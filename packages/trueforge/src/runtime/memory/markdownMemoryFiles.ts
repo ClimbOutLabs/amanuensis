@@ -18,6 +18,7 @@ import {
   USER_FACING_STORAGE_UNAVAILABLE_MESSAGE,
 } from '../../utils/dataDir';
 import type { RetainItem } from './hindsightClient';
+import { isMemoryNoteSource, NOTE_DATE_METADATA_KEY, NOTE_SOURCE_METADATA_KEY } from './memoryNotes';
 import { MEMORY_ORIGIN_METADATA_KEY, TOOL_INGESTED_ORIGIN, USER_STATED_ORIGIN } from './memoryOrigin';
 
 /** Longest namespace directory name; longer names are cut. */
@@ -121,6 +122,9 @@ export const REPLACE_DOCUMENT_METADATA_KEY = 'replace_document';
 /** Hidden trailer carrying the document id. Ids are the host's own (hashes and prefixes), never free text. */
 const DOCUMENT_MARKER_PATTERN = /^<!-- document_id: ([A-Za-z0-9_.-]{1,128}) -->$/;
 
+/** Hidden trailer carrying where a note came from and the day it was found or given; the source is one of the fixed note sources. */
+const NOTE_MARKER_PATTERN = /^<!-- note: ([a-z_]{1,32}) (\d{4}-\d{2}-\d{2}) -->$/;
+
 /** Closing line marking an entry written after the assistant read an email, document, or web page. */
 const READ_CONTENT_SOURCE_LINE = '> Source: read content';
 
@@ -151,11 +155,25 @@ export function formatRetainEntry(item: RetainItem): string {
       parts.push(marker);
     }
   }
+  const noteSource = item.metadata?.[NOTE_SOURCE_METADATA_KEY];
+  const noteDate = item.metadata?.[NOTE_DATE_METADATA_KEY];
+  if (noteSource !== undefined && noteDate !== undefined) {
+    const marker = `<!-- note: ${noteSource} ${noteDate} -->`;
+    if (isNoteMarker(marker)) {
+      parts.push(marker);
+    }
+  }
   const origin = item.metadata?.[MEMORY_ORIGIN_METADATA_KEY];
   if (origin !== undefined && origin !== USER_STATED_ORIGIN) {
     parts.push(READ_CONTENT_SOURCE_LINE);
   }
   return parts.join('\n\n');
+}
+
+/** Whether a trailer line is a note marker with a known source. */
+function isNoteMarker(line: string): boolean {
+  const source = NOTE_MARKER_PATTERN.exec(line)?.[1];
+  return source !== undefined && isMemoryNoteSource(source);
 }
 
 /**
@@ -171,7 +189,8 @@ function escapeEntryStructure(text: string): string {
       return line.startsWith('## ') ||
         trimmed === READ_CONTENT_SOURCE_LINE ||
         SESSION_MARKER_PATTERN.test(trimmed) ||
-        DOCUMENT_MARKER_PATTERN.test(trimmed)
+        DOCUMENT_MARKER_PATTERN.test(trimmed) ||
+        isNoteMarker(trimmed)
         ? `\\${line}`
         : line;
     })
@@ -186,6 +205,7 @@ function splitEntryTrailers(text: string): { body: string; metadata: Record<stri
     const line = (lines[lines.length - 1] ?? '').trimEnd();
     const sessionId = SESSION_MARKER_PATTERN.exec(line)?.[1];
     const documentId = DOCUMENT_MARKER_PATTERN.exec(line)?.[1];
+    const note = isNoteMarker(line) ? NOTE_MARKER_PATTERN.exec(line) : null;
     if (line === '') {
       lines.pop();
     } else if (line === READ_CONTENT_SOURCE_LINE) {
@@ -197,6 +217,10 @@ function splitEntryTrailers(text: string): { body: string; metadata: Record<stri
       lines.pop();
     } else if (documentId !== undefined) {
       metadata[DOCUMENT_ID_METADATA_KEY] ??= documentId;
+      lines.pop();
+    } else if (note?.[1] !== undefined && note[2] !== undefined) {
+      metadata[NOTE_SOURCE_METADATA_KEY] ??= note[1];
+      metadata[NOTE_DATE_METADATA_KEY] ??= note[2];
       lines.pop();
     } else {
       break;
@@ -211,10 +235,14 @@ export function entryMetadata(text: string): Record<string, string> | undefined 
   return Object.keys(metadata).length === 0 ? undefined : metadata;
 }
 
-/** The entry text the Memories page shows and edits: the hidden chat id and document id lines are dropped. */
+/** The entry text the Memories page shows and edits: the hidden chat id, document id and note lines are dropped. */
 export function withoutHiddenMarkers(text: string): string {
   const { body, metadata } = splitEntryTrailers(text);
-  if (metadata[SESSION_ID_METADATA_KEY] === undefined && metadata[DOCUMENT_ID_METADATA_KEY] === undefined) {
+  if (
+    metadata[SESSION_ID_METADATA_KEY] === undefined &&
+    metadata[DOCUMENT_ID_METADATA_KEY] === undefined &&
+    metadata[NOTE_SOURCE_METADATA_KEY] === undefined
+  ) {
     return text;
   }
   return metadata[MEMORY_ORIGIN_METADATA_KEY] === undefined ? body : `${body}\n\n${READ_CONTENT_SOURCE_LINE}`;
@@ -243,6 +271,11 @@ export function withOriginalHiddenMarkers({ original, edited }: { original: stri
   const documentId = kept[DOCUMENT_ID_METADATA_KEY];
   if (documentId !== undefined && metadata[DOCUMENT_ID_METADATA_KEY] === undefined) {
     trailers.push(`<!-- document_id: ${documentId} -->`);
+  }
+  const noteSource = kept[NOTE_SOURCE_METADATA_KEY];
+  const noteDate = kept[NOTE_DATE_METADATA_KEY];
+  if (noteSource !== undefined && noteDate !== undefined && metadata[NOTE_SOURCE_METADATA_KEY] === undefined) {
+    trailers.push(`<!-- note: ${noteSource} ${noteDate} -->`);
   }
   if (trailers.length === 0) {
     return edited;

@@ -4,7 +4,9 @@ import { collectOutboundStrings } from '../../permissions/outboundGuard';
 import { recordPersonText, recordUntrustedText } from '../../permissions/provenance';
 import {
   recordToolResultProvenance,
+  toolResultSource,
   toolReturnsOutsideContent,
+  type ToolResultSource,
   type WebSearchTurnState,
 } from '../../permissions/webSearch';
 import type { ContextMessage } from '../../runtime/AgentThread.types';
@@ -36,6 +38,11 @@ function calledTool(call: RawToolCall): { tool_name: string; argument_values: st
  */
 export function callReturnsOutsideContent(call: RawToolCall | undefined): boolean {
   return call === undefined || toolReturnsOutsideContent(calledTool(call).tool_name);
+}
+
+/** Where the result of a tool call came from; a call that is not known counts as `other`. */
+export function callResultSource(call: RawToolCall | undefined): ToolResultSource {
+  return call === undefined ? 'other' : toolResultSource(calledTool(call).tool_name);
 }
 
 /**

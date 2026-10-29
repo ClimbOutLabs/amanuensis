@@ -163,6 +163,24 @@ function baseToolName(toolName: string): string {
  */
 const HOST_ONLY_TOOL_NAMES: ReadonlySet<string> = new Set([TASK_STATE_TOOL_NAME, REPLACE_TASK_CHECKLIST_TOOL_NAME]);
 
+/** Where a tool result came from, as far as a person would say it: their mail, their calendar, the web, a file, or any other tool. */
+export type ToolResultSource = 'email' | 'calendar' | 'web' | 'attachment' | 'other';
+
+/** The kind of place a tool's result came from; a tool this does not know counts as `other`. */
+export function toolResultSource(toolName: string): ToolResultSource {
+  const baseName = baseToolName(toolName);
+  if (isGmailReadToolName(baseName) || isMailReadToolName(baseName)) {
+    return 'email';
+  }
+  if (CALENDAR_READ_TOOL_NAMES.some(name => name === baseName)) {
+    return 'calendar';
+  }
+  if (isPageReaderTool(baseName) || isSearchResultTool(baseName)) {
+    return 'web';
+  }
+  return baseName === EXTRACT_DOCUMENT_TEXT_TOOL_NAME ? 'attachment' : 'other';
+}
+
 /** Whether a tool's result may hold text written outside the chat: true for every tool not known to be host-only. */
 export function toolReturnsOutsideContent(toolName: string): boolean {
   return !HOST_ONLY_TOOL_NAMES.has(baseToolName(toolName));

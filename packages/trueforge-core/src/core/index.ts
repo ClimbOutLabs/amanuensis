@@ -429,7 +429,11 @@ export { applyHostToolCallPolicy } from './runtime/HostToolCallPolicy';
 export type { HostToolCallPolicy, HostToolCallPolicyBlock, HostToolCallPolicyCall } from './runtime/HostToolCallPolicy';
 
 // Sentinel: three-tier permission system for tool execution
-export { callReturnsOutsideContent, contextHasOutsideToolResult } from './capabilities/builtins/ChatProvenance';
+export {
+  callResultSource,
+  callReturnsOutsideContent,
+  contextHasOutsideToolResult,
+} from './capabilities/builtins/ChatProvenance';
 export {
   InMemoryApprovalTokenStore,
   hasApprovalScope,
@@ -511,7 +515,7 @@ export type {
 } from './permissions/tier';
 export type { ToolGrantIdentity, ToolGrantKey, ToolGrantStore } from './permissions/toolGrants';
 export { SILENT_SEARCH_LIMIT, createWebSearchTurnState, pageImageUrls } from './permissions/webSearch';
-export type { SearchProviderGrant, WebSearchTurnState } from './permissions/webSearch';
+export type { SearchProviderGrant, ToolResultSource, WebSearchTurnState } from './permissions/webSearch';
 export {
   FETCHED_PAGE_TEXT_MAX_CHARS,
   FetchedPageStore,

@@ -64,6 +64,7 @@ import {
   vaultFilesystemNamespace,
   withoutHiddenMarkers,
 } from '../runtime/memory/markdownMemoryFiles';
+import { NOTE_DATE_METADATA_KEY, NOTE_SOURCE_METADATA_KEY } from '../runtime/memory/memoryNotes';
 import { MEMORY_SCREEN_ENABLED_SETTING_KEY } from '../runtime/memoryScreenSettings';
 import { MEMORY_SUMMARIZE_SETTING_KEY } from '../runtime/memorySummarizeSettings';
 import { DEFAULT_CHAT_MODEL_SETTING_KEY } from '../runtime/tokenFactoryProvider';
@@ -944,6 +945,8 @@ function buildRetainItems(
       }
       const trailers = entryMetadata(body);
       const sessionId = trailers?.[SESSION_ID_METADATA_KEY];
+      const noteSource = trailers?.[NOTE_SOURCE_METADATA_KEY];
+      const noteDate = trailers?.[NOTE_DATE_METADATA_KEY];
       body = withoutHiddenMarkers(body);
       const contextMatch = /\n\n> ([^\n]*)$/.exec(body);
       if (contextMatch !== null) {
@@ -960,7 +963,16 @@ function buildRetainItems(
         // A replaceable entry keeps its document id, so a later update replaces it instead of adding a copy.
         document_id: trailers?.[DOCUMENT_ID_METADATA_KEY] ?? documentIdFor(entry.id),
         ...(itemContext === undefined ? {} : { context: itemContext }),
-        ...(sessionId === undefined ? {} : { metadata: { [SESSION_ID_METADATA_KEY]: sessionId } }),
+        ...(sessionId === undefined && noteSource === undefined
+          ? {}
+          : {
+              metadata: {
+                ...(sessionId === undefined ? {} : { [SESSION_ID_METADATA_KEY]: sessionId }),
+                ...(noteSource === undefined || noteDate === undefined
+                  ? {}
+                  : { [NOTE_SOURCE_METADATA_KEY]: noteSource, [NOTE_DATE_METADATA_KEY]: noteDate }),
+              },
+            }),
       });
     }
   }

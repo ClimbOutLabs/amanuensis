@@ -26,6 +26,7 @@ import {
 } from '@truefoundry/trueforge-core/agent-session';
 import {
   AgentHarnessError,
+  callResultSource,
   callReturnsOutsideContent,
   existingSandboxIdForProvider,
   extractErrorLogFields,
@@ -42,6 +43,7 @@ import {
   VercelAILLM,
   type BoundRepository,
   type HeldRefusalReason,
+  type ToolResultSource,
 } from '@truefoundry/trueforge-core/core';
 import { readTurnedOffConnectorKeys } from '@truefoundry/trueforge-core/core/connectors/chatConnectorChoice';
 import { upgradeStoredTurnState } from '@truefoundry/trueforge-core/core/permissions/storedCards';
@@ -93,6 +95,7 @@ import { buildInternalSourceToolPolicy, type InternalSourceState } from '../runt
 import { mailAccountDirectory } from '../runtime/mailConnector';
 import { createMemoryClient } from '../runtime/memory/createMemoryClient';
 import type { MemoryClient } from '../runtime/memory/memoryClient';
+import type { TurnToolResult } from '../runtime/memory/memoryNotesSummarize';
 import { resolveMemoryProvider } from '../runtime/memory/memoryProvider';
 import {
   submitRetainWithVerification,
@@ -1208,6 +1211,10 @@ export async function drainTurnEvents(input: DrainTurnEventsInput): Promise<void
   return drain;
 }
 
+/** Tool results and text kept per turn for the memory note pass; the pass cuts what it sends to the model further. */
+const TURN_TOOL_RESULTS_KEPT = 20;
+const TURN_TOOL_RESULT_CHARACTERS_KEPT = 30_000;
+
 /** A refused or unrun call returned no content, so it cannot have brought anything in. */
 function toolRanOrMayHave(disposition: string): boolean {
   return disposition !== 'denied' && disposition !== 'policy_blocked' && disposition !== 'never_ran';
@@ -1228,6 +1235,8 @@ async function runTurnEventDrain(params: {
   // attached one starts out tainted. A turn with neither is the user's own voice: `user_stated`.
   let ingestedToolOutput = memory?.attachedFiles === true;
   const callReturnsOutside = new Map<string, boolean>();
+  const callSources = new Map<string, ToolResultSource>();
+  const toolResults: TurnToolResult[] = [];
   let followUp: Promise<void> | undefined;
   try {
     for await (const event of trackedStream) {
@@ -1237,6 +1246,7 @@ async function runTurnEventDrain(params: {
       if (event.type === EventType.MODEL_MESSAGE) {
         for (const call of event.tool_calls ?? []) {
           callReturnsOutside.set(call.id, callReturnsOutsideContent(call));
+          callSources.set(call.id, callResultSource(call));
         }
       }
       if (
@@ -1245,6 +1255,16 @@ async function runTurnEventDrain(params: {
         (callReturnsOutside.get(event.tool_call_id) ?? true)
       ) {
         ingestedToolOutput = true;
+        // Kept for the note pass; a result that did not run cleanly holds no finding.
+        if (
+          (event.type === EventType.TOOL_RESPONSE || event.disposition === 'executed_ok') &&
+          toolResults.length < TURN_TOOL_RESULTS_KEPT
+        ) {
+          toolResults.push({
+            source: callSources.get(event.tool_call_id) ?? 'other',
+            text: event.content.slice(0, TURN_TOOL_RESULT_CHARACTERS_KEPT),
+          });
+        }
       }
       // Dual-write before any client sink so subscribers can resume after disconnect.
       const sequenceNumber = await turnEventStream.put(event, {
@@ -1254,7 +1274,13 @@ async function runTurnEventDrain(params: {
       if (event.type === EventType.TURN_DONE && event.state.status === 'done') {
         // Not awaited here: the stream must finish now, so the chat's next turn waits only on
         // the artifact step. The drain awaits the rest below, up to its time limit.
-        followUp = runTurnFollowUp({ input, state: event.state, ingestedToolOutput, markArtifactsCaptured });
+        followUp = runTurnFollowUp({
+          input,
+          state: event.state,
+          ingestedToolOutput,
+          toolResults,
+          markArtifactsCaptured,
+        });
       }
     }
     if (followUp !== undefined) {
@@ -1291,9 +1317,10 @@ async function runTurnFollowUp(params: {
   input: DrainTurnEventsInput;
   state: Extract<TerminalTurnState, { status: 'done' }>;
   ingestedToolOutput: boolean;
+  toolResults: readonly TurnToolResult[];
   markArtifactsCaptured: () => void;
 }): Promise<void> {
-  const { input, state, ingestedToolOutput, markArtifactsCaptured } = params;
+  const { input, state, ingestedToolOutput, toolResults, markArtifactsCaptured } = params;
   const { turnEventStream, sessionId, turnId, logger, memory, artifacts, profileLearning, modelUsage } = input;
   try {
     // First, and never behind a model call: the chat's next turn reuses the sandbox and waits
@@ -1330,6 +1357,7 @@ async function runTurnFollowUp(params: {
         timeZone: memory.timeZone,
         origin: ingestedToolOutput ? 'tool_ingested' : 'user_stated',
         logger,
+        toolResults,
         summarize: memory.summarize,
         outcomeLog: memory.outcomeLog,
       });
@@ -1585,6 +1613,7 @@ async function beginAcceptedTurnExecution(
         sessionAgent: session.record.agent,
         memoryClientPresent: deps.memoryClient !== undefined,
         personName: deps.personalizationProfile?.user_name ?? undefined,
+        assistantName: deps.personaContext?.persona_name ?? deps.personalizationProfile?.assistant_name ?? undefined,
       });
       // Same one-read-per-turn contract for the recall screen: the Settings toggle's
       // persisted override wins when stored, otherwise the MEMORY_SCREEN_ENABLED env default.
@@ -2450,6 +2479,10 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
       sessionAgent: session.record.agent,
       memoryClientPresent: memoryClient !== undefined,
       personName: profile?.user_name ?? undefined,
+      assistantName:
+        (persona?.kind === 'persona' ? persona.persona.display_name : undefined) ??
+        profile?.assistant_name ??
+        undefined,
     });
 
     const turnId = mintPeeredTurnId(configuration.EXECUTOR_ID);
