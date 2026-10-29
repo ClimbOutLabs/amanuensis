@@ -12,15 +12,7 @@ import {
 } from './windowsJobs.ts';
 
 export type FakeWindowsJobStep =
-  | 'copy'
-  | 'path'
-  | 'list'
-  | 'point'
-  | 'check'
-  | 'update'
-  | 'forwarder'
-  | 'docker'
-  | 'browser';
+  'copy' | 'path' | 'list' | 'point' | 'check' | 'update' | 'forwarder' | 'docker' | 'browser';
 
 // A Windows host for tests: the user PATH, the shortcuts and the held
 // ports are held in memory, every job writes down that it ran, and
