@@ -220,10 +220,13 @@ describe('turn memory with findings and reply notes', () => {
   });
 
   it('saves a note about the assistant reply, named for the assistant that gave it', async () => {
-    scripted.notes = JSON.stringify({ findings: [], responses: ['Leave by 08:55 for the GP visit.'] });
+    scripted.notes = JSON.stringify({
+      findings: [],
+      responses: ['Leave by 08:55 for the GP visit so that parking is not a rush.'],
+    });
     await submit({ id: 't3', userText: 'When should I go?', assistantText: LONG_REPLY, assistantName: 'Nata' });
     const file = await dayFile();
-    expect(file).toContain("From Nata's reply, Oct 29: Leave by 08:55 for the GP visit.");
+    expect(file).toContain("From Nata's reply, Oct 29: Leave by 08:55 for the GP visit so that parking is not a rush.");
     expect(file).toContain('<!-- note: assistant_response 2026-10-29 -->');
     const listed = await client.listEntries({ namespace: '', timeoutMs: 5000 });
     if (!listed.ok) {

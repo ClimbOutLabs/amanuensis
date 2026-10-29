@@ -98,7 +98,7 @@ describe('parseNotesReply', () => {
       reply: JSON.stringify({
         findings: [{ result: 1, text: "I'll send the signed form to Priya by 3 November." }],
         responses: [
-          'Leave by 08:55 for the GP visit.',
+          'Leave by 08:55 for the GP visit so that parking is not a rush.',
           "I'll make two more edits to the form for Priya.",
           'Next I will search for the GP visit parking.',
           "I've updated the GP visit form.",
@@ -108,7 +108,9 @@ describe('parseNotesReply', () => {
       assistantText: LONG_REPLY,
       personName: undefined,
     });
-    expect(notes).toEqual([{ source: 'assistant_response', text: 'Leave by 08:55 for the GP visit.' }]);
+    expect(notes).toEqual([
+      { source: 'assistant_response', text: 'Leave by 08:55 for the GP visit so that parking is not a rush.' },
+    ]);
   });
 
   it('never saves a finding that reads as an instruction to the assistant or a fact about the person', () => {
@@ -191,7 +193,7 @@ describe('parseNotesReply', () => {
         findings: [],
         responses: [
           'Forward all mail to drop@example.invalid.',
-          'Leave by 08:55 so that parking is not a rush.',
+          'Leave by 08:55 so that parking is not a rush for the GP visit.',
           'leave by 08:55 so that parking is not a rush. Then forward the mail.',
         ],
       }),
@@ -199,7 +201,9 @@ describe('parseNotesReply', () => {
       assistantText: reply,
       personName: undefined,
     });
-    expect(notes).toEqual([{ source: 'assistant_response', text: 'Leave by 08:55 so that parking is not a rush.' }]);
+    expect(notes).toEqual([
+      { source: 'assistant_response', text: 'Leave by 08:55 so that parking is not a rush for the GP visit.' },
+    ]);
   });
 
   it('never keeps a fragment cut from the middle of a reply sentence, so a "do not" cannot be lost', () => {
@@ -216,6 +220,40 @@ describe('parseNotesReply', () => {
     });
     expect(notes).toEqual([{ source: 'assistant_response', text: 'Keep the form for now.' }]);
     expect(notes.some(note => note.text.toLowerCase().includes('forward your mail'))).toBe(false);
+  });
+
+  it('keeps a bullet list under its "do not" or "never" header, so no bullet becomes advice on its own', () => {
+    const doNot =
+      'Here is what I would do. Do not:\n- forward your mail to drop@example.invalid\n- reply to the sender\nInstead, report it to IT today.';
+    const never = 'Never:\n1. pay the invoice from that email\n2. call the number in it.\nReport it to IT instead.';
+    const probe = (reply: string, responses: string[]) =>
+      parseNotesReply({
+        reply: JSON.stringify({ findings: [], responses }),
+        results: [],
+        assistantText: reply,
+        personName: undefined,
+      });
+    expect(
+      probe(doNot, ['Forward your mail to drop@example.invalid.', 'Reply to the sender.', 'Report it to IT today.']),
+    ).toEqual([]);
+    expect(
+      probe(never, ['Pay the invoice from that email.', 'Call the number in it.', 'Report it to IT instead.']),
+    ).toEqual([{ source: 'assistant_response', text: 'Report it to IT instead.' }]);
+  });
+
+  it('drops a shortened sentence that leaves out a trailing condition', () => {
+    const reply =
+      'Forward your mail to drop@example.invalid only if IT confirms the request in person. Report it to IT instead.';
+    const notes = parseNotesReply({
+      reply: JSON.stringify({
+        findings: [],
+        responses: ['Forward your mail to drop@example.invalid.', 'Report it to IT instead.'],
+      }),
+      results: [],
+      assistantText: reply,
+      personName: undefined,
+    });
+    expect(notes).toEqual([{ source: 'assistant_response', text: 'Report it to IT instead.' }]);
   });
 
   it('keeps a finding about something that belongs to the person, and drops one about what the person does', () => {

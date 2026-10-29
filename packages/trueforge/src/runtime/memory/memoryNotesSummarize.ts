@@ -220,26 +220,39 @@ function comparable(text: string): string {
     .trim();
 }
 
+/**
+ * The sentences of a text, normalized. A line break ends a sentence only after . ! or ?, so a list keeps
+ * the words that introduce it ("Do not:" and its bullets read as one sentence) and a bullet never stands
+ * alone. Within a line, a sentence ends at . ! or ? followed by a capital letter.
+ */
 function sentences(text: string): string[] {
-  return text
-    .split(/(?<=[.!?])\s+|\n+/)
+  const chunks: string[] = [];
+  for (const line of text.split('\n')) {
+    const trimmed = line.trim();
+    if (trimmed === '') {
+      continue;
+    }
+    const open = chunks.length > 0 ? chunks[chunks.length - 1] : undefined;
+    if (open === undefined || /[.!?]$/.test(open)) {
+      chunks.push(trimmed);
+    } else {
+      chunks[chunks.length - 1] = `${open} ${trimmed}`;
+    }
+  }
+  return chunks
+    .flatMap(chunk => chunk.split(/(?<=[.!?])\s+(?=\p{Lu})/u))
     .map(comparable)
     .filter(sentence => sentence !== '');
 }
 
 /**
- * Whether every sentence of the note is a whole sentence of the reply, or the start of one. A fragment
- * cut from the middle of a sentence never counts, since what came before it (a "do not") may turn it around.
+ * Whether every sentence of the note is, word for word, a whole sentence of the reply. A fragment or a
+ * shortened sentence never counts, since what it leaves out (a "do not", an "only if") may turn it around.
  */
 function copiedFromReply({ note, reply }: { note: string; reply: string }): boolean {
   const replySentences = sentences(reply);
   const noteSentences = sentences(note);
-  return (
-    noteSentences.length > 0 &&
-    noteSentences.every(sentence =>
-      replySentences.some(candidate => candidate === sentence || candidate.startsWith(`${sentence} `)),
-    )
-  );
+  return noteSentences.length > 0 && noteSentences.every(sentence => replySentences.includes(sentence));
 }
 
 /**
