@@ -1,4 +1,4 @@
-import { McpConnectionError } from '../../../src/core/errors';
+import { McpConnectionError, McpRedirectRefusedError } from '../../../src/core/errors';
 import { EventType } from '../../../src/core/events/schema';
 import type { ILLM, LLMCreateParamsStreaming } from '../../../src/core/llm/ILLM';
 import type {
@@ -13,7 +13,7 @@ import type { AgentThreadEvent, ContextMessage } from '../../../src/core/runtime
 import { NOOP_AGENT_TRACING } from '../../../src/core/tracing/NoopAgentTracing';
 import { makeMockIMCPServer, makeSilentLogger } from '../harnessMocks';
 
-const UNREACHABLE_TEXT = 'Email is not reachable right now, so nothing was sent. Try again in a minute.';
+const UNREACHABLE_TEXT = 'Email is not reachable right now, so that step did not run. Try again in a minute.';
 const SEND_ARGS = { to: 'dana@example.test', subject: 'Hello', body: 'Hi Dana' };
 
 function sendStream(id: string): AsyncGenerator<ExtendedChatCompletionChunk, RawAssistantMessageWithUsage, unknown> {
@@ -218,6 +218,129 @@ describe('an approved send whose connector dropped off before it ran', () => {
 describe('a send to a reachable connector', () => {
   it('still raises its approval card', async () => {
     const { thread } = makeThread({ modelSteps: ['send'], classifyDown: false });
+    expect(cardIds(await run(thread))).toEqual(['send-1']);
+  });
+});
+
+function callToolStream({
+  id,
+  server,
+  tool,
+}: {
+  id: string;
+  server: string;
+  tool: string;
+}): AsyncGenerator<ExtendedChatCompletionChunk, RawAssistantMessageWithUsage, unknown> {
+  return (async function* () {
+    const call = {
+      id,
+      type: 'function' as const,
+      function: { name: 'call_tool', arguments: JSON.stringify({ mcp_server: server, tool_name: tool, input: {} }) },
+    };
+    yield {
+      id: `${id}-chunk`,
+      object: 'chat.completion.chunk',
+      created: 0,
+      model: 'test-model',
+      choices: [{ index: 0, delta: { role: 'assistant', tool_calls: [{ index: 0, ...call }] }, finish_reason: null }],
+    };
+    return {
+      output: { role: 'assistant', content: null, tool_calls: [call] },
+      usage: getEmptyUsage(),
+      finish_reason: 'tool_calls',
+    };
+  })();
+}
+
+describe('one down server behind call_tool', () => {
+  it('does not block call_tool to a healthy server in the same reply, and names the inner connector', async () => {
+    const down = makeMockIMCPServer({
+      name: 'Email',
+      preload: false,
+      tools: [{ name: 'send_email', description: 'Send', inputSchema: { type: 'object' }, preload: false }],
+    });
+    jest
+      .mocked(down.toolCallInfo)
+      .mockRejectedValue(new McpConnectionError('connect ECONNREFUSED 192.0.2.1:9557', 502));
+    const healthy = makeMockIMCPServer({
+      name: 'Calendar',
+      preload: false,
+      tools: [{ name: 'create_event', description: 'Add', inputSchema: { type: 'object' }, preload: false }],
+    });
+    jest.mocked(healthy.toolCallInfo).mockImplementation(params =>
+      Promise.resolve({
+        type: 'mcp',
+        mcp_server_id: healthy.id,
+        mcp_server_name: healthy.name,
+        original_tool_name: params.name,
+        is_approval_required: true,
+        tier: 3,
+        tier3_card: SEND_CARD,
+      }),
+    );
+    const steps = [
+      callToolStream({ id: 'call-1', server: 'Email', tool: 'send_email' }),
+      callToolStream({ id: 'call-2', server: 'Calendar', tool: 'create_event' }),
+    ];
+    const requests: LLMCreateParamsStreaming[] = [];
+    const modelClient: ILLM = {
+      create: jest.fn((body: LLMCreateParamsStreaming) => {
+        requests.push(body);
+        const next = steps.shift();
+        if (next === undefined) {
+          throw new Error('the model was called more often than the test expects');
+        }
+        return next;
+      }),
+      createNonStream: jest.fn(),
+    };
+    const thread = new AgentThread({
+      threadId: 'main',
+      title: 'Main',
+      toolCallMemo: undefined,
+      turnToolCallLedger: undefined,
+      taskState: undefined,
+      isRequestContinuation: undefined,
+      tracing: NOOP_AGENT_TRACING,
+      logger: makeSilentLogger(),
+      definition: {
+        modelClient,
+        modelId: undefined,
+        configuredModels: undefined,
+        instruction: 'test',
+        toolSets: [down, healthy],
+      },
+      context: [{ role: 'user', content: 'Email Dana, then add the event.' }],
+    });
+
+    const events = await run(thread);
+
+    const [first] = results(events);
+    const firstText = JSON.stringify(first?.content);
+    expect(firstText).toContain('Email is not reachable right now, so that step did not run.');
+    expect(firstText).not.toContain('deferred-tools');
+    expect(offeredToolNames(requests[1])).toContain('call_tool');
+    expect(cardIds(events)).toEqual(['call-2']);
+  });
+});
+
+describe('a server failure that is not a lost connection', () => {
+  it('keeps the approval card when the server refused a redirect', async () => {
+    const { thread, toolSet } = makeThread({ modelSteps: ['send'], classifyDown: false });
+    jest.mocked(toolSet.toolCallInfo).mockImplementation((params, resolveUnderlyingTool) => {
+      if (resolveUnderlyingTool) {
+        return Promise.reject(
+          new McpConnectionError('Failed to connect', 502, { cause: new McpRedirectRefusedError('redirected') }),
+        );
+      }
+      return Promise.resolve({
+        type: 'mcp',
+        mcp_server_id: toolSet.id,
+        mcp_server_name: toolSet.name,
+        original_tool_name: params.name,
+        is_approval_required: false,
+      });
+    });
     expect(cardIds(await run(thread))).toEqual(['send-1']);
   });
 });

@@ -127,7 +127,7 @@ describe('AgentThread enrichment degrade on an unreachable MCP server', () => {
       throw new Error('expected a canonical tool.response.v2 event for the call');
     }
     expect(toolResponseEvent.content).toEqual(
-      expect.stringContaining('flaky-mcp is not reachable right now, so nothing was sent. Try again in a minute.'),
+      expect.stringContaining('flaky-mcp is not reachable right now, so that step did not run. Try again in a minute.'),
     );
     expect(toolResponseEvent.disposition).toBe('never_ran');
     expect(events.at(-1)).toMatchObject({ status: 'done' });

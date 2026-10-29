@@ -605,9 +605,12 @@ export function makeUnknownToolInfo(toolName: string): InternalToolCallInfo {
   };
 }
 
-/** Whether a call names a real connector, as opposed to a tool name the model made up. */
-export function isKnownConnector(info: InternalToolCallInfo): boolean {
-  return info.type === 'mcp' && info.mcp_server_id !== UNKNOWN_TOOL_NAME;
+/**
+ * What a reply removes when a call is declined or unavailable. A deferred call names its inner
+ * server and tool, so one down server never removes the same tool name on a healthy one.
+ */
+export function removedToolKey(info: InternalToolCallInfo): string {
+  return info.is_deferred === true ? `${info.mcp_server_name}/${info.original_tool_name}` : info.original_tool_name;
 }
 
 export function toToolCallInfo(toolInfo: InternalToolCallInfo): ToolInfo {

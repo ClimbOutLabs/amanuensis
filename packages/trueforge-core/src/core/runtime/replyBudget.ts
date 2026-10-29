@@ -55,7 +55,7 @@ export const REMOVED_TOOL_RESULT =
 export function connectorUnreachableText(serverName: string | undefined): string {
   const name =
     serverName === undefined || serverName === '' || serverName === UNKNOWN_TOOL_NAME ? 'That connector' : serverName;
-  return `${name} is not reachable right now, so nothing was sent. Try again in a minute.`;
+  return `${name} is not reachable right now, so that step did not run. Try again in a minute.`;
 }
 
 export function stepBudgetFor({ isSubAgent, budget }: { isSubAgent: boolean; budget: ReplyStepBudget }): number {
