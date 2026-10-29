@@ -427,6 +427,8 @@ export class SessionHandle<
      * A follow-up turn in the same chat asks as usual, but never gets the owner's relaxations.
      */
     unattended?: boolean | undefined;
+    /** Built-in tool names this turn does not offer. */
+    withheld_tools?: readonly string[] | undefined;
     /** End the turn after its tool step without calling the model. */
     stop_after_tool_response?: boolean | undefined;
   }): Promise<TurnHandle<TTurnCustom>> {
@@ -569,6 +571,7 @@ export class SessionHandle<
         turnToolCallLedger,
         sentinelServices,
         stopAfterToolResponse: input.stop_after_tool_response === true,
+        withheldTools: input.withheld_tools,
       });
 
       const createDynamicSubAgentThread = this.makeCreateDynamicSubAgentThread({
@@ -1043,6 +1046,7 @@ export class SessionHandle<
     turnToolCallLedger: TurnToolCallLedger;
     sentinelServices: SentinelServices;
     stopAfterToolResponse: boolean;
+    withheldTools: readonly string[] | undefined;
   }): Map<string, AgentThread> {
     const snapshots = input.previous?.snapshot.threads;
     const map = new Map<string, AgentThread>();
@@ -1068,6 +1072,7 @@ export class SessionHandle<
           turnToolCallLedger: input.turnToolCallLedger,
           sentinelServices: input.sentinelServices,
           stopAfterToolResponse: input.stopAfterToolResponse,
+          withheldTools: input.withheldTools,
         }),
       );
     }
@@ -1089,6 +1094,7 @@ export class SessionHandle<
     turnToolCallLedger: TurnToolCallLedger;
     sentinelServices: SentinelServices;
     stopAfterToolResponse: boolean;
+    withheldTools: readonly string[] | undefined;
   }): AgentThread {
     const { definition, extraCapabilities, compactionModel } = input.resolvedDefinition;
     const isChild = Boolean(input.previousThreadSnapshot?.parent);
@@ -1105,6 +1111,7 @@ export class SessionHandle<
       compactionContext: input.resolver.compactionContext,
       compactionThresholdTokensDefault: input.resolver.compactionThresholdTokensDefault,
       boundRepository: input.resolver.boundRepository,
+      withheldTools: input.withheldTools,
       extraCapabilities,
     });
     return new AgentThread({

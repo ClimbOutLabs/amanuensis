@@ -1,5 +1,6 @@
 import type { SessionHandle, Sessions, TurnInputItem } from '@truefoundry/trueforge-core/agent-session';
-import { isMorningBriefPrompt } from '@truefoundry/trueforge-core/core/schedules/morningBrief';
+import { DOCUMENT_REPORT_TOOL_NAMES } from '@truefoundry/trueforge-core/core';
+import { isMorningBriefPrompt, isMorningBriefSchedule } from '@truefoundry/trueforge-core/core/schedules/morningBrief';
 import { TrueForge } from '@truefoundry/trueforge-sdk';
 import type { Logger } from 'winston';
 import configuration from '../config';
@@ -141,6 +142,17 @@ export async function scheduleTaskText(params: {
     return task;
   }
   return `${task}\nAlready done, leave these out of the brief: ${titles.join('; ')}.`;
+}
+
+/**
+ * The brief's dashboard is the reply itself, so the document report tools are not offered to it: a model
+ * that reaches for them gets every call held for approval while nobody is watching.
+ */
+export const BRIEF_WITHHELD_TOOL_NAMES: readonly string[] = DOCUMENT_REPORT_TOOL_NAMES;
+
+/** The built-in tools a schedule's run does not offer. */
+export function scheduleWithheldTools({ name, task }: { name: string; task: string }): readonly string[] {
+  return isMorningBriefSchedule({ name, task }) ? BRIEF_WITHHELD_TOOL_NAMES : [];
 }
 
 export async function startScheduleRun(params: {
