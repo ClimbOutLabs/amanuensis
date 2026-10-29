@@ -220,10 +220,7 @@ describe('turn memory with findings and reply notes', () => {
   });
 
   it('saves a note about the assistant reply, named for the assistant that gave it', async () => {
-    scripted.notes = JSON.stringify({
-      findings: [],
-      responses: ['Leave by 08:55 for the GP visit so that parking is not a rush.'],
-    });
+    scripted.notes = JSON.stringify({ findings: [], responses: [3] });
     await submit({ id: 't3', userText: 'When should I go?', assistantText: LONG_REPLY, assistantName: 'Nata' });
     const file = await dayFile();
     expect(file).toContain("From Nata's reply, Oct 29: Leave by 08:55 for the GP visit so that parking is not a rush.");
@@ -236,10 +233,87 @@ describe('turn memory with findings and reply notes', () => {
     expect(listed.entries[0]?.text).not.toContain('read content');
   });
 
+  it('stores a read-content note once, even when the same turn text comes back again', async () => {
+    scripted.person = '{"facts": ["Maya lives at 12 Elm Street."]}';
+    for (const id of ['r1', 'r2', 'r3']) {
+      await submit({
+        id,
+        userText: 'Read the brief. I am Maya and I live at 12 Elm Street.',
+        assistantText: SHORT_REPLY,
+        toolResults: [EMAIL_RESULT],
+      });
+    }
+    const listed = await client.listEntries({ namespace: '', timeoutMs: 5000 });
+    if (!listed.ok) {
+      throw new Error('expected a listing');
+    }
+    expect(listed.entries.map(entry => entry.text.includes('12 Elm Street'))).toEqual([true]);
+    expect(listed.entries[0]?.text).toContain('> Source: read content');
+  });
+
+  it('stores the same finding once across turns, and keeps a different one', async () => {
+    const finding = (text: string) => JSON.stringify({ findings: [{ result: 1, text }], responses: [] });
+    scripted.notes = finding('Priya asked for the signed form by 2026-11-03.');
+    await submit({ id: 'f1', userText: 'Check my email.', assistantText: SHORT_REPLY, toolResults: [EMAIL_RESULT] });
+    await submit({ id: 'f2', userText: 'Check my email.', assistantText: SHORT_REPLY, toolResults: [EMAIL_RESULT] });
+    scripted.notes = finding('Priya sent the signed form on 2026-11-03.');
+    await submit({
+      id: 'f3',
+      userText: 'Check my email.',
+      assistantText: SHORT_REPLY,
+      toolResults: [{ source: 'email', text: 'From: Priya. Subject: Form. Priya sent the signed form on 3 November.' }],
+    });
+    const listed = await client.listEntries({ namespace: '', timeoutMs: 5000 });
+    if (!listed.ok) {
+      throw new Error('expected a listing');
+    }
+    expect(listed.entries.filter(entry => entry.text.includes('asked for the signed form'))).toHaveLength(1);
+    expect(listed.entries.filter(entry => entry.text.includes('sent the signed form'))).toHaveLength(1);
+  });
+
+  it('stores the same finding once in a persona vault, and leaves the shared vault alone', async () => {
+    const persona = new MarkdownMemoryClient({
+      baseDir: dir,
+      namespace: 'tenant',
+      vaultScope: { personaName: 'Nata', personaId: 'persona-1' },
+    });
+    scripted.notes = JSON.stringify({
+      findings: [{ result: 1, text: 'Priya asked for the signed form by 2026-11-03.' }],
+      responses: [],
+    });
+    for (const id of ['p1', 'p2', 'p3']) {
+      await submitRetain({
+        client: persona,
+        sessionId: 'chat-2',
+        turnId: id,
+        userText: 'Check my email.',
+        assistantText: SHORT_REPLY,
+        completedAt: '2026-10-29T12:00:00.000Z',
+        origin: 'tool_ingested',
+        logger: winston.createLogger({ silent: true }),
+        toolResults: [EMAIL_RESULT],
+        summarize: {
+          tenantId: 't1',
+          modelProviderStore: unusedStore,
+          summarizationModelFqn: 'provider/model',
+          tokenFactoryBudget: uncappedTokenFactoryBudget,
+          modelUsage: discardedModelUsage,
+        },
+      });
+    }
+    const personaVault = await persona.listEntries({ namespace: 'persona:Nata', timeoutMs: 5000 });
+    const shared = await client.listEntries({ namespace: '', timeoutMs: 5000 });
+    if (!personaVault.ok || !shared.ok) {
+      throw new Error('expected listings');
+    }
+    expect(personaVault.entries.filter(entry => entry.text.includes('signed form'))).toHaveLength(1);
+    expect(shared.entries).toHaveLength(0);
+  });
+
   it('saves nothing for a turn where the assistant only states its plan', async () => {
     scripted.notes = JSON.stringify({
       findings: [],
-      responses: ["I'll make two more edits to the form.", 'Next I will search for the visit.'],
+      responses: [1, 2],
     });
     await submit({
       id: 't4',
