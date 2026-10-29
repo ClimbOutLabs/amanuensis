@@ -20,8 +20,6 @@ export const DEMO_ID_PREFIX = 'maya';
 export const DEMO_JUNE_ID = `${DEMO_ID_PREFIX}-persona-june`;
 export const DEMO_THEO_ID = `${DEMO_ID_PREFIX}-persona-theo`;
 export const DEMO_AGENT_NAME = `${DEMO_ID_PREFIX}-assistant`;
-/** Resource names are lowercase and hyphenated, so the Schedules page lists this as "morning-brief". */
-export const DEMO_SCHEDULE_NAME = 'morning-brief';
 export const DEMO_TASKS_SPACE_ID = `${DEMO_ID_PREFIX}-tasks`;
 
 /** The demo schedule's task, in the owner's own words; the demo does not use the product's morning brief prompt. */

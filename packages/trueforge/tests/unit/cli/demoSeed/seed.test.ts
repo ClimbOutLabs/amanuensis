@@ -1,5 +1,6 @@
 import { AgentSpecSchema, Sessions, type CreatedBySubject } from '@truefoundry/trueforge-core/agent-session';
 import { MAIL_CONNECTOR_NAME } from '@truefoundry/trueforge-core/core/email/mailConnector/toolContract';
+import { MORNING_BRIEF_SCHEDULE_NAME } from '@truefoundry/trueforge-core/core/schedules/morningBrief';
 import { defaultSearchConnector } from '../../../../src/catalog/defaultSearchConnector';
 import { SkillCatalog } from '../../../../src/catalog/SkillCatalog';
 import { resetDemoWorld, seedDemoWorld } from '../../../../src/cli/demoSeed/seed';
@@ -9,7 +10,6 @@ import {
   DEMO_AGENT_NAME,
   DEMO_JUNE_ID,
   DEMO_MARKER,
-  DEMO_SCHEDULE_NAME,
   DEMO_TASKS_SPACE_ID,
   DEMO_THEO_ID,
   DEMO_USER_PROFILE,
@@ -125,7 +125,7 @@ describe('demo seed against the real stores', () => {
       agent_names: undefined,
       created_by_or_agent_ids: undefined,
     });
-    expect(schedules.map(schedule => schedule.name)).toEqual([DEMO_SCHEDULE_NAME]);
+    expect(schedules.map(schedule => schedule.name)).toEqual([MORNING_BRIEF_SCHEDULE_NAME]);
     expect(schedules[0]?.manifest).toMatchObject({ cron: '30 7 * * *', timezone: 'Europe/Lisbon' });
   });
 
@@ -516,7 +516,7 @@ describe('demo seed against the real stores', () => {
       await seed(stores, DAY_ONE);
 
       const left = await legacyLeft(sessionId);
-      expect(left.schedules).toEqual([DEMO_SCHEDULE_NAME]);
+      expect(left.schedules).toEqual([MORNING_BRIEF_SCHEDULE_NAME]);
       expect(left.session).toBeUndefined();
       expect(left.audit).toHaveLength(1);
       expect(await stores.agentStore.getAgent({ tenant_id: TENANT_ID, name: LEGACY_AGENT_NAME })).toBeUndefined();

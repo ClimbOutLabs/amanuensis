@@ -11,7 +11,9 @@ import {
   HOME_TOPIC_IDS,
   HOME_TOPICS,
   homeCardsFor,
+  homeSlotsFor,
   isHomeTopicId,
+  RUN_BRIEF_CARD,
   visibleTourCards,
   type TourCapabilities,
   type TourCard,
@@ -295,5 +297,40 @@ describe('help areas', () => {
     });
     expect(Object.keys(HELP_AREA_TOPIC).sort()).toEqual([...HELP_AREA_IDS].sort());
     for (const topic of Object.values(HELP_AREA_TOPIC)) expect(isHomeTopicId(topic)).toBe(true);
+  });
+});
+
+describe('homeSlotsFor', () => {
+  const titles = (slots: ReturnType<typeof homeSlotsFor>) => slots.map(slot => slot.card.title);
+
+  it('puts the run my daily brief card just after the morning brief card, at the same count', () => {
+    const slots = homeSlotsFor({ topic: null, capabilities: connected, briefRun: true });
+
+    expect(slots).toHaveLength(HOME_CARD_COUNT);
+    expect(titles(slots).slice(0, 2)).toEqual([CARDS.brief.title, RUN_BRIEF_CARD.title]);
+    expect(slots[1]?.kind).toBe('run_brief');
+  });
+
+  it('puts the run card first when the morning brief card is hidden', () => {
+    const slots = homeSlotsFor({ topic: null, capabilities: none, briefRun: true });
+
+    expect(slots[0]?.kind).toBe('run_brief');
+    expect(slots).toHaveLength(HOME_CARD_COUNT);
+  });
+
+  it('leaves the run card out without a brief schedule, and under a chosen pill', () => {
+    expect(
+      homeSlotsFor({ topic: null, capabilities: connected, briefRun: false }).map(slot => slot.kind),
+    ).not.toContain('run_brief');
+    expect(titles(homeSlotsFor({ topic: 'behind', capabilities: connected, briefRun: true }))).toEqual(
+      titlesOf(homeCardsFor({ topic: 'behind', capabilities: connected })),
+    );
+  });
+
+  it('describes the run card in plain words, with no assistant name and no dashes', () => {
+    const detail = RUN_BRIEF_CARD.detail('Juniper');
+    expect(RUN_BRIEF_CARD.title).toBe('Run my daily brief');
+    expect(detail).toBe('Runs your daily brief now, the same as the scheduled one');
+    for (const text of [detail, RUN_BRIEF_CARD.title]) expect(text).not.toMatch(/\b(Aman|Mannie)\b|\u2014/);
   });
 });

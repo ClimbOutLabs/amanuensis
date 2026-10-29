@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MORNING_BRIEF_CARD_PROMPT } from '@truefoundry/trueforge-core/core/schedules/morningBrief';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -7,10 +7,34 @@ import { AmanWelcome } from '@/components/AmanWelcome.js';
 import { EMPTY_PERSONALIZATION_PROFILE, PersonalizationProvider } from '@/components/PersonalizationContext.js';
 import { CARDS } from '@/components/tourPrompts.js';
 
-const { composer, server } = vi.hoisted(() => {
+const { composer, server, schedules, shell } = vi.hoisted(() => {
   const server: { grantedFeatures: string[]; hasCatalog: boolean } = { grantedFeatures: [], hasCatalog: true };
-  return { composer: { setText: vi.fn(), send: vi.fn() }, server };
+  const schedules: { list: { id: string; name: string; task: string }[]; enabled: boolean } = {
+    list: [],
+    enabled: false,
+  };
+  return {
+    composer: { setText: vi.fn(), send: vi.fn() },
+    server,
+    schedules,
+    shell: { openHistorySession: vi.fn() },
+  };
 });
+
+const createScheduleRun = vi.fn(async ({ scheduleId }: { scheduleId: string }) => ({
+  id: 'run-1',
+  scheduleId,
+  name: 'manual',
+  scheduledFor: '2026-10-29T08:00:00.000Z',
+  status: 'triggered',
+  triggeredAt: '2026-10-29T08:00:00.000Z',
+  triggeredBy: 'Priya',
+}));
+const findScheduleRunSession = vi.fn(async () => ({
+  id: 'session-run-1',
+  createdAt: '2026-10-29T08:00:00.000Z',
+  agentName: 'assistant',
+}));
 
 vi.mock('@assistant-ui/react', async importOriginal => ({
   ...(await importOriginal<typeof import('@assistant-ui/react')>()),
@@ -32,6 +56,14 @@ vi.mock('@/server/ServerContext.js', async importOriginal => ({
         }
       : null,
   useServerCapabilities: () => ({ sandbox: { enabled: false } }),
+  useOptionalScheduleServer: () =>
+    schedules.enabled ? { listSchedules: async () => ({ data: schedules.list }), createScheduleRun } : null,
+  useOptionalAgentSessionsServer: () => ({ findScheduleRunSession }),
+}));
+
+vi.mock('@/server/ShellModeContext.js', async importOriginal => ({
+  ...(await importOriginal<typeof import('@/server/ShellModeContext.js')>()),
+  useOptionalShellMode: () => shell,
 }));
 
 type RenderInput = {
@@ -76,6 +108,11 @@ beforeEach(() => {
   composer.send.mockClear();
   server.grantedFeatures = [];
   server.hasCatalog = true;
+  schedules.list = [];
+  schedules.enabled = false;
+  createScheduleRun.mockClear();
+  findScheduleRunSession.mockClear();
+  shell.openHistorySession.mockClear();
 });
 
 describe('AmanWelcome on an ordinary new chat', () => {
@@ -146,5 +183,41 @@ describe('AmanWelcome on an ordinary new chat', () => {
     expect(await screen.findByRole('button', { name: "I'm behind" })).toBeInTheDocument();
     expect(screen.queryByTestId('aman-setup-ticket')).not.toBeInTheDocument();
     expect(screen.queryByText(/What would help you most\? Pick one/)).not.toBeInTheDocument();
+  });
+});
+
+describe('the run my daily brief card', () => {
+  const brief = { id: 'sched-brief', name: 'morning-brief', task: 'My brief. Travel from 12 Elm Road.' };
+  const plants = { id: 'sched-plants', name: 'water-plants', task: 'Remind me to water the plants.' };
+
+  it('shows when the person has a daily brief schedule', async () => {
+    schedules.enabled = true;
+    schedules.list = [plants, brief];
+    renderWelcome({ setup: { ...firstRun, hasChatted: true } });
+
+    expect(await screen.findByRole('button', { name: /Run my daily brief/ })).toBeInTheDocument();
+  });
+
+  it('stays hidden when no schedule is a daily brief', async () => {
+    schedules.enabled = true;
+    schedules.list = [plants];
+    renderWelcome({ setup: { ...firstRun, hasChatted: true } });
+
+    expect(await screen.findByRole('button', { name: "I'm behind" })).toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByRole('button', { name: /Run my daily brief/ })).not.toBeInTheDocument());
+  });
+
+  it('starts a run of that schedule, as Run now does, and opens the chat the run writes into', async () => {
+    schedules.enabled = true;
+    schedules.list = [brief];
+    renderWelcome({ setup: { ...firstRun, hasChatted: true } });
+
+    fireEvent.click(await screen.findByRole('button', { name: /Run my daily brief/ }));
+    await waitFor(() =>
+      expect(shell.openHistorySession).toHaveBeenCalledWith({ sessionId: 'session-run-1', agentName: 'assistant' }),
+    );
+    expect(createScheduleRun).toHaveBeenCalledWith({ scheduleId: 'sched-brief' });
+    expect(findScheduleRunSession).toHaveBeenCalledWith({ scheduleId: 'sched-brief', runId: 'run-1' });
+    expect(composer.send).not.toHaveBeenCalled();
   });
 });

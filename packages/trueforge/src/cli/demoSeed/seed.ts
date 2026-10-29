@@ -4,6 +4,7 @@ import {
   type CreatedBySubject,
   type ISessionStore,
 } from '@truefoundry/trueforge-core/agent-session';
+import { MORNING_BRIEF_SCHEDULE_NAME } from '@truefoundry/trueforge-core/core/schedules/morningBrief';
 import { ulid } from 'ulid';
 import type { Logger } from 'winston';
 import type { McpCatalog } from '../../catalog/McpCatalog';
@@ -26,7 +27,7 @@ import type { SkillManifest } from '../../schemas/skill';
 import { SPACE_LIST_LIMIT } from '../../schemas/space';
 import { knowledgeSourceLabel, type DemoKnowledgeLibrary } from './knowledgeLibrary';
 import type { DemoNote, DemoPersona, DemoSpace, DemoWorld } from './model';
-import { DEMO_AGENT_NAME, DEMO_ID_PREFIX, DEMO_MARKER, DEMO_SCHEDULE_NAME, DEMO_USER_PROFILE } from './world';
+import { DEMO_AGENT_NAME, DEMO_ID_PREFIX, DEMO_MARKER, DEMO_USER_PROFILE } from './world';
 
 const MEMORY_TIMEOUT_MS = 10_000;
 /** Indexing a library embeds every passage on the CPU; a first run may also load the search model. */
@@ -425,7 +426,7 @@ async function findSchedule<TTransaction>({
     agent_names: [DEMO_AGENT_NAME],
     created_by_or_agent_ids: undefined,
   });
-  return data.find(schedule => schedule.name === DEMO_SCHEDULE_NAME);
+  return data.find(schedule => schedule.name === MORNING_BRIEF_SCHEDULE_NAME);
 }
 
 /**
@@ -545,7 +546,7 @@ async function seedSchedule<TTransaction>({
           tenant_id: scope.tenantId,
           agent_id: agentId,
           agent_name: DEMO_AGENT_NAME,
-          name: DEMO_SCHEDULE_NAME,
+          name: MORNING_BRIEF_SCHEDULE_NAME,
           persona_id: null,
           manifest: world.scheduleManifest,
           created_by_subject: subjectFor(scope.userId),
@@ -569,7 +570,7 @@ async function seedSchedule<TTransaction>({
       {
         tenant_id: scope.tenantId,
         id: existing.id,
-        name: DEMO_SCHEDULE_NAME,
+        name: MORNING_BRIEF_SCHEDULE_NAME,
         manifest: world.scheduleManifest,
         runFrom: now,
       },
