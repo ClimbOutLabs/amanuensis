@@ -152,21 +152,21 @@ export const CARDS = {
     title: 'A trip is coming',
     detail: () => 'What to book, pack and sort out, in the right order',
     prompt:
-      "Help me get ready for a trip. Ask me where I'm going and when, and who with only if it changes the plan. Then make my checklist from what I actually told you: what to book now, what to sort out before I go, and what to pack. Scale it to the time I have left. Each line is one concrete thing to do. If I leave today or this week, skip the parts that no longer fit and say so in one line.",
+      'I have a trip coming up. In one short message, ask me where I am going and when, then help me get ready: what to book, what to sort out before I go, and what to pack, in the right order for the time I have left.',
     icon: 'list-check',
   },
   remember: {
     title: "Don't let me forget",
     detail: assistant => `${assistant} reminds you at the right moment`,
     prompt:
-      'Ask me what I must not forget and when it matters. Suggest the right time to remind me, usually the evening before and the morning of, and ask before setting it. Then ask if there is anything else.',
+      'I need a reminder. In one short message, ask me what I must not forget and when it matters, suggest a good time to remind me, and ask before you set it.',
     icon: 'clock',
   },
   places: {
     title: 'Find places and routes',
     detail: () => 'Three options, travel time and hours',
     prompt:
-      "Ask me what I'm looking for, when I want to go, and where I'm starting from, unless you already know. Search for three good options near there, each with how long it takes to get there, opening hours and a link. Show them on a map. Ask if I want one added to my calendar.",
+      'I am looking for a place to go. In one short message, ask me what I am looking for, when, and where I am starting from, unless you already know. Then give me three good options with travel time, opening hours and a link, on a map. Ask if I want one on my calendar.',
     icon: 'map-pin',
     needs: ['maps'],
   },
@@ -174,28 +174,28 @@ export const CARDS = {
     title: 'Say no',
     detail: () => 'A clear no that keeps the relationship',
     prompt:
-      "Ask me what I'm being asked to do and who is asking. Then write a short, warm, clear no that sounds like me (match my own sent emails if you can see them, otherwise plain and friendly), without over-explaining. Only offer an alternative if I say there is one. Show it to me and ask before sending.",
+      'I need to say no to something. In one short message, ask me what I am being asked to do and who is asking. Then write a short, warm, clear no in my voice. Offer an alternative only if I say there is one. Show me the draft and wait for my OK.',
     icon: 'square-pen',
   },
   ask_for: {
     title: 'Ask for something',
     detail: () => 'A raise, a refund, a favor. No apologies',
     prompt:
-      "Ask me what I'm asking for and from whom. Then write a short, direct request that sounds like me (match my own sent emails if you can see them, otherwise plain and friendly), saying what I want, why it is reasonable, and what I'd like to happen next, with no apologies in it. Show it to me and ask before sending.",
+      'I need to ask someone for something. In one short message, ask me what I want and from whom. Then write a short, direct request in my voice, with no apologies. Show me the draft and wait for my OK.',
     icon: 'square-pen',
   },
   follow_up: {
     title: 'Follow up without nagging',
     detail: () => 'A polite nudge that is easy to answer',
     prompt:
-      "Ask me who I'm following up with and what I'm waiting on, or find the thread if I name it. Write a short, friendly follow-up that is easy to answer in one word. Ask before sending, and remind me again in a week if there's no answer.",
+      'I am waiting on someone. In one short message, ask me who and what for, or find the thread if I name it. Write a short, friendly follow-up that is easy to answer. Wait for my OK before sending.',
     icon: 'clock-rotate-left',
   },
   thanks: {
     title: 'Thank someone properly',
     detail: () => 'A thank-you that sounds like you, not a card from the shop',
     prompt:
-      'Ask me who it is for and what they did. Then write a short thank-you, specific to what they did, that sounds like me (match my own sent emails if you can see them, otherwise warm and plain). Show it to me and ask before sending.',
+      'I want to thank someone. In one short message, ask me who and what they did. Then write a short thank-you in my voice, specific to what they did. Show me the draft and wait for my OK.',
     icon: 'message-square-text',
   },
   explain: {

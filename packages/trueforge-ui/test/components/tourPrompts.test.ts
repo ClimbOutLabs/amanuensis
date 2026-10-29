@@ -218,6 +218,27 @@ describe('the rewritten cards', () => {
     }
   });
 
+  it('states the ask first on the writing and planning cards, so the model acts instead of asking what to do', () => {
+    const rewritten = [
+      CARDS.trip,
+      CARDS.remember,
+      CARDS.places,
+      CARDS.say_no,
+      CARDS.ask_for,
+      CARDS.follow_up,
+      CARDS.thanks,
+    ];
+    for (const card of rewritten) {
+      expect(card.prompt, card.title).toMatch(/^I (need|want|have|am) /);
+      expect(card.prompt, card.title).toContain('In one short message, ask me');
+    }
+    expect(CARDS.say_no.prompt).toMatch(/^I need to say no to something\. In one short message, ask me/);
+    for (const card of [CARDS.say_no, CARDS.ask_for, CARDS.thanks]) {
+      expect(card.prompt, card.title).toContain('Show me the draft and wait for my OK');
+    }
+    expect(CARDS.follow_up.prompt).toContain('Wait for my OK before sending');
+  });
+
   it('asks first on every card whose prompt sends, saves or books', () => {
     for (const card of everyCard) {
       if (/\b(save|saving|saved|send|sending|book|booking)\b/i.test(card.prompt)) {
@@ -243,15 +264,13 @@ describe('the rewritten cards', () => {
   });
 
   it('asks only for what the trip checklist needs', () => {
-    expect(CARDS.trip.prompt).toContain('who with only if it changes the plan');
+    expect(CARDS.trip.prompt).toContain('ask me where I am going and when');
     expect(CARDS.trip.prompt).not.toContain('sort out the week before');
   });
 
-  it('builds the trip checklist from the answers and fits it to the time left', () => {
-    expect(CARDS.trip.prompt).toContain('make my checklist from what I actually told you');
-    expect(CARDS.trip.prompt).toContain('Scale it to the time I have left');
-    expect(CARDS.trip.prompt).toContain('Each line is one concrete thing to do');
-    expect(CARDS.trip.prompt).toContain('skip the parts that no longer fit');
+  it('fits the trip checklist to the time left', () => {
+    expect(CARDS.trip.prompt).toContain('what to book, what to sort out before I go, and what to pack');
+    expect(CARDS.trip.prompt).toContain('in the right order for the time I have left');
   });
 
   it('does not presume my answers on the trip card or defend against them', () => {
