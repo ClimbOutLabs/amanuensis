@@ -269,6 +269,10 @@ describe('buildDemoWorld content', () => {
       expect(text).not.toContain('Google');
       expect(text).toContain('leave every send for her OK');
       expect(text).toContain(
+        'make it first on sensible assumptions and say what you assumed; then ask, in one short message, for what you still need. Never ask her to confirm what she already said.',
+      );
+      expect(text).toContain('you cannot order, pay, book or ship, so never offer to');
+      expect(text).toContain(
         'If a tool fails or a service is not connected, say so plainly and stop there; never invent what it would have returned.',
       );
     }
