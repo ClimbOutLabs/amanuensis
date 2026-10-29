@@ -68,12 +68,13 @@ const WORK_PLAN_ANYWHERE =
   /\b(?:i|we)(?:(?:'|’)(?:ll|ve|m|re)|\s+(?:will|shall|have|has|am|are|just|can now))\b|\bthe assistant\s+(?:will|has|is|can)\b/i;
 
 /**
- * Text that reads as an instruction to the assistant, or as a statement about the person, is never a
- * note: a tool result is data, and facts about the person are only ever saved from their own words.
+ * Text that reads as an instruction to the assistant is never a finding: a tool result is data. The
+ * assistant's own advice may well say "do not", so this check does not apply to reply sentences.
  */
 const INSTRUCTION_TO_ASSISTANT =
   /^\s*(?:always|never)\b|\b(?:remember|ignore|disregard|forget|from now on|you (?:should|must|need to|have to|are to)|do not|don(?:'|’)?t)\b/i;
 
+/** A statement about the person is never a note; facts about the person are only ever saved from their own words. */
 const ABOUT_THE_PERSON =
   /\bthe (?:person|user)(?:'s|’s|\s+(?:always|never|wants|prefers|asked|asks|likes|needs|said|says|is|has|lives|works))\b/i;
 
@@ -309,7 +310,7 @@ export function parseNotesReply({
   }
   const replies = selectedSentences({ responses: parsed.data.responses, sentences })
     .flatMap(sentence => usableNoteText({ text: sentence, assistantName }) ?? [])
-    .filter(text => !INSTRUCTION_TO_ASSISTANT.test(text) && !readsAsAboutThePerson({ text, personName }));
+    .filter(text => !readsAsAboutThePerson({ text, personName }));
   for (const text of replies.slice(0, NOTES_MAX_REPLIES)) {
     notes.push({ source: ASSISTANT_RESPONSE_SOURCE, text });
   }

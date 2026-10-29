@@ -271,6 +271,45 @@ describe('turn memory with findings and reply notes', () => {
     expect(listed.entries.filter(entry => entry.text.includes('sent the signed form'))).toHaveLength(1);
   });
 
+  it('stores the same finding once in a persona vault, and leaves the shared vault alone', async () => {
+    const persona = new MarkdownMemoryClient({
+      baseDir: dir,
+      namespace: 'tenant',
+      vaultScope: { personaName: 'Nata', personaId: 'persona-1' },
+    });
+    scripted.notes = JSON.stringify({
+      findings: [{ result: 1, text: 'Priya asked for the signed form by 2026-11-03.' }],
+      responses: [],
+    });
+    for (const id of ['p1', 'p2', 'p3']) {
+      await submitRetain({
+        client: persona,
+        sessionId: 'chat-2',
+        turnId: id,
+        userText: 'Check my email.',
+        assistantText: SHORT_REPLY,
+        completedAt: '2026-10-29T12:00:00.000Z',
+        origin: 'tool_ingested',
+        logger: winston.createLogger({ silent: true }),
+        toolResults: [EMAIL_RESULT],
+        summarize: {
+          tenantId: 't1',
+          modelProviderStore: unusedStore,
+          summarizationModelFqn: 'provider/model',
+          tokenFactoryBudget: uncappedTokenFactoryBudget,
+          modelUsage: discardedModelUsage,
+        },
+      });
+    }
+    const personaVault = await persona.listEntries({ namespace: 'persona:Nata', timeoutMs: 5000 });
+    const shared = await client.listEntries({ namespace: '', timeoutMs: 5000 });
+    if (!personaVault.ok || !shared.ok) {
+      throw new Error('expected listings');
+    }
+    expect(personaVault.entries.filter(entry => entry.text.includes('signed form'))).toHaveLength(1);
+    expect(shared.entries).toHaveLength(0);
+  });
+
   it('saves nothing for a turn where the assistant only states its plan', async () => {
     scripted.notes = JSON.stringify({
       findings: [],

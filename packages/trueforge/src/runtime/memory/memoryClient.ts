@@ -66,6 +66,15 @@ export interface MemoryClient {
   listEntries(params: { namespace: string; timeoutMs: number }): Promise<ListMemoryVaultEntriesOutcome>;
 
   /**
+   * Memory vault: the live entries in the newest `maxDailyFiles` daily files of the vault this client's
+   * `retain` writes into. Absent on a backend without a cheap listing.
+   */
+  listRecentWrittenEntries?(params: {
+    maxDailyFiles: number;
+    timeoutMs: number;
+  }): Promise<ListMemoryVaultEntriesOutcome>;
+
+  /**
    * Memory vault: replace one entry's text. The store stays append-only: the old
    * entry is kept and a supersede marker records the new text. Unknown or deleted
    * ids fail with code `not_found`.

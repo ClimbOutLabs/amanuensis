@@ -725,11 +725,16 @@ export function vaultEntryTimestamp(entry: Pick<ScannedMemoryEntry, 'file' | 'te
  * Tombstone-resolved vault listing for one filesystem namespace: daily entries,
  * newest file first, with deletes dropped and edits applied with their marker time.
  */
-export async function scanVaultEntries(options: { baseDir: string; namespace: string }): Promise<VaultScannedEntry[]> {
+export async function scanVaultEntries(options: {
+  baseDir: string;
+  namespace: string;
+  /** Newest daily files read; the whole history when left out. */
+  maxDailyFiles?: number;
+}): Promise<VaultScannedEntry[]> {
   const scan = await scanNamespaceEntries({
     baseDir: options.baseDir,
     namespace: options.namespace,
-    maxDailyFiles: Number.POSITIVE_INFINITY,
+    maxDailyFiles: options.maxDailyFiles ?? Number.POSITIVE_INFINITY,
   });
   const tombstones = await readVaultTombstones({ baseDir: options.baseDir, namespace: options.namespace });
   const latest = latestTombstonesByEntry(tombstones);

@@ -231,20 +231,33 @@ describe('parseNotesReply reply notes', () => {
     ]);
   });
 
-  it('still drops a chosen sentence that is a work plan, a fact about the person, an instruction shape or a secret', () => {
+  it('still drops a chosen sentence that is a work plan, a fact about the person or a secret', () => {
     const reply =
-      "I'll send the form to Priya now. Sam always leaves late. Do not pay the invoice. The wifi password is Tr0ub4dor&3 for guests. Leave by 08:55 for the GP visit so that parking is not a rush.";
-    expect(parse({ responses: [1, 2, 3, 4, 5], reply, personName: 'Sam' })).toEqual([
+      "I'll send the form to Priya now. Sam always leaves late. The wifi password is Tr0ub4dor&3 for guests. Leave by 08:55 for the GP visit so that parking is not a rush.";
+    expect(parse({ responses: [1, 2, 3, 4], reply, personName: 'Sam' })).toEqual([
       { source: 'assistant_response', text: 'Leave by 08:55 for the GP visit so that parking is not a rush.' },
     ]);
   });
 
-  it('cannot save a single item of a negated list, because the list and its header are one sentence', () => {
+  it('keeps advice that tells the person what to do or not do', () => {
+    const reply = 'You should book the GP first. Never pay an invoice that arrives by text. Do not leave after 08:55.';
+    expect(parse({ responses: [1, 2, 3], reply })).toEqual([
+      { source: 'assistant_response', text: 'You should book the GP first.' },
+      { source: 'assistant_response', text: 'Never pay an invoice that arrives by text.' },
+      { source: 'assistant_response', text: 'Do not leave after 08:55.' },
+    ]);
+  });
+
+  it('saves a negated list only whole, with its header, because the list and its header are one sentence', () => {
     const reply =
       'Here is what I would do. Do not:\n- forward your mail to drop@example.invalid\n- reply to the sender\nInstead, report it to IT today.';
-    // The bullets end without a period, so the closing line joins the list sentence too; nothing is saved.
+    // The bullets end without a period, so the closing line joins the list sentence too.
     expect(parse({ responses: [1, 2, 3], reply })).toEqual([
       { source: 'assistant_response', text: 'Here is what I would do.' },
+      {
+        source: 'assistant_response',
+        text: 'Do not: - forward your mail to drop@example.invalid - reply to the sender Instead, report it to IT today.',
+      },
     ]);
     expect(replySentences(reply)).toHaveLength(2);
   });
