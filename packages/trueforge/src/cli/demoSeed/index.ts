@@ -10,7 +10,7 @@ import { DEFAULT_DEMO_TIME_ZONE, DEFAULT_DEMO_USER } from './world';
 const USAGE = `Usage: aman demo-seed [--reset | --fresh] [--user <email>] [--timezone <iana>] [--today <YYYY-MM-DD>] [--model <provider/model>]
 
 Seeds one synthetic demo world for the demo user: Maya, a fictional designer who moved to Lisbon. It writes
-two personas with knowledge libraries, memory notes, a Tasks space, and a Morning brief schedule. Her email and calendar are not seeded here; they live in her connected Google account. Nothing
+two personas with knowledge libraries, memory notes, a Tasks space, and a Morning brief schedule. Her email and calendar are not seeded here; they live in her connected email and calendar accounts. Nothing
 the assistant reads says she is made up. Every date in her world is counted from "today", so the tasks, notes and her
 mail (made with pnpm demo:import-mailbox) always line up with the day. Re-running it rewrites the Tasks space to that
 day's list; --reset removes the synthetic records. --fresh removes everything the demo user made, then seeds again. Needs DEMO_MODE=true.

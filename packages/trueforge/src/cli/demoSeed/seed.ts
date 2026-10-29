@@ -4,6 +4,8 @@ import {
   type CreatedBySubject,
   type ISessionStore,
 } from '@truefoundry/trueforge-core/agent-session';
+import { CALDAV_SERVER_NAME } from '@truefoundry/trueforge-core/core/calendar/caldav/toolContract';
+import { MAIL_CONNECTOR_NAME } from '@truefoundry/trueforge-core/core/email/mailConnector/toolContract';
 import { ulid } from 'ulid';
 import type { Logger } from 'winston';
 import type { McpCatalog } from '../../catalog/McpCatalog';
@@ -370,10 +372,44 @@ async function seedProfile<TTransaction>({
   return existing === undefined ? 'created' : 'updated';
 }
 
-/** Connectors someone attached to the demo agent stay attached; the seed owns the rest of its spec. */
-function withAttachedConnectors({ wanted, stored }: { wanted: AgentSpec; stored: AgentSpec | undefined }): AgentSpec {
-  const attached = stored?.mcp_servers;
-  return attached === undefined ? wanted : AgentSpecSchema.parse({ ...wanted, mcp_servers: attached });
+/**
+ * The brief reads mail and the calendar and searches the web, so the agent gets each of those connectors
+ * the instance has. Connectors someone attached stay attached, settings and all; the seed owns the rest of its spec.
+ */
+function withDemoConnectors({
+  wanted,
+  stored,
+  available,
+}: {
+  wanted: AgentSpec;
+  stored: AgentSpec | undefined;
+  available: readonly string[];
+}): AgentSpec {
+  const attached = stored?.mcp_servers ?? [];
+  const missing = available.filter(name => !attached.some(entry => entry.name === name));
+  if (attached.length === 0 && missing.length === 0) {
+    return wanted;
+  }
+  return AgentSpecSchema.parse({ ...wanted, mcp_servers: [...attached, ...missing.map(name => ({ name }))] });
+}
+
+/** Mail, calendar and the web search provider, each only when the instance has it registered. */
+async function demoConnectorNames<TTransaction>({
+  stores,
+  scope,
+}: {
+  stores: DemoSeedStores<TTransaction>;
+  scope: DemoSeedScope;
+}): Promise<string[]> {
+  const servers = await stores.mcpServerStore.listServers({ tenant_id: scope.tenantId, names: undefined });
+  const names = servers.map(server => server.name);
+  const search = servers.filter(
+    server => server.manifest.type === 'remote' && server.manifest.search_provider === true,
+  );
+  return [
+    ...[MAIL_CONNECTOR_NAME, CALDAV_SERVER_NAME].filter(name => names.includes(name)),
+    ...search.map(server => server.name),
+  ];
 }
 
 async function seedAgent<TTransaction>({
@@ -386,7 +422,8 @@ async function seedAgent<TTransaction>({
   world: DemoWorld;
 }): Promise<{ outcome: SeedOutcome; agentId: string }> {
   const existing = await stores.agentStore.getAgent({ tenant_id: scope.tenantId, name: DEMO_AGENT_NAME });
-  const manifest = withAttachedConnectors({ wanted: world.agentSpec, stored: existing?.manifest });
+  const available = await demoConnectorNames({ stores, scope });
+  const manifest = withDemoConnectors({ wanted: world.agentSpec, stored: existing?.manifest, available });
   if (existing === undefined) {
     const created = await stores.agentStore.createAgent({
       tenant_id: scope.tenantId,
@@ -740,10 +777,11 @@ export async function seedDemoWorld<TTransaction>({
   const memory = await seedMemory({ memory: stores.memory, notes: world.notes, now });
   const { personas, knowledge } = await seedPersonas({ stores, scope, world });
   const profile = await seedProfile({ stores, scope, world });
+  // Connectors first, so the agent can be given the ones this run registered.
+  const connectorReport = await seedConnectors({ stores, scope, connectors });
   const agent = await seedAgent({ stores, scope, world });
   const schedule = await seedSchedule({ stores, scope, world, agentId: agent.agentId, now });
   const spaces = await seedSpaces({ stores, scope, world });
-  const connectorReport = await seedConnectors({ stores, scope, connectors });
   const skillReport = await seedDemoSkills({ stores, scope, connectors });
   return {
     personas,
