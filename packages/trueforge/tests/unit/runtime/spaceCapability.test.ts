@@ -153,7 +153,7 @@ describe('space capability', () => {
     expect(createSpace?.description).toContain('never by editing files in the sandbox');
   });
 
-  it('tells the model to use only picture links that a search or page returned, and never to make one up', () => {
+  it('tells the model to use only picture links a search or an opened page returned, and never to make one up', () => {
     const capability = spaceCapability({
       store: makeStore(),
       authority: { tenantId: 'default', userRef: 'user-a' },
@@ -167,9 +167,9 @@ describe('space capability', () => {
     const rendered = builder.build();
 
     const expectedSubstrings: string[] = [
-      'use only picture links that a search or page result in this chat returned',
-      'never one you made up',
-      'The host refuses any other link.',
+      'use only a picture link a search result or a page you opened in this chat returned',
+      'a plain link only from a search result',
+      'Never make one up; if you have none, leave pictures out and say so.',
     ];
     expectedSubstrings.forEach(substring => expect(rendered).toContain(substring));
   });
@@ -529,6 +529,8 @@ describe('space capability', () => {
         updated_at: '2026-09-13T00:00:00.000Z',
       },
       aggregate_revision: 1,
+      blocks: [{ anchor: 'b1', fingerprint: blockFingerprint('Body text.'), preview: 'Body text.', occurrences: 1 }],
+      format_notes: [],
     });
   });
 
@@ -610,6 +612,7 @@ describe('space capability', () => {
         },
       ],
       aggregate_revision: 4,
+      format_notes: [],
     });
   });
 
@@ -726,10 +729,52 @@ describe('space capability', () => {
     expect(response.result.isError).toBe(true);
     expect(JSON.parse(resultText(response))).toEqual({
       error:
-        'Stale space revision: space-1. Call get_space to read the current revision, then send the call ' +
-        'again with expected_revision set to the revision in this result.',
+        'The space is at revision 4, not 1. The anchors and fingerprints below are current: ' +
+        'send the edit again with expected_revision 4 and these fingerprints.',
       revision: 4,
+      blocks: [
+        { anchor: 'b1', fingerprint: blockFingerprint(TABLE_BODY), preview: expect.any(String), occurrences: 1 },
+      ],
     });
+    expect(updateSpace).not.toHaveBeenCalled();
+  });
+
+  it('a store that loses the revision race after the read returns the fresh outline', async () => {
+    const updateSpace = jest
+      .fn()
+      .mockRejectedValue(new SpaceRevisionConflictError({ id: 'space-1', expected_revision: 1, actual_revision: 2 }));
+    const getSpace = jest
+      .fn()
+      .mockResolvedValueOnce(makeSpaceRecord({ revision: 1 }))
+      .mockResolvedValue(makeSpaceRecord({ revision: 2 }));
+    const listSpacesWithAggregate = jest.fn().mockResolvedValue({
+      records: [makeSpaceRecord({ revision: 1 })],
+      aggregate_revision: 1,
+      has_more: false,
+      next_offset: null,
+    });
+    const store = makeStore({ updateSpace, getSpace, listSpacesWithAggregate });
+
+    const response = await callTool(store, EDIT_SPACE_TOOL_NAME, {
+      space_name: 'Spain houses',
+      edits: [
+        { type: 'block', anchor: 'b1', fingerprint: blockFingerprint(TABLE_BODY), new_content: TABLE_BODY_EDITED },
+      ],
+      expected_revision: 1,
+      expected_aggregate_revision: 1,
+    });
+
+    if (!('result' in response)) {
+      throw new Error('expected space tool result');
+    }
+    expect(response.result.isError).toBe(true);
+    const parsed = JSON.parse(resultText(response));
+    expect(parsed.error).toBe(
+      'The space is at revision 2, not 1. The anchors and fingerprints below are current: ' +
+        'send the edit again with expected_revision 2 and these fingerprints.',
+    );
+    expect(parsed.revision).toBe(2);
+    expect(parsed.blocks).toHaveLength(1);
   });
 
   it('edit_space returns a terminal error naming list_spaces when the name matches nothing', async () => {
@@ -818,6 +863,7 @@ describe('space capability', () => {
         },
       ],
       aggregate_revision: 4,
+      format_notes: [],
     });
   });
 

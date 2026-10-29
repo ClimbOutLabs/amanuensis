@@ -24,8 +24,7 @@ export type ModelPrices = z.infer<typeof ModelPricesSchema>;
  * `pricing` object of each model on `GET https://api.tokenfactory.nebius.com/v1/models?verbose=true`
  * (per-token USD times one million). The keys are the model ids that endpoint lists. Only
  * `nvidia/nemotron-3-super-120b-a12b` is also in catalog/model-catalog.yaml; the other ids are not
- * in the catalog file, so they are reachable by setting `TOKEN_FACTORY_MODEL` or
- * `TOKEN_FACTORY_CHEAPER_MODEL` to them.
+ * in the catalog file, so they are reachable by setting `TOKEN_FACTORY_MODEL` to them.
  */
 export const TOKEN_FACTORY_DEFAULT_PRICES: ModelPrices = {
   'nvidia/nemotron-3-super-120b-a12b': {

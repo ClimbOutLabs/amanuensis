@@ -33,7 +33,7 @@ export type {
 export { AgentThreadOrchestrator } from './runtime/AgentThreadOrchestrator';
 export { stageAttachment } from './runtime/attachmentStaging';
 export type { StagedAttachment } from './runtime/attachmentStaging';
-export { isHostWrappedText, isUntrustedDocumentText } from './runtime/contextUtils';
+export { isHostWrappedText, isUntrustedDocumentText, personMessageIndex } from './runtime/contextUtils';
 export type { CreateDynamicSubAgentThread } from './runtime/CreateDynamicSubAgentThread';
 export { measurePromptRequest } from './runtime/promptReport';
 export type { PromptReport, PromptReportInput, PromptReportRow } from './runtime/promptReport';
@@ -104,11 +104,7 @@ export {
   largeToolResponse,
 } from './capabilities/builtins/LargeToolResponse';
 export { openUI } from './capabilities/builtins/OpenUI';
-export {
-  REPLACE_TASK_CHECKLIST_TOOL_NAME,
-  TASK_CHECKLIST_SERVER_ID,
-  taskChecklist,
-} from './capabilities/builtins/TaskChecklist';
+export { TASK_CHECKLIST_SERVER_ID, taskChecklist } from './capabilities/builtins/TaskChecklist';
 export type { TaskChecklistAccess } from './capabilities/builtins/TaskChecklist';
 export { TOKEN_BUDGET_SAFETY_MARGIN } from './capabilities/builtins/tokenBudgetConstants';
 export { toolOutputScreen } from './capabilities/builtins/ToolOutputScreen';
@@ -257,7 +253,12 @@ export type { AgentThreadSendBatch, ContextMessage } from './runtime/AgentThread
 export { isInternalSystemMessage } from './runtime/contextUtils';
 export { AgentThreadMetricsSchema } from './runtime/metrics';
 export type { AgentThreadMetrics } from './runtime/metrics';
-export { TaskFindingSchema, TaskPhaseSchema, TaskStateSchema } from './runtime/taskState';
+export {
+  REPLACE_TASK_CHECKLIST_TOOL_NAME,
+  TaskFindingSchema,
+  TaskPhaseSchema,
+  TaskStateSchema,
+} from './runtime/taskState';
 export type { TaskFinding, TaskPhase, TaskState, TaskStateSnapshot } from './runtime/taskState';
 
 // Tracing
@@ -429,6 +430,12 @@ export type { HostToolCallPolicy, HostToolCallPolicyBlock, HostToolCallPolicyCal
 
 // Sentinel: three-tier permission system for tool execution
 export {
+  callResultSource,
+  callReturnsOutsideContent,
+  contextHasOutsideToolResult,
+} from './capabilities/builtins/ChatProvenance';
+export type { ToolResultSource } from './capabilities/builtins/ChatProvenance';
+export {
   InMemoryApprovalTokenStore,
   hasApprovalScope,
   hashApprovalTokenId,
@@ -485,7 +492,14 @@ export {
 } from './permissions/mapsToolNames';
 export { checkOutboundStrings, collectOutboundStrings } from './permissions/outboundGuard';
 export type { OutboundGuardRule, OutboundGuardVerdict } from './permissions/outboundGuard';
-export { isTrustedLink, recordPageImageUrls, recordPersonText } from './permissions/provenance';
+export {
+  isTrustedLink,
+  isTrustedPicture,
+  recordPageImageUrls,
+  recordPersonText,
+  searchResultUrls,
+} from './permissions/provenance';
+export type { SearchResultUrls } from './permissions/provenance';
 export {
   AUTO_DENY_REASONS,
   TIER2_ACTION_KINDS,

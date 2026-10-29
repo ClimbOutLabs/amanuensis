@@ -11,3 +11,10 @@ powershell -NoProfile -NonInteractive -Command "Start-Process 'http://127.0.0.1:
 powershell -NoProfile -NonInteractive -Command "$shell = New-Object -ComObject WScript.Shell; $path = Join-Path ([Environment]::GetFolderPath('Programs')) 'Use Aman on my phone.lnk'; $shortcut = $shell.CreateShortcut($path); $shortcut.TargetPath = 'C:\Users\Friend\AppData\Local\Programs\Amanuensis\aman.exe'; $shortcut.Arguments = 'network open'; $shortcut.Save()"
 powershell -NoProfile -NonInteractive -Command "try { $p = Start-Process -FilePath 'cmd.exe' -ArgumentList '/c netsh advfirewall firewall delete rule name=\"Aman\" >nul 2>&1 & netsh advfirewall firewall add rule name=\"Aman\" dir=in action=allow protocol=TCP localport=8443,8791 profile=private' -Verb RunAs -Wait -PassThru -ErrorAction Stop } catch { exit 3 }; exit $p.ExitCode"
 powershell -NoProfile -NonInteractive -Command "try { $p = Start-Process -FilePath 'cmd.exe' -ArgumentList '/c netsh advfirewall firewall set rule name=\"Aman\" new enable=no' -Verb RunAs -Wait -PassThru -ErrorAction Stop } catch { exit 3 }; exit $p.ExitCode"
+whoami
+icacls C:\Users\Friend\AppData\Local\Amanuensis /inheritance:r /grant:r FRIEND-PC\Friend:(OI)(CI)F
+icacls C:\Users\Friend\AppData\Local\Amanuensis
+schtasks /Create /TN "Amanuensis\Daily backup" /TR "\"C:\Users\Friend\AppData\Local\Programs\Amanuensis\aman.exe\" backup" /SC DAILY /ST 03:30 /RL LIMITED /IT /F
+schtasks /Query /TN "Amanuensis\Daily backup"
+powershell -NoProfile -NonInteractive -Command "$shell = New-Object -ComObject WScript.Shell; $path = Join-Path ([Environment]::GetFolderPath('Programs')) 'Backups.lnk'; $shortcut = $shell.CreateShortcut($path); $shortcut.TargetPath = 'C:\Users\Friend\AppData\Local\Amanuensis\backups'; $shortcut.Save()"
+powershell -NoProfile -NonInteractive -Command "[Console]::OutputEncoding = [Text.Encoding]::UTF8; if (Test-Path -LiteralPath 'C:\Users\Friend\AppData\Local\Amanuensis\backups') { Get-ChildItem -LiteralPath 'C:\Users\Friend\AppData\Local\Amanuensis\backups' -Directory | ForEach-Object { $_.Name } }"

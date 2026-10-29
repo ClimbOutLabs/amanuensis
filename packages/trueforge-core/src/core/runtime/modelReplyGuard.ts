@@ -27,12 +27,20 @@ import type { ContextMessage } from './AgentThread.types';
 /** Most tool calls one reply may make; beyond this the turn stops (see TOO_MANY_TOOL_CALLS_MESSAGE). */
 export const MAX_TOOL_CALLS_PER_REPLY = 20;
 
+/**
+ * Most tool calls the stream reads from one reply before it stops reading and marks the reply
+ * cut. Twice the cap: the cap is counted after identical calls merge and, in an unattended run,
+ * without the calls held for approval, so a reply over the cap can still be a legitimate batch
+ * up to here. Past it the model is flooding, and reading on would only hold the step open.
+ */
+export const MAX_TOOL_CALL_STREAM_PARTS = MAX_TOOL_CALLS_PER_REPLY * 2;
+
 /** Shown to the person when a reply asks for more tool calls than one reply may make. */
 export const TOO_MANY_TOOL_CALLS_MESSAGE =
-  'The model asked for too many tool calls at once, so Aman stopped. Try again.';
+  'The model asked for too many tool calls at once, so the reply stopped. Try again.';
 
 /** Shown to the person when a reply hits the output limit, which can leave a tool call half-written. */
-export const LENGTH_CUT_OFF_MESSAGE = "Aman's reply was cut off because it ran long. Ask it to continue.";
+export const LENGTH_CUT_OFF_MESSAGE = 'The reply was cut off because it ran long. Ask for the rest.';
 
 /**
  * Shown to the model when one of its calls was stopped mid-stream for running past the host's
@@ -71,13 +79,65 @@ export function spaceWriteIncompleteMessage(toolName: string): string {
 export const REPLY_CALL_NOT_RUN_OWNER_MESSAGE =
   'I could not finish one of the steps in this reply. Ask me to try again.';
 
+/** Why the guard stopped a call, for the warn log line the owner can search for. */
+export type ReplyGuardFlagReason =
+  'size_cut' | 'incomplete_arguments' | 'wrong_arguments' | 'shell_command_in_run_code' | 'event_not_created';
+
+/** One stopped call, as logged: never the argument values, which can hold the person's content. */
+export interface ReplyGuardFlaggedCall {
+  callId: string;
+  toolName: string;
+  argumentKeys: string[];
+  reason: ReplyGuardFlagReason;
+}
+
+/** The names the model sees for the sandbox's code and shell tools, when this chat has them. */
+export interface ReplyGuardSandboxToolNames {
+  runCode: string | undefined;
+  exec: string | undefined;
+}
+
 interface ModelReplyGuardOutcome {
   /** The reply with arguments repaired and exact duplicate calls removed. */
   message: RawAssistantMessage;
   /** Calls that must not run, by call id, each with the plain message the model gets instead. */
   invalidCalls: Map<string, string>;
-  /** True when the reply still holds more calls than one reply may make after duplicates merged. */
+  /** Every stopped call with its reason, in reply order. */
+  flaggedCalls: ReplyGuardFlaggedCall[];
+  /** True when the reply holds more calls than one reply may make after duplicates merged, or the stream stopped reading it. */
   tooManyCalls: boolean;
+}
+
+const SHELL_LANGUAGES: ReadonlySet<string> = new Set(['bash', 'sh', 'shell', 'zsh']);
+
+/** Code that opens with a common shell command, optionally after a "$ " prompt. */
+const SHELL_COMMAND_PATTERN =
+  /^\s*(?:\$\s*)?(?:git|cd|ls|mkdir|cp|mv|rm|cat|curl|wget|pwd|echo|find|grep|chmod|touch|tar|unzip)(?:\s|$)/;
+
+/** True when a run_code call carries a shell command rather than Python or Node code. */
+function isShellCommandForRunCode(args: Record<string, unknown>): boolean {
+  const language = args['language'];
+  if (typeof language === 'string' && SHELL_LANGUAGES.has(language.trim().toLowerCase())) {
+    return true;
+  }
+  const code = args['code'];
+  return typeof code === 'string' && SHELL_COMMAND_PATTERN.test(code);
+}
+
+/**
+ * Shown to the model when it sent a shell command to run_code, which runs only Python or Node.
+ * It names the shell tool so the model switches tools instead of resending the same call.
+ */
+export function shellCommandInRunCodeMessage(input: {
+  runCodeToolName: string;
+  execToolName: string | undefined;
+}): string {
+  const { runCodeToolName, execToolName } = input;
+  const notRun = `The ${runCodeToolName} call was not sent, because ${runCodeToolName} runs only Python or Node code and this is a shell command. Nothing was done.`;
+  if (execToolName === undefined) {
+    return `${notRun} There is no shell tool in this chat, so do not send it to ${runCodeToolName} again. Tell the person the command could not be run here.`;
+  }
+  return `${notRun} Do not send it to ${runCodeToolName} again. Call the ${execToolName} tool instead, with the same shell command in its command field.`;
 }
 
 const ID_FIELD_PATTERN = /"(?:id|event_id)"\s*:\s*"([^"]+)"/g;
@@ -123,8 +183,11 @@ export function guardModelReply(input: {
   readOnlyTools: ReadonlySet<string>;
   /** Calls the stream stopped early for running past their tool's argument size limit; their arguments are partial and never run. */
   sizeCutCalls: ReadonlySet<string>;
+  /** True when the stream stopped reading because the reply started more calls than it reads (MAX_TOOL_CALL_STREAM_PARTS). */
+  callCountCut: boolean;
+  sandboxToolNames: ReplyGuardSandboxToolNames;
 }): ModelReplyGuardOutcome {
-  const { message, tools, knownEventIds, readOnlyTools, sizeCutCalls } = input;
+  const { message, tools, knownEventIds, readOnlyTools, sizeCutCalls, callCountCut, sandboxToolNames } = input;
   const schemas = new Map<string, ToolParameterSchema>();
   for (const tool of tools) {
     if (tool.type === 'function') {
@@ -135,23 +198,41 @@ export function guardModelReply(input: {
   const calls = message.tool_calls ?? [];
   const replyHasCreate = calls.some(call => call.function.name === CREATE_EVENT_TOOL_NAME);
   const invalidCalls = new Map<string, string>();
+  const flaggedCalls: ReplyGuardFlaggedCall[] = [];
+  const flag = (flagged: {
+    call: RawToolCall;
+    argumentKeys: string[];
+    reason: ReplyGuardFlagReason;
+    message: string;
+  }) => {
+    invalidCalls.set(flagged.call.id, flagged.message);
+    flaggedCalls.push({
+      callId: flagged.call.id,
+      toolName: flagged.call.function.name,
+      argumentKeys: flagged.argumentKeys,
+      reason: flagged.reason,
+    });
+  };
   const cleaned: RawToolCall[] = [];
 
   for (const call of calls) {
     if (sizeCutCalls.has(call.id)) {
-      invalidCalls.set(call.id, TOOL_CALL_SIZE_CUT_MESSAGE);
+      flag({ call, argumentKeys: [], reason: 'size_cut', message: TOOL_CALL_SIZE_CUT_MESSAGE });
       cleaned.push(call);
       continue;
     }
     const args = parseToolCallArguments(call);
     if (args === undefined) {
-      invalidCalls.set(
-        call.id,
-        call.function.name === CREATE_SPACE_TOOL_NAME || call.function.name === EDIT_SPACE_TOOL_NAME
-          ? spaceWriteIncompleteMessage(call.function.name)
-          : `The ${call.function.name} call was not sent because its arguments were not complete, so nothing was done with it. ` +
+      flag({
+        call,
+        argumentKeys: [],
+        reason: 'incomplete_arguments',
+        message:
+          call.function.name === CREATE_SPACE_TOOL_NAME || call.function.name === EDIT_SPACE_TOOL_NAME
+            ? spaceWriteIncompleteMessage(call.function.name)
+            : `The ${call.function.name} call was not sent because its arguments were not complete, so nothing was done with it. ` +
               'Send the whole call again, with all of its arguments finished.',
-      );
+      });
       cleaned.push(call);
       continue;
     }
@@ -161,10 +242,15 @@ export function guardModelReply(input: {
       const outcome = checkToolArguments({ schema, args, readOnly: readOnlyTools.has(call.function.name) });
       finalArgs = outcome.args;
       if (outcome.problems.length > 0) {
-        invalidCalls.set(
-          call.id,
-          toolArgumentProblemMessage({ toolName: call.function.name, problems: outcome.problems }),
-        );
+        const shellInRunCode = call.function.name === sandboxToolNames.runCode && isShellCommandForRunCode(args);
+        flag({
+          call,
+          argumentKeys: Object.keys(args),
+          reason: shellInRunCode ? 'shell_command_in_run_code' : 'wrong_arguments',
+          message: shellInRunCode
+            ? shellCommandInRunCodeMessage({ runCodeToolName: call.function.name, execToolName: sandboxToolNames.exec })
+            : toolArgumentProblemMessage({ toolName: call.function.name, problems: outcome.problems }),
+        });
       }
     }
     if (
@@ -174,10 +260,13 @@ export function guardModelReply(input: {
       typeof args['event_id'] === 'string' &&
       !knownEventIds.has(args['event_id'])
     ) {
-      invalidCalls.set(
-        call.id,
-        'That event has not been created yet, so there is nothing to read. Create it first, then read it back if you still need to.',
-      );
+      flag({
+        call,
+        argumentKeys: Object.keys(args),
+        reason: 'event_not_created',
+        message:
+          'That event has not been created yet, so there is nothing to read. Create it first, then read it back if you still need to.',
+      });
     }
     cleaned.push(
       finalArgs === args ? call : { ...call, function: { ...call.function, arguments: JSON.stringify(finalArgs) } },
@@ -204,9 +293,12 @@ export function guardModelReply(input: {
       ...(message.tool_calls === undefined ? {} : { tool_calls: deduped }),
     },
     invalidCalls,
+    flaggedCalls,
     // Every call counts here: which calls an unattended run will hold for approval is only
     // known after classification, so the runtime recounts there and exempts the held ones.
-    // Counted at this stage, the cap is the plain per-reply limit for any run.
-    tooManyCalls: deduped.length > MAX_TOOL_CALLS_PER_REPLY,
+    // Counted at this stage, the cap is the plain per-reply limit for any run. A reply the
+    // stream stopped reading is incomplete whatever its merged count: the calls after the cut
+    // never arrived, so running the ones that did would be a partial run of the reply.
+    tooManyCalls: callCountCut || deduped.length > MAX_TOOL_CALLS_PER_REPLY,
   };
 }

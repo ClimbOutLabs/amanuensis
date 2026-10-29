@@ -26,6 +26,15 @@ export const PHONE_SHORTCUT_NAME = 'Use Aman on my phone';
 // networks reach Aman: one name, so it can be found, changed and
 // (on uninstall) removed.
 export const FIREWALL_RULE_NAME = 'Aman';
+// The Start menu entry that opens the folder the backups land in.
+export const BACKUPS_SHORTCUT_NAME = 'Backups';
+// The folder inside the Amanuensis folder where the backups land on
+// the Windows disk, named as the shell names its backups folder.
+export const BACKUPS_FOLDER_NAME = 'backups';
+// The Task Scheduler task that makes the daily backup, in the folder
+// the plan froze, at the shell schedule's hour (schedule.sh).
+export const BACKUP_TASK_NAME = 'Amanuensis\\Daily backup';
+export const BACKUP_TASK_TIME = '03:30';
 // Docker Desktop's own install place, the file the starter starts.
 export const DOCKER_DESKTOP_EXE = 'C:\\Program Files\\Docker\\Docker\\Docker Desktop.exe';
 
@@ -44,6 +53,7 @@ export interface WindowsPaths {
   programsExePath: string;
   dataDir: string;
   setupCmdCopyPath: string;
+  backupsDir: string;
   caCertPath: string;
 }
 
@@ -55,6 +65,7 @@ export function windowsPaths(localAppDataDir: string): WindowsPaths {
     programsExePath: win32.join(programsDir, EXE_FILE_NAME),
     dataDir,
     setupCmdCopyPath: win32.join(dataDir, SETUP_CMD_FILE_NAME),
+    backupsDir: win32.join(dataDir, BACKUPS_FOLDER_NAME),
     caCertPath: win32.join(dataDir, CA_CERT_FILE_NAME),
   };
 }
@@ -65,7 +76,59 @@ export interface ShortcutFacts {
   args: string;
 }
 
+// One line of a folder's access list, read back as facts: who the line
+// names, and whether it lets them read what is in the folder.
+export interface AclEntry {
+  principal: string;
+  canRead: boolean;
+}
+
+// What reading a folder's access list found: the entries and the
+// person's own account name as the list prints it, or why there is no
+// answer. A folder that is not there is its own answer, because a check
+// before anything is installed has nothing to judge.
+export type AclRead =
+  { status: 'read'; owner: string; entries: readonly AclEntry[] } | { status: 'missing' } | { status: 'unreadable' };
+
 export class WindowsJobError extends Error {}
+
+// The rights words that let a principal read what is in a folder: full
+// control, modify and read-and-run all include reading, and so do the
+// plain read, the generic read and generic all rights, and the read
+// parts of a detailed list (data, attributes, extended attributes and
+// permissions).
+const ACL_READ_TOKENS: ReadonlySet<string> = new Set(['F', 'M', 'RX', 'R', 'GR', 'GA', 'RD', 'RA', 'REA', 'RC']);
+
+// The lines icacls prints for a folder, read into entries. The first
+// line starts with the folder itself, the rest are indented under it,
+// and the summary lines below the entries are not entries. A deny line
+// grants nothing, whatever else it says.
+export function parseAclListing(options: { path: string; text: string }): AclEntry[] {
+  const entries: AclEntry[] = [];
+  for (const rawLine of options.text.split('\n')) {
+    let line = rawLine.replace(/\r$/, '');
+    if (line.startsWith(options.path)) {
+      line = line.slice(options.path.length);
+    }
+    line = line.trim();
+    const colon = line.lastIndexOf(':(');
+    if (colon <= 0) {
+      continue;
+    }
+    const principal = line.slice(0, colon).trim();
+    if (principal === '') {
+      continue;
+    }
+    const groups: string[] = [];
+    for (const match of line.slice(colon + 1).matchAll(/\(([^)]*)\)/g)) {
+      groups.push(match[1] ?? '');
+    }
+    const canRead =
+      !groups.includes('DENY') && groups.some(group => group.split(',').some(part => ACL_READ_TOKENS.has(part.trim())));
+    entries.push({ principal, canRead });
+  }
+  return entries;
+}
 
 // True when the user PATH value already names the folder, in any letter
 // case, with or without a trailing backslash.
@@ -84,6 +147,11 @@ export function userPathHasFolder(options: { pathValue: string; folder: string }
 export interface WindowsJobs {
   readonly programsExePath: string;
   readonly setupCmdCopyPath: string;
+  // The folder under the per-user application data folder where Aman
+  // keeps its own files on this PC: the Aman-Setup copy lives there.
+  readonly dataDir: string;
+  // The folder inside it where the backups land on this PC.
+  readonly backupsDir: string;
   // Copies the running executable into the Programs folder. 'already'
   // when the running executable is the copy there (adopt run twice).
   copySelfToPrograms: () => Promise<'copied' | 'already'>;
@@ -113,6 +181,18 @@ export interface WindowsJobs {
   // Aman. The rule itself is removed only on uninstall. A rule that is
   // not there at all is already closed, and is not a failure.
   closeFirewallToHome: () => Promise<void>;
+  // Makes the "Backups" Start menu entry, or points the existing one
+  // at the folder the backups land in, so choosing it opens that folder.
+  ensureBackupsShortcut: () => Promise<void>;
+  // Makes the daily backup task, or remakes it in the same shape:
+  // every day at 03:30, running aman backup as the person, only while
+  // they are signed in, with no password stored.
+  ensureDailyBackupTask: () => Promise<void>;
+  // True when the daily backup task is there.
+  dailyBackupTaskPresent: () => Promise<boolean>;
+  // The names in the backups folder, as they stand. A folder that is
+  // not there yet lists as empty.
+  listBackups: () => Promise<readonly string[]>;
   // Replaces the starter's copy of Aman-Setup.cmd with the forwarder.
   replaceSetupCmdCopyWithForwarder: () => Promise<void>;
   // Writes the local authority's certificate, public part only, into
@@ -123,6 +203,12 @@ export interface WindowsJobs {
   addCaCertificateToUserStore: () => Promise<void>;
   startDockerDesktop: () => Promise<void>;
   openBrowser: (url: string) => Promise<void>;
+  // Makes a folder private to the person: inherited access is removed
+  // and only their own account keeps full control, which the folders
+  // and files later made inside it inherit.
+  makeFolderPrivate: (path: string) => Promise<void>;
+  // Reads a folder's access list back, for the doctor to judge.
+  readFolderAcl: (path: string) => Promise<AclRead>;
   // True when the port can be bound on loopback and on any-address: the
   // bind is the real test, as the shell's port check does it.
   portIsFree: (port: number) => Promise<boolean>;
@@ -185,9 +271,27 @@ export function systemWindowsJobs(options: {
     return result.exitCode;
   };
 
+  // The person's own account name, the way the access list prints it,
+  // asked for once: the folder access jobs need it to grant access and
+  // to say whose access is expected.
+  let userName: Promise<string> | null = null;
+  const currentUserName = (): Promise<string> => {
+    userName ??= (async () => {
+      const result = await runner.run('whoami', []);
+      const name = result.stdout.trim();
+      if (!result.started || result.exitCode !== 0 || name === '') {
+        throw new WindowsJobError("this computer's account name could not be read");
+      }
+      return name;
+    })();
+    return userName;
+  };
+
   return {
     programsExePath: paths.programsExePath,
     setupCmdCopyPath: paths.setupCmdCopyPath,
+    dataDir: paths.dataDir,
+    backupsDir: paths.backupsDir,
 
     async copySelfToPrograms() {
       if (options.selfExePath.toLowerCase() === paths.programsExePath.toLowerCase()) {
@@ -319,6 +423,57 @@ export function systemWindowsJobs(options: {
       }
     },
 
+    async ensureBackupsShortcut() {
+      await runPowerShell(
+        `$shell = New-Object -ComObject WScript.Shell; ` +
+          `$path = Join-Path ([Environment]::GetFolderPath('Programs')) ${psQuote(`${BACKUPS_SHORTCUT_NAME}.lnk`)}; ` +
+          `$shortcut = $shell.CreateShortcut($path); ` +
+          `$shortcut.TargetPath = ${psQuote(paths.backupsDir)}; $shortcut.Save()`,
+      );
+    },
+
+    async ensureDailyBackupTask() {
+      // /F remakes a task that is already there, so making it again
+      // leaves the same task, as the other ensure steps leave the same
+      // entry. No user or password is named: the task runs as the
+      // person, and /IT runs it only while they are signed in.
+      const result = await runner.run('schtasks', [
+        '/Create',
+        '/TN',
+        BACKUP_TASK_NAME,
+        '/TR',
+        `"${paths.programsExePath}" backup`,
+        '/SC',
+        'DAILY',
+        '/ST',
+        BACKUP_TASK_TIME,
+        '/RL',
+        'LIMITED',
+        '/IT',
+        '/F',
+      ]);
+      if (!result.started || result.exitCode !== 0) {
+        throw new WindowsJobError('the daily backup task could not be made');
+      }
+    },
+
+    async dailyBackupTaskPresent() {
+      const result = await runner.run('schtasks', ['/Query', '/TN', BACKUP_TASK_NAME]);
+      return result.started && result.exitCode === 0;
+    },
+
+    async listBackups() {
+      const stdout = await runPowerShell(
+        `[Console]::OutputEncoding = [Text.Encoding]::UTF8; ` +
+          `if (Test-Path -LiteralPath ${psQuote(paths.backupsDir)}) { ` +
+          `Get-ChildItem -LiteralPath ${psQuote(paths.backupsDir)} -Directory | ForEach-Object { $_.Name } }`,
+      );
+      return stdout
+        .split('\n')
+        .map(line => line.replace(/\r$/, '').trim())
+        .filter(line => line !== '');
+    },
+
     async replaceSetupCmdCopyWithForwarder() {
       try {
         await writeFile(paths.setupCmdCopyPath, SETUP_CMD_FORWARDER, 'utf8');
@@ -348,6 +503,27 @@ export function systemWindowsJobs(options: {
 
     async openBrowser(url: string) {
       await runPowerShell(`Start-Process ${psQuote(url)}`);
+    },
+
+    async makeFolderPrivate(path: string) {
+      const user = await currentUserName();
+      const result = await runner.run('icacls', [path, '/inheritance:r', '/grant:r', `${user}:(OI)(CI)F`]);
+      if (!result.started || result.exitCode !== 0) {
+        throw new WindowsJobError(`the folder could not be made private: ${path}`);
+      }
+    },
+
+    async readFolderAcl(path: string) {
+      const owner = await currentUserName();
+      const result = await runner.run('icacls', [path]);
+      if (!result.started) {
+        return { status: 'unreadable' };
+      }
+      if (result.exitCode !== 0) {
+        const said = `${result.stdout}\n${result.stderr}`.toLowerCase();
+        return said.includes('cannot find') ? { status: 'missing' } : { status: 'unreadable' };
+      }
+      return { status: 'read', owner, entries: parseAclListing({ path, text: result.stdout }) };
     },
 
     async portIsFree(port: number) {

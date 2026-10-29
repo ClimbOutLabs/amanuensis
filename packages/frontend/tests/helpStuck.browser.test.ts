@@ -10,7 +10,9 @@ import { chromium, type Browser, type Page } from 'playwright-core';
 import { createServer, defaultClientConditions } from 'vite';
 
 import { HELP_COMPOSER_PLACEHOLDER } from '../../trueforge-ui/src/help/helpModel.ts';
+import { DEV_OPTIMIZE_DEPS } from '../src/devPrebundle.ts';
 import { findChromiumExecutable } from './support/findChromiumExecutable.ts';
+import { privateViteCache } from './support/viteCache.ts';
 
 const RENDER_TIMEOUT_MS = 45_000;
 const HELP_BUTTON = /Help, I'm stuck/;
@@ -57,8 +59,11 @@ async function screenshotDir(): Promise<string> {
 
 test("Help, I'm stuck opens the help chat in every case, never a blank page", { timeout: 300_000 }, async () => {
   const frontendRoot = fileURLToPath(new URL('../', import.meta.url));
+  const viteCache = privateViteCache('help-stuck');
   const server = await createServer({
+    cacheDir: viteCache.cacheDir,
     configFile: false,
+    optimizeDeps: DEV_OPTIMIZE_DEPS,
     root: frontendRoot,
     logLevel: 'silent',
     // The published ui dist leaves core modules external, so resolve them from source like the app does.
@@ -138,5 +143,6 @@ test("Help, I'm stuck opens the help chat in every case, never a blank page", { 
   } finally {
     await browser?.close();
     await server.close();
+    viteCache.remove();
   }
 });

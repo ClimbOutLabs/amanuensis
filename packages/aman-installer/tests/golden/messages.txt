@@ -9,6 +9,8 @@ Run aman open to open Aman in your browser.
 Run aman network open to open Aman to phones and other devices on your home network.
 Run aman network close to close Aman to your home network again.
 Run aman upgrade to update Aman on Windows to the newest version.
+Run aman backup to make a backup of Aman now, in the Backups folder on this computer.
+Run aman backups to list the backups kept on this computer.
 Run aman verify and name a downloaded file to check it against its signed release record.
 Docker is not installed on this computer. Install Docker Desktop from its website, then run this check again.
 Docker Desktop is not running. Open Docker Desktop from the Start menu, then run this check again.
@@ -55,6 +57,7 @@ Aman is not installed on this computer yet. Install Aman with the Aman Setup dow
 Docker is not answering, so the record of what is installed could not be read. Open Docker Desktop from the Start menu, then run aman adopt again.
 Docker could not download the small helper it needs to read the record of what is installed. Check your internet connection, then run aman adopt again.
 The record of what is installed could not be read. Run aman doctor to find what is wrong, then run aman adopt again.
+Another install is running right now. Wait for it to finish, or wait 2 minutes if you stopped an install a moment ago, then run aman adopt again.
 Aman could not finish moving this install onto the aman command. Run aman adopt again, and if it fails again, run aman doctor.
 This computer was not set up with the Aman Setup download, so aman open has nothing to open. Run aman status to see what is installed on this computer.
 Aman is not installed on this computer yet. Install Aman with the Aman Setup download first, then run aman open again.
@@ -114,3 +117,21 @@ Windows did not change the firewall rule, so devices on your home network can st
 Aman is open to the devices on your home network.
 Aman is closed to your home network, and only this computer can open it now.
 On your phone, open http://192.168.1.20:8791.
+This computer was not set up with the Aman Setup download, so aman backup has nothing to back up. Run aman status to see what is installed on this computer.
+Aman is not installed on this computer yet. Install Aman with the Aman Setup download first, then run aman backup again.
+Docker is not answering, so the backup cannot be made. Open Docker Desktop from the Start menu, then run aman backup again.
+Docker could not download the small helper it needs to make the backup. Check your internet connection, then run aman backup again.
+The record of what is installed could not be read. Run aman doctor to find what is wrong, then run aman backup again.
+Another install is running right now. Wait for it to finish, or wait 2 minutes if you stopped an install a moment ago, then run aman backup again.
+The backup did not finish, so nothing new was saved. Run aman doctor to find what is wrong, then run aman backup again.
+Open the Backups entry in the Start menu to see the backup.
+This computer was not set up with the Aman Setup download, so it keeps no backups to list. Run aman status to see what is installed on this computer.
+The backups kept on this computer could not be listed. Run aman doctor to find what is wrong, then run aman backups again.
+No backups have been made on this computer yet.
+Backups are kept in the folder C:\Users\Friend\AppData\Local\Amanuensis\backups.
+20261009T120000Z
+The files Aman keeps on this computer are private to you.
+The files Aman keeps on this computer are now private to you.
+Files Aman keeps on this computer can be read by other accounts on this computer. Run Check Aman again with Fix; it makes these files private to you.
+Aman could not make these files private to you. Run Check Aman again with Fix.
+Whether the files Aman keeps on this computer are private could not be checked. Run aman doctor again.

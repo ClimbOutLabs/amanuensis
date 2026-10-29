@@ -141,6 +141,17 @@ export function rootIdentityNames(profile: PersonalizationProfile | undefined): 
   };
 }
 
+/**
+ * Every line of what the person's profile already says (their own text, pinned preferences, and
+ * the learned document), so a turn summary that only repeats the profile can be told apart from a new fact.
+ */
+export function personalizationFactLines(profile: PersonalizationProfile): string[] {
+  return [profile.user_profile ?? '', ...profile.pinned_preferences, profile.learned_profile ?? '']
+    .flatMap(text => text.split('\n'))
+    .map(line => line.trim())
+    .filter(line => line !== '');
+}
+
 function joinPreferences(preferences: readonly string[]): string {
   return preferences.map(preference => `- ${preference}`).join('\n');
 }

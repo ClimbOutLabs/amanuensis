@@ -132,14 +132,16 @@ export interface ResolveTurnSummarizeContextParams {
    * agent-store read is skipped and the turn retains verbatim.
    */
   memoryClientPresent: boolean;
-  /** The small model for helper jobs; see `routeHelperModel`. */
-  helperFqn?: string | undefined;
   /**
    * The person's name from their personalization profile, as loaded by the caller for this
    * turn, so saved facts can be written in it. Optional: a caller without a profile resolves a
    * context with no name, and the summarizer writes about "the person".
    */
   personName?: string | undefined;
+  /** Lines of the person's profile, so a summary that only repeats the profile is not saved. */
+  profileLines?: readonly string[] | undefined;
+  /** The name of the persona or assistant that replies this turn, so notes about its replies can name it. */
+  assistantName?: string | undefined;
 }
 
 /**
@@ -168,7 +170,6 @@ export async function resolveTurnSummarizeContext(
     personaModelName,
     sessionAgent,
     memoryClientPresent,
-    helperFqn,
   } = params;
   const enabled = await resolveMemorySummarizeEnabled({ globalSettingsStore, logger });
   if (!isMemorySummarizeEffective(enabled)) {
@@ -198,13 +199,15 @@ export async function resolveTurnSummarizeContext(
   // summarizer falls back to writing about "the person" for this turn.
   const trimmedPersonName = params.personName?.trim();
   const personName = trimmedPersonName === undefined || trimmedPersonName === '' ? undefined : trimmedPersonName;
+  const trimmedAssistantName = params.assistantName?.trim();
+  const assistantName =
+    trimmedAssistantName === undefined || trimmedAssistantName === '' ? undefined : trimmedAssistantName;
   try {
     const summarizationModelFqn = await resolveSummarizationModelFqn({
       tenantId,
       personaModelName,
       sessionAgent,
       agentStore,
-      helperFqn,
     });
     if (summarizationModelFqn === undefined || summarizationModelFqn.trim() === '') {
       logger.debug(
@@ -218,10 +221,21 @@ export async function resolveTurnSummarizeContext(
         tokenFactoryBudget,
         modelUsage,
         personName,
+        profileLines: params.profileLines,
+        assistantName,
       };
     }
     logger.debug('Turn summarization is active for this turn', { sessionId, summarizationModelFqn });
-    return { tenantId, modelProviderStore, summarizationModelFqn, tokenFactoryBudget, modelUsage, personName };
+    return {
+      tenantId,
+      modelProviderStore,
+      summarizationModelFqn,
+      tokenFactoryBudget,
+      modelUsage,
+      personName,
+      profileLines: params.profileLines,
+      assistantName,
+    };
   } catch (error) {
     logger.debug('Memory summarization has no model for this turn: the model FQN did not resolve', {
       sessionId,
@@ -234,6 +248,8 @@ export async function resolveTurnSummarizeContext(
       tokenFactoryBudget,
       modelUsage,
       personName,
+      profileLines: params.profileLines,
+      assistantName,
     };
   }
 }

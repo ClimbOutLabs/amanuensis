@@ -1191,6 +1191,7 @@ test('a state store that cannot answer prints the one problem and stops', async 
     setInstanceValue: async () => false,
     removeInstance: async () => undefined,
     writeRelease: async () => false,
+    setBackupsMode: async () => false,
   };
   const world = await makeWorld({ store });
   const exitCode = await runDoctor(world.deps, { json: false });

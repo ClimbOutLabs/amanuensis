@@ -9,6 +9,7 @@ import { startApprovalTestServer } from '../../trueforge/tests/fixtures/approval
 import { FINAL_TEXT } from '../../trueforge/tests/fixtures/scriptedModelServer.ts';
 import { inProcessApi } from './support/approvalChat.ts';
 import { findChromiumExecutable } from './support/findChromiumExecutable.ts';
+import { privateViteCache } from './support/viteCache.ts';
 
 const RENDER_TIMEOUT_MS = 45_000;
 
@@ -48,7 +49,9 @@ test(
   { timeout: 300_000 },
   async () => {
     const api = await startApprovalTestServer();
+    const viteCache = privateViteCache('chat-layout');
     const vite = await createServer({
+      cacheDir: viteCache.cacheDir,
       root: fileURLToPath(new URL('../', import.meta.url)),
       logLevel: 'error',
       plugins: [inProcessApi(api)],
@@ -130,6 +133,7 @@ test(
     } finally {
       await browser?.close();
       await vite.close();
+      viteCache.remove();
       await api.close();
     }
   },

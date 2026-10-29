@@ -12,10 +12,14 @@ What it can do today:
   store, the images, free disk, memory, the clock, backups, the sandbox
   slots, the folder Aman was installed from, and https) and then each
   instance, by running the instance's own doctor inside its app container.
-  `aman doctor --json` prints the same checks as data. With
-  `aman doctor --local` the instances' own checks skip the ones that reach
-  the network, as the health gate before an upgrade needs. It changes
-  nothing.
+  On Windows it also checks that the folders Aman keeps on the PC itself
+  can be read by the person's own account only. `aman doctor --json`
+  prints the same checks as data. With `aman doctor --local` the
+  instances' own checks skip the ones that reach the network, as the
+  health gate before an upgrade needs. `aman doctor --fix` makes the
+  Windows folders private when they are not; that is the one fix the
+  doctor applies itself, and it belongs to that check only. Apart from
+  it, the doctor changes nothing.
 - `aman doctor docker` checks that Docker is installed, running, has its
   Compose tool, has at least 6 GB of memory to work with, and that its
   Engine is new enough for Aman's https on this computer, and reports its
@@ -42,6 +46,18 @@ What it can do today:
   until the next start, and runs the shell's own upgrade in the setup
   container. The Start menu's Update Aman entry runs it, and so does
   running Aman-Setup.exe again on an installed PC.
+- `aman backup`, on Windows, makes a backup now: it runs the shell's
+  own backup in the setup container with the backups folder on the PC
+  itself mounted where the shell writes, so the backup lands on the
+  Windows disk, under the folder access the doctor's files check
+  guards, and the shell's keep-the-last-seven rule prunes that folder.
+  A daily Task Scheduler task, made by `aman adopt`, runs this command
+  at 03:30 while the person is signed in; adopt also records the daily
+  choice in the state record and adds a Backups entry to the Start
+  menu. On Windows the doctor's backup check looks for that task and
+  reads the ages of the backups from the folder they land in.
+- `aman backups`, on Windows, lists the backups kept on the PC,
+  newest first. The Start menu's Backups entry opens the folder.
 
 Every sentence a person can read lives in `src/messages.ts`. A test checks
 each one for plain words and compares them all to the golden file in

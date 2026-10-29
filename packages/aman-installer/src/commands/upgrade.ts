@@ -36,7 +36,7 @@ import { fetchLatestManifest, fetchReleaseFile, sourceArchiveName, windowsAssetN
 import { sha256Hex, type ReleaseManifest } from '../release/manifest.ts';
 import type { ProcessRunner } from '../runner/processRunner.ts';
 import type { StateStore, StateSummary } from '../state/state.ts';
-import { SETUP_IMAGE, STATE_VOLUME, VOLUME_HOME } from '../state/volumeBackend.ts';
+import { SETUP_IMAGE, SOURCE_DIR, SOURCE_VOLUME, STATE_VOLUME, VOLUME_HOME } from '../state/volumeBackend.ts';
 
 export interface UpgradeDeps extends DoctorDeps {
   host: Host;
@@ -59,11 +59,6 @@ export interface UpgradeDeps extends DoctorDeps {
   // against the release key compiled into the executable.
   releasePublicKey?: string;
 }
-
-// The volume the release source is unpacked into, and where it is
-// mounted in the setup container: the names the starter set.
-const SOURCE_VOLUME = 'aman_source';
-const SOURCE_DIR = '/src';
 
 // The unpack: clear the source volume, pour the archive in from stdin,
 // drop its one top folder, and prove the installer is there before the

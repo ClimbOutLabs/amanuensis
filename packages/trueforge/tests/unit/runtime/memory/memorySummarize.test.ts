@@ -7,6 +7,7 @@ import { createSqliteDb } from '../../../../src/db/sqlite/client';
 import { SqliteModelProviderStore } from '../../../../src/db/sqlite/model-provider-store/SqliteModelProviderStore';
 import { SqliteTokenFactoryUsageStore } from '../../../../src/db/sqlite/token-factory-usage-store/SqliteTokenFactoryUsageStore';
 import {
+  assistantQuestionFor,
   buildSummarizationMessages,
   lightReasoningRequestFields,
   parseSummaryReply,
@@ -70,22 +71,24 @@ function fakeModelProviderStore(): IModelProviderStore {
 }
 
 describe('buildSummarizationMessages', () => {
-  it('includes the full exchange for the model to summarize', () => {
+  it("includes only the person's words, plus the assistant's question as context", () => {
     const messages = buildSummarizationMessages({
-      userText: 'My robot is named Bleep-Bloop.',
-      assistantText: 'Got it, Bleep-Bloop.',
+      userText: 'Bleep-Bloop.',
+      assistantQuestion: 'What is your robot called?',
       turnDate: TURN_DATE,
     });
     expect(messages).toHaveLength(2);
     expect(messages[0]?.role).toBe('system');
     expect(messages[1]?.role).toBe('user');
-    expect(messages[1]?.content).toContain('User: My robot is named Bleep-Bloop.');
-    expect(messages[1]?.content).toContain('Assistant: Got it, Bleep-Bloop.');
+    expect(messages[1]?.content).toContain('User: Bleep-Bloop.');
+    expect(messages[1]?.content).toContain(
+      "Context only, never a source of facts. The assistant's last question: What is your robot called?",
+    );
+    expect(messages[1]?.content).not.toContain('Assistant:');
   });
 
   it('tells the model that nothing is a valid answer, with an example of an empty result', () => {
-    const system = buildSummarizationMessages({ userText: 'hi', assistantText: 'hello', turnDate: TURN_DATE })[0]
-      ?.content;
+    const system = buildSummarizationMessages({ userText: 'hi', turnDate: TURN_DATE })[0]?.content;
     expect(system).toContain('{"facts": []}');
     expect(system).toContain('Most turns hold nothing worth keeping');
   });
@@ -93,7 +96,6 @@ describe('buildSummarizationMessages', () => {
   it("gives the model the person's name and asks for facts written in it, when a name is supplied", () => {
     const system = buildSummarizationMessages({
       userText: 'hi',
-      assistantText: 'hello',
       turnDate: TURN_DATE,
       personName: 'Priya',
     })[0]?.content;
@@ -106,7 +108,6 @@ describe('buildSummarizationMessages', () => {
   it('writes the worked examples in the name style when a name is supplied', () => {
     const system = buildSummarizationMessages({
       userText: 'hi',
-      assistantText: 'hello',
       turnDate: TURN_DATE,
       personName: 'Priya',
     })[0]?.content;
@@ -117,8 +118,7 @@ describe('buildSummarizationMessages', () => {
   });
 
   it('falls back to writing about "the person" when no name is supplied', () => {
-    const system = buildSummarizationMessages({ userText: 'hi', assistantText: 'hello', turnDate: TURN_DATE })[0]
-      ?.content;
+    const system = buildSummarizationMessages({ userText: 'hi', turnDate: TURN_DATE })[0]?.content;
     expect(system).toContain('Write each fact as one complete sentence in the third person, about "the person".');
     expect(system).toContain('"The person\'s friend <name> has their book."');
     expect(system).not.toContain("The person's name is");
@@ -128,7 +128,6 @@ describe('buildSummarizationMessages', () => {
     for (const personName of ['   ', 'Two\nLines', 'N'.repeat(201)]) {
       const system = buildSummarizationMessages({
         userText: 'hi',
-        assistantText: 'hello',
         turnDate: TURN_DATE,
         personName,
       })[0]?.content;
@@ -138,8 +137,7 @@ describe('buildSummarizationMessages', () => {
   });
 
   it('names what to keep and what never to keep', () => {
-    const system = buildSummarizationMessages({ userText: 'hi', assistantText: 'hello', turnDate: TURN_DATE })[0]
-      ?.content;
+    const system = buildSummarizationMessages({ userText: 'hi', turnDate: TURN_DATE })[0]?.content;
     expect(system).toContain('anything they ask you to remember');
     expect(system).toContain('anything the assistant said, asked, offered, or wrote');
     expect(system).toContain('open questions');
@@ -148,16 +146,14 @@ describe('buildSummarizationMessages', () => {
   });
 
   it('tells the model to keep facts from anywhere in the text, and that one request to remember never crowds out the rest', () => {
-    const system = buildSummarizationMessages({ userText: 'hi', assistantText: 'hello', turnDate: TURN_DATE })[0]
-      ?.content;
+    const system = buildSummarizationMessages({ userText: 'hi', turnDate: TURN_DATE })[0]?.content;
     expect(system).toContain('from the first line to the last');
     expect(system).toContain('A fact at the start of a long message counts as much as one at the end');
     expect(system).toContain('A request to remember never crowds out the rest');
   });
 
   it('tells the model to skip diary-style narration, so only durable facts about the person and their people count', () => {
-    const system = buildSummarizationMessages({ userText: 'hi', assistantText: 'hello', turnDate: TURN_DATE })[0]
-      ?.content;
+    const system = buildSummarizationMessages({ userText: 'hi', turnDate: TURN_DATE })[0]?.content;
     expect(system).toContain('passing events, descriptions, and things the person only saw or did once');
     expect(system).toContain('(diary-style narration)');
     expect(system).toContain('Only durable facts about the person and their people count');
@@ -166,7 +162,6 @@ describe('buildSummarizationMessages', () => {
   it('gives the date of the chat in the time zone of the person', () => {
     const user = buildSummarizationMessages({
       userText: 'hi',
-      assistantText: 'hello',
       turnDate: '2026-10-26T23:30:00.000Z',
       timeZone: 'Asia/Tokyo',
     })[1]?.content;
@@ -176,7 +171,6 @@ describe('buildSummarizationMessages', () => {
   it('falls back to UTC for a time zone it does not know', () => {
     const user = buildSummarizationMessages({
       userText: 'hi',
-      assistantText: 'hello',
       turnDate: TURN_DATE,
       timeZone: 'Not/AZone',
     })[1]?.content;
@@ -184,15 +178,13 @@ describe('buildSummarizationMessages', () => {
   });
 
   it('asks for the empty list exactly, and never for a sentence saying there is nothing', () => {
-    const system = buildSummarizationMessages({ userText: 'hi', assistantText: 'hello', turnDate: TURN_DATE })[0]
-      ?.content;
+    const system = buildSummarizationMessages({ userText: 'hi', turnDate: TURN_DATE })[0]?.content;
     expect(system).toContain('Always reply with one JSON object and nothing else');
     expect(system).toContain('Never write a sentence that says there is nothing to keep');
   });
 
   it('gives the date of the chat so relative dates can be written out', () => {
-    const user = buildSummarizationMessages({ userText: 'hi', assistantText: 'hello', turnDate: TURN_DATE })[1]
-      ?.content;
+    const user = buildSummarizationMessages({ userText: 'hi', turnDate: TURN_DATE })[1]?.content;
     expect(user).toContain('Date of the chat: 2026-10-26 (Monday)');
   });
 });
@@ -763,10 +755,10 @@ describe('summarizeTurnContent', () => {
   it('retries once with more room when thinking used up the cap and left no answer', async () => {
     const { llm, caps } = fakeReasoningSummarizer({
       thinkingTokens: 2000,
-      answer: '{"facts": ["The person has a dog named Rex."]}',
+      answer: '{"facts": ["The synthetic test robot is named Bleep-Bloop."]}',
     });
     const result = await summarizeTurnContent({ ...base, resolveLlm: async () => llm });
-    expect(result).toEqual({ status: 'summarized', facts: ['The person has a dog named Rex.'] });
+    expect(result).toEqual({ status: 'summarized', facts: ['The synthetic test robot is named Bleep-Bloop.'] });
     expect(caps).toEqual([800, 4000]);
   });
 
@@ -797,7 +789,7 @@ describe('summarizeTurnContent', () => {
   it('keeps the cut-off retry on the same client, without resolving a new one', async () => {
     const { llm, caps } = fakeReasoningSummarizer({
       thinkingTokens: 2000,
-      answer: '{"facts": ["The person has a dog named Rex."]}',
+      answer: '{"facts": ["The synthetic test robot is named Bleep-Bloop."]}',
     });
     let resolutions = 0;
     const result = await summarizeTurnContent({
@@ -807,7 +799,7 @@ describe('summarizeTurnContent', () => {
         return llm;
       },
     });
-    expect(result).toEqual({ status: 'summarized', facts: ['The person has a dog named Rex.'] });
+    expect(result).toEqual({ status: 'summarized', facts: ['The synthetic test robot is named Bleep-Bloop.'] });
     expect(caps).toEqual([800, 4000]);
     expect(resolutions).toBe(1);
   });
@@ -881,8 +873,8 @@ describe('summarizeTurnContent on Token Factory', () => {
           apiKey: 'sk-nebius',
           baseUrl: stub.baseUrl,
           model: 'nvidia/nemotron-3-super-120b-a12b',
-          cheaperModel: undefined,
         },
+        catalogModels: [],
         logger: makeLogger(),
       });
     } else {
@@ -1062,5 +1054,140 @@ describe('summarizeTurnContent reasoning fields on the real call', () => {
 
     expect((await run()).status).toBe('failed');
     expect(requests).toHaveLength(1);
+  });
+});
+
+describe('what the summary keeps', () => {
+  const base = {
+    turnDate: TURN_DATE,
+    tenantId: 'tenant-1',
+    modelProviderStore: fakeModelProviderStore(),
+    summarizationModelFqn: 'openai/gpt-4o',
+    tokenFactoryBudget: uncappedTokenFactoryBudget,
+    modelUsage: discardedModelUsage,
+    logger: makeLogger(),
+    personName: 'Maya',
+  };
+
+  function recordingSummarizer(reply: string): { llm: ILLM; prompts: string[] } {
+    const prompts: string[] = [];
+    const llm: ILLM = {
+      create(): ReturnType<ILLM['create']> {
+        throw new Error('streaming is not used by memory summarization');
+      },
+      createNonStream: async params => {
+        prompts.push(JSON.stringify(params.messages));
+        return {
+          output: { role: 'assistant', content: reply },
+          usage: { input_tokens: 0, output_tokens: 0, total_tokens: 0 },
+          finish_reason: 'stop',
+        };
+      },
+    };
+    return { llm, prompts };
+  }
+
+  it('drops facts that only come from what the assistant narrated', async () => {
+    const { llm, prompts } = recordingSummarizer(
+      '{"facts": ["Maya wants to insert ranks 18-20 after rank 17.", "Maya needs to perform the inserts in separate chunks due to character limit."]}',
+    );
+
+    const result = await summarizeTurnContent({
+      ...base,
+      userText: 'Please make the dog table with the breeds I like.',
+      assistantText: "I'll insert ranks 18-20 after rank 17, then add ranks 31-40 to the table.",
+      resolveLlm: async () => llm,
+    });
+
+    expect(result).toEqual({ status: 'nothing_to_keep' });
+    expect(prompts.join('')).not.toContain('insert ranks');
+  });
+
+  it('keeps a fact the person stated, with its details', async () => {
+    const { llm } = recordingSummarizer('{"facts": ["Maya\'s mechanic is Sidd, reachable at sidd@example.com."]}');
+
+    const result = await summarizeTurnContent({
+      ...base,
+      userText: 'my mechanic is Sidd, sidd@example.com',
+      assistantText: 'Thanks for the tip.',
+      resolveLlm: async () => llm,
+    });
+
+    expect(result).toEqual({
+      status: 'summarized',
+      facts: ["Maya's mechanic is Sidd, reachable at sidd@example.com."],
+    });
+  });
+
+  it('keeps an explicit remember request', async () => {
+    const { llm } = recordingSummarizer('{"facts": ["Maya\'s locker code is 4821."]}');
+
+    const result = await summarizeTurnContent({
+      ...base,
+      userText: 'Remember that my locker code is 4821',
+      assistantText: '',
+      resolveLlm: async () => llm,
+    });
+
+    expect(result).toEqual({ status: 'summarized', facts: ["Maya's locker code is 4821."] });
+  });
+
+  it('does not let the name alone, or a generic task verb, keep a fact', async () => {
+    const { llm } = recordingSummarizer('{"facts": ["Maya wants to continue the cleanup."]}');
+
+    const result = await summarizeTurnContent({
+      ...base,
+      userText: 'continue',
+      assistantText: 'Shall I continue?',
+      resolveLlm: async () => llm,
+    });
+
+    expect(result).toEqual({ status: 'nothing_to_keep' });
+  });
+
+  it.each([
+    [
+      'one-word answer to the assistant question',
+      'Lily',
+      'What is your daughter called?',
+      "Maya's daughter is named Lily.",
+    ],
+    ['a short name', 'call me Mo', '', 'Maya goes by Mo.'],
+    ['a condition said another way', "I'm diabetic", '', 'Maya has diabetes.'],
+    ['accented words', 'Mon café préféré est le Café Müller', '', "Maya's favourite cafe is Cafe Muller."],
+    ['a Chinese message', '我的女儿叫小明', '', '玛雅的女儿叫小明。'],
+    ['a Japanese message with a Japanese fact', '私の娘はリリーです', '', '玛雅の娘はリリーです。'],
+    ['a fact in another script that shares a name', '私の娘はLilyです', '', "Maya's daughter is Lily."],
+  ])('keeps a real fact: %s', async (_label, userText, question, fact) => {
+    const { llm } = recordingSummarizer(JSON.stringify({ facts: [fact] }));
+
+    const result = await summarizeTurnContent({
+      ...base,
+      userText,
+      assistantText: question,
+      resolveLlm: async () => llm,
+    });
+
+    expect(result).toEqual({ status: 'summarized', facts: [fact] });
+  });
+});
+
+describe('assistantQuestionFor', () => {
+  it("gives the assistant's last question for a short reply, cut to 300 characters", () => {
+    const long = `${'word '.repeat(100)}Which list should I use?`;
+    expect(assistantQuestionFor({ userText: 'the first one', assistantText: `Done. ${long}` })).toHaveLength(300);
+    expect(assistantQuestionFor({ userText: 'yes', assistantText: 'Done. Which list should I use?' })).toBe(
+      'Which list should I use?',
+    );
+  });
+
+  it('gives nothing for a longer message or when the assistant asked nothing', () => {
+    expect(
+      assistantQuestionFor({
+        userText: 'one two three four five six seven eight nine ten eleven twelve',
+        assistantText: 'Which one?',
+      }),
+    ).toBeUndefined();
+    expect(assistantQuestionFor({ userText: 'yes', assistantText: 'Done.' })).toBeUndefined();
   });
 });

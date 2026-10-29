@@ -2,6 +2,8 @@ import type { NetworkInterfaceInfo } from 'node:os';
 
 import { runAdopt } from './commands/adopt.ts';
 import { runNetwork } from './commands/network.ts';
+import { runBackup } from './commands/backup.ts';
+import { runBackups } from './commands/backups.ts';
 import { runOpen } from './commands/open.ts';
 import { runStatus } from './commands/status.ts';
 import { runUpgrade } from './commands/upgrade.ts';
@@ -66,8 +68,12 @@ export async function runCli(args: readonly string[], deps: CliDeps): Promise<nu
     if (rest.length === 1 && rest[0] === 'docker') {
       return checkDocker(deps);
     }
-    if (rest.every(arg => arg === '--json' || arg === '--local')) {
-      return runDoctor(deps, { json: rest.includes('--json'), local: rest.includes('--local') });
+    if (rest.every(arg => arg === '--json' || arg === '--local' || arg === '--fix')) {
+      return runDoctor(deps, {
+        json: rest.includes('--json'),
+        local: rest.includes('--local'),
+        fix: rest.includes('--fix'),
+      });
     }
     deps.print(problemText(UNKNOWN_DOCTOR_CHECK));
     return 1;
@@ -106,6 +112,18 @@ export async function runCli(args: readonly string[], deps: CliDeps): Promise<nu
       arch: deps.arch ?? 'x64',
       ...(deps.releasePublicKey === undefined ? {} : { releasePublicKey: deps.releasePublicKey }),
     });
+  }
+  if (first === 'backup') {
+    return runBackup({
+      host: deps.host,
+      runner: deps.runner,
+      store: deps.store,
+      jobs: deps.windowsJobs,
+      print: deps.print,
+    });
+  }
+  if (first === 'backups') {
+    return runBackups({ host: deps.host, jobs: deps.windowsJobs, print: deps.print });
   }
   if (first === 'verify') {
     return runVerify(deps, { file: second });

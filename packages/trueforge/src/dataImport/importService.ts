@@ -52,7 +52,9 @@ import {
   CURATED_MEMORY_FILE,
   dailyLogEntries,
   dailyLogFileAt,
+  DOCUMENT_ID_METADATA_KEY,
   entryMetadata,
+  hiddenContext,
   latestTombstonesByEntry,
   parseVaultTombstones,
   personaVaultNamespace,
@@ -61,8 +63,15 @@ import {
   VAULT_TOMBSTONES_FILE,
   vaultEntryTimestamp,
   vaultFilesystemNamespace,
-  withoutSessionMarker,
+  withoutHiddenMarkers,
 } from '../runtime/memory/markdownMemoryFiles';
+import {
+  isMemoryNoteSource,
+  NOTE_DATE_METADATA_KEY,
+  NOTE_SOURCE_METADATA_KEY,
+  noteRetainContent,
+} from '../runtime/memory/memoryNotes';
+import { MEMORY_RECALL_ENABLED_SETTING_KEY } from '../runtime/memoryRecallSettings';
 import { MEMORY_SCREEN_ENABLED_SETTING_KEY } from '../runtime/memoryScreenSettings';
 import { MEMORY_SUMMARIZE_SETTING_KEY } from '../runtime/memorySummarizeSettings';
 import { DEFAULT_CHAT_MODEL_SETTING_KEY } from '../runtime/tokenFactoryProvider';
@@ -220,6 +229,7 @@ function leftOutName(name: string): string {
 /** Instance-wide settings an import may fill in; the permission settings in the archive are never applied. */
 const IMPORTABLE_GLOBAL_SETTING_KEYS: ReadonlySet<string> = new Set<string>([
   DEFAULT_CHAT_MODEL_SETTING_KEY,
+  MEMORY_RECALL_ENABLED_SETTING_KEY,
   MEMORY_SCREEN_ENABLED_SETTING_KEY,
   MEMORY_SUMMARIZE_SETTING_KEY,
   TOOL_OUTPUT_SCREEN_ENABLED_SETTING_KEY,
@@ -941,23 +951,42 @@ function buildRetainItems(
         const newline = body.indexOf('\n');
         body = newline < 0 ? '' : body.slice(newline + 1).replace(/^\n+/, '');
       }
-      const sessionId = entryMetadata(body)?.[SESSION_ID_METADATA_KEY];
-      body = withoutSessionMarker(body);
+      const trailers = entryMetadata(body);
+      const sessionId = trailers?.[SESSION_ID_METADATA_KEY];
+      const noteSource = trailers?.[NOTE_SOURCE_METADATA_KEY];
+      const noteDate = trailers?.[NOTE_DATE_METADATA_KEY];
+      // The page text drops an id-shaped context line, so it is read before the body is cleaned.
+      entryContext = hiddenContext(body);
+      body = withoutHiddenMarkers(body);
       const contextMatch = /\n\n> ([^\n]*)$/.exec(body);
       if (contextMatch !== null) {
         const contextValue = contextMatch[1];
         if (contextValue !== undefined) {
-          entryContext = contextValue;
+          entryContext ??= contextValue;
           body = body.slice(0, contextMatch.index);
         }
       }
       const itemContext = vaultContext ?? entryContext;
       items.push({
-        content: body,
+        // A note's marker rides inside its text, so a backend that drops metadata still hands it back.
+        content:
+          noteSource !== undefined && isMemoryNoteSource(noteSource) && noteDate !== undefined
+            ? noteRetainContent({ text: body, source: noteSource, date: noteDate })
+            : body,
         timestamp: entry.timestamp,
-        document_id: documentIdFor(entry.id),
+        // A replaceable entry keeps its document id, so a later update replaces it instead of adding a copy.
+        document_id: trailers?.[DOCUMENT_ID_METADATA_KEY] ?? documentIdFor(entry.id),
         ...(itemContext === undefined ? {} : { context: itemContext }),
-        ...(sessionId === undefined ? {} : { metadata: { [SESSION_ID_METADATA_KEY]: sessionId } }),
+        ...(sessionId === undefined && noteSource === undefined
+          ? {}
+          : {
+              metadata: {
+                ...(sessionId === undefined ? {} : { [SESSION_ID_METADATA_KEY]: sessionId }),
+                ...(noteSource === undefined || noteDate === undefined
+                  ? {}
+                  : { [NOTE_SOURCE_METADATA_KEY]: noteSource, [NOTE_DATE_METADATA_KEY]: noteDate }),
+              },
+            }),
       });
     }
   }

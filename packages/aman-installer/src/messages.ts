@@ -29,6 +29,8 @@ export const HELP_LINES: readonly string[] = [
   'Run aman network open to open Aman to phones and other devices on your home network.',
   'Run aman network close to close Aman to your home network again.',
   'Run aman upgrade to update Aman on Windows to the newest version.',
+  'Run aman backup to make a backup of Aman now, in the Backups folder on this computer.',
+  'Run aman backups to list the backups kept on this computer.',
   'Run aman verify and name a downloaded file to check it against its signed release record.',
 ];
 
@@ -251,6 +253,13 @@ export const ADOPT_IMAGE_UNAVAILABLE: Problem = {
 export const ADOPT_STATE_UNREADABLE: Problem = {
   happened: 'The record of what is installed could not be read.',
   fix: 'Run aman doctor to find what is wrong, then run aman adopt again.',
+};
+
+// The same wait the state lock asks for, with this command's own next
+// step: the lock's dead limit, as in STATE_BUSY.
+export const ADOPT_BUSY: Problem = {
+  happened: 'Another install is running right now.',
+  fix: `Wait for it to finish, or wait ${String(LOCK_TIMING.deadSeconds / 60)} minutes if you stopped an install a moment ago, then run aman adopt again.`,
 };
 
 export const ADOPT_SETUP_FAILED: Problem = {
@@ -550,6 +559,86 @@ export function networkPhoneLine(address: string): string {
   return `On your phone, open ${printable(address)}.`;
 }
 
+export const BACKUP_NOT_WINDOWS: Problem = {
+  happened: 'This computer was not set up with the Aman Setup download, so aman backup has nothing to back up.',
+  fix: 'Run aman status to see what is installed on this computer.',
+};
+
+export const BACKUP_NOT_INSTALLED: Problem = {
+  happened: 'Aman is not installed on this computer yet.',
+  fix: 'Install Aman with the Aman Setup download first, then run aman backup again.',
+};
+
+export const BACKUP_DOCKER_NOT_ANSWERING: Problem = {
+  happened: 'Docker is not answering, so the backup cannot be made.',
+  fix: 'Open Docker Desktop from the Start menu, then run aman backup again.',
+};
+
+export const BACKUP_IMAGE_UNAVAILABLE: Problem = {
+  happened: 'Docker could not download the small helper it needs to make the backup.',
+  fix: 'Check your internet connection, then run aman backup again.',
+};
+
+export const BACKUP_STATE_UNREADABLE: Problem = {
+  happened: 'The record of what is installed could not be read.',
+  fix: 'Run aman doctor to find what is wrong, then run aman backup again.',
+};
+
+// The same wait the state lock asks for, with this command's own next
+// step: the lock's dead limit, as in STATE_BUSY.
+export const BACKUP_BUSY: Problem = {
+  happened: 'Another install is running right now.',
+  fix: `Wait for it to finish, or wait ${String(LOCK_TIMING.deadSeconds / 60)} minutes if you stopped an install a moment ago, then run aman backup again.`,
+};
+
+export const BACKUP_FAILED: Problem = {
+  happened: 'The backup did not finish, so nothing new was saved.',
+  fix: 'Run aman doctor to find what is wrong, then run aman backup again.',
+};
+
+export const BACKUP_SAVED_LINE = 'Open the Backups entry in the Start menu to see the backup.';
+
+export const BACKUPS_NOT_WINDOWS: Problem = {
+  happened: 'This computer was not set up with the Aman Setup download, so it keeps no backups to list.',
+  fix: 'Run aman status to see what is installed on this computer.',
+};
+
+export const BACKUPS_COULD_NOT_LIST: Problem = {
+  happened: 'The backups kept on this computer could not be listed.',
+  fix: 'Run aman doctor to find what is wrong, then run aman backups again.',
+};
+
+export const NO_BACKUPS_LINE = 'No backups have been made on this computer yet.';
+
+export function backupsFolderLine(folder: string): string {
+  return `Backups are kept in the folder ${printable(folder)}.`;
+}
+
+export function backupNameLine(name: string): string {
+  return printable(name);
+}
+
+// The doctor's files check on Windows: the folders Aman keeps on the
+// PC itself must be readable by the person's own account only.
+export const FILES_PRIVATE_LINE = 'The files Aman keeps on this computer are private to you.';
+
+export const FILES_MADE_PRIVATE_LINE = 'The files Aman keeps on this computer are now private to you.';
+
+export const FILES_NOT_PRIVATE: Problem = {
+  happened: 'Files Aman keeps on this computer can be read by other accounts on this computer.',
+  fix: 'Run Check Aman again with Fix; it makes these files private to you.',
+};
+
+export const FILES_COULD_NOT_FIX: Problem = {
+  happened: 'Aman could not make these files private to you.',
+  fix: 'Run Check Aman again with Fix.',
+};
+
+export const FILES_COULD_NOT_CHECK: Problem = {
+  happened: 'Whether the files Aman keeps on this computer are private could not be checked.',
+  fix: 'Run aman doctor again.',
+};
+
 // Every message, in a fixed order, for the golden file reviewers read.
 export function allMessageLines(): string[] {
   const lines: string[] = [versionLine('0.0.0'), ...HELP_LINES];
@@ -589,6 +678,7 @@ export function allMessageLines(): string[] {
   lines.push(problemText(ADOPT_DOCKER_NOT_ANSWERING));
   lines.push(problemText(ADOPT_IMAGE_UNAVAILABLE));
   lines.push(problemText(ADOPT_STATE_UNREADABLE));
+  lines.push(problemText(ADOPT_BUSY));
   lines.push(problemText(ADOPT_SETUP_FAILED));
   lines.push(problemText(OPEN_NOT_WINDOWS));
   lines.push(problemText(OPEN_NOT_INSTALLED));
@@ -648,5 +738,23 @@ export function allMessageLines(): string[] {
   lines.push(NETWORK_OPEN_LINE);
   lines.push(NETWORK_CLOSED_LINE);
   lines.push(networkPhoneLine('http://192.168.1.20:8791'));
+  lines.push(problemText(BACKUP_NOT_WINDOWS));
+  lines.push(problemText(BACKUP_NOT_INSTALLED));
+  lines.push(problemText(BACKUP_DOCKER_NOT_ANSWERING));
+  lines.push(problemText(BACKUP_IMAGE_UNAVAILABLE));
+  lines.push(problemText(BACKUP_STATE_UNREADABLE));
+  lines.push(problemText(BACKUP_BUSY));
+  lines.push(problemText(BACKUP_FAILED));
+  lines.push(BACKUP_SAVED_LINE);
+  lines.push(problemText(BACKUPS_NOT_WINDOWS));
+  lines.push(problemText(BACKUPS_COULD_NOT_LIST));
+  lines.push(NO_BACKUPS_LINE);
+  lines.push(backupsFolderLine('C:\\Users\\Friend\\AppData\\Local\\Amanuensis\\backups'));
+  lines.push(backupNameLine('20261009T120000Z'));
+  lines.push(FILES_PRIVATE_LINE);
+  lines.push(FILES_MADE_PRIVATE_LINE);
+  lines.push(problemText(FILES_NOT_PRIVATE));
+  lines.push(problemText(FILES_COULD_NOT_FIX));
+  lines.push(problemText(FILES_COULD_NOT_CHECK));
   return lines;
 }

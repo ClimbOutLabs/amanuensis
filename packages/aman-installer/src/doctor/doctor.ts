@@ -1,4 +1,5 @@
 import type { Host, SystemKind } from '../host/host.ts';
+import type { WindowsJobs } from '../host/windowsJobs.ts';
 import {
   DOCKER_NOT_ANSWERING,
   STATE_BUSY,
@@ -15,6 +16,7 @@ import {
   type StateStore,
   type StateSummary,
 } from '../state/state.ts';
+import { checkSecretFiles } from './filesCheck.ts';
 import { INSTANCE_FIX, PS_FORMAT, runMachineChecks } from './machineChecks.ts';
 
 export interface DoctorDeps {
@@ -42,6 +44,10 @@ export interface DoctorDeps {
   // The compose service name of the app in an instance (the shell
   // doctor's AMAN_DOCTOR_APP_SERVICE, else app).
   appService: string;
+  // The Windows host jobs: the files check and the backup check use
+  // them, and only on Windows. A deps without them (a test of the
+  // other checks) runs the doctor without those parts.
+  windowsJobs?: WindowsJobs;
 }
 
 // What the docker check learns, shared by the checks that follow it, as
@@ -286,11 +292,19 @@ export interface DoctorChecks {
 
 // The checks themselves, with no printing: the doctor renders them, and
 // the upgrade's health gate judges them. A state read failure is thrown,
-// for the caller to report with doctorStoreProblem.
-export async function runDoctorChecks(deps: DoctorDeps, options: { local: boolean }): Promise<DoctorChecks> {
+// for the caller to report with doctorStoreProblem. The files check is
+// asked for only by the doctor a person runs: the gate judges the same
+// records it judged before it existed.
+export async function runDoctorChecks(
+  deps: DoctorDeps,
+  options: { local: boolean; files?: boolean; fix?: boolean },
+): Promise<DoctorChecks> {
   const summary = await deps.store.readSummary();
   const list = new CheckList();
   const ctx = await runMachineChecks(deps, list, summary);
+  if (options.files === true) {
+    await checkSecretFiles(deps, list, { fix: options.fix ?? false });
+  }
   for (const instance of summary.instances) {
     await checkInstance(deps, list, ctx, instance.name, options.local);
   }
@@ -305,11 +319,14 @@ export async function runDoctorChecks(deps: DoctorDeps, options: { local: boolea
 // report. It changes nothing: unlike the shell doctor it does not save a
 // host report for the app, and it takes no lock, so the state it reads is
 // only read.
-export async function runDoctor(deps: DoctorDeps, options: { json: boolean; local?: boolean }): Promise<number> {
+export async function runDoctor(
+  deps: DoctorDeps,
+  options: { json: boolean; local?: boolean; fix?: boolean },
+): Promise<number> {
   const { print } = deps;
   let checks: DoctorChecks;
   try {
-    checks = await runDoctorChecks(deps, { local: options.local ?? false });
+    checks = await runDoctorChecks(deps, { local: options.local ?? false, files: true, fix: options.fix ?? false });
   } catch (error) {
     print(problemText(doctorStoreProblem(error, deps.host.kind)));
     return 1;

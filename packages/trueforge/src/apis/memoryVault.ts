@@ -29,9 +29,12 @@ import {
   readVaultSharing,
   sanitizeNamespace,
   vaultFilesystemNamespace,
+  withHiddenContext,
   writeVaultSharing,
   type VaultSharing,
 } from '../runtime/memory/markdownMemoryFiles';
+import type { MemoryVaultEntry as VaultEntry } from '../runtime/memory/memoryClient';
+import type { MemoryVaultEntry } from '../schemas/memoryVault';
 
 export interface MemoryVaultRouterDeps {
   resolveRequestContext: ResolveRequestContext;
@@ -43,6 +46,16 @@ const VAULT_TIMEOUT_MS = 10_000;
 
 const MAX_SHARING_PERSONAS = 100;
 const MAX_SHARING_NAMESPACES = 100;
+
+/** The wire shape of an entry: the internal id it was filed under stays on the server. */
+function wireEntry({ id, text, timestamp, persona }: VaultEntry): MemoryVaultEntry {
+  return { id, text, timestamp, persona };
+}
+
+/** An exported entry carries its internal id as the closing line, the same shape the daily logs hold. */
+function exportedEntry({ id, text, timestamp, persona, context }: VaultEntry): MemoryVaultEntry {
+  return { id, text: withHiddenContext({ text, context }), timestamp, persona };
+}
 
 function vaultClient(deps: MemoryVaultRouterDeps, tenantId: string): MarkdownMemoryClient | undefined {
   if (configuration.MEMORY_BACKEND !== 'markdown') {
@@ -128,7 +141,7 @@ export function createMemoryVaultRouter(deps: MemoryVaultRouterDeps) {
     if (!outcome.ok) {
       return c.json({ error: { message: outcome.reason } }, 500);
     }
-    return c.json({ data: outcome.entries }, 200);
+    return c.json({ data: outcome.entries.map(wireEntry) }, 200);
   };
 
   const updateHandler: RouteHandler<typeof updateMemoryVaultEntryRoute> = async c => {
@@ -182,7 +195,7 @@ export function createMemoryVaultRouter(deps: MemoryVaultRouterDeps) {
         data: {
           namespace: vaultNamespaceLabel(namespace),
           exported_at: new Date().toISOString(),
-          entries: outcome.entries,
+          entries: outcome.entries.map(exportedEntry),
         },
       },
       200,

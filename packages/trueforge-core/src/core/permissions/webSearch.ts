@@ -6,6 +6,7 @@ import { htmlImageLinks } from '../email/gmail/htmlText';
 import { isGmailReadToolName } from '../email/gmail/toolContract';
 import { isMailReadToolName } from '../email/mailConnector/toolContract';
 import { DEFAULT_ASSISTANT_NAME } from '../personas/assistantName';
+import { REPLACE_TASK_CHECKLIST_TOOL_NAME, TASK_STATE_TOOL_NAME } from '../runtime/taskState';
 import { isPageReaderTool, isSearchResultTool } from '../search/fetchedPages';
 import {
   emptyChatProvenance,
@@ -147,15 +148,39 @@ export function pageImageUrls(text: string): string[] {
   return urls;
 }
 
-/** The kind of content a tool's result is, so a card can say where an address was read. */
-function readSourceOf(input: { baseName: string; opensPage: boolean }): ReadSource {
-  if (input.opensPage) {
+/** A tool's own name, without the server prefix a connector adds. */
+function baseToolName(toolName: string): string {
+  const separator = toolName.lastIndexOf('__');
+  return separator < 0 ? toolName : toolName.slice(separator + 2);
+}
+
+/**
+ * Host tools whose results never contain stored or outside text: the finding recorder answers with a fixed
+ * line, and the task checklist writer answers with the checklist the model just wrote. Spaces, schedules and
+ * reminders are not here: their results echo stored bodies, names and tasks that may hold page text saved in
+ * an earlier turn. This is the only list; any tool not on it, including every connector, shell tool and
+ * unknown name, counts as bringing in outside content.
+ */
+const HOST_ONLY_TOOL_NAMES: ReadonlySet<string> = new Set([TASK_STATE_TOOL_NAME, REPLACE_TASK_CHECKLIST_TOOL_NAME]);
+
+/** Whether a tool's result may hold text written outside the chat: true for every tool not known to be host-only. */
+export function toolReturnsOutsideContent(toolName: string): boolean {
+  return !HOST_ONLY_TOOL_NAMES.has(baseToolName(toolName));
+}
+
+/** The kind of content a tool's result is, so a card or a memory note can say where something was read. */
+export function readSourceOf(toolName: string): ReadSource {
+  const baseName = baseToolName(toolName);
+  if (isSearchResultTool(baseName) || isPageReaderTool(baseName)) {
     return 'page';
   }
-  if (CALENDAR_READ_TOOL_NAMES.some(name => name === input.baseName)) {
+  if (isGmailReadToolName(baseName) || isMailReadToolName(baseName)) {
+    return 'email';
+  }
+  if (CALENDAR_READ_TOOL_NAMES.some(name => name === baseName)) {
     return 'event';
   }
-  return input.baseName === EXTRACT_DOCUMENT_TEXT_TOOL_NAME ? 'file' : 'tool_result';
+  return baseName === EXTRACT_DOCUMENT_TEXT_TOOL_NAME ? 'file' : 'tool_result';
 }
 
 /**
@@ -170,18 +195,16 @@ export function recordToolResultProvenance(input: {
   texts: readonly string[];
 }): void {
   const { provenance } = input.state;
-  const separator = input.tool_name.lastIndexOf('__');
-  const baseName = separator < 0 ? input.tool_name : input.tool_name.slice(separator + 2);
+  const baseName = baseToolName(input.tool_name);
   const searchTool = isSearchResultTool(baseName);
   if (searchTool && !namesUrl(input.argument_values)) {
     recordSearchResults({ provenance, texts: input.texts });
     return;
   }
-  const mail = !searchTool && (isGmailReadToolName(baseName) || isMailReadToolName(baseName));
+  const source = readSourceOf(baseName);
   const pageReader = isPageReaderTool(baseName);
-  const source = readSourceOf({ baseName, opensPage: searchTool || pageReader });
   for (const text of input.texts) {
-    if (mail) {
+    if (source === 'email') {
       recordEmailText({ provenance, text });
     } else {
       recordUntrustedText({ provenance, text, source });

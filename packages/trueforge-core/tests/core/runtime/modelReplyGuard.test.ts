@@ -9,6 +9,7 @@ import {
   collectKnownEventIds,
   guardModelReply,
   MAX_TOOL_CALLS_PER_REPLY,
+  shellCommandInRunCodeMessage,
   TOOL_CALL_SIZE_CUT_MESSAGE,
 } from '../../../src/core/runtime/modelReplyGuard';
 
@@ -71,9 +72,18 @@ function guard(
   knownEventIds: ReadonlySet<string> = new Set(),
   readOnlyTools: ReadonlySet<string> = new Set(),
   sizeCutCalls: ReadonlySet<string> = new Set(),
+  callCountCut = false,
 ) {
   const message: RawAssistantMessage = { role: 'assistant', content: null, tool_calls: calls };
-  return guardModelReply({ message, tools: TOOLS, knownEventIds, readOnlyTools, sizeCutCalls });
+  return guardModelReply({
+    message,
+    tools: TOOLS,
+    knownEventIds,
+    readOnlyTools,
+    sizeCutCalls,
+    callCountCut,
+    sandboxToolNames: { runCode: undefined, exec: undefined },
+  });
 }
 
 describe('guardModelReply', () => {
@@ -159,6 +169,12 @@ describe('guardModelReply', () => {
       ),
     );
     expect(atCap.tooManyCalls).toBe(false);
+  });
+
+  it('treats a reply the stream stopped reading as too many, whatever its merged count', () => {
+    const cut = guard([call('a', 'get_event', { event_id: 'evt-1' })], new Set(), new Set(), new Set(), true);
+    expect(cut.tooManyCalls).toBe(true);
+    expect(cut.message.tool_calls).toHaveLength(1);
   });
 
   it('counts every call toward the cap, held ones included: exempting held calls in an unattended run is the runtime recount, not the guard', () => {
@@ -259,6 +275,84 @@ describe('guardModelReply', () => {
     );
     expect(outcome.invalidCalls.size).toBe(1);
     expect(outcome.invalidCalls.has('b')).toBe(false);
+  });
+});
+
+describe('guardModelReply with a shell command sent to run_code', () => {
+  const RUN_CODE_TOOLS: ChatCompletionTool[] = [
+    {
+      type: 'function',
+      function: {
+        name: 'run_code',
+        parameters: {
+          type: 'object',
+          properties: { language: { type: 'string', enum: ['python', 'node'] }, code: { type: 'string' } },
+          required: ['language'],
+        },
+      },
+    },
+  ];
+  const clone = 'git clone --branch main https://github.com/ClimbOutLabs/exitramp.git exitramp';
+
+  function guardRunCode(calls: RawToolCall[], exec: string | undefined) {
+    return guardModelReply({
+      message: { role: 'assistant', content: null, tool_calls: calls },
+      tools: RUN_CODE_TOOLS,
+      knownEventIds: new Set(),
+      readOnlyTools: new Set(),
+      sizeCutCalls: new Set(),
+      callCountCut: false,
+      sandboxToolNames: { runCode: 'run_code', exec },
+    });
+  }
+
+  it.each(['bash', 'sh', 'shell', 'zsh', 'Bash'])('points language %s at the shell tool', language => {
+    const outcome = guardRunCode([call('a', 'run_code', { language, code: clone })], 'exec');
+    const message = outcome.invalidCalls.get('a');
+    expect(message).toBe(shellCommandInRunCodeMessage({ runCodeToolName: 'run_code', execToolName: 'exec' }));
+    expect(message).toContain('Call the exec tool instead');
+    expect(message).not.toContain('some of its arguments were wrong');
+    expect(outcome.flaggedCalls).toEqual([
+      { callId: 'a', toolName: 'run_code', argumentKeys: ['language', 'code'], reason: 'shell_command_in_run_code' },
+    ]);
+  });
+
+  it('points a shell command under an unknown language at the shell tool', () => {
+    const outcome = guardRunCode([call('a', 'run_code', { language: 'git', code: clone })], 'exec');
+    expect(outcome.flaggedCalls[0]?.reason).toBe('shell_command_in_run_code');
+  });
+
+  it('says there is no shell tool when this chat has none', () => {
+    const outcome = guardRunCode([call('a', 'run_code', { language: 'bash', code: clone })], undefined);
+    expect(outcome.invalidCalls.get('a')).toContain('There is no shell tool in this chat');
+  });
+
+  it('keeps the usual argument message for a wrong call that is not a shell command', () => {
+    const outcome = guardRunCode([call('a', 'run_code', { language: 'ruby', code: 'puts 1' })], 'exec');
+    expect(outcome.invalidCalls.get('a')).toContain('some of its arguments were wrong');
+    expect(outcome.flaggedCalls[0]?.reason).toBe('wrong_arguments');
+  });
+
+  it('lets a valid run_code call through', () => {
+    const outcome = guardRunCode([call('a', 'run_code', { language: 'python', code: 'print(1)' })], 'exec');
+    expect(outcome.invalidCalls.size).toBe(0);
+    expect(outcome.flaggedCalls).toEqual([]);
+  });
+});
+
+describe('guardModelReply flagged calls', () => {
+  it('records each stopped call with its keys and reason, never its values', () => {
+    const outcome = guard(
+      [call('a', 'create_event', '{"title":"half'), call('b', 'web_fetch', { urls: 'https://secret.example' })],
+      new Set(),
+      new Set(),
+      new Set(['a']),
+    );
+    expect(outcome.flaggedCalls).toEqual([
+      { callId: 'a', toolName: 'create_event', argumentKeys: [], reason: 'size_cut' },
+      { callId: 'b', toolName: 'web_fetch', argumentKeys: ['urls'], reason: 'wrong_arguments' },
+    ]);
+    expect(JSON.stringify(outcome.flaggedCalls)).not.toContain('secret.example');
   });
 });
 

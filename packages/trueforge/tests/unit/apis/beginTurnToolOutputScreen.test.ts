@@ -36,6 +36,7 @@ import { SqliteSpaceStore } from '../../../src/db/sqlite/space-store/SqliteSpace
 import { SqliteOAuthTokenStore } from '../../../src/db/sqlite/token-store/SqliteOAuthTokenStore';
 import { ActiveTurnRegistry } from '../../../src/runtime/activeTurns';
 import { EventSubscriptionRegistry } from '../../../src/runtime/event-subscription/index.js';
+import { MEMORY_RECALL_ENABLED_SETTING_KEY } from '../../../src/runtime/memoryRecallSettings';
 import { MEMORY_SCREEN_ENABLED_SETTING_KEY } from '../../../src/runtime/memoryScreenSettings';
 import { MEMORY_SUMMARIZE_SETTING_KEY } from '../../../src/runtime/memorySummarizeSettings';
 import { toolOutputScreenCapability, type ToolOutputScreenConfig } from '../../../src/runtime/toolOutputScreen';
@@ -214,10 +215,11 @@ describe('beginTurnExecution tool-output screen wiring', () => {
     const { capturedResolver, ctorArgs } = await beginTurnWithStore(store);
 
     // One settings read per turn per domain: tool-output screen, turn summarization and
-    // the recall screen.
+    // the recall switch and the recall screen.
     expect(store.getSettingCalls).toEqual([
       { key: TOOL_OUTPUT_SCREEN_ENABLED_SETTING_KEY },
       { key: MEMORY_SUMMARIZE_SETTING_KEY },
+      { key: MEMORY_RECALL_ENABLED_SETTING_KEY },
       { key: MEMORY_SCREEN_ENABLED_SETTING_KEY },
     ]);
     expect(capturedResolver).toEqual({ __mockToolOutputScreenResolver: true });
@@ -234,6 +236,7 @@ describe('beginTurnExecution tool-output screen wiring', () => {
     expect(store.getSettingCalls).toEqual([
       { key: TOOL_OUTPUT_SCREEN_ENABLED_SETTING_KEY },
       { key: MEMORY_SUMMARIZE_SETTING_KEY },
+      { key: MEMORY_RECALL_ENABLED_SETTING_KEY },
       { key: MEMORY_SCREEN_ENABLED_SETTING_KEY },
     ]);
     expect(toolOutputScreenConfig(ctorArgs).enabled).toBe(true);
