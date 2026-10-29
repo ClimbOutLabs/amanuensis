@@ -23,7 +23,7 @@ import {
   summaryLlmResolver,
   withSummarizeSlot,
 } from './memorySummarize';
-import { openUiSentences } from './openUiText';
+import { LIST_ITEM_LINE, openUiSentences } from './openUiText';
 
 /** One tool result of the turn, with the kind of place it came from. */
 export interface TurnToolResult {
@@ -219,9 +219,6 @@ function usableNoteText({
   }
   return redactSecretShapes(clean) === clean ? clean : undefined;
 }
-
-/** A line that is a list item: a dash, star or bullet, or a number followed by . or ), then a space. */
-const LIST_ITEM_LINE = /^(?:[-*•]|\d{1,3}[.)])\s/;
 
 /** A fence line: three or more backticks or tildes, then the language, if any. */
 const FENCE_LINE = /^(`{3,}|~{3,})\s*([\w-]*)/;

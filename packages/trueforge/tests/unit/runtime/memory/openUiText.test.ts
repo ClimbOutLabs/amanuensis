@@ -46,4 +46,20 @@ describe('openUiSentences', () => {
     expect(openUiSentences('root = Stack([TextContent("Hello)])')).toEqual([]);
     expect(openUiSentences('root = Stack([root])')).toEqual([]);
   });
+
+  it('reads a wide, deep block of shared parts quickly and keeps a bounded number of sentences', () => {
+    const width = 10;
+    const levels = 11;
+    const lines = ['root = Stack([l0])'];
+    for (let level = 0; level < levels; level += 1) {
+      const children = Array.from({ length: width }, () => `l${level + 1}`).join(', ');
+      lines.push(`l${level} = Stack([TextContent("Step ${level}"), ${children}])`);
+    }
+    lines.push(`l${levels} = TextContent("Done")`);
+    const started = Date.now();
+    const sentences = openUiSentences(lines.join('\n'));
+    expect(Date.now() - started).toBeLessThan(1000);
+    expect(sentences.length).toBeGreaterThan(0);
+    expect(sentences.length).toBeLessThanOrEqual(200);
+  });
 });

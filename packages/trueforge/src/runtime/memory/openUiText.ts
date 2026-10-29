@@ -3,6 +3,7 @@
  * The block is a small program (`name = Component(...)`), so the text is found by walking the components
  * from `root`, not by stripping tags. Data that only exists at run time (`@Each`, `$filter`, a query) has
  * no words here and is skipped. Never throws: a block that does not parse yields no sentences.
+ * The parser is hand-written; `@openuidev/lang-core` ships a framework-agnostic one that may replace it.
  */
 
 /** Most tokens read from one block; a longer block is a wall of data, not advice. */
@@ -11,6 +12,8 @@ const MAX_TOKENS = 20_000;
 const MAX_DEPTH = 32;
 /** Most sentences taken from one block. */
 const MAX_SENTENCES = 200;
+/** Most nodes visited in one block; a shared-part tree can otherwise expand without end. */
+const MAX_VISITS = 5_000;
 /** Most rows read from one table. */
 const MAX_TABLE_ROWS = 60;
 
@@ -290,7 +293,9 @@ const SILENT = new Set([
   'Point',
 ]);
 
-const MARKDOWN_LINE_MARK = /^(?:#{1,6}\s+|(?:[-*•]|\d{1,3}[.)])\s+|>\s*)/;
+/** A line that is a list item: a dash, star or bullet, or a number followed by . or ), then a space. */
+export const LIST_ITEM_LINE = /^(?:[-*•]|\d{1,3}[.)])\s/;
+const HEADING_OR_QUOTE_MARK = /^(?:#{1,6}\s+|>\s*)/;
 
 function clean(text: string): string {
   return text.replace(/\s+/g, ' ').trim();
@@ -310,9 +315,12 @@ function markdownSentences(text: string): string[] {
     const line = clean(raw.replace(/\*\*|__|`/g, ''));
     if (line === '') {
       flush();
-    } else if (MARKDOWN_LINE_MARK.test(line)) {
+    } else if (LIST_ITEM_LINE.test(line)) {
       flush();
-      out.push(clean(line.replace(MARKDOWN_LINE_MARK, '')));
+      out.push(clean(line.replace(LIST_ITEM_LINE, '')));
+    } else if (HEADING_OR_QUOTE_MARK.test(line)) {
+      flush();
+      out.push(clean(line.replace(HEADING_OR_QUOTE_MARK, '')));
     } else {
       prose.push(line);
     }
@@ -323,12 +331,15 @@ function markdownSentences(text: string): string[] {
 
 class Walker {
   private readonly open = new Set<string>();
+  /** Sentences per definition, so a part referenced many times is walked once. A cycle can shorten an entry; that is accepted. */
+  private readonly memo = new Map<string, string[]>();
+  private visits = 0;
 
   constructor(private readonly definitions: ReadonlyMap<string, Node>) {}
 
   /** The one string a node holds (resolving a reference), or undefined when it holds none or several. */
   private text(node: Node | undefined, depth: number): string | undefined {
-    if (node === undefined || depth > MAX_DEPTH) {
+    if (node === undefined || depth > MAX_DEPTH || this.spent()) {
       return undefined;
     }
     if (node.kind === 'string') {
@@ -342,6 +353,12 @@ class Walker {
       return sentences.length === 1 ? sentences[0] : undefined;
     }
     return undefined;
+  }
+
+  /** Counts one visit; true once the budget is used up, after which the walk returns what it has. */
+  private spent(): boolean {
+    this.visits += 1;
+    return this.visits > MAX_VISITS;
   }
 
   private withRef<T>(name: string, read: (target: Node) => T): T | undefined {
@@ -358,7 +375,7 @@ class Walker {
   }
 
   private items(node: Node | undefined, depth: number): Node[] {
-    if (node === undefined || depth > MAX_DEPTH) {
+    if (node === undefined || depth > MAX_DEPTH || this.spent()) {
       return [];
     }
     if (node.kind === 'array') {
@@ -419,7 +436,7 @@ class Walker {
   }
 
   sentences(node: Node | undefined, depth: number): string[] {
-    if (node === undefined || depth > MAX_DEPTH) {
+    if (node === undefined || depth > MAX_DEPTH || this.spent()) {
       return [];
     }
     switch (node.kind) {
@@ -428,7 +445,7 @@ class Walker {
       case 'array':
         return node.items.flatMap(item => this.sentences(item, depth + 1));
       case 'ref':
-        return this.withRef(node.name, target => this.sentences(target, depth + 1)) ?? [];
+        return this.refSentences(node.name, depth);
       case 'either':
         return node.branches.flatMap(branch => this.sentences(branch, depth + 1));
       case 'other':
@@ -436,6 +453,19 @@ class Walker {
       case 'call':
         return this.componentSentences(node, depth);
     }
+  }
+
+  private refSentences(name: string, depth: number): string[] {
+    const known = this.memo.get(name);
+    if (known !== undefined) {
+      return known;
+    }
+    const found = (this.withRef(name, target => this.sentences(target, depth + 1)) ?? []).slice(0, MAX_SENTENCES);
+    // An answer cut short by the budget is not reused; it would hide words from later, cheaper visits.
+    if (this.visits <= MAX_VISITS) {
+      this.memo.set(name, found);
+    }
+    return found;
   }
 
   private componentSentences(node: Node & { kind: 'call' }, depth: number): string[] {
@@ -478,7 +508,7 @@ class Walker {
 
   /** The string a text node holds with its line breaks kept, so markdown lines can be told apart. */
   private rawText(node: Node | undefined, depth: number): string {
-    if (node === undefined || depth > MAX_DEPTH) {
+    if (node === undefined || depth > MAX_DEPTH || this.spent()) {
       return '';
     }
     if (node.kind === 'string') {
