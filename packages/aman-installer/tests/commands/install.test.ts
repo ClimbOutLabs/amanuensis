@@ -11,7 +11,6 @@ import { FakeWindowsJobs, type FakeWindowsJobStep } from '../../src/host/fakeWin
 import { DOCKER_DESKTOP_DOWNLOAD_URL } from '../../src/host/windowsJobs.ts';
 import {
   ADOPTED_LINE,
-  ADOPT_NOT_INSTALLED,
   FILES_MADE_PRIVATE_LINE,
   INSTALL_BUSY,
   INSTALL_CONTINUING_LINE,
@@ -45,8 +44,15 @@ import {
   type ProcessResult,
   type ProcessRunner,
 } from '../../src/runner/processRunner.ts';
-import { createStateStore, parseRegistry, type StateStore, type StateSummary } from '../../src/state/state.ts';
-import { volumeBackend } from '../../src/state/volumeBackend.ts';
+import {
+  createStateStore,
+  parseRegistry,
+  renderRelease,
+  type StateStore,
+  type StateSummary,
+} from '../../src/state/state.ts';
+import { buildTar, parseTar } from '../../src/state/tar.ts';
+import { STATE_VOLUME, VOLUME_HOME, volumeBackend } from '../../src/state/volumeBackend.ts';
 import { TEST_PUBLIC_KEY_MINISIGN, testKeyNum, testPrivateKeyDer } from '../release/testKeys.ts';
 
 const NOW = 1791633600;
@@ -122,6 +128,11 @@ class WorldStore implements StateStore {
 
   readCaCertificate(): Promise<string | null> {
     return Promise.resolve(this.installed ? CERT : null);
+  }
+
+  refreshCache(): void {
+    // This store holds nothing back: every read answers from the
+    // world as it stands, so there is no cache to drop.
   }
 
   writeInstance(): Promise<boolean> {
@@ -421,41 +432,157 @@ test('the first install asks the four questions, installs, and opens the getting
   assert.equal(world.printed.at(-1), INSTALL_DONE_LINE);
 });
 
-// The state of a computer whose aman_home volume exists but holds
-// nothing yet: Docker answers the volume's listings, every one empty,
-// and no file can be read out of it. Everything else about the world
-// is the one the other install tests use.
+// A stand-in for the aman_home volume on a computer that has no Aman
+// yet, wrapped around the world's runner: on a real computer the
+// store's volume commands and the install's container run go through
+// the one Docker, so one runner answers both, from a map of the files
+// in the volume. The volume starts empty, as a fresh one does. Reads
+// tar the map out and listings name what the map holds, the way the
+// real volume answers: a folder with no file under it is not there,
+// and tar of a folder that is not there fails. Writes through the
+// state lock unpack the tar they are fed. The container install
+// writes what a real install writes into the volume: the release
+// record, the instance record, the installed line and the authority's
+// certificate. Every other command passes to the world runner.
 class FreshVolumeRunner implements ProcessRunner {
   private readonly inner: ProcessRunner;
+  readonly files = new Map<string, string>();
 
   constructor(inner: ProcessRunner) {
     this.inner = inner;
   }
 
+  private namesUnder(prefix: string): string[] {
+    const names = new Set<string>();
+    for (const path of this.files.keys()) {
+      const rest = prefix === '' ? path : path.startsWith(`${prefix}/`) ? path.slice(prefix.length + 1) : null;
+      if (rest === null) {
+        continue;
+      }
+      const first = rest.split('/')[0];
+      if (first !== undefined && first !== '') {
+        names.add(first);
+      }
+    }
+    return [...names];
+  }
+
+  private folderExists(folder: string): boolean {
+    for (const path of this.files.keys()) {
+      if (path.startsWith(`${folder}/`)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  private writeInstall(): void {
+    this.files.set(
+      'release/release.json',
+      renderRelease({
+        schema: '1',
+        sourceRef: RELEASE_TAG,
+        appImage: IDS['aman-app'],
+        sttImage: IDS['aman-stt'],
+        calendarImage: IDS['aman-calendar-caldav'],
+        dexImage: 'ghcr.io/example/dex@sha256:aaaa',
+        mailEmailImage: 'ghcr.io/example/mail@sha256:bbbb',
+      }),
+    );
+    this.files.set(
+      'state/instances/main.conf',
+      [
+        'name=main',
+        'app_port=8791',
+        'login_port=5556',
+        'tls=local',
+        'tls_port=8443',
+        'origins=http://127.0.0.1:8791,https://localhost:8443',
+        'public_url=https://localhost:8443',
+        '',
+      ].join('\n'),
+    );
+    this.files.set('state/installed', `2026-10-20T03:04:05Z ${IDS['aman-app']}\n`);
+    this.files.set('tls/ca/root.crt', CERT);
+  }
+
   run(command: string, args: readonly string[]): Promise<ProcessResult> {
     if (args.includes('ls')) {
+      const dir = args[args.length - 1];
+      if (dir === VOLUME_HOME) {
+        const names = this.namesUnder('');
+        return Promise.resolve(okResult(names.length === 0 ? '' : `${names.join('\n')}\n`));
+      }
+      if (typeof dir === 'string' && dir.startsWith(`${VOLUME_HOME}/`)) {
+        const names = this.namesUnder(dir.slice(VOLUME_HOME.length + 1));
+        return Promise.resolve(okResult(names.length === 0 ? '' : `${names.join('\n')}\n`));
+      }
       return Promise.resolve(okResult(''));
     }
     return this.inner.run(command, args);
   }
 
-  runBytes(command: string, args: readonly string[], stdin: Uint8Array): Promise<ProcessBytesResult> {
+  async runBytes(command: string, args: readonly string[], stdin: Uint8Array): Promise<ProcessBytesResult> {
     if (args.includes('cat')) {
-      return Promise.resolve({
-        exitCode: 1,
-        stdout: new Uint8Array(),
-        stderr: 'cat: no such file or directory',
-        started: true,
-      });
+      const path = args[args.length - 1];
+      const rel = typeof path === 'string' ? path.replace(`${VOLUME_HOME}/`, '') : '';
+      const text = this.files.get(rel);
+      if (text === undefined) {
+        return { exitCode: 1, stdout: new Uint8Array(), stderr: 'cat: no such file or directory', started: true };
+      }
+      return okBytesResult(new TextEncoder().encode(text));
+    }
+    if (args.includes('tar') && args.includes('-c')) {
+      const cAt = args.indexOf('-C');
+      const requested = cAt === -1 ? [] : args.slice(cAt + 2);
+      for (const folder of requested) {
+        if (!this.folderExists(folder)) {
+          return {
+            exitCode: 2,
+            stdout: new Uint8Array(),
+            stderr: `tar: ${folder}: Cannot stat: No such file or directory\ntar: Exiting with failure status due to previous errors\n`,
+            started: true,
+          };
+        }
+      }
+      const tar = buildTar(
+        [...this.files]
+          .filter(([path]) => requested.some(folder => path.startsWith(`${folder}/`)))
+          .map(([path, text]) => ({ path, mode: 0o600, text })),
+      );
+      return okBytesResult(tar);
+    }
+    if (args.includes('installer/install.sh')) {
+      const result = await this.inner.runBytes(command, args, stdin);
+      if (result.exitCode === 0) {
+        this.writeInstall();
+      }
+      return result;
+    }
+    if (args.includes('sh') && args.includes(`${STATE_VOLUME}:${VOLUME_HOME}`)) {
+      // A write or a removal through the state lock: the write unpacks
+      // the tar it is fed, the removal names its file last.
+      const incoming = parseTar(stdin);
+      for (const [path, text] of incoming) {
+        this.files.set(path, text);
+      }
+      const removeTarget = args[args.length - 1];
+      if (typeof removeTarget === 'string' && removeTarget.startsWith('state/') && !args.includes('tar')) {
+        this.files.delete(removeTarget);
+      }
+      return okBytesResult(new Uint8Array());
     }
     return this.inner.runBytes(command, args, stdin);
   }
 }
 
-test('a first install on a fresh volume asks the questions and runs the container install', async () => {
+test('a first install on a fresh volume asks the questions, installs, and finishes', async () => {
   const world = await makeWorld();
-  world.deps.store = createStateStore(volumeBackend(new FreshVolumeRunner(world.runner)));
+  const volume = new FreshVolumeRunner(world.runner);
+  world.deps.runner = volume;
+  world.deps.store = createStateStore(volumeBackend(volume));
   const code = await runInstall(world.deps, { dryRun: false });
+  assert.equal(code, 0);
   assert.deepEqual(
     world.asked.map(entry => `${entry.kind}:${entry.question}`),
     [
@@ -467,12 +594,18 @@ test('a first install on a fresh volume asks the questions and runs the containe
     ],
   );
   assert.equal(world.runner.installRuns.length, 1);
-  // The fake container step cannot write the volume, so the steps that
-  // finish an install find nothing in it and the adopt step says so.
-  // Those steps are covered by the WorldStore tests above; this test
-  // pins that a fresh volume no longer stops the flow before them.
-  assert.equal(code, 1);
-  assert.ok(world.printed.includes(problemText(ADOPT_NOT_INSTALLED)));
+  // The container install wrote the volume the way a real one does,
+  // so the steps that finish the install read the install back out of
+  // it: the adopt step finds it, the upgrade step finds the program
+  // already at the newest release, and the run ends at the done line.
+  assert.equal(volume.files.get('state/backups'), 'daily\n');
+  assert.deepEqual(world.jobs.browserUrls, ['https://localhost:8443', PAGE_URL]);
+  assert.ok(world.printed.includes(ADOPTED_LINE));
+  assert.ok(world.printed.includes(UPGRADE_UP_TO_DATE_LINE));
+  assert.ok(world.printed.includes(FILES_MADE_PRIVATE_LINE));
+  assert.ok(world.printed.includes(openReadyLine('https://localhost:8443')));
+  assert.ok(world.printed.includes(NETWORK_OPEN_LINE));
+  assert.equal(world.printed.at(-1), INSTALL_DONE_LINE);
 });
 
 test('the golden file holds the command lines of a first install with no Docker yet', async () => {

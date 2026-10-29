@@ -70,6 +70,7 @@ function storeWith(summary: StateSummary, modes?: string[]): StateStore {
       modes?.push(mode);
       return Promise.resolve(true);
     },
+    refreshCache: () => undefined,
   };
 }
 
@@ -82,6 +83,7 @@ function failingStore(error: Error): StateStore {
     removeInstance: () => Promise.resolve(),
     writeRelease: () => Promise.resolve(false),
     setBackupsMode: () => Promise.resolve(false),
+    refreshCache: () => undefined,
   };
 }
 
@@ -94,6 +96,7 @@ function busyModeStore(summary: StateSummary): StateStore {
     removeInstance: () => Promise.resolve(),
     writeRelease: () => Promise.resolve(false),
     setBackupsMode: () => Promise.reject(new StateBusyError('another install is running')),
+    refreshCache: () => undefined,
   };
 }
 

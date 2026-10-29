@@ -594,5 +594,9 @@ export async function runInstall(deps: InstallDeps, options: { dryRun: boolean }
   if (installCode !== 0) {
     return installCode;
   }
+  // The install ran in its container and wrote the state there, so
+  // what this process read before it is out of date. The steps that
+  // finish the install read the state as it now stands.
+  store.refreshCache();
   return finishInstall(deps, { phone: answers.phone, page: true });
 }

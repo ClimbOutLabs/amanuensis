@@ -184,6 +184,29 @@ test('a fresh volume, with neither tree folder in it yet, reads as an empty summ
   assert.equal(summary.installedAppImage, null);
 });
 
+test('a read after refreshCache sees what an outside writer wrote into the volume', async () => {
+  const runner = new FakeVolumeRunner();
+  const store = createStateStore(volumeBackend(runner));
+  const before = await store.readSummary();
+  assert.deepEqual(before.instances, []);
+  // A writer outside this process: the shell, in its container,
+  // putting an install into the volume behind the store's back. The
+  // tree the store already read is a cache, so it cannot see this
+  // until the cache is dropped.
+  runner.files.set('state/instances/main.conf', 'name=main\npublic_url=http://127.0.0.1:8791\n');
+  runner.files.set('release/release.json', RELEASE_TEXT);
+  const cached = await store.readSummary();
+  assert.deepEqual(cached.instances, []);
+  assert.equal(cached.release, null);
+  store.refreshCache();
+  const after = await store.readSummary();
+  assert.deepEqual(
+    after.instances.map(instance => instance.name),
+    ['main'],
+  );
+  assert.equal(after.release?.appImage, 'aman-app:abc123');
+});
+
 test('a write unpacks only the changed file into the volume, under the lock script', async () => {
   const runner = seededRunner();
   const store = createStateStore(volumeBackend(runner));

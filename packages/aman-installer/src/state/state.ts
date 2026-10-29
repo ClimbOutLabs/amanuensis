@@ -250,6 +250,11 @@ export interface StateBackend {
   // holds where it can: the volume answers for a backup from the time in
   // its name, and for nothing else in this stage.
   statPath?: (path: string) => Promise<StatePathStat | null>;
+  // Drops whatever the backend has cached about the state, so the next
+  // read goes back to the source. Only a backend that caches needs it:
+  // the volume backend holds the tree it tarred out and the certificate
+  // it fetched, while the folder backend reads the folder every time.
+  refreshCache?: () => void;
 }
 
 export interface StateStore {
@@ -260,6 +265,12 @@ export interface StateStore {
   // stats, and on the volume the certificate is fetched by itself, so
   // nothing else in the tls folder is ever read out of it.
   readCaCertificate: () => Promise<string | null>;
+  // Drops what the store has cached about the state, so the next read
+  // sees what an outside writer changed: the shell, running in its own
+  // container, writes the same state this store reads, and the store
+  // cannot see those writes happen. A command calls this when such a
+  // run has finished, before anything reads the state again.
+  refreshCache: () => void;
   writeInstance: (record: InstanceRecord) => Promise<boolean>;
   setInstanceValue: (options: { name: string; key: string; value: string }) => Promise<boolean>;
   removeInstance: (name: string) => Promise<void>;
@@ -375,6 +386,9 @@ export function createStateStore(backend: StateBackend): StateStore {
   return {
     readSummary: () => readSummaryFrom(backend),
     readCaCertificate: () => backend.readText(CA_CERT_FILE),
+    refreshCache: () => {
+      backend.refreshCache?.();
+    },
     writeInstance: async record => {
       record.entries.forEach(checkedEntry);
       return writeOneIfChanged(

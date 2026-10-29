@@ -378,5 +378,10 @@ export async function runUpgrade(deps: UpgradeDeps): Promise<number> {
   if (!(await unpackSource(deps, manifest, archiveName))) {
     return 1;
   }
-  return runContainerUpgrade(deps, manifest);
+  const upgradeCode = await runContainerUpgrade(deps, manifest);
+  // The upgrade ran in its container and wrote the state there, and a
+  // rollback writes it too, so what this process read before it is out
+  // of date for anything that reads the state after this command.
+  deps.store.refreshCache();
+  return upgradeCode;
 }

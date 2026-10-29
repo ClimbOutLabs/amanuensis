@@ -269,6 +269,10 @@ class StarterStore implements StateStore {
     return Promise.resolve(null);
   }
 
+  refreshCache(): void {
+    // This store holds nothing back: every read answers afresh.
+  }
+
   writeInstance(): Promise<boolean> {
     return Promise.resolve(false);
   }

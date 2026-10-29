@@ -1190,6 +1190,7 @@ test('a state store that cannot answer prints the one problem and stops', async 
       throw new StateDockerError('docker is down');
     },
     readCaCertificate: async () => null,
+    refreshCache: () => undefined,
     writeInstance: async () => false,
     setInstanceValue: async () => false,
     removeInstance: async () => undefined,
@@ -1208,6 +1209,7 @@ test('a record that cannot be read gets the doctor own next step, not the status
       throw new StateStoreError('the state volume could not be read');
     },
     readCaCertificate: async () => null,
+    refreshCache: () => undefined,
     writeInstance: async () => false,
     setInstanceValue: async () => false,
     removeInstance: async () => undefined,

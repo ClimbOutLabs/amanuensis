@@ -318,5 +318,15 @@ export function volumeBackend(runner: ProcessRunner): StateBackend {
     removeFile: async path => {
       await runLocked(REMOVE_SCRIPT, ['sh', path], new Uint8Array());
     },
+    // The tree and the certificate were read out of the volume once
+    // and are held. A writer outside this process (the shell in its
+    // container) can change both, and nothing here would notice, so
+    // this drops them and the next read goes back to the volume. The
+    // backend's own writes already clear the tree where they happen.
+    refreshCache: () => {
+      files = null;
+      caCert = null;
+      caCertRead = false;
+    },
   };
 }
