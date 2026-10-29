@@ -1,4 +1,5 @@
 import type { ToolResultSource } from '@truefoundry/trueforge-core/core';
+import { MEMORY_ORIGIN_METADATA_KEY } from './memoryOrigin';
 
 /** Metadata key naming where a note came from. Notes the person said carry no such key. */
 export const NOTE_SOURCE_METADATA_KEY = 'note_source';
@@ -78,9 +79,22 @@ export function withoutNoteTrailer(text: string): string {
   return splitNoteTrailer(text).body;
 }
 
+/** Where a note came from and when, as its metadata says; undefined when the metadata names no note source. */
+export function noteProvenanceFromMetadata(
+  metadata: Readonly<Record<string, string>> | undefined,
+): NoteProvenance | undefined {
+  const source = metadata?.[NOTE_SOURCE_METADATA_KEY];
+  if (source === undefined || !isMemoryNoteSource(source)) {
+    return undefined;
+  }
+  return { source, date: metadata?.[NOTE_DATE_METADATA_KEY] ?? '' };
+}
+
 /**
- * Where a recalled item came from and when, read from its text's marker first and from its metadata only
- * when the text has none. Undefined for something the person said.
+ * Where a recalled item came from and when. The metadata is the authority; the text's marker is read
+ * only when the store handed back no metadata at all (no origin, no note source), so a marker that
+ * something outside the chat slipped into an ordinary entry never turns that entry into a note.
+ * Undefined for something the person said.
  */
 export function noteProvenance({
   metadata,
@@ -89,15 +103,11 @@ export function noteProvenance({
   metadata: Readonly<Record<string, string>> | undefined;
   text: string;
 }): NoteProvenance | undefined {
-  const fromText = splitNoteTrailer(text).provenance;
-  if (fromText !== undefined) {
-    return fromText;
+  const fromMetadata = noteProvenanceFromMetadata(metadata);
+  if (fromMetadata !== undefined) {
+    return fromMetadata;
   }
-  const source = metadata?.[NOTE_SOURCE_METADATA_KEY];
-  if (source === undefined || !isMemoryNoteSource(source)) {
-    return undefined;
-  }
-  return { source, date: metadata?.[NOTE_DATE_METADATA_KEY] ?? '' };
+  return metadata?.[MEMORY_ORIGIN_METADATA_KEY] === undefined ? splitNoteTrailer(text).provenance : undefined;
 }
 
 /** `Oct 29` for a `YYYY-MM-DD` day, or undefined when the day is not a real date. */

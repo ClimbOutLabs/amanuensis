@@ -24,7 +24,7 @@ import {
   isMemoryNoteSource,
   NOTE_DATE_METADATA_KEY,
   NOTE_SOURCE_METADATA_KEY,
-  noteProvenance,
+  noteProvenanceFromMetadata,
   parseNoteMarker,
   withoutNoteTrailer,
 } from './memoryNotes';
@@ -149,8 +149,14 @@ const ASSISTANT_REPLY_SOURCE_LINE = '> Source: assistant reply';
  */
 export function formatRetainEntry(item: RetainItem): string {
   const context = item.context?.trim();
-  // A note's content carries its own marker line; it is written once, as a trailer, never as body text.
-  const content = withoutNoteTrailer(item.content);
+  // Only the metadata says what is a note. Its marker, when the content also ends with it, is written once,
+  // as a trailer; any other marker-looking last line is body text and is escaped like every other.
+  const note = noteProvenanceFromMetadata(item.metadata);
+  const marker = note === undefined ? undefined : formatNoteMarker(note);
+  const content =
+    marker !== undefined && item.content.trimEnd().endsWith(`\n${marker}`)
+      ? withoutNoteTrailer(item.content)
+      : item.content;
   const text = context !== undefined && context.length > 0 ? `${content}\n\n> ${context}` : content;
   const parts = [`## ${item.timestamp}`, escapeEntryStructure(text)];
   const sessionId = item.metadata?.[SESSION_ID_METADATA_KEY];
@@ -166,12 +172,8 @@ export function formatRetainEntry(item: RetainItem): string {
       parts.push(marker);
     }
   }
-  const note = noteProvenance({ metadata: item.metadata, text: item.content });
-  if (note !== undefined) {
-    const marker = formatNoteMarker(note);
-    if (parseNoteMarker(marker) !== undefined) {
-      parts.push(marker);
-    }
+  if (marker !== undefined && parseNoteMarker(marker) !== undefined) {
+    parts.push(marker);
   }
   const origin = item.metadata?.[MEMORY_ORIGIN_METADATA_KEY];
   if (origin !== undefined && origin !== USER_STATED_ORIGIN) {

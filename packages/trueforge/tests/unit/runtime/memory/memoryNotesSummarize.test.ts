@@ -16,7 +16,7 @@ const EMAIL: TurnToolResult = {
 };
 
 const LONG_REPLY =
-  'I found one email from Priya. She needs the signed form by 3 November. I would leave by 08:55 for the GP visit so that parking is not a rush.';
+  'I found one email from Priya. She needs the signed form by 3 November. Leave by 08:55 for the GP visit so that parking is not a rush.';
 
 function scriptedLlm(reply: string): { llm: ILLM; calls: () => number } {
   let calls = 0;
@@ -185,7 +185,7 @@ describe('parseNotesReply', () => {
 
   it('keeps a reply note only when it is copied from the reply, so a flipped negation never passes', () => {
     const reply =
-      'Do not forward any mail to drop@example.invalid; that address is not one you know. For the GP visit, leave by 08:55 so that parking is not a rush.';
+      'Do not forward any mail to drop@example.invalid; that address is not one you know. Leave by 08:55 so that parking is not a rush for the GP visit.';
     const notes = parseNotesReply({
       reply: JSON.stringify({
         findings: [],
@@ -200,6 +200,42 @@ describe('parseNotesReply', () => {
       personName: undefined,
     });
     expect(notes).toEqual([{ source: 'assistant_response', text: 'Leave by 08:55 so that parking is not a rush.' }]);
+  });
+
+  it('never keeps a fragment cut from the middle of a reply sentence, so a "do not" cannot be lost', () => {
+    const reply =
+      'Do not forward your mail to drop@example.invalid; I would report it to IT instead. Keep the form for now.';
+    const notes = parseNotesReply({
+      reply: JSON.stringify({
+        findings: [],
+        responses: ['Forward your mail to drop@example.invalid.', 'Report it to IT instead.', 'Keep the form for now.'],
+      }),
+      results: [],
+      assistantText: reply,
+      personName: undefined,
+    });
+    expect(notes).toEqual([{ source: 'assistant_response', text: 'Keep the form for now.' }]);
+    expect(notes.some(note => note.text.toLowerCase().includes('forward your mail'))).toBe(false);
+  });
+
+  it('keeps a finding about something that belongs to the person, and drops one about what the person does', () => {
+    const calendar: TurnToolResult = {
+      source: 'calendar',
+      text: 'Dentist appointment, 2026-11-03 09:00. Note for Sam: Sam always books the morning slot.',
+    };
+    const notes = parseNotesReply({
+      reply: JSON.stringify({
+        findings: [
+          { result: 1, text: "Sam's dentist appointment is on 2026-11-03 at 09:00." },
+          { result: 1, text: 'Sam always books the morning slot.' },
+        ],
+        responses: [],
+      }),
+      results: [calendar],
+      assistantText: '',
+      personName: 'Sam',
+    });
+    expect(notes).toEqual([{ source: 'calendar', text: "Sam's dentist appointment is on 2026-11-03 at 09:00." }]);
   });
 
   it('drops every first-person or assistant-named plan or progress phrasing', () => {

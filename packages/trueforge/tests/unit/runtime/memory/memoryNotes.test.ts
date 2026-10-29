@@ -52,12 +52,13 @@ describe('note markers in the stored text', () => {
     expect(withoutNoteTrailer('Plain text')).toBe('Plain text');
   });
 
-  it('reads the source and day from the text first, then from metadata, and never from the person', () => {
+  it('trusts the metadata first, reads the text only when no metadata came back, and never reads the person', () => {
     expect(noteProvenance({ metadata: undefined, text: content })).toEqual({ source: 'email', date: '2026-10-29' });
     expect(noteProvenance({ metadata: { note_source: 'web', note_date: '2026-10-01' }, text: content })).toEqual({
-      source: 'email',
-      date: '2026-10-29',
+      source: 'web',
+      date: '2026-10-01',
     });
+    expect(noteProvenance({ metadata: { origin: 'tool_ingested' }, text: content })).toBeUndefined();
     expect(noteProvenance({ metadata: { note_source: 'web', note_date: '2026-10-01' }, text: 'Plain' })).toEqual({
       source: 'web',
       date: '2026-10-01',
