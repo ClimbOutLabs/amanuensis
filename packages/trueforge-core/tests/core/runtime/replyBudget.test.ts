@@ -7,7 +7,9 @@ import {
   recordUnfinished,
   REMOVED_TOOL_RESULT,
   removedToolMessage,
+  replyStepBudgetFor,
   retryIsDue,
+  SCHEDULE_REPLY_STEP_BUDGET,
   settleRetry,
   STEP_BUDGET_SPENT_AFTER_SPACE_WRITE_MESSAGE,
   stepBudgetFor,
@@ -71,6 +73,16 @@ describe('toolResultKind', () => {
     ] as const) {
       expect(ToolResultKindSchema.safeParse(toolResultKind({ ...ok, disposition })).success).toBe(true);
     }
+  });
+});
+
+describe('replyStepBudgetFor', () => {
+  it('gives a scheduled run its larger budget and a chat the default, unless the definition sets one', () => {
+    expect(replyStepBudgetFor({ definitionBudget: undefined, unattended: false })).toBe(DEFAULT_REPLY_STEP_BUDGET);
+    expect(replyStepBudgetFor({ definitionBudget: undefined, unattended: true })).toBe(SCHEDULE_REPLY_STEP_BUDGET);
+    expect(SCHEDULE_REPLY_STEP_BUDGET.main).toBeGreaterThan(DEFAULT_REPLY_STEP_BUDGET.main);
+    const own = { main: 2, sub: 1 };
+    expect(replyStepBudgetFor({ definitionBudget: own, unattended: true })).toBe(own);
   });
 });
 
