@@ -141,13 +141,15 @@ describe('retrievePersonaKnowledge with a judge', () => {
   }
 
   it('keeps only the candidates the judge marks helpful', async () => {
+    // Both seeded chunks share one embedding, so their ranking order can flip; pick the kept one by content.
     const judge: KnowledgeRelevanceJudge = async (_question, candidates) => {
       expect(candidates).toHaveLength(2);
-      return [1];
+      const helpfulIndex = candidates.findIndex(candidate => candidate.text.includes('Negotiations took three months'));
+      expect(helpfulIndex).toBeGreaterThanOrEqual(0);
+      return [helpfulIndex];
     };
     const result = await retrieveWithJudge(judge);
-    expect(result?.hits).toHaveLength(1);
-    expect(result?.hits[0]?.text).toContain('Negotiations took three months');
+    expect(result?.hits.map(hit => hit.text)).toEqual(['Negotiations took three months.']);
     expect(result?.block).toContain('Negotiations took three months');
     expect(result?.block).not.toContain('twenty million dollars');
   });
