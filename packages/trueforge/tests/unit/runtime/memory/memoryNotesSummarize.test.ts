@@ -153,6 +153,14 @@ describe('replySentences', () => {
     ]);
   });
 
+  it('keeps a question as the header of the bullets under it, and a question with no list as a sentence', () => {
+    expect(replySentences('What should I bring?\n- your card\n- a list of medicines')).toEqual([
+      'What should I bring: your card',
+      'What should I bring: a list of medicines',
+    ]);
+    expect(replySentences('Shall I set a reminder?')).toEqual(['Shall I set a reminder?']);
+  });
+
   it('gives plain items for a list with no header, and keeps a bold header line out of the prose', () => {
     expect(replySentences('Bring these.\n- your card\n- a list of medicines')).toEqual([
       'Bring these.',

@@ -236,13 +236,13 @@ function plainText(text: string): string {
     .trim();
 }
 
-/** The last sentence of a prose chunk when it introduces a list (it does not end a sentence), without its colon. */
+/** The last sentence of a prose chunk when it introduces a list (it does not end a sentence, though a question may), without its colon or question mark. */
 function listHeader(prose: string): string | undefined {
-  if (/[.!?]$/.test(prose)) {
+  if (/[.!]$/.test(prose)) {
     return undefined;
   }
   const last = prose.split(SENTENCE_END).pop() ?? '';
-  const header = plainText(last).replace(/:$/, '').trim();
+  const header = plainText(last).replace(/[:?]$/, '').trim();
   return header === '' ? undefined : header;
 }
 
