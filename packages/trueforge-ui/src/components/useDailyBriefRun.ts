@@ -4,22 +4,13 @@ import { isMorningBriefSchedule } from '@truefoundry/trueforge-core/core/schedul
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { useToasterOptional } from '../containers/ToasterContainer.js';
+import { useOpenScheduleRunSession } from '../hooks/useOpenScheduleRunSession.js';
 import { useResourcePermissions } from '../hooks/useResourcePermissions.js';
-import { useOptionalAgentSessionsServer, useOptionalScheduleServer } from '../server/ServerContext.js';
-import { useOptionalShellMode } from '../server/ShellModeContext.js';
-import type { AgentSessionsServer, Schedule, ScheduleServer, SessionListEntry } from '../server/types.js';
+import { useOptionalScheduleServer } from '../server/ServerContext.js';
+import type { Schedule, ScheduleServer } from '../server/types.js';
 
 /** How many schedule pages the home reads looking for the brief; a person has a handful of schedules. */
 const MAX_SCHEDULE_PAGES = 4;
-
-type RunSessionLookup = {
-  findScheduleRunSession: (params: { scheduleId: string; runId: string }) => Promise<SessionListEntry | null>;
-};
-
-/** Narrows to a sessions server that can find the chat a schedule run writes into. */
-function canFindRunSession(server: AgentSessionsServer): server is AgentSessionsServer & RunSessionLookup {
-  return 'findScheduleRunSession' in server;
-}
 
 /** Every brief schedule in the first pages, in list order, so the pick can weigh status and permission. */
 async function findBriefSchedules(server: ScheduleServer): Promise<Schedule[]> {
@@ -48,8 +39,7 @@ export type DailyBriefRun = {
  */
 export function useDailyBriefRun(): DailyBriefRun | undefined {
   const scheduleServer = useOptionalScheduleServer();
-  const sessionsServer = useOptionalAgentSessionsServer();
-  const shell = useOptionalShellMode();
+  const openRunSession = useOpenScheduleRunSession();
   const toaster = useToasterOptional();
   const [candidates, setCandidates] = useState<Schedule[]>([]);
   const [starting, setStarting] = useState(false);
@@ -87,13 +77,7 @@ export function useDailyBriefRun(): DailyBriefRun | undefined {
       try {
         const started = await server.createScheduleRun({ scheduleId: schedule.id });
         toaster?.showSuccess({ title: 'Run started' });
-        if (sessionsServer === null || !canFindRunSession(sessionsServer)) return;
-        const session = await sessionsServer.findScheduleRunSession({ scheduleId: schedule.id, runId: started.id });
-        if (session === null) return;
-        shell?.openHistorySession({
-          sessionId: session.id,
-          ...(session.agentName == null ? {} : { agentName: session.agentName }),
-        });
+        await openRunSession({ scheduleId: schedule.id, runId: started.id });
       } catch (caught) {
         toaster?.showError(caught);
       } finally {
@@ -101,7 +85,7 @@ export function useDailyBriefRun(): DailyBriefRun | undefined {
         setStarting(false);
       }
     },
-    [sessionsServer, shell, toaster],
+    [openRunSession, toaster],
   );
 
   if (scheduleServer === null || brief === null) return undefined;

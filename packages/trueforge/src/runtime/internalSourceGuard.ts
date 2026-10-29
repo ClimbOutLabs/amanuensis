@@ -122,8 +122,11 @@ export function webQueryTargetsOwnConversation(query: string): boolean {
 }
 
 /**
- * Candidate argument names carrying the search query across web_search
- * providers.
+ * Argument names carrying the search text across web_search providers. A
+ * value may be a string or a list of strings (Parallel sends an `objective`
+ * plus `search_queries`). Each readable value is checked on its own, so a
+ * private detail in any one of them blocks the call; joining them would
+ * dilute the overlap ratio behind a clean sibling query.
  *
  * Coverage assumption: the web provider's tool is named `web_search`
  * (matched case-insensitively), reached directly or through a dispatcher
@@ -140,16 +143,24 @@ const WEB_QUERY_ARG_KEYS: readonly string[] = [
   'text',
   'question',
   'prompt',
+  'objective',
+  'search_queries',
+  'queries',
 ];
 
-function extractWebQuery(args: Record<string, unknown>): string | undefined {
-  for (const key of WEB_QUERY_ARG_KEYS) {
-    const value = args[key];
-    if (typeof value === 'string' && value.trim().length > 0) {
-      return value.trim();
-    }
+function readableStrings(value: unknown): string[] {
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    return trimmed.length > 0 ? [trimmed] : [];
   }
-  return undefined;
+  if (Array.isArray(value)) {
+    return value.flatMap(readableStrings);
+  }
+  return [];
+}
+
+function extractWebQueries(args: Record<string, unknown>): string[] {
+  return WEB_QUERY_ARG_KEYS.flatMap(key => readableStrings(args[key]));
 }
 
 const STOPWORDS: ReadonlySet<string> = new Set(
@@ -376,37 +387,42 @@ export function buildInternalSourceToolPolicy(
     if (name.toLowerCase() !== 'web_search') {
       return undefined;
     }
-    const query = extractWebQuery(call.args);
-    if (query === undefined) {
+    const queries = extractWebQueries(call.args);
+    if (queries.length === 0) {
       // Fail open, but not silently: a web_search with no readable query
       // argument is outside the policy's coverage, and that must be visible.
       logger?.warn('web_search call carried no readable query argument; allowing the call');
       return undefined;
     }
-    if (webQueryTargetsOwnConversation(query)) {
+    if (queries.some(webQueryTargetsOwnConversation)) {
       return { message: CONVERSATION_BLOCK_MESSAGE };
     }
-    // Armed-ness is checked before the query is tokenized: when neither rule
-    // can fire, a web_search costs a name comparison and nothing more.
+    // Armed-ness is checked before the queries are tokenized: when neither
+    // rule can fire, a web_search costs a name comparison and nothing more.
     const libraryArmed = state.libraryConsulted && !state.libraryAnswered && state.libraryTokens !== undefined;
     const recallArmed = state.recallTokens !== undefined;
     if (!libraryArmed && !recallArmed) {
       return undefined;
     }
-    const web = expandWithInitialisms(tokenize(query));
-    if (libraryArmed) {
-      const library = librarySet();
-      if (
-        library !== undefined &&
-        expandedAskSameQuestion({ a: web, b: library, threshold: LIBRARY_OVERLAP_THRESHOLD })
-      ) {
-        return { message: LIBRARY_BLOCK_MESSAGE };
+    for (const query of queries) {
+      const web = expandWithInitialisms(tokenize(query));
+      if (libraryArmed) {
+        const library = librarySet();
+        if (
+          library !== undefined &&
+          expandedAskSameQuestion({ a: web, b: library, threshold: LIBRARY_OVERLAP_THRESHOLD })
+        ) {
+          return { message: LIBRARY_BLOCK_MESSAGE };
+        }
       }
-    }
-    if (recallArmed) {
-      const recall = recallSet();
-      if (recall !== undefined && expandedAskSameQuestion({ a: web, b: recall, threshold: RECALL_OVERLAP_THRESHOLD })) {
-        return { message: MEMORY_BLOCK_MESSAGE };
+      if (recallArmed) {
+        const recall = recallSet();
+        if (
+          recall !== undefined &&
+          expandedAskSameQuestion({ a: web, b: recall, threshold: RECALL_OVERLAP_THRESHOLD })
+        ) {
+          return { message: MEMORY_BLOCK_MESSAGE };
+        }
       }
     }
     return undefined;

@@ -63,6 +63,74 @@ describe('recordPageImageUrls', () => {
   });
 });
 
+describe('pictures a search result lists', () => {
+  const PUP_PAGE = 'https://dogs.example/portuguese-water-dog';
+  const PUP_ONE = 'https://cdn.dogs.example/pwd/one.jpg';
+  const PUP_TWO = 'https://cdn.dogs.example/pwd/two.jpg';
+  const PUP_THUMB = 'https://cdn.dogs.example/pwd/thumb.jpg';
+  const PUP_MAIN = 'https://cdn.dogs.example/pwd/main.jpg';
+  const PUP_HTTP = 'http://cdn.dogs.example/pwd/plain.jpg';
+  const UNLISTED = 'https://cdn.dogs.example/pwd/unlisted.jpg';
+
+  function searched() {
+    const state = createWebSearchTurnState();
+    recordToolResultProvenance({
+      state,
+      tool_name: 'web_search',
+      argument_values: ['portuguese water dog pictures'],
+      texts: [
+        JSON.stringify({
+          results: [
+            {
+              title: 'Portuguese Water Dog',
+              url: PUP_PAGE,
+              images: [PUP_ONE, { url: PUP_TWO, description: 'Two dogs' }, PUP_HTTP],
+              thumbnail: { src: PUP_THUMB },
+              image_url: PUP_MAIN,
+              excerpt: `See also ${UNLISTED}`,
+            },
+          ],
+        }),
+      ],
+    });
+    return state.provenance;
+  }
+
+  it('counts the https pictures a result lists as seen, under each picture field', () => {
+    const provenance = searched();
+    for (const url of [PUP_ONE, PUP_TWO, PUP_THUMB, PUP_MAIN]) {
+      expect(isTrustedPicture({ provenance, url })).toBe(true);
+    }
+  });
+
+  it('does not count a picture that appears nowhere in the results, nor one in an excerpt', () => {
+    const provenance = searched();
+    expect(isTrustedPicture({ provenance, url: UNLISTED })).toBe(false);
+    expect(isTrustedPicture({ provenance, url: 'https://cdn.dogs.example/pwd/three.jpg' })).toBe(false);
+  });
+
+  it('does not add a plain http picture, even when a result lists it', () => {
+    const provenance = searched();
+    expect(isTrustedPicture({ provenance, url: PUP_HTTP })).toBe(false);
+    expect(isTrustedPicture({ provenance, url: PUP_HTTP.replace('http:', 'https:') })).toBe(false);
+  });
+
+  it('keeps a listed picture a picture only: it is not a trusted link, and only the result url is', () => {
+    const provenance = searched();
+    expect(isTrustedLink({ provenance, url: PUP_PAGE })).toBe(true);
+    for (const url of [PUP_ONE, PUP_TWO, PUP_THUMB, PUP_MAIN]) {
+      expect(isTrustedLink({ provenance, url })).toBe(false);
+    }
+  });
+});
+
+describe('pageImageUrls on a page returned inside JSON', () => {
+  it('reads an img tag whose quotes are JSON-escaped', () => {
+    const page = JSON.stringify({ html: `<p>Fox</p><img src="${FOX_IMAGE}" alt="Red fox">` });
+    expect(pageImageUrls(page)).toEqual([FOX_IMAGE]);
+  });
+});
+
 describe('a page picture is a picture, not a trusted link', () => {
   const PLANTED = 'https://collector.example/hook?token=abc';
 

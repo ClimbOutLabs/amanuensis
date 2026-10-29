@@ -41,6 +41,12 @@ describe('remarkCitationMarkers', () => {
     expect(text).not.toContain('deadbeef');
   });
 
+  it('strips an unresolved JSON-shaped marker from the rendered text', () => {
+    const tree = textTree('Nemotron【{"id":0,"cursor":0,"loc":0}】says.');
+    remarkCitationMarkers([])(tree);
+    expect(renderedText(tree)).toBe('Nemotronsays.');
+  });
+
   it('handles several markers in one text node', () => {
     const tree = textTree('A【1†x】and B【xyz9†y】.');
     const sources: CitationSource[] = [
