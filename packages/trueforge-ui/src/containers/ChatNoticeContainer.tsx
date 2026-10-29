@@ -8,7 +8,7 @@ import { useOptionalPersonalization } from '../components/PersonalizationContext
 import { useChatNotice } from '../hooks/useChatNotice.js';
 import { useComposerBusyState } from '../hooks/useComposerBusyState.js';
 import { assistantDisplayName } from '../utils/assistantName.js';
-import { cancelledTurnRefusal, sendRefusalText, type SendRefusal } from '../utils/turnRefusal.js';
+import { cancelledTurnRefusal, isSkillsNotice, sendRefusalText, type SendRefusal } from '../utils/turnRefusal.js';
 
 /** Why the chat's last message got no reply, as saved with its turn, while that message is still the last one shown. */
 function useSavedRefusal(): SendRefusal | undefined {
@@ -31,7 +31,9 @@ export function ChatNoticeContainer() {
   const wasSubmittingRef = useRef(isSubmitting);
 
   useEffect(() => {
-    if (isSubmitting && !wasSubmittingRef.current) notice?.dismiss();
+    // The skills line stays: the chat keeps running without skills after the send.
+    if (isSubmitting && !wasSubmittingRef.current && !(notice != null && isSkillsNotice(notice.kind)))
+      notice?.dismiss();
     wasSubmittingRef.current = isSubmitting;
   }, [isSubmitting, notice]);
 

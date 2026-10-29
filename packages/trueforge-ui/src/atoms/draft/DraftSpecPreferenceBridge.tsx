@@ -3,7 +3,8 @@
 import { useTrueFoundryAgentSpec, useTrueFoundryUpdateAgentSpec } from '@truefoundry/assistant-ui-runtime';
 import { useEffect } from 'react';
 
-import type { DraftPreferenceKind } from '../../server/draftSpecPreferences.js';
+import { useSkillsNoticeReporter } from '../../hooks/useChatNotice.js';
+import { skillsHeldBack, type DraftPreferenceKind } from '../../server/draftSpecPreferences.js';
 import { useServerCapabilities } from '../../server/ServerContext.js';
 import { useShellMode } from '../../server/ShellModeContext.js';
 import type { AgentSkill, AgentSpec, ConnectorState, ModelSelection } from '../../server/types.js';
@@ -109,18 +110,19 @@ export function reconcileDraftSandbox({
   if (kind === 'chat') {
     if (sandboxEnabled == null) return {};
     const current = readDraftSandboxEnabled(agentSpec);
-    // The capability flag says the deployment offers a sandbox, not that the user
-    // wants one, so it may only disable. Enabling from it would overwrite the
-    // composer toggle every time the user turns the sandbox off.
-    if (sandboxEnabled === false && current === true) {
-      return {
-        config: {
-          ...agentSpec.config,
-          sandbox: { ...agentSpec.config?.sandbox, enabled: false },
-        },
-      };
-    }
-    return {};
+    // The capability flag says the deployment offers a sandbox, not that the user wants one, so
+    // it may disable. It turns one on only for a chat that has skills and no setting of its own
+    // (a new chat seed carries none), since the server refuses skills without a sandbox.
+    const hasSkills = agentSpec.skills !== undefined && agentSpec.skills.length > 0;
+    const turnOn = sandboxEnabled && current === undefined && hasSkills;
+    const turnOff = !sandboxEnabled && current === true;
+    if (!turnOn && !turnOff) return {};
+    return {
+      config: {
+        ...agentSpec.config,
+        sandbox: { ...agentSpec.config?.sandbox, enabled: turnOn },
+      },
+    };
   }
 
   // For 'agent' kind: respect the user's explicit toggle choice. Do not force-disable
@@ -141,6 +143,7 @@ export function DraftSpecPreferenceBridge() {
   const { mode, pendingSessionId, rememberDraftSpec } = useShellMode();
   const { agentSpec } = useTrueFoundryAgentSpec();
   const updateAgentSpec = useTrueFoundryUpdateAgentSpec();
+  const reportSkillsNotice = useSkillsNoticeReporter();
   const capabilities = useServerCapabilities();
   const sandboxEnabled = capabilities?.sandbox.enabled;
   const { models, skills, connectors, connectorsLoaded, loaded, error, ensureLoaded } = useDraftCatalog();
@@ -165,6 +168,13 @@ export function DraftSpecPreferenceBridge() {
       updateAgentSpec(update);
     }
   }, [agentSpec, isPlainDraft, preferenceKind, sandboxEnabled, updateAgentSpec]);
+
+  const heldBack = isPlainDraft && preferenceKind === 'chat' ? skillsHeldBack(agentSpec, sandboxEnabled) : null;
+  useEffect(() => {
+    if (heldBack === 'sandbox_unavailable') reportSkillsNotice('skills_off_without_sandbox');
+    else if (heldBack === 'sandbox_turned_off') reportSkillsNotice('skills_off_sandbox_turned_off');
+    else reportSkillsNotice(null);
+  }, [heldBack, reportSkillsNotice]);
 
   useEffect(() => {
     // Mounts are reconciled as soon as the connector list alone has been read. The full

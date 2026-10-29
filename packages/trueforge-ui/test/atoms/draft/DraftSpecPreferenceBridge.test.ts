@@ -1,6 +1,10 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 
-import { reconcileDraftSpecMounts, reconcileDraftSpecPreferences } from '@/atoms/draft/DraftSpecPreferenceBridge.js';
+import {
+  reconcileDraftSandbox,
+  reconcileDraftSpecMounts,
+  reconcileDraftSpecPreferences,
+} from '@/atoms/draft/DraftSpecPreferenceBridge.js';
 import {
   CHAT_DRAFT_SPEC_PREFERENCES_STORAGE_KEY,
   readDraftSpecPreferences,
@@ -128,5 +132,61 @@ describe('a stored chat draft seed naming a deleted connector', () => {
     const newChatSpec: AgentSpec = { ...seed, ...update };
 
     expect(newChatSpec.mcpServers).toEqual([{ name: 'tavily' }]);
+  });
+});
+
+describe('reconcileDraftSandbox for a new chat', () => {
+  const skills = [{ name: 'find-skills' }];
+
+  it('turns the sandbox off when it is not available and does not touch the skills', () => {
+    const agentSpec: AgentSpec = { model: { name: 'm' }, skills, config: { sandbox: { enabled: true } } };
+
+    expect(reconcileDraftSandbox({ agentSpec, sandboxEnabled: false, kind: 'chat' })).toEqual({
+      config: { sandbox: { enabled: false } },
+    });
+  });
+
+  it('turns the sandbox on when it is available, the draft has skills and no setting', () => {
+    const agentSpec: AgentSpec = { model: { name: 'm' }, skills };
+
+    expect(reconcileDraftSandbox({ agentSpec, sandboxEnabled: true, kind: 'chat' })).toEqual({
+      config: { sandbox: { enabled: true } },
+    });
+  });
+
+  it('does not turn the sandbox on for a draft without skills', () => {
+    expect(reconcileDraftSandbox({ agentSpec: { model: { name: 'm' } }, sandboxEnabled: true, kind: 'chat' })).toEqual(
+      {},
+    );
+  });
+
+  it('keeps an explicit off when the sandbox is available', () => {
+    const agentSpec: AgentSpec = { model: { name: 'm' }, skills, config: { sandbox: { enabled: false } } };
+
+    expect(reconcileDraftSandbox({ agentSpec, sandboxEnabled: true, kind: 'chat' })).toEqual({});
+  });
+
+  it('changes nothing when the sandbox is not available and the draft has no setting', () => {
+    const agentSpec: AgentSpec = { model: { name: 'm' }, skills };
+
+    expect(reconcileDraftSandbox({ agentSpec, sandboxEnabled: false, kind: 'chat' })).toEqual({});
+  });
+
+  it('does not seed the agent builder', () => {
+    expect(
+      reconcileDraftSandbox({ agentSpec: { model: { name: 'm' }, skills }, sandboxEnabled: true, kind: 'agent' }),
+    ).toEqual({});
+  });
+
+  it('changes nothing when the sandbox is available', () => {
+    const agentSpec: AgentSpec = { model: { name: 'm' }, skills, config: { sandbox: { enabled: true } } };
+
+    expect(reconcileDraftSandbox({ agentSpec, sandboxEnabled: true, kind: 'chat' })).toEqual({});
+  });
+
+  it('changes nothing when the person turned the sandbox off and has no skills', () => {
+    const agentSpec: AgentSpec = { model: { name: 'm' }, config: { sandbox: { enabled: false } } };
+
+    expect(reconcileDraftSandbox({ agentSpec, sandboxEnabled: false, kind: 'chat' })).toEqual({});
   });
 });
