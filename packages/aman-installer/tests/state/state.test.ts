@@ -3,6 +3,7 @@ import { test } from 'node:test';
 
 import {
   StateStoreError,
+  backupNameTimeSeconds,
   createStateStore,
   parseRegistry,
   parseRelease,
@@ -215,6 +216,27 @@ test('an instance name the registry cannot hold is refused', async () => {
   await assert.rejects(async () => {
     await store.removeInstance('UPPER');
   });
+});
+
+test('the time in a backup name is the UTC time it names, with or without words after it', () => {
+  const stamp = Date.UTC(2026, 9, 20, 3, 4, 5) / 1000;
+  assert.equal(backupNameTimeSeconds('20261020T030405Z'), stamp);
+  assert.equal(backupNameTimeSeconds('20261020T030405Z-keep'), stamp);
+  assert.equal(backupNameTimeSeconds('20261020T030405Z-1'), stamp);
+  assert.equal(backupNameTimeSeconds('not-a-backup'), null);
+  assert.equal(backupNameTimeSeconds('20261020T030405'), null);
+});
+
+test('writing the backups choice writes the one record the shell reads, once', async () => {
+  const backend = memoryBackend(new Map());
+  const store = createStateStore(backend);
+  assert.equal(await store.setBackupsMode('daily'), true);
+  assert.equal(backend.files.get('state/backups'), 'daily\n');
+  assert.equal(await store.setBackupsMode('daily'), false);
+  assert.equal((await store.readSummary()).backupsMode, 'daily');
+  assert.equal(await store.setBackupsMode('off'), true);
+  assert.equal(backend.files.get('state/backups'), 'off\n');
+  assert.equal((await store.readSummary()).backupsMode, 'off');
 });
 
 test('writing a release keeps the old record as the previous one', async () => {

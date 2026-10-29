@@ -2,7 +2,7 @@ import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 
 import { EXTRACT_DOCUMENT_TEXT_TOOL_NAME } from '../../documents/toolContract';
 import { CALENDAR_READ_TOOL_NAMES } from '../calendar/toolContract';
-import { htmlImageLinks } from '../email/gmail/htmlText';
+import { htmlImages } from '../email/gmail/htmlText';
 import { isGmailReadToolName } from '../email/gmail/toolContract';
 import { isMailReadToolName } from '../email/mailConnector/toolContract';
 import { DEFAULT_ASSISTANT_NAME } from '../personas/assistantName';
@@ -119,33 +119,80 @@ export function resultTexts(result: CallToolResult): string[] {
 }
 
 /** A markdown picture: `![alt](url)` with an optional title after the link. */
-const MARKDOWN_IMAGE = /!\[[^\]]*\]\(\s*<?([^)\s>]+)>?(?:\s+(?:"[^"]*"|'[^']*'))?\s*\)/g;
+const MARKDOWN_IMAGE = /!\[([^\]]*)\]\(\s*<?([^)\s>]+)>?(?:\s+(?:"[^"]*"|'[^']*'))?\s*\)/g;
 
 /** Cap on image links taken from one page read, so a gallery page cannot grow host memory without bound. */
 const MAX_PAGE_IMAGE_URLS = 200;
 
+/** Most pictures the model is shown from one page read; the list is a hint, not the page's whole gallery. */
+const PAGE_PICTURES_SHOWN_MAX = 8;
+
+/** Longest description shown beside a picture link; a page's alt text can run to a paragraph. */
+const PICTURE_ALT_MAX_CHARS = 120;
+
+/** The name of the host-added picture list under a page read; the refusal for a made up picture names it. */
+export const PAGE_PICTURES_LABEL = 'Pictures on this page';
+
+const PAGE_PICTURES_HEADING = `${PAGE_PICTURES_LABEL}:`;
+
+/** One picture a page shows: its link and, when the page gives one, the words that describe it. */
+export interface PagePicture {
+  url: string;
+  alt: string | undefined;
+}
+
 /**
- * The picture links a page read returned, from markdown pictures and raw `<img>` tags. Tracking
- * pixels are left out by the HTML reader, and a data: picture is not a link out, so only web
- * picture links are returned.
+ * The pictures a page read returned, from markdown pictures and raw `<img>` tags, once each and in
+ * order. Tracking pixels are left out by the HTML reader, and a data: picture is not a link out, so
+ * only web picture links are returned. This is the one reader of a page's pictures: the provenance
+ * record and the list the model is shown both come from it.
  */
-export function pageImageUrls(text: string): string[] {
-  const urls: string[] = [];
-  const add = (raw: string): void => {
+export function pagePictures(text: string): PagePicture[] {
+  const pictures: PagePicture[] = [];
+  const add = ({ url: raw, alt }: PagePicture): void => {
     const url = raw.trim();
-    if (/^https?:\/\//i.test(url) && url.length <= 2048 && !urls.includes(url)) {
-      urls.push(url);
+    if (/^https?:\/\//i.test(url) && url.length <= 2048 && !pictures.some(picture => picture.url === url)) {
+      pictures.push({ url, alt });
     }
   };
   for (const match of text.matchAll(MARKDOWN_IMAGE)) {
-    if (match[1] !== undefined) {
-      add(match[1]);
+    if (match[2] !== undefined) {
+      const alt = match[1]?.trim() ?? '';
+      add({ url: match[2], alt: alt === '' ? undefined : alt });
     }
   }
-  for (const url of htmlImageLinks({ source: text, max: MAX_PAGE_IMAGE_URLS })) {
-    add(url);
+  for (const image of htmlImages({ source: text, max: MAX_PAGE_IMAGE_URLS })) {
+    add(image);
   }
-  return urls;
+  return pictures;
+}
+
+/** The picture links a page read returned, as `pagePictures` finds them. */
+export function pageImageUrls(text: string): string[] {
+  return pagePictures(text).map(picture => picture.url);
+}
+
+/**
+ * The short list of a page's pictures the model is shown under a page read, or undefined when the
+ * tool is not a page reader or the page has no https picture. It is a host-added list, kept apart
+ * from the page text so the page's own words stay framed as untrusted data. A space only accepts an
+ * https picture, so an http one is left out rather than offered and then refused.
+ */
+export function pagePicturesNote(input: { tool_name: string; text: string }): string | undefined {
+  if (!isPageReaderTool(baseToolName(input.tool_name))) {
+    return undefined;
+  }
+  const shown = pagePictures(input.text)
+    .filter(picture => /^https:\/\//i.test(picture.url))
+    .slice(0, PAGE_PICTURES_SHOWN_MAX);
+  if (shown.length === 0) {
+    return undefined;
+  }
+  const lines = shown.map(picture => {
+    const alt = picture.alt?.replace(/\s+/g, ' ').trim().slice(0, PICTURE_ALT_MAX_CHARS) ?? '';
+    return alt === '' ? `- ${picture.url}` : `- ${picture.url} (${alt})`;
+  });
+  return [PAGE_PICTURES_HEADING, ...lines].join('\n');
 }
 
 /** A tool's own name, without the server prefix a connector adds. */

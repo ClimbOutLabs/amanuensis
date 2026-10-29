@@ -2,9 +2,9 @@ import type { Host, SystemKind } from '../host/host.ts';
 import type { WindowsJobs } from '../host/windowsJobs.ts';
 import {
   DOCKER_NOT_ANSWERING,
+  DOCTOR_STATE_UNREADABLE,
   STATE_BUSY,
   STATE_IMAGE_UNAVAILABLE,
-  STATE_UNREADABLE,
   problemText,
   type Problem,
 } from '../messages.ts';
@@ -44,9 +44,9 @@ export interface DoctorDeps {
   // The compose service name of the app in an instance (the shell
   // doctor's AMAN_DOCTOR_APP_SERVICE, else app).
   appService: string;
-  // The Windows host jobs: only the files check uses them, and only on
-  // Windows. A deps without them (a test of the other checks) runs the
-  // doctor without that one check.
+  // The Windows host jobs: the files check and the backup check use
+  // them, and only on Windows. A deps without them (a test of the
+  // other checks) runs the doctor without those parts.
   windowsJobs?: WindowsJobs;
 }
 
@@ -271,6 +271,8 @@ export function doctorTextLines(records: readonly CheckRecord[], instanceNames: 
 
 // The Problem a state read failure is reported with, shared by the
 // doctor and by the upgrade's health gate, which reads the same way.
+// The unreadable record gets the doctor's own next step, since the
+// doctor is the command a person runs to find what is wrong.
 export function doctorStoreProblem(error: unknown, kind: SystemKind): Problem {
   if (error instanceof StateBusyError) {
     return STATE_BUSY;
@@ -281,7 +283,7 @@ export function doctorStoreProblem(error: unknown, kind: SystemKind): Problem {
   if (error instanceof StateImageError) {
     return STATE_IMAGE_UNAVAILABLE;
   }
-  return STATE_UNREADABLE;
+  return DOCTOR_STATE_UNREADABLE;
 }
 
 export interface DoctorChecks {

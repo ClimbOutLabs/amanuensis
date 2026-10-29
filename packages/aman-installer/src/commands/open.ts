@@ -49,7 +49,7 @@ async function dockerAnswers(runner: ProcessRunner): Promise<boolean> {
 // The instance's recorded app port: the registry's app_port, with the
 // port of the recorded public address behind it. Reading the record is
 // the rule (the starter spec's review): the port is never assumed.
-function recordedPort(entries: readonly RegistryEntry[]): number | null {
+export function recordedPort(entries: readonly RegistryEntry[]): number | null {
   const appPort = registryValue(entries, 'app_port');
   if (appPort !== null && /^\d+$/.test(appPort)) {
     const port = Number.parseInt(appPort, 10);
@@ -74,7 +74,7 @@ function recordedPort(entries: readonly RegistryEntry[]): number | null {
 // Whether an instance is served over https: the shell's one rule
 // (serves_https in shared.sh). The local authority is on, an https port
 // is recorded, and at least one address is recorded.
-function servesHttps(entries: readonly RegistryEntry[]): boolean {
+export function servesHttps(entries: readonly RegistryEntry[]): boolean {
   return (
     registryValue(entries, 'tls') === 'local' &&
     (registryValue(entries, 'tls_port') ?? '') !== '' &&
@@ -112,7 +112,7 @@ function originKind(origin: string): OriginKind {
 
 // The https address people should open: the shell's tls_open_url rule,
 // the first https address of the instance in display order.
-function httpsAddress(entries: readonly RegistryEntry[]): string | null {
+export function httpsAddress(entries: readonly RegistryEntry[]): string | null {
   const origins = (registryValue(entries, 'origins') ?? '')
     .split(',')
     .map(origin => origin.trim())

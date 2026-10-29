@@ -1,4 +1,4 @@
-import { writeFile } from 'node:fs/promises';
+import { mkdir, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:net';
 import { win32 } from 'node:path';
 
@@ -19,8 +19,43 @@ export const CA_CERT_FILE_NAME = 'ca.crt';
 export const CHECK_AMAN_SHORTCUT_NAME = 'Check Aman';
 // The Start menu entry the upgrade keeps, running aman upgrade.
 export const UPDATE_AMAN_SHORTCUT_NAME = 'Update Aman';
+// The Start menu entry that opens the folder the backups land in.
+export const BACKUPS_SHORTCUT_NAME = 'Backups';
+// The folder inside the Amanuensis folder where the backups land on
+// the Windows disk, named as the shell names its backups folder.
+export const BACKUPS_FOLDER_NAME = 'backups';
+// The Task Scheduler task that makes the daily backup, in the folder
+// the plan froze, at the shell schedule's hour (schedule.sh).
+export const BACKUP_TASK_NAME = 'Amanuensis\\Daily backup';
+export const BACKUP_TASK_TIME = '03:30';
+// The Start menu entry that shows the phone address and scan code
+// again, running aman network open.
+export const PHONE_SHORTCUT_NAME = 'Use Aman on my phone';
+// The one inbound firewall rule that lets devices on the private
+// networks reach Aman: one name, so it can be found, changed and
+// (on uninstall) removed.
+export const FIREWALL_RULE_NAME = 'Aman';
 // Docker Desktop's own install place, the file the starter starts.
 export const DOCKER_DESKTOP_EXE = 'C:\\Program Files\\Docker\\Docker\\Docker Desktop.exe';
+// Where Docker Desktop's installer is downloaded from, and the name
+// it is saved under in the Amanuensis folder while it is checked and
+// run.
+export const DOCKER_DESKTOP_DOWNLOAD_URL = 'https://desktop.docker.com/win/main/amd64/Docker%20Desktop%20Installer.exe';
+export const DOCKER_DESKTOP_INSTALLER_FILE_NAME = 'Docker Desktop Installer.exe';
+// The getting started page the first install saves into the
+// Amanuensis folder and opens at the end.
+export const GETTING_STARTED_FILE_NAME = 'Getting started.html';
+// The resume entry the first install sets before Docker Desktop is
+// installed: if the install restarts the computer, Windows runs this
+// once at the next sign-in, and the setup carries on. Its key and
+// value name are fixed here, as the other Windows names are. The name
+// starts with "!": Windows takes a RunOnce value down before the
+// program it names runs, unless the name starts with "!", which holds
+// the taking-down off until the run itself clears it. Without the
+// mark, the run Windows reopens could never see its own entry, and
+// could not tell it was resumed.
+export const RUN_ONCE_KEY = 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\RunOnce';
+export const RUN_ONCE_VALUE_NAME = '!Amanuensis Setup';
 
 // What replaces the starter's copy of Aman-Setup.cmd: three lines that
 // hand every argument to the aman command, so a shortcut or a habit that
@@ -37,7 +72,10 @@ export interface WindowsPaths {
   programsExePath: string;
   dataDir: string;
   setupCmdCopyPath: string;
+  backupsDir: string;
   caCertPath: string;
+  dockerDesktopInstallerPath: string;
+  gettingStartedPath: string;
 }
 
 export function windowsPaths(localAppDataDir: string): WindowsPaths {
@@ -48,7 +86,10 @@ export function windowsPaths(localAppDataDir: string): WindowsPaths {
     programsExePath: win32.join(programsDir, EXE_FILE_NAME),
     dataDir,
     setupCmdCopyPath: win32.join(dataDir, SETUP_CMD_FILE_NAME),
+    backupsDir: win32.join(dataDir, BACKUPS_FOLDER_NAME),
     caCertPath: win32.join(dataDir, CA_CERT_FILE_NAME),
+    dockerDesktopInstallerPath: win32.join(dataDir, DOCKER_DESKTOP_INSTALLER_FILE_NAME),
+    gettingStartedPath: win32.join(dataDir, GETTING_STARTED_FILE_NAME),
   };
 }
 
@@ -70,9 +111,7 @@ export interface AclEntry {
 // answer. A folder that is not there is its own answer, because a check
 // before anything is installed has nothing to judge.
 export type AclRead =
-  | { status: 'read'; owner: string; entries: readonly AclEntry[] }
-  | { status: 'missing' }
-  | { status: 'unreadable' };
+  { status: 'read'; owner: string; entries: readonly AclEntry[] } | { status: 'missing' } | { status: 'unreadable' };
 
 export class WindowsJobError extends Error {}
 
@@ -107,7 +146,8 @@ export function parseAclListing(options: { path: string; text: string }): AclEnt
     for (const match of line.slice(colon + 1).matchAll(/\(([^)]*)\)/g)) {
       groups.push(match[1] ?? '');
     }
-    const canRead = !groups.includes('DENY') && groups.some(group => group.split(',').some(part => ACL_READ_TOKENS.has(part.trim())));
+    const canRead =
+      !groups.includes('DENY') && groups.some(group => group.split(',').some(part => ACL_READ_TOKENS.has(part.trim())));
     entries.push({ principal, canRead });
   }
   return entries;
@@ -133,6 +173,14 @@ export interface WindowsJobs {
   // The folder under the per-user application data folder where Aman
   // keeps its own files on this PC: the Aman-Setup copy lives there.
   readonly dataDir: string;
+  // The folder inside it where the backups land on this PC.
+  readonly backupsDir: string;
+  // Where the downloaded Docker Desktop installer is saved, the file
+  // the first install checks and then runs.
+  readonly dockerDesktopInstallerPath: string;
+  // Where the getting started page is saved, the file the first
+  // install opens in the browser at the end.
+  readonly gettingStartedPath: string;
   // Copies the running executable into the Programs folder. 'already'
   // when the running executable is the copy there (adopt run twice).
   copySelfToPrograms: () => Promise<'copied' | 'already'>;
@@ -150,6 +198,30 @@ export interface WindowsJobs {
   // Makes the "Update Aman" Start menu entry, or points the existing
   // one at the aman command, running aman upgrade.
   ensureUpdateAmanShortcut: () => Promise<void>;
+  // Makes the "Backups" Start menu entry, or points the existing one
+  // at the folder the backups land in, so choosing it opens that folder.
+  ensureBackupsShortcut: () => Promise<void>;
+  // Makes the daily backup task, or remakes it in the same shape:
+  // every day at 03:30, running aman backup as the person, only while
+  // they are signed in, with no password stored.
+  ensureDailyBackupTask: () => Promise<void>;
+  // True when the daily backup task is there.
+  dailyBackupTaskPresent: () => Promise<boolean>;
+  // The names in the backups folder, as they stand. A folder that is
+  // not there yet lists as empty.
+  listBackups: () => Promise<readonly string[]>;
+  // Makes the "Use Aman on my phone" Start menu entry, or points the
+  // existing one at the aman command, running aman network open.
+  ensurePhoneShortcut: () => Promise<void>;
+  // Lets devices on the private networks reach Aman: one inbound
+  // firewall rule for the given ports, the Private profile only, made
+  // by one short elevated helper process (one Windows prompt). A rule
+  // already there under the same name is replaced.
+  openFirewallToHome: (ports: readonly number[]) => Promise<void>;
+  // Turns that rule off, so devices on the network can no longer reach
+  // Aman. The rule itself is removed only on uninstall. A rule that is
+  // not there at all is already closed, and is not a failure.
+  closeFirewallToHome: () => Promise<void>;
   // Replaces the starter's copy of Aman-Setup.cmd with the forwarder.
   replaceSetupCmdCopyWithForwarder: () => Promise<void>;
   // Writes the local authority's certificate, public part only, into
@@ -160,6 +232,29 @@ export interface WindowsJobs {
   addCaCertificateToUserStore: () => Promise<void>;
   startDockerDesktop: () => Promise<void>;
   openBrowser: (url: string) => Promise<void>;
+  // Saves the downloaded Docker Desktop installer into the
+  // Amanuensis folder, making the folder when it is not there yet.
+  writeDockerDesktopInstaller: (bytes: Uint8Array) => Promise<void>;
+  // Who signed the saved Docker Desktop installer, as its signature
+  // names them, or null when the signature does not check out or
+  // names nobody. The install judges the name, not this job.
+  dockerDesktopInstallerSigner: () => Promise<string | null>;
+  // Sets the resume entry: after a restart, Windows runs this program
+  // once at the next sign-in, so an install the restart stopped
+  // carries on.
+  ensureRunOnceResume: () => Promise<void>;
+  // True when the resume entry is set: this run was opened by it, or
+  // an earlier run was stopped before it could be taken down.
+  runOnceResumePending: () => Promise<boolean>;
+  // Takes the resume entry down once Docker is running again.
+  clearRunOnceResume: () => Promise<void>;
+  // Asks the computer not to sleep while long work runs: a hidden
+  // helper holds the request for a few hours, or until the computer
+  // restarts.
+  keepComputerAwake: () => Promise<void>;
+  // Writes the getting started page into the Amanuensis folder,
+  // where the person can find it again.
+  writeGettingStartedPage: (text: string) => Promise<void>;
   // Makes a folder private to the person: inherited access is removed
   // and only their own account keeps full control, which the folders
   // and files later made inside it inherit.
@@ -225,10 +320,32 @@ export function systemWindowsJobs(options: {
     return userName;
   };
 
+  // Changing the firewall needs the person's one Yes to the Windows
+  // prompt, so the netsh command runs in a short elevated helper
+  // process and this side only reads how it ended: 3 is the helper
+  // never starting (the prompt was refused), anything else is the
+  // netsh command's own exit code, handed back for the caller to judge.
+  const runElevatedNetsh = async (argumentList: string): Promise<number> => {
+    const script =
+      `try { $p = Start-Process -FilePath 'cmd.exe' -ArgumentList ${psQuote(argumentList)} ` +
+      `-Verb RunAs -Wait -PassThru -ErrorAction Stop } catch { exit 3 }; exit $p.ExitCode`;
+    const result = await runner.run('powershell', ['-NoProfile', '-NonInteractive', '-Command', script]);
+    if (!result.started) {
+      throw new WindowsJobError('the Windows step to change the firewall rule did not run');
+    }
+    if (result.exitCode === 3) {
+      throw new WindowsJobError('the Windows prompt for the firewall change was refused');
+    }
+    return result.exitCode;
+  };
+
   return {
     programsExePath: paths.programsExePath,
     setupCmdCopyPath: paths.setupCmdCopyPath,
     dataDir: paths.dataDir,
+    backupsDir: paths.backupsDir,
+    dockerDesktopInstallerPath: paths.dockerDesktopInstallerPath,
+    gettingStartedPath: paths.gettingStartedPath,
 
     async copySelfToPrograms() {
       if (options.selfExePath.toLowerCase() === paths.programsExePath.toLowerCase()) {
@@ -315,6 +432,102 @@ export function systemWindowsJobs(options: {
       );
     },
 
+    async ensureBackupsShortcut() {
+      await runPowerShell(
+        `$shell = New-Object -ComObject WScript.Shell; ` +
+          `$path = Join-Path ([Environment]::GetFolderPath('Programs')) ${psQuote(`${BACKUPS_SHORTCUT_NAME}.lnk`)}; ` +
+          `$shortcut = $shell.CreateShortcut($path); ` +
+          `$shortcut.TargetPath = ${psQuote(paths.backupsDir)}; $shortcut.Save()`,
+      );
+    },
+
+    async ensureDailyBackupTask() {
+      // /F remakes a task that is already there, so making it again
+      // leaves the same task, as the other ensure steps leave the same
+      // entry. No user or password is named: the task runs as the
+      // person, and /IT runs it only while they are signed in.
+      const result = await runner.run('schtasks', [
+        '/Create',
+        '/TN',
+        BACKUP_TASK_NAME,
+        '/TR',
+        `"${paths.programsExePath}" backup`,
+        '/SC',
+        'DAILY',
+        '/ST',
+        BACKUP_TASK_TIME,
+        '/RL',
+        'LIMITED',
+        '/IT',
+        '/F',
+      ]);
+      if (!result.started || result.exitCode !== 0) {
+        throw new WindowsJobError('the daily backup task could not be made');
+      }
+    },
+
+    async dailyBackupTaskPresent() {
+      const result = await runner.run('schtasks', ['/Query', '/TN', BACKUP_TASK_NAME]);
+      return result.started && result.exitCode === 0;
+    },
+
+    async listBackups() {
+      const stdout = await runPowerShell(
+        `[Console]::OutputEncoding = [Text.Encoding]::UTF8; ` +
+          `if (Test-Path -LiteralPath ${psQuote(paths.backupsDir)}) { ` +
+          `Get-ChildItem -LiteralPath ${psQuote(paths.backupsDir)} -Directory | ForEach-Object { $_.Name } }`,
+      );
+      return stdout
+        .split('\n')
+        .map(line => line.replace(/\r$/, '').trim())
+        .filter(line => line !== '');
+    },
+
+    async ensurePhoneShortcut() {
+      await runPowerShell(
+        `$shell = New-Object -ComObject WScript.Shell; ` +
+          `$path = Join-Path ([Environment]::GetFolderPath('Programs')) ${psQuote(`${PHONE_SHORTCUT_NAME}.lnk`)}; ` +
+          `$shortcut = $shell.CreateShortcut($path); ` +
+          `$shortcut.TargetPath = ${psQuote(paths.programsExePath)}; ` +
+          `$shortcut.Arguments = 'network open'; $shortcut.Save()`,
+      );
+    },
+
+    async openFirewallToHome(ports: readonly number[]) {
+      // The old rule goes first inside the same elevated helper, so
+      // opening again replaces the rule instead of adding a second
+      // one, and the person still sees only one Windows prompt.
+      const argumentList =
+        `/c netsh advfirewall firewall delete rule name="${FIREWALL_RULE_NAME}" >nul 2>&1 & ` +
+        `netsh advfirewall firewall add rule name="${FIREWALL_RULE_NAME}" dir=in action=allow ` +
+        `protocol=TCP localport=${ports.join(',')} profile=private`;
+      const exitCode = await runElevatedNetsh(argumentList);
+      if (exitCode !== 0) {
+        throw new WindowsJobError('the firewall rule could not be made');
+      }
+    },
+
+    async closeFirewallToHome() {
+      const argumentList = `/c netsh advfirewall firewall set rule name="${FIREWALL_RULE_NAME}" new enable=no`;
+      const exitCode = await runElevatedNetsh(argumentList);
+      if (exitCode === 0) {
+        return;
+      }
+      // The set command also fails when there is no rule to turn off,
+      // which is the closed state already: only a rule that is really
+      // there makes this a failure. Reading the rules needs no prompt.
+      const shown = await runner.run('netsh', [
+        'advfirewall',
+        'firewall',
+        'show',
+        'rule',
+        `name=${FIREWALL_RULE_NAME}`,
+      ]);
+      if (shown.started && shown.exitCode === 0) {
+        throw new WindowsJobError('the firewall rule could not be turned off');
+      }
+    },
+
     async replaceSetupCmdCopyWithForwarder() {
       try {
         await writeFile(paths.setupCmdCopyPath, SETUP_CMD_FORWARDER, 'utf8');
@@ -344,6 +557,76 @@ export function systemWindowsJobs(options: {
 
     async openBrowser(url: string) {
       await runPowerShell(`Start-Process ${psQuote(url)}`);
+    },
+
+    async writeDockerDesktopInstaller(bytes: Uint8Array) {
+      try {
+        await mkdir(paths.dataDir, { recursive: true });
+        await writeFile(paths.dockerDesktopInstallerPath, bytes);
+      } catch (error) {
+        throw new WindowsJobError('the Docker Desktop download could not be saved', { cause: error });
+      }
+    },
+
+    async dockerDesktopInstallerSigner() {
+      const stdout = await runPowerShell(
+        `$s = Get-AuthenticodeSignature -FilePath ${psQuote(paths.dockerDesktopInstallerPath)}; ` +
+          `if ($s.Status -eq 'Valid' -and $null -ne $s.SignerCertificate) { Write-Output $s.SignerCertificate.Subject }`,
+      ).catch(() => '');
+      const subject = stdout.trim();
+      return subject === '' ? null : subject;
+    },
+
+    async ensureRunOnceResume() {
+      const result = await runner.run('reg', [
+        'add',
+        RUN_ONCE_KEY,
+        '/v',
+        RUN_ONCE_VALUE_NAME,
+        '/t',
+        'REG_SZ',
+        '/d',
+        `"${options.selfExePath}"`,
+        '/f',
+      ]);
+      if (!result.started || result.exitCode !== 0) {
+        throw new WindowsJobError('the setup could not be set to open again after a restart');
+      }
+    },
+
+    async runOnceResumePending() {
+      const result = await runner.run('reg', ['query', RUN_ONCE_KEY, '/v', RUN_ONCE_VALUE_NAME]);
+      return result.started && result.exitCode === 0;
+    },
+
+    async clearRunOnceResume() {
+      const result = await runner.run('reg', ['delete', RUN_ONCE_KEY, '/v', RUN_ONCE_VALUE_NAME, '/f']);
+      if (!result.started || result.exitCode !== 0) {
+        throw new WindowsJobError('the entry that opens the setup again could not be taken down');
+      }
+    },
+
+    async keepComputerAwake() {
+      // The request lives with the thread that makes it, so the
+      // helper that makes it stays open, hidden, holding it. The
+      // state is the continuous one: it holds until cleared, and the
+      // helper's own sleep bounds it to this work.
+      const inner =
+        `Add-Type -Name 'AmanAwake' -Namespace 'Aman' -MemberDefinition ` +
+        `'[DllImport("kernel32.dll")] public static extern uint SetThreadExecutionState(uint esFlags);'; ` +
+        `[void][Aman.AmanAwake]::SetThreadExecutionState([uint32]0x80000001); Start-Sleep -Seconds 7200`;
+      await runPowerShell(
+        `Start-Process -FilePath 'powershell.exe' -WindowStyle Hidden -ArgumentList '-NoProfile', '-Command', ${psQuote(inner)}`,
+      );
+    },
+
+    async writeGettingStartedPage(text: string) {
+      try {
+        await mkdir(paths.dataDir, { recursive: true });
+        await writeFile(paths.gettingStartedPath, text, 'utf8');
+      } catch (error) {
+        throw new WindowsJobError('the getting started page could not be written', { cause: error });
+      }
     },
 
     async makeFolderPrivate(path: string) {

@@ -522,7 +522,12 @@ export type {
   TrackedExecutionBinding,
 } from './permissions/tier';
 export type { ToolGrantIdentity, ToolGrantKey, ToolGrantStore } from './permissions/toolGrants';
-export { SILENT_SEARCH_LIMIT, createWebSearchTurnState, pageImageUrls } from './permissions/webSearch';
+export {
+  PAGE_PICTURES_LABEL,
+  SILENT_SEARCH_LIMIT,
+  createWebSearchTurnState,
+  pageImageUrls,
+} from './permissions/webSearch';
 export type { SearchProviderGrant, WebSearchTurnState } from './permissions/webSearch';
 export {
   FETCHED_PAGE_TEXT_MAX_CHARS,

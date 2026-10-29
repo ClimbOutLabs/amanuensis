@@ -20,6 +20,7 @@ import {
   UPGRADE_NOT_WINDOWS,
   UPGRADE_OLD_PROGRAM_NOT_BACK,
   UPGRADE_PROGRAM_MISSING,
+  UPGRADE_RELEASE_NOT_THERE,
   UPGRADE_ROLLED_BACK,
   UPGRADE_SMOKE_FAILED,
   UPGRADE_SOURCE_FAILED,
@@ -31,6 +32,7 @@ import {
   VERIFY_SIGNATURE_BAD,
   verifyChangedProblem,
 } from '../../src/messages.ts';
+import type { FetchBytesResult } from '../../src/release/download.ts';
 import { buildManifest, manifestToBytes, type SourceIds } from '../../src/release/manifest.ts';
 import { signMinisign } from '../../src/release/minisign.ts';
 import {
@@ -116,6 +118,8 @@ function storeWith(summary: StateSummary): StateStore {
     setInstanceValue: () => Promise.resolve(false),
     removeInstance: () => Promise.resolve(),
     writeRelease: () => Promise.resolve(false),
+    setBackupsMode: () => Promise.resolve(false),
+    refreshCache: () => undefined,
   };
 }
 
@@ -294,21 +298,21 @@ async function makeWorld(options: WorldOptions = {}): Promise<World> {
   const servedExe = options.servedExe ?? NEW_PROGRAM;
   const servedArchive = options.servedArchive ?? ARCHIVE_BYTES;
   const fetchedUrls: string[] = [];
-  const fetchBytes = (url: string): Promise<Uint8Array | null> => {
+  const fetchBytes = (url: string): Promise<FetchBytesResult> => {
     fetchedUrls.push(url);
     if (url === MANIFEST_URL) {
-      return Promise.resolve(manifest.manifestBytes);
+      return Promise.resolve({ data: manifest.manifestBytes });
     }
     if (url === SIGNATURE_URL) {
-      return Promise.resolve(new TextEncoder().encode(manifest.signatureText));
+      return Promise.resolve({ data: new TextEncoder().encode(manifest.signatureText) });
     }
     if (url === ASSET_URL) {
-      return Promise.resolve(servedExe);
+      return Promise.resolve({ data: servedExe });
     }
     if (url === ARCHIVE_URL) {
-      return Promise.resolve(servedArchive);
+      return Promise.resolve({ data: servedArchive });
     }
-    return Promise.resolve(null);
+    return Promise.resolve({ unreachable: true });
   };
 
   const answers = options.answers ?? readyAnswers();
@@ -457,10 +461,19 @@ test('a manifest that fails its signature check refuses before anything moves', 
 
 test('an unreachable release page is a download refusal', async () => {
   const world = await makeWorld({});
-  world.deps.fetchBytes = () => Promise.resolve(null);
+  world.deps.fetchBytes = () => Promise.resolve({ unreachable: true });
   const exitCode = await runUpgrade(world.deps);
   assert.equal(exitCode, 1);
   assert.deepEqual(world.printed, [problemText(UPGRADE_DOWNLOAD_FAILED)]);
+  assert.equal(world.recording.lines().length, 0);
+});
+
+test('a release page that answers without the record names the page, not the connection', async () => {
+  const world = await makeWorld({});
+  world.deps.fetchBytes = () => Promise.resolve({ missing: true });
+  const exitCode = await runUpgrade(world.deps);
+  assert.equal(exitCode, 1);
+  assert.deepEqual(world.printed, [problemText(UPGRADE_RELEASE_NOT_THERE)]);
   assert.equal(world.recording.lines().length, 0);
 });
 

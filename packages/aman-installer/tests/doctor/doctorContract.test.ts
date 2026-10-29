@@ -19,7 +19,7 @@ import {
 import { folderBackend } from '../../src/state/folderBackend.ts';
 import { createStateStore } from '../../src/state/state.ts';
 import { buildTar } from '../../src/state/tar.ts';
-import { volumeBackend } from '../../src/state/volumeBackend.ts';
+import { VOLUME_HOME, volumeBackend } from '../../src/state/volumeBackend.ts';
 
 // The contract between the shell doctor and this one, over one fixture
 // state: the machine checks must agree record for record, and the
@@ -217,6 +217,18 @@ class VolumeWorldRunner implements ProcessRunner {
 
   run(command: string, args: readonly string[]): Promise<ProcessResult> {
     if (args.includes('ls')) {
+      const dir = args[args.length - 1];
+      if (dir === VOLUME_HOME) {
+        // The tree read first asks which of its folders the volume holds.
+        const names = new Set<string>();
+        for (const path of this.files.keys()) {
+          const first = path.split('/')[0];
+          if (first !== undefined && first !== '') {
+            names.add(first);
+          }
+        }
+        return Promise.resolve(okResult(`${[...names].join('\n')}\n`));
+      }
       return Promise.resolve(okResult('20261009T120000Z\n20261008T120000Z\n'));
     }
     return this.inner.run(command, args);

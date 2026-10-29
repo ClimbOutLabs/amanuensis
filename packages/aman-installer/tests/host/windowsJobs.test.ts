@@ -35,6 +35,7 @@ const ACL_LISTING = readFileSync(new URL('../golden/acl-listing.txt', import.met
 // can write down every command line for the golden.
 class AnswerRunner implements ProcessRunner {
   private readonly userPath: string;
+  private runOnceSet = false;
 
   constructor(userPath: string) {
     this.userPath = userPath;
@@ -44,15 +45,34 @@ class AnswerRunner implements ProcessRunner {
     if (command === 'whoami') {
       return Promise.resolve(okResult('FRIEND-PC\\Friend\r\n'));
     }
+    if (command === 'reg') {
+      if (args[0] === 'add') {
+        this.runOnceSet = true;
+        return Promise.resolve(okResult(''));
+      }
+      if (args[0] === 'delete') {
+        this.runOnceSet = false;
+        return Promise.resolve(okResult(''));
+      }
+      if (args[0] === 'query') {
+        return Promise.resolve(this.runOnceSet ? okResult('') : { exitCode: 1, stdout: '', stderr: '', started: true });
+      }
+    }
     if (command === 'icacls') {
       if (args.includes('/inheritance:r')) {
         return Promise.resolve(okResult('Successfully processed 1 files; Failed processing 0 files'));
       }
       return Promise.resolve(okResult(ACL_LISTING));
     }
+    if (command === 'schtasks') {
+      return Promise.resolve(okResult(''));
+    }
     const script = args[3] ?? '';
     if (script.includes("GetEnvironmentVariable('Path', 'User')")) {
       return Promise.resolve(okResult(this.userPath));
+    }
+    if (script.includes('-Directory')) {
+      return Promise.resolve(okResult('20261009T120000Z\r\n20261008T120000Z\r\n'));
     }
     if (script.includes('Get-ChildItem')) {
       return Promise.resolve(okResult(SHORTCUT_LISTING));
@@ -82,8 +102,55 @@ test('the golden file holds every command line the Windows jobs run', async () =
   await jobs.openBrowser('http://127.0.0.1:8791');
   await jobs.makeFolderPrivate(DATA_DIR);
   await jobs.readFolderAcl(DATA_DIR);
+  await jobs.ensureDailyBackupTask();
+  assert.equal(await jobs.dailyBackupTaskPresent(), true);
+  await jobs.ensureBackupsShortcut();
+  assert.deepEqual(await jobs.listBackups(), ['20261009T120000Z', '20261008T120000Z']);
+  await jobs.ensurePhoneShortcut();
+  await jobs.openFirewallToHome([8443, 8791]);
+  await jobs.closeFirewallToHome();
+  assert.equal(await jobs.dockerDesktopInstallerSigner(), null);
+  await jobs.ensureRunOnceResume();
+  assert.equal(await jobs.runOnceResumePending(), true);
+  await jobs.clearRunOnceResume();
+  assert.equal(await jobs.runOnceResumePending(), false);
+  await jobs.keepComputerAwake();
   const golden = readFileSync(new URL('../golden/windows-jobs-commands.txt', import.meta.url), 'utf8');
   assert.equal(recording.goldenText(), golden);
+});
+
+test('the daily backup task is absent when the query fails, and a refused make fails as a job error', async () => {
+  const queryLine = commandLine('schtasks', ['/Query', '/TN', 'Amanuensis\\Daily backup']);
+  const absent = new StubProcessRunner(
+    new Map<string, ProcessResult>([
+      [
+        queryLine,
+        { exitCode: 1, stdout: '', stderr: 'ERROR: The system cannot find the file specified.', started: true },
+      ],
+    ]),
+  );
+  assert.equal(await jobsWith(absent).dailyBackupTaskPresent(), false);
+  const createLine = commandLine('schtasks', [
+    '/Create',
+    '/TN',
+    'Amanuensis\\Daily backup',
+    '/TR',
+    '"C:\\Users\\Friend\\AppData\\Local\\Programs\\Amanuensis\\aman.exe" backup',
+    '/SC',
+    'DAILY',
+    '/ST',
+    '03:30',
+    '/RL',
+    'LIMITED',
+    '/IT',
+    '/F',
+  ]);
+  const refused = new StubProcessRunner(
+    new Map<string, ProcessResult>([
+      [createLine, { exitCode: 1, stdout: '', stderr: 'ERROR: Access is denied.', started: true }],
+    ]),
+  );
+  await assert.rejects(jobsWith(refused).ensureDailyBackupTask(), WindowsJobError);
 });
 
 test('a folder access list is read into who it names and whether they can read', async () => {
@@ -160,6 +227,71 @@ test('making a folder private that refuses fails as a Windows job error', async 
   await assert.rejects(jobsWith(refused).makeFolderPrivate(DATA_DIR), WindowsJobError);
 });
 
+// A runner that answers the elevated firewall helper and the rule
+// reading from a script the test sets: the helper's exit code, and
+// whether a rule is there to read.
+class FirewallRunner implements ProcessRunner {
+  private readonly helperExitCode: number;
+  private readonly rulePresent: boolean;
+
+  constructor(options: { helperExitCode: number; rulePresent: boolean }) {
+    this.helperExitCode = options.helperExitCode;
+    this.rulePresent = options.rulePresent;
+  }
+
+  run(command: string, _args: readonly string[]): Promise<ProcessResult> {
+    if (command === 'netsh') {
+      return Promise.resolve(
+        this.rulePresent ? okResult('Rule Name: Aman\n') : { exitCode: 1, stdout: '', stderr: '', started: true },
+      );
+    }
+    return Promise.resolve({ exitCode: this.helperExitCode, stdout: '', stderr: '', started: true });
+  }
+
+  runBytes(): Promise<ProcessBytesResult> {
+    return Promise.resolve({ exitCode: 1, stdout: new Uint8Array(), stderr: '', started: false });
+  }
+}
+
+test('the phone entry is made by the same shortcut owner, running aman network open', async () => {
+  const recording = new RecordingProcessRunner(new AnswerRunner(''));
+  const jobs = jobsWith(recording);
+  await jobs.ensurePhoneShortcut();
+  assert.deepEqual(recording.lines(), [
+    `powershell -NoProfile -NonInteractive -Command "$shell = New-Object -ComObject WScript.Shell; $path = Join-Path ([Environment]::GetFolderPath('Programs')) 'Use Aman on my phone.lnk'; $shortcut = $shell.CreateShortcut($path); $shortcut.TargetPath = 'C:\\Users\\Friend\\AppData\\Local\\Programs\\Amanuensis\\aman.exe'; $shortcut.Arguments = 'network open'; $shortcut.Save()"`,
+  ]);
+});
+
+test('opening the firewall runs one elevated helper holding the delete and the add', async () => {
+  const recording = new RecordingProcessRunner(new FirewallRunner({ helperExitCode: 0, rulePresent: false }));
+  const jobs = jobsWith(recording);
+  await jobs.openFirewallToHome([8791]);
+  assert.deepEqual(recording.lines(), [
+    `powershell -NoProfile -NonInteractive -Command "try { $p = Start-Process -FilePath 'cmd.exe' -ArgumentList '/c netsh advfirewall firewall delete rule name=\\"Aman\\" >nul 2>&1 & netsh advfirewall firewall add rule name=\\"Aman\\" dir=in action=allow protocol=TCP localport=8791 profile=private' -Verb RunAs -Wait -PassThru -ErrorAction Stop } catch { exit 3 }; exit $p.ExitCode"`,
+  ]);
+});
+
+test('a refused Windows prompt fails the firewall change', async () => {
+  const jobs = jobsWith(new FirewallRunner({ helperExitCode: 3, rulePresent: false }));
+  await assert.rejects(jobs.openFirewallToHome([8443, 8791]), WindowsJobError);
+  await assert.rejects(jobs.closeFirewallToHome(), WindowsJobError);
+});
+
+test('a firewall helper that fails its command fails the change', async () => {
+  const jobs = jobsWith(new FirewallRunner({ helperExitCode: 1, rulePresent: false }));
+  await assert.rejects(jobs.openFirewallToHome([8443, 8791]), WindowsJobError);
+});
+
+test('closing the firewall with no rule there is already closed, not a failure', async () => {
+  const jobs = jobsWith(new FirewallRunner({ helperExitCode: 1, rulePresent: false }));
+  await jobs.closeFirewallToHome();
+});
+
+test('closing the firewall with a rule that stays on is a failure', async () => {
+  const jobs = jobsWith(new FirewallRunner({ helperExitCode: 1, rulePresent: true }));
+  await assert.rejects(jobs.closeFirewallToHome(), WindowsJobError);
+});
+
 test('the Update Aman entry is made by the same shortcut owner, running aman upgrade', async () => {
   const recording = new RecordingProcessRunner(new AnswerRunner(''));
   const jobs = jobsWith(recording);
@@ -209,7 +341,46 @@ test('the frozen Windows paths are the ones the starter named', () => {
   const paths = windowsPaths(LOCAL_APP_DATA);
   assert.equal(paths.programsExePath, 'C:\\Users\\Friend\\AppData\\Local\\Programs\\Amanuensis\\aman.exe');
   assert.equal(paths.setupCmdCopyPath, 'C:\\Users\\Friend\\AppData\\Local\\Amanuensis\\Aman-Setup.cmd');
+  assert.equal(paths.backupsDir, 'C:\\Users\\Friend\\AppData\\Local\\Amanuensis\\backups');
   assert.equal(paths.caCertPath, 'C:\\Users\\Friend\\AppData\\Local\\Amanuensis\\ca.crt');
+});
+
+test('the frozen Windows paths name the Docker Desktop installer and the getting started page', () => {
+  const paths = windowsPaths(LOCAL_APP_DATA);
+  assert.equal(
+    paths.dockerDesktopInstallerPath,
+    'C:\\Users\\Friend\\AppData\\Local\\Amanuensis\\Docker Desktop Installer.exe',
+  );
+  assert.equal(paths.gettingStartedPath, 'C:\\Users\\Friend\\AppData\\Local\\Amanuensis\\Getting started.html');
+});
+
+test('the signer of the saved Docker Desktop installer is read from its signature', async () => {
+  const signerRunner: ProcessRunner = {
+    run: (command, args) => {
+      const script = args[3] ?? '';
+      if (command === 'powershell' && script.includes('Get-AuthenticodeSignature')) {
+        return Promise.resolve(okResult('CN=Docker Inc, O=Docker Inc, L=San Francisco, S=California, C=US\r\n'));
+      }
+      return Promise.resolve(okResult(''));
+    },
+    runBytes: () => Promise.resolve({ exitCode: 1, stdout: new Uint8Array(), stderr: '', started: false }),
+  };
+  const jobs = jobsWith(signerRunner);
+  assert.equal(
+    await jobs.dockerDesktopInstallerSigner(),
+    'CN=Docker Inc, O=Docker Inc, L=San Francisco, S=California, C=US',
+  );
+});
+
+test('a page write that cannot happen fails as a Windows job error', async () => {
+  const jobs = systemWindowsJobs({
+    runner: new AnswerRunner(''),
+    // Far longer than any file name a disk allows, so the write fails.
+    localAppDataDir: 'C:\\' + 'a'.repeat(300),
+    selfExePath: SELF,
+  });
+  await assert.rejects(jobs.writeGettingStartedPage('page'), WindowsJobError);
+  await assert.rejects(jobs.writeDockerDesktopInstaller(new Uint8Array([1, 2, 3])), WindowsJobError);
 });
 
 test('the forwarder golden file is the forwarder, byte for byte', () => {
