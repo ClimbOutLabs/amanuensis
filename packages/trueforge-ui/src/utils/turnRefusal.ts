@@ -45,7 +45,7 @@ export function sendRefusalText({ refusal, assistantName }: { refusal: SendRefus
     case 'skills_off_without_sandbox':
       return 'Skills are off for this chat because the space they run in is not ready yet.';
     case 'skills_off_sandbox_turned_off':
-      return 'Skills are off for this chat because the space they run in is turned off for it.';
+      return 'Skills are off for this chat because the space they run in is turned off for it. Turn it on to use skills.';
   }
 }
 

@@ -3,7 +3,7 @@
 import { useTrueFoundryAgentSpec, useTrueFoundryUpdateAgentSpec } from '@truefoundry/assistant-ui-runtime';
 import { useEffect } from 'react';
 
-import { useReportChatNotice } from '../../hooks/useChatNotice.js';
+import { useSkillsNoticeReporter } from '../../hooks/useChatNotice.js';
 import { skillsHeldBack, type DraftPreferenceKind } from '../../server/draftSpecPreferences.js';
 import { useServerCapabilities } from '../../server/ServerContext.js';
 import { useShellMode } from '../../server/ShellModeContext.js';
@@ -142,7 +142,7 @@ export function DraftSpecPreferenceBridge() {
   const { mode, pendingSessionId, rememberDraftSpec } = useShellMode();
   const { agentSpec } = useTrueFoundryAgentSpec();
   const updateAgentSpec = useTrueFoundryUpdateAgentSpec();
-  const reportChatNotice = useReportChatNotice();
+  const reportSkillsNotice = useSkillsNoticeReporter();
   const capabilities = useServerCapabilities();
   const sandboxEnabled = capabilities?.sandbox.enabled;
   const { models, skills, connectors, connectorsLoaded, loaded, error, ensureLoaded } = useDraftCatalog();
@@ -170,9 +170,10 @@ export function DraftSpecPreferenceBridge() {
 
   const heldBack = isPlainDraft && preferenceKind === 'chat' ? skillsHeldBack(agentSpec, sandboxEnabled) : null;
   useEffect(() => {
-    if (heldBack === 'sandbox_unavailable') reportChatNotice('skills_off_without_sandbox');
-    if (heldBack === 'sandbox_turned_off') reportChatNotice('skills_off_sandbox_turned_off');
-  }, [heldBack, reportChatNotice]);
+    if (heldBack === 'sandbox_unavailable') reportSkillsNotice('skills_off_without_sandbox');
+    else if (heldBack === 'sandbox_turned_off') reportSkillsNotice('skills_off_sandbox_turned_off');
+    else reportSkillsNotice(null);
+  }, [heldBack, reportSkillsNotice]);
 
   useEffect(() => {
     // Mounts are reconciled as soon as the connector list alone has been read. The full

@@ -13,7 +13,7 @@ import {
   type ReactNode,
 } from 'react';
 
-import { isSkillsNotice, type SendRefusal } from '../utils/turnRefusal.js';
+import { isSkillsNotice, type SendRefusal, type SkillsNotice } from '../utils/turnRefusal.js';
 
 /** Why the chat's last send got no reply, told in one plain line. */
 export type ChatNotice = {
@@ -49,11 +49,11 @@ export function createChatNoticeChannel(): ChatNoticeChannel {
 }
 
 const ChatNoticeContext = createContext<ChatNotice | null>(null);
-const ReportChatNoticeContext = createContext<(kind: SendRefusal) => void>(() => undefined);
+const SkillsNoticeContext = createContext<(kind: SkillsNotice | null) => void>(() => undefined);
 
-/** Lets a part of the chat page tell the chat's notice line something, outside a failed send. */
-export function useReportChatNotice(): (kind: SendRefusal) => void {
-  return useContext(ReportChatNoticeContext);
+/** Raises the line about skills left out of this chat, or takes it down again with `null`. */
+export function useSkillsNoticeReporter(): (kind: SkillsNotice | null) => void {
+  return useContext(SkillsNoticeContext);
 }
 
 /** The notice for the chat this component renders in, if any. */
@@ -88,15 +88,23 @@ export function ChatNoticeProvider({ channel, children }: { channel: ChatNoticeC
     }
   }, [notice, sessionId]);
 
-  const report = useCallback((kind: SendRefusal) => setNotice({ kind, sessionId }), [sessionId]);
+  const reportSkills = useCallback(
+    (kind: SkillsNotice | null) =>
+      setNotice(prev => {
+        if (kind !== null) return { kind, sessionId };
+        // Only the skills line is taken down; a refused send's line stays until the next send.
+        return prev !== null && isSkillsNotice(prev.kind) ? null : prev;
+      }),
+    [sessionId],
+  );
 
   const value = useMemo<ChatNotice | null>(
     () => (notice == null ? null : { ...notice, dismiss: () => setNotice(null) }),
     [notice],
   );
   return createElement(
-    ReportChatNoticeContext.Provider,
-    { value: report },
+    SkillsNoticeContext.Provider,
+    { value: reportSkills },
     createElement(ChatNoticeContext.Provider, { value }, children),
   );
 }

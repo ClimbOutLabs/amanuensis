@@ -113,8 +113,7 @@ export function skillsHeldBack(
 /** The spec to send: the server refuses skills without a sandbox. The draft and its stored choices keep them. */
 export function withoutSkillsWhenSandboxOff(spec: AgentSpec, sandboxEnabled: boolean | null | undefined): AgentSpec {
   if (skillsHeldBack(spec, sandboxEnabled) === null) return spec;
-  const { skills, ...rest } = spec;
-  void skills;
+  const { skills: _skills, ...rest } = spec;
   return rest;
 }
 
