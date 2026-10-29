@@ -135,7 +135,7 @@ describe('aman demo-seed', () => {
   it('prefers the Super model when it is configured and no --model is given', async () => {
     const { deps, calls } = fakeDeps({
       enabled: true,
-      models: ['a/ultra', 'nvidia/nemotron-3-super-120b-a12b', 'b/two'],
+      models: ['a/ultra', 'tokenfactory/nemotron-3-super-120b-a12b', 'b/two'],
     });
 
     expect(await createDemoSeed(deps)({ args: [], io: fakeIo().io })).toBe(0);
@@ -145,7 +145,7 @@ describe('aman demo-seed', () => {
         userId: 'judge@example.com',
         now: NOW,
         timeZone: 'Europe/Lisbon',
-        modelName: 'nvidia/nemotron-3-super-120b-a12b',
+        modelName: 'tokenfactory/nemotron-3-super-120b-a12b',
         today: undefined,
       },
     ]);
@@ -162,7 +162,7 @@ describe('aman demo-seed', () => {
   });
 
   it('an explicit --model wins over the Super default', async () => {
-    const { deps, calls } = fakeDeps({ enabled: true, models: ['nvidia/nemotron-3-super-120b-a12b', 'b/two'] });
+    const { deps, calls } = fakeDeps({ enabled: true, models: ['tokenfactory/nemotron-3-super-120b-a12b', 'b/two'] });
 
     expect(await createDemoSeed(deps)({ args: ['--model', 'b/two'], io: fakeIo().io })).toBe(0);
 

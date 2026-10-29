@@ -2,6 +2,7 @@ import type { CalendarDay } from '@truefoundry/trueforge-core/core/util/calendar
 import { isValidTimezone } from '@truefoundry/trueforge-core/core/util/clientTimezone';
 import { parseArgs } from 'node:util';
 import { DEFAULT_TOKEN_FACTORY_MODEL } from '../../runtime/tokenFactoryDefaults';
+import { envManagedDefaultModelName } from '../../runtime/tokenFactoryProvider';
 import type { Command } from '../command';
 import { UsageError, type CliIo } from '../io';
 import type { DemoSeedSession } from './session';
@@ -85,8 +86,9 @@ function pickModel({ requested, available }: { requested: string | undefined; av
     return requested;
   }
   // The demo is tuned for the Token Factory Super model; fall back to the first configured one.
-  if (available.includes(DEFAULT_TOKEN_FACTORY_MODEL)) {
-    return DEFAULT_TOKEN_FACTORY_MODEL;
+  const superModel = envManagedDefaultModelName(DEFAULT_TOKEN_FACTORY_MODEL);
+  if (available.includes(superModel)) {
+    return superModel;
   }
   const [first] = available;
   if (first === undefined) {
