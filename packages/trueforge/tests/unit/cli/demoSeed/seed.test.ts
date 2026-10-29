@@ -1,4 +1,5 @@
 import { AgentSpecSchema, Sessions, type CreatedBySubject } from '@truefoundry/trueforge-core/agent-session';
+import { CALDAV_SERVER_NAME } from '@truefoundry/trueforge-core/core/calendar/caldav/toolContract';
 import { MAIL_CONNECTOR_NAME } from '@truefoundry/trueforge-core/core/email/mailConnector/toolContract';
 import { defaultSearchConnector } from '../../../../src/catalog/defaultSearchConnector';
 import { SkillCatalog } from '../../../../src/catalog/SkillCatalog';
@@ -266,8 +267,12 @@ describe('demo seed against the real stores', () => {
     const again = await seed(stores, DAY_TWO);
 
     const stored = await stores.agentStore.getAgent({ tenant_id: TENANT_ID, name: DEMO_AGENT_NAME });
-    expect(stored?.manifest.mcp_servers?.map(server => server.name)).toEqual(['mail']);
-    expect(again.agent).toBe('unchanged');
+    expect(stored?.manifest.mcp_servers?.map(server => server.name)).toEqual([
+      'mail',
+      MAIL_CONNECTOR_NAME,
+      'parallel-web',
+    ]);
+    expect(again.agent).toBe('updated');
   });
 
   it('moves only the dates that follow the day on the next seed, and keeps the rest', async () => {
@@ -636,6 +641,30 @@ describe('demo seed against the real stores', () => {
         first_party: false,
         manifest: { type: 'remote', url: 'https://search.parallel.ai/mcp', search_provider: true },
       });
+    });
+
+    it('gives the agent the mail, calendar and search connectors the instance has, once each', async () => {
+      await stores.mcpServerStore.upsertServer({
+        tenant_id: TENANT_ID,
+        name: CALDAV_SERVER_NAME,
+        manifest: {
+          type: 'remote',
+          name: CALDAV_SERVER_NAME,
+          url: 'http://calendar.test/mcp',
+          description: 'Calendar',
+        },
+        first_party: true,
+      });
+      await seed(stores, DAY_ONE);
+      const again = await seed(stores, DAY_TWO);
+
+      const agent = await stores.agentStore.getAgent({ tenant_id: TENANT_ID, name: DEMO_AGENT_NAME });
+      expect(agent?.manifest.mcp_servers?.map(server => server.name)).toEqual([
+        MAIL_CONNECTOR_NAME,
+        CALDAV_SERVER_NAME,
+        'parallel-web',
+      ]);
+      expect(again.agent).toBe('unchanged');
     });
 
     it('keeps both connectors ensured on a re-seed, without adding either twice', async () => {
