@@ -217,7 +217,7 @@ describe('formatMemoryBlock', () => {
   it('drops whole items once the budget is exceeded and counts them', () => {
     // Each line is "[undated] " + 36 a's = 46 chars -> 11.5 estimated tokens. The fixed
     // overhead now also reserves room for the framing sentence (see MEMORY_FRAMING_SENTENCE)
-    // ahead of the wrapper tags and stats line; a budget of 200 leaves an item budget that fits 2
+    // ahead of the wrapper tags and stats line; a budget of 220 leaves an item budget that fits 2
     // whole items but not a 3rd, so 2 are dropped.
     const results = [
       { id: '1', text: 'a'.repeat(36) },
@@ -225,7 +225,7 @@ describe('formatMemoryBlock', () => {
       { id: '3', text: 'a'.repeat(36) },
       { id: '4', text: 'a'.repeat(36) },
     ];
-    const formatted = formatMemoryBlock({ results, entities: [], budgetTokens: 200 });
+    const formatted = formatMemoryBlock({ results, entities: [], budgetTokens: 220 });
 
     expect(formatted.includedItems).toBe(2);
     expect(formatted.droppedOverBudget).toBe(2);
@@ -1849,6 +1849,37 @@ describe('applyRelevanceGate', () => {
     const result = applyRelevanceGate({ items, entities: [], minScore: 0.5, maxItems: 12, maxEntities: 8 });
     expect(result.items.map(item => item.id)).toEqual(['1', '3']);
     expect(result.droppedBelowThreshold).toBe(2);
+  });
+
+  it('ranks items naming a person from the message ahead of higher-scored items, then caps and filters', () => {
+    const items: RecallItem[] = [
+      recallItem({ id: 'lisbon', text: 'Photo gear for Lisbon walks.', score: 0.9 }),
+      recallItem({ id: 'fado', text: 'Fado nights are on Thursdays.', score: 0.8 }),
+      recallItem({ id: 'wendy', text: "Maya's really good friend is Wendy.", score: 0.6 }),
+      recallItem({ id: 'low', text: 'Wendy likes tea.', score: 0.1 }),
+    ];
+    const result = applyRelevanceGate({
+      items,
+      entities: [],
+      minScore: 0.5,
+      maxItems: 12,
+      maxEntities: 8,
+      message: "Hi June, remember Wendy's is coming up in December.",
+    });
+    expect(result.items.map(item => item.id)).toEqual(['wendy', 'lisbon', 'fado']);
+    expect(result.droppedBelowThreshold).toBe(1);
+  });
+
+  it('keeps provider order when the message names nobody or only uses a lowercase common word', () => {
+    const items: RecallItem[] = [
+      recallItem({ id: 'lisbon', text: 'Photo gear for Lisbon walks.' }),
+      recallItem({ id: 'wendy', text: "Maya's really good friend is Wendy." }),
+      recallItem({ id: 'fado', text: 'Fado nights are on Thursdays.' }),
+    ];
+    for (const message of ['what did I say about photo gear?', 'I want to attend a fado night with wendy']) {
+      const result = applyRelevanceGate({ items, entities: [], minScore: 0.5, maxItems: 12, maxEntities: 8, message });
+      expect(result.items.map(item => item.id)).toEqual(['lisbon', 'wendy', 'fado']);
+    }
   });
 
   it('keeps an item scored exactly at the threshold', () => {

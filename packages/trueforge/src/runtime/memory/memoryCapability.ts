@@ -61,6 +61,7 @@ import { ASSISTANT_RESPONSE_SOURCE, isNoteTooOld, noteProvenance, withoutNoteTra
 import { MEMORY_ORIGIN_METADATA_KEY, USER_STATED_ORIGIN, type AmanMemoryOrigin } from './memoryOrigin';
 import { retainOperationId, submitRetain } from './memoryRetain';
 import { decideMemoryRoute } from './memoryRouting';
+import { rankNamedPeopleFirst } from './recallNameBoost';
 import { ScreenClient, type ScreenClassifyResult } from './screenClient';
 import { QUERY_STOPWORDS } from './stopWords';
 
@@ -931,10 +932,14 @@ export function applyRelevanceGate(input: {
   maxEntities: number;
   /** Post-compaction damping posture: drop every entity summary regardless of score or rank. */
   suppressEntities?: boolean;
+  /** The person's newest message: items naming a person it mentions rank ahead of the rest. */
+  message?: string;
 }): RelevanceGateResult {
-  const { items, entities, minScore, maxItems, maxEntities, suppressEntities = false } = input;
+  const { entities, minScore, maxItems, maxEntities, suppressEntities = false, message } = input;
   let droppedBelowThreshold = 0;
 
+  // Ordered before the rank cap and the token budget, since both drop from the end of the list.
+  const items = message === undefined ? input.items : rankNamedPeopleFirst({ candidates: input.items, message });
   const itemsScored = items.some(item => item.score !== undefined);
   const gatedItems = itemsScored
     ? items.filter(item => {
@@ -1555,7 +1560,8 @@ export class HindsightMemoryProcessor implements PreLLMProcessor, PreLLMEphemera
       // every entity summary outright (`suppressEntities`) rather than folding into that rank
       // cap, so a normal, non-damped turn is never narrowed by the damping posture.
       const gated = applyRelevanceGate({
-        // Notes older than the freshness limit stay stored but are not recalled.
+        // Read content older than the freshness limit stays stored but is not recalled; the
+        // assistant's own replies are always recalled.
         items: recall.outcome.results.filter(
           item =>
             !item.text.trim().startsWith(LEARNED_PROFILE_CLEARED_CONTENT) &&
@@ -1566,6 +1572,7 @@ export class HindsightMemoryProcessor implements PreLLMProcessor, PreLLMEphemera
         maxItems: this.config.recallMaxItems,
         maxEntities: this.config.recallMaxEntities,
         suppressEntities: applyDamping,
+        message: parts[parts.length - 1] ?? '',
       });
       items = gated.items.map(item => withLocalDay({ item, timeZone: this.timeZone }));
       entities = gated.entities;

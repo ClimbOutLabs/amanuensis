@@ -1,4 +1,9 @@
-import { buildDocumentsInstruction, DocumentTools } from '../../../../src/core/capabilities/builtins/DocumentTools';
+import {
+  buildDocumentsInstruction,
+  CREATE_DOCUMENT_REPORT_TOOL_NAME,
+  DOCUMENT_REPORT_TOOL_NAMES,
+  DocumentTools,
+} from '../../../../src/core/capabilities/builtins/DocumentTools';
 import { InstructionBuilder } from '../../../../src/core/InstructionBuilder';
 import { NOOP_AGENT_TRACING } from '../../../../src/core/tracing/NoopAgentTracing';
 import { EXTRACT_DOCUMENT_TEXT_TOOL_NAME } from '../../../../src/documents/toolContract';
@@ -24,5 +29,25 @@ describe('DocumentTools guidance', () => {
     );
     expect(text).toContain('Unreadable or unsupported files produce issues, never guesses.');
     expect(text).toContain('Do not use the language model as a PDF/OCR parser or invent missing values.');
+  });
+
+  it('offers the report tools to a chat turn', async () => {
+    const tools = new DocumentTools(makeStubPublicSandbox(), NOOP_AGENT_TRACING);
+    const names = (await tools.listTools()).result.tools.map(tool => tool.name);
+    expect(names).toEqual(expect.arrayContaining([...DOCUMENT_REPORT_TOOL_NAMES, EXTRACT_DOCUMENT_TEXT_TOOL_NAME]));
+  });
+
+  it('leaves the report tools out when a run withholds them, and keeps extraction', async () => {
+    const tools = new DocumentTools(makeStubPublicSandbox(), NOOP_AGENT_TRACING, undefined, DOCUMENT_REPORT_TOOL_NAMES);
+    const names = (await tools.listTools()).result.tools.map(tool => tool.name);
+    expect(names).toEqual([EXTRACT_DOCUMENT_TEXT_TOOL_NAME]);
+  });
+
+  it('does not mention a withheld report tool in the guidance', () => {
+    const builder = new InstructionBuilder('system-prompt');
+    buildDocumentsInstruction(builder, { withheldTools: DOCUMENT_REPORT_TOOL_NAMES });
+    const text = builder.build();
+    expect(text).not.toContain(CREATE_DOCUMENT_REPORT_TOOL_NAME);
+    expect(text).toContain('Unreadable or unsupported files produce issues, never guesses.');
   });
 });

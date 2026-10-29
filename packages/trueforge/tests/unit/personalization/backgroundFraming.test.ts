@@ -5,7 +5,8 @@ describe('BACKGROUND_NOT_WORK_SENTENCE', () => {
     'never work to start',
     'not a request',
     'latest message',
-    'nothing to do yet',
+    'answers something you asked, take the answer and continue',
+    'truly gives you nothing to do',
     'read together with this chat so far',
   ])('says "%s"', phrase => {
     expect(BACKGROUND_NOT_WORK_SENTENCE).toContain(phrase);

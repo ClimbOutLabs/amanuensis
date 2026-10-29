@@ -132,6 +132,45 @@ describe('aman demo-seed', () => {
     expect(JSON.parse(out.join(''))).toMatchObject({ action: 'seed', user: 'judge@example.com', report: SEED_REPORT });
   });
 
+  it('prefers the Super model when it is configured and no --model is given', async () => {
+    const { deps, calls } = fakeDeps({
+      enabled: true,
+      models: ['a/ultra', 'tokenfactory/nemotron-3-super-120b-a12b', 'b/two'],
+    });
+
+    expect(await createDemoSeed(deps)({ args: [], io: fakeIo().io })).toBe(0);
+
+    expect(calls.seed).toEqual([
+      {
+        userId: 'judge@example.com',
+        now: NOW,
+        timeZone: 'Europe/Lisbon',
+        modelName: 'tokenfactory/nemotron-3-super-120b-a12b',
+        today: undefined,
+      },
+    ]);
+  });
+
+  it('falls back to the first configured model when the Super model is absent', async () => {
+    const { deps, calls } = fakeDeps({ enabled: true, models: ['a/ultra', 'b/two'] });
+
+    expect(await createDemoSeed(deps)({ args: [], io: fakeIo().io })).toBe(0);
+
+    expect(calls.seed).toEqual([
+      { userId: 'judge@example.com', now: NOW, timeZone: 'Europe/Lisbon', modelName: 'a/ultra', today: undefined },
+    ]);
+  });
+
+  it('an explicit --model wins over the Super default', async () => {
+    const { deps, calls } = fakeDeps({ enabled: true, models: ['tokenfactory/nemotron-3-super-120b-a12b', 'b/two'] });
+
+    expect(await createDemoSeed(deps)({ args: ['--model', 'b/two'], io: fakeIo().io })).toBe(0);
+
+    expect(calls.seed).toEqual([
+      { userId: 'judge@example.com', now: NOW, timeZone: 'Europe/Lisbon', modelName: 'b/two', today: undefined },
+    ]);
+  });
+
   it('takes the user, zone and model from the options', async () => {
     const { deps, calls } = fakeDeps({ enabled: true, models: ['a/one', 'b/two'] });
 

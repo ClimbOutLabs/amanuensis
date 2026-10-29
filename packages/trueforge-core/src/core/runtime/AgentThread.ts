@@ -268,17 +268,20 @@ import {
   BLOCKED_CALLS_PARENT_MESSAGE,
   blockedCallsStopMessage,
   findUnbackedClaim,
+  REPEATED_ACTION_OWNER_MESSAGE,
   REPEATED_ACTION_RESULT,
   repetitionStopMessage,
   stepKindsOf,
   TOOL_MARKUP_RETRY_MESSAGE,
   WRITE_CAP_BLOCKED_RESULT,
+  WRITE_CAP_OWNER_MESSAGE,
   WRITE_CAP_STOP_MESSAGE,
   type UnbackedClaimKind,
 } from './replyActionChecks';
 import {
   clearUnfinished,
   connectorUnreachableText,
+  EMPTY_AFTER_TOOLS_MESSAGE,
   progressRefundFor,
   recordUnfinished,
   REMOVED_TOOL_RESULT,
@@ -300,6 +303,7 @@ import {
   type UnfinishedKind,
 } from './replyBudget';
 import { messageAsksForJson, repairToolResultDump, turnToolResultShapes } from './replyToolDumpRepair';
+import { silentTurnEndLine, turnToolRuns } from './silentTurnEnd';
 import {
   admitToolCallsForBudget,
   cloneTaskState,
@@ -804,6 +808,8 @@ interface StepLLMCallResult {
   outcome: StepOutcome;
   modelMessageEventId: string;
   retryModelMessageEventId: string | undefined;
+  /** Set when the step ended with no words after tools ran: the next step must be the no-tools answer. */
+  answerNext?: true;
 }
 
 const VALID_TRANSITIONS: Record<AgentThreadState, AgentThreadState[]> = {
@@ -4302,6 +4308,20 @@ export class AgentThread {
       emptyTerminalFallback !== undefined &&
       !hasToolCalls(assistantMessage) &&
       assistantMessageContentToStringForSubAgent(assistantMessage.content).trim().length === 0;
+    // A step that ended with no words after tools ran. The first time, one no-tools answer step is
+    // asked for; if that step is also empty, the host writes the line from how the tools ended.
+    const toolRunsThisTurn = turnToolRuns(this.context);
+    const silentAfterTools =
+      finishReason === 'stop' &&
+      !shouldNudgeForEmptyReasoning &&
+      !emptyTerminalFailure &&
+      !hasToolCalls(assistantMessage) &&
+      assistantMessageContentToStringForSubAgent(assistantMessage.content).trim().length === 0 &&
+      this.heldSentences.length === 0 &&
+      toolRunsThisTurn.length > 0;
+    if (silentAfterTools && forcedAnswer !== null) {
+      assistantMessage.content = silentTurnEndLine(toolRunsThisTurn);
+    }
     // A run that ends with actions waiting for its owner says so in its own last message.
     if (
       finishReason === 'stop' &&
@@ -4397,6 +4417,23 @@ export class AgentThread {
       // start/deltas landing under the same id is what keeps a live client's view consistent
       // with what a reload reconstructs from durable output.
       return { outcome: 'continue', modelMessageEventId, retryModelMessageEventId: modelMessageEventId };
+    }
+
+    // Like the nudge above, the empty step is not saved; only the request for the answer is.
+    if (silentAfterTools && forcedAnswer === null) {
+      yield* this.appendToContext({
+        context: [internalSystemMessage(EMPTY_AFTER_TOOLS_MESSAGE)],
+        output: [],
+        currentContextUsage: undefined,
+        usage: result.value.usage,
+      });
+      this.currentState = null;
+      return {
+        outcome: 'continue',
+        modelMessageEventId,
+        retryModelMessageEventId: modelMessageEventId,
+        answerNext: true,
+      };
     }
 
     let completion: SubAgentCompletionMarker | undefined;
@@ -4540,11 +4577,19 @@ export class AgentThread {
     let writeCapBlocked = 0;
     let repeatedBlocked = 0;
     let repeatStop = false;
-    const blocked = (call: InternalEnrichedToolCall, message: string): InternalEnrichedToolCall => ({
+    const blocked = ({
+      call,
+      message,
+      ownerMessage,
+    }: {
+      call: InternalEnrichedToolCall;
+      message: string;
+      ownerMessage: string;
+    }): InternalEnrichedToolCall => ({
       ...call,
       tool_info: {
         ...call.tool_info,
-        pre_dispatch_failure: { kind: 'pre_dispatch_failed' as const, message },
+        pre_dispatch_failure: { kind: 'pre_dispatch_failed' as const, message, owner_message: ownerMessage },
       },
     });
     const guarded = calls.map(call => {
@@ -4571,7 +4616,7 @@ export class AgentThread {
         const limit = readOnly ? REPEAT_LIMIT_READ_TOOLS : REPEAT_LIMIT_OTHER_TOOLS;
         const overLimit = duplicateInStep ? !readOnly : (lastRun?.count ?? 0) >= limit;
         repeatStop = repeatStop || (consecutive && overLimit);
-        return blocked(call, REPEATED_ACTION_RESULT);
+        return blocked({ call, message: REPEATED_ACTION_RESULT, ownerMessage: REPEATED_ACTION_OWNER_MESSAGE });
       }
       // Every tier 3 call counts except a read the host itself vouches for: a search or page read
       // leaves the computer but has its own limits. A server's read-only claim is not enough. A write
@@ -4583,7 +4628,7 @@ export class AgentThread {
       ) {
         if (turn.writeCallsThisTurn >= MAX_WRITE_CALLS_PER_TURN) {
           writeCapBlocked += 1;
-          return blocked(call, WRITE_CAP_BLOCKED_RESULT);
+          return blocked({ call, message: WRITE_CAP_BLOCKED_RESULT, ownerMessage: WRITE_CAP_OWNER_MESSAGE });
         }
         turn.writeCallsThisTurn += 1;
       }
@@ -5757,6 +5802,8 @@ export class AgentThread {
       // Set only when the previous stepLLMCall ended in the empty-answer nudge, so the next call
       // reuses that id instead of a fresh one (see stepLLMCall's retryModelMessageEventId param).
       let pendingRetryModelMessageEventId: string | undefined;
+      // Set when the last step said nothing after tools ran: the next step is the no-tools answer.
+      let answerNext = false;
       // Per execute() call: a new user turn gets one fresh correction, while an
       // unavailable tool repeated in this turn cannot consume the iteration budget.
       const unavailableToolsSeen = new Set<string>();
@@ -5868,13 +5915,17 @@ export class AgentThread {
                 }),
               });
             const removedStreak = replyLedger.removedToolRejectionStreaks.get(this.threadId) ?? 0;
-            const forcedAnswer: ForcedAnswer | null = budgetSpent
-              ? 'budget'
-              : removedStreak >= REMOVED_TOOL_STREAK_STOP_AT
-                ? 'removed_streak'
-                : null;
+            const forcedAnswer: ForcedAnswer | null = answerNext
+              ? 'empty_after_tools'
+              : budgetSpent
+                ? 'budget'
+                : removedStreak >= REMOVED_TOOL_STREAK_STOP_AT
+                  ? 'removed_streak'
+                  : null;
+            answerNext = false;
             replyLedger.stepsByThread.set(this.threadId, stepsSoFar + 1);
-            if (forcedAnswer !== null) {
+            // The request for this answer was saved by the step that came back empty.
+            if (forcedAnswer !== null && forcedAnswer !== 'empty_after_tools') {
               yield* this.appendToContext({
                 context: [
                   internalSystemMessage(
@@ -5900,7 +5951,7 @@ export class AgentThread {
                         toolMapping.get(tool.function.name)?.originalToolName ?? tool.function.name,
                       ),
                   );
-            const llmResult = yield* this.stepLLMCall(sentTools, toolMapping, signal, {
+            const llmResult: StepLLMCallResult = yield* this.stepLLMCall(sentTools, toolMapping, signal, {
               emptyTerminalFallback: undefined,
               retryModelMessageEventId: pendingRetryModelMessageEventId,
               forcedAnswer,
@@ -5908,6 +5959,7 @@ export class AgentThread {
             outcome = llmResult.outcome;
             currentModelMessageEventId = llmResult.modelMessageEventId;
             pendingRetryModelMessageEventId = llmResult.retryModelMessageEventId;
+            answerNext = llmResult.answerNext === true;
             break;
           }
           case 'tool-response-required': {

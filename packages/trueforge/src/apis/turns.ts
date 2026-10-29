@@ -1575,6 +1575,8 @@ export async function beginTurnExecution(params: {
   deps: BeginTurnExecutionDeps;
   /** No person watches this turn (a scheduled run): what would ask is held for the owner. */
   unattended?: boolean | undefined;
+  /** Built-in tool names this turn does not offer. */
+  withheldTools?: readonly string[] | undefined;
 }): Promise<{ turn: TurnHandle<TurnCustom>; drainInput: TurnEventDrainInput }> {
   const clocks = startTurnClocks({ sessionId: params.session.session_id, logger: params.deps.logger });
   try {
@@ -1714,6 +1716,7 @@ async function beginAcceptedTurnExecution(
         },
         command_execution_owner_id: configuration.EXECUTOR_ID,
         unattended: params.unattended,
+        withheld_tools: params.withheldTools,
       });
       return { turn, resolver, memorySummarize };
     },
@@ -1785,6 +1788,7 @@ export async function startTurnInProcess(params: {
   userRef: string;
   deps: BeginTurnExecutionDeps;
   unattended?: boolean | undefined;
+  withheldTools?: readonly string[] | undefined;
 }): Promise<TurnHandle<TurnCustom>> {
   const { turn, drainInput } = await beginTurnExecution(params);
 

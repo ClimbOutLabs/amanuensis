@@ -84,6 +84,7 @@ import type {
   SummaryOutcomeNote,
   UpdateMemoryVaultEntryOutcome,
 } from './memoryClient';
+import { rankNamedPeopleFirst } from './recallNameBoost';
 
 export interface MarkdownMemoryClientConfig {
   /** Base directory for all memory files; each namespace gets a subdirectory. */
@@ -290,7 +291,7 @@ export class MarkdownMemoryClient implements MemoryClient {
     }
   }
 
-  /** One vault's entries best-first: keyword overlap, fused with its own meaning index when ready. The chat being answered is left out of both. */
+  /** One vault's entries best-first: keyword overlap, fused with its own meaning index when ready, then notes naming a person the query asks about moved to the front. The chat being answered is left out. */
   private async rankVault(input: {
     namespace: string;
     scan: NamespaceScan;
@@ -314,18 +315,21 @@ export class MarkdownMemoryClient implements MemoryClient {
     // vector leg cannot contribute, this resolves undefined and ranking stays
     // keyword-only, identical to the pre-embeddings behavior.
     const embeddings = this.embeddings?.(input.namespace);
-    if (embeddings === undefined) {
-      return keywordRanked;
+    let ranked = keywordRanked;
+    if (embeddings !== undefined) {
+      embeddings.ensureWarmed();
+      const fused = await embeddings.fusedRank({
+        query: input.query,
+        keywordHits: keywordRanked,
+        entryTexts: new Map(entries.map(entry => [entry.id, entry.text])),
+        excludeIds,
+        timeoutMs: input.timeoutMs,
+      });
+      ranked = fused ?? keywordRanked;
     }
-    embeddings.ensureWarmed();
-    const fused = await embeddings.fusedRank({
-      query: input.query,
-      keywordHits: keywordRanked,
-      entryTexts: new Map(entries.map(entry => [entry.id, entry.text])),
-      excludeIds,
-      timeoutMs: input.timeoutMs,
-    });
-    return fused ?? keywordRanked;
+    // Applied after fusion so it wins over both legs: the budget cut in recall() happens before
+    // the capability's gate ever sees these entries.
+    return rankNamedPeopleFirst({ candidates: ranked, message: input.query });
   }
 
   async retain(params: { items: RetainItem[]; operationId: string; timeoutMs: number }): Promise<RetainOutcome> {

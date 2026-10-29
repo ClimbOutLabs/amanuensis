@@ -32,6 +32,7 @@ import {
   SchedulePersonaNotFoundError,
   scheduleRunFailureReason,
   ScheduleRunNotFoundError,
+  scheduleWithheldTools,
   startScheduleRun,
 } from '../controller/scheduleDispatch';
 import type { AgentRecord, IAgentStore } from '../db/agentStore';
@@ -277,6 +278,7 @@ export async function startScheduleRunOnRequest<TTransaction>(params: {
     userRef: prepared.userRef,
     // Nobody watches a scheduled run, so it holds what would ask instead of stopping at a card.
     unattended: true,
+    withheldTools: scheduleWithheldTools({ name: item.schedule.name, task: item.schedule.manifest.task }),
     deps: {
       mcpCatalog: deps.mcpCatalog,
       activeTurns: deps.activeTurns,

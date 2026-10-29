@@ -1,3 +1,4 @@
+import { DOCUMENT_REPORT_TOOL_NAMES } from '@truefoundry/trueforge-core/core';
 import { MORNING_BRIEF_PROMPT } from '@truefoundry/trueforge-core/core/schedules/morningBrief';
 import configuration from '../../../src/config';
 import {
@@ -9,6 +10,7 @@ import {
   scheduleRunFailureReason,
   ScheduleRunNotFoundError,
   scheduleTaskText,
+  scheduleWithheldTools,
   startScheduleRun,
 } from '../../../src/controller/scheduleDispatch';
 import type { IBriefItemCompletionStore } from '../../../src/db/briefItemCompletionStore';
@@ -321,5 +323,22 @@ describe('scheduleTaskText', () => {
       since: new Date('2026-10-15T08:00:00.000Z'),
     });
     expect(text).toBe(`${MORNING_BRIEF_PROMPT}\nAlready done, leave these out of the brief: A; B.`);
+  });
+});
+
+describe('scheduleWithheldTools', () => {
+  it('withholds the document report tools from a morning brief run', () => {
+    expect(scheduleWithheldTools({ name: 'morning-brief', task: MORNING_BRIEF_PROMPT })).toEqual(
+      DOCUMENT_REPORT_TOOL_NAMES,
+    );
+    expect(scheduleWithheldTools({ name: 'my-digest', task: MORNING_BRIEF_PROMPT })).toEqual(
+      DOCUMENT_REPORT_TOOL_NAMES,
+    );
+  });
+
+  it('withholds nothing from any other schedule', () => {
+    expect(scheduleWithheldTools({ name: 'weekly-report', task: 'Write the weekly report as a document.' })).toEqual(
+      [],
+    );
   });
 });
