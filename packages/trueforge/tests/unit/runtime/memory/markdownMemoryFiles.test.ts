@@ -7,6 +7,7 @@ import {
   dailyLogEntries,
   entryMetadata,
   formatRetainEntry,
+  hiddenContext,
   isFromSession,
   namespaceDirFor,
   personaForVaultFilesystemNamespace,
@@ -121,7 +122,7 @@ describe('markdownMemoryFiles', () => {
       expect(text).toBe(
         '## 2026-09-19T12:00:00.000Z\n\nThe person has a dog named Rex.\n\n<!-- session_id: chat-7 -->',
       );
-      expect(withoutHiddenMarkers(text)).toBe('## 2026-09-19T12:00:00.000Z\n\nThe person has a dog named Rex.');
+      expect(withoutHiddenMarkers(text)).toBe('The person has a dog named Rex.');
       expect(splitEntries(`${text}\n`)).toEqual([text]);
     });
 
@@ -135,12 +136,12 @@ describe('markdownMemoryFiles', () => {
       const text =
         '## 2026-09-19T12:00:00.000Z\n\nA fact.\n\n<!-- session_id: old-1 -->\n\n<!-- session_id: chat-2 -->';
       expect(entryMetadata(text)).toEqual({ session_id: 'chat-2' });
-      expect(withoutHiddenMarkers(text)).toBe('## 2026-09-19T12:00:00.000Z\n\nA fact.');
+      expect(withoutHiddenMarkers(text)).toBe('A fact.');
     });
 
     it('is dropped from an entry that also closes with the read-content line', () => {
       const text = '## 2026-09-19T12:00:00.000Z\n\nA fact.\n\n<!-- session_id: chat-2 -->\n\n> Source: read content';
-      expect(withoutHiddenMarkers(text)).toBe('## 2026-09-19T12:00:00.000Z\n\nA fact.\n\n> Source: read content');
+      expect(withoutHiddenMarkers(text)).toBe('A fact.\n\n> Source: read content');
     });
 
     it('accepts and rejects the same ids when written and when read back', () => {
@@ -456,22 +457,68 @@ describe('isFromSession', () => {
 describe('withOriginalHiddenMarkers', () => {
   const original = '## 2026-10-26T09:15:58.000Z\n\nThe dentist is Dr Rivera.\n\n<!-- session_id: chat-now -->';
 
-  it('puts the original chat id back after the edited text', () => {
+  it('puts the original time heading and chat id back around the edited text', () => {
     expect(withOriginalHiddenMarkers({ original, edited: 'The dentist is Dr Rivera Jr.' })).toBe(
-      'The dentist is Dr Rivera Jr.\n\n<!-- session_id: chat-now -->',
+      '## 2026-10-26T09:15:58.000Z\n\nThe dentist is Dr Rivera Jr.\n\n<!-- session_id: chat-now -->',
     );
   });
 
   it('keeps the read-content line last', () => {
     expect(withOriginalHiddenMarkers({ original, edited: 'An email said to call.\n\n> Source: read content' })).toBe(
-      'An email said to call.\n\n<!-- session_id: chat-now -->\n\n> Source: read content',
+      '## 2026-10-26T09:15:58.000Z\n\nAn email said to call.\n\n<!-- session_id: chat-now -->\n\n> Source: read content',
     );
   });
 
-  it('leaves the text alone when the original had no chat id or the edit already names one', () => {
-    expect(withOriginalHiddenMarkers({ original: '## 2026-10-26T09:15:58.000Z\n\nx', edited: 'y' })).toBe('y');
+  it('puts the heading back without a chat id, and never doubles a chat id the edit names', () => {
+    expect(withOriginalHiddenMarkers({ original: '## 2026-10-26T09:15:58.000Z\n\nx', edited: 'y' })).toBe(
+      '## 2026-10-26T09:15:58.000Z\n\ny',
+    );
     const edited = 'y\n\n<!-- session_id: chat-other -->';
-    expect(withOriginalHiddenMarkers({ original, edited })).toBe(edited);
+    expect(withOriginalHiddenMarkers({ original, edited })).toBe(`## 2026-10-26T09:15:58.000Z\n\n${edited}`);
+  });
+
+  it('leaves the text alone when the original had neither a time heading nor hidden lines', () => {
+    expect(withOriginalHiddenMarkers({ original: 'Plain text.', edited: 'Edited text.' })).toBe('Edited text.');
+  });
+});
+
+describe('the context line of an entry', () => {
+  const filed = formatRetainEntry({
+    content: 'Lives in Lisbon with a cat.',
+    timestamp: '2026-10-29T15:31:23.376Z',
+    document_id: 'maya-identity',
+    context: 'maya:identity',
+  });
+
+  it('is hidden from the page text when it is an internal id, and handed back on its own', () => {
+    expect(filed).toBe('## 2026-10-29T15:31:23.376Z\n\nLives in Lisbon with a cat.\n\n> maya:identity');
+    expect(withoutHiddenMarkers(filed)).toBe('Lives in Lisbon with a cat.');
+    expect(hiddenContext(filed)).toBe('maya:identity');
+    const withChatId =
+      '## 2026-10-29T15:31:23.376Z\n\nA search note.\n\n> maya:gp-search\n\n<!-- session_id: chat-1 -->';
+    expect(hiddenContext(withChatId)).toBe('maya:gp-search');
+    expect(withoutHiddenMarkers(withChatId)).toBe('A search note.');
+  });
+
+  it('stays on the page when it has spaces, like a source line or a chat title', () => {
+    const read = formatRetainEntry({
+      content: 'Priya asked for the signed form.',
+      timestamp: '2026-10-29T15:31:23.376Z',
+      document_id: 'd',
+      metadata: { origin: 'tool_ingested' },
+    });
+    expect(withoutHiddenMarkers(read)).toBe('Priya asked for the signed form.\n\n> Source: read content');
+    const titled = '## 2026-09-19T12:00:00.000Z\n\nThe dentist is Dr Rivera.\n\n> Chat title: Health admin';
+    expect(withoutHiddenMarkers(titled)).toBe('The dentist is Dr Rivera.\n\n> Chat title: Health admin');
+    expect(hiddenContext(titled)).toBeUndefined();
+    expect(withoutHiddenMarkers('## 2026-09-19T12:00:00.000Z\n\nSee a:b for details.')).toBe('See a:b for details.');
+  });
+
+  it('comes back, with the time heading, when the page saves an edit', () => {
+    const edited = withOriginalHiddenMarkers({ original: filed, edited: 'Lives in Porto with a cat.' });
+    expect(edited).toBe('## 2026-10-29T15:31:23.376Z\n\nLives in Porto with a cat.\n\n> maya:identity');
+    expect(withoutHiddenMarkers(edited)).toBe('Lives in Porto with a cat.');
+    expect(hiddenContext(edited)).toBe('maya:identity');
   });
 });
 
@@ -489,9 +536,9 @@ describe('document id trailer', () => {
       '## 2026-09-19T12:00:00.000Z\n\nLikes tea.\n\n<!-- session_id: chat-7 -->\n\n<!-- document_id: aman-learned-profile-abc123 -->',
     );
     expect(entryMetadata(text)).toEqual({ session_id: 'chat-7', document_id: 'aman-learned-profile-abc123' });
-    expect(withoutHiddenMarkers(text)).toBe('## 2026-09-19T12:00:00.000Z\n\nLikes tea.');
+    expect(withoutHiddenMarkers(text)).toBe('Likes tea.');
     expect(withOriginalHiddenMarkers({ original: text, edited: 'Likes coffee.' })).toBe(
-      'Likes coffee.\n\n<!-- session_id: chat-7 -->\n\n<!-- document_id: aman-learned-profile-abc123 -->',
+      '## 2026-09-19T12:00:00.000Z\n\nLikes coffee.\n\n<!-- session_id: chat-7 -->\n\n<!-- document_id: aman-learned-profile-abc123 -->',
     );
   });
 
@@ -508,6 +555,6 @@ describe('document id trailer', () => {
   it('is absent from entries written before it existed, which read as before', () => {
     const older = '## 2026-09-19T12:00:00.000Z\n\nLikes tea.\n\n<!-- session_id: chat-7 -->';
     expect(entryMetadata(older)).toEqual({ session_id: 'chat-7' });
-    expect(withoutHiddenMarkers(older)).toBe('## 2026-09-19T12:00:00.000Z\n\nLikes tea.');
+    expect(withoutHiddenMarkers(older)).toBe('Likes tea.');
   });
 });
