@@ -1,6 +1,7 @@
 import type { CalendarDay } from '@truefoundry/trueforge-core/core/util/calendarDay';
 import { isValidTimezone } from '@truefoundry/trueforge-core/core/util/clientTimezone';
 import { parseArgs } from 'node:util';
+import { DEFAULT_TOKEN_FACTORY_MODEL } from '../../runtime/tokenFactoryDefaults';
 import type { Command } from '../command';
 import { UsageError, type CliIo } from '../io';
 import type { DemoSeedSession } from './session';
@@ -20,7 +21,7 @@ day's list; --reset removes the synthetic records. --fresh removes everything th
   --user <email>       Demo user's login (default: ${DEFAULT_DEMO_USER})
   --timezone <iana>    Time zone that defines "today" (default: ${DEFAULT_DEMO_TIME_ZONE})
   --today <day>        Treat this day as "today", such as 2026-10-19 (default: the real today in the time zone)
-  --model <p/model>    Model for the personas and agent (default: first configured model)
+  --model <p/model>    Model for the personas and agent (default: the Super model when configured, else the first configured model)
 `;
 
 /** The `--today` day, or undefined when the flag is absent. */
@@ -82,6 +83,10 @@ function pickModel({ requested, available }: { requested: string | undefined; av
       throw new UsageError(`Unknown model "${requested}". Configured models: ${available.join(', ') || 'none'}.`);
     }
     return requested;
+  }
+  // The demo is tuned for the Token Factory Super model; fall back to the first configured one.
+  if (available.includes(DEFAULT_TOKEN_FACTORY_MODEL)) {
+    return DEFAULT_TOKEN_FACTORY_MODEL;
   }
   const [first] = available;
   if (first === undefined) {
