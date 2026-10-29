@@ -48,5 +48,6 @@ describe('AgentThread no-task-no-tools instruction', () => {
     const systemMessage = request?.messages.find(m => m.role === 'system');
     expect(systemMessage?.content).toContain('<no-task-no-tools>');
     expect(systemMessage?.content).toContain(NO_TASK_NO_TOOLS_PROMPT.trim());
+    expect(NO_TASK_NO_TOOLS_PROMPT).toContain('unless the message answers a question you just asked');
   });
 });
