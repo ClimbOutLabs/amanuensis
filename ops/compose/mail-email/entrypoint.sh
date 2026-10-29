@@ -51,7 +51,13 @@ start_server() {
   loaded=$(list_hash)
   loaded_account=$(account_hash)
   load_account
-  mcp-email-server "$@" &
+  # Its own process group, so a stop reaches a launcher's workers too: forcing down only the first
+  # process would leave a worker holding the port, and the restarted server could not bind it.
+  if command -v setsid >/dev/null 2>&1; then
+    setsid mcp-email-server "$@" &
+  else
+    mcp-email-server "$@" &
+  fi
   child=$!
   printf '%s\n' "$loaded" >"$status.tmp"
   mv "$status.tmp" "$status"
@@ -67,21 +73,28 @@ start_server() {
   fi
 }
 
+# Signals the server's whole process group when it has one, else only the server.
+signal_server() {
+  kill "-$1" "-$child" 2>/dev/null || kill "-$1" "$child" 2>/dev/null || true
+}
+
 stop_server() {
   if [ -n "$child" ]; then
     echo "stopping the mail server"
-    kill -TERM "$child" 2>/dev/null || true
+    signal_server TERM
     # The graceful stop is given the grace period, no more: a watchdog forces the server down
     # when the grace runs out, so the wait below always ends and the restart this stop makes
     # room for always happens. A server that stops promptly never meets the watchdog.
     (
-      sleep "$stop_grace"
+      sleep "$stop_grace" >/dev/null 2>&1
       echo "the mail server did not stop within $stop_grace seconds; forcing it down"
-      kill -KILL "$child" 2>/dev/null || true
+      signal_server KILL
     ) &
     watchdog=$!
     wait "$child" 2>/dev/null || true
-    kill "$watchdog" 2>/dev/null || true
+    # KILL, not TERM: the watchdog inherits this shell's TERM trap and would only run it after its sleep
+    # ended, so a plain kill made every restart wait out the whole grace period.
+    kill -KILL "$watchdog" 2>/dev/null || true
     wait "$watchdog" 2>/dev/null || true
     child=
   fi
