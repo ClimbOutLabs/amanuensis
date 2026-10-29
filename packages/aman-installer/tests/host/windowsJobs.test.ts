@@ -68,6 +68,15 @@ test('the golden file holds every command line the Windows jobs run', async () =
   assert.equal(recording.goldenText(), golden);
 });
 
+test('the Update Aman entry is made by the same shortcut owner, running aman upgrade', async () => {
+  const recording = new RecordingProcessRunner(new AnswerRunner(''));
+  const jobs = jobsWith(recording);
+  await jobs.ensureUpdateAmanShortcut();
+  assert.deepEqual(recording.lines(), [
+    `powershell -NoProfile -NonInteractive -Command "$shell = New-Object -ComObject WScript.Shell; $path = Join-Path ([Environment]::GetFolderPath('Programs')) 'Update Aman.lnk'; $shortcut = $shell.CreateShortcut($path); $shortcut.TargetPath = 'C:\\Users\\Friend\\AppData\\Local\\Programs\\Amanuensis\\aman.exe'; $shortcut.Arguments = 'upgrade'; $shortcut.Save()"`,
+  ]);
+});
+
 test('the shortcut listing is read into path, target and arguments', async () => {
   const jobs = jobsWith(new AnswerRunner(''));
   const shortcuts = await jobs.listShortcuts();

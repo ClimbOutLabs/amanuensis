@@ -3,6 +3,7 @@ import { win32 } from 'node:path';
 import {
   CHECK_AMAN_SHORTCUT_NAME,
   SETUP_CMD_FORWARDER,
+  UPDATE_AMAN_SHORTCUT_NAME,
   WindowsJobError,
   userPathHasFolder,
   windowsPaths,
@@ -10,7 +11,16 @@ import {
   type WindowsJobs,
 } from './windowsJobs.ts';
 
-export type FakeWindowsJobStep = 'copy' | 'path' | 'list' | 'point' | 'check' | 'forwarder' | 'docker' | 'browser';
+export type FakeWindowsJobStep =
+  | 'copy'
+  | 'path'
+  | 'list'
+  | 'point'
+  | 'check'
+  | 'update'
+  | 'forwarder'
+  | 'docker'
+  | 'browser';
 
 // A Windows host for tests: the user PATH, the shortcuts and the held
 // ports are held in memory, every job writes down that it ran, and
@@ -93,6 +103,19 @@ export class FakeWindowsJobs implements WindowsJobs {
     this.step('check');
     const path = win32.join(this.startMenuProgramsDir, `${CHECK_AMAN_SHORTCUT_NAME}.lnk`);
     const entry: ShortcutFacts = { path, target: this.programsExePath, args: 'doctor' };
+    const existing = this.shortcuts.findIndex(shortcut => shortcut.path === path);
+    if (existing === -1) {
+      this.shortcuts.push(entry);
+    } else {
+      this.shortcuts[existing] = entry;
+    }
+    return Promise.resolve();
+  }
+
+  ensureUpdateAmanShortcut(): Promise<void> {
+    this.step('update');
+    const path = win32.join(this.startMenuProgramsDir, `${UPDATE_AMAN_SHORTCUT_NAME}.lnk`);
+    const entry: ShortcutFacts = { path, target: this.programsExePath, args: 'upgrade' };
     const existing = this.shortcuts.findIndex(shortcut => shortcut.path === path);
     if (existing === -1) {
       this.shortcuts.push(entry);

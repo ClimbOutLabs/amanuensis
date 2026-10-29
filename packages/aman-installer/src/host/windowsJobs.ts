@@ -14,6 +14,8 @@ export const EXE_FILE_NAME = 'aman.exe';
 export const SETUP_CMD_FILE_NAME = 'Aman-Setup.cmd';
 // The Start menu entry the plan names, running aman doctor.
 export const CHECK_AMAN_SHORTCUT_NAME = 'Check Aman';
+// The Start menu entry the upgrade keeps, running aman upgrade.
+export const UPDATE_AMAN_SHORTCUT_NAME = 'Update Aman';
 // Docker Desktop's own install place, the file the starter starts.
 export const DOCKER_DESKTOP_EXE = 'C:\\Program Files\\Docker\\Docker\\Docker Desktop.exe';
 
@@ -84,6 +86,9 @@ export interface WindowsJobs {
   // Makes the "Check Aman" Start menu entry, or points the existing one
   // at the aman command, running aman doctor.
   ensureCheckAmanShortcut: () => Promise<void>;
+  // Makes the "Update Aman" Start menu entry, or points the existing
+  // one at the aman command, running aman upgrade.
+  ensureUpdateAmanShortcut: () => Promise<void>;
   // Replaces the starter's copy of Aman-Setup.cmd with the forwarder.
   replaceSetupCmdCopyWithForwarder: () => Promise<void>;
   startDockerDesktop: () => Promise<void>;
@@ -207,6 +212,16 @@ export function systemWindowsJobs(options: {
           `$shortcut = $shell.CreateShortcut($path); ` +
           `$shortcut.TargetPath = ${psQuote(paths.programsExePath)}; ` +
           `$shortcut.Arguments = 'doctor'; $shortcut.Save()`,
+      );
+    },
+
+    async ensureUpdateAmanShortcut() {
+      await runPowerShell(
+        `$shell = New-Object -ComObject WScript.Shell; ` +
+          `$path = Join-Path ([Environment]::GetFolderPath('Programs')) ${psQuote(`${UPDATE_AMAN_SHORTCUT_NAME}.lnk`)}; ` +
+          `$shortcut = $shell.CreateShortcut($path); ` +
+          `$shortcut.TargetPath = ${psQuote(paths.programsExePath)}; ` +
+          `$shortcut.Arguments = 'upgrade'; $shortcut.Save()`,
       );
     },
 

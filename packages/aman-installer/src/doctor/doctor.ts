@@ -1,10 +1,11 @@
-import type { Host } from '../host/host.ts';
+import type { Host, SystemKind } from '../host/host.ts';
 import {
   DOCKER_NOT_ANSWERING,
   STATE_BUSY,
   STATE_IMAGE_UNAVAILABLE,
   STATE_UNREADABLE,
   problemText,
+  type Problem,
 } from '../messages.ts';
 import type { ProcessRunner } from '../runner/processRunner.ts';
 import {
@@ -90,8 +91,16 @@ export class CheckList {
 // become records. The host-side lines the shell adds around that call
 // (settings files, the container list, ports, public and network
 // addresses) are not reimplemented here; they stay with the shell
-// doctor, as the plan's PR 3 scope states.
-async function checkInstance(deps: DoctorDeps, list: CheckList, ctx: MachineContext, name: string): Promise<void> {
+// doctor, as the plan's PR 3 scope states. A local run adds the shell's
+// --local: the instance's own checks then skip the ones that reach the
+// network, as the shell's health gate before an upgrade asks them to.
+async function checkInstance(
+  deps: DoctorDeps,
+  list: CheckList,
+  ctx: MachineContext,
+  name: string,
+  local: boolean,
+): Promise<void> {
   if (!ctx.dockerOk) {
     list.record({
       scope: name,
@@ -129,6 +138,7 @@ async function checkInstance(deps: DoctorDeps, list: CheckList, ctx: MachineCont
     'aman',
     'doctor',
     '--text',
+    ...(local ? ['--local'] : []),
   ]);
   const combined = (out.stdout + out.stderr).replace(/\n+$/, '');
   if (out.exitCode !== 0 && out.exitCode !== 1) {
@@ -253,34 +263,58 @@ export function doctorTextLines(records: readonly CheckRecord[], instanceNames: 
   return lines;
 }
 
+// The Problem a state read failure is reported with, shared by the
+// doctor and by the upgrade's health gate, which reads the same way.
+export function doctorStoreProblem(error: unknown, kind: SystemKind): Problem {
+  if (error instanceof StateBusyError) {
+    return STATE_BUSY;
+  }
+  if (error instanceof StateDockerError) {
+    return DOCKER_NOT_ANSWERING[kind];
+  }
+  if (error instanceof StateImageError) {
+    return STATE_IMAGE_UNAVAILABLE;
+  }
+  return STATE_UNREADABLE;
+}
+
+export interface DoctorChecks {
+  summary: StateSummary;
+  records: readonly CheckRecord[];
+  instanceNames: readonly string[];
+}
+
+// The checks themselves, with no printing: the doctor renders them, and
+// the upgrade's health gate judges them. A state read failure is thrown,
+// for the caller to report with doctorStoreProblem.
+export async function runDoctorChecks(deps: DoctorDeps, options: { local: boolean }): Promise<DoctorChecks> {
+  const summary = await deps.store.readSummary();
+  const list = new CheckList();
+  const ctx = await runMachineChecks(deps, list, summary);
+  for (const instance of summary.instances) {
+    await checkInstance(deps, list, ctx, instance.name, options.local);
+  }
+  return {
+    summary,
+    records: list.all(),
+    instanceNames: summary.instances.map(instance => instance.name),
+  };
+}
+
 // aman doctor: the machine checks and each instance's own checks, in one
 // report. It changes nothing: unlike the shell doctor it does not save a
 // host report for the app, and it takes no lock, so the state it reads is
 // only read.
-export async function runDoctor(deps: DoctorDeps, options: { json: boolean }): Promise<number> {
+export async function runDoctor(deps: DoctorDeps, options: { json: boolean; local?: boolean }): Promise<number> {
   const { print } = deps;
-  let summary: StateSummary;
+  let checks: DoctorChecks;
   try {
-    summary = await deps.store.readSummary();
+    checks = await runDoctorChecks(deps, { local: options.local ?? false });
   } catch (error) {
-    if (error instanceof StateBusyError) {
-      print(problemText(STATE_BUSY));
-    } else if (error instanceof StateDockerError) {
-      print(problemText(DOCKER_NOT_ANSWERING[deps.host.kind]));
-    } else if (error instanceof StateImageError) {
-      print(problemText(STATE_IMAGE_UNAVAILABLE));
-    } else {
-      print(problemText(STATE_UNREADABLE));
-    }
+    print(problemText(doctorStoreProblem(error, deps.host.kind)));
     return 1;
   }
-  const list = new CheckList();
-  const ctx = await runMachineChecks(deps, list, summary);
-  for (const instance of summary.instances) {
-    await checkInstance(deps, list, ctx, instance.name);
-  }
-  const records = list.all();
-  const names = summary.instances.map(instance => instance.name);
+  const { records, instanceNames: names } = checks;
   if (options.json) {
     print(doctorJson(records, names));
   } else {
