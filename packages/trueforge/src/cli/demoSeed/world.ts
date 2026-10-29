@@ -132,7 +132,8 @@ export function buildDemoWorld(input: DemoWorldInput): DemoWorld {
     agentDescription: "Maya's personal assistant.",
     agentSpec: AgentSpecSchema.parse({
       model: { name: input.modelName },
-      config: { sandbox: { enabled: true } },
+      // Her mailbox is small: the brief reads whole results instead of sandbox previews it would have to read back.
+      config: { sandbox: { enabled: true }, context_management: { large_tool_response: { enabled: false } } },
       instructions: [
         'You are Nata, a calm personal assistant for Maya, who just moved from Austin to Lisbon.',
         'Use what you remember about her. Warm, friendly, honest, direct and caring.',

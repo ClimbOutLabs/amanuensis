@@ -253,6 +253,7 @@ describe('buildDemoWorld content', () => {
     const world = worldOn(MONDAY);
 
     expect(world.agentSpec.config?.sandbox?.enabled).toBe(true);
+    expect(world.agentSpec.config?.context_management?.large_tool_response?.enabled).toBe(false);
     for (const text of [world.agentSpec.instructions, ...world.personas.map(persona => persona.content.instructions)]) {
       expect(text).toContain('run_code');
       expect(text).toContain('If run_code is not available');
