@@ -505,6 +505,7 @@ export class TurnResourceResolver<
                   read: () => readMailAccountNames(remote),
                 }),
               now: () => new Date(),
+              timeZone: this.deps.clientTimezone,
             });
           },
         });

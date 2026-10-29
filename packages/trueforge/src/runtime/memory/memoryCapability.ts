@@ -1560,7 +1560,8 @@ export class HindsightMemoryProcessor implements PreLLMProcessor, PreLLMEphemera
       // every entity summary outright (`suppressEntities`) rather than folding into that rank
       // cap, so a normal, non-damped turn is never narrowed by the damping posture.
       const gated = applyRelevanceGate({
-        // Notes older than the freshness limit stay stored but are not recalled.
+        // Read content older than the freshness limit stays stored but is not recalled; the
+        // assistant's own replies are always recalled.
         items: recall.outcome.results.filter(
           item =>
             !item.text.trim().startsWith(LEARNED_PROFILE_CLEARED_CONTENT) &&

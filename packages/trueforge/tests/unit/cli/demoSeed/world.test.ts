@@ -142,18 +142,18 @@ describe('buildDemoWorld content', () => {
     // One fragment per section, so a dropped or reworded section fails here.
     for (const fragment of [
       'Run the Morning Brief as a Personal Intelligence Briefing, an OpenUI dashboard, adaptive, never a text dump.',
-      'Check which personas I have configured.',
+      'Do this, in order:',
       "1. EMAIL: check what came in since yesterday's brief (inbox).",
       'List what needs me, most important first, one line each: who, what they want, and by when.',
       'Compare with memory to see if you can help Maya in any way.',
-      '2. DRAFT REPLIES: for each email that needs an answer, write a draft reply in my voice and save them in the chat itself.',
-      "Dont draft emails. Don't send anything.",
+      '2. DRAFT REPLIES: for each email that needs an answer, write a draft reply in my voice and show it in the chat.',
+      'Do not create email drafts in the mailbox. Do not send anything.',
       '3. APPOINTMENTS I TRAVEL TO: for each event with an address, tell me when to leave',
       'Add a buffer of 10 minutes.',
       "4. BRIEFING FOR EACH APPOINTMENT: who I'm meeting, what we last emailed about, anything I promised them",
       'Give me 2 or 3 talking points, and anything I need to bring.',
       '5. TOMORROW AT A GLANCE: anything early tomorrow I should prepare for today.',
-      'send the relevant information to the relevant personas and get their opinion, advice, feedback, todo, etc on it. Let them be judge.',
+      'Do not add opinions from personas or anyone else.',
       'Never send email or change my calendar during the brief.',
       'put it on my "Needs your OK" list.',
       'PERSONAL INTELLIGENCE:',
@@ -162,7 +162,7 @@ describe('buildDemoWorld content', () => {
       'PRIVACY SPINE: the brief is private and can say anything. Drafts are in her voice, carry only recipient-relevant facts, and never send. Nothing escapes.',
       'Surface the single most important actionable item first, on its own highlighted card, never buried.',
       'OUTPUT: write the dashboard in your reply as an openui block (read the OpenUI instructions first; there is no dashboard tool). Draw each route once.',
-      'Sections: header, 📥 Email table, 📝 Drafts, 📅 Calendar, 🧭 Travel, 🎯 Briefing per appointment, 🔭 Tomorrow, ✅ Needs your OK, with color-coded priority badges and emoji markers. Adapt: drop empty sections, never render filler. Plain, direct words; no flowery filler; no em dashes.',
+      'Sections: header, 📥 Email table, 📝 Drafts, 📅 Calendar, 🧭 Travel, 🎯 Briefing per appointment, 🔭 Tomorrow, ✅ Needs your OK, with color-coded priority badges and emoji markers. Adapt: drop empty sections, never render filler. Plain, direct words; no flowery filler; no em dashes. The reply holds only the dashboard: no notes about what you are doing or planning, no text before or after the block.',
     ]) {
       expect(task).toContain(fragment);
     }
@@ -179,6 +179,10 @@ describe('buildDemoWorld content', () => {
     expect([...positions].sort((a, b) => a - b)).toEqual(positions);
     // The old suggested-reply line is gone; the brief text covers drafts itself.
     expect(task).not.toContain('write a short suggested reply in the brief');
+    // The brief never consults personas or invents their opinions.
+    for (const fragment of ['personas I have configured', 'Let them be judge', 'Dont draft emails']) {
+      expect(task).not.toContain(fragment);
+    }
     for (const tool of [DRAFT_EMAIL_TOOL_NAME, UPDATE_DRAFT_TOOL_NAME, SEND_DRAFT_TOOL_NAME]) {
       expect(task).not.toContain(tool);
     }
@@ -264,6 +268,10 @@ describe('buildDemoWorld content', () => {
       expect(text).toContain('list the recent messages and look through them instead of repeating the same words');
       expect(text).not.toContain('Google');
       expect(text).toContain('leave every send for her OK');
+      expect(text).toContain(
+        'make it first on sensible assumptions and say what you assumed; then ask, in one short message, for what you still need. Never ask her to confirm what she already said.',
+      );
+      expect(text).toContain('you cannot order, pay, book or ship, so never offer to');
       expect(text).toContain(
         'If a tool fails or a service is not connected, say so plainly and stop there; never invent what it would have returned.',
       );
