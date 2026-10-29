@@ -1591,12 +1591,13 @@ async function beginAcceptedTurnExecution(
         memoryClientPresent: deps.memoryClient !== undefined,
         personName: deps.personalizationProfile?.user_name ?? undefined,
       });
-      // Same one-read-per-turn contract for the recall screen: the Settings toggle's
-      // persisted override wins when stored, otherwise the MEMORY_SCREEN_ENABLED env default.
+      // The person's memory switch, read once per turn like the settings around it.
       const memoryRecallEnabled = await readMemoryRecallSetting({
         globalSettingsStore: deps.globalSettingsStore,
         logger: deps.logger,
       });
+      // Same one-read-per-turn contract for the recall screen: the Settings toggle's
+      // persisted override wins when stored, otherwise the MEMORY_SCREEN_ENABLED env default.
       const memoryScreenSetting = await readMemoryScreenSetting({
         globalSettingsStore: deps.globalSettingsStore,
         logger: deps.logger,
@@ -2468,11 +2469,12 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
       globalSettingsStore: deps.globalSettingsStore,
       logger: deps.logger,
     });
-    // Same one-read-per-turn contract for the recall screen.
+    // The person's memory switch, read once per turn like the settings around it.
     const memoryRecallEnabled = await readMemoryRecallSetting({
       globalSettingsStore: deps.globalSettingsStore,
       logger: deps.logger,
     });
+    // Same one-read-per-turn contract for the recall screen.
     const memoryScreenSetting = await readMemoryScreenSetting({
       globalSettingsStore: deps.globalSettingsStore,
       logger: deps.logger,

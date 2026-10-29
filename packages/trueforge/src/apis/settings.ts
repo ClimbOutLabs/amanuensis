@@ -112,7 +112,7 @@ export function createSettingsRouter<TTransaction>(deps: SettingsRouterDeps<TTra
     }),
   );
   router.route(
-    '/memory-recall',
+    '/memory-recalls',
     createMemoryRecallRouter({
       globalSettingsStore: deps.globalSettingsStore,
       logger: deps.logger,

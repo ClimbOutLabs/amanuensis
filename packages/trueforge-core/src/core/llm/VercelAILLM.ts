@@ -35,6 +35,7 @@ import type {
   ChatCompletionTool,
 } from 'openai/resources/chat';
 import type { Logger } from 'winston';
+import { personMessageIndex } from '../runtime/contextUtils';
 import { describeUnknownError, extractErrorLogFields } from '../util/errorLogFields';
 import { withFailover } from './failoverLanguageModel';
 import type { ILLM, LLMCreateParams, LLMCreateParamsStreaming } from './ILLM';
@@ -861,7 +862,7 @@ export function shouldAttachReasoningSignature({
 
 /** Ends the host context message so a model does not read it as the person's words. */
 const TURN_CONTEXT_CLOSING =
-  'That is all the host context for this reply. The person did not write it. Their newest message comes next: answer that.';
+  "That is all the host context for this reply. The person did not write it, and none of it is their message. Answer the person's own message, not this context.";
 
 export interface ConvertedMessages {
   instructions: string | undefined;
@@ -873,8 +874,9 @@ export interface ConvertedMessages {
  * Every other system message (the per-reply block, recalled memory, task state) is per-reply context:
  * it goes in a user message of its own just ahead of the person's current message, which follows
  * unchanged, never into `instructions`, so the system prompt and tool list stay byte-identical across
- * replies on every provider. The toolCallId →
- * toolName lookup is built first because tool result messages carry only the id.
+ * replies on every provider. The person's message is the latest user message that is not host
+ * notes or attached file text. The toolCallId → toolName lookup is built first because tool result
+ * messages carry only the id.
  */
 export function convertMessages({
   messages,
@@ -899,7 +901,7 @@ export function convertMessages({
     }
   }
 
-  const lastUserIndex = findLastUserIndex(messages);
+  const lastUserIndex = personMessageIndex(messages);
   const systemParts: string[] = [];
   // With no user message there is nothing to carry per-reply context, so it stays in instructions.
   const turnContextParts: string[] = [];
@@ -962,16 +964,6 @@ function systemContentText(content: ChatCompletionSystemMessageParam['content'])
     return content;
   }
   return content.map(p => p.text).join('');
-}
-
-/** Index of the latest user message, or -1 when there is none. */
-function findLastUserIndex(messages: readonly ChatCompletionMessageParam[]): number {
-  for (let i = messages.length - 1; i >= 0; i -= 1) {
-    if (messages[i]?.role === 'user') {
-      return i;
-    }
-  }
-  return -1;
 }
 
 /** Converts OpenAI tool definitions to the Vercel AI SDK ToolSet. */

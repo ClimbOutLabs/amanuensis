@@ -438,6 +438,18 @@ function MemoryRecallToggle() {
         <p className="mt-0.5 text-xs text-text-secondary">
           When this is off, {assistant} does not bring saved memories into its replies. Saved memories are kept.
         </p>
+        {setting.enabled === null ? null : (
+          <button
+            type="button"
+            className="mt-1 text-xs text-text-secondary underline"
+            disabled={setting.saving}
+            onClick={() => {
+              void setting.clear().catch(() => undefined);
+            }}
+          >
+            Follow each agent&apos;s own setting
+          </button>
+        )}
         {setting.error === null ? null : (
           <p role="alert" className="mt-1 text-xs text-text-secondary">
             {setting.error}

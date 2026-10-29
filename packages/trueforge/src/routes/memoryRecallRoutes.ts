@@ -1,4 +1,4 @@
-/** Memory recall switch routes (mounted at /api/v1/settings/memory-recall). */
+/** Memory recall switch routes (mounted at /api/v1/settings/memory-recalls). */
 import { createRoute } from '@hono/zod-openapi';
 import { RequestErrorResponseSchema } from '../schemas/errors';
 import { GetMemoryRecallResponseSchema, UpdateMemoryRecallRequestSchema } from '../schemas/memoryRecall';
@@ -10,7 +10,7 @@ export const getMemoryRecallRoute = createRoute({
   tags: [OpenApiTag.CAPABILITIES],
   summary: 'Get the memory recall switch',
   description: 'Whether replies use saved memories for every chat. `enabled` is null when the switch was never set.',
-  'x-fern-sdk-group-name': ['settings', 'memoryRecall'],
+  'x-fern-sdk-group-name': ['settings', 'memoryRecalls'],
   'x-fern-sdk-method-name': 'get',
   responses: {
     200: {
@@ -35,7 +35,7 @@ export const putMemoryRecallRoute = createRoute({
   summary: 'Create, replace, or clear the memory recall switch',
   description:
     'Sets whether replies use saved memories in every chat, including chats with a saved agent. `null` clears the switch so each agent follows its own setting.',
-  'x-fern-sdk-group-name': ['settings', 'memoryRecall'],
+  'x-fern-sdk-group-name': ['settings', 'memoryRecalls'],
   'x-fern-sdk-method-name': 'create_or_update',
   request: {
     body: {

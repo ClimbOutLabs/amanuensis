@@ -214,6 +214,7 @@ import {
   NO_SANDBOX_PROMPT,
   NO_TASK_NO_TOOLS_PROMPT,
   noProgressNudgeMessage,
+  personMessageIndex,
   PLAIN_SPEECH_PROMPT,
   policyBlockedNudgeMessage,
   remapToolCallIdSet,
@@ -2914,7 +2915,7 @@ export class AgentThread {
     // Order is the cache order: static instruction, history, then this reply's fixed block
     // and the ephemeral recall block, both just before the current message. The history and
     // the static instruction therefore stay one reusable prefix across replies and steps.
-    messages.splice(currentMessageIndex(messages), 0, {
+    messages.splice(replyInsertIndex(messages), 0, {
       role: 'system',
       content: this.replyContext,
     });
@@ -5881,14 +5882,10 @@ function estimateRawContextTextLength(context: readonly ContextMessage[]): numbe
   return total;
 }
 
-/** Index of the latest user message, the one a reply answers. Appends when there is none. */
-function currentMessageIndex(messages: readonly ChatCompletionMessageParam[]): number {
-  for (let i = messages.length - 1; i >= 0; i -= 1) {
-    if (messages[i]?.role === 'user') {
-      return i;
-    }
-  }
-  return messages.length;
+/** Where per-reply host context goes: just before the person's message, or at the end when there is none. */
+function replyInsertIndex(messages: readonly ChatCompletionMessageParam[]): number {
+  const index = personMessageIndex(messages);
+  return index === -1 ? messages.length : index;
 }
 
 function assertUniqueStateKeys(capabilities: readonly AgentCapability[]): void {

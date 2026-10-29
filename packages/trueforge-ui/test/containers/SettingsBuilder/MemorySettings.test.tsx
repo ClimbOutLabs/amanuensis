@@ -653,6 +653,22 @@ describe('MemorySettings (use memories in replies)', () => {
     });
   });
 
+  it('clears the switch back to the agent setting', async () => {
+    recallState.enabled = true;
+    const { server, setMemoryRecallEnabled } = recallPort(false);
+    renderMemory(server);
+
+    fireEvent.click(await screen.findByRole('button', { name: "Follow each agent's own setting" }));
+    await waitFor(() => {
+      expect(setMemoryRecallEnabled).toHaveBeenLastCalledWith(null);
+    });
+    // Nothing is stored now, so the agent's own value (on) shows and the link is gone.
+    await waitFor(() => {
+      expect(screen.getByRole('switch', { name: 'Use memories in replies' })).toBeChecked();
+    });
+    expect(screen.queryByRole('button', { name: "Follow each agent's own setting" })).not.toBeInTheDocument();
+  });
+
   it('shows a plain message and keeps the old value when the save fails', async () => {
     recallState.enabled = true;
     const { server } = recallPort(true);

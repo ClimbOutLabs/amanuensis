@@ -3,10 +3,10 @@ import { z } from 'zod';
 import { getErrorMessage } from '../../../utils/getErrorMessage.js';
 import type { CreateTrueForgeClientOptions } from '../client.js';
 
+const MemoryRecallSettingSchema = z.object({ enabled: z.boolean().nullable() });
+
 /** The person-level "use memories in replies" switch. `enabled` is null until someone sets it. */
-export interface MemoryRecallSetting {
-  enabled: boolean | null;
-}
+export type MemoryRecallSetting = z.infer<typeof MemoryRecallSettingSchema>;
 
 export interface MemoryRecallCatalog {
   getMemoryRecall(): Promise<MemoryRecallSetting>;
@@ -14,7 +14,7 @@ export interface MemoryRecallCatalog {
   setMemoryRecallEnabled(enabled: boolean | null): Promise<MemoryRecallSetting>;
 }
 
-const MemoryRecallResponseSchema = z.object({ data: z.object({ enabled: z.boolean().nullable() }) });
+const MemoryRecallResponseSchema = z.object({ data: MemoryRecallSettingSchema });
 
 /**
  * Calls GET/PUT /api/v1/settings/memory-recall with the same base URL, token, and fetch the SDK
@@ -25,7 +25,7 @@ export function createMemoryRecallCatalog(options: CreateTrueForgeClientOptions 
   const fetchImpl = options.fetch ?? ((input: RequestInfo | URL, init?: RequestInit) => globalThis.fetch(input, init));
 
   async function request(method: 'GET' | 'PUT', body?: { enabled: boolean | null }): Promise<MemoryRecallSetting> {
-    const response = await fetchImpl(`${base}/api/v1/settings/memory-recall`, {
+    const response = await fetchImpl(`${base}/api/v1/settings/memory-recalls`, {
       method,
       headers: {
         ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),

@@ -14,6 +14,7 @@ import {
   toUserContent,
   VERCEL_AI_PROVIDER_NAMES,
 } from '../../../src/core/llm/VercelAILLM';
+import { internalSystemTag, untrustedDocumentTag } from '../../../src/core/runtime/contextUtils';
 
 // ─────────── parseMimeFromDataUri ───────────
 
@@ -403,11 +404,41 @@ describe('convertMessages', () => {
         role: 'user',
         content: [
           { type: 'text', text: 'Host context for this reply.' },
-          { type: 'text', text: expect.stringContaining('Their newest message comes next') },
+          { type: 'text', text: expect.stringContaining("Answer the person's own message") },
         ],
       },
       { role: 'user', content: 'current question' },
     ]);
+  });
+
+  it("host context goes before the person's message, not before attached file text that follows it", () => {
+    const fileText = untrustedDocumentTag('Extracted text for notes.pdf: the invoice total is 40.');
+    const nudge = internalSystemTag('Answer the person now.');
+    const { messages: result } = convertMessages({
+      messages: [
+        { role: 'system', content: 'Static instruction' },
+        { role: 'system', content: 'Host context for this reply.' },
+        { role: 'user', content: 'What is the total?' },
+        { role: 'user', content: [{ type: 'text', text: fileText }] },
+        { role: 'user', content: nudge },
+      ],
+      provider: 'openai',
+      providerName: 'openai',
+    });
+    expect(result).toEqual([
+      {
+        role: 'user',
+        content: [
+          { type: 'text', text: 'Host context for this reply.' },
+          { type: 'text', text: expect.stringContaining("Answer the person's own message") },
+        ],
+      },
+      { role: 'user', content: 'What is the total?' },
+      { role: 'user', content: [{ type: 'text', text: fileText }] },
+      { role: 'user', content: nudge },
+    ]);
+    // The host context makes no claim about which message follows, and calls none of it the person's message.
+    expect(JSON.stringify(result[0])).not.toContain('comes next');
   });
 
   it('the static instruction is never a later system message, even with no history', () => {
@@ -426,7 +457,7 @@ describe('convertMessages', () => {
         role: 'user',
         content: [
           { type: 'text', text: 'Host context for this reply.' },
-          { type: 'text', text: expect.stringContaining('Their newest message comes next') },
+          { type: 'text', text: expect.stringContaining("Answer the person's own message") },
         ],
       },
       { role: 'user', content: 'hi' },
@@ -559,7 +590,7 @@ describe.each(VERCEL_AI_PROVIDER_NAMES)('convertMessages on %s', provider => {
         content: [
           { type: 'text', text: REPLY_CONTEXT },
           { type: 'text', text: RECALLED_BLOCK },
-          { type: 'text', text: expect.stringContaining('Their newest message comes next') },
+          { type: 'text', text: expect.stringContaining("Answer the person's own message") },
         ],
       },
       { role: 'user', content: 'current question' },

@@ -10,7 +10,7 @@ export interface MemoryRecallRouterDeps<TTransaction> {
   logger: Logger;
 }
 
-/** Settings surface for the person-level memory recall switch (mounted at /api/v1/settings/memory-recall). */
+/** Settings surface for the person-level memory recall switch (mounted at /api/v1/settings/memory-recalls). */
 export function createMemoryRecallRouter<TTransaction>(deps: MemoryRecallRouterDeps<TTransaction>) {
   const router = new OpenAPIHono();
 

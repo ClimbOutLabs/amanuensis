@@ -27,6 +27,8 @@ export interface MemoryRecallSettingState {
   saving: boolean;
   error: string | null;
   setEnabled(enabled: boolean): Promise<void>;
+  /** Clears the switch so each agent follows its own memory setting again. */
+  clear(): Promise<void>;
 }
 
 /**
@@ -58,8 +60,8 @@ export function useMemoryRecallSetting(): MemoryRecallSettingState {
     };
   }, [catalog]);
 
-  const setEnabled = useCallback(
-    async (next: boolean) => {
+  const write = useCallback(
+    async (next: boolean | null) => {
       if (catalog === null) return;
       setOptimistic(next);
       setSaving(true);
@@ -83,6 +85,7 @@ export function useMemoryRecallSetting(): MemoryRecallSettingState {
     enabled: optimistic ?? stored?.enabled ?? null,
     saving,
     error,
-    setEnabled,
+    setEnabled: next => write(next),
+    clear: () => write(null),
   };
 }

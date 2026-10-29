@@ -475,7 +475,7 @@ describe('Host-enforced memory: wiring through the real HTTP API and session sto
       // The framing that marks recalled text as data stays inside the block the model reads.
       expect(contextText).toContain(MEMORY_FRAMING_SENTENCE);
       // The label says the notes are not the person's message and to answer the one that follows.
-      expect(contextText).toContain('Their newest message comes next');
+      expect(contextText).toContain("Answer the person's own message");
 
       // (c) the turn's own persisted events carry the recall outcome, injected_block included
       // verbatim.
@@ -587,7 +587,7 @@ describe('Host-enforced memory: wiring through the real HTTP API and session sto
       );
       expect(onEvent?.injected_block).toContain(CANNED_ITEM_TEXT);
 
-      const off = await server.request('/api/v1/settings/memory-recall', jsonInit('PUT', { enabled: false }));
+      const off = await server.request('/api/v1/settings/memory-recalls', jsonInit('PUT', { enabled: false }));
       expect(off.status).toBe(200);
       expect(await off.json()).toEqual({ data: { enabled: false } });
 
@@ -605,7 +605,7 @@ describe('Host-enforced memory: wiring through the real HTTP API and session sto
       expect(lastRequest ? memoryBlockMessages(lastRequest.messages) : undefined).toEqual([]);
 
       // Clearing the switch hands the choice back to the agent.
-      const cleared = await server.request('/api/v1/settings/memory-recall', jsonInit('PUT', { enabled: null }));
+      const cleared = await server.request('/api/v1/settings/memory-recalls', jsonInit('PUT', { enabled: null }));
       expect(await cleared.json()).toEqual({ data: { enabled: null } });
       const backSession = await savedSession();
       await runTurn({ server, sessionId: backSession, input: plainMessage(USER_MESSAGE_1) });

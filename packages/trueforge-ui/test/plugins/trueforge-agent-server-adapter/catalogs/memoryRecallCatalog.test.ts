@@ -9,7 +9,7 @@ function okJson(body: unknown) {
 describe('createMemoryRecallCatalog', () => {
   it('reads the switch through the supplied base URL, token, and fetch', async () => {
     const fetchImpl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      expect(String(input)).toBe('https://host.example/api/v1/settings/memory-recall');
+      expect(String(input)).toBe('https://host.example/api/v1/settings/memory-recalls');
       expect(init?.method).toBe('GET');
       expect(init?.headers).toMatchObject({ Authorization: 'Bearer secret' });
       return okJson({ data: { enabled: false } });
