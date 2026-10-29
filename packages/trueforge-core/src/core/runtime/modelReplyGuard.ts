@@ -32,7 +32,7 @@ export const TOO_MANY_TOOL_CALLS_MESSAGE =
   'The model asked for too many tool calls at once, so Aman stopped. Try again.';
 
 /** Shown to the person when a reply hits the output limit, which can leave a tool call half-written. */
-export const LENGTH_CUT_OFF_MESSAGE = "Aman's reply was cut off because it ran long. Ask it to continue.";
+export const LENGTH_CUT_OFF_MESSAGE = 'The reply was cut off because it ran long. Ask for the rest to continue.';
 
 /**
  * Shown to the model when one of its calls was stopped mid-stream for running past the host's
