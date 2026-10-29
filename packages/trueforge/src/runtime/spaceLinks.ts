@@ -6,7 +6,12 @@
  * unrelated edit never trips over an older picture. A new picture or link the chat never saw is
  * taken out of the write, not a reason to refuse it.
  */
-import { isTrustedLink, isTrustedPicture, type WebSearchTurnState } from '@truefoundry/trueforge-core/core';
+import {
+  isTrustedLink,
+  isTrustedPicture,
+  PAGE_PICTURES_LABEL,
+  type WebSearchTurnState,
+} from '@truefoundry/trueforge-core/core';
 import type { z } from 'zod';
 import type { SpaceFormatSchema } from '../schemas/space';
 import { bodyLinks, type BodyLink } from './spaceBodyLinks';
@@ -86,7 +91,9 @@ function verdictFor({ kind, value, tag }: BodyLink, web_search: WebSearchTurnSta
   }
   if (isPlaceholder(url.hostname)) {
     return refuse(
-      `This ${noun} uses a placeholder domain (example.com or similar). Search for a real page and use its link.`,
+      kind === 'picture'
+        ? `This picture uses a placeholder domain (example.com or similar). Use a picture URL from the '${PAGE_PICTURES_LABEL}' list of a page you opened, or from a search result.`
+        : 'This link uses a placeholder domain (example.com or similar). Search for a real page and use its link.',
     );
   }
   // The seen-URL rule compares the text the model wrote; a value the parser only resolved is compared as resolved.
