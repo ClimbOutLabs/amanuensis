@@ -4,7 +4,7 @@ import {
   noteProvenance,
   noteRetainContent,
   parseNoteMarker,
-  RECALLED_NOTE_MAX_AGE_DAYS,
+  READ_CONTENT_NOTE_MAX_AGE_DAYS,
   withoutNoteTrailer,
 } from '../../../../src/runtime/memory/memoryNotes';
 
@@ -72,8 +72,22 @@ describe('isNoteTooOld', () => {
   const now = new Date('2026-10-29T12:00:00.000Z');
   const note = (date: string) => ({ note_source: 'email', note_date: date });
 
-  it('keeps the limit in one named constant of 14 days', () => {
-    expect(RECALLED_NOTE_MAX_AGE_DAYS).toBe(14);
+  it('keeps the read-content limit in one named constant of 14 days', () => {
+    expect(READ_CONTENT_NOTE_MAX_AGE_DAYS).toBe(14);
+  });
+
+  it("ages read content out after 14 days but keeps the assistant's own replies at any age", () => {
+    expect(isNoteTooOld({ metadata: note('2026-10-15'), text: '', now })).toBe(false);
+    expect(isNoteTooOld({ metadata: note('2026-10-14'), text: '', now })).toBe(true);
+    expect(
+      isNoteTooOld({ metadata: { note_source: 'assistant_response', note_date: '2026-09-29' }, text: '', now }),
+    ).toBe(false);
+    const oldReply = noteRetainContent({
+      text: 'Take the earlier train.',
+      source: 'assistant_response',
+      date: '2026-09-29',
+    });
+    expect(isNoteTooOld({ metadata: undefined, text: oldReply, now })).toBe(false);
   });
 
   it('is false for a recent note, a note at the limit, and an item that is not a note', () => {
