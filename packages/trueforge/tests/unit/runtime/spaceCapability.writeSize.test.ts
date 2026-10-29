@@ -674,14 +674,14 @@ describe('the space write size cap', () => {
       expect(resultJson(response).error_code).toBe(SPACE_WRITE_TOO_LONG_ERROR_CODE);
     });
 
-    it('refuses the whole call when a link in the unsaved tail is not allowed', async () => {
+    it('cuts out a link in the unsaved tail before saving what fits', async () => {
       const store = new InMemorySpaceStore();
       const body = `${tablePart(1, 60)}\n\n[Docs](https://example.invalid/never-searched)`;
       const response = await callTool(store, CREATE_SPACE_TOOL_NAME, createInput(body));
-      expect(isErrorResponse(response)).toBe(true);
-      expect(resultJson(response).error_code).toBeUndefined();
+      expect(isErrorResponse(response)).toBe(false);
+      expect(JSON.stringify(resultJson(response))).not.toContain('never-searched');
       const listed = await callTool(store, LIST_SPACES_TOOL_NAME, {});
-      expect(resultJson(listed).spaces).toHaveLength(0);
+      expect(resultJson(listed).spaces).toHaveLength(1);
     });
   });
 
