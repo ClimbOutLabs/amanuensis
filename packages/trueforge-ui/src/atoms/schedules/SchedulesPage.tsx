@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ComponentType } from 'react';
 
 import { useToasterOptional } from '../../containers/ToasterContainer.js';
+import { useOpenScheduleRunSession } from '../../hooks/useOpenScheduleRunSession.js';
 import { useResourcePermissions } from '../../hooks/useResourcePermissions.js';
 import { Icon } from '../../icons/Icon.js';
 import { useScheduleServer, useServer } from '../../server/ServerContext.js';
@@ -154,6 +155,7 @@ export function SchedulesPage({ agentId }: SchedulesPageProps) {
   const scheduleServer = useScheduleServer();
   const server = useServer();
   const toaster = useToasterOptional();
+  const openRunSession = useOpenScheduleRunSession();
 
   const [schedules, setSchedules] = useState<Schedule[]>([]);
   const { allows } = useResourcePermissions({
@@ -345,8 +347,9 @@ export function SchedulesPage({ agentId }: SchedulesPageProps) {
     if (!allows(schedule.id, 'MANAGE')) return;
     setRunningScheduleIds(prev => new Set(prev).add(schedule.id));
     try {
-      await scheduleServer.createScheduleRun({ scheduleId: schedule.id });
+      const started = await scheduleServer.createScheduleRun({ scheduleId: schedule.id });
       toaster?.showSuccess({ title: 'Run started' });
+      await openRunSession({ scheduleId: schedule.id, runId: started.id });
       const runs = await scheduleServer.listScheduleRuns({ scheduleId: schedule.id });
       setRunsByScheduleId(prev => ({ ...prev, [schedule.id]: runs }));
     } catch (caught) {
