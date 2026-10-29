@@ -1,4 +1,6 @@
 import { runAdopt } from './commands/adopt.ts';
+import { runBackup } from './commands/backup.ts';
+import { runBackups } from './commands/backups.ts';
 import { runOpen } from './commands/open.ts';
 import { runStatus } from './commands/status.ts';
 import { runUpgrade } from './commands/upgrade.ts';
@@ -91,6 +93,18 @@ export async function runCli(args: readonly string[], deps: CliDeps): Promise<nu
       arch: deps.arch ?? 'x64',
       ...(deps.releasePublicKey === undefined ? {} : { releasePublicKey: deps.releasePublicKey }),
     });
+  }
+  if (first === 'backup') {
+    return runBackup({
+      host: deps.host,
+      runner: deps.runner,
+      store: deps.store,
+      jobs: deps.windowsJobs,
+      print: deps.print,
+    });
+  }
+  if (first === 'backups') {
+    return runBackups({ host: deps.host, jobs: deps.windowsJobs, print: deps.print });
   }
   if (first === 'verify') {
     return runVerify(deps, { file: second });

@@ -2,6 +2,7 @@ import type { Host } from '../host/host.ts';
 import type { WindowsJobs } from '../host/windowsJobs.ts';
 import {
   ADOPTED_LINE,
+  ADOPT_BUSY,
   ADOPT_DOCKER_NOT_ANSWERING,
   ADOPT_IMAGE_UNAVAILABLE,
   ADOPT_NOT_INSTALLED,
@@ -10,7 +11,13 @@ import {
   ADOPT_STATE_UNREADABLE,
   problemText,
 } from '../messages.ts';
-import { StateDockerError, StateImageError, type StateStore, type StateSummary } from '../state/state.ts';
+import {
+  StateBusyError,
+  StateDockerError,
+  StateImageError,
+  type StateStore,
+  type StateSummary,
+} from '../state/state.ts';
 
 export interface AdoptDeps {
   host: Host;
@@ -21,10 +28,12 @@ export interface AdoptDeps {
 
 // aman adopt: a PC set up with the Aman Setup download gets the aman
 // command. Finding the install goes through the state store's read
-// only: adopt takes no state write and no volume lock, and changes no
-// data and no state file. What it writes is on the Windows side: the
-// program copy, one user PATH value, the shortcuts and the forwarder
-// over the starter's copy of Aman-Setup.cmd.
+// only, and no data changes. What it writes is on the Windows side:
+// the program copy, one user PATH value, the shortcuts and the
+// forwarder over the starter's copy of Aman-Setup.cmd. It also turns
+// the daily backup on: the task and the Backups entry are Windows
+// side, and the one state record that says the backups are daily is
+// written through the store, under its lock, in the shell's own words.
 export async function runAdopt(deps: AdoptDeps): Promise<number> {
   const { host, store, jobs, print } = deps;
   if (host.kind !== 'windows') {
@@ -70,7 +79,14 @@ export async function runAdopt(deps: AdoptDeps): Promise<number> {
     }
     await jobs.ensureCheckAmanShortcut();
     await jobs.replaceSetupCmdCopyWithForwarder();
-  } catch {
+    await jobs.ensureDailyBackupTask();
+    await jobs.ensureBackupsShortcut();
+    await store.setBackupsMode('daily');
+  } catch (error) {
+    if (error instanceof StateBusyError) {
+      print(problemText(ADOPT_BUSY));
+      return 1;
+    }
     print(problemText(ADOPT_SETUP_FAILED));
     return 1;
   }

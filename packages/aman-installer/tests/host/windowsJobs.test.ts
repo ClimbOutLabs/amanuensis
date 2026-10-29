@@ -50,9 +50,15 @@ class AnswerRunner implements ProcessRunner {
       }
       return Promise.resolve(okResult(ACL_LISTING));
     }
+    if (command === 'schtasks') {
+      return Promise.resolve(okResult(''));
+    }
     const script = args[3] ?? '';
     if (script.includes("GetEnvironmentVariable('Path', 'User')")) {
       return Promise.resolve(okResult(this.userPath));
+    }
+    if (script.includes('-Directory')) {
+      return Promise.resolve(okResult('20261009T120000Z\r\n20261008T120000Z\r\n'));
     }
     if (script.includes('Get-ChildItem')) {
       return Promise.resolve(okResult(SHORTCUT_LISTING));
@@ -81,8 +87,46 @@ test('the golden file holds every command line the Windows jobs run', async () =
   await jobs.openBrowser('http://127.0.0.1:8791');
   await jobs.makeFolderPrivate(DATA_DIR);
   await jobs.readFolderAcl(DATA_DIR);
+  await jobs.ensureDailyBackupTask();
+  assert.equal(await jobs.dailyBackupTaskPresent(), true);
+  await jobs.ensureBackupsShortcut();
+  assert.deepEqual(await jobs.listBackups(), ['20261009T120000Z', '20261008T120000Z']);
   const golden = readFileSync(new URL('../golden/windows-jobs-commands.txt', import.meta.url), 'utf8');
   assert.equal(recording.goldenText(), golden);
+});
+
+test('the daily backup task is absent when the query fails, and a refused make fails as a job error', async () => {
+  const queryLine = commandLine('schtasks', ['/Query', '/TN', 'Amanuensis\\Daily backup']);
+  const absent = new StubProcessRunner(
+    new Map<string, ProcessResult>([
+      [
+        queryLine,
+        { exitCode: 1, stdout: '', stderr: 'ERROR: The system cannot find the file specified.', started: true },
+      ],
+    ]),
+  );
+  assert.equal(await jobsWith(absent).dailyBackupTaskPresent(), false);
+  const createLine = commandLine('schtasks', [
+    '/Create',
+    '/TN',
+    'Amanuensis\\Daily backup',
+    '/TR',
+    '"C:\\Users\\Friend\\AppData\\Local\\Programs\\Amanuensis\\aman.exe" backup',
+    '/SC',
+    'DAILY',
+    '/ST',
+    '03:30',
+    '/RL',
+    'LIMITED',
+    '/IT',
+    '/F',
+  ]);
+  const refused = new StubProcessRunner(
+    new Map<string, ProcessResult>([
+      [createLine, { exitCode: 1, stdout: '', stderr: 'ERROR: Access is denied.', started: true }],
+    ]),
+  );
+  await assert.rejects(jobsWith(refused).ensureDailyBackupTask(), WindowsJobError);
 });
 
 test('a folder access list is read into who it names and whether they can read', async () => {
@@ -208,6 +252,7 @@ test('the frozen Windows paths are the ones the starter named', () => {
   const paths = windowsPaths(LOCAL_APP_DATA);
   assert.equal(paths.programsExePath, 'C:\\Users\\Friend\\AppData\\Local\\Programs\\Amanuensis\\aman.exe');
   assert.equal(paths.setupCmdCopyPath, 'C:\\Users\\Friend\\AppData\\Local\\Amanuensis\\Aman-Setup.cmd');
+  assert.equal(paths.backupsDir, 'C:\\Users\\Friend\\AppData\\Local\\Amanuensis\\backups');
 });
 
 test('the forwarder golden file is the forwarder, byte for byte', () => {

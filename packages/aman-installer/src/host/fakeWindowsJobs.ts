@@ -1,6 +1,7 @@
 import { win32 } from 'node:path';
 
 import {
+  BACKUPS_SHORTCUT_NAME,
   CHECK_AMAN_SHORTCUT_NAME,
   SETUP_CMD_FORWARDER,
   UPDATE_AMAN_SHORTCUT_NAME,
@@ -19,6 +20,10 @@ export type FakeWindowsJobStep =
   | 'point'
   | 'check'
   | 'update'
+  | 'backupsShortcut'
+  | 'task'
+  | 'taskQuery'
+  | 'backupsList'
   | 'forwarder'
   | 'docker'
   | 'browser'
@@ -32,6 +37,7 @@ export class FakeWindowsJobs implements WindowsJobs {
   readonly programsExePath: string;
   readonly setupCmdCopyPath: string;
   readonly dataDir: string;
+  readonly backupsDir: string;
   private readonly selfExePath: string;
   private readonly programsDir: string;
   private readonly startMenuProgramsDir: string;
@@ -44,6 +50,8 @@ export class FakeWindowsJobs implements WindowsJobs {
   forwarderContents: string | null = null;
   browserUrls: string[] = [];
   dockerDesktopStarts = 0;
+  backupTask: boolean;
+  backupNames: string[];
   readonly ops: string[] = [];
 
   constructor(options: {
@@ -59,11 +67,16 @@ export class FakeWindowsJobs implements WindowsJobs {
     // scripted is not there.
     aclOwner?: string;
     acls?: ReadonlyMap<string, AclRead>;
+    // Whether the daily backup task is there, and the names in the
+    // backups folder, as a test scripts them.
+    backupTask?: boolean;
+    backups?: readonly string[];
   }) {
     const paths = windowsPaths(options.localAppDataDir);
     this.programsExePath = paths.programsExePath;
     this.setupCmdCopyPath = paths.setupCmdCopyPath;
     this.dataDir = paths.dataDir;
+    this.backupsDir = paths.backupsDir;
     this.programsDir = paths.programsDir;
     this.selfExePath = options.selfExePath;
     this.startMenuProgramsDir = options.startMenuProgramsDir;
@@ -73,6 +86,8 @@ export class FakeWindowsJobs implements WindowsJobs {
     this.failSteps = options.failSteps ?? new Set();
     this.aclOwner = options.aclOwner ?? 'FRIEND-PC\\Friend';
     this.acls = new Map(options.acls ?? []);
+    this.backupTask = options.backupTask ?? false;
+    this.backupNames = [...(options.backups ?? [])];
   }
 
   private step(name: FakeWindowsJobStep): void {
@@ -137,6 +152,35 @@ export class FakeWindowsJobs implements WindowsJobs {
       this.shortcuts[existing] = entry;
     }
     return Promise.resolve();
+  }
+
+  ensureBackupsShortcut(): Promise<void> {
+    this.step('backupsShortcut');
+    const path = win32.join(this.startMenuProgramsDir, `${BACKUPS_SHORTCUT_NAME}.lnk`);
+    const entry: ShortcutFacts = { path, target: this.backupsDir, args: '' };
+    const existing = this.shortcuts.findIndex(shortcut => shortcut.path === path);
+    if (existing === -1) {
+      this.shortcuts.push(entry);
+    } else {
+      this.shortcuts[existing] = entry;
+    }
+    return Promise.resolve();
+  }
+
+  ensureDailyBackupTask(): Promise<void> {
+    this.step('task');
+    this.backupTask = true;
+    return Promise.resolve();
+  }
+
+  dailyBackupTaskPresent(): Promise<boolean> {
+    this.step('taskQuery');
+    return Promise.resolve(this.backupTask);
+  }
+
+  listBackups(): Promise<readonly string[]> {
+    this.step('backupsList');
+    return Promise.resolve([...this.backupNames]);
   }
 
   replaceSetupCmdCopyWithForwarder(): Promise<void> {

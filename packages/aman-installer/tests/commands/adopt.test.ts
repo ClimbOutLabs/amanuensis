@@ -6,6 +6,7 @@ import { FakeHost } from '../../src/host/fakeHost.ts';
 import { FakeWindowsJobs, type FakeWindowsJobStep } from '../../src/host/fakeWindowsJobs.ts';
 import { SETUP_CMD_FORWARDER } from '../../src/host/windowsJobs.ts';
 import {
+  ADOPT_BUSY,
   ADOPT_DOCKER_NOT_ANSWERING,
   ADOPT_IMAGE_UNAVAILABLE,
   ADOPT_NOT_INSTALLED,
@@ -16,6 +17,7 @@ import {
   problemText,
 } from '../../src/messages.ts';
 import {
+  StateBusyError,
   StateDockerError,
   StateImageError,
   type ReleaseRecord,
@@ -37,6 +39,7 @@ const LOCAL_APP_DATA = 'C:\\Users\\Friend\\AppData\\Local';
 const START_MENU_PROGRAMS = 'C:\\Users\\Friend\\AppData\\Roaming\\Microsoft\\Windows\\Start Menu\\Programs';
 const SETUP_CMD_COPY = 'C:\\Users\\Friend\\AppData\\Local\\Amanuensis\\Aman-Setup.cmd';
 const PROGRAMS_EXE = 'C:\\Users\\Friend\\AppData\\Local\\Programs\\Amanuensis\\aman.exe';
+const BACKUPS_DIR = 'C:\\Users\\Friend\\AppData\\Local\\Amanuensis\\backups';
 
 function summaryWith(overrides: Partial<StateSummary>): StateSummary {
   return {
@@ -55,13 +58,17 @@ function summaryWith(overrides: Partial<StateSummary>): StateSummary {
   };
 }
 
-function storeWith(summary: StateSummary): StateStore {
+function storeWith(summary: StateSummary, modes?: string[]): StateStore {
   return {
     readSummary: () => Promise.resolve(summary),
     writeInstance: () => Promise.resolve(false),
     setInstanceValue: () => Promise.resolve(false),
     removeInstance: () => Promise.resolve(),
     writeRelease: () => Promise.resolve(false),
+    setBackupsMode: mode => {
+      modes?.push(mode);
+      return Promise.resolve(true);
+    },
   };
 }
 
@@ -72,6 +79,18 @@ function failingStore(error: Error): StateStore {
     setInstanceValue: () => Promise.resolve(false),
     removeInstance: () => Promise.resolve(),
     writeRelease: () => Promise.resolve(false),
+    setBackupsMode: () => Promise.resolve(false),
+  };
+}
+
+function busyModeStore(summary: StateSummary): StateStore {
+  return {
+    readSummary: () => Promise.resolve(summary),
+    writeInstance: () => Promise.resolve(false),
+    setInstanceValue: () => Promise.resolve(false),
+    removeInstance: () => Promise.resolve(),
+    writeRelease: () => Promise.resolve(false),
+    setBackupsMode: () => Promise.reject(new StateBusyError('another install is running')),
   };
 }
 
@@ -114,7 +133,17 @@ test('adopt moves the shortcuts, makes the Check Aman entry and replaces the sta
   const { code, lines } = await run(storeWith(summaryWith({ release: RELEASE })), jobs);
   assert.equal(code, 0);
   assert.deepEqual(lines, [ADOPTED_LINE]);
-  assert.deepEqual(jobs.ops, ['copy', 'path', 'list', 'point', 'point', 'check', 'forwarder']);
+  assert.deepEqual(jobs.ops, [
+    'copy',
+    'path',
+    'list',
+    'point',
+    'point',
+    'check',
+    'forwarder',
+    'task',
+    'backupsShortcut',
+  ]);
   const byPath = new Map(jobs.shortcuts.map(shortcut => [shortcut.path, shortcut]));
   assert.equal(byPath.get('C:\\Users\\Friend\\Desktop\\Aman.lnk')?.target, PROGRAMS_EXE);
   assert.equal(byPath.get('C:\\Users\\Friend\\Desktop\\Aman.lnk')?.args, 'open');
@@ -128,6 +157,33 @@ test('adopt moves the shortcuts, makes the Check Aman entry and replaces the sta
   assert.equal(check?.args, 'doctor');
   assert.equal(jobs.forwarderContents, SETUP_CMD_FORWARDER);
   assert.ok(jobs.userPath.includes('C:\\Users\\Friend\\AppData\\Local\\Programs\\Amanuensis'));
+});
+
+test('adopt turns the daily backup on: the task, the Backups entry and the record', async () => {
+  const jobs = jobsWith();
+  const modes: string[] = [];
+  const { code, lines } = await run(storeWith(summaryWith({ release: RELEASE }), modes), jobs);
+  assert.equal(code, 0);
+  assert.deepEqual(lines, [ADOPTED_LINE]);
+  assert.equal(jobs.backupTask, true);
+  const backups = jobs.shortcuts.find(shortcut => shortcut.path === `${START_MENU_PROGRAMS}\\Backups.lnk`);
+  assert.equal(backups?.target, BACKUPS_DIR);
+  assert.equal(backups?.args, '');
+  assert.deepEqual(modes, ['daily']);
+});
+
+test('adopt with the state busy at the backup record says to wait', async () => {
+  const jobs = jobsWith();
+  const { code, lines } = await run(busyModeStore(summaryWith({ release: RELEASE })), jobs);
+  assert.equal(code, 1);
+  assert.deepEqual(lines, [problemText(ADOPT_BUSY)]);
+});
+
+test('a failed backup step stops adopt with its problem', async () => {
+  const jobs = jobsWith({ failSteps: new Set<FakeWindowsJobStep>(['task']) });
+  const { code, lines } = await run(storeWith(summaryWith({ release: RELEASE })), jobs);
+  assert.equal(code, 1);
+  assert.deepEqual(lines, [problemText(ADOPT_SETUP_FAILED)]);
 });
 
 test('adopt on a PC with no install refuses and changes nothing', async () => {

@@ -178,6 +178,31 @@ export interface BackupEntry {
   timeSeconds: number | null;
 }
 
+// The time in a backup's name, in epoch seconds: the installer names
+// each backup by the UTC time it was made, and words may follow the
+// stamp (a kept backup is named after its stamp). Null when the name
+// does not start with a stamp. The volume backend answers a backup's
+// stat from this, and the doctor reads the age of the backups on a
+// Windows disk from it.
+const BACKUP_STAMP = /^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})Z/;
+
+export function backupNameTimeSeconds(name: string): number | null {
+  const match = BACKUP_STAMP.exec(name);
+  if (match === null) {
+    return null;
+  }
+  return (
+    Date.UTC(
+      Number(match[1]),
+      Number(match[2]) - 1,
+      Number(match[3]),
+      Number(match[4]),
+      Number(match[5]),
+      Number(match[6]),
+    ) / 1000
+  );
+}
+
 // The certificate authority's facts, as the backend can read them. The
 // key's mode is the octal text the shell's file_mode prints, or null when
 // there is no key file. On the volume the store does not read the tls
@@ -232,6 +257,9 @@ export interface StateStore {
   setInstanceValue: (options: { name: string; key: string; value: string }) => Promise<boolean>;
   removeInstance: (name: string) => Promise<void>;
   writeRelease: (record: ReleaseRecord) => Promise<boolean>;
+  // The backups choice, in the one file the shell keeps it in, in the
+  // shell's own words (daily or off, one line).
+  setBackupsMode: (mode: 'daily' | 'off') => Promise<boolean>;
 }
 
 async function readSummaryFrom(backend: StateBackend): Promise<StateSummary> {
@@ -381,6 +409,9 @@ export function createStateStore(backend: StateBackend): StateStore {
       changed.push({ path: RELEASE_FILE, text });
       await backend.writeChangedFiles(changed);
       return true;
+    },
+    setBackupsMode: async mode => {
+      return writeOneIfChanged(BACKUPS_MODE_FILE, `${mode}\n`);
     },
   };
 }

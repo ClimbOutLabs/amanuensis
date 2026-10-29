@@ -34,6 +34,18 @@ What it can do today:
   until the next start, and runs the shell's own upgrade in the setup
   container. The Start menu's Update Aman entry runs it, and so does
   running Aman-Setup.exe again on an installed PC.
+- `aman backup`, on Windows, makes a backup now: it runs the shell's
+  own backup in the setup container with the backups folder on the PC
+  itself mounted where the shell writes, so the backup lands on the
+  Windows disk, under the folder access the doctor's files check
+  guards, and the shell's keep-the-last-seven rule prunes that folder.
+  A daily Task Scheduler task, made by `aman adopt`, runs this command
+  at 03:30 while the person is signed in; adopt also records the daily
+  choice in the state record and adds a Backups entry to the Start
+  menu. On Windows the doctor's backup check looks for that task and
+  reads the ages of the backups from the folder they land in.
+- `aman backups`, on Windows, lists the backups kept on the PC,
+  newest first. The Start menu's Backups entry opens the folder.
 
 Every sentence a person can read lives in `src/messages.ts`. A test checks
 each one for plain words and compares them all to the golden file in

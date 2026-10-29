@@ -7,6 +7,7 @@ import {
   StateDockerError,
   StateImageError,
   StateStoreError,
+  backupNameTimeSeconds,
   type StateBackend,
 } from './state.ts';
 import { buildTar, parseTar } from './tar.ts';
@@ -19,6 +20,10 @@ import { buildTar, parseTar } from './tar.ts';
 export const SETUP_IMAGE = pins.setup_image;
 export const STATE_VOLUME = 'aman_home';
 export const VOLUME_HOME = '/root/.amanuensis';
+// The volume the release source is unpacked into, and where it is
+// mounted in the setup container: the names the starter set.
+export const SOURCE_VOLUME = 'aman_source';
+export const SOURCE_DIR = '/src';
 
 const MOUNT = `${STATE_VOLUME}:${VOLUME_HOME}`;
 const MOUNT_READ_ONLY = `${MOUNT}:ro`;
@@ -230,19 +235,10 @@ export function volumeBackend(runner: ProcessRunner): StateBackend {
       if (!path.startsWith(prefix)) {
         return Promise.resolve(null);
       }
-      const match = /^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})Z/.exec(path.slice(prefix.length));
-      if (match === null) {
+      const timeSeconds = backupNameTimeSeconds(path.slice(prefix.length));
+      if (timeSeconds === null) {
         return Promise.resolve(null);
       }
-      const timeSeconds =
-        Date.UTC(
-          Number(match[1]),
-          Number(match[2]) - 1,
-          Number(match[3]),
-          Number(match[4]),
-          Number(match[5]),
-          Number(match[6]),
-        ) / 1000;
       return Promise.resolve({ mtimeSeconds: timeSeconds, mode: 0, size: 0, isDirectory: true });
     },
     writeChangedFiles: async changed => {
