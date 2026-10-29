@@ -69,14 +69,20 @@ describe('TavilyClient.search', () => {
       max_results: 5,
       include_answer: false,
       include_raw_content: false,
+      include_images: true,
+      include_image_descriptions: true,
     });
-    expect(results.map(r => r.url)).toEqual([
+    expect(results.images).toEqual([
+      { url: 'https://cdn.clinics.example/harbour-front.jpg', description: 'The clinic entrance' },
+      { url: 'https://cdn.clinics.example/garden-sign.jpg', description: null },
+    ]);
+    expect(results.hits.map(r => r.url)).toEqual([
       HARBOUR_URL,
       GARDEN_URL,
       CANAL_URL,
       'https://reviews.example/best-doctors',
     ]);
-    expect(results[0]).toEqual({
+    expect(results.hits[0]).toEqual({
       title: 'Harbour Family Clinic',
       url: HARBOUR_URL,
       snippet: 'English speaking family doctors.',
