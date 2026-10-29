@@ -4,7 +4,12 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import type { FetchLike } from '@modelcontextprotocol/sdk/shared/transport.js';
-import type { CallToolRequest, CallToolResult } from '@modelcontextprotocol/sdk/types.js';
+import {
+  ErrorCode,
+  McpError,
+  type CallToolRequest,
+  type CallToolResult,
+} from '@modelcontextprotocol/sdk/types.js';
 import { context, propagation } from '@opentelemetry/api';
 import { McpConnectionError, McpRedirectRefusedError } from '../errors';
 import { withTimeout } from '../util/promiseUtils';
@@ -163,6 +168,9 @@ const TRANSPORT_ERROR_CODES: ReadonlySet<string> = new Set([
   'EPIPE',
 ]);
 
+/** The SDK's JSON-RPC code for a transport that closed under a request. */
+const CONNECTION_CLOSED_CODE: number = ErrorCode.ConnectionClosed;
+
 function networkErrorCode(error: Error): string | undefined {
   const code: unknown = Reflect.get(error, 'code');
   return typeof code === 'string' && TRANSPORT_ERROR_CODES.has(code) ? code : undefined;
@@ -183,6 +191,9 @@ export function transportFailureDetail(error: unknown): string | undefined {
     seen.add(current);
     if (current instanceof TypeError && current.message === 'fetch failed') {
       sawFetchFailure = true;
+    }
+    if (current instanceof McpError && current.code === CONNECTION_CLOSED_CODE) {
+      return 'the connection closed';
     }
     const code = networkErrorCode(current);
     if (code !== undefined) {
@@ -330,6 +341,8 @@ export async function connectRemoteMcp(params: {
     ? [params.knownTransportType, ...TRANSPORT_PROBE_ORDER.filter(t => t !== params.knownTransportType)]
     : TRANSPORT_PROBE_ORDER;
   const failures: { transport: RemoteMcpTransportType; error: string }[] = [];
+  // Kept so a caller can tell a server that cannot be reached from one that answered with a failure.
+  let transportCause: unknown;
 
   for (const transportType of candidates) {
     const transport = createTransport({
@@ -366,6 +379,9 @@ export async function connectRemoteMcp(params: {
       if (params.sessionId && isSessionExpiredError(error)) {
         throw toConnectError(error);
       }
+      if (transportCause === undefined && transportFailureDetail(error) !== undefined) {
+        transportCause = error;
+      }
       failures.push({ transport: transportType, error: describeTransportError(error) });
       continue;
     }
@@ -377,5 +393,9 @@ export async function connectRemoteMcp(params: {
     return buildConnection(client, transport, transportType, params.headers, requestOptions);
   }
 
-  throw new McpConnectionError(`failed to connect (tried ${candidates.join(', ')}): ${JSON.stringify(failures)}`, 502);
+  throw new McpConnectionError(
+    `failed to connect (tried ${candidates.join(', ')}): ${JSON.stringify(failures)}`,
+    502,
+    transportCause === undefined ? undefined : { cause: transportCause },
+  );
 }

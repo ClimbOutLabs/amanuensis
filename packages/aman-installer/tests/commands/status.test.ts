@@ -44,6 +44,7 @@ function summaryWith(overrides: Partial<StateSummary>): StateSummary {
 function storeWith(summary: StateSummary): StateStore {
   return {
     readSummary: () => Promise.resolve(summary),
+    readCaCertificate: () => Promise.resolve(null),
     writeInstance: () => Promise.resolve(false),
     setInstanceValue: () => Promise.resolve(false),
     removeInstance: () => Promise.resolve(),
@@ -55,6 +56,7 @@ function storeWith(summary: StateSummary): StateStore {
 function failingStore(error: Error): StateStore {
   return {
     readSummary: () => Promise.reject(error),
+    readCaCertificate: () => Promise.resolve(null),
     writeInstance: () => Promise.resolve(false),
     setInstanceValue: () => Promise.resolve(false),
     removeInstance: () => Promise.resolve(),

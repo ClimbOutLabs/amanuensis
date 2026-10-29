@@ -1974,6 +1974,64 @@ describe('runDataImport reads memory markers the way the vault does', () => {
   });
 });
 
+describe('runDataImport reads the internal id an export writes as the closing line', () => {
+  const FILED_FILE = `memory/${TENANT}/memory/2026-10-02.md`;
+  const FILED_LOG = '## 2026-10-02T10:00:00.000Z\n\nLives in Lisbon with a cat.\n\n> maya:identity\n';
+
+  async function filedArchive(): Promise<{ source: Instance; archive: Buffer }> {
+    const { source, archive } = await seededArchive();
+    return {
+      source,
+      archive: await repack(archive, entries => {
+        entries.set(FILED_FILE, Buffer.from(FILED_LOG, 'utf8'));
+      }),
+    };
+  }
+
+  it('hands the id back as the retain context and keeps it off the text', async () => {
+    const { source, archive } = await filedArchive();
+    const target = await makeInstance('target-filed-client');
+    try {
+      const retained: { content: string; context?: string | undefined }[] = [];
+      const client: Pick<MemoryClient, 'listEntries' | 'retain'> = {
+        listEntries: () => Promise.resolve({ ok: true, entries: [] }),
+        retain: ({ items }) => {
+          retained.push(...items);
+          return Promise.resolve({ ok: true });
+        },
+      };
+      await runDataImport(importDeps(target, { kind: 'client', client }), importRequest(archive));
+      const filed = retained.find(item => item.content.includes('Lisbon'));
+      expect(filed?.content).toBe('Lives in Lisbon with a cat.');
+      expect(filed?.context).toBe('maya:identity');
+    } finally {
+      await source.close();
+      await target.close();
+    }
+  });
+
+  it('writes the id back into a Markdown target, where the listing reads it on its own', async () => {
+    const { source, archive } = await filedArchive();
+    const target = await makeInstance('target-filed-markdown');
+    try {
+      await runDataImport(importDeps(target), importRequest(archive));
+      const written = await readFile(join(target.memoryDir, TENANT, 'memory', '2026-10-02.md'), 'utf8');
+      expect(written).toBe(FILED_LOG);
+      const reader = new MarkdownMemoryClient({ baseDir: target.memoryDir, namespace: TENANT });
+      const listed = await reader.listEntries({ namespace: '', timeoutMs: 5_000 });
+      if (!listed.ok) {
+        throw new Error('expected a vault listing');
+      }
+      const filed = listed.entries.find(entry => entry.text.includes('Lisbon'));
+      expect(filed?.text).toBe('Lives in Lisbon with a cat.');
+      expect(filed?.context).toBe('maya:identity');
+    } finally {
+      await source.close();
+      await target.close();
+    }
+  });
+});
+
 describe('runDataImport reads memory written before facts-only memory', () => {
   const LEGACY_FILE = `memory/${TENANT}/memory/2026-09-01.md`;
   const LEGACY_LOG = [
@@ -4552,6 +4610,70 @@ describe('runDataImport review: subagents, tool kinds and dry runs', () => {
       );
       expect(await chatsOf(target, 'bob')).toHaveLength(3);
       expect(await target.stores.globalSettingsStore.getSetting({ key: IMPORT_IN_PROGRESS_KEY })).toEqual(markerBefore);
+    } finally {
+      await source.close();
+      await target.close();
+    }
+  });
+});
+
+describe('runDataImport keeps the source label of saved findings', () => {
+  const NOTE_FILE = `memory/${TENANT}/memory/2026-10-20.md`;
+  const NOTE_LOG = [
+    '## 2026-10-20T10:00:00.000Z',
+    '',
+    'From an email, found Oct 20: Priya asked for the signed form by 2026-11-03.',
+    '',
+    '<!-- session_id: chat-9 -->',
+    '',
+    '<!-- note: email 2026-10-20 -->',
+    '',
+    '> Source: read content',
+    '',
+  ].join('\n');
+
+  async function noteArchive(): Promise<{ source: Instance; archive: Buffer }> {
+    const { source, archive } = await seededArchive();
+    return {
+      source,
+      archive: await repack(archive, entries => {
+        entries.set(NOTE_FILE, Buffer.from(NOTE_LOG, 'utf8'));
+      }),
+    };
+  }
+
+  it('writes the note and its hidden source line unchanged into a Markdown target', async () => {
+    const { source, archive } = await noteArchive();
+    const target = await makeInstance('target-note-markdown');
+    try {
+      await runDataImport(importDeps(target), importRequest(archive));
+      const written = await readFile(join(target.memoryDir, TENANT, 'memory', '2026-10-20.md'), 'utf8');
+      expect(written).toBe(NOTE_LOG);
+    } finally {
+      await source.close();
+      await target.close();
+    }
+  });
+
+  it('sends the source and day to a client backend as the note metadata', async () => {
+    const { source, archive } = await noteArchive();
+    const target = await makeInstance('target-note-client');
+    try {
+      const retained: { content: string; metadata?: Record<string, string> }[] = [];
+      const client: Pick<MemoryClient, 'listEntries' | 'retain'> = {
+        listEntries: () => Promise.resolve({ ok: true, entries: [] }),
+        retain: ({ items }) => {
+          retained.push(...items);
+          return Promise.resolve({ ok: true });
+        },
+      };
+      await runDataImport(importDeps(target, { kind: 'client', client }), importRequest(archive));
+      const note = retained.find(item => item.content.includes('Priya asked'));
+      expect(note?.metadata).toEqual({
+        session_id: 'chat-9',
+        note_source: 'email',
+        note_date: '2026-10-20',
+      });
     } finally {
       await source.close();
       await target.close();

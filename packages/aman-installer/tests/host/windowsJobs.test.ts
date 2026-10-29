@@ -83,6 +83,7 @@ test('the golden file holds every command line the Windows jobs run', async () =
   await jobs.listShortcuts();
   await jobs.pointShortcutAtOpen('C:\\Users\\Friend\\Desktop\\Aman.lnk');
   await jobs.ensureCheckAmanShortcut();
+  await jobs.addCaCertificateToUserStore();
   await jobs.startDockerDesktop();
   await jobs.openBrowser('http://127.0.0.1:8791');
   await jobs.makeFolderPrivate(DATA_DIR);
@@ -253,6 +254,7 @@ test('the frozen Windows paths are the ones the starter named', () => {
   assert.equal(paths.programsExePath, 'C:\\Users\\Friend\\AppData\\Local\\Programs\\Amanuensis\\aman.exe');
   assert.equal(paths.setupCmdCopyPath, 'C:\\Users\\Friend\\AppData\\Local\\Amanuensis\\Aman-Setup.cmd');
   assert.equal(paths.backupsDir, 'C:\\Users\\Friend\\AppData\\Local\\Amanuensis\\backups');
+  assert.equal(paths.caCertPath, 'C:\\Users\\Friend\\AppData\\Local\\Amanuensis\\ca.crt');
 });
 
 test('the forwarder golden file is the forwarder, byte for byte', () => {
@@ -268,6 +270,16 @@ test('a forwarder write that cannot happen fails as a Windows job error', async 
     selfExePath: SELF,
   });
   await assert.rejects(jobs.replaceSetupCmdCopyWithForwarder(), WindowsJobError);
+});
+
+test('a certificate write that cannot happen fails as a Windows job error', async () => {
+  const jobs = systemWindowsJobs({
+    runner: new AnswerRunner(''),
+    // Far longer than any file name a disk allows, so the write fails.
+    localAppDataDir: 'C:\\' + 'a'.repeat(300),
+    selfExePath: SELF,
+  });
+  await assert.rejects(jobs.writeCaCertificate('certificate'), WindowsJobError);
 });
 
 test('a port a program holds is not free, and a port nobody holds is', async () => {

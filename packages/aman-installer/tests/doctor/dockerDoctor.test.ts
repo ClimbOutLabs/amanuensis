@@ -9,6 +9,7 @@ import {
   COMPOSE_MISSING,
   DOCKER_NOT_INSTALLED,
   DOCKER_NOT_RUNNING,
+  ENGINE_TOO_OLD,
   ENGINE_VERSION_MISSING,
   LOW_MEMORY,
   MEMORY_NOT_REPORTED,
@@ -124,6 +125,32 @@ test('Docker that does not report an Engine version fails that check, after Comp
     'Docker has 8 GB of memory to work with, which is enough.',
     problemText(ENGINE_VERSION_MISSING),
   ]);
+});
+
+test('an Engine too old for the https folder mounts fails the Engine check, after memory', async () => {
+  const answers = goodAnswers(8 * GIB);
+  answers.set('docker --version', okResult('Docker version 25.0.3, build 0a1b2c3\n'));
+  answers.set('docker info --format {{.ServerVersion}}', okResult('25.0.3\n'));
+  const { deps, printed } = runDoctor({ kind: 'windows', answers });
+  const exitCode = await checkDocker(deps);
+  assert.equal(exitCode, 1);
+  assert.deepEqual(printed, [
+    'Docker is installed, version 25.0.3.',
+    'Docker is running, Engine version 25.0.3.',
+    'Docker Compose is ready, version 2.29.1.',
+    'Docker has 8 GB of memory to work with, which is enough.',
+    problemText(ENGINE_TOO_OLD.windows),
+  ]);
+});
+
+test('the oldest Engine that can mount a folder inside a volume passes', async () => {
+  const answers = goodAnswers(8 * GIB);
+  answers.set('docker --version', okResult('Docker version 26.0.0, build 0a1b2c3\n'));
+  answers.set('docker info --format {{.ServerVersion}}', okResult('26.0.0\n'));
+  const { deps, printed } = runDoctor({ kind: 'linux', answers });
+  const exitCode = await checkDocker(deps);
+  assert.equal(exitCode, 0);
+  assert.equal(printed[printed.length - 1], 'Docker is ready for Aman on this computer.');
 });
 
 test('Docker that does not report its memory on Windows fails instead of counting the whole computer', async () => {

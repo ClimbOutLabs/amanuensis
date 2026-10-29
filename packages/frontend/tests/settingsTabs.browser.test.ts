@@ -5,7 +5,9 @@ import { fileURLToPath } from 'node:url';
 import { chromium, type Browser, type Page } from 'playwright-core';
 import { createServer, defaultClientConditions } from 'vite';
 
+import { DEV_OPTIMIZE_DEPS } from '../src/devPrebundle.ts';
 import { findChromiumExecutable } from './support/findChromiumExecutable.js';
+import { privateViteCache } from './support/viteCache.ts';
 
 const RENDER_TIMEOUT_MS = 45_000;
 /** Phone and large phone, the widths where the Settings tab strip scrolls. */
@@ -17,8 +19,11 @@ const THEMES = ['light', 'dark'] as const;
 
 test('settings tabs highlight the section shown and stay reachable', { timeout: 300_000 }, async () => {
   const frontendRoot = fileURLToPath(new URL('../', import.meta.url));
+  const viteCache = privateViteCache('settings-tabs');
   const server = await createServer({
+    cacheDir: viteCache.cacheDir,
     configFile: false,
+    optimizeDeps: DEV_OPTIMIZE_DEPS,
     root: frontendRoot,
     logLevel: 'silent',
     // The published ui dist leaves core modules external, so resolve them from source like the app does.
@@ -52,6 +57,7 @@ test('settings tabs highlight the section shown and stay reachable', { timeout: 
   } finally {
     await browser?.close();
     await server.close();
+    viteCache.remove();
   }
 });
 

@@ -21,6 +21,19 @@ tls_leaf_dir() { printf '%s/leaf/%s' "$(tls_dir)" "$1"; }
 tls_trust_dir() { printf '%s/trust/%s' "$(tls_dir)" "$1"; }
 tls_image() { json_get "$PINS_FILE" caddy_image; }
 
+# The state volume, and the home it is mounted at inside the setup container, as installer/STATE.md
+# writes them down. On Windows the state lives in that volume, so a host folder the daemon could read
+# does not exist for the https folders; the compose file mounts them from inside the volume instead.
+STATE_VOLUME=aman_home
+VOLUME_HOME=/root/.amanuensis
+
+# True when this install's home is the state volume: the home is the container home the volume is
+# mounted at, and Docker has the volume. Every other home is a folder of the computer itself.
+tls_home_in_volume() {
+  [ "$AMAN_HOME" = "$VOLUME_HOME" ] || return 1
+  D volume inspect "$STATE_VOLUME" >/dev/null 2>&1
+}
+
 # Whether an instance is served over https is the one rule in shared.sh (serves_https); this is its installer
 # form, reading the record with reg_get.
 tls_active() { serves_https "$(reg_get "$1" tls)" "$(reg_get "$1" tls_port)" "$(reg_get "$1" origins)"; }

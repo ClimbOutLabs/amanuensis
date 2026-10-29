@@ -55,6 +55,18 @@ const SIDECAR_TOOLS = [
     annotations: readAnnotations,
   },
   {
+    name: 'get_emails_content',
+    description: 'Read email bodies.',
+    inputSchema: { type: 'object' as const, properties: { account_name: accountProperty }, required: ['account_name'] },
+    annotations: readAnnotations,
+  },
+  {
+    name: 'get_attachment_content',
+    description: 'Fetch one attachment.',
+    inputSchema: { type: 'object' as const, properties: { account_name: accountProperty }, required: ['account_name'] },
+    annotations: readAnnotations,
+  },
+  {
     name: 'list_mailboxes',
     description: 'List mailboxes.',
     inputSchema: { type: 'object' as const, properties: { account_name: accountProperty }, required: ['account_name'] },
@@ -175,7 +187,14 @@ function makeSpec(): AgentSpec {
     mcp_servers: [
       {
         name: MAIL_CONNECTOR_NAME,
-        enable_tools: ['list_emails_metadata', 'list_mailboxes', 'send_email', 'save_draft'],
+        enable_tools: [
+          'list_emails_metadata',
+          'get_emails_content',
+          'get_attachment_content',
+          'list_mailboxes',
+          'send_email',
+          'save_draft',
+        ],
       },
     ],
     config: {
@@ -511,5 +530,27 @@ describe('Email connector newest messages', () => {
     }
     const listTool = listed.result.tools.find(tool => tool.name === 'list_emails_metadata');
     expect(listTool?.description).toContain('Results are newest first within that window.');
+  });
+});
+
+describe('Email connector attachments', () => {
+  beforeEach(() => {
+    mockConnect.mockReset();
+  });
+
+  it('tells the model to fetch an attachment first and read the returned path, not the file name', async () => {
+    scriptedSidecar({ accountList: oneAccount });
+    const toolSet = await emailToolSet(makeResolver(new MailAccountDirectory()));
+
+    const listed = await toolSet.listTools();
+    if (!('result' in listed)) {
+      throw new Error('Expected a tool list');
+    }
+    for (const name of ['get_emails_content', 'get_attachment_content']) {
+      const tool = listed.result.tools.find(entry => entry.name === name);
+      expect(tool?.description).toContain('first call get_attachment_content');
+      expect(tool?.description).toContain('call extract_document_text with that path');
+      expect(tool?.description).toContain("Never pass an attachment's file name as the path");
+    }
   });
 });

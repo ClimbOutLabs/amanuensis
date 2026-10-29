@@ -50,6 +50,13 @@ describe('ModelRoleSettings', () => {
     expect(screen.getByRole('heading', { name: 'Summarization model' })).toBeInTheDocument();
   });
 
+  it('does not claim a small Nemotron model handles memory summaries or library checks', async () => {
+    renderPage();
+
+    await screen.findByRole('heading', { name: 'Roles and Personas' });
+    expect(screen.queryByText(/nemotron/i)).not.toBeInTheDocument();
+  });
+
   it('explains why bounded background checks reuse the main model', async () => {
     renderPage();
 

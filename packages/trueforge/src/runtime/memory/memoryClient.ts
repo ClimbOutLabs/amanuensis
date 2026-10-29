@@ -34,6 +34,13 @@ export interface MemoryClient {
 
   retain(params: { items: RetainItem[]; operationId: string; timeoutMs: number }): Promise<RetainOutcome>;
 
+  /**
+   * Removes every memory stored under one document id. A document that does not exist is a success.
+   * `context` is the line the document was retained with, so a store that kept copies before document
+   * ids existed can remove those too.
+   */
+  deleteDocument(params: { documentId: string; context?: string; timeoutMs: number }): Promise<RetainOutcome>;
+
   getOperation(id: string, timeoutMs: number): Promise<GetOperationOutcome>;
 
   retryOperation(id: string, timeoutMs: number): Promise<RetryOperationOutcome>;
@@ -57,6 +64,15 @@ export interface MemoryClient {
    * Vault edits and deletes are applied; deleted entries are omitted.
    */
   listEntries(params: { namespace: string; timeoutMs: number }): Promise<ListMemoryVaultEntriesOutcome>;
+
+  /**
+   * Memory vault: the live entries in the newest `maxDailyFiles` daily files of the vault this client's
+   * `retain` writes into. Absent on a backend without a cheap listing.
+   */
+  listRecentWrittenEntries?(params: {
+    maxDailyFiles: number;
+    timeoutMs: number;
+  }): Promise<ListMemoryVaultEntriesOutcome>;
 
   /**
    * Memory vault: replace one entry's text. The store stays append-only: the old
@@ -105,6 +121,8 @@ export interface MemoryVaultEntry {
   timestamp: string;
   /** Owning persona for `persona:<name>` vaults, else null. */
   persona: string | null;
+  /** The internal id the entry was filed under, when it has one. Not part of `text` and never shown to people. */
+  context?: string;
 }
 
 export type MemoryVaultFailureCode = 'request_failed' | 'not_found' | 'timeout';

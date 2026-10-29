@@ -24,6 +24,7 @@ import {
   DOCKER_NOT_ANSWERING,
   DOCKER_NOT_INSTALLED,
   DOCKER_NOT_RUNNING,
+  ENGINE_TOO_OLD,
   ENGINE_VERSION_MISSING,
   FILES_COULD_NOT_CHECK,
   FILES_COULD_NOT_FIX,
@@ -32,6 +33,7 @@ import {
   MEMORY_NOT_REPORTED,
   NOT_INSTALLED,
   OPEN_ADDRESS_MISSING,
+  OPEN_CERT_MISSING,
   OPEN_DID_NOT_ANSWER,
   OPEN_DOCKER_DID_NOT_START,
   OPEN_DOCKER_MISSING,
@@ -41,6 +43,7 @@ import {
   OPEN_STATE_UNREADABLE,
   openBrowserFailedProblem,
   problemText,
+  OPEN_TRUST_FAILED,
   STATE_BUSY,
   STATE_IMAGE_UNAVAILABLE,
   STATE_UNREADABLE,
@@ -139,6 +142,8 @@ function allProblems(): Problem[] {
     OPEN_STATE_UNREADABLE,
     OPEN_ADDRESS_MISSING,
     OPEN_DID_NOT_ANSWER,
+    OPEN_CERT_MISSING,
+    OPEN_TRUST_FAILED,
     openBrowserFailedProblem('http://127.0.0.1:8791'),
     UPGRADE_NOT_WINDOWS,
     UPGRADE_PROGRAM_MISSING,
@@ -166,6 +171,7 @@ function allProblems(): Problem[] {
     LOW_MEMORY,
     MEMORY_NOT_REPORTED,
     DOCKER_NOT_ANSWERING,
+    ENGINE_TOO_OLD,
   ]) {
     problems.push(record.windows, record.darwin, record.linux);
   }

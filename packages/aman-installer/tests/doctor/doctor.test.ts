@@ -1186,6 +1186,7 @@ test('a state store that cannot answer prints the one problem and stops', async 
     readSummary: async () => {
       throw new StateDockerError('docker is down');
     },
+    readCaCertificate: async () => null,
     writeInstance: async () => false,
     setInstanceValue: async () => false,
     removeInstance: async () => undefined,

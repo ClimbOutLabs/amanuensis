@@ -153,6 +153,8 @@ describe('a size-cut call whose id the host remaps', () => {
       knownEventIds: new Set(),
       readOnlyTools: new Set(),
       sizeCutCalls,
+      callCountCut: false,
+      sandboxToolNames: { runCode: undefined, exec: undefined },
     });
   }
 

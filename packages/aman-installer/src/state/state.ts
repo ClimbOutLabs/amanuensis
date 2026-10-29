@@ -205,8 +205,9 @@ export function backupNameTimeSeconds(name: string): number | null {
 
 // The certificate authority's facts, as the backend can read them. The
 // key's mode is the octal text the shell's file_mode prints, or null when
-// there is no key file. On the volume the store does not read the tls
-// folder in this stage, so every fact is absent there.
+// there is no key file. On the volume the store reads none of the tls
+// folder's stats in this stage, so every fact is absent there; the
+// certificate itself is read on its own, through readCaCertificate.
 export interface CertificateAuthorityFacts {
   certPresent: boolean;
   keyMode: string | null;
@@ -253,6 +254,12 @@ export interface StateBackend {
 
 export interface StateStore {
   readSummary: () => Promise<StateSummary>;
+  // The local authority's certificate, public part only, or null when
+  // this computer has none. It is read on its own, not as part of the
+  // summary: the summary's facts about the authority come from file
+  // stats, and on the volume the certificate is fetched by itself, so
+  // nothing else in the tls folder is ever read out of it.
+  readCaCertificate: () => Promise<string | null>;
   writeInstance: (record: InstanceRecord) => Promise<boolean>;
   setInstanceValue: (options: { name: string; key: string; value: string }) => Promise<boolean>;
   removeInstance: (name: string) => Promise<void>;
@@ -367,6 +374,7 @@ export function createStateStore(backend: StateBackend): StateStore {
   };
   return {
     readSummary: () => readSummaryFrom(backend),
+    readCaCertificate: () => backend.readText(CA_CERT_FILE),
     writeInstance: async record => {
       record.entries.forEach(checkedEntry);
       return writeOneIfChanged(

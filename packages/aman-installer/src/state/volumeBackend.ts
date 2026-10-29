@@ -3,6 +3,7 @@ import type { ProcessRunner } from '../runner/processRunner.ts';
 import { LOCK_TIMING, type LockTiming } from './lockTiming.ts';
 import {
   BACKUPS_DIR,
+  CA_CERT_FILE,
   StateBusyError,
   StateDockerError,
   StateImageError,
@@ -124,6 +125,32 @@ function dockerFailure(result: { started: boolean; exitCode: number; stderr: str
 
 export function volumeBackend(runner: ProcessRunner): StateBackend {
   let files: Map<string, string> | null = null;
+  let caCert: string | null = null;
+  let caCertRead = false;
+
+  // The authority's certificate is fetched by itself, in its own run:
+  // the tree read above names only state and release, and the tls
+  // folder also holds the authority's key, which never leaves the
+  // volume. The certificate is the public part, and it is the only tls
+  // file this backend ever reads out. A volume with no authority yet
+  // answers that the file is not there, which reads as no certificate.
+  const readCaCert = async (): Promise<string | null> => {
+    if (caCertRead) {
+      return caCert;
+    }
+    const result = await runner.runBytes(
+      'docker',
+      ['run', '--rm', '--network', 'none', '-v', MOUNT_READ_ONLY, SETUP_IMAGE, 'cat', `${VOLUME_HOME}/${CA_CERT_FILE}`],
+      new Uint8Array(),
+    );
+    const failure = dockerFailure(result);
+    if (failure !== null) {
+      throw failure;
+    }
+    caCertRead = true;
+    caCert = result.exitCode === 0 ? new TextDecoder().decode(result.stdout) : null;
+    return caCert;
+  };
 
   const readTree = async (): Promise<Map<string, string>> => {
     if (files !== null) {
@@ -182,6 +209,9 @@ export function volumeBackend(runner: ProcessRunner): StateBackend {
 
   return {
     readText: async path => {
+      if (path === CA_CERT_FILE) {
+        return readCaCert();
+      }
       const tree = await readTree();
       return tree.get(path) ?? null;
     },
@@ -230,7 +260,7 @@ export function volumeBackend(runner: ProcessRunner): StateBackend {
       // The volume keeps no times of its own, and reading more of it costs
       // a container run, so the only stat answered here is a backup's: its
       // time is the time in its name. The backup record's own time and the
-      // tls folder are not read from the volume in this stage.
+      // tls folder's stats are not answered from the volume in this stage.
       const prefix = `${BACKUPS_DIR}/`;
       if (!path.startsWith(prefix)) {
         return Promise.resolve(null);

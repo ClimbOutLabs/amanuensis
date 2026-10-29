@@ -92,10 +92,6 @@ const ModelRoleSettings = () => {
             </article>
           </div>
           <p className="mt-2 text-sm text-text-secondary">
-            When the main chat model comes from Token Factory, memory summaries, profile learning and library checks use
-            the small Nemotron model unless you pick another one here. Other providers keep using the main chat model.
-          </p>
-          <p className="mt-2 text-sm text-text-secondary">
             Short background checks, like understanding a request to change personas, reuse the main chat model. They do
             not need their own role.
           </p>

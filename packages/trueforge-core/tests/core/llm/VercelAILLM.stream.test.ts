@@ -27,6 +27,7 @@ import {
   toolCallPieceOf,
   toStreamError,
 } from '../../../src/core/llm/VercelAILLM';
+import { MAX_TOOL_CALL_STREAM_PARTS, MAX_TOOL_CALLS_PER_REPLY } from '../../../src/core/runtime/modelReplyGuard';
 
 // ─────────── Helpers ───────────
 
@@ -782,6 +783,46 @@ describe('mapStreamToChunks', () => {
     expect(final.output.tool_calls).toEqual([
       { id: 'call-1', type: 'function', function: { name: 'search', arguments: '{"q":"hi"}' } },
     ]);
+    expect(final.finish_reason).toBe('tool_calls');
+  });
+
+  it('stops reading at one call over the stream ceiling and marks the reply cut, so a flood of calls cannot hold the step open', async () => {
+    const parts: TextStreamPart<ToolSet>[] = Array.from({ length: MAX_TOOL_CALL_STREAM_PARTS + 1 }, (_, index) => ({
+      type: 'tool-input-start' as const,
+      id: `call-${String(index)}`,
+      toolName: 'search',
+    }));
+    // Nothing after the cut is read: a finish step that never arrives is not waited for.
+    const neverRead = jest.fn();
+    async function* floodStream(): AsyncGenerator<TextStreamPart<ToolSet>> {
+      for (const part of parts) yield part;
+      neverRead();
+      yield makeFinishStep('tool-calls');
+    }
+    const { final } = await drainStream(mapStreamToChunks({ stream: floodStream(), chunkMeta: CHUNK_META }));
+
+    expect(MAX_TOOL_CALL_STREAM_PARTS).toBe(40);
+    expect(final.tool_call_count_cut).toBe(true);
+    expect(final.output.tool_calls).toHaveLength(MAX_TOOL_CALL_STREAM_PARTS);
+    expect(neverRead).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['exactly the stream ceiling', MAX_TOOL_CALL_STREAM_PARTS],
+    ['22 calls, over the reply cap but a batch the reply guard may still merge or hold', 22],
+    ['exactly the reply cap', MAX_TOOL_CALLS_PER_REPLY],
+  ])('reads a reply of %s whole and leaves it unmarked', async (_label, count) => {
+    const parts: TextStreamPart<ToolSet>[] = Array.from({ length: count }, (_, index) => ({
+      type: 'tool-input-start' as const,
+      id: `call-${String(index)}`,
+      toolName: 'search',
+    }));
+    const { final } = await drainStream(
+      mapStreamToChunks({ stream: makeStream([...parts, makeFinishStep('tool-calls')]), chunkMeta: CHUNK_META }),
+    );
+
+    expect(final.tool_call_count_cut).toBeUndefined();
+    expect(final.output.tool_calls).toHaveLength(count);
     expect(final.finish_reason).toBe('tool_calls');
   });
 
