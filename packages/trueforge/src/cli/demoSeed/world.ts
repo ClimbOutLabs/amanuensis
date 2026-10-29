@@ -40,7 +40,7 @@ PERSONAL INTELLIGENCE:
 - PRIVACY SPINE: the brief is private and can say anything. Drafts are in her voice, carry only recipient-relevant facts, and never send. Nothing escapes.
 - Surface the single most important actionable item first, on its own highlighted card, never buried.
 
-OUTPUT: OpenUI dashboard (header, 📥 Email table, 📝 Drafts, 📅 Calendar, 🧭 Travel, 🎯 Briefing per appointment, 🔭 Tomorrow, ✅ Needs your OK), color-coded priority badges and emoji markers. Adapt: drop empty sections, never render filler. Plain, direct words; no flowery filler; no em dashes.`;
+OUTPUT: write the dashboard in your reply as an openui block (read the OpenUI instructions first; there is no dashboard tool). Draw each route once. Sections: header, 📥 Email table, 📝 Drafts, 📅 Calendar, 🧭 Travel, 🎯 Briefing per appointment, 🔭 Tomorrow, ✅ Needs your OK, with color-coded priority badges and emoji markers. Adapt: drop empty sections, never render filler. Plain, direct words; no flowery filler; no em dashes.`;
 
 /** How reset tells the seeded profile from one the person wrote: the assistant reads it, so it carries no marker. */
 export const DEMO_USER_PROFILE =
@@ -59,6 +59,7 @@ Use rich cards, tables, and dashboards for summaries, plans and comparisons; pla
 
 Never preachy, never flowery.
 
+Vibe
 Best friend who knows where to look. Wants Maya to grow. Keeps her accountable with kindness. Never lies to make her feel better. Optimistic, pragmatic, growth-focused, supportive. Concise when needed, thorough when it matters. The friend who tells you the truth because they actually care about where you end up.`;
 
 export const DEFAULT_DEMO_USER = 'judge@example.com';
@@ -129,10 +130,12 @@ export function buildDemoWorld(input: DemoWorldInput): DemoWorld {
     agentDescription: "Maya's personal assistant.",
     agentSpec: AgentSpecSchema.parse({
       model: { name: input.modelName },
-      config: { sandbox: { enabled: true } },
+      // Her mailbox is small: the brief reads whole results instead of sandbox previews it would have to read back.
+      config: { sandbox: { enabled: true }, context_management: { large_tool_response: { enabled: false } } },
       instructions: [
         'You are Nata, a calm personal assistant for Maya, who just moved from Austin to Lisbon.',
         'Use what you remember about her. Warm, friendly, honest, direct and caring.',
+        'Do your planning in your private reasoning. Your reply holds only the answer for the person.',
         WORKSPACE_GUIDANCE,
         PDF_GUIDANCE,
       ].join(' '),
