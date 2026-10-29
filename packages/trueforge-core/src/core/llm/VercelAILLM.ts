@@ -1165,6 +1165,27 @@ export function providerStatusCode(raw: unknown): number | undefined {
   return undefined;
 }
 
+/**
+ * True when the provider answered that the same request may work if sent again later: the
+ * service is overloaded, down, or rate limiting (HTTP 408, 409, 429, 5xx), or no answer came
+ * back at all. Walks the cause chain, since the stream wraps the provider's error. A client
+ * error such as a 400 or an auth failure is not retryable: the same request would fail again.
+ */
+export function isRetryableProviderError(raw: unknown): boolean {
+  let current: unknown = raw;
+  for (let depth = 0; depth < 5 && current !== undefined && current !== null; depth++) {
+    if (APICallError.isInstance(current)) {
+      return current.isRetryable;
+    }
+    const status = providerStatusCode(current);
+    if (status !== undefined) {
+      return status === 408 || status === 409 || status === 429 || status >= 500;
+    }
+    current = typeof current === 'object' && 'cause' in current ? current.cause : undefined;
+  }
+  return false;
+}
+
 // Wording providers use when a request does not fit the model's context window
 // (OpenAI-compatible servers such as vLLM, Anthropic, Bedrock, Gemini, Ollama, llama.cpp).
 const CONTEXT_LENGTH_ERROR_PATTERN =
