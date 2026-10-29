@@ -119,7 +119,9 @@ describe('demo seed against the real stores', () => {
 
     const entries = await vault(stores);
     expect(entries).toHaveLength(NOTE_COUNT);
-    expect(entries.every(entry => entry.text.includes(`> ${DEMO_MARKER}:`))).toBe(true);
+    // The page text names no internal id or time heading; the vault hands the context back on its own.
+    expect(entries.every(entry => entry.context?.startsWith(`${DEMO_MARKER}:`) === true)).toBe(true);
+    expect(entries.some(entry => entry.text.includes(`${DEMO_MARKER}:`) || entry.text.startsWith('## '))).toBe(false);
 
     const { data: schedules } = await stores.scheduleStore.listSchedules({
       tenant_id: TENANT_ID,
@@ -582,7 +584,7 @@ describe('demo seed against the real stores', () => {
       ).toEqual([DEMO_TASKS_SPACE_ID]);
       const entries = await vault(stores);
       expect(entries).toHaveLength(NOTE_COUNT);
-      expect(entries.every(entry => entry.text.includes(`> ${DEMO_MARKER}:`))).toBe(true);
+      expect(entries.every(entry => entry.context?.startsWith(`${DEMO_MARKER}:`) === true)).toBe(true);
       expect(entries.some(entry => entry.text.includes(LEGACY_MARKER))).toBe(false);
       expect((await stores.personalizationStore.getProfile(owner))?.user_profile).toBe(DEMO_USER_PROFILE);
     });

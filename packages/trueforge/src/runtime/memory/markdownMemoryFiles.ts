@@ -258,24 +258,55 @@ export function isLegacyDocumentCopy({ text, context }: { text: string; context:
   return closing === `> ${context}` && lines.some(line => line.trim() !== '' && !line.startsWith('## '));
 }
 
-/** The entry text the Memories page shows and edits: the hidden chat id, document id and note lines are dropped. */
+/**
+ * A closing `> ` line that names an internal id, such as `maya:identity`: two short tokens around one
+ * colon and no spaces, the first starting with a letter. A readable line such as `> Source: read content`
+ * has spaces, and a time such as `> 09:30` starts with a digit, so neither matches.
+ */
+const HIDDEN_CONTEXT_PATTERN = /^> ([A-Za-z][A-Za-z0-9_-]{0,63}:[A-Za-z0-9_-]{1,64})$/;
+
+/** A trailer-free body split into its readable text and the id-shaped context line it may close with. */
+function splitHiddenContext(body: string): { body: string; context: string | undefined } {
+  const lines = body.split('\n');
+  const context =
+    lines.length > 1 ? HIDDEN_CONTEXT_PATTERN.exec((lines[lines.length - 1] ?? '').trimEnd())?.[1] : undefined;
+  if (context === undefined) {
+    return { body, context: undefined };
+  }
+  return { body: lines.slice(0, -1).join('\n').trim(), context };
+}
+
+/** The text after an entry's timestamp heading, or the whole text when it has no such heading. */
+function withoutHeading(body: string): string {
+  return headingInstant(body) === undefined ? body : body.slice(body.indexOf('\n') + 1 || body.length).trim();
+}
+
+/**
+ * The entry text the Memories page shows and edits: the timestamp heading, the hidden chat id, document id
+ * and note lines, and an id-shaped context line are dropped. The page shows the time on its own, and a
+ * readable `> Source: …` line stays.
+ */
 export function withoutHiddenMarkers(text: string): string {
   const { body, metadata } = splitEntryTrailers(text);
-  if (
-    metadata[SESSION_ID_METADATA_KEY] === undefined &&
-    metadata[DOCUMENT_ID_METADATA_KEY] === undefined &&
-    metadata[NOTE_SOURCE_METADATA_KEY] === undefined
-  ) {
-    return text;
-  }
+  const readable = splitHiddenContext(withoutHeading(body)).body;
   if (metadata[MEMORY_ORIGIN_METADATA_KEY] === undefined) {
-    return body;
+    return readable;
   }
   const sourceLine =
     metadata[NOTE_SOURCE_METADATA_KEY] === ASSISTANT_RESPONSE_SOURCE
       ? ASSISTANT_REPLY_SOURCE_LINE
       : READ_CONTENT_SOURCE_LINE;
-  return `${body}\n\n${sourceLine}`;
+  return `${readable}\n\n${sourceLine}`;
+}
+
+/** The internal id an entry was filed under (its id-shaped `> ` context line), which the page never shows. */
+export function hiddenContext(text: string): string | undefined {
+  return splitHiddenContext(splitEntryTrailers(text).body).context;
+}
+
+/** An entry's text with its internal id put back as the closing `> ` line, the shape the daily logs hold. */
+export function withHiddenContext({ text, context }: { text: string; context: string | undefined }): string {
+  return context === undefined ? text : `${text}\n\n> ${context}`;
 }
 
 /** The instant in an entry's `## ` heading, when the heading is a readable timestamp. */
@@ -287,38 +318,42 @@ function headingInstant(text: string): string | undefined {
 }
 
 /**
- * An edited entry's text with the hidden chat id and document id of the original put back (the Memories
- * page sends the text without them), so editing a note never makes it forget where it came from.
+ * An edited entry's text with the lines the Memories page left out of the original put back: the timestamp
+ * heading, the id-shaped context line, and the hidden chat id, document id and note lines. The readable
+ * `> Source: …` line is part of the page text, so an edit that removes it is kept as written.
  */
 export function withOriginalHiddenMarkers({ original, edited }: { original: string; edited: string }): string {
-  const kept = splitEntryTrailers(original).metadata;
-  const { body, metadata } = splitEntryTrailers(edited);
+  const { body: originalBody, metadata: kept } = splitEntryTrailers(original);
+  const { body: editedBody, metadata } = splitEntryTrailers(edited);
+  const heading =
+    headingInstant(originalBody) !== undefined && headingInstant(editedBody) === undefined
+      ? [originalBody.split('\n', 1)[0] ?? '']
+      : [];
+  const context = splitHiddenContext(originalBody).context;
+  const body =
+    context !== undefined && splitHiddenContext(editedBody).context === undefined
+      ? withHiddenContext({ text: editedBody, context })
+      : editedBody;
+  // A hidden line the edit names itself wins over the original's; the lines keep their on-disk order.
   const trailers: string[] = [];
-  const sessionId = kept[SESSION_ID_METADATA_KEY];
-  if (sessionId !== undefined && metadata[SESSION_ID_METADATA_KEY] === undefined) {
+  const sessionId = metadata[SESSION_ID_METADATA_KEY] ?? kept[SESSION_ID_METADATA_KEY];
+  if (sessionId !== undefined) {
     trailers.push(`<!-- session_id: ${sessionId} -->`);
   }
-  const documentId = kept[DOCUMENT_ID_METADATA_KEY];
-  if (documentId !== undefined && metadata[DOCUMENT_ID_METADATA_KEY] === undefined) {
+  const documentId = metadata[DOCUMENT_ID_METADATA_KEY] ?? kept[DOCUMENT_ID_METADATA_KEY];
+  if (documentId !== undefined) {
     trailers.push(`<!-- document_id: ${documentId} -->`);
   }
-  const noteSource = kept[NOTE_SOURCE_METADATA_KEY];
-  const noteDate = kept[NOTE_DATE_METADATA_KEY];
-  if (
-    noteSource !== undefined &&
-    isMemoryNoteSource(noteSource) &&
-    noteDate !== undefined &&
-    metadata[NOTE_SOURCE_METADATA_KEY] === undefined
-  ) {
+  const note = metadata[NOTE_SOURCE_METADATA_KEY] === undefined ? kept : metadata;
+  const noteSource = note[NOTE_SOURCE_METADATA_KEY];
+  const noteDate = note[NOTE_DATE_METADATA_KEY];
+  if (noteSource !== undefined && isMemoryNoteSource(noteSource) && noteDate !== undefined) {
     trailers.push(formatNoteMarker({ source: noteSource, date: noteDate }));
-  }
-  if (trailers.length === 0) {
-    return edited;
   }
   if (metadata[MEMORY_ORIGIN_METADATA_KEY] !== undefined) {
     trailers.push(READ_CONTENT_SOURCE_LINE);
   }
-  return [body, ...trailers].join('\n\n');
+  return [...heading, body, ...trailers].join('\n\n');
 }
 
 /** When an entry was written: its `## ` heading instant, else the day in its daily file name. */
@@ -336,8 +371,7 @@ export function normalizedEntryBody(text: string): string {
  * and the read-content marker are left out because recall reports them as the item's date and origin.
  */
 export function entryRecallText(text: string): string {
-  const { body } = splitEntryTrailers(text);
-  return headingInstant(body) === undefined ? body : body.slice(body.indexOf('\n') + 1 || body.length).trim();
+  return withoutHeading(splitEntryTrailers(text).body);
 }
 
 /** Curated long-term memory file inside a namespace directory. */
@@ -702,6 +736,8 @@ export interface VaultScannedEntry {
   text: string;
   /** ISO-8601 instant: the marker time for edited entries, else the entry's own time. */
   timestamp: string;
+  /** The internal id the entry was filed under, when it has one; left out of `text`. */
+  context?: string;
 }
 
 /** Entry time from its `## ` heading, falling back to the file date. */
@@ -740,10 +776,12 @@ export async function scanVaultEntries(options: {
   const latest = latestTombstonesByEntry(tombstones);
   return applyVaultTombstones(scan.entries, tombstones).map(entry => {
     const tombstone = latest.get(entry.id);
+    const context = hiddenContext(entry.text);
     return {
       id: entry.id,
       text: withoutHiddenMarkers(entry.text),
       timestamp: tombstone?.action === 'updated' ? tombstone.timestamp : vaultEntryTimestamp(entry),
+      ...(context === undefined ? {} : { context }),
     };
   });
 }

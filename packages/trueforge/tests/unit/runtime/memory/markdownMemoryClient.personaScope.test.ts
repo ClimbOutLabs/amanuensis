@@ -560,19 +560,21 @@ describe('MarkdownMemoryClient persona vault scope with embeddings', () => {
     const alpha = clientWith(ALPHA);
     await retainMany(alpha, ['Alpha lodging is a hotel in Lisbon', 'Alpha owns a bicycle']);
     await waitForIndexed(subsystemOf(subsystems, 'tenant-1__persona_Alpha'), 2);
-    const [entryId] = await listedIds(alpha, 'persona:Alpha');
-    if (entryId === undefined) {
+    const listed = await alpha.listEntries({ namespace: 'persona:Alpha', timeoutMs: TIMEOUT_MS });
+    const entry = listed.ok ? listed.entries[0] : undefined;
+    if (entry === undefined) {
       throw new Error('expected a persona vault entry');
     }
     requested.clear();
 
     const edited = 'Alpha owns a tent near Sintra';
-    await alpha.updateEntry({ entryId, text: edited, timeoutMs: TIMEOUT_MS });
+    await alpha.updateEntry({ entryId: entry.id, text: edited, timeoutMs: TIMEOUT_MS });
 
     expect([...requested]).toEqual(['tenant-1__persona_Alpha']);
+    // The index keeps the entry's time heading with the fact, as it does for a newly retained entry.
     await waitFor(async () => {
       const store = await EmbeddingStore.load({ namespaceDir: path.join(baseDir, 'tenant-1__persona_Alpha') });
-      return store.get(entryId)?.hash === hashEntryText(edited);
+      return store.get(entry.id)?.hash === hashEntryText(`## ${entry.timestamp}\n\n${edited}`);
     }, 'the edited fact to be re-indexed');
     expect(await storedIds(TENANT)).toEqual([]);
   });

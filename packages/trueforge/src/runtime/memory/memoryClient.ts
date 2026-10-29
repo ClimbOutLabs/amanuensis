@@ -121,6 +121,8 @@ export interface MemoryVaultEntry {
   timestamp: string;
   /** Owning persona for `persona:<name>` vaults, else null. */
   persona: string | null;
+  /** The internal id the entry was filed under, when it has one. Not part of `text` and never shown to people. */
+  context?: string;
 }
 
 export type MemoryVaultFailureCode = 'request_failed' | 'not_found' | 'timeout';

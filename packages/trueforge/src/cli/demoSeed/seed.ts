@@ -24,7 +24,7 @@ import type { WithTransaction } from '../../db/transaction';
 import type { ITurnArtifactStore } from '../../db/turnArtifactStore';
 import { seedDefaultSearchProvider, type DefaultSearchProviderOutcome } from '../../runtime/defaultSearchProvider';
 import { registerMailConnector } from '../../runtime/mailConnector';
-import type { MemoryClient } from '../../runtime/memory/memoryClient';
+import type { MemoryClient, MemoryVaultEntry } from '../../runtime/memory/memoryClient';
 import type { SkillManifest } from '../../schemas/skill';
 import { SPACE_LIST_LIMIT } from '../../schemas/space';
 import { knowledgeDocumentId, type DemoKnowledgeLibrary } from './knowledgeLibrary';
@@ -40,7 +40,8 @@ const PAGE_SIZE = 100;
 const EARLIER_MARKER = 'demo_synthetic';
 const EARLIER_ID_PREFIX = 'demo-synthetic';
 const EARLIER_AGENT_NAME = `${EARLIER_ID_PREFIX}-assistant`;
-const NOTE_MARKER_LINE = new RegExp(`^> (${DEMO_MARKER}|${EARLIER_MARKER}):([a-z0-9-]+)$`);
+/** The context each note is filed under; the vault keeps it off the page text and hands it back on its own. */
+const NOTE_CONTEXT = new RegExp(`^(${DEMO_MARKER}|${EARLIER_MARKER}):([a-z0-9-]+)$`);
 
 export interface DemoSeedStores<TTransaction> {
   withTransaction: WithTransaction<TTransaction>;
@@ -131,25 +132,18 @@ function isSeededProfile(userProfile: string | null): boolean {
 interface StoredNote {
   entryId: string;
   key: string;
-  header: string;
   body: string;
   /** False when an earlier seed's marker is on it, so the next seed rewrites it. */
   current: boolean;
 }
 
-function noteText({ header, note }: { header: string; note: DemoNote }): string {
-  return `${header}\n\n${note.body}\n\n> ${DEMO_MARKER}:${note.key}`;
-}
-
-function parseStoredNote({ entryId, text }: { entryId: string; text: string }): StoredNote | undefined {
-  const lines = text.trimEnd().split('\n');
-  const marker = lines.pop()?.match(NOTE_MARKER_LINE);
+function parseStoredNote({ id, text, context }: MemoryVaultEntry): StoredNote | undefined {
+  const marker = context === undefined ? null : NOTE_CONTEXT.exec(context);
   const key = marker?.[2];
   if (key === undefined) {
     return undefined;
   }
-  const [header = '', ...rest] = lines;
-  return { entryId, key, header, body: rest.join('\n').trim(), current: marker?.[1] === DEMO_MARKER };
+  return { entryId: id, key, body: text.trim(), current: marker?.[1] === DEMO_MARKER };
 }
 
 async function listStoredNotes(memory: MemoryClient): Promise<StoredNote[]> {
@@ -158,7 +152,7 @@ async function listStoredNotes(memory: MemoryClient): Promise<StoredNote[]> {
     throw new Error(`Could not read the memory vault: ${outcome.reason}`);
   }
   return outcome.entries.flatMap(entry => {
-    const stored = parseStoredNote({ entryId: entry.id, text: entry.text });
+    const stored = parseStoredNote(entry);
     return stored === undefined ? [] : [stored];
   });
 }
@@ -178,38 +172,47 @@ async function seedMemory({
 
   for (const note of notes) {
     const existing = stored.find(candidate => candidate.key === note.key);
-    if (existing === undefined) {
-      const timestamp = now.toISOString();
-      // A fresh operation id each time: a reset leaves the old id on record, and a reused one would skip the write.
-      const retained = await memory.retain({
-        items: [
-          {
-            content: note.body,
-            timestamp,
-            context: `${DEMO_MARKER}:${note.key}`,
-            document_id: `${DEMO_ID_PREFIX}-${note.key}`,
-          },
-        ],
-        operationId: ulid(),
-        timeoutMs: MEMORY_TIMEOUT_MS,
-      });
-      if (!retained.ok) {
-        throw new Error(`Could not write memory note "${note.key}": ${retained.reason ?? 'unknown error'}`);
-      }
-      report.created += 1;
-    } else if (existing.current && existing.body === note.body) {
+    if (existing?.current === true && existing.body === note.body) {
       report.unchanged += 1;
-    } else {
+      continue;
+    }
+    if (existing?.current === true) {
+      // The vault keeps the note's time and context across an edit; only the body is sent.
       const updated = await memory.updateEntry({
         entryId: existing.entryId,
-        text: noteText({ header: existing.header, note }),
+        text: note.body,
         timeoutMs: MEMORY_TIMEOUT_MS,
       });
       if (!updated.ok) {
         throw new Error(`Could not update memory note "${note.key}": ${updated.reason}`);
       }
       report.updated += 1;
+      continue;
     }
+    if (existing !== undefined) {
+      // An earlier seed filed the note under its old context, which an edit would keep, so it is replaced whole.
+      const removed = await memory.deleteEntry({ entryId: existing.entryId, timeoutMs: MEMORY_TIMEOUT_MS });
+      if (!removed.ok) {
+        throw new Error(`Could not replace memory note "${note.key}": ${removed.reason}`);
+      }
+    }
+    // A fresh operation id each time: a reset leaves the old id on record, and a reused one would skip the write.
+    const retained = await memory.retain({
+      items: [
+        {
+          content: note.body,
+          timestamp: now.toISOString(),
+          context: `${DEMO_MARKER}:${note.key}`,
+          document_id: `${DEMO_ID_PREFIX}-${note.key}`,
+        },
+      ],
+      operationId: ulid(),
+      timeoutMs: MEMORY_TIMEOUT_MS,
+    });
+    if (!retained.ok) {
+      throw new Error(`Could not write memory note "${note.key}": ${retained.reason ?? 'unknown error'}`);
+    }
+    report[existing === undefined ? 'created' : 'updated'] += 1;
   }
 
   for (const leftover of stored.filter(candidate => !wanted.has(candidate.key))) {

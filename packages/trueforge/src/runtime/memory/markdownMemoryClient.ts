@@ -567,6 +567,7 @@ export class MarkdownMemoryClient implements MemoryClient {
         text: entry.text,
         timestamp: entry.timestamp,
         persona: input.persona,
+        ...(entry.context === undefined ? {} : { context: entry.context }),
       }));
       return { ok: true, entries };
     } catch (error) {
