@@ -1,4 +1,5 @@
 import type { CallToolRequest } from '@modelcontextprotocol/sdk/types.js';
+import { EXTRACT_DOCUMENT_TEXT_TOOL_NAME } from '../../../documents/toolContract';
 import type { ApprovalDecision } from '../../events/schema';
 import type { InternalToolCallInfo } from '../../llm/LLMTypes';
 import {
@@ -19,7 +20,9 @@ import {
   isMailReadToolName,
   MAIL_ACCOUNT_ARGUMENT,
   MAIL_ACCOUNT_LIST_TOOL_NAME,
+  MAIL_ATTACHMENT_TOOL_NAME,
   MAIL_CONNECTOR_TOOL_NAMES,
+  MAIL_CONTENT_TOOL_NAME,
   MAIL_DRAFT_TOOL_NAME,
   MAIL_LIST_TOOL_NAME,
 } from './toolContract';
@@ -39,6 +42,9 @@ const ACCOUNT_NOTE = 'Leave it out when there is one account; it is filled in fo
 const DRAFT_RECIPIENT_NOTE =
   'Recipients the person named must stay on the call: a recipient who is not on the Email list is handled by an approval card shown to the person, and a draft with no recipient is refused. Never leave recipients off to get past a refusal.';
 const RECENT_WINDOW_NOTE = `With no since date, this looks at the ${String(RECENT_WINDOW_DAYS)} days up to before (or up to now), then ${String(WIDER_WINDOW_DAYS)} days if fewer messages than asked for come back. Results are newest first within that window. Set since to look further back.`;
+
+// A file name alone is not a path the document reader can open without asking, so the model must fetch first.
+const ATTACHMENT_NOTE = `To read an attachment, first call ${MAIL_ATTACHMENT_TOOL_NAME} for it. That saves the file in the sandbox and returns its path. Then call ${EXTRACT_DOCUMENT_TEXT_TOOL_NAME} with that path. Never pass an attachment's file name as the path.`;
 
 function isMailConnectorTool(name: string): boolean {
   return MAIL_CONNECTOR_TOOL_NAMES.some(tool => tool === name);
@@ -71,7 +77,9 @@ function withHostFilledAccount(tool: AgentToolSchema): AgentToolSchema {
       ? `${tool.description ?? ''} ${RECENT_WINDOW_NOTE}`.trim()
       : tool.name === MAIL_DRAFT_TOOL_NAME
         ? `${tool.description ?? ''} ${DRAFT_RECIPIENT_NOTE}`.trim()
-        : tool.description;
+        : tool.name === MAIL_CONTENT_TOOL_NAME || tool.name === MAIL_ATTACHMENT_TOOL_NAME
+          ? `${tool.description ?? ''} ${ATTACHMENT_NOTE}`.trim()
+          : tool.description;
   if (properties === undefined || !isRecord(account)) {
     return { ...tool, description };
   }

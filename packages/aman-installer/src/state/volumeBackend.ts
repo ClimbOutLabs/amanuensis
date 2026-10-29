@@ -187,6 +187,32 @@ export function volumeBackend(runner: ProcessRunner): StateBackend {
     );
     return ['state', 'release'].filter(folder => names.has(folder));
   };
+  let caCert: string | null = null;
+  let caCertRead = false;
+
+  // The authority's certificate is fetched by itself, in its own run:
+  // the tree read above names only state and release, and the tls
+  // folder also holds the authority's key, which never leaves the
+  // volume. The certificate is the public part, and it is the only tls
+  // file this backend ever reads out. A volume with no authority yet
+  // answers that the file is not there, which reads as no certificate.
+  const readCaCert = async (): Promise<string | null> => {
+    if (caCertRead) {
+      return caCert;
+    }
+    const result = await runner.runBytes(
+      'docker',
+      ['run', '--rm', '--network', 'none', '-v', MOUNT_READ_ONLY, SETUP_IMAGE, 'cat', `${VOLUME_HOME}/${CA_CERT_FILE}`],
+      new Uint8Array(),
+    );
+    const failure = dockerFailure(result);
+    if (failure !== null) {
+      throw failure;
+    }
+    caCertRead = true;
+    caCert = result.exitCode === 0 ? new TextDecoder().decode(result.stdout) : null;
+    return caCert;
+  };
 
   const readTree = async (): Promise<Map<string, string>> => {
     if (files !== null) {

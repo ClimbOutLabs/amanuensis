@@ -4,6 +4,9 @@ import {
   type CreatedBySubject,
   type ISessionStore,
 } from '@truefoundry/trueforge-core/agent-session';
+import { CALDAV_SERVER_NAME } from '@truefoundry/trueforge-core/core/calendar/caldav/toolContract';
+import { MAIL_CONNECTOR_NAME } from '@truefoundry/trueforge-core/core/email/mailConnector/toolContract';
+import { MORNING_BRIEF_SCHEDULE_NAME } from '@truefoundry/trueforge-core/core/schedules/morningBrief';
 import { ulid } from 'ulid';
 import type { Logger } from 'winston';
 import type { McpCatalog } from '../../catalog/McpCatalog';
@@ -21,12 +24,12 @@ import type { WithTransaction } from '../../db/transaction';
 import type { ITurnArtifactStore } from '../../db/turnArtifactStore';
 import { seedDefaultSearchProvider, type DefaultSearchProviderOutcome } from '../../runtime/defaultSearchProvider';
 import { registerMailConnector } from '../../runtime/mailConnector';
-import type { MemoryClient } from '../../runtime/memory/memoryClient';
+import type { MemoryClient, MemoryVaultEntry } from '../../runtime/memory/memoryClient';
 import type { SkillManifest } from '../../schemas/skill';
 import { SPACE_LIST_LIMIT } from '../../schemas/space';
-import { knowledgeSourceLabel, type DemoKnowledgeLibrary } from './knowledgeLibrary';
+import { knowledgeDocumentId, type DemoKnowledgeLibrary } from './knowledgeLibrary';
 import type { DemoNote, DemoPersona, DemoSpace, DemoWorld } from './model';
-import { DEMO_AGENT_NAME, DEMO_ID_PREFIX, DEMO_MARKER, DEMO_SCHEDULE_NAME, DEMO_USER_PROFILE } from './world';
+import { DEMO_AGENT_NAME, DEMO_ID_PREFIX, DEMO_MARKER, DEMO_USER_PROFILE } from './world';
 
 const MEMORY_TIMEOUT_MS = 10_000;
 /** Indexing a library embeds every passage on the CPU; a first run may also load the search model. */
@@ -37,7 +40,8 @@ const PAGE_SIZE = 100;
 const EARLIER_MARKER = 'demo_synthetic';
 const EARLIER_ID_PREFIX = 'demo-synthetic';
 const EARLIER_AGENT_NAME = `${EARLIER_ID_PREFIX}-assistant`;
-const NOTE_MARKER_LINE = new RegExp(`^> (${DEMO_MARKER}|${EARLIER_MARKER}):([a-z0-9-]+)$`);
+/** The context each note is filed under; the vault keeps it off the page text and hands it back on its own. */
+const NOTE_CONTEXT = new RegExp(`^(${DEMO_MARKER}|${EARLIER_MARKER}):([a-z0-9-]+)$`);
 
 export interface DemoSeedStores<TTransaction> {
   withTransaction: WithTransaction<TTransaction>;
@@ -128,25 +132,18 @@ function isSeededProfile(userProfile: string | null): boolean {
 interface StoredNote {
   entryId: string;
   key: string;
-  header: string;
   body: string;
   /** False when an earlier seed's marker is on it, so the next seed rewrites it. */
   current: boolean;
 }
 
-function noteText({ header, note }: { header: string; note: DemoNote }): string {
-  return `${header}\n\n${note.body}\n\n> ${DEMO_MARKER}:${note.key}`;
-}
-
-function parseStoredNote({ entryId, text }: { entryId: string; text: string }): StoredNote | undefined {
-  const lines = text.trimEnd().split('\n');
-  const marker = lines.pop()?.match(NOTE_MARKER_LINE);
+function parseStoredNote({ id, text, context }: MemoryVaultEntry): StoredNote | undefined {
+  const marker = context === undefined ? null : NOTE_CONTEXT.exec(context);
   const key = marker?.[2];
   if (key === undefined) {
     return undefined;
   }
-  const [header = '', ...rest] = lines;
-  return { entryId, key, header, body: rest.join('\n').trim(), current: marker?.[1] === DEMO_MARKER };
+  return { entryId: id, key, body: text.trim(), current: marker?.[1] === DEMO_MARKER };
 }
 
 async function listStoredNotes(memory: MemoryClient): Promise<StoredNote[]> {
@@ -155,7 +152,7 @@ async function listStoredNotes(memory: MemoryClient): Promise<StoredNote[]> {
     throw new Error(`Could not read the memory vault: ${outcome.reason}`);
   }
   return outcome.entries.flatMap(entry => {
-    const stored = parseStoredNote({ entryId: entry.id, text: entry.text });
+    const stored = parseStoredNote(entry);
     return stored === undefined ? [] : [stored];
   });
 }
@@ -175,38 +172,47 @@ async function seedMemory({
 
   for (const note of notes) {
     const existing = stored.find(candidate => candidate.key === note.key);
-    if (existing === undefined) {
-      const timestamp = now.toISOString();
-      // A fresh operation id each time: a reset leaves the old id on record, and a reused one would skip the write.
-      const retained = await memory.retain({
-        items: [
-          {
-            content: note.body,
-            timestamp,
-            context: `${DEMO_MARKER}:${note.key}`,
-            document_id: `${DEMO_ID_PREFIX}-${note.key}`,
-          },
-        ],
-        operationId: ulid(),
-        timeoutMs: MEMORY_TIMEOUT_MS,
-      });
-      if (!retained.ok) {
-        throw new Error(`Could not write memory note "${note.key}": ${retained.reason ?? 'unknown error'}`);
-      }
-      report.created += 1;
-    } else if (existing.current && existing.body === note.body) {
+    if (existing?.current === true && existing.body === note.body) {
       report.unchanged += 1;
-    } else {
+      continue;
+    }
+    if (existing?.current === true) {
+      // The vault keeps the note's time and context across an edit; only the body is sent.
       const updated = await memory.updateEntry({
         entryId: existing.entryId,
-        text: noteText({ header: existing.header, note }),
+        text: note.body,
         timeoutMs: MEMORY_TIMEOUT_MS,
       });
       if (!updated.ok) {
         throw new Error(`Could not update memory note "${note.key}": ${updated.reason}`);
       }
       report.updated += 1;
+      continue;
     }
+    if (existing !== undefined) {
+      // An earlier seed filed the note under its old context, which an edit would keep, so it is replaced whole.
+      const removed = await memory.deleteEntry({ entryId: existing.entryId, timeoutMs: MEMORY_TIMEOUT_MS });
+      if (!removed.ok) {
+        throw new Error(`Could not replace memory note "${note.key}": ${removed.reason}`);
+      }
+    }
+    // A fresh operation id each time: a reset leaves the old id on record, and a reused one would skip the write.
+    const retained = await memory.retain({
+      items: [
+        {
+          content: note.body,
+          timestamp: now.toISOString(),
+          context: `${DEMO_MARKER}:${note.key}`,
+          document_id: `${DEMO_ID_PREFIX}-${note.key}`,
+        },
+      ],
+      operationId: ulid(),
+      timeoutMs: MEMORY_TIMEOUT_MS,
+    });
+    if (!retained.ok) {
+      throw new Error(`Could not write memory note "${note.key}": ${retained.reason ?? 'unknown error'}`);
+    }
+    report[existing === undefined ? 'created' : 'updated'] += 1;
   }
 
   for (const leftover of stored.filter(candidate => !wanted.has(candidate.key))) {
@@ -258,8 +264,8 @@ async function seedPersona<TTransaction>({
 }
 
 /**
- * Brings a persona's library to exactly the wanted documents. A document whose text changed carries a new
- * source label, so it is replaced; a failed one is tried again.
+ * Brings a persona's library to exactly the wanted documents. A document whose title or text changed carries a
+ * new id, so it is replaced; a failed one is tried again.
  */
 async function seedKnowledge({
   library,
@@ -269,15 +275,13 @@ async function seedKnowledge({
   persona: DemoPersona;
 }): Promise<Pick<SeedReport['knowledge'], 'created' | 'unchanged' | 'removed'>> {
   const report = { created: 0, unchanged: 0, removed: 0 };
-  const wanted = persona.knowledge.map(document => ({ ...document, sourceLabel: knowledgeSourceLabel(document.text) }));
+  const wanted = persona.knowledge.map(document => ({ ...document, id: knowledgeDocumentId(document) }));
   const existing = await library.listDocuments({ personaId: persona.id });
   const kept = new Set<string>();
   for (const document of existing) {
-    const keep =
-      document.status !== 'failed' &&
-      wanted.some(candidate => candidate.title === document.title && candidate.sourceLabel === document.source_label);
+    const keep = document.status !== 'failed' && wanted.some(candidate => candidate.id === document.id);
     if (keep) {
-      kept.add(`${document.title}\n${document.source_label}`);
+      kept.add(document.id);
       report.unchanged += 1;
     } else {
       await library.deleteDocument({ personaId: persona.id, documentId: document.id });
@@ -285,9 +289,10 @@ async function seedKnowledge({
     }
   }
   for (const document of wanted) {
-    if (!kept.has(`${document.title}\n${document.sourceLabel}`)) {
+    if (!kept.has(document.id)) {
       await library.addTextDocument({
         personaId: persona.id,
+        documentId: document.id,
         title: document.title,
         text: document.text,
         sourceLabel: document.sourceLabel,
@@ -370,10 +375,44 @@ async function seedProfile<TTransaction>({
   return existing === undefined ? 'created' : 'updated';
 }
 
-/** Connectors someone attached to the demo agent stay attached; the seed owns the rest of its spec. */
-function withAttachedConnectors({ wanted, stored }: { wanted: AgentSpec; stored: AgentSpec | undefined }): AgentSpec {
-  const attached = stored?.mcp_servers;
-  return attached === undefined ? wanted : AgentSpecSchema.parse({ ...wanted, mcp_servers: attached });
+/**
+ * The brief reads mail and the calendar and searches the web, so the agent gets each of those connectors
+ * the instance has. Connectors someone attached stay attached, settings and all; the seed owns the rest of its spec.
+ */
+function withDemoConnectors({
+  wanted,
+  stored,
+  available,
+}: {
+  wanted: AgentSpec;
+  stored: AgentSpec | undefined;
+  available: readonly string[];
+}): AgentSpec {
+  const attached = stored?.mcp_servers ?? [];
+  const missing = available.filter(name => !attached.some(entry => entry.name === name));
+  if (attached.length === 0 && missing.length === 0) {
+    return wanted;
+  }
+  return AgentSpecSchema.parse({ ...wanted, mcp_servers: [...attached, ...missing.map(name => ({ name }))] });
+}
+
+/** Mail, calendar and the web search provider, each only when the instance has it registered. */
+async function demoConnectorNames<TTransaction>({
+  stores,
+  scope,
+}: {
+  stores: DemoSeedStores<TTransaction>;
+  scope: DemoSeedScope;
+}): Promise<string[]> {
+  const servers = await stores.mcpServerStore.listServers({ tenant_id: scope.tenantId, names: undefined });
+  const names = servers.map(server => server.name);
+  const search = servers.filter(
+    server => server.manifest.type === 'remote' && server.manifest.search_provider === true,
+  );
+  return [
+    ...[MAIL_CONNECTOR_NAME, CALDAV_SERVER_NAME].filter(name => names.includes(name)),
+    ...search.map(server => server.name),
+  ];
 }
 
 async function seedAgent<TTransaction>({
@@ -386,7 +425,8 @@ async function seedAgent<TTransaction>({
   world: DemoWorld;
 }): Promise<{ outcome: SeedOutcome; agentId: string }> {
   const existing = await stores.agentStore.getAgent({ tenant_id: scope.tenantId, name: DEMO_AGENT_NAME });
-  const manifest = withAttachedConnectors({ wanted: world.agentSpec, stored: existing?.manifest });
+  const available = await demoConnectorNames({ stores, scope });
+  const manifest = withDemoConnectors({ wanted: world.agentSpec, stored: existing?.manifest, available });
   if (existing === undefined) {
     const created = await stores.agentStore.createAgent({
       tenant_id: scope.tenantId,
@@ -425,7 +465,7 @@ async function findSchedule<TTransaction>({
     agent_names: [DEMO_AGENT_NAME],
     created_by_or_agent_ids: undefined,
   });
-  return data.find(schedule => schedule.name === DEMO_SCHEDULE_NAME);
+  return data.find(schedule => schedule.name === MORNING_BRIEF_SCHEDULE_NAME);
 }
 
 /**
@@ -545,7 +585,7 @@ async function seedSchedule<TTransaction>({
           tenant_id: scope.tenantId,
           agent_id: agentId,
           agent_name: DEMO_AGENT_NAME,
-          name: DEMO_SCHEDULE_NAME,
+          name: MORNING_BRIEF_SCHEDULE_NAME,
           persona_id: null,
           manifest: world.scheduleManifest,
           created_by_subject: subjectFor(scope.userId),
@@ -569,7 +609,7 @@ async function seedSchedule<TTransaction>({
       {
         tenant_id: scope.tenantId,
         id: existing.id,
-        name: DEMO_SCHEDULE_NAME,
+        name: MORNING_BRIEF_SCHEDULE_NAME,
         manifest: world.scheduleManifest,
         runFrom: now,
       },
@@ -740,10 +780,11 @@ export async function seedDemoWorld<TTransaction>({
   const memory = await seedMemory({ memory: stores.memory, notes: world.notes, now });
   const { personas, knowledge } = await seedPersonas({ stores, scope, world });
   const profile = await seedProfile({ stores, scope, world });
+  // Connectors first, so the agent can be given the ones this run registered.
+  const connectorReport = await seedConnectors({ stores, scope, connectors });
   const agent = await seedAgent({ stores, scope, world });
   const schedule = await seedSchedule({ stores, scope, world, agentId: agent.agentId, now });
   const spaces = await seedSpaces({ stores, scope, world });
-  const connectorReport = await seedConnectors({ stores, scope, connectors });
   const skillReport = await seedDemoSkills({ stores, scope, connectors });
   return {
     personas,

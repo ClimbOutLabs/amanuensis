@@ -1190,7 +1190,7 @@ describe('fix-pass: reliability hardening', () => {
     expect(await readBody(callTool, spaceName)).toBe(seededBody);
   });
 
-  it('a stale expected_revision feeds the breaker, as the brief settled: a named revision is the copy the model read', async () => {
+  it('a stale expected_revision hands back the outline and does not feed the breaker', async () => {
     const { callTool } = makeHarness();
     const spaceName = await createAnchoredBoard(callTool);
     const notesFingerprint = await fingerprintOf(callTool, { spaceName: spaceName, anchor: 'notes' });
@@ -1199,18 +1199,20 @@ describe('fix-pass: reliability hardening', () => {
     await failedBlockEdits(callTool, spaceName);
     await failedBlockEdits(callTool, spaceName);
 
-    // A call naming a revision the space has moved past: refused with the current one,
-    // and it counts as the third failure: the model's copy diverged, which is exactly
-    // what the breaker exists to stop a loop on.
+    // A call naming a revision the space is not at: refused with the current outline.
+    // The outline is the recovery, so this refusal does not count as a failure.
     const stale = await callTool(EDIT_SPACE_TOOL_NAME, {
       space_name: spaceName,
       expected_revision: 999,
       edits: [{ type: 'block', anchor: 'notes', fingerprint: notesFingerprint, new_content: '<p>racy</p>' }],
     });
     expect(isErrorResponse(stale)).toBe(true);
-    expect(resultJson(stale).error).toContain('Stale space revision');
+    expect(resultJson(stale).error).toContain('The space is at revision 1, not 999');
     expect(await readBody(callTool, spaceName)).toBe(ANCHORED_BOARD);
 
+    // Counter still at 2: one more genuine failure trips the lock.
+    const third = await failedBlockEdits(callTool, spaceName);
+    expect(third.error).not.toContain('locked');
     const locked = await callTool(EDIT_SPACE_TOOL_NAME, {
       space_name: spaceName,
       expected_revision: 1,
@@ -1252,7 +1254,8 @@ describe('fix-pass: reliability hardening', () => {
       edits: [{ type: 'block', anchor: 'notes', fingerprint: notesFingerprint, new_content: '<p>racy</p>' }],
     });
     expect(isErrorResponse(conflicted)).toBe(true);
-    expect(resultJson(conflicted).error).toContain('Stale space revision');
+    expect(resultJson(conflicted).error).toContain('send the edit again with expected_revision');
+    expect(resultJson(conflicted).blocks?.map(block => block.anchor)).toContain('notes');
     expect(await readBody(callTool, spaceName)).toBe(ANCHORED_BOARD);
 
     // If the race had fed the breaker, this failure would be refused as locked; if it

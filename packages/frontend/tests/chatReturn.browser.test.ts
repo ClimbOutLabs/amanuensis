@@ -15,6 +15,7 @@ import {
 } from '../../trueforge/tests/fixtures/scriptedModelServer.ts';
 import { inProcessApi } from './support/approvalChat.ts';
 import { findChromiumExecutable } from './support/findChromiumExecutable.ts';
+import { privateViteCache } from './support/viteCache.ts';
 
 const RENDER_TIMEOUT_MS = 45_000;
 /** A name the person chose, so the lines below prove they use it rather than a built-in one. */
@@ -150,7 +151,9 @@ async function cancelStopsReply({
 test('a chat left while its reply runs comes back live', { timeout: 900_000 }, async () => {
   const api = await startApprovalTestServer();
   let turnStartDelayMs = 0;
+  const viteCache = privateViteCache('chat-return');
   const vite = await createServer({
+    cacheDir: viteCache.cacheDir,
     root: fileURLToPath(new URL('../', import.meta.url)),
     logLevel: 'error',
     plugins: [
@@ -367,6 +370,7 @@ test('a chat left while its reply runs comes back live', { timeout: 900_000 }, a
   } finally {
     await browser?.close();
     await vite.close();
+    viteCache.remove();
     await api.close();
   }
 });

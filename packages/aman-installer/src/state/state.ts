@@ -271,6 +271,12 @@ export interface StateStore {
   // cannot see those writes happen. A command calls this when such a
   // run has finished, before anything reads the state again.
   refreshCache: () => void;
+  // The local authority's certificate, public part only, or null when
+  // this computer has none. It is read on its own, not as part of the
+  // summary: the summary's facts about the authority come from file
+  // stats, and on the volume the certificate is fetched by itself, so
+  // nothing else in the tls folder is ever read out of it.
+  readCaCertificate: () => Promise<string | null>;
   writeInstance: (record: InstanceRecord) => Promise<boolean>;
   setInstanceValue: (options: { name: string; key: string; value: string }) => Promise<boolean>;
   removeInstance: (name: string) => Promise<void>;
@@ -389,6 +395,7 @@ export function createStateStore(backend: StateBackend): StateStore {
     refreshCache: () => {
       backend.refreshCache?.();
     },
+    readCaCertificate: () => backend.readText(CA_CERT_FILE),
     writeInstance: async record => {
       record.entries.forEach(checkedEntry);
       return writeOneIfChanged(

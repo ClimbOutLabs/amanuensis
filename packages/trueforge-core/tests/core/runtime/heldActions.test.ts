@@ -2,6 +2,7 @@
  * An unattended run holds every call that would ask, finishes everything else, and the owner's later
  * answer runs exactly the stored call once, with no model call.
  */
+import type { LanguageModelUsage, ToolSet as ProviderToolSet, StepResultPerformance, TextStreamPart } from 'ai';
 import {
   NEW_RECIPIENT_REFUSED,
   SEND_LIST_STILL_UPDATING,
@@ -9,7 +10,7 @@ import {
 import { InvalidAgentSendInputError } from '../../../src/core/errors';
 import { EventType } from '../../../src/core/events/schema';
 import type { ExtendedChatCompletionChunk, RawAssistantMessageWithUsage } from '../../../src/core/llm/LLMTypes';
-import { getEmptyUsage } from '../../../src/core/llm/LLMTypes';
+import { mapStreamToChunks } from '../../../src/core/llm/VercelAILLM';
 import { createTurnToolCallLedger, type TurnToolCallLedger } from '../../../src/core/mcp/executeToolCalls';
 import type { ToolSource } from '../../../src/core/mcp/IMCPServer';
 import { toolResultResponse } from '../../../src/core/mcp/IMCPServer';
@@ -26,7 +27,7 @@ import type { MailAddRecipientsResult } from '../../../src/core/permissions/cont
 import { AgentThread } from '../../../src/core/runtime/AgentThread';
 import type { AgentThreadConstructorInput } from '../../../src/core/runtime/AgentThread.types';
 import { AgentThreadOrchestrator } from '../../../src/core/runtime/AgentThreadOrchestrator';
-import { TOO_MANY_TOOL_CALLS_MESSAGE } from '../../../src/core/runtime/modelReplyGuard';
+import { MAX_TOOL_CALL_STREAM_PARTS, TOO_MANY_TOOL_CALLS_MESSAGE } from '../../../src/core/runtime/modelReplyGuard';
 import { REMOVED_TOOL_RESULT } from '../../../src/core/runtime/replyBudget';
 import { NOOP_AGENT_TRACING } from '../../../src/core/tracing/NoopAgentTracing';
 import { runTurn, textReplyStream } from '../../orchestration/helpers/helpers';
@@ -38,33 +39,50 @@ const SEND_ARGS = JSON.stringify({ to: 'ana@example.com', body: 'Lunch at noon?'
 
 type CallSpec = { id: string; name: string; args: string };
 
-// eslint-disable-next-line @typescript-eslint/require-await -- async generator fixture, not awaiting I/O
-async function* toolCallsStream(
+const NO_USAGE: LanguageModelUsage = {
+  inputTokens: 0,
+  outputTokens: 0,
+  totalTokens: 0,
+  inputTokenDetails: { cacheReadTokens: undefined, cacheWriteTokens: undefined, noCacheTokens: undefined },
+  outputTokenDetails: { reasoningTokens: undefined, textTokens: undefined },
+};
+
+const NO_PERFORMANCE: StepResultPerformance = {
+  effectiveOutputTokensPerSecond: 0,
+  outputTokensPerSecond: undefined,
+  inputTokensPerSecond: undefined,
+  effectiveTotalTokensPerSecond: 0,
+  stepTimeMs: 0,
+  responseTimeMs: 0,
+  toolExecutionMs: {},
+  timeToFirstOutputMs: undefined,
+};
+
+/**
+ * A reply of tool calls read by the real stream reader, so a batch large enough to stop the
+ * reader stops here too, exactly as it would from a provider.
+ */
+function toolCallsStream(
   calls: CallSpec[],
 ): AsyncGenerator<ExtendedChatCompletionChunk, RawAssistantMessageWithUsage, unknown> {
-  const toolCalls = calls.map(call => ({
-    id: call.id,
-    type: 'function' as const,
-    function: { name: call.name, arguments: call.args },
-  }));
-  yield {
-    id: 'chunk-tools',
-    object: 'chat.completion.chunk',
-    created: 0,
-    model: 'test-model',
-    choices: [
-      {
-        index: 0,
-        delta: { role: 'assistant', tool_calls: toolCalls.map((call, index) => ({ index, ...call })) },
-        finish_reason: 'tool_calls',
-      },
-    ],
-  };
-  return {
-    output: { role: 'assistant', content: null, tool_calls: toolCalls },
-    usage: getEmptyUsage(),
-    finish_reason: 'tool_calls',
-  };
+  // eslint-disable-next-line @typescript-eslint/require-await -- async generator fixture, not awaiting I/O
+  async function* parts(): AsyncGenerator<TextStreamPart<ProviderToolSet>> {
+    for (const call of calls) {
+      yield { type: 'tool-input-start', id: call.id, toolName: call.name };
+      yield { type: 'tool-input-delta', id: call.id, delta: call.args };
+      yield { type: 'tool-input-end', id: call.id };
+    }
+    yield {
+      type: 'finish-step',
+      response: { id: 'resp', timestamp: new Date(0), modelId: 'test-model' },
+      usage: NO_USAGE,
+      performance: NO_PERFORMANCE,
+      finishReason: 'tool-calls',
+      rawFinishReason: undefined,
+      providerMetadata: undefined,
+    };
+  }
+  return mapStreamToChunks({ stream: parts(), chunkMeta: { id: 'chunk-tools', created: 0, model: 'test-model' } });
 }
 
 type CallToolMock = jest.Mock<ReturnType<ToolSource['callTool']>, Parameters<ToolSource['callTool']>>;
@@ -1213,7 +1231,27 @@ describe('the per-reply call cap in an unattended run (owner ruling, 2026-10-19)
     expect(brief.result.output).toMatchObject({ content: expect.stringContaining('All done.') });
   });
 
-  it('runs 20 distinct reads at once, one under the cap', async () => {
+  it('runs 15 distinct reads at once, the page-by-page mail read a brief makes', async () => {
+    const calls = Array.from({ length: 15 }, (_, index) => ({
+      id: `call-read-${String(index)}`,
+      name: 'read_note',
+      args: JSON.stringify({ note: `n${String(index)}` }),
+    }));
+    const h = makeHarness([() => toolCallsStream(calls)]);
+    await h.base.tool_grants.recordToolGrant({
+      ...OWNER,
+      mcp_server_name: 'mail',
+      tool_name: 'read_note',
+      mcp_server_host: null,
+    });
+    const { brief } = await runBrief(h);
+
+    expect(h.callTool).toHaveBeenCalledTimes(15);
+    expect(brief.result.root_agent_error).toBeUndefined();
+    expect(brief.result.output).toMatchObject({ content: 'All done.' });
+  });
+
+  it('runs 20 distinct reads at once, the whole cap', async () => {
     const calls = Array.from({ length: 20 }, (_, index) => ({
       id: `call-read-${String(index)}`,
       name: 'read_note',
@@ -1280,4 +1318,18 @@ describe('the per-reply call cap in an unattended run (owner ruling, 2026-10-19)
       expect(turn.result.root_agent_error?.error).toBe(TOO_MANY_TOOL_CALLS_MESSAGE);
     },
   );
+
+  it('stops the run when the stream stopped reading a flood of held sends, with nothing held or run', async () => {
+    const calls = Array.from({ length: MAX_TOOL_CALL_STREAM_PARTS + 1 }, (_, index) => ({
+      id: `call-send-${String(index)}`,
+      name: 'send_note',
+      args: JSON.stringify({ to: `person${String(index)}@example.com`, body: 'Lunch at noon?' }),
+    }));
+    const h = makeHarness([() => toolCallsStream(calls)]);
+    const { brief } = await runBrief(h);
+
+    expect(brief.events.some(event => event.type === EventType.TOOL_APPROVAL_REQUIRED)).toBe(false);
+    expect(h.callTool).not.toHaveBeenCalled();
+    expect(brief.result.root_agent_error?.error).toBe(TOO_MANY_TOOL_CALLS_MESSAGE);
+  });
 });

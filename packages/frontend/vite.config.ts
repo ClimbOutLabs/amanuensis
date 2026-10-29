@@ -7,6 +7,7 @@ import { compression } from 'vite-plugin-compression2';
 // Maintained ESM fork of vite-plugin-monaco-editor (works with Vite 6 ESM config).
 import monacoEditorPlugin from 'vite-plugin-monaco-editor-esm';
 
+import { DEV_OPTIMIZE_DEPS } from './src/devPrebundle';
 import { rewriteShellAssetUrls } from './src/shellBaseToken';
 
 const gatewaySdkStub = fileURLToPath(new URL('./src/gatewaySdkStub.ts', import.meta.url));
@@ -60,6 +61,7 @@ export default defineConfig(({ command }) => ({
     }),
     ...(command === 'build' ? [shellBaseTokenPlugin()] : []),
   ],
+  optimizeDeps: DEV_OPTIMIZE_DEPS,
   // Single React / assistant-ui Context instance (avoids "requires an AuiProvider").
   resolve: {
     // Never add 'import'/'require' here: Vite applies those per import kind, and

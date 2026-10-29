@@ -51,8 +51,10 @@ import {
   sanitizeNamespace,
   vaultFilesystemNamespace,
   vaultWriteNamespace,
+  withHiddenContext,
 } from '../runtime/memory/markdownMemoryFiles';
 import type { MemoryClient } from '../runtime/memory/memoryClient';
+import { MEMORY_RECALL_ENABLED_SETTING_KEY } from '../runtime/memoryRecallSettings';
 import { MEMORY_SCREEN_ENABLED_SETTING_KEY } from '../runtime/memoryScreenSettings';
 import { MEMORY_SUMMARIZE_SETTING_KEY } from '../runtime/memorySummarizeSettings';
 import { DEFAULT_CHAT_MODEL_SETTING_KEY } from '../runtime/tokenFactoryProvider';
@@ -81,6 +83,7 @@ const MEMORY_LIST_TIMEOUT_MS = 10_000;
 /** Instance-wide, non-secret toggles. Anything not listed here never leaves in settings.json. */
 export const EXPORTED_GLOBAL_SETTING_KEYS = [
   DEFAULT_CHAT_MODEL_SETTING_KEY,
+  MEMORY_RECALL_ENABLED_SETTING_KEY,
   MEMORY_SCREEN_ENABLED_SETTING_KEY,
   MEMORY_SUMMARIZE_SETTING_KEY,
   TOOL_OUTPUT_SCREEN_ENABLED_SETTING_KEY,
@@ -840,7 +843,8 @@ async function writeClientMemoryFiles<TTransaction>(
     const fsNamespace = vaultFilesystemNamespace(subject.tenantId, wireNamespace);
     const rendered = [...outcome.entries]
       .reverse()
-      .map(entry => `## ${entry.timestamp}\n\n${entry.text}`)
+      // The internal id goes back as the closing line, so the file matches a daily log and needs no import step.
+      .map(entry => `## ${entry.timestamp}\n\n${withHiddenContext({ text: entry.text, context: entry.context })}`)
       .join('\n\n');
     await context.zip.addTextEntry(`memory/${fsNamespace}/memory/${fileDate}.md`, `${context.scrub.text(rendered)}\n`);
     vaults += 1;

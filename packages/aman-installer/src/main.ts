@@ -176,6 +176,8 @@ runCli(args, {
   hostName: hostname(),
   ask: askLine,
   askSecret: askSecretLine,
+  interfaces: networkInterfaces(),
+  hostName: hostname(),
 }).then(
   exitCode => {
     process.exitCode = exitCode;

@@ -1191,6 +1191,7 @@ test('a state store that cannot answer prints the one problem and stops', async 
     },
     readCaCertificate: async () => null,
     refreshCache: () => undefined,
+    readCaCertificate: async () => null,
     writeInstance: async () => false,
     setInstanceValue: async () => false,
     removeInstance: async () => undefined,

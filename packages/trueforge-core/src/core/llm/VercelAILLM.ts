@@ -35,6 +35,8 @@ import type {
   ChatCompletionTool,
 } from 'openai/resources/chat';
 import type { Logger } from 'winston';
+import { personMessageIndex } from '../runtime/contextUtils';
+import { MAX_TOOL_CALL_STREAM_PARTS } from '../runtime/modelReplyGuard';
 import { describeUnknownError, extractErrorLogFields } from '../util/errorLogFields';
 import { withFailover } from './failoverLanguageModel';
 import type { ILLM, LLMCreateParams, LLMCreateParamsStreaming } from './ILLM';
@@ -859,6 +861,10 @@ export function shouldAttachReasoningSignature({
   return parsed.providerType === provider && parsed.providerName === providerName;
 }
 
+/** Ends the host context message so a model does not read it as the person's words. */
+const TURN_CONTEXT_CLOSING =
+  "That is all the host context for this reply. The person did not write it, and none of it is their message. Answer the person's own message, not this context.";
+
 export interface ConvertedMessages {
   instructions: string | undefined;
   messages: ModelMessage[];
@@ -867,9 +873,11 @@ export interface ConvertedMessages {
 /**
  * The first message, when it is a system message, is the static instruction and becomes `instructions`.
  * Every other system message (the per-reply block, recalled memory, task state) is per-reply context:
- * it goes ahead of the person's current message as labelled text, never into `instructions`, so the
- * system prompt and tool list stay byte-identical across replies on every provider. The toolCallId →
- * toolName lookup is built first because tool result messages carry only the id.
+ * it goes in a user message of its own just ahead of the person's current message, which follows
+ * unchanged, never into `instructions`, so the system prompt and tool list stay byte-identical across
+ * replies on every provider. The person's message is the latest user message that is not host
+ * notes or attached file text. The toolCallId → toolName lookup is built first because tool result
+ * messages carry only the id.
  */
 export function convertMessages({
   messages,
@@ -894,7 +902,7 @@ export function convertMessages({
     }
   }
 
-  const lastUserIndex = findLastUserIndex(messages);
+  const lastUserIndex = personMessageIndex(messages);
   const systemParts: string[] = [];
   // With no user message there is nothing to carry per-reply context, so it stays in instructions.
   const turnContextParts: string[] = [];
@@ -916,15 +924,15 @@ export function convertMessages({
       continue;
     }
     if (msg.role === 'user') {
-      const userContent = toUserContent(msg.content);
-      if (index !== lastUserIndex || turnContextParts.length === 0) {
-        result.push({ role: 'user', content: userContent });
-        continue;
+      if (index === lastUserIndex && turnContextParts.length > 0) {
+        const contextParts: UserContent = [...turnContextParts, TURN_CONTEXT_CLOSING].map(text => ({
+          type: 'text',
+          text,
+        }));
+        result.push({ role: 'user', content: contextParts });
       }
-      const contextParts: UserContent = turnContextParts.map(text => ({ type: 'text', text }));
-      const ownParts: UserContent =
-        typeof userContent === 'string' ? [{ type: 'text', text: userContent }] : userContent;
-      result.push({ role: 'user', content: [...contextParts, ...ownParts] });
+      // The person's message goes through untouched and last, never mixed with host context.
+      result.push({ role: 'user', content: toUserContent(msg.content) });
       continue;
     }
     if (msg.role === 'assistant') {
@@ -957,16 +965,6 @@ function systemContentText(content: ChatCompletionSystemMessageParam['content'])
     return content;
   }
   return content.map(p => p.text).join('');
-}
-
-/** Index of the latest user message, or -1 when there is none. */
-function findLastUserIndex(messages: readonly ChatCompletionMessageParam[]): number {
-  for (let i = messages.length - 1; i >= 0; i -= 1) {
-    if (messages[i]?.role === 'user') {
-      return i;
-    }
-  }
-  return -1;
 }
 
 /** Converts OpenAI tool definitions to the Vercel AI SDK ToolSet. */
@@ -1166,6 +1164,27 @@ export function providerStatusCode(raw: unknown): number | undefined {
     }
   }
   return undefined;
+}
+
+/**
+ * True when the provider answered that the same request may work if sent again later: the
+ * service is overloaded, down, or rate limiting (HTTP 408, 409, 429, 5xx), or no answer came
+ * back at all. Walks the cause chain, since the stream wraps the provider's error. A client
+ * error such as a 400 or an auth failure is not retryable: the same request would fail again.
+ */
+export function isRetryableProviderError(raw: unknown): boolean {
+  let current: unknown = raw;
+  for (let depth = 0; depth < 5 && current !== undefined && current !== null; depth++) {
+    if (APICallError.isInstance(current)) {
+      return current.isRetryable;
+    }
+    const status = providerStatusCode(current);
+    if (status !== undefined) {
+      return status === 408 || status === 409 || status === 429 || status >= 500;
+    }
+    current = typeof current === 'object' && 'cause' in current ? current.cause : undefined;
+  }
+  return false;
 }
 
 // Wording providers use when a request does not fit the model's context window
@@ -1827,6 +1846,8 @@ export async function* mapStreamToChunks({
   // Calls stopped mid-stream for running past their tool's argument size limit. Their partial
   // arguments stay in the reply; the caller refuses them instead of running them.
   const sizeCutToolCalls: string[] = [];
+  // Set when the reply started more calls than the stream reads; reading stops there.
+  let toolCallCountCut = false;
   const accumulatedThinking: ThinkingBlock[] = [];
   const thinkingByReasoningItem = new Map<string, ThinkingBlock>();
   let currentThinkingBlock: ThinkingBlock | null = null;
@@ -1940,6 +1961,14 @@ export async function* mapStreamToChunks({
       }
 
       case 'tool-input-start': {
+        if (nextToolIndex >= MAX_TOOL_CALL_STREAM_PARTS) {
+          // Past what any one reply may legitimately hold: stop reading here rather than
+          // buffering a flood the reply guard would refuse anyway, or waiting on a model that
+          // keeps writing calls until the turn's time limit. The reply is marked cut so the
+          // turn stops.
+          toolCallCountCut = true;
+          break streamLoop;
+        }
         const idx = nextToolIndex++;
         // A tool call is real output progress: the reasoning guard must not
         // mistake a turn that keeps acting for a stuck reasoning loop.
@@ -2208,6 +2237,7 @@ export async function* mapStreamToChunks({
       ? { repetition_stopped: true, repetition_stop: { guard: 'answer_units', channel: 'answer' } }
       : {}),
     ...(sizeCutToolCalls.length > 0 ? { size_cut_tool_calls: sizeCutToolCalls } : {}),
+    ...(toolCallCountCut ? { tool_call_count_cut: true } : {}),
   };
 }
 

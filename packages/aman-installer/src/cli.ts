@@ -2,7 +2,10 @@ import { existsSync } from 'node:fs';
 import type { NetworkInterfaceInfo } from 'node:os';
 import { join } from 'node:path';
 
+import type { NetworkInterfaceInfo } from 'node:os';
+
 import { runAdopt } from './commands/adopt.ts';
+import { runNetwork } from './commands/network.ts';
 import { runBackup } from './commands/backup.ts';
 import { runBackups } from './commands/backups.ts';
 import { runInstall } from './commands/install.ts';
@@ -62,6 +65,11 @@ export interface CliDeps extends DoctorDeps {
   // defaults keep an unwired install safe: no answer is ever given.
   ask?: (question: string) => Promise<string | null>;
   askSecret?: (question: string) => Promise<string | null>;
+  // The network command's wiring, set by main: this computer's network
+  // adapters and its name. The defaults keep an unwired network
+  // command safe: no adapters and no name, so it finds no address.
+  interfaces?: Readonly<Record<string, readonly NetworkInterfaceInfo[] | undefined>>;
+  hostName?: string;
 }
 
 export async function runCli(args: readonly string[], deps: CliDeps): Promise<number> {
