@@ -110,13 +110,17 @@ export function reconcileDraftSandbox({
   if (kind === 'chat') {
     if (sandboxEnabled == null) return {};
     const current = readDraftSandboxEnabled(agentSpec);
-    // An unavailable sandbox is turned off. An available one is turned on only where the draft has
-    // no setting (a new chat seed carries none), so the composer toggle keeps an explicit choice.
-    if (sandboxEnabled ? current !== undefined : current === false) return {};
+    // The capability flag says the deployment offers a sandbox, not that the user wants one, so
+    // it may disable. It turns one on only for a chat that has skills and no setting of its own
+    // (a new chat seed carries none), since the server refuses skills without a sandbox.
+    const hasSkills = agentSpec.skills !== undefined && agentSpec.skills.length > 0;
+    const turnOn = sandboxEnabled && current === undefined && hasSkills;
+    const turnOff = !sandboxEnabled && current === true;
+    if (!turnOn && !turnOff) return {};
     return {
       config: {
         ...agentSpec.config,
-        sandbox: { ...agentSpec.config?.sandbox, enabled: sandboxEnabled },
+        sandbox: { ...agentSpec.config?.sandbox, enabled: turnOn },
       },
     };
   }
