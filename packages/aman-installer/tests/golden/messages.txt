@@ -105,22 +105,6 @@ Nothing was updated.
 Aman is already up to date.
 The new Aman program is in place; it runs the next time Aman starts.
 Aman is updated to v0.0.0.
-aman network needs the word open or the word close after it. Run aman network open to open Aman to your home network, or aman network close to close it.
-This computer was not set up with the Aman Setup download, so aman network has nothing to change. Run aman status to see what is installed on this computer.
-Aman is not installed on this computer yet. Install Aman with the Aman Setup download first, then run aman network open again.
-Docker could not download the small helper it needs to read the record of what is installed. Check your internet connection, then run the command again.
-The record of what is installed could not be read. Run aman doctor to find what is wrong, then run the command again.
-The record of what is installed does not say where Aman answers on this computer. Run aman doctor to find what is wrong, then run the command again.
-This computer has no address on a private network that a phone could use. Connect this computer to your home Wi-Fi, then run aman network open again.
-Docker is not answering, so the change cannot be made. Open Docker Desktop from the Start menu, then run the command again.
-Another install is running right now. Wait for it to finish, or wait 2 minutes if you stopped an install a moment ago, then run the command again.
-Aman could not be opened to the devices on your home network. Run aman doctor to find what is wrong, then run aman network open again.
-Aman could not be closed to the devices on your home network. Run aman doctor to find what is wrong, then run aman network close again.
-Windows did not change the firewall rule, so devices on your home network cannot reach Aman yet. Run aman network open again, and choose Yes when Windows asks for permission.
-Windows did not change the firewall rule, so devices on your home network can still reach Aman. Run aman network close again, and choose Yes when Windows asks for permission.
-Aman is open to the devices on your home network.
-Aman is closed to your home network, and only this computer can open it now.
-On your phone, open http://192.168.1.20:8791.
 This computer was not set up with the Aman Setup download, so aman backup has nothing to back up. Run aman status to see what is installed on this computer.
 Aman is not installed on this computer yet. Install Aman with the Aman Setup download first, then run aman backup again.
 Docker is not answering, so the backup cannot be made. Open Docker Desktop from the Start menu, then run aman backup again.

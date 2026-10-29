@@ -49,10 +49,6 @@ What it can do today:
   to answer, and opens it in the browser. An Aman served over https on
   this computer opens at its https address, after this computer is set
   to trust the authority that made its certificate.
-- `aman open`, on Windows, starts Docker if it needs to, waits for Aman
-  to answer, and opens it in the browser. An Aman served over https on
-  this computer opens at its https address, after this computer is set
-  to trust the authority that made its certificate.
 - `aman verify` checks a downloaded file against its signed release
   record.
 - `aman network open`, on Windows, opens Aman to the devices on the

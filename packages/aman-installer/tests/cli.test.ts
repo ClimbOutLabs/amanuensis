@@ -16,8 +16,6 @@ import {
   installUsageProblem,
   NETWORK_NOT_WINDOWS,
   NETWORK_USAGE,
-  NETWORK_NOT_WINDOWS,
-  NETWORK_USAGE,
   NOT_INSTALLED,
   OPEN_NOT_WINDOWS,
   problemText,
