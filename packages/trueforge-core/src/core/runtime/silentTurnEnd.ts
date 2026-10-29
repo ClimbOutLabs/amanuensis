@@ -69,7 +69,7 @@ const MAX_NAMED_RECIPIENTS = 3;
 function recipientsPhrase(recipients: readonly string[]): string {
   const shown = recipients.slice(0, MAX_NAMED_RECIPIENTS).join(', ');
   const more = recipients.length - MAX_NAMED_RECIPIENTS;
-  return more > 0 ? `${shown} and ${more} more` : shown;
+  return more > 0 ? `${shown} and ${String(more)} more` : shown;
 }
 
 function runSentence(run: TurnToolRun): string {
