@@ -3,8 +3,9 @@
  * 【14†excerpts】 or 【14†L3-L9】.
  *
  * Two marker families are supported:
- * - Numeric markers (`【14†excerpts】`) refer to numbered sources from web search results. A
- *   numeric source keeps its established numbered-link rendering.
+ * - Numeric markers (`【14†excerpts】`, or the JSON spelling `【{"id":14,"cursor":0}】` some
+ *   models emit) refer to numbered sources from web search results. A numeric source keeps
+ *   its established numbered-link rendering.
  * - Retrieval-ID markers (`【a3f9c21e†excerpts】`) refer to retrieval results by their chunk /
  *   retrieval ID. The chat's built-in extractor only produces numeric sources (the same
  *   message's `web_search` / `web_fetch` results, numbered 1..N as the model saw them); a
@@ -41,24 +42,43 @@ export type CitationMarker = {
   start: number;
   /** End position in the source string. */
   end: number;
-  /** Descriptor from the marker (e.g., "excerpts" or "L3-L9"). */
+  /** Descriptor from the marker (e.g., "excerpts" or "L3-L9"); empty for the JSON spelling. */
   descriptor: string;
 };
 
 /**
- * Matches citation markers like 【14†excerpts】, 【14†L3-L9】, or 【a3f9c21e†excerpts】.
- * The marker contains:
+ * Matches citation markers like 【14†excerpts】, 【14†L3-L9】, 【a3f9c21e†excerpts】, or the
+ * JSON spelling 【{"id":14,"cursor":0,"loc":0}】. The marker contains:
  * - Opening bracket: 【 (U+3010)
- * - ID: digits, or an alphanumeric retrieval ID (letters, digits, `-`, `_`; at most 128 chars)
- * - Dagger: † (U+2020)
- * - Descriptor: one or more non-bracket characters
+ * - Either a JSON object body (`{…}` with no closing bracket inside), or
+ *   an ID (digits, or an alphanumeric retrieval ID: letters, digits, `-`, `_`; at most 128
+ *   chars), a dagger † (U+2020), and a descriptor of one or more non-bracket characters
  * - Closing bracket: 】 (U+3011)
  */
-const CITATION_MARKER_RE = /【(\d+|[A-Za-z0-9][A-Za-z0-9_-]{0,127})†([^】]+)】/g;
+const CITATION_MARKER_RE = /【(?:(\{[^】]*\})|(\d+|[A-Za-z0-9][A-Za-z0-9_-]{0,127})†([^】]+))】/g;
 
 /** Parses a marker ID: all-digit IDs become numbers, anything else stays a string. */
 function parseMarkerId(raw: string): number | string {
   return /^\d+$/.test(raw) ? parseInt(raw, 10) : raw;
+}
+
+/**
+ * Parses a JSON marker body to its numeric `id`; other keys (`cursor`, `loc`, …) are ignored.
+ * Returns null when the body is not a JSON object with a non-negative integer `id`, so the
+ * text is left alone like any other non-marker.
+ */
+function parseJsonMarkerId(body: string): number | null {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(body);
+  } catch {
+    return null;
+  }
+  if (!isRecord(parsed)) {
+    return null;
+  }
+  const id = parsed['id'];
+  return typeof id === 'number' && Number.isInteger(id) && id >= 0 ? id : null;
 }
 
 /**
@@ -77,13 +97,24 @@ export function extractCitationMarkers(source: string): CitationMarker[] {
       // Find all markers in this prose segment
       let match: RegExpExecArray | null;
       while ((match = regex.exec(segment.text)) !== null) {
-        const rawId = match[1];
-        const descriptor = match[2];
         const full = match[0];
-        if (rawId === undefined || descriptor === undefined || full === undefined) {
+        const jsonBody = match[1];
+        const rawId = match[2];
+        let sourceId: number | string;
+        let descriptor: string;
+        if (jsonBody !== undefined) {
+          const jsonId = parseJsonMarkerId(jsonBody);
+          if (jsonId === null) {
+            continue;
+          }
+          sourceId = jsonId;
+          descriptor = '';
+        } else if (rawId !== undefined && match[3] !== undefined) {
+          sourceId = parseMarkerId(rawId);
+          descriptor = match[3];
+        } else {
           continue;
         }
-        const sourceId = parseMarkerId(rawId);
         const start = positionOffset + match.index;
         const end = start + full.length;
 
