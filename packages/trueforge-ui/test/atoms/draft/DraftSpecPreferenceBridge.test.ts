@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 
 import {
+  messageAsksForSandbox,
   reconcileDraftSandbox,
   reconcileDraftSpecMounts,
   reconcileDraftSpecPreferences,
@@ -188,5 +189,49 @@ describe('reconcileDraftSandbox for a new chat', () => {
     const agentSpec: AgentSpec = { model: { name: 'm' }, config: { sandbox: { enabled: false } } };
 
     expect(reconcileDraftSandbox({ agentSpec, sandboxEnabled: false, kind: 'chat' })).toEqual({});
+  });
+  it('turns the sandbox on for a draft without skills whose message asks to clone a repository', () => {
+    expect(
+      reconcileDraftSandbox({
+        agentSpec: { model: { name: 'm' } },
+        sandboxEnabled: true,
+        kind: 'chat',
+        asksForSandbox: true,
+      }),
+    ).toEqual({ config: { sandbox: { enabled: true } } });
+  });
+
+  it('keeps an explicit off even when the message asks to clone a repository', () => {
+    const agentSpec: AgentSpec = { model: { name: 'm' }, config: { sandbox: { enabled: false } } };
+
+    expect(reconcileDraftSandbox({ agentSpec, sandboxEnabled: true, kind: 'chat', asksForSandbox: true })).toEqual({});
+  });
+
+  it('does not turn the sandbox on for a clone request when the server has none', () => {
+    expect(
+      reconcileDraftSandbox({
+        agentSpec: { model: { name: 'm' } },
+        sandboxEnabled: false,
+        kind: 'chat',
+        asksForSandbox: true,
+      }),
+    ).toEqual({});
+  });
+});
+
+describe('messageAsksForSandbox', () => {
+  it('finds a request to clone a repository or run a command', () => {
+    expect(
+      messageAsksForSandbox(
+        'Clone https://github.com/ClimbOutLabs/exitramp.git into a new folder named exitramp in the workspace, then check out the main branch.',
+      ),
+    ).toBe(true);
+    expect(messageAsksForSandbox('Run this: git clone --branch main https://example.org/x.git x')).toBe(true);
+    expect(messageAsksForSandbox('Please run this command in the shell: ls -la')).toBe(true);
+  });
+
+  it('leaves ordinary messages alone', () => {
+    expect(messageAsksForSandbox('What is the weather in Paris?')).toBe(false);
+    expect(messageAsksForSandbox('Summarize my last three emails. Then clone the style for a reply.')).toBe(false);
   });
 });
