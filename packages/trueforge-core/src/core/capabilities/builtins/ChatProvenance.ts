@@ -1,8 +1,10 @@
 import type { LLMUserMessage, RawToolCall } from '../../llm/LLMTypes';
 import { parseToolCallArguments } from '../../mcp/toolArgumentCheck';
 import { collectOutboundStrings } from '../../permissions/outboundGuard';
+import type { ReadSource } from '../../permissions/provenance';
 import { recordPersonText, recordUntrustedText } from '../../permissions/provenance';
 import {
+  readSourceOf,
   recordToolResultProvenance,
   toolReturnsOutsideContent,
   type WebSearchTurnState,
@@ -36,6 +38,24 @@ function calledTool(call: RawToolCall): { tool_name: string; argument_values: st
  */
 export function callReturnsOutsideContent(call: RawToolCall | undefined): boolean {
   return call === undefined || toolReturnsOutsideContent(calledTool(call).tool_name);
+}
+
+/** Where a tool result came from, as a person would say it: their mail, their calendar, the web, a file, or any other tool. */
+export type ToolResultSource = 'email' | 'calendar' | 'web' | 'attachment' | 'other';
+
+const TOOL_RESULT_SOURCE_OF_READ: Record<ReadSource, ToolResultSource> = {
+  email_sender: 'email',
+  email: 'email',
+  event: 'calendar',
+  page: 'web',
+  file: 'attachment',
+  tool_result: 'other',
+  other: 'other',
+};
+
+/** Where the result of a tool call came from; a call that is not known counts as `other`. */
+export function callResultSource(call: RawToolCall | undefined): ToolResultSource {
+  return call === undefined ? 'other' : TOOL_RESULT_SOURCE_OF_READ[readSourceOf(calledTool(call).tool_name)];
 }
 
 /**

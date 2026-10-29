@@ -33,7 +33,7 @@ export type {
 export { AgentThreadOrchestrator } from './runtime/AgentThreadOrchestrator';
 export { stageAttachment } from './runtime/attachmentStaging';
 export type { StagedAttachment } from './runtime/attachmentStaging';
-export { isHostWrappedText, isUntrustedDocumentText } from './runtime/contextUtils';
+export { isHostWrappedText, isUntrustedDocumentText, personMessageIndex } from './runtime/contextUtils';
 export type { CreateDynamicSubAgentThread } from './runtime/CreateDynamicSubAgentThread';
 export { measurePromptRequest } from './runtime/promptReport';
 export type { PromptReport, PromptReportInput, PromptReportRow } from './runtime/promptReport';
@@ -429,7 +429,12 @@ export { applyHostToolCallPolicy } from './runtime/HostToolCallPolicy';
 export type { HostToolCallPolicy, HostToolCallPolicyBlock, HostToolCallPolicyCall } from './runtime/HostToolCallPolicy';
 
 // Sentinel: three-tier permission system for tool execution
-export { callReturnsOutsideContent, contextHasOutsideToolResult } from './capabilities/builtins/ChatProvenance';
+export {
+  callResultSource,
+  callReturnsOutsideContent,
+  contextHasOutsideToolResult,
+} from './capabilities/builtins/ChatProvenance';
+export type { ToolResultSource } from './capabilities/builtins/ChatProvenance';
 export {
   InMemoryApprovalTokenStore,
   hasApprovalScope,

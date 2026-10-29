@@ -140,6 +140,8 @@ export interface ResolveTurnSummarizeContextParams {
   personName?: string | undefined;
   /** Lines of the person's profile, so a summary that only repeats the profile is not saved. */
   profileLines?: readonly string[] | undefined;
+  /** The name of the persona or assistant that replies this turn, so notes about its replies can name it. */
+  assistantName?: string | undefined;
 }
 
 /**
@@ -197,6 +199,9 @@ export async function resolveTurnSummarizeContext(
   // summarizer falls back to writing about "the person" for this turn.
   const trimmedPersonName = params.personName?.trim();
   const personName = trimmedPersonName === undefined || trimmedPersonName === '' ? undefined : trimmedPersonName;
+  const trimmedAssistantName = params.assistantName?.trim();
+  const assistantName =
+    trimmedAssistantName === undefined || trimmedAssistantName === '' ? undefined : trimmedAssistantName;
   try {
     const summarizationModelFqn = await resolveSummarizationModelFqn({
       tenantId,
@@ -217,6 +222,7 @@ export async function resolveTurnSummarizeContext(
         modelUsage,
         personName,
         profileLines: params.profileLines,
+        assistantName,
       };
     }
     logger.debug('Turn summarization is active for this turn', { sessionId, summarizationModelFqn });
@@ -228,6 +234,7 @@ export async function resolveTurnSummarizeContext(
       modelUsage,
       personName,
       profileLines: params.profileLines,
+      assistantName,
     };
   } catch (error) {
     logger.debug('Memory summarization has no model for this turn: the model FQN did not resolve', {
@@ -242,6 +249,7 @@ export async function resolveTurnSummarizeContext(
       modelUsage,
       personName,
       profileLines: params.profileLines,
+      assistantName,
     };
   }
 }

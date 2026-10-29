@@ -1,5 +1,6 @@
 import dedent from 'dedent';
 import { createHash } from 'node:crypto';
+import type { ChatCompletionMessageParam } from 'openai/resources/chat';
 import { MAIL_DRAFT_TOOL_NAME } from '../email/mailConnector/toolContract';
 import type { ApprovalDecision } from '../events/schema';
 import {
@@ -433,6 +434,31 @@ export function hasSentHostNoteThisTurn(
     }
   }
   return false;
+}
+
+function isHostWrittenUserContent(content: ChatCompletionMessageParam['content']): boolean {
+  if (typeof content === 'string') {
+    return isHostWrappedText(content);
+  }
+  if (!Array.isArray(content) || content.length === 0) {
+    return false;
+  }
+  return content.every(part => part.type === 'text' && isHostWrappedText(part.text));
+}
+
+/**
+ * Index of the latest user message the person wrote, or -1 when there is none. Skips user-role
+ * messages the host wrote: internal notes such as the empty-answer nudge, and extracted file text,
+ * which follows the person's message. The one owner of "where is the person's message".
+ */
+export function personMessageIndex(messages: readonly ChatCompletionMessageParam[]): number {
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    const message = messages[i];
+    if (message?.role === 'user' && !isHostWrittenUserContent(message.content)) {
+      return i;
+    }
+  }
+  return -1;
 }
 
 export function internalSystemMessage(m: string): LLMUserMessage {
