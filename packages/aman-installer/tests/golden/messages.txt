@@ -27,6 +27,9 @@ This computer gives Docker Engine less than 6 GB of memory to work with. Free up
 Docker did not say how much memory it has to work with. Start Docker Engine again, then run this check again.
 Docker is not answering, so whether each instance is running is unknown. Start Docker Engine on this computer, then run aman status again.
 Docker did not say which Engine version it is running. Update Docker to the newest version, then run this check again.
+Docker Desktop is running an Engine that is too old for Aman's https on this computer. Update Docker Desktop to the newest version, then run this check again.
+Docker Desktop is running an Engine that is too old for Aman's https on this computer. Update Docker Desktop to the newest version, then run this check again.
+Docker Engine is too old for Aman's https on this computer. Update Docker Engine to the newest version, then run this check again.
 Aman does not know the command "example". Run aman with no command to see what it can do.
 That doctor check is not one Aman knows. Run aman doctor docker to check Docker on this computer.
 Docker is installed, version 0.0.0.
@@ -59,6 +62,8 @@ Docker could not download the small helper it needs to read the record of what i
 The record of what is installed could not be read. Run aman doctor to find what is wrong, then run aman open again.
 The record of what is installed does not say where Aman answers on this computer. Run aman doctor to find what is wrong, then run aman open again.
 Aman did not start answering on this computer. Run aman doctor to find what is wrong, then run aman open again.
+The certificate that lets your browser trust Aman at its https address could not be found. Run aman doctor to find what is wrong, then run aman open again.
+This computer could not be set to trust Aman's certificate, so the browser would show a warning at the https address. Run aman open again, and choose Yes when Windows asks whether to trust the certificate.
 Aman is open in your browser at http://127.0.0.1:8791.
 Aman is running, but the browser did not open on its own. Open your browser and go to http://127.0.0.1:8791 to use Aman.
 aman verify needs the name of the downloaded file to check. Run aman verify again and name the file you downloaded from the release page.

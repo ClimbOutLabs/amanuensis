@@ -58,6 +58,15 @@ class FakeVolumeRunner implements ProcessRunner {
 
   runBytes(command: string, args: readonly string[], stdin: Uint8Array): Promise<ProcessBytesResult> {
     this.lines.push(commandLine(command, args));
+    if (args.includes('cat')) {
+      const path = args[args.length - 1];
+      const rel = typeof path === 'string' ? path.replace('/root/.amanuensis/', '') : '';
+      const text = this.files.get(rel);
+      if (text === undefined) {
+        return Promise.resolve({ exitCode: 1, stdout: new Uint8Array(), stderr: 'cat: no such file', started: true });
+      }
+      return Promise.resolve(okBytesResult(new TextEncoder().encode(text)));
+    }
     if (args.includes('tar') && args.includes('-c')) {
       const tar = buildTar([...this.files].map(([path, text]) => ({ path, mode: 0o600, text })));
       return Promise.resolve(okBytesResult(tar));
@@ -128,6 +137,36 @@ test('the volume command lines match the golden file', async () => {
   // The pin lives in installer/release.json, so the golden file names it by a placeholder.
   const lines = runner.lines.map(line => line.replaceAll(SETUP_IMAGE, '<setup image>'));
   assert.equal(`${lines.join('\n')}\n`, golden);
+});
+
+const FAKE_CERT = '-----BEGIN CERTIFICATE-----\nfake-certificate-for-tests\n-----END CERTIFICATE-----\n';
+
+test('the authority certificate is read out of the volume on its own, and the key never is', async () => {
+  const runner = seededRunner();
+  runner.files.set('tls/ca/root.crt', FAKE_CERT);
+  runner.files.set('tls/ca/root.key', 'the-key-must-never-leave-the-volume');
+  const store = createStateStore(volumeBackend(runner));
+  const cert = await store.readCaCertificate();
+  assert.equal(cert, FAKE_CERT);
+  assert.equal(
+    runner.lines.some(line => line.includes('cat /root/.amanuensis/tls/ca/root.crt')),
+    true,
+  );
+  assert.equal(
+    runner.lines.some(line => line.includes('root.key')),
+    false,
+  );
+});
+
+test('a volume with no authority yet reads as no certificate', async () => {
+  const runner = seededRunner();
+  const store = createStateStore(volumeBackend(runner));
+  assert.equal(await store.readCaCertificate(), null);
+});
+
+test('a certificate read with docker off is the docker error', async () => {
+  const store = createStateStore(volumeBackend(failingWith(125, DOCKER_OFF_TEXT)));
+  await assert.rejects(store.readCaCertificate(), (error: unknown) => error instanceof StateDockerError);
 });
 
 test('a busy answer from the lock script surfaces as the busy error', async () => {

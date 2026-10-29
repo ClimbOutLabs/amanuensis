@@ -4,6 +4,7 @@ import {
   COMPOSE_MISSING,
   DOCKER_NOT_INSTALLED,
   DOCKER_NOT_RUNNING,
+  ENGINE_TOO_OLD,
   ENGINE_VERSION_MISSING,
   LOW_MEMORY,
   MEMORY_NOT_REPORTED,
@@ -16,6 +17,12 @@ import {
 import type { ProcessRunner } from '../runner/processRunner.ts';
 
 export const MIN_MEMORY_BYTES = 6 * 1024 * 1024 * 1024;
+
+// The oldest Engine that can mount one folder inside a volume, which is
+// how the https folders are mounted on a Windows PC, where the state
+// lives in a volume: mounting a folder inside a volume arrived in
+// Engine 26.
+export const MIN_ENGINE_VERSION_FOR_SUBPATH = '26.0.0';
 
 export interface DoctorDeps {
   host: Host;
@@ -30,6 +37,34 @@ function versionFrom(text: string): string | null {
     return null;
   }
   return version;
+}
+
+function versionParts(version: string): [number, number, number] | null {
+  const found = versionFrom(version);
+  if (found === null) {
+    return null;
+  }
+  const parts = found.split('.').map(part => Number.parseInt(part, 10));
+  return [parts[0] ?? 0, parts[1] ?? 0, parts[2] ?? 0];
+}
+
+// A version Docker reports in a shape this check cannot read is not
+// judged here; a version that was never reported at all fails earlier,
+// as ENGINE_VERSION_MISSING.
+function engineSupportsSubpath(engineVersion: string): boolean {
+  const parts = versionParts(engineVersion);
+  const floor = versionParts(MIN_ENGINE_VERSION_FOR_SUBPATH);
+  if (parts === null || floor === null) {
+    return true;
+  }
+  for (let index = 0; index < 3; index += 1) {
+    const part = parts[index] ?? 0;
+    const floorPart = floor[index] ?? 0;
+    if (part !== floorPart) {
+      return part > floorPart;
+    }
+  }
+  return true;
 }
 
 function memoryText(bytes: number): string {
@@ -98,6 +133,10 @@ export async function checkDocker(deps: DoctorDeps): Promise<number> {
 
   if (engineVersion === '') {
     print(problemText(ENGINE_VERSION_MISSING));
+    return 1;
+  }
+  if (!engineSupportsSubpath(engineVersion)) {
+    print(problemText(ENGINE_TOO_OLD[host.kind]));
     return 1;
   }
 

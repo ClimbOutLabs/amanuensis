@@ -20,6 +20,8 @@ export type FakeWindowsJobStep =
   | 'check'
   | 'update'
   | 'forwarder'
+  | 'ca-write'
+  | 'ca-store'
   | 'docker'
   | 'browser'
   | 'aclPrivate'
@@ -42,6 +44,7 @@ export class FakeWindowsJobs implements WindowsJobs {
   userPath: string;
   shortcuts: ShortcutFacts[];
   forwarderContents: string | null = null;
+  caCertContents: string | null = null;
   browserUrls: string[] = [];
   dockerDesktopStarts = 0;
   readonly ops: string[] = [];
@@ -142,6 +145,17 @@ export class FakeWindowsJobs implements WindowsJobs {
   replaceSetupCmdCopyWithForwarder(): Promise<void> {
     this.step('forwarder');
     this.forwarderContents = SETUP_CMD_FORWARDER;
+    return Promise.resolve();
+  }
+
+  writeCaCertificate(certText: string): Promise<void> {
+    this.step('ca-write');
+    this.caCertContents = certText;
+    return Promise.resolve();
+  }
+
+  addCaCertificateToUserStore(): Promise<void> {
+    this.step('ca-store');
     return Promise.resolve();
   }
 

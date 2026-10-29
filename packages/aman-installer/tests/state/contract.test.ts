@@ -77,6 +77,9 @@ test('the folder reader gives the golden summary for the fixture home', async ()
     fingerprint: null,
     fingerprintHasContent: false,
   });
+  // The certificate itself is read on its own, apart from the summary.
+  const expectedCert = await readFile(join(FIXTURE_HOME, 'tls', 'ca', 'root.crt'), 'utf8');
+  assert.equal(await store.readCaCertificate(), expectedCert);
 });
 
 test('the volume reader gives the same summary for the same fixture, packed as a tar', async () => {

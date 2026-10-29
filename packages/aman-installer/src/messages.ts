@@ -113,6 +113,24 @@ export const ENGINE_VERSION_MISSING: Problem = {
   fix: 'Update Docker to the newest version, then run this check again.',
 };
 
+// The Engine floor for the way the https folders are mounted on a
+// Windows PC, from inside the volume the state lives in: an older
+// Engine cannot mount one folder inside a volume at all.
+export const ENGINE_TOO_OLD: Record<SystemKind, Problem> = {
+  windows: {
+    happened: "Docker Desktop is running an Engine that is too old for Aman's https on this computer.",
+    fix: 'Update Docker Desktop to the newest version, then run this check again.',
+  },
+  darwin: {
+    happened: "Docker Desktop is running an Engine that is too old for Aman's https on this computer.",
+    fix: 'Update Docker Desktop to the newest version, then run this check again.',
+  },
+  linux: {
+    happened: "Docker Engine is too old for Aman's https on this computer.",
+    fix: 'Update Docker Engine to the newest version, then run this check again.',
+  },
+};
+
 export function unknownCommandProblem(command: string): Problem {
   return {
     happened: `Aman does not know the command "${command}".`,
@@ -276,6 +294,17 @@ export const OPEN_ADDRESS_MISSING: Problem = {
 export const OPEN_DID_NOT_ANSWER: Problem = {
   happened: 'Aman did not start answering on this computer.',
   fix: 'Run aman doctor to find what is wrong, then run aman open again.',
+};
+
+export const OPEN_CERT_MISSING: Problem = {
+  happened: 'The certificate that lets your browser trust Aman at its https address could not be found.',
+  fix: 'Run aman doctor to find what is wrong, then run aman open again.',
+};
+
+export const OPEN_TRUST_FAILED: Problem = {
+  happened:
+    "This computer could not be set to trust Aman's certificate, so the browser would show a warning at the https address.",
+  fix: 'Run aman open again, and choose Yes when Windows asks whether to trust the certificate.',
 };
 
 export function openReadyLine(address: string): string {
@@ -480,6 +509,9 @@ export function allMessageLines(): string[] {
     lines.push(problemText(DOCKER_NOT_ANSWERING[kind]));
   }
   lines.push(problemText(ENGINE_VERSION_MISSING));
+  lines.push(problemText(ENGINE_TOO_OLD.windows));
+  lines.push(problemText(ENGINE_TOO_OLD.darwin));
+  lines.push(problemText(ENGINE_TOO_OLD.linux));
   lines.push(problemText(unknownCommandProblem('example')));
   lines.push(problemText(UNKNOWN_DOCTOR_CHECK));
   lines.push(dockerInstalledLine('0.0.0'));
@@ -512,6 +544,8 @@ export function allMessageLines(): string[] {
   lines.push(problemText(OPEN_STATE_UNREADABLE));
   lines.push(problemText(OPEN_ADDRESS_MISSING));
   lines.push(problemText(OPEN_DID_NOT_ANSWER));
+  lines.push(problemText(OPEN_CERT_MISSING));
+  lines.push(problemText(OPEN_TRUST_FAILED));
   lines.push(openReadyLine('http://127.0.0.1:8791'));
   lines.push(problemText(openBrowserFailedProblem('http://127.0.0.1:8791')));
   lines.push(problemText(VERIFY_USAGE));
