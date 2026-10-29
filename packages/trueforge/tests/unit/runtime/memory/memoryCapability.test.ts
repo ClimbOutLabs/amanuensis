@@ -217,7 +217,7 @@ describe('formatMemoryBlock', () => {
   it('drops whole items once the budget is exceeded and counts them', () => {
     // Each line is "[undated] " + 36 a's = 46 chars -> 11.5 estimated tokens. The fixed
     // overhead now also reserves room for the framing sentence (see MEMORY_FRAMING_SENTENCE)
-    // ahead of the wrapper tags and stats line; a budget of 200 leaves an item budget that fits 2
+    // ahead of the wrapper tags and stats line; a budget of 220 leaves an item budget that fits 2
     // whole items but not a 3rd, so 2 are dropped.
     const results = [
       { id: '1', text: 'a'.repeat(36) },
@@ -225,7 +225,7 @@ describe('formatMemoryBlock', () => {
       { id: '3', text: 'a'.repeat(36) },
       { id: '4', text: 'a'.repeat(36) },
     ];
-    const formatted = formatMemoryBlock({ results, entities: [], budgetTokens: 200 });
+    const formatted = formatMemoryBlock({ results, entities: [], budgetTokens: 220 });
 
     expect(formatted.includedItems).toBe(2);
     expect(formatted.droppedOverBudget).toBe(2);
