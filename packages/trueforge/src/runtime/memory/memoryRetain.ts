@@ -14,10 +14,25 @@ import type { TokenFactoryBudget } from '../tokenFactoryBudget';
 import { stripAssistantAbilityNotes, withoutAbilityNotes } from './assistantAbilityNotes';
 import type { RetainItem } from './hindsightClient';
 import { isOperationCompletedStatus, isOperationFailedStatus } from './hindsightClient';
+import { localDay } from './localDay';
 import { SESSION_ID_METADATA_KEY } from './markdownMemoryFiles';
 import type { MemoryClient } from './memoryClient';
-import { MEMORY_ORIGIN_METADATA_KEY, USER_STATED_ORIGIN, type AmanMemoryOrigin } from './memoryOrigin';
-import { summarizeTurnContent, type SummaryFallbackReason } from './memorySummarize';
+import {
+  labeledNoteText,
+  NOTE_DATE_METADATA_KEY,
+  NOTE_SOURCE_METADATA_KEY,
+  noteLabel,
+  noteRetainContent,
+  type MemoryNoteSource,
+} from './memoryNotes';
+import { summarizeTurnNotes, type TurnToolResult } from './memoryNotesSummarize';
+import {
+  MEMORY_ORIGIN_METADATA_KEY,
+  TOOL_INGESTED_ORIGIN,
+  USER_STATED_ORIGIN,
+  type AmanMemoryOrigin,
+} from './memoryOrigin';
+import { summarizeTurnContent, usablePersonName, type SummaryFallbackReason } from './memorySummarize';
 import { uuidv5 } from './uuidv5';
 
 /** Fixed namespace for every operation id this host mints, in the style of RFC 4122's example namespaces. */
@@ -95,6 +110,11 @@ export interface SummarizeTurnContext {
    * "the person" instead.
    */
   personName?: string | undefined;
+  /**
+   * The name of the assistant or persona that replied, from the persona or profile, so a note about
+   * its reply can say whose reply it was. Undefined falls back to "the assistant".
+   */
+  assistantName?: string | undefined;
 }
 
 /**
@@ -119,6 +139,8 @@ export interface SubmitRetainParams {
   origin?: AmanMemoryOrigin | undefined;
   logger: Logger;
   outcomeLog?: RetainOutcomeLog | undefined;
+  /** What the turn's tools returned, so concrete findings can be saved as labeled notes. */
+  toolResults?: readonly TurnToolResult[] | undefined;
   /**
    * Context for LLM summarization of the turn. Present only when turn summarization was
    * enabled for the turn (the Settings toggle's persisted override, else the
@@ -143,7 +165,18 @@ export async function submitRetain(params: SubmitRetainParams): Promise<void> {
 type RetainSubmissionResult = 'submitted' | 'failed' | 'skipped';
 
 /** What one turn adds to memory: text to store, the full exchange, or nothing at all. */
-type TurnMemory = { kind: 'text'; text: string } | { kind: 'exchange' } | { kind: 'nothing' };
+type TurnMemory =
+  | { kind: 'text'; text: string; notes: readonly LabeledNote[] }
+  | { kind: 'notes'; notes: readonly LabeledNote[] }
+  | { kind: 'exchange' }
+  | { kind: 'nothing' };
+
+/** A finding or reply note ready to store: its source, its day, and its text with the label in front. */
+interface LabeledNote {
+  source: MemoryNoteSource;
+  date: string;
+  text: string;
+}
 
 /** One fact is a plain sentence; several are short bullet lines. */
 function formatFacts(facts: readonly string[]): string {
@@ -163,6 +196,56 @@ function formatFacts(facts: readonly string[]): string {
  * the effective state stays observable.
  */
 async function decideTurnMemory(params: SubmitRetainParams): Promise<TurnMemory> {
+  const summarize = params.summarize;
+  if (summarize === undefined) {
+    return decidePersonFacts(params);
+  }
+  const [person, notes] = await Promise.all([decidePersonFacts(params), decideNotes({ params, summarize })]);
+  if (notes.length === 0) {
+    return person;
+  }
+  return person.kind === 'text' ? { ...person, notes } : { kind: 'notes', notes };
+}
+
+/** The findings and reply notes of the turn, labeled with where they came from and the day. Never throws. */
+async function decideNotes({
+  params,
+  summarize,
+}: {
+  params: SubmitRetainParams;
+  summarize: SummarizeTurnContext;
+}): Promise<LabeledNote[]> {
+  const notes = await summarizeTurnNotes({
+    results: params.toolResults ?? [],
+    assistantText: params.assistantText,
+    turnDate: params.completedAt,
+    timeZone: params.timeZone,
+    personName: summarize.personName,
+    assistantName: summarize.assistantName,
+    tenantId: summarize.tenantId,
+    modelProviderStore: summarize.modelProviderStore,
+    summarizationModelFqn: summarize.summarizationModelFqn,
+    tokenFactoryBudget: summarize.tokenFactoryBudget,
+    modelUsage: summarize.modelUsage,
+    logger: params.logger,
+  });
+  const instant = new Date(params.completedAt);
+  const date = localDay({
+    instant: Number.isNaN(instant.getTime()) ? new Date() : instant,
+    timeZone: params.timeZone,
+  }).date;
+  const assistantName = usablePersonName(summarize.assistantName);
+  return notes
+    .filter(note => withoutAbilityNotes([note.text]).length > 0)
+    .map(note => ({
+      source: note.source,
+      date,
+      text: labeledNoteText({ label: noteLabel({ source: note.source, date, assistantName }), text: note.text }),
+    }));
+}
+
+/** What the person said that is worth keeping, decided as it always was; notes are decided apart from it. */
+async function decidePersonFacts(params: SubmitRetainParams): Promise<TurnMemory> {
   const summarize = params.summarize;
   if (summarize === undefined) {
     params.logger.debug('Turn summarization context not provided; retaining the full exchange', {
@@ -201,7 +284,7 @@ async function decideTurnMemory(params: SubmitRetainParams): Promise<TurnMemory>
           turnId: params.turnId,
           factCount: facts.length,
         });
-        return { kind: 'text', text: formatFacts(facts) };
+        return { kind: 'text', text: formatFacts(facts), notes: [] };
       }
       case 'nothing_to_keep':
         await recordSummaryOutcome(params, { outcome: 'summarized' });
@@ -265,6 +348,33 @@ function logTurnMemoryNotSaved(params: SubmitRetainParams, why: { message: strin
   });
 }
 
+/**
+ * Retain items for the turn's notes. They carry the untrusted origin, so recall holds them to the strict
+ * screening posture: a finding is what something outside the chat said, and a reply note is the assistant's
+ * own words, neither of them the person's voice.
+ */
+function noteRetainItems({
+  params,
+  notes,
+}: {
+  params: SubmitRetainParams;
+  notes: readonly LabeledNote[];
+}): RetainItem[] {
+  return notes.map((note, index) => ({
+    content: noteRetainContent({ text: note.text, source: note.source, date: note.date }),
+    timestamp: params.completedAt,
+    document_id: `aman-${params.sessionId}-${params.turnId}-note-${String(index)}`,
+    metadata: {
+      [SESSION_ID_METADATA_KEY]: params.sessionId,
+      turn_id: params.turnId,
+      source: 'aman-chat',
+      [MEMORY_ORIGIN_METADATA_KEY]: TOOL_INGESTED_ORIGIN,
+      [NOTE_SOURCE_METADATA_KEY]: note.source,
+      [NOTE_DATE_METADATA_KEY]: note.date,
+    },
+  }));
+}
+
 async function attemptRetainSubmission(
   params: SubmitRetainParams,
   /**
@@ -280,7 +390,13 @@ async function attemptRetainSubmission(
     await params.client.completeOperation?.(retainOperationId({ sessionId: params.sessionId, turnId: params.turnId }));
     return 'skipped';
   }
-  const item = buildRetainItem({ ...params, memoryText: memory.kind === 'text' ? memory.text : undefined });
+  const noteItems =
+    memory.kind === 'text' || memory.kind === 'notes' ? noteRetainItems({ params, notes: memory.notes }) : [];
+  const personItem =
+    memory.kind === 'notes'
+      ? undefined
+      : buildRetainItem({ ...params, memoryText: memory.kind === 'text' ? memory.text : undefined });
+  const item = personItem ?? noteItems[0];
   if (item === undefined) {
     return 'skipped';
   }
@@ -296,7 +412,7 @@ async function attemptRetainSubmission(
   }
   try {
     const outcome = await params.client.retain({
-      items: [item],
+      items: [...(personItem === undefined ? [] : [personItem]), ...noteItems],
       operationId: retainOperationId({ sessionId: params.sessionId, turnId: params.turnId }),
       timeoutMs: configuration.MEMORY_RETAIN_TIMEOUT_MS,
     });

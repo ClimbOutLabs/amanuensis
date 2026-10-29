@@ -138,6 +138,8 @@ export interface ResolveTurnSummarizeContextParams {
    * context with no name, and the summarizer writes about "the person".
    */
   personName?: string | undefined;
+  /** The name of the persona or assistant that replies this turn, so notes about its replies can name it. */
+  assistantName?: string | undefined;
 }
 
 /**
@@ -195,6 +197,9 @@ export async function resolveTurnSummarizeContext(
   // summarizer falls back to writing about "the person" for this turn.
   const trimmedPersonName = params.personName?.trim();
   const personName = trimmedPersonName === undefined || trimmedPersonName === '' ? undefined : trimmedPersonName;
+  const trimmedAssistantName = params.assistantName?.trim();
+  const assistantName =
+    trimmedAssistantName === undefined || trimmedAssistantName === '' ? undefined : trimmedAssistantName;
   try {
     const summarizationModelFqn = await resolveSummarizationModelFqn({
       tenantId,
@@ -214,10 +219,19 @@ export async function resolveTurnSummarizeContext(
         tokenFactoryBudget,
         modelUsage,
         personName,
+        assistantName,
       };
     }
     logger.debug('Turn summarization is active for this turn', { sessionId, summarizationModelFqn });
-    return { tenantId, modelProviderStore, summarizationModelFqn, tokenFactoryBudget, modelUsage, personName };
+    return {
+      tenantId,
+      modelProviderStore,
+      summarizationModelFqn,
+      tokenFactoryBudget,
+      modelUsage,
+      personName,
+      assistantName,
+    };
   } catch (error) {
     logger.debug('Memory summarization has no model for this turn: the model FQN did not resolve', {
       sessionId,
@@ -230,6 +244,7 @@ export async function resolveTurnSummarizeContext(
       tokenFactoryBudget,
       modelUsage,
       personName,
+      assistantName,
     };
   }
 }

@@ -2456,3 +2456,114 @@ describe('extractPreviousExchange origin', () => {
     expect(extractPreviousExchange(exchangeWithTool('record_finding'))?.origin).toBe('user_stated');
   });
 });
+
+describe('recall of saved findings and assistant reply notes', () => {
+  const NOW = new Date('2026-10-29T12:00:00.000Z');
+
+  function emailNote(overrides: { id: string; date: string; text: string }): RecallItem {
+    return {
+      id: overrides.id,
+      occurred_start: overrides.date,
+      text: overrides.text,
+      metadata: { origin: 'tool_ingested', note_source: 'email', note_date: overrides.date },
+    };
+  }
+
+  async function recalledBlock(results: RecallItem[]): Promise<string> {
+    const capability = hindsightMemoryCapability({
+      client: makeClient({ recall: jest.fn().mockResolvedValue({ ok: true, results, entities: [] }) }),
+      config: DEFAULT_CONFIG,
+      logger: makeLogger(),
+      sessionId: 's1',
+      previousTurnId: null,
+    });
+    const processor = capability.preLLMProcessors?.[0];
+    if (!processor) {
+      throw new Error('expected a preLLM processor');
+    }
+    const events = await collect(processor.processPreLLM(makeExecution([{ role: 'user', content: 'hi' }])));
+    const block = passthroughEvent(events)['injected_block'];
+    return typeof block === 'string' ? block : '';
+  }
+
+  beforeEach(() => {
+    jest.useFakeTimers({ now: NOW, doNotFake: ['setTimeout', 'clearTimeout', 'setImmediate', 'setInterval'] });
+  });
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
+  it('marks a finding with its source and day', async () => {
+    const block = await recalledBlock([
+      emailNote({
+        id: '1',
+        date: '2026-10-29',
+        text: 'From an email, found Oct 29: Priya asked for the signed form by 2026-11-03.',
+      }),
+    ]);
+    expect(block).toContain(
+      '[2026-10-29, found earlier by the assistant] From an email, found Oct 29: Priya asked for the signed form by 2026-11-03.',
+    );
+  });
+
+  it('marks a note about an earlier assistant reply as earlier advice, not a fact the person stated', async () => {
+    const block = await recalledBlock([
+      {
+        id: '1',
+        occurred_start: '2026-10-28',
+        text: "From Nata's reply, Oct 28: Leave by 08:55 for the GP visit.",
+        metadata: { origin: 'tool_ingested', note_source: 'assistant_response', note_date: '2026-10-28' },
+      },
+    ]);
+    expect(block).toContain("[2026-10-28, the assistant's earlier reply] From Nata's reply, Oct 28: Leave by 08:55");
+  });
+
+  it('reads the source and day from the note text when the store hands back no metadata', async () => {
+    const block = await recalledBlock([
+      {
+        id: '1',
+        occurred_start: '2026-10-28',
+        text: 'From the web, found Oct 28: The lease signing is on 2026-11-01.\n\n<!-- note: web 2026-10-28 -->',
+      },
+      {
+        id: '2',
+        occurred_start: '2026-10-01',
+        text: 'From the web, found Oct 1: Old news about the lease.\n\n<!-- note: web 2026-10-01 -->',
+      },
+    ]);
+    expect(block).toContain(
+      '[2026-10-28, found earlier by the assistant] From the web, found Oct 28: The lease signing',
+    );
+    expect(block).not.toContain('<!-- note');
+    expect(block).not.toContain('Old news');
+  });
+
+  it('skips notes older than 14 days and keeps notes at the limit and things the person said', async () => {
+    const block = await recalledBlock([
+      emailNote({ id: '1', date: '2026-10-14', text: 'From an email, found Oct 14: Old news about the lease.' }),
+      emailNote({ id: '2', date: '2026-10-15', text: 'From an email, found Oct 15: Lease signing is on 2026-11-01.' }),
+      { id: '3', occurred_start: '2026-08-01', text: 'The dentist is Dr Rivera.' },
+    ]);
+    expect(block).not.toContain('Old news about the lease');
+    expect(block).toContain('Lease signing is on 2026-11-01');
+    expect(block).toContain('[2026-08-01] The dentist is Dr Rivera.');
+  });
+
+  it('tells the model in the system section how to treat findings', () => {
+    const capability = hindsightMemoryCapability({
+      client: makeClient({}),
+      config: DEFAULT_CONFIG,
+      logger: makeLogger(),
+      sessionId: 's1',
+      previousTurnId: null,
+    });
+    const builder = InstructionBuilder.createSystemPrompt('identity');
+    for (const add of capability.instructionBuilders ?? []) {
+      add(builder);
+    }
+    const rendered = builder.build();
+    expect(rendered).toContain('you found earlier');
+    expect(rendered).toContain('may be out of date');
+    expect(rendered).toContain('check them against the source before acting on them');
+  });
+});

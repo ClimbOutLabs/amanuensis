@@ -46,7 +46,7 @@ const SUMMARIZE_KEPT_HEAD_CHARACTERS = 2000;
  * A side of the exchange that fits the input bound, cut on whole characters. A longer side keeps
  * its start, where a request to remember often sits, and its end, the person's last words.
  */
-function boundedText(text: string): { text: string; cut: boolean } {
+export function boundedText(text: string): { text: string; cut: boolean } {
   // Length in UTF-16 units is never below the length in characters, so a short text needs no scan.
   if (text.length <= SUMMARIZE_MAX_INPUT_CHARACTERS) {
     return { text, cut: false };
@@ -64,7 +64,7 @@ function boundedText(text: string): { text: string; cut: boolean } {
 
 /** Cap on generated summary tokens; bounds output cost by construction (the
  * 2000-char validation only discards after the tokens are paid for). */
-const SUMMARIZE_MAX_OUTPUT_TOKENS = 800;
+export const SUMMARIZE_MAX_OUTPUT_TOKENS = 800;
 
 /**
  * Cap for the one retry after a reply was cut off by the first cap. A model that thinks before it
@@ -138,7 +138,7 @@ function releaseSummarizeSlot(): void {
   }
 }
 
-async function withSummarizeSlot<T>(fn: () => Promise<T>): Promise<T> {
+export async function withSummarizeSlot<T>(fn: () => Promise<T>): Promise<T> {
   await acquireSummarizeSlot();
   try {
     return await fn();
@@ -263,7 +263,7 @@ export function buildSummarizationMessages(params: {
 }
 
 /** `2026-10-26 (Monday)` for a valid instant, else the text as given. */
-function describeTurnDate({ turnDate, timeZone }: { turnDate: string; timeZone: string | undefined }): string {
+export function describeTurnDate({ turnDate, timeZone }: { turnDate: string; timeZone: string | undefined }): string {
   const parsed = new Date(turnDate);
   if (Number.isNaN(parsed.getTime())) {
     return turnDate;
@@ -437,7 +437,7 @@ const TRANSCRIPT_LINE = /^[\s>*_"'\u2018\u2019\u201c\u201d\u200b\u2022-]*(?:user
 type SummaryReply = { kind: 'facts'; facts: string[] } | { kind: 'nothing' } | { kind: 'unreadable' };
 
 /** The JSON object a reply holds, tolerating code fences, a short lead-in, and a trailing comma. */
-function extractReplyJson(reply: string): unknown {
+export function extractReplyJson(reply: string): unknown {
   const unfenced = reply.replace(/```(?:json)?/gi, '');
   const object = unfenced.slice(unfenced.indexOf('{'), unfenced.lastIndexOf('}') + 1);
   try {
@@ -533,7 +533,9 @@ function withRequestFields({
   };
 }
 
-function flattenLlmContent(content: string | { type: string; text?: string; refusal?: string }[] | null): string {
+export function flattenLlmContent(
+  content: string | { type: string; text?: string; refusal?: string }[] | null,
+): string {
   if (typeof content === 'string') {
     return content;
   }
@@ -541,6 +543,43 @@ function flattenLlmContent(content: string | { type: string; text?: string; refu
     return '';
   }
   return content.map(part => (part.type === 'text' ? (part.text ?? '') : '')).join('');
+}
+
+/** The production resolver: a metered model client over the configured provider, bounded by the summary time limit. */
+export function summaryLlmResolver(params: {
+  tenantId: string;
+  modelProviderStore: IModelProviderStore;
+  tokenFactoryBudget: TokenFactoryBudget;
+  modelUsage: TurnModelUsage;
+  logger: Logger;
+}): (modelFqn: string) => Promise<ILLM> {
+  const { tenantId, modelProviderStore, logger } = params;
+  return async (name: string): Promise<ILLM> => {
+    const { providerConfig, streamTimeout, modelProperties } = await getModelDetails({
+      tenant_id: tenantId,
+      name,
+      store: modelProviderStore,
+    });
+    const metered = meterHelperLlm({
+      llm: new VercelAILLM({
+        providerConfig,
+        logger,
+        signal: AbortSignal.timeout(SUMMARIZE_TIMEOUT_MS),
+        streamTimeout,
+      }),
+      identity: modelIdentity({ name, providerConfig }),
+      role: 'summarization',
+      budget: params.tokenFactoryBudget,
+      usage: params.modelUsage,
+      logger,
+    });
+    return withRequestFields({
+      llm: metered,
+      fields: lightReasoningRequestFields(modelProperties),
+      modelKey: `${tenantId}/${name}`,
+      logger,
+    });
+  };
 }
 
 /**
@@ -573,7 +612,7 @@ export async function summarizeTurnContent(params: {
   /** Test seam; production leaves it unset and resolves a VercelAILLM over the configured provider. */
   resolveLlm?: ((modelFqn: string) => Promise<ILLM>) | undefined;
 }): Promise<SummarizeTurnResult> {
-  const { tenantId, modelProviderStore, summarizationModelFqn, logger } = params;
+  const { summarizationModelFqn, logger } = params;
   // A long turn keeps its start and its end, and the model is told that the middle is missing.
   const boundedUser = boundedText(params.userText);
   const userText = boundedUser.text;
@@ -589,34 +628,7 @@ export async function summarizeTurnContent(params: {
   // The slot is acquired before the LLM client is built so queueing never eats the
   // call budget.
   return withSummarizeSlot(async () => {
-    const resolveLlm =
-      params.resolveLlm ??
-      (async (name: string): Promise<ILLM> => {
-        const { providerConfig, streamTimeout, modelProperties } = await getModelDetails({
-          tenant_id: tenantId,
-          name,
-          store: modelProviderStore,
-        });
-        const metered = meterHelperLlm({
-          llm: new VercelAILLM({
-            providerConfig,
-            logger,
-            signal: AbortSignal.timeout(SUMMARIZE_TIMEOUT_MS),
-            streamTimeout,
-          }),
-          identity: modelIdentity({ name, providerConfig }),
-          role: 'summarization',
-          budget: params.tokenFactoryBudget,
-          usage: params.modelUsage,
-          logger,
-        });
-        return withRequestFields({
-          llm: metered,
-          fields: lightReasoningRequestFields(modelProperties),
-          modelKey: `${tenantId}/${name}`,
-          logger,
-        });
-      });
+    const resolveLlm = params.resolveLlm ?? summaryLlmResolver(params);
     let llm: ILLM;
     try {
       llm = await resolveLlm(summarizationModelFqn);

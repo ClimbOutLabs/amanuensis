@@ -64,6 +64,12 @@ import {
   vaultFilesystemNamespace,
   withoutHiddenMarkers,
 } from '../runtime/memory/markdownMemoryFiles';
+import {
+  isMemoryNoteSource,
+  NOTE_DATE_METADATA_KEY,
+  NOTE_SOURCE_METADATA_KEY,
+  noteRetainContent,
+} from '../runtime/memory/memoryNotes';
 import { MEMORY_RECALL_ENABLED_SETTING_KEY } from '../runtime/memoryRecallSettings';
 import { MEMORY_SCREEN_ENABLED_SETTING_KEY } from '../runtime/memoryScreenSettings';
 import { MEMORY_SUMMARIZE_SETTING_KEY } from '../runtime/memorySummarizeSettings';
@@ -946,6 +952,8 @@ function buildRetainItems(
       }
       const trailers = entryMetadata(body);
       const sessionId = trailers?.[SESSION_ID_METADATA_KEY];
+      const noteSource = trailers?.[NOTE_SOURCE_METADATA_KEY];
+      const noteDate = trailers?.[NOTE_DATE_METADATA_KEY];
       body = withoutHiddenMarkers(body);
       const contextMatch = /\n\n> ([^\n]*)$/.exec(body);
       if (contextMatch !== null) {
@@ -957,12 +965,25 @@ function buildRetainItems(
       }
       const itemContext = vaultContext ?? entryContext;
       items.push({
-        content: body,
+        // A note's marker rides inside its text, so a backend that drops metadata still hands it back.
+        content:
+          noteSource !== undefined && isMemoryNoteSource(noteSource) && noteDate !== undefined
+            ? noteRetainContent({ text: body, source: noteSource, date: noteDate })
+            : body,
         timestamp: entry.timestamp,
         // A replaceable entry keeps its document id, so a later update replaces it instead of adding a copy.
         document_id: trailers?.[DOCUMENT_ID_METADATA_KEY] ?? documentIdFor(entry.id),
         ...(itemContext === undefined ? {} : { context: itemContext }),
-        ...(sessionId === undefined ? {} : { metadata: { [SESSION_ID_METADATA_KEY]: sessionId } }),
+        ...(sessionId === undefined && noteSource === undefined
+          ? {}
+          : {
+              metadata: {
+                ...(sessionId === undefined ? {} : { [SESSION_ID_METADATA_KEY]: sessionId }),
+                ...(noteSource === undefined || noteDate === undefined
+                  ? {}
+                  : { [NOTE_SOURCE_METADATA_KEY]: noteSource, [NOTE_DATE_METADATA_KEY]: noteDate }),
+              },
+            }),
       });
     }
   }
