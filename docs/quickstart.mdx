@@ -16,9 +16,9 @@ The app runs in two modes: **standalone** — one process on your own machine, S
 | Node.js | 22.14 or newer | [nodejs.org](https://nodejs.org/en/download) or `brew install node` |
 | pnpm | 11.16.0 through [Corepack](https://pnpm.io/installation#using-corepack) | `corepack enable` (Corepack ships with Node.js; the exact pnpm version is pinned in `package.json`) |
 | Git | any recent version | [git-scm.com/downloads](https://git-scm.com/downloads) |
-| A Bash-compatible shell | — | macOS/Linux: built in. Windows: [WSL](https://learn.microsoft.com/windows/wsl/install) (recommended) or Git Bash, which ships with [Git for Windows](https://git-scm.com/downloads/win) |
+| A Bash-compatible shell | — | macOS/Linux: built in. Windows: [WSL2](https://learn.microsoft.com/windows/wsl/install) |
 
-On Windows, run every command below from a WSL or Git Bash shell, not PowerShell or cmd — the setup scripts use POSIX-style environment variable assignments that neither of those understand.
+On Windows, run every command below inside WSL2. Native Windows (PowerShell, cmd or Git Bash) is not supported: the setup scripts use POSIX-style environment variable assignments that those shells do not understand.
 
 ## Install and run
 
@@ -40,8 +40,7 @@ pnpm standalone:dev
 The install takes a few minutes the first time. When it finishes, open [http://localhost:3000](http://localhost:3000) and sign in — that is the app.
 
 <Note>
-  `pnpm standalone:dev` starts the API server without the file watcher: on some Windows machines the watcher
-  (`tsx watch`) stalls before the server ever starts, leaving the UI unable to reach the API. The UI itself still
+  `pnpm standalone:dev` starts the API server without the file watcher. The UI itself still
   hot-reloads; restart the command to pick up server-side changes. Contributors who want backend hot reload can run
   the package-level watch scripts instead (`pnpm --filter @truefoundry/trueforge dev`).
 </Note>

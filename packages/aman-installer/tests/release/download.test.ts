@@ -44,7 +44,11 @@ function releaseTable(): Map<string, Uint8Array> {
 function fetcher(table: Map<string, Uint8Array>, seen: string[]): FetchBytes {
   return (url: string) => {
     seen.push(url);
-    return Promise.resolve(table.get(url) ?? null);
+    const data = table.get(url);
+    // A page that answers without the file is a release that is not
+    // there; a page that does not answer at all is unreachable, and
+    // the tests below say which one they mean.
+    return Promise.resolve(data === undefined ? { missing: true } : { data });
   };
 }
 
@@ -80,10 +84,18 @@ test('a record whose signature fails is refused with its problem', async () => {
 
 test('a release page that does not answer is unreachable, not a refusal', async () => {
   const result = await fetchLatestManifest({
-    fetchBytes: () => Promise.resolve(null),
+    fetchBytes: () => Promise.resolve({ unreachable: true }),
     publicKeyBase64: TEST_PUBLIC_KEY_MINISIGN,
   });
   assert.deepEqual(result, { unreachable: true });
+});
+
+test('a release page that answers without the record is missing, not unreachable', async () => {
+  const result = await fetchLatestManifest({
+    fetchBytes: fetcher(new Map(), []),
+    publicKeyBase64: TEST_PUBLIC_KEY_MINISIGN,
+  });
+  assert.deepEqual(result, { missing: true });
 });
 
 test('a release file comes from the record release and is checked against it', async () => {
@@ -99,6 +111,18 @@ test('a release file comes from the record release and is checked against it', a
     assert.fail('the file should check out');
   }
   assert.deepEqual(file.data, EXE_BYTES);
+});
+
+test('a release file the page answers without is missing, not unreachable', async () => {
+  const table = releaseTable();
+  table.delete(`${BASE}/download/v2.0.0/aman-windows-x64.exe`);
+  const fetchBytes = fetcher(table, []);
+  const latest = await fetchLatestManifest({ fetchBytes, publicKeyBase64: TEST_PUBLIC_KEY_MINISIGN });
+  if (!('manifest' in latest)) {
+    assert.fail('the record should check out');
+  }
+  const file = await fetchReleaseFile({ fetchBytes, manifest: latest.manifest, name: 'aman-windows-x64.exe' });
+  assert.deepEqual(file, { missing: true });
 });
 
 test('a release file that does not match the record is refused', async () => {

@@ -53,6 +53,17 @@ export interface TavilySearchHit {
   snippet: string;
 }
 
+/** A picture Tavily's image search found for the query, with its description when Tavily wrote one. */
+export interface TavilySearchImage {
+  url: string;
+  description: string | null;
+}
+
+export interface TavilySearchOutcome {
+  hits: TavilySearchHit[];
+  images: TavilySearchImage[];
+}
+
 export interface TavilyPage {
   url: string;
   title: string | null;
@@ -75,8 +86,12 @@ export class TavilyError extends Error {
   }
 }
 
+/** With descriptions asked for, Tavily lists each image as an object; without them, as a bare link. */
+const searchImageSchema = z.union([z.string(), z.object({ url: z.string(), description: z.string().nullish() })]);
+
 const searchResponseSchema = z.object({
   results: z.array(z.object({ url: z.string(), title: z.string(), content: z.string() })),
+  images: z.array(searchImageSchema).nullish(),
 });
 const extractResponseSchema = z.object({
   results: z.array(z.object({ url: z.string(), title: z.string().nullish(), raw_content: z.string() })),
@@ -148,7 +163,9 @@ export class TavilyClient {
     return this.#auth.kind === 'keyless';
   }
 
-  async search({ query, signal }: { query: string; signal: AbortSignal | undefined }): Promise<TavilySearchHit[]> {
+  async search({ query, signal }: { query: string; signal: AbortSignal | undefined }): Promise<TavilySearchOutcome> {
+    // Pictures cost no extra credit, and a space may only show a picture the chat has seen, so every
+    // search asks for them rather than guessing when the person will want one.
     const body = await this.#post({
       endpoint: TAVILY_SEARCH_ENDPOINT,
       payload: {
@@ -157,6 +174,8 @@ export class TavilyClient {
         max_results: SEARCH_MAX_RESULTS,
         include_answer: false,
         include_raw_content: false,
+        include_images: true,
+        include_image_descriptions: true,
       },
       timeoutMs: SEARCH_TIMEOUT_MS,
       signal,
@@ -169,7 +188,14 @@ export class TavilyClient {
         cause: parsed.error,
       });
     }
-    return parsed.data.results.map(hit => ({ title: hit.title, url: hit.url, snippet: hit.content }));
+    return {
+      hits: parsed.data.results.map(hit => ({ title: hit.title, url: hit.url, snippet: hit.content })),
+      images: (parsed.data.images ?? []).map(image =>
+        typeof image === 'string'
+          ? { url: image, description: null }
+          : { url: image.url, description: image.description ?? null },
+      ),
+    };
   }
 
   async extract({

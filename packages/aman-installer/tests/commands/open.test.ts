@@ -6,11 +6,13 @@ import { FakeHost } from '../../src/host/fakeHost.ts';
 import { FakeWindowsJobs, type FakeWindowsJobStep } from '../../src/host/fakeWindowsJobs.ts';
 import {
   OPEN_ADDRESS_MISSING,
+  OPEN_CERT_MISSING,
   OPEN_DID_NOT_ANSWER,
   OPEN_DOCKER_DID_NOT_START,
   OPEN_DOCKER_MISSING,
   OPEN_NOT_INSTALLED,
   OPEN_NOT_WINDOWS,
+  OPEN_TRUST_FAILED,
   openBrowserFailedProblem,
   openReadyLine,
   problemText,
@@ -77,13 +79,16 @@ function summaryWith(instances: StateSummary['instances']): StateSummary {
   };
 }
 
-function storeWith(summary: StateSummary): StateStore {
+function storeWith(summary: StateSummary, cert: string | null = null): StateStore {
   return {
     readSummary: () => Promise.resolve(summary),
+    readCaCertificate: () => Promise.resolve(cert),
     writeInstance: () => Promise.resolve(false),
     setInstanceValue: () => Promise.resolve(false),
     removeInstance: () => Promise.resolve(),
     writeRelease: () => Promise.resolve(false),
+    setBackupsMode: () => Promise.resolve(false),
+    refreshCache: () => undefined,
   };
 }
 
@@ -130,6 +135,20 @@ async function run(options: {
 const MAIN_AT_8792 = summaryWith([
   { name: 'main', entries: parseRegistry('name=main\napp_port=8792\npublic_url=http://127.0.0.1:8792\n') },
 ]);
+
+// The local mode instance: https on this computer only, its certificate
+// made by the local authority.
+const MAIN_HTTPS = summaryWith([
+  {
+    name: 'main',
+    entries: parseRegistry(
+      'name=main\napp_port=8792\ntls=local\ntls_port=8443\n' +
+        'origins=http://127.0.0.1:8792,https://localhost:8443\npublic_url=https://localhost:8443\n',
+    ),
+  },
+]);
+
+const FAKE_CERT = '-----BEGIN CERTIFICATE-----\nfake-certificate-for-tests\n-----END CERTIFICATE-----\n';
 
 test('open waits for the health check at the recorded port and opens the browser there', async () => {
   const jobs = jobsWith();
@@ -258,4 +277,64 @@ test('open refuses on a computer that is not Windows', async () => {
   assert.equal(code, 1);
   assert.deepEqual(lines, [problemText(OPEN_NOT_WINDOWS)]);
   assert.equal(jobs.dockerDesktopStarts, 0);
+});
+
+test('open at https first sets this computer to trust the authority, then opens the https address', async () => {
+  const jobs = jobsWith();
+  const { code, lines, probes } = await run({
+    runner: new DockerRunner(),
+    store: storeWith(MAIN_HTTPS, FAKE_CERT),
+    jobs,
+  });
+  assert.equal(code, 0);
+  assert.deepEqual(probes, ['http://127.0.0.1:8792/healthz']);
+  assert.deepEqual(jobs.ops, ['ca-write', 'ca-store', 'browser']);
+  assert.equal(jobs.caCertContents, FAKE_CERT);
+  assert.deepEqual(jobs.browserUrls, ['https://localhost:8443']);
+  assert.deepEqual(lines, [openReadyLine('https://localhost:8443')]);
+});
+
+test('open at https opens the first https address in display order', async () => {
+  const jobs = jobsWith();
+  const summary = summaryWith([
+    {
+      name: 'main',
+      entries: parseRegistry(
+        'name=main\napp_port=8792\ntls=local\ntls_port=8443\n' +
+          'origins=https://localhost:8443,https://192.168.1.20:8443\npublic_url=https://192.168.1.20:8443\n',
+      ),
+    },
+  ]);
+  const { code } = await run({ runner: new DockerRunner(), store: storeWith(summary, FAKE_CERT), jobs });
+  assert.equal(code, 0);
+  assert.deepEqual(jobs.browserUrls, ['https://192.168.1.20:8443']);
+});
+
+test('open at https with no certificate to read prints its problem and opens nothing', async () => {
+  const jobs = jobsWith();
+  const { code, lines } = await run({ runner: new DockerRunner(), store: storeWith(MAIN_HTTPS), jobs });
+  assert.equal(code, 1);
+  assert.deepEqual(lines, [problemText(OPEN_CERT_MISSING)]);
+  assert.deepEqual(jobs.ops, []);
+  assert.deepEqual(jobs.browserUrls, []);
+});
+
+test('open at https where the trust step fails prints its problem and opens nothing', async () => {
+  const jobs = jobsWith(new Set<FakeWindowsJobStep>(['ca-store']));
+  const { code, lines } = await run({
+    runner: new DockerRunner(),
+    store: storeWith(MAIN_HTTPS, FAKE_CERT),
+    jobs,
+  });
+  assert.equal(code, 1);
+  assert.deepEqual(lines, [problemText(OPEN_TRUST_FAILED)]);
+  assert.deepEqual(jobs.browserUrls, []);
+});
+
+test('open at plain http makes no trust steps', async () => {
+  const jobs = jobsWith();
+  const { code } = await run({ runner: new DockerRunner(), store: storeWith(MAIN_AT_8792), jobs });
+  assert.equal(code, 0);
+  assert.deepEqual(jobs.ops, ['browser']);
+  assert.equal(jobs.caCertContents, null);
 });

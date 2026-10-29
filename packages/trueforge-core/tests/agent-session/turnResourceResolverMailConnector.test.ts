@@ -163,8 +163,9 @@ function scriptedSidecar({
   return { calls };
 }
 
-function makeResolver(mailAccounts: MailAccountDirectory) {
+function makeResolver(mailAccounts: MailAccountDirectory, clientTimezone?: string) {
   return new TurnResourceResolver({
+    clientTimezone,
     llm: () =>
       Promise.resolve({
         modelClient: makeMockILLM(),
@@ -518,6 +519,30 @@ describe('Email connector newest messages', () => {
 
     const listCalls = sidecar.calls.filter(call => call['tool'] === 'list_emails_metadata');
     expect(listCalls.map(call => call['since'])).toEqual([since]);
+  });
+
+  it('reads a since with no offset in the turn time zone, so the sidecar never refuses it', async () => {
+    const sidecar = scriptedSidecar({ accountList: oneAccount });
+    const toolSet = await emailToolSet(makeResolver(new MailAccountDirectory(), 'Asia/Kolkata'));
+
+    await toolSet.callTool({ name: 'list_emails_metadata', arguments: { since: '2026-10-28T08:00:00' } });
+    await toolSet.callTool({ name: 'list_emails_metadata', arguments: { since: '2026-10-28' } });
+
+    const listCalls = sidecar.calls.filter(call => call['tool'] === 'list_emails_metadata');
+    expect(listCalls.map(call => call['since'])).toEqual(['2026-10-28T02:30:00.000Z', '2026-10-27T18:30:00.000Z']);
+  });
+
+  it('refuses a since that is not a date before it reaches the sidecar', async () => {
+    const sidecar = scriptedSidecar({ accountList: oneAccount });
+    const toolSet = await emailToolSet(makeResolver(new MailAccountDirectory()));
+
+    const { text: said, isError } = resultText(
+      await toolSet.callTool({ name: 'list_emails_metadata', arguments: { since: 'last tuesday' } }),
+    );
+
+    expect(isError).toBe(true);
+    expect(said).toContain('since is not a date.');
+    expect(sidecar.calls.filter(call => call['tool'] === 'list_emails_metadata')).toEqual([]);
   });
 
   it('says in the tool description that results are newest first within the window', async () => {

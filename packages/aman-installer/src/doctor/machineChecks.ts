@@ -2,7 +2,13 @@ import type { Stats } from 'node:fs';
 import { lstat, readdir, readFile, realpath, stat } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 
-import { registryValue, type InstanceRecord, type StateSummary } from '../state/state.ts';
+import {
+  backupNameTimeSeconds,
+  registryValue,
+  type BackupEntry,
+  type InstanceRecord,
+  type StateSummary,
+} from '../state/state.ts';
 import type { CheckList, DoctorDeps, MachineContext } from './doctor.ts';
 
 // The machine checks of installer/doctor/aman, in the shell's order, with
@@ -654,8 +660,16 @@ function uiPath(deps: DoctorDeps, path: string): string {
 // True when any of the three schedules the installer can make is in place:
 // a systemd timer that is enabled, a launchd agent, or a crontab line.
 // The shell tests for a file with [ -f ]; a folder at either path does
-// not count.
+// not count. On Windows the schedule is the Task Scheduler task, and
+// the jobs that made it are the ones that say whether it is still there.
 async function backupSchedulePresent(deps: DoctorDeps): Promise<boolean> {
+  if (deps.host.kind === 'windows' && deps.windowsJobs !== undefined) {
+    try {
+      return await deps.windowsJobs.dailyBackupTaskPresent();
+    } catch {
+      return false;
+    }
+  }
   const timer = join(deps.homeDir, '.config/systemd/user/aman-backup.timer');
   if ((await statOrNull(timer))?.isFile() === true) {
     const enabled = await capture(deps, 'systemctl', ['--user', 'is-enabled', 'aman-backup.timer']);
@@ -679,6 +693,31 @@ function backupModeIsRecent(deps: DoctorDeps, summary: StateSummary): boolean {
   return time !== null && deps.now() - time < 172800;
 }
 
+// The backups the check judges, and the folder the newest one is in
+// when the check names it. On Windows the backups land in the folder
+// on the PC itself, so the names and the times in them are read there,
+// through the jobs that own that folder; a failure to read it falls
+// back to the state store's list. Anywhere else the store's list is
+// the whole answer, as before.
+async function backupFacts(
+  deps: DoctorDeps,
+  summary: StateSummary,
+): Promise<{ entries: readonly BackupEntry[]; folder: string | null }> {
+  const jobs = deps.windowsJobs;
+  if (deps.host.kind !== 'windows' || jobs === undefined) {
+    return { entries: summary.backupEntries, folder: null };
+  }
+  try {
+    const names = await jobs.listBackups();
+    return {
+      entries: names.map(name => ({ name, timeSeconds: backupNameTimeSeconds(name) })),
+      folder: jobs.backupsDir,
+    };
+  } catch {
+    return { entries: summary.backupEntries, folder: null };
+  }
+}
+
 async function checkBackup(deps: DoctorDeps, list: CheckList, summary: StateSummary): Promise<void> {
   // Backups are made of instances; before the first one exists there is
   // nothing to be late.
@@ -692,9 +731,10 @@ async function checkBackup(deps: DoctorDeps, list: CheckList, summary: StateSumm
     });
     return;
   }
+  const facts = await backupFacts(deps, summary);
   let newest = '';
   let newestTime = 0;
-  for (const entry of summary.backupEntries) {
+  for (const entry of facts.entries) {
     if (entry.timeSeconds !== null && entry.timeSeconds > newestTime) {
       newestTime = entry.timeSeconds;
       newest = entry.name;
@@ -734,7 +774,12 @@ async function checkBackup(deps: DoctorDeps, list: CheckList, summary: StateSumm
         fix: 'Run aman doctor backup --fix',
       });
     } else if (ageDays > 2) {
-      const newestPath = deps.stateHome !== null ? join(deps.stateHome, 'backups', newest) : `backups/${newest}`;
+      const newestPath =
+        deps.stateHome !== null
+          ? join(deps.stateHome, 'backups', newest)
+          : facts.folder !== null
+            ? `${facts.folder}\\${newest}`
+            : `backups/${newest}`;
       list.record({
         scope: 'machine',
         id: 'backup',

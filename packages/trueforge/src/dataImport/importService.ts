@@ -54,6 +54,7 @@ import {
   dailyLogFileAt,
   DOCUMENT_ID_METADATA_KEY,
   entryMetadata,
+  hiddenContext,
   latestTombstonesByEntry,
   parseVaultTombstones,
   personaVaultNamespace,
@@ -954,12 +955,14 @@ function buildRetainItems(
       const sessionId = trailers?.[SESSION_ID_METADATA_KEY];
       const noteSource = trailers?.[NOTE_SOURCE_METADATA_KEY];
       const noteDate = trailers?.[NOTE_DATE_METADATA_KEY];
+      // The page text drops an id-shaped context line, so it is read before the body is cleaned.
+      entryContext = hiddenContext(body);
       body = withoutHiddenMarkers(body);
       const contextMatch = /\n\n> ([^\n]*)$/.exec(body);
       if (contextMatch !== null) {
         const contextValue = contextMatch[1];
         if (contextValue !== undefined) {
-          entryContext = contextValue;
+          entryContext ??= contextValue;
           body = body.slice(0, contextMatch.index);
         }
       }

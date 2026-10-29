@@ -4,11 +4,12 @@
 // the PC's ports; this module is that rule, moved, not changed (plan
 // section 3).
 
-// The candidates, in the plan's order: the app, the sign-in service and
-// the https port.
+// The candidates, in the plan's order: the app and the sign-in
+// service. The https port is not picked here: the shell picks its own
+// inside the install, and a host pick would be a handover that never
+// happens.
 export const DEFAULT_APP_PORT = 8791;
 export const DEFAULT_LOGIN_PORT = 5556;
-export const DEFAULT_TLS_PORT = 8443;
 
 // Ports the installer itself keeps inside the instance (installer/lib/
 // ports.sh): a host pick must never land on one, since install.sh would
@@ -42,15 +43,10 @@ async function firstFreePort(options: {
 // its candidate, and an earlier pick is reserved against the later ones.
 export async function pickInstallPorts(options: {
   isFree: (port: number) => Promise<boolean>;
-}): Promise<{ appPort: number; loginPort: number; tlsPort: number }> {
+}): Promise<{ appPort: number; loginPort: number }> {
   const appPort = await firstFreePort({ isFree: options.isFree, start: DEFAULT_APP_PORT, reserved: [] });
   const loginPort = await firstFreePort({ isFree: options.isFree, start: DEFAULT_LOGIN_PORT, reserved: [appPort] });
-  const tlsPort = await firstFreePort({
-    isFree: options.isFree,
-    start: DEFAULT_TLS_PORT,
-    reserved: [appPort, loginPort],
-  });
-  return { appPort, loginPort, tlsPort };
+  return { appPort, loginPort };
 }
 
 // The starter's whole contract with the installer (the starter spec):
@@ -71,6 +67,31 @@ export function starterInstallArgs(options: { email: string; appPort: number; lo
     '--password-stdin',
     '--token-factory-key-stdin',
   ];
+  if (options.appPort !== DEFAULT_APP_PORT || options.loginPort !== DEFAULT_LOGIN_PORT) {
+    args.push('--port', String(options.appPort), '--login-port', String(options.loginPort));
+  }
+  return args;
+}
+
+// The first install's command line: the starter's line, with the
+// pieces the native install adds. The instance is made with the local
+// authority (--tls local) at this computer's own name (--address
+// localhost), so there is no --local-only (the two are opposites to
+// the installer), and the backups are daily from the first day. The
+// key flag is there only when a key was given: the installer refuses
+// an empty key line, and an install with no key is a plain install.
+// The port flags follow the starter's rule, as above.
+export function firstInstallArgs(options: {
+  email: string;
+  appPort: number;
+  loginPort: number;
+  hasKey: boolean;
+}): string[] {
+  const args = ['installer/install.sh', '--yes', '--name', 'main', '--email', options.email, '--password-stdin'];
+  if (options.hasKey) {
+    args.push('--token-factory-key-stdin');
+  }
+  args.push('--tls', 'local', '--address', 'localhost', '--backups', 'daily');
   if (options.appPort !== DEFAULT_APP_PORT || options.loginPort !== DEFAULT_LOGIN_PORT) {
     args.push('--port', String(options.appPort), '--login-port', String(options.loginPort));
   }

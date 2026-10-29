@@ -51,6 +51,7 @@ import {
   sanitizeNamespace,
   vaultFilesystemNamespace,
   vaultWriteNamespace,
+  withHiddenContext,
 } from '../runtime/memory/markdownMemoryFiles';
 import type { MemoryClient } from '../runtime/memory/memoryClient';
 import { MEMORY_RECALL_ENABLED_SETTING_KEY } from '../runtime/memoryRecallSettings';
@@ -842,7 +843,8 @@ async function writeClientMemoryFiles<TTransaction>(
     const fsNamespace = vaultFilesystemNamespace(subject.tenantId, wireNamespace);
     const rendered = [...outcome.entries]
       .reverse()
-      .map(entry => `## ${entry.timestamp}\n\n${entry.text}`)
+      // The internal id goes back as the closing line, so the file matches a daily log and needs no import step.
+      .map(entry => `## ${entry.timestamp}\n\n${withHiddenContext({ text: entry.text, context: entry.context })}`)
       .join('\n\n');
     await context.zip.addTextEntry(`memory/${fsNamespace}/memory/${fileDate}.md`, `${context.scrub.text(rendered)}\n`);
     vaults += 1;

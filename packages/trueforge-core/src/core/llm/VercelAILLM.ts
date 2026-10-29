@@ -36,6 +36,7 @@ import type {
 } from 'openai/resources/chat';
 import type { Logger } from 'winston';
 import { personMessageIndex } from '../runtime/contextUtils';
+import { MAX_TOOL_CALL_STREAM_PARTS } from '../runtime/modelReplyGuard';
 import { describeUnknownError, extractErrorLogFields } from '../util/errorLogFields';
 import { withFailover } from './failoverLanguageModel';
 import type { ILLM, LLMCreateParams, LLMCreateParamsStreaming } from './ILLM';
@@ -1845,6 +1846,8 @@ export async function* mapStreamToChunks({
   // Calls stopped mid-stream for running past their tool's argument size limit. Their partial
   // arguments stay in the reply; the caller refuses them instead of running them.
   const sizeCutToolCalls: string[] = [];
+  // Set when the reply started more calls than the stream reads; reading stops there.
+  let toolCallCountCut = false;
   const accumulatedThinking: ThinkingBlock[] = [];
   const thinkingByReasoningItem = new Map<string, ThinkingBlock>();
   let currentThinkingBlock: ThinkingBlock | null = null;
@@ -1958,6 +1961,14 @@ export async function* mapStreamToChunks({
       }
 
       case 'tool-input-start': {
+        if (nextToolIndex >= MAX_TOOL_CALL_STREAM_PARTS) {
+          // Past what any one reply may legitimately hold: stop reading here rather than
+          // buffering a flood the reply guard would refuse anyway, or waiting on a model that
+          // keeps writing calls until the turn's time limit. The reply is marked cut so the
+          // turn stops.
+          toolCallCountCut = true;
+          break streamLoop;
+        }
         const idx = nextToolIndex++;
         // A tool call is real output progress: the reasoning guard must not
         // mistake a turn that keeps acting for a stuck reasoning loop.
@@ -2226,6 +2237,7 @@ export async function* mapStreamToChunks({
       ? { repetition_stopped: true, repetition_stop: { guard: 'answer_units', channel: 'answer' } }
       : {}),
     ...(sizeCutToolCalls.length > 0 ? { size_cut_tool_calls: sizeCutToolCalls } : {}),
+    ...(toolCallCountCut ? { tool_call_count_cut: true } : {}),
   };
 }
 

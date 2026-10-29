@@ -374,14 +374,14 @@ function isTrackingPixelTag(tag: string): boolean {
 /** Longest image address kept; longer ones are dropped rather than cut. */
 const MAX_IMAGE_LINK_CHARS = 2048;
 
-/** The `src` value of one `<img ...>` tag; the name must stand alone, so `data-src` does not count. */
-function imageSource(tag: string): string | null {
+/** The value of one attribute of a tag; the name must stand alone, so `data-src` does not count as `src`. */
+function tagAttribute({ tag, name }: { tag: string; name: string }): string | null {
   const lower = tag.toLowerCase();
-  let at = lower.indexOf('src', 4);
+  let at = lower.indexOf(name, 4);
   while (at !== -1) {
     const before = lower[at - 1];
     if (before === ' ' || before === '\t' || before === '\n' || before === '\r' || before === '/') {
-      let cursor = at + 3;
+      let cursor = at + name.length;
       while (lower[cursor] === ' ' || lower[cursor] === '\t' || lower[cursor] === '\n' || lower[cursor] === '\r') {
         cursor += 1;
       }
@@ -409,21 +409,27 @@ function imageSource(tag: string): string | null {
         return tag.slice(cursor, end);
       }
     }
-    at = lower.indexOf('src', at + 3);
+    at = lower.indexOf(name, at + name.length);
   }
   return null;
 }
 
+/** One `<img>` of an HTML body: its web address and its alt text, when the tag gives one. */
+export interface HtmlImage {
+  url: string;
+  alt: string | undefined;
+}
+
 /**
- * The web addresses of an HTML body's `<img src>` tags, once each and in order, at most `max`. Inline
+ * The `<img>` tags of an HTML body with a web address, once each and in order, at most `max`. Inline
  * (`cid:`) and `data:` images are attachments, not links, and CSS backgrounds and `srcset` are not read.
  * Linear in the input like the rest of this module.
  */
-export function htmlImageLinks(input: { source: string; max: number }): string[] {
+export function htmlImages(input: { source: string; max: number }): HtmlImage[] {
   const html = input.source.length > MAX_HTML_CHARS ? input.source.slice(0, MAX_HTML_CHARS) : input.source;
-  const links: string[] = [];
+  const images: HtmlImage[] = [];
   let at = indexOfLower({ text: html, needle: '<img', from: 0 });
-  while (at !== -1 && links.length < input.max) {
+  while (at !== -1 && images.length < input.max) {
     const end = html.indexOf('>', at);
     if (end === -1) {
       break;
@@ -431,19 +437,26 @@ export function htmlImageLinks(input: { source: string; max: number }): string[]
     const tag = html.slice(at, end + 1);
     const boundary = tag.charCodeAt(4);
     if (!isNameChar(boundary)) {
-      const raw = imageSource(tag);
+      const raw = tagAttribute({ tag, name: 'src' });
       const link = raw === null ? '' : decodeEntities(raw).trim();
       if (
         /^https?:\/\//i.test(link) &&
         link.length <= MAX_IMAGE_LINK_CHARS &&
-        !links.includes(link) &&
+        !images.some(image => image.url === link) &&
         !isTrackingPixelTag(tag) &&
         !isTrackingImageLink(link)
       ) {
-        links.push(link);
+        const alt = tagAttribute({ tag, name: 'alt' });
+        const altText = alt === null ? '' : decodeEntities(alt).trim();
+        images.push({ url: link, alt: altText === '' ? undefined : altText });
       }
     }
     at = indexOfLower({ text: html, needle: '<img', from: end + 1 });
   }
-  return links;
+  return images;
+}
+
+/** The web addresses of an HTML body's `<img src>` tags, as `htmlImages` finds them. */
+export function htmlImageLinks(input: { source: string; max: number }): string[] {
+  return htmlImages(input).map(image => image.url);
 }

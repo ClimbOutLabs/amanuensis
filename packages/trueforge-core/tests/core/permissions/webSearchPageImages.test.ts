@@ -13,7 +13,10 @@ import {
 } from '../../../src/core/permissions/provenance';
 import {
   createWebSearchTurnState,
+  PAGE_PICTURES_LABEL,
   pageImageUrls,
+  pagePictures,
+  pagePicturesNote,
   recordToolResultProvenance,
 } from '../../../src/core/permissions/webSearch';
 
@@ -35,6 +38,48 @@ describe('pageImageUrls', () => {
 
   it('ignores data: pictures, which are not links out', () => {
     expect(pageImageUrls('<img src="data:image/png;base64,aaaa" alt="Inline">')).toEqual([]);
+  });
+});
+
+describe('pagePictures', () => {
+  it('keeps the words that describe a picture, from markdown pictures first and then img alts', () => {
+    expect(
+      pagePictures(
+        `![A red fox](${FOX_IMAGE})\n<img alt="Other &amp; more" src="https://upload.wikimedia.org/other.jpg">\n![](https://upload.wikimedia.org/plain.jpg)`,
+      ),
+    ).toEqual([
+      { url: FOX_IMAGE, alt: 'A red fox' },
+      { url: 'https://upload.wikimedia.org/plain.jpg', alt: undefined },
+      { url: 'https://upload.wikimedia.org/other.jpg', alt: 'Other & more' },
+    ]);
+  });
+});
+
+describe('pagePicturesNote', () => {
+  const PAGE = `# Dogs\n<img src="https://cdn.dogs.example/one.jpg" alt="Beagle">\n<img src="http://cdn.dogs.example/plain.jpg" alt="Plain">\n<img src="https://cdn.dogs.example/two.jpg">`;
+
+  it('lists the https pictures of a page read, with their words, and leaves http ones out', () => {
+    expect(pagePicturesNote({ tool_name: 'web_fetch', text: PAGE })).toBe(
+      `${PAGE_PICTURES_LABEL}:\n- https://cdn.dogs.example/one.jpg (Beagle)\n- https://cdn.dogs.example/two.jpg`,
+    );
+  });
+
+  it('is absent for a page with no pictures and for a tool that is not a page reader', () => {
+    expect(pagePicturesNote({ tool_name: 'web_fetch', text: '# Dogs\nNo pictures here.' })).toBeUndefined();
+    expect(pagePicturesNote({ tool_name: 'web_search', text: PAGE })).toBeUndefined();
+    expect(pagePicturesNote({ tool_name: 'some_tool', text: PAGE })).toBeUndefined();
+  });
+
+  it('works for a prefixed connector name and shows at most eight pictures, trimming long words', () => {
+    const many = Array.from(
+      { length: 12 },
+      (_, i) => `<img src="https://cdn.dogs.example/${String(i)}.jpg" alt="${'word '.repeat(60)}">`,
+    ).join('\n');
+    const note = pagePicturesNote({ tool_name: 'parallel__web_fetch', text: many });
+    expect(note).toBeDefined();
+    const lines = note?.split('\n').slice(1) ?? [];
+    expect(lines).toHaveLength(8);
+    expect(lines[0]).toBe(`- https://cdn.dogs.example/0.jpg (${'word '.repeat(60).trim().slice(0, 120)})`);
   });
 });
 
