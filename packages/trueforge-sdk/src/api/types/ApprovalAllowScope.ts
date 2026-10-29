@@ -2,8 +2,8 @@
 
 /** Omitted or once allows only this invocation; chat grants this exact tool for the current session; always allows this read-only connector tool for the caller until revoked. */
 export const ApprovalAllowScope = {
-        Once: "once",
-        Chat: "chat",
-        Always: "always"
-    } as const;
-export type ApprovalAllowScope = typeof ApprovalAllowScope[keyof typeof ApprovalAllowScope];
+    Once: "once",
+    Chat: "chat",
+    Always: "always",
+} as const;
+export type ApprovalAllowScope = (typeof ApprovalAllowScope)[keyof typeof ApprovalAllowScope];

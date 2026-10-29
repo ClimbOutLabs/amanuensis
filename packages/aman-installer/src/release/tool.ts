@@ -3,7 +3,8 @@ import { basename, join } from 'node:path';
 
 import { runVerify } from '../commands/verify.ts';
 import { SystemProcessRunner } from '../runner/processRunner.ts';
-import { buildManifest, manifestToBytes } from './manifest.ts';
+import { assembleManifests } from './assemble.ts';
+import { buildManifest, manifestToBytes, parseManifest, type ReleaseManifest } from './manifest.ts';
 import { signMinisign } from './minisign.ts';
 import { installerLibDir, sourceIdsFromCheckout } from './sourceIds.ts';
 
@@ -18,6 +19,19 @@ function flagValue(args: readonly string[], name: string): string | null {
   }
   const value = args[index + 1];
   return value ?? null;
+}
+
+function flagValues(args: readonly string[], name: string): string[] {
+  const values: string[] = [];
+  for (let index = 0; index < args.length; index += 1) {
+    if (args[index] === name) {
+      const value = args[index + 1];
+      if (value !== undefined) {
+        values.push(value);
+      }
+    }
+  }
+  return values;
 }
 
 function fail(line: string): number {
@@ -52,6 +66,55 @@ async function buildManifestCommand(args: readonly string[]): Promise<number> {
   const manifest = buildManifest({ release, files, sourceIds });
   await writeFile(out, manifestToBytes(manifest));
   console.log(`Wrote ${out} for release ${release} with ${String(files.length)} files.`);
+  return 0;
+}
+
+// Joins the per-system partial records into the one release record.
+// Every partial record must be a real record, they must all name the
+// same release and this checkout's images, and the joined record must
+// carry every system's build and the source archive, or the step
+// refuses and no record is written.
+async function assembleManifestCommand(args: readonly string[]): Promise<number> {
+  const partPaths = flagValues(args, '--part');
+  const release = flagValue(args, '--release');
+  const checkoutDir = flagValue(args, '--checkout');
+  const out = flagValue(args, '--out');
+  if (partPaths.length === 0 || checkoutDir === null || out === null) {
+    return fail('assemble-manifest needs --part once per partial record, --checkout and --out.');
+  }
+  const parts: ReleaseManifest[] = [];
+  for (const partPath of partPaths) {
+    let bytes: Uint8Array;
+    try {
+      bytes = new Uint8Array(await readFile(partPath));
+    } catch {
+      return fail(`A partial release record could not be read: ${partPath}`);
+    }
+    const part = parseManifest(bytes);
+    if (part === null) {
+      return fail(`A partial release record is not a release record: ${partPath}`);
+    }
+    parts.push(part);
+  }
+  const sourceIds = await sourceIdsFromCheckout({
+    runner: new SystemProcessRunner(),
+    checkoutDir,
+    libDir: installerLibDir(checkoutDir),
+  });
+  if (sourceIds === null) {
+    return fail('The shell could not work out the image names for this checkout.');
+  }
+  const assembled = assembleManifests({ parts, expectedSourceIds: sourceIds });
+  if ('problem' in assembled) {
+    return fail(assembled.problem);
+  }
+  if (release !== null && assembled.manifest.release !== release) {
+    return fail(`The partial records are for ${assembled.manifest.release}, not ${release}.`);
+  }
+  await writeFile(out, manifestToBytes(assembled.manifest));
+  console.log(
+    `Wrote ${out} for release ${assembled.manifest.release} with ${String(Object.keys(assembled.manifest.files).length)} files.`,
+  );
   return 0;
 }
 
@@ -96,11 +159,13 @@ const [command, ...rest] = process.argv.slice(2);
 let exitCode: number;
 if (command === 'build-manifest') {
   exitCode = await buildManifestCommand(rest);
+} else if (command === 'assemble-manifest') {
+  exitCode = await assembleManifestCommand(rest);
 } else if (command === 'sign') {
   exitCode = await signCommand(rest);
 } else if (command === 'verify') {
   exitCode = await verifyCommand(rest);
 } else {
-  exitCode = fail('The release tool knows build-manifest, sign and verify.');
+  exitCode = fail('The release tool knows build-manifest, assemble-manifest, sign and verify.');
 }
 process.exitCode = exitCode;

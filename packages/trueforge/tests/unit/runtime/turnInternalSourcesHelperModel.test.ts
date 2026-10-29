@@ -19,7 +19,7 @@ jest.mock('../../../src/personaKnowledge/knowledgeRelevanceJudge', () => ({
 
 const judgeFactory = jest.mocked(createKnowledgeRelevanceJudge);
 
-async function judgeModelFor({ personaModel, helperFqn }: { personaModel: string; helperFqn: string | undefined }) {
+async function judgeModelFor(personaModel: string) {
   judgeFactory.mockClear();
   const db = createSqliteDb(':memory:');
   await migrateSqliteToLatest(db);
@@ -52,7 +52,6 @@ async function judgeModelFor({ personaModel, helperFqn }: { personaModel: string
     modelProviderStore: new SqliteModelProviderStore(db),
     tokenFactoryBudget: uncappedTokenFactoryBudget,
     modelUsage: discardedModelUsage,
-    helperFqn,
     logger: createLogger({ silent: true }),
   });
   await db.destroy();
@@ -60,15 +59,13 @@ async function judgeModelFor({ personaModel, helperFqn }: { personaModel: string
 }
 
 describe('library check model', () => {
-  const helperFqn = 'tokenfactory/nvidia-nemotron-3-nano-30b-a3b';
-
-  it('uses the small model when the persona answers on Token Factory', async () => {
-    await expect(judgeModelFor({ personaModel: 'tokenfactory/nemotron-3-super-120b-a12b', helperFqn })).resolves.toBe(
-      helperFqn,
+  it('uses the persona model when it answers on Token Factory', async () => {
+    await expect(judgeModelFor('tokenfactory/nemotron-3-super-120b-a12b')).resolves.toBe(
+      'tokenfactory/nemotron-3-super-120b-a12b',
     );
   });
 
-  it('keeps the persona model when it is local', async () => {
-    await expect(judgeModelFor({ personaModel: 'host/qwen', helperFqn })).resolves.toBe('host/qwen');
+  it('uses the persona model when it is local', async () => {
+    await expect(judgeModelFor('host/qwen')).resolves.toBe('host/qwen');
   });
 });

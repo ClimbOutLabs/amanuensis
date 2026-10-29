@@ -18,7 +18,6 @@ export interface TokenFactorySettings {
   apiKey: string | undefined;
   baseUrl: string;
   model: string;
-  cheaperModel: string | undefined;
 }
 
 /** Model resource names are hyphen-only, so `org/Model_Name` becomes `model-name`. */
@@ -46,19 +45,15 @@ export function envManagedModelProviderNames(options: {
     : new Set();
 }
 
-/** The `tokenfactory` manifest for the env settings: default model first, optional cheaper model second. */
+/** The `tokenfactory` manifest for the env settings: the default model only. */
 export function buildEnvManagedTokenFactoryManifest(
   settings: TokenFactorySettings & { apiKey: string },
 ): ModelProviderManifest {
-  const modelIds =
-    settings.cheaperModel === undefined || settings.cheaperModel === settings.model
-      ? [settings.model]
-      : [settings.model, settings.cheaperModel];
   return {
     type: 'tokenfactory',
     base_url: settings.baseUrl,
     auth: { api_key: settings.apiKey },
-    models: modelIds.map(modelId => ({ model_id: modelId, name: tokenFactoryModelName(modelId), properties: {} })),
+    models: [{ model_id: settings.model, name: tokenFactoryModelName(settings.model), properties: {} }],
   };
 }
 

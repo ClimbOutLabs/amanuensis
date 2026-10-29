@@ -5,54 +5,46 @@ import { TrueForge } from "../../src/Client";
 import { mockServerPool } from "../mock-server/MockServerPool";
 
 describe("AuthClient", () => {
-    
     test("me (1)", async () => {
         const server = mockServerPool.createServer();
-        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
-        
-        const rawResponseBody = { "data" : { "roles" : [ "roles" ] , "subject" : { "display_name" : "display_name" , "id" : "id" , "type" : "type" } , "tenant_id" : "tenant_id" , "type" : "default" } };
-        
-        server
-            .mockEndpoint()
-            .get("/api/v1/auth/me").respondWith()
-            .statusCode(200).jsonBody(rawResponseBody)
-                .build();
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
 
-        
-                        
-                                const response = await client.auth.me();
-                                expect(response).toEqual({
-    data: {
-        roles: ["roles"],
-        subject: {
-            displayName: "display_name",
-            id: "id",
-            type: "type"
-        },
-        tenantId: "tenant_id",
-        type: "default"
-    }
-});
-                              
-                    
+        const rawResponseBody = {
+            data: {
+                roles: ["roles"],
+                subject: { display_name: "display_name", id: "id", type: "type" },
+                tenant_id: "tenant_id",
+                type: "default",
+            },
+        };
+
+        server.mockEndpoint().get("/api/v1/auth/me").respondWith().statusCode(200).jsonBody(rawResponseBody).build();
+
+        const response = await client.auth.me();
+        expect(response).toEqual({
+            data: {
+                roles: ["roles"],
+                subject: {
+                    displayName: "display_name",
+                    id: "id",
+                    type: "type",
+                },
+                tenantId: "tenant_id",
+                type: "default",
+            },
+        });
     });
-          
+
     test("me (2)", async () => {
         const server = mockServerPool.createServer();
-        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
-        
-        const rawResponseBody = { "error" : { "message" : "message" } };
-        
-        server
-            .mockEndpoint()
-            .get("/api/v1/auth/me").respondWith()
-            .statusCode(401).jsonBody(rawResponseBody)
-                .build();
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
 
-        
-            await expect(async () => {
-                return await client.auth.me()
-            }).rejects.toThrow(TrueForgeTypes.UnauthorizedError);
+        const rawResponseBody = { error: { message: "message" } };
+
+        server.mockEndpoint().get("/api/v1/auth/me").respondWith().statusCode(401).jsonBody(rawResponseBody).build();
+
+        await expect(async () => {
+            return await client.auth.me();
+        }).rejects.toThrow(TrueForgeTypes.UnauthorizedError);
     });
-          
 });

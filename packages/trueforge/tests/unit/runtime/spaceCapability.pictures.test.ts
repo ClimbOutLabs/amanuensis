@@ -392,6 +392,29 @@ describe('page reads, scripts, and empty bodies', () => {
     expect(stringField(created, 'body')).toContain(COLLIE_URL);
   });
 
+  it('accepts a page picture only as a picture, never as a link', async () => {
+    const webSearch = createWebSearchTurnState();
+    recordPageImageUrls({ provenance: webSearch.provenance, urls: [COLLIE_URL] });
+    for (const body of [`<img src="${COLLIE_URL}" alt="Collie">`, `![Collie](${COLLIE_URL})`]) {
+      const call = setup(webSearch);
+      const created = fieldObject(parsedObject(textOf(await call(CREATE_SPACE_TOOL_NAME, createArgs(body)))), 'space');
+      expect(stringField(created, 'body')).toContain(COLLIE_URL);
+    }
+    for (const body of [`<a href="${COLLIE_URL}">Collie</a>`, `[Collie](${COLLIE_URL})`]) {
+      const response = await setup(webSearch)(CREATE_SPACE_TOOL_NAME, createArgs(body));
+      expect(isErrorResponse(response)).toBe(true);
+      expect(await errorOf(response)).toContain('link did not come from the person or a search');
+    }
+  });
+
+  it('keeps a search result usable as a link and a picture', async () => {
+    const webSearch = createWebSearchTurnState();
+    recordSearchResults({ provenance: webSearch.provenance, texts: [searchResult([COLLIE_URL])] });
+    for (const body of [`<img src="${COLLIE_URL}" alt="Collie">`, `<a href="${COLLIE_URL}">Collie</a>`]) {
+      expect(isErrorResponse(await setup(webSearch)(CREATE_SPACE_TOOL_NAME, createArgs(body)))).toBe(false);
+    }
+  });
+
   it('refuses an external script source with the scripts-never-run guidance', async () => {
     const call = setup(createWebSearchTurnState());
     const response = await call(CREATE_SPACE_TOOL_NAME, {

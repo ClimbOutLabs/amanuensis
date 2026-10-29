@@ -5,111 +5,154 @@ import { TrueForge } from "../../src/Client";
 import { mockServerPool } from "../mock-server/MockServerPool";
 
 describe("ServerClient", () => {
-    
     test("get_capabilities (1)", async () => {
         const server = mockServerPool.createServer();
-        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
-        
-        const rawResponseBody = { "data" : { "build" : { "ref" : "ref" , "version" : "version" } , "memory_defaults" : { "backend" : "markdown" , "curated_enabled" : true , "curated_max_models" : 1 , "curated_max_tokens" : 1 , "markdown_dir" : "markdown_dir" , "prerecall_gate_enabled" : true , "recall_max_entities" : 1 , "recall_max_items" : 1 , "recall_min_score" : 1.1 , "recall_query_window" : 1 , "recall_timeout_ms" : 1 , "reflect_budget" : "low" , "reflect_enabled" : true , "reflect_max_tokens" : 1 , "reflect_timeout_ms" : 1 } , "memory_embeddings" : { "detail" : "detail" , "enabled" : true , "indexed_entries" : 1 , "state" : "starting" } , "memory_screen" : { "configured" : true , "enabled" : true , "reason" : "reason" , "threshold" : 1.1 } , "sandbox" : { "enabled" : true } , "sandbox_isolation" : { "cosign_key_configured" : true , "default_timeout_seconds" : 1 , "disk_mb" : 1 , "image" : "image" , "image_pull_timeout_seconds" : 1 , "isolation_driver" : "docker" , "max_timeout_seconds" : 1 , "memory_mb" : 1 , "network_egress" : true , "stdout_stderr_cap_kb" : 1 } , "settings" : { "enabled" : true } , "skill" : { "enabled" : true , "reason" : "reason" } , "tool_output_screen" : { "configured" : true , "enabled" : true , "reason" : "reason" , "threshold" : 1.1 , "timeout_ms" : 1 } , "voice" : { "enabled" : true } } };
-        
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
+
+        const rawResponseBody = {
+            data: {
+                build: { ref: "ref", version: "version" },
+                memory_defaults: {
+                    backend: "markdown",
+                    curated_enabled: true,
+                    curated_max_models: 1,
+                    curated_max_tokens: 1,
+                    markdown_dir: "markdown_dir",
+                    prerecall_gate_enabled: true,
+                    recall_max_entities: 1,
+                    recall_max_items: 1,
+                    recall_min_score: 1.1,
+                    recall_query_window: 1,
+                    recall_timeout_ms: 1,
+                    reflect_budget: "low",
+                    reflect_enabled: true,
+                    reflect_max_tokens: 1,
+                    reflect_timeout_ms: 1,
+                },
+                memory_embeddings: { detail: "detail", enabled: true, indexed_entries: 1, state: "starting" },
+                memory_screen: { configured: true, enabled: true, reason: "reason", threshold: 1.1 },
+                sandbox: { enabled: true },
+                sandbox_isolation: {
+                    cosign_key_configured: true,
+                    default_timeout_seconds: 1,
+                    disk_mb: 1,
+                    image: "image",
+                    image_pull_timeout_seconds: 1,
+                    isolation_driver: "docker",
+                    max_timeout_seconds: 1,
+                    memory_mb: 1,
+                    network_egress: true,
+                    stdout_stderr_cap_kb: 1,
+                },
+                settings: { enabled: true },
+                skill: { enabled: true, reason: "reason" },
+                tool_output_screen: {
+                    configured: true,
+                    enabled: true,
+                    reason: "reason",
+                    threshold: 1.1,
+                    timeout_ms: 1,
+                },
+                voice: { enabled: true },
+            },
+        };
+
         server
             .mockEndpoint()
-            .get("/api/v1/capabilities").respondWith()
-            .statusCode(200).jsonBody(rawResponseBody)
-                .build();
+            .get("/api/v1/capabilities")
+            .respondWith()
+            .statusCode(200)
+            .jsonBody(rawResponseBody)
+            .build();
 
-        
-                        
-                                const response = await client.server.getCapabilities();
-                                expect(response).toEqual({
-    data: {
-        build: {
-            ref: "ref",
-            version: "version"
-        },
-        memoryDefaults: {
-            backend: "markdown",
-            curatedEnabled: true,
-            curatedMaxModels: 1,
-            curatedMaxTokens: 1,
-            markdownDir: "markdown_dir",
-            prerecallGateEnabled: true,
-            recallMaxEntities: 1,
-            recallMaxItems: 1,
-            recallMinScore: 1.1,
-            recallQueryWindow: 1,
-            recallTimeoutMs: 1,
-            reflectBudget: "low",
-            reflectEnabled: true,
-            reflectMaxTokens: 1,
-            reflectTimeoutMs: 1
-        },
-        memoryEmbeddings: {
-            detail: "detail",
-            enabled: true,
-            indexedEntries: 1,
-            state: "starting"
-        },
-        memoryScreen: {
-            configured: true,
-            enabled: true,
-            reason: "reason",
-            threshold: 1.1
-        },
-        sandbox: {
-            enabled: true
-        },
-        sandboxIsolation: {
-            cosignKeyConfigured: true,
-            defaultTimeoutSeconds: 1,
-            diskMb: 1,
-            image: "image",
-            imagePullTimeoutSeconds: 1,
-            isolationDriver: "docker",
-            maxTimeoutSeconds: 1,
-            memoryMb: 1,
-            networkEgress: true,
-            stdoutStderrCapKb: 1
-        },
-        settings: {
-            enabled: true
-        },
-        skill: {
-            enabled: true,
-            reason: "reason"
-        },
-        toolOutputScreen: {
-            configured: true,
-            enabled: true,
-            reason: "reason",
-            threshold: 1.1,
-            timeoutMs: 1
-        },
-        voice: {
-            enabled: true
-        }
-    }
-});
-                              
-                    
+        const response = await client.server.getCapabilities();
+        expect(response).toEqual({
+            data: {
+                build: {
+                    ref: "ref",
+                    version: "version",
+                },
+                memoryDefaults: {
+                    backend: "markdown",
+                    curatedEnabled: true,
+                    curatedMaxModels: 1,
+                    curatedMaxTokens: 1,
+                    markdownDir: "markdown_dir",
+                    prerecallGateEnabled: true,
+                    recallMaxEntities: 1,
+                    recallMaxItems: 1,
+                    recallMinScore: 1.1,
+                    recallQueryWindow: 1,
+                    recallTimeoutMs: 1,
+                    reflectBudget: "low",
+                    reflectEnabled: true,
+                    reflectMaxTokens: 1,
+                    reflectTimeoutMs: 1,
+                },
+                memoryEmbeddings: {
+                    detail: "detail",
+                    enabled: true,
+                    indexedEntries: 1,
+                    state: "starting",
+                },
+                memoryScreen: {
+                    configured: true,
+                    enabled: true,
+                    reason: "reason",
+                    threshold: 1.1,
+                },
+                sandbox: {
+                    enabled: true,
+                },
+                sandboxIsolation: {
+                    cosignKeyConfigured: true,
+                    defaultTimeoutSeconds: 1,
+                    diskMb: 1,
+                    image: "image",
+                    imagePullTimeoutSeconds: 1,
+                    isolationDriver: "docker",
+                    maxTimeoutSeconds: 1,
+                    memoryMb: 1,
+                    networkEgress: true,
+                    stdoutStderrCapKb: 1,
+                },
+                settings: {
+                    enabled: true,
+                },
+                skill: {
+                    enabled: true,
+                    reason: "reason",
+                },
+                toolOutputScreen: {
+                    configured: true,
+                    enabled: true,
+                    reason: "reason",
+                    threshold: 1.1,
+                    timeoutMs: 1,
+                },
+                voice: {
+                    enabled: true,
+                },
+            },
+        });
     });
-          
+
     test("get_capabilities (2)", async () => {
         const server = mockServerPool.createServer();
-        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
-        
-        const rawResponseBody = { "error" : { "message" : "message" } };
-        
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
+
+        const rawResponseBody = { error: { message: "message" } };
+
         server
             .mockEndpoint()
-            .get("/api/v1/capabilities").respondWith()
-            .statusCode(401).jsonBody(rawResponseBody)
-                .build();
+            .get("/api/v1/capabilities")
+            .respondWith()
+            .statusCode(401)
+            .jsonBody(rawResponseBody)
+            .build();
 
-        
-            await expect(async () => {
-                return await client.server.getCapabilities()
-            }).rejects.toThrow(TrueForgeTypes.UnauthorizedError);
+        await expect(async () => {
+            return await client.server.getCapabilities();
+        }).rejects.toThrow(TrueForgeTypes.UnauthorizedError);
     });
-          
 });

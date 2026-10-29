@@ -38,3 +38,16 @@ test('the doctor inputs follow their environment settings', () => {
   assert.equal(config.dockerConfigDir, '/data/docker');
   assert.equal(config.appService, 'web');
 });
+
+test('the windows folder root is the AppData Local folder Windows would name', () => {
+  const config = installerConfig({ env: {}, homeDir: '/home/person' });
+  assert.equal(config.localAppDataDir, '/home/person/AppData/Local');
+});
+
+test('the windows folder root follows LOCALAPPDATA when Windows names it', () => {
+  const config = installerConfig({
+    env: { LOCALAPPDATA: 'C:\\Users\\Friend\\AppData\\Local' },
+    homeDir: 'C:\\Users\\Friend',
+  });
+  assert.equal(config.localAppDataDir, 'C:\\Users\\Friend\\AppData\\Local');
+});

@@ -183,6 +183,7 @@ import {
   CALENDAR_PASSWORD_PROMPT,
   CHECK_BEFORE_ASKING_PROMPT,
   createSourceDiscoveryContract,
+  DEMO_EMAIL_PROMPT,
   EMAIL_PASSWORD_PROMPT,
   EMPTY_ANSWER_NUDGE_MESSAGE,
   emptyInspectionNudgeMessage,
@@ -2031,6 +2032,9 @@ export class AgentThread {
     capabilities.addSection('plain-speech', PLAIN_SPEECH_PROMPT);
     if (this.definition.setUpConnectorNames?.includes(MAIL_CONNECTOR_NAME)) {
       capabilities.addSection('email-passwords', EMAIL_PASSWORD_PROMPT);
+      if (this.sentinel?.services.demoSendAllowlist != null) {
+        capabilities.addSection('demo-email', DEMO_EMAIL_PROMPT);
+      }
     }
     if (this.definition.setUpConnectorNames?.includes(CALDAV_SERVER_NAME)) {
       capabilities.addSection('calendar-passwords', CALENDAR_PASSWORD_PROMPT);

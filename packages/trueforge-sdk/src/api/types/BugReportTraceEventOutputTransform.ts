@@ -2,7 +2,8 @@
 
 /** Host transformation applied to the result text: `truncated` cut it, `replaced` swapped it for guidance. */
 export const BugReportTraceEventOutputTransform = {
-        Truncated: "truncated",
-        Replaced: "replaced"
-    } as const;
-export type BugReportTraceEventOutputTransform = typeof BugReportTraceEventOutputTransform[keyof typeof BugReportTraceEventOutputTransform];
+    Truncated: "truncated",
+    Replaced: "replaced",
+} as const;
+export type BugReportTraceEventOutputTransform =
+    (typeof BugReportTraceEventOutputTransform)[keyof typeof BugReportTraceEventOutputTransform];

@@ -29,6 +29,8 @@ export interface ChatProvenance {
   trusted: ProvenanceValues;
   /** Seen in content the assistant read: web pages, mail (headers too), files, tool output, earlier summaries. */
   untrusted: ProvenanceValues;
+  /** Exact picture URLs from pages the chat opened. Pictures only: never a link, and never steering-trusted. */
+  page_pictures: ProvenanceValues;
   /** Where each address (`address:`) and site (`site:`) on the read side was first read, so a card can say so. */
   read_from: Map<string, ReadOrigin>;
   /** The person's own details seen in this chat: addresses and phone numbers from their words, mail and events. */
@@ -53,6 +55,7 @@ export function emptyChatProvenance(): ChatProvenance {
   return {
     trusted: emptyValues(),
     untrusted: emptyValues(),
+    page_pictures: emptyValues(),
     read_from: new Map(),
     own_details: new Set(),
     own_details_overflowed: false,
@@ -405,13 +408,16 @@ export function recordSearchResults(input: { provenance: ChatProvenance; texts: 
 }
 
 /**
- * Picture links from a page the chat opened: opening the page saw them, so a space may use a
- * picture file no search result named. Only the page's own pictures count; a link the page
- * merely points at is not a picture on it.
+ * Picture links from a page the chat opened: opening the page saw them, so a space may show a
+ * picture file no search result named. A page can name any URL as a picture, so these are kept
+ * apart from trusted links and never vouch for a link, a site or a destination.
  */
 export function recordPageImageUrls(input: { provenance: ChatProvenance; urls: readonly string[] }): void {
   for (const url of input.urls) {
-    recordUrl(input.provenance.trusted, url);
+    const key = urlKey(url);
+    if (key !== undefined) {
+      add({ side: input.provenance.page_pictures, kind: 'urls', value: key });
+    }
   }
 }
 
@@ -515,6 +521,12 @@ export function steeredDestinations(input: {
 export function isTrustedLink(input: { provenance: ChatProvenance; url: string }): boolean {
   const key = urlKey(input.url);
   return key !== undefined && input.provenance.trusted.urls.has(key);
+}
+
+/** Whether a picture may be shown: a trusted link, or exactly a picture a page the chat opened contained. */
+export function isTrustedPicture(input: { provenance: ChatProvenance; url: string }): boolean {
+  const key = urlKey(input.url);
+  return isTrustedLink(input) || (key !== undefined && input.provenance.page_pictures.urls.has(key));
 }
 
 /** Whether this chat has read content that is not the person's own words. */

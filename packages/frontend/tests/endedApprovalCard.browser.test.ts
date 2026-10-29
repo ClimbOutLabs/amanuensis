@@ -11,6 +11,7 @@ import { startApprovalTestServer, type ApprovalTestServer } from '../../trueforg
 import { inProcessApi, pausedSession, waitingCallIds } from './support/approvalChat.ts';
 import { findChromiumExecutable } from './support/findChromiumExecutable.ts';
 import { screenshotDir } from './support/screenshotDir.ts';
+import { privateViteCache } from './support/viteCache.ts';
 
 const RENDER_TIMEOUT_MS = 45_000;
 const ENDED_NOTE = 'This request ended. Ask again if you still need it.';
@@ -94,7 +95,9 @@ async function assertNotWaitingAfterReload(page: Page, name: string): Promise<vo
 
 test('an ended approval card can be cleared but never run', { timeout: 600_000 }, async () => {
   const api = await startApprovalTestServer();
+  const viteCache = privateViteCache('ended-approval-card');
   const vite = await createServer({
+    cacheDir: viteCache.cacheDir,
     root: fileURLToPath(new URL('../', import.meta.url)),
     logLevel: 'error',
     plugins: [inProcessApi(api)],
@@ -177,6 +180,7 @@ test('an ended approval card can be cleared but never run', { timeout: 600_000 }
   } finally {
     await browser?.close();
     await vite.close();
+    viteCache.remove();
     await api.close();
   }
 });
