@@ -2,8 +2,9 @@
 
 /** needs_reconnect: Google no longer accepts the stored login; connect again. */
 export const GoogleConnectionStatusState = {
-        NotConnected: "not_connected",
-        Connected: "connected",
-        NeedsReconnect: "needs_reconnect"
-    } as const;
-export type GoogleConnectionStatusState = typeof GoogleConnectionStatusState[keyof typeof GoogleConnectionStatusState];
+    NotConnected: "not_connected",
+    Connected: "connected",
+    NeedsReconnect: "needs_reconnect",
+} as const;
+export type GoogleConnectionStatusState =
+    (typeof GoogleConnectionStatusState)[keyof typeof GoogleConnectionStatusState];

@@ -5,9 +5,12 @@ import { test } from 'node:test';
 
 import { runCli } from '../src/cli.ts';
 import { FakeHost } from '../src/host/fakeHost.ts';
+import { FakeWindowsJobs } from '../src/host/fakeWindowsJobs.ts';
 import {
+  ADOPT_NOT_WINDOWS,
   HELP_LINES,
   NOT_INSTALLED,
+  OPEN_NOT_WINDOWS,
   problemText,
   UNKNOWN_DOCTOR_CHECK,
   unknownCommandProblem,
@@ -42,6 +45,13 @@ function makeCli(answers: Map<string, ProcessResult>) {
     osReleasePath: join(home, 'os-release'),
     dockerConfigDir: join(home, '.docker'),
     appService: 'app',
+    windowsJobs: new FakeWindowsJobs({
+      localAppDataDir: 'C:\\Users\\Friend\\AppData\\Local',
+      selfExePath: 'C:\\Users\\Friend\\Downloads\\aman-windows-x64.exe',
+      startMenuProgramsDir: 'C:\\Users\\Friend\\AppData\\Roaming\\Microsoft\\Windows\\Start Menu\\Programs',
+    }),
+    probeHealth: () => Promise.resolve(false),
+    sleep: () => Promise.resolve(),
   };
   return { deps, printed };
 }
@@ -165,4 +175,18 @@ test('upgrade refuses plainly where it cannot run', async () => {
   const exitCode = await runCli(['upgrade'], deps);
   assert.equal(exitCode, 1);
   assert.deepEqual(printed, [problemText(UPGRADE_NOT_WINDOWS)]);
+});
+
+test('adopt on a computer that is not Windows refuses with its problem', async () => {
+  const { deps, printed } = makeCli(new Map());
+  const exitCode = await runCli(['adopt'], deps);
+  assert.equal(exitCode, 1);
+  assert.deepEqual(printed, [problemText(ADOPT_NOT_WINDOWS)]);
+});
+
+test('open on a computer that is not Windows refuses with its problem', async () => {
+  const { deps, printed } = makeCli(new Map());
+  const exitCode = await runCli(['open'], deps);
+  assert.equal(exitCode, 1);
+  assert.deepEqual(printed, [problemText(OPEN_NOT_WINDOWS)]);
 });

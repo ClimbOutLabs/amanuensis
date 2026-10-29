@@ -24,6 +24,8 @@ export const HELP_LINES: readonly string[] = [
   'Run aman doctor to check this computer and each instance.',
   'Run aman doctor docker to check that Docker is ready for Aman.',
   'Run aman status to see what is installed and whether it is running.',
+  'Run aman adopt to move a PC set up with Aman Setup onto the aman command.',
+  'Run aman open to open Aman in your browser.',
   'Run aman upgrade to update Aman on Windows to the newest version.',
   'Run aman verify and name a downloaded file to check it against its signed release record.',
 ];
@@ -202,6 +204,91 @@ export function statusInstanceLine(name: string, state: InstanceState, address: 
 
 export const NO_INSTANCES_LINE = 'No instance has been made yet.';
 
+// The line the plan gives the adopt moment: the install was already on
+// the PC, the upgrade that led here updated it, and nothing was lost.
+export const ADOPTED_LINE = 'Aman is already on this PC. It is updated, and your chats are kept.';
+
+export const ADOPT_NOT_WINDOWS: Problem = {
+  happened: 'This computer was not set up with the Aman Setup download, so there is nothing to adopt.',
+  fix: 'Run aman status to see what is installed on this computer.',
+};
+
+export const ADOPT_NOT_INSTALLED: Problem = {
+  happened: 'Aman is not installed on this computer yet.',
+  fix: 'Install Aman with the Aman Setup download first, then run aman adopt again.',
+};
+
+export const ADOPT_DOCKER_NOT_ANSWERING: Problem = {
+  happened: 'Docker is not answering, so the record of what is installed could not be read.',
+  fix: 'Open Docker Desktop from the Start menu, then run aman adopt again.',
+};
+
+export const ADOPT_IMAGE_UNAVAILABLE: Problem = {
+  happened: 'Docker could not download the small helper it needs to read the record of what is installed.',
+  fix: 'Check your internet connection, then run aman adopt again.',
+};
+
+export const ADOPT_STATE_UNREADABLE: Problem = {
+  happened: 'The record of what is installed could not be read.',
+  fix: 'Run aman doctor to find what is wrong, then run aman adopt again.',
+};
+
+export const ADOPT_SETUP_FAILED: Problem = {
+  happened: 'Aman could not finish moving this install onto the aman command.',
+  fix: 'Run aman adopt again, and if it fails again, run aman doctor.',
+};
+
+export const OPEN_NOT_WINDOWS: Problem = {
+  happened: 'This computer was not set up with the Aman Setup download, so aman open has nothing to open.',
+  fix: 'Run aman status to see what is installed on this computer.',
+};
+
+export const OPEN_NOT_INSTALLED: Problem = {
+  happened: 'Aman is not installed on this computer yet.',
+  fix: 'Install Aman with the Aman Setup download first, then run aman open again.',
+};
+
+export const OPEN_DOCKER_MISSING: Problem = {
+  happened: 'Docker Desktop is not installed on this computer.',
+  fix: 'Install Docker Desktop from its website, then run aman open again.',
+};
+
+export const OPEN_DOCKER_DID_NOT_START: Problem = {
+  happened: 'Docker Desktop did not start.',
+  fix: 'Open Docker Desktop from the Start menu, wait until it says it is running, then run aman open again.',
+};
+
+export const OPEN_IMAGE_UNAVAILABLE: Problem = {
+  happened: 'Docker could not download the small helper it needs to read the record of what is installed.',
+  fix: 'Check your internet connection, then run aman open again.',
+};
+
+export const OPEN_STATE_UNREADABLE: Problem = {
+  happened: 'The record of what is installed could not be read.',
+  fix: 'Run aman doctor to find what is wrong, then run aman open again.',
+};
+
+export const OPEN_ADDRESS_MISSING: Problem = {
+  happened: 'The record of what is installed does not say where Aman answers on this computer.',
+  fix: 'Run aman doctor to find what is wrong, then run aman open again.',
+};
+
+export const OPEN_DID_NOT_ANSWER: Problem = {
+  happened: 'Aman did not start answering on this computer.',
+  fix: 'Run aman doctor to find what is wrong, then run aman open again.',
+};
+
+export function openReadyLine(address: string): string {
+  return `Aman is open in your browser at ${printable(address)}.`;
+}
+
+export function openBrowserFailedProblem(address: string): Problem {
+  return {
+    happened: 'Aman is running, but the browser did not open on its own.',
+    fix: `Open your browser and go to ${printable(address)} to use Aman.`,
+  };
+}
+
 export const VERIFY_USAGE: Problem = {
   happened: 'aman verify needs the name of the downloaded file to check.',
   fix: 'Run aman verify again and name the file you downloaded from the release page.',
@@ -295,6 +382,24 @@ export const UPGRADE_REPLACE_FAILED: Problem = {
   fix: 'Close any Aman window that is open, then run Update Aman from the Start menu again.',
 };
 
+// The swap's last step: the checked new program could not be renamed
+// over the old one, the old one is back in place, and the new one stays
+// in the program folder under its staging name, where the next upgrade
+// writes over it.
+export const UPGRADE_NEW_PROGRAM_WAITING: Problem = {
+  happened:
+    'The new Aman program passed its checks but could not be moved into place, so it stays in the Aman program folder as aman.exe.new and your Aman is unchanged.',
+  fix: 'Run Update Aman from the Start menu again.',
+};
+
+// The worse end of the same step: the old program could not be put back
+// either. The kept old copy is still in the folder, and the first step
+// of every start puts it back, which is the fix this problem names.
+export const UPGRADE_OLD_PROGRAM_NOT_BACK: Problem = {
+  happened: 'The new Aman program could not be moved into place, and the old program could not be put back.',
+  fix: 'Run the Aman Setup file again, and its first step will put the old program back.',
+};
+
 export const UPGRADE_SOURCE_FAILED: Problem = {
   happened: 'The new Aman program is in place, but the update itself did not finish.',
   fix: 'Run Update Aman from the Start menu again to finish the update.',
@@ -371,6 +476,23 @@ export function allMessageLines(): string[] {
   lines.push(statusInstanceLine('main', 'stopped', null));
   lines.push(statusInstanceLine('main', 'unknown', null));
   lines.push(NO_INSTANCES_LINE);
+  lines.push(ADOPTED_LINE);
+  lines.push(problemText(ADOPT_NOT_WINDOWS));
+  lines.push(problemText(ADOPT_NOT_INSTALLED));
+  lines.push(problemText(ADOPT_DOCKER_NOT_ANSWERING));
+  lines.push(problemText(ADOPT_IMAGE_UNAVAILABLE));
+  lines.push(problemText(ADOPT_STATE_UNREADABLE));
+  lines.push(problemText(ADOPT_SETUP_FAILED));
+  lines.push(problemText(OPEN_NOT_WINDOWS));
+  lines.push(problemText(OPEN_NOT_INSTALLED));
+  lines.push(problemText(OPEN_DOCKER_MISSING));
+  lines.push(problemText(OPEN_DOCKER_DID_NOT_START));
+  lines.push(problemText(OPEN_IMAGE_UNAVAILABLE));
+  lines.push(problemText(OPEN_STATE_UNREADABLE));
+  lines.push(problemText(OPEN_ADDRESS_MISSING));
+  lines.push(problemText(OPEN_DID_NOT_ANSWER));
+  lines.push(openReadyLine('http://127.0.0.1:8791'));
+  lines.push(problemText(openBrowserFailedProblem('http://127.0.0.1:8791')));
   lines.push(problemText(VERIFY_USAGE));
   lines.push(problemText(VERIFY_MANIFEST_MISSING));
   lines.push(problemText(VERIFY_SIGNATURE_MISSING));
@@ -388,6 +510,8 @@ export function allMessageLines(): string[] {
   lines.push(problemText(upgradeNotReadyProblem('Run aman doctor')));
   lines.push(problemText(UPGRADE_SMOKE_FAILED));
   lines.push(problemText(UPGRADE_REPLACE_FAILED));
+  lines.push(problemText(UPGRADE_NEW_PROGRAM_WAITING));
+  lines.push(problemText(UPGRADE_OLD_PROGRAM_NOT_BACK));
   lines.push(problemText(UPGRADE_SOURCE_FAILED));
   lines.push(problemText(UPGRADE_DOCKER_NOT_ANSWERING));
   lines.push(problemText(UPGRADE_BUSY));

@@ -4,6 +4,8 @@ Run aman --version to see which version this is.
 Run aman doctor to check this computer and each instance.
 Run aman doctor docker to check that Docker is ready for Aman.
 Run aman status to see what is installed and whether it is running.
+Run aman adopt to move a PC set up with Aman Setup onto the aman command.
+Run aman open to open Aman in your browser.
 Run aman upgrade to update Aman on Windows to the newest version.
 Run aman verify and name a downloaded file to check it against its signed release record.
 Docker is not installed on this computer. Install Docker Desktop from its website, then run this check again.
@@ -42,6 +44,23 @@ Instance main is partly running at http://127.0.0.1:8791.
 Instance main is stopped.
 Instance main: whether it is running is unknown.
 No instance has been made yet.
+Aman is already on this PC. It is updated, and your chats are kept.
+This computer was not set up with the Aman Setup download, so there is nothing to adopt. Run aman status to see what is installed on this computer.
+Aman is not installed on this computer yet. Install Aman with the Aman Setup download first, then run aman adopt again.
+Docker is not answering, so the record of what is installed could not be read. Open Docker Desktop from the Start menu, then run aman adopt again.
+Docker could not download the small helper it needs to read the record of what is installed. Check your internet connection, then run aman adopt again.
+The record of what is installed could not be read. Run aman doctor to find what is wrong, then run aman adopt again.
+Aman could not finish moving this install onto the aman command. Run aman adopt again, and if it fails again, run aman doctor.
+This computer was not set up with the Aman Setup download, so aman open has nothing to open. Run aman status to see what is installed on this computer.
+Aman is not installed on this computer yet. Install Aman with the Aman Setup download first, then run aman open again.
+Docker Desktop is not installed on this computer. Install Docker Desktop from its website, then run aman open again.
+Docker Desktop did not start. Open Docker Desktop from the Start menu, wait until it says it is running, then run aman open again.
+Docker could not download the small helper it needs to read the record of what is installed. Check your internet connection, then run aman open again.
+The record of what is installed could not be read. Run aman doctor to find what is wrong, then run aman open again.
+The record of what is installed does not say where Aman answers on this computer. Run aman doctor to find what is wrong, then run aman open again.
+Aman did not start answering on this computer. Run aman doctor to find what is wrong, then run aman open again.
+Aman is open in your browser at http://127.0.0.1:8791.
+Aman is running, but the browser did not open on its own. Open your browser and go to http://127.0.0.1:8791 to use Aman.
 aman verify needs the name of the downloaded file to check. Run aman verify again and name the file you downloaded from the release page.
 The release record that goes with this download is missing. Download manifest.json from the same release page into the same folder, then run aman verify again.
 The signature that goes with this release record is missing. Download manifest.json.minisig from the same release page into the same folder, then run aman verify again.
@@ -59,6 +78,8 @@ The newest version of Aman could not be downloaded. Check your internet connecti
 Aman is not ready to update. Run aman doctor.
 The new version of Aman did not start, so the update was stopped and your Aman is unchanged. Run Update Aman from the Start menu again later.
 The new Aman program could not be put in place. Close any Aman window that is open, then run Update Aman from the Start menu again.
+The new Aman program passed its checks but could not be moved into place, so it stays in the Aman program folder as aman.exe.new and your Aman is unchanged. Run Update Aman from the Start menu again.
+The new Aman program could not be moved into place, and the old program could not be put back. Run the Aman Setup file again, and its first step will put the old program back.
 The new Aman program is in place, but the update itself did not finish. Run Update Aman from the Start menu again to finish the update.
 Docker is not answering, so the update cannot go ahead. Open Docker Desktop from the Start menu, then run Update Aman again.
 Another install is running right now. Wait for it to finish, or wait 2 minutes if you stopped an install a moment ago, then run Update Aman from the Start menu again.

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # The answers on stdin: one line per option that ends in -stdin, always in the order sign-in password, Token Factory key,
-# calendar app password, email app password, on a first install and on a run over an existing instance.
+# calendar app password, email app password, Tavily key, on a first install and on a run over an existing instance.
 set -euo pipefail
 # shellcheck source=../helpers.sh
 . "$(dirname "${BASH_SOURCE[0]}")/../helpers.sh"

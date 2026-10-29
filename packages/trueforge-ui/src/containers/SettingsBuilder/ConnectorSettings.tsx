@@ -651,7 +651,7 @@ const ConnectorSettings = () => {
         ? 'Reconnect needed'
         : connected
           ? 'Connected'
-          : 'Not connected';
+          : 'Available';
     return (
       <article className="flex min-h-16 w-full items-center gap-3 p-3">
         <span
@@ -848,6 +848,20 @@ const ConnectorSettings = () => {
           <div className="flex flex-1 flex-col gap-5 overflow-y-auto pb-1">
             {loading ? <p className="py-8 text-center text-sm text-text-secondary">Loading…</p> : null}
 
+            {!loading && matchingConnected.length > 0 ? (
+              <section aria-labelledby="connected-connectors-heading">
+                <h4
+                  id="connected-connectors-heading"
+                  className="mb-2 text-[0.8125rem] font-semibold uppercase text-text-secondary"
+                >
+                  Configured · {matchingConnected.length}
+                </h4>
+                <div className="overflow-hidden rounded-xl border border-border bg-card-bg">
+                  {matchingConnected.map(connector => renderConnector(connector, true))}
+                </div>
+              </section>
+            ) : null}
+
             {!loading &&
             (emailStatus !== null || emailStatusFailed) &&
             emailMatchesQuery &&
@@ -900,20 +914,6 @@ const ConnectorSettings = () => {
                   Google
                 </h4>
                 <div className="overflow-hidden rounded-xl border border-border bg-card-bg">{renderGoogle()}</div>
-              </section>
-            ) : null}
-
-            {!loading && matchingConnected.length > 0 ? (
-              <section aria-labelledby="connected-connectors-heading">
-                <h4
-                  id="connected-connectors-heading"
-                  className="mb-2 text-[0.8125rem] font-semibold uppercase text-text-secondary"
-                >
-                  Configured · {matchingConnected.length}
-                </h4>
-                <div className="overflow-hidden rounded-xl border border-border bg-card-bg">
-                  {matchingConnected.map(connector => renderConnector(connector, true))}
-                </div>
               </section>
             ) : null}
 

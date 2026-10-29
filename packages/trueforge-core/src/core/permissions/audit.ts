@@ -160,7 +160,7 @@ export async function recordHeldActionAudit(input: {
   services: SentinelServices;
   identity: Pick<SentinelCallIdentity, 'tenant_id' | 'created_by' | 'conversation_id'>;
   info: InternalToolCallInfo;
-  outcome: Extract<AuditOutcome, 'logged' | 'approved' | 'denied'>;
+  outcome: Extract<AuditOutcome, 'logged' | 'approved' | 'denied' | 'auto_denied'>;
   /** What happened, in plain words, written before the action's own description. */
   note: string;
 }): Promise<void> {

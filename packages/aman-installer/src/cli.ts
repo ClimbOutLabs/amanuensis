@@ -1,9 +1,12 @@
+import { runAdopt } from './commands/adopt.ts';
+import { runOpen } from './commands/open.ts';
 import { runStatus } from './commands/status.ts';
 import { runUpgrade } from './commands/upgrade.ts';
 import { runVerify } from './commands/verify.ts';
 import { checkDocker } from './doctor/dockerDoctor.ts';
 import { runDoctor, type DoctorDeps } from './doctor/doctor.ts';
 import type { Host } from './host/host.ts';
+import type { WindowsJobs } from './host/windowsJobs.ts';
 import { HELP_LINES, UNKNOWN_DOCTOR_CHECK, problemText, unknownCommandProblem, versionLine } from './messages.ts';
 import { fetchBytesFromNetwork, type FetchBytes } from './release/download.ts';
 import type { ProcessRunner } from './runner/processRunner.ts';
@@ -17,6 +20,13 @@ export interface CliDeps extends DoctorDeps {
   runner: ProcessRunner;
   store: StateStore;
   print: (line: string) => void;
+  // The Windows host jobs (the aman command's place, the shortcuts,
+  // Docker Desktop, the browser): only the Windows commands use them,
+  // and they refuse on any other system before touching them.
+  windowsJobs: WindowsJobs;
+  // The health check open waits for: true when the address answers.
+  probeHealth: (url: string) => Promise<boolean>;
+  sleep: (ms: number) => Promise<void>;
   // Only a test sets this; the shipped command checks downloads
   // against the release key compiled into the executable.
   releasePublicKey?: string;
@@ -25,7 +35,6 @@ export interface CliDeps extends DoctorDeps {
   confirm?: (question: string) => Promise<boolean>;
   fetchBytes?: FetchBytes;
   programsDir?: string | null;
-  startMenuDir?: string | null;
   arch?: string;
 }
 
@@ -58,6 +67,12 @@ export async function runCli(args: readonly string[], deps: CliDeps): Promise<nu
   if (first === 'status') {
     return runStatus(deps);
   }
+  if (first === 'adopt') {
+    return runAdopt({ host: deps.host, store: deps.store, jobs: deps.windowsJobs, print: deps.print });
+  }
+  if (first === 'open') {
+    return runOpen({ ...deps, jobs: deps.windowsJobs });
+  }
   if (first === 'upgrade') {
     return runUpgrade({
       ...deps,
@@ -68,7 +83,7 @@ export async function runCli(args: readonly string[], deps: CliDeps): Promise<nu
         }),
       fetchBytes: deps.fetchBytes ?? fetchBytesFromNetwork,
       programsDir: deps.programsDir ?? null,
-      startMenuDir: deps.startMenuDir ?? null,
+      jobs: deps.windowsJobs,
       arch: deps.arch ?? 'x64',
       ...(deps.releasePublicKey === undefined ? {} : { releasePublicKey: deps.releasePublicKey }),
     });

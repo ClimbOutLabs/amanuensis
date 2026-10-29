@@ -1,10 +1,10 @@
 import { existsSync, renameSync, rmSync } from 'node:fs';
 import { readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { join as joinWindows } from 'node:path/win32';
 
 import { doctorStoreProblem, runDoctorChecks, type DoctorChecks, type DoctorDeps } from '../doctor/doctor.ts';
 import type { Host } from '../host/host.ts';
+import type { WindowsJobs } from '../host/windowsJobs.ts';
 import {
   NOT_INSTALLED,
   STATE_UNREADABLE,
@@ -14,8 +14,10 @@ import {
   UPGRADE_DOCKER_NOT_ANSWERING,
   UPGRADE_DOWNLOAD_FAILED,
   UPGRADE_EXE_IN_PLACE_LINE,
+  UPGRADE_NEW_PROGRAM_WAITING,
   UPGRADE_NOT_PUT_BACK,
   UPGRADE_NOT_WINDOWS,
+  UPGRADE_OLD_PROGRAM_NOT_BACK,
   UPGRADE_PROGRAM_MISSING,
   UPGRADE_REPLACE_FAILED,
   UPGRADE_ROLLED_BACK,
@@ -45,10 +47,12 @@ export interface UpgradeDeps extends DoctorDeps {
   // whether the person said yes. There is no silent mode.
   confirm: (question: string) => Promise<boolean>;
   fetchBytes: FetchBytes;
-  // The folder the adopt step put the installed program in, and the
-  // Start menu Programs folder; null when this computer has neither.
+  // The folder the adopt step put the installed program in; null when
+  // this computer has none.
   programsDir: string | null;
-  startMenuDir: string | null;
+  // The Windows host jobs: the Start menu entries are theirs to make,
+  // the same owner the adopt and open steps use.
+  jobs: WindowsJobs;
   // This computer's processor kind, as the release names its files.
   arch: string;
   // Only a test sets this; the shipped command checks downloads
@@ -94,23 +98,12 @@ export function resolvePendingSwap(programsDir: string): void {
   }
 }
 
-// The Start menu entry that runs this command, made the way the other
-// Aman entries are made. Best effort: the entry is a convenience, and
-// its absence never blocks an update the person asked for.
-async function ensureUpdateEntry(deps: UpgradeDeps, startMenuDir: string, programsDir: string): Promise<void> {
-  // The link's address is a Windows path by construction, spelled the
-  // Windows way wherever this code is tested.
-  const linkPath = joinWindows(startMenuDir, 'Update Aman.lnk');
-  if (existsSync(linkPath)) {
-    return;
-  }
-  const quote = (path: string): string => path.replaceAll("'", "''");
-  const script =
-    `$shell = New-Object -ComObject WScript.Shell; ` +
-    `$link = $shell.CreateShortcut('${quote(linkPath)}'); ` +
-    `$link.TargetPath = '${quote(join(programsDir, EXE_NAME))}'; ` +
-    `$link.Arguments = 'upgrade'; $link.Save()`;
-  await deps.runner.run('powershell', ['-NoProfile', '-NonInteractive', '-Command', script]);
+// The Start menu entry that runs this command, refreshed through the
+// Windows jobs, the one owner of every Aman shortcut. Best effort: the
+// entry is a convenience, and its absence never blocks an update the
+// person asked for.
+async function ensureUpdateEntry(deps: UpgradeDeps): Promise<void> {
+  await deps.jobs.ensureUpdateAmanShortcut().catch(() => undefined);
 }
 
 // The health gate: the local doctor's checks, judged the way the doctor
@@ -178,8 +171,15 @@ async function stageNewProgram(
   try {
     await rename(newPath, exePath);
   } catch {
-    await rename(oldPath, exePath).catch(() => undefined);
-    print(problemText(UPGRADE_REPLACE_FAILED));
+    // The end state gets its own words, because it is not the plain
+    // replace failure above: the checked new program stays in the
+    // folder as aman.exe.new, and which program is in place depends on
+    // whether the old one could be put back.
+    const oldBack = await rename(oldPath, exePath).then(
+      () => true,
+      () => false,
+    );
+    print(problemText(oldBack ? UPGRADE_NEW_PROGRAM_WAITING : UPGRADE_OLD_PROGRAM_NOT_BACK));
     return false;
   }
   print(UPGRADE_EXE_IN_PLACE_LINE);
@@ -301,8 +301,8 @@ export async function runUpgrade(deps: UpgradeDeps): Promise<number> {
     print(problemText(UPGRADE_NOT_WINDOWS));
     return 1;
   }
-  const { programsDir, startMenuDir } = deps;
-  if (programsDir === null || startMenuDir === null) {
+  const { programsDir } = deps;
+  if (programsDir === null) {
     print(problemText(NOT_INSTALLED));
     return 1;
   }
@@ -367,7 +367,7 @@ export async function runUpgrade(deps: UpgradeDeps): Promise<number> {
     print(UPGRADE_DECLINED_LINE);
     return 0;
   }
-  await ensureUpdateEntry(deps, startMenuDir, programsDir);
+  await ensureUpdateEntry(deps);
   if (!(await stageNewProgram(deps, manifest, assetName, programsDir))) {
     return 1;
   }

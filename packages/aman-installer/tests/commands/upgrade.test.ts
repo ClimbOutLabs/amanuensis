@@ -1,13 +1,14 @@
 import assert from 'node:assert/strict';
-import { existsSync } from 'node:fs';
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { chmod, mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { test } from 'node:test';
 
 import { resolvePendingSwap, runUpgrade, type UpgradeDeps } from '../../src/commands/upgrade.ts';
 import { runDoctorChecks } from '../../src/doctor/doctor.ts';
 import { FakeHost } from '../../src/host/fakeHost.ts';
+import { FakeWindowsJobs } from '../../src/host/fakeWindowsJobs.ts';
 import {
   NOT_INSTALLED,
   problemText,
@@ -17,6 +18,7 @@ import {
   UPGRADE_DOWNLOAD_FAILED,
   UPGRADE_EXE_IN_PLACE_LINE,
   UPGRADE_NOT_WINDOWS,
+  UPGRADE_OLD_PROGRAM_NOT_BACK,
   UPGRADE_PROGRAM_MISSING,
   UPGRADE_ROLLED_BACK,
   UPGRADE_SMOKE_FAILED,
@@ -39,6 +41,7 @@ import {
   StubProcessRunner,
   type ProcessBytesResult,
   type ProcessResult,
+  type ProcessRunner,
 } from '../../src/runner/processRunner.ts';
 import { parseRegistry, type ReleaseRecord, type StateStore, type StateSummary } from '../../src/state/state.ts';
 import { SETUP_IMAGE } from '../../src/state/volumeBackend.ts';
@@ -212,6 +215,7 @@ interface World {
   deps: UpgradeDeps;
   printed: string[];
   recording: RecordingProcessRunner;
+  jobs: FakeWindowsJobs;
   programsDir: string;
   fetchedUrls: string[];
   questions: string[];
@@ -220,6 +224,7 @@ interface World {
 interface WorldOptions {
   answers?: Map<string, ProcessResult>;
   byteAnswers?: Map<string, ProcessBytesResult>;
+  wrapRunner?: (inner: ProcessRunner) => ProcessRunner;
   summary?: StateSummary;
   programBytes?: Uint8Array | null;
   confirmAnswer?: boolean;
@@ -234,6 +239,31 @@ async function write(path: string, text: string, mode?: number): Promise<void> {
   await writeFile(path, text);
   if (mode !== undefined) {
     await chmod(path, mode);
+  }
+}
+
+// Stands in for a folder appearing where the program belongs while the
+// new program runs its smoke test, so the swap's last rename can no
+// longer happen and neither can putting the old program back. Every
+// command still gets the stub's answer.
+class BlockingRunner implements ProcessRunner {
+  private readonly inner: ProcessRunner;
+
+  constructor(inner: ProcessRunner) {
+    this.inner = inner;
+  }
+
+  async run(command: string, args: readonly string[]): Promise<ProcessResult> {
+    if (command.endsWith('aman.exe.new')) {
+      const exeDir = join(dirname(command), 'aman.exe');
+      mkdirSync(exeDir, { recursive: true });
+      writeFileSync(join(exeDir, 'keep.txt'), 'in the way');
+    }
+    return this.inner.run(command, args);
+  }
+
+  runBytes(command: string, args: readonly string[], stdin: Uint8Array): Promise<ProcessBytesResult> {
+    return this.inner.runBytes(command, args, stdin);
   }
 }
 
@@ -285,7 +315,13 @@ async function makeWorld(options: WorldOptions = {}): Promise<World> {
   if (!answers.has(smokeLine)) {
     answers.set(smokeLine, okResult('aman 0.2.0\n'));
   }
-  const recording = new RecordingProcessRunner(new StubProcessRunner(answers, options.byteAnswers ?? new Map()));
+  const stub = new StubProcessRunner(answers, options.byteAnswers ?? new Map());
+  const recording = new RecordingProcessRunner(options.wrapRunner === undefined ? stub : options.wrapRunner(stub));
+  const jobs = new FakeWindowsJobs({
+    localAppDataDir: 'C:\\Users\\Friend\\AppData\\Local',
+    selfExePath: 'C:\\Users\\Friend\\Downloads\\aman-windows-x64.exe',
+    startMenuProgramsDir: START_MENU_DIR,
+  });
   const printed: string[] = [];
   const questions: string[] = [];
   const deps: UpgradeDeps = {
@@ -301,7 +337,7 @@ async function makeWorld(options: WorldOptions = {}): Promise<World> {
     },
     fetchBytes,
     programsDir,
-    startMenuDir: START_MENU_DIR,
+    jobs,
     arch: 'x64',
     releasePublicKey: TEST_PUBLIC_KEY_MINISIGN,
     now: () => NOW,
@@ -311,7 +347,7 @@ async function makeWorld(options: WorldOptions = {}): Promise<World> {
     dockerConfigDir: join(personHome, '.docker'),
     appService: 'app',
   };
-  return { deps, printed, recording, programsDir, fetchedUrls, questions };
+  return { deps, printed, recording, jobs, programsDir, fetchedUrls, questions };
 }
 
 function goldenLines(world: World): string {
@@ -375,6 +411,19 @@ test('the happy path swaps the program, unpacks the source and runs the containe
   assert.deepEqual(new Uint8Array(await readFile(join(world.programsDir, 'aman.exe'))), NEW_PROGRAM);
   assert.deepEqual(new Uint8Array(await readFile(join(world.programsDir, 'aman.exe.old'))), OLD_PROGRAM);
   assert.equal(existsSync(join(world.programsDir, 'aman.exe.new')), false);
+  // The Update Aman entry is refreshed through the Windows jobs, the
+  // same owner the adopt and open steps use.
+  assert.deepEqual(world.jobs.ops, ['update']);
+  assert.deepEqual(
+    world.jobs.shortcuts.filter(shortcut => shortcut.args === 'upgrade'),
+    [
+      {
+        path: 'C:\\Users\\Friend\\AppData\\Roaming\\Microsoft\\Windows\\Start Menu\\Programs\\Update Aman.lnk',
+        target: 'C:\\Users\\Friend\\AppData\\Local\\Programs\\Amanuensis\\aman.exe',
+        args: 'upgrade',
+      },
+    ],
+  );
   const golden = await readFile(new URL('../golden/upgrade-commands.txt', import.meta.url), 'utf8');
   assert.equal(goldenLines(world), golden);
 });
@@ -474,6 +523,19 @@ test('a new program that fails its smoke test puts the old one back', async () =
   assert.deepEqual(new Uint8Array(await readFile(join(world.programsDir, 'aman.exe'))), OLD_PROGRAM);
   assert.equal(existsSync(join(world.programsDir, 'aman.exe.new')), false);
   assert.equal(existsSync(join(world.programsDir, 'aman.exe.old')), false);
+  assert.ok(world.recording.lines().every(line => !line.includes('docker run')));
+});
+
+test('a last rename that cannot happen says where the checked program waits and what to run', async () => {
+  const { answers, byteAnswers } = happyAnswers(okResult(''));
+  const world = await makeWorld({ answers, byteAnswers, wrapRunner: inner => new BlockingRunner(inner) });
+  const exitCode = await runUpgrade(world.deps);
+  assert.equal(exitCode, 1);
+  assert.deepEqual(world.printed, [problemText(UPGRADE_OLD_PROGRAM_NOT_BACK)]);
+  // The end state the words describe: the checked new program stays as
+  // aman.exe.new, and the old program is kept whole beside it.
+  assert.deepEqual(new Uint8Array(await readFile(join(world.programsDir, 'aman.exe.new'))), NEW_PROGRAM);
+  assert.deepEqual(new Uint8Array(await readFile(join(world.programsDir, 'aman.exe.old'))), OLD_PROGRAM);
   assert.ok(world.recording.lines().every(line => !line.includes('docker run')));
 });
 

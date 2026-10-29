@@ -229,7 +229,7 @@ describe('recalled block', () => {
       const { block } = formatMemoryBlock({ results, entities: [], budgetTokens: 600 });
       const lines = block.split('\n');
       expect(lines).toContain(
-        '[2026-10-20, from something Aman read] The dentist is Dr Rivera, per a follow-up reminder email.',
+        '[2026-10-20, from something read for the person] The dentist is Dr Rivera, per a follow-up reminder email.',
       );
       expect(lines).toContain('[2026-09-19] The vet follow-up reminder is booked.');
       expect(block).not.toContain('discussed again');

@@ -182,6 +182,7 @@ import {
   CALENDAR_PASSWORD_PROMPT,
   CHECK_BEFORE_ASKING_PROMPT,
   createSourceDiscoveryContract,
+  DEMO_EMAIL_PROMPT,
   EMAIL_PASSWORD_PROMPT,
   EMPTY_ANSWER_NUDGE_MESSAGE,
   emptyInspectionNudgeMessage,
@@ -2026,6 +2027,9 @@ export class AgentThread {
     capabilities.addSection('plain-speech', PLAIN_SPEECH_PROMPT);
     if (this.definition.setUpConnectorNames?.includes(MAIL_CONNECTOR_NAME)) {
       capabilities.addSection('email-passwords', EMAIL_PASSWORD_PROMPT);
+      if (this.sentinel?.services.demoSendAllowlist != null) {
+        capabilities.addSection('demo-email', DEMO_EMAIL_PROMPT);
+      }
     }
     if (this.definition.setUpConnectorNames?.includes(CALDAV_SERVER_NAME)) {
       capabilities.addSection('calendar-passwords', CALENDAR_PASSWORD_PROMPT);
@@ -2289,7 +2293,7 @@ export class AgentThread {
 
   private async auditHeld(input: {
     info: InternalToolCallInfo;
-    outcome: 'logged' | 'approved' | 'denied';
+    outcome: 'logged' | 'approved' | 'denied' | 'auto_denied';
     note: string;
   }): Promise<void> {
     if (this.sentinel === undefined) {
@@ -2304,6 +2308,19 @@ export class AgentThread {
       },
       ...input,
     });
+  }
+
+  /**
+   * Records that an approved send stopped while its addresses were being prepared, so the stopped
+   * attempt shows in the activity log. The throw that follows each call is unchanged, so a failed
+   * write is dropped rather than replacing the plain message the person is shown.
+   */
+  private async auditMailPrepareFailure(input: { info: InternalToolCallInfo; note: string }): Promise<void> {
+    try {
+      await this.auditHeld({ info: input.info, outcome: 'auto_denied', note: input.note });
+    } catch {
+      // The activity log being unavailable never changes what the person is told.
+    }
   }
 
   /**
@@ -2328,21 +2345,38 @@ export class AgentThread {
       }
       const call = input.pendingById.get(approval.tool_call_id) ?? input.heldById.get(approval.tool_call_id);
       const added = call?.tool_info.tier3_card?.mail_new_recipients ?? [];
+      if (call === undefined) {
+        // No call behind the approval: the check below would skip it too (no send, no new
+        // addresses), so leaving here changes nothing and keeps the call in hand below.
+        continue;
+      }
       // Only a send the host itself judged to go through its own Email sidecar, or a card carrying new
       // addresses for one, touches the Email list, however the card was later reworded. A send's addresses
       // still come only from its own card.
-      if (call?.tool_info.mail_send !== true && added.length === 0) {
+      if (call.tool_info.mail_send !== true && added.length === 0) {
         continue;
       }
       if (added.length > 0) {
         const result = await sentinel.services.mail_add_recipients(ctx, added);
         if (result === 'refused') {
+          await this.auditMailPrepareFailure({
+            info: call.tool_info,
+            note: 'The address could not be added to the Email list',
+          });
           throw new InvalidAgentSendInputError(NEW_RECIPIENT_REFUSED);
         }
         if (result === 'not_loaded') {
+          await this.auditMailPrepareFailure({
+            info: call.tool_info,
+            note: 'The Email list did not load in time',
+          });
           throw new InvalidAgentSendInputError(SEND_LIST_STILL_UPDATING);
         }
       } else if ((await sentinel.services.mail_list_loaded(ctx)) === 'not_loaded') {
+        await this.auditMailPrepareFailure({
+          info: call.tool_info,
+          note: 'The Email list did not load in time',
+        });
         throw new InvalidAgentSendInputError(SEND_LIST_STILL_UPDATING);
       }
     }

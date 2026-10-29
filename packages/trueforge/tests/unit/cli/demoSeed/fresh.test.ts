@@ -5,7 +5,15 @@ import { dayInZone } from '../../../../src/cli/demoSeed/storyDays.mjs';
 import { buildDemoWorld, DEMO_JUNE_ID, DEMO_THEO_ID } from '../../../../src/cli/demoSeed/world';
 import { SqliteSessionStore } from '../../../../src/db/sqlite/session-store/SqliteSessionStore';
 import { MarkdownMemoryClient } from '../../../../src/runtime/memory/markdownMemoryClient';
-import { createTestWorld, MODEL_NAME, TENANT_ID, USER_ID, type TestStores, type TestWorld } from './testStores';
+import {
+  createTestWorld,
+  MODEL_NAME,
+  TENANT_ID,
+  testConnectors,
+  USER_ID,
+  type TestStores,
+  type TestWorld,
+} from './testStores';
 
 const OTHER_ID = 'visitor@example.com';
 const NOW = new Date('2026-10-26T08:00:00Z');
@@ -31,7 +39,13 @@ describe('start fresh against the real stores', () => {
   });
 
   const seed = () =>
-    seedDemoWorld({ stores, scope: { tenantId: TENANT_ID, userId: USER_ID }, world: demoWorld, now: NOW });
+    seedDemoWorld({
+      stores,
+      scope: { tenantId: TENANT_ID, userId: USER_ID },
+      world: demoWorld,
+      now: NOW,
+      connectors: testConnectors(),
+    });
   const wipe = (userId: string) => wipeUserData({ stores, scope: { tenantId: TENANT_ID, userId } });
 
   async function addPersonMadeRecords(userId: string, suffix: string) {
