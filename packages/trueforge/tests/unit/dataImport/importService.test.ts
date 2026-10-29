@@ -1974,6 +1974,64 @@ describe('runDataImport reads memory markers the way the vault does', () => {
   });
 });
 
+describe('runDataImport reads the internal id an export writes as the closing line', () => {
+  const FILED_FILE = `memory/${TENANT}/memory/2026-10-02.md`;
+  const FILED_LOG = '## 2026-10-02T10:00:00.000Z\n\nLives in Lisbon with a cat.\n\n> maya:identity\n';
+
+  async function filedArchive(): Promise<{ source: Instance; archive: Buffer }> {
+    const { source, archive } = await seededArchive();
+    return {
+      source,
+      archive: await repack(archive, entries => {
+        entries.set(FILED_FILE, Buffer.from(FILED_LOG, 'utf8'));
+      }),
+    };
+  }
+
+  it('hands the id back as the retain context and keeps it off the text', async () => {
+    const { source, archive } = await filedArchive();
+    const target = await makeInstance('target-filed-client');
+    try {
+      const retained: { content: string; context?: string | undefined }[] = [];
+      const client: Pick<MemoryClient, 'listEntries' | 'retain'> = {
+        listEntries: () => Promise.resolve({ ok: true, entries: [] }),
+        retain: ({ items }) => {
+          retained.push(...items);
+          return Promise.resolve({ ok: true });
+        },
+      };
+      await runDataImport(importDeps(target, { kind: 'client', client }), importRequest(archive));
+      const filed = retained.find(item => item.content.includes('Lisbon'));
+      expect(filed?.content).toBe('Lives in Lisbon with a cat.');
+      expect(filed?.context).toBe('maya:identity');
+    } finally {
+      await source.close();
+      await target.close();
+    }
+  });
+
+  it('writes the id back into a Markdown target, where the listing reads it on its own', async () => {
+    const { source, archive } = await filedArchive();
+    const target = await makeInstance('target-filed-markdown');
+    try {
+      await runDataImport(importDeps(target), importRequest(archive));
+      const written = await readFile(join(target.memoryDir, TENANT, 'memory', '2026-10-02.md'), 'utf8');
+      expect(written).toBe(FILED_LOG);
+      const reader = new MarkdownMemoryClient({ baseDir: target.memoryDir, namespace: TENANT });
+      const listed = await reader.listEntries({ namespace: '', timeoutMs: 5_000 });
+      if (!listed.ok) {
+        throw new Error('expected a vault listing');
+      }
+      const filed = listed.entries.find(entry => entry.text.includes('Lisbon'));
+      expect(filed?.text).toBe('Lives in Lisbon with a cat.');
+      expect(filed?.context).toBe('maya:identity');
+    } finally {
+      await source.close();
+      await target.close();
+    }
+  });
+});
+
 describe('runDataImport reads memory written before facts-only memory', () => {
   const LEGACY_FILE = `memory/${TENANT}/memory/2026-09-01.md`;
   const LEGACY_LOG = [

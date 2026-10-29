@@ -29,6 +29,7 @@ import {
   readVaultSharing,
   sanitizeNamespace,
   vaultFilesystemNamespace,
+  withHiddenContext,
   writeVaultSharing,
   type VaultSharing,
 } from '../runtime/memory/markdownMemoryFiles';
@@ -49,6 +50,11 @@ const MAX_SHARING_NAMESPACES = 100;
 /** The wire shape of an entry: the internal id it was filed under stays on the server. */
 function wireEntry({ id, text, timestamp, persona }: VaultEntry): MemoryVaultEntry {
   return { id, text, timestamp, persona };
+}
+
+/** An exported entry carries its internal id as the closing line, the same shape the daily logs hold. */
+function exportedEntry({ id, text, timestamp, persona, context }: VaultEntry): MemoryVaultEntry {
+  return { id, text: withHiddenContext({ text, context }), timestamp, persona };
 }
 
 function vaultClient(deps: MemoryVaultRouterDeps, tenantId: string): MarkdownMemoryClient | undefined {
@@ -189,7 +195,7 @@ export function createMemoryVaultRouter(deps: MemoryVaultRouterDeps) {
         data: {
           namespace: vaultNamespaceLabel(namespace),
           exported_at: new Date().toISOString(),
-          entries: outcome.entries.map(wireEntry),
+          entries: outcome.entries.map(exportedEntry),
         },
       },
       200,

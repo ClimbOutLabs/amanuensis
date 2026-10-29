@@ -260,9 +260,10 @@ export function isLegacyDocumentCopy({ text, context }: { text: string; context:
 
 /**
  * A closing `> ` line that names an internal id, such as `maya:identity`: two short tokens around one
- * colon and no spaces. A readable line such as `> Source: read content` has spaces and never matches.
+ * colon and no spaces, the first starting with a letter. A readable line such as `> Source: read content`
+ * has spaces, and a time such as `> 09:30` starts with a digit, so neither matches.
  */
-const HIDDEN_CONTEXT_PATTERN = /^> ([A-Za-z0-9_-]{1,64}:[A-Za-z0-9_-]{1,64})$/;
+const HIDDEN_CONTEXT_PATTERN = /^> ([A-Za-z][A-Za-z0-9_-]{0,63}:[A-Za-z0-9_-]{1,64})$/;
 
 /** A trailer-free body split into its readable text and the id-shaped context line it may close with. */
 function splitHiddenContext(body: string): { body: string; context: string | undefined } {
@@ -303,6 +304,11 @@ export function hiddenContext(text: string): string | undefined {
   return splitHiddenContext(splitEntryTrailers(text).body).context;
 }
 
+/** An entry's text with its internal id put back as the closing `> ` line, the shape the daily logs hold. */
+export function withHiddenContext({ text, context }: { text: string; context: string | undefined }): string {
+  return context === undefined ? text : `${text}\n\n> ${context}`;
+}
+
 /** The instant in an entry's `## ` heading, when the heading is a readable timestamp. */
 function headingInstant(text: string): string | undefined {
   const heading = text.startsWith('## ') ? (text.split('\n', 1)[0] ?? '').slice(3).trim() : '';
@@ -312,9 +318,9 @@ function headingInstant(text: string): string | undefined {
 }
 
 /**
- * An edited entry's text with everything the Memories page left out of the original put back: the timestamp
- * heading, the id-shaped context line, and the hidden chat id, document id and note lines. Editing a note
- * then never makes it forget when it was written or where it came from.
+ * An edited entry's text with the lines the Memories page left out of the original put back: the timestamp
+ * heading, the id-shaped context line, and the hidden chat id, document id and note lines. The readable
+ * `> Source: …` line is part of the page text, so an edit that removes it is kept as written.
  */
 export function withOriginalHiddenMarkers({ original, edited }: { original: string; edited: string }): string {
   const { body: originalBody, metadata: kept } = splitEntryTrailers(original);
@@ -326,7 +332,7 @@ export function withOriginalHiddenMarkers({ original, edited }: { original: stri
   const context = splitHiddenContext(originalBody).context;
   const body =
     context !== undefined && splitHiddenContext(editedBody).context === undefined
-      ? `${editedBody}\n\n> ${context}`
+      ? withHiddenContext({ text: editedBody, context })
       : editedBody;
   // A hidden line the edit names itself wins over the original's; the lines keep their on-disk order.
   const trailers: string[] = [];

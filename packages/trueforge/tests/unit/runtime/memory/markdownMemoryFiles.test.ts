@@ -514,6 +514,19 @@ describe('the context line of an entry', () => {
     expect(withoutHiddenMarkers('## 2026-09-19T12:00:00.000Z\n\nSee a:b for details.')).toBe('See a:b for details.');
   });
 
+  it('stays on the page when it starts with a digit, like a time, and is hidden when it starts with a letter', () => {
+    for (const line of ['> 09:30', '> 3:4']) {
+      const note = `## 2026-10-29T15:31:23.376Z\n\nCall the clinic.\n\n${line}`;
+      expect(withoutHiddenMarkers(note)).toBe(`Call the clinic.\n\n${line}`);
+      expect(hiddenContext(note)).toBeUndefined();
+    }
+    for (const id of ['maya:identity', 'demo_synthetic:gp-search']) {
+      const note = `## 2026-10-29T15:31:23.376Z\n\nA filed note.\n\n> ${id}`;
+      expect(withoutHiddenMarkers(note)).toBe('A filed note.');
+      expect(hiddenContext(note)).toBe(id);
+    }
+  });
+
   it('comes back, with the time heading, when the page saves an edit', () => {
     const edited = withOriginalHiddenMarkers({ original: filed, edited: 'Lives in Porto with a cat.' });
     expect(edited).toBe('## 2026-10-29T15:31:23.376Z\n\nLives in Porto with a cat.\n\n> maya:identity');
