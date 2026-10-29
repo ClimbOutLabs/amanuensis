@@ -19,6 +19,15 @@ export const CA_CERT_FILE_NAME = 'ca.crt';
 export const CHECK_AMAN_SHORTCUT_NAME = 'Check Aman';
 // The Start menu entry the upgrade keeps, running aman upgrade.
 export const UPDATE_AMAN_SHORTCUT_NAME = 'Update Aman';
+// The Start menu entry that opens the folder the backups land in.
+export const BACKUPS_SHORTCUT_NAME = 'Backups';
+// The folder inside the Amanuensis folder where the backups land on
+// the Windows disk, named as the shell names its backups folder.
+export const BACKUPS_FOLDER_NAME = 'backups';
+// The Task Scheduler task that makes the daily backup, in the folder
+// the plan froze, at the shell schedule's hour (schedule.sh).
+export const BACKUP_TASK_NAME = 'Amanuensis\\Daily backup';
+export const BACKUP_TASK_TIME = '03:30';
 // Docker Desktop's own install place, the file the starter starts.
 export const DOCKER_DESKTOP_EXE = 'C:\\Program Files\\Docker\\Docker\\Docker Desktop.exe';
 
@@ -37,6 +46,7 @@ export interface WindowsPaths {
   programsExePath: string;
   dataDir: string;
   setupCmdCopyPath: string;
+  backupsDir: string;
   caCertPath: string;
 }
 
@@ -48,6 +58,7 @@ export function windowsPaths(localAppDataDir: string): WindowsPaths {
     programsExePath: win32.join(programsDir, EXE_FILE_NAME),
     dataDir,
     setupCmdCopyPath: win32.join(dataDir, SETUP_CMD_FILE_NAME),
+    backupsDir: win32.join(dataDir, BACKUPS_FOLDER_NAME),
     caCertPath: win32.join(dataDir, CA_CERT_FILE_NAME),
   };
 }
@@ -70,9 +81,7 @@ export interface AclEntry {
 // answer. A folder that is not there is its own answer, because a check
 // before anything is installed has nothing to judge.
 export type AclRead =
-  | { status: 'read'; owner: string; entries: readonly AclEntry[] }
-  | { status: 'missing' }
-  | { status: 'unreadable' };
+  { status: 'read'; owner: string; entries: readonly AclEntry[] } | { status: 'missing' } | { status: 'unreadable' };
 
 export class WindowsJobError extends Error {}
 
@@ -107,7 +116,8 @@ export function parseAclListing(options: { path: string; text: string }): AclEnt
     for (const match of line.slice(colon + 1).matchAll(/\(([^)]*)\)/g)) {
       groups.push(match[1] ?? '');
     }
-    const canRead = !groups.includes('DENY') && groups.some(group => group.split(',').some(part => ACL_READ_TOKENS.has(part.trim())));
+    const canRead =
+      !groups.includes('DENY') && groups.some(group => group.split(',').some(part => ACL_READ_TOKENS.has(part.trim())));
     entries.push({ principal, canRead });
   }
   return entries;
@@ -133,6 +143,8 @@ export interface WindowsJobs {
   // The folder under the per-user application data folder where Aman
   // keeps its own files on this PC: the Aman-Setup copy lives there.
   readonly dataDir: string;
+  // The folder inside it where the backups land on this PC.
+  readonly backupsDir: string;
   // Copies the running executable into the Programs folder. 'already'
   // when the running executable is the copy there (adopt run twice).
   copySelfToPrograms: () => Promise<'copied' | 'already'>;
@@ -150,6 +162,18 @@ export interface WindowsJobs {
   // Makes the "Update Aman" Start menu entry, or points the existing
   // one at the aman command, running aman upgrade.
   ensureUpdateAmanShortcut: () => Promise<void>;
+  // Makes the "Backups" Start menu entry, or points the existing one
+  // at the folder the backups land in, so choosing it opens that folder.
+  ensureBackupsShortcut: () => Promise<void>;
+  // Makes the daily backup task, or remakes it in the same shape:
+  // every day at 03:30, running aman backup as the person, only while
+  // they are signed in, with no password stored.
+  ensureDailyBackupTask: () => Promise<void>;
+  // True when the daily backup task is there.
+  dailyBackupTaskPresent: () => Promise<boolean>;
+  // The names in the backups folder, as they stand. A folder that is
+  // not there yet lists as empty.
+  listBackups: () => Promise<readonly string[]>;
   // Replaces the starter's copy of Aman-Setup.cmd with the forwarder.
   replaceSetupCmdCopyWithForwarder: () => Promise<void>;
   // Writes the local authority's certificate, public part only, into
@@ -229,6 +253,7 @@ export function systemWindowsJobs(options: {
     programsExePath: paths.programsExePath,
     setupCmdCopyPath: paths.setupCmdCopyPath,
     dataDir: paths.dataDir,
+    backupsDir: paths.backupsDir,
 
     async copySelfToPrograms() {
       if (options.selfExePath.toLowerCase() === paths.programsExePath.toLowerCase()) {
@@ -313,6 +338,57 @@ export function systemWindowsJobs(options: {
           `$shortcut.TargetPath = ${psQuote(paths.programsExePath)}; ` +
           `$shortcut.Arguments = 'upgrade'; $shortcut.Save()`,
       );
+    },
+
+    async ensureBackupsShortcut() {
+      await runPowerShell(
+        `$shell = New-Object -ComObject WScript.Shell; ` +
+          `$path = Join-Path ([Environment]::GetFolderPath('Programs')) ${psQuote(`${BACKUPS_SHORTCUT_NAME}.lnk`)}; ` +
+          `$shortcut = $shell.CreateShortcut($path); ` +
+          `$shortcut.TargetPath = ${psQuote(paths.backupsDir)}; $shortcut.Save()`,
+      );
+    },
+
+    async ensureDailyBackupTask() {
+      // /F remakes a task that is already there, so making it again
+      // leaves the same task, as the other ensure steps leave the same
+      // entry. No user or password is named: the task runs as the
+      // person, and /IT runs it only while they are signed in.
+      const result = await runner.run('schtasks', [
+        '/Create',
+        '/TN',
+        BACKUP_TASK_NAME,
+        '/TR',
+        `"${paths.programsExePath}" backup`,
+        '/SC',
+        'DAILY',
+        '/ST',
+        BACKUP_TASK_TIME,
+        '/RL',
+        'LIMITED',
+        '/IT',
+        '/F',
+      ]);
+      if (!result.started || result.exitCode !== 0) {
+        throw new WindowsJobError('the daily backup task could not be made');
+      }
+    },
+
+    async dailyBackupTaskPresent() {
+      const result = await runner.run('schtasks', ['/Query', '/TN', BACKUP_TASK_NAME]);
+      return result.started && result.exitCode === 0;
+    },
+
+    async listBackups() {
+      const stdout = await runPowerShell(
+        `[Console]::OutputEncoding = [Text.Encoding]::UTF8; ` +
+          `if (Test-Path -LiteralPath ${psQuote(paths.backupsDir)}) { ` +
+          `Get-ChildItem -LiteralPath ${psQuote(paths.backupsDir)} -Directory | ForEach-Object { $_.Name } }`,
+      );
+      return stdout
+        .split('\n')
+        .map(line => line.replace(/\r$/, '').trim())
+        .filter(line => line !== '');
     },
 
     async replaceSetupCmdCopyWithForwarder() {

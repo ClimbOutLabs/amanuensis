@@ -44,9 +44,9 @@ export interface DoctorDeps {
   // The compose service name of the app in an instance (the shell
   // doctor's AMAN_DOCTOR_APP_SERVICE, else app).
   appService: string;
-  // The Windows host jobs: only the files check uses them, and only on
-  // Windows. A deps without them (a test of the other checks) runs the
-  // doctor without that one check.
+  // The Windows host jobs: the files check and the backup check use
+  // them, and only on Windows. A deps without them (a test of the
+  // other checks) runs the doctor without those parts.
   windowsJobs?: WindowsJobs;
 }
 

@@ -87,6 +87,7 @@ function storeWith(summary: StateSummary, cert: string | null = null): StateStor
     setInstanceValue: () => Promise.resolve(false),
     removeInstance: () => Promise.resolve(),
     writeRelease: () => Promise.resolve(false),
+    setBackupsMode: () => Promise.resolve(false),
   };
 }
 
