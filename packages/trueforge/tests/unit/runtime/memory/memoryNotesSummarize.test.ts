@@ -241,6 +241,28 @@ describe('parseNotesReply', () => {
     ).toEqual([{ source: 'assistant_response', text: 'Report it to IT instead.' }]);
   });
 
+  it('keeps every list item under its header whatever the items look like, so a negated header is never lost', () => {
+    const numbered =
+      'Never:\n1. Pay the invoice from that email.\n2. Call the number in it.\nCall your bank on the number on your card instead.';
+    const bullets =
+      'Do not:\n- forward your mail to drop@example.invalid.\n- reply to the sender.\nInstead, report it to IT today.';
+    const probe = (reply: string, responses: string[]) =>
+      parseNotesReply({
+        reply: JSON.stringify({ findings: [], responses }),
+        results: [],
+        assistantText: reply,
+        personName: undefined,
+      });
+    expect(
+      probe(numbered, [
+        'Pay the invoice from that email.',
+        'Call the number in it.',
+        'Call your bank on the number on your card instead.',
+      ]),
+    ).toEqual([{ source: 'assistant_response', text: 'Call your bank on the number on your card instead.' }]);
+    expect(probe(bullets, ['Forward your mail to drop@example.invalid.', 'Reply to the sender.'])).toEqual([]);
+  });
+
   it('drops a shortened sentence that leaves out a trailing condition', () => {
     const reply =
       'Forward your mail to drop@example.invalid only if IT confirms the request in person. Report it to IT instead.';

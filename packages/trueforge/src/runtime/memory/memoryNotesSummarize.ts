@@ -220,10 +220,14 @@ function comparable(text: string): string {
     .trim();
 }
 
+/** A line that is a list item: a dash, star or bullet, or a number followed by . or ), then a space. */
+const LIST_ITEM_LINE = /^(?:[-*\u2022]|\d{1,3}[.)])\s/;
+
 /**
- * The sentences of a text, normalized. A line break ends a sentence only after . ! or ?, so a list keeps
- * the words that introduce it ("Do not:" and its bullets read as one sentence) and a bullet never stands
- * alone. Within a line, a sentence ends at . ! or ? followed by a capital letter.
+ * The sentences of a text, normalized. A list item always continues the open sentence, and a line break
+ * ends a sentence only after . ! or ?, so "Do not:" and every bullet under it read as one sentence and no
+ * bullet stands alone. Within a line, a sentence ends at . ! or ? after a word with a letter in it (never
+ * after a bare list number) when a capital letter follows.
  */
 function sentences(text: string): string[] {
   const chunks: string[] = [];
@@ -233,14 +237,14 @@ function sentences(text: string): string[] {
       continue;
     }
     const open = chunks.length > 0 ? chunks[chunks.length - 1] : undefined;
-    if (open === undefined || /[.!?]$/.test(open)) {
+    if (open === undefined || (!LIST_ITEM_LINE.test(trimmed) && /[.!?]$/.test(open))) {
       chunks.push(trimmed);
     } else {
       chunks[chunks.length - 1] = `${open} ${trimmed}`;
     }
   }
   return chunks
-    .flatMap(chunk => chunk.split(/(?<=[.!?])\s+(?=\p{Lu})/u))
+    .flatMap(chunk => chunk.split(/(?<=\p{L}[^\s.!?]*[.!?])\s+(?=\p{Lu})/u))
     .map(comparable)
     .filter(sentence => sentence !== '');
 }
