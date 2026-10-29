@@ -605,6 +605,11 @@ export function makeUnknownToolInfo(toolName: string): InternalToolCallInfo {
   };
 }
 
+/** Whether a call names a real connector, as opposed to a tool name the model made up. */
+export function isKnownConnector(info: InternalToolCallInfo): boolean {
+  return info.type === 'mcp' && info.mcp_server_id !== UNKNOWN_TOOL_NAME;
+}
+
 export function toToolCallInfo(toolInfo: InternalToolCallInfo): ToolInfo {
   // Carried onto the wire so an approval prompt can state the tool's effect and whether
   // data leaves the machine from what the server published, rather than guessing.

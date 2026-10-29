@@ -143,7 +143,7 @@ export const InternalToolCallInfoSchema = z.object({
   is_thread_creation: z.boolean().optional().describe('Whether this tool call creates a subagent thread.'),
   pre_dispatch_failure: z
     .object({
-      kind: z.enum(['policy_blocked', 'pre_dispatch_failed']),
+      kind: z.enum(['policy_blocked', 'pre_dispatch_failed', 'connector_unreachable']),
       message: z.string(),
       owner_message: z
         .string()

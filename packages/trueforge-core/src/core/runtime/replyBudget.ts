@@ -10,6 +10,7 @@
  */
 import { z } from 'zod';
 import type { ToolResultDisposition } from '../events/schema';
+import { UNKNOWN_TOOL_NAME } from '../llm/LLMTypes';
 
 export const ToolResultKindSchema = z.enum([
   'ok',
@@ -49,6 +50,13 @@ export const REMOVED_TOOL_STREAK_MESSAGE =
 /** Result text for a call to a tool removed from this reply. Not run. */
 export const REMOVED_TOOL_RESULT =
   'This tool was removed from this reply because it was declined or is not available here. Do not call it again.';
+
+/** Result text when a connector cannot be reached. Falls back to a generic name for an unnamed server. */
+export function connectorUnreachableText(serverName: string | undefined): string {
+  const name =
+    serverName === undefined || serverName === '' || serverName === UNKNOWN_TOOL_NAME ? 'That connector' : serverName;
+  return `${name} is not reachable right now, so nothing was sent. Try again in a minute.`;
+}
 
 export function stepBudgetFor({ isSubAgent, budget }: { isSubAgent: boolean; budget: ReplyStepBudget }): number {
   return isSubAgent ? budget.sub : budget.main;

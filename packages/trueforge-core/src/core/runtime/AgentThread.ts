@@ -202,6 +202,7 @@ import {
   isClientSideToolResponseMessage,
   isFreshnessQuestion,
   isInputUserMessage,
+  isKnownConnector,
   isLLMContextMessage,
   isLLMToolMessage,
   lastUserMessageText,
@@ -257,6 +258,7 @@ import {
 } from './replyActionChecks';
 import {
   clearUnfinished,
+  connectorUnreachableText,
   DEFAULT_REPLY_STEP_BUDGET,
   recordUnfinished,
   REMOVED_TOOL_RESULT,
@@ -1326,18 +1328,20 @@ async function resolveToolCallInfo({
   } catch (error) {
     const unavailableMcp = findUnavailableMcpCause(error);
     if (unavailableMcp !== undefined) {
-      // Metadata discovery can reach the remote MCP server. An unavailable
-      // connector must not kill the turn or be mistaken for a host policy
-      // denial. Fail closed by requiring approval, then let dispatch record
-      // the actual terminal execution disposition if the user proceeds.
+      // Metadata discovery can reach the remote MCP server. An unreachable connector
+      // must not kill the turn, and nothing can run, so no approval card is raised.
       return {
         type: 'mcp',
         mcp_server_id: toolInfo.toolSet.id,
         mcp_server_name: toolInfo.toolSet.name,
         original_tool_name: toolInfo.originalToolName,
-        is_approval_required: true,
+        is_approval_required: false,
         is_client_side: false,
         description: `Tool metadata unavailable: ${describeUnknownError(unavailableMcp)}`,
+        pre_dispatch_failure: {
+          kind: 'connector_unreachable',
+          message: connectorUnreachableText(toolInfo.toolSet.name),
+        },
       };
     }
     return {
@@ -4685,7 +4689,14 @@ export class AgentThread {
     }
     for (const result of toolCallResults) {
       const toolCall = openCalls.find(call => call.id === result.message.tool_call_id);
-      if (toolCall && !toolMapping.has(toolCall.function.name)) {
+      if (toolCall && !toolMapping.has(toolCall.function.name) && isKnownConnector(toolCall.tool_info)) {
+        // The person may have approved a card for a tool whose connector has since dropped off.
+        this.logger.warn(
+          `Tool call ${toolCall.function.name} was not run because ${toolCall.tool_info.mcp_server_name} is not reachable`,
+          { threadId: this.threadId, toolCallId: toolCall.id },
+        );
+        result.message.content = connectorUnreachableText(toolCall.tool_info.mcp_server_name);
+      } else if (toolCall && !toolMapping.has(toolCall.function.name)) {
         result.message.content = `Tool ${toolCall.function.name} is unavailable in this conversation. Do not call it again. Use only the tools provided in the request, or continue without a tool.`;
       }
     }
@@ -5041,7 +5052,8 @@ export class AgentThread {
       const kind = toolResultKind({
         disposition: result.disposition,
         failure: result.failure,
-        unavailable: !toolMapping.has(call.function.name),
+        unavailable:
+          !toolMapping.has(call.function.name) || call.tool_info.pre_dispatch_failure?.kind === 'connector_unreachable',
         removed: wasRemoved,
         expired: isExpiredApproval(decision),
       });

@@ -1,10 +1,11 @@
-import { McpConnectionError, ToolPreDispatchError } from '../../../src/core/errors';
+import { McpConnectionError } from '../../../src/core/errors';
 import { EventType } from '../../../src/core/events/schema';
 import type { ILLM } from '../../../src/core/llm/ILLM';
 import type { ExtendedChatCompletionChunk, RawAssistantMessageWithUsage } from '../../../src/core/llm/LLMTypes';
 import { getEmptyUsage } from '../../../src/core/llm/LLMTypes';
 import type { IToolSet } from '../../../src/core/mcp/IMCPServer';
 import { AgentThread } from '../../../src/core/runtime/AgentThread';
+import type { AgentThreadEvent } from '../../../src/core/runtime/AgentThread.types';
 import { NOOP_AGENT_TRACING } from '../../../src/core/tracing/NoopAgentTracing';
 import { makeMockIMCPServer, makeSilentLogger } from '../harnessMocks';
 
@@ -35,15 +36,6 @@ function makeUnreachableDuringClassificationToolSet(): IToolSet {
       is_approval_required: false,
     });
   });
-  // The approval retries the connection at dispatch. ToolSet wraps a listTools/connect
-  // failure as a pre-dispatch failure, proving the underlying tool never ran.
-  jest
-    .mocked(toolSet.callTool)
-    .mockImplementation(() =>
-      Promise.reject(
-        new ToolPreDispatchError(`Tool 'tool_a' could not be prepared for execution`, { cause: connectionFailure() }),
-      ),
-    );
   return toolSet;
 }
 
@@ -91,7 +83,7 @@ async function* finalAnswerStream(
 }
 
 describe('AgentThread enrichment degrade on an unreachable MCP server', () => {
-  it('pauses the call for approval instead of failing the turn, then reports the retried dispatch failure and completes', async () => {
+  it('answers the call as unreachable without a card instead of failing the turn, and completes', async () => {
     const toolSet = makeUnreachableDuringClassificationToolSet();
     const create = jest
       .fn()
@@ -118,74 +110,26 @@ describe('AgentThread enrichment degrade on an unreachable MCP server', () => {
       context: [{ role: 'user', content: 'call the flaky tool' }],
     });
 
-    // First turn: the model calls the tool, classification throws mid-enrichment.
-    let events = [];
+    const events: AgentThreadEvent[] = [];
     for await (const event of thread.execute({ signal: new AbortController().signal })) {
       events.push(event);
     }
 
-    // (a) The turn is not ended as an error; it pauses for approval instead.
+    // The turn is not ended as an error, and nothing was left to approve.
     expect(events.some(event => event.type === 'internal.agent.done' && event.status === 'error')).toBe(false);
-    expect(events.map(event => event.type)).toContain(EventType.TOOL_APPROVAL_REQUIRED);
+    expect(events.map(event => event.type)).not.toContain(EventType.TOOL_APPROVAL_REQUIRED);
+    expect(toolSet.callTool).not.toHaveBeenCalled();
 
-    const approvalEvent = events.find(event => event.type === EventType.TOOL_APPROVAL_REQUIRED);
-    if (approvalEvent?.type !== EventType.TOOL_APPROVAL_REQUIRED) {
-      throw new Error('expected a tool.approval_required event');
-    }
-    const pendingCall = approvalEvent.tool_calls[0];
-    if (pendingCall === undefined) {
-      throw new Error('expected one pending approval');
-    }
-    expect(pendingCall.id).toBe(TOOL_CALL_ID);
-
-    // (b) The tool info carried for that call is the fail-closed, approval-gated one this fix
-    // synthesizes — never a value the (throwing) server could have actually vouched for.
-    const deltasForCall = events.filter(
-      event => event.type === EventType.MODEL_MESSAGE_DELTA && event.id === pendingCall.source_event_id,
-    );
-    const toolInfosForCall = deltasForCall.flatMap(event =>
-      event.type === EventType.MODEL_MESSAGE_DELTA ? (event.tool_calls ?? []) : [],
-    );
-    // The wire ToolInfo carries only the model/approval-facing fields (no internal
-    // is_approval_required/is_client_side) — the description is what proves this call was
-    // classified fail-closed rather than genuinely vouched for by the (throwing) server.
-    expect(toolInfosForCall.map(tc => tc.tool_info)).toContainEqual(
-      expect.objectContaining({
-        type: 'mcp',
-        name: 'tool_a',
-        server_id: toolSet.id,
-        description: expect.stringContaining(CONNECTION_FAILURE_MESSAGE),
-      }),
-    );
-
-    // (c) Approve; dispatch retries the same dead connection, callTool throws again, and that
-    // lands as an honest tool.response error — not a second turn-level failure.
-    for await (const _event of thread.send([
-      {
-        type: EventType.USER_TOOL_APPROVAL,
-        thread_id: 'main',
-        tool_call_id: TOOL_CALL_ID,
-        approval: { status: 'allow', scope: 'once' },
-      },
-    ])) {
-      // Context updates are consumed by the session layer in production.
-    }
-    events = [];
-    for await (const event of thread.execute()) {
-      events.push(event);
-    }
-
-    expect(toolSet.callTool).toHaveBeenCalledTimes(1);
     const toolResponseEvent = events.find(
       event => event.type === EventType.TOOL_RESPONSE_V2 && event.tool_call_id === TOOL_CALL_ID,
     );
     if (toolResponseEvent?.type !== EventType.TOOL_RESPONSE_V2) {
-      throw new Error('expected a canonical tool.response.v2 event for the retried call');
+      throw new Error('expected a canonical tool.response.v2 event for the call');
     }
-    expect(toolResponseEvent.content).toEqual(expect.stringContaining('could not be prepared for execution'));
+    expect(toolResponseEvent.content).toEqual(
+      expect.stringContaining('flaky-mcp is not reachable right now, so nothing was sent. Try again in a minute.'),
+    );
     expect(toolResponseEvent.disposition).toBe('never_ran');
-    expect(toolResponseEvent.admission_provenance).toMatchObject({ source: 'user_approval' });
-    expect(events.some(event => event.type === 'internal.agent.done' && event.status === 'error')).toBe(false);
     expect(events.at(-1)).toMatchObject({ status: 'done' });
   });
 });
