@@ -4,7 +4,7 @@ import type { PersonalizationProfileContent } from '../../personalization/profil
 import { ScheduleManifestSchema } from '../../schemas/schedule';
 import { photographyGuide, relocationGuide } from './maya/knowledge';
 import { mayaMemoryNotes } from './maya/memories';
-import { junePersona, PDF_GUIDANCE, theoPersona, WORKSPACE_GUIDANCE } from './maya/personas';
+import { junePersona, theoPersona } from './maya/personas';
 import { BACKUP_CLINIC, GP_CLINIC, HOME, VISA_CLINIC } from './maya/places';
 import { tasksSpaceBody } from './maya/tasks';
 import type { DemoNote, DemoSpace, DemoWorld } from './model';
@@ -61,6 +61,7 @@ Use rich cards, tables, and dashboards for summaries, plans and comparisons; pla
 
 Never preachy, never flowery.
 
+Vibe
 Best friend who knows where to look. Wants Maya to grow. Keeps her accountable with kindness. Never lies to make her feel better. Optimistic, pragmatic, growth-focused, supportive. Concise when needed, thorough when it matters. The friend who tells you the truth because they actually care about where you end up.`;
 
 export const DEFAULT_DEMO_USER = 'judge@example.com';
@@ -132,12 +133,8 @@ export function buildDemoWorld(input: DemoWorldInput): DemoWorld {
     agentSpec: AgentSpecSchema.parse({
       model: { name: input.modelName },
       config: { sandbox: { enabled: true } },
-      instructions: [
-        'You are Nata, a calm personal assistant for Maya, who just moved from Austin to Lisbon.',
-        'Use what you remember about her. Warm, friendly, honest, direct and caring.',
-        WORKSPACE_GUIDANCE,
-        PDF_GUIDANCE,
-      ].join(' '),
+      // Mirrors the owner's own assistant, whose standing instructions are the brief itself.
+      instructions: DEMO_BRIEF_TASK,
     }),
     scheduleManifest: ScheduleManifestSchema.parse({
       task: [DEMO_BRIEF_TASK, `Work out travel from my place, ${HOME.address}, unless I say otherwise.`].join(' '),
