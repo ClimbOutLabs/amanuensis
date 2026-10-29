@@ -98,6 +98,7 @@ function notesSystemPrompt(): string {
     'responses: the numbers of the sentences in the assistant reply that are advice, recommendations, answers or decisions worth keeping.',
     '- Give only numbers from the list. Do not write the sentences out, and do not add anything else about the reply.',
     '- Pick a sentence only when it states the advice itself and makes sense on its own.',
+    '- A list in the reply is given one line per item, with its heading in front, such as "What to bring: a list of your medicines".',
     '',
     'Never keep:',
     '- the assistant\'s work plans, intentions, task steps or progress, such as "I will make two more edits" or "next I will search"',
@@ -219,31 +220,83 @@ function usableNoteText({
 }
 
 /** A line that is a list item: a dash, star or bullet, or a number followed by . or ), then a space. */
-const LIST_ITEM_LINE = /^(?:[-*•]|\d{1,3}[.)])\s/;
+const LIST_ITEM_LINE = /^(?:[-*•]|\d{1,3}[.)])\s+/;
+
+/** Within a line, a sentence ends at . ! or ? after a word with a letter in it (never after a bare list number) when a capital letter follows. */
+const SENTENCE_END = /(?<=\p{L}[^\s.!?]*[.!?])\s+(?=\p{Lu})/u;
+
+/** A reply sentence that is a list item under a header that says what not to do. Such an item is never advice on its own. */
+const NEGATED_HEADER_ITEM = /^\s*(?:do not|don(?:'|’)?t|never|avoid)\b[^:]{0,80}:\s/i;
+
+/** Prose as the person reads it: bold markers dropped, spacing flattened. */
+function plainText(text: string): string {
+  return text
+    .replace(/\*\*|__/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/** The last sentence of a prose chunk when it introduces a list (it does not end a sentence), without its colon. */
+function listHeader(prose: string): string | undefined {
+  if (/[.!?]$/.test(prose)) {
+    return undefined;
+  }
+  const last = prose.split(SENTENCE_END).pop() ?? '';
+  const header = plainText(last).replace(/:$/, '').trim();
+  return header === '' ? undefined : header;
+}
+
+interface ReplyUnit {
+  kind: 'prose' | 'item';
+  text: string;
+  /** A prose unit whose last sentence became the header of the list after it; that sentence is not a sentence on its own. */
+  usedAsHeader: boolean;
+}
 
 /**
- * The sentences of a reply, as written. A list item always continues the open sentence, and a line break
- * ends a sentence only after . ! or ?, so "Do not:" and every bullet under it read as one sentence and no
- * bullet stands alone. Within a line, a sentence ends at . ! or ? after a word with a letter in it (never
- * after a bare list number) when a capital letter follows. Exported for tests.
+ * The sentences of a reply, as written, one per list item. A list item becomes "<header>: <item>", the header
+ * being the line that introduced the list, so "Do not:" travels with every bullet under it and each item stays
+ * short enough to store. A list with no header gives its items as plain sentences. Prose lines join until one
+ * ends with . ! ? or a colon. Exported for tests.
  */
 export function replySentences(text: string): string[] {
-  const chunks: string[] = [];
-  for (const line of text.split('\n')) {
-    const trimmed = line.trim();
-    if (trimmed === '') {
+  const units: ReplyUnit[] = [];
+  let header: string | undefined;
+  for (const raw of text.split('\n')) {
+    const line = raw.trim();
+    if (line === '') {
       continue;
     }
-    const open = chunks.length > 0 ? chunks[chunks.length - 1] : undefined;
-    if (open === undefined || (!LIST_ITEM_LINE.test(trimmed) && /[.!?]$/.test(open))) {
-      chunks.push(trimmed);
-    } else {
-      chunks[chunks.length - 1] = `${open} ${trimmed}`;
+    const marker = LIST_ITEM_LINE.exec(line);
+    const last = units.length > 0 ? units[units.length - 1] : undefined;
+    if (marker !== null) {
+      const item = plainText(line.slice(marker[0].length));
+      if (item !== '') {
+        units.push({ kind: 'item', text: header === undefined ? item : `${header}: ${item}`, usedAsHeader: false });
+        if (header !== undefined) {
+          const introducer = [...units].reverse().find(unit => unit.kind === 'prose');
+          if (introducer !== undefined) {
+            introducer.usedAsHeader = true;
+          }
+        }
+      }
+      continue;
     }
+    if (last?.kind === 'prose' && !/[.!?:]$/.test(last.text)) {
+      last.text = `${last.text} ${line}`;
+    } else {
+      units.push({ kind: 'prose', text: line, usedAsHeader: false });
+    }
+    header = listHeader(units[units.length - 1]?.text ?? '');
   }
-  return chunks
-    .flatMap(chunk => chunk.split(/(?<=\p{L}[^\s.!?]*[.!?])\s+(?=\p{Lu})/u))
-    .map(sentence => sentence.trim())
+  return units
+    .flatMap(unit => {
+      if (unit.kind === 'item') {
+        return [unit.text];
+      }
+      const sentences = unit.text.split(SENTENCE_END).map(plainText);
+      return unit.usedAsHeader ? sentences.slice(0, -1) : sentences;
+    })
     .filter(sentence => sentence !== '')
     .slice(0, NOTES_MAX_REPLY_SENTENCES);
 }
@@ -310,7 +363,7 @@ export function parseNotesReply({
   }
   const replies = selectedSentences({ responses: parsed.data.responses, sentences })
     .flatMap(sentence => usableNoteText({ text: sentence, assistantName }) ?? [])
-    .filter(text => !readsAsAboutThePerson({ text, personName }));
+    .filter(text => !NEGATED_HEADER_ITEM.test(text) && !readsAsAboutThePerson({ text, personName }));
   for (const text of replies.slice(0, NOTES_MAX_REPLIES)) {
     notes.push({ source: ASSISTANT_RESPONSE_SOURCE, text });
   }

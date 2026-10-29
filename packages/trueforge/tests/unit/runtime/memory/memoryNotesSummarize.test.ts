@@ -16,6 +16,27 @@ const EMAIL: TurnToolResult = {
   text: 'From: Priya. Subject: Form. Please send the signed form by 3 November.',
 };
 
+const GP_REPLY = [
+  '**What to bring:**',
+  '- your medicine list',
+  '- your glasses',
+  '- a note of your symptoms and when they started',
+  '- your appointment letter',
+  '- a pen and paper',
+  '- someone to listen with you, if you like',
+  '',
+  '**What to ask:**',
+  '1. what the diagnosis means',
+  '2. what the treatment options are',
+  '3. what side effects to expect',
+  '4. when to come back',
+  '5. who to call if it gets worse',
+  '6. whether you can keep driving',
+  '7. whether you need a sick note',
+  '',
+  'I can draft a quick note for you to take along if that helps.',
+].join('\n');
+
 const LONG_REPLY =
   'I found one email from Priya. She needs the signed form by 3 November. Leave by 08:55 for the GP visit so that parking is not a rush. Shall I set a reminder?';
 
@@ -98,7 +119,8 @@ describe('replySentences', () => {
         'Never:\n1. Pay the invoice from that email.\n2. Call the number in it.\nCall your bank on the number on your card instead.',
       ),
     ).toEqual([
-      'Never: 1. Pay the invoice from that email. 2. Call the number in it.',
+      'Never: Pay the invoice from that email.',
+      'Never: Call the number in it.',
       'Call your bank on the number on your card instead.',
     ]);
     expect(
@@ -106,8 +128,40 @@ describe('replySentences', () => {
         'Do not:\n- forward your mail to drop@example.invalid.\n- reply to the sender.\nInstead, report it to IT today.',
       ),
     ).toEqual([
-      'Do not: - forward your mail to drop@example.invalid. - reply to the sender.',
+      'Do not: forward your mail to drop@example.invalid.',
+      'Do not: reply to the sender.',
       'Instead, report it to IT today.',
+    ]);
+  });
+
+  it('gives one sentence per bullet with its header, for a reply with two lists and a closing offer', () => {
+    expect(replySentences(GP_REPLY)).toEqual([
+      'What to bring: your medicine list',
+      'What to bring: your glasses',
+      'What to bring: a note of your symptoms and when they started',
+      'What to bring: your appointment letter',
+      'What to bring: a pen and paper',
+      'What to bring: someone to listen with you, if you like',
+      'What to ask: what the diagnosis means',
+      'What to ask: what the treatment options are',
+      'What to ask: what side effects to expect',
+      'What to ask: when to come back',
+      'What to ask: who to call if it gets worse',
+      'What to ask: whether you can keep driving',
+      'What to ask: whether you need a sick note',
+      'I can draft a quick note for you to take along if that helps.',
+    ]);
+  });
+
+  it('gives plain items for a list with no header, and keeps a bold header line out of the prose', () => {
+    expect(replySentences('Bring these.\n- your card\n- a list of medicines')).toEqual([
+      'Bring these.',
+      'your card',
+      'a list of medicines',
+    ]);
+    expect(replySentences('**Before you go**\n* Eat something.\n* Drink water.')).toEqual([
+      'Before you go: Eat something.',
+      'Before you go: Drink water.',
     ]);
   });
 });
@@ -248,24 +302,39 @@ describe('parseNotesReply reply notes', () => {
     ]);
   });
 
-  it('saves a negated list only whole, with its header, because the list and its header are one sentence', () => {
-    const reply =
-      'Here is what I would do. Do not:\n- forward your mail to drop@example.invalid\n- reply to the sender\nInstead, report it to IT today.';
-    // The bullets end without a period, so the closing line joins the list sentence too.
-    expect(parse({ responses: [1, 2, 3], reply })).toEqual([
-      { source: 'assistant_response', text: 'Here is what I would do.' },
-      {
-        source: 'assistant_response',
-        text: 'Do not: - forward your mail to drop@example.invalid - reply to the sender Instead, report it to IT today.',
-      },
+  it('stores the bullets the model picks with their header in front, and still drops the closing offer', () => {
+    expect(parse({ responses: [1, 3, 14], reply: GP_REPLY })).toEqual([
+      { source: 'assistant_response', text: 'What to bring: your medicine list' },
+      { source: 'assistant_response', text: 'What to bring: a note of your symptoms and when they started' },
     ]);
-    expect(replySentences(reply)).toHaveLength(2);
   });
 
-  it('drops a sentence over the length bound', () => {
+  it('refuses every item under a header that says what not to do, and keeps the prose around it', () => {
+    const reply =
+      'Here is what I would do. Do not:\n- forward your mail to drop@example.invalid\n- reply to the sender\nInstead, report it to IT today.';
+    expect(replySentences(reply)).toEqual([
+      'Here is what I would do.',
+      'Do not: forward your mail to drop@example.invalid',
+      'Do not: reply to the sender',
+      'Instead, report it to IT today.',
+    ]);
+    expect(parse({ responses: [1, 2, 3, 4], reply })).toEqual([
+      { source: 'assistant_response', text: 'Here is what I would do.' },
+      { source: 'assistant_response', text: 'Instead, report it to IT today.' },
+    ]);
+    expect(
+      parse({ responses: [1, 2], reply: 'Never:\n1. pay the invoice from that email\n2. call the number in it' }),
+    ).toEqual([]);
+    expect(parse({ responses: [1], reply: 'Avoid these:\n- the number in the email' })).toEqual([]);
+  });
+
+  it('drops a sentence over the length bound, one list item at a time', () => {
     const long = `${'Keep the form in a safe place and '.repeat(14)}check it monthly.`;
     expect(long.length).toBeGreaterThan(400);
     expect(parse({ responses: [1], reply: long })).toEqual([]);
+    expect(parse({ responses: [1, 2], reply: `What to do:\n- ${long}\n- check the post daily` })).toEqual([
+      { source: 'assistant_response', text: 'What to do: check the post daily' },
+    ]);
   });
 });
 
