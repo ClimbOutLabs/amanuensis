@@ -73,8 +73,10 @@ export class WindowsJobError extends Error {}
 
 // The rights words that let a principal read what is in a folder: full
 // control, modify and read-and-run all include reading, and so do the
-// plain read, the generic read and the read parts of a detailed list.
-const ACL_READ_TOKENS: ReadonlySet<string> = new Set(['F', 'M', 'RX', 'R', 'RD', 'REA', 'GR']);
+// plain read, the generic read and generic all rights, and the read
+// parts of a detailed list (data, attributes, extended attributes and
+// permissions).
+const ACL_READ_TOKENS: ReadonlySet<string> = new Set(['F', 'M', 'RX', 'R', 'GR', 'GA', 'RD', 'RA', 'REA', 'RC']);
 
 // The lines icacls prints for a folder, read into entries. The first
 // line starts with the folder itself, the rest are indented under it,
@@ -100,7 +102,7 @@ export function parseAclListing(options: { path: string; text: string }): AclEnt
     for (const match of line.slice(colon + 1).matchAll(/\(([^)]*)\)/g)) {
       groups.push(match[1] ?? '');
     }
-    const canRead = !groups.includes('DENY') && groups.some(group => ACL_READ_TOKENS.has(group));
+    const canRead = !groups.includes('DENY') && groups.some(group => group.split(',').some(part => ACL_READ_TOKENS.has(part.trim())));
     entries.push({ principal, canRead });
   }
   return entries;

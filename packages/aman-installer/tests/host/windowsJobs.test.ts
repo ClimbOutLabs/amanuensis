@@ -6,6 +6,7 @@ import { test } from 'node:test';
 import {
   SETUP_CMD_FORWARDER,
   WindowsJobError,
+  parseAclListing,
   systemWindowsJobs,
   userPathHasFolder,
   windowsPaths,
@@ -97,8 +98,19 @@ test('a folder access list is read into who it names and whether they can read',
       { principal: 'BUILTIN\\Users', canRead: true },
       { principal: 'FRIEND-PC\\Guest', canRead: false },
       { principal: 'FRIEND-PC\\Backup', canRead: false },
+      { principal: 'BUILTIN\\Users', canRead: true },
+      { principal: 'BUILTIN\\Users', canRead: true },
+      { principal: 'BUILTIN\\Users', canRead: true },
     ],
   });
+});
+
+test('comma-joined rights are split before they are judged for reading', () => {
+  for (const rights of ['GR,GE', 'RD,REA,RA,RC', 'M,DC']) {
+    assert.deepEqual(parseAclListing({ path: DATA_DIR, text: `${DATA_DIR} BUILTIN\\Users:(I)(OI)(CI)(${rights})` }), [
+      { principal: 'BUILTIN\\Users', canRead: true },
+    ]);
+  }
 });
 
 test('a folder that is not there reads as missing, and a refused read as unreadable', async () => {

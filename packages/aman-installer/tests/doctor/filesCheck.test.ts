@@ -7,7 +7,7 @@ import { test } from 'node:test';
 import { runDoctor, runDoctorChecks, type CheckRecord, type DoctorDeps } from '../../src/doctor/doctor.ts';
 import { FakeHost } from '../../src/host/fakeHost.ts';
 import { FakeWindowsJobs, type FakeWindowsJobStep } from '../../src/host/fakeWindowsJobs.ts';
-import { windowsPaths, type AclRead } from '../../src/host/windowsJobs.ts';
+import { systemWindowsJobs, windowsPaths, type AclRead } from '../../src/host/windowsJobs.ts';
 import {
   FILES_COULD_NOT_CHECK,
   FILES_COULD_NOT_FIX,
@@ -15,7 +15,7 @@ import {
   FILES_NOT_PRIVATE,
   FILES_PRIVATE_LINE,
 } from '../../src/messages.ts';
-import { StubProcessRunner } from '../../src/runner/processRunner.ts';
+import { StubProcessRunner, commandLine, okResult, type ProcessResult } from '../../src/runner/processRunner.ts';
 import { folderBackend } from '../../src/state/folderBackend.ts';
 import { createStateStore } from '../../src/state/state.ts';
 import type { SystemKind } from '../../src/host/host.ts';
@@ -116,6 +116,27 @@ test('a folder other accounts can read fails, with the fix the check promises', 
   assert.equal(record.fix, FILES_NOT_PRIVATE.fix);
   // Without Fix asked for, nothing is changed.
   assert.deepEqual(aclOps(world.jobs), ['aclRead']);
+});
+
+test('a folder whose listing joins read rights with commas is judged open', async () => {
+  const world = await makeWorld();
+  const runner = new StubProcessRunner(
+    new Map<string, ProcessResult>([
+      ['whoami', okResult(`${OWNER}\r\n`)],
+      [commandLine('icacls', [DATA_DIR]), okResult(`${DATA_DIR} BUILTIN\\Users:(I)(OI)(CI)(RD,REA,RA,RC)\r\n`)],
+    ]),
+  );
+  world.deps.windowsJobs = systemWindowsJobs({
+    runner,
+    localAppDataDir: LOCAL_APP_DATA,
+    selfExePath: 'C:\\Users\\Friend\\Downloads\\aman-windows-x64.exe',
+  });
+  const checks = await runDoctorChecks(world.deps, { local: false, files: true });
+  const record = filesRecord(checks.records);
+  assert.ok(record !== undefined);
+  assert.equal(record.state, 'fail');
+  assert.equal(record.detail, FILES_NOT_PRIVATE.happened);
+  assert.equal(record.fix, FILES_NOT_PRIVATE.fix);
 });
 
 test('with Fix, the folder is made private and read back before the check passes', async () => {
