@@ -82,6 +82,19 @@ describe('chat picture service', () => {
     expect(seen).toEqual([FOX]);
   });
 
+  it('serves a picture a search result listed, though no result link named the file', async () => {
+    const { seen, get } = service([
+      modelMessage({ id: 'm1', content: '', calls: [{ id: 'c1', name: 'web_search' }] }),
+      toolResponse({
+        id: 't1',
+        tool_call_id: 'c1',
+        result: { results: [{ title: 'Red Fox', url: 'https://example.com/foxes', images: [{ url: FOX }] }] },
+      }),
+    ]);
+    await expect(get(FOX)).resolves.toEqual({ status: 'shown', bytes: PNG, mime: 'image/png' });
+    expect(seen).toEqual([FOX]);
+  });
+
   it('serves a picture from a page the chat opened, though no result named the file', async () => {
     const { seen, get } = service([
       modelMessage({ id: 'm1', content: '', calls: [{ id: 'c1', name: 'web_fetch' }] }),

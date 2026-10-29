@@ -51,6 +51,16 @@ describe('htmlImageLinks', () => {
     ]);
   });
 
+  it('reads a src whose quotes are escaped, as HTML carried inside a JSON string is', () => {
+    const html = JSON.stringify(
+      '<img src="https://example.com/a.png" alt="A"><img src=\'https://example.com/b.png\'><img src="broken>',
+    );
+    expect(htmlImageLinks({ source: html, max: 20 })).toEqual([
+      'https://example.com/a.png',
+      'https://example.com/b.png',
+    ]);
+  });
+
   it('stops at the cap', () => {
     const html = Array.from({ length: 30 }, (_, i) => `<img src="https://example.com/${String(i)}.png">`).join('');
     expect(htmlImageLinks({ source: html, max: 20 })).toHaveLength(20);
