@@ -305,6 +305,12 @@ export interface AgentThreadConstructorInput {
    */
   modelToolCallIdleTimeoutMs?: number | undefined;
   /**
+   * Waits in milliseconds before each retry of the forced answer after the model service said
+   * to try again later; the list's length is the retry count. Undefined falls back to
+   * FORCED_ANSWER_RETRY_BACKOFF_MS.
+   */
+  forcedAnswerRetryBackoffMs?: readonly number[] | undefined;
+  /**
    * Bound in milliseconds on the pre-LLM context processor phase producing
    * progress before the turn fails visibly instead of hanging. Undefined falls
    * back to the core default (DEFAULT_PRE_LLM_PROCESSORS_TIMEOUT_MS).

@@ -83,7 +83,12 @@ import {
 } from '../llm/streamDeadline';
 import { toOpenAIChatMessage } from '../llm/toOpenAIChatMessage';
 import { estimateTokensForString } from '../llm/usage';
-import { isContextLengthError, ModelOutputRepetitionError, ModelStreamFault } from '../llm/VercelAILLM';
+import {
+  isContextLengthError,
+  isRetryableProviderError,
+  ModelOutputRepetitionError,
+  ModelStreamFault,
+} from '../llm/VercelAILLM';
 import {
   allowsChatApproval,
   allowsToolGrant,
@@ -158,7 +163,7 @@ import {
 } from '../sandbox/Sandbox';
 import { spaceClosingLine, spaceWriteSavedNothing, spaceWritesThisTurn } from '../spaces/turnSpaceWrites';
 import type { AgentTracing } from '../tracing/AgentTracing';
-import { awaitWithAbort, throwIfSignalAborted } from '../util/abort';
+import { awaitWithAbort, onSignalAbort, throwIfSignalAborted } from '../util/abort';
 import { resolveLocalTime } from '../util/clientTimezone';
 import { describeUnknownError, extractErrorLogFields } from '../util/errorLogFields';
 import type { AbnormalHandoff, AbnormalHandoffCause, AbnormalHandoffEvidence } from './AbnormalHandoff';
@@ -272,13 +277,13 @@ import {
 import {
   clearUnfinished,
   connectorUnreachableText,
-  DEFAULT_REPLY_STEP_BUDGET,
   progressRefundFor,
   recordUnfinished,
   REMOVED_TOOL_RESULT,
   REMOVED_TOOL_STREAK_MESSAGE,
   REMOVED_TOOL_STREAK_STOP_AT,
   removedToolMessage,
+  replyStepBudgetFor,
   retryIsDue,
   settleRetry,
   STEP_BUDGET_SPENT_AFTER_SPACE_WRITE_MESSAGE,
@@ -344,6 +349,17 @@ export const DEFAULT_MODEL_IDLE_TIMEOUT_MS = 60_000;
 /** Shown when a model call goes silent; the steps done so far are kept. */
 export const MODEL_STOPPED_ANSWERING_MESSAGE =
   'The model stopped answering, so this reply stopped. Send your message again to retry.';
+
+/**
+ * Waits before each retry of the forced answer when the model service says to try again later.
+ * The forced answer is the reply's last step, so a lost call there loses everything the turn
+ * gathered; two short waits cover a brief provider hiccup without holding the turn open long.
+ */
+export const FORCED_ANSWER_RETRY_BACKOFF_MS: readonly number[] = [2_000, 5_000];
+
+/** Shown when the model service kept refusing the forced answer; the steps already done are kept. */
+export const MODEL_SERVICE_UNAVAILABLE_MESSAGE =
+  'The model service did not answer after three tries, so this reply stopped. Wait a minute, then send your message again or run the task again.';
 
 /** Shown when a turn stops at its step limit; the steps already done stay done. */
 export const ITERATION_LIMIT_MESSAGE =
@@ -1845,6 +1861,7 @@ export class AgentThread {
   private readonly modelFirstResponseTimeoutMs: number;
   private readonly modelIdleTimeoutMs: number;
   private readonly modelToolCallIdleTimeoutMs: number;
+  private readonly forcedAnswerRetryBackoffMs: readonly number[];
   private readonly toolCallPolicy: HostToolCallPolicy | undefined;
   private readonly preLLMProcessorsTimeoutMs: number;
   private readonly sandboxRefreshTimeoutMs: number;
@@ -1902,6 +1919,7 @@ export class AgentThread {
       input.modelToolCallIdleTimeoutMs ?? DEFAULT_MODEL_TOOL_CALL_IDLE_TIMEOUT_MS,
       this.modelIdleTimeoutMs,
     );
+    this.forcedAnswerRetryBackoffMs = input.forcedAnswerRetryBackoffMs ?? FORCED_ANSWER_RETRY_BACKOFF_MS;
     this.toolCallPolicy = input.toolCallPolicy;
     this.preLLMProcessorsTimeoutMs = input.preLLMProcessorsTimeoutMs ?? DEFAULT_PRE_LLM_PROCESSORS_TIMEOUT_MS;
     this.sandboxRefreshTimeoutMs = input.sandboxRefreshTimeoutMs ?? DEFAULT_SANDBOX_REFRESH_TIMEOUT_MS;
@@ -3703,6 +3721,9 @@ export class AgentThread {
     // behind it stay in the history the retry sends, and a partial tool call never runs because
     // calls only execute from a completed step. Only a second silence ends the step.
     let silenceRetried = false;
+    // Retries of the forced answer after the provider said to try again later (see
+    // FORCED_ANSWER_RETRY_BACKOFF_MS); never counts toward the stream-fault attempts.
+    let providerRetries = 0;
     // Per-model request limit: take this model's place before the request is created, so the
     // silence deadlines in the loop only ever measure a request that was actually sent. While
     // the step waits, the chat shows the waiting line once.
@@ -3871,10 +3892,46 @@ export class AgentThread {
             });
             return { outcome: 'exit', modelMessageEventId, retryModelMessageEventId: undefined };
           }
-          if (signal?.aborted || !(error instanceof ModelStreamFault)) {
+          if (signal?.aborted) {
             throw error;
           }
-          if (attempt >= MAX_MODEL_STREAM_FAULT_ATTEMPTS) {
+          if (!(error instanceof ModelStreamFault)) {
+            // A definite "try again later" from the provider (5xx, 429) on the forced answer is
+            // retried after a short wait, since this step is the only one left and failing it
+            // throws away everything the turn gathered. Ordinary steps keep the outer
+            // fatal_error path: the model can pick up from its tool results on the next turn.
+            if (forcedAnswer === null || !isRetryableProviderError(error)) {
+              throw error;
+            }
+            const backoffMs = this.forcedAnswerRetryBackoffMs[providerRetries];
+            if (backoffMs === undefined) {
+              this.logger.warn('Model service kept refusing the forced answer; ending the step', {
+                ...extractErrorLogFields(error),
+                attempt,
+                step: this.metrics.iterations,
+              });
+              yield this.generateErrorEvent(MODEL_SERVICE_UNAVAILABLE_MESSAGE, undefined, 'model_stream_fault');
+              return { outcome: 'exit', modelMessageEventId, retryModelMessageEventId: undefined };
+            }
+            providerRetries++;
+            this.logger.warn('Model service refused the forced answer; retrying after a short wait', {
+              ...extractErrorLogFields(error),
+              attempt,
+              backoffMs,
+              step: this.metrics.iterations,
+            });
+            const waited = await awaitWithTimeout(
+              new Promise<void>(resolve => {
+                onSignalAbort(signal, resolve);
+              }),
+              backoffMs,
+            );
+            if (waited !== OPERATION_TIMEOUT || signal?.aborted) {
+              return { outcome: 'exit', modelMessageEventId, retryModelMessageEventId: undefined };
+            }
+            continue;
+          }
+          if (attempt - providerRetries >= MAX_MODEL_STREAM_FAULT_ATTEMPTS) {
             // A repetition fault gets its own actionable guidance, and only a context-length
             // fault is blamed on the chat's length; anything else would mislead the user.
             const message =
@@ -5790,7 +5847,10 @@ export class AgentThread {
               stepsSoFar >=
               stepBudgetFor({
                 isSubAgent: this.parent !== undefined,
-                budget: this.definition.stepBudget ?? DEFAULT_REPLY_STEP_BUDGET,
+                budget: replyStepBudgetFor({
+                  definitionBudget: this.definition.stepBudget,
+                  unattended: this.sentinel?.services.unattended === true,
+                }),
               });
             const removedStreak = replyLedger.removedToolRejectionStreaks.get(this.threadId) ?? 0;
             const forcedAnswer: ForcedAnswer | null = budgetSpent
