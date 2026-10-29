@@ -3,6 +3,7 @@ import { CALDAV_SERVER_NAME } from '@truefoundry/trueforge-core/core/calendar/ca
 import { MAIL_CONNECTOR_NAME } from '@truefoundry/trueforge-core/core/email/mailConnector/toolContract';
 import { defaultSearchConnector } from '../../../../src/catalog/defaultSearchConnector';
 import { SkillCatalog } from '../../../../src/catalog/SkillCatalog';
+import { PHOTOGRAPHY_GUIDE_LABEL, RELOCATION_GUIDE_LABEL } from '../../../../src/cli/demoSeed/maya/knowledge';
 import { resetDemoWorld, seedDemoWorld } from '../../../../src/cli/demoSeed/seed';
 import { dayInZone, parseDemoDay } from '../../../../src/cli/demoSeed/storyDays.mjs';
 import {
@@ -17,6 +18,7 @@ import {
 } from '../../../../src/cli/demoSeed/world';
 import { SentinelAuditStore } from '../../../../src/db/sentinelAuditStore';
 import { SqliteSessionStore } from '../../../../src/db/sqlite/session-store/SqliteSessionStore';
+import { formatSourceEntry } from '../../../../src/personaKnowledge/knowledgeAttribution';
 import {
   createTestWorld,
   MAIL_MCP_URL,
@@ -149,8 +151,55 @@ describe('demo seed against the real stores', () => {
     expect(theo.map(document => document.title)).toContain('Twelve places to shoot in Lisbon');
     expect(june.map(document => document.title)).not.toContain('Twelve places to shoot in Lisbon');
     expect([...june, ...theo].every(document => document.status === 'ready')).toBe(true);
-    expect([...june, ...theo].every(document => document.source_label.startsWith(`${DEMO_MARKER}:`))).toBe(true);
     expect(world.queued).toHaveLength(11);
+  });
+
+  it('cites a seeded document by its title and a plain label, never an id', async () => {
+    await seed(stores, DAY_ONE);
+
+    const june = await stores.knowledge.listDocuments({ personaId: DEMO_JUNE_ID });
+    const theo = await stores.knowledge.listDocuments({ personaId: DEMO_THEO_ID });
+
+    expect(june.every(document => document.source_label === RELOCATION_GUIDE_LABEL)).toBe(true);
+    expect(theo.every(document => document.source_label === PHOTOGRAPHY_GUIDE_LABEL)).toBe(true);
+    expect([...june, ...theo].every(document => document.id.startsWith('maya-doc-'))).toBe(true);
+    for (const document of [...june, ...theo]) {
+      const entry = formatSourceEntry({
+        text: '',
+        title: document.title,
+        sourceLabel: document.source_label,
+        sourceUrl: null,
+        similarity: 1,
+        documentId: document.id,
+      });
+      expect(entry.endsWith(` (${document.source_label})`)).toBe(true);
+      expect(entry).not.toContain(document.id);
+      expect(entry).not.toMatch(/[0-9a-f]{12}/);
+    }
+  });
+
+  it('replaces a document whose text changed and keeps the rest', async () => {
+    await seed(stores, DAY_ONE);
+    const world = worldFor(DAY_ONE);
+    const [june, ...others] = world.personas;
+    if (june === undefined) {
+      throw new Error('The demo world has no personas.');
+    }
+    const [first, ...rest] = june.knowledge;
+    if (first === undefined) {
+      throw new Error('The demo world has no knowledge documents.');
+    }
+    const changed = {
+      ...world,
+      personas: [{ ...june, knowledge: [{ ...first, text: `${first.text}\n\nOne more line.` }, ...rest] }, ...others],
+    };
+
+    const report = await seedDemoWorld({ stores, scope, world: changed, now: DAY_ONE, connectors: testConnectors() });
+
+    expect(report.knowledge).toMatchObject({ created: 1, unchanged: 10, removed: 1 });
+    const documents = await stores.knowledge.listDocuments({ personaId: DEMO_JUNE_ID });
+    expect(documents.map(document => document.title)).toContain(first.title);
+    expect(documents.every(document => document.source_label === RELOCATION_GUIDE_LABEL)).toBe(true);
   });
 
   it('reports documents the indexer has not finished, and does not wait forever for them', async () => {
