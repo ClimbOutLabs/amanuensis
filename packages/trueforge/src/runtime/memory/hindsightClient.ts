@@ -520,7 +520,8 @@ export class HindsightClient implements MemoryClient {
     return { ok: true };
   }
 
-  async deleteDocument(params: { documentId: string; timeoutMs: number }): Promise<RetainOutcome> {
+  async deleteDocument(params: { documentId: string; context?: string; timeoutMs: number }): Promise<RetainOutcome> {
+    // Hindsight keys documents by id alone; the context is for stores that kept copies before ids existed.
     const sent = await this.send({
       path: `/documents/${encodeURIComponent(params.documentId)}`,
       method: 'DELETE',

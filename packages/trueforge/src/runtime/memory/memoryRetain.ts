@@ -115,6 +115,35 @@ export interface SummarizeTurnContext {
    * its reply can say whose reply it was. Undefined falls back to "the assistant".
    */
   assistantName?: string | undefined;
+  /**
+   * Lines of the person's personalization and learned profile. A summary that only repeats them is
+   * not saved, so the profile is never copied into memory turn after turn.
+   */
+  profileLines?: readonly string[] | undefined;
+}
+
+/** A line as compared for the profile guard: case, surrounding space, and a leading bullet do not count. */
+function comparableLine(line: string): string {
+  return line
+    .trim()
+    .replace(/^(?:[-*\u2022]\s+)/, '')
+    .trim()
+    .toLowerCase();
+}
+
+/**
+ * True when every fact is already a line of the profile (so the whole summary is a copy of it, or
+ * a line-for-line subset). A summary with even one new line is kept whole.
+ */
+export function isProfileEcho(params: {
+  facts: readonly string[];
+  profileLines: readonly string[] | undefined;
+}): boolean {
+  if (params.facts.length === 0 || params.profileLines === undefined || params.profileLines.length === 0) {
+    return false;
+  }
+  const known = new Set(params.profileLines.map(comparableLine).filter(line => line !== ''));
+  return params.facts.every(fact => fact.split('\n').every(line => known.has(comparableLine(line))));
 }
 
 /**
@@ -276,6 +305,13 @@ async function decidePersonFacts(params: SubmitRetainParams): Promise<TurnMemory
           logTurnMemoryNotSaved(params, {
             message: 'it only described what the assistant could not do',
             reason: 'ability_notes_only',
+          });
+          return { kind: 'nothing' };
+        }
+        if (isProfileEcho({ facts, profileLines: summarize.profileLines })) {
+          logTurnMemoryNotSaved(params, {
+            message: 'it only repeated what the profile already says',
+            reason: 'profile_echo',
           });
           return { kind: 'nothing' };
         }

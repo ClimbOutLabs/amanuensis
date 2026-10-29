@@ -242,6 +242,22 @@ export function entryMetadata(text: string): Record<string, string> | undefined 
   return Object.keys(metadata).length === 0 ? undefined : metadata;
 }
 
+/**
+ * True for an entry stored as a copy of a replaced document before entries recorded a document id.
+ * Such a copy carries no trailer at all (a document mirror never recorded a chat or a source), and
+ * its body closes with the document's own `> context` line. An entry with any trailer is a chat note
+ * or an imported note that merely quotes the line, never a copy.
+ */
+export function isLegacyDocumentCopy({ text, context }: { text: string; context: string }): boolean {
+  const { body, metadata } = splitEntryTrailers(text);
+  if (Object.keys(metadata).length > 0) {
+    return false;
+  }
+  const lines = body.split('\n');
+  const closing = (lines.pop() ?? '').trim();
+  return closing === `> ${context}` && lines.some(line => line.trim() !== '' && !line.startsWith('## '));
+}
+
 /** The entry text the Memories page shows and edits: the hidden chat id, document id and note lines are dropped. */
 export function withoutHiddenMarkers(text: string): string {
   const { body, metadata } = splitEntryTrailers(text);

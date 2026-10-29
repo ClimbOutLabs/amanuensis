@@ -17,6 +17,7 @@ import { HindsightClient, type RetainOutcome } from '../../../src/runtime/memory
 import {
   buildDistillationMessages,
   isLearningRateCapped,
+  LEARNED_PROFILE_CONTEXT,
   learnedProfileDocumentId,
   learnedProfileOperationId,
   mirrorLearnedProfile,
@@ -313,6 +314,7 @@ describe('mirrorLearnedProfile', () => {
     expect(deleteDocument).toHaveBeenCalledTimes(2);
     for (const [call] of deleteDocument.mock.calls) {
       expect(call.documentId).toBe(learnedProfileDocumentId('user-a'));
+      expect(call.context).toBe(LEARNED_PROFILE_CONTEXT);
     }
   });
 

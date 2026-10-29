@@ -33,6 +33,7 @@ import {
   HeldActionRefusedError,
   isAgentInputUserMessage,
   isFileContentPart,
+  isHostWrappedText,
   McpConnectionError,
   newEventId,
   rawSandboxId,
@@ -75,7 +76,7 @@ import { evalPageFixtures } from '../eval/pageFixtures';
 import type { IOAuthTokenStore } from '../mcp/auth/types';
 import { setUpConnectorNamesOf } from '../mcp/hostConnectors';
 import type { PersonaKnowledgeHit } from '../personaKnowledge/knowledgeRetrieval';
-import type { PersonalizationProfile } from '../personalization/profile';
+import { personalizationFactLines, type PersonalizationProfile } from '../personalization/profile';
 import type { PersonaContext } from '../personas/persona';
 import {
   createAndExecuteTurnRoute,
@@ -970,6 +971,7 @@ export function extractUserMessageText(input: TurnInputItem[] | undefined): stri
         : message.content
             .filter(part => !isFileContentPart(part))
             .map(part => part.text)
+            .filter(text => !isHostWrappedText(text))
             .join(' '),
     )
     .join('\n\n');
@@ -1618,6 +1620,7 @@ async function beginAcceptedTurnExecution(
         sessionAgent: session.record.agent,
         memoryClientPresent: deps.memoryClient !== undefined,
         personName: deps.personalizationProfile?.user_name ?? undefined,
+        profileLines: deps.personalizationProfile ? personalizationFactLines(deps.personalizationProfile) : undefined,
         assistantName: deps.personaContext?.persona_name ?? deps.personalizationProfile?.assistant_name ?? undefined,
       });
       // The person's memory switch, read once per turn like the settings around it.
@@ -2490,6 +2493,7 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
       sessionAgent: session.record.agent,
       memoryClientPresent: memoryClient !== undefined,
       personName: profile?.user_name ?? undefined,
+      profileLines: profile ? personalizationFactLines(profile) : undefined,
       assistantName:
         (persona?.kind === 'persona' ? persona.persona.display_name : undefined) ??
         profile?.assistant_name ??

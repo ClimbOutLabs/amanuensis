@@ -56,6 +56,7 @@ import {
   estimateTokens,
   formatRetainEntry,
   isFromSession,
+  isLegacyDocumentCopy,
   latestTombstonesByEntry,
   markSummaryFailed,
   namespaceDirFor,
@@ -366,7 +367,11 @@ export class MarkdownMemoryClient implements MemoryClient {
       // Looked up before the append so a retry after a half-finished attempt finds, and hides, the
       // copy that attempt wrote as well as the original: one entry remains.
       const replaced = await this.liveDocumentEntryIds(
-        items.flatMap(item => (item.metadata?.[REPLACE_DOCUMENT_METADATA_KEY] === 'true' ? [item.document_id] : [])),
+        items.flatMap(item =>
+          item.metadata?.[REPLACE_DOCUMENT_METADATA_KEY] === 'true'
+            ? [{ documentId: item.document_id, context: item.context?.trim() }]
+            : [],
+        ),
       );
       for (const [day, items] of byDay) {
         const filePath = path.join(this.dailyDir(), `${day}.md`);
@@ -406,10 +411,12 @@ export class MarkdownMemoryClient implements MemoryClient {
     }
   }
 
-  async deleteDocument(params: { documentId: string; timeoutMs: number }): Promise<RetainOutcome> {
+  async deleteDocument(params: { documentId: string; context?: string; timeoutMs: number }): Promise<RetainOutcome> {
     try {
       await withTimeout(
-        this.liveDocumentEntryIds([params.documentId]).then(ids => this.hideEntries(ids)),
+        this.liveDocumentEntryIds([{ documentId: params.documentId, context: params.context?.trim() }]).then(ids =>
+          this.hideEntries(ids),
+        ),
         params.timeoutMs,
         `markdown deleteDocument ${params.documentId}`,
       );
@@ -684,9 +691,16 @@ export class MarkdownMemoryClient implements MemoryClient {
     return parsed.toISOString().slice(0, 10);
   }
 
-  /** Ids of the visible entries in the write vault that carry one of these document ids. */
-  private async liveDocumentEntryIds(documentIds: readonly string[]): Promise<string[]> {
-    if (documentIds.length === 0) {
+  /**
+   * Ids of the visible entries in the write vault that are earlier copies of one of these documents:
+   * entries carrying the document id, and (only when a context is given) copies written before ids
+   * were recorded, which `isLegacyDocumentCopy` recognises. Those older copies recorded no user, so a
+   * tenant vault shared by several people hides every person's older copy of the same document.
+   */
+  private async liveDocumentEntryIds(
+    documents: readonly { documentId: string; context: string | undefined }[],
+  ): Promise<string[]> {
+    if (documents.length === 0) {
       return [];
     }
     const scan = await scanNamespaceEntries({
@@ -695,8 +709,18 @@ export class MarkdownMemoryClient implements MemoryClient {
       maxDailyFiles: Number.POSITIVE_INFINITY,
       resolveTombstones: true,
     });
+    const documentIds = new Set(documents.map(document => document.documentId));
+    const legacyContexts = documents.flatMap(document =>
+      document.context === undefined || document.context === '' ? [] : [document.context],
+    );
     return scan.entries
-      .filter(entry => documentIds.includes(entryMetadata(entry.text)?.[DOCUMENT_ID_METADATA_KEY] ?? ''))
+      .filter(entry => {
+        const documentId = entryMetadata(entry.text)?.[DOCUMENT_ID_METADATA_KEY];
+        if (documentId !== undefined) {
+          return documentIds.has(documentId);
+        }
+        return legacyContexts.some(context => isLegacyDocumentCopy({ text: entry.text, context }));
+      })
       .map(entry => entry.id);
   }
 

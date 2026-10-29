@@ -138,6 +138,8 @@ export interface ResolveTurnSummarizeContextParams {
    * context with no name, and the summarizer writes about "the person".
    */
   personName?: string | undefined;
+  /** Lines of the person's profile, so a summary that only repeats the profile is not saved. */
+  profileLines?: readonly string[] | undefined;
   /** The name of the persona or assistant that replies this turn, so notes about its replies can name it. */
   assistantName?: string | undefined;
 }
@@ -219,6 +221,7 @@ export async function resolveTurnSummarizeContext(
         tokenFactoryBudget,
         modelUsage,
         personName,
+        profileLines: params.profileLines,
         assistantName,
       };
     }
@@ -230,6 +233,7 @@ export async function resolveTurnSummarizeContext(
       tokenFactoryBudget,
       modelUsage,
       personName,
+      profileLines: params.profileLines,
       assistantName,
     };
   } catch (error) {
@@ -244,6 +248,7 @@ export async function resolveTurnSummarizeContext(
       tokenFactoryBudget,
       modelUsage,
       personName,
+      profileLines: params.profileLines,
       assistantName,
     };
   }
