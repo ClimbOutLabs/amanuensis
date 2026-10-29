@@ -326,6 +326,11 @@ export function entryOccurredAt(entry: { id: string; text: string }): string | u
   return headingInstant(entry.text) ?? /(\d{4}-\d{2}-\d{2})\.md#\d+$/.exec(entry.id)?.[1];
 }
 
+/** An entry's body with case and spacing flattened and every trailer dropped, so two copies of one note compare equal. */
+export function normalizedEntryBody(text: string): string {
+  return entryRecallText(text).toLowerCase().replace(/\s+/g, ' ').trim();
+}
+
 /**
  * What recall shows the model for an entry: the text alone. The timestamp heading, the hidden chat id
  * and the read-content marker are left out because recall reports them as the item's date and origin.

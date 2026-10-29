@@ -15,7 +15,7 @@ import { stripAssistantAbilityNotes, withoutAbilityNotes } from './assistantAbil
 import type { RetainItem } from './hindsightClient';
 import { isOperationCompletedStatus, isOperationFailedStatus } from './hindsightClient';
 import { localDay } from './localDay';
-import { SESSION_ID_METADATA_KEY } from './markdownMemoryFiles';
+import { normalizedEntryBody, SESSION_ID_METADATA_KEY } from './markdownMemoryFiles';
 import type { MemoryClient } from './memoryClient';
 import {
   labeledNoteText,
@@ -411,6 +411,44 @@ function noteRetainItems({
   }));
 }
 
+/**
+ * The items not already in the vault. A note read from outside the chat comes back turn after turn while
+ * the same email or page is in view, so one whose body matches a live entry is not stored again. The
+ * person's own words are never deduplicated. A backend with no listing stores every item.
+ */
+async function withoutStoredCopies({
+  params,
+  items,
+}: {
+  params: SubmitRetainParams;
+  items: readonly RetainItem[];
+}): Promise<RetainItem[]> {
+  const readContent = (item: RetainItem): boolean =>
+    item.metadata?.[MEMORY_ORIGIN_METADATA_KEY] === TOOL_INGESTED_ORIGIN;
+  if (!items.some(readContent)) {
+    return [...items];
+  }
+  let stored: Set<string>;
+  try {
+    const listed = await params.client.listEntries({
+      namespace: '',
+      timeoutMs: configuration.MEMORY_RETAIN_TIMEOUT_MS,
+    });
+    if (!listed.ok) {
+      return [...items];
+    }
+    stored = new Set(listed.entries.map(entry => normalizedEntryBody(entry.text)));
+  } catch (error) {
+    // A listing that fails must never lose a memory; the copy is stored and the person can delete it.
+    params.logger.debug('Memory listing failed before retain; storing without the duplicate check', {
+      sessionId: params.sessionId,
+      reason: error instanceof Error ? error.message : String(error),
+    });
+    return [...items];
+  }
+  return items.filter(item => !readContent(item) || !stored.has(normalizedEntryBody(item.content)));
+}
+
 async function attemptRetainSubmission(
   params: SubmitRetainParams,
   /**
@@ -446,9 +484,18 @@ async function attemptRetainSubmission(
     });
     return 'skipped';
   }
+  const items = await withoutStoredCopies({
+    params,
+    items: [...(personItem === undefined ? [] : [personItem]), ...noteItems],
+  });
+  if (items.length === 0) {
+    logTurnMemoryNotSaved(params, { message: 'the same note is already in memory', reason: 'already_stored' });
+    await params.client.completeOperation?.(retainOperationId({ sessionId: params.sessionId, turnId: params.turnId }));
+    return 'skipped';
+  }
   try {
     const outcome = await params.client.retain({
-      items: [...(personItem === undefined ? [] : [personItem]), ...noteItems],
+      items,
       operationId: retainOperationId({ sessionId: params.sessionId, turnId: params.turnId }),
       timeoutMs: configuration.MEMORY_RETAIN_TIMEOUT_MS,
     });
