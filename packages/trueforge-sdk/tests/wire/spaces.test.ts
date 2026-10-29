@@ -5,642 +5,736 @@ import { TrueForge } from "../../src/Client";
 import { mockServerPool } from "../mock-server/MockServerPool";
 
 describe("SpacesClient", () => {
-    
     test("list (1)", async () => {
         const server = mockServerPool.createServer();
-        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
-        
-        const rawResponseBody = { "data" : { "aggregate_revision" : 0 , "spaces" : [ { "body" : "body" , "created_at" : "2024-01-15T09:30:00Z" , "id" : "id" , "name" : "name" , "purpose" : "purpose" , "revision" : 1 , "status" : "active" , "updated_at" : "2024-01-15T09:30:00Z" } ] } , "pagination" : { "has_more" : true , "next_offset" : 1 } };
-        
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
+
+        const rawResponseBody = {
+            data: {
+                aggregate_revision: 0,
+                spaces: [
+                    {
+                        body: "body",
+                        created_at: "2024-01-15T09:30:00Z",
+                        id: "id",
+                        name: "name",
+                        purpose: "purpose",
+                        revision: 1,
+                        status: "active",
+                        updated_at: "2024-01-15T09:30:00Z",
+                    },
+                ],
+            },
+            pagination: { has_more: true, next_offset: 1 },
+        };
+
+        server.mockEndpoint().get("/api/v1/spaces").respondWith().statusCode(200).jsonBody(rawResponseBody).build();
+
+        const response = await client.spaces.list({
+            limit: 500,
+            offset: 0,
+        });
+        expect(response).toEqual({
+            data: {
+                aggregateRevision: 0,
+                spaces: [
+                    {
+                        body: "body",
+                        createdAt: new Date("2024-01-15T09:30:00.000Z"),
+                        id: "id",
+                        name: "name",
+                        purpose: "purpose",
+                        revision: 1,
+                        status: "active",
+                        updatedAt: new Date("2024-01-15T09:30:00.000Z"),
+                    },
+                ],
+            },
+            pagination: {
+                hasMore: true,
+                nextOffset: 1,
+            },
+        });
+    });
+
+    test("list (2)", async () => {
+        const server = mockServerPool.createServer();
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
+
+        const rawResponseBody = { error: { message: "message" } };
+
+        server.mockEndpoint().get("/api/v1/spaces").respondWith().statusCode(401).jsonBody(rawResponseBody).build();
+
+        await expect(async () => {
+            return await client.spaces.list();
+        }).rejects.toThrow(TrueForgeTypes.UnauthorizedError);
+    });
+
+    test("list (3)", async () => {
+        const server = mockServerPool.createServer();
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
+
+        const rawResponseBody = { error: { message: "message" } };
+
+        server.mockEndpoint().get("/api/v1/spaces").respondWith().statusCode(409).jsonBody(rawResponseBody).build();
+
+        await expect(async () => {
+            return await client.spaces.list();
+        }).rejects.toThrow(TrueForgeTypes.ConflictError);
+    });
+
+    test("create (1)", async () => {
+        const server = mockServerPool.createServer();
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
+        const rawRequestBody = {
+            expected_aggregate_revision: 0,
+            space: { body: "body", name: "name", purpose: "purpose", status: "active" },
+        };
+        const rawResponseBody = {
+            data: {
+                aggregate_revision: 0,
+                space: {
+                    body: "body",
+                    created_at: "2024-01-15T09:30:00Z",
+                    format: "markdown",
+                    id: "id",
+                    name: "name",
+                    purpose: "purpose",
+                    revision: 1,
+                    status: "active",
+                    updated_at: "2024-01-15T09:30:00Z",
+                },
+            },
+        };
+
         server
             .mockEndpoint()
-            .get("/api/v1/spaces").respondWith()
-            .statusCode(200).jsonBody(rawResponseBody)
-                .build();
+            .post("/api/v1/spaces")
+            .jsonBody(rawRequestBody)
+            .respondWith()
+            .statusCode(200)
+            .jsonBody(rawResponseBody)
+            .build();
 
-        
-                        
-                                const response = await client.spaces.list({
-    limit: 500,
-    offset: 0
-});
-                                expect(response).toEqual({
-    data: {
-        aggregateRevision: 0,
-        spaces: [{
+        const response = await client.spaces.create({
+            expectedAggregateRevision: 0,
+            space: {
                 body: "body",
-                createdAt: new Date("2024-01-15T09:30:00.000Z"),
+                name: "name",
+                purpose: "purpose",
+                status: "active",
+            },
+        });
+        expect(response).toEqual({
+            data: {
+                aggregateRevision: 0,
+                space: {
+                    body: "body",
+                    createdAt: new Date("2024-01-15T09:30:00.000Z"),
+                    format: "markdown",
+                    id: "id",
+                    name: "name",
+                    purpose: "purpose",
+                    revision: 1,
+                    status: "active",
+                    updatedAt: new Date("2024-01-15T09:30:00.000Z"),
+                },
+            },
+        });
+    });
+
+    test("create (2)", async () => {
+        const server = mockServerPool.createServer();
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
+        const rawRequestBody = {
+            expected_aggregate_revision: 1,
+            space: { body: "body", name: "x", purpose: "x", status: "active" },
+        };
+        const rawResponseBody = { error: { message: "message" } };
+
+        server
+            .mockEndpoint()
+            .post("/api/v1/spaces")
+            .jsonBody(rawRequestBody)
+            .respondWith()
+            .statusCode(400)
+            .jsonBody(rawResponseBody)
+            .build();
+
+        await expect(async () => {
+            return await client.spaces.create({
+                expectedAggregateRevision: 1,
+                space: {
+                    body: "body",
+                    name: "x",
+                    purpose: "x",
+                    status: "active",
+                },
+            });
+        }).rejects.toThrow(TrueForgeTypes.BadRequestError);
+    });
+
+    test("create (3)", async () => {
+        const server = mockServerPool.createServer();
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
+        const rawRequestBody = {
+            expected_aggregate_revision: 1,
+            space: { body: "body", name: "x", purpose: "x", status: "active" },
+        };
+        const rawResponseBody = { error: { message: "message" } };
+
+        server
+            .mockEndpoint()
+            .post("/api/v1/spaces")
+            .jsonBody(rawRequestBody)
+            .respondWith()
+            .statusCode(401)
+            .jsonBody(rawResponseBody)
+            .build();
+
+        await expect(async () => {
+            return await client.spaces.create({
+                expectedAggregateRevision: 1,
+                space: {
+                    body: "body",
+                    name: "x",
+                    purpose: "x",
+                    status: "active",
+                },
+            });
+        }).rejects.toThrow(TrueForgeTypes.UnauthorizedError);
+    });
+
+    test("create (4)", async () => {
+        const server = mockServerPool.createServer();
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
+        const rawRequestBody = {
+            expected_aggregate_revision: 1,
+            space: { body: "body", name: "x", purpose: "x", status: "active" },
+        };
+        const rawResponseBody = { error: { message: "message" } };
+
+        server
+            .mockEndpoint()
+            .post("/api/v1/spaces")
+            .jsonBody(rawRequestBody)
+            .respondWith()
+            .statusCode(409)
+            .jsonBody(rawResponseBody)
+            .build();
+
+        await expect(async () => {
+            return await client.spaces.create({
+                expectedAggregateRevision: 1,
+                space: {
+                    body: "body",
+                    name: "x",
+                    purpose: "x",
+                    status: "active",
+                },
+            });
+        }).rejects.toThrow(TrueForgeTypes.ConflictError);
+    });
+
+    test("get (1)", async () => {
+        const server = mockServerPool.createServer();
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
+
+        const rawResponseBody = {
+            data: {
+                body: "body",
+                created_at: "2024-01-15T09:30:00Z",
+                format: "markdown",
                 id: "id",
                 name: "name",
                 purpose: "purpose",
                 revision: 1,
                 status: "active",
-                updatedAt: new Date("2024-01-15T09:30:00.000Z")
-            }]
-    },
-    pagination: {
-        hasMore: true,
-        nextOffset: 1
-    }
-});
-                              
-                    
-    });
-          
-    test("list (2)", async () => {
-        const server = mockServerPool.createServer();
-        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
-        
-        const rawResponseBody = { "error" : { "message" : "message" } };
-        
+                updated_at: "2024-01-15T09:30:00Z",
+            },
+        };
+
         server
             .mockEndpoint()
-            .get("/api/v1/spaces").respondWith()
-            .statusCode(401).jsonBody(rawResponseBody)
-                .build();
+            .get("/api/v1/spaces/space_id")
+            .respondWith()
+            .statusCode(200)
+            .jsonBody(rawResponseBody)
+            .build();
 
-        
-            await expect(async () => {
-                return await client.spaces.list()
-            }).rejects.toThrow(TrueForgeTypes.UnauthorizedError);
+        const response = await client.spaces.get("space_id", {
+            revision: 18,
+        });
+        expect(response).toEqual({
+            data: {
+                body: "body",
+                createdAt: new Date("2024-01-15T09:30:00.000Z"),
+                format: "markdown",
+                id: "id",
+                name: "name",
+                purpose: "purpose",
+                revision: 1,
+                status: "active",
+                updatedAt: new Date("2024-01-15T09:30:00.000Z"),
+            },
+        });
     });
-          
-    test("list (3)", async () => {
-        const server = mockServerPool.createServer();
-        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
-        
-        const rawResponseBody = { "error" : { "message" : "message" } };
-        
-        server
-            .mockEndpoint()
-            .get("/api/v1/spaces").respondWith()
-            .statusCode(409).jsonBody(rawResponseBody)
-                .build();
 
-        
-            await expect(async () => {
-                return await client.spaces.list()
-            }).rejects.toThrow(TrueForgeTypes.ConflictError);
-    });
-          
-    test("create (1)", async () => {
-        const server = mockServerPool.createServer();
-        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
-        const rawRequestBody = { "expected_aggregate_revision" : 0 , "space" : { "body" : "body" , "name" : "name" , "purpose" : "purpose" , "status" : "active" } };
-        const rawResponseBody = { "data" : { "aggregate_revision" : 0 , "space" : { "body" : "body" , "created_at" : "2024-01-15T09:30:00Z" , "format" : "markdown" , "id" : "id" , "name" : "name" , "purpose" : "purpose" , "revision" : 1 , "status" : "active" , "updated_at" : "2024-01-15T09:30:00Z" } } };
-        
-        server
-            .mockEndpoint()
-            .post("/api/v1/spaces").jsonBody(rawRequestBody)
-                .respondWith()
-            .statusCode(200).jsonBody(rawResponseBody)
-                .build();
-
-        
-                        
-                                const response = await client.spaces.create({
-    expectedAggregateRevision: 0,
-    space: {
-        body: "body",
-        name: "name",
-        purpose: "purpose",
-        status: "active"
-    }
-});
-                                expect(response).toEqual({
-    data: {
-        aggregateRevision: 0,
-        space: {
-            body: "body",
-            createdAt: new Date("2024-01-15T09:30:00.000Z"),
-            format: "markdown",
-            id: "id",
-            name: "name",
-            purpose: "purpose",
-            revision: 1,
-            status: "active",
-            updatedAt: new Date("2024-01-15T09:30:00.000Z")
-        }
-    }
-});
-                              
-                    
-    });
-          
-    test("create (2)", async () => {
-        const server = mockServerPool.createServer();
-        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
-        const rawRequestBody = { "expected_aggregate_revision" : 1 , "space" : { "body" : "body" , "name" : "x" , "purpose" : "x" , "status" : "active" } };
-        const rawResponseBody = { "error" : { "message" : "message" } };
-        
-        server
-            .mockEndpoint()
-            .post("/api/v1/spaces").jsonBody(rawRequestBody)
-                .respondWith()
-            .statusCode(400).jsonBody(rawResponseBody)
-                .build();
-
-        
-            await expect(async () => {
-                return await client.spaces.create({
-    expectedAggregateRevision: 1,
-    space: {
-        body: "body",
-        name: "x",
-        purpose: "x",
-        status: "active"
-    }
-})
-            }).rejects.toThrow(TrueForgeTypes.BadRequestError);
-    });
-          
-    test("create (3)", async () => {
-        const server = mockServerPool.createServer();
-        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
-        const rawRequestBody = { "expected_aggregate_revision" : 1 , "space" : { "body" : "body" , "name" : "x" , "purpose" : "x" , "status" : "active" } };
-        const rawResponseBody = { "error" : { "message" : "message" } };
-        
-        server
-            .mockEndpoint()
-            .post("/api/v1/spaces").jsonBody(rawRequestBody)
-                .respondWith()
-            .statusCode(401).jsonBody(rawResponseBody)
-                .build();
-
-        
-            await expect(async () => {
-                return await client.spaces.create({
-    expectedAggregateRevision: 1,
-    space: {
-        body: "body",
-        name: "x",
-        purpose: "x",
-        status: "active"
-    }
-})
-            }).rejects.toThrow(TrueForgeTypes.UnauthorizedError);
-    });
-          
-    test("create (4)", async () => {
-        const server = mockServerPool.createServer();
-        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
-        const rawRequestBody = { "expected_aggregate_revision" : 1 , "space" : { "body" : "body" , "name" : "x" , "purpose" : "x" , "status" : "active" } };
-        const rawResponseBody = { "error" : { "message" : "message" } };
-        
-        server
-            .mockEndpoint()
-            .post("/api/v1/spaces").jsonBody(rawRequestBody)
-                .respondWith()
-            .statusCode(409).jsonBody(rawResponseBody)
-                .build();
-
-        
-            await expect(async () => {
-                return await client.spaces.create({
-    expectedAggregateRevision: 1,
-    space: {
-        body: "body",
-        name: "x",
-        purpose: "x",
-        status: "active"
-    }
-})
-            }).rejects.toThrow(TrueForgeTypes.ConflictError);
-    });
-          
-    test("get (1)", async () => {
-        const server = mockServerPool.createServer();
-        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
-        
-        const rawResponseBody = { "data" : { "body" : "body" , "created_at" : "2024-01-15T09:30:00Z" , "format" : "markdown" , "id" : "id" , "name" : "name" , "purpose" : "purpose" , "revision" : 1 , "status" : "active" , "updated_at" : "2024-01-15T09:30:00Z" } };
-        
-        server
-            .mockEndpoint()
-            .get("/api/v1/spaces/space_id").respondWith()
-            .statusCode(200).jsonBody(rawResponseBody)
-                .build();
-
-        
-                        
-                                const response = await client.spaces.get("space_id", {
-    revision: 18
-});
-                                expect(response).toEqual({
-    data: {
-        body: "body",
-        createdAt: new Date("2024-01-15T09:30:00.000Z"),
-        format: "markdown",
-        id: "id",
-        name: "name",
-        purpose: "purpose",
-        revision: 1,
-        status: "active",
-        updatedAt: new Date("2024-01-15T09:30:00.000Z")
-    }
-});
-                              
-                    
-    });
-          
     test("get (2)", async () => {
         const server = mockServerPool.createServer();
-        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
-        
-        const rawResponseBody = { "error" : { "message" : "message" } };
-        
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
+
+        const rawResponseBody = { error: { message: "message" } };
+
         server
             .mockEndpoint()
-            .get("/api/v1/spaces/space_id").respondWith()
-            .statusCode(401).jsonBody(rawResponseBody)
-                .build();
+            .get("/api/v1/spaces/space_id")
+            .respondWith()
+            .statusCode(401)
+            .jsonBody(rawResponseBody)
+            .build();
 
-        
-            await expect(async () => {
-                return await client.spaces.get("space_id")
-            }).rejects.toThrow(TrueForgeTypes.UnauthorizedError);
+        await expect(async () => {
+            return await client.spaces.get("space_id");
+        }).rejects.toThrow(TrueForgeTypes.UnauthorizedError);
     });
-          
+
     test("get (3)", async () => {
         const server = mockServerPool.createServer();
-        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
-        
-        const rawResponseBody = { "error" : { "message" : "message" } };
-        
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
+
+        const rawResponseBody = { error: { message: "message" } };
+
         server
             .mockEndpoint()
-            .get("/api/v1/spaces/space_id").respondWith()
-            .statusCode(404).jsonBody(rawResponseBody)
-                .build();
+            .get("/api/v1/spaces/space_id")
+            .respondWith()
+            .statusCode(404)
+            .jsonBody(rawResponseBody)
+            .build();
 
-        
-            await expect(async () => {
-                return await client.spaces.get("space_id")
-            }).rejects.toThrow(TrueForgeTypes.NotFoundError);
+        await expect(async () => {
+            return await client.spaces.get("space_id");
+        }).rejects.toThrow(TrueForgeTypes.NotFoundError);
     });
-          
+
     test("update (1)", async () => {
         const server = mockServerPool.createServer();
-        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
-        const rawRequestBody = { "expected_aggregate_revision" : 0 , "expected_revision" : 0 , "space" : { "body" : "body" , "name" : "name" , "purpose" : "purpose" , "status" : "active" } };
-        const rawResponseBody = { "data" : { "aggregate_revision" : 0 , "space" : { "body" : "body" , "created_at" : "2024-01-15T09:30:00Z" , "format" : "markdown" , "id" : "id" , "name" : "name" , "purpose" : "purpose" , "revision" : 1 , "status" : "active" , "updated_at" : "2024-01-15T09:30:00Z" } } };
-        
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
+        const rawRequestBody = {
+            expected_aggregate_revision: 0,
+            expected_revision: 0,
+            space: { body: "body", name: "name", purpose: "purpose", status: "active" },
+        };
+        const rawResponseBody = {
+            data: {
+                aggregate_revision: 0,
+                space: {
+                    body: "body",
+                    created_at: "2024-01-15T09:30:00Z",
+                    format: "markdown",
+                    id: "id",
+                    name: "name",
+                    purpose: "purpose",
+                    revision: 1,
+                    status: "active",
+                    updated_at: "2024-01-15T09:30:00Z",
+                },
+            },
+        };
+
         server
             .mockEndpoint()
-            .put("/api/v1/spaces/space_id").jsonBody(rawRequestBody)
-                .respondWith()
-            .statusCode(200).jsonBody(rawResponseBody)
-                .build();
+            .put("/api/v1/spaces/space_id")
+            .jsonBody(rawRequestBody)
+            .respondWith()
+            .statusCode(200)
+            .jsonBody(rawResponseBody)
+            .build();
 
-        
-                        
-                                const response = await client.spaces.update("space_id", {
-    expectedAggregateRevision: 0,
-    expectedRevision: 0,
-    space: {
-        body: "body",
-        name: "name",
-        purpose: "purpose",
-        status: "active"
-    }
-});
-                                expect(response).toEqual({
-    data: {
-        aggregateRevision: 0,
-        space: {
-            body: "body",
-            createdAt: new Date("2024-01-15T09:30:00.000Z"),
-            format: "markdown",
-            id: "id",
-            name: "name",
-            purpose: "purpose",
-            revision: 1,
-            status: "active",
-            updatedAt: new Date("2024-01-15T09:30:00.000Z")
-        }
-    }
-});
-                              
-                    
+        const response = await client.spaces.update("space_id", {
+            expectedAggregateRevision: 0,
+            expectedRevision: 0,
+            space: {
+                body: "body",
+                name: "name",
+                purpose: "purpose",
+                status: "active",
+            },
+        });
+        expect(response).toEqual({
+            data: {
+                aggregateRevision: 0,
+                space: {
+                    body: "body",
+                    createdAt: new Date("2024-01-15T09:30:00.000Z"),
+                    format: "markdown",
+                    id: "id",
+                    name: "name",
+                    purpose: "purpose",
+                    revision: 1,
+                    status: "active",
+                    updatedAt: new Date("2024-01-15T09:30:00.000Z"),
+                },
+            },
+        });
     });
-          
+
     test("update (2)", async () => {
         const server = mockServerPool.createServer();
-        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
-        const rawRequestBody = { "expected_aggregate_revision" : 1 , "expected_revision" : 1 , "space" : { "body" : "body" , "name" : "x" , "purpose" : "x" , "status" : "active" } };
-        const rawResponseBody = { "error" : { "message" : "message" } };
-        
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
+        const rawRequestBody = {
+            expected_aggregate_revision: 1,
+            expected_revision: 1,
+            space: { body: "body", name: "x", purpose: "x", status: "active" },
+        };
+        const rawResponseBody = { error: { message: "message" } };
+
         server
             .mockEndpoint()
-            .put("/api/v1/spaces/space_id").jsonBody(rawRequestBody)
-                .respondWith()
-            .statusCode(400).jsonBody(rawResponseBody)
-                .build();
+            .put("/api/v1/spaces/space_id")
+            .jsonBody(rawRequestBody)
+            .respondWith()
+            .statusCode(400)
+            .jsonBody(rawResponseBody)
+            .build();
 
-        
-            await expect(async () => {
-                return await client.spaces.update("space_id", {
-    expectedAggregateRevision: 1,
-    expectedRevision: 1,
-    space: {
-        body: "body",
-        name: "x",
-        purpose: "x",
-        status: "active"
-    }
-})
-            }).rejects.toThrow(TrueForgeTypes.BadRequestError);
+        await expect(async () => {
+            return await client.spaces.update("space_id", {
+                expectedAggregateRevision: 1,
+                expectedRevision: 1,
+                space: {
+                    body: "body",
+                    name: "x",
+                    purpose: "x",
+                    status: "active",
+                },
+            });
+        }).rejects.toThrow(TrueForgeTypes.BadRequestError);
     });
-          
+
     test("update (3)", async () => {
         const server = mockServerPool.createServer();
-        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
-        const rawRequestBody = { "expected_aggregate_revision" : 1 , "expected_revision" : 1 , "space" : { "body" : "body" , "name" : "x" , "purpose" : "x" , "status" : "active" } };
-        const rawResponseBody = { "error" : { "message" : "message" } };
-        
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
+        const rawRequestBody = {
+            expected_aggregate_revision: 1,
+            expected_revision: 1,
+            space: { body: "body", name: "x", purpose: "x", status: "active" },
+        };
+        const rawResponseBody = { error: { message: "message" } };
+
         server
             .mockEndpoint()
-            .put("/api/v1/spaces/space_id").jsonBody(rawRequestBody)
-                .respondWith()
-            .statusCode(401).jsonBody(rawResponseBody)
-                .build();
+            .put("/api/v1/spaces/space_id")
+            .jsonBody(rawRequestBody)
+            .respondWith()
+            .statusCode(401)
+            .jsonBody(rawResponseBody)
+            .build();
 
-        
-            await expect(async () => {
-                return await client.spaces.update("space_id", {
-    expectedAggregateRevision: 1,
-    expectedRevision: 1,
-    space: {
-        body: "body",
-        name: "x",
-        purpose: "x",
-        status: "active"
-    }
-})
-            }).rejects.toThrow(TrueForgeTypes.UnauthorizedError);
+        await expect(async () => {
+            return await client.spaces.update("space_id", {
+                expectedAggregateRevision: 1,
+                expectedRevision: 1,
+                space: {
+                    body: "body",
+                    name: "x",
+                    purpose: "x",
+                    status: "active",
+                },
+            });
+        }).rejects.toThrow(TrueForgeTypes.UnauthorizedError);
     });
-          
+
     test("update (4)", async () => {
         const server = mockServerPool.createServer();
-        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
-        const rawRequestBody = { "expected_aggregate_revision" : 1 , "expected_revision" : 1 , "space" : { "body" : "body" , "name" : "x" , "purpose" : "x" , "status" : "active" } };
-        const rawResponseBody = { "error" : { "message" : "message" } };
-        
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
+        const rawRequestBody = {
+            expected_aggregate_revision: 1,
+            expected_revision: 1,
+            space: { body: "body", name: "x", purpose: "x", status: "active" },
+        };
+        const rawResponseBody = { error: { message: "message" } };
+
         server
             .mockEndpoint()
-            .put("/api/v1/spaces/space_id").jsonBody(rawRequestBody)
-                .respondWith()
-            .statusCode(404).jsonBody(rawResponseBody)
-                .build();
+            .put("/api/v1/spaces/space_id")
+            .jsonBody(rawRequestBody)
+            .respondWith()
+            .statusCode(404)
+            .jsonBody(rawResponseBody)
+            .build();
 
-        
-            await expect(async () => {
-                return await client.spaces.update("space_id", {
-    expectedAggregateRevision: 1,
-    expectedRevision: 1,
-    space: {
-        body: "body",
-        name: "x",
-        purpose: "x",
-        status: "active"
-    }
-})
-            }).rejects.toThrow(TrueForgeTypes.NotFoundError);
+        await expect(async () => {
+            return await client.spaces.update("space_id", {
+                expectedAggregateRevision: 1,
+                expectedRevision: 1,
+                space: {
+                    body: "body",
+                    name: "x",
+                    purpose: "x",
+                    status: "active",
+                },
+            });
+        }).rejects.toThrow(TrueForgeTypes.NotFoundError);
     });
-          
+
     test("update (5)", async () => {
         const server = mockServerPool.createServer();
-        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
-        const rawRequestBody = { "expected_aggregate_revision" : 1 , "expected_revision" : 1 , "space" : { "body" : "body" , "name" : "x" , "purpose" : "x" , "status" : "active" } };
-        const rawResponseBody = { "error" : { "message" : "message" } };
-        
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
+        const rawRequestBody = {
+            expected_aggregate_revision: 1,
+            expected_revision: 1,
+            space: { body: "body", name: "x", purpose: "x", status: "active" },
+        };
+        const rawResponseBody = { error: { message: "message" } };
+
         server
             .mockEndpoint()
-            .put("/api/v1/spaces/space_id").jsonBody(rawRequestBody)
-                .respondWith()
-            .statusCode(409).jsonBody(rawResponseBody)
-                .build();
+            .put("/api/v1/spaces/space_id")
+            .jsonBody(rawRequestBody)
+            .respondWith()
+            .statusCode(409)
+            .jsonBody(rawResponseBody)
+            .build();
 
-        
-            await expect(async () => {
-                return await client.spaces.update("space_id", {
-    expectedAggregateRevision: 1,
-    expectedRevision: 1,
-    space: {
-        body: "body",
-        name: "x",
-        purpose: "x",
-        status: "active"
-    }
-})
-            }).rejects.toThrow(TrueForgeTypes.ConflictError);
+        await expect(async () => {
+            return await client.spaces.update("space_id", {
+                expectedAggregateRevision: 1,
+                expectedRevision: 1,
+                space: {
+                    body: "body",
+                    name: "x",
+                    purpose: "x",
+                    status: "active",
+                },
+            });
+        }).rejects.toThrow(TrueForgeTypes.ConflictError);
     });
-          
+
     test("delete (1)", async () => {
         const server = mockServerPool.createServer();
-        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
-        
-        const rawResponseBody = { };
-        
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
+
+        const rawResponseBody = {};
+
         server
             .mockEndpoint()
-            .delete("/api/v1/spaces/space_id").respondWith()
-            .statusCode(200).jsonBody(rawResponseBody)
-                .build();
+            .delete("/api/v1/spaces/space_id")
+            .respondWith()
+            .statusCode(200)
+            .jsonBody(rawResponseBody)
+            .build();
 
-        
-                        
-                                const response = await client.spaces.delete("space_id", {
-    expectedRevision: 1
-});
-                                expect(response).toEqual({});
-                              
-                    
+        const response = await client.spaces.delete("space_id", {
+            expectedRevision: 1,
+        });
+        expect(response).toEqual({});
     });
-          
+
     test("delete (2)", async () => {
         const server = mockServerPool.createServer();
-        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
-        
-        const rawResponseBody = { "error" : { "message" : "message" } };
-        
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
+
+        const rawResponseBody = { error: { message: "message" } };
+
         server
             .mockEndpoint()
-            .delete("/api/v1/spaces/space_id").respondWith()
-            .statusCode(401).jsonBody(rawResponseBody)
-                .build();
+            .delete("/api/v1/spaces/space_id")
+            .respondWith()
+            .statusCode(401)
+            .jsonBody(rawResponseBody)
+            .build();
 
-        
-            await expect(async () => {
-                return await client.spaces.delete("space_id")
-            }).rejects.toThrow(TrueForgeTypes.UnauthorizedError);
+        await expect(async () => {
+            return await client.spaces.delete("space_id");
+        }).rejects.toThrow(TrueForgeTypes.UnauthorizedError);
     });
-          
+
     test("delete (3)", async () => {
         const server = mockServerPool.createServer();
-        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
-        
-        const rawResponseBody = { "error" : { "message" : "message" } };
-        
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
+
+        const rawResponseBody = { error: { message: "message" } };
+
         server
             .mockEndpoint()
-            .delete("/api/v1/spaces/space_id").respondWith()
-            .statusCode(404).jsonBody(rawResponseBody)
-                .build();
+            .delete("/api/v1/spaces/space_id")
+            .respondWith()
+            .statusCode(404)
+            .jsonBody(rawResponseBody)
+            .build();
 
-        
-            await expect(async () => {
-                return await client.spaces.delete("space_id")
-            }).rejects.toThrow(TrueForgeTypes.NotFoundError);
+        await expect(async () => {
+            return await client.spaces.delete("space_id");
+        }).rejects.toThrow(TrueForgeTypes.NotFoundError);
     });
-          
+
     test("delete (4)", async () => {
         const server = mockServerPool.createServer();
-        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
-        
-        const rawResponseBody = { "error" : { "message" : "message" } };
-        
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
+
+        const rawResponseBody = { error: { message: "message" } };
+
         server
             .mockEndpoint()
-            .delete("/api/v1/spaces/space_id").respondWith()
-            .statusCode(409).jsonBody(rawResponseBody)
-                .build();
+            .delete("/api/v1/spaces/space_id")
+            .respondWith()
+            .statusCode(409)
+            .jsonBody(rawResponseBody)
+            .build();
 
-        
-            await expect(async () => {
-                return await client.spaces.delete("space_id")
-            }).rejects.toThrow(TrueForgeTypes.ConflictError);
+        await expect(async () => {
+            return await client.spaces.delete("space_id");
+        }).rejects.toThrow(TrueForgeTypes.ConflictError);
     });
-          
+
     test("revert (1)", async () => {
         const server = mockServerPool.createServer();
-        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
-        const rawRequestBody = { "expected_aggregate_revision" : 0 , "expected_revision" : 0 , "revision" : 18 };
-        const rawResponseBody = { "data" : { "aggregate_revision" : 0 , "space" : { "body" : "body" , "created_at" : "2024-01-15T09:30:00Z" , "format" : "markdown" , "id" : "id" , "name" : "name" , "purpose" : "purpose" , "revision" : 1 , "status" : "active" , "updated_at" : "2024-01-15T09:30:00Z" } } };
-        
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
+        const rawRequestBody = { expected_aggregate_revision: 0, expected_revision: 0, revision: 18 };
+        const rawResponseBody = {
+            data: {
+                aggregate_revision: 0,
+                space: {
+                    body: "body",
+                    created_at: "2024-01-15T09:30:00Z",
+                    format: "markdown",
+                    id: "id",
+                    name: "name",
+                    purpose: "purpose",
+                    revision: 1,
+                    status: "active",
+                    updated_at: "2024-01-15T09:30:00Z",
+                },
+            },
+        };
+
         server
             .mockEndpoint()
-            .post("/api/v1/spaces/space_id/revert").jsonBody(rawRequestBody)
-                .respondWith()
-            .statusCode(200).jsonBody(rawResponseBody)
-                .build();
+            .post("/api/v1/spaces/space_id/revert")
+            .jsonBody(rawRequestBody)
+            .respondWith()
+            .statusCode(200)
+            .jsonBody(rawResponseBody)
+            .build();
 
-        
-                        
-                                const response = await client.spaces.revert("space_id", {
-    expectedAggregateRevision: 0,
-    expectedRevision: 0,
-    revision: 18
-});
-                                expect(response).toEqual({
-    data: {
-        aggregateRevision: 0,
-        space: {
-            body: "body",
-            createdAt: new Date("2024-01-15T09:30:00.000Z"),
-            format: "markdown",
-            id: "id",
-            name: "name",
-            purpose: "purpose",
-            revision: 1,
-            status: "active",
-            updatedAt: new Date("2024-01-15T09:30:00.000Z")
-        }
-    }
-});
-                              
-                    
+        const response = await client.spaces.revert("space_id", {
+            expectedAggregateRevision: 0,
+            expectedRevision: 0,
+            revision: 18,
+        });
+        expect(response).toEqual({
+            data: {
+                aggregateRevision: 0,
+                space: {
+                    body: "body",
+                    createdAt: new Date("2024-01-15T09:30:00.000Z"),
+                    format: "markdown",
+                    id: "id",
+                    name: "name",
+                    purpose: "purpose",
+                    revision: 1,
+                    status: "active",
+                    updatedAt: new Date("2024-01-15T09:30:00.000Z"),
+                },
+            },
+        });
     });
-          
+
     test("revert (2)", async () => {
         const server = mockServerPool.createServer();
-        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
-        const rawRequestBody = { "expected_aggregate_revision" : 1 , "expected_revision" : 1 , "revision" : 1 };
-        const rawResponseBody = { "error" : { "message" : "message" } };
-        
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
+        const rawRequestBody = { expected_aggregate_revision: 1, expected_revision: 1, revision: 1 };
+        const rawResponseBody = { error: { message: "message" } };
+
         server
             .mockEndpoint()
-            .post("/api/v1/spaces/space_id/revert").jsonBody(rawRequestBody)
-                .respondWith()
-            .statusCode(400).jsonBody(rawResponseBody)
-                .build();
+            .post("/api/v1/spaces/space_id/revert")
+            .jsonBody(rawRequestBody)
+            .respondWith()
+            .statusCode(400)
+            .jsonBody(rawResponseBody)
+            .build();
 
-        
-            await expect(async () => {
-                return await client.spaces.revert("space_id", {
-    expectedAggregateRevision: 1,
-    expectedRevision: 1,
-    revision: 1
-})
-            }).rejects.toThrow(TrueForgeTypes.BadRequestError);
+        await expect(async () => {
+            return await client.spaces.revert("space_id", {
+                expectedAggregateRevision: 1,
+                expectedRevision: 1,
+                revision: 1,
+            });
+        }).rejects.toThrow(TrueForgeTypes.BadRequestError);
     });
-          
+
     test("revert (3)", async () => {
         const server = mockServerPool.createServer();
-        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
-        const rawRequestBody = { "expected_aggregate_revision" : 1 , "expected_revision" : 1 , "revision" : 1 };
-        const rawResponseBody = { "error" : { "message" : "message" } };
-        
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
+        const rawRequestBody = { expected_aggregate_revision: 1, expected_revision: 1, revision: 1 };
+        const rawResponseBody = { error: { message: "message" } };
+
         server
             .mockEndpoint()
-            .post("/api/v1/spaces/space_id/revert").jsonBody(rawRequestBody)
-                .respondWith()
-            .statusCode(401).jsonBody(rawResponseBody)
-                .build();
+            .post("/api/v1/spaces/space_id/revert")
+            .jsonBody(rawRequestBody)
+            .respondWith()
+            .statusCode(401)
+            .jsonBody(rawResponseBody)
+            .build();
 
-        
-            await expect(async () => {
-                return await client.spaces.revert("space_id", {
-    expectedAggregateRevision: 1,
-    expectedRevision: 1,
-    revision: 1
-})
-            }).rejects.toThrow(TrueForgeTypes.UnauthorizedError);
+        await expect(async () => {
+            return await client.spaces.revert("space_id", {
+                expectedAggregateRevision: 1,
+                expectedRevision: 1,
+                revision: 1,
+            });
+        }).rejects.toThrow(TrueForgeTypes.UnauthorizedError);
     });
-          
+
     test("revert (4)", async () => {
         const server = mockServerPool.createServer();
-        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
-        const rawRequestBody = { "expected_aggregate_revision" : 1 , "expected_revision" : 1 , "revision" : 1 };
-        const rawResponseBody = { "error" : { "message" : "message" } };
-        
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
+        const rawRequestBody = { expected_aggregate_revision: 1, expected_revision: 1, revision: 1 };
+        const rawResponseBody = { error: { message: "message" } };
+
         server
             .mockEndpoint()
-            .post("/api/v1/spaces/space_id/revert").jsonBody(rawRequestBody)
-                .respondWith()
-            .statusCode(404).jsonBody(rawResponseBody)
-                .build();
+            .post("/api/v1/spaces/space_id/revert")
+            .jsonBody(rawRequestBody)
+            .respondWith()
+            .statusCode(404)
+            .jsonBody(rawResponseBody)
+            .build();
 
-        
-            await expect(async () => {
-                return await client.spaces.revert("space_id", {
-    expectedAggregateRevision: 1,
-    expectedRevision: 1,
-    revision: 1
-})
-            }).rejects.toThrow(TrueForgeTypes.NotFoundError);
+        await expect(async () => {
+            return await client.spaces.revert("space_id", {
+                expectedAggregateRevision: 1,
+                expectedRevision: 1,
+                revision: 1,
+            });
+        }).rejects.toThrow(TrueForgeTypes.NotFoundError);
     });
-          
+
     test("revert (5)", async () => {
         const server = mockServerPool.createServer();
-        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
-        const rawRequestBody = { "expected_aggregate_revision" : 1 , "expected_revision" : 1 , "revision" : 1 };
-        const rawResponseBody = { "error" : { "message" : "message" } };
-        
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
+        const rawRequestBody = { expected_aggregate_revision: 1, expected_revision: 1, revision: 1 };
+        const rawResponseBody = { error: { message: "message" } };
+
         server
             .mockEndpoint()
-            .post("/api/v1/spaces/space_id/revert").jsonBody(rawRequestBody)
-                .respondWith()
-            .statusCode(409).jsonBody(rawResponseBody)
-                .build();
+            .post("/api/v1/spaces/space_id/revert")
+            .jsonBody(rawRequestBody)
+            .respondWith()
+            .statusCode(409)
+            .jsonBody(rawResponseBody)
+            .build();
 
-        
-            await expect(async () => {
-                return await client.spaces.revert("space_id", {
-    expectedAggregateRevision: 1,
-    expectedRevision: 1,
-    revision: 1
-})
-            }).rejects.toThrow(TrueForgeTypes.ConflictError);
+        await expect(async () => {
+            return await client.spaces.revert("space_id", {
+                expectedAggregateRevision: 1,
+                expectedRevision: 1,
+                revision: 1,
+            });
+        }).rejects.toThrow(TrueForgeTypes.ConflictError);
     });
-          
 });
