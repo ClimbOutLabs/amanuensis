@@ -5,90 +5,88 @@ import { TrueForge } from "../../../src/Client";
 import { mockServerPool } from "../../mock-server/MockServerPool";
 
 describe("SchedulesClient", () => {
-    
     test("execute_run (1)", async () => {
         const server = mockServerPool.createServer();
-        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
-        const rawRequestBody = { "schedule_run_id" : "schedule_run_id" };
-        
-        
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
+        const rawRequestBody = { schedule_run_id: "schedule_run_id" };
+
         server
             .mockEndpoint()
-            .post("/api/internal/schedules/runs/execute").jsonBody(rawRequestBody)
-                .respondWith()
-            .statusCode(200).build();
+            .post("/api/internal/schedules/runs/execute")
+            .jsonBody(rawRequestBody)
+            .respondWith()
+            .statusCode(200)
+            .build();
 
-        
-                        
-                                const response = await client.internal.schedules.executeRun({
-    scheduleRunId: "schedule_run_id"
-});
-                                expect(response).toEqual(undefined);
-                              
-                    
+        const response = await client.internal.schedules.executeRun({
+            scheduleRunId: "schedule_run_id",
+        });
+        expect(response).toEqual(undefined);
     });
-          
+
     test("execute_run (2)", async () => {
         const server = mockServerPool.createServer();
-        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
-        const rawRequestBody = { "schedule_run_id" : "x" };
-        const rawResponseBody = { "error" : { "message" : "message" } };
-        
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
+        const rawRequestBody = { schedule_run_id: "x" };
+        const rawResponseBody = { error: { message: "message" } };
+
         server
             .mockEndpoint()
-            .post("/api/internal/schedules/runs/execute").jsonBody(rawRequestBody)
-                .respondWith()
-            .statusCode(401).jsonBody(rawResponseBody)
-                .build();
+            .post("/api/internal/schedules/runs/execute")
+            .jsonBody(rawRequestBody)
+            .respondWith()
+            .statusCode(401)
+            .jsonBody(rawResponseBody)
+            .build();
 
-        
-            await expect(async () => {
-                return await client.internal.schedules.executeRun({
-    scheduleRunId: "x"
-})
-            }).rejects.toThrow(TrueForgeTypes.UnauthorizedError);
+        await expect(async () => {
+            return await client.internal.schedules.executeRun({
+                scheduleRunId: "x",
+            });
+        }).rejects.toThrow(TrueForgeTypes.UnauthorizedError);
     });
-          
+
     test("execute_run (3)", async () => {
         const server = mockServerPool.createServer();
-        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
-        const rawRequestBody = { "schedule_run_id" : "x" };
-        const rawResponseBody = { "error" : { "message" : "message" } };
-        
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
+        const rawRequestBody = { schedule_run_id: "x" };
+        const rawResponseBody = { error: { message: "message" } };
+
         server
             .mockEndpoint()
-            .post("/api/internal/schedules/runs/execute").jsonBody(rawRequestBody)
-                .respondWith()
-            .statusCode(404).jsonBody(rawResponseBody)
-                .build();
+            .post("/api/internal/schedules/runs/execute")
+            .jsonBody(rawRequestBody)
+            .respondWith()
+            .statusCode(404)
+            .jsonBody(rawResponseBody)
+            .build();
 
-        
-            await expect(async () => {
-                return await client.internal.schedules.executeRun({
-    scheduleRunId: "x"
-})
-            }).rejects.toThrow(TrueForgeTypes.NotFoundError);
+        await expect(async () => {
+            return await client.internal.schedules.executeRun({
+                scheduleRunId: "x",
+            });
+        }).rejects.toThrow(TrueForgeTypes.NotFoundError);
     });
-          
+
     test("execute_run (4)", async () => {
         const server = mockServerPool.createServer();
-        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
-        const rawRequestBody = { "schedule_run_id" : "x" };
-        const rawResponseBody = { "error" : { "message" : "message" } };
-        
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
+        const rawRequestBody = { schedule_run_id: "x" };
+        const rawResponseBody = { error: { message: "message" } };
+
         server
             .mockEndpoint()
-            .post("/api/internal/schedules/runs/execute").jsonBody(rawRequestBody)
-                .respondWith()
-            .statusCode(422).jsonBody(rawResponseBody)
-                .build();
+            .post("/api/internal/schedules/runs/execute")
+            .jsonBody(rawRequestBody)
+            .respondWith()
+            .statusCode(422)
+            .jsonBody(rawResponseBody)
+            .build();
 
-        
-            await expect(async () => {
-                return await client.internal.schedules.executeRun({
-    scheduleRunId: "x"
-})
-            }).rejects.toThrow(TrueForgeTypes.UnprocessableEntityError);
+        await expect(async () => {
+            return await client.internal.schedules.executeRun({
+                scheduleRunId: "x",
+            });
+        }).rejects.toThrow(TrueForgeTypes.UnprocessableEntityError);
     });
-          
 });

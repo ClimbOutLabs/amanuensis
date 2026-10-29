@@ -485,7 +485,7 @@ export {
 } from './permissions/mapsToolNames';
 export { checkOutboundStrings, collectOutboundStrings } from './permissions/outboundGuard';
 export type { OutboundGuardRule, OutboundGuardVerdict } from './permissions/outboundGuard';
-export { isTrustedLink, recordPageImageUrls, recordPersonText } from './permissions/provenance';
+export { isTrustedLink, isTrustedPicture, recordPageImageUrls, recordPersonText } from './permissions/provenance';
 export {
   AUTO_DENY_REASONS,
   TIER2_ACTION_KINDS,

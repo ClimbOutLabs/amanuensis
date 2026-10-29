@@ -9,6 +9,9 @@ import { fileURLToPath } from 'node:url';
 import { chromium, type Browser, type Page } from 'playwright-core';
 import { createServer, defaultClientConditions } from 'vite';
 
+import { DEV_OPTIMIZE_DEPS } from '../src/devPrebundle.ts';
+import { privateViteCache } from './support/viteCache.ts';
+
 function findChromiumExecutable(): string {
   const candidates = [
     process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH,
@@ -91,8 +94,11 @@ async function checkSizes(page: Page) {
 
 test('home screens render in light and dark at desktop and phone width', { timeout: 300_000 }, async () => {
   const frontendRoot = fileURLToPath(new URL('../', import.meta.url));
+  const viteCache = privateViteCache('first-run-guide');
   const server = await createServer({
+    cacheDir: viteCache.cacheDir,
     configFile: false,
+    optimizeDeps: DEV_OPTIMIZE_DEPS,
     root: frontendRoot,
     logLevel: 'silent',
     // The published ui dist leaves core modules external, so resolve them from source like the app does.
@@ -169,12 +175,16 @@ test('home screens render in light and dark at desktop and phone width', { timeo
         assert.equal(new Set(cardLefts).size, 2, 'the cards sit in a two-column grid');
 
         // Three groups that read apart: 1rem under the composer, and at least as much before the cards.
+        // The pill group starts at its prompt line on a first run, so measure from the group's first line.
         const gaps = await page.evaluate(() => {
           const composer = document.querySelector('[data-slot="aui_composer-shell"]')?.getBoundingClientRect();
-          const pills = document.querySelector('ul[aria-label="What would help you most?"]')?.getBoundingClientRect();
+          const pillList = document.querySelector('ul[aria-label="What would help you most?"]');
+          const groupTop = pillList?.parentElement?.firstElementChild?.getBoundingClientRect().top;
+          const pills = pillList?.getBoundingClientRect();
           const cards = document.getElementById('aman-home-cards-heading')?.getBoundingClientRect();
-          if (composer === undefined || pills === undefined || cards === undefined) return null;
-          return { underComposer: pills.top - composer.bottom, beforeCards: cards.top - pills.bottom };
+          if (composer === undefined || groupTop === undefined || pills === undefined || cards === undefined)
+            return null;
+          return { underComposer: groupTop - composer.bottom, beforeCards: cards.top - pills.bottom };
         });
         assert.ok(gaps !== null, 'the composer, the pills and the cards are all on screen');
         assert.ok(gaps.underComposer >= 15.5, `the pills sit 1rem under the composer, got ${gaps.underComposer}px`);
@@ -201,5 +211,6 @@ test('home screens render in light and dark at desktop and phone width', { timeo
   } finally {
     await browser?.close();
     await server.close();
+    viteCache.remove();
   }
 });

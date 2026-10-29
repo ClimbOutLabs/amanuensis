@@ -2,8 +2,8 @@
 
 /** What happens to the message: sent, saved as a draft, or a saved draft changed. */
 export const Tier3EmailAction = {
-        Send: "send",
-        Save: "save",
-        Change: "change"
-    } as const;
-export type Tier3EmailAction = typeof Tier3EmailAction[keyof typeof Tier3EmailAction];
+    Send: "send",
+    Save: "save",
+    Change: "change",
+} as const;
+export type Tier3EmailAction = (typeof Tier3EmailAction)[keyof typeof Tier3EmailAction];

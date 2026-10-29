@@ -91,7 +91,6 @@ async function startTurn(options: { cap: number | undefined; tokenFactoryUrl?: s
       apiKey: 'sk-nebius',
       baseUrl: options.tokenFactoryUrl ?? 'https://api.tokenfactory.nebius.com/v1',
       model: 'nvidia/nemotron-3-super-120b-a12b',
-      cheaperModel: undefined,
     },
     logger,
   });
