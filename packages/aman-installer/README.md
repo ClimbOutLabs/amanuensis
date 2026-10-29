@@ -27,6 +27,24 @@ What it can do today:
   words of the system it is running on.
 - `aman status` says what is installed and whether each instance is
   running.
+- `aman install`, on Windows, is the first install, what Aman-Setup.exe
+  does on a computer with no Aman yet: it installs Docker Desktop first
+  when it is missing (the download is checked against Docker Inc's
+  signature before it runs, and a resume entry is set so an install a
+  restart stops is carried on from), checks Docker's memory before
+  asking anything, asks the four questions (an email, a password, the
+  model key, and whether to open Aman to the phone), and runs the
+  shell's installer in the setup container with https on this computer
+  and daily backups. Then the steps the earlier commands added run in
+  their order: the adopt step puts the command and the Start menu
+  entries in place, the folder Aman keeps on the PC is made private,
+  Aman opens in the browser, and the home network is opened when the
+  phone answer was yes. At the end a short getting started page opens
+  in the browser; the page is also saved in the Amanuensis folder.
+  `aman install --dry-run` prints what it would do and does nothing.
+  Running Aman-Setup.exe with no command does what the computer in
+  front of it needs: this install, the adopt step on a starter PC, or
+  the upgrade on an installed one.
 - `aman open`, on Windows, starts Docker if it needs to, waits for Aman
   to answer, and opens it in the browser. An Aman served over https on
   this computer opens at its https address, after this computer is set

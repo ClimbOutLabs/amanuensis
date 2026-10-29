@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { mkdtemp, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
@@ -8,7 +9,11 @@ import { FakeHost } from '../src/host/fakeHost.ts';
 import { FakeWindowsJobs } from '../src/host/fakeWindowsJobs.ts';
 import {
   ADOPT_NOT_WINDOWS,
+  ADOPTED_LINE,
   HELP_LINES,
+  INSTALL_KEY_ON_COMMAND_LINE,
+  INSTALL_NOT_WINDOWS,
+  installUsageProblem,
   NETWORK_NOT_WINDOWS,
   NETWORK_USAGE,
   NOT_INSTALLED,
@@ -16,8 +21,10 @@ import {
   problemText,
   UNKNOWN_DOCTOR_CHECK,
   unknownCommandProblem,
+  UPGRADE_DOWNLOAD_FAILED,
   UPGRADE_NOT_WINDOWS,
 } from '../src/messages.ts';
+import type { FetchBytesResult } from '../src/release/download.ts';
 import {
   okResult,
   RecordingProcessRunner,
@@ -25,7 +32,7 @@ import {
   type ProcessResult,
 } from '../src/runner/processRunner.ts';
 import { folderBackend } from '../src/state/folderBackend.ts';
-import { createStateStore } from '../src/state/state.ts';
+import { createStateStore, parseRegistry, type StateStore, type StateSummary } from '../src/state/state.ts';
 
 const GIB = 1024 * 1024 * 1024;
 let homeCounter = 0;
@@ -205,4 +212,141 @@ test('network with no word after it prints its usage problem', async () => {
   const exitCode = await runCli(['network'], deps);
   assert.equal(exitCode, 1);
   assert.deepEqual(printed, [problemText(NETWORK_USAGE)]);
+});
+
+test('install on a computer that is not Windows refuses with its problem', async () => {
+  const { deps, printed } = makeCli(new Map());
+  const exitCode = await runCli(['install'], deps);
+  assert.equal(exitCode, 1);
+  assert.deepEqual(printed, [problemText(INSTALL_NOT_WINDOWS)]);
+});
+
+test('install refuses the model key on the command line', async () => {
+  const { deps, printed } = makeCli(new Map());
+  const exitCode = await runCli(['install', '--token-factory-key', 'a-key typed here'], deps);
+  assert.equal(exitCode, 1);
+  assert.deepEqual(printed, [problemText(INSTALL_KEY_ON_COMMAND_LINE)]);
+});
+
+test('install refuses a word it does not know', async () => {
+  const { deps, printed } = makeCli(new Map());
+  const exitCode = await runCli(['install', '--force'], deps);
+  assert.equal(exitCode, 1);
+  assert.deepEqual(printed, [problemText(installUsageProblem('--force'))]);
+});
+
+test('setup on a computer with nothing installed routes to the first install', async () => {
+  const { deps, printed } = makeCli(new Map());
+  const exitCode = await runCli(['setup'], deps);
+  assert.equal(exitCode, 1);
+  assert.deepEqual(printed, [problemText(INSTALL_NOT_WINDOWS)]);
+});
+
+// A store that reports a starter install on the computer: one
+// instance, no release record read through this side.
+function starterSummary(): StateSummary {
+  return {
+    release: null,
+    releaseUnreadable: false,
+    previousRelease: null,
+    instances: [{ name: 'main', entries: parseRegistry('name=main\napp_port=8791\n') }],
+    backups: [],
+    backupEntries: [],
+    backupsMode: null,
+    backupsModeTimeSeconds: null,
+    certificateAuthority: { certPresent: false, keyMode: null, fingerprint: null, fingerprintHasContent: false },
+    sourceCheckout: null,
+    installedAppImage: null,
+  };
+}
+
+class StarterStore implements StateStore {
+  readSummary(): Promise<StateSummary> {
+    return Promise.resolve(starterSummary());
+  }
+
+  readCaCertificate(): Promise<string | null> {
+    return Promise.resolve(null);
+  }
+
+  refreshCache(): void {
+    // This store holds nothing back: every read answers afresh.
+  }
+
+  writeInstance(): Promise<boolean> {
+    return Promise.resolve(false);
+  }
+
+  setInstanceValue(): Promise<boolean> {
+    return Promise.resolve(false);
+  }
+
+  removeInstance(): Promise<void> {
+    return Promise.resolve();
+  }
+
+  writeRelease(): Promise<boolean> {
+    return Promise.resolve(false);
+  }
+
+  setBackupsMode(): Promise<boolean> {
+    return Promise.resolve(true);
+  }
+}
+
+// A Windows computer with a starter install: the aman command's
+// folder is named, and the program itself is in it only when the test
+// says the install has been adopted already. Downloads answer
+// nothing, so a command that goes looking for a release stops there.
+async function makeWindowsCli(options: { programInPlace: boolean }) {
+  const printed: string[] = [];
+  homeCounter += 1;
+  const home = join(tmpdir(), `aman-cli-windows-${String(process.pid)}-${String(homeCounter)}`);
+  const programsDir = await mkdtemp(join(tmpdir(), 'aman-cli-programs-'));
+  if (options.programInPlace) {
+    await writeFile(join(programsDir, 'aman.exe'), 'the aman program');
+  }
+  const deps = {
+    host: new FakeHost({ kind: 'windows', memoryBytes: 16 * GIB }),
+    runner: new RecordingProcessRunner(new StubProcessRunner(new Map())),
+    store: new StarterStore(),
+    print: (line: string) => {
+      printed.push(line);
+    },
+    now: () => 1791633600,
+    homeDir: home,
+    stateHome: null,
+    osReleasePath: join(home, 'os-release'),
+    dockerConfigDir: join(home, '.docker'),
+    appService: 'app',
+    windowsJobs: new FakeWindowsJobs({
+      localAppDataDir: 'C:\\Users\\Friend\\AppData\\Local',
+      selfExePath: 'C:\\Users\\Friend\\Downloads\\Aman-Setup.exe',
+      startMenuProgramsDir: 'C:\\Users\\Friend\\AppData\\Roaming\\Microsoft\\Windows\\Start Menu\\Programs',
+    }),
+    probeHealth: () => Promise.resolve(false),
+    sleep: () => Promise.resolve(),
+    programsDir,
+    fetchBytes: (): Promise<FetchBytesResult> => Promise.resolve({ unreachable: true }),
+    confirm: () => Promise.resolve(true),
+    arch: 'x64',
+  };
+  return { deps, printed };
+}
+
+test('setup on a computer with the program in place routes to the upgrade', async () => {
+  const { deps, printed } = await makeWindowsCli({ programInPlace: true });
+  const exitCode = await runCli(['setup'], deps);
+  // The upgrade looks for the newest release and stops at the
+  // download: the adopt and install routes print neither of these.
+  assert.equal(exitCode, 1);
+  assert.deepEqual(printed, [problemText(UPGRADE_DOWNLOAD_FAILED)]);
+});
+
+test('setup on a computer with a starter install routes to adopt', async () => {
+  const { deps, printed } = await makeWindowsCli({ programInPlace: false });
+  const exitCode = await runCli(['setup'], deps);
+  assert.equal(exitCode, 0);
+  assert.deepEqual(printed, [ADOPTED_LINE]);
+  assert.equal(deps.windowsJobs.backupTask, true);
 });
