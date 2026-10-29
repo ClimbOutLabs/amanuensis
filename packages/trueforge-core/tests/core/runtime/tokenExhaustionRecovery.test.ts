@@ -152,7 +152,7 @@ describe('AgentThread token exhaustion recovery', () => {
         expect.objectContaining({
           type: 'internal.agent.done',
           status: 'error',
-          error: 'The reply was cut off because it ran long. Ask for the rest to continue.',
+          error: 'The reply was cut off because it ran long. Ask for the rest.',
         }),
       ]),
     );
@@ -223,7 +223,7 @@ describe('AgentThread token exhaustion recovery', () => {
         expect.objectContaining({
           type: 'internal.agent.done',
           status: 'error',
-          error: 'The reply was cut off because it ran long. Ask for the rest to continue.',
+          error: 'The reply was cut off because it ran long. Ask for the rest.',
         }),
       ]),
     );
