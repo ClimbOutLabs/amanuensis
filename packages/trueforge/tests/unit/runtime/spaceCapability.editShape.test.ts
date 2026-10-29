@@ -85,4 +85,23 @@ describe('the edit tool when an edit entry has the wrong shape', () => {
     });
     expect(outcome.problems.map(problem => problem.path)).toEqual(['edits[0].new_content']);
   });
+
+  it('accepts edits sent as the JSON text of a list, and still refuses text that is not a list', async () => {
+    const schema = await editSpaceSchema();
+    const edits = [{ type: 'append', new_content: 'More notes.' }];
+    const accepted = checkToolArguments({
+      schema,
+      args: { space_name: 'Lantern Workshop Notes', expected_revision: 1, edits: JSON.stringify(edits) },
+      readOnly: false,
+    });
+    expect(accepted.problems).toEqual([]);
+    expect(accepted.args['edits']).toEqual(edits);
+
+    const refused = checkToolArguments({
+      schema,
+      args: { space_name: 'Lantern Workshop Notes', expected_revision: 1, edits: 'append More notes.' },
+      readOnly: false,
+    });
+    expect(refused.problems.map(problem => problem.path)).toEqual(['edits']);
+  });
 });

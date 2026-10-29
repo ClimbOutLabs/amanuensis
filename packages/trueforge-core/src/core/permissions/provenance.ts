@@ -364,11 +364,44 @@ export function recordEmailText(input: { provenance: ChatProvenance; text: strin
 }
 
 /** Keys whose contents describe a result or what it links to, never the result's own link. */
-const NON_RESULT_KEYS = new Set(['links', 'metadata', 'images', 'favicon', 'excerpts', 'content', 'raw_content']);
+const NON_RESULT_KEYS = new Set(['links', 'metadata', 'favicon', 'excerpts', 'content', 'raw_content']);
+/** Keys under which a result lists its own pictures: one picture, or a list of them. */
+const RESULT_PICTURE_KEYS = new Set(['images', 'image', 'thumbnail', 'image_url']);
 const MAX_RESULT_DEPTH = 3;
 
-/** The `url` field of each result object in a provider's JSON; text inside a result is never read for links. */
-function collectResultUrls(node: unknown, into: string[], depth: number): void {
+/** The links and pictures a search's result objects list, read apart so a picture never counts as a link. */
+export interface SearchResultUrls {
+  links: string[];
+  pictures: string[];
+}
+
+/** One listed picture: its address as a string, or an object whose `url` or `src` is the address. */
+function pictureUrlOf(value: unknown): string | undefined {
+  if (typeof value === 'string') {
+    return value;
+  }
+  if (typeof value === 'object' && value !== null) {
+    const url = 'url' in value ? value.url : 'src' in value ? value.src : undefined;
+    return typeof url === 'string' ? url : undefined;
+  }
+  return undefined;
+}
+
+/** The pictures under one picture key: the value itself or each entry of a list, https only. */
+function collectResultPictures(node: unknown, into: string[]): void {
+  for (const entry of Array.isArray(node) ? node : [node]) {
+    const url = pictureUrlOf(entry);
+    if (url !== undefined && /^https:\/\//i.test(url)) {
+      into.push(url);
+    }
+  }
+}
+
+/**
+ * The `url` field of each result object in a provider's JSON, and the pictures a result lists under its
+ * picture keys; text inside a result is never read for either.
+ */
+function collectResultUrls(node: unknown, into: SearchResultUrls, depth: number): void {
   if (depth > MAX_RESULT_DEPTH) {
     return;
   }
@@ -379,7 +412,9 @@ function collectResultUrls(node: unknown, into: string[], depth: number): void {
   } else if (typeof node === 'object' && node !== null) {
     for (const [key, child] of Object.entries(node)) {
       if (key === 'url' && typeof child === 'string') {
-        into.push(child);
+        into.links.push(child);
+      } else if (RESULT_PICTURE_KEYS.has(key)) {
+        collectResultPictures(child, into.pictures);
       } else if (!NON_RESULT_KEYS.has(key)) {
         collectResultUrls(child, into, depth + 1);
       }
@@ -387,9 +422,17 @@ function collectResultUrls(node: unknown, into: string[], depth: number): void {
   }
 }
 
+/** The links and pictures the result objects in a provider's parsed JSON list. */
+export function searchResultUrls(node: unknown): SearchResultUrls {
+  const found: SearchResultUrls = { links: [], pictures: [] };
+  collectResultUrls(node, found, 0);
+  return found;
+}
+
 /**
- * A search's results: each result's own link is the person's to open. The rest of the result text is neither side,
- * so a site an excerpt mentions neither steers nor vouches for a later call.
+ * A search's results: each result's own link is the person's to open, and a picture a result lists was seen
+ * the way a picture on an opened page is. The rest of the result text is neither side, so a site an excerpt
+ * mentions neither steers nor vouches for a later call.
  */
 export function recordSearchResults(input: { provenance: ChatProvenance; texts: readonly string[] }): void {
   for (const text of input.texts) {
@@ -399,18 +442,18 @@ export function recordSearchResults(input: { provenance: ChatProvenance; texts: 
     } catch {
       continue;
     }
-    const urls: string[] = [];
-    collectResultUrls(parsed, urls, 0);
-    for (const url of urls) {
+    const found = searchResultUrls(parsed);
+    for (const url of found.links) {
       recordUrl(input.provenance.trusted, url);
     }
+    recordPageImageUrls({ provenance: input.provenance, urls: found.pictures });
   }
 }
 
 /**
- * Picture links from a page the chat opened: opening the page saw them, so a space may show a
- * picture file no search result named. A page can name any URL as a picture, so these are kept
- * apart from trusted links and never vouch for a link, a site or a destination.
+ * Pictures the chat saw: on a page it opened, or listed by a search result. Seeing them lets a
+ * space show a picture file no result's own link named. A page can name any URL as a picture, so
+ * these are kept apart from trusted links and never vouch for a link, a site or a destination.
  */
 export function recordPageImageUrls(input: { provenance: ChatProvenance; urls: readonly string[] }): void {
   for (const url of input.urls) {
@@ -523,7 +566,7 @@ export function isTrustedLink(input: { provenance: ChatProvenance; url: string }
   return key !== undefined && input.provenance.trusted.urls.has(key);
 }
 
-/** Whether a picture may be shown: a trusted link, or exactly a picture a page the chat opened contained. */
+/** Whether a picture may be shown: a trusted link, or exactly a picture an opened page or a search result listed. */
 export function isTrustedPicture(input: { provenance: ChatProvenance; url: string }): boolean {
   const key = urlKey(input.url);
   return isTrustedLink(input) || (key !== undefined && input.provenance.page_pictures.urls.has(key));
