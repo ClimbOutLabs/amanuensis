@@ -242,6 +242,9 @@ function sha256Hex(text: string): string {
   return createHash('sha256').update(text, 'utf8').digest('hex');
 }
 
+/** The context line every mirror is retained with; a store without document ids recognises older copies by it. */
+export const LEARNED_PROFILE_CONTEXT = 'Learned user profile';
+
 /** Per-user mirror document id; the hash keeps arbitrary user references id-safe. */
 export function learnedProfileDocumentId(userRef: string): string {
   return `${LEARNED_PROFILE_DOCUMENT_ID_PREFIX}${sha256Hex(userRef).slice(0, 16)}`;
@@ -294,14 +297,18 @@ export async function mirrorLearnedProfile(params: {
   try {
     const outcome =
       document === null || document.trim() === ''
-        ? await client.deleteDocument({ documentId: learnedProfileDocumentId(userRef), timeoutMs: retainTimeoutMs })
+        ? await client.deleteDocument({
+            documentId: learnedProfileDocumentId(userRef),
+            context: LEARNED_PROFILE_CONTEXT,
+            timeoutMs: retainTimeoutMs,
+          })
         : await client.retain({
             items: [
               {
                 content: document,
                 timestamp,
                 document_id: learnedProfileDocumentId(userRef),
-                context: 'Learned user profile',
+                context: LEARNED_PROFILE_CONTEXT,
                 metadata: { source: 'aman-profile-learning', [REPLACE_DOCUMENT_METADATA_KEY]: 'true' },
               },
             ],

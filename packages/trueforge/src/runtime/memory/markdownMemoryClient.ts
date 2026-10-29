@@ -50,13 +50,13 @@ import {
   REPLACE_DOCUMENT_METADATA_KEY,
   appendVaultTombstone,
   clearSummaryPending,
-  entryContext,
   entryMetadata,
   entryOccurredAt,
   entryRecallText,
   estimateTokens,
   formatRetainEntry,
   isFromSession,
+  isLegacyDocumentCopy,
   latestTombstonesByEntry,
   markSummaryFailed,
   namespaceDirFor,
@@ -411,10 +411,10 @@ export class MarkdownMemoryClient implements MemoryClient {
     }
   }
 
-  async deleteDocument(params: { documentId: string; timeoutMs: number }): Promise<RetainOutcome> {
+  async deleteDocument(params: { documentId: string; context?: string; timeoutMs: number }): Promise<RetainOutcome> {
     try {
       await withTimeout(
-        this.liveDocumentEntryIds([{ documentId: params.documentId, context: undefined }]).then(ids =>
+        this.liveDocumentEntryIds([{ documentId: params.documentId, context: params.context?.trim() }]).then(ids =>
           this.hideEntries(ids),
         ),
         params.timeoutMs,
@@ -693,8 +693,9 @@ export class MarkdownMemoryClient implements MemoryClient {
 
   /**
    * Ids of the visible entries in the write vault that are earlier copies of one of these documents:
-   * entries carrying the document id, and entries written before ids were recorded, which carry no
-   * document id but were retained with the same `> context` line (only when a context is given).
+   * entries carrying the document id, and (only when a context is given) copies written before ids
+   * were recorded, which `isLegacyDocumentCopy` recognises. Those older copies recorded no user, so a
+   * tenant vault shared by several people hides every person's older copy of the same document.
    */
   private async liveDocumentEntryIds(
     documents: readonly { documentId: string; context: string | undefined }[],
@@ -709,10 +710,8 @@ export class MarkdownMemoryClient implements MemoryClient {
       resolveTombstones: true,
     });
     const documentIds = new Set(documents.map(document => document.documentId));
-    const legacyContexts = new Set(
-      documents.flatMap(document =>
-        document.context === undefined || document.context === '' ? [] : [document.context],
-      ),
+    const legacyContexts = documents.flatMap(document =>
+      document.context === undefined || document.context === '' ? [] : [document.context],
     );
     return scan.entries
       .filter(entry => {
@@ -720,8 +719,7 @@ export class MarkdownMemoryClient implements MemoryClient {
         if (documentId !== undefined) {
           return documentIds.has(documentId);
         }
-        const context = entryContext(entry.text);
-        return context !== undefined && legacyContexts.has(context);
+        return legacyContexts.some(context => isLegacyDocumentCopy({ text: entry.text, context }));
       })
       .map(entry => entry.id);
   }

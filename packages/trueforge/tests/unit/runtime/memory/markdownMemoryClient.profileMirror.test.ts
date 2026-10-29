@@ -87,20 +87,87 @@ describe('learned profile mirror on the Markdown store', () => {
     });
   });
 
-  it('also hides an older mirror written before the document marker existed', async () => {
+  async function writeDay(dir: string, day: string, entries: string[]): Promise<void> {
+    const memoryDir = path.join(dir, 'tenant-1', 'memory');
+    await mkdir(memoryDir, { recursive: true });
+    await writeFile(path.join(memoryDir, `${day}.md`), `${entries.map(entry => `${entry}\n`).join('\n')}\n`, 'utf8');
+  }
+
+  const legacyMirror = (timestamp: string, document: string) =>
+    `## ${timestamp}\n\n${document}\n\n> Learned user profile`;
+
+  it('also hides every older mirror written before the document marker existed', async () => {
     await withClient(async (client, dir) => {
-      const memoryDir = path.join(dir, 'tenant-1', 'memory');
-      await mkdir(memoryDir, { recursive: true });
-      await writeFile(
-        path.join(memoryDir, '2026-10-20.md'),
-        '## 2026-10-20T12:00:00.000Z\n\n# Learned\n\nLikes tea.\n\n> Learned user profile\n\n',
-        'utf8',
-      );
+      await writeDay(dir, '2026-10-19', [legacyMirror('2026-10-19T12:00:00.000Z', '# Learned\n\nLikes tea.')]);
+      await writeDay(dir, '2026-10-20', [
+        legacyMirror('2026-10-20T12:00:00.000Z', 'No learned profile is currently stored for this user.'),
+        legacyMirror('2026-10-20T13:00:00.000Z', '# Learned\n\nLikes tea.\n\nWorks in Lisbon.'),
+      ]);
       await mirror(client, '# Learned\n\nLikes coffee.', 5, '2026-10-27T12:00:00.000Z');
 
       const shown = await listed(client);
       expect(shown).toHaveLength(1);
       expect(shown[0]).toContain('Likes coffee.');
+    });
+  });
+
+  it('leaves a note that merely quotes the mirror line alone when it carries a chat id or a source', async () => {
+    await withClient(async (client, dir) => {
+      await writeDay(dir, '2026-10-20', [
+        `${legacyMirror('2026-10-20T12:00:00.000Z', 'Alice wrote this note herself.')}\n\n<!-- session_id: chat-1 -->`,
+        `${legacyMirror('2026-10-20T13:00:00.000Z', 'An email said this.')}\n\n> Source: read content`,
+        '## 2026-10-20T14:00:00.000Z\n\n> Learned user profile',
+      ]);
+      await mirror(client, '# Learned\n\nLikes coffee.', 5, '2026-10-27T12:00:00.000Z');
+
+      const shown = await listed(client);
+      expect(shown).toHaveLength(4);
+      expect(shown.filter(text => text.includes('Likes coffee.'))).toHaveLength(1);
+    });
+  });
+
+  it('hides the older copies too when the profile is cleared', async () => {
+    await withClient(async (client, dir) => {
+      await writeDay(dir, '2026-10-20', [legacyMirror('2026-10-20T12:00:00.000Z', '# Learned\n\nLikes tea.')]);
+      await mirror(client, '# Learned\n\nLikes coffee.', 5, '2026-10-27T12:00:00.000Z');
+
+      await mirrorLearnedProfile({
+        client,
+        userRef: 'user:alice',
+        document: null,
+        profileExists: true,
+        profileRevision: 6,
+        timestamp: '2026-10-28T12:00:00.000Z',
+        retainTimeoutMs: 1000,
+        logger: logger(),
+      });
+
+      expect(await listed(client)).toEqual([]);
+      expect(await recalled(client)).toEqual([]);
+    });
+  });
+
+  it("never lets one person's mirror replace another's in a shared tenant vault", async () => {
+    await withClient(async client => {
+      const bob = (document: string, revision: number) =>
+        mirrorLearnedProfile({
+          client,
+          userRef: 'user:bob',
+          document,
+          profileExists: true,
+          profileRevision: revision,
+          timestamp: '2026-10-27T12:00:00.000Z',
+          retainTimeoutMs: 1000,
+          logger: logger(),
+        });
+      await mirror(client, '# Learned\n\nAlice likes tea.', 1, '2026-10-26T12:00:00.000Z');
+      await bob('# Learned\n\nBob likes coffee.', 1);
+      await mirror(client, '# Learned\n\nAlice likes cocoa.', 2, '2026-10-28T12:00:00.000Z');
+
+      const shown = await listed(client);
+      expect(shown).toHaveLength(2);
+      expect(shown.some(text => text.includes('Bob likes coffee.'))).toBe(true);
+      expect(shown.some(text => text.includes('Alice likes cocoa.'))).toBe(true);
     });
   });
 
