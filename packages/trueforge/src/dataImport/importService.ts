@@ -64,6 +64,7 @@ import {
   vaultFilesystemNamespace,
   withoutHiddenMarkers,
 } from '../runtime/memory/markdownMemoryFiles';
+import { MEMORY_RECALL_ENABLED_SETTING_KEY } from '../runtime/memoryRecallSettings';
 import { MEMORY_SCREEN_ENABLED_SETTING_KEY } from '../runtime/memoryScreenSettings';
 import { MEMORY_SUMMARIZE_SETTING_KEY } from '../runtime/memorySummarizeSettings';
 import { DEFAULT_CHAT_MODEL_SETTING_KEY } from '../runtime/tokenFactoryProvider';
@@ -221,6 +222,7 @@ function leftOutName(name: string): string {
 /** Instance-wide settings an import may fill in; the permission settings in the archive are never applied. */
 const IMPORTABLE_GLOBAL_SETTING_KEYS: ReadonlySet<string> = new Set<string>([
   DEFAULT_CHAT_MODEL_SETTING_KEY,
+  MEMORY_RECALL_ENABLED_SETTING_KEY,
   MEMORY_SCREEN_ENABLED_SETTING_KEY,
   MEMORY_SUMMARIZE_SETTING_KEY,
   TOOL_OUTPUT_SCREEN_ENABLED_SETTING_KEY,

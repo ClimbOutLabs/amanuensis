@@ -1,6 +1,6 @@
 'use client';
 
-import { useTrueFoundryAgentSpec, useTrueFoundryUpdateAgentSpec } from '@truefoundry/assistant-ui-runtime';
+import { useTrueFoundryAgentSpec } from '@truefoundry/assistant-ui-runtime';
 import type { TrueForgeApi } from '@truefoundry/trueforge-sdk';
 import { useEffect, useState, type ReactNode } from 'react';
 
@@ -15,6 +15,7 @@ import {
 import { useAssistantDisplayName } from '../../components/PersonalizationContext.js';
 import { useToasterOptional } from '../ToasterContainer.js';
 import { readMemoryEmbeddingsStatus, type MemoryEmbeddingsStatus } from './memoryEmbeddingsCapability.js';
+import { useMemoryRecallSetting } from './memoryRecallSetting.js';
 import { readMemoryScreenStatus, readToolOutputScreenStatus } from './memoryScreenCapability.js';
 import { useMemoryScreenSetting } from './memoryScreenSetting.js';
 import { readMemoryStorageDir } from './memoryStorageCapability.js';
@@ -423,22 +424,10 @@ function StatusPill({ tone, text }: { tone: 'on' | 'neutral'; text: string }) {
 function MemoryRecallToggle() {
   const assistant = useAssistantDisplayName();
   const { agentSpec } = useTrueFoundryAgentSpec();
-  const updateAgentSpec = useTrueFoundryUpdateAgentSpec();
+  const setting = useMemoryRecallSetting();
 
-  const recallEnabled = agentSpec?.config?.memory?.recallEnabled ?? true;
-
-  const setRecallEnabled = (next: boolean) => {
-    if (!updateAgentSpec) return;
-    updateAgentSpec({
-      config: {
-        ...(agentSpec?.config ?? {}),
-        memory: {
-          ...(agentSpec?.config?.memory ?? {}),
-          recallEnabled: next,
-        },
-      },
-    });
-  };
+  // The server's person-level switch owns the choice; the agent's own value only shows until it is set.
+  const recallEnabled = setting.enabled ?? agentSpec?.config?.memory?.recallEnabled ?? true;
 
   return (
     <div className="flex items-start justify-between gap-4">
@@ -449,12 +438,20 @@ function MemoryRecallToggle() {
         <p className="mt-0.5 text-xs text-text-secondary">
           When this is off, {assistant} does not bring saved memories into its replies. Saved memories are kept.
         </p>
+        {setting.error === null ? null : (
+          <p role="alert" className="mt-1 text-xs text-text-secondary">
+            {setting.error}
+          </p>
+        )}
       </div>
       <Switch
         id="memory-recall-toggle"
         checked={recallEnabled}
-        disabled={!updateAgentSpec}
-        onCheckedChange={setRecallEnabled}
+        disabled={!setting.supported || setting.saving}
+        onCheckedChange={next => {
+          // The failure message is shown below; the rejection carries nothing more to handle.
+          void setting.setEnabled(next).catch(() => undefined);
+        }}
         aria-label="Use memories in replies"
       />
     </div>

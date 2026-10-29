@@ -60,6 +60,7 @@ const SETTINGS_PATHS = [
   '/api/v1/settings/run-code',
   '/api/v1/settings/tool-output-screens',
   '/api/v1/settings/memory-screens',
+  '/api/v1/settings/memory-recall',
   '/api/v1/settings/memory-summarize',
   '/api/v1/settings/anything-added-later',
 ];

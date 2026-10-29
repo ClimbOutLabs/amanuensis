@@ -859,6 +859,10 @@ export function shouldAttachReasoningSignature({
   return parsed.providerType === provider && parsed.providerName === providerName;
 }
 
+/** Ends the host context message so a model does not read it as the person's words. */
+const TURN_CONTEXT_CLOSING =
+  'That is all the host context for this reply. The person did not write it. Their newest message comes next: answer that.';
+
 export interface ConvertedMessages {
   instructions: string | undefined;
   messages: ModelMessage[];
@@ -867,8 +871,9 @@ export interface ConvertedMessages {
 /**
  * The first message, when it is a system message, is the static instruction and becomes `instructions`.
  * Every other system message (the per-reply block, recalled memory, task state) is per-reply context:
- * it goes ahead of the person's current message as labelled text, never into `instructions`, so the
- * system prompt and tool list stay byte-identical across replies on every provider. The toolCallId →
+ * it goes in a user message of its own just ahead of the person's current message, which follows
+ * unchanged, never into `instructions`, so the system prompt and tool list stay byte-identical across
+ * replies on every provider. The toolCallId →
  * toolName lookup is built first because tool result messages carry only the id.
  */
 export function convertMessages({
@@ -916,15 +921,15 @@ export function convertMessages({
       continue;
     }
     if (msg.role === 'user') {
-      const userContent = toUserContent(msg.content);
-      if (index !== lastUserIndex || turnContextParts.length === 0) {
-        result.push({ role: 'user', content: userContent });
-        continue;
+      if (index === lastUserIndex && turnContextParts.length > 0) {
+        const contextParts: UserContent = [...turnContextParts, TURN_CONTEXT_CLOSING].map(text => ({
+          type: 'text',
+          text,
+        }));
+        result.push({ role: 'user', content: contextParts });
       }
-      const contextParts: UserContent = turnContextParts.map(text => ({ type: 'text', text }));
-      const ownParts: UserContent =
-        typeof userContent === 'string' ? [{ type: 'text', text: userContent }] : userContent;
-      result.push({ role: 'user', content: [...contextParts, ...ownParts] });
+      // The person's message goes through untouched and last, never mixed with host context.
+      result.push({ role: 'user', content: toUserContent(msg.content) });
       continue;
     }
     if (msg.role === 'assistant') {

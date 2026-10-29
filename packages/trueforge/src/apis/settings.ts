@@ -21,6 +21,7 @@ import type { TokenFactoryBudget } from '../runtime/tokenFactoryBudget';
 import { sandboxDisabledByInstaller } from '../sandbox/slotBackend';
 import { createFirstRunGuideRouter } from './firstRunGuide';
 import { createSettingsMcpServersRouter } from './mcpServers';
+import { createMemoryRecallRouter } from './memoryRecall';
 import { createMemoryScreensRouter } from './memoryScreens';
 import { createMemorySummarizeRouter } from './memorySummarize';
 import { createModelProvidersRouter } from './modelProviders';
@@ -106,6 +107,13 @@ export function createSettingsRouter<TTransaction>(deps: SettingsRouterDeps<TTra
   router.route(
     '/memory-screens',
     createMemoryScreensRouter({
+      globalSettingsStore: deps.globalSettingsStore,
+      logger: deps.logger,
+    }),
+  );
+  router.route(
+    '/memory-recall',
+    createMemoryRecallRouter({
       globalSettingsStore: deps.globalSettingsStore,
       logger: deps.logger,
     }),
