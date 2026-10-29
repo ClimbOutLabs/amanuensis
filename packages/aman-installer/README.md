@@ -12,11 +12,24 @@ What it can do today:
   store, the images, free disk, memory, the clock, backups, the sandbox
   slots, the folder Aman was installed from, and https) and then each
   instance, by running the instance's own doctor inside its app container.
-  `aman doctor --json` prints the same checks as data. It changes nothing.
+  `aman doctor --json` prints the same checks as data. With
+  `aman doctor --local` the instances' own checks skip the ones that reach
+  the network, as the health gate before an upgrade needs. It changes
+  nothing.
 - `aman doctor docker` checks that Docker is installed, running, has its
   Compose tool, has at least 6 GB of memory to work with, and reports its
   Engine version. Each failed check says the one thing to do next, in the
   words of the system it is running on.
+- `aman status` says what is installed and whether each instance is
+  running.
+- `aman verify` checks a downloaded file against its signed release
+  record.
+- `aman upgrade`, on Windows, updates Aman to the newest release whose
+  signed record checks out: it gates on the local doctor, asks once
+  before anything downloads, swaps the program in with the old one kept
+  until the next start, and runs the shell's own upgrade in the setup
+  container. The Start menu's Update Aman entry runs it, and so does
+  running Aman-Setup.exe again on an installed PC.
 
 Every sentence a person can read lives in `src/messages.ts`. A test checks
 each one for plain words and compares them all to the golden file in
