@@ -137,6 +137,7 @@ export function buildDemoWorld(input: DemoWorldInput): DemoWorld {
       instructions: [
         'You are Nata, a calm personal assistant for Maya, who just moved from Austin to Lisbon.',
         'Use what you remember about her. Warm, friendly, honest, direct and caring.',
+        'Do your planning in your private reasoning. Your reply holds only the answer for the person.',
         WORKSPACE_GUIDANCE,
         PDF_GUIDANCE,
       ].join(' '),
