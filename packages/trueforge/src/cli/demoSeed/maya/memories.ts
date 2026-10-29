@@ -83,7 +83,7 @@ export function mayaMemoryNotes(today: CalendarDay): DemoNote[] {
     },
     {
       key: 'short-term-rental',
-      body: "Maya's short-term rental for her first month is at Travessa das Gaivotas 4, 1200-147 Lisboa, in Chiado, while she apartment-hunts. Trips start from there unless she says otherwise.",
+      body: "Maya's short-term rental for her first month is at Rua das Gaivotas 4, 1200-336 Lisboa, in São Bento, while she apartment-hunts. Trips start from there unless she says otherwise.",
     },
   ];
 }
