@@ -15,8 +15,15 @@ export const TOOL_MARKUP_RETRY_MESSAGE =
 export const REPEATED_ACTION_RESULT =
   'This exact action already ran or was refused in this reply. Do not repeat it; tell the person what happened.';
 
+/** What the person reads in place of a repeat the guard skipped. */
+export const REPEATED_ACTION_OWNER_MESSAGE = 'Skipped, because I had already done this. Check the result above.';
+
 /** Result text for a write call past the per-turn cap. Not run; the turn ends after this batch. */
 export const WRITE_CAP_BLOCKED_RESULT = `Not run: this reply already made the maximum of ${String(MAX_WRITE_CALLS_PER_TURN)} changes. Do not make more changes; tell the person what was changed.`;
+
+/** What the person reads in place of a change the write cap skipped. */
+export const WRITE_CAP_OWNER_MESSAGE =
+  'Skipped, because I had already made the most changes allowed in one reply. Ask again for the rest.';
 
 /** Ends the turn, shown to the person, when the write cap stopped a call. */
 export const WRITE_CAP_STOP_MESSAGE = `Stopped after ${String(MAX_WRITE_CALLS_PER_TURN)} changes in one reply to avoid repeats. Check what was changed, then ask again if you need more.`;

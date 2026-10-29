@@ -299,6 +299,45 @@ export interface MapsServiceDeps {
   transit_provider: MapsTransitProvider;
   logger: Logger;
   fetch_limited: (url: string) => Promise<Response>;
+  /** IANA zone of the person; narrows address searches to its country when known. */
+  timezone?: string | undefined;
+}
+
+/** Zones whose country is certain; others search worldwide. */
+const COUNTRY_CODE_BY_ZONE: Record<string, string> = {
+  'Europe/Lisbon': 'pt',
+  'Atlantic/Azores': 'pt',
+  'Atlantic/Madeira': 'pt',
+};
+
+/** Place names an address ends with, such as the city after a postcode; empty when it names none. */
+function namedPlacesOf(query: string): string[] {
+  return query
+    .split(',')
+    .slice(1)
+    .map(segment =>
+      segment
+        .split(/\s+/)
+        .filter(word => !/\d/.test(word))
+        .join(' '),
+    )
+    .map(name => normalizedWords(name).trim())
+    .filter(name => name !== '');
+}
+
+const CITY_ADDRESS_FIELDS = ['city', 'town', 'village', 'municipality'];
+
+function isInNamedPlace({
+  candidate,
+  names,
+}: {
+  candidate: z.infer<typeof nominatimResultSchema>;
+  names: readonly string[];
+}): boolean {
+  return CITY_ADDRESS_FIELDS.some(field => {
+    const value = candidate.address?.[field];
+    return typeof value === 'string' && names.includes(normalizedWords(value).trim());
+  });
 }
 
 /** Server-side maps service: geocoding, POI search, road and public transport routing. */
@@ -317,7 +356,34 @@ export class MapsService {
     if (cached !== undefined) {
       return cached[0] ?? null;
     }
-    const url = `${this.deps.geocoder_url}/search?q=${encodeURIComponent(place)}&format=jsonv2&limit=1&addressdetails=1`;
+    const countryCode = this.deps.timezone === undefined ? undefined : COUNTRY_CODE_BY_ZONE[this.deps.timezone];
+    let candidates = await this.searchCandidates({ place, countryCode });
+    if (candidates.length === 0 && countryCode !== undefined) {
+      // The zone is only a hint: a place abroad still resolves.
+      candidates = await this.searchCandidates({ place, countryCode: undefined });
+    }
+    if (candidates.length === 0) {
+      return null;
+    }
+    const names = namedPlacesOf(place);
+    const best = candidates.find(candidate => isInNamedPlace({ candidate, names })) ?? candidates[0];
+    if (best === undefined) {
+      return null;
+    }
+    const place0 = toGeocodedPlace(best);
+    this.geocodeCache.set(cacheKey, [place0]);
+    return place0;
+  }
+
+  private async searchCandidates({
+    place,
+    countryCode,
+  }: {
+    place: string;
+    countryCode: string | undefined;
+  }): Promise<z.infer<typeof nominatimResultSchema>[]> {
+    const country = countryCode === undefined ? '' : `&countrycodes=${countryCode}`;
+    const url = `${this.deps.geocoder_url}/search?q=${encodeURIComponent(place)}&format=jsonv2&limit=5&addressdetails=1${country}`;
     let response: Response;
     try {
       response = await this.geocodeLimiter.run(() => this.deps.fetch_limited(url));
@@ -336,15 +402,16 @@ export class MapsService {
     }
     const body = json.value;
     if (!Array.isArray(body) || body.length === 0) {
-      return null;
+      return [];
     }
-    const parsed = nominatimResultSchema.safeParse(body[0]);
-    if (!parsed.success) {
+    const candidates = body.flatMap(item => {
+      const parsed = nominatimResultSchema.safeParse(item);
+      return parsed.success ? [parsed.data] : [];
+    });
+    if (candidates.length === 0) {
       throw new MapsUpstreamError('service_unavailable', 'geocoder');
     }
-    const place0 = toGeocodedPlace(parsed.data);
-    this.geocodeCache.set(cacheKey, [place0]);
-    return place0;
+    return candidates;
   }
 
   /** POI search near a geocoded place; zero hits is not an error. */
@@ -1064,6 +1131,7 @@ export function mapsCapability(options: MapsCapabilityOptions): AgentCapability 
     transit_provider: new MotisTransitProvider(configuration.MAPS_TRANSIT_URL, fetch_limited),
     logger: options.logger,
     fetch_limited,
+    timezone: options.timezone,
   });
   return {
     systemToolSets: [

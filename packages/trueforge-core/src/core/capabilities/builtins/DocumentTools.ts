@@ -45,6 +45,11 @@ import { throwIfSignalAborted } from '../../util/abort';
 import type { AgentCapability } from '../AgentCapability';
 export const CREATE_DOCUMENT_REPORT_TOOL_NAME = 'create_document_report';
 export const SUMMARIZE_NET_WORTH_TOOL_NAME = 'summarize_net_worth';
+/** The tools that render a downloadable report, for a run whose answer is not a file. */
+export const DOCUMENT_REPORT_TOOL_NAMES: readonly string[] = [
+  CREATE_DOCUMENT_REPORT_TOOL_NAME,
+  SUMMARIZE_NET_WORTH_TOOL_NAME,
+];
 export const DOCUMENTS_INSTRUCTION_SECTION = 'documents';
 
 const filePathListSchema = z
@@ -251,11 +256,18 @@ function compactNetWorthDocumentReport(report: StructuredDocumentReport): Struct
   };
 }
 
-export function buildDocumentsInstruction(builder: InstructionBuilder): void {
+export function buildDocumentsInstruction(
+  builder: InstructionBuilder,
+  options: { withheldTools?: readonly string[] | undefined } = {},
+): void {
+  // A report tool the run does not offer is not mentioned, so the model never reaches for it.
+  const reportGuidance = (options.withheldTools ?? []).includes(CREATE_DOCUMENT_REPORT_TOOL_NAME)
+    ? ''
+    : ` For a generic report, pass a structured report to documents/${CREATE_DOCUMENT_REPORT_TOOL_NAME}: compact mode (default) is a bounded digest of ${String(DOCUMENT_REPORT_MAX_SECTIONS)} sections, ${String(DOCUMENT_REPORT_MAX_ROWS)} rows, ${String(DOCUMENT_REPORT_MAX_NOTES)} notes, while full mode renders a multi-page report with no row or section cap for long reports such as financial plans. For the explicit net-worth mode only, cite exact spans from the extraction result in documents/${SUMMARIZE_NET_WORTH_TOOL_NAME}; the host validates those spans and computes totals.`;
   builder.addSection(
     DOCUMENTS_INSTRUCTION_SECTION,
     dedent`
-      Supported PDF and raster-image attachments are staged in the sandbox, listed in the Uploaded files announcement, and their text is already placed in the message that follows (native PDF text first, local OCR fallback for scanned pages and images), so it does not need to be fetched to be read. Use documents/${EXTRACT_DOCUMENT_TEXT_TOOL_NAME} only to re-extract with page/line-addressable provenance for citation, or when the inline text was truncated or reported unavailable. A PDF staged from an email or chat attachment is read with documents/${EXTRACT_DOCUMENT_TEXT_TOOL_NAME} using its staged path, the same as an announced upload. A file in the project folder can be read by its project path; it is staged and read the same as an upload. A file outside the project folder asks the person first. For a generic report, pass a structured report to documents/${CREATE_DOCUMENT_REPORT_TOOL_NAME}: compact mode (default) is a bounded digest of ${String(DOCUMENT_REPORT_MAX_SECTIONS)} sections, ${String(DOCUMENT_REPORT_MAX_ROWS)} rows, ${String(DOCUMENT_REPORT_MAX_NOTES)} notes, while full mode renders a multi-page report with no row or section cap for long reports such as financial plans. For the explicit net-worth mode only, cite exact spans from the extraction result in documents/${SUMMARIZE_NET_WORTH_TOOL_NAME}; the host validates those spans and computes totals. Unreadable or unsupported files produce issues, never guesses. Do not use the language model as a PDF/OCR parser or invent missing values.
+      Supported PDF and raster-image attachments are staged in the sandbox, listed in the Uploaded files announcement, and their text is already placed in the message that follows (native PDF text first, local OCR fallback for scanned pages and images), so it does not need to be fetched to be read. Use documents/${EXTRACT_DOCUMENT_TEXT_TOOL_NAME} only to re-extract with page/line-addressable provenance for citation, or when the inline text was truncated or reported unavailable. A PDF staged from an email or chat attachment is read with documents/${EXTRACT_DOCUMENT_TEXT_TOOL_NAME} using its staged path, the same as an announced upload. A file in the project folder can be read by its project path; it is staged and read the same as an upload. A file outside the project folder asks the person first.${reportGuidance} Unreadable or unsupported files produce issues, never guesses. Do not use the language model as a PDF/OCR parser or invent missing values.
     `.trim(),
   );
 }
@@ -382,12 +394,13 @@ export class DocumentTools extends LocalToolMCP {
     private readonly sandbox: Sandbox,
     tracing: AgentTracing,
     boundRepository?: BoundRepository,
+    private readonly withheldTools: readonly string[] = [],
   ) {
     super({ tracing });
     this.boundRepository = boundRepository;
   }
 
-  private readonly tools: ToolDefinition[] = [
+  private readonly allTools: ToolDefinition[] = [
     defineTool({
       name: EXTRACT_DOCUMENT_TEXT_TOOL_NAME,
       description:
@@ -416,7 +429,7 @@ export class DocumentTools extends LocalToolMCP {
   ];
 
   protected getTools(): ToolDefinition[] {
-    return this.tools;
+    return this.allTools.filter(tool => !this.withheldTools.includes(tool.name));
   }
 
   override async toolCallInfo(params: Parameters<LocalToolMCP['toolCallInfo']>[0], resolveUnderlyingTool?: boolean) {
@@ -660,10 +673,18 @@ export function documentCapability(options: {
   sandbox: Sandbox;
   tracing: AgentTracing;
   boundRepository?: BoundRepository | undefined;
+  /** Tool names this run does not offer. */
+  withheldTools?: readonly string[] | undefined;
 }): AgentCapability {
   return {
-    systemToolSets: [new DocumentTools(options.sandbox, options.tracing, options.boundRepository)],
-    instructionBuilders: [buildDocumentsInstruction],
+    systemToolSets: [
+      new DocumentTools(options.sandbox, options.tracing, options.boundRepository, options.withheldTools),
+    ],
+    instructionBuilders: [
+      builder => {
+        buildDocumentsInstruction(builder, { withheldTools: options.withheldTools });
+      },
+    ],
     bundle: 'documents',
   };
 }

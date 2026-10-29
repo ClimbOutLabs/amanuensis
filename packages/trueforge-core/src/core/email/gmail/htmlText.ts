@@ -210,8 +210,12 @@ function safeLink(href: string): string | null {
   return /^(https?:\/\/|mailto:)/i.test(decoded) && decoded.length <= MAX_LINK_CHARS ? decoded : null;
 }
 
-/** A readable plain-text version of an HTML body: no scripts, styles, hidden text or tags; links keep their address. */
-export function htmlToText(source: string): string {
+/**
+ * A readable plain-text version of an HTML body: no scripts, styles, hidden text or tags; links keep their
+ * address. Cells of one table row sit on one line, apart by `cellSeparator` (a space unless given).
+ */
+export function htmlToText(source: string, options?: { cellSeparator?: string }): string {
+  const cellSeparator = options?.cellSeparator ?? ' ';
   const html = source.length > MAX_HTML_CHARS ? source.slice(0, MAX_HTML_CHARS) : source;
   const lastGt = html.lastIndexOf('>');
   // Pieces are joined once at the end: appending to one growing string and testing its tail is quadratic.
@@ -233,8 +237,9 @@ export function htmlToText(source: string): string {
       push(text);
     }
   };
+  const lineHasText = () => parts.length > 0 && !atLineStart;
   const lineBreak = () => {
-    if (parts.length > 0 && !atLineStart) {
+    if (lineHasText()) {
       push('\n');
     }
   };
@@ -319,8 +324,8 @@ export function htmlToText(source: string): string {
       push('- ');
     } else if (BLOCK_TAGS.has(name)) {
       lineBreak();
-    } else if (CELL_TAGS.has(name) && closing) {
-      push(' ');
+    } else if (CELL_TAGS.has(name) && !closing && lineHasText()) {
+      push(cellSeparator);
     }
   }
   return decodeEntities(parts.join(''))

@@ -31,7 +31,7 @@ export const DEMO_BRIEF_TASK = `Run the Morning Brief as a Personal Intelligence
 5. TOMORROW AT A GLANCE: anything early tomorrow I should prepare for today.
 
 Do not add opinions from personas or anyone else.
-Never send email or change my calendar during the brief. If something on the calendar needs changing, put it on my "Needs your OK" list.
+Never send email or change my calendar during the brief. Do not create or change spaces during the brief; the reply is the dashboard. If something on the calendar needs changing, put it on my "Needs your OK" list.
 
 PERSONAL INTELLIGENCE:
 - Research is allowed to deepen external facts (people, organizations, events, topics). Keep searches neutral and public, never personal. Personal detail comes only from what I know about Maya (memory/profile), never from a search.

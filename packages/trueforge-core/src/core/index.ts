@@ -61,6 +61,7 @@ export { DEFAULT_OCR_LANGUAGES, requiredOcrLanguages } from '../documents/ocrLan
 export { DOCUMENTS_SERVER_ID, EXTRACT_DOCUMENT_TEXT_TOOL_NAME } from '../documents/toolContract';
 export {
   CREATE_DOCUMENT_REPORT_TOOL_NAME,
+  DOCUMENT_REPORT_TOOL_NAMES,
   SUMMARIZE_NET_WORTH_TOOL_NAME,
   documentCapability,
 } from './capabilities/builtins/DocumentTools';

@@ -174,6 +174,60 @@ describe('replySentences', () => {
   });
 });
 
+const BRIEF_REPLY = [
+  '```openui',
+  'root = Stack([header, emailCard, okCard])',
+  'header = TextContent("Good morning, Maya.", "large-heavy")',
+  'emailCard = Card([CardHeader("📥 Email", "2 need a reply"), emailTable])',
+  'emailTable = Table([Col("From", froms), Col("Subject", subjects)])',
+  'froms = ["Priya Shah", "Tomas Reis"]',
+  'subjects = ["Signed form due 3 November", "Lisbon studio lease renewal"]',
+  'okCard = Card([CardHeader("✅ Needs your OK"), TextContent("- Send the signed form to Priya today.\\n- Reply to Tomas about the lease by Friday.")])',
+  '```',
+].join('\n');
+
+const BRIEF_SENTENCES = [
+  'Good morning, Maya.',
+  '📥 Email: 2 need a reply',
+  'Priya Shah, Signed form due 3 November',
+  'Tomas Reis, Lisbon studio lease renewal',
+  '✅ Needs your OK',
+  'Send the signed form to Priya today.',
+  'Reply to Tomas about the lease by Friday.',
+];
+
+describe('replySentences of a drawn or marked-up reply', () => {
+  it('reads a brief that is one OpenUI block as its heading, table rows and list items', () => {
+    expect(replySentences(BRIEF_REPLY)).toEqual(BRIEF_SENTENCES);
+  });
+
+  it('keeps prose around the block as written and skips a code fence that is not OpenUI', () => {
+    expect(
+      replySentences(
+        `Here is your morning.\n${BRIEF_REPLY}\nCall the bank before noon.\n\`\`\`ts\nconst x = 1;\nRun this first.\n\`\`\``,
+      ),
+    ).toEqual(['Here is your morning.', ...BRIEF_SENTENCES, 'Call the bank before noon.']);
+  });
+
+  it('reads HTML as its headings, list items and table rows, with the cells of a row apart by a comma', () => {
+    expect(
+      replySentences(
+        '<h2>Today</h2><ul><li>Send the form.</li><li>Call Tomas.</li></ul><table><tr><td>Priya Shah</td><td>Form due 3 November</td></tr></table>',
+      ),
+    ).toEqual(['Today', 'Send the form.', 'Call Tomas.', 'Priya Shah, Form due 3 November']);
+  });
+
+  it('stores the plain-text sentence the model pointed at, never the block markup', async () => {
+    const { llm, lastPrompt } = scriptedLlm('{"findings": [], "responses": [6, 3]}');
+    await expect(run({ results: [], assistantText: BRIEF_REPLY, llm })).resolves.toEqual([
+      { source: 'assistant_response', text: 'Send the signed form to Priya today.' },
+      { source: 'assistant_response', text: 'Priya Shah, Signed form due 3 November' },
+    ]);
+    expect(lastPrompt()).toContain('[6] Send the signed form to Priya today.');
+    expect(lastPrompt()).not.toContain('CardHeader');
+  });
+});
+
 describe('parseNotesReply findings', () => {
   it('keeps a finding tied to a real result and labels its source from that result', () => {
     expect(
