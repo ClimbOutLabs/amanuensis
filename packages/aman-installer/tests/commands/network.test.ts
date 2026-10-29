@@ -179,13 +179,63 @@ test('network open lets the ports through the firewall, hands the installer the 
   assert.deepEqual(runner.calls, [
     {
       command: 'docker',
-      args: containerArgs(['--address', '192.168.1.20', '--address', '100.101.102.103', '--address', 'desktop-abc']),
+      args: containerArgs(['--address', '192.168.1.20', '--address', 'desktop-abc']),
     },
   ]);
   assert.ok(jobs.shortcuts.some(shortcut => shortcut.args === 'network open'));
   assert.deepEqual(lines, [
     'Open https://192.168.1.20:8443',
     networkPhoneLine('https://192.168.1.20:8443'),
+    NETWORK_OPEN_LINE,
+  ]);
+});
+
+test('network open hands over no Tailscale-range address even when it sorts first, and the phone line names the home address', async () => {
+  const jobs = jobsWith();
+  const runner = new RefreshRunner(OK);
+  const { code, lines } = await run({
+    runner,
+    store: storeWith(MAIN_HTTPS),
+    jobs,
+    mode: 'open',
+    interfaces: {
+      Tailscale: [v4('100.101.102.103')],
+      Ethernet: [v4('192.168.1.20')],
+    },
+  });
+  assert.equal(code, 0);
+  assert.equal(jobs.firewallOpen, true);
+  assert.deepEqual(runner.calls, [
+    {
+      command: 'docker',
+      args: containerArgs(['--address', '192.168.1.20', '--address', 'desktop-abc']),
+    },
+  ]);
+  assert.deepEqual(lines, [
+    'Open https://192.168.1.20:8443',
+    networkPhoneLine('https://192.168.1.20:8443'),
+    NETWORK_OPEN_LINE,
+  ]);
+});
+
+test('network open on a Tailscale-only computer completes on the name alone, and the phone line names the computer', async () => {
+  const jobs = jobsWith();
+  const runner = new RefreshRunner(OK);
+  const { code, lines } = await run({
+    runner,
+    store: storeWith(MAIN_HTTPS),
+    jobs,
+    mode: 'open',
+    interfaces: { Tailscale: [v4('100.101.102.103')] },
+  });
+  assert.equal(code, 0);
+  assert.equal(jobs.firewallOpen, true);
+  assert.deepEqual(jobs.firewallPorts, [8443, 8791]);
+  assert.deepEqual(runner.calls, [{ command: 'docker', args: containerArgs(['--address', 'desktop-abc']) }]);
+  assert.ok(jobs.shortcuts.some(shortcut => shortcut.args === 'network open'));
+  assert.deepEqual(lines, [
+    'Open https://192.168.1.20:8443',
+    networkPhoneLine('https://desktop-abc:8443'),
     NETWORK_OPEN_LINE,
   ]);
 });

@@ -1,7 +1,12 @@
 import type { NetworkInterfaceInfo } from 'node:os';
 
 import type { Host } from '../host/host.ts';
-import { networkAddressList, networkInstallAddresses, type NetworkAddressList } from '../host/networkAddresses.ts';
+import {
+  networkAddressList,
+  networkInstallAddresses,
+  tailscaleRangeIpv4,
+  type NetworkAddressList,
+} from '../host/networkAddresses.ts';
 import { WindowsJobError, type WindowsJobs } from '../host/windowsJobs.ts';
 import {
   NETWORK_ADDRESS_MISSING,
@@ -63,11 +68,14 @@ function recordedTlsPort(instance: InstanceRecord): number | null {
   return null;
 }
 
-// The address a phone opens: the first private IPv4 address, else the
-// computer's name, at the https port when the instance serves https
-// and at the plain port otherwise.
+// The address a phone opens: the first private IPv4 address outside
+// Tailscale's range, which a phone on the same Wi-Fi can open, else
+// the computer's name, at the https port when the instance serves
+// https and at the plain port otherwise. The Tailscale address is
+// never the printed one: a phone that is not on the tailnet cannot
+// open it, so when it is the only address the name stands in.
 function phoneAddress(list: NetworkAddressList, ports: { appPort: number; tlsPort: number | null }): string | null {
-  const host = list.ipv4[0] ?? list.hostName;
+  const host = list.ipv4.find(address => !tailscaleRangeIpv4(address)) ?? list.hostName;
   if (host === null) {
     return null;
   }

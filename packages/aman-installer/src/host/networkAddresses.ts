@@ -39,6 +39,21 @@ function ipv4Parts(address: string): readonly number[] | null {
   return numbers;
 }
 
+// Tailscale's own range, 100.64.0.0/10, over already-read parts.
+function tailscaleRangeParts(parts: readonly number[]): boolean {
+  const [a, b] = parts;
+  return a === 100 && b !== undefined && b >= 64 && b <= 127;
+}
+
+// True when an address sits in Tailscale's own range, 100.64.0.0/10:
+// private on this computer, where the Tailscale adapter is, and
+// public-looking to any judge that has no Tailscale adapter of its
+// own, install.sh's address check inside the setup container included.
+export function tailscaleRangeIpv4(address: string): boolean {
+  const parts = ipv4Parts(address);
+  return parts !== null && tailscaleRangeParts(parts);
+}
+
 // The private ranges, as the shell's private_ipv4 reads them: RFC 1918,
 // plus Tailscale's own range on the Tailscale adapter only. Link-local
 // and loopback are not addresses other devices use, and the address
@@ -58,7 +73,7 @@ function privateIpv4(address: string, onTailscale: boolean): boolean {
   if (a === 192 && b === 168) {
     return true;
   }
-  if (a === 100 && b !== undefined && b >= 64 && b <= 127) {
+  if (tailscaleRangeParts(parts)) {
     return onTailscale;
   }
   return false;
@@ -79,9 +94,14 @@ function privateIpv6(address: string): boolean {
 }
 
 // The computer's short name, lowercase, when it is a name the shell's
-// own rule would take (a single label of letters, digits and hyphens).
+// own rule would take: a single label of letters, digits and hyphens,
+// and not digits alone, which the shell refuses as a number rather
+// than a name.
 function shortHostName(rawName: string): string | null {
   const firstLabel = rawName.trim().toLowerCase().split('.')[0] ?? '';
+  if (/^\d+$/.test(firstLabel)) {
+    return null;
+  }
   return /^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/.test(firstLabel) ? firstLabel : null;
 }
 
@@ -120,10 +140,15 @@ export function networkAddressList(options: {
 }
 
 // The addresses install.sh is handed, one --address at a time: the IPv4
-// addresses and the computer's name. install.sh's own address check
-// takes IPv4 addresses and names only, so the IPv6 addresses stay in
-// the list above, for the summary and the first-install flow, and are
-// not handed over here.
+// addresses and the computer's name, minus two parts of the list. The
+// Tailscale-range addresses stay in the list but are not handed over:
+// install.sh judges each address where it runs, inside the setup
+// container, whose adapters have no Tailscale, so it refuses that
+// range as public. And the IPv6 addresses are not handed over either:
+// the list above is the whole picture of this computer's private
+// addresses, and install.sh's address check takes IPv4 addresses and
+// names only today.
 export function networkInstallAddresses(list: NetworkAddressList): readonly string[] {
-  return list.hostName === null ? [...list.ipv4] : [...list.ipv4, list.hostName];
+  const handed = list.ipv4.filter(address => !tailscaleRangeIpv4(address));
+  return list.hostName === null ? handed : [...handed, list.hostName];
 }

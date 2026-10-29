@@ -98,6 +98,9 @@ test('the host name is the short name in lowercase, or nothing when it is not a 
   assert.equal(nameOf('DESKTOP-ABC'), 'desktop-abc');
   assert.equal(nameOf('host.corp.example'), 'host');
   assert.equal(nameOf('a'), 'a');
+  assert.equal(nameOf('pc123'), 'pc123');
+  assert.equal(nameOf('1234567'), null);
+  assert.equal(nameOf('1234567.corp.example'), null);
   assert.equal(nameOf('My Computer!'), null);
   assert.equal(nameOf('bad_name'), null);
   assert.equal(nameOf(''), null);
@@ -113,4 +116,27 @@ test('the installer is handed the IPv4 addresses and the name, never the IPv6 ad
   assert.deepEqual(networkInstallAddresses(list), ['192.168.1.20', 'desktop-abc']);
   assert.deepEqual(networkInstallAddresses({ ipv4: ['10.0.0.5'], ipv6: [], hostName: null }), ['10.0.0.5']);
   assert.deepEqual(networkInstallAddresses({ ipv4: [], ipv6: [], hostName: null }), []);
+});
+
+test('the Tailscale-range addresses stay in the list but are not handed to the installer', () => {
+  const list = networkAddressList({
+    interfaces: {
+      Tailscale: [v4('100.101.102.103')],
+      Ethernet: [v4('192.168.1.20')],
+    },
+    hostName: 'DESKTOP-ABC',
+  });
+  assert.deepEqual(list.ipv4, ['100.101.102.103', '192.168.1.20']);
+  assert.deepEqual(networkInstallAddresses(list), ['192.168.1.20', 'desktop-abc']);
+});
+
+test('a Tailscale-only computer hands the installer its name and no Tailscale-range address', () => {
+  const list = networkAddressList({
+    interfaces: {
+      Tailscale: [v4('100.101.102.103')],
+    },
+    hostName: 'DESKTOP-ABC',
+  });
+  assert.deepEqual(list.ipv4, ['100.101.102.103']);
+  assert.deepEqual(networkInstallAddresses(list), ['desktop-abc']);
 });
