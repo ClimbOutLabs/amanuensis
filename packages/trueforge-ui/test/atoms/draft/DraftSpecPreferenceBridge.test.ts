@@ -146,6 +146,34 @@ describe('reconcileDraftSandbox for a new chat', () => {
     });
   });
 
+  it('turns the sandbox on when it is available and the draft has no setting', () => {
+    const agentSpec: AgentSpec = { model: { name: 'm' }, skills };
+
+    expect(reconcileDraftSandbox({ agentSpec, sandboxEnabled: true, kind: 'chat' })).toEqual({
+      config: { sandbox: { enabled: true } },
+    });
+  });
+
+  it('keeps an explicit off when the sandbox is available', () => {
+    const agentSpec: AgentSpec = { model: { name: 'm' }, skills, config: { sandbox: { enabled: false } } };
+
+    expect(reconcileDraftSandbox({ agentSpec, sandboxEnabled: true, kind: 'chat' })).toEqual({});
+  });
+
+  it('turns the sandbox off when it is not available and the draft has no setting', () => {
+    const agentSpec: AgentSpec = { model: { name: 'm' }, skills };
+
+    expect(reconcileDraftSandbox({ agentSpec, sandboxEnabled: false, kind: 'chat' })).toEqual({
+      config: { sandbox: { enabled: false } },
+    });
+  });
+
+  it('does not seed the agent builder', () => {
+    expect(reconcileDraftSandbox({ agentSpec: { model: { name: 'm' } }, sandboxEnabled: true, kind: 'agent' })).toEqual(
+      {},
+    );
+  });
+
   it('changes nothing when the sandbox is available', () => {
     const agentSpec: AgentSpec = { model: { name: 'm' }, skills, config: { sandbox: { enabled: true } } };
 

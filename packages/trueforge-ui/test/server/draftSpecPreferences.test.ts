@@ -228,6 +228,17 @@ describe('withoutSkillsWhenSandboxOff', () => {
     expect(skillsHeldBack(sandboxOff, true)).toBe('sandbox_turned_off');
   });
 
+  it('names the notice and sends skills for each case', () => {
+    const seeded = { model: { name: 'model' }, skills, config: { sandbox: { enabled: true } } };
+
+    expect(skillsHeldBack(seeded, true)).toBeNull();
+    expect(withoutSkillsWhenSandboxOff(seeded, true).skills).toEqual(skills);
+    expect(skillsHeldBack(sandboxOff, true)).toBe('sandbox_turned_off');
+    expect(withoutSkillsWhenSandboxOff(sandboxOff, true).skills).toBeUndefined();
+    expect(skillsHeldBack(seeded, false)).toBe('sandbox_unavailable');
+    expect(withoutSkillsWhenSandboxOff(seeded, false).skills).toBeUndefined();
+  });
+
   it('keeps skills when the sandbox is available and on', () => {
     expect(withoutSkillsWhenSandboxOff(sandboxOn, true)).toBe(sandboxOn);
     expect(skillsHeldBack(sandboxOn, true)).toBeNull();

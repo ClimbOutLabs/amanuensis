@@ -91,9 +91,9 @@ export function ChatNoticeProvider({ channel, children }: { channel: ChatNoticeC
   const reportSkills = useCallback(
     (kind: SkillsNotice | null) =>
       setNotice(prev => {
-        if (kind !== null) return { kind, sessionId };
-        // Only the skills line is taken down; a refused send's line stays until the next send.
-        return prev !== null && isSkillsNotice(prev.kind) ? null : prev;
+        // A refused send's line outranks the skills line and stays until the next send.
+        if (prev !== null && !isSkillsNotice(prev.kind)) return prev;
+        return kind === null ? null : { kind, sessionId };
       }),
     [sessionId],
   );
