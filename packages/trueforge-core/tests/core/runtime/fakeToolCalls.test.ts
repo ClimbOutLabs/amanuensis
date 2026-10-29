@@ -31,7 +31,7 @@ import {
 } from '../../../src/core/mcp/executeToolCalls';
 import { AgentThread } from '../../../src/core/runtime/AgentThread';
 import { InternalEventType, type ContextMessage } from '../../../src/core/runtime/AgentThread.types';
-import { TOO_MANY_TOOL_CALLS_MESSAGE } from '../../../src/core/runtime/modelReplyGuard';
+import { MAX_TOOL_CALLS_PER_REPLY, TOO_MANY_TOOL_CALLS_MESSAGE } from '../../../src/core/runtime/modelReplyGuard';
 import {
   REPEATED_ACTION_RESULT,
   TOOL_MARKUP_RETRY_MESSAGE,
@@ -199,6 +199,8 @@ async function* replyStream(input: {
   calls?: CallSpec[];
   text?: string;
   toolMarkup?: 'leaked';
+  /** Marks the reply as cut by the stream for starting more calls than the stream reads. */
+  toolCallCountCut?: true;
 }): AsyncGenerator<ExtendedChatCompletionChunk, RawAssistantMessageWithUsage, unknown> {
   const calls = (input.calls ?? []).map(rawCall);
   if (input.text !== undefined) {
@@ -237,6 +239,7 @@ async function* replyStream(input: {
     usage: getEmptyUsage(),
     finish_reason: calls.length > 0 ? 'tool_calls' : 'stop',
     ...(input.toolMarkup === undefined ? {} : { tool_markup: input.toolMarkup }),
+    ...(input.toolCallCountCut === undefined ? {} : { tool_call_count_cut: input.toolCallCountCut }),
   };
 }
 
@@ -712,14 +715,14 @@ describe('duplicates, floods and dependent reads', () => {
     }
   });
 
-  it('runs a full reply of 20 different calls, one under the cap', async () => {
+  it('runs a full reply of 20 different calls, the whole cap', async () => {
     const toolSet = makeToolSet();
     let round = 0;
     const create = jest.fn((_request: LLMCreateParamsStreaming) => {
       round += 1;
       if (round === 1) {
         return replyStream({
-          calls: Array.from({ length: 20 }, (_, index) => ({
+          calls: Array.from({ length: MAX_TOOL_CALLS_PER_REPLY }, (_, index) => ({
             id: `get-${String(index)}`,
             name: 'get_event',
             args: { event_id: `evt-${String(index)}` },
@@ -730,15 +733,16 @@ describe('duplicates, floods and dependent reads', () => {
     });
     const thread = makeThread({ toolSet, create });
     const events = await drain(thread);
+    expect(MAX_TOOL_CALLS_PER_REPLY).toBe(20);
     expect(callToolNames(toolSet)).toHaveLength(20);
     expect(events.at(-1)).toMatchObject({ type: InternalEventType.AGENT_DONE, status: 'done' });
   });
 
-  it('stops the turn when one reply asks for more than 20 tool calls', async () => {
+  it('stops the turn and runs nothing when one reply asks for 21 tool calls, one over the cap', async () => {
     const toolSet = makeToolSet();
     const create = jest.fn((_request: LLMCreateParamsStreaming) =>
       replyStream({
-        calls: Array.from({ length: 21 }, (_, index) => ({
+        calls: Array.from({ length: MAX_TOOL_CALLS_PER_REPLY + 1 }, (_, index) => ({
           id: `get-${String(index)}`,
           name: 'get_event',
           args: { event_id: `evt-${String(index)}` },
@@ -755,6 +759,55 @@ describe('duplicates, floods and dependent reads', () => {
       }),
     );
     expect(toolSet.callTool).not.toHaveBeenCalled();
+  });
+
+  it('stops the turn and runs nothing when the stream stopped reading the reply, even with few calls in it', async () => {
+    const toolSet = makeToolSet();
+    const create = jest.fn((_request: LLMCreateParamsStreaming) =>
+      replyStream({
+        calls: [{ id: 'get-0', name: 'get_event', args: { event_id: 'evt-0' } }],
+        toolCallCountCut: true,
+      }),
+    );
+    const thread = makeThread({ toolSet, create });
+    const events = await drain(thread);
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        type: InternalEventType.AGENT_DONE,
+        status: 'error',
+        error: TOO_MANY_TOOL_CALLS_MESSAGE,
+      }),
+    );
+    expect(toolSet.callTool).not.toHaveBeenCalled();
+  });
+
+  it('answers a call to an unknown tool with an error result at once, and the other calls in the step still run', async () => {
+    const toolSet = makeToolSet();
+    let round = 0;
+    const create = jest.fn((_request: LLMCreateParamsStreaming) => {
+      round += 1;
+      if (round === 1) {
+        return replyStream({
+          calls: [
+            { id: 'unknown-0', name: 'extract_document_text', args: { url: 'https://example.com' } },
+            { id: 'get-0', name: 'get_event', args: { event_id: 'evt-0' } },
+            { id: 'unknown-1', name: 'extract_document_text', args: { url: 'https://example.org' } },
+          ],
+        });
+      }
+      return finalAnswerStream();
+    });
+    const thread = makeThread({ toolSet, create });
+    const events = await drain(thread);
+    expect(callToolNames(toolSet)).toEqual(['get_event']);
+    const results = toolResults(thread);
+    expect(results.map(result => result.tool_call_id)).toEqual(['unknown-0', 'get-0', 'unknown-1']);
+    for (const id of ['unknown-0', 'unknown-1']) {
+      expect(results.find(result => result.tool_call_id === id)?.content).toContain(
+        'Tool extract_document_text is unavailable in this conversation',
+      );
+    }
+    expect(events.at(-1)).toMatchObject({ type: InternalEventType.AGENT_DONE, status: 'done' });
   });
 });
 
