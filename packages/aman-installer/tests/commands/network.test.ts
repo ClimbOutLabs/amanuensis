@@ -97,6 +97,8 @@ function storeWith(summary: StateSummary): StateStore {
     setInstanceValue: () => Promise.resolve(false),
     removeInstance: () => Promise.resolve(),
     writeRelease: () => Promise.resolve(false),
+    setBackupsMode: () => Promise.resolve(false),
+    refreshCache: () => undefined,
   };
 }
 

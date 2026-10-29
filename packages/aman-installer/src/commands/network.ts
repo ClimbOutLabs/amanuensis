@@ -118,6 +118,10 @@ async function runRefresh(
     print(problemText(NETWORK_DOCKER_NOT_ANSWERING));
     return false;
   }
+  // The refresh ran in its container and wrote the instance's record
+  // there, so what this process read before it is out of date for
+  // anything that reads the state after this command.
+  deps.store.refreshCache();
   for (const line of result.stdout.split('\n')) {
     if (line.trim() !== '') {
       print(line);

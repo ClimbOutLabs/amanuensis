@@ -7,16 +7,19 @@ import { test } from 'node:test';
 import { runDoctor, type DoctorDeps } from '../../src/doctor/doctor.ts';
 import { FakeHost } from '../../src/host/fakeHost.ts';
 import type { SystemKind } from '../../src/host/host.ts';
-import { DOCKER_NOT_ANSWERING, problemText } from '../../src/messages.ts';
+import { DOCKER_NOT_ANSWERING, DOCTOR_STATE_UNREADABLE, problemText } from '../../src/messages.ts';
 import {
   commandLine,
   okResult,
   RecordingProcessRunner,
   StubProcessRunner,
+  type ProcessBytesResult,
   type ProcessResult,
+  type ProcessRunner,
 } from '../../src/runner/processRunner.ts';
 import { folderBackend } from '../../src/state/folderBackend.ts';
-import { createStateStore, StateDockerError, type StateStore } from '../../src/state/state.ts';
+import { createStateStore, StateDockerError, StateStoreError, type StateStore } from '../../src/state/state.ts';
+import { volumeBackend } from '../../src/state/volumeBackend.ts';
 
 const NOW = 1791633600;
 const DAEMON_TIME = '2026-10-10T12:00:00.123456789Z';
@@ -1187,6 +1190,7 @@ test('a state store that cannot answer prints the one problem and stops', async 
       throw new StateDockerError('docker is down');
     },
     readCaCertificate: async () => null,
+    refreshCache: () => undefined,
     writeInstance: async () => false,
     setInstanceValue: async () => false,
     removeInstance: async () => undefined,
@@ -1197,4 +1201,53 @@ test('a state store that cannot answer prints the one problem and stops', async 
   const exitCode = await runDoctor(world.deps, { json: false });
   assert.equal(exitCode, 1);
   assert.deepEqual(world.printed, [problemText(DOCKER_NOT_ANSWERING['linux'])]);
+});
+
+test('a record that cannot be read gets the doctor own next step, not the status one', async () => {
+  const store: StateStore = {
+    readSummary: async () => {
+      throw new StateStoreError('the state volume could not be read');
+    },
+    readCaCertificate: async () => null,
+    refreshCache: () => undefined,
+    writeInstance: async () => false,
+    setInstanceValue: async () => false,
+    removeInstance: async () => undefined,
+    writeRelease: async () => false,
+    setBackupsMode: async () => false,
+  };
+  const world = await makeWorld({ store });
+  const exitCode = await runDoctor(world.deps, { json: false });
+  assert.equal(exitCode, 1);
+  assert.deepEqual(world.printed, [problemText(DOCTOR_STATE_UNREADABLE)]);
+});
+
+// A volume nothing has written to yet: Docker answers its listings,
+// every one of them empty, and no file can be read out of it.
+class FreshVolumeRunner implements ProcessRunner {
+  run(): Promise<ProcessResult> {
+    return Promise.resolve(okResult(''));
+  }
+
+  runBytes(): Promise<ProcessBytesResult> {
+    return Promise.resolve({ exitCode: 1, stdout: new Uint8Array(), stderr: 'cat: no such file', started: true });
+  }
+}
+
+test('a fresh volume reads as nothing installed yet, not as a broken record', async () => {
+  const store = createStateStore(volumeBackend(new FreshVolumeRunner()));
+  const world = await makeWorld({
+    store,
+    instances: null,
+    release: null,
+    backups: [],
+    backupsMode: null,
+    source: false,
+    schedule: false,
+  });
+  const { doc } = await runJson(world);
+  assert.deepEqual(doc.instances, {});
+  const backup = recordById(doc.machine, 'backup');
+  assert.equal(backup.state, 'ok');
+  assert.equal(backup.detail, 'No instances yet; nothing to back up.');
 });

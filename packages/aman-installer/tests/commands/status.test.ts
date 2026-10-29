@@ -50,6 +50,7 @@ function storeWith(summary: StateSummary): StateStore {
     removeInstance: () => Promise.resolve(),
     writeRelease: () => Promise.resolve(false),
     setBackupsMode: () => Promise.resolve(false),
+    refreshCache: () => undefined,
   };
 }
 
@@ -62,6 +63,7 @@ function failingStore(error: Error): StateStore {
     removeInstance: () => Promise.resolve(),
     writeRelease: () => Promise.resolve(false),
     setBackupsMode: () => Promise.resolve(false),
+    refreshCache: () => undefined,
   };
 }
 

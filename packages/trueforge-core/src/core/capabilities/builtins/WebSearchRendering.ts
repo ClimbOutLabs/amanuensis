@@ -1,5 +1,7 @@
 import type { InternalToolCallInfo } from '../../llm/LLMTypes';
 import type { ToolCallResult } from '../../mcp/executeToolCalls';
+import { searchResultUrls } from '../../permissions/provenance';
+import { pagePicturesNote } from '../../permissions/webSearch';
 import type { AgentCapability } from '../AgentCapability';
 import type { ToolResponseProcessor, ToolResponseProcessorResult } from '../ToolResponseProcessor';
 
@@ -22,6 +24,8 @@ import type { ToolResponseProcessor, ToolResponseProcessorResult } from '../Tool
 export const WEB_SEARCH_RENDER_MAX_RESULTS = 5;
 const WEB_SEARCH_EXCERPTS_PER_RESULT = 1;
 const WEB_SEARCH_EXCERPT_MAX_CHARS = 200;
+/** Most pictures shown under one search result, so the model can use them as a space's pictures. */
+const WEB_SEARCH_PICTURES_PER_RESULT = 4;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -85,6 +89,8 @@ interface RenderableResult {
   title: string;
   url: string;
   excerpts: string[];
+  /** The https pictures the result lists under its picture fields; the same ones provenance counts as seen. */
+  pictures: string[];
 }
 
 interface UnwrappedResults {
@@ -122,6 +128,7 @@ function parseResultItems(results: unknown[]): RenderableResult[] {
       title: stringField(raw, 'title') ?? url,
       url,
       excerpts: collectExcerpts(raw),
+      pictures: searchResultUrls(raw).pictures,
     });
   }
   return items;
@@ -170,6 +177,9 @@ export function renderWebSearchResultsMarkdown(content: string): string | undefi
     const lines = [`${String(index + 1)}. ${item.title}`, `   ${item.url}`];
     for (const excerpt of item.excerpts.slice(0, WEB_SEARCH_EXCERPTS_PER_RESULT)) {
       lines.push(`   ${truncateAtWordBoundary(excerpt, WEB_SEARCH_EXCERPT_MAX_CHARS)}`);
+    }
+    if (item.pictures.length > 0) {
+      lines.push(`   Pictures: ${item.pictures.slice(0, WEB_SEARCH_PICTURES_PER_RESULT).join(' ')}`);
     }
     return lines.join('\n');
   });
@@ -243,10 +253,14 @@ export class WebSearchRenderingProcessor implements ToolResponseProcessor {
         : isFetchToolName(toolName)
           ? renderWebFetchResultMarkdown(result.message.content)
           : undefined;
-      if (rendered === undefined) {
+      // The picture list is read from the provider's own text, the same text provenance recorded, and
+      // follows the page text as a host-added section so the page's words keep their untrusted framing.
+      const pictures = pagePicturesNote({ tool_name: toolName, text: result.rawContent });
+      if (rendered === undefined && pictures === undefined) {
         continue;
       }
-      result.message.content = rendered;
+      const shown = rendered ?? result.message.content;
+      result.message.content = pictures === undefined ? shown : `${shown}\n\n${pictures}`;
       result.isStructuredContent = false;
       // The model-facing text is now a host rendering of the raw JSON, not the raw
       // provider output itself; rawContent (unchanged) still carries that for the UI.

@@ -203,6 +203,7 @@ describe('a mail send the sidecar refuses after approval', () => {
       inner,
       accounts: () => Promise.resolve(['main']),
       now: () => new Date(),
+      timeZone: undefined,
     });
     const outcome = await dispatch({
       services: bundle.services,
