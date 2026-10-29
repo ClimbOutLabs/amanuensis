@@ -5,6 +5,7 @@
  * throws, so the person's own facts are unaffected.
  */
 import type { ILLM, ToolResultSource } from '@truefoundry/trueforge-core/core';
+import { htmlToText } from '@truefoundry/trueforge-core/core/email/gmail/htmlText';
 import type { Logger } from 'winston';
 import { z } from 'zod';
 import { redactSecretShapes } from '../../dataExport/secretScrub';
@@ -22,6 +23,7 @@ import {
   summaryLlmResolver,
   withSummarizeSlot,
 } from './memorySummarize';
+import { LIST_ITEM_LINE, openUiSentences } from './openUiText';
 
 /** One tool result of the turn, with the kind of place it came from. */
 export interface TurnToolResult {
@@ -218,16 +220,59 @@ function usableNoteText({
   return redactSecretShapes(clean) === clean ? clean : undefined;
 }
 
-/** A line that is a list item: a dash, star or bullet, or a number followed by . or ), then a space. */
-const LIST_ITEM_LINE = /^(?:[-*•]|\d{1,3}[.)])\s/;
+/** A fence line: three or more backticks or tildes, then the language, if any. */
+const FENCE_LINE = /^(`{3,}|~{3,})\s*([\w-]*)/;
+
+/** An opening HTML tag; a reply with one is read as markup, not as prose. */
+const HTML_TAG = /<[a-z][\w-]*(?:\s[^<>]*)?>/i;
+
+/** A piece of the reply: prose the person reads as written, an OpenUI block drawn as a page, or code. */
+interface ReplySegment {
+  kind: 'prose' | 'openui' | 'code';
+  text: string;
+}
+
+/** The reply cut at its fences, so a drawn block and code can each be read their own way. */
+function replySegments(text: string): ReplySegment[] {
+  const segments: ReplySegment[] = [];
+  let open: { fence: string; kind: 'openui' | 'code'; lines: string[] } | undefined;
+  let prose: string[] = [];
+  const flushProse = () => {
+    if (prose.length > 0) {
+      segments.push({ kind: 'prose', text: prose.join('\n') });
+      prose = [];
+    }
+  };
+  for (const line of text.split('\n')) {
+    const fence = FENCE_LINE.exec(line.trim());
+    if (open !== undefined) {
+      if (fence !== null && fence[1]?.[0] === open.fence[0] && (fence[1]?.length ?? 0) >= open.fence.length) {
+        segments.push({ kind: open.kind, text: open.lines.join('\n') });
+        open = undefined;
+      } else {
+        open.lines.push(line);
+      }
+    } else if (fence !== null) {
+      flushProse();
+      open = { fence: fence[1] ?? '```', kind: fence[2]?.toLowerCase() === 'openui' ? 'openui' : 'code', lines: [] };
+    } else {
+      prose.push(line);
+    }
+  }
+  flushProse();
+  // A fence left open is still a drawn block or code, not prose.
+  if (open !== undefined) {
+    segments.push({ kind: open.kind, text: open.lines.join('\n') });
+  }
+  return segments;
+}
 
 /**
- * The sentences of a reply, as written. A list item always continues the open sentence, and a line break
+ * Prose as sentence chunks, as written. A list item always continues the open sentence, and a line break
  * ends a sentence only after . ! or ?, so "Do not:" and every bullet under it read as one sentence and no
- * bullet stands alone. Within a line, a sentence ends at . ! or ? after a word with a letter in it (never
- * after a bare list number) when a capital letter follows. Exported for tests.
+ * bullet stands alone.
  */
-export function replySentences(text: string): string[] {
+function proseChunks(text: string): string[] {
   const chunks: string[] = [];
   for (const line of text.split('\n')) {
     const trimmed = line.trim();
@@ -241,6 +286,34 @@ export function replySentences(text: string): string[] {
       chunks[chunks.length - 1] = `${open} ${trimmed}`;
     }
   }
+  return chunks;
+}
+
+/** Markup as sentences: every heading, paragraph, list item and table row (cells apart by ", ") on its own. */
+function htmlChunks(text: string): string[] {
+  return htmlToText(text, { cellSeparator: ', ' })
+    .split('\n')
+    .map(line => line.replace(/^-\s+/, '').trim())
+    .filter(line => line !== '');
+}
+
+/**
+ * The sentences of a reply. Prose is split as written; an OpenUI block or HTML is read as the words a
+ * person sees, one sentence per heading, row, list item or card; other code is not advice and is skipped.
+ * Within a chunk, a sentence ends at . ! or ? after a word with a letter in it (never after a bare list
+ * number) when a capital letter follows. Exported for tests.
+ */
+export function replySentences(text: string): string[] {
+  const chunks = replySegments(text).flatMap(segment => {
+    switch (segment.kind) {
+      case 'code':
+        return [];
+      case 'openui':
+        return openUiSentences(segment.text);
+      case 'prose':
+        return HTML_TAG.test(segment.text) ? htmlChunks(segment.text) : proseChunks(segment.text);
+    }
+  });
   return chunks
     .flatMap(chunk => chunk.split(/(?<=\p{L}[^\s.!?]*[.!?])\s+(?=\p{Lu})/u))
     .map(sentence => sentence.trim())
