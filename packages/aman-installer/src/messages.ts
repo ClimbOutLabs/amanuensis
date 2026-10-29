@@ -24,6 +24,7 @@ export const HELP_LINES: readonly string[] = [
   'Run aman doctor to check this computer and each instance.',
   'Run aman doctor docker to check that Docker is ready for Aman.',
   'Run aman status to see what is installed and whether it is running.',
+  'Run aman install to set up Aman on this computer for the first time.',
   'Run aman adopt to move a PC set up with Aman Setup onto the aman command.',
   'Run aman open to open Aman in your browser.',
   'Run aman network open to open Aman to phones and other devices on your home network.',
@@ -639,6 +640,182 @@ export function networkPhoneLine(address: string): string {
   return `On your phone, open ${printable(address)}.`;
 }
 
+export const INSTALL_NOT_WINDOWS: Problem = {
+  happened: 'The Aman Setup download sets Aman up on a Windows computer, and this is not one.',
+  fix: 'Use the installer for this computer to set Aman up.',
+};
+
+export const INSTALL_IMAGE_UNAVAILABLE: Problem = {
+  happened: 'Docker could not download the small helper it needs to read the record of what is installed.',
+  fix: 'Check your internet connection, then open Aman Setup again.',
+};
+
+export const INSTALL_DOWNLOAD_FAILED: Problem = {
+  happened: 'Docker Desktop could not be downloaded.',
+  fix: 'Check your internet connection, then open Aman Setup again.',
+};
+
+export const INSTALL_DOCKER_UNTRUSTED: Problem = {
+  happened: 'The Docker Desktop download did not come from Docker Inc, so it was not run.',
+  fix: 'Download Docker Desktop from desktop.docker.com yourself, then open Aman Setup again.',
+};
+
+export const INSTALL_DOCKER_FAILED: Problem = {
+  happened: 'Docker Desktop could not be installed.',
+  fix: 'Install Docker Desktop from its website, then open Aman Setup again.',
+};
+
+export const INSTALL_DOCKER_DID_NOT_START: Problem = {
+  happened: 'Docker Desktop did not start.',
+  fix: 'Open Docker Desktop from the Start menu, wait until it says it is running, then open Aman Setup again.',
+};
+
+// The restart Docker Desktop asks for after it is installed: the setup
+// is set to open again by itself once the computer is back, and carries
+// on from this point.
+export const INSTALL_RESTART_NEEDED: Problem = {
+  happened: 'Docker Desktop needs your computer to restart before it can run.',
+  fix: 'Restart your computer, and Aman Setup will open again by itself and carry on.',
+};
+
+export const INSTALL_DOCKER_NOT_ANSWERING: Problem = {
+  happened: 'Docker is not answering, so the setup cannot go ahead.',
+  fix: 'Open Docker Desktop from the Start menu, then open Aman Setup again.',
+};
+
+export const INSTALL_NO_ANSWER: Problem = {
+  happened: 'No answer was given, so nothing was installed.',
+  fix: 'Open Aman Setup again when you are ready to answer its questions.',
+};
+
+export const INSTALL_NO_FREE_PORT: Problem = {
+  happened: 'Every place Aman could answer on this computer is taken by another program.',
+  fix: 'Stop a program you do not need, then open Aman Setup again.',
+};
+
+export const INSTALL_RELEASE_DOWNLOAD_FAILED: Problem = {
+  happened: 'The newest version of Aman could not be downloaded.',
+  fix: 'Check your internet connection, then open Aman Setup again.',
+};
+
+export const INSTALL_SOURCE_MISSING: Problem = {
+  happened: 'This release does not carry the source files the setup needs.',
+  fix: 'Open Aman Setup again later, when a fixed release is out.',
+};
+
+export const INSTALL_SOURCE_FAILED: Problem = {
+  happened: 'Aman could not be set up from the downloaded files.',
+  fix: 'Open Aman Setup again.',
+};
+
+// The same wait the state lock asks for, with this command's own next
+// step: the lock's dead limit, as in STATE_BUSY.
+export const INSTALL_BUSY: Problem = {
+  happened: 'Another install is running right now.',
+  fix: `Wait for it to finish, or wait ${String(LOCK_TIMING.deadSeconds / 60)} minutes if you stopped an install a moment ago, then open Aman Setup again.`,
+};
+
+export const INSTALL_CONTAINER_FAILED: Problem = {
+  happened: 'The setup stopped before it finished.',
+  fix: 'Open Aman Setup again; it carries on from where it stopped.',
+};
+
+export const INSTALL_PAGE_FAILED: Problem = {
+  happened: 'Aman is installed, but the getting started page could not be opened.',
+  fix: 'Open Aman from the Start menu; everything the page names is in Settings.',
+};
+
+// The model key is refused on the command line, the way the shell
+// installer refuses it: a key typed there would stay in the terminal's
+// history and in the list of running programs.
+export const INSTALL_KEY_ON_COMMAND_LINE: Problem = {
+  happened: 'The model key is never taken from the command line.',
+  fix: 'Run aman install again and paste the key when it asks.',
+};
+
+export function installUsageProblem(word: string): Problem {
+  return {
+    happened: `aman install does not take the word "${printable(word)}".`,
+    fix: 'Run aman install on its own, or with --dry-run to see what it would do.',
+  };
+}
+
+// Said at the start of a run the computer restarted in the middle of:
+// the setup was set to open again by itself, and it carries on.
+export const INSTALL_CONTINUING_LINE = 'Continuing where it left off.';
+
+export const INSTALL_EMAIL_QUESTION = 'Your email, used to sign in:';
+
+export const INSTALL_PASSWORD_QUESTION = 'Choose a password (at least 8 characters, not shown):';
+
+export const INSTALL_PASSWORD_AGAIN_QUESTION = 'Type it again:';
+
+export const INSTALL_PASSWORD_MISMATCH_LINE = 'The passwords do not match. Type them again.';
+
+export const INSTALL_PASSWORD_TOO_LONG_LINE =
+  'The password can have at most 72 characters. Accented or non-Latin letters count as more than one.';
+
+// The password rule is the shell installer's own (password_problem in
+// installer/lib/common.sh): the setup judges a password by the same
+// words here, at the question, instead of letting the build fail on it
+// later. The sentence is the shell's, built from what is missing.
+export function installPasswordProblem(password: string): string | null {
+  if (new TextEncoder().encode(password).length > 72) {
+    return INSTALL_PASSWORD_TOO_LONG_LINE;
+  }
+  const missing: string[] = [];
+  if (password.length < 8) {
+    missing.push('at least 8 characters');
+  }
+  if (!/\d/.test(password)) {
+    missing.push('a number');
+  }
+  if (!/[!-/:-@[-`{-~]/.test(password)) {
+    missing.push('a symbol, like @ # $ %');
+  }
+  if (missing.length === 0) {
+    return null;
+  }
+  if (missing.length === 1) {
+    return `That password still needs ${missing[0] ?? ''}.`;
+  }
+  if (missing.length === 2) {
+    return `That password still needs ${missing[0] ?? ''} and ${missing[1] ?? ''}.`;
+  }
+  return `That password still needs ${missing[0] ?? ''}, ${missing[1] ?? ''} and ${missing[2] ?? ''}.`;
+}
+
+// What is printed above the model key question: what the key is for,
+// and where to get one. The address is Nebius Token Factory's own.
+export const INSTALL_KEY_HELP_LINES: readonly string[] = [
+  'The key lets Aman answer you with a model from Nebius Token Factory.',
+  'Get a key at tokenfactory.nebius.com.',
+];
+
+export const INSTALL_KEY_QUESTION = 'Paste your model key (not shown):';
+
+// Said when the key answer is empty, which is allowed: the install
+// goes ahead without a key, and Aman opens but cannot answer.
+export const INSTALL_KEY_EMPTY_LINE = 'Aman will open but cannot answer until you add a key in Settings, then Models.';
+
+export const INSTALL_PHONE_QUESTION =
+  'Also use Aman from your phone and other devices on your home Wi-Fi? (yes or no):';
+
+export const INSTALL_YES_OR_NO_LINE = 'Please answer yes or no.';
+
+export const INSTALL_DONE_LINE = 'Aman is installed, and the getting started page is open in your browser.';
+
+// What aman install --dry-run prints: the steps it would take, in
+// order. It asks nothing, downloads nothing and changes nothing.
+export const INSTALL_DRY_RUN_LINES: readonly string[] = [
+  'This shows what aman install would do. Nothing is changed and nothing is asked.',
+  'It checks that Docker Desktop is installed and running, and installs it first if it is missing.',
+  'It asks four questions: your email, a password, your model key, and whether to open Aman to your phone.',
+  'It downloads the newest Aman and sets it up with daily backups and an https address on this computer.',
+  'It puts the aman command and the Start menu entries in place, and opens Aman in your browser.',
+  'It opens a short getting started page in your browser at the end.',
+];
+
 // Every message, in a fixed order, for the golden file reviewers read.
 export function allMessageLines(): string[] {
   const lines: string[] = [versionLine('0.0.0'), ...HELP_LINES];
@@ -756,5 +933,38 @@ export function allMessageLines(): string[] {
   lines.push(NETWORK_OPEN_LINE);
   lines.push(NETWORK_CLOSED_LINE);
   lines.push(networkPhoneLine('http://192.168.1.20:8791'));
+  lines.push(problemText(INSTALL_NOT_WINDOWS));
+  lines.push(problemText(INSTALL_IMAGE_UNAVAILABLE));
+  lines.push(problemText(INSTALL_DOWNLOAD_FAILED));
+  lines.push(problemText(INSTALL_DOCKER_UNTRUSTED));
+  lines.push(problemText(INSTALL_DOCKER_FAILED));
+  lines.push(problemText(INSTALL_DOCKER_DID_NOT_START));
+  lines.push(problemText(INSTALL_RESTART_NEEDED));
+  lines.push(problemText(INSTALL_DOCKER_NOT_ANSWERING));
+  lines.push(problemText(INSTALL_NO_ANSWER));
+  lines.push(problemText(INSTALL_NO_FREE_PORT));
+  lines.push(problemText(INSTALL_RELEASE_DOWNLOAD_FAILED));
+  lines.push(problemText(INSTALL_SOURCE_MISSING));
+  lines.push(problemText(INSTALL_SOURCE_FAILED));
+  lines.push(problemText(INSTALL_BUSY));
+  lines.push(problemText(INSTALL_CONTAINER_FAILED));
+  lines.push(problemText(INSTALL_PAGE_FAILED));
+  lines.push(problemText(INSTALL_KEY_ON_COMMAND_LINE));
+  lines.push(problemText(installUsageProblem('--force')));
+  lines.push(INSTALL_CONTINUING_LINE);
+  lines.push(INSTALL_EMAIL_QUESTION);
+  lines.push(INSTALL_PASSWORD_QUESTION);
+  lines.push(INSTALL_PASSWORD_AGAIN_QUESTION);
+  lines.push(INSTALL_PASSWORD_MISMATCH_LINE);
+  lines.push(INSTALL_PASSWORD_TOO_LONG_LINE);
+  lines.push(installPasswordProblem('short') ?? '');
+  lines.push(installPasswordProblem('longenough') ?? '');
+  lines.push(...INSTALL_KEY_HELP_LINES);
+  lines.push(INSTALL_KEY_QUESTION);
+  lines.push(INSTALL_KEY_EMPTY_LINE);
+  lines.push(INSTALL_PHONE_QUESTION);
+  lines.push(INSTALL_YES_OR_NO_LINE);
+  lines.push(INSTALL_DONE_LINE);
+  lines.push(...INSTALL_DRY_RUN_LINES);
   return lines;
 }

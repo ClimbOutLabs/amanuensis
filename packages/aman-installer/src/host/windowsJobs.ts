@@ -1,4 +1,4 @@
-import { writeFile } from 'node:fs/promises';
+import { mkdir, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:net';
 import { win32 } from 'node:path';
 
@@ -37,6 +37,20 @@ export const PHONE_SHORTCUT_NAME = 'Use Aman on my phone';
 export const FIREWALL_RULE_NAME = 'Aman';
 // Docker Desktop's own install place, the file the starter starts.
 export const DOCKER_DESKTOP_EXE = 'C:\\Program Files\\Docker\\Docker\\Docker Desktop.exe';
+// Where Docker Desktop's installer is downloaded from, and the name
+// it is saved under in the Amanuensis folder while it is checked and
+// run.
+export const DOCKER_DESKTOP_DOWNLOAD_URL = 'https://desktop.docker.com/win/main/amd64/Docker%20Desktop%20Installer.exe';
+export const DOCKER_DESKTOP_INSTALLER_FILE_NAME = 'Docker Desktop Installer.exe';
+// The getting started page the first install saves into the
+// Amanuensis folder and opens at the end.
+export const GETTING_STARTED_FILE_NAME = 'Getting started.html';
+// The resume entry the first install sets before Docker Desktop is
+// installed: if the install restarts the computer, Windows runs this
+// once at the next sign-in, and the setup carries on. Its key and
+// value name are fixed here, as the other Windows names are.
+export const RUN_ONCE_KEY = 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\RunOnce';
+export const RUN_ONCE_VALUE_NAME = 'Amanuensis Setup';
 
 // What replaces the starter's copy of Aman-Setup.cmd: three lines that
 // hand every argument to the aman command, so a shortcut or a habit that
@@ -55,6 +69,8 @@ export interface WindowsPaths {
   setupCmdCopyPath: string;
   backupsDir: string;
   caCertPath: string;
+  dockerDesktopInstallerPath: string;
+  gettingStartedPath: string;
 }
 
 export function windowsPaths(localAppDataDir: string): WindowsPaths {
@@ -67,6 +83,8 @@ export function windowsPaths(localAppDataDir: string): WindowsPaths {
     setupCmdCopyPath: win32.join(dataDir, SETUP_CMD_FILE_NAME),
     backupsDir: win32.join(dataDir, BACKUPS_FOLDER_NAME),
     caCertPath: win32.join(dataDir, CA_CERT_FILE_NAME),
+    dockerDesktopInstallerPath: win32.join(dataDir, DOCKER_DESKTOP_INSTALLER_FILE_NAME),
+    gettingStartedPath: win32.join(dataDir, GETTING_STARTED_FILE_NAME),
   };
 }
 
@@ -152,6 +170,12 @@ export interface WindowsJobs {
   readonly dataDir: string;
   // The folder inside it where the backups land on this PC.
   readonly backupsDir: string;
+  // Where the downloaded Docker Desktop installer is saved, the file
+  // the first install checks and then runs.
+  readonly dockerDesktopInstallerPath: string;
+  // Where the getting started page is saved, the file the first
+  // install opens in the browser at the end.
+  readonly gettingStartedPath: string;
   // Copies the running executable into the Programs folder. 'already'
   // when the running executable is the copy there (adopt run twice).
   copySelfToPrograms: () => Promise<'copied' | 'already'>;
@@ -203,6 +227,29 @@ export interface WindowsJobs {
   addCaCertificateToUserStore: () => Promise<void>;
   startDockerDesktop: () => Promise<void>;
   openBrowser: (url: string) => Promise<void>;
+  // Saves the downloaded Docker Desktop installer into the
+  // Amanuensis folder, making the folder when it is not there yet.
+  writeDockerDesktopInstaller: (bytes: Uint8Array) => Promise<void>;
+  // Who signed the saved Docker Desktop installer, as its signature
+  // names them, or null when the signature does not check out or
+  // names nobody. The install judges the name, not this job.
+  dockerDesktopInstallerSigner: () => Promise<string | null>;
+  // Sets the resume entry: after a restart, Windows runs this program
+  // once at the next sign-in, so an install the restart stopped
+  // carries on.
+  ensureRunOnceResume: () => Promise<void>;
+  // True when the resume entry is set: this run was opened by it, or
+  // an earlier run was stopped before it could be taken down.
+  runOnceResumePending: () => Promise<boolean>;
+  // Takes the resume entry down once Docker is running again.
+  clearRunOnceResume: () => Promise<void>;
+  // Asks the computer not to sleep while long work runs: a hidden
+  // helper holds the request for a few hours, or until the computer
+  // restarts.
+  keepComputerAwake: () => Promise<void>;
+  // Writes the getting started page into the Amanuensis folder,
+  // where the person can find it again.
+  writeGettingStartedPage: (text: string) => Promise<void>;
   // Makes a folder private to the person: inherited access is removed
   // and only their own account keeps full control, which the folders
   // and files later made inside it inherit.
@@ -292,6 +339,8 @@ export function systemWindowsJobs(options: {
     setupCmdCopyPath: paths.setupCmdCopyPath,
     dataDir: paths.dataDir,
     backupsDir: paths.backupsDir,
+    dockerDesktopInstallerPath: paths.dockerDesktopInstallerPath,
+    gettingStartedPath: paths.gettingStartedPath,
 
     async copySelfToPrograms() {
       if (options.selfExePath.toLowerCase() === paths.programsExePath.toLowerCase()) {
@@ -503,6 +552,76 @@ export function systemWindowsJobs(options: {
 
     async openBrowser(url: string) {
       await runPowerShell(`Start-Process ${psQuote(url)}`);
+    },
+
+    async writeDockerDesktopInstaller(bytes: Uint8Array) {
+      try {
+        await mkdir(paths.dataDir, { recursive: true });
+        await writeFile(paths.dockerDesktopInstallerPath, bytes);
+      } catch (error) {
+        throw new WindowsJobError('the Docker Desktop download could not be saved', { cause: error });
+      }
+    },
+
+    async dockerDesktopInstallerSigner() {
+      const stdout = await runPowerShell(
+        `$s = Get-AuthenticodeSignature -FilePath ${psQuote(paths.dockerDesktopInstallerPath)}; ` +
+          `if ($s.Status -eq 'Valid' -and $null -ne $s.SignerCertificate) { Write-Output $s.SignerCertificate.Subject }`,
+      ).catch(() => '');
+      const subject = stdout.trim();
+      return subject === '' ? null : subject;
+    },
+
+    async ensureRunOnceResume() {
+      const result = await runner.run('reg', [
+        'add',
+        RUN_ONCE_KEY,
+        '/v',
+        RUN_ONCE_VALUE_NAME,
+        '/t',
+        'REG_SZ',
+        '/d',
+        `"${options.selfExePath}"`,
+        '/f',
+      ]);
+      if (!result.started || result.exitCode !== 0) {
+        throw new WindowsJobError('the setup could not be set to open again after a restart');
+      }
+    },
+
+    async runOnceResumePending() {
+      const result = await runner.run('reg', ['query', RUN_ONCE_KEY, '/v', RUN_ONCE_VALUE_NAME]);
+      return result.started && result.exitCode === 0;
+    },
+
+    async clearRunOnceResume() {
+      const result = await runner.run('reg', ['delete', RUN_ONCE_KEY, '/v', RUN_ONCE_VALUE_NAME, '/f']);
+      if (!result.started || result.exitCode !== 0) {
+        throw new WindowsJobError('the entry that opens the setup again could not be taken down');
+      }
+    },
+
+    async keepComputerAwake() {
+      // The request lives with the thread that makes it, so the
+      // helper that makes it stays open, hidden, holding it. The
+      // state is the continuous one: it holds until cleared, and the
+      // helper's own sleep bounds it to this work.
+      const inner =
+        `Add-Type -Name 'AmanAwake' -Namespace 'Aman' -MemberDefinition ` +
+        `'[DllImport("kernel32.dll")] public static extern uint SetThreadExecutionState(uint esFlags);'; ` +
+        `[void][Aman.AmanAwake]::SetThreadExecutionState([uint32]0x80000001); Start-Sleep -Seconds 7200`;
+      await runPowerShell(
+        `Start-Process -FilePath 'powershell.exe' -WindowStyle Hidden -ArgumentList '-NoProfile', '-Command', ${psQuote(inner)}`,
+      );
+    },
+
+    async writeGettingStartedPage(text: string) {
+      try {
+        await mkdir(paths.dataDir, { recursive: true });
+        await writeFile(paths.gettingStartedPath, text, 'utf8');
+      } catch (error) {
+        throw new WindowsJobError('the getting started page could not be written', { cause: error });
+      }
     },
 
     async makeFolderPrivate(path: string) {

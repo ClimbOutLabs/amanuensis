@@ -4,6 +4,7 @@ Run aman --version to see which version this is.
 Run aman doctor to check this computer and each instance.
 Run aman doctor docker to check that Docker is ready for Aman.
 Run aman status to see what is installed and whether it is running.
+Run aman install to set up Aman on this computer for the first time.
 Run aman adopt to move a PC set up with Aman Setup onto the aman command.
 Run aman open to open Aman in your browser.
 Run aman network open to open Aman to phones and other devices on your home network.
@@ -135,3 +136,42 @@ Windows did not change the firewall rule, so devices on your home network can st
 Aman is open to the devices on your home network.
 Aman is closed to your home network, and only this computer can open it now.
 On your phone, open http://192.168.1.20:8791.
+The Aman Setup download sets Aman up on a Windows computer, and this is not one. Use the installer for this computer to set Aman up.
+Docker could not download the small helper it needs to read the record of what is installed. Check your internet connection, then open Aman Setup again.
+Docker Desktop could not be downloaded. Check your internet connection, then open Aman Setup again.
+The Docker Desktop download did not come from Docker Inc, so it was not run. Download Docker Desktop from desktop.docker.com yourself, then open Aman Setup again.
+Docker Desktop could not be installed. Install Docker Desktop from its website, then open Aman Setup again.
+Docker Desktop did not start. Open Docker Desktop from the Start menu, wait until it says it is running, then open Aman Setup again.
+Docker Desktop needs your computer to restart before it can run. Restart your computer, and Aman Setup will open again by itself and carry on.
+Docker is not answering, so the setup cannot go ahead. Open Docker Desktop from the Start menu, then open Aman Setup again.
+No answer was given, so nothing was installed. Open Aman Setup again when you are ready to answer its questions.
+Every place Aman could answer on this computer is taken by another program. Stop a program you do not need, then open Aman Setup again.
+The newest version of Aman could not be downloaded. Check your internet connection, then open Aman Setup again.
+This release does not carry the source files the setup needs. Open Aman Setup again later, when a fixed release is out.
+Aman could not be set up from the downloaded files. Open Aman Setup again.
+Another install is running right now. Wait for it to finish, or wait 2 minutes if you stopped an install a moment ago, then open Aman Setup again.
+The setup stopped before it finished. Open Aman Setup again; it carries on from where it stopped.
+Aman is installed, but the getting started page could not be opened. Open Aman from the Start menu; everything the page names is in Settings.
+The model key is never taken from the command line. Run aman install again and paste the key when it asks.
+aman install does not take the word "--force". Run aman install on its own, or with --dry-run to see what it would do.
+Continuing where it left off.
+Your email, used to sign in:
+Choose a password (at least 8 characters, not shown):
+Type it again:
+The passwords do not match. Type them again.
+The password can have at most 72 characters. Accented or non-Latin letters count as more than one.
+That password still needs at least 8 characters, a number and a symbol, like @ # $ %.
+That password still needs a number and a symbol, like @ # $ %.
+The key lets Aman answer you with a model from Nebius Token Factory.
+Get a key at tokenfactory.nebius.com.
+Paste your model key (not shown):
+Aman will open but cannot answer until you add a key in Settings, then Models.
+Also use Aman from your phone and other devices on your home Wi-Fi? (yes or no):
+Please answer yes or no.
+Aman is installed, and the getting started page is open in your browser.
+This shows what aman install would do. Nothing is changed and nothing is asked.
+It checks that Docker Desktop is installed and running, and installs it first if it is missing.
+It asks four questions: your email, a password, your model key, and whether to open Aman to your phone.
+It downloads the newest Aman and sets it up with daily backups and an https address on this computer.
+It puts the aman command and the Start menu entries in place, and opens Aman in your browser.
+It opens a short getting started page in your browser at the end.

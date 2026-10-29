@@ -88,6 +88,7 @@ function failingStore(error: Error): StateStore {
 function busyModeStore(summary: StateSummary): StateStore {
   return {
     readSummary: () => Promise.resolve(summary),
+    readCaCertificate: () => Promise.resolve(null),
     writeInstance: () => Promise.resolve(false),
     setInstanceValue: () => Promise.resolve(false),
     removeInstance: () => Promise.resolve(),

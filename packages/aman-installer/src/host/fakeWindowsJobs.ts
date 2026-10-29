@@ -34,7 +34,14 @@ export type FakeWindowsJobStep =
   | 'docker'
   | 'browser'
   | 'aclPrivate'
-  | 'aclRead';
+  | 'aclRead'
+  | 'installerWrite'
+  | 'signer'
+  | 'runOnceSet'
+  | 'runOnceQuery'
+  | 'runOnceClear'
+  | 'awake'
+  | 'pageWrite';
 
 // A Windows host for tests: the user PATH, the shortcuts and the held
 // ports are held in memory, every job writes down that it ran, and
@@ -44,6 +51,8 @@ export class FakeWindowsJobs implements WindowsJobs {
   readonly setupCmdCopyPath: string;
   readonly dataDir: string;
   readonly backupsDir: string;
+  readonly dockerDesktopInstallerPath: string;
+  readonly gettingStartedPath: string;
   private readonly selfExePath: string;
   private readonly programsDir: string;
   private readonly startMenuProgramsDir: string;
@@ -51,7 +60,12 @@ export class FakeWindowsJobs implements WindowsJobs {
   private readonly failSteps: ReadonlySet<FakeWindowsJobStep>;
   private readonly aclOwner: string;
   private readonly acls: Map<string, AclRead>;
+  private readonly scriptedSigner: string | null;
   userPath: string;
+  installerBytes: Uint8Array | null = null;
+  gettingStartedText: string | null = null;
+  runOncePending: boolean;
+  awakeRequests = 0;
   shortcuts: ShortcutFacts[];
   forwarderContents: string | null = null;
   caCertContents: string | null = null;
@@ -80,12 +94,25 @@ export class FakeWindowsJobs implements WindowsJobs {
     // backups folder, as a test scripts them.
     backupTask?: boolean;
     backups?: readonly string[];
+    // Who the saved Docker Desktop installer's signature names, as a
+    // test scripts it; the default is Docker Inc.
+    installerSigner?: string | null;
+    // Whether the resume entry is set when the run starts, as a test
+    // scripts it (a run the computer's restart reopened).
+    runOncePending?: boolean;
   }) {
     const paths = windowsPaths(options.localAppDataDir);
     this.programsExePath = paths.programsExePath;
     this.setupCmdCopyPath = paths.setupCmdCopyPath;
     this.dataDir = paths.dataDir;
     this.backupsDir = paths.backupsDir;
+    this.dockerDesktopInstallerPath = paths.dockerDesktopInstallerPath;
+    this.gettingStartedPath = paths.gettingStartedPath;
+    this.scriptedSigner =
+      options.installerSigner === undefined
+        ? 'CN=Docker Inc, O=Docker Inc, L=San Francisco, S=California, C=US'
+        : options.installerSigner;
+    this.runOncePending = options.runOncePending ?? false;
     this.programsDir = paths.programsDir;
     this.selfExePath = options.selfExePath;
     this.startMenuProgramsDir = options.startMenuProgramsDir;
@@ -244,6 +271,46 @@ export class FakeWindowsJobs implements WindowsJobs {
   openBrowser(url: string): Promise<void> {
     this.step('browser');
     this.browserUrls.push(url);
+    return Promise.resolve();
+  }
+
+  writeDockerDesktopInstaller(bytes: Uint8Array): Promise<void> {
+    this.step('installerWrite');
+    this.installerBytes = bytes;
+    return Promise.resolve();
+  }
+
+  dockerDesktopInstallerSigner(): Promise<string | null> {
+    this.step('signer');
+    return Promise.resolve(this.scriptedSigner);
+  }
+
+  ensureRunOnceResume(): Promise<void> {
+    this.step('runOnceSet');
+    this.runOncePending = true;
+    return Promise.resolve();
+  }
+
+  runOnceResumePending(): Promise<boolean> {
+    this.step('runOnceQuery');
+    return Promise.resolve(this.runOncePending);
+  }
+
+  clearRunOnceResume(): Promise<void> {
+    this.step('runOnceClear');
+    this.runOncePending = false;
+    return Promise.resolve();
+  }
+
+  keepComputerAwake(): Promise<void> {
+    this.step('awake');
+    this.awakeRequests += 1;
+    return Promise.resolve();
+  }
+
+  writeGettingStartedPage(text: string): Promise<void> {
+    this.step('pageWrite');
+    this.gettingStartedText = text;
     return Promise.resolve();
   }
 

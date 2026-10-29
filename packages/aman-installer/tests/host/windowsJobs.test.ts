@@ -35,6 +35,7 @@ const ACL_LISTING = readFileSync(new URL('../golden/acl-listing.txt', import.met
 // can write down every command line for the golden.
 class AnswerRunner implements ProcessRunner {
   private readonly userPath: string;
+  private runOnceSet = false;
 
   constructor(userPath: string) {
     this.userPath = userPath;
@@ -43,6 +44,19 @@ class AnswerRunner implements ProcessRunner {
   run(command: string, args: readonly string[]): Promise<ProcessResult> {
     if (command === 'whoami') {
       return Promise.resolve(okResult('FRIEND-PC\\Friend\r\n'));
+    }
+    if (command === 'reg') {
+      if (args[0] === 'add') {
+        this.runOnceSet = true;
+        return Promise.resolve(okResult(''));
+      }
+      if (args[0] === 'delete') {
+        this.runOnceSet = false;
+        return Promise.resolve(okResult(''));
+      }
+      if (args[0] === 'query') {
+        return Promise.resolve(this.runOnceSet ? okResult('') : { exitCode: 1, stdout: '', stderr: '', started: true });
+      }
     }
     if (command === 'icacls') {
       if (args.includes('/inheritance:r')) {
@@ -95,6 +109,12 @@ test('the golden file holds every command line the Windows jobs run', async () =
   await jobs.ensurePhoneShortcut();
   await jobs.openFirewallToHome([8443, 8791]);
   await jobs.closeFirewallToHome();
+  assert.equal(await jobs.dockerDesktopInstallerSigner(), null);
+  await jobs.ensureRunOnceResume();
+  assert.equal(await jobs.runOnceResumePending(), true);
+  await jobs.clearRunOnceResume();
+  assert.equal(await jobs.runOnceResumePending(), false);
+  await jobs.keepComputerAwake();
   const golden = readFileSync(new URL('../golden/windows-jobs-commands.txt', import.meta.url), 'utf8');
   assert.equal(recording.goldenText(), golden);
 });
@@ -323,6 +343,44 @@ test('the frozen Windows paths are the ones the starter named', () => {
   assert.equal(paths.setupCmdCopyPath, 'C:\\Users\\Friend\\AppData\\Local\\Amanuensis\\Aman-Setup.cmd');
   assert.equal(paths.backupsDir, 'C:\\Users\\Friend\\AppData\\Local\\Amanuensis\\backups');
   assert.equal(paths.caCertPath, 'C:\\Users\\Friend\\AppData\\Local\\Amanuensis\\ca.crt');
+});
+
+test('the frozen Windows paths name the Docker Desktop installer and the getting started page', () => {
+  const paths = windowsPaths(LOCAL_APP_DATA);
+  assert.equal(
+    paths.dockerDesktopInstallerPath,
+    'C:\\Users\\Friend\\AppData\\Local\\Amanuensis\\Docker Desktop Installer.exe',
+  );
+  assert.equal(paths.gettingStartedPath, 'C:\\Users\\Friend\\AppData\\Local\\Amanuensis\\Getting started.html');
+});
+
+test('the signer of the saved Docker Desktop installer is read from its signature', async () => {
+  const signerRunner: ProcessRunner = {
+    run: (command, args) => {
+      const script = args[3] ?? '';
+      if (command === 'powershell' && script.includes('Get-AuthenticodeSignature')) {
+        return Promise.resolve(okResult('CN=Docker Inc, O=Docker Inc, L=San Francisco, S=California, C=US\r\n'));
+      }
+      return Promise.resolve(okResult(''));
+    },
+    runBytes: () => Promise.resolve({ exitCode: 1, stdout: new Uint8Array(), stderr: '', started: false }),
+  };
+  const jobs = jobsWith(signerRunner);
+  assert.equal(
+    await jobs.dockerDesktopInstallerSigner(),
+    'CN=Docker Inc, O=Docker Inc, L=San Francisco, S=California, C=US',
+  );
+});
+
+test('a page write that cannot happen fails as a Windows job error', async () => {
+  const jobs = systemWindowsJobs({
+    runner: new AnswerRunner(''),
+    // Far longer than any file name a disk allows, so the write fails.
+    localAppDataDir: 'C:\\' + 'a'.repeat(300),
+    selfExePath: SELF,
+  });
+  await assert.rejects(jobs.writeGettingStartedPage('page'), WindowsJobError);
+  await assert.rejects(jobs.writeDockerDesktopInstaller(new Uint8Array([1, 2, 3])), WindowsJobError);
 });
 
 test('the forwarder golden file is the forwarder, byte for byte', () => {

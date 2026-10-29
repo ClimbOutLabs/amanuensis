@@ -1,7 +1,12 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { NoFreePortError, pickInstallPorts, starterInstallArgs } from '../../src/host/windowsInstall.ts';
+import {
+  NoFreePortError,
+  firstInstallArgs,
+  pickInstallPorts,
+  starterInstallArgs,
+} from '../../src/host/windowsInstall.ts';
 
 function held(...ports: number[]): (port: number) => Promise<boolean> {
   const set = new Set(ports);
@@ -83,4 +88,34 @@ test("the starter's command line with a moved pair hands both ports over", () =>
 test('a pair moved on the sign-in side only still hands both ports over', () => {
   const args = starterInstallArgs({ email: 'friend@example.com', appPort: 8791, loginPort: 5559 });
   assert.deepEqual(args.slice(-4), ['--port', '8791', '--login-port', '5559']);
+});
+
+test('the first install line adds https on this computer and daily backups to the starter line', () => {
+  assert.deepEqual(firstInstallArgs({ email: 'friend@example.com', appPort: 8791, loginPort: 5556, hasKey: true }), [
+    'installer/install.sh',
+    '--yes',
+    '--name',
+    'main',
+    '--email',
+    'friend@example.com',
+    '--password-stdin',
+    '--token-factory-key-stdin',
+    '--tls',
+    'local',
+    '--address',
+    'localhost',
+    '--backups',
+    'daily',
+  ]);
+});
+
+test('the first install line with no key given asks for no key on the input', () => {
+  const args = firstInstallArgs({ email: 'friend@example.com', appPort: 8791, loginPort: 5556, hasKey: false });
+  assert.ok(!args.includes('--token-factory-key-stdin'));
+  assert.ok(!args.includes('--local-only'));
+});
+
+test('the first install line with a moved pair hands both ports over', () => {
+  const args = firstInstallArgs({ email: 'friend@example.com', appPort: 8792, loginPort: 5556, hasKey: false });
+  assert.deepEqual(args.slice(-4), ['--port', '8792', '--login-port', '5556']);
 });

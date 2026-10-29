@@ -9,6 +9,9 @@ import { FakeWindowsJobs } from '../src/host/fakeWindowsJobs.ts';
 import {
   ADOPT_NOT_WINDOWS,
   HELP_LINES,
+  INSTALL_KEY_ON_COMMAND_LINE,
+  INSTALL_NOT_WINDOWS,
+  installUsageProblem,
   NETWORK_NOT_WINDOWS,
   NETWORK_USAGE,
   NOT_INSTALLED,
@@ -205,4 +208,32 @@ test('network with no word after it prints its usage problem', async () => {
   const exitCode = await runCli(['network'], deps);
   assert.equal(exitCode, 1);
   assert.deepEqual(printed, [problemText(NETWORK_USAGE)]);
+});
+
+test('install on a computer that is not Windows refuses with its problem', async () => {
+  const { deps, printed } = makeCli(new Map());
+  const exitCode = await runCli(['install'], deps);
+  assert.equal(exitCode, 1);
+  assert.deepEqual(printed, [problemText(INSTALL_NOT_WINDOWS)]);
+});
+
+test('install refuses the model key on the command line', async () => {
+  const { deps, printed } = makeCli(new Map());
+  const exitCode = await runCli(['install', '--token-factory-key', 'a-key typed here'], deps);
+  assert.equal(exitCode, 1);
+  assert.deepEqual(printed, [problemText(INSTALL_KEY_ON_COMMAND_LINE)]);
+});
+
+test('install refuses a word it does not know', async () => {
+  const { deps, printed } = makeCli(new Map());
+  const exitCode = await runCli(['install', '--force'], deps);
+  assert.equal(exitCode, 1);
+  assert.deepEqual(printed, [problemText(installUsageProblem('--force'))]);
+});
+
+test('setup on a computer with nothing installed routes to the first install', async () => {
+  const { deps, printed } = makeCli(new Map());
+  const exitCode = await runCli(['setup'], deps);
+  assert.equal(exitCode, 1);
+  assert.deepEqual(printed, [problemText(INSTALL_NOT_WINDOWS)]);
 });
