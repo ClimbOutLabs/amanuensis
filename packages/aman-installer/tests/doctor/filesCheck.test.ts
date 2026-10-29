@@ -7,6 +7,7 @@ import { test } from 'node:test';
 import { runDoctor, runDoctorChecks, type CheckRecord, type DoctorDeps } from '../../src/doctor/doctor.ts';
 import { FakeHost } from '../../src/host/fakeHost.ts';
 import { FakeWindowsJobs, type FakeWindowsJobStep } from '../../src/host/fakeWindowsJobs.ts';
+import type { SystemKind } from '../../src/host/host.ts';
 import { systemWindowsJobs, windowsPaths, type AclRead } from '../../src/host/windowsJobs.ts';
 import {
   FILES_COULD_NOT_CHECK,
@@ -18,7 +19,6 @@ import {
 import { StubProcessRunner, commandLine, okResult, type ProcessResult } from '../../src/runner/processRunner.ts';
 import { folderBackend } from '../../src/state/folderBackend.ts';
 import { createStateStore } from '../../src/state/state.ts';
-import type { SystemKind } from '../../src/host/host.ts';
 
 const LOCAL_APP_DATA = 'C:\\Users\\Friend\\AppData\\Local';
 const DATA_DIR = windowsPaths(LOCAL_APP_DATA).dataDir;

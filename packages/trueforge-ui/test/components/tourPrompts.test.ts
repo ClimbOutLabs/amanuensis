@@ -218,40 +218,56 @@ describe('the rewritten cards', () => {
     }
   });
 
-  it('asks first on every card whose prompt sends, saves or books', () => {
+  it('states the ask first on every card, asks once, and uses no dashes, so the model acts instead of asking what to do', () => {
+    // The brief card opens with the line the brief schedule is recognised by, so it is checked on its own.
+    const cards = everyCard.filter(card => card !== CARDS.brief);
+    for (const card of cards) {
+      expect(card.prompt, card.title).toMatch(/^I /);
+      expect(card.prompt, card.title).not.toContain(' - ');
+      expect(card.prompt, card.title).not.toContain('\u2014');
+      if (/\bask me\b/i.test(card.prompt)) expect(card.prompt, card.title).toContain('one short message');
+      expect(card.prompt, card.title).not.toMatch(/one (thing|field|line|word) at a time|line by line|in one line/i);
+    }
+    expect(CARDS.brief.prompt).toBe(MORNING_BRIEF_CARD_PROMPT);
+    expect(CARDS.say_no.prompt).toMatch(/^I need to say no to something\. In one short message, ask me/);
+    for (const card of [CARDS.say_no, CARDS.ask_for, CARDS.thanks]) {
+      expect(card.prompt, card.title).toContain('Show me the draft and wait for my OK');
+    }
+    expect(CARDS.follow_up.prompt).toContain('Wait for my OK before sending');
+  });
+
+  it('waits for my OK on every card whose prompt sends, saves, sets or books', () => {
     for (const card of everyCard) {
-      if (/\b(save|saving|saved|send|sending|book|booking)\b/i.test(card.prompt)) {
-        expect(card.prompt, card.title).toMatch(/\bask/i);
+      if (/\b(save|saving|saved|send|sending|sent|book|booking|set it|set them|set that)\b/i.test(card.prompt)) {
+        expect(card.prompt, card.title).toMatch(/\bask|after I say yes|wait(ing)? for my OK|asking me/i);
       }
     }
   });
 
   it('asks before saving the dinner plan', () => {
-    expect(CARDS.dinner.prompt).toContain(
-      'Offer to save the plan where I can tick it off, and save it only after I say yes',
-    );
+    expect(CARDS.dinner.prompt).toContain('Offer to save the plan where I can tick it off');
+    expect(CARDS.dinner.prompt).toContain('only after I say yes');
   });
 
   it('asks who is eating and about allergies on the dinner card, when that is not known', () => {
-    expect(CARDS.dinner.prompt).toContain("If you don't know who is eating");
+    expect(CARDS.dinner.prompt).toContain('who is eating');
+    expect(CARDS.dinner.prompt).toContain('unless you already know');
     expect(CARDS.dinner.prompt).toContain("an allergy or a food they won't eat");
   });
 
   it('starts the dinner card with the plan, not a round of questions', () => {
-    expect(CARDS.dinner.prompt).toContain("Plan this week's dinners and give me one shopping list grouped by aisle");
+    expect(CARDS.dinner.prompt).toMatch(/^I want this week's dinners planned, with one shopping list grouped by aisle/);
     expect(CARDS.dinner.prompt).not.toContain('Ask me how many people are eating');
   });
 
   it('asks only for what the trip checklist needs', () => {
-    expect(CARDS.trip.prompt).toContain('who with only if it changes the plan');
+    expect(CARDS.trip.prompt).toContain('ask me where I am going and when');
     expect(CARDS.trip.prompt).not.toContain('sort out the week before');
   });
 
-  it('builds the trip checklist from the answers and fits it to the time left', () => {
-    expect(CARDS.trip.prompt).toContain('make my checklist from what I actually told you');
-    expect(CARDS.trip.prompt).toContain('Scale it to the time I have left');
-    expect(CARDS.trip.prompt).toContain('Each line is one concrete thing to do');
-    expect(CARDS.trip.prompt).toContain('skip the parts that no longer fit');
+  it('fits the trip checklist to the time left', () => {
+    expect(CARDS.trip.prompt).toContain('what to book, what to sort out before I go, and what to pack');
+    expect(CARDS.trip.prompt).toContain('in the right order for the time I have left');
   });
 
   it('does not presume my answers on the trip card or defend against them', () => {

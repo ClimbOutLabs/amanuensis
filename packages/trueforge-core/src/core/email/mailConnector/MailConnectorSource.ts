@@ -13,6 +13,7 @@ import {
   type ToolSource,
 } from '../../mcp/IMCPServer';
 import { isRecord } from '../../util/records';
+import { resolveMailDates } from './mailDates';
 import { accountNamesOfResult, emailsOfResult } from './mailToolResults';
 import { isRecipientRefusal, RECIPIENT_NOT_LISTED } from './recipientRefusal';
 import {
@@ -41,7 +42,7 @@ const ACCOUNTS_UNREADABLE =
 const ACCOUNT_NOTE = 'Leave it out when there is one account; it is filled in for you.';
 const DRAFT_RECIPIENT_NOTE =
   'Recipients the person named must stay on the call: a recipient who is not on the Email list is handled by an approval card shown to the person, and a draft with no recipient is refused. Never leave recipients off to get past a refusal.';
-const RECENT_WINDOW_NOTE = `With no since date, this looks at the ${String(RECENT_WINDOW_DAYS)} days up to before (or up to now), then ${String(WIDER_WINDOW_DAYS)} days if fewer messages than asked for come back. Results are newest first within that window. Set since to look further back.`;
+const RECENT_WINDOW_NOTE = `With no since date, this looks at the ${String(RECENT_WINDOW_DAYS)} days up to before (or up to now), then ${String(WIDER_WINDOW_DAYS)} days if fewer messages than asked for come back. Results are newest first within that window. Set since to look further back. A since or before with no time zone offset is read in the user's time zone.`;
 
 // A file name alone is not a path the document reader can open without asking, so the model must fetch first.
 const ATTACHMENT_NOTE = `To read an attachment, first call ${MAIL_ATTACHMENT_TOOL_NAME} for it. That saves the file in the sandbox and returns its path. Then call ${EXTRACT_DOCUMENT_TEXT_TOOL_NAME} with that path. Never pass an attachment's file name as the path.`;
@@ -167,20 +168,25 @@ export class MailConnectorSource implements ToolSource {
   readonly #inner: ToolSource;
   readonly #accounts: (options: { fresh: boolean }) => Promise<readonly string[]>;
   readonly #now: () => Date;
+  readonly #timeZone: string | undefined;
 
   constructor({
     inner,
     accounts,
     now,
+    timeZone,
   }: {
     inner: ToolSource;
     /** The account names; `fresh` reads them again instead of using a kept list. */
     accounts: (options: { fresh: boolean }) => Promise<readonly string[]>;
     now: () => Date;
+    /** The user's IANA time zone, in which a date the model gives without an offset is read; UTC when unknown. */
+    timeZone: string | undefined;
   }) {
     this.#inner = inner;
     this.#accounts = accounts;
     this.#now = now;
+    this.#timeZone = timeZone;
   }
 
   get name(): string {
@@ -227,7 +233,14 @@ export class MailConnectorSource implements ToolSource {
     if ('refused' in account) {
       return refusal(account.refused);
     }
-    const args = withoutNullDates({ ...given, [MAIL_ACCOUNT_ARGUMENT]: account.name });
+    const dated = resolveMailDates({
+      args: withoutNullDates({ ...given, [MAIL_ACCOUNT_ARGUMENT]: account.name }),
+      time_zone: this.#timeZone,
+    });
+    if (!dated.ok) {
+      return refusal(dated.error);
+    }
+    const { args } = dated;
     const send = (sent: Record<string, unknown>) =>
       this.#inner.callTool({ ...params, arguments: sent }, approvalDecision, context);
     if (params.name !== MAIL_LIST_TOOL_NAME || args['since'] !== undefined) {

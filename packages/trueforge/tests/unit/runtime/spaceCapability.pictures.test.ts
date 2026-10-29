@@ -438,7 +438,11 @@ describe('space pictures and links come only from this chat', () => {
     const response = await call(CREATE_SPACE_TOOL_NAME, {
       ...createArgs('<img src="https://example.com/collie.jpg" alt="Collie">'),
     });
-    expect(await errorOf(response)).toContain('placeholder domain');
+    const refusal = await errorOf(response);
+    expect(refusal).toContain('placeholder domain');
+    expect(refusal).toContain(
+      "Use a picture URL from the 'Pictures on this page' list of a page you opened, or from a search result.",
+    );
     const sub = await call(CREATE_SPACE_TOOL_NAME, {
       ...createArgs('<img src="https://cdn.example.org/collie.jpg" alt="Collie">'),
     });

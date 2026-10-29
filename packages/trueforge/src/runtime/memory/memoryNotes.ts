@@ -32,8 +32,11 @@ export interface NoteProvenance {
   date: string;
 }
 
-/** Notes older than this stay stored but are not recalled, because what an assistant found goes out of date. */
-export const RECALLED_NOTE_MAX_AGE_DAYS = 14;
+/**
+ * Read content (findings from emails, web pages, documents) older than this stays stored but is not recalled,
+ * because it goes out of date; the assistant's own replies never age out, so "what did you advise me" stays recallable.
+ */
+export const READ_CONTENT_NOTE_MAX_AGE_DAYS = 14;
 
 const MILLISECONDS_PER_DAY = 86_400_000;
 
@@ -166,7 +169,7 @@ export function isNoteTooOld({
   now: Date;
 }): boolean {
   const provenance = noteProvenance({ metadata, text });
-  if (provenance === undefined) {
+  if (provenance === undefined || provenance.source === ASSISTANT_RESPONSE_SOURCE) {
     return false;
   }
   const found = NOTE_DATE_PATTERN.test(provenance.date) ? Date.parse(`${provenance.date}T00:00:00Z`) : Number.NaN;
@@ -175,5 +178,5 @@ export function isNoteTooOld({
   }
   const today = Math.floor(now.getTime() / MILLISECONDS_PER_DAY);
   const foundDay = Math.min(Math.floor(found / MILLISECONDS_PER_DAY), today);
-  return today - foundDay > RECALLED_NOTE_MAX_AGE_DAYS;
+  return today - foundDay > READ_CONTENT_NOTE_MAX_AGE_DAYS;
 }
