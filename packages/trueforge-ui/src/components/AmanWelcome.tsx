@@ -58,7 +58,7 @@ function AmanHome() {
       onSend={sendPrompt}
       onFill={fillPrompt}
       canSend={setup === null || setup.modelName !== null}
-      {...(runBrief === undefined ? {} : { onRunBrief: runBrief })}
+      {...(runBrief === undefined ? {} : { onRunBrief: runBrief.run, briefStarting: runBrief.starting })}
     />
   );
 }

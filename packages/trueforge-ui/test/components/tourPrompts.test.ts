@@ -330,7 +330,7 @@ describe('homeSlotsFor', () => {
   it('describes the run card in plain words, with no assistant name and no dashes', () => {
     const detail = RUN_BRIEF_CARD.detail('Juniper');
     expect(RUN_BRIEF_CARD.title).toBe('Run my daily brief');
-    expect(detail).toBe('Runs your daily brief now, the same as the scheduled one');
+    expect(detail).toBe('Runs your scheduled brief now');
     for (const text of [detail, RUN_BRIEF_CARD.title]) expect(text).not.toMatch(/\b(Aman|Mannie)\b|\u2014/);
   });
 });

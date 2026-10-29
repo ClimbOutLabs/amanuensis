@@ -95,6 +95,8 @@ export type AmanTourProps = {
   canSend: boolean;
   /** Runs the person's daily brief schedule now. Omitted when they have no brief schedule, and the card stays hidden. */
   onRunBrief?: () => void;
+  /** True while a brief run is starting; the card goes quiet so a second tap cannot start another. */
+  briefStarting?: boolean;
 };
 
 /**
@@ -113,6 +115,7 @@ export function AmanTour({
   onFill,
   canSend,
   onRunBrief,
+  briefStarting = false,
 }: AmanTourProps) {
   const assistant = assistantDisplayName(assistantName);
   const { hello, firstName } = greetingParts({ now, name: userName });
@@ -181,27 +184,38 @@ export function AmanTour({
             Some things {assistant} can do
           </h2>
           <ul className="m-0 grid list-none grid-cols-2 gap-2.5 p-0">
-            {slots.map(slot => (
-              <li key={slot.card.title}>
-                <button type="button" className={cn(CARD_CLASS, 'h-full w-full')} onClick={() => press(slot)}>
-                  <span className="flex min-w-0 items-start gap-2" data-role="home-card-title">
-                    <span className="flex h-[1.2em] shrink-0 items-center text-[0.9375rem] text-gold-ink">
-                      {slot.card.icon === 'map-pin' ? (
-                        <MapPinIcon />
-                      ) : (
-                        <Icon name={slot.card.icon} size="1.125rem" aria-hidden="true" />
-                      )}
+            {slots.map(slot => {
+              const busy = slot.kind === 'run_brief' && briefStarting;
+              return (
+                <li key={slot.card.title}>
+                  <button
+                    type="button"
+                    className={cn(CARD_CLASS, 'h-full w-full', busy && 'cursor-not-allowed opacity-50')}
+                    disabled={busy}
+                    aria-busy={busy}
+                    onClick={() => press(slot)}
+                  >
+                    <span className="flex min-w-0 items-start gap-2" data-role="home-card-title">
+                      <span className="flex h-[1.2em] shrink-0 items-center text-[0.9375rem] text-gold-ink">
+                        {busy ? (
+                          <Icon name="loader" size="1.125rem" className="animate-spin" aria-hidden="true" />
+                        ) : slot.card.icon === 'map-pin' ? (
+                          <MapPinIcon />
+                        ) : (
+                          <Icon name={slot.card.icon} size="1.125rem" aria-hidden="true" />
+                        )}
+                      </span>
+                      <span className="aui-face-serif text-[0.9375rem] leading-[1.2] font-normal text-text-primary">
+                        {slot.card.title}
+                      </span>
                     </span>
-                    <span className="aui-face-serif text-[0.9375rem] leading-[1.2] font-normal text-text-primary">
-                      {slot.card.title}
+                    <span className="line-clamp-2 text-[0.8125rem] text-text-secondary">
+                      {busy ? 'Starting...' : slot.card.detail(assistant)}
                     </span>
-                  </span>
-                  <span className="line-clamp-2 text-[0.8125rem] text-text-secondary">
-                    {slot.card.detail(assistant)}
-                  </span>
-                </button>
-              </li>
-            ))}
+                  </button>
+                </li>
+              );
+            })}
           </ul>
         </section>
 

@@ -375,7 +375,7 @@ export const DEFAULT_CARD_KEYS: readonly CardKey[] = [
 /** Runs the person's own daily brief schedule now, so the run uses the task they wrote, home address and all. */
 export const RUN_BRIEF_CARD: TourCardFace = {
   title: 'Run my daily brief',
-  detail: () => 'Runs your daily brief now, the same as the scheduled one',
+  detail: () => 'Runs your scheduled brief now',
   icon: 'play',
 };
 

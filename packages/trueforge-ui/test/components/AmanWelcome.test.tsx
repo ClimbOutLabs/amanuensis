@@ -7,17 +7,30 @@ import { AmanWelcome } from '@/components/AmanWelcome.js';
 import { EMPTY_PERSONALIZATION_PROFILE, PersonalizationProvider } from '@/components/PersonalizationContext.js';
 import { CARDS } from '@/components/tourPrompts.js';
 
-const { composer, server, schedules, shell } = vi.hoisted(() => {
+const { composer, server, schedules, shell, permissionsServer } = vi.hoisted(() => {
   const server: { grantedFeatures: string[]; hasCatalog: boolean } = { grantedFeatures: [], hasCatalog: true };
-  const schedules: { list: { id: string; name: string; task: string }[]; enabled: boolean } = {
+  const schedules: {
+    list: { id: string; name: string; task: string; status: 'active' | 'paused' }[];
+    enabled: boolean;
+    /** What the person may do on each schedule; null means no permissions server, so everything is allowed. */
+    permissions: Record<string, string[]> | null;
+  } = {
     list: [],
     enabled: false,
+    permissions: null,
+  };
+  // One object for the whole run: the permissions hook keys its reads on the server's identity.
+  const permissionsServer = {
+    listPermissions: async ({ resourceIds }: { resourceIds: readonly string[] }) => ({
+      data: Object.fromEntries(resourceIds.map(id => [id, schedules.permissions?.[id] ?? []])),
+    }),
   };
   return {
     composer: { setText: vi.fn(), send: vi.fn() },
     server,
     schedules,
     shell: { openHistorySession: vi.fn() },
+    permissionsServer,
   };
 });
 
@@ -59,6 +72,7 @@ vi.mock('@/server/ServerContext.js', async importOriginal => ({
   useOptionalScheduleServer: () =>
     schedules.enabled ? { listSchedules: async () => ({ data: schedules.list }), createScheduleRun } : null,
   useOptionalAgentSessionsServer: () => ({ findScheduleRunSession }),
+  useOptionalPermissionsServer: () => (schedules.permissions === null ? null : permissionsServer),
 }));
 
 vi.mock('@/server/ShellModeContext.js', async importOriginal => ({
@@ -110,6 +124,7 @@ beforeEach(() => {
   server.hasCatalog = true;
   schedules.list = [];
   schedules.enabled = false;
+  schedules.permissions = null;
   createScheduleRun.mockClear();
   findScheduleRunSession.mockClear();
   shell.openHistorySession.mockClear();
@@ -187,8 +202,19 @@ describe('AmanWelcome on an ordinary new chat', () => {
 });
 
 describe('the run my daily brief card', () => {
-  const brief = { id: 'sched-brief', name: 'morning-brief', task: 'My brief. Travel from 12 Elm Road.' };
-  const plants = { id: 'sched-plants', name: 'water-plants', task: 'Remind me to water the plants.' };
+  const brief = {
+    id: 'sched-brief',
+    name: 'morning-brief',
+    task: 'My brief. Travel from 12 Elm Road.',
+    status: 'active' as const,
+  };
+  const plants = {
+    id: 'sched-plants',
+    name: 'water-plants',
+    task: 'Remind me to water the plants.',
+    status: 'active' as const,
+  };
+  const pausedBrief = { ...brief, id: 'sched-brief-paused', status: 'paused' as const };
 
   it('shows when the person has a daily brief schedule', async () => {
     schedules.enabled = true;
@@ -219,5 +245,79 @@ describe('the run my daily brief card', () => {
     expect(createScheduleRun).toHaveBeenCalledWith({ scheduleId: 'sched-brief' });
     expect(findScheduleRunSession).toHaveBeenCalledWith({ scheduleId: 'sched-brief', runId: 'run-1' });
     expect(composer.send).not.toHaveBeenCalled();
+  });
+
+  it('starts one run from two fast taps, and shows the card busy until the run has started', async () => {
+    schedules.enabled = true;
+    schedules.list = [brief];
+    let finishStart: (() => void) | undefined;
+    createScheduleRun.mockImplementationOnce(
+      ({ scheduleId }) =>
+        new Promise(resolve => {
+          finishStart = () =>
+            resolve({
+              id: 'run-1',
+              scheduleId,
+              name: 'manual',
+              scheduledFor: '2026-10-29T08:00:00.000Z',
+              status: 'triggered',
+              triggeredAt: '2026-10-29T08:00:00.000Z',
+              triggeredBy: 'Priya',
+            });
+        }),
+    );
+    renderWelcome({ setup: { ...firstRun, hasChatted: true } });
+
+    const card = await screen.findByRole('button', { name: /Run my daily brief/ });
+    fireEvent.click(card);
+    fireEvent.click(card);
+    expect(createScheduleRun).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(card).toBeDisabled());
+    expect(card).toHaveTextContent('Starting...');
+    fireEvent.click(card);
+    expect(createScheduleRun).toHaveBeenCalledTimes(1);
+
+    finishStart?.();
+    await waitFor(() => expect(shell.openHistorySession).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(card).toBeEnabled());
+    expect(card).not.toHaveTextContent('Starting...');
+  });
+
+  it('stays hidden when the person may not manage the brief schedule', async () => {
+    schedules.enabled = true;
+    schedules.list = [brief];
+    schedules.permissions = { 'sched-brief': ['READ'] };
+    renderWelcome({ setup: { ...firstRun, hasChatted: true } });
+
+    expect(await screen.findByRole('button', { name: "I'm behind" })).toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByRole('button', { name: /Run my daily brief/ })).not.toBeInTheDocument());
+  });
+
+  it('runs the brief schedule the person may manage, not the one they may only read', async () => {
+    schedules.enabled = true;
+    schedules.list = [brief, pausedBrief];
+    schedules.permissions = { 'sched-brief': ['READ'], 'sched-brief-paused': ['READ', 'MANAGE'] };
+    renderWelcome({ setup: { ...firstRun, hasChatted: true } });
+
+    fireEvent.click(await screen.findByRole('button', { name: /Run my daily brief/ }));
+    await waitFor(() => expect(createScheduleRun).toHaveBeenCalledWith({ scheduleId: 'sched-brief-paused' }));
+  });
+
+  it('prefers an active brief schedule over a paused one listed first', async () => {
+    schedules.enabled = true;
+    schedules.list = [pausedBrief, brief];
+    renderWelcome({ setup: { ...firstRun, hasChatted: true } });
+
+    fireEvent.click(await screen.findByRole('button', { name: /Run my daily brief/ }));
+    await waitFor(() => expect(createScheduleRun).toHaveBeenCalledWith({ scheduleId: 'sched-brief' }));
+  });
+
+  it('falls back to a paused brief schedule when no brief is active', async () => {
+    schedules.enabled = true;
+    schedules.list = [plants, pausedBrief];
+    renderWelcome({ setup: { ...firstRun, hasChatted: true } });
+
+    fireEvent.click(await screen.findByRole('button', { name: /Run my daily brief/ }));
+    await waitFor(() => expect(createScheduleRun).toHaveBeenCalledWith({ scheduleId: 'sched-brief-paused' }));
   });
 });
