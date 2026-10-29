@@ -51,3 +51,10 @@ export function mailRecipientsNotListed({
   }
   return [...notListed];
 }
+
+/** The addresses a mail call names in its `recipients` field, as written, for a plain line to the person. */
+export function namedMailRecipients(params: Record<string, unknown>): string[] {
+  const value = params['recipients'];
+  const items = Array.isArray(value) ? value : value === undefined ? [] : [value];
+  return items.map(addressOf);
+}
