@@ -23,6 +23,7 @@ import {
   AgentHarnessError,
   InvalidAgentSendInputError,
   McpConnectionError,
+  McpRedirectRefusedError,
   ToolPolicyBlockedError,
   ToolPreDispatchError,
 } from '../errors';
@@ -56,6 +57,7 @@ import {
 import { InstructionBuilder, rootAgentIdentity } from '../InstructionBuilder';
 import type { LLMCreateParamsStreaming } from '../llm/ILLM';
 import {
+  UNKNOWN_TOOL_NAME,
   type CompletionUsage,
   type ExtendedChatCompletionChunk,
   type FinishReason,
@@ -122,6 +124,7 @@ import {
 } from '../mcp/executeToolCalls';
 import { isGithubFileRead } from '../mcp/githubFileContents';
 import type { IToolSet, MCPAuthRequired } from '../mcp/IMCPServer';
+import { transportFailureDetail } from '../mcp/remoteMcpClient';
 import { stampSentinelDecision } from '../mcp/ToolSet';
 import type { SentinelHostContext } from '../permissions';
 import {
@@ -214,6 +217,7 @@ import {
   PLAIN_SPEECH_PROMPT,
   policyBlockedNudgeMessage,
   remapToolCallIdSet,
+  removedToolKey,
   SANDBOX_OFF_PROMPT,
   scanApprovalDecisions,
   toEnrichedToolCall,
@@ -222,7 +226,7 @@ import {
   WEB_IMAGES_PROMPT,
   withHostUniqueToolCallIds,
 } from './contextUtils';
-import { CALL_TOOL_NAME, DeferredTool, tryUnwrapCallToolInput } from './DeferredTool';
+import { CALL_TOOL_NAME, DeferredTool, tryParseCallToolWrapper, tryUnwrapCallToolInput } from './DeferredTool';
 import { applyHostToolCallPolicy, type HostToolCallPolicy, type HostToolCallPolicyLogger } from './HostToolCallPolicy';
 import {
   createEmptyAgentThreadMetrics,
@@ -259,6 +263,7 @@ import {
 } from './replyActionChecks';
 import {
   clearUnfinished,
+  connectorUnreachableText,
   DEFAULT_REPLY_STEP_BUDGET,
   progressRefundFor,
   recordUnfinished,
@@ -1329,11 +1334,36 @@ async function resolveToolCallInfo({
     return await toolInfo.toolSet.toolCallInfo(params, resolveUnderlyingTool);
   } catch (error) {
     const unavailableMcp = findUnavailableMcpCause(error);
+    // A server that cannot be reached cannot run anything, so no card is raised. A deferred
+    // call_tool names its inner server and tool; only that pair is withheld, never the wrapper.
+    if (isConnectorUnreachable(error)) {
+      const wrapped =
+        toolInfo.originalToolName === CALL_TOOL_NAME && params.arguments !== undefined
+          ? tryParseCallToolWrapper(params.arguments)
+          : undefined;
+      // The name comes from the resolved server, never from the model's own text.
+      const inner =
+        wrapped !== undefined && toolInfo.toolSet instanceof DeferredTool
+          ? toolInfo.toolSet.resolvedServer(wrapped.mcp_server)
+          : undefined;
+      const serverName = wrapped === undefined ? toolInfo.toolSet.name : inner?.name;
+      return {
+        type: 'mcp',
+        mcp_server_id: wrapped === undefined ? toolInfo.toolSet.id : (inner?.id ?? UNKNOWN_TOOL_NAME),
+        mcp_server_name: serverName ?? UNKNOWN_TOOL_NAME,
+        original_tool_name: wrapped?.tool_name ?? toolInfo.originalToolName,
+        is_approval_required: false,
+        is_client_side: false,
+        ...(wrapped !== undefined && { is_deferred: true }),
+        description: `Tool metadata unavailable: ${describeUnknownError(error)}`,
+        pre_dispatch_failure: {
+          kind: 'connector_unreachable',
+          message: connectorUnreachableText(serverName),
+        },
+      };
+    }
     if (unavailableMcp !== undefined) {
-      // Metadata discovery can reach the remote MCP server. An unavailable
-      // connector must not kill the turn or be mistaken for a host policy
-      // denial. Fail closed by requiring approval, then let dispatch record
-      // the actual terminal execution disposition if the user proceeds.
+      // Any other server failure fails closed: ask the person, and let dispatch record what happens.
       return {
         type: 'mcp',
         mcp_server_id: toolInfo.toolSet.id,
@@ -1418,6 +1448,24 @@ async function enforceRegisteredCommandApprovalIdentity({
     });
   }
   return checked;
+}
+
+/** A real connection failure, read from the typed cause chain; a server that answered with an error is not one. */
+function isConnectorUnreachable(error: unknown): boolean {
+  return transportFailureDetail(error) !== undefined && !hasRedirectRefusal(error);
+}
+
+function hasRedirectRefusal(error: unknown): boolean {
+  const seen = new Set<unknown>();
+  let current: unknown = error;
+  while (current instanceof Error && !seen.has(current)) {
+    seen.add(current);
+    if (current instanceof McpRedirectRefusedError) {
+      return true;
+    }
+    current = current.cause;
+  }
+  return false;
 }
 
 function findUnavailableMcpCause(error: unknown): McpConnectionError | undefined {
@@ -1728,6 +1776,8 @@ export class AgentThread {
   /** Provider-reported input tokens of this thread's latest main model call; null before the first. */
   private lastCallInputTokens: number | null = null;
   private tfyManagedServerNames = new Set<string>();
+  /** Servers left out of this turn's tool list because they could not be reached. */
+  private unreachableServerNames: ReadonlySet<string> = new Set();
 
   private contextBusy = false;
   private preSendRanThisTurn = false;
@@ -3139,11 +3189,14 @@ export class AgentThread {
     }
     const userServers = this.definition.readOnly ? [] : [...(this.definition.toolSets ?? [])];
 
-    const { convertedTools, initializationInfo, authRequirementInfo } = await convertMCPServersToTools({
-      tfyManagedServers,
-      userServers,
-    });
+    const { convertedTools, initializationInfo, authRequirementInfo, unavailableInfo } = await convertMCPServersToTools(
+      {
+        tfyManagedServers,
+        userServers,
+      },
+    );
     this.convertedTools = convertedTools;
+    this.unreachableServerNames = new Set(unavailableInfo.map(info => info.name));
     this.tfyManagedServerNames = new Set(tfyManagedServers.map(s => s.name));
     if (this.toolBundles !== undefined) {
       this.toolBundles.load({
@@ -4051,7 +4104,7 @@ export class AgentThread {
         tool_calls: assistantMessage.tool_calls.map(call => {
           // A repeat of a "no" keeps its card identity, so the run refuses it as that same "no" and ends the turn.
           if (
-            removedTools.includes(call.tool_info.original_tool_name) &&
+            removedTools.includes(removedToolKey(call.tool_info)) &&
             !this.toolCallMemo.deniedApprovalIdentities.has(approvalGrantKey(call.tool_info))
           ) {
             return {
@@ -4663,6 +4716,7 @@ export class AgentThread {
       runCodeToolCallTimeoutMs: this.runCodeToolCallTimeoutMs,
       logger: this.logger,
       sentinel: toDispatchSentinelContext(this.sentinel),
+      unreachableServerNames: this.unreachableServerNames,
     });
     const resultsById = new Map(executedToolCallResults.map(result => [result.message.tool_call_id, result]));
     const toolCallResults = openCalls.flatMap(call => {
@@ -4719,7 +4773,18 @@ export class AgentThread {
     }
     for (const result of toolCallResults) {
       const toolCall = openCalls.find(call => call.id === result.message.tool_call_id);
-      if (toolCall && !toolMapping.has(toolCall.function.name)) {
+      if (
+        toolCall &&
+        !toolMapping.has(toolCall.function.name) &&
+        this.unreachableServerNames.has(toolCall.tool_info.mcp_server_name)
+      ) {
+        // The person may have approved a card for a tool whose connector has since dropped off.
+        this.logger.warn(
+          `Tool call ${toolCall.function.name} was not run because ${toolCall.tool_info.mcp_server_name} is not reachable`,
+          { threadId: this.threadId, toolCallId: toolCall.id },
+        );
+        result.message.content = connectorUnreachableText(toolCall.tool_info.mcp_server_name);
+      } else if (toolCall && !toolMapping.has(toolCall.function.name)) {
         result.message.content = `Tool ${toolCall.function.name} is unavailable in this conversation. Do not call it again. Use only the tools provided in the request, or continue without a tool.`;
       }
     }
@@ -5057,7 +5122,7 @@ export class AgentThread {
     // blocked did not run, so it leaves its call's record alone.
     const replyTurn = nextToolCallMemo.turn;
     const settledByCallId = new Map<string, { kind: ToolResultKind; retried: boolean }>();
-    const removalNotices: { toolName: string; reason: 'declined' | 'unavailable' }[] = [];
+    const removalNotices: { toolName: string; removalKey: string; reason: 'declined' | 'unavailable' }[] = [];
     let removedCallsThisBatch = 0;
     let lastKindThisBatch: ToolResultKind | undefined;
     for (const result of toolCallResults) {
@@ -5067,7 +5132,8 @@ export class AgentThread {
         continue;
       }
       const toolName = call.tool_info.original_tool_name;
-      const wasRemoved = replyTurn.removedTools.includes(toolName);
+      const removalKey = removedToolKey(call.tool_info);
+      const wasRemoved = replyTurn.removedTools.includes(removalKey);
       if (wasRemoved) {
         removedCallsThisBatch += 1;
       }
@@ -5075,7 +5141,8 @@ export class AgentThread {
       const kind = toolResultKind({
         disposition: result.disposition,
         failure: result.failure,
-        unavailable: !toolMapping.has(call.function.name),
+        unavailable:
+          !toolMapping.has(call.function.name) || call.tool_info.pre_dispatch_failure?.kind === 'connector_unreachable',
         removed: wasRemoved,
         expired: isExpiredApproval(decision),
       });
@@ -5086,8 +5153,8 @@ export class AgentThread {
         lastKindThisBatch = kind;
       }
       if (!wasRemoved && !changeRequested && (kind === 'declined' || kind === 'unavailable')) {
-        if (!removalNotices.some(notice => notice.toolName === toolName)) {
-          removalNotices.push({ toolName, reason: kind });
+        if (!removalNotices.some(notice => notice.removalKey === removalKey)) {
+          removalNotices.push({ toolName, removalKey, reason: kind });
         }
       }
       const previous = replyTurn.callSignatures.get(toolCallSignature(call));
@@ -5133,7 +5200,7 @@ export class AgentThread {
       );
     }
     for (const notice of removalNotices) {
-      replyTurn.removedTools.push(notice.toolName);
+      replyTurn.removedTools.push(notice.removalKey);
       this.noteUnfinished(notice.reason);
     }
     const removedStreakBefore = replyTurn.removedToolRejectionStreaks.get(this.threadId) ?? 0;
@@ -5224,7 +5291,9 @@ export class AgentThread {
         ),
         ...guardNotesToSendNow.map(candidate => internalSystemMessage(candidate.message)),
         // Sent once, in the same append as the results that removed the tool.
-        ...removalNotices.map(notice => internalSystemMessage(removedToolMessage(notice))),
+        ...removalNotices.map(notice =>
+          internalSystemMessage(removedToolMessage({ toolName: notice.toolName, reason: notice.reason })),
+        ),
       ],
       output: [],
       currentContextUsage: undefined,

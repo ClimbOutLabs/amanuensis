@@ -614,6 +614,14 @@ export function makeUnknownToolInfo(toolName: string): InternalToolCallInfo {
   };
 }
 
+/**
+ * What a reply removes when a call is declined or unavailable. A deferred call names its inner
+ * server and tool, so one down server never removes the same tool name on a healthy one.
+ */
+export function removedToolKey(info: InternalToolCallInfo): string {
+  return info.is_deferred === true ? `${info.mcp_server_name}/${info.original_tool_name}` : info.original_tool_name;
+}
+
 export function toToolCallInfo(toolInfo: InternalToolCallInfo): ToolInfo {
   // Carried onto the wire so an approval prompt can state the tool's effect and whether
   // data leaves the machine from what the server published, rather than guessing.

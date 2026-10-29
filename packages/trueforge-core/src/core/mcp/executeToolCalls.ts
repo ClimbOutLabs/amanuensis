@@ -52,7 +52,7 @@ import {
 } from '../permissions/webSearch';
 import { identicalCallNudgeMessage } from '../runtime/contextUtils';
 import { CALL_TOOL_NAME, tryParseCallToolWrapper } from '../runtime/DeferredTool';
-import type { ToolResultKind, UnfinishedKind } from '../runtime/replyBudget';
+import { connectorUnreachableText, type ToolResultKind, type UnfinishedKind } from '../runtime/replyBudget';
 import type { SandboxInfo, WorkspaceVerificationReceiptCandidate } from '../sandbox/Sandbox';
 import { approvalGrantKey } from './approvalGrant';
 import type { MappedMCPTool } from './convertMCPServers';
@@ -1406,6 +1406,7 @@ export async function executeToolCalls({
   runCodeToolCallTimeoutMs,
   logger,
   sentinel,
+  unreachableServerNames,
 }: {
   assistantMessage: InternalEnrichedAssistantMessage;
   toolMapping: Map<string, MappedMCPTool>;
@@ -1458,6 +1459,8 @@ export async function executeToolCalls({
    * invocation, and Tier 3 approved/denied outcomes are audit-logged.
    */
   sentinel?: SentinelDispatchContext | undefined;
+  /** Servers left out of this turn's tool list because they could not be reached. */
+  unreachableServerNames?: ReadonlySet<string> | undefined;
 }): Promise<ExecuteToolCallsResult> {
   const toolMessages: ToolCallResult[] = [];
   const initializationInfo: MCPServerInitInfo[] = [];
@@ -1501,10 +1504,15 @@ export async function executeToolCalls({
       admissionProvenance,
     });
     if (!toolInfo) {
+      // A tool the person already saw a card for can vanish when its connector drops off. Say so plainly.
+      const connectorGone = unreachableServerNames?.has(toolCall.tool_info.mcp_server_name) === true;
+      const connectorText = connectorUnreachableText(toolCall.tool_info.mcp_server_name);
       return {
         toolCall,
         toolInfo,
-        response: toolResultResponse({ text: `Tool ${toolCall.function.name} not found in tool mapping` }),
+        response: toolResultResponse({
+          text: connectorGone ? connectorText : `Tool ${toolCall.function.name} not found in tool mapping`,
+        }),
         failure: true,
         completedAt: new Date().toISOString(),
         memoized: false,
@@ -1512,11 +1520,13 @@ export async function executeToolCalls({
         blockedPrivateFallback: false,
         repeatedSideEffect: false,
         disposition: 'never_ran',
-        remediation: {
-          reason_code: 'unknown_tool',
-          message: 'Use only a tool that is available in this conversation, or continue without a tool.',
-          suggested_action: 'change_strategy',
-        },
+        remediation: connectorGone
+          ? { reason_code: 'connector_unreachable', message: connectorText, suggested_action: 'retry' }
+          : {
+              reason_code: 'unknown_tool',
+              message: 'Use only a tool that is available in this conversation, or continue without a tool.',
+              suggested_action: 'change_strategy',
+            },
         admissionProvenance: admission,
       };
     }
@@ -1546,7 +1556,9 @@ export async function executeToolCalls({
                 'Use a tool that is allowed in this conversation or change strategy.',
               suggested_action: preparationFailure.owner_message === undefined ? 'change_strategy' : 'contact_user',
             }
-          : {
+          : preparationFailure.kind === 'connector_unreachable'
+            ? { reason_code: 'connector_unreachable', message: preparationFailure.message, suggested_action: 'retry' }
+            : {
               reason_code: 'tool_pre_dispatch_failed',
               // A refusal the owner must hear about (the reply guard, the search budget) carries its plain line.
               message:
