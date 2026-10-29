@@ -5,7 +5,12 @@ import type { Logger } from 'winston';
 import type { IGlobalSettingsStore } from '../db/globalSettingsStore';
 import type { IModelProviderStore } from '../db/modelProviderStore';
 import { NameSchema } from '../schemas/common';
-import { modelProviderName, type AvailableModel, type ModelProviderManifest } from '../schemas/modelProvider';
+import {
+  modelProviderName,
+  type AvailableModel,
+  type ConfiguredModel,
+  type ModelProviderManifest,
+} from '../schemas/modelProvider';
 
 /** Resource name of the env-managed provider: well-known providers are named after their type. */
 export const TOKEN_FACTORY_PROVIDER_NAME = 'tokenfactory';
@@ -45,15 +50,29 @@ export function envManagedModelProviderNames(options: {
     : new Set();
 }
 
-/** The `tokenfactory` manifest for the env settings: the default model only. */
-export function buildEnvManagedTokenFactoryManifest(
-  settings: TokenFactorySettings & { apiKey: string },
-): ModelProviderManifest {
+/**
+ * The `tokenfactory` manifest for the env settings: the configured model first, then the catalog's
+ * other Token Factory models so a chat can switch between them. A catalog entry with the same
+ * name lends the configured model its properties, such as the output cap.
+ */
+export function buildEnvManagedTokenFactoryManifest({
+  settings,
+  catalogModels,
+}: {
+  settings: TokenFactorySettings & { apiKey: string };
+  catalogModels: readonly ConfiguredModel[];
+}): ModelProviderManifest {
+  const defaultName = tokenFactoryModelName(settings.model);
+  const defaultModel: ConfiguredModel = {
+    model_id: settings.model,
+    name: defaultName,
+    properties: catalogModels.find(model => model.name === defaultName)?.properties ?? {},
+  };
   return {
     type: 'tokenfactory',
     base_url: settings.baseUrl,
     auth: { api_key: settings.apiKey },
-    models: [{ model_id: settings.model, name: tokenFactoryModelName(settings.model), properties: {} }],
+    models: [defaultModel, ...catalogModels.filter(model => model.name !== defaultName)],
   };
 }
 
@@ -74,11 +93,13 @@ export async function ensureEnvManagedTokenFactoryProvider({
   store,
   tenant_id,
   settings,
+  catalogModels,
   logger,
 }: {
   store: IModelProviderStore;
   tenant_id: string;
   settings: TokenFactorySettings;
+  catalogModels: readonly ConfiguredModel[];
   logger: Logger;
 }): Promise<EnvManagedProviderOutcome> {
   const { apiKey } = settings;
@@ -86,7 +107,7 @@ export async function ensureEnvManagedTokenFactoryProvider({
     return 'skipped';
   }
   const existing = await store.getProvider({ tenant_id, name: TOKEN_FACTORY_PROVIDER_NAME, model_name: '' });
-  const built = buildEnvManagedTokenFactoryManifest({ ...settings, apiKey });
+  const built = buildEnvManagedTokenFactoryManifest({ settings: { ...settings, apiKey }, catalogModels });
   // Models an earlier boot registered stay listed, so roles, personas and agents that still point
   // at a replaced default keep resolving after an upgrade or an env change.
   const desiredNames = new Set(built.models.map(model => model.name));

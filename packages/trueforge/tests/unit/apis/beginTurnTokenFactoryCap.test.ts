@@ -14,6 +14,7 @@ import { TENANT_ID } from '../../../src/apis/sessions';
 import { beginTurnExecution, drainTurnEvents } from '../../../src/apis/turns';
 import { STANDALONE_REQUEST_CONTEXT } from '../../../src/auth/identity';
 import { McpCatalog } from '../../../src/catalog/McpCatalog';
+import { ModelCatalog } from '../../../src/catalog/ModelCatalog';
 import configuration from '../../../src/config';
 import { McpServerWithAuthStore } from '../../../src/db/McpServerWithAuthStore';
 import { migrateSqliteToLatest } from '../../../src/db/migrateSqlite';
@@ -78,7 +79,13 @@ function isLlmFactory(
 const DEAD_URL = 'http://127.0.0.1:1/v1';
 const ask = { messages: [{ role: 'user' as const, content: 'hi' }] };
 
-async function startTurn(options: { cap: number | undefined; tokenFactoryUrl?: string; localUrl?: string }) {
+async function startTurn(options: {
+  cap: number | undefined;
+  tokenFactoryUrl?: string;
+  localUrl?: string;
+  tokenFactoryModel?: string;
+  withCatalogModels?: boolean;
+}) {
   const logger = createLogger({ silent: true });
   const db = createSqliteDb(':memory:');
   await migrateSqliteToLatest(db);
@@ -90,8 +97,14 @@ async function startTurn(options: { cap: number | undefined; tokenFactoryUrl?: s
     settings: {
       apiKey: 'sk-nebius',
       baseUrl: options.tokenFactoryUrl ?? 'https://api.tokenfactory.nebius.com/v1',
-      model: 'nvidia/nemotron-3-super-120b-a12b',
+      model: options.tokenFactoryModel ?? 'nvidia/nemotron-3-super-120b-a12b',
     },
+    catalogModels:
+      options.withCatalogModels === true
+        ? (ModelCatalog.load()
+            .list()
+            .find(entry => entry.type === 'tokenfactory')?.models ?? [])
+        : [],
     logger,
   });
   await modelProviderStore.upsertProvider({
@@ -255,6 +268,26 @@ describe('Token Factory daily cap in the turn path', () => {
 
     await expect(modelClient.createNonStream(ask)).rejects.toBeInstanceOf(TokenFactoryDailyCapError);
     expect(await usedToday(usageStore)).toBe(1100);
+  });
+
+  it('lets a chat pick Super when Ultra is configured, and holds Super to the same cap', async () => {
+    const tokenFactoryUrl = await modelServer({ prompt_tokens: 300, completion_tokens: 50 });
+    const { llm, usageStore } = await startTurn({
+      cap: CAP,
+      tokenFactoryUrl,
+      tokenFactoryModel: 'nvidia/Nemotron-3-Ultra-550b-a55b',
+      withCatalogModels: true,
+    });
+
+    const { modelClient, modelId } = await llm('tokenfactory/nemotron-3-super-120b-a12b', 'chat');
+    expect(modelId).toBe('nvidia/nemotron-3-super-120b-a12b');
+    await modelClient.createNonStream(ask);
+    expect(await usedToday(usageStore)).toBe(350);
+
+    await useUpToday(usageStore, CAP);
+    await expect(llm('tokenfactory/nemotron-3-super-120b-a12b', 'chat')).rejects.toBeInstanceOf(
+      TokenFactoryDailyCapError,
+    );
   });
 
   it('never refuses and never counts a turn on another provider', async () => {

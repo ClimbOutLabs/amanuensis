@@ -579,6 +579,7 @@ describe('submitProfileLearning', () => {
             baseUrl: stub.baseUrl,
             model: 'nvidia/nemotron-3-super-120b-a12b',
           },
+          catalogModels: [],
           logger: makeLogger(),
         });
       } else {
