@@ -403,7 +403,7 @@ describe('page reads, scripts, and empty bodies', () => {
     for (const body of [`<a href="${COLLIE_URL}">Collie</a>`, `[Collie](${COLLIE_URL})`]) {
       const response = await setup(webSearch)(CREATE_SPACE_TOOL_NAME, createArgs(body));
       expect(isErrorResponse(response)).toBe(true);
-      expect(await errorOf(response)).toContain('link did not come from the person or a search');
+      expect(await errorOf(response)).toContain('does not come from a search result in this chat');
     }
   });
 
