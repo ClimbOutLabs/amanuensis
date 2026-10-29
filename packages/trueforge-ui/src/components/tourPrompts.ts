@@ -311,7 +311,7 @@ export const CARDS = {
     title: 'A simple budget for this month',
     detail: () => 'What comes in, goes out, and is left',
     prompt:
-      'I want a simple budget for this month. In one short message, ask me what comes in this month and the fixed things that must go out; rounding is fine, and if I am not sure of a number, use a round guess and say it is a guess. Show me three numbers, in, must-pay and left over, and ask if I want to set aside anything from what is left. Offer to save the budget and check in with me mid-month, and do that only after I say yes.',
+      'I want a simple budget for this month. In one short message, ask me what comes in this month and the fixed things that must go out; rounding is fine, and if I am not sure of a number, use a round guess and say it is a guess. Show me three numbers: what comes in, what must go out, and what is left, and ask if I want to set aside anything from what is left. Offer to save the budget and check in with me mid-month, and do that only after I say yes.',
     icon: 'chart',
   },
   sort_out: {
