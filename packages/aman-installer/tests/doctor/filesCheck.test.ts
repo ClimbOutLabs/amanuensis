@@ -172,17 +172,40 @@ test('on any other system the check records nothing', async () => {
   assert.deepEqual(aclOps(world.jobs), []);
 });
 
+interface JsonRecord {
+  id: string;
+  state: string;
+  detail: string;
+  fix: string;
+}
+
+function isJsonRecord(value: unknown): value is JsonRecord {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return false;
+  }
+  return (
+    'id' in value &&
+    typeof value.id === 'string' &&
+    'state' in value &&
+    typeof value.state === 'string' &&
+    'detail' in value &&
+    typeof value.detail === 'string' &&
+    'fix' in value &&
+    typeof value.fix === 'string'
+  );
+}
+
 test('the doctor a person runs reports the fixed folder in its document', async () => {
   const world = await makeWorld({ acls: new Map([[DATA_DIR, OPEN_READ]]) });
   await runDoctor(world.deps, { json: true, fix: true });
   assert.equal(world.printed.length, 1);
   const doc: unknown = JSON.parse(world.printed[0] ?? '');
-  assert.ok(typeof doc === 'object' && doc !== null && 'machine' in doc);
-  const machine = (doc as { machine: unknown }).machine;
+  if (typeof doc !== 'object' || doc === null || !('machine' in doc)) {
+    throw new Error('the doctor document has no machine checks');
+  }
+  const machine: unknown = doc.machine;
   assert.ok(Array.isArray(machine));
-  const record = machine.find(
-    (entry: unknown) => typeof entry === 'object' && entry !== null && 'id' in entry && entry.id === 'files',
-  ) as CheckRecord | undefined;
+  const record = machine.filter(isJsonRecord).find(entry => entry.id === 'files');
   assert.ok(record !== undefined);
   assert.equal(record.state, 'ok');
   assert.equal(record.detail, FILES_MADE_PRIVATE_LINE);
