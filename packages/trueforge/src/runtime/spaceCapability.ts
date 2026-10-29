@@ -346,10 +346,12 @@ export class SpaceBodyEmptyError extends Error {
 
 /** Thrown when an edit_space call would leave the space exactly as it is. Nothing is saved. */
 export class SpaceEditUnchangedError extends Error {
-  constructor() {
+  constructor(leftOut?: Pick<DroppedLinks, 'links' | 'pictures'>) {
     super(
-      'This edit changes nothing: the blocks already hold exactly that content, so nothing was saved. ' +
-        'Change the content, or tell the person the space already reads this way.',
+      leftOut === undefined
+        ? 'This edit changes nothing: the blocks already hold exactly that content, so nothing was saved. ' +
+            'Change the content, or tell the person the space already reads this way.'
+        : `Nothing was saved. ${leftOutSentence(leftOut)} The rest of the edit changes nothing, so the space reads the same.`,
     );
     this.name = 'SpaceEditUnchangedError';
   }
@@ -1881,17 +1883,19 @@ class SpaceTool extends LocalToolMCP {
     });
     // The link check is a safety check on the content, so it runs before the size policy:
     // a write that breaks both rules gets the safety refusal. Unseen links are cut out here.
-    const checked = dropUnseenSpaceLinks({
-      body: input.body,
-      previousBody: '',
-      format: input.format,
-      web_search: this.options.webSearch,
-    });
+    const checkLinks = (candidate: string): DroppedLinks =>
+      dropUnseenSpaceLinks({
+        body: candidate,
+        previousBody: '',
+        format: input.format,
+        web_search: this.options.webSearch,
+      });
+    checkLinks(input.body);
     // Dropping repeated rows first lets a call that only overshoots because of them still fit.
     const deduped =
       input.format === 'markdown'
-        ? dropDuplicateRows({ content: checked.body, existingKeys: [] })
-        : { content: checked.body, skipped: [] };
+        ? dropDuplicateRows({ content: input.body, existingKeys: [] })
+        : { content: input.body, skipped: [] };
     let body = deduped.content;
     let cut: WritePrefix | null = null;
     if (body.length > SPACE_WRITE_MAX_LENGTH) {
@@ -1906,6 +1910,13 @@ class SpaceTool extends LocalToolMCP {
         });
       }
       body = cut.kept;
+    }
+    // The cut and the duplicate drop can change how the text reads (a code span can lose its
+    // closing line), so what is saved is checked again; its counts are what was left out.
+    const checked = checkLinks(body);
+    body = checked.body;
+    if (body.trim() === '') {
+      throw new SpaceBodyEmptyError({ space_id: '' });
     }
     const expected_aggregate_revision = await resolveAggregateRevision(
       this.options.store,
@@ -1925,7 +1936,7 @@ class SpaceTool extends LocalToolMCP {
     });
     // The outline lets the next edit chain from real anchors and fingerprints.
     const blocks = blockOutline(mutation.record.body).blocks;
-    const skipped_rows = cut === null ? deduped.skipped : skippedRowsWithin({ content: checked.body, kept: cut.kept });
+    const skipped_rows = cut === null ? deduped.skipped : skippedRowsWithin({ content: input.body, kept: cut.kept });
     return {
       mutation,
       action: 'Created',
@@ -2089,17 +2100,44 @@ class SpaceTool extends LocalToolMCP {
         format,
         web_search: this.options.webSearch,
       });
-    // Refusals for the full content come before the size cut; the saved part is checked again below.
-    let checked = checkLinks(applied.body);
+    // Refusals for the full content come before the size cut.
+    checkLinks(applied.body);
+    let entries: readonly SpaceEditEntry[] = input.edits;
     if (cut !== null && lone !== undefined) {
+      entries = [{ ...lone, new_content: cut.kept }];
       applied = applyEditEntries({
         space_id: input.space_id,
         body: current.body,
         format,
-        edits: [{ ...lone, new_content: cut.kept }],
+        edits: entries,
         confirm_shrink: input.confirm_shrink,
       });
-      checked = checkLinks(applied.body);
+    }
+    // What is saved is cleaned entry by entry and applied again, so block lengths and the counts
+    // describe the saved text only, and the last check below is the safety net for the whole body.
+    let checked = checkLinks(applied.body);
+    if (checked.links + checked.pictures > 0) {
+      const counts = { links: 0, pictures: 0 };
+      const cleaned = entries.map(entry => {
+        const dropped = checkLinks(entry.new_content);
+        if (dropped.body.trim() === '' && entry.new_content.trim() !== '') {
+          throw new SpaceLinkRefusedError(
+            'Nothing was left of this content after links and pictures that did not come from this chat were left out. Add text, then send the call again.',
+          );
+        }
+        counts.links += dropped.links;
+        counts.pictures += dropped.pictures;
+        return { ...entry, new_content: dropped.body };
+      });
+      applied = applyEditEntries({
+        space_id: input.space_id,
+        body: current.body,
+        format,
+        edits: cleaned,
+        confirm_shrink: input.confirm_shrink,
+      });
+      const last = checkLinks(applied.body);
+      checked = { body: last.body, links: counts.links + last.links, pictures: counts.pictures + last.pictures };
     }
     const { block_results, starts_new_table, skipped_rows } = applied;
     const { body } = checked;
@@ -2112,7 +2150,9 @@ class SpaceTool extends LocalToolMCP {
       (input.status ?? current.status) === current.status &&
       format === current.format
     ) {
-      throw new SpaceEditUnchangedError();
+      throw new SpaceEditUnchangedError(
+        checked.links + checked.pictures > 0 ? { links: checked.links, pictures: checked.pictures } : undefined,
+      );
     }
     this.checkShrink(input.space_id, current, body, input.confirm_shrink, EDIT_SPACE_TOOL_NAME);
     if (body.length === 0) {

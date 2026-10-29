@@ -267,6 +267,122 @@ describe('space pictures and links come only from this chat', () => {
     expect(saved.body).not.toContain('[pic]:');
   });
 
+  it('checks the saved part again after a size cut, so a cut cannot make a hidden picture live', async () => {
+    const filler = (from: number, to: number) =>
+      Array.from({ length: to - from }, (_, index) => `Filler line number ${String(from + index)} here.`).join('\n');
+    const body = [
+      filler(0, 120),
+      '`',
+      '![p](https://evil.net/x.png)',
+      `\`${'tail words '.repeat(70)}`,
+      filler(120, 150),
+    ].join('\n');
+    expect(body.length).toBeGreaterThan(4_000);
+    // The closing line does not fit, so the cut ends right after the picture line.
+    const response = await setup(createWebSearchTurnState())(CREATE_SPACE_TOOL_NAME, createArgs(body));
+    expect(isErrorResponse(response)).toBe(false);
+    const parsed = parsedObject(textOf(response));
+    expect(parsed['unsaved_lines']).toBeDefined();
+    expect(stringField(fieldObject(parsed, 'space'), 'body')).not.toContain('evil.net');
+  });
+
+  it.each([
+    '![](https://evil.net/x.png)',
+    '<https://evil.net/x>',
+    '[](https://evil.net/x)\n\n![](https://evil.net/y.png)',
+  ])('refuses a create that has nothing left after the unseen items go: %s', async body => {
+    const response = await setup(createWebSearchTurnState())(CREATE_SPACE_TOOL_NAME, createArgs(body));
+    expect(isErrorResponse(response)).toBe(true);
+    expect(await errorOf(response)).toContain('The space body is empty');
+  });
+
+  it('refuses an html create that has nothing left after the picture goes', async () => {
+    const response = await setup(createWebSearchTurnState())(CREATE_SPACE_TOOL_NAME, {
+      ...createArgs('<img src="https://evil.net/x.png">'),
+      format: 'html',
+    });
+    expect(await errorOf(response)).toContain('The space body is empty');
+  });
+
+  it('keeps a seen definition when an unseen one has the same name', async () => {
+    const webSearch = createWebSearchTurnState();
+    recordSearchResults({ provenance: webSearch.provenance, texts: [searchResult(['https://seen.org/page'])] });
+    const response = await setup(webSearch)(
+      CREATE_SPACE_TOOL_NAME,
+      createArgs('See [the page][r].\n\n[r]: https://seen.org/page\n[r]: https://evil.net/x'),
+    );
+    const saved = savedOf(response);
+    expect(saved.body).toContain('[r]: https://seen.org/page');
+    expect(saved.body).not.toContain('evil.net');
+  });
+
+  it('counts each removed item once', async () => {
+    const call = setup(createWebSearchTurnState());
+    const bare = savedOf(
+      await call(CREATE_SPACE_TOOL_NAME, createArgs('Hi\n\n[https://evil.net/x](https://evil.net/x)')),
+    );
+    expect(bare.summary).toContain('Left out 1 link that did not');
+    const reference = savedOf(
+      await setup(createWebSearchTurnState())(
+        CREATE_SPACE_TOOL_NAME,
+        createArgs('Hi\n\n![a][r]\n\n[r]: https://evil.net/x.png'),
+      ),
+    );
+    expect(reference.summary).toContain('Left out 1 picture that did not');
+    expect(reference.summary).not.toContain('link');
+  });
+
+  it('counts only what was removed from the saved part of a cut create', async () => {
+    const lines = Array.from({ length: 150 }, (_, index) => `Filler line number ${String(index)} here.`);
+    const body = [...lines, '[Late](https://evil.net/late)'].join('\n');
+    const parsed = parsedObject(
+      textOf(await setup(createWebSearchTurnState())(CREATE_SPACE_TOOL_NAME, createArgs(body))),
+    );
+    expect(parsed['unsaved_lines']).toBeDefined();
+    expect(stringField(parsed, 'summary')).not.toContain('Left out');
+  });
+
+  it('tells the person when the only change of an edit was a link that was left out', async () => {
+    const call = setup(createWebSearchTurnState());
+    await call(CREATE_SPACE_TOOL_NAME, { ...createArgs('# Dog breeds\n<!-- @block:one -->\nCollie') });
+    const response = await call(EDIT_SPACE_TOOL_NAME, {
+      space_name: 'Dog breeds',
+      expected_revision: 1,
+      edits: [
+        {
+          type: 'block',
+          anchor: 'one',
+          fingerprint: await fingerprintOf(call, { spaceName: 'Dog breeds', anchor: 'one' }),
+          new_content: '[Collie](https://evil.net/collie)',
+        },
+      ],
+    });
+    expect(isErrorResponse(response)).toBe(true);
+    const error = await errorOf(response);
+    expect(error).toContain('Left out 1 link');
+    expect(error).not.toContain('changes nothing: the blocks already hold');
+  });
+
+  it('reports block lengths of the text that was saved', async () => {
+    const call = setup(createWebSearchTurnState());
+    await call(CREATE_SPACE_TOOL_NAME, { ...createArgs('# Dog breeds\n<!-- @block:one -->\n(to fill)') });
+    const response = await call(EDIT_SPACE_TOOL_NAME, {
+      space_name: 'Dog breeds',
+      expected_revision: 1,
+      edits: [
+        {
+          type: 'block',
+          anchor: 'one',
+          fingerprint: await fingerprintOf(call, { spaceName: 'Dog breeds', anchor: 'one' }),
+          new_content: 'Collie [more](https://evil.net/more/and/a/very/long/path/to/nowhere)',
+        },
+      ],
+    });
+    const results = parsedObject(textOf(response))['block_results'];
+    // One line break leads a marked block.
+    expect(results).toEqual([{ anchor: 'one', new_length: 1 + 'Collie more'.length, deleted: false }]);
+  });
+
   it('removes unseen items from an edit and saves the rest', async () => {
     const store = makeStore();
     const call = setup(createWebSearchTurnState(), store);

@@ -118,10 +118,14 @@ function rewriteHtml({ html, drop }: { html: string; drop: DropLink }): RemovalR
 
 function rewriteMarkdown({ markdown, drop }: { markdown: string; drop: DropLink }): RemovalResult | undefined {
   const tree = markdownProcessor.parse(markdown);
-  const droppedDefinitions = new Set<string>();
+  // A reference loses its link only when every definition of its name goes; a kept one still serves it.
+  const definitionCounts = new Map<string, { all: number; dropped: number }>();
   const findDefinitions = (node: Nodes): void => {
-    if (node.type === 'definition' && drop(link(node.url))) {
-      droppedDefinitions.add(node.identifier);
+    if (node.type === 'definition') {
+      const count = definitionCounts.get(node.identifier) ?? { all: 0, dropped: 0 };
+      count.all += 1;
+      count.dropped += drop(link(node.url)) ? 1 : 0;
+      definitionCounts.set(node.identifier, count);
     }
     if ('children' in node) {
       for (const child of node.children) {
@@ -130,6 +134,10 @@ function rewriteMarkdown({ markdown, drop }: { markdown: string; drop: DropLink 
     }
   };
   findDefinitions(tree);
+  const lostDefinition = (identifier: string): boolean => {
+    const count = definitionCounts.get(identifier);
+    return count !== undefined && count.dropped === count.all;
+  };
 
   const edits: SourceEdit[] = [];
   const counts = { links: 0, pictures: 0 };
@@ -146,7 +154,9 @@ function rewriteMarkdown({ markdown, drop }: { markdown: string; drop: DropLink 
     if (!markdown.slice(start, end).startsWith('[') || first === undefined || last === undefined) {
       return '';
     }
-    return markdown.slice(first, last);
+    const text = markdown.slice(first, last);
+    // Text that is only an address goes too, or it would stay in the page as a bare address.
+    return /^\s*(?:https?:\/\/|www\.)\S*\s*$/i.test(text) ? '' : text;
   };
 
   const visit = (node: Nodes): void => {
@@ -159,26 +169,24 @@ function rewriteMarkdown({ markdown, drop }: { markdown: string; drop: DropLink 
     switch (node.type) {
       case 'link':
       case 'linkReference':
-        if (node.type === 'link' ? drop(link(node.url)) : droppedDefinitions.has(node.identifier)) {
+        if (node.type === 'link' ? drop(link(node.url)) : lostDefinition(node.identifier)) {
           edits.push({ start, end, text: visibleText(node, start, end) });
-          if (node.type === 'link') {
-            counts.links += 1;
-          }
+          counts.links += 1;
           return;
         }
         break;
       case 'image':
       case 'imageReference':
-        if (node.type === 'image' ? drop(picture(node.url)) : droppedDefinitions.has(node.identifier)) {
+        if (node.type === 'image' ? drop(picture(node.url)) : lostDefinition(node.identifier)) {
           edits.push({ start, end, text: plainMarkdownLine(node.alt ?? '') });
           counts.pictures += 1;
           return;
         }
         break;
       case 'definition':
-        if (droppedDefinitions.has(node.identifier)) {
+        // A definition shows nothing itself, so only the links and pictures that used it are counted.
+        if (drop(link(node.url))) {
           edits.push({ start, end, text: '' });
-          counts.links += 1;
           return;
         }
         break;
