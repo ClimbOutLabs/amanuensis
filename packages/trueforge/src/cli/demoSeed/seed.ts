@@ -26,7 +26,7 @@ import { registerMailConnector } from '../../runtime/mailConnector';
 import type { MemoryClient } from '../../runtime/memory/memoryClient';
 import type { SkillManifest } from '../../schemas/skill';
 import { SPACE_LIST_LIMIT } from '../../schemas/space';
-import { knowledgeSourceLabel, type DemoKnowledgeLibrary } from './knowledgeLibrary';
+import { knowledgeDocumentId, type DemoKnowledgeLibrary } from './knowledgeLibrary';
 import type { DemoNote, DemoPersona, DemoSpace, DemoWorld } from './model';
 import { DEMO_AGENT_NAME, DEMO_ID_PREFIX, DEMO_MARKER, DEMO_SCHEDULE_NAME, DEMO_USER_PROFILE } from './world';
 
@@ -260,8 +260,8 @@ async function seedPersona<TTransaction>({
 }
 
 /**
- * Brings a persona's library to exactly the wanted documents. A document whose text changed carries a new
- * source label, so it is replaced; a failed one is tried again.
+ * Brings a persona's library to exactly the wanted documents. A document whose title or text changed carries a
+ * new id, so it is replaced; a failed one is tried again.
  */
 async function seedKnowledge({
   library,
@@ -271,15 +271,13 @@ async function seedKnowledge({
   persona: DemoPersona;
 }): Promise<Pick<SeedReport['knowledge'], 'created' | 'unchanged' | 'removed'>> {
   const report = { created: 0, unchanged: 0, removed: 0 };
-  const wanted = persona.knowledge.map(document => ({ ...document, sourceLabel: knowledgeSourceLabel(document.text) }));
+  const wanted = persona.knowledge.map(document => ({ ...document, id: knowledgeDocumentId(document) }));
   const existing = await library.listDocuments({ personaId: persona.id });
   const kept = new Set<string>();
   for (const document of existing) {
-    const keep =
-      document.status !== 'failed' &&
-      wanted.some(candidate => candidate.title === document.title && candidate.sourceLabel === document.source_label);
+    const keep = document.status !== 'failed' && wanted.some(candidate => candidate.id === document.id);
     if (keep) {
-      kept.add(`${document.title}\n${document.source_label}`);
+      kept.add(document.id);
       report.unchanged += 1;
     } else {
       await library.deleteDocument({ personaId: persona.id, documentId: document.id });
@@ -287,9 +285,10 @@ async function seedKnowledge({
     }
   }
   for (const document of wanted) {
-    if (!kept.has(`${document.title}\n${document.sourceLabel}`)) {
+    if (!kept.has(document.id)) {
       await library.addTextDocument({
         personaId: persona.id,
+        documentId: document.id,
         title: document.title,
         text: document.text,
         sourceLabel: document.sourceLabel,

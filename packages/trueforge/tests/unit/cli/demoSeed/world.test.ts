@@ -260,7 +260,13 @@ describe('buildDemoWorld content', () => {
       expect(text).toContain('read them with the email and calendar tools');
       expect(text).not.toContain('Google');
       expect(text).toContain('leave every send for her OK');
+      expect(text).toContain(
+        'If a tool fails or a service is not connected, say so plainly and stop there; never invent what it would have returned.',
+      );
     }
+    expect(world.agentSpec.instructions).toContain(
+      'Your reply holds only the answer for the person. If a tool fails or a service is not connected',
+    );
   });
 
   it('books the GP in the tasks and starts trips from the rental', () => {

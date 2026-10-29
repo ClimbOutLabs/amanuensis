@@ -166,7 +166,7 @@ export class SqlitePersonaKnowledgeRepository implements PersonaKnowledgeReposit
   createDocument(input: NewKnowledgeDocument): KnowledgeDocumentRecord {
     const now = new Date().toISOString();
     const record: KnowledgeDocumentRecord = {
-      id: ulid(),
+      id: input.id ?? ulid(),
       title: input.title,
       title_explicit: input.titleExplicit,
       source_kind: input.source_kind,
