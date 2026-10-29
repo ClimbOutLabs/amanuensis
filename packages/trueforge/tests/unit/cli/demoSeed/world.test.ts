@@ -137,7 +137,7 @@ describe('buildDemoWorld content', () => {
     // The brief text comes first, word for word; the seed adds only the travel-from-home line after it.
     expect(task.startsWith(DEMO_BRIEF_TASK)).toBe(true);
     expect(
-      task.endsWith('Work out travel from my place, Travessa das Gaivotas 4, 1200-147 Lisboa, unless I say otherwise.'),
+      task.endsWith('Work out travel from my place, Rua das Gaivotas 4, 1200-336 Lisboa, unless I say otherwise.'),
     ).toBe(true);
     expect(task).toContain('Do not create or change spaces during the brief; the reply is the dashboard.');
     // One fragment per section, so a dropped or reworded section fails here.
@@ -288,6 +288,6 @@ describe('buildDemoWorld content', () => {
     expect(tasksBody(world)).toContain(
       'GP appointment Thursday, October 29, 2026, 09:30 at Brightwater Family Clinic with Dra. Helena Rocha',
     );
-    expect(noteBody(world, 'short-term-rental')).toContain('Travessa das Gaivotas 4, 1200-147 Lisboa, in Chiado');
+    expect(noteBody(world, 'short-term-rental')).toContain('Rua das Gaivotas 4, 1200-336 Lisboa, in São Bento');
   });
 });
