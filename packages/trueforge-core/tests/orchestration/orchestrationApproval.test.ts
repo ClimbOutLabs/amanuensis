@@ -230,6 +230,7 @@ describe('orchestration: pause then resume on tool approval', () => {
     const EXPECTED_TURN_2_INPUT = {
       messages: [
         { role: 'system', content: expect.stringContaining(INSTRUCTION) },
+        { role: 'system', content: expect.stringContaining('<reply-context>') },
         { role: 'user', content: 'hello' },
         {
           role: 'assistant',
@@ -243,7 +244,6 @@ describe('orchestration: pause then resume on tool approval', () => {
           ],
         },
         { role: 'tool', tool_call_id: WRITE_NOTE_CALL_ID, content: DENY_TOOL_CONTENT },
-        { role: 'system', content: expect.stringContaining('<reply-context>') },
         { role: 'user', content: expect.stringContaining('The person declined write note') },
       ],
     };

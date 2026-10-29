@@ -599,6 +599,39 @@ describe('HindsightMemoryProcessor.processPreLLM', () => {
     expect(result[4]).toMatchObject({ role: 'user', content: 'second' });
   });
 
+  it("places the recall block before the person's message, not before attached file text that follows it", async () => {
+    const capability = hindsightMemoryCapability({
+      client: makeClient({
+        recall: jest.fn().mockResolvedValue({
+          ok: true,
+          results: [{ id: '1', text: 'Priya prefers tea.' }],
+          entities: [],
+        }),
+      }),
+      config: DEFAULT_CONFIG,
+      logger: makeLogger(),
+      sessionId: 's1',
+      previousTurnId: null,
+    });
+    const processor = capability.preLLMProcessors?.[0];
+    const ephemeral = capability.preLLMEphemeralProcessors?.[0];
+    if (!processor || !ephemeral) {
+      throw new Error('expected both processors');
+    }
+    await collect(processor.processPreLLM(makeExecution([{ role: 'user', content: 'What does Priya drink?' }])));
+
+    const fileText = '<untrusted-document>invoice total is 40</untrusted-document>';
+    const result = ephemeral.processPreLLMEphemeral([
+      { role: 'system', content: 'sys' },
+      { role: 'user', content: 'What does Priya drink?' },
+      { role: 'user', content: [{ type: 'text', text: fileText }] },
+    ]);
+    expect(result?.map(message => message.role)).toEqual(['system', 'system', 'user', 'user']);
+    expect(result?.[1]?.content).toEqual(expect.stringContaining('<aman-memory>'));
+    expect(result?.[2]?.content).toBe('What does Priya drink?');
+    expect(result?.[3]?.content).toEqual([{ type: 'text', text: fileText }]);
+  });
+
   it('returns undefined from processPreLLMEphemeral when nothing was recalled', async () => {
     const capability = hindsightMemoryCapability({
       client: makeClient({ recall: jest.fn().mockResolvedValue({ ok: true, results: [], entities: [] }) }),
@@ -2483,6 +2516,26 @@ describe('recall of saved findings and assistant reply notes', () => {
       },
     ]);
     expect(block).toContain("[2026-10-28, the assistant's earlier reply] From Nata's reply, Oct 28: Leave by 08:55");
+  });
+
+  it('reads the source and day from the note text when the store hands back no metadata', async () => {
+    const block = await recalledBlock([
+      {
+        id: '1',
+        occurred_start: '2026-10-28',
+        text: 'From the web, found Oct 28: The lease signing is on 2026-11-01.\n\n<!-- note: web 2026-10-28 -->',
+      },
+      {
+        id: '2',
+        occurred_start: '2026-10-01',
+        text: 'From the web, found Oct 1: Old news about the lease.\n\n<!-- note: web 2026-10-01 -->',
+      },
+    ]);
+    expect(block).toContain(
+      '[2026-10-28, found earlier by the assistant] From the web, found Oct 28: The lease signing',
+    );
+    expect(block).not.toContain('<!-- note');
+    expect(block).not.toContain('Old news');
   });
 
   it('skips notes older than 14 days and keeps notes at the limit and things the person said', async () => {

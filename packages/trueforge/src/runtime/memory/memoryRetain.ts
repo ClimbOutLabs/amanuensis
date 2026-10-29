@@ -22,6 +22,7 @@ import {
   NOTE_DATE_METADATA_KEY,
   NOTE_SOURCE_METADATA_KEY,
   noteLabel,
+  noteRetainContent,
   type MemoryNoteSource,
 } from './memoryNotes';
 import { summarizeTurnNotes, type TurnToolResult } from './memoryNotesSummarize';
@@ -220,6 +221,7 @@ async function decideNotes({
     turnDate: params.completedAt,
     timeZone: params.timeZone,
     personName: summarize.personName,
+    assistantName: summarize.assistantName,
     tenantId: summarize.tenantId,
     modelProviderStore: summarize.modelProviderStore,
     summarizationModelFqn: summarize.summarizationModelFqn,
@@ -359,7 +361,7 @@ function noteRetainItems({
   notes: readonly LabeledNote[];
 }): RetainItem[] {
   return notes.map((note, index) => ({
-    content: note.text,
+    content: noteRetainContent({ text: note.text, source: note.source, date: note.date }),
     timestamp: params.completedAt,
     document_id: `aman-${params.sessionId}-${params.turnId}-note-${String(index)}`,
     metadata: {

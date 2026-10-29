@@ -25,6 +25,12 @@ export function isMemoryNoteSource(value: string): value is MemoryNoteSource {
   return NOTE_SOURCES.some(source => source === value);
 }
 
+/** Where a note came from and the day it was found or given. */
+export interface NoteProvenance {
+  source: MemoryNoteSource;
+  date: string;
+}
+
 /** Notes older than this stay stored but are not recalled, because what an assistant found goes out of date. */
 export const RECALLED_NOTE_MAX_AGE_DAYS = 14;
 
@@ -33,6 +39,66 @@ const MILLISECONDS_PER_DAY = 86_400_000;
 const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'] as const;
 
 const NOTE_DATE_PATTERN = /^(\d{4})-(\d{2})-(\d{2})$/;
+
+/**
+ * Hidden trailer line carrying a note's source and day. It travels inside the note's stored text, so every
+ * store hands it back at recall, and it is the one place the source and day are read from.
+ */
+const NOTE_MARKER_PATTERN = /^<!-- note: ([a-z_]{1,32}) (\d{4}-\d{2}-\d{2}) -->$/;
+
+export function formatNoteMarker({ source, date }: NoteProvenance): string {
+  return `<!-- note: ${source} ${date} -->`;
+}
+
+/** The provenance a trailer line carries, or undefined when the line is not a note marker with a known source. */
+export function parseNoteMarker(line: string): NoteProvenance | undefined {
+  const match = NOTE_MARKER_PATTERN.exec(line.trimEnd());
+  const source = match?.[1];
+  const date = match?.[2];
+  return source !== undefined && date !== undefined && isMemoryNoteSource(source) ? { source, date } : undefined;
+}
+
+/** A note's text split into its body and the marker on its last line, when it ends with one. */
+function splitNoteTrailer(text: string): { body: string; provenance: NoteProvenance | undefined } {
+  const trimmed = text.trimEnd();
+  const lastLineStart = trimmed.lastIndexOf('\n') + 1;
+  const provenance = parseNoteMarker(trimmed.slice(lastLineStart));
+  return provenance === undefined
+    ? { body: text, provenance: undefined }
+    : { body: trimmed.slice(0, lastLineStart).trimEnd(), provenance };
+}
+
+/** The stored text of a note: its labeled sentence, then the hidden marker. */
+export function noteRetainContent({ text, source, date }: { text: string } & NoteProvenance): string {
+  return `${text}\n\n${formatNoteMarker({ source, date })}`;
+}
+
+/** A note's text without the hidden marker, for showing to the model or the person. */
+export function withoutNoteTrailer(text: string): string {
+  return splitNoteTrailer(text).body;
+}
+
+/**
+ * Where a recalled item came from and when, read from its text's marker first and from its metadata only
+ * when the text has none. Undefined for something the person said.
+ */
+export function noteProvenance({
+  metadata,
+  text,
+}: {
+  metadata: Readonly<Record<string, string>> | undefined;
+  text: string;
+}): NoteProvenance | undefined {
+  const fromText = splitNoteTrailer(text).provenance;
+  if (fromText !== undefined) {
+    return fromText;
+  }
+  const source = metadata?.[NOTE_SOURCE_METADATA_KEY];
+  if (source === undefined || !isMemoryNoteSource(source)) {
+    return undefined;
+  }
+  return { source, date: metadata?.[NOTE_DATE_METADATA_KEY] ?? '' };
+}
 
 /** `Oct 29` for a `YYYY-MM-DD` day, or undefined when the day is not a real date. */
 function monthAndDay(date: string): string | undefined {
@@ -53,7 +119,7 @@ const FINDING_SOURCE_PHRASES: Record<ToolResultSource, string> = {
 
 /**
  * The label written at the start of a note's text, so the Memories page and the model both see where
- * it came from and when: "From an email, found Oct 29" or "From Nata's reply, Oct 29".
+ * it came from and when: "From an email, found Oct 29" or "From <assistant name>'s reply, Oct 29".
  */
 export function noteLabel({
   source,
@@ -76,28 +142,28 @@ export function labeledNoteText({ label, text }: { label: string; text: string }
 }
 
 /**
- * Whether a recalled item is a note more than the limit's whole days old. A note whose date cannot be read counts as too old,
- * because its age cannot be checked. Items that are not notes are never too old.
+ * Whether a recalled item is a note more than the limit's whole days old, counted in UTC days. A day in the
+ * future counts as today, so a wrong clock never keeps a note forever. A note whose date cannot be read
+ * counts as too old, because its age cannot be checked. Items that are not notes are never too old.
  */
 export function isNoteTooOld({
   metadata,
+  text,
   now,
 }: {
   metadata: Readonly<Record<string, string>> | undefined;
+  text: string;
   now: Date;
 }): boolean {
-  if (metadata?.[NOTE_SOURCE_METADATA_KEY] === undefined) {
+  const provenance = noteProvenance({ metadata, text });
+  if (provenance === undefined) {
     return false;
   }
-  const date = metadata[NOTE_DATE_METADATA_KEY] ?? '';
-  const found = NOTE_DATE_PATTERN.test(date) ? Date.parse(`${date}T00:00:00Z`) : Number.NaN;
-  return Number.isNaN(found) || Math.floor((now.getTime() - found) / MILLISECONDS_PER_DAY) > RECALLED_NOTE_MAX_AGE_DAYS;
-}
-
-/** The note kind a recalled item carries, or undefined for something the person said. */
-export function recalledNoteSource(
-  metadata: Readonly<Record<string, string>> | undefined,
-): MemoryNoteSource | undefined {
-  const source = metadata?.[NOTE_SOURCE_METADATA_KEY];
-  return source !== undefined && isMemoryNoteSource(source) ? source : undefined;
+  const found = NOTE_DATE_PATTERN.test(provenance.date) ? Date.parse(`${provenance.date}T00:00:00Z`) : Number.NaN;
+  if (Number.isNaN(found)) {
+    return true;
+  }
+  const today = Math.floor(now.getTime() / MILLISECONDS_PER_DAY);
+  const foundDay = Math.min(Math.floor(found / MILLISECONDS_PER_DAY), today);
+  return today - foundDay > RECALLED_NOTE_MAX_AGE_DAYS;
 }

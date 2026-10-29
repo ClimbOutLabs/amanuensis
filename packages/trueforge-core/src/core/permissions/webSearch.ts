@@ -163,38 +163,24 @@ function baseToolName(toolName: string): string {
  */
 const HOST_ONLY_TOOL_NAMES: ReadonlySet<string> = new Set([TASK_STATE_TOOL_NAME, REPLACE_TASK_CHECKLIST_TOOL_NAME]);
 
-/** Where a tool result came from, as far as a person would say it: their mail, their calendar, the web, a file, or any other tool. */
-export type ToolResultSource = 'email' | 'calendar' | 'web' | 'attachment' | 'other';
-
-/** The kind of place a tool's result came from; a tool this does not know counts as `other`. */
-export function toolResultSource(toolName: string): ToolResultSource {
-  const baseName = baseToolName(toolName);
-  if (isGmailReadToolName(baseName) || isMailReadToolName(baseName)) {
-    return 'email';
-  }
-  if (CALENDAR_READ_TOOL_NAMES.some(name => name === baseName)) {
-    return 'calendar';
-  }
-  if (isPageReaderTool(baseName) || isSearchResultTool(baseName)) {
-    return 'web';
-  }
-  return baseName === EXTRACT_DOCUMENT_TEXT_TOOL_NAME ? 'attachment' : 'other';
-}
-
 /** Whether a tool's result may hold text written outside the chat: true for every tool not known to be host-only. */
 export function toolReturnsOutsideContent(toolName: string): boolean {
   return !HOST_ONLY_TOOL_NAMES.has(baseToolName(toolName));
 }
 
-/** The kind of content a tool's result is, so a card can say where an address was read. */
-function readSourceOf(input: { baseName: string; opensPage: boolean }): ReadSource {
-  if (input.opensPage) {
+/** The kind of content a tool's result is, so a card or a memory note can say where something was read. */
+export function readSourceOf(toolName: string): ReadSource {
+  const baseName = baseToolName(toolName);
+  if (isSearchResultTool(baseName) || isPageReaderTool(baseName)) {
     return 'page';
   }
-  if (CALENDAR_READ_TOOL_NAMES.some(name => name === input.baseName)) {
+  if (isGmailReadToolName(baseName) || isMailReadToolName(baseName)) {
+    return 'email';
+  }
+  if (CALENDAR_READ_TOOL_NAMES.some(name => name === baseName)) {
     return 'event';
   }
-  return input.baseName === EXTRACT_DOCUMENT_TEXT_TOOL_NAME ? 'file' : 'tool_result';
+  return baseName === EXTRACT_DOCUMENT_TEXT_TOOL_NAME ? 'file' : 'tool_result';
 }
 
 /**
@@ -215,11 +201,10 @@ export function recordToolResultProvenance(input: {
     recordSearchResults({ provenance, texts: input.texts });
     return;
   }
-  const mail = !searchTool && (isGmailReadToolName(baseName) || isMailReadToolName(baseName));
+  const source = readSourceOf(baseName);
   const pageReader = isPageReaderTool(baseName);
-  const source = readSourceOf({ baseName, opensPage: searchTool || pageReader });
   for (const text of input.texts) {
-    if (mail) {
+    if (source === 'email') {
       recordEmailText({ provenance, text });
     } else {
       recordUntrustedText({ provenance, text, source });

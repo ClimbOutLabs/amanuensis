@@ -103,6 +103,7 @@ import {
   type SummarizeTurnContext,
 } from '../runtime/memory/memoryRetain';
 import { applyMemorySettings } from '../runtime/memory/memorySettings';
+import { readMemoryRecallSetting } from '../runtime/memoryRecallSettings';
 import { applyMemoryScreenOverride, readMemoryScreenSetting } from '../runtime/memoryScreenSettings';
 import { resolveTurnSummarizeContext } from '../runtime/memorySummarizeSettings';
 import { resolveModelContextLength } from '../runtime/modelContextLength';
@@ -380,6 +381,8 @@ function createTurnResolver(deps: {
   previousTurnId?: string | null;
   /** Present when summaries are on for the turn, so a recovered earlier turn is summarized, never stored raw. */
   memorySummarize: SummarizeTurnContext | undefined;
+  /** The person's "use memories in replies" switch when they set it; absent, the agent's own setting applies. */
+  memoryRecallEnabled: boolean | undefined;
   spaceStore: ISpaceStore;
   /** Per-user Google logins; absent, no Gmail tools mount. */
   googleConnectionStore?: IGoogleConnectionStore | undefined;
@@ -433,6 +436,7 @@ function createTurnResolver(deps: {
     memorySettings,
     previousTurnId,
     memorySummarize,
+    memoryRecallEnabled,
     spaceStore,
     googleConnectionStore,
     turnArtifactStore,
@@ -857,8 +861,9 @@ function createTurnResolver(deps: {
       searchProviderPresetNames: () => mcpCatalog.searchProviderPresetNames(),
       // The connectors the person turned off for this chat stay off on every turn of it.
       turnedOffConnectorKeys: readTurnedOffConnectorKeys(session.record.metadata),
-      // An explicit false wins over the spec in resolveAgentDefinition: unattended runs do not recall.
-      recallEnabled: deps.unattended ? false : undefined,
+      // An explicit value wins over the spec in resolveAgentDefinition: unattended runs do not recall,
+      // and the person's switch applies to every agent, saved ones included.
+      recallEnabled: deps.unattended ? false : memoryRecallEnabled,
       summarize: memorySummarize,
       clientTimezone,
       internalSourceState,
@@ -1615,6 +1620,11 @@ async function beginAcceptedTurnExecution(
         personName: deps.personalizationProfile?.user_name ?? undefined,
         assistantName: deps.personaContext?.persona_name ?? deps.personalizationProfile?.assistant_name ?? undefined,
       });
+      // The person's memory switch, read once per turn like the settings around it.
+      const memoryRecallEnabled = await readMemoryRecallSetting({
+        globalSettingsStore: deps.globalSettingsStore,
+        logger: deps.logger,
+      });
       // Same one-read-per-turn contract for the recall screen: the Settings toggle's
       // persisted override wins when stored, otherwise the MEMORY_SCREEN_ENABLED env default.
       const memoryScreenSetting = await readMemoryScreenSetting({
@@ -1676,6 +1686,7 @@ async function beginAcceptedTurnExecution(
         unattended: params.unattended,
         previousTurnId: deps.previousTurnId ?? null,
         memorySummarize,
+        memoryRecallEnabled,
         clientTimezone: deps.clientTimezone,
         toolOutputScreenEnabled,
         turnArtifactStore: deps.turnArtifactStore,
@@ -2491,6 +2502,11 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
       globalSettingsStore: deps.globalSettingsStore,
       logger: deps.logger,
     });
+    // The person's memory switch, read once per turn like the settings around it.
+    const memoryRecallEnabled = await readMemoryRecallSetting({
+      globalSettingsStore: deps.globalSettingsStore,
+      logger: deps.logger,
+    });
     // Same one-read-per-turn contract for the recall screen.
     const memoryScreenSetting = await readMemoryScreenSetting({
       globalSettingsStore: deps.globalSettingsStore,
@@ -2534,6 +2550,7 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
       memorySettings: effectiveMemorySettings,
       previousTurnId: memoryPreviousTurnId,
       memorySummarize,
+      memoryRecallEnabled,
       spaceStore: deps.spaceStore,
       googleConnectionStore: deps.googleConnectionStore,
       clientTimezone: body.client_timezone,

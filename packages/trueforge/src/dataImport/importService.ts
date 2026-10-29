@@ -64,7 +64,13 @@ import {
   vaultFilesystemNamespace,
   withoutHiddenMarkers,
 } from '../runtime/memory/markdownMemoryFiles';
-import { NOTE_DATE_METADATA_KEY, NOTE_SOURCE_METADATA_KEY } from '../runtime/memory/memoryNotes';
+import {
+  isMemoryNoteSource,
+  NOTE_DATE_METADATA_KEY,
+  NOTE_SOURCE_METADATA_KEY,
+  noteRetainContent,
+} from '../runtime/memory/memoryNotes';
+import { MEMORY_RECALL_ENABLED_SETTING_KEY } from '../runtime/memoryRecallSettings';
 import { MEMORY_SCREEN_ENABLED_SETTING_KEY } from '../runtime/memoryScreenSettings';
 import { MEMORY_SUMMARIZE_SETTING_KEY } from '../runtime/memorySummarizeSettings';
 import { DEFAULT_CHAT_MODEL_SETTING_KEY } from '../runtime/tokenFactoryProvider';
@@ -222,6 +228,7 @@ function leftOutName(name: string): string {
 /** Instance-wide settings an import may fill in; the permission settings in the archive are never applied. */
 const IMPORTABLE_GLOBAL_SETTING_KEYS: ReadonlySet<string> = new Set<string>([
   DEFAULT_CHAT_MODEL_SETTING_KEY,
+  MEMORY_RECALL_ENABLED_SETTING_KEY,
   MEMORY_SCREEN_ENABLED_SETTING_KEY,
   MEMORY_SUMMARIZE_SETTING_KEY,
   TOOL_OUTPUT_SCREEN_ENABLED_SETTING_KEY,
@@ -958,7 +965,11 @@ function buildRetainItems(
       }
       const itemContext = vaultContext ?? entryContext;
       items.push({
-        content: body,
+        // A note's marker rides inside its text, so a backend that drops metadata still hands it back.
+        content:
+          noteSource !== undefined && isMemoryNoteSource(noteSource) && noteDate !== undefined
+            ? noteRetainContent({ text: body, source: noteSource, date: noteDate })
+            : body,
         timestamp: entry.timestamp,
         // A replaceable entry keeps its document id, so a later update replaces it instead of adding a copy.
         document_id: trailers?.[DOCUMENT_ID_METADATA_KEY] ?? documentIdFor(entry.id),

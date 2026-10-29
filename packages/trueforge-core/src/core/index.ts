@@ -33,7 +33,7 @@ export type {
 export { AgentThreadOrchestrator } from './runtime/AgentThreadOrchestrator';
 export { stageAttachment } from './runtime/attachmentStaging';
 export type { StagedAttachment } from './runtime/attachmentStaging';
-export { isHostWrappedText, isUntrustedDocumentText } from './runtime/contextUtils';
+export { isHostWrappedText, isUntrustedDocumentText, personMessageIndex } from './runtime/contextUtils';
 export type { CreateDynamicSubAgentThread } from './runtime/CreateDynamicSubAgentThread';
 export { measurePromptRequest } from './runtime/promptReport';
 export type { PromptReport, PromptReportInput, PromptReportRow } from './runtime/promptReport';
@@ -434,6 +434,7 @@ export {
   callReturnsOutsideContent,
   contextHasOutsideToolResult,
 } from './capabilities/builtins/ChatProvenance';
+export type { ToolResultSource } from './capabilities/builtins/ChatProvenance';
 export {
   InMemoryApprovalTokenStore,
   hasApprovalScope,
@@ -515,7 +516,7 @@ export type {
 } from './permissions/tier';
 export type { ToolGrantIdentity, ToolGrantKey, ToolGrantStore } from './permissions/toolGrants';
 export { SILENT_SEARCH_LIMIT, createWebSearchTurnState, pageImageUrls } from './permissions/webSearch';
-export type { SearchProviderGrant, ToolResultSource, WebSearchTurnState } from './permissions/webSearch';
+export type { SearchProviderGrant, WebSearchTurnState } from './permissions/webSearch';
 export {
   FETCHED_PAGE_TEXT_MAX_CHARS,
   FetchedPageStore,

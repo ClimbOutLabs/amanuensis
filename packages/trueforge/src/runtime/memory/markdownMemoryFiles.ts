@@ -18,7 +18,16 @@ import {
   USER_FACING_STORAGE_UNAVAILABLE_MESSAGE,
 } from '../../utils/dataDir';
 import type { RetainItem } from './hindsightClient';
-import { isMemoryNoteSource, NOTE_DATE_METADATA_KEY, NOTE_SOURCE_METADATA_KEY } from './memoryNotes';
+import {
+  ASSISTANT_RESPONSE_SOURCE,
+  formatNoteMarker,
+  isMemoryNoteSource,
+  NOTE_DATE_METADATA_KEY,
+  NOTE_SOURCE_METADATA_KEY,
+  noteProvenance,
+  parseNoteMarker,
+  withoutNoteTrailer,
+} from './memoryNotes';
 import { MEMORY_ORIGIN_METADATA_KEY, TOOL_INGESTED_ORIGIN, USER_STATED_ORIGIN } from './memoryOrigin';
 
 /** Longest namespace directory name; longer names are cut. */
@@ -122,11 +131,11 @@ export const REPLACE_DOCUMENT_METADATA_KEY = 'replace_document';
 /** Hidden trailer carrying the document id. Ids are the host's own (hashes and prefixes), never free text. */
 const DOCUMENT_MARKER_PATTERN = /^<!-- document_id: ([A-Za-z0-9_.-]{1,128}) -->$/;
 
-/** Hidden trailer carrying where a note came from and the day it was found or given; the source is one of the fixed note sources. */
-const NOTE_MARKER_PATTERN = /^<!-- note: ([a-z_]{1,32}) (\d{4}-\d{2}-\d{2}) -->$/;
-
 /** Closing line marking an entry written after the assistant read an email, document, or web page. */
 const READ_CONTENT_SOURCE_LINE = '> Source: read content';
+
+/** What the Memories page shows in place of that line for a note about the assistant's own reply. */
+const ASSISTANT_REPLY_SOURCE_LINE = '> Source: assistant reply';
 
 /**
  * The exact on-disk text of one retained entry, trimmed. `retain()` appends one
@@ -140,7 +149,9 @@ const READ_CONTENT_SOURCE_LINE = '> Source: read content';
  */
 export function formatRetainEntry(item: RetainItem): string {
   const context = item.context?.trim();
-  const text = context !== undefined && context.length > 0 ? `${item.content}\n\n> ${context}` : item.content;
+  // A note's content carries its own marker line; it is written once, as a trailer, never as body text.
+  const content = withoutNoteTrailer(item.content);
+  const text = context !== undefined && context.length > 0 ? `${content}\n\n> ${context}` : content;
   const parts = [`## ${item.timestamp}`, escapeEntryStructure(text)];
   const sessionId = item.metadata?.[SESSION_ID_METADATA_KEY];
   if (sessionId !== undefined) {
@@ -155,11 +166,10 @@ export function formatRetainEntry(item: RetainItem): string {
       parts.push(marker);
     }
   }
-  const noteSource = item.metadata?.[NOTE_SOURCE_METADATA_KEY];
-  const noteDate = item.metadata?.[NOTE_DATE_METADATA_KEY];
-  if (noteSource !== undefined && noteDate !== undefined) {
-    const marker = `<!-- note: ${noteSource} ${noteDate} -->`;
-    if (isNoteMarker(marker)) {
+  const note = noteProvenance({ metadata: item.metadata, text: item.content });
+  if (note !== undefined) {
+    const marker = formatNoteMarker(note);
+    if (parseNoteMarker(marker) !== undefined) {
       parts.push(marker);
     }
   }
@@ -168,12 +178,6 @@ export function formatRetainEntry(item: RetainItem): string {
     parts.push(READ_CONTENT_SOURCE_LINE);
   }
   return parts.join('\n\n');
-}
-
-/** Whether a trailer line is a note marker with a known source. */
-function isNoteMarker(line: string): boolean {
-  const source = NOTE_MARKER_PATTERN.exec(line)?.[1];
-  return source !== undefined && isMemoryNoteSource(source);
 }
 
 /**
@@ -188,9 +192,10 @@ function escapeEntryStructure(text: string): string {
       const trimmed = line.trimEnd();
       return line.startsWith('## ') ||
         trimmed === READ_CONTENT_SOURCE_LINE ||
+        trimmed === ASSISTANT_REPLY_SOURCE_LINE ||
         SESSION_MARKER_PATTERN.test(trimmed) ||
         DOCUMENT_MARKER_PATTERN.test(trimmed) ||
-        isNoteMarker(trimmed)
+        parseNoteMarker(trimmed) !== undefined
         ? `\\${line}`
         : line;
     })
@@ -205,10 +210,10 @@ function splitEntryTrailers(text: string): { body: string; metadata: Record<stri
     const line = (lines[lines.length - 1] ?? '').trimEnd();
     const sessionId = SESSION_MARKER_PATTERN.exec(line)?.[1];
     const documentId = DOCUMENT_MARKER_PATTERN.exec(line)?.[1];
-    const note = isNoteMarker(line) ? NOTE_MARKER_PATTERN.exec(line) : null;
+    const note = parseNoteMarker(line);
     if (line === '') {
       lines.pop();
-    } else if (line === READ_CONTENT_SOURCE_LINE) {
+    } else if (line === READ_CONTENT_SOURCE_LINE || line === ASSISTANT_REPLY_SOURCE_LINE) {
       metadata[MEMORY_ORIGIN_METADATA_KEY] = TOOL_INGESTED_ORIGIN;
       lines.pop();
     } else if (sessionId !== undefined) {
@@ -218,9 +223,9 @@ function splitEntryTrailers(text: string): { body: string; metadata: Record<stri
     } else if (documentId !== undefined) {
       metadata[DOCUMENT_ID_METADATA_KEY] ??= documentId;
       lines.pop();
-    } else if (note?.[1] !== undefined && note[2] !== undefined) {
-      metadata[NOTE_SOURCE_METADATA_KEY] ??= note[1];
-      metadata[NOTE_DATE_METADATA_KEY] ??= note[2];
+    } else if (note !== undefined) {
+      metadata[NOTE_SOURCE_METADATA_KEY] ??= note.source;
+      metadata[NOTE_DATE_METADATA_KEY] ??= note.date;
       lines.pop();
     } else {
       break;
@@ -245,7 +250,14 @@ export function withoutHiddenMarkers(text: string): string {
   ) {
     return text;
   }
-  return metadata[MEMORY_ORIGIN_METADATA_KEY] === undefined ? body : `${body}\n\n${READ_CONTENT_SOURCE_LINE}`;
+  if (metadata[MEMORY_ORIGIN_METADATA_KEY] === undefined) {
+    return body;
+  }
+  const sourceLine =
+    metadata[NOTE_SOURCE_METADATA_KEY] === ASSISTANT_RESPONSE_SOURCE
+      ? ASSISTANT_REPLY_SOURCE_LINE
+      : READ_CONTENT_SOURCE_LINE;
+  return `${body}\n\n${sourceLine}`;
 }
 
 /** The instant in an entry's `## ` heading, when the heading is a readable timestamp. */
@@ -274,8 +286,13 @@ export function withOriginalHiddenMarkers({ original, edited }: { original: stri
   }
   const noteSource = kept[NOTE_SOURCE_METADATA_KEY];
   const noteDate = kept[NOTE_DATE_METADATA_KEY];
-  if (noteSource !== undefined && noteDate !== undefined && metadata[NOTE_SOURCE_METADATA_KEY] === undefined) {
-    trailers.push(`<!-- note: ${noteSource} ${noteDate} -->`);
+  if (
+    noteSource !== undefined &&
+    isMemoryNoteSource(noteSource) &&
+    noteDate !== undefined &&
+    metadata[NOTE_SOURCE_METADATA_KEY] === undefined
+  ) {
+    trailers.push(formatNoteMarker({ source: noteSource, date: noteDate }));
   }
   if (trailers.length === 0) {
     return edited;

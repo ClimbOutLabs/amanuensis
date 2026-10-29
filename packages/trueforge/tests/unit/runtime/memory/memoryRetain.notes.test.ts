@@ -150,12 +150,54 @@ describe('turn memory with findings and reply notes', () => {
     expect(file).not.toContain('Check my email');
   });
 
+  it('carries the source and day inside the stored text, so a backend that keeps no metadata still hands them back', async () => {
+    scripted.notes = JSON.stringify({
+      findings: [{ result: 1, text: 'Priya asked for the signed form by 2026-11-03.' }],
+      responses: [],
+    });
+    const retain = jest.spyOn(client, 'retain');
+    await submitRetain({
+      client,
+      sessionId: 'chat-1',
+      turnId: 't2b',
+      userText: 'Check my email.',
+      assistantText: SHORT_REPLY,
+      completedAt: '2026-10-29T12:00:00.000Z',
+      origin: 'tool_ingested',
+      logger: winston.createLogger({ silent: true }),
+      toolResults: [EMAIL_RESULT],
+      summarize: {
+        tenantId: 't1',
+        modelProviderStore: unusedStore,
+        summarizationModelFqn: 'provider/model',
+        tokenFactoryBudget: uncappedTokenFactoryBudget,
+        modelUsage: discardedModelUsage,
+      },
+    });
+    const content = retain.mock.calls[0]?.[0].items[0]?.content ?? '';
+    expect(content.endsWith('<!-- note: email 2026-10-29 -->')).toBe(true);
+    const block = formatMemoryBlock({
+      results: [{ id: 'h1', occurred_start: '2026-10-29', text: content }],
+      entities: [],
+      budgetTokens: 2000,
+    }).block;
+    expect(block).toContain('found earlier by the assistant] From an email, found Oct 29: Priya asked');
+    expect(block).not.toContain('<!-- note');
+    expect((await dayFile()).match(/<!-- note:/g)).toHaveLength(1);
+  });
+
   it('saves a note about the assistant reply, named for the assistant that gave it', async () => {
     scripted.notes = JSON.stringify({ findings: [], responses: ['Leave by 08:55 for the GP visit.'] });
     await submit({ id: 't3', userText: 'When should I go?', assistantText: LONG_REPLY, assistantName: 'Nata' });
     const file = await dayFile();
     expect(file).toContain("From Nata's reply, Oct 29: Leave by 08:55 for the GP visit.");
     expect(file).toContain('<!-- note: assistant_response 2026-10-29 -->');
+    const listed = await client.listEntries({ namespace: '', timeoutMs: 5000 });
+    if (!listed.ok) {
+      throw new Error('expected a listing');
+    }
+    expect(listed.entries[0]?.text).toContain('> Source: assistant reply');
+    expect(listed.entries[0]?.text).not.toContain('read content');
   });
 
   it('saves nothing for a turn where the assistant only states its plan', async () => {
