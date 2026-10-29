@@ -25,7 +25,7 @@ const settings = {
   model: 'nvidia/nemotron-3-super-120b-a12b',
 };
 
-const ULTRA_MODEL = 'nvidia/Nemotron-3-Ultra-550b-a55b';
+const NANO_MODEL = 'nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B';
 
 function shippedTokenFactoryModels() {
   return (
@@ -78,32 +78,45 @@ describe('ensureEnvManagedTokenFactoryProvider', () => {
     await ensureEnvManagedTokenFactoryProvider({
       store,
       tenant_id: TENANT,
-      settings: { ...settings, model: ULTRA_MODEL },
+      settings: { ...settings, model: NANO_MODEL },
       catalogModels: shippedTokenFactoryModels(),
       logger,
     });
 
     expect((await store.listModels({ tenant_id: TENANT })).map(model => model.name)).toEqual([
-      'tokenfactory/nemotron-3-ultra-550b-a55b',
-      'tokenfactory/nemotron-3-super-120b-a12b',
       'tokenfactory/nvidia-nemotron-3-nano-30b-a3b',
+      'tokenfactory/nemotron-3-super-120b-a12b',
     ]);
     const record = await store.getProvider({ tenant_id: TENANT, name: 'tokenfactory', model_name: '' });
     expect(record?.manifest.models.map(model => model.model_id)).toEqual([
-      ULTRA_MODEL,
+      NANO_MODEL,
       'nvidia/nemotron-3-super-120b-a12b',
-      'nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B',
     ]);
-    // The configured model keeps the catalog's output cap, so long replies are not cut short.
-    expect(record?.manifest.models[0]?.properties.max_output_tokens).toBe(32768);
+    // Each model keeps the catalog's output cap, so long replies are not cut short.
+    expect(record?.manifest.models[1]?.properties.max_output_tokens).toBe(32768);
   });
 
-  it('lets a chat resolve Super when Ultra is the configured model', async () => {
+  it('keeps the catalog output cap on the configured model', async () => {
     const { store } = await createStores();
     await ensureEnvManagedTokenFactoryProvider({
       store,
       tenant_id: TENANT,
-      settings: { ...settings, model: ULTRA_MODEL },
+      settings,
+      catalogModels: shippedTokenFactoryModels(),
+      logger,
+    });
+
+    const record = await store.getProvider({ tenant_id: TENANT, name: 'tokenfactory', model_name: '' });
+    expect(record?.manifest.models[0]?.model_id).toBe(settings.model);
+    expect(record?.manifest.models[0]?.properties.max_output_tokens).toBe(32768);
+  });
+
+  it('lets a chat resolve Super when Nano is the configured model', async () => {
+    const { store } = await createStores();
+    await ensureEnvManagedTokenFactoryProvider({
+      store,
+      tenant_id: TENANT,
+      settings: { ...settings, model: NANO_MODEL },
       catalogModels: shippedTokenFactoryModels(),
       logger,
     });
@@ -125,16 +138,15 @@ describe('ensureEnvManagedTokenFactoryProvider', () => {
     await ensureEnvManagedTokenFactoryProvider({
       store,
       tenant_id: TENANT,
-      settings: { ...settings, model: 'nvidia/nemotron-3-ultra-550b-a55b' },
+      settings: { ...settings, model: 'nvidia/nvidia-nemotron-3-nano-30b-a3b' },
       catalogModels: shippedTokenFactoryModels(),
       logger,
     });
 
     const record = await store.getProvider({ tenant_id: TENANT, name: 'tokenfactory', model_name: '' });
     expect(record?.manifest.models.map(model => model.model_id)).toEqual([
-      'nvidia/nemotron-3-ultra-550b-a55b',
+      'nvidia/nvidia-nemotron-3-nano-30b-a3b',
       'nvidia/nemotron-3-super-120b-a12b',
-      'nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B',
     ]);
   });
 
@@ -262,20 +274,19 @@ describe('default chat model', () => {
     await ensureEnvManagedTokenFactoryProvider({
       store,
       tenant_id: TENANT,
-      settings: { ...settings, model: ULTRA_MODEL },
+      settings: { ...settings, model: NANO_MODEL },
       catalogModels: shippedTokenFactoryModels(),
       logger,
     });
-    await seedEnvManagedDefaultChatModel({ globalSettingsStore, model: ULTRA_MODEL, logger });
+    await seedEnvManagedDefaultChatModel({ globalSettingsStore, model: NANO_MODEL, logger });
 
     const defaultName = await readDefaultChatModel({ globalSettingsStore, logger });
     const listed = putDefaultModelFirst(await store.listModels({ tenant_id: TENANT }), defaultName);
 
-    expect(defaultName).toBe('tokenfactory/nemotron-3-ultra-550b-a55b');
+    expect(defaultName).toBe('tokenfactory/nvidia-nemotron-3-nano-30b-a3b');
     expect(listed.map(model => model.name)).toEqual([
-      'tokenfactory/nemotron-3-ultra-550b-a55b',
-      'tokenfactory/nemotron-3-super-120b-a12b',
       'tokenfactory/nvidia-nemotron-3-nano-30b-a3b',
+      'tokenfactory/nemotron-3-super-120b-a12b',
     ]);
   });
 
