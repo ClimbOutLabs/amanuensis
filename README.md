@@ -41,7 +41,7 @@ If you use a hosted model, the company running it sees each chat: your messages,
 - 🧠 **Your choice of model** — configurable providers, including OpenAI-compatible endpoints and fully local Ollama; model roles assign separate models to conversation and auxiliary work.
 - 🔌 **MCP connectors** — header or OAuth authentication, tool approvals, and per-chat capability selection.
 - 📦 **Reusable skills and subagents** — `SKILL.md` instruction packs, dynamic subagents, and generative UI that renders interactive results instead of plain text.
-- 💻 **Sandboxed execution** — on-demand code and file execution through the Daytona adapter; standalone mode also supports a built-in local adapter on macOS and Linux hosts.
+- 💻 **Sandboxed execution** — on-demand code and file execution in a sandbox, with two backends: `docker` (the default; the server starts a container per run) and `slots` (four locked-down containers the installer sets up). See [docs/sandbox.mdx](docs/sandbox.mdx).
 - 👤 **Personalization** — personas and an inspectable personalization profile.
 - 🗄️ **Long-term memory** — on by default as local Markdown files: the model retains what matters from each chat and recalls it in later ones, with bounded recall and auditable recall events. Self-hosted Hindsight banks remain available as an experimental opt-in.
 
@@ -56,7 +56,7 @@ flowchart TB
     Runtime["Agent runtime<br/>tool orchestration · approvals · sessions<br/>(packages/trueforge-core)"]
     Models["Model providers<br/>OpenAI-compatible · Ollama"]
     MCP["MCP connectors<br/>header / OAuth auth"]
-    Sandbox["Sandbox<br/>Daytona · local adapter"]
+    Sandbox["Sandbox<br/>docker · slots backends"]
     Memory["Memory<br/>Markdown files (local)"]
     Storage[("Storage<br/>SQLite in standalone<br/>Postgres + Redis hosted")]
 
@@ -74,35 +74,49 @@ flowchart TB
 
 ## Repository layout
 
-| Path                      | Purpose                                                               |
-| ------------------------- | --------------------------------------------------------------------- |
-| `packages/trueforge`      | HTTP server, persistence, provider management, and Aman host features |
-| `packages/trueforge-core` | Agent runtime, tool orchestration, and session contracts              |
-| `packages/frontend`       | Browser application                                                   |
-| `packages/trueforge-ui`   | Reusable UI components and server-facing UI contracts                 |
-| `packages/trueforge-sdk`  | Generated TypeScript SDK                                              |
-| `docs`                    | Product, setup, architecture, and API documentation                   |
-| `ops`                     | Aman-specific design records, evaluations, and runbooks               |
+| Path                      | Purpose                                                                   |
+| ------------------------- | ------------------------------------------------------------------------- |
+| `packages/trueforge`      | HTTP server, persistence, provider management, and Aman host features     |
+| `packages/trueforge-core` | Agent runtime, tool orchestration, and session contracts                  |
+| `packages/frontend`       | Browser application                                                       |
+| `packages/trueforge-ui`   | Reusable UI components and server-facing UI contracts                     |
+| `packages/trueforge-sdk`  | Generated TypeScript SDK                                                  |
+| `packages/amanuensis`     | The `npx amanuensis` package: server and chat UI started with one command |
+| `packages/aman-installer` | The `aman` command the installer leaves behind (doctor, checks, upgrades) |
+| `installer`               | The one-command installer (`install.sh`) and its helper scripts           |
+| `charts`                  | Helm chart for Kubernetes                                                 |
+| `demo`                    | Example data, scripts and the runbook for the demo                        |
+| `mcp`                     | A frozen copy of the Gmail MCP connector                                  |
+| `scripts`                 | Repository build, check and smoke-test scripts                            |
+| `docs`                    | Product, setup, architecture, and API documentation                       |
+| `ops`                     | Aman-specific design records, evaluations, and runbooks                   |
 
 ## Install on your own computer
 
-The installer sets everything up in one command. You need Docker (on Linux the installer can install it for you). Check out the release tag you were given, then run the installer.
+The installer sets everything up in one command. It checks these things first and stops with a plain message if one is missing:
+
+- Linux or macOS, on an x86_64 or arm64 computer. On Windows, run it inside WSL2. Native Windows is not supported.
+- Docker. On Linux this means Docker Engine 28 or newer with Compose v2; on macOS, Docker Desktop. Rootless Docker and Podman are not supported. If Docker is missing, the installer can install it for you only on Debian or Ubuntu with `apt`, and only when you answer yes at its prompt or pass `--install-docker`. `--yes` alone never installs Docker.
+- Docker set to at least 6 GB of memory for the first build. 8 GB or more is recommended.
+- `git`.
+- 10 GB of free disk space. On Linux the sandbox also needs about 20 GB more under `/var/lib` for its slot disks; they use real space only as code runs.
+- Admin rights on Linux: the installer asks before each `sudo` step (installing Docker if you chose that, adding you to the `docker` group, the sandbox security rule and disks, and Docker at boot).
+- Nothing else. No Node.js is needed: the installer downloads a pinned copy (about 35 MB, checked against a hash in the repository) and uses it only to set up the sandbox. `--use-host-node` uses your own Node.js 22.14 or newer instead.
+
+Releases are listed under [Releases](https://github.com/ClimbOutLabs/amanuensis/releases). The newest one, `v0.1.0`, is from before the installer existed, so for now run the installer from `main`. Once a newer release includes it, check out that tag first with `git checkout <tag>`.
 
 ```bash
 git clone https://github.com/ClimbOutLabs/amanuensis && cd amanuensis
-git checkout vX.Y.Z
 ./installer/install.sh
 ```
 
-Then open http://localhost:8791 and see [docs/try-aman.md](docs/try-aman.md).
+The installer shows its plan and asks before it changes anything. At the end it prints the address to open. By default the app is served over https on port 8443 (or the next free port near it) with a certificate the installer makes on this computer; the plain port near 8791 only sends your browser to the https address. See [docs/install.mdx](docs/install.mdx) for the details and [docs/try-aman.md](docs/try-aman.md) for your first steps.
 
 ## Development quick start
 
 > **`main` is active development and may be unstable.** To build a tagged release instead, add `--branch <tag>` to the `git clone` below; tags are listed under [Releases](https://github.com/ClimbOutLabs/amanuensis/releases).
->
-> A guided one-command installer (`installer/install.sh`, described in [docs/install.mdx](docs/install.mdx)) is coming; until it lands on `main`, use the steps below.
 
-The fastest path to a working chat is standalone mode: one process on your own machine, SQLite storage, no database server. Login is mandatory: `pnpm dev:login` runs Aman's own sign-in service in Docker. Aman uses its own sign-in. Outside sign-in services are not supported. You need [Node.js](https://nodejs.org/en/download) 22.14 or newer and pnpm 11.16.0 through [Corepack](https://pnpm.io/installation#using-corepack) (the exact version is pinned in `package.json`); on Windows, run these from [WSL](https://learn.microsoft.com/windows/wsl/install) or [Git Bash](https://git-scm.com/downloads/win):
+The fastest path to a working chat is standalone mode: one process on your own machine, SQLite storage, no database server. Login is mandatory: `pnpm dev:login` runs Aman's own sign-in service in Docker. Aman uses its own sign-in. Outside sign-in services are not supported. You need [Node.js](https://nodejs.org/en/download) 22.14 or newer and pnpm 11.16.0 through [Corepack](https://pnpm.io/installation#using-corepack) (the exact version is pinned in `package.json`); on Windows, run these inside [WSL2](https://learn.microsoft.com/windows/wsl/install); native Windows (PowerShell, cmd or Git Bash) is not supported:
 
 ```bash
 git clone https://github.com/ClimbOutLabs/amanuensis && cd amanuensis
@@ -129,8 +143,13 @@ The app is single-user and, as shipped, this stack has no login screen: every po
 ```bash
 git clone https://github.com/ClimbOutLabs/amanuensis && cd amanuensis
 cp packages/trueforge/.env.example packages/trueforge/.env
+export CALENDAR_ACCOUNT_SECRET=$(openssl rand -hex 32)
 docker compose up --build
 ```
+
+The `export` line makes a random secret that the app and the calendar container share. Compose stops with a message if it is missing, because `.env.example` does not set it. Set it again in each new terminal, and use the same value for `docker compose down` and `up`.
+
+**Fewer than 20 CPU cores.** `docker-compose.yml` pins the `server` service to cores `0-15` and the `aman-stt` speech service to `16-19`. On a computer with fewer cores Docker refuses to start them. Edit both `cpuset` lines so they fit your cores and do not overlap (for example `0-7` and `8-11` on 12 cores), or delete both lines; [docs/voice-input.mdx](docs/voice-input.mdx) explains the split.
 
 The first build takes several minutes. `docker compose up` keeps streaming container logs in the foreground; the stack is ready when the `server` line `Agent server listening on http://0.0.0.0:8790` appears. Open `http://localhost:8791`.
 
@@ -139,6 +158,7 @@ The first build takes several minutes. `docker compose up` keeps streaming conta
 ```bash
 openssl rand -hex 32
 docker run --rm httpd:2.4-alpine htpasswd -nbBC 10 "" 'your-password' | cut -d: -f2
+export CALENDAR_ACCOUNT_SECRET=$(openssl rand -hex 32)   # skip if it is still set in this terminal
 docker compose --profile login up --build
 ```
 
