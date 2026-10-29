@@ -445,6 +445,37 @@ describe('space pictures and links come only from this chat', () => {
     expect(await errorOf(sub)).toContain('placeholder domain');
   });
 
+  it('keeps the pictures a search result listed, and drops one no result or page showed', async () => {
+    const webSearch = createWebSearchTurnState();
+    const unlisted = 'https://upload.wikimedia.org/wikipedia/commons/9/9f/Invented_Water_Dog.jpg';
+    recordSearchResults({
+      provenance: webSearch.provenance,
+      texts: [
+        JSON.stringify({
+          results: [
+            {
+              title: 'Portuguese Water Dog',
+              url: 'https://www.akc.org/dog-breeds/portuguese-water-dog/',
+              images: [COLLIE_URL, { url: POODLE_URL, description: 'Standing' }],
+            },
+          ],
+        }),
+      ],
+    });
+    const response = await setup(webSearch)(
+      CREATE_SPACE_TOOL_NAME,
+      createArgs(
+        [`![One](${COLLIE_URL})`, `<img src="${POODLE_URL}" alt="Two">`, `![Three](${unlisted})`].join('\n\n'),
+      ),
+    );
+    expect(isErrorResponse(response)).toBe(false);
+    const saved = savedOf(response);
+    expect(saved.body).toContain(COLLIE_URL);
+    expect(saved.body).toContain(POODLE_URL);
+    expect(saved.body).not.toContain(unlisted);
+    expect(saved.summary).toContain("Left out 1 picture that did not come from this chat's searches or opened pages.");
+  });
+
   it('keeps a picture link that a search result returned, exactly as returned', async () => {
     const webSearch = createWebSearchTurnState();
     recordSearchResults({ provenance: webSearch.provenance, texts: [searchResult([COLLIE_URL])] });
