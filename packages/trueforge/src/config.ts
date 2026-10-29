@@ -40,7 +40,7 @@ import { PACKAGE_VERSION } from './packageVersion';
 import { defaultEmbeddingModelDir } from './runtime/memory/embeddingRetrieval';
 import type { ReflectBudget } from './runtime/memory/hindsightClient';
 import { parseModelPrices, type ModelPrices } from './runtime/modelPricing';
-import { DEFAULT_TOKEN_FACTORY_CHEAPER_MODEL, DEFAULT_TOKEN_FACTORY_MODEL } from './runtime/tokenFactoryDefaults';
+import { DEFAULT_TOKEN_FACTORY_MODEL } from './runtime/tokenFactoryDefaults';
 import { MAX_CODE_MODE_SOCKET_PARENT_BYTES } from './sandbox/local/core/CodeModeUdsTransport';
 
 const DEFAULT_PORT = 8790;
@@ -1826,12 +1826,6 @@ export interface SharedServerConfiguration {
    */
   TOKEN_FACTORY_MODEL: string;
   /**
-   * Optional cheaper Token Factory model registered next to the default on the env-managed
-   * provider. Set it to an empty string to register only the default model.
-   * Env: `TOKEN_FACTORY_CHEAPER_MODEL`. Default `nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B`.
-   */
-  TOKEN_FACTORY_CHEAPER_MODEL: string | undefined;
-  /**
    * Token Factory base URL.
    * Env: `TOKEN_FACTORY_BASE_URL`. Default `https://api.tokenfactory.nebius.com/v1`.
    */
@@ -2563,9 +2557,6 @@ const shared: SharedServerConfiguration = {
   TAVILY_API_KEY: blankToUndefined(getEnv('TAVILY_API_KEY')),
   TOKEN_FACTORY_MODEL:
     getEnv('TOKEN_FACTORY_MODEL', { defaultValue: DEFAULT_TOKEN_FACTORY_MODEL }) ?? DEFAULT_TOKEN_FACTORY_MODEL,
-  TOKEN_FACTORY_CHEAPER_MODEL: blankToUndefined(
-    getEnv('TOKEN_FACTORY_CHEAPER_MODEL', { defaultValue: DEFAULT_TOKEN_FACTORY_CHEAPER_MODEL }),
-  ),
   TOKEN_FACTORY_BASE_URL:
     getEnv('TOKEN_FACTORY_BASE_URL', { defaultValue: TOKEN_FACTORY_DEFAULT_BASE_URL }) ??
     TOKEN_FACTORY_DEFAULT_BASE_URL,

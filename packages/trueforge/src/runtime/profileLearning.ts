@@ -53,7 +53,6 @@ import {
 } from '../personalization/profile';
 import { ProfileLearnedEventSchema, type ProfileLearnedEvent } from '../schemas/profileLearningEvents';
 import type { EventSubscription } from './event-subscription';
-import { routeHelperModel } from './helperModelRouting';
 import type { MemoryClient } from './memory/memoryClient';
 import { AMAN_MEMORY_NAMESPACE } from './memory/memoryRetain';
 import { uuidv5 } from './memory/uuidv5';
@@ -349,8 +348,6 @@ export interface ProfileLearningDrainMember {
   createdBy: string;
   userText: string;
   turnModelFqn: string | undefined;
-  /** The small model for helper jobs; see `routeHelperModel`. */
-  helperFqn?: string | undefined;
   /** Test seam; production leaves it unset and resolves a VercelAILLM over the configured provider. */
   resolveLlm?: ((modelFqn: string) => Promise<ILLM>) | undefined;
 }
@@ -460,10 +457,7 @@ async function distillProfile(params: SubmitProfileLearningParams): Promise<void
     return;
   }
 
-  const modelFqn =
-    config.modelFqn.trim() !== ''
-      ? config.modelFqn.trim()
-      : routeHelperModel({ modelFqn: params.turnModelFqn, helperFqn: params.helperFqn });
+  const modelFqn = config.modelFqn.trim() !== '' ? config.modelFqn.trim() : params.turnModelFqn;
   if (modelFqn === undefined || modelFqn === '') {
     return;
   }
