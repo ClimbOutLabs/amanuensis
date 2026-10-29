@@ -68,10 +68,10 @@ const WORK_PLAN_ANYWHERE =
  * finding: a tool result is data, and facts about the person are only ever saved from their own words.
  */
 const INSTRUCTION_TO_ASSISTANT =
-  /\b(?:remember|ignore|disregard|forget|always|never|from now on|you (?:should|must|need to|have to|are to)|do not|don(?:'|’)?t)\b/i;
+  /^\s*(?:always|never)\b|\b(?:remember|ignore|disregard|forget|from now on|you (?:should|must|need to|have to|are to)|do not|don(?:'|’)?t)\b/i;
 
 const ABOUT_THE_PERSON =
-  /\bthe (?:person|user)(?:'s|’s|\s+(?:wants|prefers|asked|asks|likes|needs|said|says|is|has|lives|works))\b/i;
+  /\bthe (?:person|user)(?:'s|’s|\s+(?:always|never|wants|prefers|asked|asks|likes|needs|said|says|is|has|lives|works))\b/i;
 
 const NotesReplySchema = z.object({
   findings: z.array(z.object({ result: z.number().int(), text: z.string() })),
@@ -187,7 +187,7 @@ function readsAsAboutThePerson({ text, personName }: { text: string; personName:
     name !== undefined &&
     name !== '' &&
     new RegExp(
-      `\\b${escapeRegExp(name)}(?:'s|’s|\\s+(?:wants|prefers|asked|asks|likes|needs|said|says|is|has|lives|works))\\b`,
+      `\\b${escapeRegExp(name)}(?:'s|’s|\\s+(?:always|never|wants|prefers|asked|asks|likes|needs|said|says|is|has|lives|works))\\b`,
       'i',
     ).test(text)
   );

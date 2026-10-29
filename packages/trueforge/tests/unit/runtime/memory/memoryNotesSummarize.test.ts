@@ -134,6 +134,34 @@ describe('parseNotesReply', () => {
     expect(notes).toEqual([{ source: 'email', text: 'Priya needs the form by 2026-11-03.' }]);
   });
 
+  it('keeps an honest finding that merely contains "always" or "never", and drops the imperative or person-fact shapes', () => {
+    const page: TurnToolResult = {
+      source: 'web',
+      text: 'Opening hours: the bakery is never open on Mondays and always closes at 18:00. Never miss our Friday loaves. Sam always orders rye.',
+    };
+    const notes = parseNotesReply({
+      reply: JSON.stringify({
+        findings: [
+          { result: 1, text: 'The bakery is never open on Mondays.' },
+          { result: 1, text: 'The bakery always closes at 18:00.' },
+          { result: 1, text: 'Never miss the Friday loaves.' },
+          { result: 1, text: 'Always order the Friday loaves.' },
+          { result: 1, text: 'The person always orders rye.' },
+          { result: 1, text: 'Sam always orders rye.' },
+          { result: 1, text: 'You should never order on Mondays.' },
+        ],
+        responses: [],
+      }),
+      results: [page],
+      assistantText: '',
+      personName: 'Sam',
+    });
+    expect(notes).toEqual([
+      { source: 'web', text: 'The bakery is never open on Mondays.' },
+      { source: 'web', text: 'The bakery always closes at 18:00.' },
+    ]);
+  });
+
   it('drops a note that holds a secret instead of saving it with a hole', () => {
     const leaky: TurnToolResult = {
       source: 'email',
