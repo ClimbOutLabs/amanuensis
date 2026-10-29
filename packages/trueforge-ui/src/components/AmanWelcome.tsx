@@ -11,6 +11,7 @@ import { AmanTour } from './AmanTour.js';
 import { EMPTY_PERSONALIZATION_PROFILE, useOptionalPersonalization } from './PersonalizationContext.js';
 import { personDisplayName } from './personDisplayName.js';
 import type { TourCapabilities } from './tourPrompts.js';
+import { useDailyBriefRun } from './useDailyBriefRun.js';
 
 /**
  * What this instance can do, read from data the shell already has: the sandbox from server
@@ -37,6 +38,7 @@ function AmanHome() {
   const capabilities = useTourCapabilities();
   const fillPrompt = useFillPrompt();
   const sendPrompt = useSendPrompt();
+  const runBrief = useDailyBriefRun();
   const currentUser = useOptionalCurrentUser();
   const profile = personalization?.profile ?? EMPTY_PERSONALIZATION_PROFILE;
   const personName = personDisplayName({
@@ -56,6 +58,7 @@ function AmanHome() {
       onSend={sendPrompt}
       onFill={fillPrompt}
       canSend={setup === null || setup.modelName !== null}
+      {...(runBrief === undefined ? {} : { onRunBrief: runBrief.run, briefStarting: runBrief.starting })}
     />
   );
 }

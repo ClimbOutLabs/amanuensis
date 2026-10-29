@@ -6,7 +6,14 @@ import { cn } from '../atoms/lib/cn.js';
 import { Icon } from '../icons/Icon.js';
 import { assistantDisplayName } from '../utils/assistantName.js';
 import { useHomeTopic } from './homeTopic.js';
-import { composerTextFor, HOME_TOPIC_IDS, HOME_TOPICS, homeCardsFor, type TourCapabilities } from './tourPrompts.js';
+import {
+  composerTextFor,
+  HOME_TOPIC_IDS,
+  HOME_TOPICS,
+  homeSlotsFor,
+  type HomeSlot,
+  type TourCapabilities,
+} from './tourPrompts.js';
 
 /** Morning, afternoon or evening, by the local hour. */
 function greetingFor(now: Date): string {
@@ -86,6 +93,10 @@ export type AmanTourProps = {
   onFill: (text: string) => void;
   /** False until the host reports a model; a chat cannot run without one. */
   canSend: boolean;
+  /** Runs the person's daily brief schedule now. Omitted when they have no brief schedule, and the card stays hidden. */
+  onRunBrief?: () => void;
+  /** True while a brief run is starting; the card goes quiet so a second tap cannot start another. */
+  briefStarting?: boolean;
 };
 
 /**
@@ -103,11 +114,20 @@ export function AmanTour({
   onSend,
   onFill,
   canSend,
+  onRunBrief,
+  briefStarting = false,
 }: AmanTourProps) {
   const assistant = assistantDisplayName(assistantName);
   const { hello, firstName } = greetingParts({ now, name: userName });
   const [topic, setTopic] = useHomeTopic();
-  const cards = homeCardsFor({ topic, capabilities });
+  const slots = homeSlotsFor({ topic, capabilities, briefRun: onRunBrief !== undefined });
+  const press = (slot: HomeSlot) => {
+    if (slot.kind === 'run_brief') {
+      onRunBrief?.();
+      return;
+    }
+    (canSend ? onSend : onFill)(composerTextFor(slot.card));
+  };
 
   return (
     <>
@@ -164,29 +184,38 @@ export function AmanTour({
             Some things {assistant} can do
           </h2>
           <ul className="m-0 grid list-none grid-cols-2 gap-2.5 p-0">
-            {cards.map(card => (
-              <li key={card.title}>
-                <button
-                  type="button"
-                  className={cn(CARD_CLASS, 'h-full w-full')}
-                  onClick={() => (canSend ? onSend : onFill)(composerTextFor(card))}
-                >
-                  <span className="flex min-w-0 items-start gap-2" data-role="home-card-title">
-                    <span className="flex h-[1.2em] shrink-0 items-center text-[0.9375rem] text-gold-ink">
-                      {card.icon === 'map-pin' ? (
-                        <MapPinIcon />
-                      ) : (
-                        <Icon name={card.icon} size="1.125rem" aria-hidden="true" />
-                      )}
+            {slots.map(slot => {
+              const busy = slot.kind === 'run_brief' && briefStarting;
+              return (
+                <li key={slot.card.title}>
+                  <button
+                    type="button"
+                    className={cn(CARD_CLASS, 'h-full w-full', busy && 'cursor-not-allowed opacity-50')}
+                    disabled={busy}
+                    aria-busy={busy}
+                    onClick={() => press(slot)}
+                  >
+                    <span className="flex min-w-0 items-start gap-2" data-role="home-card-title">
+                      <span className="flex h-[1.2em] shrink-0 items-center text-[0.9375rem] text-gold-ink">
+                        {busy ? (
+                          <Icon name="loader" size="1.125rem" className="animate-spin" aria-hidden="true" />
+                        ) : slot.card.icon === 'map-pin' ? (
+                          <MapPinIcon />
+                        ) : (
+                          <Icon name={slot.card.icon} size="1.125rem" aria-hidden="true" />
+                        )}
+                      </span>
+                      <span className="aui-face-serif text-[0.9375rem] leading-[1.2] font-normal text-text-primary">
+                        {slot.card.title}
+                      </span>
                     </span>
-                    <span className="aui-face-serif text-[0.9375rem] leading-[1.2] font-normal text-text-primary">
-                      {card.title}
+                    <span className="line-clamp-2 text-[0.8125rem] text-text-secondary">
+                      {busy ? 'Starting...' : slot.card.detail(assistant)}
                     </span>
-                  </span>
-                  <span className="line-clamp-2 text-[0.8125rem] text-text-secondary">{card.detail(assistant)}</span>
-                </button>
-              </li>
-            ))}
+                  </button>
+                </li>
+              );
+            })}
           </ul>
         </section>
 
