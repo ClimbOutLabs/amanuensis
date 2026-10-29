@@ -369,9 +369,17 @@ describe('PersonaTurnResourceResolver', () => {
       return hook;
     }
 
-    it('is undefined when no knowledge was injected', () => {
+    it('leaves the output untouched when no knowledge was injected and nothing was claimed', () => {
       const { resolver } = makeResolver(PERSONA);
-      expect(resolver.finalizeAssistantOutput).toBeUndefined();
+      expect(hookOrThrow(resolver)(outputEvent('Hello there.'))).toBeUndefined();
+    });
+
+    it('replaces a claimed switch no tool made, and keeps it once a switch ran', () => {
+      const { resolver } = makeResolver(PERSONA);
+      const claim = outputEvent('Using your existing Theo. Now talking with Theo.');
+      expect(hookOrThrow(resolver)(claim)?.content).toContain('I did not switch.');
+      resolver.switches.markSwitched();
+      expect(hookOrThrow(resolver)(claim)).toBeUndefined();
     });
 
     it('appends the Sources footer through the hook when the answer used an injected passage', () => {
@@ -399,6 +407,14 @@ describe('PersonaTurnResourceResolver', () => {
       }
       return sanitize;
     }
+
+    it('stores a real switch as a host note so the model cannot learn to fake it', () => {
+      const { resolver } = makeResolver(PERSONA);
+      resolver.switches.markSwitched();
+      expect(sanitizeOrThrow(resolver)('Using your existing Theo. Now talking with Theo.')).toBe(
+        '[The persona tool switched this chat to Theo.]',
+      );
+    });
 
     it('is set for every persona turn, knowledge or not', () => {
       const { resolver } = makeResolver(PERSONA);
