@@ -4175,8 +4175,8 @@ export class AgentThread {
         streamCut: result.value.tool_call_count_cut === true,
       });
     }
-    // An unattended run recounts below, once held calls are known; a reply the stream cut at
-    // the cap is incomplete and stops either way.
+    // An unattended run recounts below, once held calls are known; a reply the stream stopped
+    // reading is incomplete and stops either way.
     if (replyGuard.tooManyCalls && (!unattended || result.value.tool_call_count_cut === true)) {
       await this.recordDroppedCallRefusals(replyGuard.message.tool_calls);
       yield this.generateErrorEvent(TOO_MANY_TOOL_CALLS_MESSAGE, undefined, 'model_stream_fault');

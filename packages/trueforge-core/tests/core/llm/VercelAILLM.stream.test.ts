@@ -27,7 +27,7 @@ import {
   toolCallPieceOf,
   toStreamError,
 } from '../../../src/core/llm/VercelAILLM';
-import { MAX_TOOL_CALLS_PER_REPLY } from '../../../src/core/runtime/modelReplyGuard';
+import { MAX_TOOL_CALL_STREAM_PARTS, MAX_TOOL_CALLS_PER_REPLY } from '../../../src/core/runtime/modelReplyGuard';
 
 // ─────────── Helpers ───────────
 
@@ -786,8 +786,8 @@ describe('mapStreamToChunks', () => {
     expect(final.finish_reason).toBe('tool_calls');
   });
 
-  it('stops reading at one call over the cap and marks the reply cut, so a flood of calls cannot hold the step open', async () => {
-    const parts: TextStreamPart<ToolSet>[] = Array.from({ length: MAX_TOOL_CALLS_PER_REPLY + 1 }, (_, index) => ({
+  it('stops reading at one call over the stream ceiling and marks the reply cut, so a flood of calls cannot hold the step open', async () => {
+    const parts: TextStreamPart<ToolSet>[] = Array.from({ length: MAX_TOOL_CALL_STREAM_PARTS + 1 }, (_, index) => ({
       type: 'tool-input-start' as const,
       id: `call-${String(index)}`,
       toolName: 'search',
@@ -801,13 +801,18 @@ describe('mapStreamToChunks', () => {
     }
     const { final } = await drainStream(mapStreamToChunks({ stream: floodStream(), chunkMeta: CHUNK_META }));
 
+    expect(MAX_TOOL_CALL_STREAM_PARTS).toBe(40);
     expect(final.tool_call_count_cut).toBe(true);
-    expect(final.output.tool_calls).toHaveLength(MAX_TOOL_CALLS_PER_REPLY);
+    expect(final.output.tool_calls).toHaveLength(MAX_TOOL_CALL_STREAM_PARTS);
     expect(neverRead).not.toHaveBeenCalled();
   });
 
-  it('leaves a reply with exactly the cap of calls unmarked', async () => {
-    const parts: TextStreamPart<ToolSet>[] = Array.from({ length: MAX_TOOL_CALLS_PER_REPLY }, (_, index) => ({
+  it.each([
+    ['exactly the stream ceiling', MAX_TOOL_CALL_STREAM_PARTS],
+    ['22 calls, over the reply cap but a batch the reply guard may still merge or hold', 22],
+    ['exactly the reply cap', MAX_TOOL_CALLS_PER_REPLY],
+  ])('reads a reply of %s whole and leaves it unmarked', async (_label, count) => {
+    const parts: TextStreamPart<ToolSet>[] = Array.from({ length: count }, (_, index) => ({
       type: 'tool-input-start' as const,
       id: `call-${String(index)}`,
       toolName: 'search',
@@ -817,7 +822,8 @@ describe('mapStreamToChunks', () => {
     );
 
     expect(final.tool_call_count_cut).toBeUndefined();
-    expect(final.output.tool_calls).toHaveLength(MAX_TOOL_CALLS_PER_REPLY);
+    expect(final.output.tool_calls).toHaveLength(count);
+    expect(final.finish_reason).toBe('tool_calls');
   });
 
   it('captures google thoughtSignature from tool-input-start providerMetadata into provider_specific_fields', async () => {

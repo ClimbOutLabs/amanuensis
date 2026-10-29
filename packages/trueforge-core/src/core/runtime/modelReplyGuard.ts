@@ -24,13 +24,16 @@ import { stableStringify } from '../permissions/approvalTokens';
 import { CREATE_SPACE_TOOL_NAME, EDIT_SPACE_TOOL_NAME } from '../spaces/toolContract';
 import type { ContextMessage } from './AgentThread.types';
 
+/** Most tool calls one reply may make; beyond this the turn stops (see TOO_MANY_TOOL_CALLS_MESSAGE). */
+export const MAX_TOOL_CALLS_PER_REPLY = 20;
+
 /**
- * Most tool calls one reply may make; beyond this the turn stops (see TOO_MANY_TOOL_CALLS_MESSAGE).
- * The stream stops reading at this many calls too, so a model that keeps writing calls cannot
- * hold a step open until the turn's time limit. Twelve leaves room for a real parallel batch of
- * reads while staying well under what one step can finish in the time a turn has.
+ * Most tool calls the stream reads from one reply before it stops reading and marks the reply
+ * cut. Twice the cap: the cap is counted after identical calls merge and, in an unattended run,
+ * without the calls held for approval, so a reply over the cap can still be a legitimate batch
+ * up to here. Past it the model is flooding, and reading on would only hold the step open.
  */
-export const MAX_TOOL_CALLS_PER_REPLY = 12;
+export const MAX_TOOL_CALL_STREAM_PARTS = MAX_TOOL_CALLS_PER_REPLY * 2;
 
 /** Shown to the person when a reply asks for more tool calls than one reply may make. */
 export const TOO_MANY_TOOL_CALLS_MESSAGE =
@@ -101,7 +104,7 @@ interface ModelReplyGuardOutcome {
   invalidCalls: Map<string, string>;
   /** Every stopped call with its reason, in reply order. */
   flaggedCalls: ReplyGuardFlaggedCall[];
-  /** True when the reply holds more calls than one reply may make after duplicates merged, or the stream was cut at the cap. */
+  /** True when the reply holds more calls than one reply may make after duplicates merged, or the stream stopped reading it. */
   tooManyCalls: boolean;
 }
 
@@ -180,7 +183,7 @@ export function guardModelReply(input: {
   readOnlyTools: ReadonlySet<string>;
   /** Calls the stream stopped early for running past their tool's argument size limit; their arguments are partial and never run. */
   sizeCutCalls: ReadonlySet<string>;
-  /** True when the stream stopped reading because the reply started more calls than one reply may make. */
+  /** True when the stream stopped reading because the reply started more calls than it reads (MAX_TOOL_CALL_STREAM_PARTS). */
   callCountCut: boolean;
   sandboxToolNames: ReplyGuardSandboxToolNames;
 }): ModelReplyGuardOutcome {
@@ -294,7 +297,7 @@ export function guardModelReply(input: {
     // Every call counts here: which calls an unattended run will hold for approval is only
     // known after classification, so the runtime recounts there and exempts the held ones.
     // Counted at this stage, the cap is the plain per-reply limit for any run. A reply the
-    // stream cut at the cap is incomplete whatever its merged count: the calls after the cut
+    // stream stopped reading is incomplete whatever its merged count: the calls after the cut
     // never arrived, so running the ones that did would be a partial run of the reply.
     tooManyCalls: callCountCut || deduped.length > MAX_TOOL_CALLS_PER_REPLY,
   };

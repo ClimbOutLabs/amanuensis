@@ -199,7 +199,7 @@ async function* replyStream(input: {
   calls?: CallSpec[];
   text?: string;
   toolMarkup?: 'leaked';
-  /** Marks the reply as cut by the stream for starting more calls than one reply may make. */
+  /** Marks the reply as cut by the stream for starting more calls than the stream reads. */
   toolCallCountCut?: true;
 }): AsyncGenerator<ExtendedChatCompletionChunk, RawAssistantMessageWithUsage, unknown> {
   const calls = (input.calls ?? []).map(rawCall);
@@ -715,7 +715,7 @@ describe('duplicates, floods and dependent reads', () => {
     }
   });
 
-  it('runs a full reply of 12 different calls, the whole cap', async () => {
+  it('runs a full reply of 20 different calls, the whole cap', async () => {
     const toolSet = makeToolSet();
     let round = 0;
     const create = jest.fn((_request: LLMCreateParamsStreaming) => {
@@ -733,12 +733,12 @@ describe('duplicates, floods and dependent reads', () => {
     });
     const thread = makeThread({ toolSet, create });
     const events = await drain(thread);
-    expect(MAX_TOOL_CALLS_PER_REPLY).toBe(12);
-    expect(callToolNames(toolSet)).toHaveLength(12);
+    expect(MAX_TOOL_CALLS_PER_REPLY).toBe(20);
+    expect(callToolNames(toolSet)).toHaveLength(20);
     expect(events.at(-1)).toMatchObject({ type: InternalEventType.AGENT_DONE, status: 'done' });
   });
 
-  it('stops the turn and runs nothing when one reply asks for 13 tool calls, one over the cap', async () => {
+  it('stops the turn and runs nothing when one reply asks for 21 tool calls, one over the cap', async () => {
     const toolSet = makeToolSet();
     const create = jest.fn((_request: LLMCreateParamsStreaming) =>
       replyStream({
@@ -761,7 +761,7 @@ describe('duplicates, floods and dependent reads', () => {
     expect(toolSet.callTool).not.toHaveBeenCalled();
   });
 
-  it('stops the turn and runs nothing when the stream was cut at the cap, even with few calls in the reply', async () => {
+  it('stops the turn and runs nothing when the stream stopped reading the reply, even with few calls in it', async () => {
     const toolSet = makeToolSet();
     const create = jest.fn((_request: LLMCreateParamsStreaming) =>
       replyStream({
