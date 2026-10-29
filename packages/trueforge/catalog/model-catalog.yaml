@@ -550,14 +550,6 @@ providers:
       # the lower of the two published figures, so a reply is never asked for more than it can hold.
       context_length: 262144
       max_output_tokens: 32768
-  - model_id: nvidia/Nemotron-3-Ultra-550b-a55b
-    name: nemotron-3-ultra-550b-a55b
-    properties:
-      # Token Factory lists 1,048,576, but each step resends the whole chat, so a window that large lets one
-      # long chat cost dollars before compaction trims it; 262,144 matches Super. The output cap is not
-      # listed, so it also matches Super's: without one, Token Factory's short default cuts replies short.
-      context_length: 262144
-      max_output_tokens: 32768
   - model_id: nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B
     name: nvidia-nemotron-3-nano-30b-a3b
     properties: {}

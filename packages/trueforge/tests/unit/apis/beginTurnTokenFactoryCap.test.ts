@@ -310,12 +310,12 @@ describe('Token Factory daily cap in the turn path', () => {
     expect(await usedToday(usageStore)).toBe(1100);
   });
 
-  it('lets a chat pick Super when Ultra is configured, and holds Super to the same cap', async () => {
+  it('lets a chat pick Super when Nano is configured, and holds Super to the same cap', async () => {
     const tokenFactoryUrl = await modelServer({ prompt_tokens: 300, completion_tokens: 50 });
     const { llm, usageStore } = await startTurn({
       cap: CAP,
       tokenFactoryUrl,
-      tokenFactoryModel: 'nvidia/Nemotron-3-Ultra-550b-a55b',
+      tokenFactoryModel: 'nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B',
       withCatalogModels: true,
     });
 
@@ -330,14 +330,14 @@ describe('Token Factory daily cap in the turn path', () => {
     );
   });
 
-  it('sizes a turn on the configured Ultra model by its catalog output cap and context length', async () => {
+  it('sizes a turn on the configured model by its catalog output cap and context length', async () => {
     const { llm } = await startTurn({
       cap: undefined,
-      tokenFactoryModel: 'nvidia/Nemotron-3-Ultra-550b-a55b',
+      tokenFactoryModel: 'nvidia/nemotron-3-super-120b-a12b',
       withCatalogModels: true,
     });
 
-    const resolved = await llm('tokenfactory/nemotron-3-ultra-550b-a55b', 'chat');
+    const resolved = await llm('tokenfactory/nemotron-3-super-120b-a12b', 'chat');
 
     expect(resolved.defaultModelParams).toEqual({ max_tokens: 32768 });
     expect(resolved.modelProperties?.contextLength).toBe(262144);
