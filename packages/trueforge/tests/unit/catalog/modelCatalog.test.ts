@@ -28,7 +28,7 @@ describe('shipped model catalog', () => {
     const ultra = preset?.models.find(model => model.model_id === ULTRA_MODEL);
 
     expect(ultra?.properties.max_output_tokens).toBe(32768);
-    expect(ultra?.properties.context_length).toBe(1048576);
+    expect(ultra?.properties.context_length).toBe(262144);
   });
 
   it('gives the default Token Factory model an explicit output cap and its context length', () => {
