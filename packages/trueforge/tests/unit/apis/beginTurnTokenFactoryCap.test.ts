@@ -6,7 +6,14 @@ import {
   type TurnModelRole,
   type TurnStreamingEvent,
 } from '@truefoundry/trueforge-core/agent-session';
-import { EventType, type ILLM, type ModelMessageEvent } from '@truefoundry/trueforge-core/core';
+import {
+  contextCompaction,
+  EventType,
+  type AgentThreadExecutionContext,
+  type ILLM,
+  type ModelMessageEvent,
+  type ModelParams,
+} from '@truefoundry/trueforge-core/core';
 import type { Server } from 'node:http';
 import { createLogger } from 'winston';
 
@@ -70,10 +77,43 @@ function modelMessageWithUsage(usage: { input_tokens: number; output_tokens: num
   };
 }
 
-function isLlmFactory(
-  value: unknown,
-): value is (name: string, role: TurnModelRole) => Promise<{ modelId: string; modelClient: ILLM }> {
+interface ResolvedTurnModel {
+  modelId: string;
+  modelClient: ILLM;
+  defaultModelParams: ModelParams;
+  modelProperties?: { contextLength?: number };
+}
+
+function isLlmFactory(value: unknown): value is (name: string, role: TurnModelRole) => Promise<ResolvedTurnModel> {
   return typeof value === 'function';
+}
+
+/** Whether compaction would call the summarizer on a chat of this many tokens for the resolved model. */
+async function compactsAt({ tokens, resolved }: { tokens: number; resolved: ResolvedTurnModel }): Promise<boolean> {
+  const createNonStream = jest.fn(() => Promise.reject(new Error('summarizer called')));
+  const processor = contextCompaction({
+    logger: undefined,
+    definition: {
+      modelClient: { create: jest.fn(), createNonStream },
+      modelId: undefined,
+      configuredModels: undefined,
+      modelParams: resolved.defaultModelParams,
+      modelProperties: { contextLength: resolved.modelProperties?.contextLength },
+    },
+  }).preLLMProcessors?.[0];
+  if (processor === undefined) {
+    throw new Error('expected a compaction processor');
+  }
+  const execution: AgentThreadExecutionContext = {
+    threadId: 'main',
+    signal: undefined,
+    currentContextUsage: { prompt_tokens: tokens, completion_tokens: 0 },
+    context: [{ role: 'user', content: 'Plan the week.' }],
+  };
+  for await (const _event of processor.processPreLLM(execution)) {
+    // Only whether the summarizer was asked matters here.
+  }
+  return createNonStream.mock.calls.length > 0;
 }
 
 const DEAD_URL = 'http://127.0.0.1:1/v1';
@@ -288,6 +328,38 @@ describe('Token Factory daily cap in the turn path', () => {
     await expect(llm('tokenfactory/nemotron-3-super-120b-a12b', 'chat')).rejects.toBeInstanceOf(
       TokenFactoryDailyCapError,
     );
+  });
+
+  it('sizes a turn on the configured Ultra model by its catalog output cap and context length', async () => {
+    const { llm } = await startTurn({
+      cap: undefined,
+      tokenFactoryModel: 'nvidia/Nemotron-3-Ultra-550b-a55b',
+      withCatalogModels: true,
+    });
+
+    const resolved = await llm('tokenfactory/nemotron-3-ultra-550b-a55b', 'chat');
+
+    expect(resolved.defaultModelParams).toEqual({ max_tokens: 32768 });
+    expect(resolved.modelProperties?.contextLength).toBe(262144);
+    // Without the catalog limits compaction would start at the 50,000-token fallback.
+    expect(await compactsAt({ tokens: 60_000, resolved })).toBe(false);
+    expect(await compactsAt({ tokens: 60_000, resolved: { ...resolved, modelProperties: {} } })).toBe(true);
+    // 80% of 262,144, which leaves room for the 32,768-token reply.
+    expect(await compactsAt({ tokens: 209_000, resolved })).toBe(false);
+    expect(await compactsAt({ tokens: 210_000, resolved })).toBe(true);
+  });
+
+  it('keeps a configured model the catalog does not list on its unknown limits', async () => {
+    const { llm } = await startTurn({
+      cap: undefined,
+      tokenFactoryModel: 'openai/gpt-oss-120b',
+      withCatalogModels: true,
+    });
+
+    const resolved = await llm('tokenfactory/gpt-oss-120b', 'chat');
+
+    expect(resolved.defaultModelParams).toEqual({});
+    expect(resolved.modelProperties?.contextLength).toBeUndefined();
   });
 
   it('never refuses and never counts a turn on another provider', async () => {
