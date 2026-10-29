@@ -74,29 +74,29 @@ flowchart TB
 
 ## Repository layout
 
-| Path                      | Purpose                                                                   |
-| ------------------------- | ------------------------------------------------------------------------- |
-| `packages/trueforge`      | HTTP server, persistence, provider management, and Aman host features     |
-| `packages/trueforge-core` | Agent runtime, tool orchestration, and session contracts                  |
-| `packages/frontend`       | Browser application                                                       |
-| `packages/trueforge-ui`   | Reusable UI components and server-facing UI contracts                     |
-| `packages/trueforge-sdk`  | Generated TypeScript SDK                                                  |
-| `packages/amanuensis`     | The `npx amanuensis` package: server and chat UI started with one command |
-| `packages/aman-installer` | The `aman` command the installer leaves behind (doctor, checks, upgrades) |
-| `installer`               | The one-command installer (`install.sh`) and its helper scripts           |
-| `charts`                  | Helm chart for Kubernetes                                                 |
-| `demo`                    | Example data, scripts and the runbook for the demo                        |
-| `mcp`                     | A frozen copy of the Gmail MCP connector                                  |
-| `scripts`                 | Repository build, check and smoke-test scripts                            |
-| `docs`                    | Product, setup, architecture, and API documentation                       |
-| `ops`                     | Aman-specific design records, evaluations, and runbooks                   |
+| Path                      | Purpose                                                                                                                      |
+| ------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| `packages/trueforge`      | HTTP server, persistence, provider management, and Aman host features                                                        |
+| `packages/trueforge-core` | Agent runtime, tool orchestration, and session contracts                                                                     |
+| `packages/frontend`       | Browser application                                                                                                          |
+| `packages/trueforge-ui`   | Reusable UI components and server-facing UI contracts                                                                        |
+| `packages/trueforge-sdk`  | Generated TypeScript SDK                                                                                                     |
+| `packages/amanuensis`     | The `npx amanuensis` package: server and chat UI started with one command                                                    |
+| `packages/aman-installer` | A separate single-file installer program for Windows, Mac and Linux; its upgrade command is Windows-only                     |
+| `installer`               | The one-command installer (`install.sh`), its helper scripts and the `aman` shim it leaves behind (doctor, checks, upgrades) |
+| `charts`                  | Helm chart for Kubernetes                                                                                                    |
+| `demo`                    | Example data, scripts and the runbook for the demo                                                                           |
+| `mcp`                     | A frozen copy of the Gmail MCP connector                                                                                     |
+| `scripts`                 | Repository build, check and smoke-test scripts                                                                               |
+| `docs`                    | Product, setup, architecture, and API documentation                                                                          |
+| `ops`                     | Aman-specific design records, evaluations, and runbooks                                                                      |
 
 ## Install on your own computer
 
 The installer sets everything up in one command. It checks these things first and stops with a plain message if one is missing:
 
 - Linux or macOS, on an x86_64 or arm64 computer. On Windows, run it inside WSL2. Native Windows is not supported.
-- Docker. On Linux this means Docker Engine 28 or newer with Compose v2; on macOS, Docker Desktop. Rootless Docker and Podman are not supported. If Docker is missing, the installer can install it for you only on Debian or Ubuntu with `apt`, and only when you answer yes at its prompt or pass `--install-docker`. `--yes` alone never installs Docker.
+- Docker. On Linux this means Docker Engine 23 or newer with Compose v2, and Engine 28 or newer when Docker runs on the Linux kernel itself rather than under WSL2 or Docker Desktop; on macOS, Docker Desktop. Rootless Docker and Podman are not supported. If Docker is missing, the installer can install it for you only on Debian or Ubuntu with `apt`, and only when you answer yes at its prompt or pass `--install-docker`. `--yes` alone never installs Docker.
 - Docker set to at least 6 GB of memory for the first build. 8 GB or more is recommended.
 - `git`.
 - 10 GB of free disk space. On Linux the sandbox also needs about 20 GB more under `/var/lib` for its slot disks; they use real space only as code runs.
@@ -130,7 +130,7 @@ pnpm standalone:dev
 
 Open `http://localhost:3000` and sign in with the account `pnpm dev:login` prints. The app ships with no model configured — connect one under **Settings, Models** before starting a chat.
 
-The server runs without a file watcher (on some Windows machines the watcher stalls before the server starts), so restart `pnpm standalone:dev` to pick up backend changes — the UI itself still hot-reloads.
+The server runs without a file watcher, so restart `pnpm standalone:dev` to pick up backend changes. The UI itself still hot-reloads.
 
 [docs/quickstart.mdx](docs/quickstart.mdx) walks through this path in full: prerequisites, connecting your first model (a hosted API key or a fully local Ollama model), confirming a chat works, and troubleshooting the failures a fresh install actually hits.
 
