@@ -193,6 +193,7 @@ describe('mail-email entrypoint bounded stop', () => {
   let status: string;
   let starts: string;
   let pidsFile: string;
+  let workerPidsFile: string;
   let accountFile: string;
   let wrapper: ChildProcess | undefined;
   let output: string;
@@ -203,6 +204,7 @@ describe('mail-email entrypoint bounded stop', () => {
     status = join(dir, 'status', 'loaded.sha256');
     starts = join(dir, 'starts.log');
     pidsFile = join(dir, 'pids.log');
+    workerPidsFile = join(dir, 'worker-pids.log');
     accountFile = join(dir, '.env.mail-email');
     output = '';
     wrapper = undefined;
@@ -221,7 +223,10 @@ describe('mail-email entrypoint bounded stop', () => {
       }
     }
     // No stand-in server outlives its test, whichever way the wrapper went down.
-    for (const line of (await readOrEmpty(pidsFile)).split('\n')) {
+    for (const line of [
+      ...(await readOrEmpty(pidsFile)).split('\n'),
+      ...(await readOrEmpty(workerPidsFile)).split('\n'),
+    ]) {
       const pid = Number.parseInt(line, 10);
       if (Number.isFinite(pid)) {
         try {
@@ -241,6 +246,18 @@ describe('mail-email entrypoint bounded stop', () => {
     const body = stubborn
       ? `#!/bin/sh\necho start >> "${starts}"\necho $$ >> "${pidsFile}"\ntrap '' TERM\nwhile :; do sleep 1; done\n`
       : `#!/bin/sh\necho start >> "${starts}"\necho $$ >> "${pidsFile}"\nexec sleep 1000\n`;
+    await writeFile(join(bin, 'mcp-email-server'), body);
+    await chmod(join(bin, 'mcp-email-server'), 0o755);
+  }
+
+  /**
+   * A stand-in for a server whose real work runs in a process of its own (as a launcher script's does):
+   * the launcher and its worker both ignore the stop signal, and the worker holds the port.
+   */
+  async function writeWorkerStub(leaderExitsOnStop = false): Promise<void> {
+    const bin = join(dir, 'bin');
+    await mkdir(bin);
+    const body = `#!/bin/sh\necho start >> "${starts}"\necho $$ >> "${pidsFile}"\ntrap ${leaderExitsOnStop ? "'exit 0'" : "''"} TERM\nsh -c 'trap "" TERM; echo $$ >> "${workerPidsFile}"; while :; do sleep 1; done' &\nwait\n`;
     await writeFile(join(bin, 'mcp-email-server'), body);
     await chmod(join(bin, 'mcp-email-server'), 0o755);
   }
@@ -327,4 +344,38 @@ describe('mail-email entrypoint bounded stop', () => {
     expect(output).toContain('the send list changed');
     expect(output).not.toContain('forcing it down');
   }, 30_000);
+
+  it('forces down the whole server, not only its first process, so the restarted server can take the port', async () => {
+    await writeWorkerStub();
+    startWrapperCaptured({ AMAN_MAIL_STOP_GRACE_SECONDS: '2' });
+    await eventually(async () => (await readOrEmpty(status)) === allowedRecipientsFileHash(LIST_V1));
+    await eventually(async () => (await readOrEmpty(workerPidsFile)) !== '');
+    const firstPids = [...(await serverPids()), ...(await readOrEmpty(workerPidsFile)).split('\n').map(Number)];
+
+    await changeList();
+    await eventually(async () => (await readOrEmpty(status)) === allowedRecipientsFileHash(LIST_V2), 25_000);
+
+    expect(await startCount()).toBeGreaterThanOrEqual(2);
+    // An orphaned worker is reaped a moment after it dies, so give that a little time.
+    for (const pid of firstPids) {
+      await eventually(async () => !isAlive(pid), 3_000);
+    }
+  }, 40_000);
+
+  it('forces down a worker that ignores the stop signal after its leader has exited', async () => {
+    await writeWorkerStub(true);
+    startWrapperCaptured({ AMAN_MAIL_STOP_GRACE_SECONDS: '2' });
+    await eventually(async () => (await readOrEmpty(status)) === allowedRecipientsFileHash(LIST_V1));
+    await eventually(async () => (await readOrEmpty(workerPidsFile)) !== '');
+    const firstPids = [...(await serverPids()), ...(await readOrEmpty(workerPidsFile)).split('\n').map(Number)];
+
+    await changeList();
+    await eventually(async () => (await readOrEmpty(status)) === allowedRecipientsFileHash(LIST_V2), 25_000);
+
+    expect(await startCount()).toBeGreaterThanOrEqual(2);
+    // An orphaned worker is reaped a moment after it dies, so give that a little time.
+    for (const pid of firstPids) {
+      await eventually(async () => !isAlive(pid), 3_000);
+    }
+  }, 40_000);
 });

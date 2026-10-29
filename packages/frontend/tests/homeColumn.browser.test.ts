@@ -10,6 +10,7 @@ import { startApprovalTestServer } from '../../trueforge/tests/fixtures/approval
 import { inProcessApi } from './support/approvalChat.ts';
 import { findChromiumExecutable } from './support/findChromiumExecutable.ts';
 import { screenshotDir } from './support/screenshotDir.ts';
+import { privateViteCache } from './support/viteCache.ts';
 
 const RENDER_TIMEOUT_MS = 45_000;
 /** The first page waits for the dev server's cold compile, which is slow while other suites run. */
@@ -84,7 +85,9 @@ async function cutOffCards(page: Page): Promise<string[]> {
 
 test('home is one left-aligned column whose edges the composer and the cards share', { timeout: 600_000 }, async () => {
   const api = await startApprovalTestServer();
+  const viteCache = privateViteCache('home-column');
   const vite = await createServer({
+    cacheDir: viteCache.cacheDir,
     root: fileURLToPath(new URL('../', import.meta.url)),
     logLevel: 'error',
     plugins: [inProcessApi(api)],
@@ -130,6 +133,7 @@ test('home is one left-aligned column whose edges the composer and the cards sha
   } finally {
     await browser?.close();
     await vite.close();
+    viteCache.remove();
     await api.close();
   }
 });

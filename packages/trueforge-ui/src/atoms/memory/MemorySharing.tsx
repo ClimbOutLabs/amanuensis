@@ -118,7 +118,8 @@ export function MemorySharing(props: {
         Everything you tell any persona about yourself is shared with all of them. Each persona also keeps its own
         notes. Choose which other personas’ notes each one can read.
       </p>
-      <div className="overflow-x-auto rounded-[0.75rem] border border-border bg-card-bg">
+      {/* Relative so the scroll box clips the hidden "Its own notes" labels; otherwise they widen the page. */}
+      <div className="relative overflow-x-auto rounded-[0.75rem] border border-border bg-card-bg">
         <table
           aria-label="Which notes each persona can read"
           className="w-full border-collapse text-left text-[0.875rem] text-text-primary"

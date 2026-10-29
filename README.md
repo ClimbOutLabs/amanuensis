@@ -217,21 +217,21 @@ See [Deployment Security](docs/deployment-security.mdx#prompt-guard-screens) for
 
 ## How Nemotron and Token Factory are used
 
-With `NEBIUS_API_KEY` set, the server connects a read-only `tokenfactory` provider (Nebius Token Factory) at startup. It lists `TOKEN_FACTORY_MODEL` (default `nvidia/nemotron-3-super-120b-a12b`, NVIDIA Nemotron 3 Super) and `TOKEN_FACTORY_CHEAPER_MODEL` (default `nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B`, NVIDIA Nemotron 3 Nano), and makes Nemotron 3 Super the chat default. The provider is managed by the environment, so to change the small model, set `TOKEN_FACTORY_CHEAPER_MODEL` to another id and restart; set it empty to register only the main model. Both appear in **Settings, Models** and can be assigned to roles. A model an earlier start registered stays listed after either variable changes, so roles, personas and agents that still point at it keep working.
+With `NEBIUS_API_KEY` set, the server connects a read-only `tokenfactory` provider (Nebius Token Factory) at startup. It lists `TOKEN_FACTORY_MODEL` (default `nvidia/nemotron-3-super-120b-a12b`, NVIDIA Nemotron 3 Super) and makes it the chat default. The provider is managed by the environment. The model appears in **Settings, Models** and can be assigned to roles. A model an earlier start registered stays listed after the variable changes, so roles, personas and agents that still point at it keep working.
 
-**Which role uses which model.** Every job the server does with a model is a role, and each role can have its own model under **Settings, Roles and Personas**. A role left unset uses the main chat model, except the helper jobs below: while a turn runs on Token Factory, they use the small model unless you pick one for that role.
+**Which role uses which model.** Every job the server does with a model is a role, and each role can have its own model under **Settings, Roles and Personas**. A role left unset uses the main chat model, and that includes the helper jobs below.
 
-| Role                | What it does                                            | Where the model comes from                                      |
-| ------------------- | ------------------------------------------------------- | --------------------------------------------------------------- |
-| Main chat           | Answers you, including requests for a briefing          | Main chat model                                                 |
-| Coding / sub-agent  | Work the assistant hands to sub-agents                  | Coding / subagent model, else the main chat model               |
-| Compaction          | Summarizes old context in long conversations            | Compaction model, else the main chat model                      |
-| Summarization       | Condenses each turn before it is written to memory      | Summarization model, else the small model on Token Factory      |
-| Profile learning    | Rewrites the learned profile after a turn, when enabled | `PROFILE_LEARNING_MODEL`, else the small model on Token Factory |
-| Knowledge relevance | Checks which library passages help answer a question    | The small model on Token Factory, else the persona's model      |
-| Persona             | Answers as that persona                                 | The model bound to the persona under **Roles and Personas**     |
+| Role                | What it does                                            | Where the model comes from                                  |
+| ------------------- | ------------------------------------------------------- | ----------------------------------------------------------- |
+| Main chat           | Answers you, including requests for a briefing          | Main chat model                                             |
+| Coding / sub-agent  | Work the assistant hands to sub-agents                  | Coding / subagent model, else the main chat model           |
+| Compaction          | Summarizes old context in long conversations            | Compaction model, else the main chat model                  |
+| Summarization       | Condenses each turn before it is written to memory      | Summarization model, else the main chat model               |
+| Profile learning    | Rewrites the learned profile after a turn, when enabled | `PROFILE_LEARNING_MODEL`, else the main chat model          |
+| Knowledge relevance | Checks which library passages help answer a question    | The persona's model                                         |
+| Persona             | Answers as that persona                                 | The model bound to the persona under **Roles and Personas** |
 
-**Why tier them.** Helper jobs are short and structured: a few hundred tokens in, a short summary or a yes/no list out. They run on every turn, so their price and latency add up, and a small model such as Nemotron 3 Nano does them at a fraction of the cost of Nemotron 3 Super (see the price table below). Chat answers and briefings are open-ended reasoning over memory and tools, so they stay on Nemotron 3 Super. A weak compaction summary degrades every later turn of a conversation, so keep that role on a model you trust.
+**Why tier them.** Helper jobs are short and structured: a few hundred tokens in, a short summary or a yes/no list out. They run on every turn, so their price and latency add up. A small model is cheaper, but it can write poor memories, so pick one under **Settings, Roles and Personas** only if you trust it. A weak compaction summary degrades every later turn of a conversation, so keep that role on a model you trust.
 
 **What it costs.** Prices are USD per million tokens, read on 2026-10-15 from the Token Factory model catalog (`https://tokenfactory.nebius.com/model-catalog.md`) and confirmed against its models endpoint (`https://api.tokenfactory.nebius.com/v1/models?verbose=true`).
 
@@ -248,7 +248,7 @@ These defaults are a snapshot and are meant to be edited. Set `TOKEN_FACTORY_PRI
 
 **Where cost shows.**
 
-- With **Show agent details** on for the chat, each answer's details show a quiet line with the model, its provider, and the tokens and cost of the whole turn, for example `Nemotron 3 Super · Token Factory · 2,140 tokens (1,800 in, 340 out) · $0.0011 at list price · + 2 helper calls on Nemotron 3 Nano`. Helper calls are included in the total.
+- With **Show agent details** on for the chat, each answer's details show a quiet line with the model, its provider, and the tokens and cost of the whole turn, for example `Nemotron 3 Super · Token Factory · 2,140 tokens (1,800 in, 340 out) · $0.0011 at list price · + 2 helper calls on Nemotron 3 Super`. Helper calls are included in the total.
 - In the same details, each role that ran appears with its model, calls, tokens and cost.
 - **Settings, Models** shows today's tokens and cost per Token Factory model and the daily cap remaining.
 - **Settings, Themes, Answers** switches the line and the helper rows off for you. This changes only what is shown; usage is still counted.

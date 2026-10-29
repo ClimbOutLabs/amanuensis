@@ -143,43 +143,27 @@ describe('resolveSummarizationModelFqn', () => {
     expect(store.getAgent).not.toHaveBeenCalled();
   });
 
-  describe('helper model routing', () => {
-    const helperFqn = 'tokenfactory/nvidia-nemotron-3-nano-30b-a3b';
-
-    it('uses the small model when the main model is on Token Factory and the role is unset', async () => {
+  describe('Token Factory main model', () => {
+    it('uses the main model when the role is unset', async () => {
       const result = await resolveSummarizationModelFqn({
         tenantId: 'tenant-1',
         personaModelName: 'tokenfactory/nemotron-3-super-120b-a12b',
         sessionAgent: inlineAgent(),
         agentStore: fakeAgentStore(),
-        helperFqn,
       });
 
-      expect(result).toBe(helperFqn);
+      expect(result).toBe('tokenfactory/nemotron-3-super-120b-a12b');
     });
 
     it('keeps an explicitly chosen summarization model', async () => {
       const result = await resolveSummarizationModelFqn({
         tenantId: 'tenant-1',
         personaModelName: 'tokenfactory/nemotron-3-super-120b-a12b',
-        sessionAgent: inlineAgent('tokenfactory/nemotron-3-super-120b-a12b'),
+        sessionAgent: inlineAgent('tokenfactory/gpt-oss-120b'),
         agentStore: fakeAgentStore(),
-        helperFqn,
       });
 
-      expect(result).toBe('tokenfactory/nemotron-3-super-120b-a12b');
-    });
-
-    it('keeps the main model when it is not on Token Factory', async () => {
-      const result = await resolveSummarizationModelFqn({
-        tenantId: 'tenant-1',
-        personaModelName: undefined,
-        sessionAgent: inlineAgent(),
-        agentStore: fakeAgentStore(),
-        helperFqn,
-      });
-
-      expect(result).toBe('openai/gpt-4o');
+      expect(result).toBe('tokenfactory/gpt-oss-120b');
     });
   });
 });

@@ -5,12 +5,16 @@ import { test } from 'node:test';
 
 import { runCli } from '../src/cli.ts';
 import { FakeHost } from '../src/host/fakeHost.ts';
+import { FakeWindowsJobs } from '../src/host/fakeWindowsJobs.ts';
 import {
+  ADOPT_NOT_WINDOWS,
   HELP_LINES,
   NOT_INSTALLED,
+  OPEN_NOT_WINDOWS,
   problemText,
   UNKNOWN_DOCTOR_CHECK,
   unknownCommandProblem,
+  UPGRADE_NOT_WINDOWS,
 } from '../src/messages.ts';
 import {
   okResult,
@@ -41,6 +45,13 @@ function makeCli(answers: Map<string, ProcessResult>) {
     osReleasePath: join(home, 'os-release'),
     dockerConfigDir: join(home, '.docker'),
     appService: 'app',
+    windowsJobs: new FakeWindowsJobs({
+      localAppDataDir: 'C:\\Users\\Friend\\AppData\\Local',
+      selfExePath: 'C:\\Users\\Friend\\Downloads\\aman-windows-x64.exe',
+      startMenuProgramsDir: 'C:\\Users\\Friend\\AppData\\Roaming\\Microsoft\\Windows\\Start Menu\\Programs',
+    }),
+    probeHealth: () => Promise.resolve(false),
+    sleep: () => Promise.resolve(),
   };
   return { deps, printed };
 }
@@ -135,4 +146,47 @@ test('status on a computer with nothing installed prints the not-installed probl
   const exitCode = await runCli(['status'], deps);
   assert.equal(exitCode, 1);
   assert.deepEqual(printed, [problemText(NOT_INSTALLED)]);
+});
+
+test('doctor --local runs the doctor instead of refusing the flag', async () => {
+  const { deps, printed } = makeCli(new Map());
+  const exitCode = await runCli(['doctor', '--local'], deps);
+  assert.equal(exitCode, 1);
+  assert.ok(!printed.includes(problemText(UNKNOWN_DOCTOR_CHECK)));
+  assert.ok(printed.includes('Checking this computer'));
+});
+
+test('doctor --json --local prints the checks as data, in either order', async () => {
+  for (const args of [
+    ['doctor', '--json', '--local'],
+    ['doctor', '--local', '--json'],
+  ]) {
+    const { deps, printed } = makeCli(new Map());
+    const exitCode = await runCli(args, deps);
+    assert.equal(exitCode, 1);
+    assert.equal(printed.length, 1);
+    const doc: unknown = JSON.parse(printed[0] ?? '');
+    assert.ok(typeof doc === 'object' && doc !== null && 'machine' in doc);
+  }
+});
+
+test('upgrade refuses plainly where it cannot run', async () => {
+  const { deps, printed } = makeCli(new Map());
+  const exitCode = await runCli(['upgrade'], deps);
+  assert.equal(exitCode, 1);
+  assert.deepEqual(printed, [problemText(UPGRADE_NOT_WINDOWS)]);
+});
+
+test('adopt on a computer that is not Windows refuses with its problem', async () => {
+  const { deps, printed } = makeCli(new Map());
+  const exitCode = await runCli(['adopt'], deps);
+  assert.equal(exitCode, 1);
+  assert.deepEqual(printed, [problemText(ADOPT_NOT_WINDOWS)]);
+});
+
+test('open on a computer that is not Windows refuses with its problem', async () => {
+  const { deps, printed } = makeCli(new Map());
+  const exitCode = await runCli(['open'], deps);
+  assert.equal(exitCode, 1);
+  assert.deepEqual(printed, [problemText(OPEN_NOT_WINDOWS)]);
 });

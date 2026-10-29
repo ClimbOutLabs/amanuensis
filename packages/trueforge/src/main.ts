@@ -645,7 +645,6 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
         apiKey: configuration.NEBIUS_API_KEY,
         baseUrl: configuration.TOKEN_FACTORY_BASE_URL,
         model: configuration.TOKEN_FACTORY_MODEL,
-        cheaperModel: configuration.TOKEN_FACTORY_CHEAPER_MODEL,
       },
       logger,
     });

@@ -578,7 +578,6 @@ describe('submitProfileLearning', () => {
             apiKey: 'sk-nebius',
             baseUrl: stub.baseUrl,
             model: 'nvidia/nemotron-3-super-120b-a12b',
-            cheaperModel: undefined,
           },
           logger: makeLogger(),
         });
@@ -657,28 +656,14 @@ describe('submitProfileLearning', () => {
     await harness.db.destroy();
   });
 
-  it('hands the pass to the small model when the turn runs on Token Factory', async () => {
+  it('uses the turn model when the turn runs on Token Factory and no pass model is set', async () => {
     const harness = await makeHarness();
     await submitProfileLearning({
       ...harness.member,
       turnModelFqn: 'tokenfactory/nemotron-3-super-120b-a12b',
-      helperFqn: 'tokenfactory/nvidia-nemotron-3-nano-30b-a3b',
       ...turnFields(),
     });
-    expect(harness.resolveLlm).toHaveBeenCalledWith('tokenfactory/nvidia-nemotron-3-nano-30b-a3b');
-    await harness.db.destroy();
-  });
-
-  it('keeps a configured pass model over the small model', async () => {
-    const harness = await makeHarness();
-    await submitProfileLearning({
-      ...harness.member,
-      config: passConfig({ modelFqn: 'small-provider/small-model' }),
-      turnModelFqn: 'tokenfactory/nemotron-3-super-120b-a12b',
-      helperFqn: 'tokenfactory/nvidia-nemotron-3-nano-30b-a3b',
-      ...turnFields(),
-    });
-    expect(harness.resolveLlm).toHaveBeenCalledWith('small-provider/small-model');
+    expect(harness.resolveLlm).toHaveBeenCalledWith('tokenfactory/nemotron-3-super-120b-a12b');
     await harness.db.destroy();
   });
 
