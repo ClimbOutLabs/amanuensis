@@ -46,7 +46,7 @@ export const SCHEDULE_REPLY_STEP_BUDGET: ReplyStepBudget = { main: 16, sub: 4 };
 export const REMOVED_TOOL_STREAK_STOP_AT = 2;
 
 /** Why a step is answered with no tools. */
-export type ForcedAnswer = 'budget' | 'removed_streak';
+export type ForcedAnswer = 'budget' | 'removed_streak' | 'empty_after_tools';
 
 /** Steps one thread may get back in a reply for landing space writes. With the base budget this bounds a reply at 8 + 12 steps. */
 export const MAX_PROGRESS_STEP_REFUNDS = 12;
@@ -57,6 +57,10 @@ export const STEP_BUDGET_SPENT_MESSAGE =
 /** Used when the budget runs out after space writes landed. */
 export const STEP_BUDGET_SPENT_AFTER_SPACE_WRITE_MESSAGE =
   'The step budget for this reply is spent. Answer with what you have. Say which space you changed and what is still missing, and say plainly that you stopped before finishing and that they can ask you to continue.';
+
+/** Sent when a step ended with no words after tools ran, so the model must say what it did. */
+export const EMPTY_AFTER_TOOLS_MESSAGE =
+  'You finished the steps but wrote no reply. Tools are off now. In one or two plain sentences, say what you did and what the person can do next.';
 
 export const REMOVED_TOOL_STREAK_MESSAGE =
   'Tools that were declined or are not available keep being called. Answer with what you have.';
@@ -110,7 +114,7 @@ export function progressRefundFor({
 }
 
 /** Tool names are snake_case; the person and the model read them as plain words. */
-function toolActionName(toolName: string): string {
+export function toolActionName(toolName: string): string {
   return toolName.replace(/_/g, ' ');
 }
 
