@@ -149,7 +149,13 @@ import {
 } from '../permissions/heldActions';
 import type { Tier, Tier3Card } from '../permissions/tier';
 import { assistantDisplayName } from '../personas/assistantName';
-import type { Sandbox, SandboxInfo } from '../sandbox/Sandbox';
+import {
+  SANDBOX_EXEC_TOOL_NAME,
+  SANDBOX_MCP_SERVER_ID,
+  SANDBOX_RUN_CODE_TOOL_NAME,
+  type Sandbox,
+  type SandboxInfo,
+} from '../sandbox/Sandbox';
 import { spaceClosingLine, spaceWriteSavedNothing, spaceWritesThisTurn } from '../spaces/turnSpaceWrites';
 import type { AgentTracing } from '../tracing/AgentTracing';
 import { awaitWithAbort, throwIfSignalAborted } from '../util/abort';
@@ -242,6 +248,7 @@ import {
   MAX_TOOL_CALLS_PER_REPLY,
   REPLY_CALL_NOT_RUN_OWNER_MESSAGE,
   TOO_MANY_TOOL_CALLS_MESSAGE,
+  type ReplyGuardSandboxToolNames,
 } from './modelReplyGuard';
 import {
   getClosableOpenToolCallOutcomes,
@@ -1573,6 +1580,23 @@ function hostVouchedReadToolNames({
     }
   }
   return vouched;
+}
+
+/** The names the model sees for the sandbox's run_code and exec tools; undefined when a tool is not offered. */
+function sandboxToolNamesFor(toolMapping: Map<string, MappedMCPTool>): ReplyGuardSandboxToolNames {
+  let runCode: string | undefined;
+  let exec: string | undefined;
+  for (const [name, mapped] of toolMapping) {
+    if (mapped.toolSet.name !== SANDBOX_MCP_SERVER_ID) {
+      continue;
+    }
+    if (mapped.originalToolName === SANDBOX_RUN_CODE_TOOL_NAME) {
+      runCode = name;
+    } else if (mapped.originalToolName === SANDBOX_EXEC_TOOL_NAME) {
+      exec = name;
+    }
+  }
+  return { runCode, exec };
 }
 
 async function enrichAssistantMessage({
@@ -4060,6 +4084,7 @@ export class AgentThread {
       tools: this.getConvertedTools().tools,
       knownEventIds: collectKnownEventIds(this.context),
       readOnlyTools: hostVouchedReadToolNames({ calls: providerToolCalls ?? [], toolMapping }),
+      sandboxToolNames: sandboxToolNamesFor(this.getConvertedTools().toolMapping),
       // The stream recorded the size-cut calls by their provider ids; carry the set across
       // the id remap above, or a remapped call loses its flag and the guard misses it.
       sizeCutCalls:
@@ -4071,6 +4096,16 @@ export class AgentThread {
               ids: new Set(result.value.size_cut_tool_calls ?? []),
             }),
     });
+    // Keys and reason only: argument values can hold the person's content.
+    for (const flagged of replyGuard.flaggedCalls) {
+      this.logger.warn('Reply guard stopped a tool call before it ran', {
+        threadId: this.threadId,
+        tool: flagged.toolName,
+        toolCallId: flagged.callId,
+        argumentKeys: flagged.argumentKeys,
+        reason: flagged.reason,
+      });
+    }
     if (replyGuard.tooManyCalls && !unattended) {
       await this.recordDroppedCallRefusals(replyGuard.message.tool_calls);
       yield this.generateErrorEvent(TOO_MANY_TOOL_CALLS_MESSAGE, undefined, 'model_stream_fault');
