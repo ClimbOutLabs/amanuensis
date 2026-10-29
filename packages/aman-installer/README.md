@@ -21,13 +21,25 @@ What it can do today:
   doctor applies itself, and it belongs to that check only. Apart from
   it, the doctor changes nothing.
 - `aman doctor docker` checks that Docker is installed, running, has its
-  Compose tool, has at least 6 GB of memory to work with, and reports its
+  Compose tool, has at least 6 GB of memory to work with, and that its
+  Engine is new enough for Aman's https on this computer, and reports its
   Engine version. Each failed check says the one thing to do next, in the
   words of the system it is running on.
 - `aman status` says what is installed and whether each instance is
   running.
+- `aman open`, on Windows, starts Docker if it needs to, waits for Aman
+  to answer, and opens it in the browser. An Aman served over https on
+  this computer opens at its https address, after this computer is set
+  to trust the authority that made its certificate.
 - `aman verify` checks a downloaded file against its signed release
   record.
+- `aman network open`, on Windows, opens Aman to the devices on the
+  home network: it hands the installer this computer's private
+  addresses (the setup container cannot see its adapters), lets those
+  devices through the Windows firewall on Aman's ports, and prints
+  the address and the scan code a phone uses. The Start menu entry
+  "Use Aman on my phone" prints them again. `aman network close`
+  closes Aman to the network again.
 - `aman upgrade`, on Windows, updates Aman to the newest release whose
   signed record checks out: it gates on the local doctor, asks once
   before anything downloads, swaps the program in with the old one kept

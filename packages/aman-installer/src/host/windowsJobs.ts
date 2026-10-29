@@ -12,6 +12,9 @@ export const WINDOWS_FOLDER_NAME = 'Amanuensis';
 export const PROGRAMS_PARENT_NAME = 'Programs';
 export const EXE_FILE_NAME = 'aman.exe';
 export const SETUP_CMD_FILE_NAME = 'Aman-Setup.cmd';
+// The name the authority's certificate is downloaded under on the trust
+// page, and the name it is kept under in the Amanuensis folder here.
+export const CA_CERT_FILE_NAME = 'ca.crt';
 // The Start menu entry the plan names, running aman doctor.
 export const CHECK_AMAN_SHORTCUT_NAME = 'Check Aman';
 // The Start menu entry the upgrade keeps, running aman upgrade.
@@ -25,6 +28,13 @@ export const BACKUPS_FOLDER_NAME = 'backups';
 // the plan froze, at the shell schedule's hour (schedule.sh).
 export const BACKUP_TASK_NAME = 'Amanuensis\\Daily backup';
 export const BACKUP_TASK_TIME = '03:30';
+// The Start menu entry that shows the phone address and scan code
+// again, running aman network open.
+export const PHONE_SHORTCUT_NAME = 'Use Aman on my phone';
+// The one inbound firewall rule that lets devices on the private
+// networks reach Aman: one name, so it can be found, changed and
+// (on uninstall) removed.
+export const FIREWALL_RULE_NAME = 'Aman';
 // Docker Desktop's own install place, the file the starter starts.
 export const DOCKER_DESKTOP_EXE = 'C:\\Program Files\\Docker\\Docker\\Docker Desktop.exe';
 
@@ -44,6 +54,7 @@ export interface WindowsPaths {
   dataDir: string;
   setupCmdCopyPath: string;
   backupsDir: string;
+  caCertPath: string;
 }
 
 export function windowsPaths(localAppDataDir: string): WindowsPaths {
@@ -55,6 +66,7 @@ export function windowsPaths(localAppDataDir: string): WindowsPaths {
     dataDir,
     setupCmdCopyPath: win32.join(dataDir, SETUP_CMD_FILE_NAME),
     backupsDir: win32.join(dataDir, BACKUPS_FOLDER_NAME),
+    caCertPath: win32.join(dataDir, CA_CERT_FILE_NAME),
   };
 }
 
@@ -169,8 +181,26 @@ export interface WindowsJobs {
   // The names in the backups folder, as they stand. A folder that is
   // not there yet lists as empty.
   listBackups: () => Promise<readonly string[]>;
+  // Makes the "Use Aman on my phone" Start menu entry, or points the
+  // existing one at the aman command, running aman network open.
+  ensurePhoneShortcut: () => Promise<void>;
+  // Lets devices on the private networks reach Aman: one inbound
+  // firewall rule for the given ports, the Private profile only, made
+  // by one short elevated helper process (one Windows prompt). A rule
+  // already there under the same name is replaced.
+  openFirewallToHome: (ports: readonly number[]) => Promise<void>;
+  // Turns that rule off, so devices on the network can no longer reach
+  // Aman. The rule itself is removed only on uninstall. A rule that is
+  // not there at all is already closed, and is not a failure.
+  closeFirewallToHome: () => Promise<void>;
   // Replaces the starter's copy of Aman-Setup.cmd with the forwarder.
   replaceSetupCmdCopyWithForwarder: () => Promise<void>;
+  // Writes the local authority's certificate, public part only, into
+  // the Amanuensis folder, the file the trust step below names.
+  writeCaCertificate: (certText: string) => Promise<void>;
+  // Adds that certificate to the person's own Root store: Windows asks
+  // once with a Yes/No dialog, and no administrator rights are needed.
+  addCaCertificateToUserStore: () => Promise<void>;
   startDockerDesktop: () => Promise<void>;
   openBrowser: (url: string) => Promise<void>;
   // Makes a folder private to the person: inherited access is removed
@@ -236,6 +266,25 @@ export function systemWindowsJobs(options: {
       return name;
     })();
     return userName;
+  };
+
+  // Changing the firewall needs the person's one Yes to the Windows
+  // prompt, so the netsh command runs in a short elevated helper
+  // process and this side only reads how it ended: 3 is the helper
+  // never starting (the prompt was refused), anything else is the
+  // netsh command's own exit code, handed back for the caller to judge.
+  const runElevatedNetsh = async (argumentList: string): Promise<number> => {
+    const script =
+      `try { $p = Start-Process -FilePath 'cmd.exe' -ArgumentList ${psQuote(argumentList)} ` +
+      `-Verb RunAs -Wait -PassThru -ErrorAction Stop } catch { exit 3 }; exit $p.ExitCode`;
+    const result = await runner.run('powershell', ['-NoProfile', '-NonInteractive', '-Command', script]);
+    if (!result.started) {
+      throw new WindowsJobError('the Windows step to change the firewall rule did not run');
+    }
+    if (result.exitCode === 3) {
+      throw new WindowsJobError('the Windows prompt for the firewall change was refused');
+    }
+    return result.exitCode;
   };
 
   return {
@@ -380,11 +429,71 @@ export function systemWindowsJobs(options: {
         .filter(line => line !== '');
     },
 
+    async ensurePhoneShortcut() {
+      await runPowerShell(
+        `$shell = New-Object -ComObject WScript.Shell; ` +
+          `$path = Join-Path ([Environment]::GetFolderPath('Programs')) ${psQuote(`${PHONE_SHORTCUT_NAME}.lnk`)}; ` +
+          `$shortcut = $shell.CreateShortcut($path); ` +
+          `$shortcut.TargetPath = ${psQuote(paths.programsExePath)}; ` +
+          `$shortcut.Arguments = 'network open'; $shortcut.Save()`,
+      );
+    },
+
+    async openFirewallToHome(ports: readonly number[]) {
+      // The old rule goes first inside the same elevated helper, so
+      // opening again replaces the rule instead of adding a second
+      // one, and the person still sees only one Windows prompt.
+      const argumentList =
+        `/c netsh advfirewall firewall delete rule name="${FIREWALL_RULE_NAME}" >nul 2>&1 & ` +
+        `netsh advfirewall firewall add rule name="${FIREWALL_RULE_NAME}" dir=in action=allow ` +
+        `protocol=TCP localport=${ports.join(',')} profile=private`;
+      const exitCode = await runElevatedNetsh(argumentList);
+      if (exitCode !== 0) {
+        throw new WindowsJobError('the firewall rule could not be made');
+      }
+    },
+
+    async closeFirewallToHome() {
+      const argumentList = `/c netsh advfirewall firewall set rule name="${FIREWALL_RULE_NAME}" new enable=no`;
+      const exitCode = await runElevatedNetsh(argumentList);
+      if (exitCode === 0) {
+        return;
+      }
+      // The set command also fails when there is no rule to turn off,
+      // which is the closed state already: only a rule that is really
+      // there makes this a failure. Reading the rules needs no prompt.
+      const shown = await runner.run('netsh', [
+        'advfirewall',
+        'firewall',
+        'show',
+        'rule',
+        `name=${FIREWALL_RULE_NAME}`,
+      ]);
+      if (shown.started && shown.exitCode === 0) {
+        throw new WindowsJobError('the firewall rule could not be turned off');
+      }
+    },
+
     async replaceSetupCmdCopyWithForwarder() {
       try {
         await writeFile(paths.setupCmdCopyPath, SETUP_CMD_FORWARDER, 'utf8');
       } catch (error) {
         throw new WindowsJobError('the forwarder could not be written over the Aman Setup copy', { cause: error });
+      }
+    },
+
+    async writeCaCertificate(certText: string) {
+      try {
+        await writeFile(paths.caCertPath, certText, 'utf8');
+      } catch (error) {
+        throw new WindowsJobError('the certificate file could not be written', { cause: error });
+      }
+    },
+
+    async addCaCertificateToUserStore() {
+      const result = await runner.run('certutil', ['-addstore', '-user', 'Root', paths.caCertPath]);
+      if (!result.started || result.exitCode !== 0) {
+        throw new WindowsJobError('the certificate could not be added to the store of this computer');
       }
     },
 

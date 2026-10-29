@@ -83,6 +83,7 @@ test('the golden file holds every command line the Windows jobs run', async () =
   await jobs.listShortcuts();
   await jobs.pointShortcutAtOpen('C:\\Users\\Friend\\Desktop\\Aman.lnk');
   await jobs.ensureCheckAmanShortcut();
+  await jobs.addCaCertificateToUserStore();
   await jobs.startDockerDesktop();
   await jobs.openBrowser('http://127.0.0.1:8791');
   await jobs.makeFolderPrivate(DATA_DIR);
@@ -91,6 +92,9 @@ test('the golden file holds every command line the Windows jobs run', async () =
   assert.equal(await jobs.dailyBackupTaskPresent(), true);
   await jobs.ensureBackupsShortcut();
   assert.deepEqual(await jobs.listBackups(), ['20261009T120000Z', '20261008T120000Z']);
+  await jobs.ensurePhoneShortcut();
+  await jobs.openFirewallToHome([8443, 8791]);
+  await jobs.closeFirewallToHome();
   const golden = readFileSync(new URL('../golden/windows-jobs-commands.txt', import.meta.url), 'utf8');
   assert.equal(recording.goldenText(), golden);
 });
@@ -203,6 +207,71 @@ test('making a folder private that refuses fails as a Windows job error', async 
   await assert.rejects(jobsWith(refused).makeFolderPrivate(DATA_DIR), WindowsJobError);
 });
 
+// A runner that answers the elevated firewall helper and the rule
+// reading from a script the test sets: the helper's exit code, and
+// whether a rule is there to read.
+class FirewallRunner implements ProcessRunner {
+  private readonly helperExitCode: number;
+  private readonly rulePresent: boolean;
+
+  constructor(options: { helperExitCode: number; rulePresent: boolean }) {
+    this.helperExitCode = options.helperExitCode;
+    this.rulePresent = options.rulePresent;
+  }
+
+  run(command: string, _args: readonly string[]): Promise<ProcessResult> {
+    if (command === 'netsh') {
+      return Promise.resolve(
+        this.rulePresent ? okResult('Rule Name: Aman\n') : { exitCode: 1, stdout: '', stderr: '', started: true },
+      );
+    }
+    return Promise.resolve({ exitCode: this.helperExitCode, stdout: '', stderr: '', started: true });
+  }
+
+  runBytes(): Promise<ProcessBytesResult> {
+    return Promise.resolve({ exitCode: 1, stdout: new Uint8Array(), stderr: '', started: false });
+  }
+}
+
+test('the phone entry is made by the same shortcut owner, running aman network open', async () => {
+  const recording = new RecordingProcessRunner(new AnswerRunner(''));
+  const jobs = jobsWith(recording);
+  await jobs.ensurePhoneShortcut();
+  assert.deepEqual(recording.lines(), [
+    `powershell -NoProfile -NonInteractive -Command "$shell = New-Object -ComObject WScript.Shell; $path = Join-Path ([Environment]::GetFolderPath('Programs')) 'Use Aman on my phone.lnk'; $shortcut = $shell.CreateShortcut($path); $shortcut.TargetPath = 'C:\\Users\\Friend\\AppData\\Local\\Programs\\Amanuensis\\aman.exe'; $shortcut.Arguments = 'network open'; $shortcut.Save()"`,
+  ]);
+});
+
+test('opening the firewall runs one elevated helper holding the delete and the add', async () => {
+  const recording = new RecordingProcessRunner(new FirewallRunner({ helperExitCode: 0, rulePresent: false }));
+  const jobs = jobsWith(recording);
+  await jobs.openFirewallToHome([8791]);
+  assert.deepEqual(recording.lines(), [
+    `powershell -NoProfile -NonInteractive -Command "try { $p = Start-Process -FilePath 'cmd.exe' -ArgumentList '/c netsh advfirewall firewall delete rule name=\\"Aman\\" >nul 2>&1 & netsh advfirewall firewall add rule name=\\"Aman\\" dir=in action=allow protocol=TCP localport=8791 profile=private' -Verb RunAs -Wait -PassThru -ErrorAction Stop } catch { exit 3 }; exit $p.ExitCode"`,
+  ]);
+});
+
+test('a refused Windows prompt fails the firewall change', async () => {
+  const jobs = jobsWith(new FirewallRunner({ helperExitCode: 3, rulePresent: false }));
+  await assert.rejects(jobs.openFirewallToHome([8443, 8791]), WindowsJobError);
+  await assert.rejects(jobs.closeFirewallToHome(), WindowsJobError);
+});
+
+test('a firewall helper that fails its command fails the change', async () => {
+  const jobs = jobsWith(new FirewallRunner({ helperExitCode: 1, rulePresent: false }));
+  await assert.rejects(jobs.openFirewallToHome([8443, 8791]), WindowsJobError);
+});
+
+test('closing the firewall with no rule there is already closed, not a failure', async () => {
+  const jobs = jobsWith(new FirewallRunner({ helperExitCode: 1, rulePresent: false }));
+  await jobs.closeFirewallToHome();
+});
+
+test('closing the firewall with a rule that stays on is a failure', async () => {
+  const jobs = jobsWith(new FirewallRunner({ helperExitCode: 1, rulePresent: true }));
+  await assert.rejects(jobs.closeFirewallToHome(), WindowsJobError);
+});
+
 test('the Update Aman entry is made by the same shortcut owner, running aman upgrade', async () => {
   const recording = new RecordingProcessRunner(new AnswerRunner(''));
   const jobs = jobsWith(recording);
@@ -253,6 +322,7 @@ test('the frozen Windows paths are the ones the starter named', () => {
   assert.equal(paths.programsExePath, 'C:\\Users\\Friend\\AppData\\Local\\Programs\\Amanuensis\\aman.exe');
   assert.equal(paths.setupCmdCopyPath, 'C:\\Users\\Friend\\AppData\\Local\\Amanuensis\\Aman-Setup.cmd');
   assert.equal(paths.backupsDir, 'C:\\Users\\Friend\\AppData\\Local\\Amanuensis\\backups');
+  assert.equal(paths.caCertPath, 'C:\\Users\\Friend\\AppData\\Local\\Amanuensis\\ca.crt');
 });
 
 test('the forwarder golden file is the forwarder, byte for byte', () => {
@@ -268,6 +338,16 @@ test('a forwarder write that cannot happen fails as a Windows job error', async 
     selfExePath: SELF,
   });
   await assert.rejects(jobs.replaceSetupCmdCopyWithForwarder(), WindowsJobError);
+});
+
+test('a certificate write that cannot happen fails as a Windows job error', async () => {
+  const jobs = systemWindowsJobs({
+    runner: new AnswerRunner(''),
+    // Far longer than any file name a disk allows, so the write fails.
+    localAppDataDir: 'C:\\' + 'a'.repeat(300),
+    selfExePath: SELF,
+  });
+  await assert.rejects(jobs.writeCaCertificate('certificate'), WindowsJobError);
 });
 
 test('a port a program holds is not free, and a port nobody holds is', async () => {

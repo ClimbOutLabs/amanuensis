@@ -3,6 +3,7 @@ import { win32 } from 'node:path';
 import {
   BACKUPS_SHORTCUT_NAME,
   CHECK_AMAN_SHORTCUT_NAME,
+  PHONE_SHORTCUT_NAME,
   SETUP_CMD_FORWARDER,
   UPDATE_AMAN_SHORTCUT_NAME,
   WindowsJobError,
@@ -24,7 +25,12 @@ export type FakeWindowsJobStep =
   | 'task'
   | 'taskQuery'
   | 'backupsList'
+  | 'phone'
+  | 'firewall-open'
+  | 'firewall-close'
   | 'forwarder'
+  | 'ca-write'
+  | 'ca-store'
   | 'docker'
   | 'browser'
   | 'aclPrivate'
@@ -48,10 +54,13 @@ export class FakeWindowsJobs implements WindowsJobs {
   userPath: string;
   shortcuts: ShortcutFacts[];
   forwarderContents: string | null = null;
+  caCertContents: string | null = null;
   browserUrls: string[] = [];
   dockerDesktopStarts = 0;
   backupTask: boolean;
   backupNames: string[];
+  firewallOpen = false;
+  firewallPorts: readonly number[] = [];
   readonly ops: string[] = [];
 
   constructor(options: {
@@ -183,9 +192,46 @@ export class FakeWindowsJobs implements WindowsJobs {
     return Promise.resolve([...this.backupNames]);
   }
 
+  ensurePhoneShortcut(): Promise<void> {
+    this.step('phone');
+    const path = win32.join(this.startMenuProgramsDir, `${PHONE_SHORTCUT_NAME}.lnk`);
+    const entry: ShortcutFacts = { path, target: this.programsExePath, args: 'network open' };
+    const existing = this.shortcuts.findIndex(shortcut => shortcut.path === path);
+    if (existing === -1) {
+      this.shortcuts.push(entry);
+    } else {
+      this.shortcuts[existing] = entry;
+    }
+    return Promise.resolve();
+  }
+
+  openFirewallToHome(ports: readonly number[]): Promise<void> {
+    this.step('firewall-open');
+    this.firewallOpen = true;
+    this.firewallPorts = [...ports];
+    return Promise.resolve();
+  }
+
+  closeFirewallToHome(): Promise<void> {
+    this.step('firewall-close');
+    this.firewallOpen = false;
+    return Promise.resolve();
+  }
+
   replaceSetupCmdCopyWithForwarder(): Promise<void> {
     this.step('forwarder');
     this.forwarderContents = SETUP_CMD_FORWARDER;
+    return Promise.resolve();
+  }
+
+  writeCaCertificate(certText: string): Promise<void> {
+    this.step('ca-write');
+    this.caCertContents = certText;
+    return Promise.resolve();
+  }
+
+  addCaCertificateToUserStore(): Promise<void> {
+    this.step('ca-store');
     return Promise.resolve();
   }
 

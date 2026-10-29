@@ -111,6 +111,7 @@ function installedSummary(): StateSummary {
 function storeWith(summary: StateSummary): StateStore {
   return {
     readSummary: () => Promise.resolve(summary),
+    readCaCertificate: () => Promise.resolve(null),
     writeInstance: () => Promise.resolve(false),
     setInstanceValue: () => Promise.resolve(false),
     removeInstance: () => Promise.resolve(),

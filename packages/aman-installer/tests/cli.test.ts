@@ -9,6 +9,8 @@ import { FakeWindowsJobs } from '../src/host/fakeWindowsJobs.ts';
 import {
   ADOPT_NOT_WINDOWS,
   HELP_LINES,
+  NETWORK_NOT_WINDOWS,
+  NETWORK_USAGE,
   NOT_INSTALLED,
   OPEN_NOT_WINDOWS,
   problemText,
@@ -189,4 +191,18 @@ test('open on a computer that is not Windows refuses with its problem', async ()
   const exitCode = await runCli(['open'], deps);
   assert.equal(exitCode, 1);
   assert.deepEqual(printed, [problemText(OPEN_NOT_WINDOWS)]);
+});
+
+test('network open on a computer that is not Windows refuses with its problem', async () => {
+  const { deps, printed } = makeCli(new Map());
+  const exitCode = await runCli(['network', 'open'], deps);
+  assert.equal(exitCode, 1);
+  assert.deepEqual(printed, [problemText(NETWORK_NOT_WINDOWS)]);
+});
+
+test('network with no word after it prints its usage problem', async () => {
+  const { deps, printed } = makeCli(new Map());
+  const exitCode = await runCli(['network'], deps);
+  assert.equal(exitCode, 1);
+  assert.deepEqual(printed, [problemText(NETWORK_USAGE)]);
 });
