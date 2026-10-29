@@ -4,7 +4,7 @@ import type { PersonalizationProfileContent } from '../../personalization/profil
 import { ScheduleManifestSchema } from '../../schemas/schedule';
 import { photographyGuide, relocationGuide } from './maya/knowledge';
 import { mayaMemoryNotes } from './maya/memories';
-import { junePersona, theoPersona } from './maya/personas';
+import { junePersona, PDF_GUIDANCE, theoPersona, WORKSPACE_GUIDANCE } from './maya/personas';
 import { BACKUP_CLINIC, GP_CLINIC, HOME, VISA_CLINIC } from './maya/places';
 import { tasksSpaceBody } from './maya/tasks';
 import type { DemoNote, DemoSpace, DemoWorld } from './model';
@@ -42,7 +42,7 @@ PERSONAL INTELLIGENCE:
 - PRIVACY SPINE: the brief is private and can say anything. Drafts are in her voice, carry only recipient-relevant facts, and never send. Nothing escapes.
 - Surface the single most important actionable item first, on its own highlighted card, never buried.
 
-OUTPUT: OpenUI dashboard (header, 📥 Email table, 📝 Drafts, 📅 Calendar, 🧭 Travel, 🎯 Briefing per appointment, 🔭 Tomorrow, ✅ Needs your OK), color-coded priority badges and emoji markers. Adapt: drop empty sections, never render filler. Plain, direct words; no flowery filler; no em dashes.`;
+OUTPUT: write the dashboard in your reply as an openui block (read the OpenUI instructions first; there is no dashboard tool). Draw each route once. Sections: header, 📥 Email table, 📝 Drafts, 📅 Calendar, 🧭 Travel, 🎯 Briefing per appointment, 🔭 Tomorrow, ✅ Needs your OK, with color-coded priority badges and emoji markers. Adapt: drop empty sections, never render filler. Plain, direct words; no flowery filler; no em dashes.`;
 
 /** How reset tells the seeded profile from one the person wrote: the assistant reads it, so it carries no marker. */
 export const DEMO_USER_PROFILE =
@@ -133,8 +133,12 @@ export function buildDemoWorld(input: DemoWorldInput): DemoWorld {
     agentSpec: AgentSpecSchema.parse({
       model: { name: input.modelName },
       config: { sandbox: { enabled: true } },
-      // Mirrors the owner's own assistant, whose standing instructions are the brief itself.
-      instructions: DEMO_BRIEF_TASK,
+      instructions: [
+        'You are Nata, a calm personal assistant for Maya, who just moved from Austin to Lisbon.',
+        'Use what you remember about her. Warm, friendly, honest, direct and caring.',
+        WORKSPACE_GUIDANCE,
+        PDF_GUIDANCE,
+      ].join(' '),
     }),
     scheduleManifest: ScheduleManifestSchema.parse({
       task: [DEMO_BRIEF_TASK, `Work out travel from my place, ${HOME.address}, unless I say otherwise.`].join(' '),

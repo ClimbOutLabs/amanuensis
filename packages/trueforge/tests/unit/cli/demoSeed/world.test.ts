@@ -161,7 +161,8 @@ describe('buildDemoWorld content', () => {
       'Weave what I know about Maya into every briefing: her life context, relationships, plans, and preferences.',
       'PRIVACY SPINE: the brief is private and can say anything. Drafts are in her voice, carry only recipient-relevant facts, and never send. Nothing escapes.',
       'Surface the single most important actionable item first, on its own highlighted card, never buried.',
-      'OUTPUT: OpenUI dashboard (header, 📥 Email table, 📝 Drafts, 📅 Calendar, 🧭 Travel, 🎯 Briefing per appointment, 🔭 Tomorrow, ✅ Needs your OK), color-coded priority badges and emoji markers. Adapt: drop empty sections, never render filler. Plain, direct words; no flowery filler; no em dashes.',
+      'OUTPUT: write the dashboard in your reply as an openui block (read the OpenUI instructions first; there is no dashboard tool). Draw each route once.',
+      'Sections: header, 📥 Email table, 📝 Drafts, 📅 Calendar, 🧭 Travel, 🎯 Briefing per appointment, 🔭 Tomorrow, ✅ Needs your OK, with color-coded priority badges and emoji markers. Adapt: drop empty sections, never render filler. Plain, direct words; no flowery filler; no em dashes.',
     ]) {
       expect(task).toContain(fragment);
     }
@@ -238,7 +239,8 @@ describe('buildDemoWorld content', () => {
     expect(profile.voice_guidance).toBe('Warm, friendly, honest, direct and caring.');
     expect(profile.learning_enabled).toBe(true);
     expect(profile.assistant_identity).toContain('Vibe\nBest friend who knows where to look.');
-    expect(agentSpec.instructions).toBe(DEMO_BRIEF_TASK);
+    expect(agentSpec.instructions).toContain('You are Nata');
+    expect(agentSpec.instructions).toContain('Warm, friendly, honest, direct and caring.');
   });
 
   it('never tells the assistant that Maya or her world is made up', () => {
@@ -247,12 +249,11 @@ describe('buildDemoWorld content', () => {
     expect(JSON.stringify(world)).not.toMatch(/demo|synthetic|fictional|invented|made up|not real/i);
   });
 
-  it('turns the sandbox on for the agent and tells every persona to degrade to plain text', () => {
+  it('turns the sandbox on for the agent and tells every voice to degrade to plain text', () => {
     const world = worldOn(MONDAY);
 
     expect(world.agentSpec.config?.sandbox?.enabled).toBe(true);
-    expect(world.agentSpec.instructions).not.toContain('Google');
-    for (const text of world.personas.map(persona => persona.content.instructions)) {
+    for (const text of [world.agentSpec.instructions, ...world.personas.map(persona => persona.content.instructions)]) {
       expect(text).toContain('run_code');
       expect(text).toContain('If run_code is not available');
       expect(text).toContain('read them with the email and calendar tools');

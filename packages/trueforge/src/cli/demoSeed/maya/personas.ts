@@ -1,11 +1,11 @@
 import type { PersonaContent } from '../../../personas/persona';
 
 /** Added to every persona so a checklist or plan can become a file when the sandbox exists, and plain text when it does not. */
-const PDF_GUIDANCE =
+export const PDF_GUIDANCE =
   'When she asks for a PDF or a file, build it with run_code and say where to download it. If run_code is not available, say so plainly and give the checklist as plain text she can print.';
 
 /** Where Maya's records live; every persona and the default assistant read them the same way. */
-const WORKSPACE_GUIDANCE =
+export const WORKSPACE_GUIDANCE =
   'Her email and calendar are her connected accounts: read them with the email and calendar tools. Her task list is the Tasks space (list_spaces, get_space); keep it current. When drafting is offered, draft replies and leave every send for her OK; never send on your own.';
 
 export const JUNE_NAME = 'June';
