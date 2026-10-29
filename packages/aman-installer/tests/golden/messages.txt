@@ -46,6 +46,8 @@ Aman is not installed on this computer yet. Install Aman on this computer, then 
 The record of what is installed could not be read. Run the installer again from the folder Aman was installed from, then run aman status again.
 Another install is running right now. Wait for it to finish, or wait 2 minutes if you stopped an install a moment ago, then run aman status again.
 Docker could not download the small helper it needs to read the record of what is installed. Check your internet connection, then run aman status again.
+The record of what is installed could not be read. Run the installer again from the folder Aman was installed from, then run aman doctor again.
+Something went wrong that Aman did not expect, so it stopped. Run aman doctor and keep what it prints; it helps find what went wrong.
 Aman is installed, version aman-app:0.
 Instance main is running at http://127.0.0.1:8791.
 Instance main is partly running at http://127.0.0.1:8791.
@@ -86,6 +88,7 @@ Aman cannot update itself from here on this computer. Update Aman with the insta
 Aman is installed, but its program is not in place on this computer. Run Aman Setup once to put the program in place, then run Update Aman again.
 This release does not carry the source files the update needs. Run Update Aman from the Start menu again later, when a fixed release is out.
 The newest version of Aman could not be downloaded. Check your internet connection, then run Update Aman from the Start menu again.
+The newest version of Aman could not be got from the release page. Wait a while, then run Update Aman from the Start menu again.
 Aman is not ready to update. Run aman doctor.
 The new version of Aman did not start, so the update was stopped and your Aman is unchanged. Run Update Aman from the Start menu again later.
 The new Aman program could not be put in place. Close any Aman window that is open, then run Update Aman from the Start menu again.
@@ -148,6 +151,7 @@ Docker is not answering, so the setup cannot go ahead. Open Docker Desktop from 
 No answer was given, so nothing was installed. Open Aman Setup again when you are ready to answer its questions.
 Every place Aman could answer on this computer is taken by another program. Stop a program you do not need, then open Aman Setup again.
 The newest version of Aman could not be downloaded. Check your internet connection, then open Aman Setup again.
+The newest version of Aman could not be got from the release page. Wait a while, then open Aman Setup again.
 This release does not carry the source files the setup needs. Open Aman Setup again later, when a fixed release is out.
 Aman could not be set up from the downloaded files. Open Aman Setup again.
 Another install is running right now. Wait for it to finish, or wait 2 minutes if you stopped an install a moment ago, then open Aman Setup again.
@@ -163,8 +167,6 @@ The passwords do not match. Type them again.
 The password can have at most 72 characters. Accented or non-Latin letters count as more than one.
 That password still needs at least 8 characters, a number and a symbol, like @ # $ %.
 That password still needs a number and a symbol, like @ # $ %.
-The key lets Aman answer you with a model from Nebius Token Factory.
-Get a key at tokenfactory.nebius.com.
 Paste your model key (not shown):
 Aman will open but cannot answer until you add a key in Settings, then Models.
 Also use Aman from your phone and other devices on your home Wi-Fi? (yes or no):

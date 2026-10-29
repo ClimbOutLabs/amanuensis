@@ -121,8 +121,27 @@ test('the volume reader gives the same summary for the same fixture, packed as a
     '-1',
     `${VOLUME_HOME}/backups`,
   ]);
+  // The tree read first asks which of its folders the volume holds.
+  const probeLine = commandLine('docker', [
+    'run',
+    '--rm',
+    '--network',
+    'none',
+    '-v',
+    `${STATE_VOLUME}:${VOLUME_HOME}:ro`,
+    SETUP_IMAGE,
+    'ls',
+    '-1',
+    VOLUME_HOME,
+  ]);
+  const topNames = [
+    ...new Set(all.map(file => file.path.split('/')[0]).filter((name): name is string => name !== undefined)),
+  ];
   const runner = new StubProcessRunner(
-    new Map([[lsLine, okResult(`${[...new Set(backupNames)].join('\n')}\n`)]]),
+    new Map([
+      [lsLine, okResult(`${[...new Set(backupNames)].join('\n')}\n`)],
+      [probeLine, okResult(`${topNames.join('\n')}\n`)],
+    ]),
     new Map([[readLine, okBytesResult(buildTar(tarred))]]),
   );
   const store = createStateStore(volumeBackend(runner));

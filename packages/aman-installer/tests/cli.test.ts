@@ -24,6 +24,7 @@ import {
   UPGRADE_DOWNLOAD_FAILED,
   UPGRADE_NOT_WINDOWS,
 } from '../src/messages.ts';
+import type { FetchBytesResult } from '../src/release/download.ts';
 import {
   okResult,
   RecordingProcessRunner,
@@ -322,7 +323,7 @@ async function makeWindowsCli(options: { programInPlace: boolean }) {
     probeHealth: () => Promise.resolve(false),
     sleep: () => Promise.resolve(),
     programsDir,
-    fetchBytes: () => Promise.resolve(null),
+    fetchBytes: (): Promise<FetchBytesResult> => Promise.resolve({ unreachable: true }),
     confirm: () => Promise.resolve(true),
     arch: 'x64',
   };

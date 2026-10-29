@@ -7,6 +7,7 @@ import { resolvePendingSwap } from './commands/upgrade.ts';
 import { installerConfig } from './config.ts';
 import { hostForPlatform } from './host/hostFor.ts';
 import { systemWindowsJobs, windowsPaths } from './host/windowsJobs.ts';
+import { UNEXPECTED_FAILURE, problemText } from './messages.ts';
 import { fetchBytesFromNetwork } from './release/download.ts';
 import { SystemProcessRunner } from './runner/processRunner.ts';
 import { storeForHost } from './state/storeFor.ts';
@@ -180,6 +181,9 @@ runCli(args, {
     process.exitCode = exitCode;
   },
   () => {
+    // A failure no command planned for still owes the person one
+    // plain problem and a next step, never a silent exit.
+    console.log(problemText(UNEXPECTED_FAILURE));
     process.exitCode = 1;
   },
 );

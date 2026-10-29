@@ -38,18 +38,51 @@ const RELEASE_TEXT = `{
 
 // A stand-in for the aman_home volume: a map of files. Reads tar the map
 // out, writes unpack the tar they are fed, and every command line is
-// recorded for the golden file.
+// recorded for the golden file. The listings and the tar answer from
+// the map the way the real volume answers: a folder with no file under
+// it is not there, and tar of a folder that is not there fails.
 class FakeVolumeRunner implements ProcessRunner {
   readonly lines: string[] = [];
   readonly files = new Map<string, string>();
   writeExitCode = 0;
+  tarExitCode = 0;
+  tarStderr = '';
+
+  private namesUnder(prefix: string): string[] {
+    const names = new Set<string>();
+    for (const path of this.files.keys()) {
+      const rest = prefix === '' ? path : path.startsWith(`${prefix}/`) ? path.slice(prefix.length + 1) : null;
+      if (rest === null) {
+        continue;
+      }
+      const first = rest.split('/')[0];
+      if (first !== undefined && first !== '') {
+        names.add(first);
+      }
+    }
+    return [...names];
+  }
+
+  private folderExists(folder: string): boolean {
+    for (const path of this.files.keys()) {
+      if (path.startsWith(`${folder}/`)) {
+        return true;
+      }
+    }
+    return false;
+  }
 
   run(command: string, args: readonly string[]): Promise<ProcessResult> {
     this.lines.push(commandLine(command, args));
     if (args.includes('ls')) {
       const dir = args[args.length - 1];
       if (dir === '/root/.amanuensis/backups') {
-        return Promise.resolve(okResult('20261020T030405Z\n'));
+        const names = this.namesUnder('backups');
+        return Promise.resolve(okResult(names.length === 0 ? '' : `${names.join('\n')}\n`));
+      }
+      if (dir === '/root/.amanuensis') {
+        const names = this.namesUnder('');
+        return Promise.resolve(okResult(names.length === 0 ? '' : `${names.join('\n')}\n`));
       }
       return Promise.resolve(okResult(''));
     }
@@ -68,7 +101,31 @@ class FakeVolumeRunner implements ProcessRunner {
       return Promise.resolve(okBytesResult(new TextEncoder().encode(text)));
     }
     if (args.includes('tar') && args.includes('-c')) {
-      const tar = buildTar([...this.files].map(([path, text]) => ({ path, mode: 0o600, text })));
+      if (this.tarExitCode !== 0) {
+        return Promise.resolve({
+          exitCode: this.tarExitCode,
+          stdout: new Uint8Array(),
+          stderr: this.tarStderr,
+          started: true,
+        });
+      }
+      const cAt = args.indexOf('-C');
+      const requested = cAt === -1 ? [] : args.slice(cAt + 2);
+      for (const folder of requested) {
+        if (!this.folderExists(folder)) {
+          return Promise.resolve({
+            exitCode: 2,
+            stdout: new Uint8Array(),
+            stderr: `tar: ${folder}: Cannot stat: No such file or directory\ntar: Exiting with failure status due to previous errors\n`,
+            started: true,
+          });
+        }
+      }
+      const tar = buildTar(
+        [...this.files]
+          .filter(([path]) => requested.some(folder => path.startsWith(`${folder}/`)))
+          .map(([path, text]) => ({ path, mode: 0o600, text })),
+      );
       return Promise.resolve(okBytesResult(tar));
     }
     if (args.includes('sh')) {
@@ -96,6 +153,7 @@ function seededRunner(): FakeVolumeRunner {
   runner.files.set('state/installed', '2026-10-20T03:04:05Z aman-app:abc123\n');
   runner.files.set('state/backups', 'daily\n');
   runner.files.set('state/source', '/opt/aman-checkout\n');
+  runner.files.set('backups/20261020T030405Z/aman-backup.tar', 'fake backup bytes');
   return runner;
 }
 
@@ -111,6 +169,19 @@ test('the summary is read out of the volume with one tar read', async () => {
   assert.deepEqual(summary.backups, ['20261020T030405Z']);
   assert.equal(summary.backupsMode, 'daily');
   assert.equal(summary.installedAppImage, 'aman-app:abc123');
+});
+
+test('a fresh volume, with neither tree folder in it yet, reads as an empty summary', async () => {
+  const runner = new FakeVolumeRunner();
+  const store = createStateStore(volumeBackend(runner));
+  const summary = await store.readSummary();
+  assert.equal(summary.release, null);
+  assert.equal(summary.releaseUnreadable, false);
+  assert.deepEqual(summary.instances, []);
+  assert.deepEqual(summary.backups, []);
+  assert.equal(summary.backupsMode, null);
+  assert.equal(summary.sourceCheckout, null);
+  assert.equal(summary.installedAppImage, null);
 });
 
 test('a write unpacks only the changed file into the volume, under the lock script', async () => {
@@ -214,8 +285,25 @@ test('exit 125 from a failed image download is not read as docker being off', as
 test('a docker command that never starts is the docker error too', async () => {
   const runner = new FakeVolumeRunner();
   runner.runBytes = () => Promise.resolve({ exitCode: 1, stdout: new Uint8Array(), stderr: '', started: false });
+  runner.run = () => Promise.resolve({ exitCode: 1, stdout: '', stderr: '', started: false });
   const store = createStateStore(volumeBackend(runner));
   await assert.rejects(store.readSummary(), (error: unknown) => error instanceof StateDockerError);
+});
+
+test('a volume whose folders are there but cannot be read is the plain read error', async () => {
+  const runner = seededRunner();
+  runner.tarExitCode = 2;
+  runner.tarStderr =
+    'tar: state/instances/main.conf: Cannot open: Permission denied\ntar: Exiting with failure status due to previous errors\n';
+  const store = createStateStore(volumeBackend(runner));
+  await assert.rejects(
+    store.readSummary(),
+    (error: unknown) =>
+      error instanceof StateStoreError &&
+      !(error instanceof StateDockerError) &&
+      !(error instanceof StateImageError) &&
+      !(error instanceof StateBusyError),
+  );
 });
 
 test('a write with docker off is the docker error, so the next command that writes says to start Docker', async () => {

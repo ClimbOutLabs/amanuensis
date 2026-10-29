@@ -152,8 +152,49 @@ export function volumeBackend(runner: ProcessRunner): StateBackend {
     return caCert;
   };
 
+  // The two folders the tree read tars out. Which of them the volume
+  // holds is asked first: a fresh volume has neither, because Docker
+  // makes the volume for the mount but nothing has written into it
+  // yet, and tar of a folder that is not there fails. A volume with
+  // neither folder reads as an empty tree. A folder the listing names
+  // is then tarred, and a tar that still fails is a read that truly
+  // failed, so it keeps the plain read error below.
+  const presentTreeFolders = async (): Promise<string[]> => {
+    const result = await runner.run('docker', [
+      'run',
+      '--rm',
+      '--network',
+      'none',
+      '-v',
+      MOUNT_READ_ONLY,
+      SETUP_IMAGE,
+      'ls',
+      '-1',
+      VOLUME_HOME,
+    ]);
+    const failure = dockerFailure(result);
+    if (failure !== null) {
+      throw failure;
+    }
+    if (result.exitCode !== 0) {
+      throw new StateStoreError('the state volume could not be read');
+    }
+    const names = new Set(
+      result.stdout
+        .split('\n')
+        .map(line => line.trim())
+        .filter(line => line !== ''),
+    );
+    return ['state', 'release'].filter(folder => names.has(folder));
+  };
+
   const readTree = async (): Promise<Map<string, string>> => {
     if (files !== null) {
+      return files;
+    }
+    const folders = await presentTreeFolders();
+    if (folders.length === 0) {
+      files = new Map();
       return files;
     }
     const result = await runner.runBytes(
@@ -172,8 +213,7 @@ export function volumeBackend(runner: ProcessRunner): StateBackend {
         '-',
         '-C',
         VOLUME_HOME,
-        'state',
-        'release',
+        ...folders,
       ],
       new Uint8Array(),
     );

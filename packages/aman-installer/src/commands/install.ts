@@ -23,7 +23,6 @@ import {
   INSTALL_EMAIL_QUESTION,
   INSTALL_IMAGE_UNAVAILABLE,
   INSTALL_KEY_EMPTY_LINE,
-  INSTALL_KEY_HELP_LINES,
   INSTALL_KEY_QUESTION,
   INSTALL_NO_ANSWER,
   INSTALL_NO_FREE_PORT,
@@ -34,6 +33,7 @@ import {
   INSTALL_PASSWORD_QUESTION,
   INSTALL_PHONE_QUESTION,
   INSTALL_RELEASE_DOWNLOAD_FAILED,
+  INSTALL_RELEASE_NOT_THERE,
   INSTALL_RESTART_NEEDED,
   INSTALL_RESUME_FAILED,
   INSTALL_SOURCE_FAILED,
@@ -142,11 +142,12 @@ interface DockerInstallOutcome {
 // Docker answers afterwards is the test, as everywhere else.
 async function installDockerDesktop(deps: InstallDeps): Promise<DockerInstallOutcome> {
   const { jobs, print } = deps;
-  const bytes = await deps.fetchBytes(DOCKER_DESKTOP_DOWNLOAD_URL);
-  if (bytes === null) {
+  const download = await deps.fetchBytes(DOCKER_DESKTOP_DOWNLOAD_URL);
+  if (!('data' in download)) {
     print(problemText(INSTALL_DOWNLOAD_FAILED));
     return { ok: false, resumeFailed: false };
   }
+  const bytes = download.data;
   try {
     await jobs.writeDockerDesktopInstaller(bytes);
   } catch (error) {
@@ -272,9 +273,6 @@ async function askQuestions(deps: InstallDeps): Promise<Answers | null> {
     }
     password = first;
   }
-  for (const line of INSTALL_KEY_HELP_LINES) {
-    print(line);
-  }
   const keyAnswer = await deps.askSecret(INSTALL_KEY_QUESTION);
   if (keyAnswer === null) {
     return null;
@@ -315,6 +313,10 @@ async function unpackNewestSource(deps: InstallDeps): Promise<boolean> {
     print(problemText(INSTALL_RELEASE_DOWNLOAD_FAILED));
     return false;
   }
+  if ('missing' in latest) {
+    print(problemText(INSTALL_RELEASE_NOT_THERE));
+    return false;
+  }
   if ('problem' in latest) {
     print(problemText(latest.problem));
     return false;
@@ -331,6 +333,10 @@ async function unpackNewestSource(deps: InstallDeps): Promise<boolean> {
   });
   if ('unreachable' in download) {
     print(problemText(INSTALL_RELEASE_DOWNLOAD_FAILED));
+    return false;
+  }
+  if ('missing' in download) {
+    print(problemText(INSTALL_RELEASE_NOT_THERE));
     return false;
   }
   if ('problem' in download) {

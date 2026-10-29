@@ -11,6 +11,7 @@ import { FakeWindowsJobs, type FakeWindowsJobStep } from '../../src/host/fakeWin
 import { DOCKER_DESKTOP_DOWNLOAD_URL } from '../../src/host/windowsJobs.ts';
 import {
   ADOPTED_LINE,
+  ADOPT_NOT_INSTALLED,
   FILES_MADE_PRIVATE_LINE,
   INSTALL_BUSY,
   INSTALL_CONTINUING_LINE,
@@ -21,6 +22,7 @@ import {
   INSTALL_NOT_WINDOWS,
   INSTALL_NO_ANSWER,
   INSTALL_PASSWORD_MISMATCH_LINE,
+  INSTALL_RELEASE_NOT_THERE,
   INSTALL_RESTART_NEEDED,
   INSTALL_RESUME_FAILED,
   LOW_MEMORY,
@@ -31,6 +33,7 @@ import {
   openReadyLine,
   problemText,
 } from '../../src/messages.ts';
+import type { FetchBytesResult } from '../../src/release/download.ts';
 import { buildManifest, manifestToBytes, type SourceIds } from '../../src/release/manifest.ts';
 import { signMinisign } from '../../src/release/minisign.ts';
 import {
@@ -42,7 +45,8 @@ import {
   type ProcessResult,
   type ProcessRunner,
 } from '../../src/runner/processRunner.ts';
-import { parseRegistry, type StateStore, type StateSummary } from '../../src/state/state.ts';
+import { createStateStore, parseRegistry, type StateStore, type StateSummary } from '../../src/state/state.ts';
+import { volumeBackend } from '../../src/state/volumeBackend.ts';
 import { TEST_PUBLIC_KEY_MINISIGN, testKeyNum, testPrivateKeyDer } from '../release/testKeys.ts';
 
 const NOW = 1791633600;
@@ -288,20 +292,20 @@ async function makeWorld(options: WorldOptions = {}): Promise<World> {
     privateKeyDer: testPrivateKeyDer(),
     keyNum: testKeyNum(),
   });
-  const fetchBytes = (url: string): Promise<Uint8Array | null> => {
+  const fetchBytes = (url: string): Promise<FetchBytesResult> => {
     if (url === MANIFEST_URL) {
-      return Promise.resolve(manifestBytes);
+      return Promise.resolve({ data: manifestBytes });
     }
     if (url === SIGNATURE_URL) {
-      return Promise.resolve(new TextEncoder().encode(signatureText));
+      return Promise.resolve({ data: new TextEncoder().encode(signatureText) });
     }
     if (url === ARCHIVE_URL) {
-      return Promise.resolve(ARCHIVE);
+      return Promise.resolve({ data: ARCHIVE });
     }
     if (url === DOCKER_DESKTOP_DOWNLOAD_URL) {
-      return Promise.resolve(options.noDockerDownload === true ? null : DOCKER_INSTALLER);
+      return Promise.resolve(options.noDockerDownload === true ? { unreachable: true } : { data: DOCKER_INSTALLER });
     }
-    return Promise.resolve(null);
+    return Promise.resolve({ unreachable: true });
   };
   const printed: string[] = [];
   const asked: World['asked'] = [];
@@ -415,6 +419,60 @@ test('the first install asks the four questions, installs, and opens the getting
   assert.ok(world.printed.includes(openReadyLine('https://localhost:8443')));
   assert.ok(world.printed.includes(NETWORK_OPEN_LINE));
   assert.equal(world.printed.at(-1), INSTALL_DONE_LINE);
+});
+
+// The state of a computer whose aman_home volume exists but holds
+// nothing yet: Docker answers the volume's listings, every one empty,
+// and no file can be read out of it. Everything else about the world
+// is the one the other install tests use.
+class FreshVolumeRunner implements ProcessRunner {
+  private readonly inner: ProcessRunner;
+
+  constructor(inner: ProcessRunner) {
+    this.inner = inner;
+  }
+
+  run(command: string, args: readonly string[]): Promise<ProcessResult> {
+    if (args.includes('ls')) {
+      return Promise.resolve(okResult(''));
+    }
+    return this.inner.run(command, args);
+  }
+
+  runBytes(command: string, args: readonly string[], stdin: Uint8Array): Promise<ProcessBytesResult> {
+    if (args.includes('cat')) {
+      return Promise.resolve({
+        exitCode: 1,
+        stdout: new Uint8Array(),
+        stderr: 'cat: no such file or directory',
+        started: true,
+      });
+    }
+    return this.inner.runBytes(command, args, stdin);
+  }
+}
+
+test('a first install on a fresh volume asks the questions and runs the container install', async () => {
+  const world = await makeWorld();
+  world.deps.store = createStateStore(volumeBackend(new FreshVolumeRunner(world.runner)));
+  const code = await runInstall(world.deps, { dryRun: false });
+  assert.deepEqual(
+    world.asked.map(entry => `${entry.kind}:${entry.question}`),
+    [
+      'ask:Your email, used to sign in:',
+      'secret:Choose a password (at least 8 characters, not shown):',
+      'secret:Type it again:',
+      'secret:Paste your model key (not shown):',
+      'ask:Also use Aman from your phone and other devices on your home Wi-Fi? (yes or no):',
+    ],
+  );
+  assert.equal(world.runner.installRuns.length, 1);
+  // The fake container step cannot write the volume, so the steps that
+  // finish an install find nothing in it and the adopt step says so.
+  // Those steps are covered by the WorldStore tests above; this test
+  // pins that a fresh volume no longer stops the flow before them.
+  assert.equal(code, 1);
+  assert.ok(world.printed.includes(problemText(ADOPT_NOT_INSTALLED)));
 });
 
 test('the golden file holds the command lines of a first install with no Docker yet', async () => {
@@ -640,6 +698,16 @@ test('a busy container install stops the flow before any later step', async () =
   assert.equal(world.printed.at(-1), problemText(INSTALL_BUSY));
   assert.ok(!world.jobs.ops.includes('copy'));
   assert.equal(world.jobs.gettingStartedText, null);
+});
+
+test('a release page that answers without the record names the page, not the connection', async () => {
+  const world = await makeWorld();
+  world.deps.fetchBytes = () => Promise.resolve({ missing: true });
+  const code = await runInstall(world.deps, { dryRun: false });
+  assert.equal(code, 1);
+  assert.equal(world.asked.length, 5);
+  assert.ok(world.printed.includes(problemText(INSTALL_RELEASE_NOT_THERE)));
+  assert.equal(world.runner.installRuns.length, 0);
 });
 
 test('a release record that does not check out stops the flow before the install', async () => {

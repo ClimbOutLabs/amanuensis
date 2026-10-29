@@ -188,6 +188,20 @@ export const STATE_IMAGE_UNAVAILABLE: Problem = {
   fix: 'Check your internet connection, then run aman status again.',
 };
 
+// The doctor's own words for the same unreadable record: the next step
+// names the doctor, not another command.
+export const DOCTOR_STATE_UNREADABLE: Problem = {
+  happened: 'The record of what is installed could not be read.',
+  fix: 'Run the installer again from the folder Aman was installed from, then run aman doctor again.',
+};
+
+// What the entry point says when a command stops with a failure no
+// command planned for: one plain problem instead of silence.
+export const UNEXPECTED_FAILURE: Problem = {
+  happened: 'Something went wrong that Aman did not expect, so it stopped.',
+  fix: 'Run aman doctor and keep what it prints; it helps find what went wrong.',
+};
+
 export const DOCKER_NOT_ANSWERING: Record<SystemKind, Problem> = {
   windows: {
     happened: 'Docker is not answering, so whether each instance is running is unknown.',
@@ -401,6 +415,13 @@ export const UPGRADE_SOURCE_MISSING: Problem = {
 export const UPGRADE_DOWNLOAD_FAILED: Problem = {
   happened: 'The newest version of Aman could not be downloaded.',
   fix: 'Check your internet connection, then run Update Aman from the Start menu again.',
+};
+
+// The release page answered, but the newest version is not there:
+// that is not the person's connection, and the words do not blame it.
+export const UPGRADE_RELEASE_NOT_THERE: Problem = {
+  happened: 'The newest version of Aman could not be got from the release page.',
+  fix: 'Wait a while, then run Update Aman from the Start menu again.',
 };
 
 // The fix sentence is the doctor's own, for the first check that failed:
@@ -706,6 +727,13 @@ export const INSTALL_RELEASE_DOWNLOAD_FAILED: Problem = {
   fix: 'Check your internet connection, then open Aman Setup again.',
 };
 
+// The release page answered, but the newest version is not there:
+// that is not the person's connection, and the words do not blame it.
+export const INSTALL_RELEASE_NOT_THERE: Problem = {
+  happened: 'The newest version of Aman could not be got from the release page.',
+  fix: 'Wait a while, then open Aman Setup again.',
+};
+
 export const INSTALL_SOURCE_MISSING: Problem = {
   happened: 'This release does not carry the source files the setup needs.',
   fix: 'Open Aman Setup again later, when a fixed release is out.',
@@ -796,13 +824,6 @@ export function installPasswordProblem(password: string): string | null {
   return `That password still needs ${missing[0] ?? ''}, ${missing[1] ?? ''} and ${missing[2] ?? ''}.`;
 }
 
-// What is printed above the model key question: what the key is for,
-// and where to get one. The address is Nebius Token Factory's own.
-export const INSTALL_KEY_HELP_LINES: readonly string[] = [
-  'The key lets Aman answer you with a model from Nebius Token Factory.',
-  'Get a key at tokenfactory.nebius.com.',
-];
-
 export const INSTALL_KEY_QUESTION = 'Paste your model key (not shown):';
 
 // Said when the key answer is empty, which is allowed: the install
@@ -854,6 +875,8 @@ export function allMessageLines(): string[] {
   lines.push(problemText(STATE_UNREADABLE));
   lines.push(problemText(STATE_BUSY));
   lines.push(problemText(STATE_IMAGE_UNAVAILABLE));
+  lines.push(problemText(DOCTOR_STATE_UNREADABLE));
+  lines.push(problemText(UNEXPECTED_FAILURE));
   lines.push(statusInstalledLine('aman-app:0'));
   lines.push(statusInstanceLine('main', 'running', 'http://127.0.0.1:8791'));
   lines.push(statusInstanceLine('main', 'partly running', 'http://127.0.0.1:8791'));
@@ -894,6 +917,7 @@ export function allMessageLines(): string[] {
   lines.push(problemText(UPGRADE_PROGRAM_MISSING));
   lines.push(problemText(UPGRADE_SOURCE_MISSING));
   lines.push(problemText(UPGRADE_DOWNLOAD_FAILED));
+  lines.push(problemText(UPGRADE_RELEASE_NOT_THERE));
   lines.push(problemText(upgradeNotReadyProblem('Run aman doctor')));
   lines.push(problemText(UPGRADE_SMOKE_FAILED));
   lines.push(problemText(UPGRADE_REPLACE_FAILED));
@@ -956,6 +980,7 @@ export function allMessageLines(): string[] {
   lines.push(problemText(INSTALL_NO_ANSWER));
   lines.push(problemText(INSTALL_NO_FREE_PORT));
   lines.push(problemText(INSTALL_RELEASE_DOWNLOAD_FAILED));
+  lines.push(problemText(INSTALL_RELEASE_NOT_THERE));
   lines.push(problemText(INSTALL_SOURCE_MISSING));
   lines.push(problemText(INSTALL_SOURCE_FAILED));
   lines.push(problemText(INSTALL_BUSY));
@@ -971,7 +996,6 @@ export function allMessageLines(): string[] {
   lines.push(INSTALL_PASSWORD_TOO_LONG_LINE);
   lines.push(installPasswordProblem('short') ?? '');
   lines.push(installPasswordProblem('longenough') ?? '');
-  lines.push(...INSTALL_KEY_HELP_LINES);
   lines.push(INSTALL_KEY_QUESTION);
   lines.push(INSTALL_KEY_EMPTY_LINE);
   lines.push(INSTALL_PHONE_QUESTION);
