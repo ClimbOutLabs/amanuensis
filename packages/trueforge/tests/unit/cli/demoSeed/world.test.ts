@@ -258,6 +258,10 @@ describe('buildDemoWorld content', () => {
       expect(text).toContain('run_code');
       expect(text).toContain('If run_code is not available');
       expect(text).toContain('read them with the email and calendar tools');
+      expect(text).toContain(
+        'fetch it with the attachment tool; if it was not fetched, say that only the email text was read',
+      );
+      expect(text).toContain('list the recent messages and look through them instead of repeating the same words');
       expect(text).not.toContain('Google');
       expect(text).toContain('leave every send for her OK');
       expect(text).toContain(
