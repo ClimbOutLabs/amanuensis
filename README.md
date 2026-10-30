@@ -6,7 +6,7 @@
 
 <p align="center">
   <strong>A chief of staff that lives on your own computer.</strong><br>
-  It knows your life, keeps track of what you'd otherwise forget, and never does anything behind your back.
+  It knows your life, keeps track of what you'd otherwise forget, and never does anything without your knowledge.
 </p>
 
 <p align="center">
@@ -303,6 +303,7 @@ Read [AGENTS.md](AGENTS.md) and any package-level `AGENTS.md` before changing co
 ## License and attribution
 
 Amanuensis is licensed under the [Mozilla Public License 2.0](LICENSE). It is derived from [TrueForge](https://github.com/truefoundry/trueforge) by [TrueFoundry](https://truefoundry.com); those portions are MIT licensed, Copyright 2024-2026 TrueFoundry, and their notices are kept in [NOTICE](NOTICE). Third-party components with their own terms are listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+
 
 
 
