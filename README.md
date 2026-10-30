@@ -39,6 +39,15 @@ Amanuensis is built for them. You give it a name (ours is Mannie). It wakes up b
 
 You need Docker, `git`, about 10 GB of free disk space, and Linux or macOS. On Windows, use WSL2. Setup takes about 15 minutes.
 
+### Installing on Mac and Linux
+
+```bash
+git clone https://github.com/ClimbOutLabs/amanuensis && cd amanuensis
+./installer/install.sh
+```
+
+The installer checks your computer first and tells you in plain words if something is missing. It shows its plan and asks before it changes anything. At the end it prints the address to open in your browser. It also sets up sign-in, backups and phone access, and leaves an `aman` command for health checks (`aman doctor`) and upgrades.
+
 ### Installing on Windows
 
 On Windows, Amanuensis installs inside WSL 2, the Windows Subsystem for Linux, with Docker Desktop, by running the project's install script. Follow these steps in order.
@@ -77,22 +86,13 @@ Replace `YOU@example.com` with the email address you will sign in with. Replace 
 
 **If Docker is not connected to Ubuntu.** The install script may say Docker did not answer, or Ubuntu itself may say the docker command could not be found in this WSL 2 distro. Both mean the same thing: Docker Desktop is running, but its integration with Ubuntu is off. Open Docker Desktop, go to **Settings, Resources, WSL Integration**, turn on Ubuntu under **Enable integration with additional distros**, and choose **Apply & Restart**. Then, in the Ubuntu window, `docker version` must print a Server section. Once it does, run the install command again.
 
-**1. Install Aman.**
-
-```bash
-git clone https://github.com/ClimbOutLabs/amanuensis && cd amanuensis
-./installer/install.sh
-```
-
-The installer checks your computer first and tells you in plain words if something is missing. It shows its plan and asks before it changes anything. At the end it prints the address to open in your browser. It also sets up sign-in, backups and phone access, and leaves an `aman` command for health checks (`aman doctor`) and upgrades.
-
-**2. Get a Together AI key.** Aman needs a model to think with. [Together AI](https://www.together.ai) hosts open models and is the quickest way to start.
+**1. Get a Together AI key.** Aman needs a model to think with. [Together AI](https://www.together.ai) hosts open models and is the quickest way to start.
 
 - Sign up free at [api.together.ai](https://api.together.ai).
 - Open **Settings, API keys** ([direct link](https://api.together.ai/settings/projects/~current/api-keys)) and create a key.
 - Copy it. It is shown only once.
 
-**3. Add it to Aman.** Open Aman, then go to **Settings, Models, Add custom provider**, and fill in:
+**2. Add it to Aman.** Open Aman, then go to **Settings, Models, Add custom provider**, and fill in:
 
 | Field    | What to enter                                                                                                                 |
 | -------- | ----------------------------------------------------------------------------------------------------------------------------- |
@@ -103,7 +103,7 @@ The installer checks your computer first and tells you in plain words if somethi
 
 Save, then pick the model in the menu under the message box.
 
-**4. Give your chief of staff a name and a personality.** Go to **Settings, Personalization**, and find **Assistant profile**. It has three fields:
+**3. Give your chief of staff a name and a personality.** Go to **Settings, Personalization**, and find **Assistant profile**. It has three fields:
 
 - **Name**: what you'll call it. Ours is Mannie.
 - **Voice guidance**: one line on how it talks, such as "Warm, direct, concise".
@@ -123,9 +123,9 @@ Not sure what to write? Start from one of these and copy its two fields in. Chan
 
 None of these change what it's allowed to do. Sending, deleting and installing still wait for your OK, whatever personality you pick.
 
-**5. Go say hello.** Open the home screen and tap **I'm behind**, or just say what's on your mind. Your chief of staff asks one question at a time and takes it from there.
+**4. Go say hello.** Open the home screen and tap **I'm behind**, or just say what's on your mind. Your chief of staff asks one question at a time and takes it from there.
 
-**6. Connect your email and calendar.** This is where it starts carrying things for you. Go to **Settings, Connectors**:
+**5. Connect your email and calendar.** This is where it starts carrying things for you. Go to **Settings, Connectors**:
 
 - **Gmail and Google Calendar.** Choose **Google**, then **Connect**. The panel walks you through making your own Google sign-in in about ten minutes, so your mail goes from Google straight to your computer and nobody else is in between. Connect mail first, then **Connect Calendar**. [Step-by-step guide](docs/google.mdx).
 - **Any other mailbox or calendar.** Choose **Email** for an IMAP mailbox (Outlook, iCloud, Fastmail and most others), and **Calendar** for a CalDAV calendar.
