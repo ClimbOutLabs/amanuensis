@@ -18,7 +18,12 @@ import {
   type SettingsOpenRequest,
 } from '@/server/ShellModeContext.js';
 import type { AgentUIServer } from '@/server/types.js';
-import { createMockAgentSessionsServer, createMockAgentUIServer, createMockCatalog } from './mockServer.js';
+import {
+  createMockAgentSessionsServer,
+  createMockAgentUIServer,
+  createMockCatalog,
+  createMockScheduleServer,
+} from './mockServer.js';
 
 function wrap(agentConfig?: AgentConfig, initialSettingsOpen?: boolean) {
   const server = createMockAgentUIServer({
@@ -385,6 +390,27 @@ describe('ShellModeProvider', () => {
     act(() => result.current.closeSpaces());
     expect(result.current.spacesOpen).toBe(false);
     expect(result.current.selectedSpaceId).toBeNull();
+  });
+
+  it('opens the spaces view from the Schedules page and from the chat list', () => {
+    const server = createMockAgentUIServer({
+      catalog: createMockCatalog(),
+      sessions: createMockAgentSessionsServer(),
+      schedules: createMockScheduleServer(),
+    });
+    const { result } = renderHook(() => useShellMode(), { wrapper: wrapWithServer(server) });
+
+    act(() => result.current.setSchedulesOpen(true));
+    expect(result.current.schedulesOpen).toBe(true);
+    act(() => result.current.openSpaces());
+    expect(result.current.spacesOpen).toBe(true);
+    expect(result.current.schedulesOpen).toBe(false);
+
+    act(() => result.current.setSessionsOpen(true));
+    expect(result.current.sessionsOpen).toBe(true);
+    act(() => result.current.openSpaces());
+    expect(result.current.spacesOpen).toBe(true);
+    expect(result.current.sessionsOpen).toBe(false);
   });
 
   it('defaults to AgentLibraryWithComposer (mutable + library)', () => {
