@@ -171,6 +171,8 @@ From TrueForge came the agent runtime, tool calling, the approvals framework, se
 
 The full accounting, area by area with pull request numbers and the git commands to check it, is in [docs/AMANUENSIS_ATTRIBUTION.md](docs/AMANUENSIS_ATTRIBUTION.md).
 
+Amanuensis was built for the Nebius × NVIDIA Global AI Hackathon and runs on NVIDIA Nemotron through Nebius Token Factory. [docs/token-factory.md](docs/token-factory.md) explains which model does which job, what it costs, and how the cost shows under each answer.
+
 ## How it works
 
 ```mermaid
