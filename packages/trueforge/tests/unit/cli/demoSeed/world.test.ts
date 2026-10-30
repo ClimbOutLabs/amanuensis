@@ -142,7 +142,7 @@ describe('buildDemoWorld content', () => {
     expect(task).toContain('Do not create or change spaces during the brief; the reply is the dashboard.');
     // One fragment per section, so a dropped or reworded section fails here.
     for (const fragment of [
-      'Run the Morning Brief as a Personal Intelligence Briefing, an OpenUI dashboard, adaptive, never a text dump.',
+      'Run the Morning Brief as a Personal Intelligence Briefing, a markdown dashboard, adaptive, never a text dump.',
       'Do this, in order:',
       "1. EMAIL: check what came in since yesterday's brief (inbox).",
       'List what needs me, most important first, one line each: who, what they want, and by when.',
@@ -162,8 +162,8 @@ describe('buildDemoWorld content', () => {
       'Weave what I know about Maya into every briefing: her life context, relationships, plans, and preferences.',
       'PRIVACY SPINE: the brief is private and can say anything. Drafts are in her voice, carry only recipient-relevant facts, and never send. Nothing escapes.',
       'Surface the single most important actionable item first, on its own highlighted card, never buried.',
-      'OUTPUT: write the dashboard in your reply as an openui block (read the OpenUI instructions first; there is no dashboard tool). Draw each route once.',
-      'Sections: header, 📥 Email table, 📝 Drafts, 📅 Calendar, 🧭 Travel, 🎯 Briefing per appointment, 🔭 Tomorrow, ✅ Needs your OK, with color-coded priority badges and emoji markers. Adapt: drop empty sections, never render filler. Plain, direct words; no flowery filler; no em dashes. The reply holds only the dashboard: no notes about what you are doing or planning, no text before or after the block.',
+      'OUTPUT: write the brief directly in your reply as markdown. Do not write files, run commands, or use any tool to build it. Draw each route once; the route maps show above the brief by themselves, so do not add map images, image links or placeholders.',
+      'Sections: header, 📥 Email table, 📝 Drafts, 📅 Calendar table, 🧭 Travel table, 🎯 Briefing per appointment, 🔭 Tomorrow, ✅ Needs your OK, with bold priority labels and emoji markers. Adapt: drop empty sections, never render filler. Plain, direct words; no flowery filler; no em dashes. The reply holds only the brief: no notes about what you are doing or planning, no text before or after it.',
     ]) {
       expect(task).toContain(fragment);
     }
