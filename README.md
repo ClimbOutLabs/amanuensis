@@ -37,7 +37,7 @@ Amanuensis is built for them. You give it a name (ours is Mannie). It wakes up b
 
 ## Get started
 
-You need Docker, `git`, about 10 GB of free disk space, and Linux or macOS. On Windows, use WSL2 or the Windows setup program. Setup takes about 15 minutes.
+You need Docker, `git`, about 10 GB of free disk space, and Linux or macOS. On Windows, use WSL2. Setup takes about 15 minutes.
 
 ### Installing on Windows
 
@@ -74,6 +74,8 @@ Replace `YOU@example.com` with the email address you will sign in with. Replace 
 **Upgrading.** In the Ubuntu window, in the same `amanuensis` folder, run `git pull`, then run the install command from step 4 again. It keeps your data and carries on.
 
 **If something looks missing.** Commands like `apt` only exist inside the Ubuntu window. If a terminal says a distro or a package tool is missing, you are in PowerShell or in Docker Desktop's own system, not Ubuntu. Open **Ubuntu** from the Start menu.
+
+**If the script says Docker did not answer.** Docker Desktop is running, but it is not connected to Ubuntu yet. Open Docker Desktop, go to **Settings, Resources, WSL Integration**, turn on the integration for Ubuntu, and choose **Apply & Restart**. Then run the install command again.
 
 **1. Install Aman.**
 
@@ -308,4 +310,5 @@ Read [AGENTS.md](AGENTS.md) and any package-level `AGENTS.md` before changing co
 ## License and attribution
 
 Amanuensis is licensed under the [Mozilla Public License 2.0](LICENSE). It is derived from [TrueForge](https://github.com/truefoundry/trueforge) by [TrueFoundry](https://truefoundry.com); those portions are MIT licensed, Copyright 2024-2026 TrueFoundry, and their notices are kept in [NOTICE](NOTICE). Third-party components with their own terms are listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+
 
