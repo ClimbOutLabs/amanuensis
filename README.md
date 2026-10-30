@@ -37,7 +37,7 @@ Amanuensis is built for them. You give it a name (ours is Mannie). It wakes up b
 
 ## Get started
 
-You need Docker, `git`, about 10 GB of free disk space, and Linux or macOS. On Windows, use WSL2. Setup takes about 15 minutes.
+You need Docker, `git`, about 10 GB of free disk space, and Linux or macOS. On Windows, use [WSL2](https://learn.microsoft.com/en-us/windows/wsl/install). Setup takes about 15 minutes.
 
 ### Installing on Mac and Linux
 
@@ -50,7 +50,7 @@ The installer checks your computer first and tells you in plain words if somethi
 
 ### Installing on Windows
 
-On Windows, Amanuensis installs inside WSL 2, the Windows Subsystem for Linux, with Docker Desktop, by running the project's install script. Follow these steps in order.
+On Windows, Amanuensis installs inside [WSL 2](https://learn.microsoft.com/en-us/windows/wsl/install), the Windows Subsystem for Linux, with Docker Desktop, by running the project's install script. Follow these steps in order.
 
 **1. Install WSL 2 with Ubuntu.** Open PowerShell as an administrator and run:
 
