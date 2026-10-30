@@ -51,7 +51,7 @@ wsl --install -d Ubuntu
 
 Restart when it asks. Then open **Ubuntu** from the Start menu once, and set the Linux username and password it asks for. [Microsoft's WSL guide](https://learn.microsoft.com/en-us/windows/wsl/install) has the details.
 
-**2. Install Docker Desktop.** Get it from [Docker's Windows install page](https://docs.docker.com/desktop/setup/install/windows-install/) and install it. Start Docker Desktop and wait until it reports it is running. Then open its **Settings**, go to **Resources, WSL Integration**, and turn on the integration for Ubuntu.
+**2. Install Docker Desktop.** Get it from [Docker's Windows install page](https://docs.docker.com/desktop/setup/install/windows-install/) and install it. Start Docker Desktop and wait until it reports it is running. Then open its **Settings**, go to **Resources, WSL Integration**, turn on Ubuntu under **Enable integration with additional distros**, and choose **Apply & Restart**. If that page shows only one switch, for the default distro, follow the **Go to classic Settings** link at the top of the Settings page instead: the classic page has the same WSL Integration page, with the list of distros.
 
 **3. Get the code.** In the Ubuntu window:
 
@@ -75,7 +75,7 @@ Replace `YOU@example.com` with the email address you will sign in with. Replace 
 
 **If something looks missing.** Commands like `apt` only exist inside the Ubuntu window. If a terminal says a distro or a package tool is missing, you are in PowerShell or in Docker Desktop's own system, not Ubuntu. Open **Ubuntu** from the Start menu.
 
-**If the script says Docker did not answer.** Docker Desktop is running, but it is not connected to Ubuntu yet. Open Docker Desktop, go to **Settings, Resources, WSL Integration**, turn on the integration for Ubuntu, and choose **Apply & Restart**. Then run the install command again.
+**If Docker is not connected to Ubuntu.** The install script may say Docker did not answer, or Ubuntu itself may say the docker command could not be found in this WSL 2 distro. Both mean the same thing: Docker Desktop is running, but its integration with Ubuntu is off. Open Docker Desktop, go to **Settings, Resources, WSL Integration**, turn on Ubuntu under **Enable integration with additional distros**, and choose **Apply & Restart**. Then, in the Ubuntu window, `docker version` must print a Server section. Once it does, run the install command again.
 
 **1. Install Aman.**
 
