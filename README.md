@@ -73,18 +73,18 @@ cd amanuensis
 **4. Run the install.** Still in the Ubuntu window:
 
 ```bash
-printf '%s\n%s\n' 'YOUR_PASSWORD' 'YOUR_MODEL_KEY' | ./installer/install.sh --yes --name main --email YOU@example.com --password-stdin --token-factory-key-stdin --tls local --address localhost --backups daily
+./installer/install.sh
 ```
 
-Replace `YOU@example.com` with the email address you will sign in with. Replace `YOUR_PASSWORD` with the sign-in password you choose, and `YOUR_MODEL_KEY` with your model key. The password goes to the script on the first input line and the model key on the second, and neither is printed. If you have no model key yet, drop `--token-factory-key-stdin` and the second quoted value, and add the key later under **Settings, Models**.
+The script checks the computer first, then shows its plan and asks before it changes anything. It asks its questions one at a time: the email address you will sign in with, what Aman should call you, a password to choose, and a few setup choices. It does not ask for a model key. You add the key after the install, under **Settings, Models**, which the steps after this section walk through.
 
 **5. Open Aman.** The script checks Docker, builds and installs everything, and prints the address to open in your browser. Sign in with the email and password from step 4.
 
-**Upgrading.** In the Ubuntu window, in the same `amanuensis` folder, run `git pull`, then run the install command from step 4 again. It keeps your data and carries on.
+**Upgrading.** In the Ubuntu window, in the same `amanuensis` folder, run `git pull`, then run `./installer/install.sh` again. It keeps your data and carries on.
 
 **If something looks missing.** Commands like `apt` only exist inside the Ubuntu window. If a terminal says a distro or a package tool is missing, you are in PowerShell or in Docker Desktop's own system, not Ubuntu. Open **Ubuntu** from the Start menu.
 
-**If Docker is not connected to Ubuntu.** The install script may say Docker did not answer, or Ubuntu itself may say the docker command could not be found in this WSL 2 distro. Both mean the same thing: Docker Desktop is running, but its integration with Ubuntu is off. Open Docker Desktop, go to **Settings, Resources, WSL Integration**, turn on Ubuntu under **Enable integration with additional distros**, and choose **Apply & Restart**. Then, in the Ubuntu window, `docker version` must print a Server section. Once it does, run the install command again.
+**If Docker is not connected to Ubuntu.** The install script may say Docker did not answer, or Ubuntu itself may say the docker command could not be found in this WSL 2 distro. Both mean the same thing: Docker Desktop is running, but its integration with Ubuntu is off. Open Docker Desktop, go to **Settings, Resources, WSL Integration**, turn on Ubuntu under **Enable integration with additional distros**, and choose **Apply & Restart**. Then, in the Ubuntu window, `docker version` must print a Server section. Once it does, run `./installer/install.sh` again.
 
 **1. Get a Together AI key.** Aman needs a model to think with. [Together AI](https://www.together.ai) hosts open models and is the quickest way to start.
 
@@ -303,5 +303,6 @@ Read [AGENTS.md](AGENTS.md) and any package-level `AGENTS.md` before changing co
 ## License and attribution
 
 Amanuensis is licensed under the [Mozilla Public License 2.0](LICENSE). It is derived from [TrueForge](https://github.com/truefoundry/trueforge) by [TrueFoundry](https://truefoundry.com); those portions are MIT licensed, Copyright 2024-2026 TrueFoundry, and their notices are kept in [NOTICE](NOTICE). Third-party components with their own terms are listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+
 
 
