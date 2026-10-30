@@ -1,6 +1,8 @@
 import type { SessionHandle, Sessions, TurnInputItem } from '@truefoundry/trueforge-core/agent-session';
 import { DOCUMENT_REPORT_TOOL_NAMES } from '@truefoundry/trueforge-core/core';
+import { SANDBOX_FILE_WRITE_TOOLS } from '@truefoundry/trueforge-core/core/permissions/dispatch';
 import { isMorningBriefPrompt, isMorningBriefSchedule } from '@truefoundry/trueforge-core/core/schedules/morningBrief';
+import { SPACE_WRITE_TOOL_NAMES } from '@truefoundry/trueforge-core/core/spaces/toolContract';
 import { TrueForge } from '@truefoundry/trueforge-sdk';
 import type { Logger } from 'winston';
 import configuration from '../config';
@@ -145,10 +147,16 @@ export async function scheduleTaskText(params: {
 }
 
 /**
- * The brief's dashboard is the reply itself, so the document report tools are not offered to it: a model
- * that reaches for them gets every call held for approval while nobody is watching.
+ * The brief's dashboard is the reply itself, so the document report tools, the file write tools and the
+ * space write tools are not offered to it: a model that reaches for them gets calls held for approval
+ * while nobody is watching, and spends steps and tokens it needs to write the brief. Reading files and
+ * spaces stays available.
  */
-export const BRIEF_WITHHELD_TOOL_NAMES: readonly string[] = DOCUMENT_REPORT_TOOL_NAMES;
+export const BRIEF_WITHHELD_TOOL_NAMES: readonly string[] = [
+  ...DOCUMENT_REPORT_TOOL_NAMES,
+  ...SANDBOX_FILE_WRITE_TOOLS,
+  ...SPACE_WRITE_TOOL_NAMES,
+];
 
 /** The built-in tools a schedule's run does not offer. */
 export function scheduleWithheldTools({ name, task }: { name: string; task: string }): readonly string[] {

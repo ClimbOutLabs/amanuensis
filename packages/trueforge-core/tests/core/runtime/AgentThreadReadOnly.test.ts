@@ -3,6 +3,7 @@ import {
   GET_CURRENT_DATETIME_TOOL_NAME,
 } from '../../../src/core/capabilities/builtins/CurrentDateTime';
 import { EventType } from '../../../src/core/events/schema';
+import { SANDBOX_FILE_WRITE_TOOLS } from '../../../src/core/permissions/dispatch';
 import { AgentThread } from '../../../src/core/runtime/AgentThread';
 import { AgentThreadOrchestrator } from '../../../src/core/runtime/AgentThreadOrchestrator';
 import {
@@ -23,7 +24,15 @@ const SANDBOX_TOOL_NAMES = [
   SANDBOX_REPLACE_TEXT_TOOL_NAME,
 ];
 
-function threadFor({ readOnly, sandbox }: { readOnly: boolean; sandbox?: Sandbox | undefined }) {
+function threadFor({
+  readOnly,
+  sandbox,
+  withheldTools,
+}: {
+  readOnly: boolean;
+  sandbox?: Sandbox | undefined;
+  withheldTools?: readonly string[] | undefined;
+}) {
   const modelClient = {
     create: jest.fn().mockImplementation(() => textReplyStream('ok')),
     createNonStream: jest.fn(),
@@ -55,6 +64,7 @@ function threadFor({ readOnly, sandbox }: { readOnly: boolean; sandbox?: Sandbox
     turnToolCallLedger: undefined,
     taskState: undefined,
     isRequestContinuation: undefined,
+    withheldTools,
     tracing: NOOP_AGENT_TRACING,
     logger: makeSilentLogger(),
   });
@@ -99,5 +109,21 @@ describe('AgentThread read-only definitions', () => {
     await runTurn({ orchestrator, sendBatch: [{ type: EventType.USER_MESSAGE, content: 'Run a quick script.' }] });
     const requests = JSON.stringify(llmCreateInputs(modelClient));
     expect(requests).toContain(`"name":"${SANDBOX_RUN_CODE_TOOL_NAME}"`);
+  });
+
+  it('leaves out the sandbox tools a run withholds and keeps the read and other tools', async () => {
+    const { modelClient, orchestrator } = threadFor({
+      readOnly: false,
+      sandbox: makeStubPublicSandbox(),
+      withheldTools: [...SANDBOX_FILE_WRITE_TOOLS],
+    });
+    await runTurn({ orchestrator, sendBatch: [{ type: EventType.USER_MESSAGE, content: 'hello' }] });
+    const requests = JSON.stringify(llmCreateInputs(modelClient));
+    for (const name of SANDBOX_FILE_WRITE_TOOLS) {
+      expect(requests).not.toContain(`"name":"${name}"`);
+    }
+    expect(requests).toContain(`"name":"${SANDBOX_EXEC_TOOL_NAME}"`);
+    expect(requests).toContain(`"name":"${SANDBOX_RUN_CODE_TOOL_NAME}"`);
+    expect(requests).toContain(GET_CURRENT_DATETIME_TOOL_NAME);
   });
 });

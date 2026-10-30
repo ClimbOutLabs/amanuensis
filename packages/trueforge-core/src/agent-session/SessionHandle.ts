@@ -584,6 +584,7 @@ export class SessionHandle<
         chatApprovalGrants,
         loadImplementationPlanGrants,
         sentinelServices,
+        withheldTools: input.withheld_tools,
       });
 
       const orchestrator = new AgentThreadOrchestrator({
@@ -1146,6 +1147,7 @@ export class SessionHandle<
       modelToolCallIdleTimeoutMs: input.resolver.modelToolCallIdleTimeoutMs,
       toolCallPolicy: input.resolver.toolCallPolicy,
       stopAfterToolResponse: input.stopAfterToolResponse,
+      withheldTools: input.withheldTools,
       sentinel: this.createSentinelContext(input.sentinelServices, input.resolver.webSearchTurn),
     });
   }
@@ -1160,6 +1162,7 @@ export class SessionHandle<
     chatApprovalGrants: Set<string>;
     loadImplementationPlanGrants: () => Promise<ReadonlySet<string>>;
     sentinelServices: SentinelServices;
+    withheldTools: readonly string[] | undefined;
   }): CreateDynamicSubAgentThread {
     return async params => {
       throwIfSignalAborted(params.signal);
@@ -1233,6 +1236,7 @@ export class SessionHandle<
         capabilities,
         toolCallMemo: undefined,
         turnToolCallLedger: params.turnToolCallLedger,
+        withheldTools: input.withheldTools,
         taskState: undefined,
         chatApprovalGrants: input.chatApprovalGrants,
         loadImplementationPlanGrants: input.loadImplementationPlanGrants,

@@ -1,5 +1,7 @@
 import { DOCUMENT_REPORT_TOOL_NAMES } from '@truefoundry/trueforge-core/core';
+import { SANDBOX_FILE_WRITE_TOOLS } from '@truefoundry/trueforge-core/core/permissions/dispatch';
 import { MORNING_BRIEF_PROMPT } from '@truefoundry/trueforge-core/core/schedules/morningBrief';
+import { SPACE_READ_TOOL_NAMES, SPACE_WRITE_TOOL_NAMES } from '@truefoundry/trueforge-core/core/spaces/toolContract';
 import configuration from '../../../src/config';
 import {
   createHttpScheduleRunExecutor,
@@ -327,13 +329,20 @@ describe('scheduleTaskText', () => {
 });
 
 describe('scheduleWithheldTools', () => {
-  it('withholds the document report tools from a morning brief run', () => {
-    expect(scheduleWithheldTools({ name: 'morning-brief', task: MORNING_BRIEF_PROMPT })).toEqual(
-      DOCUMENT_REPORT_TOOL_NAMES,
-    );
-    expect(scheduleWithheldTools({ name: 'my-digest', task: MORNING_BRIEF_PROMPT })).toEqual(
-      DOCUMENT_REPORT_TOOL_NAMES,
-    );
+  const briefWithheld = [...DOCUMENT_REPORT_TOOL_NAMES, ...SANDBOX_FILE_WRITE_TOOLS, ...SPACE_WRITE_TOOL_NAMES];
+
+  it('withholds the document report tools and the file write tools from a morning brief run', () => {
+    expect(scheduleWithheldTools({ name: 'morning-brief', task: MORNING_BRIEF_PROMPT })).toEqual(briefWithheld);
+    expect(scheduleWithheldTools({ name: 'my-digest', task: MORNING_BRIEF_PROMPT })).toEqual(briefWithheld);
+    expect(briefWithheld).toEqual(expect.arrayContaining(['write_file', 'apply_patch', 'replace_text']));
+  });
+
+  it('withholds the space write tools but keeps reading, mail, calendar and maps available', () => {
+    const withheld = scheduleWithheldTools({ name: 'morning-brief', task: MORNING_BRIEF_PROMPT });
+    expect(withheld).toEqual(expect.arrayContaining(['create_space', 'edit_space', 'revert_space']));
+    for (const kept of [...SPACE_READ_TOOL_NAMES, 'exec', 'gmail_search', 'calendar_list_events', 'maps_route']) {
+      expect(withheld).not.toContain(kept);
+    }
   });
 
   it('withholds nothing from any other schedule', () => {
