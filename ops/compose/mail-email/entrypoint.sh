@@ -21,10 +21,12 @@ agent=${AMAN_MAIL_ACCOUNT_AGENT:?set AMAN_MAIL_ACCOUNT_AGENT to the account agen
 # How long a stop is given before the server is forced down. The server holds nothing across a
 # restart (mail connections are made per tool call, and sessions are the client's to rebuild), so
 # forcing it down after the grace loses nothing. An unbounded wait once left the mail service
-# down for good when a graceful shutdown stalled on connections that never closed.
-stop_grace=${AMAN_MAIL_STOP_GRACE_SECONDS:-30}
+# down for good when a graceful shutdown stalled on connections that never closed. The grace is
+# short because the app keeps a stream open that never closes on its own, and a send waits on the
+# restart: the whole restart must fit inside the app's wait for the new list.
+stop_grace=${AMAN_MAIL_STOP_GRACE_SECONDS:-5}
 case $stop_grace in
-  '' | *[!0-9]*) stop_grace=30 ;;
+  '' | *[!0-9]*) stop_grace=5 ;;
 esac
 
 # An unreadable list hashes to nothing, which never matches a loaded list.
