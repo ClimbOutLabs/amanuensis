@@ -92,16 +92,9 @@ Replace `YOU@example.com` with the email address you will sign in with. Replace 
 - Open **Settings, API keys** ([direct link](https://api.together.ai/settings/projects/~current/api-keys)) and create a key.
 - Copy it. It is shown only once.
 
-**2. Add it to Aman.** Open Aman, then go to **Settings, Models, Add custom provider**, and fill in:
+**2. Add it to Aman.** Open Aman and go to **Settings**, then **Models**. Together AI is built in: under **Available**, find **together** and click **Configure**. Paste the key you copied into the **API key** field and click **Create**. Nothing else to fill in: the address and the models come with it.
 
-| Field    | What to enter                                                                                                                 |
-| -------- | ----------------------------------------------------------------------------------------------------------------------------- |
-| Name     | `together`                                                                                                                    |
-| Base URL | `https://api.together.ai/v1`                                                                                                  |
-| API key  | the key you copied                                                                                                            |
-| Model    | a chat model from [Together's model list](https://docs.together.ai/docs/serverless/models), for example `openai/gpt-oss-120b` |
-
-Save, then pick the model in the menu under the message box.
+Its models are now on your list. Pick the one you want in the menu under the message box.
 
 **3. Give your chief of staff a name and a personality.** Go to **Settings, Personalization**, and find **Assistant profile**. It has three fields:
 
