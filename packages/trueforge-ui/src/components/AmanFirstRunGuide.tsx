@@ -127,7 +127,7 @@ export const AmanSetupTicket: FC = () => {
     <section
       aria-labelledby="aman-setup-ticket-heading"
       data-testid="aman-setup-ticket"
-      className="aui-settle w-full overflow-hidden rounded-[0.75rem] border border-border bg-card-bg text-left"
+      className="aui-settle w-full shrink-0 overflow-hidden rounded-[0.75rem] border border-border bg-card-bg text-left"
     >
       <header className="flex items-center justify-between gap-3 border-0 border-b border-dashed border-border px-4 py-3">
         <h2 id="aman-setup-ticket-heading" className="aui-face-serif m-0 text-[0.9375rem] font-normal">
