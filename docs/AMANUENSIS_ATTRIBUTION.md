@@ -46,7 +46,7 @@ Built in this fork in the public repo, from 27 September 2026:
 
 ## How much changed in the public repo
 
-The baseline is the public repo right after the import, commit `2440bfb2a` on 27 September 2026. It held 3,557 files. The figures below cover everything after it, through 30 October 2026.
+This repo was created on GitHub on 14 September 2026 (15 September in UTC). Its first commit of our own is the import of 26 September. The baseline is the public repo right after the import, commit `2440bfb2a` on 27 September 2026. It held 3,557 files. The figures below cover everything after it, through 30 October 2026.
 
 | Measure                                   | Since the import                                      |
 | ----------------------------------------- | ----------------------------------------------------- |
