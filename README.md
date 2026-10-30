@@ -39,6 +39,42 @@ Amanuensis is built for them. You give it a name (ours is Mannie). It wakes up b
 
 You need Docker, `git`, about 10 GB of free disk space, and Linux or macOS. On Windows, use WSL2 or the Windows setup program. Setup takes about 15 minutes.
 
+### Installing on Windows
+
+On Windows, Amanuensis installs inside WSL 2, the Windows Subsystem for Linux, with Docker Desktop, by running the project's install script. Follow these steps in order.
+
+**1. Install WSL 2 with Ubuntu.** Open PowerShell as an administrator and run:
+
+```powershell
+wsl --install -d Ubuntu
+```
+
+Restart when it asks. Then open **Ubuntu** from the Start menu once, and set the Linux username and password it asks for. [Microsoft's WSL guide](https://learn.microsoft.com/en-us/windows/wsl/install) has the details.
+
+**2. Install Docker Desktop.** Get it from [Docker's Windows install page](https://docs.docker.com/desktop/setup/install/windows-install/) and install it. Start Docker Desktop and wait until it reports it is running. Then open its **Settings**, go to **Resources, WSL Integration**, and turn on the integration for Ubuntu.
+
+**3. Get the code.** In the Ubuntu window:
+
+```bash
+sudo apt update && sudo apt install -y git
+git clone https://github.com/ClimbOutLabs/amanuensis.git
+cd amanuensis
+```
+
+**4. Run the install.** Still in the Ubuntu window:
+
+```bash
+printf '%s\n%s\n' 'YOUR_PASSWORD' 'YOUR_MODEL_KEY' | ./installer/install.sh --yes --name main --email YOU@example.com --password-stdin --token-factory-key-stdin --tls local --address localhost --backups daily
+```
+
+Replace `YOU@example.com` with the email address you will sign in with. Replace `YOUR_PASSWORD` with the sign-in password you choose, and `YOUR_MODEL_KEY` with your model key. The password goes to the script on the first input line and the model key on the second, and neither is printed. If you have no model key yet, drop `--token-factory-key-stdin` and the second quoted value, and add the key later under **Settings, Models**.
+
+**5. Open Aman.** The script checks Docker, builds and installs everything, and prints the address to open in your browser. Sign in with the email and password from step 4.
+
+**Upgrading.** In the Ubuntu window, in the same `amanuensis` folder, run `git pull`, then run the install command from step 4 again. It keeps your data and carries on.
+
+**If something looks missing.** Commands like `apt` only exist inside the Ubuntu window. If a terminal says a distro or a package tool is missing, you are in PowerShell or in Docker Desktop's own system, not Ubuntu. Open **Ubuntu** from the Start menu.
+
 **1. Install Aman.**
 
 ```bash
@@ -272,3 +308,4 @@ Read [AGENTS.md](AGENTS.md) and any package-level `AGENTS.md` before changing co
 ## License and attribution
 
 Amanuensis is licensed under the [Mozilla Public License 2.0](LICENSE). It is derived from [TrueForge](https://github.com/truefoundry/trueforge) by [TrueFoundry](https://truefoundry.com); those portions are MIT licensed, Copyright 2024-2026 TrueFoundry, and their notices are kept in [NOTICE](NOTICE). Third-party components with their own terms are listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+
