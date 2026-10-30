@@ -6,7 +6,7 @@
 
 <p align="center">
   <strong>A chief of staff that lives on your own computer.</strong><br>
-  It knows your life, keeps track of what you'd otherwise forget, and never does anything behind your back.
+  It knows your life, keeps track of what you'd otherwise forget, and never does anything without your knowledge.
 </p>
 
 <p align="center">
@@ -37,9 +37,9 @@ Amanuensis is built for them. You give it a name (ours is Mannie). It wakes up b
 
 ## Get started
 
-You need Docker, `git`, about 10 GB of free disk space, and Linux or macOS. On Windows, use WSL2 or the Windows setup program. Setup takes about 15 minutes.
+You need Docker, `git`, about 10 GB of free disk space, and Linux or macOS. On Windows, use [WSL2](https://learn.microsoft.com/en-us/windows/wsl/install). Setup takes about 15 minutes.
 
-**1. Install Aman.**
+### Installing on Mac and Linux
 
 ```bash
 git clone https://github.com/ClimbOutLabs/amanuensis && cd amanuensis
@@ -48,24 +48,55 @@ git clone https://github.com/ClimbOutLabs/amanuensis && cd amanuensis
 
 The installer checks your computer first and tells you in plain words if something is missing. It shows its plan and asks before it changes anything. At the end it prints the address to open in your browser. It also sets up sign-in, backups and phone access, and leaves an `aman` command for health checks (`aman doctor`) and upgrades.
 
-**2. Get a Together AI key.** Aman needs a model to think with. [Together AI](https://www.together.ai) hosts open models and is the quickest way to start.
+### Installing on Windows
+
+On Windows, Amanuensis installs inside [WSL 2](https://learn.microsoft.com/en-us/windows/wsl/install), the Windows Subsystem for Linux, with Docker Desktop, by running the project's install script. Follow these steps in order.
+
+**1. Install WSL 2 with Ubuntu.** Open PowerShell as an administrator and run:
+
+```powershell
+wsl --install -d Ubuntu
+```
+
+Restart when it asks. Then open **Ubuntu** from the Start menu once, and set the Linux username and password it asks for. [Microsoft's WSL guide](https://learn.microsoft.com/en-us/windows/wsl/install) has the details.
+
+**2. Install Docker Desktop.** Get it from [Docker's Windows install page](https://docs.docker.com/desktop/setup/install/windows-install/) and install it. Start Docker Desktop and wait until it reports it is running. Then open its **Settings**, go to **Resources, WSL Integration**, turn on Ubuntu under **Enable integration with additional distros**, and choose **Apply & Restart**. If that page shows only one switch, for the default distro, follow the **Go to classic Settings** link at the top of the Settings page instead: the classic page has the same WSL Integration page, with the list of distros.
+
+**3. Get the code.** In the Ubuntu window:
+
+```bash
+sudo apt update && sudo apt install -y git
+git clone https://github.com/ClimbOutLabs/amanuensis.git
+cd amanuensis
+```
+
+**4. Run the install.** Still in the Ubuntu window:
+
+```bash
+./installer/install.sh
+```
+
+The script checks the computer first, then shows its plan and asks before it changes anything. It asks its questions one at a time: the email address you will sign in with, what Aman should call you, a password to choose, and a few setup choices. It does not ask for a model key. You add the key after the install, under **Settings, Models**, which the steps after this section walk through.
+
+**5. Open Aman.** The script checks Docker, builds and installs everything, and prints the address to open in your browser. Sign in with the email and password from step 4.
+
+**Upgrading.** In the Ubuntu window, in the same `amanuensis` folder, run `git pull`, then run `./installer/install.sh` again. It keeps your data and carries on.
+
+**If something looks missing.** Commands like `apt` only exist inside the Ubuntu window. If a terminal says a distro or a package tool is missing, you are in PowerShell or in Docker Desktop's own system, not Ubuntu. Open **Ubuntu** from the Start menu.
+
+**If Docker is not connected to Ubuntu.** The install script may say Docker did not answer, or Ubuntu itself may say the docker command could not be found in this WSL 2 distro. Both mean the same thing: Docker Desktop is running, but its integration with Ubuntu is off. Open Docker Desktop, go to **Settings, Resources, WSL Integration**, turn on Ubuntu under **Enable integration with additional distros**, and choose **Apply & Restart**. Then, in the Ubuntu window, `docker version` must print a Server section. Once it does, run `./installer/install.sh` again.
+
+**1. Get a Together AI key.** Aman needs a model to think with. [Together AI](https://www.together.ai) hosts open models and is the quickest way to start.
 
 - Sign up free at [api.together.ai](https://api.together.ai).
 - Open **Settings, API keys** ([direct link](https://api.together.ai/settings/projects/~current/api-keys)) and create a key.
 - Copy it. It is shown only once.
 
-**3. Add it to Aman.** Open Aman, then go to **Settings, Models, Add custom provider**, and fill in:
+**2. Add it to Aman.** Open Aman and go to **Settings**, then **Models**. Together AI is built in: under **Available**, find **together** and click **Configure**. Paste the key you copied into the **API key** field and click **Create**. Nothing else to fill in: the address and the models come with it.
 
-| Field    | What to enter                                                                                                                 |
-| -------- | ----------------------------------------------------------------------------------------------------------------------------- |
-| Name     | `together`                                                                                                                    |
-| Base URL | `https://api.together.ai/v1`                                                                                                  |
-| API key  | the key you copied                                                                                                            |
-| Model    | a chat model from [Together's model list](https://docs.together.ai/docs/serverless/models), for example `openai/gpt-oss-120b` |
+Its models are now on your list. Pick the one you want in the menu under the message box.
 
-Save, then pick the model in the menu under the message box.
-
-**4. Give your chief of staff a name and a personality.** Go to **Settings, Personalization**, and find **Assistant profile**. It has three fields:
+**3. Give your chief of staff a name and a personality.** Go to **Settings, Personalization**, and find **Assistant profile**. It has three fields:
 
 - **Name**: what you'll call it. Ours is Mannie.
 - **Voice guidance**: one line on how it talks, such as "Warm, direct, concise".
@@ -85,9 +116,9 @@ Not sure what to write? Start from one of these and copy its two fields in. Chan
 
 None of these change what it's allowed to do. Sending, deleting and installing still wait for your OK, whatever personality you pick.
 
-**5. Go say hello.** Open the home screen and tap **I'm behind**, or just say what's on your mind. Your chief of staff asks one question at a time and takes it from there.
+**4. Go say hello.** Open the home screen and tap **I'm behind**, or just say what's on your mind. Your chief of staff asks one question at a time and takes it from there.
 
-**6. Connect your email and calendar.** This is where it starts carrying things for you. Go to **Settings, Connectors**:
+**5. Connect your email and calendar.** This is where it starts carrying things for you. Go to **Settings, Connectors**:
 
 - **Gmail and Google Calendar.** Choose **Google**, then **Connect**. The panel walks you through making your own Google sign-in in about ten minutes, so your mail goes from Google straight to your computer and nobody else is in between. Connect mail first, then **Connect Calendar**. [Step-by-step guide](docs/google.mdx).
 - **Any other mailbox or calendar.** Choose **Email** for an IMAP mailbox (Outlook, iCloud, Fastmail and most others), and **Calendar** for a CalDAV calendar.
@@ -272,3 +303,6 @@ Read [AGENTS.md](AGENTS.md) and any package-level `AGENTS.md` before changing co
 ## License and attribution
 
 Amanuensis is licensed under the [Mozilla Public License 2.0](LICENSE). It is derived from [TrueForge](https://github.com/truefoundry/trueforge) by [TrueFoundry](https://truefoundry.com); those portions are MIT licensed, Copyright 2024-2026 TrueFoundry, and their notices are kept in [NOTICE](NOTICE). Third-party components with their own terms are listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+
+
+
