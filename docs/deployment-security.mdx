@@ -50,3 +50,15 @@ Two defenses do not depend on the Prompt Guard screens and cannot be turned off:
 ## Supply chain: package release age
 
 `pnpm-workspace.yaml` sets `minimumReleaseAge: 0` in this repository, meaning pnpm will install a package version the moment it is published, with no waiting period during which a malicious release could be caught and pulled. This is set to 0 so contributors and CI are not blocked on a newly published dependency bump. An operator building their own image or maintaining a long-lived deployment may want to raise this value (for example to a few days) in their own fork or override, trading immediate access to new releases for a window in which supply-chain attacks tend to get caught and yanked.
+
+## Limits to keep in mind
+
+- Standalone mode requires OIDC login and refuses to start without `OIDC_ISSUER_URL`, `OIDC_CLIENT_ID`, and `OIDC_CLIENT_SECRET`, and it refuses an `OIDC_ISSUER_URL` that is not Aman's own sign-in service (path `/dex`). An http issuer is accepted only on a loopback host. It also refuses to start unless `OIDC_ALLOWED_EMAILS` holds exactly one email address, and it accepts only sign-ins with a verified email.
+- Hosted mode also uses a shared admin identity when OIDC is unset. Configure OIDC (the Compose `login` profile) and appropriate network controls before any shared or internet-facing deployment.
+- Tool approval and sandboxing reduce risk; they are not an unlimited safety boundary. Review enabled capabilities, provider trust, egress policy, and approval requests.
+- Model credentials stay in the harness. Built-in MCP access from Code Mode is bridged back through the harness so its stored MCP tokens do not enter the sandbox; do not assume the same boundary for arbitrary custom code, tools, or integrations. Administrators remain responsible for secret storage, transport security, and provider configuration.
+- Markdown memory stores memories as plain files under `MEMORY_MARKDOWN_DIR` (default `./data/memory`) — treat that directory as sensitive. Recall screening and live tool-output screening default off.
+- The Prompt Guard sidecar under `ops/prompt-guard` is evaluation-only and is not an accepted production security control.
+
+See [authentication](/authentication/overview), [sandboxing](/sandbox), and the [memory runbook](https://github.com/ClimbOutLabs/amanuensis/blob/main/ops/memory/RUNBOOK.md) before enabling those features outside local development.
+
