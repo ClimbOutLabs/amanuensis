@@ -461,11 +461,20 @@ export function ShellModeProvider({
     }
   }, [schedulesEnabled]);
 
-  const openSpaces = useCallback((spaceId?: string | null) => {
-    setSelectedSpaceId(spaceId ?? null);
-    setSpacesOpenState(true);
-    setSettingsOpenState(false);
-  }, []);
+  // Like the other views, Spaces closes whatever page was open; the layout shows an open Schedules page first.
+  const openSpaces = useCallback(
+    (spaceId?: string | null) => {
+      setSelectedSpaceId(spaceId ?? null);
+      setSpacesOpenState(true);
+      setSettingsOpenState(false);
+      setAgentConfigOpenState(false);
+      setLibraryOpenState(false);
+      setLibraryAgentId(null);
+      setSessionsOpen(false);
+      setSchedulesOpenState(false);
+    },
+    [setSessionsOpen],
+  );
 
   const invalidateAgentsList = useCallback(() => {
     setAgentsListEpoch(n => n + 1);
