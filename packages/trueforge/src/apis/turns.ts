@@ -367,6 +367,8 @@ function createTurnResolver(deps: {
   personaKnowledgeBlock?: string | undefined;
   personaKnowledgeHits?: readonly PersonaKnowledgeHit[] | undefined;
   switchNotice?: PersonaSwitchNotice | undefined;
+  /** The person's own message already switched the chat before the model ran, so a reply may say so. */
+  switchedByMessage?: boolean | undefined;
   /** Per-turn internal-source state shared by the knowledge lookup, recall, and the web_search policy. */
   internalSourceState: InternalSourceState;
   boundRepository?: BoundRepository | undefined;
@@ -427,6 +429,7 @@ function createTurnResolver(deps: {
     personaKnowledgeBlock,
     personaKnowledgeHits,
     switchNotice,
+    switchedByMessage,
     internalSourceState,
     boundRepository,
     serverSandboxAvailable,
@@ -453,7 +456,7 @@ function createTurnResolver(deps: {
   const metadataHeaders = isTrueFoundryModeEnabled()
     ? gatewayMetadataHeaders(buildGatewayMetadata({ session, turnId }))
     : {};
-  return new SpaceTurnResourceResolver(
+  const resolver = new SpaceTurnResourceResolver(
     {
       llm: async (name, role) => {
         const resolved = await getModelDetails({
@@ -892,6 +895,10 @@ function createTurnResolver(deps: {
     { store: turnArtifactStore, tenantId: tenant_id, sessionId, turnId, logger },
     { sessionStore, budget: tokenFactoryBudget, authority: { tenantId: tenant_id, userRef } },
   );
+  if (switchedByMessage === true) {
+    resolver.switches.markSwitched();
+  }
+  return resolver;
 }
 
 const MAX_SESSION_TITLE_LENGTH = 50;
@@ -2544,6 +2551,7 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
       personaKnowledgeBlock: internalSources.personaKnowledgeBlock,
       personaKnowledgeHits: internalSources.personaKnowledgeHits,
       switchNotice: persona?.switchNotice,
+      switchedByMessage: persona?.selection === 'direct',
       internalSourceState: internalSources.internalSourceState,
       boundRepository,
       serverSandboxAvailable: await readServerSandboxAvailable({
@@ -2576,6 +2584,7 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
               owner_id: userRef,
               model_name: chatModelName(chatRunner),
               session_id: session.session_id,
+              default_assistant_name: profile?.assistant_name ?? null,
               logger: deps.logger,
             },
       schedules:

@@ -2722,7 +2722,9 @@ export class SpaceTurnResourceResolver extends MemoryTurnResourceResolver {
         usageSummaryCapability({ ...this.#usage, tracing: input.tracing, timeZone: this.clientTimezone }),
         toolImagesCapability(this.#toolImages),
         ...google,
-        ...(personas === undefined ? [] : [personaCapability({ ...personas, tracing: input.tracing, sentinel })]),
+        ...(personas === undefined
+          ? []
+          : [personaCapability({ ...personas, switches: this.switches, tracing: input.tracing, sentinel })]),
         ...(schedules === undefined
           ? []
           : [

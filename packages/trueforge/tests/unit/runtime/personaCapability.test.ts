@@ -21,6 +21,7 @@ import { activateSessionPersona } from '../../../src/personas/sessionPersona';
 import type { ChatRunner } from '../../../src/runtime/chatAssistant';
 import { chatModelName } from '../../../src/runtime/chatAssistant';
 import { PersonaToolSet, personaCapability, personaContentFor } from '../../../src/runtime/personaCapability';
+import { PersonaSwitchLog } from '../../../src/runtime/personaSwitchClaim';
 import { resolveTurnPersona } from '../../../src/runtime/turnPersona';
 
 const OWNER: CreatedBySubject = { subject_id: 'owner-1', subject_type: 'user', subject_display_name: 'Test Owner' };
@@ -36,7 +37,7 @@ const TRAVEL_PLANNER = {
 const CHAT_SESSION_ID = 'chat-1';
 
 /** The card prompt's own call: a persona the chat answers with, on the chat's model. */
-async function setup(input: { existing?: string[] } = {}) {
+async function setup(input: { existing?: string[]; defaultAssistantName?: string } = {}) {
   const db = createSqliteDb(':memory:');
   await migrateSqliteToLatest(db);
   const modelProviderStore = new SqliteModelProviderStore(db);
@@ -82,6 +83,7 @@ async function setup(input: { existing?: string[] } = {}) {
     created_by: OWNER.subject_id,
     conversation_id: 'chat-1',
   });
+  const switches = new PersonaSwitchLog();
   const options = {
     tracing: NOOP_AGENT_TRACING,
     store,
@@ -90,6 +92,8 @@ async function setup(input: { existing?: string[] } = {}) {
     owner_id: OWNER.subject_id,
     model_name: chatModelName(runner),
     session_id: CHAT_SESSION_ID,
+    default_assistant_name: input.defaultAssistantName ?? null,
+    switches,
     logger: winston.createLogger({ silent: true }),
     sentinel,
   };
@@ -97,7 +101,7 @@ async function setup(input: { existing?: string[] } = {}) {
   const listAll = () => store.listPersonas({ tenant_id: 'default', created_by: OWNER.subject_id });
   const activeChatPersona = () =>
     store.getLatestManualSessionPersona({ tenant_id: TENANT_ID, session_id: CHAT_SESSION_ID });
-  return { tools, options, sentinel, store, modelProviderStore, listAll, activeChatPersona };
+  return { tools, options, switches, sentinel, store, modelProviderStore, listAll, activeChatPersona };
 }
 
 type Setup = Awaited<ReturnType<typeof setup>>;
@@ -310,6 +314,31 @@ describe('reusing a persona', () => {
     expect(JSON.parse(resultText(result))).toEqual({
       personas: [{ name: 'Zara', aliases: [], description: 'Be brief.' }],
     });
+  });
+});
+
+describe('switching from a persona', () => {
+  it('switches to another persona and records that a switch ran', async () => {
+    const built = await setup({ existing: ['Theo', 'June'] });
+    await dispatch({ built, args: { name: 'Theo' }, name: 'use_persona' });
+    const { result } = await dispatch({ built, args: { name: 'June' }, name: 'use_persona' });
+    expect(resultText(result)).toContain('Now talking with June.');
+    expect(await built.activeChatPersona()).toMatchObject({ persona_name: 'June' });
+    expect(built.switches.switched).toBe(true);
+  });
+
+  it('switches back to the main assistant by its name', async () => {
+    const built = await setup({ existing: ['Theo'], defaultAssistantName: 'Mina' });
+    await dispatch({ built, args: { name: 'Theo' }, name: 'use_persona' });
+    const { result } = await dispatch({ built, args: { name: 'mina' }, name: 'use_persona' });
+    expect(resultText(result)).toContain('Now talking with Mina.');
+    expect(await built.activeChatPersona()).toMatchObject({ persona_id: null, source: 'default' });
+  });
+
+  it('does not record a switch when the name matches nobody', async () => {
+    const built = await setup({ existing: ['Theo'] });
+    await dispatch({ built, args: { name: 'June' }, name: 'use_persona' });
+    expect(built.switches.switched).toBe(false);
   });
 });
 
