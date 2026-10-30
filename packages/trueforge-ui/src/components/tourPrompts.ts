@@ -437,8 +437,8 @@ export function homeCardsFor({
 }
 
 /**
- * The home's cards. With no pill chosen and a brief schedule to run, the run card sits just after the
- * morning brief card, or first when that card is hidden, and the count stays the same.
+ * The home's cards. With a brief schedule to run, the run card shows with no pill chosen and under
+ * "I'm behind": just after the morning brief card, or first when that card is not shown. The count stays the same.
  */
 export function homeSlotsFor({
   topic,
@@ -450,7 +450,7 @@ export function homeSlotsFor({
   briefRun: boolean;
 }): HomeSlot[] {
   const prompts = homeCardsFor({ topic, capabilities }).map((card): HomeSlot => ({ kind: 'prompt', card }));
-  if (!briefRun || topic !== null) return prompts;
+  if (!briefRun || (topic !== null && topic !== 'behind')) return prompts;
   const at = prompts.findIndex(slot => slot.card === CARDS.brief) + 1;
   const runBrief: HomeSlot = { kind: 'run_brief', card: RUN_BRIEF_CARD };
   return [...prompts.slice(0, at), runBrief, ...prompts.slice(at)].slice(0, HOME_CARD_COUNT);

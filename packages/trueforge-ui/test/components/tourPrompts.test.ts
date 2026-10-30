@@ -334,12 +334,22 @@ describe('homeSlotsFor', () => {
     expect(slots).toHaveLength(HOME_CARD_COUNT);
   });
 
-  it('leaves the run card out without a brief schedule, and under a chosen pill', () => {
+  it('leaves the run card out without a brief schedule, and under other pills', () => {
     expect(
       homeSlotsFor({ topic: null, capabilities: connected, briefRun: false }).map(slot => slot.kind),
     ).not.toContain('run_brief');
-    expect(titles(homeSlotsFor({ topic: 'behind', capabilities: connected, briefRun: true }))).toEqual(
-      titlesOf(homeCardsFor({ topic: 'behind', capabilities: connected })),
+    expect(titles(homeSlotsFor({ topic: 'money', capabilities: connected, briefRun: true }))).toEqual(
+      titlesOf(homeCardsFor({ topic: 'money', capabilities: connected })),
+    );
+  });
+
+  it("puts the run card first under I'm behind, at the same count", () => {
+    const slots = homeSlotsFor({ topic: 'behind', capabilities: connected, briefRun: true });
+
+    expect(slots[0]?.kind).toBe('run_brief');
+    expect(slots).toHaveLength(HOME_CARD_COUNT);
+    expect(titles(slots).slice(1)).toEqual(
+      titlesOf(homeCardsFor({ topic: 'behind', capabilities: connected })).slice(0, HOME_CARD_COUNT - 1),
     );
   });
 
