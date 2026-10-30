@@ -60,6 +60,7 @@ const SPACE_READ_TOOLS: readonly SpaceToolContract[] = [
   { name: LIST_BLOCKS_TOOL_NAME, activity_line: () => 'Looked at the sections of a space.' },
 ];
 
+export const SPACE_WRITE_TOOL_NAMES = SPACE_WRITE_TOOLS.map(tool => tool.name);
 export const SPACE_READ_TOOL_NAMES = SPACE_READ_TOOLS.map(tool => tool.name);
 
 /** Calls that create, change or restore a space. */

@@ -333,6 +333,8 @@ export interface AgentThreadConstructorInput {
    * answers actions an unattended run held, so approving one runs just that call.
    */
   stopAfterToolResponse?: boolean | undefined;
+  /** Built-in tool names this run does not offer the model. */
+  withheldTools?: readonly string[] | undefined;
   tracing: AgentTracing;
   logger: Logger;
 }

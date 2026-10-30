@@ -1875,6 +1875,7 @@ export class AgentThread {
   private readonly sandboxRefreshTimeoutMs: number;
   private readonly sentinel?: SentinelHostContext | undefined;
   private readonly stopAfterToolResponse: boolean;
+  private readonly withheldTools: readonly string[];
   private implementationPlanGrants: ReadonlySet<string> = new Set();
   // One user request may span several execute() calls while approvals are
   // resolved. Keep orchestration limits across those continuations; reset only
@@ -1937,6 +1938,7 @@ export class AgentThread {
       input.sentinel.web_search.assistantName = assistantDisplayName(input.definition.identity?.assistantName);
     }
     this.stopAfterToolResponse = input.stopAfterToolResponse === true;
+    this.withheldTools = input.withheldTools ?? [];
     this.toolCallMemo = createToolCallMemoState(input.toolCallMemo);
     // A sub-agent counts into the ledger of the turn that started it, not a fresh one.
     if (input.turnToolCallLedger !== undefined) {
@@ -3259,6 +3261,24 @@ export class AgentThread {
       this.instruction = this.buildInstruction(this.definition.instruction);
     }
     return { initializationInfo, authRequirementInfo };
+  }
+
+  /** Built-in tools the run was told not to offer are left out of the request; user servers keep their own tools. */
+  private withoutWithheldTools(
+    tools: ConvertToolsResult['tools'],
+    toolMapping: Map<string, MappedMCPTool>,
+  ): ConvertToolsResult['tools'] {
+    if (this.withheldTools.length === 0) {
+      return tools;
+    }
+    return tools.filter(tool => {
+      const info = tool.type === 'function' ? toolMapping.get(tool.function.name) : undefined;
+      return (
+        info === undefined ||
+        !this.tfyManagedServerNames.has(info.toolSet.name) ||
+        !this.withheldTools.includes(info.originalToolName)
+      );
+    });
   }
 
   /**
@@ -5879,7 +5899,10 @@ export class AgentThread {
             // phase here is exact. This is the structural answer to
             // non-convergent research loops: stopping is host-owned, not
             // model-owned.
-            const available = await this.withoutOfflineBlockedTools(allTools, toolMapping);
+            const available = await this.withoutOfflineBlockedTools(
+              this.withoutWithheldTools(allTools, toolMapping),
+              toolMapping,
+            );
             const tools = this.toolBundles?.requestTools(available) ?? available;
             const taskBudget = this.definition.toolCallBudget;
             const finalAnswerPhase = taskBudget !== undefined && this.taskState.phase === 'final_answer';
