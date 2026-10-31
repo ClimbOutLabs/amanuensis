@@ -18,6 +18,7 @@ import type { CalendarSetupPort } from '../../../server/calendarSetup.js';
 import { parseToolGrants, type ConnectorToolGrants } from '../../../server/connectorToolGrants.js';
 import type { EmailSetupPort } from '../../../server/emailSetup.js';
 import type { GoogleSetupPort } from '../../../server/googleSetup.js';
+import type { MapsSetupPort } from '../../../server/mapsSetup.js';
 import type { MemoryProviderFields } from '../../../server/memoryProviderTypes.js';
 import type { SearchProviderFields } from '../../../server/searchProviderTypes.js';
 import type {
@@ -36,6 +37,7 @@ import type { CreateTrueForgeClientOptions } from '../client.js';
 import { createCalendarSetupApi } from './calendarSetup.js';
 import { createEmailSetupApi } from './emailSetup.js';
 import { createGoogleSetupApi } from './googleSetup.js';
+import { createMapsSetupApi } from './mapsSetup.js';
 
 export type UiConnectorAuth = ConnectorAuth;
 export type UiConnectorAuthPublic = ConnectorAuthPublic;
@@ -326,7 +328,8 @@ export type HarnessConnectorCatalog = ConnectorCatalogServer<
   ConnectorToolGrants &
   GoogleSetupPort &
   EmailSetupPort &
-  CalendarSetupPort;
+  CalendarSetupPort &
+  MapsSetupPort;
 
 /** Settings connector port for `createTrueFoundryServer`. Delete omitted; disconnect unsupported. */
 export function createConnectorCatalog(
@@ -380,6 +383,7 @@ export function createConnectorCatalog(
     ...createGoogleSetupApi(client),
     ...createEmailSetupApi(clientOptions),
     ...createCalendarSetupApi(clientOptions),
+    ...createMapsSetupApi(clientOptions),
     getConnectorCatalog: async () => {
       const body = await client.catalogs.mcpServers.list();
       return body.data.map(server => toUiCatalogEntry(server, { baseUrl: clientOptions.baseUrl }));
