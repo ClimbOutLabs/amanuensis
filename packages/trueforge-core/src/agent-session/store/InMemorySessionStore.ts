@@ -14,6 +14,7 @@ import type { TokenPagination } from '../schemas/pagination';
 import { emptyTaskChecklist, TaskChecklistSchema } from '../schemas/taskChecklist';
 import type { TerminalTurnState } from '../schemas/turn';
 import { assertCreateTurnThreadDelta } from './assertCreateTurnThreadDelta';
+import { buildChatSearchSnippet, chatSearchQueryTerms } from './chatSearchSnippet';
 import type {
   AddThreadsAndAppendEventsInput,
   AddThreadsInput,
@@ -24,6 +25,8 @@ import type {
   ApprovalDismissalRecord,
   BeginImplementationPlanDispatchInput,
   BeginImplementationPlanDispatchResult,
+  ChatSearchDocument,
+  ChatSearchHit,
   CommandExecutionRecord,
   CompleteImplementationPlanDispatchInput,
   CreateSessionFolderInput,
@@ -40,6 +43,7 @@ import type {
   GetTaskChecklistInput,
   GetTurnInput,
   ImplementationPlanTurnOwner,
+  IndexChatMessagesInput,
   ISessionStore,
   ListApprovalDismissalsInput,
   ListImplementationPlanGrantsInput,
@@ -61,6 +65,7 @@ import type {
   ReplaceTaskChecklistInput,
   RevokeImplementationPlanGrantInput,
   RevokeImplementationPlanGrantResult,
+  SearchChatHistoryInput,
   SetSessionFolderInput,
   StampImportedSessionInput,
   TurnContextAppend,
@@ -267,6 +272,7 @@ export class InMemorySessionStore<
   private readonly implementationPlanGrants = new Map<string, Map<string, StoredImplementationPlanGrant>>();
   private readonly implementationPlanDispatches = new Map<string, StoredImplementationPlanDispatch>();
   private readonly approvalDismissals = new Map<string, Map<string, ApprovalDismissalRecord>>();
+  private readonly chatSearchDocuments = new Map<string, Map<string, Map<string, ChatSearchDocument>>>();
 
   async createSession(input: CreateSessionInput<TSessionCustom>): Promise<void> {
     const key = sessionKey(input.session_id);
@@ -350,12 +356,83 @@ export class InMemorySessionStore<
     }
     this.implementationPlanGrants.delete(sKey);
     this.approvalDismissals.delete(sKey);
+    this.chatSearchDocuments.delete(sKey);
     for (const [dispatchKey, dispatch] of this.implementationPlanDispatches) {
       if (dispatch.session_id === input.session_id) {
         this.implementationPlanDispatches.delete(dispatchKey);
       }
     }
     this.sessions.delete(sKey);
+  }
+
+  async indexChatMessages(input: IndexChatMessagesInput): Promise<void> {
+    const sKey = sessionKey(input.session_id);
+    const stored = this.sessions.get(sKey);
+    if (stored?.record.tenant_id !== input.tenant_id) {
+      return;
+    }
+    let byTurn = this.chatSearchDocuments.get(sKey);
+    if (byTurn === undefined) {
+      byTurn = new Map();
+      this.chatSearchDocuments.set(sKey, byTurn);
+    }
+    byTurn.set(input.turn_id, new Map(input.documents.map(document => [document.message_id, { ...document }])));
+  }
+
+  async searchChatHistory(input: SearchChatHistoryInput): Promise<ChatSearchHit[]> {
+    const terms = chatSearchQueryTerms(input.query);
+    if (terms.length === 0 || input.limit <= 0) {
+      return [];
+    }
+    const bestBySession = new Map<string, { session: SessionRecord<TSessionCustom>; text: string; matchedAt: Date }>();
+    for (const [sKey, byTurn] of this.chatSearchDocuments) {
+      const stored = this.sessions.get(sKey);
+      if (stored === undefined) {
+        continue;
+      }
+      const { record } = stored;
+      if (record.tenant_id !== input.tenant_id) {
+        continue;
+      }
+      if (record.created_by_subject.subject_id !== input.created_by_subject_id) {
+        continue;
+      }
+      if (input.exclude_session_id !== null && record.session_id === input.exclude_session_id) {
+        continue;
+      }
+      for (const byMessage of byTurn.values()) {
+        for (const document of byMessage.values()) {
+          if (input.from !== null && document.created_at < input.from) {
+            continue;
+          }
+          if (input.to !== null && document.created_at >= input.to) {
+            continue;
+          }
+          const lower = document.text.toLowerCase();
+          const matched = terms.filter(term => lower.includes(term));
+          if (matched.length < terms.length) {
+            continue;
+          }
+          const current = bestBySession.get(record.session_id);
+          if (current === undefined || document.created_at > current.matchedAt) {
+            bestBySession.set(record.session_id, {
+              session: record,
+              text: document.text,
+              matchedAt: document.created_at,
+            });
+          }
+        }
+      }
+    }
+    return [...bestBySession.values()]
+      .sort((a, b) => b.matchedAt.getTime() - a.matchedAt.getTime())
+      .slice(0, input.limit)
+      .map(entry => ({
+        session_id: entry.session.session_id,
+        title: entry.session.title,
+        created_at: entry.session.created_at,
+        snippet: buildChatSearchSnippet(entry.text, input.query),
+      }));
   }
 
   private implementationPlanOwnerMatches(input: ListImplementationPlanGrantsInput): boolean {

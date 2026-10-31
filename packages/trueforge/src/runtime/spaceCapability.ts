@@ -68,6 +68,7 @@ import { googleCapability, sandboxAttachmentStager } from './googleCapability';
 import { googleSetupCapability } from './googleSetupCapability';
 import { mapsCapability } from './mapsCapability';
 import { MemoryTurnResourceResolver } from './MemoryTurnResourceResolver';
+import { pastChatsCapability, type PastChatsTurnContext } from './pastChatsCapability';
 import { personaCapability, type PersonaTurnContext } from './personaCapability';
 import { scheduleCapability, type ScheduleTurnContext } from './scheduleCapability';
 import { maskDocumentationRegions } from './spaceDocumentationMask';
@@ -2665,6 +2666,7 @@ export class SpaceTurnResourceResolver extends MemoryTurnResourceResolver {
       space: SpaceTurnContext,
       toolImages: ToolImagesOptions,
       usage: UsageSummaryTurnContext,
+      pastChats: PastChatsTurnContext,
     ]
   ) {
     const [
@@ -2679,16 +2681,19 @@ export class SpaceTurnResourceResolver extends MemoryTurnResourceResolver {
       space,
       toolImages,
       usage,
+      pastChats,
     ] = args;
     super(deps, profile, persona, memory, toolOutputScreen, personaKnowledgeBlock, personaKnowledgeHits, switchNotice);
     this.#space = space;
     this.#toolImages = toolImages;
     this.#usage = usage;
+    this.#pastChats = pastChats;
   }
 
   readonly #space: SpaceTurnContext;
   readonly #toolImages: ToolImagesOptions;
   readonly #usage: UsageSummaryTurnContext;
+  readonly #pastChats: PastChatsTurnContext;
   /** The run's sandbox, resolved before any thread is built; mail attachments are placed in it. */
   private runSandbox: Sandbox | undefined;
 
@@ -2720,6 +2725,15 @@ export class SpaceTurnResourceResolver extends MemoryTurnResourceResolver {
           starts_answer: this.#space.startsAnswer,
         }),
         usageSummaryCapability({ ...this.#usage, tracing: input.tracing, timeZone: this.clientTimezone }),
+        ...(this.#pastChats.enabled
+          ? [
+              pastChatsCapability({
+                sessionStore: this.#pastChats.sessionStore,
+                authority: { ...this.#pastChats.authority, currentSessionId: input.session_id },
+                tracing: input.tracing,
+              }),
+            ]
+          : []),
         toolImagesCapability(this.#toolImages),
         ...google,
         ...(personas === undefined

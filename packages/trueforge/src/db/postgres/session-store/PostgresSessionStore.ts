@@ -22,6 +22,7 @@ import type {
   ApprovalDismissalRecord,
   BeginImplementationPlanDispatchInput,
   BeginImplementationPlanDispatchResult,
+  ChatSearchHit,
   CommandExecutionRecord,
   CompleteImplementationPlanDispatchInput,
   CreateSessionFolderInput,
@@ -38,6 +39,7 @@ import type {
   GetTaskChecklistInput,
   GetTurnInput,
   ISessionStore,
+  IndexChatMessagesInput,
   ListApprovalDismissalsInput,
   ListImplementationPlanGrantsInput,
   ListSessionEventsInput,
@@ -57,6 +59,7 @@ import type {
   ReplaceTaskChecklistInput,
   RevokeImplementationPlanGrantInput,
   RevokeImplementationPlanGrantResult,
+  SearchChatHistoryInput,
   SetSessionFolderInput,
   StampImportedSessionInput,
   TurnRecordWithoutSnapshot,
@@ -81,6 +84,10 @@ import {
   recordApprovalDismissal as recordApprovalDismissalQuery,
 } from './queries/approvalDismissals';
 import { patchThreadCapabilityState as patchThreadCapabilityStateQuery } from './queries/capabilities';
+import {
+  indexChatMessages as indexChatMessagesQuery,
+  searchChatHistory as searchChatHistoryQuery,
+} from './queries/chatSearch';
 import {
   appendCommandExecutionResult as appendCommandExecutionResultQuery,
   appendCommandExecutionStarted as appendCommandExecutionStartedQuery,
@@ -266,6 +273,14 @@ export class PostgresSessionStore implements ISessionStore<SessionCustom, TurnCu
 
   listApprovalDismissals(input: ListApprovalDismissalsInput): Promise<ApprovalDismissalRecord[]> {
     return listApprovalDismissalsQuery(this.db, input);
+  }
+
+  indexChatMessages(input: IndexChatMessagesInput): Promise<void> {
+    return indexChatMessagesQuery(this.db, input);
+  }
+
+  searchChatHistory(input: SearchChatHistoryInput): Promise<ChatSearchHit[]> {
+    return searchChatHistoryQuery(this.db, input);
   }
 
   setSessionFolder(input: SetSessionFolderInput): Promise<void> {

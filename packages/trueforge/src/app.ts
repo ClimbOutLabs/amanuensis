@@ -1174,6 +1174,7 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
         repositoryStore: deps.repositoryStore,
         turnArtifactStore: deps.turnArtifactStore,
         globalSettingsStore: deps.globalSettingsStore,
+        sentinelSettingsStore: deps.sentinelSettingsStore,
         tokenFactoryBudget: deps.tokenFactoryBudget,
         eventSubscriptions: deps.eventSubscriptions,
         resolveSandboxProviderStore: deps.resolveSandboxProviderStore,

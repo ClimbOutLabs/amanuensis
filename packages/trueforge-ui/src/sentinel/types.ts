@@ -282,6 +282,8 @@ export type SentinelUserSettings = {
   maps_without_asking: boolean;
   /** While on, code, commands and workspace files in the sandbox run without asking. Default: on. */
   sandbox_without_asking: boolean;
+  /** While on, the assistant can search your own past chats when you ask. Default: off. */
+  chat_search_enabled: boolean;
 };
 
 /**
@@ -765,6 +767,7 @@ export function parseUserSettings(body: unknown): SentinelUserSettings {
       search_without_asking: true,
       maps_without_asking: true,
       sandbox_without_asking: true,
+      chat_search_enabled: false,
     };
   }
   return {
@@ -773,5 +776,6 @@ export function parseUserSettings(body: unknown): SentinelUserSettings {
     search_without_asking: optionalBoolean(settings, 'search_without_asking') ?? true,
     maps_without_asking: optionalBoolean(settings, 'maps_without_asking') ?? true,
     sandbox_without_asking: optionalBoolean(settings, 'sandbox_without_asking') ?? true,
+    chat_search_enabled: optionalBoolean(settings, 'chat_search_enabled') ?? false,
   };
 }

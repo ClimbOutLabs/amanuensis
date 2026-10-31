@@ -67,6 +67,7 @@ import type { IPersonalizationStore } from '../db/personalizationStore';
 import type { IPersonaStore } from '../db/personaStore';
 import type { IRepositoryStore } from '../db/repositoryStore';
 import type { ISandboxProviderStore } from '../db/sandboxProviderStore';
+import type { ISentinelSettingsStore } from '../db/sentinelSettingsStore';
 import type { SessionCustom, TurnCustom } from '../db/sessionCustom';
 import type { ISkillStore } from '../db/skillStore';
 import type { ISpaceStore } from '../db/spaceStore';
@@ -91,6 +92,8 @@ import type { ActiveTurnRegistry, TurnAdmission } from '../runtime/activeTurns';
 import { findTurnArtifact } from '../runtime/artifacts/findTurnArtifact';
 import { submitArtifactPersistence } from '../runtime/artifacts/persistTurnArtifacts';
 import { chatModelName, resolveChatAssistant, scheduleRunsAs, type ChatRunner } from '../runtime/chatAssistant';
+import { indexChatTurn } from '../runtime/chatSearchIndexing';
+import { readChatSearchEnabled } from '../runtime/chatSearchSettings';
 import { StreamGoneError, type EventSubscription, type EventSubscriptionRegistry } from '../runtime/event-subscription';
 import { buildInternalSourceToolPolicy, type InternalSourceState } from '../runtime/internalSourceGuard';
 import { mailAccountDirectory } from '../runtime/mailConnector';
@@ -282,6 +285,8 @@ export interface TurnsRouterDeps {
   turnArtifactStore: ITurnArtifactStore;
   /** Not tenant-scoped: the persisted live tool-output screen override is global. */
   globalSettingsStore: IGlobalSettingsStore;
+  /** Per-person settings, for the past-chat search switch; absent, the search tool stays off. */
+  sentinelSettingsStore?: ISentinelSettingsStore | undefined;
   /** Per-instance daily Token Factory counters; refuses new turns past `TOKEN_FACTORY_DAILY_TOKEN_CAP`. */
   tokenFactoryBudget: TokenFactoryBudget;
   /** Resumable live turn-event transport: create-turn writes, subscribe polls. */
@@ -326,6 +331,8 @@ export type BeginTurnExecutionDeps = Pick<
   spaceStore: ISpaceStore;
   /** Per-user Google logins; absent, no Gmail tools mount. */
   googleConnectionStore?: IGoogleConnectionStore | undefined;
+  /** Per-person settings, for the past-chat search switch; absent, the search tool stays off. */
+  sentinelSettingsStore?: ISentinelSettingsStore | undefined;
   /** persists run_code's harvested result files as turn artifacts at harvest time. */
   turnArtifactStore: ITurnArtifactStore;
   /** Same override point as the chat path's `TurnsRouterDeps.sandboxProviderResolver`; defaults to {@link resolveSandboxProvider}. */
@@ -386,6 +393,8 @@ function createTurnResolver(deps: {
   memorySummarize: SummarizeTurnContext | undefined;
   /** The person's "use memories in replies" switch when they set it; absent, the agent's own setting applies. */
   memoryRecallEnabled: boolean | undefined;
+  /** The person's past-chat search switch for this turn; off, the search tool is not offered. */
+  chatSearchEnabled: boolean;
   spaceStore: ISpaceStore;
   /** Per-user Google logins; absent, no Gmail tools mount. */
   googleConnectionStore?: IGoogleConnectionStore | undefined;
@@ -441,6 +450,7 @@ function createTurnResolver(deps: {
     previousTurnId,
     memorySummarize,
     memoryRecallEnabled,
+    chatSearchEnabled,
     spaceStore,
     googleConnectionStore,
     turnArtifactStore,
@@ -894,6 +904,11 @@ function createTurnResolver(deps: {
     },
     { store: turnArtifactStore, tenantId: tenant_id, sessionId, turnId, logger },
     { sessionStore, budget: tokenFactoryBudget, authority: { tenantId: tenant_id, userRef } },
+    {
+      sessionStore,
+      authority: { tenantId: tenant_id, userRef },
+      enabled: chatSearchEnabled,
+    },
   );
   if (switchedByMessage === true) {
     resolver.switches.markSwitched();
@@ -1194,6 +1209,13 @@ export interface DrainTurnEventsInput {
         tenantId: string;
       }
     | undefined;
+  /** Present on every turn: the finished turn joins the past-chat search index in the follow-up. */
+  chatSearch?:
+    | {
+        sessionStore: ISessionStore<SessionCustom, TurnCustom>;
+        tenantId: string;
+      }
+    | undefined;
 }
 
 /** Events that show a turn reached the model. Connector startup, memory recall and a new sandbox are still setup. */
@@ -1335,7 +1357,8 @@ async function runTurnFollowUp(params: {
   markArtifactsCaptured: () => void;
 }): Promise<void> {
   const { input, state, ingestedToolOutput, toolResults, markArtifactsCaptured } = params;
-  const { turnEventStream, sessionId, turnId, logger, memory, artifacts, profileLearning, modelUsage } = input;
+  const { turnEventStream, sessionId, turnId, logger, memory, artifacts, profileLearning, modelUsage, chatSearch } =
+    input;
   try {
     // First, and never behind a model call: the chat's next turn reuses the sandbox and waits
     // on this step, so its tools cannot change a file before this turn has saved it.
@@ -1394,6 +1417,20 @@ async function runTurnFollowUp(params: {
         turnEventStream,
         logger,
       });
+    }
+    if (chatSearch !== undefined) {
+      // The finished turn joins the past-chat search index, so a later chat can find it.
+      const finishedTurn = await chatSearch.sessionStore
+        .getTurn({ session_id: sessionId, turn_id: turnId })
+        .catch(() => undefined);
+      if (finishedTurn !== undefined) {
+        await indexChatTurn({
+          sessionStore: chatSearch.sessionStore,
+          tenant_id: chatSearch.tenantId,
+          turn: finishedTurn,
+          logger,
+        });
+      }
     }
     // The summarization and profile learning calls above record after the first flush.
     await flushUsage();
@@ -1568,6 +1605,7 @@ export interface TurnEventDrainInput {
   turnDrains: TurnDrainRegistry;
   modelUsage: ModelUsageDrainMember;
   memory?: DrainTurnEventsInput['memory'];
+  chatSearch?: DrainTurnEventsInput['chatSearch'];
 }
 
 /**
@@ -1637,6 +1675,13 @@ async function beginAcceptedTurnExecution(
         globalSettingsStore: deps.globalSettingsStore,
         logger: deps.logger,
       });
+      // The person's past-chat search switch, read once per turn the same way.
+      const chatSearchEnabled = await readChatSearchEnabled({
+        sentinelSettingsStore: deps.sentinelSettingsStore,
+        tenant_id,
+        created_by: userRef,
+        logger: deps.logger,
+      });
       // Same one-read-per-turn contract for the recall screen: the Settings toggle's
       // persisted override wins when stored, otherwise the MEMORY_SCREEN_ENABLED env default.
       const memoryScreenSetting = await readMemoryScreenSetting({
@@ -1699,6 +1744,7 @@ async function beginAcceptedTurnExecution(
         previousTurnId: deps.previousTurnId ?? null,
         memorySummarize,
         memoryRecallEnabled,
+        chatSearchEnabled,
         clientTimezone: deps.clientTimezone,
         toolOutputScreenEnabled,
         turnArtifactStore: deps.turnArtifactStore,
@@ -1770,6 +1816,7 @@ async function beginAcceptedTurnExecution(
       logger: deps.logger,
       turnDrains: deps.turnDrains,
       modelUsage: { ledger: modelUsage, eventStore: deps.sessionStore },
+      chatSearch: { sessionStore: deps.sessionStore, tenantId: tenant_id },
       memory:
         deps.memoryClient === undefined
           ? undefined
@@ -2522,6 +2569,13 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
       globalSettingsStore: deps.globalSettingsStore,
       logger: deps.logger,
     });
+    // The person's past-chat search switch, read once per turn the same way.
+    const chatSearchEnabled = await readChatSearchEnabled({
+      sentinelSettingsStore: deps.sentinelSettingsStore,
+      tenant_id: requestContext.tenant_id,
+      created_by: userRef,
+      logger: deps.logger,
+    });
     // Same one-read-per-turn contract for the recall screen.
     const memoryScreenSetting = await readMemoryScreenSetting({
       globalSettingsStore: deps.globalSettingsStore,
@@ -2567,6 +2621,7 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
       previousTurnId: memoryPreviousTurnId,
       memorySummarize,
       memoryRecallEnabled,
+      chatSearchEnabled,
       spaceStore: deps.spaceStore,
       googleConnectionStore: deps.googleConnectionStore,
       clientTimezone: body.client_timezone,
@@ -2937,6 +2992,7 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
                   },
                 },
           profileLearning,
+          chatSearch: { sessionStore: deps.sessionStore, tenantId: requestContext.tenant_id },
           artifacts: {
             turnArtifactStore: deps.turnArtifactStore,
             sandboxProviderStore,

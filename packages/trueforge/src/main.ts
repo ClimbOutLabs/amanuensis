@@ -111,6 +111,7 @@ import { registerCalendarConnectorForBoot } from './runtime/calendarAccount';
 import { createChatImageService } from './runtime/chatImages/chatImageService';
 import { CHAT_IMAGE_RETENTION_DAYS } from './runtime/chatImages/limits';
 import { createImageReencoder } from './runtime/chatImages/reencodeInSandbox';
+import { startChatSearchBackfill } from './runtime/chatSearchIndexing';
 import { recoverAbandonedCommandExecutions } from './runtime/commandExecutionRecovery';
 import { designateTavilyAtBoot, seedDefaultSearchProviderAtBoot } from './runtime/defaultSearchProvider';
 import { EventSubscriptionRegistry } from './runtime/event-subscription';
@@ -898,6 +899,7 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     chatImageStore,
     turnDrains,
     sentinelAuditStore,
+    globalSettingsStore,
   };
 }
 
@@ -976,6 +978,7 @@ try {
     chatImageStore,
     turnDrains,
     sentinelAuditStore,
+    globalSettingsStore,
   } = configuration.STANDALONE
     ? await createServerRuntime(
         await createStandalonePersistence({ sqlitePath: configuration.SQLITE_PATH, logger }),
@@ -1018,6 +1021,9 @@ try {
     void sweepExpiredTurnArtifacts();
   }, 86_400_000);
   artifactRetentionTimer.unref();
+
+  // Fill the past-chat search index for chats that predate it; a no-op once done.
+  startChatSearchBackfill({ sessionStore, globalSettingsStore, logger });
 
   // Abandoned Google consents hold a client secret; consent reads already purge, this covers an idle install.
   const googlePendingPurgeTimer = setInterval(() => {

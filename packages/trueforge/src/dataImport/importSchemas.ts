@@ -560,6 +560,7 @@ const ImportPermissionSettingsSchema = z.object({
   ...SentinelUserSettingsSchema.shape,
   maps_without_asking: SentinelUserSettingsSchema.shape.maps_without_asking.default(true),
   sandbox_without_asking: SentinelUserSettingsSchema.shape.sandbox_without_asking.default(true),
+  chat_search_enabled: SentinelUserSettingsSchema.shape.chat_search_enabled.default(false),
 });
 
 export const ImportSettingsFileSchema = z.object({

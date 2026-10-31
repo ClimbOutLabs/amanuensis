@@ -28,6 +28,7 @@ export class PostgresSentinelSettingsStore implements ISentinelSettingsStore<Tra
         'search_without_asking',
         'maps_without_asking',
         'sandbox_without_asking',
+        'chat_search_enabled',
       ])
       .where('tenant_id', '=', input.tenant_id)
       .where('created_by', '=', input.created_by)
@@ -40,6 +41,7 @@ export class PostgresSentinelSettingsStore implements ISentinelSettingsStore<Tra
           search_without_asking: row.search_without_asking,
           maps_without_asking: row.maps_without_asking,
           sandbox_without_asking: row.sandbox_without_asking,
+          chat_search_enabled: row.chat_search_enabled,
         };
   }
 
@@ -57,6 +59,7 @@ export class PostgresSentinelSettingsStore implements ISentinelSettingsStore<Tra
         search_without_asking: input.search_without_asking ?? DEFAULT_SENTINEL_USER_SETTINGS.search_without_asking,
         maps_without_asking: input.maps_without_asking ?? DEFAULT_SENTINEL_USER_SETTINGS.maps_without_asking,
         sandbox_without_asking: input.sandbox_without_asking ?? DEFAULT_SENTINEL_USER_SETTINGS.sandbox_without_asking,
+        chat_search_enabled: input.chat_search_enabled ?? DEFAULT_SENTINEL_USER_SETTINGS.chat_search_enabled,
         created_at: now(),
         updated_at: now(),
       })
@@ -67,6 +70,7 @@ export class PostgresSentinelSettingsStore implements ISentinelSettingsStore<Tra
           ...(tier2 === undefined ? {} : { tier2_auto_allow: json(tier2) }),
           ...(input.search_without_asking === undefined ? {} : { search_without_asking: input.search_without_asking }),
           ...(input.maps_without_asking === undefined ? {} : { maps_without_asking: input.maps_without_asking }),
+          ...(input.chat_search_enabled === undefined ? {} : { chat_search_enabled: input.chat_search_enabled }),
           ...(input.sandbox_without_asking === undefined
             ? {}
             : { sandbox_without_asking: input.sandbox_without_asking }),

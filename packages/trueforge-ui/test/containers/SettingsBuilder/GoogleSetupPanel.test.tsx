@@ -718,6 +718,7 @@ describe('GoogleSetupPanel', () => {
         search_without_asking: true,
         maps_without_asking: false,
         sandbox_without_asking: true,
+        chat_search_enabled: false,
       }),
       updateUserSettings: async () => ({
         offline_mode: offlineMode,
@@ -725,6 +726,7 @@ describe('GoogleSetupPanel', () => {
         search_without_asking: true,
         maps_without_asking: false,
         sandbox_without_asking: true,
+        chat_search_enabled: false,
       }),
       listSentinelSessionContext: async () => ({ approvals: [] }),
     });
