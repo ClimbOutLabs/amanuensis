@@ -101,8 +101,9 @@ test_dns_resolves_the_macos_way_without_getent() {
   dns_ready
   fixture_caddy
   fixture_dscacheutil
-  install_tls
+  install_tls --tls-root
   assert_rc 0
+  assert_flat_contains "$OUT" "done DNS: aman.example.com and login.example.com resolve to this computer's public address $PUBLIC_IP"
   assert_not_contains "$OUT$ERR" "does not resolve yet"
   sandbox_drop
 }
