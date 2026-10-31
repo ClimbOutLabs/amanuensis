@@ -4,9 +4,9 @@ import { useThreadIsRunning } from '@assistant-ui/core/react';
 import { useAuiState } from '@assistant-ui/react';
 import { useEffect, useRef } from 'react';
 
+import { useSpokenReply } from '../components/SpokenReplyContext.js';
 import { useOptionalSentinelState, type SentinelState } from '../sentinel/SentinelStateProvider.js';
-import { isSpeechOutputSupported, speakText, stopSpeaking } from '../utils/speechOutput.js';
-import { readSpeechVoiceURI, useSpeakVoiceReplies } from '../utils/speechReplyPreferences.js';
+import { useSpeakVoiceReplies } from '../utils/speechReplyPreferences.js';
 import {
   approvalSpeechLine,
   finalAnswerSpeech,
@@ -56,6 +56,7 @@ export function SpokenReplyContainer() {
   const messages = useAuiState(s => s.thread.messages);
   const threadId = useAuiState(s => s.threadListItem.id);
   const { enabled } = useSpeakVoiceReplies();
+  const spokenReply = useSpokenReply();
   const latestUser = lastMessageWithRole(messages, 'user');
   const latestUserId = latestUser?.id;
   const latestUserText = latestUser === undefined ? '' : textOf(latestUser);
@@ -71,10 +72,10 @@ export function SpokenReplyContainer() {
   useEffect(() => {
     disarmSpokenReply();
     replyDue.current = false;
-    stopSpeaking();
-  }, [threadId]);
+    spokenReply.stop();
+  }, [threadId, spokenReply]);
 
-  useEffect(() => () => stopSpeaking(), []);
+  useEffect(() => () => spokenReply.stop(), [spokenReply]);
 
   // A new user message is either the voice send's own message or the end of that send.
   useEffect(() => {
@@ -101,11 +102,11 @@ export function SpokenReplyContainer() {
     replyDue.current = false;
     // Switching chats ends a run as seen here too; only the chat the voice turn started in is read.
     if (runThreadId.current !== threadId) return;
-    if (!enabled || !isSpeechOutputSupported()) return;
+    if (!enabled || !spokenReply.canSpeak()) return;
     const sentinelLine = approvalLine(message.content, sentinel);
     const text = sentinelLine ?? limitSpeechWords(finalAnswerSpeech(message.content));
-    speakText({ key: message.id, text, voiceURI: readSpeechVoiceURI() });
-  }, [isRunning, messages, enabled, sentinel, threadId]);
+    void spokenReply.speak(text, { key: message.id });
+  }, [isRunning, messages, enabled, sentinel, threadId, spokenReply]);
 
   return null;
 }

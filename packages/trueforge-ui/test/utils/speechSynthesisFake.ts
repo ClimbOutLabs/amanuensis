@@ -1,15 +1,26 @@
+import { renderHook } from '@testing-library/react';
 import { vi, type Mock } from 'vitest';
+
+import { useSpokenReply } from '@/components/SpokenReplyContext.js';
 
 /** The utterance fields the read-aloud code sets and reads. */
 export class FakeUtterance {
   text: string;
   voice: SpeechSynthesisVoice | null = null;
   lang = '';
-  onend: (() => void) | null = null;
-  onerror: (() => void) | null = null;
+  private listeners = new Map<string, Array<() => void>>();
 
   constructor(text: string) {
     this.text = text;
+  }
+
+  addEventListener(type: string, listener: () => void): void {
+    this.listeners.set(type, [...(this.listeners.get(type) ?? []), listener]);
+  }
+
+  /** Plays the browser telling the page that this utterance ended. */
+  finish(): void {
+    for (const listener of this.listeners.get('end') ?? []) listener();
   }
 }
 
@@ -55,4 +66,9 @@ export function removeSpeechSynthesis(): void {
 /** The text of every utterance handed to `speak`, in order. */
 export function spokenTexts(synthesis: FakeSpeechSynthesis): string[] {
   return synthesis.speak.mock.calls.map(([utterance]) => utterance.text);
+}
+
+/** Stops whatever the shared browser-only spoken reply player is reading, so tests do not leak into each other. */
+export function stopSpokenReply(): void {
+  renderHook(() => useSpokenReply()).result.current.stop();
 }

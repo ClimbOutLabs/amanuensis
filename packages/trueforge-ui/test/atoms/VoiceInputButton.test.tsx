@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, renderHook, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const { mockSetText, mockStartVoiceRecording } = vi.hoisted(() => ({
@@ -18,15 +18,15 @@ vi.mock('@/atoms/lib/voiceRecorder.js', () => ({
 
 import type { StartVoiceRecordingOptions } from '@/atoms/lib/voiceRecorder.js';
 import { VoiceInputButton } from '@/atoms/VoiceInputButton.js';
+import { useSpokenReply } from '@/components/SpokenReplyContext.js';
 import {
   VoiceInputProvider,
   type VoiceAvailability,
   type VoiceInputApi,
   type VoiceTranscription,
 } from '@/components/VoiceInputContext.js';
-import { speakText, stopSpeaking } from '@/utils/speechOutput.js';
 import { clearDraftFromVoice, takeDraftFromVoice } from '@/utils/voiceTurn.js';
-import { installSpeechSynthesis, removeSpeechSynthesis } from '../utils/speechSynthesisFake.js';
+import { installSpeechSynthesis, removeSpeechSynthesis, stopSpokenReply } from '../utils/speechSynthesisFake.js';
 
 const DEFAULT_TRANSCRIPTION: VoiceTranscription = {
   text: 'hello world',
@@ -342,13 +342,13 @@ describe('VoiceInputButton and read-aloud replies', () => {
   });
 
   afterEach(() => {
-    stopSpeaking();
+    stopSpokenReply();
     removeSpeechSynthesis();
   });
 
   it('starting to record stops any reply that is being read aloud', async () => {
     const synthesis = installSpeechSynthesis();
-    speakText({ key: 'msg-1', text: 'A long reply.' });
+    void renderHook(() => useSpokenReply()).result.current.speak('A long reply.', { key: 'msg-1' });
     const { api } = makeApi();
     render(
       <VoiceInputProvider api={api}>

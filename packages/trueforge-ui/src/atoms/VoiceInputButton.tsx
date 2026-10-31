@@ -3,9 +3,9 @@
 import { useAui, useAuiState } from '@assistant-ui/react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
+import { useSpokenReply } from '../components/SpokenReplyContext.js';
 import { useOptionalVoiceInput, type VoiceAvailability, type VoiceInputApi } from '../components/VoiceInputContext.js';
 import { Icon } from '../icons/Icon.js';
-import { stopSpeaking } from '../utils/speechOutput.js';
 import { markDraftFromVoice } from '../utils/voiceTurn.js';
 import { auiButtonClass } from './lib/buttonClasses.js';
 import { cn } from './lib/cn.js';
@@ -37,6 +37,7 @@ function VoiceInputButtonInner({ api, disabled }: { api: VoiceInputApi; disabled
   const aui = useAui();
   const composerText = useAuiState(s => s.composer.text);
   const [available, setAvailable] = useState<VoiceAvailability>(null);
+  const spokenReply = useSpokenReply();
   const [phase, setPhase] = useState<VoicePhase>('idle');
   const [acquiring, setAcquiring] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -141,7 +142,7 @@ function VoiceInputButtonInner({ api, disabled }: { api: VoiceInputApi; disabled
 
   const startRecording = useCallback(async (): Promise<boolean> => {
     // Speaking a reply and recording a new message at once would have the mic hear the reply.
-    stopSpeaking();
+    spokenReply.stop();
     setError(null);
     setNotice(null);
     setAcquiring(true);
@@ -182,7 +183,7 @@ function VoiceInputButtonInner({ api, disabled }: { api: VoiceInputApi; disabled
         setAcquiring(false);
       }
     }
-  }, [stopAndTranscribe]);
+  }, [stopAndTranscribe, spokenReply]);
 
   const cancelTranscription = useCallback(() => {
     abortRef.current?.abort();

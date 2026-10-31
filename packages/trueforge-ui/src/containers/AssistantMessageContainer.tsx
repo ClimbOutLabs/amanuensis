@@ -21,6 +21,7 @@ import { ModelUsageOverview } from '../atoms/agent-chat/ModelUsageOverview.js';
 import { TurnImages } from '../chatImages/ChatImages.js';
 import { ChatImageScope, ChatTurnWithoutImages, useChatImagesPort } from '../chatImages/chatImageScope.js';
 import { AmanBrief } from '../components/AmanBrief.js';
+import { useSpeakingKey, useSpokenReply } from '../components/SpokenReplyContext.js';
 import { useAgentDetailsVisibility } from '../server/AgentDetailsPreferenceContext.js';
 import { useSlot } from '../theme/SlotsProvider.js';
 import { computeAgentStepsSplit, type AgentStepsRun } from '../utils/computeAgentStepsSplit.js';
@@ -31,8 +32,6 @@ import {
   toolStepErrored,
   toolStepUnfinished,
 } from '../utils/recoveredSteps.js';
-import { isSpeechOutputSupported, speakText, stopSpeaking, useSpeakingKey } from '../utils/speechOutput.js';
-import { readSpeechVoiceURI } from '../utils/speechReplyPreferences.js';
 import { finalAnswerSpeech, limitSpeechWords } from '../utils/speechText.js';
 import { hasPendingAskUserResponse, hasPendingToolApproval } from '../utils/toolCallParsing.js';
 import { turnOutcomeLines } from '../utils/turnOutcomes.js';
@@ -189,6 +188,7 @@ export function AssistantMessageContainer() {
   // The read-aloud button shows once an answer has text and is done; the plain text is built on press.
   const hasAnswerText = answerText.trim() !== '';
   const messageContent = useAuiState(s => s.message.content);
+  const spokenReply = useSpokenReply();
   const speakingKey = useSpeakingKey();
   // A brief replaces the answer once its JSON block is complete and parses. While it is being written one quiet
   // line shows instead of the raw text; a finished answer without a valid block shows as normal markdown.
@@ -439,16 +439,15 @@ export function AssistantMessageContainer() {
               onCopy={copy}
               createdAt={createdAt}
               speech={
-                hasAnswerText && isSpeechOutputSupported()
+                hasAnswerText && spokenReply.canSpeak()
                   ? {
                       speaking: speakingKey === messageId,
-                      onSpeak: () =>
-                        speakText({
+                      onSpeak: () => {
+                        void spokenReply.speak(limitSpeechWords(finalAnswerSpeech(messageContent)), {
                           key: messageId,
-                          text: limitSpeechWords(finalAnswerSpeech(messageContent)),
-                          voiceURI: readSpeechVoiceURI(),
-                        }),
-                      onStop: stopSpeaking,
+                        });
+                      },
+                      onStop: spokenReply.stop,
                     }
                   : undefined
               }

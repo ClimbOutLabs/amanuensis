@@ -3,8 +3,9 @@
 import { useState } from 'react';
 
 import { Switch } from '../atoms/primitives/Switch.js';
-import { isSpeechOutputSupported, stopSpeaking, useSpeechVoices } from '../utils/speechOutput.js';
+import { useSpeechVoices } from '../utils/speechOutput.js';
 import { readSpeechVoiceURI, useSpeakVoiceReplies, writeSpeechVoiceURI } from '../utils/speechReplyPreferences.js';
+import { useSpokenReply } from './SpokenReplyContext.js';
 
 const selectClassName =
   'w-full rounded-md border border-border/70 bg-secondary-bg px-3 py-2.5 text-sm text-text-primary outline-none transition-colors focus-visible:border-focus-ring focus-visible:ring-2 focus-visible:ring-focus-ring/50';
@@ -13,9 +14,10 @@ const selectClassName =
 export function VoiceReplySettings() {
   const { enabled, setEnabled } = useSpeakVoiceReplies();
   const voices = useSpeechVoices();
+  const spokenReply = useSpokenReply();
   const [voiceURI, setVoiceURI] = useState(() => readSpeechVoiceURI() ?? '');
 
-  if (!isSpeechOutputSupported()) return null;
+  if (!spokenReply.canSpeak()) return null;
 
   return (
     <section className="mt-4 rounded-xl border border-border bg-card-bg p-4" aria-labelledby="voice-reply-heading">
@@ -35,7 +37,7 @@ export function VoiceReplySettings() {
           checked={enabled}
           onCheckedChange={checked => {
             setEnabled(checked);
-            if (!checked) stopSpeaking();
+            if (!checked) spokenReply.stop();
           }}
           aria-labelledby="voice-reply-switch-label"
           aria-describedby="voice-reply-switch-hint"

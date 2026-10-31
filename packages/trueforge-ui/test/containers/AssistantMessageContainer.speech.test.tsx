@@ -3,12 +3,14 @@ import { ThreadPrimitive, type ThreadMessageLike } from '@assistant-ui/react';
 import { fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { SpokenReplyProvider } from '@/components/SpokenReplyContext.js';
 import { AssistantMessageContainer } from '@/containers/AssistantMessageContainer.js';
-import { stopSpeaking } from '@/utils/speechOutput.js';
+import type { ServerVoiceApi } from '@/utils/spokenReplyPlayer.js';
 import {
   installSpeechSynthesis,
   removeSpeechSynthesis,
   spokenTexts,
+  stopSpokenReply,
   type FakeSpeechSynthesis,
 } from '../utils/speechSynthesisFake.js';
 import { RuntimeHarness } from './RuntimeHarness.js';
@@ -27,13 +29,16 @@ const answer: ThreadMessageLike[] = [
   },
 ];
 
-function renderAnswer() {
-  return render(
+function renderAnswer({ serverVoice }: { serverVoice?: ServerVoiceApi } = {}) {
+  const thread = (
     <RuntimeHarness messages={answer} isRunning={false}>
       <ThreadPrimitive.Messages>
         {({ message }) => (message.role === 'assistant' ? <AssistantMessageContainer /> : null)}
       </ThreadPrimitive.Messages>
-    </RuntimeHarness>,
+    </RuntimeHarness>
+  );
+  return render(
+    serverVoice === undefined ? thread : <SpokenReplyProvider serverVoice={serverVoice}>{thread}</SpokenReplyProvider>,
   );
 }
 
@@ -45,7 +50,8 @@ describe('finished answer read-aloud controls', () => {
   });
 
   afterEach(() => {
-    stopSpeaking();
+    stopSpokenReply();
+    vi.restoreAllMocks();
     removeSpeechSynthesis();
     window.localStorage.clear();
   });
@@ -72,5 +78,26 @@ describe('finished answer read-aloud controls', () => {
     expect(screen.queryByRole('button', { name: 'Read aloud' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Stop reading aloud' })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Copy' })).toBeInTheDocument();
+  });
+
+  it('reads the answer with the computer voice when the host has one, and not the browser voice', async () => {
+    const speak = vi.fn<ServerVoiceApi['speak']>(() => Promise.resolve(new Blob(['wav'], { type: 'audio/wav' })));
+    removeSpeechSynthesis();
+    vi.spyOn(HTMLMediaElement.prototype, 'play').mockResolvedValue();
+    renderAnswer({ serverVoice: { speak } });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Read aloud' }));
+
+    await vi.waitFor(() => expect(speak).toHaveBeenCalledTimes(1));
+    expect(speak.mock.lastCall?.[0].text).toBe('Here is the plan for your week.');
+  });
+
+  it('falls back to the browser voice when the computer voice fails', async () => {
+    const speak = vi.fn<ServerVoiceApi['speak']>(() => Promise.reject(new Error('voice is off')));
+    renderAnswer({ serverVoice: { speak } });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Read aloud' }));
+
+    await vi.waitFor(() => expect(spokenTexts(synthesis)).toEqual(['Here is the plan for your week.']));
   });
 });

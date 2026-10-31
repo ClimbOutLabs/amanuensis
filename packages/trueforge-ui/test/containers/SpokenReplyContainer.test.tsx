@@ -4,7 +4,6 @@ import { act, render } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { SpokenReplyContainer } from '@/containers/SpokenReplyContainer.js';
-import { stopSpeaking } from '@/utils/speechOutput.js';
 import { SPEAK_VOICE_REPLIES_STORAGE_KEY } from '@/utils/speechReplyPreferences.js';
 import {
   armSpokenReply,
@@ -17,6 +16,7 @@ import {
   installSpeechSynthesis,
   removeSpeechSynthesis,
   spokenTexts,
+  stopSpokenReply,
   type FakeSpeechSynthesis,
 } from '../utils/speechSynthesisFake.js';
 import { RuntimeHarness } from './RuntimeHarness.js';
@@ -125,7 +125,7 @@ describe('SpokenReplyContainer', () => {
   });
 
   afterEach(() => {
-    stopSpeaking();
+    stopSpokenReply();
     removeSpeechSynthesis();
     clearDraftFromVoice();
     window.localStorage.clear();

@@ -1,6 +1,6 @@
 'use client';
 
-import { createContext, useContext, useMemo, type FC, type ReactNode } from 'react';
+import { createContext, useContext, useMemo, useSyncExternalStore, type FC, type ReactNode } from 'react';
 
 import { createSpokenReplyPlayer, type ServerVoiceApi, type SpokenReplyPlayer } from '../utils/spokenReplyPlayer.js';
 
@@ -25,4 +25,10 @@ export function useSpokenReply(): SpokenReplyPlayer {
   }
   browserOnlyPlayer.current ??= createSpokenReplyPlayer({ serverVoice: null });
   return browserOnlyPlayer.current;
+}
+
+/** The key of what is being read aloud right now (a message id), or null. */
+export function useSpeakingKey(): string | null {
+  const player = useSpokenReply();
+  return useSyncExternalStore(player.subscribe, player.speakingKey, () => null);
 }
