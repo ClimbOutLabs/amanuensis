@@ -272,7 +272,7 @@ export class InMemorySessionStore<
   private readonly implementationPlanGrants = new Map<string, Map<string, StoredImplementationPlanGrant>>();
   private readonly implementationPlanDispatches = new Map<string, StoredImplementationPlanDispatch>();
   private readonly approvalDismissals = new Map<string, Map<string, ApprovalDismissalRecord>>();
-  private readonly chatSearchDocuments = new Map<string, Map<string, ChatSearchDocument & { turn_id: string }>>();
+  private readonly chatSearchDocuments = new Map<string, Map<string, Map<string, ChatSearchDocument>>>();
 
   async createSession(input: CreateSessionInput<TSessionCustom>): Promise<void> {
     const key = sessionKey(input.session_id);
@@ -371,19 +371,12 @@ export class InMemorySessionStore<
     if (stored?.record.tenant_id !== input.tenant_id) {
       return;
     }
-    let byMessage = this.chatSearchDocuments.get(sKey);
-    if (byMessage === undefined) {
-      byMessage = new Map();
-      this.chatSearchDocuments.set(sKey, byMessage);
+    let byTurn = this.chatSearchDocuments.get(sKey);
+    if (byTurn === undefined) {
+      byTurn = new Map();
+      this.chatSearchDocuments.set(sKey, byTurn);
     }
-    for (const [messageId, document] of byMessage) {
-      if (document.turn_id === input.turn_id) {
-        byMessage.delete(messageId);
-      }
-    }
-    for (const document of input.documents) {
-      byMessage.set(document.message_id, { ...document, turn_id: input.turn_id });
-    }
+    byTurn.set(input.turn_id, new Map(input.documents.map(document => [document.message_id, { ...document }])));
   }
 
   async searchChatHistory(input: SearchChatHistoryInput): Promise<ChatSearchHit[]> {
@@ -392,7 +385,7 @@ export class InMemorySessionStore<
       return [];
     }
     const bestBySession = new Map<string, { session: SessionRecord<TSessionCustom>; text: string; matchedAt: Date }>();
-    for (const [sKey, byMessage] of this.chatSearchDocuments) {
+    for (const [sKey, byTurn] of this.chatSearchDocuments) {
       const stored = this.sessions.get(sKey);
       if (stored === undefined) {
         continue;
@@ -407,25 +400,27 @@ export class InMemorySessionStore<
       if (input.exclude_session_id !== null && record.session_id === input.exclude_session_id) {
         continue;
       }
-      for (const document of byMessage.values()) {
-        if (input.from !== null && document.created_at < input.from) {
-          continue;
-        }
-        if (input.to !== null && document.created_at >= input.to) {
-          continue;
-        }
-        const lower = document.text.toLowerCase();
-        const matched = terms.filter(term => lower.includes(term));
-        if (matched.length < terms.length) {
-          continue;
-        }
-        const current = bestBySession.get(record.session_id);
-        if (current === undefined || document.created_at > current.matchedAt) {
-          bestBySession.set(record.session_id, {
-            session: record,
-            text: document.text,
-            matchedAt: document.created_at,
-          });
+      for (const byMessage of byTurn.values()) {
+        for (const document of byMessage.values()) {
+          if (input.from !== null && document.created_at < input.from) {
+            continue;
+          }
+          if (input.to !== null && document.created_at >= input.to) {
+            continue;
+          }
+          const lower = document.text.toLowerCase();
+          const matched = terms.filter(term => lower.includes(term));
+          if (matched.length < terms.length) {
+            continue;
+          }
+          const current = bestBySession.get(record.session_id);
+          if (current === undefined || document.created_at > current.matchedAt) {
+            bestBySession.set(record.session_id, {
+              session: record,
+              text: document.text,
+              matchedAt: document.created_at,
+            });
+          }
         }
       }
     }
