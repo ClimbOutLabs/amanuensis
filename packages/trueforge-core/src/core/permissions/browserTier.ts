@@ -117,8 +117,8 @@ function shown(text: string): string {
   return escapeDisplayText(text).replace(/"/g, '\\"');
 }
 
-/** The approval card for a commit click: the button's label, the site, and the form's values. */
-function commitClickCard(review: BrowserClickReview): Tier3Card {
+/** The approval card for a commit click: the button's label, the site, the form's values, and a picture of the page. */
+function commitClickCard(review: BrowserClickReview, screenshot: string | undefined): Tier3Card {
   const label = review.accessible_name.trim() === '' ? '(no label)' : shown(review.accessible_name);
   const outbound = renderOutboundArguments(review.form_values);
   return {
@@ -133,6 +133,7 @@ function commitClickCard(review: BrowserClickReview): Tier3Card {
     outbound_text: outbound.text,
     destination_host: review.site,
     outbound_truncated: outbound.truncated,
+    browser_screenshot: screenshot ?? null,
   };
 }
 
@@ -172,7 +173,10 @@ export async function classifyBrowserActionTool({
   action,
   mintToken,
 }: {
-  action: Pick<SentinelAction, 'tool_name' | 'canonical_params' | 'tool_type' | 'browser_click'>;
+  action: Pick<
+    SentinelAction,
+    'tool_name' | 'canonical_params' | 'tool_type' | 'browser_click' | 'browser_click_screenshot'
+  >;
   /** Mints the approval token over the given params; the caller hashes exactly what is passed. */
   mintToken: (params: unknown) => Promise<string>;
 }): Promise<TierDecision | undefined> {
@@ -203,7 +207,7 @@ export async function classifyBrowserActionTool({
       });
     }
     return tier3Decision({
-      card: commitClickCard(review),
+      card: commitClickCard(review, action.browser_click_screenshot),
       reason: BROWSER_COMMIT_REASON,
       reason_detail: review.is_form_submit
         ? 'Submits a form, so Aman always asks first.'
