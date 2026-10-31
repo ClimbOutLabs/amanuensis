@@ -299,7 +299,7 @@ export async function startApprovalTestServer(options?: {
     request: async (path, init) => await app.request(path, init),
     restart: async () => {
       await app.guidesSettled();
-      await turnDrains.shutdownAndWait({ timeoutMs: configuration.TURN_DRAIN_SHUTDOWN_TIMEOUT_MS });
+      // A restart stands in for the process going away, so running replies are cut off, not drained.
       await db.destroy();
       db = createSqliteDb(databaseFile);
       app = buildApp({ db, sandboxProvider: options?.sandboxProvider, authenticator, turnDrains });
