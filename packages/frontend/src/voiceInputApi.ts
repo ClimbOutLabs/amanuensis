@@ -1,4 +1,4 @@
-import type { VoiceAvailability, VoiceInputApi, VoiceTranscription } from '@truefoundry/trueforge-ui';
+import type { ServerVoiceApi, VoiceAvailability, VoiceInputApi, VoiceTranscription } from '@truefoundry/trueforge-ui';
 
 import { apiPath } from './publicPath';
 
@@ -240,6 +240,32 @@ export function createVoiceInputApi(fetcher: typeof fetch, options: CreateVoiceI
         clearTimeout(timeout);
         signal?.removeEventListener('abort', forwardAbort);
       }
+    },
+  };
+}
+
+/**
+ * Host implementation of the trueforge-ui server voice port: posts reply text to
+ * `/api/v1/voice/speak` and resolves with the WAV audio. Any failure rejects, and
+ * the spoken reply player falls back to the browser's own voice.
+ */
+export function createServerVoiceApi(fetcher: typeof fetch): ServerVoiceApi {
+  return {
+    async speak({ text, signal }: { text: string; signal?: AbortSignal }): Promise<Blob> {
+      const response = await fetcher(apiPath('/api/v1/voice/speak'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text }),
+        signal: signal ?? null,
+      });
+      if (!response.ok) {
+        throw await readError(response);
+      }
+      const contentType = (response.headers.get('content-type') ?? '').split(';')[0]?.trim().toLowerCase();
+      if (contentType !== 'audio/wav') {
+        throw new Error('The voice on this computer sent something that is not audio.');
+      }
+      return response.blob();
     },
   };
 }

@@ -29,6 +29,7 @@ import type { AgentUIServer } from '../server/types.js';
 import { isNetworkFailureError, LiveConnectionLostError, ReplyStoppedByRestartError } from '../utils/liveConnection.js';
 import { isStaleApprovalError, publishStaleApproval } from '../utils/staleApproval.js';
 import { turnRefusalCode } from '../utils/turnRefusal.js';
+import { disarmSpokenReply } from '../utils/voiceTurn.js';
 import { PendingApprovalsReporter } from './PendingApprovalsReporter.js';
 import { ToasterProvider, useToaster } from './ToasterContainer.js';
 
@@ -177,6 +178,8 @@ function ChatRuntimeScope({
       // ease back. Fires whether the host or the toaster renders the error itself.
       activitySink?.reportError();
       notifyComposerBusyFailure(getActiveComposerSendId(composerBusyScope), composerBusyScope);
+      // A failed send never gets its reply, so its voice arm must not wait for the next one.
+      disarmSpokenReply();
       if (isPendingApprovalsError(error)) {
         // The send was rejected because the session tip still holds pending
         // tool approvals. Surface the escape hatch immediately (the banner

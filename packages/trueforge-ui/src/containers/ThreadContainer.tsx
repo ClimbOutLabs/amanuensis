@@ -23,6 +23,7 @@ import { MemoryTurnContextProvider } from './MemoryTurnContextProvider.js';
 import { ModelUsageTurnProvider } from './ModelUsageTurnProvider.js';
 import { PendingApprovalsBanner } from './PendingApprovalsBanner.js';
 import { ResumeUnavailableContainer } from './ResumeUnavailableContainer.js';
+import { SpokenReplyContainer } from './SpokenReplyContainer.js';
 import { TerminalErrorContainer } from './TerminalErrorContainer.js';
 import { UserEditComposerContainer } from './UserEditComposerContainer.js';
 import { UserMessageContainer } from './UserMessageContainer.js';
@@ -117,6 +118,7 @@ export function ThreadContainer({ composer }: ThreadContainerProps) {
           <SentinelStateProvider>
             <ComposerBusyProvider>
               <AvatarActivityBridge />
+              <SpokenReplyContainer />
               <ApprovalFocusProvider>
                 <WorkOnRepoPanelProvider>
                   <ThreadPrimitive.Root asChild>

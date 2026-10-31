@@ -1,22 +1,34 @@
 /**
- * Voice input endpoints (mounted at `/api/v1/voice`). The browser posts recorded
- * audio here; this router forwards the bytes to the `aman-stt` sidecar and returns
- * the transcript. The browser never talks to the sidecar directly.
+ * Voice endpoints (mounted at `/api/v1/voice`). The browser posts recorded audio
+ * here; this router forwards the bytes to the `aman-stt` sidecar and returns the
+ * transcript. Reply text posted to `/speak` goes to the `aman-tts` sidecar and comes
+ * back as audio. The browser never talks to either sidecar directly.
  *
- * Privacy: transcripts are never logged. Only durations, byte counts, and status
- * codes reach the logs.
+ * Privacy: transcripts and reply text are never logged. Only durations, byte and
+ * character counts, and status codes reach the logs.
  */
 import { OpenAPIHono, type RouteHandler } from '@hono/zod-openapi';
 import { extractErrorLogFields } from '@truefoundry/trueforge-core/core';
 import type { Context } from 'hono';
 import type { Logger } from 'winston';
 
-import { getVoiceStatusRoute, transcribeVoiceRoute } from '../routes/voiceRoutes';
-import { VoiceTranscriptionSchema, type VoiceStatus, type VoiceTranscription } from '../schemas/voice';
+import type { ResolveRequestContext } from '../auth/identity';
+import configuration from '../config';
+import { getVoiceStatusRoute, speakVoiceRoute, transcribeVoiceRoute } from '../routes/voiceRoutes';
+import {
+  MAX_SPEAK_TEXT_CHARS,
+  VoiceTranscriptionSchema,
+  type VoiceStatus,
+  type VoiceTranscription,
+} from '../schemas/voice';
+import { SpeechRateLimiter } from '../voice/speechRateLimit';
 import { probeSttHealth, sttBaseUrl } from '../voice/sttAvailability';
 
 export interface VoiceRouterDeps {
   logger: Logger;
+  resolveRequestContext: ResolveRequestContext;
+  /** Defaults to a fresh per-process limiter; tests inject one with a small budget. */
+  speechLimiter?: SpeechRateLimiter;
 }
 
 /**
@@ -38,6 +50,11 @@ const STT_TRANSCRIBE_MAX_ATTEMPTS = 3;
 const STT_RETRY_DELAY_MS = 2_000;
 /** Model label the sidecar serves; reported by /status while the probe succeeds. */
 const STT_MODEL_LABEL = 'whisper-small-int8';
+/**
+ * Backend-to-sidecar speech timeout. The longest allowed text is a few minutes of
+ * audio, which a 4-core CPU synthesizes well inside this.
+ */
+const TTS_SPEAK_TIMEOUT_MS = 120_000;
 
 class AudioTooLargeError extends Error {
   constructor() {
@@ -45,12 +62,27 @@ class AudioTooLargeError extends Error {
   }
 }
 
-function errorJson(
+function errorJson<S extends 400 | 413 | 429 | 502 | 503>(
   c: Context,
-  { status, message, code }: { status: 400 | 413 | 502 | 503; message: string; code: string },
+  { status, message, code }: { status: S; message: string; code: string },
 ) {
   return c.json({ error: { message, code } }, status);
 }
+
+function ttsBaseUrl(): string {
+  return configuration.TTS_URL.replace(/\/+$/, '');
+}
+
+const TTS_UNAVAILABLE: { status: 503; message: string; code: string } = {
+  status: 503,
+  message: 'The voice on this computer is not available right now. Try again in a minute.',
+  code: 'tts_unavailable',
+};
+const TTS_FAILED: { status: 502; message: string; code: string } = {
+  status: 502,
+  message: 'The voice on this computer could not read this reply. Try again.',
+  code: 'tts_error',
+};
 
 /** Reads the request body with an early 413, before buffering the whole upload. */
 async function readBoundedAudio(c: Context): Promise<Uint8Array> {
@@ -123,7 +155,7 @@ async function forwardToSidecar(audio: Uint8Array): Promise<Response> {
   }
 }
 
-/** Voice input router (mounted at `/api/v1/voice`). */
+/** Voice router (mounted at `/api/v1/voice`). */
 export function createVoiceRouter(deps: VoiceRouterDeps) {
   const getVoiceStatusHandler: RouteHandler<typeof getVoiceStatusRoute> = async c => {
     return c.json({ data: await probeStt(deps.logger) }, 200);
@@ -196,8 +228,81 @@ export function createVoiceRouter(deps: VoiceRouterDeps) {
     return c.json({ data: transcription }, 200);
   };
 
+  const speechLimiter = deps.speechLimiter ?? new SpeechRateLimiter();
+
+  const speakVoiceHandler: RouteHandler<typeof speakVoiceRoute> = async c => {
+    const { text, voice } = c.req.valid('json');
+    if (text.length > MAX_SPEAK_TEXT_CHARS) {
+      return errorJson(c, {
+        status: 413,
+        message: `This reply is too long to read aloud at once. Send at most ${String(MAX_SPEAK_TEXT_CHARS)} characters at a time.`,
+        code: 'text_too_long',
+      });
+    }
+    const { tenant_id, subject } = deps.resolveRequestContext(c);
+    const permit = speechLimiter.acquire(`${tenant_id}:${subject.id}`);
+    if (!permit.allowed) {
+      deps.logger.info('voice speak rejected', { reason: 'rate_limited' });
+      c.header('Retry-After', String(permit.retryAfterSeconds));
+      return errorJson(c, {
+        status: 429,
+        message: 'Too many read-aloud requests. Wait a few seconds, then try again.',
+        code: 'rate_limited',
+      });
+    }
+    const started = performance.now();
+    try {
+      let upstream: Response;
+      try {
+        upstream = await fetch(`${ttsBaseUrl()}/v1/speak`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify(voice === undefined ? { text } : { text, voice }),
+          signal: AbortSignal.timeout(TTS_SPEAK_TIMEOUT_MS),
+        });
+      } catch (error) {
+        deps.logger.warn('voice speak failed: sidecar unreachable', extractErrorLogFields(error));
+        return errorJson(c, TTS_UNAVAILABLE);
+      }
+      if (upstream.status === 503) {
+        deps.logger.info('voice speak failed', { reason: 'tts_not_warm' });
+        return errorJson(c, TTS_UNAVAILABLE);
+      }
+      if (upstream.status === 400 || upstream.status === 413) {
+        deps.logger.info('voice speak rejected', { reason: 'sidecar_rejected', tts_status: upstream.status });
+        return errorJson(c, {
+          status: 400,
+          message:
+            'The voice could not read this text aloud. Send text with words in it, and leave out the voice to use the usual one.',
+          code: 'bad_text',
+        });
+      }
+      const contentType = (upstream.headers.get('content-type') ?? '').split(';')[0]?.trim().toLowerCase();
+      if (!upstream.ok || contentType !== 'audio/wav') {
+        deps.logger.warn('voice speak failed', { reason: 'tts_error', tts_status: upstream.status });
+        return errorJson(c, TTS_FAILED);
+      }
+      let audio: ArrayBuffer;
+      try {
+        audio = await upstream.arrayBuffer();
+      } catch (error) {
+        deps.logger.warn('voice speak failed: audio cut off', extractErrorLogFields(error));
+        return errorJson(c, TTS_FAILED);
+      }
+      deps.logger.info('voice speak', {
+        duration_ms: Math.round(performance.now() - started),
+        text_chars: text.length,
+        audio_bytes: audio.byteLength,
+      });
+      return c.body(audio, 200, { 'Content-Type': 'audio/wav', 'Cache-Control': 'private, no-store' });
+    } finally {
+      permit.release();
+    }
+  };
+
   const router = new OpenAPIHono();
   router.openapi(transcribeVoiceRoute, transcribeVoiceHandler);
+  router.openapi(speakVoiceRoute, speakVoiceHandler);
   router.openapi(getVoiceStatusRoute, getVoiceStatusHandler);
   return router;
 }

@@ -79,9 +79,9 @@ services:
       # From-source image; root Dockerfile is the npm-install prod recipe.
       dockerfile: Dockerfile.dev
     image: truefoundry-server:latest
-    # The aman-stt sidecar owns cores 16-19 (see below); the server and its
-    # in-process embedding workload stay on the remaining cores so a
-    # transcription never steals latency from chat. Adjust both pins together
+    # The aman-stt and aman-tts sidecars own cores 16-19 (see below); the
+    # server and its in-process embedding workload stay on the remaining cores
+    # so voice work never steals latency from chat. Adjust both pins together
     # on hosts with a different core count (see docs/voice-input.mdx).
     cpuset: '0-15'
     # Ports are published by `loopback` above. Compose DNS therefore has no
@@ -121,6 +121,9 @@ services:
       # the server forwards recorded WAV audio and degrades gracefully when
       # the sidecar is unreachable (typed chat keeps working).
       STT_URL: http://aman-stt:8001
+      # Local text-to-speech sidecar for spoken replies. When it is down the
+      # browser reads replies with its own built-in voice instead.
+      TTS_URL: http://aman-tts:8002
       # Email send list the server writes, and the sidecar's status file it reads (see mail-email).
       MAIL_POLICY_FILE: /data/mail-policy/allowed_recipients.toml
       MAIL_POLICY_STATUS_FILE: /data/mail-policy-status/loaded.sha256
@@ -205,6 +208,22 @@ services:
       - stt-model-cache:/data/stt-cache
     # CPU-only by construction: the image has no CUDA userspace and the app
     # pins device=cpu. No GPU reservations here.
+    restart: unless-stopped
+
+  # Local text-to-speech sidecar (Kokoro-82M int8 ONNX, CPU-only). The server
+  # posts reply text here and returns the audio to the browser. No host port
+  # is published, and the voice files are baked into the image, so it needs
+  # no network access at all. Shares cores 16-19 with aman-stt: a person
+  # speaks, then listens, so the two rarely run at once.
+  aman-tts:
+    build:
+      context: ops/aman-tts
+    image: amanuensis-aman-tts:latest
+    cpuset: '16-19'
+    mem_limit: 1g
+    environment:
+      # onnxruntime threads; 4 matches the 4 pinned cores.
+      AMAN_TTS_CPU_THREADS: '4'
     restart: unless-stopped
 
   # Email connector sidecar. Private to the Compose network: `expose` only, never `ports`.

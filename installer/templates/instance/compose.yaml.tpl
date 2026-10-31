@@ -21,15 +21,16 @@ services:
       - 'host.docker.internal:host-gateway'
 @@IF_EDGE@@      # Caddy on this computer answers for the login name, so the app reaches its issuer without a trip through the public address.
 @@IF_EDGE@@      - '@@LOGIN_HOST@@:host-gateway'
-    # The app reaches speech by the name aman-stt on a network that only the relay below shares with it.
+    # The app reaches speech by the names aman-stt and aman-tts on a network that only the relay below shares with it.
     networks:
       - default
       - link
 @@IF_CALENDAR@@      - calendar
     restart: unless-stopped
 
-  # Carries the app's speech requests to the shared speech service and nothing else. The service is on a network of its
-  # own with this relay alone, so it has no route to the app, the login service or the https front end.
+  # Carries the app's speech requests to the shared speech services and nothing else: speech-to-text on 8001, the voice
+  # on 8002. The services are on a network of their own with this relay alone, so they have no route to the app, the
+  # login service or the https front end.
   speech-link:
     image: @@APP_IMAGE@@
     pull_policy: never
@@ -39,11 +40,12 @@ services:
       - node
       - --input-type=module
       - -e
-      - "import n from 'node:net';n.createServer(c=>{const u=n.connect(8001,'aman-stt-engine');const x=()=>{c.destroy();u.destroy()};c.on('error',x);u.on('error',x);c.pipe(u).pipe(c)}).listen(8001)"
+      - "import n from 'node:net';const r=(p,h)=>n.createServer(c=>{const u=n.connect(p,h);const x=()=>{c.destroy();u.destroy()};c.on('error',x);u.on('error',x);c.pipe(u).pipe(c)}).listen(p);r(8001,'aman-stt-engine');r(8002,'aman-tts-engine')"
     networks:
       link:
         aliases:
           - aman-stt
+          - aman-tts
       speech: {}
     cap_drop:
       - ALL
@@ -326,7 +328,7 @@ networks:
   # Between the app and the relay only.
   link:
     internal: true
-  # Between the relay and the shared speech service only; the installer joins the service to it.
+  # Between the relay and the shared speech services only; the installer joins the services to it.
   speech:
     internal: true
     name: @@STT_NETWORK@@

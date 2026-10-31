@@ -729,6 +729,26 @@ test_upgrade_warns_that_the_branch_is_not_on_origin_when_it_is_missing_there() {
   sandbox_drop
 }
 
+test_upgrade_from_a_release_without_the_voice_adds_it() {
+  t_begin "upgrading an install from before the voice builds it, starts it and joins it to each instance"
+  sandbox_new
+  install_machine
+  local release=$AMAN_HOME/release/release.json
+  grep -v '"tts_image"' "$release" >"$release.new"
+  mv "$release.new" "$release"
+  : >"$SB_STATE/network_aliases"
+  run_install upgrade --check
+  assert_rc 0
+  assert_contains "$OUT" "voice   (not installed) -> aman-tts:"
+  run_install upgrade
+  assert_rc 0
+  assert_contains "$(cat "$release")" '"tts_image": "aman-tts:'
+  assert_contains "$(cat "$AMAN_HOME/machine/compose.yaml")" "container_name: aman-tts"
+  assert_contains "$(cat "$SB_STATE/network_aliases")" "aman_main_speech aman-tts aman-tts-engine"
+  sandbox_drop
+}
+
+
 test_noop_when_current
 test_upgrade_reports_a_newer_version_when_the_checkout_is_behind_origin
 test_upgrade_stays_up_to_date_when_the_checkout_matches_origin
@@ -763,6 +783,7 @@ test_restore_goes_only_into_the_right_volume
 test_restore_does_not_wait_for_a_migration_marker
 test_failed_build_changes_nothing
 test_doctor_failure_blocks_unless_forced
+test_upgrade_from_a_release_without_the_voice_adds_it
 test_gate_passes_when_the_doctor_reports_only_warnings
 test_gate_blocks_when_the_doctor_cannot_be_checked
 tests_finish
