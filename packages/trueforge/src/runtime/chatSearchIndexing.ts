@@ -1,11 +1,9 @@
-import type { TurnInputItem, TurnRecordWithoutSnapshot } from '@truefoundry/trueforge-core/agent-session';
-import type {
-  ChatSearchDocument,
-  ISessionStore,
-} from '@truefoundry/trueforge-core/agent-session/store/ISessionStore';
+import type { TurnRecordWithoutSnapshot } from '@truefoundry/trueforge-core/agent-session';
+import type { ChatSearchDocument, ISessionStore } from '@truefoundry/trueforge-core/agent-session/store/ISessionStore';
 import { isAgentInputUserMessage, isFileContentPart, isHostWrappedText } from '@truefoundry/trueforge-core/core';
 import type { Logger } from 'winston';
 import type { IGlobalSettingsStore } from '../db/globalSettingsStore';
+import type { SessionCustom, TurnCustom } from '../db/sessionCustom';
 import { TENANT_ID } from '../tenancy';
 
 /**
@@ -14,7 +12,9 @@ import { TENANT_ID } from '../tenancy';
  * around a message stay out. This is the one place that decides it; the live indexer, the
  * backfill and the import rebuild all read turns through here.
  */
-export function chatSearchDocumentsForTurn(turn: TurnRecordWithoutSnapshot): ChatSearchDocument[] {
+export function chatSearchDocumentsForTurn<TCustom extends object>(
+  turn: TurnRecordWithoutSnapshot<TCustom>,
+): ChatSearchDocument[] {
   const documents: ChatSearchDocument[] = [];
   const userText = turn.input
     .filter(isAgentInputUserMessage)
@@ -49,9 +49,9 @@ export function chatSearchDocumentsForTurn(turn: TurnRecordWithoutSnapshot): Cha
 
 /** Writes one finished turn into the search index. A failure is logged, never thrown: indexing must not fail a turn. */
 export async function indexChatTurn(deps: {
-  sessionStore: ISessionStore;
+  sessionStore: ISessionStore<SessionCustom, TurnCustom>;
   tenant_id: string;
-  turn: TurnRecordWithoutSnapshot;
+  turn: TurnRecordWithoutSnapshot<TurnCustom>;
   logger: Logger;
 }): Promise<void> {
   try {
@@ -62,10 +62,10 @@ export async function indexChatTurn(deps: {
       documents: chatSearchDocumentsForTurn(deps.turn),
     });
   } catch (error) {
-    deps.logger.warn(
-      { err: error instanceof Error ? error.message : String(error), turn_id: deps.turn.turn_id },
-      'A finished turn could not be added to the past-chat search index.',
-    );
+    deps.logger.warn('A finished turn could not be added to the past-chat search index.', {
+      err: error instanceof Error ? error.message : String(error),
+      turn_id: deps.turn.turn_id,
+    });
   }
 }
 
@@ -88,7 +88,7 @@ export interface ChatSearchBackfillResult {
  * the index current afterwards; this job only covers what was already there.
  */
 export async function runChatSearchBackfill(deps: {
-  sessionStore: ISessionStore;
+  sessionStore: ISessionStore<SessionCustom, TurnCustom>;
   globalSettingsStore: IGlobalSettingsStore;
   logger: Logger;
 }): Promise<ChatSearchBackfillResult> {
@@ -97,7 +97,7 @@ export async function runChatSearchBackfill(deps: {
     return { sessions_scanned: 0, turns_indexed: 0, done: true };
   }
   const savedCursor = await deps.globalSettingsStore.getSetting({ key: BACKFILL_CURSOR_KEY });
-  let pageToken: string | null = savedCursor?.value ?? null;
+  let pageToken: string | undefined = savedCursor?.value;
   let sessionsScanned = 0;
   let turnsIndexed = 0;
   for (;;) {
@@ -112,6 +112,9 @@ export async function runChatSearchBackfill(deps: {
       folder_id: undefined,
       no_folder: false,
       created_by_or_agent_ids: undefined,
+      metadata: undefined,
+      source_type: undefined,
+      source_id: undefined,
     });
     for (const session of page.data) {
       sessionsScanned += 1;
@@ -126,22 +129,26 @@ export async function runChatSearchBackfill(deps: {
   }
   await deps.globalSettingsStore.setSetting({ key: BACKFILL_DONE_KEY, value: 'true' });
   await deps.globalSettingsStore.deleteSetting({ key: BACKFILL_CURSOR_KEY });
-  deps.logger.info(
-    { sessions_scanned: sessionsScanned, turns_indexed: turnsIndexed },
-    'Past-chat search backfill finished.',
-  );
+  deps.logger.info('Past-chat search backfill finished.', {
+    sessions_scanned: sessionsScanned,
+    turns_indexed: turnsIndexed,
+  });
   return { sessions_scanned: sessionsScanned, turns_indexed: turnsIndexed, done: true };
 }
 
 /** Indexes every finished turn of one chat. Shared by the backfill; imports rebuild through the same path per restored turn instead. */
 async function indexSessionTurns(
-  deps: { sessionStore: ISessionStore; logger: Logger },
+  deps: { sessionStore: ISessionStore<SessionCustom, TurnCustom>; logger: Logger },
   sessionId: string,
 ): Promise<number> {
   let indexed = 0;
-  let pageToken: string | null = null;
+  let pageToken: string | undefined;
   for (;;) {
-    const page = await deps.sessionStore.listTurns({ session_id: sessionId, limit: BACKFILL_PAGE_SIZE, page_token: pageToken });
+    const page = await deps.sessionStore.listTurns({
+      session_id: sessionId,
+      limit: BACKFILL_PAGE_SIZE,
+      page_token: pageToken,
+    });
     for (const turn of page.data) {
       if (turn.state.status === 'running') {
         continue;
@@ -163,14 +170,13 @@ async function indexSessionTurns(
  * the next start tries again from the saved page token.
  */
 export function startChatSearchBackfill(deps: {
-  sessionStore: ISessionStore;
+  sessionStore: ISessionStore<SessionCustom, TurnCustom>;
   globalSettingsStore: IGlobalSettingsStore;
   logger: Logger;
 }): void {
   void runChatSearchBackfill(deps).catch((error: unknown) => {
-    deps.logger.warn(
-      { err: error instanceof Error ? error.message : String(error) },
-      'The past-chat search backfill stopped early. It will try again on the next start.',
-    );
+    deps.logger.warn('The past-chat search backfill stopped early. It will try again on the next start.', {
+      err: error instanceof Error ? error.message : String(error),
+    });
   });
 }

@@ -62,8 +62,7 @@ export class SqliteSentinelSettingsStore implements ISentinelSettingsStore<Trans
         maps_without_asking: (input.maps_without_asking ?? DEFAULT_SENTINEL_USER_SETTINGS.maps_without_asking) ? 1 : 0,
         sandbox_without_asking:
           (input.sandbox_without_asking ?? DEFAULT_SENTINEL_USER_SETTINGS.sandbox_without_asking) ? 1 : 0,
-        chat_search_enabled:
-          (input.chat_search_enabled ?? DEFAULT_SENTINEL_USER_SETTINGS.chat_search_enabled) ? 1 : 0,
+        chat_search_enabled: (input.chat_search_enabled ?? DEFAULT_SENTINEL_USER_SETTINGS.chat_search_enabled) ? 1 : 0,
         created_at: timestamp,
         updated_at: timestamp,
       })

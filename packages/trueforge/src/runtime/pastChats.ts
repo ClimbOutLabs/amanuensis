@@ -44,10 +44,7 @@ export class PastChatsDateError extends Error {
 }
 
 /** The reads the past-chat search makes; any session store satisfies them. */
-export type PastChatsSessionReader = Pick<
-  ISessionStore<SessionCustom, TurnCustom>,
-  'searchChatHistory' | 'getSession'
->;
+export type PastChatsSessionReader = Pick<ISessionStore<SessionCustom, TurnCustom>, 'searchChatHistory' | 'getSession'>;
 
 /** One day at UTC midnight, or null when the text is not a real calendar day. */
 function utcDayStart(value: string): Date | null {
@@ -95,7 +92,7 @@ export async function searchPastChats(deps: {
       tenant_id: deps.tenantId,
       session_id: hit.session_id,
     });
-    if (session === undefined || session.created_by_subject.subject_id !== deps.userRef) {
+    if (session?.created_by_subject.subject_id !== deps.userRef) {
       continue;
     }
     kept.push(hit);

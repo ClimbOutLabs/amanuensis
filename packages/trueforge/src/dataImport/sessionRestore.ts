@@ -480,7 +480,11 @@ export async function replaySessions(
         const base = baseTurn(entry.turns, { index, indexById });
         if (base !== undefined) {
           // Every thread of the base is new to this store, so it lands with its whole context.
-          await restoreTurn(store, context.tenantId, session, base, { threads: new Map(), isFirstTurn: false, answered: true });
+          await restoreTurn(store, context.tenantId, session, base, {
+            threads: new Map(),
+            isFirstTurn: false,
+            answered: true,
+          });
           landed.push(base);
         }
         await restoreTurn(store, context.tenantId, session, turnEntry, {
