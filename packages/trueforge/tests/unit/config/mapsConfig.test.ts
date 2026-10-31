@@ -33,6 +33,31 @@ describe('maps config', () => {
     expect(config.MAPS_USER_AGENT).toMatch(/^Amanuensis\//);
   });
 
+  it('says which maps URLs came from the environment', async () => {
+    delete process.env['MAPS_GEOCODER_URL'];
+    delete process.env['MAPS_WALKING_ROUTER_URL'];
+    delete process.env['MAPS_CYCLING_ROUTER_URL'];
+    delete process.env['MAPS_TRANSIT_URL'];
+    delete process.env['MAPS_TILE_URL'];
+    process.env['MAPS_ROUTER_URL'] = 'https://routes.example.internal';
+    const config = await loadConfig();
+    expect(config.MAPS_URL_FROM_ENV).toEqual({
+      MAPS_GEOCODER_URL: false,
+      MAPS_ROUTER_URL: true,
+      MAPS_WALKING_ROUTER_URL: false,
+      MAPS_CYCLING_ROUTER_URL: false,
+      MAPS_TRANSIT_URL: false,
+      MAPS_TILE_URL: false,
+    });
+  });
+
+  it('treats a blank maps URL environment variable as unset', async () => {
+    process.env['MAPS_ROUTER_URL'] = '   ';
+    const config = await loadConfig();
+    expect(config.MAPS_URL_FROM_ENV.MAPS_ROUTER_URL).toBe(false);
+    expect(config.MAPS_ROUTER_URL).toBe('https://router.project-osrm.org');
+  });
+
   it('defaults the walking, cycling and transit services', async () => {
     delete process.env['MAPS_WALKING_ROUTER_URL'];
     delete process.env['MAPS_CYCLING_ROUTER_URL'];
