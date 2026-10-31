@@ -15,6 +15,7 @@ import {
 import { useAssistantDisplayName } from '../../components/PersonalizationContext.js';
 import { useToasterOptional } from '../ToasterContainer.js';
 import { readMemoryEmbeddingsStatus, type MemoryEmbeddingsStatus } from './memoryEmbeddingsCapability.js';
+import { useChatSearchSetting } from './chatSearchSetting.js';
 import { useMemoryRecallSetting } from './memoryRecallSetting.js';
 import { readMemoryScreenStatus, readToolOutputScreenStatus } from './memoryScreenCapability.js';
 import { useMemoryScreenSetting } from './memoryScreenSetting.js';
@@ -470,6 +471,42 @@ function MemoryRecallToggle() {
   );
 }
 
+/** The past-chat search switch: off, the search tool is not offered at all; on, earlier chats can be searched when asked. */
+function ChatSearchToggle() {
+  const assistant = useAssistantDisplayName();
+  const setting = useChatSearchSetting();
+  const label = `Let ${assistant} search your past chats when you ask`;
+
+  return (
+    <div className="flex items-start justify-between gap-4">
+      <div className="min-w-0">
+        <label htmlFor="chat-search-toggle" className="text-sm font-medium text-text-primary">
+          {label}
+        </label>
+        <p className="mt-0.5 text-xs text-text-secondary">
+          When this is on, {assistant} can look through your own earlier chats when you ask about something you
+          discussed before. When it is off, the search is not offered at all.
+        </p>
+        {setting.error === null ? null : (
+          <p role="alert" className="mt-1 text-xs text-text-secondary">
+            {setting.error}
+          </p>
+        )}
+      </div>
+      <Switch
+        id="chat-search-toggle"
+        checked={setting.enabled ?? false}
+        disabled={!setting.supported || setting.saving}
+        onCheckedChange={next => {
+          // The failure message is shown below; the rejection carries nothing more to handle.
+          void setting.setEnabled(next).catch(() => undefined);
+        }}
+        aria-label={label}
+      />
+    </div>
+  );
+}
+
 /** Names the memory backend only after capabilities settle: checking while loading,
  * unavailable on a missing or malformed backend — never a guess. */
 function MemoryStatusCard() {
@@ -517,6 +554,10 @@ function MemoryStatusCard() {
           <MemoryRecallToggle />
         </div>
       ) : null}
+
+      <div className="mt-4 border-t border-border pt-4">
+        <ChatSearchToggle />
+      </div>
     </section>
   );
 }
