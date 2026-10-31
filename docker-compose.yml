@@ -66,10 +66,13 @@ services:
     # another's namespace, and the joined containers read this hosts file.
     extra_hosts:
       - 'host.docker.internal:host-gateway'
-    # The calendar network is shared with the calendar connector only (see calendar-caldav).
+    # The calendar network is shared with the calendar connector only (see calendar-caldav); the
+    # browser network, with the browser sidecar only (see browser). Harmless when the `browser`
+    # profile does not run: an unused Compose network costs nothing.
     networks:
       - default
       - calendar
+      - browser
     restart: unless-stopped
 
   # Serves both the API and the UI on one port.
@@ -274,6 +277,30 @@ services:
       - '9560'
     restart: unless-stopped
 
+  # Aman's own browser (ops/browser-sidecar): a real, headed Chromium under Xvfb. Off unless the
+  # `browser` profile runs, since it is a separate browser with its own logins that a person opts
+  # into, not something every install needs. Private: `expose` only, never `ports`, on its own
+  # network shared with `loopback` only. The server reaches it as http://browser:8792.
+  browser:
+    build:
+      context: ./ops/browser-sidecar
+    profiles: ['browser']
+    environment:
+      # Guards the sidecar's whole HTTP API; the same value goes to the server as BROWSER_SECRET.
+      # There is no default: set a random one in packages/trueforge/.env (openssl rand -hex 32).
+      BROWSER_SECRET: ${BROWSER_SECRET:?set BROWSER_SECRET to a random value of 32 or more characters, for example from openssl rand -hex 32}
+    networks:
+      - browser
+    volumes:
+      # One persistent Chromium profile per person (cookies, saved logins) under /profiles/<owner
+      # hash>. Treated as sensitive: nothing but this sidecar reads it.
+      - browser-profiles:/profiles
+    expose:
+      - '8792'
+    # Chromium's own memory footprint, headed, on top of the virtual screen.
+    mem_limit: 2g
+    restart: unless-stopped
+
   # Schedule controller: runs the periodic control loops (schedule dispatch) as a separate service.
   controller:
     # Runs the image the `server` service builds. Building it here too makes Compose build
@@ -353,6 +380,8 @@ networks:
   # Between the app's `loopback` and the calendar connector only. Not internal: the connector reaches the calendar
   # server on the internet.
   calendar: {}
+  # Between the app's `loopback` and the browser sidecar only. Not internal: the browser reaches the open internet.
+  browser: {}
 
 volumes:
   dex-tls:
@@ -366,6 +395,8 @@ volumes:
   mail-account:
   # The Calendar login file, owned by the connector. Holds the app password; nothing else reads it.
   calendar-account:
+  # One Chromium profile per person, owned by the browser sidecar. Holds session cookies; nothing else reads it.
+  browser-profiles:
   # Persistent Markdown memory files .
   memory-data:
   # Persistent persona knowledge libraries (SQLite per persona).

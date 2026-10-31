@@ -9,6 +9,17 @@ export type { ApprovalTokenStore } from './approvalTokens';
 export { recordClassificationAudit, recordStandingTrustRun } from './audit';
 export type { AuditLogWriter, AuditOutcome, AuditRecordInput } from './audit';
 export {
+  BROWSER_BACK_TOOL_NAME,
+  BROWSER_EXPLORE_REASON,
+  BROWSER_OPEN_TOOL_NAME,
+  BROWSER_READ_TOOL_NAME,
+  BROWSER_SCREENSHOT_TOOL_NAME,
+  BROWSER_SCROLL_TOOL_NAME,
+  BROWSER_TOOL_NAMES,
+  isBrowserToolName,
+} from './browserToolNames';
+export type { BrowserToolName } from './browserToolNames';
+export {
   approvalCardForGatedCall,
   canonicalShellForm,
   classifyHostToolCall,

@@ -386,6 +386,42 @@ export function parseCalendarAccountSecret(raw: string | undefined): string | un
 }
 
 /**
+ * Parses `BROWSER_URL`: the browser sidecar's private HTTP address, such as the compose sidecar's
+ * `http://browser:8792`. Unset or blank means no browser sidecar is configured. Anything else that is not
+ * an http(s) URL fails the boot.
+ */
+export function parseBrowserUrl(raw: string | undefined): string | undefined {
+  if (raw === undefined || raw.trim() === '') {
+    return undefined;
+  }
+  const trimmed = raw.trim();
+  if (normalizedOrigin(trimmed) === undefined) {
+    throw new Error(`BROWSER_URL must be an http(s) URL such as http://browser:8792, got: ${trimmed}`);
+  }
+  return trimmed;
+}
+
+/** The shortest secret the browser sidecar accepts; a shorter one keeps its port closed. */
+const BROWSER_SECRET_MIN_LENGTH = 32;
+
+/**
+ * Parses `BROWSER_SECRET`: the value every request to the browser sidecar must carry. Unset or blank means
+ * none. A value that is too short fails the boot, since the sidecar would refuse it.
+ */
+export function parseBrowserSecret(raw: string | undefined): string | undefined {
+  if (raw === undefined || raw.trim() === '') {
+    return undefined;
+  }
+  const trimmed = raw.trim();
+  if (trimmed.length < BROWSER_SECRET_MIN_LENGTH) {
+    throw new Error(
+      `BROWSER_SECRET must be at least ${String(BROWSER_SECRET_MIN_LENGTH)} characters. Set a longer random value, or remove the line to leave the browser off.`,
+    );
+  }
+  return trimmed;
+}
+
+/**
  * The first-party origins: the operator's list, plus the Calendar connector's origin when one is configured.
  */
 export function firstPartyOriginsFor({
@@ -1254,6 +1290,26 @@ export interface SharedServerConfiguration {
    */
   CALENDAR_ACCOUNT_SECRET: string | undefined;
   /**
+   * Turns on Aman's own browser. Off by default: with it off, the browser_* tools do not exist, whatever
+   * BROWSER_URL and BROWSER_SECRET are set to. Env: `BROWSER_ENABLED`. Default false.
+   */
+  BROWSER_ENABLED: boolean;
+  /**
+   * The browser sidecar's private HTTP address, such as the compose sidecar's `http://browser:8792`.
+   * Required when BROWSER_ENABLED is true. Env: `BROWSER_URL`. Default unset.
+   */
+  BROWSER_URL: string | undefined;
+  /**
+   * The shared secret every request to the browser sidecar must carry. Required when BROWSER_ENABLED is
+   * true; the same value is given to the sidecar. Env: `BROWSER_SECRET`. Default unset.
+   */
+  BROWSER_SECRET: string | undefined;
+  /**
+   * Max milliseconds the browser waits for a page to finish opening before giving up.
+   * Env: `BROWSER_NAV_TIMEOUT_MS`. Default 30000.
+   */
+  BROWSER_NAV_TIMEOUT_MS: number;
+  /**
    * The Email send list the server writes (`allowed_recipients.toml`). Set with the sidecar; the sidecar reads it
    * read-only. Env: `MAIL_POLICY_FILE`. Default unset, which means no send list is written.
    */
@@ -2112,6 +2168,13 @@ const calendarSidecarMcpUrl = hostCalendarMcpUrl({
 });
 const mailSidecarMcpUrl = hostMailMcpUrl({ mailMcpUrl: mailEmailMcpUrl, mailAccountUrl: mailEmailAccountUrl });
 
+const browserEnabled = parseBoolean({ envKey: 'BROWSER_ENABLED', raw: getEnv('BROWSER_ENABLED'), defaultValue: false });
+const browserUrl = parseBrowserUrl(getEnv('BROWSER_URL'));
+const browserSecret = parseBrowserSecret(getEnv('BROWSER_SECRET'));
+if (browserEnabled && (browserUrl === undefined || browserSecret === undefined)) {
+  throw new Error('BROWSER_ENABLED is true, so BROWSER_URL and BROWSER_SECRET must both be set.');
+}
+
 const shared: SharedServerConfiguration = {
   LOG_LEVEL: getEnv('LOG_LEVEL', { defaultValue: 'info' }) ?? 'info',
   ACCESS_LOGS: parseBoolean({ envKey: 'ACCESS_LOGS', raw: getEnv('ACCESS_LOGS'), defaultValue: true }),
@@ -2158,6 +2221,14 @@ const shared: SharedServerConfiguration = {
   CALENDAR_SIDECAR_MCP_URL: calendarSidecarMcpUrl,
   CALENDAR_ACCOUNT_URL: calendarAccountUrl,
   CALENDAR_ACCOUNT_SECRET: parseCalendarAccountSecret(getEnv('CALENDAR_ACCOUNT_SECRET')),
+  BROWSER_ENABLED: browserEnabled,
+  BROWSER_URL: browserUrl,
+  BROWSER_SECRET: browserSecret,
+  BROWSER_NAV_TIMEOUT_MS: parsePositiveInt({
+    envKey: 'BROWSER_NAV_TIMEOUT_MS',
+    raw: getEnv('BROWSER_NAV_TIMEOUT_MS'),
+    defaultValue: 30_000,
+  }),
   TOOL_DISPATCH_MAX_CONCURRENCY: parsePositiveInt({
     envKey: 'TOOL_DISPATCH_MAX_CONCURRENCY',
     raw: getEnv('TOOL_DISPATCH_MAX_CONCURRENCY'),

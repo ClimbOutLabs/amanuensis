@@ -65,6 +65,7 @@ import {
   type ShellApprovalBinding,
 } from './approvalTokens';
 import { recordClassificationAudit } from './audit';
+import { classifyBrowserTool } from './browserTier';
 import {
   FIRST_PARTY_TOOL_REASON,
   MAIL_MARK_AS_READ_REASON,
@@ -3534,6 +3535,17 @@ export async function classifyTier(action: SentinelAction, ctx: ClassifyContext)
           connector: connectorBindingFor(action),
         }),
       });
+    }
+    // Aman's own browser: every read-only tool runs silently, unless the only reason it would open a
+    // link is that a page it read named it, which asks first (see browserTier.ts).
+    const browser = await classifyBrowserTool({
+      action,
+      provenance: ctx.web_search.provenance,
+      assistant: ctx.web_search.assistantName,
+      mintToken: () => mintPlainToken({ ctx, tool_name: action.tool_name, params: action.canonical_params }),
+    });
+    if (browser !== undefined) {
+      return steeringChecked({ decision: browser, ctx, guests: [] });
     }
   }
 
