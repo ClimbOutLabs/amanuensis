@@ -418,7 +418,7 @@ Ship as CSS variable maps under `src/theme/presets/`:
 | --------------- | ---------------------------------- |
 | `paper`         | Warm paper, ink and gold (default) |
 | `forest`        | Calm greens, natural tones         |
-| `midnight`      | Deep blue-grays, navy accents      |
+| `midnight`      | Deep blue-grays, gold accents      |
 | `high-contrast` | Maximum legibility, stark surfaces |
 
 Each preset defines **light + dark** token sets. Gold is the highlight in every
