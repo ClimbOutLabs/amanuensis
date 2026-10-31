@@ -5,6 +5,8 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { useOptionalVoiceInput, type VoiceAvailability, type VoiceInputApi } from '../components/VoiceInputContext.js';
 import { Icon } from '../icons/Icon.js';
+import { stopSpeaking } from '../utils/speechOutput.js';
+import { markDraftFromVoice } from '../utils/voiceTurn.js';
 import { auiButtonClass } from './lib/buttonClasses.js';
 import { cn } from './lib/cn.js';
 import { isVoiceCaptureSupported, startVoiceRecording, type VoiceRecorder } from './lib/voiceRecorder.js';
@@ -111,6 +113,7 @@ function VoiceInputButtonInner({ api, disabled }: { api: VoiceInputApi; disabled
         if (!mountedRef.current || controller.signal.aborted) {
           return;
         }
+        if (result.text.trim() !== '') markDraftFromVoice();
         aui.composer().setText(appendTranscript(composerTextRef.current, result.text));
         if (autoStopped) {
           setNotice(RECORD_LIMIT_MESSAGE);
@@ -137,6 +140,8 @@ function VoiceInputButtonInner({ api, disabled }: { api: VoiceInputApi; disabled
   );
 
   const startRecording = useCallback(async (): Promise<boolean> => {
+    // Speaking a reply and recording a new message at once would have the mic hear the reply.
+    stopSpeaking();
     setError(null);
     setNotice(null);
     setAcquiring(true);
