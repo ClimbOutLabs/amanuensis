@@ -1,0 +1,17 @@
+{
+  "name": "trueforge-browser-sidecar",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Private browser connector: a headed Chromium under Xvfb, one persistent profile per person, served over HTTP on the Compose network.",
+  "license": "MPL-2.0",
+  "type": "module",
+  "engines": {
+    "node": ">=22.14.0"
+  },
+  "scripts": {
+    "test": "node --test \"test/*.test.mjs\""
+  },
+  "dependencies": {
+    "playwright-core": "1.49.1"
+  }
+}

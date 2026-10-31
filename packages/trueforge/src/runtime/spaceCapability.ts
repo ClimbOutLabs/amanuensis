@@ -63,6 +63,7 @@ import {
   SpaceSchema,
   SpaceStatusSchema,
 } from '../schemas/space';
+import { browserCapability } from './browserCapability';
 import { toolImagesCapability, type ToolImagesOptions } from './chatImages/toolImagesCapability';
 import { googleCapability, sandboxAttachmentStager } from './googleCapability';
 import { googleSetupCapability } from './googleSetupCapability';
@@ -2721,6 +2722,9 @@ export class SpaceTurnResourceResolver extends MemoryTurnResourceResolver {
         }),
         usageSummaryCapability({ ...this.#usage, tracing: input.tracing, timeZone: this.clientTimezone }),
         toolImagesCapability(this.#toolImages),
+        ...(configuration.BROWSER_ENABLED
+          ? [browserCapability({ tracing: input.tracing, logger: this.#space.logger, owner: input.created_by })]
+          : []),
         ...google,
         ...(personas === undefined
           ? []

@@ -476,7 +476,7 @@ function isBareSite(url: string): boolean {
  * its site: a shared site (a forms host, a link shortener) serves anyone's page, so the person naming the site once
  * does not vouch for a page on it that read content chose.
  */
-function steeredUrl(input: { provenance: ChatProvenance; url: string }): boolean {
+export function steeredUrl(input: { provenance: ChatProvenance; url: string }): boolean {
   const { provenance } = input;
   const key = urlKey(input.url);
   const host = parsedUrl(input.url)?.hostname;

@@ -267,4 +267,15 @@ export default defineConfig(
       '@typescript-eslint/no-unused-vars': 'off',
     },
   },
+  {
+    // The browser sidecar's page extractor runs inside `page.evaluate()`, in page context, not Node.
+    files: ['ops/browser-sidecar/src/extract.mjs'],
+    languageOptions: {
+      globals: {
+        document: 'readonly',
+        window: 'readonly',
+        CSS: 'readonly',
+      },
+    },
+  },
 );
