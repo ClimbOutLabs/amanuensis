@@ -178,6 +178,33 @@ ui_json_escape() {
   printf '%s' "$out"
 }
 
+# ui_events_fd_writable FD: true when the descriptor is open and writing to it is allowed.
+# Nothing is written to prove it: the stream must begin with the first event line, so a
+# test byte is out of the question. Linux lists a descriptor's own flags in
+# /proc/self/fdinfo, and the lowest two are its access mode. Where there is no /proc
+# (macOS, the BSDs), opening /dev/fd/FD for append asks the system for write access on
+# this very descriptor instead: a descriptor opened read-only is refused there, and an
+# empty append still writes no byte. A system with neither refuses, to fail closed.
+ui_events_fd_writable() { # fd
+  local fd=$1 flags= key value
+  if [ -r "/proc/self/fdinfo/$fd" ]; then
+    while read -r key value; do
+      if [ "$key" = "flags:" ]; then
+        flags=$value
+        break
+      fi
+    done <"/proc/self/fdinfo/$fd"
+    case "$flags" in '' | *[!0-7]*) return 1 ;; esac
+    [ $((0$flags & 3)) -ne 0 ]
+    return
+  fi
+  if [ -e "/dev/fd/$fd" ]; then
+    (printf '' >>"/dev/fd/$fd") 2>/dev/null
+    return
+  fi
+  return 1
+}
+
 # A "key":"text" fragment for an event line.
 _ui_event_field() { printf '"%s":"%s"' "$1" "$(ui_json_escape "$2")"; }
 

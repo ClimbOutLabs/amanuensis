@@ -380,13 +380,17 @@ sandbox_docker_boot_ensure() {
 sandbox_verify() {
   local name=$1
   # The per-instance sandbox doctor can take minutes; show it as running. It
-  # has no result line of its own: the summary at the end is the verdict.
+  # has no result line of its own: the summary at the end is the verdict. The
+  # event stream still receives the step's result, because there one start
+  # always pairs with one result.
   ui_step_start "Checking the sandbox of instance $name" ""
   if DOCTOR_TIMEOUT=300 run_doctor sandbox --instance "$name" >/dev/null 2>&1; then
     ui_step_abort
+    ui_event_step_result "Checking the sandbox of instance $name" done
     return 0
   fi
   ui_step_abort
+  ui_event_step_result "Checking the sandbox of instance $name" failed
   SANDBOX_VERIFY_FAILED=1
   SANDBOX_FAILED_NAMES="$SANDBOX_FAILED_NAMES $name"
 }

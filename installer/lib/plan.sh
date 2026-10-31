@@ -672,10 +672,17 @@ check_result() {
   [ -x "$(doctor_shim)" ] || return 0
   # Includes the model and the public https checks, which wait on the network.
   # The run can take minutes; show it as running. The doctor's own summary
-  # stays the verdict, so the step line ends without a result of its own.
+  # stays the verdict, so the step line ends without a result line of its own;
+  # the event stream still receives the step's result, because there one start
+  # always pairs with one result.
   ui_step_start "Running the doctor's full check" ""
   AMAN_REPORT_COMMAND=install DOCTOR_TIMEOUT=180 run_doctor --summary || DOCTOR_PROBLEMS=1
   ui_step_abort
+  if [ "$DOCTOR_PROBLEMS" = 1 ]; then
+    ui_event_step_result "Running the doctor's full check" failed
+  else
+    ui_event_step_result "Running the doctor's full check" done
+  fi
   for name in $(reg_names); do
     if instance_sandbox_wanted "$name"; then sandbox_verify "$name"; fi
   done

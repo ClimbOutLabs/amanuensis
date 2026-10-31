@@ -31,6 +31,21 @@ run_install_events_tty() {
   ERR=
 }
 
+# run_install_readonly_events TARGET [args...]: like run_install, with descriptor 3 open
+# read-only on TARGET (a file or a directory) for the run.
+run_install_readonly_events() {
+  local target=$1
+  shift
+  local out=$SB/out err=$SB/err
+  build_run_env
+  set +e
+  env -i "${RUN_ENV[@]}" bash "$SB_INSTALLER/install.sh" "$@" <"${INPUT_FILE:-/dev/null}" >"$out" 2>"$err" 3<"$target"
+  RC=$?
+  set -e
+  OUT=$(cat "$out")
+  ERR=$(cat "$err")
+}
+
 # Every line of the events file parses as JSON.
 assert_events_json() {
   if python3 -c '
@@ -58,6 +73,35 @@ for line in open(sys.argv[1]):
 # How many events of one type the stream holds.
 event_count() {
   event_types | grep -c "^$1\$" || true
+}
+
+# Every step_start is closed by exactly one step_result before the next step_start or the
+# final line, and no step is left open at the end. Pairing in the stream is positional:
+# a step's result words can differ from its start words, so this walks the events in order
+# and pairs each start with the first result that follows it.
+assert_steps_paired() {
+  if python3 - "$EVENTS_FILE" <<'PYEOF'
+import json, sys
+events = [json.loads(line) for line in open(sys.argv[1]) if line.strip()]
+open_step = None
+closed = 0
+for e in events:
+    if e["type"] == "step_start":
+        assert open_step is None, "step %r started while %r had no result" % (e["name"], open_step)
+        open_step = e["name"]
+    elif e["type"] == "step_result" and open_step is not None:
+        open_step = None
+        closed += 1
+    elif e["type"] == "final_result":
+        assert open_step is None, "step %r never reported a result" % open_step
+assert open_step is None, "step %r never reported a result" % open_step
+assert closed > 0, "no step was closed"
+PYEOF
+  then
+    t_pass
+  else
+    t_fail "a step started without exactly one matching result: $(cat "$EVENTS_FILE")"
+  fi
 }
 
 test_events_dry_run() {
@@ -109,6 +153,7 @@ test_events_first_install() {
   clear_input
   assert_rc 0
   assert_events_json
+  assert_steps_paired
   local events
   events=$(cat "$EVENTS_FILE")
   assert_contains "$events" '"name":"Building the app"' "the build phase is streamed"
@@ -172,6 +217,66 @@ test_events_bad_descriptor() {
   sandbox_drop
 }
 
+test_events_read_only_descriptor() {
+  t_begin "an events descriptor opened read-only stops the run before anything happens and names the one fix"
+  sandbox_new
+  : >"$SB/ro-file"
+  run_install_readonly_events "$SB/ro-file" --dry-run --events 3
+  assert_rc 2
+  assert_flat_contains "$ERR" "File descriptor 3 is not open for writing"
+  assert_flat_contains "$ERR" "3>events.txt"
+  assert_no_path "$AMAN_HOME"
+  assert_eq "$(cat "$STUB_LOG")" "" "no command ran for a read-only file descriptor"
+  mkdir "$SB/ro-dir"
+  run_install_readonly_events "$SB/ro-dir" --dry-run --events 3
+  assert_rc 2
+  assert_flat_contains "$ERR" "File descriptor 3 is not open for writing"
+  assert_flat_contains "$ERR" "3>events.txt"
+  assert_no_path "$AMAN_HOME"
+  assert_eq "$(cat "$STUB_LOG")" "" "no command ran for a read-only directory descriptor"
+  sandbox_drop
+}
+
+test_events_sandbox_check_fails() {
+  t_begin "a sandbox check that fails closes its step with a failed result, and the run ends as a failure"
+  sandbox_new
+  EVENTS_FILE=$SB/events.jsonl
+  STUB_DOCKER_MEM_BYTES=7000000000
+  STUB_SANDBOX_DOCTOR_EXIT=1
+  with_input "$SENTINEL_PASSWORD\n"
+  run_install_events --yes --password-stdin --email owner@example.invalid --events 3
+  clear_input
+  assert_rc 1
+  assert_events_json
+  assert_steps_paired
+  if python3 - "$EVENTS_FILE" <<'PYEOF'
+import json, sys
+events = [json.loads(line) for line in open(sys.argv[1]) if line.strip()]
+for i, e in enumerate(events):
+    if e["type"] == "step_start" and e["name"] == "Checking the sandbox of instance main":
+        closing = None
+        for later in events[i + 1:]:
+            if later["type"] == "step_result":
+                closing = later
+                break
+            if later["type"] in ("step_start", "final_result"):
+                break
+        assert closing is not None, "the sandbox step has no closing result"
+        assert closing["result"] == "failed", "the sandbox step closed with %r" % closing["result"]
+        break
+else:
+    raise AssertionError("the sandbox step never started")
+final = [e for e in events if e["type"] == "final_result"]
+assert len(final) == 1 and final[0]["result"] == "failed", final
+PYEOF
+  then
+    t_pass
+  else
+    t_fail "the failing sandbox check did not close its step as failed: $(cat "$EVENTS_FILE")"
+  fi
+  sandbox_drop
+}
+
 test_events_words_survive() {
   t_begin "quotes, backslashes, newlines and other scripts in a moment's words reach the stream as the same words"
   sandbox_new
@@ -222,6 +327,8 @@ test_events_dry_run
 test_events_first_install
 test_events_admin_prompt
 test_events_bad_descriptor
+test_events_read_only_descriptor
+test_events_sandbox_check_fails
 test_events_words_survive
 test_no_events_without_the_flag
 tests_finish

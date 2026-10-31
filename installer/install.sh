@@ -366,7 +366,7 @@ set_option() {
         '' | *[![:digit:]]*) usage_die "--events takes the number of an open file descriptor, for example --events 3 together with 3>events.txt on the same command." ;;
         0 | 1 | 2) usage_die "--events cannot use 0, 1 or 2, because those are this terminal's streams. Open a file for the events instead, for example --events 3 together with 3>events.txt." ;;
       esac
-      (printf '' >&"$2") 2>/dev/null || usage_die "File descriptor $2 is not open for writing, so no events can be written to it. Open it on the same command, for example --events 3 together with 3>events.txt, or leave --events out."
+      ui_events_fd_writable "$2" || usage_die "File descriptor $2 is not open for writing, so no events can be written to it. Open it on the same command, for example --events 3 together with 3>events.txt, or leave --events out."
       UI_EVENTS_FD=$2
       UI_EVENTS_T0=$SECONDS
       ;;
