@@ -4499,6 +4499,51 @@ export function runStoreContractSuite<
       expect(hits[0]?.snippet).toContain('train');
     });
 
+    it('keeps earlier turns searchable when a later turn reuses the same message ids', async () => {
+      const store = createStore();
+      await seedSession(store);
+      await store.indexChatMessages({
+        tenant_id: tenant,
+        session_id: sessionId,
+        turn_id: 'turn-1',
+        documents: [
+          {
+            message_id: 'user',
+            role: 'user',
+            text: 'We decided to book the ferry on Friday.',
+            created_at: docAt('01'),
+          },
+          {
+            message_id: 'assistant',
+            role: 'assistant',
+            text: 'The ferry leaves at nine and lands before lunch.',
+            created_at: docAt('01'),
+          },
+        ],
+      });
+      await store.indexChatMessages({
+        tenant_id: tenant,
+        session_id: sessionId,
+        turn_id: 'turn-2',
+        documents: [
+          { message_id: 'user', role: 'user', text: 'Now we need a hotel near the harbor.', created_at: docAt('02') },
+          {
+            message_id: 'assistant',
+            role: 'assistant',
+            text: 'The hotel has a room with a sea view.',
+            created_at: docAt('02'),
+          },
+        ],
+      });
+
+      const ferryHits = await store.searchChatHistory(searchInput());
+      expect(ferryHits).toHaveLength(1);
+      expect(ferryHits[0]?.snippet).toContain('ferry');
+      const hotelHits = await store.searchChatHistory(searchInput({ query: 'hotel' }));
+      expect(hotelHits).toHaveLength(1);
+      expect(hotelHits[0]?.snippet).toContain('hotel');
+    });
+
     it('keeps every snippet at most 300 characters', async () => {
       const store = createStore();
       await seedSession(store);
