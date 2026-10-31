@@ -18,8 +18,8 @@ export interface ProcessBytesResult {
 // test can record or answer every command line instead of running it.
 export interface ProcessRunner {
   run: (command: string, args: readonly string[]) => Promise<ProcessResult>;
-  // For commands whose input or output is not text (the state volume is read
-  // and written as a tar stream): bytes in on stdin, bytes out on stdout.
+  // For commands whose input or output is not text: bytes in on stdin,
+  // bytes out on stdout.
   runBytes: (command: string, args: readonly string[], stdin: Uint8Array) => Promise<ProcessBytesResult>;
 }
 

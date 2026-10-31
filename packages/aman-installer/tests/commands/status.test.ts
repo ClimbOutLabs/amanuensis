@@ -6,8 +6,6 @@ import { FakeHost } from '../../src/host/fakeHost.ts';
 import { StubProcessRunner, commandLine, okResult, type ProcessResult } from '../../src/runner/processRunner.ts';
 import {
   StateBusyError,
-  StateDockerError,
-  StateImageError,
   parseRegistry,
   type ReleaseRecord,
   type StateStore,
@@ -109,28 +107,6 @@ test('a busy state prints the busy problem and exits 1', async () => {
   assert.equal(code, 1);
   assert.deepEqual(lines, [
     'Another install is running right now. Wait for it to finish, or wait 2 minutes if you stopped an install a moment ago, then run aman status again.',
-  ]);
-});
-
-test('a state read Docker refused prints the not-answering problem and exits 1', async () => {
-  const { code, lines } = await run(
-    failingStore(new StateDockerError('docker did not answer the state read')),
-    new StubProcessRunner(new Map()),
-  );
-  assert.equal(code, 1);
-  assert.deepEqual(lines, [
-    'Docker is not answering, so whether each instance is running is unknown. Start Docker Engine on this computer, then run aman status again.',
-  ]);
-});
-
-test('a helper image Docker could not download says to check the internet connection', async () => {
-  const { code, lines } = await run(
-    failingStore(new StateImageError('docker could not get the helper image')),
-    new StubProcessRunner(new Map()),
-  );
-  assert.equal(code, 1);
-  assert.deepEqual(lines, [
-    'Docker could not download the small helper it needs to read the record of what is installed. Check your internet connection, then run aman status again.',
   ]);
 });
 

@@ -7,19 +7,16 @@ import { test } from 'node:test';
 import { runDoctor, type DoctorDeps } from '../../src/doctor/doctor.ts';
 import { FakeHost } from '../../src/host/fakeHost.ts';
 import type { SystemKind } from '../../src/host/host.ts';
-import { DOCKER_NOT_ANSWERING, DOCTOR_STATE_UNREADABLE, problemText } from '../../src/messages.ts';
+import { DOCTOR_STATE_UNREADABLE, STATE_BUSY, problemText } from '../../src/messages.ts';
 import {
   commandLine,
   okResult,
   RecordingProcessRunner,
   StubProcessRunner,
-  type ProcessBytesResult,
   type ProcessResult,
-  type ProcessRunner,
 } from '../../src/runner/processRunner.ts';
 import { folderBackend } from '../../src/state/folderBackend.ts';
-import { createStateStore, StateDockerError, StateStoreError, type StateStore } from '../../src/state/state.ts';
-import { volumeBackend } from '../../src/state/volumeBackend.ts';
+import { createStateStore, StateBusyError, StateStoreError, type StateStore } from '../../src/state/state.ts';
 
 const NOW = 1791633600;
 const DAEMON_TIME = '2026-10-10T12:00:00.123456789Z';
@@ -137,7 +134,6 @@ interface WorldOptions {
   source?: boolean;
   osRelease?: string | null;
   dockerConfig?: string | null;
-  stateHomeNull?: boolean;
   store?: StateStore;
 }
 
@@ -227,7 +223,7 @@ async function makeWorld(options: WorldOptions = {}): Promise<World> {
     },
     now: () => NOW,
     homeDir: personHome,
-    stateHome: options.stateHomeNull === true ? null : stateHome,
+    stateHome,
     osReleasePath: join(personHome, 'os-release'),
     dockerConfigDir: join(personHome, '.docker'),
     appService: 'app',
@@ -401,14 +397,6 @@ const NOT_RUNNING: ProcessResult = {
   stdout: '',
   stderr: 'Cannot connect to the Docker daemon at unix:///var/run/docker.sock. Is the docker daemon running?\n',
 };
-
-test('Docker not running on Windows: the fix names Docker Desktop', async () => {
-  const world = await makeWorld({ kind: 'windows', answers: withAnswer(readyAnswers(), INFO_LINE, NOT_RUNNING) });
-  const exitCode = await runDoctor(world.deps, { json: false });
-  assert.equal(exitCode, 1);
-  const golden = await readFile(new URL('../golden/doctor-report-windows.txt', import.meta.url), 'utf8');
-  assert.equal(`${world.printed.join('\n')}\n`, golden);
-});
 
 test('Docker not running on a Mac: the fix names Docker Desktop', async () => {
   const world = await makeWorld({ kind: 'darwin', answers: withAnswer(readyAnswers(), INFO_LINE, NOT_RUNNING) });
@@ -1184,10 +1172,10 @@ test('the in-image call: a failed run names its first line; unknown lines are dr
   assert.deepEqual(oddDoc.instances['main'], [{ id: 'service', state: 'ok', detail: 'The app is running.', fix: '' }]);
 });
 
-test('a state store that cannot answer prints the one problem and stops', async () => {
+test('a busy state prints the busy problem and stops', async () => {
   const store: StateStore = {
     readSummary: async () => {
-      throw new StateDockerError('docker is down');
+      throw new StateBusyError('another install is running right now');
     },
     readCaCertificate: async () => null,
     refreshCache: () => undefined,
@@ -1200,13 +1188,13 @@ test('a state store that cannot answer prints the one problem and stops', async 
   const world = await makeWorld({ store });
   const exitCode = await runDoctor(world.deps, { json: false });
   assert.equal(exitCode, 1);
-  assert.deepEqual(world.printed, [problemText(DOCKER_NOT_ANSWERING['linux'])]);
+  assert.deepEqual(world.printed, [problemText(STATE_BUSY)]);
 });
 
 test('a record that cannot be read gets the doctor own next step, not the status one', async () => {
   const store: StateStore = {
     readSummary: async () => {
-      throw new StateStoreError('the state volume could not be read');
+      throw new StateStoreError('the state could not be read');
     },
     readCaCertificate: async () => null,
     refreshCache: () => undefined,
@@ -1222,32 +1210,3 @@ test('a record that cannot be read gets the doctor own next step, not the status
   assert.deepEqual(world.printed, [problemText(DOCTOR_STATE_UNREADABLE)]);
 });
 
-// A volume nothing has written to yet: Docker answers its listings,
-// every one of them empty, and no file can be read out of it.
-class FreshVolumeRunner implements ProcessRunner {
-  run(): Promise<ProcessResult> {
-    return Promise.resolve(okResult(''));
-  }
-
-  runBytes(): Promise<ProcessBytesResult> {
-    return Promise.resolve({ exitCode: 1, stdout: new Uint8Array(), stderr: 'cat: no such file', started: true });
-  }
-}
-
-test('a fresh volume reads as nothing installed yet, not as a broken record', async () => {
-  const store = createStateStore(volumeBackend(new FreshVolumeRunner()));
-  const world = await makeWorld({
-    store,
-    instances: null,
-    release: null,
-    backups: [],
-    backupsMode: null,
-    source: false,
-    schedule: false,
-  });
-  const { doc } = await runJson(world);
-  assert.deepEqual(doc.instances, {});
-  const backup = recordById(doc.machine, 'backup');
-  assert.equal(backup.state, 'ok');
-  assert.equal(backup.detail, 'No instances yet; nothing to back up.');
-});

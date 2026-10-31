@@ -1,4 +1,4 @@
-export type SystemKind = 'windows' | 'darwin' | 'linux';
+export type SystemKind = 'darwin' | 'linux';
 
 // The host side of the installer: what the installer needs to know about the
 // computer it is running on. Later stages add the host jobs (shortcuts,

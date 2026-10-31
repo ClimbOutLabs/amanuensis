@@ -1,22 +1,7 @@
-import type { Host, SystemKind } from '../host/host.ts';
-import type { WindowsJobs } from '../host/windowsJobs.ts';
-import {
-  DOCKER_NOT_ANSWERING,
-  DOCTOR_STATE_UNREADABLE,
-  STATE_BUSY,
-  STATE_IMAGE_UNAVAILABLE,
-  problemText,
-  type Problem,
-} from '../messages.ts';
+import type { Host } from '../host/host.ts';
+import { DOCTOR_STATE_UNREADABLE, STATE_BUSY, problemText, type Problem } from '../messages.ts';
 import type { ProcessRunner } from '../runner/processRunner.ts';
-import {
-  StateBusyError,
-  StateDockerError,
-  StateImageError,
-  type StateStore,
-  type StateSummary,
-} from '../state/state.ts';
-import { checkSecretFiles } from './filesCheck.ts';
+import { StateBusyError, type StateStore, type StateSummary } from '../state/state.ts';
 import { INSTANCE_FIX, PS_FORMAT, runMachineChecks } from './machineChecks.ts';
 
 export interface DoctorDeps {
@@ -30,11 +15,10 @@ export interface DoctorDeps {
   // The person's home folder: Docker's settings file and the backup
   // schedule are looked for under it, as the shell doctor looks.
   homeDir: string;
-  // The state home as a folder on this computer, or null when the state
-  // lives in the volume (Windows): the tls check mounts this folder for
-  // its certificate read and probes with its certificate, and a backup
-  // line names a folder in it.
-  stateHome: string | null;
+  // The state home as a folder on this computer: the tls check mounts
+  // this folder for its certificate read and probes with its
+  // certificate, and a backup line names a folder in it.
+  stateHome: string;
   // The file that names the system (/etc/os-release, or the shell
   // doctor's AMAN_OS_RELEASE override).
   osReleasePath: string;
@@ -44,10 +28,6 @@ export interface DoctorDeps {
   // The compose service name of the app in an instance (the shell
   // doctor's AMAN_DOCTOR_APP_SERVICE, else app).
   appService: string;
-  // The Windows host jobs: the files check and the backup check use
-  // them, and only on Windows. A deps without them (a test of the
-  // other checks) runs the doctor without those parts.
-  windowsJobs?: WindowsJobs;
 }
 
 // What the docker check learns, shared by the checks that follow it, as
@@ -269,19 +249,12 @@ export function doctorTextLines(records: readonly CheckRecord[], instanceNames: 
   return lines;
 }
 
-// The Problem a state read failure is reported with, shared by the
-// doctor and by the upgrade's health gate, which reads the same way.
-// The unreadable record gets the doctor's own next step, since the
-// doctor is the command a person runs to find what is wrong.
-export function doctorStoreProblem(error: unknown, kind: SystemKind): Problem {
+// The Problem a state read failure is reported with. The unreadable
+// record gets the doctor's own next step, since the doctor is the
+// command a person runs to find what is wrong.
+export function doctorStoreProblem(error: unknown): Problem {
   if (error instanceof StateBusyError) {
     return STATE_BUSY;
-  }
-  if (error instanceof StateDockerError) {
-    return DOCKER_NOT_ANSWERING[kind];
-  }
-  if (error instanceof StateImageError) {
-    return STATE_IMAGE_UNAVAILABLE;
   }
   return DOCTOR_STATE_UNREADABLE;
 }
@@ -292,21 +265,16 @@ export interface DoctorChecks {
   instanceNames: readonly string[];
 }
 
-// The checks themselves, with no printing: the doctor renders them, and
-// the upgrade's health gate judges them. A state read failure is thrown,
-// for the caller to report with doctorStoreProblem. The files check is
-// asked for only by the doctor a person runs: the gate judges the same
-// records it judged before it existed.
+// The checks themselves, with no printing: the doctor renders them. A
+// state read failure is thrown, for the caller to report with
+// doctorStoreProblem.
 export async function runDoctorChecks(
   deps: DoctorDeps,
-  options: { local: boolean; files?: boolean; fix?: boolean },
+  options: { local: boolean; fix?: boolean },
 ): Promise<DoctorChecks> {
   const summary = await deps.store.readSummary();
   const list = new CheckList();
   const ctx = await runMachineChecks(deps, list, summary);
-  if (options.files === true) {
-    await checkSecretFiles(deps, list, { fix: options.fix ?? false });
-  }
   for (const instance of summary.instances) {
     await checkInstance(deps, list, ctx, instance.name, options.local);
   }
@@ -328,9 +296,9 @@ export async function runDoctor(
   const { print } = deps;
   let checks: DoctorChecks;
   try {
-    checks = await runDoctorChecks(deps, { local: options.local ?? false, files: true, fix: options.fix ?? false });
+    checks = await runDoctorChecks(deps, { local: options.local ?? false, fix: options.fix ?? false });
   } catch (error) {
-    print(problemText(doctorStoreProblem(error, deps.host.kind)));
+    print(problemText(doctorStoreProblem(error)));
     return 1;
   }
   const { records, instanceNames: names } = checks;
