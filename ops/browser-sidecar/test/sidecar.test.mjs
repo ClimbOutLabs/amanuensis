@@ -110,6 +110,14 @@ async function withWorld(run) {
       </form>
       <button type="submit" form="linked-form">Send order</button>
       <input type="submit" form="linked-form" value="Subscribe outside" />`),
+    // A button whose label matches no commit word and which is not a form submit, the case the Tier
+    // classifier can miss, but whose click handler quietly posts to the same site with JavaScript.
+    '/newsletter': html(
+      `<h1>Newsletter</h1><button type="button" id="continue-button" onclick="fetch('/subscribe', { method: 'POST' })">Continue</button>`,
+    ),
+    '/article': html(
+      `<h1>Article</h1><button type="button" id="share-button" onclick="fetch('http://site-b.test/beacon', { method: 'POST' }).catch(() => {})">Share</button>`,
+    ),
     '/redirect-private': (_req, res) => res.writeHead(302, { location: `${internalUrl}/api/admin` }).end(),
     '/redirect-metadata': (_req, res) =>
       res.writeHead(302, { location: 'http://169.254.169.254/latest/meta-data/' }).end(),
@@ -785,5 +793,92 @@ test('type with a ref whose element can no longer be read is refused as a stale 
     state.infoReadable = false;
     const typed = await sidecar.type({ owner: 'owner-1', tab: 'chat-1', ref: 'e1', text: 'hello' });
     assert.deepEqual(typed, { status: 'refused', reason: 'stale_ref' });
+  });
+});
+
+test(
+  'an unapproved click whose label hides a same-site post is caught and needs approval',
+  { skip: !browsersAvailable },
+  async () => {
+    await withWorld(async ({ sidecar, siteA }) => {
+      const opened = await sidecar.open({ owner: 'owner-1', tab: 'chat-1', url: 'http://site-a.test/newsletter' });
+      const ref = refFor(opened.text, 'Continue');
+      // No `approved` flag: the classifier found no commit word on "Continue", so the host
+      // dispatches this click right away, exactly as it would any other Tier 1 click.
+      const clicked = await sidecar.click({ owner: 'owner-1', tab: 'chat-1', ref });
+      assert.equal(clicked.status, 'needs_approval');
+      assert.equal(clicked.accessible_name, 'Continue');
+      assert.ok(clicked.png_base64, 'a screenshot is returned with the hold');
+      // The post was aborted in the browser: the site never saw it.
+      assert.deepEqual(
+        siteA.hits.filter(hit => hit.url === '/subscribe'),
+        [],
+      );
+    });
+  },
+);
+
+test('an approved click is trusted outright: the gate is not run', { skip: !browsersAvailable }, async () => {
+  await withWorld(async ({ sidecar, siteA }) => {
+    const opened = await sidecar.open({ owner: 'owner-1', tab: 'chat-1', url: 'http://site-a.test/newsletter' });
+    const ref = refFor(opened.text, 'Continue');
+    const clicked = await sidecar.click({ owner: 'owner-1', tab: 'chat-1', ref, approved: true });
+    assert.equal(clicked.status, 'ok');
+    await settle();
+    assert.ok(
+      siteA.hits.some(hit => hit.url === '/subscribe' && hit.method === 'POST'),
+      'the approved post went through',
+    );
+  });
+});
+
+test('the click gate lets an allowed request fall through to the next handler, with no browser', async () => {
+  const { installClickGate } = await import('../src/clickGate.mjs');
+  let handler;
+  const page = {
+    route: async (_pattern, installed) => {
+      handler = installed;
+    },
+    unroute: async () => undefined,
+  };
+  const gate = await installClickGate({ page, site: 'site-a.test', log: () => undefined });
+  const callsFor = async request => {
+    const calls = [];
+    await handler({
+      request: () => request,
+      fallback: async () => {
+        calls.push('fallback');
+      },
+      continue: async () => {
+        calls.push('continue');
+      },
+      abort: async () => {
+        calls.push('abort');
+      },
+    });
+    return calls;
+  };
+  // An allowed request must reach the context's navigation guard, so it falls through to the
+  // next handler instead of continuing straight to the network.
+  assert.deepEqual(await callsFor({ url: () => 'http://site-a.test/page', method: () => 'GET' }), ['fallback']);
+  assert.equal(gate.blocked.length, 0);
+  assert.equal(gate.allowed.length, 1);
+  // A same-site write the gate holds is still aborted outright, never passed on.
+  assert.deepEqual(await callsFor({ url: () => 'http://site-a.test/subscribe', method: () => 'POST' }), ['abort']);
+  assert.equal(gate.blocked.length, 1);
+  await gate.remove();
+});
+
+test('a third-party request during a click is allowed, not blocked', { skip: !browsersAvailable }, async () => {
+  await withWorld(async ({ sidecar, siteB }) => {
+    const opened = await sidecar.open({ owner: 'owner-1', tab: 'chat-1', url: 'http://site-a.test/article' });
+    const ref = refFor(opened.text, 'Share');
+    const clicked = await sidecar.click({ owner: 'owner-1', tab: 'chat-1', ref });
+    // The beacon's host (site-b.test) differs from the page's own site (site-a.test): never gated.
+    assert.equal(clicked.status, 'ok');
+    assert.ok(
+      siteB.hits.some(hit => hit.url === '/beacon'),
+      'the third-party beacon went through',
+    );
   });
 });

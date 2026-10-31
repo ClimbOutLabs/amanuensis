@@ -10,6 +10,7 @@ import path from 'node:path';
 import { URL } from 'node:url';
 import { chromium } from 'playwright-core';
 
+import { CLICK_GATE_SETTLE_MS, installClickGate } from './clickGate.mjs';
 import { elementAtPath } from './extract.mjs';
 import { RefAssigner, renderSnapshot, sensitivityOf } from './snapshot.mjs';
 
@@ -177,12 +178,14 @@ export class BrowserSidecar {
   #navTimeoutMs;
   #launch;
   #proxyServer;
+  #log;
 
   /**
    * `proxyServer` is the egress gateway every browser request goes through; it is required, so the
-   * browser never talks to the network directly.
+   * browser never talks to the network directly. `log` takes the click gate's own log lines only:
+   * never the page's content, never a login.
    */
-  constructor({ profilesDir, navTimeoutMs, proxyServer, launch = launchPersistentChromium }) {
+  constructor({ profilesDir, navTimeoutMs, proxyServer, launch = launchPersistentChromium, log }) {
     if (typeof proxyServer !== 'string' || proxyServer === '') {
       throw new Error('the browser needs its egress proxy (BROWSER_PROXY)');
     }
@@ -190,6 +193,7 @@ export class BrowserSidecar {
     this.#navTimeoutMs = navTimeoutMs;
     this.#launch = launch;
     this.#proxyServer = proxyServer;
+    this.#log = log ?? (() => undefined);
   }
 
   /** One browser per person, launched once even when two requests for them arrive together. */
@@ -424,15 +428,45 @@ export class BrowserSidecar {
     };
   }
 
-  /** Performs a click already approved (or found Tier 1), then reads the page it lands on. */
-  async click({ owner, tab: tabId, ref }) {
+  /**
+   * Performs a click. `approved` is true only once the person has said OK to this exact click (see
+   * browserTier.ts and BrowserTool.liveMintParams on the host); then it is trusted outright. Every
+   * other click, the ones the host's own classifier found nothing to ask about, still goes through
+   * the gate: a same-site write the click sets off is aborted, and the click comes back as
+   * `needs_approval` instead of succeeding, catching a missed commit word.
+   */
+  async click({ owner, tab: tabId, ref, approved }) {
     const found = await this.#elementFor({ owner, tab: tabId, ref });
     if (!found.ok) {
       return found.result;
     }
     found.tab.refs.reset();
-    await found.element.click({ timeout: this.#navTimeoutMs });
-    return this.#read(found.tab);
+    if (approved === true) {
+      await found.element.click({ timeout: this.#navTimeoutMs });
+      return this.#read(found.tab);
+    }
+    const site = new URL(found.tab.page.url()).hostname;
+    const gate = await installClickGate({ page: found.tab.page, site, log: this.#log });
+    try {
+      // A blocked navigation can make the click's own wait reject; the gate's record is what
+      // decides the outcome, not whether this call itself threw.
+      await found.element.click({ timeout: this.#navTimeoutMs }).catch(() => undefined);
+      await found.tab.page.waitForTimeout(CLICK_GATE_SETTLE_MS);
+    } finally {
+      await gate.remove();
+    }
+    if (gate.blocked.length === 0) {
+      return this.#read(found.tab);
+    }
+    const info = await found.tab.page.evaluate(elementInfoScript(found.path)).catch(() => null);
+    const screenshot = await found.tab.page.screenshot({ type: 'png' }).catch(() => null);
+    return {
+      status: 'needs_approval',
+      site,
+      accessible_name: info?.accessible_name ?? '',
+      form_values: info?.form_values ?? {},
+      png_base64: screenshot === null ? null : screenshot.toString('base64'),
+    };
   }
 
   /** Types into a field; refuses a password, card or one-time-code field instead of typing into it. */
@@ -545,7 +579,7 @@ const ROUTES = {
   'POST /back': (sidecar, where) => sidecar.back(where),
   'POST /screenshot': (sidecar, where) => sidecar.screenshot(where),
   'POST /click-info': (sidecar, where, body) => sidecar.clickInfo({ ...where, ref: body.ref }),
-  'POST /click': (sidecar, where, body) => sidecar.click({ ...where, ref: body.ref }),
+  'POST /click': (sidecar, where, body) => sidecar.click({ ...where, ref: body.ref, approved: body.approved }),
   'POST /type': (sidecar, where, body) => sidecar.type({ ...where, ref: body.ref, text: body.text }),
   'POST /select': (sidecar, where, body) => sidecar.select({ ...where, ref: body.ref, option: body.option }),
 };

@@ -175,7 +175,7 @@ describe('browser capability', () => {
     expect(result.isError).toBeUndefined();
     expect(textOf(result)).toContain('# Done');
     expect(sent[0]?.url).toBe('http://browser-relay:8792/click');
-    expect(sent[0]?.body).toEqual({ ref: 'e3', owner: 'tenant-1:person-1', tab: 'chat-1' });
+    expect(sent[0]?.body).toEqual({ ref: 'e3', approved: false, owner: 'tenant-1:person-1', tab: 'chat-1' });
   });
 
   it("toolCallInfo stamps browser_click with the sidecar's dry-run read, not from model text", async () => {
@@ -223,5 +223,59 @@ describe('browser capability', () => {
     jest.spyOn(globalThis, 'fetch').mockRejectedValueOnce(new Error('ECONNREFUSED'));
     const info = await toolSet.toolCallInfo({ name: 'browser_click', arguments: { ref: 'e3' } });
     expect(info.browser_click).toBeUndefined();
+  });
+
+  it('liveMintParams re-reads the click at dispatch, so the generic approval check catches it changing', async () => {
+    const { toolSet } = mount(path =>
+      path === '/click-info'
+        ? {
+            json: {
+              status: 'ok',
+              site: 'shop.example',
+              // The label changed since the card was approved: "Place order" became "Add item".
+              accessible_name: 'Add item',
+              is_form_submit: true,
+              form_values: {},
+            },
+          }
+        : { json: { status: 'ok', text: '' } },
+    );
+    const live = await toolSet.liveMintParams?.({ name: 'browser_click', arguments: { ref: 'e3' } });
+    expect(live).toEqual({
+      ref: 'e3',
+      review: { site: 'shop.example', accessible_name: 'Add item', is_form_submit: true, form_values: {} },
+    });
+  });
+
+  it('liveMintParams throws when the sidecar cannot be reached, so dispatch refuses instead of guessing', async () => {
+    const { toolSet } = mount(() => ({ json: { status: 'ok', text: '' } }));
+    jest.spyOn(globalThis, 'fetch').mockRejectedValueOnce(new Error('ECONNREFUSED'));
+    await expect(toolSet.liveMintParams?.({ name: 'browser_click', arguments: { ref: 'e3' } })).rejects.toThrow();
+  });
+
+  it('liveMintParams is a no-op for tools other than browser_click', async () => {
+    const { sent, toolSet } = mount(() => ({ json: { status: 'ok', text: '' } }));
+    const live = await toolSet.liveMintParams?.({ name: 'browser_open', arguments: { url: 'https://hulu.com' } });
+    expect(live).toBeUndefined();
+    expect(sent).toEqual([]);
+  });
+
+  it('a click the gate holds comes back as needs_approval, with the form it held', async () => {
+    const { call } = mount(() => ({
+      json: {
+        status: 'needs_approval',
+        site: 'shop.example',
+        accessible_name: 'Continue',
+        form_values: { plan: 'monthly' },
+        png_base64: null,
+      },
+    }));
+    const result = await call('browser_click', { ref: 'e3' });
+    expect(result.isError).toBe(true);
+    const parsed: unknown = JSON.parse(textOf(result));
+    expect(parsed).toMatchObject({ status: 'needs_approval' });
+    expect(textOf(result)).toContain('Continue');
+    expect(textOf(result)).toContain('Nothing was sent');
+    expect(textOf(result)).toContain('plan: monthly');
   });
 });
