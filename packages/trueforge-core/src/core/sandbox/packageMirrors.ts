@@ -211,11 +211,14 @@ export function commandDownloadsPackages(command: string): boolean {
   return splitShellCommands(command).some(words => segmentDownloadEcosystem(programWords(words)) !== undefined);
 }
 
-/**
- * The one sentence the first-download approval card shows, or undefined when the command downloads
- * nothing. The sites are named for the tools this command actually uses, in the order it uses them.
- */
-export function packageDownloadCardWhat(command: string): string | undefined {
+/** The public package sites a download can come from, named in one list for sentences a person reads. */
+export function packageDownloadSitesText(): string {
+  const names = [PACKAGE_SITE_NAMES.pypi, PACKAGE_SITE_NAMES.npm, PACKAGE_SITE_NAMES.go, PACKAGE_SITE_NAMES.cargo];
+  return `${names.slice(0, -1).join(', ')} and ${names[names.length - 1] ?? ''}`;
+}
+
+/** The sites one command downloads from, named for the tools it actually uses, in the order it uses them. */
+function downloadSiteNames(command: string): string[] {
   const sites: string[] = [];
   for (const words of splitShellCommands(command)) {
     const ecosystem = segmentDownloadEcosystem(programWords(words));
@@ -226,10 +229,33 @@ export function packageDownloadCardWhat(command: string): string | undefined {
       }
     }
   }
+  return sites;
+}
+
+/**
+ * The one sentence the first-download approval card shows, or undefined when the command downloads
+ * nothing. The sites are named for the tools this command actually uses, in the order it uses them.
+ */
+export function packageDownloadCardWhat(command: string): string | undefined {
+  const sites = downloadSiteNames(command);
   if (sites.length === 0) {
     return undefined;
   }
   return `Aman wants to download this project's packages from the public package sites (${sites.join(', ')}).`;
+}
+
+/**
+ * The first-download card sentence for a chat that is not working on a project: the same sites,
+ * then what the person is agreeing to, downloads in their chats without a project.
+ */
+export function packageDownloadCardWhatWithoutProject(command: string): string | undefined {
+  const sites = downloadSiteNames(command);
+  if (sites.length === 0) {
+    return undefined;
+  }
+  return `Aman wants to download packages from the public package sites (${sites.join(
+    ', ',
+  )}) in your chats that are not working on a project.`;
 }
 
 /**
