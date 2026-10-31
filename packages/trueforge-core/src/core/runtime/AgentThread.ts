@@ -1580,6 +1580,7 @@ export async function classifyUnstampedToolCall(input: {
       },
       maps_hosts: info.maps_hosts,
       document_scope: info.document_scope,
+      browser_click: info.browser_click,
     },
   });
   return { ...info, ...stampSentinelDecision({ decision }) };

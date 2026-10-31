@@ -5,10 +5,11 @@ import { Buffer } from 'node:buffer';
 import { createHash } from 'node:crypto';
 import { createServer } from 'node:http';
 import path from 'node:path';
+import { URL } from 'node:url';
 import { chromium } from 'playwright-core';
 
-import { extractSnapshotNodes } from './extract.mjs';
-import { RefAssigner, renderSnapshot } from './snapshot.mjs';
+import { elementAtPath, elementInfo, extractSnapshotNodes } from './extract.mjs';
+import { RefAssigner, renderSnapshot, sensitivityOf } from './snapshot.mjs';
 import { safeNavigationTarget } from './urlSafety.mjs';
 
 const MAX_BODY_BYTES = 256 * 1024;
@@ -85,6 +86,84 @@ export class BrowserSidecar {
     return { status: 'ok', png_base64: buffer.toString('base64') };
   }
 
+  /** The live element a ref names, or a refusal: an unknown ref, or one the page no longer has. */
+  async #elementFor({ owner, ref }) {
+    const session = await this.sessionFor(owner);
+    const path = session.refs.resolve(ref);
+    if (path === undefined) {
+      return { ok: false, reason: 'unknown_ref' };
+    }
+    const handle = await session.page.evaluateHandle(elementAtPath, path);
+    const element = handle.asElement();
+    if (element === null) {
+      return { ok: false, reason: 'stale_ref' };
+    }
+    return { ok: true, session, path, element };
+  }
+
+  /** Field, submit and form context for a ref, without changing the page: the click gate's dry run. */
+  async clickInfo({ owner, ref }) {
+    const found = await this.#elementFor({ owner, ref });
+    if (!found.ok) {
+      return { status: 'refused', reason: found.reason };
+    }
+    const info = await found.session.page.evaluate(elementInfo, found.path);
+    if (info === null) {
+      return { status: 'refused', reason: 'stale_ref' };
+    }
+    return {
+      status: 'ok',
+      site: new URL(found.session.page.url()).hostname,
+      accessible_name: info.accessible_name,
+      is_form_submit: info.is_form_submit,
+      form_values: info.form_values,
+    };
+  }
+
+  /** Performs a click already approved (or found Tier 1), then reads the page it lands on. */
+  async click({ owner, ref }) {
+    const found = await this.#elementFor({ owner, ref });
+    if (!found.ok) {
+      return { status: 'refused', reason: found.reason };
+    }
+    found.session.refs.reset();
+    await found.element.click({ timeout: this.#navTimeoutMs });
+    return this.read({ owner });
+  }
+
+  /** Types into a field; refuses a password, card or one-time-code field instead of typing into it. */
+  async type({ owner, ref, text }) {
+    const found = await this.#elementFor({ owner, ref });
+    if (!found.ok) {
+      return { status: 'refused', reason: found.reason };
+    }
+    const info = await found.session.page.evaluate(elementInfo, found.path);
+    const sensitive = info === null ? null : sensitivityOf({ field_kind: info.field_kind });
+    if (sensitive !== null) {
+      return { status: 'refused', reason: 'sensitive_field' };
+    }
+    await found.element.fill(text, { timeout: this.#navTimeoutMs });
+    return this.read({ owner });
+  }
+
+  /** Picks an option on a `<select>`, by its value, falling back to its visible label. */
+  async select({ owner, ref, option }) {
+    const found = await this.#elementFor({ owner, ref });
+    if (!found.ok) {
+      return { status: 'refused', reason: found.reason };
+    }
+    try {
+      await found.element.selectOption(option, { timeout: this.#navTimeoutMs });
+    } catch {
+      try {
+        await found.element.selectOption({ label: option }, { timeout: this.#navTimeoutMs });
+      } catch {
+        return { status: 'refused', reason: 'no_such_option' };
+      }
+    }
+    return this.read({ owner });
+  }
+
   async close() {
     for (const session of this.#sessions.values()) {
       await session.context.close();
@@ -134,6 +213,10 @@ const ROUTES = {
   'POST /scroll': (sidecar, body) => sidecar.scroll({ owner: body.owner, direction: body.direction }),
   'POST /back': (sidecar, body) => sidecar.back({ owner: body.owner }),
   'POST /screenshot': (sidecar, body) => sidecar.screenshot({ owner: body.owner }),
+  'POST /click-info': (sidecar, body) => sidecar.clickInfo({ owner: body.owner, ref: body.ref }),
+  'POST /click': (sidecar, body) => sidecar.click({ owner: body.owner, ref: body.ref }),
+  'POST /type': (sidecar, body) => sidecar.type({ owner: body.owner, ref: body.ref, text: body.text }),
+  'POST /select': (sidecar, body) => sidecar.select({ owner: body.owner, ref: body.ref, option: body.option }),
 };
 
 export function createHttpServer({ sidecar, secret }) {

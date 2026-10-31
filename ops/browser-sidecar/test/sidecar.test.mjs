@@ -38,9 +38,29 @@ const FIXTURE_HTML = `<!doctype html>
   </body>
 </html>`;
 
-async function withFixtureServer(run) {
+const CHECKOUT_FIXTURE_HTML = `<!doctype html>
+<html>
+  <body>
+    <h1>Checkout</h1>
+    <form id="order-form">
+      <label for="name">Name on card</label>
+      <input id="name" name="name" value="Ada Lovelace" />
+      <label for="country">Country</label>
+      <select id="country" name="country">
+        <option value="us">United States</option>
+        <option value="uk">United Kingdom</option>
+      </select>
+      <button type="submit" id="place-order">Place order</button>
+    </form>
+    <dialog open>
+      <button type="button" id="dialog-cancel" onclick="this.closest('dialog').close()">Cancel</button>
+    </dialog>
+  </body>
+</html>`;
+
+async function withFixtureServer(run, html = FIXTURE_HTML) {
   const server = createServer((_req, res) => {
-    res.writeHead(200, { 'content-type': 'text/html' }).end(FIXTURE_HTML);
+    res.writeHead(200, { 'content-type': 'text/html' }).end(html);
   });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   const { port } = server.address();
@@ -76,6 +96,133 @@ test('refuses to open a private address', { skip: !browsersAvailable }, async ()
     const result = await sidecar.open({ owner: 'owner-1', url: 'http://127.0.0.1:1/' });
     assert.equal(result.status, 'refused');
     assert.equal(result.reason, 'private_network');
+  } finally {
+    await sidecar.close();
+    await rm(profilesDir, { recursive: true, force: true });
+  }
+});
+
+/** The ref the snapshot text gave a line naming `label`, such as `[e3] button Place order`. */
+function refFor(text, label) {
+  const line = text.split('\n').find(candidate => candidate.includes(label));
+  return /^\[(e\d+)\]/.exec(line ?? '')?.[1];
+}
+
+test('types into a field, then fills it', { skip: !browsersAvailable }, async () => {
+  const profilesDir = await mkdtemp(path.join(tmpdir(), 'browser-sidecar-'));
+  const sidecar = new BrowserSidecar({ profilesDir, navTimeoutMs: 10_000 });
+  try {
+    await withFixtureServer(
+      async url => {
+        const opened = await sidecar.open({ owner: 'owner-1', url });
+        const ref = refFor(opened.text, 'Name on card');
+        const typed = await sidecar.type({ owner: 'owner-1', ref, text: 'Grace Hopper' });
+        assert.equal(typed.status, 'ok');
+        assert.match(typed.text, /Grace Hopper/);
+      },
+      CHECKOUT_FIXTURE_HTML,
+    );
+  } finally {
+    await sidecar.close();
+    await rm(profilesDir, { recursive: true, force: true });
+  }
+});
+
+test('refuses to type into a password field', { skip: !browsersAvailable }, async () => {
+  const profilesDir = await mkdtemp(path.join(tmpdir(), 'browser-sidecar-'));
+  const sidecar = new BrowserSidecar({ profilesDir, navTimeoutMs: 10_000 });
+  try {
+    await withFixtureServer(async url => {
+      const opened = await sidecar.open({ owner: 'owner-1', url });
+      const ref = refFor(opened.text, 'Password');
+      const typed = await sidecar.type({ owner: 'owner-1', ref, text: 'hunter2' });
+      assert.deepEqual(typed, { status: 'refused', reason: 'sensitive_field' });
+    });
+  } finally {
+    await sidecar.close();
+    await rm(profilesDir, { recursive: true, force: true });
+  }
+});
+
+test('selects an option', { skip: !browsersAvailable }, async () => {
+  const profilesDir = await mkdtemp(path.join(tmpdir(), 'browser-sidecar-'));
+  const sidecar = new BrowserSidecar({ profilesDir, navTimeoutMs: 10_000 });
+  try {
+    await withFixtureServer(
+      async url => {
+        const opened = await sidecar.open({ owner: 'owner-1', url });
+        const ref = refFor(opened.text, 'Country');
+        const selected = await sidecar.select({ owner: 'owner-1', ref, option: 'United Kingdom' });
+        assert.equal(selected.status, 'ok');
+      },
+      CHECKOUT_FIXTURE_HTML,
+    );
+  } finally {
+    await sidecar.close();
+    await rm(profilesDir, { recursive: true, force: true });
+  }
+});
+
+test('click-info reads a submit button without clicking it', { skip: !browsersAvailable }, async () => {
+  const profilesDir = await mkdtemp(path.join(tmpdir(), 'browser-sidecar-'));
+  const sidecar = new BrowserSidecar({ profilesDir, navTimeoutMs: 10_000 });
+  try {
+    await withFixtureServer(
+      async url => {
+        const opened = await sidecar.open({ owner: 'owner-1', url });
+        const ref = refFor(opened.text, 'Place order');
+        const info = await sidecar.clickInfo({ owner: 'owner-1', ref });
+        assert.equal(info.status, 'ok');
+        assert.equal(info.is_form_submit, true);
+        assert.equal(info.accessible_name, 'Place order');
+        assert.equal(info.form_values.name, 'Ada Lovelace');
+        // Nothing changed: the form is still there to click for real.
+        const read = await sidecar.read({ owner: 'owner-1' });
+        assert.match(read.text, /Place order/);
+      },
+      CHECKOUT_FIXTURE_HTML,
+    );
+  } finally {
+    await sidecar.close();
+    await rm(profilesDir, { recursive: true, force: true });
+  }
+});
+
+test("click-info on a dialog's plain Cancel button is not a form submit", { skip: !browsersAvailable }, async () => {
+  const profilesDir = await mkdtemp(path.join(tmpdir(), 'browser-sidecar-'));
+  const sidecar = new BrowserSidecar({ profilesDir, navTimeoutMs: 10_000 });
+  try {
+    await withFixtureServer(
+      async url => {
+        const opened = await sidecar.open({ owner: 'owner-1', url });
+        const ref = refFor(opened.text, 'Cancel');
+        const info = await sidecar.clickInfo({ owner: 'owner-1', ref });
+        assert.equal(info.status, 'ok');
+        assert.equal(info.is_form_submit, false);
+      },
+      CHECKOUT_FIXTURE_HTML,
+    );
+  } finally {
+    await sidecar.close();
+    await rm(profilesDir, { recursive: true, force: true });
+  }
+});
+
+test('click performs a real click and reads the result', { skip: !browsersAvailable }, async () => {
+  const profilesDir = await mkdtemp(path.join(tmpdir(), 'browser-sidecar-'));
+  const sidecar = new BrowserSidecar({ profilesDir, navTimeoutMs: 10_000 });
+  try {
+    await withFixtureServer(
+      async url => {
+        const opened = await sidecar.open({ owner: 'owner-1', url });
+        const ref = refFor(opened.text, 'Cancel');
+        const clicked = await sidecar.click({ owner: 'owner-1', ref });
+        assert.equal(clicked.status, 'ok');
+        // The dialog's own script closed it; the page is otherwise unchanged.
+        assert.match(clicked.text, /Checkout/);
+      },
+      CHECKOUT_FIXTURE_HTML,
+    );
   } finally {
     await sidecar.close();
     await rm(profilesDir, { recursive: true, force: true });
