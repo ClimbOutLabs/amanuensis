@@ -1,3 +1,5 @@
+import { useSyncExternalStore } from 'react';
+
 /**
  * Tracks which reply is read aloud: only the reply to a message the person sent from voice input.
  * Module state, because the mic button and the composer send path sit in different subtrees.
@@ -12,6 +14,11 @@ let awaitingReplyTo: string | null = null;
 
 export function markDraftFromVoice(): void {
   draftFromVoice = true;
+}
+
+/** Whether the composer's draft holds a voice transcript that has not been sent. */
+export function hasDraftFromVoice(): boolean {
+  return draftFromVoice;
 }
 
 /** Forgets the voice draft, e.g. once the composer is emptied. */
@@ -56,4 +63,43 @@ export function takeSpokenReply(latestUserId: string | undefined): boolean {
   const pending = awaitingReplyTo !== null && awaitingReplyTo === latestUserId;
   awaitingReplyTo = null;
   return pending;
+}
+
+/**
+ * Hands-free conversation for the open chat: off, listening for the person, waiting while Aman
+ * answers, or due to listen again once the answer is over. Module state, because the composer that
+ * shows the mic unmounts while a turn runs and remounts for an approval.
+ */
+export type HandsFree = 'off' | 'listening' | 'answering' | 'listen-due';
+
+let handsFree: HandsFree = 'off';
+const handsFreeListeners = new Set<() => void>();
+
+export function getHandsFree(): HandsFree {
+  return handsFree;
+}
+
+export function setHandsFree(next: HandsFree): void {
+  if (handsFree === next) return;
+  handsFree = next;
+  for (const listener of handsFreeListeners) listener();
+}
+
+function subscribeHandsFree(listener: () => void): () => void {
+  handsFreeListeners.add(listener);
+  return () => {
+    handsFreeListeners.delete(listener);
+  };
+}
+
+export function useHandsFree(): HandsFree {
+  return useSyncExternalStore(subscribeHandsFree, getHandsFree, () => 'off');
+}
+
+/**
+ * Called when a turn is over as far as the person is concerned: its reply has been read aloud, or
+ * there was nothing to read. A hands-free conversation waiting on the answer is due to listen again.
+ */
+export function voiceReplyDone(): void {
+  if (handsFree === 'answering') setHandsFree('listen-due');
 }

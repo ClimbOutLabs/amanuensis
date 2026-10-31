@@ -26,7 +26,7 @@ import {
   type VoiceTranscription,
 } from '@/components/VoiceInputContext.js';
 import { PUSH_TO_TALK_HOTKEY_STORAGE_KEY } from '@/utils/pushToTalkHotkey.js';
-import { clearDraftFromVoice, takeDraftFromVoice } from '@/utils/voiceTurn.js';
+import { clearDraftFromVoice, setHandsFree, takeDraftFromVoice, voiceReplyDone } from '@/utils/voiceTurn.js';
 import { installSpeechSynthesis, removeSpeechSynthesis, stopSpokenReply } from '../utils/speechSynthesisFake.js';
 
 const DEFAULT_TRANSCRIPTION: VoiceTranscription = {
@@ -494,4 +494,125 @@ describe('VoiceInputButton push-to-talk', () => {
     await settle();
     expect(requestSubmit).not.toHaveBeenCalled();
   });
+});
+
+describe('VoiceInputButton hands-free', () => {
+  let silence: ((event: 'pause' | 'quiet') => void) | undefined;
+
+  beforeEach(() => {
+    clearDraftFromVoice();
+    setHandsFree('off');
+    silence = undefined;
+    mockStartVoiceRecording.mockImplementation(async (options: StartVoiceRecordingOptions) => {
+      silence = options.onSilence;
+      return makeRecorder();
+    });
+    // Stands in for the composer: a send takes the voice draft.
+    HTMLFormElement.prototype.requestSubmit = vi.fn<(submitter?: HTMLElement | null) => void>(() => {
+      takeDraftFromVoice();
+    });
+  });
+
+  function composer(api: VoiceInputApi, { isRunning = false }: { isRunning?: boolean } = {}) {
+    return (
+      <form>
+        <VoiceInputProvider api={api}>
+          <VoiceInputButton disabled={isRunning} isRunning={isRunning} />
+        </VoiceInputProvider>
+      </form>
+    );
+  }
+
+  async function startHandsFree() {
+    const { api, transcribeMock } = makeApi();
+    const view = render(composer(api));
+    fireEvent.click(await screen.findByRole('button', { name: 'Start hands-free conversation' }));
+    await screen.findByText('Listening. Pause to send.');
+    return { api, transcribeMock, view };
+  }
+
+  it('sends on a pause, waits for the answer, then listens again', async () => {
+    const { transcribeMock } = await startHandsFree();
+    expect(mockStartVoiceRecording).toHaveBeenCalledTimes(1);
+
+    act(() => silence?.('pause'));
+    await screen.findByText('Waiting for the answer…');
+    expect(transcribeMock).toHaveBeenCalledTimes(1);
+    expect(HTMLFormElement.prototype.requestSubmit).toHaveBeenCalledTimes(1);
+
+    act(() => voiceReplyDone());
+    await screen.findByText('Listening. Pause to send.');
+    expect(mockStartVoiceRecording).toHaveBeenCalledTimes(2);
+  });
+
+  it('stops after a long quiet and says how to start again', async () => {
+    await startHandsFree();
+
+    act(() => silence?.('quiet'));
+
+    expect(await screen.findByText(/Hands-free stopped because it was quiet/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Start hands-free conversation' })).toBeInTheDocument();
+  });
+
+  it('stops when the message could not be sent', async () => {
+    HTMLFormElement.prototype.requestSubmit = vi.fn<(submitter?: HTMLElement | null) => void>();
+    await startHandsFree();
+
+    act(() => silence?.('pause'));
+
+    expect(await screen.findByText(/could not be sent yet/)).toBeInTheDocument();
+    act(() => voiceReplyDone());
+    expect(mockStartVoiceRecording).toHaveBeenCalledTimes(1);
+  });
+
+  it('turning it off releases the mic and ends the conversation', async () => {
+    await startHandsFree();
+    const recorder = await mockStartVoiceRecording.mock.results[0]?.value;
+
+    fireEvent.click(screen.getByRole('button', { name: 'Stop hands-free conversation' }));
+
+    expect(recorder.cancel).toHaveBeenCalled();
+    act(() => voiceReplyDone());
+    expect(mockStartVoiceRecording).toHaveBeenCalledTimes(1);
+  });
+
+  it('switching chats ends the conversation', async () => {
+    await startHandsFree();
+
+    act(() => {
+      window.dispatchEvent(new Event('trueforge:routechange'));
+    });
+
+    expect(await screen.findByRole('button', { name: 'Start hands-free conversation' })).toBeInTheDocument();
+  });
+
+  it('while Aman answers only the hands-free switch shows, and listening resumes after a remount', async () => {
+    const { api, view } = await startHandsFree();
+    act(() => silence?.('pause'));
+    await screen.findByText('Waiting for the answer…');
+
+    view.rerender(composer(api, { isRunning: true }));
+    expect(screen.queryByRole('button', { name: 'Record voice message' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Stop hands-free conversation' })).toBeInTheDocument();
+
+    // An approval pause mounts a new composer; the conversation carries on there.
+    view.unmount();
+    render(composer(api));
+    act(() => voiceReplyDone());
+    await screen.findByText('Listening. Pause to send.');
+    expect(mockStartVoiceRecording).toHaveBeenCalledTimes(2);
+  });
+
+  it('shows nothing while a turn runs when hands-free is off', async () => {
+    const { api } = makeApi();
+    const { container } = render(composer(api, { isRunning: true }));
+    await settleAll();
+    expect(container.querySelector('button')).toBeNull();
+  });
+
+  async function settleAll() {
+    await act(async () => {
+      await Promise.resolve();
+    });
+  }
 });

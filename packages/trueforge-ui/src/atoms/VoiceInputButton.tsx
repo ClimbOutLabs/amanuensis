@@ -7,14 +7,21 @@ import { useSpokenReply } from '../components/SpokenReplyContext.js';
 import { useOptionalVoiceInput, type VoiceAvailability, type VoiceInputApi } from '../components/VoiceInputContext.js';
 import { Icon } from '../icons/Icon.js';
 import { hotkeyById, matchesHotkey, usePushToTalkHotkey } from '../utils/pushToTalkHotkey.js';
-import { markDraftFromVoice } from '../utils/voiceTurn.js';
+import { getHandsFree, hasDraftFromVoice, markDraftFromVoice, setHandsFree, useHandsFree } from '../utils/voiceTurn.js';
 import { auiButtonClass } from './lib/buttonClasses.js';
 import { cn } from './lib/cn.js';
-import { isVoiceCaptureSupported, startVoiceRecording, type VoiceRecorder } from './lib/voiceRecorder.js';
+import {
+  isVoiceCaptureSupported,
+  type SilenceEvent,
+  startVoiceRecording,
+  type VoiceRecorder,
+} from './lib/voiceRecorder.js';
 
 const TRANSCRIBE_ERROR_MESSAGE = 'Transcription failed, try again or type instead.';
 const MIC_UNAVAILABLE_MESSAGE = 'Microphone unavailable. Check your microphone and try again.';
 const RECORD_LIMIT_MESSAGE = 'Recording stopped at the 3-minute limit. Tap the mic to record another segment.';
+const HANDS_FREE_QUIET_MESSAGE = 'Hands-free stopped because it was quiet for a while. Tap it to start again.';
+const HANDS_FREE_NOT_SENT_MESSAGE = 'Hands-free stopped because the message could not be sent yet. Check the box.';
 
 type VoicePhase = 'idle' | 'recording' | 'transcribing' | 'denied';
 
@@ -37,7 +44,15 @@ function isPermissionDenial(error: unknown): boolean {
   return error instanceof DOMException && (error.name === 'NotAllowedError' || error.name === 'SecurityError');
 }
 
-function VoiceInputButtonInner({ api, disabled }: { api: VoiceInputApi; disabled: boolean }) {
+function VoiceInputButtonInner({
+  api,
+  disabled,
+  isRunning,
+}: {
+  api: VoiceInputApi;
+  disabled: boolean;
+  isRunning: boolean;
+}) {
   const aui = useAui();
   const composerText = useAuiState(s => s.composer.text);
   const [available, setAvailable] = useState<VoiceAvailability>(null);
@@ -53,6 +68,9 @@ function VoiceInputButtonInner({ api, disabled }: { api: VoiceInputApi; disabled
   const pressHeldRef = useRef(false);
   const rootRef = useRef<HTMLSpanElement>(null);
   const [sendPending, setSendPending] = useState(false);
+  const handsFree = useHandsFree();
+  // Starts the next hands-free listen; set below, once startRecording exists.
+  const listenRef = useRef<() => void>(() => {});
   const { hotkeyId } = usePushToTalkHotkey();
   const abortRef = useRef<AbortController | null>(null);
   const mountedRef = useRef(true);
@@ -85,6 +103,7 @@ function VoiceInputButtonInner({ api, disabled }: { api: VoiceInputApi; disabled
       recorder?.cancel();
       abortRef.current?.abort();
       abortRef.current = null;
+      setHandsFree('off');
       setPhase(current => (current === 'recording' || current === 'transcribing' ? 'idle' : current));
     };
     document.addEventListener('visibilitychange', onVisibilityChange);
@@ -100,6 +119,8 @@ function VoiceInputButtonInner({ api, disabled }: { api: VoiceInputApi; disabled
       recorder?.cancel();
       abortRef.current?.abort();
       abortRef.current = null;
+      // Hands-free belongs to one chat; leaving it ends the conversation.
+      setHandsFree('off');
       setPhase(current => (current === 'recording' || current === 'transcribing' ? 'idle' : current));
     };
     window.addEventListener('trueforge:routechange', onRouteChange);
@@ -130,7 +151,13 @@ function VoiceInputButtonInner({ api, disabled }: { api: VoiceInputApi; disabled
         if (spoke) markDraftFromVoice();
         aui.composer().setText(appendTranscript(composerTextRef.current, result.text));
         // Sent once the new text has rendered, through the same submit path as the Send button.
-        if (send && spoke && !autoStopped) setSendPending(true);
+        if (send && spoke && !autoStopped) {
+          setSendPending(true);
+        } else if (getHandsFree() !== 'off') {
+          if (autoStopped) setHandsFree('off');
+          // Nothing was heard but noise: keep listening.
+          else if (!spoke) listenRef.current();
+        }
         if (autoStopped) {
           setNotice(RECORD_LIMIT_MESSAGE);
         }
@@ -139,6 +166,7 @@ function VoiceInputButtonInner({ api, disabled }: { api: VoiceInputApi; disabled
         if (controller.signal.aborted || !mountedRef.current) {
           return;
         }
+        setHandsFree('off');
         setError(TRANSCRIBE_ERROR_MESSAGE);
         if (autoStopped) {
           setNotice(RECORD_LIMIT_MESSAGE);
@@ -155,51 +183,110 @@ function VoiceInputButtonInner({ api, disabled }: { api: VoiceInputApi; disabled
     [api, aui],
   );
 
-  const startRecording = useCallback(async (): Promise<boolean> => {
-    // Speaking a reply and recording a new message at once would have the mic hear the reply.
-    spokenReply.stop();
-    setError(null);
-    setNotice(null);
-    setAcquiring(true);
-    try {
-      const recorder = await startVoiceRecording({
-        onAutoStop: () => {
-          void stopAndTranscribe({ autoStopped: true, send: false });
-        },
-        onStreamEnded: () => {
-          // Mic revoked mid-recording: release and surface the denied state.
-          const lost = recorderRef.current;
-          recorderRef.current = null;
-          lost?.cancel();
-          if (mountedRef.current) {
-            setPhase('denied');
-          }
-        },
-      });
-      recorderRef.current = recorder;
-      if (!mountedRef.current) {
-        recorder.cancel();
+  const startRecording = useCallback(
+    async ({ listen }: { listen: boolean }): Promise<boolean> => {
+      // Speaking a reply and recording a new message at once would have the mic hear the reply.
+      spokenReply.stop();
+      setError(null);
+      setNotice(null);
+      setAcquiring(true);
+      try {
+        const recorder = await startVoiceRecording({
+          onAutoStop: () => {
+            void stopAndTranscribe({ autoStopped: true, send: false });
+          },
+          // Hands-free: a pause after speech sends; a long quiet ends the conversation.
+          ...(listen
+            ? {
+                onSilence: (event: SilenceEvent) => {
+                  if (event === 'pause') {
+                    void stopAndTranscribe({ autoStopped: false, send: true });
+                    return;
+                  }
+                  const quiet = recorderRef.current;
+                  recorderRef.current = null;
+                  quiet?.cancel();
+                  if (!mountedRef.current) return;
+                  setHandsFree('off');
+                  setPhase(current => (current === 'recording' ? 'idle' : current));
+                  setNotice(HANDS_FREE_QUIET_MESSAGE);
+                },
+              }
+            : {}),
+          onStreamEnded: () => {
+            // Mic revoked mid-recording: release and surface the denied state.
+            const lost = recorderRef.current;
+            recorderRef.current = null;
+            lost?.cancel();
+            if (mountedRef.current) {
+              setHandsFree('off');
+              setPhase('denied');
+            }
+          },
+        });
+        recorderRef.current = recorder;
+        if (!mountedRef.current) {
+          recorder.cancel();
+          return false;
+        }
+        recordingStartedAtRef.current = Date.now();
+        setPhase('recording');
+        return true;
+      } catch (error) {
+        if (!mountedRef.current) {
+          return false;
+        }
+        setHandsFree('off');
+        if (isPermissionDenial(error)) {
+          setPhase('denied');
+        } else {
+          setError(MIC_UNAVAILABLE_MESSAGE);
+        }
         return false;
+      } finally {
+        if (mountedRef.current) {
+          setAcquiring(false);
+        }
       }
-      recordingStartedAtRef.current = Date.now();
-      setPhase('recording');
-      return true;
-    } catch (error) {
-      if (!mountedRef.current) {
-        return false;
-      }
-      if (isPermissionDenial(error)) {
-        setPhase('denied');
-      } else {
-        setError(MIC_UNAVAILABLE_MESSAGE);
-      }
-      return false;
-    } finally {
-      if (mountedRef.current) {
-        setAcquiring(false);
-      }
+    },
+    [stopAndTranscribe, spokenReply],
+  );
+
+  listenRef.current = () => {
+    setHandsFree('listening');
+    void startRecording({ listen: true });
+  };
+
+  // Hands-free listens again once the answer is over, and picks up where it was after the composer
+  // remounts. A hidden tab never listens.
+  useEffect(() => {
+    // Mounted mid-listen (the composer remounted): that recording is gone, so listen afresh.
+    if (getHandsFree() === 'listening') setHandsFree('listen-due');
+  }, []);
+
+  useEffect(() => {
+    if (available !== true || handsFree !== 'listen-due') return;
+    if (document.visibilityState === 'hidden') {
+      setHandsFree('off');
+      return;
     }
-  }, [stopAndTranscribe, spokenReply]);
+    listenRef.current();
+  }, [handsFree, available]);
+
+  const toggleHandsFree = () => {
+    if (getHandsFree() !== 'off') {
+      setHandsFree('off');
+      const recorder = recorderRef.current;
+      recorderRef.current = null;
+      recordingStartedAtRef.current = null;
+      recorder?.cancel();
+      setPhase(current => (current === 'recording' ? 'idle' : current));
+      return;
+    }
+    if (acquiring || phase === 'recording' || phase === 'transcribing' || disabled) return;
+    setNotice(null);
+    listenRef.current();
+  };
 
   const cancelTranscription = useCallback(() => {
     abortRef.current?.abort();
@@ -214,11 +301,13 @@ function VoiceInputButtonInner({ api, disabled }: { api: VoiceInputApi; disabled
     if (available !== true || acquiring || phase === 'transcribing') {
       return;
     }
-    if (phase === 'recording') {
-      void stopAndTranscribe({ autoStopped: false, send: false });
+    if (disabled && phase !== 'recording') {
       return;
     }
-    if (disabled) {
+    // Taking the mic by hand ends hands-free; a recording in progress is kept for the box.
+    if (getHandsFree() !== 'off') setHandsFree('off');
+    if (phase === 'recording') {
+      void stopAndTranscribe({ autoStopped: false, send: false });
       return;
     }
     if (phase === 'denied') {
@@ -226,7 +315,7 @@ function VoiceInputButtonInner({ api, disabled }: { api: VoiceInputApi; disabled
       return;
     }
     pressHeldRef.current = true;
-    void startRecording();
+    void startRecording({ listen: false });
   };
 
   /**
@@ -251,6 +340,14 @@ function VoiceInputButtonInner({ api, disabled }: { api: VoiceInputApi; disabled
     if (!sendPending) return;
     setSendPending(false);
     rootRef.current?.closest('form')?.requestSubmit();
+    if (getHandsFree() === 'off') return;
+    // The composer takes the voice draft only when it sends; a draft still here was not sent.
+    if (hasDraftFromVoice()) {
+      setHandsFree('off');
+      setNotice(HANDS_FREE_NOT_SENT_MESSAGE);
+    } else {
+      setHandsFree('answering');
+    }
   }, [sendPending]);
 
   useEffect(() => {
@@ -279,7 +376,7 @@ function VoiceInputButtonInner({ api, disabled }: { api: VoiceInputApi; disabled
 
   const tryAgain = () => {
     void (async () => {
-      const started = await startRecording();
+      const started = await startRecording({ listen: false });
       if (started) {
         setPopoverOpen(false);
       }
@@ -289,6 +386,11 @@ function VoiceInputButtonInner({ api, disabled }: { api: VoiceInputApi; disabled
   // Hidden until the `voice` capability flag has been observed true; the host
   // latches availability so the mic never disappears mid-session.
   if (available !== true) {
+    return null;
+  }
+  // While a turn runs, Stop is the only control at the end of the bar, unless a hands-free
+  // conversation is on: then its switch stays so it can be ended while Aman answers.
+  if (isRunning && handsFree === 'off') {
     return null;
   }
 
@@ -302,60 +404,88 @@ function VoiceInputButtonInner({ api, disabled }: { api: VoiceInputApi; disabled
 
   return (
     <span ref={rootRef} className="relative inline-flex min-w-0 items-center gap-1">
-      {phase === 'transcribing' ? (
-        <span className="inline-flex min-w-0 items-center gap-2">
-          <span role="status" className="text-text-secondary text-xs whitespace-nowrap">
-            Transcribing…
-          </span>
-          <button
-            type="button"
-            onClick={cancelTranscription}
-            aria-label="Cancel transcription"
-            className={auiButtonClass({ variant: 'ghost', size: 'small' })}
-          >
-            Cancel
-          </button>
-        </span>
-      ) : (
-        <button
-          type="button"
-          onPointerDown={event => {
-            if (event.button !== 0) return;
-            // Keeps the release reported here when the finger or pointer drifts off the button.
-            event.currentTarget.setPointerCapture?.(event.pointerId);
-            beginPress();
-          }}
-          onPointerUp={endPress}
-          onPointerCancel={endPress}
-          onContextMenu={event => event.preventDefault()}
-          onClick={event => {
-            // Pointer presses are handled above; only keyboard activation (no click count) gets here as a tap.
-            if (event.detail !== 0) return;
-            beginPress();
-            endPress();
-          }}
-          disabled={acquiring || (disabled && phase !== 'recording')}
-          title={micHint}
-          aria-label={micTitle}
-          aria-pressed={phase === 'recording'}
-          className={cn(
-            auiButtonClass({ variant: 'ghost', size: 'icon' }),
-            'touch-none select-none',
-            phase === 'recording' && 'bg-failure-bg/15',
-            phase === 'denied' && 'text-failure-text',
-          )}
-        >
-          {phase === 'recording' ? (
-            <span aria-hidden="true" className="block h-2.5 w-2.5 animate-pulse rounded-full bg-recording" />
-          ) : phase === 'denied' ? (
-            <span className="relative inline-flex" aria-hidden="true">
-              <Icon name="mic" />
-              <span className="absolute top-1/2 left-1/2 h-px w-5 -translate-x-1/2 -translate-y-1/2 rotate-45 bg-current" />
+      {!isRunning && (
+        <>
+          {phase === 'transcribing' ? (
+            <span className="inline-flex min-w-0 items-center gap-2">
+              <span role="status" className="text-text-secondary text-xs whitespace-nowrap">
+                Transcribing…
+              </span>
+              <button
+                type="button"
+                onClick={cancelTranscription}
+                aria-label="Cancel transcription"
+                className={auiButtonClass({ variant: 'ghost', size: 'small' })}
+              >
+                Cancel
+              </button>
             </span>
           ) : (
-            <Icon name="mic" />
+            <button
+              type="button"
+              onPointerDown={event => {
+                if (event.button !== 0) return;
+                // Keeps the release reported here when the finger or pointer drifts off the button.
+                event.currentTarget.setPointerCapture?.(event.pointerId);
+                beginPress();
+              }}
+              onPointerUp={endPress}
+              onPointerCancel={endPress}
+              onContextMenu={event => event.preventDefault()}
+              onClick={event => {
+                // Pointer presses are handled above; only keyboard activation (no click count) gets here as a tap.
+                if (event.detail !== 0) return;
+                beginPress();
+                endPress();
+              }}
+              disabled={acquiring || (disabled && phase !== 'recording')}
+              title={micHint}
+              aria-label={micTitle}
+              aria-pressed={phase === 'recording'}
+              className={cn(
+                auiButtonClass({ variant: 'ghost', size: 'icon' }),
+                'touch-none select-none',
+                phase === 'recording' && 'bg-failure-bg/15',
+                phase === 'denied' && 'text-failure-text',
+              )}
+            >
+              {phase === 'recording' ? (
+                <span aria-hidden="true" className="block h-2.5 w-2.5 animate-pulse rounded-full bg-recording" />
+              ) : phase === 'denied' ? (
+                <span className="relative inline-flex" aria-hidden="true">
+                  <Icon name="mic" />
+                  <span className="absolute top-1/2 left-1/2 h-px w-5 -translate-x-1/2 -translate-y-1/2 rotate-45 bg-current" />
+                </span>
+              ) : (
+                <Icon name="mic" />
+              )}
+            </button>
           )}
+        </>
+      )}
+      {phase !== 'denied' && (
+        <button
+          type="button"
+          onClick={toggleHandsFree}
+          disabled={handsFree === 'off' && (acquiring || disabled || phase !== 'idle')}
+          title={
+            handsFree === 'off' ? 'Talk hands-free: pause to send, and the answer is read aloud' : 'Stop hands-free'
+          }
+          aria-label={handsFree === 'off' ? 'Start hands-free conversation' : 'Stop hands-free conversation'}
+          aria-pressed={handsFree !== 'off'}
+          className={cn(auiButtonClass({ variant: 'ghost', size: 'icon' }), handsFree !== 'off' && 'bg-failure-bg/15')}
+        >
+          <Icon name="audio-lines" />
         </button>
+      )}
+      {handsFree !== 'off' && (
+        <span role="status" className="text-text-secondary text-xs whitespace-nowrap">
+          {handsFree === 'answering'
+            ? 'Waiting for the answer…'
+            : phase === 'recording'
+              ? 'Listening. Pause to send.'
+              : ''}
+        </span>
       )}
       {popoverOpen && phase === 'denied' && (
         <div
@@ -434,10 +564,10 @@ function VoiceInputButtonInner({ api, disabled }: { api: VoiceInputApi; disabled
  * go to send. Denial surfaces as a tappable denied state with a help popover,
  * never a disabled button.
  */
-export function VoiceInputButton({ disabled }: { disabled: boolean }) {
+export function VoiceInputButton({ disabled, isRunning = false }: { disabled: boolean; isRunning?: boolean }) {
   const api = useOptionalVoiceInput();
   if (api == null || !isVoiceCaptureSupported()) {
     return null;
   }
-  return <VoiceInputButtonInner api={api} disabled={disabled} />;
+  return <VoiceInputButtonInner api={api} disabled={disabled} isRunning={isRunning} />;
 }

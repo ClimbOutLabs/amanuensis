@@ -101,7 +101,54 @@ function concatChunks(chunks: Float32Array[]): Float32Array {
   return out;
 }
 
+/** Loudness (RMS) above which a stretch of audio counts as speech. */
+export const SPEECH_RMS_THRESHOLD = 0.015;
+/** Speech this long must be heard before a pause can end the turn, so a cough never sends. */
+export const MIN_SPEECH_MS = 300;
+/** A pause this long after speech ends the turn. */
+export const PAUSE_AFTER_SPEECH_MS = 1500;
+/** Quiet this long with no speech at all ends the listening. */
+export const QUIET_TIMEOUT_MS = 30_000;
+
+export type SilenceEvent = 'pause' | 'quiet';
+
+/**
+ * Tracks speech and silence across captured chunks. Reports 'pause' once speech was heard and has
+ * stopped for PAUSE_AFTER_SPEECH_MS, or 'quiet' when nothing was said for QUIET_TIMEOUT_MS. Each
+ * detector reports at most once.
+ */
+export function createSilenceDetector(sampleRate: number): (samples: Float32Array) => SilenceEvent | null {
+  let speechMs = 0;
+  let silentMs = 0;
+  let reported = false;
+  return samples => {
+    if (reported || samples.length === 0) return null;
+    let sum = 0;
+    for (const sample of samples) sum += sample * sample;
+    const loud = Math.sqrt(sum / samples.length) >= SPEECH_RMS_THRESHOLD;
+    const ms = (samples.length / sampleRate) * 1000;
+    if (loud) {
+      speechMs += ms;
+      silentMs = 0;
+      return null;
+    }
+    silentMs += ms;
+    const event: SilenceEvent | null =
+      speechMs >= MIN_SPEECH_MS
+        ? silentMs >= PAUSE_AFTER_SPEECH_MS
+          ? 'pause'
+          : null
+        : silentMs >= QUIET_TIMEOUT_MS
+          ? 'quiet'
+          : null;
+    if (event !== null) reported = true;
+    return event;
+  };
+}
+
 export type StartVoiceRecordingOptions = {
+  /** Hands-free listening: called once when the speaker pauses, or when nobody speaks at all. */
+  onSilence?: (event: SilenceEvent) => void;
   /** Called when the auto-stop timer fires; the caller should stop the recorder. */
   onAutoStop?: () => void;
   /**
@@ -151,11 +198,16 @@ export async function startVoiceRecording(options: StartVoiceRecordingOptions = 
   // back through the speakers.
   mute.gain.value = 0;
   const chunks: Float32Array[] = [];
+  const onSilence = options.onSilence;
+  const detectSilence = onSilence === undefined ? null : createSilenceDetector(context.sampleRate);
   processor.onaudioprocess = event => {
     if (settled) {
       return;
     }
-    chunks.push(new Float32Array(event.inputBuffer.getChannelData(0)));
+    const chunk = new Float32Array(event.inputBuffer.getChannelData(0));
+    chunks.push(chunk);
+    const silence = detectSilence?.(chunk) ?? null;
+    if (silence !== null) onSilence?.(silence);
   };
   source.connect(processor);
   processor.connect(mute);
