@@ -48,6 +48,9 @@ docker_probe() {
   fi
   DOCKER_DETAIL=$(printf '%s' "$out" | grep -Ei 'permission denied|cannot connect|error' | head -n 1 || true)
   case "$out" in
+    # The Docker Desktop shim inside a WSL distro it is not connected to:
+    # docker exists but answers with this advice instead of the daemon.
+    *"WSL 2 distro"* | *"WSL integration"*) DOCKER_STATE=wsl ;;
     *[Pp]ermission\ denied*) DOCKER_STATE=denied ;;
     *"Cannot connect"* | *"Is the docker daemon running"* | *"error during connect"*) DOCKER_STATE=down ;;
     *) DOCKER_STATE=error ;;
@@ -237,6 +240,10 @@ docker_blocked_parts() {
       DB_HEAD="Your user cannot use Docker yet"
       DB_NEXT="Run install.sh docker to give it access (it asks before using admin rights), then run install.sh again."
       ;;
+    wsl)
+      DB_HEAD="Docker Desktop is not connected to this WSL distro"
+      DB_NEXT="Open Docker Desktop and choose Settings, then Resources, then WSL Integration. Turn on this distro, choose Apply & Restart, then run install.sh again."
+      ;;
     *)
       DB_HEAD="Docker did not answer"
       DB_NEXT="Check that Docker is running, then run this again."
@@ -378,7 +385,7 @@ docker_fix() {
   fi
   case "$DOCKER_STATE" in
     missing | denied) docker_prepare ;;
-    error) die "$(docker_blocked_text)" ;;
+    error | wsl) die "$(docker_blocked_text)" ;;
   esac
   compose=$(D compose version --short 2>/dev/null || true)
   compose=${compose#v}

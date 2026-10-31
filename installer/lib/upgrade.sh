@@ -103,7 +103,7 @@ upgrade_prepare() {
 upgrade_switch() {
   local name rc
   UPGRADE_STAGE=applying
-  release_write
+  release_write upgrade
   machine_up "$REL_STT_TAG"
   for name in $(reg_names); do
     if instance_sandbox_wanted "$name"; then sandbox_ensure "$name" refresh; fi

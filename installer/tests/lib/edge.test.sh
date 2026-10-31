@@ -63,6 +63,19 @@ test_plan_skips_the_install_line_when_caddy_is_there() {
   sandbox_drop
 }
 
+# A name lookup without getent, the macOS way: dscacheutil answers from the same dns fixtures.
+fixture_dscacheutil() {
+  rm -f "$SB_BIN/getent"
+  cat >"$SB_BIN/dscacheutil" <<'STUB'
+#!/usr/bin/env bash
+name="${@: -1}"
+[ -f "$STUB_STATE/dns/$name" ] || exit 0
+printf 'name: %s\n' "$name"
+while IFS= read -r ip; do printf 'ip_address: %s\n' "$ip"; done <"$STUB_STATE/dns/$name"
+STUB
+  chmod 755 "$SB_BIN/dscacheutil"
+}
+
 test_dns_not_resolving_stops_before_anything() {
   t_begin "a name that does not resolve is reported plainly and nothing is built or requested"
   sandbox_new
@@ -79,6 +92,31 @@ test_dns_not_resolving_stops_before_anything() {
   assert_log_lacks "docker build"
   assert_eq "$(sudo_calls)" 0
   assert_no_path "$AMAN_HOME/state/instances/main.conf"
+  sandbox_drop
+}
+
+test_dns_resolves_the_macos_way_without_getent() {
+  t_begin "without getent, the macOS lookup tool answers the DNS check"
+  sandbox_new
+  dns_ready
+  fixture_caddy
+  fixture_dscacheutil
+  install_tls
+  assert_rc 0
+  assert_not_contains "$OUT$ERR" "does not resolve yet"
+  sandbox_drop
+}
+
+test_dns_with_no_lookup_tool_says_the_check_failed() {
+  t_begin "with no name lookup tool at all, the run says the check itself failed, not that the name is missing"
+  sandbox_new
+  dns_ready
+  rm -f "$SB_BIN/getent"
+  install_tls
+  assert_rc 1
+  assert_flat_contains "$OUT$ERR" "could not be checked: this computer has no tool for looking up names"
+  assert_not_contains "$OUT$ERR" "does not resolve yet"
+  assert_log_lacks "docker build"
   sandbox_drop
 }
 
@@ -546,6 +584,8 @@ test_network_list_names_the_hosts() {
 test_dry_run_plans_the_front_end
 test_plan_skips_the_install_line_when_caddy_is_there
 test_dns_not_resolving_stops_before_anything
+test_dns_resolves_the_macos_way_without_getent
+test_dns_with_no_lookup_tool_says_the_check_failed
 test_dns_pointing_elsewhere_stops
 test_public_address_lookup_failure_and_override
 test_install_with_the_flag_runs_the_root_steps

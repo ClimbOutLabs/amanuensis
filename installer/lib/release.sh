@@ -12,14 +12,13 @@ valid_digest_ref() {
 
 # Checks the pins shipped with the installer before anything is pulled or written.
 pins_validate() {
-  local dex
+  local dex mail
   [ -f "$PINS_FILE" ] || die "release manifest missing: $PINS_FILE"
   [ "$(json_get "$PINS_FILE" schema)" = 1 ] || die "unsupported release manifest schema in $PINS_FILE"
   dex=$(json_get "$PINS_FILE" dex_image)
   valid_digest_ref "$dex" || die "dex_image in $PINS_FILE must be pinned by sha256 digest"
   mail=$(json_get "$PINS_FILE" mail_email_image)
   valid_digest_ref "$mail" || die "mail_email_image in $PINS_FILE must be pinned by sha256 digest"
-  valid_digest_ref "$(json_get "$PINS_FILE" setup_image)" || die "setup_image in $PINS_FILE must be pinned by sha256 digest"
   valid_digest_ref "$(json_get "$PINS_FILE" caddy_image)" || die "caddy_image in $PINS_FILE must be pinned by sha256 digest"
   node_pins_validate
 }
@@ -75,7 +74,10 @@ release_resolve() {
   REL_MAIL_EMAIL_IMAGE=$(json_get "$PINS_FILE" mail_email_image)
 }
 
-# The resolved manifest recorded under release/; the previous one is kept for rollback.
+# The resolved manifest recorded under release/. Called with "upgrade" on the
+# upgrade path: the record it replaces is kept in previous.release.json, which
+# STATE.md defines as the record from before the last upgrade. A plain install
+# write never touches previous.release.json.
 release_write() {
   local file="$RELEASE_DIR/release.json" tmp
   ensure_private_dir "$RELEASE_DIR"
@@ -95,7 +97,7 @@ release_write() {
     rm -f "$tmp"
     return 0
   fi
-  if [ -f "$file" ]; then
+  if [ "${1:-}" = upgrade ] && [ -f "$file" ]; then
     cp "$file" "$RELEASE_DIR/previous.release.json"
   fi
   chmod 600 "$tmp"

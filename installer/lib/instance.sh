@@ -134,7 +134,7 @@ machine_running() {
 
 # Rewrites compose.yaml and dex.yaml from the registry (the owner) and the given images. Both hold no secrets.
 instance_render() {
-  local name=$1 app_image=$2 dex_image=$3 dir login_bind=0.0.0.0 app_port login_port public_url login_url email client_id sandbox_on edge_on login_host origins redirects app_ports tls_on=0 tls_host=0 tls_volume=0 tls_port address
+  local name=$1 app_image=$2 dex_image=$3 dir login_bind=0.0.0.0 app_port login_port public_url login_url email client_id sandbox_on edge_on login_host origins redirects app_ports tls_on=0 tls_host=0 tls_port address
   dir=$(instance_dir "$name")
   owner_name_backfill "$name"
   app_port=$(reg_get "$name" app_port)
@@ -192,17 +192,15 @@ instance_render() {
     # No account file is written here: the account lives in the connector's volume, and the
     # installer writes it through the connector's account agent (see email_agent_write).
   fi
-  # The https folders are mounted from the home folder itself, except when the home is the state volume
-  # (Windows): then the compose file mounts them from inside the volume, because a host folder the
-  # daemon could read does not exist there.
+  # The https folders are mounted from the home folder itself.
   if [ "$tls_on" = 1 ]; then
-    if tls_home_in_volume; then tls_volume=1; else tls_host=1; fi
+    tls_host=1
   fi
   render_template "$TEMPLATES_DIR/instance/compose.yaml.tpl" \
     "NAME=$name" "IF_CALENDAR=$calendar_on" "CALENDAR_IMAGE=${REL_CALENDAR_TAG:-}" "IF_EMAIL=$email_on" "MAIL_EMAIL_IMAGE=${REL_MAIL_EMAIL_IMAGE:-}" "STT_NETWORK=$(stt_network "$name")" "APP_IMAGE=$app_image" "DEX_IMAGE=$dex_image" "APP_PORT=$app_port" "IF_SANDBOX=$sandbox_on" \
     "IF_EDGE=$edge_on" "LOGIN_HOST=$login_host" \
     "LOGIN_PORT=$login_port" "DEX_TELEMETRY_PORT=$DEX_TELEMETRY_PORT" "APP_PORTS=$app_ports" \
-    "IF_TLS=$tls_on" "IF_TLS_HOST=$tls_host" "IF_TLS_VOLUME=$tls_volume" "CADDY_IMAGE=$(tls_image)" "TLS_USER=$(id -u):$(id -g)" "TLS_LEAF_DIR=$(tls_leaf_dir "$name")" \
+    "IF_TLS=$tls_on" "IF_TLS_HOST=$tls_host" "CADDY_IMAGE=$(tls_image)" "TLS_USER=$(id -u):$(id -g)" "TLS_LEAF_DIR=$(tls_leaf_dir "$name")" \
     "TLS_TRUST_DIR=$(tls_trust_dir "$name")" "TLS_HTTP_IN=$TLS_HTTP_IN" | write_if_changed "$dir/compose.yaml" 644 || true
   if [ "$tls_on" = 1 ]; then tls_prepare "$name" "$app_image"; fi
   if [ "$edge_on" = 1 ]; then edge_render "$name"; fi
@@ -385,8 +383,17 @@ install_doctor_shim() {
 }
 
 # install.sh command: puts the aman command, its helper files and its path line back, and nothing else.
+# The checkout is judged first, by the same rule the shim's forwarded commands use: a checkout that
+# cannot be made private is refused, not installed with a warning, so the three agree.
 cmd_command() {
   [ -d "$AMAN_HOME" ] || die "Aman is not set up on this computer yet. Run install.sh first."
+  local problem words
+  tighten_checkout "$REPO_ROOT" || true
+  if problem=$(checkout_problem "$REPO_ROOT"); then
+    words=$(checkout_problem_words "$problem")
+    ui_fail "${words%%|*}" "${words#*|}"
+    exit 1
+  fi
   install_doctor_shim
   ui_ok "The aman command is installed"
 }

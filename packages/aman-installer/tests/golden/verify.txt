@@ -1,2 +1,0 @@
-aman-linux-x64 matches the signed release record.
-The download aman-linux-x64 does not match the release record. Download it again from the Aman release page, then run aman verify again.

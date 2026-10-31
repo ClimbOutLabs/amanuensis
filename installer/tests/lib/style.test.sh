@@ -211,7 +211,10 @@ Connect an email account=>n
   assert_not_contains "$OUT" "Name for this instance"
   assert_not_contains "$OUT" "Go ahead?"
   assert_not_contains "$OUT" "Password"
-  assert_no_path "$AMAN_HOME"
+  assert_file "$AMAN_HOME/state/install.log"
+  assert_contains "$(cat "$AMAN_HOME/state/install.log")" "check failed:" "the stop is recorded in the run log"
+  assert_no_path "$AMAN_HOME/state/instances"
+  assert_no_path "$AMAN_HOME/release"
   sandbox_drop
 }
 
