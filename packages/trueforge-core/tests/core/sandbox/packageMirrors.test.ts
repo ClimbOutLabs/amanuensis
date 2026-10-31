@@ -28,7 +28,10 @@ describe('commandDownloadsPackages', () => {
   it.each([
     'pip install requests',
     'pip3 install -r requirements.txt',
+    'pip download requests',
+    'pip3 download -r requirements.txt',
     'python3 -m pip install flask',
+    'python3 -m pip download flask',
     'cd app && npm ci',
     'npm install',
     'npm i lodash',
@@ -37,6 +40,7 @@ describe('commandDownloadsPackages', () => {
     'cargo build --release',
     'cargo test',
     'cargo fetch',
+    'cargo install ripgrep',
     'go mod download',
     'go build ./...',
     'go test ./...',
@@ -326,6 +330,15 @@ describe('packageDownloadCardWhat', () => {
       "Aman wants to download this project's packages from the public package sites (the Go package site).",
     );
     expect(packageDownloadCardWhat('cargo build')).toBe(
+      "Aman wants to download this project's packages from the public package sites (crates.io).",
+    );
+  });
+
+  it('names the sites for the plain download commands too', () => {
+    expect(packageDownloadCardWhat('pip download requests')).toBe(
+      "Aman wants to download this project's packages from the public package sites (PyPI).",
+    );
+    expect(packageDownloadCardWhat('cargo install ripgrep')).toBe(
       "Aman wants to download this project's packages from the public package sites (crates.io).",
     );
   });
