@@ -222,3 +222,13 @@ export function turnOutcomeLines(parts: readonly TurnOutcomePart[]): string[] {
   }
   return lines;
 }
+
+/** Whether a finished turn set a reminder: the same check that writes its outcome line. */
+export function turnSetReminder(parts: readonly TurnOutcomePart[]): boolean {
+  return parts.some(
+    part =>
+      part.type === 'tool-call' &&
+      effectiveCall(part).name === SET_REMINDER_TOOL_NAME &&
+      outcomeLine(part) !== undefined,
+  );
+}

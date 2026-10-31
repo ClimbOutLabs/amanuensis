@@ -192,6 +192,26 @@ describe('RepeatedUnitGuard', () => {
       expect(run([text])).toEqual({ shown: text, stopped: false });
     });
 
+    it('keeps a two-week availability list whole', () => {
+      const states = ['Free.', 'Busy.', 'Out of office.'];
+      const text = Array.from({ length: 14 }, (_, day) => `Day ${day + 1}\n${states[day % 3]}\n`).join('');
+      expect(run([text])).toEqual({ shown: text, stopped: false });
+    });
+
+    it('keeps a week schedule written as short sentences whole', () => {
+      const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+      const text = days.map(day => `${day}: 9 a.m. Standup. 12 p.m. Lunch. 5 p.m. Gym.\n`).join('');
+      expect(run([text])).toEqual({ shown: text, stopped: false });
+    });
+
+    it('keeps a quiz whose answers repeat', () => {
+      const text = Array.from(
+        { length: 12 },
+        (_, n) => `Question ${n + 1} is about chapter ${n + 1}. True. False.\n`,
+      ).join('');
+      expect(run([text])).toEqual({ shown: text, stopped: false });
+    });
+
     it('keeps bold labels repeated across the days of a plan', () => {
       const text = Array.from(
         { length: 5 },

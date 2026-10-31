@@ -10,7 +10,6 @@ import {
 } from '@assistant-ui/react';
 import { useTrueFoundryResumeUnavailable } from '@truefoundry/assistant-ui-runtime';
 import { parseMorningBrief } from '@truefoundry/trueforge-core/core/schedules/morningBrief';
-import { SET_REMINDER_TOOL_NAME } from '@truefoundry/trueforge-core/core/schedules/toolContract';
 import { useState, type ReactNode } from 'react';
 
 import { copyText } from '@/utils/copyText.js';
@@ -34,7 +33,7 @@ import {
   toolStepUnfinished,
 } from '../utils/recoveredSteps.js';
 import { hasPendingAskUserResponse, hasPendingToolApproval } from '../utils/toolCallParsing.js';
-import { turnOutcomeLines } from '../utils/turnOutcomes.js';
+import { turnOutcomeLines, turnSetReminder } from '../utils/turnOutcomes.js';
 import { AgentStepsContainer } from './AgentStepsContainer.js';
 import { AssistantTextContainer } from './AssistantTextContainer.js';
 import { useDocumentIngestionStatusLine } from './DocumentIngestionStatusProvider.js';
@@ -238,11 +237,7 @@ export function AssistantMessageContainer() {
   const outcomeLines = !agentDetailsVisible && settled ? turnOutcomeLines(parts) : [];
   // The offer of browser notices shows once per reply, under the answer, whether details are on or off:
   // inside a step it was repeated for every reminder and hidden with the steps.
-  const offerReminderNotices =
-    settled &&
-    parts.some(
-      part => part.type === 'tool-call' && part.toolName === SET_REMINDER_TOOL_NAME && part.status?.type === 'complete',
-    );
+  const offerReminderNotices = settled && turnSetReminder(parts);
 
   // The step rows below render only while agent details are on. Errors and approvals surface with an
   // amber dot and auto-expand while the turn is running; a clean completed run with no tools, no

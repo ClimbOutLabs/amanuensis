@@ -361,6 +361,20 @@ describe('ToolMarkupGuard stray closing tags', () => {
     expect(guard.finish()).toBe('clean');
   });
 
+  it.each(['**Done**', '(done)', '😀 done', '“Done”'])('hides a closing tag with %s glued to it', after => {
+    const guard = new ToolMarkupGuard();
+    const shown = guard.push(`Okay </tool_calls>${after} and set.`);
+    expect(shown + guard.heldText).toBe(`Okay ${after} and set.`);
+    expect(guard.finish()).toBe('clean');
+  });
+
+  it('keeps a closing tag that a sentence names before closing punctuation', () => {
+    const guard = new ToolMarkupGuard();
+    const shown = guard.push('A call ends with </invoke>. Then the reply goes on.');
+    expect(shown + guard.heldText).toBe('A call ends with </invoke>. Then the reply goes on.');
+    expect(guard.finish()).toBe('clean');
+  });
+
   it('keeps a closing tag that a sentence names with a space after it', () => {
     const guard = new ToolMarkupGuard();
     const shown = guard.push('The block ends with </tool_calls> and nothing else.');
