@@ -175,6 +175,37 @@ describe('isAmanSourceUrl', () => {
     expect(isAmanSourceUrl(DISCUSSION_URL, prefixes)).toBe(false);
   });
 
+  it('rejects a link whose path steps out of the repository into another one', () => {
+    expect(
+      isAmanSourceUrl(
+        'https://github.com/ClimbOutLabs/amanuensis/../../octocat/Hello-World/blob/main/README.md',
+        prefixes,
+      ),
+    ).toBe(false);
+    expect(
+      isAmanSourceUrl(
+        'https://github.com/ClimbOutLabs/amanuensis/%2e%2e/%2e%2e/octocat/Hello-World/blob/main/README.md',
+        prefixes,
+      ),
+    ).toBe(false);
+  });
+
+  it('rejects an empty path step before a place anyone can write in', () => {
+    expect(isAmanSourceUrl(`${REPO}//issues/12`, prefixes)).toBe(false);
+  });
+
+  it('rejects a percent-encoded name of a place anyone can write in', () => {
+    expect(isAmanSourceUrl(`${REPO}/%69ssues/12`, prefixes)).toBe(false);
+  });
+
+  it('rejects a path step that is not valid percent-encoding', () => {
+    expect(isAmanSourceUrl(`${REPO}/tree/%zz`, prefixes)).toBe(false);
+  });
+
+  it('accepts a file whose name carries ordinary percent-encoding', () => {
+    expect(isAmanSourceUrl(`${REPO}/blob/main/docs/my%20file.mdx`, prefixes)).toBe(true);
+  });
+
   it('rejects text that is not a URL', () => {
     expect(isAmanSourceUrl('not a url', prefixes)).toBe(false);
     expect(isAmanSourceUrl('', prefixes)).toBe(false);
@@ -184,6 +215,12 @@ describe('isAmanSourceUrl', () => {
     const withDocs = amanSourcePrefixes({ docsSiteUrl: 'https://docs.example.org' });
     expect(isAmanSourceUrl('https://docs.example.org/install', withDocs)).toBe(true);
     expect(isAmanSourceUrl('https://docs.example.org/install', prefixes)).toBe(false);
+  });
+
+  it('rejects a docs link whose path steps out of the docs pages', () => {
+    const withDocs = amanSourcePrefixes({ docsSiteUrl: 'https://example.org/docs' });
+    expect(isAmanSourceUrl('https://example.org/docs/install', withDocs)).toBe(true);
+    expect(isAmanSourceUrl('https://example.org/docs/../other-pages/install', withDocs)).toBe(false);
   });
 });
 

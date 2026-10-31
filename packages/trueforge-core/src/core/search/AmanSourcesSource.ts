@@ -69,15 +69,40 @@ export function isAmanSourceUrl(url: string, prefixes: readonly string[]): boole
     return false;
   }
   for (const prefix of prefixes) {
-    const bare = prefix.endsWith('/') ? prefix.slice(0, -1) : prefix;
-    if (url !== bare && !url.startsWith(prefix)) {
+    let allowed: URL;
+    try {
+      allowed = new URL(prefix);
+    } catch {
+      continue;
+    }
+    if (parsed.hostname !== allowed.hostname) {
+      continue;
+    }
+    // Membership is decided on the parsed path alone: the path equals the prefix
+    // path, or sits under it. Parsing has already folded dot steps, plain and
+    // percent-encoded, into the path, so the parsed path is the one a host
+    // would route on.
+    const barePath = allowed.pathname.endsWith('/') ? allowed.pathname.slice(0, -1) : allowed.pathname;
+    if (parsed.pathname !== barePath && !parsed.pathname.startsWith(allowed.pathname)) {
       continue;
     }
     if (prefix === AMAN_PUBLIC_REPO_PREFIX) {
-      const prefixPath = new URL(AMAN_PUBLIC_REPO_PREFIX).pathname;
-      const rest = parsed.pathname.startsWith(prefixPath) ? parsed.pathname.slice(prefixPath.length) : '';
-      const firstSegment = rest.split('/')[0] ?? '';
-      if (REPO_WRITE_SEGMENTS.has(firstSegment)) {
+      const rest = parsed.pathname.slice(barePath.length);
+      const segments: string[] = [];
+      for (const step of rest.split('/')) {
+        if (step === '') {
+          continue;
+        }
+        let decoded: string;
+        try {
+          decoded = decodeURIComponent(step);
+        } catch {
+          return false;
+        }
+        segments.push(decoded);
+      }
+      const firstSegment = segments[0];
+      if (firstSegment !== undefined && REPO_WRITE_SEGMENTS.has(firstSegment)) {
         return false;
       }
     }
