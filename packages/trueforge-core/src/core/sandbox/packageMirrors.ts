@@ -138,10 +138,15 @@ function segmentDownloadEcosystem(argv: string[]): PackageDownloadEcosystem | un
   }
   const base = program.slice(program.lastIndexOf('/') + 1);
   const sub = argv[1];
-  if (PIP_PROGRAMS.has(base) && sub === 'install') {
+  if (PIP_PROGRAMS.has(base) && (sub === 'install' || sub === 'download')) {
     return 'pypi';
   }
-  if ((base === 'python' || base === 'python3') && argv[1] === '-m' && argv[2] === 'pip' && argv[3] === 'install') {
+  if (
+    (base === 'python' || base === 'python3') &&
+    argv[1] === '-m' &&
+    argv[2] === 'pip' &&
+    (argv[3] === 'install' || argv[3] === 'download')
+  ) {
     return 'pypi';
   }
   if (
@@ -162,7 +167,8 @@ function segmentDownloadEcosystem(argv: string[]): PackageDownloadEcosystem | un
       sub === 'clippy' ||
       sub === 'fetch' ||
       sub === 'update' ||
-      sub === 'add')
+      sub === 'add' ||
+      sub === 'install')
   ) {
     return 'cargo';
   }
@@ -193,14 +199,6 @@ function segmentDownloadEcosystem(argv: string[]): PackageDownloadEcosystem | un
  */
 export const PACKAGE_UNAVAILABLE_RULE =
   'say that plainly instead of retrying, and do not try another tool to get around it.';
-
-/** Whether a command installs packages from PyPI or npm, the two sites a chat without downloads cannot reach. */
-export function commandInstallsPypiOrNpmPackages(command: string): boolean {
-  return splitShellCommands(command).some(words => {
-    const ecosystem = segmentDownloadEcosystem(programWords(words));
-    return ecosystem === 'pypi' || ecosystem === 'npm';
-  });
-}
 
 /**
  * Whether a command would make a package tool download packages: installs, and the build and test

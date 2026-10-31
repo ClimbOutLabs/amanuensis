@@ -164,6 +164,28 @@ describe('the first package download in a chat without a project', () => {
     expect(info.tier3_card?.plain_what).toBe(NO_PROJECT_CARD_WHAT);
   });
 
+  it('shows the same card for a pip download and a cargo install', async () => {
+    const sandbox = makeSandbox({
+      execCalls: [],
+      allowed: () => false,
+      allowPackageDownloads: async () => undefined,
+    });
+    const pipDownload = await sandbox.toolCallInfo({
+      name: SANDBOX_EXEC_TOOL_NAME,
+      arguments: { intent: 'Download the packages', purpose: 'execute', command: 'pip download requests' },
+    });
+    expect(pipDownload.is_approval_required).toBe(true);
+    expect(pipDownload.tier3_card?.plain_what).toBe(NO_PROJECT_CARD_WHAT);
+    const cargoInstall = await sandbox.toolCallInfo({
+      name: SANDBOX_EXEC_TOOL_NAME,
+      arguments: { intent: 'Install the tool', purpose: 'execute', command: 'cargo install ripgrep' },
+    });
+    expect(cargoInstall.is_approval_required).toBe(true);
+    expect(cargoInstall.tier3_card?.plain_what).toBe(
+      'Aman wants to download packages from the public package sites (crates.io) in your chats that are not working on a project.',
+    );
+  });
+
   it('is refused with the card while unapproved: nothing runs and nothing is recorded', async () => {
     const execCalls: SandboxExecParams[] = [];
     const allowPackageDownloads = jest.fn(async () => undefined);
