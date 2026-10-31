@@ -284,6 +284,11 @@ export type SentinelUserSettings = {
   sandbox_without_asking: boolean;
   /** While on, the assistant can search your own past chats when you ask. Default: off. */
   chat_search_enabled: boolean;
+  /**
+   * While on, the sandbox may download packages in chats that are not working on a project, through
+   * the download-only mirrors. The allowance also covers scheduled runs. Default: off.
+   */
+  package_downloads_without_project_allowed: boolean;
 };
 
 /**
@@ -768,6 +773,7 @@ export function parseUserSettings(body: unknown): SentinelUserSettings {
       maps_without_asking: true,
       sandbox_without_asking: true,
       chat_search_enabled: false,
+      package_downloads_without_project_allowed: false,
     };
   }
   return {
@@ -777,5 +783,7 @@ export function parseUserSettings(body: unknown): SentinelUserSettings {
     maps_without_asking: optionalBoolean(settings, 'maps_without_asking') ?? true,
     sandbox_without_asking: optionalBoolean(settings, 'sandbox_without_asking') ?? true,
     chat_search_enabled: optionalBoolean(settings, 'chat_search_enabled') ?? false,
+    package_downloads_without_project_allowed:
+      optionalBoolean(settings, 'package_downloads_without_project_allowed') ?? false,
   };
 }
