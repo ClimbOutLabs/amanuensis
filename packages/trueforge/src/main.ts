@@ -108,6 +108,7 @@ import type { IOAuthTokenStore } from './mcp/auth/types';
 import { PACKAGE_VERSION } from './packageVersion';
 import { ActiveTurnRegistry } from './runtime/activeTurns';
 import { registerCalendarConnectorForBoot } from './runtime/calendarAccount';
+import { startChatSearchBackfill } from './runtime/chatSearchIndexing';
 import { createChatImageService } from './runtime/chatImages/chatImageService';
 import { CHAT_IMAGE_RETENTION_DAYS } from './runtime/chatImages/limits';
 import { createImageReencoder } from './runtime/chatImages/reencodeInSandbox';
@@ -1018,6 +1019,9 @@ try {
     void sweepExpiredTurnArtifacts();
   }, 86_400_000);
   artifactRetentionTimer.unref();
+
+  // Fill the past-chat search index for chats that predate it; a no-op once done.
+  startChatSearchBackfill({ sessionStore, globalSettingsStore, logger });
 
   // Abandoned Google consents hold a client secret; consent reads already purge, this covers an idle install.
   const googlePendingPurgeTimer = setInterval(() => {
