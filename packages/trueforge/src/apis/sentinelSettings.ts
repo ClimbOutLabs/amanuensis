@@ -31,6 +31,7 @@ export function createSentinelSettingsRouter(deps: SentinelSettingsRouterDeps) {
       search_without_asking: body.search_without_asking,
       maps_without_asking: body.maps_without_asking,
       sandbox_without_asking: body.sandbox_without_asking,
+      chat_search_enabled: body.chat_search_enabled,
     });
     return c.json({ data: settings }, 200);
   };
