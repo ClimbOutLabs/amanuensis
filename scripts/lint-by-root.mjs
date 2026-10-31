@@ -1,37 +1,39 @@
 #!/usr/bin/env node
-// Runs the root ESLint config once per lint root, each in its own process.
+// Runs the root ESLint config once per TypeScript project, each in its own process.
 //
 // The config is type-aware (projectService), and a project service never closes
 // a project once a file has opened it. A single `eslint .` therefore holds every
-// package's TypeScript program at once, and because packages resolve each
+// project's TypeScript program at once, and because packages resolve each
 // other's sources through the `trueforge-dev` condition, the shared sources are
 // loaded again in each program. That outgrew the CI heap and crashed lint.
 //
-// One process per root keeps only that root's programs alive. The roots cover
-// exactly what `eslint .` covers: every directory under packages/ and mcp/, then
-// the rest of the tree. New packages are picked up without editing this file.
+// A lint root is every tracked directory that holds a tsconfig*.json. Each root
+// is linted on its own, minus the roots nested inside it, and a last run covers
+// the rest of the tree. Together the runs cover exactly what `eslint .` covers,
+// and a new package or test project becomes its own root without editing this file.
 //
 // Usage: node scripts/lint-by-root.mjs [extra eslint args, e.g. --fix]
-import { spawnSync } from 'node:child_process';
-import { readdirSync } from 'node:fs';
-import { join } from 'node:path';
+import { execFileSync, spawnSync } from 'node:child_process';
+import { dirname, join } from 'node:path';
 
-const groupDirs = ['packages', 'mcp'];
 const extraArgs = process.argv.slice(2);
 
-const roots = groupDirs.flatMap(group =>
-  readdirSync(group, { withFileTypes: true })
-    .filter(entry => entry.isDirectory())
-    .map(entry => join(group, entry.name))
-    .sort(),
-);
+const roots = [
+  ...new Set(
+    execFileSync('git', ['ls-files', '--', '*tsconfig*.json'], { encoding: 'utf8' })
+      .split('\n')
+      .filter(path => path.length > 0)
+      .map(path => dirname(path))
+      .filter(dir => dir !== '.'),
+  ),
+].sort();
+
+const nestedIn = dir => roots.filter(other => other !== dir && other.startsWith(`${dir}/`));
+const ignoring = dirs => dirs.flatMap(dir => ['--ignore-pattern', `${dir}/**`]);
 
 const runs = [
-  ...roots.map(root => ({ name: root, args: [root] })),
-  {
-    name: '(rest of the tree)',
-    args: ['.', ...groupDirs.flatMap(group => ['--ignore-pattern', `${group}/**`])],
-  },
+  ...roots.map(root => ({ name: root, args: [root, ...ignoring(nestedIn(root))] })),
+  { name: '(rest of the tree)', args: ['.', ...ignoring(roots)] },
 ];
 
 const eslintBin = join('node_modules', 'eslint', 'bin', 'eslint.js');
@@ -44,7 +46,7 @@ for (const run of runs) {
     [
       eslintBin,
       ...run.args,
-      // A root whose files are all ignored (the generated SDK) is not an error.
+      // A root whose files are all ignored (the generated SDK, test-only projects) is not an error.
       '--no-error-on-unmatched-pattern',
       '--cache',
       '--cache-location',
