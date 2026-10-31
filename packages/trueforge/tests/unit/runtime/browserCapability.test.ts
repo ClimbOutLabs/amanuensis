@@ -45,7 +45,7 @@ function mount(reply: (path: string) => { status?: number; json: unknown }) {
     }
     return response.result;
   };
-  return { sent, call };
+  return { sent, call, toolSet };
 }
 
 function textOf(result: { content: readonly { type: string; text?: string }[] }): string {
@@ -138,4 +138,81 @@ describe('browser capability', () => {
     expect(textOf(result)).toContain('not set up');
     expect(sent).toEqual([]);
   });
+  it('registers all eight browser tools', async () => {
+    const { toolSet } = mount(() => ({ json: { status: 'ok', text: '' } }));
+    const response = await toolSet.listTools();
+    if (!('result' in response)) {
+      throw new Error('expected a resolved listTools response');
+    }
+    expect(response.result.tools.map(tool => tool.name).sort()).toEqual(
+      [
+        'browser_open',
+        'browser_read',
+        'browser_scroll',
+        'browser_back',
+        'browser_screenshot',
+        'browser_type',
+        'browser_select',
+        'browser_click',
+      ].sort(),
+    );
+  });
+
+  it('browser_type refuses a sensitive field with the plain reason', async () => {
+    const { sent, call } = mount(() => ({ json: { status: 'refused', reason: 'sensitive_field' } }));
+    const result = await call('browser_type', { ref: 'e1', text: 'hunter2' });
+    expect(result.isError).toBe(true);
+    expect(JSON.parse(textOf(result)).message).toBe(
+      'This field is for a password or payment detail. Ask the person to type it themselves.',
+    );
+    expect(sent[0]?.url).toBe('http://browser-relay:8792/type');
+    expect(sent[0]?.body).toEqual({ ref: 'e1', text: 'hunter2', owner: 'tenant-1:person-1', tab: 'chat-1' });
+  });
+
+  it('browser_click sends the ref and returns the page it lands on', async () => {
+    const { sent, call } = mount(() => ({ json: { status: 'ok', text: '# Done' } }));
+    const result = await call('browser_click', { ref: 'e3' });
+    expect(result.isError).toBeUndefined();
+    expect(textOf(result)).toContain('# Done');
+    expect(sent[0]?.url).toBe('http://browser-relay:8792/click');
+    expect(sent[0]?.body).toEqual({ ref: 'e3', owner: 'tenant-1:person-1', tab: 'chat-1' });
+  });
+
+  it("toolCallInfo stamps browser_click with the sidecar's dry-run read, not from model text", async () => {
+    const { sent, toolSet } = mount(path =>
+      path === '/click-info'
+        ? {
+            json: {
+              status: 'ok',
+              site: 'shop.example',
+              accessible_name: 'Place order',
+              is_form_submit: true,
+              form_values: { card_last4: '4242' },
+            },
+          }
+        : { json: { status: 'ok', text: '' } },
+    );
+    const info = await toolSet.toolCallInfo({ name: 'browser_click', arguments: { ref: 'e3' } });
+    expect(info.browser_click).toEqual({
+      site: 'shop.example',
+      accessible_name: 'Place order',
+      is_form_submit: true,
+      form_values: { card_last4: '4242' },
+    });
+    expect(sent).toEqual([
+      {
+        url: 'http://browser-relay:8792/click-info',
+        headers: expect.objectContaining({ 'x-browser-secret': SECRET }),
+        body: { ref: 'e3', owner: 'tenant-1:person-1', tab: 'chat-1' },
+      },
+    ]);
+  });
+
+  it('toolCallInfo leaves browser_click unset when the sidecar cannot be reached, failing closed', async () => {
+    const { toolSet } = mount(() => ({ json: { status: 'ok', text: '' } }));
+    jest.spyOn(globalThis, 'fetch').mockRejectedValueOnce(new Error('ECONNREFUSED'));
+    const info = await toolSet.toolCallInfo({ name: 'browser_click', arguments: { ref: 'e3' } });
+    expect(info.browser_click).toBeUndefined();
+  });
 });
+
