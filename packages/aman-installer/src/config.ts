@@ -16,6 +16,10 @@ export interface InstallerConfig {
   // The compose service name of the app in an instance (the shell doctor's
   // AMAN_DOCTOR_APP_SERVICE, else app).
   appService: string;
+  // The folder holding the computer's hardware names, which the setup
+  // wizard reads for its cloud check; AMAN_DMI_DIR overrides it, mostly
+  // for tests.
+  dmiDir: string;
 }
 
 // The one place the installer's environment settings are read. AMANUENSIS_HOME
@@ -30,6 +34,7 @@ export function installerConfig(options: {
   const dockerConfig = options.env['DOCKER_CONFIG'];
   const osRelease = options.env['AMAN_OS_RELEASE'];
   const appService = options.env['AMAN_DOCTOR_APP_SERVICE'];
+  const dmiDir = options.env['AMAN_DMI_DIR'];
   return {
     stateHome: fromEnv !== undefined && fromEnv !== '' ? fromEnv : join(options.homeDir, '.amanuensis'),
     homeDir: options.homeDir,
@@ -37,5 +42,6 @@ export function installerConfig(options: {
     dockerConfigDir:
       dockerConfig !== undefined && dockerConfig !== '' ? dockerConfig : join(options.homeDir, '.docker'),
     appService: appService !== undefined && appService !== '' ? appService : 'app',
+    dmiDir: dmiDir !== undefined && dmiDir !== '' ? dmiDir : '/sys/class/dmi/id',
   };
 }

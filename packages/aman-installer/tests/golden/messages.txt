@@ -4,6 +4,7 @@ Run aman --version to see which version this is.
 Run aman doctor to check this computer and each instance.
 Run aman doctor docker to check that Docker is ready for Aman.
 Run aman status to see what is installed and whether it is running.
+Run aman setup to set Aman up in your browser, step by step.
 Docker is not installed on this computer. Install Docker Desktop from its website, then run this check again.
 Docker Desktop is not running. Open Docker Desktop from Launchpad, then run this check again.
 Docker is installed without its Compose tool, which Aman needs. Update Docker Desktop to the newest version, then run this check again.
@@ -37,3 +38,97 @@ Instance main is partly running at http://127.0.0.1:8791.
 Instance main is stopped.
 Instance main: whether it is running is unknown.
 No instance has been made yet.
+Setup page: http://127.0.0.1:8791
+Downloads together: about 2775 MB.
+Opening the setup page in your browser.
+The setup page could not be opened in your browser by itself. Copy the setup page address above into your browser to open it.
+The password can have at most 72 characters. Accented or non-Latin letters count as more than one.
+at least 8 characters
+a number
+a symbol, like @ # $ %
+The passwords do not match. Type them again.
+Type a password first. The password rules are listed under the field.
+Set up Aman on this computer
+Aman is your private assistant. It runs on this computer only, and your information stays on this computer.
+Setup takes about 15 minutes and downloads a few GB, because Aman is built on this computer.
+Start
+Check this computer
+Aman checks that this computer is ready. Nothing is changed by these checks.
+Something above needs fixing before setup can go on. Setup cannot start while a problem stands.
+Check again
+Install Docker for me
+Continue
+About you
+Your email, the one you sign in with
+What should Aman call you?
+Choose a password
+Type the password again
+At least 8 characters
+A number
+A symbol, like @ # $ % ! -
+At most 72 bytes
+Your choices
+Back up every day
+Aman keeps the last few backups on this computer, so a mistake can be undone.
+Who can reach Aman
+This computer only
+This computer, and my phone on my home network
+Advanced: email, calendar and Token Factory
+Email provider
+Email address
+Email app password
+Incoming mail server
+Incoming mail server number
+Outgoing mail server
+Outgoing mail server number
+Calendar provider
+Calendar email address
+Calendar address
+Calendar user name
+Calendar app password
+Token Factory key
+Token Factory model
+Token Factory daily limit
+Review the plan
+This is what setup will do. Nothing on this computer changes until you choose Install.
+Downloads
+Done
+To do
+Needs admin
+Pass
+Needs a look
+Needs fixing
+Docker will be installed as part of setup.
+Time so far
+Install
+Back
+Setting up Aman
+This can take several minutes. You can close this page and come back; the setup keeps running.
+A step needs your permission. Your computer is about to ask for your password.
+Show details
+Hide details
+Setup stopped
+The step below did not finish. Its record is under Show details.
+Try again
+Copy the log
+Copied
+Docker stopped answering, so the setup cannot go on.
+Start Docker, then choose Try again.
+Start Docker
+Your password, typed again so the setup can go on
+Aman is ready
+Open Aman
+On your phone, open this address or point the camera at the code:
+Backups are on, and they are kept in the backups folder of Aman on this computer.
+Backups are off. You can turn them on later with aman doctor.
+The page that opens has a short guide to your first steps with Aman.
+Aman is running, but a check found a problem
+The finding and its fix are in the details below. You can also run aman doctor to see them again.
+Aman is already set up
+Opening setup changes nothing on this computer. Your Aman is at this address:
+An install is already running
+Another install is running on this computer right now. Wait for it to finish, then open setup again.
+An install from this setup is still running. Its progress is below.
+Close
+Setup is closed. You can close this tab now.
+Working on it. This takes a few seconds.

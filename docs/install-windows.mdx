@@ -1,0 +1,37 @@
+---
+title: "Install on Windows"
+description: "Install Amanuensis on Windows inside WSL2: a helper script for the Windows half, then the setup wizard in Ubuntu."
+---
+
+## What this is
+
+On Windows, Amanuensis runs inside WSL2 (the Windows Subsystem for Linux) with Ubuntu, which is the Linux the setup wizard supports. Windows itself runs no part of Amanuensis. Two halves get you there: a small helper script does the Windows half, and the setup wizard does the rest inside Ubuntu.
+
+## 1. The Windows half: a helper script
+
+Download `installer/setup-windows.ps1` from the repository, open the Start menu, type PowerShell, right-click Windows PowerShell and choose **Run as administrator**, then run the script from the folder you downloaded it to:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\setup-windows.ps1
+```
+
+The script checks that virtualization is on (and says how to turn it on in the BIOS or UEFI settings when it is not), installs WSL2 with Ubuntu when they are missing, and tells you to restart when Windows asks. Each problem it finds is printed with the one thing to do next.
+
+## 2. Ubuntu and Docker Desktop
+
+After the restart, open **Ubuntu** from the Start menu once and finish its first-run questions: it asks you to pick a Linux user name and a password.
+
+Install Docker Desktop from [Docker's Windows install page](https://docs.docker.com/desktop/setup/install/windows-install/), start it, then open its **Settings**, go to **Resources, WSL Integration**, turn on Ubuntu, and choose **Apply & Restart**. This is the step that lets the Ubuntu side reach Docker; the wizard's checks screen can see when it is missing and shows the same steps.
+
+## 3. The setup wizard
+
+Ubuntu needs Node.js 22 or newer for the wizard command (the install itself downloads everything else it needs). In the Ubuntu window:
+
+```bash
+sudo apt update && sudo apt install -y git nodejs
+git clone https://github.com/ClimbOutLabs/amanuensis.git
+cd amanuensis
+node packages/aman-installer/src/main.ts setup
+```
+
+If Ubuntu's Node.js is older than 22, install a current one from [nodejs.org](https://nodejs.org) first; the wizard command says so when it cannot start. The wizard opens in your browser and walks the install from there: checks, your details, the plan, the install, and the address to open at the end. From then on, Amanuensis on this computer is a Linux install like any other, and the [install guide](/install) covers the rest.

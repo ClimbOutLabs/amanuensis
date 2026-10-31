@@ -24,6 +24,7 @@ export const HELP_LINES: readonly string[] = [
   'Run aman doctor to check this computer and each instance.',
   'Run aman doctor docker to check that Docker is ready for Aman.',
   'Run aman status to see what is installed and whether it is running.',
+  'Run aman setup to set Aman up in your browser, step by step.',
 ];
 
 export const DOCKER_NOT_INSTALLED: Record<SystemKind, Problem> = {
@@ -197,7 +198,131 @@ export function statusInstanceLine(name: string, state: InstanceState, address: 
 
 export const NO_INSTANCES_LINE = 'No instance has been made yet.';
 
-// Every message, in a fixed order, for the golden file reviewers read.
+// ---- the setup wizard ----------------------------------------------------------------------------
+// The words of the wizard's page and of the setup command itself. The words
+// of the checks, the plan and the steps are the installer's own and reach
+// the page as data, so they are not repeated here.
+
+export function setupUrlLine(url: string): string {
+  return `Setup page: ${printable(url)}`;
+}
+
+export function setupDownloadsTotalLine(sizeMb: number): string {
+  return `Downloads together: about ${String(sizeMb)} MB.`;
+}
+
+export const SETUP_OPENING_LINE = 'Opening the setup page in your browser.';
+
+export const SETUP_BROWSER_PROBLEM: Problem = {
+  happened: 'The setup page could not be opened in your browser by itself.',
+  fix: 'Copy the setup page address above into your browser to open it.',
+};
+
+// What the password still lacks, in the installer's own words (its
+// password_problem in installer/lib/common.sh says the same). A password
+// is judged by the bytes it takes, because the sign-in check ignores
+// everything past 72 of them.
+export const PASSWORD_TOO_LONG_LINE =
+  'The password can have at most 72 characters. Accented or non-Latin letters count as more than one.';
+export const PASSWORD_LACK_LENGTH = 'at least 8 characters';
+export const PASSWORD_LACK_NUMBER = 'a number';
+export const PASSWORD_LACK_SYMBOL = 'a symbol, like @ # $ %';
+export const PASSWORDS_DIFFER_LINE = 'The passwords do not match. Type them again.';
+export const PASSWORD_MISSING_LINE = 'Type a password first. The password rules are listed under the field.';
+
+// The wizard's screens, in order. Labels and short lines the page shows;
+// the sentences among them follow the same plain-words rules as every
+// other message.
+export const SETUP_TEXT = {
+  welcomeTitle: 'Set up Aman on this computer',
+  welcomeWhat:
+    'Aman is your private assistant. It runs on this computer only, and your information stays on this computer.',
+  welcomeTime: 'Setup takes about 15 minutes and downloads a few GB, because Aman is built on this computer.',
+  start: 'Start',
+  checksTitle: 'Check this computer',
+  checksIntro: 'Aman checks that this computer is ready. Nothing is changed by these checks.',
+  checksBlocked: 'Something above needs fixing before setup can go on. Setup cannot start while a problem stands.',
+  checkAgain: 'Check again',
+  installDocker: 'Install Docker for me',
+  continue: 'Continue',
+  aboutTitle: 'About you',
+  emailLabel: 'Your email, the one you sign in with',
+  nameLabel: 'What should Aman call you?',
+  passwordLabel: 'Choose a password',
+  passwordAgainLabel: 'Type the password again',
+  passwordRuleLength: 'At least 8 characters',
+  passwordRuleNumber: 'A number',
+  passwordRuleSymbol: 'A symbol, like @ # $ % ! -',
+  passwordRuleBytes: 'At most 72 bytes',
+  optionsTitle: 'Your choices',
+  backupsLabel: 'Back up every day',
+  backupsNote: 'Aman keeps the last few backups on this computer, so a mistake can be undone.',
+  reachLabel: 'Who can reach Aman',
+  reachLocal: 'This computer only',
+  reachNetwork: 'This computer, and my phone on my home network',
+  advanced: 'Advanced: email, calendar and Token Factory',
+  emailProviderLabel: 'Email provider',
+  emailAddressLabel: 'Email address',
+  emailPasswordLabel: 'Email app password',
+  emailImapHostLabel: 'Incoming mail server',
+  emailImapPortLabel: 'Incoming mail server number',
+  emailSmtpHostLabel: 'Outgoing mail server',
+  emailSmtpPortLabel: 'Outgoing mail server number',
+  calendarProviderLabel: 'Calendar provider',
+  calendarEmailLabel: 'Calendar email address',
+  calendarUrlLabel: 'Calendar address',
+  calendarUserLabel: 'Calendar user name',
+  calendarPasswordLabel: 'Calendar app password',
+  tokenFactoryKeyLabel: 'Token Factory key',
+  tokenFactoryModelLabel: 'Token Factory model',
+  tokenFactoryCapLabel: 'Token Factory daily limit',
+  reviewTitle: 'Review the plan',
+  reviewIntro: 'This is what setup will do. Nothing on this computer changes until you choose Install.',
+  reviewDownloads: 'Downloads',
+  stateDone: 'Done',
+  stateTodo: 'To do',
+  stateAdmin: 'Needs admin',
+  checkPass: 'Pass',
+  checkWarn: 'Needs a look',
+  checkBlock: 'Needs fixing',
+  dockerChosen: 'Docker will be installed as part of setup.',
+  elapsedLabel: 'Time so far',
+  install: 'Install',
+  back: 'Back',
+  installingTitle: 'Setting up Aman',
+  installingNote: 'This can take several minutes. You can close this page and come back; the setup keeps running.',
+  adminNote: 'A step needs your permission. Your computer is about to ask for your password.',
+  showDetails: 'Show details',
+  hideDetails: 'Hide details',
+  failedTitle: 'Setup stopped',
+  failedWhat: 'The step below did not finish. Its record is under Show details.',
+  tryAgain: 'Try again',
+  copyLog: 'Copy the log',
+  copied: 'Copied',
+  dockerStoppedWhat: 'Docker stopped answering, so the setup cannot go on.',
+  dockerStoppedNext: 'Start Docker, then choose Try again.',
+  startDocker: 'Start Docker',
+  retryPasswordLabel: 'Your password, typed again so the setup can go on',
+  doneTitle: 'Aman is ready',
+  openAman: 'Open Aman',
+  phoneNote: 'On your phone, open this address or point the camera at the code:',
+  backupsOnLine: 'Backups are on, and they are kept in the backups folder of Aman on this computer.',
+  backupsOffLine: 'Backups are off. You can turn them on later with aman doctor.',
+  gettingStarted: 'The page that opens has a short guide to your first steps with Aman.',
+  doneWarningTitle: 'Aman is running, but a check found a problem',
+  doneWarningNote: 'The finding and its fix are in the details below. You can also run aman doctor to see them again.',
+  alreadyTitle: 'Aman is already set up',
+  alreadyNote: 'Opening setup changes nothing on this computer. Your Aman is at this address:',
+  lockedTitle: 'An install is already running',
+  lockedNote:
+    'Another install is running on this computer right now. Wait for it to finish, then open setup again.',
+  attachNote: 'An install from this setup is still running. Its progress is below.',
+  close: 'Close',
+  closedLine: 'Setup is closed. You can close this tab now.',
+  working: 'Working on it. This takes a few seconds.',
+} as const;
+
+export type SetupText = typeof SETUP_TEXT;
 export function allMessageLines(): string[] {
   const lines: string[] = [versionLine('0.0.0'), ...HELP_LINES];
   const kinds: SystemKind[] = ['darwin', 'linux'];
@@ -230,5 +355,16 @@ export function allMessageLines(): string[] {
   lines.push(statusInstanceLine('main', 'stopped', null));
   lines.push(statusInstanceLine('main', 'unknown', null));
   lines.push(NO_INSTANCES_LINE);
+  lines.push(setupUrlLine('http://127.0.0.1:8791'));
+  lines.push(setupDownloadsTotalLine(2775));
+  lines.push(SETUP_OPENING_LINE);
+  lines.push(problemText(SETUP_BROWSER_PROBLEM));
+  lines.push(PASSWORD_TOO_LONG_LINE);
+  lines.push(PASSWORD_LACK_LENGTH);
+  lines.push(PASSWORD_LACK_NUMBER);
+  lines.push(PASSWORD_LACK_SYMBOL);
+  lines.push(PASSWORDS_DIFFER_LINE);
+  lines.push(PASSWORD_MISSING_LINE);
+  lines.push(...Object.values(SETUP_TEXT));
   return lines;
 }

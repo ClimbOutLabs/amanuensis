@@ -41,8 +41,16 @@ You need Docker, `git`, about 10 GB of free disk space, and Linux or macOS. On W
 
 ### Installing on Mac and Linux
 
+The guided setup wizard is the default way in: a page in your browser that checks your computer, asks the few questions that matter, shows the whole plan before anything changes, and installs with a progress bar. It needs Node.js 22 or newer:
+
 ```bash
 git clone https://github.com/ClimbOutLabs/amanuensis && cd amanuensis
+node packages/aman-installer/src/main.ts setup
+```
+
+The wizard drives the project's install script, so the result is the same either way. If you would rather answer in the terminal, or your computer has no Node.js, run the script itself:
+
+```bash
 ./installer/install.sh
 ```
 
@@ -50,33 +58,28 @@ The installer checks your computer first and tells you in plain words if somethi
 
 ### Installing on Windows
 
-On Windows, Amanuensis installs inside [WSL 2](https://learn.microsoft.com/en-us/windows/wsl/install), the Windows Subsystem for Linux, with Docker Desktop, by running the project's install script. Follow these steps in order.
+On Windows, Amanuensis installs inside [WSL 2](https://learn.microsoft.com/en-us/windows/wsl/install), the Windows Subsystem for Linux, with Docker Desktop, and is then set up with the same wizard as on Mac and Linux. A helper script, `installer/setup-windows.ps1`, does the Windows half: follow these steps in order.
 
-**1. Install WSL 2 with Ubuntu.** Open PowerShell as an administrator and run:
+**1. Run the helper script.** Download `installer/setup-windows.ps1` from this repository. Open the Start menu, type PowerShell, right-click Windows PowerShell, choose **Run as administrator**, and run:
 
 ```powershell
-wsl --install -d Ubuntu
+powershell -ExecutionPolicy Bypass -File .\setup-windows.ps1
 ```
 
-Restart when it asks. Then open **Ubuntu** from the Start menu once, and set the Linux username and password it asks for. [Microsoft's WSL guide](https://learn.microsoft.com/en-us/windows/wsl/install) has the details.
+The script checks that virtualization is on and says how to turn it on in the BIOS or UEFI settings when it is not. It installs WSL 2 with Ubuntu when they are missing. Restart when it asks. Then open **Ubuntu** from the Start menu once, and set the Linux username and password it asks for. [Microsoft's WSL guide](https://learn.microsoft.com/en-us/windows/wsl/install) has the details.
 
 **2. Install Docker Desktop.** Get it from [Docker's Windows install page](https://docs.docker.com/desktop/setup/install/windows-install/) and install it. Start Docker Desktop and wait until it reports it is running. Then open its **Settings**, go to **Resources, WSL Integration**, turn on Ubuntu under **Enable integration with additional distros**, and choose **Apply & Restart**. If that page shows only one switch, for the default distro, follow the **Go to classic Settings** link at the top of the Settings page instead: the classic page has the same WSL Integration page, with the list of distros.
 
-**3. Get the code.** In the Ubuntu window:
+**3. Get the code, and open the wizard.** In the Ubuntu window:
 
 ```bash
-sudo apt update && sudo apt install -y git
+sudo apt update && sudo apt install -y git nodejs
 git clone https://github.com/ClimbOutLabs/amanuensis.git
 cd amanuensis
+node packages/aman-installer/src/main.ts setup
 ```
 
-**4. Run the install.** Still in the Ubuntu window:
-
-```bash
-./installer/install.sh
-```
-
-The script checks the computer first, then shows its plan and asks before it changes anything. It asks its questions one at a time: the email address you will sign in with, what Aman should call you, a password to choose, and a few setup choices. It does not ask for a model key. You add the key after the install, under **Settings, Models**, which the steps after this section walk through.
+The wizard opens in your browser (Ubuntu's Node.js needs to be version 22 or newer for the wizard command; if it is older, the plain script below works instead). It checks the computer first, then asks its questions as screens: the email address you will sign in with, what Aman should call you, a password to choose, and a few setup choices. It does not ask for a model key. You add the key after the install, under **Settings, Models**, which the steps after this section walk through. To run the same install as terminal questions instead, run `./installer/install.sh` in the Ubuntu window.
 
 **5. Open Aman.** The script checks Docker, builds and installs everything, and prints the address to open in your browser. Sign in with the email and password from step 4.
 
