@@ -29,7 +29,7 @@
 
 ## Why
 
-Most AI assistants are built for people who already live in software: a keyboard, a prompt, patience for a wall of text, and a willingness to send their life to someone else's server.
+Most AI assistants are built for people who already live in software: a keyboard, a prompt, patience for a wall of text, and the energy to explain everything from scratch every time.
 
 Most people run a household, not a terminal. They carry the flyer, the bill, the form, the appointment and the thing they promised someone, and they carry it in their head, because nothing was built to carry it for them.
 
