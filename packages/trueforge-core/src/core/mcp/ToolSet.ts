@@ -19,15 +19,12 @@ import {
 import type { ConnectorBinding } from '../permissions/approvalTokens';
 import { caldavResultNote } from '../permissions/caldavTier';
 import { isChangeRequestReason } from '../permissions/changeRequest';
-import { isStandingTrustDecision } from '../permissions/connectorTrust';
+import { isHostVouchedDecision, isStandingTrustDecision } from '../permissions/connectorTrust';
 import { isMapsToolName } from '../permissions/mapsToolNames';
 import { appendOutboundTrace, collectOutboundStrings } from '../permissions/outboundGuard';
 import {
-  countSilentFetches,
   isSearchAskReason,
   isSilentSearchReason,
-  namesUrl,
-  recordResultUrls,
   resultTexts,
   runOneAtATime,
   type SearchProviderGrant,
@@ -80,8 +77,21 @@ export function deniedToolCallText(reason: string | undefined): string {
   if (isApprovalExpiredReason(reason)) {
     return JSON.stringify({ error: APPROVAL_EXPIRED_RESULT });
   }
-  return JSON.stringify({ error: `User denied tool call: ${reason ?? 'no reason provided'}` });
+  const said = reason === undefined ? DENIED_SAID : `${DENIED_SAID} Their reason: ${reason}.`;
+  return JSON.stringify({ error: `${said} ${DENIED_NEXT_STEP}` });
 }
+
+// Firm on purpose: a small model reads a bare "denied" as "try another wording".
+const DENIED_SAID = 'The person said no to this.';
+const DENIED_NEXT_STEP =
+  'Do not try it again, with any wording, unless they ask for it. Answer with what you have, or ask them what they want.';
+
+/** Marks a call refused because it repeats a "no" from earlier in the turn; it never asked again. */
+export const REPEATED_DENIAL_REMEDIATION: ToolResultRemediation = {
+  reason_code: 'repeated_denied_action',
+  message: 'You already said no to this, so it was not asked again.',
+  suggested_action: 'contact_user',
+};
 
 /** Marks a denied call whose card expired, so the chat says it expired instead of "you said no". */
 export function deniedToolCallRemediation(reason: string | undefined): ToolResultRemediation | undefined {
@@ -122,6 +132,7 @@ export function stampSentinelDecision(input: {
   | 'effect'
   | 'grant_host'
   | 'secret_path_read'
+  | 'mail_send'
 > {
   const decision = input.decision;
   return {
@@ -136,6 +147,7 @@ export function stampSentinelDecision(input: {
     ...(decision.inspection ? { effect: 'inspect' as const } : {}),
     ...(decision.grant_host === null ? {} : { grant_host: decision.grant_host }),
     ...(decision.secret_path_read ? { secret_path_read: true as const } : {}),
+    ...(decision.mail_send ? { mail_send: true as const } : {}),
     ...(decision.silent_search_query === null ? {} : { silent_search_query: decision.silent_search_query }),
     ...(decision.audit_description === null ? {} : { audit_description: decision.audit_description }),
     is_approval_required:
@@ -169,8 +181,12 @@ function autoDenyMessage(decision: TierDecision): string {
       return `Auto-denied: ${decision.reason_detail ?? 'a scheduled run cannot do this'}`;
     case 'outbound_guard':
       return `Auto-denied: ${decision.reason_detail ?? 'the outbound guard held this call back'} Continue without it.`;
-    case 'private_text_check':
-      return `Skipped: ${decision.reason_detail ?? 'it would have shared something from your mail or calendar.'} Continue without it.`;
+    case 'lookup_limit':
+      return `Not run: ${decision.reason_detail ?? 'this reply already looked up a lot.'} Answer from what you already found.`;
+    case 'steered_by_content':
+      return `Skipped: ${decision.reason_detail ?? 'something read, not the person, asked for it.'} Continue without it.`;
+    case 'private_detail':
+      return `Skipped: ${decision.reason_detail ?? 'it would have shared something private.'} Continue without it.`;
     default:
       return 'Auto-denied: the destination of this external action could not be verified.';
   }
@@ -240,7 +256,7 @@ export class ToolSet implements IToolSet {
      * host names the chat it belongs to. Set by the host only, alongside `pages`.
      */
     pagesScope?: FetchedPageScope | undefined;
-    /** The bundle every tool of this connector is sent with. Set by the host only; absent sends them on every request. */
+    /** The guidance topic every tool of this connector is grouped under. Set by the host only; absent groups them under none. */
     bundle?: ToolBundleName | undefined;
     /**
      * How long a web search or page read may take before it is stopped and the model gets a plain
@@ -268,6 +284,11 @@ export class ToolSet implements IToolSet {
     this.bundle = params.bundle;
     this.searchCallTimeoutMs = params.searchCallTimeoutMs;
     this.logger = params.logger;
+  }
+
+  /** Only the designated search provider's listed search and page-read tools; the server's own hints never count. */
+  isHostVouchedReadTool(name: string): boolean {
+    return this.searchProvider && this.searchTools.has(name);
   }
 
   bundleOf(_toolName: string): ToolBundleName | undefined {
@@ -406,14 +427,6 @@ export class ToolSet implements IToolSet {
         texts: resultTexts(response.result),
       });
     }
-    if (this.searchProvider && this.sentinel !== undefined && isCallToolResponseResult(response)) {
-      // What a search returned is what a later fetch in this turn may name. A call that itself
-      // names a URL is a fetch: its page's links are not search results, so they stay unreturned.
-      const sent = collectOutboundStrings(params.arguments ?? {}, this.searchPlumbingFields);
-      if (sent !== undefined && !namesUrl([...sent.values, ...sent.plumbing])) {
-        recordResultUrls({ state: this.sentinel.web_search, texts: resultTexts(response.result) });
-      }
-    }
     // The priming listTools() may have captured the first-connect init; carry it forward since the
     // subsequent callTool sees an already-open connection and reports none.
     if (listed.wasInitialized && isCallToolResponseResult(response) && !response.wasInitialized) {
@@ -496,12 +509,7 @@ export class ToolSet implements IToolSet {
       this.sentinel !== undefined
     ) {
       // Classified as silent a moment ago inside this one-at-a-time step, so the count is current.
-      const turn = this.sentinel.web_search;
-      turn.silentSearches += 1;
-      const sent = collectOutboundStrings(params.arguments ?? {}, this.searchPlumbingFields);
-      if (sent !== undefined) {
-        countSilentFetches({ values: sent.values, state: turn });
-      }
+      this.sentinel.web_search.silentSearches += 1;
     }
 
     if (
@@ -648,6 +656,7 @@ export class ToolSet implements IToolSet {
       sentinel,
       repository_id: null,
       workspace_cwd: sentinel.workspace_cwd,
+      path_resolution: info.path_resolution,
       action: {
         tool_name: params.name,
         canonical_params: isRecord(params.arguments) ? params.arguments : {},
@@ -666,6 +675,7 @@ export class ToolSet implements IToolSet {
           open_world_hint: info.open_world_hint,
         },
         maps_hosts: info.maps_hosts,
+        document_scope: info.document_scope,
       },
     });
     const stamp = stampSentinelDecision({ decision });
@@ -680,7 +690,7 @@ export class ToolSet implements IToolSet {
           stamp.is_approval_required === true ||
           (decision.auto_deny === null &&
             this.policy.requiresApproval(params.name, tool?.annotations, {
-              waiveUnclassified: isSilentSearchReason(decision.reason),
+              waiveWriteAndUnclassifiedForHostVouchedRead: isHostVouchedDecision(decision),
             })),
       },
       classification: decision,

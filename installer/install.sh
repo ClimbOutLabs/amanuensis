@@ -2,7 +2,7 @@
 # Amanuensis installer: plan, local image builds, shared speech-to-text, per-person instances and their sandbox.
 # Usage: install.sh [--dry-run] [--yes] [options]
 #        install.sh instance add|list|remove <name>
-#        install.sh instance demo-seed [--reset]
+#        install.sh instance demo-seed [--reset | --fresh]
 #        install.sh instance import <name> <file.zip> [--display-name NAME] [--dry-run]
 #        install.sh migrate --from-compose <folder> [--user ID]
 #        install.sh instance refresh <name>
@@ -19,7 +19,7 @@ set -euo pipefail
 # Everything written is private unless a file is deliberately made world-readable.
 umask 077
 # A password or key in the caller's environment is never used and must not reach a child process.
-unset AMAN_PASSWORD AMAN_TF_KEY EM_PASSWORD NEBIUS_API_KEY
+unset AMAN_PASSWORD AMAN_TF_KEY AMAN_TAVILY_KEY EM_PASSWORD NEBIUS_API_KEY TAVILY_API_KEY
 
 INSTALLER_DIR=$(cd -P -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 REPO_ROOT=${AMAN_REPO_ROOT:-$(cd -P -- "$INSTALLER_DIR/.." && pwd)}
@@ -91,6 +91,7 @@ OPT_HOST_NODE=0
 OPT_SANDBOX_ROOT=0
 OPT_TLS_ROOT=0
 OPT_TF_KEY_STDIN=0
+OPT_TAVILY_KEY_STDIN=0
 PRINT_ROOT_STEPS=0
 PRINT_NETWORK=0
 PRINT_PROXY=0
@@ -105,6 +106,7 @@ OPT_ADDRESSES=
 OPT_BACKUPS=
 OPT_BACKUPS_ARG=
 OPT_RESET=0
+OPT_FRESH=0
 OPT_NAME=
 OPT_INSTANCE=
 OPT_EMAIL=
@@ -136,6 +138,7 @@ SUBCOMMAND=
 LOCK_HELD=0
 AMAN_PASSWORD=
 AMAN_TF_KEY=
+AMAN_TAVILY_KEY=
 ui_init
 
 usage() {
@@ -149,8 +152,8 @@ Amanuensis installer
   install.sh instance list        show every instance
   install.sh instance remove <name> [--purge-data]
                                   remove an instance; --purge-data deletes its data too
-  install.sh instance demo-seed [--reset] [--instance NAME]
-                                  fill a demo instance with example data, or clear it with --reset
+  install.sh instance demo-seed [--reset | --fresh] [--instance NAME]
+                                  fill a demo instance with example data, clear it with --reset, or start it fresh with --fresh
   install.sh instance import <name> <file.zip> [--display-name NAME] [--dry-run]
                                   put an exported file into an instance (it is backed up first; its app pauses meanwhile)
   install.sh migrate --from-compose <folder> [--user ID]
@@ -191,12 +194,15 @@ Options
   --password-stdin      read the sign-in password from the input instead of asking for it
   --token-factory-key-stdin  read the Token Factory key from the input; never put the key on the command line
                         Each option that ends in -stdin reads one line of the input. The lines come in this order:
-                        sign-in password, Token Factory key, calendar app password, email app password.
+                        sign-in password, Token Factory key, calendar app password, email app password, Tavily key.
                         Leave out the line of an option you do not give.
   --token-factory-model ID   the Token Factory model to use (default nvidia/nemotron-3-super-120b-a12b)
   --token-factory-daily-cap N  stop answering after N Token Factory tokens in a day (default: no limit)
   --demo                make the instance a demo and fill it with example data once it runs
+  --tavily-key-stdin    with --demo, read the Tavily key from the input; the demo instance then searches the web
+                        with Tavily. Never put the key on the command line (see the line order above)
   --reset               with instance demo-seed, remove the example data instead of adding it
+  --fresh               with instance demo-seed, remove everything the demo person made (chats, spaces, memory, schedules, personas, files), then add the example data again
   --local-only          open Aman on this computer only (by default it also opens for other devices on your private network)
   --backups daily|off   back up every day (default) or never, without asking
   --address HOST        also open Aman at this name or private address; repeat for more (for example --address host.local)
@@ -270,11 +276,14 @@ parse_args() {
       --tls-root) OPT_TLS_ROOT=1 ;;
       --token-factory-key-stdin) OPT_TF_KEY_STDIN=1 ;;
       --token-factory-key | --token-factory-key=*) usage_die "The Token Factory key is never taken from the command line. Use --token-factory-key-stdin." ;;
+      --tavily-key-stdin) OPT_TAVILY_KEY_STDIN=1 ;;
+      --tavily-key | --tavily-key=*) usage_die "The Tavily key is never taken from the command line. Use --tavily-key-stdin." ;;
       --check) OPT_CHECK=1 ;;
       --force) OPT_FORCE=1 ;;
       --purge-data) OPT_PURGE=1 ;;
       --demo) OPT_DEMO=1 ;;
       --reset) OPT_RESET=1 ;;
+      --fresh) OPT_FRESH=1 ;;
       --local-only) OPT_LOCAL_ONLY=1 ;;
       --home-network) OPT_HOME_NETWORK=1 ;;
       --home | --name | --instance | --email | --your-name | --public-url | --login-url | --port | --login-port | --confirm-name | --tls | --public-ip | --address | --backups | --token-factory-model | --token-factory-daily-cap | --display-name | --from-compose | --user | --email-provider | --email-address | --email-imap-host | --email-imap-port | --email-smtp-host | --email-smtp-port | --calendar-provider | --calendar-email | --calendar-url | --calendar-user)
@@ -360,7 +369,7 @@ print_signout_note() {
   fi
 }
 
-# --demo belongs to install and instance add; --reset only to instance demo-seed.
+# --demo belongs to install and instance add; --reset and --fresh only to instance demo-seed.
 check_demo_options() {
   local seeding=0
   if [ "$COMMAND:$SUBCOMMAND" = instance:demo-seed ]; then seeding=1; fi
@@ -369,6 +378,15 @@ check_demo_options() {
   fi
   if [ "$OPT_RESET" = 1 ] && [ "$seeding" != 1 ]; then
     usage_die "--reset applies to instance demo-seed"
+  fi
+  if [ "$OPT_FRESH" = 1 ] && [ "$seeding" != 1 ]; then
+    usage_die "--fresh applies to instance demo-seed"
+  fi
+  if [ "$OPT_FRESH" = 1 ] && [ "$OPT_RESET" = 1 ]; then
+    usage_die "Use either --fresh or --reset, not both."
+  fi
+  if [ "$OPT_TAVILY_KEY_STDIN" = 1 ] && [ "$OPT_DEMO" != 1 ]; then
+    usage_die "--tavily-key-stdin goes with --demo: it gives the demo instance its Tavily key for web search."
   fi
   if [ -n "$OPT_YOUR_NAME" ] && [ "$COMMAND" != install ] && [ "$COMMAND:$SUBCOMMAND" != instance:add ]; then
     usage_die "--your-name applies to install and instance add"
@@ -402,6 +420,7 @@ on_exit() {
   trap - EXIT
   AMAN_PASSWORD=
   AMAN_TF_KEY=
+  AMAN_TAVILY_KEY=
   EM_PASSWORD=
   CAL_PASSWORD=
   STDIN_SIGNIN_PASSWORD=

@@ -60,6 +60,17 @@ export interface SandboxExecParams {
    * call stays offline.
    */
   packageMirrorToken?: string | undefined;
+  /**
+   * Skill network grant token for this call, issued for the sites the person approved for the skills
+   * in this chat. Slot providers pass it to the agent, which hands the guest proxy variables for the
+   * duration of the call; the gateway stays the wall that checks every site against the grant.
+   */
+  skillNetworkToken?: string | undefined;
+  /**
+   * The approved sites behind {@link skillNetworkToken}, for providers that enforce a per-command
+   * allowlist on the host (the local supervisor path) instead of a gateway.
+   */
+  skillNetworkHosts?: readonly string[] | undefined;
 }
 
 export interface WorkspaceExecutionLock {
@@ -298,13 +309,26 @@ def git(*args):
 def digest(value):
     return hashlib.sha256(value).hexdigest()
 
+def git_refs():
+    try:
+        return git("for-each-ref", "--include-root-refs", "--sort=refname", "--format=%(refname)%00%(objectname)%00%(symref)%00")
+    except subprocess.CalledProcessError as error:
+        # Only git 2.48 and newer knows --include-root-refs; when git names that
+        # flag as an unknown option, the same read runs once more without it. The
+        # state records HEAD and the branch separately, so the retried read still
+        # covers every ref this git can name. Any other failure stays a failure.
+        stderr = error.stderr or b""
+        if b"unknown option" not in stderr or b"include-root-refs" not in stderr:
+            raise
+        return git("for-each-ref", "--sort=refname", "--format=%(refname)%00%(objectname)%00%(symref)%00")
+
 def state():
     root = os.fsdecode(git("rev-parse", "--show-toplevel")).strip()
     if os.path.normpath(root) != os.path.normpath(request["workspace_root"]):
         return None
     branch = os.fsdecode(git("rev-parse", "--abbrev-ref", "HEAD")).strip()
     head = os.fsdecode(git("rev-parse", "HEAD")).strip()
-    refs = git("for-each-ref", "--include-root-refs", "--sort=refname", "--format=%(refname)%00%(objectname)%00%(symref)%00")
+    refs = git_refs()
     tagged = os.fsdecode(git("ls-files", "-v", "-z"))
     if any(re.match(r"^[a-zS] ", entry) for entry in tagged.split("\0")):
         return None

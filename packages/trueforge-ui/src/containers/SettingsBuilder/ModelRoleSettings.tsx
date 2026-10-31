@@ -5,6 +5,7 @@ import { DraftModelSelector } from '@/atoms/draft/DraftModelSelector.js';
 import { useOptionalPersonas } from '@/components/PersonaContext.js';
 import { getErrorMessage } from '@/utils/getErrorMessage.js';
 import { useTrueFoundryAgentSpec } from '@truefoundry/assistant-ui-runtime';
+import { useAssistantDisplayName } from '../../components/PersonalizationContext.js';
 import PersonaSettings from './PersonaSettings.js';
 
 /**
@@ -17,6 +18,7 @@ import PersonaSettings from './PersonaSettings.js';
  * them can be given a setting that changes anything.
  */
 const ModelRoleSettings = () => {
+  const assistant = useAssistantDisplayName();
   const personas = useOptionalPersonas();
   const { specError } = useTrueFoundryAgentSpec();
 
@@ -54,8 +56,8 @@ const ModelRoleSettings = () => {
               <div className="min-w-0 flex-1">
                 <h5 className="text-sm font-medium text-text-primary">Coding / subagent model</h5>
                 <p className="mt-0.5 text-sm text-text-secondary">
-                  Runs sub-agent threads, the delegated work Aman hands off. A sub-agent that asks for a specific model
-                  still gets it.
+                  Runs sub-agent threads, the delegated work {assistant} hands off. A sub-agent that asks for a specific
+                  model still gets it.
                 </p>
               </div>
               <div className="w-full shrink-0 sm:w-80">
@@ -89,10 +91,6 @@ const ModelRoleSettings = () => {
               </div>
             </article>
           </div>
-          <p className="mt-2 text-sm text-text-secondary">
-            When the main chat model comes from Token Factory, memory summaries, profile learning and library checks use
-            the small Nemotron model unless you pick another one here. Other providers keep using the main chat model.
-          </p>
           <p className="mt-2 text-sm text-text-secondary">
             Short background checks, like understanding a request to change personas, reuse the main chat model. They do
             not need their own role.

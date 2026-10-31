@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
 import { render, screen } from '@testing-library/react';
+import { holdSay, searchHoldCardText } from '@truefoundry/trueforge-core/core/permissions/searchHoldText';
 import { describe, expect, it, vi } from 'vitest';
 
-import { offersChangeIt } from '@/sentinel/approvalChoices.js';
+import { APPROVAL_CHOICES, EMAIL_CHOICES, offersChangeIt } from '@/sentinel/approvalChoices.js';
 import { HeldActionCard } from '@/sentinel/HeldActionCard.js';
 import { PermissionApprovalCard } from '@/sentinel/PermissionApprovalCard.js';
 import { SentinelApiProvider } from '@/sentinel/SentinelApiContext.js';
@@ -30,7 +31,7 @@ const card: SentinelApprovalCard = {
 const buttonNames = () => screen.getAllByRole('button').map(button => button.textContent);
 
 describe('approval choices', () => {
-  it('shows the safe verb, the quiet no, and Approve for this chat in plain view, and never Always deny', () => {
+  it('shows the safe verb, the quiet no, and Always allow this here in plain view, and never Always deny', () => {
     render(
       <PermissionApprovalCard
         approvalId="approval-1"
@@ -41,13 +42,13 @@ describe('approval choices', () => {
         onDeny={vi.fn()}
       />,
     );
-    expect(buttonNames()).toEqual(['Allow it', 'Not now', 'Approve for this chat']);
+    expect(buttonNames()).toEqual(['Allow', 'Not now', 'Always allow this here']);
     // A choice the server offers is never folded into the closed Details block.
-    expect(screen.getByRole('button', { name: 'Approve for this chat' }).closest('details')).toBeNull();
-    expect(screen.getByRole('button', { name: 'Allow it' })).toHaveAttribute('title', 'Allow this one call only.');
-    expect(screen.getByRole('button', { name: 'Approve for this chat' })).toHaveAttribute(
+    expect(screen.getByRole('button', { name: 'Always allow this here' }).closest('details')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Allow' })).toHaveAttribute('title', 'Allow this one call only.');
+    expect(screen.getByRole('button', { name: 'Always allow this here' })).toHaveAttribute(
       'title',
-      'Allow this kind of call for the rest of this chat.',
+      "Don't ask again for this kind of action in this chat.",
     );
     expect(screen.queryByText(/Always deny/i)).not.toBeInTheDocument();
   });
@@ -95,8 +96,36 @@ describe('approval choices', () => {
       </SentinelApiProvider>,
     );
     const terms = (await screen.findAllByRole('term')).map(term => term.textContent);
-    expect(terms).toEqual(['Approve', 'Approve for this chat', 'Always allow', 'Deny']);
+    expect(terms).toEqual(['Approve', 'Always allow this here', 'Always allow', 'Deny']);
     expect(screen.queryByText(/Always deny/i)).not.toBeInTheDocument();
+  });
+});
+
+describe('grant hint wording', () => {
+  it('never calls the chat persona an agent in a Change it or Edit hint, and says persona', () => {
+    expect(APPROVAL_CHOICES.changeIt.hint).toBe('Ask the persona to change this first. Nothing runs now.');
+    expect(EMAIL_CHOICES.edit.hint).toBe('Ask the persona to change this first. Nothing is sent now.');
+    for (const hint of [APPROVAL_CHOICES.changeIt.hint, EMAIL_CHOICES.edit.hint]) {
+      expect(hint).not.toMatch(/\bagent\b/i);
+    }
+  });
+
+  it('shows the persona hint as the Change it title on a held card', () => {
+    render(
+      <HeldActionCard
+        card={card}
+        status={{ kind: 'waiting' }}
+        alwaysAllowOffered={false}
+        onApprove={vi.fn()}
+        onAlwaysAllow={vi.fn()}
+        onDeny={vi.fn()}
+        onChangeRequest={vi.fn()}
+      />,
+    );
+    expect(screen.getByRole('button', { name: 'Change it' })).toHaveAttribute(
+      'title',
+      'Ask the persona to change this first. Nothing runs now.',
+    );
   });
 });
 
@@ -142,7 +171,17 @@ describe('offersChangeIt', () => {
     expect(offersChangeIt({ ...card, schedule })).toBe(true);
   });
 
-  it('offers Change it for a new specialist', () => {
+  it('offers Change it for a held web search or page read, so its words can be edited before it is sent', () => {
+    const say = holdSay('Aman').search_setting;
+    expect(
+      offersChangeIt({ ...card, plain_what: searchHoldCardText({ summary: 'clinic hours', say, page: false }) }),
+    ).toBe(true);
+    expect(
+      offersChangeIt({ ...card, plain_what: searchHoldCardText({ summary: 'https://example.org', say, page: true }) }),
+    ).toBe(true);
+  });
+
+  it('offers Change it for a new persona', () => {
     expect(
       offersChangeIt({
         ...card,
@@ -154,5 +193,11 @@ describe('offersChangeIt', () => {
   it('offers no Change it for a delete or for an action with nothing to edit', () => {
     expect(offersChangeIt({ ...card, schedule: { ...schedule, action: 'delete' } })).toBe(false);
     expect(offersChangeIt({ ...card, parsed_command: 'rm -rf /tmp/work' })).toBe(false);
+  });
+
+  it('offers Change it for a mail send or draft to a new recipient, and not for a card with none', () => {
+    expect(offersChangeIt({ ...card, mail_new_recipients: ['a@x.com'] })).toBe(true);
+    expect(offersChangeIt({ ...card, mail_new_recipients: ['a@x.com'], mail_draft: true })).toBe(true);
+    expect(offersChangeIt({ ...card, mail_new_recipients: null })).toBe(false);
   });
 });

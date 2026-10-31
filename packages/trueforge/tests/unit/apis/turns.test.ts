@@ -38,7 +38,6 @@ import { ActiveTurnRegistry } from '../../../src/runtime/activeTurns';
 import { EventSubscriptionRegistry } from '../../../src/runtime/event-subscription/index.js';
 import { TurnDrainRegistry } from '../../../src/runtime/turnDrains';
 import { GetTurnResponseSchema } from '../../../src/schemas/turn';
-import { InMemorySentinelSettingsStore } from '../../fixtures/InMemorySentinelSettingsStore';
 import { uncappedTokenFactoryBudget } from '../../fixtures/uncappedTokenFactoryBudget';
 
 /** Standalone caller identity, spelled out as a plain string where a store expects one. */
@@ -183,7 +182,6 @@ describe('turns', () => {
       app.route(
         '/',
         createTurnsRouter({
-          sentinelSettingsStore: new InMemorySentinelSettingsStore(),
           mcpCatalog: McpCatalog.loadShipped(),
           globalSettingsStore: new SqliteGlobalSettingsStore(db),
           tokenFactoryBudget: uncappedTokenFactoryBudget,
@@ -272,7 +270,6 @@ describe('turns', () => {
       app.route(
         '/',
         createTurnsRouter({
-          sentinelSettingsStore: new InMemorySentinelSettingsStore(),
           mcpCatalog: McpCatalog.loadShipped(),
           globalSettingsStore: new SqliteGlobalSettingsStore(db),
           tokenFactoryBudget: uncappedTokenFactoryBudget,
@@ -370,6 +367,17 @@ describe('turns', () => {
 
     it('ignores non-user-message input items entirely', () => {
       expect(extractUserMessageText([toolResponseItem])).toBe('');
+    });
+
+    it("drops text the host wrote into the message, keeping only the person's words", () => {
+      const input = [
+        userMessage([
+          { type: 'text', text: '<tfy-internal>Personalization: likes tea.</tfy-internal>' },
+          { type: 'text', text: 'I moved to Porto.' },
+          { type: 'text', text: '<untrusted-document>extracted file text</untrusted-document>' },
+        ]),
+      ];
+      expect(extractUserMessageText(input)).toBe('I moved to Porto.');
     });
 
     it('excludes a name carried in a tool result, feeding the profile learner only the user turn', () => {
@@ -494,7 +502,6 @@ describe('turns', () => {
       app.route(
         '/',
         createTurnsRouter({
-          sentinelSettingsStore: new InMemorySentinelSettingsStore(),
           mcpCatalog: McpCatalog.loadShipped(),
           globalSettingsStore: new SqliteGlobalSettingsStore(db),
           tokenFactoryBudget: uncappedTokenFactoryBudget,
@@ -634,7 +641,6 @@ describe('turns', () => {
       app.route(
         '/',
         createTurnsRouter({
-          sentinelSettingsStore: new InMemorySentinelSettingsStore(),
           mcpCatalog: McpCatalog.loadShipped(),
           globalSettingsStore: new SqliteGlobalSettingsStore(db),
           tokenFactoryBudget: uncappedTokenFactoryBudget,
@@ -672,6 +678,124 @@ describe('turns', () => {
       expect(body.data.id).toBe('turn-learning-degraded');
 
       releaseRest?.();
+    });
+  });
+
+  describe("create turn waits for the previous turn's files", () => {
+    it('does not start the next turn until the previous turn of the chat has saved its files', async () => {
+      const db = createSqliteDb(':memory:');
+      await migrateSqliteToLatest(db);
+      const sessionStore = new SqliteSessionStore(db);
+      const modelProviderStore = new SqliteModelProviderStore(db);
+      await modelProviderStore.upsertProvider({
+        tenant_id: 'default',
+        name: 'test-provider',
+        manifest: {
+          type: 'custom',
+          name: 'test-provider',
+          base_url: 'https://llm.test.example.com/v1',
+          auth: { api_key: 'sk-test' },
+          models: [
+            {
+              model_id: 'test-model',
+              name: 'test-model',
+              properties: { context_length: 128000, max_output_tokens: 4096 },
+            },
+          ],
+        },
+      });
+      await sessionStore.createSession({
+        tenant_id: TENANT_ID,
+        session_id: 's1',
+        created_by_subject: TEST_CREATED_BY_SUBJECT,
+        agent: { type: 'inline', spec: AgentSpecSchema.parse({ model: { name: 'test-provider/test-model' } }) },
+        custom: null,
+        metadata: {},
+        external_id: null,
+        source: null,
+      });
+
+      // Turn 1 of this chat is still saving its sandbox files.
+      const turnDrains = new TurnDrainRegistry();
+      const firstTurnCapture = Promise.withResolvers<void>();
+      turnDrains.trackArtifactCapture({ sessionId: 's1', turnId: 'turn-1', capture: firstTurnCapture.promise });
+
+      let secondTurnStarted = false;
+      const restParked = Promise.withResolvers<void>();
+      const sessions = await scriptedSessions({
+        sessionStore,
+        sessionId: 's1',
+        turnId: 'turn-2',
+        stream: async function* stream() {
+          // Stands in for turn 2's first model call or tool run in the shared sandbox.
+          secondTurnStarted = true;
+          yield {
+            type: 'turn.created',
+            id: 'evt_created',
+            turn_id: 'turn-2',
+            previous_turn_id: null,
+            state: { status: 'running' },
+            created_at: '2026-01-01T00:00:00.000Z',
+            thread_id: null,
+          };
+          await restParked.promise;
+        },
+      });
+
+      const tokenStore = new SqliteOAuthTokenStore(db);
+      const app = new OpenAPIHono();
+      app.route(
+        '/',
+        createTurnsRouter({
+          mcpCatalog: McpCatalog.loadShipped(),
+          globalSettingsStore: new SqliteGlobalSettingsStore(db),
+          tokenFactoryBudget: uncappedTokenFactoryBudget,
+          sessions,
+          sessionStore,
+          activeTurns: new ActiveTurnRegistry(),
+          turnDrains,
+          tokenStore,
+          resolveModelProviderStore: () => modelProviderStore,
+          resolveMcpServerStore: () => mcpServerStoreWithAuth(db, tokenStore),
+          resolveAgentStore: () => new SqliteAgentStore(db),
+          resolveSkillStore: () => new SqliteSkillStore(db),
+          personalizationStore: new SqlitePersonalizationStore(db),
+          personaStore: new SqlitePersonaStore(db),
+          spaceStore: new SqliteSpaceStore(db),
+          repositoryStore: new SqliteRepositoryStore(db),
+          turnArtifactStore: new SqliteTurnArtifactStore(db),
+          eventSubscriptions: new EventSubscriptionRegistry<TurnStreamingEvent>(undefined),
+          resolveSandboxProviderStore: () => new SqliteSandboxProviderStore(db),
+          logger: createLogger({ silent: true }),
+          resolveRequestContext: () => STANDALONE_REQUEST_CONTEXT,
+          authorizer: new TrueForgeAuthorizer(),
+        }),
+      );
+
+      let responded = false;
+      const response = Promise.resolve(
+        app.request('/s1/turns', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            stream: false,
+            input: [{ type: EventType.USER_MESSAGE, content: 'Make it bigger.' }],
+          }),
+        }),
+      ).finally(() => {
+        responded = true;
+      });
+
+      await new Promise(resolve => setTimeout(resolve, 200));
+      expect(secondTurnStarted).toBe(false);
+      expect(responded).toBe(false);
+
+      firstTurnCapture.resolve();
+      const settled = await response;
+      expect(settled.status).toBe(200);
+      expect(secondTurnStarted).toBe(true);
+
+      restParked.resolve();
     });
   });
 
@@ -750,7 +874,6 @@ describe('turns', () => {
       app.route(
         '/',
         createTurnsRouter({
-          sentinelSettingsStore: new InMemorySentinelSettingsStore(),
           mcpCatalog: McpCatalog.loadShipped(),
           globalSettingsStore: new SqliteGlobalSettingsStore(db),
           tokenFactoryBudget: uncappedTokenFactoryBudget,
@@ -844,7 +967,6 @@ describe('turns', () => {
       app.route(
         '/',
         createTurnsRouter({
-          sentinelSettingsStore: new InMemorySentinelSettingsStore(),
           mcpCatalog: McpCatalog.loadShipped(),
           globalSettingsStore: new SqliteGlobalSettingsStore(db),
           tokenFactoryBudget: uncappedTokenFactoryBudget,

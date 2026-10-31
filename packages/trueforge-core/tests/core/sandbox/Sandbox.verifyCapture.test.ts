@@ -13,6 +13,9 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
+import { Writable } from 'node:stream';
+import type { Logger } from 'winston';
+import winston from 'winston';
 import { isCallToolResponseResult } from '../../../src/core/mcp/IMCPServer';
 import { createSentinelHostContext, defaultSentinelServices } from '../../../src/core/permissions/context';
 import {
@@ -78,7 +81,7 @@ const TRUSTED_PATH_PREFIX = withTrustedPath('');
 function realProvider(
   fixture: Fixture,
   seen: SandboxExecParams[],
-  paths: { shellPath?: string; trustedPath?: string } = {},
+  paths: { shellPath?: string; trustedPath?: string; stripRefsFlag?: boolean } = {},
 ): SandboxProvider {
   const { shellPath, trustedPath } = paths;
   const exec = (params: SandboxExecParams): Promise<ExecResult> => {
@@ -89,8 +92,10 @@ function realProvider(
         ? params.command
         : params.command.replace(TRUSTED_PATH_PREFIX, `PATH='${trustedPath}'; export PATH; `);
     try {
-      // Older git binaries (before 2.48) lack --include-root-refs; the ref list is not under test here.
-      const out = execFileSync('sh', ['-c', command.replace(' --include-root-refs', '')], {
+      // Older git binaries (before 2.48) lack --include-root-refs; unless a test asks for
+      // the real binary's answer, the flag is stripped: the ref list is not under test here.
+      const runnable = paths.stripRefsFlag === false ? command : command.replace(' --include-root-refs', '');
+      const out = execFileSync('sh', ['-c', runnable], {
         cwd: params.cwd ?? fixture.repo,
         env: { ...process.env, ...(shellPath === undefined ? {} : { PATH: shellPath }), ...params.env },
         encoding: 'utf8',
@@ -127,7 +132,7 @@ function realProvider(
   };
 }
 
-function boundSandbox(fixture: Fixture, provider: SandboxProvider): Sandbox {
+function boundSandbox(fixture: Fixture, provider: SandboxProvider, logger?: Logger | undefined): Sandbox {
   const bound: BoundRepository = { repository_id: 'repo-1', revision: 1, workspace_cwd: fixture.repo, commands: [] };
   return new Sandbox({
     provider,
@@ -138,7 +143,7 @@ function boundSandbox(fixture: Fixture, provider: SandboxProvider): Sandbox {
     blockDestructiveToolsInCodeMode: true,
     mcpRequestTimeoutMs: 60_000,
     mcpConnectTimeoutMs: 5_000,
-    logger: makeSilentLogger(),
+    logger: logger ?? makeSilentLogger(),
     tracing: NOOP_AGENT_TRACING,
     sentinel: createSentinelHostContext({
       tenant_id: 't1',
@@ -464,6 +469,240 @@ describe('verification state capture in a bound repository', () => {
       });
       expect(existsSync(fixture.marker)).toBe(false);
       expect(result.isError).toBe(false);
+    } finally {
+      fixture.cleanup();
+    }
+  });
+});
+
+interface CapturedLogLine {
+  level: unknown;
+  message: unknown;
+  repositoryId: unknown;
+  workspaceRoot: unknown;
+  read: unknown;
+  cwd: unknown;
+  exitCode: unknown;
+  error: unknown;
+}
+
+function captureLine(line: string): CapturedLogLine {
+  const parsed: unknown = JSON.parse(line);
+  if (typeof parsed !== 'object' || parsed === null) {
+    throw new Error('A captured log line was not a JSON object');
+  }
+  return {
+    level: Reflect.get(parsed, 'level'),
+    message: Reflect.get(parsed, 'message'),
+    repositoryId: Reflect.get(parsed, 'repositoryId'),
+    workspaceRoot: Reflect.get(parsed, 'workspaceRoot'),
+    read: Reflect.get(parsed, 'read'),
+    cwd: Reflect.get(parsed, 'cwd'),
+    exitCode: Reflect.get(parsed, 'exitCode'),
+    error: Reflect.get(parsed, 'error'),
+  };
+}
+
+/** A real winston logger writing JSON lines a test can read back. */
+function makeCapturingLogger(): { logger: Logger; lines: () => CapturedLogLine[] } {
+  const chunks: string[] = [];
+  const stream = new Writable({
+    write(chunk, _encoding, callback) {
+      chunks.push(String(chunk));
+      callback();
+    },
+  });
+  const logger = winston.createLogger({
+    level: 'warn',
+    format: winston.format.json(),
+    transports: [new winston.transports.Stream({ stream })],
+  });
+  logger.child = () => logger;
+  return {
+    logger,
+    lines: () =>
+      chunks
+        .join('')
+        .split('\n')
+        .filter(line => line.trim().length > 0)
+        .map(captureLine),
+  };
+}
+
+/**
+ * A provider whose first capture read (the repository root lookup) fails the way git
+ * does. Only the capture's own read is failed: it is the one carrying the hardened git
+ * environment; the lease's earlier root lookup runs without it and still succeeds.
+ */
+function failingToplevelProvider(fixture: Fixture, seen: SandboxExecParams[], errorOutput: string): SandboxProvider {
+  const base = realProvider(fixture, seen);
+  return {
+    ...base,
+    exec: (params: SandboxExecParams): Promise<ExecResult> => {
+      if (params.command === `${TRUSTED_PATH_PREFIX}git rev-parse --show-toplevel` && params.env !== undefined) {
+        seen.push(params);
+        return Promise.resolve({ success: true, response: { exitCode: 128, result: errorOutput } });
+      }
+      return base.exec(params);
+    },
+  };
+}
+
+/** A provider whose refs read always fails with the given output; every other call runs for real. */
+function failingRefsProvider(fixture: Fixture, seen: SandboxExecParams[], errorOutput: string): SandboxProvider {
+  const base = realProvider(fixture, seen);
+  return {
+    ...base,
+    exec: (params: SandboxExecParams): Promise<ExecResult> => {
+      if (params.command.includes('for-each-ref')) {
+        seen.push(params);
+        return Promise.resolve({ success: true, response: { exitCode: 129, result: errorOutput } });
+      }
+      return base.exec(params);
+    },
+  };
+}
+
+function refsCommands(seen: SandboxExecParams[]): string[] {
+  return seen.map(params => params.command).filter(command => command.includes('for-each-ref'));
+}
+
+/** Whether the git on this machine knows --include-root-refs (it arrived in git 2.48). */
+function localGitAcceptsRootRefsFlag(cwd: string): boolean {
+  try {
+    execFileSync('git', ['for-each-ref', '--include-root-refs'], {
+      cwd,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+describe('a failed Git state capture read logs why', () => {
+  test('names the repository, the working directory, the read, and what git said, and the command still does not run', async () => {
+    const fixture = repoFixture();
+    try {
+      const { logger, lines } = makeCapturingLogger();
+      const seen: SandboxExecParams[] = [];
+      const sandbox = boundSandbox(
+        fixture,
+        failingToplevelProvider(fixture, seen, `fatal: detected dubious ownership in repository at '${fixture.repo}'`),
+        logger,
+      );
+      const result = await run({ sandbox, fixture, command: 'test -f f.txt', purpose: 'verify', approved: true });
+      expect(result.isError).toBe(true);
+      expect(result.text).toContain(
+        'Could not capture the Git repository state before verification. The command was not run.',
+      );
+      const failures = lines().filter(line => line.message === 'Git repository state capture failed');
+      expect(failures).toHaveLength(1);
+      const [failure] = failures;
+      if (failure === undefined) {
+        throw new Error('expected one capture failure log line');
+      }
+      expect(failure.level).toBe('warn');
+      expect(failure.repositoryId).toBe('repo-1');
+      expect(failure.workspaceRoot).toBe(fixture.repo);
+      expect(failure.read).toBe('git rev-parse --show-toplevel');
+      expect(failure.cwd).toBe(fixture.repo);
+      expect(failure.exitCode).toBe(128);
+      expect(failure.error).toBe(`fatal: detected dubious ownership in repository at '${fixture.repo}'`);
+      expect(seen.some(params => params.command.includes('test -f f.txt'))).toBe(false);
+    } finally {
+      fixture.cleanup();
+    }
+  });
+
+  test('keeps only the bounded start of a long error output', async () => {
+    const fixture = repoFixture();
+    try {
+      const { logger, lines } = makeCapturingLogger();
+      const sandbox = boundSandbox(fixture, failingToplevelProvider(fixture, [], `fatal: ${'x'.repeat(2000)}`), logger);
+      const result = await run({ sandbox, fixture, command: 'test -f f.txt', purpose: 'verify', approved: true });
+      expect(result.isError).toBe(true);
+      const failures = lines().filter(line => line.message === 'Git repository state capture failed');
+      expect(failures).toHaveLength(1);
+      const [failure] = failures;
+      if (failure === undefined) {
+        throw new Error('expected one capture failure log line');
+      }
+      expect(typeof failure.error).toBe('string');
+      if (typeof failure.error === 'string') {
+        expect(failure.error.length).toBe(500);
+        expect(failure.error.startsWith('fatal: ')).toBe(true);
+      }
+    } finally {
+      fixture.cleanup();
+    }
+  });
+});
+
+describe('the refs read on a git without the root refs flag', () => {
+  test('a workspace edit still lands when git rejects the flag, after one retry without it', async () => {
+    const fixture = repoFixture();
+    try {
+      const seen: SandboxExecParams[] = [];
+      // stripRefsFlag off: the real git here answers the capture exactly as it is.
+      const sandbox = boundSandbox(fixture, realProvider(fixture, seen, { stripRefsFlag: false }));
+      const result = await writeNewFile({ sandbox, fixture, path: 'added.txt', content: 'hello\n' });
+      expect(result.isError).toBe(false);
+      expect(existsSync(join(fixture.repo, 'added.txt'))).toBe(true);
+      const commands = refsCommands(seen);
+      expect(commands.length).toBeGreaterThan(0);
+      expect(commands[0]).toContain('--include-root-refs');
+      if (!localGitAcceptsRootRefsFlag(fixture.repo)) {
+        // The first read was refused for the flag alone, so a later read ran without it.
+        expect(commands.some(command => !command.includes('--include-root-refs'))).toBe(true);
+      }
+    } finally {
+      fixture.cleanup();
+    }
+  });
+
+  test('the refs read keeps the flag when git accepts the read', async () => {
+    const fixture = repoFixture();
+    try {
+      const seen: SandboxExecParams[] = [];
+      const sandbox = boundSandbox(fixture, realProvider(fixture, seen));
+      const result = await writeNewFile({ sandbox, fixture, path: 'added.txt', content: 'hello\n' });
+      expect(result.isError).toBe(false);
+      const commands = refsCommands(seen);
+      expect(commands.length).toBeGreaterThan(0);
+      // Every refs read the capture sent carried the flag; none was retried without it.
+      expect(commands.every(command => command.includes('--include-root-refs'))).toBe(true);
+    } finally {
+      fixture.cleanup();
+    }
+  });
+
+  test('a refs read that fails for another reason still blocks the edit, with no retry', async () => {
+    const fixture = repoFixture();
+    try {
+      const seen: SandboxExecParams[] = [];
+      const sandbox = boundSandbox(fixture, failingRefsProvider(fixture, seen, 'fatal: the refs store is damaged'));
+      const result = await writeNewFile({ sandbox, fixture, path: 'added.txt', content: 'hello\n' });
+      expect(result.isError).toBe(true);
+      expect(result.text).toContain('Could not capture Git state');
+      expect(existsSync(join(fixture.repo, 'added.txt'))).toBe(false);
+      const commands = refsCommands(seen);
+      expect(commands).toHaveLength(1);
+      expect(commands[0]).toContain('--include-root-refs');
+    } finally {
+      fixture.cleanup();
+    }
+  });
+
+  test('a rejection naming a different option is not retried either', async () => {
+    const fixture = repoFixture();
+    try {
+      const seen: SandboxExecParams[] = [];
+      const sandbox = boundSandbox(fixture, failingRefsProvider(fixture, seen, "error: unknown option `frobnicate'"));
+      const result = await writeNewFile({ sandbox, fixture, path: 'added.txt', content: 'hello\n' });
+      expect(result.isError).toBe(true);
+      expect(existsSync(join(fixture.repo, 'added.txt'))).toBe(false);
+      expect(refsCommands(seen)).toHaveLength(1);
     } finally {
       fixture.cleanup();
     }

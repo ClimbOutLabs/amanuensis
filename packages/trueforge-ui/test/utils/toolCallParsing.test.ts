@@ -13,6 +13,7 @@ import {
   parseMcpToolArgs,
   parseSandboxArgs,
   parseSandboxResult,
+  parseSpaceWriteTooLongNote,
   parseToolNotDoneReason,
   parseToolRefusalNotice,
   parseToolResultDisposition,
@@ -189,7 +190,7 @@ describe('toolCallParsing', () => {
     const declined = JSON.stringify({
       schema_version: 'tool.response.v2',
       outcome: { disposition: 'denied' },
-      result: { error: 'User denied tool call: not now' },
+      result: { error: 'The person said no to this. Their reason: not now.' },
     });
     expect(parseToolNotDoneReason(declined)).toBe('you said no');
     expect(parseToolResultDisposition(declined)?.label).toBe('Denied');
@@ -268,20 +269,49 @@ describe('toolCallParsing', () => {
     expect(buildOutcomeText(undefined, 'x')).toBeUndefined();
   });
 
+  it('reads the plain note for a space write refused for its size, from its code alone', () => {
+    const refusalText =
+      'Refusing create_space: this write carries 4,642 characters of new content, and one write may carry at most 3,600. ' +
+      'Nothing was persisted. Send a shorter body now (a heading and the first part), then add the rest with edit_space once the space exists.';
+    const envelope = (result: unknown) =>
+      JSON.stringify({ schema_version: 'tool.response.v2', outcome: { disposition: 'executed_nonzero' }, result });
+
+    const refused = envelope({
+      error: [{ type: 'text', text: JSON.stringify({ error: refusalText, error_code: 'space_write_too_long' }) }],
+    });
+    expect(parseSpaceWriteTooLongNote(refused)).toBe('Too long for one write. Splitting it into parts.');
+
+    // The same words without the code are just a failure: the wording never drives the note.
+    const uncoded = envelope({ error: [{ type: 'text', text: JSON.stringify({ error: refusalText }) }] });
+    expect(parseSpaceWriteTooLongNote(uncoded)).toBeUndefined();
+
+    const otherCode = envelope({
+      error: [{ type: 'text', text: JSON.stringify({ error: 'boom', error_code: 'something_else' }) }],
+    });
+    expect(parseSpaceWriteTooLongNote(otherCode)).toBeUndefined();
+    expect(parseSpaceWriteTooLongNote(undefined)).toBeUndefined();
+    expect(parseSpaceWriteTooLongNote('boom')).toBeUndefined();
+  });
+
   it('builds default approval options when none declared', () => {
     expect(buildApprovalOptions(undefined)).toEqual([
-      { id: 'allow-once', label: 'Approve', hint: 'Allow this one call only.', isAllow: true },
-      { id: 'deny', label: 'Deny', hint: 'Do not run this call.', isAllow: false, confirm: {} },
+      { id: 'allow-once', isAllow: true },
+      { id: 'deny', isAllow: false },
     ]);
   });
 
-  it('labels declared options with the approval verbs, whatever label the server sent', () => {
-    const labels = buildApprovalOptions([
-      { id: 'deny', kind: 'reject-once' },
-      { id: 'allow-chat', kind: 'allow-always', label: 'Allow `pnpm test` in this chat' },
-      { id: 'allow-once', kind: 'allow-once' },
-    ]).map(option => option.label);
-    expect(labels).toEqual(['Approve', 'Approve for this chat', 'Deny']);
+  it('puts the single-use allow first, then the chat allow, then deny', () => {
+    expect(
+      buildApprovalOptions([
+        { id: 'deny', kind: 'reject-once' },
+        { id: 'allow-chat', kind: 'allow-always', label: 'Allow `pnpm test` in this chat' },
+        { id: 'allow-once', kind: 'allow-once' },
+      ]),
+    ).toEqual([
+      { id: 'allow-once', isAllow: true },
+      { id: 'allow-chat', isAllow: true },
+      { id: 'deny', isAllow: false },
+    ]);
   });
 });
 

@@ -337,4 +337,17 @@ describe('first-party marker on stored connectors', () => {
       expect(await firstPartyForTurn('memory')).toBe(true);
     });
   });
+
+  describe('the names Email and Calendar', () => {
+    // Connector names must be lowercase, so these two reserved names can only reach the store from the host's own
+    // setup and from an import, which checks them itself. This pins that the settings API stays closed to them.
+    it.each(['POST', 'PUT'] as const)('%s turns the names away before anything is written', async method => {
+      for (const name of ['Email', 'Calendar']) {
+        const response = await save(method, manifestOf(name));
+
+        expect(response.status).toBe(400);
+        expect(await store.getServer({ tenant_id: TENANT_ID, name })).toBeUndefined();
+      }
+    });
+  });
 });

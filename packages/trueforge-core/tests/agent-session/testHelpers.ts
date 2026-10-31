@@ -1,15 +1,11 @@
 import { ulid } from 'ulid';
+import type { Logger } from 'winston';
 import type { ITurnResourceResolver } from '../../src/agent-session/ITurnResourceResolver';
 import { MAIN_THREAD_ID, type TurnRecord } from '../../src/agent-session/models/TurnRecord';
 import { AgentSpecSchema, type AgentSpec } from '../../src/agent-session/schemas/agentSpec';
 import { EventType } from '../../src/agent-session/schemas/events';
 import { CancellationReason, type TerminalTurnState } from '../../src/agent-session/schemas/turn';
-import type {
-  CreateTurnInput,
-  NewThreadInit,
-  SessionTitleSeed,
-  TurnContextAppend,
-} from '../../src/agent-session/store/ISessionStore';
+import type { CreateTurnInput, NewThreadInit, TurnContextAppend } from '../../src/agent-session/store/ISessionStore';
 import { TurnResourceResolver } from '../../src/agent-session/TurnResourceResolver';
 import type { AgentCapability } from '../../src/core/capabilities/AgentCapability';
 import { newEventId } from '../../src/core/events/schema';
@@ -36,7 +32,7 @@ export function mintTestTurnId(): string {
 export function makeAgentSpec(
   overrides: {
     instructions?: string;
-    model?: { name: string };
+    model?: { name: string; params?: Record<string, unknown> };
     auxiliary_models?: {
       compaction?: { name: string; params?: Record<string, unknown> };
       delegation?: { name: string; params?: Record<string, unknown> };
@@ -104,6 +100,8 @@ export function makeTestResolver<TTurnCustom extends object = Record<string, nev
   agent?: ((agentId: string) => Promise<AgentSpec>) | undefined;
   finalizeAssistantOutput?: ITurnResourceResolver<TTurnCustom>['finalizeAssistantOutput'];
   sanitizeAssistantTextForContext?: ITurnResourceResolver<TTurnCustom>['sanitizeAssistantTextForContext'];
+  /** Logger for the turn's resolver; defaults to a silent one. Pass a capturing logger to assert on log lines. */
+  logger?: Logger | undefined;
 }): ITurnResourceResolver<TTurnCustom> {
   const llm =
     options?.modelClient ??
@@ -118,7 +116,7 @@ export function makeTestResolver<TTurnCustom extends object = Record<string, nev
     },
     mcpRequestTimeoutMs: 60_000,
     mcpConnectTimeoutMs: 5_000,
-    logger: makeSilentLogger(),
+    logger: options?.logger ?? makeSilentLogger(),
     ...(options?.agent !== undefined ? { agent: options.agent } : {}),
     ...(options?.sandbox
       ? {
@@ -206,7 +204,7 @@ export interface MakeCreateTurnInputOptions<TTurnCustom extends object = Record<
   task_states?: CreateTurnInput<TTurnCustom>['task_states'];
   approval_grants?: string[];
   require_previous_turn_is_tip?: boolean;
-  update_session_title_if_not_exist?: SessionTitleSeed;
+  update_session_title_if_not_exist?: string;
   sandbox_info?: CreateTurnInput<TTurnCustom>['sandbox_info'];
 }
 

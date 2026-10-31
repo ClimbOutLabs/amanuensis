@@ -51,13 +51,36 @@ async function retain(client: MarkdownMemoryClient, content: string, operationId
   await retainMany(client, [content], operationId);
 }
 
-async function recall(client: MarkdownMemoryClient, query: string, maxTokens = 4000): Promise<string[]> {
+async function retainFromChat(client: MarkdownMemoryClient, content: string, sessionId: string): Promise<void> {
+  operationCounter += 1;
+  const outcome = await client.retain({
+    items: [
+      {
+        content,
+        timestamp: '2026-09-26T10:00:00.000Z',
+        document_id: `doc-${String(operationCounter)}`,
+        metadata: { session_id: sessionId },
+      },
+    ],
+    operationId: `op-${String(operationCounter)}`,
+    timeoutMs: TIMEOUT_MS,
+  });
+  expect(outcome).toEqual({ ok: true });
+}
+
+async function recall(
+  client: MarkdownMemoryClient,
+  query: string,
+  maxTokens = 4000,
+  currentSessionId?: string,
+): Promise<string[]> {
   const outcome = await client.recall({
     query,
     maxTokens,
     queryTimestamp: '2026-09-27T10:00:00.000Z',
     entityTokens: 0,
     timeoutMs: TIMEOUT_MS,
+    currentSessionId,
   });
   if (!outcome.ok) {
     throw new Error(`recall failed: ${outcome.reason}`);
@@ -272,6 +295,24 @@ describe('MarkdownMemoryClient persona vault scope', () => {
     });
   });
 
+  describe('current chat', () => {
+    it('skips the current chat in both the persona vault and the shared vault, and keeps other chats', async () => {
+      const alpha = clientFor(ALPHA);
+      await retainFromChat(alpha, 'Alpha stores quince preserves in chat now', 'chat-now');
+      await retainFromChat(alpha, 'Alpha stores damson preserves in chat old', 'chat-old');
+      await retainFromChat(clientFor(undefined), 'The cellar stores preserves in chat now', 'chat-now');
+      await retainFromChat(clientFor(undefined), 'The cellar stores preserves in chat old', 'chat-old');
+
+      const during = await recall(alpha, 'stores preserves', 4000, 'chat-now');
+
+      expect(during).toHaveLength(2);
+      expect(mentions(during, 'chat now')).toBe(false);
+      expect(mentions(during, 'Alpha stores damson')).toBe(true);
+      expect(mentions(during, 'The cellar stores preserves in chat old')).toBe(true);
+      expect(await recall(alpha, 'stores preserves', 4000, 'chat-elsewhere')).toHaveLength(4);
+    });
+  });
+
   describe('recall composition', () => {
     it('gives the shared vault a place in a tight budget instead of filling it from the persona vault', async () => {
       const alpha = clientFor(ALPHA);
@@ -281,7 +322,7 @@ describe('MarkdownMemoryClient persona vault scope', () => {
       await retain(clientFor(undefined), 'The cellar stores preserves for winter too');
 
       // Room for two entries: one from each vault, not two from the persona vault.
-      const recalled = await recall(clientFor(ALPHA), 'preserves winter', 40);
+      const recalled = await recall(clientFor(ALPHA), 'preserves winter', 25);
 
       expect(recalled).toHaveLength(2);
       expect(mentions(recalled, 'cellar')).toBe(true);
@@ -519,19 +560,21 @@ describe('MarkdownMemoryClient persona vault scope with embeddings', () => {
     const alpha = clientWith(ALPHA);
     await retainMany(alpha, ['Alpha lodging is a hotel in Lisbon', 'Alpha owns a bicycle']);
     await waitForIndexed(subsystemOf(subsystems, 'tenant-1__persona_Alpha'), 2);
-    const [entryId] = await listedIds(alpha, 'persona:Alpha');
-    if (entryId === undefined) {
+    const listed = await alpha.listEntries({ namespace: 'persona:Alpha', timeoutMs: TIMEOUT_MS });
+    const entry = listed.ok ? listed.entries[0] : undefined;
+    if (entry === undefined) {
       throw new Error('expected a persona vault entry');
     }
     requested.clear();
 
     const edited = 'Alpha owns a tent near Sintra';
-    await alpha.updateEntry({ entryId, text: edited, timeoutMs: TIMEOUT_MS });
+    await alpha.updateEntry({ entryId: entry.id, text: edited, timeoutMs: TIMEOUT_MS });
 
     expect([...requested]).toEqual(['tenant-1__persona_Alpha']);
+    // The index keeps the entry's time heading with the fact, as it does for a newly retained entry.
     await waitFor(async () => {
       const store = await EmbeddingStore.load({ namespaceDir: path.join(baseDir, 'tenant-1__persona_Alpha') });
-      return store.get(entryId)?.hash === hashEntryText(edited);
+      return store.get(entry.id)?.hash === hashEntryText(`## ${entry.timestamp}\n\n${edited}`);
     }, 'the edited fact to be re-indexed');
     expect(await storedIds(TENANT)).toEqual([]);
   });

@@ -6,7 +6,14 @@ import {
   type TurnModelRole,
   type TurnStreamingEvent,
 } from '@truefoundry/trueforge-core/agent-session';
-import { EventType, type ILLM, type ModelMessageEvent } from '@truefoundry/trueforge-core/core';
+import {
+  contextCompaction,
+  EventType,
+  type AgentThreadExecutionContext,
+  type ILLM,
+  type ModelMessageEvent,
+  type ModelParams,
+} from '@truefoundry/trueforge-core/core';
 import type { Server } from 'node:http';
 import { createLogger } from 'winston';
 
@@ -14,6 +21,7 @@ import { TENANT_ID } from '../../../src/apis/sessions';
 import { beginTurnExecution, drainTurnEvents } from '../../../src/apis/turns';
 import { STANDALONE_REQUEST_CONTEXT } from '../../../src/auth/identity';
 import { McpCatalog } from '../../../src/catalog/McpCatalog';
+import { ModelCatalog } from '../../../src/catalog/ModelCatalog';
 import configuration from '../../../src/config';
 import { McpServerWithAuthStore } from '../../../src/db/McpServerWithAuthStore';
 import { migrateSqliteToLatest } from '../../../src/db/migrateSqlite';
@@ -37,7 +45,6 @@ import { ensureEnvManagedTokenFactoryProvider } from '../../../src/runtime/token
 import { TurnDrainRegistry } from '../../../src/runtime/turnDrains';
 import type { ModelUsagePersistedEvent } from '../../../src/schemas/modelUsageEvents';
 import { FakeTurnArtifactStore } from '../../fixtures/fakeTurnArtifactStore';
-import { InMemorySentinelSettingsStore } from '../../fixtures/InMemorySentinelSettingsStore';
 import { startModelEndpointStub } from '../../fixtures/modelEndpointStub';
 
 /** Constructor args of the replaced resolver: the first one carries the `llm` factory the cap guards. */
@@ -70,16 +77,55 @@ function modelMessageWithUsage(usage: { input_tokens: number; output_tokens: num
   };
 }
 
-function isLlmFactory(
-  value: unknown,
-): value is (name: string, role: TurnModelRole) => Promise<{ modelId: string; modelClient: ILLM }> {
+interface ResolvedTurnModel {
+  modelId: string;
+  modelClient: ILLM;
+  defaultModelParams: ModelParams;
+  modelProperties?: { contextLength?: number };
+}
+
+function isLlmFactory(value: unknown): value is (name: string, role: TurnModelRole) => Promise<ResolvedTurnModel> {
   return typeof value === 'function';
+}
+
+/** Whether compaction would call the summarizer on a chat of this many tokens for the resolved model. */
+async function compactsAt({ tokens, resolved }: { tokens: number; resolved: ResolvedTurnModel }): Promise<boolean> {
+  const createNonStream = jest.fn(() => Promise.reject(new Error('summarizer called')));
+  const processor = contextCompaction({
+    logger: undefined,
+    definition: {
+      modelClient: { create: jest.fn(), createNonStream },
+      modelId: undefined,
+      configuredModels: undefined,
+      modelParams: resolved.defaultModelParams,
+      modelProperties: { contextLength: resolved.modelProperties?.contextLength },
+    },
+  }).preLLMProcessors?.[0];
+  if (processor === undefined) {
+    throw new Error('expected a compaction processor');
+  }
+  const execution: AgentThreadExecutionContext = {
+    threadId: 'main',
+    signal: undefined,
+    currentContextUsage: { prompt_tokens: tokens, completion_tokens: 0 },
+    context: [{ role: 'user', content: 'Plan the week.' }],
+  };
+  for await (const _event of processor.processPreLLM(execution)) {
+    // Only whether the summarizer was asked matters here.
+  }
+  return createNonStream.mock.calls.length > 0;
 }
 
 const DEAD_URL = 'http://127.0.0.1:1/v1';
 const ask = { messages: [{ role: 'user' as const, content: 'hi' }] };
 
-async function startTurn(options: { cap: number | undefined; tokenFactoryUrl?: string; localUrl?: string }) {
+async function startTurn(options: {
+  cap: number | undefined;
+  tokenFactoryUrl?: string;
+  localUrl?: string;
+  tokenFactoryModel?: string;
+  withCatalogModels?: boolean;
+}) {
   const logger = createLogger({ silent: true });
   const db = createSqliteDb(':memory:');
   await migrateSqliteToLatest(db);
@@ -91,9 +137,14 @@ async function startTurn(options: { cap: number | undefined; tokenFactoryUrl?: s
     settings: {
       apiKey: 'sk-nebius',
       baseUrl: options.tokenFactoryUrl ?? 'https://api.tokenfactory.nebius.com/v1',
-      model: 'nvidia/nemotron-3-super-120b-a12b',
-      cheaperModel: undefined,
+      model: options.tokenFactoryModel ?? 'nvidia/nemotron-3-super-120b-a12b',
     },
+    catalogModels:
+      options.withCatalogModels === true
+        ? (ModelCatalog.load()
+            .list()
+            .find(entry => entry.type === 'tokenfactory')?.models ?? [])
+        : [],
     logger,
   });
   await modelProviderStore.upsertProvider({
@@ -156,7 +207,6 @@ async function startTurn(options: { cap: number | undefined; tokenFactoryUrl?: s
     previous_turn_id: undefined,
     userRef: STANDALONE_REQUEST_CONTEXT.subject.id,
     deps: {
-      sentinelSettingsStore: new InMemorySentinelSettingsStore(),
       mcpCatalog: McpCatalog.loadShipped(),
       globalSettingsStore: new SqliteGlobalSettingsStore(db),
       tokenFactoryBudget: createTokenFactoryBudget({ store: usageStore, cap: options.cap, now: () => NOW }),
@@ -258,6 +308,58 @@ describe('Token Factory daily cap in the turn path', () => {
 
     await expect(modelClient.createNonStream(ask)).rejects.toBeInstanceOf(TokenFactoryDailyCapError);
     expect(await usedToday(usageStore)).toBe(1100);
+  });
+
+  it('lets a chat pick Super when Ultra is configured, and holds Super to the same cap', async () => {
+    const tokenFactoryUrl = await modelServer({ prompt_tokens: 300, completion_tokens: 50 });
+    const { llm, usageStore } = await startTurn({
+      cap: CAP,
+      tokenFactoryUrl,
+      tokenFactoryModel: 'nvidia/Nemotron-3-Ultra-550b-a55b',
+      withCatalogModels: true,
+    });
+
+    const { modelClient, modelId } = await llm('tokenfactory/nemotron-3-super-120b-a12b', 'chat');
+    expect(modelId).toBe('nvidia/nemotron-3-super-120b-a12b');
+    await modelClient.createNonStream(ask);
+    expect(await usedToday(usageStore)).toBe(350);
+
+    await useUpToday(usageStore, CAP);
+    await expect(llm('tokenfactory/nemotron-3-super-120b-a12b', 'chat')).rejects.toBeInstanceOf(
+      TokenFactoryDailyCapError,
+    );
+  });
+
+  it('sizes a turn on the configured Ultra model by its catalog output cap and context length', async () => {
+    const { llm } = await startTurn({
+      cap: undefined,
+      tokenFactoryModel: 'nvidia/Nemotron-3-Ultra-550b-a55b',
+      withCatalogModels: true,
+    });
+
+    const resolved = await llm('tokenfactory/nemotron-3-ultra-550b-a55b', 'chat');
+
+    expect(resolved.defaultModelParams).toEqual({ max_tokens: 32768 });
+    expect(resolved.modelProperties?.contextLength).toBe(262144);
+    // Without the catalog limits compaction would start at the 50,000-token fallback.
+    expect(await compactsAt({ tokens: 60_000, resolved })).toBe(false);
+    expect(await compactsAt({ tokens: 60_000, resolved: { ...resolved, modelProperties: {} } })).toBe(true);
+    // 80% of 262,144, which leaves room for the 32,768-token reply.
+    expect(await compactsAt({ tokens: 209_000, resolved })).toBe(false);
+    expect(await compactsAt({ tokens: 210_000, resolved })).toBe(true);
+  });
+
+  it('keeps a configured model the catalog does not list on its unknown limits', async () => {
+    const { llm } = await startTurn({
+      cap: undefined,
+      tokenFactoryModel: 'openai/gpt-oss-120b',
+      withCatalogModels: true,
+    });
+
+    const resolved = await llm('tokenfactory/gpt-oss-120b', 'chat');
+
+    expect(resolved.defaultModelParams).toEqual({});
+    expect(resolved.modelProperties?.contextLength).toBeUndefined();
   });
 
   it('never refuses and never counts a turn on another provider', async () => {

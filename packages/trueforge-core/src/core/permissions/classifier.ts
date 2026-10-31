@@ -14,6 +14,7 @@
 import { existsSync, readFileSync, realpathSync } from 'fs';
 import os from 'os';
 import path from 'path';
+import { DOCUMENTS_SERVER_ID, EXTRACT_DOCUMENT_TEXT_TOOL_NAME } from '../../documents/toolContract';
 import type { CalendarWriteReview } from '../calendar/eventWrite';
 import { CALENDAR_SERVER_ID, isCalendarReadToolName, isCalendarWriteToolName } from '../calendar/toolContract';
 import type { ReviewableDraft } from '../email/gmail/draftReview';
@@ -26,9 +27,15 @@ import {
   UPDATE_DRAFT_TOOL_NAME,
 } from '../email/gmail/toolContract';
 import { mailRecipientsNotListed } from '../email/mailConnector/recipientList';
-import { isMailSend } from '../email/mailConnector/sendListApproval';
-import { isMailReadToolName, MAIL_CONNECTOR_NAME } from '../email/mailConnector/toolContract';
-import type { MapsHosts } from '../llm/LLMTypes';
+import {
+  isMailDraftToolName,
+  isMailReadToolName,
+  isMailSendToolName,
+  MAIL_CONNECTOR_NAME,
+  MAIL_CONTENT_TOOL_NAME,
+} from '../email/mailConnector/toolContract';
+import { GOOGLE_SETUP_SERVER_ID, GOOGLE_SETUP_STATUS_TOOL_NAME } from '../google/setupToolContract';
+import type { DocumentScope, MapsHosts } from '../llm/LLMTypes';
 import {
   isPersonaWriteToolName,
   LIST_PERSONAS_TOOL_NAME,
@@ -36,23 +43,17 @@ import {
   USE_PERSONA_TOOL_NAME,
 } from '../personas/toolContract';
 import {
+  CANCEL_REMINDER_TOOL_NAME,
+  isReminderToolName,
   isScheduleStatusToolName,
   isScheduleWriteToolName,
+  LIST_REMINDERS_TOOL_NAME,
   LIST_SCHEDULES_TOOL_NAME,
   SCHEDULE_SERVER_ID,
+  SET_REMINDER_TOOL_NAME,
 } from '../schedules/toolContract';
 import { tavilyApprovalWhat } from '../search/tavilyCardText';
-import {
-  CREATE_SPACE_TOOL_NAME,
-  GET_SPACE_TOOL_NAME,
-  isSpaceReadToolName,
-  isSpaceWriteToolName,
-  LIST_BLOCKS_TOOL_NAME,
-  LIST_SPACES_TOOL_NAME,
-  REVERT_SPACE_TOOL_NAME,
-  SPACE_SERVER_ID,
-  UPDATE_SPACE_TOOL_NAME,
-} from '../spaces/toolContract';
+import { isSpaceReadToolName, isSpaceWriteToolName, SPACE_SERVER_ID, spaceActivityLine } from '../spaces/toolContract';
 import { absolutePatchTarget, applyPatchTargets } from './applyPatchTargets';
 import {
   actionIdFor,
@@ -64,7 +65,13 @@ import {
   type ShellApprovalBinding,
 } from './approvalTokens';
 import { recordClassificationAudit } from './audit';
-import { FIRST_PARTY_TOOL_REASON } from './connectorTrust';
+import {
+  FIRST_PARTY_TOOL_REASON,
+  MAIL_MARK_AS_READ_REASON,
+  MAIL_NEW_RECIPIENT_REASON,
+  MAIL_READ_REASON,
+  MAIL_SEND_REASON,
+} from './connectorTrust';
 import {
   classifyContextFor,
   type SentinelCallIdentity,
@@ -81,7 +88,7 @@ import {
 import { DEFAULT_MAPS_TRAVEL_MODE, MapsTravelModeSchema } from './mapsRouteSchemas';
 import {
   isMapsToolName,
-  MAPS_AFTER_READ_SILENT_REASON,
+  MAPS_ASK_REASON,
   MAPS_SILENT_REASON,
   RENDER_PLACES_TOOL_NAME,
   RENDER_ROUTE_TOOL_NAME,
@@ -96,16 +103,18 @@ import {
   type OutboundGuardVerdict,
   type OutboundStrings,
 } from './outboundGuard';
-import { fingerprintLeak, privateTextLeak, type PrivateTextLeak } from './privateTextCheck';
+import { carriedPrivateDetails, hasReadContent, namesUrl, steeredDestinations, steeredLinks } from './provenance';
 import { isRunnerWorkflow } from './runner';
-import { scriptFileLoadsOnlyStandardCode, scriptLoadsOnlyStandardCode } from './scriptImports';
+import { scriptFileLoadsOnlyStandardCode, scriptFileText, scriptLoadsOnlyStandardCode } from './scriptImports';
 import {
-  GUARD_RULE_SAY,
-  HOLD_SAY,
+  guardRuleSay,
+  holdSay,
   SEARCH_SERVER_FALLBACK,
   searchHoldAuditText,
   searchHoldCardText,
   searchProviderLabel,
+  SECRET_SAY,
+  steeredDestinationSay,
   withHoldSay,
 } from './searchHoldText';
 import { containsPathLikeValue, containsSecretPath, namesSecretPath } from './secretPaths';
@@ -114,12 +123,15 @@ import {
   hashArgv,
   matchAllowlist,
   OFFLINE_SHELL_COMMANDS,
+  parseReadOnlyList,
   parseSimpleCommand,
   type ParsedSimpleCommand,
+  type ReadOnlyList,
   type ShellAllowlistConfig,
 } from './shellAllowlist';
 import {
   autoDenyDecision,
+  CONTENT_STEERED_REASON,
   failClosedDecision,
   SANDBOX_COMMAND_REASON,
   SANDBOX_FILE_WRITE_REASON,
@@ -145,6 +157,7 @@ import {
   extractExecutedFileOperand,
   isInsideWorkspace,
   isNewWriteTarget,
+  isPathUnderDir,
   isUnderRoot,
   lexicalPath,
   sha256FileContent,
@@ -157,23 +170,16 @@ import {
   type TrackedExecutableScope,
 } from './trackedExecutables';
 import {
-  chatPrivateReadHeld,
-  hasReadPrivateData,
-  markPrivateDataRead,
-  namesHostAtFetchLimit,
-  privateFingerprintsUsable,
-  privateTextForChecks,
-  SEARCH_AFTER_PRIVATE_READ_REASON,
-  SEARCH_AFTER_READ_SILENT_REASON,
-  SEARCH_CHAT_GRANTED_SILENT_REASON,
+  SEARCH_PRIVATE_DETAIL_REASON,
   SEARCH_SILENT_REASON,
+  SEARCH_STEERED_REASON,
   SILENT_SEARCH_LIMIT,
-  unreturnedUrls,
   type SearchAskReason,
   type WebSearchTurnState,
 } from './webSearch';
 
 import type { CaldavEventReview } from '../calendar/caldav/eventReview';
+import { CALDAV_SERVER_NAME, isCaldavReadToolName } from '../calendar/caldav/toolContract';
 import { classifyCaldavTool } from './caldavTier';
 
 export interface SentinelAction {
@@ -212,6 +218,12 @@ export interface SentinelAction {
    */
   maps_hosts?: MapsHosts | undefined;
   /**
+   * Host-derived folders the document reader may read without asking: the staged uploads
+   * directory and the bound project folder. Set by the documents tool set from the sandbox
+   * and the session binding, never from model params.
+   */
+  document_scope?: DocumentScope | undefined;
+  /**
    * The message a Gmail write would send or save, as the host holds it. Set by the Gmail tool set from a live
    * read and the validated call, so the card shows what would really go out.
    */
@@ -227,8 +239,16 @@ export interface SentinelAction {
   calendar_write?: CalendarWriteReview | undefined;
   /** The schedule a create or delete would save or remove, settled by the schedule tool set from the store. */
   schedule_write?: Tier3Schedule | undefined;
-  /** The specialist a create would add, settled by the persona tool set from the request and the owner's personas. */
+  /** The persona a create would add, settled by the persona tool set from the request and the owner's personas. */
   persona_write?: Tier3Persona | undefined;
+  /** The reminder a set or cancel call touches, settled by the schedule tool set so the activity line reads it plainly. */
+  reminder?: ReminderLine | undefined;
+}
+
+/** What the activity line says about one reminder: when it is due in plain words (set only), and what it says. */
+export interface ReminderLine {
+  when: string | null;
+  what: string | null;
 }
 
 export interface ClassifyContext extends SentinelCallIdentity {
@@ -347,13 +367,13 @@ function mapsPlainWhat(action: SentinelAction): string {
   if (action.tool_name === RENDER_ROUTE_TOOL_NAME) {
     return (
       `Send ${mapsCardLabel(params['from_place'])} and ${mapsCardLabel(params['to_place'])} to ${geocoder}, ` +
-      `${mapsRouteService({ mode: params['mode'], hosts })}, then load map tiles for that area from ${tile}.`
+      `${mapsRouteService({ mode: params['mode'], hosts })}, then load map tiles for that area from ${tile}?`
     );
   }
   if (action.tool_name === RENDER_PLACES_TOOL_NAME) {
     return (
       `Send the addresses ${joinedLabels(placeAddresses(params))} to ${geocoder} to find where they are, ` +
-      `then load map tiles for that area from ${tile}. The details on each pin come from pages Aman already read.`
+      `then load map tiles for that area from ${tile}? The details on each pin come from pages already read.`
     );
   }
   const placeName = mapsCardLabel(params['place_name']);
@@ -361,10 +381,10 @@ function mapsPlainWhat(action: SentinelAction): string {
     const poi = mapsCardLabel(params['poi']);
     return (
       `Send ${placeName} and ${poi} to ${geocoder} to find ${poi} near it, ` +
-      `then load map tiles for that area from ${tile}.`
+      `then load map tiles for that area from ${tile}?`
     );
   }
-  return `Send ${placeName} to ${geocoder} to find it, then load map tiles for that area from ${tile}.`;
+  return `Send ${placeName} to ${geocoder} to find it, then load map tiles for that area from ${tile}?`;
 }
 
 function stringParam(params: Record<string, unknown>, key: string): string | null {
@@ -384,11 +404,6 @@ function plainWhy(agentIntent: string | null): string | null {
     return null;
   }
   return firstSentence(agentIntent);
-}
-
-function basenameOf(p: string): string {
-  const base = p.split('/').pop() ?? p;
-  return base === '' ? p : base;
 }
 
 function workspaceScope(ctx: ClassifyContext): TrackedExecutableScope {
@@ -468,6 +483,34 @@ function shellOperandsInsideWorkspace(input: {
     if (!isUnderRoot({ identity, root, separator })) {
       return false;
     }
+  }
+  return true;
+}
+
+/**
+ * Whether every step of a read-only list stays inside the workspace: each `cd` lands inside it, and each command's
+ * operands resolve inside it from the directory that step runs in.
+ */
+function readOnlyListInsideWorkspace(input: {
+  list: ReadOnlyList;
+  cwd: string;
+  workspace_root: string;
+  resolution: PathResolution | undefined;
+}): boolean {
+  const { resolution, workspace_root } = input;
+  let cwd = input.cwd;
+  for (const step of input.list.steps) {
+    if (step.kind === 'run') {
+      if (!shellOperandsInsideWorkspace({ parsed: step.parsed, cwd, workspace_root, resolution })) {
+        return false;
+      }
+      continue;
+    }
+    const target = canonicalFileIdentity({ p: step.dir, cwd, resolution });
+    if (target === null || !isInsideWorkspace({ p: target, cwd: '/', workspace_root, resolution })) {
+      return false;
+    }
+    cwd = target;
   }
   return true;
 }
@@ -707,13 +750,20 @@ export async function canonicalShellFormFor(
   return canonicalShellForm({ ...input, file_digests: digests });
 }
 
-export function shellBindingFromForm(form: CanonicalShellForm): ShellApprovalBinding {
+export function shellBindingFromForm(input: {
+  form: CanonicalShellForm;
+  workspace_cwd: string | null;
+  path_resolution: PathResolution | undefined;
+}): ShellApprovalBinding {
+  const { form } = input;
   return {
     commands: [{ argv: [...form.argv], argv0_resolved: form.argv0_resolved }],
     redirections: [],
     cwd_resolved: form.cwd_resolved,
     env_overrides: form.env_overrides,
     file_hashes: form.file_hashes,
+    workspace_cwd: input.workspace_cwd,
+    path_resolution: input.path_resolution ?? null,
   };
 }
 
@@ -721,7 +771,11 @@ async function mintShellToken(input: { ctx: ClassifyContext; tool_name: string; 
   token_id: string;
   binding: ShellApprovalBinding;
 }> {
-  const binding = shellBindingFromForm(input.form);
+  const binding = shellBindingFromForm({
+    form: input.form,
+    workspace_cwd: input.ctx.workspace_cwd,
+    path_resolution: input.ctx.path_resolution,
+  });
   const token = await input.ctx.services.token_store.mint({
     ...approvalTokenOwner(input.ctx),
     action_id: actionIdFor({ tool_name: input.tool_name, canonical_params: input.form }),
@@ -1090,6 +1144,32 @@ async function runCodePlacement({
   return scriptFileLoadsOnlyStandardCode({ runtime, file: identity, resolution: ctx.path_resolution }) ? detail : null;
 }
 
+/**
+ * What the run_code approval card shows as the code it would run: the call's own `code`, or the
+ * text of the script file the call names. Null when neither is available (the call names no
+ * source, or the script file cannot be read or is over the checked-script bound); the card still
+ * asks, it just shows no code.
+ */
+function runCodeCardText(params: Record<string, unknown>, ctx: ClassifyContext): string | null {
+  const code = stringParam(params, 'code');
+  if (code !== null) {
+    return code;
+  }
+  const scriptPath = stringParam(params, 'script_path');
+  if (scriptPath === null) {
+    return null;
+  }
+  const identity = canonicalFileIdentity({
+    p: scriptPath,
+    cwd: resolveIdentityCwd(ctx, null),
+    resolution: ctx.path_resolution,
+  });
+  if (identity === null) {
+    return null;
+  }
+  return scriptFileText({ file: identity, resolution: ctx.path_resolution });
+}
+
 async function classifyExecShell(action: SentinelAction, ctx: ClassifyContext): Promise<TierDecision> {
   const { services } = ctx;
   const command = stringParam(action.canonical_params, 'command') ?? '';
@@ -1103,7 +1183,7 @@ async function classifyExecShell(action: SentinelAction, ctx: ClassifyContext): 
   if (env !== null && Object.keys(env).length > 0) {
     return tier3Decision({
       card: {
-        plain_what: `Run \`${escapeDisplayText(command)}\` with custom environment variables.`,
+        plain_what: 'Run this command with custom environment variables?',
         plain_why: plainWhy(ctx.agent_intent),
         cannot_be_undone: 'This changes how programs start, which can make them run other code.',
         why_asked_again: null,
@@ -1167,7 +1247,7 @@ async function classifyExecShell(action: SentinelAction, ctx: ClassifyContext): 
     if (identity === null) {
       return tier3Decision({
         card: {
-          plain_what: `Execute \`${escapeDisplayText(basenameOf(executedOperand))}\`, which the server cannot resolve to a workspace file.`,
+          plain_what: 'Run this program, even though it cannot be matched to a file in your workspace?',
           plain_why: plainWhy(ctx.agent_intent),
           cannot_be_undone: 'This runs a file, and it can do anything once started.',
           why_asked_again: null,
@@ -1216,7 +1296,7 @@ async function classifyExecShell(action: SentinelAction, ctx: ClassifyContext): 
             : await mintPlainToken({ ctx, tool_name: action.tool_name, params: grantParams });
         return tier3Decision({
           card: {
-            plain_what: `Execute \`${escapeDisplayText(basenameOf(identity))}\`, a script the agent wrote earlier.`,
+            plain_what: 'Run a script the assistant wrote earlier?',
             plain_why: plainWhy(ctx.agent_intent),
             cannot_be_undone: 'This script gets full access to your shell.',
             why_asked_again: null,
@@ -1255,7 +1335,7 @@ async function classifyExecShell(action: SentinelAction, ctx: ClassifyContext): 
         // Without a workspace there is nothing to contain the command in, so it must ask.
         return tier3Decision({
           card: {
-            plain_what: `Run \`${escapeDisplayText(command)}\` where no workspace is set.`,
+            plain_what: 'Run this command, even though no workspace is set?',
             plain_why: plainWhy(ctx.agent_intent),
             cannot_be_undone: 'No workspace is set, so this command can read any of your files.',
             why_asked_again: null,
@@ -1282,7 +1362,7 @@ async function classifyExecShell(action: SentinelAction, ctx: ClassifyContext): 
       if (!cwdInside) {
         return tier3Decision({
           card: {
-            plain_what: `Run \`${escapeDisplayText(command)}\` from outside the workspace.`,
+            plain_what: 'Run this command from outside your workspace?',
             plain_why: plainWhy(ctx.agent_intent),
             cannot_be_undone: 'This runs outside your workspace and can reach system files.',
             why_asked_again: null,
@@ -1310,7 +1390,7 @@ async function classifyExecShell(action: SentinelAction, ctx: ClassifyContext): 
       ) {
         return tier3Decision({
           card: {
-            plain_what: `Access a file outside the workspace with \`${escapeDisplayText(command)}\`.`,
+            plain_what: 'Run a command that reaches a file outside your workspace?',
             plain_why: plainWhy(ctx.agent_intent),
             cannot_be_undone: 'This file is outside your workspace.',
             why_asked_again: null,
@@ -1338,6 +1418,31 @@ async function classifyExecShell(action: SentinelAction, ctx: ClassifyContext): 
     }
   }
 
+  // Reads joined into one list, such as `cd repo && sed -n '5,9p' README.md`, run like each read would on its own.
+  const list = parsed === undefined ? parseReadOnlyList({ command, config: services.shell_allowlist }) : undefined;
+  if (
+    list !== undefined &&
+    ctx.workspace_cwd !== null &&
+    isInsideWorkspace({
+      p: resolveIdentityCwd(ctx, cwd),
+      cwd: '/',
+      workspace_root: ctx.workspace_cwd,
+      resolution: ctx.path_resolution,
+    }) &&
+    readOnlyListInsideWorkspace({
+      list,
+      cwd: resolveIdentityCwd(ctx, cwd),
+      workspace_root: ctx.workspace_cwd,
+      resolution: ctx.path_resolution,
+    })
+  ) {
+    return tier1Decision({
+      reason: 'shell_read_only_list',
+      reason_detail: 'Ran a list of read-only commands inside the workspace.',
+      sensitive_read: containsSecretPath(action.canonical_params),
+    });
+  }
+
   // Not allowlisted: Tier 3 with the full parsed binding.
   const form = await canonicalShellFormFor({
     command,
@@ -1352,9 +1457,7 @@ async function classifyExecShell(action: SentinelAction, ctx: ClassifyContext): 
   return tier3Decision({
     card: {
       plain_what:
-        form.kind === 'compound'
-          ? 'Run a compound shell command (pipes, chaining, or redirects).'
-          : `Run \`${escapeDisplayText(form.argv[0] ?? command)}\` with arguments the safe list does not allow.`,
+        form.kind === 'compound' ? 'Run this command with pipes, chaining, or redirects?' : 'Run this command?',
       plain_why: plainWhy(ctx.agent_intent),
       cannot_be_undone: 'Commands can change or delete files.',
       why_asked_again: null,
@@ -1482,7 +1585,7 @@ async function classifySandboxWrite(action: SentinelAction, ctx: ClassifyContext
   // Fail closed on undeterminable targets or a missing workspace: treat as outside workspace.
   if (targets === null || ctx.workspace_cwd === null) {
     return outsideWorkspace({
-      plain_what: 'Write a file outside the workspace.',
+      plain_what: 'Write a file outside your workspace?',
       reason_detail: 'Write target is null or workspace is unknown.',
     });
   }
@@ -1513,7 +1616,7 @@ async function classifySandboxWrite(action: SentinelAction, ctx: ClassifyContext
   const outside = targets.paths.filter((_, index) => !insideWorkspace(absolute[index] ?? ''));
   if (outside.length > 0) {
     return outsideWorkspace({
-      plain_what: `Write a file outside the workspace at ${namedWriteTargets(outside)}.`,
+      plain_what: `Write a file outside your workspace at ${namedWriteTargets(outside)}?`,
       reason_detail: 'Write targets outside the workspace are never Tier 2.',
     });
   }
@@ -1525,7 +1628,7 @@ async function classifySandboxWrite(action: SentinelAction, ctx: ClassifyContext
     return tier3Decision({
       card: writeCard({
         ctx,
-        plain_what: `Write Git control file ${namedWriteTargets(controlTargets)}.`,
+        plain_what: `Write Git control file ${namedWriteTargets(controlTargets)}?`,
         cannot_be_undone: 'Git settings can make Git run other programs.',
       }),
       reason: 'git_control_write',
@@ -1551,7 +1654,7 @@ async function classifySandboxWrite(action: SentinelAction, ctx: ClassifyContext
     return tier3Decision({
       card: writeCard({
         ctx,
-        plain_what: `Save ${namedWriteTargets(toolTargets)} in a folder where this workspace keeps programs it can run.`,
+        plain_what: `Save ${namedWriteTargets(toolTargets)} in a folder where this workspace keeps programs it can run?`,
         cannot_be_undone:
           'A program saved here could run instead of a trusted one. Approve only if you asked for this file.',
       }),
@@ -1584,7 +1687,7 @@ async function classifySandboxWrite(action: SentinelAction, ctx: ClassifyContext
     ctx,
     action,
     kind: 'file_write',
-    plain_what: `Change ${namedWriteTargets(targets.paths)} in your workspace.`,
+    plain_what: `Change ${namedWriteTargets(targets.paths)} in your workspace?`,
     parsed_command: null,
     reason: 'sandbox_write',
     reason_detail: `Sandbox file write to ${namedWriteTargets(targets.paths)}.`,
@@ -1599,9 +1702,9 @@ function classifyRunnerTool(action: SentinelAction, ctx: ClassifyContext): TierD
   // which a Tier 2 relaxation must not be able to auto-run: always Tier 3.
   return tier3Decision({
     card: {
-      plain_what: `Run the \`${workflowName}\` workflow (executes package.json scripts).`,
+      plain_what: `Run the ${workflowName} workflow?`,
       plain_why: plainWhy(ctx.agent_intent),
-      cannot_be_undone: 'This workflow runs scripts Aman can edit.',
+      cannot_be_undone: `This workflow runs scripts ${ctx.web_search.assistantName} can edit.`,
       why_asked_again: null,
       destination: null,
       recipient: null,
@@ -1677,24 +1780,24 @@ function externalServiceWhat(input: {
   const where = input.recipient ?? input.destination ?? 'an external destination';
   if (name.includes('email') || name.includes('mail')) {
     if (name.includes('draft')) {
-      return `Save an email draft for ${where}.`;
+      return `Save an email draft for ${where}?`;
     }
     if (name.includes('forward')) {
-      return `Forward an email to ${where}.`;
+      return `Forward an email to ${where}?`;
     }
     if (name.includes('reply')) {
-      return `Reply to an email, sending it to ${where}.`;
+      return `Reply to an email, sending it to ${where}?`;
     }
-    return `Send an email to ${where}.`;
+    return `Send an email to ${where}?`;
   }
   if (name.includes('sms') || name.includes('message') || name.includes('notify')) {
-    return `Send a message to ${where}.`;
+    return `Send a message to ${where}?`;
   }
   if (name.includes('post') || name.includes('publish') || name.includes('tweet')) {
-    return `Publish a post${input.destination === null ? '' : ` to ${input.destination}`}.`;
+    return `Publish a post${input.destination === null ? '' : ` to ${input.destination}`}?`;
   }
   if (name.includes('share') || name.includes('webhook')) {
-    return `Share data with ${where}.`;
+    return `Share data with ${where}?`;
   }
   if (
     name.includes('pay') ||
@@ -1703,9 +1806,9 @@ function externalServiceWhat(input: {
     name.includes('transfer') ||
     name.includes('invoice')
   ) {
-    return `Spend ${input.amount ?? 'money'}${input.destination === null ? '' : ` via ${input.destination}`}.`;
+    return `Spend ${input.amount ?? 'money'}${input.destination === null ? '' : ` via ${input.destination}`}?`;
   }
-  return `Perform an external action (${escapeDisplayText(input.tool_name)}) affecting ${where}.`;
+  return `Perform an external action affecting ${where}?`;
 }
 
 const DESTRUCTIVE_FRAGMENTS = ['delete', 'remove', 'uninstall', 'drop', 'destroy', 'erase'];
@@ -1779,15 +1882,15 @@ async function holdSearchCall(input: {
   action: SentinelAction;
   ctx: ClassifyContext;
   reason: SearchAskReason;
-  /** The one sentence that says why Aman is asking. */
+  /** The one sentence that says why the assistant is asking. */
   say: string;
   /** The card's one line, with any held key masked. */
   summary: string;
+  /** True when the call opens a page rather than searches, so the card says so. */
+  page: boolean;
   /** Arguments the card may quote, with any held key masked; undefined when they cannot be shown. */
   params: Record<string, unknown> | undefined;
   fields: ExtractionResult['fields'];
-  /** True when the chat read a secret or key file, so no chat-wide allow is offered on this card. */
-  secret_path_read: boolean;
 }): Promise<TierDecision> {
   const { action, ctx, fields } = input;
   const shown =
@@ -1807,7 +1910,7 @@ async function holdSearchCall(input: {
     card: {
       plain_what:
         tavily === null
-          ? searchHoldCardText({ summary: escapeDisplayText(shown), say: input.say })
+          ? searchHoldCardText({ summary: escapeDisplayText(shown), say: input.say, page: input.page })
           : withHoldSay(tavily, input.say),
       plain_why: plainWhy(ctx.agent_intent),
       cannot_be_undone: null,
@@ -1829,7 +1932,6 @@ async function holdSearchCall(input: {
     reason: input.reason,
     reason_detail: input.say,
     sensitive_read: false,
-    secret_path_read: input.secret_path_read,
     approval_token_id: await mintPlainToken({
       ctx,
       tool_name: action.tool_name,
@@ -1839,18 +1941,19 @@ async function holdSearchCall(input: {
   });
   return {
     ...decision,
-    audit_description: searchHoldAuditText({ server: SEARCH_SERVER_FALLBACK, say: input.say }),
+    audit_description: searchHoldAuditText({ server: SEARCH_SERVER_FALLBACK, say: input.say, page: input.page }),
   };
 }
 
 /**
- * The designated search provider's call. Runs without asking unless the user switched searches to
- * ask, the outbound secret guard trips, the turn already ran its allowance of silent searches, or
- * the call names a URL no search result of this turn returned. Returns undefined, leaving the call
- * to the ordinary rules, for a tool that the server did not declare read-only and the host's list
- * does not name as a search tool, that declares itself destructive or not read-only, falls in a
- * name-based escalation class, or touches a sensitive path: the role never lowers those, so
- * designating a connector that can write does not make its unannotated tools silent.
+ * The designated search provider's call: a search or a page read. Runs without asking unless the person switched
+ * searches to ask, the outbound secret guard trips, the turn already ran its allowance of silent lookups, content
+ * the assistant read chose the link and the call adds to it, or the chat has read other people's content and the
+ * call carries one of the person's own private details. Returns undefined, leaving the call to the ordinary
+ * rules, for a tool that the server did not declare read-only and the host's list does not name as a search tool,
+ * that declares itself destructive or not read-only, falls in a name-based escalation class, or touches a sensitive
+ * path: the role never lowers those, so designating a connector that can write does not make its unannotated tools
+ * silent.
  */
 async function classifySearchProviderTool(input: {
   action: SentinelAction;
@@ -1871,19 +1974,22 @@ async function classifySearchProviderTool(input: {
     return undefined;
   }
   const owner = { tenant_id: ctx.tenant_id, created_by: ctx.created_by };
+  const say = holdSay(ctx.web_search.assistantName);
   const strings = collectOutboundStrings(action.canonical_params, action.mcp_search_plumbing_fields);
   const queryText = strings === undefined ? '' : searchQueryText(strings.values);
   const summary = strings === undefined ? '' : searchSummaryText(strings);
-  const held = (reason: SearchAskReason, say: string): Promise<TierDecision> =>
+  const sentValues = strings === undefined ? [] : [...strings.values, ...strings.plumbing];
+  const page = namesUrl(sentValues);
+  const held = (reason: SearchAskReason, reasonSay: string): Promise<TierDecision> =>
     holdSearchCall({
       action,
       ctx,
       reason,
-      say,
+      say: reasonSay,
       summary,
+      page,
       params: action.canonical_params,
       fields: extraction.fields,
-      secret_path_read: false,
     });
   // The card, the stored turn and the audit row never carry a key this computer holds.
   const heldWithoutKey = async (secrets: readonly string[]): Promise<TierDecision> => {
@@ -1900,15 +2006,15 @@ async function classifySearchProviderTool(input: {
       action,
       ctx,
       reason: 'mcp_search_guard',
-      say: HOLD_SAY.secret,
+      say: SECRET_SAY,
       summary: maskedStrings === undefined ? HIDDEN_QUERY : searchSummaryText(maskedStrings),
+      page,
       params: masked,
       fields: {
         ...extraction.fields,
         outbound_text: outbound === undefined ? `query: ${HIDDEN_QUERY}` : outbound.text,
         outbound_truncated: outbound?.truncated ?? false,
       },
-      secret_path_read: false,
     });
   };
 
@@ -1918,186 +2024,145 @@ async function classifySearchProviderTool(input: {
     return heldWithoutKey(secrets);
   }
   if (!(await ctx.services.searchWithoutAsking(owner))) {
-    return held('mcp_search_setting_ask', HOLD_SAY.search_setting);
+    return held('mcp_search_setting_ask', say.search_setting);
   }
   if (!verdict.ok) {
-    return held('mcp_search_guard', GUARD_RULE_SAY[verdict.rule]);
+    return held('mcp_search_guard', guardRuleSay({ rule: verdict.rule, assistant: ctx.web_search.assistantName }));
   }
-  // A chat's private read is held here, or checked against its text. The chat's own state is what the check reads.
-  const readMode = hasReadPrivateData(ctx.web_search);
-  const privateReadHeld = chatPrivateReadHeld({
-    state: ctx.web_search,
-    markedInProcess: ctx.services.private_reads.hasPrivateDataRead(ctx),
-  });
-  // A grant lifts only the private-read hold, and only where every private read left a fingerprint to check against.
-  const chatGranted =
-    (readMode || privateReadHeld) && ctx.web_search.searchChatGranted() && privateFingerprintsUsable(ctx.web_search);
-  // A chat that read a secret or key file asks before every search, whatever the grant says.
-  const heldPrivate = (): Promise<TierDecision> =>
-    ctx.web_search.chatFingerprints.secret
-      ? holdSearchCall({
-          action,
-          ctx,
-          reason: SEARCH_AFTER_PRIVATE_READ_REASON,
-          say: HOLD_SAY.private_secret,
-          summary,
-          params: action.canonical_params,
-          fields: extraction.fields,
-          secret_path_read: true,
-        })
-      : held(SEARCH_AFTER_PRIVATE_READ_REASON, HOLD_SAY.private_read);
-  if (chatGranted) {
-    if (strings === undefined) {
-      return heldPrivate();
-    }
-    const leak = fingerprintLeak({
-      mode: 'search',
-      strings,
-      earlier: ctx.web_search.sentText,
-      entries: ctx.web_search.chatFingerprints.entries,
-      has_text: ctx.web_search.chatFingerprints.has_text,
-    });
-    if (leak !== null) {
-      return ctx.services.unattended ? privateTextSkipped(leak) : heldPrivate();
-    }
-  } else {
-    if (readMode) {
-      const texts = privateTextForChecks(ctx.web_search);
-      if (texts === undefined || strings === undefined) {
-        return heldPrivate();
-      }
-      const leak = privateTextLeak({
-        mode: 'search',
-        strings,
-        earlier: ctx.web_search.sentText,
-        privateTexts: texts,
-      });
-      if (leak !== null) {
-        return ctx.services.unattended ? privateTextSkipped(leak) : heldPrivate();
-      }
-    }
-    if (privateReadHeld) {
-      return heldPrivate();
-    }
-  }
+  // A loop breaker, not a question: the reply stops looking things up and the person is told in one line.
   if (ctx.web_search.silentSearches >= SILENT_SEARCH_LIMIT) {
-    return held('mcp_search_limit', HOLD_SAY.search_limit);
+    return autoDenyDecision({
+      reason: 'lookup_limit',
+      reason_detail: say.search_limit,
+      owner_message: say.search_limit,
+      sensitive_read: false,
+    });
   }
+  if (steeredLinks({ provenance: ctx.web_search.provenance, values: sentValues }).length > 0) {
+    return ctx.services.unattended ? steeredSkipped(ctx) : held(SEARCH_STEERED_REASON, say.steered);
+  }
+  // The detail is the person's own, but a chat that has read other people's content asks before sending one:
+  // what prompted putting it in a lookup may not have been the person.
   if (
-    strings !== undefined &&
-    unreturnedUrls({ values: [...strings.values, ...strings.plumbing], state: ctx.web_search }).length > 0
+    hasReadContent(ctx.web_search.provenance) &&
+    carriedPrivateDetails({ provenance: ctx.web_search.provenance, values: sentValues }).length > 0
   ) {
-    return held('mcp_search_unreturned_url', HOLD_SAY.unseen_link);
-  }
-  if (strings !== undefined && namesHostAtFetchLimit({ values: strings.values, state: ctx.web_search })) {
-    return held('mcp_search_host_limit', HOLD_SAY.site_limit);
+    return ctx.services.unattended ? privateDetailSkipped(ctx) : held(SEARCH_PRIVATE_DETAIL_REASON, say.private_detail);
   }
   return tier1Decision({
-    reason: chatGranted
-      ? SEARCH_CHAT_GRANTED_SILENT_REASON
-      : readMode
-        ? SEARCH_AFTER_READ_SILENT_REASON
-        : SEARCH_SILENT_REASON,
-    reason_detail: `Searched: ${queryText}`,
+    reason: SEARCH_SILENT_REASON,
+    reason_detail: `${page ? 'Opened' : 'Searched'}: ${queryText}`,
     sensitive_read: false,
     silent_search_query: queryText,
   });
 }
 
-/** Said to the owner when a scheduled run's search or map is skipped because its text was copied from mail or calendar. */
-const PRIVATE_TEXT_SKIPPED_OWNER_MESSAGE =
-  'One lookup was skipped, because it would have shared something from your mail or calendar.';
-
-/** What a skipped call's text would have carried, in plain words. */
-function leakWords(leak: PrivateTextLeak): string {
-  switch (leak) {
-    case 'contact':
-      return 'an email address or phone number';
-    case 'number':
-      return 'a long number';
-    case 'name':
-      return "a person's name";
-    case 'phrase':
-      return 'a phrase copied word for word';
-    case 'token':
-      return 'a long code';
-  }
+/** A held call that is skipped rather than asked, for a scheduled run with nobody to answer. */
+function steeredSkipped(ctx: ClassifyContext): TierDecision {
+  const assistant = ctx.web_search.assistantName;
+  return autoDenyDecision({
+    reason: 'steered_by_content',
+    reason_detail: `A link or address in something ${assistant} read chose this, not you.`,
+    owner_message: `One step was skipped, because something ${assistant} read asked for it, not you.`,
+    sensitive_read: false,
+  });
 }
 
-/** A call that is skipped rather than asked, for a scheduled run with nobody to answer. */
-function privateTextSkipped(leak: PrivateTextLeak): TierDecision {
+/** A lookup carrying a private detail that is skipped rather than asked, for a scheduled run with nobody to answer. */
+function privateDetailSkipped(ctx: ClassifyContext): TierDecision {
+  const assistant = ctx.web_search.assistantName;
   return autoDenyDecision({
-    reason: 'private_text_check',
-    reason_detail: `It would have shared ${leakWords(leak)} from your mail or calendar.`,
-    owner_message: PRIVATE_TEXT_SKIPPED_OWNER_MESSAGE,
+    reason: 'private_detail',
+    reason_detail: `It would have shared a private detail of yours, in a chat where ${assistant} read other people's content.`,
+    owner_message: 'One lookup was skipped, because it would have shared something private about you.',
     sensitive_read: false,
   });
 }
 
 /**
- * A host mail or calendar read. Its result text is kept for the checks on later searches and maps, so the
- * read does not mark the chat as holding a secret.
+ * A consequential action asks with its card as it is. When a recipient or site the card names came only from content
+ * the assistant read, the card says so and no chat grant covers it; a scheduled run skips it. `guests` adds people
+ * the card holds only as text, such as a shared calendar's guests.
  */
-function isCheckedPrivateRead(action: SentinelAction): boolean {
-  return (
-    action.tool_type === 'truefoundry-system' &&
-    (action.mcp_server_name === GMAIL_SERVER_ID || action.mcp_server_name === CALENDAR_SERVER_ID)
+function steeringChecked(input: {
+  decision: TierDecision;
+  ctx: ClassifyContext;
+  guests: readonly string[];
+}): TierDecision {
+  const { decision, ctx } = input;
+  const card = decision.card;
+  if (decision.tier !== 3 || decision.auto_deny !== null || card === null) {
+    return decision;
+  }
+  const mail = card.email ?? null;
+  const steered = steeredDestinations({
+    provenance: ctx.web_search.provenance,
+    addresses: mail === null ? [] : [...mail.to, ...mail.cc, ...mail.bcc].map(mailbox => mailbox.address),
+    // The connector's own configured host is the person's setup, not something read content could choose.
+    values: [
+      ...[card.recipient, card.destination].filter(value => value !== null),
+      ...(card.calendar_event?.attendees ?? []),
+      ...input.guests,
+    ],
+    // Only the host-read sender of the one message this replies to; never the model's or the message's own claim.
+    reply_sender: mail?.reply_in_thread?.from ?? null,
+  });
+  if (steered.length === 0) {
+    return decision;
+  }
+  if (ctx.services.unattended) {
+    return steeredSkipped(ctx);
+  }
+  const cardNames = new Map(
+    (mail === null ? [] : [...mail.to, ...mail.cc, ...mail.bcc]).map(mailbox => [
+      mailbox.address.toLowerCase(),
+      mailbox.name,
+    ]),
   );
+  const say = steeredDestinationSay({
+    assistant: ctx.web_search.assistantName,
+    destinations: steered.map(({ value, kind, origin }) => {
+      // The name the send itself shows wins; an email's sender name fills in when the card has none.
+      const cardName = kind === 'address' ? (cardNames.get(value.toLowerCase()) ?? '') : '';
+      const name = cardName === '' ? (kind === 'address' ? origin.name : null) : cardName;
+      const shown = escapeDisplayText(value);
+      return { kind, source: origin.source, who: name === null ? shown : `${escapeDisplayText(name)} (${shown})` };
+    }),
+  });
+  return {
+    ...decision,
+    reason: CONTENT_STEERED_REASON,
+    reason_detail: say,
+    card: { ...card, plain_what: withHoldSay(card.plain_what, say) },
+  };
 }
 
 /**
- * An embedded maps call that runs without asking, once the user has let maps run without asking. Only when
- * the search provider's silent-run rules hold: the chat has read no private data, and the outbound guard
- * finds nothing sensitive in the call's strings. Returns undefined when the call should show its card.
+ * An embedded maps call that runs without asking, once the person has let maps run without asking. The outbound
+ * secret guard still reads its places. Returns the guard's rule when the call should show its card instead.
  */
 async function classifyMapsSilently(input: {
   action: SentinelAction;
   ctx: ClassifyContext;
-}): Promise<TierDecision | undefined> {
+}): Promise<{ decision: TierDecision } | { held: OutboundGuardVerdict }> {
   const { action, ctx } = input;
   const strings = collectOutboundStrings(action.canonical_params);
   const { verdict } = await outboundGuard({ ctx, strings });
   if (!verdict.ok) {
-    return undefined;
-  }
-  if (
-    chatPrivateReadHeld({ state: ctx.web_search, markedInProcess: ctx.services.private_reads.hasPrivateDataRead(ctx) })
-  ) {
-    return undefined;
-  }
-  const readMode = hasReadPrivateData(ctx.web_search);
-  const texts = readMode ? privateTextForChecks(ctx.web_search) : undefined;
-  if (readMode && texts === undefined) {
-    return undefined;
-  }
-  if (texts !== undefined && strings !== undefined) {
-    // A map may name a street address from the mail, so only the words of a search are checked for copies.
-    const leak = privateTextLeak({
-      mode: 'maps',
-      strings,
-      earlier: ctx.web_search.sentText,
-      privateTexts: texts,
-    });
-    if (leak !== null) {
-      return ctx.services.unattended ? privateTextSkipped(leak) : undefined;
-    }
+    return { held: verdict };
   }
   // The text leaves with this call, so a later silent search or map sees a secret split across the two.
   if (strings !== undefined) {
     ctx.web_search.sentText = appendOutboundTrace({ earlier: ctx.web_search.sentText, strings });
   }
   const values = strings?.values.map(value => value.trim()).filter(value => value !== '') ?? [];
-  return readMode
-    ? tier1Decision({
-        reason: MAPS_AFTER_READ_SILENT_REASON,
-        reason_detail: `Map: ${values.join(', ')}`,
-        sensitive_read: false,
-      })
-    : tier1Decision({
-        reason: MAPS_SILENT_REASON,
-        reason_detail: `Maps ran without asking: ${values.join(', ')}`,
-        sensitive_read: false,
-      });
+  return {
+    decision: tier1Decision({
+      reason: MAPS_SILENT_REASON,
+      reason_detail: `Maps ran without asking: ${values.join(', ')}`,
+      sensitive_read: false,
+    }),
+  };
 }
 
 /** Said on a card when a recipient's name was left off because it looked like an address. */
@@ -2177,10 +2242,10 @@ function gmailWriteCard(input: { action: SentinelAction; agent_intent: string | 
       : ` Reply in the thread: ${cardSubject(answered.subject)}, from ${cardText(answered.from)}.`;
   const plainWhat =
     (kind === 'send'
-      ? `Send ${subject} from your Gmail ${recipientsLine}.`
+      ? `Send ${subject} from your Gmail ${recipientsLine}?`
       : kind === 'change'
-        ? `Change a saved draft in your Gmail. It replaces ${replaces === undefined ? 'the saved draft' : `${cardSubject(replaces.subject)} to ${recipientList(replaces.to) === '' ? 'no one' : recipientList(replaces.to)}`} with ${subject} ${recipientsLine}. It is not sent.`
-        : `Save a draft ${subject} in your Gmail ${recipientsLine}. It is not sent.`) +
+        ? `Change a saved draft in your Gmail? It replaces ${replaces === undefined ? 'the saved draft' : `${cardSubject(replaces.subject)} to ${recipientList(replaces.to) === '' ? 'no one' : recipientList(replaces.to)}`} with ${subject} ${recipientsLine}. It is not sent.`
+        : `Save a draft ${subject} in your Gmail ${recipientsLine}? It is not sent.`) +
     threadLine +
     (content.nameLeftOff || replaces?.nameLeftOff === true ? NAME_LEFT_OFF_LINE : '');
   return {
@@ -2222,16 +2287,10 @@ function demoRefusal(reason_detail: string): TierDecision {
   return autoDenyDecision({ reason: 'outbound_guard', reason_detail, sensitive_read: false });
 }
 
-/** The reason a silent Email read is recorded with. */
-const MAIL_READ_REASON = 'mail_read';
-
-/** The addresses a mail send would reach that are not on the Email list; empty for any other call. */
+/** The addresses a mail send or draft would reach that are not on the Email list; empty for any other call. */
 async function mailNewRecipients(input: { action: SentinelAction; ctx: ClassifyContext }): Promise<string[]> {
   const { action, ctx } = input;
-  if (
-    action.tool_type !== 'mcp' ||
-    !isMailSend({ mcp_server_name: action.mcp_server_name, tool_name: action.tool_name })
-  ) {
+  if (!isHostMailSend(action) && !isHostMailDraft(action)) {
     return [];
   }
   return mailRecipientsNotListed({
@@ -2243,7 +2302,10 @@ async function mailNewRecipients(input: { action: SentinelAction; ctx: ClassifyC
 /**
  * A connector's tool name and arguments do not reliably show whether it sends mail, so a demo instance refuses
  * a connector call that could send. Any other call is refused unless it is declared read-only or is a read by
- * name. Only Aman's own Gmail tools check recipients.
+ * name. Only Aman's own Gmail tools check recipients. The one exception is a draft save on Aman's own Email
+ * sidecar: the host knows that call by its first-party mark and the sidecar's own tool list, where the draft
+ * tool is the one tool that saves a message without sending it, so the demo lets it through to the ordinary
+ * checks, which still read its recipients like a send's.
  */
 function demoRefusesConnector(input: {
   action: SentinelAction;
@@ -2253,6 +2315,7 @@ function demoRefusesConnector(input: {
   return (
     input.ctx.services.demoSendAllowlist !== null &&
     input.action.tool_type === 'mcp' &&
+    !isHostMailDraft(input.action) &&
     (input.extraction.sends || (input.action.mcp_hints.read_only_hint !== true && !input.extraction.connector_read))
   );
 }
@@ -2260,7 +2323,10 @@ function demoRefusesConnector(input: {
 /**
  * A read of the operator's own Email sidecar runs without a card, as Gmail's reads do. It is a private read, so a
  * web search later in the chat asks first. Only the host-vouched first-party connector gets this, never a user's
- * connector that happens to be named Email.
+ * connector that happens to be named Email. The one exception is reading message bodies with mark-as-read set:
+ * that choice changes the mailbox, so it asks with its own card even though the tool is a read. The choice
+ * counts as set unless it is exactly off: not every path repairs the model's spelling of the value before
+ * classification, and a spelling the sidecar would honour as on must never slip through as a plain read.
  */
 async function classifyMailRead(action: SentinelAction, ctx: ClassifyContext): Promise<TierDecision> {
   if (await ctx.services.isOffline({ tenant_id: ctx.tenant_id, created_by: ctx.created_by })) {
@@ -2270,11 +2336,53 @@ async function classifyMailRead(action: SentinelAction, ctx: ClassifyContext): P
       sensitive_read: false,
     });
   }
-  markPrivateDataRead(ctx.web_search);
+  const markAsRead = action.canonical_params['mark_as_read'];
+  if (action.tool_name === MAIL_CONTENT_TOOL_NAME && markAsRead !== undefined && markAsRead !== false) {
+    return tier3Decision({
+      card: {
+        plain_what: 'Allow marking these emails as read?',
+        plain_why: plainWhy(ctx.agent_intent),
+        cannot_be_undone: null,
+        why_asked_again: null,
+        destination: null,
+        recipient: null,
+        amount: null,
+        parsed_command: null,
+        outbound_text: null,
+        destination_host: null,
+        outbound_truncated: false,
+      },
+      reason: MAIL_MARK_AS_READ_REASON,
+      reason_detail: 'Reading with mark as read set changes these emails in the mailbox, so it asks first.',
+      sensitive_read: true,
+      approval_token_id: await mintPlainToken({
+        ctx,
+        tool_name: action.tool_name,
+        params: action.canonical_params,
+        connector: connectorBindingFor(action),
+      }),
+    });
+  }
   return tier1Decision({
     reason: MAIL_READ_REASON,
     reason_detail: `Read your email with \`${action.tool_name}\`.`,
     sensitive_read: true,
+  });
+}
+
+/**
+ * The Google setup read is the host's own, named by server like the Gmail tools. It reads only whether a
+ * login is saved and what it may do: no secret, no mail and no calendar content, so it runs without asking
+ * and is not a sensitive read. Anything else on this server fails closed.
+ */
+function classifyGoogleSetupTool(action: SentinelAction): TierDecision {
+  if (action.tool_name !== GOOGLE_SETUP_STATUS_TOOL_NAME) {
+    return failClosedDecision({ reason_detail: 'Unknown Google setup tool.' });
+  }
+  return tier1Decision({
+    reason: 'google_setup_read',
+    reason_detail: 'Read the state of your Google connection.',
+    sensitive_read: false,
   });
 }
 
@@ -2341,8 +2449,12 @@ async function classifyGmailTool(action: SentinelAction, ctx: ClassifyContext): 
  * The approval card for a Calendar write, built from the request the host will send, never from model prose.
  * Every guest is listed, and whether Google emails them is said in words.
  */
-function calendarWriteCard(input: { review: CalendarWriteReview; agent_intent: string | null }): Tier3Card {
-  const { review } = input;
+function calendarWriteCard(input: {
+  review: CalendarWriteReview;
+  agent_intent: string | null;
+  assistant: string;
+}): Tier3Card {
+  const { review, assistant } = input;
   const show = (text: string) => escapeDisplayText(text);
   const title = cardSubject(review.title);
   const guests = displayList(review.attendees);
@@ -2360,15 +2472,15 @@ function calendarWriteCard(input: { review: CalendarWriteReview; agent_intent: s
     review.action === 'create' && review.already_created ? 'You already have this event. Add another? ' : '';
   const plainWhat =
     review.action === 'create'
-      ? `${duplicateLead}Add ${title} to your Google Calendar on ${show(review.short_when)} (${show(review.time_zone)}).${guestLine}${spanWarning}`
-      : `Change ${review.before === null ? 'an event' : cardSubject(review.before.title)}${review.one_of_repeating ? ' (this one event of a repeating series)' : ''} in your Google Calendar to ${title} on ${show(review.short_when)} (${show(review.time_zone)}).${guestLine}${spanWarning}`;
-  // Says why a guest change asks every time, since no grant can cover it.
+      ? `${duplicateLead}Add ${title} to your Google Calendar on ${show(review.short_when)} (${show(review.time_zone)})?${guestLine}${spanWarning}`
+      : `Change ${review.before === null ? 'an event' : cardSubject(review.before.title)}${review.one_of_repeating ? ' (this one event of a repeating series)' : ''} in your Google Calendar to ${title} on ${show(review.short_when)} (${show(review.time_zone)})?${guestLine}${spanWarning}`;
+  // Says why a guest change asks every time: neither a standing nor a chat-wide answer covers it.
   const alwaysAsks =
     review.attendees.length === 0
       ? ''
       : review.action === 'create'
-        ? ' This change sends an invitation to other people, so Aman always asks.'
-        : ' This change reaches the other people invited to this event, so Aman always asks.';
+        ? ` This change sends an invitation to other people, so ${assistant} always asks.`
+        : ` This change reaches the other people invited to this event, so ${assistant} always asks.`;
   return {
     plain_what: `${plainWhat}${alwaysAsks}`,
     plain_why: plainWhy(input.agent_intent),
@@ -2482,7 +2594,7 @@ async function classifyCalendarTool(action: SentinelAction, ctx: ClassifyContext
       });
     }
     return tier3Decision({
-      card: calendarWriteCard({ review, agent_intent: ctx.agent_intent }),
+      card: calendarWriteCard({ review, agent_intent: ctx.agent_intent, assistant: ctx.web_search.assistantName }),
       reason: reachesGuests ? 'calendar_write_guests' : 'calendar_write',
       reason_detail: reachesGuests
         ? 'A calendar change that reaches guests always asks.'
@@ -2510,8 +2622,8 @@ function scheduleWriteCard(input: { review: Tier3Schedule; agent_intent: string 
   return {
     plain_what:
       review.action === 'create'
-        ? `Create the schedule ${name}. It runs ${when.charAt(0).toLowerCase()}${when.slice(1)} and starts as soon as you approve.`
-        : `Delete the schedule ${name}, which runs ${when.charAt(0).toLowerCase()}${when.slice(1)}.`,
+        ? `Create the schedule ${name}? It runs ${when.charAt(0).toLowerCase()}${when.slice(1)} and starts as soon as you approve.`
+        : `Delete the schedule ${name}, which runs ${when.charAt(0).toLowerCase()}${when.slice(1)}?`,
     plain_why: plainWhy(input.agent_intent),
     cannot_be_undone: review.action === 'delete' ? 'Once deleted, the schedule is gone for good.' : null,
     why_asked_again: null,
@@ -2534,14 +2646,14 @@ function scheduleWriteCard(input: { review: Tier3Schedule; agent_intent: string 
   };
 }
 
-/** The approval card for adding a specialist, built from what the host will save. */
+/** The approval card for adding a persona, built from what the host will save. */
 function personaWriteCard(input: { review: Tier3Persona; agent_intent: string | null }): Tier3Card {
   const { review } = input;
   const show = (text: string) => escapeDisplayText(text);
   // The description is shown as one sentence, so a trailing full stop is not doubled.
   const sentence = show(review.description).replace(/[.!?]+$/, '');
   return {
-    plain_what: `Add a specialist: ${show(review.name)}. ${sentence}.`,
+    plain_what: `Add a persona: ${show(review.name)}? ${sentence}.`,
     plain_why: plainWhy(input.agent_intent),
     cannot_be_undone: null,
     why_asked_again: null,
@@ -2562,34 +2674,34 @@ function personaWriteCard(input: { review: Tier3Persona; agent_intent: string | 
 }
 
 /**
- * Adding a specialist always asks with the full instructions. Reading the list and switching this chat to an
- * existing specialist run without asking. Any other persona tool name fails closed.
+ * Adding a persona always asks with the full instructions. Reading the list and switching this chat to an
+ * existing persona run without asking. Any other persona tool name fails closed.
  */
 async function classifyPersonaTool(action: SentinelAction, ctx: ClassifyContext): Promise<TierDecision> {
   if (action.tool_name === LIST_PERSONAS_TOOL_NAME) {
-    return tier1Decision({ reason: 'persona_read', reason_detail: 'Read your specialists.', sensitive_read: false });
+    return tier1Decision({ reason: 'persona_read', reason_detail: 'Read your personas.', sensitive_read: false });
   }
   if (action.tool_name === USE_PERSONA_TOOL_NAME) {
     return tier1Decision({
       reason: 'persona_switch',
-      reason_detail: 'Switch this chat to a specialist you already have.',
+      reason_detail: 'Switch this chat to a persona you already have.',
       sensitive_read: false,
     });
   }
   if (!isPersonaWriteToolName(action.tool_name)) {
-    return failClosedDecision({ reason_detail: 'Unknown specialist tool.' });
+    return failClosedDecision({ reason_detail: 'Unknown persona tool.' });
   }
   if (action.persona_write === undefined) {
     return autoDenyDecision({
       reason: 'destination_unverifiable',
-      reason_detail: 'The specialist could not be checked, so it was not offered.',
+      reason_detail: 'The persona could not be checked, so it was not offered.',
       sensitive_read: false,
     });
   }
   return tier3Decision({
     card: personaWriteCard({ review: action.persona_write, agent_intent: ctx.agent_intent }),
     reason: 'persona_write',
-    reason_detail: 'Adding a specialist always asks.',
+    reason_detail: 'Adding a persona always asks.',
     sensitive_read: false,
     approval_token_id: await mintPlainToken({ ctx, tool_name: action.tool_name, params: action.canonical_params }),
   });
@@ -2600,6 +2712,9 @@ async function classifyPersonaTool(action: SentinelAction, ctx: ClassifyContext)
  * listing, pausing and resuming run without asking. Any other name fails closed.
  */
 async function classifyScheduleTool(action: SentinelAction, ctx: ClassifyContext): Promise<TierDecision> {
+  if (isReminderToolName(action.tool_name)) {
+    return classifyReminderTool(action);
+  }
   if (isScheduleWriteToolName(action.tool_name)) {
     if (action.schedule_write === undefined) {
       return autoDenyDecision({
@@ -2630,6 +2745,37 @@ async function classifyScheduleTool(action: SentinelAction, ctx: ClassifyContext
 }
 
 /**
+ * A reminder is the person's own note on their own machine and only ever reaches them, so setting, listing and
+ * cancelling one runs without asking. The activity line is the only trace.
+ */
+function classifyReminderTool(action: SentinelAction): TierDecision {
+  const what = displayLineText(action.reminder?.what ?? null);
+  const when = displayLineText(action.reminder?.when ?? null);
+  switch (action.tool_name) {
+    case SET_REMINDER_TOOL_NAME:
+      return tier1Decision({
+        reason: 'reminder_write',
+        reason_detail: when !== null && what !== null ? `Set a reminder for ${when}: ${what}` : 'Set a reminder.',
+        sensitive_read: false,
+      });
+    case CANCEL_REMINDER_TOOL_NAME:
+      return tier1Decision({
+        reason: 'reminder_write',
+        reason_detail: what === null ? 'Cancelled a reminder.' : `Cancelled a reminder: ${what}`,
+        sensitive_read: false,
+      });
+    case LIST_REMINDERS_TOOL_NAME:
+      return tier1Decision({
+        reason: 'reminder_read',
+        reason_detail: 'Looked at your reminders.',
+        sensitive_read: false,
+      });
+    default:
+      return failClosedDecision({ reason_detail: 'Unknown reminder tool.' });
+  }
+}
+
+/**
  * Space tools are the host's own, named by server. Reading or writing one runs without asking: a space
  * is the person's own page on their own machine, nothing leaves it, and every write keeps a revision
  * that revert_space can restore. Any other name fails closed.
@@ -2645,15 +2791,103 @@ function classifySpaceTool(action: SentinelAction): TierDecision {
   return failClosedDecision({ reason_detail: 'Unknown space tool.' });
 }
 
-/** Most characters of a space's name the line in the chat shows. */
-const SPACE_NAME_MAX_CHARS = 80;
+/** The paths a document read names, or null when they are not a non-empty list of names. */
+function documentFilePaths(action: SentinelAction): string[] | null {
+  const raw = action.canonical_params['file_paths'];
+  if (!Array.isArray(raw) || raw.length === 0) {
+    return null;
+  }
+  const paths: string[] = [];
+  for (const entry of raw) {
+    if (typeof entry !== 'string' || entry === '') {
+      return null;
+    }
+    paths.push(entry);
+  }
+  return paths;
+}
+
+/** True when a document path reads without asking: a staged upload, or a file inside the project folder. */
+function documentPathReadsWithoutAsking(input: {
+  p: string;
+  scope: DocumentScope | undefined;
+  workspaceRoot: string | null;
+  resolution: PathResolution | undefined;
+}): boolean {
+  const uploadsDir = input.scope?.staged_uploads_dir;
+  if (
+    uploadsDir !== null &&
+    uploadsDir !== undefined &&
+    isPathUnderDir({ p: input.p, dir: uploadsDir, cwd: '/', resolution: input.resolution })
+  ) {
+    return true;
+  }
+  const root = input.workspaceRoot;
+  if (root === null || root === '') {
+    return false;
+  }
+  return isInsideWorkspace({ p: input.p, cwd: root, workspace_root: root, resolution: input.resolution });
+}
 
 /**
- * The space's name as the line shows it: whitespace runs folded to one space, ends trimmed, made safe
- * to show, then capped the way the Gmail card caps a subject. Null when the call carries no name, or
- * the name is only whitespace, so the line falls back to naming no space.
+ * Document reads are the host's own, named by server. A staged upload, and a file inside the
+ * project folder, read without asking as today. Any other path asks first, with the approval
+ * bound to the exact paths in this call, so an approval for one set of files never covers
+ * another set. With no project folder bound, a path that is not a staged upload asks too.
  */
-function spaceDisplayName(name: string | null): string | null {
+async function classifyDocumentTool(action: SentinelAction, ctx: ClassifyContext): Promise<TierDecision> {
+  const paths = documentFilePaths(action);
+  if (paths === null) {
+    return failClosedDecision({ reason_detail: 'The document paths could not be checked.' });
+  }
+  const scope = action.document_scope;
+  const resolution = scope?.path_resolution ?? ctx.path_resolution ?? undefined;
+  const workspaceRoot = scope?.workspace_cwd ?? ctx.workspace_cwd;
+  const outside = paths.filter(p => !documentPathReadsWithoutAsking({ p, scope, workspaceRoot, resolution }));
+  if (outside.length === 0) {
+    return tier1Decision({
+      reason: 'document_read',
+      reason_detail: 'Read a document you provided or one in the project folder.',
+      sensitive_read: containsSecretPath(action.canonical_params),
+    });
+  }
+  const named =
+    outside.length === 1 ? `the file ${mapsCardLabel(outside[0])}` : `these files: ${joinedLabels(outside)}`;
+  return tier3Decision({
+    card: {
+      plain_what: `Read ${named} outside the project folder?`,
+      plain_why: plainWhy(ctx.agent_intent),
+      cannot_be_undone: null,
+      why_asked_again: null,
+      destination: null,
+      recipient: null,
+      amount: null,
+      parsed_command: null,
+      outbound_text: null,
+      destination_host: null,
+      outbound_truncated: false,
+    },
+    reason: 'document_outside_workspace',
+    reason_detail: 'A document outside the project folder asks before it is read.',
+    sensitive_read: containsSecretPath(action.canonical_params),
+    secret_path_read: true,
+    approval_token_id: await mintPlainToken({
+      ctx,
+      tool_name: action.tool_name,
+      params: action.canonical_params,
+    }),
+  });
+}
+
+/** Most characters of a name or note the line in the chat shows. */
+const LINE_TEXT_MAX_CHARS = 80;
+
+/**
+ * A name or note as an activity line shows it: whitespace runs folded to one space, ends trimmed, made safe
+ * to show, then capped the way the Gmail card caps a subject. Null when there is none, or it is only
+ * whitespace, so the line falls back to naming nothing.
+ */
+function displayLineText(name: string | null): string | null {
   if (name === null) {
     return null;
   }
@@ -2662,35 +2896,24 @@ function spaceDisplayName(name: string | null): string | null {
     return null;
   }
   const chars = Array.from(escapeDisplayText(oneLine));
-  return chars.length > SPACE_NAME_MAX_CHARS ? `${chars.slice(0, SPACE_NAME_MAX_CHARS - 1).join('')}…` : chars.join('');
+  return chars.length > LINE_TEXT_MAX_CHARS ? `${chars.slice(0, LINE_TEXT_MAX_CHARS - 1).join('')}…` : chars.join('');
 }
 
 /**
- * The plain line for a space tool, in the words the activity rail shows. A name is shown only when
- * the call carries one: get_space, list_blocks and revert_space name the space by id alone, so their
- * lines say "a space". Null for any tool that is not the host's own space tool.
+ * The plain line for a space tool, in the words the activity rail shows. The wording lives with the
+ * tool names in the space tool contract, so a space tool cannot exist without its line. The name shown
+ * is the one the call addresses the space by (space_name), or the name a create call gives it (name);
+ * a call that carries neither names no space, so the line says "a space". Null for any tool that is
+ * not the host's own space tool.
  */
 function spaceToolLine(action: SentinelAction): string | null {
   if (action.tool_type !== 'truefoundry-system' || action.mcp_server_name !== SPACE_SERVER_ID) {
     return null;
   }
-  const name = spaceDisplayName(stringParam(action.canonical_params, 'name'));
-  switch (action.tool_name) {
-    case LIST_SPACES_TOOL_NAME:
-      return 'Looked at your spaces.';
-    case GET_SPACE_TOOL_NAME:
-      return 'Read a space.';
-    case LIST_BLOCKS_TOOL_NAME:
-      return 'Looked at the sections of a space.';
-    case CREATE_SPACE_TOOL_NAME:
-      return name === null ? 'Created a space.' : `Created the space ${name}.`;
-    case UPDATE_SPACE_TOOL_NAME:
-      return name === null ? 'Updated a space.' : `Updated the space ${name}.`;
-    case REVERT_SPACE_TOOL_NAME:
-      return 'Restored an earlier version of a space.';
-    default:
-      return null;
-  }
+  const name = displayLineText(
+    stringParam(action.canonical_params, 'space_name') ?? stringParam(action.canonical_params, 'name'),
+  );
+  return spaceActivityLine({ tool_name: action.tool_name, space_name: name });
 }
 
 /**
@@ -2725,7 +2948,10 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
     server_host: action.mcp_server_host,
     server_name: action.mcp_server_name,
     read_only_closed_world: action.mcp_hints.read_only_hint === true && action.mcp_hints.open_world_hint === false,
+    host_mail_draft: isHostMailDraft(action),
   });
+  // A card for the host's own Email sidecar never shows the sidecar's endpoint as a destination: the recipient is.
+  const hostMailCall = isHostMailCall(action);
   // A read is not a send by name, so it is not carded as an external-service send; its annotations still decide.
   const namedSend = extraction.external_service && !extraction.connector_read;
   // A connector read is private data, so a search in the same chat asks afterwards.
@@ -2795,18 +3021,66 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
   }
 
   // A mail send to an address the owner has never mailed asks with its own card, naming each new address.
+  // A draft naming a new address asks with the same card in draft words: approving adds the addresses and
+  // saves the draft, and nothing is sent.
   const newMailRecipients = await mailNewRecipients({ action, ctx });
   if (newMailRecipients.length > 0) {
     const { fields } = extraction;
+    const draft = isHostMailDraft(action);
     const sentence = externalServiceWhat({
       tool_name: action.tool_name,
       destination: fields.destination,
       recipient: fields.recipient,
       amount: fields.amount,
     });
+    const newRecipientLine = newMailRecipients
+      .map(address => `New recipient. You have never emailed ${escapeDisplayText(address)}.`)
+      .join(' ');
     return tier3Decision({
       card: {
-        plain_what: `${newMailRecipients.map(address => `New recipient. You have never emailed ${escapeDisplayText(address)}.`).join(' ')} Approving adds them to your send list and sends. ${sentence}`,
+        plain_what: draft
+          ? `${newRecipientLine} Approving adds them to your send list and saves this draft. ${extraction.connector_what ?? sentence}`
+          : `${newRecipientLine} Approving adds them to your send list and sends. ${sentence}`,
+        plain_why: plainWhy(ctx.agent_intent),
+        cannot_be_undone: draft ? null : "Once this is sent, it can't be unsent.",
+        why_asked_again: null,
+        destination: fields.destination,
+        recipient: fields.recipient,
+        amount: fields.amount,
+        parsed_command: null,
+        outbound_text: fields.outbound_text,
+        destination_host: null,
+        outbound_truncated: fields.outbound_truncated,
+        mail_new_recipients: newMailRecipients,
+        ...(draft ? { mail_draft: true } : {}),
+      },
+      mail_send: !draft,
+      reason: MAIL_NEW_RECIPIENT_REASON,
+      reason_detail: draft
+        ? 'A mail draft to an address that is not on the Email list.'
+        : 'A mail send to an address that is not on the Email list.',
+      sensitive_read: readsPrivateData,
+      approval_token_id: await mintPlainToken({
+        ctx,
+        tool_name: action.tool_name,
+        params: action.canonical_params,
+        connector: connectorBindingFor(action),
+      }),
+    });
+  }
+
+  // A send through the host's own Email sidecar always asks, whatever the sidecar says about it. Its own reason is how
+  // the host later knows to check the Email list before the send; a connector that only shares the name never gets it.
+  if (isHostMailSend(action)) {
+    const { fields } = extraction;
+    return tier3Decision({
+      card: {
+        plain_what: externalServiceWhat({
+          tool_name: action.tool_name,
+          destination: fields.destination,
+          recipient: fields.recipient,
+          amount: fields.amount,
+        }),
         plain_why: plainWhy(ctx.agent_intent),
         cannot_be_undone: "Once this is sent, it can't be unsent.",
         why_asked_again: null,
@@ -2815,12 +3089,12 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
         amount: fields.amount,
         parsed_command: null,
         outbound_text: fields.outbound_text,
-        destination_host: fields.destination_host,
+        destination_host: null,
         outbound_truncated: fields.outbound_truncated,
-        mail_new_recipients: newMailRecipients,
       },
-      reason: 'mail_new_recipient',
-      reason_detail: 'A mail send to an address that is not on the Email list.',
+      mail_send: true,
+      reason: MAIL_SEND_REASON,
+      reason_detail: 'A mail send through the Email sidecar always asks.',
       sensitive_read: readsPrivateData,
       approval_token_id: await mintPlainToken({
         ctx,
@@ -2848,22 +3122,28 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
               amount: fields.amount,
             })
           : destructiveHint || extraction.connector_what === null
-            ? `Run ${escapeDisplayText(action.tool_name)}, flagged as ${destructiveHint ? 'destructive' : 'reaching outside this machine'}.`
+            ? destructiveHint
+              ? 'Run this action, even though it might change or delete something for good?'
+              : 'Run this action, even though it reaches outside this machine?'
             : extraction.connector_what,
         plain_why: plainWhy(ctx.agent_intent),
+        // A call that only saves a draft sends nothing, so it carries no send warning.
         cannot_be_undone: destructiveHint
           ? 'This might change or delete something for good.'
-          : "Once this is sent, it can't be unsent.",
+          : extraction.staged_draft
+            ? null
+            : "Once this is sent, it can't be unsent.",
         why_asked_again: null,
         destination: fields.destination,
         recipient: fields.recipient,
         amount: fields.amount,
         parsed_command: null,
         outbound_text: fields.outbound_text,
-        destination_host: fields.destination_host,
+        destination_host: hostMailCall ? null : fields.destination_host,
         outbound_truncated: fields.outbound_truncated,
       },
-      reason: destructiveHint ? 'mcp_destructive_hint' : 'mcp_open_world_hint',
+      // A send keeps its own reason whatever the annotations say, so no chat-wide answer ever covers it.
+      reason: extraction.sends ? 'connector_send' : destructiveHint ? 'mcp_destructive_hint' : 'mcp_open_world_hint',
       reason_detail: 'MCP annotations flagged the tool; hints escalate only.',
       sensitive_read: readsPrivateData,
       escalated: true,
@@ -2889,8 +3169,8 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
           amount: fields.amount,
         })
       : isInstall
-        ? 'Install software or dependencies.'
-        : `Delete or remove ${fields.destination ?? fields.recipient ?? 'data'}.`;
+        ? 'Install software or dependencies?'
+        : `Delete or remove ${fields.destination ?? fields.recipient ?? 'data'}?`;
     return tier3Decision({
       card: {
         plain_what: what,
@@ -2924,8 +3204,8 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
     return tier3Decision({
       card: {
         ...card,
-        plain_what: `A calendar change through ${escapeDisplayText(action.mcp_server_name ?? 'a connector you added')}. Check every detail below before you allow it.`,
-        cannot_be_undone: 'Check the details before you go ahead.',
+        plain_what: `Make this calendar change through ${escapeDisplayText(action.mcp_server_name ?? 'a connector you added')}?`,
+        cannot_be_undone: 'Guests may be told about this change.',
       },
       reason: 'connector_calendar_write',
       reason_detail: 'A calendar change from a connector always asks.',
@@ -3013,6 +3293,38 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
   });
 }
 
+/** A call on the host's own Email sidecar, read or write: only it carries the first-party mark under the Email name. */
+function isHostMailCall(action: SentinelAction): boolean {
+  return (
+    action.tool_type === 'mcp' && action.mcp_first_party === true && action.mcp_server_name === MAIL_CONNECTOR_NAME
+  );
+}
+
+/** A mail read the host itself vouched for: only the host's own Email sidecar carries the first-party mark. */
+function isHostMailRead(action: SentinelAction): boolean {
+  return isHostMailCall(action) && isMailReadToolName(action.tool_name);
+}
+
+/** A mail send through the host's own Email sidecar, the only send whose recipients are checked against the Email list. */
+function isHostMailSend(action: SentinelAction): boolean {
+  return isHostMailCall(action) && isMailSendToolName(action.tool_name);
+}
+
+/** A mail draft through the host's own Email sidecar: it sends nothing, but its recipients are checked like a send's. */
+function isHostMailDraft(action: SentinelAction): boolean {
+  return isHostMailCall(action) && isMailDraftToolName(action.tool_name);
+}
+
+/** A calendar read the host itself vouched for. */
+function isHostCalendarRead(action: SentinelAction): boolean {
+  return (
+    action.tool_type === 'mcp' &&
+    action.mcp_first_party === true &&
+    action.mcp_server_name === CALDAV_SERVER_NAME &&
+    isCaldavReadToolName(action.tool_name)
+  );
+}
+
 /**
  * The card for a call that has to ask but matched no more specific class. A connector call shows its
  * exact arguments and server host, and a known search, fetch, write or mail tool is named in plain
@@ -3025,23 +3337,35 @@ function connectorApprovalCard(input: {
 }): Tier3Card {
   const { action, extraction } = input;
   const { fields } = extraction;
+  // Only a read the host vouches for may say "your email" or "your calendar"; a connector that merely shares the name asks like any other.
+  const hostMailRead = isHostMailRead(action);
+  const hostCalendarRead = isHostCalendarRead(action);
   return {
     plain_what:
       spaceToolLine(action) ??
       extraction.connector_what ??
-      `This is a new tool from ${escapeDisplayText(action.mcp_server_name ?? 'a connector you added')}. Check what it will do before you allow it.`,
+      (hostCalendarRead
+        ? 'Allow looking at your calendar?'
+        : hostMailRead
+          ? 'Allow reading your email?'
+          : `Allow this new tool from ${escapeDisplayText(action.mcp_server_name ?? 'a connector you added')}?`),
     plain_why: plainWhy(input.agent_intent),
-    cannot_be_undone:
-      extraction.connector_what === null
-        ? 'Check the details before you go ahead.'
-        : "Once this is sent, it can't be unsent.",
+    // A connector's own read-only claim never lowers this; only a read the host vouches for leaves the warning out.
+    // A call that only saves a draft sends nothing, so it carries no send warning either.
+    cannot_be_undone: extraction.staged_draft
+      ? null
+      : extraction.connector_what !== null
+        ? "Once this is sent, it can't be unsent."
+        : hostMailRead || hostCalendarRead
+          ? null
+          : 'It is not clear whether this can be undone.',
     why_asked_again: null,
     destination: fields.destination,
     recipient: fields.recipient,
     amount: fields.amount,
     parsed_command: null,
     outbound_text: fields.outbound_text,
-    destination_host: fields.destination_host,
+    destination_host: isHostMailCall(action) ? null : fields.destination_host,
     outbound_truncated: fields.outbound_truncated,
   };
 }
@@ -3075,17 +3399,15 @@ export async function classifyTier(action: SentinelAction, ctx: ClassifyContext)
   const name = action.tool_name;
 
   if (action.tool_type === 'truefoundry-system' && action.mcp_server_name === GMAIL_SERVER_ID) {
-    return classifyGmailTool(action, ctx);
+    return steeringChecked({ decision: await classifyGmailTool(action, ctx), ctx, guests: [] });
   }
   if (action.tool_type === 'truefoundry-system' && action.mcp_server_name === CALENDAR_SERVER_ID) {
-    return classifyCalendarTool(action, ctx);
+    return steeringChecked({ decision: await classifyCalendarTool(action, ctx), ctx, guests: [] });
   }
-  if (
-    action.tool_type === 'mcp' &&
-    action.mcp_server_name === MAIL_CONNECTOR_NAME &&
-    action.mcp_first_party === true &&
-    isMailReadToolName(action.tool_name)
-  ) {
+  if (action.tool_type === 'truefoundry-system' && action.mcp_server_name === GOOGLE_SETUP_SERVER_ID) {
+    return steeringChecked({ decision: classifyGoogleSetupTool(action), ctx, guests: [] });
+  }
+  if (isHostMailRead(action)) {
     return classifyMailRead(action, ctx);
   }
   if (action.tool_type === 'truefoundry-system' && action.mcp_server_name === SCHEDULE_SERVER_ID) {
@@ -3096,6 +3418,13 @@ export async function classifyTier(action: SentinelAction, ctx: ClassifyContext)
   }
   if (action.tool_type === 'truefoundry-system' && action.mcp_server_name === SPACE_SERVER_ID) {
     return classifySpaceTool(action);
+  }
+  if (
+    action.tool_type === 'truefoundry-system' &&
+    action.mcp_server_name === DOCUMENTS_SERVER_ID &&
+    name === EXTRACT_DOCUMENT_TEXT_TOOL_NAME
+  ) {
+    return steeringChecked({ decision: await classifyDocumentTool(action, ctx), ctx, guests: [] });
   }
 
   // Only the verified system exec tool gets the allowlist path. An MCP tool
@@ -3128,15 +3457,15 @@ export async function classifyTier(action: SentinelAction, ctx: ClassifyContext)
         card: {
           plain_what:
             name === 'run_code'
-              ? 'Run code the agent wrote in the sandbox.'
-              : 'Submit an implementation plan for review.',
+              ? 'Run code the assistant wrote in the sandbox?'
+              : 'Submit this implementation plan for review?',
           plain_why: plainWhy(ctx.agent_intent),
           cannot_be_undone: "Once this runs, it can't be undone.",
           why_asked_again: null,
           destination: null,
           recipient: null,
           amount: null,
-          parsed_command: null,
+          parsed_command: name === 'run_code' ? runCodeCardText(action.canonical_params, ctx) : null,
           outbound_text: null,
           destination_host: null,
           outbound_truncated: false,
@@ -3159,7 +3488,7 @@ export async function classifyTier(action: SentinelAction, ctx: ClassifyContext)
       if (await ctx.services.isOffline({ tenant_id: ctx.tenant_id, created_by: ctx.created_by })) {
         return autoDenyDecision({
           reason: 'offline_mode',
-          reason_detail: HOLD_SAY.maps_offline,
+          reason_detail: holdSay(ctx.web_search.assistantName).maps_offline,
           sensitive_read: false,
         });
       }
@@ -3168,8 +3497,8 @@ export async function classifyTier(action: SentinelAction, ctx: ClassifyContext)
         created_by: ctx.created_by,
       });
       const silent = runsWithoutAsking ? await classifyMapsSilently({ action, ctx }) : undefined;
-      if (silent !== undefined) {
-        return silent;
+      if (silent !== undefined && 'decision' in silent) {
+        return silent.decision;
       }
       const outbound = renderOutboundArguments(
         action.tool_name === RENDER_PLACES_TOOL_NAME
@@ -3190,8 +3519,13 @@ export async function classifyTier(action: SentinelAction, ctx: ClassifyContext)
           destination_host: action.maps_hosts === undefined ? null : mapsDestinationHosts(action.maps_hosts),
           outbound_truncated: outbound.truncated,
         },
-        reason: 'maps_tool',
-        reason_detail: runsWithoutAsking ? HOLD_SAY.maps_private : HOLD_SAY.maps_always,
+        reason: MAPS_ASK_REASON,
+        reason_detail:
+          silent === undefined
+            ? holdSay(ctx.web_search.assistantName).maps_always
+            : silent.held.ok
+              ? null
+              : guardRuleSay({ rule: silent.held.rule, assistant: ctx.web_search.assistantName }),
         sensitive_read: false,
         approval_token_id: await mintPlainToken({
           ctx,
@@ -3207,6 +3541,7 @@ export async function classifyTier(action: SentinelAction, ctx: ClassifyContext)
     const caldav = await classifyCaldavTool({
       action,
       review: action.caldav_event ?? null,
+      assistant: ctx.web_search.assistantName,
       hasStandingGrant: () => hasStandingToolGrant(ctx, action),
       mintToken: () =>
         mintPlainToken({
@@ -3217,14 +3552,11 @@ export async function classifyTier(action: SentinelAction, ctx: ClassifyContext)
         }),
     });
     if (caldav !== undefined) {
-      if (caldav.tier === 1 && caldav.sensitive_read) {
-        markPrivateDataRead(ctx.web_search);
-      }
-      return caldav;
+      return steeringChecked({ decision: caldav, ctx, guests: action.caldav_event?.attendees ?? [] });
     }
   }
 
-  return classifyGenericTool(action, ctx);
+  return steeringChecked({ decision: await classifyGenericTool(action, ctx), ctx, guests: [] });
 }
 
 /**
@@ -3259,17 +3591,6 @@ export async function classifyHostToolCall(input: {
     path_resolution: input.path_resolution,
     file_digest: input.file_digest,
   });
-  // A mail or calendar read is checked later, against its text, so it does not mark the chat as holding a secret.
-  if (decision.sensitive_read && decision.auto_deny === null && !isCheckedPrivateRead(action)) {
-    ctx.services.private_reads.markPrivateDataRead(ctx);
-    // Its text is never fingerprinted, so the chat's fingerprints miss it and a search grant cannot lift the hold.
-    ctx.web_search.fingerprintsLost = true;
-  }
-  // A secret or key file leaves no text to check, so the chat keeps asking for the rest of its life. Only a read
-  // that names one counts; an argument that merely looks like a path, such as a link, does not.
-  if (decision.auto_deny === null && decision.sensitive_read && containsSecretPath(action.canonical_params)) {
-    ctx.web_search.chatFingerprints.secret = true;
-  }
   await recordClassificationAudit({
     services: ctx.services,
     identity: {

@@ -34,7 +34,7 @@ export interface ResolvedAgentDefinition {
  * per-request state (secrets, providers, caches) freely.
  */
 export interface ITurnResourceResolver<TTurnCustom extends object = Record<string, never>> {
-  /** The turn's search and private-read state, shared by every thread's host context so one thread's reads bind the others. */
+  /** The turn's lookup state and where its links came from, shared by every thread's host context. */
   readonly webSearchTurn: WebSearchTurnState;
   /** Host-owned durable task state shared by the root thread's checklist and compaction. */
   readonly compactionContext?: TaskChecklistAccess | undefined;
@@ -75,6 +75,12 @@ export interface ITurnResourceResolver<TTurnCustom extends object = Record<strin
    * chunks. Undefined falls back to the core default (see DEFAULT_MODEL_IDLE_TIMEOUT_MS).
    */
   readonly modelIdleTimeoutMs?: number | undefined;
+  /**
+   * Host instance-wide bound in milliseconds on silence between a model call's
+   * chunks while one of its tool calls is open. Undefined falls back to the core
+   * default (see DEFAULT_MODEL_TOOL_CALL_IDLE_TIMEOUT_MS).
+   */
+  readonly modelToolCallIdleTimeoutMs?: number | undefined;
   /**
    * Per-run host policy over tool calls, consulted synchronously during
    * assistant-message enrichment before any provider dispatch. A block resolves

@@ -37,7 +37,6 @@ import { SqliteTurnArtifactStore } from '../../../src/db/sqlite/turn-artifact-st
 import { ActiveTurnRegistry } from '../../../src/runtime/activeTurns';
 import { EventSubscriptionRegistry } from '../../../src/runtime/event-subscription/index.js';
 import { TurnDrainRegistry } from '../../../src/runtime/turnDrains';
-import { InMemorySentinelSettingsStore } from '../../fixtures/InMemorySentinelSettingsStore';
 import { uncappedTokenFactoryBudget } from '../../fixtures/uncappedTokenFactoryBudget';
 
 const SESSION_ID = 's1';
@@ -262,7 +261,6 @@ async function buildApp(
   app.route(
     '/',
     createTurnsRouter({
-      sentinelSettingsStore: new InMemorySentinelSettingsStore(),
       mcpCatalog: McpCatalog.loadShipped(),
       globalSettingsStore: new SqliteGlobalSettingsStore(db),
       tokenFactoryBudget: uncappedTokenFactoryBudget,
@@ -325,9 +323,14 @@ describe('POST /{session_id}/turns approval conflicts', () => {
   });
 
   it.each([
-    [new PreviousTurnRunningError(TIP_TURN_ID), 'previous_turn_running'],
-    [new TurnAlreadyExistsError(TIP_TURN_ID), 'turn_already_exists'],
-  ])('maps a store conflict to 409 with code %#', async (error, code) => {
+    [
+      new PreviousTurnRunningError(TIP_TURN_ID),
+      'previous_turn_running',
+      // A person reads this one, so it never carries the store's turn ids.
+      'This chat is still working on your last message. Wait for it to finish, or press Cancel, then send again.',
+    ],
+    [new TurnAlreadyExistsError(TIP_TURN_ID), 'turn_already_exists', new TurnAlreadyExistsError(TIP_TURN_ID).message],
+  ])('maps a store conflict to 409 with code %#', async (error, code, message) => {
     const app = await buildApp({ status: 'allow' });
     rejectCreateTurnWith(error);
 
@@ -335,7 +338,7 @@ describe('POST /{session_id}/turns approval conflicts', () => {
 
     expect(response.status).toBe(409);
     expect(await response.json()).toEqual({
-      error: { message: error.message, type: 'conflict', code },
+      error: { message, type: 'conflict', code },
     });
   });
 
@@ -623,6 +626,18 @@ describe('POST /{session_id}/turns for a card whose request ended', () => {
     const response = await postTurn(app, childDecision({ status: 'deny', reason: 'Not now' }));
 
     expect(response.status).toBe(200);
+    expect(await turnCount(app)).toBe(before);
+  });
+
+  it('Dismissing the same ended card twice answers 200 both times and still creates no turn', async () => {
+    const app = await buildApp(undefined, { endedCard: true });
+    const before = await turnCount(app);
+
+    const first = await postTurn(app, childDecision({ status: 'deny', reason: 'Dismissed' }));
+    const second = await postTurn(app, childDecision({ status: 'deny', reason: 'Dismissed' }));
+
+    expect(first.status).toBe(200);
+    expect(second.status).toBe(200);
     expect(await turnCount(app)).toBe(before);
   });
 

@@ -16,9 +16,9 @@ The app runs in two modes: **standalone** — one process on your own machine, S
 | Node.js | 22.14 or newer | [nodejs.org](https://nodejs.org/en/download) or `brew install node` |
 | pnpm | 11.16.0 through [Corepack](https://pnpm.io/installation#using-corepack) | `corepack enable` (Corepack ships with Node.js; the exact pnpm version is pinned in `package.json`) |
 | Git | any recent version | [git-scm.com/downloads](https://git-scm.com/downloads) |
-| A Bash-compatible shell | — | macOS/Linux: built in. Windows: [WSL](https://learn.microsoft.com/windows/wsl/install) (recommended) or Git Bash, which ships with [Git for Windows](https://git-scm.com/downloads/win) |
+| A Bash-compatible shell | — | macOS/Linux: built in. Windows: [WSL2](https://learn.microsoft.com/windows/wsl/install) |
 
-On Windows, run every command below from a WSL or Git Bash shell, not PowerShell or cmd — the setup scripts use POSIX-style environment variable assignments that neither of those understand.
+On Windows, run every command below inside WSL2. Native Windows (PowerShell, cmd or Git Bash) is not supported: the setup scripts use POSIX-style environment variable assignments that those shells do not understand.
 
 ## Install and run
 
@@ -40,8 +40,7 @@ pnpm standalone:dev
 The install takes a few minutes the first time. When it finishes, open [http://localhost:3000](http://localhost:3000) and sign in — that is the app.
 
 <Note>
-  `pnpm standalone:dev` starts the API server without the file watcher: on some Windows machines the watcher
-  (`tsx watch`) stalls before the server ever starts, leaving the UI unable to reach the API. The UI itself still
+  `pnpm standalone:dev` starts the API server without the file watcher. The UI itself still
   hot-reloads; restart the command to pick up server-side changes. Contributors who want backend hot reload can run
   the package-level watch scripts instead (`pnpm --filter @truefoundry/trueforge dev`).
 </Note>
@@ -144,8 +143,11 @@ None of these are required to chat with a model. Each is one sentence plus where
     ```bash
     git clone https://github.com/ClimbOutLabs/amanuensis && cd amanuensis
     cp packages/trueforge/.env.example packages/trueforge/.env
+    export CALENDAR_ACCOUNT_SECRET=$(openssl rand -hex 32)
     docker compose up --build
     ```
+
+    The `export` line makes a random secret that the app and the calendar container share, so only the app can use the calendar container's account port. Compose stops with a message if it is missing. Set it again in each new terminal, and run `docker compose down` and `up` with the same value; `pnpm smoke` makes one for you.
 
     The first build takes a few minutes (it compiles the app from source). `docker compose up` stays in the foreground
     and streams every container's log; the stack is ready when the `server` line `Agent server listening on http://0.0.0.0:8790`
@@ -355,7 +357,7 @@ With the app open in your browser and a model connected (above), this walkthroug
       </Step>
 
   <Step title="Find it under Agents">
-    Open **Agents** from the sidebar. Your saved agent is there — click **Try** to start a fresh chat with the same setup, or **Edit** to tweak it. See [Agents](/agent-library) for shared-visibility notes in hosted mode.
+    Open **More**, then **Agents** from the sidebar. Your saved agent is there — click **Try** to start a fresh chat with the same setup, or **Edit** to tweak it. See [Agents](/agent-library) for shared-visibility notes in hosted mode.
 
       </Step>
 </Steps>

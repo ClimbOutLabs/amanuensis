@@ -176,14 +176,14 @@ describe('PermissionApprovalCard', () => {
   it('asks its question as the heading, with no approval label, lock or tier word', () => {
     renderCard();
     expect(screen.getByRole('heading', { name: 'Send $250 to Acme Corp' })).toBeInTheDocument();
-    expect(screen.getAllByText('Waiting for you')).toHaveLength(2);
+    expect(screen.getAllByText('Waiting for you')).toHaveLength(1);
     expect(screen.queryByText('Approval needed')).not.toBeInTheDocument();
     expect(screen.queryByText(/Needs your OK|Review carefully|Tier \d/)).not.toBeInTheDocument();
   });
 
   it('calls the safe verb', () => {
     const { onApprove, onDeny } = renderCard();
-    fireEvent.click(screen.getByRole('button', { name: 'Allow it' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Allow' }));
     expect(onApprove).toHaveBeenCalledTimes(1);
     expect(onDeny).not.toHaveBeenCalled();
   });
@@ -254,7 +254,7 @@ describe('PermissionApprovalCard for a calendar event', () => {
     renderCard({
       calendar_event: { ...event, action: 'create', attendees: [], guests_emailed: false, before: null },
     });
-    expect(screen.getByRole('button', { name: 'Add it' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Allow' })).toBeInTheDocument();
     expect(screen.getByText('Exactly what will be saved')).toBeInTheDocument();
     expect(screen.getByText('None')).toBeInTheDocument();
     expect(screen.queryByText(/Google will/)).not.toBeInTheDocument();
@@ -284,6 +284,16 @@ describe('PermissionApprovalCard always allow this tool', () => {
     expect(onApproveAlways).not.toHaveBeenCalled();
   });
 
+  it('says who will run this kind of action in the confirm step, in the assistant name and never as an agent', () => {
+    renderCard({}, { onApproveAlways: vi.fn() });
+    fireEvent.click(screen.getByRole('button', { name: ALWAYS_ALLOW_TOOL }));
+
+    expect(
+      screen.getByText('Aman will run this kind of action on this connector without asking, in every chat.'),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/The agent will run/)).not.toBeInTheDocument();
+  });
+
   it('calls nothing when the owner cancels the confirm step', () => {
     const onApproveAlways = vi.fn();
     const { onApprove } = renderCard({}, { onApproveAlways });
@@ -305,7 +315,7 @@ describe('PermissionApprovalCard always allow this tool', () => {
 });
 
 describe('PermissionApprovalCard "Change it"', () => {
-  // A new specialist is a card the person may change; a mail card has its own Edit button.
+  // A new persona is a card the person may change; a mail card has its own Edit button.
   const changeableCard: SentinelApprovalCard = {
     ...baseCard(),
     persona: { name: 'Tax helper', description: 'Files receipts', instructions: 'Keep receipts.', model_name: 'm' },
@@ -330,7 +340,7 @@ describe('PermissionApprovalCard "Change it"', () => {
   it('shows Change it between Approve and Deny when the container passes a handler', () => {
     renderChangeable();
     const labels = screen.getAllByRole('button').map(button => button.textContent);
-    expect(labels).toEqual(['Create it', 'Change it', 'Not now']);
+    expect(labels).toEqual(['Allow', 'Change it', 'Not now']);
   });
 
   it('shows no Change it when the container passes no handler', () => {

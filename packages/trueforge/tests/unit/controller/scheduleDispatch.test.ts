@@ -1,4 +1,7 @@
+import { DOCUMENT_REPORT_TOOL_NAMES } from '@truefoundry/trueforge-core/core';
+import { SANDBOX_FILE_WRITE_TOOLS } from '@truefoundry/trueforge-core/core/permissions/dispatch';
 import { MORNING_BRIEF_PROMPT } from '@truefoundry/trueforge-core/core/schedules/morningBrief';
+import { SPACE_READ_TOOL_NAMES, SPACE_WRITE_TOOL_NAMES } from '@truefoundry/trueforge-core/core/spaces/toolContract';
 import configuration from '../../../src/config';
 import {
   createHttpScheduleRunExecutor,
@@ -9,6 +12,7 @@ import {
   scheduleRunFailureReason,
   ScheduleRunNotFoundError,
   scheduleTaskText,
+  scheduleWithheldTools,
   startScheduleRun,
 } from '../../../src/controller/scheduleDispatch';
 import type { IBriefItemCompletionStore } from '../../../src/db/briefItemCompletionStore';
@@ -321,5 +325,29 @@ describe('scheduleTaskText', () => {
       since: new Date('2026-10-15T08:00:00.000Z'),
     });
     expect(text).toBe(`${MORNING_BRIEF_PROMPT}\nAlready done, leave these out of the brief: A; B.`);
+  });
+});
+
+describe('scheduleWithheldTools', () => {
+  const briefWithheld = [...DOCUMENT_REPORT_TOOL_NAMES, ...SANDBOX_FILE_WRITE_TOOLS, ...SPACE_WRITE_TOOL_NAMES];
+
+  it('withholds the document report tools and the file write tools from a morning brief run', () => {
+    expect(scheduleWithheldTools({ name: 'morning-brief', task: MORNING_BRIEF_PROMPT })).toEqual(briefWithheld);
+    expect(scheduleWithheldTools({ name: 'my-digest', task: MORNING_BRIEF_PROMPT })).toEqual(briefWithheld);
+    expect(briefWithheld).toEqual(expect.arrayContaining(['write_file', 'apply_patch', 'replace_text']));
+  });
+
+  it('withholds the space write tools but keeps reading, mail, calendar and maps available', () => {
+    const withheld = scheduleWithheldTools({ name: 'morning-brief', task: MORNING_BRIEF_PROMPT });
+    expect(withheld).toEqual(expect.arrayContaining(['create_space', 'edit_space', 'revert_space']));
+    for (const kept of [...SPACE_READ_TOOL_NAMES, 'exec', 'gmail_search', 'calendar_list_events', 'maps_route']) {
+      expect(withheld).not.toContain(kept);
+    }
+  });
+
+  it('withholds nothing from any other schedule', () => {
+    expect(scheduleWithheldTools({ name: 'weekly-report', task: 'Write the weekly report as a document.' })).toEqual(
+      [],
+    );
   });
 });

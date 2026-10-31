@@ -16,6 +16,7 @@ import configuration from '../../config';
 import type { MemoryProviderFailureCode } from '../../schemas/memoryProvider';
 import { stripAssistantAbilityNotes } from './assistantAbilityNotes';
 import { readBodyWithinCap } from './boundedBodyReader';
+import { isFromSession } from './markdownMemoryFiles';
 import type {
   DeleteMemoryVaultEntryOutcome,
   ListMemoryVaultEntriesOutcome,
@@ -33,7 +34,6 @@ const REFUSE_REDIRECT: NonNullable<RequestInit['redirect']> = 'manual';
 export interface RecallItem {
   id: string;
   text: string;
-  type: string;
   entities?: string[];
   occurred_start?: string;
   occurred_end?: string;
@@ -109,7 +109,6 @@ function sanitizeRecallItem(value: unknown): RecallItem | null {
   const sanitized: RecallItem = {
     id: typeof item['id'] === 'string' ? item['id'] : '',
     text: item['text'],
-    type: typeof item['type'] === 'string' ? item['type'] : 'unknown',
   };
   const occurredStart = sanitizeOptionalString(item['occurred_start']);
   if (occurredStart !== undefined) {
@@ -431,6 +430,7 @@ export class HindsightClient implements MemoryClient {
     queryTimestamp: string;
     entityTokens: number;
     timeoutMs: number;
+    currentSessionId?: string | undefined;
   }): Promise<RecallOutcome> {
     const sent = await this.sendWithOverloadRetry({
       path: '/memories/recall',
@@ -461,7 +461,9 @@ export class HindsightClient implements MemoryClient {
         results?: unknown;
         entities?: Record<string, unknown>;
       };
-      const results = sanitizeRecallItems(parsed.results);
+      const results = sanitizeRecallItems(parsed.results).filter(
+        item => !isFromSession({ metadata: item.metadata, sessionId: params.currentSessionId }),
+      );
       const entities: EntitySummary[] = [];
       if (parsed.entities && typeof parsed.entities === 'object') {
         for (const [name, value] of Object.entries(parsed.entities)) {
@@ -513,6 +515,27 @@ export class HindsightClient implements MemoryClient {
     }
     if (!sent.response.ok) {
       const failure = await this.httpFailure({ sent, operation: 'retain' });
+      return { ok: false, reason: failure.reason };
+    }
+    return { ok: true };
+  }
+
+  async deleteDocument(params: { documentId: string; context?: string; timeoutMs: number }): Promise<RetainOutcome> {
+    // Hindsight keys documents by id alone; the context is for stores that kept copies before ids existed.
+    const sent = await this.send({
+      path: `/documents/${encodeURIComponent(params.documentId)}`,
+      method: 'DELETE',
+      timeoutMs: params.timeoutMs,
+    });
+    if (!sent.ok) {
+      return { ok: false, reason: sent.reason };
+    }
+    // 404 means the document is already gone, which is what the caller wanted; the reason lets it log that.
+    if (sent.response.status === 404) {
+      return { ok: true, reason: 'document not found' };
+    }
+    if (!sent.response.ok) {
+      const failure = await this.httpFailure({ sent, operation: 'delete document' });
       return { ok: false, reason: failure.reason };
     }
     return { ok: true };
@@ -743,7 +766,7 @@ export class HindsightClient implements MemoryClient {
    */
   private async send(input: {
     path: string;
-    method: 'GET' | 'POST';
+    method: 'GET' | 'POST' | 'DELETE';
     timeoutMs: number;
     body?: unknown;
   }): Promise<SentRequest | MemoryFailure> {

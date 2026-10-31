@@ -1,8 +1,9 @@
 import { z } from 'zod';
 
 /**
- * The morning brief prompt and its answer format. The tour card, the demo seed and any schedule the chat
- * creates as a brief all send this text, so every brief asks for the same things in the same order.
+ * The morning brief prompt and its answer format. The demo seed and any schedule the chat creates as a
+ * brief send this text, so every scheduled brief asks for the same things in the same order. The tour card
+ * sends MORNING_BRIEF_CARD_PROMPT instead: the same asks in plain words, with no format in it.
  */
 export const MORNING_BRIEF_PROMPT =
   'Give me my morning brief. 1. Read everything new since my last brief, or the last 24 hours: all of it, page by page, not just the first few. Then today\'s and the next 7 days\' calendar, the lists in my spaces, and what you remember about me. 2. Write one plain-words digest sentence, then the items, most urgent first. Each item is one thing I can act on. Put anything that may be wrong (a conflict, a likely typo, a date or time that does not match) under check_first. Put replies and choices waiting on me under decision. Put calendar items under coming_up, with their start time. Put a due date under deadline only when it is not already a decision. Each item gets one next step: a label and a target, where the target is a prompt for me to send. 3. Give the answer as one JSON object in a ```json code block, shaped as {"digest": string, "items": [{"section": "check_first" | "decision" | "coming_up" | "deadline", "title": string, "subtitle": [string, ...], "source": "email" | "calendar" | "web" | "memory" | "space", "when": ISO 8601 time with offset (coming_up only), "action": {"label": string, "target": {"kind": "prompt", "text": string}}}]}. Keep titles and subtitle parts short, in plain text with no markdown. Say where each item came from in its source. Offer next steps, but do not send or save anything without asking me. 4. If something could not be read, leave it out and say so in the digest instead of guessing.';
@@ -13,6 +14,28 @@ const MORNING_BRIEF_OPENING = 'Give me my morning brief.';
 export function isMorningBriefPrompt(text: string): boolean {
   return text.startsWith(MORNING_BRIEF_OPENING);
 }
+
+/** The name the seeded brief schedule goes by; resource names are lowercase and hyphenated. */
+export const MORNING_BRIEF_SCHEDULE_NAME = 'morning-brief';
+
+/** Whether a schedule is the owner's daily brief: it carries the brief name, or its task is a brief request. */
+export function isMorningBriefSchedule({ name, task }: { name: string; task: string }): boolean {
+  return name === MORNING_BRIEF_SCHEDULE_NAME || isMorningBriefPrompt(task);
+}
+
+/**
+ * What the home's morning brief card sends: the contract's asks in the plain words a person would say,
+ * with no output format in it. It shares the contract's opening, so the chat still treats it as a brief;
+ * the answer shows as plain text when it comes back as prose instead of the contract's JSON.
+ */
+export const MORNING_BRIEF_CARD_PROMPT =
+  `${MORNING_BRIEF_OPENING} Read everything new since my last brief, or from the last 24 hours: my email, ` +
+  `today's and the next 7 days' calendar, the lists in my spaces, and what you remember about me. Start ` +
+  `with one sentence that sums up the morning, then the items, most urgent first, each one a single thing ` +
+  `I can act on. Point out anything that may be wrong, like a clash, a likely typo, or a date or time that ` +
+  `does not match. Show the replies and choices waiting on me, the start time of anything on my calendar, ` +
+  `and anything that has a due date. If something could not be read, say so in the first sentence instead ` +
+  `of guessing. Offer next steps, but do not send or save anything without asking me.`;
 
 export const BRIEF_SECTION_VALUES = ['check_first', 'decision', 'coming_up', 'deadline'] as const;
 

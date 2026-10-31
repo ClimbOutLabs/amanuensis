@@ -62,6 +62,136 @@ test_successful_upgrade_backs_up_first() {
   sandbox_drop
 }
 
+test_upgrade_notes_an_old_email_account_file() {
+  t_begin "upgrade says how to reconnect email when the old account file is there"
+  sandbox_new
+  install_machine
+  printf '%s\n' '# Written by the installer for the Email connector. Keep it private: it holds the app password.' \
+    'MCP_EMAIL_SERVER_EMAIL_ADDRESS=owner@example.invalid' >"$AMAN_HOME/instances/main/.env.mail-email"
+  repo_commit_change "app change"
+  run_install upgrade
+  assert_rc 0
+  assert_contains "$OUT" "Email was set up the old way. Connect it again in Settings, then Connectors, then Email."
+  assert_file "$AMAN_HOME/instances/main/.env.mail-email"
+  run_install upgrade
+  assert_rc 0
+  assert_contains "$OUT" "Already up to date"
+  assert_contains "$OUT" "Email was set up the old way. Connect it again in Settings, then Connectors, then Email."
+  sandbox_drop
+}
+
+test_upgrade_without_an_old_email_account_file_stays_quiet() {
+  t_begin "upgrade without the old account file says nothing about reconnecting email"
+  sandbox_new
+  install_machine
+  repo_commit_change "app change"
+  run_install upgrade
+  assert_rc 0
+  assert_not_contains "$OUT" "Email was set up the old way"
+  sandbox_drop
+}
+
+test_upgrade_notes_an_old_calendar_account_file() {
+  t_begin "upgrade says how to reconnect the calendar when the old account file is there, once"
+  sandbox_new
+  install_machine
+  printf '%s\n' 'CALDAV_URL=https://caldav.example.invalid/dav/' 'CALDAV_USERNAME=owner@example.invalid' \
+    >"$AMAN_HOME/instances/main/.env.calendar"
+  repo_commit_change "app change"
+  run_install upgrade
+  assert_rc 0
+  assert_contains "$OUT" "Calendar was set up the old way. Connect it again in Settings, then Connectors, then Calendar."
+  assert_not_contains "$OUT" "Email was set up the old way"
+  assert_file "$AMAN_HOME/instances/main/.env.calendar"
+  run_install upgrade
+  assert_rc 0
+  assert_contains "$OUT" "Already up to date"
+  assert_contains "$OUT" "Calendar was set up the old way. Connect it again in Settings, then Connectors, then Calendar."
+  sandbox_drop
+}
+
+test_upgrade_moves_a_complete_old_calendar_account() {
+  t_begin "upgrade moves a complete old calendar account into the connector, deletes the old file and stays quiet after"
+  sandbox_new
+  install_machine
+  local dir=$AMAN_HOME/instances/main
+  printf '%s\n' 'CALDAV_URL=https://caldav.example.invalid/dav/' 'CALDAV_USERNAME=owner@example.invalid' \
+    'CALDAV_PASSWORD=old-sentinel-91c2' 'CALDAV_USER_EMAIL=owner@example.invalid' >"$dir/.env.calendar"
+  printf 'CALENDAR_CONNECTOR_URL=http://calendar-caldav:9558/mcp\n' >>"$dir/.env"
+  repo_commit_change "app change"
+  run_install upgrade
+  assert_rc 0
+  assert_not_contains "$OUT" "Calendar was set up the old way"
+  assert_no_path "$dir/.env.calendar"
+  assert_eq "$(grep -c '^CALENDAR_CONNECTOR_URL=' "$dir/.env" || true)" 0 "the old connector line is gone"
+  assert_contains "$(cat "$STUB_STATE/calendar-account-aman-main")" "CALDAV_PASSWORD=old-sentinel-91c2"
+  assert_not_contains "$OUT$ERR" "old-sentinel-91c2"
+  run_install upgrade
+  assert_rc 0
+  assert_not_contains "$OUT" "Calendar was set up the old way"
+  sandbox_drop
+}
+
+test_upgrade_keeps_a_calendar_account_connected_again() {
+  t_begin "upgrade never replaces an account connected again in Settings with the old file; it only deletes the old file"
+  sandbox_new
+  install_machine
+  local dir=$AMAN_HOME/instances/main
+  printf '%s\n' 'CALDAV_URL=https://new.example.invalid/dav/' 'CALDAV_USERNAME=new@example.invalid' \
+    'CALDAV_PASSWORD=new-sentinel' 'CALDAV_USER_EMAIL=new@example.invalid' >"$STUB_STATE/calendar-account-aman-main"
+  printf '%s\n' 'CALDAV_URL=https://caldav.example.invalid/dav/' 'CALDAV_USERNAME=owner@example.invalid' \
+    'CALDAV_PASSWORD=old-sentinel' 'CALDAV_USER_EMAIL=owner@example.invalid' >"$dir/.env.calendar"
+  repo_commit_change "app change"
+  run_install upgrade
+  assert_rc 0
+  assert_no_path "$dir/.env.calendar"
+  assert_contains "$(cat "$STUB_STATE/calendar-account-aman-main")" "CALDAV_PASSWORD=new-sentinel"
+  assert_not_contains "$(cat "$STUB_STATE/calendar-account-aman-main")" "old-sentinel"
+  assert_not_contains "$OUT" "Calendar was set up the old way"
+  sandbox_drop
+}
+
+test_upgrade_keeps_the_old_calendar_file_when_the_check_says_nothing() {
+  t_begin "upgrade keeps the old calendar file, and says so, when the connector's check printed nothing"
+  sandbox_new
+  install_machine
+  local dir=$AMAN_HOME/instances/main
+  printf '%s\n' 'CALDAV_URL=https://new.example.invalid/dav/' 'CALDAV_USERNAME=new@example.invalid' \
+    'CALDAV_PASSWORD=new-sentinel' 'CALDAV_USER_EMAIL=new@example.invalid' >"$STUB_STATE/calendar-account-aman-main"
+  printf '%s\n' 'CALDAV_URL=https://caldav.example.invalid/dav/' 'CALDAV_USERNAME=owner@example.invalid' \
+    'CALDAV_PASSWORD=old-sentinel' 'CALDAV_USER_EMAIL=owner@example.invalid' >"$dir/.env.calendar"
+  repo_commit_change "app change"
+  STUB_CALENDAR_CHECK=silent run_install upgrade
+  assert_rc 0
+  assert_file "$dir/.env.calendar"
+  assert_contains "$OUT" "Calendar was set up the old way. Connect it again in Settings, then Connectors, then Calendar."
+  assert_contains "$(cat "$STUB_STATE/calendar-account-aman-main")" "CALDAV_PASSWORD=new-sentinel"
+  sandbox_drop
+}
+
+test_upgrade_without_an_old_calendar_account_file_stays_quiet() {
+  t_begin "upgrade without the old calendar file says nothing about reconnecting the calendar"
+  sandbox_new
+  install_machine
+  repo_commit_change "app change"
+  run_install upgrade
+  assert_rc 0
+  assert_not_contains "$OUT" "Calendar was set up the old way"
+  sandbox_drop
+}
+
+test_upgrade_starts_the_calendar_connector_without_a_profile() {
+  t_begin "after an upgrade the instance's compose file starts the calendar connector with the instance"
+  sandbox_new
+  install_machine
+  repo_commit_change "app change"
+  run_install upgrade
+  assert_rc 0
+  assert_not_contains "$(cat "$AMAN_HOME/instances/main/compose.yaml")" "profiles: ['calendar']"
+  assert_contains "$(cat "$AMAN_HOME/instances/main/compose.yaml")" "calendar-account:/account"
+  sandbox_drop
+}
+
 test_failed_upgrade_restores_database_and_images() {
   t_begin "a failed health check restores the database and the previous images"
   sandbox_new
@@ -145,10 +275,40 @@ test_doctor_failure_blocks_unless_forced() {
   sandbox_new
   install_machine
   repo_commit_change "needs doctor"
+  STUB_DOCTOR_JSON='{"machine":[],"instances":{"main":[{"id":"containers","state":"fail","detail":"The main app is not running.","fix":"Run aman doctor instance --fix"}]}}'
   STUB_DOCTOR_EXIT=1
   run_install upgrade
   assert_rc 1
   assert_flat_contains "$ERR" "has a problem now, so the upgrade did not start"
+  assert_flat_contains "$ERR" "The main app is not running"
+  assert_no_path "$AMAN_HOME/backups"
+  run_install upgrade --force
+  assert_rc 0
+  sandbox_drop
+}
+
+test_gate_passes_when_the_doctor_reports_only_warnings() {
+  t_begin "an upgrade with only warnings in the doctor report passes the gate"
+  sandbox_new
+  install_machine
+  repo_commit_change "warn only"
+  STUB_DOCTOR_JSON='{"machine":[{"id":"backup","state":"warn","detail":"Daily backups are off.","fix":"Run aman backup"}],"instances":{"main":[]}}'
+  STUB_DOCTOR_EXIT=0
+  run_install upgrade
+  assert_rc 0
+  assert_contains "$OUT" "Upgraded to"
+  sandbox_drop
+}
+
+test_gate_blocks_when_the_doctor_cannot_be_checked() {
+  t_begin "a doctor run that produces no fail record but still fails blocks with its own message"
+  sandbox_new
+  install_machine
+  repo_commit_change "needs doctor"
+  STUB_DOCTOR_EXIT=1
+  run_install upgrade
+  assert_rc 1
+  assert_flat_contains "$ERR" "could not be checked, so the upgrade did not start"
   assert_no_path "$AMAN_HOME/backups"
   run_install upgrade --force
   assert_rc 0
@@ -244,10 +404,11 @@ test_upgrade_still_needs_force_for_an_instance_with_data() {
   sandbox_new
   install_machine
   repo_commit_change "needs doctor"
+  STUB_DOCTOR_JSON='{"machine":[],"instances":{"main":[{"id":"containers","state":"fail","detail":"The main app is not running.","fix":"Run aman doctor instance --fix"}]}}'
   STUB_DOCTOR_EXIT=1
   run_install upgrade
   assert_rc 1
-  assert_flat_contains "$ERR" "Instance main worked before but has a problem now, so the upgrade did not start."
+  assert_flat_contains "$ERR" "Instance main worked before but has a problem now, so the upgrade did not start: The main app is not running."
   assert_flat_contains "$ERR" "upgrade --force"
   assert_no_path "$AMAN_HOME/backups"
   sandbox_drop
@@ -259,11 +420,12 @@ test_a_record_from_before_the_flag_counts_as_having_data() {
   install_machine
   sed -i '/^healthy=/d' "$AMAN_HOME/state/instances/main.conf"
   repo_commit_change "older record"
+  STUB_DOCTOR_JSON='{"machine":[],"instances":{"main":[{"id":"containers","state":"fail","detail":"The main app is not running.","fix":"Run aman doctor instance --fix"}]}}'
   STUB_DOCTOR_EXIT=1
   run_install upgrade
   assert_rc 1
   assert_flat_contains "$ERR" "worked before but has a problem now"
-  unset STUB_DOCTOR_EXIT
+  unset STUB_DOCTOR_EXIT STUB_DOCTOR_JSON
   run_install upgrade
   assert_rc 0
   assert_eq "$(find "$AMAN_HOME/backups" -mindepth 1 -maxdepth 1 -type d | wc -l | tr -d ' ')" 1
@@ -588,9 +750,19 @@ test_upgrade_still_needs_force_for_an_instance_with_data
 test_a_record_from_before_the_flag_counts_as_having_data
 test_check_reports_without_changing
 test_successful_upgrade_backs_up_first
+test_upgrade_notes_an_old_email_account_file
+test_upgrade_without_an_old_email_account_file_stays_quiet
+test_upgrade_notes_an_old_calendar_account_file
+test_upgrade_moves_a_complete_old_calendar_account
+test_upgrade_keeps_a_calendar_account_connected_again
+test_upgrade_keeps_the_old_calendar_file_when_the_check_says_nothing
+test_upgrade_without_an_old_calendar_account_file_stays_quiet
+test_upgrade_starts_the_calendar_connector_without_a_profile
 test_failed_upgrade_restores_database_and_images
 test_restore_goes_only_into_the_right_volume
 test_restore_does_not_wait_for_a_migration_marker
 test_failed_build_changes_nothing
 test_doctor_failure_blocks_unless_forced
+test_gate_passes_when_the_doctor_reports_only_warnings
+test_gate_blocks_when_the_doctor_cannot_be_checked
 tests_finish

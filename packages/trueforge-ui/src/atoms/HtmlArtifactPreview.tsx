@@ -14,11 +14,24 @@ export type HtmlArtifactPreviewProps = {
   onFetchRelatedFile?: (path: string) => Promise<Blob>;
   /** Maximum total bytes to inline for related assets before falling back to link-only. */
   maxInliningBytes?: number;
+  /**
+   * Builds the host picture-proxy URL for one external picture. The proxy only serves links the
+   * chat saw, so the frame itself never contacts an outside site: a proxied picture is inlined
+   * as a data: URI, and anything the proxy refuses shows the plain line below. Absent, external
+   * pictures stay out and show the space line instead.
+   */
+  pictureProxyUrl?: (url: string) => string;
   /** Saves the file to the user's device; only ever called from the download button. */
   onDownload?: () => void;
   /** When true, the download and expand controls are hidden. */
   readOnly?: boolean;
 };
+
+/** Shown where a picture would be when it cannot be shown. */
+const PICTURE_FAILED_LINE = "This picture couldn't be shown";
+
+/** Shown where a web picture would be when no picture proxy is available for this page. */
+const SPACE_PICTURES_LINE = 'Pictures from the web show in a space';
 
 const SCRIPT_TAG_RE = /<script[\s/>]/i;
 
@@ -161,6 +174,58 @@ function escapeRegex(str: string): string {
   return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
+const EXTERNAL_IMG_TAG_RE = /<img\s+[^>]*>/gi;
+const SRC_ATTR_RE = /\ssrc=["']([^"']+)["']/i;
+
+/**
+ * Inlines external pictures through the host picture proxy, keeping the frame's data:-only
+ * picture rule intact: the frame never fetches an outside URL, it only ever sees data: URIs the
+ * app origin fetched for it. A picture the proxy refuses (unseen in this chat, or unfetchable)
+ * becomes the plain failure line, and without a proxy every web picture becomes the space line.
+ * Bytes count against the same inlining budget as related assets.
+ */
+async function inlineExternalImages(
+  htmlText: string,
+  pictureProxyUrl: ((url: string) => string) | undefined,
+  maxBytes: number,
+): Promise<{ html: string; bytesInlined: number }> {
+  let out = '';
+  let copied = 0;
+  let bytesInlined = 0;
+  EXTERNAL_IMG_TAG_RE.lastIndex = 0;
+  let match: RegExpExecArray | null;
+  while ((match = EXTERNAL_IMG_TAG_RE.exec(htmlText)) !== null) {
+    const tag = match[0];
+    const srcMatch = SRC_ATTR_RE.exec(tag);
+    const src = srcMatch?.[1];
+    if (src === undefined || !/^https?:\/\//i.test(src)) {
+      continue;
+    }
+    out += htmlText.slice(copied, match.index);
+    copied = match.index + tag.length;
+    if (pictureProxyUrl === undefined) {
+      out += `<span>${SPACE_PICTURES_LINE}</span>`;
+      continue;
+    }
+    try {
+      const response = await fetch(pictureProxyUrl(src));
+      if (!response.ok) {
+        throw new Error(`Picture proxy refused ${response.status}`);
+      }
+      const blob = await response.blob();
+      if (bytesInlined + blob.size > maxBytes) {
+        throw new Error('Picture exceeds the inlining budget');
+      }
+      const dataUri = await blobToDataUri(blob);
+      bytesInlined += blob.size;
+      out += tag.replace(SRC_ATTR_RE, () => ` src="${dataUri}"`);
+    } catch {
+      out += `<span>${PICTURE_FAILED_LINE}</span>`;
+    }
+  }
+  return { html: out + htmlText.slice(copied), bytesInlined };
+}
+
 async function blobToDataUri(blob: Blob): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -248,6 +313,7 @@ export function HtmlArtifactPreview({
   filename,
   onFetchRelatedFile,
   maxInliningBytes = DEFAULT_MAX_INLINING_BYTES,
+  pictureProxyUrl,
   onDownload,
   readOnly,
 }: HtmlArtifactPreviewProps) {
@@ -270,6 +336,7 @@ export function HtmlArtifactPreview({
         htmlText = insertPolicyFirst(stripHttpEquivMetas(htmlText));
 
         // Inline relative assets if fetch function is provided
+        let inlinedBytes = 0;
         if (onFetchRelatedFile) {
           const { html: inlinedHtml, bytesInlined: bytes } = await inlineAssets(
             htmlText,
@@ -278,8 +345,18 @@ export function HtmlArtifactPreview({
             maxInliningBytes,
           );
           htmlText = inlinedHtml;
-          if (isMounted) setBytesInlined(bytes);
+          inlinedBytes = bytes;
         }
+
+        // External pictures go through the host proxy and are inlined the same way, so the
+        // frame's data:-only rule never changes.
+        const { html: proxiedHtml, bytesInlined: proxiedBytes } = await inlineExternalImages(
+          htmlText,
+          pictureProxyUrl,
+          maxInliningBytes - inlinedBytes,
+        );
+        htmlText = proxiedHtml;
+        if (isMounted) setBytesInlined(inlinedBytes + proxiedBytes);
 
         if (isMounted) {
           setSrcdoc(htmlText);
@@ -297,7 +374,7 @@ export function HtmlArtifactPreview({
     return () => {
       isMounted = false;
     };
-  }, [content, filename, onFetchRelatedFile, maxInliningBytes]);
+  }, [content, filename, onFetchRelatedFile, maxInliningBytes, pictureProxyUrl]);
 
   const framedSrcdoc = useMemo(() => (srcdoc == null ? null : wrapInContainmentFrame(srcdoc)), [srcdoc]);
 

@@ -94,10 +94,43 @@ function renderPendingApprovalMessage(
   );
 }
 
+/** The new approval ticket is on screen, and nothing of the old radio-button card is. */
+function expectNewCardOnly() {
+  expect(document.querySelector('[data-role="approval-ticket"]')).not.toBeNull();
+  expect(screen.queryByRole('radiogroup')).not.toBeInTheDocument();
+  expect(screen.queryByRole('radio')).not.toBeInTheDocument();
+  expect(screen.queryByText(/Tool Approval Required/i)).not.toBeInTheDocument();
+}
+
 describe('ToolCallContainer', () => {
+  it('shows a search the person said no to as not done, never as a completed check', () => {
+    const ToolCallCard = vi.fn((props: ToolCallCardProps) => <div>{props.toolName}</div>);
+    renderToolCallMessage(
+      [
+        {
+          type: 'tool-call',
+          toolCallId: 'search-1',
+          toolName: 'web_search',
+          args: { query: 'Dana Example' },
+          approval: { id: 'search-1', approved: false, reason: 'No thanks' },
+          result: { error: 'No thanks' },
+          isError: true,
+        },
+      ],
+      { ToolCallCard },
+    );
+
+    const props = ToolCallCard.mock.calls.at(-1)?.[0];
+    expect(props?.status).not.toBe('success');
+    expect(props?.status).toBe('muted');
+    expect(props?.outcomeText).toBe('Not done: you said no');
+    // Its title says what it was, not "Searched the web".
+    expect(props?.toolName).toBe('A web search');
+  });
+
   it('renders a running tool call without a result', () => {
     renderToolCallMessage([{ type: 'tool-call', toolCallId: '1', toolName: 'search_docs', args: {} }]);
-    expect(screen.getByText('search_docs')).toBeInTheDocument();
+    expect(screen.getByText('Search docs')).toBeInTheDocument();
     expect(screen.queryByText('Result:')).not.toBeInTheDocument();
   });
 
@@ -112,10 +145,83 @@ describe('ToolCallContainer', () => {
         result: '2026-07-01T00:00:00Z',
       },
     ]);
-    fireEvent.click(screen.getByText('get_current_datetime'));
+    fireEvent.click(screen.getByText('Get current datetime'));
     const blocks = screen.getAllByTestId('tfy-tool-call-content-block');
     expect(blocks[0]).toHaveAttribute('data-content', expect.stringContaining('"tz"'));
     expect(blocks[1]).toHaveAttribute('data-content', '2026-07-01T00:00:00Z');
+  });
+
+  it('makes the Request pane resizable like the Response pane, so a long request stays reachable in full', () => {
+    const args = {
+      report_id: 'rep-2026-10-27',
+      sections: Array.from({ length: 30 }, (_, index) => `section-${index + 1}`),
+      include_history: true,
+    };
+    renderToolCallMessage([
+      {
+        type: 'tool-call',
+        toolCallId: '1',
+        toolName: 'fetch_report',
+        args: {},
+        argsText: JSON.stringify(args),
+        result: 'Report ready.',
+      },
+    ]);
+    fireEvent.click(screen.getByText('Fetch report'));
+    const blocks = screen.getAllByTestId('tfy-tool-call-content-block');
+    // The full request is on the block, from its first line to its last.
+    expect(blocks[0]).toHaveAttribute('data-content', JSON.stringify(args, null, 2));
+    // A resizable pane's body carries the drag affordance and clips by scrolling, like the Response
+    // pane; a fixed pane has neither, so its overflow reads as text that vanished.
+    const [requestBlock, responseBlock] = blocks;
+    if (requestBlock === undefined || responseBlock === undefined) {
+      throw new Error('expected the step to show a Request and a Response block');
+    }
+    const requestBody = requestBlock.children[1];
+    const responseBody = responseBlock.children[1];
+    expect(requestBody).toHaveStyle({ resize: 'vertical' });
+    expect(requestBody).toHaveClass('overflow-hidden');
+    expect(responseBody).toHaveStyle({ resize: 'vertical' });
+  });
+
+  it('makes a long plain-text request resizable too', () => {
+    const longText = Array.from({ length: 40 }, (_, index) => `line ${index + 1} of the request`).join('\n');
+    renderToolCallMessage([
+      {
+        type: 'tool-call',
+        toolCallId: '1',
+        toolName: 'fetch_report',
+        args: {},
+        argsText: JSON.stringify(longText),
+        result: 'Report ready.',
+      },
+    ]);
+    fireEvent.click(screen.getByText('Fetch report'));
+    const blocks = screen.getAllByTestId('tfy-tool-call-content-block');
+    expect(blocks[0]).toHaveAttribute('data-content', longText);
+    const [requestBlock] = blocks;
+    if (requestBlock === undefined) {
+      throw new Error('expected the step to show a Request block');
+    }
+    expect(requestBlock.children[1]).toHaveStyle({ resize: 'vertical' });
+    expect(requestBlock.children[1]).toHaveClass('overflow-hidden');
+  });
+
+  it('says plainly when no request was recorded instead of showing an empty object', () => {
+    renderToolCallMessage([
+      {
+        type: 'tool-call',
+        toolCallId: '1',
+        toolName: 'fetch_report',
+        args: {},
+        argsText: '',
+        result: 'Report ready.',
+      },
+    ]);
+    fireEvent.click(screen.getByText('Fetch report'));
+    const blocks = screen.getAllByTestId('tfy-tool-call-content-block');
+    expect(blocks[0]).toHaveAttribute('data-content', 'No request was recorded for this step.');
+    expect(blocks[0]).not.toHaveAttribute('data-content', '{}');
   });
 
   it('shows a Searched chip for a search the host ran without asking, from the host-set artifact only', () => {
@@ -183,7 +289,7 @@ describe('ToolCallContainer', () => {
         isError: true,
       },
     ]);
-    fireEvent.click(screen.getByText('flaky_tool'));
+    fireEvent.click(screen.getByText('Flaky tool'));
     const blocks = screen.getAllByTestId('tfy-tool-call-content-block');
     expect(blocks[1]).toHaveTextContent('boom');
   });
@@ -206,7 +312,7 @@ describe('ToolCallContainer', () => {
     renderToolCallMessage([{ type: 'tool-call', toolCallId: 'screened-1', toolName: 'fetch_url', args: {}, result }]);
 
     expect(screen.getByText('Content withheld')).toBeInTheDocument();
-    fireEvent.click(screen.getByText('fetch_url'));
+    fireEvent.click(screen.getByText('Fetch url'));
     const blocks = screen.getAllByTestId('tfy-tool-call-content-block');
     expect(blocks[1]).toHaveAttribute('data-content', '<html>RED-TEAM-CANARY-7Q2X9</html>');
   });
@@ -237,6 +343,52 @@ describe('ToolCallContainer', () => {
     // The rest of the reason is still available, expanded, in the response block.
     const responseSlot = ToolCallCard.mock.calls[0]?.[0]?.responseSlot as { props: { content: string } } | undefined;
     expect(responseSlot?.props.content).toContain(rejectionText);
+  });
+
+  it('shows a plain note, not a failure, for a space write refused for its size', () => {
+    const ToolCallCard = createToolCallCardProbe();
+    const refusalText =
+      'Refusing create_space: this write carries 4,642 characters of new content, and one write may carry at most 3,600. ' +
+      'Nothing was persisted. Send a shorter body now (a heading and the first part), then add the rest with edit_space once the space exists.';
+    // Shape produced end-to-end: the space tool's JSON result (the refusal text plus its stable
+    // code) rides in a text content item, which the generic isError path wraps under `error` in
+    // the tool.response.v2 envelope's `result` field.
+    const result = JSON.stringify({
+      schema_version: 'tool.response.v2',
+      outcome: { disposition: 'executed_nonzero' },
+      result: {
+        error: [{ type: 'text', text: JSON.stringify({ error: refusalText, error_code: 'space_write_too_long' }) }],
+      },
+    });
+
+    renderToolCallMessage([{ type: 'tool-call', toolCallId: 'space-1', toolName: 'create_space', args: {}, result }], {
+      ToolCallCard,
+    });
+
+    expect(ToolCallCard.mock.calls[0]?.[0]).toEqual(
+      expect.objectContaining({ outcomeText: 'Too long for one write. Splitting it into parts.', status: 'muted' }),
+    );
+    // The refusal text is still in the step's details, for the person who opens them.
+    const responseSlot = ToolCallCard.mock.calls[0]?.[0]?.responseSlot as { props: { content: string } } | undefined;
+    expect(responseSlot?.props.content).toContain(refusalText);
+  });
+
+  it('still shows a failure for a space call that failed for another reason', () => {
+    const ToolCallCard = createToolCallCardProbe();
+    const errorText = 'No space is named "Dog breeds". Call list_spaces to see the spaces you have.';
+    const result = JSON.stringify({
+      schema_version: 'tool.response.v2',
+      outcome: { disposition: 'executed_nonzero' },
+      result: { error: [{ type: 'text', text: JSON.stringify({ error: errorText }) }] },
+    });
+
+    renderToolCallMessage([{ type: 'tool-call', toolCallId: 'space-2', toolName: 'edit_space', args: {}, result }], {
+      ToolCallCard,
+    });
+
+    expect(ToolCallCard.mock.calls[0]?.[0]).toEqual(
+      expect.objectContaining({ outcomeText: `Execution failed: ${errorText}`, status: 'error' }),
+    );
   });
 
   it('shows the host remediation message next to a policy-blocked tool step', () => {
@@ -282,6 +434,8 @@ describe('ToolCallContainer', () => {
 
     const outcomes = ToolCallCard.mock.calls.map(call => call[0]?.outcomeText);
     expect(outcomes).toEqual(['Not sent: you said no', 'Not done: you said no']);
+    const titles = ToolCallCard.mock.calls.map(call => call[0]?.toolName);
+    expect(titles).toEqual(['An email', 'A calendar change']);
   });
 
   it('routes sandbox calls with parsed command and result details', () => {
@@ -610,14 +764,16 @@ describe('ToolCallContainer', () => {
       </SlotsProvider>,
     );
 
-    expect(screen.getByRole('radio', { name: 'Approve for this chat' })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('radio', { name: 'Approve' }));
+    expectNewCardOnly();
+    expect(screen.getByRole('button', { name: 'Always allow this here' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Allow' })).toBeEnabled();
+    fireEvent.click(screen.getByRole('button', { name: 'Allow' }));
     expect(respondToToolApproval).toHaveBeenCalledWith(
-      expect.objectContaining({ approvalId: 'nested-approval-1', approved: true }),
+      expect.objectContaining({ approvalId: 'nested-approval-1', approved: true, optionId: 'allow-once' }),
     );
   });
 
-  it('auto-expands and shows the approval bar while an approval is pending', () => {
+  it('shows the approval card while an approval is pending', () => {
     renderPendingApprovalMessage([
       {
         type: 'tool-call',
@@ -628,9 +784,10 @@ describe('ToolCallContainer', () => {
         approval: { id: 'approval-1', approved: undefined },
       },
     ]);
-    expect(screen.getByRole('radio', { name: 'Approve' })).toBeInTheDocument();
-    expect(screen.queryByRole('radio', { name: /in this chat/i })).not.toBeInTheDocument();
-    expect(screen.getByRole('radio', { name: 'Deny' })).toBeInTheDocument();
+    expectNewCardOnly();
+    expect(screen.getByRole('button', { name: 'Allow' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /in this chat/i })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Not now' })).toBeInTheDocument();
   });
 
   it('keeps a pending approval visible — the disclosure locks open while approval waits', () => {
@@ -657,8 +814,9 @@ describe('ToolCallContainer', () => {
     expect(
       screen.queryByRole('button', { name: /Expand agent details|Collapse agent details/ }),
     ).not.toBeInTheDocument();
-    expect(screen.getByRole('radio', { name: 'Approve' })).toBeInTheDocument();
-    expect(screen.getByRole('radio', { name: 'Deny' })).toBeInTheDocument();
+    expectNewCardOnly();
+    expect(screen.getByRole('button', { name: 'Allow' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Not now' })).toBeInTheDocument();
   });
 
   it('routes a root Approve through the runtime onRespondToToolApproval callback', () => {
@@ -676,13 +834,13 @@ describe('ToolCallContainer', () => {
       ],
       { onRespondToToolApproval },
     );
-    fireEvent.click(screen.getByRole('radio', { name: 'Approve' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Allow' }));
     expect(onRespondToToolApproval).toHaveBeenCalledWith(
       expect.objectContaining({ approvalId: 'approval-1', approved: true }),
     );
   });
 
-  it('preserves the chat scope option when Approve for this chat is clicked', () => {
+  it('preserves the chat scope option when Always allow this here is clicked', () => {
     respondToToolApproval.mockClear();
     const onRespondToToolApproval = vi.fn();
     renderPendingApprovalMessage(
@@ -707,7 +865,7 @@ describe('ToolCallContainer', () => {
       { onRespondToToolApproval },
     );
 
-    fireEvent.click(screen.getByRole('radio', { name: 'Approve for this chat' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Always allow this here' }));
     expect(respondToToolApproval).toHaveBeenCalledWith(
       expect.objectContaining({ approvalId: 'approval-1', approved: true, optionId: 'allow-chat' }),
     );
@@ -735,13 +893,16 @@ describe('ToolCallContainer', () => {
       },
     ]);
 
-    expect(screen.getByText('pnpm test')).toBeInTheDocument();
-    expect(screen.getByRole('radio', { name: 'Approve' })).toBeInTheDocument();
-    expect(screen.getByRole('radio', { name: 'Approve for this chat' })).toBeInTheDocument();
-    expect(screen.getByRole('radio', { name: 'Deny' })).toBeInTheDocument();
+    // The command shows once, on the card as an argument line, not in the execution details above it.
+    expect(screen.getByText(/command: pnpm test/)).toBeInTheDocument();
+    expect(screen.queryByText('Execution details')).not.toBeInTheDocument();
+    expectNewCardOnly();
+    expect(screen.getByRole('button', { name: 'Allow' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Always allow this here' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Not now' })).toBeInTheDocument();
   });
 
-  it('includes the denial reason when Deny is submitted', () => {
+  it('sends the declared denial when Not now is pressed', () => {
     const onRespondToToolApproval = vi.fn();
     renderPendingApprovalMessage(
       [
@@ -756,72 +917,57 @@ describe('ToolCallContainer', () => {
       ],
       { onRespondToToolApproval },
     );
-    fireEvent.click(screen.getByRole('radio', { name: 'Deny' }));
-    fireEvent.change(screen.getByPlaceholderText('Enter reason for denial'), {
-      target: { value: 'Denied by user' },
-    });
-    fireEvent.click(screen.getByRole('button', { name: 'Submit' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Not now' }));
     expect(onRespondToToolApproval).toHaveBeenCalledWith(
-      expect.objectContaining({
-        approvalId: 'approval-1',
-        approved: false,
-        reason: 'Denied by user',
-      }),
+      expect.objectContaining({ approvalId: 'approval-1', approved: false }),
     );
   });
 
-  it('renders declared approval options with their labels', () => {
-    renderPendingApprovalMessage([
-      {
-        type: 'tool-call',
-        toolCallId: '1',
-        toolName: 'run_migration',
-        args: {},
-        interrupt: { type: 'human', payload: {} },
-        approval: {
-          id: 'approval-1',
-          approved: undefined,
-          options: [
-            { id: 'opt-allow', kind: 'allow-once' },
-            { id: 'opt-deny', kind: 'reject-once' },
-          ],
+  it('answers with the option ids the call declared', () => {
+    const onRespondToToolApproval = vi.fn();
+    renderPendingApprovalMessage(
+      [
+        {
+          type: 'tool-call',
+          toolCallId: '1',
+          toolName: 'run_migration',
+          args: {},
+          interrupt: { type: 'human', payload: {} },
+          approval: {
+            id: 'approval-1',
+            approved: undefined,
+            options: [
+              { id: 'opt-allow', kind: 'allow-once' },
+              { id: 'opt-deny', kind: 'reject-once' },
+            ],
+          },
         },
-      },
-    ]);
-    expect(screen.getByRole('radio', { name: 'Approve' })).toBeInTheDocument();
-    expect(screen.getByRole('radio', { name: 'Deny' })).toBeInTheDocument();
+      ],
+      { onRespondToToolApproval },
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Allow' }));
+    expect(onRespondToToolApproval).toHaveBeenLastCalledWith(
+      expect.objectContaining({ approvalId: 'approval-1', approved: true, optionId: 'opt-allow' }),
+    );
   });
 
-  it('forwards confirmation copy and grants to the denial option', () => {
+  it('shows the call in plain fields and never the raw Request block while the approval waits', () => {
     renderPendingApprovalMessage([
       {
         type: 'tool-call',
         toolCallId: '1',
-        toolName: 'run_migration',
+        toolName: 'draft_email',
         args: {},
+        argsText: JSON.stringify({ to: 'sam@example.test', subject: 'Garden club', body: 'See you at noon.' }),
         interrupt: { type: 'human', payload: {} },
-        approval: {
-          id: 'approval-1',
-          approved: undefined,
-          options: [
-            { id: 'opt-allow', kind: 'allow-once' },
-            {
-              id: 'opt-deny',
-              kind: 'reject-once',
-              grants: ['database:write'],
-              confirm: {
-                title: 'Confirm denial',
-                description: 'The migration will not run.',
-              },
-            },
-          ],
-        },
+        approval: { id: 'approval-1', approved: undefined },
       },
     ]);
-    fireEvent.click(screen.getByRole('radio', { name: 'Deny' }));
-    expect(screen.getByText('Confirm denial')).toBeInTheDocument();
-    expect(screen.getByText('The migration will not run.')).toBeInTheDocument();
-    expect(screen.getByText('database:write')).toBeInTheDocument();
+    expectNewCardOnly();
+    expect(screen.queryByTestId('tfy-tool-call-content-block')).not.toBeInTheDocument();
+    expect(screen.queryByText('Request')).not.toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Allow the assistant to use "draft email"?' })).toBeInTheDocument();
+    expect(screen.getByText(/subject: Garden club/)).toBeInTheDocument();
   });
 
   it.each([
@@ -914,7 +1060,8 @@ describe('ToolCallContainer', () => {
       ]);
 
       expect(screen.getAllByText('This request ended. Ask again if you still need it.')).toHaveLength(1);
-      expect(screen.getAllByRole('radio', { name: 'Approve' })).toHaveLength(1);
+      expect(screen.getAllByRole('button', { name: 'Allow' })).toHaveLength(1);
+      expect(screen.queryByRole('radio')).not.toBeInTheDocument();
     });
 
     it('expires the older connector card read back from saved history, and keeps the newest one answerable', async () => {
@@ -1008,7 +1155,8 @@ describe('ToolCallContainer: held search request', () => {
     const card: SentinelApprovalInfo['card'] = {
       plain_what: searchHoldCardText({
         summary: 'how do I rotate ws••••••3x safely',
-        say: 'This search contains something that looks like a password or key.',
+        say: 'This sends something that looks like a password or key.',
+        page: false,
       }),
       plain_why: null,
       cannot_be_undone: null,
@@ -1066,14 +1214,14 @@ describe('ToolCallContainer: held search request', () => {
 
   it('shows the masked arguments in the Request block of an answered hold, never the raw key', async () => {
     const { container } = renderHeldSearch({ result: 'ok' });
-    await screen.findByText('web_search');
-    fireEvent.click(screen.getByText('web_search'));
+    await screen.findByText('Searched the web');
+    fireEvent.click(screen.getByText('Searched the web'));
     const blocks = await screen.findAllByTestId('tfy-tool-call-content-block');
     expect(blocks[0]).toHaveAttribute('data-content', 'query: how do I rotate ws••••••3x safely');
     expect(container.innerHTML).not.toContain(rawKey);
   });
 
-  it('shows the masked arguments while the hold waits for an answer', async () => {
+  it('shows the masked arguments on the card while the hold waits, with no raw Request block', async () => {
     const { container } = renderHeldSearch(
       {
         interrupt: { type: 'human', payload: {} },
@@ -1088,7 +1236,8 @@ describe('ToolCallContainer: held search request', () => {
       },
       { type: 'requires-action', reason: 'tool-calls' },
     );
-    expect(await screen.findAllByTestId('tfy-tool-call-content-block')).toHaveLength(1);
+    expect(await screen.findByText('query: how do I rotate ws••••••3x safely')).toBeInTheDocument();
+    expect(screen.queryByTestId('tfy-tool-call-content-block')).not.toBeInTheDocument();
     expect(container.innerHTML).not.toContain(rawKey);
   });
 });

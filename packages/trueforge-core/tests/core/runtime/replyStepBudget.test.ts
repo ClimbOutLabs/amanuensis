@@ -2,25 +2,43 @@ import { ToolPolicyBlockedError } from '../../../src/core/errors';
 import type { ILLM, LLMCreateParamsStreaming } from '../../../src/core/llm/ILLM';
 import type { ExtendedChatCompletionChunk, RawAssistantMessageWithUsage } from '../../../src/core/llm/LLMTypes';
 import { getEmptyUsage } from '../../../src/core/llm/LLMTypes';
-import { UNBACKED_CLAIM_NOTE } from '../../../src/core/llm/replyNotices';
+import { UNBACKED_CLAIM_NOTES } from '../../../src/core/llm/replyNotices';
 import { createTurnToolCallLedger, type TurnToolCallLedger } from '../../../src/core/mcp/executeToolCalls';
 import { toolResultResponse, type IToolSet } from '../../../src/core/mcp/IMCPServer';
+import {
+  createSentinelHostContext,
+  DEFAULT_PINNED_PATH,
+  defaultSentinelServices,
+  forUnattendedRun,
+} from '../../../src/core/permissions/context';
 import { AgentThread } from '../../../src/core/runtime/AgentThread';
 import type { AgentParent } from '../../../src/core/runtime/AgentThread.types';
 import {
+  MAX_PROGRESS_STEP_REFUNDS,
   REMOVED_TOOL_RESULT,
   REMOVED_TOOL_STREAK_MESSAGE,
+  SCHEDULE_REPLY_STEP_BUDGET,
   STEP_BUDGET_SPENT_MESSAGE,
   unfinishedNotice,
 } from '../../../src/core/runtime/replyBudget';
+import { EDIT_SPACE_TOOL_NAME } from '../../../src/core/spaces/toolContract';
 import { NOOP_AGENT_TRACING } from '../../../src/core/tracing/NoopAgentTracing';
 import { finalAnswerStream, makeMockIMCPServer, makeSilentLogger, OBJECT_INPUT_SCHEMA } from '../harnessMocks';
 
 /**
  * A toolset for the reply budget. `create_event` is refused by the tool policy when `refuse` is set,
- * `run` ran and failed with an error result, and `lookup` always succeeds.
+ * `run` ran and failed with an error result, and `lookup` always succeeds. With `hostReads`, the
+ * tools are the host's own local reads, which an unattended run may call without asking.
  */
-function makeBudgetToolSet({ refuse, runFails }: { refuse: boolean; runFails: boolean }): IToolSet {
+function makeBudgetToolSet({
+  refuse,
+  runFails,
+  hostReads = false,
+}: {
+  refuse: boolean;
+  runFails: boolean;
+  hostReads?: boolean;
+}): IToolSet {
   const toolSet = makeMockIMCPServer({
     name: 'workspace',
     preload: true,
@@ -28,20 +46,30 @@ function makeBudgetToolSet({ refuse, runFails }: { refuse: boolean; runFails: bo
       { name: 'create_event', description: 'Create a calendar event', inputSchema: OBJECT_INPUT_SCHEMA, preload: true },
       { name: 'lookup', description: 'Look something up', inputSchema: OBJECT_INPUT_SCHEMA, preload: true },
       { name: 'run', description: 'Run a command', inputSchema: OBJECT_INPUT_SCHEMA, preload: true },
+      {
+        name: EDIT_SPACE_TOOL_NAME,
+        description: 'Change a space',
+        inputSchema: OBJECT_INPUT_SCHEMA,
+        preload: true,
+      },
     ],
   });
   jest.mocked(toolSet.toolCallInfo).mockImplementation(params =>
     Promise.resolve({
-      type: 'mcp',
+      type: hostReads ? 'truefoundry-system' : 'mcp',
       mcp_server_id: toolSet.id,
       mcp_server_name: toolSet.name,
       original_tool_name: params.name,
       is_approval_required: false,
+      ...(hostReads ? { read_only_hint: true, open_world_hint: false } : {}),
     }),
   );
   jest.mocked(toolSet.callTool).mockImplementation(params => {
     if (params.name === 'create_event' && refuse) {
       return Promise.reject(new ToolPolicyBlockedError(`Tool '${params.name}' is not allowed on MCP server workspace`));
+    }
+    if (params.name === EDIT_SPACE_TOOL_NAME && params.arguments?.['refused'] === true) {
+      return Promise.resolve(toolResultResponse({ text: 'Not saved.', isError: true }));
     }
     if (params.name === 'run' && runFails) {
       return Promise.resolve(toolResultResponse({ text: 'Traceback: boom', isError: true }));
@@ -85,6 +113,8 @@ interface RunInput {
   threadId?: string;
   parent?: AgentParent | undefined;
   ledger?: TurnToolCallLedger | undefined;
+  /** Set for a scheduled run: nobody watches it. */
+  unattended?: boolean | undefined;
 }
 
 async function runThread({
@@ -93,6 +123,7 @@ async function runThread({
   threadId = 'main',
   parent,
   ledger,
+  unattended = false,
 }: RunInput): Promise<{ events: unknown[]; thread: AgentThread }> {
   const modelClient: ILLM = { create, createNonStream: jest.fn() };
   const thread = new AgentThread({
@@ -112,6 +143,14 @@ async function runThread({
       instruction: 'test',
       toolSets: [toolSet],
     },
+    sentinel: unattended
+      ? createSentinelHostContext({
+          tenant_id: 't1',
+          created_by: 'u1',
+          conversation_id: 'c1',
+          services: forUnattendedRun(defaultSentinelServices({ pinned_path: DEFAULT_PINNED_PATH })),
+        })
+      : undefined,
     context: [{ role: 'user', content: 'Plan my week' }],
   });
   const events: unknown[] = [];
@@ -203,6 +242,71 @@ describe('reply step budget', () => {
     expect(JSON.stringify(model.requests[8]?.messages)).toContain(STEP_BUDGET_SPENT_MESSAGE);
     expect(toolSet.callTool).toHaveBeenCalledTimes(8);
     expect(JSON.stringify(doneEvents(events))).toContain('"status":"done"');
+  });
+
+  it('a scheduled run gets 16 main-thread steps, so a brief with a route per appointment finishes', async () => {
+    const toolSet = makeBudgetToolSet({ refuse: false, runFails: false, hostReads: true });
+    const main = SCHEDULE_REPLY_STEP_BUDGET.main;
+    const model = scriptedModel(step => (step <= main ? lookupCall(step) : finalAnswerStream()));
+
+    const { events } = await runThread({ toolSet, create: model.create, unattended: true });
+
+    expect(main).toBe(16);
+    expect(model.requests).toHaveLength(main + 1);
+    for (const request of model.requests.slice(0, main)) {
+      expect(request.tools).toBeDefined();
+    }
+    expect(model.requests[main]?.tools).toBeUndefined();
+    expect(JSON.stringify(model.requests[main]?.messages)).toContain(STEP_BUDGET_SPENT_MESSAGE);
+    expect(toolSet.callTool).toHaveBeenCalledTimes(main);
+    expect(JSON.stringify(doneEvents(events))).toContain('"status":"done"');
+  });
+
+  describe('space writes', () => {
+    const editCall = ({ step, refused }: { step: number; refused: boolean }) =>
+      toolCallStream({ id: `edit-${String(step)}`, name: EDIT_SPACE_TOOL_NAME, args: { n: step, refused } });
+
+    it('a landed space write does not spend the step, so a build in parts runs past 8 steps', async () => {
+      const toolSet = makeBudgetToolSet({ refuse: false, runFails: false });
+      const model = scriptedModel(step => (step <= 10 ? editCall({ step, refused: false }) : finalAnswerStream()));
+
+      const { thread } = await runThread({ toolSet, create: model.create });
+
+      expect(model.requests).toHaveLength(11);
+      expect(model.requests[9]?.tools).toBeDefined();
+      expect(thread.turnToolCallLedger.stepsByThread.get('main')).toBe(1);
+      expect(thread.turnToolCallLedger.progressRefundsByThread.get('main')).toBe(10);
+    });
+
+    it('stops refunding at the cap, so the reply is bounded at 8 plus the cap', async () => {
+      const toolSet = makeBudgetToolSet({ refuse: false, runFails: false });
+      const model = scriptedModel(step => editCall({ step, refused: false }));
+
+      const { thread } = await runThread({ toolSet, create: model.create });
+
+      expect(thread.turnToolCallLedger.progressRefundsByThread.get('main')).toBe(MAX_PROGRESS_STEP_REFUNDS);
+      expect(model.requests).toHaveLength(8 + MAX_PROGRESS_STEP_REFUNDS + 1);
+      expect(model.requests.at(-1)?.tools).toBeUndefined();
+      expect(JSON.stringify(model.requests.at(-1)?.messages)).toContain('Say which space you changed');
+    });
+
+    it('a refused space write refunds nothing', async () => {
+      const toolSet = makeBudgetToolSet({ refuse: false, runFails: false });
+      const model = scriptedModel(step => {
+        if (step > 8) {
+          return finalAnswerStream();
+        }
+        // A lookup between refusals keeps the failed-batch stop from ending the reply first.
+        return step % 2 === 0 ? lookupCall(step) : editCall({ step, refused: true });
+      });
+
+      const { thread } = await runThread({ toolSet, create: model.create });
+
+      expect(model.requests).toHaveLength(9);
+      expect(model.requests[8]?.tools).toBeUndefined();
+      expect(thread.turnToolCallLedger.progressRefundsByThread.get('main')).toBeUndefined();
+      expect(JSON.stringify(model.requests[8]?.messages)).not.toContain('Say which space you changed');
+    });
   });
 
   it('a call written on the forced answer is dropped, not run, and is not streamed either', async () => {
@@ -303,7 +407,7 @@ describe('reply step budget', () => {
 
     const { events } = await runThread({ toolSet, create: model.create });
 
-    expect(JSON.stringify(doneEvents(events))).toContain(escaped(UNBACKED_CLAIM_NOTE));
+    expect(JSON.stringify(doneEvents(events))).toContain(escaped(UNBACKED_CLAIM_NOTES.change));
   });
 
   it('a retryable error gets one retry, then becomes final', async () => {

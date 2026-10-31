@@ -285,7 +285,14 @@ describe('Data export route', () => {
       agent_name: 'reporter',
       persona_id: null,
       name: 'alice-daily',
-      manifest: { task: 'Write the daily summary', cron: '0 9 * * *', timezone: 'UTC', status: 'active' },
+      manifest: {
+        task: 'Write the daily summary',
+        cron: '0 9 * * *',
+        timezone: 'UTC',
+        status: 'active',
+        run_at: null,
+        kind: 'task',
+      },
       created_by_subject: subject('alice'),
       runFrom: new Date(),
     });
@@ -295,7 +302,14 @@ describe('Data export route', () => {
       agent_name: 'reporter',
       persona_id: null,
       name: 'bob-weekly',
-      manifest: { task: 'Bob weekly task', cron: '0 10 * * 1', timezone: 'UTC', status: 'paused' },
+      manifest: {
+        task: 'Bob weekly task',
+        cron: '0 10 * * 1',
+        timezone: 'UTC',
+        status: 'paused',
+        run_at: null,
+        kind: 'task',
+      },
       created_by_subject: subject('bob'),
       runFrom: new Date(),
     });

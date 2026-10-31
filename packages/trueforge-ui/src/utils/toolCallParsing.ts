@@ -5,22 +5,18 @@ import {
   DEFAULT_MAPS_TRAVEL_MODE,
   MapsRouteResultSchema,
 } from '@truefoundry/trueforge-core/core/permissions/mapsRouteSchemas';
+import {
+  SPACE_WRITE_TOO_LONG_ERROR_CODE,
+  SPACE_WRITE_TOO_LONG_NOTE,
+} from '@truefoundry/trueforge-core/core/spaces/toolContract';
 import { parse as parsePartialJson } from 'partial-json';
 
 import type { ToolCallStatus } from '../atoms/ToolCallCard.js';
 import type { MapCardData, MapPin, MapPlace, MapRefusedPlace } from '../components/MapCard.js';
-import { APPROVAL_CHOICES } from '../sentinel/approvalChoices.js';
 
 export type ApprovalOptionView = {
   id: string;
-  label: string;
   isAllow: boolean;
-  hint?: string;
-  grants?: readonly string[];
-  confirm?: {
-    title?: string;
-    description?: string;
-  };
 };
 
 export type ToolDispositionView = {
@@ -54,11 +50,8 @@ export const SANDBOX_TOOL_NAMES = new Set([
 /** MCP meta-tools that wrap actual tool calls. */
 export const MCP_META_TOOLS = new Set(['call_tool', 'list_tools', 'get_tool_info']);
 
-const APPROVAL_OPTION_CHOICES: Record<string, { label: string; hint: string }> = {
-  'allow-once': APPROVAL_CHOICES.approve,
-  'allow-always': APPROVAL_CHOICES.approveForChat,
-  'reject-once': APPROVAL_CHOICES.deny,
-};
+/** The option kinds an approval card can answer with. */
+const APPROVAL_OPTION_KINDS: ReadonlySet<string> = new Set(['allow-once', 'allow-always', 'reject-once']);
 
 const isAllowKind = (kind: string) => kind === 'allow-once' || kind === 'allow-always';
 
@@ -135,6 +128,8 @@ function isExpiredApprovalResult(content: unknown): boolean {
 
 const EMAIL_SEND_TOOL_NAMES = new Set(['send_draft', 'send_email']);
 
+const DECLINED_REASON = 'you said no';
+
 /**
  * The short plain reason a call did not run (refused, denied, or never started), or undefined when it ran.
  * Refused calls must never read as finished, so every step label is built from this.
@@ -143,7 +138,7 @@ export function parseToolNotDoneReason(content: unknown): string | undefined {
   const disposition = parseToolResultDisposition(content);
   switch (disposition?.disposition) {
     case 'denied':
-      return isExpiredApprovalResult(content) ? 'nobody answered in time' : 'you said no';
+      return isExpiredApprovalResult(content) ? 'nobody answered in time' : DECLINED_REASON;
     case 'policy_blocked':
       return parseToolRefusalNotice(content) ?? disposition.remediation ?? 'a safety rule blocked it';
     case 'never_ran':
@@ -151,6 +146,38 @@ export function parseToolNotDoneReason(content: unknown): string | undefined {
     default:
       return undefined;
   }
+}
+
+/** A call's result and its card answer. A "no" on the card fills the result locally with no envelope. */
+type ToolCallOutcomeSource = { result?: unknown; approval?: { approved?: boolean | undefined } | undefined };
+
+/** How a denied call shows, whether the result says so or the person said no on the card. */
+function deniedView({
+  expired,
+  remediation,
+}: {
+  expired: boolean;
+  remediation: string | undefined;
+}): ToolDispositionView {
+  return {
+    disposition: 'denied',
+    label: expired ? 'Expired' : 'Denied',
+    tone: 'muted',
+    ...(remediation ? { remediation } : {}),
+  };
+}
+
+/** The disposition a call shows, counting a "no" on its card before the server's result arrives. */
+export function toolCallDisposition(part: ToolCallOutcomeSource): ToolDispositionView | undefined {
+  return (
+    parseToolResultDisposition(part.result) ??
+    (part.approval?.approved === false ? deniedView({ expired: false, remediation: undefined }) : undefined)
+  );
+}
+
+/** The plain reason a call did not run, counting a "no" on its card, or undefined when it ran. */
+export function toolCallNotDoneReason(part: ToolCallOutcomeSource): string | undefined {
+  return parseToolNotDoneReason(part.result) ?? (part.approval?.approved === false ? DECLINED_REASON : undefined);
 }
 
 /** Step wording for a call that did not run: email sends say "Not sent", everything else "Not done". */
@@ -168,12 +195,7 @@ export function parseToolResultDisposition(content: unknown): ToolDispositionVie
       : undefined;
   switch (outcome.disposition) {
     case 'denied':
-      return {
-        disposition: outcome.disposition,
-        label: isExpiredApprovalResult(content) ? 'Expired' : 'Denied',
-        tone: 'muted',
-        ...(remediation ? { remediation } : {}),
-      };
+      return deniedView({ expired: isExpiredApprovalResult(content), remediation });
     case 'policy_blocked':
       return {
         disposition: outcome.disposition,
@@ -276,6 +298,53 @@ export function getToolFailureReason(
   const envelope = parseToolResultEnvelope(content);
   const visibleResult = envelope?.result ?? content;
   return findErrorText(visibleResult, 0);
+}
+
+/**
+ * Hunts a parsed tool-result payload for an `error_code` field, unwrapping the same shapes
+ * findErrorText unwraps: stringified JSON and MCP content items along the way.
+ */
+function findErrorCode(value: unknown, depth: number): string | undefined {
+  if (depth > MAX_ERROR_TEXT_SEARCH_DEPTH) return undefined;
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (trimmed[0] !== '{' && trimmed[0] !== '[') return undefined;
+    try {
+      return findErrorCode(JSON.parse(trimmed), depth + 1);
+    } catch {
+      return undefined;
+    }
+  }
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const nested = findErrorCode(item, depth + 1);
+      if (nested) return nested;
+    }
+    return undefined;
+  }
+  if (isUnknownRecord(value)) {
+    if (typeof value.error_code === 'string') return value.error_code;
+    for (const key of ['error', 'content', 'text', 'message'] as const) {
+      if (key in value) {
+        const nested = findErrorCode(value[key], depth + 1);
+        if (nested) return nested;
+      }
+    }
+  }
+  return undefined;
+}
+
+/**
+ * The plain note to show for a space write the tool layer refused for carrying too much new
+ * content in one call, or undefined for any other result. A size refusal is a normal step in
+ * building a space in parts, not a failure, so the step shows this note in place of the
+ * refusal text, which is written for the model. The refusal is told apart by the stable code
+ * its result carries, never by its wording.
+ */
+export function parseSpaceWriteTooLongNote(content: unknown): string | undefined {
+  const envelope = parseToolResultEnvelope(content);
+  const visibleResult = envelope?.result ?? content;
+  return findErrorCode(visibleResult, 0) === SPACE_WRITE_TOO_LONG_ERROR_CODE ? SPACE_WRITE_TOO_LONG_NOTE : undefined;
 }
 
 /** Truncates a failure reason to a single inline line, for display next to the outcome label. */
@@ -424,7 +493,7 @@ export function allowChatOptionId(options: readonly AuiToolApprovalOption[] | un
 }
 
 export function buildApprovalOptions(options: readonly AuiToolApprovalOption[] | undefined): ApprovalOptionView[] {
-  const declared = options?.filter(o => Object.hasOwn(APPROVAL_OPTION_CHOICES, o.kind));
+  const declared = options?.filter(o => APPROVAL_OPTION_KINDS.has(o.kind));
   if (declared && declared.length > 0) {
     const allow = declared
       .filter(o => isAllowKind(o.kind))
@@ -432,20 +501,16 @@ export function buildApprovalOptions(options: readonly AuiToolApprovalOption[] |
     const reject = declared.filter(o => !isAllowKind(o.kind));
     const mapped: ApprovalOptionView[] = [...allow, ...reject].map(o => ({
       id: o.id,
-      label: APPROVAL_OPTION_CHOICES[o.kind]?.label ?? o.id,
-      hint: APPROVAL_OPTION_CHOICES[o.kind]?.hint,
       isAllow: isAllowKind(o.kind),
-      grants: o.grants,
-      confirm: o.confirm != null ? (typeof o.confirm === 'object' ? o.confirm : {}) : undefined,
     }));
     if (reject.length === 0) {
-      mapped.push({ id: '__deny', ...APPROVAL_CHOICES.deny, isAllow: false, confirm: {} });
+      mapped.push({ id: '__deny', isAllow: false });
     }
     return mapped;
   }
   return [
-    { id: 'allow-once', ...APPROVAL_CHOICES.approve, isAllow: true },
-    { id: 'deny', ...APPROVAL_CHOICES.deny, isAllow: false, confirm: {} },
+    { id: 'allow-once', isAllow: true },
+    { id: 'deny', isAllow: false },
   ];
 }
 

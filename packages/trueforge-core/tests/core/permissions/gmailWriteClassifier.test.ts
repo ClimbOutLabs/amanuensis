@@ -141,7 +141,7 @@ describe('Gmail write classification', () => {
     const decision = await classifyTier(gmail('send_draft', { draft_id: 'd1' }, { mail_draft: CONTENT }), makeCtx());
     expect(decision.tier).toBe(3);
     expect(decision.card?.plain_what).toBe(
-      'Send "Lease \\"final\\"" from your Gmail to grace@example.com. Hidden copy: audit@example.com.',
+      'Send "Lease \\"final\\"" from your Gmail to grace@example.com. Hidden copy: audit@example.com?',
     );
     expect(decision.card?.email).toMatchObject({
       action: 'send',
@@ -173,7 +173,7 @@ describe('Gmail write classification', () => {
       makeCtx(),
     );
     expect(decision.card?.plain_what).toBe(
-      'Send "Lunch Thursday" from your Gmail to Maya Lopez (maya@example.com) and sam@example.org.',
+      'Send "Lunch Thursday" from your Gmail to Maya Lopez (maya@example.com) and sam@example.org?',
     );
     expect(decision.card?.email?.to).toEqual([
       { name: 'Maya Lopez', address: 'maya@example.com' },
@@ -193,7 +193,7 @@ describe('Gmail write classification', () => {
       ),
       makeCtx(),
     );
-    expect(decision.card?.plain_what).toContain('to other@example.org.');
+    expect(decision.card?.plain_what).toContain('to other@example.org?');
     expect(decision.card?.plain_what).toContain(
       'The name was left off this address because it looked like an address.',
     );
@@ -210,7 +210,7 @@ describe('Gmail write classification', () => {
       makeCtx(),
     );
     expect(decision.card?.plain_what).toContain(
-      'to boss@example.com (other@example.org) and Jane Doe (Acme) (jane@example.org).',
+      'to boss@example.com (other@example.org) and Jane Doe (Acme) (jane@example.org)?',
     );
     expect(decision.card?.email?.to).toEqual(to);
   });

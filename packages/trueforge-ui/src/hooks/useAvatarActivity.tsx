@@ -8,8 +8,8 @@ import { useOptionalComposerBusyState } from './useComposerBusyState.js';
 
 /** What the assistant is doing right now, as read by the avatar. Connectivity stays out:
  *  the rail's status dot already answers "is the backend reachable"; this answers
- *  "what is Aman doing". */
-export type AmanAvatarActivity = 'idle' | 'thinking' | 'writing' | 'error';
+ *  "what is the assistant doing". `waiting` means the turn is parked on the person. */
+export type AmanAvatarActivity = 'idle' | 'thinking' | 'writing' | 'waiting' | 'error';
 
 /** How long a surfaced failure holds the error pose before easing back to whatever the
  *  agent is actually doing (idle, or thinking/writing when a retry is already in flight). */
@@ -21,6 +21,8 @@ type DerivedActivityInput = {
   isBusy: boolean;
   /** True while visible response tokens are streaming into chat. */
   isTextStreaming: boolean;
+  /** True while the turn is parked on the person: an approval, an answer, or a sign-in. */
+  isWaiting: boolean;
 };
 
 type AvatarActivitySink = {
@@ -37,8 +39,9 @@ export function useAvatarActivitySink(): AvatarActivitySink | null {
   return useContext(AvatarActivitySinkContext);
 }
 
-function deriveActivity({ isBusy, isTextStreaming }: DerivedActivityInput): AmanAvatarActivity {
+function deriveActivity({ isBusy, isTextStreaming, isWaiting }: DerivedActivityInput): AmanAvatarActivity {
   if (!isBusy) return 'idle';
+  if (isWaiting) return 'waiting';
   return isTextStreaming ? 'writing' : 'thinking';
 }
 
@@ -58,7 +61,7 @@ export function AvatarActivityProvider({
 }) {
   const onActivityRef = useRef(onActivity);
   const lastEmittedRef = useRef<AmanAvatarActivity>('idle');
-  const lastDerivedRef = useRef<DerivedActivityInput>({ isBusy: false, isTextStreaming: false });
+  const lastDerivedRef = useRef<DerivedActivityInput>({ isBusy: false, isTextStreaming: false, isWaiting: false });
   // Which (callback, activity) pair was last delivered: a (re)subscribed callback that has
   // not heard the current activity gets it immediately instead of waiting for the next
   // transition. This also keeps the initial mount from double-delivering when the bridge's
@@ -213,13 +216,13 @@ export function AvatarActivityBridge() {
   const busy = useOptionalComposerBusyState();
   const isTextStreaming = useAuiState(selectTextStreaming);
   // A turn parked on a tool approval / ask-user / MCP auth still counts as busy: the agent
-  // is waiting on the user, not done.
+  // is waiting on the user, not done. The avatar shows that as its own waiting state.
   const turnBlockedOnUser = useAuiState(selectTurnBlockedOnUser);
   const isBusy = isRunning || (busy?.isBusy ?? false) || turnBlockedOnUser;
 
   useEffect(() => {
-    sink?.reportDerived({ isBusy, isTextStreaming });
-  }, [sink, isBusy, isTextStreaming]);
+    sink?.reportDerived({ isBusy, isTextStreaming, isWaiting: turnBlockedOnUser });
+  }, [sink, isBusy, isTextStreaming, turnBlockedOnUser]);
 
   return null;
 }

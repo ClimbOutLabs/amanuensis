@@ -47,7 +47,7 @@ export const PERSONAL_INSTANCE_NAMES = [
 
 export type PromptReportTurn = 'core-only' | 'calendar' | 'web';
 
-/** Typical turns, each a message the person sends: what it asks for decides which tool bundles go out. */
+/** Typical turns, each a message the person sends; every turn sends the same prompt and tools. */
 export const PROMPT_REPORT_TURNS: Record<PromptReportTurn, string> = {
   'core-only': 'Thanks, that is all for now.',
   calendar: 'Add a reminder to my calendar for Thursday at 9:00: dentist.',
@@ -265,8 +265,12 @@ export async function buildPersonalInstance(input: {
 }): Promise<PersonalInstance> {
   const logger = createLogger({ silent: true });
   const tracing = NOOP_AGENT_TRACING;
+  // The sandbox object exists only when the spec enables it, as in a real turn.
+  const sandboxEnabled = input.name === 'personal' || input.name === 'personal-with-google';
+  const spec = personalSpec({ sandbox: sandboxEnabled });
   const sandbox = new Sandbox({
     provider: sandboxProvider(),
+    fileDownloadEnabled: spec.config.sandbox.file_downloads,
     blockDestructiveToolsInCodeMode: true,
     mcpRequestTimeoutMs: 60_000,
     mcpConnectTimeoutMs: 5_000,
@@ -278,7 +282,7 @@ export async function buildPersonalInstance(input: {
     config: MEMORY_CONFIG,
     sessionId: SESSION_ID,
     previousTurnId: null,
-    sessionTitle: undefined,
+    summarize: undefined,
     providerServerName: undefined,
   };
   const space: SpaceTurnContext = {
@@ -325,9 +329,6 @@ export async function buildPersonalInstance(input: {
       authority: { tenantId: TENANT_ID, userRef: CREATED_BY },
     },
   );
-  // The sandbox object exists only when the spec enables it, as in a real turn.
-  const sandboxEnabled = input.name === 'personal' || input.name === 'personal-with-google';
-  const spec = personalSpec({ sandbox: sandboxEnabled });
   const resolved = await resolver.resolveAgentDefinition({
     spec,
     tenant_id: TENANT_ID,

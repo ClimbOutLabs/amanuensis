@@ -82,6 +82,7 @@ function makeResolver(
   personalization?: PersonalizationProfile,
   knowledge?: { block: string; hits: readonly PersonaKnowledgeHit[] },
   switchNotice?: PersonaSwitchNotice,
+  modelProperties?: (name: string) => { contextLength: number | undefined } | undefined,
 ) {
   const requested: string[] = [];
   // The resolver owns the speaker projection: callers hand over the raw
@@ -95,6 +96,7 @@ function makeResolver(
           defaultModelParams: { temperature: name === PERSONA_MODEL ? 0.1 : 0.9 },
           modelId: undefined,
           modelSupportsVision: false,
+          modelProperties: modelProperties?.(name),
         });
       },
       mcp: () => Promise.reject(new Error('unused')),
@@ -159,6 +161,17 @@ describe('PersonaTurnResourceResolver', () => {
     // The identity prompt names the persona's model; with no resolver-supplied id the catalog
     // name loses its provider prefix.
     expect(resolved.definition.modelId).toBe('persona-model');
+  });
+
+  it('sizes the persona turn against the persona window, not the chat window, and keeps compaction on the chat', async () => {
+    // Chat window equals the persona's output budget: a window taken from the chat model would fail the pre-flight guard.
+    const { resolver } = makeResolver(PERSONA, undefined, undefined, undefined, name =>
+      name === PERSONA_MODEL ? { contextLength: 200_000 } : { contextLength: 32_768 },
+    );
+    const resolved = await resolve(resolver, makeSpec());
+
+    expect(resolved.definition.modelProperties?.contextLength).toBe(200_000);
+    expect(resolved.compactionModel?.modelProperties?.contextLength).toBe(32_768);
   });
 
   it('adds the persona as one escaped section, leaving the agent instructions in place', async () => {
@@ -356,9 +369,17 @@ describe('PersonaTurnResourceResolver', () => {
       return hook;
     }
 
-    it('is undefined when no knowledge was injected', () => {
+    it('leaves the output untouched when no knowledge was injected and nothing was claimed', () => {
       const { resolver } = makeResolver(PERSONA);
-      expect(resolver.finalizeAssistantOutput).toBeUndefined();
+      expect(hookOrThrow(resolver)(outputEvent('Hello there.'))).toBeUndefined();
+    });
+
+    it('replaces a claimed switch no tool made, and keeps it once a switch ran', () => {
+      const { resolver } = makeResolver(PERSONA);
+      const claim = outputEvent('Using your existing Theo. Now talking with Theo.');
+      expect(hookOrThrow(resolver)(claim)?.content).toContain('I did not switch.');
+      resolver.switches.markSwitched();
+      expect(hookOrThrow(resolver)(claim)).toBeUndefined();
     });
 
     it('appends the Sources footer through the hook when the answer used an injected passage', () => {
@@ -386,6 +407,14 @@ describe('PersonaTurnResourceResolver', () => {
       }
       return sanitize;
     }
+
+    it('stores a real switch as a host note so the model cannot learn to fake it', () => {
+      const { resolver } = makeResolver(PERSONA);
+      resolver.switches.markSwitched();
+      expect(sanitizeOrThrow(resolver)('Using your existing Theo. Now talking with Theo.')).toBe(
+        '[The persona tool switched this chat to Theo.]',
+      );
+    });
 
     it('is set for every persona turn, knowledge or not', () => {
       const { resolver } = makeResolver(PERSONA);

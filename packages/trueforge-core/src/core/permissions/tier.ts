@@ -26,13 +26,19 @@ export const SANDBOX_SILENT_REASONS: ReadonlySet<string> = new Set([
   SANDBOX_RUN_CODE_REASON,
 ]);
 
+/** Reason code for a consequential action whose recipient or site only content the assistant read named. */
+export const CONTENT_STEERED_REASON = 'content_steered';
+
 /**
  * Tier 3 reason codes for calls the classifier ranks as a send, destructive, install or hint-escalated
- * action. A durable approval is argument-blind, so these never get chat or always scope, whatever the
- * hosting server declares about the tool.
+ * action. A standing approval is argument-blind, so these never get "Always allow" across chats, whatever the
+ * hosting server declares about the tool. Only the chat grant below may cover some of them, inside one chat.
  */
 export const GRANT_BARRED_TIER_REASONS: ReadonlySet<string> = new Set([
   'external_service',
+  'gmail_send',
+  'mail_new_recipient',
+  'mail_send',
   'destructive_action',
   'install_action',
   'mcp_destructive_hint',
@@ -42,6 +48,22 @@ export const GRANT_BARRED_TIER_REASONS: ReadonlySet<string> = new Set([
   'caldav_calendar_guests',
   'caldav_invitation_reply',
   'connector_calendar_write',
+  'schedule_write',
+  'persona_write',
+  CONTENT_STEERED_REASON,
+]);
+
+/**
+ * Consequential actions a person may answer once for the whole chat with "Always allow this here". The chat grant
+ * binds the tool and its destination, never a standing grant across chats. A send, a guest change and a steered call
+ * are never among them: each of those asks every time.
+ */
+export const CHAT_GRANTABLE_CONSEQUENCE_REASONS: ReadonlySet<string> = new Set([
+  'gmail_draft',
+  'connector_outbound',
+  'destructive_action',
+  'mcp_destructive_hint',
+  'mcp_open_world_hint',
   'schedule_write',
   'persona_write',
 ]);
@@ -61,9 +83,11 @@ export const AUTO_DENY_REASONS = [
   APPROVAL_EXPIRED_REASON_CODE,
   'destination_unverifiable',
   'incomplete_send_card',
+  'lookup_limit',
   'offline_mode',
   'outbound_guard',
-  'private_text_check',
+  'private_detail',
+  'steered_by_content',
   'tool_not_prepared',
   'unattended_run',
 ] as const;
@@ -147,15 +171,15 @@ export const Tier3ScheduleSchema = z
   .describe('The schedule a chat call creates or deletes, shown in full.')
   .openapi('Tier3Schedule');
 
-/** A specialist that a chat call adds, shown in full. Existing personas are never changed by a call. */
+/** A persona that a chat call adds, shown in full. Existing personas are never changed by a call. */
 export const Tier3PersonaSchema = z
   .object({
-    name: z.string().describe('Specialist name in plain words.'),
-    description: z.string().describe('One line on what the specialist is for.'),
-    instructions: z.string().describe('The whole instruction text the specialist follows.'),
-    model_name: z.string().describe('The model the specialist answers with.'),
+    name: z.string().describe('Persona name in plain words.'),
+    description: z.string().describe('One line on what the persona is for.'),
+    instructions: z.string().describe('The whole instruction text the persona follows.'),
+    model_name: z.string().describe('The model the persona answers with.'),
   })
-  .describe('The specialist a chat call adds, shown in full.')
+  .describe('The persona a chat call adds, shown in full.')
   .openapi('Tier3Persona');
 
 /**
@@ -201,6 +225,10 @@ export const Tier3CardSchema = z
       .nullable()
       .optional()
       .describe('For a mail send to addresses not yet on the Email list: those addresses, lowercased. Otherwise null.'),
+    mail_draft: z
+      .boolean()
+      .optional()
+      .describe('True when a card carrying mail_new_recipients approves saving a draft rather than sending.'),
   })
   .openapi('Tier3Card');
 
@@ -253,6 +281,8 @@ export interface TierDecision {
   grant_host: string | null;
   /** True for a private read: a sensitive path, or an argument with a path shape. Never eligible for a standing grant or chat scope. */
   secret_path_read: boolean;
+  /** True for a send through the host's own Email sidecar. Steering changes the reason, never this, so the send-list step still runs. */
+  mail_send: boolean;
 }
 
 /** Hash binding for a tracked executable file execution. */
@@ -290,6 +320,7 @@ export function failClosedDecision(input: { reason_detail: string | null }): Tie
     inspection: false,
     grant_host: null,
     secret_path_read: false,
+    mail_send: false,
   };
 }
 
@@ -309,6 +340,7 @@ function baseDecision(): Omit<TierDecision, 'tier' | 'reason' | 'reason_detail'>
     inspection: false,
     grant_host: null,
     secret_path_read: false,
+    mail_send: false,
   };
 }
 
@@ -369,6 +401,7 @@ export function tier3Decision(input: {
   inspection?: boolean | undefined;
   grant_host?: string | null | undefined;
   secret_path_read?: boolean | undefined;
+  mail_send?: boolean | undefined;
 }): TierDecision {
   return {
     ...baseDecision(),
@@ -385,6 +418,7 @@ export function tier3Decision(input: {
     inspection: input.inspection === true,
     grant_host: input.grant_host ?? null,
     secret_path_read: input.secret_path_read === true,
+    mail_send: input.mail_send === true,
   };
 }
 

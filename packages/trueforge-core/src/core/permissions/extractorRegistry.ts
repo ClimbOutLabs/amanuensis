@@ -520,7 +520,6 @@ export function isCalendarChangeToolName(toolName: string): boolean {
 }
 
 interface ConnectorCallInput {
-  tool_name: string;
   words: string;
   /** " on <connector>" when the connector's configured name is known. */
   where: string;
@@ -536,6 +535,8 @@ interface ConnectorFamily {
    * message to a person, so it also has to be shown in full and carry no hidden characters.
    */
   sends?: 'message' | 'content';
+  /** The call only stages a message as a draft: nothing is delivered, so its card carries no send warning. */
+  stages_message?: boolean;
   /** The card has to name a recipient. */
   needs_recipient?: boolean;
   /** Replaces the recipient when only some addresses in the params receive anything, such as a filter's sender match. */
@@ -611,14 +612,14 @@ const CONNECTOR_FAMILIES: ConnectorFamily[] = [
   {
     match: words => hasPhrase(words, 'gist'),
     sends: 'content',
-    describe: ({ tool_name, where }) => `Publish a gist with ${tool_name}${where}.`,
+    describe: ({ where }) => `Publish a gist${where}?`,
   },
   {
     match: words => hasPhrase(words, 'push_files', 'create_or_update_file', 'create_repository'),
     sends: 'content',
-    describe: ({ tool_name, where, params }) => {
+    describe: ({ where, params }) => {
       const repo = repositoryLabel(params);
-      return `Write to ${repo === null ? 'a repository' : `repository ${repo}`} with ${tool_name}${where}.`;
+      return `Write to ${repo === null ? 'a repository' : `repository ${repo}`}${where}?`;
     },
     destination: repositoryLabel,
   },
@@ -627,28 +628,29 @@ const CONNECTOR_FAMILIES: ConnectorFamily[] = [
     sends: 'message',
     needs_recipient: true,
     recipient: params => joinOrNull([...new Set(nestedRecipientValues(params, FORWARD_KEY_SET))]),
-    describe: ({ tool_name, where, fields }) =>
-      `Forward every matching message${toRecipient(fields)}, now and from here on, with ${tool_name}${where}.`,
+    describe: ({ where, fields }) =>
+      `Forward every matching message${toRecipient(fields)}, now and from here on${where}?`,
   },
   {
     match: words => hasPhrase(words, 'forward'),
     sends: 'message',
-    describe: ({ tool_name, where, fields }) => `Forward a message${toRecipient(fields)} with ${tool_name}${where}.`,
+    describe: ({ where, fields }) => `Forward a message${toRecipient(fields)}${where}?`,
   },
   {
     match: words => hasPhrase(words, 'reply'),
     sends: 'message',
-    describe: ({ tool_name, where, fields }) => `Send a reply${toRecipient(fields)} with ${tool_name}${where}.`,
+    describe: ({ where, fields }) => `Send a reply${toRecipient(fields)}${where}?`,
   },
   {
     match: words => hasPhrase(words, 'create_draft', 'draft_email', 'update_draft', 'gmail_draft', 'save_draft'),
     sends: 'message',
-    describe: ({ tool_name, where, fields }) => `Save a message draft${toRecipient(fields)} with ${tool_name}${where}.`,
+    stages_message: true,
+    describe: ({ where, fields }) => `Save a message draft${toRecipient(fields)}${where}?`,
   },
   {
     // Archiving only moves mail inside the mailbox, so it carries no recipient and is not an external send.
     match: words => hasPhrase(words, 'archive'),
-    describe: ({ tool_name, where }) => `Archive emails with ${tool_name}${where}.`,
+    describe: ({ where }) => `Archive emails${where}?`,
   },
   {
     match: words =>
@@ -666,12 +668,12 @@ const CONNECTOR_FAMILIES: ConnectorFamily[] = [
         'tavily_extract',
         'extract_url',
       ),
-    describe: ({ tool_name, where }) => `Fetch a web page with ${tool_name}${where}.`,
+    describe: ({ where }) => `Fetch a web page${where}?`,
   },
   {
     match: words => hasPhrase(words, 'search'),
-    describe: ({ tool_name, where, words }) =>
-      `${hasPhrase(words, 'web', 'tavily', 'exa', 'engine') ? 'Search the web' : 'Run a search'} with ${tool_name}${where}.`,
+    describe: ({ where, words }) =>
+      `${hasPhrase(words, 'web', 'tavily', 'exa', 'engine') ? 'Search the web' : 'Run a search'}${where}?`,
   },
 ];
 
@@ -706,6 +708,8 @@ export interface ExtractionResult {
   connector_what: string | null;
   /** The call sends data out (a send family, an external service, or a named recipient); it is never trusted by a hint or grant. */
   sends: boolean;
+  /** The call only saves a draft of a message: nothing is sent, so its card carries no send warning. */
+  staged_draft: boolean;
   /** Why a send cannot be shown to the user in full, or null. Such a send is refused, never carded. */
   incomplete_send: IncompleteSend | null;
 }
@@ -863,7 +867,10 @@ interface IncompleteSend {
   owner_message: string;
 }
 
-const REFUSALS: Record<HiddenSend | 'hidden_characters' | 'long_key' | 'too_long' | 'no_recipient', IncompleteSend> = {
+const REFUSALS: Record<
+  HiddenSend | 'hidden_characters' | 'long_key' | 'too_long' | 'no_recipient' | 'draft_no_recipient',
+  IncompleteSend
+> = {
   reply_all: {
     model_message:
       'Replying to everyone fills in the recipients after approval, so it cannot be shown. Reply on the same message with every person who should get it named in `to`.',
@@ -896,6 +903,11 @@ const REFUSALS: Record<HiddenSend | 'hidden_characters' | 'long_key' | 'too_long
   no_recipient: {
     model_message: 'This does not name who receives it. Name each recipient in `to` and try again.',
     owner_message: 'Nothing was sent: it did not say who gets it. The assistant needs to name each person.',
+  },
+  draft_no_recipient: {
+    model_message:
+      'This draft names no recipient, and a draft must say who it is for. Put the address in `recipients`, or ask the person who the draft should go to.',
+    owner_message: 'Nothing was saved: the draft did not say who it is for. The assistant needs to name the recipient.',
   },
 };
 
@@ -945,6 +957,8 @@ function incompleteSend(input: {
   truncated: boolean;
   needs_recipient: boolean;
   needs_to: boolean;
+  /** The host Email connector's own draft: it must name a recipient even though a draft sends nothing. */
+  draft_needs_recipient: boolean;
   params: Record<string, unknown>;
   fields: ExtractedCardFields;
 }): IncompleteSend | null {
@@ -973,6 +987,9 @@ function incompleteSend(input: {
   ) {
     return REFUSALS.no_recipient;
   }
+  if (input.draft_needs_recipient && input.fields.recipient === null) {
+    return REFUSALS.draft_no_recipient;
+  }
   return null;
 }
 
@@ -991,6 +1008,11 @@ export function extractCardFields(input: {
   server_name?: string | undefined;
   /** The tool is declared read-only and closed-world: a recipient or draft argument alone does not make it a send. */
   read_only_closed_world?: boolean | undefined;
+  /**
+   * The classifier judged this the host Email connector's own save_draft, from the first-party mark the
+   * extractor cannot see: its draft must name a recipient, unlike a draft-shaped call anywhere else.
+   */
+  host_mail_draft?: boolean | undefined;
 }): ExtractionResult {
   const entry = EXTRACTOR_REGISTRY.find(e => e.match(input.tool_name));
   const externalService =
@@ -1005,6 +1027,7 @@ export function extractCardFields(input: {
       connector_read: false,
       connector_what: null,
       sends: externalService,
+      staged_draft: false,
       incomplete_send: incompleteSend({
         hidden: null,
         sends: externalService,
@@ -1014,6 +1037,7 @@ export function extractCardFields(input: {
         truncated: false,
         needs_recipient: false,
         needs_to: false,
+        draft_needs_recipient: false,
         params: input.canonical_params,
         fields: base,
       }),
@@ -1060,6 +1084,7 @@ export function extractCardFields(input: {
     external_service: externalService,
     connector_read: connectorRead,
     sends,
+    staged_draft: family?.stages_message === true,
     incomplete_send: incompleteSend({
       hidden,
       sends,
@@ -1069,6 +1094,7 @@ export function extractCardFields(input: {
       truncated: outbound.truncated,
       needs_recipient: family?.needs_recipient === true,
       needs_to: isMailReply({ words: `${words}${nameWords(input.server_name ?? '')}`, params: input.canonical_params }),
+      draft_needs_recipient: input.host_mail_draft === true && family?.stages_message === true,
       params: input.canonical_params,
       fields,
     }),
@@ -1076,7 +1102,6 @@ export function extractCardFields(input: {
       family === undefined
         ? null
         : family.describe({
-            tool_name: escapeDisplayText(input.tool_name),
             words,
             where,
             fields,

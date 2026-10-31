@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { ThreadPrimitive, type ThreadMessageLike } from '@assistant-ui/react';
 import { act, render, screen, waitFor } from '@testing-library/react';
-import { HOLD_SAY, searchHoldCardText } from '@truefoundry/trueforge-core/core/permissions/searchHoldText';
+import { holdSay, searchHoldCardText } from '@truefoundry/trueforge-core/core/permissions/searchHoldText';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { AssistantMessageContainer } from '@/containers/AssistantMessageContainer.js';
@@ -36,19 +36,19 @@ type HeldSearch = { name: string; say: string; can_chat_allow: boolean; can_alwa
 const HELD_SEARCHES: HeldSearch[] = [
   {
     name: 'a search held because searches are set to ask',
-    say: HOLD_SAY.search_setting,
+    say: holdSay('Aman').search_setting,
     can_chat_allow: false,
     can_always_allow: false,
   },
   {
-    name: 'a search held after the chat read private text',
-    say: HOLD_SAY.private_read,
-    can_chat_allow: true,
+    name: 'a page read that content the assistant read steered',
+    say: holdSay('Aman').steered,
+    can_chat_allow: false,
     can_always_allow: false,
   },
   {
     name: 'a search held because it carries a key',
-    say: HOLD_SAY.secret,
+    say: holdSay('Aman').secret,
     can_chat_allow: false,
     can_always_allow: false,
   },
@@ -66,7 +66,7 @@ function approvalEvent(search: HeldSearch): Record<string, unknown> {
         source_event_id: 'evt-model',
         tier: 3,
         tier3_card: {
-          plain_what: searchHoldCardText({ summary: 'oslo weather', say: search.say }),
+          plain_what: searchHoldCardText({ summary: 'oslo weather', say: search.say, page: false }),
           destination: 'search',
           outbound_text: 'query: "oslo weather"',
         },
@@ -194,15 +194,14 @@ describe('a reopened chat with one held search', () => {
 
       it('offers a chat-wide choice only when the server allows one, and never an always choice', async () => {
         const live = await liveChoices(search);
-        expect(live.includes('Allow searches in this chat')).toBe(search.can_chat_allow);
-        expect(live).not.toContain('Approve for this chat');
+        expect(live.includes('Always allow this here')).toBe(search.can_chat_allow);
         expect(live).not.toContain('Always allow this tool');
-        expect(live.slice(0, 2)).toEqual(['Allow it', 'Not now']);
+        expect(live.slice(0, 3)).toEqual(['Allow', 'Change it', 'Not now']);
       });
     });
   }
 
-  it('falls back to the plain card when the saved cards cannot be read', async () => {
+  it('falls back to the generic ticket, never the old radio card, when the saved cards cannot be read', async () => {
     const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
     renderChat(
       HELD_SEARCHES[0] ?? { name: '', say: '', can_chat_allow: false, can_always_allow: false },
@@ -210,7 +209,9 @@ describe('a reopened chat with one held search', () => {
         throw new Error('offline');
       }),
     );
-    await waitFor(() => expect(screen.getByRole('radiogroup')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Allow' })).toBeEnabled());
+    expect(screen.getByRole('button', { name: 'Not now' })).toBeEnabled();
+    expect(screen.queryByRole('radiogroup')).not.toBeInTheDocument();
     expect(document.querySelector('[data-role="approval-loading"]')).toBeNull();
     consoleError.mockRestore();
   });

@@ -15,8 +15,8 @@ import ts from 'typescript';
 
 const DEFAULT_REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
-// The exported constants that hold every Tour card, in the order they are read.
-const TOUR_CARD_EXPORTS = ['MORNING_BRIEF', 'GENERAL_DAY_PROMPTS', 'HELP_AREAS', 'CAPABILITY_PROMPTS'];
+// The exported table that holds every Tour card, keyed by card id. The pills only name these keys.
+const TOUR_CARDS_EXPORT = 'CARDS';
 
 export class AmanGuideBuildError extends Error {
   constructor(message, options) {
@@ -41,6 +41,18 @@ function literalText(node, where) {
   throw new AmanGuideBuildError(`${where} must be a plain string.`);
 }
 
+/** The expression inside `satisfies`, `as const` and parentheses, which only add type information. */
+function withoutTypeWrappers(node) {
+  let current = node;
+  while (
+    current !== undefined &&
+    (ts.isSatisfiesExpression(current) || ts.isAsExpression(current) || ts.isParenthesizedExpression(current))
+  ) {
+    current = current.expression;
+  }
+  return current;
+}
+
 function propertyMap(objectLiteral) {
   const values = new Map();
   for (const property of objectLiteral.properties) {
@@ -51,7 +63,7 @@ function propertyMap(objectLiteral) {
   return values;
 }
 
-/** Reads the Tour cards from tourPrompts.ts source, following the constants that hold them, without running the UI. */
+/** Reads the Tour cards from the card table in tourPrompts.ts source, without running the UI. */
 function readTour(source, fileName) {
   const file = ts.createSourceFile(fileName, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
   const capabilityKeys = new Set();
@@ -81,74 +93,45 @@ function readTour(source, fileName) {
     }
   }
 
+  if (!exported.has(TOUR_CARDS_EXPORT)) {
+    throw new AmanGuideBuildError(
+      `tourPrompts.ts must export ${TOUR_CARDS_EXPORT}, the table the guide build reads the Tour cards from. Add export to its declaration.`,
+    );
+  }
+  const table = withoutTypeWrappers(declarations.get(TOUR_CARDS_EXPORT));
+  if (!ts.isObjectLiteralExpression(table)) {
+    throw new AmanGuideBuildError(
+      `${TOUR_CARDS_EXPORT} in tourPrompts.ts must be a table of cards keyed by card id. Write it as { key: { title: ... }, ... }.`,
+    );
+  }
   const cards = new Map();
-  const resolving = new Set();
-
-  function addCard(node) {
-    const props = propertyMap(node);
-    const key = literalText(props.get('key'), 'A Tour card key');
-    const label = literalText(props.get('label'), `Tour card "${key}" label`);
-    const needs = props.has('needs') ? capabilityList(props.get('needs'), `Tour card "${key}" needs`) : [];
-    const existing = cards.get(key);
-    if (existing !== undefined) {
-      if (existing.node === node) {
-        return;
-      }
-      throw new AmanGuideBuildError(`Duplicate Tour card "${key}".`);
+  for (const property of table.properties) {
+    if (!ts.isPropertyAssignment(property) || !(ts.isIdentifier(property.name) || ts.isStringLiteral(property.name))) {
+      throw new AmanGuideBuildError(
+        `Every entry in ${TOUR_CARDS_EXPORT} must be a card id and a card. Write each one as key: { title: ... }, not a spread or a computed key.`,
+      );
     }
+    const key = property.name.text;
+    const card = withoutTypeWrappers(property.initializer);
+    if (!ts.isObjectLiteralExpression(card)) {
+      throw new AmanGuideBuildError(
+        `Tour card "${key}" must be written out in ${TOUR_CARDS_EXPORT}. Write the card as an object with a title in place of the name it points to.`,
+      );
+    }
+    const props = propertyMap(card);
+    const label = literalText(props.get('title'), `Tour card "${key}" title`);
+    const needs = props.has('needs') ? capabilityList(props.get('needs'), `Tour card "${key}" needs`) : [];
     for (const name of needs) {
       if (!capabilityKeys.has(name)) {
         throw new AmanGuideBuildError(`Tour card "${key}" needs "${name}", which TourCapabilities does not declare.`);
       }
     }
-    cards.set(key, { node, label, needs });
-  }
-
-  // Walks a card list or help-area table, following names to the constants they point at.
-  function collect(node, where) {
-    if (ts.isIdentifier(node)) {
-      const name = node.text;
-      const target = declarations.get(name);
-      if (target === undefined) {
-        throw new AmanGuideBuildError(`${where} uses "${name}", which tourPrompts.ts does not declare.`);
-      }
-      if (resolving.has(name)) {
-        throw new AmanGuideBuildError(`"${name}" in tourPrompts.ts refers back to itself.`);
-      }
-      resolving.add(name);
-      collect(target, where);
-      resolving.delete(name);
-      return;
-    }
-    if (ts.isArrayLiteralExpression(node)) {
-      for (const element of node.elements) {
-        collect(element, where);
-      }
-      return;
-    }
-    if (ts.isObjectLiteralExpression(node)) {
-      if (propertyMap(node).has('key')) {
-        addCard(node);
-        return;
-      }
-      for (const value of propertyMap(node).values()) {
-        if (ts.isIdentifier(value) || ts.isArrayLiteralExpression(value) || ts.isObjectLiteralExpression(value)) {
-          collect(value, where);
-        }
-      }
-    }
-  }
-
-  for (const name of TOUR_CARD_EXPORTS) {
-    if (!exported.has(name)) {
-      throw new AmanGuideBuildError(
-        `tourPrompts.ts must export ${name}. The guide build reads the Tour cards from it.`,
-      );
-    }
-    collect(declarations.get(name), name);
+    cards.set(key, { label, needs });
   }
   if (cards.size === 0) {
-    throw new AmanGuideBuildError('No Tour cards found in tourPrompts.ts.');
+    throw new AmanGuideBuildError(
+      `No Tour cards found in ${TOUR_CARDS_EXPORT} in tourPrompts.ts. Add at least one card with a title.`,
+    );
   }
   return { cards, capabilityKeys };
 }

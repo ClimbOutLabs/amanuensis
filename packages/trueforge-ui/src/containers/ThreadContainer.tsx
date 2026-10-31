@@ -3,7 +3,6 @@
 import { ThreadPrimitive, useAuiState } from '@assistant-ui/react';
 import { useEffect, useRef, type ReactNode } from 'react';
 import { preloadMarkdownOpenUI } from '../atoms/Markdown.js';
-import { RuntimeTourWaiting } from '../components/AmanTourWaiting.js';
 import { HelpChatPanel, HelpChoices } from '../help/HelpChatPanel.js';
 import { useOptionalHelp } from '../help/HelpProvider.js';
 import { AvatarActivityBridge } from '../hooks/useAvatarActivity.js';
@@ -15,6 +14,7 @@ import { useSlot } from '../theme/SlotsProvider.js';
 import { isNewChatView } from '../utils/isNewChatView.js';
 import { ApprovalFocusProvider } from './approvalFocus.js';
 import { AssistantMessageContainer } from './AssistantMessageContainer.js';
+import { ChatNoticeContainer } from './ChatNoticeContainer.js';
 import { ConnectionStatusContainer } from './ConnectionStatusContainer.js';
 import { DocumentIngestionStatusProvider } from './DocumentIngestionStatusProvider.js';
 import { HistoryLoaderContainer } from './HistoryLoaderContainer.js';
@@ -28,6 +28,7 @@ import { TerminalErrorContainer } from './TerminalErrorContainer.js';
 import { UserEditComposerContainer } from './UserEditComposerContainer.js';
 import { UserMessageContainer } from './UserMessageContainer.js';
 import { ThreadWorkOnRepoControls } from './WorkOnRepoControls.js';
+import { WorkOnRepoPanelProvider } from './workOnRepoPanel.js';
 
 export { isNewChatView } from '../utils/isNewChatView.js';
 
@@ -119,7 +120,7 @@ export function ThreadContainer({ composer }: ThreadContainerProps) {
               <AvatarActivityBridge />
               <SpokenReplyContainer />
               <ApprovalFocusProvider>
-                <RuntimeTourWaiting>
+                <WorkOnRepoPanelProvider>
                   <ThreadPrimitive.Root asChild>
                     <ThreadRootShell>
                       {/* The empty chat opens at its top: the first frame is taller than the screen on purpose. */}
@@ -151,6 +152,7 @@ export function ThreadContainer({ composer }: ThreadContainerProps) {
                                     )}
                                   </ThreadPrimitive.Messages>
                                   <TerminalErrorContainer />
+                                  <ChatNoticeContainer />
                                   <ResumeUnavailableContainer />
                                   <ConnectionStatusContainer />
                                 </MessageGroup>
@@ -173,7 +175,7 @@ export function ThreadContainer({ composer }: ThreadContainerProps) {
                       )}
                     </ThreadRootShell>
                   </ThreadPrimitive.Root>
-                </RuntimeTourWaiting>
+                </WorkOnRepoPanelProvider>
               </ApprovalFocusProvider>
             </ComposerBusyProvider>
           </SentinelStateProvider>

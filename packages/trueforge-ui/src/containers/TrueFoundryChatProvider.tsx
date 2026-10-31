@@ -12,6 +12,7 @@ import { withImageDownscaling } from '../server/imageAttachmentAdapter.js';
 
 import { sessionIsCreateAgent } from '../atoms/lib/sessionCreateAgent.js';
 import { AvatarActivityProvider, useAvatarActivitySink, type AmanAvatarActivity } from '../hooks/useAvatarActivity.js';
+import { ChatNoticeProvider, createChatNoticeChannel } from '../hooks/useChatNotice.js';
 import {
   ComposerBusyScopeProvider,
   getActiveComposerSendId,
@@ -25,9 +26,10 @@ import {
   publishBlockedSend,
 } from '../plugins/trueforge-agent-server-adapter/sessionResync.js';
 import type { AgentUIServer } from '../server/types.js';
-import { isNetworkFailureError, LiveConnectionLostError } from '../utils/liveConnection.js';
+import { isNetworkFailureError, LiveConnectionLostError, ReplyStoppedByRestartError } from '../utils/liveConnection.js';
 import { isStaleApprovalError, publishStaleApproval } from '../utils/staleApproval.js';
 import { disarmSpokenReply } from '../utils/voiceTurn.js';
+import { turnRefusalCode } from '../utils/turnRefusal.js';
 import { PendingApprovalsReporter } from './PendingApprovalsReporter.js';
 import { ToasterProvider, useToaster } from './ToasterContainer.js';
 
@@ -149,6 +151,7 @@ function ChatRuntimeScope({
     [locallyCreatedSessionIds, server],
   );
   const streamDrops = useMemo(() => createStreamDropChannel(), []);
+  const chatNotices = useMemo(() => createChatNoticeChannel(), []);
   // composer().send() is void and swallows onNew rejections; clear optimistic
   // busy when the runtime reports a pre-stream failure (e.g. createSession).
   // The runtime hands back no attempt id of its own, so this failure is stamped with the id of
@@ -162,6 +165,13 @@ function ChatRuntimeScope({
         // and resync quietly instead of showing a failure.
         notifyComposerBusyFailure(getActiveComposerSendId(composerBusyScope), composerBusyScope);
         streamDrops.report();
+        return;
+      }
+      const refusal = error instanceof ReplyStoppedByRestartError ? 'stopped_by_restart' : turnRefusalCode(error);
+      if (refusal !== undefined) {
+        // The typed text stays in the composer and the chat says why in one line.
+        notifyComposerBusyFailure(getActiveComposerSendId(composerBusyScope), composerBusyScope);
+        chatNotices.report(refusal);
         return;
       }
       // A surfaced failure is avatar ground truth too: hold the composed error pose, then
@@ -183,7 +193,7 @@ function ChatRuntimeScope({
       }
       reportError(error);
     },
-    [activitySink, composerBusyScope, reportError, streamDrops],
+    [activitySink, chatNotices, composerBusyScope, reportError, streamDrops],
   );
 
   const runtime = useTrueFoundryAgentRuntime({
@@ -203,9 +213,11 @@ function ChatRuntimeScope({
   return (
     <AssistantRuntimeProvider runtime={runtime as never}>
       <ForegroundEventSync streamDrops={streamDrops}>
-        <ActiveSessionPermissionScope locallyCreatedSessionIds={locallyCreatedSessionIds}>
-          {children}
-        </ActiveSessionPermissionScope>
+        <ChatNoticeProvider channel={chatNotices}>
+          <ActiveSessionPermissionScope locallyCreatedSessionIds={locallyCreatedSessionIds}>
+            {children}
+          </ActiveSessionPermissionScope>
+        </ChatNoticeProvider>
       </ForegroundEventSync>
     </AssistantRuntimeProvider>
   );

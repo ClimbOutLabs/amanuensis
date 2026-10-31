@@ -1,7 +1,7 @@
 import { AgentSpecSchema, type CreatedBySubject } from '@truefoundry/trueforge-core/agent-session';
 import type { IAgentStore } from '../../src/db/agentStore';
 import { cronRunName, ScheduleNameConflictError, type IScheduleStore } from '../../src/db/scheduleStore';
-import { nextTriggerAfter } from '../../src/runtime/cron';
+import { firstRunAfter, nextTriggerAfter } from '../../src/runtime/cron';
 import { ScheduleManifestSchema, type ScheduleManifest } from '../../src/schemas/schedule';
 
 const TENANT = 'default';
@@ -64,7 +64,7 @@ export function runScheduleStoreContractSuite(deps: {
         schedule_id: schedule.id,
         status: 'scheduled',
         created_by_subject: USER_SUBJECT,
-        scheduled_for: nextTriggerAfter({ cron: m.cron, timezone: m.timezone, from: runFrom }).toISOString(),
+        scheduled_for: firstRunAfter({ manifest: m, from: runFrom }).toISOString(),
       }),
     );
     expect(await store.getScheduledRunFor({ tenant_id: TENANT, schedule_id: schedule.id })).toEqual(pendingRun);
@@ -72,6 +72,117 @@ export function runScheduleStoreContractSuite(deps: {
       throw new Error('Expected active schedule to create a pending run');
     }
     expect(await store.getRunById({ id: pendingRun.id })).toEqual(pendingRun);
+  });
+
+  it('create one-time schedule queues one run at its own time, and a done one queues none', async () => {
+    const store = deps.getScheduleStore();
+    const agent = await seedAgent();
+    const runFrom = new Date('2026-10-26T10:00:00.000Z');
+    const once = manifest({ cron: null, run_at: '2026-10-26T18:00:00-04:00', kind: 'reminder' });
+
+    const { schedule, pendingRun } = await store.createScheduleAndRun({
+      tenant_id: TENANT,
+      agent_id: agent.id,
+      agent_name: agent.name,
+      persona_id: null,
+      name: 'once',
+      manifest: once,
+      created_by_subject: USER_SUBJECT,
+      runFrom,
+    });
+    expect(pendingRun?.scheduled_for).toBe('2026-10-26T22:00:00.000Z');
+    expect(schedule.manifest).toMatchObject({ cron: null, run_at: '2026-10-26T18:00:00-04:00', kind: 'reminder' });
+
+    const finished = await store.updateScheduleAndRun({
+      tenant_id: TENANT,
+      id: schedule.id,
+      name: 'once',
+      manifest: { ...once, status: 'done' },
+      runFrom,
+    });
+    expect(finished?.schedule.status).toBe('done');
+    expect(finished?.pendingRun).toBeUndefined();
+    expect(await store.getScheduledRunFor({ tenant_id: TENANT, schedule_id: schedule.id })).toBeUndefined();
+  });
+
+  it('runs a schedule as another agent when asked, and keeps its pending run, name and manifest', async () => {
+    const store = deps.getScheduleStore();
+    const before = await seedAgent();
+    const after = await seedAgent();
+    const runFrom = new Date('2026-08-27T10:00:00.000Z');
+    const m = manifest({ cron: '0 13 * * *', timezone: 'UTC' });
+    const { schedule, pendingRun } = await store.createScheduleAndRun({
+      tenant_id: TENANT,
+      agent_id: before.id,
+      agent_name: before.name,
+      persona_id: null,
+      name: 'daily',
+      manifest: m,
+      created_by_subject: USER_SUBJECT,
+      runFrom,
+    });
+
+    const moved = await store.updateScheduleAndRun({
+      tenant_id: TENANT,
+      id: schedule.id,
+      name: 'daily',
+      manifest: m,
+      agent: { agent_id: after.id, agent_name: after.name },
+      runFrom,
+    });
+
+    expect(moved?.schedule).toMatchObject({
+      id: schedule.id,
+      agent_id: after.id,
+      agent_name: after.name,
+      name: 'daily',
+    });
+    expect(moved?.schedule.manifest).toEqual(m);
+    expect(moved?.pendingRun).toEqual(pendingRun);
+    expect(await store.getSchedule({ tenant_id: TENANT, id: schedule.id })).toMatchObject({
+      agent_id: after.id,
+      agent_name: after.name,
+    });
+  });
+
+  it('refuses to move a schedule onto an agent that already has a schedule by that name', async () => {
+    const store = deps.getScheduleStore();
+    const first = await seedAgent();
+    const second = await seedAgent();
+    const m = manifest();
+    const runFrom = new Date('2026-08-27T10:00:00.000Z');
+    const { schedule } = await store.createScheduleAndRun({
+      tenant_id: TENANT,
+      agent_id: first.id,
+      agent_name: first.name,
+      persona_id: null,
+      name: 'daily',
+      manifest: m,
+      created_by_subject: USER_SUBJECT,
+      runFrom,
+    });
+    await store.createScheduleAndRun({
+      tenant_id: TENANT,
+      agent_id: second.id,
+      agent_name: second.name,
+      persona_id: null,
+      name: 'daily',
+      manifest: m,
+      created_by_subject: USER_SUBJECT,
+      runFrom,
+    });
+
+    await expect(
+      store.updateScheduleAndRun({
+        tenant_id: TENANT,
+        id: schedule.id,
+        name: 'daily',
+        manifest: m,
+        agent: { agent_id: second.id, agent_name: second.name },
+        runFrom,
+      }),
+    ).rejects.toBeInstanceOf(ScheduleNameConflictError);
+    expect((await store.getSchedule({ tenant_id: TENANT, id: schedule.id }))?.agent_id).toBe(first.id);
   });
 
   it('keeps the persona a schedule runs as through create, read and list', async () => {

@@ -1,5 +1,7 @@
 import dedent from 'dedent';
 import { createHash } from 'node:crypto';
+import type { ChatCompletionMessageParam } from 'openai/resources/chat';
+import { MAIL_DRAFT_TOOL_NAME } from '../email/mailConnector/toolContract';
 import type { ApprovalDecision } from '../events/schema';
 import {
   EventType,
@@ -85,7 +87,7 @@ Show a picture in a reply only when the person asked for one or the picture is t
  * per-tool special case.
  */
 export const NO_TASK_NO_TOOLS_PROMPT = dedent`
-When the user's message names no concrete task, such as a greeting, an announcement of intent ("ready to...", "let's..."), or small talk, reply in text and ask what they want done. Do not call any tool, open or use a sandbox, or guess which tool they might mean.
+When the user's message names no concrete task, such as a greeting, an announcement of intent ("ready to...", "let's..."), or small talk, reply in text and ask what they want done. In that case, do not call any tool, open or use a sandbox, or guess which tool they might mean. The one exception: if the message answers a question you just asked, take the answer and continue the task, using tools as the task needs.
 `;
 
 /**
@@ -107,6 +109,30 @@ Speak to the user in plain words. Never name tools, sandboxes, shells, networks,
 `;
 
 /**
+ * Email and Calendar are connected only through the Settings form, so the app password never passes
+ * through a chat. Without this, a model asked to "set up email with this password" will try to use the
+ * password somewhere, or repeat it back. The fix is a plain instruction to point at Settings and
+ * never touch the password, not a per-tool special case.
+ */
+function connectorPasswordPrompt({ connector, owner }: { connector: string; owner: string }): string {
+  return dedent`
+${connector} is connected only in Settings, under Connectors, ${connector}, with an app password you never see. Never ask for a password in chat. If someone pastes a password or asks you to connect ${owner} with it, do not use it, save it, or pass it to a tool; tell them to enter it in Settings, Connectors, ${connector} instead.
+`;
+}
+
+export const EMAIL_PASSWORD_PROMPT = connectorPasswordPrompt({ connector: 'Email', owner: 'email' });
+
+/**
+ * A demo instance refuses to send from the Email account but lets a draft be saved. The model is told so, or it answers "send it"
+ * with a pointer to Settings and prints a draft instead of saving one.
+ */
+export const DEMO_EMAIL_PROMPT = dedent`
+On this demo, the Email account cannot send. When the person asks you to send or draft a message from it, save it as a draft with ${MAIL_DRAFT_TOOL_NAME}; that asks the person first. Use the address they gave, and fill in names you know instead of placeholders.
+`;
+
+export const CALENDAR_PASSWORD_PROMPT = connectorPasswordPrompt({ connector: 'Calendar', owner: 'their calendar' });
+
+/**
  * Host-owned source contract; it guides evidence gathering without routing requests. The shell is named as a
  * retrieval route only when the sandbox can reach a network.
  */
@@ -115,7 +141,7 @@ export function createSourceDiscoveryContract({ shellCanFetch }: { shellCanFetch
     ? ', and the sandbox exec tool when it retrieves an already identified source through an advertised network client such as curl, subject to its normal permission gate'
     : '';
   return dedent`
-For current or external facts, require adequate source contents supplied by the user or returned by a permitted retrieval or discovery capability before making the claim. Retrieval capabilities include search, browsing, lookup, and fetch tools${shellFetchClause}. No retrieval capability discovers or validates a guessed URL${shellCanFetch ? ', and the sandbox does not discover or validate a guessed URL either' : ''}. A URL alone is not evidence, whether supplied, remembered, or guessed: knowing where a source lives never substitutes for reading it. When adequate source contents have not been supplied or retrieved, do not make the claim. Either retrieve them first through a permitted capability, or, when no permitted capability can obtain them, say so plainly and abstain from claiming the fact. Treat returned sources as evidence and state uncertainty when they are incomplete or conflicting. Never invent, guess, or present a fabricated URL as an authoritative source. This is not a ban on URLs or ordinary coding commands. When a question asks what is newest, latest, or best right now, put the current year from the date given above into the search query and prefer sources dated in the last few months. When the question names a period or is about the past, search that period instead. Never type a year remembered from training data as if it were the present.
+For current or external facts, require adequate source contents supplied by the user or returned by a permitted retrieval or discovery capability before making the claim. Retrieval capabilities include search, browsing, lookup, and fetch tools${shellFetchClause}. No retrieval capability discovers or validates a guessed URL${shellCanFetch ? ', and the sandbox does not discover or validate a guessed URL either' : ''}. A URL alone is not evidence, whether supplied, remembered, or guessed: knowing where a source lives never substitutes for reading it. When adequate source contents have not been supplied or retrieved, do not make the claim. Either retrieve them first through a permitted capability, or, when no permitted capability can obtain them, say so plainly and abstain from claiming the fact. Treat returned sources as evidence and state uncertainty when they are incomplete or conflicting. Never invent, guess, or present a fabricated URL as an authoritative source. This is not a ban on URLs or ordinary coding commands. When a question asks what is newest, latest, or best right now, put the current year from the date given above into the search query and prefer sources dated in the last few months. When the question names a period or is about the past, search that period instead. Never type a year remembered from training data as if it were the present. Do not search for a person the user mentions unless they ask you to look that person up. Search for one topic at a time. When the user asks you to check a list, run several short searches of a few items each instead of one long search.
 `;
 }
 
@@ -410,6 +436,31 @@ export function hasSentHostNoteThisTurn(
   return false;
 }
 
+function isHostWrittenUserContent(content: ChatCompletionMessageParam['content']): boolean {
+  if (typeof content === 'string') {
+    return isHostWrappedText(content);
+  }
+  if (!Array.isArray(content) || content.length === 0) {
+    return false;
+  }
+  return content.every(part => part.type === 'text' && isHostWrappedText(part.text));
+}
+
+/**
+ * Index of the latest user message the person wrote, or -1 when there is none. Skips user-role
+ * messages the host wrote: internal notes such as the empty-answer nudge, and extracted file text,
+ * which follows the person's message. The one owner of "where is the person's message".
+ */
+export function personMessageIndex(messages: readonly ChatCompletionMessageParam[]): number {
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    const message = messages[i];
+    if (message?.role === 'user' && !isHostWrittenUserContent(message.content)) {
+      return i;
+    }
+  }
+  return -1;
+}
+
 export function internalSystemMessage(m: string): LLMUserMessage {
   return { role: 'user' as const, content: internalSystemTag(m) };
 }
@@ -535,6 +586,28 @@ export function withHostUniqueToolCallIds<T extends { id: string }>(input: {
   });
 }
 
+/**
+ * Carries a set of provider tool call ids across withHostUniqueToolCallIds. The remap returns
+ * the calls in order, so a fact recorded against the provider ids (for example, which calls
+ * the stream stopped early for size) is rebuilt against the ids the calls carry now. Without
+ * this, a remapped call's recorded fact is silently lost: the set still names an id no call
+ * in the reply has.
+ */
+export function remapToolCallIdSet<T extends { id: string }>(input: {
+  before: readonly T[];
+  after: readonly T[];
+  ids: ReadonlySet<string>;
+}): Set<string> {
+  const remapped = new Set<string>();
+  input.before.forEach((call, index) => {
+    const replacement = input.after[index];
+    if (replacement !== undefined && input.ids.has(call.id)) {
+      remapped.add(replacement.id);
+    }
+  });
+  return remapped;
+}
+
 /** Every call an unattended run held for the owner, in the order it was made. A repeat in one batch is not one. */
 export function findHeldToolCalls(context: readonly ContextMessage[]): InternalEnrichedToolCall[] {
   const held: InternalEnrichedToolCall[] = [];
@@ -565,6 +638,14 @@ export function makeUnknownToolInfo(toolName: string): InternalToolCallInfo {
     is_approval_required: false,
     is_client_side: false,
   };
+}
+
+/**
+ * What a reply removes when a call is declined or unavailable. A deferred call names its inner
+ * server and tool, so one down server never removes the same tool name on a healthy one.
+ */
+export function removedToolKey(info: InternalToolCallInfo): string {
+  return info.is_deferred === true ? `${info.mcp_server_name}/${info.original_tool_name}` : info.original_tool_name;
 }
 
 export function toToolCallInfo(toolInfo: InternalToolCallInfo): ToolInfo {

@@ -12,6 +12,7 @@ import type {
   BaseMCPAuthRequiredEvent,
   BaseThreadDoneEvent,
   ContextCompactionEvent,
+  ContextCompactionStartedEvent,
   DocumentIngestionEvent,
   MCPInitializeEvent,
   MCPServerAuthInfo,
@@ -173,6 +174,7 @@ export type AgentThreadEvent =
   | AgentThreadAppendContext
   | ThreadOverwriteContextEvent
   | ContextCompactionEvent
+  | ContextCompactionStartedEvent
   | InternalThreadDoneEvent
   | InternalMCPAuthRequiredEvent
   | InternalCapabilityStateEvent
@@ -298,6 +300,17 @@ export interface AgentThreadConstructorInput {
    */
   modelIdleTimeoutMs?: number | undefined;
   /**
+   * Bound in milliseconds on silence between a model call's chunks while one of
+   * its tool calls is open. Undefined falls back to DEFAULT_MODEL_TOOL_CALL_IDLE_TIMEOUT_MS.
+   */
+  modelToolCallIdleTimeoutMs?: number | undefined;
+  /**
+   * Waits in milliseconds before each retry of the forced answer after the model service said
+   * to try again later; the list's length is the retry count. Undefined falls back to
+   * FORCED_ANSWER_RETRY_BACKOFF_MS.
+   */
+  forcedAnswerRetryBackoffMs?: readonly number[] | undefined;
+  /**
    * Bound in milliseconds on the pre-LLM context processor phase producing
    * progress before the turn fails visibly instead of hanging. Undefined falls
    * back to the core default (DEFAULT_PRE_LLM_PROCESSORS_TIMEOUT_MS).
@@ -320,6 +333,8 @@ export interface AgentThreadConstructorInput {
    * answers actions an unattended run held, so approving one runs just that call.
    */
   stopAfterToolResponse?: boolean | undefined;
+  /** Built-in tool names this run does not offer the model. */
+  withheldTools?: readonly string[] | undefined;
   tracing: AgentTracing;
   logger: Logger;
 }

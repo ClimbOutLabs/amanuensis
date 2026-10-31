@@ -230,3 +230,87 @@ describe('skillCatalog delete', () => {
     assert.equal(calls.length, 1);
   });
 });
+
+describe('skillCatalog network approval', () => {
+  function catalogWithFetch(fetchImpl: typeof fetch) {
+    const client = new TrueForge({ baseUrl: 'http://harness.test', maxRetries: 0, fetch: fetchImpl });
+    return createSkillCatalog(client, { baseUrl: 'http://harness.test', fetch: fetchImpl });
+  }
+
+  const stateBody = {
+    data: { declared_hosts: ['github.com', 'api.github.com'], approved_hosts: null, send_capable: false },
+  };
+
+  it('reads the approval state from the settings route and projects it', async () => {
+    const calls: { url: string; method: string | undefined }[] = [];
+    const catalog = catalogWithFetch(async (input, init) => {
+      calls.push({ url: String(input), method: init?.method });
+      return new Response(JSON.stringify(stateBody), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    });
+
+    const state = await catalog.getSkillNetworkApproval({ id: 'ten-x' });
+
+    assert.deepEqual(calls, [
+      { url: 'http://harness.test/api/v1/settings/skills/ten-x/network-approval', method: 'GET' },
+    ]);
+    assert.deepEqual(state, {
+      declaredHosts: ['github.com', 'api.github.com'],
+      approvedHosts: null,
+      sendCapable: false,
+    });
+  });
+
+  it('approves with a PUT naming the hosts, and revokes with a DELETE', async () => {
+    const calls: { url: string; method: string | undefined; body: string | undefined }[] = [];
+    const catalog = catalogWithFetch(async (input, init) => {
+      calls.push({
+        url: String(input),
+        method: init?.method,
+        body: typeof init?.body === 'string' ? init.body : undefined,
+      });
+      return new Response(
+        JSON.stringify({
+          data: {
+            declared_hosts: ['github.com', 'api.github.com'],
+            approved_hosts: ['github.com', 'api.github.com'],
+            send_capable: false,
+          },
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      );
+    });
+
+    const state = await catalog.approveSkillNetwork({ id: 'ten-x', hosts: ['github.com', 'api.github.com'] });
+    assert.deepEqual(state.approvedHosts, ['github.com', 'api.github.com']);
+    await catalog.revokeSkillNetwork({ id: 'ten-x' });
+
+    assert.deepEqual(calls, [
+      {
+        url: 'http://harness.test/api/v1/settings/skills/ten-x/network-approval',
+        method: 'PUT',
+        body: JSON.stringify({ hosts: ['github.com', 'api.github.com'] }),
+      },
+      {
+        url: 'http://harness.test/api/v1/settings/skills/ten-x/network-approval',
+        method: 'DELETE',
+        body: undefined,
+      },
+    ]);
+  });
+
+  it('surfaces the server plain-words error when the list no longer matches', async () => {
+    const catalog = catalogWithFetch(
+      async () =>
+        new Response(
+          JSON.stringify({
+            error: { message: 'The list of sites changed since this page was loaded.' },
+          }),
+          { status: 422, headers: { 'content-type': 'application/json' } },
+        ),
+    );
+    await assert.rejects(catalog.approveSkillNetwork({ id: 'ten-x', hosts: ['github.com'] }), /list of sites changed/);
+  });
+});

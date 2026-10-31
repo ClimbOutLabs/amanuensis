@@ -1,4 +1,9 @@
-import { classifyTier, type ClassifyContext, type SentinelAction } from '../../../src/core/permissions/classifier';
+import {
+  classifyTier,
+  type ClassifyContext,
+  type ReminderLine,
+  type SentinelAction,
+} from '../../../src/core/permissions/classifier';
 import { defaultSentinelServices } from '../../../src/core/permissions/context';
 import type { Tier3Schedule } from '../../../src/core/permissions/tier';
 import { createWebSearchTurnState } from '../../../src/core/permissions/webSearch';
@@ -43,7 +48,7 @@ describe('Schedule tool classification', () => {
     expect(decision).toMatchObject({ tier: 3, reason: 'schedule_write', auto_deny: null });
     expect(decision.approval_token_id).not.toBeNull();
     expect(decision.card?.plain_what).toBe(
-      'Create the schedule "Morning brief". It runs every weekday at 8:00 AM (America/New_York) and starts as soon as you approve.',
+      'Create the schedule "Morning brief"? It runs every weekday at 8:00 AM (America/New_York) and starts as soon as you approve.',
     );
     expect(decision.card?.schedule).toEqual(MORNING_BRIEF);
   });
@@ -55,7 +60,7 @@ describe('Schedule tool classification', () => {
     );
     expect(decision).toMatchObject({ tier: 3, reason: 'schedule_write' });
     expect(decision.card?.plain_what).toBe(
-      'Delete the schedule "Morning brief", which runs every weekday at 8:00 AM (America/New_York).',
+      'Delete the schedule "Morning brief", which runs every weekday at 8:00 AM (America/New_York)?',
     );
     expect(decision.card?.cannot_be_undone).toBe('Once deleted, the schedule is gone for good.');
   });
@@ -74,5 +79,72 @@ describe('Schedule tool classification', () => {
     const decision = await classifyTier(scheduleAction('wipe_schedules'), makeCtx());
     expect(decision.tier).toBe(3);
     expect(decision.reason).not.toBe('schedule_write');
+  });
+});
+
+function reminderAction(tool_name: string, reminder?: ReminderLine): SentinelAction {
+  return {
+    tool_name,
+    canonical_params: { what: 'Take the medicine', at: '2026-10-26T18:00:00-04:00' },
+    tool_type: 'truefoundry-system',
+    mcp_server_name: 'schedules',
+    mcp_hints: { read_only_hint: false, destructive_hint: false, open_world_hint: false },
+    ...(reminder === undefined ? {} : { reminder }),
+  };
+}
+
+describe('Reminder tool classification', () => {
+  it('sets a reminder without a card and says what was set', async () => {
+    const decision = await classifyTier(
+      reminderAction('set_reminder', { when: 'Monday, October 26 at 6:00 PM', what: 'Take the medicine' }),
+      makeCtx(),
+    );
+    expect(decision).toMatchObject({
+      tier: 1,
+      reason: 'reminder_write',
+      reason_detail: 'Set a reminder for Monday, October 26 at 6:00 PM: Take the medicine',
+      card: null,
+      auto_deny: null,
+      approval_token_id: null,
+      sensitive_read: false,
+    });
+  });
+
+  it('cancels a reminder without a card', async () => {
+    const decision = await classifyTier(
+      reminderAction('cancel_reminder', { when: null, what: 'Take the medicine' }),
+      makeCtx(),
+    );
+    expect(decision).toMatchObject({
+      tier: 1,
+      reason: 'reminder_write',
+      reason_detail: 'Cancelled a reminder: Take the medicine',
+      card: null,
+      auto_deny: null,
+    });
+  });
+
+  it('lists reminders without a card', async () => {
+    const decision = await classifyTier(reminderAction('list_reminders'), makeCtx());
+    expect(decision).toMatchObject({
+      tier: 1,
+      reason: 'reminder_read',
+      reason_detail: 'Looked at your reminders.',
+      card: null,
+      auto_deny: null,
+    });
+  });
+
+  it('still runs without a card when the host gave no details', async () => {
+    const decision = await classifyTier(reminderAction('set_reminder'), makeCtx());
+    expect(decision).toMatchObject({ tier: 1, reason: 'reminder_write', reason_detail: 'Set a reminder.', card: null });
+  });
+
+  it('shortens a very long note in the line', async () => {
+    const decision = await classifyTier(
+      reminderAction('set_reminder', { when: 'Monday at 6:00 PM', what: 'x'.repeat(200) }),
+      makeCtx(),
+    );
+    expect((decision.reason_detail ?? '').length).toBeLessThan(140);
   });
 });

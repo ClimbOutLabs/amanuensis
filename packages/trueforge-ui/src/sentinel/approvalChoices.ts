@@ -1,19 +1,16 @@
+import { isSearchHoldCardText } from '@truefoundry/trueforge-core/core/permissions/searchHoldText';
 import type { SentinelApprovalCard } from './types.js';
 
 /** The approval choices, in the order every approval surface shows them. */
 export const APPROVAL_CHOICES = {
   approve: { label: 'Approve', hint: 'Allow this one call only.' },
-  approveForChat: { label: 'Approve for this chat', hint: 'Allow this kind of call for the rest of this chat.' },
-  allowSearchesForChat: {
-    label: 'Allow searches in this chat',
-    hint: 'Later searches in this chat skip the private-read check. Every other check still runs.',
-  },
+  approveForChat: { label: 'Always allow this here', hint: "Don't ask again for this kind of action in this chat." },
   alwaysAllow: { label: 'Always allow', hint: 'Remember this for every chat.' },
   alwaysAllowTool: {
     label: 'Always allow this tool',
     hint: 'Run this tool on this connector without asking, in every chat, until you remove it in settings.',
   },
-  changeIt: { label: 'Change it', hint: 'Ask the agent to change this first. Nothing runs now.' },
+  changeIt: { label: 'Change it', hint: 'Ask the persona to change this first. Nothing runs now.' },
   deny: { label: 'Deny', hint: 'Do not run this call.' },
 } as const;
 
@@ -26,9 +23,15 @@ export const NEW_RECIPIENT_CHOICES = {
   cancel: { label: "Don't send", hint: 'Do not send. Nothing is added to your send list.' },
 } as const;
 
-/** The buttons on a mail card. Edit is the same path as Change it: the agent revises the mail first. */
+/** The choices on the same card when it approves saving a draft: approving adds the addresses and saves, and nothing is sent. */
+export const NEW_RECIPIENT_DRAFT_CHOICES = {
+  approve: { label: 'Add and save draft', hint: 'Add the addresses shown to your send list, then save this draft.' },
+  cancel: { label: "Don't save", hint: 'Do not save this draft. Nothing is added to your send list.' },
+} as const;
+
+/** The buttons on a mail card. Edit is the same path as Change it: the persona revises the mail first. */
 export const EMAIL_CHOICES = {
-  edit: { label: 'Edit', hint: 'Ask the agent to change this first. Nothing is sent now.' },
+  edit: { label: 'Edit', hint: 'Ask the persona to change this first. Nothing is sent now.' },
   saveDraft: { label: 'Save as draft', hint: 'Save this as a draft. Nothing is sent.' },
 } as const;
 
@@ -42,18 +45,28 @@ export function isNewRecipientCard(card: SentinelApprovalCard): boolean {
   return (card.mail_new_recipients ?? []).length > 0;
 }
 
+/** A new-recipient card whose approval saves a draft instead of sending. */
+export function isNewRecipientDraftCard(card: SentinelApprovalCard): boolean {
+  return isNewRecipientCard(card) && card.mail_draft === true;
+}
+
 /**
  * The option id that asks the runtime for a standing grant: the patched runtime maps it to scope
  * "always" (patches/@truefoundry__assistant-ui-runtime). Keep the two in step.
  */
 export const ALWAYS_ALLOW_TOOL_OPTION_ID = 'allow-standing';
 
-/** Cards with content a person may want to edit: a mail, a calendar event, a new schedule, or a new specialist. */
+/**
+ * Cards with content a person may want to edit: a mail, a calendar event, a new schedule, a new persona, a
+ * held web search, or a mail send or draft to a new recipient, whose words they may want to change first.
+ */
 export function offersChangeIt(card: SentinelApprovalCard): boolean {
   return (
+    isSearchHoldCardText(card.plain_what) ||
     card.email !== null ||
     card.calendar_event !== null ||
     (card.schedule !== null && card.schedule.action === 'create') ||
-    card.persona !== null
+    card.persona !== null ||
+    isNewRecipientCard(card)
   );
 }

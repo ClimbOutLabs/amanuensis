@@ -60,7 +60,7 @@ machine_up() {
   local name rc=0
   machine_render "$1"
   step_begin start-machine "Starting the speech-to-text service"
-  dcm up -d >"$STEP_LOG" 2>&1 || rc=$?
+  dcm up -d --remove-orphans >"$STEP_LOG" 2>&1 || rc=$?
   if [ "$rc" != 0 ]; then
     step_fail "The speech-to-text service could not start" "Fix what the log says, then run install.sh again."
   fi
@@ -134,7 +134,7 @@ machine_running() {
 
 # Rewrites compose.yaml and dex.yaml from the registry (the owner) and the given images. Both hold no secrets.
 instance_render() {
-  local name=$1 app_image=$2 dex_image=$3 dir login_bind=0.0.0.0 app_port login_port public_url login_url email client_id sandbox_on edge_on login_host origins redirects app_ports tls_on=0 tls_port address
+  local name=$1 app_image=$2 dex_image=$3 dir login_bind=0.0.0.0 app_port login_port public_url login_url email client_id sandbox_on edge_on login_host origins redirects app_ports tls_on=0 tls_host=0 tls_volume=0 tls_port address
   dir=$(instance_dir "$name")
   owner_name_backfill "$name"
   app_port=$(reg_get "$name" app_port)
@@ -176,7 +176,10 @@ instance_render() {
   fi
   # The calendar connector is part of the compose file only once its image is known.
   local calendar_on=0
-  [ -n "${REL_CALENDAR_TAG:-}" ] && calendar_on=1
+  if [ -n "${REL_CALENDAR_TAG:-}" ]; then
+    calendar_on=1
+    calendar_secret_backfill "$name"
+  fi
   # The email connector is part of the compose file only once its image is known. Its wrapper script is copied beside the
   # compose file, because the compose file mounts it from this folder.
   local email_on=0
@@ -184,12 +187,22 @@ instance_render() {
   ensure_private_dir "$dir"
   if [ "$email_on" = 1 ]; then
     write_if_changed "$dir/mail-email-entrypoint.sh" 644 <"$REPO_ROOT/ops/compose/mail-email/entrypoint.sh" || true
+    write_if_changed "$dir/mail-account-agent.py" 644 <"$REPO_ROOT/ops/compose/mail-email/account_agent.py" || true
+    write_if_changed "$dir/mail-email-check.py" 644 <"$REPO_ROOT/ops/compose/mail-email/email_check.py" || true
+    # No account file is written here: the account lives in the connector's volume, and the
+    # installer writes it through the connector's account agent (see email_agent_write).
+  fi
+  # The https folders are mounted from the home folder itself, except when the home is the state volume
+  # (Windows): then the compose file mounts them from inside the volume, because a host folder the
+  # daemon could read does not exist there.
+  if [ "$tls_on" = 1 ]; then
+    if tls_home_in_volume; then tls_volume=1; else tls_host=1; fi
   fi
   render_template "$TEMPLATES_DIR/instance/compose.yaml.tpl" \
     "NAME=$name" "IF_CALENDAR=$calendar_on" "CALENDAR_IMAGE=${REL_CALENDAR_TAG:-}" "IF_EMAIL=$email_on" "MAIL_EMAIL_IMAGE=${REL_MAIL_EMAIL_IMAGE:-}" "STT_NETWORK=$(stt_network "$name")" "APP_IMAGE=$app_image" "DEX_IMAGE=$dex_image" "APP_PORT=$app_port" "IF_SANDBOX=$sandbox_on" \
     "IF_EDGE=$edge_on" "LOGIN_HOST=$login_host" \
     "LOGIN_PORT=$login_port" "DEX_TELEMETRY_PORT=$DEX_TELEMETRY_PORT" "APP_PORTS=$app_ports" \
-    "IF_TLS=$tls_on" "CADDY_IMAGE=$(tls_image)" "TLS_USER=$(id -u):$(id -g)" "TLS_LEAF_DIR=$(tls_leaf_dir "$name")" \
+    "IF_TLS=$tls_on" "IF_TLS_HOST=$tls_host" "IF_TLS_VOLUME=$tls_volume" "CADDY_IMAGE=$(tls_image)" "TLS_USER=$(id -u):$(id -g)" "TLS_LEAF_DIR=$(tls_leaf_dir "$name")" \
     "TLS_TRUST_DIR=$(tls_trust_dir "$name")" "TLS_HTTP_IN=$TLS_HTTP_IN" | write_if_changed "$dir/compose.yaml" 644 || true
   if [ "$tls_on" = 1 ]; then tls_prepare "$name" "$app_image"; fi
   if [ "$edge_on" = 1 ]; then edge_render "$name"; fi
@@ -224,6 +237,25 @@ owner_name_backfill() { # name
   fi
 }
 
+# The secret the app and the calendar connector share, so only the app can use the connector's account port. It is made
+# once, in the settings file, and an existing value is never changed. A file without the installer's managed part (an
+# older or hand-made one) gets the line at its end, so Compose never stops for the missing value. A missing file gets
+# nothing: the instance has no settings to run from, and the instance commands say so.
+calendar_secret_backfill() { # name
+  local env
+  env="$(instance_dir "$1")/.env"
+  [ -f "$env" ] || return 0
+  grep -q '^CALENDAR_ACCOUNT_SECRET=.\{32,\}' "$env" && return 0
+  if grep -q '^# >>> managed by the installer' "$env"; then
+    env_managed_set "$env" CALENDAR_ACCOUNT_SECRET "$(rand_hex 32)"
+    return 0
+  fi
+  {
+    grep -v '^CALENDAR_ACCOUNT_SECRET=' "$env" || true
+    printf 'CALENDAR_ACCOUNT_SECRET=%s\n' "$(rand_hex 32)"
+  } | write_if_changed "$env" 600 || true
+}
+
 # running, partial or stopped, from the containers Compose labelled for the project.
 instance_state() {
   local count
@@ -242,7 +274,10 @@ instance_up() {
   local name=$1 rc=0 recreate=()
   if [ "${2:-}" = recreate ]; then recreate=(--force-recreate); fi
   step_begin "start-$name" "Starting instance $name and waiting until it answers"
-  dc "$name" up -d ${recreate[@]+"${recreate[@]}"} --wait --wait-timeout 240 >"$STEP_LOG" 2>&1 || rc=$?
+  # A whole-project start removes the containers of services the compose file no longer lists (--remove-orphans),
+  # so a service dropped from the file, like the https front end when an instance closes back to this computer,
+  # does not linger as an orphan. Every whole-project start follows this rule.
+  dc "$name" up -d ${recreate[@]+"${recreate[@]}"} --wait --wait-timeout 240 --remove-orphans >"$STEP_LOG" 2>&1 || rc=$?
   if [ "$rc" != 0 ]; then
     instance_unhealthy "$name"
     return 1
@@ -384,6 +419,15 @@ doctor_status() {
   else
     echo n/a
   fi
+}
+
+# The fail records of a doctor JSON document, one plain detail per line, in order. The doctor prints
+# records as {"id", "state", "detail", "fix"} in that order, and the pattern allows escaped characters
+# inside a detail, so a detail that quotes something is not cut short.
+doctor_fail_details() {
+  printf '%s' "$1" |
+    grep -oE '"state":"fail","detail":"(([^"\\]|\\.)*)"' |
+    sed -e 's/^"state":"fail","detail":"//' -e 's/"$//' -e 's/\\"/"/g' -e 's/\\\\/\\/g' || true
 }
 
 # ---- inputs -----------------------------------------------------------------------------------

@@ -6,6 +6,7 @@ import { ROOT_THREAD_ID, useTrueFoundryReload } from '@truefoundry/assistant-ui-
 import { changeRequestReason, changeRequestText } from '@truefoundry/trueforge-core/core/permissions/changeRequest';
 import { useState } from 'react';
 
+import { useOptionalPersonalization } from '../components/PersonalizationContext.js';
 import { useActiveSessionCanManage } from '../hooks/useResourcePermissions.js';
 import { hasSessionResync, type HeldActionDecision } from '../plugins/trueforge-agent-server-adapter/sessionResync.js';
 import { offersChangeIt } from '../sentinel/approvalChoices.js';
@@ -16,6 +17,7 @@ import { useOptionalSentinelState } from '../sentinel/SentinelStateProvider.js';
 import type { SentinelApprovalInfo } from '../sentinel/types.js';
 import { useOptionalServer } from '../server/ServerContext.js';
 import { useSlot } from '../theme/SlotsProvider.js';
+import { assistantDisplayName } from '../utils/assistantName.js';
 
 type Local = Exclude<HeldActionStatus, { kind: 'waiting' }>;
 
@@ -33,6 +35,7 @@ export function NeedsYourOkContainer({ parts }: { parts: readonly PartState[] })
   const sessionId = useAuiState(state => state.threadListItem.remoteId ?? undefined);
   const messageStatus = useAuiState(state => state.message.status?.type);
   const [local, setLocal] = useState<ReadonlyMap<string, Local>>(new Map());
+  const assistantName = assistantDisplayName(useOptionalPersonalization()?.profile?.assistant_name);
 
   if (sentinel == null) return null;
   const toolCallIds = parts.flatMap(part => (part.type === 'tool-call' ? [part.toolCallId] : []));
@@ -71,7 +74,7 @@ export function NeedsYourOkContainer({ parts }: { parts: readonly PartState[] })
       reload();
     } catch (error) {
       console.error('Held action could not be answered', error);
-      const failure = describeHeldAnswerFailure(error);
+      const failure = describeHeldAnswerFailure(error, assistantName);
       setStatus(
         info.toolCallId,
         failure.kind === 'refused'
@@ -99,7 +102,7 @@ export function NeedsYourOkContainer({ parts }: { parts: readonly PartState[] })
   };
 
   return (
-    <NeedsYourOk notSavedCount={notSavedCount}>
+    <NeedsYourOk notSavedCount={notSavedCount} assistant={assistantName}>
       {held.map(info => (
         <HeldActionCard
           key={info.toolCallId}

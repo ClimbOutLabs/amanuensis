@@ -16,7 +16,7 @@ import {
 } from '../errors';
 import type { ApprovalDecision, TextContentPart } from '../events/schema';
 import { InstructionBuilder } from '../InstructionBuilder';
-import type { InternalToolCallInfo } from '../llm/LLMTypes';
+import type { DocumentScope, InternalToolCallInfo } from '../llm/LLMTypes';
 import { estimateTokensForString } from '../llm/usage';
 import type { MappedMCPTool } from '../mcp/convertMCPServers';
 import {
@@ -50,7 +50,12 @@ import {
 } from '../permissions';
 import { toJsonSafeParams } from '../permissions/approvalTokens';
 import { gitHardeningEnv } from '../permissions/gitHardening';
-import { gitLocalConfigIsSafe, pinAllowlistedExec } from '../permissions/shellAllowlist';
+import {
+  gitLocalConfigIsSafe,
+  pinAllowlistedExec,
+  pinReadOnlyList,
+  type PinnedReadOnlyList,
+} from '../permissions/shellAllowlist';
 import type { Tier3Card } from '../permissions/tier';
 import type { AbnormalHandoffEvidence } from '../runtime/AbnormalHandoff';
 import {
@@ -262,6 +267,13 @@ export interface SandboxOptions {
    */
   loadPackageMirrorToken?: (() => Promise<string | undefined>) | undefined;
   /**
+   * Resolves the skill network grant for this chat: the token and the approved sites, for the skills
+   * the person allowed network access to in Settings. Re-read on every command, so removing the
+   * approval in Settings takes effect on the next call. Absent outside the server runtime, and
+   * undefined when no mounted skill has approved sites.
+   */
+  loadSkillNetworkGrant?: (() => Promise<{ token: string; hosts: readonly string[] } | undefined>) | undefined;
+  /**
    * Whether the person has allowed package downloads for the bound repository. Re-read whenever a
    * download command is stamped, so the first download in a repo shows its own approval card.
    * Absent outside the server runtime; the ordinary card is shown then.
@@ -374,6 +386,20 @@ const BOUND_REPOSITORY_STATE_COMMAND =
   'git rev-parse --show-toplevel && git rev-parse --abbrev-ref HEAD && git rev-parse HEAD';
 const GIT_REFS_COMMAND =
   "git for-each-ref --include-root-refs --sort=refname --format='%(refname)%00%(objectname)%00%(symref)%00'";
+/** The same refs read without --include-root-refs, which only git 2.48 and newer knows. */
+const GIT_REFS_COMMAND_WITHOUT_ROOT_REFS =
+  "git for-each-ref --sort=refname --format='%(refname)%00%(objectname)%00%(symref)%00'";
+
+/**
+ * True when a failed refs read failed only because git does not know the
+ * --include-root-refs flag: git names the flag it rejected as an unknown option.
+ * Any other wording means the read failed for a real reason and must stay failed.
+ */
+function refsReadRejectedRootRefsFlag(failureOutput: string): boolean {
+  return failureOutput.includes('unknown option') && failureOutput.includes('include-root-refs');
+}
+/** How much of a failed capture read's output the failure log line keeps. */
+const MAX_CAPTURE_FAILURE_OUTPUT_CHARS = 500;
 
 export type RegisteredRepositoryCommandPurpose = 'build' | 'test' | 'verify';
 
@@ -1349,19 +1375,43 @@ type ReplaceTextDispatchOutcome =
   { kind: 'match_rejected'; rejection: string } | { kind: 'dispatched'; exec: ExecResult; payloadDigest: string };
 
 /** Network sentence of the exec description; the offline wording replaces the retrieval and admission claims. */
-function execNetworkSentences({ offline }: { offline: boolean }): string {
-  return offline
-    ? 'This shell has no internet access. Never use it to fetch web content.'
-    : 'Exec provides retrieval of an already identified public source; it does not provide search or discovery. Network egress requires PermissionGate admission.';
+function execNetworkSentences({
+  offline,
+  skillNetworkHosts,
+}: {
+  offline: boolean;
+  skillNetworkHosts: readonly string[];
+}): string {
+  if (!offline) {
+    return 'Exec provides retrieval of an already identified public source; it does not provide search or discovery. Network egress requires PermissionGate admission.';
+  }
+  if (skillNetworkHosts.length > 0) {
+    return `This shell can reach only the sites approved for the skills in this chat: ${skillNetworkHosts.join(', ')}. Every other site is refused. Never use it to fetch web content from any other site.`;
+  }
+  return 'This shell has no internet access. Never use it to fetch web content.';
 }
 
-export function createSandboxExecDescription({ offline }: { offline: boolean }): string {
-  return `Run a shell command in the persistent sandbox. cwd sets the repository; HOME does not. Never list, print or expose environment variables.
+/** Sent with the tools that make files: the UI downloads only files listed in this block. */
+const SANDBOX_FILE_OUTPUT_RULE =
+  'To give the user a file, list it in a sandbox_artifacts block as [name](/absolute/path); a file named only in prose never reaches them.';
+
+export function createSandboxExecDescription({
+  offline,
+  fileDownload,
+  skillNetworkHosts,
+}: {
+  offline: boolean;
+  fileDownload: boolean;
+  /** Sites approved for the skills in this chat; the middle state between offline and full network. */
+  skillNetworkHosts?: readonly string[] | undefined;
+}): string {
+  const fileOutput = fileDownload ? `\n${SANDBOX_FILE_OUTPUT_RULE}` : '';
+  return `Run a shell command in the persistent sandbox. cwd sets the repository; HOME does not. Never list, print or expose environment variables. The sandbox holds no git credentials: never ask for or search for tokens.
 Create files with write_file; edit with apply_patch or replace_text. Never bypass them with sed, Perl, Python, heredocs or temp patch files.
 Large output: use output.head_lines, output.tail_lines or output.grep.
 Python and Node go to run_code; interpreter invocations are rejected.
 Status: "ok", "exited" (see exit_code) or "failed" (the host could not run it).
-${execNetworkSentences({ offline })} Make separate tool calls in one response; the host runs read-only calls concurrently.
+${execNetworkSentences({ offline, skillNetworkHosts: skillNetworkHosts ?? [] })} Make separate tool calls in one response; the host runs read-only calls concurrently.${fileOutput}
 `;
 }
 
@@ -1414,8 +1464,14 @@ export const SANDBOX_APPLY_PATCH_DESCRIPTION =
 export const SANDBOX_REPLACE_TEXT_DESCRIPTION =
   'Replace one exact passage in a UTF-8 file beneath cwd; old_text must match exactly and uniquely. Pass old_text_lines and new_text_lines, one element per line, blank lines as empty strings. Writes atomically. Never stages, commits or pushes.';
 
-export const SANDBOX_WRITE_FILE_DESCRIPTION =
+const SANDBOX_WRITE_FILE_DESCRIPTION =
   'Create one new UTF-8 file beneath cwd. Pass content_lines, one element per line, blank lines as empty strings. Use replace_text or apply_patch for existing files. Never stages, commits or pushes.';
+
+export function createSandboxWriteFileDescription({ fileDownload }: { fileDownload: boolean }): string {
+  return fileDownload
+    ? `${SANDBOX_WRITE_FILE_DESCRIPTION} ${SANDBOX_FILE_OUTPUT_RULE}`
+    : SANDBOX_WRITE_FILE_DESCRIPTION;
+}
 
 export const SANDBOX_RUN_REGISTERED_COMMAND_DESCRIPTION =
   'Run one host-confirmed repository build, test, or verification command by its stable command ID. The host owns the exact command, repository cwd, purpose, and timeout. Do not restate the shell command.';
@@ -1752,6 +1808,8 @@ function sandboxExecPreflightFailure(input: {
   webConnectorToolHint: string;
   hasNetwork: boolean;
   packageGatewayAvailable: boolean;
+  /** True when the person approved network access for a skill mounted in this chat. */
+  skillNetworkGranted: boolean;
   resolveCache: Map<string, string | undefined>;
 }): string | undefined {
   const outputFailure = sandboxOutputPreflightFailure(input.output);
@@ -1766,8 +1824,10 @@ function sandboxExecPreflightFailure(input: {
   if (interpreterGuardFailure !== undefined) {
     return interpreterGuardFailure;
   }
-  // An impossible action must not reach an approval card.
-  if (!input.hasNetwork && sandboxCommandHasNetworkIntent(input.command)) {
+  // An impossible action must not reach an approval card. A skill network grant is the middle
+  // state: the command may try, and the gateway is the wall that refuses every site outside the
+  // grant, so the refusal here would only block the sites the person approved.
+  if (!input.hasNetwork && !input.skillNetworkGranted && sandboxCommandHasNetworkIntent(input.command)) {
     return OFFLINE_NETWORK_COMMAND_REFUSAL;
   }
   if (!input.packageGatewayAvailable && commandInstallsPypiOrNpmPackages(input.command)) {
@@ -2016,6 +2076,8 @@ export class Sandbox extends LocalToolMCP {
   private readonly boundRepository: BoundRepository | undefined;
   private readonly loadBoundRepository: (() => Promise<BoundRepository | undefined>) | undefined;
   private readonly loadPackageMirrorToken: (() => Promise<string | undefined>) | undefined;
+  private readonly loadSkillNetworkGrant:
+    (() => Promise<{ token: string; hosts: readonly string[] } | undefined>) | undefined;
   private readonly loadPackageDownloadsAllowed: (() => Promise<boolean>) | undefined;
   private readonly allowPackageDownloads: (() => Promise<void>) | undefined;
   private implementationPlanGrantContext: ImplementationPlanGrantContext | undefined;
@@ -2057,6 +2119,8 @@ export class Sandbox extends LocalToolMCP {
   private readonly runCodeService: RunCodeBackend | undefined;
   /** The person's download setting for the bound repository, read before each tool-list read and call. */
   private packageDownloadsAllowedForChat = false;
+  /** Sites approved for the skills in this chat, read before each tool-list read; empty means no grant. */
+  private skillNetworkHostsForChat: readonly string[] = [];
   /** host sink for harvested run_code file bytes; undefined when the host wires no persistence. */
   private readonly runCodeHarvestSink: ((files: HarvestedFile[]) => Promise<void>) | undefined;
   /**
@@ -2119,6 +2183,7 @@ export class Sandbox extends LocalToolMCP {
     this.boundRepository = options.boundRepository;
     this.loadBoundRepository = options.loadBoundRepository;
     this.loadPackageMirrorToken = options.loadPackageMirrorToken;
+    this.loadSkillNetworkGrant = options.loadSkillNetworkGrant;
     this.loadPackageDownloadsAllowed = options.loadPackageDownloadsAllowed;
     this.allowPackageDownloads = options.allowPackageDownloads;
     this.onRepositorySources = options.onRepositorySources;
@@ -2219,6 +2284,7 @@ export class Sandbox extends LocalToolMCP {
         webConnectorToolHint: this.webConnectorToolHint,
         hasNetwork: this.hasNetwork(),
         packageGatewayAvailable: this.packageGatewayAvailable(),
+        skillNetworkGranted: this.skillNetworkHostsForChat.length > 0,
         resolveCache: this.execGuardResolveCache,
       }) !== undefined;
     const invalidWriteFilePath =
@@ -2348,13 +2414,18 @@ export class Sandbox extends LocalToolMCP {
     // approval-required=false with their existing pre-dispatch failure.
     const sentinelHost = this.sentinelContext;
     let sentinelStamp: ReturnType<typeof stampSentinelDecision> | undefined;
+    let classificationWorkspaceCwd: string | null = null;
     if (sentinelHost !== undefined) {
+      // The workspace classification judges this call against: the bound repository, else the
+      // session's, else the provider's default. Recorded on the call below so pre-dispatch
+      // verification re-checks containment against this same root.
+      classificationWorkspaceCwd =
+        this.boundRepository?.workspace_cwd ?? sentinelHost.workspace_cwd ?? this.provider.getWorkspaceDir() ?? null;
       const sentinelDecision = await classifyHostToolCall({
         sentinel: sentinelHost,
         repository_id: this.boundRepository?.repository_id ?? null,
         // Never the call's own cwd: a model-supplied cwd would make itself the workspace.
-        workspace_cwd:
-          this.boundRepository?.workspace_cwd ?? sentinelHost.workspace_cwd ?? this.provider.getWorkspaceDir() ?? null,
+        workspace_cwd: classificationWorkspaceCwd,
         // Chosen by the provider, never by a path. A remote sandbox's paths are judged by name because the server
         // cannot follow its symlinks; the slot agent's O_NOFOLLOW walk and the guest's own view contain those.
         path_resolution: this.provider.filesystem,
@@ -2468,6 +2539,9 @@ export class Sandbox extends LocalToolMCP {
       mint_tool_name: params.name,
       mint_canonical_params: toJsonSafeParams(effectiveArguments ?? {}),
       ...(this.provider.filesystem === undefined ? {} : { path_resolution: this.provider.filesystem }),
+      // The workspace classification judged against, so the pre-dispatch recheck uses the
+      // same root even when the session itself has no workspace bound.
+      ...(sentinelStamp === undefined ? {} : { workspace_cwd: classificationWorkspaceCwd }),
       original_tool_name:
         params.name === SANDBOX_EXEC_TOOL_NAME
           ? purpose === undefined
@@ -2855,6 +2929,7 @@ export class Sandbox extends LocalToolMCP {
 
   override async listTools() {
     await this.refreshPackageDownloadsAllowed();
+    await this.refreshSkillNetworkHosts();
     return super.listTools();
   }
 
@@ -2871,7 +2946,17 @@ export class Sandbox extends LocalToolMCP {
     // tool-list read so newly staged attachments are advertised.
     return base.map(tool => {
       if (tool.name === SANDBOX_EXEC_TOOL_NAME) {
-        return { ...tool, description: createSandboxExecDescription({ offline: !this.hasNetwork() }) };
+        return {
+          ...tool,
+          description: createSandboxExecDescription({
+            offline: !this.hasNetwork(),
+            fileDownload: this.fileDownloadEnabled,
+            skillNetworkHosts: this.skillNetworkHostsForChat,
+          }),
+        };
+      }
+      if (tool.name === SANDBOX_WRITE_FILE_TOOL_NAME) {
+        return { ...tool, description: createSandboxWriteFileDescription({ fileDownload: this.fileDownloadEnabled }) };
       }
       return tool.name === SANDBOX_RUN_CODE_TOOL_NAME
         ? { ...tool, description: this.renderRunCodeDescription() }
@@ -3122,7 +3207,6 @@ export class Sandbox extends LocalToolMCP {
     }
 
     this.buildSchemaSection(sandboxInstructions);
-    this.buildSkillsSection(sandboxInstructions);
     this.buildMCPSection(sandboxInstructions);
     this.buildFileUploadsSection(sandboxInstructions);
 
@@ -3178,7 +3262,8 @@ export class Sandbox extends LocalToolMCP {
     );
   }
 
-  private buildSkillsSection(builder: InstructionBuilder): void {
+  /** The skills index: kept out of the sandbox guidance, so the model always knows which skills exist. */
+  buildSkillsInstruction(builder: InstructionBuilder): void {
     builder.addContent(this.renderSkillsSection());
   }
 
@@ -3796,8 +3881,11 @@ export class Sandbox extends LocalToolMCP {
     // Only the model's own commands can carry a package mirror grant: host-built commands (git,
     // verification, file reads) never download packages and never see the token.
     let packageMirrorToken: string | undefined;
+    // The skill network grant follows the same rule: only the model's own commands carry it.
+    let skillNetworkGrant: { token: string; hosts: readonly string[] } | undefined;
     if (!input.hostAuthored) {
       packageMirrorToken = await this.resolvePackageMirrorToken();
+      skillNetworkGrant = await this.resolveSkillNetworkGrant();
       if (packageMirrorToken !== undefined && commandDownloadsPackages(input.command)) {
         const refusal = await this.packageGitDependencyRefusal({
           sandboxId: input.sandboxId,
@@ -3821,6 +3909,9 @@ export class Sandbox extends LocalToolMCP {
       ...(input.signal === undefined ? {} : { signal: input.signal }),
       ...(input.approvedGitRemotes === undefined ? {} : { approvedGitRemotes: input.approvedGitRemotes }),
       ...(packageMirrorToken === undefined ? {} : { packageMirrorToken }),
+      ...(skillNetworkGrant === undefined
+        ? {}
+        : { skillNetworkToken: skillNetworkGrant.token, skillNetworkHosts: skillNetworkGrant.hosts }),
       ...(useProviderLock && input.workspaceRoot !== undefined
         ? { workspaceLock: { workspaceRoot: input.workspaceRoot } }
         : {}),
@@ -3881,6 +3972,32 @@ export class Sandbox extends LocalToolMCP {
       return await load();
     } catch (error) {
       this.logger.warn('Could not resolve the package mirror grant; the command runs offline', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return undefined;
+    }
+  }
+
+  /** Reads the approved skill sites into the cache. A failed read keeps the list empty, never wider. */
+  private async refreshSkillNetworkHosts(): Promise<void> {
+    const grant = await this.resolveSkillNetworkGrant();
+    this.skillNetworkHostsForChat = grant?.hosts ?? [];
+  }
+
+  /**
+   * The skill network grant for this chat, or undefined when no mounted skill has approved sites.
+   * A resolver failure keeps the sandbox offline, never the reverse.
+   */
+  private async resolveSkillNetworkGrant(): Promise<{ token: string; hosts: readonly string[] } | undefined> {
+    const load = this.loadSkillNetworkGrant;
+    if (load === undefined) {
+      return undefined;
+    }
+    try {
+      const grant = await load();
+      return grant !== undefined && grant.hosts.length > 0 ? grant : undefined;
+    } catch (error) {
+      this.logger.warn('Could not resolve the skill network grant; the command runs offline', {
         error: error instanceof Error ? error.message : String(error),
       });
       return undefined;
@@ -3979,29 +4096,102 @@ export class Sandbox extends LocalToolMCP {
       return undefined;
     }
     const env = gitHardeningEnv({ workspaceRoot: hardeningRoot });
-    const read = async (input: { command: string; commandCwd: string | undefined }): Promise<string | undefined> => {
-      const result = await this.hostExec({
+    let failureLogged = false;
+    const read = async (input: {
+      label: string;
+      command: string;
+      commandCwd: string | undefined;
+      withoutRootRefsCommand?: string | undefined;
+    }): Promise<string | undefined> => {
+      let result = await this.hostExec({
         sandboxId,
         command: input.command,
         cwd: input.commandCwd,
         env,
         ...(input.commandCwd === undefined ? {} : { workspaceLock: { workspaceRoot: input.commandCwd } }),
       });
-      return successfulExec(result) ? result.response.result : undefined;
+      if (
+        !successfulExec(result) &&
+        input.withoutRootRefsCommand !== undefined &&
+        refsReadRejectedRootRefsFlag(execResultOutputText(result))
+      ) {
+        // The git here predates the --include-root-refs flag, so the same read runs
+        // once more without it. The capture records HEAD and the branch separately,
+        // so the retried read still covers every ref this git can name.
+        result = await this.hostExec({
+          sandboxId,
+          command: input.withoutRootRefsCommand,
+          cwd: input.commandCwd,
+          env,
+          ...(input.commandCwd === undefined ? {} : { workspaceLock: { workspaceRoot: input.commandCwd } }),
+        });
+      }
+      const failureOutput = result.success ? result.response.result : result.error;
+      const failureExitCode = result.success ? result.response.exitCode : null;
+      if (successfulExec(result)) {
+        return result.response.result;
+      }
+      if (!failureLogged) {
+        failureLogged = true;
+        // The capture fails closed from here and the caller can only report that it
+        // failed. This line is the record of why: which read failed, where it ran, and
+        // what git said, so the next live failure names its own cause.
+        this.logger.warn('Git repository state capture failed', {
+          repositoryId: this.boundRepository?.repository_id ?? null,
+          workspaceRoot: hardeningRoot,
+          read: input.label,
+          cwd: input.commandCwd ?? null,
+          exitCode: failureExitCode,
+          error: failureOutput.slice(0, MAX_CAPTURE_FAILURE_OUTPUT_CHARS),
+        });
+      }
+      return undefined;
     };
 
     try {
-      const workspaceRoot = (await read({ command: 'git rev-parse --show-toplevel', commandCwd: cwd }))?.trim();
+      const workspaceRoot = (
+        await read({
+          label: 'git rev-parse --show-toplevel',
+          command: 'git rev-parse --show-toplevel',
+          commandCwd: cwd,
+        })
+      )?.trim();
       if (!workspaceRoot) {
         return undefined;
       }
-      const branch = (await read({ command: 'git rev-parse --abbrev-ref HEAD', commandCwd: workspaceRoot }))?.trim();
-      const head = (await read({ command: 'git rev-parse HEAD', commandCwd: workspaceRoot }))?.trim();
-      const refs = await read({ command: GIT_REFS_COMMAND, commandCwd: workspaceRoot });
-      const taggedTrackedPaths = await read({ command: 'git ls-files -v -z', commandCwd: workspaceRoot });
-      const indexEntries = await read({ command: GIT_INDEX_ENTRIES_COMMAND, commandCwd: workspaceRoot });
-      const trackedWorktreeListing = await read({ command: TRACKED_WORKTREE_COMMAND, commandCwd: workspaceRoot });
+      const branch = (
+        await read({
+          label: 'git rev-parse --abbrev-ref HEAD',
+          command: 'git rev-parse --abbrev-ref HEAD',
+          commandCwd: workspaceRoot,
+        })
+      )?.trim();
+      const head = (
+        await read({ label: 'git rev-parse HEAD', command: 'git rev-parse HEAD', commandCwd: workspaceRoot })
+      )?.trim();
+      const refs = await read({
+        label: 'git for-each-ref',
+        command: GIT_REFS_COMMAND,
+        commandCwd: workspaceRoot,
+        withoutRootRefsCommand: GIT_REFS_COMMAND_WITHOUT_ROOT_REFS,
+      });
+      const taggedTrackedPaths = await read({
+        label: 'git ls-files -v -z',
+        command: 'git ls-files -v -z',
+        commandCwd: workspaceRoot,
+      });
+      const indexEntries = await read({
+        label: 'git ls-files -s -z',
+        command: GIT_INDEX_ENTRIES_COMMAND,
+        commandCwd: workspaceRoot,
+      });
+      const trackedWorktreeListing = await read({
+        label: 'tracked worktree listing',
+        command: TRACKED_WORKTREE_COMMAND,
+        commandCwd: workspaceRoot,
+      });
       const untrackedPathList = await read({
+        label: 'git ls-files --others --exclude-standard -z',
         command: 'git ls-files --others --exclude-standard -z',
         commandCwd: workspaceRoot,
       });
@@ -4032,6 +4222,7 @@ export class Sandbox extends LocalToolMCP {
       for (const path of untrackedPaths) {
         const objectSha = (
           await read({
+            label: 'git hash-object',
             command: `git hash-object --no-filters -- ${shellEscape(path)}`,
             commandCwd: workspaceRoot,
           })
@@ -4973,7 +5164,18 @@ export class Sandbox extends LocalToolMCP {
         ? undefined
         : pinAllowlistedExec({ command: input.exec.command, config: allowlist, workspace_root: workspaceRoot });
     if (pinned === undefined) {
-      return { exec: input.exec, env: {}, preflight: undefined };
+      const list =
+        allowlist === undefined
+          ? undefined
+          : pinReadOnlyList({
+              command: input.exec.command,
+              config: allowlist,
+              workspace_root: workspaceRoot,
+              cwd: input.exec.cwd ?? workspaceRoot ?? '/',
+            });
+      return list === undefined
+        ? { exec: input.exec, env: {}, preflight: undefined }
+        : this.preparePinnedList({ sandboxId: input.sandboxId, exec: input.exec, list });
     }
     if (pinned.git_needs_workspace_root) {
       return {
@@ -5010,6 +5212,57 @@ export class Sandbox extends LocalToolMCP {
       env: pinned.env,
       preflight,
     };
+  }
+
+  /**
+   * A list of reads runs as the pinned form of each of its commands, joined by the list's own separators, so no
+   * command in it is looked up on the sandbox PATH. Each directory a git step runs in gets the same config probe as a
+   * single git command, under the same workspace lock.
+   */
+  private preparePinnedList(input: { sandboxId: string; exec: SandboxRuntimeExecInput; list: PinnedReadOnlyList }): {
+    exec: SandboxRuntimeExecInput;
+    env: Record<string, string>;
+    preflight: ExecPreflight | undefined;
+  } {
+    const { list } = input;
+    if (list.git_needs_workspace_root) {
+      return { exec: input.exec, env: {}, preflight: () => Promise.resolve(GIT_CONFIG_UNREADABLE_REFUSAL) };
+    }
+    const pinnedCommand = (argv: readonly string[]): string =>
+      [ENV_BINARY, `PATH=${list.pinned_path}`, ...argv].map(shellEscape).join(' ');
+    const command = list.steps
+      .map((step, index) => {
+        const text = step.kind === 'cd' ? `cd ${shellEscape(step.dir)}` : pinnedCommand(step.argv);
+        const separator = list.separators[index];
+        return separator === undefined ? text : `${text} ${separator}`;
+      })
+      .join(' ');
+    const preflight: ExecPreflight | undefined =
+      list.probes.length === 0
+        ? undefined
+        : async () => {
+            for (const probeStep of list.probes) {
+              const probe = await this.hostExec({
+                sandboxId: input.sandboxId,
+                command: pinnedCommand(probeStep.argv),
+                cwd: probeStep.cwd,
+                env: { ...list.env, LC_ALL: 'C' },
+              });
+              if (!probe.success) {
+                return GIT_CONFIG_UNREADABLE_REFUSAL;
+              }
+              if (probe.response.exitCode !== 0) {
+                return /git repository/iu.test(probe.response.result)
+                  ? 'This directory is not a git repository, so this git command cannot run.'
+                  : GIT_CONFIG_UNREADABLE_REFUSAL;
+              }
+              if (!gitLocalConfigIsSafe(probe.response.result)) {
+                return GIT_CONFIG_UNSAFE_REFUSAL;
+              }
+            }
+            return undefined;
+          };
+    return { exec: { ...input.exec, command }, env: list.env, preflight };
   }
 
   /**
@@ -5122,6 +5375,33 @@ export class Sandbox extends LocalToolMCP {
     }
   }
 
+  /**
+   * A command refused before it ran leaves one row in the activity log, so a stopped attempt is
+   * visible beside the actions that ran. The refusal itself is unchanged, and a failed write is
+   * only logged, never a reason to change what the caller is told.
+   */
+  private async recordPreflightRefusal(refusal: string): Promise<void> {
+    const sentinel = this.sentinelContext;
+    const writer = sentinel?.services.audit ?? null;
+    if (sentinel === undefined || writer === null) {
+      return;
+    }
+    try {
+      await writer.record({
+        tenant_id: sentinel.tenant_id,
+        created_by: sentinel.created_by,
+        conversation_id: sentinel.conversation_id,
+        tier: 3,
+        tool_name: SANDBOX_EXEC_TOOL_NAME,
+        description: refusal,
+        outcome: 'auto_denied',
+        auto_deny_reason: null,
+      });
+    } catch (error) {
+      this.logger.warn('Could not record a refused command in the activity log', extractErrorLogFields(error));
+    }
+  }
+
   private async handleExec(
     input: SandboxRuntimeExecInput,
     approvalDecision?: ApprovalDecision,
@@ -5142,9 +5422,11 @@ export class Sandbox extends LocalToolMCP {
       webConnectorToolHint: this.webConnectorToolHint,
       hasNetwork: this.hasNetwork(),
       packageGatewayAvailable: this.packageGatewayAvailable(),
+      skillNetworkGranted: this.skillNetworkHostsForChat.length > 0,
       resolveCache: this.execGuardResolveCache,
     });
     if (preflightFailure !== undefined) {
+      await this.recordPreflightRefusal(preflightFailure);
       return hostRefusalResponse(preflightFailure);
     }
     const effect = sandboxInvocationPolicy({ command: resolvedInput.command, purpose: resolvedInput.purpose }).effect;
@@ -6225,7 +6507,7 @@ export class Sandbox extends LocalToolMCP {
         status: persisted ? 'active' : 'submission_approved_once',
         message: persisted
           ? 'The implementation plan grant is active for this chat until revoked or repository state drifts.'
-          : 'The plan submission was approved for this call only, so no reusable plan grant was created. Choose Approve for this chat to create one.',
+          : 'The plan submission was approved for this call only, so no reusable plan grant was created. Choose Always allow this here to create one.',
       }),
     });
   }
@@ -6298,6 +6580,31 @@ export class Sandbox extends LocalToolMCP {
   /** Download an attachment previously staged by {@link uploadUserFile}. */
   async downloadUserFile(filePath: string): Promise<Buffer> {
     const { sandboxId, canonicalFilePath } = await this.canonicalStagedFilePath(filePath);
+    return await this.provider.downloadFile({ sandboxId, path: canonicalFilePath });
+  }
+
+  /**
+   * The folders the document reader may read without asking: where uploads are staged, and the
+   * bound project folder. Host-derived from the provider and the session binding, so the
+   * permission classifier can check a document path before the tool runs.
+   */
+  documentReadScope(): DocumentScope {
+    return {
+      staged_uploads_dir: this.provider.getFileUploadsDir(this.promptSandboxId()),
+      workspace_cwd: this.boundRepository?.workspace_cwd ?? null,
+      path_resolution: this.provider.filesystem ?? null,
+    };
+  }
+
+  /**
+   * Read one document file's bytes from the sandbox, resolving the path to its real location
+   * first. The document bridge stages these bytes as an upload before anything reads them;
+   * unlike {@link createDocumentSnapshot} this does not require the path to be staged already.
+   */
+  async downloadDocumentSourceFile(filePath: string): Promise<Buffer> {
+    const { sandboxInfo } = await this.ensureReadySandbox();
+    const sandboxId = this.providerSandboxId(sandboxInfo.sandbox_id);
+    const canonicalFilePath = await this.canonicalSandboxPath({ sandboxId, path: filePath });
     return await this.provider.downloadFile({ sandboxId, path: canonicalFilePath });
   }
 

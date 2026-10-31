@@ -5,443 +5,573 @@ import { TrueForge } from "../../../src/Client";
 import { mockServerPool } from "../../mock-server/MockServerPool";
 
 describe("ModelProvidersClient", () => {
-    
     test("list (1)", async () => {
         const server = mockServerPool.createServer();
-        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
-        
-        const rawResponseBody = { "data" : [ { "env_managed" : true , "manifest" : { "auth" : { "api_key" : "api_key" } , "models" : [ { "model_id" : "model_id" , "name" : "name" , "properties" : { } } ] , "type" : "alibaba" } , "name" : "name" } ] };
-        
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
+
+        const rawResponseBody = {
+            data: [
+                {
+                    env_managed: true,
+                    manifest: {
+                        auth: { api_key: "api_key" },
+                        models: [{ model_id: "model_id", name: "name", properties: {} }],
+                        type: "alibaba",
+                    },
+                    name: "name",
+                },
+            ],
+        };
+
         server
             .mockEndpoint()
-            .get("/api/v1/settings/model-providers").respondWith()
-            .statusCode(200).jsonBody(rawResponseBody)
-                .build();
+            .get("/api/v1/settings/model-providers")
+            .respondWith()
+            .statusCode(200)
+            .jsonBody(rawResponseBody)
+            .build();
 
-        
-                        
-                                const response = await client.settings.modelProviders.list();
-                                expect(response).toEqual({
-    data: [{
-            envManaged: true,
-            manifest: {
-                auth: {
-                    apiKey: "api_key"
+        const response = await client.settings.modelProviders.list();
+        expect(response).toEqual({
+            data: [
+                {
+                    envManaged: true,
+                    manifest: {
+                        auth: {
+                            apiKey: "api_key",
+                        },
+                        models: [
+                            {
+                                modelId: "model_id",
+                                name: "name",
+                                properties: {},
+                            },
+                        ],
+                        type: "alibaba",
+                    },
+                    name: "name",
                 },
-                models: [{
-                        modelId: "model_id",
-                        name: "name",
-                        properties: {}
-                    }],
-                type: "alibaba"
-            },
-            name: "name"
-        }]
-});
-                              
-                    
+            ],
+        });
     });
-          
+
     test("list (2)", async () => {
         const server = mockServerPool.createServer();
-        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
-        
-        const rawResponseBody = { "error" : { "message" : "message" } };
-        
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
+
+        const rawResponseBody = { error: { message: "message" } };
+
         server
             .mockEndpoint()
-            .get("/api/v1/settings/model-providers").respondWith()
-            .statusCode(401).jsonBody(rawResponseBody)
-                .build();
+            .get("/api/v1/settings/model-providers")
+            .respondWith()
+            .statusCode(401)
+            .jsonBody(rawResponseBody)
+            .build();
 
-        
-            await expect(async () => {
-                return await client.settings.modelProviders.list()
-            }).rejects.toThrow(TrueForgeTypes.UnauthorizedError);
+        await expect(async () => {
+            return await client.settings.modelProviders.list();
+        }).rejects.toThrow(TrueForgeTypes.UnauthorizedError);
     });
-          
+
     test("list (3)", async () => {
         const server = mockServerPool.createServer();
-        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
-        
-        const rawResponseBody = { "error" : { "message" : "message" } };
-        
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
+
+        const rawResponseBody = { error: { message: "message" } };
+
         server
             .mockEndpoint()
-            .get("/api/v1/settings/model-providers").respondWith()
-            .statusCode(403).jsonBody(rawResponseBody)
-                .build();
+            .get("/api/v1/settings/model-providers")
+            .respondWith()
+            .statusCode(403)
+            .jsonBody(rawResponseBody)
+            .build();
 
-        
-            await expect(async () => {
-                return await client.settings.modelProviders.list()
-            }).rejects.toThrow(TrueForgeTypes.ForbiddenError);
+        await expect(async () => {
+            return await client.settings.modelProviders.list();
+        }).rejects.toThrow(TrueForgeTypes.ForbiddenError);
     });
-          
+
     test("create (1)", async () => {
         const server = mockServerPool.createServer();
-        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
-        const rawRequestBody = { "manifest" : { "auth" : { "api_key" : "api_key" } , "models" : [ { "model_id" : "model_id" , "name" : "name" , "properties" : { } } ] , "type" : "alibaba" } };
-        const rawResponseBody = { "data" : { "env_managed" : true , "manifest" : { "auth" : { "api_key" : "api_key" } , "base_url" : "base_url" , "models" : [ { "model_id" : "model_id" , "name" : "name" , "properties" : { } } ] , "type" : "alibaba" } , "name" : "name" } };
-        
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
+        const rawRequestBody = {
+            manifest: {
+                auth: { api_key: "api_key" },
+                models: [{ model_id: "model_id", name: "name", properties: {} }],
+                type: "alibaba",
+            },
+        };
+        const rawResponseBody = {
+            data: {
+                env_managed: true,
+                manifest: {
+                    auth: { api_key: "api_key" },
+                    base_url: "base_url",
+                    models: [{ model_id: "model_id", name: "name", properties: {} }],
+                    type: "alibaba",
+                },
+                name: "name",
+            },
+        };
+
         server
             .mockEndpoint()
-            .post("/api/v1/settings/model-providers").jsonBody(rawRequestBody)
-                .respondWith()
-            .statusCode(200).jsonBody(rawResponseBody)
-                .build();
+            .post("/api/v1/settings/model-providers")
+            .jsonBody(rawRequestBody)
+            .respondWith()
+            .statusCode(200)
+            .jsonBody(rawResponseBody)
+            .build();
 
-        
-                        
-                                const response = await client.settings.modelProviders.create({
-    manifest: {
-        auth: {
-            apiKey: "api_key"
-        },
-        models: [{
-                modelId: "model_id",
-                name: "name",
-                properties: {}
-            }],
-        type: "alibaba"
-    }
-});
-                                expect(response).toEqual({
-    data: {
-        envManaged: true,
-        manifest: {
-            auth: {
-                apiKey: "api_key"
+        const response = await client.settings.modelProviders.create({
+            manifest: {
+                auth: {
+                    apiKey: "api_key",
+                },
+                models: [
+                    {
+                        modelId: "model_id",
+                        name: "name",
+                        properties: {},
+                    },
+                ],
+                type: "alibaba",
             },
-            baseUrl: "base_url",
-            models: [{
-                    modelId: "model_id",
-                    name: "name",
-                    properties: {}
-                }],
-            type: "alibaba"
-        },
-        name: "name"
-    }
-});
-                              
-                    
+        });
+        expect(response).toEqual({
+            data: {
+                envManaged: true,
+                manifest: {
+                    auth: {
+                        apiKey: "api_key",
+                    },
+                    baseUrl: "base_url",
+                    models: [
+                        {
+                            modelId: "model_id",
+                            name: "name",
+                            properties: {},
+                        },
+                    ],
+                    type: "alibaba",
+                },
+                name: "name",
+            },
+        });
     });
-          
+
     test("create (2)", async () => {
         const server = mockServerPool.createServer();
-        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
-        const rawRequestBody = { "manifest" : { "auth" : { "api_key" : "x" } , "models" : [ { "model_id" : "x" , "name" : "xy" , "properties" : { } } , { "model_id" : "x" , "name" : "xy" , "properties" : { } } ] , "type" : "alibaba" } };
-        const rawResponseBody = { "error" : { "message" : "message" } };
-        
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
+        const rawRequestBody = {
+            manifest: {
+                auth: { api_key: "x" },
+                models: [
+                    { model_id: "x", name: "xy", properties: {} },
+                    { model_id: "x", name: "xy", properties: {} },
+                ],
+                type: "alibaba",
+            },
+        };
+        const rawResponseBody = { error: { message: "message" } };
+
         server
             .mockEndpoint()
-            .post("/api/v1/settings/model-providers").jsonBody(rawRequestBody)
-                .respondWith()
-            .statusCode(400).jsonBody(rawResponseBody)
-                .build();
+            .post("/api/v1/settings/model-providers")
+            .jsonBody(rawRequestBody)
+            .respondWith()
+            .statusCode(400)
+            .jsonBody(rawResponseBody)
+            .build();
 
-        
-            await expect(async () => {
-                return await client.settings.modelProviders.create({
-    manifest: {
-        auth: {
-            apiKey: "x"
-        },
-        models: [{
-                modelId: "x",
-                name: "xy",
-                properties: {}
-            }, {
-                modelId: "x",
-                name: "xy",
-                properties: {}
-            }],
-        type: "alibaba"
-    }
-})
-            }).rejects.toThrow(TrueForgeTypes.BadRequestError);
+        await expect(async () => {
+            return await client.settings.modelProviders.create({
+                manifest: {
+                    auth: {
+                        apiKey: "x",
+                    },
+                    models: [
+                        {
+                            modelId: "x",
+                            name: "xy",
+                            properties: {},
+                        },
+                        {
+                            modelId: "x",
+                            name: "xy",
+                            properties: {},
+                        },
+                    ],
+                    type: "alibaba",
+                },
+            });
+        }).rejects.toThrow(TrueForgeTypes.BadRequestError);
     });
-          
+
     test("create (3)", async () => {
         const server = mockServerPool.createServer();
-        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
-        const rawRequestBody = { "manifest" : { "auth" : { "api_key" : "x" } , "models" : [ { "model_id" : "x" , "name" : "xy" , "properties" : { } } , { "model_id" : "x" , "name" : "xy" , "properties" : { } } ] , "type" : "alibaba" } };
-        const rawResponseBody = { "error" : { "message" : "message" } };
-        
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
+        const rawRequestBody = {
+            manifest: {
+                auth: { api_key: "x" },
+                models: [
+                    { model_id: "x", name: "xy", properties: {} },
+                    { model_id: "x", name: "xy", properties: {} },
+                ],
+                type: "alibaba",
+            },
+        };
+        const rawResponseBody = { error: { message: "message" } };
+
         server
             .mockEndpoint()
-            .post("/api/v1/settings/model-providers").jsonBody(rawRequestBody)
-                .respondWith()
-            .statusCode(409).jsonBody(rawResponseBody)
-                .build();
+            .post("/api/v1/settings/model-providers")
+            .jsonBody(rawRequestBody)
+            .respondWith()
+            .statusCode(409)
+            .jsonBody(rawResponseBody)
+            .build();
 
-        
-            await expect(async () => {
-                return await client.settings.modelProviders.create({
-    manifest: {
-        auth: {
-            apiKey: "x"
-        },
-        models: [{
-                modelId: "x",
-                name: "xy",
-                properties: {}
-            }, {
-                modelId: "x",
-                name: "xy",
-                properties: {}
-            }],
-        type: "alibaba"
-    }
-})
-            }).rejects.toThrow(TrueForgeTypes.ConflictError);
+        await expect(async () => {
+            return await client.settings.modelProviders.create({
+                manifest: {
+                    auth: {
+                        apiKey: "x",
+                    },
+                    models: [
+                        {
+                            modelId: "x",
+                            name: "xy",
+                            properties: {},
+                        },
+                        {
+                            modelId: "x",
+                            name: "xy",
+                            properties: {},
+                        },
+                    ],
+                    type: "alibaba",
+                },
+            });
+        }).rejects.toThrow(TrueForgeTypes.ConflictError);
     });
-          
+
     test("create (4)", async () => {
         const server = mockServerPool.createServer();
-        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
-        const rawRequestBody = { "manifest" : { "auth" : { "api_key" : "x" } , "models" : [ { "model_id" : "x" , "name" : "xy" , "properties" : { } } , { "model_id" : "x" , "name" : "xy" , "properties" : { } } ] , "type" : "alibaba" } };
-        const rawResponseBody = { "error" : { "message" : "message" } };
-        
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
+        const rawRequestBody = {
+            manifest: {
+                auth: { api_key: "x" },
+                models: [
+                    { model_id: "x", name: "xy", properties: {} },
+                    { model_id: "x", name: "xy", properties: {} },
+                ],
+                type: "alibaba",
+            },
+        };
+        const rawResponseBody = { error: { message: "message" } };
+
         server
             .mockEndpoint()
-            .post("/api/v1/settings/model-providers").jsonBody(rawRequestBody)
-                .respondWith()
-            .statusCode(424).jsonBody(rawResponseBody)
-                .build();
+            .post("/api/v1/settings/model-providers")
+            .jsonBody(rawRequestBody)
+            .respondWith()
+            .statusCode(424)
+            .jsonBody(rawResponseBody)
+            .build();
 
-        
-            await expect(async () => {
-                return await client.settings.modelProviders.create({
-    manifest: {
-        auth: {
-            apiKey: "x"
-        },
-        models: [{
-                modelId: "x",
-                name: "xy",
-                properties: {}
-            }, {
-                modelId: "x",
-                name: "xy",
-                properties: {}
-            }],
-        type: "alibaba"
-    }
-})
-            }).rejects.toThrow(TrueForgeTypes.FailedDependencyError);
+        await expect(async () => {
+            return await client.settings.modelProviders.create({
+                manifest: {
+                    auth: {
+                        apiKey: "x",
+                    },
+                    models: [
+                        {
+                            modelId: "x",
+                            name: "xy",
+                            properties: {},
+                        },
+                        {
+                            modelId: "x",
+                            name: "xy",
+                            properties: {},
+                        },
+                    ],
+                    type: "alibaba",
+                },
+            });
+        }).rejects.toThrow(TrueForgeTypes.FailedDependencyError);
     });
-          
+
     test("create_or_update (1)", async () => {
         const server = mockServerPool.createServer();
-        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
-        const rawRequestBody = { "manifest" : { "auth" : { "api_key" : "api_key" } , "models" : [ { "model_id" : "model_id" , "name" : "name" , "properties" : { } } ] , "type" : "alibaba" } };
-        const rawResponseBody = { "data" : { "env_managed" : true , "manifest" : { "auth" : { "api_key" : "api_key" } , "base_url" : "base_url" , "models" : [ { "model_id" : "model_id" , "name" : "name" , "properties" : { } } ] , "type" : "alibaba" } , "name" : "name" } };
-        
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
+        const rawRequestBody = {
+            manifest: {
+                auth: { api_key: "api_key" },
+                models: [{ model_id: "model_id", name: "name", properties: {} }],
+                type: "alibaba",
+            },
+        };
+        const rawResponseBody = {
+            data: {
+                env_managed: true,
+                manifest: {
+                    auth: { api_key: "api_key" },
+                    base_url: "base_url",
+                    models: [{ model_id: "model_id", name: "name", properties: {} }],
+                    type: "alibaba",
+                },
+                name: "name",
+            },
+        };
+
         server
             .mockEndpoint()
-            .put("/api/v1/settings/model-providers").jsonBody(rawRequestBody)
-                .respondWith()
-            .statusCode(200).jsonBody(rawResponseBody)
-                .build();
+            .put("/api/v1/settings/model-providers")
+            .jsonBody(rawRequestBody)
+            .respondWith()
+            .statusCode(200)
+            .jsonBody(rawResponseBody)
+            .build();
 
-        
-                        
-                                const response = await client.settings.modelProviders.createOrUpdate({
-    manifest: {
-        auth: {
-            apiKey: "api_key"
-        },
-        models: [{
-                modelId: "model_id",
-                name: "name",
-                properties: {}
-            }],
-        type: "alibaba"
-    }
-});
-                                expect(response).toEqual({
-    data: {
-        envManaged: true,
-        manifest: {
-            auth: {
-                apiKey: "api_key"
+        const response = await client.settings.modelProviders.createOrUpdate({
+            manifest: {
+                auth: {
+                    apiKey: "api_key",
+                },
+                models: [
+                    {
+                        modelId: "model_id",
+                        name: "name",
+                        properties: {},
+                    },
+                ],
+                type: "alibaba",
             },
-            baseUrl: "base_url",
-            models: [{
-                    modelId: "model_id",
-                    name: "name",
-                    properties: {}
-                }],
-            type: "alibaba"
-        },
-        name: "name"
-    }
-});
-                              
-                    
+        });
+        expect(response).toEqual({
+            data: {
+                envManaged: true,
+                manifest: {
+                    auth: {
+                        apiKey: "api_key",
+                    },
+                    baseUrl: "base_url",
+                    models: [
+                        {
+                            modelId: "model_id",
+                            name: "name",
+                            properties: {},
+                        },
+                    ],
+                    type: "alibaba",
+                },
+                name: "name",
+            },
+        });
     });
-          
+
     test("create_or_update (2)", async () => {
         const server = mockServerPool.createServer();
-        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
-        const rawRequestBody = { "manifest" : { "auth" : { "api_key" : "x" } , "models" : [ { "model_id" : "x" , "name" : "xy" , "properties" : { } } , { "model_id" : "x" , "name" : "xy" , "properties" : { } } ] , "type" : "alibaba" } };
-        const rawResponseBody = { "error" : { "message" : "message" } };
-        
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
+        const rawRequestBody = {
+            manifest: {
+                auth: { api_key: "x" },
+                models: [
+                    { model_id: "x", name: "xy", properties: {} },
+                    { model_id: "x", name: "xy", properties: {} },
+                ],
+                type: "alibaba",
+            },
+        };
+        const rawResponseBody = { error: { message: "message" } };
+
         server
             .mockEndpoint()
-            .put("/api/v1/settings/model-providers").jsonBody(rawRequestBody)
-                .respondWith()
-            .statusCode(400).jsonBody(rawResponseBody)
-                .build();
+            .put("/api/v1/settings/model-providers")
+            .jsonBody(rawRequestBody)
+            .respondWith()
+            .statusCode(400)
+            .jsonBody(rawResponseBody)
+            .build();
 
-        
-            await expect(async () => {
-                return await client.settings.modelProviders.createOrUpdate({
-    manifest: {
-        auth: {
-            apiKey: "x"
-        },
-        models: [{
-                modelId: "x",
-                name: "xy",
-                properties: {}
-            }, {
-                modelId: "x",
-                name: "xy",
-                properties: {}
-            }],
-        type: "alibaba"
-    }
-})
-            }).rejects.toThrow(TrueForgeTypes.BadRequestError);
+        await expect(async () => {
+            return await client.settings.modelProviders.createOrUpdate({
+                manifest: {
+                    auth: {
+                        apiKey: "x",
+                    },
+                    models: [
+                        {
+                            modelId: "x",
+                            name: "xy",
+                            properties: {},
+                        },
+                        {
+                            modelId: "x",
+                            name: "xy",
+                            properties: {},
+                        },
+                    ],
+                    type: "alibaba",
+                },
+            });
+        }).rejects.toThrow(TrueForgeTypes.BadRequestError);
     });
-          
+
     test("create_or_update (3)", async () => {
         const server = mockServerPool.createServer();
-        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
-        const rawRequestBody = { "manifest" : { "auth" : { "api_key" : "x" } , "models" : [ { "model_id" : "x" , "name" : "xy" , "properties" : { } } , { "model_id" : "x" , "name" : "xy" , "properties" : { } } ] , "type" : "alibaba" } };
-        const rawResponseBody = { "error" : { "message" : "message" } };
-        
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
+        const rawRequestBody = {
+            manifest: {
+                auth: { api_key: "x" },
+                models: [
+                    { model_id: "x", name: "xy", properties: {} },
+                    { model_id: "x", name: "xy", properties: {} },
+                ],
+                type: "alibaba",
+            },
+        };
+        const rawResponseBody = { error: { message: "message" } };
+
         server
             .mockEndpoint()
-            .put("/api/v1/settings/model-providers").jsonBody(rawRequestBody)
-                .respondWith()
-            .statusCode(409).jsonBody(rawResponseBody)
-                .build();
+            .put("/api/v1/settings/model-providers")
+            .jsonBody(rawRequestBody)
+            .respondWith()
+            .statusCode(409)
+            .jsonBody(rawResponseBody)
+            .build();
 
-        
-            await expect(async () => {
-                return await client.settings.modelProviders.createOrUpdate({
-    manifest: {
-        auth: {
-            apiKey: "x"
-        },
-        models: [{
-                modelId: "x",
-                name: "xy",
-                properties: {}
-            }, {
-                modelId: "x",
-                name: "xy",
-                properties: {}
-            }],
-        type: "alibaba"
-    }
-})
-            }).rejects.toThrow(TrueForgeTypes.ConflictError);
+        await expect(async () => {
+            return await client.settings.modelProviders.createOrUpdate({
+                manifest: {
+                    auth: {
+                        apiKey: "x",
+                    },
+                    models: [
+                        {
+                            modelId: "x",
+                            name: "xy",
+                            properties: {},
+                        },
+                        {
+                            modelId: "x",
+                            name: "xy",
+                            properties: {},
+                        },
+                    ],
+                    type: "alibaba",
+                },
+            });
+        }).rejects.toThrow(TrueForgeTypes.ConflictError);
     });
-          
+
     test("create_or_update (4)", async () => {
         const server = mockServerPool.createServer();
-        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
-        const rawRequestBody = { "manifest" : { "auth" : { "api_key" : "x" } , "models" : [ { "model_id" : "x" , "name" : "xy" , "properties" : { } } , { "model_id" : "x" , "name" : "xy" , "properties" : { } } ] , "type" : "alibaba" } };
-        const rawResponseBody = { "error" : { "message" : "message" } };
-        
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
+        const rawRequestBody = {
+            manifest: {
+                auth: { api_key: "x" },
+                models: [
+                    { model_id: "x", name: "xy", properties: {} },
+                    { model_id: "x", name: "xy", properties: {} },
+                ],
+                type: "alibaba",
+            },
+        };
+        const rawResponseBody = { error: { message: "message" } };
+
         server
             .mockEndpoint()
-            .put("/api/v1/settings/model-providers").jsonBody(rawRequestBody)
-                .respondWith()
-            .statusCode(424).jsonBody(rawResponseBody)
-                .build();
+            .put("/api/v1/settings/model-providers")
+            .jsonBody(rawRequestBody)
+            .respondWith()
+            .statusCode(424)
+            .jsonBody(rawResponseBody)
+            .build();
 
-        
-            await expect(async () => {
-                return await client.settings.modelProviders.createOrUpdate({
-    manifest: {
-        auth: {
-            apiKey: "x"
-        },
-        models: [{
-                modelId: "x",
-                name: "xy",
-                properties: {}
-            }, {
-                modelId: "x",
-                name: "xy",
-                properties: {}
-            }],
-        type: "alibaba"
-    }
-})
-            }).rejects.toThrow(TrueForgeTypes.FailedDependencyError);
+        await expect(async () => {
+            return await client.settings.modelProviders.createOrUpdate({
+                manifest: {
+                    auth: {
+                        apiKey: "x",
+                    },
+                    models: [
+                        {
+                            modelId: "x",
+                            name: "xy",
+                            properties: {},
+                        },
+                        {
+                            modelId: "x",
+                            name: "xy",
+                            properties: {},
+                        },
+                    ],
+                    type: "alibaba",
+                },
+            });
+        }).rejects.toThrow(TrueForgeTypes.FailedDependencyError);
     });
-          
+
     test("delete (1)", async () => {
         const server = mockServerPool.createServer();
-        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
-        
-        const rawResponseBody = { };
-        
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
+
+        const rawResponseBody = {};
+
         server
             .mockEndpoint()
-            .delete("/api/v1/settings/model-providers/name").respondWith()
-            .statusCode(200).jsonBody(rawResponseBody)
-                .build();
+            .delete("/api/v1/settings/model-providers/name")
+            .respondWith()
+            .statusCode(200)
+            .jsonBody(rawResponseBody)
+            .build();
 
-        
-                        
-                                const response = await client.settings.modelProviders.delete("name");
-                                expect(response).toEqual({});
-                              
-                    
+        const response = await client.settings.modelProviders.delete("name");
+        expect(response).toEqual({});
     });
-          
+
     test("delete (2)", async () => {
         const server = mockServerPool.createServer();
-        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
-        
-        const rawResponseBody = { "error" : { "message" : "message" } };
-        
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
+
+        const rawResponseBody = { error: { message: "message" } };
+
         server
             .mockEndpoint()
-            .delete("/api/v1/settings/model-providers/xy").respondWith()
-            .statusCode(404).jsonBody(rawResponseBody)
-                .build();
+            .delete("/api/v1/settings/model-providers/xy")
+            .respondWith()
+            .statusCode(404)
+            .jsonBody(rawResponseBody)
+            .build();
 
-        
-            await expect(async () => {
-                return await client.settings.modelProviders.delete("xy")
-            }).rejects.toThrow(TrueForgeTypes.NotFoundError);
+        await expect(async () => {
+            return await client.settings.modelProviders.delete("xy");
+        }).rejects.toThrow(TrueForgeTypes.NotFoundError);
     });
-          
+
     test("delete (3)", async () => {
         const server = mockServerPool.createServer();
-        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
-        
-        const rawResponseBody = { "error" : { "message" : "message" } };
-        
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
+
+        const rawResponseBody = { error: { message: "message" } };
+
         server
             .mockEndpoint()
-            .delete("/api/v1/settings/model-providers/xy").respondWith()
-            .statusCode(409).jsonBody(rawResponseBody)
-                .build();
+            .delete("/api/v1/settings/model-providers/xy")
+            .respondWith()
+            .statusCode(409)
+            .jsonBody(rawResponseBody)
+            .build();
 
-        
-            await expect(async () => {
-                return await client.settings.modelProviders.delete("xy")
-            }).rejects.toThrow(TrueForgeTypes.ConflictError);
+        await expect(async () => {
+            return await client.settings.modelProviders.delete("xy");
+        }).rejects.toThrow(TrueForgeTypes.ConflictError);
     });
-          
 });

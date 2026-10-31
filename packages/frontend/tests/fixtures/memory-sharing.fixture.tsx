@@ -3,12 +3,12 @@ import '@truefoundry/trueforge-ui/styles.css';
 import { createRoot } from 'react-dom/client';
 
 /**
- * The real shell with seven invented specialists and a sharing config. Every other API call
+ * The real shell with seven invented agents and a sharing config. Every other API call
  * answers 503, so the shell renders its chrome without a backend.
  */
-const SPECIALIST_NAMES = ['Anna', 'Cole', 'Dana', 'Eli', 'Farah', 'Gus', 'Hana'];
-const specialists: Persona[] = SPECIALIST_NAMES.map((name, index) => ({
-  id: `specialist-${index}`,
+const AGENT_NAMES = ['Anna', 'Cole', 'Dana', 'Eli', 'Farah', 'Gus', 'Hana'];
+const agents: Persona[] = AGENT_NAMES.map((name, index) => ({
+  id: `agent-${index}`,
   display_name: name,
   aliases: [],
   instructions: '',
@@ -19,8 +19,8 @@ const notUsedHere = async (): Promise<never> => {
   throw new Error('Not used in this fixture.');
 };
 
-const specialistApi: PersonaApi = {
-  listPersonas: async () => specialists,
+const agentApi: PersonaApi = {
+  listPersonas: async () => agents,
   createPersona: notUsedHere,
   updatePersona: notUsedHere,
   deletePersona: notUsedHere,
@@ -32,7 +32,7 @@ const specialistApi: PersonaApi = {
   getPersonaKnowledgeEmbeddingModel: notUsedHere,
 };
 
-const sharing = { shares: { 'specialist-0': ['persona:Cole'] } };
+const sharing = { shares: { 'agent-0': ['persona:Cole'] } };
 
 function json(body: unknown): Response {
   return new Response(JSON.stringify(body), { status: 200, headers: { 'content-type': 'application/json' } });
@@ -52,7 +52,7 @@ const rootElement = document.getElementById('root');
 if (rootElement == null) throw new Error('Missing fixture root');
 
 createRoot(rootElement).render(
-  <PersonaProvider api={specialistApi}>
+  <PersonaProvider api={agentApi}>
     <TrueForgeUI
       layout="dock"
       server={{ type: 'trueforge', baseUrl: 'http://127.0.0.1/', fetch: fakeFetch }}

@@ -8,10 +8,11 @@ import { createServer } from 'vite';
 import { startApprovalTestServer } from '../../trueforge/tests/fixtures/approvalTestServer.ts';
 import { inProcessApi, pausedSession } from './support/approvalChat.ts';
 import { findChromiumExecutable } from './support/findChromiumExecutable.ts';
+import { privateViteCache } from './support/viteCache.ts';
 
 const RENDER_TIMEOUT_MS = 45_000;
 const USER_TEXT = 'run:inert_write please';
-const ALLOW = 'Allow it';
+const ALLOW = 'Allow';
 const RECONNECTING = 'Reconnecting…';
 const LOST = 'Connection lost. Check your network, then tap Retry.';
 /** The chat only re-checks after a hide this long; a shorter tab switch is left alone. */
@@ -63,7 +64,9 @@ async function chatCounts(page: Page): Promise<{ userMessages: number; allowButt
 
 test('the chat reconnects on its own after the page was in the background', { timeout: 600_000 }, async () => {
   const api = await startApprovalTestServer();
+  const viteCache = privateViteCache('reconnect-after-background');
   const vite = await createServer({
+    cacheDir: viteCache.cacheDir,
     root: fileURLToPath(new URL('../', import.meta.url)),
     logLevel: 'error',
     plugins: [inProcessApi(api)],
@@ -132,6 +135,7 @@ test('the chat reconnects on its own after the page was in the background', { ti
   } finally {
     await browser?.close();
     await vite.close();
+    viteCache.remove();
     await api.close();
   }
 });

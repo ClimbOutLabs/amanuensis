@@ -49,6 +49,9 @@ import { fetchSameOrigin, readCappedJson } from './mapsUpstream';
 
 export const MAPS_SERVER_ID = 'maps';
 
+/** Maps tools look up places and routes on outside services and draw a card; they change nothing. */
+const MAPS_TOOL_ANNOTATIONS = { readOnlyHint: true, openWorldHint: true } as const;
+
 /**
  * Origin privacy: coordinates sent to a routing provider for the origin are
  * rounded to this many decimal places (3 is about 100 m). The destination is
@@ -296,6 +299,45 @@ export interface MapsServiceDeps {
   transit_provider: MapsTransitProvider;
   logger: Logger;
   fetch_limited: (url: string) => Promise<Response>;
+  /** IANA zone of the person; narrows address searches to its country when known. */
+  timezone?: string | undefined;
+}
+
+/** Zones whose country is certain; others search worldwide. */
+const COUNTRY_CODE_BY_ZONE: Record<string, string> = {
+  'Europe/Lisbon': 'pt',
+  'Atlantic/Azores': 'pt',
+  'Atlantic/Madeira': 'pt',
+};
+
+/** Place names an address ends with, such as the city after a postcode; empty when it names none. */
+function namedPlacesOf(query: string): string[] {
+  return query
+    .split(',')
+    .slice(1)
+    .map(segment =>
+      segment
+        .split(/\s+/)
+        .filter(word => !/\d/.test(word))
+        .join(' '),
+    )
+    .map(name => normalizedWords(name).trim())
+    .filter(name => name !== '');
+}
+
+const CITY_ADDRESS_FIELDS = ['city', 'town', 'village', 'municipality'];
+
+function isInNamedPlace({
+  candidate,
+  names,
+}: {
+  candidate: z.infer<typeof nominatimResultSchema>;
+  names: readonly string[];
+}): boolean {
+  return CITY_ADDRESS_FIELDS.some(field => {
+    const value = candidate.address?.[field];
+    return typeof value === 'string' && names.includes(normalizedWords(value).trim());
+  });
 }
 
 /** Server-side maps service: geocoding, POI search, road and public transport routing. */
@@ -314,7 +356,34 @@ export class MapsService {
     if (cached !== undefined) {
       return cached[0] ?? null;
     }
-    const url = `${this.deps.geocoder_url}/search?q=${encodeURIComponent(place)}&format=jsonv2&limit=1&addressdetails=1`;
+    const countryCode = this.deps.timezone === undefined ? undefined : COUNTRY_CODE_BY_ZONE[this.deps.timezone];
+    let candidates = await this.searchCandidates({ place, countryCode });
+    if (candidates.length === 0 && countryCode !== undefined) {
+      // The zone is only a hint: a place abroad still resolves.
+      candidates = await this.searchCandidates({ place, countryCode: undefined });
+    }
+    if (candidates.length === 0) {
+      return null;
+    }
+    const names = namedPlacesOf(place);
+    const best = candidates.find(candidate => isInNamedPlace({ candidate, names })) ?? candidates[0];
+    if (best === undefined) {
+      return null;
+    }
+    const place0 = toGeocodedPlace(best);
+    this.geocodeCache.set(cacheKey, [place0]);
+    return place0;
+  }
+
+  private async searchCandidates({
+    place,
+    countryCode,
+  }: {
+    place: string;
+    countryCode: string | undefined;
+  }): Promise<z.infer<typeof nominatimResultSchema>[]> {
+    const country = countryCode === undefined ? '' : `&countrycodes=${countryCode}`;
+    const url = `${this.deps.geocoder_url}/search?q=${encodeURIComponent(place)}&format=jsonv2&limit=5&addressdetails=1${country}`;
     let response: Response;
     try {
       response = await this.geocodeLimiter.run(() => this.deps.fetch_limited(url));
@@ -333,15 +402,16 @@ export class MapsService {
     }
     const body = json.value;
     if (!Array.isArray(body) || body.length === 0) {
-      return null;
+      return [];
     }
-    const parsed = nominatimResultSchema.safeParse(body[0]);
-    if (!parsed.success) {
+    const candidates = body.flatMap(item => {
+      const parsed = nominatimResultSchema.safeParse(item);
+      return parsed.success ? [parsed.data] : [];
+    });
+    if (candidates.length === 0) {
       throw new MapsUpstreamError('service_unavailable', 'geocoder');
     }
-    const place0 = toGeocodedPlace(parsed.data);
-    this.geocodeCache.set(cacheKey, [place0]);
-    return place0;
+    return candidates;
   }
 
   /** POI search near a geocoded place; zero hits is not an error. */
@@ -876,6 +946,7 @@ class MapsTool extends LocalToolMCP {
   private readonly tools: ToolDefinition[] = [
     defineTool({
       name: RENDER_MAP_TOOL_NAME,
+      annotations: MAPS_TOOL_ANNOTATIONS,
       description:
         "Render an interactive map with a pin for a named place. Pass the place name as the user gave it (e.g. 'Paris', 'Eiffel Tower'); never pass coordinates. The tool geocodes the name and returns an inline map card; the user is asked to approve each call. Use only for a place or address the user typed themselves. A place that came from a web page goes through render_places instead, never this tool. Use when the user explicitly asks to see a place on a map, asks where a place is, or asks for a kind of place near a named place.",
       schema: RENDER_MAP_INPUT_SCHEMA,
@@ -883,6 +954,7 @@ class MapsTool extends LocalToolMCP {
     }),
     defineTool({
       name: RENDER_ROUTE_TOOL_NAME,
+      annotations: MAPS_TOOL_ANNOTATIONS,
       description:
         "Render a route map between two named places by walking, cycling, driving or transit. Pass both place names as the user gave them; never pass coordinates. Pick mode from the user's words; if unstated, walk short city trips and take transit for longer ones, and mention the other modes. For transit, depart_at or arrive_by (local time like 2026-10-19T09:20) answers 'I need to be there at 9:20'; omit both to leave now. Returns an inline map card; transit lists steps. If no transit route is found, say so and offer walking. The user approves each call. Use only when the user named both origin and destination; there is no current-location mode.",
       schema: RENDER_ROUTE_INPUT_SCHEMA,
@@ -890,6 +962,7 @@ class MapsTool extends LocalToolMCP {
     }),
     defineTool({
       name: RENDER_PLACES_TOOL_NAME,
+      annotations: MAPS_TOOL_ANNOTATIONS,
       description:
         "Pin places on one map card, each with details from the page it came from. Call after a page reading tool (tavily_extract, web_fetch or another fetch tool) has read the pages. Copy each name, address, language, hours, price and phone word for word from the page; leave out what the page does not state. Short forms such as St are fine. Pass the page's own link as source_url. A refused place comes back with its name and reason; fix that detail and call again, once. If a place is refused again in the same answer, stop using the map and answer in text with the places and their links. Calendar locations go in calendar_locations. The tool drops any detail it cannot find on the page; the user approves each call.",
       schema: RENDER_PLACES_INPUT_SCHEMA,
@@ -1058,6 +1131,7 @@ export function mapsCapability(options: MapsCapabilityOptions): AgentCapability 
     transit_provider: new MotisTransitProvider(configuration.MAPS_TRANSIT_URL, fetch_limited),
     logger: options.logger,
     fetch_limited,
+    timezone: options.timezone,
   });
   return {
     systemToolSets: [

@@ -1,17 +1,23 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { ComposerShell } from '@/atoms/ComposerShell.js';
+import { avatarAltText } from '@/components/AmanAvatarMotion.js';
 import { AmanRuntimeRail } from '@/components/AmanRuntimeRail.js';
 import { PersonalizationProvider } from '@/components/PersonalizationContext.js';
 import { SentinelApiProvider } from '@/sentinel/SentinelApiContext.js';
+import { SentinelAuditFeed } from '@/sentinel/SentinelAuditFeed.js';
 import type { SentinelApi, SentinelUserSettings } from '@/sentinel/types.js';
 
 import { RuntimeHarness } from '../containers/RuntimeHarness.js';
 
 const fetchMock = vi.fn();
+
+/** The panda's accessible name carries the assistant's default display name. */
+const PANDA_ALT = avatarAltText('Aman');
 
 // Walks up from wherever the runner started, so the stylesheet is found whether vitest
 // runs in the package or at the monorepo root. import.meta.url is not a file URL here.
@@ -51,11 +57,8 @@ describe('AmanRuntimeRail', () => {
 
     expect(screen.getByRole('complementary', { name: 'Amanuensis runtime status' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Aman' })).toBeInTheDocument();
-    expect(screen.getByText('local-model')).toBeInTheDocument();
-    expect(screen.getByRole('img', { name: 'Aman, drawn as a panda writing with a quill' })).toHaveAttribute(
-      'src',
-      '/aman-avatar.png',
-    );
+    expect(screen.queryByText('local-model')).not.toBeInTheDocument();
+    expect(screen.getByRole('img', { name: PANDA_ALT })).toHaveAttribute('src', '/aman-avatar.png');
   });
 
   it('collapses and expands the rail from its toggle, and remembers the choice', () => {
@@ -65,7 +68,7 @@ describe('AmanRuntimeRail', () => {
       </RuntimeHarness>,
     );
 
-    const collapse = screen.getByRole('button', { name: 'Collapse rail' });
+    const collapse = screen.getByRole('button', { name: 'Hide panel' });
     expect(collapse).toHaveAttribute('aria-expanded', 'true');
     expect(screen.getByRole('complementary', { name: 'Amanuensis runtime status' })).not.toHaveClass(
       'aman-runtime-rail--collapsed',
@@ -73,7 +76,7 @@ describe('AmanRuntimeRail', () => {
 
     fireEvent.click(collapse);
 
-    const expand = screen.getByRole('button', { name: 'Expand rail' });
+    const expand = screen.getByRole('button', { name: 'Show panel' });
     expect(expand).toHaveAttribute('aria-expanded', 'false');
     expect(screen.getByRole('complementary', { name: 'Amanuensis runtime status' })).toHaveClass(
       'aman-runtime-rail--collapsed',
@@ -83,8 +86,8 @@ describe('AmanRuntimeRail', () => {
 
     fireEvent.click(expand);
 
-    expect(screen.getByRole('button', { name: 'Collapse rail' })).toHaveAttribute('aria-expanded', 'true');
-    expect(screen.getByText('local-model')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Hide panel' })).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getByRole('heading', { name: 'Aman' })).toBeInTheDocument();
     expect(window.localStorage.getItem('aui-runtime-rail-collapsed')).toBe('false');
   });
 
@@ -118,6 +121,54 @@ describe('AmanRuntimeRail', () => {
     expect(await screen.findByRole('status', { name: 'Offline mode is on' })).toBeInTheDocument();
   });
 
+  it('lists each rule as its sentence once the settings load', async () => {
+    const settings: SentinelUserSettings = {
+      offline_mode: false,
+      tier2_auto_allow: [],
+      search_without_asking: true,
+      maps_without_asking: false,
+      sandbox_without_asking: false,
+    };
+    const api: SentinelApi = {
+      listAuditEntries: vi.fn(async () => []),
+      listBriefItemCompletions: async () => [],
+      markBriefItemDone: async () => undefined,
+      unmarkBriefItemDone: async () => undefined,
+      listUserAuditEntries: vi.fn(async () => ({ entries: [] })),
+      getUserSettings: vi.fn(async () => settings),
+      updateUserSettings: vi.fn(async () => settings),
+      listSentinelSessionContext: vi.fn(async () => ({ approvals: [] })),
+    };
+    const { container } = render(
+      <SentinelApiProvider api={api}>
+        <RuntimeHarness messages={[]}>
+          <AmanRuntimeRail modelName="local-model" status="ready" />
+        </RuntimeHarness>
+      </SentinelApiProvider>,
+    );
+
+    await screen.findByText('Web searches run without asking');
+    const rules = container.querySelector('[data-section="rules"]');
+    const items = Array.from(rules?.querySelectorAll('li') ?? []).map(item => item.textContent?.trim());
+    expect(items).toEqual([
+      'Web searches run without asking',
+      'Read-only commands in the workspace run without asking. Other commands ask first.',
+      'Offline mode is off',
+    ]);
+  });
+
+  it('shows no bullets in Rules when there are no rules to show', () => {
+    const { container } = render(
+      <RuntimeHarness messages={[]}>
+        <AmanRuntimeRail modelName="local-model" status="ready" />
+      </RuntimeHarness>,
+    );
+
+    const rules = container.querySelector('[data-section="rules"]');
+    expect(rules?.querySelectorAll('ul, li')).toHaveLength(0);
+    expect(rules).toHaveTextContent('No rules to show yet.');
+  });
+
   it('keeps the model name out of the collapsed status dot', () => {
     window.localStorage.setItem('aui-runtime-rail-collapsed', 'true');
     render(
@@ -139,7 +190,7 @@ describe('AmanRuntimeRail', () => {
       </RuntimeHarness>,
     );
 
-    expect(screen.getByRole('button', { name: 'Expand rail' })).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.getByRole('button', { name: 'Show panel' })).toHaveAttribute('aria-expanded', 'false');
     expect(screen.getByRole('complementary', { name: 'Amanuensis runtime status' })).toHaveClass(
       'aman-runtime-rail--collapsed',
     );
@@ -157,8 +208,8 @@ describe('AmanRuntimeRail', () => {
         </RuntimeHarness>,
       );
 
-      expect(screen.getByRole('button', { name: 'Collapse rail' })).toHaveAttribute('aria-expanded', 'true');
-      expect(screen.getByText('local-model')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Hide panel' })).toHaveAttribute('aria-expanded', 'true');
+      expect(screen.getByRole('heading', { name: 'Aman' })).toBeInTheDocument();
     } finally {
       getItem.mockRestore();
     }
@@ -176,85 +227,99 @@ describe('AmanRuntimeRail', () => {
         </RuntimeHarness>,
       );
 
-      fireEvent.click(screen.getByRole('button', { name: 'Collapse rail' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Hide panel' }));
 
-      expect(screen.getByRole('button', { name: 'Expand rail' })).toHaveAttribute('aria-expanded', 'false');
+      expect(screen.getByRole('button', { name: 'Show panel' })).toHaveAttribute('aria-expanded', 'false');
     } finally {
       setItem.mockRestore();
     }
   });
 
-  it('feathers the avatar edges without a container, motion, or a literal colour', () => {
+  it('frames the picture with rounded corners, no border, and nothing drawn over it', () => {
     render(
       <RuntimeHarness messages={[]}>
         <AmanRuntimeRail avatarSrc="/aman-avatar.png" />
       </RuntimeHarness>,
     );
-    const avatar = screen.getByRole('img', { name: 'Aman, drawn as a panda writing with a quill' });
-    expect(avatar).toHaveClass('aman-runtime-rail__avatar');
+    const picture = screen.getByRole('img', { name: PANDA_ALT });
+    const frame = picture.parentElement;
+    expect(frame).toHaveClass('aman-runtime-rail__avatar');
+    expect(frame?.children).toHaveLength(1);
 
     const stylesheet = readFileSync(findStylesheet(), 'utf8');
-    const selector = '.aman-runtime-rail__avatar {';
-    // Pinning the count keeps the slice below honest: a second block for the same selector
-    // would let this read an earlier rule and pass on stale declarations. The one extra block
-    // is the dark-mode override, which swaps the feather for a radial mask.
-    expect(stylesheet.split(selector)).toHaveLength(3);
-    const rule = stylesheet.slice(stylesheet.indexOf(selector));
-    const avatarRule = rule.slice(0, rule.indexOf('}') + 1);
-
-    // The prefixed pair is asserted separately because WebKit ships only those, and an
-    // unprefixed-only rule would leave Safari with the hard rectangle this change removes.
-    expect(avatarRule).toMatch(/^\s{2}mask-image:/m);
-    expect(avatarRule).toMatch(/^\s{2}mask-composite:/m);
-    expect(avatarRule).toContain('-webkit-mask-image:');
-    expect(avatarRule).toContain('-webkit-mask-composite:');
-    // The rail background must show through the feather, so the rule names no colour of
-    // its own beyond the mask alpha ramp, and stays static.
-    expect(avatarRule).not.toMatch(/#[0-9a-f]{3,8}\b/i);
-    expect(avatarRule).not.toMatch(/animation|transition|transform/);
+    const ruleOf = (selector: string): string => {
+      const start = stylesheet.indexOf(`${selector} {`);
+      expect(start).toBeGreaterThanOrEqual(0);
+      return stylesheet.slice(start, stylesheet.indexOf('}', start) + 1);
+    };
+    // The frame clips its children and owns the rounded corners; it draws no border and no padding.
+    const frameRule = ruleOf('.aman-runtime-rail__avatar');
+    expect(frameRule).toMatch(/^\s{2}overflow: hidden;/m);
+    expect(frameRule).toMatch(/^\s{2}border-radius: 0\.75rem;/m);
+    expect(frameRule).not.toMatch(/border:|padding:|box-shadow/);
+    // Nothing is drawn over the picture: no fade rule, and no gradient anywhere in the panel's rules.
+    expect(stylesheet).not.toContain('.aman-runtime-rail__fade');
+    expect(ruleOf('.aman-runtime-rail__picture')).not.toMatch(/gradient/);
   });
 
-  it('calls the build line a release, with a shortened reference', () => {
-    render(
+  it('sizes the section value, fold rows, waiting line and the Activity receipt on the --text-sm step', () => {
+    const stylesheet = readFileSync(findStylesheet(), 'utf8');
+    const ruleOf = (selector: string): string => {
+      const start = stylesheet.indexOf(`${selector} {`);
+      expect(start, selector).toBeGreaterThanOrEqual(0);
+      return stylesheet.slice(start, stylesheet.indexOf('}', start) + 1);
+    };
+    // The value sits a weight heavier than its label, at the same size, not a size jump.
+    const sectionValueRule = ruleOf('.aman-runtime-rail__section-value');
+    expect(sectionValueRule).toMatch(/font-size: var\(--text-sm\);/);
+    expect(sectionValueRule).toMatch(/font-weight: 500;/);
+    const summaryRule = ruleOf('.aman-runtime-rail__details-summary');
+    expect(summaryRule).toMatch(/font-size: var\(--text-sm\);/);
+    expect(summaryRule).toMatch(/font-weight: 500;/);
+    expect(ruleOf('.aman-runtime-rail__details-body')).toMatch(/font-size: var\(--text-sm\);/);
+    expect(ruleOf('.aman-runtime-rail__waiting')).toMatch(/font-size: var\(--text-sm\);/);
+    // The Activity row's receipt list (SentinelAuditFeed) must not fall back to the stray
+    // 0.875rem the base .aui-receipt rule used before the rail stepped it onto the scale.
+    const railReceiptRule = ruleOf('.aman-runtime-rail .aui-receipt');
+    expect(railReceiptRule).toMatch(/font-size: var\(--text-sm\);/);
+    expect(railReceiptRule).not.toMatch(/0\.875rem/);
+  });
+
+  it('shows no release line, no Details disclosure, and no pixel lengths in the rail', () => {
+    const { container } = render(
       <RuntimeHarness messages={[]}>
-        <AmanRuntimeRail version="0.4.2" buildRef="4f2a91c8d3b7e6510a2c9f4b8d1e7a3c5b6d8e90" />
+        <AmanRuntimeRail
+          avatarSrc="/aman-avatar.png"
+          modelName="local-model"
+          version="0.4.2"
+          buildRef="abcdef1234567"
+        />
       </RuntimeHarness>,
     );
 
-    const value = screen.getByText('Release 0.4.2 · 4f2a91c');
-    expect(value).toBeInTheDocument();
-    expect(value).toHaveAttribute('title', 'Release 0.4.2 · 4f2a91c8d3b7e6510a2c9f4b8d1e7a3c5b6d8e90');
-    expect(screen.queryByText(/Session/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Release/)).not.toBeInTheDocument();
+    expect(screen.queryByText('Details')).not.toBeInTheDocument();
+    expect(screen.queryByText('local-model')).not.toBeInTheDocument();
+    expect(container.querySelector('.aman-runtime-rail__footer')).toBeNull();
   });
 
-  it('leaves a tag-shaped build reference whole in the release line', () => {
-    render(
+  it('folds Activity and Rules closed by default, with the chevron on the left of each label, and has no Memory row', () => {
+    const { container } = render(
       <RuntimeHarness messages={[]}>
-        <AmanRuntimeRail version="0.4.2" buildRef="v0.4.2-rc1" />
+        <AmanRuntimeRail avatarSrc="/aman-avatar.png" auditFeed={<p>Recent actions body</p>} />
       </RuntimeHarness>,
     );
 
-    expect(screen.getByText('Release 0.4.2 · v0.4.2-rc1')).toBeInTheDocument();
-  });
-
-  it('shows the version alone in the release line when the build carries no reference', () => {
-    render(
-      <RuntimeHarness messages={[]}>
-        <AmanRuntimeRail version="0.4.2" />
-      </RuntimeHarness>,
-    );
-
-    expect(screen.getByText('Release 0.4.2')).toBeInTheDocument();
-  });
-
-  it('leaves out the release line when the server reports no version', () => {
-    render(
-      <RuntimeHarness messages={[]}>
-        <AmanRuntimeRail buildRef="4f2a91c8d3b7e6510a2c9f4b8d1e7a3c5b6d8e90" />
-      </RuntimeHarness>,
-    );
-
-    expect(screen.queryByText(/^Release /)).not.toBeInTheDocument();
+    const rows = Array.from(container.querySelectorAll<HTMLDetailsElement>('details.aman-runtime-rail__details'));
+    expect(rows.map(row => row.dataset.section)).toEqual(['activity', 'rules']);
+    for (const row of rows) {
+      expect(row.open).toBe(false);
+      const summary = row.querySelector('summary');
+      expect(summary?.firstElementChild).toHaveClass('aman-runtime-rail__fold-chevron');
+    }
+    expect(screen.getByText('Rules')).toBeInTheDocument();
+    expect(screen.queryByText('Memory')).not.toBeInTheDocument();
+    expect(screen.getByText('Activity')).toBeInTheDocument();
   });
 
   it('does not show a signed-in name or a memory status row', () => {
@@ -298,8 +363,8 @@ describe('AmanRuntimeRail', () => {
       </RuntimeHarness>,
     );
 
-    expect(screen.getByRole('img', { name: 'Aman, drawn as a panda writing with a quill' })).toHaveTextContent('A');
-    expect(screen.getByText('Offline')).toBeInTheDocument();
+    expect(screen.getByRole('img', { name: PANDA_ALT })).toHaveTextContent('A');
+    expect(screen.getByText('Offline. Check your connection.')).toBeInTheDocument();
   });
 
   it('shows the personalized name without exposing editing controls in the runtime rail', async () => {
@@ -331,42 +396,34 @@ describe('AmanRuntimeRail', () => {
     expect(screen.queryByRole('button', { name: 'Personalize assistant' })).not.toBeInTheDocument();
   });
 
-  it('captions the panda with the owner name in sentence case', async () => {
+  it('captions the panda "Chief of staff" and names it with the assistant name only', async () => {
     render(
-      <RuntimeHarness messages={[]}>
-        <PersonalizationProvider
-          api={{
-            getProfile: async () => ({
-              assistant_name: 'Mira',
-              assistant_identity: null,
-              voice_guidance: null,
-              user_name: 'Maya',
-              address_as: null,
-              user_profile: null,
-              pinned_preferences: [],
-              help_areas: [],
-              learned_profile: null,
-            }),
-            updateProfile: async profile => profile,
-            deleteProfile: async () => {},
-          }}
-        >
-          <AmanRuntimeRail />
-        </PersonalizationProvider>
-      </RuntimeHarness>,
+      <PersonalizationProvider
+        api={{
+          getProfile: async () => ({
+            assistant_name: 'Mannie',
+            assistant_identity: null,
+            voice_guidance: null,
+            user_name: 'Maya',
+            address_as: null,
+            user_profile: null,
+            pinned_preferences: [],
+            help_areas: [],
+            learned_profile: null,
+          }),
+          updateProfile: async profile => profile,
+          deleteProfile: async () => {},
+        }}
+      >
+        <RuntimeHarness messages={[]}>
+          <AmanRuntimeRail avatarSrc="/aman-avatar.png" />
+        </RuntimeHarness>
+      </PersonalizationProvider>,
     );
 
-    expect(await screen.findByText("Maya's Chief of Staff")).toHaveClass('aui-panda__role');
-  });
-
-  it('captions the panda "Your Chief of Staff" when no owner name is known', () => {
-    render(
-      <RuntimeHarness messages={[]}>
-        <AmanRuntimeRail avatarSrc="/aman-avatar.png" modelName="local-model" />
-      </RuntimeHarness>,
-    );
-
-    expect(screen.getByText('Your Chief of Staff')).toHaveClass('aui-panda__role');
+    expect(await screen.findByRole('heading', { name: 'Mannie' })).toBeInTheDocument();
+    expect(screen.getByText('Chief of staff')).toHaveClass('aui-panda__role');
+    expect(screen.getByRole('img', { name: avatarAltText('Mannie') })).toBeInTheDocument();
   });
 
   it('groups the rail into labeled answering and model sections', () => {
@@ -386,7 +443,7 @@ describe('AmanRuntimeRail', () => {
     expect(screen.queryByRole('heading', { name: 'Session' })).not.toBeInTheDocument();
   });
 
-  it('shows the probe latency next to a ready status', async () => {
+  it('shows ready once the live probe answers', async () => {
     fetchMock.mockResolvedValue(new Response(null, { status: 200 }));
 
     render(
@@ -396,7 +453,6 @@ describe('AmanRuntimeRail', () => {
     );
 
     expect(await screen.findByText('Ready')).toBeInTheDocument();
-    expect(await screen.findByText(/\d+ ms/)).toBeInTheDocument();
   });
 
   it('lets an explicit status prop override the live probe', () => {
@@ -407,10 +463,9 @@ describe('AmanRuntimeRail', () => {
     );
 
     // The probe would report ready, but the host's status wins and no probing happens.
-    expect(screen.getByText('Degraded')).toBeInTheDocument();
+    expect(screen.getByText('Connection is slow')).toBeInTheDocument();
     expect(fetchMock).not.toHaveBeenCalled();
     expect(screen.queryByRole('button', { name: /retry/i })).not.toBeInTheDocument();
-    expect(screen.queryByText(/\d+ ms/)).not.toBeInTheDocument();
   });
 
   it('shows a retry control when the live probe fails, and re-probes on retry', async () => {
@@ -424,12 +479,12 @@ describe('AmanRuntimeRail', () => {
     );
 
     const retry = await screen.findByRole('button', { name: /retry/i });
-    expect(await screen.findByText('Offline')).toBeInTheDocument();
+    expect(await screen.findByText('Offline. Check your connection.')).toBeInTheDocument();
 
     fireEvent.click(retry);
 
     // The retry succeeds after a failure, so the rail reports degraded rather than ready.
-    expect(await screen.findByText('Degraded')).toBeInTheDocument();
+    expect(await screen.findByText('Connection is slow')).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
@@ -440,7 +495,7 @@ describe('AmanRuntimeRail', () => {
       </RuntimeHarness>,
     );
 
-    const avatar = screen.getByRole('img', { name: 'Aman, drawn as a panda writing with a quill' });
+    const avatar = screen.getByRole('img', { name: PANDA_ALT });
     expect(avatar.tagName).toBe('IMG');
     expect(avatar.className).not.toMatch(/mascot-animator/);
     expect(avatar.parentElement?.querySelector('.mascot-animator__container')).toBeNull();
@@ -497,7 +552,7 @@ describe('AmanRuntimeRail', () => {
 
       // Idle on arrival: the poster still, no video element, no clip bytes.
       expect(document.querySelectorAll('video')).toHaveLength(0);
-      const still = screen.getByRole('img', { name: 'Aman, drawn as a panda writing with a quill' });
+      const still = screen.getByRole('img', { name: PANDA_ALT });
       expect(still.tagName).toBe('IMG');
       expect(still).toHaveAttribute('src', motionSources.poster);
 
@@ -507,26 +562,44 @@ describe('AmanRuntimeRail', () => {
           <AmanRuntimeRail avatarSrc="/aman-avatar.png" avatarMotion={motionSources} activity="thinking" />
         </RuntimeHarness>,
       );
-      const avatar = screen.getByRole('img', { name: 'Aman, drawn as a panda writing with a quill' });
+      const avatar = screen.getByRole('img', { name: PANDA_ALT });
       expect(avatar.tagName).toBe('VIDEO');
       expect(avatar.getAttribute('src')).toBe(motionSources.thinking);
       expect(avatar).toHaveAttribute('poster', motionSources.poster);
     });
 
-    it('plays the writing clip while an approval waits, even when the agent is idle', () => {
-      render(
+    it('shows the still poster while an approval waits, when there is no waiting clip', () => {
+      const { container } = render(
         <RuntimeHarness messages={[]}>
           <AmanRuntimeRail
             avatarSrc="/aman-avatar.png"
             avatarMotion={motionSources}
             activity="idle"
+            status="ready"
             pendingApprovalIds={['approval-1']}
           />
         </RuntimeHarness>,
       );
-      const avatar = screen.getByRole('img', { name: 'Aman, drawn as a panda writing with a quill' });
+      const still = screen.getByRole('img', { name: PANDA_ALT });
+      expect(still.tagName).toBe('IMG');
+      expect(still).toHaveAttribute('src', motionSources.poster);
+      expect(container.querySelector('.aman-runtime-rail__status')).toHaveTextContent('Waiting for you');
+    });
+
+    it('plays the waiting clip while an approval waits, even when the agent is idle', () => {
+      render(
+        <RuntimeHarness messages={[]}>
+          <AmanRuntimeRail
+            avatarSrc="/aman-avatar.png"
+            avatarMotion={{ ...motionSources, waiting: '/aman-avatar/waiting.mp4' }}
+            activity="idle"
+            pendingApprovalIds={['approval-1']}
+          />
+        </RuntimeHarness>,
+      );
+      const avatar = screen.getByRole('img', { name: PANDA_ALT });
       expect(avatar.tagName).toBe('VIDEO');
-      expect(avatar.getAttribute('src')).toBe(motionSources.writing);
+      expect(avatar.getAttribute('src')).toBe('/aman-avatar/waiting.mp4');
     });
 
     it('plays the error clip the moment an error is reported', () => {
@@ -536,10 +609,7 @@ describe('AmanRuntimeRail', () => {
         </RuntimeHarness>,
       );
 
-      expect(screen.getByRole('img', { name: 'Aman, drawn as a panda writing with a quill' })).toHaveAttribute(
-        'src',
-        motionSources.error,
-      );
+      expect(screen.getByRole('img', { name: PANDA_ALT })).toHaveAttribute('src', motionSources.error);
     });
 
     it('keeps the static image when motion sources are absent, whatever the activity', () => {
@@ -549,7 +619,7 @@ describe('AmanRuntimeRail', () => {
         </RuntimeHarness>,
       );
 
-      const avatar = screen.getByRole('img', { name: 'Aman, drawn as a panda writing with a quill' });
+      const avatar = screen.getByRole('img', { name: PANDA_ALT });
       expect(avatar.tagName).toBe('IMG');
       expect(avatar).toHaveAttribute('src', '/aman-avatar.png');
     });
@@ -562,7 +632,7 @@ describe('AmanRuntimeRail', () => {
         </RuntimeHarness>,
       );
 
-      const avatar = screen.getByRole('img', { name: 'Aman, drawn as a panda writing with a quill' });
+      const avatar = screen.getByRole('img', { name: PANDA_ALT });
       expect(avatar.tagName).toBe('IMG');
       expect(avatar).toHaveAttribute('src', motionSources.poster);
       expect(document.querySelectorAll('video')).toHaveLength(0);
@@ -575,7 +645,7 @@ describe('AmanRuntimeRail', () => {
         </RuntimeHarness>,
       );
 
-      expect(screen.getByRole('img', { name: 'Aman, drawn as a panda writing with a quill' })).toHaveTextContent('A');
+      expect(screen.getByRole('img', { name: PANDA_ALT })).toHaveTextContent('A');
     });
   });
 });
@@ -612,28 +682,142 @@ describe('AmanRuntimeRail recent actions, rules and Needs you', () => {
     vi.unstubAllGlobals();
   });
 
-  it('puts the panda first, then the status line, Your rules and Recent actions', async () => {
-    render(
+  it('keeps Rules and Activity folded, with at most five actions and no Show all link', async () => {
+    const actions = [
+      'read_email',
+      'list_events',
+      'tavily_search',
+      'edit_space',
+      'run_code',
+      'write_file',
+      'send_draft',
+      'create_schedule',
+    ];
+    const api = {
+      ...sentinelWith(settingsStub),
+      listAuditEntries: vi.fn(async () =>
+        actions.map((action, index) => ({
+          id: `entry-${String(index)}`,
+          session_id: 'chat-1',
+          created_at: `2026-10-23T10:0${String(index)}:00.000Z`,
+          tier: 2 as const,
+          action_type: action,
+          description: '',
+          outcome: 'ran' as const,
+        })),
+      ),
+    };
+    const { container } = render(
+      <SentinelApiProvider api={api}>
+        <RuntimeHarness messages={[]}>
+          <AmanRuntimeRail avatarSrc="/aman-avatar.png" auditFeed={<SentinelAuditFeed sessionId="chat-1" />} />
+        </RuntimeHarness>
+      </SentinelApiProvider>,
+    );
+
+    const fold = (section: string) =>
+      container.querySelector<HTMLDetailsElement>(`details.aman-runtime-rail__details[data-section="${section}"]`);
+    expect(fold('rules')?.open).toBe(false);
+    expect(fold('activity')?.open).toBe(false);
+    expect(screen.queryByText('Your rules')).not.toBeInTheDocument();
+
+    const activity = fold('activity');
+    expect(await within(activity ?? document.body).findByText('Changed a schedule')).toBeInTheDocument();
+    expect(within(activity ?? document.body).queryByText('Read your email')).not.toBeInTheDocument();
+    expect(activity?.querySelectorAll('li')).toHaveLength(5);
+    expect(screen.queryByText(/Show all/i)).not.toBeInTheDocument();
+  });
+
+  it('puts the panda first, then Activity above Rules, and has no Settings link', async () => {
+    const { container } = render(
       <SentinelApiProvider api={sentinelWith(settingsStub)}>
         <RuntimeHarness messages={[]}>
           <AmanRuntimeRail
             avatarSrc="/aman-avatar.png"
             pendingApprovalIds={['approval-1']}
             auditFeed={<p>Recent actions body</p>}
-            settingsHref="/settings"
           />
         </RuntimeHarness>
       </SentinelApiProvider>,
     );
-    await screen.findByText('Sandbox code asks first');
-    const order = Array.from(document.querySelectorAll('[data-section]')).map(node =>
+    await screen.findByText('Read-only commands in the workspace run without asking. Other commands ask first.');
+    const order = Array.from(container.querySelectorAll('[data-section]')).map(node =>
       node.getAttribute('data-section'),
     );
-    expect(order).toEqual(['panda', 'rules', 'recent-actions']);
-    expect(screen.getByRole('region', { name: 'Recent actions' })).toContainElement(
+    expect(order).toEqual(['panda', 'activity', 'rules']);
+    expect(container.querySelector('[data-section="activity"]')).toContainElement(
       screen.getByText('Recent actions body'),
     );
-    expect(screen.getByRole('link', { name: 'Change in Settings' })).toHaveAttribute('href', '/settings');
+    expect(screen.queryByRole('link', { name: /Settings/ })).not.toBeInTheDocument();
+    expect(container.querySelector('aside')).not.toHaveTextContent(/Settings/);
+  });
+
+  it('shows a live Waiting for you line above the history while an approval waits', () => {
+    const { container } = render(
+      <SentinelApiProvider api={sentinelWith(settingsStub)}>
+        <RuntimeHarness messages={[]}>
+          <AmanRuntimeRail pendingApprovalIds={['approval-1']} auditFeed={<p>Recent actions body</p>} status="ready" />
+        </RuntimeHarness>
+      </SentinelApiProvider>,
+    );
+    const activity = container.querySelector<HTMLDetailsElement>(
+      'details.aman-runtime-rail__details[data-section="activity"]',
+    );
+    const line = within(activity ?? document.body).getByText('Waiting for you');
+    expect(activity?.contains(line)).toBe(true);
+    expect(
+      line.compareDocumentPosition(screen.getByText('Recent actions body')) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
+  it('drops the Waiting for you line as soon as nothing waits', () => {
+    const { container, rerender } = render(
+      <RuntimeHarness messages={[]}>
+        <AmanRuntimeRail pendingApprovalIds={['approval-1']} auditFeed={<p>Recent actions body</p>} />
+      </RuntimeHarness>,
+    );
+    const activity = container.querySelector<HTMLDetailsElement>(
+      'details.aman-runtime-rail__details[data-section="activity"]',
+    );
+    expect(within(activity ?? document.body).getByText('Waiting for you')).toBeInTheDocument();
+
+    rerender(
+      <RuntimeHarness messages={[]}>
+        <AmanRuntimeRail pendingApprovalIds={[]} auditFeed={<p>Recent actions body</p>} />
+      </RuntimeHarness>,
+    );
+    expect(screen.queryByText('Waiting for you')).not.toBeInTheDocument();
+    expect(screen.getByText('Recent actions body')).toBeInTheDocument();
+  });
+
+  it('shows no Waiting for you line when nothing waits', () => {
+    render(
+      <RuntimeHarness messages={[]}>
+        <AmanRuntimeRail pendingApprovalIds={[]} auditFeed={<p>Recent actions body</p>} />
+      </RuntimeHarness>,
+    );
+    expect(screen.queryByText('Waiting for you')).not.toBeInTheDocument();
+  });
+
+  it('shows the wait line beside an empty history, with no waiting entry in it', async () => {
+    const { container } = render(
+      <SentinelApiProvider api={sentinelWith(settingsStub)}>
+        <RuntimeHarness messages={[]}>
+          <AmanRuntimeRail
+            pendingApprovalIds={['approval-1']}
+            auditFeed={<SentinelAuditFeed sessionId="session-1" />}
+            status="ready"
+          />
+        </RuntimeHarness>
+      </SentinelApiProvider>,
+    );
+    // The carded action is not in the history yet: it is written only after it is answered.
+    expect(await screen.findByText('Nothing has happened in this chat yet.')).toBeInTheDocument();
+    const activity = container.querySelector<HTMLDetailsElement>(
+      'details.aman-runtime-rail__details[data-section="activity"]',
+    );
+    expect(within(activity ?? document.body).getByText('Waiting for you')).toBeInTheDocument();
+    expect(document.querySelector('.aui-receipt')).toBeNull();
   });
 
   it('shows one pending signal: no Needs you ticket, and the status line says the approval is waiting', () => {
@@ -645,25 +829,49 @@ describe('AmanRuntimeRail recent actions, rules and Needs you', () => {
     expect(container.querySelector('[data-section="needs-you"]')).toBeNull();
     expect(screen.queryByText(/Needs you/)).not.toBeInTheDocument();
     expect(container.querySelectorAll('.aui-ticket--selected')).toHaveLength(0);
-    expect(screen.getByText('Waiting on your approval')).toBeInTheDocument();
+    expect(container.querySelector('.aman-runtime-rail__status')).toHaveTextContent('Waiting for you');
   });
 
-  it('says what Aman is doing in the status line and keeps it polite for screen readers', () => {
+  it('says nothing in the status line while a reply runs, and Ready once it is done', () => {
     const { container, rerender } = render(
       <RuntimeHarness messages={[]}>
         <AmanRuntimeRail status="ready" activity="thinking" />
       </RuntimeHarness>,
     );
-    const status = container.querySelector('.aman-runtime-rail__status');
-    expect(status).toHaveAttribute('aria-live', 'polite');
-    expect(status).toHaveTextContent('Working on it…');
+    const status = () => container.querySelector('.aman-runtime-rail__status');
+    expect(status()).toHaveAttribute('aria-live', 'polite');
+    expect(status()).toHaveTextContent(/^$/);
+
+    rerender(
+      <RuntimeHarness messages={[]}>
+        <AmanRuntimeRail status="ready" activity="writing" />
+      </RuntimeHarness>,
+    );
+    expect(status()).toHaveTextContent(/^$/);
 
     rerender(
       <RuntimeHarness messages={[]}>
         <AmanRuntimeRail status="ready" activity="idle" />
       </RuntimeHarness>,
     );
-    expect(container.querySelector('.aman-runtime-rail__status')).toHaveTextContent('Ready');
+    expect(status()).toHaveTextContent('Ready');
+  });
+
+  it('leaves the composer as the only place a running reply says Working on it', () => {
+    render(
+      <RuntimeHarness messages={[]}>
+        <AmanRuntimeRail status="ready" activity="thinking" />
+        <ComposerShell
+          input={<textarea aria-label="Message" />}
+          disabled={false}
+          canSubmit={false}
+          isRunning
+          onSubmit={() => undefined}
+        />
+      </RuntimeHarness>,
+    );
+
+    expect(screen.getAllByText(/Working on it/)).toHaveLength(1);
   });
 
   it('reads the three rules in plain words from the saved settings', async () => {
@@ -675,19 +883,64 @@ describe('AmanRuntimeRail recent actions, rules and Needs you', () => {
       </SentinelApiProvider>,
     );
     expect(await screen.findByText('Web searches run without asking')).toBeInTheDocument();
-    expect(screen.getByText('Sandbox code asks first')).toBeInTheDocument();
+    expect(
+      screen.getByText('Read-only commands in the workspace run without asking. Other commands ask first.'),
+    ).toBeInTheDocument();
     expect(screen.getByText('Offline mode is on')).toBeInTheDocument();
     // Read-only: the rules offer no switch.
     expect(screen.queryByRole('switch', { name: /offline/i })).not.toBeInTheDocument();
   });
 
-  it('keeps the model in Details and out of the visible rail', () => {
+  it('says only what the sandbox switch really lets run without asking', async () => {
+    render(
+      <SentinelApiProvider api={sentinelWith({ ...settingsStub, sandbox_without_asking: true })}>
+        <RuntimeHarness messages={[]}>
+          <AmanRuntimeRail />
+        </RuntimeHarness>
+      </SentinelApiProvider>,
+    );
+    expect(
+      await screen.findByText(
+        "Read-only commands and Aman's own code in the workspace run without asking. Other commands ask first.",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByText('Sandbox code runs without asking')).not.toBeInTheDocument();
+  });
+
+  it('keeps the model name out of the rail', () => {
     render(
       <RuntimeHarness messages={[]}>
         <AmanRuntimeRail modelName="local-model" />
       </RuntimeHarness>,
     );
-    const details = screen.getByText('Details').closest('details');
-    expect(details).toHaveTextContent('local-model');
+    expect(screen.queryByText('local-model')).not.toBeInTheDocument();
+  });
+
+  it('shows an Audits link in the Activity fold when the host hands over a way to open Audits, and calls it on click', () => {
+    const onOpenAudits = vi.fn();
+    render(
+      <RuntimeHarness messages={[]}>
+        <AmanRuntimeRail auditFeed={<p>Recent actions body</p>} onOpenAudits={onOpenAudits} />
+      </RuntimeHarness>,
+    );
+
+    const auditsLink = screen.getByRole('button', { name: 'Audits' });
+    expect(auditsLink).toBeInTheDocument();
+    expect(auditsLink).toHaveClass('justify-self-start');
+    expect(auditsLink).toHaveClass('text-left');
+
+    fireEvent.click(auditsLink);
+
+    expect(onOpenAudits).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not show an Audits link when the host hands over no way to open Audits', () => {
+    render(
+      <RuntimeHarness messages={[]}>
+        <AmanRuntimeRail auditFeed={<p>Recent actions body</p>} />
+      </RuntimeHarness>,
+    );
+
+    expect(screen.queryByRole('button', { name: 'Audits' })).not.toBeInTheDocument();
   });
 });

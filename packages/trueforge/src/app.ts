@@ -2,7 +2,13 @@
 import { swaggerUI } from '@hono/swagger-ui';
 import { OpenAPIHono, z } from '@hono/zod-openapi';
 import type { ISessionStore, Sessions, TurnStreamingEvent } from '@truefoundry/trueforge-core/agent-session';
-import { extractErrorLogFields, type SentinelServices } from '@truefoundry/trueforge-core/core';
+import {
+  existingSandboxIdForProvider,
+  extractErrorLogFields,
+  rawSandboxId,
+  repositoryRootsMatch,
+  type SentinelServices,
+} from '@truefoundry/trueforge-core/core';
 import type { RequestReplyRouter } from '@truefoundry/trueforge-core/request-reply';
 import type { Context, ErrorHandler, MiddlewareHandler } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
@@ -16,11 +22,14 @@ import { createAuthRouter } from './apis/auth';
 import { createBriefItemsRouter } from './apis/briefItems';
 import { createBugReportRouter } from './apis/bugReport';
 import { createAppBugReportRouter } from './apis/bugReportApp';
+import { CALENDAR_SETTINGS_BASE_PATH, createCalendarAccountRouter } from './apis/calendarAccount';
 import { createCapabilitiesRouter } from './apis/capabilities';
 import { createCatalogRouter } from './apis/catalog';
 import { createChatImagesRouter } from './apis/chatImages';
+import { createChatPicturesRouter } from './apis/chatPictures';
 import { createDataExportRouter } from './apis/dataExport';
 import { createDataImportRouter } from './apis/dataImport';
+import { createEmailAccountRouter, EMAIL_SETTINGS_BASE_PATH } from './apis/emailAccount';
 import { createGoogleRouter } from './apis/google';
 import { createHelpRouter } from './apis/help';
 import { createMapsRouter } from './apis/maps';
@@ -37,7 +46,7 @@ import { createScheduleExecutionRouter, createSchedulesRouter } from './apis/sch
 import { createSentinelSettingsRouter } from './apis/sentinelSettings';
 import { createSessionFolderAssignmentsRouter, createSessionFoldersRouter } from './apis/sessionFolders';
 import { createInternalMetricsRouter } from './apis/sessionMetrics';
-import { createInternalSessionsRouter, createSessionsRouter } from './apis/sessions';
+import { createInternalSessionsRouter, createSessionsRouter, sandboxIdOfLastTurn } from './apis/sessions';
 import { createSettingsRouter } from './apis/settings';
 import { createAvailableSkillsRouter, type ResolveSkillStore } from './apis/skills';
 import { createSpacePicturesRouter } from './apis/spacePictures';
@@ -103,6 +112,7 @@ import { GOOGLE_ROUTES_BASE_PATH } from './routes/googleRoutes';
 import { OPENAPI_DOCUMENT_TAGS } from './routes/openapiTags';
 import type { ActiveTurnRegistry } from './runtime/activeTurns';
 import type { ChatImageService } from './runtime/chatImages/chatImageService';
+import { createChatPictureService } from './runtime/chatPictures/chatPictureService';
 import { resolveDefaultChatModel } from './runtime/defaultChatModel';
 import type { EventSubscriptionRegistry } from './runtime/event-subscription';
 import { resolveSandboxProvider } from './runtime/sessionResources';
@@ -317,6 +327,79 @@ export interface ServerDeps<TTransaction> {
   outboundSecrets: SentinelServices['outboundSecrets'];
 }
 
+/**
+ * Whether the sandbox the chat last used already holds a real checkout at the
+ * workspace path. Git must name the path as the checkout root and HEAD must
+ * resolve to a commit, so an empty folder, a repo with no commits yet, and the
+ * leftover of an interrupted clone do not count. The recorded sandbox id goes
+ * through the same provider gate turn admit uses, and any failure to tell
+ * counts as no checkout, so start work refuses plainly instead of failing.
+ */
+export async function resolveCheckoutExistsInSessionSandbox(input: {
+  deps: {
+    sessionStore: Pick<ISessionStore<SessionCustom, TurnCustom>, 'getSession' | 'getTurn'>;
+    logger: Logger;
+    sandboxProviderResolver: typeof resolveSandboxProvider | undefined;
+    resolveSandboxProviderStore: (c: Context) => ISandboxProviderStore;
+  };
+  c: Context;
+  session_id: string;
+  workspace_cwd: string;
+}): Promise<boolean> {
+  const { deps, c, session_id, workspace_cwd } = input;
+  try {
+    const session = await deps.sessionStore.getSession({ tenant_id: TENANT_ID, session_id });
+    if (session === undefined) {
+      return false;
+    }
+    const recordedSandboxId = await sandboxIdOfLastTurn({
+      deps: { sessionStore: deps.sessionStore, logger: deps.logger },
+      record: session,
+    });
+    if (recordedSandboxId === undefined) {
+      return false;
+    }
+    const resolver = deps.sandboxProviderResolver ?? resolveSandboxProvider;
+    const provider = await resolver({
+      tenant_id: TENANT_ID,
+      store: deps.resolveSandboxProviderStore(c),
+      logger: deps.logger,
+      sessionId: session_id,
+    });
+    if (provider === undefined) {
+      return false;
+    }
+    const sandboxId = existingSandboxIdForProvider({
+      existingSandboxId: recordedSandboxId,
+      currentProviderType: provider.type,
+    });
+    if (sandboxId === undefined) {
+      return false;
+    }
+    const root = await provider.exec({
+      sandboxId: rawSandboxId(sandboxId),
+      command: 'git rev-parse --show-toplevel',
+      cwd: workspace_cwd,
+    });
+    if (
+      !root.success ||
+      root.response.exitCode !== 0 ||
+      !repositoryRootsMatch({ expected: workspace_cwd, actual: root.response.result.trim() })
+    ) {
+      return false;
+    }
+    const head = await provider.exec({
+      sandboxId: rawSandboxId(sandboxId),
+      command: 'git rev-parse HEAD',
+      cwd: workspace_cwd,
+    });
+    return head.success && head.response.exitCode === 0 && head.response.result.trim().length > 0;
+  } catch (error) {
+    deps.logger.warn('Could not check for a checkout before starting work', extractErrorLogFields(error));
+    return false;
+  }
+}
+
 export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
   const app = new OpenAPIHono({ defaultHook: zodValidationHook });
   // Installs the Aman guide for a person and refreshes it on upgrade. It waits for a default model,
@@ -408,7 +491,6 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
     resolveSandboxProviderStore: deps.resolveSandboxProviderStore,
     activeTurns: deps.activeTurns,
     turnDrains: deps.turnDrains,
-    sentinelSettingsStore: deps.sentinelSettingsStore,
     resolveSkillStore: deps.resolveSkillStore,
     tokenStore: deps.tokenStore,
     repositoryStore: deps.repositoryStore,
@@ -419,6 +501,7 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
     sandboxProviderResolver: deps.sandboxProviderResolver,
     globalSettingsStore: deps.globalSettingsStore,
     tokenFactoryBudget: deps.tokenFactoryBudget,
+    audit: deps.sentinelAuditStore,
   };
 
   if (configuration.ACCESS_LOGS) {
@@ -598,6 +681,7 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
         resolveMcpServerStore: deps.resolveMcpServerStore,
         resolveSkillStore: deps.resolveSkillStore,
         resolveSandboxProviderStore: deps.resolveSandboxProviderStore,
+        mcpCatalog: deps.mcpCatalog,
         withTransaction: deps.withTransaction,
         resolveRequestContext,
         authorizer: deps.authorizer,
@@ -713,6 +797,7 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
     withAuth(
       createInternalSessionsRouter({
         sessions: deps.sessions,
+        mcpCatalog: deps.mcpCatalog,
         resolveModelProviderStore: deps.resolveModelProviderStore,
         resolveMcpServerStore: deps.resolveMcpServerStore,
         resolveSkillStore: deps.resolveSkillStore,
@@ -806,6 +891,37 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
       createUiSessionAuthMiddleware(deps.authenticator),
     ),
   );
+  // Browser session only and admin only: the Email and Calendar accounts belong to the whole instance, so a
+  // member of a shared server must not read or change them. Their app passwords pass through the save call
+  // to the sidecars only.
+  app.route(
+    EMAIL_SETTINGS_BASE_PATH,
+    withAuth(
+      withAdminAuth(
+        createEmailAccountRouter({
+          fetchImpl: undefined,
+          logger: deps.logger,
+          mcpServerStore: deps.resolveMcpServerStore(),
+        }),
+        adminAuthMiddleware,
+      ),
+      createUiSessionAuthMiddleware(deps.authenticator),
+    ),
+  );
+  app.route(
+    CALENDAR_SETTINGS_BASE_PATH,
+    withAuth(
+      withAdminAuth(
+        createCalendarAccountRouter({
+          fetchImpl: undefined,
+          logger: deps.logger,
+          mcpServerStore: deps.resolveMcpServerStore(),
+        }),
+        adminAuthMiddleware,
+      ),
+      createUiSessionAuthMiddleware(deps.authenticator),
+    ),
+  );
   // Same-origin tile proxy for embedded maps. Browser session only: bearer
   // credentials (agents, sandboxes, API clients) are refused.
   app.route(
@@ -843,6 +959,23 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
           fetchDeps: { fetchImpl: undefined, resolveAddresses: undefined },
           now: () => Date.now(),
         }),
+        resolveRequestContext,
+      }),
+      createUiSessionAuthMiddleware(deps.authenticator),
+    ),
+  );
+  // Chat-page pictures, browser session only: only a link the chat itself saw, read back from its
+  // stored turns, and no agent or API token may fetch on the person\'s behalf.
+  app.route(
+    '/api/chat-pictures',
+    withAuth(
+      createChatPicturesRouter({
+        pictures: createChatPictureService({
+          sessionStore: deps.sessionStore,
+          fetchDeps: { fetchImpl: undefined, resolveAddresses: undefined },
+          now: () => Date.now(),
+        }),
+        sessions: deps.sessions,
         resolveRequestContext,
       }),
       createUiSessionAuthMiddleware(deps.authenticator),
@@ -909,6 +1042,7 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
     withAuth(
       createSessionsRouter({
         sessions: deps.sessions,
+        mcpCatalog: deps.mcpCatalog,
         sessionStore: deps.sessionStore,
         sentinelAuditStore: deps.sentinelAuditStore,
         activeTurns: deps.activeTurns,
@@ -1003,6 +1137,18 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
           });
           return provider?.getWorkspaceDir();
         },
+        resolveCheckoutExists: ({ c, session_id, workspace_cwd }) =>
+          resolveCheckoutExistsInSessionSandbox({
+            deps: {
+              sessionStore: deps.sessionStore,
+              logger: deps.logger,
+              sandboxProviderResolver: deps.sandboxProviderResolver,
+              resolveSandboxProviderStore: deps.resolveSandboxProviderStore,
+            },
+            c,
+            session_id,
+            workspace_cwd,
+          }),
       }),
       authMiddleware,
     ),
@@ -1016,7 +1162,6 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
         sessionStore: deps.sessionStore,
         activeTurns: deps.activeTurns,
         turnDrains: deps.turnDrains,
-        sentinelSettingsStore: deps.sentinelSettingsStore,
         tokenStore: deps.tokenStore,
         resolveModelProviderStore: deps.resolveModelProviderStore,
         resolveMcpServerStore: deps.resolveMcpServerStore,

@@ -1,5 +1,8 @@
 import type { SessionHandle, Sessions, TurnInputItem } from '@truefoundry/trueforge-core/agent-session';
-import { isMorningBriefPrompt } from '@truefoundry/trueforge-core/core/schedules/morningBrief';
+import { DOCUMENT_REPORT_TOOL_NAMES } from '@truefoundry/trueforge-core/core';
+import { SANDBOX_FILE_WRITE_TOOLS } from '@truefoundry/trueforge-core/core/permissions/dispatch';
+import { isMorningBriefPrompt, isMorningBriefSchedule } from '@truefoundry/trueforge-core/core/schedules/morningBrief';
+import { SPACE_WRITE_TOOL_NAMES } from '@truefoundry/trueforge-core/core/spaces/toolContract';
 import { TrueForge } from '@truefoundry/trueforge-sdk';
 import type { Logger } from 'winston';
 import configuration from '../config';
@@ -16,7 +19,7 @@ import type { SessionCustom, TurnCustom } from '../db/sessionCustom';
 import type { WithTransaction } from '../db/transaction';
 import { createTlsFetch, normalizeTlsUrl } from '../http/tls';
 import type { Persona } from '../personas/persona';
-import { nextTriggerAfter } from '../runtime/cron';
+import { firstRunAfter } from '../runtime/cron';
 import { InvalidCronError, type ScheduleRunStatus } from '../schemas/schedule';
 import type { ControlLoop } from './Controller';
 
@@ -143,6 +146,23 @@ export async function scheduleTaskText(params: {
   return `${task}\nAlready done, leave these out of the brief: ${titles.join('; ')}.`;
 }
 
+/**
+ * The brief's dashboard is the reply itself, so the document report tools, the file write tools and the
+ * space write tools are not offered to it: a model that reaches for them gets calls held for approval
+ * while nobody is watching, and spends steps and tokens it needs to write the brief. Reading files and
+ * spaces stays available.
+ */
+export const BRIEF_WITHHELD_TOOL_NAMES: readonly string[] = [
+  ...DOCUMENT_REPORT_TOOL_NAMES,
+  ...SANDBOX_FILE_WRITE_TOOLS,
+  ...SPACE_WRITE_TOOL_NAMES,
+];
+
+/** The built-in tools a schedule's run does not offer. */
+export function scheduleWithheldTools({ name, task }: { name: string; task: string }): readonly string[] {
+  return isMorningBriefSchedule({ name, task }) ? BRIEF_WITHHELD_TOOL_NAMES : [];
+}
+
 export async function startScheduleRun(params: {
   item: ScheduleDispatchItem;
   sessions: Pick<Sessions<SessionCustom, TurnCustom>, 'getOrCreateByExternalId'>;
@@ -227,7 +247,8 @@ export async function loadScheduleDispatchItem<TTransaction>(params: {
 
 /**
  * Mark the current run with `status`, then add the schedule's next scheduled run
- * if the schedule is still active and its cron still has a later trigger time.
+ * if the schedule is still active and its cron still has a later trigger time. A one-time
+ * schedule is marked done instead.
  *
  * ## LOCK ORDERING
  * The schedule row is locked FIRST, before the run row is touched. `updateScheduleAndRun`
@@ -259,17 +280,28 @@ async function finishScheduledRun<TTransaction>(params: {
       return;
     }
 
+    // A one-time schedule ends with its only run: it is marked done so it never gets another.
+    if (latest.manifest.run_at !== null) {
+      await store.updateScheduleAndRun(
+        {
+          tenant_id: latest.tenant_id,
+          id: latest.id,
+          name: latest.name,
+          manifest: { ...latest.manifest, status: 'done' },
+          runFrom: now,
+        },
+        txn,
+      );
+      return;
+    }
+
     // `now` selected this run (`scheduled_for <= now`), so anchoring here gives a
     // trigger time strictly later than the run being finished.
     const advanceFrom = new Date(Math.max(Date.parse(run.scheduled_for), now.getTime()));
 
     let nextTrigger: Date;
     try {
-      nextTrigger = nextTriggerAfter({
-        cron: latest.manifest.cron,
-        timezone: latest.manifest.timezone,
-        from: advanceFrom,
-      });
+      nextTrigger = firstRunAfter({ manifest: latest.manifest, from: advanceFrom });
     } catch (error) {
       if (!(error instanceof InvalidCronError)) {
         throw error;

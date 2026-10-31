@@ -1,11 +1,9 @@
-import { EXTRACT_DOCUMENT_TEXT_TOOL_NAME } from '../../../documents/toolContract';
+import { DOCUMENTS_SERVER_ID, EXTRACT_DOCUMENT_TEXT_TOOL_NAME } from '../../../documents/toolContract';
 import type { ToolOutputScreenClassification, ToolOutputScreenDecision } from '../../../schemas/toolOutputScreen';
 import type { ToolCallResult } from '../../mcp/executeToolCalls';
 import type { AgentCapability, UntrustedTextScreen } from '../AgentCapability';
 import type { AgentThreadExecutionContext } from '../AgentContextProcessor';
 import type { ToolResponseProcessor, ToolResponseProcessorResult } from '../ToolResponseProcessor';
-import { DOCUMENTS_SERVER_ID } from './DocumentTools';
-
 export interface ToolOutputScreenClassifier {
   classify(input: { text: string; timeoutMs: number }): Promise<ToolOutputScreenClassification>;
 }

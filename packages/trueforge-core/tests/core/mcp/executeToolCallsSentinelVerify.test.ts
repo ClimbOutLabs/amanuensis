@@ -8,7 +8,7 @@
  * the classifier would have used, then dispatches the approved Tier 3 call
  * through the real executeToolCalls verify path.
  */
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { ApprovalDecision, ToolAdmissionProvenance } from '../../../src/core/events/schema';
@@ -334,7 +334,7 @@ function servicesWithAudit(): { services: SentinelServices; records: AuditRecord
 }
 
 const TIER2_CARD = {
-  plain_what: 'Change `notes.md` in your workspace.',
+  plain_what: 'Change `notes.md` in your workspace?',
   plain_why: null,
   cannot_be_undone: null,
   why_asked_again: null,
@@ -471,6 +471,155 @@ describe('executeToolCalls sentinel pre-dispatch: silent shell commands', () => 
         wireArgs: { command: 'ls', cwd: workspace },
         toolInfo,
       });
+      expect(outcome.executed).toBe(true);
+    } finally {
+      rmSync(workspace, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('executeToolCalls sentinel pre-dispatch: silent file writes', () => {
+  // A silent write was classified while its folder was an ordinary folder
+  // inside the workspace. These tests rebuild that folder so that by
+  // dispatch it points outside the workspace, and the write must be refused.
+  function workspaceWithMovedFolder(): { workspace: string; outside: string } {
+    const workspace = mkdtempSync(join(tmpdir(), 'sentinel-ws-'));
+    const outside = mkdtempSync(join(tmpdir(), 'sentinel-outside-'));
+    mkdirSync(join(workspace, 'shared'));
+    rmSync(join(workspace, 'shared'), { recursive: true, force: true });
+    symlinkSync(outside, join(workspace, 'shared'), 'dir');
+    return { workspace, outside };
+  }
+
+  test.each([
+    ['write_file', { path: 'shared/notes.txt', content: 'x' }],
+    ['replace_text', { path: 'shared/notes.txt', old_text: 'a', new_text: 'b' }],
+  ])('a silent %s whose folder now points outside the workspace is refused at dispatch', async (toolName, wireArgs) => {
+    const { services } = servicesWithAudit();
+    const { workspace, outside } = workspaceWithMovedFolder();
+    try {
+      const outcome = await dispatchApproved({
+        services,
+        decision: null,
+        workspaceCwd: workspace,
+        wireName: 'test_tool',
+        wireArgs,
+        toolInfo: { original_tool_name: toolName, mint_tool_name: toolName, tier: 1, is_approval_required: false },
+      });
+      expect(outcome.disposition).toBe('policy_blocked');
+      expect(outcome.reasonCode).toBe('sentinel_verification_failed');
+      expect(outcome.failure).toBe(true);
+      expect(outcome.executed).toBe(false);
+    } finally {
+      rmSync(workspace, { recursive: true, force: true });
+      rmSync(outside, { recursive: true, force: true });
+    }
+  });
+
+  test('a silent apply_patch whose patched file now sits outside the workspace is refused at dispatch', async () => {
+    const { services } = servicesWithAudit();
+    const { workspace, outside } = workspaceWithMovedFolder();
+    try {
+      const outcome = await dispatchApproved({
+        services,
+        decision: null,
+        workspaceCwd: workspace,
+        wireName: 'test_tool',
+        wireArgs: {
+          patch:
+            'diff --git a/shared/notes.txt b/shared/notes.txt\n--- a/shared/notes.txt\n+++ b/shared/notes.txt\n@@ -1 +1 @@\n-one\n+two\n',
+        },
+        toolInfo: {
+          original_tool_name: 'apply_patch',
+          mint_tool_name: 'apply_patch',
+          tier: 1,
+          is_approval_required: false,
+        },
+      });
+      expect(outcome.disposition).toBe('policy_blocked');
+      expect(outcome.reasonCode).toBe('sentinel_verification_failed');
+      expect(outcome.failure).toBe(true);
+      expect(outcome.executed).toBe(false);
+    } finally {
+      rmSync(workspace, { recursive: true, force: true });
+      rmSync(outside, { recursive: true, force: true });
+    }
+  });
+
+  test('a silent write_file whose target file now points outside the workspace is refused at dispatch', async () => {
+    const { services } = servicesWithAudit();
+    const workspace = mkdtempSync(join(tmpdir(), 'sentinel-ws-'));
+    const outside = mkdtempSync(join(tmpdir(), 'sentinel-outside-'));
+    try {
+      writeFileSync(join(outside, 'notes.txt'), 'outside');
+      symlinkSync(join(outside, 'notes.txt'), join(workspace, 'notes.txt'), 'file');
+      const outcome = await dispatchApproved({
+        services,
+        decision: null,
+        workspaceCwd: workspace,
+        wireName: 'test_tool',
+        wireArgs: { path: 'notes.txt', content: 'x' },
+        toolInfo: {
+          original_tool_name: 'write_file',
+          mint_tool_name: 'write_file',
+          tier: 1,
+          is_approval_required: false,
+        },
+      });
+      expect(outcome.disposition).toBe('policy_blocked');
+      expect(outcome.reasonCode).toBe('sentinel_verification_failed');
+      expect(outcome.executed).toBe(false);
+    } finally {
+      rmSync(workspace, { recursive: true, force: true });
+      rmSync(outside, { recursive: true, force: true });
+    }
+  });
+
+  test.each([
+    ['write_file', { path: 'notes.txt', content: 'x' }],
+    ['replace_text', { path: 'notes.txt', old_text: 'a', new_text: 'b' }],
+  ])('an ordinary silent %s inside the workspace runs with no card', async (toolName, wireArgs) => {
+    const { services } = servicesWithAudit();
+    const workspace = mkdtempSync(join(tmpdir(), 'sentinel-ws-'));
+    try {
+      writeFileSync(join(workspace, 'notes.txt'), 'a');
+      const outcome = await dispatchApproved({
+        services,
+        decision: null,
+        workspaceCwd: workspace,
+        wireName: 'test_tool',
+        wireArgs,
+        toolInfo: { original_tool_name: toolName, mint_tool_name: toolName, tier: 1, is_approval_required: false },
+      });
+      expect(outcome.disposition).not.toBe('policy_blocked');
+      expect(outcome.executed).toBe(true);
+    } finally {
+      rmSync(workspace, { recursive: true, force: true });
+    }
+  });
+
+  test('an ordinary silent apply_patch inside the workspace runs with no card', async () => {
+    const { services } = servicesWithAudit();
+    const workspace = mkdtempSync(join(tmpdir(), 'sentinel-ws-'));
+    try {
+      writeFileSync(join(workspace, 'notes.txt'), 'old');
+      const outcome = await dispatchApproved({
+        services,
+        decision: null,
+        workspaceCwd: workspace,
+        wireName: 'test_tool',
+        wireArgs: {
+          patch:
+            'diff --git a/notes.txt b/notes.txt\n--- a/notes.txt\n+++ b/notes.txt\n@@ -1 +1 @@\n-old\n+new\n',
+        },
+        toolInfo: {
+          original_tool_name: 'apply_patch',
+          mint_tool_name: 'apply_patch',
+          tier: 1,
+          is_approval_required: false,
+        },
+      });
+      expect(outcome.disposition).not.toBe('policy_blocked');
       expect(outcome.executed).toBe(true);
     } finally {
       rmSync(workspace, { recursive: true, force: true });
@@ -621,5 +770,97 @@ describe('executeToolCalls sentinel audit for a chat grant', () => {
       toolInfo: { original_tool_name: 'lookup_note', tier: 3, tier3_card: card, approval_token_id: tokenId },
     });
     expect(records.map(record => record.description)).toEqual(['Look up a note.']);
+  });
+});
+
+describe('executeToolCalls sentinel pre-dispatch: the workspace classification judged against', () => {
+  // The session identity carries no workspace (no repository bound). The
+  // classifying tool recorded the workspace it judged the call against: the
+  // provider's default workspace, which classification fell back to.
+  async function dispatchSilentExec(input: {
+    services: SentinelServices;
+    command: string;
+    recordedWorkspace?: string | undefined;
+  }): Promise<{ disposition: string | undefined; message: string | undefined; executed: boolean }> {
+    const { toolSet, callTool } = mockToolSet();
+    const result = await executeToolCalls({
+      assistantMessage: toolCall({
+        id: 'call-1',
+        wireName: 'test_tool',
+        wireArgs: { command: input.command },
+        toolInfo: {
+          original_tool_name: 'exec',
+          tier: 1,
+          is_approval_required: false,
+          approval_token_id: null,
+          ...(input.recordedWorkspace === undefined ? {} : { workspace_cwd: input.recordedWorkspace }),
+        },
+      }),
+      toolMapping: new Map([['test_tool', { toolSet, originalToolName: 'test_tool' }]]),
+      threadId: 'main',
+      approvalDecisions: new Map<string, ApprovalDecision>(),
+      memoState: createToolCallMemoState(),
+      sentinel: {
+        services: input.services,
+        web_search: createWebSearchTurnState(),
+        identity: {
+          tenant_id: 't1',
+          created_by: 'u1',
+          conversation_id: 'conv-1',
+          repository_id: null,
+          workspace_cwd: null,
+          agent_intent: null,
+        },
+      },
+    });
+    const outcome = result.toolCallResults[0];
+    if (outcome === undefined) {
+      throw new Error('expected one tool call result');
+    }
+    return {
+      disposition: outcome.disposition,
+      message: outcome.remediation?.message,
+      executed: callTool.mock.calls.length === 1,
+    };
+  }
+
+  test('a silent verify command runs against the recorded workspace when the session has none', async () => {
+    const { services } = servicesWithAudit();
+    const workspace = mkdtempSync(join(tmpdir(), 'sentinel-ws-'));
+    try {
+      mkdirSync(join(workspace, 'repo'));
+      const outcome = await dispatchSilentExec({
+        services,
+        command: 'cd repo && git branch --show-current && ls',
+        recordedWorkspace: workspace,
+      });
+      expect(outcome.disposition).not.toBe('policy_blocked');
+      expect(outcome.executed).toBe(true);
+    } finally {
+      rmSync(workspace, { recursive: true, force: true });
+    }
+  });
+
+  test('a silent command escaping the recorded workspace is still refused', async () => {
+    const { services } = servicesWithAudit();
+    const workspace = mkdtempSync(join(tmpdir(), 'sentinel-ws-'));
+    try {
+      const outcome = await dispatchSilentExec({ services, command: 'ls /etc', recordedWorkspace: workspace });
+      expect(outcome.disposition).toBe('policy_blocked');
+      expect(outcome.message).toBe(
+        'Tier 2 shell operand is outside the workspace at dispatch; request approval again.',
+      );
+      expect(outcome.executed).toBe(false);
+    } finally {
+      rmSync(workspace, { recursive: true, force: true });
+    }
+  });
+
+  test('a silent command with no workspace recorded or bound is still refused', async () => {
+    const { services } = servicesWithAudit();
+    const outcome = await dispatchSilentExec({ services, command: 'ls' });
+    expect(outcome.disposition).toBe('policy_blocked');
+    expect(outcome.message).toBe('No workspace is set for this shell command at dispatch; request approval again.');
+    expect(outcome.executed).toBe(false);
   });
 });

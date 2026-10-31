@@ -76,4 +76,12 @@ export interface ITurnArtifactStore<TTransaction = never> {
    * Blobs shared with a surviving row are kept. Returns the deleted row count.
    */
   deleteArtifactsOlderThan(input: { older_than: string }, transaction?: TTransaction): Promise<number>;
+  /**
+   * Deletes every index row of one chat, then the blobs no remaining row references.
+   * Used when a chat is wiped, because chat deletion does not cascade here. Returns the deleted row count.
+   */
+  deleteArtifactsForSession(
+    input: TenantScopedInput & { session_id: string },
+    transaction?: TTransaction,
+  ): Promise<number>;
 }

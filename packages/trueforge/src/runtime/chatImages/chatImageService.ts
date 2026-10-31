@@ -9,6 +9,7 @@ import {
   type OutboundGuardVerdict,
   type SentinelServices,
 } from '@truefoundry/trueforge-core/core';
+import { isTrackingImageLink } from '@truefoundry/trueforge-core/core/chatImages';
 
 import type { ChatImageOrigin, ChatImageWithData, IChatImageStore } from '../../db/chatImageStore';
 import type { SessionCustom, TurnCustom } from '../../db/sessionCustom';
@@ -193,7 +194,10 @@ export function createChatImageService(deps: ChatImageServiceDeps) {
     source: Extract<ChatImageSource, { kind: 'upload' | 'artifact' }>;
   }): Promise<ChatImageOutcome> {
     const { ref, source } = input;
-    const source_key = source.kind === 'upload' ? `upload:${String(source.index)}` : `artifact:${source.path}`;
+    // An upload is one turn's own attachment, so the turn is part of its key: the same position in
+    // a later turn is a different picture. An artifact path already names a file of this turn.
+    const source_key =
+      source.kind === 'upload' ? `upload:${ref.turn_id}:${String(source.index)}` : `artifact:${source.path}`;
     const hit = await cached({ ref, source_key });
     if (hit !== undefined) {
       return hit;
@@ -262,6 +266,14 @@ export function createChatImageService(deps: ChatImageServiceDeps) {
     const inReply = facts.replyTexts.some(text => url !== undefined && replyImageUrls(text).has(url));
     if (url === undefined || !inReply) {
       throw new ChatImageNotFoundError('That image link is not in this turn.');
+    }
+    // A picture the model copied from an email is offered once, on the email images line, never inline;
+    // a tracking pixel is never offered at all.
+    const fromEmail = [...facts.emailImageLinks.values()].some(links =>
+      links.some(link => normalizeImageLink(link) === url),
+    );
+    if (fromEmail || isTrackingImageLink(url)) {
+      return { status: 'done', images: [] };
     }
     const source_key = `reply:${url}`;
     const hit = await cached({ ref, source_key });

@@ -23,7 +23,9 @@ import {
 const unusedGithubFetch: typeof fetch = () =>
   Promise.resolve(new Response('{}', { status: 500, headers: { 'content-type': 'application/json' } }));
 
-async function setup(options: { githubConnected?: boolean; fetchGithub?: typeof fetch } = {}) {
+async function setup(
+  options: { githubConnected?: boolean; fetchGithub?: typeof fetch; checkoutExists?: boolean } = {},
+) {
   const db = createSqliteDb(':memory:');
   await migrateSqliteToLatest(db);
   const repositoryStore = new SqliteRepositoryStore(db);
@@ -37,6 +39,7 @@ async function setup(options: { githubConnected?: boolean; fetchGithub?: typeof 
     user_credential: null,
   };
   const fetchGithub = options.fetchGithub ?? unusedGithubFetch;
+  const checkoutChecks: { session_id: string; workspace_cwd: string }[] = [];
   const app = new OpenAPIHono();
   app.route(
     '/repositories',
@@ -51,6 +54,10 @@ async function setup(options: { githubConnected?: boolean; fetchGithub?: typeof 
       resolveAgentStore: () => agentStore,
       resolveMcpServerStore: () => mcpServerStore,
       resolveWorkspaceDir: () => Promise.resolve('/workspace'),
+      resolveCheckoutExists: input => {
+        checkoutChecks.push({ session_id: input.session_id, workspace_cwd: input.workspace_cwd });
+        return Promise.resolve(options.checkoutExists ?? true);
+      },
       fetchGithub,
     }),
   );
@@ -88,6 +95,7 @@ async function setup(options: { githubConnected?: boolean; fetchGithub?: typeof 
   return {
     app,
     repositoryStore,
+    checkoutChecks,
     setUser(next: RequestContext) {
       user = next;
     },
@@ -488,6 +496,33 @@ describe('work on a repo API', () => {
         repository_id: started.data.repository_id,
         workspace_cwd: '/workspace/demo-repo',
       },
+    });
+  });
+
+  it('refuses to start work when the repo has not been cloned yet, and binds nothing', async () => {
+    const { app, checkoutChecks } = await setup({
+      githubConnected: true,
+      fetchGithub: demoGithubFetch(),
+      checkoutExists: false,
+    });
+    const response = await app.request('/sessions/session-1/repository/start-work', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ clone_url: 'https://github.com/octo-example/demo-repo', branch: 'main' }),
+    });
+    expect(response.status).toBe(422);
+    expect(await response.json()).toEqual({
+      error: {
+        message:
+          "There is no copy of demo-repo on this computer yet, so this chat can't be connected to it. Ask in this chat to clone it first, then try again.",
+      },
+    });
+    expect(checkoutChecks).toEqual([{ session_id: 'session-1', workspace_cwd: '/workspace/demo-repo' }]);
+
+    const bindingResponse = await app.request('/sessions/session-1/repository');
+    expect(bindingResponse.status).toBe(200);
+    expect(GetSessionRepositoryBindingResponseSchema.parse(await bindingResponse.json())).toEqual({
+      data: { session_id: 'session-1', repository_id: null, workspace_cwd: null },
     });
   });
 

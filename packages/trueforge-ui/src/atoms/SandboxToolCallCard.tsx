@@ -21,6 +21,8 @@ export type SandboxToolCallCardProps = {
   resultJson?: string;
   /** Plain lines for the person, such as a skill that could not be loaded. Shown even when collapsed. */
   notices?: readonly string[];
+  /** When set, overrides the awaiting state derived from status, so a waiting approval shows no second status line. */
+  awaiting?: boolean;
   viewMode?: 'terminal' | 'code';
   hasContent?: boolean;
   onViewModeChange?: (viewMode: 'terminal' | 'code') => void;
@@ -242,11 +244,12 @@ export function SandboxToolCallCard({
   outcomeText,
   approvalSlot,
   approvalId,
+  awaiting: awaitingOverride,
   dataTestPrefix,
   className,
 }: SandboxToolCallCardProps) {
   const ToolCallCard = useSlot('ToolCallCard');
-  const awaiting = status === 'running';
+  const awaiting = awaitingOverride ?? status === 'running';
 
   return (
     <ToolCallCard

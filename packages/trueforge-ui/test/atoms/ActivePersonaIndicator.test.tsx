@@ -15,6 +15,7 @@ vi.mock('@/assistant-ui.js', () => ({
 
 import { ActivePersonaIndicator } from '@/atoms/ActivePersonaIndicator.js';
 import { PersonaProvider, type PersonaApi, type SessionPersona } from '@/components/PersonaContext.js';
+import { applyHeldPersona, holdPersonaForNewChat } from '@/personaMutationGate.js';
 import { personaKnowledgeApiStubs } from '../personaApiStubs.js';
 
 const ZARA: SessionPersona = {
@@ -41,6 +42,17 @@ const DEFAULT_SPEAKER: SessionPersona = {
   turn_id: null,
 };
 
+const PERSONAS = [
+  { id: 'p-zara', display_name: 'Zara', aliases: [], instructions: '', model_name: 'anthropic/haiku' },
+  { id: 'p-nova', display_name: 'Nova', aliases: [], instructions: '', model_name: 'openai/gpt-4.1' },
+];
+
+/** Goes back to the assistant through the control's menu, as a person does. */
+async function returnToDefault() {
+  fireEvent.click(await screen.findByTitle('Choose a persona'));
+  fireEvent.click(await screen.findByRole('menuitem', { name: 'Aman' }));
+}
+
 async function unavailable(): Promise<never> {
   throw new Error('Unexpected persona API call');
 }
@@ -48,7 +60,7 @@ async function unavailable(): Promise<never> {
 function renderIndicator(overrides: Partial<PersonaApi>) {
   const api: PersonaApi = {
     ...personaKnowledgeApiStubs,
-    listPersonas: async () => [],
+    listPersonas: async () => PERSONAS,
     createPersona: unavailable,
     updatePersona: unavailable,
     deletePersona: unavailable,
@@ -73,19 +85,105 @@ describe('ActivePersonaIndicator', () => {
     );
   });
 
-  it('names the persona answering the chat and the model it is on', async () => {
+  it('shows on a new chat, and a pick there answers its first message', async () => {
+    holdPersonaForNewChat(null);
+    useAuiState.mockImplementation((selector: (state: unknown) => unknown) =>
+      selector({ threadListItem: { id: 'new-chat', remoteId: undefined } }),
+    );
+    const setSessionPersona = vi.fn(async () => NOVA);
+    const getSessionPersona = vi.fn(async () => null);
+    renderIndicator({ setSessionPersona, getSessionPersona });
+
+    fireEvent.click(await screen.findByTitle('Choose a persona'));
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Nova' }));
+    expect(await screen.findByTestId('active-persona')).toHaveTextContent('Nova');
+    // Nothing is sent before the chat exists; the session lookup never ran for a chat without one.
+    expect(setSessionPersona).not.toHaveBeenCalled();
+    expect(getSessionPersona).not.toHaveBeenCalled();
+
+    // The chat's first turn applies the pick to the new session before it is admitted.
+    await applyHeldPersona('sess-new');
+    expect(setSessionPersona).toHaveBeenCalledWith('sess-new', 'p-nova');
+    // Applied once: a later turn does not switch again.
+    await applyHeldPersona('sess-new');
+    expect(setSessionPersona).toHaveBeenCalledTimes(1);
+  });
+
+  it('names who answers the chat on the control, and each choice with its model in the menu', async () => {
     renderIndicator({ getSessionPersona: async () => ZARA });
 
     expect(await screen.findByTestId('active-persona')).toHaveTextContent('Zara');
-    expect(screen.getByTestId('active-persona')).toHaveTextContent('haiku');
+    fireEvent.click(screen.getByTitle('Choose a persona'));
+    const menu = screen.getByRole('menu', { name: 'Who answers this chat' });
+    expect(menu).toHaveTextContent('Who answers this chat');
+    expect(menu).toHaveTextContent('haiku');
   });
 
-  it('renders nothing while the chat is on the default assistant', async () => {
+  it('sizes the trigger and the menu heading on the type scale, not a one-off literal', async () => {
+    renderIndicator({ getSessionPersona: async () => ZARA });
+
+    const trigger = await screen.findByTitle('Choose a persona');
+    expect(trigger).toHaveClass('text-sm');
+    expect(trigger.className).not.toMatch(/text-\[0\.8125rem\]/);
+
+    fireEvent.click(trigger);
+    const heading = screen.getByText('Who answers this chat');
+    expect(heading).toHaveClass('text-xs');
+    expect(heading.className).not.toMatch(/text-\[0\.75rem\]/);
+  });
+
+  it("shows the assistant's own display name while the chat is on the default assistant", async () => {
     renderIndicator({ getSessionPersona: async () => null });
 
-    await waitFor(() => {
-      expect(screen.queryByTestId('active-persona')).not.toBeInTheDocument();
+    expect(await screen.findByTitle('Choose a persona')).toHaveTextContent('Aman');
+    expect(screen.queryByTestId('active-persona')).not.toBeInTheDocument();
+  });
+
+  it('stays hidden while the list is loading, and when there is nobody to pick', async () => {
+    let finishLoading!: (personas: typeof PERSONAS) => void;
+    const pending = new Promise<typeof PERSONAS>(resolve => {
+      finishLoading = resolve;
     });
+    renderIndicator({ listPersonas: () => pending });
+    expect(screen.queryByTitle('Choose a persona')).not.toBeInTheDocument();
+    await act(async () => {
+      finishLoading([]);
+      await pending;
+    });
+    expect(screen.queryByTitle('Choose a persona')).not.toBeInTheDocument();
+  });
+
+  it('is a labelled control, never a bare arrow, titled for personas and never for agents or specialists', async () => {
+    renderIndicator({ getSessionPersona: async () => null });
+
+    const control = await screen.findByTitle('Choose a persona');
+    expect(control.textContent?.trim()).not.toBe('');
+    fireEvent.click(control);
+    expect(screen.getByRole('menu', { name: 'Who answers this chat' })).toBeInTheDocument();
+    const words = [document.body.textContent ?? '', control.getAttribute('title') ?? ''].join(' ');
+    expect(words).not.toMatch(/\bagents?\b|specialist/i);
+  });
+
+  it('opens its menu fully inside the screen, even from a button near the bottom left', async () => {
+    renderIndicator({ getSessionPersona: async () => null });
+    const control = await screen.findByTitle('Choose a persona');
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 390 });
+    Object.defineProperty(window, 'innerHeight', { configurable: true, value: 844 });
+    control.getBoundingClientRect = () => new DOMRect(2, 800, 80, 32);
+
+    fireEvent.click(control);
+    const menu = screen.getByRole('menu', { name: 'Who answers this chat' });
+    const left = Number.parseFloat(menu.style.left);
+    const width = Number.parseFloat(menu.style.width);
+    const bottom = Number.parseFloat(menu.style.bottom);
+    const maxHeight = Number.parseFloat(menu.style.maxHeight);
+    expect(menu.style.position).toBe('fixed');
+    expect(left).toBeGreaterThanOrEqual(8);
+    expect(left + width).toBeLessThanOrEqual(390 - 8);
+    // More room above the button, so it opens upward and never past the top of the screen.
+    expect(menu.style.top).toBe('');
+    expect(844 - bottom - maxHeight).toBeGreaterThanOrEqual(8);
+    expect(menu.style.overflowY).toBe('auto');
   });
 
   it('returns to the default assistant in one action', async () => {
@@ -96,7 +194,7 @@ describe('ActivePersonaIndicator', () => {
     });
     renderIndicator({ getSessionPersona: async () => serverPersona, setSessionPersona });
 
-    fireEvent.click(await screen.findByRole('button', { name: /Return to the default assistant/ }));
+    await returnToDefault();
 
     await waitFor(() => {
       expect(setSessionPersona).toHaveBeenCalledWith('sess-1', null);
@@ -119,7 +217,7 @@ describe('ActivePersonaIndicator', () => {
     const setSessionPersona = vi.fn(() => resetPending);
     const { rerenderTree } = renderIndicator({ getSessionPersona, setSessionPersona });
 
-    fireEvent.click(await screen.findByRole('button', { name: /Return to the default assistant/ }));
+    await returnToDefault();
     currentSessionId = 'sess-2';
     rerenderTree();
 
@@ -160,7 +258,7 @@ describe('ActivePersonaIndicator', () => {
     rerenderTree();
     await waitFor(() => expect(getSessionPersona).toHaveBeenCalledTimes(2));
 
-    fireEvent.click(screen.getByRole('button', { name: /Return to the default assistant/ }));
+    await returnToDefault();
     await waitFor(() => expect(screen.queryByTestId('active-persona')).not.toBeInTheDocument());
     await waitFor(() => expect(getSessionPersona).toHaveBeenCalledTimes(3));
 
@@ -182,7 +280,7 @@ describe('ActivePersonaIndicator', () => {
     const { rerenderTree } = renderIndicator({ getSessionPersona, setSessionPersona });
 
     expect(await screen.findByTestId('active-persona')).toHaveTextContent('Zara');
-    fireEvent.click(screen.getByRole('button', { name: /Return to the default assistant/ }));
+    await returnToDefault();
     await waitFor(() => expect(setSessionPersona).toHaveBeenCalledWith('sess-1', null));
 
     useThreadIsRunning.mockReturnValue(true);

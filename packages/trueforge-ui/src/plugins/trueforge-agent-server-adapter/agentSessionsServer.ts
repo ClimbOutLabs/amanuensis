@@ -48,6 +48,7 @@ export function createHarnessAgentSessionsServer(
   options: CreateHarnessAgentSessionsServerOptions = {},
 ): AgentSessionsServer<HarnessAgentSpec> & {
   listRecallTimestamps: (params: { sessionId: string }) => Promise<{ turnId: string; timestamp: string }[]>;
+  findScheduleRunSession: (params: { scheduleId: string; runId: string }) => Promise<HarnessSessionListEntry | null>;
 } {
   const client = options.client ?? createTrueForgeClient(options);
 
@@ -123,6 +124,12 @@ export function createHarnessAgentSessionsServer(
         pageToken = page.response.pagination.nextPageToken;
       } while (pageToken !== undefined);
       return markers;
+    },
+    /** The chat a schedule run writes into. A run starts its chat before the run request returns, so the newest few hold it. */
+    async findScheduleRunSession({ scheduleId, runId }: { scheduleId: string; runId: string }) {
+      const { data } = await client.sessions.list({ sourceType: 'schedule', sourceId: scheduleId, order: 'desc' });
+      const session = data.find(item => item.source?.runId === runId);
+      return session === undefined ? null : toSessionListEntry(session);
     },
   };
 }

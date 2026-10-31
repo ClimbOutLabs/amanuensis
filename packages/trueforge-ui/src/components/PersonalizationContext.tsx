@@ -1,6 +1,7 @@
 'use client';
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type FC, type ReactNode } from 'react';
+import { assistantDisplayName } from '../utils/assistantName.js';
 
 import type { HelpAreaId } from '@truefoundry/trueforge-core/schemas/personalizationHelpAreas';
 
@@ -110,6 +111,11 @@ export const PersonalizationProvider: FC<{ api: PersonalizationApi; children: Re
 
 export function useOptionalPersonalization(): PersonalizationContextValue | null {
   return useContext(PersonalizationContext);
+}
+
+/** The assistant's display name from the profile, or the default before one is chosen. */
+export function useAssistantDisplayName(): string {
+  return assistantDisplayName(useOptionalPersonalization()?.profile?.assistant_name);
 }
 
 export function usePersonalization(): PersonalizationContextValue {

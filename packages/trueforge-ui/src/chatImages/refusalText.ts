@@ -2,7 +2,7 @@ import type { ChatImageRefusal } from '../plugins/trueforge-agent-server-adapter
 
 /** What went wrong and the one thing to do, in two short sentences. */
 export const CHAT_IMAGE_REFUSAL_TEXT: Record<ChatImageRefusal, string> = {
-  unsupported_type: "This isn't a picture type Aman can show. Ask for a PNG, JPEG, GIF or WebP copy.",
+  unsupported_type: "This picture type can't be shown here. Ask for a PNG, JPEG, GIF or WebP copy.",
   too_large: 'This image is too large to show. Ask for a smaller copy.',
   undecodable: 'This image looks damaged, so it is not shown. Ask for a fresh copy.',
   fetch_failed: "This image couldn't be downloaded. Try again later.",
@@ -13,3 +13,14 @@ export const CHAT_IMAGE_REFUSAL_TEXT: Record<ChatImageRefusal, string> = {
 
 /** Shown when a request for an image fails outright. */
 export const CHAT_IMAGE_ERROR_TEXT = "The image couldn't be loaded. Try again later.";
+
+/** Shown when some or all of the images the person chose to load from their emails failed to download. */
+export function emailImagesFailedText({ failed, total }: { failed: number; total: number }): string {
+  let what: string;
+  if (failed < total) {
+    what = `${String(failed)} of ${String(total)} images couldn't be downloaded.`;
+  } else {
+    what = failed === 1 ? "The image couldn't be downloaded." : `The ${String(failed)} images couldn't be downloaded.`;
+  }
+  return `${what} Check your connection, then choose Try again.`;
+}

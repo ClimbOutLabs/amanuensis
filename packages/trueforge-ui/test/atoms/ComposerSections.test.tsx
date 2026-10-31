@@ -4,14 +4,13 @@ import { describe, expect, it, vi } from 'vitest';
 import { ComposerLeftSection, ComposerRightSection, ComposerSendButton } from '@/atoms/ComposerSections.js';
 
 describe('ComposerLeftSection', () => {
-  it('renders an accessible attachment action when a handler is provided', () => {
+  it('offers attaching files from the one plus menu', async () => {
     const onAttach = vi.fn();
     render(<ComposerLeftSection disabled={false} isRunning={false} onAttach={onAttach} />);
 
-    const button = screen.getByRole('button', { name: 'Attach' });
-    expect(button).toHaveAttribute('type', 'button');
-    expect(button).toHaveAttribute('title', 'Attach');
-    fireEvent.click(button);
+    fireEvent.click(screen.getByRole('button', { name: 'Add' }));
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Attach files' }));
+
     expect(onAttach).toHaveBeenCalledOnce();
   });
 
@@ -51,35 +50,34 @@ describe('ComposerSendButton', () => {
     expect(onSubmit).toHaveBeenCalledOnce();
   });
 
-  it('shows a disabled Stopping… action after Cancel was pressed', () => {
+  it('shows a disabled Stopping action after Stop was pressed', () => {
     const onCancel = vi.fn();
     render(
       <ComposerSendButton disabled={false} canSubmit isRunning isStopping onSubmit={vi.fn()} onCancel={onCancel} />,
     );
 
     const stopping = screen.getByRole('button', { name: 'Stopping' });
-    expect(stopping).toHaveTextContent('Stopping…');
     expect(stopping).toBeDisabled();
     fireEvent.click(stopping);
     expect(onCancel).not.toHaveBeenCalled();
   });
 
-  it('switches to a cancel action while running', () => {
+  it('becomes Stop while running and leaves Send out of the bar', () => {
     const onSubmit = vi.fn();
     const onCancel = vi.fn();
     render(<ComposerSendButton disabled={false} canSubmit isRunning onSubmit={onSubmit} onCancel={onCancel} />);
 
-    const cancelButton = screen.getByRole('button', { name: 'Cancel' });
-    expect(cancelButton).toHaveTextContent('Cancel');
     expect(screen.queryByRole('button', { name: 'Send message' })).not.toBeInTheDocument();
-    fireEvent.click(cancelButton);
+    const stop = screen.getByRole('button', { name: 'Stop' });
+    expect(stop).toHaveAttribute('title', 'Stop (Esc)');
+    fireEvent.click(stop);
     expect(onCancel).toHaveBeenCalledOnce();
     expect(onSubmit).not.toHaveBeenCalled();
   });
 
-  it('disables cancellation when no cancel handler is supplied', () => {
+  it('disables Stop when no cancel handler is supplied', () => {
     render(<ComposerSendButton disabled={false} canSubmit isRunning onSubmit={() => {}} />);
 
-    expect(screen.getByRole('button', { name: 'Cancel' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Stop' })).toBeDisabled();
   });
 });

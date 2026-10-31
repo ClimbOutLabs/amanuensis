@@ -714,6 +714,91 @@ describe('EmbeddingSubsystem', () => {
     }
   });
 
+  it('fusedRank leaves excluded entries out of the vector hits and the baseline', async () => {
+    const fixture = await makeFixture();
+    try {
+      await retainTexts(fixture, ['alpha own-chat note', 'beta other-chat note', 'gamma other-chat note']);
+      fixture.model.vectorForText = text => (text.includes('alpha') ? oneHot(0) : oneHot(1));
+      fixture.model.queryVector = oneHot(0);
+      fixture.subsystem.ensureWarmed();
+      await waitForState(fixture.subsystem, 'ready');
+      const own = 'md:tenant-1:2026-09-19.md#0';
+      const entryTexts = new Map([
+        ['md:tenant-1:2026-09-19.md#1', 'beta other-chat note'],
+        ['md:tenant-1:2026-09-19.md#2', 'gamma other-chat note'],
+      ]);
+      // The only entry that matches the query is the excluded one: the others are flat, so nothing peaks.
+      expect(
+        await fixture.subsystem.fusedRank({
+          query: 'alpha',
+          keywordHits: [],
+          entryTexts,
+          excludeIds: new Set([own]),
+          timeoutMs: 5000,
+        }),
+      ).toBeUndefined();
+    } finally {
+      await cleanup(fixture);
+    }
+  });
+
+  it('recall by meaning skips the current chat and still finds another chat', async () => {
+    const fixture = await makeFixture();
+    try {
+      const writer = new MarkdownMemoryClient({ baseDir: fixture.baseDir, namespace: fixture.namespace });
+      await writer.retain({
+        items: [
+          {
+            content: 'Turn summary: hotel in Madrid is Petit Palace',
+            timestamp: '2026-09-19T10:00:00.000Z',
+            document_id: 'd1',
+            metadata: { session_id: 'chat-other' },
+          },
+          {
+            content: 'Turn summary: hotel plan is still undecided',
+            timestamp: '2026-09-19T10:01:00.000Z',
+            document_id: 'd2',
+            metadata: { session_id: 'chat-now' },
+          },
+          {
+            content: 'Turn summary: Lexie is a Bernese Mountain Dog',
+            timestamp: '2026-09-19T10:02:00.000Z',
+            document_id: 'd3',
+            metadata: { session_id: 'chat-other' },
+          },
+        ],
+        operationId: 'op-scope',
+        timeoutMs: 5000,
+      });
+      fixture.model.vectorForText = text => (text.includes('hotel') ? oneHot(0) : oneHot(1));
+      fixture.model.queryVector = oneHot(0);
+      fixture.subsystem.ensureWarmed();
+      await waitForState(fixture.subsystem, 'ready');
+
+      const client = new MarkdownMemoryClient({
+        baseDir: fixture.baseDir,
+        namespace: fixture.namespace,
+        embeddings: () => fixture.subsystem,
+      });
+      const outcome = await client.recall({
+        query: 'accommodation in Spain',
+        maxTokens: 4000,
+        queryTimestamp: '2026-09-20T10:00:00.000Z',
+        entityTokens: 0,
+        timeoutMs: 5000,
+        currentSessionId: 'chat-now',
+      });
+      expect(outcome.ok).toBe(true);
+      if (outcome.ok) {
+        const texts = outcome.results.map(item => item.text);
+        expect(texts).toContainEqual(expect.stringContaining('Petit Palace'));
+        expect(texts.some(text => text.includes('still undecided'))).toBe(false);
+      }
+    } finally {
+      await cleanup(fixture);
+    }
+  });
+
   it('finds a memory by meaning when keywords do not match', async () => {
     const fixture = await makeFixture();
     try {

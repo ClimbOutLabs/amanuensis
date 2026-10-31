@@ -49,8 +49,6 @@ import type {
   ReplaceTaskChecklistInput,
   RevokeImplementationPlanGrantInput,
   RevokeImplementationPlanGrantResult,
-  SetGeneratedSessionTitleInput,
-  SetPrivateFingerprintsInput,
   SetSessionFolderInput,
   StampImportedSessionInput,
   TurnRecordWithoutSnapshot,
@@ -108,8 +106,6 @@ import {
   getSessionByExternalId as getSessionByExternalIdQuery,
   getSession as getSessionQuery,
   listSessions as listSessionsQuery,
-  setGeneratedSessionTitle as setGeneratedSessionTitleQuery,
-  setPrivateFingerprints as setPrivateFingerprintsQuery,
   stampImportedSession as stampImportedSessionQuery,
   updateSession as updateSessionQuery,
 } from './queries/sessions';
@@ -220,10 +216,6 @@ export class SqliteSessionStore implements ISessionStore<SessionCustom, TurnCust
     return updateSessionQuery(this.db, input);
   }
 
-  setGeneratedSessionTitle(input: SetGeneratedSessionTitleInput): Promise<boolean> {
-    return setGeneratedSessionTitleQuery(this.db, input);
-  }
-
   createSessionFolder(input: CreateSessionFolderInput): Promise<SessionFolderRecord> {
     return createSessionFolderQuery(this.db, input);
   }
@@ -254,10 +246,6 @@ export class SqliteSessionStore implements ISessionStore<SessionCustom, TurnCust
 
   setSessionFolder(input: SetSessionFolderInput): Promise<void> {
     return setSessionFolderQuery(this.db, input);
-  }
-
-  setPrivateFingerprints(input: SetPrivateFingerprintsInput): Promise<void> {
-    return setPrivateFingerprintsQuery(this.db, input);
   }
 
   async listSessions(

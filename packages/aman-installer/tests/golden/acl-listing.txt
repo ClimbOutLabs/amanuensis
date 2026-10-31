@@ -1,0 +1,11 @@
+C:\Users\Friend\AppData\Local\Amanuensis NT AUTHORITY\SYSTEM:(I)(OI)(CI)(F)
+                                          BUILTIN\Administrators:(I)(OI)(CI)(F)
+                                          FRIEND-PC\Friend:(I)(OI)(CI)(F)
+                                          BUILTIN\Users:(I)(OI)(CI)(RX)
+                                          FRIEND-PC\Guest:(I)(DENY)(OI)(CI)(R)
+                                          FRIEND-PC\Backup:(I)(W)
+                                          BUILTIN\Users:(I)(OI)(CI)(IO)(GR,GE)
+                                          BUILTIN\Users:(I)(OI)(CI)(RD,REA,RA,RC)
+                                          BUILTIN\Users:(I)(OI)(CI)(M,DC)
+
+Successfully processed 1 files; Failed processing 0 files

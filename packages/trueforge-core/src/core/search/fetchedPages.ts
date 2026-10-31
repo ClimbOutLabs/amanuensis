@@ -1,5 +1,5 @@
 import { collectOutboundStrings } from '../permissions/outboundGuard';
-import { namesUrl } from '../permissions/webSearch';
+import { namesUrl } from '../permissions/provenance';
 import { hasMixedScriptWord, normalizedWords, significantWords } from './groundPlace';
 import { TAVILY_EXTRACT_TOOL_NAME, TAVILY_SEARCH_TOOL_NAME } from './TavilyClient';
 

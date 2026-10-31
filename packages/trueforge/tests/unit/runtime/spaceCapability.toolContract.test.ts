@@ -1,0 +1,477 @@
+import type {
+  AgentExecutionTrace,
+  AgentLocalToolTrace,
+  AgentRemoteMcpToolTrace,
+  AgentTracing,
+  CallToolResponse,
+} from '@truefoundry/trueforge-core/core';
+import { createWebSearchTurnState } from '@truefoundry/trueforge-core/core';
+import {
+  CREATE_SPACE_TOOL_NAME,
+  EDIT_SPACE_TOOL_NAME,
+  GET_SPACE_TOOL_NAME,
+  UPDATE_SPACE_TOOL_NAME,
+} from '@truefoundry/trueforge-core/core/spaces/toolContract';
+import type { SpaceRecord } from '../../../src/db/spaceStore';
+import { SpaceAggregateRevisionConflictError, SpaceRevisionConflictError } from '../../../src/db/spaceStore';
+import { spaceCapability, type SpaceToolStore } from '../../../src/runtime/spaceCapability';
+import { isRecord } from '../../fixtures/jsonGuards';
+
+/**
+ * The simplified contract: body is one string everywhere, partial changes go through
+ * edit_space alone, every error names its next step, and results carry name and link.
+ */
+
+const NOOP_EXECUTION_TRACE: AgentExecutionTrace = {
+  runInContext: operation => operation(),
+  startSubAgent: () => NOOP_EXECUTION_TRACE,
+  setOutput: () => undefined,
+  setMetrics: () => undefined,
+  setError: () => undefined,
+  setSuccess: () => undefined,
+  end: () => undefined,
+};
+const NOOP_LOCAL_TOOL_TRACE: AgentLocalToolTrace = { setOutput: () => undefined, setSandboxId: () => undefined };
+const NOOP_REMOTE_MCP_TOOL_TRACE: AgentRemoteMcpToolTrace = {
+  setOutput: () => undefined,
+  setNumberOfTools: () => undefined,
+};
+const NOOP_TRACING: AgentTracing = {
+  withInitSpan: operation => operation(),
+  startRootSpan: () => NOOP_EXECUTION_TRACE,
+  withLocalToolSpan: (_input, operation) => operation(NOOP_LOCAL_TOOL_TRACE),
+  withRemoteMcpToolSpan: (_input, operation) => operation(NOOP_REMOTE_MCP_TOOL_TRACE),
+};
+
+const AUTHORITY = { tenantId: 'default', userRef: 'user-a' };
+
+const DIRECTIVE = 'Fix the listed fields and send the call again.';
+
+function textOf(response: CallToolResponse): string {
+  if (!('result' in response)) {
+    throw new Error('expected a space tool result');
+  }
+  const content = response.result.content[0];
+  return content?.type === 'text' ? content.text : '';
+}
+
+function isErrorResponse(response: CallToolResponse): boolean {
+  return 'result' in response && response.result.isError === true;
+}
+
+/** Guards for tool-result JSON, so the tests never lean on an assertion escape. */
+function parsedObject(text: string): Record<string, unknown> {
+  const parsed: unknown = JSON.parse(text);
+  if (!isRecord(parsed)) {
+    throw new Error('expected a JSON object');
+  }
+  return parsed;
+}
+
+function fieldObject(owner: Record<string, unknown>, field: string): Record<string, unknown> {
+  const value = owner[field];
+  if (!isRecord(value)) {
+    throw new Error(`expected an object ${field}`);
+  }
+  return value;
+}
+
+function stringField(owner: Record<string, unknown>, field: string): string {
+  const value = owner[field];
+  if (typeof value !== 'string') {
+    throw new Error(`expected a string ${field}`);
+  }
+  return value;
+}
+
+function numberField(owner: Record<string, unknown>, field: string): number {
+  const value = owner[field];
+  if (typeof value !== 'number') {
+    throw new Error(`expected a number ${field}`);
+  }
+  return value;
+}
+
+function makeStore(): SpaceToolStore {
+  const rows = new Map<string, SpaceRecord>();
+  let aggregate = 0;
+  const save = (record: SpaceRecord) => {
+    rows.set(record.id, record);
+    aggregate += 1;
+    return { record, aggregate_revision: aggregate };
+  };
+  return {
+    createSpace: async input =>
+      save({
+        tenant_id: AUTHORITY.tenantId,
+        created_by: AUTHORITY.userRef,
+        id: input.id,
+        name: input.name,
+        purpose: input.purpose,
+        status: input.status,
+        body: input.body,
+        format: input.format,
+        revision: 1,
+        created_at: '2026-10-21T00:00:00.000Z',
+        updated_at: '2026-10-21T00:00:00.000Z',
+      }),
+    updateSpace: async input => {
+      const current = rows.get(input.space_id);
+      if (current === undefined) {
+        throw new Error(`no space ${input.space_id}`);
+      }
+      if (input.expected_revision !== undefined && input.expected_revision !== current.revision) {
+        throw new SpaceRevisionConflictError({
+          id: current.id,
+          expected_revision: input.expected_revision,
+          actual_revision: current.revision,
+        });
+      }
+      if (input.expected_aggregate_revision !== undefined && input.expected_aggregate_revision !== aggregate) {
+        throw new SpaceAggregateRevisionConflictError({
+          expected_revision: input.expected_aggregate_revision,
+          actual_revision: aggregate,
+        });
+      }
+      return save({
+        ...current,
+        name: input.name,
+        purpose: input.purpose,
+        status: input.status,
+        body: input.body,
+        format: input.format,
+        revision: current.revision + 1,
+      });
+    },
+    revertSpace: async () => {
+      throw new Error('not used in these tests');
+    },
+    getSpace: async input => rows.get(input.space_id),
+    getSpaceRevision: async input => {
+      const current = rows.get(input.space_id);
+      return current !== undefined && current.revision === input.revision ? current : undefined;
+    },
+    listSpacesWithAggregate: async () => ({
+      records: [...rows.values()],
+      aggregate_revision: aggregate,
+      has_more: false,
+      next_offset: null,
+    }),
+  };
+}
+
+type Call = (name: string, args: Record<string, unknown>) => Promise<CallToolResponse>;
+
+function makeCall(store: SpaceToolStore): Call {
+  const capability = spaceCapability({
+    store,
+    authority: AUTHORITY,
+    tracing: NOOP_TRACING,
+    webSearch: createWebSearchTurnState(),
+  });
+  const toolSet = capability.systemToolSets?.[0];
+  if (toolSet === undefined) {
+    throw new Error('expected space tool set');
+  }
+  return (name, args) => toolSet.callTool({ name, arguments: args });
+}
+
+async function createSpace(call: Call, options: { name: string; body: string }): Promise<void> {
+  const response = await call(CREATE_SPACE_TOOL_NAME, {
+    name: options.name,
+    purpose: `${options.name} purpose.`,
+    status: 'active',
+    format: 'markdown',
+    body: options.body,
+  });
+  expect(isErrorResponse(response)).toBe(false);
+}
+
+async function errorOf(response: CallToolResponse): Promise<string> {
+  const parsed = parsedObject(textOf(response));
+  const error = parsed['error'];
+  return typeof error === 'string' ? error : '';
+}
+
+/** The fingerprint the get_space outline shows for one anchor, read the way a model reads it. */
+async function fingerprintOf(call: Call, input: { spaceName: string; anchor: string }): Promise<string> {
+  const read = parsedObject(textOf(await call(GET_SPACE_TOOL_NAME, { space_name: input.spaceName })));
+  const blocks = read['blocks'];
+  if (!Array.isArray(blocks)) {
+    throw new Error('expected a blocks list in the get_space result');
+  }
+  for (const block of blocks) {
+    if (isRecord(block) && block['anchor'] === input.anchor) {
+      return stringField(block, 'fingerprint');
+    }
+  }
+  throw new Error(`expected block ${input.anchor} in the get_space result for ${input.spaceName}`);
+}
+
+describe('space contract: one string body, one edit shape, guided errors, name and link results', () => {
+  it('stores a single string body with its blank lines unchanged', async () => {
+    const call = makeCall(makeStore());
+    const body = '# Title\n\nLine one.\n\nLine two.';
+    await createSpace(call, { name: 'Blank lines', body });
+    const read = fieldObject(
+      parsedObject(textOf(await call(GET_SPACE_TOOL_NAME, { space_name: 'Blank lines' }))),
+      'space',
+    );
+    expect(stringField(read, 'body')).toBe(body);
+  });
+
+  it('refuses an array body on create_space, since the contract takes one string body only', async () => {
+    const call = makeCall(makeStore());
+    const response = await call(CREATE_SPACE_TOOL_NAME, {
+      name: 'Array create',
+      purpose: 'Array create purpose.',
+      status: 'active',
+      format: 'markdown',
+      body: ['# Array create', 'A line.'],
+    });
+    expect(isErrorResponse(response)).toBe(true);
+    const error = await errorOf(response);
+    expect(error).toContain('Invalid space call');
+    expect(error).toContain('body');
+    expect(error).toContain(DIRECTIVE);
+  });
+
+  it('update_space is not a tool any more: a call to it is refused as unknown', async () => {
+    const call = makeCall(makeStore());
+    await createSpace(call, { name: 'Array update', body: '# Array update\nOld line.' });
+    const response = await call(UPDATE_SPACE_TOOL_NAME, {
+      space_name: 'Array update',
+      name: 'Array update',
+      purpose: 'Array update purpose.',
+      status: 'active',
+      format: 'markdown',
+      body: '# Array update\nNew line.',
+    });
+    expect(isErrorResponse(response)).toBe(true);
+    expect(await errorOf(response)).toContain('Unknown tool: update_space');
+  });
+
+  it('refuses edit_space entries without a type, with an unknown type, and an empty edits list', async () => {
+    const call = makeCall(makeStore());
+    await createSpace(call, { name: 'Edit shapes', body: '# Edit shapes\nSome text here.' });
+    const cases: Record<string, unknown>[] = [
+      { edits: [{ search: 'Some', replace: 'Any' }] },
+      { edits: [{ type: 'replace', search: 'Some', replace: 'Any' }] },
+      { edits: [] },
+    ];
+    for (const entry of cases) {
+      const response = await call(EDIT_SPACE_TOOL_NAME, { space_name: 'Edit shapes', ...entry });
+      expect(isErrorResponse(response)).toBe(true);
+      const error = await errorOf(response);
+      expect(error).toContain('Invalid space call');
+      expect(error).toContain(DIRECTIVE);
+    }
+    const noType = await errorOf(
+      await call(EDIT_SPACE_TOOL_NAME, {
+        space_name: 'Edit shapes',
+        edits: [{ search: 'Some', replace: 'Any' }],
+      }),
+    );
+    expect(noType).toContain('type');
+    const empty = await errorOf(await call(EDIT_SPACE_TOOL_NAME, { space_name: 'Edit shapes', edits: [] }));
+    expect(empty).toContain('edits');
+  });
+
+  it('refuses a search entry outright: edit_space takes block and insert entries only', async () => {
+    const call = makeCall(makeStore());
+    await createSpace(call, { name: 'Search shape', body: '# Search shape\nSome text here.' });
+    // Even a complete, well-formed search entry is refused: the shape itself is gone.
+    const response = await call(EDIT_SPACE_TOOL_NAME, {
+      space_name: 'Search shape',
+      expected_revision: 1,
+      edits: [{ type: 'search', search: 'Some', replace: 'Any' }],
+    });
+    expect(isErrorResponse(response)).toBe(true);
+    const error = await errorOf(response);
+    expect(error).toContain('Invalid space call');
+    expect(error).toContain(DIRECTIVE);
+  });
+
+  it('stale revisions name the recovery call: revision, aggregate, and missing revision', async () => {
+    const call = makeCall(makeStore());
+    await createSpace(call, { name: 'Stale board', body: '# Stale board\nA line of content here.' });
+
+    const missing = await call(GET_SPACE_TOOL_NAME, { space_name: 'Stale board', revision: 99 });
+    expect(isErrorResponse(missing)).toBe(true);
+    expect(await errorOf(missing)).toContain('Call get_space without a revision to read the current revision.');
+
+    const conflict = await call(EDIT_SPACE_TOOL_NAME, {
+      space_name: 'Stale board',
+      edits: [{ type: 'block', anchor: 'b2', fingerprint: '00000000', new_content: 'New line.' }],
+      expected_revision: 5,
+    });
+    expect(isErrorResponse(conflict)).toBe(true);
+    const conflictError = await errorOf(conflict);
+    expect(conflictError).toContain(
+      'The space is at revision 1, not 5. The anchors and fingerprints below are current: send the edit again with expected_revision 1 and these fingerprints.',
+    );
+    expect(textOf(conflict)).toContain('revision');
+
+    const aggregateConflict = await call(EDIT_SPACE_TOOL_NAME, {
+      space_name: 'Stale board',
+      edits: [
+        {
+          type: 'block',
+          anchor: 'b2',
+          fingerprint: await fingerprintOf(call, { spaceName: 'Stale board', anchor: 'b2' }),
+          new_content: 'New line.',
+        },
+      ],
+      expected_revision: 1,
+      expected_aggregate_revision: 9,
+    });
+    expect(isErrorResponse(aggregateConflict)).toBe(true);
+    expect(await errorOf(aggregateConflict)).toContain(
+      'Call list_spaces to read the current aggregate_revision, then send the call again with expected_aggregate_revision set to the aggregate_revision in this result.',
+    );
+    expect(textOf(aggregateConflict)).toContain('aggregate_revision');
+  });
+
+  it('the shrink guard names edit_space, the one change tool there is', async () => {
+    const call = makeCall(makeStore());
+    const longBody = `${'# Shrink board\n'}${'A line of body text that stays.\n'.repeat(20)}`;
+    await createSpace(call, { name: 'Shrink board', body: longBody });
+
+    // The heading is b1 and the twenty repeated lines are one run, b2: deleting b2
+    // keeps a fraction of the body, which is the shrink the guard exists to catch.
+    const wiped = await call(EDIT_SPACE_TOOL_NAME, {
+      space_name: 'Shrink board',
+      expected_revision: 1,
+      edits: [
+        {
+          type: 'block',
+          anchor: 'b2',
+          fingerprint: await fingerprintOf(call, { spaceName: 'Shrink board', anchor: 'b2' }),
+          new_content: '',
+        },
+      ],
+    });
+    expect(isErrorResponse(wiped)).toBe(true);
+    expect(await errorOf(wiped)).toContain('call edit_space again with confirm_shrink: true');
+
+    const bulk = 'A'.repeat(500);
+    await createSpace(call, { name: 'Shrink edit', body: `${bulk}\nKeep this line.` });
+    const shrunk = await call(EDIT_SPACE_TOOL_NAME, {
+      space_name: 'Shrink edit',
+      expected_revision: 1,
+      edits: [
+        {
+          type: 'block',
+          anchor: 'b1',
+          fingerprint: await fingerprintOf(call, { spaceName: 'Shrink edit', anchor: 'b1' }),
+          new_content: 'x',
+        },
+      ],
+    });
+    expect(isErrorResponse(shrunk)).toBe(true);
+    expect(await errorOf(shrunk)).toContain('call edit_space again with confirm_shrink: true');
+  });
+
+  it('edit_space failures name the next step: bad anchor, duplicate anchor, lockout, over-long body', async () => {
+    const store = makeStore();
+    const call = makeCall(store);
+    await createSpace(call, {
+      name: 'Edit failures',
+      body: '# Edit failures\n<!-- @block:main -->\nSome text here.',
+    });
+
+    const badAnchor = await call(EDIT_SPACE_TOOL_NAME, {
+      space_name: 'Edit failures',
+      expected_revision: 1,
+      edits: [{ type: 'block', anchor: 'nope', fingerprint: '00000000', new_content: 'x' }],
+    });
+    const badAnchorError = await errorOf(badAnchor);
+    expect(badAnchorError).toContain('Retry edit_space with one of the valid anchors');
+    expect(badAnchorError).toContain('make the change with edit_space in parts');
+    expect(badAnchorError).not.toContain('search');
+
+    await createSpace(call, {
+      name: 'Duplicate anchors',
+      body: '<!-- @block:dup --><p>first</p><!-- @block:dup --><p>second</p>',
+    });
+    const duplicate = await call(EDIT_SPACE_TOOL_NAME, {
+      space_name: 'Duplicate anchors',
+      expected_revision: 1,
+      edits: [{ type: 'block', anchor: 'dup', fingerprint: '00000000', new_content: '<p>winner</p>' }],
+    });
+    expect(isErrorResponse(duplicate)).toBe(true);
+    expect(await errorOf(duplicate)).toContain('edit_space needs a unique anchor');
+
+    await createSpace(call, { name: 'Lockout board', body: '# Lockout board\nSome text here.' });
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const failed = await call(EDIT_SPACE_TOOL_NAME, {
+        space_name: 'Lockout board',
+        expected_revision: 1,
+        edits: [{ type: 'block', anchor: 'nope', fingerprint: '00000000', new_content: 'x' }],
+      });
+      expect(isErrorResponse(failed)).toBe(true);
+    }
+    const locked = await call(EDIT_SPACE_TOOL_NAME, {
+      space_name: 'Lockout board',
+      expected_revision: 1,
+      edits: [{ type: 'block', anchor: 'b1', fingerprint: '00000000', new_content: 'Any' }],
+    });
+    expect(await errorOf(locked)).toContain('Do not call edit_space again for this space.');
+
+    // Seeded directly in the store: one write may no longer carry a near-limit body (a
+    // space this size is built in parts now); the subject is the edit whose computed
+    // body crosses the stored limit. The seeded body is one run, so one block, b1.
+    await store.createSpace({
+      tenant_id: AUTHORITY.tenantId,
+      created_by: AUTHORITY.userRef,
+      id: 'too-long-board',
+      name: 'Too long board',
+      purpose: 'Too long board purpose.',
+      status: 'active',
+      format: 'markdown',
+      body: `TOKEN\n${'x'.repeat(64_990)}`,
+      expected_aggregate_revision: 0,
+    });
+    const tooLong = await call(EDIT_SPACE_TOOL_NAME, {
+      space_name: 'Too long board',
+      expected_revision: 1,
+      edits: [
+        {
+          type: 'insert',
+          after: 'b1',
+          fingerprint: await fingerprintOf(call, { spaceName: 'Too long board', anchor: 'b1' }),
+          new_content: 'y'.repeat(2000),
+        },
+      ],
+    });
+    expect(isErrorResponse(tooLong)).toBe(true);
+    expect(await errorOf(tooLong)).toContain('Refusing edit_space on');
+  });
+
+  it('edit_space results carry name and link, never an id', async () => {
+    const call = makeCall(makeStore());
+    await createSpace(call, { name: 'Edit board', body: '# Edit board\nSome text here.' });
+    const response = await call(EDIT_SPACE_TOOL_NAME, {
+      space_name: 'Edit board',
+      expected_revision: 1,
+      edits: [
+        {
+          type: 'block',
+          anchor: 'b2',
+          fingerprint: await fingerprintOf(call, { spaceName: 'Edit board', anchor: 'b2' }),
+          new_content: 'Any text here.',
+        },
+      ],
+    });
+    expect(isErrorResponse(response)).toBe(false);
+    const text = textOf(response);
+    const parsed = parsedObject(text);
+    const space = fieldObject(parsed, 'space');
+    expect(stringField(parsed, 'summary')).toBe('Updated space "Edit board" (revision 2).');
+    expect(stringField(space, 'name')).toBe('Edit board');
+    expect(stringField(space, 'link')).toMatch(/^\/spaces\/[^/]+$/);
+    expect(text).not.toContain('"id"');
+    expect(text).not.toContain('(id:');
+    expect(numberField(space, 'revision')).toBe(2);
+  });
+});

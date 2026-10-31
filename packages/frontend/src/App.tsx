@@ -1,5 +1,4 @@
 import {
-  AmanPandaSourceProvider,
   AmanRuntimeRail,
   AmanSetupProvider,
   AmanWelcome,
@@ -27,6 +26,7 @@ import {
   type CurrentUser,
   type FirstRunGuideState,
   type RoutesConfig,
+  type SettingsOpenRequest,
   type SlotOverrides,
   type ThemeConfig,
   type TrueForgeServerConfig,
@@ -97,7 +97,6 @@ const AMAN_AVATAR_MOTION_SOURCES: AmanAvatarMotionSources = {
 const AMAN_PANDA_SRC = apiPath('/aman-avatar.png');
 
 const AMAN_THEME: ThemeConfig = {
-  defaultMode: 'light',
   webFonts: false,
   brand: {
     mode: 'icon-title',
@@ -150,19 +149,23 @@ type BootState =
 const AmanChatSurface = memo(function AmanChatSurface({
   defaultAgentSpec,
   openSettings,
+  settingsOpenRequest,
   displayName,
   overrides,
   onAgentActivity,
   onActiveSessionChange,
   onPendingApprovalsChange,
+  onSettingsChromeEnabledChange,
 }: {
   defaultAgentSpec: HarnessAgentSpec;
   openSettings: boolean;
+  settingsOpenRequest: SettingsOpenRequest | undefined;
   displayName: string;
   overrides: SlotOverrides;
   onAgentActivity: (activity: AmanAvatarActivity) => void;
   onActiveSessionChange: (sessionId: string | undefined) => void;
   onPendingApprovalsChange: (approvalIds: readonly string[]) => void;
+  onSettingsChromeEnabledChange: (enabled: boolean) => void;
 }) {
   const agentConfig = useMemo(
     (): AgentConfig => ({ mode: 'AgentLibraryWithComposer', defaultAgentSpec }),
@@ -181,10 +184,12 @@ const AmanChatSurface = memo(function AmanChatSurface({
         {...(ROUTES ? { routes: ROUTES } : {})}
         agentConfig={agentConfig}
         initialSettingsOpen={openSettings}
+        {...(settingsOpenRequest ? { settingsOpenRequest } : {})}
         currentUser={currentUser}
         onAgentActivity={onAgentActivity}
         onActiveSessionChange={onActiveSessionChange}
         onPendingApprovalsChange={onPendingApprovalsChange}
+        onSettingsChromeEnabledChange={onSettingsChromeEnabledChange}
         overrides={overrides}
         className="app-assistant"
       />
@@ -223,16 +228,29 @@ function AmanShell({
   const [activeSessionId, setActiveSessionId] = useState<string | undefined>(undefined);
   // Approvals waiting in the active chat, for the rail's waiting status and panda.
   const [pendingApprovalIds, setPendingApprovalIds] = useState<readonly string[]>([]);
+  // Settings requests from outside the chat tree (the rail's Audits link). Each ask raises
+  // the nonce, so asking again after Settings was closed asks again.
+  const [settingsOpenRequest, setSettingsOpenRequest] = useState<SettingsOpenRequest | undefined>(undefined);
+  const openAudits = () => {
+    setSettingsOpenRequest(previous => ({ section: 'audit', nonce: (previous?.nonce ?? 0) + 1 }));
+  };
+  // Whether Settings chrome exists, reported by the shell that owns the gate. The rail is
+  // handed its Audits link only while this holds, so the link can never outlive the
+  // Settings it opens. It starts shown, like the Settings button itself, which also
+  // shows until capabilities say otherwise.
+  const [settingsChromeEnabled, setSettingsChromeEnabled] = useState(true);
   return (
     <div className="aman-shell">
       <AmanChatSurface
         defaultAgentSpec={defaultAgentSpec}
         openSettings={openSettings}
+        settingsOpenRequest={settingsOpenRequest}
         displayName={displayName}
         overrides={overrides}
         onAgentActivity={setAvatarActivity}
         onActiveSessionChange={setActiveSessionId}
         onPendingApprovalsChange={setPendingApprovalIds}
+        onSettingsChromeEnabledChange={setSettingsChromeEnabled}
       />
       <AmanRuntimeRail
         modelName={modelName}
@@ -241,9 +259,9 @@ function AmanShell({
         activity={avatarActivity}
         version={version}
         buildRef={buildRef}
-        settingsHref="/settings"
         pendingApprovalIds={pendingApprovalIds}
         auditFeed={activeSessionId === undefined ? undefined : <SentinelAuditFeed sessionId={activeSessionId} />}
+        {...(settingsChromeEnabled ? { onOpenAudits: openAudits } : {})}
       />
     </div>
   );
@@ -530,19 +548,17 @@ export function App() {
                                 }}
                               >
                                 <ComposerDraftScopeProvider scope={draftScope}>
-                                  <AmanPandaSourceProvider src={AMAN_PANDA_SRC}>
-                                    <AmanShell
-                                      defaultAgentSpec={boot.defaultAgentSpec}
-                                      openSettings={boot.openSettings}
-                                      displayName={session.displayName}
-                                      overrides={overrides}
-                                      modelName={
-                                        setup?.modelName ?? (boot.defaultAgentSpec.model.name || 'Choose a model')
-                                      }
-                                      version={boot.build?.version}
-                                      buildRef={boot.build?.ref}
-                                    />
-                                  </AmanPandaSourceProvider>
+                                  <AmanShell
+                                    defaultAgentSpec={boot.defaultAgentSpec}
+                                    openSettings={boot.openSettings}
+                                    displayName={session.displayName}
+                                    overrides={overrides}
+                                    modelName={
+                                      setup?.modelName ?? (boot.defaultAgentSpec.model.name || 'Choose a model')
+                                    }
+                                    version={boot.build?.version}
+                                    buildRef={boot.build?.ref}
+                                  />
                                 </ComposerDraftScopeProvider>
                               </AmanSetupProvider>
                             </HelpProvider>

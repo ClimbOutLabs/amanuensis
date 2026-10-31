@@ -130,6 +130,7 @@ const defaults: Record<string, IconEntry> = {
   palette: Palette,
   paperclip: Paperclip,
   'arrow-up': ArrowUp,
+  square: Square,
   'arrow-down': ArrowDown,
   'arrow-left': ArrowLeft,
   xmark: X,

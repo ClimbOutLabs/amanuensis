@@ -2,7 +2,6 @@ import {
   CreatedBySubjectSchema,
   SessionMetadataSchema,
   SessionSourceSchema,
-  SessionTitleSourceSchema,
   type AgentSpec,
   type CreatedBySubject,
   type SessionMetadata,
@@ -22,8 +21,6 @@ import type {
   GetSessionByExternalIdInput,
   GetSessionInput,
   ListSessionsInput,
-  SetGeneratedSessionTitleInput,
-  SetPrivateFingerprintsInput,
   StampImportedSessionInput,
   UpdateSessionInput,
 } from '@truefoundry/trueforge-core/agent-session/store/ISessionStore';
@@ -38,11 +35,6 @@ import {
   SessionStoreInvariantError,
   TurnNotFoundError,
 } from '@truefoundry/trueforge-core/agent-session/store/SessionStoreErrors';
-import {
-  ChatPrivateFingerprintsSchema,
-  mergeChatPrivateFingerprints,
-  type ChatPrivateFingerprints,
-} from '@truefoundry/trueforge-core/core/permissions/privateTextCheck';
 import { sql, type Kysely } from 'kysely';
 import { SESSION_EXTERNAL_ID_UQ } from '../../../indexes';
 import { sessionAgentFromColumns, sessionAgentToColumns } from '../../../sessionAgentColumns';
@@ -80,14 +72,12 @@ function mapRowToSessionRecord(row: {
   agent_name: string | null;
   agent_spec: AgentSpec | null;
   title: string | null;
-  title_source: string | null;
   folder_id: string | null;
   repository_id: string | null;
   workspace_cwd: string | null;
   last_turn_id: string | null;
   approval_grants: string[];
   task_checklist: TaskChecklist;
-  private_fingerprints: ChatPrivateFingerprints | null;
   external_id: string | null;
   custom: Record<string, unknown> | null;
   metadata: SessionMetadata;
@@ -108,14 +98,12 @@ function mapRowToSessionRecord(row: {
       agent_spec: row.agent_spec,
     }),
     title: row.title,
-    title_source: SessionTitleSourceSchema.nullable().parse(row.title_source),
     folder_id: row.folder_id,
     repository_id: row.repository_id,
     workspace_cwd: row.workspace_cwd,
     last_turn_id: row.last_turn_id,
     approval_grants: row.approval_grants,
     task_checklist: parseStoredTaskChecklist(row.task_checklist),
-    private_fingerprints: ChatPrivateFingerprintsSchema.nullable().parse(row.private_fingerprints),
     external_id: row.external_id,
     custom: parseSessionCustom(row.custom),
     metadata: parseSessionMetadata(row.metadata),
@@ -142,13 +130,11 @@ export async function createSession(db: Kysely<Database>, input: CreateSessionIn
         agent_name: columns.agent_name,
         agent_spec: columns.agent_spec !== null ? json(columns.agent_spec) : null,
         title: null,
-        title_source: null,
         folder_id: null,
         // Bind via json(): a bare [] is encoded by node-pg as the Postgres array
         // literal '{}', which then casts to jsonb as an empty OBJECT, not [].
         approval_grants: json([]),
         task_checklist: json(emptyTaskChecklist()),
-        private_fingerprints: null,
         custom: input.custom !== null ? json(input.custom) : null,
         metadata: json(input.metadata),
         external_id: input.external_id,
@@ -262,20 +248,6 @@ export async function getSessionByExternalId(
   return mapRowToSessionRecord(row);
 }
 
-export async function setGeneratedSessionTitle(
-  db: Kysely<Database>,
-  input: SetGeneratedSessionTitleInput,
-): Promise<boolean> {
-  const result = await db
-    .updateTable('session')
-    .set({ title: input.title, title_source: 'auto' })
-    .where('tenant_id', '=', input.tenant_id)
-    .where('session_id', '=', input.session_id)
-    .where('title_source', '=', 'first_message')
-    .executeTakeFirst();
-  return Number(result.numUpdatedRows) > 0;
-}
-
 export async function updateSession(db: Kysely<Database>, input: UpdateSessionInput<SessionCustom>): Promise<void> {
   const agent = input.agent;
   const title = input.title;
@@ -307,8 +279,7 @@ export async function updateSession(db: Kysely<Database>, input: UpdateSessionIn
       if (title === undefined) {
         return qb;
       }
-      // A title set through the store is a person's choice; the generated title never replaces it.
-      return qb.set({ title, title_source: 'person' });
+      return qb.set({ title });
     })
     .$if(metadata !== undefined, qb => {
       if (metadata === undefined) {
@@ -347,6 +318,12 @@ export async function listSessions(
 
   if (input.agent_id !== undefined) {
     query = query.where('agent_id', '=', input.agent_id);
+  }
+  if (input.folder_id !== undefined) {
+    query = query.where('folder_id', '=', input.folder_id);
+  }
+  if (input.no_folder) {
+    query = query.where('folder_id', 'is', null);
   }
   query = whereCreatedByOrAgentIds(query, input.created_by_or_agent_ids);
   if (input.metadata !== undefined) {
@@ -401,28 +378,4 @@ export async function listSessions(
   const { data: pageRows, pagination } = paginateSessionListRows(rows, limit, row => row.updated_at_cursor);
 
   return { data: pageRows.map(mapRowToSessionRecord), pagination };
-}
-
-export async function setPrivateFingerprints(db: Kysely<Database>, input: SetPrivateFingerprintsInput): Promise<void> {
-  await db.transaction().execute(async trx => {
-    // Locked, so two turns saving at once each merge into what the other stored.
-    const row = await trx
-      .selectFrom('session')
-      .select('private_fingerprints')
-      .where('session_id', '=', input.session_id)
-      .forUpdate()
-      .executeTakeFirst();
-    if (row === undefined) {
-      return;
-    }
-    const fingerprints = mergeChatPrivateFingerprints({
-      stored: ChatPrivateFingerprintsSchema.nullable().parse(row.private_fingerprints),
-      saved: input.fingerprints,
-    });
-    await trx
-      .updateTable('session')
-      .set({ private_fingerprints: json(fingerprints) })
-      .where('session_id', '=', input.session_id)
-      .execute();
-  });
 }

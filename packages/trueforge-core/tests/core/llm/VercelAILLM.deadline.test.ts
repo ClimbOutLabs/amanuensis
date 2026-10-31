@@ -1,4 +1,5 @@
 import { EventType } from '../../../src/core/events/schema';
+import { streamDeadlineDetailsOf } from '../../../src/core/llm/streamDeadline';
 import { VercelAILLM } from '../../../src/core/llm/VercelAILLM';
 import { AgentThread, MODEL_STOPPED_ANSWERING_MESSAGE } from '../../../src/core/runtime/AgentThread';
 import { InternalEventType } from '../../../src/core/runtime/AgentThread.types';
@@ -78,6 +79,8 @@ function modelClient(signal: AbortSignal) {
     signal,
     logger: makeSilentLogger(),
     streamTimeout: { firstChunkMs: 100, chunkMs: 50 },
+    // The partial call is open, so its allowance is the one the empty heartbeats must not extend.
+    toolCallChunkMs: 50,
     providerConfig: {
       provider: { type: 'custom' as const, name: 'synthetic' },
       model: { id: 'synthetic-model', name: 'synthetic-model' },
@@ -144,9 +147,12 @@ describe('provider stream progress deadlines', () => {
     const events = await completion;
     expect(observed.abortReason).toMatchObject({ name: 'TimeoutError' });
     expect(observed.heartbeats).toBeGreaterThan(0);
-    expect(observed.heartbeats).toBeLessThan(10);
+    // Both attempts were cut by the deadline (about eleven heartbeats), nowhere near the
+    // hundred the provider's own 500 ms bound would have allowed across two streams.
+    expect(observed.heartbeats).toBeLessThan(20);
     expect(caller.signal.aborted).toBe(false);
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    // The silent step is retried once before the turn ends; the partial call never runs on either.
+    expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(toolSet.callTool).not.toHaveBeenCalled();
     expect(thread.hasOpenToolCallId('partial-call')).toBe(false);
     expect(
@@ -171,9 +177,17 @@ describe('provider stream progress deadlines', () => {
         (error: unknown) => ({ result: null, error }),
       );
     await jest.advanceTimersByTimeAsync(600);
-    expect((await completion).error).toMatchObject({ message: expect.stringMatching(/first.*chunk.*timeout/i) });
+    const settled = await completion;
+    expect(settled.error).toMatchObject({ message: expect.stringMatching(/first.*chunk.*timeout/i) });
     expect(observed.abortReason).toMatchObject({ name: 'TimeoutError' });
     expect(observed.heartbeats).toBeLessThan(12);
+    // The record says plainly that nothing at all arrived before the first-chunk deadline fired.
+    expect(streamDeadlineDetailsOf(settled.error)).toMatchObject({
+      deadline: 'first_chunk',
+      timeoutMs: 100,
+      lastProgressField: null,
+      msSinceLastProgress: null,
+    });
   });
 
   it('allows continuing reasoning and text past the first-output deadline without timing out the whole turn', async () => {
@@ -192,6 +206,115 @@ describe('provider stream progress deadlines', () => {
     expect(result.finish_reason).toBe('stop');
     expect(result.output.content).toBe('The constraints conflict.');
     expect(observed.abortReason).toBeUndefined();
+  });
+
+  it('lets a provider whose reasoning arrives under a field the parser drops finish, and shows the thinking', async () => {
+    const { observed } = mockProvider([
+      {
+        atMs: 20,
+        delta: { reasoning_details: [{ type: 'reasoning.text', text: 'Thinking about breeds.' }] },
+        finishReason: null,
+      },
+      {
+        atMs: 60,
+        delta: { reasoning_details: [{ type: 'reasoning.text', text: ' Still thinking.' }] },
+        finishReason: null,
+      },
+      {
+        atMs: 100,
+        delta: { reasoning_details: [{ type: 'reasoning.text', text: ' Almost there.' }] },
+        finishReason: null,
+      },
+      {
+        atMs: 140,
+        delta: { reasoning_details: [{ type: 'reasoning.text', text: ' Done thinking.' }] },
+        finishReason: null,
+      },
+      { atMs: 180, delta: { content: 'Here is the answer.' }, finishReason: null },
+      { atMs: 220, delta: {}, finishReason: 'stop' },
+    ]);
+    const caller = new AbortController();
+    const completion = modelClient(caller.signal).createNonStream({
+      messages: [{ role: 'user', content: 'Name a breed.' }],
+    });
+    await jest.advanceTimersByTimeAsync(600);
+    const result = await completion;
+    expect(observed.abortReason).toBeUndefined();
+    expect(result.finish_reason).toBe('stop');
+    expect(result.output.content).toBe('Here is the answer.');
+    const thinking = (result.output.thinking_blocks ?? [])
+      .map(block => (block.type === 'thinking' ? block.thinking : ''))
+      .join('');
+    expect(thinking).toContain('Thinking about breeds.');
+    expect(thinking).toContain('Done thinking.');
+  });
+
+  it('lets a tool call whose name arrives only in the last frame finish with its full arguments', async () => {
+    const { observed } = mockProvider([
+      {
+        atMs: 5,
+        delta: {
+          tool_calls: [{ index: 0, id: 'call-1', type: 'function', function: { arguments: '{"body":"<div>' } }],
+        },
+        finishReason: null,
+      },
+      {
+        atMs: 45,
+        delta: { tool_calls: [{ index: 0, function: { arguments: ' <p>card one</p>' } }] },
+        finishReason: null,
+      },
+      {
+        atMs: 85,
+        delta: { tool_calls: [{ index: 0, function: { arguments: ' <p>card two</p>' } }] },
+        finishReason: null,
+      },
+      {
+        atMs: 125,
+        delta: { tool_calls: [{ index: 0, function: { arguments: ' </div>"}' } }] },
+        finishReason: null,
+      },
+      {
+        atMs: 165,
+        delta: { tool_calls: [{ index: 0, function: { name: 'update_space' } }] },
+        finishReason: 'tool_calls',
+      },
+    ]);
+    const caller = new AbortController();
+    const completion = modelClient(caller.signal).createNonStream({
+      messages: [{ role: 'user', content: 'Update the space.' }],
+    });
+    await jest.advanceTimersByTimeAsync(600);
+    const result = await completion;
+    expect(observed.abortReason).toBeUndefined();
+    expect(result.finish_reason).toBe('tool_calls');
+    expect(result.output.tool_calls).toHaveLength(1);
+    expect(result.output.tool_calls?.[0]?.function.name).toBe('update_space');
+    expect(result.output.tool_calls?.[0]?.function.arguments).toBe(
+      '{"body":"<div> <p>card one</p> <p>card two</p> </div>"}',
+    );
+  });
+
+  it('records which deadline fired and what the stream last did before it', async () => {
+    const { observed } = mockProvider([
+      { atMs: 20, delta: { reasoning_content: 'Inspecting the available evidence.' }, finishReason: null },
+    ]);
+    const caller = new AbortController();
+    const completion = modelClient(caller.signal)
+      .createNonStream({ messages: [{ role: 'user', content: 'Explain the conflict.' }] })
+      .then(
+        result => ({ result, error: null }),
+        (error: unknown) => ({ result: null, error }),
+      );
+    await jest.advanceTimersByTimeAsync(600);
+    const settled = await completion;
+    expect(observed.abortReason).toMatchObject({ name: 'TimeoutError' });
+    // Reasoning arrived (so the first-chunk deadline passed), then nothing: the chunk deadline
+    // fired, and the record names the field the last progress arrived under.
+    expect(streamDeadlineDetailsOf(settled.error)).toMatchObject({
+      deadline: 'chunk',
+      timeoutMs: 50,
+      lastProgressField: 'reasoning',
+    });
   });
 
   it('preserves explicit caller cancellation instead of replacing it with a later deadline', async () => {

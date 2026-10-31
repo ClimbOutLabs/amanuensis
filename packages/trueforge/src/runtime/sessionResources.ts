@@ -4,6 +4,7 @@ import {
   DisabledDriver,
   DockerDriver,
   McpConnectionError,
+  ModelRequestGate,
   RunCodeService,
   Sandbox,
   SkillMounter,
@@ -32,7 +33,8 @@ import type { ISkillStore } from '../db/skillStore';
 import type { ITurnArtifactStore } from '../db/turnArtifactStore';
 import { isMcpAuthRequired, resolveMcpAuth } from '../mcp/auth/mcpDcr';
 import type { IOAuthTokenStore } from '../mcp/auth/types';
-import { isFirstPartyOrigin } from '../mcp/firstParty';
+import { isFirstPartyOrigin, isReservedConnectorName } from '../mcp/firstParty';
+import { isHostOwnConnector } from '../mcp/hostConnectors';
 import { LocalSandboxProvider } from '../sandbox/local/provider/LocalSandboxProvider';
 import { getCachedLocalSandboxSupport, isLocalSandboxFallbackEnabled } from '../sandbox/localRuntime';
 import { toSandboxProviderFromRecord } from '../sandbox/providerUtils';
@@ -253,6 +255,12 @@ export function parseModelFqn(name: string): { providerName: string; modelName: 
 }
 
 /**
+ * The one per-model request gate for this server process: every turn's steps take their model's
+ * place in it before sending, so replies on a model with a request limit wait instead of racing.
+ */
+export const modelRequestGate = new ModelRequestGate();
+
+/**
  * Load turn-ready model config and defaults for a configured FQN (`provider/model`).
  * Malformed FQN or missing provider/model → HTTPException(422).
  */
@@ -271,6 +279,12 @@ export async function getModelDetails({
   modelProperties: ModelProperties;
   /** Stream progress deadlines: the provider's own, else the server-wide ones. */
   streamTimeout: Required<StreamTimeout>;
+  /**
+   * How many requests may be in flight on this model at once: the model's own setting when it
+   * has one, else 1 for a custom provider (a self-hosted server that serves one request at a
+   * time), else no limit.
+   */
+  maxConcurrentRequests: number | undefined;
 }> {
   const parsed = parseModelFqn(name);
   if (parsed === undefined) {
@@ -309,6 +323,7 @@ export async function getModelDetails({
     defaultModelParams: model.properties.max_output_tokens ? { max_tokens: model.properties.max_output_tokens } : {},
     modelProperties: model.properties,
     streamTimeout: modelProviderStreamTimeout(stream_timeout),
+    maxConcurrentRequests: model.properties.max_concurrent_requests ?? (type === 'custom' ? 1 : undefined),
   };
 }
 
@@ -480,10 +495,14 @@ export async function getMcpConnection({
   if (record === undefined) {
     return undefined;
   }
-  // The stored mark is what setup decided at save time. It counts only while the operator still
-  // lists the origin, so dropping an origin from the configuration takes effect on the next turn.
+  // The stored mark is what setup decided at save time. The names Email and Calendar belong to the host's own
+  // sidecars: they are first-party only at the address the host was set up with, whatever the stored mark says,
+  // so an old or imported record cannot hold the trust. Either way the origin must still be on the first-party
+  // list, so dropping an origin from the configuration takes effect on the next turn.
   const firstParty =
-    record.first_party &&
+    (isReservedConnectorName(record.name)
+      ? isHostOwnConnector({ name: record.name, url: record.manifest.url })
+      : record.first_party) &&
     isFirstPartyOrigin({ url: record.manifest.url, origins: configuration.FIRST_PARTY_MCP_ORIGINS });
   const searchProvider =
     record.manifest.type === 'remote' && record.manifest.search_provider === true
@@ -706,6 +725,7 @@ export function buildTurnSandbox(input: {
   boundRepository?: BoundRepository | undefined;
   loadBoundRepository?: (() => Promise<BoundRepository | undefined>) | undefined;
   loadPackageMirrorToken?: (() => Promise<string | undefined>) | undefined;
+  loadSkillNetworkGrant?: (() => Promise<{ token: string; hosts: readonly string[] } | undefined>) | undefined;
   loadPackageDownloadsAllowed?: (() => Promise<boolean>) | undefined;
   allowPackageDownloads?: (() => Promise<void>) | undefined;
   onRepositorySources?: RepositoryCommandSourceObserver | undefined;
@@ -744,6 +764,7 @@ export function buildTurnSandbox(input: {
     boundRepository: input.boundRepository,
     loadBoundRepository: input.loadBoundRepository,
     loadPackageMirrorToken: input.loadPackageMirrorToken,
+    loadSkillNetworkGrant: input.loadSkillNetworkGrant,
     loadPackageDownloadsAllowed: input.loadPackageDownloadsAllowed,
     allowPackageDownloads: input.allowPackageDownloads,
     onRepositorySources: input.onRepositorySources,
@@ -773,9 +794,29 @@ export function buildTurnSandbox(input: {
 }
 
 /**
+ * Whether an unconfigured mount names a search provider preset that lost the search provider
+ * role to another connector: a remembered mount of it is stale, not a configuration error.
+ * Callers establish "not configured" themselves; the designated provider's own name never
+ * counts, so a mount of the connector that holds the role keeps its ordinary checks.
+ */
+export function isStaleSearchProviderMount(input: {
+  name: string;
+  searchProviderPresetNames: readonly string[] | undefined;
+  designatedName: string | undefined;
+}): boolean {
+  return (
+    input.searchProviderPresetNames !== undefined &&
+    input.searchProviderPresetNames.includes(input.name) &&
+    input.name !== input.designatedName
+  );
+}
+
+/**
  * Cross-checks an AgentSpec against configured models / MCP / skills and
  * sandbox capability. Throws HTTPException(422) for semantic failures.
  * Skills must exist in the skill store (git name) or pass SFY resolve (registry FQN).
+ * When searchProviderPresetNames is given, a mount that isStaleSearchProviderMount does not
+ * fail validation: the turn drops it instead (see MemoryTurnResourceResolver).
  */
 export async function validateAgentSpec({
   spec,
@@ -784,6 +825,7 @@ export async function validateAgentSpec({
   mcpServerStore,
   skillStore,
   sandboxProviderStore,
+  searchProviderPresetNames,
 }: {
   spec: AgentSpec;
   tenant_id: string;
@@ -791,6 +833,7 @@ export async function validateAgentSpec({
   mcpServerStore: IMcpServerStore;
   skillStore: ISkillStore;
   sandboxProviderStore: ISandboxProviderStore;
+  searchProviderPresetNames?: readonly string[] | undefined;
 }): Promise<void> {
   const resolved = await getModelDetails({
     tenant_id,
@@ -820,11 +863,28 @@ export async function validateAgentSpec({
         })
       ).map(record => record.name),
     );
-    const unknown = requestedMcpServers.find(server => !configuredNames.has(server.name));
-    if (unknown !== undefined) {
-      throw new HTTPException(422, {
-        message: `Unknown MCP server "${unknown.name}" — not configured`,
-      });
+    const unknownServers = requestedMcpServers.filter(server => !configuredNames.has(server.name));
+    if (unknownServers.length > 0) {
+      // The designated provider's name is read only when an unknown name could be a stale
+      // search provider mount, so ordinary validation costs no extra store read.
+      let designatedName: string | undefined;
+      if (
+        searchProviderPresetNames !== undefined &&
+        unknownServers.some(server => searchProviderPresetNames.includes(server.name))
+      ) {
+        const records = await mcpServerStore.listServers({ tenant_id, names: undefined });
+        designatedName = records.find(
+          record => record.manifest.type === 'remote' && record.manifest.search_provider === true,
+        )?.name;
+      }
+      const unknown = unknownServers.find(
+        server => !isStaleSearchProviderMount({ name: server.name, searchProviderPresetNames, designatedName }),
+      );
+      if (unknown !== undefined) {
+        throw new HTTPException(422, {
+          message: `Unknown MCP server "${unknown.name}" — not configured`,
+        });
+      }
     }
   }
 

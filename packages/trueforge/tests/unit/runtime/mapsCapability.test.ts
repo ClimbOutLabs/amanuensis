@@ -180,9 +180,13 @@ describe('MapsService.geocode', () => {
     boundingbox: ['48.85', '48.86', '2.29', '2.3'],
   };
 
-  function serviceWith(fetch_limited: (url: string) => Promise<Response>): { service: MapsService; seen: string[] } {
+  function serviceWith(
+    fetch_limited: (url: string) => Promise<Response>,
+    timezone?: string,
+  ): { service: MapsService; seen: string[] } {
     const seen: string[] = [];
     const service = new MapsService({
+      timezone,
       geocoder_url: 'https://geocode.example',
       road_providers: unusedRoadProviders(),
       transit_provider: unusedTransitProvider(),
@@ -219,6 +223,57 @@ describe('MapsService.geocode', () => {
     const second = await service.geocode('Eiffel Tower');
     expect(second).toEqual(first);
     expect(seen).toHaveLength(1);
+  });
+
+  const TORRES_VEDRAS = {
+    lat: '39.1',
+    lon: '-9.3',
+    display_name: 'Travessa das Gaivotas, Torres Vedras, Lisboa, 2560-061',
+    address: { road: 'Travessa das Gaivotas', municipality: 'Torres Vedras' },
+  };
+  const LISBOA = {
+    lat: '38.7106',
+    lon: '-9.1426',
+    display_name: 'Travessa das Gaivotas, Santa Catarina, Lisboa',
+    address: { road: 'Travessa das Gaivotas', city: 'Lisboa' },
+  };
+
+  it('prefers the result in the city the address names over the first result', async () => {
+    const { service, seen } = serviceWith(() => Promise.resolve(jsonResponse([TORRES_VEDRAS, LISBOA])));
+    const place = await service.geocode('Travessa das Gaivotas 4, 1200-147 Lisboa');
+    expect(place?.lat).toBeCloseTo(38.7106, 4);
+    expect(seen[0]).toContain('limit=5');
+  });
+
+  it('ignores accents and case when matching the city', async () => {
+    const braga = { ...LISBOA, display_name: 'Rua A, Braga', address: { town: 'São João' } };
+    const { service } = serviceWith(() => Promise.resolve(jsonResponse([TORRES_VEDRAS, braga])));
+    const place = await service.geocode('Rua A 1, SAO JOAO');
+    expect(place?.resolved_name).toBe('Rua A, Braga');
+  });
+
+  it('keeps the first result when no candidate is in the named city', async () => {
+    const { service } = serviceWith(() => Promise.resolve(jsonResponse([TORRES_VEDRAS, LISBOA])));
+    const place = await service.geocode('Travessa das Gaivotas 4, Porto');
+    expect(place?.lat).toBeCloseTo(39.1, 4);
+  });
+
+  it('limits the search to Portugal for a Lisbon time zone, and retries worldwide when that finds nothing', async () => {
+    const { service, seen } = serviceWith(
+      url => Promise.resolve(jsonResponse(url.includes('countrycodes=pt') ? [] : [nominatimHit])),
+      'Europe/Lisbon',
+    );
+    const place = await service.geocode('Eiffel Tower, Paris');
+    expect(place?.resolved_name).toBe('Eiffel Tower, Paris, France');
+    expect(seen).toHaveLength(2);
+    expect(seen[0]).toContain('countrycodes=pt');
+    expect(seen[1]).not.toContain('countrycodes');
+  });
+
+  it('sends no country limit when the time zone does not imply one', async () => {
+    const { service, seen } = serviceWith(() => Promise.resolve(jsonResponse([nominatimHit])), 'America/New_York');
+    await service.geocode('Eiffel Tower');
+    expect(seen[0]).not.toContain('countrycodes');
   });
 
   it('returns null on zero hits (not an error)', async () => {
@@ -295,6 +350,23 @@ describe('maps connector binding', () => {
       throw new Error('maps hosts were not stamped');
     }
     expect(binding).toEqual({ server_id: MAPS_SERVER_ID, destination_host: mapsDestinationHosts(info.maps_hosts) });
+  });
+
+  it('declares every maps tool read-only, so a map lookup never counts as a change', async () => {
+    const capability = mapsCapability({
+      tracing: NOOP_AGENT_TRACING,
+      logger: createLogger({ silent: true }),
+      pages_scope: PAGES_SCOPE,
+      starts_answer: true,
+    });
+    const toolSet = capability.systemToolSets?.[0];
+    if (toolSet === undefined) {
+      throw new Error('maps capability has no tool sets');
+    }
+    for (const name of ['render_map', 'render_route', 'render_places']) {
+      const info = await toolSet.toolCallInfo({ name, arguments: {} });
+      expect(info).toMatchObject({ read_only_hint: true, open_world_hint: true });
+    }
   });
 
   it('names the walking, cycling and public transport services in the approval destination', async () => {

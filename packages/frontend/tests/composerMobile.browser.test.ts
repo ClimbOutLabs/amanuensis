@@ -5,14 +5,19 @@ import { fileURLToPath } from 'node:url';
 import { chromium, type Browser } from 'playwright-core';
 import { createServer, defaultClientConditions } from 'vite';
 
+import { DEV_OPTIMIZE_DEPS } from '../src/devPrebundle.ts';
 import { findChromiumExecutable } from './support/findChromiumExecutable.ts';
+import { privateViteCache } from './support/viteCache.ts';
 
 const RENDER_TIMEOUT_MS = 45_000;
 
 test('320px composer keeps a touch-usable Send control inside the viewport', { timeout: 120_000 }, async () => {
   const frontendRoot = fileURLToPath(new URL('../', import.meta.url));
+  const viteCache = privateViteCache('composer-mobile');
   const server = await createServer({
+    cacheDir: viteCache.cacheDir,
     configFile: false,
+    optimizeDeps: DEV_OPTIMIZE_DEPS,
     root: frontendRoot,
     logLevel: 'silent',
     // The published ui dist leaves core modules external, so resolve them from source like the app does.
@@ -66,20 +71,21 @@ test('320px composer keeps a touch-usable Send control inside the viewport', { t
     await send.tap();
     assert.equal(await page.locator('body').getAttribute('data-submitted'), 'true');
 
-    const cancel = page.getByRole('button', { name: 'Cancel' });
-    await cancel.waitFor({ state: 'visible', timeout: RENDER_TIMEOUT_MS });
-    const cancelBox = await cancel.boundingBox();
-    assert.ok(cancelBox != null, 'Cancel should have browser geometry while running');
-    assert.ok(cancelBox.x >= 0, `Cancel starts outside viewport: ${cancelBox.x}`);
-    assert.ok(cancelBox.x + cancelBox.width <= 320, `Cancel ends outside viewport: ${cancelBox.x + cancelBox.width}`);
-    assert.ok(cancelBox.width >= 44, `Cancel width is below touch target: ${cancelBox.width}`);
-    assert.ok(cancelBox.height >= 44, `Cancel height is below touch target: ${cancelBox.height}`);
+    const stop = page.getByRole('button', { name: 'Stop' });
+    await stop.waitFor({ state: 'visible', timeout: RENDER_TIMEOUT_MS });
+    const stopBox = await stop.boundingBox();
+    assert.ok(stopBox != null, 'Stop should have browser geometry while running');
+    assert.ok(stopBox.x >= 0, `Stop starts outside viewport: ${stopBox.x}`);
+    assert.ok(stopBox.x + stopBox.width <= 320, `Stop ends outside viewport: ${stopBox.x + stopBox.width}`);
+    assert.ok(stopBox.width >= 44, `Stop width is below touch target: ${stopBox.width}`);
+    assert.ok(stopBox.height >= 44, `Stop height is below touch target: ${stopBox.height}`);
 
-    await cancel.tap();
+    await stop.tap();
     assert.equal(await page.locator('body').getAttribute('data-cancelled'), 'true');
     await page.getByRole('button', { name: 'Send message' }).waitFor({ state: 'visible', timeout: RENDER_TIMEOUT_MS });
   } finally {
     await browser?.close();
     await server.close();
+    viteCache.remove();
   }
 });

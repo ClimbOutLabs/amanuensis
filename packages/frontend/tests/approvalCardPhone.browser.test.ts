@@ -8,7 +8,9 @@ import { fileURLToPath } from 'node:url';
 import { chromium, type Browser } from 'playwright-core';
 import { createServer, defaultClientConditions } from 'vite';
 
+import { DEV_OPTIMIZE_DEPS } from '../src/devPrebundle.ts';
 import { findChromiumExecutable } from './support/findChromiumExecutable.ts';
+import { privateViteCache } from './support/viteCache.ts';
 
 const RENDER_TIMEOUT_MS = 45_000;
 const PHONE = { width: 390, height: 844 };
@@ -24,8 +26,11 @@ async function screenshotDir(): Promise<string> {
 
 test('both approval cards fit a 390 px phone with every choice in reach', { timeout: 180_000 }, async () => {
   const frontendRoot = fileURLToPath(new URL('../', import.meta.url));
+  const viteCache = privateViteCache('approval-card-phone');
   const server = await createServer({
+    cacheDir: viteCache.cacheDir,
     configFile: false,
+    optimizeDeps: DEV_OPTIMIZE_DEPS,
     root: frontendRoot,
     logLevel: 'silent',
     resolve: { conditions: ['trueforge-dev', ...defaultClientConditions] },
@@ -50,28 +55,38 @@ test('both approval cards fit a 390 px phone with every choice in reach', { time
 
     const ticket = page.getByTestId('ticket-card');
     const plain = page.getByTestId('plain-card');
-    const ticketChoices = ['Allow it', 'Not now', 'Allow searches in this chat'];
-    const plainChoices = ['Approve', 'Approve for this chat', 'Deny'];
+    const ticketChoices = ['Allow', 'Not now', 'Always allow this here'];
+    const plainChoices = ['Allow', 'Not now', 'Always allow this here'];
     await ticket
-      .getByRole('button', { name: ticketChoices[0] })
+      .getByRole('button', { name: ticketChoices[0], exact: true })
       .waitFor({ state: 'visible', timeout: RENDER_TIMEOUT_MS });
 
     const pageWidth = await page.evaluate(() => document.documentElement.scrollWidth);
     assert.ok(pageWidth <= PHONE.width, `the page scrolls sideways: ${String(pageWidth)} px wide`);
 
     // Every choice shows without opening Details, and sits fully inside the screen.
-    for (const [card, names, role] of [
-      [ticket, ticketChoices, 'button'],
-      [plain, plainChoices, 'radio'],
+    for (const [card, names] of [
+      [ticket, ticketChoices],
+      [plain, plainChoices],
     ] as const) {
       for (const name of names) {
-        const choice = card.getByRole(role, { name, exact: true });
+        const choice = card.getByRole('button', { name, exact: true });
         assert.equal(await choice.isVisible(), true, `${name} is not visible`);
-        const box = await (role === 'radio' ? choice.locator('xpath=..') : choice).boundingBox();
+        const box = await choice.boundingBox();
         assert.ok(box !== null, `${name} has no box`);
         assert.ok(box.x >= 0 && box.x + box.width <= PHONE.width, `${name} runs off the screen`);
       }
     }
+
+    // The generic ticket shows who a draft goes to without opening Details.
+    const recipient = plain.getByText(/to: robin@example\.test/);
+    assert.equal(await recipient.isVisible(), true, 'the recipient is not visible');
+    const recipientBox = await recipient.boundingBox();
+    assert.ok(recipientBox !== null, 'the recipient has no box');
+    assert.ok(
+      recipientBox.x >= 0 && recipientBox.x + recipientBox.width <= PHONE.width,
+      'the recipient runs off the screen',
+    );
 
     const dir = await screenshotDir();
     await ticket.screenshot({ path: join(dir, 'approval-ticket-390.png') });
@@ -79,5 +94,6 @@ test('both approval cards fit a 390 px phone with every choice in reach', { time
   } finally {
     await browser?.close();
     await server.close();
+    viteCache.remove();
   }
 });

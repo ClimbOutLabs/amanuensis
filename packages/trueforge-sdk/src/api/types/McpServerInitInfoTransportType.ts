@@ -2,7 +2,8 @@
 
 /** Transport used to connect to the MCP server. */
 export const McpServerInitInfoTransportType = {
-        StreamableHttp: "streamable-http",
-        Sse: "sse"
-    } as const;
-export type McpServerInitInfoTransportType = typeof McpServerInitInfoTransportType[keyof typeof McpServerInitInfoTransportType];
+    StreamableHttp: "streamable-http",
+    Sse: "sse",
+} as const;
+export type McpServerInitInfoTransportType =
+    (typeof McpServerInitInfoTransportType)[keyof typeof McpServerInitInfoTransportType];

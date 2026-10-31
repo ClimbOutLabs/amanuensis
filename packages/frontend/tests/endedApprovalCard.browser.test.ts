@@ -1,6 +1,4 @@
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
@@ -12,20 +10,13 @@ import { createServer } from 'vite';
 import { startApprovalTestServer, type ApprovalTestServer } from '../../trueforge/tests/fixtures/approvalTestServer.ts';
 import { inProcessApi, pausedSession, waitingCallIds } from './support/approvalChat.ts';
 import { findChromiumExecutable } from './support/findChromiumExecutable.ts';
+import { screenshotDir } from './support/screenshotDir.ts';
+import { privateViteCache } from './support/viteCache.ts';
 
 const RENDER_TIMEOUT_MS = 45_000;
 const ENDED_NOTE = 'This request ended. Ask again if you still need it.';
-const ALLOW = 'Allow it';
+const ALLOW = 'Allow';
 const DENY = 'Not now';
-
-async function screenshotDir(): Promise<string> {
-  const configured = process.env.AMAN_SCREENSHOT_DIR;
-  if (configured != null && configured !== '') {
-    await mkdir(configured, { recursive: true });
-    return configured;
-  }
-  return await mkdtemp(join(tmpdir(), 'aman-ended-card-'));
-}
 
 /**
  * The chat moved on: a newer turn runs and finishes, so the paused turn's request has ended. It is
@@ -104,14 +95,16 @@ async function assertNotWaitingAfterReload(page: Page, name: string): Promise<vo
 
 test('an ended approval card can be cleared but never run', { timeout: 600_000 }, async () => {
   const api = await startApprovalTestServer();
+  const viteCache = privateViteCache('ended-approval-card');
   const vite = await createServer({
+    cacheDir: viteCache.cacheDir,
     root: fileURLToPath(new URL('../', import.meta.url)),
     logLevel: 'error',
     plugins: [inProcessApi(api)],
     server: { host: '127.0.0.1', port: 0, strictPort: false },
   });
   let browser: Browser | undefined;
-  const outDir = await screenshotDir();
+  const outDir = await screenshotDir('aman-ended-card-');
   try {
     await vite.listen();
     const address = vite.httpServer?.address();
@@ -151,10 +144,7 @@ test('an ended approval card can be cleared but never run', { timeout: 600_000 }
 
       // Either the click reached the server and was refused, or the chat had already ended the card.
       if (await clickUnlessEnded(page, ALLOW)) {
-        await page
-          .getByText('Nothing was approved or run', { exact: false })
-          .first()
-          .waitFor({ timeout: RENDER_TIMEOUT_MS });
+        await page.getByText(ENDED_NOTE).first().waitFor({ timeout: RENDER_TIMEOUT_MS });
       }
       await page.screenshot({ path: join(outDir, 'ended-4-allow-refused.png'), fullPage: true });
       assert.equal(api.mcp.writeInvocations(), 0, 'Allow on an ended request runs nothing');
@@ -190,6 +180,7 @@ test('an ended approval card can be cleared but never run', { timeout: 600_000 }
   } finally {
     await browser?.close();
     await vite.close();
+    viteCache.remove();
     await api.close();
   }
 });

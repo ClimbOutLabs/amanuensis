@@ -25,8 +25,15 @@ function jsonInit(body: unknown): RequestInit {
   return { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) };
 }
 
-/** Serves `/api/*` from the real server app in this process, as the dev proxy would. */
-export function inProcessApi(api: ApprovalTestServer): Plugin {
+/**
+ * Serves `/api/*` from the real server app in this process, as the dev proxy would. `beforeRequest`
+ * runs once the request body is read and before the app sees it, so a test can make the server slow;
+ * like a real server, the app still handles a request whose page hung up meanwhile.
+ */
+export function inProcessApi(
+  api: ApprovalTestServer,
+  options?: { beforeRequest?: (request: { method: string; url: string }) => Promise<void> },
+): Plugin {
   return {
     name: 'in-process-api',
     configureServer(server) {
@@ -45,9 +52,14 @@ export function inProcessApi(api: ApprovalTestServer): Plugin {
           }
           const method = req.method ?? 'GET';
           const body = method === 'GET' || method === 'HEAD' ? undefined : Buffer.concat(chunks);
-          api
-            .request(url, { method, headers, body })
-            .then(response => {
+          Promise.resolve(options?.beforeRequest?.({ method, url }))
+            .then(() => api.request(url, { method, headers, body }))
+            .then(async response => {
+              if (res.destroyed) {
+                // The page hung up while the server was slow; drop the answer as a real socket would.
+                await response.body?.cancel();
+                return;
+              }
               res.statusCode = response.status;
               response.headers.forEach((value, name) => res.setHeader(name, value));
               if (response.body === null) {
@@ -66,11 +78,38 @@ export function inProcessApi(api: ApprovalTestServer): Plugin {
   };
 }
 
-/** A real paused turn: the scripted model asks to run the write tool, and the card waits. */
-export async function pausedSession(api: ApprovalTestServer): Promise<{ sessionId: string; pausedTurnId: string }> {
+/** Sends one turn and drains its stream, which waits for the turn to finish or pause. */
+export async function sendMessage({
+  api,
+  sessionId,
+  text,
+}: {
+  api: ApprovalTestServer;
+  sessionId: string;
+  text: string;
+}): Promise<void> {
+  const turn = await api.request(
+    `/api/v1/sessions/${sessionId}/turns`,
+    jsonInit({ input: [{ type: 'user.message', content: text }], stream: true }),
+  );
+  assert.equal(turn.status, 200, `turn "${text}" was accepted`);
+  await turn.text();
+}
+
+/**
+ * A real paused turn: the scripted model asks to run the write tool, and the card waits.
+ * `earlierMessages` are sent first as finished turns, so the chat has history before the card.
+ */
+export async function pausedSession(
+  api: ApprovalTestServer,
+  options?: { earlierMessages?: string[] },
+): Promise<{ sessionId: string; pausedTurnId: string }> {
   const session = await api.request('/api/v1/sessions', jsonInit({ agent: { spec: AGENT_SPEC } }));
   assert.equal(session.status, 201);
   const sessionId = ((await session.json()) as { data: { id: string } }).data.id;
+  for (const text of options?.earlierMessages ?? []) {
+    await sendMessage({ api, sessionId, text });
+  }
   const turn = await api.request(
     `/api/v1/sessions/${sessionId}/turns`,
     jsonInit({ input: [{ type: 'user.message', content: 'run:inert_write please' }], stream: true }),
