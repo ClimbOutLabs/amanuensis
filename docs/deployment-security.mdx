@@ -3,37 +3,31 @@ title: 'Deployment Security'
 description: 'What the shipped defaults protect against, what they do not, and what to change before exposing an instance beyond your own machine.'
 ---
 
-TrueForge ships defaults tuned for a single user running it locally. This page describes those defaults plainly so you can decide what to change before a shared or network-reachable deployment.
+Aman is meant to be installed with the installer (`installer/install.sh`, see [Install](/install)). This page says plainly what an installed Aman protects against, what it does not, and what to check before anyone else can reach it.
 
-## Everyone is admin without OIDC
+## What the installer sets up
 
-Standalone mode (`STANDALONE=true`) always requires OIDC login: without `OIDC_ISSUER_URL`, `OIDC_CLIENT_ID`, and `OIDC_CLIENT_SECRET` the server refuses to start, whatever the bind address, and `REQUIRE_AUTH=false` does not opt out. Standalone also refuses to start unless `OIDC_ALLOWED_EMAILS` holds exactly one email address, and it accepts only sign-ins with a verified email (`email_verified: true`), which Aman's own sign-in always gives. Every mode refuses an `OIDC_ISSUER_URL` that is not Aman's own sign-in service (path `/dex`). An http issuer is accepted only on a loopback host; any other issuer must be https. Standalone also rejects requests whose `Host` is not a loopback name on the instance port or the `PUBLIC_BASE_URL` host (421) and cross-origin writes (403). Hosted mode (`STANDALONE=false`, Docker Compose or Kubernetes) has no login screen unless you configure OIDC: with the three variables all unset, every request is treated as one shared local admin identity. Hosted mode refuses to start when it would listen on a non-loopback address without authentication, with an error naming your options (configure OIDC, bind `HOST=localhost`, or set `REQUIRE_AUTH=false` to explicitly accept the risk). Loopback binds keep a warning ("Auth is disabled; browser login is off") and normal startup.
+Each instance is one person's Aman, with its own sign-in, data, secrets and ports.
 
-In practice this means anyone who can reach the app port has full admin access: they can read chat history, change settings, and use any configured model, MCP connector, or sandbox credential.
+- **Sign-in is always on.** Every instance runs Aman's own sign-in service, with one owner account: the email you gave the installer. The app refuses to start without it, and only that one verified email can sign in. Your password is never stored; the installer keeps only its hash.
+- **Your home network, over https.** By default the app answers at this computer's private addresses (its LAN and Tailscale addresses, `localhost` and its host names) over https, with a certificate from an authority the installer makes on this computer. The plain port only sends devices to https and serves the `/trust` page. `--local-only` keeps the app on `127.0.0.1` alone. `--tls off` turns https off, and then the password crosses the network unencrypted, so use it only with Tailscale.
+- **Cloud servers start closed.** On a server at a common cloud provider, a new instance opens on `127.0.0.1` alone, because private addresses there are shared with other customers. `--home-network` overrides that.
+- **The internet only over https.** A public address is never served over plain http. For access from the internet, use `--public-url`, `--login-url` and `--tls caddy`, open only TCP 443 (plus SSH from your own address), and see [Https with Caddy](/install#https-with-caddy).
+- **Docker 28 or newer on Linux.** Older Docker Engines let other devices on your network reach ports meant for this computer only, so the installer and `aman doctor` stop and say so.
 
-## Enabling OIDC
+`aman doctor` checks all of this again at any time.
 
-Aman uses its own sign-in. Set all three variables together, never just one or two (standalone also needs `OIDC_ALLOWED_EMAILS`):
+## Running from source, Docker Compose or Kubernetes
 
-- `OIDC_ISSUER_URL`
-- `OIDC_CLIENT_ID`
-- `OIDC_CLIENT_SECRET`
+The other ways to run it in [Quickstart](/quickstart) set up sign-in differently.
 
-Once set, users sign in through Aman's sign-in service and are assigned `admin` or `user` roles from an ID token claim. See [Setup Login](/authentication/overview) for the remaining optional variables (`OIDC_USER_REFERENCE_CLAIM`, `OIDC_USER_ROLE_CLAIM`, `OIDC_ADMIN_ROLE_VALUE`, `OIDC_SCOPES`).
-
-## Do not expose the app port without OIDC
-
-Do not put the app port (`8790` in standalone mode, `8791` in the Compose topology) on a network interface reachable beyond `localhost`, or beyond hosts you trust on a private network, unless OIDC is configured. This applies to any port-forward, reverse proxy, or Tailscale/VPN exposure you add yourself. The default Compose file publishes `8791` on `127.0.0.1` only and sets `REQUIRE_AUTH=false` as an explicit, documented opt-out for that local-dev stack — do not copy that opt-out into a production deployment; configure OIDC there instead.
-
-The Compose file's `login` profile is the quickest way to have OIDC on: it runs Aman's sign-in service (Dex) inside the stack with one account defined in `.env`, and the server signs users in through the standard OIDC flow against it. See [Turn on login](/quickstart#turn-on-login). Dex serves `https://localhost:5556` with a self-signed certificate minted on first start, trusted by the server through `NODE_EXTRA_CA_CERTS` and accepted once in the browser; it is scoped to loopback, and a deployment reachable from other machines needs the sign-in service served with a certificate those machines trust.
-
-## Change the Postgres password
-
-`packages/trueforge/.env.example` ships `POSTGRES_USER=trueforge` and `POSTGRES_PASSWORD=trueforge` for local development. `docker-compose.yml` binds the Postgres port (`5433`) and Redis port (`6380`) to `127.0.0.1` only, so they are not reachable from other machines by default. If you deploy on a shared host, change the Postgres password in your `.env` file before starting the stack, and keep the debug ports off any interface other than loopback unless you have a specific reason to open them.
+- `pnpm standalone:dev` runs standalone mode, with the same rules as an installed instance: it refuses to start without `OIDC_ISSUER_URL`, `OIDC_CLIENT_ID` and `OIDC_CLIENT_SECRET`, refuses an issuer that is not Aman's own sign-in service (path `/dex`), accepts an http issuer only on a loopback host, needs `OIDC_ALLOWED_EMAILS` to hold exactly one address, and accepts only verified emails. It also rejects requests whose `Host` is not a loopback name on the instance port or the `PUBLIC_BASE_URL` host (421) and cross-origin writes (403).
+- Docker Compose (`docker-compose.yml`) and the Helm chart for Kubernetes (`charts/trueforge`) run hosted mode (`STANDALONE=false`) with Postgres and Redis. Without the three `OIDC_*` variables, every request is one shared admin identity, so anyone who can reach the app port can read chat history, change settings and use every configured model, connector and sandbox credential. Hosted mode refuses to listen on a non-loopback address without sign-in, unless `REQUIRE_AUTH=false` explicitly accepts the risk. Configure sign-in before anyone else can reach either one. The Compose file publishes port `8791` on `127.0.0.1` only and sets `REQUIRE_AUTH=false` for that local stack; never copy that into anything other people can reach. It also ships `POSTGRES_PASSWORD=trueforge` and binds Postgres (`5433`) and Redis (`6380`) to `127.0.0.1`; change the password before running it on a shared machine. Its `login` profile turns sign-in on: see [Turn on login](/quickstart#turn-on-login) and [Setup Login](/authentication/overview).
+- On Kubernetes, turn sign-in on with the chart's `configs.oidc` values (`enabled`, `issuerUrl`, `clientId`, `clientSecret`); the chart's [README](https://github.com/ClimbOutLabs/amanuensis/blob/main/charts/trueforge/README.md) has the details.
 
 ## Prompt Guard screens
 
-TrueForge can run recalled memories and live tool output past a classifier sidecar (`aman-content-screen`) that looks for prompt injection. Both screens are optional and off by default. The sidecar supports a CPU (default) and a GPU backend behind the same HTTP contract; see `ops/prompt-guard/README.md`.
+Aman can run recalled memories and live tool output past a classifier sidecar (`aman-content-screen`) that looks for prompt injection. Both screens are optional and off by default. The sidecar supports a CPU (default) and a GPU backend behind the same HTTP contract; see `ops/prompt-guard/README.md`.
 
 - **Memory recall screen** (`MEMORY_SCREEN_ENABLED`, env default `false`): checks memories recalled from the memory bank before they reach the model. Turn it on per memory bank in **Settings → Memory**, using the "Screen recalled memories with Prompt Guard" switch under the active bank. The switch is disabled until a classifier URL (`MEMORY_SCREEN_URL`) is configured and reachable. Your own stated memories are never withheld by this screen; it applies to memories that came from tools, documents, or email.
 - **Tool output screen** (`TOOL_OUTPUT_SCREEN_ENABLED`, env default `false`): checks tool results from structurally open-world tools before they re-enter model context. This one is environment-only; there is no Settings switch. It uses the same classifier URL, bearer token, and threshold as the memory recall screen (`MEMORY_SCREEN_URL`, `MEMORY_SCREEN_AUTH_TOKEN`, `MEMORY_SCREEN_THRESHOLD`).
@@ -53,8 +47,7 @@ Two defenses do not depend on the Prompt Guard screens and cannot be turned off:
 
 ## Limits to keep in mind
 
-- Standalone mode requires OIDC login and refuses to start without `OIDC_ISSUER_URL`, `OIDC_CLIENT_ID`, and `OIDC_CLIENT_SECRET`, and it refuses an `OIDC_ISSUER_URL` that is not Aman's own sign-in service (path `/dex`). An http issuer is accepted only on a loopback host. It also refuses to start unless `OIDC_ALLOWED_EMAILS` holds exactly one email address, and it accepts only sign-ins with a verified email.
-- Hosted mode also uses a shared admin identity when OIDC is unset. Configure OIDC (the Compose `login` profile) and appropriate network controls before any shared or internet-facing deployment.
+- Sign-in protects the app, not the computer it runs on. Anyone with administrator rights or Docker access on that computer can read Aman's data, and backups are stored unencrypted.
 - Tool approval and sandboxing reduce risk; they are not an unlimited safety boundary. Review enabled capabilities, provider trust, egress policy, and approval requests.
 - Model credentials stay in the harness. Built-in MCP access from Code Mode is bridged back through the harness so its stored MCP tokens do not enter the sandbox; do not assume the same boundary for arbitrary custom code, tools, or integrations. Administrators remain responsible for secret storage, transport security, and provider configuration.
 - Markdown memory stores memories as plain files under `MEMORY_MARKDOWN_DIR` (default `./data/memory`) — treat that directory as sensitive. Recall screening and live tool-output screening default off.
