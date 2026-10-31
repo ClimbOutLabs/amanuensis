@@ -20,7 +20,7 @@
     "pretypecheck": "pnpm run ui:build",
     "typecheck": "pnpm run typecheck:only",
     "typecheck:only": "tsc --noEmit",
-    "pretest": "pnpm run ui:build",
+    "pretest": "pnpm run ui:build && pnpm --filter @truefoundry/trueforge build:gen",
     "test": "cross-env NODE_OPTIONS=--conditions=trueforge-dev tsx --test \"tests/**/*.test.ts\""
   },
   "dependencies": {
