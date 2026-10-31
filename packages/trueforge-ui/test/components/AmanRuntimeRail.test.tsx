@@ -99,6 +99,7 @@ describe('AmanRuntimeRail', () => {
       search_without_asking: true,
       maps_without_asking: false,
       sandbox_without_asking: true,
+      package_downloads_without_project_allowed: false,
     };
     const api: SentinelApi = {
       listAuditEntries: vi.fn(async () => []),
@@ -128,6 +129,7 @@ describe('AmanRuntimeRail', () => {
       search_without_asking: true,
       maps_without_asking: false,
       sandbox_without_asking: false,
+      package_downloads_without_project_allowed: false,
     };
     const api: SentinelApi = {
       listAuditEntries: vi.fn(async () => []),
@@ -657,6 +659,7 @@ describe('AmanRuntimeRail recent actions, rules and Needs you', () => {
     search_without_asking: true,
     maps_without_asking: false,
     sandbox_without_asking: false,
+    package_downloads_without_project_allowed: false,
   };
 
   function sentinelWith(settings: SentinelUserSettings): SentinelApi {

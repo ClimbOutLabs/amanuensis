@@ -1101,6 +1101,7 @@ describe('ToolCallContainer', () => {
           search_without_asking: true,
           maps_without_asking: false,
           sandbox_without_asking: true,
+          package_downloads_without_project_allowed: false,
         })),
         updateUserSettings: vi.fn(async () => ({
           offline_mode: false,
@@ -1108,6 +1109,7 @@ describe('ToolCallContainer', () => {
           search_without_asking: true,
           maps_without_asking: false,
           sandbox_without_asking: true,
+          package_downloads_without_project_allowed: false,
         })),
         listSentinelSessionContext: vi.fn(async () => ({
           approvals: [approval('old', 'old.example.com'), approval('now', 'now.example.com')],
@@ -1186,6 +1188,7 @@ describe('ToolCallContainer: held search request', () => {
         search_without_asking: true,
         maps_without_asking: false,
         sandbox_without_asking: true,
+        package_downloads_without_project_allowed: false,
       })),
       updateUserSettings: vi.fn(async () => ({
         offline_mode: false,
@@ -1193,6 +1196,7 @@ describe('ToolCallContainer: held search request', () => {
         search_without_asking: true,
         maps_without_asking: false,
         sandbox_without_asking: true,
+        package_downloads_without_project_allowed: false,
       })),
       listSentinelSessionContext: vi.fn(async () => ({ approvals: [info] })),
     };
