@@ -3665,7 +3665,10 @@ export async function classifyTier(action: SentinelAction, ctx: ClassifyContext)
     }
     const browserAction = await classifyBrowserActionTool({
       action,
-      mintToken: () => mintPlainToken({ ctx, tool_name: action.tool_name, params: action.canonical_params }),
+      // A click mints over the ref plus what the page said about it, not just the ref: the same
+      // re-read at dispatch (see BrowserTool.liveMintParams) then catches the page changing
+      // underneath the approval, through the ordinary "parameters changed since approval" check.
+      mintToken: (params: unknown) => mintPlainToken({ ctx, tool_name: action.tool_name, params }),
     });
     if (browserAction !== undefined) {
       return steeringChecked({ decision: browserAction, ctx, guests: [] });

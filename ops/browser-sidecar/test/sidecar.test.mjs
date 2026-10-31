@@ -89,6 +89,14 @@ async function withWorld(run) {
   const siteA = await fixture({
     '/': ACCOUNT_PAGE,
     '/checkout': (_req, res) => res.writeHead(200, { 'content-type': 'text/html' }).end(CHECKOUT_FIXTURE_HTML),
+    // A button whose label matches no commit word and which is not a form submit, the case the Tier
+    // classifier can miss, but whose click handler quietly posts to the same site with JavaScript.
+    '/newsletter': html(
+      `<h1>Newsletter</h1><button type="button" id="continue-button" onclick="fetch('/subscribe', { method: 'POST' })">Continue</button>`,
+    ),
+    '/article': html(
+      `<h1>Article</h1><button type="button" id="share-button" onclick="fetch('http://site-b.test/beacon', { method: 'POST' }).catch(() => {})">Share</button>`,
+    ),
     '/redirect-private': (_req, res) => res.writeHead(302, { location: `${internalUrl}/api/admin` }).end(),
     '/redirect-metadata': (_req, res) =>
       res.writeHead(302, { location: 'http://169.254.169.254/latest/meta-data/' }).end(),
@@ -385,5 +393,54 @@ test('click performs a real click and reads the result', { skip: !browsersAvaila
     assert.equal(clicked.status, 'ok');
     // The dialog's own script closed it; the page is otherwise unchanged.
     assert.match(clicked.text, /Checkout/);
+  });
+});
+
+test(
+  'an unapproved click whose label hides a same-site post is caught and needs approval',
+  { skip: !browsersAvailable },
+  async () => {
+    await withWorld(async ({ sidecar, siteA }) => {
+      const opened = await sidecar.open({ owner: 'owner-1', url: 'http://site-a.test/newsletter' });
+      const ref = refFor(opened.text, 'Continue');
+      // No `approved` flag: the classifier found no commit word on "Continue", so the host
+      // dispatches this click right away, exactly as it would any other Tier 1 click.
+      const clicked = await sidecar.click({ owner: 'owner-1', ref });
+      assert.equal(clicked.status, 'needs_approval');
+      assert.equal(clicked.accessible_name, 'Continue');
+      assert.ok(clicked.png_base64, 'a screenshot is returned with the hold');
+      // The post was aborted in the browser: the site never saw it.
+      assert.deepEqual(
+        siteA.hits.filter(hit => hit.url === '/subscribe'),
+        [],
+      );
+    });
+  },
+);
+
+test('an approved click is trusted outright: the gate is not run', { skip: !browsersAvailable }, async () => {
+  await withWorld(async ({ sidecar, siteA }) => {
+    const opened = await sidecar.open({ owner: 'owner-1', url: 'http://site-a.test/newsletter' });
+    const ref = refFor(opened.text, 'Continue');
+    const clicked = await sidecar.click({ owner: 'owner-1', ref, approved: true });
+    assert.equal(clicked.status, 'ok');
+    assert.ok(
+      siteA.hits.some(hit => hit.url === '/subscribe' && hit.method === 'POST'),
+      'the approved post went through',
+    );
+  });
+});
+
+test('a third-party request during a click is allowed, not blocked', { skip: !browsersAvailable }, async () => {
+  await withWorld(async ({ sidecar, siteB }) => {
+    const opened = await sidecar.open({ owner: 'owner-1', url: 'http://site-a.test/article' });
+    const ref = refFor(opened.text, 'Share');
+    const clicked = await sidecar.click({ owner: 'owner-1', ref });
+    // The beacon's host (site-b.test) differs from the page's own site (site-a.test): never gated.
+    assert.equal(clicked.status, 'ok');
+    assert.ok(
+      siteB.hits.some(hit => hit.url === '/beacon'),
+      'the third-party beacon went through',
+    );
   });
 });

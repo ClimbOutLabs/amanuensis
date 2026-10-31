@@ -163,4 +163,36 @@ describe('browser tools', () => {
     const info = await toolSet.toolCallInfo({ name: 'browser_click', arguments: { ref: 'e3' } });
     expect(info.browser_click).toBeUndefined();
   });
+
+  it('liveMintParams re-reads the click at dispatch, so the generic approval check catches it changing', async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({
+        status: 'ok',
+        site: 'shop.example',
+        // The label changed since the card was approved: "Place order" became "Add item".
+        accessible_name: 'Add item',
+        is_form_submit: true,
+        form_values: {},
+      }),
+    );
+    const toolSet = browserToolSet();
+    const live = await toolSet.liveMintParams?.({ name: 'browser_click', arguments: { ref: 'e3' } });
+    expect(live).toEqual({
+      ref: 'e3',
+      review: { site: 'shop.example', accessible_name: 'Add item', is_form_submit: true, form_values: {} },
+    });
+  });
+
+  it('liveMintParams throws when the sidecar cannot be reached, so dispatch refuses instead of guessing', async () => {
+    fetchMock.mockRejectedValueOnce(new Error('ECONNREFUSED'));
+    const toolSet = browserToolSet();
+    await expect(toolSet.liveMintParams?.({ name: 'browser_click', arguments: { ref: 'e3' } })).rejects.toThrow();
+  });
+
+  it('liveMintParams is a no-op for tools other than browser_click', async () => {
+    const toolSet = browserToolSet();
+    const live = await toolSet.liveMintParams?.({ name: 'browser_open', arguments: { url: 'https://hulu.com' } });
+    expect(live).toBeUndefined();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
 });

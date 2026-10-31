@@ -3,31 +3,18 @@
 // `X-Browser-Secret` header; nothing here is published to the host or to any other service.
 import { Buffer } from 'node:buffer';
 import { createHash, timingSafeEqual } from 'node:crypto';
-import { readFileSync } from 'node:fs';
 import { rm } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import path from 'node:path';
 import { URL } from 'node:url';
 import { chromium } from 'playwright-core';
 
-import { elementAtPath } from './extract.mjs';
+import { CLICK_GATE_SETTLE_MS, installClickGate } from './clickGate.mjs';
+import { pageBridge } from './extract.mjs';
 import { RefAssigner, renderSnapshot, sensitivityOf } from './snapshot.mjs';
 import { safeNavigationTarget } from './urlSafety.mjs';
 
 const MAX_BODY_BYTES = 256 * 1024;
-
-/**
- * extract.mjs as one script for the page. `page.evaluate(fn)` sends only the function's own source, so
- * the helpers and tables it uses must travel with it: the whole module goes, minus its `export`s.
- */
-const EXTRACT_MODULE = readFileSync(new URL('./extract.mjs', import.meta.url), 'utf8').replace(/^export /gm, '');
-
-const EXTRACT_SCRIPT = `(() => {\n${EXTRACT_MODULE}\nreturn extractSnapshotNodes();\n})()`;
-
-/** The same bundled module, ending in a read of one element's field, submit and form context. */
-function elementInfoScript(domPath) {
-  return `(() => {\n${EXTRACT_MODULE}\nreturn elementInfo(${JSON.stringify(domPath)});\n})()`;
-}
 
 /** The shortest shared secret the sidecar accepts, the same floor the app server enforces. */
 export const MIN_SECRET_LENGTH = 32;
@@ -112,13 +99,15 @@ export class BrowserSidecar {
   #launch;
   #proxyServer;
   #resolve;
+  #log;
 
   /**
    * `proxyServer` is the egress gateway every browser request goes through; it is required, so the
    * browser never talks to the network directly. `resolve` stands in for DNS in the early address
-   * check, for tests; the same policy (`urlSafety.mjs`) runs either way.
+   * check, for tests; the same policy (`urlSafety.mjs`) runs either way. `log` takes the click
+   * gate's own log lines only: never the page's content, never a login.
    */
-  constructor({ profilesDir, navTimeoutMs, proxyServer, launch = launchPersistentChromium, resolve }) {
+  constructor({ profilesDir, navTimeoutMs, proxyServer, launch = launchPersistentChromium, resolve, log }) {
     if (typeof proxyServer !== 'string' || proxyServer === '') {
       throw new Error('the browser needs its egress proxy (BROWSER_PROXY)');
     }
@@ -127,6 +116,7 @@ export class BrowserSidecar {
     this.#launch = launch;
     this.#proxyServer = proxyServer;
     this.#resolve = resolve;
+    this.#log = log ?? (() => undefined);
   }
 
   /** One launch per person, even when two requests for them arrive together. */
@@ -198,7 +188,7 @@ export class BrowserSidecar {
     if (!checked.ok) {
       return checked.result;
     }
-    const nodes = await session.page.evaluate(EXTRACT_SCRIPT);
+    const nodes = await session.page.evaluate(pageBridge, { command: 'extractSnapshotNodes' });
     const refs = session.refs.refsFor(nodes);
     const text = renderSnapshot({ title: await session.page.title(), url: session.page.url(), nodes, refs });
     return { status: 'ok', text };
@@ -237,7 +227,7 @@ export class BrowserSidecar {
     if (path === undefined) {
       return { ok: false, reason: 'unknown_ref' };
     }
-    const handle = await session.page.evaluateHandle(elementAtPath, path);
+    const handle = await session.page.evaluateHandle(pageBridge, { command: 'elementAtPath', args: path });
     const element = handle.asElement();
     if (element === null) {
       return { ok: false, reason: 'stale_ref' };
@@ -251,7 +241,7 @@ export class BrowserSidecar {
     if (!found.ok) {
       return { status: 'refused', reason: found.reason };
     }
-    const info = await found.session.page.evaluate(elementInfoScript(found.path));
+    const info = await found.session.page.evaluate(pageBridge, { command: 'elementInfo', args: found.path });
     if (info === null) {
       return { status: 'refused', reason: 'stale_ref' };
     }
@@ -264,15 +254,47 @@ export class BrowserSidecar {
     };
   }
 
-  /** Performs a click already approved (or found Tier 1), then reads the page it lands on. */
-  async click({ owner, ref }) {
+  /**
+   * Performs a click. `approved` is true only once the person has said OK to this exact click (see
+   * browserTier.ts and BrowserTool.liveMintParams on the host); then it is trusted outright. Every
+   * other click, the ones the host's own classifier found nothing to ask about, still goes through
+   * the gate: a same-site write the click sets off is aborted, and the click comes back as
+   * `needs_approval` instead of succeeding, catching a missed commit word.
+   */
+  async click({ owner, ref, approved }) {
     const found = await this.#elementFor({ owner, ref });
     if (!found.ok) {
       return { status: 'refused', reason: found.reason };
     }
     found.session.refs.reset();
-    await found.element.click({ timeout: this.#navTimeoutMs });
-    return this.read({ owner });
+    if (approved === true) {
+      await found.element.click({ timeout: this.#navTimeoutMs });
+      return this.read({ owner });
+    }
+    const site = new URL(found.session.page.url()).hostname;
+    const gate = await installClickGate({ page: found.session.page, site, log: this.#log });
+    try {
+      // A blocked navigation can make the click's own wait reject; the gate's record is what
+      // decides the outcome, not whether this call itself threw.
+      await found.element.click({ timeout: this.#navTimeoutMs }).catch(() => undefined);
+      await found.session.page.waitForTimeout(CLICK_GATE_SETTLE_MS);
+    } finally {
+      await gate.remove();
+    }
+    if (gate.blocked.length === 0) {
+      return this.read({ owner });
+    }
+    const info = await found.session.page
+      .evaluate(pageBridge, { command: 'elementInfo', args: found.path })
+      .catch(() => null);
+    const screenshot = await found.session.page.screenshot({ type: 'png' }).catch(() => null);
+    return {
+      status: 'needs_approval',
+      site,
+      accessible_name: info?.accessible_name ?? '',
+      form_values: info?.form_values ?? {},
+      png_base64: screenshot === null ? null : screenshot.toString('base64'),
+    };
   }
 
   /** Types into a field; refuses a password, card or one-time-code field instead of typing into it. */
@@ -281,7 +303,7 @@ export class BrowserSidecar {
     if (!found.ok) {
       return { status: 'refused', reason: found.reason };
     }
-    const info = await found.session.page.evaluate(elementInfoScript(found.path));
+    const info = await found.session.page.evaluate(pageBridge, { command: 'elementInfo', args: found.path });
     const sensitive = info === null ? null : sensitivityOf({ field_kind: info.field_kind });
     if (sensitive !== null) {
       return { status: 'refused', reason: 'sensitive_field' };
@@ -387,7 +409,7 @@ const ROUTES = {
   'POST /back': (sidecar, body) => sidecar.back({ owner: body.owner }),
   'POST /screenshot': (sidecar, body) => sidecar.screenshot({ owner: body.owner }),
   'POST /click-info': (sidecar, body) => sidecar.clickInfo({ owner: body.owner, ref: body.ref }),
-  'POST /click': (sidecar, body) => sidecar.click({ owner: body.owner, ref: body.ref }),
+  'POST /click': (sidecar, body) => sidecar.click({ owner: body.owner, ref: body.ref, approved: body.approved }),
   'POST /type': (sidecar, body) => sidecar.type({ owner: body.owner, ref: body.ref, text: body.text }),
   'POST /select': (sidecar, body) => sidecar.select({ owner: body.owner, ref: body.ref, option: body.option }),
 };

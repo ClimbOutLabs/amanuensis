@@ -172,8 +172,9 @@ export async function classifyBrowserActionTool({
   action,
   mintToken,
 }: {
-  action: Pick<SentinelAction, 'tool_name' | 'tool_type' | 'browser_click'>;
-  mintToken: () => Promise<string>;
+  action: Pick<SentinelAction, 'tool_name' | 'canonical_params' | 'tool_type' | 'browser_click'>;
+  /** Mints the approval token over the given params; the caller hashes exactly what is passed. */
+  mintToken: (params: unknown) => Promise<string>;
 }): Promise<TierDecision | undefined> {
   if (action.tool_type !== 'truefoundry-system' || !isBrowserToolName(action.tool_name)) {
     return undefined;
@@ -208,7 +209,10 @@ export async function classifyBrowserActionTool({
         ? 'Submits a form, so Aman always asks first.'
         : 'Its label is a word Aman always asks about first: a pay, buy, send, delete, cancel or similar action.',
       sensitive_read: false,
-      approval_token_id: await mintToken(),
+      // The ref alone is not what was approved: the token binds the ref together with the page's
+      // own account of the click (site, label, form-submit-ness, form values), so BrowserTool's
+      // liveMintParams, re-reading the live page at dispatch, catches it changing since approval.
+      approval_token_id: await mintToken({ ref: action.canonical_params['ref'], review }),
     });
   }
   return undefined;
