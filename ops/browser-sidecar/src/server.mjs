@@ -104,7 +104,11 @@ export class BrowserSidecar {
     return { ok: true, session, path, element };
   }
 
-  /** Field, submit and form context for a ref, without changing the page: the click gate's dry run. */
+  /**
+   * Field, submit and form context for a ref, without changing the page: the click gate's dry run,
+   * and what the approval card shows before the click happens. The screenshot is for the person to
+   * look at only: it never affects classification or the approval binding.
+   */
   async clickInfo({ owner, ref }) {
     const found = await this.#elementFor({ owner, ref });
     if (!found.ok) {
@@ -114,12 +118,14 @@ export class BrowserSidecar {
     if (info === null) {
       return { status: 'refused', reason: 'stale_ref' };
     }
+    const screenshot = await found.session.page.screenshot({ type: 'png' }).catch(() => null);
     return {
       status: 'ok',
       site: new URL(found.session.page.url()).hostname,
       accessible_name: info.accessible_name,
       is_form_submit: info.is_form_submit,
       form_values: info.form_values,
+      png_base64: screenshot === null ? null : screenshot.toString('base64'),
     };
   }
 

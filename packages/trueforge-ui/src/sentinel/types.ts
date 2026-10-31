@@ -157,6 +157,8 @@ export type SentinelApprovalCard = {
   mail_new_recipients?: string[] | null;
   /** True when a card carrying mail_new_recipients approves saving a draft rather than sending. */
   mail_draft?: boolean | undefined;
+  /** A picture of the page just before a browser click, as a data URL, or null/absent for every other card. */
+  browser_screenshot?: string | null;
 };
 
 /** The whole persona a chat call adds, in plain words. */
@@ -569,6 +571,7 @@ function parseApprovalCard(value: unknown): SentinelApprovalCard | undefined {
     persona: parsePersona(value.persona),
     mail_new_recipients: parseNewRecipients(value.mail_new_recipients ?? value.mailNewRecipients),
     mail_draft: cardFlag(value, { snake: 'mail_draft', camel: 'mailDraft' }),
+    browser_screenshot: cardString(value, { snake: 'browser_screenshot', camel: 'browserScreenshot' }),
   });
 }
 

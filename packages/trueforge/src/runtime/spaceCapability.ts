@@ -2723,7 +2723,14 @@ export class SpaceTurnResourceResolver extends MemoryTurnResourceResolver {
         usageSummaryCapability({ ...this.#usage, tracing: input.tracing, timeZone: this.clientTimezone }),
         toolImagesCapability(this.#toolImages),
         ...(configuration.BROWSER_ENABLED
-          ? [browserCapability({ tracing: input.tracing, logger: this.#space.logger, owner: input.created_by })]
+          ? [
+              browserCapability({
+                tracing: input.tracing,
+                logger: this.#space.logger,
+                owner: input.created_by,
+                sentinel,
+              }),
+            ]
           : []),
         ...google,
         ...(personas === undefined

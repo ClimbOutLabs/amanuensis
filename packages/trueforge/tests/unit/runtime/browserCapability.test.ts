@@ -1,3 +1,6 @@
+import { createSentinelHostContext } from '@truefoundry/trueforge-core/core';
+import type { AuditLogWriter, AuditRecordInput } from '@truefoundry/trueforge-core/core/permissions/audit';
+import { defaultSentinelServices } from '@truefoundry/trueforge-core/core/permissions/context';
 import { NOOP_AGENT_TRACING } from '@truefoundry/trueforge-core/core/tracing/NoopAgentTracing';
 import { createLogger, transports } from 'winston';
 import { browserCapability, callBrowserSidecar } from '../../../src/runtime/browserCapability';
@@ -26,8 +29,32 @@ function jsonResponse(body: unknown, status = 200): Response {
 
 const logger = createLogger({ transports: [new transports.Console({ silent: true })] });
 
-function browserToolSet() {
-  const capability = browserCapability({ tracing: NOOP_AGENT_TRACING, logger, owner: 'owner-1' });
+/** An in-memory audit log, for asserting on what a caught click records. */
+function recordingAuditWriter(): { writer: AuditLogWriter; records: AuditRecordInput[] } {
+  const records: AuditRecordInput[] = [];
+  return {
+    records,
+    writer: {
+      record: input => {
+        records.push(input);
+        return Promise.resolve();
+      },
+    },
+  };
+}
+
+function browserToolSet(audit: AuditLogWriter | null = null) {
+  const capability = browserCapability({
+    tracing: NOOP_AGENT_TRACING,
+    logger,
+    owner: 'owner-1',
+    sentinel: createSentinelHostContext({
+      tenant_id: 't1',
+      created_by: 'owner-1',
+      conversation_id: 'c1',
+      services: { ...defaultSentinelServices({ pinned_path: '/usr/bin:/bin' }), audit },
+    }),
+  });
   const toolSet = capability.systemToolSets?.[0];
   if (toolSet === undefined) {
     throw new Error('browserCapability did not register a tool set');
@@ -134,7 +161,7 @@ describe('browser tools', () => {
     expect(JSON.parse(text)).toEqual({ status: 'ok', saved: true });
   });
 
-  it("toolCallInfo stamps browser_click with the sidecar's dry-run read, not from model text", async () => {
+  it("toolCallInfo stamps browser_click and its screenshot from the sidecar's dry-run read, not from model text", async () => {
     fetchMock.mockResolvedValueOnce(
       jsonResponse({
         status: 'ok',
@@ -142,6 +169,7 @@ describe('browser tools', () => {
         accessible_name: 'Place order',
         is_form_submit: true,
         form_values: { card_last4: '4242' },
+        png_base64: 'aGVsbG8=',
       }),
     );
     const toolSet = browserToolSet();
@@ -152,9 +180,27 @@ describe('browser tools', () => {
       is_form_submit: true,
       form_values: { card_last4: '4242' },
     });
+    expect(info.browser_click_screenshot).toBe('data:image/png;base64,aGVsbG8=');
     const [url, init] = fetchMock.mock.calls[0] ?? [];
     expect(url).toBe('http://browser-test:8792/click-info');
     expect(JSON.parse(String(init?.body))).toEqual({ owner: 'owner-1', ref: 'e3' });
+  });
+
+  it('toolCallInfo leaves the screenshot unset when the sidecar has none, without failing the whole stamp', async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({
+        status: 'ok',
+        site: 'shop.example',
+        accessible_name: 'Cancel',
+        is_form_submit: false,
+        form_values: {},
+        png_base64: null,
+      }),
+    );
+    const toolSet = browserToolSet();
+    const info = await toolSet.toolCallInfo({ name: 'browser_click', arguments: { ref: 'e3' } });
+    expect(info.browser_click).toBeDefined();
+    expect(info.browser_click_screenshot).toBeUndefined();
   });
 
   it('toolCallInfo leaves browser_click unset when the sidecar cannot be reached, failing closed', async () => {
@@ -194,5 +240,47 @@ describe('browser tools', () => {
     const live = await toolSet.liveMintParams?.({ name: 'browser_open', arguments: { url: 'https://hulu.com' } });
     expect(live).toBeUndefined();
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('a click the sidecar gate caught writes a receipt, and tells the model plainly to stop', async () => {
+    const { writer, records } = recordingAuditWriter();
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({
+        status: 'needs_approval',
+        site: 'shop.example',
+        accessible_name: 'Continue',
+        form_values: { plan: 'yearly' },
+      }),
+    );
+    const toolSet = browserToolSet(writer);
+    const response = await toolSet.callTool({ name: 'browser_click', arguments: { ref: 'e5' } });
+    if (!('result' in response)) {
+      throw new Error('expected a resolved tool result');
+    }
+    expect(response.result.isError).toBe(true);
+    const [content] = response.result.content;
+    const body = JSON.parse(content?.type === 'text' ? content.text : '{}') as { status: string; message: string };
+    expect(body.status).toBe('needs_approval');
+    expect(body.message).toMatch(/Continue/);
+    expect(body.message).toMatch(/shop\.example/);
+    expect(body.message).toMatch(/plan: yearly/);
+    expect(records).toHaveLength(1);
+    expect(records[0]).toMatchObject({
+      tenant_id: 't1',
+      created_by: 'owner-1',
+      tier: 3,
+      tool_name: 'browser_click',
+      outcome: 'auto_denied',
+    });
+    expect(records[0]?.description).toMatch(/Continue/);
+    expect(records[0]?.description).toMatch(/shop\.example/);
+  });
+
+  it('an approved click that goes through writes no gate receipt: it was never caught', async () => {
+    const { writer, records } = recordingAuditWriter();
+    fetchMock.mockResolvedValueOnce(jsonResponse({ status: 'ok', text: 'Order placed' }));
+    const toolSet = browserToolSet(writer);
+    await toolSet.callTool({ name: 'browser_click', arguments: { ref: 'e5' } }, { status: 'allow' });
+    expect(records).toHaveLength(0);
   });
 });
