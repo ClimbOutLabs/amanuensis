@@ -7,6 +7,7 @@ import type {
   AppendCommandExecutionStartedInput,
   CreateTurnInput,
   ISessionStore,
+  SearchChatHistoryInput,
 } from '../../../src/agent-session/store/ISessionStore';
 import {
   decodeSessionEventPageToken,
@@ -4341,6 +4342,211 @@ export function runStoreContractSuite<
       await store.deleteSession({ tenant_id: tenant, session_id: sessionId });
 
       await expect(store.listApprovalDismissals({ session_id: sessionId })).resolves.toEqual([]);
+    });
+  });
+
+  describe('chat search', () => {
+    const docAt = (day: string) => new Date(`2026-09-${day}T10:00:00.000Z`);
+
+    function searchInput(overrides: Partial<SearchChatHistoryInput> = {}): SearchChatHistoryInput {
+      return {
+        tenant_id: tenant,
+        query: 'ferry',
+        created_by_subject_id: createdBy,
+        exclude_session_id: null,
+        from: null,
+        to: null,
+        limit: 8,
+        ...overrides,
+      };
+    }
+
+    async function seedSecondSession(store: Store, id: string, creator: string) {
+      await store.createSession({
+        tenant_id: tenant,
+        session_id: id,
+        created_by_subject: { subject_id: creator, subject_type: 'user', subject_display_name: creator },
+        agent: { type: 'inline', spec: makeAgentSpec() },
+        custom: null,
+        metadata: {},
+        external_id: null,
+        source: null,
+      });
+    }
+
+    it('finds a chat by the words in its indexed messages', async () => {
+      const store = createStore();
+      await seedSession(store);
+      await store.updateSession({
+        tenant_id: tenant,
+        session_id: sessionId,
+        agent: undefined,
+        title: 'Island trip plans',
+        metadata: undefined,
+      });
+      await store.indexChatMessages({
+        tenant_id: tenant,
+        session_id: sessionId,
+        turn_id: 'turn-1',
+        documents: [
+          { message_id: 'm1', role: 'user', text: 'We decided to book the ferry on Friday.', created_at: docAt('01') },
+          {
+            message_id: 'm2',
+            role: 'assistant',
+            text: 'The ferry leaves at nine and lands before lunch.',
+            created_at: docAt('01'),
+          },
+        ],
+      });
+
+      const hits = await store.searchChatHistory(searchInput());
+      expect(hits).toHaveLength(1);
+      expect(hits[0]?.session_id).toBe(sessionId);
+      expect(hits[0]?.title).toBe('Island trip plans');
+      expect(hits[0]?.snippet).toContain('ferry');
+      const session = mustGet(await store.getSession({ tenant_id: tenant, session_id: sessionId }));
+      expect(hits[0]?.created_at.getTime()).toBe(session.created_at.getTime());
+    });
+
+    it('returns nothing when no indexed message matches', async () => {
+      const store = createStore();
+      await seedSession(store);
+      await store.indexChatMessages({
+        tenant_id: tenant,
+        session_id: sessionId,
+        turn_id: 'turn-1',
+        documents: [
+          { message_id: 'm1', role: 'user', text: 'We decided to book the ferry on Friday.', created_at: docAt('01') },
+        ],
+      });
+
+      await expect(store.searchChatHistory(searchInput({ query: 'lighthouse' }))).resolves.toEqual([]);
+      await expect(store.searchChatHistory(searchInput({ query: '   ' }))).resolves.toEqual([]);
+    });
+
+    it("never returns another person's chat, in this tenant or another", async () => {
+      const store = createStore();
+      await seedSession(store);
+      await seedSecondSession(store, 'other-person-session', 'user-2');
+      await store.indexChatMessages({
+        tenant_id: tenant,
+        session_id: 'other-person-session',
+        turn_id: 'turn-1',
+        documents: [
+          { message_id: 'm1', role: 'user', text: 'We decided to book the ferry on Friday.', created_at: docAt('01') },
+        ],
+      });
+      await store.indexChatMessages({
+        tenant_id: 'other-tenant',
+        session_id: sessionId,
+        turn_id: 'turn-1',
+        documents: [
+          { message_id: 'm1', role: 'user', text: 'We decided to book the ferry on Friday.', created_at: docAt('01') },
+        ],
+      });
+
+      await expect(store.searchChatHistory(searchInput())).resolves.toEqual([]);
+    });
+
+    it('never returns the chat the search runs from', async () => {
+      const store = createStore();
+      await seedSession(store);
+      await store.indexChatMessages({
+        tenant_id: tenant,
+        session_id: sessionId,
+        turn_id: 'turn-1',
+        documents: [
+          { message_id: 'm1', role: 'user', text: 'We decided to book the ferry on Friday.', created_at: docAt('01') },
+        ],
+      });
+
+      await expect(store.searchChatHistory(searchInput({ exclude_session_id: sessionId }))).resolves.toEqual([]);
+    });
+
+    it('drops a chat from the index at once when the chat is deleted', async () => {
+      const store = createStore();
+      await seedSession(store);
+      await store.indexChatMessages({
+        tenant_id: tenant,
+        session_id: sessionId,
+        turn_id: 'turn-1',
+        documents: [
+          { message_id: 'm1', role: 'user', text: 'We decided to book the ferry on Friday.', created_at: docAt('01') },
+        ],
+      });
+
+      await store.deleteSession({ tenant_id: tenant, session_id: sessionId });
+
+      await expect(store.searchChatHistory(searchInput())).resolves.toEqual([]);
+    });
+
+    it('replaces a turn’s documents when the turn is indexed again', async () => {
+      const store = createStore();
+      await seedSession(store);
+      const indexTurn = (text: string) =>
+        store.indexChatMessages({
+          tenant_id: tenant,
+          session_id: sessionId,
+          turn_id: 'turn-1',
+          documents: [{ message_id: 'm1', role: 'user', text, created_at: docAt('01') }],
+        });
+      await indexTurn('We decided to book the ferry on Friday.');
+      await indexTurn('We decided to take the train instead.');
+
+      await expect(store.searchChatHistory(searchInput())).resolves.toEqual([]);
+      const hits = await store.searchChatHistory(searchInput({ query: 'train' }));
+      expect(hits).toHaveLength(1);
+      expect(hits[0]?.snippet).toContain('train');
+    });
+
+    it('keeps every snippet at most 300 characters', async () => {
+      const store = createStore();
+      await seedSession(store);
+      const longText = `Harbor notes. ${'Quiet water and slow mornings. '.repeat(30)}The ferry timetable is pinned to the board.`;
+      await store.indexChatMessages({
+        tenant_id: tenant,
+        session_id: sessionId,
+        turn_id: 'turn-1',
+        documents: [{ message_id: 'm1', role: 'user', text: longText, created_at: docAt('01') }],
+      });
+
+      const hits = await store.searchChatHistory(searchInput());
+      expect(hits).toHaveLength(1);
+      expect(hits[0]?.snippet.length).toBeLessThanOrEqual(300);
+      expect(hits[0]?.snippet).toContain('ferry');
+    });
+
+    it('bounds matches by the message dates given', async () => {
+      const store = createStore();
+      await seedSession(store);
+      await store.indexChatMessages({
+        tenant_id: tenant,
+        session_id: sessionId,
+        turn_id: 'turn-1',
+        documents: [
+          { message_id: 'm1', role: 'user', text: 'We decided to book the ferry on Friday.', created_at: docAt('01') },
+        ],
+      });
+
+      await expect(store.searchChatHistory(searchInput({ from: docAt('02') }))).resolves.toEqual([]);
+      await expect(store.searchChatHistory(searchInput({ to: docAt('01') }))).resolves.toEqual([]);
+      await expect(store.searchChatHistory(searchInput({ from: docAt('01'), to: docAt('02') }))).resolves.toHaveLength(
+        1,
+      );
+    });
+
+    it('treats indexing a missing session as a no-op', async () => {
+      const store = createStore();
+      await store.indexChatMessages({
+        tenant_id: tenant,
+        session_id: missingSessionId,
+        turn_id: 'turn-1',
+        documents: [
+          { message_id: 'm1', role: 'user', text: 'We decided to book the ferry on Friday.', created_at: docAt('01') },
+        ],
+      });
+
+      await expect(store.searchChatHistory(searchInput())).resolves.toEqual([]);
     });
   });
 
