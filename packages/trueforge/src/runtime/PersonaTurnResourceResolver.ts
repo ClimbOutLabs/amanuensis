@@ -5,6 +5,7 @@ import type { PersonaKnowledgeHit } from '../personaKnowledge/knowledgeRetrieval
 import type { PersonalizationProfile } from '../personalization/profile';
 import { isAmanGuidePersona } from '../personas/amanGuide/identity';
 import type { PersonaContext } from '../personas/persona';
+import { buildGuideSearchToolSet, type GuideSearchTurnContext } from './guideSearch';
 import { PersonalizationTurnResourceResolver } from './PersonalizationTurnResourceResolver';
 import { guardSwitchClaim, PersonaSwitchLog, switchTextForContext } from './personaSwitchClaim';
 
@@ -125,6 +126,7 @@ export class PersonaTurnResourceResolver extends PersonalizationTurnResourceReso
    */
   readonly sanitizeAssistantTextForContext: (text: string) => string;
   readonly #switchNotice: PersonaSwitchNotice | undefined;
+  readonly #guideSearch: GuideSearchTurnContext | undefined;
 
   constructor(
     deps: ConstructorParameters<typeof PersonalizationTurnResourceResolver>[0],
@@ -133,6 +135,7 @@ export class PersonaTurnResourceResolver extends PersonalizationTurnResourceReso
     personaKnowledgeBlock?: string,
     personaKnowledgeHits?: readonly PersonaKnowledgeHit[],
     switchNotice?: PersonaSwitchNotice,
+    guideSearch?: GuideSearchTurnContext,
   ) {
     // The configured persona owns assistant identity and voice while active, so
     // the deployment personalization is projected without its identity fields
@@ -153,6 +156,7 @@ export class PersonaTurnResourceResolver extends PersonalizationTurnResourceReso
       return guarded ?? (base === output ? undefined : base);
     };
     this.#switchNotice = switchNotice;
+    this.#guideSearch = guideSearch;
   }
 
   override async resolveAgentDefinition(
@@ -181,6 +185,25 @@ export class PersonaTurnResourceResolver extends PersonalizationTurnResourceReso
     const personaModel = await this.deps.llm(persona.model_name, 'chat');
     const knowledgeCapability =
       this.#personaKnowledgeBlock === undefined ? [] : [personaKnowledgeCapability(this.#personaKnowledgeBlock)];
+    const isGuide = isAmanGuidePersona({ id: persona.persona_id, created_by: input.created_by });
+    // The guide's one live tool, and only when this turn may have it: Tavily is the
+    // configured provider and offline mode is off. The builder returns undefined in
+    // every other case, and the guide then answers from its built-in help alone.
+    const guideSearchToolSet =
+      isGuide && this.#guideSearch !== undefined
+        ? await buildGuideSearchToolSet({
+            context: this.#guideSearch,
+            tenantId: input.tenant_id,
+            createdBy: input.created_by,
+            sessionId: input.session_id,
+            connectionFor: async serverName => {
+              const connection = await this.deps.mcp(serverName);
+              return { url: connection.url, headers: connection.headers, search_provider: connection.search_provider };
+            },
+            sentinelServices: input.sentinel_services,
+            logger: this.deps.logger,
+          })
+        : undefined;
 
     return {
       ...resolved,
@@ -195,7 +218,9 @@ export class PersonaTurnResourceResolver extends PersonalizationTurnResourceReso
         // The pre-flight guard sizes the persona's output against this window, so it must be the persona's own.
         modelProperties: personaModel.modelProperties,
         // Iris only explains Aman from what she knows: she is never given a tool that sends, writes or schedules.
-        readOnly: isAmanGuidePersona({ id: persona.persona_id, created_by: input.created_by }),
+        // Her one exception is the read-only search over Aman's public sources, set just above when this turn may have it.
+        readOnly: isGuide,
+        ...(guideSearchToolSet === undefined ? {} : { guideSearchToolSet }),
       },
       compactionModel: await this.#pinCompactionAwayFromPersona(input.spec, resolved),
       extraCapabilities: [
