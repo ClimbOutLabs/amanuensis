@@ -110,6 +110,7 @@ function sentinelApi(readSavedCards: () => Promise<SentinelSessionContext>): Sen
     search_without_asking: false,
     maps_without_asking: false,
     sandbox_without_asking: true,
+    chat_search_enabled: false,
   };
   return {
     listAuditEntries: vi.fn(async () => []),
