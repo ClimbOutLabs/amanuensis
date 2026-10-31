@@ -76,6 +76,11 @@ The printed plan lists every first-run download with its approximate size, inclu
 - `--print-network`: print every host the installer may contact and stop.
 - `--print-proxy-requirements`: print what a reverse proxy in front of an instance must do and stop.
 - `--home-network`: on a cloud server, open Aman at its private addresses anyway. Private addresses there are shared with other customers, so by default (for the common providers, recognised by their hardware) a new instance opens on `127.0.0.1` alone and says so. An instance that already exists keeps where it opens; `--local-only` puts it back on this computer.
+- `--events FD`: also write the run's progress to the open file descriptor FD, one JSON line per moment, for a program that drives the installer. See [Progress as data](#progress-as-data).
+
+### Progress as data
+
+A program that runs the installer for a person, as the setup wizard does, cannot follow the terminal output. With `--events FD` the installer writes the same run a second time, as data: one JSON line per moment on the file descriptor FD, which the calling program opens first (for example `install.sh --events 3 3>events.txt`). Each line has a `type`: `phase_start`, `step_start`, `step_result` (with a `result` of `done`, `skipped` or `failed`), `admin_prompt` (written before the installer asks about a step that needs administrator rights, and before the computer asks for the password), `warning`, and one `final_result` at the end. A line carries the words the terminal shows for that moment and the seconds since the run started. No secret is ever part of a line. The terminal output stays exactly as it is, and without the flag nothing is written anywhere new. A descriptor that cannot be written stops the run before anything happens, so a driver never loses the stream silently.
 
 ### Feeding the Token Factory key safely
 
