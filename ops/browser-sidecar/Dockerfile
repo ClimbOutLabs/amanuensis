@@ -6,8 +6,8 @@ FROM mcr.microsoft.com/playwright:v1.49.1-noble
 
 WORKDIR /app
 
-COPY package.json ./
-RUN npm install --omit=dev --ignore-scripts --no-audit --no-fund \
+COPY package.json package-lock.json ./
+RUN npm ci --omit=dev --ignore-scripts --no-audit --no-fund \
   && npm cache clean --force
 
 COPY src ./src

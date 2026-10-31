@@ -8,7 +8,8 @@ import path from 'node:path';
 import { URL } from 'node:url';
 import { chromium } from 'playwright-core';
 
-import { elementAtPath, elementInfo, extractSnapshotNodes } from './extract.mjs';
+import { CLICK_GATE_SETTLE_MS, installClickGate } from './clickGate.mjs';
+import { pageBridge } from './extract.mjs';
 import { RefAssigner, renderSnapshot, sensitivityOf } from './snapshot.mjs';
 import { safeNavigationTarget } from './urlSafety.mjs';
 
@@ -24,11 +25,13 @@ export class BrowserSidecar {
   #profilesDir;
   #navTimeoutMs;
   #launch;
+  #log;
 
-  constructor({ profilesDir, navTimeoutMs, launch = launchPersistentChromium }) {
+  constructor({ profilesDir, navTimeoutMs, launch = launchPersistentChromium, log }) {
     this.#profilesDir = profilesDir;
     this.#navTimeoutMs = navTimeoutMs;
     this.#launch = launch;
+    this.#log = log ?? (() => undefined);
   }
 
   async sessionFor(owner) {
@@ -60,7 +63,7 @@ export class BrowserSidecar {
 
   async read({ owner }) {
     const session = await this.sessionFor(owner);
-    const nodes = await session.page.evaluate(extractSnapshotNodes);
+    const nodes = await session.page.evaluate(pageBridge, { command: 'extractSnapshotNodes' });
     const refs = session.refs.refsFor(nodes);
     const text = renderSnapshot({ title: await session.page.title(), url: session.page.url(), nodes, refs });
     return { status: 'ok', text };
@@ -93,7 +96,7 @@ export class BrowserSidecar {
     if (path === undefined) {
       return { ok: false, reason: 'unknown_ref' };
     }
-    const handle = await session.page.evaluateHandle(elementAtPath, path);
+    const handle = await session.page.evaluateHandle(pageBridge, { command: 'elementAtPath', args: path });
     const element = handle.asElement();
     if (element === null) {
       return { ok: false, reason: 'stale_ref' };
@@ -107,7 +110,7 @@ export class BrowserSidecar {
     if (!found.ok) {
       return { status: 'refused', reason: found.reason };
     }
-    const info = await found.session.page.evaluate(elementInfo, found.path);
+    const info = await found.session.page.evaluate(pageBridge, { command: 'elementInfo', args: found.path });
     if (info === null) {
       return { status: 'refused', reason: 'stale_ref' };
     }
@@ -120,15 +123,47 @@ export class BrowserSidecar {
     };
   }
 
-  /** Performs a click already approved (or found Tier 1), then reads the page it lands on. */
-  async click({ owner, ref }) {
+  /**
+   * Performs a click. `approved` is true only once the person has said OK to this exact click (see
+   * browserTier.ts and BrowserTool.liveMintParams on the host); then it is trusted outright. Every
+   * other click — the ones the host's own classifier found nothing to ask about — still goes through
+   * the gate: a same-site write the click sets off is aborted, and the click comes back as
+   * `needs_approval` instead of succeeding, catching a missed commit word.
+   */
+  async click({ owner, ref, approved }) {
     const found = await this.#elementFor({ owner, ref });
     if (!found.ok) {
       return { status: 'refused', reason: found.reason };
     }
     found.session.refs.reset();
-    await found.element.click({ timeout: this.#navTimeoutMs });
-    return this.read({ owner });
+    if (approved === true) {
+      await found.element.click({ timeout: this.#navTimeoutMs });
+      return this.read({ owner });
+    }
+    const site = new URL(found.session.page.url()).hostname;
+    const gate = await installClickGate({ page: found.session.page, site, log: this.#log });
+    try {
+      // A blocked navigation can make the click's own wait reject; the gate's record is what
+      // decides the outcome, not whether this call itself threw.
+      await found.element.click({ timeout: this.#navTimeoutMs }).catch(() => undefined);
+      await found.session.page.waitForTimeout(CLICK_GATE_SETTLE_MS);
+    } finally {
+      await gate.remove();
+    }
+    if (gate.blocked.length === 0) {
+      return this.read({ owner });
+    }
+    const info = await found.session.page
+      .evaluate(pageBridge, { command: 'elementInfo', args: found.path })
+      .catch(() => null);
+    const screenshot = await found.session.page.screenshot({ type: 'png' }).catch(() => null);
+    return {
+      status: 'needs_approval',
+      site,
+      accessible_name: info?.accessible_name ?? '',
+      form_values: info?.form_values ?? {},
+      png_base64: screenshot === null ? null : screenshot.toString('base64'),
+    };
   }
 
   /** Types into a field; refuses a password, card or one-time-code field instead of typing into it. */
@@ -137,7 +172,7 @@ export class BrowserSidecar {
     if (!found.ok) {
       return { status: 'refused', reason: found.reason };
     }
-    const info = await found.session.page.evaluate(elementInfo, found.path);
+    const info = await found.session.page.evaluate(pageBridge, { command: 'elementInfo', args: found.path });
     const sensitive = info === null ? null : sensitivityOf({ field_kind: info.field_kind });
     if (sensitive !== null) {
       return { status: 'refused', reason: 'sensitive_field' };
@@ -214,7 +249,7 @@ const ROUTES = {
   'POST /back': (sidecar, body) => sidecar.back({ owner: body.owner }),
   'POST /screenshot': (sidecar, body) => sidecar.screenshot({ owner: body.owner }),
   'POST /click-info': (sidecar, body) => sidecar.clickInfo({ owner: body.owner, ref: body.ref }),
-  'POST /click': (sidecar, body) => sidecar.click({ owner: body.owner, ref: body.ref }),
+  'POST /click': (sidecar, body) => sidecar.click({ owner: body.owner, ref: body.ref, approved: body.approved }),
   'POST /type': (sidecar, body) => sidecar.type({ owner: body.owner, ref: body.ref, text: body.text }),
   'POST /select': (sidecar, body) => sidecar.select({ owner: body.owner, ref: body.ref, option: body.option }),
 };

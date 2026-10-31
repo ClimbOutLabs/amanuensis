@@ -3549,7 +3549,10 @@ export async function classifyTier(action: SentinelAction, ctx: ClassifyContext)
       action,
       provenance: ctx.web_search.provenance,
       assistant: ctx.web_search.assistantName,
-      mintToken: () => mintPlainToken({ ctx, tool_name: action.tool_name, params: action.canonical_params }),
+      // A click mints over the ref plus what the page said about it, not just the ref: the same
+      // re-read at dispatch (see BrowserTool.liveMintParams) then catches the page changing
+      // underneath the approval, through the ordinary "parameters changed since approval" check.
+      mintToken: (params: unknown) => mintPlainToken({ ctx, tool_name: action.tool_name, params }),
     });
     if (browser !== undefined) {
       return steeringChecked({ decision: browser, ctx, guests: [] });

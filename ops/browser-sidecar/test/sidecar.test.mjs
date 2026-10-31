@@ -3,8 +3,8 @@
 // Docker image already has; skipped automatically where they are not, so `npm test` on a plain
 // checkout still runs the rest of the suite.
 import assert from 'node:assert/strict';
-import { createServer } from 'node:http';
 import { mkdtemp, rm } from 'node:fs/promises';
+import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
@@ -58,6 +58,16 @@ const CHECKOUT_FIXTURE_HTML = `<!doctype html>
   </body>
 </html>`;
 
+// A button whose label matches no commit word and which is not a form submit — the case the Tier
+// classifier can miss — but whose click handler quietly posts to the same site with JavaScript.
+const DISGUISED_FIXTURE_HTML = `<!doctype html>
+<html>
+  <body>
+    <h1>Newsletter</h1>
+    <button type="button" id="continue-button" onclick="fetch('/subscribe', { method: 'POST' })">Continue</button>
+  </body>
+</html>`;
+
 async function withFixtureServer(run, html = FIXTURE_HTML) {
   const server = createServer((_req, res) => {
     res.writeHead(200, { 'content-type': 'text/html' }).end(html);
@@ -71,12 +81,25 @@ async function withFixtureServer(run, html = FIXTURE_HTML) {
   }
 }
 
+/**
+ * Loads a fixture page directly on the owner's session, bypassing the public `open()` gate: a test
+ * fixture necessarily runs on this computer, which `open()` (correctly) refuses to navigate to, so
+ * every test below that only needs a page loaded uses this instead. `open()`'s own refusal is
+ * covered on its own, against an address nothing here needs to serve.
+ */
+async function openFixture(sidecar, owner, url) {
+  const session = await sidecar.sessionFor(owner);
+  session.refs.reset();
+  await session.page.goto(url, { waitUntil: 'domcontentloaded' });
+  return sidecar.read({ owner });
+}
+
 test('reads a fixture page: title, links, and a masked password field', { skip: !browsersAvailable }, async () => {
   const profilesDir = await mkdtemp(path.join(tmpdir(), 'browser-sidecar-'));
   const sidecar = new BrowserSidecar({ profilesDir, navTimeoutMs: 10_000 });
   try {
     await withFixtureServer(async url => {
-      const result = await sidecar.open({ owner: 'owner-1', url });
+      const result = await openFixture(sidecar, 'owner-1', url);
       assert.equal(result.status, 'ok');
       assert.match(result.text, /Streaming Account/);
       assert.match(result.text, /Cancel membership/);
@@ -112,16 +135,13 @@ test('types into a field, then fills it', { skip: !browsersAvailable }, async ()
   const profilesDir = await mkdtemp(path.join(tmpdir(), 'browser-sidecar-'));
   const sidecar = new BrowserSidecar({ profilesDir, navTimeoutMs: 10_000 });
   try {
-    await withFixtureServer(
-      async url => {
-        const opened = await sidecar.open({ owner: 'owner-1', url });
-        const ref = refFor(opened.text, 'Name on card');
-        const typed = await sidecar.type({ owner: 'owner-1', ref, text: 'Grace Hopper' });
-        assert.equal(typed.status, 'ok');
-        assert.match(typed.text, /Grace Hopper/);
-      },
-      CHECKOUT_FIXTURE_HTML,
-    );
+    await withFixtureServer(async url => {
+      const opened = await openFixture(sidecar, 'owner-1', url);
+      const ref = refFor(opened.text, 'Name on card');
+      const typed = await sidecar.type({ owner: 'owner-1', ref, text: 'Grace Hopper' });
+      assert.equal(typed.status, 'ok');
+      assert.match(typed.text, /Grace Hopper/);
+    }, CHECKOUT_FIXTURE_HTML);
   } finally {
     await sidecar.close();
     await rm(profilesDir, { recursive: true, force: true });
@@ -133,7 +153,7 @@ test('refuses to type into a password field', { skip: !browsersAvailable }, asyn
   const sidecar = new BrowserSidecar({ profilesDir, navTimeoutMs: 10_000 });
   try {
     await withFixtureServer(async url => {
-      const opened = await sidecar.open({ owner: 'owner-1', url });
+      const opened = await openFixture(sidecar, 'owner-1', url);
       const ref = refFor(opened.text, 'Password');
       const typed = await sidecar.type({ owner: 'owner-1', ref, text: 'hunter2' });
       assert.deepEqual(typed, { status: 'refused', reason: 'sensitive_field' });
@@ -148,15 +168,12 @@ test('selects an option', { skip: !browsersAvailable }, async () => {
   const profilesDir = await mkdtemp(path.join(tmpdir(), 'browser-sidecar-'));
   const sidecar = new BrowserSidecar({ profilesDir, navTimeoutMs: 10_000 });
   try {
-    await withFixtureServer(
-      async url => {
-        const opened = await sidecar.open({ owner: 'owner-1', url });
-        const ref = refFor(opened.text, 'Country');
-        const selected = await sidecar.select({ owner: 'owner-1', ref, option: 'United Kingdom' });
-        assert.equal(selected.status, 'ok');
-      },
-      CHECKOUT_FIXTURE_HTML,
-    );
+    await withFixtureServer(async url => {
+      const opened = await openFixture(sidecar, 'owner-1', url);
+      const ref = refFor(opened.text, 'Country');
+      const selected = await sidecar.select({ owner: 'owner-1', ref, option: 'United Kingdom' });
+      assert.equal(selected.status, 'ok');
+    }, CHECKOUT_FIXTURE_HTML);
   } finally {
     await sidecar.close();
     await rm(profilesDir, { recursive: true, force: true });
@@ -167,21 +184,18 @@ test('click-info reads a submit button without clicking it', { skip: !browsersAv
   const profilesDir = await mkdtemp(path.join(tmpdir(), 'browser-sidecar-'));
   const sidecar = new BrowserSidecar({ profilesDir, navTimeoutMs: 10_000 });
   try {
-    await withFixtureServer(
-      async url => {
-        const opened = await sidecar.open({ owner: 'owner-1', url });
-        const ref = refFor(opened.text, 'Place order');
-        const info = await sidecar.clickInfo({ owner: 'owner-1', ref });
-        assert.equal(info.status, 'ok');
-        assert.equal(info.is_form_submit, true);
-        assert.equal(info.accessible_name, 'Place order');
-        assert.equal(info.form_values.name, 'Ada Lovelace');
-        // Nothing changed: the form is still there to click for real.
-        const read = await sidecar.read({ owner: 'owner-1' });
-        assert.match(read.text, /Place order/);
-      },
-      CHECKOUT_FIXTURE_HTML,
-    );
+    await withFixtureServer(async url => {
+      const opened = await openFixture(sidecar, 'owner-1', url);
+      const ref = refFor(opened.text, 'Place order');
+      const info = await sidecar.clickInfo({ owner: 'owner-1', ref });
+      assert.equal(info.status, 'ok');
+      assert.equal(info.is_form_submit, true);
+      assert.equal(info.accessible_name, 'Place order');
+      assert.equal(info.form_values.name, 'Ada Lovelace');
+      // Nothing changed: the form is still there to click for real.
+      const read = await sidecar.read({ owner: 'owner-1' });
+      assert.match(read.text, /Place order/);
+    }, CHECKOUT_FIXTURE_HTML);
   } finally {
     await sidecar.close();
     await rm(profilesDir, { recursive: true, force: true });
@@ -192,16 +206,13 @@ test("click-info on a dialog's plain Cancel button is not a form submit", { skip
   const profilesDir = await mkdtemp(path.join(tmpdir(), 'browser-sidecar-'));
   const sidecar = new BrowserSidecar({ profilesDir, navTimeoutMs: 10_000 });
   try {
-    await withFixtureServer(
-      async url => {
-        const opened = await sidecar.open({ owner: 'owner-1', url });
-        const ref = refFor(opened.text, 'Cancel');
-        const info = await sidecar.clickInfo({ owner: 'owner-1', ref });
-        assert.equal(info.status, 'ok');
-        assert.equal(info.is_form_submit, false);
-      },
-      CHECKOUT_FIXTURE_HTML,
-    );
+    await withFixtureServer(async url => {
+      const opened = await openFixture(sidecar, 'owner-1', url);
+      const ref = refFor(opened.text, 'Cancel');
+      const info = await sidecar.clickInfo({ owner: 'owner-1', ref });
+      assert.equal(info.status, 'ok');
+      assert.equal(info.is_form_submit, false);
+    }, CHECKOUT_FIXTURE_HTML);
   } finally {
     await sidecar.close();
     await rm(profilesDir, { recursive: true, force: true });
@@ -212,18 +223,89 @@ test('click performs a real click and reads the result', { skip: !browsersAvaila
   const profilesDir = await mkdtemp(path.join(tmpdir(), 'browser-sidecar-'));
   const sidecar = new BrowserSidecar({ profilesDir, navTimeoutMs: 10_000 });
   try {
-    await withFixtureServer(
-      async url => {
-        const opened = await sidecar.open({ owner: 'owner-1', url });
-        const ref = refFor(opened.text, 'Cancel');
-        const clicked = await sidecar.click({ owner: 'owner-1', ref });
-        assert.equal(clicked.status, 'ok');
-        // The dialog's own script closed it; the page is otherwise unchanged.
-        assert.match(clicked.text, /Checkout/);
-      },
-      CHECKOUT_FIXTURE_HTML,
-    );
+    await withFixtureServer(async url => {
+      const opened = await openFixture(sidecar, 'owner-1', url);
+      const ref = refFor(opened.text, 'Cancel');
+      const clicked = await sidecar.click({ owner: 'owner-1', ref });
+      assert.equal(clicked.status, 'ok');
+      // The dialog's own script closed it; the page is otherwise unchanged.
+      assert.match(clicked.text, /Checkout/);
+    }, CHECKOUT_FIXTURE_HTML);
   } finally {
+    await sidecar.close();
+    await rm(profilesDir, { recursive: true, force: true });
+  }
+});
+
+test(
+  'an unapproved click whose label hides a same-site post is caught and needs approval',
+  { skip: !browsersAvailable },
+  async () => {
+    const profilesDir = await mkdtemp(path.join(tmpdir(), 'browser-sidecar-'));
+    const sidecar = new BrowserSidecar({ profilesDir, navTimeoutMs: 10_000 });
+    try {
+      await withFixtureServer(async url => {
+        const opened = await openFixture(sidecar, 'owner-1', url);
+        const ref = refFor(opened.text, 'Continue');
+        // No `approved` flag: the classifier found no commit word on "Continue", so the host
+        // dispatches this click right away, exactly as it would any other Tier 1 click.
+        const clicked = await sidecar.click({ owner: 'owner-1', ref });
+        assert.equal(clicked.status, 'needs_approval');
+        assert.equal(clicked.accessible_name, 'Continue');
+        assert.ok(clicked.png_base64, 'a screenshot is returned with the hold');
+      }, DISGUISED_FIXTURE_HTML);
+    } finally {
+      await sidecar.close();
+      await rm(profilesDir, { recursive: true, force: true });
+    }
+  },
+);
+
+test('an approved click is trusted outright: the gate is not run', { skip: !browsersAvailable }, async () => {
+  const profilesDir = await mkdtemp(path.join(tmpdir(), 'browser-sidecar-'));
+  const sidecar = new BrowserSidecar({ profilesDir, navTimeoutMs: 10_000 });
+  try {
+    await withFixtureServer(async url => {
+      const opened = await openFixture(sidecar, 'owner-1', url);
+      const ref = refFor(opened.text, 'Continue');
+      const clicked = await sidecar.click({ owner: 'owner-1', ref, approved: true });
+      assert.equal(clicked.status, 'ok');
+    }, DISGUISED_FIXTURE_HTML);
+  } finally {
+    await sidecar.close();
+    await rm(profilesDir, { recursive: true, force: true });
+  }
+});
+
+test('a third-party request during a click is allowed, not blocked', { skip: !browsersAvailable }, async () => {
+  const profilesDir = await mkdtemp(path.join(tmpdir(), 'browser-sidecar-'));
+  const sidecar = new BrowserSidecar({ profilesDir, navTimeoutMs: 10_000 });
+  // Two different hostnames on loopback (127.0.0.1 and localhost) stand in for the page's own site
+  // and a third-party analytics host: different enough for the gate's same-site check, reachable
+  // without any real network or DNS setup.
+  let beaconReached = false;
+  const beaconServer = createServer((_req, res) => {
+    beaconReached = true;
+    res.writeHead(200).end();
+  });
+  try {
+    await new Promise(resolve => beaconServer.listen(0, 'localhost', resolve));
+    const { port: beaconPort } = beaconServer.address();
+    const html = `<!doctype html>
+<html><body>
+  <h1>Article</h1>
+  <button type="button" id="share-button" onclick="fetch('http://localhost:${String(beaconPort)}/beacon', { method: 'POST' }).catch(() => {})">Share</button>
+</body></html>`;
+    await withFixtureServer(async url => {
+      const opened = await openFixture(sidecar, 'owner-1', url);
+      const ref = refFor(opened.text, 'Share');
+      const clicked = await sidecar.click({ owner: 'owner-1', ref });
+      // The beacon's host (localhost) differs from the page's own site (127.0.0.1): never gated.
+      assert.equal(clicked.status, 'ok');
+      assert.equal(beaconReached, true);
+    }, html);
+  } finally {
+    beaconServer.close();
     await sidecar.close();
     await rm(profilesDir, { recursive: true, force: true });
   }

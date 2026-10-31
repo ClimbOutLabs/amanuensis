@@ -14,6 +14,8 @@ if (process.argv[1] !== undefined && fileURLToPath(import.meta.url) === process.
   const sidecar = new BrowserSidecar({
     profilesDir: process.env.BROWSER_PROFILES_DIR ?? DEFAULT_PROFILES_DIR,
     navTimeoutMs: Number(process.env.BROWSER_NAV_TIMEOUT_MS ?? DEFAULT_NAV_TIMEOUT_MS),
+    // The gate's own log line only: never the page's content, never a login.
+    log: message => process.stdout.write(`${message}\n`),
   });
   const server = createHttpServer({ sidecar, secret });
   server.listen(Number(process.env.BROWSER_PORT ?? DEFAULT_PORT), '0.0.0.0');
