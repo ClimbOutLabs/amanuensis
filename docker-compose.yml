@@ -67,12 +67,12 @@ services:
     extra_hosts:
       - 'host.docker.internal:host-gateway'
     # The calendar network is shared with the calendar connector only (see calendar-caldav); the
-    # browser network, with the browser sidecar only (see browser). Harmless when the `browser`
-    # profile does not run: an unused Compose network costs nothing.
+    # browser-control network, with the browser gateway only (see browser-gateway), never with the
+    # browser itself. Harmless when the `browser` profile does not run: an unused network costs nothing.
     networks:
       - default
       - calendar
-      - browser
+      - browser-control
     restart: unless-stopped
 
   # Serves both the API and the UI on one port.
@@ -279,26 +279,75 @@ services:
 
   # Aman's own browser (ops/browser-sidecar): a real, headed Chromium under Xvfb. Off unless the
   # `browser` profile runs, since it is a separate browser with its own logins that a person opts
-  # into, not something every install needs. Private: `expose` only, never `ports`, on its own
-  # network shared with `loopback` only. The server reaches it as http://browser:8792.
+  # into, not something every install needs.
+  #
+  # It reads hostile pages, so it is walled off: its only network is `browser-internal`, which is
+  # internal (no route out) and holds nothing but `browser-gateway`. Every request Chromium makes
+  # goes through the gateway's egress proxy, which refuses anything on this computer or a private
+  # network, and the app server reaches the sidecar's API only through the gateway's relay. Nothing
+  # of Aman's (the server, sign-in, the calendar, the host) is on a network the browser is on.
   browser:
     build:
       context: ./ops/browser-sidecar
     profiles: ['browser']
+    # xvfb-run waits for a signal from Xvfb that never arrives when it runs as PID 1, so a small init
+    # runs first.
+    init: true
     environment:
       # Guards the sidecar's whole HTTP API; the same value goes to the server as BROWSER_SECRET.
       # There is no default: set a random one in packages/trueforge/.env (openssl rand -hex 32).
+      # The sidecar keeps it out of Chromium's environment.
       BROWSER_SECRET: ${BROWSER_SECRET:?set BROWSER_SECRET to a random value of 32 or more characters, for example from openssl rand -hex 32}
+      BROWSER_PROXY: http://browser-gateway:3128
     networks:
-      - browser
+      - browser-internal
     volumes:
       # One persistent Chromium profile per person (cookies, saved logins) under /profiles/<owner
       # hash>. Treated as sensitive: nothing but this sidecar reads it.
       - browser-profiles:/profiles
     expose:
       - '8792'
+    # Chromium runs with its own sandbox on. It needs user namespaces, which Docker's default
+    # seccomp profile refuses; this is Playwright's profile for exactly that (Docker's default plus
+    # the namespace calls). No capabilities, no privilege gain, a read-only root.
+    security_opt:
+      - no-new-privileges:true
+      - seccomp=./ops/browser-sidecar/seccomp_profile.json
+    cap_drop: [ALL]
+    read_only: true
+    tmpfs:
+      - /tmp:size=256m
+      - /home/pwuser:size=256m,uid=1001,gid=1001
+    shm_size: 512m
+    pids_limit: 512
     # Chromium's own memory footprint, headed, on top of the virtual screen.
     mem_limit: 2g
+    restart: unless-stopped
+
+  # The browser's only way out, and the server's only way in (ops/browser-sidecar/src/egressProxy.mjs).
+  # An egress proxy on 3128 that resolves each request's host once, refuses private addresses, and
+  # connects to the address it checked; and a relay on 8792 that passes the server's calls through
+  # to the sidecar's API. The server reaches the browser as http://browser-gateway:8792.
+  browser-gateway:
+    build:
+      context: ./ops/browser-sidecar
+      dockerfile: Dockerfile.gateway
+    profiles: ['browser']
+    environment:
+      BROWSER_SIDECAR_HOST: browser
+    networks:
+      - browser-internal
+      - browser-control
+      - browser-egress
+    expose:
+      - '3128'
+      - '8792'
+    security_opt:
+      - no-new-privileges:true
+    cap_drop: [ALL]
+    read_only: true
+    pids_limit: 128
+    mem_limit: 256m
     restart: unless-stopped
 
   # Schedule controller: runs the periodic control loops (schedule dispatch) as a separate service.
@@ -380,8 +429,14 @@ networks:
   # Between the app's `loopback` and the calendar connector only. Not internal: the connector reaches the calendar
   # server on the internet.
   calendar: {}
-  # Between the app's `loopback` and the browser sidecar only. Not internal: the browser reaches the open internet.
-  browser: {}
+  # The browser and its gateway only. Internal: no route out, so the browser can reach nothing but the gateway.
+  browser-internal:
+    internal: true
+  # The app's `loopback` and the browser gateway only, for the server's calls to the sidecar's API.
+  browser-control:
+    internal: true
+  # The gateway's own way out to the internet. Nothing else is on it.
+  browser-egress: {}
 
 volumes:
   dex-tls:

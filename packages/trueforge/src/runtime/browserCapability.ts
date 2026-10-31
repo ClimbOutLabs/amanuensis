@@ -88,22 +88,34 @@ interface ReadBody {
   text: string;
 }
 
+/** The tab is on a site other than the one opened, so the sidecar returned nothing of it. */
+interface MovedBody {
+  status: 'moved';
+  url: string;
+}
+
 interface OpenBody {
   status: 'ok' | 'refused';
   text?: string;
   reason?: string;
 }
 
-interface ScreenshotBody {
-  status: 'ok';
-  png_base64: string;
+type ScreenshotBody = { status: 'ok'; png_base64: string } | MovedBody;
+
+/**
+ * The page left the site that was opened (a redirect, or going back). Its content is not shown: reading
+ * it is a new `browser_open` of that address, which is classified like any other open.
+ */
+function movedMessage(url: unknown): string {
+  const shown = typeof url === 'string' && url !== '' ? url : 'another site';
+  return `The page went to ${shown}, a different site from the one that was opened, so it was not read. To read it, open that address with browser_open.`;
 }
 
 function readResult({
   result,
   logger,
 }: {
-  result: SidecarResult<ReadBody | OpenBody>;
+  result: SidecarResult<ReadBody | OpenBody | MovedBody>;
   logger: Logger;
 }): ReturnType<typeof toolResultResponse> {
   if (!result.ok) {
@@ -113,6 +125,12 @@ function readResult({
   if (result.body.status === 'refused') {
     return toolResultResponse({
       text: JSON.stringify({ status: 'error', message: refusalMessage(result.body.reason) }),
+      isError: true,
+    });
+  }
+  if (result.body.status === 'moved') {
+    return toolResultResponse({
+      text: JSON.stringify({ status: 'error', message: movedMessage(result.body.url) }),
       isError: true,
     });
   }
@@ -141,7 +159,11 @@ class BrowserTool extends LocalToolMCP {
       schema: OPEN_INPUT_SCHEMA,
       handler: async (input: BrowserOpenInput) =>
         readResult({
-          result: await callBrowserSidecar<OpenBody>({ path: '/open', owner: this.owner, body: { url: input.url } }),
+          result: await callBrowserSidecar<OpenBody | MovedBody>({
+            path: '/open',
+            owner: this.owner,
+            body: { url: input.url },
+          }),
           logger: this.logger,
         }),
     }),
@@ -153,7 +175,7 @@ class BrowserTool extends LocalToolMCP {
       schema: EMPTY_INPUT_SCHEMA,
       handler: async () =>
         readResult({
-          result: await callBrowserSidecar<ReadBody>({ path: '/read', owner: this.owner }),
+          result: await callBrowserSidecar<ReadBody | MovedBody>({ path: '/read', owner: this.owner }),
           logger: this.logger,
         }),
     }),
@@ -164,7 +186,7 @@ class BrowserTool extends LocalToolMCP {
       schema: SCROLL_INPUT_SCHEMA,
       handler: async (input: BrowserScrollInput) =>
         readResult({
-          result: await callBrowserSidecar<ReadBody>({ path: '/scroll', owner: this.owner, body: input }),
+          result: await callBrowserSidecar<ReadBody | MovedBody>({ path: '/scroll', owner: this.owner, body: input }),
           logger: this.logger,
         }),
     }),
@@ -175,7 +197,7 @@ class BrowserTool extends LocalToolMCP {
       schema: EMPTY_INPUT_SCHEMA,
       handler: async () =>
         readResult({
-          result: await callBrowserSidecar<ReadBody>({ path: '/back', owner: this.owner }),
+          result: await callBrowserSidecar<ReadBody | MovedBody>({ path: '/back', owner: this.owner }),
           logger: this.logger,
         }),
     }),
@@ -191,6 +213,12 @@ class BrowserTool extends LocalToolMCP {
           this.logger.warn('browser sidecar call failed', { message: result.message });
           return toolResultResponse({
             text: JSON.stringify({ status: 'error', message: result.message }),
+            isError: true,
+          });
+        }
+        if (result.body.status === 'moved') {
+          return toolResultResponse({
+            text: JSON.stringify({ status: 'error', message: movedMessage(result.body.url) }),
             isError: true,
           });
         }

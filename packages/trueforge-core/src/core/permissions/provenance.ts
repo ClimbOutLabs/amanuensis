@@ -566,6 +566,18 @@ export function isTrustedLink(input: { provenance: ChatProvenance; url: string }
   return key !== undefined && input.provenance.trusted.urls.has(key);
 }
 
+/**
+ * Whether the person vouched for a link: they gave it (or a search returned it) exactly, or it names only a site, with
+ * no path or query, that the person named. Such a link carries nothing but what the person already chose.
+ */
+export function isPersonVouchedUrl(input: { provenance: ChatProvenance; url: string }): boolean {
+  if (isTrustedLink(input)) {
+    return true;
+  }
+  const host = parsedUrl(input.url)?.hostname;
+  return host !== undefined && isBareSite(input.url) && input.provenance.trusted.hosts.has(hostKey(host));
+}
+
 /** Whether a picture may be shown: a trusted link, or exactly a picture an opened page or a search result listed. */
 export function isTrustedPicture(input: { provenance: ChatProvenance; url: string }): boolean {
   const key = urlKey(input.url);

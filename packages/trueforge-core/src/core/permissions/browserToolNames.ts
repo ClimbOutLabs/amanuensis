@@ -22,6 +22,21 @@ export type BrowserToolName = (typeof BROWSER_TOOL_NAMES)[number];
 /** Reason code for a browser call that reads or moves around without asking (explore, tier 1). */
 export const BROWSER_EXPLORE_REASON = 'browser_explore';
 
+/** Reason code for a page the browser opened without asking: it passed every outbound check (tier 1). */
+export const BROWSER_OPEN_SILENT_REASON = 'browser_open';
+
+/**
+ * Reason code for an open that asks because the chat has read other people's content and the person never gave the
+ * address: the address itself is sent to the site, so whatever the assistant put in it leaves with the request.
+ */
+export const BROWSER_OPEN_UNVOUCHED_REASON = 'browser_open_unvouched';
+
+/** Reason code for an open that asks because its address carries a private detail, in a chat that read other content. */
+export const BROWSER_OPEN_PRIVATE_DETAIL_REASON = 'browser_open_private_detail';
+
+/** Reason code for an open that asks because the outbound guard or the person's search setting holds it. */
+export const BROWSER_OPEN_GUARD_REASON = 'browser_open_guard';
+
 export function isBrowserToolName(tool_name: string): tool_name is BrowserToolName {
   return BROWSER_TOOL_NAMES.some(name => name === tool_name);
 }

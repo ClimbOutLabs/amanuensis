@@ -7,15 +7,23 @@ export const DEFAULT_NAV_TIMEOUT_MS = 30_000;
 
 if (process.argv[1] !== undefined && fileURLToPath(import.meta.url) === process.argv[1]) {
   const secret = process.env.BROWSER_SECRET;
-  if (secret === undefined || secret === '') {
-    process.stderr.write('browser sidecar: BROWSER_SECRET is not set, refusing to start\n');
+  // Read once, then dropped from this process's environment so nothing it starts inherits it.
+  delete process.env.BROWSER_SECRET;
+  let server;
+  let sidecar;
+  try {
+    sidecar = new BrowserSidecar({
+      profilesDir: process.env.BROWSER_PROFILES_DIR ?? DEFAULT_PROFILES_DIR,
+      navTimeoutMs: Number(process.env.BROWSER_NAV_TIMEOUT_MS ?? DEFAULT_NAV_TIMEOUT_MS),
+      proxyServer: process.env.BROWSER_PROXY,
+    });
+    server = createHttpServer({ sidecar, secret });
+  } catch (error) {
+    process.stderr.write(
+      `browser sidecar: ${error instanceof Error ? error.message : String(error)}, refusing to start\n`,
+    );
     process.exit(1);
   }
-  const sidecar = new BrowserSidecar({
-    profilesDir: process.env.BROWSER_PROFILES_DIR ?? DEFAULT_PROFILES_DIR,
-    navTimeoutMs: Number(process.env.BROWSER_NAV_TIMEOUT_MS ?? DEFAULT_NAV_TIMEOUT_MS),
-  });
-  const server = createHttpServer({ sidecar, secret });
   server.listen(Number(process.env.BROWSER_PORT ?? DEFAULT_PORT), '0.0.0.0');
   const shutdown = () => {
     server.close();

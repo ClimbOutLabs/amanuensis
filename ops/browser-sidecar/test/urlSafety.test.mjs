@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { safeNavigationTarget, syntacticallySafeUrl } from '../src/urlSafety.mjs';
+import { isPrivateAddress, safeNavigationTarget, syntacticallySafeUrl } from '../src/urlSafety.mjs';
 
 test('allows an ordinary https address', () => {
   assert.deepEqual(syntacticallySafeUrl('https://hulu.com/account/cancel').ok, true);
@@ -52,4 +52,46 @@ test('safeNavigationTarget refuses a name that cannot be resolved', async () => 
     },
   });
   assert.deepEqual(result, { ok: false, reason: 'unresolved' });
+});
+
+test('treats IPv4-mapped, tunnel and bracketed IPv6 forms as private', () => {
+  for (const address of [
+    '::ffff:127.0.0.1',
+    '::ffff:7f00:1',
+    '::ffff:10.0.0.1',
+    '::7f00:1',
+    '[::1]',
+    '2002:c0a8:0101::1',
+    '2001:0:4136:e378::1',
+    'fe80::1',
+    'fd00::1',
+  ]) {
+    assert.equal(isPrivateAddress(address), true, address);
+  }
+});
+
+test('treats ordinary public addresses as public', () => {
+  for (const address of ['93.184.216.34', '1.1.1.1', '2606:4700:4700::1111']) {
+    assert.equal(isPrivateAddress(address), false, address);
+  }
+});
+
+test('treats anything that is not an address as private', () => {
+  assert.equal(isPrivateAddress('example.com'), true);
+  assert.equal(isPrivateAddress(''), true);
+});
+
+test('refuses an IPv6 literal for loopback in a URL', () => {
+  assert.deepEqual(syntacticallySafeUrl('http://[::1]:8790/'), { ok: false, reason: 'private_network' });
+  assert.deepEqual(syntacticallySafeUrl('http://[::ffff:127.0.0.1]/'), { ok: false, reason: 'private_network' });
+});
+
+test('safeNavigationTarget refuses a name that resolves to a mapped loopback address', async () => {
+  const result = await safeNavigationTarget('https://mapped.example/', { resolve: async () => ['::ffff:127.0.0.1'] });
+  assert.deepEqual(result, { ok: false, reason: 'private_network' });
+});
+
+test('safeNavigationTarget refuses localhost written with a trailing dot', async () => {
+  const result = await safeNavigationTarget('http://localhost./', { resolve: async () => ['93.184.216.34'] });
+  assert.deepEqual(result, { ok: false, reason: 'private_network' });
 });

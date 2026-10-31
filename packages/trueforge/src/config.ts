@@ -387,7 +387,7 @@ export function parseCalendarAccountSecret(raw: string | undefined): string | un
 
 /**
  * Parses `BROWSER_URL`: the browser sidecar's private HTTP address, such as the compose sidecar's
- * `http://browser:8792`. Unset or blank means no browser sidecar is configured. Anything else that is not
+ * `http://browser-gateway:8792`. Unset or blank means no browser sidecar is configured. Anything else that is not
  * an http(s) URL fails the boot.
  */
 export function parseBrowserUrl(raw: string | undefined): string | undefined {
@@ -396,7 +396,7 @@ export function parseBrowserUrl(raw: string | undefined): string | undefined {
   }
   const trimmed = raw.trim();
   if (normalizedOrigin(trimmed) === undefined) {
-    throw new Error(`BROWSER_URL must be an http(s) URL such as http://browser:8792, got: ${trimmed}`);
+    throw new Error(`BROWSER_URL must be an http(s) URL such as http://browser-gateway:8792, got: ${trimmed}`);
   }
   return trimmed;
 }
@@ -1295,7 +1295,7 @@ export interface SharedServerConfiguration {
    */
   BROWSER_ENABLED: boolean;
   /**
-   * The browser sidecar's private HTTP address, such as the compose sidecar's `http://browser:8792`.
+   * The browser sidecar's private HTTP address, such as the compose sidecar's `http://browser-gateway:8792`.
    * Required when BROWSER_ENABLED is true. Env: `BROWSER_URL`. Default unset.
    */
   BROWSER_URL: string | undefined;

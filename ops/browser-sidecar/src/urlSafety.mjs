@@ -29,22 +29,79 @@ const BLOCKED_V6 = new BlockList();
 for (const [network, prefix] of [
   ['::', 128],
   ['::1', 128],
+  // IPv4-mapped and IPv4-compatible forms carry an IPv4 address; they are checked as that address
+  // below, and refused outright here as a backstop.
+  ['::ffff:0:0', 96],
+  ['::', 96],
   ['64:ff9b::', 96],
+  ['64:ff9b:1::', 48],
   ['100::', 64],
+  // Teredo and 6to4 tunnel to an IPv4 address the prefix embeds, which may be a private one.
+  ['2001::', 32],
+  ['2001:db8::', 32],
+  ['2002::', 16],
   ['fc00::', 7],
   ['fe80::', 10],
+  ['fec0::', 10],
   ['ff00::', 8],
 ]) {
   BLOCKED_V6.addSubnet(network, prefix, 'ipv6');
 }
 
-/** True for an address on this computer or a private network: loopback, link-local, RFC 1918, etc. */
-export function isPrivateAddress(address) {
+/** An IPv6 literal as `URL.hostname` spells it, `[::1]`, without its brackets. */
+export function unbracketed(host) {
+  return host.startsWith('[') && host.endsWith(']') ? host.slice(1, -1) : host;
+}
+
+/**
+ * True for anything that is not a plain public address: loopback, link-local, RFC 1918, carrier NAT,
+ * multicast, tunnel and translation prefixes, and anything that is not an IP address at all. Fails
+ * closed: a value this cannot read as an address is treated as private.
+ */
+export function isPrivateAddress(raw) {
+  const address = unbracketed(String(raw)).toLowerCase();
   const family = isIP(address);
   if (family === 0) {
-    return false;
+    return true;
   }
-  return family === 6 ? BLOCKED_V6.check(address, 'ipv6') : BLOCKED_V4.check(address, 'ipv4');
+  if (family === 4) {
+    return BLOCKED_V4.check(address, 'ipv4');
+  }
+  return BLOCKED_V6.check(address, 'ipv6');
+}
+
+/**
+ * Every address a name resolves to, or the reason it may not be reached: a name that resolves
+ * nowhere, or anywhere private, is refused as a whole. The egress proxy dials one of the returned
+ * addresses itself, so what was checked is what is reached (no second lookup to rebind).
+ */
+export async function resolvePublic(host, deps = {}) {
+  const bare = unbracketed(host);
+  if (isIP(bare) !== 0) {
+    return isPrivateAddress(bare) ? { ok: false, reason: 'private_network' } : { ok: true, addresses: [bare] };
+  }
+  const name = bare.toLowerCase().replace(/\.$/, '');
+  if (LOOPBACK_NAMES.has(name) || name.endsWith('.localhost')) {
+    return { ok: false, reason: 'private_network' };
+  }
+  const resolve = deps.resolve ?? defaultResolve;
+  let addresses;
+  try {
+    addresses = await resolve(name);
+  } catch {
+    return { ok: false, reason: 'unresolved' };
+  }
+  if (addresses.length === 0) {
+    return { ok: false, reason: 'unresolved' };
+  }
+  if (addresses.some(isPrivateAddress)) {
+    return { ok: false, reason: 'private_network' };
+  }
+  return { ok: true, addresses };
+}
+
+async function defaultResolve(name) {
+  return (await dnsLookup(name, { all: true, verbatim: true })).map(entry => entry.address);
 }
 
 /** The scheme and host a navigation target must satisfy before anything is resolved or fetched. */
@@ -58,7 +115,7 @@ export function syntacticallySafeUrl(raw) {
   if (url.protocol !== 'http:' && url.protocol !== 'https:') {
     return { ok: false, reason: 'scheme' };
   }
-  const host = url.hostname.toLowerCase();
+  const host = unbracketed(url.hostname.toLowerCase()).replace(/\.$/, '');
   if (LOOPBACK_NAMES.has(host) || host.endsWith('.localhost')) {
     return { ok: false, reason: 'private_network' };
   }
@@ -69,29 +126,15 @@ export function syntacticallySafeUrl(raw) {
 }
 
 /**
- * Whether a URL may be navigated to: the right scheme, a host that is not itself a private address,
- * and (when it is a name) addresses that do not resolve into one either. A name that cannot be looked
- * up at all is refused, the same as one that resolves somewhere private: a browser that cannot tell
- * where a page goes must not be pointed at it.
+ * Whether a URL may be navigated to: the right scheme, and a host that neither is nor resolves to a
+ * private address. This is the early, readable refusal for the model; the egress proxy enforces the
+ * same rule on every request the browser makes, including redirects and the page's own requests.
  */
 export async function safeNavigationTarget(raw, deps = {}) {
   const syntactic = syntacticallySafeUrl(raw);
   if (!syntactic.ok) {
     return syntactic;
   }
-  const { url } = syntactic;
-  if (isIP(url.hostname) !== 0) {
-    return { ok: true, url };
-  }
-  const resolve = deps.resolve ?? (async name => (await dnsLookup(name, { all: true })).map(entry => entry.address));
-  let addresses;
-  try {
-    addresses = await resolve(url.hostname);
-  } catch {
-    return { ok: false, reason: 'unresolved' };
-  }
-  if (addresses.length === 0 || addresses.some(isPrivateAddress)) {
-    return { ok: false, reason: 'private_network' };
-  }
-  return { ok: true, url };
+  const resolved = await resolvePublic(syntactic.url.hostname, deps);
+  return resolved.ok ? { ok: true, url: syntactic.url } : resolved;
 }
