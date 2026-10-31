@@ -60,12 +60,66 @@ const THINKING_CHUNK_INTERVAL_MS = 50;
  */
 export const JUDGE_REJECT_MARKER = 'judge_reject';
 const RELEVANCE_JUDGE_TAG = '<knowledge-relevance-judge';
+/** Runs `RESEARCH_SEARCHES` web searches, then reads `RESEARCH_FETCHES` of the pages they returned, then answers. */
+export const RESEARCH_DIRECTIVE = 'research';
+export const RESEARCH_SEARCHES = 7;
+export const RESEARCH_FETCHES = 2;
+/**
+ * Searches the web; whatever the search answers, even a "no", it rewords the query and searches
+ * again, three times, then answers. Built to show what the searches after a "no" look like.
+ */
+export const SEARCH_AGAIN_DIRECTIVE = 'search_again';
+export const SEARCH_AGAIN_QUERIES = [
+  'Lantern Row bakery opening hours',
+  'Lantern Row bakery hours today',
+  'when does the bakery on Lantern Row open',
+  'Lantern Row bakery Saturday hours',
+] as const;
+/** Text streamed as hidden reasoning while `ModelPacing.reasoningMs` runs. */
+export const REASONING_TEXT = 'Thinking it through. ';
+
+/** How slowly streamed replies arrive, like a self-hosted model on modest hardware. */
+export interface ModelPacing {
+  /** Wait before the first streamed byte. */
+  firstTokenMs: number;
+  /** Hidden reasoning streamed after the first byte and before the answer or tool call; 0 for none. */
+  reasoningMs: number;
+  /** Wait between streamed words of the answer. */
+  wordDelayMs: number;
+}
+
+/** One tool call a planned reply makes: the advertised tool whose name contains `match`, with these arguments. */
+export interface PlannedToolCall {
+  match: string;
+  argumentsJson: string;
+}
+
+/**
+ * Plans a reply to a message that carries no directive, the way a real model would choose its calls: given the
+ * person's latest message and the text of each tool result since, the next call, or undefined to answer.
+ */
+export type ReplyPlanner = (input: { message: string; toolResults: string[] }) => PlannedToolCall | undefined;
+
+/** One chat-completion request and how its response ended. */
+export interface ModelCall {
+  request: ChatCompletionRequest;
+  /** `aborted` means the caller hung up before the response was complete. */
+  outcome: () => 'open' | 'finished' | 'aborted';
+}
 
 export interface ScriptedModelServer {
   /** Value for a `custom` model provider `base_url`. */
   baseUrl: string;
   /** Chat-completion requests served so far, oldest first. */
   requests: () => readonly ChatCompletionRequest[];
+  /** The same requests with how each one ended, oldest first. */
+  calls: () => readonly ModelCall[];
+  /** Paces every later streamed reply; `undefined` answers at once again. */
+  setPacing: (pacing: ModelPacing | undefined) => void;
+  /** Plans replies to messages with no directive; `undefined` answers them with text again. */
+  setPlanner: (planner: ReplyPlanner | undefined) => void;
+  /** Cuts every open response, as a server whose process died would. */
+  hangUpAll: () => void;
   /** Thinking streams still open: a cancelled turn must hang up every one of them. */
   openThinkingStreams: () => number;
   close: () => Promise<void>;
@@ -286,6 +340,59 @@ function briefSteps(messages: ChatMessage[]): { match: string; argumentsJson: st
   ];
 }
 
+/** The person's latest message and the text of every tool result after it. */
+function latestExchange(messages: ChatMessage[]): { message: string; toolResults: string[] } {
+  let message = '';
+  let toolResults: string[] = [];
+  for (const entry of messages) {
+    if (entry.role === 'user') {
+      message = personText(entry.content);
+      toolResults = [];
+    } else if (entry.role === 'tool') {
+      toolResults.push(messageText(entry.content));
+    }
+  }
+  return { message, toolResults };
+}
+
+/** Page links the search results in this conversation returned, in order, without repeats. */
+function resultUrls(messages: ChatMessage[]): string[] {
+  const urls: string[] = [];
+  for (const message of messages) {
+    if (message.role !== 'tool') {
+      continue;
+    }
+    for (const match of messageText(message.content).matchAll(/https?:\/\/[^\s"'<>)\]]+/g)) {
+      if (!urls.includes(match[0])) {
+        urls.push(match[0]);
+      }
+    }
+  }
+  return urls;
+}
+
+/** The search provider's own argument shape: an objective plus the queries to run. */
+export function webSearchArgumentsJson(query: string): string {
+  return JSON.stringify({ objective: `Find out: ${query}`, search_queries: [query] });
+}
+
+function researchStep(
+  messages: ChatMessage[],
+  toolResults: number,
+): { match: string; argumentsJson: string } | undefined {
+  if (toolResults < RESEARCH_SEARCHES) {
+    return {
+      match: 'web_search',
+      argumentsJson: webSearchArgumentsJson(`Lantern Row history part ${String(toolResults + 1)}`),
+    };
+  }
+  const url = resultUrls(messages)[toolResults - RESEARCH_SEARCHES];
+  if (toolResults >= RESEARCH_SEARCHES + RESEARCH_FETCHES || url === undefined) {
+    return undefined;
+  }
+  return { match: 'web_fetch', argumentsJson: JSON.stringify({ urls: [url], objective: 'Read the page' }) };
+}
+
 function sandboxArgumentsJson(purpose: 'verify' | 'commit'): string {
   return JSON.stringify({
     intent: purpose === 'verify' ? 'Verify the repository before committing' : 'Commit the verified repository state',
@@ -315,6 +422,28 @@ function directiveProgress(messages: ChatMessage[]): { directive: string | undef
 }
 
 const USAGE = { prompt_tokens: 12, completion_tokens: 4, total_tokens: 16 };
+
+/** Waits `ms`, or less when the caller hangs up first; true when the full wait passed. */
+function waitUnlessHungUp({ ms, res }: { ms: number; res: ServerResponse }): Promise<boolean> {
+  return new Promise(resolve => {
+    if (res.destroyed) {
+      resolve(false);
+      return;
+    }
+    const onClose = () => {
+      clearTimeout(timer);
+      resolve(false);
+    };
+    const timer = setTimeout(() => {
+      res.off('close', onClose);
+      resolve(true);
+    }, ms);
+    res.once('close', onClose);
+  });
+}
+
+/** How often a paced reply sends a piece of hidden reasoning. */
+const REASONING_TICK_MS = 500;
 
 function chunkEnvelope(choice: Record<string, unknown>, usage?: typeof USAGE): Record<string, unknown> {
   return {
@@ -388,10 +517,55 @@ function completionBody({ text, toolCalls }: { text: string | null; toolCalls: S
   };
 }
 
+/** Streams one reply slowly: a wait, hidden reasoning, then the tool call or the answer word by word. */
+async function streamPaced({
+  res,
+  pacing,
+  toolCalls,
+  replyText,
+}: {
+  res: ServerResponse;
+  pacing: ModelPacing;
+  toolCalls: ScriptedToolCall[];
+  replyText: string;
+}): Promise<void> {
+  const send = (chunk: Record<string, unknown>) => res.write(`data: ${JSON.stringify(chunk)}\n\n`);
+  if (!(await waitUnlessHungUp({ ms: pacing.firstTokenMs, res }))) {
+    return;
+  }
+  send(chunkEnvelope({ index: 0, delta: { role: 'assistant', content: '' }, finish_reason: null }));
+  for (let thought = 0; thought < pacing.reasoningMs; thought += REASONING_TICK_MS) {
+    send(chunkEnvelope({ index: 0, delta: { reasoning_content: REASONING_TEXT }, finish_reason: null }));
+    if (!(await waitUnlessHungUp({ ms: Math.min(REASONING_TICK_MS, pacing.reasoningMs - thought), res }))) {
+      return;
+    }
+  }
+  if (toolCalls.length > 0) {
+    // The opening role chunk was already sent above.
+    for (const chunk of toolCallChunks(toolCalls).slice(1)) {
+      send(chunk);
+    }
+  } else {
+    for (const word of replyText.split(/(?<= )/)) {
+      send(chunkEnvelope({ index: 0, delta: { content: word }, finish_reason: null }));
+      if (!(await waitUnlessHungUp({ ms: pacing.wordDelayMs, res }))) {
+        return;
+      }
+    }
+    send(chunkEnvelope({ index: 0, delta: {}, finish_reason: 'stop' }, USAGE));
+  }
+  res.write('data: [DONE]\n\n');
+  res.end();
+}
+
 export async function startScriptedModelServer(): Promise<ScriptedModelServer> {
   const requests: ChatCompletionRequest[] = [];
   // Stalled streams stay open until the caller hangs up or the fixture closes.
   const stalled = new Set<ServerResponse>();
+  const open = new Set<ServerResponse>();
+  const calls: ModelCall[] = [];
+  let pacing: ModelPacing | undefined;
+  let planner: ReplyPlanner | undefined;
   const thinking = new Set<ServerResponse>();
   let callCounter = 0;
 
@@ -411,6 +585,13 @@ export async function startScriptedModelServer(): Promise<ScriptedModelServer> {
       chatTemplateKwargs: isRecord(body) ? body['chat_template_kwargs'] : undefined,
     };
     requests.push(parsed);
+    let outcome: 'open' | 'finished' | 'aborted' = 'open';
+    calls.push({ request: parsed, outcome: () => outcome });
+    open.add(res);
+    res.on('close', () => {
+      open.delete(res);
+      outcome = res.writableFinished ? 'finished' : 'aborted';
+    });
 
     const progress = directiveProgress(parsed.messages);
     const pending = pendingDirective(parsed.messages);
@@ -441,8 +622,16 @@ export async function startScriptedModelServer(): Promise<ScriptedModelServer> {
       requestedTool = { match: 'inert_write', argumentsJson: '{"text":"inert"}' };
     } else if (progress.directive === BRIEF_DIRECTIVE) {
       requestedTool = briefSteps(parsed.messages)[progress.toolResults];
+    } else if (progress.directive === RESEARCH_DIRECTIVE) {
+      requestedTool = researchStep(parsed.messages, progress.toolResults);
+    } else if (progress.directive === SEARCH_AGAIN_DIRECTIVE) {
+      const query = SEARCH_AGAIN_QUERIES[progress.toolResults];
+      requestedTool =
+        query === undefined ? undefined : { match: 'web_search', argumentsJson: webSearchArgumentsJson(query) };
     } else if (pending !== undefined) {
       requestedTool = { match: pending, argumentsJson: '' };
+    } else if (progress.directive === undefined && planner !== undefined && parsed.tools.length > 0) {
+      requestedTool = planner(latestExchange(parsed.messages));
     }
     const toolName =
       requestedTool === undefined
@@ -532,12 +721,17 @@ export async function startScriptedModelServer(): Promise<ScriptedModelServer> {
       });
       return;
     }
-    const chunks = toolCalls.length > 0 ? toolCallChunks(toolCalls) : textChunks(replyText);
-    for (const chunk of chunks) {
-      res.write(`data: ${JSON.stringify(chunk)}\n\n`);
+    const paced = pacing;
+    if (paced === undefined) {
+      const chunks = toolCalls.length > 0 ? toolCallChunks(toolCalls) : textChunks(replyText);
+      for (const chunk of chunks) {
+        res.write(`data: ${JSON.stringify(chunk)}\n\n`);
+      }
+      res.write('data: [DONE]\n\n');
+      res.end();
+      return;
     }
-    res.write('data: [DONE]\n\n');
-    res.end();
+    await streamPaced({ res, pacing: paced, toolCalls, replyText });
   }
 
   const httpServer: Server = createServer((req, res) => {
@@ -564,10 +758,22 @@ export async function startScriptedModelServer(): Promise<ScriptedModelServer> {
   return {
     baseUrl: `http://127.0.0.1:${String(address.port)}/v1`,
     requests: () => requests,
+    calls: () => calls,
+    setPacing: next => {
+      pacing = next;
+    },
+    setPlanner: next => {
+      planner = next;
+    },
+    hangUpAll: () => {
+      for (const res of open) {
+        res.destroy();
+      }
+    },
     openThinkingStreams: () => thinking.size,
     close: () =>
       new Promise<void>((resolve, reject) => {
-        for (const res of [...stalled, ...thinking]) {
+        for (const res of [...stalled, ...thinking, ...open]) {
           res.destroy();
         }
         httpServer.closeAllConnections();

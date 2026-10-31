@@ -21,7 +21,8 @@
     "typecheck": "pnpm run typecheck:only",
     "typecheck:only": "tsc --noEmit",
     "pretest": "pnpm run ui:build",
-    "test": "cross-env NODE_OPTIONS=--conditions=trueforge-dev tsx --test \"tests/**/*.test.ts\""
+    "test": "cross-env NODE_OPTIONS=--conditions=trueforge-dev tsx --test \"tests/**/*.test.ts\"",
+    "journey:slow": "cross-env NODE_OPTIONS=--conditions=trueforge-dev tsx --test tests/slowModelJourney.journey.ts"
   },
   "dependencies": {
     "@assistant-ui/core": "0.2.22",

@@ -13,6 +13,9 @@ export function findChromiumExecutable(bundledPath: string): string {
   add(process.env['CHROME_PATH']);
   add(process.env['EDGE_PATH']);
   add(bundledPath);
+  // A shared browser directory may hold a browser for another Playwright release under a plain name.
+  const browsersPath = process.env['PLAYWRIGHT_BROWSERS_PATH'];
+  if (browsersPath != null && browsersPath.length > 0) add(join(browsersPath, 'chromium'));
 
   if (process.platform === 'win32') {
     const programFiles = process.env['ProgramFiles'];
