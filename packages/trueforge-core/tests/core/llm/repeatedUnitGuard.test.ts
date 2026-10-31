@@ -152,4 +152,53 @@ describe('RepeatedUnitGuard', () => {
     const line = `${ELEVEN_WORDS}\n`;
     expect(run([line, line, line])).toEqual({ shown: line.repeat(2), stopped: true });
   });
+
+  describe('a reply stuck signing off', () => {
+    const ANSWER =
+      'Your errands are on the calendar today from 11:00 to 12:00, with all four stops listed in the task.\n\n';
+    const LOOP =
+      "That's it. All set. Everything's neat. Ready when you are. Set. Ready. All set. Done. That's it. All set. Done. " +
+      "Everything's neat. Ready when you are. Set. Ready. ✓\n\nDone. ✓\n\nFinal. ✓\n\nDone. ✓\n\nStop.\n";
+
+    it('stops once several short sign-offs keep repeating, keeping the answer', () => {
+      const result = run([ANSWER, LOOP]);
+      expect(result.stopped).toBe(true);
+      expect(result.shown.startsWith(ANSWER)).toBe(true);
+      expect(result.shown).not.toContain('Final.');
+      expect(result.shown.length).toBeLessThan(ANSWER.length + 200);
+    });
+
+    it('stops at the same point when the loop arrives one character at a time', () => {
+      // Only the blank before the next sentence may differ, since it streams before that sentence is known.
+      const byChar = run((ANSWER + LOOP).split(''));
+      const whole = run([ANSWER, LOOP]);
+      expect(byChar.stopped).toBe(true);
+      expect(byChar.shown.trimEnd()).toBe(whole.shown.trimEnd());
+    });
+
+    it('never shows part of the short sentence it stops before', () => {
+      const { shown } = run((ANSWER + LOOP).split(''));
+      expect(shown.trimEnd()).toMatch(/[.✓]$/);
+    });
+
+    it('counts "Done.", "Done ✓" and "done!" as one sentence', () => {
+      const loop = 'Done. All set! Ready. Done ✓.\nAll set. Ready! done! all set. Ready. Done. All set. Ready.\n';
+      expect(run([loop]).stopped).toBe(true);
+    });
+
+    it('keeps one short line repeated under each day', () => {
+      const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+      const text = days.map(day => `**${day}**\nFree.\n`).join('') + days.map(day => `${day}: Busy.\n`).join('');
+      expect(run([text])).toEqual({ shown: text, stopped: false });
+    });
+
+    it('keeps bold labels repeated across the days of a plan', () => {
+      const text = Array.from(
+        { length: 5 },
+        (_, day) =>
+          `Day ${day + 1}\n**Morning**\nWalk on site ${day}.\n**Afternoon**\nLunch spot ${day}.\n**Evening**\nDinner ${day}.\n`,
+      ).join('');
+      expect(run([text])).toEqual({ shown: text, stopped: false });
+    });
+  });
 });

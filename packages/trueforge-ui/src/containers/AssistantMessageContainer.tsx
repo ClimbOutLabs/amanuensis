@@ -10,6 +10,7 @@ import {
 } from '@assistant-ui/react';
 import { useTrueFoundryResumeUnavailable } from '@truefoundry/assistant-ui-runtime';
 import { parseMorningBrief } from '@truefoundry/trueforge-core/core/schedules/morningBrief';
+import { SET_REMINDER_TOOL_NAME } from '@truefoundry/trueforge-core/core/schedules/toolContract';
 import { useState, type ReactNode } from 'react';
 
 import { copyText } from '@/utils/copyText.js';
@@ -21,6 +22,7 @@ import { ModelUsageOverview } from '../atoms/agent-chat/ModelUsageOverview.js';
 import { TurnImages } from '../chatImages/ChatImages.js';
 import { ChatImageScope, ChatTurnWithoutImages, useChatImagesPort } from '../chatImages/chatImageScope.js';
 import { AmanBrief } from '../components/AmanBrief.js';
+import { ReminderNotificationPrompt } from '../reminders/ReminderNotificationPrompt.js';
 import { useAgentDetailsVisibility } from '../server/AgentDetailsPreferenceContext.js';
 import { useSlot } from '../theme/SlotsProvider.js';
 import { computeAgentStepsSplit, type AgentStepsRun } from '../utils/computeAgentStepsSplit.js';
@@ -234,6 +236,13 @@ export function AssistantMessageContainer() {
   // a calendar change, an email sent, a draft saved) each get one plain line under the reply instead.
   // With details on the step rows already carry them, and a running turn shows none until it settles.
   const outcomeLines = !agentDetailsVisible && settled ? turnOutcomeLines(parts) : [];
+  // The offer of browser notices shows once per reply, under the answer, whether details are on or off:
+  // inside a step it was repeated for every reminder and hidden with the steps.
+  const offerReminderNotices =
+    settled &&
+    parts.some(
+      part => part.type === 'tool-call' && part.toolName === SET_REMINDER_TOOL_NAME && part.status?.type === 'complete',
+    );
 
   // The step rows below render only while agent details are on. Errors and approvals surface with an
   // amber dot and auto-expand while the turn is running; a clean completed run with no tools, no
@@ -413,6 +422,7 @@ export function AssistantMessageContainer() {
           {line}
         </p>
       ))}
+      {offerReminderNotices && <ReminderNotificationPrompt />}
       <TurnImages />
     </>
   );

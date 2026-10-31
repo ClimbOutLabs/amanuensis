@@ -9,6 +9,15 @@ const STOP_AT_LONG_COPY = 2;
 const LONG_SENTENCE_WORDS = 12;
 /** Shorter sentences ("Done.", "Yes.") repeat in ordinary answers, so they are never counted. */
 const MIN_SENTENCE_WORDS = 6;
+/**
+ * Short sentences are not counted one by one, but a reply that keeps cycling through several of them
+ * ("Done. All set. Ready. Done. Final. All set.") is a model stuck signing off. The reply stops before
+ * the short sentence that would make this many repeats in total, once at least SHORT_LOOP_KEYS
+ * different short sentences have repeated. One short line repeated on its own ("Free." under each day)
+ * never stops a reply.
+ */
+const SHORT_LOOP_REPEATS = 8;
+const SHORT_LOOP_KEYS = 3;
 /** A unit with no sentence end is released once it reaches this length, so text never waits long. */
 const MAX_UNIT_CHARS = 400;
 
@@ -43,6 +52,14 @@ function proseKey(raw: string): string {
   return raw.replace(INLINE_CODE, ' ').replace(/\s+/g, ' ').trim().toLowerCase();
 }
 
+/** The words of a short sentence alone, so "Done.", "Done ✓" and "done!" are one sentence. */
+function shortKey(key: string): string {
+  return key
+    .replace(/[^\p{L}\p{N}\s']/gu, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 function isSentence(key: string): boolean {
   return key.split(' ').length >= MIN_SENTENCE_WORDS && /[\p{L}\p{N}]/u.test(key);
 }
@@ -54,8 +71,8 @@ function stopAtCopy(key: string): number {
 
 /**
  * Stops streamed answer text once one whole prose sentence has come STOP_AT_COPY times, or
- * STOP_AT_LONG_COPY times for a long sentence. Text in code fences, inline code, list items,
- * headings, tables and short sentences is never counted. Each unit is shown as it completes, and a
+ * STOP_AT_LONG_COPY times for a long sentence, or once short sentences keep cycling (SHORT_LOOP_REPEATS).
+ * Text in code fences, inline code, list items, headings and tables is never counted. Each unit is shown as it completes, and a
  * copy that would be the last one is not shown: the reply ends before it. Text that starts like a
  * sentence whose next copy would stop the reply is held until it is clear it is not that sentence.
  */
@@ -66,6 +83,10 @@ export class RepeatedUnitGuard {
   #partialShown = 0;
   /** How many times each prose sentence has been shown. */
   #copies = new Map<string, number>();
+  /** How many times each short sentence has been shown. */
+  #shortCopies = new Map<string, number>();
+  /** Copies of short sentences shown beyond each one's first. */
+  #shortRepeats = 0;
   #atLineStart = true;
   #inFence = false;
   /** Whether the line being read is code or structure, so its units are never counted. */
@@ -120,10 +141,14 @@ export class RepeatedUnitGuard {
 
   #addUnit(unit: UnitText): RepeatedUnitsStep {
     const shown = unit.raw.slice(unit.shown);
-    const key = this.#countedKey(unit.raw);
-    if (key === undefined) {
+    const counted = this.#countedKey(unit.raw);
+    if (counted === undefined) {
       return { text: shown, stopped: false };
     }
+    if (counted.short) {
+      return this.#addShortUnit({ key: counted.key, shown });
+    }
+    const key = counted.key;
     const copies = this.#copies.get(key) ?? 0;
     if (copies + 1 >= stopAtCopy(key)) {
       return { text: '', stopped: true };
@@ -132,11 +157,38 @@ export class RepeatedUnitGuard {
     return { text: shown, stopped: false };
   }
 
+  #addShortUnit({ key, shown }: { key: string; shown: string }): RepeatedUnitsStep {
+    const copies = this.#shortCopies.get(key) ?? 0;
+    if (copies > 0 && this.#shortLoopArmed()) {
+      return { text: '', stopped: true };
+    }
+    this.#shortCopies.set(key, copies + 1);
+    if (copies > 0) {
+      this.#shortRepeats += 1;
+    }
+    return { text: shown, stopped: false };
+  }
+
+  /** Whether one more repeat of any short sentence already seen would stop the reply. */
+  #shortLoopArmed(): boolean {
+    if (this.#shortRepeats + 1 < SHORT_LOOP_REPEATS) {
+      return false;
+    }
+    let repeatedKeys = 0;
+    for (const copies of this.#shortCopies.values()) {
+      if (copies > 1) {
+        repeatedKeys += 1;
+      }
+    }
+    return repeatedKeys >= SHORT_LOOP_KEYS;
+  }
+
   /**
-   * The prose key of a completed unit when it counts as a sentence, otherwise undefined. Also advances
-   * the line state: a fence toggles code, and the first unit of a line decides whether the line counts.
+   * The key of a completed unit when it counts, and whether it is a short sentence, otherwise undefined.
+   * Also advances the line state: a fence toggles code, and the first unit of a line decides whether the
+   * line counts.
    */
-  #countedKey(raw: string): string | undefined {
+  #countedKey(raw: string): { key: string; short: boolean } | undefined {
     if (this.#atLineStart) {
       if (FENCE.test(raw)) {
         this.#inFence = !this.#inFence;
@@ -150,7 +202,12 @@ export class RepeatedUnitGuard {
       return undefined;
     }
     const key = proseKey(raw);
-    return isSentence(key) ? key : undefined;
+    if (isSentence(key)) {
+      return { key, short: false };
+    }
+    // A short unit counts only as a finished sentence: a bold label such as "**Morning**" repeats by design.
+    const short = shortKey(key);
+    return /[.!?]["')\]]*$/.test(raw.trim()) && /[\p{L}\p{N}]/u.test(short) ? { key: short, short: true } : undefined;
   }
 
   /**
@@ -169,6 +226,14 @@ export class RepeatedUnitGuard {
   #startsRepeatedSentence(prefix: string): boolean {
     if (prefix === '') {
       return false;
+    }
+    if (this.#shortLoopArmed()) {
+      const shortPrefix = shortKey(prefix);
+      for (const key of this.#shortCopies.keys()) {
+        if (key.startsWith(shortPrefix)) {
+          return true;
+        }
+      }
     }
     for (const [key, copies] of this.#copies) {
       if (copies + 1 >= stopAtCopy(key) && key.startsWith(prefix)) {
