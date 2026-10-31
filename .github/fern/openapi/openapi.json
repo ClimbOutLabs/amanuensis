@@ -3085,6 +3085,17 @@
         ],
         "type": "object"
       },
+      "GetMemoryRecallResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/MemoryRecall"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
       "GetMemoryScreenResponse": {
         "properties": {
           "data": {
@@ -6261,6 +6272,21 @@
             "type": "boolean"
           }
         },
+        "type": "object"
+      },
+      "MemoryRecall": {
+        "properties": {
+          "enabled": {
+            "description": "Whether replies use saved memories. `null` when not set, so each agent follows its own memory setting.",
+            "type": [
+              "boolean",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "enabled"
+        ],
         "type": "object"
       },
       "MemoryRecallCurated": {
@@ -13061,6 +13087,24 @@
         },
         "required": [
           "manifest"
+        ],
+        "type": "object"
+      },
+      "UpdateMemoryRecallRequest": {
+        "example": {
+          "enabled": false
+        },
+        "properties": {
+          "enabled": {
+            "description": "`true` or `false` sets the switch for every chat. `null` clears it back to each agent setting.",
+            "type": [
+              "boolean",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "enabled"
         ],
         "type": "object"
       },
@@ -22116,6 +22160,116 @@
           "mcpServers"
         ],
         "x-fern-sdk-method-name": "get"
+      }
+    },
+    "/api/v1/settings/memory-recalls": {
+      "get": {
+        "description": "Whether replies use saved memories for every chat. `enabled` is null when the switch was never set.",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetMemoryRecallResponse"
+                }
+              }
+            },
+            "description": "The stored memory recall switch."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication required."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Admin access required."
+          }
+        },
+        "summary": "Get the memory recall switch",
+        "tags": [
+          "Capabilities"
+        ],
+        "x-fern-sdk-group-name": [
+          "settings",
+          "memoryRecalls"
+        ],
+        "x-fern-sdk-method-name": "get"
+      },
+      "put": {
+        "description": "Sets whether replies use saved memories in every chat, including chats with a saved agent. `null` clears the switch so each agent follows its own setting.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateMemoryRecallRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetMemoryRecallResponse"
+                }
+              }
+            },
+            "description": "The stored memory recall switch after the update."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request body."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication required."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Admin access required."
+          }
+        },
+        "summary": "Create, replace, or clear the memory recall switch",
+        "tags": [
+          "Capabilities"
+        ],
+        "x-fern-sdk-group-name": [
+          "settings",
+          "memoryRecalls"
+        ],
+        "x-fern-sdk-method-name": "create_or_update"
       }
     },
     "/api/v1/settings/memory-screens": {
