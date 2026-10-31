@@ -67,6 +67,17 @@ describe('PackageMirrorTokenRegistry grants for chats without a project', () => 
     expect(registry.resolve(second)).toBeDefined();
   });
 
+  it('treats an empty repository id as no repository, and the project-less revoke reaches it', () => {
+    const registry = new PackageMirrorTokenRegistry();
+    const emptyId = registry.issue({ ...OWNER, repository_id: '' });
+    expect(emptyId).toBe(registry.issue({ ...OWNER }));
+    expect(registry.resolve(emptyId)?.repository_id).toBeUndefined();
+
+    registry.revokePersonWithoutRepository({ tenant_id: 'tenant-1', created_by: 'owner-1' });
+
+    expect(registry.resolve(emptyId)).toBeUndefined();
+  });
+
   it('refuses a token it never issued', () => {
     const registry = new PackageMirrorTokenRegistry();
     registry.issue({ ...OWNER });

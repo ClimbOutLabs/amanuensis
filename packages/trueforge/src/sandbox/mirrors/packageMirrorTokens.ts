@@ -35,7 +35,10 @@ export class PackageMirrorTokenRegistry {
     session_id: string;
     repository_id?: string | undefined;
   }): string {
-    const key = grantKey({ ...input, repository_id: input.repository_id });
+    // An empty repository id means the same as none. Normalize it here so the stored grant and
+    // its key can never disagree about the scope, and the project-less revoke always reaches it.
+    const repository_id = input.repository_id === '' ? undefined : input.repository_id;
+    const key = grantKey({ ...input, repository_id });
     const now = Date.now();
     const existingToken = this.#tokenByGrantKey.get(key);
     if (existingToken !== undefined) {
@@ -51,7 +54,7 @@ export class PackageMirrorTokenRegistry {
       tenant_id: input.tenant_id,
       created_by: input.created_by,
       session_id: input.session_id,
-      repository_id: input.repository_id,
+      repository_id,
       issued_at: new Date(now).toISOString(),
       expires_at_ms: now + GRANT_TTL_MS,
     });
@@ -122,8 +125,8 @@ function grantKey(input: {
   session_id: string;
   repository_id: string | undefined;
 }): string {
-  // A chat without a project keys on the empty repository segment; repository ids are never empty,
-  // so the two scopes can never collide.
+  // A chat without a project keys on the empty repository segment. issue normalizes an empty
+  // repository id to none before keying, so the two scopes can never collide.
   return [input.tenant_id, input.created_by, input.session_id, input.repository_id ?? ''].join('\0');
 }
 
