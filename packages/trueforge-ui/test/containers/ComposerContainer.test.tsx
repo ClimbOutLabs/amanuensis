@@ -17,6 +17,7 @@ import {
 import { ServerProvider } from '@/server/ServerContext.js';
 import { ShellModeProvider, type AgentConfig } from '@/server/ShellModeContext.js';
 import { SlotsProvider } from '@/theme/SlotsProvider.js';
+import { markDraftFromVoice, noteUserMessage, takeSpokenReply } from '@/utils/voiceTurn.js';
 import { createMockAgentUIServer } from '../server/mockServer.js';
 import { RuntimeHarness } from './RuntimeHarness.js';
 
@@ -1180,5 +1181,50 @@ describe('ComposerContainer voice input', () => {
     fireEvent.change(input, { target: { value: 'typing' } });
 
     expect(input.getAttribute('placeholder')).toBe(first);
+  });
+});
+
+describe('spoken replies from the composer', () => {
+  it('arms the reply when the sent draft came from voice input', async () => {
+    const onNew = vi.fn(async () => {});
+    renderComposer(onNew);
+    const input = screen.getByRole<HTMLTextAreaElement>('textbox', { name: 'Message input' });
+    markDraftFromVoice();
+    fireEvent.change(input, { target: { value: 'spoken words' } });
+
+    fireEvent.keyDown(input, { key: 'Enter' });
+
+    await waitFor(() => expect(onNew).toHaveBeenCalledTimes(1));
+    noteUserMessage({ id: 'sent', text: 'spoken words' });
+    expect(takeSpokenReply('sent')).toBe(true);
+  });
+
+  it('does not arm the reply for a typed message', async () => {
+    const onNew = vi.fn(async () => {});
+    renderComposer(onNew);
+    const input = screen.getByRole<HTMLTextAreaElement>('textbox', { name: 'Message input' });
+    fireEvent.change(input, { target: { value: 'typed words' } });
+
+    fireEvent.keyDown(input, { key: 'Enter' });
+
+    await waitFor(() => expect(onNew).toHaveBeenCalledTimes(1));
+    noteUserMessage({ id: 'typed', text: 'typed words' });
+    expect(takeSpokenReply('typed')).toBe(false);
+  });
+
+  it('drops a voice draft that was emptied before sending', async () => {
+    const onNew = vi.fn(async () => {});
+    renderComposer(onNew);
+    const input = screen.getByRole<HTMLTextAreaElement>('textbox', { name: 'Message input' });
+    fireEvent.change(input, { target: { value: 'first try' } });
+    markDraftFromVoice();
+    fireEvent.change(input, { target: { value: '' } });
+    fireEvent.change(input, { target: { value: 'typed instead' } });
+
+    fireEvent.keyDown(input, { key: 'Enter' });
+
+    await waitFor(() => expect(onNew).toHaveBeenCalledTimes(1));
+    noteUserMessage({ id: 'typed', text: 'typed instead' });
+    expect(takeSpokenReply('typed')).toBe(false);
   });
 });
