@@ -344,6 +344,30 @@ describe('ToolMarkupGuard indented code blocks', () => {
 });
 
 describe('ToolMarkupGuard stray closing tags', () => {
+  it('hides a closing tag with the next sentence glued straight to it', () => {
+    const guard = new ToolMarkupGuard();
+    const shown = guard.push('Prior to that </tool_calls>Your errands are now on the calendar.');
+    expect(shown + guard.heldText).toBe('Prior to that Your errands are now on the calendar.');
+    expect(guard.finish()).toBe('clean');
+  });
+
+  it('hides a glued closing tag when the word after it arrives in the next piece', () => {
+    const guard = new ToolMarkupGuard();
+    let shown = '';
+    for (const piece of ['Done. </tool_', 'calls>', 'Your errands are set.']) {
+      shown += guard.push(piece);
+    }
+    expect(shown + guard.heldText).toBe('Done. Your errands are set.');
+    expect(guard.finish()).toBe('clean');
+  });
+
+  it('keeps a closing tag that a sentence names with a space after it', () => {
+    const guard = new ToolMarkupGuard();
+    const shown = guard.push('The block ends with </tool_calls> and nothing else.');
+    expect(shown + guard.heldText).toBe('The block ends with </tool_calls> and nothing else.');
+    expect(guard.finish()).toBe('clean');
+  });
+
   it('hides a stray closing tool-call line and keeps the answer around it', () => {
     const guard = new ToolMarkupGuard();
     const shown = guard.push('Let me look.\n</tool_call>\nThe space is ready.');
