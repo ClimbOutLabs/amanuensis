@@ -39,6 +39,7 @@ import { z } from 'zod';
 import configuration from '../config';
 import { MapsUpstreamError, type MapsErrorBody } from './mapsErrors';
 import { MAX_GEOMETRY_CHARS, thinPolyline } from './mapsPolyline';
+import type { MapsServers } from './mapsSettings';
 import {
   MotisTransitProvider,
   resolveTransitTime,
@@ -910,6 +911,7 @@ class MapsTool extends LocalToolMCP {
     private readonly logger: Logger,
     private readonly timezone: string,
     private readonly retries: PlaceRefusalLedger,
+    private readonly servers: MapsServers,
     tracing: AgentTracing,
   ) {
     super({ tracing });
@@ -917,12 +919,12 @@ class MapsTool extends LocalToolMCP {
 
   private upstreamHosts() {
     return {
-      geocoder: configuration.MAPS_GEOCODER_URL,
-      router: configuration.MAPS_ROUTER_URL,
-      walking: configuration.MAPS_WALKING_ROUTER_URL,
-      cycling: configuration.MAPS_CYCLING_ROUTER_URL,
-      transit: configuration.MAPS_TRANSIT_URL,
-      tile: configuration.MAPS_TILE_URL,
+      geocoder: this.servers.geocoder_url,
+      router: this.servers.router_url,
+      walking: this.servers.walking_router_url,
+      cycling: this.servers.cycling_router_url,
+      transit: this.servers.transit_url,
+      tile: this.servers.tile_url,
     };
   }
 
@@ -1086,6 +1088,12 @@ class MapsTool extends LocalToolMCP {
 export interface MapsCapabilityOptions {
   tracing: AgentTracing;
   logger: Logger;
+  /**
+   * The maps server addresses in force for this answer, resolved from the
+   * environment and Settings by the caller. Absent, the environment addresses
+   * are used as they are.
+   */
+  servers?: MapsServers | undefined;
   /** The tenant and chat read pages are checked for; a page read in another chat does not count. */
   pages_scope: FetchedPageScope;
   /** IANA zone the user's local times are read in; UTC when the client sent none. */
@@ -1097,6 +1105,14 @@ export interface MapsCapabilityOptions {
 /** Build the maps capability from server config. One instance per server. */
 export function mapsCapability(options: MapsCapabilityOptions): AgentCapability {
   const user_agent = configuration.MAPS_USER_AGENT;
+  const servers: MapsServers = options.servers ?? {
+    router_url: configuration.MAPS_ROUTER_URL,
+    walking_router_url: configuration.MAPS_WALKING_ROUTER_URL,
+    cycling_router_url: configuration.MAPS_CYCLING_ROUTER_URL,
+    geocoder_url: configuration.MAPS_GEOCODER_URL,
+    transit_url: configuration.MAPS_TRANSIT_URL,
+    tile_url: configuration.MAPS_TILE_URL,
+  };
   // The fetch wrapper attaches the identifying User-Agent and strips nothing
   // else: these are server-to-upstream requests, never browser requests.
   const fetch_limited = (url: string): Promise<Response> =>
@@ -1108,17 +1124,17 @@ export function mapsCapability(options: MapsCapabilityOptions): AgentCapability 
   const road_providers: Record<MapsRoadMode, MapsRoutingProvider> = {
     driving: createMapsRoutingProvider({
       provider_id: configuration.MAPS_ROUTER_PROVIDER,
-      router_url: configuration.MAPS_ROUTER_URL,
+      router_url: servers.router_url,
       fetch_limited,
     }),
     walking: createMapsRoutingProvider({
       provider_id: configuration.MAPS_ROUTER_PROVIDER,
-      router_url: configuration.MAPS_WALKING_ROUTER_URL,
+      router_url: servers.walking_router_url,
       fetch_limited,
     }),
     cycling: createMapsRoutingProvider({
       provider_id: configuration.MAPS_ROUTER_PROVIDER,
-      router_url: configuration.MAPS_CYCLING_ROUTER_URL,
+      router_url: servers.cycling_router_url,
       fetch_limited,
     }),
   };
@@ -1126,9 +1142,9 @@ export function mapsCapability(options: MapsCapabilityOptions): AgentCapability 
     placeRefusals.startAnswer(options.pages_scope);
   }
   const service = new MapsService({
-    geocoder_url: configuration.MAPS_GEOCODER_URL,
+    geocoder_url: servers.geocoder_url,
     road_providers,
-    transit_provider: new MotisTransitProvider(configuration.MAPS_TRANSIT_URL, fetch_limited),
+    transit_provider: new MotisTransitProvider(servers.transit_url, fetch_limited),
     logger: options.logger,
     fetch_limited,
     timezone: options.timezone,
@@ -1141,6 +1157,7 @@ export function mapsCapability(options: MapsCapabilityOptions): AgentCapability 
         options.logger,
         resolveLocalTime(new Date(), options.timezone).zone,
         placeRefusals,
+        servers,
         options.tracing,
       ),
     ],

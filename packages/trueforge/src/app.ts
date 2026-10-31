@@ -929,6 +929,7 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
     withAuth(
       createMapsRouter({
         sentinelSettingsStore: deps.sentinelSettingsStore,
+        globalSettingsStore: deps.globalSettingsStore,
         resolveRequestContext,
         logger: deps.logger,
       }),

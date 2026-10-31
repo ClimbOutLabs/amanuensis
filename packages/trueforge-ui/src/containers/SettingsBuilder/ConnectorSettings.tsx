@@ -14,6 +14,7 @@ import { hasCalendarSetup, type CalendarAccountStatus } from '@/server/calendarS
 import { hasConnectorConnectionTest, type ConnectorConnectionFailureKind } from '@/server/connectorChecks.js';
 import { hasEmailSetup, type EmailAccountStatus } from '@/server/emailSetup.js';
 import { hasGoogleSetup, type GoogleConnectionStatus } from '@/server/googleSetup.js';
+import { hasMapsSetup } from '@/server/mapsSetup.js';
 import { isSearchProvider, type SearchProviderFields } from '@/server/searchProviderTypes.js';
 import { useCatalogServer } from '@/server/ServerContext.js';
 import { shellIsMutable, useShellMode } from '@/server/ShellModeContext.js';
@@ -28,6 +29,7 @@ import CalendarSetupPanel from './CalendarSetupPanel.js';
 import ConnectorDetails from './ConnectorDetails.js';
 import EmailSetupPanel from './EmailSetupPanel.js';
 import GoogleSetupPanel from './GoogleSetupPanel.js';
+import MapsSettingsCard from './MapsSettingsCard.js';
 import { isMemoryProvider, memoryProviderUpdateRequest, withRemediation } from './memoryProvider.js';
 import { searchProviderForNewConnector } from './searchProvider.js';
 
@@ -638,6 +640,7 @@ const ConnectorSettings = () => {
 
   const emailMatchesQuery = normalizedQuery === '' || 'email mail'.includes(normalizedQuery);
   const calendarMatchesQuery = normalizedQuery === '' || 'calendar caldav events'.includes(normalizedQuery);
+  const mapsMatchesQuery = normalizedQuery === '' || 'maps map routes routing servers tiles'.includes(normalizedQuery);
 
   const googleMatchesQuery = normalizedQuery === '' || 'google gmail email mail'.includes(normalizedQuery);
 
@@ -900,6 +903,10 @@ const ConnectorSettings = () => {
                 onOpen={() => setCalendarPanelOpen(true)}
                 onRetry={() => void refresh()}
               />
+            ) : null}
+
+            {!loading && mapsMatchesQuery && hasMapsSetup(connectorCatalog) ? (
+              <MapsSettingsCard port={connectorCatalog} />
             ) : null}
 
             {!loading &&
