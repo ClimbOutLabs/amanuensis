@@ -7,6 +7,7 @@ import { EmailClient } from "../resources/email/client/Client.js";
 import { FirstRunGuideClient } from "../resources/firstRunGuide/client/Client.js";
 import { GoogleClient } from "../resources/google/client/Client.js";
 import { McpServersClient } from "../resources/mcpServers/client/Client.js";
+import { MemoryRecallsClient } from "../resources/memoryRecalls/client/Client.js";
 import { MemoryScreensClient } from "../resources/memoryScreens/client/Client.js";
 import { MemorySummarizeClient } from "../resources/memorySummarize/client/Client.js";
 import { ModelProvidersClient } from "../resources/modelProviders/client/Client.js";
@@ -24,6 +25,7 @@ export class SettingsClient {
     protected readonly _options: NormalizedClientOptionsWithAuth<SettingsClient.Options>;
     protected _firstRunGuide: FirstRunGuideClient | undefined;
     protected _mcpServers: McpServersClient | undefined;
+    protected _memoryRecalls: MemoryRecallsClient | undefined;
     protected _memoryScreens: MemoryScreensClient | undefined;
     protected _memorySummarize: MemorySummarizeClient | undefined;
     protected _modelProviders: ModelProvidersClient | undefined;
@@ -46,6 +48,10 @@ export class SettingsClient {
 
     public get mcpServers(): McpServersClient {
         return (this._mcpServers ??= new McpServersClient(this._options));
+    }
+
+    public get memoryRecalls(): MemoryRecallsClient {
+        return (this._memoryRecalls ??= new MemoryRecallsClient(this._options));
     }
 
     public get memoryScreens(): MemoryScreensClient {
