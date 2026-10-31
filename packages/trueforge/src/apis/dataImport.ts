@@ -20,6 +20,7 @@ import { DataImportError } from '../dataImport/importError';
 import type { MemoryImportTarget } from '../dataImport/importPreflight';
 import { runDataImport } from '../dataImport/importService';
 import type { AgentRecord, IAgentStore } from '../db/agentStore';
+import type { IDeliveryStore } from '../db/deliveryStore';
 import type { IGlobalSettingsStore } from '../db/globalSettingsStore';
 import type { IMcpServerWithAuthStore } from '../db/mcpServerStore';
 import type { IPersonaStore } from '../db/personaStore';
@@ -46,6 +47,7 @@ export interface DataImportRouterDeps<TTransaction> {
   scheduleStore: IScheduleStore<TTransaction>;
   globalSettingsStore: IGlobalSettingsStore<TTransaction>;
   sentinelAuditStore: ISentinelAuditStore;
+  deliveryStore: IDeliveryStore;
   turnArtifactStore: ITurnArtifactStore<TTransaction>;
   tokenStore: IOAuthTokenStore<TTransaction>;
   resolveMcpServerStore: (c?: Context, runAsAgent?: AgentRecord) => IMcpServerWithAuthStore<TTransaction>;
@@ -156,6 +158,7 @@ export function createDataImportRouter<TTransaction>(deps: DataImportRouterDeps<
           scheduleStore: deps.scheduleStore,
           globalSettingsStore: deps.globalSettingsStore,
           auditStore: deps.sentinelAuditStore,
+          deliveryStore: deps.deliveryStore,
           turnArtifactStore: deps.turnArtifactStore,
           mcpServerStore: deps.resolveMcpServerStore(c),
           agentStore,

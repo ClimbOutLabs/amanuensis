@@ -18,9 +18,9 @@ import {
   threadListIndicesByRecency,
   threadListItemIsMutable,
 } from '../atoms/lib/threadListMeta.js';
+import { useOptionalDeliveries } from '../deliveries/DeliveriesContext.js';
 import { useResourcePermissions } from '../hooks/useResourcePermissions.js';
 import { Icon } from '../icons/Icon.js';
-import { useOptionalReminders } from '../reminders/RemindersContext.js';
 import { useOptionalChatFolders, type ChatFolderSession } from '../server/ChatFolderContext.js';
 import { useOptionalServer } from '../server/ServerContext.js';
 import { useOptionalShellMode } from '../server/ShellModeContext.js';
@@ -65,15 +65,15 @@ function ThreadListItemRow({
   const mainThreadId = useAuiState(s => s.threads.mainThreadId);
   const agentName = readThreadAgentName(custom);
   const sidebarNavOpen = shell?.libraryOpen === true || shell?.sessionsOpen === true || shell?.schedulesOpen === true;
-  const reminders = useOptionalReminders();
-  const isRemindersChat = remoteId != null && remoteId === reminders?.remindersSessionId;
-  const unread = isRemindersChat && reminders?.unread === true;
+  const deliveries = useOptionalDeliveries();
+  // A chat with an unread item in the feed (a reminder, say) is marked until it is opened.
+  const unread = remoteId != null && deliveries?.unreadChatIds.has(remoteId) === true;
   const isOpen = id === mainThreadId && !sidebarNavOpen;
-  const markRemindersSeen = reminders?.markSeen;
+  const markChatSeen = deliveries?.markChatSeen;
   // The mark clears once the chat is open, however it was opened.
   useEffect(() => {
-    if (isRemindersChat && isOpen && unread) markRemindersSeen?.();
-  }, [isRemindersChat, isOpen, unread, markRemindersSeen]);
+    if (remoteId != null && isOpen && unread) void markChatSeen?.(remoteId);
+  }, [remoteId, isOpen, unread, markChatSeen]);
   const canDelete = canDeleteSession && remoteId != null && canDeleteResource(remoteId);
   const canRename = canRenameSession && remoteId != null;
   // The "..." actions menu holds Rename, Delete, and/or Move to folder (the "Show agent
@@ -90,7 +90,6 @@ function ThreadListItemRow({
         lastMessageAt={lastMessageAt}
         unread={unread}
         onSelect={() => {
-          if (isRemindersChat) markRemindersSeen?.();
           onThreadOpen?.();
           shell?.setSettingsOpen(false);
           shell?.setLibraryOpen(false);

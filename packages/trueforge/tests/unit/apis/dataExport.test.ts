@@ -589,6 +589,7 @@ describe('Data export route', () => {
       'connectors.json',
       'settings.json',
       'audit.json',
+      'deliveries.json',
     ]);
     for (const section of manifest.sections) {
       expect(names).toContain(section);

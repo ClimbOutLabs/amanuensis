@@ -19,6 +19,7 @@ import {
 
 import type { ISessionStore } from '@truefoundry/trueforge-core/agent-session';
 import type { IAgentStore } from '../../src/db/agentStore';
+import type { IDeliveryStore } from '../../src/db/deliveryStore';
 import type { IGlobalSettingsStore } from '../../src/db/globalSettingsStore';
 import type { IMcpServerStore } from '../../src/db/mcpServerStore';
 import type { IPersonaStore } from '../../src/db/personaStore';
@@ -159,6 +160,7 @@ export interface DataTransferSeedStores<TTransaction> {
   globalSettingsStore: IGlobalSettingsStore<TTransaction>;
   sentinelSettingsStore: ISentinelSettingsStore<TTransaction>;
   auditStore: ISentinelAuditStore;
+  deliveryStore: IDeliveryStore;
   turnArtifactStore: ITurnArtifactStore<TTransaction>;
   mcpServerStore: IMcpServerStore<TTransaction>;
 }
@@ -494,6 +496,15 @@ export async function seedRichInstance<TTransaction>(input: SeedRichInstanceInpu
     });
   }
   await stores.auditStore.importRecords({ tenant_id: tenantId, created_by: userId, records: SEED_AUDIT });
+  await stores.deliveryStore.create({
+    tenant_id: tenantId,
+    created_by: userId,
+    kind: 'reminder',
+    level: 'nudge',
+    text: 'Call the dentist',
+    reason: 'You asked to be reminded on Monday.',
+    link: null,
+  });
 
   const knowledgeDbPath = personaKnowledgeLocation({
     knowledgeDir: input.knowledgeDir,

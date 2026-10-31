@@ -14,6 +14,7 @@ import configuration from '../../../src/config';
 import { EXPORT_SCHEMA_VERSION } from '../../../src/dataExport/exportService';
 import { normalizeSecrets } from '../../../src/dataExport/secretScrub';
 import { ZipStreamWriter } from '../../../src/dataExport/zipStreamWriter';
+import { UNRECORDED_REASON } from '../../../src/dataImport/deliveryUpgrade';
 import { DataImportError } from '../../../src/dataImport/importError';
 import { IMPORT_HEARTBEAT_MS, IMPORT_IN_PROGRESS_KEY } from '../../../src/dataImport/importLedger';
 import type { MemoryImportTarget } from '../../../src/dataImport/importPreflight';
@@ -21,6 +22,7 @@ import { EXPIRED_CALL_RESULT } from '../../../src/dataImport/importSchemas';
 import { runDataImport, type DataImportDeps } from '../../../src/dataImport/importService';
 import type { KnowledgeEmbedder } from '../../../src/dataImport/knowledgeImport';
 import { EXPIRED_APPROVAL_NOTICE } from '../../../src/dataImport/sessionRestore';
+import { DeliveryStore } from '../../../src/db/deliveryStore';
 import { migrateSqliteToLatest } from '../../../src/db/migrateSqlite';
 import { SentinelAuditStore } from '../../../src/db/sentinelAuditStore';
 import type { SessionCustom, TurnCustom } from '../../../src/db/sessionCustom';
@@ -59,6 +61,7 @@ import {
 } from '../../fixtures/dataTransferSeed';
 import { listAt, parseJson, recordAt, recordsAt, stringAt, type JsonRecord } from '../../fixtures/jsonGuards';
 import { legacySessionsOf, setLegacySessions } from '../../fixtures/legacySessions';
+import { OLDER_DELIVERIES_JSON } from '../../fixtures/olderDeliveries';
 import { readZipEntries } from '../../fixtures/zipReader';
 
 jest.setTimeout(120_000);
@@ -93,6 +96,7 @@ async function makeInstance(label: string): Promise<Instance> {
     globalSettingsStore: new SqliteGlobalSettingsStore(db),
     sentinelSettingsStore: new SqliteSentinelSettingsStore(db),
     auditStore: new SentinelAuditStore(db),
+    deliveryStore: new DeliveryStore(db),
     turnArtifactStore: new SqliteTurnArtifactStore(db),
     mcpServerStore: new SqliteMcpServerStore(db),
   };
@@ -129,6 +133,7 @@ function importDeps(instance: Instance, memoryTarget?: MemoryImportTarget): Data
     globalSettingsStore: instance.stores.globalSettingsStore,
     turnArtifactStore: instance.stores.turnArtifactStore,
     auditStore: instance.stores.auditStore,
+    deliveryStore: instance.stores.deliveryStore,
     mcpServerStore: instance.stores.mcpServerStore,
     agentStore: instance.stores.agentStore,
     mcpCatalog: McpCatalog.loadShipped(),
@@ -223,6 +228,7 @@ describe('runDataImport', () => {
           '  • Chats keep their dates and totals. Personas, spaces, folders and schedules show the time of the import.',
           '  • Approvals given for one chat only do not carry over.',
           '  • 3 past permission decisions came along.',
+          '  • 1 item from your feed came along.',
           '  • Not brought over: model keys, connector sign-ins, your own skills.',
           '    Add your model again and sign in to your connectors.',
           '  • Permissions start fresh, so each tool will ask again.',
@@ -2898,6 +2904,74 @@ describe('runDataImport keeps permission history and persona choices', () => {
       expect(result.chats).toBe(3);
       const imported = await chatsOf(target, 'bob');
       expect(imported.map(chat => chat.title).sort()).toEqual([...titles].sort());
+    } finally {
+      await source.close();
+      await target.close();
+    }
+  });
+
+  it('carries the feed in the export, and never a push device', async () => {
+    const { source, archive } = await seededArchive();
+    const target = await makeInstance('target-feed');
+    try {
+      const entries = new Map(readZipEntries(archive).map(entry => [entry.name, entry.data]));
+      const rows = listAt(parseJson(entries.get('deliveries.json'), 'deliveries.json'), 'deliveries.json');
+      expect(rows).toHaveLength(1);
+      expect(recordAt(rows[0], 'row')['text']).toBe('Call the dentist');
+      expect([...entries.keys()].some(name => name.includes('push'))).toBe(false);
+      expect(entries.get('deliveries.json')?.toString('utf8')).not.toMatch(/endpoint|p256dh/);
+
+      const result = await runDataImport(importDeps(target), importRequest(archive));
+      const feed = await target.stores.deliveryStore.list({ tenant_id: TENANT, created_by: 'bob', limit: 10 });
+      expect(feed.deliveries.map(item => item.text)).toEqual(['Call the dentist']);
+      expect(result.summary).toContain('1 item from your feed came along.');
+    } finally {
+      await source.close();
+      await target.close();
+    }
+  });
+
+  it('still imports an export made before the feed existed', async () => {
+    const { source, archive } = await seededArchive();
+    const target = await makeInstance('target-no-feed');
+    try {
+      const older = await repack(archive, entries => {
+        entries.delete('deliveries.json');
+      });
+      const result = await runDataImport(importDeps(target), importRequest(older));
+      expect(result.chats).toBe(3);
+      expect(result.summary).not.toContain('from your feed');
+      await expect(target.stores.deliveryStore.countUnread({ tenant_id: TENANT, created_by: 'bob' })).resolves.toBe(0);
+    } finally {
+      await source.close();
+      await target.close();
+    }
+  });
+
+  it('upgrades a feed written in an older shape, with plain defaults and the unreadable attempts counted', async () => {
+    const { source, archive } = await seededArchive();
+    const target = await makeInstance('target-older-feed');
+    try {
+      const older = await repack(archive, entries => {
+        entries.set('deliveries.json', Buffer.from(JSON.stringify(OLDER_DELIVERIES_JSON)));
+      });
+      const result = await runDataImport(importDeps(target), importRequest(older));
+      const feed = await target.stores.deliveryStore.list({ tenant_id: TENANT, created_by: 'bob', limit: 10 });
+      const byText = new Map(feed.deliveries.map(item => [item.text, item]));
+      expect(byText.get('Water the plants')).toMatchObject({
+        level: 'nudge',
+        reason: UNRECORDED_REASON,
+        seen_at: null,
+        attempts: [],
+        link: { type: 'chat', session_id: 'older-chat' },
+      });
+      expect(byText.get('Your passport renewal form is ready')).toMatchObject({
+        level: 'note',
+        seen_at: '2026-10-21T10:00:00.000Z',
+        link: null,
+      });
+      await expect(target.stores.deliveryStore.countUnread({ tenant_id: TENANT, created_by: 'bob' })).resolves.toBe(1);
+      expect(result.summary).toContain('2 items from your feed came along.');
     } finally {
       await source.close();
       await target.close();

@@ -29,6 +29,7 @@ import type {
 
 import { errorCode } from '../cli/errorCode';
 import type { AgentRecord } from '../db/agentStore';
+import type { IDeliveryStore } from '../db/deliveryStore';
 import type { IGlobalSettingsStore } from '../db/globalSettingsStore';
 import type { IMcpServerStore } from '../db/mcpServerStore';
 import type { IPersonalizationStore } from '../db/personalizationStore';
@@ -121,6 +122,7 @@ export interface DataExportDeps<TTransaction> {
   globalSettingsStore: IGlobalSettingsStore<TTransaction>;
   sentinelSettingsStore: ISentinelSettingsStore<TTransaction>;
   auditStore: Pick<ISentinelAuditStore, 'listOwned'>;
+  deliveryStore: Pick<IDeliveryStore, 'listForExport'>;
   turnArtifactStore: ITurnArtifactStore<TTransaction>;
   mcpServerStore: IMcpServerStore<TTransaction>;
   /** The agents the user may manage; the entry point resolves them because access rules differ per deployment. */
@@ -525,6 +527,13 @@ export async function runDataExport<TTransaction>(
     }
   }
   await writeJsonArrayEntry(context, 'audit.json', auditEntries());
+
+  // deliveries.json: this user's feed. Push devices belong to a device and are never exported.
+  await writeJsonArrayEntry(
+    context,
+    'deliveries.json',
+    await deps.deliveryStore.listForExport({ tenant_id: tenantId, created_by: subjectId }),
+  );
 
   // A persona vault is keyed by the persona's name, so another person's persona with the same name writes into it too.
   const othersPersonaNames = await personaNamesOfOthers(deps, { tenantId, subjectId });

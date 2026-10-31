@@ -20,6 +20,11 @@ describe('toolWords', () => {
     expect(toolDoneWords('google_setup_read')).toBe('Checked your Google connection');
   });
 
+  it('reads the feed’s activity rows in plain words', () => {
+    expect(toolDoneWords('delivery.created')).toBe('Sent you a notice');
+    expect(toolDoneWords('delivery.web_push')).toBe('Sent a notice to your device');
+  });
+
   it('never shows a raw tool name for a tool it does not know', () => {
     expect(toolDoingWords('some_new_tool')).toBeUndefined();
     expect(toolDoneWords('some_new_tool')).toBe(TOOL_DONE_FALLBACK);

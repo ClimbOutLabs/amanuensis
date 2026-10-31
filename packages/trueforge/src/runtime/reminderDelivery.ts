@@ -7,31 +7,18 @@ import {
   type TurnCreatedEvent,
   type TurnDoneEvent,
 } from '@truefoundry/trueforge-core/agent-session';
-import { newEventId, type AuditLogWriter } from '@truefoundry/trueforge-core/core';
+import { newEventId } from '@truefoundry/trueforge-core/core';
 import type { ModelMessageEvent } from '@truefoundry/trueforge-core/core/events/schema';
-import {
-  LATEST_REMINDER_AT_METADATA_KEY,
-  LATEST_REMINDER_METADATA_KEY,
-  REMINDERS_CHAT_TITLE,
-  REMINDERS_METADATA_KEY,
-  SET_REMINDER_TOOL_NAME,
-} from '@truefoundry/trueforge-core/core/schedules/toolContract';
+import { REMINDERS_CHAT_TITLE, REMINDERS_METADATA_KEY } from '@truefoundry/trueforge-core/core/schedules/toolContract';
 import { ulid } from 'ulid';
 import type { IAgentStore } from '../db/agentStore';
 import type { ScheduleDispatchItem } from '../db/scheduleStore';
 import type { SessionCustom, TurnCustom } from '../db/sessionCustom';
+import type { DeliveryService } from './delivery/deliveryService';
 import { formatRunTime } from './scheduleCapability';
-
-/** Session metadata values are capped at 128 characters. */
-const METADATA_VALUE_MAX_CHARS = 128;
 
 function remindersExternalId(subjectId: string): string {
   return `reminders:${subjectId}`;
-}
-
-function shortened(text: string): string {
-  const chars = Array.from(text);
-  return chars.length > METADATA_VALUE_MAX_CHARS ? `${chars.slice(0, METADATA_VALUE_MAX_CHARS - 1).join('')}…` : text;
 }
 
 /** The line the person reads in the Reminders chat. */
@@ -47,9 +34,9 @@ export class ReminderAgentNotFoundError extends Error {
 }
 
 /**
- * Writes one due reminder into the owner's Reminders chat as a finished assistant line. The host writes it
- * itself: no model is called, so it lands at once and costs nothing. The chat is made on the first reminder
- * and reused after. Returns the session id.
+ * Writes one due reminder into the owner's Reminders chat as a finished assistant line, then puts it in the
+ * owner's feed, which also pushes it to their devices. The host writes it itself: no model is called, so it
+ * lands at once and costs nothing. The chat is made on the first reminder and reused after. Returns the session id.
  */
 export async function deliverReminder(params: {
   item: ScheduleDispatchItem;
@@ -57,8 +44,8 @@ export async function deliverReminder(params: {
   sessionStore: ISessionStore<SessionCustom, TurnCustom>;
   agentStore: Pick<IAgentStore, 'getAgent'>;
   now: Date;
-  /** The activity log the delivery is also written to; absent, the delivery is unchanged and unrecorded. */
-  audit?: AuditLogWriter | null | undefined;
+  /** The feed the reminder is also delivered through; it writes the reason to Activity. */
+  deliveries: Pick<DeliveryService, 'deliver'>;
 }): Promise<string> {
   const { item, sessions, sessionStore, agentStore, now } = params;
   const { schedule, run } = item;
@@ -163,37 +150,23 @@ export async function deliverReminder(params: {
   };
   await sessionStore.updateTurnState({ session_id: sessionId, turn_id: turnId, state, turn_done_event: done });
 
-  // The chat list learns of a new reminder from this: the words, and when they arrived.
+  // The chat list learns of a new reminder from the chat's marker; the feed carries what is unread.
   await sessionStore.updateSession({
     tenant_id: schedule.tenant_id,
     session_id: sessionId,
     agent: undefined,
     title: undefined,
-    metadata: {
-      ...record.metadata,
-      [REMINDERS_METADATA_KEY]: 'true',
-      [LATEST_REMINDER_METADATA_KEY]: shortened(what),
-      [LATEST_REMINDER_AT_METADATA_KEY]: createdAt,
-    },
+    metadata: { ...record.metadata, [REMINDERS_METADATA_KEY]: 'true' },
   });
 
-  // The delivery also leaves one row in the activity log, so a reminder that arrived is visible
-  // beside the actions that ran. A failed write never changes the delivery.
-  if (params.audit !== undefined && params.audit !== null) {
-    try {
-      await params.audit.record({
-        tenant_id: schedule.tenant_id,
-        created_by: schedule.created_by_subject.subject_id,
-        conversation_id: sessionId,
-        tier: 1,
-        tool_name: SET_REMINDER_TOOL_NAME,
-        description: `Delivered the reminder: ${what}`,
-        outcome: 'logged',
-        auto_deny_reason: null,
-      });
-    } catch {
-      // The activity log being unavailable never changes a delivery.
-    }
-  }
+  await params.deliveries.deliver({
+    tenant_id: schedule.tenant_id,
+    created_by: owner.subject_id,
+    kind: 'reminder',
+    level: 'nudge',
+    text: what,
+    reason: `You asked to be reminded on ${formatRunTime({ at: new Date(run.scheduled_for), timezone: schedule.manifest.timezone })}.`,
+    link: { type: 'chat', session_id: sessionId },
+  });
   return sessionId;
 }

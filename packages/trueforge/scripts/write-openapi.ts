@@ -25,6 +25,8 @@ import { SkillCatalog } from '../src/catalog/SkillCatalog';
 import configuration from '../src/config';
 import { McpServerWithAuthStore } from '../src/db/McpServerWithAuthStore';
 import { BriefItemCompletionStore } from '../src/db/briefItemCompletionStore';
+import { DeliveryStore } from '../src/db/deliveryStore';
+import { PushSubscriptionStore } from '../src/db/pushSubscriptionStore';
 import { SentinelAuditStore, type SentinelAuditDatabase } from '../src/db/sentinelAuditStore';
 import { SqliteAgentStore } from '../src/db/sqlite/agent-store/SqliteAgentStore';
 import { SqliteChatImageStore } from '../src/db/sqlite/chat-image-store/SqliteChatImageStore';
@@ -50,6 +52,7 @@ import { SqliteTurnArtifactStore } from '../src/db/sqlite/turn-artifact-store/Sq
 import { ActiveTurnRegistry } from '../src/runtime/activeTurns';
 import { createChatImageService } from '../src/runtime/chatImages/chatImageService';
 import { createImageReencoder } from '../src/runtime/chatImages/reencodeInSandbox';
+import { createDeliveryService } from '../src/runtime/delivery/deliveryService';
 import { EventSubscriptionRegistry } from '../src/runtime/event-subscription';
 import { createTokenFactoryBudget } from '../src/runtime/tokenFactoryBudget';
 import { TurnDrainRegistry } from '../src/runtime/turnDrains';
@@ -86,6 +89,7 @@ const skillStore = new SqliteSkillStore(db);
 const sandboxProviderStore = new SqliteSandboxProviderStore(db);
 const modelProviderStore = new SqliteModelProviderStore(db);
 const turnArtifactStore = new SqliteTurnArtifactStore(db);
+const deliveryStore = new DeliveryStore(db);
 const app = createServerApp({
   modelCatalog: ModelCatalog.load(),
   mcpCatalog: McpCatalog.load(configuration.MCP_CATALOG_PATH),
@@ -123,6 +127,15 @@ const app = createServerApp({
   sentinelAuditStore: new SentinelAuditStore(db as Kysely<SentinelAuditDatabase>),
   sentinelSettingsStore: new SqliteSentinelSettingsStore(db),
   briefItemStore: new BriefItemCompletionStore(db),
+  deliveryStore,
+  pushSubscriptionStore: new PushSubscriptionStore(db),
+  deliveryService: createDeliveryService({
+    store: deliveryStore,
+    senders: [],
+    audit: { record: () => Promise.resolve() },
+    logger: winston.createLogger({ silent: true }),
+  }),
+  webPushPublicKey: undefined,
   sessions: new Sessions({ sessionStore }),
   chatImages: createChatImageService({
     store: new SqliteChatImageStore(db),
