@@ -25,15 +25,15 @@ import { useAgentDetailsVisibility } from '../server/AgentDetailsPreferenceConte
 import { useSlot } from '../theme/SlotsProvider.js';
 import { computeAgentStepsSplit, type AgentStepsRun } from '../utils/computeAgentStepsSplit.js';
 import { useModelUsageVisible } from '../utils/modelUsageDisplayPreference.js';
-import { isSpeechOutputSupported, speakText, stopSpeaking, useSpeakingKey } from '../utils/speechOutput.js';
-import { readSpeechVoiceURI } from '../utils/speechReplyPreferences.js';
-import { finalAnswerSpeech, limitSpeechWords } from '../utils/speechText.js';
 import {
   recoveredToolCallIds,
   stepNoticesByCallId,
   toolStepErrored,
   toolStepUnfinished,
 } from '../utils/recoveredSteps.js';
+import { isSpeechOutputSupported, speakText, stopSpeaking, useSpeakingKey } from '../utils/speechOutput.js';
+import { readSpeechVoiceURI } from '../utils/speechReplyPreferences.js';
+import { finalAnswerSpeech, limitSpeechWords } from '../utils/speechText.js';
 import { hasPendingAskUserResponse, hasPendingToolApproval } from '../utils/toolCallParsing.js';
 import { turnOutcomeLines } from '../utils/turnOutcomes.js';
 import { AgentStepsContainer } from './AgentStepsContainer.js';

@@ -28,8 +28,8 @@ import {
 import type { AgentUIServer } from '../server/types.js';
 import { isNetworkFailureError, LiveConnectionLostError, ReplyStoppedByRestartError } from '../utils/liveConnection.js';
 import { isStaleApprovalError, publishStaleApproval } from '../utils/staleApproval.js';
-import { disarmSpokenReply } from '../utils/voiceTurn.js';
 import { turnRefusalCode } from '../utils/turnRefusal.js';
+import { disarmSpokenReply } from '../utils/voiceTurn.js';
 import { PendingApprovalsReporter } from './PendingApprovalsReporter.js';
 import { ToasterProvider, useToaster } from './ToasterContainer.js';
 
