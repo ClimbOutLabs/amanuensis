@@ -451,6 +451,17 @@
             },
             "default": "./dist/cjs/api/resources/settings/resources/mcpServers/exports.js"
         },
+        "./settings/memoryRecalls": {
+            "import": {
+                "types": "./dist/esm/api/resources/settings/resources/memoryRecalls/exports.d.mts",
+                "default": "./dist/esm/api/resources/settings/resources/memoryRecalls/exports.mjs"
+            },
+            "require": {
+                "types": "./dist/cjs/api/resources/settings/resources/memoryRecalls/exports.d.ts",
+                "default": "./dist/cjs/api/resources/settings/resources/memoryRecalls/exports.js"
+            },
+            "default": "./dist/cjs/api/resources/settings/resources/memoryRecalls/exports.js"
+        },
         "./settings/memoryScreens": {
             "import": {
                 "types": "./dist/esm/api/resources/settings/resources/memoryScreens/exports.d.mts",
