@@ -163,9 +163,13 @@ describe('DraftModelSelector', () => {
   });
 
   it('does not rewrite agentSpec when the selected model is already in the catalog', async () => {
+    // No reasoning effort: gpt-4.1 has none, and the effort selector rightly heals an unsupported one.
+    agentSpec = { model: { name: 'openai/gpt-4.1', params: { maxTokens: 512 } } };
     renderSelector();
 
-    await waitFor(() => expect(screen.getByTitle('Select model')).toHaveTextContent('gpt-4.1'));
+    // The label comes from the spec before the catalog loads, so wait for the catalog itself.
+    fireEvent.click(await screen.findByTitle('Select model'));
+    await screen.findByRole('option', { name: /gpt-4.1/i });
     expect(updateAgentSpec).not.toHaveBeenCalled();
   });
 

@@ -8241,6 +8241,127 @@ await client.settings.mcpServers.delete("name");
 </dl>
 </details>
 
+## Settings MemoryRecalls
+<details><summary><code>client.settings.memoryRecalls.<a href="/src/api/resources/settings/resources/memoryRecalls/client/Client.ts">get</a>() -> TrueForge.GetMemoryRecallResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+Whether replies use saved memories for every chat. `enabled` is null when the switch was never set.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.settings.memoryRecalls.get();
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**requestOptions:** `MemoryRecallsClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
+<details><summary><code>client.settings.memoryRecalls.<a href="/src/api/resources/settings/resources/memoryRecalls/client/Client.ts">createOrUpdate</a>({ ...params }) -> TrueForge.GetMemoryRecallResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+Sets whether replies use saved memories in every chat, including chats with a saved agent. `null` clears the switch so each agent follows its own setting.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.settings.memoryRecalls.createOrUpdate({
+    enabled: false
+});
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**request:** `TrueForge.settings.UpdateMemoryRecallRequest`
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**requestOptions:** `MemoryRecallsClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
 ## Settings MemoryScreens
 <details><summary><code>client.settings.memoryScreens.<a href="/src/api/resources/settings/resources/memoryScreens/client/Client.ts">get</a>() -> TrueForge.GetMemoryScreenResponse</code></summary>
 <dl>
