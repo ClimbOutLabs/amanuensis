@@ -1,9 +1,10 @@
 // @vitest-environment jsdom
 import { ThreadPrimitive, type ThreadMessageLike } from '@assistant-ui/react';
 import { render, screen } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { AssistantMessageContainer } from '@/containers/AssistantMessageContainer.js';
+import { RemindersProvider } from '@/reminders/RemindersContext.js';
 import { AgentDetailsHarness, settleAgentDetails } from './agentDetailsHarness.js';
 import { RuntimeHarness } from './RuntimeHarness.js';
 
@@ -150,5 +151,103 @@ describe('AssistantMessageContainer outcome lines', () => {
     await settleAgentDetails();
     expect(screen.queryByTestId('assistant-message-agent-internals')).not.toBeInTheDocument();
     expect(screen.getByTestId('assistant-message-outcome')).toHaveTextContent(REMINDER_LINE);
+  });
+});
+
+describe('AssistantMessageContainer browser notices offer', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    window.localStorage.clear();
+  });
+
+  /** The browser has not been asked yet, so the offer is due. */
+  function notificationsNotAsked() {
+    vi.stubGlobal(
+      'Notification',
+      class {
+        static permission: NotificationPermission = 'default';
+      },
+    );
+  }
+
+  const fourReminders: ThreadMessageLike = {
+    role: 'assistant',
+    content: [
+      reminderPart('rem-1'),
+      reminderPart('rem-2'),
+      reminderPart('rem-3'),
+      reminderPart('rem-4'),
+      { type: 'text', text: 'Done, four reminders are set.' },
+    ],
+  };
+
+  function visiblePrompts(container: HTMLElement): Element[] {
+    return Array.from(container.querySelectorAll('[data-role="reminder-notification-prompt"]')).filter(
+      prompt => prompt.closest('[hidden]') === null,
+    );
+  }
+
+  it('offers notices once under the reply, not once per reminder, while details are off', () => {
+    notificationsNotAsked();
+    const { container } = render(
+      <RuntimeHarness messages={[fourReminders]}>
+        <RemindersProvider>
+          <ThreadPrimitive.Messages>{() => <AssistantMessageContainer />}</ThreadPrimitive.Messages>
+        </RemindersProvider>
+      </RuntimeHarness>,
+    );
+    expect(container.querySelectorAll('[data-role="reminder-notification-prompt"]')).toHaveLength(1);
+    expect(visiblePrompts(container)).toHaveLength(1);
+  });
+
+  it('offers notices once outside the step rows while details are on', async () => {
+    notificationsNotAsked();
+    const { container } = render(
+      <AgentDetailsHarness agentDetails="expanded" messages={[fourReminders]}>
+        <RemindersProvider>
+          <ThreadPrimitive.Messages>{() => <AssistantMessageContainer />}</ThreadPrimitive.Messages>
+        </RemindersProvider>
+      </AgentDetailsHarness>,
+    );
+    await settleAgentDetails();
+    const prompts = container.querySelectorAll('[data-role="reminder-notification-prompt"]');
+    expect(prompts).toHaveLength(1);
+    expect(prompts[0]?.closest('[data-testid="assistant-message-agent-internals"]')).toBeNull();
+  });
+
+  it('does not offer notices when the reminder was declined', () => {
+    notificationsNotAsked();
+    const declined: ThreadMessageLike = {
+      role: 'assistant',
+      content: [
+        { ...reminderPart('rem-1'), result: envelope(mcpText({ error: 'Not approved.' }), 'denied') },
+        { type: 'text', text: 'Okay, I did not set it.' },
+      ],
+    };
+    const { container } = render(
+      <RuntimeHarness messages={[declined]}>
+        <RemindersProvider>
+          <ThreadPrimitive.Messages>{() => <AssistantMessageContainer />}</ThreadPrimitive.Messages>
+        </RemindersProvider>
+      </RuntimeHarness>,
+    );
+    expect(container.querySelectorAll('[data-role="reminder-notification-prompt"]')).toHaveLength(0);
+  });
+
+  it('does not offer notices while the reminder turn is still running', () => {
+    notificationsNotAsked();
+    const running: ThreadMessageLike = {
+      role: 'assistant',
+      status: { type: 'running' },
+      content: [reminderPart('rem-1'), { type: 'text', text: 'Setting it now.' }],
+    };
+    const { container } = render(
+      <RuntimeHarness messages={[running]} isRunning>
+        <RemindersProvider>
+          <ThreadPrimitive.Messages>{() => <AssistantMessageContainer />}</ThreadPrimitive.Messages>
+        </RemindersProvider>
+      </RuntimeHarness>,
+    );
+    expect(container.querySelectorAll('[data-role="reminder-notification-prompt"]')).toHaveLength(0);
   });
 });

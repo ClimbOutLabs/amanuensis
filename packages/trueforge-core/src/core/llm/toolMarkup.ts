@@ -27,7 +27,8 @@ const STRAY_CLOSING_TAGS: readonly string[] = [
  * the detector matches, never text Aman writes itself. A closing tag is a candidate too: it is a
  * stray marker and is hidden when nothing but blanks follows it on its line, and prose when words
  * follow it there, wherever on the line it sits. A run of closing tags with only blanks between
- * them is judged as one, by what follows the last of them.
+ * them is judged as one, by what follows the last of them. Text glued to a closing tag, with no
+ * space or closing punctuation between, is never prose either, so only the tag is hidden.
  */
 const CANDIDATE_OPENERS: readonly string[] = [
   '<tool_calls',
@@ -343,6 +344,12 @@ function judgeClosingTag(text: string, startsLine: boolean, endOfStream: boolean
     runEnd = at + next.length;
   }
   const rest = text.slice(runEnd);
+  if (/^[^\s.,;:!?)\]}'"`]/u.test(rest)) {
+    // Text glued straight to the tag (a word, **, an emoji, an opening bracket) is never a sentence
+    // naming the tag, which goes on with a space or closing punctuation: it is a reply that went on
+    // writing after a call it wrote as text. Only the tag is hidden.
+    return { verdict: 'stray', length: runEnd };
+  }
   const newlineAt = rest.indexOf('\n');
   const lineRest = newlineAt === -1 ? rest : rest.slice(0, newlineAt);
   if (/[^ \t\r]/.test(lineRest)) {
