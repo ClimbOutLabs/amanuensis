@@ -10,11 +10,11 @@ const LONG_SENTENCE_WORDS = 12;
 /** Shorter sentences ("Done.", "Yes.") repeat in ordinary answers, so they are never counted. */
 const MIN_SENTENCE_WORDS = 6;
 /**
- * Short sentences are not counted one by one, but a reply that keeps cycling through several of them
- * ("Done. All set. Ready. Done. Final. All set.") is a model stuck signing off. The reply stops before
- * the short sentence that would make this many repeats in total, once at least SHORT_LOOP_KEYS
- * different short sentences have repeated. One short line repeated on its own ("Free." under each day)
- * never stops a reply.
+ * Short sentences are not counted one by one, but a reply that keeps cycling through ones it already
+ * wrote ("Done. All set. Ready. Done. Final. All set.") is a model stuck signing off. The reply stops
+ * before the short sentence that would make SHORT_LOOP_REPEATS repeats in a row, with no new words
+ * between them, once at least SHORT_LOOP_KEYS different sentences are in that run. Anything new (a new
+ * sentence, a heading, a day's name) ends the run, so lists and schedules that reuse short lines never stop.
  */
 const SHORT_LOOP_REPEATS = 8;
 const SHORT_LOOP_KEYS = 3;
@@ -85,8 +85,8 @@ export class RepeatedUnitGuard {
   #copies = new Map<string, number>();
   /** How many times each short sentence has been shown. */
   #shortCopies = new Map<string, number>();
-  /** Copies of short sentences shown beyond each one's first. */
-  #shortRepeats = 0;
+  /** The short sentences repeated in a row at the end of the reply, with no new words between them. */
+  #repeatRun: string[] = [];
   #atLineStart = true;
   #inFence = false;
   /** Whether the line being read is code or structure, so its units are never counted. */
@@ -143,7 +143,13 @@ export class RepeatedUnitGuard {
     const shown = unit.raw.slice(unit.shown);
     const counted = this.#countedKey(unit.raw);
     if (counted === undefined) {
+      if (/[\p{L}\p{N}]/u.test(unit.raw)) {
+        this.#repeatRun = [];
+      }
       return { text: shown, stopped: false };
+    }
+    if (!counted.short) {
+      this.#repeatRun = [];
     }
     if (counted.short) {
       return this.#addShortUnit({ key: counted.key, shown });
@@ -159,28 +165,24 @@ export class RepeatedUnitGuard {
 
   #addShortUnit({ key, shown }: { key: string; shown: string }): RepeatedUnitsStep {
     const copies = this.#shortCopies.get(key) ?? 0;
-    if (copies > 0 && this.#shortLoopArmed()) {
+    this.#shortCopies.set(key, copies + 1);
+    if (copies === 0) {
+      this.#repeatRun = [];
+      return { text: shown, stopped: false };
+    }
+    if (this.#shortLoopArmed(key)) {
       return { text: '', stopped: true };
     }
-    this.#shortCopies.set(key, copies + 1);
-    if (copies > 0) {
-      this.#shortRepeats += 1;
-    }
+    this.#repeatRun.push(key);
     return { text: shown, stopped: false };
   }
 
-  /** Whether one more repeat of any short sentence already seen would stop the reply. */
-  #shortLoopArmed(): boolean {
-    if (this.#shortRepeats + 1 < SHORT_LOOP_REPEATS) {
+  /** Whether one more repeat, of `next`, would complete a sign-off loop. */
+  #shortLoopArmed(next: string): boolean {
+    if (this.#repeatRun.length + 1 < SHORT_LOOP_REPEATS) {
       return false;
     }
-    let repeatedKeys = 0;
-    for (const copies of this.#shortCopies.values()) {
-      if (copies > 1) {
-        repeatedKeys += 1;
-      }
-    }
-    return repeatedKeys >= SHORT_LOOP_KEYS;
+    return new Set([...this.#repeatRun, next]).size >= SHORT_LOOP_KEYS;
   }
 
   /**
@@ -227,12 +229,10 @@ export class RepeatedUnitGuard {
     if (prefix === '') {
       return false;
     }
-    if (this.#shortLoopArmed()) {
-      const shortPrefix = shortKey(prefix);
-      for (const key of this.#shortCopies.keys()) {
-        if (key.startsWith(shortPrefix)) {
-          return true;
-        }
+    const shortPrefix = shortKey(prefix);
+    for (const key of this.#shortCopies.keys()) {
+      if (key.startsWith(shortPrefix) && this.#shortLoopArmed(key)) {
+        return true;
       }
     }
     for (const [key, copies] of this.#copies) {

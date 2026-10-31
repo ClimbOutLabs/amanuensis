@@ -215,6 +215,25 @@ describe('AssistantMessageContainer browser notices offer', () => {
     expect(prompts[0]?.closest('[data-testid="assistant-message-agent-internals"]')).toBeNull();
   });
 
+  it('does not offer notices when the reminder was declined', () => {
+    notificationsNotAsked();
+    const declined: ThreadMessageLike = {
+      role: 'assistant',
+      content: [
+        { ...reminderPart('rem-1'), result: envelope(mcpText({ error: 'Not approved.' }), 'denied') },
+        { type: 'text', text: 'Okay, I did not set it.' },
+      ],
+    };
+    const { container } = render(
+      <RuntimeHarness messages={[declined]}>
+        <RemindersProvider>
+          <ThreadPrimitive.Messages>{() => <AssistantMessageContainer />}</ThreadPrimitive.Messages>
+        </RemindersProvider>
+      </RuntimeHarness>,
+    );
+    expect(container.querySelectorAll('[data-role="reminder-notification-prompt"]')).toHaveLength(0);
+  });
+
   it('does not offer notices while the reminder turn is still running', () => {
     notificationsNotAsked();
     const running: ThreadMessageLike = {
