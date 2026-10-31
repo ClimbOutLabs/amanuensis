@@ -5,6 +5,8 @@ import type * as TrueForge from "../index.js";
 export interface Tier3Card {
     /** Verifiable amount, or null. */
     amount: string | null;
+    /** A picture of the page just before a browser click, as a data URL, for the person to check against. Null or absent for every other card. */
+    browserScreenshot?: string | null;
     calendarEvent?: TrueForge.Tier3CalendarEvent | null;
     /** A short note on what can't be reversed, or null. */
     cannotBeUndone: string | null;

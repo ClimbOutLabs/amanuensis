@@ -10745,6 +10745,13 @@
               "null"
             ]
           },
+          "browser_screenshot": {
+            "description": "A picture of the page just before a browser click, as a data URL, for the person to check against. Null or absent for every other card.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "calendar_event": {
             "$ref": "#/components/schemas/Tier3CalendarEvent"
           },
