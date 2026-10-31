@@ -419,16 +419,70 @@ describe('PackageMirrorGateway', () => {
     const harness = await setup();
     try {
       const info = await call(harness.port, {
-        path: '/go/example.com/mod/@v/v1.0.0.info',
+        path: '/go/github.com/example/mod/@v/v1.0.0.info',
         token: harness.token,
       });
       expect(info.status).toBe(200);
       const sum = await call(harness.port, {
-        path: '/go/sumdb/sum.golang.org/lookup/example.com/mod@v1.0.0',
+        path: '/go/sumdb/sum.golang.org/lookup/github.com/example/mod@v1.0.0',
         token: harness.token,
       });
       expect(sum.status).toBe(200);
-      expect(sum.body).toBe('upstream saw /sumdb/sum.golang.org/lookup/example.com/mod@v1.0.0');
+      expect(sum.body).toBe('upstream saw /sumdb/sum.golang.org/lookup/github.com/example/mod@v1.0.0');
+    } finally {
+      await harness.close();
+    }
+  });
+
+  it('serves Go modules from other hosts on the list, through the proxy and the checksum database', async () => {
+    const harness = await setup();
+    try {
+      const list = await call(harness.port, {
+        path: '/go/gitlab.com/example/library/@v/list',
+        token: harness.token,
+      });
+      expect(list.status).toBe(200);
+      const mod = await call(harness.port, {
+        path: '/go/golang.org/x/mod/@v/v0.17.0.mod',
+        token: harness.token,
+      });
+      expect(mod.status).toBe(200);
+      const sum = await call(harness.port, {
+        path: '/go/sumdb/sum.golang.org/lookup/gopkg.in/example/library.v2@v2.0.0',
+        token: harness.token,
+      });
+      expect(sum.status).toBe(200);
+      expect(sum.body).toBe('upstream saw /sumdb/sum.golang.org/lookup/gopkg.in/example/library.v2@v2.0.0');
+    } finally {
+      await harness.close();
+    }
+  });
+
+  it('refuses a Go module whose host is not on the list', async () => {
+    const harness = await setup();
+    try {
+      const reply = await call(harness.port, {
+        path: '/go/modules.example.net/library/@v/v1.2.3.info',
+        token: harness.token,
+      });
+      expect(reply.status).toBe(403);
+      expect(reply.body).toContain('well-known code host');
+      expect(harness.upstreamHits).toEqual([]);
+    } finally {
+      await harness.close();
+    }
+  });
+
+  it('refuses a checksum database lookup for a module whose host is not on the list', async () => {
+    const harness = await setup();
+    try {
+      const reply = await call(harness.port, {
+        path: '/go/sumdb/sum.golang.org/lookup/modules.example.net/library@v1.2.3',
+        token: harness.token,
+      });
+      expect(reply.status).toBe(403);
+      expect(reply.body).toContain('well-known code host');
+      expect(harness.upstreamHits).toEqual([]);
     } finally {
       await harness.close();
     }
