@@ -1,3 +1,6 @@
+import { createSentinelHostContext } from '@truefoundry/trueforge-core/core';
+import type { AuditLogWriter, AuditRecordInput } from '@truefoundry/trueforge-core/core/permissions/audit';
+import { defaultSentinelServices } from '@truefoundry/trueforge-core/core/permissions/context';
 import { NOOP_AGENT_TRACING } from '@truefoundry/trueforge-core/core/tracing/NoopAgentTracing';
 import { createLogger } from 'winston';
 
@@ -13,8 +16,22 @@ interface SentRequest {
   body: Record<string, unknown>;
 }
 
+/** An in-memory audit log, for asserting on what a caught click records. */
+function recordingAuditWriter(): { writer: AuditLogWriter; records: AuditRecordInput[] } {
+  const records: AuditRecordInput[] = [];
+  return {
+    records,
+    writer: {
+      record: input => {
+        records.push(input);
+        return Promise.resolve();
+      },
+    },
+  };
+}
+
 /** The capability's tools, with the sidecar answered by `reply` and every request it would have sent recorded. */
-function mount(reply: (path: string) => { status?: number; json: unknown }) {
+function mount(reply: (path: string) => { status?: number; json: unknown }, audit: AuditLogWriter | null = null) {
   const sent: SentRequest[] = [];
   jest.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
     const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
@@ -33,6 +50,12 @@ function mount(reply: (path: string) => { status?: number; json: unknown }) {
     tracing: NOOP_AGENT_TRACING,
     logger: createLogger({ silent: true }),
     tab: TAB,
+    sentinel: createSentinelHostContext({
+      tenant_id: TAB.tenant_id,
+      created_by: TAB.created_by,
+      conversation_id: TAB.chat_id,
+      services: { ...defaultSentinelServices({ pinned_path: '/usr/bin:/bin' }), audit },
+    }),
   });
   const toolSet = capability.systemToolSets?.[0];
   if (toolSet === undefined) {
@@ -178,7 +201,7 @@ describe('browser capability', () => {
     expect(sent[0]?.body).toEqual({ ref: 'e3', approved: false, owner: 'tenant-1:person-1', tab: 'chat-1' });
   });
 
-  it("toolCallInfo stamps browser_click with the sidecar's dry-run read, not from model text", async () => {
+  it("toolCallInfo stamps browser_click and its screenshot from the sidecar's dry-run read, not from model text", async () => {
     const { sent, toolSet } = mount(path =>
       path === '/click-info'
         ? {
@@ -188,6 +211,7 @@ describe('browser capability', () => {
               accessible_name: 'Place order',
               is_form_submit: true,
               form_values: { card_last4: '4242' },
+              png_base64: 'aGVsbG8=',
             },
           }
         : { json: { status: 'ok', text: '' } },
@@ -199,6 +223,7 @@ describe('browser capability', () => {
       is_form_submit: true,
       form_values: { card_last4: '4242' },
     });
+    expect(info.browser_click_screenshot).toBe('data:image/png;base64,aGVsbG8=');
     expect(sent).toEqual([
       {
         url: 'http://browser-relay:8792/click-info',
@@ -216,6 +241,26 @@ describe('browser capability', () => {
     );
     const info = await toolSet.toolCallInfo({ name: 'browser_click', arguments: { ref: 'e3' } });
     expect(info.browser_click).toBeUndefined();
+  });
+
+  it('toolCallInfo leaves the screenshot unset when the sidecar has none, without failing the whole stamp', async () => {
+    const { toolSet } = mount(path =>
+      path === '/click-info'
+        ? {
+            json: {
+              status: 'ok',
+              site: 'shop.example',
+              accessible_name: 'Cancel',
+              is_form_submit: false,
+              form_values: {},
+              png_base64: null,
+            },
+          }
+        : { json: { status: 'ok', text: '' } },
+    );
+    const info = await toolSet.toolCallInfo({ name: 'browser_click', arguments: { ref: 'e3' } });
+    expect(info.browser_click).toBeDefined();
+    expect(info.browser_click_screenshot).toBeUndefined();
   });
 
   it('toolCallInfo leaves browser_click unset when the sidecar cannot be reached, failing closed', async () => {
@@ -236,6 +281,7 @@ describe('browser capability', () => {
               accessible_name: 'Add item',
               is_form_submit: true,
               form_values: {},
+              png_base64: null,
             },
           }
         : { json: { status: 'ok', text: '' } },
@@ -277,5 +323,47 @@ describe('browser capability', () => {
     expect(textOf(result)).toContain('Continue');
     expect(textOf(result)).toContain('Nothing was sent');
     expect(textOf(result)).toContain('plan: monthly');
+  });
+
+  it('a click the sidecar gate caught writes a receipt, and tells the model plainly to stop', async () => {
+    const { writer, records } = recordingAuditWriter();
+    const { call } = mount(
+      () => ({
+        json: {
+          status: 'needs_approval',
+          site: 'shop.example',
+          accessible_name: 'Continue',
+          form_values: { plan: 'yearly' },
+          png_base64: null,
+        },
+      }),
+      writer,
+    );
+    const result = await call('browser_click', { ref: 'e5' });
+    expect(result.isError).toBe(true);
+    const parsed: unknown = JSON.parse(textOf(result));
+    expect(parsed).toMatchObject({ status: 'needs_approval' });
+    expect(textOf(result)).toContain('Continue');
+    expect(textOf(result)).toContain('shop.example');
+    expect(textOf(result)).toContain('plan: yearly');
+    expect(records).toHaveLength(1);
+    expect(records[0]).toMatchObject({
+      tenant_id: 'tenant-1',
+      created_by: 'person-1',
+      conversation_id: 'chat-1',
+      tier: 3,
+      tool_name: 'browser_click',
+      outcome: 'auto_denied',
+      auto_deny_reason: 'outbound_guard',
+    });
+    expect(records[0]?.description).toMatch(/Continue/);
+    expect(records[0]?.description).toMatch(/shop\.example/);
+  });
+
+  it('an approved click that goes through writes no gate receipt: it was never caught', async () => {
+    const { writer, records } = recordingAuditWriter();
+    const { toolSet } = mount(() => ({ json: { status: 'ok', text: 'Order placed' } }), writer);
+    await toolSet.callTool({ name: 'browser_click', arguments: { ref: 'e5' } }, { status: 'allow' });
+    expect(records).toHaveLength(0);
   });
 });

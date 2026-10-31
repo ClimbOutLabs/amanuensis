@@ -2858,6 +2858,7 @@ export class SpaceTurnResourceResolver extends MemoryTurnResourceResolver {
                 tracing: input.tracing,
                 logger: this.#space.logger,
                 tab: { tenant_id: input.tenant_id, created_by: input.created_by, chat_id: input.session_id },
+                sentinel,
               }),
             ]
           : []),

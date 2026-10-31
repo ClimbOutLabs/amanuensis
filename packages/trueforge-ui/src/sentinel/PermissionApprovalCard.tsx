@@ -241,6 +241,14 @@ export const PermissionApprovalCard: FC<PermissionApprovalCardProps> = ({
           <p className="text-text-secondary">You have seen this before: {card.why_asked_again}</p>
         )}
 
+        {card.browser_screenshot !== null && card.browser_screenshot !== undefined && (
+          <img
+            src={card.browser_screenshot}
+            alt="The page just before this click"
+            className="max-h-64 w-full rounded border border-border object-contain object-top"
+          />
+        )}
+
         {hasDetails && (
           <dl className="space-y-1.5 rounded border border-border bg-primary-bg px-3 py-2">
             {card.destination !== null && <DetailRow label="Destination" value={card.destination} />}
