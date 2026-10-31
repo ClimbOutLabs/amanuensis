@@ -2,9 +2,9 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import { join } from 'node:path';
 import { createSentinelHostContext, defaultSentinelServices } from '../../../src/core';
-import { isCallToolResponseResult } from '../../../src/core/mcp/IMCPServer';
-import type { RunCodeInput, RunCodeResult } from '../../../src/core/sandbox/driver/RunCodeSchemas';
-import type { RunCodeBackend, RunCodeRunOptions } from '../../../src/core/sandbox/driver/RunCodeService';
+import { isCallToolResponseResult, type CallToolResponse } from '../../../src/core/mcp/IMCPServer';
+import type { RunCodeResult } from '../../../src/core/sandbox/driver/RunCodeSchemas';
+import type { RunCodeBackend, RunCodeCallOptions } from '../../../src/core/sandbox/driver/RunCodeService';
 import { PACKAGE_GIT_DEPENDENCY_MESSAGE } from '../../../src/core/sandbox/packageMirrors';
 import type { ExecResult, SandboxExecParams, SandboxProvider } from '../../../src/core/sandbox/provider/Provider';
 import {
@@ -28,13 +28,25 @@ const BOUND_REPOSITORY: BoundRepository = {
 const NO_PROJECT_CARD_WHAT =
   'Aman wants to download packages from the public package sites (PyPI) in your chats that are not working on a project.';
 
+/** One call the fake run_code backend recorded: the raw input the backend contract hands it, and its call options. */
+type RecordedRunCodeCall = { input: unknown; options: RunCodeCallOptions | undefined };
+
 /** A run_code backend that records what it was handed and can reach the package gateway. */
-function makeRunCodeService(calls: { input: RunCodeInput; options: RunCodeRunOptions | undefined }[]): RunCodeBackend {
+function makeRunCodeService(calls: RecordedRunCodeCall[]): RunCodeBackend {
   return {
     packageGatewayCapable: true,
     runCode: (input, options) => {
       calls.push({ input, options });
-      const result: RunCodeResult = { status: 'ok', exit_code: 0, stdout: '', stderr: '', files_out: [] };
+      const result: RunCodeResult = {
+        status: 'ok',
+        exit_code: 0,
+        stdout: '',
+        stderr: '',
+        stdout_truncated: false,
+        stderr_truncated: false,
+        files_out: [],
+        harvest_warnings: [],
+      };
       return Promise.resolve(result);
     },
     scrubDispatchErrorText: text => text,
@@ -95,7 +107,7 @@ function makeSandbox(input: {
   allowPackageDownloads: () => Promise<void>;
   boundRepository?: BoundRepository | undefined;
   files?: Record<string, string> | undefined;
-  runCodeCalls?: { input: RunCodeInput; options: RunCodeRunOptions | undefined }[] | undefined;
+  runCodeCalls?: RecordedRunCodeCall[] | undefined;
   runCodeService?: RunCodeBackend | undefined;
   loaders?: boolean | undefined;
   sandboxWithoutAsking?: boolean | undefined;
@@ -141,7 +153,7 @@ const PIP_CALL = {
   arguments: { intent: 'Install the packages', purpose: 'execute', command: 'pip install requests' },
 };
 
-function resultText(response: unknown): string {
+function resultText(response: CallToolResponse): string {
   if (!isCallToolResponseResult(response)) {
     throw new Error('Expected a tool result');
   }
@@ -431,7 +443,7 @@ describe('package downloads from run_code in a chat without a project', () => {
   });
 
   it('records the allowance on approval, and the run itself is provisioned with the mirror token', async () => {
-    const runCodeCalls: { input: RunCodeInput; options: RunCodeRunOptions | undefined }[] = [];
+    const runCodeCalls: RecordedRunCodeCall[] = [];
     let allowed = false;
     const allowPackageDownloads = jest.fn(async () => {
       allowed = true;
@@ -459,7 +471,7 @@ describe('package downloads from run_code in a chat without a project', () => {
   });
 
   it('hands the run no token while downloads are not allowed', async () => {
-    const runCodeCalls: { input: RunCodeInput; options: RunCodeRunOptions | undefined }[] = [];
+    const runCodeCalls: RecordedRunCodeCall[] = [];
     const sandbox = makeSandbox({
       execCalls: [],
       allowed: () => false,
@@ -481,7 +493,7 @@ describe('package downloads from run_code in a chat without a project', () => {
 
   it('the mirror token rides only the model\u2019s own calls, never a host-authored one', async () => {
     const execCalls: SandboxExecParams[] = [];
-    const runCodeCalls: { input: RunCodeInput; options: RunCodeRunOptions | undefined }[] = [];
+    const runCodeCalls: RecordedRunCodeCall[] = [];
     let allowed = false;
     const sandbox = makeSandbox({
       execCalls,
