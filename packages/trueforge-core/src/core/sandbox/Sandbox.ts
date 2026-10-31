@@ -110,13 +110,14 @@ import {
 } from './hostAuthenticatedGit';
 import {
   commandDownloadsPackages,
-  commandInstallsPypiOrNpmPackages,
   findCommandLineGitDependency,
   findGitDependency,
   PACKAGE_GIT_DEPENDENCY_MESSAGE,
   PACKAGE_MANIFEST_FILES,
   PACKAGE_UNAVAILABLE_RULE,
   packageDownloadCardWhat,
+  packageDownloadCardWhatWithoutProject,
+  packageDownloadSitesText,
 } from './packageMirrors';
 import {
   ensureExecSuccess,
@@ -261,9 +262,10 @@ export interface SandboxOptions {
   /** Re-reads the owner-scoped repository record for final plan admission. */
   loadBoundRepository?: (() => Promise<BoundRepository | undefined>) | undefined;
   /**
-   * Resolves the package mirror token for the bound repository when the person has allowed package
-   * downloads for it, or undefined when downloads are not allowed. Re-read on every command, so
-   * removing the allowance takes effect on the next call. Absent outside the server runtime.
+   * Resolves the package mirror token for this chat when the person has allowed package downloads
+   * for its scope, the bound repository or their chats without a project, or undefined when
+   * downloads are not allowed. Re-read on every command, so removing the allowance takes effect
+   * on the next call. Absent outside the server runtime.
    */
   loadPackageMirrorToken?: (() => Promise<string | undefined>) | undefined;
   /**
@@ -274,13 +276,13 @@ export interface SandboxOptions {
    */
   loadSkillNetworkGrant?: (() => Promise<{ token: string; hosts: readonly string[] } | undefined>) | undefined;
   /**
-   * Whether the person has allowed package downloads for the bound repository. Re-read whenever a
-   * download command is stamped, so the first download in a repo shows its own approval card.
+   * Whether the person has allowed package downloads for this chat's scope. Re-read whenever a
+   * download command is stamped, so the first download in a scope shows its own approval card.
    * Absent outside the server runtime; the ordinary card is shown then.
    */
   loadPackageDownloadsAllowed?: (() => Promise<boolean>) | undefined;
   /**
-   * Records that the person allowed package downloads for the bound repository. Called when a
+   * Records that the person allowed package downloads for this chat's scope. Called when a
    * download command the person approved is about to run, before the mirror token is resolved, so
    * the approved command itself can download. Absent outside the server runtime.
    */
@@ -1426,12 +1428,12 @@ function runCodeEnvironmentSentences({
   if (offline) {
     // The package gateway is separate from the sandbox network, so an offline sandbox can still download.
     const packages = packageDownloads
-      ? 'Packages can be downloaded for this chat: if one is missing, install it with pip or npm, then run again.'
+      ? `Packages can be downloaded for this chat: if one is missing, install it from ${packageDownloadSitesText()}, then run again.`
       : `Packages cannot be downloaded here, so if one is missing, ${PACKAGE_UNAVAILABLE_RULE}`;
     return `Preinstalled: Python with pandas, numpy, matplotlib, openpyxl, pdfplumber, pypdf, Pillow, python-docx and reportlab; Node with tsx and typescript. This sandbox has no internet access. Never use it to fetch web content. ${packages}`;
   }
   if (packageDownloads) {
-    return 'Preinstalled: pandas, numpy, matplotlib, seaborn, plotly, openpyxl, pdfplumber, Pillow, requests, genson, pydantic, pyyaml, beautifulsoup4, poppler-utils, tesseract-ocr. Packages can be downloaded for this chat: if one is missing, install it with pip or npm, then run again. Never use the network to fetch web content.';
+    return `Preinstalled: pandas, numpy, matplotlib, seaborn, plotly, openpyxl, pdfplumber, Pillow, requests, genson, pydantic, pyyaml, beautifulsoup4, poppler-utils, tesseract-ocr. Packages can be downloaded for this chat: if one is missing, install it from ${packageDownloadSitesText()}, then run again. Never use the network to fetch web content.`;
   }
   return 'Preinstalled: pandas, numpy, matplotlib, seaborn, plotly, openpyxl, pdfplumber, Pillow, requests, genson, pydantic, pyyaml, beautifulsoup4, poppler-utils, tesseract-ocr. No network and no installs at runtime: if a package is missing, say so instead of installing it.';
 }
@@ -1796,7 +1798,13 @@ const OFFLINE_NETWORK_COMMAND_REFUSAL =
   'This sandbox is offline by design, so this command cannot reach the internet and was not run. Do not retry it and do not try another tool for the same job. Tell the user in plain words that you cannot open websites from here.';
 
 const PACKAGE_INSTALL_UNAVAILABLE_REFUSAL =
-  'Packages cannot be downloaded in this chat, so this install was not run. Use the standard library or the packages that are already installed, or open this work on a repository that allows downloads. Do not retry it and do not try another tool for the same job.';
+  'Packages cannot be downloaded on this server, so this install was not run. Use the standard library or the packages that are already installed. Do not retry it and do not try another tool for the same job.';
+
+const PACKAGE_INSTALL_NEEDS_SEALED_SANDBOX_REFUSAL =
+  'Package downloads need the sealed sandbox, and this server is not using it. Move this work to a server that uses the sealed sandbox, then try the install again.';
+
+/** Why a package download cannot succeed in this chat: no token wiring, or a driver that cannot reach the gateway. */
+export type PackageDownloadBlock = 'unavailable' | 'driver';
 
 function sandboxExecPreflightFailure(input: {
   command: string;
@@ -1807,7 +1815,7 @@ function sandboxExecPreflightFailure(input: {
   webConnectorAttached: boolean;
   webConnectorToolHint: string;
   hasNetwork: boolean;
-  packageGatewayAvailable: boolean;
+  packageDownloadBlock: PackageDownloadBlock | undefined;
   /** True when the person approved network access for a skill mounted in this chat. */
   skillNetworkGranted: boolean;
   resolveCache: Map<string, string | undefined>;
@@ -1830,8 +1838,10 @@ function sandboxExecPreflightFailure(input: {
   if (!input.hasNetwork && !input.skillNetworkGranted && sandboxCommandHasNetworkIntent(input.command)) {
     return OFFLINE_NETWORK_COMMAND_REFUSAL;
   }
-  if (!input.packageGatewayAvailable && commandInstallsPypiOrNpmPackages(input.command)) {
-    return PACKAGE_INSTALL_UNAVAILABLE_REFUSAL;
+  if (input.packageDownloadBlock !== undefined && commandDownloadsPackages(input.command)) {
+    return input.packageDownloadBlock === 'driver'
+      ? PACKAGE_INSTALL_NEEDS_SEALED_SANDBOX_REFUSAL
+      : PACKAGE_INSTALL_UNAVAILABLE_REFUSAL;
   }
   if (input.purpose === undefined) {
     return 'A terminal invocation must declare its purpose explicitly.';
@@ -2117,7 +2127,7 @@ export class Sandbox extends LocalToolMCP {
   private readonly execGuardResolveCache = new Map<string, string | undefined>();
   /** Code-execution backend behind `run_code`; undefined when no isolation driver is configured. */
   private readonly runCodeService: RunCodeBackend | undefined;
-  /** The person's download setting for the bound repository, read before each tool-list read and call. */
+  /** The person's download setting for this chat's scope, read before each tool-list read and call. */
   private packageDownloadsAllowedForChat = false;
   /** Sites approved for the skills in this chat, read before each tool-list read; empty means no grant. */
   private skillNetworkHostsForChat: readonly string[] = [];
@@ -2143,7 +2153,7 @@ export class Sandbox extends LocalToolMCP {
       // Description is rendered per turn in getTools(): the /ingress list is dynamic.
       description: '',
       schema: RunCodeInputSchema,
-      handler: (input, _approvalDecision, context) => this.handleRunCode(input, context),
+      handler: (input, approvalDecision, context) => this.handleRunCode(input, approvalDecision, context),
     }),
     defineTool({
       name: SANDBOX_APPLY_PATCH_TOOL_NAME,
@@ -2283,7 +2293,7 @@ export class Sandbox extends LocalToolMCP {
         webConnectorAttached: this.webConnectorAttached,
         webConnectorToolHint: this.webConnectorToolHint,
         hasNetwork: this.hasNetwork(),
-        packageGatewayAvailable: this.packageGatewayAvailable(),
+        packageDownloadBlock: this.packageDownloadBlock(),
         skillNetworkGranted: this.skillNetworkHostsForChat.length > 0,
         resolveCache: this.execGuardResolveCache,
       }) !== undefined;
@@ -2474,20 +2484,28 @@ export class Sandbox extends LocalToolMCP {
         }`;
       }
     }
-    // The first download in a repo that has not allowed downloads gets its own card wording: what the
-    // person is agreeing to is downloads for this repo, not just this one command. A failed read
-    // leaves the ordinary card in place; the command still runs offline, never the reverse.
+    // The first download in a scope that has not allowed downloads gets its own card wording: what
+    // the person is agreeing to is downloads for this repo, or for their chats without a project,
+    // not just this one command. A failed read leaves the ordinary card in place; the command
+    // still runs offline, never the reverse.
     let packageCard: { plain_what: string } | undefined;
+    const packageCardText =
+      params.name === SANDBOX_EXEC_TOOL_NAME && !invalidExecPreflight
+        ? command
+        : params.name === SANDBOX_RUN_CODE_TOOL_NAME
+          ? stringToolArgument(effectiveArguments, 'code')
+          : undefined;
     if (
-      params.name === SANDBOX_EXEC_TOOL_NAME &&
-      !invalidExecPreflight &&
-      this.boundRepository !== undefined &&
+      packageCardText !== undefined &&
       this.loadPackageDownloadsAllowed !== undefined &&
-      commandDownloadsPackages(command)
+      commandDownloadsPackages(packageCardText)
     ) {
       try {
         if (!(await this.loadPackageDownloadsAllowed())) {
-          const what = packageDownloadCardWhat(command);
+          const what =
+            this.boundRepository === undefined
+              ? packageDownloadCardWhatWithoutProject(packageCardText)
+              : packageDownloadCardWhat(packageCardText);
           if (what !== undefined) {
             packageCard = { plain_what: what };
           }
@@ -2530,6 +2548,7 @@ export class Sandbox extends LocalToolMCP {
               : withPackageDownloadCard({
                   card: withHostGitCard({ card: sentinelStamp.tier3_card, hostGitCard }),
                   packageCard,
+                  parsedCommand: packageCardText ?? null,
                 }),
           }),
       // The approval token (if any) was minted over the invoked name and the
@@ -2594,7 +2613,17 @@ export class Sandbox extends LocalToolMCP {
             ? {}
             : { pre_dispatch_failure: structuredEditPreDispatchFailure }
           : { pre_dispatch_failure: sentinelStamp.pre_dispatch_failure }),
-      is_approval_required: invalidCall ? false : (sentinelStamp?.is_approval_required ?? legacyApprovalRequired),
+      // The first download in a scope always asks, even when the person lets sandbox work run
+      // without asking: without the card the allowance is never recorded, and the install would
+      // fail inside the sandbox with no explanation. A call the host already refused asks nothing.
+      is_approval_required: invalidCall
+        ? false
+        : packageCard !== undefined &&
+            sentinelStamp !== undefined &&
+            sentinelStamp.pre_dispatch_failure === undefined &&
+            hostGitPushFailure === undefined
+          ? true
+          : (sentinelStamp?.is_approval_required ?? legacyApprovalRequired),
     };
   }
 
@@ -3921,22 +3950,27 @@ export class Sandbox extends LocalToolMCP {
   }
 
   /**
-   * Whether a package download can ever succeed in this chat: a bound repository, a token loader and
-   * a driver that can reach the package gateway. The install refusal reads this, not the person's
-   * allowance, so the first install still reaches the approval card that asks for it.
+   * Why a package download cannot succeed in this chat, or undefined when it can: the wiring that
+   * hands out mirror tokens is absent, or the run_code driver cannot reach the package gateway.
+   * The install refusal reads this, not the person's allowance, so the first install still reaches
+   * the approval card that asks for it.
    */
+  private packageDownloadBlock(): PackageDownloadBlock | undefined {
+    if (this.loadPackageMirrorToken === undefined) {
+      return 'unavailable';
+    }
+    return this.runCodeService?.packageGatewayCapable === true ? undefined : 'driver';
+  }
+
+  /** Whether a package download can ever succeed in this chat: token wiring and a capable driver. */
   private packageGatewayAvailable(): boolean {
-    return (
-      this.loadPackageMirrorToken !== undefined &&
-      this.boundRepository !== undefined &&
-      this.runCodeService?.packageGatewayCapable === true
-    );
+    return this.packageDownloadBlock() === undefined;
   }
 
   /**
    * Whether a package download can succeed right now: the gateway is available and the person has
-   * allowed downloads for the bound repository. The run_code description reads this. The token
-   * check at dispatch still decides each command.
+   * allowed downloads for this chat's scope, the bound repository or their chats without a project.
+   * The run_code description reads this. The token check at dispatch still decides each command.
    */
   private packageDownloadsPossible(): boolean {
     return this.packageGatewayAvailable() && this.packageDownloadsAllowedForChat;
@@ -3945,7 +3979,7 @@ export class Sandbox extends LocalToolMCP {
   /** Reads the download setting into the cache. A failed read keeps downloads off, never on. */
   private async refreshPackageDownloadsAllowed(): Promise<void> {
     const load = this.loadPackageDownloadsAllowed;
-    if (load === undefined || this.boundRepository === undefined) {
+    if (load === undefined) {
       this.packageDownloadsAllowedForChat = false;
       return;
     }
@@ -3960,12 +3994,12 @@ export class Sandbox extends LocalToolMCP {
   }
 
   /**
-   * The package mirror token for this session's bound repository, or undefined when the person has
-   * not allowed downloads for it. A resolver failure keeps the sandbox offline, never the reverse.
+   * The package mirror token for this chat, or undefined when the person has not allowed downloads
+   * for its scope. A resolver failure keeps the sandbox offline, never the reverse.
    */
   private async resolvePackageMirrorToken(): Promise<string | undefined> {
     const load = this.loadPackageMirrorToken;
-    if (load === undefined || this.boundRepository === undefined) {
+    if (load === undefined) {
       return undefined;
     }
     try {
@@ -4005,7 +4039,7 @@ export class Sandbox extends LocalToolMCP {
   }
 
   /**
-   * Records the bound repository's download allowance after the person approved a download command,
+   * Records this chat's scope's download allowance after the person approved a download command,
    * or returns the plain refusal to run the command when the record cannot be saved. Running the
    * command offline after an approval would fail in a way that hides why, so a failed save stops it
    * before anything runs. Anything that is not an unapproved download command is left alone.
@@ -4013,12 +4047,7 @@ export class Sandbox extends LocalToolMCP {
   private async recordPackageDownloadsApproval(input: { command: string }): Promise<string | undefined> {
     const allow = this.allowPackageDownloads;
     const loadAllowed = this.loadPackageDownloadsAllowed;
-    if (
-      allow === undefined ||
-      loadAllowed === undefined ||
-      this.boundRepository === undefined ||
-      !commandDownloadsPackages(input.command)
-    ) {
+    if (allow === undefined || loadAllowed === undefined || !commandDownloadsPackages(input.command)) {
       return undefined;
     }
     try {
@@ -4028,11 +4057,34 @@ export class Sandbox extends LocalToolMCP {
       await allow();
       return undefined;
     } catch (error) {
-      this.logger.error('Could not save the package download setting for this repository', {
+      this.logger.error('Could not save the package download setting', {
         error: error instanceof Error ? error.message : String(error),
       });
-      return 'Aman could not save the download setting for this repo. Try again.';
+      return this.boundRepository === undefined
+        ? 'Aman could not save the download setting. Try again.'
+        : 'Aman could not save the download setting for this repo. Try again.';
     }
+  }
+
+  /**
+   * The run_code form of the record step: the text scanned for downloads is the call's own code,
+   * or the script file's text for a script_path call. A script that cannot be read records
+   * nothing: the run then goes ahead with no mirror token and an install inside it fails in the
+   * sandbox, never the reverse.
+   */
+  private async recordRunCodeDownloadsApproval(input: RunCodeInput): Promise<string | undefined> {
+    let text = input.code;
+    if (text === undefined && input.script_path !== undefined) {
+      try {
+        text = (await this.readRunCodeScript(input.script_path)).toString('utf8');
+      } catch {
+        return undefined;
+      }
+    }
+    if (text === undefined) {
+      return undefined;
+    }
+    return this.recordPackageDownloadsApproval({ command: text });
   }
 
   /**
@@ -5039,12 +5091,25 @@ export class Sandbox extends LocalToolMCP {
   }
 
   /** Dispatches `run_code` through the configured isolation driver. */
-  private async handleRunCode(input: RunCodeInput, context?: ToolInvocationContext): Promise<CallToolResponse> {
+  private async handleRunCode(
+    input: RunCodeInput,
+    approvalDecision?: ApprovalDecision,
+    context?: ToolInvocationContext,
+  ): Promise<CallToolResponse> {
     const service = this.runCodeService;
     if (service === undefined) {
       return hostRefusalResponse(
         'run_code is not available: no sandbox isolation driver is configured for this deployment. Report the failure instead of running the code another way.',
       );
+    }
+    if (approvalDecision !== undefined) {
+      // The person approved this run. When the code downloads packages in a scope that has not
+      // allowed downloads yet, that approval is the scope's allowance: record it before the run
+      // is provisioned, so the mirror token resolves for this run and later ones.
+      const allowanceRefusal = await this.recordRunCodeDownloadsApproval(input);
+      if (allowanceRefusal !== undefined) {
+        return hostRefusalResponse(allowanceRefusal);
+      }
     }
     // the turn's abort signal reaches the backend (provisioning observes
     // it); provisioning progress is honest — every driver message is logged
@@ -5421,7 +5486,7 @@ export class Sandbox extends LocalToolMCP {
       webConnectorAttached: this.webConnectorAttached,
       webConnectorToolHint: this.webConnectorToolHint,
       hasNetwork: this.hasNetwork(),
-      packageGatewayAvailable: this.packageGatewayAvailable(),
+      packageDownloadBlock: this.packageDownloadBlock(),
       skillNetworkGranted: this.skillNetworkHostsForChat.length > 0,
       resolveCache: this.execGuardResolveCache,
     });
@@ -7164,13 +7229,33 @@ function withHostGitCard(input: {
   };
 }
 
-/** The Sentinel card with the package download sentence in place of its generic wording. */
+/**
+ * The Sentinel card with the package download sentence in place of its generic wording. A call the
+ * classifier would have run without asking has no card; the first download still asks, so it gets
+ * the download card on its own.
+ */
 function withPackageDownloadCard(input: {
   card: Tier3Card | null | undefined;
   packageCard: { plain_what: string } | undefined;
+  parsedCommand: string | null;
 }): Tier3Card | null | undefined {
-  if (input.card === null || input.card === undefined || input.packageCard === undefined) {
+  if (input.packageCard === undefined) {
     return input.card;
+  }
+  if (input.card === null || input.card === undefined) {
+    return {
+      plain_what: input.packageCard.plain_what,
+      plain_why: null,
+      cannot_be_undone: null,
+      why_asked_again: null,
+      destination: null,
+      recipient: null,
+      amount: null,
+      parsed_command: input.parsedCommand,
+      outbound_text: null,
+      destination_host: null,
+      outbound_truncated: false,
+    };
   }
   return { ...input.card, plain_what: input.packageCard.plain_what };
 }
