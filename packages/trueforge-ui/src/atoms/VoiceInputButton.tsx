@@ -6,6 +6,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useSpokenReply } from '../components/SpokenReplyContext.js';
 import { useOptionalVoiceInput, type VoiceAvailability, type VoiceInputApi } from '../components/VoiceInputContext.js';
 import { Icon } from '../icons/Icon.js';
+import { hotkeyById, matchesHotkey, usePushToTalkHotkey } from '../utils/pushToTalkHotkey.js';
 import { markDraftFromVoice } from '../utils/voiceTurn.js';
 import { auiButtonClass } from './lib/buttonClasses.js';
 import { cn } from './lib/cn.js';
@@ -16,6 +17,9 @@ const MIC_UNAVAILABLE_MESSAGE = 'Microphone unavailable. Check your microphone a
 const RECORD_LIMIT_MESSAGE = 'Recording stopped at the 3-minute limit. Tap the mic to record another segment.';
 
 type VoicePhase = 'idle' | 'recording' | 'transcribing' | 'denied';
+
+/** A press held at least this long after recording starts is push-to-talk: letting go sends. */
+export const HOLD_TO_SEND_MS = 400;
 
 function appendTranscript(current: string, transcript: string): string {
   const trimmed = transcript.trim();
@@ -44,6 +48,12 @@ function VoiceInputButtonInner({ api, disabled }: { api: VoiceInputApi; disabled
   const [notice, setNotice] = useState<string | null>(null);
   const [popoverOpen, setPopoverOpen] = useState(false);
   const recorderRef = useRef<VoiceRecorder | null>(null);
+  const recordingStartedAtRef = useRef<number | null>(null);
+  // A press (pointer or hotkey) that started the recording and is still held.
+  const pressHeldRef = useRef(false);
+  const rootRef = useRef<HTMLSpanElement>(null);
+  const [sendPending, setSendPending] = useState(false);
+  const { hotkeyId } = usePushToTalkHotkey();
   const abortRef = useRef<AbortController | null>(null);
   const mountedRef = useRef(true);
   const composerTextRef = useRef(composerText);
@@ -97,9 +107,11 @@ function VoiceInputButtonInner({ api, disabled }: { api: VoiceInputApi; disabled
   }, []);
 
   const stopAndTranscribe = useCallback(
-    async ({ autoStopped }: { autoStopped: boolean }): Promise<void> => {
+    async ({ autoStopped, send }: { autoStopped: boolean; send: boolean }): Promise<void> => {
       const recorder = recorderRef.current;
       recorderRef.current = null;
+      recordingStartedAtRef.current = null;
+      pressHeldRef.current = false;
       if (recorder == null) {
         return;
       }
@@ -114,8 +126,11 @@ function VoiceInputButtonInner({ api, disabled }: { api: VoiceInputApi; disabled
         if (!mountedRef.current || controller.signal.aborted) {
           return;
         }
-        if (result.text.trim() !== '') markDraftFromVoice();
+        const spoke = result.text.trim() !== '';
+        if (spoke) markDraftFromVoice();
         aui.composer().setText(appendTranscript(composerTextRef.current, result.text));
+        // Sent once the new text has rendered, through the same submit path as the Send button.
+        if (send && spoke && !autoStopped) setSendPending(true);
         if (autoStopped) {
           setNotice(RECORD_LIMIT_MESSAGE);
         }
@@ -149,7 +164,7 @@ function VoiceInputButtonInner({ api, disabled }: { api: VoiceInputApi; disabled
     try {
       const recorder = await startVoiceRecording({
         onAutoStop: () => {
-          void stopAndTranscribe({ autoStopped: true });
+          void stopAndTranscribe({ autoStopped: true, send: false });
         },
         onStreamEnded: () => {
           // Mic revoked mid-recording: release and surface the denied state.
@@ -166,6 +181,7 @@ function VoiceInputButtonInner({ api, disabled }: { api: VoiceInputApi; disabled
         recorder.cancel();
         return false;
       }
+      recordingStartedAtRef.current = Date.now();
       setPhase('recording');
       return true;
     } catch (error) {
@@ -189,20 +205,77 @@ function VoiceInputButtonInner({ api, disabled }: { api: VoiceInputApi; disabled
     abortRef.current?.abort();
   }, []);
 
-  const toggle = () => {
-    if (acquiring || phase === 'transcribing') {
+  /**
+   * Start of a press on the mic or the hotkey. While recording, a press stops it and leaves the
+   * text in the box to check; otherwise it starts recording.
+   */
+  const beginPress = () => {
+    // The hotkey listens while the mic is still hidden; it does nothing until the mic shows.
+    if (available !== true || acquiring || phase === 'transcribing') {
       return;
     }
     if (phase === 'recording') {
-      void stopAndTranscribe({ autoStopped: false });
+      void stopAndTranscribe({ autoStopped: false, send: false });
+      return;
+    }
+    if (disabled) {
       return;
     }
     if (phase === 'denied') {
       setPopoverOpen(true);
       return;
     }
+    pressHeldRef.current = true;
     void startRecording();
   };
+
+  /**
+   * End of a press. A short press was a tap, so recording goes on until the next tap. A press held
+   * while recording for at least HOLD_TO_SEND_MS was push-to-talk, so the words are sent.
+   */
+  const endPress = () => {
+    if (!pressHeldRef.current) {
+      return;
+    }
+    pressHeldRef.current = false;
+    const startedAt = recordingStartedAtRef.current;
+    if (recorderRef.current != null && startedAt != null && Date.now() - startedAt >= HOLD_TO_SEND_MS) {
+      void stopAndTranscribe({ autoStopped: false, send: true });
+    }
+  };
+
+  const pressRef = useRef({ beginPress, endPress });
+  pressRef.current = { beginPress, endPress };
+
+  useEffect(() => {
+    if (!sendPending) return;
+    setSendPending(false);
+    rootRef.current?.closest('form')?.requestSubmit();
+  }, [sendPending]);
+
+  useEffect(() => {
+    const hotkey = hotkeyById(hotkeyId);
+    if (hotkey === undefined) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (!matchesHotkey(event, hotkey)) return;
+      event.preventDefault();
+      if (!event.repeat) pressRef.current.beginPress();
+    };
+    // Modifiers may be let go first, so the press ends on Space alone.
+    const onKeyUp = (event: KeyboardEvent) => {
+      if (event.code === 'Space') pressRef.current.endPress();
+    };
+    // A key let go in another window never reports here; treat leaving the window as letting go.
+    const onBlur = () => pressRef.current.endPress();
+    window.addEventListener('keydown', onKeyDown);
+    window.addEventListener('keyup', onKeyUp);
+    window.addEventListener('blur', onBlur);
+    return () => {
+      window.removeEventListener('keydown', onKeyDown);
+      window.removeEventListener('keyup', onKeyUp);
+      window.removeEventListener('blur', onBlur);
+    };
+  }, [hotkeyId]);
 
   const tryAgain = () => {
     void (async () => {
@@ -225,9 +298,10 @@ function VoiceInputButtonInner({ api, disabled }: { api: VoiceInputApi; disabled
       : phase === 'recording'
         ? 'Stop and transcribe'
         : 'Record voice message';
+  const micHint = phase === 'idle' ? 'Tap to record, or hold to talk and let go to send.' : micTitle;
 
   return (
-    <span className="relative inline-flex min-w-0 items-center gap-1">
+    <span ref={rootRef} className="relative inline-flex min-w-0 items-center gap-1">
       {phase === 'transcribing' ? (
         <span className="inline-flex min-w-0 items-center gap-2">
           <span role="status" className="text-text-secondary text-xs whitespace-nowrap">
@@ -245,13 +319,28 @@ function VoiceInputButtonInner({ api, disabled }: { api: VoiceInputApi; disabled
       ) : (
         <button
           type="button"
-          onClick={toggle}
+          onPointerDown={event => {
+            if (event.button !== 0) return;
+            // Keeps the release reported here when the finger or pointer drifts off the button.
+            event.currentTarget.setPointerCapture?.(event.pointerId);
+            beginPress();
+          }}
+          onPointerUp={endPress}
+          onPointerCancel={endPress}
+          onContextMenu={event => event.preventDefault()}
+          onClick={event => {
+            // Pointer presses are handled above; only keyboard activation (no click count) gets here as a tap.
+            if (event.detail !== 0) return;
+            beginPress();
+            endPress();
+          }}
           disabled={acquiring || (disabled && phase !== 'recording')}
-          title={micTitle}
+          title={micHint}
           aria-label={micTitle}
           aria-pressed={phase === 'recording'}
           className={cn(
             auiButtonClass({ variant: 'ghost', size: 'icon' }),
+            'touch-none select-none',
             phase === 'recording' && 'bg-failure-bg/15',
             phase === 'denied' && 'text-failure-text',
           )}
@@ -340,9 +429,10 @@ function VoiceInputButtonInner({ api, disabled }: { api: VoiceInputApi; disabled
 /**
  * Mic button for the chat composer. Hidden entirely until the host observes the
  * `voice` capability flag true (and when no host wired voice input or the
- * browser cannot capture audio). Tap-to-toggle: tap to record, tap again to
- * stop and transcribe. Denial surfaces as a tappable denied state with a help
- * popover, never a disabled button.
+ * browser cannot capture audio). Tap to record and tap again to put the words
+ * in the box; or hold (the button or the push-to-talk hotkey) to talk and let
+ * go to send. Denial surfaces as a tappable denied state with a help popover,
+ * never a disabled button.
  */
 export function VoiceInputButton({ disabled }: { disabled: boolean }) {
   const api = useOptionalVoiceInput();
