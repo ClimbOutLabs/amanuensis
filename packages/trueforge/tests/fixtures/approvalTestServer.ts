@@ -98,8 +98,9 @@ function buildApp(input: {
   db: SqliteDb;
   sandboxProvider: SandboxProvider | undefined;
   authenticator: Authenticator;
+  turnDrains: TurnDrainRegistry;
 }): ReturnType<typeof createServerApp> {
-  const { db, sandboxProvider, authenticator } = input;
+  const { db, sandboxProvider, authenticator, turnDrains } = input;
   const sessionStore = new SqliteSessionStore(db);
   const tokenStore = new SqliteOAuthTokenStore(db);
   const agentStore = new SqliteAgentStore(db);
@@ -173,7 +174,7 @@ function buildApp(input: {
     briefItemStore: new BriefItemCompletionStore(db),
     sessions: new Sessions({ sessionStore, sentinelServices }),
     activeTurns: new ActiveTurnRegistry(),
-    turnDrains: new TurnDrainRegistry(),
+    turnDrains,
     requestReplyRouter: new RequestReplyRouter(),
     eventSubscriptions: new EventSubscriptionRegistry<TurnStreamingEvent>(undefined),
     logger: createLogger({ silent: true }),
@@ -285,7 +286,9 @@ export async function startApprovalTestServer(options?: {
   const originalFirstPartyOrigins = configuration.FIRST_PARTY_MCP_ORIGINS;
   configuration.FIRST_PARTY_MCP_ORIGINS = options?.memoryProvider === true ? [mcp.origin] : [];
 
-  let app = buildApp({ db, sandboxProvider: options?.sandboxProvider, authenticator });
+  // One registry for the server's life, so close() can wait for turn drains the way main.ts does.
+  const turnDrains = new TurnDrainRegistry();
+  let app = buildApp({ db, sandboxProvider: options?.sandboxProvider, authenticator, turnDrains });
   if (options?.memoryProvider === true) {
     await registerMemoryProvider({ app, mcp });
   }
@@ -296,9 +299,10 @@ export async function startApprovalTestServer(options?: {
     request: async (path, init) => await app.request(path, init),
     restart: async () => {
       await app.guidesSettled();
+      await turnDrains.shutdownAndWait({ timeoutMs: configuration.TURN_DRAIN_SHUTDOWN_TIMEOUT_MS });
       await db.destroy();
       db = createSqliteDb(databaseFile);
-      app = buildApp({ db, sandboxProvider: options?.sandboxProvider, authenticator });
+      app = buildApp({ db, sandboxProvider: options?.sandboxProvider, authenticator, turnDrains });
     },
     mcp,
     model,
@@ -312,6 +316,9 @@ export async function startApprovalTestServer(options?: {
       configuration.FIRST_PARTY_MCP_ORIGINS = originalFirstPartyOrigins;
       // The guide installs write into the temp directory removed below, so they finish first.
       await app.guidesSettled();
+      // Like main.ts shutdown: a finished turn's drain still writes events and memory (a scheduled
+      // run saves to the vault), so it settles before the database and the caller's directories go.
+      await turnDrains.shutdownAndWait({ timeoutMs: configuration.TURN_DRAIN_SHUTDOWN_TIMEOUT_MS });
       await db.destroy();
       await model.close();
       await mcp.close();
