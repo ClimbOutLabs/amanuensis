@@ -146,6 +146,39 @@ export function formValuesOf(element) {
   return values;
 }
 
+/** The element a snapshot id (`domPath`'s output) names, or null when the page no longer has it. */
+export function elementAtPath(path) {
+  if (path === '') {
+    return document.body;
+  }
+  let node = document.body;
+  for (const part of path.split('/')) {
+    const [tag, indexText] = part.split(':');
+    const index = Number(indexText);
+    const match = Array.from(node.children).filter(child => child.tagName === tag)[index];
+    if (match === undefined) {
+      return null;
+    }
+    node = match;
+  }
+  return node;
+}
+
+/** Field, click and form context for one element, read without changing the page. */
+export function elementInfo(path) {
+  const element = elementAtPath(path);
+  if (element === null) {
+    return null;
+  }
+  return {
+    field_kind: fieldKind(element),
+    is_form_submit: isFormSubmit(element),
+    accessible_name: accessibleName(element),
+    form_values: formValuesOf(element),
+    tag: element.tagName,
+  };
+}
+
 /** Visible, interactive-first page content: headings and interactive elements, each with a stable id. */
 export function extractSnapshotNodes() {
   const nodes = [];

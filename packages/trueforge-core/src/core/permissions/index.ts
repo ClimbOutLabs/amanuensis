@@ -9,13 +9,24 @@ export type { ApprovalTokenStore } from './approvalTokens';
 export { recordClassificationAudit, recordStandingTrustRun } from './audit';
 export type { AuditLogWriter, AuditOutcome, AuditRecordInput } from './audit';
 export {
+  BROWSER_CANCEL_QUALIFIERS,
+  BROWSER_COMMIT_WORDS,
+  classifyBrowserClickKind,
+  matchesCommitWord,
+} from './browserTier';
+export {
   BROWSER_BACK_TOOL_NAME,
+  BROWSER_CLICK_TOOL_NAME,
+  BROWSER_COMMIT_REASON,
   BROWSER_EXPLORE_REASON,
   BROWSER_OPEN_TOOL_NAME,
+  BROWSER_PREPARE_REASON,
   BROWSER_READ_TOOL_NAME,
   BROWSER_SCREENSHOT_TOOL_NAME,
   BROWSER_SCROLL_TOOL_NAME,
+  BROWSER_SELECT_TOOL_NAME,
   BROWSER_TOOL_NAMES,
+  BROWSER_TYPE_TOOL_NAME,
   isBrowserToolName,
 } from './browserToolNames';
 export type { BrowserToolName } from './browserToolNames';

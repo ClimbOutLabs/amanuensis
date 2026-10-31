@@ -35,7 +35,7 @@ import {
   MAIL_CONTENT_TOOL_NAME,
 } from '../email/mailConnector/toolContract';
 import { GOOGLE_SETUP_SERVER_ID, GOOGLE_SETUP_STATUS_TOOL_NAME } from '../google/setupToolContract';
-import type { DocumentScope, MapsHosts } from '../llm/LLMTypes';
+import type { BrowserClickReview, DocumentScope, MapsHosts } from '../llm/LLMTypes';
 import {
   isPersonaWriteToolName,
   LIST_PERSONAS_TOOL_NAME,
@@ -244,6 +244,13 @@ export interface SentinelAction {
   persona_write?: Tier3Persona | undefined;
   /** The reminder a set or cancel call touches, settled by the schedule tool set so the activity line reads it plainly. */
   reminder?: ReminderLine | undefined;
+  /**
+   * Context for a browser_click call, read from the live page before the click: the site, the
+   * element's accessible name, whether it submits a form, and the form's values. Set by the browser
+   * tool set from the sidecar's read, never from model params. Undefined when the host could not
+   * read it, which fails the call closed to the generic Tier 3 path.
+   */
+  browser_click?: BrowserClickReview | undefined;
 }
 
 /** What the activity line says about one reminder: when it is due in plain words (set only), and what it says. */
