@@ -203,6 +203,8 @@ export interface SentinelUserSettingsTable {
   maps_without_asking: number;
   /** SQLite's 0/1 integer boolean. */
   sandbox_without_asking: number;
+  /** SQLite's 0/1 integer boolean. */
+  package_downloads_without_project_allowed: number;
   created_at: string;
   updated_at: string;
 }

@@ -1,7 +1,9 @@
 import { randomBytes } from 'node:crypto';
 
 /**
- * One package mirror grant: the token a sandbox presents, and the repo and chat it was issued for.
+ * One package mirror grant: the token a sandbox presents, and the chat it was issued for, with the
+ * repository when the chat works on one. A grant for a chat without a project has no repository:
+ * its scope is the person's own download allowance for such chats.
  * Grants live in memory only. A server restart ends every grant, and the next command in the chat
  * is issued a fresh one, so nothing durable depends on them.
  */
@@ -10,7 +12,7 @@ export interface PackageMirrorGrant {
   tenant_id: string;
   created_by: string;
   session_id: string;
-  repository_id: string;
+  repository_id: string | undefined;
   issued_at: string;
   expires_at_ms: number;
 }
@@ -19,16 +21,24 @@ export interface PackageMirrorGrant {
 const GRANT_TTL_MS = 12 * 60 * 60 * 1000;
 
 /**
- * Issues and checks the per-sandbox tokens the package mirrors accept. A token is tied to one chat
- * and one repository: the gateway refuses a token it did not issue, one that has expired, and one
- * whose repository allowance was taken back.
+ * Issues and checks the per-sandbox tokens the package mirrors accept. A token is tied to one
+ * chat and one scope: a repository, or the person's chats without a project. The gateway refuses
+ * a token it did not issue, one that has expired, and one whose allowance was taken back.
  */
 export class PackageMirrorTokenRegistry {
   readonly #grants = new Map<string, PackageMirrorGrant>();
   readonly #tokenByGrantKey = new Map<string, string>();
 
-  issue(input: { tenant_id: string; created_by: string; session_id: string; repository_id: string }): string {
-    const key = grantKey(input);
+  issue(input: {
+    tenant_id: string;
+    created_by: string;
+    session_id: string;
+    repository_id?: string | undefined;
+  }): string {
+    // An empty repository id means the same as none. Normalize it here so the stored grant and
+    // its key can never disagree about the scope, and the project-less revoke always reaches it.
+    const repository_id = input.repository_id === '' ? undefined : input.repository_id;
+    const key = grantKey({ ...input, repository_id });
     const now = Date.now();
     const existingToken = this.#tokenByGrantKey.get(key);
     if (existingToken !== undefined) {
@@ -44,7 +54,7 @@ export class PackageMirrorTokenRegistry {
       tenant_id: input.tenant_id,
       created_by: input.created_by,
       session_id: input.session_id,
-      repository_id: input.repository_id,
+      repository_id,
       issued_at: new Date(now).toISOString(),
       expires_at_ms: now + GRANT_TTL_MS,
     });
@@ -77,6 +87,19 @@ export class PackageMirrorTokenRegistry {
     }
   }
 
+  /** Takes back every grant the person holds for chats without a project, used the moment that allowance is removed. */
+  revokePersonWithoutRepository(input: { tenant_id: string; created_by: string }): void {
+    for (const grant of [...this.#grants.values()]) {
+      if (
+        grant.tenant_id === input.tenant_id &&
+        grant.created_by === input.created_by &&
+        grant.repository_id === undefined
+      ) {
+        this.#drop(grant.token);
+      }
+    }
+  }
+
   /** Takes back every grant of one chat, for example when the chat is deleted. */
   revokeSession(session_id: string): void {
     for (const grant of [...this.#grants.values()]) {
@@ -96,8 +119,15 @@ export class PackageMirrorTokenRegistry {
   }
 }
 
-function grantKey(input: { tenant_id: string; created_by: string; session_id: string; repository_id: string }): string {
-  return [input.tenant_id, input.created_by, input.session_id, input.repository_id].join('\0');
+function grantKey(input: {
+  tenant_id: string;
+  created_by: string;
+  session_id: string;
+  repository_id: string | undefined;
+}): string {
+  // A chat without a project keys on the empty repository segment. issue normalizes an empty
+  // repository id to none before keying, so the two scopes can never collide.
+  return [input.tenant_id, input.created_by, input.session_id, input.repository_id ?? ''].join('\0');
 }
 
 /** The one registry the server process shares between the turn wiring and the mirror gateway. */

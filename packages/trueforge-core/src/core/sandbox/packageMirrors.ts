@@ -138,10 +138,15 @@ function segmentDownloadEcosystem(argv: string[]): PackageDownloadEcosystem | un
   }
   const base = program.slice(program.lastIndexOf('/') + 1);
   const sub = argv[1];
-  if (PIP_PROGRAMS.has(base) && sub === 'install') {
+  if (PIP_PROGRAMS.has(base) && (sub === 'install' || sub === 'download')) {
     return 'pypi';
   }
-  if ((base === 'python' || base === 'python3') && argv[1] === '-m' && argv[2] === 'pip' && argv[3] === 'install') {
+  if (
+    (base === 'python' || base === 'python3') &&
+    argv[1] === '-m' &&
+    argv[2] === 'pip' &&
+    (argv[3] === 'install' || argv[3] === 'download')
+  ) {
     return 'pypi';
   }
   if (
@@ -162,7 +167,8 @@ function segmentDownloadEcosystem(argv: string[]): PackageDownloadEcosystem | un
       sub === 'clippy' ||
       sub === 'fetch' ||
       sub === 'update' ||
-      sub === 'add')
+      sub === 'add' ||
+      sub === 'install')
   ) {
     return 'cargo';
   }
@@ -194,14 +200,6 @@ function segmentDownloadEcosystem(argv: string[]): PackageDownloadEcosystem | un
 export const PACKAGE_UNAVAILABLE_RULE =
   'say that plainly instead of retrying, and do not try another tool to get around it.';
 
-/** Whether a command installs packages from PyPI or npm, the two sites a chat without downloads cannot reach. */
-export function commandInstallsPypiOrNpmPackages(command: string): boolean {
-  return splitShellCommands(command).some(words => {
-    const ecosystem = segmentDownloadEcosystem(programWords(words));
-    return ecosystem === 'pypi' || ecosystem === 'npm';
-  });
-}
-
 /**
  * Whether a command would make a package tool download packages: installs, and the build and test
  * commands that fetch dependencies first. Only these commands get the git-address check, because only
@@ -211,11 +209,14 @@ export function commandDownloadsPackages(command: string): boolean {
   return splitShellCommands(command).some(words => segmentDownloadEcosystem(programWords(words)) !== undefined);
 }
 
-/**
- * The one sentence the first-download approval card shows, or undefined when the command downloads
- * nothing. The sites are named for the tools this command actually uses, in the order it uses them.
- */
-export function packageDownloadCardWhat(command: string): string | undefined {
+/** The public package sites a download can come from, named in one list for sentences a person reads. */
+export function packageDownloadSitesText(): string {
+  const names = [PACKAGE_SITE_NAMES.pypi, PACKAGE_SITE_NAMES.npm, PACKAGE_SITE_NAMES.go, PACKAGE_SITE_NAMES.cargo];
+  return `${names.slice(0, -1).join(', ')} and ${names[names.length - 1] ?? ''}`;
+}
+
+/** The sites one command downloads from, named for the tools it actually uses, in the order it uses them. */
+function downloadSiteNames(command: string): string[] {
   const sites: string[] = [];
   for (const words of splitShellCommands(command)) {
     const ecosystem = segmentDownloadEcosystem(programWords(words));
@@ -226,10 +227,33 @@ export function packageDownloadCardWhat(command: string): string | undefined {
       }
     }
   }
+  return sites;
+}
+
+/**
+ * The one sentence the first-download approval card shows, or undefined when the command downloads
+ * nothing. The sites are named for the tools this command actually uses, in the order it uses them.
+ */
+export function packageDownloadCardWhat(command: string): string | undefined {
+  const sites = downloadSiteNames(command);
   if (sites.length === 0) {
     return undefined;
   }
   return `Aman wants to download this project's packages from the public package sites (${sites.join(', ')}).`;
+}
+
+/**
+ * The first-download card sentence for a chat that is not working on a project: the same sites,
+ * then what the person is agreeing to, downloads in their chats without a project.
+ */
+export function packageDownloadCardWhatWithoutProject(command: string): string | undefined {
+  const sites = downloadSiteNames(command);
+  if (sites.length === 0) {
+    return undefined;
+  }
+  return `Aman wants to download packages from the public package sites (${sites.join(
+    ', ',
+  )}) in your chats that are not working on a project.`;
 }
 
 /**

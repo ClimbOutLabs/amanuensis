@@ -117,6 +117,7 @@ describe('tile proxy route', () => {
       search_without_asking: false,
       maps_without_asking: false,
       sandbox_without_asking: true,
+      package_downloads_without_project_allowed: false,
     });
     app = new Hono();
     app.use('*', createUiSessionAuthMiddleware(cookieAuthenticator));
@@ -185,6 +186,7 @@ describe('tile proxy route', () => {
       search_without_asking: false,
       maps_without_asking: false,
       sandbox_without_asking: true,
+      package_downloads_without_project_allowed: false,
     });
     expect((await get('3/2/2.png')).status).toBe(503);
     expect((await get('3/3/3.png')).status).toBe(503);

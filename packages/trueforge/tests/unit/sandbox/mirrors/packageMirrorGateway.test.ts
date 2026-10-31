@@ -582,3 +582,77 @@ describe('PackageMirrorTokenRegistry', () => {
     expect(registry.resolve(second)).toBeUndefined();
   });
 });
+
+describe('PackageMirrorGateway with a grant for a chat without a project', () => {
+  function issueWithoutProject(harness: Harness): string {
+    return harness.registry.issue({ tenant_id: 'tenant-1', created_by: 'owner-1', session_id: 'session-2' });
+  }
+
+  it('serves downloads through the mirror on a project-less grant', async () => {
+    const harness = await setup();
+    try {
+      const token = issueWithoutProject(harness);
+      const metadata = await call(harness.port, { path: '/npm/leftpad', token });
+      expect(metadata.status).toBe(200);
+      const tarball = await call(harness.port, { path: '/npm/leftpad/-/leftpad-1.0.0.tgz', token });
+      expect(tarball.status).toBe(200);
+      expect(tarball.body).toBe('fake tarball bytes');
+      const wheel = await call(harness.port, { path: '/pypi/simple/requests/', token });
+      expect(wheel.status).toBe(200);
+    } finally {
+      await harness.close();
+    }
+  });
+
+  it('refuses publishing and uploads on a project-less grant', async () => {
+    const harness = await setup();
+    try {
+      const token = issueWithoutProject(harness);
+      const npmPublish = await call(harness.port, { method: 'PUT', path: '/npm/leftpad', token });
+      expect(npmPublish.status).toBe(405);
+      const pythonUpload = await call(harness.port, { method: 'POST', path: '/pypi/', token });
+      expect(pythonUpload.status).toBe(405);
+      const cargoPublish = await call(harness.port, { method: 'POST', path: '/cargo/api/v1/crates/new', token });
+      expect(cargoPublish.status).toBe(405);
+      expect(harness.upstreamHits).toEqual([]);
+      expect(readdirSync(harness.cacheDir)).toEqual([]);
+    } finally {
+      await harness.close();
+    }
+  });
+
+  it('refuses an address that is not a package mirror, and a redirect off the list', async () => {
+    const harness = await setup();
+    try {
+      const token = issueWithoutProject(harness);
+      const unknown = await call(harness.port, { path: '/evil.example.net/leftpad.tgz', token });
+      expect(unknown.status).toBe(404);
+      expect(unknown.body).toContain('There is no package mirror at that address.');
+      const offList = await call(harness.port, { path: '/pypi/redir-off', token });
+      expect(offList.status).toBe(502);
+      const offListPath = await call(harness.port, {
+        path: '/npm/off-list/evil.example.net/evil-9.9.9.tgz',
+        token,
+      });
+      expect(offListPath.status).toBe(403);
+    } finally {
+      await harness.close();
+    }
+  });
+
+  it('stops serving a project-less grant the moment it is taken back', async () => {
+    const harness = await setup();
+    try {
+      const token = issueWithoutProject(harness);
+      expect((await call(harness.port, { path: '/npm/leftpad', token })).status).toBe(200);
+      harness.registry.revokePersonWithoutRepository({ tenant_id: 'tenant-1', created_by: 'owner-1' });
+      const refused = await call(harness.port, { path: '/npm/leftpad', token });
+      expect(refused.status).toBe(403);
+      expect(refused.body).toContain('Allow package downloads in this chat first');
+      // The repository grant of the same person keeps working.
+      expect((await call(harness.port, { path: '/npm/leftpad', token: harness.token })).status).toBe(200);
+    } finally {
+      await harness.close();
+    }
+  });
+});

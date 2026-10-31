@@ -15,6 +15,7 @@ const INITIAL: SentinelUserSettings = {
   search_without_asking: true,
   maps_without_asking: false,
   sandbox_without_asking: true,
+  package_downloads_without_project_allowed: false,
 };
 
 function Capture({ into }: { into: { current: SentinelApiState | null } }) {
@@ -112,6 +113,7 @@ describe('SentinelApiProvider.updateSettings', () => {
       search_without_asking: true,
       maps_without_asking: false,
       sandbox_without_asking: true,
+      package_downloads_without_project_allowed: false,
     });
     await waitFor(() => {
       expect(sentinel().settings).toEqual({
@@ -120,6 +122,7 @@ describe('SentinelApiProvider.updateSettings', () => {
         search_without_asking: true,
         maps_without_asking: false,
         sandbox_without_asking: true,
+        package_downloads_without_project_allowed: false,
       });
     });
     expect(api.updateUserSettings).toHaveBeenCalledTimes(2);
@@ -134,6 +137,7 @@ describe('SentinelApiProvider.updateSettings', () => {
       search_without_asking: true,
       maps_without_asking: false,
       sandbox_without_asking: true,
+      package_downloads_without_project_allowed: false,
     });
   });
 });

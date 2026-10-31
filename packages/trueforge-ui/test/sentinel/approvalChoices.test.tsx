@@ -79,6 +79,7 @@ describe('approval choices', () => {
       search_without_asking: true,
       maps_without_asking: false,
       sandbox_without_asking: true,
+      package_downloads_without_project_allowed: false,
     };
     const api: SentinelApi = {
       listAuditEntries: vi.fn(async () => []),
