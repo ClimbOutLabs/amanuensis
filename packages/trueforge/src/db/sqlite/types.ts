@@ -203,6 +203,8 @@ export interface SentinelUserSettingsTable {
   maps_without_asking: number;
   /** SQLite's 0/1 integer boolean. */
   sandbox_without_asking: number;
+  /** SQLite's 0/1 integer boolean. */
+  chat_search_enabled: number;
   created_at: string;
   updated_at: string;
 }
@@ -261,6 +263,21 @@ export interface ApprovalDismissalTable {
   thread_id: string;
   tool_call_id: string;
   dismissed_at: string;
+}
+
+/**
+ * One searchable message of a finished turn in the past-chat search index.
+ * PRIMARY KEY (tenant_id, session_id, turn_id, message_id). The FTS5 table that searches
+ * `body` is a virtual table and is not part of the Kysely schema.
+ */
+export interface ChatSearchDocumentTable {
+  tenant_id: string;
+  session_id: string;
+  turn_id: string;
+  message_id: string;
+  role: string;
+  body: string;
+  created_at: string;
 }
 
 /** Global key/value settings shared across tenants (e.g. persisted feature overrides). PRIMARY KEY (key). */
@@ -794,6 +811,7 @@ export interface Database {
   turn_artifact: TurnArtifactTable;
   chat_image: ChatImageTable;
   approval_dismissal: ApprovalDismissalTable;
+  chat_search_document: ChatSearchDocumentTable;
   global_settings: GlobalSettingsTable;
   token_factory_usage: TokenFactoryUsageTable;
   token_factory_model_usage: TokenFactoryModelUsageTable;

@@ -54,6 +54,7 @@ export const TABLES_TO_MOVE = [
   'chat_image',
   'chat_image_turn_allowance',
   'approval_dismissal',
+  'chat_search_document',
   'global_settings',
   'token_factory_usage',
   'token_factory_model_usage',
