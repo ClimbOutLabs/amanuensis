@@ -3234,6 +3234,12 @@ export class AgentThread {
       });
       tfyManagedServers.push(this.taskStateToolSet);
     }
+    // The guide's one live tool: a host-owned exception to readOnly, set only by the
+    // host for the guide persona. It joins the managed servers so the model is
+    // offered exactly this tool set and no other.
+    if (this.definition.guideSearchToolSet !== undefined) {
+      tfyManagedServers.push(this.definition.guideSearchToolSet);
+    }
     if (this.sandbox) {
       tfyManagedServers.push(this.sandbox);
     }
