@@ -185,6 +185,9 @@ Options
   --no-sandbox          install without the sandbox (the assistant then cannot run code or read attachments)
   --use-host-node       set up the sandbox with the Node.js on this computer (22.14 or newer) instead of a downloaded copy
   --verbose             show technical details and the full list of downloads
+  --events FD           also write the progress of the run to the open file descriptor FD, one JSON line
+                        per phase, step, warning and result (for example --events 3 with 3>events.txt);
+                        a program driving the installer reads this instead of the terminal output
   --dry-run             show the plan and stop; with instance import, check the file and say what it would bring
                         (an instance that has never started is started once first, so the file can be checked)
   --name NAME           name of the first instance (default main)
@@ -286,12 +289,12 @@ parse_args() {
       --fresh) OPT_FRESH=1 ;;
       --local-only) OPT_LOCAL_ONLY=1 ;;
       --home-network) OPT_HOME_NETWORK=1 ;;
-      --home | --name | --instance | --email | --your-name | --public-url | --login-url | --port | --login-port | --confirm-name | --tls | --public-ip | --address | --backups | --token-factory-model | --token-factory-daily-cap | --display-name | --from-compose | --user | --email-provider | --email-address | --email-imap-host | --email-imap-port | --email-smtp-host | --email-smtp-port | --calendar-provider | --calendar-email | --calendar-url | --calendar-user)
+      --home | --name | --instance | --email | --your-name | --public-url | --login-url | --port | --login-port | --confirm-name | --tls | --public-ip | --address | --backups | --token-factory-model | --token-factory-daily-cap | --display-name | --from-compose | --user | --email-provider | --email-address | --email-imap-host | --email-imap-port | --email-smtp-host | --email-smtp-port | --calendar-provider | --calendar-email | --calendar-url | --calendar-user | --events)
         [ "$#" -ge 2 ] || usage_die "$arg needs a value"
         set_option "$arg" "$2"
         shift
         ;;
-      --home=* | --name=* | --instance=* | --email=* | --your-name=* | --public-url=* | --login-url=* | --port=* | --login-port=* | --confirm-name=* | --tls=* | --public-ip=* | --address=* | --backups=* | --token-factory-model=* | --token-factory-daily-cap=* | --display-name=* | --from-compose=* | --user=* | --email-provider=* | --email-address=* | --email-imap-host=* | --email-imap-port=* | --email-smtp-host=* | --email-smtp-port=* | --calendar-provider=* | --calendar-email=* | --calendar-url=* | --calendar-user=*)
+      --home=* | --name=* | --instance=* | --email=* | --your-name=* | --public-url=* | --login-url=* | --port=* | --login-port=* | --confirm-name=* | --tls=* | --public-ip=* | --address=* | --backups=* | --token-factory-model=* | --token-factory-daily-cap=* | --display-name=* | --from-compose=* | --user=* | --email-provider=* | --email-address=* | --email-imap-host=* | --email-imap-port=* | --email-smtp-host=* | --email-smtp-port=* | --calendar-provider=* | --calendar-email=* | --calendar-url=* | --calendar-user=* | --events=*)
         set_option "${arg%%=*}" "${arg#*=}"
         ;;
       -*) usage_die "unknown option $arg" ;;
@@ -358,6 +361,15 @@ set_option() {
     --calendar-email) OPT_CAL_EMAIL=$2 ;;
     --calendar-url) OPT_CAL_URL=$2 ;;
     --calendar-user) OPT_CAL_USER=$2 ;;
+    --events)
+      case "$2" in
+        '' | *[![:digit:]]*) usage_die "--events takes the number of an open file descriptor, for example --events 3 together with 3>events.txt on the same command." ;;
+        0 | 1 | 2) usage_die "--events cannot use 0, 1 or 2, because those are this terminal's streams. Open a file for the events instead, for example --events 3 together with 3>events.txt." ;;
+      esac
+      (printf '' >&"$2") 2>/dev/null || usage_die "File descriptor $2 is not open for writing, so no events can be written to it. Open it on the same command, for example --events 3 together with 3>events.txt, or leave --events out."
+      UI_EVENTS_FD=$2
+      UI_EVENTS_T0=$SECONDS
+      ;;
   esac
   safe_value "$2" || usage_die "$1 contains a character that is not allowed"
 }
@@ -432,6 +444,7 @@ on_exit() {
   migrate_on_exit
   if [ "$rc" != 0 ]; then instance_pending_notice; fi
   lock_release
+  ui_event_final "$rc"
   exit "$rc"
 }
 

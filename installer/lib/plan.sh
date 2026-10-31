@@ -31,6 +31,7 @@ check_block() { # what is wrong, what to do next, technical details
   LOG_STARTED=1
   log_event "check failed: $1"
   ui_fail "$1" "${2:-}" "${3:-}"
+  ui_event_warning "$1" "${2:-}"
 }
 
 # First sentence and the rest of a message, for text that says the problem and then the way out.

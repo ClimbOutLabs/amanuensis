@@ -4,6 +4,14 @@
 # Color goes on markers, status words and verdicts only. Bash 3.2 compatible; nothing here needs tput.
 
 UI_FD=1
+UI_EVENTS_FD=
+UI_EVENTS_T0=0
+UI_EVENT_PHASE=
+UI_EVENT_STEP=
+UI_EVENT_VERDICT_KIND=
+UI_EVENT_VERDICT=
+UI_EVENT_FINAL_SENT=0
+UI_EVENT_QUIET=0
 UI_UTF8=0
 UI_COLOR_1=0
 UI_COLOR_2=0
@@ -141,6 +149,104 @@ _ui_elapsed_since() {
   if [ "$n" -ge 5 ]; then ui_fmt_elapsed "$n"; fi
 }
 
+# ---- events ---------------------------------------------------------------------------------------
+# A second rendering of the run for a program that drives the installer: one JSON line per moment on
+# the descriptor in UI_EVENTS_FD, which only install.sh --events sets. Empty means off, and then
+# nothing here writes anywhere and the terminal output above never depends on this stream. Only the
+# words of the moment go in (a name, a result, a warning); a secret is never an argument of these
+# helpers, so no secret can reach the stream.
+
+# The inside of a JSON string for TEXT: quotes, backslashes and control characters escaped, the rest
+# as it is, so UTF-8 words pass through whole.
+ui_json_escape() {
+  local s=$1 out= c i n
+  for ((i = 0; i < ${#s}; i++)); do
+    c=${s:i:1}
+    case "$c" in
+      '"') out="$out\\\"" ;;
+      '\') out="$out\\\\" ;;
+      $'\n') out="$out\\n" ;;
+      $'\r') out="$out\\r" ;;
+      $'\t') out="$out\\t" ;;
+      [[:cntrl:]])
+        n=$(printf '%d' "'$c")
+        out="$out$(printf '\\u%04x' "$n")"
+        ;;
+      *) out="$out$c" ;;
+    esac
+  done
+  printf '%s' "$out"
+}
+
+# A "key":"text" fragment for an event line.
+_ui_event_field() { printf '"%s":"%s"' "$1" "$(ui_json_escape "$2")"; }
+
+# The ",\"phase\":\"...\"" fragment of a step line, empty before the first phase.
+_ui_event_phase_field() {
+  if [ -n "$UI_EVENT_PHASE" ]; then printf ',%s' "$(_ui_event_field phase "$UI_EVENT_PHASE")"; fi
+}
+
+# _ui_event TYPE FIELDS: one line on the events descriptor; FIELDS is a comma-joined fragment string.
+# A failed write never fails the run: the stream is a copy, not the record.
+_ui_event() {
+  [ -n "$UI_EVENTS_FD" ] || return 0
+  local line="{\"type\":\"$1\",\"elapsed_seconds\":$((SECONDS - UI_EVENTS_T0))"
+  if [ -n "${2:-}" ]; then line="$line,$2"; fi
+  line="$line}"
+  (printf '%s\n' "$line" >&"$UI_EVENTS_FD") 2>/dev/null || true
+}
+
+ui_event_phase() { # text [n total]
+  [ -n "$UI_EVENTS_FD" ] || return 0
+  UI_EVENT_PHASE=$1
+  local fields
+  fields=$(_ui_event_field name "$1")
+  if [ -n "${2:-}" ] && [ -n "${3:-}" ]; then fields="$fields,\"index\":$2,\"total\":$3"; fi
+  _ui_event phase_start "$fields"
+}
+
+ui_event_step_start() { # text
+  [ -n "$UI_EVENTS_FD" ] || return 0
+  UI_EVENT_STEP=$1
+  _ui_event step_start "$(_ui_event_field name "$1")$(_ui_event_phase_field)"
+}
+
+ui_event_step_result() { # text done|skipped|failed
+  [ -n "$UI_EVENTS_FD" ] || return 0
+  UI_EVENT_STEP=$1
+  _ui_event step_result "$(_ui_event_field name "$1"),$(_ui_event_field result "$2")$(_ui_event_phase_field)"
+}
+
+ui_event_warning() { # text [next]
+  [ -n "$UI_EVENTS_FD" ] || return 0
+  UI_EVENT_STEP=$1
+  local fields
+  fields=$(_ui_event_field text "$1")
+  if [ -n "${2:-}" ]; then fields="$fields,$(_ui_event_field next "$2")"; fi
+  _ui_event warning "$fields"
+}
+
+ui_event_admin() { # text
+  [ -n "$UI_EVENTS_FD" ] || return 0
+  _ui_event admin_prompt "$(_ui_event_field text "$1")"
+}
+
+# The one final line of a run, sent by install.sh on its way out: success when the exit code is 0,
+# else failed with the last step and the phase it stopped in, plus the closing words when the run
+# printed a summary. A second call sends nothing.
+ui_event_final() { # exit code
+  [ -n "$UI_EVENTS_FD" ] || return 0
+  [ "$UI_EVENT_FINAL_SENT" = 0 ] || return 0
+  UI_EVENT_FINAL_SENT=1
+  local result=failed fields
+  if [ "$1" = 0 ]; then result=success; fi
+  fields=$(_ui_event_field result "$result")
+  if [ -n "$UI_EVENT_STEP" ]; then fields="$fields,$(_ui_event_field step "$UI_EVENT_STEP")"; fi
+  if [ -n "$UI_EVENT_PHASE" ]; then fields="$fields,$(_ui_event_field phase "$UI_EVENT_PHASE")"; fi
+  if [ -n "$UI_EVENT_VERDICT" ]; then fields="$fields,$(_ui_event_field verdict_kind "$UI_EVENT_VERDICT_KIND"),$(_ui_event_field verdict "$UI_EVENT_VERDICT")"; fi
+  _ui_event final_result "$fields"
+}
+
 # ---- lines ----------------------------------------------------------------------------------------
 
 ui_title() { _ui_out "$(_ui_s 1 "$1")"; }
@@ -151,12 +257,14 @@ ui_phase() { # text [n total]
   line=$(_ui_s 1 "$1")
   if [ -n "${2:-}" ]; then line="$line $(_ui_s 2 "($2 of $3)")"; fi
   _ui_out "$line"
+  ui_event_phase "$1" "${2:-}" "${3:-}"
 }
 
 ui_ok() { # text [elapsed]
   local tail=
   if [ -n "${2:-}" ]; then tail="  $(_ui_s 2 "$2")"; fi
   _ui_marked 32 "$S_OK" "$1" "$tail"
+  if [ "$UI_EVENT_QUIET" = 0 ]; then ui_event_step_result "$1" done; fi
 }
 
 # Warnings are remembered so the closing block can repeat them.
@@ -164,6 +272,7 @@ ui_warn() { # text [next] [details]
   UI_WARNS="$UI_WARNS$1"$'\n'
   _ui_marked 33 "$S_WARN" "$1"
   _ui_follow "${2:-}" "${3:-}"
+  ui_event_warning "$1" "${2:-}"
 }
 
 ui_fail() { # text [next] [details]
@@ -183,7 +292,10 @@ _ui_follow() {
   fi
 }
 
-ui_skip() { _ui_block "  $S_SKIP " 4 "$1" 2; }
+ui_skip() {
+  _ui_block "  $S_SKIP " 4 "$1" 2
+  if [ "$UI_EVENT_QUIET" = 0 ]; then ui_event_step_result "$1" skipped; fi
+}
 
 ui_hint() { _ui_block "  " 2 "$1" 2; }
 
@@ -248,6 +360,8 @@ ui_detail() { _ui_block "$(printf '%*s' $((UI_STATUS_WIDTH + 6)) '')" $((UI_STAT
 
 # A framed closing block: rule, the verdict, then whatever the caller prints, then ui_summary_end.
 ui_summary() { # ok|warn|fail verdict
+  UI_EVENT_VERDICT_KIND=$1
+  UI_EVENT_VERDICT=$2
   local code=1
   case "$1" in
     ok) code="1;32" ;;
@@ -351,6 +465,7 @@ ui_password() { # VAR label
 ui_step_start() { # text [log file]
   local text=$1 log=${2:-} t0=$SECONDS note=''
   UI_STEP_T0=$t0
+  ui_event_step_start "$text"
   if [ -n "$log" ]; then note="log: $(ui_path "$log")"; fi
   if [ "$UI_ANIM" = 1 ]; then
     (
@@ -402,12 +517,20 @@ ui_step_abort() {
 }
 
 # ui_step_end ok|fail text [next] [details]: the progress line becomes a normal result line.
+# The step's own result line is the event; the ui_ok inside is silenced so a step reports once.
 ui_step_end() {
   local status=$1 text=$2
   ui_step_abort
+  UI_EVENT_QUIET=1
   if [ "$status" = ok ]; then
     ui_ok "$text" "$(_ui_elapsed_since "$UI_STEP_T0")"
   else
     ui_fail "$text" "${3:-}" "${4:-}"
+  fi
+  UI_EVENT_QUIET=0
+  if [ "$status" = ok ]; then
+    ui_event_step_result "$text" done
+  else
+    ui_event_step_result "$text" failed
   fi
 }
