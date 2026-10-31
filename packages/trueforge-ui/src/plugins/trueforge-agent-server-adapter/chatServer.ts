@@ -14,7 +14,6 @@
 import type { TrueForge, TrueForgeApi } from '@truefoundry/trueforge-sdk';
 import { readSessionAgentDetails, type AgentDetailsVisibility } from '../../atoms/lib/sessionAgentDetails.js';
 import { readSessionIsCreateAgent } from '../../atoms/lib/sessionCreateAgent.js';
-import { readSessionReminders, type RemindersMarker } from '../../atoms/lib/sessionReminders.js';
 import type { MemoryTurnContext } from '../../components/MemoryRecallContext.js';
 import type { ModelUsageTurnContext } from '../../components/ModelUsageContext.js';
 import { applyHeldPersona, awaitPendingPersonaMutation } from '../../personaMutationGate.js';
@@ -160,8 +159,6 @@ export type HarnessUiSession = Session<HarnessAgentSpec> & {
   agentDetails?: AgentDetailsVisibility;
   /** The session's metadata, so a write that replaces it can keep every key it does not change. */
   metadata: Record<string, string>;
-  /** Set only on the Reminders chat: what it last received and when. */
-  reminders?: RemindersMarker;
 };
 
 export type HarnessCreateSessionRequest = CreateSessionRequest<HarnessAgentSpec> & {
@@ -226,7 +223,6 @@ export function toUiAgentSpec(spec: TrueForgeApi.AgentSpec): HarnessAgentSpec {
 
 function toUiSession(session: TrueForgeApi.Session): HarnessUiSession {
   const agentDetails = readSessionAgentDetails(session.metadata);
-  const reminders = readSessionReminders(session.metadata);
   return {
     id: session.id,
     isMutable: session.agent.type === 'inline',
@@ -240,7 +236,6 @@ function toUiSession(session: TrueForgeApi.Session): HarnessUiSession {
     ...(session.agent.type === 'reference' && session.agent.name !== null ? { agentName: session.agent.name } : {}),
     ...(session.agent.type === 'inline' ? { agentSpec: toUiAgentSpec(session.agent.spec) } : {}),
     ...(agentDetails === undefined ? {} : { agentDetails }),
-    ...(reminders === null ? {} : { reminders }),
   };
 }
 

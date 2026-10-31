@@ -385,6 +385,55 @@ export function parseCalendarAccountSecret(raw: string | undefined): string | un
   return trimmed;
 }
 
+/** A web push (VAPID) key pair and contact, or none. Push stays off unless all three settings are set. */
+export interface WebPushSettings {
+  publicKey: string;
+  privateKey: string;
+  subject: string;
+}
+
+const VAPID_PUBLIC_KEY_BYTES = 65;
+const VAPID_PRIVATE_KEY_BYTES = 32;
+
+function base64UrlByteLength(value: string): number | undefined {
+  if (!/^[A-Za-z0-9_-]+$/.test(value)) {
+    return undefined;
+  }
+  return Buffer.from(value, 'base64url').length;
+}
+
+/**
+ * Parses `WEB_PUSH_PUBLIC_KEY`, `WEB_PUSH_PRIVATE_KEY` and `WEB_PUSH_SUBJECT`. All unset means push is off.
+ * Some but not all, or a value that is not a key, fails the boot with the one thing to do next.
+ */
+export function parseWebPushSettings(raw: {
+  publicKey: string | undefined;
+  privateKey: string | undefined;
+  subject: string | undefined;
+}): WebPushSettings | undefined {
+  const publicKey = blankToUndefined(raw.publicKey?.trim());
+  const privateKey = blankToUndefined(raw.privateKey?.trim());
+  const subject = blankToUndefined(raw.subject?.trim());
+  if (publicKey === undefined && privateKey === undefined && subject === undefined) {
+    return undefined;
+  }
+  if (publicKey === undefined || privateKey === undefined || subject === undefined) {
+    throw new Error(
+      'WEB_PUSH_PUBLIC_KEY, WEB_PUSH_PRIVATE_KEY and WEB_PUSH_SUBJECT must all be set, or all left out. Set the missing ones, or remove the others to leave push off.',
+    );
+  }
+  if (base64UrlByteLength(publicKey) !== VAPID_PUBLIC_KEY_BYTES) {
+    throw new Error('WEB_PUSH_PUBLIC_KEY is not a push key. Run the installer again to make a new pair.');
+  }
+  if (base64UrlByteLength(privateKey) !== VAPID_PRIVATE_KEY_BYTES) {
+    throw new Error('WEB_PUSH_PRIVATE_KEY is not a push key. Run the installer again to make a new pair.');
+  }
+  if (!/^(mailto:[^\s@]+@[^\s@]+|https:\/\/\S+)$/.test(subject)) {
+    throw new Error('WEB_PUSH_SUBJECT must start with mailto: or https://. Set it to mailto: and your email address.');
+  }
+  return { publicKey, privateKey, subject };
+}
+
 /**
  * The first-party origins: the operator's list, plus the Calendar connector's origin when one is configured.
  */
@@ -1253,6 +1302,11 @@ export interface SharedServerConfiguration {
    * Env: `CALENDAR_ACCOUNT_SECRET`. Default unset.
    */
   CALENDAR_ACCOUNT_SECRET: string | undefined;
+  /**
+   * The VAPID key pair and contact the server signs web push with. Push is off when all three are unset.
+   * Env: `WEB_PUSH_PUBLIC_KEY`, `WEB_PUSH_PRIVATE_KEY`, `WEB_PUSH_SUBJECT`. Default unset.
+   */
+  WEB_PUSH: WebPushSettings | undefined;
   /**
    * The Email send list the server writes (`allowed_recipients.toml`). Set with the sidecar; the sidecar reads it
    * read-only. Env: `MAIL_POLICY_FILE`. Default unset, which means no send list is written.
@@ -2152,6 +2206,11 @@ const shared: SharedServerConfiguration = {
   MAIL_EMAIL_MCP_URL: mailEmailMcpUrl,
   MAIL_SIDECAR_MCP_URL: mailSidecarMcpUrl,
   MAIL_EMAIL_ACCOUNT_URL: mailEmailAccountUrl,
+  WEB_PUSH: parseWebPushSettings({
+    publicKey: getEnv('WEB_PUSH_PUBLIC_KEY'),
+    privateKey: getEnv('WEB_PUSH_PRIVATE_KEY'),
+    subject: getEnv('WEB_PUSH_SUBJECT'),
+  }),
   MAIL_POLICY_FILE: parseOptionalPath(getEnv('MAIL_POLICY_FILE')),
   MAIL_POLICY_STATUS_FILE: parseOptionalPath(getEnv('MAIL_POLICY_STATUS_FILE')),
   CALENDAR_CONNECTOR_URL: calendarConnectorUrl,
@@ -2692,6 +2751,7 @@ export const SECRET_SETTING_NAMES = [
   'TRUEFOUNDRY_API_KEY',
   'TRUEFOUNDRY_SANDBOX_API_KEY',
   'POSTGRES_PASSWORD',
+  'WEB_PUSH_PRIVATE_KEY',
 ] as const;
 
 /** Connection URL settings: secret as a whole, and for the password inside. */
@@ -2724,6 +2784,7 @@ export type ConfiguredSecretSettings = Pick<
   SharedServerConfiguration,
   'TRUEFORGE_API_KEY' | 'NEBIUS_API_KEY' | 'MEMORY_SCREEN_AUTH_TOKEN' | 'OIDC'
 > &
+  Partial<Pick<SharedServerConfiguration, 'WEB_PUSH'>> &
   (
     | { STANDALONE: true }
     | ({ STANDALONE: false } & Pick<
@@ -2744,6 +2805,7 @@ export function getConfiguredSecretValues(config: ConfiguredSecretSettings = con
     NEBIUS_API_KEY: config.NEBIUS_API_KEY,
     MEMORY_SCREEN_AUTH_TOKEN: config.MEMORY_SCREEN_AUTH_TOKEN,
     OIDC_CLIENT_SECRET: config.OIDC?.OIDC_CLIENT_SECRET,
+    WEB_PUSH_PRIVATE_KEY: config.WEB_PUSH?.privateKey,
     ...(config.STANDALONE
       ? {}
       : {

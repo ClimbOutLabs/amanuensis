@@ -19,6 +19,7 @@ import { tablistTargetIndex } from '@/atoms/lib/tablistKeys.js';
 import { Spinner } from '@/atoms/primitives/Spinner.js';
 import { useOptionalPersonalization } from '@/components/PersonalizationContext.js';
 import { useOptionalRunCodeStatus } from '@/components/RunCodeStatusContext.js';
+import { useOptionalDeliveries } from '@/deliveries/DeliveriesContext.js';
 import { Icon } from '@/icons/Icon.js';
 import { useOptionalSentinelApiState } from '@/sentinel/SentinelApiContext.js';
 import { useOptionalCatalogServer, useOptionalRefreshServerCapabilities } from '@/server/ServerContext.js';
@@ -43,6 +44,9 @@ const SentinelSettings = lazy(() =>
 const AuditLogSettings = lazy(() =>
   import('@/sentinel/AuditLogSettings.js').then(module => ({ default: module.AuditLogSettings })),
 );
+const ReachMeSettings = lazy(() =>
+  import('@/deliveries/ReachMeSettings.js').then(module => ({ default: module.ReachMeSettings })),
+);
 const AboutSettings = lazy(() => import('./AboutSettings.js'));
 
 type SettingsNavItem = {
@@ -59,6 +63,7 @@ type SettingsNavItem = {
     | 'palette'
     | 'lock'
     | 'clock-rotate-left'
+    | 'bell'
     | 'info';
 };
 
@@ -90,6 +95,7 @@ const TruefoundrySettingsBuilder = () => {
   const hasSandbox = useOptionalRunCodeStatus() != null;
   const hasPersonalization = useOptionalPersonalization() != null;
   const hasSentinel = useOptionalSentinelApiState() != null;
+  const hasDeliveries = useOptionalDeliveries() != null;
 
   const closeSettings = useCallback(() => {
     setSettingsOpen(false);
@@ -117,7 +123,10 @@ const TruefoundrySettingsBuilder = () => {
     if (!hasSentinel && (section === 'permissions' || section === 'audit')) {
       setSettingsOpen(settingsOpen, 'models');
     }
-  }, [hasSkills, hasSandbox, hasPersonalization, hasSentinel, section, settingsOpen, setSettingsOpen]);
+    if (!hasDeliveries && section === 'reach-me') {
+      setSettingsOpen(settingsOpen, 'models');
+    }
+  }, [hasSkills, hasSandbox, hasPersonalization, hasSentinel, hasDeliveries, section, settingsOpen, setSettingsOpen]);
 
   useEffect(() => {
     if (!settingsOpen) return;
@@ -154,9 +163,12 @@ const TruefoundrySettingsBuilder = () => {
       baseSections.push({ id: 'permissions', label: 'Permissions', icon: 'lock' });
       baseSections.push({ id: 'audit', label: 'Audit', icon: 'clock-rotate-left' });
     }
+    if (hasDeliveries) {
+      baseSections.push({ id: 'reach-me', label: 'Reach me', icon: 'bell' });
+    }
     baseSections.push({ id: 'about', label: 'About', icon: 'info' });
     return baseSections;
-  }, [hasSkills, hasSandbox, hasPersonalization, hasSentinel]);
+  }, [hasSkills, hasSandbox, hasPersonalization, hasSentinel, hasDeliveries]);
 
   // The one section both the tab strip and the body show. A stored section the host no longer
   // offers falls back to Models here, so the highlighted tab and the content cannot disagree.
@@ -296,6 +308,7 @@ const TruefoundrySettingsBuilder = () => {
               {activeSection === 'personalization' ? <PersonalizationSettings /> : null}
               {activeSection === 'permissions' ? <SentinelSettings /> : null}
               {activeSection === 'audit' ? <AuditLogSettings /> : null}
+              {activeSection === 'reach-me' ? <ReachMeSettings /> : null}
               {activeSection === 'about' ? <AboutSettings /> : null}
             </Suspense>
           </div>

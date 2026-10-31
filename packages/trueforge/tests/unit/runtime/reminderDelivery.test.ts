@@ -5,19 +5,18 @@ import {
   type CreatedBySubject,
 } from '@truefoundry/trueforge-core/agent-session';
 import type { AuditRecordInput } from '@truefoundry/trueforge-core/core';
-import {
-  LATEST_REMINDER_AT_METADATA_KEY,
-  LATEST_REMINDER_METADATA_KEY,
-  REMINDERS_CHAT_TITLE,
-  REMINDERS_METADATA_KEY,
-} from '@truefoundry/trueforge-core/core/schedules/toolContract';
+import { REMINDERS_CHAT_TITLE, REMINDERS_METADATA_KEY } from '@truefoundry/trueforge-core/core/schedules/toolContract';
+import winston from 'winston';
+import { DeliveryStore } from '../../../src/db/deliveryStore';
 import { migrateSqliteToLatest } from '../../../src/db/migrateSqlite';
 import type { ScheduleDispatchItem } from '../../../src/db/scheduleStore';
 import { SqliteAgentStore } from '../../../src/db/sqlite/agent-store/SqliteAgentStore';
 import { createSqliteDb } from '../../../src/db/sqlite/client';
 import { SqliteScheduleStore } from '../../../src/db/sqlite/schedule-store/SqliteScheduleStore';
 import { SqliteSessionStore } from '../../../src/db/sqlite/session-store/SqliteSessionStore';
+import { createDeliveryService } from '../../../src/runtime/delivery/deliveryService';
 import { deliverReminder } from '../../../src/runtime/reminderDelivery';
+import type { Delivery } from '../../../src/schemas/deliveries';
 import { ScheduleManifestSchema } from '../../../src/schemas/schedule';
 
 const TENANT = 'default';
@@ -64,43 +63,82 @@ async function setup() {
   }
 
   const auditRecords: AuditRecordInput[] = [];
-  const deliver = (item: ScheduleDispatchItem, now: Date) =>
-    deliverReminder({
-      item,
-      sessions,
-      sessionStore,
-      agentStore,
-      now,
-      audit: {
-        record: input => {
-          auditRecords.push(input);
-          return Promise.resolve();
+  const deliveryStore = new DeliveryStore(db);
+  const pushed: Delivery[] = [];
+  const deliveries = createDeliveryService({
+    store: deliveryStore,
+    senders: [
+      {
+        send: ({ delivery }) => {
+          pushed.push(delivery);
+          return Promise.resolve([
+            {
+              channel: 'web_push',
+              outcome: 'sent',
+              detail: null,
+              target: 'device-1',
+              attempted_at: new Date().toISOString(),
+            },
+          ]);
         },
       },
-    });
+    ],
+    audit: {
+      record: input => {
+        auditRecords.push(input);
+        return Promise.resolve();
+      },
+    },
+    logger: winston.createLogger({ silent: true }),
+  });
+  const deliver = (item: ScheduleDispatchItem, now: Date) =>
+    deliverReminder({ item, sessions, sessionStore, agentStore, now, deliveries });
 
-  return { sessionStore, dueReminder, deliver, auditRecords };
+  return { sessionStore, dueReminder, deliver, auditRecords, deliveryStore, pushed };
 }
 
 describe('deliverReminder', () => {
-  it('records the delivery in the activity log, keyed on the Reminders chat', async () => {
+  it('makes a reminder delivery for the owner and pushes it, with no tab open', async () => {
+    const { dueReminder, deliver, deliveryStore, pushed } = await setup();
+    const item = await dueReminder({ what: 'Take the medicine', runAt: '2026-10-19T18:00:00-04:00', name: 'r-one' });
+
+    const sessionId = await deliver(item, new Date('2026-10-19T22:00:05.000Z'));
+
+    const owner = { tenant_id: TENANT, created_by: OWNER.subject_id };
+    const page = await deliveryStore.list({ ...owner, limit: 10 });
+    expect(page.deliveries).toHaveLength(1);
+    expect(page.deliveries[0]).toMatchObject({
+      kind: 'reminder',
+      level: 'nudge',
+      text: 'Take the medicine',
+      reason: 'You asked to be reminded on Monday, October 19 at 6:00 PM.',
+      link: { type: 'chat', session_id: sessionId },
+      seen_at: null,
+    });
+    expect(page.deliveries[0]?.attempts.map(a => [a.channel, a.outcome])).toEqual([
+      ['in_app', 'sent'],
+      ['web_push', 'sent'],
+    ]);
+    expect(pushed.map(d => d.id)).toEqual([page.deliveries[0]?.id]);
+    await expect(deliveryStore.countUnread(owner)).resolves.toBe(1);
+  });
+
+  it('records the delivery and each channel tried in the activity log, with the reason', async () => {
     const { dueReminder, deliver, auditRecords } = await setup();
     const item = await dueReminder({ what: 'Take the medicine', runAt: '2026-10-19T18:00:00-04:00', name: 'r-one' });
 
     const sessionId = await deliver(item, new Date('2026-10-19T22:00:05.000Z'));
 
-    expect(auditRecords).toEqual([
-      expect.objectContaining({
-        tenant_id: TENANT,
-        created_by: OWNER.subject_id,
-        conversation_id: sessionId,
-        tier: 1,
-        tool_name: 'set_reminder',
-        description: 'Delivered the reminder: Take the medicine',
-        outcome: 'logged',
-        auto_deny_reason: null,
-      }),
-    ]);
+    expect(auditRecords.map(r => r.tool_name)).toEqual(['delivery.created', 'delivery.web_push']);
+    expect(auditRecords[0]).toMatchObject({
+      tenant_id: TENANT,
+      created_by: OWNER.subject_id,
+      conversation_id: sessionId,
+      tier: 1,
+      outcome: 'logged',
+    });
+    expect(auditRecords[0]?.description).toContain('Take the medicine');
+    expect(auditRecords[0]?.description).toContain('You asked to be reminded on Monday, October 19 at 6:00 PM.');
   });
 
   it('writes a due reminder, with its time, into one chat named Reminders, with no model call', async () => {
@@ -115,8 +153,6 @@ describe('deliverReminder', () => {
       created_by_subject: OWNER,
       metadata: {
         [REMINDERS_METADATA_KEY]: 'true',
-        [LATEST_REMINDER_METADATA_KEY]: 'Take the medicine',
-        [LATEST_REMINDER_AT_METADATA_KEY]: '2026-10-19T22:00:05.000Z',
       },
     });
     const turn = await sessionStore.getTurn({ session_id: sessionId, turn_id: session?.last_turn_id ?? '' });
@@ -153,7 +189,5 @@ describe('deliverReminder', () => {
     expect(all.data).toHaveLength(1);
     const turns = await sessionStore.listTurns({ session_id: firstId, limit: 10, page_token: undefined });
     expect(turns.data).toHaveLength(2);
-    const session = await sessionStore.getSession({ tenant_id: TENANT, session_id: firstId });
-    expect(session?.metadata[LATEST_REMINDER_METADATA_KEY]).toBe('Call the dentist');
   });
 });

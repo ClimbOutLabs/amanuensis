@@ -40,6 +40,7 @@ import { MarkdownMemoryClient } from '../../../src/runtime/memory/markdownMemory
 import { resolveTurnSummarizeContext } from '../../../src/runtime/memorySummarizeSettings';
 import { TurnDrainRegistry } from '../../../src/runtime/turnDrains';
 import { ScheduleManifestSchema } from '../../../src/schemas/schedule';
+import { deliveryDeps } from '../../fixtures/deliveryDeps';
 import { discardedModelUsage } from '../../fixtures/discardedModelUsage';
 import { FakeTurnArtifactStore } from '../../fixtures/fakeTurnArtifactStore';
 import { uncappedTokenFactoryBudget } from '../../fixtures/uncappedTokenFactoryBudget';
@@ -141,6 +142,7 @@ describe('scheduled run memory wiring', () => {
         mcpCatalog: McpCatalog.loadShipped(),
         scheduleStore,
         briefItemStore: new BriefItemCompletionStore(db),
+        deliveryService: deliveryDeps(db).deliveryService,
         sessions: new Sessions<SessionCustom, TurnCustom>({ sessionStore }),
         agentStore,
         personaStore: {

@@ -36,6 +36,7 @@ import { CommonChatExportFileSchema } from '../dataExport/commonChatFormat';
 import { EXPORT_SCHEMA_VERSION } from '../dataExport/exportService';
 import { sessionPartIndex, sessionPartName } from '../dataExport/sessionRecords';
 import { ZIP_MAX_ENTRIES } from '../dataExport/zipStreamWriter';
+import type { IDeliveryStore } from '../db/deliveryStore';
 import type { IGlobalSettingsStore } from '../db/globalSettingsStore';
 import type { ISentinelAuditStore } from '../db/sentinelAuditStore';
 import type { SessionCustom, TurnCustom } from '../db/sessionCustom';
@@ -79,6 +80,7 @@ import { TOOL_OUTPUT_SCREEN_ENABLED_SETTING_KEY } from '../runtime/toolOutputScr
 import type { ImportDataResult } from '../schemas/dataImport';
 import { newId } from '../utils/id';
 import { detachConnectors, normalizeImportedConnectors, withoutKeptConnector } from './connectorImport';
+import { upgradeArchivedDeliveries } from './deliveryUpgrade';
 import { damagedExportError, DataImportError } from './importError';
 import {
   compensate,
@@ -104,6 +106,7 @@ import {
   ImportAgentsFileSchema,
   ImportAuditFileSchema,
   ImportConnectorsFileSchema,
+  ImportDeliveriesFileSchema,
   ImportFoldersFileSchema,
   ImportManifestSchema,
   ImportPersonalizationFileSchema,
@@ -120,6 +123,7 @@ import {
   type ImportAgentRecord,
   type ImportAuditRecord,
   type ImportConnectorRecord,
+  type ImportDelivery,
   type ImportFolderRecord,
   type ImportManifest,
   type ImportPersonalizationFile,
@@ -144,6 +148,8 @@ export interface DataImportDeps<TTransaction> extends PreflightDeps<TTransaction
   globalSettingsStore: IGlobalSettingsStore<TTransaction>;
   /** Permission history is imported with the same commit as the rest, and never removed again. */
   auditStore: Pick<ISentinelAuditStore, 'importRecords'>;
+  /** The feed comes along with the same commit. Push devices never do. */
+  deliveryStore: Pick<IDeliveryStore, 'importDeliveries'>;
   turnArtifactStore: ITurnArtifactStore<TTransaction>;
   withTransaction: WithTransaction<TTransaction>;
   personaKnowledgeDir: string;
@@ -490,6 +496,7 @@ interface ArchiveContents {
   connectors: ImportConnectorRecord[];
   settings: ImportSettingsFile;
   audit: ImportAuditRecord[];
+  deliveries: ImportDelivery[];
   files: ReadonlyMap<string, Buffer>;
   sourceTenantId: string;
   /** Internal details from an older version that were repaired or left out, filled in as sections are read. */
@@ -719,6 +726,10 @@ function loadArchive(input: {
     settings: section('settings.json', ImportSettingsFileSchema),
     // Absent from exports made before permission history travelled.
     audit: files.has('audit.json') ? section('audit.json', ImportAuditFileSchema) : [],
+    // Absent from exports made before the feed existed.
+    deliveries: files.has('deliveries.json')
+      ? section('deliveries.json', ImportDeliveriesFileSchema, upgradeArchivedDeliveries)
+      : [],
     files,
     sourceTenantId: manifest.tenant_id,
     leftOutReport: leftOut,
@@ -1002,6 +1013,7 @@ function buildSummary({
   connectorNames,
   leftOutConnectorNames,
   auditEntries,
+  deliveryCount,
   standInAgentNames,
   filesLeftBehind,
   leftOut,
@@ -1014,6 +1026,7 @@ function buildSummary({
   /** Email or Calendar copies from the export that are not this computer's own; it sets those up in Settings. */
   leftOutConnectorNames: string[];
   auditEntries: number;
+  deliveryCount: number;
   standInAgentNames: string[];
   /** Rows of the left-out table: internal details from an older version that did not come over. */
   leftOut: readonly LeftOutRow[];
@@ -1068,6 +1081,9 @@ function buildSummary({
   notes.push('Approvals given for one chat only do not carry over.');
   if (auditEntries > 0) {
     notes.push(`${pluralize(auditEntries, 'past permission decision', 'past permission decisions')} came along.`);
+  }
+  if (deliveryCount > 0) {
+    notes.push(`${pluralize(deliveryCount, 'item', 'items')} from your feed came along.`);
   }
   notes.push(
     'Not brought over: model keys, connector sign-ins, your own skills.\n    Add your model again and sign in to your connectors.',
@@ -1381,6 +1397,7 @@ async function importArchive<TTransaction>(
     schedules,
     settings,
     audit,
+    deliveries,
   } = contents;
   // Each person's guide is installed from the bundled pack, so the archived copy is never written again.
   // Its memory still maps to the person's own guide, and the summary still counts it.
@@ -1555,6 +1572,7 @@ async function importArchive<TTransaction>(
         connectorNames: newConnectors.map(connector => connector.name),
         leftOutConnectorNames,
         auditEntries: audit.length,
+        deliveryCount: deliveries.length,
         standInAgentNames: agentPlan.placeholders.map(placeholder => placeholder.name),
         filesLeftBehind: 0,
         leftOut,
@@ -1680,6 +1698,7 @@ async function importArchive<TTransaction>(
         throw new Error('The import transaction is not a database transaction.');
       }
       await deps.auditStore.importRecords({ tenant_id: tenantId, created_by: subjectId, records: audit }, tx);
+      await deps.deliveryStore.importDeliveries({ tenant_id: tenantId, created_by: subjectId, deliveries }, tx);
 
       if (personalization !== null) {
         // Replaces the empty profile the app creates on first sign-in; the emptiness check ruled out a filled one.
@@ -1871,6 +1890,7 @@ async function importArchive<TTransaction>(
         connectorNames: newConnectors.map(connector => connector.name),
         leftOutConnectorNames,
         auditEntries: audit.length,
+        deliveryCount: deliveries.length,
         standInAgentNames: agentPlan.placeholders.map(placeholder => placeholder.name),
         filesLeftBehind,
         leftOut,

@@ -612,10 +612,12 @@ test_refresh_puts_back_lost_settings() {
     after=$(cat "$env")
     for other in $keys; do
       [ "$other" = "$key" ] && continue
+      # The two push keys only work as a pair, so losing one makes a new pair.
+      case "$key:$other" in WEB_PUSH_PUBLIC_KEY:WEB_PUSH_PRIVATE_KEY | WEB_PUSH_PRIVATE_KEY:WEB_PUSH_PUBLIC_KEY) continue ;; esac
       assert_eq "$(printf '%s\n' "$after" | grep "^$other=")" "$(printf '%s\n' "$before" | grep "^$other=")" "$other is unchanged"
     done
     case "$key" in
-      OIDC_CLIENT_SECRET | TRUEFORGE_API_KEY | CALENDAR_ACCOUNT_SECRET) ;;
+      OIDC_CLIENT_SECRET | TRUEFORGE_API_KEY | CALENDAR_ACCOUNT_SECRET | WEB_PUSH_PUBLIC_KEY | WEB_PUSH_PRIVATE_KEY) ;;
       *) assert_eq "$(printf '%s\n' "$after" | grep "^$key=")" "$(printf '%s\n' "$before" | grep "^$key=")" "$key comes back as it was" ;;
     esac
   done
