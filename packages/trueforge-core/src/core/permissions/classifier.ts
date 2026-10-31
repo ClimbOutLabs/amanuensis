@@ -251,6 +251,12 @@ export interface SentinelAction {
    * read it, which fails the call closed to the generic Tier 3 path.
    */
   browser_click?: BrowserClickReview | undefined;
+  /**
+   * A picture of the page just before the click, for the approval card only: never hashed into the
+   * approval token, so a screenshot re-read at dispatch (lighting, a loading spinner) never fails an
+   * approval that the token's own fields (site, label, form-submit-ness, form values) still match.
+   */
+  browser_click_screenshot?: string | undefined;
 }
 
 /** What the activity line says about one reminder: when it is due in plain words (set only), and what it says. */

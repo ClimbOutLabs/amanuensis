@@ -12,7 +12,12 @@
  * one persistent profile per person. This capability only calls its HTTP API.
  */
 import type { CallToolRequest } from '@modelcontextprotocol/sdk/types.js';
-import type { AgentCapability, AgentTracing, ApprovalDecision } from '@truefoundry/trueforge-core/core';
+import type {
+  AgentCapability,
+  AgentTracing,
+  ApprovalDecision,
+  SentinelHostContext,
+} from '@truefoundry/trueforge-core/core';
 import {
   BROWSER_CLICK_TOOL_NAME,
   defineTool,
@@ -137,7 +142,15 @@ interface ClickInfoBody {
   accessible_name?: string;
   is_form_submit?: boolean;
   form_values?: Record<string, string>;
+  png_base64?: string | null;
   reason?: string;
+}
+
+/** A read of the live page before a click: what it is for the classifier, plus a picture for the card. */
+interface ClickReview {
+  review: BrowserClickReview;
+  /** A data URL, for the approval card only; never part of what the approval token binds. */
+  screenshot: string | undefined;
 }
 
 /** The sidecar's answer to an unapproved click: `ok`, a plain refusal, or caught by the request gate. */
@@ -196,22 +209,54 @@ class BrowserTool extends LocalToolMCP {
   constructor(
     private readonly owner: string,
     private readonly logger: Logger,
+    private readonly sentinel: SentinelHostContext,
     tracing: AgentTracing,
   ) {
     super({ tracing });
   }
 
+  /**
+   * A click the Tier classifier waved through, but that the sidecar's own gate then caught trying
+   * to send something, is a stopped attempt like any other: recorded even though it never had a
+   * card or a token of its own.
+   */
+  private async recordCaughtClick(body: ClickBody): Promise<void> {
+    const writer = this.sentinel.services.audit;
+    if (writer === null) {
+      return;
+    }
+    const label =
+      body.accessible_name === undefined || body.accessible_name === '' ? '(no label)' : body.accessible_name;
+    await writer.record({
+      tenant_id: this.sentinel.tenant_id,
+      created_by: this.sentinel.created_by,
+      conversation_id: this.sentinel.conversation_id,
+      tier: 3,
+      tool_name: BROWSER_CLICK_TOOL_NAME,
+      description: `Held: clicking "${label}" on ${body.site ?? 'the page'} tried to send something without asking first.`,
+      outcome: 'auto_denied',
+      auto_deny_reason: 'outbound_guard',
+    });
+  }
+
   /** What the live page says about a clicked ref right now, or undefined when it cannot be read. */
-  private async readClickReview(ref: string): Promise<BrowserClickReview | undefined> {
+  private async readClickReview(ref: string): Promise<ClickReview | undefined> {
     const result = await callBrowserSidecar<ClickInfoBody>({ path: '/click-info', owner: this.owner, body: { ref } });
     if (!result.ok || result.body.status !== 'ok') {
       return undefined;
     }
+    const body = result.body;
     return {
-      site: result.body.site ?? '',
-      accessible_name: result.body.accessible_name ?? '',
-      is_form_submit: result.body.is_form_submit === true,
-      form_values: result.body.form_values ?? {},
+      review: {
+        site: body.site ?? '',
+        accessible_name: body.accessible_name ?? '',
+        is_form_submit: body.is_form_submit === true,
+        form_values: body.form_values ?? {},
+      },
+      screenshot:
+        body.png_base64 === null || body.png_base64 === undefined
+          ? undefined
+          : `data:image/png;base64,${body.png_base64}`,
     };
   }
 
@@ -232,8 +277,15 @@ class BrowserTool extends LocalToolMCP {
     if (ref === undefined) {
       return info;
     }
-    const review = await this.readClickReview(ref);
-    return review === undefined ? info : { ...info, browser_click: review };
+    const found = await this.readClickReview(ref);
+    if (found === undefined) {
+      return info;
+    }
+    return {
+      ...info,
+      browser_click: found.review,
+      ...(found.screenshot === undefined ? {} : { browser_click_screenshot: found.screenshot }),
+    };
   }
 
   /**
@@ -252,11 +304,12 @@ class BrowserTool extends LocalToolMCP {
     if (ref === undefined) {
       throw new Error('browser_click is missing its ref');
     }
-    const review = await this.readClickReview(ref);
-    if (review === undefined) {
+    const found = await this.readClickReview(ref);
+    if (found === undefined) {
       throw new Error('could not re-read the clicked element');
     }
-    return { ref, review };
+    // Only the review binds the approval: the screenshot never does (see ClickReview).
+    return { ref, review: found.review };
   }
 
   private readonly tools: ToolDefinition[] = [
@@ -377,6 +430,7 @@ class BrowserTool extends LocalToolMCP {
             site: body.site,
             accessible_name: body.accessible_name,
           });
+          await this.recordCaughtClick(body);
           return needsApprovalResult(body);
         }
         if (body.status === 'refused') {
@@ -400,9 +454,13 @@ export interface BrowserCapabilityOptions {
   logger: Logger;
   /** The person the browser profile belongs to; logins persist across chats for the same person. */
   owner: string;
+  /** For the receipt a click the sidecar's gate caught writes, even though it never had its own card. */
+  sentinel: SentinelHostContext;
 }
 
 /** Build the browser capability. Callers only add this when `configuration.BROWSER_ENABLED` is true. */
 export function browserCapability(options: BrowserCapabilityOptions): AgentCapability {
-  return { systemToolSets: [new BrowserTool(options.owner, options.logger, options.tracing)] };
+  return {
+    systemToolSets: [new BrowserTool(options.owner, options.logger, options.sentinel, options.tracing)],
+  };
 }

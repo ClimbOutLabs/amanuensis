@@ -192,6 +192,7 @@ test('click-info reads a submit button without clicking it', { skip: !browsersAv
       assert.equal(info.is_form_submit, true);
       assert.equal(info.accessible_name, 'Place order');
       assert.equal(info.form_values.name, 'Ada Lovelace');
+      assert.ok(info.png_base64, 'a screenshot comes with the dry run, for the approval card');
       // Nothing changed: the form is still there to click for real.
       const read = await sidecar.read({ owner: 'owner-1' });
       assert.match(read.text, /Place order/);
