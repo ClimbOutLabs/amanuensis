@@ -402,6 +402,9 @@ plan_build() {
     else
       plan_add todo "$(demo_plan_text "$name" "$(reg_get "$name" owner_email)")"
     fi
+    if [ -n "$AMAN_TAVILY_KEY" ] || { [ "$DRY_RUN" = 1 ] && [ "$OPT_TAVILY_KEY_STDIN" = 1 ]; }; then
+      plan_add todo "Use Tavily for web search on instance $name" "The key is saved only in the settings file of this instance."
+    fi
   fi
   if ! need_new_instance && [ "$OPT_TF_KEY_STDIN" = 1 ]; then
     plan_add todo "Replace the Token Factory key of instance $(tf_rotation_name) and restart its app" "The key is saved only in the settings file of that instance."

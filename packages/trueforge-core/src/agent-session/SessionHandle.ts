@@ -1,11 +1,11 @@
 /**
  * Bound session handle: starts turns via {@link SessionHandle.createTurn}.
  */
+import type { Logger } from 'winston';
 import { stripLegacyHostContextMessages } from '../core/capabilities/builtins/RepositoryBindingContext';
 import type { ActionRequiredEvent, ApprovalDecision, UserToolApprovalMessage } from '../core/events/schema';
 import { newEventId } from '../core/events/schema';
 import type { RegisteredCommandExecution } from '../core/llm/LLMTypes';
-import { SEARCH_CHAT_GRANT_KEY } from '../core/mcp/approvalGrant';
 import {
   createToolCallMemoState,
   createTurnToolCallLedger,
@@ -27,7 +27,6 @@ import {
   type SentinelServices,
 } from '../core/permissions';
 import { isChangeRequestReason } from '../core/permissions/changeRequest';
-import { emptyChatPrivateFingerprints } from '../core/permissions/privateTextCheck';
 import type { WebSearchTurnState } from '../core/permissions/webSearch';
 import {
   mechanicalAbnormalHandoff,
@@ -55,7 +54,6 @@ import type { Sandbox } from '../core/sandbox/Sandbox';
 import type { AgentTracing } from '../core/tracing/AgentTracing';
 import { awaitWithAbort, throwIfSignalAborted } from '../core/util/abort';
 import { threadCapabilities } from './builtinsFromSpec';
-import { chatFingerprintSaves } from './ChatFingerprintSaves';
 import type { ITurnResourceResolver, ResolvedAgentDefinition } from './ITurnResourceResolver';
 import type { SessionRecord } from './models/SessionRecord';
 import { MAIN_THREAD_ID, type TurnRecord } from './models/TurnRecord';
@@ -403,7 +401,7 @@ export class SessionHandle<
    *
    * `previous_turn_id`: omitted/`'auto'` → session tip; `'none'` → new root
    * (no parent, even on a non-empty session); string → fork from that turn
-   * (must exist). Concurrent `'auto'` forks both succeed.
+   * (must exist). While the chat's latest turn runs, any new turn is refused.
    */
   async createTurn(input: {
     turn_id: string;
@@ -429,6 +427,8 @@ export class SessionHandle<
      * A follow-up turn in the same chat asks as usual, but never gets the owner's relaxations.
      */
     unattended?: boolean | undefined;
+    /** Built-in tool names this turn does not offer. */
+    withheld_tools?: readonly string[] | undefined;
     /** End the turn after its tool step without calling the model. */
     stop_after_tool_response?: boolean | undefined;
   }): Promise<TurnHandle<TTurnCustom>> {
@@ -437,9 +437,7 @@ export class SessionHandle<
       throw new ApprovalRequestEndedError();
     }
     const previousTurnId = resolvePreviousTurnId(input.previous_turn_id, this.session.last_turn_id);
-    // Read, do not freeze: cancelling here would make a submission that then fails
-    // validation kill a running turn on its way out. The freeze happens below, once
-    // nothing is left that can reject.
+    // Read, never frozen: a new submission does not end a running turn.
     const previous = previousTurnId ? await this.getTurnRecord(previousTurnId) : undefined;
 
     const custom = typeof input.custom === 'function' ? input.custom(previous?.custom ?? undefined) : input.custom;
@@ -458,7 +456,6 @@ export class SessionHandle<
     // acquisition phase we close the resolver (best-effort, error swallowed)
     // and rethrow — same pattern as the gateway's sessionTurnHandler, which
     // wraps getAgent/handler.init and calls gatewayStore.dispose() on failure.
-    let fingerprintTurnBegun = false;
     try {
       const tracing = input.resolver.createTracing();
       const agent = this.session.agent;
@@ -508,28 +505,14 @@ export class SessionHandle<
         session_id: this.session.session_id,
       };
       const turnId = input.turn_id;
+      // One logger for the whole turn, stamped with the session and turn ids, so every line the
+      // turn's threads and orchestrator write can be found in the app log by either id.
+      const turnLogger = input.resolver.logger.child({ sessionId: this.session.session_id, turnId });
       const planGrantTurnOwner = { ...planGrantOwner, turn_id: turnId };
       let turnCommitted = false;
       const chatApprovalGrants = new Set(
         this.session.approval_grants.filter(value => !isSerializedImplementationPlanGrant(value)),
       );
-      const webSearchTurn = input.resolver.webSearchTurn;
-      // This chat's own grants, read live: an approval during this send adds to the same set.
-      webSearchTurn.searchChatGranted = () => chatApprovalGrants.has(SEARCH_CHAT_GRANT_KEY);
-      // Registered before the record is read, so an earlier turn either shows as unsaved or its save is read.
-      const earlierTurnUnsaved = chatFingerprintSaves.begin({
-        session_id: this.session.session_id,
-        state: webSearchTurn,
-      });
-      fingerprintTurnBegun = true;
-      const savedFingerprints =
-        (await this.store.getSession({ tenant_id: this.tenant_id, session_id: this.session.session_id }))
-          ?.private_fingerprints ?? null;
-      webSearchTurn.chatFingerprints = savedFingerprints ?? emptyChatPrivateFingerprints();
-      webSearchTurn.savedFingerprintsLoaded = savedFingerprints !== null;
-      if (earlierTurnUnsaved) {
-        webSearchTurn.fingerprintsLost = true;
-      }
       const loadImplementationPlanGrants = async (): Promise<ReadonlySet<string>> => {
         // send() validates and snapshots before createTurn commits. There is no
         // executable tool batch at that point, and the durable lifecycle must not
@@ -577,6 +560,7 @@ export class SessionHandle<
       const agentThreads = this.buildThreads({
         previous,
         resolver: input.resolver,
+        logger: turnLogger,
         spec,
         sandbox,
         tracing,
@@ -587,10 +571,12 @@ export class SessionHandle<
         turnToolCallLedger,
         sentinelServices,
         stopAfterToolResponse: input.stop_after_tool_response === true,
+        withheldTools: input.withheld_tools,
       });
 
       const createDynamicSubAgentThread = this.makeCreateDynamicSubAgentThread({
         resolver: input.resolver,
+        logger: turnLogger,
         previous,
         spec,
         sandbox,
@@ -598,13 +584,14 @@ export class SessionHandle<
         chatApprovalGrants,
         loadImplementationPlanGrants,
         sentinelServices,
+        withheldTools: input.withheld_tools,
       });
 
       const orchestrator = new AgentThreadOrchestrator({
         agentThreads,
         createDynamicSubAgentThread,
         tracing,
-        logger: input.resolver.logger,
+        logger: turnLogger,
       });
 
       // SEND BEFORE COMMIT — validate + append; throw ⇒ nothing persisted.
@@ -650,16 +637,8 @@ export class SessionHandle<
         },
       };
 
-      // Last point of no return. Everything that could reject this submission has run,
-      // so cancelling the predecessor is now a consequence of a turn that is definitely
-      // being created. store.createTurn's PreviousTurnRunningError backstops a race here.
-      if (previousTurnId !== null) {
-        await this.freezeTurn({
-          turn_id: previousTurnId,
-          reason: CancellationReason.CancelledForNextTurn,
-        });
-      }
-
+      // A new message never ends a running reply; only Cancel does. The store refuses this
+      // turn with PreviousTurnRunningError while the chat's latest turn still runs.
       await this.store.createTurn({
         turn: turnInit,
         sandbox_info: sandbox?.getCurrentSandboxInfo() ?? previous?.snapshot.sandbox_info ?? null,
@@ -732,9 +711,6 @@ export class SessionHandle<
         commandExecutionOwnerId: input.command_execution_owner_id,
       });
     } catch (error) {
-      if (fingerprintTurnBegun) {
-        chatFingerprintSaves.forget({ session_id: this.session.session_id, state: input.resolver.webSearchTurn });
-      }
       await input.resolver.close().catch((closeError: unknown) => {
         input.resolver.logger.warn('TurnResourceResolver.close() failed after createTurn() error', {
           err: closeError,
@@ -1060,6 +1036,7 @@ export class SessionHandle<
   private buildThreads(input: {
     previous: TurnRecord<TTurnCustom> | undefined;
     resolver: ITurnResourceResolver<TTurnCustom>;
+    logger: Logger;
     spec: AgentSpec;
     sandbox: Sandbox | undefined;
     tracing: AgentTracing;
@@ -1070,6 +1047,7 @@ export class SessionHandle<
     turnToolCallLedger: TurnToolCallLedger;
     sentinelServices: SentinelServices;
     stopAfterToolResponse: boolean;
+    withheldTools: readonly string[] | undefined;
   }): Map<string, AgentThread> {
     const snapshots = input.previous?.snapshot.threads;
     const map = new Map<string, AgentThread>();
@@ -1084,6 +1062,7 @@ export class SessionHandle<
           threadId,
           previousThreadSnapshot: snapshots?.[threadId],
           resolver: input.resolver,
+          logger: input.logger,
           spec: input.spec,
           sandbox: input.sandbox,
           tracing: input.tracing,
@@ -1094,6 +1073,7 @@ export class SessionHandle<
           turnToolCallLedger: input.turnToolCallLedger,
           sentinelServices: input.sentinelServices,
           stopAfterToolResponse: input.stopAfterToolResponse,
+          withheldTools: input.withheldTools,
         }),
       );
     }
@@ -1104,6 +1084,7 @@ export class SessionHandle<
     threadId: string;
     previousThreadSnapshot?: AgentThreadSnapshot | undefined;
     resolver: ITurnResourceResolver<TTurnCustom>;
+    logger: Logger;
     spec: AgentSpec;
     sandbox: Sandbox | undefined;
     tracing: AgentTracing;
@@ -1114,6 +1095,7 @@ export class SessionHandle<
     turnToolCallLedger: TurnToolCallLedger;
     sentinelServices: SentinelServices;
     stopAfterToolResponse: boolean;
+    withheldTools: readonly string[] | undefined;
   }): AgentThread {
     const { definition, extraCapabilities, compactionModel } = input.resolvedDefinition;
     const isChild = Boolean(input.previousThreadSnapshot?.parent);
@@ -1126,10 +1108,11 @@ export class SessionHandle<
       sandbox,
       sandboxAvailable: Boolean(sandbox),
       tracing: input.tracing,
-      logger: input.resolver.logger,
+      logger: input.logger,
       compactionContext: input.resolver.compactionContext,
       compactionThresholdTokensDefault: input.resolver.compactionThresholdTokensDefault,
       boundRepository: input.resolver.boundRepository,
+      withheldTools: input.withheldTools,
       extraCapabilities,
     });
     return new AgentThread({
@@ -1155,19 +1138,23 @@ export class SessionHandle<
       loadImplementationPlanGrants: input.loadImplementationPlanGrants,
       isRequestContinuation: input.isRequestContinuation,
       tracing: input.tracing,
-      logger: input.resolver.logger,
+      logger: input.logger,
       toolDispatchMaxConcurrency: input.resolver.toolDispatchMaxConcurrency,
       toolCallTimeoutMs: input.resolver.toolCallTimeoutMs,
       runCodeToolCallTimeoutMs: input.resolver.runCodeToolCallTimeoutMs,
       modelFirstResponseTimeoutMs: input.resolver.modelFirstResponseTimeoutMs,
+      modelIdleTimeoutMs: input.resolver.modelIdleTimeoutMs,
+      modelToolCallIdleTimeoutMs: input.resolver.modelToolCallIdleTimeoutMs,
       toolCallPolicy: input.resolver.toolCallPolicy,
       stopAfterToolResponse: input.stopAfterToolResponse,
+      withheldTools: input.withheldTools,
       sentinel: this.createSentinelContext(input.sentinelServices, input.resolver.webSearchTurn),
     });
   }
 
   private makeCreateDynamicSubAgentThread(input: {
     resolver: ITurnResourceResolver<TTurnCustom>;
+    logger: Logger;
     previous: TurnRecord<TTurnCustom> | undefined;
     spec: AgentSpec;
     sandbox: Sandbox | undefined;
@@ -1175,6 +1162,7 @@ export class SessionHandle<
     chatApprovalGrants: Set<string>;
     loadImplementationPlanGrants: () => Promise<ReadonlySet<string>>;
     sentinelServices: SentinelServices;
+    withheldTools: readonly string[] | undefined;
   }): CreateDynamicSubAgentThread {
     return async params => {
       throwIfSignalAborted(params.signal);
@@ -1231,7 +1219,7 @@ export class SessionHandle<
         sandbox,
         sandboxAvailable: Boolean(sandbox),
         tracing: input.tracing,
-        logger: input.resolver.logger,
+        logger: input.logger,
         compactionContext: input.resolver.compactionContext,
         compactionThresholdTokensDefault: input.resolver.compactionThresholdTokensDefault,
         boundRepository: input.resolver.boundRepository,
@@ -1248,16 +1236,19 @@ export class SessionHandle<
         capabilities,
         toolCallMemo: undefined,
         turnToolCallLedger: params.turnToolCallLedger,
+        withheldTools: input.withheldTools,
         taskState: undefined,
         chatApprovalGrants: input.chatApprovalGrants,
         loadImplementationPlanGrants: input.loadImplementationPlanGrants,
         isRequestContinuation: false,
         tracing: input.tracing,
-        logger: input.resolver.logger,
+        logger: input.logger,
         toolDispatchMaxConcurrency: input.resolver.toolDispatchMaxConcurrency,
         toolCallTimeoutMs: input.resolver.toolCallTimeoutMs,
         runCodeToolCallTimeoutMs: input.resolver.runCodeToolCallTimeoutMs,
         modelFirstResponseTimeoutMs: input.resolver.modelFirstResponseTimeoutMs,
+        modelIdleTimeoutMs: input.resolver.modelIdleTimeoutMs,
+        modelToolCallIdleTimeoutMs: input.resolver.modelToolCallIdleTimeoutMs,
         toolCallPolicy: input.resolver.toolCallPolicy,
         sentinel: this.createSentinelContext(input.sentinelServices, input.resolver.webSearchTurn),
       });

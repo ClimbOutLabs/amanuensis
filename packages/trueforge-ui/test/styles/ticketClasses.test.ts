@@ -12,19 +12,19 @@ describe('B2 look styles', () => {
   const css = readFileSync(stylesPath, 'utf8');
   const b2Section = css.slice(css.indexOf('B2 look: time-of-day paper'));
 
-  it('defines every ticket, row and chapter class', () => {
+  it('defines every ticket, row and brief card class', () => {
     for (const selector of [
       '.aui-ticket {',
       '.aui-ticket--stub {',
       '.aui-ticket--punch::before {',
       '.aui-ticket--selected {',
-      '.aui-ticket--mark {',
-      '.aui-ticket__tear {',
       '.aui-ticket__stub {',
       '.aui-row {',
       '.aui-row--2 {',
-      '.aui-chapter {',
-      '.aui-underline::after {',
+      '.aui-brief-card {',
+      '.aui-brief-action {',
+      '.aui-name-underline {',
+      '.aui-face-serif {',
       '.aui-receipt {',
     ]) {
       expect(b2Section, selector).toContain(selector);
@@ -32,7 +32,7 @@ describe('B2 look styles', () => {
   });
 
   it('defines the motion keyframes and a reduced-motion block', () => {
-    for (const name of ['aui-settle', 'aui-lay', 'aui-press', 'aui-pulse', 'aui-tear', 'aui-fleck']) {
+    for (const name of ['aui-settle', 'aui-press', 'aui-pulse', 'aui-tear', 'aui-fleck']) {
       expect(b2Section).toContain(`@keyframes ${name}`);
     }
     expect(b2Section).toContain('@media (prefers-reduced-motion: reduce)');
@@ -53,5 +53,18 @@ describe('B2 look styles', () => {
 
   it('no longer defines the retired approval banner tokens', () => {
     expect(css).not.toContain('approval-banner');
+  });
+
+  it('sizes the row when/meta/action text and the chip on the --text-xs scale step', () => {
+    const ruleOf = (selector: string): string => {
+      const start = b2Section.indexOf(`\n${selector} {`);
+      expect(start, selector).toBeGreaterThanOrEqual(0);
+      return b2Section.slice(start, b2Section.indexOf('}', start) + 1);
+    };
+    expect(ruleOf('.aui-row > .when')).toMatch(/font-size: var\(--text-xs\);/);
+    expect(ruleOf('.aui-row > .text .meta')).toMatch(/font-size: var\(--text-xs\);/);
+    expect(ruleOf('.aui-row > .action')).toMatch(/font-size: var\(--text-xs\);/);
+    expect(ruleOf('.aui-chip')).toMatch(/font-size: var\(--text-xs\);/);
+    expect(b2Section).not.toMatch(/font-size:\s*0\.7[0-9]*rem/);
   });
 });

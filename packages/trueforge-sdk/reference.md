@@ -3047,7 +3047,6 @@ Create a schedule for an existing agent (by name) and add its first pending run 
 await client.schedules.create({
     agentName: "agent_name",
     manifest: {
-        cron: "cron",
         task: "task"
     },
     name: "name"
@@ -3244,7 +3243,6 @@ Replace name and manifest; replaces or drops the pending run when status/cron/ti
 ```typescript
 await client.schedules.update("schedule_id", {
     manifest: {
-        cron: "cron",
         task: "task"
     },
     name: "name"
@@ -3407,6 +3405,144 @@ await client.schedules.listRuns("schedule_id");
 <dd>
 
 **request:** `TrueForge.ListRunsSchedulesRequest`
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**requestOptions:** `SchedulesClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
+<details><summary><code>client.schedules.<a href="/src/api/resources/schedules/client/Client.ts">getTools</a>(schedule_id) -> TrueForge.GetScheduleToolsResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+The connectors, skills and sandbox a schedule runs with, and whether they are its own or come from a saved agent.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.schedules.getTools("schedule_id");
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**schedule_id:** `string` — Immutable schedule identifier.
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**requestOptions:** `SchedulesClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
+<details><summary><code>client.schedules.<a href="/src/api/resources/schedules/client/Client.ts">updateTools</a>(schedule_id, { ...params }) -> TrueForge.GetScheduleToolsResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+Replace the connectors, skills and sandbox of a schedule with its own tools. Refused for a schedule that runs as a saved agent.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.schedules.updateTools("schedule_id", {
+    connectors: ["connectors"],
+    sandboxEnabled: true,
+    skills: ["skills"]
+});
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**schedule_id:** `string` — Immutable schedule identifier.
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**request:** `TrueForge.UpdateScheduleToolsRequest`
 
 </dd>
 </dl>
@@ -7204,6 +7340,69 @@ await client.memory.vault.updateSharing({
 </dl>
 </details>
 
+<details><summary><code>client.memory.vault.<a href="/src/api/resources/memory/resources/vault/client/Client.ts">getSummaryStatus</a>({ ...params }) -> TrueForge.GetMemoryVaultSummaryStatusResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+Say whether one vault namespace is still owed a turn summary after a failed attempt.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.memory.vault.getSummaryStatus();
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**request:** `TrueForge.memory.GetSummaryStatusVaultRequest`
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**requestOptions:** `VaultClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
 <details><summary><code>client.memory.vault.<a href="/src/api/resources/memory/resources/vault/client/Client.ts">update</a>(entry_id, { ...params }) -> TrueForge.GetMemoryVaultEntryResponse</code></summary>
 <dl>
 <dd>
@@ -7393,6 +7592,201 @@ await client.personalization.auditLog.list();
 <dd>
 
 **requestOptions:** `AuditLogClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
+## Personalization BriefItems
+<details><summary><code>client.personalization.briefItems.<a href="/src/api/resources/personalization/resources/briefItems/client/Client.ts">list</a>({ ...params }) -> TrueForge.ListBriefItemCompletionsResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+Lists the morning brief items the authenticated user marked done since a time, newest first. Defaults to the last seven days.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.personalization.briefItems.list();
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**request:** `TrueForge.personalization.ListBriefItemsRequest`
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**requestOptions:** `BriefItemsClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
+<details><summary><code>client.personalization.briefItems.<a href="/src/api/resources/personalization/resources/briefItems/client/Client.ts">markDone</a>({ ...params }) -> TrueForge.MarkBriefItemDoneResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+Marks one morning brief item done for the authenticated user, so it is left out of later briefs. Marking it again refreshes the time.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.personalization.briefItems.markDone({
+    itemKey: "item_key",
+    section: "check_first",
+    sessionId: "session_id",
+    title: "title"
+});
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**request:** `TrueForge.personalization.MarkBriefItemDoneRequest`
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**requestOptions:** `BriefItemsClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
+<details><summary><code>client.personalization.briefItems.<a href="/src/api/resources/personalization/resources/briefItems/client/Client.ts">undo</a>(item_key) -> TrueForge.DeleteBriefItemDoneResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+Puts a morning brief item back on the list for the authenticated user. Undoing an item that is not done is not an error.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.personalization.briefItems.undo("item_key");
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**item_key:** `string` — Client key of the brief item.
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**requestOptions:** `BriefItemsClient.RequestOptions`
 
 </dd>
 </dl>
@@ -8840,6 +9234,205 @@ await client.settings.skills.delete("name");
 </dl>
 </details>
 
+<details><summary><code>client.settings.skills.<a href="/src/api/resources/settings/resources/skills/client/Client.ts">getNetworkApproval</a>(name) -> TrueForge.GetSkillNetworkApprovalResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+The sites the skill declares, the approved list in force, and whether a declared site can send.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.settings.skills.getNetworkApproval("name");
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**name:** `TrueForge.ResourceName`
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**requestOptions:** `SkillsClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
+<details><summary><code>client.settings.skills.<a href="/src/api/resources/settings/resources/skills/client/Client.ts">createOrUpdateNetworkApproval</a>(name, { ...params }) -> TrueForge.UpdateSkillNetworkApprovalResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+Stores the approval for exactly the sites the skill declares. A list that differs from the declaration is refused.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.settings.skills.createOrUpdateNetworkApproval("name", {
+    hosts: ["hosts"]
+});
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**name:** `TrueForge.ResourceName`
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**request:** `TrueForge.settings.UpdateSkillNetworkApprovalRequest`
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**requestOptions:** `SkillsClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
+<details><summary><code>client.settings.skills.<a href="/src/api/resources/settings/resources/skills/client/Client.ts">deleteNetworkApproval</a>(name) -> TrueForge.DeleteSkillNetworkApprovalResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+Clears the stored approval. The skill keeps no network access from the next run on.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.settings.skills.deleteNetworkApproval("name");
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**name:** `TrueForge.ResourceName`
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**requestOptions:** `SkillsClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
 ## Settings TokenFactoryUsage
 <details><summary><code>client.settings.tokenFactoryUsage.<a href="/src/api/resources/settings/resources/tokenFactoryUsage/client/Client.ts">get</a>() -> TrueForge.GetTokenFactoryUsageResponse</code></summary>
 <dl>
@@ -9006,6 +9599,362 @@ await client.settings.toolOutputScreens.createOrUpdate({
 <dd>
 
 **requestOptions:** `ToolOutputScreensClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
+## Settings Calendar
+<details><summary><code>client.settings.calendar.<a href="/src/api/resources/settings/resources/calendar/client/Client.ts">saveAccount</a>({ ...params }) -> TrueForge.SaveCalendarAccountResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+Checks the sign-in with the calendar server first and saves the account only when it passes. The password goes to the sidecar only and is never stored by the app or returned.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.settings.calendar.saveAccount({
+    email: "email",
+    password: "password",
+    providerKey: "provider_key"
+});
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**request:** `TrueForge.settings.SaveCalendarAccountRequest`
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**requestOptions:** `CalendarClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
+<details><summary><code>client.settings.calendar.<a href="/src/api/resources/settings/resources/calendar/client/Client.ts">removeAccount</a>() -> TrueForge.RemoveCalendarAccountResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+Deletes the saved account and its app password from the sidecar for good.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.settings.calendar.removeAccount();
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**requestOptions:** `CalendarClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
+<details><summary><code>client.settings.calendar.<a href="/src/api/resources/settings/resources/calendar/client/Client.ts">getStatus</a>() -> TrueForge.GetCalendarAccountResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+Returns whether a calendar account is connected, its email, login and calendar address, and the provider table for the picker. The app password is never returned.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.settings.calendar.getStatus();
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**requestOptions:** `CalendarClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
+## Settings Email
+<details><summary><code>client.settings.email.<a href="/src/api/resources/settings/resources/email/client/Client.ts">saveAccount</a>({ ...params }) -> TrueForge.SaveEmailAccountResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+Checks the sign-in with the mail server first and saves the account only when it passes. The password goes to the sidecar only and is never stored by the app or returned.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.settings.email.saveAccount({
+    address: "address",
+    password: "password",
+    providerKey: "provider_key"
+});
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**request:** `TrueForge.settings.SaveEmailAccountRequest`
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**requestOptions:** `EmailClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
+<details><summary><code>client.settings.email.<a href="/src/api/resources/settings/resources/email/client/Client.ts">removeAccount</a>() -> TrueForge.RemoveEmailAccountResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+Deletes the saved account and its app password from the sidecar for good.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.settings.email.removeAccount();
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**requestOptions:** `EmailClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
+<details><summary><code>client.settings.email.<a href="/src/api/resources/settings/resources/email/client/Client.ts">getStatus</a>() -> TrueForge.GetEmailAccountResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+Returns whether an email account is connected, its address and provider, and the provider table for the picker. The app password is never returned.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.settings.email.getStatus();
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**requestOptions:** `EmailClient.RequestOptions`
 
 </dd>
 </dl>

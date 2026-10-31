@@ -227,7 +227,7 @@ function normalizeSection(name: string, parsed: unknown): unknown {
     );
     for (const entry of entries) {
       const session = recordAt(entry['session'], 'session');
-      // Import never carries Approve for this chat choices; expectNoApprovalGrants checks the target side.
+      // Import never carries Always allow this here choices; expectNoApprovalGrants checks the target side.
       session['approval_grants'] = '<never imported>';
       entry['artifacts'] = sortBy(recordsAt(entry['artifacts'], 'artifacts'), artifact =>
         stringAt(artifact['path'], 'path'),

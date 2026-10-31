@@ -16,7 +16,7 @@ import type { LLMUserMessage } from '../llm/LLMTypes';
 import { SandboxFileUploadError, type Sandbox, type SandboxInfo } from '../sandbox/Sandbox';
 import type { AgentSendInput } from './AgentThread.types';
 import { assertAttachmentBatch, stageAttachment, validatePublicFilename } from './attachmentStaging';
-import { internalSystemTag, SYSTEM_TAG_START, untrustedDocumentTag } from './contextUtils';
+import { internalSystemTag, untrustedDocumentTag } from './contextUtils';
 
 export type { AgentInputUserMessage, FileContentPart, TextContentPart, UserContentPart };
 
@@ -107,11 +107,6 @@ export function extractBase64(dataUri: string): Buffer {
 }
 
 const UPLOADED_FILES_HEADING = 'Uploaded files (';
-
-/** True for the note that lists the files a person attached to their message. */
-export function isUploadedFilesAnnouncement(text: string): boolean {
-  return text.startsWith(`${SYSTEM_TAG_START}${UPLOADED_FILES_HEADING}`);
-}
 
 function buildUploadedFilesAnnouncement(
   files: { filename: string; path: string; mime: string; size: number; stagedFilename: string }[],

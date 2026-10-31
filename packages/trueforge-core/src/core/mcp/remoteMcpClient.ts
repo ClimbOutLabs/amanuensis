@@ -4,9 +4,14 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import type { FetchLike } from '@modelcontextprotocol/sdk/shared/transport.js';
-import type { CallToolRequest, CallToolResult } from '@modelcontextprotocol/sdk/types.js';
+import {
+  ErrorCode,
+  McpError,
+  type CallToolRequest,
+  type CallToolResult,
+} from '@modelcontextprotocol/sdk/types.js';
 import { context, propagation } from '@opentelemetry/api';
-import { McpConnectionError } from '../errors';
+import { McpConnectionError, McpRedirectRefusedError } from '../errors';
 import { withTimeout } from '../util/promiseUtils';
 import { isRedirectStatus, redirectTargetOrigin } from '../util/redirects';
 import type { ToolSchema } from './IMCPServer';
@@ -120,7 +125,7 @@ function createRedirectGuardFetch({ sameOriginOnly }: { sameOriginOnly: boolean 
           await response.body?.cancel().catch(() => {
             /* no-op */
           });
-          throw new McpConnectionError(redirectRefusedMessage(refused), 502);
+          throw new McpRedirectRefusedError(redirectRefusedMessage(refused));
         }
         await response.body?.cancel().catch(() => {
           /* no-op */
@@ -148,6 +153,64 @@ export function isSessionExpiredError(error: unknown): boolean {
     error.message.toLowerCase().includes('session') ||
     isNotInitializedServerError(error.message)
   );
+}
+
+/** Node network failure codes that mean the request never reached the server. */
+const TRANSPORT_ERROR_CODES: ReadonlySet<string> = new Set([
+  'ECONNREFUSED',
+  'ECONNRESET',
+  'ECONNABORTED',
+  'ETIMEDOUT',
+  'ENOTFOUND',
+  'EAI_AGAIN',
+  'EHOSTUNREACH',
+  'ENETUNREACH',
+  'EPIPE',
+]);
+
+/** The SDK's JSON-RPC code for a transport that closed under a request. */
+const CONNECTION_CLOSED_CODE: number = ErrorCode.ConnectionClosed;
+
+function networkErrorCode(error: Error): string | undefined {
+  const code: unknown = Reflect.get(error, 'code');
+  return typeof code === 'string' && TRANSPORT_ERROR_CODES.has(code) ? code : undefined;
+}
+
+/**
+ * A plain-words reason when a failure is the transport itself (the request never reached the
+ * server), or undefined for anything else: an answer the server gave, an auth refusal, a bug.
+ * The fetch layer reports these as a bare "fetch failed" and hides the real reason one level
+ * down, on the error's cause, which for a refused connection carries the code and the address;
+ * the chain is walked for the first link that names a network failure.
+ */
+export function transportFailureDetail(error: unknown): string | undefined {
+  const seen = new Set<unknown>();
+  let current: unknown = error;
+  let sawFetchFailure = false;
+  while (current instanceof Error && !seen.has(current)) {
+    seen.add(current);
+    if (current instanceof TypeError && current.message === 'fetch failed') {
+      sawFetchFailure = true;
+    }
+    if (current instanceof McpError && current.code === CONNECTION_CLOSED_CODE) {
+      return 'the connection closed';
+    }
+    const code = networkErrorCode(current);
+    if (code !== undefined) {
+      if (code === 'ECONNREFUSED') {
+        const address: unknown = Reflect.get(current, 'address');
+        const port: unknown = Reflect.get(current, 'port');
+        if (typeof address === 'string' && typeof port === 'number') {
+          return `connection refused at ${address}:${String(port)}`;
+        }
+      }
+      return current.message.length > 0 ? current.message : code;
+    }
+    current = current.cause;
+  }
+  // A bare fetch failure with no coded cause is still the transport failing, just with
+  // nothing more specific to say about why.
+  return sawFetchFailure ? 'the connection failed' : undefined;
 }
 
 /**
@@ -278,6 +341,8 @@ export async function connectRemoteMcp(params: {
     ? [params.knownTransportType, ...TRANSPORT_PROBE_ORDER.filter(t => t !== params.knownTransportType)]
     : TRANSPORT_PROBE_ORDER;
   const failures: { transport: RemoteMcpTransportType; error: string }[] = [];
+  // Kept so a caller can tell a server that cannot be reached from one that answered with a failure.
+  let transportCause: unknown;
 
   for (const transportType of candidates) {
     const transport = createTransport({
@@ -304,7 +369,7 @@ export async function connectRemoteMcp(params: {
       // A refused redirect is final: the URL does not serve MCP itself, so another transport on it would fare no better.
       const refused = redirectRefusal.refusal();
       if (refused !== undefined) {
-        throw new McpConnectionError(redirectRefusedMessage(refused), 502, { cause: error });
+        throw new McpRedirectRefusedError(redirectRefusedMessage(refused), { cause: error });
       }
       if (isAuthError(error)) {
         throw toConnectError(error);
@@ -313,6 +378,9 @@ export async function connectRemoteMcp(params: {
       // the caller reconnects fresh instead of falling through to a different transport.
       if (params.sessionId && isSessionExpiredError(error)) {
         throw toConnectError(error);
+      }
+      if (transportCause === undefined && transportFailureDetail(error) !== undefined) {
+        transportCause = error;
       }
       failures.push({ transport: transportType, error: describeTransportError(error) });
       continue;
@@ -325,5 +393,9 @@ export async function connectRemoteMcp(params: {
     return buildConnection(client, transport, transportType, params.headers, requestOptions);
   }
 
-  throw new McpConnectionError(`failed to connect (tried ${candidates.join(', ')}): ${JSON.stringify(failures)}`, 502);
+  throw new McpConnectionError(
+    `failed to connect (tried ${candidates.join(', ')}): ${JSON.stringify(failures)}`,
+    502,
+    transportCause === undefined ? undefined : { cause: transportCause },
+  );
 }

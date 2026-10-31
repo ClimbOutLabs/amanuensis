@@ -22,7 +22,9 @@ import {
   USAGE_SUMMARY_INPUT_SCHEMA,
   UsagePeriodError,
   type UsageEntry,
+  type UsageGroupRow,
   type UsagePeriod,
+  type UsageSummary,
   type UsageSummaryInput,
 } from './usageSummary';
 
@@ -67,6 +69,8 @@ export async function collectUsageEntries({
       metadata: undefined,
       source_type: undefined,
       source_id: undefined,
+      folder_id: undefined,
+      no_folder: false,
     });
     for (const session of page.data) {
       if (session.created_by_subject.subject_id !== userRef) {
@@ -135,8 +139,64 @@ async function usageEntriesForSession({
   return entries;
 }
 
+/** One slice's cost in words: its priced total, or why no total can be shown for it. */
+function usageCostText(row: UsageGroupRow): string {
+  if (row.cost_usd !== null) {
+    return `$${String(row.cost_usd)}`;
+  }
+  return `not shown, because ${String(row.unpriced_tokens)} tokens have no known price`;
+}
+
+/**
+ * A chat title is free text and can hold anything, line breaks included: collapse it to a single
+ * clean line so a title can never start a line of its own or dress itself up as a figure.
+ */
+function oneLineTitle(title: string): string {
+  return title
+    .replace(/\p{Cc}+/gu, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/**
+ * The tool result as written lines, every figure the summary's own, so the model answers from
+ * words a person could read as-is instead of a JSON dump it may paste back unchanged.
+ */
+function renderUsageSummaryText(summary: UsageSummary): string {
+  const { period, total, daily_cap: cap } = summary;
+  const lines = [`Usage from ${period.from_date} to ${period.to_date} (${period.time_zone}).`];
+  if (summary.by_model.length === 0) {
+    lines.push('No usage was recorded in this period.');
+  } else {
+    lines.push(
+      `Total: ${String(total.total_tokens)} tokens (${String(total.input_tokens)} in, ${String(total.output_tokens)} out).`,
+    );
+    lines.push(`Total cost: ${usageCostText(total)}.`);
+    lines.push('By model:');
+    for (const model of summary.by_model) {
+      lines.push(
+        `- ${model.display_name}: ${String(model.total_tokens)} tokens (${String(model.input_tokens)} in, ${String(model.output_tokens)} out); cost ${usageCostText(model)}.`,
+      );
+    }
+    lines.push('By day:');
+    for (const day of summary.by_day) {
+      lines.push(`- ${day.date}: ${String(day.total_tokens)} tokens; cost ${usageCostText(day)}.`);
+    }
+    lines.push('Top chats:');
+    for (const chat of summary.top_chats) {
+      lines.push(`- ${oneLineTitle(chat.title)}: ${String(chat.total_tokens)} tokens; cost ${usageCostText(chat)}.`);
+    }
+  }
+  lines.push(
+    cap === null
+      ? 'Daily Token Factory cap: none is set.'
+      : `Daily Token Factory cap: ${String(cap.cap_tokens)} tokens for the whole instance; ${String(cap.remaining_tokens)} left today.`,
+  );
+  return lines.join('\n');
+}
+
 const USAGE_SUMMARY_DESCRIPTION =
-  "Read the signed-in person's own usage: tokens in and out, cost where priced, by model and by day, the top chats by cost (titles only), and the shared daily Token Factory cap left. The cap covers the whole instance. Periods: today, this_week, this_month (default) or date_range. Unpriced tokens are counted apart; a cost is null when any of its tokens lack a price. Say so; never guess a price. Answer in a few plain sentences; a small bar chart fits several days or models.";
+  "Read the signed-in person's own usage: tokens in and out, cost where priced, by model and by day, the top chats by cost (titles only), and the shared daily Token Factory cap left. The cap covers the whole instance. Periods: today, this_week, this_month (default) or date_range. Unpriced tokens are counted apart; a cost is not shown when any of its tokens have no known price. Say so; never guess a price. Answer in a few plain sentences; a small bar chart fits several days or models.";
 
 export interface UsageSummaryTurnContext {
   sessionStore: UsageSessionReader;
@@ -202,7 +262,7 @@ class UsageSummaryTool extends LocalToolMCP {
       period,
       cap: day.cap_tokens === undefined ? undefined : { capTokens: day.cap_tokens, usedTokens: day.used_tokens },
     });
-    return toolResultResponse({ text: JSON.stringify(summary) });
+    return toolResultResponse({ text: renderUsageSummaryText(summary) });
   }
 
   // A read of the person's own numbers: it gets no approval prompt, like the space reads.

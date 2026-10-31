@@ -82,7 +82,10 @@ interface LabelCase {
   /** The card sentence under test. */
   label: string;
   build: (control: string) => { call: SentinelAction; ctx: ClassifyContext };
-  /** The model-supplied text as it must appear once the control is a code. */
+  /**
+   * The text the card sentence must contain: the escaped model text, or the
+   * whole question when the title no longer repeats the model text.
+   */
   shown: (code: string) => string;
 }
 
@@ -117,7 +120,7 @@ const LABEL_CASES: LabelCase[] = [
       call: action('exec', { command: `echo hi${control}`, env: { FOO: 'bar' } }),
       ctx: makeCtx({ workspace_cwd: '/tmp' }),
     }),
-    shown: code => `echo hi${code}`,
+    shown: () => 'Run this command with custom environment variables?',
   },
   {
     label: 'executed file the server cannot resolve',
@@ -128,7 +131,7 @@ const LABEL_CASES: LabelCase[] = [
         ctx: makeCtx({ workspace_cwd: workspace }),
       };
     },
-    shown: code => `missing${code}.sh`,
+    shown: () => 'Run this program, even though it cannot be matched to a file in your workspace?',
   },
   {
     label: 'script the agent wrote earlier',
@@ -152,7 +155,7 @@ const LABEL_CASES: LabelCase[] = [
         ctx: makeCtx({ workspace_cwd: workspace, services }),
       };
     },
-    shown: code => `tool${code}.sh`,
+    shown: () => 'Run a script the assistant wrote earlier?',
   },
   {
     label: 'command with no workspace set',
@@ -160,7 +163,7 @@ const LABEL_CASES: LabelCase[] = [
       call: action('exec', { command: `ls ${control}x` }),
       ctx: makeCtx({ workspace_cwd: null, services: allowlistedServices() }),
     }),
-    shown: code => `ls ${code}x`,
+    shown: () => 'Run this command, even though no workspace is set?',
   },
   {
     label: 'command from outside the workspace',
@@ -168,7 +171,7 @@ const LABEL_CASES: LabelCase[] = [
       call: action('exec', { command: `ls ${control}x`, cwd: '/' }),
       ctx: makeCtx({ workspace_cwd: tempDir('card-label-ws-'), services: allowlistedServices() }),
     }),
-    shown: code => `ls ${code}x`,
+    shown: () => 'Run this command from outside your workspace?',
   },
   {
     label: 'file outside the workspace',
@@ -183,7 +186,7 @@ const LABEL_CASES: LabelCase[] = [
         ctx: makeCtx({ workspace_cwd: workspace, services: allowlistedServices() }),
       };
     },
-    shown: code => `cat link${code}.txt`,
+    shown: () => 'Run a command that reaches a file outside your workspace?',
   },
   {
     label: 'arguments the safe list does not allow',
@@ -194,7 +197,7 @@ const LABEL_CASES: LabelCase[] = [
         ctx: makeCtx({ workspace_cwd: workspace }),
       };
     },
-    shown: code => `git${code}`,
+    shown: () => 'Run this command?',
   },
   {
     label: 'write outside the workspace',
@@ -242,7 +245,7 @@ const LABEL_CASES: LabelCase[] = [
       ),
       ctx: makeCtx({ workspace_cwd: null }),
     }),
-    shown: code => `lookup${code}_records`,
+    shown: () => 'Run this action, even though it might change or delete something for good?',
   },
   {
     label: 'web search query',
@@ -265,7 +268,7 @@ const LABEL_CASES: LabelCase[] = [
         },
       }),
     }),
-    shown: code => `Web search: weather${code}`,
+    shown: code => `Search the web for weather${code}?`,
   },
 ];
 

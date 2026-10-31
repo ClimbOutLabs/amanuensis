@@ -1,6 +1,11 @@
-import { classifyTier, type ClassifyContext, type SentinelAction } from '../../../src/core/permissions/classifier';
+import {
+  approvalCardForGatedCall,
+  classifyTier,
+  type ClassifyContext,
+  type SentinelAction,
+} from '../../../src/core/permissions/classifier';
 import { defaultSentinelServices } from '../../../src/core/permissions/context';
-import { createWebSearchTurnState, hasReadPrivateData } from '../../../src/core/permissions/webSearch';
+import { createWebSearchTurnState } from '../../../src/core/permissions/webSearch';
 
 const MAIL_CONNECTOR = 'Email';
 const CLOSED_WORLD_READ = { read_only_hint: true, open_world_hint: false };
@@ -25,6 +30,15 @@ function mailCall(
 /** A call on the Email connector that the host vouches for: the operator's own sidecar. */
 function firstPartyMailCall(tool_name: string, canonical_params: Record<string, unknown>): SentinelAction {
   return { ...mailCall(tool_name, canonical_params, CLOSED_WORLD_READ), mcp_first_party: true };
+}
+
+/** A call on the Email connector with the hints it publishes, on the host's own sidecar. */
+function hostMailCall(
+  tool_name: string,
+  canonical_params: Record<string, unknown>,
+  mcp_hints: SentinelAction['mcp_hints'],
+): SentinelAction {
+  return { ...mailCall(tool_name, canonical_params, mcp_hints), mcp_first_party: true };
 }
 
 function makeCtx(): ClassifyContext {
@@ -66,28 +80,68 @@ describe('Email connector classifier', () => {
     );
 
     it.each(READS)(
-      '%s from the first-party Email sidecar runs without a card and is a private read',
+      '%s from the first-party Email sidecar runs without a card and is a read of private data',
       async (name, params) => {
         const ctx = makeCtx();
         const decision = await classifyTier(firstPartyMailCall(name, params), ctx);
         expect(decision).toMatchObject({ tier: 1, reason: 'mail_read', auto_deny: null, sensitive_read: true });
         expect(decision.card).toBeNull();
-        expect(hasReadPrivateData(ctx.web_search)).toBe(true);
       },
     );
-
-    it('a silent read leaves the chat private, so a later web search still goes through the private-text check', async () => {
-      const ctx = makeCtx();
-      expect(hasReadPrivateData(ctx.web_search)).toBe(false);
-      await classifyTier(firstPartyMailCall('list_emails_metadata', { mailbox: 'INBOX' }), ctx);
-      expect(hasReadPrivateData(ctx.web_search)).toBe(true);
-    });
 
     it('a read is never silent when the sidecar is offline', async () => {
       const ctx = makeCtx();
       ctx.services.isOffline = () => Promise.resolve(true);
       const decision = await classifyTier(firstPartyMailCall('list_emails_metadata', { mailbox: 'INBOX' }), ctx);
       expect(decision).toMatchObject({ tier: 3, reason: 'auto_denied', auto_deny: 'offline_mode' });
+    });
+  });
+
+  describe('mark as read', () => {
+    // The hints the mail server really publishes for get_emails_content: a write only because of this choice.
+    const CONTENT_HINTS = { read_only_hint: false, open_world_hint: true };
+
+    it('reading message bodies with mark as read set asks with the card for that change', async () => {
+      const decision = await classifyTier(
+        hostMailCall('get_emails_content', { email_ids: ['e1'], mark_as_read: true }, CONTENT_HINTS),
+        makeCtx(),
+      );
+      expect(decision).toMatchObject({ tier: 3, reason: 'mail_mark_as_read', auto_deny: null, sensitive_read: true });
+      expect(decision.card?.plain_what).toBe('Allow marking these emails as read?');
+      expect(decision.approval_token_id).not.toBeNull();
+    });
+
+    it.each([
+      ['spelled as text', 'true'],
+      ['a number', 1],
+      ['the word yes', 'yes'],
+    ])(
+      'reading message bodies with mark as read set, %s, still asks with the card for that change',
+      async (_label, value) => {
+        const decision = await classifyTier(
+          hostMailCall('get_emails_content', { email_ids: ['e1'], mark_as_read: value }, CONTENT_HINTS),
+          makeCtx(),
+        );
+        expect(decision).toMatchObject({ tier: 3, reason: 'mail_mark_as_read', auto_deny: null, sensitive_read: true });
+        expect(decision.card?.plain_what).toBe('Allow marking these emails as read?');
+        expect(decision.approval_token_id).not.toBeNull();
+      },
+    );
+
+    it('reading message bodies with mark as read off or absent stays a silent read', async () => {
+      for (const params of [{ email_ids: ['e1'] }, { email_ids: ['e1'], mark_as_read: false }]) {
+        const decision = await classifyTier(hostMailCall('get_emails_content', params, CONTENT_HINTS), makeCtx());
+        expect(decision).toMatchObject({ tier: 1, reason: 'mail_read', auto_deny: null, sensitive_read: true });
+        expect(decision.card).toBeNull();
+      }
+    });
+
+    it('mark as read set still asks when the sidecar is the one asking, never silently', async () => {
+      const decision = await classifyTier(
+        hostMailCall('get_emails_content', { email_ids: ['e1'], mark_as_read: true }, CLOSED_WORLD_READ),
+        makeCtx(),
+      );
+      expect(decision).toMatchObject({ tier: 3, reason: 'mail_mark_as_read', auto_deny: null });
     });
   });
 
@@ -196,7 +250,7 @@ describe('Email connector classifier', () => {
 
     it('a send to a listed address keeps the plain send card', async () => {
       const decision = await classifyTier(
-        mailCall('send_email', { recipients: [LISTED], subject: SUBJECT, body: 'Hi' }, OUTBOUND_WRITE),
+        hostMailCall('send_email', { recipients: [LISTED], subject: SUBJECT, body: 'Hi' }, OUTBOUND_WRITE),
         ctxWithList([LISTED]),
       );
       expect(decision).toMatchObject({ tier: 3, auto_deny: null });
@@ -206,20 +260,27 @@ describe('Email connector classifier', () => {
 
     it('a send to an address not on the list asks with the new-recipient card', async () => {
       const decision = await classifyTier(
-        mailCall('send_email', { recipients: [STRANGER], subject: SUBJECT, body: 'Hi' }, OUTBOUND_WRITE),
+        hostMailCall('send_email', { recipients: [STRANGER], subject: SUBJECT, body: 'Hi' }, OUTBOUND_WRITE),
         ctxWithList([LISTED]),
       );
       expect(decision).toMatchObject({ tier: 3, auto_deny: null, reason: 'mail_new_recipient' });
       expect(decision.card?.plain_what).toContain(NEW_RECIPIENT_LINE);
       expect(decision.card?.plain_what).toContain('Approving adds them to your send list and sends.');
       expect(decision.card?.mail_new_recipients).toEqual([STRANGER]);
+      expect(decision.card?.mail_draft ?? null).toBeNull();
+      expect(decision.card?.cannot_be_undone).toBe("Once this is sent, it can't be unsent.");
+      expect(decision.card?.destination_host).toBeNull();
       expect(decision.card?.outbound_text).toContain(SUBJECT);
       expect(decision.approval_token_id).not.toBeNull();
     });
 
     it('one unlisted address among listed ones is still a new recipient', async () => {
       const decision = await classifyTier(
-        mailCall('send_email', { recipients: [LISTED], cc: [STRANGER], subject: SUBJECT, body: 'Hi' }, OUTBOUND_WRITE),
+        hostMailCall(
+          'send_email',
+          { recipients: [LISTED], cc: [STRANGER], subject: SUBJECT, body: 'Hi' },
+          OUTBOUND_WRITE,
+        ),
         ctxWithList([LISTED]),
       );
       expect(decision.reason).toBe('mail_new_recipient');
@@ -228,7 +289,11 @@ describe('Email connector classifier', () => {
 
     it('matches the list ignoring case and edge space', async () => {
       const decision = await classifyTier(
-        mailCall('send_email', { recipients: [' DANA@Example.com '], subject: SUBJECT, body: 'Hi' }, OUTBOUND_WRITE),
+        hostMailCall(
+          'send_email',
+          { recipients: [' DANA@Example.com '], subject: SUBJECT, body: 'Hi' },
+          OUTBOUND_WRITE,
+        ),
         ctxWithList([LISTED]),
       );
       expect(decision.reason).not.toBe('mail_new_recipient');
@@ -236,7 +301,7 @@ describe('Email connector classifier', () => {
 
     it('with no list at all, every recipient is new', async () => {
       const decision = await classifyTier(
-        mailCall('send_email', { recipients: [LISTED], subject: SUBJECT, body: 'Hi' }, OUTBOUND_WRITE),
+        hostMailCall('send_email', { recipients: [LISTED], subject: SUBJECT, body: 'Hi' }, OUTBOUND_WRITE),
         ctxWithList([]),
       );
       expect(decision.reason).toBe('mail_new_recipient');
@@ -244,34 +309,165 @@ describe('Email connector classifier', () => {
 
     it('forward_email to an address not on the list asks with the new-recipient card', async () => {
       const decision = await classifyTier(
-        mailCall('forward_email', { email_id: 'e1', recipients: [STRANGER], subject: SUBJECT }, OUTBOUND_WRITE),
+        hostMailCall('forward_email', { email_id: 'e1', recipients: [STRANGER], subject: SUBJECT }, OUTBOUND_WRITE),
         ctxWithList([LISTED]),
       );
       expect(decision).toMatchObject({ tier: 3, reason: 'mail_new_recipient' });
       expect(decision.card?.plain_what).toContain(NEW_RECIPIENT_LINE);
     });
 
-    it('save_draft is not a send, so it never asks about new recipients', async () => {
+    it('a draft to an address not on the list asks with the new-recipient card, in draft words', async () => {
       const decision = await classifyTier(
-        mailCall('save_draft', { recipients: [STRANGER], subject: SUBJECT, body: 'Hi' }, LOCAL_WRITE),
+        hostMailCall('save_draft', { recipients: [STRANGER], subject: SUBJECT, body: 'Hi' }, OUTBOUND_WRITE),
+        ctxWithList([LISTED]),
+      );
+      expect(decision).toMatchObject({ tier: 3, auto_deny: null, reason: 'mail_new_recipient' });
+      expect(decision.card?.plain_what).toContain(NEW_RECIPIENT_LINE);
+      expect(decision.card?.plain_what).toContain('Approving adds them to your send list and saves this draft.');
+      expect(decision.card?.plain_what).toContain('Save a message draft');
+      expect(decision.card?.plain_what).not.toContain('and sends.');
+      expect(decision.card?.mail_new_recipients).toEqual([STRANGER]);
+      expect(decision.card?.mail_draft).toBe(true);
+      // A draft sends nothing, so it carries no send warning, and its destination is the recipient, not the endpoint.
+      expect(decision.card?.cannot_be_undone).toBeNull();
+      expect(decision.card?.destination_host).toBeNull();
+      expect(decision.card?.recipient).toContain(STRANGER);
+      expect(decision.mail_send).toBe(false);
+      expect(decision.approval_token_id).not.toBeNull();
+    });
+
+    it('a draft to a listed address keeps the ordinary draft card and adds nobody', async () => {
+      const decision = await classifyTier(
+        hostMailCall('save_draft', { recipients: [LISTED], subject: SUBJECT, body: 'Hi' }, LOCAL_WRITE),
         ctxWithList([LISTED]),
       );
       expect(decision.reason).toBe('connector_send');
       expect(decision.card?.plain_what).not.toContain('New recipient');
+      expect(decision.card?.mail_new_recipients ?? null).toBeNull();
+    });
+
+    it('a draft to a listed address on the host sidecar shows no send warning and no endpoint as its destination', async () => {
+      const decision = await classifyTier(
+        hostMailCall('save_draft', { recipients: [LISTED], subject: SUBJECT, body: 'Hi' }, OUTBOUND_WRITE),
+        ctxWithList([LISTED]),
+      );
+      expect(decision).toMatchObject({ tier: 3, auto_deny: null, reason: 'connector_send' });
+      expect(decision.card?.plain_what).toContain('Save a message draft');
+      expect(decision.card?.cannot_be_undone).toBeNull();
+      expect(decision.card?.destination_host).toBeNull();
+      expect(decision.card?.recipient).toContain(LISTED);
+    });
+
+    it('a draft with no recipient is refused before any card', async () => {
+      const decision = await classifyTier(
+        hostMailCall('save_draft', { subject: SUBJECT, body: 'Hi' }, OUTBOUND_WRITE),
+        ctxWithList([LISTED]),
+      );
+      expect(decision.card).toBeNull();
+      expect(decision.auto_deny).toBe('incomplete_send_card');
+      expect(decision.reason_detail).toContain('a draft must say who it is for');
+      expect(decision.owner_message).toContain('Nothing was saved');
+    });
+
+    it('a draft with no recipient on a connector that only shares the name is not refused for that', async () => {
+      const decision = await classifyTier(
+        mailCall('save_draft', { subject: SUBJECT, body: 'Hi' }, LOCAL_WRITE),
+        ctxWithList([LISTED]),
+      );
+      expect(decision.auto_deny).toBeNull();
+      expect(decision.card).not.toBeNull();
+    });
+
+    it("a send through the host's own sidecar to a listed address asks under its own reason, and no answer covers it", async () => {
+      const decision = await classifyTier(
+        hostMailCall('send_email', { recipients: [LISTED], subject: SUBJECT, body: 'Hi' }, OUTBOUND_WRITE),
+        ctxWithList([LISTED]),
+      );
+      expect(decision).toMatchObject({ tier: 3, auto_deny: null, reason: 'mail_send' });
+      expect(decision.card?.destination_host).toBeNull();
+      expect(decision.approval_token_id).not.toBeNull();
+    });
+
+    it('a connector that only shares the name never gets the new-recipient card or the send-list reason', async () => {
+      const decision = await classifyTier(
+        mailCall('send_email', { recipients: [STRANGER], subject: SUBJECT, body: 'Hi' }, OUTBOUND_WRITE),
+        ctxWithList([LISTED]),
+      );
+      expect(decision).toMatchObject({ tier: 3, auto_deny: null });
+      expect(decision.reason).not.toBe('mail_new_recipient');
+      expect(decision.reason).not.toBe('mail_send');
+      expect(decision.card?.mail_new_recipients ?? null).toBeNull();
+      // Only the host's own sidecar drops the endpoint: a connector that shares the name still shows its host.
+      expect(decision.card?.destination_host).toBe('mail-email');
     });
   });
 
   describe('unknown tools', () => {
     it('a tool the Email connector does not offer with a mail word in its name is never silent', async () => {
-      const decision = await classifyTier(mailCall('purge_emails', { mailbox: 'INBOX' }, {}), makeCtx());
+      const decision = await classifyTier(hostMailCall('purge_emails', { mailbox: 'INBOX' }, {}), makeCtx());
       expect(decision.tier).not.toBe(1);
       expect(decision.auto_deny).not.toBeNull();
     });
 
     it('a tool with no recognized name asks with a card and is never silent', async () => {
-      const decision = await classifyTier(mailCall('empty_trash', { mailbox: 'Trash' }, {}), makeCtx());
+      const decision = await classifyTier(hostMailCall('empty_trash', { mailbox: 'Trash' }, {}), makeCtx());
       expect(decision).toMatchObject({ tier: 3, auto_deny: null, reason: 'unrecognized_tool' });
       expect(decision.card).not.toBeNull();
+    });
+
+    it('the card for an unknown Email tool keeps a plain warning and shows its argument labels', async () => {
+      const decision = await classifyTier(hostMailCall('empty_trash', { mailbox: 'Trash', ids: ['1'] }, {}), makeCtx());
+      expect(decision.card?.cannot_be_undone).toBe('It is not clear whether this can be undone.');
+      expect(decision.card?.plain_what).toBe('Allow this new tool from Email?');
+      expect(decision.card?.outbound_text).toContain('ids (array): ["1"]');
+    });
+  });
+
+  describe('the card for a call that asks without a rule', () => {
+    it.each(['list_emails_metadata', 'get_emails_content', 'get_attachment_content', 'list_mailboxes'])(
+      'a gated %s read on the first-party Email sidecar is not called new and carries no warning',
+      tool => {
+        const card = approvalCardForGatedCall({
+          action: firstPartyMailCall(tool, { mailbox: 'INBOX' }),
+          agent_intent: null,
+        });
+        expect(card.plain_what).toBe('Allow reading your email?');
+        expect(card.cannot_be_undone).toBeNull();
+      },
+    );
+
+    it('a gated Email write keeps the warning, even on the first-party sidecar', () => {
+      const card = approvalCardForGatedCall({
+        action: firstPartyMailCall('archive_emails', { ids: ['1'] }),
+        agent_intent: null,
+      });
+      expect(card.cannot_be_undone).not.toBeNull();
+    });
+
+    it('a mail-read call on a connector named Email that is not first-party asks like any other connector', () => {
+      const card = approvalCardForGatedCall({
+        action: mailCall('list_emails_metadata', {}, CLOSED_WORLD_READ),
+        agent_intent: null,
+      });
+      expect(card.plain_what).toBe('Allow this new tool from Email?');
+      expect(card.cannot_be_undone).toBe('It is not clear whether this can be undone.');
+    });
+
+    it('a connector that only declares itself read-only still gets the warning', async () => {
+      const decision = await classifyTier(
+        mailCall('peek_trash', { mailbox: 'Trash' }, { read_only_hint: true, open_world_hint: true }),
+        makeCtx(),
+      );
+      expect(decision.card?.cannot_be_undone).toBe('It is not clear whether this can be undone.');
+    });
+
+    it('a mail-read name on another connector is still an unknown tool with the warning', () => {
+      const card = approvalCardForGatedCall({
+        action: { ...firstPartyMailCall('list_emails_metadata', {}), mcp_server_name: 'Mail Mirror' },
+        agent_intent: null,
+      });
+      expect(card.plain_what).toBe('Allow this new tool from Mail Mirror?');
+      expect(card.cannot_be_undone).toBe('It is not clear whether this can be undone.');
     });
   });
 });

@@ -183,19 +183,17 @@ test_partial_instance_dir_is_replaced() {
 }
 
 test_concurrent_run_blocked_and_stale_lock_taken_over() {
-  t_begin "a live lock blocks a run and a dead one is replaced"
+  t_begin "a lock with a fresh beat blocks a run and one whose beat stopped is replaced"
   sandbox_new
   mkdir -p "$AMAN_HOME/state/lock"
-  sleep 30 &
-  local pid=$!
-  printf '%s\n' "$pid" >"$AMAN_HOME/state/lock/pid"
+  printf 'other-run\n' >"$AMAN_HOME/state/lock/owner"
+  date +%s >"$AMAN_HOME/state/lock/beat"
   with_input "$SENTINEL_PASSWORD
 "
   run_install --yes --password-stdin --email owner@example.invalid
   assert_rc 1
   assert_flat_contains "$ERR" "Another install is running right now"
-  kill "$pid" 2>/dev/null || true
-  wait "$pid" 2>/dev/null || true
+  printf '%s\n' $(($(date +%s) - 3600)) >"$AMAN_HOME/state/lock/beat"
   with_input "$SENTINEL_PASSWORD
 "
   run_install --yes --password-stdin --email owner@example.invalid

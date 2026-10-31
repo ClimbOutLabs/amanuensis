@@ -1,13 +1,13 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
-import { approvalQuestion, approvalStub, approveVerb, declineVerb } from '../../src/sentinel/approvalCopy.js';
+import {
+  approvalQuestion,
+  approvalSentLine,
+  approvalStub,
+  approveVerb,
+  declineVerb,
+} from '../../src/sentinel/approvalCopy.js';
 import type { SentinelApprovalCard } from '../../src/sentinel/types.js';
-
-// The label has one owner in types.ts; a copy in approvalCopy would keep the old text when that owner changes.
-vi.mock('../../src/sentinel/types.js', async importOriginal => ({
-  ...(await importOriginal()),
-  WAITING_FOR_YOU_LABEL: 'Needs you now',
-}));
 
 function cardWith(overrides: Partial<SentinelApprovalCard>): SentinelApprovalCard {
   return {
@@ -45,42 +45,48 @@ const reply: SentinelApprovalCard['email'] = {
 };
 
 describe('approval copy', () => {
-  it('asks "Send this reply?" for a reply, with Send and Don\'t send', () => {
+  it('asks "Send this reply to Rui?" for a reply, with Allow and Not now', () => {
     const card = cardWith({ email: reply });
-    expect(approvalQuestion(card)).toBe('Send this reply?');
-    expect(approveVerb(card)).toBe('Send');
-    expect(declineVerb(card)).toBe("Don't send");
+    expect(approvalQuestion(card)).toBe('Send this reply to Rui?');
+    expect(approveVerb(card)).toBe('Allow');
+    expect(declineVerb(card)).toBe('Not now');
   });
 
   it('never shows a search connector id on a held search stub', () => {
     const card = cardWith({
-      plain_what: 'Search the web with Tavily for: harbour tides.',
+      plain_what: 'Search the web with Tavily for harbour tides?',
       destination: null,
       destination_host: 'Tavily',
     });
-    const stub = approvalStub(card, { sentAt: null });
+    const stub = approvalStub(card);
     expect(stub.detail).not.toMatch(/tavily-|mcp\./i);
     expect(stub.detail).toBe('Open Details to see what it does');
   });
 
-  it('asks "Send this email?" for a new message, whatever the number of recipients', () => {
+  it('asks "Send this email to a@x.com and 1 more?" for a new message, whatever the number of recipients', () => {
     const card = cardWith({ email: { ...reply, reply_in_thread: null, to: [bare('a@x.com'), bare('b@x.com')] } });
-    expect(approvalQuestion(card)).toBe('Send this email?');
-    expect(approveVerb(card)).toBe('Send');
+    expect(approvalQuestion(card)).toBe('Send this email to a@x.com and 1 more?');
+    expect(approveVerb(card)).toBe('Allow');
   });
 
   it('says "Add and send" for a send to a new address, since approving adds it', () => {
     const card = cardWith({ email: { ...reply, reply_in_thread: null }, mail_new_recipients: ['a@x.com'] });
-    expect(approvalQuestion(card)).toBe('Send this email?');
+    expect(approvalQuestion(card)).toBe('Send this email to Rui?');
     expect(approveVerb(card)).toBe('Add and send');
     expect(declineVerb(card)).toBe("Don't send");
   });
 
-  it('asks "Save this draft?" with Save draft, and Don\'t save to decline', () => {
+  it('says "Add and save draft" for a draft to a new address, since approving adds it and saves', () => {
+    const card = cardWith({ mail_new_recipients: ['a@x.com'], mail_draft: true });
+    expect(approveVerb(card)).toBe('Add and save draft');
+    expect(declineVerb(card)).toBe("Don't save");
+  });
+
+  it('asks "Save this draft?" with Allow, and Not now to decline', () => {
     const card = cardWith({ email: { ...reply, action: 'save' } });
     expect(approvalQuestion(card)).toBe('Save this draft?');
-    expect(approveVerb(card)).toBe('Save draft');
-    expect(declineVerb(card)).toBe("Don't save");
+    expect(approveVerb(card)).toBe('Allow');
+    expect(declineVerb(card)).toBe('Not now');
   });
 
   it('names a calendar event and asks to add it', () => {
@@ -101,7 +107,20 @@ describe('approval copy', () => {
       },
     });
     expect(approvalQuestion(card)).toBe('Add "Dentist" to your calendar?');
-    expect(approveVerb(card)).toBe('Add it');
+    expect(approveVerb(card)).toBe('Allow');
+  });
+
+  it('calls a persona add a persona in the title and the stub', () => {
+    const card = cardWith({
+      persona: {
+        name: 'Tax helper',
+        description: 'Files receipts.',
+        instructions: 'Keep every receipt.',
+        model_name: 'fast',
+      },
+    });
+    expect(approvalQuestion(card)).toBe('Add the persona "Tax helper"?');
+    expect(approvalStub(card)).toEqual({ what: 'New persona', detail: 'Tax helper' });
   });
 
   it('asks a new schedule to be created', () => {
@@ -117,22 +136,22 @@ describe('approval copy', () => {
       },
     });
     expect(approvalQuestion(card)).toBe('Create the schedule "Morning brief"?');
-    expect(approveVerb(card)).toBe('Create it');
+    expect(approveVerb(card)).toBe('Allow');
   });
 
   it('falls back to the server sentence and a plain verb for other actions', () => {
     const card = cardWith({});
     expect(approvalQuestion(card)).toBe('Run the report.');
-    expect(approveVerb(card)).toBe('Allow it');
+    expect(approveVerb(card)).toBe('Allow');
     expect(declineVerb(card)).toBe('Not now');
   });
 
-  it('shows the time in the stub once a ticket is done', () => {
+  it('shows the time in the sent line once a ticket is done, and the stub carries no state', () => {
     const card = cardWith({ calendar_event: null });
-    expect(approvalStub(card, { sentAt: '09:14' }).state).toBe('Done 09:14');
-  });
-
-  it('reads the waiting label from its one owner', () => {
-    expect(approvalStub(cardWith({ calendar_event: null }), { sentAt: null }).state).toBe('Needs you now');
+    expect(approvalSentLine(card, '09:14')).toBe('Done · 09:14');
+    expect(approvalSentLine(cardWith({ email: reply }), '09:14')).toBe('Sent to Rui · 09:14');
+    const stub = approvalStub(card);
+    expect(stub).toEqual({ what: 'Action', detail: 'Open Details to see what it does' });
+    expect('state' in stub).toBe(false);
   });
 });

@@ -41,6 +41,8 @@ import type { ISentinelAuditStore } from '../db/sentinelAuditStore';
 import type { SessionCustom, TurnCustom } from '../db/sessionCustom';
 import type { WithTransaction } from '../db/transaction';
 import type { ITurnArtifactStore } from '../db/turnArtifactStore';
+import { isReservedConnectorName } from '../mcp/firstParty';
+import { isHostOwnConnector } from '../mcp/hostConnectors';
 import { personaKnowledgeLocation } from '../personaKnowledge/knowledgePaths';
 import { amanGuidePersonaId, isAmanGuidePersona, isAnyAmanGuideId } from '../personas/amanGuide/identity';
 import { PERSISTED_ARTIFACT_MIME } from '../runtime/artifacts/persistTurnArtifacts';
@@ -50,13 +52,26 @@ import {
   CURATED_MEMORY_FILE,
   dailyLogEntries,
   dailyLogFileAt,
+  DOCUMENT_ID_METADATA_KEY,
+  entryMetadata,
+  hiddenContext,
   latestTombstonesByEntry,
   parseVaultTombstones,
   personaVaultNamespace,
+  SESSION_ID_METADATA_KEY,
+  upgradeLegacyEntries,
   VAULT_TOMBSTONES_FILE,
   vaultEntryTimestamp,
   vaultFilesystemNamespace,
+  withoutHiddenMarkers,
 } from '../runtime/memory/markdownMemoryFiles';
+import {
+  isMemoryNoteSource,
+  NOTE_DATE_METADATA_KEY,
+  NOTE_SOURCE_METADATA_KEY,
+  noteRetainContent,
+} from '../runtime/memory/memoryNotes';
+import { MEMORY_RECALL_ENABLED_SETTING_KEY } from '../runtime/memoryRecallSettings';
 import { MEMORY_SCREEN_ENABLED_SETTING_KEY } from '../runtime/memoryScreenSettings';
 import { MEMORY_SUMMARIZE_SETTING_KEY } from '../runtime/memorySummarizeSettings';
 import { DEFAULT_CHAT_MODEL_SETTING_KEY } from '../runtime/tokenFactoryProvider';
@@ -214,6 +229,7 @@ function leftOutName(name: string): string {
 /** Instance-wide settings an import may fill in; the permission settings in the archive are never applied. */
 const IMPORTABLE_GLOBAL_SETTING_KEYS: ReadonlySet<string> = new Set<string>([
   DEFAULT_CHAT_MODEL_SETTING_KEY,
+  MEMORY_RECALL_ENABLED_SETTING_KEY,
   MEMORY_SCREEN_ENABLED_SETTING_KEY,
   MEMORY_SUMMARIZE_SETTING_KEY,
   TOOL_OUTPUT_SCREEN_ENABLED_SETTING_KEY,
@@ -935,20 +951,42 @@ function buildRetainItems(
         const newline = body.indexOf('\n');
         body = newline < 0 ? '' : body.slice(newline + 1).replace(/^\n+/, '');
       }
+      const trailers = entryMetadata(body);
+      const sessionId = trailers?.[SESSION_ID_METADATA_KEY];
+      const noteSource = trailers?.[NOTE_SOURCE_METADATA_KEY];
+      const noteDate = trailers?.[NOTE_DATE_METADATA_KEY];
+      // The page text drops an id-shaped context line, so it is read before the body is cleaned.
+      entryContext = hiddenContext(body);
+      body = withoutHiddenMarkers(body);
       const contextMatch = /\n\n> ([^\n]*)$/.exec(body);
       if (contextMatch !== null) {
         const contextValue = contextMatch[1];
         if (contextValue !== undefined) {
-          entryContext = contextValue;
+          entryContext ??= contextValue;
           body = body.slice(0, contextMatch.index);
         }
       }
       const itemContext = vaultContext ?? entryContext;
       items.push({
-        content: body,
+        // A note's marker rides inside its text, so a backend that drops metadata still hands it back.
+        content:
+          noteSource !== undefined && isMemoryNoteSource(noteSource) && noteDate !== undefined
+            ? noteRetainContent({ text: body, source: noteSource, date: noteDate })
+            : body,
         timestamp: entry.timestamp,
-        document_id: documentIdFor(entry.id),
+        // A replaceable entry keeps its document id, so a later update replaces it instead of adding a copy.
+        document_id: trailers?.[DOCUMENT_ID_METADATA_KEY] ?? documentIdFor(entry.id),
         ...(itemContext === undefined ? {} : { context: itemContext }),
+        ...(sessionId === undefined && noteSource === undefined
+          ? {}
+          : {
+              metadata: {
+                ...(sessionId === undefined ? {} : { [SESSION_ID_METADATA_KEY]: sessionId }),
+                ...(noteSource === undefined || noteDate === undefined
+                  ? {}
+                  : { [NOTE_SOURCE_METADATA_KEY]: noteSource, [NOTE_DATE_METADATA_KEY]: noteDate }),
+              },
+            }),
       });
     }
   }
@@ -962,6 +1000,7 @@ function pluralize(count: number, singular: string, plural: string): string {
 function buildSummary({
   result,
   connectorNames,
+  leftOutConnectorNames,
   auditEntries,
   standInAgentNames,
   filesLeftBehind,
@@ -972,6 +1011,8 @@ function buildSummary({
 }: {
   result: Omit<ImportDataResult, 'summary' | 'schedules_off'>;
   connectorNames: string[];
+  /** Email or Calendar copies from the export that are not this computer's own; it sets those up in Settings. */
+  leftOutConnectorNames: string[];
   auditEntries: number;
   standInAgentNames: string[];
   /** Rows of the left-out table: internal details from an older version that did not come over. */
@@ -1003,6 +1044,11 @@ function buildSummary({
   }
   if (connectorNames.length > 0) {
     notes.push(`Connectors (${connectorNames.join(', ')}) come without an agent. Attach them on the Agents page.`);
+  }
+  if (leftOutConnectorNames.length > 0) {
+    notes.push(
+      `${leftOutConnectorNames.join(' and ')} ${leftOutConnectorNames.length === 1 ? 'was' : 'were'} left out. This computer sets up its own Email and Calendar. Connect ${leftOutConnectorNames.length === 1 ? 'it' : 'them'} in Settings.`,
+    );
   }
   if (standInAgentNames.length === 1) {
     notes.push(
@@ -1144,6 +1190,10 @@ function planMarkdownMemory(
       // so edits and deletes still apply under the new tenant.
       const text = data.toString('utf8').split(`md:${sourceSeg}:`).join(`md:${targetSeg}:`);
       bytes = Buffer.from(text, 'utf8');
+    }
+    if (dailyLogFileAt(inner) !== undefined) {
+      // Entries written before facts-only memory carried a "Turn summary:" prefix and a chat title line.
+      bytes = Buffer.from(upgradeLegacyEntries(data.toString('utf8')), 'utf8');
     }
     planned.push({ targetPath: path.join(markdownDir, targetSeg, inner), bytes });
   }
@@ -1335,8 +1385,18 @@ async function importArchive<TTransaction>(
   // Each person's guide is installed from the bundled pack, so the archived copy is never written again.
   // Its memory still maps to the person's own guide, and the summary still counts it.
   const personas = archivedPersonas.filter(({ persona }) => !isAmanGuidePersona(persona));
-  const connectors = normalizeImportedConnectors(contents.connectors);
-  const connectorNames = new Set(connectors.map(connector => connector.name));
+  const exportedConnectors = normalizeImportedConnectors(contents.connectors);
+  // This computer sets up its own Email and Calendar, so the export's copy of one that is not at this host's address
+  // is left out. Everything else comes along, and nothing from an import is ever first-party.
+  const connectors = exportedConnectors.filter(
+    connector =>
+      !isReservedConnectorName(connector.name) ||
+      isHostOwnConnector({ name: connector.name, url: connector.manifest.url }),
+  );
+  const leftOutConnectorNames = exportedConnectors
+    .filter(connector => !connectors.includes(connector))
+    .map(connector => connector.name);
+  const connectorNames = new Set(exportedConnectors.map(connector => connector.name));
   const importerSubject: CreatedBySubject = {
     subject_id: subjectId,
     subject_type: 'user',
@@ -1493,6 +1553,7 @@ async function importArchive<TTransaction>(
       summary: buildSummary({
         result,
         connectorNames: newConnectors.map(connector => connector.name),
+        leftOutConnectorNames,
         auditEntries: audit.length,
         standInAgentNames: agentPlan.placeholders.map(placeholder => placeholder.name),
         filesLeftBehind: 0,
@@ -1702,7 +1763,8 @@ async function importArchive<TTransaction>(
               schedule.persona_id !== null && personas.some(({ persona }) => persona.id === schedule.persona_id)
                 ? schedule.persona_id
                 : null,
-            manifest: { ...schedule.manifest, status: 'paused' },
+            // A one-time schedule that already ran stays done, so switching it on can never run it again.
+            manifest: { ...schedule.manifest, status: schedule.manifest.status === 'done' ? 'done' : 'paused' },
             created_by_subject: importerSubject,
             runFrom: new Date(),
           },
@@ -1807,6 +1869,7 @@ async function importArchive<TTransaction>(
       summary: buildSummary({
         result,
         connectorNames: newConnectors.map(connector => connector.name),
+        leftOutConnectorNames,
         auditEntries: audit.length,
         standInAgentNames: agentPlan.placeholders.map(placeholder => placeholder.name),
         filesLeftBehind,

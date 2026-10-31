@@ -53,7 +53,7 @@ import {
 } from '../personalization/profile';
 import { ProfileLearnedEventSchema, type ProfileLearnedEvent } from '../schemas/profileLearningEvents';
 import type { EventSubscription } from './event-subscription';
-import { routeHelperModel } from './helperModelRouting';
+import { REPLACE_DOCUMENT_METADATA_KEY } from './memory/markdownMemoryFiles';
 import type { MemoryClient } from './memory/memoryClient';
 import { AMAN_MEMORY_NAMESPACE } from './memory/memoryRetain';
 import { uuidv5 } from './memory/uuidv5';
@@ -83,9 +83,8 @@ export const PROFILE_LEARNING_ACTOR = 'aman-learning';
 export const LEARNED_PROFILE_DOCUMENT_ID_PREFIX = 'aman-learned-profile-';
 
 /**
- * Mirror content that replaces the learned document (and its derived memories) once the stored
- * document is gone. Worded for the state, not the cause: the pass cannot distinguish a document
- * the user cleared from one that never existed, and only the state is true in both cases.
+ * Text an earlier version stored as a memory when the profile was cleared. Nothing writes it now;
+ * recall skips it so copies already stored never reach a chat.
  */
 export const LEARNED_PROFILE_CLEARED_CONTENT = 'No learned profile is currently stored for this user.';
 
@@ -243,6 +242,9 @@ function sha256Hex(text: string): string {
   return createHash('sha256').update(text, 'utf8').digest('hex');
 }
 
+/** The context line every mirror is retained with; a store without document ids recognises older copies by it. */
+export const LEARNED_PROFILE_CONTEXT = 'Learned user profile';
+
 /** Per-user mirror document id; the hash keeps arbitrary user references id-safe. */
 export function learnedProfileDocumentId(userRef: string): string {
   return `${LEARNED_PROFILE_DOCUMENT_ID_PREFIX}${sha256Hex(userRef).slice(0, 16)}`;
@@ -268,25 +270,12 @@ export function learnedProfileOperationId(params: {
 }
 
 /**
- * Deterministic tombstone operation id: repeated clears at the same revision dedupe via 409.
- * The cleared marker is a constant, so the revision already carries the whole of what makes one
- * clear distinct from the next and the reverted-content hazard above cannot arise here.
- */
-export function learnedProfileClearedOperationId(params: { userRef: string; profileRevision: number }): string {
-  return uuidv5({
-    name: `${params.userRef}\ncleared\n${String(params.profileRevision)}`,
-    namespace: AMAN_MEMORY_NAMESPACE,
-  });
-}
-
-/**
  * Mirrors the learned document into the memory provider. Fire-and-forget; an unchanged document
  * at an unchanged revision resubmits under the same operation id and the provider's 409 reads as
  * success.
- * A null or empty document mirrors {@link LEARNED_PROFILE_CLEARED_CONTENT} under the same
- * per-user document id, replacing the previous mirror and its derived memories after the
- * user clears the profile. Skips when there is no client, and when the user has no profile
- * row at all, since nothing can ever have been mirrored for them to replace.
+ * A non-empty document replaces the previous mirror under the same per-user document id. A null
+ * or empty one deletes the mirror, so no memory is stored for a cleared profile. Skips when there
+ * is no client, and when the user has no profile row at all, since nothing was ever mirrored.
  */
 export async function mirrorLearnedProfile(params: {
   client: MemoryClient | undefined;
@@ -305,29 +294,31 @@ export async function mirrorLearnedProfile(params: {
   if (!profileExists) {
     return;
   }
-  const mirrored =
-    document === null || document.trim() === ''
-      ? {
-          content: LEARNED_PROFILE_CLEARED_CONTENT,
-          operationId: learnedProfileClearedOperationId({ userRef, profileRevision }),
-        }
-      : { content: document, operationId: learnedProfileOperationId({ userRef, document, profileRevision }) };
   try {
-    const outcome = await client.retain({
-      items: [
-        {
-          content: mirrored.content,
-          timestamp,
-          document_id: learnedProfileDocumentId(userRef),
-          context: 'Learned user profile',
-          metadata: { source: 'aman-profile-learning' },
-        },
-      ],
-      operationId: mirrored.operationId,
-      timeoutMs: retainTimeoutMs,
-    });
+    const outcome =
+      document === null || document.trim() === ''
+        ? await client.deleteDocument({
+            documentId: learnedProfileDocumentId(userRef),
+            context: LEARNED_PROFILE_CONTEXT,
+            timeoutMs: retainTimeoutMs,
+          })
+        : await client.retain({
+            items: [
+              {
+                content: document,
+                timestamp,
+                document_id: learnedProfileDocumentId(userRef),
+                context: LEARNED_PROFILE_CONTEXT,
+                metadata: { source: 'aman-profile-learning', [REPLACE_DOCUMENT_METADATA_KEY]: 'true' },
+              },
+            ],
+            operationId: learnedProfileOperationId({ userRef, document, profileRevision }),
+            timeoutMs: retainTimeoutMs,
+          });
     if (!outcome.ok) {
       logger.warn('Learned profile mirror submission failed', { reason: outcome.reason });
+    } else if (outcome.reason !== undefined) {
+      logger.debug('Learned profile mirror was already gone', { reason: outcome.reason });
     }
   } catch (error) {
     logger.warn('Learned profile mirror threw unexpectedly', {
@@ -349,8 +340,6 @@ export interface ProfileLearningDrainMember {
   createdBy: string;
   userText: string;
   turnModelFqn: string | undefined;
-  /** The small model for helper jobs; see `routeHelperModel`. */
-  helperFqn?: string | undefined;
   /** Test seam; production leaves it unset and resolves a VercelAILLM over the configured provider. */
   resolveLlm?: ((modelFqn: string) => Promise<ILLM>) | undefined;
 }
@@ -460,10 +449,7 @@ async function distillProfile(params: SubmitProfileLearningParams): Promise<void
     return;
   }
 
-  const modelFqn =
-    config.modelFqn.trim() !== ''
-      ? config.modelFqn.trim()
-      : routeHelperModel({ modelFqn: params.turnModelFqn, helperFqn: params.helperFqn });
+  const modelFqn = config.modelFqn.trim() !== '' ? config.modelFqn.trim() : params.turnModelFqn;
   if (modelFqn === undefined || modelFqn === '') {
     return;
   }

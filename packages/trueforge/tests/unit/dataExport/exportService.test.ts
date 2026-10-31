@@ -159,6 +159,21 @@ describe('runDataExport memory backends', () => {
     }
   });
 
+  it('writes a retained entry with its internal id back as the closing line', async () => {
+    const { client } = listing({
+      '': [{ ...vaultEntry('Lives in Lisbon with a cat.', '2026-10-02T10:00:00.000Z'), context: 'maya:identity' }],
+    });
+    const { deps, close } = await makeDeps({ kind: 'client', backend: 'hindsight', client });
+    try {
+      const sink = new CollectingWritable();
+      await runDataExport(deps, exportRequest(), sink);
+      const shared = zipEntryText(readZipEntries(sink.buffer()), `memory/${TENANT_ID}/memory/2026-10-16.md`);
+      expect(shared).toBe('## 2026-10-02T10:00:00.000Z\n\nLives in Lisbon with a cat.\n\n> maya:identity\n');
+    } finally {
+      await close();
+    }
+  });
+
   it("reads only the caller's own persona vaults unless instance data is included", async () => {
     const { client, asked } = listing({ '': [vaultEntry('shared fact', '2026-10-02T10:00:00.000Z')] });
     const { deps, close } = await makeDeps({ kind: 'client', backend: 'hindsight', client });

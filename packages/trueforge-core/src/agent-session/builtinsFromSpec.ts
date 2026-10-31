@@ -46,6 +46,8 @@ export interface BuiltinsFromSpecInput {
    */
   compactionThresholdTokensDefault?: number | undefined;
   boundRepository?: BoundRepository | undefined;
+  /** Built-in tool names this run does not offer. */
+  withheldTools?: readonly string[] | undefined;
 }
 
 export function builtinsFromSpec(input: BuiltinsFromSpecInput): AgentCapability[] {
@@ -61,6 +63,7 @@ export function builtinsFromSpec(input: BuiltinsFromSpecInput): AgentCapability[
     compactionContext,
     compactionThresholdTokensDefault,
     boundRepository,
+    withheldTools,
   } = input;
   const config = spec.config;
   const checklistState = new TaskChecklistRequestState(compactionContext);
@@ -78,7 +81,7 @@ export function builtinsFromSpec(input: BuiltinsFromSpecInput): AgentCapability[
   ];
 
   if (!isChild && sandboxAvailable && sandbox !== undefined) {
-    capabilities.push(documentCapability({ sandbox, tracing }));
+    capabilities.push(documentCapability({ sandbox, tracing, boundRepository, withheldTools }));
   }
 
   if (!isChild && compactionContext !== undefined) {

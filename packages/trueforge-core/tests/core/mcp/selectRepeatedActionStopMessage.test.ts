@@ -28,7 +28,7 @@ describe('selectRepeatedActionStopMessage', () => {
       repeatedVerification: true,
       repeatedGithubFileRead: true,
     });
-    expect(message).toContain('already denied');
+    expect(message).toContain('something you said no to');
   });
 
   it('prioritizes repeated side effects over a repeated read', () => {

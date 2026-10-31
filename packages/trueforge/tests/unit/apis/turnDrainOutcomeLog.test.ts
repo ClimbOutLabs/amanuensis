@@ -118,7 +118,7 @@ async function drainTurn(input: {
         : { ok: true, status: 'completed' },
     );
   if (input.abilityNotesOnly === true) {
-    mockSummarize.mockResolvedValue({ status: 'summarized', summary: abilityNoteSummary });
+    mockSummarize.mockResolvedValue({ status: 'summarized', facts: [abilityNoteSummary] });
   }
   const activation: PersonaActivation = {
     tenant_id: 'tenant-1',
@@ -150,7 +150,6 @@ async function drainTurn(input: {
     memory: {
       client,
       userText,
-      sessionTitle: undefined,
       attachedFiles: false,
       summarize: input.abilityNotesOnly === true ? summarizeContext() : undefined,
       outcomeLog: input.interactive
@@ -207,7 +206,7 @@ describe('drainTurnEvents outcome log', () => {
     const entries = infoEntries(lines);
     expect(entries).toHaveLength(1);
     expect(entries[0]).toMatchObject({
-      message: 'Turn memory not saved: it only described what Aman could not do',
+      message: 'Turn memory not saved: it only described what the assistant could not do',
       reason: 'ability_notes_only',
     });
     expect(lines.join('\n')).not.toContain('Turn memory saved under the persona');

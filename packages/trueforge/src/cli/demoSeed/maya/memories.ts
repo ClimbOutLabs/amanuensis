@@ -1,9 +1,11 @@
+import type { CalendarDay } from '@truefoundry/trueforge-core/core/util/calendarDay';
 import type { DemoNote } from '../model';
-import { MAYA_DAYS } from './days';
+import { dayLabels, STORY } from '../storyDays.mjs';
 
-/** Maya's long-term memory, one note per fact; a date in it is the one her mail and calendar hold. */
-export function mayaMemoryNotes(): DemoNote[] {
-  const meetup = `${MAYA_DAYS.weekday(10)}, ${MAYA_DAYS.monthDay(10)}`;
+/** Maya's long-term memory for `today`, one note per fact; a date in it is the one her mail and calendar hold. */
+export function mayaMemoryNotes(today: CalendarDay): DemoNote[] {
+  const days = dayLabels(today);
+  const meetup = `${days.weekday(STORY.LUNCH_OPTION_A)}, ${days.monthDay(STORY.LUNCH_OPTION_A)}`;
   return [
     {
       key: 'identity',
@@ -81,7 +83,7 @@ export function mayaMemoryNotes(): DemoNote[] {
     },
     {
       key: 'short-term-rental',
-      body: "Maya's short-term rental for her first month is at Travessa das Gaivotas 4, 1200-000 Lisboa, in Chiado, while she apartment-hunts. Trips start from there unless she says otherwise.",
+      body: "Maya's short-term rental for her first month is at Rua das Gaivotas 4, 1200-336 Lisboa, in São Bento, while she apartment-hunts. Trips start from there unless she says otherwise.",
     },
   ];
 }

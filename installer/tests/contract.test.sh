@@ -126,6 +126,8 @@ test_token_factory_settings_match_the_server() {
     assert_contains "$config" "getEnv('$key'" "the server reads $key"
     assert_contains "$(cat "$INSTALLER_DIR/templates/instance/env.tpl")" "$key=" "the installer writes $key"
   done
+  assert_not_contains "$config" "TOKEN_FACTORY_CHEAPER_MODEL" "the server no longer reads a separate helper model"
+  assert_not_contains "$(cat "$INSTALLER_DIR/templates/instance/env.tpl")" "TOKEN_FACTORY_CHEAPER_MODEL" "the installer does not write a separate helper model"
 }
 
 test_sign_in_settings_match_the_server() {
@@ -160,6 +162,42 @@ test_image_keeps_app_data_on_the_data_volume() {
   assert_contains "$(cat "$INSTALLER_DIR/templates/instance/compose.yaml.tpl")" "      - data:/data" "the instance mounts its data volume at /data"
 }
 
+test_image_creates_the_send_list_dir() {
+  t_begin "the image creates the send list dir owned by the runtime user, so a fresh send list volume is writable by the server"
+  local repo=$INSTALLER_DIR/.. dockerfile
+  # Docker gives a fresh named volume the ownership of the image dir it mounts over. The server runs as
+  # 10001 and is the only writer of the send list, so both app images create the dir with the owned roots.
+  for dockerfile in "$repo/Dockerfile.dev" "$repo/Dockerfile"; do
+    assert_contains "$(cat "$dockerfile")" "mkdir -p /data/memory /data/persona-knowledge /data/app /data/mail-policy" "$dockerfile creates the send list dir with the owned data roots"
+  done
+  assert_contains "$(cat "$INSTALLER_DIR/templates/instance/compose.yaml.tpl")" "- mail-policy:/data/mail-policy" "the instance mounts the send list volume at that dir"
+  assert_contains "$(cat "$INSTALLER_DIR/templates/instance/compose.yaml.tpl")" "- mail-policy:/policy:ro" "the connector mounts the same volume read-only"
+}
+
+test_slot_image_creates_the_mirror_dir() {
+  t_begin "the slot image creates the package mirror dir owned by the server user, so a fresh mirror volume lets the server bind its socket"
+  local repo=$INSTALLER_DIR/.. dockerfile slot
+  # Docker gives a fresh named volume the ownership of the image dir it mounts over. The slots project
+  # creates the mirror volumes and the installer starts the slots before the app, so the slot image is
+  # the one a fresh mirror volume takes its ownership from; the server runs as 10001 and binds one
+  # package mirror socket per slot inside that slot's mirror volume, so the dir must start out owned
+  # by 10001. The app images carry nothing for the mirrors: the instance mounts these volumes but
+  # never creates them, so a dir in the app image would never take effect. Mirror volumes that
+  # already exist are handed to 10001 by the slot setup itself when the slots start (slots.ts).
+  assert_contains "$(cat "$repo/ops/sandbox-slot/Dockerfile")" "mkdir -p /run/aman/mirror" "the slot image creates the mirror dir its volume takes ownership from"
+  assert_contains "$(cat "$repo/ops/sandbox-slot/Dockerfile")" "chown 10001:10001 /run/aman/mirror" "the slot image gives the mirror dir to the server user, not the slot user"
+  for dockerfile in "$repo/Dockerfile.dev" "$repo/Dockerfile"; do
+    assert_not_contains "$(cat "$dockerfile")" "/run/aman-slots" "$dockerfile carries no mirror dirs; the instance never creates the mirror volumes"
+    assert_contains "$(cat "$dockerfile")" "useradd --uid 10001" "$dockerfile creates the server user with uid 10001, the uid the slot image gives the mirror dir to"
+    assert_contains "$(cat "$dockerfile")" "USER 10001:10001" "$dockerfile runs as the server user the mirror dir belongs to"
+  done
+  assert_contains "$(cat "$repo/docker-compose.slots.yml")" "user: '65532:65532'" "the slots run as 65532, the user who connects through the mirror socket"
+  for slot in 1 2 3 4; do
+    assert_contains "$(cat "$INSTALLER_DIR/templates/instance/compose.yaml.tpl")" "- slot_mirror_$slot:/run/aman-slots/$slot/mirror" "the instance mounts mirror volume $slot where the server binds its socket"
+    assert_contains "$(cat "$repo/docker-compose.slots.yml")" "- slot_mirror_$slot:/run/aman/mirror" "slot $slot mounts the same volume at the dir its image creates"
+  done
+}
+
 test_in_image_check_ids_match() {
   t_begin "every check the shim relays from the app container is one the app's doctor knows"
   local repo=$INSTALLER_DIR/.. ids id known
@@ -173,6 +211,8 @@ test_in_image_check_ids_match() {
 test_token_factory_settings_match_the_server
 test_sign_in_settings_match_the_server
 test_image_keeps_app_data_on_the_data_volume
+test_image_creates_the_send_list_dir
+test_slot_image_creates_the_mirror_dir
 test_in_image_check_ids_match
 test_doctor_reads_what_the_installer_wrote
 test_installer_calls_the_shim_as_documented

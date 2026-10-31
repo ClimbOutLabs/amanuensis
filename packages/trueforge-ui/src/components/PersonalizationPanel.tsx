@@ -5,17 +5,18 @@ import { useEffect, useRef, useState, type FC, type FormEvent } from 'react';
 import { Markdown } from '../atoms/Markdown.js';
 import { Button } from '../atoms/primitives/Button.js';
 import { Switch } from '../atoms/primitives/Switch.js';
-import { HelpAreaChoices } from './HelpAreaChoices.js';
+import { assistantDisplayName } from '../utils/assistantName.js';
 import {
   EMPTY_PERSONALIZATION_PROFILE,
   PersonalizationProvider,
+  useAssistantDisplayName,
   usePersonalization,
   type PersonalizationApi,
   type PersonalizationProfile,
 } from './PersonalizationContext.js';
 
 const inputClassName =
-  'w-full rounded-md border border-border/70 bg-secondary-bg px-3 py-2.5 text-sm text-text-primary outline-none transition-colors placeholder:text-text-secondary/70 focus-visible:border-focus-ring focus-visible:ring-2 focus-visible:ring-focus-ring/50';
+  'w-full rounded-md border border-border/70 bg-input-box-bg px-3 py-2.5 text-sm text-text-primary outline-none transition-colors placeholder:text-text-muted focus-visible:border-focus-ring focus-visible:ring-2 focus-visible:ring-focus-ring/50';
 
 export type PersonalizationPanelProps = {
   /** Optional for standalone use; Settings inherits the host provider. */
@@ -24,6 +25,7 @@ export type PersonalizationPanelProps = {
 };
 
 const PersonalizationPanelContent: FC<Pick<PersonalizationPanelProps, 'onProfileChange'>> = ({ onProfileChange }) => {
+  const assistant = useAssistantDisplayName();
   const { profile, loading, loadError, updateProfile, deleteProfile } = usePersonalization();
   const [draft, setDraft] = useState<PersonalizationProfile>(profile ?? EMPTY_PERSONALIZATION_PROFILE);
   const [saving, setSaving] = useState(false);
@@ -105,7 +107,7 @@ const PersonalizationPanelContent: FC<Pick<PersonalizationPanelProps, 'onProfile
     <>
       <h3 className="text-xl font-semibold tracking-tight text-text-primary">Personalization</h3>
       <p className="mt-1 text-sm text-text-secondary">
-        Tell Aman who you are and how it should speak with you. Start with your name.
+        Tell {assistant} who you are and how it should speak with you. Start with your name.
       </p>
 
       {loadError ? (
@@ -129,7 +131,8 @@ const PersonalizationPanelContent: FC<Pick<PersonalizationPanelProps, 'onProfile
                 About you
               </h4>
               <p className="mt-1 text-sm text-text-secondary">
-                Aman greets you by name and addresses you the way you ask. Everything here stays on this computer.
+                {assistant} greets you by name and addresses you the way you ask. Everything here stays on this
+                computer.
               </p>
 
               <div className="mt-4 grid gap-4 md:grid-cols-2">
@@ -148,14 +151,14 @@ const PersonalizationPanelContent: FC<Pick<PersonalizationPanelProps, 'onProfile
                     onChange={event => updateDraft('user_name', event.target.value)}
                     placeholder="For example, Sam Rivera"
                   />
-                  <p className="mt-1.5 text-xs leading-snug text-text-secondary">The name Aman knows you by.</p>
+                  <p className="mt-1.5 text-xs leading-snug text-text-secondary">The name {assistant} knows you by.</p>
                 </div>
                 <div>
                   <label
                     htmlFor="personalization-address-as"
                     className="mb-1.5 block text-sm font-medium text-text-primary"
                   >
-                    How Aman should address you
+                    How {assistant} should address you
                   </label>
                   <input
                     id="personalization-address-as"
@@ -168,14 +171,6 @@ const PersonalizationPanelContent: FC<Pick<PersonalizationPanelProps, 'onProfile
                     A first name, a title, or your pronouns. Leave it empty to be called by your name.
                   </p>
                 </div>
-              </div>
-
-              <div className="mt-4">
-                <HelpAreaChoices
-                  idPrefix="personalization-help"
-                  value={draft.help_areas}
-                  onChange={helpAreas => setDraft(current => ({ ...current, help_areas: helpAreas }))}
-                />
               </div>
 
               <div className="mt-4">
@@ -257,7 +252,9 @@ const PersonalizationPanelContent: FC<Pick<PersonalizationPanelProps, 'onProfile
               <h4 id="assistant-profile-heading" className="text-sm font-semibold text-text-primary">
                 Assistant profile
               </h4>
-              <p className="mt-1 text-sm text-text-secondary">Choose how Aman sees itself and speaks with you.</p>
+              <p className="mt-1 text-sm text-text-secondary">
+                Choose how {assistant} sees itself and speaks with you.
+              </p>
 
               <div className="mt-4 grid gap-4 md:grid-cols-2">
                 <div>
@@ -272,7 +269,7 @@ const PersonalizationPanelContent: FC<Pick<PersonalizationPanelProps, 'onProfile
                     className={inputClassName}
                     value={draft.assistant_name ?? ''}
                     onChange={event => updateDraft('assistant_name', event.target.value)}
-                    placeholder="Aman"
+                    placeholder={assistantDisplayName(null)}
                   />
                 </div>
                 <div>
@@ -314,10 +311,10 @@ const PersonalizationPanelContent: FC<Pick<PersonalizationPanelProps, 'onProfile
                 Learned profile
               </h4>
               <p className="mt-1 text-sm text-text-secondary">
-                Aman updates this from your conversations. Edit or clear it any time.
+                {assistant} updates this from your conversations. Edit or clear it any time.
               </p>
 
-              <div className="mt-3 flex items-start gap-3 rounded-lg border border-border/70 bg-secondary-bg px-3 py-3">
+              <div className="mt-3 flex items-start gap-3 rounded-lg border border-border/70 bg-input-box-bg px-3 py-3">
                 <div className="min-w-0 flex-1">
                   <p className="text-sm font-medium text-text-primary">Learn from conversations</p>
                   <p className="mt-0.5 text-xs leading-snug text-text-secondary">
@@ -347,7 +344,7 @@ const PersonalizationPanelContent: FC<Pick<PersonalizationPanelProps, 'onProfile
                   onChange={event => setDraft(current => ({ ...current, learned_profile: event.target.value }))}
                 />
               ) : (
-                <div className="mt-3 rounded-md border border-border/70 bg-secondary-bg px-3 py-2.5 text-sm">
+                <div className="mt-3 rounded-md border border-border/70 bg-input-box-bg px-3 py-2.5 text-sm">
                   <Markdown content={draft.learned_profile} readOnly />
                 </div>
               )}

@@ -1,9 +1,19 @@
 import type { DemoKnowledgeDocument } from '../model';
 import { BACKUP_CLINIC, GP_CLINIC, VISA_CLINIC } from './places';
 
+/** Printed next to a document title in the reply's "Sources:" footer: the guide name the persona instructions use. */
+export const RELOCATION_GUIDE_LABEL = 'Lisbon relocation guide';
+export const PHOTOGRAPHY_GUIDE_LABEL = 'Lisbon photography guide';
+
+type GuidePage = Pick<DemoKnowledgeDocument, 'title' | 'text'>;
+
+function labelled({ label, pages }: { label: string; pages: GuidePage[] }): DemoKnowledgeDocument[] {
+  return pages.map(page => ({ ...page, sourceLabel: label }));
+}
+
 /** June's library: a Lisbon relocation guide, written for Maya's situation and free of anything private. */
 export function relocationGuide(): DemoKnowledgeDocument[] {
-  return [
+  const pages: GuidePage[] = [
     {
       title: 'Visa and residence permit checklist',
       text: [
@@ -22,7 +32,7 @@ export function relocationGuide(): DemoKnowledgeDocument[] {
         '',
         '## The health certificate',
         'Portugal does not publish one mandatory "visa medical exam" for a standard residence permit. In practice a lawyer may ask for a general health certificate for the file. Present it as "your lawyer asked for a health certificate for the file", never as a government requirement.',
-        `Maya's appointment is at 10:00 at ${VISA_CLINIC.name}, ${VISA_CLINIC.address} (the date is on her Google Calendar). It covers a medical history review, a physical examination, blood tests and a chest X-ray. Fasting is not required. Arrive 15 minutes early.`,
+        `Maya's appointment is at 10:00 at ${VISA_CLINIC.name}, ${VISA_CLINIC.address} (the date is on her calendar). It covers a medical history review, a physical examination, blood tests and a chest X-ray. Fasting is not required. Arrive 15 minutes early.`,
         '',
         '## What to bring to the medical',
         '- Passport',
@@ -120,11 +130,12 @@ export function relocationGuide(): DemoKnowledgeDocument[] {
       ].join('\n'),
     },
   ];
+  return labelled({ label: RELOCATION_GUIDE_LABEL, pages });
 }
 
 /** Theo's library: a Lisbon photography guide, with twelve places and the plan for the "Old Lisbon" series. */
 export function photographyGuide(): DemoKnowledgeDocument[] {
-  return [
+  const pages: GuidePage[] = [
     {
       title: 'Twelve places to shoot in Lisbon',
       text: [
@@ -195,7 +206,7 @@ export function photographyGuide(): DemoKnowledgeDocument[] {
         '1. Alfama sunrise, just after the sun is up. Start at Largo do Chafariz de Dentro. Empty alleys, light slicing through. The X-T5 only, travel light.',
         '2. Miradouro da Graça golden hour. Arrive an hour before sunset; the sun sets over São Jorge Castle.',
         '3. Belém golden hour. Arrive an hour before sunset. Riverside light with the 25 de Abril bridge as backdrop. Expose for highlights.',
-        'The dates of the three sessions are on her Google Calendar.',
+        'The dates of the three sessions are on her calendar.',
         '',
         '## Optional extras',
         '- A Mouraria afternoon, an optional extra spot: the staircases and laundry lines a couple of hours before sunset.',
@@ -208,4 +219,5 @@ export function photographyGuide(): DemoKnowledgeDocument[] {
       ].join('\n'),
     },
   ];
+  return labelled({ label: PHOTOGRAPHY_GUIDE_LABEL, pages });
 }

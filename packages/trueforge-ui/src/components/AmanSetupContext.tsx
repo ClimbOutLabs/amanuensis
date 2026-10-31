@@ -22,7 +22,7 @@ export type AmanSetupState = {
    * out, which leaves that line off the checklist.
    */
   hasChatted?: boolean | undefined;
-  /** The checklist's dismissal; omitted shows the checklist without a way to put it away. */
+  /** The setup ticket's dismissal (Skip); omitted shows the ticket without a way to put it away. */
   firstRunGuide?: FirstRunGuideState;
   /** Where the setup links point; omitted renders the same text without links. */
   settingsHref?: string;

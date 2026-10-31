@@ -2,10 +2,10 @@
 
 /** State of the one-time search model download. */
 export const KnowledgeEmbeddingPhase = {
-        Idle: "idle",
-        Loading: "loading",
-        Downloading: "downloading",
-        Ready: "ready",
-        Unavailable: "unavailable"
-    } as const;
-export type KnowledgeEmbeddingPhase = typeof KnowledgeEmbeddingPhase[keyof typeof KnowledgeEmbeddingPhase];
+    Idle: "idle",
+    Loading: "loading",
+    Downloading: "downloading",
+    Ready: "ready",
+    Unavailable: "unavailable",
+} as const;
+export type KnowledgeEmbeddingPhase = (typeof KnowledgeEmbeddingPhase)[keyof typeof KnowledgeEmbeddingPhase];

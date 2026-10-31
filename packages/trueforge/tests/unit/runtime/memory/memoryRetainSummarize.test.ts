@@ -3,6 +3,9 @@
  *
  * The config module is mocked with MEMORY_SUMMARIZE=true; the summarizeTurnContent
  * module is mocked to control the LLM outcome without network access.
+ *
+ * The rule under test: with summarization on, the exchange is never stored. Durable facts are
+ * stored, and "nothing durable", a failed summary, or an unsummarized turn stores nothing.
  */
 import * as fs from 'fs';
 import * as os from 'os';
@@ -31,6 +34,7 @@ jest.mock('../../../../src/runtime/memory/memorySummarize', () => {
   return { ...actual, summarizeTurnContent: jest.fn() };
 });
 
+import type { ILLM } from '@truefoundry/trueforge-core/core';
 import { type IModelProviderStore } from '../../../../src/db/modelProviderStore';
 import { HindsightClient, type RetainOutcome } from '../../../../src/runtime/memory/hindsightClient';
 import type { MemoryClient } from '../../../../src/runtime/memory/memoryClient';
@@ -79,26 +83,30 @@ function summarizeContext() {
   };
 }
 
+const TURN = {
+  sessionId: 's1',
+  turnId: 't1',
+  completedAt: '2026-09-19T12:00:00.000Z',
+};
+
 describe('submitRetain with MEMORY_SUMMARIZE=true', () => {
   beforeEach(() => {
     mockSummarize.mockReset();
   });
 
-  it('retains the summary instead of the verbatim transcript on success', async () => {
+  it('retains the facts as plain text, not the transcript, on success', async () => {
     const { client, retain } = retainingClient();
     retain.mockResolvedValue({ ok: true });
     mockSummarize.mockResolvedValue({
       status: 'summarized',
-      summary: '- User has a synthetic test robot named Bleep-Bloop.',
+      facts: ['The person has a synthetic test robot named Bleep-Bloop.'],
     });
 
     await submitRetain({
+      ...TURN,
       client,
-      sessionId: 's1',
-      turnId: 't1',
       userText: 'Please remember that my synthetic test robot is named Bleep-Bloop.',
       assistantText: 'Got it — Bleep-Bloop.',
-      completedAt: '2026-09-19T12:00:00.000Z',
       logger: makeLogger(),
       summarize: summarizeContext(),
     });
@@ -108,92 +116,126 @@ describe('submitRetain with MEMORY_SUMMARIZE=true', () => {
       expect.objectContaining({
         userText: 'Please remember that my synthetic test robot is named Bleep-Bloop.',
         assistantText: 'Got it — Bleep-Bloop.',
+        turnDate: '2026-09-19T12:00:00.000Z',
         tenantId: 'tenant-1',
         summarizationModelFqn: 'openai/gpt-4o',
       }),
     );
-    const call = retain.mock.calls[0]?.[0];
-    expect(call?.items[0]?.content).toBe('Turn summary: - User has a synthetic test robot named Bleep-Bloop.');
+    expect(retain.mock.calls[0]?.[0]?.items[0]?.content).toBe(
+      'The person has a synthetic test robot named Bleep-Bloop.',
+    );
   });
 
-  it('falls back to verbatim when summarization is skipped', async () => {
+  it('stores several facts as short bullet lines in one entry', async () => {
     const { client, retain } = retainingClient();
     retain.mockResolvedValue({ ok: true });
+    mockSummarize.mockResolvedValue({
+      status: 'summarized',
+      facts: ["The person's friend Harry has their book.", 'The person needs the car back on 2026-09-20.'],
+    });
+
+    await submitRetain({
+      ...TURN,
+      client,
+      userText: 'My friend Harry has my book. I need the car back tomorrow.',
+      assistantText: 'Noted.',
+      logger: makeLogger(),
+      summarize: summarizeContext(),
+    });
+
+    expect(retain).toHaveBeenCalledTimes(1);
+    expect(retain.mock.calls[0]?.[0]?.items).toHaveLength(1);
+    expect(retain.mock.calls[0]?.[0]?.items[0]?.content).toBe(
+      "- The person's friend Harry has their book.\n- The person needs the car back on 2026-09-20.",
+    );
+  });
+
+  it('stores nothing when the turn holds nothing worth keeping', async () => {
+    const { client, retain } = retainingClient();
+    mockSummarize.mockResolvedValue({ status: 'nothing_to_keep' });
+
+    await submitRetain({
+      ...TURN,
+      client,
+      userText: 'Dog',
+      assistantText: 'Noted. Anything else on your mind?',
+      logger: makeLogger(),
+      summarize: summarizeContext(),
+    });
+
+    expect(retain).not.toHaveBeenCalled();
+  });
+
+  it('stores nothing for an empty exchange', async () => {
+    const { client, retain } = retainingClient();
     mockSummarize.mockResolvedValue({ status: 'skipped', reason: 'empty-exchange' });
 
     await submitRetain({
+      ...TURN,
       client,
-      sessionId: 's1',
-      turnId: 't1',
-      userText: 'hi',
-      assistantText: 'hello',
-      completedAt: '2026-09-19T12:00:00.000Z',
+      userText: '',
+      assistantText: '',
       logger: makeLogger(),
       summarize: summarizeContext(),
     });
 
-    const call = retain.mock.calls[0]?.[0];
-    expect(call?.items[0]?.content).toBe('User: hi\n\nAssistant: hello');
+    expect(retain).not.toHaveBeenCalled();
   });
 
-  it('falls back to verbatim when summarization fails', async () => {
+  it.each([
+    ['fails', { status: 'failed', reason: 'provider down', fallback: 'model_failed' }],
+    [
+      'is cut off by its length limit',
+      { status: 'failed', reason: 'summary-cut-short', fallback: 'summary_cut_short' },
+    ],
+    ['is skipped for a missing model', { status: 'skipped', reason: 'no-model-configured' }],
+  ] as const)('stores nothing, not the chat text, when summarization %s', async (_name, result) => {
     const { client, retain } = retainingClient();
     retain.mockResolvedValue({ ok: true });
-    mockSummarize.mockResolvedValue({ status: 'failed', reason: 'provider down', fallback: 'model_failed' });
+    mockSummarize.mockResolvedValue(result);
 
     await submitRetain({
+      ...TURN,
       client,
-      sessionId: 's1',
-      turnId: 't1',
-      userText: 'hi',
-      assistantText: 'hello',
-      completedAt: '2026-09-19T12:00:00.000Z',
+      userText: 'My friend Harry has my book and I want it back by Friday.',
+      assistantText: 'Sure, I can help you word a reminder for Harry.',
       logger: makeLogger(),
       summarize: summarizeContext(),
     });
 
-    const call = retain.mock.calls[0]?.[0];
-    expect(call?.items[0]?.content).toBe('User: hi\n\nAssistant: hello');
+    expect(retain).not.toHaveBeenCalled();
   });
 
-  it('falls back to verbatim when summarization throws', async () => {
+  it('stores nothing when summarization throws', async () => {
     const { client, retain } = retainingClient();
-    retain.mockResolvedValue({ ok: true });
     mockSummarize.mockRejectedValue(new Error('should be caught inside'));
 
     await submitRetain({
+      ...TURN,
       client,
-      sessionId: 's1',
-      turnId: 't1',
-      userText: 'hi',
+      userText: 'yes',
       assistantText: 'hello',
-      completedAt: '2026-09-19T12:00:00.000Z',
       logger: makeLogger(),
       summarize: summarizeContext(),
     });
 
-    // The retain itself never throws; the memory is preserved verbatim.
-    const call = retain.mock.calls[0]?.[0];
-    expect(call?.items[0]?.content).toBe('User: hi\n\nAssistant: hello');
+    expect(retain).not.toHaveBeenCalled();
   });
 
-  it('does not summarize when no summarize context is provided (verbatim default)', async () => {
+  it('does not summarize when no summarize context is provided (the exchange is kept for the backend)', async () => {
     const { client, retain } = retainingClient();
     retain.mockResolvedValue({ ok: true });
 
     await submitRetain({
+      ...TURN,
       client,
-      sessionId: 's1',
-      turnId: 't1',
       userText: 'hi',
       assistantText: 'hello',
-      completedAt: '2026-09-19T12:00:00.000Z',
       logger: makeLogger(),
     });
 
     expect(mockSummarize).not.toHaveBeenCalled();
-    const call = retain.mock.calls[0]?.[0];
-    expect(call?.items[0]?.content).toBe('User: hi\n\nAssistant: hello');
+    expect(retain.mock.calls[0]?.[0]?.items[0]?.content).toBe('User: hi\n\nAssistant: hello');
   });
 });
 
@@ -209,16 +251,14 @@ describe('submitRetainWithVerification with MEMORY_SUMMARIZE=true', () => {
     const getOperation = jest.spyOn(client, 'getOperation').mockResolvedValue({ ok: true, status: 'unknown' });
     mockSummarize.mockResolvedValue({
       status: 'summarized',
-      summary: '- User has a synthetic test robot named Bleep-Bloop.',
+      facts: ['The person has a synthetic test robot named Bleep-Bloop.'],
     });
 
     await submitRetainWithVerification({
+      ...TURN,
       client,
-      sessionId: 's1',
-      turnId: 't1',
       userText: 'Please remember that my synthetic test robot is named Bleep-Bloop.',
       assistantText: 'Got it.',
-      completedAt: '2026-09-19T12:00:00.000Z',
       logger: makeLogger(),
       summarize: summarizeContext(),
     });
@@ -227,11 +267,29 @@ describe('submitRetainWithVerification with MEMORY_SUMMARIZE=true', () => {
     expect(retain).toHaveBeenCalledTimes(2);
     // ...but the summary was computed once and reused, never recomputed.
     expect(mockSummarize).toHaveBeenCalledTimes(1);
-    // Both submissions carried the same precomputed summary.
     for (const call of retain.mock.calls) {
-      expect(call[0]?.items[0]?.content).toBe('Turn summary: - User has a synthetic test robot named Bleep-Bloop.');
+      expect(call[0]?.items[0]?.content).toBe('The person has a synthetic test robot named Bleep-Bloop.');
     }
     getOperation.mockRestore();
+  });
+
+  it('reports that nothing was stored when there was nothing to keep', async () => {
+    const { client, retain } = retainingClient();
+    const getOperation = jest.spyOn(client, 'getOperation');
+    mockSummarize.mockResolvedValue({ status: 'nothing_to_keep' });
+
+    await expect(
+      submitRetainWithVerification({
+        ...TURN,
+        client,
+        userText: 'Dog',
+        assistantText: 'Noted.',
+        logger: makeLogger(),
+        summarize: summarizeContext(),
+      }),
+    ).resolves.toBe(false);
+    expect(retain).not.toHaveBeenCalled();
+    expect(getOperation).not.toHaveBeenCalled();
   });
 });
 
@@ -254,9 +312,8 @@ describe('summarization observability', () => {
 
   function baseSubmit(logger: winston.Logger) {
     return {
+      ...TURN,
       client: retainingClient().client,
-      sessionId: 's1',
-      turnId: 't1',
       userText: 'Please remember that my houseplant is a cactus named Gerald.',
       assistantText: 'Noted: Gerald the cactus.',
       completedAt: '2026-09-21T12:00:00.000Z',
@@ -268,10 +325,10 @@ describe('summarization observability', () => {
     mockSummarize.mockReset();
   });
 
-  it('logs when a turn is summarized instead of stored verbatim', async () => {
+  it('logs when a turn is summarized instead of stored as an exchange', async () => {
     const { client, retain } = retainingClient();
     retain.mockResolvedValue({ ok: true });
-    mockSummarize.mockResolvedValue({ status: 'summarized', summary: '- Houseplant is a cactus named Gerald.' });
+    mockSummarize.mockResolvedValue({ status: 'summarized', facts: ['The person has a cactus named Gerald.'] });
     const { logger, lines } = capturingLogger();
 
     await submitRetain({ ...baseSubmit(logger), client, summarize: summarizeContext() });
@@ -291,7 +348,7 @@ describe('summarization observability', () => {
     expect(lines.some(line => line.includes('no-model-configured'))).toBe(true);
   });
 
-  it('logs when summarization fails and falls back to verbatim', async () => {
+  it('logs when summarization fails', async () => {
     const { client, retain } = retainingClient();
     retain.mockResolvedValue({ ok: true });
     mockSummarize.mockResolvedValue({ status: 'failed', reason: 'provider down', fallback: 'model_failed' });
@@ -319,12 +376,7 @@ describe('markdown round trip (synthetic end-to-end)', () => {
     mockSummarize.mockReset();
   });
 
-  it('stores a Turn summary entry in the Markdown file and recalls it in a fresh context', async () => {
-    mockSummarize.mockResolvedValue({
-      status: 'summarized',
-      summary: '- Houseplant is a cactus named Gerald.',
-    });
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'summarize-e2e-'));
+  function markdownClient(dir: string): MemoryClient {
     const client = createMemoryClient({
       backend: 'markdown',
       markdownDir: dir,
@@ -334,54 +386,210 @@ describe('markdown round trip (synthetic end-to-end)', () => {
     if (client === undefined) {
       throw new Error('expected a markdown memory client');
     }
+    return client;
+  }
 
-    // Drive the real retain path: summarize -> buildRetainItem -> markdown file.
-    await submitRetainWithVerification({
-      client,
-      sessionId: 's1',
-      turnId: 't1',
-      userText: 'Please remember that my houseplant is a cactus named Gerald.',
-      assistantText: 'Noted: Gerald the cactus.',
-      completedAt: '2026-09-21T12:00:00.000Z',
-      logger: makeLogger(),
-      summarize: summarizeContext(),
+  it('stores a clean fact entry in the Markdown file and recalls it in a fresh context', async () => {
+    mockSummarize.mockResolvedValue({
+      status: 'summarized',
+      facts: ['The person has a houseplant, a cactus named Gerald.'],
     });
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'summarize-e2e-'));
+    try {
+      await submitRetainWithVerification({
+        ...TURN,
+        client: markdownClient(dir),
+        userText: 'Please remember that my houseplant is a cactus named Gerald.',
+        assistantText: 'Noted: Gerald the cactus.',
+        completedAt: '2026-09-21T12:00:00.000Z',
+        logger: makeLogger(),
+        summarize: summarizeContext(),
+      });
 
-    // The Markdown file carries a Turn summary entry, not the verbatim transcript.
-    const memoryDir = path.join(dir, 'tenant-1', 'memory');
-    const files = fs.readdirSync(memoryDir).filter(name => name.endsWith('.md'));
-    expect(files).toHaveLength(1);
-    const firstFile = files[0];
-    if (firstFile === undefined) {
-      throw new Error('expected one daily memory file');
+      const memoryDir = path.join(dir, 'tenant-1', 'memory');
+      const files = fs.readdirSync(memoryDir).filter(name => name.endsWith('.md'));
+      expect(files).toHaveLength(1);
+      const content = fs.readFileSync(path.join(memoryDir, files[0] ?? ''), 'utf8');
+      // The entry format recall relies on: heading with the time, the fact text, a hidden chat id.
+      expect(content).toBe(
+        '## 2026-09-21T12:00:00.000Z\n\nThe person has a houseplant, a cactus named Gerald.\n\n<!-- session_id: s1 -->\n\n',
+      );
+      expect(content).not.toContain('Turn summary');
+      expect(content).not.toContain('Chat title');
+      expect(content).not.toContain('User:');
+
+      const recallOutcome = await markdownClient(dir).recall({
+        query: 'What is my houseplant named?',
+        maxTokens: 2000,
+        queryTimestamp: '2026-09-21T12:01:00.000Z',
+        entityTokens: 0,
+        timeoutMs: 5000,
+      });
+      if (!recallOutcome.ok) {
+        throw new Error(`recall failed: ${recallOutcome.reason}`);
+      }
+      const recalled = recallOutcome.results.map(item => item.text).join('\n');
+      expect(recalled).toContain('Gerald');
+      expect(recalled).not.toContain('session_id');
+      expect(recallOutcome.results[0]?.metadata?.['session_id']).toBe('s1');
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
     }
-    const content = fs.readFileSync(path.join(memoryDir, firstFile), 'utf8');
-    expect(content).toContain('Turn summary:');
-    expect(content).toContain('Gerald');
-    expect(content).not.toContain('User: Please remember');
+  });
 
-    // Fresh-context recall finds the remembered fact.
-    const freshClient = createMemoryClient({
+  it('writes nothing to disk when the turn holds nothing worth keeping', async () => {
+    mockSummarize.mockResolvedValue({ status: 'nothing_to_keep' });
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'summarize-nothing-'));
+    try {
+      await submitRetainWithVerification({
+        ...TURN,
+        client: markdownClient(dir),
+        userText: 'Dog',
+        assistantText: 'Noted. Anything else on your mind?',
+        logger: makeLogger(),
+        summarize: summarizeContext(),
+      });
+      expect(fs.existsSync(path.join(dir, 'tenant-1', 'memory'))).toBe(false);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('writes no chat text to disk when the summary fails', async () => {
+    mockSummarize.mockResolvedValue({ status: 'failed', reason: 'summary-cut-short', fallback: 'summary_cut_short' });
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'summarize-failed-'));
+    try {
+      await submitRetainWithVerification({
+        ...TURN,
+        client: markdownClient(dir),
+        userText: 'Please remember that my houseplant is a cactus named Gerald.',
+        assistantText: 'Noted: Gerald the cactus.',
+        logger: makeLogger(),
+        summarize: summarizeContext(),
+      });
+      expect(fs.existsSync(path.join(dir, 'tenant-1', 'memory'))).toBe(false);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('a summary model that reasons until it hits the length limit', () => {
+  const actual = jest.requireActual<typeof import('../../../../src/runtime/memory/memorySummarize')>(
+    '../../../../src/runtime/memory/memorySummarize',
+  );
+  const FIRST_CAP = 800;
+
+  /** A model that thinks for `thinkingTokens` before it writes; under a smaller cap it is cut off with no text. */
+  function reasoningModel(options: { thinkingTokens: number; answer: string }): {
+    llm: ILLM;
+    caps: (number | null | undefined)[];
+  } {
+    const caps: (number | null | undefined)[] = [];
+    const llm: ILLM = {
+      create(): ReturnType<ILLM['create']> {
+        throw new Error('streaming is not used by memory summarization');
+      },
+      createNonStream: async body => {
+        caps.push(body.max_tokens);
+        const cutOff = (body.max_tokens ?? 0) < options.thinkingTokens;
+        return {
+          output: { role: 'assistant', content: cutOff ? '' : options.answer },
+          usage: {
+            input_tokens: 0,
+            output_tokens: cutOff ? (body.max_tokens ?? 0) : options.thinkingTokens,
+            total_tokens: 0,
+          },
+          finish_reason: cutOff ? 'length' : 'stop',
+        };
+      },
+    };
+    return { llm, caps };
+  }
+
+  function useModel(llm: ILLM): void {
+    mockSummarize.mockImplementation(params => actual.summarizeTurnContent({ ...params, resolveLlm: async () => llm }));
+  }
+
+  function storedLogs(dir: string): string[] {
+    const memoryDir = path.join(dir, 'tenant-1', 'memory');
+    return fs.existsSync(memoryDir)
+      ? fs.readdirSync(memoryDir).map(name => fs.readFileSync(path.join(memoryDir, name), 'utf8'))
+      : [];
+  }
+
+  async function retainTurn(dir: string): Promise<void> {
+    const client = createMemoryClient({
       backend: 'markdown',
       markdownDir: dir,
       namespace: 'tenant-1',
       hindsight: undefined,
     });
-    if (freshClient === undefined) {
+    if (client === undefined) {
       throw new Error('expected a markdown memory client');
     }
-    const recallOutcome = await freshClient.recall({
-      query: 'What is my houseplant named?',
-      maxTokens: 2000,
-      queryTimestamp: '2026-09-21T12:01:00.000Z',
-      entityTokens: 0,
-      timeoutMs: 5000,
+    await submitRetainWithVerification({
+      ...TURN,
+      client,
+      userText: 'Please remember that my houseplant is a cactus named Gerald.',
+      assistantText: 'Noted: Gerald the cactus.',
+      logger: makeLogger(),
+      summarize: summarizeContext(),
     });
-    if (!recallOutcome.ok) {
-      throw new Error(`recall failed: ${recallOutcome.reason}`);
+  }
+
+  beforeEach(() => {
+    mockSummarize.mockReset();
+  });
+
+  it('gets one more try with more room, and only the facts are stored', async () => {
+    const { llm, caps } = reasoningModel({
+      thinkingTokens: 2000,
+      answer: '{"facts": ["The person has a cactus named Gerald."]}',
+    });
+    useModel(llm);
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'summarize-reasoning-'));
+    try {
+      await retainTurn(dir);
+
+      expect(caps).toHaveLength(2);
+      expect(caps[0]).toBe(FIRST_CAP);
+      expect(caps[1]).toBeGreaterThan(FIRST_CAP);
+      const logs = storedLogs(dir);
+      expect(logs).toHaveLength(1);
+      expect(logs[0]).toContain('The person has a cactus named Gerald.');
+      expect(logs[0]).not.toContain('User:');
+      expect(logs[0]).not.toContain('Assistant:');
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
     }
-    const recalledText = recallOutcome.results.map(item => item.text).join('\n');
-    expect(recalledText).toContain('Gerald');
+  });
+
+  it('stores nothing, not the chat text, when it is still cut off after the retry', async () => {
+    const { llm, caps } = reasoningModel({ thinkingTokens: 1_000_000, answer: '{"facts": []}' });
+    useModel(llm);
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'summarize-reasoning-'));
+    try {
+      await retainTurn(dir);
+
+      expect(caps).toHaveLength(2);
+      expect(storedLogs(dir)).toEqual([]);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('stores nothing for a turn with no durable facts', async () => {
+    const { llm } = reasoningModel({ thinkingTokens: 10, answer: '{"facts": []}' });
+    useModel(llm);
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'summarize-reasoning-'));
+    try {
+      await retainTurn(dir);
+
+      expect(storedLogs(dir)).toEqual([]);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 
@@ -412,9 +620,8 @@ describe('turn outcome log at info', () => {
 
   function submitFor(params: { client: MemoryClient; logger: winston.Logger; interactive: boolean }) {
     return {
+      ...TURN,
       client: params.client,
-      sessionId: 's1',
-      turnId: 't1',
       userText,
       assistantText,
       completedAt: '2026-10-22T12:00:00.000Z',
@@ -424,23 +631,28 @@ describe('turn outcome log at info', () => {
     };
   }
 
+  beforeEach(() => {
+    mockSummarize.mockReset();
+  });
+
   it.each([
     ['model_timeout', { status: 'failed', reason: 'The operation timed out', fallback: 'model_timeout' }],
     ['model_failed', { status: 'failed', reason: 'provider down', fallback: 'model_failed' }],
-    ['summary_empty', { status: 'failed', reason: 'empty-summary', fallback: 'summary_empty' }],
+    ['summary_unreadable', { status: 'failed', reason: 'summary-unreadable', fallback: 'summary_unreadable' }],
+    ['summary_cut_short', { status: 'failed', reason: 'summary-cut-short', fallback: 'summary_cut_short' }],
     ['summary_too_long', { status: 'failed', reason: 'summary-too-long', fallback: 'summary_too_long' }],
-  ] as const)('logs one info line with reason %s when the summary falls back to full text', async (code, result) => {
+  ] as const)('logs one info line with reason %s when the summary fails and nothing is saved', async (code, result) => {
     const { client, retain } = retainingClient();
-    retain.mockResolvedValue({ ok: true });
     mockSummarize.mockResolvedValue(result);
     const { logger, lines } = captureLogger();
 
     await submitRetain(submitFor({ client, logger, interactive: true }));
 
+    expect(retain).not.toHaveBeenCalled();
     const entries = infoEntries(lines);
     expect(entries).toHaveLength(1);
     expect(entries[0]).toMatchObject({
-      message: 'Turn saved as full text instead of a summary',
+      message: 'Turn memory not saved: the summary failed',
       reason: code,
       sessionId: 's1',
       turnId: 't1',
@@ -450,22 +662,39 @@ describe('turn outcome log at info', () => {
     expect(lines.join('\n')).not.toContain('Gerald');
   });
 
-  it('maps a summarizer skipped for a missing model or long input to a full-text reason', async () => {
+  it('logs why nothing was saved when there was nothing worth keeping', async () => {
     const { client, retain } = retainingClient();
-    retain.mockResolvedValue({ ok: true });
+    mockSummarize.mockResolvedValue({ status: 'nothing_to_keep' });
+    const { logger, lines } = captureLogger();
+
+    await submitRetain(submitFor({ client, logger, interactive: true }));
+
+    expect(retain).not.toHaveBeenCalled();
+    expect(infoEntries(lines)).toEqual([
+      expect.objectContaining({
+        message: 'Turn memory not saved: it held nothing worth keeping',
+        reason: 'nothing_to_keep',
+        personaName: 'shared',
+      }),
+    ]);
+  });
+
+  it('logs a reason code, and saves nothing, when the summarizer is skipped for a missing model, and logs nothing for an empty exchange', async () => {
+    const { client, retain } = retainingClient();
     const { logger, lines } = captureLogger();
 
     mockSummarize.mockResolvedValueOnce({ status: 'skipped', reason: 'no-model-configured' });
     await submitRetain(submitFor({ client, logger, interactive: true }));
-    mockSummarize.mockResolvedValueOnce({ status: 'skipped', reason: 'input-too-long' });
+    mockSummarize.mockResolvedValueOnce({ status: 'skipped', reason: 'empty-exchange' });
     await submitRetain(submitFor({ client, logger, interactive: true }));
 
-    expect(infoEntries(lines).map(entry => entry['reason'])).toEqual(['model_unresolved', 'input_too_long']);
+    expect(retain).not.toHaveBeenCalled();
+    expect(infoEntries(lines).map(entry => entry['reason'])).toEqual(['no_summary_model']);
   });
 
   it('logs one info line when the Hindsight backend is given only an ability note', async () => {
     const { client, retain } = retainingClient();
-    mockSummarize.mockResolvedValue({ status: 'summarized', summary: "I can't read email right now." });
+    mockSummarize.mockResolvedValue({ status: 'summarized', facts: ["I can't read email right now."] });
     const { logger, lines } = captureLogger();
 
     await submitRetainWithVerification(submitFor({ client, logger, interactive: true }));
@@ -474,7 +703,7 @@ describe('turn outcome log at info', () => {
     const entries = infoEntries(lines);
     expect(entries).toHaveLength(1);
     expect(entries[0]).toMatchObject({
-      message: 'Turn memory not saved: it only described what Aman could not do',
+      message: 'Turn memory not saved: it only described what the assistant could not do',
       reason: 'ability_notes_only',
       sessionId: 's1',
       turnId: 't1',
@@ -487,7 +716,7 @@ describe('turn outcome log at info', () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'retain-ability-'));
     try {
       const client = new MarkdownMemoryClient({ baseDir: dir, namespace: 'tenant-1' });
-      mockSummarize.mockResolvedValue({ status: 'summarized', summary: "I can't read email right now." });
+      mockSummarize.mockResolvedValue({ status: 'summarized', facts: ["I can't read email right now."] });
       const { logger, lines } = captureLogger();
 
       await submitRetainWithVerification(submitFor({ client, logger, interactive: true }));
@@ -495,7 +724,7 @@ describe('turn outcome log at info', () => {
       const entries = infoEntries(lines);
       expect(entries).toHaveLength(1);
       expect(entries[0]).toMatchObject({
-        message: 'Turn memory not saved: it only described what Aman could not do',
+        message: 'Turn memory not saved: it only described what the assistant could not do',
         reason: 'ability_notes_only',
         personaName: 'shared',
       });
@@ -508,7 +737,7 @@ describe('turn outcome log at info', () => {
   it('keeps a normal summarized turn silent at info', async () => {
     const { client, retain } = retainingClient();
     retain.mockResolvedValue({ ok: true });
-    mockSummarize.mockResolvedValue({ status: 'summarized', summary: 'User has a cactus named Gerald.' });
+    mockSummarize.mockResolvedValue({ status: 'summarized', facts: ['The person has a cactus named Gerald.'] });
     const { logger, lines } = captureLogger();
 
     await submitRetain(submitFor({ client, logger, interactive: true }));
@@ -516,9 +745,8 @@ describe('turn outcome log at info', () => {
     expect(infoEntries(lines)).toHaveLength(0);
   });
 
-  it('logs nothing at info for a scheduled turn, even when the summary falls back', async () => {
-    const { client, retain } = retainingClient();
-    retain.mockResolvedValue({ ok: true });
+  it('logs nothing at info for a scheduled turn, even when the summary fails', async () => {
+    const { client } = retainingClient();
     mockSummarize.mockResolvedValue({ status: 'failed', reason: 'provider down', fallback: 'model_failed' });
     const { logger, lines } = captureLogger();
 

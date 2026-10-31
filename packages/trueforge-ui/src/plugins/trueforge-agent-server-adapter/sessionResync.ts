@@ -108,18 +108,6 @@ export function hasSessionResync(server: object): server is HarnessChatServerExt
   );
 }
 
-/**
- * Pending tool approvals are automatically denied after this long without a
- * decision. The age is derived from the persisted `tool.approval_required`
- * event timestamp, so it holds while the browser is backgrounded or closed.
- * Fail-closed: an unanswered approval never becomes an approval.
- */
-export const APPROVAL_AUTO_DENY_MINUTES = 30;
-
-export function approvalAutoDenyReason(): string {
-  return `Automatically denied: the approval was not answered within ${APPROVAL_AUTO_DENY_MINUTES} minutes.`;
-}
-
 const PENDING_APPROVALS_MESSAGE = 'user message cannot be sent while approvals or questions are pending';
 
 /** True when the error is the server's pending-approvals 422. */

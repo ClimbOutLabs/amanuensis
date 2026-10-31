@@ -1,6 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { mkdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
@@ -9,7 +8,9 @@ import { crc32, deflateSync } from 'node:zlib';
 import { chromium, type Browser, type Page } from 'playwright-core';
 import { createServer, defaultClientConditions, type Plugin } from 'vite';
 
+import { DEV_OPTIMIZE_DEPS } from '../src/devPrebundle.ts';
 import { findChromiumExecutable } from './support/findChromiumExecutable.ts';
+import { privateViteCache } from './support/viteCache.ts';
 
 const RENDER_TIMEOUT_MS = 45_000;
 const CSP_META = /<meta\s+http-equiv="Content-Security-Policy"\s+content="([^"]*)"/i;
@@ -110,12 +111,12 @@ test('chat images: no remote image request ever leaves the page', { timeout: 180
   assert.equal(fixtureCsp, indexCsp, 'the fixture must run under the app shell image policy');
   assert.doesNotMatch(indexCsp, /img-src[^;]*(https?:|\*)/, 'img-src must not allow any remote host');
 
-  // Its own dependency cache: a shared one lets a parallel browser test re-optimize and reload this page.
-  const cacheDir = mkdtempSync(join(tmpdir(), 'chat-images-vite-'));
+  const viteCache = privateViteCache('chat-images');
   const server = await createServer({
     configFile: false,
+    optimizeDeps: DEV_OPTIMIZE_DEPS,
     root: frontendRoot,
-    cacheDir,
+    cacheDir: viteCache.cacheDir,
     logLevel: 'silent',
     server: { host: '127.0.0.1', port: 0 },
     // Same resolution as the app: workspace packages load from source, one React instance.
@@ -184,7 +185,7 @@ test('chat images: no remote image request ever leaves the page', { timeout: 180
       await page.waitForLoadState('networkidle', { timeout: RENDER_TIMEOUT_MS });
       await page.getByText('Image from example.com hidden').first().waitFor({ timeout: RENDER_TIMEOUT_MS });
       assert.equal(await page.getByText('Image from example.com hidden').count(), 3, `${viewport.name}: reply lines`);
-      await page.getByText('Images hidden', { exact: true }).waitFor();
+      await page.getByText('2 images from the email were not loaded.', { exact: true }).waitFor();
       assert.equal(
         await page.locator('img[data-testid="aui-chat-image"]').count(),
         1,
@@ -217,8 +218,8 @@ test('chat images: no remote image request ever leaves the page', { timeout: 180
       );
       await page.getByText('Sketch (image not shown)').waitFor();
 
-      // Showing the email's pictures loads them as thumbnails in one row.
-      await showEach(page, 'Show images');
+      // Loading the email's pictures shows them as thumbnails in one row.
+      await showEach(page, 'Load images');
       await waitForImages(page, 4);
       assert.equal(
         await page.locator('[data-testid="aui-email-images"] img').count(),
@@ -252,6 +253,6 @@ test('chat images: no remote image request ever leaves the page', { timeout: 180
   } finally {
     await browser?.close();
     await server.close();
-    rmSync(cacheDir, { recursive: true, force: true });
+    viteCache.remove();
   }
 });

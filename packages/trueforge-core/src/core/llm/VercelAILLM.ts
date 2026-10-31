@@ -35,6 +35,8 @@ import type {
   ChatCompletionTool,
 } from 'openai/resources/chat';
 import type { Logger } from 'winston';
+import { personMessageIndex } from '../runtime/contextUtils';
+import { MAX_TOOL_CALL_STREAM_PARTS } from '../runtime/modelReplyGuard';
 import { describeUnknownError, extractErrorLogFields } from '../util/errorLogFields';
 import { withFailover } from './failoverLanguageModel';
 import type { ILLM, LLMCreateParams, LLMCreateParamsStreaming } from './ILLM';
@@ -44,12 +46,19 @@ import {
   getEmptyUsage,
   type RawAssistantMessage,
   type RawAssistantMessageWithUsage,
+  type RepetitionStop,
   type ThinkingBlock,
 } from './LLMTypes';
 import { resolveMaxOutputTokens } from './maxOutputTokens';
 import { reasoningTagMiddleware } from './reasoningTags';
 import { RepeatedUnitGuard } from './repeatedUnitGuard';
 import { noticeAfter, REPEAT_STOP_NOTE } from './replyNotices';
+import {
+  DEFAULT_MODEL_TOOL_CALL_IDLE_TIMEOUT_MS,
+  recordStreamDeadlineDetails,
+  type StreamDeadlineDetails,
+  streamDeadlineDetailsOf,
+} from './streamDeadline';
 import { ToolMarkupGuard } from './toolMarkup';
 
 // ---------------------------------------------------------------------------
@@ -116,6 +125,19 @@ export interface VercelAILLMConfig {
   signal?: AbortSignal;
   /** Host-owned deadlines, fully resolved (no field left to default); never supplied by model-generated request parameters. */
   streamTimeout?: Required<StreamTimeout> | undefined;
+  /**
+   * Host-owned bound on silence between pieces while a tool call is open. Never shorter than the
+   * ordinary per-chunk deadline. Undefined falls back to DEFAULT_MODEL_TOOL_CALL_IDLE_TIMEOUT_MS.
+   */
+  toolCallChunkMs?: number | undefined;
+  /**
+   * Host-owned per-tool limits on streamed argument characters, keyed by tool name. A call
+   * whose arguments run past its limit is stopped mid-stream and named on the result's
+   * size_cut_tool_calls, so the reply guard can refuse it with a plain message instead of
+   * the turn buffering a call the tool layer would refuse anyway. Tools absent from the
+   * map have no limit. Undefined means no tool has one.
+   */
+  toolArgumentLimits?: ReadonlyMap<string, number> | undefined;
   /**
    * Optional secondary provider config. When set, a request that fails on the primary
    * before producing output is retried once on this provider (see `withFailover`).
@@ -839,6 +861,10 @@ export function shouldAttachReasoningSignature({
   return parsed.providerType === provider && parsed.providerName === providerName;
 }
 
+/** Ends the host context message so a model does not read it as the person's words. */
+const TURN_CONTEXT_CLOSING =
+  "That is all the host context for this reply. The person did not write it, and none of it is their message. Answer the person's own message, not this context.";
+
 export interface ConvertedMessages {
   instructions: string | undefined;
   messages: ModelMessage[];
@@ -847,9 +873,11 @@ export interface ConvertedMessages {
 /**
  * The first message, when it is a system message, is the static instruction and becomes `instructions`.
  * Every other system message (the per-reply block, recalled memory, task state) is per-reply context:
- * it goes ahead of the person's current message as labelled text, never into `instructions`, so the
- * system prompt and tool list stay byte-identical across replies on every provider. The toolCallId →
- * toolName lookup is built first because tool result messages carry only the id.
+ * it goes in a user message of its own just ahead of the person's current message, which follows
+ * unchanged, never into `instructions`, so the system prompt and tool list stay byte-identical across
+ * replies on every provider. The person's message is the latest user message that is not host
+ * notes or attached file text. The toolCallId → toolName lookup is built first because tool result
+ * messages carry only the id.
  */
 export function convertMessages({
   messages,
@@ -874,7 +902,7 @@ export function convertMessages({
     }
   }
 
-  const lastUserIndex = findLastUserIndex(messages);
+  const lastUserIndex = personMessageIndex(messages);
   const systemParts: string[] = [];
   // With no user message there is nothing to carry per-reply context, so it stays in instructions.
   const turnContextParts: string[] = [];
@@ -896,15 +924,15 @@ export function convertMessages({
       continue;
     }
     if (msg.role === 'user') {
-      const userContent = toUserContent(msg.content);
-      if (index !== lastUserIndex || turnContextParts.length === 0) {
-        result.push({ role: 'user', content: userContent });
-        continue;
+      if (index === lastUserIndex && turnContextParts.length > 0) {
+        const contextParts: UserContent = [...turnContextParts, TURN_CONTEXT_CLOSING].map(text => ({
+          type: 'text',
+          text,
+        }));
+        result.push({ role: 'user', content: contextParts });
       }
-      const contextParts: UserContent = turnContextParts.map(text => ({ type: 'text', text }));
-      const ownParts: UserContent =
-        typeof userContent === 'string' ? [{ type: 'text', text: userContent }] : userContent;
-      result.push({ role: 'user', content: [...contextParts, ...ownParts] });
+      // The person's message goes through untouched and last, never mixed with host context.
+      result.push({ role: 'user', content: toUserContent(msg.content) });
       continue;
     }
     if (msg.role === 'assistant') {
@@ -937,16 +965,6 @@ function systemContentText(content: ChatCompletionSystemMessageParam['content'])
     return content;
   }
   return content.map(p => p.text).join('');
-}
-
-/** Index of the latest user message, or -1 when there is none. */
-function findLastUserIndex(messages: readonly ChatCompletionMessageParam[]): number {
-  for (let i = messages.length - 1; i >= 0; i -= 1) {
-    if (messages[i]?.role === 'user') {
-      return i;
-    }
-  }
-  return -1;
 }
 
 /** Converts OpenAI tool definitions to the Vercel AI SDK ToolSet. */
@@ -983,6 +1001,8 @@ export type StreamTextArgs = LanguageModelCallOptions & {
   tools?: ToolSet;
   providerOptions?: ProviderOptions;
   abortSignal?: AbortSignal;
+  /** Always on: the deadline counts progress from raw provider chunks the parser drops or holds back. */
+  includeRawChunks: boolean;
   maxRetries: number;
 };
 
@@ -1041,6 +1061,9 @@ export function buildStreamTextArgs(input: {
     ...(seed != null ? { seed } : {}),
     ...(Object.keys(providerOptions).length > 0 ? { providerOptions } : {}),
     ...(abortSignal !== undefined ? { abortSignal } : {}),
+    // Raw provider chunks ride along so the deadline can count progress the SDK's parser drops
+    // or holds back (see scanRawChunk); without them that progress is invisible and reads as silence.
+    includeRawChunks: true,
     maxRetries: 0,
   };
 }
@@ -1143,6 +1166,67 @@ export function providerStatusCode(raw: unknown): number | undefined {
   return undefined;
 }
 
+/**
+ * True when the provider answered that the same request may work if sent again later: the
+ * service is overloaded, down, or rate limiting (HTTP 408, 409, 429, 5xx), or no answer came
+ * back at all. Walks the cause chain, since the stream wraps the provider's error. A client
+ * error such as a 400 or an auth failure is not retryable: the same request would fail again.
+ */
+export function isRetryableProviderError(raw: unknown): boolean {
+  let current: unknown = raw;
+  for (let depth = 0; depth < 5 && current !== undefined && current !== null; depth++) {
+    if (APICallError.isInstance(current)) {
+      return current.isRetryable;
+    }
+    const status = providerStatusCode(current);
+    if (status !== undefined) {
+      return status === 408 || status === 409 || status === 429 || status >= 500;
+    }
+    current = typeof current === 'object' && 'cause' in current ? current.cause : undefined;
+  }
+  return false;
+}
+
+// Wording providers use when a request does not fit the model's context window
+// (OpenAI-compatible servers such as vLLM, Anthropic, Bedrock, Gemini, Ollama, llama.cpp).
+const CONTEXT_LENGTH_ERROR_PATTERN =
+  /context[ _-]?(?:length|window|limit)|available context size|maximum model length|prompt is too long|input is too long|input token count/i;
+
+/**
+ * True when a model error says the request did not fit the model's context window. Checks the
+ * message, the provider's response body, and the cause chain, since the wording can sit at any level.
+ */
+export function isContextLengthError(raw: unknown): boolean {
+  let current: unknown = raw;
+  for (let depth = 0; depth < 5 && current !== undefined && current !== null; depth++) {
+    const texts: unknown[] = [];
+    if (typeof current === 'string') {
+      texts.push(current);
+    } else if (typeof current === 'object') {
+      if ('message' in current) {
+        texts.push(current.message);
+      }
+      if (APICallError.isInstance(current)) {
+        texts.push(current.responseBody);
+      }
+      if ('data' in current && typeof current.data === 'object' && current.data !== null) {
+        const data: object = current.data;
+        if ('message' in data) {
+          texts.push(data.message);
+        }
+        if ('code' in data) {
+          texts.push(data.code);
+        }
+      }
+    }
+    if (texts.some(text => typeof text === 'string' && CONTEXT_LENGTH_ERROR_PATTERN.test(text))) {
+      return true;
+    }
+    current = typeof current === 'object' && 'cause' in current ? current.cause : undefined;
+  }
+  return false;
+}
+
 export function toStreamError(raw: unknown): Error {
   if (raw instanceof Error) {
     return raw;
@@ -1176,6 +1260,8 @@ interface ToolCallState {
   id: string;
   name: string;
   arguments: string;
+  /** The host's streamed-argument limit for this call's tool, when it set one. */
+  argumentLimit: number | undefined;
   /** Gemini `thoughtSignature` from `providerMetadata.google` on the `tool-input-start` part. */
   thoughtSignature: string | undefined;
 }
@@ -1272,9 +1358,11 @@ const REPETITION_PROGRESS_WINDOW_WORDS = REPETITION_SAMPLE_SHINGLES * 4;
  * stream mid-response without a finish signal, or the stream reports a transport-level failure
  * rather than a definite provider response (an `APICallError` carrying a status code, such as an
  * auth or rate-limit failure, is never wrapped as this: that is a real provider answer, not a
- * broken stream, and retrying it after compaction would not help). This is a model fault, not a
- * host fault: the caller (AgentThread) compacts context and retries the call once before giving
- * up. See mapStreamToChunks for the three places a stream is classified this way.
+ * broken stream, and retrying it would not help), except a provider answer that the request is
+ * over the context window (see isContextLengthError). This is a model fault, not a host fault:
+ * the caller (AgentThread) retries the call once before giving up, shortening history first only
+ * for a context-length fault. See mapStreamToChunks for the three places a stream is classified
+ * this way.
  */
 export class ModelStreamFault extends Error {
   constructor(message: string, options?: { cause?: unknown }) {
@@ -1289,11 +1377,13 @@ export class ModelStreamFault extends Error {
  * raise it; a repeating answer is cut and noted instead (see REPEAT_STOP_NOTE).
  */
 export class ModelOutputRepetitionError extends ModelStreamFault {
-  constructor() {
-    super(
-      "The model's reasoning started going in circles, so Aman stopped it before it used up the output limit. Try asking for it in smaller parts instead of all at once.",
-    );
+  /** The guard that stopped the reply, its channel, and the words it had seen when it tripped. */
+  readonly stop: RepetitionStop;
+
+  constructor({ words }: { words?: number | undefined } = {}) {
+    super("The model's reasoning stopped making progress.");
     this.name = 'ModelOutputRepetitionError';
+    this.stop = { guard: 'streaming_shingles', channel: 'reasoning', ...(words !== undefined ? { words } : {}) };
   }
 }
 
@@ -1321,6 +1411,11 @@ class StreamingRepetitionGuard {
    */
   markProgress(): void {
     this.wordsAtLastProgress = this.wordsSeen;
+  }
+
+  /** Words fed to the guard so far; reported with the stop when the guard trips. */
+  get wordCount(): number {
+    return this.wordsSeen;
   }
 
   push(text: string): boolean {
@@ -1380,12 +1475,132 @@ class StreamingRepetitionGuard {
   }
 }
 
+/** The field of a provider's raw chunk that carried its progress, named for logs and deadline reports. */
+export type RawProgressField =
+  'content' | 'reasoning' | 'reasoning_content' | 'reasoning_details' | 'tool_call_arguments';
+
+interface RawChunkScan {
+  /** The first field carrying nonempty progress text, when any field does. */
+  progressField: RawProgressField | undefined;
+  /**
+   * Progress the SDK parser also turns into parts of its own (answer text, reasoning under the
+   * fields it maps, a tool call whose name has arrived). When true, the mapped parts already
+   * reset both deadline layers, so the raw part needs no progress chunk of its own.
+   */
+  mappedProgress: boolean;
+  /** Reasoning under a field the parser maps (`reasoning` / `reasoning_content`) is present in this chunk. */
+  mappedReasoning: boolean;
+  /** Reasoning text the parser drops (it lives only under `reasoning_details`), when present. */
+  droppedReasoningText: string | undefined;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
+function nonemptyString(value: unknown): string | undefined {
+  return typeof value === 'string' && value.length > 0 ? value : undefined;
+}
+
+/** Text carried by a `reasoning_details` entry, across the shapes providers use for it. */
+function reasoningDetailText(entry: unknown): string | undefined {
+  if (!isRecord(entry)) {
+    return undefined;
+  }
+  return nonemptyString(entry['text']) ?? nonemptyString(entry['summary']) ?? nonemptyString(entry['content']);
+}
+
+/**
+ * Reads one raw provider chunk (an OpenAI-shaped chat-completion chunk) for progress the SDK
+ * parser may not surface. The parser drops some fields outright (reasoning carried only under
+ * `reasoning_details`) and holds others back (tool-call argument deltas are buffered until the
+ * call's name arrives, which a provider may send only in its last frame), so a model can be
+ * answering while no parsed part exists. A chunk whose delta carries nothing but a role, or no
+ * text at all, is a keepalive and scans as no progress. Non-OpenAI-shaped raw chunks (other
+ * providers' native events) scan as no progress: their parsers map their own reasoning, so the
+ * parsed parts remain the only signal there, exactly as before raw chunks were requested.
+ */
+export function scanRawChunk(rawValue: unknown): RawChunkScan {
+  const none: RawChunkScan = {
+    progressField: undefined,
+    mappedProgress: false,
+    mappedReasoning: false,
+    droppedReasoningText: undefined,
+  };
+  if (!isRecord(rawValue)) {
+    return none;
+  }
+  const choices: unknown = rawValue['choices'];
+  if (!Array.isArray(choices) || choices.length === 0) {
+    return none;
+  }
+  const first: unknown = choices[0];
+  if (!isRecord(first)) {
+    return none;
+  }
+  const delta: unknown = first['delta'];
+  if (!isRecord(delta)) {
+    return none;
+  }
+
+  let droppedReasoningText: string | undefined;
+  const details: unknown = delta['reasoning_details'];
+  if (Array.isArray(details)) {
+    const texts = details.map(reasoningDetailText).filter(text => text !== undefined);
+    if (texts.length > 0) {
+      droppedReasoningText = texts.join('');
+    }
+  }
+
+  let toolArguments = false;
+  let toolNameArrived = false;
+  const toolCalls: unknown = delta['tool_calls'];
+  if (Array.isArray(toolCalls)) {
+    for (const call of toolCalls) {
+      if (!isRecord(call) || !isRecord(call['function'])) {
+        continue;
+      }
+      if (nonemptyString(call['function']['arguments']) !== undefined) {
+        toolArguments = true;
+      }
+      if (nonemptyString(call['function']['name']) !== undefined) {
+        toolNameArrived = true;
+      }
+    }
+  }
+
+  const content = nonemptyString(delta['content']) !== undefined;
+  const reasoning = nonemptyString(delta['reasoning']) !== undefined;
+  const reasoningContent = nonemptyString(delta['reasoning_content']) !== undefined;
+  const mappedReasoning = reasoning || reasoningContent;
+  const mappedProgress = content || mappedReasoning || toolNameArrived;
+  const progressField: RawProgressField | undefined = content
+    ? 'content'
+    : reasoningContent
+      ? 'reasoning_content'
+      : reasoning
+        ? 'reasoning'
+        : droppedReasoningText !== undefined
+          ? 'reasoning_details'
+          : toolArguments
+            ? 'tool_call_arguments'
+            : undefined;
+  return { progressField, mappedProgress, mappedReasoning, droppedReasoningText };
+}
+
+/** The progress field of a raw provider chunk, or undefined when the chunk carries no progress. */
+export function rawChunkProgressField(rawValue: unknown): RawProgressField | undefined {
+  return scanRawChunk(rawValue).progressField;
+}
+
 /**
  * True when a raw SDK stream part carries something a caller would notice: text, reasoning text,
- * a nonempty tool-call delta, a tool call/file/reasoning-file, or a step/turn finish. False for
- * bookkeeping and empty-heartbeat parts (role-only deltas, `start`/`start-step`, zero-length
- * deltas). Only substantive parts may satisfy the first-chunk deadline or reset the per-chunk
- * deadline — see {@link VercelAILLM}.
+ * a nonempty tool-call delta, a tool call/file/reasoning-file, or a step/turn finish. A raw
+ * provider chunk also counts when its delta carries nonempty text in any field, including fields
+ * the parser drops or holds back (see scanRawChunk). False for bookkeeping and
+ * empty-heartbeat parts (role-only deltas, `start`/`start-step`, zero-length deltas). Only
+ * substantive parts may satisfy the first-chunk deadline or reset the per-chunk deadline in
+ * VercelAILLM.
  */
 export function chunkHasSubstance(part: TextStreamPart<ToolSet>): boolean {
   switch (part.type) {
@@ -1394,6 +1609,8 @@ export function chunkHasSubstance(part: TextStreamPart<ToolSet>): boolean {
       return part.text.length > 0;
     case 'tool-input-delta':
       return part.delta.length > 0;
+    case 'raw':
+      return rawChunkProgressField(part.rawValue) !== undefined;
     case 'tool-input-start':
     case 'tool-call':
     case 'file':
@@ -1415,7 +1632,6 @@ export function chunkHasSubstance(part: TextStreamPart<ToolSet>): boolean {
     case 'tool-approval-request':
     case 'tool-approval-response':
     case 'start-step':
-    case 'raw':
     case 'error':
     case 'abort':
       return false;
@@ -1427,31 +1643,103 @@ export function chunkHasSubstance(part: TextStreamPart<ToolSet>): boolean {
 }
 
 /**
+ * The field that carried a part's progress, for deadline reports: a raw chunk names the delta
+ * field its text arrived under; a parsed part names the harness field it feeds. Undefined when
+ * the part carries no progress (chunkHasSubstance is false for it).
+ */
+export function chunkSubstanceField(part: TextStreamPart<ToolSet>): string | undefined {
+  if (part.type === 'raw') {
+    return rawChunkProgressField(part.rawValue);
+  }
+  if (!chunkHasSubstance(part)) {
+    return undefined;
+  }
+  switch (part.type) {
+    case 'text-delta':
+      return 'content';
+    case 'reasoning-delta':
+      return 'reasoning';
+    case 'tool-input-delta':
+    case 'tool-input-start':
+    case 'tool-call':
+      return 'tool_call_arguments';
+    default:
+      return part.type;
+  }
+}
+
+/** What a stream part says about a tool call: it opened, it completed, or the step ended. */
+export type ToolCallPiece = { kind: 'opened' | 'completed'; id: string } | { kind: 'step_ended' };
+
+/** The tool-call piece a stream part carries, or undefined for any other part. */
+export function toolCallPieceOf(part: TextStreamPart<ToolSet>): ToolCallPiece | undefined {
+  switch (part.type) {
+    case 'tool-input-start':
+      return { kind: 'opened', id: part.id };
+    case 'tool-input-end':
+      return { kind: 'completed', id: part.id };
+    case 'tool-call':
+      return { kind: 'completed', id: part.toolCallId };
+    case 'finish-step':
+    case 'finish':
+      return { kind: 'step_ended' };
+    default:
+      return undefined;
+  }
+}
+
+/**
  * Re-arms the first-chunk and per-chunk deadlines from inside the harness rather than trusting the
  * SDK's own `timeout` option end to end. A chunk only satisfies the first-chunk deadline, and only
  * a chunk resets the per-chunk deadline, when {@link chunkHasSubstance} says it carries something —
  * a provider's role-only or empty-delta heartbeat (a real shape some OpenAI-compatible servers send
- * while prefilling a large prompt) keeps both timers exactly where they were. On expiry, aborts
+ * while prefilling a large prompt) keeps both timers exactly where they were. While a tool call is
+ * open (its first piece arrived and it has not completed), the per-chunk deadline is the tool-call
+ * allowance instead, because a server may hold a call's arguments back and send them in a few large
+ * pieces. On expiry, aborts
  * `deadlineController` with the same `DOMException`/`TimeoutError` shape the SDK's own timeout uses,
- * so downstream error handling is unchanged; the underlying request is expected to observe that
- * abort (via a combined `AbortSignal`) and end the source stream, which unblocks the `for await`
- * below with a rejection.
+ * so downstream error handling is unchanged, and rejects the pending read at once. The firing is
+ * recorded as StreamDeadlineDetails (which deadline, and the last progress before it) so the
+ * turn's one log line can say what actually happened.
  */
 export async function* enforceStreamDeadlines<T>({
   stream,
   timeout,
   hasSubstance,
+  substanceField,
+  toolCalls,
   deadlineController,
 }: {
   stream: AsyncIterable<T>;
   timeout: { firstChunkMs: number; chunkMs: number };
   hasSubstance: (part: T) => boolean;
+  /** Names the field that carried a part's progress, for the deadline record; defaults to the part's kind. */
+  substanceField?: ((part: T) => string | undefined) | undefined;
+  /** The per-chunk allowance while a tool call is open, and how a part opens or completes one. */
+  toolCalls?: { chunkMs: number; pieceOf: (part: T) => ToolCallPiece | undefined } | undefined;
   deadlineController: AbortController;
 }): AsyncGenerator<T, void, unknown> {
   let timer: ReturnType<typeof setTimeout> | undefined;
+  const openToolCalls = new Set<string>();
+  let lastProgress: { field: string; atMs: number } | undefined;
+  let firedDetails: StreamDeadlineDetails | undefined;
 
   const abortWithTimeout = (label: 'First chunk' | 'Chunk', ms: number) => {
-    deadlineController.abort(new DOMException(`${label} timeout of ${ms.toString()}ms exceeded`, 'TimeoutError'));
+    const now = Date.now();
+    const details: StreamDeadlineDetails = {
+      deadline: label === 'First chunk' ? 'first_chunk' : 'chunk',
+      timeoutMs: ms,
+      lastProgressField: lastProgress?.field ?? null,
+      msSinceLastProgress: lastProgress === undefined ? null : now - lastProgress.atMs,
+    };
+    firedDetails = details;
+    const progressNote =
+      lastProgress === undefined
+        ? 'no progress received'
+        : `last progress ${(now - lastProgress.atMs).toString()}ms ago via ${lastProgress.field}`;
+    const reason = new DOMException(`${label} timeout of ${ms.toString()}ms exceeded; ${progressNote}`, 'TimeoutError');
+    recordStreamDeadlineDetails(reason, details);
+    deadlineController.abort(reason);
   };
 
   const armFirstChunkTimer = () => {
@@ -1460,18 +1748,57 @@ export async function* enforceStreamDeadlines<T>({
     }, timeout.firstChunkMs);
   };
   const armChunkTimer = () => {
+    const chunkMs =
+      toolCalls !== undefined && openToolCalls.size > 0
+        ? Math.max(toolCalls.chunkMs, timeout.chunkMs)
+        : timeout.chunkMs;
     timer = setTimeout(() => {
-      abortWithTimeout('Chunk', timeout.chunkMs);
-    }, timeout.chunkMs);
+      abortWithTimeout('Chunk', chunkMs);
+    }, chunkMs);
   };
+
+  // A provider stream does not always end when its request is aborted, so an expired deadline
+  // rejects the pending read itself; the source is asked to close but never awaited.
+  const iterator = stream[Symbol.asyncIterator]();
+  const expired = new Promise<never>((_, reject) => {
+    const onExpired = () => {
+      const reason: unknown = deadlineController.signal.reason;
+      const expiredError = new Error(describeStreamError(reason), { cause: reason });
+      expiredError.name = 'TimeoutError';
+      const details = firedDetails ?? streamDeadlineDetailsOf(reason);
+      if (details !== undefined) {
+        recordStreamDeadlineDetails(expiredError, details);
+      }
+      reject(expiredError);
+    };
+    if (deadlineController.signal.aborted) {
+      onExpired();
+    } else {
+      deadlineController.signal.addEventListener('abort', onExpired, { once: true });
+    }
+  });
+  // Observed here so an expiry nobody is reading never surfaces as an unhandled rejection.
+  expired.catch(() => undefined);
 
   armFirstChunkTimer();
   try {
-    // The underlying stream is expected to end (reject) shortly after `deadlineController` aborts,
-    // since callers combine it into the signal driving the request — a fired timer is not handled
-    // here so that rejection, not a silent early return, is what ends this generator.
-    for await (const part of stream) {
-      if (hasSubstance(part)) {
+    for (;;) {
+      const result = await Promise.race([iterator.next(), expired]);
+      if (result.done === true) {
+        return;
+      }
+      const part = result.value;
+      const piece = toolCalls?.pieceOf(part);
+      if (piece?.kind === 'opened') {
+        openToolCalls.add(piece.id);
+      } else if (piece?.kind === 'completed') {
+        openToolCalls.delete(piece.id);
+      } else if (piece?.kind === 'step_ended') {
+        openToolCalls.clear();
+      }
+      const field = substanceField === undefined ? undefined : substanceField(part);
+      if (field !== undefined || hasSubstance(part)) {
+        lastProgress = { field: field ?? 'chunk', atMs: Date.now() };
         clearTimeout(timer);
         armChunkTimer();
       }
@@ -1479,6 +1806,9 @@ export async function* enforceStreamDeadlines<T>({
     }
   } finally {
     clearTimeout(timer);
+    void Promise.resolve()
+      .then(() => iterator.return?.())
+      .catch(() => undefined);
   }
 }
 
@@ -1489,9 +1819,12 @@ export async function* enforceStreamDeadlines<T>({
 export async function* mapStreamToChunks({
   stream,
   chunkMeta,
+  toolArgumentLimits,
 }: {
   stream: AsyncIterable<TextStreamPart<ToolSet>>;
   chunkMeta: ChunkMeta;
+  /** Host-owned per-tool limits on streamed argument characters; absent means no tool has one. */
+  toolArgumentLimits?: ReadonlyMap<string, number> | undefined;
 }): AsyncGenerator<ExtendedChatCompletionChunk, RawAssistantMessageWithUsage, unknown> {
   const makeBase = (): Omit<ExtendedChatCompletionChunk, 'choices' | 'usage'> => ({
     id: chunkMeta.id,
@@ -1510,6 +1843,11 @@ export async function* mapStreamToChunks({
   const answerUnits = new RepeatedUnitGuard();
   const reasoningRepetition = new StreamingRepetitionGuard();
   let repetitionStopped = false;
+  // Calls stopped mid-stream for running past their tool's argument size limit. Their partial
+  // arguments stay in the reply; the caller refuses them instead of running them.
+  const sizeCutToolCalls: string[] = [];
+  // Set when the reply started more calls than the stream reads; reading stops there.
+  let toolCallCountCut = false;
   const accumulatedThinking: ThinkingBlock[] = [];
   const thinkingByReasoningItem = new Map<string, ThinkingBlock>();
   let currentThinkingBlock: ThinkingBlock | null = null;
@@ -1546,6 +1884,9 @@ export async function* mapStreamToChunks({
   // false, which is what the post-loop check below uses to tell a genuinely silent 'stop' apart
   // from a stream that never finished at all.
   let sawFinishStep = false;
+  // Set when the parser surfaces reasoning itself; raw-chunk reasoning (a field the parser
+  // drops) is only mapped while this stays false, so mirrored reasoning is never shown twice.
+  let sawMappedReasoning = false;
 
   streamLoop: for await (const part of stream) {
     switch (part.type) {
@@ -1585,10 +1926,11 @@ export async function* mapStreamToChunks({
       }
 
       case 'reasoning-delta': {
+        sawMappedReasoning = true;
         // A delta with no preceding `reasoning-start` would otherwise drop the block and its
         // signature, breaking replay while the text still streams out.
         if (reasoningRepetition.push(part.text)) {
-          throw new ModelOutputRepetitionError();
+          throw new ModelOutputRepetitionError({ words: reasoningRepetition.wordCount });
         }
         currentThinkingBlock ??= openThinkingBlock(part.providerMetadata);
         currentThinkingBlock.thinking += part.text;
@@ -1619,6 +1961,14 @@ export async function* mapStreamToChunks({
       }
 
       case 'tool-input-start': {
+        if (nextToolIndex >= MAX_TOOL_CALL_STREAM_PARTS) {
+          // Past what any one reply may legitimately hold: stop reading here rather than
+          // buffering a flood the reply guard would refuse anyway, or waiting on a model that
+          // keeps writing calls until the turn's time limit. The reply is marked cut so the
+          // turn stops.
+          toolCallCountCut = true;
+          break streamLoop;
+        }
         const idx = nextToolIndex++;
         // A tool call is real output progress: the reasoning guard must not
         // mistake a turn that keeps acting for a stuck reasoning loop.
@@ -1634,6 +1984,7 @@ export async function* mapStreamToChunks({
           id: part.id,
           name: part.toolName,
           arguments: '',
+          argumentLimit: toolArgumentLimits?.get(part.toolName),
           thoughtSignature,
         });
         yield {
@@ -1686,6 +2037,15 @@ export async function* mapStreamToChunks({
             },
           ],
         };
+        if (state.argumentLimit !== undefined && state.arguments.length > state.argumentLimit) {
+          // The call ran past its size limit: stop reading the stream here rather than
+          // buffering a call the tool layer would refuse anyway, or waiting on a server
+          // that may never finish it. The partial call stays in the reply and is named
+          // on the result, so the reply guard refuses it with a plain message and the
+          // model can send the content in smaller parts in the same turn.
+          sizeCutToolCalls.push(state.id);
+          break streamLoop;
+        }
         break;
       }
 
@@ -1719,8 +2079,9 @@ export async function* mapStreamToChunks({
         // Error. Any other error part (no status code: a transport failure or a
         // malformed-response parse failure, the shape a cut/malformed stream like vLLM's
         // mid-response HarmonyError takes) is the stream itself breaking, so it is a
-        // ModelStreamFault.
-        if (providerStatusCode(raw) != null) {
+        // ModelStreamFault. A provider answer saying the request is over the context window is
+        // the one definite answer a shorter history can fix, so it is a ModelStreamFault too.
+        if (providerStatusCode(raw) != null && !isContextLengthError(raw)) {
           throw new Error(message, { cause });
         }
         throw new ModelStreamFault(message, { cause });
@@ -1756,9 +2117,45 @@ export async function* mapStreamToChunks({
       case 'tool-approval-response':
       case 'start-step':
       case 'finish':
-      case 'raw':
         // Structural/bookkeeping events — no harness chunk is emitted for these.
         break;
+
+      case 'raw': {
+        const scan = scanRawChunk(part.rawValue);
+        if (scan.droppedReasoningText !== undefined && !scan.mappedReasoning && !sawMappedReasoning) {
+          // Reasoning the parser dropped: surface it as reasoning, the way a mapped
+          // reasoning-delta is surfaced, so the person sees the thinking.
+          const text = scan.droppedReasoningText;
+          if (reasoningRepetition.push(text)) {
+            throw new ModelOutputRepetitionError({ words: reasoningRepetition.wordCount });
+          }
+          currentThinkingBlock ??= openThinkingBlock(undefined);
+          currentThinkingBlock.thinking += text;
+          yield {
+            ...makeBase(),
+            choices: [
+              {
+                index: 0,
+                delta: {
+                  thinking_blocks: [{ type: 'thinking', thinking: text }],
+                  reasoning_content: text,
+                } satisfies ExtendedChatCompletionChunk['choices'][0]['delta'],
+                finish_reason: null,
+                logprobs: null,
+              },
+            ],
+          };
+        } else if (scan.progressField !== undefined && !scan.mappedProgress) {
+          // Progress the parser cannot surface (tool-call arguments it is holding back):
+          // an empty delta still tells the harness layer the model is answering, the same
+          // shape 'finish-step' uses, so its silence clock resets too.
+          yield {
+            ...makeBase(),
+            choices: [{ index: 0, delta: {}, finish_reason: null, logprobs: null }],
+          };
+        }
+        break;
+      }
 
       default: {
         const _exhaustive: never = part;
@@ -1783,11 +2180,14 @@ export async function* mapStreamToChunks({
   }
 
   // Settle the markup guard. A clean reply releases its held tail, which passes the repetition guard
-  // like the rest of the answer; a reply that carried markup releases nothing of it.
+  // like the rest of the answer; a reply that carried markup releases nothing of it. A reply cut off
+  // at the output limit releases nothing either: what the guard still holds then is a tool call the
+  // limit cut in two, and releasing it would show the person raw markup as answer text.
   const markupOutcome = markupGuard.finish();
+  const cutOffMidCall = finalFinishReason === 'length' && markupGuard.inMarkup;
   let tail = '';
   if (!repetitionStopped) {
-    const flushed = answerUnits.push(markupOutcome === 'clean' ? markupGuard.heldText : '');
+    const flushed = answerUnits.push(markupOutcome === 'clean' && !cutOffMidCall ? markupGuard.heldText : '');
     const rest = flushed.stopped ? { text: '', stopped: false } : answerUnits.finish();
     repetitionStopped = flushed.stopped || rest.stopped;
     tail = flushed.text + rest.text;
@@ -1833,7 +2233,11 @@ export async function* mapStreamToChunks({
     output,
     finish_reason: finalFinishReason,
     ...(markupOutcome === 'leaked' ? { tool_markup: markupOutcome } : {}),
-    ...(repetitionStopped ? { repetition_stopped: true } : {}),
+    ...(repetitionStopped
+      ? { repetition_stopped: true, repetition_stop: { guard: 'answer_units', channel: 'answer' } }
+      : {}),
+    ...(sizeCutToolCalls.length > 0 ? { size_cut_tool_calls: sizeCutToolCalls } : {}),
+    ...(toolCallCountCut ? { tool_call_count_cut: true } : {}),
   };
 }
 
@@ -1856,9 +2260,14 @@ export class VercelAILLM implements ILLM {
     // chunks hold an unfinished proposal open indefinitely. The SDK counts
     // nonempty text, reasoning and tool-input chunks as progress.
     this.streamTimeout = { ...(config.streamTimeout ?? { firstChunkMs: 300_000, chunkMs: 60_000 }) };
-    for (const value of Object.values(this.streamTimeout)) {
+    for (const value of [...Object.values(this.streamTimeout), config.toolCallChunkMs ?? this.streamTimeout.chunkMs]) {
       if (!Number.isSafeInteger(value) || value <= 0 || value > 2_147_483_647) {
         throw new Error('Model stream deadlines must be integer milliseconds between 1 and 2147483647');
+      }
+    }
+    for (const value of config.toolArgumentLimits?.values() ?? []) {
+      if (!Number.isSafeInteger(value) || value <= 0) {
+        throw new Error('Tool argument limits must be positive integer character counts');
       }
     }
   }
@@ -1998,11 +2407,20 @@ export class VercelAILLM implements ILLM {
       stream: streamResult.stream,
       timeout: this.streamTimeout,
       hasSubstance: chunkHasSubstance,
+      substanceField: chunkSubstanceField,
+      toolCalls: {
+        chunkMs: this.config.toolCallChunkMs ?? DEFAULT_MODEL_TOOL_CALL_IDLE_TIMEOUT_MS,
+        pieceOf: toolCallPieceOf,
+      },
       deadlineController,
     });
 
     try {
-      const result = yield* mapStreamToChunks({ stream: deadlineGuardedStream, chunkMeta });
+      const result = yield* mapStreamToChunks({
+        stream: deadlineGuardedStream,
+        chunkMeta,
+        toolArgumentLimits: this.config.toolArgumentLimits,
+      });
       result.output.source = `${provider.type}/${provider.name}/${model.name}`;
       return result;
     } catch (error) {

@@ -23,7 +23,15 @@ import { canonicalShellFormFor } from './classifier';
 import type { SentinelCallIdentity, SentinelServices } from './context';
 import { extractCardFields } from './extractorRegistry';
 import { provenanceForToolType, requiresNetwork } from './networkRequirements';
-import { hashArgv, matchAllowlist, OFFLINE_SHELL_COMMANDS, parseSimpleCommand } from './shellAllowlist';
+import {
+  hashArgv,
+  matchAllowlist,
+  OFFLINE_SHELL_COMMANDS,
+  parseReadOnlyList,
+  parseSimpleCommand,
+  type ParsedSimpleCommand,
+  type ShellAllowlistConfig,
+} from './shellAllowlist';
 import type { Tier, TrackedExecutionBinding } from './tier';
 import {
   canonicalFileIdentity,
@@ -127,8 +135,9 @@ function verifyTier2Containment(input: {
   call: VerifiableCall;
   workspace_root: string;
   resolution: PathResolution | undefined;
+  shellAllowlist: ShellAllowlistConfig;
 }): string | undefined {
-  const { call, workspace_root, resolution } = input;
+  const { call, workspace_root, resolution, shellAllowlist } = input;
   let root: string | null;
   try {
     root = resolution === 'remote' ? lexicalPath({ p: workspace_root, cwd: '/' }) : realpathSync(workspace_root);
@@ -176,7 +185,8 @@ function verifyTier2Containment(input: {
   if (call.tool_name === 'exec') {
     const command = stringParam(call.canonical_params, 'command') ?? '';
     const parsed = parseSimpleCommand(command);
-    if (parsed === undefined) {
+    const list = parsed === undefined ? parseReadOnlyList({ command, config: shellAllowlist }) : undefined;
+    if (parsed === undefined && list === undefined) {
       return 'Tier 2 shell command cannot be parsed at dispatch; request approval again.';
     }
     const cwd = callCwd({ params: call.canonical_params, workspace_root, resolution });
@@ -184,17 +194,36 @@ function verifyTier2Containment(input: {
     if (cwdIdentity === null || !insideRoot(cwdIdentity)) {
       return 'Tier 2 shell working directory is outside the workspace at dispatch; request approval again.';
     }
-    for (const token of parsed.argv.slice(1)) {
-      if (token.startsWith('-')) {
+    const operandOutside = (input: { parsed: ParsedSimpleCommand; cwd: string }): boolean =>
+      input.parsed.argv.slice(1).some(token => {
+        if (token.startsWith('-')) {
+          return false;
+        }
+        const identity =
+          canonicalFileIdentity({ p: token, cwd: input.cwd, resolution }) ??
+          canonicalWriteTarget({ p: token, cwd: input.cwd, resolution });
+        // Unresolvable operands were not bound at classify time; only a
+        // resolved-outside operand invalidates the Tier 2 grant.
+        return identity !== null && !insideRoot(identity);
+      });
+    if (parsed !== undefined) {
+      return operandOutside({ parsed, cwd })
+        ? 'Tier 2 shell operand is outside the workspace at dispatch; request approval again.'
+        : undefined;
+    }
+    let stepCwd = cwd;
+    for (const step of list?.steps ?? []) {
+      if (step.kind === 'run') {
+        if (operandOutside({ parsed: step.parsed, cwd: stepCwd })) {
+          return 'Tier 2 shell operand is outside the workspace at dispatch; request approval again.';
+        }
         continue;
       }
-      const identity =
-        canonicalFileIdentity({ p: token, cwd, resolution }) ?? canonicalWriteTarget({ p: token, cwd, resolution });
-      // Unresolvable operands were not bound at classify time; only a
-      // resolved-outside operand invalidates the Tier 2 grant.
-      if (identity !== null && !insideRoot(identity)) {
-        return 'Tier 2 shell operand is outside the workspace at dispatch; request approval again.';
+      const target = canonicalFileIdentity({ p: step.dir, cwd: stepCwd, resolution });
+      if (target === null || !insideRoot(target)) {
+        return 'Tier 2 shell working directory is outside the workspace at dispatch; request approval again.';
       }
+      stepCwd = target;
     }
     return undefined;
   }
@@ -203,7 +232,7 @@ function verifyTier2Containment(input: {
 }
 
 /** File-write tools whose sandbox writes can run without a card, so they are re-checked at dispatch. */
-const SANDBOX_FILE_WRITE_TOOLS: ReadonlySet<string> = new Set(['write_file', 'apply_patch', 'replace_text']);
+export const SANDBOX_FILE_WRITE_TOOLS: ReadonlySet<string> = new Set(['write_file', 'apply_patch', 'replace_text']);
 
 /**
  * Returns an error message when the call must not execute, or undefined when
@@ -228,7 +257,12 @@ export async function verifyPreDispatch(input: {
     // Silent only because it was contained; with no workspace there is nothing to check against.
     return workspaceRoot === null
       ? 'No workspace is set for this shell command at dispatch; request approval again.'
-      : verifyTier2Containment({ call, workspace_root: workspaceRoot, resolution: ctx.path_resolution });
+      : verifyTier2Containment({
+          call,
+          workspace_root: workspaceRoot,
+          resolution: ctx.path_resolution,
+          shellAllowlist: services.shell_allowlist,
+        });
   }
 
   if (call.tier === 2) {
@@ -236,7 +270,12 @@ export async function verifyPreDispatch(input: {
     const containmentError =
       workspaceRoot === null
         ? undefined
-        : verifyTier2Containment({ call, workspace_root: workspaceRoot, resolution: ctx.path_resolution });
+        : verifyTier2Containment({
+            call,
+            workspace_root: workspaceRoot,
+            resolution: ctx.path_resolution,
+            shellAllowlist: services.shell_allowlist,
+          });
     if (containmentError !== undefined || call.approval_token_id === null) {
       return containmentError;
     }
@@ -265,15 +304,19 @@ export async function verifyPreDispatch(input: {
     return 'Approval token is invalid or was already used; request approval again.';
   }
 
-  // Rebuild the canonical params identically to classify time, with fresh hashes.
+  // Rebuild the canonical params from the environment stamped on the binding at
+  // approval time, with fresh hashes. Replaying the approved environment keeps an
+  // approval valid when the sandbox state flips between the card and dispatch.
+  // A missing path resolution stamp means none was in force at approval time; it
+  // replays as none, never as whatever the live turn now reports.
   if (call.shell_binding !== null) {
     const form = await canonicalShellFormFor({
       command: stringParam(call.canonical_params, 'command') ?? '',
       cwd: stringParam(call.canonical_params, 'cwd'),
       env: envOverrides(call.canonical_params),
       allowlist: services.shell_allowlist,
-      workspace_cwd: ctx.workspace_cwd,
-      path_resolution: ctx.path_resolution,
+      workspace_cwd: call.shell_binding.workspace_cwd ?? ctx.workspace_cwd,
+      path_resolution: call.shell_binding.path_resolution ?? undefined,
       file_digest: ctx.file_digest,
     });
     const verification = verifyApprovalToken({

@@ -5,6 +5,8 @@ import {
   Sessions,
   type TurnStreamingEvent,
 } from '@truefoundry/trueforge-core/agent-session';
+import type { AuditRecordInput } from '@truefoundry/trueforge-core/core';
+import { HTTPException } from 'hono/http-exception';
 import winston from 'winston';
 import { createScheduleExecutionRouter, createSchedulesRouter } from '../../../src/apis/schedules';
 import { startTurnInProcess } from '../../../src/apis/turns';
@@ -12,21 +14,26 @@ import { TrueForgeAuthorizer, type Authorizer } from '../../../src/auth/authoriz
 import type { RequestContext } from '../../../src/auth/identity';
 import { McpCatalog } from '../../../src/catalog/McpCatalog';
 import { ScheduleAgentNotFoundError, startScheduleRun } from '../../../src/controller/scheduleDispatch';
+import { BriefItemCompletionStore } from '../../../src/db/briefItemCompletionStore';
 import { migrateSqliteToLatest } from '../../../src/db/migrateSqlite';
 import type { SessionCustom, TurnCustom } from '../../../src/db/sessionCustom';
 import { SqliteAgentStore } from '../../../src/db/sqlite/agent-store/SqliteAgentStore';
 import { createSqliteDb } from '../../../src/db/sqlite/client';
 import { SqliteGlobalSettingsStore } from '../../../src/db/sqlite/global-settings-store/SqliteGlobalSettingsStore';
 import { SqliteScheduleStore } from '../../../src/db/sqlite/schedule-store/SqliteScheduleStore';
+import { SqliteSessionStore } from '../../../src/db/sqlite/session-store/SqliteSessionStore';
 import { ActiveTurnRegistry } from '../../../src/runtime/activeTurns';
-import { CHAT_ASSISTANT_DESCRIPTION } from '../../../src/runtime/chatAssistant';
+import { CHAT_ASSISTANT_DESCRIPTION, getOrCreateChatAssistantAgent } from '../../../src/runtime/chatAssistant';
 import { EventSubscriptionRegistry } from '../../../src/runtime/event-subscription';
+import { validateAgentSpec } from '../../../src/runtime/sessionResources';
 import { TurnDrainRegistry } from '../../../src/runtime/turnDrains';
 import {
   CreateScheduleRunResponseSchema,
   GetScheduleResponseSchema,
+  GetScheduleToolsResponseSchema,
   ListScheduleRunsResponseSchema,
   ListSchedulesResponseSchema,
+  ScheduleManifestSchema,
 } from '../../../src/schemas/schedule';
 import { FakeTurnArtifactStore } from '../../fixtures/fakeTurnArtifactStore';
 import { uncappedTokenFactoryBudget } from '../../fixtures/uncappedTokenFactoryBudget';
@@ -41,12 +48,20 @@ jest.mock('../../../src/controller/scheduleDispatch', () => {
   };
 });
 
+jest.mock('../../../src/runtime/sessionResources', () => ({
+  ...jest.requireActual<typeof import('../../../src/runtime/sessionResources')>(
+    '../../../src/runtime/sessionResources',
+  ),
+  validateAgentSpec: jest.fn().mockResolvedValue(undefined),
+}));
+
 jest.mock('../../../src/apis/turns', () => {
   const actual = jest.requireActual<typeof import('../../../src/apis/turns')>('../../../src/apis/turns');
   return { ...actual, startTurnInProcess: jest.fn() };
 });
 
 const mockedStartScheduleRun = startScheduleRun as jest.MockedFunction<typeof startScheduleRun>;
+const mockedValidateAgentSpec = jest.mocked(validateAgentSpec);
 const mockedStartTurnInProcess = jest.mocked(startTurnInProcess);
 
 const ALICE: RequestContext = {
@@ -83,6 +98,7 @@ function stubTurnExecutionDeps(
   return {
     mcpCatalog: McpCatalog.loadShipped(),
     scheduleStore,
+    briefItemStore: new BriefItemCompletionStore(db),
     sessions: new Sessions<SessionCustom, TurnCustom>({ sessionStore }),
     agentStore,
     personaStore: { getPersona: () => Promise.resolve(undefined) },
@@ -128,11 +144,14 @@ async function setup(authorizer: Authorizer = new TrueForgeAuthorizer()) {
   let currentAuthorizer = authorizer;
   mockedStartScheduleRun.mockReset();
   mockedStartScheduleRun.mockResolvedValue(undefined);
+  mockedValidateAgentSpec.mockReset();
+  mockedValidateAgentSpec.mockResolvedValue(undefined);
+  const turnDeps = stubTurnExecutionDeps(agentStore, scheduleStore, db);
   const app = new OpenAPIHono();
   app.route(
     '/',
     createSchedulesRouter({
-      ...stubTurnExecutionDeps(agentStore, scheduleStore, db),
+      ...turnDeps,
       resolveAgentStore: () => agentStore,
       withTransaction: callback => db.transaction().execute(callback),
       resolveRequestContext: () => current,
@@ -153,7 +172,7 @@ async function setup(authorizer: Authorizer = new TrueForgeAuthorizer()) {
   const postJson = (path: string, method: string, body: unknown) =>
     app.request(path, { method, headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
 
-  return { app, asUser, setAuthorizer, postJson, agentStore, scheduleStore };
+  return { app, asUser, setAuthorizer, postJson, agentStore, scheduleStore, sessions: turnDeps.sessions, db };
 }
 
 describe('schedule RBAC', () => {
@@ -291,7 +310,14 @@ describe('who a schedule runs as', () => {
       agent_name: chatAgent.name,
       persona_id: null,
       name: 'lobster-joke',
-      manifest: { task: 'Tell me a lobster joke.', cron: '0 8 * * *', timezone: 'UTC', status: 'active' },
+      manifest: {
+        task: 'Tell me a lobster joke.',
+        cron: '0 8 * * *',
+        timezone: 'UTC',
+        status: 'active',
+        run_at: null,
+        kind: 'task',
+      },
       created_by_subject: alice,
       runFrom: new Date(),
     });
@@ -513,7 +539,7 @@ describe('internal schedule execution', () => {
       agent_name: agent.name,
       persona_id: null,
       name: 'daily-report',
-      manifest: { task: 'Say hi', cron: '0 13 * * *', timezone, status: 'active' },
+      manifest: { task: 'Say hi', cron: '0 13 * * *', timezone, status: 'active', run_at: null, kind: 'task' },
       created_by_subject: alice,
       runFrom: new Date(),
     });
@@ -573,6 +599,35 @@ describe('internal schedule execution', () => {
 
     expect(response.status).toBe(204);
     expect(mockedStartTurnInProcess).toHaveBeenCalledWith(expect.objectContaining({ unattended: true }));
+  });
+
+  it('lets a scheduled chat take its title from its task, with no fixed schedule title', async () => {
+    const { agent, run, execute } = await seedRun();
+    const session = await new Sessions<SessionCustom, TurnCustom>({
+      sessionStore: new InMemorySessionStore<SessionCustom, TurnCustom>(),
+    }).create({
+      tenant_id: 'default',
+      session_id: 'run-session-title',
+      created_by_subject: { subject_id: 'alice', subject_type: 'user', subject_display_name: 'alice' },
+      agent: { type: 'reference', id: agent.id, name: agent.name },
+      external_id: run.id,
+      source: null,
+    });
+    mockedStartScheduleRun.mockResolvedValue({
+      session,
+      input: [{ type: 'user.message', content: 'Say hi' }],
+      previous_turn_id: 'none',
+      userRef: 'alice',
+      agent,
+      persona: undefined,
+    });
+    mockedStartTurnInProcess.mockReset();
+
+    const response = await execute(run.id);
+
+    expect(response.status).toBe(204);
+    expect(mockedStartTurnInProcess).toHaveBeenCalledTimes(1);
+    expect(mockedStartTurnInProcess.mock.calls[0]?.[0]).not.toHaveProperty('title_seed');
   });
 
   it("runs the turn in the schedule's own time zone, so today and times match the owner's day", async () => {
@@ -667,5 +722,362 @@ describe('internal schedule execution', () => {
 
     expect(response.status).toBe(404);
     expect(mockedStartScheduleRun).not.toHaveBeenCalled();
+  });
+});
+
+describe('what a schedule runs with', () => {
+  const ALICE_SUBJECT = { subject_id: 'alice', subject_type: 'user' as const, subject_display_name: 'alice' };
+  const CHAT_SPEC = AgentSpecSchema.parse({
+    model: { name: 'test-provider/chat-model' },
+    instructions: 'Be brief.',
+    mcp_servers: [{ name: 'calendar', enable_tools: ['@read-only'] }],
+    config: { sandbox: { enabled: false } },
+  });
+  const TOOLS = { connectors: ['mail', 'calendar'], skills: ['digest'], sandbox_enabled: true };
+
+  type Built = Awaited<ReturnType<typeof setup>>;
+
+  /** A schedule made in a chat, which runs as the agent the host made from that chat's own setup. */
+  async function chatSchedule(built: Built, name = 'morning-brief') {
+    const agent = await getOrCreateChatAssistantAgent({
+      tenant_id: 'default',
+      owner: ALICE_SUBJECT,
+      name: 'assistant-chat0001',
+      spec: CHAT_SPEC,
+      agentStore: built.agentStore,
+    });
+    const { schedule } = await built.scheduleStore.createScheduleAndRun({
+      tenant_id: 'default',
+      agent_id: agent.id,
+      agent_name: agent.name,
+      name,
+      persona_id: null,
+      manifest: ScheduleManifestSchema.parse({ task: 'Say hi', cron: '0 13 * * *', timezone: 'UTC' }),
+      created_by_subject: ALICE_SUBJECT,
+      runFrom: new Date(),
+    });
+    return { schedule, agent };
+  }
+
+  it("shows the tools a chat's schedule runs with, as its own", async () => {
+    const built = await setup();
+    const { schedule, agent } = await chatSchedule(built);
+    const response = await built.app.request(`/${schedule.id}/tools`);
+    expect(response.status).toBe(200);
+    expect(GetScheduleToolsResponseSchema.parse(await response.json()).data).toEqual({
+      source: 'schedule',
+      agent_name: agent.name,
+      connectors: ['calendar'],
+      skills: [],
+      sandbox_enabled: false,
+    });
+  });
+
+  it('saves new tools on the schedule, and the next run has exactly those tools', async () => {
+    const built = await setup();
+    const { schedule, agent } = await chatSchedule(built);
+    const other = await chatSchedule(built, 'evening-brief');
+
+    const saved = await built.postJson(`/${schedule.id}/tools`, 'PUT', TOOLS);
+    expect(saved.status).toBe(200);
+    expect(GetScheduleToolsResponseSchema.parse(await saved.json()).data).toMatchObject(TOOLS);
+
+    const reread = await built.app.request(`/${schedule.id}/tools`);
+    expect(GetScheduleToolsResponseSchema.parse(await reread.json()).data).toMatchObject(TOOLS);
+
+    // The run is prepared from the stored schedule, the way the dispatcher does it.
+    const actual = jest.requireActual<typeof import('../../../src/controller/scheduleDispatch')>(
+      '../../../src/controller/scheduleDispatch',
+    );
+    const stored = await built.scheduleStore.getSchedule({ tenant_id: 'default', id: schedule.id });
+    const pending = await built.scheduleStore.getScheduledRunFor({ tenant_id: 'default', schedule_id: schedule.id });
+    if (stored === undefined || pending === undefined) {
+      throw new Error('The schedule or its run was not saved.');
+    }
+    const prepared = await actual.startScheduleRun({
+      item: { run: pending, schedule: stored },
+      sessions: built.sessions,
+      agentStore: built.agentStore,
+      personaStore: { getPersona: () => Promise.resolve(undefined) },
+      briefItems: { listCompletedSince: () => Promise.resolve([]) },
+    });
+    const runSpec = prepared?.agent.manifest;
+    expect(runSpec?.mcp_servers?.map(server => server.name)).toEqual(['mail', 'calendar']);
+    expect(runSpec?.skills?.map(skill => skill.name)).toEqual(['digest']);
+    expect(runSpec?.config.sandbox.enabled).toBe(true);
+    // What the chat set up besides the tools carries over, including a kept connector's own settings.
+    expect(runSpec?.instructions).toBe('Be brief.');
+    expect(runSpec?.model.name).toBe('test-provider/chat-model');
+    expect(runSpec?.mcp_servers?.find(server => server.name === 'calendar')?.enable_tools).toEqual(['@read-only']);
+
+    // The agent the chat made is not edited, and a sibling schedule keeps running with it.
+    expect(prepared?.agent.id).not.toBe(agent.id);
+    const untouched = await built.agentStore.getAgent({ tenant_id: 'default', id: agent.id });
+    expect(untouched?.manifest).toEqual(CHAT_SPEC);
+    expect((await built.scheduleStore.getSchedule({ tenant_id: 'default', id: other.schedule.id }))?.agent_id).toBe(
+      agent.id,
+    );
+    expect(stored.manifest).toEqual(schedule.manifest);
+  });
+
+  it('still runs unattended after the tools change, so a send is held and never runs', async () => {
+    const built = await setup();
+    const { schedule } = await chatSchedule(built);
+    await built.postJson(`/${schedule.id}/tools`, 'PUT', TOOLS);
+    const run = await built.scheduleStore.createRun({
+      tenant_id: 'default',
+      schedule_id: schedule.id,
+      name: 'manual-test',
+      scheduled_for: new Date(),
+      status: 'triggered',
+      created_by_subject: ALICE_SUBJECT,
+      triggered_at: new Date(),
+    });
+    const actual = jest.requireActual<typeof import('../../../src/controller/scheduleDispatch')>(
+      '../../../src/controller/scheduleDispatch',
+    );
+    mockedStartScheduleRun.mockImplementation(actual.startScheduleRun);
+    mockedStartTurnInProcess.mockReset();
+    const execution = createScheduleExecutionRouter(
+      stubTurnExecutionDeps(built.agentStore, built.scheduleStore, built.db),
+    );
+
+    const response = await execution.request('/runs/execute', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ schedule_run_id: run.id }),
+    });
+
+    expect(response.status).toBe(204);
+    const started = mockedStartTurnInProcess.mock.calls[0]?.[0];
+    expect(started?.unattended).toBe(true);
+    // The tools changed what the run can reach, not how it asks: the dispatcher's own flag still decides.
+    expect(started).toEqual(expect.objectContaining({ unattended: true, userRef: 'alice' }));
+  });
+
+  it('shares one agent between schedules saved with the same tools', async () => {
+    const built = await setup();
+    const first = await chatSchedule(built);
+    const second = await chatSchedule(built, 'evening-brief');
+    await built.postJson(`/${first.schedule.id}/tools`, 'PUT', TOOLS);
+    await built.postJson(`/${second.schedule.id}/tools`, 'PUT', TOOLS);
+    const [one, two] = await Promise.all(
+      [first, second].map(({ schedule }) => built.scheduleStore.getSchedule({ tenant_id: 'default', id: schedule.id })),
+    );
+    expect(one?.agent_id).toBe(two?.agent_id);
+  });
+
+  it('says where the tools come from for a schedule that runs as a saved agent, and does not change that agent', async () => {
+    const built = await setup();
+    const created = await built.postJson('/', 'POST', scheduleBody);
+    const { id } = ((await created.json()) as { data: { id: string } }).data;
+
+    const shown = await built.app.request(`/${id}/tools`);
+    expect(GetScheduleToolsResponseSchema.parse(await shown.json()).data).toMatchObject({
+      source: 'saved_agent',
+      agent_name: 'reporter',
+    });
+
+    const refused = await built.postJson(`/${id}/tools`, 'PUT', TOOLS);
+    expect(refused.status).toBe(409);
+    expect(await refused.json()).toEqual({
+      error: {
+        message: "The tools of this schedule come from the agent reporter. Change them on that agent's page.",
+      },
+    });
+    const agent = await built.agentStore.getAgent({ tenant_id: 'default', name: 'reporter' });
+    expect(agent?.manifest.mcp_servers).toBeUndefined();
+    expect((await built.scheduleStore.getSchedule({ tenant_id: 'default', id }))?.agent_name).toBe('reporter');
+  });
+
+  it('refuses skills without the sandbox and saves nothing', async () => {
+    const built = await setup();
+    const { schedule, agent } = await chatSchedule(built);
+    const response = await built.postJson(`/${schedule.id}/tools`, 'PUT', { ...TOOLS, sandbox_enabled: false });
+    expect(response.status).toBe(422);
+    expect(await response.json()).toEqual({
+      error: { message: 'Skills need the sandbox. Turn the sandbox on or remove the skills.' },
+    });
+    expect((await built.scheduleStore.getSchedule({ tenant_id: 'default', id: schedule.id }))?.agent_id).toBe(agent.id);
+  });
+
+  it('refuses tools the server does not have, with the next step, and saves nothing', async () => {
+    const built = await setup();
+    const { schedule, agent } = await chatSchedule(built);
+    mockedValidateAgentSpec.mockRejectedValueOnce(new HTTPException(422, { message: 'Unknown MCP server "mail"' }));
+    const response = await built.postJson(`/${schedule.id}/tools`, 'PUT', TOOLS);
+    expect(response.status).toBe(422);
+    expect(await response.json()).toEqual({
+      error: { message: 'Unknown MCP server "mail". Pick from the tools the form lists, then save again.' },
+    });
+    expect((await built.scheduleStore.getSchedule({ tenant_id: 'default', id: schedule.id }))?.agent_id).toBe(agent.id);
+  });
+
+  it('keeps the tools of one person private to them', async () => {
+    const built = await setup();
+    const { schedule } = await chatSchedule(built);
+    built.asUser(BOB);
+    expect((await built.app.request(`/${schedule.id}/tools`)).status).toBe(403);
+    expect((await built.postJson(`/${schedule.id}/tools`, 'PUT', TOOLS)).status).toBe(403);
+  });
+
+  it('keeps the schedule when another schedule already has its name with these tools', async () => {
+    const built = await setup();
+    const first = await chatSchedule(built);
+    const second = await chatSchedule(built, 'evening-brief');
+    await built.postJson(`/${first.schedule.id}/tools`, 'PUT', TOOLS);
+    // Same name as the first schedule, now on the agent with these tools.
+    const { schedule: clash } = await built.scheduleStore.createScheduleAndRun({
+      tenant_id: 'default',
+      agent_id:
+        (await built.scheduleStore.getSchedule({ tenant_id: 'default', id: first.schedule.id }))?.agent_id ?? '',
+      agent_name:
+        (await built.scheduleStore.getSchedule({ tenant_id: 'default', id: first.schedule.id }))?.agent_name ?? '',
+      name: 'evening-brief',
+      persona_id: null,
+      manifest: second.schedule.manifest,
+      created_by_subject: ALICE_SUBJECT,
+      runFrom: new Date(),
+    });
+    expect(clash.name).toBe('evening-brief');
+    const response = await built.postJson(`/${second.schedule.id}/tools`, 'PUT', TOOLS);
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({
+      error: { message: 'You already have a schedule with this name and these tools. Rename one, then try again.' },
+    });
+    expect((await built.scheduleStore.getSchedule({ tenant_id: 'default', id: second.schedule.id }))?.agent_id).toBe(
+      second.agent.id,
+    );
+  });
+});
+
+describe('audit rows for schedule firings', () => {
+  const ALICE_SUBJECT = { subject_id: 'alice', subject_type: 'user' as const, subject_display_name: 'alice' };
+
+  function auditRecorder() {
+    const records: AuditRecordInput[] = [];
+    return {
+      records,
+      audit: {
+        record: (input: AuditRecordInput) => {
+          records.push(input);
+          return Promise.resolve();
+        },
+      },
+    };
+  }
+
+  it('writes one logged row for a schedule firing, keyed on the run chat', async () => {
+    const built = await setup();
+    const { schedule } = await built.scheduleStore.createScheduleAndRun({
+      tenant_id: 'default',
+      agent_id: (await built.agentStore.getAgent({ tenant_id: 'default', name: 'reporter' }))?.id ?? '',
+      agent_name: 'reporter',
+      name: 'daily-report',
+      persona_id: null,
+      manifest: ScheduleManifestSchema.parse({ task: 'Say hi', cron: '0 13 * * *', timezone: 'UTC' }),
+      created_by_subject: ALICE_SUBJECT,
+      runFrom: new Date(),
+    });
+    const run = await built.scheduleStore.createRun({
+      tenant_id: 'default',
+      schedule_id: schedule.id,
+      name: 'manual-test',
+      scheduled_for: new Date(),
+      status: 'triggered',
+      created_by_subject: ALICE_SUBJECT,
+      triggered_at: new Date(),
+    });
+    const actual = jest.requireActual<typeof import('../../../src/controller/scheduleDispatch')>(
+      '../../../src/controller/scheduleDispatch',
+    );
+    mockedStartScheduleRun.mockImplementation(actual.startScheduleRun);
+    mockedStartTurnInProcess.mockReset();
+    const { records, audit } = auditRecorder();
+    const deps = { ...stubTurnExecutionDeps(built.agentStore, built.scheduleStore, built.db), audit };
+    const execution = createScheduleExecutionRouter(deps);
+
+    const response = await execution.request('/runs/execute', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ schedule_run_id: run.id }),
+    });
+
+    expect(response.status).toBe(204);
+    const runSession = await deps.sessions.getByExternalId({ tenant_id: 'default', external_id: run.id });
+    expect(runSession).toBeDefined();
+    expect(records).toEqual([
+      expect.objectContaining({
+        tenant_id: 'default',
+        created_by: 'alice',
+        conversation_id: runSession?.session_id,
+        tier: 1,
+        tool_name: 'create_schedule',
+        description: 'The schedule "daily-report" ran.',
+        outcome: 'logged',
+        auto_deny_reason: null,
+      }),
+    ]);
+  });
+
+  it('writes the firing row and the delivery row for a reminder, both keyed on the Reminders chat', async () => {
+    const built = await setup();
+    const agent = await built.agentStore.getAgent({ tenant_id: 'default', name: 'reporter' });
+    if (agent === undefined) {
+      throw new Error('The reporter agent was not created.');
+    }
+    const { schedule, pendingRun } = await built.scheduleStore.createScheduleAndRun({
+      tenant_id: 'default',
+      agent_id: agent.id,
+      agent_name: agent.name,
+      name: 'reminder-medicine',
+      persona_id: null,
+      manifest: ScheduleManifestSchema.parse({
+        task: 'Take the medicine',
+        run_at: '2026-10-19T18:00:00-04:00',
+        timezone: 'America/New_York',
+        kind: 'reminder',
+      }),
+      created_by_subject: ALICE_SUBJECT,
+      runFrom: new Date('2026-10-18T12:00:00.000Z'),
+    });
+    if (pendingRun === undefined) {
+      throw new Error('Expected the reminder to queue a run');
+    }
+    expect(schedule.manifest.kind).toBe('reminder');
+    const sessionStore = new SqliteSessionStore(built.db);
+    const { records, audit } = auditRecorder();
+    const execution = createScheduleExecutionRouter({
+      ...stubTurnExecutionDeps(built.agentStore, built.scheduleStore, built.db),
+      sessions: new Sessions<SessionCustom, TurnCustom>({ sessionStore }),
+      sessionStore,
+      audit,
+    });
+
+    const response = await execution.request('/runs/execute', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ schedule_run_id: pendingRun.id }),
+    });
+
+    expect(response.status).toBe(204);
+    expect(records).toHaveLength(2);
+    expect(records[0]).toMatchObject({
+      tenant_id: 'default',
+      created_by: 'alice',
+      tier: 1,
+      tool_name: 'set_reminder',
+      description: 'Delivered the reminder: Take the medicine',
+      outcome: 'logged',
+    });
+    expect(records[1]).toMatchObject({
+      tenant_id: 'default',
+      created_by: 'alice',
+      tier: 1,
+      tool_name: 'set_reminder',
+      description: 'The reminder ran: Take the medicine',
+      outcome: 'logged',
+    });
+    expect(records[1]?.conversation_id).toBe(records[0]?.conversation_id);
   });
 });

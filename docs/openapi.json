@@ -507,6 +507,10 @@
           "name": {
             "$ref": "#/components/schemas/ResourceName"
           },
+          "search_provider": {
+            "description": "True for the connector chosen for web search. Every chat uses it unless the person turns it off.",
+            "type": "boolean"
+          },
           "url": {
             "description": "URL of the remote MCP server.",
             "format": "uri",
@@ -687,6 +691,42 @@
         "required": [
           "repository_id",
           "workspace_cwd"
+        ],
+        "type": "object"
+      },
+      "BriefItemCompletion": {
+        "description": "The item as marked done.",
+        "properties": {
+          "completed_at": {
+            "description": "When the item was marked done, ISO 8601 UTC.",
+            "type": "string"
+          },
+          "item_key": {
+            "description": "Client key of the brief item.",
+            "maxLength": 120,
+            "minLength": 1,
+            "type": "string"
+          },
+          "section": {
+            "enum": [
+              "check_first",
+              "decision",
+              "coming_up",
+              "deadline"
+            ],
+            "type": "string"
+          },
+          "title": {
+            "maxLength": 200,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "item_key",
+          "section",
+          "title",
+          "completed_at"
         ],
         "type": "object"
       },
@@ -1118,6 +1158,104 @@
         ],
         "type": "object"
       },
+      "CalendarAccountStatus": {
+        "properties": {
+          "available": {
+            "description": "Whether this instance has the Calendar connector at all; when false, no card is shown.",
+            "type": "boolean"
+          },
+          "calendar_url": {
+            "description": "The calendar address of the connected account; null when none.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "email": {
+            "description": "The email address of the connected account; null when none is connected.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "provider_key": {
+            "description": "The provider of the connected account, worked out from its address; the picker default otherwise.",
+            "type": "string"
+          },
+          "providers": {
+            "description": "The provider picker table, in display order.",
+            "items": {
+              "$ref": "#/components/schemas/CalendarProvider"
+            },
+            "type": "array"
+          },
+          "state": {
+            "description": "Connected, not connected, connected but the saved sign-in no longer works, or saved but the server cannot be reached right now.",
+            "enum": [
+              "connected",
+              "not_connected",
+              "sign_in_stopped",
+              "not_working"
+            ],
+            "type": "string"
+          },
+          "username": {
+            "description": "The login name of the connected account; never the password.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "available",
+          "state",
+          "email",
+          "username",
+          "calendar_url",
+          "provider_key",
+          "providers"
+        ],
+        "type": "object"
+      },
+      "CalendarProvider": {
+        "properties": {
+          "help_hint": {
+            "description": "One plain sentence on how to get an app password.",
+            "type": "string"
+          },
+          "help_url": {
+            "description": "The provider's own help page for making an app password; null when none could be checked.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "key": {
+            "description": "Stable provider key, such as fastmail or other.",
+            "type": "string"
+          },
+          "name": {
+            "description": "The name the person sees in the provider picker.",
+            "type": "string"
+          },
+          "server_url": {
+            "description": "The built-in calendar address; null when it depends on the email domain or is typed.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "key",
+          "name",
+          "server_url",
+          "help_url",
+          "help_hint"
+        ],
+        "type": "object"
+      },
       "CancelSessionRequest": {
         "description": "Empty request body. Cancel identifies the session via the path only.",
         "properties": {},
@@ -1340,6 +1478,17 @@
           },
           "name": {
             "$ref": "#/components/schemas/ResourceName"
+          },
+          "network_hosts": {
+            "description": "Exact site names the skill needs to reach. The person approves this list in Settings.",
+            "items": {
+              "description": "One exact site name the skill needs to reach.",
+              "maxLength": 253,
+              "pattern": "^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$",
+              "type": "string"
+            },
+            "maxItems": 20,
+            "type": "array"
           },
           "path": {
             "description": "Path to the skill directory within the repository. Omit to use the repository root.",
@@ -1820,6 +1969,51 @@
         ],
         "type": "object"
       },
+      "ContextCompactionStartedEvent": {
+        "properties": {
+          "created_at": {
+            "description": "ISO 8601 event timestamp.",
+            "type": "string"
+          },
+          "id": {
+            "description": "Unique identifier for the event (monotonic ULID).",
+            "type": "string"
+          },
+          "mode": {
+            "description": "Which host template is used for the summary.",
+            "enum": [
+              "coding",
+              "conversation"
+            ],
+            "type": "string"
+          },
+          "thread_id": {
+            "description": "Thread the compaction runs on.",
+            "type": "string"
+          },
+          "tokens_before": {
+            "description": "Estimated context tokens before this attempt.",
+            "minimum": 0,
+            "type": "number"
+          },
+          "type": {
+            "description": "A context-compaction attempt started. It ends with agent.context.compaction or the turn ending.",
+            "enum": [
+              "agent.context.compaction_started"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "id",
+          "created_at",
+          "thread_id",
+          "mode",
+          "tokens_before"
+        ],
+        "type": "object"
+      },
       "ContextManagementConfig": {
         "default": {
           "compaction": {
@@ -2185,9 +2379,13 @@
         "type": "object"
       },
       "CronExpression": {
+        "default": null,
         "description": "Standard 5-field cron expression, evaluated in `timezone`.",
         "pattern": "^[\\d*,\\-/]+(?:\\s+[\\d*,\\-/]+){4}$",
-        "type": "string"
+        "type": [
+          "string",
+          "null"
+        ]
       },
       "CustomModelProvider": {
         "additionalProperties": false,
@@ -2248,6 +2446,10 @@
         "properties": {},
         "type": "object"
       },
+      "DeleteBriefItemDoneResponse": {
+        "properties": {},
+        "type": "object"
+      },
       "DeleteKnowledgeDocumentResponse": {
         "properties": {},
         "type": "object"
@@ -2285,6 +2487,10 @@
         "type": "object"
       },
       "DeleteSessionRepositoryBindingResponse": {
+        "properties": {},
+        "type": "object"
+      },
+      "DeleteSkillNetworkApprovalResponse": {
         "properties": {},
         "type": "object"
       },
@@ -2408,6 +2614,118 @@
             "type": "boolean"
           }
         },
+        "type": "object"
+      },
+      "EmailAccountStatus": {
+        "properties": {
+          "address": {
+            "description": "The connected account address; null when none is connected.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "available": {
+            "description": "Whether this instance has the Email connector at all; when false, no card is shown.",
+            "type": "boolean"
+          },
+          "provider_key": {
+            "description": "The provider of the connected account, worked out from its servers; the picker default otherwise.",
+            "type": "string"
+          },
+          "providers": {
+            "description": "The provider picker table, in display order.",
+            "items": {
+              "$ref": "#/components/schemas/EmailProvider"
+            },
+            "type": "array"
+          },
+          "state": {
+            "description": "Connected, not connected, connected but the saved sign-in no longer works, or saved but the server cannot be reached right now.",
+            "enum": [
+              "connected",
+              "not_connected",
+              "sign_in_stopped",
+              "not_working"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "available",
+          "state",
+          "address",
+          "provider_key",
+          "providers"
+        ],
+        "type": "object"
+      },
+      "EmailProvider": {
+        "properties": {
+          "help_hint": {
+            "description": "One plain sentence on how to get an app password.",
+            "type": "string"
+          },
+          "help_url": {
+            "description": "The provider's own help page for making an app password; null when none could be checked.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "imap_host": {
+            "description": "Incoming mail server.",
+            "type": "string"
+          },
+          "imap_mode": {
+            "description": "How the server is reached: direct TLS, or plain first and upgraded with STARTTLS.",
+            "enum": [
+              "ssl",
+              "starttls"
+            ],
+            "type": "string"
+          },
+          "imap_port": {
+            "description": "Incoming mail port.",
+            "type": "integer"
+          },
+          "key": {
+            "description": "Stable provider key, such as gmail or other.",
+            "type": "string"
+          },
+          "name": {
+            "description": "The name the person sees in the provider picker.",
+            "type": "string"
+          },
+          "smtp_host": {
+            "description": "Outgoing mail server.",
+            "type": "string"
+          },
+          "smtp_mode": {
+            "description": "How the server is reached: direct TLS, or plain first and upgraded with STARTTLS.",
+            "enum": [
+              "ssl",
+              "starttls"
+            ],
+            "type": "string"
+          },
+          "smtp_port": {
+            "description": "Outgoing mail port.",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "key",
+          "name",
+          "imap_host",
+          "imap_port",
+          "imap_mode",
+          "smtp_host",
+          "smtp_port",
+          "smtp_mode",
+          "help_url",
+          "help_hint"
+        ],
         "type": "object"
       },
       "ExecuteScheduleRunRequest": {
@@ -2609,10 +2927,32 @@
         ],
         "type": "object"
       },
+      "GetCalendarAccountResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/CalendarAccountStatus"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
       "GetCapabilitiesResponse": {
         "properties": {
           "data": {
             "$ref": "#/components/schemas/CapabilitiesData"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
+      "GetEmailAccountResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/EmailAccountStatus"
           }
         },
         "required": [
@@ -2782,6 +3122,17 @@
         "properties": {
           "data": {
             "$ref": "#/components/schemas/MemoryVaultSharing"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
+      "GetMemoryVaultSummaryStatusResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/MemoryVaultSummaryStatus"
           }
         },
         "required": [
@@ -2972,6 +3323,17 @@
         ],
         "type": "object"
       },
+      "GetScheduleToolsResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/ScheduleTools"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
       "GetSentinelUserSettingsResponse": {
         "properties": {
           "data": {
@@ -3081,6 +3443,17 @@
         ],
         "type": "object"
       },
+      "GetSkillNetworkApprovalResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/SkillNetworkApproval"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
       "GetSkillResponse": {
         "properties": {
           "data": {
@@ -3159,6 +3532,17 @@
           },
           "name": {
             "$ref": "#/components/schemas/ResourceName"
+          },
+          "network_hosts": {
+            "description": "Exact site names the skill needs to reach. The person approves this list in Settings.",
+            "items": {
+              "description": "One exact site name the skill needs to reach.",
+              "maxLength": 253,
+              "pattern": "^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$",
+              "type": "string"
+            },
+            "maxItems": 20,
+            "type": "array"
           },
           "path": {
             "description": "Path to the skill directory within the repository. Omit to use the repository root.",
@@ -4529,6 +4913,21 @@
         ],
         "type": "object"
       },
+      "ListBriefItemCompletionsResponse": {
+        "properties": {
+          "data": {
+            "description": "Completed brief items, newest first.",
+            "items": {
+              "$ref": "#/components/schemas/BriefItemCompletion"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
       "ListGithubRepositoriesResponse": {
         "additionalProperties": false,
         "properties": {
@@ -5480,6 +5879,53 @@
         ],
         "type": "object"
       },
+      "MarkBriefItemDoneRequest": {
+        "properties": {
+          "item_key": {
+            "description": "Client key of the brief item.",
+            "maxLength": 120,
+            "minLength": 1,
+            "type": "string"
+          },
+          "section": {
+            "enum": [
+              "check_first",
+              "decision",
+              "coming_up",
+              "deadline"
+            ],
+            "type": "string"
+          },
+          "session_id": {
+            "description": "The chat the brief was shown in.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "title": {
+            "maxLength": 200,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "item_key",
+          "section",
+          "title",
+          "session_id"
+        ],
+        "type": "object"
+      },
+      "MarkBriefItemDoneResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/BriefItemCompletion"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
       "Me": {
         "properties": {
           "roles": {
@@ -6310,6 +6756,18 @@
         ],
         "type": "object"
       },
+      "MemoryVaultSummaryStatus": {
+        "properties": {
+          "summary_pending": {
+            "description": "True when the newest turn summary for this vault failed and has not been made yet.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "summary_pending"
+        ],
+        "type": "object"
+      },
       "MetricsUnit": {
         "enum": [
           "count",
@@ -6600,6 +7058,11 @@
             "exclusiveMinimum": 0,
             "type": "integer"
           },
+          "max_concurrent_requests": {
+            "description": "How many requests may be sent to this model at once; a further reply waits for one to finish. Absent means 1 for a model on a custom provider, and no limit for other providers.",
+            "exclusiveMinimum": 0,
+            "type": "integer"
+          },
           "max_output_tokens": {
             "description": "Maximum output tokens the model can generate.",
             "exclusiveMinimum": 0,
@@ -6693,13 +7156,13 @@
         "description": "Optional per-provider override of the server-wide stream progress deadlines.",
         "properties": {
           "chunk_ms": {
-            "description": "Milliseconds to wait between substantive stream chunks before aborting. Default: 60000.",
+            "description": "Milliseconds to wait between substantive stream chunks before aborting. Default and upper bound: the server-wide value (60000 unless the host changes it).",
             "maximum": 2147483647,
             "minimum": 1,
             "type": "integer"
           },
           "first_chunk_ms": {
-            "description": "Milliseconds to wait for the first substantive stream chunk before aborting. Default: 300000.",
+            "description": "Milliseconds to wait for the first substantive stream chunk before aborting. Default and upper bound: the server-wide value (90000 unless the host changes it).",
             "maximum": 2147483647,
             "minimum": 1,
             "type": "integer"
@@ -6799,6 +7262,36 @@
           "relevance_judge"
         ],
         "type": "string"
+      },
+      "ModelWaitingPersistedEvent": {
+        "properties": {
+          "created_at": {
+            "description": "ISO 8601 event timestamp.",
+            "type": "string"
+          },
+          "id": {
+            "description": "Unique identifier for the event (monotonic ULID).",
+            "type": "string"
+          },
+          "message": {
+            "description": "The plain line shown in the chat while the reply waits.",
+            "type": "string"
+          },
+          "type": {
+            "description": "Emitted when a model step waits for another reply on the same model.",
+            "enum": [
+              "aman.model.waiting"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "message",
+          "id",
+          "created_at"
+        ],
+        "type": "object"
       },
       "MoonshotModelProvider": {
         "additionalProperties": false,
@@ -7724,6 +8217,28 @@
         ],
         "type": "object"
       },
+      "RemoveCalendarAccountResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/CalendarAccountStatus"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
+      "RemoveEmailAccountResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/EmailAccountStatus"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
       "ReplyResultsByKind": {
         "description": "Tool call results in this reply: ok, refused, unavailable, or error.",
         "properties": {
@@ -8007,6 +8522,15 @@
         "properties": {},
         "type": "object"
       },
+      "RunAt": {
+        "default": null,
+        "description": "The single time a one-time schedule runs: ISO 8601 with a UTC offset, like 2026-10-26T18:00:00-04:00.",
+        "format": "date-time",
+        "type": [
+          "string",
+          "null"
+        ]
+      },
       "RuntimeConfig": {
         "default": {
           "ask_user_questions": {
@@ -8269,6 +8793,96 @@
         ],
         "type": "object"
       },
+      "SaveCalendarAccountRequest": {
+        "properties": {
+          "calendar_url": {
+            "description": "The https calendar address, only for the other provider.",
+            "type": "string"
+          },
+          "email": {
+            "description": "The email address of the calendar account.",
+            "type": "string"
+          },
+          "password": {
+            "description": "The app password. Write-only: it is checked and passed to the sidecar, never stored or returned.",
+            "type": "string"
+          },
+          "provider_key": {
+            "description": "The picked provider key, or other for a typed calendar address.",
+            "type": "string"
+          },
+          "username": {
+            "description": "The login name, when it is not the email address.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "provider_key",
+          "email",
+          "password"
+        ],
+        "type": "object"
+      },
+      "SaveCalendarAccountResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/CalendarAccountStatus"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
+      "SaveEmailAccountRequest": {
+        "properties": {
+          "address": {
+            "description": "The email address to connect.",
+            "type": "string"
+          },
+          "imap_host": {
+            "description": "Incoming server, only for the other provider.",
+            "type": "string"
+          },
+          "imap_port": {
+            "description": "Incoming port, only for the other provider.",
+            "type": "integer"
+          },
+          "password": {
+            "description": "The app password. Write-only: it is checked and passed to the sidecar, never stored or returned.",
+            "type": "string"
+          },
+          "provider_key": {
+            "description": "The picked provider key, or other for typed servers.",
+            "type": "string"
+          },
+          "smtp_host": {
+            "description": "Outgoing server, only for the other provider.",
+            "type": "string"
+          },
+          "smtp_port": {
+            "description": "Outgoing port, only for the other provider.",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "provider_key",
+          "address",
+          "password"
+        ],
+        "type": "object"
+      },
+      "SaveEmailAccountResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/EmailAccountStatus"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
       "Schedule": {
         "additionalProperties": false,
         "properties": {
@@ -8312,11 +8926,25 @@
         ],
         "type": "object"
       },
+      "ScheduleKind": {
+        "default": "task",
+        "enum": [
+          "task",
+          "reminder"
+        ],
+        "type": "string"
+      },
       "ScheduleManifest": {
         "additionalProperties": false,
         "properties": {
           "cron": {
             "$ref": "#/components/schemas/CronExpression"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/ScheduleKind"
+          },
+          "run_at": {
+            "$ref": "#/components/schemas/RunAt"
           },
           "status": {
             "$ref": "#/components/schemas/ScheduleStatus"
@@ -8331,8 +8959,7 @@
           }
         },
         "required": [
-          "task",
-          "cron"
+          "task"
         ],
         "type": "object"
       },
@@ -8406,7 +9033,56 @@
         "default": "active",
         "enum": [
           "active",
-          "paused"
+          "paused",
+          "done"
+        ],
+        "type": "string"
+      },
+      "ScheduleTools": {
+        "additionalProperties": false,
+        "properties": {
+          "agent_name": {
+            "$ref": "#/components/schemas/ResourceName"
+          },
+          "connectors": {
+            "description": "Names of the connectors it can use.",
+            "items": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 100,
+            "type": "array"
+          },
+          "sandbox_enabled": {
+            "description": "Whether it can use the sandbox. Skills need the sandbox.",
+            "type": "boolean"
+          },
+          "skills": {
+            "description": "Names of the skills it can use.",
+            "items": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 50,
+            "type": "array"
+          },
+          "source": {
+            "$ref": "#/components/schemas/ScheduleToolsSource"
+          }
+        },
+        "required": [
+          "source",
+          "agent_name",
+          "connectors",
+          "skills",
+          "sandbox_enabled"
+        ],
+        "type": "object"
+      },
+      "ScheduleToolsSource": {
+        "enum": [
+          "schedule",
+          "saved_agent"
         ],
         "type": "string"
       },
@@ -8464,7 +9140,7 @@
       "SentinelUserSettings": {
         "properties": {
           "maps_without_asking": {
-            "description": "While on, map requests run without asking unless private data was read in this chat.",
+            "description": "While on, map requests run without asking. Off asks for each one.",
             "type": "boolean"
           },
           "offline_mode": {
@@ -8505,7 +9181,7 @@
             "$ref": "#/components/schemas/SessionAgent"
           },
           "approval_grants": {
-            "description": "Server-derived grants created by \"Approve for this chat\" (server:tool pairs) and \"Allow searches in this chat\".",
+            "description": "Server-derived grants created by \"Always allow this here\" for one kind of action in this chat.",
             "items": {
               "type": "string"
             },
@@ -8848,6 +9524,9 @@
             "$ref": "#/components/schemas/ContextCompactionEvent"
           },
           {
+            "$ref": "#/components/schemas/ContextCompactionStartedEvent"
+          },
+          {
             "$ref": "#/components/schemas/MemoryRecallPersistedEvent"
           },
           {
@@ -8861,6 +9540,9 @@
           },
           {
             "$ref": "#/components/schemas/ModelUsagePersistedEvent"
+          },
+          {
+            "$ref": "#/components/schemas/ModelWaitingPersistedEvent"
           }
         ]
       },
@@ -8897,10 +9579,12 @@
           "tool.approval_required",
           "tool.response_required",
           "agent.context.compaction",
+          "agent.context.compaction_started",
           "aman.memory.recall",
           "aman.profile.learned",
           "aman.skill.used",
-          "aman.sandbox.provisioning"
+          "aman.sandbox.provisioning",
+          "aman.model.waiting"
         ],
         "type": "string"
       },
@@ -9385,6 +10069,44 @@
             "$ref": "#/components/schemas/TrueFoundryRegistrySkill"
           }
         ]
+      },
+      "SkillNetworkApproval": {
+        "additionalProperties": false,
+        "properties": {
+          "approved_hosts": {
+            "items": {
+              "description": "One exact site name the skill needs to reach.",
+              "maxLength": 253,
+              "pattern": "^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$",
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "declared_hosts": {
+            "description": "Exact site names the skill needs to reach. The person approves this list in Settings.",
+            "items": {
+              "description": "One exact site name the skill needs to reach.",
+              "maxLength": 253,
+              "pattern": "^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$",
+              "type": "string"
+            },
+            "maxItems": 20,
+            "type": "array"
+          },
+          "send_capable": {
+            "description": "True when a declared site can send mail or change a calendar.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "declared_hosts",
+          "approved_hosts",
+          "send_capable"
+        ],
+        "type": "object"
       },
       "SkillUsedPersistedEvent": {
         "properties": {
@@ -10024,6 +10746,10 @@
           "email": {
             "$ref": "#/components/schemas/Tier3Email"
           },
+          "mail_draft": {
+            "description": "True when a card carrying mail_new_recipients approves saving a draft rather than sending.",
+            "type": "boolean"
+          },
           "mail_new_recipients": {
             "description": "For a mail send to addresses not yet on the Email list: those addresses, lowercased. Otherwise null.",
             "items": {
@@ -10235,22 +10961,22 @@
         "type": "object"
       },
       "Tier3Persona": {
-        "description": "The specialist a chat call adds, shown in full.",
+        "description": "The persona a chat call adds, shown in full.",
         "properties": {
           "description": {
-            "description": "One line on what the specialist is for.",
+            "description": "One line on what the persona is for.",
             "type": "string"
           },
           "instructions": {
-            "description": "The whole instruction text the specialist follows.",
+            "description": "The whole instruction text the persona follows.",
             "type": "string"
           },
           "model_name": {
-            "description": "The model the specialist answers with.",
+            "description": "The model the persona answers with.",
             "type": "string"
           },
           "name": {
-            "description": "Specialist name in plain words.",
+            "description": "Persona name in plain words.",
             "type": "string"
           }
         },
@@ -11926,7 +12652,8 @@
           "server-execution-timeout",
           "client-cancelled",
           "cancelled-for-next-turn",
-          "abandoned"
+          "abandoned",
+          "could-not-start"
         ],
         "type": "string"
       },
@@ -12195,8 +12922,10 @@
         "discriminator": {
           "mapping": {
             "agent.context.compaction": "#/components/schemas/ContextCompactionEvent",
+            "agent.context.compaction_started": "#/components/schemas/ContextCompactionStartedEvent",
             "aman.memory.recall": "#/components/schemas/MemoryRecallPersistedEvent",
             "aman.model.usage": "#/components/schemas/ModelUsagePersistedEvent",
+            "aman.model.waiting": "#/components/schemas/ModelWaitingPersistedEvent",
             "aman.profile.learned": "#/components/schemas/ProfileLearnedPersistedEvent",
             "aman.sandbox.provisioning": "#/components/schemas/ProvisioningPersistedEvent",
             "aman.skill.used": "#/components/schemas/SkillUsedPersistedEvent",
@@ -12277,7 +13006,13 @@
             "$ref": "#/components/schemas/ModelUsagePersistedEvent"
           },
           {
+            "$ref": "#/components/schemas/ModelWaitingPersistedEvent"
+          },
+          {
             "$ref": "#/components/schemas/ContextCompactionEvent"
+          },
+          {
+            "$ref": "#/components/schemas/ContextCompactionStartedEvent"
           },
           {
             "$ref": "#/components/schemas/DocumentIngestionEvent"
@@ -12477,6 +13212,39 @@
         ],
         "type": "object"
       },
+      "UpdateScheduleToolsRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "connectors": {
+            "description": "Names of the connectors it can use.",
+            "items": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 100,
+            "type": "array"
+          },
+          "sandbox_enabled": {
+            "description": "Whether it can use the sandbox. Skills need the sandbox.",
+            "type": "boolean"
+          },
+          "skills": {
+            "description": "Names of the skills it can use.",
+            "items": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 50,
+            "type": "array"
+          }
+        },
+        "required": [
+          "connectors",
+          "skills",
+          "sandbox_enabled"
+        ],
+        "type": "object"
+      },
       "UpdateSentinelUserSettingsRequest": {
         "properties": {
           "maps_without_asking": {
@@ -12539,6 +13307,37 @@
             "type": "string"
           }
         },
+        "type": "object"
+      },
+      "UpdateSkillNetworkApprovalRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "hosts": {
+            "description": "Exact site names the skill needs to reach. The person approves this list in Settings.",
+            "items": {
+              "description": "One exact site name the skill needs to reach.",
+              "maxLength": 253,
+              "pattern": "^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$",
+              "type": "string"
+            },
+            "maxItems": 20,
+            "type": "array"
+          }
+        },
+        "required": [
+          "hosts"
+        ],
+        "type": "object"
+      },
+      "UpdateSkillNetworkApprovalResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/SkillNetworkApproval"
+          }
+        },
+        "required": [
+          "data"
+        ],
         "type": "object"
       },
       "UpdateSkillRequest": {
@@ -15607,6 +16406,85 @@
         "x-fern-sdk-method-name": "update_sharing"
       }
     },
+    "/api/v1/memory/vault/summary-status": {
+      "get": {
+        "description": "Say whether one vault namespace is still owed a turn summary after a failed attempt.",
+        "parameters": [
+          {
+            "description": "Vault namespace: omit for the shared vault, `persona:<name>` for a persona vault, else a topic name.",
+            "in": "query",
+            "name": "namespace",
+            "required": false,
+            "schema": {
+              "description": "Vault namespace: omit for the shared vault, `persona:<name>` for a persona vault, else a topic name.",
+              "maxLength": 128,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetMemoryVaultSummaryStatusResponse"
+                }
+              }
+            },
+            "description": "Whether a turn summary is still owed for the namespace."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid namespace."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication required."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The vault operation failed."
+          },
+          "501": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The server does not run the markdown memory backend."
+          }
+        },
+        "summary": "Get memory vault summary status",
+        "tags": [
+          "Capabilities"
+        ],
+        "x-fern-sdk-group-name": [
+          "memory",
+          "vault"
+        ],
+        "x-fern-sdk-method-name": "get_summary_status"
+      }
+    },
     "/api/v1/memory/vault/{entry_id}": {
       "delete": {
         "description": "Delete one entry. The daily log is append-only, so the old entry stays and a delete marker hides it from listings and recall.",
@@ -17937,6 +18815,152 @@
         "x-fern-sdk-method-name": "list_runs"
       }
     },
+    "/api/v1/schedules/{schedule_id}/tools": {
+      "get": {
+        "description": "The connectors, skills and sandbox a schedule runs with, and whether they are its own or come from a saved agent.",
+        "parameters": [
+          {
+            "description": "Immutable schedule identifier.",
+            "in": "path",
+            "name": "schedule_id",
+            "required": true,
+            "schema": {
+              "description": "Immutable schedule identifier.",
+              "maxLength": 64,
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetScheduleToolsResponse"
+                }
+              }
+            },
+            "description": "The schedule tools."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The caller cannot read the schedule."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Not found."
+          }
+        },
+        "summary": "Get what a schedule runs with",
+        "tags": [
+          "Schedules"
+        ],
+        "x-fern-sdk-group-name": [
+          "schedules"
+        ],
+        "x-fern-sdk-method-name": "get_tools"
+      },
+      "put": {
+        "description": "Replace the connectors, skills and sandbox of a schedule with its own tools. Refused for a schedule that runs as a saved agent.",
+        "parameters": [
+          {
+            "description": "Immutable schedule identifier.",
+            "in": "path",
+            "name": "schedule_id",
+            "required": true,
+            "schema": {
+              "description": "Immutable schedule identifier.",
+              "maxLength": 64,
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateScheduleToolsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetScheduleToolsResponse"
+                }
+              }
+            },
+            "description": "The updated schedule tools."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The caller is not the schedule creator."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Not found."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The schedule runs as a saved agent, or another schedule already has this name with these tools."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "A connector or skill is not available, or skills are chosen without the sandbox."
+          }
+        },
+        "summary": "Change what a schedule runs with",
+        "tags": [
+          "Schedules"
+        ],
+        "x-fern-sdk-group-name": [
+          "schedules"
+        ],
+        "x-fern-sdk-method-name": "update_tools"
+      }
+    },
     "/api/v1/session-folders": {
       "get": {
         "responses": {
@@ -18176,6 +19200,27 @@
               "description": "When set, only sessions bound to this agent id are returned.",
               "minLength": 1,
               "type": "string"
+            }
+          },
+          {
+            "description": "When set, only sessions filed in this folder are returned.",
+            "in": "query",
+            "name": "folder_id",
+            "required": false,
+            "schema": {
+              "description": "When set, only sessions filed in this folder are returned.",
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "description": "When true, only sessions with no folder are returned.",
+            "in": "query",
+            "name": "no_folder",
+            "required": false,
+            "schema": {
+              "description": "When true, only sessions with no folder are returned.",
+              "type": "boolean"
             }
           },
           {
@@ -18806,7 +19851,7 @@
               "items": {
                 "$ref": "#/components/schemas/SessionEventType"
               },
-              "maxItems": 19,
+              "maxItems": 21,
               "minItems": 1,
               "type": "array"
             }
@@ -20112,7 +21157,7 @@
                 }
               }
             },
-            "description": "The turn conflicts with the session as stored. `error.code` says which: `stale_approval_continuation` (the approval was answered against a turn that is no longer the tip), `previous_turn_running` (the prior turn is still executing), `turn_already_exists` (that turn id is taken), or `approval_conflict` (a resubmitted decision contradicts the one already recorded), or `approval_request_ended` (the approval answers a request that already ended; it cannot run, so ask again), or `held_action_expired`, `held_action_changed`, `held_action_not_allowed`, `held_action_tool_gone` or `held_action_sign_in` (a held action cannot run now; nothing was done)."
+            "description": "The turn conflicts with the session as stored. `error.code` says which: `stale_approval_continuation` (the approval was answered against a turn that is no longer the tip), `previous_turn_running` (the chat is still answering; wait or cancel, then send again), `turn_already_exists` (that turn id is taken), or `approval_conflict` (a resubmitted decision contradicts the one already recorded), or `approval_request_ended` (the approval answers a request that already ended; it cannot run, so ask again), or `held_action_expired`, `held_action_changed`, `held_action_not_allowed`, `held_action_tool_gone` or `held_action_sign_in` (a held action cannot run now; nothing was done), or `turn_could_not_start` (the reply could not start in time; send again)."
           },
           "412": {
             "content": {
@@ -21936,6 +22981,190 @@
         "x-fern-sdk-method-name": "delete"
       }
     },
+    "/api/v1/settings/skills/{name}/network-approval": {
+      "delete": {
+        "description": "Clears the stored approval. The skill keeps no network access from the next run on.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ResourceName"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeleteSkillNetworkApprovalResponse"
+                }
+              }
+            },
+            "description": "Approval removed."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "No skill with this name"
+          },
+          "424": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Unsupported because skills are managed by an external system."
+          }
+        },
+        "summary": "Remove a skill network approval",
+        "tags": [
+          "Skills"
+        ],
+        "x-fern-sdk-group-name": [
+          "settings",
+          "skills"
+        ],
+        "x-fern-sdk-method-name": "delete_network_approval"
+      },
+      "get": {
+        "description": "The sites the skill declares, the approved list in force, and whether a declared site can send.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ResourceName"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetSkillNetworkApprovalResponse"
+                }
+              }
+            },
+            "description": "The skill network approval state."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "No skill with this name"
+          }
+        },
+        "summary": "Get a skill network approval",
+        "tags": [
+          "Skills"
+        ],
+        "x-fern-sdk-group-name": [
+          "settings",
+          "skills"
+        ],
+        "x-fern-sdk-method-name": "get_network_approval"
+      },
+      "put": {
+        "description": "Stores the approval for exactly the sites the skill declares. A list that differs from the declaration is refused.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ResourceName"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateSkillNetworkApprovalRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UpdateSkillNetworkApprovalResponse"
+                }
+              }
+            },
+            "description": "The stored approval state."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request body."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "No skill with this name"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The list sent is not the list the skill declares."
+          },
+          "424": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Unsupported because skills are managed by an external system."
+          }
+        },
+        "summary": "Approve a skill network site list",
+        "tags": [
+          "Skills"
+        ],
+        "x-fern-sdk-group-name": [
+          "settings",
+          "skills"
+        ],
+        "x-fern-sdk-method-name": "create_or_update_network_approval"
+      }
+    },
     "/api/v1/settings/token-factory-usage": {
       "get": {
         "description": "Tokens and cost per model counted today (UTC), and the daily cap with what is left under it. Counts come from the usage the provider reported.",
@@ -22746,6 +23975,561 @@
           "auditLog"
         ],
         "x-fern-sdk-method-name": "list"
+      }
+    },
+    "/api/v1/user/brief-items/completions": {
+      "get": {
+        "description": "Lists the morning brief items the authenticated user marked done since a time, newest first. Defaults to the last seven days.",
+        "parameters": [
+          {
+            "description": "Only items marked done at or after this time. Defaults to seven days ago.",
+            "in": "query",
+            "name": "since",
+            "required": false,
+            "schema": {
+              "description": "Only items marked done at or after this time. Defaults to seven days ago.",
+              "format": "date-time",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListBriefItemCompletionsResponse"
+                }
+              }
+            },
+            "description": "Completed brief items."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid query parameters."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "OIDC is configured and the request has no valid session cookie."
+          }
+        },
+        "summary": "List morning brief items marked done",
+        "tags": [
+          "Personalization"
+        ],
+        "x-fern-sdk-group-name": [
+          "personalization",
+          "briefItems"
+        ],
+        "x-fern-sdk-method-name": "list"
+      },
+      "post": {
+        "description": "Marks one morning brief item done for the authenticated user, so it is left out of later briefs. Marking it again refreshes the time.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MarkBriefItemDoneRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MarkBriefItemDoneResponse"
+                }
+              }
+            },
+            "description": "The item as marked done."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request body."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "OIDC is configured and the request has no valid session cookie."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The chat was not found."
+          }
+        },
+        "summary": "Mark a morning brief item done",
+        "tags": [
+          "Personalization"
+        ],
+        "x-fern-sdk-group-name": [
+          "personalization",
+          "briefItems"
+        ],
+        "x-fern-sdk-method-name": "markDone"
+      }
+    },
+    "/api/v1/user/brief-items/completions/{item_key}": {
+      "delete": {
+        "description": "Puts a morning brief item back on the list for the authenticated user. Undoing an item that is not done is not an error.",
+        "parameters": [
+          {
+            "description": "Client key of the brief item.",
+            "in": "path",
+            "name": "item_key",
+            "required": true,
+            "schema": {
+              "description": "Client key of the brief item.",
+              "maxLength": 120,
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeleteBriefItemDoneResponse"
+                }
+              }
+            },
+            "description": "The item is no longer marked done."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid item key."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "OIDC is configured and the request has no valid session cookie."
+          }
+        },
+        "summary": "Undo a morning brief item marked done",
+        "tags": [
+          "Personalization"
+        ],
+        "x-fern-sdk-group-name": [
+          "personalization",
+          "briefItems"
+        ],
+        "x-fern-sdk-method-name": "undo"
+      }
+    },
+    "/api/v1/user/settings/calendar": {
+      "delete": {
+        "description": "Deletes the saved account and its app password from the sidecar for good.",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RemoveCalendarAccountResponse"
+                }
+              }
+            },
+            "description": "The account is removed."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "OIDC is configured and the request has no valid session cookie."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The caller is not an admin, or the request did not come from this app, so nothing was done."
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The calendar connector could not be reached."
+          }
+        },
+        "summary": "Remove the calendar account",
+        "tags": [
+          "Personalization"
+        ],
+        "x-fern-sdk-group-name": [
+          "settings",
+          "calendar"
+        ],
+        "x-fern-sdk-method-name": "remove_account"
+      },
+      "post": {
+        "description": "Checks the sign-in with the calendar server first and saves the account only when it passes. The password goes to the sidecar only and is never stored by the app or returned.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveCalendarAccountRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SaveCalendarAccountResponse"
+                }
+              }
+            },
+            "description": "The account is connected."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The details could not be used, the address is not allowed, the password was refused, or the server could not be reached."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "OIDC is configured and the request has no valid session cookie."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The caller is not an admin, or the request did not come from this app, so nothing was done."
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The calendar connector could not be reached."
+          }
+        },
+        "summary": "Connect a calendar account",
+        "tags": [
+          "Personalization"
+        ],
+        "x-fern-sdk-group-name": [
+          "settings",
+          "calendar"
+        ],
+        "x-fern-sdk-method-name": "save_account"
+      }
+    },
+    "/api/v1/user/settings/calendar/status": {
+      "get": {
+        "description": "Returns whether a calendar account is connected, its email, login and calendar address, and the provider table for the picker. The app password is never returned.",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetCalendarAccountResponse"
+                }
+              }
+            },
+            "description": "The account status and the provider table."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "OIDC is configured and the request has no valid session cookie."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The caller is not an admin, or the request did not come from this app, so nothing was done."
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The calendar connector could not be reached."
+          }
+        },
+        "summary": "Get the calendar account status",
+        "tags": [
+          "Personalization"
+        ],
+        "x-fern-sdk-group-name": [
+          "settings",
+          "calendar"
+        ],
+        "x-fern-sdk-method-name": "get_status"
+      }
+    },
+    "/api/v1/user/settings/email": {
+      "delete": {
+        "description": "Deletes the saved account and its app password from the sidecar for good.",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RemoveEmailAccountResponse"
+                }
+              }
+            },
+            "description": "The account is removed."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "OIDC is configured and the request has no valid session cookie."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The caller is not an admin, or the request did not come from this app, so nothing was done."
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The email connector could not be reached."
+          }
+        },
+        "summary": "Remove the email account",
+        "tags": [
+          "Personalization"
+        ],
+        "x-fern-sdk-group-name": [
+          "settings",
+          "email"
+        ],
+        "x-fern-sdk-method-name": "remove_account"
+      },
+      "post": {
+        "description": "Checks the sign-in with the mail server first and saves the account only when it passes. The password goes to the sidecar only and is never stored by the app or returned.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveEmailAccountRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SaveEmailAccountResponse"
+                }
+              }
+            },
+            "description": "The account is connected."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The details could not be used, the password was refused, or the server could not be reached."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "OIDC is configured and the request has no valid session cookie."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The caller is not an admin, or the request did not come from this app, so nothing was done."
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The email connector could not be reached."
+          }
+        },
+        "summary": "Connect an email account",
+        "tags": [
+          "Personalization"
+        ],
+        "x-fern-sdk-group-name": [
+          "settings",
+          "email"
+        ],
+        "x-fern-sdk-method-name": "save_account"
+      }
+    },
+    "/api/v1/user/settings/email/status": {
+      "get": {
+        "description": "Returns whether an email account is connected, its address and provider, and the provider table for the picker. The app password is never returned.",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetEmailAccountResponse"
+                }
+              }
+            },
+            "description": "The account status and the provider table."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "OIDC is configured and the request has no valid session cookie."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The caller is not an admin, or the request did not come from this app, so nothing was done."
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The email connector could not be reached."
+          }
+        },
+        "summary": "Get the email account status",
+        "tags": [
+          "Personalization"
+        ],
+        "x-fern-sdk-group-name": [
+          "settings",
+          "email"
+        ],
+        "x-fern-sdk-method-name": "get_status"
       }
     },
     "/api/v1/user/settings/google/disconnect": {

@@ -1,134 +1,22 @@
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { Readable } from 'node:stream';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
 import { newEventId } from '@truefoundry/trueforge-core/core/events/schema';
 import { chromium, type Browser, type Page } from 'playwright-core';
-import { createServer, type Plugin } from 'vite';
+import { createServer } from 'vite';
 
-import {
-  MODEL_FQN,
-  startApprovalTestServer,
-  type ApprovalTestServer,
-} from '../../trueforge/tests/fixtures/approvalTestServer.ts';
+import { startApprovalTestServer, type ApprovalTestServer } from '../../trueforge/tests/fixtures/approvalTestServer.ts';
+import { inProcessApi, pausedSession, waitingCallIds } from './support/approvalChat.ts';
 import { findChromiumExecutable } from './support/findChromiumExecutable.ts';
+import { screenshotDir } from './support/screenshotDir.ts';
+import { privateViteCache } from './support/viteCache.ts';
 
 const RENDER_TIMEOUT_MS = 45_000;
 const ENDED_NOTE = 'This request ended. Ask again if you still need it.';
-const ALLOW = 'Allow it';
+const ALLOW = 'Allow';
 const DENY = 'Not now';
-
-const AGENT_SPEC = {
-  model: { name: MODEL_FQN },
-  instructions: 'Use the inert connector exactly as instructed.',
-  mcp_servers: [
-    { name: 'inert', preload: true, require_approval_for_tools: ['@write', '@destructive', '@unclassified'] },
-  ],
-  config: {
-    sandbox: { enabled: false },
-    generative_ui: { enabled: false },
-    ask_user_questions: { enabled: false },
-    dynamic_sub_agents: { enabled: false },
-    context_management: { compaction: { enabled: false }, large_tool_response: { enabled: false } },
-  },
-};
-
-function jsonInit(body: unknown): RequestInit {
-  return { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) };
-}
-
-async function screenshotDir(): Promise<string> {
-  const configured = process.env.AMAN_SCREENSHOT_DIR;
-  if (configured != null && configured !== '') {
-    await mkdir(configured, { recursive: true });
-    return configured;
-  }
-  return await mkdtemp(join(tmpdir(), 'aman-ended-card-'));
-}
-
-/** Serves `/api/*` from the real server app in this process, as the dev proxy would. */
-function inProcessApi(api: ApprovalTestServer): Plugin {
-  return {
-    name: 'in-process-api',
-    configureServer(server) {
-      server.middlewares.use((req, res, next) => {
-        const url = req.url;
-        if (url === undefined || !url.startsWith('/api/')) {
-          next();
-          return;
-        }
-        const chunks: Buffer[] = [];
-        req.on('data', (chunk: Buffer) => chunks.push(chunk));
-        req.on('end', () => {
-          const headers = new Headers();
-          for (const [name, value] of Object.entries(req.headers)) {
-            if (typeof value === 'string') headers.set(name, value);
-          }
-          const method = req.method ?? 'GET';
-          const body = method === 'GET' || method === 'HEAD' ? undefined : Buffer.concat(chunks);
-          api
-            .request(url, { method, headers, body })
-            .then(response => {
-              res.statusCode = response.status;
-              response.headers.forEach((value, name) => res.setHeader(name, value));
-              if (response.body === null) {
-                res.end();
-                return;
-              }
-              Readable.fromWeb(response.body).pipe(res);
-            })
-            .catch((error: unknown) => {
-              res.statusCode = 500;
-              res.end(String(error));
-            });
-        });
-      });
-    },
-  };
-}
-
-/** A real paused turn: the scripted model asks to run the write tool, and the card waits. */
-async function pausedSession(api: ApprovalTestServer): Promise<{ sessionId: string; pausedTurnId: string }> {
-  const session = await api.request('/api/v1/sessions', jsonInit({ agent: { spec: AGENT_SPEC } }));
-  assert.equal(session.status, 201);
-  const sessionId = ((await session.json()) as { data: { id: string } }).data.id;
-  const turn = await api.request(
-    `/api/v1/sessions/${sessionId}/turns`,
-    jsonInit({ input: [{ type: 'user.message', content: 'run:inert_write please' }], stream: true }),
-  );
-  assert.equal(turn.status, 200);
-  // Draining the stream waits for the turn to pause; its first event names the turn.
-  const created =
-    /"type":"turn\.created"[^}]*?"turn_id":"([^"]+)"|"turn_id":"([^"]+)"[^}]*?"type":"turn\.created"/.exec(
-      await turn.text(),
-    );
-  const pausedTurnId = created?.[1] ?? created?.[2];
-  if (pausedTurnId === undefined) throw new Error('the turn stream named no turn');
-  assert.equal(await waitingCallIds({ api, sessionId, turnId: pausedTurnId }), 1);
-  return { sessionId, pausedTurnId };
-}
-
-/** How many cards a turn still waits on, as the server shows it. */
-async function waitingCallIds({
-  api,
-  sessionId,
-  turnId,
-}: {
-  api: ApprovalTestServer;
-  sessionId: string;
-  turnId: string;
-}): Promise<number> {
-  const response = await api.request(`/api/v1/sessions/${sessionId}/turns/${turnId}`);
-  const body = (await response.json()) as {
-    data: { state: { status: string; required_actions?: Array<{ tool_calls: unknown[] }> } };
-  };
-  if (body.data.state.status !== 'done') return 0;
-  return (body.data.state.required_actions ?? []).reduce((total, action) => total + action.tool_calls.length, 0);
-}
 
 /**
  * The chat moved on: a newer turn runs and finishes, so the paused turn's request has ended. It is
@@ -207,14 +95,16 @@ async function assertNotWaitingAfterReload(page: Page, name: string): Promise<vo
 
 test('an ended approval card can be cleared but never run', { timeout: 600_000 }, async () => {
   const api = await startApprovalTestServer();
+  const viteCache = privateViteCache('ended-approval-card');
   const vite = await createServer({
+    cacheDir: viteCache.cacheDir,
     root: fileURLToPath(new URL('../', import.meta.url)),
     logLevel: 'error',
     plugins: [inProcessApi(api)],
     server: { host: '127.0.0.1', port: 0, strictPort: false },
   });
   let browser: Browser | undefined;
-  const outDir = await screenshotDir();
+  const outDir = await screenshotDir('aman-ended-card-');
   try {
     await vite.listen();
     const address = vite.httpServer?.address();
@@ -254,10 +144,7 @@ test('an ended approval card can be cleared but never run', { timeout: 600_000 }
 
       // Either the click reached the server and was refused, or the chat had already ended the card.
       if (await clickUnlessEnded(page, ALLOW)) {
-        await page
-          .getByText('Nothing was approved or run', { exact: false })
-          .first()
-          .waitFor({ timeout: RENDER_TIMEOUT_MS });
+        await page.getByText(ENDED_NOTE).first().waitFor({ timeout: RENDER_TIMEOUT_MS });
       }
       await page.screenshot({ path: join(outDir, 'ended-4-allow-refused.png'), fullPage: true });
       assert.equal(api.mcp.writeInvocations(), 0, 'Allow on an ended request runs nothing');
@@ -293,6 +180,7 @@ test('an ended approval card can be cleared but never run', { timeout: 600_000 }
   } finally {
     await browser?.close();
     await vite.close();
+    viteCache.remove();
     await api.close();
   }
 });

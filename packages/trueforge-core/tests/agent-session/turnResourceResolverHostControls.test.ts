@@ -11,6 +11,7 @@ import type { ILLM, LLMCreateParamsStreaming } from '../../src/core/llm/ILLM';
 import type { ExtendedChatCompletionChunk, RawAssistantMessageWithUsage } from '../../src/core/llm/LLMTypes';
 import { getEmptyUsage } from '../../src/core/llm/LLMTypes';
 import { toolResultResponse, type IToolSet } from '../../src/core/mcp/IMCPServer';
+import { MODEL_STOPPED_ANSWERING_MESSAGE } from '../../src/core/runtime/AgentThread';
 import type { HostToolCallPolicy } from '../../src/core/runtime/HostToolCallPolicy';
 import { makeMockIMCPServer, OBJECT_INPUT_SCHEMA } from '../core/harnessMocks';
 import { emptyLlmStream, makeAgentSpec, makeSilentLogger, mintTestTurnId } from './testHelpers';
@@ -237,7 +238,7 @@ describe('TurnResourceResolver host controls reach the turn', () => {
     expect(requests).toHaveLength(1);
   });
 
-  it('applies the configured first-response bound instead of the ten-minute default', async () => {
+  it('applies the configured first-response bound instead of the default', async () => {
     const modelClient: ILLM = { create: jest.fn(() => hangingStream()), createNonStream: jest.fn() };
 
     const turn = await runTurn(
@@ -245,6 +246,6 @@ describe('TurnResourceResolver host controls reach the turn', () => {
     );
 
     expect(turn.state.status).toBe('error');
-    expect(turn.state.status === 'error' ? turn.state.message : '').toContain('no output within 1 second');
+    expect(turn.state.status === 'error' ? turn.state.message : '').toBe(MODEL_STOPPED_ANSWERING_MESSAGE);
   });
 });

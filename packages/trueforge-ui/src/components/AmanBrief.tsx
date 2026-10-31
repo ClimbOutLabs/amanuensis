@@ -1,219 +1,330 @@
 'use client';
 
-import { useEffect, useId, useMemo, useState } from 'react';
+import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
 
 import { cn } from '../atoms/lib/cn.js';
-import { Highlight } from '../atoms/Reward.js';
-import { useHighlightedCard, useRewardLedger, type RewardContext } from '../hooks/useRewardLedger.js';
+import { GoldTick } from '../atoms/Reward.js';
 import { useSendPrompt } from '../hooks/useSendPrompt.js';
 import { useOptionalSentinelApiState } from '../sentinel/SentinelApiContext.js';
+import { greetingLine } from './AmanTour.js';
 import {
+  briefFooterLine,
+  briefWhenLabel,
+  buildBriefView,
   summarizeBriefAudit,
   type BriefAuditSummary,
-  type BriefLine,
-  type BriefSection,
-  type BriefSectionId,
+  type BriefViewItem,
+  type BriefViewSection,
+  type MorningBrief,
 } from './briefSections.js';
+import { useOptionalPersonalization } from './PersonalizationContext.js';
+import { personDisplayName } from './personDisplayName.js';
 
-/** Lines under Watch out that may take a highlight, per brief. */
-const MAX_HIGHLIGHTS = 3;
-/** The highlights start after the line settles and step in one after another. */
-const HIGHLIGHT_START_MS = 350;
-const HIGHLIGHT_STEP_MS = 120;
-
-/** The brief page only renders once the answer is done, so nothing blocks a reward here. */
-const QUIET_CONTEXT: RewardContext = {
-  busy: false,
-  waitingOnPerson: false,
-  hasError: false,
-  scheduleFailedToday: false,
-};
-
-/** The mono count on each stop: the number of items in that chapter, in plain words. */
-const STOP_COUNT_WORDS: Record<BriefSectionId, string> = {
-  coming_up: 'coming up',
-  deadlines: 'due',
-  needs_doing: 'to do',
-  watch_out: 'to check',
-};
-
-function sectionById(sections: readonly BriefSection[], id: BriefSectionId): BriefSection | undefined {
-  return sections.find(section => section.id === id);
-}
-
-function stopCount(section: BriefSection): string {
-  return `${String(section.lines.length)} ${STOP_COUNT_WORDS[section.id]}`;
-}
-
-function stopSecondLine(section: BriefSection): string {
-  const first = section.lines[0];
-  if (first === undefined) return 'Nothing here this time.';
-  return first.text;
-}
+/** The fade a done row takes before its Undo shows. */
+const DONE_FADE_MS = 225;
+/** How long Undo stays in a row's place. */
+const UNDO_WINDOW_MS = 5000;
 
 export type AmanBriefProps = {
-  sections: readonly BriefSection[];
-  /** Identifies this brief for the highlight cap. */
+  brief: MorningBrief;
+  /** Identifies this brief for the greeting heading's id. */
   briefId: string;
-  /** The chat the brief came from, for the audit footer. */
+  /** The chat the brief came from: the audit entries for the trust line, and where done marks are logged. */
   sessionId: string | undefined;
 };
 
-/** A brief answer as four stops and their chapters, with one tap per line and a footer from the audit log. */
-export function AmanBrief({ sections, briefId, sessionId }: AmanBriefProps) {
-  const prefix = useId();
-  const comingUp = sectionById(sections, 'coming_up');
-  const highlightedStop = useHighlightedCard({
-    firstWaitingApprovalId: null,
-    nextAppointmentId: comingUp !== undefined && comingUp.lines.length > 0 ? 'coming_up' : null,
-  });
+/** A row's state after the person marks it done: the fade, then Undo for a few seconds, then gone. */
+type DonePhase = 'fading' | 'undo';
+
+function prefersReducedMotion(): boolean {
+  return typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+}
+
+/** A plain card with the brief's greeting, digest, sections and trust line. */
+export function AmanBrief({ brief, briefId, sessionId }: AmanBriefProps) {
+  const api = useOptionalSentinelApiState()?.api ?? null;
+  const profile = useOptionalPersonalization()?.profile;
+  const name = personDisplayName({ profile, signInName: undefined });
+  const [expanded, setExpanded] = useState(false);
+  // Keys done on the server (last 7 days) plus rows whose Undo window has closed.
+  const [savedDone, setSavedDone] = useState<ReadonlySet<string>>(() => new Set());
+  const [closedKeys, setClosedKeys] = useState<ReadonlySet<string>>(() => new Set());
+  const [phases, setPhases] = useState<Readonly<Record<string, DonePhase>>>({});
+  const [failure, setFailure] = useState<string | null>(null);
+  const timers = useRef(new Map<string, number[]>());
+
+  useEffect(() => {
+    if (api === null) return;
+    let cancelled = false;
+    api
+      .listBriefItemCompletions()
+      .then(keys => {
+        if (!cancelled) setSavedDone(new Set(keys));
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [api]);
+
+  useEffect(() => {
+    const pending = timers.current;
+    return () => {
+      for (const ids of pending.values()) ids.forEach(id => window.clearTimeout(id));
+    };
+  }, []);
+
+  const hiddenKeys = new Set([...savedDone, ...closedKeys]);
+  const view = buildBriefView({ brief, hiddenKeys, expanded });
+  const total = view.sections.reduce((sum, section) => sum + section.count, 0);
+  const isDone = (key: string): boolean => phases[key] !== undefined;
+
+  function setPhase(key: string, phase: DonePhase | undefined) {
+    setPhases(current => {
+      const next = { ...current };
+      if (phase === undefined) delete next[key];
+      else next[key] = phase;
+      return next;
+    });
+  }
+
+  function clearTimers(key: string) {
+    timers.current.get(key)?.forEach(id => window.clearTimeout(id));
+    timers.current.delete(key);
+  }
+
+  function markDone(item: BriefViewItem) {
+    // Without the chat there is nowhere to record the mark, so the row stays as it is.
+    if (api !== null && sessionId === undefined) return;
+    setFailure(null);
+    setPhase(item.key, 'fading');
+    const fade = prefersReducedMotion() ? 0 : DONE_FADE_MS;
+    const showUndo = window.setTimeout(() => setPhase(item.key, 'undo'), fade);
+    const close = window.setTimeout(() => {
+      setPhases(current => {
+        const next = { ...current };
+        delete next[item.key];
+        return next;
+      });
+      setClosedKeys(current => new Set(current).add(item.key));
+      timers.current.delete(item.key);
+    }, fade + UNDO_WINDOW_MS);
+    timers.current.set(item.key, [showUndo, close]);
+    if (api !== null && sessionId !== undefined) {
+      api.markBriefItemDone({ itemKey: item.key, section: item.section, title: item.title, sessionId }).catch(() => {
+        clearTimers(item.key);
+        setPhase(item.key, undefined);
+        setFailure('Could not save that. Try again.');
+      });
+    }
+  }
+
+  function undo(key: string) {
+    clearTimers(key);
+    setPhase(key, undefined);
+    api?.unmarkBriefItemDone(key).catch(() => {
+      setFailure('Could not undo that. Try again.');
+    });
+  }
 
   return (
-    <div className="flex flex-col gap-6" data-testid="aman-brief">
-      <BriefStops sections={sections} highlightedId={highlightedStop} prefix={prefix} />
-      <div className="flex flex-col">
-        {sections.map(section => (
-          <BriefChapter key={section.id} section={section} briefId={briefId} anchorId={`${prefix}-${section.id}`} />
+    <div className="flex w-full max-w-[48rem] flex-col gap-4" data-testid="aman-brief">
+      <header className="flex flex-col gap-1">
+        <h2
+          id={`${briefId}-greeting`}
+          className="font-serif text-2xl font-normal leading-tight text-text-primary sm:text-[1.75rem]"
+        >
+          {greetingLine({ now: new Date(), name })}
+        </h2>
+        <p className="text-base text-text-secondary">{brief.digest}</p>
+      </header>
+
+      <div className="aui-brief-card flex flex-col px-4 py-4 sm:px-5">
+        {view.sections.map(section => (
+          <BriefSectionBlock
+            key={section.section}
+            section={section}
+            isDone={isDone}
+            phases={phases}
+            onDone={markDone}
+            onUndo={undo}
+          />
         ))}
+        {total === 0 ? <p className="text-base text-text-secondary">Nothing needs you this morning.</p> : null}
+        {view.hiddenCount > 0 || expanded ? (
+          <button
+            type="button"
+            className="aui-brief-action mt-2 self-start"
+            aria-expanded={expanded}
+            onClick={() => setExpanded(!expanded)}
+          >
+            {expanded
+              ? 'Show fewer'
+              : `+ ${String(view.hiddenCount)} more ${view.hiddenCount === 1 ? 'item' : 'items'}`}
+          </button>
+        ) : null}
+        {failure === null ? null : (
+          <p role="alert" className="mt-2 text-sm text-text-secondary">
+            {failure}
+          </p>
+        )}
       </div>
+
       <BriefFooter sessionId={sessionId} />
     </div>
   );
 }
 
-function BriefStops({
-  sections,
-  highlightedId,
-  prefix,
+function BriefSectionBlock({
+  section,
+  isDone,
+  phases,
+  onDone,
+  onUndo,
 }: {
-  sections: readonly BriefSection[];
-  highlightedId: string | null;
-  prefix: string;
+  section: BriefViewSection;
+  isDone: (key: string) => boolean;
+  phases: Readonly<Record<string, DonePhase>>;
+  onDone: (item: BriefViewItem) => void;
+  onUndo: (key: string) => void;
 }) {
+  const isCheck = section.section === 'check_first';
+  const heading = section.section === 'decision' ? `${section.label} · ${String(section.count)}` : section.label;
   return (
-    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4" data-testid="brief-stops">
-      {sections.map(section => {
-        const selected = highlightedId === section.id;
-        return (
-          <button
-            key={section.id}
-            type="button"
-            data-testid={`brief-stop-${section.id}`}
-            className={cn(
-              'aui-ticket aui-ticket--punch flex flex-col gap-1 p-4 text-left',
-              selected && 'aui-ticket--selected',
-            )}
-            onClick={() => document.getElementById(`${prefix}-${section.id}`)?.scrollIntoView({ block: 'start' })}
-          >
-            <span className="aui-brief-mono flex items-center gap-2 text-[0.68rem] tracking-[0.1em] text-text-secondary uppercase">
-              {section.id === 'watch_out' && section.lines.length > 0 ? (
-                <span aria-hidden="true" className="inline-block size-2 rounded-full bg-gold" />
-              ) : null}
-              {stopCount(section)}
-            </span>
-            <span className="aui-brief-display text-base font-semibold text-text-primary">{section.title}</span>
-            <span className="text-sm text-text-secondary">{stopSecondLine(section)}</span>
-          </button>
-        );
-      })}
-    </div>
-  );
-}
-
-function BriefChapter({ section, briefId, anchorId }: { section: BriefSection; briefId: string; anchorId: string }) {
-  // Only Watch out lines are highlighted, the first few; the order sets when each sweep starts.
-  const highlightOrder = useMemo(
-    () =>
-      new Map(
-        section.id === 'watch_out'
-          ? section.lines.slice(0, MAX_HIGHLIGHTS).map((line, order) => [line.id, order] as const)
-          : [],
-      ),
-    [section],
-  );
-  return (
-    <section id={anchorId} className="aui-chapter" aria-labelledby={`${anchorId}-title`}>
-      <h3 id={`${anchorId}-title`} className="aui-brief-display pt-1 text-base font-semibold text-text-primary">
-        {section.title}
-      </h3>
-      <ul className="flex flex-col gap-1">
-        {section.lines.map(line => (
-          <BriefRow key={line.id} line={line} briefId={briefId} highlightOrder={highlightOrder.get(line.id) ?? null} />
+    <section className="mt-6 flex flex-col gap-2 first:mt-0" aria-label={heading}>
+      <h3 className={cn('text-sm font-normal', isCheck ? 'text-gold-ink' : 'text-text-secondary')}>{heading}</h3>
+      <ul className="flex flex-col">
+        {section.items.map(item => (
+          <BriefRow
+            key={item.key}
+            item={item}
+            phase={phases[item.key]}
+            done={isDone(item.key)}
+            onDone={onDone}
+            onUndo={onUndo}
+          />
         ))}
       </ul>
     </section>
   );
 }
 
-/** Plays a line's highlight once, at its turn in the brief, if the ledger allows it. */
-function useHighlightPlay({ briefId, order }: { briefId: string; order: number }): boolean {
-  const { tryPlay } = useRewardLedger();
-  const [play, setPlay] = useState(false);
-  useEffect(() => {
-    // The timer is cleared on cleanup, so a strict-mode double mount still plays once.
-    const timer = window.setTimeout(
-      () => {
-        if (tryPlay({ request: { kind: 'highlight', briefId }, context: QUIET_CONTEXT })) setPlay(true);
-      },
-      HIGHLIGHT_START_MS + order * HIGHLIGHT_STEP_MS,
-    );
-    return () => window.clearTimeout(timer);
-  }, [briefId, order, tryPlay]);
-  return play;
-}
-
-function HighlightedLineText({ text, briefId, order }: { text: string; briefId: string; order: number }) {
-  const play = useHighlightPlay({ briefId, order });
-  return <Highlight play={play}>{text}</Highlight>;
-}
-
 function BriefRow({
-  line,
-  briefId,
-  highlightOrder,
+  item,
+  phase,
+  done,
+  onDone,
+  onUndo,
 }: {
-  line: BriefLine;
-  briefId: string;
-  highlightOrder: number | null;
+  item: BriefViewItem;
+  phase: DonePhase | undefined;
+  done: boolean;
+  onDone: (item: BriefViewItem) => void;
+  onUndo: (key: string) => void;
 }) {
   const sendPrompt = useSendPrompt();
-  const { action } = line;
+  const isCheck = item.section === 'check_first';
+  const subtitle = item.subtitle.join(' · ');
+  const when = item.section === 'coming_up' && item.when !== undefined ? briefWhenLabel(item.when) : undefined;
+  const { action } = item;
+  const target = action.target;
+  const actionPlace = 'col-start-2 justify-self-start sm:col-start-3 sm:row-start-1 sm:justify-self-end';
+  const actionClass = cn('aui-brief-action', actionPlace);
+
+  function onKeyDown(event: KeyboardEvent<HTMLLIElement>) {
+    if (event.target !== event.currentTarget || done) return;
+    if (event.key === ' ') {
+      event.preventDefault();
+      onDone(item);
+    } else if (event.key === 'Enter') {
+      event.preventDefault();
+      event.currentTarget.querySelector<HTMLElement>('[data-brief-action]')?.click();
+    }
+  }
+
   return (
-    <li className="aui-row" data-testid="brief-row">
-      <span className="mark flex items-center justify-center">
-        <span aria-hidden="true" className="size-3 rounded-full border border-border" />
-      </span>
-      <span className="when" />
-      <span className="text">
-        {highlightOrder === null ? (
-          line.text
-        ) : (
-          <HighlightedLineText text={line.text} briefId={briefId} order={highlightOrder} />
+    <li
+      tabIndex={0}
+      data-testid="brief-row"
+      aria-label={item.title}
+      onKeyDown={onKeyDown}
+      className={cn(
+        'group/row grid grid-cols-[1.25rem_minmax(0,1fr)] items-center gap-x-3 gap-y-1 border-t border-border py-2.5 first:border-t-0 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gold-ink sm:grid-cols-[1.25rem_minmax(0,1fr)_max-content]',
+        phase === 'fading' && 'opacity-0 transition-opacity duration-[225ms] ease-out',
+      )}
+    >
+      {isCheck ? (
+        <span className="flex size-[1.25rem] items-center justify-center self-start pt-[0.125rem]">
+          <span aria-hidden="true" className="size-[0.6875rem] rounded-full bg-gold ring-1 ring-gold-ink" />
+        </span>
+      ) : (
+        <button
+          type="button"
+          tabIndex={-1}
+          aria-label={`Mark done: ${item.title}`}
+          disabled={done}
+          onClick={() => onDone(item)}
+          className="flex size-[1.25rem] cursor-pointer items-center justify-center self-start border-0 bg-transparent p-0 pt-[0.125rem] disabled:cursor-default"
+        >
+          <span
+            aria-hidden="true"
+            className={cn(
+              'size-[0.8125rem] rounded-full border border-text-secondary',
+              'group-hover/row:hidden group-focus-visible/row:hidden',
+              done && 'hidden',
+            )}
+          />
+          <span
+            aria-hidden="true"
+            className={cn('hidden size-[1.25rem] group-hover/row:block group-focus-visible/row:block', done && 'block')}
+          >
+            <GoldTick play={phase !== undefined} className="size-full" />
+          </span>
+        </button>
+      )}
+      <span className="flex min-w-0 flex-col gap-0.5">
+        <span
+          className={cn(
+            'line-clamp-2 break-words text-base font-medium leading-snug text-text-primary sm:line-clamp-1',
+            done && 'text-text-secondary',
+          )}
+        >
+          {item.title}
+        </span>
+        {when === undefined && subtitle === '' && item.source === undefined ? null : (
+          <span className="flex min-w-0 items-baseline gap-x-2 text-sm leading-snug text-text-secondary">
+            {when === undefined ? null : <span className="shrink-0 font-receipt text-xs">{when}</span>}
+            {subtitle === '' ? null : <span className="min-w-0 truncate">{subtitle}</span>}
+            {item.source === undefined ? null : (
+              <span data-testid="brief-source" className="aui-brief-source shrink-0">
+                {item.source}
+              </span>
+            )}
+          </span>
         )}
       </span>
-      {action === null ? (
-        <span className="action" />
+      {phase === 'undo' ? (
+        <button type="button" className={actionClass} onClick={() => onUndo(item.key)}>
+          Undo
+        </button>
+      ) : target.kind === 'link' ? (
+        // The brief is written from mail anyone can send, so its web addresses never become links.
+        <span
+          data-testid="brief-link-site"
+          className={cn(actionPlace, 'whitespace-nowrap text-sm text-text-secondary')}
+        >
+          {new URL(target.url).hostname}
+        </span>
       ) : (
-        <button type="button" className="action" onClick={() => sendPrompt(`${action} for this: ${line.text}`)}>
-          {action}
+        <button data-brief-action type="button" className={actionClass} onClick={() => sendPrompt(target.text)}>
+          {action.label}
         </button>
       )}
     </li>
   );
 }
 
-function pluralize(count: number, singular: string): string {
-  return `${String(count)} ${singular}${count === 1 ? '' : 's'}`;
-}
-
-/** The footer sentence. Only counts the audit log holds; nothing is claimed about sends it does not show. */
-export function briefFooterLine(summary: BriefAuditSummary): string {
-  const parts: string[] = [];
-  if (summary.readAllowed > 0) parts.push(`${pluralize(summary.readAllowed, 'thing')} read, allowed by your settings.`);
-  parts.push(summary.actionsRan === 0 ? 'Nothing was sent.' : `${pluralize(summary.actionsRan, 'action')} ran.`);
-  return parts.join(' ');
-}
-
+/** The trust line from real audit counts, read once when the brief has loaded. */
 function BriefFooter({ sessionId }: { sessionId: string | undefined }) {
   const sentinel = useOptionalSentinelApiState();
   const api = sentinel?.api ?? null;
@@ -237,13 +348,4 @@ function BriefFooter({ sessionId }: { sessionId: string | undefined }) {
 
   if (summary === null) return null;
   return <p className="text-sm text-text-secondary">{briefFooterLine(summary)}</p>;
-}
-
-/** The request a brief answers, shown as a ticket in place of the user's bubble. */
-export function AmanBriefRequest() {
-  return (
-    <div className="aui-ticket aui-ticket--punch max-w-md p-4" data-testid="brief-request">
-      <span className="aui-brief-display text-base font-semibold text-text-primary">Your morning brief</span>
-    </div>
-  );
 }

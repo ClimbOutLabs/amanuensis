@@ -534,6 +534,7 @@ export const ImportScheduleRecordSchema = z.object({
   name: z.string().min(1),
   /** Absent from exports made before schedules kept a persona. */
   persona_id: z.string().min(1).nullable().default(null),
+  /** Manifests from exports made before one-time schedules lack `run_at` and `kind`; the manifest schema fills `null` and `task`. */
   manifest: ScheduleManifestSchema,
   status: ScheduleStatusSchema,
   created_by_subject: CreatedBySubjectSchema,
@@ -557,7 +558,7 @@ export const ImportConnectorsFileSchema = z.array(ImportConnectorRecordSchema);
 /** Permission settings as an export wrote them. Exports from before a switch lack its field, so it reads as the default. */
 const ImportPermissionSettingsSchema = z.object({
   ...SentinelUserSettingsSchema.shape,
-  maps_without_asking: SentinelUserSettingsSchema.shape.maps_without_asking.default(false),
+  maps_without_asking: SentinelUserSettingsSchema.shape.maps_without_asking.default(true),
   sandbox_without_asking: SentinelUserSettingsSchema.shape.sandbox_without_asking.default(true),
 });
 

@@ -430,6 +430,70 @@ describe('ComposerContainer', () => {
     await waitFor(() => expect(window.sessionStorage.getItem(key)).toBe('lost?, edited'));
   });
 
+  it('shows Stopping… after Cancel and leaves the running state once the turn stops', async () => {
+    let finishCancel: () => void = () => undefined;
+    cancelRun.mockImplementationOnce(
+      () =>
+        new Promise<void>(resolve => {
+          finishCancel = resolve;
+        }),
+    );
+    const running: ThreadMessageLike[] = [
+      { role: 'user', content: 'What is on in town tonight?' },
+      { role: 'assistant', content: '' },
+    ];
+    const view = render(
+      <RuntimeHarness messages={running} isRunning>
+        <ComposerBusyProvider>
+          <ComposerContainer />
+        </ComposerBusyProvider>
+      </RuntimeHarness>,
+    );
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Stop' }));
+    const stopping = await screen.findByRole('button', { name: 'Stopping' });
+    expect(stopping).toBeDisabled();
+    expect(cancelRun).toHaveBeenCalledOnce();
+
+    // The runtime ends the run (confirmed or not, within its bound), then cancel() resolves.
+    view.rerender(
+      <RuntimeHarness messages={running}>
+        <ComposerBusyProvider>
+          <ComposerContainer />
+        </ComposerBusyProvider>
+      </RuntimeHarness>,
+    );
+    finishCancel();
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Stopping' })).not.toBeInTheDocument());
+    expect(screen.queryByRole('button', { name: 'Stop' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Send message' })).toBeInTheDocument();
+  });
+
+  it('keeps the box open during a run, and Esc stops the run', async () => {
+    const running: ThreadMessageLike[] = [
+      { role: 'user', content: 'What is on in town tonight?' },
+      { role: 'assistant', content: '' },
+    ];
+    render(
+      <RuntimeHarness messages={running} isRunning>
+        <ComposerBusyProvider>
+          <ComposerContainer />
+        </ComposerBusyProvider>
+      </RuntimeHarness>,
+    );
+
+    const input = await screen.findByRole<HTMLTextAreaElement>('textbox', { name: 'Message input' });
+    expect(input).toBeEnabled();
+    expect(screen.queryByRole('button', { name: 'Send message' })).not.toBeInTheDocument();
+
+    fireEvent.change(input, { target: { value: 'Also add the cinema' } });
+    expect(input).toHaveValue('Also add the cinema');
+
+    cancelRun.mockClear();
+    fireEvent.keyDown(input, { key: 'Escape' });
+    expect(cancelRun).toHaveBeenCalledOnce();
+  });
+
   it('a second send after a completed turn sends only the new text', async () => {
     const onNew = vi.fn<(message: AppendMessage) => Promise<void>>(async () => {});
     const view = render(
@@ -458,7 +522,7 @@ describe('ComposerContainer', () => {
         </ComposerBusyProvider>
       </RuntimeHarness>,
     );
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Cancel' })).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Stop' })).toBeInTheDocument());
 
     view.rerender(
       <RuntimeHarness
@@ -473,7 +537,7 @@ describe('ComposerContainer', () => {
         </ComposerBusyProvider>
       </RuntimeHarness>,
     );
-    await waitFor(() => expect(screen.queryByRole('button', { name: 'Cancel' })).not.toBeInTheDocument());
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Stop' })).not.toBeInTheDocument());
     expect(input.value).toBe('');
 
     fireEvent.change(input, { target: { value: 'second' } });
@@ -922,8 +986,8 @@ describe('ComposerContainer', () => {
       },
     ]);
 
-    expect(screen.getByText('2 items need your approval')).toBeInTheDocument();
-    expect(screen.getByText('(1/2)')).toBeInTheDocument();
+    expect(screen.getByRole('status')).toHaveTextContent('2 things are waiting for your OK');
+    expect(screen.queryByText('(1/2)')).not.toBeInTheDocument();
     expect(screen.getByRole('textbox', { name: 'Message input' })).toBeDisabled();
     expect(document.querySelector('[data-slot="aui_composer-approval-pause"]')).toBeInTheDocument();
     approvalCardPlacement = 'missing';
@@ -949,7 +1013,7 @@ describe('ComposerContainer', () => {
       },
     ]);
 
-    expect(screen.queryByText(/need your approval/)).toBeNull();
+    expect(screen.queryByText(/waiting for your OK/)).toBeNull();
     approvalCardPlacement = 'missing';
   });
 
@@ -972,12 +1036,12 @@ describe('ComposerContainer', () => {
     const input = screen.getByRole<HTMLTextAreaElement>('textbox', { name: 'Message input' });
     fireEvent.change(input, { target: { value: 'start a turn' } });
     fireEvent.keyDown(input, { key: 'Enter' });
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Cancel' })).toBeInTheDocument());
-    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Stop' })).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: 'Stop' }));
 
     await waitFor(() => expect(cancelRun).toHaveBeenCalledOnce());
     expect(await screen.findByText('cancel request failed')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Cancel' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Stop' })).toBeInTheDocument();
     resolvePendingSubmit?.();
   });
 
@@ -1007,7 +1071,8 @@ describe('ComposerContainer', () => {
 
     // A plain New Chat (mutable, not the agent builder) must still show the capabilities picker
     // (connectors / skills / sandbox) and the model picker in the composer.
-    expect(screen.getByRole('button', { name: /Add-ons/ })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Add' }));
+    expect(screen.getByRole('menuitem', { name: 'Add-ons' })).toBeInTheDocument();
     expect(await screen.findByTitle('Select model')).toBeInTheDocument();
   });
 });
@@ -1073,6 +1138,7 @@ describe('ComposerContainer voice input', () => {
     expect(buttons.indexOf(modelSelector)).toBeGreaterThanOrEqual(0);
     expect(buttons.indexOf(mic)).toBeGreaterThan(buttons.indexOf(modelSelector));
     expect(buttons.indexOf(send)).toBeGreaterThan(buttons.indexOf(mic));
+    expect(screen.queryByRole('button', { name: 'Attach' })).not.toBeInTheDocument();
   });
 
   it('hides the mic in the draft composer while voice is unavailable', async () => {

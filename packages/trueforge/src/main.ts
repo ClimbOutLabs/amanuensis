@@ -72,9 +72,10 @@ import { McpCatalog } from './catalog/McpCatalog';
 import { ModelCatalog } from './catalog/ModelCatalog';
 import { SandboxCatalog } from './catalog/SandboxCatalog';
 import { SkillCatalog } from './catalog/SkillCatalog';
-import { type DistributedServerConfiguration } from './config';
+import type { DistributedServerConfiguration } from './config';
 import { createController } from './controller';
 import type { AgentRecord, IAgentStore } from './db/agentStore';
+import { BriefItemCompletionStore, type IBriefItemCompletionStore } from './db/briefItemCompletionStore';
 import type { IChatImageStore } from './db/chatImageStore';
 import type { ICompletedTurnEventStore } from './db/completedTurnEvents';
 import type { IGlobalSettingsStore } from './db/globalSettingsStore';
@@ -106,13 +107,14 @@ import { createServerLogger, shouldColorize } from './logger';
 import type { IOAuthTokenStore } from './mcp/auth/types';
 import { PACKAGE_VERSION } from './packageVersion';
 import { ActiveTurnRegistry } from './runtime/activeTurns';
-import { registerCalendarConnectorAtBoot } from './runtime/calendarConnector';
+import { registerCalendarConnectorForBoot } from './runtime/calendarAccount';
 import { createChatImageService } from './runtime/chatImages/chatImageService';
 import { CHAT_IMAGE_RETENTION_DAYS } from './runtime/chatImages/limits';
 import { createImageReencoder } from './runtime/chatImages/reencodeInSandbox';
 import { recoverAbandonedCommandExecutions } from './runtime/commandExecutionRecovery';
 import { designateTavilyAtBoot, seedDefaultSearchProviderAtBoot } from './runtime/defaultSearchProvider';
 import { EventSubscriptionRegistry } from './runtime/event-subscription';
+import { registerMailConnectorFromSavedAccountInBackground } from './runtime/mailAccount';
 import { prepareMailPolicyAtBoot, registerMailConnectorAtBoot } from './runtime/mailConnector';
 import { warmEmbeddingsAtBoot } from './runtime/memory/embeddingRetrieval';
 import { createOutboundSecretSource } from './runtime/outboundSecrets';
@@ -122,7 +124,7 @@ import { getSharedRunCodeService } from './runtime/sessionResources';
 import { createTokenFactoryBudget } from './runtime/tokenFactoryBudget';
 import { ensureEnvManagedTokenFactoryProvider, seedEnvManagedDefaultChatModel } from './runtime/tokenFactoryProvider';
 import { TurnDrainRegistry } from './runtime/turnDrains';
-import { slotsBackendEnabled, startPackageMirrorGateway } from './sandbox/slotBackend';
+import { slotsBackendEnabled, startPackageMirrorGateway, startSkillNetworkGateway } from './sandbox/slotBackend';
 import { printStandaloneStartupBanner } from './startupBanner';
 import { TENANT_ID } from './tenancy';
 import {
@@ -181,6 +183,7 @@ interface ServerPersistence<TTransaction> {
   googleConnectionStore: IGoogleConnectionStore;
   sentinelAuditStore: ISentinelAuditStore;
   sentinelSettingsStore: ISentinelSettingsStore<TTransaction>;
+  briefItemStore: IBriefItemCompletionStore;
   approvalTokenStore: ApprovalTokenStore;
   destroyDb: () => Promise<void>;
   redis: RedisClientType | undefined;
@@ -414,6 +417,7 @@ async function createStandalonePersistence(options: {
     googleConnectionStore: new SqliteGoogleConnectionStore(db),
     sentinelAuditStore: new SentinelAuditStore(db as Kysely<SentinelAuditDatabase>),
     sentinelSettingsStore: new SqliteSentinelSettingsStore(db),
+    briefItemStore: new BriefItemCompletionStore(db),
     approvalTokenStore: new SqliteApprovalTokenStore(db),
     modelProviderStore,
     resolveModelProviderStore: () => modelProviderStore,
@@ -583,6 +587,7 @@ async function createDistributedPersistence(options: {
     googleConnectionStore: new PostgresGoogleConnectionStore(db),
     sentinelAuditStore: new SentinelAuditStore(db as Kysely<SentinelAuditDatabase>),
     sentinelSettingsStore: new PostgresSentinelSettingsStore(db),
+    briefItemStore: new BriefItemCompletionStore(db),
     approvalTokenStore: new PostgresApprovalTokenStore(db),
     modelProviderStore,
     resolveModelProviderStore,
@@ -623,12 +628,14 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     googleConnectionStore,
     sentinelAuditStore,
     sentinelSettingsStore,
+    briefItemStore,
     approvalTokenStore,
     destroyDb,
     redis,
     serviceFoundryClient,
   } = persistence;
 
+  const modelCatalog = ModelCatalog.load();
   // The env-managed Token Factory provider and default model are written before the first request,
   // so no Settings step is needed. TrueFoundry mode lists providers from TrueFoundry instead.
   if (!isTrueFoundryModeEnabled(configuration)) {
@@ -639,8 +646,8 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
         apiKey: configuration.NEBIUS_API_KEY,
         baseUrl: configuration.TOKEN_FACTORY_BASE_URL,
         model: configuration.TOKEN_FACTORY_MODEL,
-        cheaperModel: configuration.TOKEN_FACTORY_CHEAPER_MODEL,
       },
+      catalogModels: modelCatalog.list().find(entry => entry.type === 'tokenfactory')?.models ?? [],
       logger,
     });
     if (outcome !== 'skipped') {
@@ -684,9 +691,26 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     policyPath: configuration.MAIL_POLICY_FILE,
     logger,
   });
-  // Registered at boot when the calendar sidecar is configured; a no-op otherwise.
-  await registerCalendarConnectorAtBoot({
-    url: configuration.CALENDAR_CONNECTOR_URL,
+  // An account saved through Settings on an instance the installer never linked still needs the
+  // connector: the account agent is asked in the background, and the connector is registered
+  // from what it reports. With the installer's link configured, the steps above already ran.
+  if (configuration.MAIL_EMAIL_MCP_URL === undefined) {
+    registerMailConnectorFromSavedAccountInBackground({
+      accountUrl: configuration.MAIL_EMAIL_ACCOUNT_URL,
+      mcpUrl: configuration.MAIL_SIDECAR_MCP_URL,
+      policyPath: configuration.MAIL_POLICY_FILE,
+      fetchImpl: undefined,
+      mcpServerStore: mcpOAuthStore,
+      tenant_id: TENANT_ID,
+      logger,
+    });
+  }
+  await registerCalendarConnectorForBoot({
+    accountUrl: configuration.CALENDAR_ACCOUNT_URL,
+    secret: configuration.CALENDAR_ACCOUNT_SECRET,
+    connectorUrl: configuration.CALENDAR_CONNECTOR_URL,
+    mcpUrl: configuration.CALENDAR_SIDECAR_MCP_URL,
+    fetchImpl: undefined,
     mcpServerStore: mcpOAuthStore,
     tenant_id: TENANT_ID,
     logger,
@@ -809,7 +833,7 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
   const resolveSandboxProviderStore = (c: Context) => persistence.resolveSandboxProviderStore(resolveRequestContext(c));
   const resolveSkillStore = (c: Context) => persistence.resolveSkillStore(resolveRequestContext(c));
   const app = createServerApp({
-    modelCatalog: ModelCatalog.load(),
+    modelCatalog,
     mcpCatalog,
     skillCatalog: SkillCatalog.load(),
     sandboxCatalog: SandboxCatalog.load(),
@@ -839,6 +863,7 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     sessionMetricsStore,
     sentinelAuditStore,
     sentinelSettingsStore,
+    briefItemStore,
     sessions,
     chatImages,
     activeTurns,
@@ -872,6 +897,7 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     turnArtifactStore,
     chatImageStore,
     turnDrains,
+    sentinelAuditStore,
   };
 }
 
@@ -949,6 +975,7 @@ try {
     turnArtifactStore,
     chatImageStore,
     turnDrains,
+    sentinelAuditStore,
   } = configuration.STANDALONE
     ? await createServerRuntime(
         await createStandalonePersistence({ sqlitePath: configuration.SQLITE_PATH, logger }),
@@ -1142,6 +1169,10 @@ try {
   // start, sandbox package downloads stay off and everything else keeps working.
   await startPackageMirrorGateway({ logger });
 
+  // The skill network gateway for the sandbox slots. Best effort: when it cannot start,
+  // approved skill sites stay unreachable and everything else keeps working.
+  await startSkillNetworkGateway({ logger, audit: sentinelAuditStore });
+
   const server = serve(
     {
       fetch: app.fetch,
@@ -1196,8 +1227,9 @@ try {
       // closed covers the gap where the registry is empty before that late track().
       await activeTurns.shutdownAndWait(CancellationReason.Abandoned);
       await closed;
-      // Wait for detached turn drains (memory retain, profile learning, artifact persistence)
-      // with a bounded timeout so a stuck provider call cannot hang shutdown forever. This
+      // Wait for detached turn drains (artifact persistence, memory retain, profile learning)
+      // with a bounded timeout so a stuck provider call cannot hang shutdown forever. Each drain
+      // also stops watching its follow-up work after its own time limit. This
       // runs before the Redis/DB teardown below because drains still dual-write events.
       if (turnDrains.size > 0) {
         logger.info(`Waiting for ${String(turnDrains.size)} in-flight turn drains before shutdown`);

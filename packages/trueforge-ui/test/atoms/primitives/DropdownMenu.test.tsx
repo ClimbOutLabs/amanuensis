@@ -1,4 +1,5 @@
 import { fireEvent, render, screen } from '@testing-library/react';
+import type { ReactNode } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 
 import { DropdownMenu, DropdownMenuItem, DropdownMenuSeparator } from '@/atoms/primitives/DropdownMenu.js';
@@ -191,6 +192,63 @@ describe('DropdownMenu', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Actions' }));
     expect(onOpenChange).toHaveBeenLastCalledWith(false);
+    expect(screen.getByRole('menu')).toBeInTheDocument();
+  });
+});
+
+describe('DropdownMenu dismissal', () => {
+  function renderMenu(extra?: ReactNode) {
+    return render(
+      <DropdownMenu trigger={<button type="button">More</button>}>
+        <button type="button" role="menuitem">
+          Rename
+        </button>
+        <p>Menu note</p>
+        {extra}
+      </DropdownMenu>,
+    );
+  }
+
+  it('closes on an outside click and on Escape, and returns focus to the trigger on Escape', () => {
+    renderMenu();
+    fireEvent.click(screen.getByRole('button', { name: 'More' }));
+    expect(screen.getByRole('menu')).toBeInTheDocument();
+
+    fireEvent.mouseDown(document.body);
+    expect(screen.queryByRole('menu')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'More' }));
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(screen.queryByRole('menu')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'More' })).toHaveFocus();
+  });
+
+  it('stays open for a click inside its panel that is not an item', () => {
+    renderMenu();
+    fireEvent.click(screen.getByRole('button', { name: 'More' }));
+
+    fireEvent.mouseDown(screen.getByText('Menu note'));
+    fireEvent.click(screen.getByText('Menu note'));
+    expect(screen.getByRole('menu')).toBeInTheDocument();
+  });
+
+  it('closes when a menu item is chosen', () => {
+    renderMenu();
+    fireEvent.click(screen.getByRole('button', { name: 'More' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Rename' }));
+    expect(screen.queryByRole('menu')).not.toBeInTheDocument();
+  });
+
+  it('keeps the menu open while a dialog it opened is clicked, so the dialog can finish its action', () => {
+    const dialog = (
+      <div role="dialog" aria-label="Delete chat">
+        <button type="button">Confirm delete</button>
+      </div>
+    );
+    renderMenu(dialog);
+    fireEvent.click(screen.getByRole('button', { name: 'More' }));
+
+    fireEvent.mouseDown(screen.getByRole('button', { name: 'Confirm delete' }));
     expect(screen.getByRole('menu')).toBeInTheDocument();
   });
 });

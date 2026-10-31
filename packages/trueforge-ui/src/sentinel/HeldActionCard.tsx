@@ -3,9 +3,16 @@
 import { useRef, useState, type FC, type ReactNode } from 'react';
 
 import { Button } from '../atoms/primitives/Button.js';
+import { useAssistantDisplayName } from '../components/PersonalizationContext.js';
 import { Icon } from '../icons/Icon.js';
 import { AlwaysAllowToolControl } from './AlwaysAllowToolControl.js';
-import { APPROVAL_CHOICES, isNewRecipientCard, NEW_RECIPIENT_CHOICES } from './approvalChoices.js';
+import {
+  APPROVAL_CHOICES,
+  isNewRecipientCard,
+  isNewRecipientDraftCard,
+  NEW_RECIPIENT_CHOICES,
+  NEW_RECIPIENT_DRAFT_CHOICES,
+} from './approvalChoices.js';
 import { CalendarEventDetails } from './CalendarEventDetails.js';
 import { ChangeRequestBox } from './ChangeRequestBox.js';
 import { APPROVED_OUTCOME_TEXT, HELD_EXPIRED_TEXT, type HeldActionOutcome } from './heldActionErrors.js';
@@ -104,6 +111,7 @@ export const HeldActionCard: FC<HeldActionCardProps> = ({
   onChangeRequest,
   changeRequestNote,
 }) => {
+  const assistant = useAssistantDisplayName();
   const hasDetails =
     card.recipient !== null ||
     card.destination !== null ||
@@ -113,10 +121,20 @@ export const HeldActionCard: FC<HeldActionCardProps> = ({
   const canAnswer = status.kind === 'waiting' || status.kind === 'failed';
   const [changing, setChanging] = useState(false);
   const changeButtonRef = useRef<HTMLButtonElement>(null);
-  // Approving a new-recipient send adds its addresses, so it never offers "Always allow" and its labels say so.
+  // Approving a new-recipient card adds its addresses, so it never offers "Always allow" and its labels say so,
+  // in draft words when the card saves a draft instead of sending.
   const newRecipients = isNewRecipientCard(card);
-  const approveChoice = newRecipients ? NEW_RECIPIENT_CHOICES.approve : APPROVAL_CHOICES.approve;
-  const denyChoice = newRecipients ? NEW_RECIPIENT_CHOICES.cancel : APPROVAL_CHOICES.deny;
+  const newRecipientDraft = isNewRecipientDraftCard(card);
+  const approveChoice = newRecipientDraft
+    ? NEW_RECIPIENT_DRAFT_CHOICES.approve
+    : newRecipients
+      ? NEW_RECIPIENT_CHOICES.approve
+      : APPROVAL_CHOICES.approve;
+  const denyChoice = newRecipientDraft
+    ? NEW_RECIPIENT_DRAFT_CHOICES.cancel
+    : newRecipients
+      ? NEW_RECIPIENT_CHOICES.cancel
+      : APPROVAL_CHOICES.deny;
 
   return (
     <li className="list-none rounded-lg border border-border bg-primary-bg" data-role="held-action">
@@ -165,7 +183,7 @@ export const HeldActionCard: FC<HeldActionCardProps> = ({
 
         {card.plain_why !== null && (
           <p className="text-sm text-text-secondary" data-role="held-action-reason">
-            Agent says: {card.plain_why}
+            {assistant} says: {card.plain_why}
           </p>
         )}
 
@@ -187,7 +205,7 @@ export const HeldActionCard: FC<HeldActionCardProps> = ({
               <AlwaysAllowToolControl
                 size="large"
                 disabled={disabled}
-                description="The agent will run this tool on this connector without asking, in every chat."
+                description={`${assistant} will run this tool on this connector without asking, in every chat.`}
                 onConfirm={onAlwaysAllow}
               />
             )}

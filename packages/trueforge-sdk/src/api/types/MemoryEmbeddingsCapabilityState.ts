@@ -2,10 +2,11 @@
 
 /** Meaning-based recall status for this tenant. */
 export const MemoryEmbeddingsCapabilityState = {
-        Starting: "starting",
-        Downloading: "downloading",
-        Backfilling: "backfilling",
-        Ready: "ready",
-        Unavailable: "unavailable"
-    } as const;
-export type MemoryEmbeddingsCapabilityState = typeof MemoryEmbeddingsCapabilityState[keyof typeof MemoryEmbeddingsCapabilityState];
+    Starting: "starting",
+    Downloading: "downloading",
+    Backfilling: "backfilling",
+    Ready: "ready",
+    Unavailable: "unavailable",
+} as const;
+export type MemoryEmbeddingsCapabilityState =
+    (typeof MemoryEmbeddingsCapabilityState)[keyof typeof MemoryEmbeddingsCapabilityState];

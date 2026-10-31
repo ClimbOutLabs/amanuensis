@@ -10,17 +10,23 @@ import { CatalogLogo } from '@/atoms/primitives/CatalogLogo.js';
 import { CenteredModal } from '@/atoms/primitives/CenteredModal.js';
 import SearchInput from '@/atoms/primitives/SearchInput.js';
 import { Icon } from '@/icons/Icon.js';
+import { hasCalendarSetup, type CalendarAccountStatus } from '@/server/calendarSetup.js';
 import { hasConnectorConnectionTest, type ConnectorConnectionFailureKind } from '@/server/connectorChecks.js';
+import { hasEmailSetup, type EmailAccountStatus } from '@/server/emailSetup.js';
 import { hasGoogleSetup, type GoogleConnectionStatus } from '@/server/googleSetup.js';
 import { isSearchProvider, type SearchProviderFields } from '@/server/searchProviderTypes.js';
 import { useCatalogServer } from '@/server/ServerContext.js';
 import { shellIsMutable, useShellMode } from '@/server/ShellModeContext.js';
 import type { AgentSpec, ConnectorAuth, ConnectorBase, ConnectorCatalogEntry } from '@/server/types.js';
 import { getErrorMessage } from '@/utils/getErrorMessage.js';
+import { useAssistantDisplayName } from '../../components/PersonalizationContext.js';
 import { useToasterOptional } from '../ToasterContainer.js';
+import AccountConnectorCard from './AccountConnectorCard.js';
 import AddMcpServerForm, { type AddMcpServerDraft } from './AddMcpServerForm.js';
 import { AUTH_TYPE_LABELS } from './authTypeLabels.js';
+import CalendarSetupPanel from './CalendarSetupPanel.js';
 import ConnectorDetails from './ConnectorDetails.js';
+import EmailSetupPanel from './EmailSetupPanel.js';
 import GoogleSetupPanel from './GoogleSetupPanel.js';
 import { isMemoryProvider, memoryProviderUpdateRequest, withRemediation } from './memoryProvider.js';
 import { searchProviderForNewConnector } from './searchProvider.js';
@@ -77,6 +83,7 @@ function withoutConnector({ spec, connector }: { spec: AgentSpec; connector: Con
 }
 
 const ConnectorSettings = () => {
+  const assistant = useAssistantDisplayName();
   const { connectorCatalog } = useCatalogServer();
   const { agentSpec } = useTrueFoundryAgentSpec();
   const updateAgentSpec = useTrueFoundryUpdateAgentSpec();
@@ -111,6 +118,17 @@ const ConnectorSettings = () => {
   // The status is advisory, but a failed read must show: a missing row reads as "Google is not offered here".
   const [googleStatusFailed, setGoogleStatusFailed] = useState(false);
   const [googlePanelOpen, setGooglePanelOpen] = useState(false);
+
+  const [emailStatus, setEmailStatus] = useState<EmailAccountStatus | null>(null);
+  // An instance without the Email connector answers "not available", which hides the card
+  // entirely; only a failed read of an available connector shows, like Google's.
+  const [emailStatusFailed, setEmailStatusFailed] = useState(false);
+  const [emailPanelOpen, setEmailPanelOpen] = useState(false);
+
+  const [calendarStatus, setCalendarStatus] = useState<CalendarAccountStatus | null>(null);
+  // Like Email: an instance without the Calendar connector answers "not available", which hides the card.
+  const [calendarStatusFailed, setCalendarStatusFailed] = useState(false);
+  const [calendarPanelOpen, setCalendarPanelOpen] = useState(false);
 
   const [catalog, setCatalog] = useState<ConnectorCatalogEntry[]>([]);
   const [addMcpServerFormOpen, setAddMcpServerFormOpen] = useState(false);
@@ -162,6 +180,18 @@ const ConnectorSettings = () => {
         const next = await connectorCatalog.getGoogleStatus().catch(() => null);
         setGoogleStatus(next);
         setGoogleStatusFailed(next === null);
+      }
+      // The Email card likewise: shown only when this instance has the connector.
+      if (hasEmailSetup(connectorCatalog)) {
+        const next = await connectorCatalog.getEmailStatus().catch(() => null);
+        setEmailStatus(next !== null && next.available ? next : null);
+        setEmailStatusFailed(next === null);
+      }
+      // The Calendar card likewise.
+      if (hasCalendarSetup(connectorCatalog)) {
+        const next = await connectorCatalog.getCalendarStatus().catch(() => null);
+        setCalendarStatus(next !== null && next.available ? next : null);
+        setCalendarStatusFailed(next === null);
       }
     } catch (err) {
       setError(getErrorMessage(err, 'Failed to load connectors'));
@@ -606,6 +636,9 @@ const ConnectorSettings = () => {
     );
   };
 
+  const emailMatchesQuery = normalizedQuery === '' || 'email mail'.includes(normalizedQuery);
+  const calendarMatchesQuery = normalizedQuery === '' || 'calendar caldav events'.includes(normalizedQuery);
+
   const googleMatchesQuery = normalizedQuery === '' || 'google gmail email mail'.includes(normalizedQuery);
 
   const renderGoogle = () => {
@@ -618,7 +651,7 @@ const ConnectorSettings = () => {
         ? 'Reconnect needed'
         : connected
           ? 'Connected'
-          : 'Not connected';
+          : 'Available';
     return (
       <article className="flex min-h-16 w-full items-center gap-3 p-3">
         <span
@@ -631,7 +664,7 @@ const ConnectorSettings = () => {
           <h5 className="truncate text-sm font-medium text-text-primary">Google</h5>
           <p className="mt-0.5 line-clamp-2 text-sm text-text-secondary sm:truncate">
             {locked
-              ? "This demo uses a sample Google account. Aman can only send to the demo's own addresses."
+              ? `This demo uses a sample Google account. ${assistant} can only send to the demo's own addresses.`
               : 'Read your email and, with your approval, draft and send it. Uses a Google app you set up once, in your own Google account.'}
           </p>
         </div>
@@ -778,7 +811,7 @@ const ConnectorSettings = () => {
               Find a connector in <span className="font-medium text-text-primary">Available</span> below and choose
               Connect. Most need an API key or token from that service.
             </li>
-            <li>Choose it in the message box so Aman can use its tools in that chat.</li>
+            <li>Choose it in the message box so {assistant} can use its tools in that chat.</li>
             <li>
               Use <span className="font-medium text-text-primary">Test connection</span> to see which tools the
               connector offers.
@@ -815,6 +848,60 @@ const ConnectorSettings = () => {
           <div className="flex flex-1 flex-col gap-5 overflow-y-auto pb-1">
             {loading ? <p className="py-8 text-center text-sm text-text-secondary">Loading…</p> : null}
 
+            {!loading && matchingConnected.length > 0 ? (
+              <section aria-labelledby="connected-connectors-heading">
+                <h4
+                  id="connected-connectors-heading"
+                  className="mb-2 text-[0.8125rem] font-semibold uppercase text-text-secondary"
+                >
+                  Configured · {matchingConnected.length}
+                </h4>
+                <div className="overflow-hidden rounded-xl border border-border bg-card-bg">
+                  {matchingConnected.map(connector => renderConnector(connector, true))}
+                </div>
+              </section>
+            ) : null}
+
+            {!loading &&
+            (emailStatus !== null || emailStatusFailed) &&
+            emailMatchesQuery &&
+            hasEmailSetup(connectorCatalog) ? (
+              <AccountConnectorCard
+                id="email"
+                title="Email"
+                glyph="@"
+                description="Read your email and, with your approval, draft and send it. Connects any email account with an app password."
+                connectedLine={emailStatus?.address ? `Connected as ${emailStatus.address}.` : null}
+                stoppedLine="Sign-in stopped working. Make a new app password and save it again."
+                notWorkingLine="Your email server could not be reached just now. Check your internet connection, then open Manage."
+                failedLabel="Couldn't check email right now"
+                state={emailStatus?.state ?? 'not_connected'}
+                failed={emailStatusFailed}
+                onOpen={() => setEmailPanelOpen(true)}
+                onRetry={() => void refresh()}
+              />
+            ) : null}
+
+            {!loading &&
+            (calendarStatus !== null || calendarStatusFailed) &&
+            calendarMatchesQuery &&
+            hasCalendarSetup(connectorCatalog) ? (
+              <AccountConnectorCard
+                id="calendar"
+                title="Calendar"
+                glyph="31"
+                description="Look at your calendar and, with your approval, add and change events. Connects your calendar with an app password."
+                connectedLine={calendarStatus?.email ? `Connected as ${calendarStatus.email}.` : null}
+                stoppedLine="Sign-in stopped working. Make a new app password and save it again."
+                notWorkingLine="Your calendar server could not be reached just now. Check your internet connection, then open Manage."
+                failedLabel="Couldn't check calendar right now"
+                state={calendarStatus?.state ?? 'not_connected'}
+                failed={calendarStatusFailed}
+                onOpen={() => setCalendarPanelOpen(true)}
+                onRetry={() => void refresh()}
+              />
+            ) : null}
+
             {!loading &&
             (googleStatus !== null || googleStatusFailed) &&
             googleMatchesQuery &&
@@ -827,20 +914,6 @@ const ConnectorSettings = () => {
                   Google
                 </h4>
                 <div className="overflow-hidden rounded-xl border border-border bg-card-bg">{renderGoogle()}</div>
-              </section>
-            ) : null}
-
-            {!loading && matchingConnected.length > 0 ? (
-              <section aria-labelledby="connected-connectors-heading">
-                <h4
-                  id="connected-connectors-heading"
-                  className="mb-2 text-[0.8125rem] font-semibold uppercase text-text-secondary"
-                >
-                  Configured · {matchingConnected.length}
-                </h4>
-                <div className="overflow-hidden rounded-xl border border-border bg-card-bg">
-                  {matchingConnected.map(connector => renderConnector(connector, true))}
-                </div>
               </section>
             ) : null}
 
@@ -928,6 +1001,28 @@ const ConnectorSettings = () => {
             <GoogleSetupPanel
               open={googlePanelOpen}
               onOpenChange={setGooglePanelOpen}
+              port={connectorCatalog}
+              onChanged={() => {
+                void refresh();
+              }}
+            />
+          ) : null}
+
+          {hasEmailSetup(connectorCatalog) ? (
+            <EmailSetupPanel
+              open={emailPanelOpen}
+              onOpenChange={setEmailPanelOpen}
+              port={connectorCatalog}
+              onChanged={() => {
+                void refresh();
+              }}
+            />
+          ) : null}
+
+          {hasCalendarSetup(connectorCatalog) ? (
+            <CalendarSetupPanel
+              open={calendarPanelOpen}
+              onOpenChange={setCalendarPanelOpen}
               port={connectorCatalog}
               onChanged={() => {
                 void refresh();

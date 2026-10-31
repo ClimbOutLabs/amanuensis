@@ -17,8 +17,10 @@ export enum CancellationReason {
   ClientCancelled = 'client-cancelled',
   // Prior turn aborted because the client started a new turn.
   CancelledForNextTurn = 'cancelled-for-next-turn',
-  // Process shutting down (SIGTERM/SIGINT).
+  // The process running the turn stopped: shut down, or restarted before the turn could finish.
   Abandoned = 'abandoned',
+  // The reply never started; nothing ran for this turn.
+  CouldNotStart = 'could-not-start',
 }
 
 export const TurnStateRunningSchema = z

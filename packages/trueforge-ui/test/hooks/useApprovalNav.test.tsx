@@ -46,44 +46,43 @@ describe('useApprovalNav', () => {
     useApprovals.mockImplementation(() => ({ pending }));
   });
 
-  it('keeps the selected approval when an earlier approval resolves', () => {
-    pending = [{ approvalId: 'A' }, { approvalId: 'B' }, { approvalId: 'C' }];
+  it('tracks the first pending approval and focuses it when it appears', () => {
+    pending = [{ approvalId: 'A' }, { approvalId: 'B' }];
+    const { result } = renderHook(() => useApprovalNav());
+
+    expect(result.current.count).toBe(2);
+    expect(result.current.currentId).toBe('A');
+    expect(focus).toHaveBeenCalledTimes(1);
+    expect(focus).toHaveBeenLastCalledWith('A');
+  });
+
+  it('moves to the next approval when the first one resolves', () => {
+    pending = [{ approvalId: 'A' }, { approvalId: 'B' }];
     const { result, rerender } = renderHook(() => useApprovalNav());
 
-    act(() => result.current.goNext());
-    expect(result.current.index).toBe(1);
-    expect(focus).toHaveBeenCalledTimes(2);
-
-    pending = [{ approvalId: 'B' }, { approvalId: 'C' }];
+    pending = [{ approvalId: 'B' }];
     rerender();
 
-    expect(result.current.index).toBe(0);
+    expect(result.current.currentId).toBe('B');
     expect(focus).toHaveBeenLastCalledWith('B');
     expect(focus).toHaveBeenCalledTimes(2);
   });
 
-  it('keeps the same slot when the selected approval resolves', () => {
-    pending = [{ approvalId: 'A' }, { approvalId: 'B' }, { approvalId: 'C' }];
-    const { result, rerender } = renderHook(() => useApprovalNav());
-
-    act(() => result.current.goNext());
-    pending = [{ approvalId: 'A' }, { approvalId: 'C' }];
-    rerender();
-
-    expect(result.current.index).toBe(1);
-    expect(focus).toHaveBeenLastCalledWith('C');
-  });
-
-  it('starts at the first approval and does not wrap', () => {
-    pending = [{ approvalId: 'A' }, { approvalId: 'B' }];
+  it('focuses the first approval again when asked', () => {
+    pending = [{ approvalId: 'A' }];
     const { result } = renderHook(() => useApprovalNav());
 
-    expect(result.current.index).toBe(0);
-    act(() => result.current.goPrev());
-    expect(result.current.index).toBe(0);
+    act(() => result.current.focusCurrent());
 
-    act(() => result.current.goNext());
-    act(() => result.current.goNext());
-    expect(result.current.index).toBe(1);
+    expect(focus).toHaveBeenCalledTimes(2);
+    expect(focus).toHaveBeenLastCalledWith('A', { focusPrimary: true });
+  });
+
+  it('reports no approval when none waits', () => {
+    const { result } = renderHook(() => useApprovalNav());
+
+    expect(result.current.count).toBe(0);
+    expect(result.current.currentId).toBeNull();
+    expect(focus).not.toHaveBeenCalled();
   });
 });

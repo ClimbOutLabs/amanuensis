@@ -7,9 +7,10 @@ import {
   type ToolSource,
 } from '../../../src/core';
 import { allowsChatApproval, allowsToolGrant } from '../../../src/core/mcp/approvalGrant';
-import { toolResultResponse, type ToolSchema } from '../../../src/core/mcp/IMCPServer';
 import { createToolCallMemoState, executeToolCalls } from '../../../src/core/mcp/executeToolCalls';
+import { toolResultResponse, type ToolSchema } from '../../../src/core/mcp/IMCPServer';
 import { connectRemoteMcp } from '../../../src/core/mcp/remoteMcpClient';
+import { DeferredTool } from '../../../src/core/runtime/DeferredTool';
 import type { ToolSelectorConfig } from '../../../src/core/mcp/ToolSelectorPolicy';
 import type { AuditRecordInput } from '../../../src/core/permissions/audit';
 import type { SentinelServices } from '../../../src/core/permissions/context';
@@ -31,6 +32,7 @@ function makeToolSet(params: {
   services: SentinelServices;
   requireApprovalForTools?: string[];
   firstParty?: boolean;
+  serverName?: string;
 }): ToolSet {
   mockConnect.mockImplementation(() =>
     Promise.resolve({
@@ -42,8 +44,8 @@ function makeToolSet(params: {
     }),
   );
   const remote = new RemoteMCP({
-    name: SERVER_NAME,
-    id: SERVER_NAME,
+    name: params.serverName ?? SERVER_NAME,
+    id: params.serverName ?? SERVER_NAME,
     url: 'https://mcp.example.com/mcp',
     headers: {},
     logger: noopLogger,
@@ -128,26 +130,30 @@ describe('ToolSet Sentinel classification of connector tools', () => {
   });
 
   it.each([
-    ['send_message', 'a name the classifier ranks as a send'],
-    ['delete_note', 'a name the classifier ranks as destructive'],
-    ['install_note_pack', 'a name the classifier ranks as an install'],
-  ])('refuses chat scope for %s even though the server declares it read-only and closed-world (%s)', async name => {
-    const tool: ToolSchema = {
-      name,
-      description: 'Claims to only read.',
-      inputSchema: schema,
-      annotations: { readOnlyHint: true, openWorldHint: false },
-    };
-    const info = await makeToolSet({ tools: [tool], services: servicesWithGrants([]) }).toolCallInfo({
-      name,
-      arguments: { to: 'friend@example.com', body: 'hello', package: 'left-pad' },
-    });
-    expect(info.tier).toBe(3);
-    expect(info.is_approval_required).toBe(true);
-    expect(info.effect).toBe('inspect');
-    expect(allowsChatApproval(info)).toBe(false);
-    expect(allowsToolGrant(info)).toBe(false);
-  });
+    ['send_message', 'a name the classifier ranks as a send', false],
+    ['delete_note', 'a name the classifier ranks as destructive', true],
+    ['install_note_pack', 'a name the classifier ranks as an install', false],
+  ])(
+    'asks for %s though the server declares it read-only and closed-world (%s), never with a standing grant',
+    async (name, _why, chat) => {
+      const tool: ToolSchema = {
+        name,
+        description: 'Claims to only read.',
+        inputSchema: schema,
+        annotations: { readOnlyHint: true, openWorldHint: false },
+      };
+      const info = await makeToolSet({ tools: [tool], services: servicesWithGrants([]) }).toolCallInfo({
+        name,
+        arguments: { to: 'friend@example.com', body: 'hello', package: 'left-pad' },
+      });
+      expect(info.tier).toBe(3);
+      expect(info.is_approval_required).toBe(true);
+      expect(info.effect).toBe('inspect');
+      // A delete may be answered once for the chat; a send asks every time, and so does an install.
+      expect(allowsChatApproval(info)).toBe(chat);
+      expect(allowsToolGrant(info)).toBe(false);
+    },
+  );
 
   it('tells the owner in plain words, end to end, when a send is refused before it runs', async () => {
     const reply: ToolSchema = { name: 'reply', description: 'Replies.', inputSchema: schema };
@@ -161,7 +167,12 @@ describe('ToolSet Sentinel classification of connector tools', () => {
         role: 'assistant',
         content: null,
         tool_calls: [
-          { id: 'c1', type: 'function', function: { name: 'reply', arguments: '{"body":"ok","cc":["a@example.com"]}' }, tool_info: info },
+          {
+            id: 'c1',
+            type: 'function',
+            function: { name: 'reply', arguments: '{"body":"ok","cc":["a@example.com"]}' },
+            tool_info: info,
+          },
         ],
       },
       toolMapping: new Map([['reply', { toolSet, originalToolName: 'reply' }]]),
@@ -179,13 +190,13 @@ describe('ToolSet Sentinel classification of connector tools', () => {
     expect(remediation?.message).not.toMatch(/card/i);
   });
 
-  it('refuses chat scope when the server hints escalate the tier', async () => {
+  it('refuses a standing grant when the server hints escalate the tier, but lets the chat answer once', async () => {
     const info = await makeToolSet({ tools: [destructiveRead], services: servicesWithGrants([]) }).toolCallInfo({
       name: 'archive_note',
       arguments: {},
     });
     expect(info.tier).toBe(3);
-    expect(allowsChatApproval(info)).toBe(false);
+    expect(allowsChatApproval(info)).toBe(true);
     expect(allowsToolGrant(info)).toBe(false);
   });
 
@@ -470,5 +481,221 @@ describe('ToolSet Sentinel classification of connector calendar changes', () => 
       services: servicesWithGrants(['list_events']),
     }).toolCallInfo({ name: 'list_events', arguments: {} });
     expect(info).toMatchObject({ tier: 1, is_approval_required: false });
+  });
+});
+
+describe("the operator's own Email sidecar, whose tools publish no annotations", () => {
+  const unannotated = (name: string): ToolSchema => ({ name, description: name, inputSchema: schema });
+  const tools = ['get_emails_content', 'list_emails_metadata', 'send_email'].map(unannotated);
+
+  it('reads mail with no card on the default gate, and still asks before sending', async () => {
+    const email = makeToolSet({ tools, services: servicesWithGrants([]), firstParty: true, serverName: 'Email' });
+    for (const name of ['get_emails_content', 'list_emails_metadata']) {
+      expect(await email.toolCallInfo({ name, arguments: {} })).toMatchObject({ tier: 1, is_approval_required: false });
+    }
+    const send = await email.toolCallInfo({ name: 'send_email', arguments: { to: ['dana@example.org'] } });
+    expect(send.is_approval_required).toBe(true);
+    expect(allowsChatApproval(send)).toBe(false);
+  });
+
+  it('keeps the default gate for the same tools on a connector the host does not vouch for', async () => {
+    const other = makeToolSet({ tools, services: servicesWithGrants([]), firstParty: false, serverName: 'Email' });
+    expect((await other.toolCallInfo({ name: 'get_emails_content', arguments: {} })).is_approval_required).toBe(true);
+  });
+});
+
+describe("the operator's own Email sidecar, with the annotations the mail server really publishes", () => {
+  // The upstream mail server annotates get_emails_content as a write (readOnlyHint false) only because
+  // of its optional mark-as-read choice; the call itself is a read while that choice is off.
+  const contentTool: ToolSchema = {
+    name: 'get_emails_content',
+    description: 'Reads email content.',
+    inputSchema: schema,
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+  };
+  const sendTool: ToolSchema = {
+    name: 'send_email',
+    description: 'Sends an email.',
+    inputSchema: schema,
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+  };
+
+  it('runs a plain content read with no card under the default gate', async () => {
+    const email = makeToolSet({
+      tools: [contentTool],
+      services: servicesWithGrants([]),
+      firstParty: true,
+      serverName: 'Email',
+    });
+    for (const args of [{ email_ids: ['e1'] }, { email_ids: ['e1'], mark_as_read: false }]) {
+      expect(await email.toolCallInfo({ name: 'get_emails_content', arguments: args })).toMatchObject({
+        tier: 1,
+        tier_reason: 'mail_read',
+        is_approval_required: false,
+      });
+    }
+    const response = await email.callTool({ name: 'get_emails_content', arguments: { email_ids: ['e1'] } });
+    expect(response).not.toHaveProperty('approvalRequired');
+  });
+
+  it('asks before reading with mark as read set, with the card for that change', async () => {
+    const email = makeToolSet({
+      tools: [contentTool],
+      services: servicesWithGrants([]),
+      firstParty: true,
+      serverName: 'Email',
+    });
+    const info = await email.toolCallInfo({
+      name: 'get_emails_content',
+      arguments: { email_ids: ['e1'], mark_as_read: true },
+    });
+    expect(info).toMatchObject({ tier: 3, tier_reason: 'mail_mark_as_read', is_approval_required: true });
+    expect(info.approval_token_id).toEqual(expect.any(String));
+  });
+
+  it('asks before marking when the choice arrives spelled as text through the call_tool wrapper', async () => {
+    const email = makeToolSet({
+      tools: [contentTool],
+      services: servicesWithGrants([]),
+      firstParty: true,
+      serverName: 'Email',
+    });
+    const deferred = new DeferredTool([email], { tracing: NOOP_AGENT_TRACING, logger: noopLogger });
+    const info = await deferred.toolCallInfo({
+      name: 'call_tool',
+      arguments: {
+        mcp_server: 'Email',
+        tool_name: 'get_emails_content',
+        input: { email_ids: ['e1'], mark_as_read: 'true' },
+      },
+    });
+    expect(info).toMatchObject({ tier: 3, tier_reason: 'mail_mark_as_read', is_approval_required: true });
+    expect(info.approval_token_id).toEqual(expect.any(String));
+  });
+
+  it.each([
+    ['a changed tag list', ['@write', '@destructive']],
+    ['the all tag', ['@all']],
+    ['a literal tool name', ['get_emails_content']],
+  ])('still gates a plain content read when the person set %s', async (_label, requireApprovalForTools) => {
+    const email = makeToolSet({
+      tools: [contentTool],
+      services: servicesWithGrants([]),
+      firstParty: true,
+      serverName: 'Email',
+      requireApprovalForTools,
+    });
+    const info = await email.toolCallInfo({ name: 'get_emails_content', arguments: { email_ids: ['e1'] } });
+    expect(info).toMatchObject({ tier: 1, is_approval_required: true });
+  });
+
+  it('keeps asking on a connector only named Email, which the host does not vouch for', async () => {
+    const other = makeToolSet({
+      tools: [contentTool],
+      services: servicesWithGrants([]),
+      firstParty: false,
+      serverName: 'Email',
+    });
+    const info = await other.toolCallInfo({ name: 'get_emails_content', arguments: { email_ids: ['e1'] } });
+    expect(info.is_approval_required).toBe(true);
+  });
+
+  it('never waives a destructive tool, even on the host-vouched read path', async () => {
+    const destructiveContent: ToolSchema = {
+      ...contentTool,
+      annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
+    };
+    const email = makeToolSet({
+      tools: [destructiveContent],
+      services: servicesWithGrants([]),
+      firstParty: true,
+      serverName: 'Email',
+    });
+    const info = await email.toolCallInfo({ name: 'get_emails_content', arguments: { email_ids: ['e1'] } });
+    expect(info).toMatchObject({ tier: 1, tier_reason: 'mail_read', is_approval_required: true });
+  });
+
+  it('runs a calendar read with no card when its annotations call it a write', async () => {
+    const listEvents: ToolSchema = {
+      name: 'list_events',
+      description: 'Lists events.',
+      inputSchema: schema,
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+    };
+    const calendar = makeToolSet({
+      tools: [listEvents],
+      services: servicesWithGrants([]),
+      firstParty: true,
+      serverName: 'Calendar',
+    });
+    const info = await calendar.toolCallInfo({ name: 'list_events', arguments: {} });
+    expect(info).toMatchObject({ tier: 1, tier_reason: 'caldav_private_read', is_approval_required: false });
+  });
+
+  it('still asks before sending, and no answer covers a send', async () => {
+    const email = makeToolSet({
+      tools: [sendTool],
+      services: servicesWithGrants([]),
+      firstParty: true,
+      serverName: 'Email',
+    });
+    const send = await email.toolCallInfo({ name: 'send_email', arguments: { to: ['dana@example.org'] } });
+    expect(send.is_approval_required).toBe(true);
+    expect(allowsChatApproval(send)).toBe(false);
+    expect(allowsToolGrant(send)).toBe(false);
+  });
+});
+
+describe("the operator's own Calendar sidecar, under a standing grant the person gave", () => {
+  const createEvent: ToolSchema = {
+    name: 'create_event',
+    description: 'Adds an event.',
+    inputSchema: schema,
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+  };
+  const deleteEvent: ToolSchema = {
+    name: 'delete_event',
+    description: 'Deletes an event.',
+    inputSchema: schema,
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
+  };
+
+  function calendarServices(granted: string[]): SentinelServices {
+    const services = defaultSentinelServices({ pinned_path: '/usr/bin:/bin' });
+    for (const tool_name of granted) {
+      void services.tool_grants.recordToolGrant({
+        tenant_id: 't1',
+        created_by: 'u1',
+        mcp_server_name: 'Calendar',
+        tool_name,
+        mcp_server_host: 'mcp.example.com',
+      });
+    }
+    return services;
+  }
+
+  it('runs a granted calendar write with no card under the default gate', async () => {
+    const calendar = makeToolSet({
+      tools: [createEvent],
+      services: calendarServices(['create_event']),
+      firstParty: true,
+      serverName: 'Calendar',
+    });
+    const info = await calendar.toolCallInfo({
+      name: 'create_event',
+      arguments: { summary: 'Lunch', start: '2026-10-22T12:00', end: '2026-10-22T13:00' },
+    });
+    expect(info).toMatchObject({ tier: 1, tier_reason: 'mcp_tool_grant', is_approval_required: false });
+  });
+
+  it('still asks for a destructive calendar call, granted or not', async () => {
+    const calendar = makeToolSet({
+      tools: [deleteEvent],
+      services: calendarServices(['delete_event']),
+      firstParty: true,
+      serverName: 'Calendar',
+    });
+    const info = await calendar.toolCallInfo({ name: 'delete_event', arguments: { id: 'evt-1' } });
+    expect(info).toMatchObject({ tier: 3, is_approval_required: true });
   });
 });

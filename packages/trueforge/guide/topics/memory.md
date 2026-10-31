@@ -1,7 +1,7 @@
 ---
 id: memory
 title: Memory
-covers: memory
+covers:
 ---
 
 Aman remembers what matters to you. Ask "What do you remember about me so far?" to see it.

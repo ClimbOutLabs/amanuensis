@@ -2,7 +2,7 @@ import { SLOT_MIRROR_GUEST_PORT } from '@truefoundry/trueforge-core/core';
 import { createHash } from 'node:crypto';
 import { lookup as dnsLookup, type LookupAddress } from 'node:dns';
 import { createReadStream, createWriteStream } from 'node:fs';
-import { mkdir, readdir, readFile, rename, stat, unlink, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, readdir, readFile, rename, stat, unlink, writeFile } from 'node:fs/promises';
 import {
   createServer,
   request as httpRequest,
@@ -155,11 +155,11 @@ function isPublicIpv6(address: string): boolean {
 /**
  * DNS lookup for upstream fetches: resolves the name, refuses the whole answer when any address in
  * it is not public, and pins the checked addresses for the connection, so what was checked is what
- * gets connected to.
+ * gets connected to. Shared with the skill network gateway, which makes the same promise.
  */
 type GuardedLookup = NonNullable<RequestOptions['lookup']>;
 
-const guardedLookup: GuardedLookup = (hostname, options, callback) => {
+export const guardedLookup: GuardedLookup = (hostname, options, callback) => {
   dnsLookup(hostname, { all: true, verbatim: true }, (error, addresses) => {
     if (error !== null) {
       callback(error, '', 0);
@@ -293,6 +293,17 @@ export class PackageMirrorGateway {
           resolve();
         });
       });
+      // The socket is created with the process umask, which leaves it closed to anyone but the app
+      // user; the slot agent runs as another user and connecting to a socket needs write permission
+      // on it. The folder around the socket is mounted only by the app and that one slot, so the
+      // folder is what limits who can reach the socket; open the socket itself the way the slot
+      // agent opens its control socket to the app.
+      try {
+        await chmod(socketPath, 0o666);
+      } catch (error: unknown) {
+        server.close();
+        throw error;
+      }
       this.#servers.push(server);
     }
   }

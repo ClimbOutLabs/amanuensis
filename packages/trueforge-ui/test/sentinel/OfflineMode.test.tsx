@@ -14,6 +14,9 @@ function stubApi(settings: SentinelUserSettings): { api: SentinelApi; updateUser
   }));
   const api: SentinelApi = {
     listAuditEntries: vi.fn(async () => []),
+    listBriefItemCompletions: async () => [],
+    markBriefItemDone: async () => undefined,
+    unmarkBriefItemDone: async () => undefined,
     listUserAuditEntries: vi.fn(async () => ({ entries: [] })),
     getUserSettings: vi.fn(async () => settings),
     updateUserSettings,
@@ -169,7 +172,7 @@ describe('SentinelSettings', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent('Save failed.');
   });
 
-  it('shows maps asking by default, and switches them to run without asking', async () => {
+  it('shows maps asking when they are set to ask, and switches them to run without asking', async () => {
     const { api, updateUserSettings } = stubApi({
       offline_mode: false,
       tier2_auto_allow: [],
@@ -193,9 +196,7 @@ describe('SentinelSettings', () => {
       expect(screen.getByRole('switch', { name: 'Show maps without asking' })).toBeChecked();
     });
     expect(
-      screen.getByText(
-        'Maps run without asking. After this chat reads your email or calendar, a map asks instead if it would share a name, email address or number from them.',
-      ),
+      screen.getByText('Maps run without asking. A map asks first only if it would send a password or key.'),
     ).toBeInTheDocument();
   });
 

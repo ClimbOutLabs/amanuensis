@@ -2,7 +2,7 @@ import { stampSentinelDecision } from '../../../src/core/mcp/ToolSet';
 import { autoDenyDecision, tier1Decision, tier2Decision, tier3Decision } from '../../../src/core/permissions/tier';
 
 const card = {
-  plain_what: 'Change `notes.md` in your workspace.',
+  plain_what: 'Change `notes.md` in your workspace?',
   plain_why: null,
   cannot_be_undone: null,
   why_asked_again: null,

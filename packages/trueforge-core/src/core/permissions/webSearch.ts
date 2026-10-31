@@ -1,52 +1,52 @@
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 
-import { isPrivateReadToolName } from './privateReadTools';
-import { addPrivateFingerprints, type ChatPrivateFingerprints, emptyChatPrivateFingerprints } from './privateTextCheck';
+import { EXTRACT_DOCUMENT_TEXT_TOOL_NAME } from '../../documents/toolContract';
+import { CALENDAR_READ_TOOL_NAMES } from '../calendar/toolContract';
+import { htmlImages } from '../email/gmail/htmlText';
+import { isGmailReadToolName } from '../email/gmail/toolContract';
+import { isMailReadToolName } from '../email/mailConnector/toolContract';
+import { DEFAULT_ASSISTANT_NAME } from '../personas/assistantName';
+import { REPLACE_TASK_CHECKLIST_TOOL_NAME, TASK_STATE_TOOL_NAME } from '../runtime/taskState';
+import { isPageReaderTool, isSearchResultTool } from '../search/fetchedPages';
+import {
+  emptyChatProvenance,
+  namesUrl,
+  recordEmailText,
+  recordPageImageUrls,
+  recordSearchResults,
+  recordUntrustedText,
+  type ChatProvenance,
+  type ReadSource,
+} from './provenance';
 
 /**
- * Host state and helpers for the designated search provider's silent runs: the per-turn count that
- * trips the loop breaker and the set of URLs the provider's own results returned, which is all a
- * silent fetch may name. Both live in host memory for one turn and never reach the model.
+ * Host state for one turn's outbound lookups: the count that trips the loop breaker, the text already sent, and where
+ * each link and address the model may name came from. It lives in host memory for one turn and never reaches the model.
  */
 
-/** Silent searches one turn may run before the next one asks. */
+/** Silent lookups one turn may run; the next is stopped with a plain line, never a card. */
 export const SILENT_SEARCH_LIMIT = 20;
 
-/** Silent fetches of one host a turn may run before the next one asks. */
-export const SILENT_FETCHES_PER_HOST = 2;
-
-/** Cap on remembered result URLs per turn, so a huge result cannot grow host memory without bound. */
-const MAX_RESULT_URLS = 500;
-
-/** Reason code for a search the designated provider ran without asking. */
+/** Reason code for a search or page read the designated provider ran without asking. */
 export const SEARCH_SILENT_REASON = 'mcp_search_provider';
 
-/** Reason code for a search that ran without asking after a private read, because its text was checked. */
-export const SEARCH_AFTER_READ_SILENT_REASON = 'mcp_search_after_read_checked';
-
-/** Reason code for a search that ran without asking under "Allow searches in this chat". */
-export const SEARCH_CHAT_GRANTED_SILENT_REASON = 'mcp_search_chat_granted';
-
-/** Reason code for a search held because the chat has read private data. */
-export const SEARCH_AFTER_PRIVATE_READ_REASON = 'mcp_search_after_private_read';
-
-/** Whether a decision reason is a search that ran without asking, after a private read or not. */
+/** Whether a decision reason is a search that ran without asking. */
 export function isSilentSearchReason(reason: string): boolean {
-  return (
-    reason === SEARCH_SILENT_REASON ||
-    reason === SEARCH_AFTER_READ_SILENT_REASON ||
-    reason === SEARCH_CHAT_GRANTED_SILENT_REASON
-  );
+  return reason === SEARCH_SILENT_REASON;
 }
+
+/** Reason code for a lookup held because read content chose its link and the link carries more than it gave. */
+export const SEARCH_STEERED_REASON = 'mcp_search_steered';
+
+/** Reason code for a lookup held because it carries a private detail of the person's, in a chat that read other content. */
+export const SEARCH_PRIVATE_DETAIL_REASON = 'mcp_search_private_detail';
 
 /** Reason codes for a designated-provider call that stops for approval, and why. */
 export const SEARCH_ASK_REASONS = [
   'mcp_search_setting_ask',
   'mcp_search_guard',
-  'mcp_search_limit',
-  'mcp_search_unreturned_url',
-  'mcp_search_host_limit',
-  SEARCH_AFTER_PRIVATE_READ_REASON,
+  SEARCH_STEERED_REASON,
+  SEARCH_PRIVATE_DETAIL_REASON,
 ] as const;
 export type SearchAskReason = (typeof SEARCH_ASK_REASONS)[number];
 
@@ -63,38 +63,14 @@ export interface SearchProviderGrant {
 }
 
 export interface WebSearchTurnState {
-  /** Searches that ran without asking this turn. */
+  /** Lookups that ran without asking this turn. */
   silentSearches: number;
-  /** URLs the designated provider returned this turn, exactly as returned. */
-  resultUrls: Set<string>;
-  /** Silent fetches this turn, by host. */
-  fetchesByHost: Map<string, number>;
   /** Tail of the text those searches sent, so a secret split across two searches is seen whole. */
   sentText: string;
-  /** True once the session read private data (mail, calendar or a secret), after which a search is checked or asks. */
-  privateDataRead: boolean;
-  /**
-   * Whether the chat's "Allow searches in this chat" grant is in force. Read at each search, so a grant the owner
-   * gives during a turn covers the rest of that reply.
-   */
-  searchChatGranted: () => boolean;
-  /**
-   * The chat's kept fingerprints: loaded from the saved chat at the turn's start, then extended with this turn's
-   * private texts. A grant's search check runs against these, since the texts of earlier turns are not held here.
-   */
-  chatFingerprints: ChatPrivateFingerprints;
-  /** True once this turn had a private text it could not fingerprint, so the kept fingerprints miss a copy. */
-  fingerprintsLost: boolean;
-  /** True when the chat had a saved fingerprint record at the turn's start. A history mark without one is unchecked. */
-  savedFingerprintsLoaded: boolean;
-  /** Text of the private reads' results this turn received, so a later search can be checked against it. */
-  privateTexts: string[];
-  /** Private reads this turn that reached the model, by any thread. Each must have its result kept as text. */
-  privateReadCalls: number;
-  /** Private read results kept as text this turn, by any thread. */
-  privateTextsKept: number;
-  /** True when the private mark came from saved state or old context, whose text this turn never saw. */
-  privateTextLost: boolean;
+  /** Where the links and addresses this chat has seen came from. */
+  provenance: ChatProvenance;
+  /** The name the person calls the assistant, for the sentences on its cards. */
+  assistantName: string;
   /** Tail of the one-at-a-time chain that classifies and counts the turn's search calls. */
   admission: Promise<void>;
 }
@@ -102,18 +78,9 @@ export interface WebSearchTurnState {
 export function createWebSearchTurnState(): WebSearchTurnState {
   return {
     silentSearches: 0,
-    resultUrls: new Set(),
-    fetchesByHost: new Map(),
     sentText: '',
-    privateDataRead: false,
-    searchChatGranted: () => false,
-    chatFingerprints: emptyChatPrivateFingerprints(),
-    fingerprintsLost: false,
-    savedFingerprintsLoaded: false,
-    privateTexts: [],
-    privateReadCalls: 0,
-    privateTextsKept: 0,
-    privateTextLost: false,
+    provenance: emptyChatProvenance(),
+    assistantName: DEFAULT_ASSISTANT_NAME,
     admission: Promise.resolve(),
   };
 }
@@ -130,199 +97,6 @@ export function runOneAtATime<T>(input: { state: WebSearchTurnState; work: () =>
     () => undefined,
   );
   return run;
-}
-
-const TRAILING_PUNCTUATION = /[.,;:!?)\]}'"]+$/;
-const SCHEME_URL = /[A-Za-z][A-Za-z0-9+.-]*:\/\/[^\s"'<>\\`]+/g;
-const SCHEMELESS_URL_WITH_PATH = /(?<![\w@.-])(?:[A-Za-z0-9-]+\.)+[A-Za-z]{2,}(?::\d+)?\/[^\s"'<>\\`]*/g;
-const WWW_URL = /(?<![\w@.-])www\.[^\s"'<>\\`]+/gi;
-/** A whole value that is a bare host (optionally with port and path): `example.com`, `10.0.0.1:8080/x`. */
-const WHOLE_HOST = /^(?:(?:[A-Za-z0-9-]+\.)+[A-Za-z]{2,}|\d{1,3}(?:\.\d{1,3}){3})(?::\d+)?(?:[/?#]\S*)?$/;
-
-/** URLs in free text, each match removed before the next pattern runs so one URL is never counted twice. */
-function urlsInText(text: string): string[] {
-  const found: string[] = [];
-  let rest = text;
-  for (const pattern of [SCHEME_URL, WWW_URL, SCHEMELESS_URL_WITH_PATH]) {
-    rest = rest.replace(pattern, match => {
-      found.push(match);
-      return ' ';
-    });
-  }
-  return found;
-}
-
-/** Keys whose contents describe the page or what it links to, never the result itself. */
-const NON_RESULT_KEYS = new Set(['links', 'metadata', 'images', 'favicon', 'excerpts', 'content', 'raw_content']);
-const MAX_RESULT_DEPTH = 3;
-
-/** The `url` field of each result object in a provider's JSON; text inside a result is never read for links. */
-function collectResultUrls(node: unknown, into: string[], depth: number): void {
-  if (depth > MAX_RESULT_DEPTH) {
-    return;
-  }
-  if (Array.isArray(node)) {
-    for (const child of node) {
-      collectResultUrls(child, into, depth + 1);
-    }
-  } else if (typeof node === 'object' && node !== null) {
-    for (const [key, child] of Object.entries(node)) {
-      if (key === 'url' && typeof child === 'string') {
-        into.push(child);
-      } else if (!NON_RESULT_KEYS.has(key)) {
-        collectResultUrls(child, into, depth + 1);
-      }
-    }
-  }
-}
-
-/**
- * Remembers each result's own `url` field, as returned. A link that only appears in an excerpt, a
- * result's own links, or prose is not a result, so a fetch of it asks. Nothing else is ever added.
- */
-export function recordResultUrls(input: { state: WebSearchTurnState; texts: readonly string[] }): void {
-  for (const text of input.texts) {
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(text);
-    } catch {
-      continue;
-    }
-    const urls: string[] = [];
-    collectResultUrls(parsed, urls, 0);
-    for (const url of urls) {
-      if (url.length > 0 && input.state.resultUrls.size < MAX_RESULT_URLS) {
-        input.state.resultUrls.add(url);
-      }
-    }
-  }
-}
-
-function isWholeUrl(value: string): boolean {
-  return WHOLE_HOST.test(value) || /^[A-Za-z][A-Za-z0-9+.-]*:\/\/\S+$/.test(value) || /^www\.\S+$/i.test(value);
-}
-
-/** Whether any outbound value is, or contains, a URL: a call that fetches rather than searches. */
-export function namesUrl(values: readonly string[]): boolean {
-  return values.some(value => isWholeUrl(value) || urlsInText(value).length > 0);
-}
-
-/**
- * URLs an outbound call names that no search result of this turn returned. A value that is itself a
- * URL must match a returned one exactly; a URL embedded in prose may also match without trailing
- * punctuation. A bare hostname counts as a URL, so a model cannot compose a fetch by dropping the
- * scheme.
- */
-export function unreturnedUrls(input: { values: readonly string[]; state: WebSearchTurnState }): string[] {
-  const unreturned: string[] = [];
-  for (const value of input.values) {
-    if (isWholeUrl(value)) {
-      if (!input.state.resultUrls.has(value)) {
-        unreturned.push(value);
-      }
-      continue;
-    }
-    for (const url of urlsInText(value)) {
-      if (!input.state.resultUrls.has(url) && !input.state.resultUrls.has(url.replace(TRAILING_PUNCTUATION, ''))) {
-        unreturned.push(url);
-      }
-    }
-  }
-  return unreturned;
-}
-
-/** Host of a URL as the fetch would reach it, or undefined when the value does not parse as one. */
-function hostOfUrl(value: string): string | undefined {
-  try {
-    return new URL(/^[A-Za-z][A-Za-z0-9+.-]*:\/\//.test(value) ? value : `https://${value}`).hostname.toLowerCase();
-  } catch {
-    return undefined;
-  }
-}
-
-/** Distinct hosts of the URLs an outbound call names. */
-function fetchedHosts(values: readonly string[]): Set<string> {
-  const hosts = new Set<string>();
-  for (const value of values) {
-    for (const url of isWholeUrl(value) ? [value] : urlsInText(value)) {
-      const host = hostOfUrl(url);
-      if (host !== undefined) {
-        hosts.add(host);
-      }
-    }
-  }
-  return hosts;
-}
-
-/** Whether the call names a host the turn already fetched silently its allowance of times. */
-export function namesHostAtFetchLimit(input: { values: readonly string[]; state: WebSearchTurnState }): boolean {
-  return [...fetchedHosts(input.values)].some(
-    host => (input.state.fetchesByHost.get(host) ?? 0) >= SILENT_FETCHES_PER_HOST,
-  );
-}
-
-export function countSilentFetches(input: { values: readonly string[]; state: WebSearchTurnState }): void {
-  for (const host of fetchedHosts(input.values)) {
-    input.state.fetchesByHost.set(host, (input.state.fetchesByHost.get(host) ?? 0) + 1);
-  }
-}
-
-/**
- * The one place that records and answers "has this session read private data". Called for each private read before
- * its result reaches the model, so the search provider's classifier sees every read first.
- */
-export function markPrivateDataRead(state: WebSearchTurnState): void {
-  state.privateDataRead = true;
-  state.privateReadCalls += 1;
-}
-
-/** Mark restored from saved state or from the context of a thread: the text it read is not held here. */
-export function markPrivateDataReadFromHistory(state: WebSearchTurnState): void {
-  state.privateDataRead = true;
-  state.privateTextLost = true;
-  if (!state.savedFingerprintsLoaded) {
-    state.fingerprintsLost = true;
-  }
-}
-
-export function hasReadPrivateData(state: WebSearchTurnState): boolean {
-  return state.privateDataRead;
-}
-
-/** Above this, the text is not kept whole, so a check could miss a copy; the turn then asks. */
-const MAX_PRIVATE_TEXT_CHARS = 2_000_000;
-
-/** Keeps the text a private read's result returned, for the checks on later searches and maps. */
-export function recordPrivateReadText(input: { state: WebSearchTurnState; text: string }): void {
-  input.state.privateTextsKept += 1;
-  keepText(input);
-}
-
-/**
- * Keeps a sub-agent's final answer for the checks. The answer reaches the parent's model and can carry what the
- * sub-agent read from mail, so it is checked like a private read's text. It is not counted as a read, so it cannot
- * stand in for one that failed.
- */
-export function keepSubAgentAnswerText(input: { state: WebSearchTurnState; text: string }): void {
-  keepText(input);
-}
-
-function keepText(input: { state: WebSearchTurnState; text: string }): void {
-  const { state, text } = input;
-  // Fingerprints are kept even after the turn's own text was lost, since a later turn checks them.
-  if (!state.fingerprintsLost && !addPrivateFingerprints({ state: state.chatFingerprints, text })) {
-    state.fingerprintsLost = true;
-  }
-  if (state.privateTextLost) {
-    return;
-  }
-  const kept = state.privateTexts.reduce((total, held) => total + held.length, 0);
-  if (kept + text.length > MAX_PRIVATE_TEXT_CHARS) {
-    state.privateTexts = [];
-    state.privateTextLost = true;
-    return;
-  }
-  state.privateTexts.push(text);
 }
 
 /** Text a result carries: its text blocks and its structured content. An error result carries none. */
@@ -344,98 +118,149 @@ export function resultTexts(result: CallToolResult): string[] {
   return texts;
 }
 
-/**
- * The text of a private read's result, or undefined when it cannot be read whole: an error, or a block that is
- * not text (an image or a file this check cannot scan).
- */
-function scannableResultText(result: CallToolResult): string | undefined {
-  if (result.isError === true || !Array.isArray(result.content)) {
-    return undefined;
-  }
-  if (result.content.some(block => block.type !== 'text')) {
-    return undefined;
-  }
-  return resultTexts(result).join('\n');
+/** A markdown picture: `![alt](url)` with an optional title after the link. */
+const MARKDOWN_IMAGE = /!\[([^\]]*)\]\(\s*<?([^)\s>]+)>?(?:\s+(?:"[^"]*"|'[^']*'))?\s*\)/g;
+
+/** Cap on image links taken from one page read, so a gallery page cannot grow host memory without bound. */
+const MAX_PAGE_IMAGE_URLS = 200;
+
+/** Most pictures the model is shown from one page read; the list is a hint, not the page's whole gallery. */
+const PAGE_PICTURES_SHOWN_MAX = 8;
+
+/** Longest description shown beside a picture link; a page's alt text can run to a paragraph. */
+const PICTURE_ALT_MAX_CHARS = 120;
+
+/** The name of the host-added picture list under a page read; the refusal for a made up picture names it. */
+export const PAGE_PICTURES_LABEL = 'Pictures on this page';
+
+const PAGE_PICTURES_HEADING = `${PAGE_PICTURES_LABEL}:`;
+
+/** One picture a page shows: its link and, when the page gives one, the words that describe it. */
+export interface PagePicture {
+  url: string;
+  alt: string | undefined;
 }
 
 /**
- * Records one tool result that is about to reach the model. The dispatch loop calls this for every result, so no
- * tool has to remember to. A private read is always marked, and its text is kept when it can be scanned; one that
- * cannot be scanned keeps no text, so the turn's later searches and maps ask. Once the turn has read private data,
- * any other result is kept too, since a command can print a file a mail read downloaded. An error from a tool that
- * does not read private data carries no file text, so it is not kept.
+ * The pictures a page read returned, from markdown pictures and raw `<img>` tags, once each and in
+ * order. Tracking pixels are left out by the HTML reader, and a data: picture is not a link out, so
+ * only web picture links are returned. This is the one reader of a page's pictures: the provenance
+ * record and the list the model is shown both come from it.
  */
-export function recordPrivateToolResult(input: {
+export function pagePictures(text: string): PagePicture[] {
+  const pictures: PagePicture[] = [];
+  const add = ({ url: raw, alt }: PagePicture): void => {
+    const url = raw.trim();
+    if (/^https?:\/\//i.test(url) && url.length <= 2048 && !pictures.some(picture => picture.url === url)) {
+      pictures.push({ url, alt });
+    }
+  };
+  for (const match of text.matchAll(MARKDOWN_IMAGE)) {
+    if (match[2] !== undefined) {
+      const alt = match[1]?.trim() ?? '';
+      add({ url: match[2], alt: alt === '' ? undefined : alt });
+    }
+  }
+  for (const image of htmlImages({ source: text, max: MAX_PAGE_IMAGE_URLS })) {
+    add(image);
+  }
+  return pictures;
+}
+
+/** The picture links a page read returned, as `pagePictures` finds them. */
+export function pageImageUrls(text: string): string[] {
+  return pagePictures(text).map(picture => picture.url);
+}
+
+/**
+ * The short list of a page's pictures the model is shown under a page read, or undefined when the
+ * tool is not a page reader or the page has no https picture. It is a host-added list, kept apart
+ * from the page text so the page's own words stay framed as untrusted data. A space only accepts an
+ * https picture, so an http one is left out rather than offered and then refused.
+ */
+export function pagePicturesNote(input: { tool_name: string; text: string }): string | undefined {
+  if (!isPageReaderTool(baseToolName(input.tool_name))) {
+    return undefined;
+  }
+  const shown = pagePictures(input.text)
+    .filter(picture => /^https:\/\//i.test(picture.url))
+    .slice(0, PAGE_PICTURES_SHOWN_MAX);
+  if (shown.length === 0) {
+    return undefined;
+  }
+  const lines = shown.map(picture => {
+    const alt = picture.alt?.replace(/\s+/g, ' ').trim().slice(0, PICTURE_ALT_MAX_CHARS) ?? '';
+    return alt === '' ? `- ${picture.url}` : `- ${picture.url} (${alt})`;
+  });
+  return [PAGE_PICTURES_HEADING, ...lines].join('\n');
+}
+
+/** A tool's own name, without the server prefix a connector adds. */
+function baseToolName(toolName: string): string {
+  const separator = toolName.lastIndexOf('__');
+  return separator < 0 ? toolName : toolName.slice(separator + 2);
+}
+
+/**
+ * Host tools whose results never contain stored or outside text: the finding recorder answers with a fixed
+ * line, and the task checklist writer answers with the checklist the model just wrote. Spaces, schedules and
+ * reminders are not here: their results echo stored bodies, names and tasks that may hold page text saved in
+ * an earlier turn. This is the only list; any tool not on it, including every connector, shell tool and
+ * unknown name, counts as bringing in outside content.
+ */
+const HOST_ONLY_TOOL_NAMES: ReadonlySet<string> = new Set([TASK_STATE_TOOL_NAME, REPLACE_TASK_CHECKLIST_TOOL_NAME]);
+
+/** Whether a tool's result may hold text written outside the chat: true for every tool not known to be host-only. */
+export function toolReturnsOutsideContent(toolName: string): boolean {
+  return !HOST_ONLY_TOOL_NAMES.has(baseToolName(toolName));
+}
+
+/** The kind of content a tool's result is, so a card or a memory note can say where something was read. */
+export function readSourceOf(toolName: string): ReadSource {
+  const baseName = baseToolName(toolName);
+  if (isSearchResultTool(baseName) || isPageReaderTool(baseName)) {
+    return 'page';
+  }
+  if (isGmailReadToolName(baseName) || isMailReadToolName(baseName)) {
+    return 'email';
+  }
+  if (CALENDAR_READ_TOOL_NAMES.some(name => name === baseName)) {
+    return 'event';
+  }
+  return baseName === EXTRACT_DOCUMENT_TEXT_TOOL_NAME ? 'file' : 'tool_result';
+}
+
+/**
+ * Records where the links and addresses of one tool result came from, before the model reads it. A search's results
+ * are the person's to open; every other text is data, the headers of their own mail and their events' guests too.
+ * `argument_values` are the call's own strings, so a search that names a link counts as opening a page.
+ */
+export function recordToolResultProvenance(input: {
   state: WebSearchTurnState;
   tool_name: string;
-  result: CallToolResult;
+  argument_values: readonly string[];
+  texts: readonly string[];
 }): void {
-  const { state, result } = input;
-  if (isPrivateReadToolName(input.tool_name)) {
-    markPrivateDataRead(state);
-    const text = scannableResultText(result);
-    if (text !== undefined && text !== '') {
-      recordPrivateReadText({ state, text });
+  const { provenance } = input.state;
+  const baseName = baseToolName(input.tool_name);
+  const searchTool = isSearchResultTool(baseName);
+  if (searchTool && !namesUrl(input.argument_values)) {
+    recordSearchResults({ provenance, texts: input.texts });
+    return;
+  }
+  const source = readSourceOf(baseName);
+  const pageReader = isPageReaderTool(baseName);
+  for (const text of input.texts) {
+    if (source === 'email') {
+      recordEmailText({ provenance, text });
+    } else {
+      recordUntrustedText({ provenance, text, source });
     }
-    return;
+    if (pageReader) {
+      // A page the chat opened is the exception to that rule for its pictures: opening the page
+      // saw them, so a space may use a picture file the search result never named. Only the
+      // page's own pictures count, and the page's text itself stays untrusted data.
+      recordPageImageUrls({ provenance, urls: pageImageUrls(text) });
+    }
   }
-  if (!hasReadPrivateData(state) || result.isError === true) {
-    return;
-  }
-  const text = scannableResultText(result);
-  if (text === undefined) {
-    state.privateTexts = [];
-    state.privateTextLost = true;
-    state.fingerprintsLost = true;
-    return;
-  }
-  keepText({ state, text });
-}
-
-/**
- * Whether the chat's saved fingerprints can check this turn's searches: every private read the chat made has its
- * text fingerprinted, and none was lost. A chat that cannot be checked asks before each search.
- */
-export function privateFingerprintsUsable(state: WebSearchTurnState): boolean {
-  return (
-    state.chatFingerprints.complete &&
-    !state.fingerprintsLost &&
-    state.privateTextsKept >= state.privateReadCalls &&
-    !state.chatFingerprints.secret
-  );
-}
-
-/**
- * Whether the chat has read private data that a search or map must not send without asking. The process mark is lost
- * on a restart, so the saved record answers too: it is incomplete only after a private read Aman could not check.
- */
-export function chatPrivateReadHeld(input: { state: WebSearchTurnState; markedInProcess: boolean }): boolean {
-  const saved = input.state.chatFingerprints;
-  return input.markedInProcess || saved.secret || (input.state.savedFingerprintsLoaded && !saved.complete);
-}
-
-/** Whether this turn holds private-text fingerprints, or a lost one, that the chat's saved record must take in. */
-export function hasPrivateFingerprintsToSave(state: WebSearchTurnState): boolean {
-  return state.privateReadCalls > 0 || state.fingerprintsLost || state.chatFingerprints.secret;
-}
-
-/** The chat's fingerprints as the next turn of this chat loads them. */
-export function chatFingerprintsAfterTurn(state: WebSearchTurnState): ChatPrivateFingerprints {
-  return {
-    complete: privateFingerprintsUsable(state),
-    has_text: state.chatFingerprints.has_text,
-    secret: state.chatFingerprints.secret,
-    entries: state.chatFingerprints.entries,
-  };
-}
-
-/**
- * The text a search or map is checked against, or undefined when it is not all there: the mark came
- * from earlier history, or some private read has no result kept to compare with.
- */
-export function privateTextForChecks(state: WebSearchTurnState): readonly string[] | undefined {
-  if (state.privateTextLost || state.privateTextsKept < state.privateReadCalls) {
-    return undefined;
-  }
-  return state.privateTexts;
 }

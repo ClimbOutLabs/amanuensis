@@ -25,6 +25,7 @@ services:
     networks:
       - default
       - link
+@@IF_CALENDAR@@      - calendar
     restart: unless-stopped
 
   # Carries the app's speech requests to the shared speech services and nothing else: speech-to-text on 8001, the voice
@@ -72,6 +73,10 @@ services:
 @@IF_EMAIL@@      # The Email send list the server writes, and the connector's status file it reads (see mail-email).
 @@IF_EMAIL@@      MAIL_POLICY_FILE: /data/mail-policy/allowed_recipients.toml
 @@IF_EMAIL@@      MAIL_POLICY_STATUS_FILE: /data/mail-policy-status/loaded.sha256
+@@IF_EMAIL@@      # The sidecar's account agent, which the Settings Email card talks to. Fixed inside the private network.
+@@IF_EMAIL@@      MAIL_EMAIL_ACCOUNT_URL: http://mail-email:9559
+@@IF_CALENDAR@@      # The calendar sidecar's account agent, which the Settings Calendar card talks to. Fixed inside the private network.
+@@IF_CALENDAR@@      CALENDAR_ACCOUNT_URL: http://calendar-caldav:9560
     volumes:
       - data:/data
 @@IF_SANDBOX@@      # Read-only views of each slot's control socket. No Docker socket, no workspace volume.
@@ -117,8 +122,20 @@ services:
 @@IF_TLS@@    command: ['caddy', 'run', '--config', '/etc/caddy/Caddyfile']
 @@IF_TLS@@    volumes:
 @@IF_TLS@@      - ./tls.Caddyfile:/etc/caddy/Caddyfile:ro
-@@IF_TLS@@      - @@TLS_LEAF_DIR@@:/certs:ro
-@@IF_TLS@@      - @@TLS_TRUST_DIR@@:/srv/trust:ro
+@@IF_TLS_HOST@@      - @@TLS_LEAF_DIR@@:/certs:ro
+@@IF_TLS_HOST@@      - @@TLS_TRUST_DIR@@:/srv/trust:ro
+@@IF_TLS_VOLUME@@      - type: volume
+@@IF_TLS_VOLUME@@        source: aman_home
+@@IF_TLS_VOLUME@@        target: /certs
+@@IF_TLS_VOLUME@@        read_only: true
+@@IF_TLS_VOLUME@@        volume:
+@@IF_TLS_VOLUME@@          subpath: tls/leaf/@@NAME@@
+@@IF_TLS_VOLUME@@      - type: volume
+@@IF_TLS_VOLUME@@        source: aman_home
+@@IF_TLS_VOLUME@@        target: /srv/trust
+@@IF_TLS_VOLUME@@        read_only: true
+@@IF_TLS_VOLUME@@        volume:
+@@IF_TLS_VOLUME@@          subpath: tls/trust/@@NAME@@
 @@IF_TLS@@    # It needs no privileges beyond the one its binary is marked with, and writes only to memory.
 @@IF_TLS@@    cap_drop:
 @@IF_TLS@@      - ALL
@@ -141,20 +158,31 @@ services:
 @@IF_TLS@@      retries: 10
 @@IF_TLS@@    restart: unless-stopped
 
-# Calendar connector. It starts only when named, so an instance without a calendar never runs it. The app reaches it at
-# http://calendar-caldav:9558/mcp on this project's private network. Nothing is published, and the credentials come only from .env.calendar.
+# Calendar connector. It starts with the instance whenever the release has its image, so the Settings Calendar card can
+# set it up. The app reaches it at http://calendar-caldav:9558/mcp. Nothing is published. It sits on a network of its own
+# that only the app's network holder shares, so no other service (the mail connector reads untrusted mail) can reach its
+# account port, which also answers only a caller that presents this instance's secret.
+# The calendar login lives in a volume this sidecar owns, which the installer writes through the sidecar's account agent
+# and the Settings Calendar card changes through the same agent on port 9560.
+# The tool server inside runs only while a login is saved.
 @@IF_CALENDAR@@  calendar-caldav:
 @@IF_CALENDAR@@    image: @@CALENDAR_IMAGE@@
 @@IF_CALENDAR@@    pull_policy: never
-@@IF_CALENDAR@@    profiles: ['calendar']
-@@IF_CALENDAR@@    env_file:
-@@IF_CALENDAR@@      - path: ./.env.calendar
-@@IF_CALENDAR@@        required: false
 @@IF_CALENDAR@@    environment:
 @@IF_CALENDAR@@      CALDAV_ALLOW_TOOLS: list_calendars,list_events,get_event,search_events,create_event,update_event,delete_event,respond_to_event
 @@IF_CALENDAR@@      ELICITATION: 'false'
+@@IF_CALENDAR@@      # The account agent: the account file it owns and its private-network port.
+@@IF_CALENDAR@@      CALENDAR_ACCOUNT_FILE: /account/.env.calendar
+@@IF_CALENDAR@@      CALENDAR_ACCOUNT_PORT: '9560'
+@@IF_CALENDAR@@      # Shared with the app through .env, which the installer fills in once.
+@@IF_CALENDAR@@      CALENDAR_ACCOUNT_SECRET: ${CALENDAR_ACCOUNT_SECRET:?missing from .env}
+@@IF_CALENDAR@@    networks:
+@@IF_CALENDAR@@      - calendar
+@@IF_CALENDAR@@    volumes:
+@@IF_CALENDAR@@      - calendar-account:/account
 @@IF_CALENDAR@@    expose:
 @@IF_CALENDAR@@      - '9558'
+@@IF_CALENDAR@@      - '9560'
 @@IF_CALENDAR@@    cap_drop:
 @@IF_CALENDAR@@      - ALL
 @@IF_CALENDAR@@    security_opt:
@@ -162,16 +190,15 @@ services:
 @@IF_CALENDAR@@    restart: unless-stopped
 
 # Email connector. It starts with the instance, and the app reaches it at http://mail-email:9557/mcp on this project's
-# private network. Nothing is published. Account credentials come only from .env.mail-email, which the installer writes.
+# private network. Nothing is published. The account lives in a volume this sidecar owns, which the installer writes
+# through the sidecar's account agent and the Settings Email card changes through the same agent on port 9559,
+# also private-network only.
 @@IF_EMAIL@@  mail-email:
 @@IF_EMAIL@@    image: @@MAIL_EMAIL_IMAGE@@
 @@IF_EMAIL@@    pull_policy: never
 @@IF_EMAIL@@    # The wrapper starts the connector on the send list the app writes, and restarts it when that list changes.
 @@IF_EMAIL@@    entrypoint: ['/bin/sh', '/usr/local/bin/aman-mail-entrypoint']
 @@IF_EMAIL@@    command: ['streamable-http', '--host', '0.0.0.0', '--port', '9557']
-@@IF_EMAIL@@    env_file:
-@@IF_EMAIL@@      - path: ./.env.mail-email
-@@IF_EMAIL@@        required: false
 @@IF_EMAIL@@    environment:
 @@IF_EMAIL@@      # Only requests addressed to this service name pass the DNS-rebinding check.
 @@IF_EMAIL@@      MCP_ALLOWED_HOSTS: mail-email
@@ -179,14 +206,23 @@ services:
 @@IF_EMAIL@@      MCP_EMAIL_SERVER_CREDENTIAL_STORAGE: plaintext
 @@IF_EMAIL@@      MCP_EMAIL_SERVER_CONFIG_PATH: /policy/allowed_recipients.toml
 @@IF_EMAIL@@      AMAN_MAIL_STATUS_FILE: /mail-status/loaded.sha256
+@@IF_EMAIL@@      # The account agent: the account file it owns, its private-network port, and its own path in the image.
+@@IF_EMAIL@@      AMAN_MAIL_ACCOUNT_FILE: /account/.env.mail-email
+@@IF_EMAIL@@      AMAN_MAIL_ACCOUNT_PORT: '9559'
+@@IF_EMAIL@@      AMAN_MAIL_ACCOUNT_AGENT: /usr/local/bin/aman-mail-account-agent
+@@IF_EMAIL@@      AMAN_MAIL_EMAIL_CHECK: /usr/local/bin/aman-mail-email-check
 @@IF_EMAIL@@      MCP_EMAIL_SERVER_ENABLE_ATTACHMENT_CONTENT: 'true'
 @@IF_EMAIL@@    volumes:
 @@IF_EMAIL@@      - ./mail-email-entrypoint.sh:/usr/local/bin/aman-mail-entrypoint:ro
+@@IF_EMAIL@@      - ./mail-account-agent.py:/usr/local/bin/aman-mail-account-agent:ro
+@@IF_EMAIL@@      - ./mail-email-check.py:/usr/local/bin/aman-mail-email-check:ro
+@@IF_EMAIL@@      - mail-account:/account
 @@IF_EMAIL@@      - mail-policy:/policy:ro
 @@IF_EMAIL@@      - mail-policy-status:/mail-status
 @@IF_EMAIL@@      - mail-email-data:/data
 @@IF_EMAIL@@    expose:
 @@IF_EMAIL@@      - '9557'
+@@IF_EMAIL@@      - '9559'
 @@IF_EMAIL@@    cap_drop:
 @@IF_EMAIL@@      - ALL
 @@IF_EMAIL@@    security_opt:
@@ -229,6 +265,12 @@ volumes:
     name: aman_@@NAME@@_dex
     labels:
       com.amanuensis.instance: @@NAME@@
+@@IF_TLS_VOLUME@@
+@@IF_TLS_VOLUME@@  # The state volume itself, declared so the https folders above can be mounted from inside it.
+@@IF_TLS_VOLUME@@  # The setup that put the state there made it; Compose never makes it.
+@@IF_TLS_VOLUME@@  aman_home:
+@@IF_TLS_VOLUME@@    name: aman_home
+@@IF_TLS_VOLUME@@    external: true
 
 @@IF_EMAIL@@  # The Email send list. Holds only addresses, never credentials.
 @@IF_EMAIL@@  mail-policy:
@@ -245,6 +287,16 @@ volumes:
 @@IF_EMAIL@@    name: aman_@@NAME@@_mail_email_data
 @@IF_EMAIL@@    labels:
 @@IF_EMAIL@@      com.amanuensis.instance: @@NAME@@
+@@IF_EMAIL@@  # The Email account file, owned by the connector. Holds the app password; nothing else reads it.
+@@IF_EMAIL@@  mail-account:
+@@IF_EMAIL@@    name: aman_@@NAME@@_mail_account
+@@IF_EMAIL@@    labels:
+@@IF_EMAIL@@      com.amanuensis.instance: @@NAME@@
+@@IF_CALENDAR@@  # The Calendar login file, owned by the connector. Holds the app password; nothing else reads it.
+@@IF_CALENDAR@@  calendar-account:
+@@IF_CALENDAR@@    name: aman_@@NAME@@_calendar_account
+@@IF_CALENDAR@@    labels:
+@@IF_CALENDAR@@      com.amanuensis.instance: @@NAME@@
 @@IF_SANDBOX@@  # Created by the slots project, which the installer starts before this one.
 @@IF_SANDBOX@@  slot_ctl_1:
 @@IF_SANDBOX@@    name: @@NAME@@_slot_ctl_1
@@ -280,3 +332,6 @@ networks:
   speech:
     internal: true
     name: @@STT_NETWORK@@
+  # Between the app's network holder and the calendar connector only. Not internal: the connector reaches the
+  # calendar server on the internet.
+@@IF_CALENDAR@@  calendar: {}

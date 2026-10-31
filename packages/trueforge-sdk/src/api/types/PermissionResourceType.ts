@@ -2,8 +2,8 @@
 
 /** Resource type to evaluate permissions for. */
 export const PermissionResourceType = {
-        Agent: "agent",
-        Schedule: "schedule",
-        Session: "session"
-    } as const;
-export type PermissionResourceType = typeof PermissionResourceType[keyof typeof PermissionResourceType];
+    Agent: "agent",
+    Schedule: "schedule",
+    Session: "session",
+} as const;
+export type PermissionResourceType = (typeof PermissionResourceType)[keyof typeof PermissionResourceType];

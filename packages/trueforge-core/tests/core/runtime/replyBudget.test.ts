@@ -2,16 +2,23 @@ import { createTurnToolCallLedger, mergeTurnToolCallLedgers } from '../../../src
 import {
   clearUnfinished,
   DEFAULT_REPLY_STEP_BUDGET,
+  MAX_PROGRESS_STEP_REFUNDS,
+  progressRefundFor,
   recordUnfinished,
   REMOVED_TOOL_RESULT,
   removedToolMessage,
+  replyStepBudgetFor,
   retryIsDue,
+  SCHEDULE_REPLY_STEP_BUDGET,
   settleRetry,
+  STEP_BUDGET_SPENT_AFTER_SPACE_WRITE_MESSAGE,
   stepBudgetFor,
   toolResultKind,
   ToolResultKindSchema,
   unfinishedKindFor,
+  UnfinishedKindSchema,
   unfinishedNotice,
+  withoutUnfinishedNotices,
 } from '../../../src/core/runtime/replyBudget';
 
 const ok = {
@@ -19,6 +26,7 @@ const ok = {
   failure: false,
   unavailable: false,
   removed: false,
+  expired: false,
 } as const;
 
 describe('toolResultKind', () => {
@@ -34,6 +42,12 @@ describe('toolResultKind', () => {
   it('keeps a rule block to its own call: it is a block, never a decline', () => {
     expect(toolResultKind({ ...ok, disposition: 'policy_blocked' })).toBe('blocked');
     expect(unfinishedKindFor('blocked')).toBe('blocked');
+  });
+
+  it('tells a card that expired unanswered from the person saying no', () => {
+    expect(toolResultKind({ ...ok, disposition: 'denied', expired: true })).toBe('expired');
+    expect(unfinishedKindFor('expired')).toBe('expired');
+    expect(unfinishedNotice('expired')).not.toMatch(/you said no|declined|held off/i);
   });
 
   it('marks an executed call that reported a failure as retryable', () => {
@@ -59,6 +73,16 @@ describe('toolResultKind', () => {
     ] as const) {
       expect(ToolResultKindSchema.safeParse(toolResultKind({ ...ok, disposition })).success).toBe(true);
     }
+  });
+});
+
+describe('replyStepBudgetFor', () => {
+  it('gives a scheduled run its larger budget and a chat the default, unless the definition sets one', () => {
+    expect(replyStepBudgetFor({ definitionBudget: undefined, unattended: false })).toBe(DEFAULT_REPLY_STEP_BUDGET);
+    expect(replyStepBudgetFor({ definitionBudget: undefined, unattended: true })).toBe(SCHEDULE_REPLY_STEP_BUDGET);
+    expect(SCHEDULE_REPLY_STEP_BUDGET.main).toBeGreaterThan(DEFAULT_REPLY_STEP_BUDGET.main);
+    const own = { main: 2, sub: 1 };
+    expect(replyStepBudgetFor({ definitionBudget: own, unattended: true })).toBe(own);
   });
 });
 
@@ -96,7 +120,7 @@ describe('step budget', () => {
 describe('removed tool wording', () => {
   it('says what the person declined, in plain words, and what to do next', () => {
     expect(removedToolMessage({ toolName: 'create_event', reason: 'declined' })).toBe(
-      'The person declined create event. Do not try it again. Tell them what you did and did not do.',
+      'The person declined create event. Do not try it again or ask again. Say once, plainly, that it was skipped, and carry on with the rest.',
     );
     expect(removedToolMessage({ toolName: 'create_event', reason: 'unavailable' })).toBe(
       'create event is not available here. Do not try it again. Tell them what you did and did not do.',
@@ -110,14 +134,10 @@ describe('unfinished reply', () => {
     expect(unfinishedKindFor('ok')).toBeNull();
     expect(unfinishedKindFor('declined')).toBe('declined');
     expect(unfinishedKindFor('error_final')).toBe('failed');
-    expect(unfinishedNotice('declined')).toBe(
-      'You said no to one step, so Aman did not finish. Ask again if you want that step done.',
-    );
-    expect(unfinishedNotice('failed')).toBe(
-      'Aman could not finish because a step failed. Reply "try again" to let it retry.',
-    );
+    expect(unfinishedNotice('declined')).toBe('Skipped, as you asked.');
+    expect(unfinishedNotice('failed')).toBe('One step failed, so this is not finished. Reply "try again" to retry.');
     expect(unfinishedNotice('budget')).toBe(
-      'Aman stopped after many steps without finishing. Reply "continue" to let it carry on.',
+      'Stopped after many steps without finishing. Reply "continue" to carry on.',
     );
   });
 
@@ -131,6 +151,26 @@ describe('unfinished reply', () => {
     expect(declined).toBe('declined');
     expect(clearUnfinished({ current: declined })).toBe('declined');
     expect(clearUnfinished({ current: 'failed' })).toBeUndefined();
+  });
+
+  it('keeps an expired card as the reason through a clean step', () => {
+    expect(recordUnfinished({ current: 'failed', kind: 'expired' })).toBe('expired');
+    expect(clearUnfinished({ current: 'expired' })).toBe('expired');
+  });
+
+  it("names no assistant and only reads as the person's choice for their own decline", () => {
+    for (const kind of UnfinishedKindSchema.options) {
+      const line = unfinishedNotice(kind);
+      expect(line).not.toMatch(/\bAman\b/);
+      expect(/as you asked|you said no|you declined/i.test(line)).toBe(kind === 'declined');
+    }
+  });
+
+  it("leaves an older version's line out of an earlier reply the model reads again", () => {
+    const answer = 'Understood, skipping the reminder.';
+    const older = 'You said no to one step, so Aman did not finish. Ask again if you want that step done.';
+    expect(withoutUnfinishedNotices(`${answer}\n\n${older}`)).toBe(answer);
+    expect(withoutUnfinishedNotices(answer)).toBe(answer);
   });
 });
 
@@ -165,5 +205,45 @@ describe('ledger', () => {
     expect(merged.removedToolRejectionStreaks.get('sub-1')).toBe(2);
     expect(merged.unfinishedByThread.get('main')).toBe('failed');
     expect(merged.unfinishedByThread.get('sub-1')).toBe('blocked');
+  });
+});
+
+describe('progressRefundFor', () => {
+  const landed = { toolName: 'edit_space', disposition: 'executed_ok', failure: false, savedNothing: false } as const;
+
+  it('refunds one step when a space write landed', () => {
+    expect(progressRefundFor({ results: [landed], refundsSoFar: 0 })).toBe(1);
+    expect(progressRefundFor({ results: [{ ...landed, toolName: 'lookup' }, landed], refundsSoFar: 3 })).toBe(1);
+  });
+
+  it('refunds nothing for a refused or failed write, or a batch with no space write', () => {
+    expect(progressRefundFor({ results: [{ ...landed, failure: true }], refundsSoFar: 0 })).toBe(0);
+    expect(progressRefundFor({ results: [{ ...landed, disposition: 'policy_blocked' }], refundsSoFar: 0 })).toBe(0);
+    expect(progressRefundFor({ results: [{ ...landed, toolName: 'get_space' }], refundsSoFar: 0 })).toBe(0);
+    expect(progressRefundFor({ results: [], refundsSoFar: 0 })).toBe(0);
+  });
+
+  it('refunds nothing for a write that saved nothing new, such as an append already at the end', () => {
+    expect(progressRefundFor({ results: [{ ...landed, savedNothing: true }], refundsSoFar: 0 })).toBe(0);
+  });
+
+  it('stops at the cap', () => {
+    expect(progressRefundFor({ results: [landed], refundsSoFar: MAX_PROGRESS_STEP_REFUNDS - 1 })).toBe(1);
+    expect(progressRefundFor({ results: [landed], refundsSoFar: MAX_PROGRESS_STEP_REFUNDS })).toBe(0);
+  });
+
+  it('keeps the largest refund count per thread when ledgers merge', () => {
+    const root = createTurnToolCallLedger();
+    root.progressRefundsByThread.set('main', 2);
+    const child = createTurnToolCallLedger();
+    child.progressRefundsByThread.set('main', 5);
+    expect(mergeTurnToolCallLedgers([root, child]).progressRefundsByThread.get('main')).toBe(5);
+  });
+});
+
+describe('STEP_BUDGET_SPENT_AFTER_SPACE_WRITE_MESSAGE', () => {
+  it('asks for the changed space and says they can ask you to continue exactly once', () => {
+    expect(STEP_BUDGET_SPENT_AFTER_SPACE_WRITE_MESSAGE).toContain('Say which space you changed');
+    expect(STEP_BUDGET_SPENT_AFTER_SPACE_WRITE_MESSAGE.split('they can ask you to continue')).toHaveLength(2);
   });
 });

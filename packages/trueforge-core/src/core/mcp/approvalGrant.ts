@@ -1,14 +1,17 @@
 import type { ApprovalDecision } from '../events/schema';
 import type { InternalEnrichedToolCall, InternalToolCallInfo } from '../llm/LLMTypes';
 import {
+  CHAT_GRANTABLE_CONSEQUENCE_REASONS,
+  GRANT_BARRED_TIER_REASONS,
+  OWN_CALENDAR_CHANGE_REASONS,
+} from '../permissions/tier';
+import {
   SANDBOX_APPLY_PATCH_TOOL_NAME,
   SANDBOX_MCP_SERVER_ID,
   SANDBOX_REPLACE_TEXT_TOOL_NAME,
   SANDBOX_RUN_REGISTERED_COMMAND_TOOL_NAME,
   SANDBOX_WRITE_FILE_TOOL_NAME,
 } from '../sandbox/Sandbox';
-import { GRANT_BARRED_TIER_REASONS, OWN_CALENDAR_CHANGE_REASONS } from '../permissions/tier';
-import { SEARCH_AFTER_PRIVATE_READ_REASON } from '../permissions/webSearch';
 import {
   implementationPlanAllowsScope,
   implementationPlanMatchesBinding,
@@ -73,12 +76,10 @@ export function effectiveToolAdmissions(input: {
 }
 
 /**
- * Server-owned eligibility for a durable chat-scoped approval. This only gates
- * which calls may *receive* chat scope; the scope's binding lives in the grant
- * key: sandbox exec keys carry an invocation digest over (purpose, command,
- * cwd, env) and registered-command keys carry the repository command id, so
- * approving one invocation never authorizes a different one. A failed,
- * unknown, or repository-mutating run never creates a commit receipt.
+ * Server-owned eligibility for "Always allow this here", the one chat-scoped grant. This only gates which calls may
+ * *receive* chat scope; the scope's binding lives in the grant key: the tool and its destination, and for sandbox
+ * exec an invocation digest over (purpose, command, cwd, env), so approving one command in a chat never authorizes a
+ * different one or reaches another chat. A consequential action qualifies; a send and a steered call never do.
  */
 export function allowsChatApproval(info: InternalToolCallInfo): boolean {
   if (secretPathReadBarsDurableGrant(info)) {
@@ -90,36 +91,15 @@ export function allowsChatApproval(info: InternalToolCallInfo): boolean {
   if (isOwnCalendarChange(info)) {
     return true;
   }
+  if (info.tier_reason !== undefined && CHAT_GRANTABLE_CONSEQUENCE_REASONS.has(info.tier_reason)) {
+    return true;
+  }
   return !tierBarsDurableGrant(info) && (info.effect === 'inspect' || info.effect === 'verify');
 }
 
 /** A change to the person's own calendar with no guests; a guest change never qualifies, whatever its effect. */
 function isOwnCalendarChange(info: InternalToolCallInfo): boolean {
   return info.tier_reason !== undefined && OWN_CALENDAR_CHANGE_REASONS.has(info.tier_reason);
-}
-
-/**
- * Stored in the chat's approval grants by "Allow searches in this chat". It is one value per chat, so it never
- * matches an `approvalGrantKey`, and it only lifts the private-read hold for the designated search provider.
- */
-export const SEARCH_CHAT_GRANT_KEY = JSON.stringify(['search_after_private_read', 'v1']);
-
-/**
- * Whether a held search may offer "Allow searches in this chat". Only the designated search provider's call
- * held for a private read qualifies; every other search check still runs whatever the grant says.
- */
-export function allowsSearchChatGrant(info: InternalToolCallInfo): boolean {
-  return (
-    info.search_provider_call === true &&
-    info.tier_reason === SEARCH_AFTER_PRIVATE_READ_REASON &&
-    info.implementation_plan_grant === undefined &&
-    !secretPathReadBarsDurableGrant(info)
-  );
-}
-
-/** Whether the approval card may offer a chat-scoped allow for this call. */
-export function offersChatApproval(info: InternalToolCallInfo): boolean {
-  return allowsChatApproval(info) || allowsSearchChatGrant(info);
 }
 
 /** A send, destructive, install or hint-escalated call is never covered by an argument-blind grant. */
@@ -154,6 +134,22 @@ export function allowsToolGrant(info: InternalToolCallInfo): boolean {
     return false;
   }
   return isOwnCalendarChange(info) || (info.type === 'mcp' && info.effect === 'inspect');
+}
+
+/**
+ * Whether a call waits for the person's answer. A call that matches a "no" from earlier in this turn
+ * gets no new card: the run refuses it as that same "no", so rewording a search cannot ask again.
+ */
+export function awaitsApproval(input: {
+  call: InternalEnrichedToolCall;
+  decisions: ReadonlyMap<string, ApprovalDecision>;
+  deniedApprovalIdentities: ReadonlySet<string>;
+}): boolean {
+  return (
+    input.call.tool_info.is_approval_required === true &&
+    !input.decisions.has(input.call.id) &&
+    !input.deniedApprovalIdentities.has(approvalGrantKey(input.call.tool_info))
+  );
 }
 
 /**

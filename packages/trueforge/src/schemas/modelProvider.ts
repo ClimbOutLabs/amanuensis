@@ -30,6 +30,15 @@ export const ModelPropertiesSchema = z
       .optional()
       .describe('Supported reasoning-effort values for this model.'),
     vision: z.boolean().optional().describe('Whether the model can read images directly. Absent means false.'),
+    max_concurrent_requests: z
+      .number()
+      .int()
+      .positive()
+      .optional()
+      .describe(
+        'How many requests may be sent to this model at once; a further reply waits for one to finish. ' +
+          'Absent means 1 for a model on a custom provider, and no limit for other providers.',
+      ),
   })
   .strict()
   .superRefine((properties, ctx) => {
@@ -102,14 +111,18 @@ export const ModelProviderStreamTimeoutSchema = z
       .min(STREAM_TIMEOUT_MS_MIN)
       .max(STREAM_TIMEOUT_MS_MAX)
       .optional()
-      .describe('Milliseconds to wait for the first substantive stream chunk before aborting. Default: 300000.'),
+      .describe(
+        'Milliseconds to wait for the first substantive stream chunk before aborting. Default and upper bound: the server-wide value (90000 unless the host changes it).',
+      ),
     chunk_ms: z
       .number()
       .int()
       .min(STREAM_TIMEOUT_MS_MIN)
       .max(STREAM_TIMEOUT_MS_MAX)
       .optional()
-      .describe('Milliseconds to wait between substantive stream chunks before aborting. Default: 60000.'),
+      .describe(
+        'Milliseconds to wait between substantive stream chunks before aborting. Default and upper bound: the server-wide value (60000 unless the host changes it).',
+      ),
   })
   .strict()
   .describe('Optional per-provider override of the server-wide stream progress deadlines.')
@@ -219,6 +232,7 @@ export function refineModelProviderManifest(
 }
 
 export type ModelProperties = z.infer<typeof ModelPropertiesSchema>;
+export type ConfiguredModel = z.infer<typeof ConfiguredModelSchema>;
 
 /**
  * Configured provider jsonb (`model_provider.manifest`). Only `custom` carries a name, so the

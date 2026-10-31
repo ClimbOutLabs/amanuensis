@@ -12,7 +12,7 @@ import type { ConnectorBase, ConnectorCatalogEntry } from './types.js';
 export type SearchProviderFields = Pick<TrueForgeApi.RemoteMcpServerManifest, 'searchProvider'>;
 
 /** Reads the flag off the row: the runtime's `ConnectorBase` does not declare it. */
-export function isSearchProvider(connector: ConnectorBase): boolean {
+export function isSearchProvider(connector: Pick<ConnectorBase, 'name'>): boolean {
   return 'searchProvider' in connector && connector.searchProvider === true;
 }
 

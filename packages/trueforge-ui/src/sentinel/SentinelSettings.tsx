@@ -3,6 +3,7 @@
 import { useState, type FC } from 'react';
 
 import { Switch } from '../atoms/primitives/Switch.js';
+import { useAssistantDisplayName } from '../components/PersonalizationContext.js';
 import { APPROVAL_CHOICES } from './approvalChoices.js';
 import { useOptionalSentinelApiState } from './SentinelApiContext.js';
 import { Tier2RelaxationToggle } from './Tier2RelaxationToggle.js';
@@ -16,6 +17,7 @@ import { TIER2_ACTION_KINDS, TIER2_ACTION_LABELS, type Tier2ActionKind } from '.
  * decides whether maps ask first. After this chat reads mail or calendar, a map is checked against that text first.
  */
 export const SentinelSettings: FC = () => {
+  const assistant = useAssistantDisplayName();
   const sentinel = useOptionalSentinelApiState();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -33,7 +35,7 @@ export const SentinelSettings: FC = () => {
 
   const offline = sentinel.settings?.offline_mode ?? false;
   const searchWithoutAsking = sentinel.settings?.search_without_asking ?? true;
-  const mapsWithoutAsking = sentinel.settings?.maps_without_asking ?? false;
+  const mapsWithoutAsking = sentinel.settings?.maps_without_asking ?? true;
   const sandboxWithoutAsking = sentinel.settings?.sandbox_without_asking ?? true;
 
   const handleChange = async (next: boolean) => {
@@ -175,7 +177,7 @@ export const SentinelSettings: FC = () => {
           <p className="text-sm font-medium text-text-primary">Maps</p>
           <p className="mt-1 text-sm text-text-secondary">
             {mapsWithoutAsking
-              ? 'Maps run without asking. After this chat reads your email or calendar, a map asks instead if it would share a name, email address or number from them.'
+              ? 'Maps run without asking. A map asks first only if it would send a password or key.'
               : 'Maps ask before each one.'}
           </p>
           {mapsError !== null && (
@@ -198,7 +200,7 @@ export const SentinelSettings: FC = () => {
           <p className="text-sm font-medium text-text-primary">Sandbox</p>
           <p className="mt-1 text-sm text-text-secondary">
             {sandboxWithoutAsking
-              ? 'Aman can make new files and run the scripts it wrote in this chat without asking. Changing a file that already exists, running scripts from your repository, and running tests still ask. Anything that leaves the sandbox still asks.'
+              ? `${assistant} can make new files and run the scripts it wrote in this chat without asking. Changing a file that already exists, running scripts from your repository, and running tests still ask. Anything that leaves the sandbox still asks.`
               : 'Work inside the sandbox asks before it runs.'}
           </p>
           {sandboxError !== null && (

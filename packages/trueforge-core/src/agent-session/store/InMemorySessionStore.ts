@@ -4,7 +4,6 @@ import {
   validateImplementationPlanGrant,
   type ImplementationPlanGrant,
 } from '../../core/mcp/implementationPlanGrant';
-import { mergeChatPrivateFingerprints } from '../../core/permissions/privateTextCheck';
 import type { AgentThreadSnapshot } from '../../core/runtime/AgentThread.types';
 import { getEmptyCurrentContextUsage } from '../../core/runtime/contextUsage';
 import type { SessionFolderRecord } from '../models/SessionFolderRecord';
@@ -62,7 +61,6 @@ import type {
   ReplaceTaskChecklistInput,
   RevokeImplementationPlanGrantInput,
   RevokeImplementationPlanGrantResult,
-  SetPrivateFingerprintsInput,
   SetSessionFolderInput,
   StampImportedSessionInput,
   TurnContextAppend,
@@ -300,7 +298,6 @@ export class InMemorySessionStore<
       updated_at: now,
       last_activity_timestamp_ms: Date.now(),
       approval_grants: [],
-      private_fingerprints: null,
       task_checklist: emptyTaskChecklist(),
       metrics: {
         total_duration_ms: 0,
@@ -333,17 +330,6 @@ export class InMemorySessionStore<
     stored.record.updated_at = new Date(input.updated_at);
     stored.record.last_activity_timestamp_ms = input.last_activity_timestamp_ms;
     stored.record.metrics = deepCopy(input.metrics);
-  }
-
-  async setPrivateFingerprints(input: SetPrivateFingerprintsInput): Promise<void> {
-    const stored = this.sessions.get(sessionKey(input.session_id));
-    if (stored === undefined) {
-      return;
-    }
-    stored.record.private_fingerprints = mergeChatPrivateFingerprints({
-      stored: stored.record.private_fingerprints,
-      saved: deepCopy(input.fingerprints),
-    });
   }
 
   async deleteSession(input: DeleteSessionInput): Promise<void> {
@@ -719,6 +705,12 @@ export class InMemorySessionStore<
       ) {
         continue;
       }
+      if (input.folder_id !== undefined && stored.record.folder_id !== input.folder_id) {
+        continue;
+      }
+      if (input.no_folder && stored.record.folder_id !== null) {
+        continue;
+      }
       if (createdByOrAgentIds !== undefined) {
         const creatorMatches =
           stored.record.created_by_subject.subject_id === createdByOrAgentIds.created_by_subject_id;
@@ -797,6 +789,14 @@ export class InMemorySessionStore<
     const previousTurnId = input.turn.previous_turn_id;
     if (input.require_previous_turn_is_tip && previousTurnId !== stored.record.last_turn_id) {
       throw new StaleApprovalContinuationError(previousTurnId, stored.record.last_turn_id);
+    }
+    // One reply at a time: whatever the parent, a new turn waits until the chat's latest turn ends.
+    const tipTurnId = stored.record.last_turn_id;
+    if (tipTurnId !== null) {
+      const tip = this.turns.get(turnKey({ session_id: input.turn.session_id, turn_id: tipTurnId }));
+      if (tip?.state.status === 'running') {
+        throw new PreviousTurnRunningError(tipTurnId);
+      }
     }
     let previousSnapshot: TurnSnapshot | undefined;
     if (previousTurnId !== null) {

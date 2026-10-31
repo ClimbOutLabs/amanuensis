@@ -9,7 +9,6 @@ import type {
 import type { RegisteredCommandExecution } from '../../core/llm/LLMTypes';
 import type { ToolCallMemoSnapshot } from '../../core/mcp/executeToolCalls';
 import type { ImplementationPlanGrant, ImplementationPlanGrantOwner } from '../../core/mcp/implementationPlanGrant';
-import type { ChatPrivateFingerprints } from '../../core/permissions/privateTextCheck';
 import type {
   AgentThreadSnapshot,
   ContextMessage,
@@ -37,11 +36,6 @@ export type CreateSessionInput<TSessionCustom extends object = Record<string, ne
 > & {
   custom: TSessionCustom | null;
 };
-
-export interface SetPrivateFingerprintsInput {
-  session_id: string;
-  fingerprints: ChatPrivateFingerprints;
-}
 
 /**
  * PATCH fields for an existing session; `undefined` fields are left unchanged.
@@ -194,6 +188,10 @@ export interface ListSessionsInput {
   end_timestamp: Date | undefined;
   /** When set, only sessions bound to this named agent id. */
   agent_id: string | undefined;
+  /** When set, only sessions filed in this folder. */
+  folder_id: string | undefined;
+  /** When true, only sessions with no folder. Never combined with `folder_id`. */
+  no_folder: boolean;
   /** When set, match creator or named-agent binding. Empty `agent_ids` means creator-only. */
   created_by_or_agent_ids:
     | {
@@ -544,13 +542,6 @@ export interface ISessionStore<
    */
   updateSession(input: UpdateSessionInput<TSessionCustom>): Promise<void>;
 
-  /**
-   * Merges a turn's private-text fingerprints into the chat's kept record, so a later turn of the chat can check its
-   * searches. Entries are joined; once incomplete or holding a secret, the record stays so. A missing session is a
-   * no-op. Deleted with the session.
-   */
-  setPrivateFingerprints(input: SetPrivateFingerprintsInput): Promise<void>;
-
   /** Creates an owner-scoped folder. The caller supplies its globally unique id. */
   createSessionFolder(input: CreateSessionFolderInput): Promise<SessionFolderRecord>;
 
@@ -604,13 +595,16 @@ export interface ISessionStore<
    * Also bumps `session.last_activity_timestamp_ms` and increments
    * `session.metrics.total_turns` in that same atomic unit.
    *
+   * One reply at a time: while the session's tip is `running`, reject with
+   * `PreviousTurnRunningError` naming the tip, whatever `previous_turn_id` is.
+   * Only a Cancel or the turn's own end frees the chat. Of two concurrent
+   * creates on one session, only the first commits.
+   *
    * Fork semantics for `turn.previous_turn_id`:
-   * - `null` — new root turn (no parent); always allowed.
+   * - `null` — new root turn (no parent).
    * - string — fork/chain from that turn when it exists. Tip-equality is NOT
-   *   required; concurrent forks from the same tip both succeed. Unknown id is
-   *   allowed (relaxed) and treated as no inheritance. If that turn exists and
-   *   is still `running`, reject with {@link PreviousTurnRunningError} —
-   *   callers must {@link freezeAndGetTurn} first.
+   *   required. Unknown id is allowed (relaxed) and treated as no inheritance.
+   *   If that turn exists and is still `running`, reject the same way.
    * `last_turn_id` always advances to the new turn in the same atomic unit.
    *
    * `update_session_title_if_not_exist`: when set AND `session.title` is

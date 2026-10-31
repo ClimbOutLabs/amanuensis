@@ -176,10 +176,34 @@ describe('Google connection API', () => {
     expect(JSON.parse(text).data.setup.mode).toBe('paste');
   });
 
-  it('uses a pasted address when the public address is a Tailscale name', async () => {
+  it('asks for a Web client when the public address is a Tailscale name', async () => {
     configuration.PUBLIC_BASE_URL = 'https://box.tailnet-name.ts.net';
     const { text } = await call({ method: 'GET', path: '/status', origin: 'https://box.tailnet-name.ts.net' });
-    expect(JSON.parse(text).data.setup.mode).toBe('paste');
+    expect(JSON.parse(text).data.setup).toEqual({
+      mode: 'web',
+      client_type: 'web',
+      redirect_uri: 'https://box.tailnet-name.ts.net/api/v1/user/settings/google/oauth/callback',
+    });
+  });
+
+  it('uses the recorded Tailscale address when the public address is the loopback default', async () => {
+    const originalOrigins = configuration.ALLOWED_ORIGINS;
+    configuration.PUBLIC_BASE_URL = 'http://127.0.0.1:8791';
+    configuration.ALLOWED_ORIGINS = ['http://127.0.0.1:8791', 'https://box.tailnet-name.ts.net:8443'];
+    try {
+      const { text } = await call({
+        method: 'GET',
+        path: '/status',
+        origin: 'https://box.tailnet-name.ts.net:8443',
+      });
+      expect(JSON.parse(text).data.setup).toEqual({
+        mode: 'web',
+        client_type: 'web',
+        redirect_uri: 'https://box.tailnet-name.ts.net:8443/api/v1/user/settings/google/oauth/callback',
+      });
+    } finally {
+      configuration.ALLOWED_ORIGINS = originalOrigins;
+    }
   });
 
   describe('on a demo instance', () => {
@@ -347,6 +371,62 @@ describe('Google connection API', () => {
     it('trusts the public address as an origin too', async () => {
       configuration.PUBLIC_BASE_URL = 'https://aman.example.org';
       expect((await post('/test', { Origin: 'https://aman.example.org' })).status).toBe(200);
+    });
+  });
+
+  describe('through the installer TLS proxy, on an install whose public address is loopback', () => {
+    const HOME = 'https://192.168.1.20:8443';
+    const INTERNAL = 'http://aman:8791';
+    let originalOrigins: string[];
+
+    beforeEach(() => {
+      originalOrigins = configuration.ALLOWED_ORIGINS;
+      configuration.PUBLIC_BASE_URL = 'http://127.0.0.1:8791';
+      configuration.ALLOWED_ORIGINS = [HOME];
+    });
+
+    afterEach(() => {
+      configuration.ALLOWED_ORIGINS = originalOrigins;
+    });
+
+    const proxied = (path: string, headers: Record<string, string>) =>
+      app.request(`${INTERNAL}${BASE}${path}`, { method: 'POST', headers: { 'x-test-user': 'ada', ...headers } });
+
+    it('disconnects when the browser came through the proxy at the recorded home-network address', async () => {
+      await connect();
+      const response = await proxied('/disconnect', {
+        Origin: HOME,
+        'x-forwarded-host': '192.168.1.20:8443',
+        'x-forwarded-proto': 'https',
+      });
+      expect(response.status).toBe(200);
+      expect(JSON.parse((await call({ method: 'GET', path: '/status' })).text).data.state).toBe('not_connected');
+    });
+
+    it('answers a bodiless call whose Origin is a recorded address, with no proxy headers', async () => {
+      await connect();
+      expect((await proxied('/test', { Origin: HOME })).status).toBe(200);
+    });
+
+    it('still refuses an address the installer does not serve this instance on', async () => {
+      await connect();
+      const byOrigin = await proxied('/disconnect', {
+        Origin: 'https://192.168.1.99:8443',
+        'x-forwarded-host': '192.168.1.99:8443',
+        'x-forwarded-proto': 'https',
+      });
+      expect(byOrigin.status).toBe(403);
+      expect(JSON.parse(await byOrigin.text()).error.message).toBe(
+        'That request did not come from Aman, so nothing was done.',
+      );
+      const form = await proxied('/disconnect', {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        Origin: 'https://evil.example.net',
+        'x-forwarded-host': '192.168.1.20:8443',
+        'x-forwarded-proto': 'https',
+      });
+      expect(form.status).toBe(403);
+      expect(JSON.parse((await call({ method: 'GET', path: '/status' })).text).data.state).toBe('connected');
     });
   });
 

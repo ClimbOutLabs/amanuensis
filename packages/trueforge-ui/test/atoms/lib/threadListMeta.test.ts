@@ -2,11 +2,14 @@ import { describe, expect, it } from 'vitest';
 
 import {
   canReuseMutableShell,
+  filterChatsByTitle,
   formatRelativeShort,
+  groupRecentChats,
   readThreadAgentName,
   readThreadIsMutable,
   threadListIndicesByRecency,
   threadListItemIsMutable,
+  visibleChats,
 } from '@/atoms/lib/threadListMeta.js';
 
 describe('formatRelativeShort', () => {
@@ -111,5 +114,87 @@ describe('canReuseMutableShell', () => {
         pendingSessionId: 'sess-a',
       }),
     ).toBe(true);
+  });
+});
+
+describe('groupRecentChats', () => {
+  // Local midnight is the boundary, so the test builds its dates in local time.
+  const now = new Date(2026, 9, 23, 14, 0, 0);
+  const chat = (key: string, time: number, folderId?: string) => ({ key, time, folderId });
+  const a = chat('a', new Date(2026, 9, 23, 9, 0, 0).getTime());
+  const b = chat('b', new Date(2026, 9, 22, 23, 59, 0).getTime(), 'work');
+  // A chat with no message yet counts as newest.
+  const c = chat('c', Number.POSITIVE_INFINITY);
+  const d = chat('d', new Date(2026, 9, 23, 0, 0, 0).getTime());
+  const e = chat('e', new Date(2026, 9, 20, 8, 0, 0).getTime(), 'work');
+  const f = chat('f', new Date(2026, 9, 22, 8, 0, 0).getTime());
+
+  it('puts chats used since local midnight under today, and the rest under earlier', () => {
+    expect(groupRecentChats({ chats: [a, c, d, f], folderIds: [], now })).toEqual({
+      folders: [],
+      today: [a, c, d],
+      earlier: [f],
+    });
+  });
+
+  it('keeps a chat in its folder only, with folders newest use first', () => {
+    const grouped = groupRecentChats({ chats: [a, b, c, d, e], folderIds: ['home', 'work'], now });
+
+    expect(grouped.folders).toEqual([
+      { folderId: 'work', chats: [b, e] },
+      { folderId: 'home', chats: [] },
+    ]);
+    expect(grouped.today).toEqual([a, c, d]);
+    expect(grouped.earlier).toEqual([]);
+  });
+
+  it('keeps the order of the chats it is given within each group', () => {
+    expect(groupRecentChats({ chats: [d, c, a], folderIds: [], now })).toEqual({
+      folders: [],
+      today: [d, c, a],
+      earlier: [],
+    });
+  });
+});
+
+describe('visibleChats', () => {
+  const chats = ['0', '1', '2', '3', '4', '5', '6'].map(key => ({ key }));
+
+  it('shows the first page of a group', () => {
+    expect(visibleChats({ chats, limit: 5, openKey: undefined }).map(chat => chat.key)).toEqual([
+      '0',
+      '1',
+      '2',
+      '3',
+      '4',
+    ]);
+  });
+
+  it('keeps the open chat even when it falls past the limit', () => {
+    expect(visibleChats({ chats, limit: 5, openKey: '6' }).map(chat => chat.key)).toEqual([
+      '0',
+      '1',
+      '2',
+      '3',
+      '4',
+      '6',
+    ]);
+  });
+
+  it('grows with the limit', () => {
+    expect(visibleChats({ chats, limit: 10, openKey: undefined })).toHaveLength(7);
+  });
+});
+
+describe('filterChatsByTitle', () => {
+  const chats = [{ title: 'Plan the Trip' }, { title: 'Groceries' }, { title: '' }];
+
+  it('keeps every chat for a blank query', () => {
+    expect(filterChatsByTitle({ chats, query: '   ' })).toEqual(chats);
+  });
+
+  it('matches titles that contain the query, ignoring case', () => {
+    expect(filterChatsByTitle({ chats, query: 'trip' })).toEqual([chats[0]]);
+    expect(filterChatsByTitle({ chats, query: 'GROC' })).toEqual([chats[1]]);
   });
 });

@@ -23,7 +23,7 @@ The sidebar's chat history list supports renaming chats, filing them into folder
 
 **Folders**: click **New folder** next to the chat history header to create a folder. Move an existing chat into one from its **···** menu (**Move to folder**), which also lets you create a folder on the spot. Folders render as collapsible sections above the unfiled chats; each folder's own **···** button opens a dialog to rename or delete it, deleting a folder keeps its chats, just unfiled.
 
-**Agent details**: while a chat is open, the toggle next to **Clear chat** in the header shows or hides the agent's internal steps (reasoning, tool calls, subagents) for that chat. It only appears once the chat has a persisted session, and is hidden while the chat is idle or on a fresh, unsaved chat.
+**Agent details**: while a chat is open, the **Show agent details** button next to **Clear chat** in the header turns the agent's internal steps on or off for that chat. The button looks pressed while they are on. With them on, each answer shows its steps, tool calls, sub-agents, the lines the model wrote between steps, and the model and cost line. With them off, you see only your message, the answer, and anything that needs you: approval cards, notices written for you, and one progress line while Aman works. If a step failed or was blocked, one plain line under the answer says so. A reply that could not finish says so in one plain line. The button only appears once the chat has a persisted session, and is hidden while the chat is idle or on a fresh, unsaved chat.
 
 A chat's **···** menu itself only appears when at least one of Rename, Delete, or Move to folder is actually available for it.
 

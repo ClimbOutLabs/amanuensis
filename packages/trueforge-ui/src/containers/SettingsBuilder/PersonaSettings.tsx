@@ -11,7 +11,7 @@ import { getErrorMessage } from '@/utils/getErrorMessage.js';
 import { PersonaKnowledgeSection } from './PersonaKnowledge.js';
 
 const inputClassName =
-  'w-full rounded-md border border-border/70 bg-secondary-bg px-3 py-2.5 text-sm text-text-primary outline-none transition-colors placeholder:text-text-secondary/70 focus-visible:border-focus-ring focus-visible:ring-2 focus-visible:ring-focus-ring/50';
+  'w-full rounded-md border border-border/70 bg-input-box-bg px-3 py-2.5 text-sm text-text-primary outline-none transition-colors placeholder:text-text-muted focus-visible:border-focus-ring focus-visible:ring-2 focus-visible:ring-focus-ring/50';
 
 function toDraft(persona: Persona): PersonaDraft {
   return {

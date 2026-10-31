@@ -2,9 +2,11 @@
 
 import { Renderer } from '@openuidev/react-lang';
 import { ThemeProvider, openuiLibrary } from '@openuidev/react-ui';
+import { useMemo } from 'react';
 
 import { useOptionalContentClassNames } from '../theme/ThemeProvider.js';
 import { cn } from './lib/cn.js';
+import { repairOpenUiSource } from './lib/repairOpenUiSource.js';
 
 export type OpenUiFenceBlockProps = {
   content: string;
@@ -14,6 +16,7 @@ export type OpenUiFenceBlockProps = {
 
 export function OpenUiFenceBlock({ content, isStreaming, darkTheme }: OpenUiFenceBlockProps) {
   const classNames = useOptionalContentClassNames();
+  const response = useMemo(() => repairOpenUiSource(content), [content]);
 
   return (
     <div className={cn('aui-openui mb-2 w-full min-w-0 max-w-full', classNames.openui?.root)}>
@@ -21,7 +24,7 @@ export function OpenUiFenceBlock({ content, isStreaming, darkTheme }: OpenUiFenc
         <div
           className={cn('markdown-openui-scope min-w-0 w-full max-w-full overflow-x-auto', classNames.openui?.scope)}
         >
-          <Renderer response={content} library={openuiLibrary} isStreaming={isStreaming} />
+          <Renderer response={response} library={openuiLibrary} isStreaming={isStreaming} />
         </div>
       </ThemeProvider>
     </div>

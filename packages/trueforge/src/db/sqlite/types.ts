@@ -30,7 +30,6 @@ import type {
   Tier2ActionKind,
   ToolCallMemoSnapshot,
 } from '@truefoundry/trueforge-core/core';
-import type { ChatPrivateFingerprints } from '@truefoundry/trueforge-core/core/permissions/privateTextCheck';
 import type { CurrentContextUsage } from '@truefoundry/trueforge-core/core/runtime/contextUsage';
 import type { HelpAreaId } from '@truefoundry/trueforge-core/schemas/personalizationHelpAreas';
 import type { ColumnType, Generated, JSONColumnType } from 'kysely';
@@ -43,6 +42,7 @@ import type {
 } from '../../schemas/sandboxProvider';
 import type { ScheduleManifest, ScheduleRunStatus, ScheduleStatus } from '../../schemas/schedule';
 import type { SkillManifest } from '../../schemas/skill';
+import type { BriefItemCompletionTable } from '../briefItemCompletionStore';
 import type { ChatImageOrigin } from '../chatImageStore';
 import type { OAuthClient, OAuthPendingAuthorizationData, OAuthServer, OAuthToken } from '../mcpServerStore';
 
@@ -93,14 +93,14 @@ export interface SessionTable {
   /** Inline spec binding; XOR with `agent_id`. */
   agent_spec: JsonbColumn<AgentSpec> | null;
   title: string | null;
+  /** Unused; kept because installed databases already have the column. */
+  title_source: string | null;
   /** FK -> session_folder.id, ON DELETE SET NULL. */
   folder_id: string | null;
   last_turn_id: string | null;
   approval_grants: JsonbColumn<string[]>;
   /** Host-owned durable ordered task state. Null only for rows created before T3. */
   task_checklist: JsonbColumn<TaskChecklist> | null;
-  /** Fingerprints of the chat's private texts for later turns' searches; null until a private read. Never sent to clients. */
-  private_fingerprints: JsonbColumn<ChatPrivateFingerprints> | null;
   /** Optional unique key within `tenant_id` when set. */
   external_id: string | null;
   custom: JsonbColumn<Record<string, unknown>> | null;
@@ -462,6 +462,8 @@ export interface SkillTable {
   name: string;
   /** SkillManifest document; replaced whole on every upsert */
   manifest: JsonbColumn<SkillManifest>;
+  /** The person's approved site list for this skill's network access, or null when not approved */
+  network_approval: JsonbColumn<string[]> | null;
   created_at: string;
   updated_at: string;
 }
@@ -756,6 +758,7 @@ export interface Database {
   space: SpaceTable;
   space_revision: SpaceRevisionTable;
   sentinel_audit: SentinelAuditTable;
+  brief_item_completion: BriefItemCompletionTable;
   approval_token: ApprovalTokenTable;
   sentinel_user_settings: SentinelUserSettingsTable;
   implementation_plan_grant: ImplementationPlanGrantTable;

@@ -1,5 +1,9 @@
 import type { ChatCompletionMessageParam } from 'openai/resources/chat';
-import type { ContextCompactionEvent, ThreadOverwriteContextEvent } from '../events/schema';
+import type {
+  ContextCompactionEvent,
+  ContextCompactionStartedEvent,
+  ThreadOverwriteContextEvent,
+} from '../events/schema';
 import type {
   AgentThreadAppendContext,
   ContextMessage,
@@ -20,8 +24,8 @@ export interface AgentThreadExecutionContext {
   context: ContextMessage[];
   /**
    * Set only when the host is forcing this preLLM pass to run compaction regardless of the
-   * configured token threshold (currently after a ModelStreamFault), so the retry attempt runs
-   * against a shorter context. A processor with no notion of a threshold ignores this.
+   * configured token threshold (when the request would not fit the model, or after a fault the
+   * provider says is about context length), so the next attempt runs against a shorter context. A processor with no notion of a threshold ignores this.
    */
   forceCompaction?: boolean;
 }
@@ -30,6 +34,8 @@ export type AgentContextProcessorOverwriteContext = Omit<ThreadOverwriteContextE
 
 /** Processors omit thread_id, since AgentThread stamps it (same as append/overwrite). */
 export type AgentContextProcessorCompactionEvent = Omit<ContextCompactionEvent, 'thread_id'>;
+
+export type AgentContextProcessorCompactionStartedEvent = Omit<ContextCompactionStartedEvent, 'thread_id'>;
 
 export type AgentContextProcessorAppendContext = Omit<AgentThreadAppendContext, 'thread_id'>;
 
@@ -45,7 +51,8 @@ export type AgentContextProcessorOutput =
   | InternalPassthroughEvent
   | AgentContextProcessorCapabilityState
   | AgentContextProcessorModelUsage
-  | AgentContextProcessorCompactionEvent;
+  | AgentContextProcessorCompactionEvent
+  | AgentContextProcessorCompactionStartedEvent;
 
 export interface PreSendContextProcessor {
   processPreSend(execution: Readonly<AgentThreadExecutionContext>): AsyncIterable<AgentContextProcessorAppendContext>;

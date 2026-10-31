@@ -6,6 +6,7 @@ import type { PersonalizationProfile } from '../personalization/profile';
 import { isAmanGuidePersona } from '../personas/amanGuide/identity';
 import type { PersonaContext } from '../personas/persona';
 import { PersonalizationTurnResourceResolver } from './PersonalizationTurnResourceResolver';
+import { guardSwitchClaim, PersonaSwitchLog, switchTextForContext } from './personaSwitchClaim';
 
 /** Root-only capability: the persona is who is answering the user, not who runs a sub-agent. */
 function personaContextCapability(context: PersonaContext): AgentCapability {
@@ -109,18 +110,20 @@ export class PersonaTurnResourceResolver extends PersonalizationTurnResourceReso
   readonly #persona: PersonaContext | undefined;
   readonly #personaKnowledgeBlock: string | undefined;
   /**
-   * Host post-pass: enforces knowledge attribution on the root thread's
-   * final assistant message. Present only when the turn injected passages;
-   * the harness applies it once, before the terminal state is persisted.
+   * Host post-pass on the root thread's final assistant message: enforces knowledge
+   * attribution when the turn injected passages, and replaces a claimed persona switch
+   * no tool made. The harness applies it once, before the terminal state is persisted.
    */
-  readonly finalizeAssistantOutput: ((output: ModelMessageEvent) => ModelMessageEvent | undefined) | undefined;
+  readonly finalizeAssistantOutput: (output: ModelMessageEvent) => ModelMessageEvent | undefined;
+  /** Set by the persona tools when a switch really ran, so a reply cannot claim one that did not. */
+  readonly switches = new PersonaSwitchLog();
   /**
    * Host marker strip for the durable thread context: persona turns never
    * persist live citation markers, so a stale marker in history cannot
    * false-attribute a passage in a later turn. Set for every persona turn —
    * it is a no-op when the answer carries no markers.
    */
-  readonly sanitizeAssistantTextForContext: ((text: string) => string) | undefined;
+  readonly sanitizeAssistantTextForContext: (text: string) => string;
   readonly #switchNotice: PersonaSwitchNotice | undefined;
 
   constructor(
@@ -140,14 +143,15 @@ export class PersonaTurnResourceResolver extends PersonalizationTurnResourceReso
     super(deps, profile, { speaker: persona === undefined ? 'default_assistant' : 'persona' });
     this.#persona = persona;
     this.#personaKnowledgeBlock = personaKnowledgeBlock;
-    this.sanitizeAssistantTextForContext = stripCitationMarkers;
-    this.finalizeAssistantOutput =
-      personaKnowledgeHits === undefined || personaKnowledgeHits.length === 0
-        ? undefined
-        : output => {
-            const repaired = repairAssistantMessageContent(output.content, personaKnowledgeHits);
-            return repaired === output.content ? undefined : { ...output, content: repaired };
-          };
+    this.sanitizeAssistantTextForContext = text =>
+      switchTextForContext({ text: stripCitationMarkers(text), log: this.switches });
+    const hits = personaKnowledgeHits ?? [];
+    this.finalizeAssistantOutput = output => {
+      const repaired = repairAssistantMessageContent(output.content, hits);
+      const base = repaired === output.content ? output : { ...output, content: repaired };
+      const guarded = guardSwitchClaim({ output: base, log: this.switches });
+      return guarded ?? (base === output ? undefined : base);
+    };
     this.#switchNotice = switchNotice;
   }
 
@@ -188,6 +192,8 @@ export class PersonaTurnResourceResolver extends PersonalizationTurnResourceReso
         // catalog name without its provider prefix, as the base resolver does.
         modelId: personaModel.modelId ?? persona.model_name.slice(persona.model_name.indexOf('/') + 1),
         modelSupportsVision: personaModel.modelSupportsVision,
+        // The pre-flight guard sizes the persona's output against this window, so it must be the persona's own.
+        modelProperties: personaModel.modelProperties,
         // Iris only explains Aman from what she knows: she is never given a tool that sends, writes or schedules.
         readOnly: isAmanGuidePersona({ id: persona.persona_id, created_by: input.created_by }),
       },

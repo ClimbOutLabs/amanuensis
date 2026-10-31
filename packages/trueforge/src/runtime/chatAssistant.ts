@@ -37,19 +37,20 @@ export class ChatAssistantUnavailableError extends Error {
   }
 }
 
-function isChatAssistantAgent(input: { agent: AgentRecord; owner: CreatedBySubject }): boolean {
+/** An agent the host made for its owner's schedules, as opposed to one the person saved and named. */
+export function isChatAssistantAgent(input: { agent: AgentRecord; owner: CreatedBySubject }): boolean {
   return input.agent.host_managed && input.agent.created_by_subject.subject_id === input.owner.subject_id;
 }
 
 /** One name per owner and setup, so chats set up alike share one stored agent and a changed setup gets its own. */
-function chatAssistantAgentName(input: { owner: CreatedBySubject; spec: AgentSpec }): string {
+export function chatAssistantAgentName(input: { owner: CreatedBySubject; spec: AgentSpec }): string {
   const digest = createHash('sha256')
     .update(JSON.stringify({ owner: input.owner.subject_id, spec: input.spec }))
     .digest('hex');
   return `${CHAT_ASSISTANT_NAME_PREFIX}${digest.slice(0, 16)}`;
 }
 
-async function getOrCreateChatAssistantAgent(input: {
+export async function getOrCreateChatAssistantAgent(input: {
   tenant_id: string;
   owner: CreatedBySubject;
   name: string;
@@ -94,7 +95,7 @@ async function getOrCreateChatAssistantAgent(input: {
   }
 }
 
-/** The model a chat's turns run on, which a specialist created in that chat answers with. */
+/** The model a chat's turns run on, which a persona created in that chat answers with. */
 export function chatModelName(runner: ChatRunner): string {
   return runner.kind === 'plain' ? runner.spec.model.name : runner.agent.manifest.model.name;
 }

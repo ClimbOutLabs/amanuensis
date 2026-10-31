@@ -1,3 +1,4 @@
+import type { ChatCompletionMessageParam } from 'openai/resources/chat';
 import type { ContextMessage } from '../../../src/core/runtime/AgentThread.types';
 import {
   hasCalledRetrievalTool,
@@ -9,6 +10,7 @@ import {
   isRetrievalToolName,
   isUntrustedDocumentText,
   lastUserMessageText,
+  personMessageIndex,
   untrustedDocumentTag,
   userAuthoredText,
 } from '../../../src/core/runtime/contextUtils';
@@ -225,5 +227,36 @@ describe('host-wrapped text predicates', () => {
   it('leaves what the user typed alone', () => {
     expect(isHostWrappedText('what does the lease say?')).toBe(false);
     expect(isUntrustedDocumentText('what does the lease say?')).toBe(false);
+  });
+});
+
+describe('personMessageIndex', () => {
+  it("skips file text and host notes that follow the person's message", () => {
+    const messages: ChatCompletionMessageParam[] = [
+      { role: 'system', content: 'Static instruction' },
+      { role: 'user', content: 'earlier question' },
+      { role: 'assistant', content: 'earlier answer' },
+      { role: 'user', content: 'What is the total?' },
+      { role: 'user', content: [{ type: 'text', text: untrustedDocumentTag('invoice total is 40') }] },
+      { role: 'user', content: internalSystemTag('Answer now.') },
+    ];
+    expect(personMessageIndex(messages)).toBe(3);
+  });
+
+  it('keeps a message that has an image next to host text', () => {
+    const messages: ChatCompletionMessageParam[] = [
+      {
+        role: 'user',
+        content: [
+          { type: 'text', text: internalSystemTag('note') },
+          { type: 'image_url', image_url: { url: 'data:image/png;base64,AAAA' } },
+        ],
+      },
+    ];
+    expect(personMessageIndex(messages)).toBe(0);
+  });
+
+  it('is -1 when only the host wrote user messages', () => {
+    expect(personMessageIndex([{ role: 'user', content: internalSystemTag('note') }])).toBe(-1);
   });
 });

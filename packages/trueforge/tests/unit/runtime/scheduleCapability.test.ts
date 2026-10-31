@@ -1,15 +1,25 @@
-import { AgentSpecSchema, type CreatedBySubject } from '@truefoundry/trueforge-core/agent-session';
+import { AgentSpecSchema, type AgentSpec, type CreatedBySubject } from '@truefoundry/trueforge-core/agent-session';
 import {
+  AgentThread,
+  AgentThreadOrchestrator,
   createSentinelHostContext,
   defaultSentinelServices,
   InstructionBuilder,
+  type AgentThreadSendBatch,
   type AuditRecordInput,
   type SentinelServices,
 } from '@truefoundry/trueforge-core/core';
-import type { ApprovalDecision } from '@truefoundry/trueforge-core/core/events/schema';
-import type { InternalEnrichedAssistantMessage } from '@truefoundry/trueforge-core/core/llm/LLMTypes';
+import { EventType, type ApprovalDecision } from '@truefoundry/trueforge-core/core/events/schema';
+import type { ILLM } from '@truefoundry/trueforge-core/core/llm/ILLM';
+import {
+  getEmptyUsage,
+  type ExtendedChatCompletionChunk,
+  type InternalEnrichedAssistantMessage,
+  type RawAssistantMessageWithUsage,
+} from '@truefoundry/trueforge-core/core/llm/LLMTypes';
 import { createToolCallMemoState, executeToolCalls } from '@truefoundry/trueforge-core/core/mcp/executeToolCalls';
 import { isCallToolResponseResult } from '@truefoundry/trueforge-core/core/mcp/IMCPServer';
+import { approvalExpiredReason } from '@truefoundry/trueforge-core/core/permissions/approvalExpiry';
 import { MORNING_BRIEF_PROMPT } from '@truefoundry/trueforge-core/core/schedules/morningBrief';
 import { NOOP_AGENT_TRACING } from '@truefoundry/trueforge-core/core/tracing/NoopAgentTracing';
 import winston from 'winston';
@@ -49,6 +59,8 @@ async function setup(
     runner?: ChatRunner['kind'];
     /** The chat is talking to a persona right now. */
     persona?: boolean;
+    /** A plain chat's own setup; defaults to a bare model and instructions. */
+    spec?: AgentSpec;
   } = {},
 ) {
   const db = createSqliteDb(':memory:');
@@ -98,7 +110,7 @@ async function setup(
     });
   }
   const runner: ChatRunner =
-    input.runner === 'saved' ? { kind: 'saved', agent: researcher } : { kind: 'plain', spec: CHAT_SPEC };
+    input.runner === 'saved' ? { kind: 'saved', agent: researcher } : { kind: 'plain', spec: input.spec ?? CHAT_SPEC };
   const audit: AuditRecordInput[] = [];
   const services: SentinelServices = {
     ...defaultSentinelServices({ pinned_path: '/usr/bin:/bin' }),
@@ -200,7 +212,7 @@ describe('create_schedule', () => {
     const info = await built.tools.toolCallInfo({ name: 'create_schedule', arguments: MORNING_BRIEF });
     expect(info).toMatchObject({ tier: 3, tier_reason: 'schedule_write', is_approval_required: true });
     expect(info.tier3_card?.plain_what).toBe(
-      'Create the schedule "Morning brief". It runs every weekday at 8:00 AM (America/New_York) and starts as soon as you approve.',
+      'Create the schedule "Morning brief"? It runs every weekday at 8:00 AM (America/New_York) and starts as soon as you approve.',
     );
     expect(info.tier3_card?.schedule).toEqual({
       action: 'create',
@@ -244,6 +256,23 @@ describe('create_schedule', () => {
       created_by_subject: OWNER,
     });
     expect(JSON.parse(resultText(result))).toMatchObject({ created: { runs_as: 'Aman' } });
+  });
+
+  it("captures the chat's connectors, skills and sandbox on the agent the schedule runs as", async () => {
+    const spec = AgentSpecSchema.parse({
+      model: { name: 'test-provider/chat-model' },
+      instructions: 'chat',
+      mcp_servers: [{ name: 'calendar' }, { name: 'mail' }],
+      skills: [{ name: 'digest' }],
+      config: { sandbox: { enabled: true } },
+    });
+    const built = await setup({ spec });
+    await dispatch({ built, name: 'create_schedule', args: MORNING_BRIEF, decision: { status: 'allow' } });
+    const [saved] = await built.listAll();
+    const runsAs = await built.agentStore.getAgent({ tenant_id: 'default', id: saved?.agent_id ?? '' });
+    expect(runsAs?.manifest.mcp_servers?.map(server => server.name)).toEqual(['calendar', 'mail']);
+    expect(runsAs?.manifest.skills?.map(skill => skill.name)).toEqual(['digest']);
+    expect(runsAs?.manifest.config.sandbox.enabled).toBe(true);
   });
 
   it('reuses the one stored agent for every schedule from a plain chat', async () => {
@@ -337,7 +366,7 @@ describe('create_schedule', () => {
       args: MORNING_BRIEF,
       decision: { status: 'deny', reason: 'not now' },
     });
-    expect(resultText(denied.result)).toContain('User denied tool call');
+    expect(resultText(denied.result)).toContain('The person said no to this.');
     const direct = await built.tools.callTool({ name: 'create_schedule', arguments: MORNING_BRIEF });
     expect(isCallToolResponseResult(direct) && direct.result.isError).toBe(true);
     expect(await built.listAll()).toEqual([]);
@@ -537,7 +566,7 @@ describe.each([
     expect(built.audit.map(row => [row.tool_name, row.description, row.outcome])).toEqual([
       [
         'create_schedule',
-        'Create the schedule "Morning brief". It runs every weekday at 8:00 AM (America/New_York) and starts as soon as you approve.',
+        'Create the schedule "Morning brief"? It runs every weekday at 8:00 AM (America/New_York) and starts as soon as you approve.',
         'approved',
       ],
       ['pause_schedule', 'Paused the schedule "morning-brief".', 'ran'],
@@ -556,7 +585,7 @@ describe.each([
     const info = await built.tools.toolCallInfo({ name: 'delete_schedule', arguments: { schedule: 'morning-brief' } });
     expect(info).toMatchObject({ tier: 3, is_approval_required: true });
     expect(info.tier3_card?.plain_what).toBe(
-      'Delete the schedule "Morning brief", which runs every weekday at 8:00 AM (America/New_York).',
+      'Delete the schedule "Morning brief", which runs every weekday at 8:00 AM (America/New_York)?',
     );
     expect(info.tier3_card?.schedule?.runs_as).toBe(runsAs);
     await dispatch({
@@ -584,7 +613,292 @@ describe('the schedule rule in the system prompt', () => {
       build(prompt);
     }
     expect(prompt.build()).toContain(
-      'Schedules can only be made with create_schedule. Never tell the user something is scheduled',
+      'Repeating tasks need create_schedule. For "remind me" use set_reminder: it only reaches the user and needs no approval. Never say something is scheduled or set unless create_schedule or set_reminder succeeded in this chat.',
     );
+  });
+});
+
+const MEDICINE = { what: 'Take the medicine', at: '2026-10-19T18:00:00-04:00' };
+
+describe('reminder tools', () => {
+  it('sets a one-time reminder without a card, records it, and tells the activity log in plain words', async () => {
+    const built = await setup();
+    const { info, result } = await dispatch({ built, name: 'set_reminder', args: MEDICINE });
+    expect(info).toMatchObject({
+      tier: 1,
+      tier_reason: 'reminder_write',
+      is_approval_required: false,
+      tier3_card: null,
+    });
+    expect(JSON.parse(resultText(result))).toMatchObject({
+      set: { what: 'Take the medicine', repeats: false, next: 'Monday, October 19 at 6:00 PM' },
+    });
+    const [saved] = await built.listAll();
+    expect(saved).toMatchObject({
+      status: 'active',
+      created_by_subject: OWNER,
+      manifest: {
+        task: 'Take the medicine',
+        cron: null,
+        run_at: '2026-10-19T18:00:00-04:00',
+        kind: 'reminder',
+        timezone: 'America/New_York',
+      },
+    });
+    const pending = await built.store.getScheduledRunFor({ tenant_id: 'default', schedule_id: saved?.id ?? '' });
+    expect(pending?.scheduled_for).toBe('2026-10-19T22:00:00.000Z');
+    expect(built.audit.map(row => [row.tool_name, row.description, row.outcome])).toEqual([
+      ['set_reminder', 'Set a reminder for Monday, October 19 at 6:00 PM: Take the medicine', 'ran'],
+    ]);
+  });
+
+  it('refuses a time in the past with a message that says what to do next', async () => {
+    const built = await setup();
+    const { result } = await dispatch({
+      built,
+      name: 'set_reminder',
+      args: { what: 'Too late', at: '2026-10-18T07:00:00-04:00' },
+    });
+    expect(resultText(result)).toContain(
+      'Nothing was set because that time has already passed. Ask the user for a later time.',
+    );
+    expect(await built.listAll()).toEqual([]);
+  });
+
+  it('makes a repeating reminder from the existing cron path', async () => {
+    const built = await setup();
+    await dispatch({
+      built,
+      name: 'set_reminder',
+      args: { what: 'Take the medicine', at: '2026-10-19T08:30:00-04:00', repeat: 'weekdays' },
+    });
+    const [saved] = await built.listAll();
+    expect(saved?.manifest).toMatchObject({ cron: '30 8 * * 1-5', run_at: null, kind: 'reminder' });
+  });
+
+  it('lists upcoming reminders apart from schedules, and cancels one by id without asking', async () => {
+    const built = await setup();
+    await dispatch({ built, name: 'set_reminder', args: MEDICINE });
+    const schedules = await dispatch({ built, name: 'list_schedules', args: {} });
+    expect(JSON.parse(resultText(schedules.result))).toEqual({ schedules: [] });
+
+    const listed = await dispatch({ built, name: 'list_reminders', args: {} });
+    expect(listed.info).toMatchObject({ tier: 1, tier_reason: 'reminder_read', is_approval_required: false });
+    const { reminders } = JSON.parse(resultText(listed.result));
+    expect(reminders).toHaveLength(1);
+
+    const cancelled = await dispatch({ built, name: 'cancel_reminder', args: { reminder: reminders[0].id } });
+    expect(cancelled.info).toMatchObject({ tier: 1, tier_reason: 'reminder_write', is_approval_required: false });
+    expect(JSON.parse(resultText(cancelled.result))).toMatchObject({ cancelled: { what: 'Take the medicine' } });
+    expect(await built.listAll()).toEqual([]);
+  });
+
+  it('cancels by the exact words, and says what to do when none matches', async () => {
+    const built = await setup();
+    await dispatch({ built, name: 'set_reminder', args: MEDICINE });
+    const missing = await dispatch({ built, name: 'cancel_reminder', args: { reminder: 'Walk the dog' } });
+    expect(resultText(missing.result)).toContain('Call list_reminders');
+    await dispatch({ built, name: 'cancel_reminder', args: { reminder: 'take the medicine' } });
+    expect(await built.listAll()).toEqual([]);
+  });
+});
+
+/** The old Tour card: it promised a check-in in 25 minutes. */
+const OLD_TOUR_PROMPT =
+  "I can't get started. Pick the one smallest thing I should do right now, and check in with me in 25 minutes.";
+/** What a model made of that prompt: the only schedule it can make is a repeating one. */
+const CHECK_IN = {
+  name: 'check-in',
+  task: 'Ask how the smallest step went.',
+  repeat: 'daily',
+  time: '08:25',
+  time_zone: 'America/New_York',
+};
+const SAID_NO = /you said no|you declined|you held off|the person declined/i;
+
+// eslint-disable-next-line @typescript-eslint/require-await -- async generator fixture, not awaiting I/O
+async function* scriptedStream(
+  output: RawAssistantMessageWithUsage['output'],
+): AsyncGenerator<ExtendedChatCompletionChunk, RawAssistantMessageWithUsage, unknown> {
+  const finish = output.tool_calls === undefined ? 'stop' : 'tool_calls';
+  yield {
+    id: 'chunk',
+    object: 'chat.completion.chunk',
+    created: 0,
+    model: 'scripted',
+    choices: [
+      {
+        index: 0,
+        delta: {
+          role: 'assistant',
+          ...(typeof output.content === 'string' ? { content: output.content } : {}),
+          ...(output.tool_calls === undefined
+            ? {}
+            : { tool_calls: output.tool_calls.map((call, index) => ({ index, ...call })) }),
+        },
+        finish_reason: finish,
+      },
+    ],
+  };
+  return { output, usage: getEmptyUsage(), finish_reason: finish };
+}
+
+/**
+ * A model that answers from what the tools said: asked for a check-in, it calls create_schedule, then
+ * reports the result it read. It never claims the person declined unless the result says so.
+ */
+function scriptedModel(): ILLM['create'] {
+  return request => {
+    const last = request.messages.at(-1);
+    const lastText = typeof last?.content === 'string' ? last.content : JSON.stringify(last?.content ?? '');
+    const asked = request.messages.some(
+      message => message.role === 'user' && typeof message.content === 'string' && message.content === OLD_TOUR_PROMPT,
+    );
+    const toolResult = [...request.messages].reverse().find(message => message.role === 'tool');
+    if (asked && toolResult === undefined) {
+      return scriptedStream({
+        role: 'assistant',
+        content: null,
+        tool_calls: [
+          {
+            id: 'call-check-in',
+            type: 'function',
+            function: { name: 'create_schedule', arguments: JSON.stringify(CHECK_IN) },
+          },
+        ],
+      });
+    }
+    const said = typeof toolResult?.content === 'string' ? toolResult.content : lastText;
+    const reply = said.includes('"created"')
+      ? 'Do the first small step now. Your check-in is set.'
+      : said.includes('They did not say no')
+        ? 'Do the first small step now. The check-in request expired before you answered, so it is not set.'
+        : said.includes('The person said no to this.')
+          ? 'Do the first small step now. No check-in, as you asked.'
+          : 'Do the first small step now. I could not set the check-in.';
+    return scriptedStream({ role: 'assistant', content: reply });
+  };
+}
+
+async function tourChat() {
+  const built = await setup();
+  const create = jest.fn(scriptedModel());
+  const thread = new AgentThread({
+    definition: {
+      modelClient: { create, createNonStream: jest.fn() },
+      instruction: 'You are Aman.',
+      messages: undefined,
+      modelParams: undefined,
+      responseFormat: undefined,
+      iterationLimit: undefined,
+      toolSets: undefined,
+      modelId: undefined,
+      configuredModels: undefined,
+    },
+    threadId: 'main',
+    title: 'tour',
+    parent: undefined,
+    agentInfo: undefined,
+    context: undefined,
+    currentContextUsage: undefined,
+    preComputedCompletion: undefined,
+    sandbox: undefined,
+    capabilities: [scheduleCapability(built.options)],
+    capabilityState: undefined,
+    toolCallMemo: undefined,
+    turnToolCallLedger: undefined,
+    taskState: undefined,
+    isRequestContinuation: undefined,
+    sentinel: built.sentinel,
+    tracing: NOOP_AGENT_TRACING,
+    logger: winston.createLogger({ silent: true }),
+  });
+  const orchestrator = new AgentThreadOrchestrator({
+    agentThreads: new Map([[thread.threadId, thread]]),
+    createDynamicSubAgentThread: () => Promise.reject(new Error('unexpected sub-agent')),
+    tracing: NOOP_AGENT_TRACING,
+    logger: winston.createLogger({ silent: true }),
+  });
+  const events: unknown[] = [];
+  const run = async (sendBatch: AgentThreadSendBatch) => {
+    for await (const _event of orchestrator.send(sendBatch)) {
+      void _event;
+    }
+    const iterator = orchestrator.execute({ signal: new AbortController().signal });
+    let step = await iterator.next();
+    while (step.done !== true) {
+      events.push(step.value);
+      step = await iterator.next();
+    }
+    return step.value;
+  };
+  const first = await run([{ type: EventType.USER_MESSAGE, content: OLD_TOUR_PROMPT }]);
+  const card = first.required_actions.flatMap(action =>
+    action.type === EventType.TOOL_APPROVAL_REQUIRED
+      ? action.tool_calls.map(call => ({ thread_id: action.thread_id, id: call.id }))
+      : [],
+  );
+  const answer = (approval: ApprovalDecision) =>
+    run(
+      card.map(call => ({
+        type: EventType.USER_TOOL_APPROVAL,
+        thread_id: call.thread_id,
+        tool_call_id: call.id,
+        approval,
+      })),
+    );
+  return { built, card, answer, events };
+}
+
+describe('the Tour check-in prompt, run through a scripted model', () => {
+  it('asks once, and on approval saves exactly one schedule with no "You said no" line', async () => {
+    const { built, card, answer } = await tourChat();
+    expect(card).toHaveLength(1);
+    expect(await built.listAll()).toEqual([]);
+
+    const done = await answer({ status: 'allow' });
+
+    expect(await built.listAll()).toHaveLength(1);
+    expect(done.output?.content).toBe('Do the first small step now. Your check-in is set.');
+    expect(built.audit.map(row => row.outcome)).toContain('approved');
+  });
+
+  it('tells the person a card left unanswered expired, never that they said no, and saves nothing', async () => {
+    const { built, answer, events } = await tourChat();
+
+    const done = await answer({ status: 'deny', reason: approvalExpiredReason() });
+
+    expect(await built.listAll()).toEqual([]);
+    // The model read the true reason and said it in its own words; the host added nothing.
+    expect(done.output?.content).toBe(
+      'Do the first small step now. The check-in request expired before you answered, so it is not set.',
+    );
+    expect(done.output?.content).not.toMatch(SAID_NO);
+    // The activity log does not record the person turning it down either.
+    expect(built.audit).toContainEqual(
+      expect.objectContaining({
+        tool_name: 'create_schedule',
+        outcome: 'auto_denied',
+        auto_deny_reason: 'approval_expired',
+      }),
+    );
+    // The chat's step reads the result's code, so it shows the card expired rather than "you said no".
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        type: EventType.TOOL_RESPONSE_V2,
+        disposition: 'denied',
+        remediation: expect.objectContaining({ reason_code: 'approval_expired' }),
+      }),
+    );
+  });
+
+  it("lets the reply acknowledge the person's own decline once, with no extra line", async () => {
+    const { built, answer } = await tourChat();
+
+    const done = await answer({ status: 'deny', reason: 'not now' });
+
+    expect(await built.listAll()).toEqual([]);
+    expect(done.output?.content).toBe('Do the first small step now. No check-in, as you asked.');
+    expect(built.audit).toContainEqual(expect.objectContaining({ tool_name: 'create_schedule', outcome: 'denied' }));
   });
 });

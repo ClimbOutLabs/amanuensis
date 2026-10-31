@@ -4,6 +4,8 @@
  * grow with the length of the input.
  */
 
+import { isTrackingImageLink } from '../../chatImages';
+
 /** Longest HTML read; the rest is dropped. Mail bodies that matter are far shorter. */
 export const MAX_HTML_CHARS = 300_000;
 
@@ -108,41 +110,66 @@ function indexOfLower(input: { text: string; needle: string; from: number }): nu
   return -1;
 }
 
+function isSpace(char: string | undefined): boolean {
+  return char === ' ' || char === '\t' || char === '\n' || char === '\r' || char === '\f';
+}
+
+/** True where an attribute name stops. */
+function endsName(char: string | undefined): boolean {
+  return isSpace(char) || char === '=' || char === '>' || char === '/';
+}
+
+/**
+ * The value of one attribute of a start tag, read attribute by attribute so a name inside another
+ * attribute's value (a `src` query, an `alt` text, a `style`) never matches. '' for an attribute
+ * written without a value; null when the tag does not have it.
+ */
 function attributeValue(input: { tag: string; name: string }): string | null {
-  const lower = input.tag.toLowerCase();
-  let from = 0;
-  for (;;) {
-    const at = lower.indexOf(input.name, from);
-    if (at === -1) {
+  const { tag } = input;
+  let cursor = 1;
+  while (cursor < tag.length && !endsName(tag[cursor])) {
+    cursor += 1;
+  }
+  while (cursor < tag.length) {
+    while (isSpace(tag[cursor]) || tag[cursor] === '/') {
+      cursor += 1;
+    }
+    if (cursor >= tag.length || tag[cursor] === '>') {
       return null;
     }
-    from = at + input.name.length;
-    const before = lower.charCodeAt(at - 1);
-    if (at > 0 && isNameChar(before)) {
-      continue;
-    }
-    let cursor = from;
-    while (lower[cursor] === ' ') {
+    const nameStart = cursor;
+    while (cursor < tag.length && !endsName(tag[cursor])) {
       cursor += 1;
     }
-    if (lower[cursor] !== '=') {
-      return input.name === 'hidden' ? '' : null;
+    const name = tag.slice(nameStart, cursor).toLowerCase();
+    let equals = cursor;
+    while (isSpace(tag[equals])) {
+      equals += 1;
     }
-    cursor += 1;
-    while (lower[cursor] === ' ') {
-      cursor += 1;
+    let value = '';
+    if (tag[equals] === '=') {
+      cursor = equals + 1;
+      while (isSpace(tag[cursor])) {
+        cursor += 1;
+      }
+      const quote = tag[cursor];
+      if (quote === '"' || quote === "'") {
+        const end = tag.indexOf(quote, cursor + 1);
+        value = tag.slice(cursor + 1, end === -1 ? undefined : end);
+        cursor = end === -1 ? tag.length : end + 1;
+      } else {
+        const start = cursor;
+        while (cursor < tag.length && !isSpace(tag[cursor]) && tag[cursor] !== '>') {
+          cursor += 1;
+        }
+        value = tag.slice(start, cursor);
+      }
     }
-    const quote = input.tag[cursor];
-    if (quote === '"' || quote === "'") {
-      const end = input.tag.indexOf(quote, cursor + 1);
-      return input.tag.slice(cursor + 1, end === -1 ? undefined : end);
+    if (name === input.name) {
+      return value;
     }
-    let end = cursor;
-    while (end < input.tag.length && input.tag[end] !== ' ' && input.tag[end] !== '>') {
-      end += 1;
-    }
-    return input.tag.slice(cursor, end);
   }
+  return null;
 }
 
 /** True for a CSS declaration that takes the element's text out of sight. */
@@ -183,8 +210,12 @@ function safeLink(href: string): string | null {
   return /^(https?:\/\/|mailto:)/i.test(decoded) && decoded.length <= MAX_LINK_CHARS ? decoded : null;
 }
 
-/** A readable plain-text version of an HTML body: no scripts, styles, hidden text or tags; links keep their address. */
-export function htmlToText(source: string): string {
+/**
+ * A readable plain-text version of an HTML body: no scripts, styles, hidden text or tags; links keep their
+ * address. Cells of one table row sit on one line, apart by `cellSeparator` (a space unless given).
+ */
+export function htmlToText(source: string, options?: { cellSeparator?: string }): string {
+  const cellSeparator = options?.cellSeparator ?? ' ';
   const html = source.length > MAX_HTML_CHARS ? source.slice(0, MAX_HTML_CHARS) : source;
   const lastGt = html.lastIndexOf('>');
   // Pieces are joined once at the end: appending to one growing string and testing its tail is quadratic.
@@ -206,8 +237,9 @@ export function htmlToText(source: string): string {
       push(text);
     }
   };
+  const lineHasText = () => parts.length > 0 && !atLineStart;
   const lineBreak = () => {
-    if (parts.length > 0 && !atLineStart) {
+    if (lineHasText()) {
       push('\n');
     }
   };
@@ -292,8 +324,8 @@ export function htmlToText(source: string): string {
       push('- ');
     } else if (BLOCK_TAGS.has(name)) {
       lineBreak();
-    } else if (CELL_TAGS.has(name) && closing) {
-      push(' ');
+    } else if (CELL_TAGS.has(name) && !closing && lineHasText()) {
+      push(cellSeparator);
     }
   }
   return decodeEntities(parts.join(''))
@@ -304,17 +336,52 @@ export function htmlToText(source: string): string {
     .trim();
 }
 
+/** Images this small or smaller on a side are tracking pixels, not pictures anyone would look at. */
+const TRACKING_PIXEL_MAX_SIDE = 2;
+
+/** True for a width or height in pixels (a bare number or `px`) no larger than a tracking pixel. */
+function tinySide(value: string | null): boolean {
+  const size = value === null ? null : /^(\d*\.?\d+)(?:px)?(?:!important)?$/i.exec(value.trim());
+  return size?.[1] !== undefined && Number.parseFloat(size[1]) <= TRACKING_PIXEL_MAX_SIDE;
+}
+
+/** True for an `<img>` tag drawn so small or so hidden that it can only be there to report the email was opened. */
+function isTrackingPixelTag(tag: string): boolean {
+  if (tinySide(attributeValue({ tag, name: 'width' })) || tinySide(attributeValue({ tag, name: 'height' }))) {
+    return true;
+  }
+  const style = (attributeValue({ tag, name: 'style' }) ?? '').toLowerCase().replace(/\s/g, '');
+  return style.split(';').some(declaration => {
+    const colon = declaration.indexOf(':');
+    const property = declaration.slice(0, colon);
+    const value = declaration.slice(colon + 1);
+    switch (colon === -1 ? '' : property) {
+      case 'display':
+        return value.startsWith('none');
+      case 'visibility':
+        return value.startsWith('hidden');
+      case 'width':
+      case 'height':
+      case 'max-width':
+      case 'max-height':
+        return tinySide(value);
+      default:
+        return false;
+    }
+  });
+}
+
 /** Longest image address kept; longer ones are dropped rather than cut. */
 const MAX_IMAGE_LINK_CHARS = 2048;
 
-/** The `src` value of one `<img ...>` tag; the name must stand alone, so `data-src` does not count. */
-function imageSource(tag: string): string | null {
+/** The value of one attribute of a tag; the name must stand alone, so `data-src` does not count as `src`. */
+function tagAttribute({ tag, name }: { tag: string; name: string }): string | null {
   const lower = tag.toLowerCase();
-  let at = lower.indexOf('src', 4);
+  let at = lower.indexOf(name, 4);
   while (at !== -1) {
     const before = lower[at - 1];
     if (before === ' ' || before === '\t' || before === '\n' || before === '\r' || before === '/') {
-      let cursor = at + 3;
+      let cursor = at + name.length;
       while (lower[cursor] === ' ' || lower[cursor] === '\t' || lower[cursor] === '\n' || lower[cursor] === '\r') {
         cursor += 1;
       }
@@ -328,6 +395,13 @@ function imageSource(tag: string): string | null {
           const end = tag.indexOf(quote, cursor + 1);
           return end === -1 ? null : tag.slice(cursor + 1, end);
         }
+        // HTML carried inside a JSON string keeps its quotes escaped: `src=\"...\"`.
+        const escaped = tag[cursor + 1];
+        if (quote === '\\' && (escaped === '"' || escaped === "'")) {
+          const closing = `\\${escaped}`;
+          const end = tag.indexOf(closing, cursor + 2);
+          return end === -1 ? null : tag.slice(cursor + 2, end);
+        }
         let end = cursor;
         while (end < tag.length && !/[\s>]/.test(tag.charAt(end))) {
           end += 1;
@@ -335,21 +409,27 @@ function imageSource(tag: string): string | null {
         return tag.slice(cursor, end);
       }
     }
-    at = lower.indexOf('src', at + 3);
+    at = lower.indexOf(name, at + name.length);
   }
   return null;
 }
 
+/** One `<img>` of an HTML body: its web address and its alt text, when the tag gives one. */
+export interface HtmlImage {
+  url: string;
+  alt: string | undefined;
+}
+
 /**
- * The web addresses of an HTML body's `<img src>` tags, once each and in order, at most `max`. Inline
+ * The `<img>` tags of an HTML body with a web address, once each and in order, at most `max`. Inline
  * (`cid:`) and `data:` images are attachments, not links, and CSS backgrounds and `srcset` are not read.
  * Linear in the input like the rest of this module.
  */
-export function htmlImageLinks(input: { source: string; max: number }): string[] {
+export function htmlImages(input: { source: string; max: number }): HtmlImage[] {
   const html = input.source.length > MAX_HTML_CHARS ? input.source.slice(0, MAX_HTML_CHARS) : input.source;
-  const links: string[] = [];
+  const images: HtmlImage[] = [];
   let at = indexOfLower({ text: html, needle: '<img', from: 0 });
-  while (at !== -1 && links.length < input.max) {
+  while (at !== -1 && images.length < input.max) {
     const end = html.indexOf('>', at);
     if (end === -1) {
       break;
@@ -357,13 +437,26 @@ export function htmlImageLinks(input: { source: string; max: number }): string[]
     const tag = html.slice(at, end + 1);
     const boundary = tag.charCodeAt(4);
     if (!isNameChar(boundary)) {
-      const raw = imageSource(tag);
+      const raw = tagAttribute({ tag, name: 'src' });
       const link = raw === null ? '' : decodeEntities(raw).trim();
-      if (/^https?:\/\//i.test(link) && link.length <= MAX_IMAGE_LINK_CHARS && !links.includes(link)) {
-        links.push(link);
+      if (
+        /^https?:\/\//i.test(link) &&
+        link.length <= MAX_IMAGE_LINK_CHARS &&
+        !images.some(image => image.url === link) &&
+        !isTrackingPixelTag(tag) &&
+        !isTrackingImageLink(link)
+      ) {
+        const alt = tagAttribute({ tag, name: 'alt' });
+        const altText = alt === null ? '' : decodeEntities(alt).trim();
+        images.push({ url: link, alt: altText === '' ? undefined : altText });
       }
     }
     at = indexOfLower({ text: html, needle: '<img', from: end + 1 });
   }
-  return links;
+  return images;
+}
+
+/** The web addresses of an HTML body's `<img src>` tags, as `htmlImages` finds them. */
+export function htmlImageLinks(input: { source: string; max: number }): string[] {
+  return htmlImages(input).map(image => image.url);
 }

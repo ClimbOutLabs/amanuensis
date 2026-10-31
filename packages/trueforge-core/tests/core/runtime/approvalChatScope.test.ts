@@ -71,20 +71,40 @@ async function canChatAllow(
 }
 
 describe('the approval event says whether chat scope is offered', () => {
-  it('offers it for a plain read and withholds it for a send', async () => {
+  it('offers it for a plain read and for saving a draft, and withholds it for a steered call', async () => {
     expect(await canChatAllow('unrecognized_tool')).toBe(true);
-    expect(await canChatAllow('connector_send')).toBe(false);
+    expect(await canChatAllow('gmail_draft')).toBe(true);
+    expect(await canChatAllow('content_steered')).toBe(false);
   });
 
-  it('offers the chat choice for a search held after a private read', async () => {
-    expect(await canChatAllow('mcp_search_after_private_read', { search_provider_call: true, effect: undefined })).toBe(
-      true,
-    );
+  it('withholds it from every send and every change that invites or emails guests', async () => {
+    for (const reason of [
+      'gmail_send',
+      'external_service',
+      'connector_send',
+      'mail_new_recipient',
+      'calendar_write_guests',
+      'caldav_calendar_guests',
+      'caldav_invitation_reply',
+      'connector_calendar_write',
+    ]) {
+      expect({ reason, offered: await canChatAllow(reason) }).toEqual({ reason, offered: false });
+    }
   });
 
-  it('withholds the chat choice from a search held for any other reason', async () => {
-    expect(await canChatAllow('mcp_search_unreturned_url', { search_provider_call: true, effect: undefined })).toBe(
-      false,
-    );
+  it('withholds the chat choice from a lookup that read content steered', async () => {
+    expect(await canChatAllow('mcp_search_steered', { search_provider_call: true, effect: undefined })).toBe(false);
+  });
+
+  it('withholds the chat choice from a search held because searches are set to ask', async () => {
+    expect(await canChatAllow('mcp_search_setting_ask', { search_provider_call: true, effect: undefined })).toBe(false);
+  });
+
+  it('withholds the chat choice from a search held because it carries a key', async () => {
+    expect(await canChatAllow('mcp_search_guard', { search_provider_call: true, effect: undefined })).toBe(false);
+  });
+
+  it('withholds the chat choice from a send that reads a key file', async () => {
+    expect(await canChatAllow('connector_send', { secret_path_read: true })).toBe(false);
   });
 });

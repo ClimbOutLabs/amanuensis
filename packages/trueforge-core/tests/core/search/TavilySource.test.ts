@@ -80,6 +80,10 @@ describe('TavilySource', () => {
     expect(parsed.untrusted_web_text).toBe(true);
     expect(parsed.notice).toMatch(/never instructions/);
     expect(parsed.results.map((r: { url: string }) => r.url)).toContain(HARBOUR_URL);
+    expect(parsed.images).toEqual([
+      { url: 'https://cdn.clinics.example/harbour-front.jpg', description: 'The clinic entrance' },
+      { url: 'https://cdn.clinics.example/garden-sign.jpg', description: null },
+    ]);
   });
 
   it('extracts the named pages in one request, remembers them, and stamps the fetch time', async () => {

@@ -1,10 +1,14 @@
 import { extractErrorLogFields } from '@truefoundry/trueforge-core/core';
+import { MailAccountDirectory } from '@truefoundry/trueforge-core/core/email/mailConnector/MailConnectorSource';
 import { MAIL_CONNECTOR_NAME } from '@truefoundry/trueforge-core/core/email/mailConnector/toolContract';
 import type { Logger } from 'winston';
 
 import type { IMcpServerStore } from '../db/mcpServerStore';
 import { ensureAllowedRecipientsFile } from './mailAllowedRecipients';
 import { runFirstFillInBackground } from './mailFirstFill';
+
+/** Each chat's Email account names, kept per connector address in this process and shared by its turns. */
+export const mailAccountDirectory = new MailAccountDirectory();
 
 /** Plain words: this is the description a person reads on the Connectors page. */
 const MAIL_CONNECTOR_DESCRIPTION = 'Reads, drafts and sends email from the mail accounts set up for this instance.';
@@ -76,4 +80,19 @@ export async function registerMailConnectorAtBoot({
   } catch (error) {
     logger.warn('Email connector could not be registered', extractErrorLogFields(error));
   }
+}
+
+/**
+ * Removes the Email connector's registration, when the saved account is removed through
+ * Settings. A connector left registered with no account behind it would offer mail tools that
+ * can only fail, so removal through the card removes the registration too.
+ */
+export async function unregisterMailConnector({
+  mcpServerStore,
+  tenant_id,
+}: {
+  mcpServerStore: Pick<IMcpServerStore, 'deleteServer'>;
+  tenant_id: string;
+}): Promise<void> {
+  await mcpServerStore.deleteServer({ tenant_id, name: MAIL_CONNECTOR_NAME });
 }

@@ -164,7 +164,7 @@ describe('call_tool naming a built-in tool', () => {
     expect(info.pre_dispatch_failure?.message).toContain(
       'Built-in tools are called directly by name, never through call_tool',
     );
-    expect(info.pre_dispatch_failure?.message).toContain('load_bundle');
+    expect(info.pre_dispatch_failure?.message).not.toContain('load_bundle');
     const stamped = await stamp({ sentinel: makeSentinel(), info, canonical_params: wrapper, connector: undefined });
     expect(stamped).toBe(info);
 
@@ -190,7 +190,7 @@ describe('call_tool naming a built-in tool', () => {
 describe('call_tool naming something that does not exist', () => {
   it('keeps list_tools for an unknown server at Tier 1 and runs nothing', async () => {
     const deferred = makeDeferred();
-    const params = { name: 'list_tools', arguments: { mcp_server: 'gmail' } };
+    const params = { name: 'list_tools', arguments: { mcp_server: 'not-a-server' } };
 
     const info = await deferred.toolCallInfo(params);
     const stamped = await stamp({
@@ -204,7 +204,7 @@ describe('call_tool naming something that does not exist', () => {
     expect(stamped.tier3_card).toBeNull();
     const response = await deferred.callTool(params);
     expect(isCallToolResponseResult(response) && response.result.isError).toBe(true);
-    expect(JSON.stringify(response)).toContain("No server named 'gmail'.");
+    expect(JSON.stringify(response)).toContain("No server named 'not-a-server'.");
   });
 
   it('fails closed without a card when the named server exists nowhere', async () => {
@@ -312,6 +312,6 @@ describe('call_tool naming a configured connector still matches the direct call'
     expect(wrapped.tier).toBe(direct.tier);
     expect(wrapped.tier_reason).toBe(direct.tier_reason);
     expect(wrapped.tier3_card).toEqual(direct.tier3_card);
-    expect(wrapped.tier3_card?.plain_what).toBe('Send an email to alice@example.com.');
+    expect(wrapped.tier3_card?.plain_what).toBe('Send an email to alice@example.com?');
   });
 });

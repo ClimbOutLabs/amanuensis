@@ -61,14 +61,30 @@ upgrade_any_sandbox() {
 }
 
 # Only an instance that was healthy once has anything the upgrade could harm, so only its failure stops the upgrade;
-# an instance that never started is what the upgrade is for. --force skips the check.
+# an instance that never started is what the upgrade is for. --force skips the check. Healthy means the doctor's
+# report for the instance holds no fail record: warnings pass, and the message names the failing parts from the
+# report itself. A doctor run that produces no report is a check that could not run, not a healthy instance, so it
+# stops the upgrade too, with its own message.
 upgrade_health_gate() {
-  local name
+  local name out rc fails flat
   [ -x "$(doctor_shim)" ] && [ "$OPT_FORCE" != 1 ] || return 0
   for name in $(reg_names); do
     instance_ever_healthy "$name" || continue
-    run_doctor --json --local --instance "$name" >/dev/null 2>&1 ||
-      die "Instance $name worked before but has a problem now, so the upgrade did not start. See it with: aman doctor. Repair it with: aman doctor instance --fix. Or upgrade anyway with: aman upgrade --force"
+    rc=0
+    out=$(DOCTOR_TIMEOUT=180 run_doctor --json --local --instance "$name" 2>/dev/null) || rc=$?
+    fails=$(doctor_fail_details "$out")
+    if [ -n "$fails" ]; then
+      flat=$(printf '%s' "$fails" | tr '\n' ' ')
+      flat=${flat% }
+      case "$flat" in
+        *.) ;;
+        *) flat="$flat." ;;
+      esac
+      die "Instance $name worked before but has a problem now, so the upgrade did not start: $flat See it with: aman doctor. Repair it with: aman doctor instance --fix. Or upgrade anyway with: aman upgrade --force"
+    fi
+    if [ "$rc" != 0 ] || [ -z "$out" ]; then
+      die "Instance $name could not be checked, so the upgrade did not start. Run the check itself to see why: aman doctor. Or upgrade anyway with: aman upgrade --force"
+    fi
   done
 }
 
@@ -105,6 +121,31 @@ upgrade_report() {
   [ "$OPT_CHECK" != 1 ] && [ "$DRY_RUN" != 1 ] || return 0
   [ -x "$(doctor_shim)" ] || return 0
   AMAN_REPORT_COMMAND=upgrade DOCTOR_TIMEOUT=180 run_doctor --json >/dev/null 2>&1 || true
+}
+
+# Before the Email and Calendar connectors kept their account in their own volume, the installer kept the account
+# in a file in the instance folder, and nothing reads that file now. An instance that still has the file has an
+# account the upgrade did not carry over, so the output says how to connect it again. Said once per connector,
+# however many instances have the file.
+upgrade_old_connector_notice() { # file, connector name
+  local file=$1 connector=$2 name
+  for name in $(reg_names); do
+    if [ -s "$(instance_dir "$name")/$file" ]; then
+      say "$connector was set up the old way. Connect it again in Settings, then Connectors, then $connector."
+      return 0
+    fi
+  done
+}
+
+# A calendar account the older installer kept in the instance folder is moved into the connector's own storage. Only
+# one that could not be moved is reported, so the notice stops once the account is moved.
+upgrade_old_account_notices() {
+  local name
+  for name in $(reg_names); do
+    calendar_migrate_old_file "$name" || true
+  done
+  upgrade_old_connector_notice .env.mail-email Email
+  upgrade_old_connector_notice .env.calendar Calendar
 }
 
 # The source a branch that tracks nothing would be pulled from: the checkout's only remote, when
@@ -184,6 +225,7 @@ cmd_upgrade() {
   if [ "$CUR_APP_TAG" = "$REL_APP_TAG" ] && [ "$CUR_STT_TAG" = "$REL_STT_TAG" ] && [ "$CUR_TTS_TAG" = "$REL_TTS_TAG" ] && [ "$CUR_CALENDAR_TAG" = "$REL_CALENDAR_TAG" ] && [ "$CUR_DEX_IMAGE" = "$REL_DEX_IMAGE" ]; then
     if docker_image_exists "$REL_APP_TAG" && docker_image_exists "$REL_STT_TAG" && docker_image_exists "$REL_TTS_TAG" && docker_image_exists "$REL_CALENDAR_TAG" && docker_image_exists "$REL_DEX_IMAGE"; then
       say "Already up to date ($REL_APP_TAG). Nothing to do."
+      upgrade_old_account_notices
       upgrade_report
       return 0
     fi
@@ -198,6 +240,7 @@ cmd_upgrade() {
     for name in $(reg_names); do
       instance_up "$name" || exit 1
     done
+    upgrade_old_account_notices
     upgrade_report
     return 0
   fi
@@ -230,6 +273,7 @@ cmd_upgrade() {
   else
     say "Upgraded to $REL_APP_TAG. No backup was needed, since no instance had data yet."
   fi
+  upgrade_old_account_notices
   if [ -x "$(doctor_shim)" ]; then
     AMAN_REPORT_COMMAND=upgrade DOCTOR_TIMEOUT=180 run_doctor || warn "The checks after the upgrade found a problem, listed above."
   fi

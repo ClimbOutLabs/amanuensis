@@ -1,0 +1,4 @@
+docker --version
+docker info --format {{.ServerVersion}}
+docker compose version
+docker info --format {{.MemTotal}}

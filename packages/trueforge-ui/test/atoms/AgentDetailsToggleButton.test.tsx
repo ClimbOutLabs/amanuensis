@@ -62,7 +62,7 @@ describe('AgentDetailsToggleButton', () => {
         </ShellModeProvider>
       </SlotsProvider>,
     );
-    expect(screen.queryByRole('button', { name: /agent details/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('switch', { name: 'Agent details' })).not.toBeInTheDocument();
   });
 
   it('is hidden while the chat has no server session id yet', () => {
@@ -76,45 +76,47 @@ describe('AgentDetailsToggleButton', () => {
         </ShellModeProvider>
       </SlotsProvider>,
     );
-    expect(screen.getByRole('button', { name: 'Clear chat' })).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /agent details/i })).not.toBeInTheDocument();
+    expect(screen.getByRole('menuitem', { name: 'Clear chat' })).toBeInTheDocument();
+    expect(screen.queryByRole('switch', { name: 'Agent details' })).not.toBeInTheDocument();
   });
 
-  it('renders next to Clear chat, labeled "Show agent details" and unpressed when collapsed', async () => {
+  it('is a switch labelled "Agent details" that reports off to screen readers', async () => {
     renderToggle({ agentDetails: 'collapsed' });
     await act(async () => {
       await Promise.resolve();
     });
 
-    expect(screen.getByRole('button', { name: 'Clear chat' })).toBeInTheDocument();
-    const toggle = screen.getByRole('button', { name: 'Show agent details' });
-    expect(toggle).toBeInTheDocument();
-    expect(toggle).toHaveAttribute('aria-pressed', 'false');
+    const toggle = screen.getByRole('switch', { name: 'Agent details' });
+    expect(toggle).toHaveAttribute('aria-checked', 'false');
+    expect(toggle).toHaveAttribute('title', 'Agent details are off');
+    expect(toggle).toHaveTextContent('Agent details');
   });
 
-  it('renders as "Hide agent details" and pressed when the stored preference is expanded', async () => {
+  it('reports on, from the preference stored on the chat, so it is the same after a reload', async () => {
     renderToggle({ agentDetails: 'expanded' });
     await act(async () => {
       await Promise.resolve();
     });
 
-    const toggle = screen.getByRole('button', { name: 'Hide agent details' });
-    expect(toggle).toHaveAttribute('aria-pressed', 'true');
+    const toggle = screen.getByRole('switch', { name: 'Agent details' });
+    expect(toggle).toHaveAttribute('aria-checked', 'true');
+    expect(toggle).toHaveAttribute('title', 'Agent details are on');
+    expect(toggle.querySelector('[data-state]')).toHaveAttribute('data-state', 'on');
   });
 
-  it('toggles the label/aria-pressed and writes the new preference through the session', async () => {
+  it('flips its state and stores the new choice on the chat', async () => {
     const { server } = renderToggle({ agentDetails: 'collapsed' });
     await act(async () => {
       await Promise.resolve();
     });
 
-    fireEvent.click(screen.getByRole('button', { name: 'Show agent details' }));
+    fireEvent.click(screen.getByRole('switch', { name: 'Agent details' }));
     await act(async () => {
       await Promise.resolve();
       await Promise.resolve();
     });
 
-    expect(screen.getByRole('button', { name: 'Hide agent details' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('switch', { name: 'Agent details' })).toHaveAttribute('aria-checked', 'true');
     expect(server.updateSession).toHaveBeenCalledWith(
       expect.objectContaining({
         sessionId: 'sess-1',

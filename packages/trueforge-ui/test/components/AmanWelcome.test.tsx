@@ -1,21 +1,53 @@
-import { fireEvent, render, screen } from '@testing-library/react';
-import { MORNING_BRIEF_PROMPT } from '@truefoundry/trueforge-core/core/schedules/morningBrief';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { MORNING_BRIEF_CARD_PROMPT } from '@truefoundry/trueforge-core/core/schedules/morningBrief';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { AmanSetupProvider, type AmanSetupState } from '@/components/AmanSetupContext.js';
-import { greetingFor } from '@/components/AmanTour.js';
-import { AmanWelcome, amanWelcomeHeading } from '@/components/AmanWelcome.js';
+import { AmanWelcome } from '@/components/AmanWelcome.js';
 import { EMPTY_PERSONALIZATION_PROFILE, PersonalizationProvider } from '@/components/PersonalizationContext.js';
-import { TOUR_HIDDEN_STORAGE_KEY } from '@/utils/tourDisplayPreference.js';
+import { CARDS } from '@/components/tourPrompts.js';
 
-const { composer, server } = vi.hoisted(() => {
-  const server: { grantedFeatures: string[]; sandboxEnabled: boolean; hasCatalog: boolean } = {
-    grantedFeatures: [],
-    sandboxEnabled: false,
-    hasCatalog: true,
+const { composer, server, schedules, shell, permissionsServer } = vi.hoisted(() => {
+  const server: { grantedFeatures: string[]; hasCatalog: boolean } = { grantedFeatures: [], hasCatalog: true };
+  const schedules: {
+    list: { id: string; name: string; task: string; status: 'active' | 'paused' }[];
+    enabled: boolean;
+    /** What the person may do on each schedule; null means no permissions server, so everything is allowed. */
+    permissions: Record<string, string[]> | null;
+  } = {
+    list: [],
+    enabled: false,
+    permissions: null,
   };
-  return { composer: { setText: vi.fn(), send: vi.fn() }, server };
+  // One object for the whole run: the permissions hook keys its reads on the server's identity.
+  const permissionsServer = {
+    listPermissions: async ({ resourceIds }: { resourceIds: readonly string[] }) => ({
+      data: Object.fromEntries(resourceIds.map(id => [id, schedules.permissions?.[id] ?? []])),
+    }),
+  };
+  return {
+    composer: { setText: vi.fn(), send: vi.fn() },
+    server,
+    schedules,
+    shell: { openHistorySession: vi.fn() },
+    permissionsServer,
+  };
 });
+
+const createScheduleRun = vi.fn(async ({ scheduleId }: { scheduleId: string }) => ({
+  id: 'run-1',
+  scheduleId,
+  name: 'manual',
+  scheduledFor: '2026-10-29T08:00:00.000Z',
+  status: 'triggered',
+  triggeredAt: '2026-10-29T08:00:00.000Z',
+  triggeredBy: 'Priya',
+}));
+const findScheduleRunSession = vi.fn(async () => ({
+  id: 'session-run-1',
+  createdAt: '2026-10-29T08:00:00.000Z',
+  agentName: 'assistant',
+}));
 
 vi.mock('@assistant-ui/react', async importOriginal => ({
   ...(await importOriginal<typeof import('@assistant-ui/react')>()),
@@ -28,7 +60,7 @@ vi.mock('@/server/ServerContext.js', async importOriginal => ({
     server.hasCatalog
       ? {
           getGoogleStatus: async () => ({
-            features: ['gmail_read', 'gmail_compose', 'calendar_read', 'calendar_write'].map(feature => ({
+            features: ['gmail_read', 'calendar_read'].map(feature => ({
               feature,
               granted: server.grantedFeatures.includes(feature),
               label: feature,
@@ -36,7 +68,16 @@ vi.mock('@/server/ServerContext.js', async importOriginal => ({
           }),
         }
       : null,
-  useServerCapabilities: () => ({ sandbox: { enabled: server.sandboxEnabled } }),
+  useServerCapabilities: () => ({ sandbox: { enabled: false } }),
+  useOptionalScheduleServer: () =>
+    schedules.enabled ? { listSchedules: async () => ({ data: schedules.list }), createScheduleRun } : null,
+  useOptionalAgentSessionsServer: () => ({ findScheduleRunSession }),
+  useOptionalPermissionsServer: () => (schedules.permissions === null ? null : permissionsServer),
+}));
+
+vi.mock('@/server/ShellModeContext.js', async importOriginal => ({
+  ...(await importOriginal<typeof import('@/server/ShellModeContext.js')>()),
+  useOptionalShellMode: () => shell,
 }));
 
 type RenderInput = {
@@ -56,192 +97,227 @@ function renderWelcome(input: RenderInput = {}) {
     updateProfile: async () => ({ ...EMPTY_PERSONALIZATION_PROFILE }),
     deleteProfile: async () => {},
   };
-  const screenElement = <AmanWelcome heading={input.heading} />;
   return render(
     <PersonalizationProvider api={api}>
       {input.setup === undefined ? (
-        screenElement
+        <AmanWelcome heading={input.heading} />
       ) : (
-        <AmanSetupProvider value={input.setup}>{screenElement}</AmanSetupProvider>
+        <AmanSetupProvider value={input.setup}>
+          <AmanWelcome heading={input.heading} />
+        </AmanSetupProvider>
       )}
     </PersonalizationProvider>,
   );
 }
 
-const dismissed = { dismissed: true, dismiss: () => {} };
-const notDismissed = { dismissed: false, dismiss: () => {} };
-/** The tour's greeting, which depends on the hour the test runs at. */
+const firstRun: AmanSetupState = {
+  modelName: 'local/llama',
+  hasChatted: false,
+  firstRunGuide: { dismissed: false, dismiss: () => {} },
+};
 
 beforeEach(() => {
-  window.localStorage.clear();
+  localStorage.clear();
   composer.setText.mockClear();
   composer.send.mockClear();
   server.grantedFeatures = [];
-  server.sandboxEnabled = false;
   server.hasCatalog = true;
-});
-
-afterEach(() => {
-  window.localStorage.clear();
+  schedules.list = [];
+  schedules.enabled = false;
+  schedules.permissions = null;
+  createScheduleRun.mockClear();
+  findScheduleRunSession.mockClear();
+  shell.openHistorySession.mockClear();
 });
 
 describe('AmanWelcome on an ordinary new chat', () => {
-  it('shows the tour in place of the plain greeting', async () => {
-    renderWelcome({ assistantName: 'Testinatrix' });
+  it('shows the home in place of the plain heading', async () => {
+    renderWelcome({ userName: 'Priya Shah', assistantName: 'Mannie' });
 
-    expect(await screen.findByTestId('aman-tour')).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { level: 1, name: /Good .*Priya/ })).toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: /How can I help/ })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Replay the tour' })).not.toBeInTheDocument();
   });
 
   it('keeps a heading the runtime passes in, such as an active agent name, on the plain screen', async () => {
-    renderWelcome({ assistantName: 'Testinatrix', heading: 'Repo Reviewer' });
+    renderWelcome({ heading: 'Repo Reviewer', setup: firstRun });
 
     expect(await screen.findByRole('heading', { level: 1, name: 'Repo Reviewer' })).toBeInTheDocument();
-    expect(screen.queryByTestId('aman-tour')).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Hide the tour' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: "I'm behind" })).not.toBeInTheDocument();
   });
 
-  it('sends the brief ticket through the composer and then sends it', async () => {
-    renderWelcome({ setup: { modelName: 'local/llama', hasChatted: false, firstRunGuide: notDismissed } });
+  it('chooses a pill without sending, then a card tap starts a turn with the card prompt', async () => {
+    renderWelcome({ setup: { ...firstRun, hasChatted: true } });
 
-    fireEvent.click(await screen.findByRole('button', { name: /Your brief is ready/ }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Help me think' }));
+    expect(composer.send).not.toHaveBeenCalled();
 
-    expect(composer.setText).toHaveBeenCalledWith(MORNING_BRIEF_PROMPT);
-    expect(composer.send).toHaveBeenCalledTimes(1);
-    expect(composer.setText.mock.invocationCallOrder[0]).toBeLessThan(composer.send.mock.invocationCallOrder[0] ?? 0);
-  });
-
-  it('sends a capability chip through the composer', async () => {
-    renderWelcome({ setup: { modelName: 'local/llama', hasChatted: false, firstRunGuide: notDismissed } });
-
-    fireEvent.click(await screen.findByRole('button', { name: 'Run things on a schedule' }));
-
-    expect(composer.setText).toHaveBeenCalledWith('Every weekday at 7:30, send me my morning brief.');
+    fireEvent.click(screen.getByRole('button', { name: /I can't get started/ }));
+    expect(composer.setText).toHaveBeenCalledWith(CARDS.start.prompt);
     expect(composer.send).toHaveBeenCalledTimes(1);
   });
 
-  it('hides the email and calendar prompts until Google grants them', async () => {
-    renderWelcome({ setup: { modelName: 'local/llama', hasChatted: false, firstRunGuide: notDismissed } });
-    await screen.findByTestId('aman-tour');
-
-    expect(screen.queryByRole('button', { name: /Find forgotten subscriptions/ })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Keep your calendar' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Read files and run code' })).not.toBeInTheDocument();
-  });
-
-  it('shows the capability tickets an instance has the capability for', async () => {
+  it('sends only the morning brief card prompt from the brief card', async () => {
     server.grantedFeatures = ['gmail_read', 'calendar_read'];
-    server.sandboxEnabled = true;
-    renderWelcome({ setup: { modelName: 'local/llama', hasChatted: false, firstRunGuide: notDismissed } });
+    renderWelcome({ setup: firstRun });
 
-    expect(await screen.findByRole('button', { name: /Handle your email/ })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /Find forgotten subscriptions/ })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /Keep pages in Spaces/ })).toBeInTheDocument();
+    fireEvent.click(await screen.findByRole('button', { name: /Your morning brief/ }));
+    expect(composer.setText).toHaveBeenCalledWith(MORNING_BRIEF_CARD_PROMPT);
+    expect(composer.send).toHaveBeenCalledTimes(1);
   });
 
-  it('hides the Google prompts when the host has no Google port at all', async () => {
-    server.hasCatalog = false;
-    server.sandboxEnabled = true;
-    renderWelcome({ setup: { modelName: 'local/llama', hasChatted: false, firstRunGuide: notDismissed } });
-    await screen.findByTestId('aman-tour');
+  it('with no model only fills the composer from a card and shows the model line', async () => {
+    renderWelcome({ setup: { ...firstRun, modelName: null } });
 
-    expect(screen.queryByRole('button', { name: /Handle your email/ })).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /Run things on a schedule/ })).toBeInTheDocument();
+    expect(await screen.findByText('Choose a model in Settings before you start a chat.')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /I can't get started/ }));
+    expect(composer.setText).toHaveBeenCalledWith(CARDS.start.prompt);
+    expect(composer.send).not.toHaveBeenCalled();
   });
 
-  it('turns the cards off and says why when no model is set', async () => {
-    renderWelcome({
-      setup: { modelName: null, hasChatted: false, firstRunGuide: notDismissed, settingsHref: '/settings' },
-    });
+  it('shows the setup ticket on a first run and puts it away with Skip for good', async () => {
+    const dismiss = vi.fn();
+    renderWelcome({ setup: { ...firstRun, firstRunGuide: { dismissed: false, dismiss } } });
 
-    expect(await screen.findByRole('button', { name: /Your brief is ready/ })).toBeDisabled();
-    expect(screen.getByText('Choose a model in Settings before you start a chat.')).toBeInTheDocument();
-  });
-});
-
-describe('the setup line in the tour', () => {
-  it('shows how many lines are set up, linking to the first open one', async () => {
-    renderWelcome({
-      setup: { modelName: null, hasChatted: false, firstRunGuide: notDismissed, settingsHref: '/settings' },
-    });
-
-    expect(await screen.findByRole('link', { name: '0 of 3 set up →' })).toHaveAttribute('href', '/settings');
-    expect(screen.queryByRole('heading', { name: 'Get set up' })).not.toBeInTheDocument();
+    expect(await screen.findByTestId('aman-setup-ticket')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Skip the tour' }));
+    expect(dismiss).toHaveBeenCalledTimes(1);
   });
 
-  it('drops the line once every line is done', async () => {
-    renderWelcome({
-      userName: 'Sam',
-      setup: { modelName: 'local/llama', hasChatted: true, firstRunGuide: notDismissed },
-    });
+  it('drops the prompt line, the ticket and Skip once the first chat is sent, and keeps the pills and cards', async () => {
+    renderWelcome({ setup: { ...firstRun, hasChatted: true } });
 
-    expect(await screen.findByTestId('aman-tour')).toBeInTheDocument();
-    expect(screen.queryByTestId('aman-first-run-summary')).not.toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: "I'm behind" })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Everything's in my head/ })).toBeInTheDocument();
+    expect(screen.queryByTestId('aman-setup-ticket')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Skip the tour' })).not.toBeInTheDocument();
   });
 
-  it('asks for the name in that line once the owner has put the guide away', async () => {
-    renderWelcome({
-      userName: null,
-      setup: { modelName: 'local/llama', hasChatted: false, firstRunGuide: dismissed, settingsHref: '/settings' },
-    });
+  it('hides the first-run lines once the owner has skipped them', async () => {
+    renderWelcome({ setup: { ...firstRun, firstRunGuide: { dismissed: true, dismiss: () => {} } } });
 
-    expect(await screen.findByTestId('aman-name-prompt')).toHaveTextContent('Aman does not know your name yet.');
-    expect(screen.queryByTestId('aman-first-run-summary')).not.toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: "I'm behind" })).toBeInTheDocument();
+    expect(screen.queryByTestId('aman-setup-ticket')).not.toBeInTheDocument();
+    expect(screen.queryByText(/What would help you most\? Pick one/)).not.toBeInTheDocument();
   });
 });
 
-describe('hiding and bringing back the tour', () => {
-  it('hides the tour for the owner, shows the plain greeting, and brings the tour back on request', async () => {
-    const { unmount } = renderWelcome({
-      assistantName: 'Testinatrix',
-      setup: { modelName: 'local/llama', hasChatted: true, firstRunGuide: dismissed },
-    });
-    fireEvent.click(await screen.findByRole('button', { name: 'Hide the tour' }));
+describe('the run my daily brief card', () => {
+  const brief = {
+    id: 'sched-brief',
+    name: 'morning-brief',
+    task: 'My brief. Travel from 12 Elm Road.',
+    status: 'active' as const,
+  };
+  const plants = {
+    id: 'sched-plants',
+    name: 'water-plants',
+    task: 'Remind me to water the plants.',
+    status: 'active' as const,
+  };
+  const pausedBrief = { ...brief, id: 'sched-brief-paused', status: 'paused' as const };
 
-    expect(await screen.findByRole('heading', { name: `${greetingFor(new Date())}.` })).toBeInTheDocument();
-    expect(window.localStorage.getItem(TOUR_HIDDEN_STORAGE_KEY)).toBe('true');
-    unmount();
+  it('shows when the person has a daily brief schedule', async () => {
+    schedules.enabled = true;
+    schedules.list = [plants, brief];
+    renderWelcome({ setup: { ...firstRun, hasChatted: true } });
 
-    renderWelcome({
-      assistantName: 'Testinatrix',
-      setup: { modelName: 'local/llama', hasChatted: true, firstRunGuide: dismissed },
-    });
-    expect(await screen.findByRole('button', { name: 'Replay the tour' })).toBeInTheDocument();
-    expect(screen.queryByTestId('aman-tour')).not.toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole('button', { name: 'Replay the tour' }));
-    expect(await screen.findByTestId('aman-tour')).toBeInTheDocument();
-    expect(window.localStorage.getItem(TOUR_HIDDEN_STORAGE_KEY)).toBe('false');
+    expect(await screen.findByRole('button', { name: /Run my daily brief/ })).toBeInTheDocument();
   });
 
-  it('keeps the plain greeting for a stored hide, and the checklist on the plain screen while it is open', async () => {
-    window.localStorage.setItem(TOUR_HIDDEN_STORAGE_KEY, 'true');
-    renderWelcome({ setup: { modelName: null, hasChatted: false, firstRunGuide: notDismissed } });
+  it('stays hidden when no schedule is a daily brief', async () => {
+    schedules.enabled = true;
+    schedules.list = [plants];
+    renderWelcome({ setup: { ...firstRun, hasChatted: true } });
 
-    expect(await screen.findByRole('heading', { name: `${greetingFor(new Date())}.` })).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: 'Get set up' })).toBeInTheDocument();
-    expect(screen.queryByTestId('aman-tour')).not.toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: "I'm behind" })).toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByRole('button', { name: /Run my daily brief/ })).not.toBeInTheDocument());
   });
-});
 
-describe('amanWelcomeHeading', () => {
-  it('greets the person by name at the time of day, and without a name when there is none', () => {
-    expect(amanWelcomeHeading({ name: 'Priya', now: new Date(2026, 0, 1, 9) })).toBe('Good morning, Priya.');
-    expect(amanWelcomeHeading({ name: '  ', now: new Date(2026, 0, 1, 14) })).toBe('Good afternoon.');
-    expect(amanWelcomeHeading({ name: undefined, now: new Date(2026, 0, 1, 20) })).toBe('Good evening.');
+  it('starts a run of that schedule, as Run now does, and opens the chat the run writes into', async () => {
+    schedules.enabled = true;
+    schedules.list = [brief];
+    renderWelcome({ setup: { ...firstRun, hasChatted: true } });
+
+    fireEvent.click(await screen.findByRole('button', { name: /Run my daily brief/ }));
+    await waitFor(() =>
+      expect(shell.openHistorySession).toHaveBeenCalledWith({ sessionId: 'session-run-1', agentName: 'assistant' }),
+    );
+    expect(createScheduleRun).toHaveBeenCalledWith({ scheduleId: 'sched-brief' });
+    expect(findScheduleRunSession).toHaveBeenCalledWith({ scheduleId: 'sched-brief', runId: 'run-1' });
+    expect(composer.send).not.toHaveBeenCalled();
   });
-});
 
-describe('AmanWelcome assistant name', () => {
-  it('shows no Aman anywhere on the first frame once the owner names the assistant', async () => {
-    renderWelcome({
-      assistantName: 'Maya',
-      setup: { modelName: 'local/llama', hasChatted: false, firstRunGuide: notDismissed },
-    });
+  it('starts one run from two fast taps, and shows the card busy until the run has started', async () => {
+    schedules.enabled = true;
+    schedules.list = [brief];
+    let finishStart: (() => void) | undefined;
+    createScheduleRun.mockImplementationOnce(
+      ({ scheduleId }) =>
+        new Promise(resolve => {
+          finishStart = () =>
+            resolve({
+              id: 'run-1',
+              scheduleId,
+              name: 'manual',
+              scheduledFor: '2026-10-29T08:00:00.000Z',
+              status: 'triggered',
+              triggeredAt: '2026-10-29T08:00:00.000Z',
+              triggeredBy: 'Priya',
+            });
+        }),
+    );
+    renderWelcome({ setup: { ...firstRun, hasChatted: true } });
 
-    expect(await screen.findByTestId('aman-tour')).toBeInTheDocument();
-    expect(screen.getByTestId('aman-tour').textContent).toContain('Maya is your chief of staff');
-    expect(screen.getByTestId('aman-tour').textContent).not.toMatch(/Aman/);
+    const card = await screen.findByRole('button', { name: /Run my daily brief/ });
+    fireEvent.click(card);
+    fireEvent.click(card);
+    expect(createScheduleRun).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(card).toBeDisabled());
+    expect(card).toHaveTextContent('Starting...');
+    fireEvent.click(card);
+    expect(createScheduleRun).toHaveBeenCalledTimes(1);
+
+    finishStart?.();
+    await waitFor(() => expect(shell.openHistorySession).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(card).toBeEnabled());
+    expect(card).not.toHaveTextContent('Starting...');
+  });
+
+  it('stays hidden when the person may not manage the brief schedule', async () => {
+    schedules.enabled = true;
+    schedules.list = [brief];
+    schedules.permissions = { 'sched-brief': ['READ'] };
+    renderWelcome({ setup: { ...firstRun, hasChatted: true } });
+
+    expect(await screen.findByRole('button', { name: "I'm behind" })).toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByRole('button', { name: /Run my daily brief/ })).not.toBeInTheDocument());
+  });
+
+  it('runs the brief schedule the person may manage, not the one they may only read', async () => {
+    schedules.enabled = true;
+    schedules.list = [brief, pausedBrief];
+    schedules.permissions = { 'sched-brief': ['READ'], 'sched-brief-paused': ['READ', 'MANAGE'] };
+    renderWelcome({ setup: { ...firstRun, hasChatted: true } });
+
+    fireEvent.click(await screen.findByRole('button', { name: /Run my daily brief/ }));
+    await waitFor(() => expect(createScheduleRun).toHaveBeenCalledWith({ scheduleId: 'sched-brief-paused' }));
+  });
+
+  it('prefers an active brief schedule over a paused one listed first', async () => {
+    schedules.enabled = true;
+    schedules.list = [pausedBrief, brief];
+    renderWelcome({ setup: { ...firstRun, hasChatted: true } });
+
+    fireEvent.click(await screen.findByRole('button', { name: /Run my daily brief/ }));
+    await waitFor(() => expect(createScheduleRun).toHaveBeenCalledWith({ scheduleId: 'sched-brief' }));
+  });
+
+  it('falls back to a paused brief schedule when no brief is active', async () => {
+    schedules.enabled = true;
+    schedules.list = [plants, pausedBrief];
+    renderWelcome({ setup: { ...firstRun, hasChatted: true } });
+
+    fireEvent.click(await screen.findByRole('button', { name: /Run my daily brief/ }));
+    await waitFor(() => expect(createScheduleRun).toHaveBeenCalledWith({ scheduleId: 'sched-brief-paused' }));
   });
 });

@@ -505,11 +505,11 @@ describe('AgentsLibraryButton', () => {
     });
   });
 
-  it('does not fetch agent count when compact', () => {
+  it('does not fetch agent count as a menu row', () => {
     const searchAgents = vi.fn(async () => [{ name: 'alpha', agentId: 'alpha' }]);
     const server = createMockAgentUIServer({ searchAgents });
 
-    renderLibrary(<AgentsLibraryButton compact />, { server });
+    renderLibrary(<AgentsLibraryButton row />, { server });
 
     expect(screen.getByRole('button', { name: 'Agents' })).toBeInTheDocument();
     expect(searchAgents).not.toHaveBeenCalled();
@@ -606,6 +606,44 @@ describe('AgentsLibraryButton', () => {
     fireEvent.click(screen.getByRole('menuitem', { name: 'Manage Schedules' }));
     expect(screen.getByTestId('library-agent-id')).toHaveTextContent('alpha-agent');
     expect(new URL(window.location.href).searchParams.get('tab')).toBe('schedules');
+  });
+
+  it('stops reading schedules when the next page token cycles back', async () => {
+    const tokens = ['A', 'B', 'A'];
+    const listSchedules = vi.fn(async () => ({
+      data: [
+        {
+          id: `s${String(listSchedules.mock.calls.length)}`,
+          name: 'job-a',
+          agentId: 'alpha-agent',
+          agentName: 'alpha-agent',
+          task: 't',
+          cron: '0 9 * * *',
+          timezone: 'UTC',
+          status: 'active' as const,
+          lastRunAt: null,
+        },
+      ],
+      nextPageToken: tokens[listSchedules.mock.calls.length - 1],
+    }));
+    const server = createMockAgentUIServer({
+      searchAgents: vi.fn(async () => [{ name: 'alpha-agent', agentId: 'alpha-agent' }]),
+      schedules: {
+        listSchedules,
+        getSchedule: vi.fn(),
+        createSchedule: vi.fn(),
+        updateSchedule: vi.fn(),
+        deleteSchedule: vi.fn(),
+        listScheduleRuns: vi.fn(async () => []),
+        createScheduleRun: vi.fn(),
+      },
+    });
+
+    renderLibrary(<LibraryHarness />, { server });
+    fireEvent.click(screen.getByRole('button', { name: 'Open library' }));
+
+    expect(await screen.findByRole('button', { name: /schedules for alpha-agent/ })).toBeInTheDocument();
+    expect(listSchedules).toHaveBeenCalledTimes(3);
   });
 
   it('does not show an empty-schedules action before schedule counts load', async () => {

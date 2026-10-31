@@ -2,8 +2,8 @@
 
 /** Granted action on a resource. */
 export const ResourcePermission = {
-        Use: "USE",
-        Manage: "MANAGE",
-        Delete: "DELETE"
-    } as const;
-export type ResourcePermission = typeof ResourcePermission[keyof typeof ResourcePermission];
+    Use: "USE",
+    Manage: "MANAGE",
+    Delete: "DELETE",
+} as const;
+export type ResourcePermission = (typeof ResourcePermission)[keyof typeof ResourcePermission];

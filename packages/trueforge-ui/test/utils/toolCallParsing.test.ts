@@ -13,6 +13,7 @@ import {
   parseMcpToolArgs,
   parseSandboxArgs,
   parseSandboxResult,
+  parseSpaceWriteTooLongNote,
   parseToolNotDoneReason,
   parseToolRefusalNotice,
   parseToolResultDisposition,
@@ -170,8 +171,33 @@ describe('toolCallParsing', () => {
     });
   });
 
+  it('says an expired card was not answered in time, and keeps "you said no" for a real decline', () => {
+    const expired = JSON.stringify({
+      schema_version: 'tool.response.v2',
+      outcome: {
+        disposition: 'denied',
+        remediation: {
+          reason_code: 'approval_expired',
+          message: 'Nothing was done.',
+          suggested_action: 'request_approval',
+        },
+      },
+      result: { error: 'ignored' },
+    });
+    expect(parseToolNotDoneReason(expired)).toBe('nobody answered in time');
+    expect(parseToolResultDisposition(expired)?.label).toBe('Expired');
+
+    const declined = JSON.stringify({
+      schema_version: 'tool.response.v2',
+      outcome: { disposition: 'denied' },
+      result: { error: 'The person said no to this. Their reason: not now.' },
+    });
+    expect(parseToolNotDoneReason(declined)).toBe('you said no');
+    expect(parseToolResultDisposition(declined)?.label).toBe('Denied');
+  });
+
   it('shows the plain line for a call refused before it started, and only for a refusal that asks the owner', () => {
-    const owner = 'Aman stopped a search: it had used all 40 tool steps for this question.';
+    const owner = 'A search was stopped: all 40 tool steps for this question were used.';
     const refused = JSON.stringify({
       schema_version: 'tool.response.v2',
       outcome: {
@@ -243,20 +269,49 @@ describe('toolCallParsing', () => {
     expect(buildOutcomeText(undefined, 'x')).toBeUndefined();
   });
 
+  it('reads the plain note for a space write refused for its size, from its code alone', () => {
+    const refusalText =
+      'Refusing create_space: this write carries 4,642 characters of new content, and one write may carry at most 3,600. ' +
+      'Nothing was persisted. Send a shorter body now (a heading and the first part), then add the rest with edit_space once the space exists.';
+    const envelope = (result: unknown) =>
+      JSON.stringify({ schema_version: 'tool.response.v2', outcome: { disposition: 'executed_nonzero' }, result });
+
+    const refused = envelope({
+      error: [{ type: 'text', text: JSON.stringify({ error: refusalText, error_code: 'space_write_too_long' }) }],
+    });
+    expect(parseSpaceWriteTooLongNote(refused)).toBe('Too long for one write. Splitting it into parts.');
+
+    // The same words without the code are just a failure: the wording never drives the note.
+    const uncoded = envelope({ error: [{ type: 'text', text: JSON.stringify({ error: refusalText }) }] });
+    expect(parseSpaceWriteTooLongNote(uncoded)).toBeUndefined();
+
+    const otherCode = envelope({
+      error: [{ type: 'text', text: JSON.stringify({ error: 'boom', error_code: 'something_else' }) }],
+    });
+    expect(parseSpaceWriteTooLongNote(otherCode)).toBeUndefined();
+    expect(parseSpaceWriteTooLongNote(undefined)).toBeUndefined();
+    expect(parseSpaceWriteTooLongNote('boom')).toBeUndefined();
+  });
+
   it('builds default approval options when none declared', () => {
     expect(buildApprovalOptions(undefined)).toEqual([
-      { id: 'allow-once', label: 'Approve', hint: 'Allow this one call only.', isAllow: true },
-      { id: 'deny', label: 'Deny', hint: 'Do not run this call.', isAllow: false, confirm: {} },
+      { id: 'allow-once', isAllow: true },
+      { id: 'deny', isAllow: false },
     ]);
   });
 
-  it('labels declared options with the approval verbs, whatever label the server sent', () => {
-    const labels = buildApprovalOptions([
-      { id: 'deny', kind: 'reject-once' },
-      { id: 'allow-chat', kind: 'allow-always', label: 'Allow `pnpm test` in this chat' },
-      { id: 'allow-once', kind: 'allow-once' },
-    ]).map(option => option.label);
-    expect(labels).toEqual(['Approve', 'Approve for this chat', 'Deny']);
+  it('puts the single-use allow first, then the chat allow, then deny', () => {
+    expect(
+      buildApprovalOptions([
+        { id: 'deny', kind: 'reject-once' },
+        { id: 'allow-chat', kind: 'allow-always', label: 'Allow `pnpm test` in this chat' },
+        { id: 'allow-once', kind: 'allow-once' },
+      ]),
+    ).toEqual([
+      { id: 'allow-once', isAllow: true },
+      { id: 'allow-chat', isAllow: true },
+      { id: 'deny', isAllow: false },
+    ]);
   });
 });
 

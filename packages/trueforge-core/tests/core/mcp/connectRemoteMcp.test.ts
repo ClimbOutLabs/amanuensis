@@ -1,5 +1,5 @@
 import { McpConnectionError } from '../../../src/core/errors';
-import { connectRemoteMcp, isSessionExpiredError } from '../../../src/core/mcp/remoteMcpClient';
+import { connectRemoteMcp, isSessionExpiredError, transportFailureDetail } from '../../../src/core/mcp/remoteMcpClient';
 
 // Records every transport type client.connect() was attempted with, in order.
 const mockConnectAttempts: string[] = [];
@@ -218,5 +218,33 @@ describe('connectRemoteMcp transport selection', () => {
     ).toBe(true);
     expect(isSessionExpiredError(new Error('HTTP 401 Unauthorized'))).toBe(false);
     expect(isSessionExpiredError(new Error('HTTP 500 Internal Server Error'))).toBe(false);
+  });
+});
+
+describe('connectRemoteMcp when every transport fails', () => {
+  beforeEach(() => {
+    mockConnectAttempts.length = 0;
+  });
+
+  it('keeps a refused connection as the typed cause, so a caller can tell the server is unreachable', async () => {
+    mockConnectImpl = () => {
+      throw Object.assign(new Error('connect ECONNREFUSED 192.0.2.1:9557'), { code: 'ECONNREFUSED' });
+    };
+
+    const failure: unknown = await connectRemoteMcp(baseParams()).catch((error: unknown) => error);
+
+    expect(failure).toBeInstanceOf(McpConnectionError);
+    expect(transportFailureDetail(failure)).toBeDefined();
+  });
+
+  it('does not read an answer from a server that is up as unreachable', async () => {
+    mockConnectImpl = () => {
+      throw new Error('Streamable HTTP error: Error POSTing to endpoint (HTTP 500)');
+    };
+
+    const failure: unknown = await connectRemoteMcp(baseParams()).catch((error: unknown) => error);
+
+    expect(failure).toBeInstanceOf(McpConnectionError);
+    expect(transportFailureDetail(failure)).toBeUndefined();
   });
 });

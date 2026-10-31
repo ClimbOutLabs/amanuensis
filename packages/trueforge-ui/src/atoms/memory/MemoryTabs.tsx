@@ -3,6 +3,7 @@
 import { useRef, type KeyboardEvent } from 'react';
 
 import { cn } from '@/atoms/lib/cn.js';
+import { tablistTargetIndex } from '@/atoms/lib/tablistKeys.js';
 
 /**
  * The memory sub-tab pattern: an underlined tablist shared by the standalone memory page
@@ -20,11 +21,7 @@ export function MemoryTabs<TabId extends string>(props: {
 
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     const current = props.tabs.findIndex(tab => tab.id === props.activeTab);
-    let next: number | null = null;
-    if (event.key === 'ArrowRight') next = (current + 1) % props.tabs.length;
-    else if (event.key === 'ArrowLeft') next = (current - 1 + props.tabs.length) % props.tabs.length;
-    else if (event.key === 'Home') next = 0;
-    else if (event.key === 'End') next = props.tabs.length - 1;
+    const next = tablistTargetIndex({ key: event.key, current, count: props.tabs.length });
     if (next === null) return;
     const tab = props.tabs[next];
     if (tab === undefined) return;

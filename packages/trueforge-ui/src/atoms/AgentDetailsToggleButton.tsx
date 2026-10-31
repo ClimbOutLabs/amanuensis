@@ -2,34 +2,46 @@
 
 import { useAuiState } from '../assistant-ui.js';
 import { useChatChromeActionsVisible } from '../hooks/useChatChromeActionsVisible.js';
-import { Icon } from '../icons/Icon.js';
 import { useAgentDetailsVisibility } from '../server/AgentDetailsPreferenceContext.js';
-import { auiButtonClass } from './lib/buttonClasses.js';
+import { headerActionClassName } from './lib/buttonClasses.js';
+import { cn } from './lib/cn.js';
 
-// Chat-level "Show/Hide agent details" switch, next to Clear chat. Toggles whether every turn's
-// agent internals (tool calls, reasoning steps) render expanded for this chat; see
-// AgentDetailsPreferenceContext. Same visibility rule as Clear chat (hidden while idle and on a
-// fresh chat), and also hidden until the chat has a server session id, since the preference is
-// stored on that session and a toggle with nowhere to write would do nothing.
+// The chat header's "Agent details" switch. While on, every turn shows its agent internals (steps,
+// tool calls, in-between text); while off, only the answer and what needs the person. The choice is
+// stored on the chat's session, so it is the same after a reload. Hidden while idle, on a fresh chat,
+// and until the chat has a server session id to store it on.
 export function AgentDetailsToggleButton() {
   const visible = useChatChromeActionsVisible();
   const sessionId = useAuiState(s => s.threadListItem.remoteId ?? undefined);
-  const { visibility, setVisibility } = useAgentDetailsVisibility(sessionId);
-  const expanded = visibility === 'expanded';
-  const label = expanded ? 'Hide agent details' : 'Show agent details';
+  const { visible: detailsVisible, setVisibility } = useAgentDetailsVisibility(sessionId);
 
   if (!visible || sessionId == null) return null;
 
   return (
     <button
       type="button"
-      title={label}
-      aria-pressed={expanded}
-      className={auiButtonClass({ variant: 'ghost', size: 'large' })}
-      onClick={() => void setVisibility(expanded ? 'collapsed' : 'expanded')}
+      role="switch"
+      aria-checked={detailsVisible}
+      title={detailsVisible ? 'Agent details are on' : 'Agent details are off'}
+      className={headerActionClassName}
+      onClick={() => void setVisibility(detailsVisible ? 'collapsed' : 'expanded')}
     >
-      <Icon name="eye" size="0.875rem" />
-      {label}
+      Agent details
+      <span
+        aria-hidden="true"
+        data-state={detailsVisible ? 'on' : 'off'}
+        className={cn(
+          'relative inline-flex h-4 w-7 shrink-0 items-center rounded-full border transition-colors motion-reduce:transition-none',
+          detailsVisible ? 'border-primary-button-bg bg-primary-button-bg' : 'border-text-secondary bg-transparent',
+        )}
+      >
+        <span
+          className={cn(
+            'absolute left-0.5 size-2.5 rounded-full transition-transform motion-reduce:transition-none',
+            detailsVisible ? 'translate-x-3 bg-primary-button-text' : 'translate-x-0 bg-text-secondary',
+          )}
+        />
+      </span>
     </button>
   );
 }

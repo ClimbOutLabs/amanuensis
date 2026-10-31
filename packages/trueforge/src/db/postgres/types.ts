@@ -27,7 +27,6 @@ import type {
   Tier2ActionKind,
   ToolCallMemoSnapshot,
 } from '@truefoundry/trueforge-core/core';
-import type { ChatPrivateFingerprints } from '@truefoundry/trueforge-core/core/permissions/privateTextCheck';
 import type { CurrentContextUsage } from '@truefoundry/trueforge-core/core/runtime/contextUsage';
 import type { HelpAreaId } from '@truefoundry/trueforge-core/schemas/personalizationHelpAreas';
 import type { ColumnType, Generated, JSONColumnType } from 'kysely';
@@ -40,6 +39,7 @@ import type {
 } from '../../schemas/sandboxProvider';
 import type { ScheduleManifest, ScheduleRunStatus, ScheduleStatus } from '../../schemas/schedule';
 import type { SkillManifest } from '../../schemas/skill';
+import type { BriefItemCompletionTable } from '../briefItemCompletionStore';
 import type { ChatImageOrigin } from '../chatImageStore';
 import type { OAuthClient, OAuthPendingAuthorizationData, OAuthServer, OAuthToken } from '../mcpServerStore';
 
@@ -102,6 +102,8 @@ export interface SessionTable {
    *      (COALESCE) targets it directly
    */
   title: string | null;
+  /** Unused; kept because installed databases already have the column. */
+  title_source: string | null;
   /** FK -> session_folder.id, ON DELETE SET NULL. */
   folder_id: string | null;
   /**
@@ -113,12 +115,6 @@ export interface SessionTable {
   approval_grants: JSONColumnType<string[], string[], string[]>;
   /** Host-owned durable ordered task state. */
   task_checklist: JSONColumnType<TaskChecklist, TaskChecklist, TaskChecklist>;
-  /** Fingerprints of the chat's private texts for later turns' searches; null until a private read. Never sent to clients. */
-  private_fingerprints: JSONColumnType<
-    ChatPrivateFingerprints,
-    ChatPrivateFingerprints,
-    ChatPrivateFingerprints
-  > | null;
   /**
    * Optional unique key within `tenant_id` (`session_external_id_uq`,
    * partial WHERE external_id IS NOT NULL).
@@ -618,6 +614,8 @@ export interface SkillTable {
   name: string;
   /** SkillManifest document; replaced whole on every upsert */
   manifest: JSONColumnType<SkillManifest, SkillManifest, SkillManifest>;
+  /** The person's approved site list for this skill's network access, or null when not approved */
+  network_approval: JSONColumnType<string[], string[], string[]> | null;
   created_at: Date;
   updated_at: Date;
 }
@@ -938,6 +936,7 @@ export interface Database {
   space: SpaceTable;
   space_revision: SpaceRevisionTable;
   sentinel_audit: SentinelAuditTable;
+  brief_item_completion: BriefItemCompletionTable;
   approval_token: ApprovalTokenTable;
   sentinel_user_settings: SentinelUserSettingsTable;
   implementation_plan_grant: ImplementationPlanGrantTable;

@@ -2,13 +2,14 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
+import { EMPTY_PERSONALIZATION_PROFILE, PersonalizationProvider } from '@/components/PersonalizationContext.js';
 import { HeldActionCard, type HeldActionCardProps } from '@/sentinel/HeldActionCard.js';
 import { HELD_EXPIRED_TEXT } from '@/sentinel/heldActionErrors.js';
 import type { SentinelApprovalCard } from '@/sentinel/types.js';
 
 function card(overrides: Partial<SentinelApprovalCard> = {}): SentinelApprovalCard {
   return {
-    plain_what: 'Send a note to Ana.',
+    plain_what: 'Send a note to Ana?',
     plain_why: 'It was on the Monday list.',
     cannot_be_undone: "Once this is sent, it can't be unsent.",
     why_asked_again: null,
@@ -50,10 +51,36 @@ describe('HeldActionCard', () => {
     expect(text.indexOf('ana@example.com')).toBeGreaterThan(-1);
     expect(text.indexOf('Full request')).toBeGreaterThan(text.indexOf('ana@example.com'));
     expect(screen.getByText(/Lunch at noon\?/)).toBeInTheDocument();
-    const reason = screen.getByText('Agent says: It was on the Monday list.');
-    expect(text.indexOf('Agent says')).toBeGreaterThan(text.indexOf('Full request'));
-    expect(text.indexOf('Agent says')).toBeGreaterThan(text.indexOf("can't be unsent"));
+    const reason = screen.getByText('Aman says: It was on the Monday list.');
+    expect(text.indexOf('Aman says')).toBeGreaterThan(text.indexOf('Full request'));
+    expect(text.indexOf('Aman says')).toBeGreaterThan(text.indexOf("can't be unsent"));
     expect(reason).toBeInTheDocument();
+    expect(screen.queryByText(/Agent says/)).not.toBeInTheDocument();
+  });
+
+  it('names the assistant by the name the person gave it when it says why', async () => {
+    render(
+      <PersonalizationProvider
+        api={{
+          getProfile: async () => ({ ...EMPTY_PERSONALIZATION_PROFILE, assistant_name: 'Mira' }),
+          updateProfile: async profile => profile,
+          deleteProfile: async () => {},
+        }}
+      >
+        <ul>
+          <HeldActionCard
+            card={card()}
+            status={{ kind: 'waiting' }}
+            alwaysAllowOffered={false}
+            onApprove={vi.fn()}
+            onAlwaysAllow={vi.fn()}
+            onDeny={vi.fn()}
+          />
+        </ul>
+      </PersonalizationProvider>,
+    );
+    expect(await screen.findByText('Mira says: It was on the Monday list.')).toBeInTheDocument();
+    expect(screen.queryByText(/Aman says|Agent says/)).not.toBeInTheDocument();
   });
 
   it('shows plainly when part of the text is cut off', () => {
@@ -89,6 +116,16 @@ describe('HeldActionCard', () => {
     expect(screen.getByRole('heading', { name: 'Always allow this tool?' })).toBeInTheDocument();
     expect(screen.getByText(/You can remove this later in connector settings/)).toBeInTheDocument();
     expect(onAlwaysAllow).not.toHaveBeenCalled();
+  });
+
+  it('says who will run the tool in the confirm step, in the assistant name and never as an agent', () => {
+    renderCard({ alwaysAllowOffered: true });
+    fireEvent.click(screen.getByRole('button', { name: 'Always allow this tool' }));
+
+    expect(
+      screen.getByText('Aman will run this tool on this connector without asking, in every chat.'),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/The agent will run/)).not.toBeInTheDocument();
   });
 
   it('calls nothing when the owner cancels the Always allow confirm step', () => {
@@ -134,7 +171,7 @@ describe('HeldActionCard', () => {
   ])('shows %j without hiding what was asked', (status, text) => {
     renderCard({ status });
     expect(screen.getByText(text)).toBeInTheDocument();
-    expect(screen.getByText('Send a note to Ana.')).toBeInTheDocument();
+    expect(screen.getByText('Send a note to Ana?')).toBeInTheDocument();
   });
 
   it('takes the buttons away once the action is answered or has expired', () => {

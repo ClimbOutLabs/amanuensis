@@ -40,7 +40,7 @@ import { PACKAGE_VERSION } from './packageVersion';
 import { defaultEmbeddingModelDir } from './runtime/memory/embeddingRetrieval';
 import type { ReflectBudget } from './runtime/memory/hindsightClient';
 import { parseModelPrices, type ModelPrices } from './runtime/modelPricing';
-import { DEFAULT_TOKEN_FACTORY_CHEAPER_MODEL, DEFAULT_TOKEN_FACTORY_MODEL } from './runtime/tokenFactoryDefaults';
+import { DEFAULT_TOKEN_FACTORY_MODEL } from './runtime/tokenFactoryDefaults';
 import { MAX_CODE_MODE_SOCKET_PARENT_BYTES } from './sandbox/local/core/CodeModeUdsTransport';
 
 const DEFAULT_PORT = 8790;
@@ -253,6 +253,85 @@ export function parseMailEmailMcpUrl(raw: string | undefined): string | undefine
 }
 
 /**
+ * Parses `MAIL_EMAIL_ACCOUNT_URL`: the mail sidecar's account agent, such as the compose sidecar's
+ * `http://mail-email:9559`. The Settings Email card reaches the saved account through it. Unset or
+ * blank means the instance has no account agent, so the card cannot be offered. Anything else that
+ * is not an http(s) URL fails the boot.
+ */
+export function parseMailEmailAccountUrl(raw: string | undefined): string | undefined {
+  if (raw === undefined || raw.trim() === '') {
+    return undefined;
+  }
+  const trimmed = raw.trim();
+  if (normalizedOrigin(trimmed) === undefined) {
+    throw new Error(`MAIL_EMAIL_ACCOUNT_URL must be an http(s) URL such as http://mail-email:9559, got: ${trimmed}`);
+  }
+  return trimmed;
+}
+
+/**
+ * A sidecar's MCP endpoint derived from its account agent's address: same scheme and host, the MCP
+ * port, the /mcp path. Used when the installer has not linked the connector but an account saved
+ * through Settings still needs the connector registered.
+ */
+function mcpUrlFromAccountUrl({
+  accountUrl,
+  mcpPort,
+}: {
+  accountUrl: string | undefined;
+  mcpPort: number;
+}): string | undefined {
+  if (accountUrl === undefined) {
+    return undefined;
+  }
+  try {
+    const url = new URL(accountUrl);
+    url.port = String(mcpPort);
+    url.pathname = '/mcp';
+    url.search = '';
+    url.hash = '';
+    return url.toString();
+  } catch {
+    return undefined;
+  }
+}
+
+/** The mail sidecar's MCP endpoint, derived from its account agent's address. */
+function mailMcpUrlFromAccountUrl(accountUrl: string | undefined): string | undefined {
+  return mcpUrlFromAccountUrl({ accountUrl, mcpPort: 9557 });
+}
+
+/** The calendar sidecar's MCP endpoint, derived from its account agent's address. */
+function calendarMcpUrlFromAccountUrl(accountUrl: string | undefined): string | undefined {
+  return mcpUrlFromAccountUrl({ accountUrl, mcpPort: 9558 });
+}
+
+/** The mail sidecar's MCP endpoint this host owns: the installer's link, else the one derived from its account agent. */
+export function hostMailMcpUrl({
+  mailMcpUrl,
+  mailAccountUrl,
+}: {
+  mailMcpUrl: string | undefined;
+  mailAccountUrl: string | undefined;
+}): string | undefined {
+  return mailMcpUrl ?? mailMcpUrlFromAccountUrl(mailAccountUrl);
+}
+
+/**
+ * The calendar sidecar's MCP endpoint this host owns: the configured link, else the one derived from its account
+ * agent. The installer links only the account agent, so deciding from the link alone would miss the host's own Calendar.
+ */
+export function hostCalendarMcpUrl({
+  calendarMcpUrl,
+  calendarAccountUrl,
+}: {
+  calendarMcpUrl: string | undefined;
+  calendarAccountUrl: string | undefined;
+}): string | undefined {
+  return calendarMcpUrl ?? calendarMcpUrlFromAccountUrl(calendarAccountUrl);
+}
+
+/**
  * Parses `CALENDAR_CONNECTOR_URL`: the Calendar connector's MCP endpoint. Unset or blank means no calendar
  * sidecar. Anything else that is not an http(s) URL fails the boot.
  */
@@ -264,6 +343,43 @@ export function parseCalendarConnectorUrl(raw: string | undefined): string | und
   if (normalizedOrigin(trimmed) === undefined) {
     throw new Error(
       `CALENDAR_CONNECTOR_URL must be an http(s) URL such as http://calendar-caldav:9558/mcp, got: ${trimmed}`,
+    );
+  }
+  return trimmed;
+}
+
+/**
+ * Parses `CALENDAR_ACCOUNT_URL`: the calendar sidecar's account agent, such as the compose sidecar's
+ * `http://calendar-caldav:9560`. The Settings Calendar card reaches the saved account through it. Unset or
+ * blank means the instance has no account agent, so the card cannot be offered. Anything else that is not
+ * an http(s) URL fails the boot.
+ */
+export function parseCalendarAccountUrl(raw: string | undefined): string | undefined {
+  if (raw === undefined || raw.trim() === '') {
+    return undefined;
+  }
+  const trimmed = raw.trim();
+  if (normalizedOrigin(trimmed) === undefined) {
+    throw new Error(`CALENDAR_ACCOUNT_URL must be an http(s) URL such as http://calendar-caldav:9560, got: ${trimmed}`);
+  }
+  return trimmed;
+}
+
+/** The shortest account secret the calendar connector accepts; a shorter one keeps its account port closed. */
+const CALENDAR_ACCOUNT_SECRET_MIN_LENGTH = 32;
+
+/**
+ * Parses `CALENDAR_ACCOUNT_SECRET`: the value the calendar connector's account agent needs before it answers.
+ * Unset or blank means none. A value that is too short fails the boot, since the connector would refuse it.
+ */
+export function parseCalendarAccountSecret(raw: string | undefined): string | undefined {
+  if (raw === undefined || raw.trim() === '') {
+    return undefined;
+  }
+  const trimmed = raw.trim();
+  if (trimmed.length < CALENDAR_ACCOUNT_SECRET_MIN_LENGTH) {
+    throw new Error(
+      `CALENDAR_ACCOUNT_SECRET must be at least ${String(CALENDAR_ACCOUNT_SECRET_MIN_LENGTH)} characters. Set a longer random value, or remove the line to leave the Calendar card off.`,
     );
   }
   return trimmed;
@@ -1103,11 +1219,40 @@ export interface SharedServerConfiguration {
    */
   MAIL_EMAIL_MCP_URL: string | undefined;
   /**
+   * The mail sidecar's account agent, such as `http://mail-email:9559`. The Settings Email card reads and
+   * changes the saved account through it. When set without MAIL_EMAIL_MCP_URL, the MCP endpoint is derived
+   * from it for registration once an account exists. Env: `MAIL_EMAIL_ACCOUNT_URL`. Default unset.
+   */
+  MAIL_EMAIL_ACCOUNT_URL: string | undefined;
+  /**
+   * The mail sidecar's MCP endpoint this host owns, resolved once: MAIL_EMAIL_MCP_URL, else the one derived
+   * from MAIL_EMAIL_ACCOUNT_URL. An Email connector at this address is first-party. Default unset.
+   */
+  MAIL_SIDECAR_MCP_URL: string | undefined;
+  /**
    * The Calendar connector's MCP endpoint, such as the compose sidecar's `http://calendar-caldav:9558/mcp`.
    * Its origin is added to FIRST_PARTY_MCP_ORIGINS, so the read-only calendar tools run without asking.
    * Env: `CALENDAR_CONNECTOR_URL`. Default unset.
    */
   CALENDAR_CONNECTOR_URL: string | undefined;
+  /**
+   * The calendar sidecar's MCP endpoint this host owns, resolved once: CALENDAR_CONNECTOR_URL, else the one derived
+   * from CALENDAR_ACCOUNT_URL. A Calendar connector at this address is first-party. Default unset.
+   */
+  CALENDAR_SIDECAR_MCP_URL: string | undefined;
+  /**
+   * The calendar sidecar's account agent, such as `http://calendar-caldav:9560`. The Settings Calendar card reads
+   * and changes the saved account through it, and the Calendar connector is registered only while an account is
+   * saved. When set without CALENDAR_CONNECTOR_URL, the MCP endpoint is derived from it.
+   * Env: `CALENDAR_ACCOUNT_URL`. Default unset.
+   */
+  CALENDAR_ACCOUNT_URL: string | undefined;
+  /**
+   * The secret the calendar connector's account agent needs before it answers. The same value is given to the
+   * connector. With an account URL but no secret the Settings Calendar card is left off.
+   * Env: `CALENDAR_ACCOUNT_SECRET`. Default unset.
+   */
+  CALENDAR_ACCOUNT_SECRET: string | undefined;
   /**
    * The Email send list the server writes (`allowed_recipients.toml`). Set with the sidecar; the sidecar reads it
    * read-only. Env: `MAIL_POLICY_FILE`. Default unset, which means no send list is written.
@@ -1134,13 +1279,34 @@ export interface SharedServerConfiguration {
    */
   TOOL_CALL_TIMEOUT_MS: number;
   /**
-   * Bound in milliseconds on waiting for a model call's first output before
-   * the turn fails visibly instead of hanging. A provider that accepts the
-   * request but never produces a first chunk would otherwise leave the turn
-   * active indefinitely. Env: `MODEL_FIRST_RESPONSE_TIMEOUT_MS`. Default
-   * 600000 (10 minutes).
+   * Bound in milliseconds on waiting for a model call's first output, on every
+   * step. A provider that accepts the request and then says nothing would
+   * otherwise hold the turn open. Also the default first-chunk deadline for a
+   * provider whose `stream_timeout` does not set one.
+   * Env: `MODEL_FIRST_RESPONSE_TIMEOUT_MS`. Default 90000 (90 seconds).
    */
   MODEL_FIRST_RESPONSE_TIMEOUT_MS: number;
+  /**
+   * Bound in milliseconds on silence between a model's chunks once it has
+   * started answering. Also the default per-chunk deadline for a provider
+   * whose `stream_timeout` does not set one.
+   * Env: `MODEL_STREAM_IDLE_TIMEOUT_MS`. Default 60000 (60 seconds).
+   */
+  MODEL_STREAM_IDLE_TIMEOUT_MS: number;
+  /**
+   * Bound in milliseconds on silence between a model's chunks while one of its
+   * tool calls is open. Some servers hold a call's arguments back and send them
+   * in a few large pieces, so a long call needs more room than ordinary
+   * answering. Never shorter than `MODEL_STREAM_IDLE_TIMEOUT_MS`.
+   * Env: `MODEL_STREAM_TOOL_CALL_IDLE_TIMEOUT_MS`. Default 180000 (3 minutes).
+   */
+  MODEL_STREAM_TOOL_CALL_IDLE_TIMEOUT_MS: number;
+  /**
+   * Bound in milliseconds on one web search or page read, after which the
+   * model gets a plain tool error and the reply goes on.
+   * Env: `SEARCH_CALL_TIMEOUT_MS`. Default 120000 (2 minutes).
+   */
+  SEARCH_CALL_TIMEOUT_MS: number;
   /**
    * Client name used for Dynamic Client Registration (DCR) of MCP servers.
    * This is the client name shown on authorization-server consent screens.
@@ -1312,6 +1478,19 @@ export interface SharedServerConfiguration {
    * Env: `TURN_DRAIN_SHUTDOWN_TIMEOUT_MS`. Default 30000.
    */
   TURN_DRAIN_SHUTDOWN_TIMEOUT_MS: number;
+  /**
+   * Max milliseconds a turn's drain waits for its follow-up work (memory, turn summary, profile
+   * learning, artifacts) after the answer. Past it the work keeps running unwatched.
+   * Env: `TURN_FOLLOW_UP_TIMEOUT_MS`. Default 120000.
+   */
+  TURN_FOLLOW_UP_TIMEOUT_MS: number;
+  /**
+   * Max milliseconds from accepting a turn to its first sign of work (a model chunk, a tool or
+   * connector starting). Past it the turn ends with an error asking the person to send again.
+   * Must stay above the pre-model step limit (300 s) plus `MODEL_FIRST_RESPONSE_TIMEOUT_MS`.
+   * Env: `TURN_START_TIMEOUT_MS`. Default 480000 (8 minutes).
+   */
+  TURN_START_TIMEOUT_MS: number;
   /**
    * Max seconds a single turn may execute before it is cancelled with
    * `server-execution-timeout`. Env: `SERVER_EXECUTION_TIMEOUT_SECONDS`.
@@ -1653,12 +1832,6 @@ export interface SharedServerConfiguration {
    */
   TOKEN_FACTORY_MODEL: string;
   /**
-   * Optional cheaper Token Factory model registered next to the default on the env-managed
-   * provider. Set it to an empty string to register only the default model.
-   * Env: `TOKEN_FACTORY_CHEAPER_MODEL`. Default `nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B`.
-   */
-  TOKEN_FACTORY_CHEAPER_MODEL: string | undefined;
-  /**
    * Token Factory base URL.
    * Env: `TOKEN_FACTORY_BASE_URL`. Default `https://api.tokenfactory.nebius.com/v1`.
    */
@@ -1935,6 +2108,16 @@ const appDataDir = resolveAppDataDir({
 const port = parsePort(getEnv('PORT'));
 const host = getEnv('HOST', { defaultValue: DEFAULT_HOST }) ?? DEFAULT_HOST;
 
+const mailEmailMcpUrl = parseMailEmailMcpUrl(getEnv('MAIL_EMAIL_MCP_URL'));
+const mailEmailAccountUrl = parseMailEmailAccountUrl(getEnv('MAIL_EMAIL_ACCOUNT_URL'));
+const calendarConnectorUrl = parseCalendarConnectorUrl(getEnv('CALENDAR_CONNECTOR_URL'));
+const calendarAccountUrl = parseCalendarAccountUrl(getEnv('CALENDAR_ACCOUNT_URL'));
+const calendarSidecarMcpUrl = hostCalendarMcpUrl({
+  calendarMcpUrl: calendarConnectorUrl,
+  calendarAccountUrl,
+});
+const mailSidecarMcpUrl = hostMailMcpUrl({ mailMcpUrl: mailEmailMcpUrl, mailAccountUrl: mailEmailAccountUrl });
+
 const shared: SharedServerConfiguration = {
   LOG_LEVEL: getEnv('LOG_LEVEL', { defaultValue: 'info' }) ?? 'info',
   ACCESS_LOGS: parseBoolean({ envKey: 'ACCESS_LOGS', raw: getEnv('ACCESS_LOGS'), defaultValue: true }),
@@ -1968,14 +2151,19 @@ const shared: SharedServerConfiguration = {
   FIRST_PARTY_MCP_ORIGINS: withMailSidecarOrigin({
     origins: firstPartyOriginsFor({
       raw: getEnv('FIRST_PARTY_MCP_ORIGINS'),
-      calendarUrl: parseCalendarConnectorUrl(getEnv('CALENDAR_CONNECTOR_URL')),
+      calendarUrl: calendarSidecarMcpUrl,
     }),
-    mailUrl: parseMailEmailMcpUrl(getEnv('MAIL_EMAIL_MCP_URL')),
+    mailUrl: mailSidecarMcpUrl,
   }),
-  MAIL_EMAIL_MCP_URL: parseMailEmailMcpUrl(getEnv('MAIL_EMAIL_MCP_URL')),
+  MAIL_EMAIL_MCP_URL: mailEmailMcpUrl,
+  MAIL_SIDECAR_MCP_URL: mailSidecarMcpUrl,
+  MAIL_EMAIL_ACCOUNT_URL: mailEmailAccountUrl,
   MAIL_POLICY_FILE: parseOptionalPath(getEnv('MAIL_POLICY_FILE')),
   MAIL_POLICY_STATUS_FILE: parseOptionalPath(getEnv('MAIL_POLICY_STATUS_FILE')),
-  CALENDAR_CONNECTOR_URL: parseCalendarConnectorUrl(getEnv('CALENDAR_CONNECTOR_URL')),
+  CALENDAR_CONNECTOR_URL: calendarConnectorUrl,
+  CALENDAR_SIDECAR_MCP_URL: calendarSidecarMcpUrl,
+  CALENDAR_ACCOUNT_URL: calendarAccountUrl,
+  CALENDAR_ACCOUNT_SECRET: parseCalendarAccountSecret(getEnv('CALENDAR_ACCOUNT_SECRET')),
   TOOL_DISPATCH_MAX_CONCURRENCY: parsePositiveInt({
     envKey: 'TOOL_DISPATCH_MAX_CONCURRENCY',
     raw: getEnv('TOOL_DISPATCH_MAX_CONCURRENCY'),
@@ -1999,7 +2187,24 @@ const shared: SharedServerConfiguration = {
     raw: getEnv('MODEL_FIRST_RESPONSE_TIMEOUT_MS'),
     // Literal mirror of DEFAULT_MODEL_FIRST_RESPONSE_TIMEOUT_MS in
     // trueforge-core's AgentThread.ts (the canonical owner).
-    defaultValue: 600_000,
+    defaultValue: 90_000,
+  }),
+  MODEL_STREAM_IDLE_TIMEOUT_MS: parsePositiveInt({
+    envKey: 'MODEL_STREAM_IDLE_TIMEOUT_MS',
+    raw: getEnv('MODEL_STREAM_IDLE_TIMEOUT_MS'),
+    // Literal mirror of DEFAULT_MODEL_IDLE_TIMEOUT_MS in trueforge-core's AgentThread.ts.
+    defaultValue: 60_000,
+  }),
+  MODEL_STREAM_TOOL_CALL_IDLE_TIMEOUT_MS: parsePositiveInt({
+    envKey: 'MODEL_STREAM_TOOL_CALL_IDLE_TIMEOUT_MS',
+    raw: getEnv('MODEL_STREAM_TOOL_CALL_IDLE_TIMEOUT_MS'),
+    // Literal mirror of DEFAULT_MODEL_TOOL_CALL_IDLE_TIMEOUT_MS in trueforge-core's streamDeadline.ts.
+    defaultValue: 180_000,
+  }),
+  SEARCH_CALL_TIMEOUT_MS: parsePositiveInt({
+    envKey: 'SEARCH_CALL_TIMEOUT_MS',
+    raw: getEnv('SEARCH_CALL_TIMEOUT_MS'),
+    defaultValue: 120_000,
   }),
   MCP_DCR_OAUTH_CLIENT_NAME:
     getEnv('MCP_DCR_OAUTH_CLIENT_NAME', { defaultValue: 'truefoundry-harness' }) ?? 'truefoundry-harness',
@@ -2123,6 +2328,16 @@ const shared: SharedServerConfiguration = {
     envKey: 'TURN_DRAIN_SHUTDOWN_TIMEOUT_MS',
     raw: getEnv('TURN_DRAIN_SHUTDOWN_TIMEOUT_MS'),
     defaultValue: 30_000,
+  }),
+  TURN_FOLLOW_UP_TIMEOUT_MS: parsePositiveInt({
+    envKey: 'TURN_FOLLOW_UP_TIMEOUT_MS',
+    raw: getEnv('TURN_FOLLOW_UP_TIMEOUT_MS'),
+    defaultValue: 120_000,
+  }),
+  TURN_START_TIMEOUT_MS: parsePositiveInt({
+    envKey: 'TURN_START_TIMEOUT_MS',
+    raw: getEnv('TURN_START_TIMEOUT_MS'),
+    defaultValue: 480_000,
   }),
   SERVER_EXECUTION_TIMEOUT_SECONDS: serverExecutionTimeoutSeconds,
   TURN_STREAM_TTL_SECONDS: parsePositiveInt({
@@ -2349,9 +2564,6 @@ const shared: SharedServerConfiguration = {
   TAVILY_API_KEY: blankToUndefined(getEnv('TAVILY_API_KEY')),
   TOKEN_FACTORY_MODEL:
     getEnv('TOKEN_FACTORY_MODEL', { defaultValue: DEFAULT_TOKEN_FACTORY_MODEL }) ?? DEFAULT_TOKEN_FACTORY_MODEL,
-  TOKEN_FACTORY_CHEAPER_MODEL: blankToUndefined(
-    getEnv('TOKEN_FACTORY_CHEAPER_MODEL', { defaultValue: DEFAULT_TOKEN_FACTORY_CHEAPER_MODEL }),
-  ),
   TOKEN_FACTORY_BASE_URL:
     getEnv('TOKEN_FACTORY_BASE_URL', { defaultValue: TOKEN_FACTORY_DEFAULT_BASE_URL }) ??
     TOKEN_FACTORY_DEFAULT_BASE_URL,

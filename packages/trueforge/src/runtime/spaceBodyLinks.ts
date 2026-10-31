@@ -20,6 +20,8 @@ import type { SpaceFormatSchema } from '../schemas/space';
 export interface BodyLink {
   kind: 'picture' | 'link';
   value: string;
+  /** The element the URL came from, when the check needs it: only `script` changes the refusal. */
+  tag?: string;
 }
 
 type HtmlNode = DefaultTreeAdapterMap['node'];
@@ -69,16 +71,16 @@ function cleanUrl(raw: string): string {
   return value.slice(start, end);
 }
 
-function picture(raw: string): BodyLink {
+export function picture(raw: string): BodyLink {
   return { kind: 'picture', value: cleanUrl(raw) };
 }
 
-function link(raw: string): BodyLink {
+export function link(raw: string): BodyLink {
   return { kind: 'link', value: cleanUrl(raw) };
 }
 
 /** Every URL a CSS text could fetch: `url(...)` arguments, and quoted strings that name a host. */
-function cssLinks(css: string): BodyLink[] {
+export function cssLinks(css: string): BodyLink[] {
   const decoded = decodeCssEscapes(css.replace(CSS_COMMENT, ''));
   const links: BodyLink[] = [];
   for (const match of decoded.matchAll(CSS_URL_CALL)) {
@@ -132,12 +134,12 @@ function srcsetLinks(srcset: string): BodyLink[] {
   return links;
 }
 
-function attributeName(attribute: { name: string; prefix?: string }): string {
+export function attributeName(attribute: { name: string; prefix?: string }): string {
   return attribute.prefix ? `${attribute.prefix}:${attribute.name}` : attribute.name;
 }
 
 /** Every URL one attribute of one element could load or follow. */
-function attributeLinks({ tag, name, value }: { tag: string; name: string; value: string }): BodyLink[] {
+export function attributeLinks({ tag, name, value }: { tag: string; name: string; value: string }): BodyLink[] {
   if (name === 'srcset') {
     return srcsetLinks(value);
   }
@@ -156,7 +158,7 @@ function attributeLinks({ tag, name, value }: { tag: string; name: string; value
   return [...loads, ...cssLinks(value)];
 }
 
-function textOf(node: HtmlNode): string {
+export function textOf(node: HtmlNode): string {
   return 'childNodes' in node ? node.childNodes.map(child => ('value' in child ? child.value : '')).join('') : '';
 }
 
@@ -165,7 +167,11 @@ function collectHtmlLinks(node: HtmlNode, links: BodyLink[]): void {
   if ('attrs' in node) {
     const tag = node.tagName.toLowerCase();
     for (const attribute of node.attrs) {
-      links.push(...attributeLinks({ tag, name: attributeName(attribute), value: attribute.value }));
+      links.push(
+        ...attributeLinks({ tag, name: attributeName(attribute), value: attribute.value }).map(link =>
+          tag === 'script' ? { ...link, tag } : link,
+        ),
+      );
     }
     if (tag === 'style') {
       links.push(...cssLinks(textOf(node)));
@@ -197,7 +203,7 @@ function htmlLinks(html: string): BodyLink[] | undefined {
   return sameLinks({ first: links, second: reparsed }) ? links : undefined;
 }
 
-const markdownProcessor = unified().use(remarkParse).use(remarkGfm).use(remarkMath);
+export const markdownProcessor = unified().use(remarkParse).use(remarkGfm).use(remarkMath);
 
 function collectMarkdownLinks(node: Nodes, links: BodyLink[]): boolean {
   switch (node.type) {

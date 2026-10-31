@@ -149,6 +149,11 @@ async function saveCreateForm() {
 }
 
 describe('ScheduleFormDrawer', () => {
+  it('still calls the schedule runner an agent on a new schedule', async () => {
+    renderDrawer({});
+    expect(await screen.findByText('Run an agent on a repeating schedule.')).toBeInTheDocument();
+  });
+
   it('shows agent picker on create', async () => {
     renderDrawer({});
     const picker = await screen.findByLabelText('Agent');
@@ -204,9 +209,18 @@ describe('ScheduleFormDrawer', () => {
     expect(screen.getByText('Agent builder open')).toBeInTheDocument();
   });
 
-  it('disables agent picker on edit', async () => {
-    renderDrawer({ mode: 'edit', schedule: pausedSchedule({ status: 'active' }) });
-    expect(await screen.findByLabelText('Agent')).toBeDisabled();
+  it('shows who an edited schedule runs as in place of the agent picker, using the name the server gives', async () => {
+    const { unmount } = renderDrawer({
+      mode: 'edit',
+      schedule: pausedSchedule({ status: 'active', runsAs: 'Zara' }),
+    });
+    expect(await screen.findByText('Runs as')).toBeInTheDocument();
+    expect(screen.getByText('Zara')).toBeInTheDocument();
+    expect(screen.queryByLabelText('Agent')).not.toBeInTheDocument();
+    unmount();
+
+    renderDrawer({ mode: 'edit', schedule: pausedSchedule({ status: 'active', runsAs: 'Your assistant' }) });
+    expect(await screen.findByText('Your assistant')).toBeInTheDocument();
   });
 
   it('groups standard recurrence controls with a schedule summary', async () => {

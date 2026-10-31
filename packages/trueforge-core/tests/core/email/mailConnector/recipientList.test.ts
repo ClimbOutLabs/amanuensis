@@ -1,4 +1,8 @@
-import { mailRecipientsNotListed, normalizeMailAddress } from '../../../../src/core/email/mailConnector/recipientList';
+import {
+  mailRecipientsNotListed,
+  namedMailRecipients,
+  normalizeMailAddress,
+} from '../../../../src/core/email/mailConnector/recipientList';
 
 describe('normalizeMailAddress', () => {
   it('trims and lowercases, so the same mailbox always matches itself', () => {
@@ -53,5 +57,15 @@ describe('mailRecipientsNotListed', () => {
 
   it('returns nothing when no recipient is given, so the caller decides how to refuse it', () => {
     expect(mailRecipientsNotListed({ listed: ['dana@example.com'], params: { subject: 'Hi' } })).toEqual([]);
+  });
+});
+
+describe('namedMailRecipients', () => {
+  it('keeps strings and objects with an email or address, and drops everything else', () => {
+    expect(
+      namedMailRecipients({
+        recipients: ['a@example.com', { email: 'b@example.com' }, { address: 'c@example.com' }, { name: 'x' }, 4, null],
+      }),
+    ).toEqual(['a@example.com', 'b@example.com', 'c@example.com']);
   });
 });

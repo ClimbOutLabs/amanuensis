@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, renderHook, waitFor } from '@testing-library/react';
+import { act, render, renderHook, screen, waitFor } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -10,9 +10,20 @@ import {
   readDraftSpecPreferences,
 } from '@/server/draftSpecPreferences.js';
 import { ServerProvider, useServerCapabilities } from '@/server/ServerContext.js';
-import { ShellModeProvider, useOptionalShellMode, useShellMode, type AgentConfig } from '@/server/ShellModeContext.js';
+import {
+  ShellModeProvider,
+  useOptionalShellMode,
+  useShellMode,
+  type AgentConfig,
+  type SettingsOpenRequest,
+} from '@/server/ShellModeContext.js';
 import type { AgentUIServer } from '@/server/types.js';
-import { createMockAgentSessionsServer, createMockAgentUIServer, createMockCatalog } from './mockServer.js';
+import {
+  createMockAgentSessionsServer,
+  createMockAgentUIServer,
+  createMockCatalog,
+  createMockScheduleServer,
+} from './mockServer.js';
 
 function wrap(agentConfig?: AgentConfig, initialSettingsOpen?: boolean) {
   const server = createMockAgentUIServer({
@@ -147,6 +158,52 @@ describe('ShellModeProvider', () => {
       expect(result.current.settingsOpen).toBe(true);
     });
     expect(result.current.settingsSection).toBe('connectors');
+  });
+
+  function SettingsStateProbe() {
+    const shell = useShellMode();
+    return <div data-testid="settings-state">{`${String(shell.settingsOpen)} / ${shell.settingsSection}`}</div>;
+  }
+
+  function requestShell(server: AgentUIServer) {
+    return function RequestShell({ request }: { request: SettingsOpenRequest | undefined }) {
+      return (
+        <ServerProvider server={server}>
+          <ShellModeProvider settingsOpenRequest={request}>
+            <SettingsStateProbe />
+          </ShellModeProvider>
+        </ServerProvider>
+      );
+    };
+  }
+
+  it('answers a host settings request only when its nonce changes, opening at the requested section', () => {
+    const server = createMockAgentUIServer({
+      catalog: createMockCatalog(),
+      sessions: createMockAgentSessionsServer(),
+    });
+    const RequestShell = requestShell(server);
+    const { rerender } = render(<RequestShell request={{ section: 'audit', nonce: 1 }} />);
+
+    // The request the shell mounts with is remembered, not answered.
+    expect(screen.getByTestId('settings-state')).toHaveTextContent('false / models');
+
+    rerender(<RequestShell request={{ section: 'audit', nonce: 1 }} />);
+    expect(screen.getByTestId('settings-state')).toHaveTextContent('false / models');
+
+    rerender(<RequestShell request={{ section: 'audit', nonce: 2 }} />);
+    expect(screen.getByTestId('settings-state')).toHaveTextContent('true / audit');
+  });
+
+  it('keeps settings closed for a host request when Settings chrome has no catalog', () => {
+    const server = createMockAgentUIServer({ catalog: undefined });
+    const RequestShell = requestShell(server);
+    const { rerender } = render(<RequestShell request={undefined} />);
+
+    rerender(<RequestShell request={{ section: 'audit', nonce: 1 }} />);
+    // The request is answered through setSettingsOpen, so the chrome gate keeps the panel
+    // closed; only the remembered section moves.
+    expect(screen.getByTestId('settings-state').textContent).toMatch(/^false/);
   });
 
   it('closes the library when settings opens and vice versa', async () => {
@@ -333,6 +390,27 @@ describe('ShellModeProvider', () => {
     act(() => result.current.closeSpaces());
     expect(result.current.spacesOpen).toBe(false);
     expect(result.current.selectedSpaceId).toBeNull();
+  });
+
+  it('opens the spaces view from the Schedules page and from the chat list', () => {
+    const server = createMockAgentUIServer({
+      catalog: createMockCatalog(),
+      sessions: createMockAgentSessionsServer(),
+      schedules: createMockScheduleServer(),
+    });
+    const { result } = renderHook(() => useShellMode(), { wrapper: wrapWithServer(server) });
+
+    act(() => result.current.setSchedulesOpen(true));
+    expect(result.current.schedulesOpen).toBe(true);
+    act(() => result.current.openSpaces());
+    expect(result.current.spacesOpen).toBe(true);
+    expect(result.current.schedulesOpen).toBe(false);
+
+    act(() => result.current.setSessionsOpen(true));
+    expect(result.current.sessionsOpen).toBe(true);
+    act(() => result.current.openSpaces());
+    expect(result.current.spacesOpen).toBe(true);
+    expect(result.current.sessionsOpen).toBe(false);
   });
 
   it('defaults to AgentLibraryWithComposer (mutable + library)', () => {

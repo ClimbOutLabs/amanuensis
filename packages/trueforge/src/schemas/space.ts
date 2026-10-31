@@ -1,6 +1,6 @@
 /**
- * A space is a persistent, named, structured page the model creates and updates through the
- * `create_space` / `update_space` tools and the UI renders. Wire contracts for the
+ * A space is a persistent, named, structured page the model creates and changes through the
+ * `create_space` / `edit_space` tools and the UI renders. Wire contracts for the
  * `/api/v1/spaces` routes.
  */
 import { z } from '@hono/zod-openapi';
@@ -142,10 +142,30 @@ export const SpaceFormatSchema = z.enum(['markdown', 'html']).openapi('SpaceForm
 
 /**
  * Maximum space body length, in characters. Single source of truth: SpaceContentSchema's body
- * limit and the update_space delta-edit guard in runtime/spaceCapability.ts both use this, so
+ * limit and the edit_space body guard in runtime/spaceCapability.ts both use this, so
  * the cap can never drift between the schema and the tool layer.
  */
 export const SPACE_BODY_MAX_LENGTH = 65_536;
+
+/**
+ * Maximum new content one space write call may carry, in characters. A stored body may reach
+ * SPACE_BODY_MAX_LENGTH, but it is built up over several calls: models stall while writing
+ * very long tool arguments (the argument stream goes silent mid-call on more than one model),
+ * so one call stays small and the space tool layer refuses a write past this. The streamed-
+ * argument limit for the write tools is derived from it. This number is the internal
+ * comparison value only: it is never rendered into a message. The model is told
+ * SPACE_WRITE_GUIDANCE_MAX_LENGTH instead, so a write counted loosely against the told
+ * number still lands under this cap.
+ */
+export const SPACE_WRITE_MAX_LENGTH = 4_000;
+
+/**
+ * The one number any message to the model reports for a space write: the instructions, the
+ * tool descriptions, and the too-long refusal all say this and nothing else. It sits ten
+ * percent below SPACE_WRITE_MAX_LENGTH to leave headroom, because a model counting loosely
+ * against the real cap lands just past it and loses the whole write.
+ */
+export const SPACE_WRITE_GUIDANCE_MAX_LENGTH = 3_600;
 
 export const SpaceContentSchema = z
   .object({

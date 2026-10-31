@@ -10,7 +10,6 @@
  */
 import { InMemoryApprovalTokenStore, type ApprovalTokenStore } from './approvalTokens';
 import type { AuditLogWriter } from './audit';
-import { InMemoryPrivateDataReadStore, type PrivateDataReadStore } from './privateDataReads';
 import { seedShellAllowlist, type ShellAllowlistConfig } from './shellAllowlist';
 import type { Tier2ActionKind } from './tier';
 import { InMemoryToolGrantStore, type ToolGrantStore } from './toolGrants';
@@ -23,14 +22,12 @@ export interface SentinelServices {
   audit: AuditLogWriter | null;
   shell_allowlist: ShellAllowlistConfig;
   tool_grants: ToolGrantStore;
-  /** Chats that have read something private, for the search provider's silent runs. */
-  private_reads: PrivateDataReadStore;
   isOffline: (input: { tenant_id: string; created_by: string }) => Promise<boolean>;
   /** Tier 2 kinds the user relaxed to run without asking. */
   tier2AutoAllow: (input: { tenant_id: string; created_by: string }) => Promise<ReadonlySet<Tier2ActionKind>>;
   /** Whether the user lets the designated search provider run without asking. Default on. */
   searchWithoutAsking: (input: { tenant_id: string; created_by: string }) => Promise<boolean>;
-  /** Whether the user lets embedded maps run without asking, once the silent-run rules hold. Default off. */
+  /** Whether the user lets embedded maps run without asking, behind the outbound secret guard. Off unless the host says. */
   mapsWithoutAsking: (input: { tenant_id: string; created_by: string }) => Promise<boolean>;
   /** Whether the user lets in-sandbox work (code, commands, workspace files, package installs) run without asking. Default off. */
   sandboxWithoutAsking: (input: { tenant_id: string; created_by: string }) => Promise<boolean>;
@@ -87,7 +84,6 @@ export function defaultSentinelServices(input: { pinned_path: string }): Sentine
     audit: null,
     shell_allowlist: seedShellAllowlist(input.pinned_path),
     tool_grants: new InMemoryToolGrantStore(),
-    private_reads: new InMemoryPrivateDataReadStore(),
     isOffline: () => Promise.resolve(false),
     tier2AutoAllow: () => Promise.resolve(new Set<Tier2ActionKind>()),
     searchWithoutAsking: () => Promise.resolve(true),
@@ -131,7 +127,7 @@ export interface SentinelHostContext {
   conversation_id: string;
   /** Workspace root for boundary checks; null when the session has no workspace. */
   workspace_cwd: string | null;
-  /** Host state for the turn's silent web searches. Shared by every thread of the turn. */
+  /** Host state for the turn's lookups and where their links came from. Shared by every thread of the turn. */
   web_search: WebSearchTurnState;
 }
 
@@ -166,7 +162,7 @@ export function createSentinelHostContext(input: {
 export interface SentinelDispatchContext {
   services: SentinelServices;
   identity: SentinelCallIdentity;
-  /** Where each private read's result is recorded before the model sees it. */
+  /** Where each result's links and addresses are recorded before the model sees it. */
   web_search: WebSearchTurnState;
 }
 

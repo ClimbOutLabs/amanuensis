@@ -9,7 +9,8 @@ import {
   type MessageStatus,
 } from '@assistant-ui/react';
 import { useTrueFoundryResumeUnavailable } from '@truefoundry/assistant-ui-runtime';
-import type { ReactNode } from 'react';
+import { parseMorningBrief } from '@truefoundry/trueforge-core/core/schedules/morningBrief';
+import { useState, type ReactNode } from 'react';
 
 import { copyText } from '@/utils/copyText.js';
 import type { AgentStepsPhase } from '../atoms/adapters/AgentStepsCardAdapter.js';
@@ -20,12 +21,18 @@ import { ModelUsageOverview } from '../atoms/agent-chat/ModelUsageOverview.js';
 import { TurnImages } from '../chatImages/ChatImages.js';
 import { ChatImageScope, ChatTurnWithoutImages, useChatImagesPort } from '../chatImages/chatImageScope.js';
 import { AmanBrief } from '../components/AmanBrief.js';
-import { parseBrief } from '../components/briefSections.js';
 import { useAgentDetailsVisibility } from '../server/AgentDetailsPreferenceContext.js';
 import { useSlot } from '../theme/SlotsProvider.js';
 import { computeAgentStepsSplit, type AgentStepsRun } from '../utils/computeAgentStepsSplit.js';
 import { useModelUsageVisible } from '../utils/modelUsageDisplayPreference.js';
-import { parseToolResultDisposition } from '../utils/toolCallParsing.js';
+import {
+  recoveredToolCallIds,
+  stepNoticesByCallId,
+  toolStepErrored,
+  toolStepUnfinished,
+} from '../utils/recoveredSteps.js';
+import { hasPendingAskUserResponse, hasPendingToolApproval } from '../utils/toolCallParsing.js';
+import { turnOutcomeLines } from '../utils/turnOutcomes.js';
 import { AgentStepsContainer } from './AgentStepsContainer.js';
 import { AssistantTextContainer } from './AssistantTextContainer.js';
 import { useDocumentIngestionStatusLine } from './DocumentIngestionStatusProvider.js';
@@ -43,21 +50,30 @@ import { answersBriefPrompt, messageText } from './briefTurn.js';
  * Dispatches a leaf message part to its renderer. "data" parts (generative
  * UI) are out of scope for this SDK entirely.
  */
-function AssistantReasoningProgress() {
+function AssistantReasoningProgress({ text }: { text: string }) {
   const ReasoningCard = useSlot('ReasoningCard');
-  return <ReasoningCard content="" isStreaming headingText="Thinking…" />;
+  const [expanded, setExpanded] = useState(false);
+  return (
+    <ReasoningCard
+      content={text}
+      isStreaming
+      expanded={expanded}
+      onToggle={() => setExpanded(open => !open)}
+      headingText="Thinking…"
+    />
+  );
 }
 
-function AssistantLeafPartContainer({ part }: { part: EnrichedPartState }) {
+function AssistantLeafPartContainer({ part, stepHidden = false }: { part: EnrichedPartState; stepHidden?: boolean }) {
   switch (part.type) {
     case 'text':
       return <AssistantTextContainer />;
     case 'reasoning':
-      return part.status?.type === 'running' ? <AssistantReasoningProgress /> : null;
+      return part.status?.type === 'running' ? <AssistantReasoningProgress text={part.text} /> : null;
     case 'image':
       return <MessageImageContainer />;
     case 'tool-call':
-      return <ToolCallContainer {...part} />;
+      return <ToolCallContainer {...part} stepHidden={stepHidden} />;
     default:
       return null;
   }
@@ -87,15 +103,17 @@ function stepPhase(
   return 'waiting-for-model';
 }
 
+type NestedPart = { readonly type: string; readonly messages?: readonly { readonly content: readonly NestedPart[] }[] };
+
 /**
- * A tool-call part counts as errored when its result disposition carries an
- * error tone. The incomplete-status branch is a fallback for runtimes that
- * preserve part-level statuses (the external-store runtime normalizes them).
+ * A tool call the person has to answer: an undecided approval or a question, here or inside a
+ * sub-agent's messages. These stay in view even while agent details are off.
  */
-function isToolPartErrored(part: PartState): boolean {
+function needsPerson(part: PartState | NestedPart): boolean {
   if (part.type !== 'tool-call') return false;
-  if (part.status?.type === 'incomplete') return true;
-  return parseToolResultDisposition(part.result)?.tone === 'error';
+  if ('approval' in part && hasPendingToolApproval(part.approval)) return true;
+  if ('interrupt' in part && 'result' in part && hasPendingAskUserResponse(part)) return true;
+  return (part.messages ?? []).some(message => message.content.some(needsPerson));
 }
 
 function pluralize(count: number, singular: string): string {
@@ -105,36 +123,29 @@ function pluralize(count: number, singular: string): string {
 function buildInternalsSummary({
   toolCount,
   thinkingCount,
-  recalledItems,
   helperCalls,
 }: {
   toolCount: number;
   thinkingCount: number;
-  recalledItems: number;
   helperCalls: number;
 }): string {
   const segments: string[] = [];
   const steps = toolCount + thinkingCount;
   if (steps > 0) segments.push(pluralize(steps, 'step'));
   if (toolCount > 0) segments.push(pluralize(toolCount, 'tool'));
-  if (recalledItems > 0) segments.push(`${String(recalledItems)} recalled`);
   if (helperCalls > 0) segments.push(pluralize(helperCalls, 'helper call'));
   // An answer with nothing else to list still gets a toggle for its model usage.
   return segments.length > 0 ? segments.join(' · ') : 'Details';
 }
 
-type GroupKey = `group-agentSteps-${number}` | 'group-reasoning';
+type GroupKey = `group-agentSteps-${number}` | 'group-reasoning' | 'group-interimText';
 
 // Each folded run gets its own group key so interleaved runs stay distinct disclosures.
 function agentStepsGroupKey(runIndex: number): `group-agentSteps-${number}` {
   return `group-agentSteps-${runIndex}`;
 }
 
-const PHASE_LIVE_LABELS: Record<AgentStepsPhase, string> = {
-  'waiting-for-model': 'Waiting for model',
-  'executing-tools': 'Executing tools',
-  'waiting-for-approval': 'Waiting for approval',
-};
+const BRIEF_WRITING_LINE = 'Putting your brief together…';
 
 export function AssistantMessageContainer() {
   const AssistantMessageBubble = useSlot('AssistantMessageBubble');
@@ -148,7 +159,7 @@ export function AssistantMessageContainer() {
   const messageStatus = useAuiState(s => s.message.status?.type);
   const isMessageRunning = messageStatus === 'running';
   const sessionId = useAuiState(s => s.threadListItem.remoteId ?? undefined);
-  const { visibility: agentDetailsVisibility } = useAgentDetailsVisibility(sessionId);
+  const { visible: agentDetailsVisible } = useAgentDetailsVisibility(sessionId);
   const { copy, isCopied } = useActionBarCopy({
     copyToClipboard: text => copyText(text),
   });
@@ -172,32 +183,69 @@ export function AssistantMessageContainer() {
   const messageId = useAuiState(s => s.message.id);
   const answersBrief = useAuiState(s => answersBriefPrompt(s.thread.messages, s.message.id));
   const answerText = useAuiState(s => messageText(s.message.content));
-  // A brief shows its stops and chapters once the answer is done; until then the normal progress shows.
-  const briefSections = answersBrief && !isMessageRunning ? parseBrief(answerText) : null;
+  // A brief replaces the answer once its JSON block is complete and parses. While it is being written one quiet
+  // line shows instead of the raw text; a finished answer without a valid block shows as normal markdown.
+  const brief = answersBrief ? parseMorningBrief(answerText) : null;
+  const briefWriting = answersBrief && brief === null && isMessageRunning;
 
-  const { runs, hasFinal } = computeAgentStepsSplit(parts);
+  const { runs, hasFinal, interimTextIndices } = computeAgentStepsSplit(parts);
 
-  // Progressive disclosure inputs: errors and approvals surface with an amber
-  // dot and auto-expand while the turn is running; a clean completed run with no tools, no
-  // thinking, no memory, no usage, and no errors renders no internals row at all. Completed turns with
-  // errors keep the dot and the summary row but follow the chat-level switch (collapsed by
-  // default) instead of forcing the content open.
+  // With agent details off the person sees their answer and what needs them, nothing of the work.
+  // In-between lines hide; a settled reply with no text after its last step keeps its last line as
+  // the answer, unless a step after that line failed, and then one plain line says it did not finish.
+  const settled = messageStatus !== 'running' && messageStatus !== 'requires-action';
+  const lastInterim = interimTextIndices.at(-1);
+  // A step the reply did again, successfully, is not a failure the person needs to hear about.
+  const recovered = recoveredToolCallIds(parts);
+  const isUnrecovered = (part: PartState) => part.type === 'tool-call' && !recovered.has(part.toolCallId);
+  const failedAfterLastInterim =
+    lastInterim !== undefined &&
+    parts.slice(lastInterim + 1).some(part => toolStepErrored(part) && isUnrecovered(part));
+  const keptAsAnswer = settled && !hasFinal && !failedAfterLastInterim ? lastInterim : undefined;
+  const hiddenTextIndices = agentDetailsVisible
+    ? new Set<number>()
+    : new Set(interimTextIndices.filter(index => index !== keptAsAnswer));
+  const showNotFinished =
+    !agentDetailsVisible &&
+    settled &&
+    !hasFinal &&
+    keptAsAnswer === undefined &&
+    error === undefined &&
+    parts.some(part => toolStepErrored(part) && isUnrecovered(part));
+  const foldedToolCallIds = new Set(
+    runs.flatMap(run =>
+      parts.slice(run.start, run.end).flatMap(part => (part.type === 'tool-call' ? [part.toolCallId] : [])),
+    ),
+  );
+  const isHiddenStep = (part: PartState) =>
+    !agentDetailsVisible && part.type === 'tool-call' && foldedToolCallIds.has(part.toolCallId) && !needsPerson(part);
+  // An answer can read as if everything worked, so a hidden step that ended unfinished always gets one line.
+  const showStepNotFinished =
+    settled &&
+    !showNotFinished &&
+    parts.some(part => isHiddenStep(part) && toolStepUnfinished(part) && isUnrecovered(part));
+  // The host's plain line for an undone step shows once the reply has settled, where the step happened.
+  const stepNotices = settled ? stepNoticesByCallId({ parts, recovered }) : new Map<string, readonly string[]>();
+  const noticesInRange = ({ start, end }: { start: number; end: number }) =>
+    parts
+      .slice(start, end)
+      .flatMap(part => (part.type === 'tool-call' ? (stepNotices.get(part.toolCallId) ?? []) : []));
+  // With details off the step rows fold away, so a finished turn's lasting outcomes (a reminder set,
+  // a calendar change, an email sent, a draft saved) each get one plain line under the reply instead.
+  // With details on the step rows already carry them, and a running turn shows none until it settles.
+  const outcomeLines = !agentDetailsVisible && settled ? turnOutcomeLines(parts) : [];
+
+  // The step rows below render only while agent details are on. Errors and approvals surface with an
+  // amber dot and auto-expand while the turn is running; a clean completed run with no tools, no
+  // thinking, no memory, no usage, and no errors renders no internals row at all.
   const recall = memoryContext?.recall;
-  const agentDetailsVisible = agentDetailsVisibility === 'expanded';
   const recallOutcomeBad = recall != null && (recall.stats.outcome === 'timeout' || recall.stats.outcome === 'error');
-  // The recalled-item count is part of "agent details": suppressed while the chat-level
-  // preference is collapsed, unless the recall itself needs attention (timeout/error) — then
-  // it stays in the summary row next to the amber dot while the disclosure content collapses.
-  const memoryVisible = recall != null && (agentDetailsVisible || recallOutcomeBad);
-  const recalledItems = memoryVisible ? (recall?.stats.items ?? 0) : 0;
-  const hasMemory = memoryVisible || memoryContext?.profile != null;
+  const hasMemory = recall != null || memoryContext?.profile != null;
   const memoryFailed = memoryContext == null && memoryContextHasError;
-  // Helper calls are agent details like the recalled memory: listed when the chat switch is on.
-  const helperUsage =
-    agentDetailsVisible && modelUsage !== undefined && modelUsage.helperCalls > 0 ? modelUsage : undefined;
+  const helperUsage = modelUsage !== undefined && modelUsage.helperCalls > 0 ? modelUsage : undefined;
 
   // Turn-level state (memory, live label) is hosted by the first run; a turn with no folded run
-  // gets a leading row instead.
+  // gets a leading row instead. Called only while agent details are on.
   const renderInternals = ({
     run,
     runIndex,
@@ -214,7 +262,7 @@ export function AssistantMessageContainer() {
     // Only the last run reflects the running turn; earlier runs have already finished.
     const phase = stepPhase(runParts, isMessageRunning && !isLast ? undefined : messageStatus);
     const attention =
-      runParts.some(isToolPartErrored) ||
+      runParts.some(part => toolStepErrored(part) && isUnrecovered(part)) ||
       (isHost && (recallOutcomeBad || memoryFailed)) ||
       phase === 'waiting-for-approval';
     const showMemory = isHost && hasMemory;
@@ -230,29 +278,17 @@ export function AssistantMessageContainer() {
       !attention;
     if (trivial) return null;
 
-    // A paused-for-approval turn is not "running" but still needs a live label —
-    // it is the one state that requires the user to act.
-    const liveLabel = isLive
-      ? phase !== undefined
-        ? PHASE_LIVE_LABELS[phase]
-        : 'Thinking…'
-      : phase === 'waiting-for-approval'
-        ? PHASE_LIVE_LABELS['waiting-for-approval']
-        : undefined;
-
     return (
       <AgentInternalsDisclosure
         summary={buildInternalsSummary({
           toolCount: run.toolCount,
           thinkingCount: run.thinkingCount,
-          recalledItems: isHost ? recalledItems : 0,
           helperCalls: isHost ? (helperUsage?.helperCalls ?? 0) : 0,
         })}
-        liveLabel={liveLabel}
         isRunning={isLive}
         attention={attention}
         lockOpen={messageStatus === 'requires-action' && (isLast || phase === 'waiting-for-approval')}
-        expanded={agentDetailsVisible}
+        expanded
         dataTestPrefix="assistant-message"
       >
         {showMemory && (
@@ -261,7 +297,6 @@ export function AssistantMessageContainer() {
             profile={memoryContext?.profile}
             unavailable={memoryFailed}
             onRetry={retryMemoryContext}
-            agentDetailsVisible={agentDetailsVisible}
           />
         )}
         {showUsage && helperUsage !== undefined && <ModelUsageDetails summary={helperUsage} />}
@@ -284,7 +319,9 @@ export function AssistantMessageContainer() {
   const runIndexOfPart = (index: number) => runs.findIndex(run => index >= run.start && index < run.end);
 
   const groupBy = (part: PartState, _context: GroupByContext): readonly GroupKey[] | null => {
-    const runIndex = runIndexOfPart(parts.findIndex(p => p === part));
+    const index = parts.findIndex(p => p === part);
+    if (hiddenTextIndices.has(index)) return ['group-interimText'];
+    const runIndex = runIndexOfPart(index);
     if (runIndex === -1) return null;
     return part.type === 'reasoning'
       ? [agentStepsGroupKey(runIndex), 'group-reasoning']
@@ -294,9 +331,10 @@ export function AssistantMessageContainer() {
   // Inside a chat image scope, the turn's images render re-encoded and web images ask first.
   const messageBody = (
     <>
-      {runs.length === 0 && renderInternals({ run: { start: 0, end: 0, toolCount: 0, thinkingCount: 0 }, runIndex: 0 })}
+      {agentDetailsVisible &&
+        runs.length === 0 &&
+        renderInternals({ run: { start: 0, end: 0, toolCount: 0, thinkingCount: 0 }, runIndex: 0 })}
       <RunCodeSetupNoticesContainer parts={parts} />
-      <ToolRefusalNoticesContainer parts={parts} />
       {ingestionStatusLine !== undefined && (
         <p className="mb-2 text-xs italic text-text-secondary" data-testid="document-ingestion-status">
           {ingestionStatusLine}
@@ -312,12 +350,22 @@ export function AssistantMessageContainer() {
         {({ part, children }) => {
           switch (part.type) {
             case 'group-reasoning':
-              return isMessageRunning ? <ReasoningContainer group={part} /> : null;
+              return isMessageRunning && agentDetailsVisible ? <ReasoningContainer group={part} /> : null;
+            case 'group-interimText':
+              return null;
             case 'text':
-              return <AssistantTextContainer />;
+              return briefWriting ? null : <AssistantTextContainer />;
             case 'reasoning':
-              return isMessageRunning ? <AssistantLeafPartContainer part={part} /> : null;
+              return isMessageRunning && agentDetailsVisible ? <AssistantLeafPartContainer part={part} /> : null;
             case 'tool-call':
+              return (
+                <>
+                  <AssistantLeafPartContainer part={part} stepHidden={isHiddenStep(part)} />
+                  {foldedToolCallIds.has(part.toolCallId) ? null : (
+                    <ToolRefusalNoticesContainer notices={stepNotices.get(part.toolCallId) ?? []} />
+                  )}
+                </>
+              );
             case 'image':
             case 'data':
               return <AssistantLeafPartContainer part={part} />;
@@ -328,11 +376,43 @@ export function AssistantMessageContainer() {
               const firstIndex = part.indices[0];
               const runIndex = firstIndex === undefined ? -1 : runIndexOfPart(firstIndex);
               const run = runs[runIndex];
-              return run ? renderInternals({ run, runIndex, children }) : null;
+              if (!run) return null;
+              // Details off: no step header; only the calls that need the person show from the run.
+              return (
+                <>
+                  {agentDetailsVisible ? renderInternals({ run, runIndex, children }) : children}
+                  <ToolRefusalNoticesContainer notices={noticesInRange(run)} />
+                </>
+              );
             }
           }
         }}
       </MessagePrimitive.GroupedParts>
+      {briefWriting ? (
+        <p role="status" className="text-sm text-text-secondary" data-testid="brief-writing">
+          {BRIEF_WRITING_LINE}
+        </p>
+      ) : null}
+      {showNotFinished && (
+        <p role="status" data-testid="assistant-message-not-finished" className="mt-2 text-sm text-text-primary">
+          This reply did not finish. Ask again, or turn on Agent details to see what went wrong.
+        </p>
+      )}
+      {showStepNotFinished && (
+        <p role="status" data-testid="assistant-message-step-not-finished" className="mt-2 text-sm text-text-secondary">
+          One step didn't finish. Turn on agent details to see it.
+        </p>
+      )}
+      {outcomeLines.map((line, index) => (
+        <p
+          key={index}
+          role="status"
+          data-testid="assistant-message-outcome"
+          className="mt-2 text-sm text-text-secondary"
+        >
+          {line}
+        </p>
+      ))}
       <TurnImages />
     </>
   );
@@ -340,13 +420,17 @@ export function AssistantMessageContainer() {
   return (
     <MessagePrimitive.Root data-role="assistant">
       <AssistantMessageBubble
-        error={error !== undefined ? <MessageErrorBanner message={String(error)} /> : undefined}
+        // An error line belongs to a finished reply. While the thread is still running the
+        // message can carry an earlier attempt's error (a resumed or retried run), and showing
+        // it would tell the person the reply failed while it is still being written; it clears
+        // when the run settles, and only then may the line show.
+        error={error !== undefined && !isThreadRunning ? <MessageErrorBanner message={String(error)} /> : undefined}
         actionBar={
           !isThreadRunning ? <MessageActionBar isCopied={isCopied} onCopy={copy} createdAt={createdAt} /> : undefined
         }
       >
-        {briefSections !== null ? (
-          <AmanBrief sections={briefSections} briefId={turnId ?? messageId} sessionId={sessionId} />
+        {brief !== null ? (
+          <AmanBrief brief={brief} briefId={turnId ?? messageId} sessionId={sessionId} />
         ) : chatImagesPort !== null && sessionId !== undefined && turnId !== undefined ? (
           <ChatImageScope port={chatImagesPort} sessionId={sessionId} turnId={turnId} settled={!isMessageRunning}>
             {messageBody}

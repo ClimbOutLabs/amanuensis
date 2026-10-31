@@ -16,6 +16,7 @@
 import { changeRequestText } from '@truefoundry/trueforge-core/core/permissions/changeRequest';
 import { savedSearchHold, withHoldSay } from '@truefoundry/trueforge-core/core/permissions/searchHoldText';
 import { readStoredMailbox, type Tier3Mailbox } from '@truefoundry/trueforge-core/core/permissions/tierMailbox';
+import type { BriefSection } from '@truefoundry/trueforge-core/core/schedules/morningBrief';
 
 /** Sentinel permission tier: 1 silent, 2 asks unless the user relaxed its kind, 3 always asks. */
 export const TOOL_TIERS = [1, 2, 3] as const;
@@ -150,21 +151,23 @@ export type SentinelApprovalCard = {
   calendar_event: SentinelApprovalCalendarEvent | null;
   /** The whole schedule when the action creates or deletes one, or null. */
   schedule: SentinelApprovalSchedule | null;
-  /** The whole specialist when the action adds one, or null. */
+  /** The whole persona when the action adds one, or null. */
   persona: SentinelApprovalPersona | null;
   /** For a mail send to addresses not on the Email list: those addresses. Approving adds them. Otherwise null. */
   mail_new_recipients?: string[] | null;
+  /** True when a card carrying mail_new_recipients approves saving a draft rather than sending. */
+  mail_draft?: boolean | undefined;
 };
 
-/** The whole specialist a chat call adds, in plain words. */
+/** The whole persona a chat call adds, in plain words. */
 export type SentinelApprovalPersona = {
-  /** Specialist name in plain words. */
+  /** Persona name in plain words. */
   name: string;
-  /** One line on what the specialist is for. */
+  /** One line on what the persona is for. */
   description: string;
-  /** The whole instruction text the specialist follows. */
+  /** The whole instruction text the persona follows. */
   instructions: string;
-  /** The model the specialist answers with. */
+  /** The model the persona answers with. */
   model_name: string;
 };
 
@@ -204,7 +207,7 @@ export const SENTINEL_AUDIT_OUTCOMES = ['logged', 'ran', 'approved', 'denied', '
 export type SentinelAuditOutcome = (typeof SENTINEL_AUDIT_OUTCOMES)[number];
 
 /** The one owner of the words for a call that ran because the person's settings allow it. */
-export const ALLOWED_BY_SETTINGS_LABEL = 'Done · allowed by your settings';
+export const ALLOWED_BY_SETTINGS_LABEL = 'Allowed by your settings';
 
 /** The one owner of the words for a call held for the person's OK. */
 export const WAITING_FOR_YOU_LABEL = 'Waiting for you';
@@ -289,6 +292,9 @@ export type SentinelUserSettings = {
  * - `GET /api/v1/user/audit-log?limit=N&page_token=T&outcome=O` -> `{ data: [...], pagination }`
  * - `GET /api/v1/user/settings/sentinel` -> `{ data: settings }`
  * - `PATCH /api/v1/user/settings/sentinel` with a settings patch -> `{ data: settings }`
+ * - `GET /api/v1/user/brief-items/completions` -> `{ data: [{ item_key, ... }] }`
+ * - `POST /api/v1/user/brief-items/completions` -> marks a brief item done
+ * - `DELETE /api/v1/user/brief-items/completions/{item_key}` -> removes the mark
  */
 export type SentinelApi = {
   listAuditEntries: (input: { sessionId: string; limit?: number }) => Promise<SentinelAuditEntry[]>;
@@ -305,6 +311,17 @@ export type SentinelApi = {
    * stream already delivered.
    */
   listSentinelSessionContext: (sessionId: string) => Promise<SentinelSessionContext>;
+  /** Keys of the morning brief items this person marked done in the last 7 days. */
+  listBriefItemCompletions: () => Promise<string[]>;
+  /** Saves a brief item as done, and writes it to the audit log for `sessionId`. */
+  markBriefItemDone: (input: {
+    itemKey: string;
+    section: BriefSection;
+    title: string;
+    sessionId: string;
+  }) => Promise<void>;
+  /** Removes a done mark again (the Undo on a brief row). */
+  unmarkBriefItemDone: (itemKey: string) => Promise<void>;
 };
 
 /** Durable per-tool-call Sentinel state for one session. */
@@ -492,7 +509,7 @@ function parseCalendarEvent(value: unknown): SentinelApprovalCalendarEvent | nul
   };
 }
 
-/** A card missing any field is not shown as a specialist, so a partial one is never approved as if it were whole. */
+/** A card missing any field is not shown as a persona, so a partial one is never approved as if it were whole. */
 function parsePersona(value: unknown): SentinelApprovalPersona | null {
   if (!isRecord(value)) return null;
   const name = optionalString(value, 'name');
@@ -551,6 +568,7 @@ function parseApprovalCard(value: unknown): SentinelApprovalCard | undefined {
     schedule: parseSchedule(value.schedule),
     persona: parsePersona(value.persona),
     mail_new_recipients: parseNewRecipients(value.mail_new_recipients ?? value.mailNewRecipients),
+    mail_draft: cardFlag(value, { snake: 'mail_draft', camel: 'mailDraft' }),
   });
 }
 
@@ -745,7 +763,7 @@ export function parseUserSettings(body: unknown): SentinelUserSettings {
       offline_mode: false,
       tier2_auto_allow: [],
       search_without_asking: true,
-      maps_without_asking: false,
+      maps_without_asking: true,
       sandbox_without_asking: true,
     };
   }
@@ -753,7 +771,7 @@ export function parseUserSettings(body: unknown): SentinelUserSettings {
     offline_mode: optionalBoolean(settings, 'offline_mode') ?? false,
     tier2_auto_allow: tier2ActionKindArray(settings.tier2_auto_allow),
     search_without_asking: optionalBoolean(settings, 'search_without_asking') ?? true,
-    maps_without_asking: optionalBoolean(settings, 'maps_without_asking') ?? false,
+    maps_without_asking: optionalBoolean(settings, 'maps_without_asking') ?? true,
     sandbox_without_asking: optionalBoolean(settings, 'sandbox_without_asking') ?? true,
   };
 }
