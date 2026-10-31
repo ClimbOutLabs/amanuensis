@@ -14,8 +14,8 @@ import {
 } from '@/server/ServerContext.js';
 import { useAssistantDisplayName } from '../../components/PersonalizationContext.js';
 import { useToasterOptional } from '../ToasterContainer.js';
-import { readMemoryEmbeddingsStatus, type MemoryEmbeddingsStatus } from './memoryEmbeddingsCapability.js';
 import { useChatSearchSetting } from './chatSearchSetting.js';
+import { readMemoryEmbeddingsStatus, type MemoryEmbeddingsStatus } from './memoryEmbeddingsCapability.js';
 import { useMemoryRecallSetting } from './memoryRecallSetting.js';
 import { readMemoryScreenStatus, readToolOutputScreenStatus } from './memoryScreenCapability.js';
 import { useMemoryScreenSetting } from './memoryScreenSetting.js';

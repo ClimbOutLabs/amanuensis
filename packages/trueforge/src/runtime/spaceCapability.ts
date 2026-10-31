@@ -68,6 +68,7 @@ import { googleCapability, sandboxAttachmentStager } from './googleCapability';
 import { googleSetupCapability } from './googleSetupCapability';
 import { mapsCapability } from './mapsCapability';
 import { MemoryTurnResourceResolver } from './MemoryTurnResourceResolver';
+import { pastChatsCapability, type PastChatsTurnContext } from './pastChatsCapability';
 import { personaCapability, type PersonaTurnContext } from './personaCapability';
 import { scheduleCapability, type ScheduleTurnContext } from './scheduleCapability';
 import { maskDocumentationRegions } from './spaceDocumentationMask';
@@ -82,7 +83,6 @@ import { spaceFormatNotes } from './spaceFormatNotes';
 import { dropUnseenSpaceLinks, SpaceLinkRefusedError, type DroppedLinks } from './spaceLinks';
 import { isTableRow, isTableSeparatorRow, orphanedRowGroupCount, tableRowEntries } from './spaceTableRows';
 import { prefixWithinCap, type WritePrefix } from './spaceWritePrefix';
-import { pastChatsCapability, type PastChatsTurnContext } from './pastChatsCapability';
 import { usageSummaryCapability, type UsageSummaryTurnContext } from './usageSummaryCapability';
 
 /**

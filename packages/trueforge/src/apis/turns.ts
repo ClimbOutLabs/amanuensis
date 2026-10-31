@@ -60,7 +60,6 @@ import configuration, { getRunCodeToolCallTimeoutMs, isTrueFoundryModeEnabled } 
 import type { AgentRecord, IAgentStore } from '../db/agentStore';
 import type { ICompletedTurnEventStore } from '../db/completedTurnEvents';
 import type { IGlobalSettingsStore } from '../db/globalSettingsStore';
-import type { ISentinelSettingsStore } from '../db/sentinelSettingsStore';
 import type { IGoogleConnectionStore } from '../db/googleConnectionStore';
 import type { IMcpServerWithAuthStore } from '../db/mcpServerStore';
 import type { IModelProviderStore } from '../db/modelProviderStore';
@@ -68,6 +67,7 @@ import type { IPersonalizationStore } from '../db/personalizationStore';
 import type { IPersonaStore } from '../db/personaStore';
 import type { IRepositoryStore } from '../db/repositoryStore';
 import type { ISandboxProviderStore } from '../db/sandboxProviderStore';
+import type { ISentinelSettingsStore } from '../db/sentinelSettingsStore';
 import type { SessionCustom, TurnCustom } from '../db/sessionCustom';
 import type { ISkillStore } from '../db/skillStore';
 import type { ISpaceStore } from '../db/spaceStore';
@@ -92,6 +92,8 @@ import type { ActiveTurnRegistry, TurnAdmission } from '../runtime/activeTurns';
 import { findTurnArtifact } from '../runtime/artifacts/findTurnArtifact';
 import { submitArtifactPersistence } from '../runtime/artifacts/persistTurnArtifacts';
 import { chatModelName, resolveChatAssistant, scheduleRunsAs, type ChatRunner } from '../runtime/chatAssistant';
+import { indexChatTurn } from '../runtime/chatSearchIndexing';
+import { readChatSearchEnabled } from '../runtime/chatSearchSettings';
 import { StreamGoneError, type EventSubscription, type EventSubscriptionRegistry } from '../runtime/event-subscription';
 import { buildInternalSourceToolPolicy, type InternalSourceState } from '../runtime/internalSourceGuard';
 import { mailAccountDirectory } from '../runtime/mailConnector';
@@ -105,8 +107,6 @@ import {
   type SummarizeTurnContext,
 } from '../runtime/memory/memoryRetain';
 import { applyMemorySettings } from '../runtime/memory/memorySettings';
-import { indexChatTurn } from '../runtime/chatSearchIndexing';
-import { readChatSearchEnabled } from '../runtime/chatSearchSettings';
 import { readMemoryRecallSetting } from '../runtime/memoryRecallSettings';
 import { applyMemoryScreenOverride, readMemoryScreenSetting } from '../runtime/memoryScreenSettings';
 import { resolveTurnSummarizeContext } from '../runtime/memorySummarizeSettings';
@@ -1357,7 +1357,8 @@ async function runTurnFollowUp(params: {
   markArtifactsCaptured: () => void;
 }): Promise<void> {
   const { input, state, ingestedToolOutput, toolResults, markArtifactsCaptured } = params;
-  const { turnEventStream, sessionId, turnId, logger, memory, artifacts, profileLearning, modelUsage, chatSearch } = input;
+  const { turnEventStream, sessionId, turnId, logger, memory, artifacts, profileLearning, modelUsage, chatSearch } =
+    input;
   try {
     // First, and never behind a model call: the chat's next turn reuses the sandbox and waits
     // on this step, so its tools cannot change a file before this turn has saved it.

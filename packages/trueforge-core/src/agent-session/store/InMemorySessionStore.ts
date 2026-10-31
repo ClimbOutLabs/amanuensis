@@ -64,8 +64,8 @@ import type {
   RenewCommandExecutionLeaseInput,
   ReplaceTaskChecklistInput,
   RevokeImplementationPlanGrantInput,
-  SearchChatHistoryInput,
   RevokeImplementationPlanGrantResult,
+  SearchChatHistoryInput,
   SetSessionFolderInput,
   StampImportedSessionInput,
   TurnContextAppend,
@@ -391,10 +391,7 @@ export class InMemorySessionStore<
     if (terms.length === 0 || input.limit <= 0) {
       return [];
     }
-    const bestBySession = new Map<
-      string,
-      { session: SessionRecord<TSessionCustom>; text: string; matchedAt: Date }
-    >();
+    const bestBySession = new Map<string, { session: SessionRecord<TSessionCustom>; text: string; matchedAt: Date }>();
     for (const [sKey, byMessage] of this.chatSearchDocuments) {
       const stored = this.sessions.get(sKey);
       if (stored === undefined) {

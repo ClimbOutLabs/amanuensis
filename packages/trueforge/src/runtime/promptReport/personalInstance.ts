@@ -30,9 +30,9 @@ import type { IScheduleStore } from '../../db/scheduleStore';
 import type { ChatAssistant } from '../chatAssistant';
 import type { MemoryConfig } from '../memory/memoryCapability';
 import type { MemoryTurnContext, ToolOutputScreenConfig } from '../MemoryTurnResourceResolver';
+import type { PastChatsSessionReader } from '../pastChats';
 import { SpaceTurnResourceResolver, type SpaceTurnContext } from '../spaceCapability';
 import type { TokenFactoryBudget } from '../tokenFactoryBudget';
-import type { PastChatsSessionReader } from '../pastChats';
 import type { UsageSessionReader } from '../usageSummaryCapability';
 
 export type PersonalInstanceName =

@@ -23,10 +23,9 @@ export async function readChatSearchEnabled(deps: {
     });
     return settings.chat_search_enabled;
   } catch (error) {
-    deps.logger.warn(
-      { err: error instanceof Error ? error.message : String(error) },
-      'Past-chat search stays off because the setting could not be read.',
-    );
+    deps.logger.warn('Past-chat search stays off because the setting could not be read.', {
+      err: error instanceof Error ? error.message : String(error),
+    });
     return false;
   }
 }

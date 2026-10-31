@@ -108,10 +108,10 @@ import type { IOAuthTokenStore } from './mcp/auth/types';
 import { PACKAGE_VERSION } from './packageVersion';
 import { ActiveTurnRegistry } from './runtime/activeTurns';
 import { registerCalendarConnectorForBoot } from './runtime/calendarAccount';
-import { startChatSearchBackfill } from './runtime/chatSearchIndexing';
 import { createChatImageService } from './runtime/chatImages/chatImageService';
 import { CHAT_IMAGE_RETENTION_DAYS } from './runtime/chatImages/limits';
 import { createImageReencoder } from './runtime/chatImages/reencodeInSandbox';
+import { startChatSearchBackfill } from './runtime/chatSearchIndexing';
 import { recoverAbandonedCommandExecutions } from './runtime/commandExecutionRecovery';
 import { designateTavilyAtBoot, seedDefaultSearchProviderAtBoot } from './runtime/defaultSearchProvider';
 import { EventSubscriptionRegistry } from './runtime/event-subscription';
@@ -899,6 +899,7 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     chatImageStore,
     turnDrains,
     sentinelAuditStore,
+    globalSettingsStore,
   };
 }
 
@@ -977,6 +978,7 @@ try {
     chatImageStore,
     turnDrains,
     sentinelAuditStore,
+    globalSettingsStore,
   } = configuration.STANDALONE
     ? await createServerRuntime(
         await createStandalonePersistence({ sqlitePath: configuration.SQLITE_PATH, logger }),

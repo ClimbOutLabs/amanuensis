@@ -51,8 +51,8 @@ import type {
   ReplaceTaskChecklistInput,
   RevokeImplementationPlanGrantInput,
   RevokeImplementationPlanGrantResult,
-  SetSessionFolderInput,
   SearchChatHistoryInput,
+  SetSessionFolderInput,
   StampImportedSessionInput,
   TurnRecordWithoutSnapshot,
   UpdateSessionFolderInput,
@@ -72,11 +72,11 @@ import {
   listApprovalDismissals as listApprovalDismissalsQuery,
   recordApprovalDismissal as recordApprovalDismissalQuery,
 } from './queries/approvalDismissals';
+import { patchThreadCapabilityState as patchThreadCapabilityStateQuery } from './queries/capabilities';
 import {
   indexChatMessages as indexChatMessagesQuery,
   searchChatHistory as searchChatHistoryQuery,
 } from './queries/chatSearch';
-import { patchThreadCapabilityState as patchThreadCapabilityStateQuery } from './queries/capabilities';
 import {
   appendCommandExecutionResult as appendCommandExecutionResultQuery,
   appendCommandExecutionStarted as appendCommandExecutionStartedQuery,
