@@ -560,6 +560,10 @@ const ImportPermissionSettingsSchema = z.object({
   ...SentinelUserSettingsSchema.shape,
   maps_without_asking: SentinelUserSettingsSchema.shape.maps_without_asking.default(true),
   sandbox_without_asking: SentinelUserSettingsSchema.shape.sandbox_without_asking.default(true),
+  // Permission settings are never applied on import, so an imported allowance can never arrive on;
+  // the field is read only so an export that carries it still parses, and a missing one reads as off.
+  package_downloads_without_project_allowed:
+    SentinelUserSettingsSchema.shape.package_downloads_without_project_allowed.default(false),
 });
 
 export const ImportSettingsFileSchema = z.object({

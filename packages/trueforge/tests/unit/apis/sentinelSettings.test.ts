@@ -1,6 +1,7 @@
 import { HTTPException } from 'hono/http-exception';
 import type { Authenticator } from '../../../src/auth/authenticator';
 import type { RequestContext } from '../../../src/auth/identity';
+import { packageMirrorTokens } from '../../../src/sandbox/mirrors/packageMirrorTokens';
 import { GetSentinelUserSettingsResponseSchema } from '../../../src/schemas/sentinelSettings';
 import { startApprovalTestServer, type ApprovalTestServer } from '../../fixtures/approvalTestServer';
 
@@ -71,6 +72,7 @@ describe('Sentinel user settings routes', () => {
       search_without_asking: true,
       maps_without_asking: true,
       sandbox_without_asking: true,
+      package_downloads_without_project_allowed: false,
     });
   });
 
@@ -83,6 +85,7 @@ describe('Sentinel user settings routes', () => {
       search_without_asking: true,
       maps_without_asking: true,
       sandbox_without_asking: true,
+      package_downloads_without_project_allowed: false,
     });
 
     await server.request(SETTINGS_PATH, patch('alice', { offline_mode: true }));
@@ -93,6 +96,7 @@ describe('Sentinel user settings routes', () => {
       search_without_asking: false,
       maps_without_asking: true,
       sandbox_without_asking: true,
+      package_downloads_without_project_allowed: false,
     });
     expect(await read('bob')).toEqual({
       offline_mode: false,
@@ -100,6 +104,7 @@ describe('Sentinel user settings routes', () => {
       search_without_asking: true,
       maps_without_asking: true,
       sandbox_without_asking: true,
+      package_downloads_without_project_allowed: false,
     });
   });
 
@@ -112,6 +117,7 @@ describe('Sentinel user settings routes', () => {
       search_without_asking: true,
       maps_without_asking: true,
       sandbox_without_asking: true,
+      package_downloads_without_project_allowed: false,
     });
 
     await server.request(SETTINGS_PATH, patch('dana', { maps_without_asking: false }));
@@ -129,6 +135,7 @@ describe('Sentinel user settings routes', () => {
       search_without_asking: true,
       maps_without_asking: true,
       sandbox_without_asking: false,
+      package_downloads_without_project_allowed: false,
     });
 
     await server.request(SETTINGS_PATH, patch('erin', { sandbox_without_asking: true }));
@@ -152,6 +159,48 @@ describe('Sentinel user settings routes', () => {
       search_without_asking: true,
       maps_without_asking: true,
       sandbox_without_asking: true,
+      package_downloads_without_project_allowed: false,
     });
+  });
+
+  it('saves the download allowance for chats without a project on its own', async () => {
+    const saved = await server.request(
+      SETTINGS_PATH,
+      patch('fran', { package_downloads_without_project_allowed: true }),
+    );
+    expect(saved.status).toBe(200);
+    expect((await read('fran')).package_downloads_without_project_allowed).toBe(true);
+    expect((await read('fran')).offline_mode).toBe(false);
+
+    const bad = await server.request(
+      SETTINGS_PATH,
+      patch('fran', { package_downloads_without_project_allowed: 'yes' }),
+    );
+    expect(bad.status).toBe(400);
+  });
+
+  it('turning the allowance off takes back the person\u2019s live project-less download grants at once', async () => {
+    await server.request(SETTINGS_PATH, patch('gwen', { package_downloads_without_project_allowed: true }));
+    const withoutProject = packageMirrorTokens.issue({
+      tenant_id: 'default',
+      created_by: 'gwen',
+      session_id: 'gwen-chat',
+    });
+    const withProject = packageMirrorTokens.issue({
+      tenant_id: 'default',
+      created_by: 'gwen',
+      session_id: 'gwen-chat',
+      repository_id: 'repo-1',
+    });
+    expect(packageMirrorTokens.resolve(withoutProject)).toBeDefined();
+
+    const saved = await server.request(
+      SETTINGS_PATH,
+      patch('gwen', { package_downloads_without_project_allowed: false }),
+    );
+    expect(saved.status).toBe(200);
+    expect(packageMirrorTokens.resolve(withoutProject)).toBeUndefined();
+    expect(packageMirrorTokens.resolve(withProject)).toBeDefined();
+    packageMirrorTokens.revokeSession('gwen-chat');
   });
 });

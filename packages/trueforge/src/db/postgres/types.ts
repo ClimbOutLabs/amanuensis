@@ -212,6 +212,7 @@ export interface SentinelUserSettingsTable {
   search_without_asking: boolean;
   maps_without_asking: boolean;
   sandbox_without_asking: boolean;
+  package_downloads_without_project_allowed: boolean;
   created_at: Date;
   updated_at: Date;
 }
