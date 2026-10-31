@@ -341,7 +341,11 @@ export class PackageMirrorGateway {
     const token = Array.isArray(tokenHeader) ? tokenHeader[0] : tokenHeader;
     const grant = token === undefined ? undefined : this.#registry.resolve(token);
     if (grant === undefined || token === undefined) {
-      this.#plain(res, 403, 'This sandbox has no package download grant. Allow downloads for this repo first.');
+      this.#plain(
+        res,
+        403,
+        'This sandbox has no package download grant. Allow package downloads in this chat first, then try again.',
+      );
       return;
     }
     // The rest of the path goes upstream exactly as written, trailing slash and all.

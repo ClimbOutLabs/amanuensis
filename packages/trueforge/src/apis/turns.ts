@@ -282,6 +282,11 @@ export interface TurnsRouterDeps {
   /** Per-user Google logins; absent, no Gmail tools mount. */
   googleConnectionStore?: IGoogleConnectionStore | undefined;
   repositoryStore: IRepositoryStore;
+  /**
+   * Per-person settings, for the package download allowance of chats without a project. Absent,
+   * those chats get no download wiring, exactly as before this allowance existed.
+   */
+  sentinelSettingsStore?: ISentinelSettingsStore | undefined;
   turnArtifactStore: ITurnArtifactStore;
   /** Not tenant-scoped: the persisted live tool-output screen override is global. */
   globalSettingsStore: IGlobalSettingsStore;
@@ -327,6 +332,8 @@ export type BeginTurnExecutionDeps = Pick<
   /** Fork-only: required unconditionally by createTurnResolver's memory/repository wiring. */
   tokenStore: IOAuthTokenStore;
   repositoryStore: IRepositoryStore;
+  /** Per-person settings, for the package download allowance of chats without a project. */
+  sentinelSettingsStore?: ISentinelSettingsStore | undefined;
   sessionStore: ISessionStore<SessionCustom, TurnCustom> & ICompletedTurnEventStore;
   spaceStore: ISpaceStore;
   /** Per-user Google logins; absent, no Gmail tools mount. */
@@ -382,6 +389,11 @@ function createTurnResolver(deps: {
   /** Whether this server has a sandbox at all, from the persisted sandbox status. See readServerSandboxAvailable. */
   serverSandboxAvailable: boolean;
   repositoryStore: IRepositoryStore;
+  /**
+   * Per-person settings, for the package download allowance of chats without a project. Absent,
+   * those chats get no download wiring, exactly as before this allowance existed.
+   */
+  sentinelSettingsStore?: ISentinelSettingsStore | undefined;
   sessionStore: ISessionStore<SessionCustom, TurnCustom>;
   memoryClient?: MemoryClient | undefined;
   memoryProviderServerName?: string | undefined;
@@ -443,6 +455,7 @@ function createTurnResolver(deps: {
     boundRepository,
     serverSandboxAvailable,
     repositoryStore,
+    sentinelSettingsStore,
     sessionStore,
     memoryClient,
     memoryProviderServerName,
@@ -677,7 +690,7 @@ function createTurnResolver(deps: {
                   });
                 },
           loadPackageMirrorToken:
-            boundRepository === undefined
+            boundRepository === undefined && sentinelSettingsStore === undefined
               ? undefined
               : async () => {
                   const currentSession = await sessionStore.getSession({
@@ -686,6 +699,20 @@ function createTurnResolver(deps: {
                   });
                   if (currentSession?.created_by_subject.subject_id !== userRef) {
                     return undefined;
+                  }
+                  if (boundRepository === undefined) {
+                    // No project: the person's own allowance is the scope, and its tokens carry
+                    // no repository. Taking the allowance back ends them here as well.
+                    const settings = await sentinelSettingsStore?.get({ tenant_id, created_by: userRef });
+                    if (settings?.package_downloads_without_project_allowed !== true) {
+                      packageMirrorTokens.revokePersonWithoutRepository({ tenant_id, created_by: userRef });
+                      return undefined;
+                    }
+                    return packageMirrorTokens.issue({
+                      tenant_id,
+                      created_by: userRef,
+                      session_id: sessionId,
+                    });
                   }
                   const repository = await repositoryStore.getRepository({
                     tenant_id,
@@ -728,7 +755,7 @@ function createTurnResolver(deps: {
             });
           },
           loadPackageDownloadsAllowed:
-            boundRepository === undefined
+            boundRepository === undefined && sentinelSettingsStore === undefined
               ? undefined
               : async () => {
                   const currentSession = await sessionStore.getSession({
@@ -738,6 +765,10 @@ function createTurnResolver(deps: {
                   if (currentSession?.created_by_subject.subject_id !== userRef) {
                     return false;
                   }
+                  if (boundRepository === undefined) {
+                    const settings = await sentinelSettingsStore?.get({ tenant_id, created_by: userRef });
+                    return settings?.package_downloads_without_project_allowed ?? false;
+                  }
                   const repository = await repositoryStore.getRepository({
                     tenant_id,
                     created_by: userRef,
@@ -746,7 +777,7 @@ function createTurnResolver(deps: {
                   return repository?.package_downloads_allowed ?? false;
                 },
           allowPackageDownloads:
-            boundRepository === undefined
+            boundRepository === undefined && sentinelSettingsStore === undefined
               ? undefined
               : async () => {
                   const currentSession = await sessionStore.getSession({
@@ -754,6 +785,19 @@ function createTurnResolver(deps: {
                     session_id: sessionId,
                   });
                   if (currentSession?.created_by_subject.subject_id !== userRef) {
+                    return;
+                  }
+                  if (boundRepository === undefined) {
+                    await sentinelSettingsStore?.patch({
+                      tenant_id,
+                      created_by: userRef,
+                      offline_mode: undefined,
+                      tier2_auto_allow: undefined,
+                      search_without_asking: undefined,
+                      maps_without_asking: undefined,
+                      sandbox_without_asking: undefined,
+                      package_downloads_without_project_allowed: true,
+                    });
                     return;
                   }
                   await repositoryStore.setPackageDownloadsAllowed({
@@ -1717,6 +1761,7 @@ async function beginAcceptedTurnExecution(
         agentStore: deps.agentStore,
         modelProviderStore: deps.modelProviderStore,
         repositoryStore: deps.repositoryStore,
+        sentinelSettingsStore: deps.sentinelSettingsStore,
         sessionStore: deps.sessionStore,
         spaceStore: deps.spaceStore,
         googleConnectionStore: deps.googleConnectionStore,
@@ -2614,6 +2659,7 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
         logger: deps.logger,
       }),
       repositoryStore: deps.repositoryStore,
+      sentinelSettingsStore: deps.sentinelSettingsStore,
       sessionStore: deps.sessionStore,
       memoryClient,
       memoryProviderServerName: memoryProvider?.serverName,
