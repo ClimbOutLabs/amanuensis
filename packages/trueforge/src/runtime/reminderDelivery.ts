@@ -49,7 +49,7 @@ export class ReminderAgentNotFoundError extends Error {
 /**
  * Writes one due reminder into the owner's Reminders chat as a finished assistant line. The host writes it
  * itself: no model is called, so it lands at once and costs nothing. The chat is made on the first reminder
- * and reused after. Returns the session id.
+ * and reused after. Returns the chat and the turn it wrote.
  */
 export async function deliverReminder(params: {
   item: ScheduleDispatchItem;
@@ -59,7 +59,7 @@ export async function deliverReminder(params: {
   now: Date;
   /** The activity log the delivery is also written to; absent, the delivery is unchanged and unrecorded. */
   audit?: AuditLogWriter | null | undefined;
-}): Promise<string> {
+}): Promise<{ session_id: string; turn_id: string }> {
   const { item, sessions, sessionStore, agentStore, now } = params;
   const { schedule, run } = item;
   const owner = schedule.created_by_subject;
@@ -195,5 +195,5 @@ export async function deliverReminder(params: {
       // The activity log being unavailable never changes a delivery.
     }
   }
-  return sessionId;
+  return { session_id: sessionId, turn_id: turnId };
 }

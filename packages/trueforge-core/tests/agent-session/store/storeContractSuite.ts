@@ -4688,6 +4688,24 @@ export function runStoreContractSuite<
       await expect(store.searchChatHistory(searchInput({ query: 'tri' }))).resolves.toEqual([]);
     });
 
+    it.each([
+      ['made', 'mad'],
+      ['James', 'jammed'],
+      ['string', 'str'],
+      ['done', 'don'],
+    ])('keeps "%s" and "%s" apart', async (first, second) => {
+      const store = createStore();
+      await seedSession(store);
+      await seedSecondSession(store, 'second-session', createdBy);
+      await indexOne(store, { session: sessionId, turn: 'turn-1', text: `${first} ferry`, at: docAt('01') });
+      await indexOne(store, { session: 'second-session', turn: 'turn-1', text: `${second} ferry`, at: docAt('02') });
+
+      const firstHits = await store.searchChatHistory(searchInput({ query: first }));
+      expect(firstHits.map(hit => hit.session_id)).toEqual([sessionId]);
+      const secondHits = await store.searchChatHistory(searchInput({ query: second }));
+      expect(secondHits.map(hit => hit.session_id)).toEqual(['second-session']);
+    });
+
     it('keeps words written with combining marks whole, in either letter form', async () => {
       const store = createStore();
       await seedSession(store);
@@ -4714,6 +4732,8 @@ export function runStoreContractSuite<
       await expect(store.searchChatHistory(searchInput({ query: 'caf' }))).resolves.toEqual([]);
       const istanbulHits = await store.searchChatHistory(searchInput({ query: 'İstanbul' }));
       expect(istanbulHits.map(hit => hit.session_id)).toEqual(['cafe-session']);
+      const lowercaseIstanbulHits = await store.searchChatHistory(searchInput({ query: 'istanbul' }));
+      expect(lowercaseIstanbulHits.map(hit => hit.session_id)).toEqual(['cafe-session']);
       await expect(store.searchChatHistory(searchInput({ query: 'stanbul' }))).resolves.toEqual([]);
     });
 

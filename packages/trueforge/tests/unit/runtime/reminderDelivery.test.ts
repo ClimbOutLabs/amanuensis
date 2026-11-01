@@ -77,7 +77,7 @@ async function setup() {
           return Promise.resolve();
         },
       },
-    });
+    }).then(delivered => delivered.session_id);
 
   return { sessionStore, dueReminder, deliver, auditRecords };
 }

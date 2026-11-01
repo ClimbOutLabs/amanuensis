@@ -200,17 +200,13 @@ export class ChatSearchIndexer {
       if (turn === undefined || turn.state.status === 'running') {
         return;
       }
-      await this.#writeTurn({ tenant_id: input.tenant_id, turn, generation: before.generation, person });
-      // The switch changed while this write ran: take the write back, since the clear may have run first.
-      const after = await this.#switchState(person);
-      if (!after.enabled || after.generation !== before.generation) {
-        await this.#deps.sessionStore.indexChatMessages({
-          tenant_id: input.tenant_id,
-          session_id: input.session_id,
-          turn_id: input.turn_id,
-          persona_id: null,
-          documents: [],
-        });
+      const written = await this.#writeTurn({
+        tenant_id: input.tenant_id,
+        turn,
+        generation: before.generation,
+        person,
+      });
+      if (written !== 'written') {
         return;
       }
       // An earlier write for this person failed: now that writes work again, run the pass it asked for.
@@ -436,7 +432,9 @@ export class ChatSearchIndexer {
 
   /**
    * Writes one turn, after checking the switch one last time for this write. A turn whose
-   * persona cannot be decided is cleared from the index instead of being guessed.
+   * persona cannot be decided is cleared from the index instead of being guessed. When the
+   * switch changed while the write ran, the write is taken back, since the clear may have
+   * run first; the live path and the pass both write through here, so both are covered.
    */
   async #writeTurn(input: {
     tenant_id: string;
@@ -463,7 +461,18 @@ export class ChatSearchIndexer {
       persona_id: decision.decided ? decision.persona_id : null,
       documents: decision.decided ? chatSearchDocumentsForTurn(turn) : [],
     });
-    return 'written';
+    const after = await this.#switchState(input.person);
+    if (after.enabled && after.generation === input.generation) {
+      return 'written';
+    }
+    await this.#deps.sessionStore.indexChatMessages({
+      tenant_id: input.tenant_id,
+      session_id: turn.session_id,
+      turn_id: turn.turn_id,
+      persona_id: null,
+      documents: [],
+    });
+    return after.generation === input.generation ? 'off' : 'stale';
   }
 
   async #activationsFor(input: { tenant_id: string; session_id: string }): Promise<PersonaActivation[]> {

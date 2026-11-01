@@ -201,7 +201,7 @@ export async function startScheduleRunOnRequest<TTransaction>(params: {
   const { c, item, deps } = params;
   if (item.schedule.manifest.kind === 'reminder') {
     // A reminder needs no model: the host writes its line into the Reminders chat itself.
-    const deliveredSessionId = await deliverReminder({
+    const delivered = await deliverReminder({
       item,
       sessions: deps.sessions,
       sessionStore: deps.sessionStore,
@@ -209,11 +209,18 @@ export async function startScheduleRunOnRequest<TTransaction>(params: {
       now: new Date(),
       audit: deps.audit,
     });
+    // A reminder line is a finished turn like any other, so it joins the past-chat search now.
+    await deps.chatSearchIndexer?.indexFinishedTurn({
+      tenant_id: item.schedule.tenant_id,
+      created_by: item.schedule.created_by_subject.subject_id,
+      session_id: delivered.session_id,
+      turn_id: delivered.turn_id,
+    });
     await recordScheduleFiring({
       audit: deps.audit,
       logger: deps.logger,
       item,
-      session_id: deliveredSessionId,
+      session_id: delivered.session_id,
       tool_name: SET_REMINDER_TOOL_NAME,
       description: `The reminder ran: ${item.schedule.manifest.task}`,
     });
