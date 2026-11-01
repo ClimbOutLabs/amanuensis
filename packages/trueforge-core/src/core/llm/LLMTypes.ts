@@ -192,6 +192,13 @@ export const InternalToolCallInfoSchema = z.object({
   browser_click: BrowserClickReviewSchema.optional().describe(
     'Host-read context for a browser_click call, read from the live page before the click. Never model-authored.',
   ),
+  browser_click_screenshot: z
+    .string()
+    .optional()
+    .describe(
+      'A picture of the page just before a browser_click call, as a data URL, for its approval card. ' +
+        'Never part of what an approval token binds: only the fields on browser_click are. Never model-authored.',
+    ),
   // Sentinel host-only classification. Populated by the classifier in
   // ToolSet/Sandbox; always present on classified calls, never wire-visible.
   tier: TierSchema.optional().describe('Server-owned Sentinel permission tier. Never model-authored.'),

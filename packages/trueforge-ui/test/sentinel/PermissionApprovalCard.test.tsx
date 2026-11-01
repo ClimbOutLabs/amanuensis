@@ -413,3 +413,25 @@ describe('PermissionApprovalCard "Change it"', () => {
     expect(screen.getByRole('button', { name: 'Change it' })).toBeDisabled();
   });
 });
+
+describe('PermissionApprovalCard browser screenshot', () => {
+  it('shows the picture when a browser click card carries one', () => {
+    renderCard({
+      plain_what: 'Click "Place order" on shop.example?',
+      browser_screenshot: 'data:image/png;base64,aGVsbG8=',
+    });
+    const image = screen.getByAltText('The page just before this click');
+    expect(image).toBeInTheDocument();
+    expect(image).toHaveAttribute('src', 'data:image/png;base64,aGVsbG8=');
+  });
+
+  it('shows no picture for a card with none', () => {
+    renderCard({ browser_screenshot: null });
+    expect(screen.queryByAltText('The page just before this click')).not.toBeInTheDocument();
+  });
+
+  it('shows no picture for an ordinary card that never set the field', () => {
+    renderCard();
+    expect(screen.queryByAltText('The page just before this click')).not.toBeInTheDocument();
+  });
+});
