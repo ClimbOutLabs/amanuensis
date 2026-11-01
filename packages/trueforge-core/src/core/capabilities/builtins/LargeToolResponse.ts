@@ -1,6 +1,6 @@
 import dedent from 'dedent';
 import type { Logger } from 'winston';
-import { describeContentSize, estimateTokensForString } from '../../llm/usage';
+import { CHARS_PER_TOKEN, describeContentSize, estimateTokensForString } from '../../llm/usage';
 import type { ToolCallResult } from '../../mcp/executeToolCalls';
 import type { ContextMessage } from '../../runtime/AgentThread.types';
 import type { Sandbox, SandboxInfo } from '../../sandbox/Sandbox';
@@ -238,9 +238,9 @@ function mentionsRequest(block: string, request: ReadonlySet<string>): boolean {
   return wordsOf(block).some(word => request.has(word));
 }
 
-/** Cuts text to about maxTokens. estimateTokensForString counts four characters per token. */
+/** Cuts text to about maxTokens, at CHARS_PER_TOKEN characters per token. */
 function cutToTokens(text: string, maxTokens: number): string {
-  return text.slice(0, Math.floor(maxTokens * 4));
+  return text.slice(0, Math.floor(maxTokens * CHARS_PER_TOKEN));
 }
 
 /**
@@ -450,13 +450,13 @@ export class LargeToolResponseProcessor implements ToolResponseProcessor {
     this.logger = param.logger.child({ module: 'LargeToolResponse' });
   }
 
-  // The thresholds are set in tokens, estimated at four characters per token; the reason states
-  // them in characters, which is what the model can plan against. An entry at or over the
-  // individual threshold was blocked for its own size; a smaller one was blocked only because
-  // the batch as a whole went over the total threshold.
+  // The thresholds are set in tokens, estimated at CHARS_PER_TOKEN characters per token; the
+  // reason states them in characters, which is what the model can plan against. An entry at or
+  // over the individual threshold was blocked for its own size; a smaller one was blocked only
+  // because the batch as a whole went over the total threshold.
   private blockReasonDescription(entry: ToolResultWithInfo): string {
-    const perResult = (this.individualTokenThreshold * 4).toLocaleString('en-US');
-    const combined = (this.totalTokenThreshold * 4).toLocaleString('en-US');
+    const perResult = (this.individualTokenThreshold * CHARS_PER_TOKEN).toLocaleString('en-US');
+    const combined = (this.totalTokenThreshold * CHARS_PER_TOKEN).toLocaleString('en-US');
     return entry.originalTokens >= this.individualTokenThreshold
       ? `this result is over the ${perResult}-character limit for a single tool result`
       : `the results in this batch together are over the ${combined}-character combined limit`;

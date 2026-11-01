@@ -1,6 +1,6 @@
 import { InstructionBuilder } from '../../../src/core/InstructionBuilder';
 import type { ExecResult, SandboxProvider } from '../../../src/core/sandbox/provider/Provider';
-import { Sandbox } from '../../../src/core/sandbox/Sandbox';
+import { createSandboxExecDescription, Sandbox } from '../../../src/core/sandbox/Sandbox';
 import { NOOP_AGENT_TRACING } from '../../../src/core/tracing/NoopAgentTracing';
 import { makeSilentLogger } from '../harnessMocks';
 
@@ -58,15 +58,26 @@ describe('Sandbox file-output guidance', () => {
     );
   });
 
-  it('tells the Agent to save fetched remote content to a file before extracting from it', () => {
+  it('tells the Agent to save fetched remote content to a file only where the shell can fetch', () => {
+    const sentence =
+      'When fetching remote content, the Agent MUST save it to a file first, then extract from the file. Do not pipe large fetches through grep or sed into the tool response.';
+
+    // Both networked branches of the exec description carry the sentence: full network, and
+    // offline with sites approved for the skills in the chat.
+    expect(createSandboxExecDescription({ offline: false, fileDownload: true })).toContain(sentence);
+    expect(
+      createSandboxExecDescription({ offline: true, fileDownload: true, skillNetworkHosts: ['api.github.com'] }),
+    ).toContain(sentence);
+    // A shell with no internet is told it cannot fetch, never that it must save what it fetches.
+    expect(createSandboxExecDescription({ offline: true, fileDownload: true })).not.toContain(sentence);
+    expect(createSandboxExecDescription({ offline: true, fileDownload: true })).toContain(
+      'This shell has no internet access. Never use it to fetch web content.',
+    );
+    // The sentence no longer sits in the sandbox instructions sent to every sandbox.
     const sandbox = makeSandbox(true);
     const builder = new InstructionBuilder('root');
     sandbox.buildInstruction(builder);
-    const prompt = builder.build();
-
-    expect(prompt).toContain(
-      'When fetching remote content, the Agent MUST save it to a file first, then extract from the file. Do not pipe large fetches through grep or sed into the tool response.',
-    );
+    expect(builder.build()).not.toContain(sentence);
   });
 
   it('omits the file-output section when file downloads are disabled', () => {
