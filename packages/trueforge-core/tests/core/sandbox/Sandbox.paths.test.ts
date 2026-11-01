@@ -1,10 +1,10 @@
 import { execFile, execFileSync } from 'node:child_process';
 import { createHash, randomBytes } from 'node:crypto';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, writeFile } from 'node:fs/promises';
 import { createServer, type Server } from 'node:http';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import type { ApprovalDecision, ToolAdmissionProvenance } from '../../../src/core/events/schema';
 import { InstructionBuilder } from '../../../src/core/InstructionBuilder';
 import type { ILLM, LLMCreateParamsStreaming } from '../../../src/core/llm/ILLM';
@@ -4177,7 +4177,8 @@ function slotLikeProvider(input: {
     getGitCredentialsPath: () => join(root, '.git-credentials'),
     getSkillsDir: () => skillsDir,
     getSkillDownloaderPath: () => join(root, 'skill_downloader.py'),
-    downloadFile: ({ path }) => readFile(path),
+    // Each provider has its own sandbox, like a real one, so state kept per sandbox never leaks between tests.
+    createSandbox: () => Promise.resolve({ sandboxId: basename(root) }),
     uploadFile: async ({ remotePath, content }) => {
       if (refuseUpload?.(remotePath) === true) {
         throw new Error('upload refused');
@@ -4471,7 +4472,7 @@ describe('Sandbox skills without a network', () => {
 
       // Each turn, an approval continuation included, builds a new Sandbox on the same sandbox.
       const next = makeSandbox(provider, {
-        existingSandboxId: 'raw-1',
+        existingSandboxId: basename(root),
         skillMounter: new SkillMounter({ skills: [gamma] }),
       });
       expect(noticesOf(await next.callTool(execTrue, { status: 'allow', scope: 'once' }))).toBeUndefined();
@@ -4482,7 +4483,7 @@ describe('Sandbox skills without a network', () => {
       // Another skill left out later is still shown once.
       const delta = registrySkill({ name: 'delta', presignedUrl: 'http://127.0.0.1:9/delta.tar' });
       const later = makeSandbox(provider, {
-        existingSandboxId: 'raw-1',
+        existingSandboxId: basename(root),
         skillMounter: new SkillMounter({ skills: [gamma, delta] }),
       });
       expect(noticesOf(await later.callTool(execTrue, { status: 'allow', scope: 'once' }))).toEqual([
@@ -4644,5 +4645,33 @@ describe('Sandbox host bookkeeping', () => {
     expect(buildWriteAndRunScriptCommand({ scriptPath: 'skill_downloader.py', scriptContent: 'pass\n' })).toMatch(
       / && python3 -I -S 'skill_downloader\.py'$/u,
     );
+  });
+});
+
+describe('staysInWorkspace', () => {
+  const exec = (purpose: string, command: string): { name: string; argumentsText: string } => ({
+    name: 'exec',
+    argumentsText: JSON.stringify({ intent: 'Run', purpose, command }),
+  });
+
+  it('keeps file edits, run_code and offline commands in the workspace, but never a push', () => {
+    const sandbox = makeSandbox(makeProvider({ network: 'none' }));
+
+    expect(sandbox.staysInWorkspace({ name: 'write_file', argumentsText: '{}' })).toBe(true);
+    expect(sandbox.staysInWorkspace({ name: 'run_code', argumentsText: '{}' })).toBe(true);
+    expect(sandbox.staysInWorkspace(exec('verify', 'python3 -m pytest -q'))).toBe(true);
+    expect(sandbox.staysInWorkspace(exec('push', 'git push origin main'))).toBe(false);
+    expect(sandbox.staysInWorkspace(exec('edit', 'git push origin main'))).toBe(false);
+    expect(sandbox.staysInWorkspace({ name: 'exec', argumentsText: 'not json' })).toBe(false);
+    expect(sandbox.staysInWorkspace({ name: 'some_other_tool', argumentsText: '{}' })).toBe(false);
+  });
+
+  it('counts a command on a sandbox with network as able to reach past it, unless it only inspects', () => {
+    const sandbox = makeSandbox(makeProvider());
+
+    expect(sandbox.staysInWorkspace(exec('execute', 'curl -X POST https://example.com'))).toBe(false);
+    expect(sandbox.staysInWorkspace(exec('verify', 'python3 -m pytest -q'))).toBe(false);
+    expect(sandbox.staysInWorkspace(exec('inspect', 'ls -la'))).toBe(true);
+    expect(sandbox.staysInWorkspace({ name: 'write_file', argumentsText: '{}' })).toBe(true);
   });
 });

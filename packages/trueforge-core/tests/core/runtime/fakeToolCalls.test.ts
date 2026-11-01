@@ -1197,7 +1197,7 @@ describe('turn-wide counts across threads', () => {
     expect(toolResults(sub).some(result => result.content.includes(REPEATED_ACTION_RESULT))).toBe(true);
   });
 
-  it('runs an identical call again when a sibling thread has run a write since it last ran', async () => {
+  it('never runs an identical outside action twice, even after a sibling thread has run a write', async () => {
     const toolSet = makeTier3WriteToolSet();
     const turnToolCallLedger = createTurnToolCallLedger();
     const main = makeThread({
@@ -1214,13 +1214,17 @@ describe('turn-wide counts across threads', () => {
     await drain(main);
     await drain(sub);
 
-    expect(callToolNames(toolSet)).toEqual(['create_event', 'create_event', 'create_event']);
-    expect(toolResults(sub).some(result => result.content.includes(REPEATED_ACTION_RESULT))).toBe(false);
+    // The same event is not created twice: an outside action is the same action whatever ran since.
+    expect(callToolNames(toolSet)).toEqual(['create_event', 'create_event']);
+    expect(toolResults(sub).some(result => result.content.includes(REPEATED_ACTION_RESULT))).toBe(true);
   });
 });
 
-/** A stand-in for the sandbox: every call asks (tier 3), like an unrelaxed sandbox. `failing` tools return an error. */
-function makeSandboxToolSet(input: { failing?: readonly string[] } = {}) {
+/**
+ * A stand-in for an offline sandbox: every call asks (tier 3), like an unrelaxed sandbox, and every
+ * call but a push stays in its workspace. `failing` tools return an error.
+ */
+function makeSandboxToolSet(input: { failing?: readonly string[]; networked?: boolean } = {}) {
   const toolSet = makeMockIMCPServer({
     name: 'sandbox',
     preload: true,
@@ -1236,12 +1240,20 @@ function makeSandboxToolSet(input: { failing?: readonly string[] } = {}) {
       type: 'truefoundry-system' as const,
       mcp_server_id: toolSet.id,
       mcp_server_name: 'sandbox',
-      original_tool_name: params.name,
+      // Like the real sandbox, the classified name carries more than the bare tool name.
+      original_tool_name: `${params.name}:classified`,
       is_approval_required: false,
       tier: 3 as const,
       tier_reason: 'arbitrary_code_execution',
+      effect: params.name === 'write_file' ? ('edit' as const) : ('execute' as const),
     }),
   );
+  toolSet.staysInWorkspace = ({ name, argumentsText }) => {
+    if (name === 'write_file') {
+      return true;
+    }
+    return name === 'exec' && !argumentsText.includes('git push') && input.networked !== true;
+  };
   jest
     .mocked(toolSet.callTool)
     .mockImplementation((params: CallToolRequest['params']) =>
@@ -1321,7 +1333,30 @@ describe('write cap leaves work inside the sandbox workspace alone', () => {
     });
   });
 
-  it('counts only actions outside the sandbox that succeeded', async () => {
+  it('caps commands on a sandbox with network, which can reach past it', async () => {
+    const toolSet = makeSandboxToolSet({ networked: true });
+    const posts = Array.from({ length: MAX_WRITE_CALLS_PER_TURN + 2 }, (_, index) => [
+      { name: 'exec', args: { purpose: 'execute', command: `curl -X POST https://example.com/${String(index)}` } },
+    ]);
+    const thread = makeThread({ toolSet, create: scriptedArgs(posts) });
+    await drain(thread);
+
+    expect(callToolNames(toolSet)).toHaveLength(MAX_WRITE_CALLS_PER_TURN);
+  });
+
+  it('never repeats an outside action, even after a file changed in between', async () => {
+    const toolSet = makeSandboxToolSet();
+    const push = { name: 'exec', args: { purpose: 'push', command: 'git push origin main' } };
+    const thread = makeThread({
+      toolSet,
+      create: scriptedArgs([[push], [{ name: 'write_file', args: { path: 'a.py', content: 'x\n' } }], [push]]),
+    });
+    await drain(thread);
+
+    expect(callToolNames(toolSet)).toEqual(['exec', 'write_file']);
+  });
+
+  it('counts an outside action that reported an error, since it may still have gone out', async () => {
     const toolSet = makeResearchToolSet();
     let attempt = 0;
     jest.mocked(toolSet.callTool).mockImplementation(() => {
@@ -1338,7 +1373,7 @@ describe('write cap leaves work inside the sandbox workspace alone', () => {
     const thread = makeThread({ toolSet, create: scriptedCalls(drafts) });
     await drain(thread);
 
-    // Three failed and did not count, so five more ran before the cap.
-    expect(callToolNames(toolSet)).toHaveLength(MAX_WRITE_CALLS_PER_TURN + 3);
+    // The three that answered with an error still count.
+    expect(callToolNames(toolSet)).toHaveLength(MAX_WRITE_CALLS_PER_TURN);
   });
 });

@@ -51,6 +51,7 @@ import {
   type ToolExecutionStartedEvent,
   type ToolResponseEventV2,
   type ToolResponseRequiredEvent,
+  type ToolResultDisposition,
   type UserToolApprovalMessage,
   type UserToolResponseMessage,
 } from '../events/schema';
@@ -269,7 +270,7 @@ import {
   changesState,
   countsTowardWriteCap,
   findUnbackedClaim,
-  isSandboxFileEdit,
+  isSandboxFileEditTool,
   REPEATED_ACTION_OWNER_MESSAGE,
   REPEATED_ACTION_RESULT,
   repetitionStopMessage,
@@ -1606,6 +1607,41 @@ function hostVouchedReadToolNames({
     }
   }
   return vouched;
+}
+
+/** Whether the call's own server says it stays inside that server's contained workspace. */
+function callStaysInWorkspace({
+  call,
+  toolMapping,
+}: {
+  call: Pick<InternalEnrichedToolCall, 'function'>;
+  toolMapping: Map<string, MappedMCPTool>;
+}): boolean {
+  const mapped = toolMapping.get(call.function.name);
+  return (
+    mapped?.toolSet.staysInWorkspace?.({ name: mapped.originalToolName, argumentsText: call.function.arguments }) ===
+    true
+  );
+}
+
+/** Whether the call goes to one of the sandbox's own file tools, looked up by the tool it maps to. */
+function isSandboxFileEditCall({
+  call,
+  toolMapping,
+}: {
+  call: Pick<InternalEnrichedToolCall, 'function'>;
+  toolMapping: Map<string, MappedMCPTool>;
+}): boolean {
+  const mapped = toolMapping.get(call.function.name);
+  return (
+    mapped !== undefined &&
+    isSandboxFileEditTool({ serverName: mapped.toolSet.name, toolName: mapped.originalToolName })
+  );
+}
+
+/** Whether a call reached its tool, whatever it answered. Refused, blocked and unsent calls did not. */
+function toolCallWasAttempted(disposition: ToolResultDisposition): boolean {
+  return disposition !== 'denied' && disposition !== 'policy_blocked' && disposition !== 'never_ran';
 }
 
 /** The names the model sees for the sandbox's run_code and exec tools; undefined when a tool is not offered. */
@@ -4589,7 +4625,15 @@ export class AgentThread {
    * run either (countsTowardWriteCap). Both end the turn after their batch resolves, and the repeat also
    * ends it when the same call comes straight after the one before.
    */
-  private applyToolCallLoopGuard({ calls, turn }: { calls: InternalEnrichedToolCall[]; turn: TurnToolCallLedger }): {
+  private applyToolCallLoopGuard({
+    calls,
+    turn,
+    toolMapping,
+  }: {
+    calls: InternalEnrichedToolCall[];
+    turn: TurnToolCallLedger;
+    toolMapping: Map<string, MappedMCPTool>;
+  }): {
     calls: InternalEnrichedToolCall[];
     writeCapHit: boolean;
     repeatStop: boolean;
@@ -4622,14 +4666,18 @@ export class AgentThread {
       const signature = toolCallSignature(call);
       const consecutive = signature === previous;
       previous = signature;
-      // An identical call may run again once a write has run since it last ran, since the state may have changed.
+      // An identical call may run again once something changed since it last ran, so tests can run
+      // again after an edit. An outside action never does: a send is the same send whatever changed.
       // A retryable error gets its one retry, whatever has run since.
+      const countsTowardCap = countsTowardWriteCap(call.tool_info, {
+        staysInWorkspace: callStaysInWorkspace({ call, toolMapping }),
+      });
       const lastRun = turn.callSignatures.get(signature);
       const alreadySeen =
         seenInBatch.has(signature) ||
         (lastRun !== undefined &&
           !retryIsDue({ lastKind: lastRun.lastKind, retried: lastRun.retried }) &&
-          lastRun.writesAtLastRun >= turn.changesThisTurn);
+          (countsTowardCap || lastRun.writesAtLastRun >= turn.changesThisTurn));
       const duplicateInStep = seenInBatch.has(signature);
       seenInBatch.add(signature);
       if (alreadySeen) {
@@ -4641,10 +4689,9 @@ export class AgentThread {
         repeatStop = repeatStop || (consecutive && overLimit);
         return blocked({ call, message: REPEATED_ACTION_RESULT, ownerMessage: REPEATED_ACTION_OWNER_MESSAGE });
       }
-      // Only actions that leave the sandbox count (see countsTowardWriteCap). The count is of ones
-      // that ran and succeeded; the calls admitted in this batch are reserved so one batch cannot
-      // overshoot the cap.
-      if (countsTowardWriteCap(call.tool_info, call.function.arguments)) {
+      // Only actions that can reach past the sandbox count (see countsTowardWriteCap), once they ran;
+      // the calls admitted in this batch are reserved so one batch cannot overshoot the cap.
+      if (countsTowardCap) {
         if (turn.writeCallsThisTurn + admittedCappedInBatch >= MAX_WRITE_CALLS_PER_TURN) {
           writeCapBlocked += 1;
           return blocked({ call, message: WRITE_CAP_BLOCKED_RESULT, ownerMessage: WRITE_CAP_OWNER_MESSAGE });
@@ -4809,7 +4856,7 @@ export class AgentThread {
     // executeToolCalls can reach a provider. The tool-call budget admission
     // runs first, so an over-budget batch is capped deterministically before
     // any provider is reached.
-    const loopGuard = this.applyToolCallLoopGuard({ calls: executionCalls, turn: toolCallMemo.turn });
+    const loopGuard = this.applyToolCallLoopGuard({ calls: executionCalls, turn: toolCallMemo.turn, toolMapping });
     const budgetAdmittedCalls = this.applyToolCallBudgetAdmission(loopGuard.calls);
     const callsForDispatch = signal?.aborted
       ? budgetAdmittedCalls.map(call =>
@@ -4980,14 +5027,21 @@ export class AgentThread {
       logToolCallOutcome(this.logger, { toolName: toolCall?.function.name ?? 'unknown_tool', result });
       // Calls with no metadata count as writes, as isReadOnlyCall treats them.
       const writes = result.toolCallInfo === undefined || !isReadOnlyCall(result.toolCallInfo);
+      const countsTowardCap =
+        toolCall !== undefined &&
+        countsTowardWriteCap(toolCall.tool_info, {
+          staysInWorkspace: callStaysInWorkspace({ call: toolCall, toolMapping }),
+        });
+      // An outside action counts once it was attempted, whatever it reported: a send can arrive and
+      // still answer with an error. Only a call that never ran (refused, blocked, never sent) is free.
+      if (countsTowardCap && toolCallWasAttempted(result.disposition)) {
+        nextToolCallMemo.turn.writeCallsThisTurn += 1;
+      }
       if (result.disposition === 'executed_ok' && !result.failure) {
         if (writes) {
           nextToolCallMemo.turn.successfulWritesThisTurn += 1;
         }
-        if (toolCall !== undefined && countsTowardWriteCap(toolCall.tool_info, toolCall.function.arguments)) {
-          nextToolCallMemo.turn.writeCallsThisTurn += 1;
-        }
-        if (toolCall !== undefined && changesState(toolCall.tool_info, toolCall.function.arguments)) {
+        if (toolCall !== undefined && changesState(toolCall.tool_info, { countsTowardCap })) {
           nextToolCallMemo.turn.changesThisTurn += 1;
         }
         if (result.toolCallInfo !== undefined) {
@@ -5373,7 +5427,7 @@ export class AgentThread {
                 disposition: result.disposition,
                 failure: result.failure,
                 savedNothing: spaceWriteSavedNothing(result.message.content),
-                sandboxFileEdit: isSandboxFileEdit(call.tool_info),
+                sandboxFileEdit: isSandboxFileEditCall({ call, toolMapping }),
               },
             ];
       }),

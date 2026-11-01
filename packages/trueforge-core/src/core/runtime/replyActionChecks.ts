@@ -5,7 +5,6 @@ import {
   MAX_WRITE_CALLS_PER_TURN,
   type TurnStepKind,
 } from '../mcp/executeToolCalls';
-import { sandboxCommandEffect } from '../sandbox/commandClassification';
 import {
   SANDBOX_APPLY_PATCH_TOOL_NAME,
   SANDBOX_EXEC_TOOL_NAME,
@@ -37,43 +36,29 @@ export const WRITE_CAP_OWNER_MESSAGE = `Skipped, because I had already done ${St
 export const WRITE_CAP_STOP_MESSAGE = `Stopped after ${String(MAX_WRITE_CALLS_PER_TURN)} actions outside the sandbox in one reply. Check what was done, then ask again if you need more.`;
 
 /**
- * Whether a call counts toward the per-turn cap on changes. The cap is for actions that leave the
- * sandbox: a send, a connector write, a git push. Work inside the sandbox workspace (writing and
- * editing files, running code, builds and tests) stays in the sandbox and can be undone there, so a
- * coding task is not cut off part way; the repeat guard still stops a call made over and over.
- * A read the host vouches for (a search, a page read, a map lookup) never counts; a server's own
- * read-only claim is not enough. A call held for the owner does not run now.
+ * Whether a call counts toward the per-turn cap on changes. The cap is for actions that can reach
+ * past the sandbox: a send, a connector write, a git push, a command on a sandbox with network.
+ * Work its own server says stays in its workspace (staysInWorkspace) does not count, so a coding
+ * task is not cut off part way. A read the host vouches for (a search, a page read, a map lookup)
+ * never counts; a server's own read-only claim is not enough. A call held for the owner does not run now.
  */
-export function countsTowardWriteCap(info: InternalToolCallInfo, argumentsText: string): boolean {
-  if (info.tier !== 3 || info.held_for_owner !== undefined || isHostVouchedRead(info)) {
-    return false;
-  }
-  if (info.mcp_server_name !== SANDBOX_MCP_SERVER_ID) {
-    return true;
-  }
-  return info.original_tool_name === SANDBOX_EXEC_TOOL_NAME && execPushes(argumentsText);
+export function countsTowardWriteCap(info: InternalToolCallInfo, input: { staysInWorkspace: boolean }): boolean {
+  return info.tier === 3 && info.held_for_owner === undefined && !isHostVouchedRead(info) && !input.staysInWorkspace;
 }
 
 /**
- * Whether a call that ran and succeeded changed something, so the same call may sensibly run again:
- * tests run again after a file edit, for example. Counts every action the write cap counts, plus the
- * sandbox's own edits: a file written or edited, and an exec whose command edits, commits or pushes.
+ * Whether a call that ran changed something, so a different call made the same way may sensibly run
+ * again (tests run again after a file edit, for example): any action the cap counts, and a sandbox
+ * step whose effect is an edit, a commit or a push.
  */
-export function changesState(info: InternalToolCallInfo, argumentsText: string): boolean {
-  if (countsTowardWriteCap(info, argumentsText)) {
+export function changesState(info: InternalToolCallInfo, input: { countsTowardCap: boolean }): boolean {
+  if (input.countsTowardCap) {
     return true;
   }
-  if (info.mcp_server_name !== SANDBOX_MCP_SERVER_ID) {
-    return false;
-  }
-  if (isSandboxFileEdit(info)) {
-    return true;
-  }
-  if (info.original_tool_name !== SANDBOX_EXEC_TOOL_NAME || info.effect === 'inspect') {
-    return false;
-  }
-  const effect = execEffect(argumentsText);
-  return effect === undefined || effect === 'edit' || effect === 'commit' || effect === 'push';
+  return (
+    info.mcp_server_name === SANDBOX_MCP_SERVER_ID &&
+    (info.effect === 'edit' || info.effect === 'commit' || info.effect === 'push')
+  );
 }
 
 const SANDBOX_FILE_EDIT_TOOLS: ReadonlySet<string> = new Set([
@@ -82,35 +67,9 @@ const SANDBOX_FILE_EDIT_TOOLS: ReadonlySet<string> = new Set([
   SANDBOX_REPLACE_TEXT_TOOL_NAME,
 ]);
 
-/** Whether a call is one of the sandbox's own file tools: writing a new file, or editing one. */
-export function isSandboxFileEdit(info: Pick<InternalToolCallInfo, 'mcp_server_name' | 'original_tool_name'>): boolean {
-  return info.mcp_server_name === SANDBOX_MCP_SERVER_ID && SANDBOX_FILE_EDIT_TOOLS.has(info.original_tool_name);
-}
-
-/** Whether an exec call pushes out of the sandbox, by its declared purpose or by its command. */
-function execPushes(argumentsText: string): boolean {
-  return execEffect(argumentsText) === 'push';
-}
-
-/**
- * What an exec call does, from its declared purpose when that is push and otherwise from its command.
- * Undefined when the arguments cannot be read, which callers treat as the riskier answer.
- */
-function execEffect(argumentsText: string): string | undefined {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(argumentsText);
-  } catch {
-    return undefined;
-  }
-  if (typeof parsed !== 'object' || parsed === null) {
-    return undefined;
-  }
-  const { purpose, command } = parsed as { purpose?: unknown; command?: unknown };
-  if (purpose === 'push') {
-    return 'push';
-  }
-  return typeof command === 'string' ? sandboxCommandEffect(command) : undefined;
+/** Whether a tool is one of the sandbox's own file tools, by its server and its tool name. */
+export function isSandboxFileEditTool(input: { serverName: string; toolName: string }): boolean {
+  return input.serverName === SANDBOX_MCP_SERVER_ID && SANDBOX_FILE_EDIT_TOOLS.has(input.toolName);
 }
 
 /** Ends the turn, shown to the person, when the model kept sending tool calls that were blocked before they ran. */
