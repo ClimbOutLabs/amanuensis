@@ -48,6 +48,7 @@ test_docker_memory_is_checked() {
 test_out_of_memory_build_points_at_docker_memory() {
   t_begin "a build killed with exit 137 says to raise Docker's memory"
   sandbox_new
+  STUB_PULL_FAIL=climboutlabs
   STUB_BUILD_OOM=1
   with_input "$SENTINEL_PASSWORD
 "

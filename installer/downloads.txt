@@ -1,12 +1,15 @@
 # id|approximate MB|what|source host
 # Sizes are estimates for the plan; the real totals depend on cache and architecture.
 docker-engine|400|Docker Engine, Compose and Buildx packages (only when Docker is installed for you)|download.docker.com
+app-image|1200|The Aman app image, downloaded from ghcr.io (built here only if the download is not available)|ghcr.io
 dockerfile-frontend|15|BuildKit Dockerfile frontend image|registry-1.docker.io
 app-base|80|Node base image for the app build|registry-1.docker.io
 app-deps|700|Packages fetched while building the Aman app|registry.npmjs.org
+stt-image|900|The speech-to-text image, downloaded from ghcr.io (built here only if the download is not available)|ghcr.io
 stt-base|50|Python base image for the speech-to-text build|registry-1.docker.io
 stt-deps|200|Python packages fetched while building the speech-to-text service|pypi.org files.pythonhosted.org
 stt-weights|464|Whisper small speech model weights, downloaded once at first start|huggingface.co
+calendar-image|300|The calendar connector image, downloaded from ghcr.io (built here only if the download is not available)|ghcr.io
 dex|36|Sign-in service (pinned by digest)|ghcr.io
 mail-email|25|Email connector (pinned by digest)|ghcr.io
 https-front|20|The web front end that serves your instance over https on your network (pinned by digest)|registry-1.docker.io

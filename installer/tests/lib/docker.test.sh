@@ -129,7 +129,7 @@ test_group_member_without_relogin_uses_sg() {
   assert_log_lacks "usermod"
   assert_log_lacks "sudo docker"
   assert_file "$AMAN_HOME/state/instances/main.conf"
-  assert_contains "$(cat "$STUB_LOG")" "sg docker -c env DOCKER_BUILDKIT=1 docker build"
+  assert_contains "$(cat "$STUB_LOG")" "sg docker -c env DOCKER_BUILDKIT=1 docker pull ghcr.io/climboutlabs/aman-app:"
   assert_tree_lacks "$AMAN_HOME" "$SENTINEL_PASSWORD"
   assert_not_contains "$(cat "$STUB_LOG")" "$SENTINEL_PASSWORD"
   assert_log_has "sg docker -c env AMANUENSIS_HOME=$AMAN_HOME HOME=$SB/user timeout 180 $AMAN_HOME/bin/aman doctor"

@@ -100,6 +100,7 @@ OPT_FORCE=0
 OPT_PURGE=0
 OPT_DEMO=0
 OPT_LOCAL_ONLY=0
+OPT_BUILD_FROM_SOURCE=0
 OPT_HOME_NETWORK=0
 CLOUD_DEFAULT_LOCAL=0
 OPT_ADDRESSES=
@@ -230,6 +231,7 @@ Options
   --calendar-password-stdin  read the calendar app password from the input (see the line order above; with --yes: required)
   --remove              with instance email or instance calendar, remove that connection
   --print-root-steps    show the admin steps that install Docker, and stop
+  --build-from-source   build the Aman images here instead of downloading them
   --print-network       show every site the installer may contact, and stop
   --print-proxy-requirements  show what a reverse proxy in front of Aman must do, and stop
   --help                this text
@@ -285,6 +287,7 @@ parse_args() {
       --reset) OPT_RESET=1 ;;
       --fresh) OPT_FRESH=1 ;;
       --local-only) OPT_LOCAL_ONLY=1 ;;
+      --build-from-source) OPT_BUILD_FROM_SOURCE=1 ;;
       --home-network) OPT_HOME_NETWORK=1 ;;
       --home | --name | --instance | --email | --your-name | --public-url | --login-url | --port | --login-port | --confirm-name | --tls | --public-ip | --address | --backups | --token-factory-model | --token-factory-daily-cap | --display-name | --from-compose | --user | --email-provider | --email-address | --email-imap-host | --email-imap-port | --email-smtp-host | --email-smtp-port | --calendar-provider | --calendar-email | --calendar-url | --calendar-user)
         [ "$#" -ge 2 ] || usage_die "$arg needs a value"

@@ -85,6 +85,9 @@ case "$cmd" in
       if grep -Fxq "$ref" "$S/images"; then
         case "$*" in
           *Architecture*) echo amd64 ;;
+          # The digest and revision a registry image carries: tests set $S/revision to make a download mismatch.
+          *RepoDigests*) echo "${ref%%:*}@sha256:$(printf 'a%.0s' $(seq 64))" ;;
+          *revision*) cat "$S/revision" 2>/dev/null || git -C "${AMAN_REPO_ROOT:-.}" rev-parse HEAD 2>/dev/null ;;
           # A rebuild that changed an image changes its id; tests write the new id to $S/image_id.
           *'{{.Id}}'*) echo "sha256:$(cat "$S/image_id" 2>/dev/null || echo first)" ;;
         esac
@@ -116,7 +119,16 @@ case "$cmd" in
     ;;
   pull)
     echo "sha256:4c1d: Pulling from dexidp/dex"
+    if [ -n "${STUB_PULL_FAIL:-}" ] && [[ "$*" == *"$STUB_PULL_FAIL"* ]]; then
+      echo "Error response from daemon: manifest unknown" >&2
+      exit 1
+    fi
     echo "$1" >>"$S/images"
+    echo "$1" >>"$S/pulls"
+    exit 0
+    ;;
+  tag)
+    echo "$2" >>"$S/images"
     exit 0
     ;;
   logs)

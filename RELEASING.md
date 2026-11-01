@@ -33,8 +33,9 @@ This creates the `v0.2.0` tag on the current `main` HEAD and publishes the relea
 
 ## After cutting a release
 
-1. Update `README.md`: the "Install on your own computer" section names the newest release tag and says whether it includes the installer. Change it to the new tag, and make the `git checkout <tag>` step the default once the release includes `installer/install.sh`.
-2. Open a PR with the README change (follow `.github/pull_request_template.md`). The named tag keeps users on the latest stable release.
+1. Wait for the `Images` workflow to finish green on the new tag. It publishes the three Aman images that the installer downloads. The README must not point at a tag whose images are missing, or installs fall back to building on every computer.
+2. Update `README.md`: the "Install on your own computer" section names the newest release tag and says whether it includes the installer. Change it to the new tag, and make the `git checkout <tag>` step the default once the release includes `installer/install.sh`.
+3. Open a PR with the README change (follow `.github/pull_request_template.md`). The named tag keeps users on the latest stable release.
 
 ## Versioning
 

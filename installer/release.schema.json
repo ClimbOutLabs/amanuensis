@@ -40,6 +40,21 @@
       "description": "Local tag of the calendar sidecar image built from ops/calendar-sidecar, aman-calendar-caldav:<source id>.",
       "type": "string"
     },
+    "app_image_digest": {
+      "description": "Digest of the app image downloaded from the registry, empty when it was built here.",
+      "type": "string",
+      "pattern": "^([a-z0-9./_-]+(:[A-Za-z0-9._-]+)?@sha256:[a-f0-9]{64})?$"
+    },
+    "stt_image_digest": {
+      "description": "Digest of the speech-to-text image downloaded from the registry, empty when it was built here.",
+      "type": "string",
+      "pattern": "^([a-z0-9./_-]+(:[A-Za-z0-9._-]+)?@sha256:[a-f0-9]{64})?$"
+    },
+    "calendar_image_digest": {
+      "description": "Digest of the calendar connector image downloaded from the registry, empty when it was built here.",
+      "type": "string",
+      "pattern": "^([a-z0-9./_-]+(:[A-Za-z0-9._-]+)?@sha256:[a-f0-9]{64})?$"
+    },
     "broker_image": {
       "description": "Reserved for the sandbox broker, absent until it ships.",
       "type": "string",
