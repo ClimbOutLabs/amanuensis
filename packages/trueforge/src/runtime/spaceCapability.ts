@@ -2666,7 +2666,7 @@ export class SpaceTurnResourceResolver extends MemoryTurnResourceResolver {
       space: SpaceTurnContext,
       toolImages: ToolImagesOptions,
       usage: UsageSummaryTurnContext,
-      pastChats: PastChatsTurnContext,
+      pastChats: PastChatsTurnContext | undefined,
     ]
   ) {
     const [
@@ -2693,7 +2693,7 @@ export class SpaceTurnResourceResolver extends MemoryTurnResourceResolver {
   readonly #space: SpaceTurnContext;
   readonly #toolImages: ToolImagesOptions;
   readonly #usage: UsageSummaryTurnContext;
-  readonly #pastChats: PastChatsTurnContext;
+  readonly #pastChats: PastChatsTurnContext | undefined;
   /** The run's sandbox, resolved before any thread is built; mail attachments are placed in it. */
   private runSandbox: Sandbox | undefined;
 
@@ -2725,15 +2725,15 @@ export class SpaceTurnResourceResolver extends MemoryTurnResourceResolver {
           starts_answer: this.#space.startsAnswer,
         }),
         usageSummaryCapability({ ...this.#usage, tracing: input.tracing, timeZone: this.clientTimezone }),
-        ...(this.#pastChats.enabled
-          ? [
+        ...(this.#pastChats === undefined
+          ? []
+          : [
               pastChatsCapability({
-                sessionStore: this.#pastChats.sessionStore,
+                ...this.#pastChats,
                 authority: { ...this.#pastChats.authority, currentSessionId: input.session_id },
                 tracing: input.tracing,
               }),
-            ]
-          : []),
+            ]),
         toolImagesCapability(this.#toolImages),
         ...google,
         ...(personas === undefined

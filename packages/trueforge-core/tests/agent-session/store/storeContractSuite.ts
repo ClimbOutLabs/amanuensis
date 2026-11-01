@@ -4353,6 +4353,7 @@ export function runStoreContractSuite<
         tenant_id: tenant,
         query: 'ferry',
         created_by_subject_id: createdBy,
+        persona_ids: [],
         exclude_session_id: null,
         from: null,
         to: null,
@@ -4388,6 +4389,7 @@ export function runStoreContractSuite<
         tenant_id: tenant,
         session_id: sessionId,
         turn_id: 'turn-1',
+        persona_id: null,
         documents: [
           { message_id: 'm1', role: 'user', text: 'We decided to book the ferry on Friday.', created_at: docAt('01') },
           {
@@ -4415,6 +4417,7 @@ export function runStoreContractSuite<
         tenant_id: tenant,
         session_id: sessionId,
         turn_id: 'turn-1',
+        persona_id: null,
         documents: [
           { message_id: 'm1', role: 'user', text: 'We decided to book the ferry on Friday.', created_at: docAt('01') },
         ],
@@ -4432,6 +4435,7 @@ export function runStoreContractSuite<
         tenant_id: tenant,
         session_id: 'other-person-session',
         turn_id: 'turn-1',
+        persona_id: null,
         documents: [
           { message_id: 'm1', role: 'user', text: 'We decided to book the ferry on Friday.', created_at: docAt('01') },
         ],
@@ -4440,6 +4444,7 @@ export function runStoreContractSuite<
         tenant_id: 'other-tenant',
         session_id: sessionId,
         turn_id: 'turn-1',
+        persona_id: null,
         documents: [
           { message_id: 'm1', role: 'user', text: 'We decided to book the ferry on Friday.', created_at: docAt('01') },
         ],
@@ -4455,6 +4460,7 @@ export function runStoreContractSuite<
         tenant_id: tenant,
         session_id: sessionId,
         turn_id: 'turn-1',
+        persona_id: null,
         documents: [
           { message_id: 'm1', role: 'user', text: 'We decided to book the ferry on Friday.', created_at: docAt('01') },
         ],
@@ -4470,6 +4476,7 @@ export function runStoreContractSuite<
         tenant_id: tenant,
         session_id: sessionId,
         turn_id: 'turn-1',
+        persona_id: null,
         documents: [
           { message_id: 'm1', role: 'user', text: 'We decided to book the ferry on Friday.', created_at: docAt('01') },
         ],
@@ -4488,6 +4495,7 @@ export function runStoreContractSuite<
           tenant_id: tenant,
           session_id: sessionId,
           turn_id: 'turn-1',
+          persona_id: null,
           documents: [{ message_id: 'm1', role: 'user', text, created_at: docAt('01') }],
         });
       await indexTurn('We decided to book the ferry on Friday.');
@@ -4506,6 +4514,7 @@ export function runStoreContractSuite<
         tenant_id: tenant,
         session_id: sessionId,
         turn_id: 'turn-1',
+        persona_id: null,
         documents: [
           {
             message_id: 'user',
@@ -4525,6 +4534,7 @@ export function runStoreContractSuite<
         tenant_id: tenant,
         session_id: sessionId,
         turn_id: 'turn-2',
+        persona_id: null,
         documents: [
           { message_id: 'user', role: 'user', text: 'Now we need a hotel near the harbor.', created_at: docAt('02') },
           {
@@ -4552,6 +4562,7 @@ export function runStoreContractSuite<
         tenant_id: tenant,
         session_id: sessionId,
         turn_id: 'turn-1',
+        persona_id: null,
         documents: [{ message_id: 'm1', role: 'user', text: longText, created_at: docAt('01') }],
       });
 
@@ -4568,6 +4579,7 @@ export function runStoreContractSuite<
         tenant_id: tenant,
         session_id: sessionId,
         turn_id: 'turn-1',
+        persona_id: null,
         documents: [
           { message_id: 'm1', role: 'user', text: 'We decided to book the ferry on Friday.', created_at: docAt('01') },
         ],
@@ -4586,12 +4598,140 @@ export function runStoreContractSuite<
         tenant_id: tenant,
         session_id: missingSessionId,
         turn_id: 'turn-1',
+        persona_id: null,
         documents: [
           { message_id: 'm1', role: 'user', text: 'We decided to book the ferry on Friday.', created_at: docAt('01') },
         ],
       });
 
       await expect(store.searchChatHistory(searchInput())).resolves.toEqual([]);
+    });
+
+    async function indexOne(
+      store: Store,
+      input: { session: string; turn: string; text: string; at: Date; persona?: string | null; message?: string },
+    ) {
+      await store.indexChatMessages({
+        tenant_id: tenant,
+        session_id: input.session,
+        turn_id: input.turn,
+        persona_id: input.persona ?? null,
+        documents: [{ message_id: input.message ?? 'user', role: 'user', text: input.text, created_at: input.at }],
+      });
+    }
+
+    it('only returns messages from personas the search allows; messages with no persona always count', async () => {
+      const store = createStore();
+      await seedSession(store);
+      await indexOne(store, {
+        session: sessionId,
+        turn: 'turn-home',
+        text: 'Home ferry note',
+        at: docAt('01'),
+        persona: 'home',
+      });
+      await indexOne(store, {
+        session: sessionId,
+        turn: 'turn-work',
+        text: 'Work ferry note',
+        at: docAt('02'),
+        persona: 'work',
+      });
+      await indexOne(store, {
+        session: sessionId,
+        turn: 'turn-main',
+        text: 'Shared ferry note',
+        at: docAt('03'),
+        persona: null,
+      });
+
+      const sharedOnly = await store.searchChatHistory(searchInput({ query: 'ferry note home' }));
+      expect(sharedOnly).toEqual([]);
+      const asHome = await store.searchChatHistory(searchInput({ query: 'home ferry', persona_ids: ['home'] }));
+      expect(asHome.map(hit => hit.snippet)).toEqual(['Home ferry note']);
+      await expect(
+        store.searchChatHistory(searchInput({ query: 'work ferry', persona_ids: ['home'] })),
+      ).resolves.toEqual([]);
+      const mainOnly = await store.searchChatHistory(searchInput({ query: 'ferry' }));
+      expect(mainOnly.map(hit => hit.snippet)).toEqual(['Shared ferry note']);
+    });
+
+    it('ignores filler words in the query and in the messages', async () => {
+      const store = createStore();
+      await seedSession(store);
+      await indexOne(store, { session: sessionId, turn: 'turn-1', text: 'Booked a ferry for Friday', at: docAt('01') });
+
+      await expect(store.searchChatHistory(searchInput({ query: 'the ferry' }))).resolves.toHaveLength(1);
+      await expect(store.searchChatHistory(searchInput({ query: 'what was the ferry about' }))).resolves.toHaveLength(
+        1,
+      );
+      await expect(store.searchChatHistory(searchInput({ query: 'the and of' }))).resolves.toEqual([]);
+    });
+
+    it('matches plural and -ing / -ed forms of a word, never a longer word that starts with it', async () => {
+      const store = createStore();
+      await seedSession(store);
+      await seedSecondSession(store, 'tripod-session', createdBy);
+      await indexOne(store, { session: sessionId, turn: 'turn-1', text: 'We planned two trips', at: docAt('01') });
+      await indexOne(store, {
+        session: 'tripod-session',
+        turn: 'turn-1',
+        text: 'Bring the camera tripod',
+        at: docAt('02'),
+      });
+
+      const tripHits = await store.searchChatHistory(searchInput({ query: 'trip planning' }));
+      expect(tripHits.map(hit => hit.session_id)).toEqual([sessionId]);
+      const planHits = await store.searchChatHistory(searchInput({ query: 'plans' }));
+      expect(planHits.map(hit => hit.session_id)).toEqual([sessionId]);
+      await expect(store.searchChatHistory(searchInput({ query: 'tri' }))).resolves.toEqual([]);
+    });
+
+    it('needs every query word in one message, not spread across a chat', async () => {
+      const store = createStore();
+      await seedSession(store);
+      await indexOne(store, { session: sessionId, turn: 'turn-1', text: 'The ferry was late', at: docAt('01') });
+      await indexOne(store, { session: sessionId, turn: 'turn-2', text: 'The hotel was lovely', at: docAt('02') });
+
+      await expect(store.searchChatHistory(searchInput({ query: 'ferry hotel' }))).resolves.toEqual([]);
+    });
+
+    it('shows each chat once with its newest match, newest chats first, and stops at the limit', async () => {
+      const store = createStore();
+      await seedSession(store);
+      await seedSecondSession(store, 'session-b', createdBy);
+      await seedSecondSession(store, 'session-c', createdBy);
+      await indexOne(store, { session: sessionId, turn: 'turn-1', text: 'Old ferry plan', at: docAt('01') });
+      await indexOne(store, { session: sessionId, turn: 'turn-2', text: 'New ferry plan', at: docAt('05') });
+      await indexOne(store, { session: 'session-b', turn: 'turn-1', text: 'Ferry in the middle', at: docAt('03') });
+      await indexOne(store, { session: 'session-c', turn: 'turn-1', text: 'Ferry tie a', at: docAt('03') });
+
+      const hits = await store.searchChatHistory(searchInput());
+      expect(hits.map(hit => [hit.session_id, hit.snippet])).toEqual([
+        [sessionId, 'New ferry plan'],
+        ['session-b', 'Ferry in the middle'],
+        ['session-c', 'Ferry tie a'],
+      ]);
+      const limited = await store.searchChatHistory(searchInput({ limit: 2 }));
+      expect(limited.map(hit => hit.session_id)).toEqual([sessionId, 'session-b']);
+    });
+
+    it("clears the index of one person's chats and leaves everyone else's", async () => {
+      const store = createStore();
+      await seedSession(store);
+      await seedSecondSession(store, 'other-person-session', 'user-2');
+      await indexOne(store, { session: sessionId, turn: 'turn-1', text: 'Ferry for me', at: docAt('01') });
+      await indexOne(store, {
+        session: 'other-person-session',
+        turn: 'turn-1',
+        text: 'Ferry for them',
+        at: docAt('01'),
+      });
+
+      await store.clearChatSearchIndex({ tenant_id: tenant, created_by_subject_id: createdBy });
+
+      await expect(store.searchChatHistory(searchInput())).resolves.toEqual([]);
+      await expect(store.searchChatHistory(searchInput({ created_by_subject_id: 'user-2' }))).resolves.toHaveLength(1);
     });
   });
 

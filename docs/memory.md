@@ -18,6 +18,14 @@ Memory is on by default. Amanuensis recalls from local Markdown files before eve
 
 Memories are scoped by persona. While a persona is active, what it learns is kept in that persona's own vault and is private to it until you share the vault. With no persona active, memories go to the shared vault, which every persona can read. A persona recalls from its own vault, the shared vault, and any vault shared with it. Renaming or deleting a persona never deletes its vault.
 
+## Searching past chats
+
+Aman can also look through your earlier chats when you ask, for example "what did we decide about the trip?". This is off until you turn on past-chat search in Settings. While it is off, nothing from your chats is added to the search. When you turn it on, Aman adds your earlier chats in the background, then adds each new chat as it finishes. When you turn it off, everything it added is removed.
+
+The search follows the same rule as memory. A persona finds its own chats, chats with the main assistant, and chats of personas whose vault is shared with it. A chat with a persona whose vault is not shared stays out of the search.
+
+A message matches when it contains every word you searched for, as a whole word. Small filler words such as "the" are ignored, and "trip", "trips" and "tripped" count as the same word.
+
 Manage it in **Settings → Memory**: see what's stored, turn recall on or off (the rail toggle does the same), and check the memory status. Recall is bounded, so a large memory can't blow up the model's context window, and every recall is auditable.
 
 Prefer a hosted memory bank? Set `MEMORY_BACKEND=hindsight` to use a self-hosted [Hindsight](../ops/memory/RUNBOOK.md) instance instead — currently experimental. Point Amanuensis at your bank's MCP endpoint (`{apiBase}/mcp/{bank}`) with a `Bearer` API key in **Settings → Memory**. Memory calls Hindsight's REST API directly for recall and retain, so use a key valid on both surfaces; see [the runbook's two-surfaces note](../ops/memory/RUNBOOK.md#two-surfaces-one-connector) if recall stops working after a key rotation.

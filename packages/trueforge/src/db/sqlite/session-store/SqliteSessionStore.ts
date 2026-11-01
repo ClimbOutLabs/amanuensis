@@ -15,6 +15,7 @@ import type {
   BeginImplementationPlanDispatchInput,
   BeginImplementationPlanDispatchResult,
   ChatSearchHit,
+  ClearChatSearchIndexInput,
   CommandExecutionRecord,
   CompleteImplementationPlanDispatchInput,
   CreateSessionFolderInput,
@@ -74,6 +75,7 @@ import {
 } from './queries/approvalDismissals';
 import { patchThreadCapabilityState as patchThreadCapabilityStateQuery } from './queries/capabilities';
 import {
+  clearChatSearchIndex as clearChatSearchIndexQuery,
   indexChatMessages as indexChatMessagesQuery,
   searchChatHistory as searchChatHistoryQuery,
 } from './queries/chatSearch';
@@ -257,6 +259,10 @@ export class SqliteSessionStore implements ISessionStore<SessionCustom, TurnCust
 
   searchChatHistory(input: SearchChatHistoryInput): Promise<ChatSearchHit[]> {
     return searchChatHistoryQuery(this.db, input);
+  }
+
+  clearChatSearchIndex(input: ClearChatSearchIndexInput): Promise<void> {
+    return clearChatSearchIndexQuery(this.db, input);
   }
 
   setSessionFolder(input: SetSessionFolderInput): Promise<void> {

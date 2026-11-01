@@ -170,11 +170,7 @@ describe('download_attachment follows the chat sandbox', () => {
         budget: uncappedTokenFactoryBudget,
         authority: { tenantId: OWNER.tenant_id, userRef: OWNER.created_by },
       },
-      {
-        sessionStore: new SqliteSessionStore(env.db),
-        authority: { tenantId: OWNER.tenant_id, userRef: OWNER.created_by },
-        enabled: false,
-      },
+      undefined,
     );
   }
 

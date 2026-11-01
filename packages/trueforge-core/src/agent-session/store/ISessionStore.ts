@@ -459,16 +459,23 @@ export interface IndexChatMessagesInput {
   tenant_id: string;
   session_id: string;
   turn_id: string;
+  /** The persona the turn ran under, or `null` for the main assistant. Search scopes by it. */
+  persona_id: string | null;
   /** The turn's complete document set; the rows stored for the turn are replaced by it. */
   documents: readonly ChatSearchDocument[];
 }
 
 export interface SearchChatHistoryInput {
   tenant_id: string;
-  /** Free text; a chat matches when every query word appears in one of its indexed messages. */
+  /** Free text; a chat matches when one of its indexed messages holds every query word (see chatSearchText). */
   query: string;
   /** Only chats this subject created are searched. */
   created_by_subject_id: string;
+  /**
+   * The personas whose messages may be returned. Messages written with no persona are always
+   * searchable; a message written under a persona only when that persona's id is listed.
+   */
+  persona_ids: readonly string[];
   /** The chat the search runs from; never among the hits. `null` excludes nothing. */
   exclude_session_id: string | null;
   /** Inclusive lower bound on the matched message's time; `null` is unbounded. */
@@ -477,6 +484,12 @@ export interface SearchChatHistoryInput {
   to: Date | null;
   /** Most hits to return; at most one hit per chat. */
   limit: number;
+}
+
+export interface ClearChatSearchIndexInput {
+  tenant_id: string;
+  /** Every indexed message of the chats this subject created is removed. */
+  created_by_subject_id: string;
 }
 
 export interface ChatSearchHit {
@@ -531,11 +544,15 @@ export interface ISessionStore<
   indexChatMessages(input: IndexChatMessagesInput): Promise<void>;
 
   /**
-   * Full-text search over the indexed words of the chats `created_by_subject_id` created in
-   * the tenant: at most one hit per chat (its best-matching message), best matches first.
-   * `from` / `to` bound the matched message's time. A query with no words matches nothing.
+   * Word search over the indexed messages of the chats `created_by_subject_id` created in the
+   * tenant, limited to the personas `persona_ids` allows. At most one hit per chat, its newest
+   * matching message; chats with the newest match come first, ties by session id. `from` / `to`
+   * bound the matched message's time. A query with no searchable words matches nothing.
    */
   searchChatHistory(input: SearchChatHistoryInput): Promise<ChatSearchHit[]>;
+
+  /** Removes every indexed message of the chats the subject created in the tenant. */
+  clearChatSearchIndex(input: ClearChatSearchIndexInput): Promise<void>;
 
   /** Lists active grants for the owner-scoped session and its current repository binding, including between turns. */
   listImplementationPlanGrants(input: ListImplementationPlanGrantsInput): Promise<ImplementationPlanGrant[]>;

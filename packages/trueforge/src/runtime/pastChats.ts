@@ -6,7 +6,15 @@
  */
 import type { ChatSearchHit, ISessionStore } from '@truefoundry/trueforge-core/agent-session/store/ISessionStore';
 import { z } from 'zod';
+import type { IPersonaStore } from '../db/personaStore';
 import type { SessionCustom, TurnCustom } from '../db/sessionCustom';
+import {
+  personaVaultNamespace,
+  sanitizeNamespace,
+  vaultFilesystemNamespace,
+  vaultReadNamespaces,
+  type VaultScope,
+} from './memory/markdownMemoryFiles';
 
 const CALENDAR_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 const DAY_MS = 86_400_000;
@@ -56,16 +64,44 @@ function utcDayStart(value: string): Date | null {
 }
 
 /**
- * Searches the person's own earlier chats for the query words. The store already limits
- * hits to the person's chats in this tenant and leaves the current chat out; each hit is
- * still re-checked against its chat record here, so a hit whose chat cannot be shown to
- * belong to the person is dropped.
+ * The personas whose chats the answering persona may search, by the memory recall rule: its
+ * own, and any whose vault is shared with it. Chats with the main assistant are always
+ * searchable, the way the shared vault is always recalled, so they need no id here.
+ */
+export async function searchablePersonaIds(deps: {
+  memoryDir: string;
+  tenantId: string;
+  userRef: string;
+  scope: VaultScope | undefined;
+  personaStore: Pick<IPersonaStore, 'listPersonas'>;
+}): Promise<string[]> {
+  const tenantNamespace = sanitizeNamespace(deps.tenantId);
+  const readable = new Set(
+    (await vaultReadNamespaces({ baseDir: deps.memoryDir, tenantNamespace, scope: deps.scope })).map(sanitizeNamespace),
+  );
+  const personas = await deps.personaStore.listPersonas({ tenant_id: deps.tenantId, created_by: deps.userRef });
+  const ids = personas
+    .filter(persona =>
+      readable.has(
+        sanitizeNamespace(vaultFilesystemNamespace(tenantNamespace, personaVaultNamespace(persona.display_name))),
+      ),
+    )
+    .map(persona => persona.id);
+  return deps.scope === undefined || ids.includes(deps.scope.personaId) ? ids : [...ids, deps.scope.personaId];
+}
+
+/**
+ * Searches the person's own earlier chats for the query words, in the chats `personaIds`
+ * allows plus those with the main assistant. The store already limits hits to the person's
+ * chats in this tenant and leaves the current chat out; each hit is still re-checked against
+ * its chat record here, so a hit whose chat cannot be shown to belong to the person is dropped.
  */
 export async function searchPastChats(deps: {
   sessionStore: PastChatsSessionReader;
   tenantId: string;
   userRef: string;
   currentSessionId: string;
+  personaIds: readonly string[];
   input: SearchPastChatsInput;
 }): Promise<ChatSearchHit[]> {
   const from = deps.input.from_date === undefined ? null : utcDayStart(deps.input.from_date);
@@ -82,6 +118,7 @@ export async function searchPastChats(deps: {
     query: deps.input.query,
     created_by_subject_id: deps.userRef,
     exclude_session_id: deps.currentSessionId,
+    persona_ids: deps.personaIds,
     from,
     to,
     limit: PAST_CHATS_HIT_LIMIT,

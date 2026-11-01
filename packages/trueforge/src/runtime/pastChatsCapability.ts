@@ -1,7 +1,8 @@
 /**
  * The `search_past_chats` built-in: a read-only tool that searches the person's own earlier
- * chats when they ask, across all their personas. It is only offered while the person has
- * the past-chat search switch on in Settings; the resolver leaves it out otherwise.
+ * chats when they ask. A persona sees the chats its memory may recall from: its own, the main
+ * assistant's, and those of personas that share their memory with it. It is only offered while
+ * the person has the past-chat search switch on in Settings; the resolver leaves it out otherwise.
  */
 import {
   defineTool,
@@ -13,10 +14,13 @@ import {
   type ToolDefinition,
 } from '@truefoundry/trueforge-core/core';
 import type { ToolBundleName } from '@truefoundry/trueforge-core/core/runtime/toolBundleCatalog';
+import type { IPersonaStore } from '../db/personaStore';
+import type { VaultScope } from './memory/markdownMemoryFiles';
 import {
   PastChatsDateError,
   renderPastChatsText,
   SEARCH_PAST_CHATS_INPUT_SCHEMA,
+  searchablePersonaIds,
   searchPastChats,
   type PastChatsSessionReader,
   type SearchPastChatsInput,
@@ -26,17 +30,24 @@ export const PAST_CHATS_SERVER_ID = 'past_chats';
 export const SEARCH_PAST_CHATS_TOOL_NAME = 'search_past_chats';
 
 const SEARCH_PAST_CHATS_DESCRIPTION =
-  "Search the signed-in person's own earlier chats for the words in the query, across all of their chats and personas, and return up to 8 matches with each chat's title, date, a short snippet and its chat id. Use it when the person asks what was decided, said or planned in an earlier chat. The chat happening now is never included. Dates are optional: from_date and to_date narrow the search to messages sent in that range.";
+  "Search the signed-in person's own earlier chats for the words in the query, in the chats this assistant may remember (its own, the main assistant's, and those shared with it), and return up to 8 matches with each chat's title, date, a short snippet and its chat id. Use it when the person asks what was decided, said or planned in an earlier chat. The chat happening now is never included. Dates are optional: from_date and to_date narrow the search to messages sent in that range.";
 
-export interface PastChatsTurnContext {
+/** What decides which earlier chats a turn may search. */
+export interface PastChatsReaders {
   sessionStore: PastChatsSessionReader;
-  authority: { tenantId: string; userRef: string };
-  /** The person's past-chat search switch for this turn. Off leaves the tool out entirely. */
-  enabled: boolean;
+  personaStore: Pick<IPersonaStore, 'listPersonas'>;
+  /** Where the memory sharing settings live; they decide which personas' chats are shared. */
+  memoryDir: string;
+  /** The persona answering the turn; absent for the main assistant. */
+  scope: VaultScope | undefined;
 }
 
-export interface PastChatsCapabilityOptions {
-  sessionStore: PastChatsSessionReader;
+/** Present only while the person has the past-chat search switch on; absent leaves the tool out entirely. */
+export interface PastChatsTurnContext extends PastChatsReaders {
+  authority: { tenantId: string; userRef: string };
+}
+
+export interface PastChatsCapabilityOptions extends PastChatsReaders {
   authority: { tenantId: string; userRef: string; currentSessionId: string };
   tracing: AgentTracing;
 }
@@ -65,13 +76,21 @@ class PastChatsTool extends LocalToolMCP {
   }
 
   private async search(input: SearchPastChatsInput): Promise<CallToolResponse> {
-    const { sessionStore, authority } = this.options;
+    const { sessionStore, personaStore, memoryDir, scope, authority } = this.options;
     try {
+      const personaIds = await searchablePersonaIds({
+        memoryDir,
+        tenantId: authority.tenantId,
+        userRef: authority.userRef,
+        scope,
+        personaStore,
+      });
       const hits = await searchPastChats({
         sessionStore,
         tenantId: authority.tenantId,
         userRef: authority.userRef,
         currentSessionId: authority.currentSessionId,
+        personaIds,
         input,
       });
       return toolResultResponse({ text: renderPastChatsText(hits) });

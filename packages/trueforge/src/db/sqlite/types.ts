@@ -271,12 +271,18 @@ export interface ApprovalDismissalTable {
  * `body` is a virtual table and is not part of the Kysely schema.
  */
 export interface ChatSearchDocumentTable {
+  /** Stable row id the FTS5 table points at; VACUUM never renumbers an INTEGER PRIMARY KEY. */
+  doc_id: Generated<number>;
   tenant_id: string;
   session_id: string;
   turn_id: string;
   message_id: string;
   role: string;
+  /** The persona the turn ran under; null for the main assistant. */
+  persona_id: string | null;
   body: string;
+  /** The message's searchable words, space-separated, built by the shared matching rule. */
+  search_words: string;
   created_at: string;
 }
 

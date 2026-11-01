@@ -113,6 +113,7 @@ import { OPENAPI_DOCUMENT_TAGS } from './routes/openapiTags';
 import type { ActiveTurnRegistry } from './runtime/activeTurns';
 import type { ChatImageService } from './runtime/chatImages/chatImageService';
 import { createChatPictureService } from './runtime/chatPictures/chatPictureService';
+import type { ChatSearchIndexer } from './runtime/chatSearchIndexing';
 import { resolveDefaultChatModel } from './runtime/defaultChatModel';
 import type { EventSubscriptionRegistry } from './runtime/event-subscription';
 import { resolveSandboxProvider } from './runtime/sessionResources';
@@ -294,6 +295,8 @@ export interface ServerDeps<TTransaction> {
   sessionMetricsStore: ISessionMetricsStore;
   sentinelAuditStore: ISentinelAuditStore;
   sentinelSettingsStore: ISentinelSettingsStore<TTransaction>;
+  /** Keeps the past-chat search index for people who turned the search on. */
+  chatSearchIndexer: ChatSearchIndexer;
   briefItemStore: IBriefItemCompletionStore;
   turnArtifactStore: ITurnArtifactStore<TTransaction>;
   /** Not tenant-scoped: the persisted live tool-output screen override is global. */
@@ -501,6 +504,7 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
     sandboxProviderResolver: deps.sandboxProviderResolver,
     globalSettingsStore: deps.globalSettingsStore,
     tokenFactoryBudget: deps.tokenFactoryBudget,
+    chatSearchIndexer: deps.chatSearchIndexer,
     audit: deps.sentinelAuditStore,
   };
 
@@ -752,6 +756,7 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
       globalSettingsStore: deps.globalSettingsStore,
       sentinelAuditStore: deps.sentinelAuditStore,
       turnArtifactStore: deps.turnArtifactStore,
+      chatSearchIndexer: deps.chatSearchIndexer,
       tokenStore: deps.tokenStore,
       resolveMcpServerStore: deps.resolveMcpServerStore,
       resolveAgentStore: deps.resolveAgentStore,
@@ -871,6 +876,7 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
     withAuth(
       createSentinelSettingsRouter({
         sentinelSettingsStore: deps.sentinelSettingsStore,
+        chatSearchIndexer: deps.chatSearchIndexer,
         resolveRequestContext,
       }),
       authMiddleware,
@@ -1175,6 +1181,7 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
         turnArtifactStore: deps.turnArtifactStore,
         globalSettingsStore: deps.globalSettingsStore,
         sentinelSettingsStore: deps.sentinelSettingsStore,
+        chatSearchIndexer: deps.chatSearchIndexer,
         tokenFactoryBudget: deps.tokenFactoryBudget,
         eventSubscriptions: deps.eventSubscriptions,
         resolveSandboxProviderStore: deps.resolveSandboxProviderStore,
