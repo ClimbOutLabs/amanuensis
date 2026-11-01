@@ -70,6 +70,11 @@ export async function searchChatHistory(db: Kysely<Database>, input: SearchChatH
   if (terms.length === 0 || input.limit <= 0) {
     return [];
   }
+  // Optional filters are left out of the query rather than written as "$n IS NULL OR ...":
+  // Postgres cannot infer a type for a parameter that is only ever compared with NULL.
+  const exclusion = input.exclude_session_id === null ? sql`` : sql`AND d.session_id != ${input.exclude_session_id}`;
+  const fromBound = input.from === null ? sql`` : sql`AND d.created_at >= ${input.from}`;
+  const toBound = input.to === null ? sql`` : sql`AND d.created_at < ${input.to}`;
   const rows = await sql<ChatSearchRow>`
     SELECT
       d.session_id AS session_id,
@@ -84,9 +89,9 @@ export async function searchChatHistory(db: Kysely<Database>, input: SearchChatH
     WHERE d.search_vector @@ q.query
       AND d.tenant_id = ${input.tenant_id}
       AND s.created_by_subject->>'subject_id' = ${input.created_by_subject_id}
-      AND (${input.exclude_session_id} IS NULL OR d.session_id != ${input.exclude_session_id})
-      AND (${input.from} IS NULL OR d.created_at >= ${input.from})
-      AND (${input.to} IS NULL OR d.created_at < ${input.to})
+      ${exclusion}
+      ${fromBound}
+      ${toBound}
     ORDER BY rank DESC, d.created_at DESC
   `.execute(db);
 
