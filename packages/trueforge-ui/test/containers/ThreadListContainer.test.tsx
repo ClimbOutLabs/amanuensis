@@ -857,6 +857,45 @@ describe('ThreadListContainer', () => {
     expect(screen.queryByText(/session_folder_not_found/)).not.toBeInTheDocument();
   });
 
+  it('shows a plain sentence, not the server reply, and keeps the chat put when a move fails', async () => {
+    const chatFolders: ChatFolderStore = {
+      load: async () => ({
+        folders: [{ id: 'folder-work', name: 'Work' }],
+        assignments: [],
+        folderSessions: [{ folderId: 'folder-work', sessions: [] }],
+        unfiledSessions: [],
+      }),
+      createFolder: async ({ name }) => ({ id: 'folder-new', name }),
+      renameFolder: async ({ folderId, name }) => ({ id: folderId, name }),
+      deleteFolder: async () => {},
+      setSessionFolder: async () => {
+        throw new Error('{"error":{"code":"session_folder_not_found"}}');
+      },
+    };
+
+    renderThreadList({
+      adapter: {
+        threadId: 'thread-1',
+        threads: [{ status: 'regular', id: 'thread-1', remoteId: 'session-1', title: 'Unfiled chat' }],
+      },
+      chatFolders,
+    });
+
+    await screen.findByRole('region', { name: 'Work' });
+    const row = screen.getByTestId('thread-row-Unfiled chat');
+    const actionButton = row.querySelector<HTMLButtonElement>('[aria-label="Session actions"]');
+    if (actionButton === null) throw new Error('Expected session actions button');
+    fireEvent.click(actionButton);
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Move to folder' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Work' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Could not move the chat. The folder may no longer exist. Refresh the page and try again.',
+    );
+    expect(screen.queryByText(/session_folder_not_found/)).not.toBeInTheDocument();
+    expect(within(screen.getByRole('region', { name: 'Work' })).queryByTestId('thread-row-Unfiled chat')).toBeNull();
+  });
+
   it('shows every chat in a folder even when the recent list only has the first page', async () => {
     const folderSessions = Array.from({ length: 35 }, (_, index) => {
       const number = index + 1;
