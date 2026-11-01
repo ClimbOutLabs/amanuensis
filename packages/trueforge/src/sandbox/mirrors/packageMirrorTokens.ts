@@ -5,7 +5,8 @@ import { randomBytes } from 'node:crypto';
  * repository when the chat works on one. A grant for a chat without a project has no repository:
  * its scope is the person's own download allowance for such chats.
  * Grants live in memory only. A server restart ends every grant, and the next command in the chat
- * is issued a fresh one, so nothing durable depends on them.
+ * is issued a fresh one, so nothing durable depends on them. The gateway also checks each grant
+ * against the shared database, so a change made through another server ends it too.
  */
 export interface PackageMirrorGrant {
   token: string;
@@ -100,7 +101,12 @@ export class PackageMirrorTokenRegistry {
     }
   }
 
-  /** Takes back every grant of one chat, for example when the chat is deleted. */
+  /** Takes back one grant, used when the shared database says its allowance no longer holds. */
+  revoke(token: string): void {
+    this.#drop(token);
+  }
+
+  /** Takes back every grant of one chat, used when the chat is deleted. */
   revokeSession(session_id: string): void {
     for (const grant of [...this.#grants.values()]) {
       if (grant.session_id === session_id) {

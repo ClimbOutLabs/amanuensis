@@ -3,6 +3,7 @@ import { createServer, request as httpRequest, type Server } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createLogger, transports } from 'winston';
+import type { PackageMirrorAllowanceCheck } from '../../../../src/sandbox/mirrors/packageMirrorAllowance';
 import {
   PackageMirrorGateway,
   isPublicAddress,
@@ -66,7 +67,11 @@ interface Harness {
   close: () => Promise<void>;
 }
 
-async function setup(options?: { maxDownloadBytes?: number; maxCacheBytes?: number }): Promise<Harness> {
+async function setup(options?: {
+  maxDownloadBytes?: number;
+  maxCacheBytes?: number;
+  allowanceHolds?: PackageMirrorAllowanceCheck;
+}): Promise<Harness> {
   const upstreamHits: string[] = [];
   const otherHits: string[] = [];
   let upstreamPort = 0;
@@ -182,6 +187,7 @@ async function setup(options?: { maxDownloadBytes?: number; maxCacheBytes?: numb
   const cacheDir = mkdtempSync(join(tmpdir(), 'aman-mirror-test-'));
   const gateway = new PackageMirrorGateway({
     registry,
+    allowanceHolds: options?.allowanceHolds ?? (() => Promise.resolve(true)),
     cacheDir,
     logger: silentLogger,
     upstreamBases: {
@@ -273,6 +279,19 @@ describe('PackageMirrorGateway', () => {
       expect(
         (await call(harness.port, { path: '/npm/leftpad', token: 'ffffffffffffffffffffffffffffffff' })).status,
       ).toBe(403);
+      expect(harness.upstreamHits).toEqual([]);
+    } finally {
+      await harness.close();
+    }
+  });
+
+  it('stops a grant whose allowance no longer holds in the shared database, and takes it back', async () => {
+    const harness = await setup({ allowanceHolds: () => Promise.resolve(false) });
+    try {
+      const refused = await call(harness.port, { path: '/npm/leftpad', token: harness.token });
+      expect(refused.status).toBe(403);
+      expect(refused.body).toContain('Package downloads were turned off for this chat');
+      expect(harness.registry.resolve(harness.token)).toBeUndefined();
       expect(harness.upstreamHits).toEqual([]);
     } finally {
       await harness.close();
@@ -543,6 +562,7 @@ describe('PackageMirrorGateway sockets', () => {
     const socketPath = join(dir, 'mirror.sock');
     const gateway = new PackageMirrorGateway({
       registry: new PackageMirrorTokenRegistry(),
+      allowanceHolds: () => Promise.resolve(true),
       cacheDir: join(dir, 'cache'),
       logger: silentLogger,
     });

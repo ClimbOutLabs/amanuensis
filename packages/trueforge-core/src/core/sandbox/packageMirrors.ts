@@ -25,14 +25,14 @@ export const PACKAGE_MANIFEST_FILES = [
   'Cargo.toml',
 ] as const;
 
-/** Shell words that end one command and start another. */
-const SEGMENT_BREAKS = new Set(['&&', '||', ';', '|', '&', '\n']);
+/** Shell characters that end one command and start another, subshell and substitution edges included. */
+const SEGMENT_BREAKS = new Set(['&&', '||', ';', '|', '&', '\n', '(', ')', '`']);
 
 /**
  * Splits a shell command into simple commands as word lists. Deliberately small: quotes are honoured,
- * everything else (subshells, substitutions) stays inside its segment as words. The callers only use
- * this to recognise package tool invocations, and a miss fails safe: the command runs with no mirror
- * grant attached, exactly as it did before mirrors existed.
+ * and subshells and command substitutions start commands of their own. The callers only use this to
+ * recognise package tool invocations, and a miss fails safe: the command runs with no mirror grant
+ * attached, exactly as it did before mirrors existed.
  */
 export function splitShellCommands(command: string): string[][] {
   const segments: string[][] = [];
@@ -100,63 +100,175 @@ export function splitShellCommands(command: string): string[][] {
   return segments;
 }
 
-/** Leading words that do not change which program runs: env assignments, sudo, env, npx-style runners. */
-function programWords(words: string[]): string[] {
+/** Shell keywords and grouping words that can stand before a command without changing it. */
+const LEADING_KEYWORDS = new Set([
+  '{',
+  '!',
+  'if',
+  'then',
+  'else',
+  'elif',
+  'do',
+  'while',
+  'until',
+  'exec',
+  'builtin',
+  'command',
+  'nohup',
+]);
+
+/** Wrappers that run the command after them, with the flags of theirs that take a value. */
+const WRAPPER_VALUE_FLAGS: Readonly<Record<string, ReadonlySet<string>>> = {
+  sudo: new Set(['-u', '-g', '-C', '-D', '-h', '-p', '-r', '-t', '-U']),
+  env: new Set(['-u', '-C', '-S', '--unset', '--chdir']),
+  time: new Set(['-f', '-o', '--format', '--output']),
+  nice: new Set(['-n', '--adjustment']),
+  ionice: new Set(['-c', '-n', '-p']),
+  stdbuf: new Set(['-i', '-o', '-e']),
+  timeout: new Set(['-s', '-k', '--signal', '--kill-after']),
+  xargs: new Set([
+    '-I',
+    '-i',
+    '-n',
+    '-P',
+    '-L',
+    '-l',
+    '-d',
+    '-a',
+    '-E',
+    '-e',
+    '-s',
+    '--max-args',
+    '--max-procs',
+    '--delimiter',
+    '--arg-file',
+    '--replace',
+  ]),
+};
+
+/**
+ * The words that name the program and its arguments, after anything that only wraps it: env
+ * assignments, shell keywords, and wrappers such as sudo, env, time, nice, timeout and xargs with
+ * their own flags. timeout's duration is its first plain word, so it is passed over too.
+ */
+function programWords(words: readonly string[]): string[] {
   let index = 0;
   for (;;) {
     const word = words[index];
     if (word === undefined) {
       return [];
     }
-    if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(word) || word === 'sudo' || word === 'env') {
+    if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(word) || LEADING_KEYWORDS.has(word)) {
       index += 1;
       continue;
     }
-    return words.slice(index);
+    const valueFlags = Object.hasOwn(WRAPPER_VALUE_FLAGS, word) ? WRAPPER_VALUE_FLAGS[word] : undefined;
+    if (valueFlags === undefined) {
+      return words.slice(index);
+    }
+    index += 1;
+    for (;;) {
+      const flag = words[index];
+      if (!flag?.startsWith('-')) {
+        break;
+      }
+      index += !flag.includes('=') && valueFlags.has(flag) ? 2 : 1;
+    }
+    if (word === 'timeout' && words[index] !== undefined) {
+      index += 1;
+    }
   }
 }
 
-const PIP_PROGRAMS = new Set(['pip', 'pip3']);
-const NPM_PROGRAMS = new Set(['npm', 'pnpm', 'yarn']);
-
-/** The package family one simple command downloads from, named by its mirror. */
-type PackageDownloadEcosystem = 'pypi' | 'npm' | 'go' | 'cargo';
+/** The package family one simple command downloads from, named by its mirror; `any` when the tool is not known. */
+type PackageDownloadEcosystem = 'pypi' | 'npm' | 'go' | 'cargo' | 'any';
 
 /** How each package site is named in words a person reads. */
-const PACKAGE_SITE_NAMES: Record<PackageDownloadEcosystem, string> = {
+const PACKAGE_SITE_NAMES: Record<Exclude<PackageDownloadEcosystem, 'any'>, string> = {
   pypi: 'PyPI',
   npm: 'npm',
   go: 'the Go package site',
   cargo: 'crates.io',
 };
 
+/** The sites a command of one family can download from: every site when the tool is not known. */
+function siteNamesFor(ecosystem: PackageDownloadEcosystem): string[] {
+  return ecosystem === 'any' ? Object.values(PACKAGE_SITE_NAMES) : [PACKAGE_SITE_NAMES[ecosystem]];
+}
+
+/** pip, pip3 and pinned spellings such as pip3.12. */
+const PIP_PROGRAM = /^pip(?:\d+(?:\.\d+)?)?$/;
+/** python, python3 and pinned spellings such as python3.12. */
+const PYTHON_PROGRAM = /^python(?:\d+(?:\.\d+)?)?$/;
+const NPM_PROGRAMS = new Set(['npm', 'pnpm', 'yarn', 'bun']);
+const NPM_INSTALL_WORDS = new Set(['install', 'i', 'ci', 'add', 'update', 'upgrade', 'install-test', 'it']);
+/** Script and make target names that, by wide convention, fetch a project's dependencies. */
+const SETUP_SCRIPT_NAMES = new Set([
+  'install',
+  'setup',
+  'bootstrap',
+  'deps',
+  'dependencies',
+  'postinstall',
+  'prepare',
+  'init',
+  'vendor',
+]);
+const SHELL_PROGRAMS = new Set(['sh', 'bash', 'zsh', 'dash', 'ksh']);
+/** How deep shell -c, eval and alias text is followed: enough for real commands, bounded for hostile ones. */
+const MAX_NESTING = 4;
+
 /** The ecosystem one simple command downloads packages from, or undefined when it downloads none. */
-function segmentDownloadEcosystem(argv: string[]): PackageDownloadEcosystem | undefined {
+function segmentDownloadEcosystem(argv: readonly string[]): PackageDownloadEcosystem | undefined {
   const program = argv[0];
   if (program === undefined) {
     return undefined;
   }
   const base = program.slice(program.lastIndexOf('/') + 1);
   const sub = argv[1];
-  if (PIP_PROGRAMS.has(base) && (sub === 'install' || sub === 'download')) {
+  if (PIP_PROGRAM.test(base) && (sub === 'install' || sub === 'download')) {
     return 'pypi';
   }
   if (
-    (base === 'python' || base === 'python3') &&
+    PYTHON_PROGRAM.test(base) &&
     argv[1] === '-m' &&
-    argv[2] === 'pip' &&
+    argv[2] !== undefined &&
+    PIP_PROGRAM.test(argv[2]) &&
     (argv[3] === 'install' || argv[3] === 'download')
   ) {
     return 'pypi';
   }
+  if (base === 'pipx' && (sub === 'install' || sub === 'run' || sub === 'inject' || sub === 'upgrade')) {
+    return 'pypi';
+  }
+  if (base === 'pip-sync') {
+    return 'pypi';
+  }
   if (
-    NPM_PROGRAMS.has(base) &&
-    (sub === 'install' || sub === 'i' || sub === 'ci' || sub === 'add' || sub === 'update')
+    (base === 'pdm' || base === 'pipenv') &&
+    (sub === 'install' || sub === 'add' || sub === 'sync' || sub === 'update')
   ) {
+    return 'pypi';
+  }
+  if (NPM_PROGRAMS.has(base) && sub !== undefined && NPM_INSTALL_WORDS.has(sub)) {
     return 'npm';
   }
-  if (base === 'npx' && argv[1] === 'npm' && (argv[2] === 'install' || argv[2] === 'ci')) {
+  // A bare yarn or bun installs the project's dependencies.
+  if ((base === 'yarn' || base === 'bun') && (sub === undefined || sub.startsWith('-'))) {
     return 'npm';
+  }
+  // npx, bunx and dlx fetch the package they are asked to run when it is not installed.
+  if (base === 'npx' || base === 'bunx' || ((base === 'pnpm' || base === 'yarn') && sub === 'dlx')) {
+    return 'npm';
+  }
+  if (NPM_PROGRAMS.has(base) && (sub === 'run' || sub === 'run-script') && SETUP_SCRIPT_NAMES.has(argv[2] ?? '')) {
+    return 'npm';
+  }
+  if ((base === 'yarn' || base === 'pnpm') && sub !== undefined && SETUP_SCRIPT_NAMES.has(sub) && sub !== 'install') {
+    return 'npm';
+  }
+  if (base === 'make' && argv.slice(1).some(word => !word.startsWith('-') && SETUP_SCRIPT_NAMES.has(word))) {
+    return 'any';
   }
   if (
     base === 'cargo' &&
@@ -183,14 +295,188 @@ function segmentDownloadEcosystem(argv: string[]): PackageDownloadEcosystem | un
   }
   if (
     (base === 'uv' && sub === 'pip' && argv[2] === 'install') ||
-    (base === 'uv' && (sub === 'sync' || sub === 'add'))
+    (base === 'uv' && (sub === 'sync' || sub === 'add' || sub === 'run')) ||
+    (base === 'uv' && sub === 'tool' && (argv[2] === 'install' || argv[2] === 'run')) ||
+    base === 'uvx'
   ) {
     return 'pypi';
   }
   if (base === 'poetry' && (sub === 'install' || sub === 'add' || sub === 'update')) {
     return 'pypi';
   }
+  // A program held in a variable ($p install ...) could be any package tool.
+  if (
+    program.startsWith('$') &&
+    sub !== undefined &&
+    (NPM_INSTALL_WORDS.has(sub) || sub === 'download' || sub === 'get' || sub === 'sync')
+  ) {
+    return 'any';
+  }
   return undefined;
+}
+
+/** One simple command that downloads packages, with the words that name it and its arguments. */
+interface DownloadCommand {
+  ecosystem: PackageDownloadEcosystem;
+  argv: readonly string[];
+}
+
+/** A Python string literal, with any prefix such as r, b or f. */
+const PYTHON_STRING = /[rbfuRBFU]{0,2}(?:'((?:[^'\\\n]|\\.)*)'|"((?:[^"\\\n]|\\.)*)")/g;
+/** Python calls that run a command: os.system, os.popen, the subprocess functions, and pip's own main. */
+const PYTHON_COMMAND_CALL =
+  /\b(?:os\.(?:system|popen)|subprocess\.(?:run|call|check_call|check_output|getoutput|getstatusoutput|Popen)|pip(?:\._internal)?\.main)\s*\(/g;
+
+/** The text between a call's opening parenthesis at `open` and its matching close, quotes honoured. */
+function callArguments(text: string, open: number): string {
+  let depth = 0;
+  let quote: string | undefined;
+  for (let i = open; i < text.length; i += 1) {
+    const ch = text[i];
+    if (quote !== undefined) {
+      if (ch === '\\') {
+        i += 1;
+      } else if (ch === quote) {
+        quote = undefined;
+      }
+      continue;
+    }
+    if (ch === "'" || ch === '"') {
+      quote = ch;
+    } else if (ch === '(' || ch === '[') {
+      depth += 1;
+    } else if (ch === ')' || ch === ']') {
+      depth -= 1;
+      if (depth === 0) {
+        return text.slice(open + 1, i);
+      }
+    }
+  }
+  return text.slice(open + 1);
+}
+
+/**
+ * The commands Python code runs through os.system, subprocess and pip.main, as word lists. A list
+ * argument becomes the words of one command, with sys.executable read as python; a string argument
+ * is read as a shell command.
+ */
+function pythonCallCommands(text: string): { list: string[] | undefined; shell: string | undefined }[] {
+  const calls: { list: string[] | undefined; shell: string | undefined }[] = [];
+  for (const match of text.matchAll(PYTHON_COMMAND_CALL)) {
+    const args = callArguments(text, match.index + match[0].length - 1).trim();
+    const isPipMain = match[0].startsWith('pip');
+    if (args.startsWith('[') || args.startsWith('(') || isPipMain) {
+      const firstArgument = args.startsWith('[') || args.startsWith('(') ? callArguments(args, 0) : args;
+      const words: string[] = isPipMain ? ['pip'] : [];
+      for (const token of firstArgument.matchAll(new RegExp(`${PYTHON_STRING.source}|sys\\.executable`, 'g'))) {
+        words.push(token[0] === 'sys.executable' ? 'python' : (token[1] ?? token[2] ?? ''));
+      }
+      calls.push({ list: words, shell: undefined });
+      continue;
+    }
+    const literal = new RegExp(PYTHON_STRING.source).exec(args);
+    if (literal !== null && literal.index === 0) {
+      calls.push({ list: undefined, shell: literal[1] ?? literal[2] ?? '' });
+    }
+  }
+  return calls;
+}
+
+/**
+ * Every simple command in `text` that downloads packages. Shell -c and eval text, aliases defined
+ * earlier in the same text, and commands Python code runs through os.system, subprocess or pip.main
+ * are read as commands too.
+ */
+function downloadCommands(text: string, depth = 0): DownloadCommand[] {
+  const found: DownloadCommand[] = [];
+  const aliases = new Map<string, string[]>();
+  const add = (argv: readonly string[]): void => {
+    const ecosystem = segmentDownloadEcosystem(argv);
+    if (ecosystem !== undefined) {
+      found.push({ ecosystem, argv });
+    }
+  };
+  for (const words of splitShellCommands(text)) {
+    let argv = programWords(words);
+    const first = argv[0];
+    if (first === undefined) {
+      continue;
+    }
+    if (first === 'alias') {
+      for (const definition of argv.slice(1)) {
+        const equals = definition.indexOf('=');
+        if (equals > 0) {
+          aliases.set(
+            definition.slice(0, equals),
+            programWords(splitShellCommands(definition.slice(equals + 1))[0] ?? []),
+          );
+        }
+      }
+      continue;
+    }
+    const alias = aliases.get(first);
+    if (alias !== undefined) {
+      argv = [...alias, ...argv.slice(1)];
+    }
+    const program = argv[0] ?? '';
+    const base = program.slice(program.lastIndexOf('/') + 1);
+    if (depth < MAX_NESTING && SHELL_PROGRAMS.has(base)) {
+      const flag = argv.findIndex((word, index) => index > 0 && /^-[a-z]*c[a-z]*$/.test(word));
+      const script = flag === -1 ? undefined : argv[flag + 1];
+      if (script !== undefined) {
+        found.push(...downloadCommands(script, depth + 1));
+        continue;
+      }
+    }
+    if (depth < MAX_NESTING && base === 'eval') {
+      found.push(...downloadCommands(argv.slice(1).join(' '), depth + 1));
+      continue;
+    }
+    if (depth < MAX_NESTING && PYTHON_PROGRAM.test(base)) {
+      const flag = argv.indexOf('-c');
+      const code = flag === -1 ? undefined : argv[flag + 1];
+      if (code !== undefined) {
+        found.push(...downloadCommands(code, depth + 1));
+        continue;
+      }
+    }
+    add(argv);
+  }
+  if (depth < MAX_NESTING) {
+    for (const call of pythonCallCommands(text)) {
+      if (call.list !== undefined) {
+        add(programWords(call.list));
+      } else if (call.shell !== undefined) {
+        found.push(...downloadCommands(call.shell, depth + 1));
+      }
+    }
+  }
+  return found;
+}
+
+/**
+ * What package tools print when they try to download while the sandbox holds no download grant:
+ * npm's dead-end registry address, pip with no index, Go with its proxy off, and Cargo offline.
+ */
+const BLOCKED_DOWNLOAD_SIGNS: readonly RegExp[] = [
+  /127\.0\.0\.1:1\b/,
+  /No matching distribution found/,
+  /GOPROXY=off/,
+  /CARGO_NET_OFFLINE|you are in the offline mode|attempting to make an HTTP request, but --offline/i,
+];
+
+/** Whether a failed command's output shows a package download the missing grant stopped. */
+export function outputShowsBlockedDownload(output: string): boolean {
+  return BLOCKED_DOWNLOAD_SIGNS.some(sign => sign.test(output));
+}
+
+/**
+ * The note added to a failed command's output when it tried to download packages while downloads
+ * are off, so the person learns why and what to do instead of reading a network error.
+ */
+export function packageDownloadsOffNote(scope: { inProject: boolean }): string {
+  const setting = scope.inProject ? 'for this repo' : 'for chats without a project';
+  return `Package downloads are off ${setting}, so this command could not download packages. To allow them, run the install as a command of its own so Aman can ask you, or turn on package downloads ${setting} in Settings.`;
 }
 
 /**
@@ -206,22 +492,20 @@ export const PACKAGE_UNAVAILABLE_RULE =
  * they would try to fetch the dependency.
  */
 export function commandDownloadsPackages(command: string): boolean {
-  return splitShellCommands(command).some(words => segmentDownloadEcosystem(programWords(words)) !== undefined);
+  return downloadCommands(command).length > 0;
 }
 
 /** The public package sites a download can come from, named in one list for sentences a person reads. */
 export function packageDownloadSitesText(): string {
-  const names = [PACKAGE_SITE_NAMES.pypi, PACKAGE_SITE_NAMES.npm, PACKAGE_SITE_NAMES.go, PACKAGE_SITE_NAMES.cargo];
+  const names = siteNamesFor('any');
   return `${names.slice(0, -1).join(', ')} and ${names[names.length - 1] ?? ''}`;
 }
 
 /** The sites one command downloads from, named for the tools it actually uses, in the order it uses them. */
 function downloadSiteNames(command: string): string[] {
   const sites: string[] = [];
-  for (const words of splitShellCommands(command)) {
-    const ecosystem = segmentDownloadEcosystem(programWords(words));
-    if (ecosystem !== undefined) {
-      const name = PACKAGE_SITE_NAMES[ecosystem];
+  for (const { ecosystem } of downloadCommands(command)) {
+    for (const name of siteNamesFor(ecosystem)) {
       if (!sites.includes(name)) {
         sites.push(name);
       }
@@ -244,7 +528,8 @@ export function packageDownloadCardWhat(command: string): string | undefined {
 
 /**
  * The first-download card sentence for a chat that is not working on a project: the same sites,
- * then what the person is agreeing to, downloads in their chats without a project.
+ * then what the person is agreeing to, downloads in their chats without a project and in their
+ * scheduled runs, which use the same allowance.
  */
 export function packageDownloadCardWhatWithoutProject(command: string): string | undefined {
   const sites = downloadSiteNames(command);
@@ -253,7 +538,7 @@ export function packageDownloadCardWhatWithoutProject(command: string): string |
   }
   return `Aman wants to download packages from the public package sites (${sites.join(
     ', ',
-  )}) in your chats that are not working on a project.`;
+  )}) in your chats that are not working on a project. This also covers your scheduled runs.`;
 }
 
 /**
@@ -454,6 +739,7 @@ const FLAG_VALUE_WORDS: Record<PackageDownloadEcosystem, ReadonlySet<string>> = 
     '-F',
     '-p',
   ]),
+  any: new Set<string>(),
 };
 
 /**
@@ -466,6 +752,7 @@ const SPEC_VALUE_FLAGS: Record<PackageDownloadEcosystem, ReadonlySet<string>> = 
   npm: new Set<string>(),
   go: new Set<string>(),
   cargo: new Set<string>(),
+  any: new Set<string>(),
 };
 
 /**
@@ -505,12 +792,7 @@ function isRefusedCommandSpec(word: string): boolean {
  * attached value is read as a word of its own, because it names the package itself.
  */
 export function findCommandLineGitDependency(command: string): string | undefined {
-  for (const words of splitShellCommands(command)) {
-    const argv = programWords(words);
-    const ecosystem = segmentDownloadEcosystem(argv);
-    if (ecosystem === undefined) {
-      continue;
-    }
+  for (const { ecosystem, argv } of downloadCommands(command)) {
     const valueWords = FLAG_VALUE_WORDS[ecosystem];
     const specWords = SPEC_VALUE_FLAGS[ecosystem];
     let skipNext = false;

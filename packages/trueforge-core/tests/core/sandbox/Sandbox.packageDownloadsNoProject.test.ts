@@ -26,7 +26,7 @@ const BOUND_REPOSITORY: BoundRepository = {
 };
 
 const NO_PROJECT_CARD_WHAT =
-  'Aman wants to download packages from the public package sites (PyPI) in your chats that are not working on a project.';
+  'Aman wants to download packages from the public package sites (PyPI) in your chats that are not working on a project. This also covers your scheduled runs.';
 
 /** One call the fake run_code backend recorded: the raw input the backend contract hands it, and its call options. */
 type RecordedRunCodeCall = { input: unknown; options: RunCodeCallOptions | undefined };
@@ -64,6 +64,7 @@ function makeProvider(
   execCalls: SandboxExecParams[],
   files?: Record<string, string>,
   workspaceDir = '/work',
+  commandResults?: Record<string, { exitCode: number; result: string }>,
 ): SandboxProvider {
   return {
     type: 'test',
@@ -72,6 +73,10 @@ function makeProvider(
     createSandbox: () => Promise.resolve({ sandboxId: 'raw-1' }),
     exec: realCommandExec((params: SandboxExecParams): Promise<ExecResult> => {
       execCalls.push(params);
+      const scripted = commandResults?.[params.command];
+      if (scripted !== undefined) {
+        return Promise.resolve({ success: true, response: scripted });
+      }
       // realpath answers with the path it was given, so a script_path run can read its script.
       const realpath = /^realpath -e -- '([^']*)'$/u.exec(params.command)?.[1];
       const result =
@@ -116,6 +121,7 @@ function makeSandbox(input: {
   loaders?: boolean | undefined;
   sandboxWithoutAsking?: boolean | undefined;
   workspaceDir?: string | undefined;
+  commandResults?: Record<string, { exitCode: number; result: string }> | undefined;
 }): Sandbox {
   const loaders = input.loaders ?? true;
   const boundRepository =
@@ -123,7 +129,7 @@ function makeSandbox(input: {
       ? input.boundRepository
       : { ...input.boundRepository, workspace_cwd: input.workspaceDir };
   return new Sandbox({
-    provider: makeProvider(input.execCalls, input.files, input.workspaceDir),
+    provider: makeProvider(input.execCalls, input.files, input.workspaceDir, input.commandResults),
     boundRepository,
     loadBoundRepository: boundRepository === undefined ? undefined : async () => boundRepository,
     workspaceVerificationCoordinator: boundRepository === undefined ? undefined : new TestDurableWorkspaceCoordinator(),
@@ -198,7 +204,7 @@ describe('the first package download in a chat without a project', () => {
     });
     expect(cargoInstall.is_approval_required).toBe(true);
     expect(cargoInstall.tier3_card?.plain_what).toBe(
-      'Aman wants to download packages from the public package sites (crates.io) in your chats that are not working on a project.',
+      'Aman wants to download packages from the public package sites (crates.io) in your chats that are not working on a project. This also covers your scheduled runs.',
     );
   });
 
@@ -348,7 +354,7 @@ describe('the first download always asks, even when sandbox work runs without as
     const firstInfo = await sandbox.toolCallInfo(npmCall);
     expect(firstInfo.is_approval_required).toBe(true);
     expect(firstInfo.tier3_card?.plain_what).toBe(
-      'Aman wants to download packages from the public package sites (npm) in your chats that are not working on a project.',
+      'Aman wants to download packages from the public package sites (npm) in your chats that are not working on a project. This also covers your scheduled runs.',
     );
 
     const held = await sandbox.callTool(npmCall);
@@ -587,6 +593,73 @@ describe('a run_code script that downloads packages, in a chat without a project
     expect(allowPackageDownloads).not.toHaveBeenCalled();
     expect(runCodeCalls).toHaveLength(1);
     expect(runCodeCalls[0]?.options?.packageMirrorToken).toBeUndefined();
+  });
+});
+
+describe('an install the download check did not recognise, while downloads are off', () => {
+  const NOTE =
+    'Package downloads are off for chats without a project, so this command could not download packages. To allow them, run the install as a command of its own so Aman can ask you, or turn on package downloads for chats without a project in Settings.';
+
+  it('adds a plain note to a command whose package tool hit the closed download path', async () => {
+    const sandbox = makeSandbox({
+      execCalls: [],
+      allowed: () => false,
+      allowPackageDownloads: async () => undefined,
+      commandResults: {
+        './setup.sh': { exitCode: 1, result: 'npm ERR! connect ECONNREFUSED 127.0.0.1:1' },
+      },
+    });
+    const response = await sandbox.callTool(
+      { name: SANDBOX_EXEC_TOOL_NAME, arguments: { intent: 'Set up', purpose: 'execute', command: './setup.sh' } },
+      { status: 'allow' },
+    );
+    expect(resultText(response)).toContain(NOTE);
+  });
+
+  it('leaves an ordinary failure alone', async () => {
+    const sandbox = makeSandbox({
+      execCalls: [],
+      allowed: () => false,
+      allowPackageDownloads: async () => undefined,
+      commandResults: { './setup.sh': { exitCode: 1, result: 'setup.sh: line 3: missing file' } },
+    });
+    const response = await sandbox.callTool(
+      { name: SANDBOX_EXEC_TOOL_NAME, arguments: { intent: 'Set up', purpose: 'execute', command: './setup.sh' } },
+      { status: 'allow' },
+    );
+    expect(resultText(response)).not.toContain('Package downloads are off');
+  });
+
+  it('adds the note to a run_code run whose install found no package index', async () => {
+    const service: RunCodeBackend = {
+      packageGatewayCapable: true,
+      runCode: () =>
+        Promise.resolve({
+          status: 'ok',
+          exit_code: 1,
+          stdout: '',
+          stderr: 'ERROR: No matching distribution found for requests',
+          stdout_truncated: false,
+          stderr_truncated: false,
+          files_out: [],
+          harvest_warnings: [],
+        }),
+      scrubDispatchErrorText: text => text,
+    };
+    const sandbox = makeSandbox({
+      execCalls: [],
+      allowed: () => false,
+      allowPackageDownloads: async () => undefined,
+      runCodeService: service,
+    });
+    const response = await sandbox.callTool(
+      {
+        name: SANDBOX_RUN_CODE_TOOL_NAME,
+        arguments: { language: 'python', code: 'import runpy\nrunpy.run_path("setup_env.py")' },
+      },
+      { status: 'allow' },
+    );
+    expect(resultText(response)).toContain(NOTE);
   });
 });
 

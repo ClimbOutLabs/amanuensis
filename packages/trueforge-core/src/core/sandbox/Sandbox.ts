@@ -112,12 +112,14 @@ import {
   commandDownloadsPackages,
   findCommandLineGitDependency,
   findGitDependency,
+  outputShowsBlockedDownload,
   PACKAGE_GIT_DEPENDENCY_MESSAGE,
   PACKAGE_MANIFEST_FILES,
   PACKAGE_UNAVAILABLE_RULE,
   packageDownloadCardWhat,
   packageDownloadCardWhatWithoutProject,
   packageDownloadSitesText,
+  packageDownloadsOffNote,
 } from './packageMirrors';
 import {
   ensureExecSuccess,
@@ -3949,7 +3951,20 @@ export class Sandbox extends LocalToolMCP {
         : {}),
     };
     const operation = input.hostAuthored ? this.hostExec(params) : this.sandboxPathExec(params);
-    return input.signal === undefined ? operation : await awaitWithAbort({ operation, signal: input.signal });
+    const result =
+      input.signal === undefined ? await operation : await awaitWithAbort({ operation, signal: input.signal });
+    if (
+      !input.hostAuthored &&
+      packageMirrorToken === undefined &&
+      this.packageGatewayAvailable() &&
+      result.success &&
+      result.response.exitCode !== 0 &&
+      outputShowsBlockedDownload(result.response.result)
+    ) {
+      const note = packageDownloadsOffNote({ inProject: this.boundRepository !== undefined });
+      return { ...result, response: { ...result.response, result: `${result.response.result}\n\n${note}` } };
+    }
+    return result;
   }
 
   /**
@@ -5154,10 +5169,11 @@ export class Sandbox extends LocalToolMCP {
     // UI/chat stream on the tool response.
     const provisioningMessages: string[] = [];
     let result: RunCodeResult;
+    const packageMirrorToken = await this.resolvePackageMirrorToken();
     try {
       result = await service.runCode(input, {
         signal: context?.signal,
-        packageMirrorToken: await this.resolvePackageMirrorToken(),
+        packageMirrorToken,
         attachments: [...this.runCodeIngressStaging.values()],
         readScript: scriptPath => this.readRunCodeScript(scriptPath),
         onProgress: (message: string) => {
@@ -5183,6 +5199,15 @@ export class Sandbox extends LocalToolMCP {
         }),
         isError: true,
       });
+    }
+    if (
+      packageMirrorToken === undefined &&
+      this.packageGatewayAvailable() &&
+      (result.status === 'failed' || result.exit_code !== 0) &&
+      outputShowsBlockedDownload(`${result.stdout}\n${result.stderr}`)
+    ) {
+      const note = packageDownloadsOffNote({ inProject: this.boundRepository !== undefined });
+      result = { ...result, stderr: `${result.stderr}\n\n${note}` };
     }
     return toolResultResponse({
       text: JSON.stringify(result),

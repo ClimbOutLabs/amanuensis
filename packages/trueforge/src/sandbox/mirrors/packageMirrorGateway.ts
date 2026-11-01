@@ -16,6 +16,7 @@ import path from 'node:path';
 import { Transform, type Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import type { Logger } from 'winston';
+import type { PackageMirrorAllowanceCheck } from './packageMirrorAllowance';
 import type { PackageMirrorGrant, PackageMirrorTokenRegistry } from './packageMirrorTokens';
 
 export type MirrorEcosystem = 'pypi' | 'npm' | 'go' | 'cargo';
@@ -45,6 +46,8 @@ const UPSTREAM_TIMEOUT_MS = 10 * 60 * 1000;
 
 export interface PackageMirrorGatewayOptions {
   registry: PackageMirrorTokenRegistry;
+  /** Whether a grant's allowance still holds in the shared database; a grant that fails it is taken back. */
+  allowanceHolds: PackageMirrorAllowanceCheck;
   cacheDir: string;
   logger: Logger;
   maxDownloadBytes?: number;
@@ -241,6 +244,7 @@ function headerValue(headers: Record<string, string | string[] | undefined>, nam
  */
 export class PackageMirrorGateway {
   readonly #registry: PackageMirrorTokenRegistry;
+  readonly #allowanceHolds: PackageMirrorAllowanceCheck;
   readonly #cacheDir: string;
   readonly #logger: Logger;
   readonly #maxDownloadBytes: number;
@@ -251,6 +255,7 @@ export class PackageMirrorGateway {
 
   constructor(options: PackageMirrorGatewayOptions) {
     this.#registry = options.registry;
+    this.#allowanceHolds = options.allowanceHolds;
     this.#cacheDir = options.cacheDir;
     this.#logger = options.logger;
     this.#maxDownloadBytes = options.maxDownloadBytes ?? DEFAULT_MIRROR_DOWNLOAD_MAX_BYTES;
@@ -346,6 +351,16 @@ export class PackageMirrorGateway {
         403,
         'This sandbox has no package download grant. Allow package downloads in this chat first, then try again.',
       );
+      return;
+    }
+    if (!(await this.#allowanceHolds(grant))) {
+      this.#registry.revoke(token);
+      this.#plain(
+        res,
+        403,
+        'Package downloads were turned off for this chat, so this download was stopped. Turn them on again in Settings, then try again.',
+      );
+      this.#log({ grant, ecosystem, path: rawPath, status: 403, bytes: 0, cached: false, at: startedAt });
       return;
     }
     // The rest of the path goes upstream exactly as written, trailing slash and all.
