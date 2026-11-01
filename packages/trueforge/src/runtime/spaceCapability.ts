@@ -764,10 +764,11 @@ export interface SpaceCapabilityOptions {
  * The store record carries `tenant_id` and `created_by`, host-owned scope that is never a wire
  * field (see `SpaceRecord` in `../db/spaceStore`). Parse through the wire `SpaceSchema`, relaxed
  * to strip rather than reject those extra keys, so the model only ever sees the same shape the
- * `/api/v1/spaces` routes and the UI do.
+ * `/api/v1/spaces` routes and the UI do. Folders are a UI-only filing choice, so the model never
+ * sees `folder_id`.
  */
-const SPACE_RESULT_SCHEMA = SpaceSchema.strip();
-const SPACE_SUMMARY_SCHEMA = SpaceSchema.omit({ body: true }).strip();
+const SPACE_RESULT_SCHEMA = SpaceSchema.omit({ folder_id: true }).strip();
+const SPACE_SUMMARY_SCHEMA = SpaceSchema.omit({ body: true, folder_id: true }).strip();
 
 /**
  * The store mutation plus tool-layer annotations for the result payload. Only the

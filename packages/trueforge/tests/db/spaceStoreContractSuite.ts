@@ -1,5 +1,6 @@
 import {
   SpaceAggregateRevisionConflictError,
+  SpaceFolderNotFoundError,
   SpaceNotFoundError,
   SpaceRevisionConflictError,
   SpaceRevisionNotFoundError,
@@ -400,5 +401,159 @@ export function runSpaceStoreContractSuite(getStore: () => ISpaceStore): void {
     await store.deleteSpace({ ...OWNER, space_id: created.id, expected_revision: updated.revision });
 
     expect(await store.getSpaceRevision({ ...OWNER, space_id: created.id, revision: 1 })).toBeUndefined();
+  });
+
+  describe('space folders', () => {
+    const OTHER_OWNER = { tenant_id: 'default', created_by: 'user-b' };
+
+    async function createSpace(store: ISpaceStore, id = SPAIN_HOUSES.id) {
+      const { record } = await store.createSpace({
+        ...SPAIN_HOUSES,
+        id,
+        expected_aggregate_revision: (await store.getAggregate(OWNER)).revision,
+      });
+      return record;
+    }
+
+    it('creates, renames and lists folders sorted by name, scoped to the owner', async () => {
+      const store = getStore();
+      const zebra = await store.createSpaceFolder({ ...OWNER, id: 'f-zebra', name: 'Zebra' });
+      await store.createSpaceFolder({ ...OWNER, id: 'f-apple', name: 'Apple' });
+      await store.createSpaceFolder({ ...OTHER_OWNER, id: 'f-other', name: 'Other' });
+
+      expect(zebra.created_at).toMatch(/Z$/);
+      expect((await store.listSpaceFolders(OWNER)).map(folder => folder.name)).toEqual(['Apple', 'Zebra']);
+
+      const renamed = await store.updateSpaceFolder({ ...OWNER, folder_id: 'f-zebra', name: 'Aardvark' });
+      expect(renamed.name).toBe('Aardvark');
+      expect((await store.listSpaceFolders(OWNER)).map(folder => folder.name)).toEqual(['Aardvark', 'Apple']);
+      await expect(
+        store.updateSpaceFolder({ ...OTHER_OWNER, folder_id: 'f-zebra', name: 'Taken' }),
+      ).rejects.toBeInstanceOf(SpaceFolderNotFoundError);
+    });
+
+    it('moves a space into a folder and back out without touching its revision, timestamps or history', async () => {
+      const store = getStore();
+      const created = await createSpace(store);
+      await store.createSpaceFolder({ ...OWNER, id: 'f-1', name: 'Homes' });
+      const aggregateBefore = await store.getAggregate(OWNER);
+
+      await store.setSpaceFolder({ ...OWNER, space_id: created.id, folder_id: 'f-1' });
+
+      expect(await store.listSpaceFolderAssignments(OWNER)).toEqual([{ space_id: created.id, folder_id: 'f-1' }]);
+      expect(await store.getSpace({ ...OWNER, space_id: created.id })).toEqual(created);
+      expect(await store.getAggregate(OWNER)).toEqual(aggregateBefore);
+      expect(await store.getSpaceRevision({ ...OWNER, space_id: created.id, revision: 0 })).toBeUndefined();
+
+      await store.setSpaceFolder({ ...OWNER, space_id: created.id, folder_id: null });
+      expect(await store.listSpaceFolderAssignments(OWNER)).toEqual([]);
+      expect(await store.getSpace({ ...OWNER, space_id: created.id })).toEqual(created);
+      expect(await store.getAggregate(OWNER)).toEqual(aggregateBefore);
+    });
+
+    it('moves a space between folders and limits assignment reads to the spaces asked for', async () => {
+      const store = getStore();
+      const first = await createSpace(store, 's-1');
+      const second = await createSpace(store, 's-2');
+      await store.createSpaceFolder({ ...OWNER, id: 'f-1', name: 'One' });
+      await store.createSpaceFolder({ ...OWNER, id: 'f-2', name: 'Two' });
+
+      await store.setSpaceFolder({ ...OWNER, space_id: first.id, folder_id: 'f-1' });
+      await store.setSpaceFolder({ ...OWNER, space_id: second.id, folder_id: 'f-1' });
+      await store.setSpaceFolder({ ...OWNER, space_id: first.id, folder_id: 'f-2' });
+
+      expect(await store.listSpaceFolderAssignments(OWNER)).toEqual([
+        { space_id: 's-1', folder_id: 'f-2' },
+        { space_id: 's-2', folder_id: 'f-1' },
+      ]);
+      expect(await store.listSpaceFolderAssignments({ ...OWNER, space_ids: ['s-2'] })).toEqual([
+        { space_id: 's-2', folder_id: 'f-1' },
+      ]);
+      expect(await store.listSpaceFolderAssignments({ ...OWNER, space_ids: [] })).toEqual([]);
+    });
+
+    it('rejects a move to a missing or another owner folder, and a move of a missing or another owner space', async () => {
+      const store = getStore();
+      const created = await createSpace(store);
+      await store.createSpaceFolder({ ...OTHER_OWNER, id: 'f-other', name: 'Other' });
+      await store.createSpaceFolder({ ...OWNER, id: 'f-1', name: 'Homes' });
+
+      await expect(
+        store.setSpaceFolder({ ...OWNER, space_id: created.id, folder_id: 'f-missing' }),
+      ).rejects.toBeInstanceOf(SpaceFolderNotFoundError);
+      await expect(
+        store.setSpaceFolder({ ...OWNER, space_id: created.id, folder_id: 'f-other' }),
+      ).rejects.toBeInstanceOf(SpaceFolderNotFoundError);
+      await expect(store.setSpaceFolder({ ...OWNER, space_id: 's-missing', folder_id: 'f-1' })).rejects.toBeInstanceOf(
+        SpaceNotFoundError,
+      );
+      await expect(
+        store.setSpaceFolder({ ...OTHER_OWNER, space_id: created.id, folder_id: 'f-other' }),
+      ).rejects.toBeInstanceOf(SpaceNotFoundError);
+      expect(await store.listSpaceFolderAssignments(OWNER)).toEqual([]);
+    });
+
+    it('deleting a folder unfiles its spaces and keeps them', async () => {
+      const store = getStore();
+      const created = await createSpace(store);
+      await store.createSpaceFolder({ ...OWNER, id: 'f-1', name: 'Homes' });
+      await store.setSpaceFolder({ ...OWNER, space_id: created.id, folder_id: 'f-1' });
+
+      await store.deleteSpaceFolder({ ...OWNER, folder_id: 'f-1' });
+      await store.deleteSpaceFolder({ ...OWNER, folder_id: 'f-1' });
+
+      expect(await store.listSpaceFolders(OWNER)).toEqual([]);
+      expect(await store.listSpaceFolderAssignments(OWNER)).toEqual([]);
+      expect(await store.getSpace({ ...OWNER, space_id: created.id })).toEqual(created);
+    });
+
+    it('does not let another owner delete a folder', async () => {
+      const store = getStore();
+      await store.createSpaceFolder({ ...OWNER, id: 'f-1', name: 'Homes' });
+
+      await store.deleteSpaceFolder({ ...OTHER_OWNER, folder_id: 'f-1' });
+
+      expect((await store.listSpaceFolders(OWNER)).map(folder => folder.id)).toEqual(['f-1']);
+    });
+
+    it('deleting a space removes its assignment and keeps the folder', async () => {
+      const store = getStore();
+      const created = await createSpace(store);
+      await store.createSpaceFolder({ ...OWNER, id: 'f-1', name: 'Homes' });
+      await store.setSpaceFolder({ ...OWNER, space_id: created.id, folder_id: 'f-1' });
+
+      await store.deleteSpace({ ...OWNER, space_id: created.id, expected_revision: created.revision });
+
+      expect(await store.listSpaceFolderAssignments(OWNER)).toEqual([]);
+      expect((await store.listSpaceFolders(OWNER)).map(folder => folder.id)).toEqual(['f-1']);
+    });
+
+    it('keeps the folder through an update and a revert', async () => {
+      const store = getStore();
+      const created = await createSpace(store);
+      await store.createSpaceFolder({ ...OWNER, id: 'f-1', name: 'Homes' });
+      await store.setSpaceFolder({ ...OWNER, space_id: created.id, folder_id: 'f-1' });
+      const { record: updated } = await store.updateSpace({
+        ...OWNER,
+        space_id: created.id,
+        name: created.name,
+        purpose: created.purpose,
+        status: created.status,
+        body: 'changed',
+        format: created.format,
+        expected_revision: created.revision,
+        expected_aggregate_revision: (await store.getAggregate(OWNER)).revision,
+      });
+
+      await store.revertSpace({
+        ...OWNER,
+        space_id: created.id,
+        revision: created.revision,
+        expected_revision: updated.revision,
+        expected_aggregate_revision: (await store.getAggregate(OWNER)).revision,
+      });
+
+      expect(await store.listSpaceFolderAssignments(OWNER)).toEqual([{ space_id: created.id, folder_id: 'f-1' }]);
+    });
   });
 }

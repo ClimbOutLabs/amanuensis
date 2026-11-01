@@ -28,5 +28,7 @@ export * as sessionRepository from "./sessionRepository/index.js";
 export * from "./sessions/client/requests/index.js";
 export * as sessions from "./sessions/index.js";
 export * as settings from "./settings/index.js";
+export * from "./spaceFolders/client/requests/index.js";
+export * as spaceFolders from "./spaceFolders/index.js";
 export * from "./spaces/client/requests/index.js";
 export * as spaces from "./spaces/index.js";

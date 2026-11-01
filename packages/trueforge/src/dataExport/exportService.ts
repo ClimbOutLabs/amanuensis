@@ -421,7 +421,20 @@ export async function runDataExport<TTransaction>(
   const profile = await deps.personalizationStore.getProfile({ tenant_id: tenantId, created_by: subjectId });
   await writeJsonEntry(context, 'personalization.json', profile ?? null);
 
-  // spaces.json: each space with every revision.
+  // space_folders.json: shaped like folders.json so one import schema reads both.
+  const spaceFolders = await deps.spaceStore.listSpaceFolders({ tenant_id: tenantId, created_by: subjectId });
+  await writeJsonArrayEntry(
+    context,
+    'space_folders.json',
+    spaceFolders.map(({ id, ...folder }) => ({ ...folder, folder_id: id })),
+  );
+  const spaceFolderBySpaceId = new Map(
+    (await deps.spaceStore.listSpaceFolderAssignments({ tenant_id: tenantId, created_by: subjectId })).map(
+      assignment => [assignment.space_id, assignment.folder_id],
+    ),
+  );
+
+  // spaces.json: each space with every revision and the folder it sits in.
   async function* spaceEntries(): AsyncIterable<unknown> {
     let offset = 0;
     for (;;) {
@@ -445,7 +458,7 @@ export async function runDataExport<TTransaction>(
             revisions.push(record);
           }
         }
-        yield { space, revisions };
+        yield { space, revisions, folder_id: spaceFolderBySpaceId.get(space.id) ?? null };
       }
       if (page.length < PAGE_LIMIT) {
         return;

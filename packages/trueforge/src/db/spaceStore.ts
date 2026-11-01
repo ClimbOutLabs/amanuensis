@@ -84,12 +84,58 @@ export interface SpaceListResult {
   next_offset: number | null;
 }
 
+/** An owner's space folder; timestamps are ISO 8601 like the space record's. */
+export interface SpaceFolderRecord extends OwnerScopedInput {
+  id: string;
+  name: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface SpaceFolderIdentityInput extends OwnerScopedInput {
+  folder_id: string;
+}
+
+export interface CreateSpaceFolderInput extends OwnerScopedInput {
+  id: string;
+  name: string;
+}
+
+export interface UpdateSpaceFolderInput extends SpaceFolderIdentityInput {
+  name: string;
+}
+
+/** `folder_id: null` takes the space out of its folder. */
+export interface SetSpaceFolderInput extends SpaceIdentityInput {
+  folder_id: string | null;
+}
+
+export interface ListSpaceFolderAssignmentsInput extends OwnerScopedInput {
+  /** Limits the read to these spaces; omit for every assignment the owner has. */
+  space_ids?: readonly string[] | undefined;
+}
+
+export interface SpaceFolderAssignment {
+  space_id: string;
+  folder_id: string;
+}
+
 export class SpaceNotFoundError extends Error {
   readonly id: string;
 
   constructor(input: { id: string }) {
     super(`Space not found: ${input.id}`);
     this.name = 'SpaceNotFoundError';
+    this.id = input.id;
+  }
+}
+
+export class SpaceFolderNotFoundError extends Error {
+  readonly id: string;
+
+  constructor(input: { id: string }) {
+    super(`Space folder not found: ${input.id}`);
+    this.name = 'SpaceFolderNotFoundError';
     this.id = input.id;
   }
 }
@@ -157,4 +203,20 @@ export interface ISpaceStore<TTransaction = never> {
    */
   revertSpace(input: RevertSpaceInput, transaction?: TTransaction): Promise<SpaceMutationResult>;
   deleteSpace(input: DeleteSpaceInput, transaction?: TTransaction): Promise<SpaceDeleteResult>;
+  listSpaceFolders(input: OwnerScopedInput, transaction?: TTransaction): Promise<SpaceFolderRecord[]>;
+  createSpaceFolder(input: CreateSpaceFolderInput, transaction?: TTransaction): Promise<SpaceFolderRecord>;
+  /** Throws SpaceFolderNotFoundError when the owner has no such folder. */
+  updateSpaceFolder(input: UpdateSpaceFolderInput, transaction?: TTransaction): Promise<SpaceFolderRecord>;
+  /** Removes only the folder: its spaces become unfiled. Deleting a missing folder is a no-op. */
+  deleteSpaceFolder(input: SpaceFolderIdentityInput, transaction?: TTransaction): Promise<void>;
+  /**
+   * Places a space in a folder, or unfiles it with `folder_id: null`. Placement is not a content
+   * edit: it never changes the space's revision, timestamps, history, or the aggregate revision.
+   * Throws SpaceNotFoundError or SpaceFolderNotFoundError.
+   */
+  setSpaceFolder(input: SetSpaceFolderInput, transaction?: TTransaction): Promise<void>;
+  listSpaceFolderAssignments(
+    input: ListSpaceFolderAssignmentsInput,
+    transaction?: TTransaction,
+  ): Promise<SpaceFolderAssignment[]>;
 }

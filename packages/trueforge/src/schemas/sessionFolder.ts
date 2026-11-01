@@ -1,38 +1,27 @@
 import { z } from '@hono/zod-openapi';
+import { FolderFieldsSchema, FolderIdSchema, FolderNameSchema } from './folder';
 
 export const SessionFolderIdParamsSchema = z
   .object({ folder_id: z.string().min(1).max(64).describe('Immutable session folder identifier.') })
   .openapi('SessionFolderIDParams');
 
-export const SessionFolderNameSchema = z
-  .string()
-  .trim()
-  .min(1)
-  .max(64)
-  .describe('Folder name, trimmed to 1 through 64 characters.');
-
 export const SessionFolderSchema = z
-  .object({
-    id: z.string().min(1).describe('Immutable server-generated folder identifier.'),
-    name: SessionFolderNameSchema,
-    created_at: z.string().describe('ISO 8601 creation timestamp.'),
-    updated_at: z.string().describe('ISO 8601 last-update timestamp.'),
-  })
+  .object({ ...FolderFieldsSchema.shape })
   .strict()
   .openapi('SessionFolder');
 
 export const CreateSessionFolderRequestSchema = z
-  .object({ name: SessionFolderNameSchema })
+  .object({ name: FolderNameSchema })
   .strict()
   .openapi('CreateSessionFolderRequest');
 
 export const UpdateSessionFolderRequestSchema = z
-  .object({ name: SessionFolderNameSchema })
+  .object({ name: FolderNameSchema })
   .strict()
   .openapi('UpdateSessionFolderRequest');
 
 export const SetSessionFolderRequestSchema = z
-  .object({ folder_id: z.string().min(1).max(64) })
+  .object({ folder_id: FolderIdSchema })
   .strict()
   .openapi('SetSessionFolderRequest');
 
