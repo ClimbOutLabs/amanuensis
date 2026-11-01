@@ -93,4 +93,32 @@ describe('RequestReplyExecutor heartbeat', () => {
     await sleep(120);
     expect(heartbeatCalls(setSpy).length).toBe(beatsAfterDrain);
   });
+
+  it('keeps the heartbeat beating when a subscription error lands during drain until running requests settle', async () => {
+    let releaseHandler: ((reply: JSONReply) => void) | undefined;
+    const { executor, subscriber, setSpy, deliver } = createExecutor({
+      heartbeatIntervalMs: 20,
+      requestHandler: () =>
+        new Promise<JSONReply>(resolve => {
+          releaseHandler = resolve;
+        }),
+    });
+    await executor.init();
+    deliver(JSON.stringify({ replyKey: 'reply-1', path: '/ping', body: { ping: true } }));
+
+    const beatsBeforeDrain = heartbeatCalls(setSpy).length;
+    const drained = executor.drain();
+    subscriber.emit('error', new Error('subscription dropped'));
+    await sleep(250);
+    expect(heartbeatCalls(setSpy).length).toBeGreaterThan(beatsBeforeDrain + 2);
+    if (releaseHandler === undefined) {
+      throw new Error('request handler was not called');
+    }
+    releaseHandler({ status: 200, headers: {}, body: { pong: true } });
+    await drained;
+
+    const beatsAfterDrain = heartbeatCalls(setSpy).length;
+    await sleep(120);
+    expect(heartbeatCalls(setSpy).length).toBe(beatsAfterDrain);
+  });
 });
