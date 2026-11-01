@@ -1165,7 +1165,35 @@ export const sandboxWriteFileSchema = z
     return { ...rest, content };
   });
 
-const WRITE_FILE_SCRIPT = `import hashlib
+/**
+ * The skill notices already shown, per sandbox. Kept on the host, where nothing run in the sandbox
+ * can change it. An entry is dropped when its sandbox goes away, and the oldest go first past a bound,
+ * so it stays small; a dropped or restarted entry only means a notice may show once more.
+ */
+const shownSkillNoticesBySandbox = new Map<string, Set<string>>();
+const MAX_SANDBOXES_WITH_SHOWN_NOTICES = 1_000;
+
+/** Forgets the skill notices shown for a sandbox that is gone, such as a deleted chat's. */
+export function forgetShownSkillNotices(sandboxId: string): void {
+  shownSkillNoticesBySandbox.delete(sandboxId);
+}
+
+/** A skill notice for the person, with the key that says whether it was already shown. */
+interface SkillNotice {
+  key: string;
+  text: string;
+}
+
+/**
+ * One notice per skill and cause. The cause is kept as a plain string, not the notice's wording, so
+ * rewording a notice does not show it again and a new cause is shown once like the others.
+ */
+function skillNoticeKey(input: { name: string; cause: string }): string {
+  return JSON.stringify([input.name, input.cause]);
+}
+
+export const WRITE_FILE_SCRIPT = `import errno
+import hashlib
 import json
 import os
 import secrets
@@ -1197,13 +1225,40 @@ if not path_parts or any(part == ".." for part in path_parts):
     stop("path must stay within cwd")
 parts = cwd_parts + path_parts
 
+DIRECTORY_FLAGS = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+
+def open_folder(name, parent_fd, shown):
+    try:
+        return os.open(name, DIRECTORY_FLAGS, dir_fd=parent_fd)
+    except OSError as error:
+        if error.errno in (errno.ENOTDIR, errno.ELOOP):
+            stop("%s is a file or a link, not a folder, so write_file cannot create a file inside it" % shown)
+        raise
+
+def open_or_create_folder(name, parent_fd, shown, created):
+    try:
+        return open_folder(name, parent_fd, shown)
+    except FileNotFoundError:
+        pass
+    try:
+        os.mkdir(name, 0o755, dir_fd=parent_fd)
+        created.append(shown)
+    except FileExistsError:
+        pass
+    return open_folder(name, parent_fd, shown)
+
 directory_fds = []
-root_fd = os.open(workspace_cwd, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+created_directories = []
+try:
+    root_fd = os.open(workspace_cwd, DIRECTORY_FLAGS)
+except OSError as error:
+    stop("the workspace folder could not be opened: %s" % (error.strerror or error))
 directory_fds.append(root_fd)
 parent_fd = root_fd
 try:
-    for part in parts[:-1]:
-        parent_fd = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=parent_fd)
+    for index, part in enumerate(parts[:-1]):
+        shown = "/".join(parts[: index + 1])
+        parent_fd = open_or_create_folder(part, parent_fd, shown, created_directories)
         directory_fds.append(parent_fd)
     target_name = parts[-1]
     content_bytes = payload["content"].encode("utf-8")
@@ -1234,6 +1289,8 @@ try:
             os.unlink(temporary_name, dir_fd=parent_fd)
         except FileNotFoundError:
             pass
+except OSError as error:
+    stop("%s could not be written: %s" % (relative_path, error.strerror or error))
 finally:
     for directory_fd in reversed(directory_fds):
         os.close(directory_fd)
@@ -1242,6 +1299,7 @@ print(json.dumps({
     "path": relative_path,
     "byte_length": len(content_bytes),
     "sha256": hashlib.sha256(content_bytes).hexdigest(),
+    "created_directories": created_directories,
 }))
 `;
 
@@ -1465,7 +1523,7 @@ export const SANDBOX_REPLACE_TEXT_DESCRIPTION =
   'Replace one exact passage in a UTF-8 file beneath cwd; old_text must match exactly and uniquely. Pass old_text_lines and new_text_lines, one element per line, blank lines as empty strings. Writes atomically. Never stages, commits or pushes.';
 
 const SANDBOX_WRITE_FILE_DESCRIPTION =
-  'Create one new UTF-8 file beneath cwd. Pass content_lines, one element per line, blank lines as empty strings. Use replace_text or apply_patch for existing files. Never stages, commits or pushes.';
+  'Create one new UTF-8 file beneath cwd, creating any missing folders on its path. Pass content_lines, one element per line, blank lines as empty strings. Use replace_text or apply_patch for existing files. Never stages, commits or pushes.';
 
 export function createSandboxWriteFileDescription({ fileDownload }: { fileDownload: boolean }): string {
   return fileDownload
@@ -2109,8 +2167,10 @@ export class Sandbox extends LocalToolMCP {
   private unavailableSkillsCache: Map<string, string> = new Map<string, string>();
   // Kept apart from the prerequisite cache, which the prerequisite check clears.
   private skillCopyFailures: ReadonlyMap<string, SkillCopyFailure> = new Map<string, SkillCopyFailure>();
-  // Plain lines for the person, shown once on the next exec result.
-  private pendingSkillNotices: string[] = [];
+  // Plain lines for the person, shown once on the next tool result.
+  private pendingSkillNotices: SkillNotice[] = [];
+  // Notices already put on a tool result in this turn, not yet recorded in the sandbox.
+  private deliveredSkillNotices: SkillNotice[] = [];
   /** Flag to track if we've already checked prerequisites. */
   private prerequisitesChecked = false;
   /** PATH-resolution cache for the exec interpreter guard (preflight runs per call). */
@@ -2969,6 +3029,45 @@ export class Sandbox extends LocalToolMCP {
     return this.provider.network !== 'none';
   }
 
+  /**
+   * File edits, run_code (always offline) and plan submissions stay in the workspace. A command stays
+   * when it only inspects; otherwise only while nothing it runs can reach the network, and a push
+   * never stays, since the host carries it out.
+   */
+  staysInWorkspace({ name, argumentsText }: { name: string; argumentsText: string }): boolean {
+    if (
+      name === SANDBOX_WRITE_FILE_TOOL_NAME ||
+      name === SANDBOX_APPLY_PATCH_TOOL_NAME ||
+      name === SANDBOX_REPLACE_TEXT_TOOL_NAME ||
+      name === SANDBOX_RUN_CODE_TOOL_NAME ||
+      name === SANDBOX_SUBMIT_IMPLEMENTATION_PLAN_TOOL_NAME
+    ) {
+      return true;
+    }
+    const networked = this.hasNetwork() || this.skillNetworkHostsForChat.length > 0;
+    if (name === SANDBOX_RUN_REGISTERED_COMMAND_TOOL_NAME) {
+      return !networked;
+    }
+    if (name !== SANDBOX_EXEC_TOOL_NAME) {
+      return false;
+    }
+    let argumentsValue: unknown;
+    try {
+      argumentsValue = JSON.parse(argumentsText);
+    } catch {
+      return false;
+    }
+    const purpose = purposeFromToolArguments(argumentsValue);
+    if (purpose === undefined) {
+      return false;
+    }
+    const { effect } = sandboxInvocationPolicy({ command: commandFromToolArguments(argumentsValue), purpose });
+    if (effect === 'push') {
+      return false;
+    }
+    return effect === 'inspect' || !networked;
+  }
+
   /** Atomically refreshes model-visible repository root, branch, and HEAD before each model request. */
   async refreshBoundRepositoryState(options: { signal?: AbortSignal | undefined } = {}): Promise<void> {
     const binding = this.boundRepository;
@@ -3107,9 +3206,11 @@ export class Sandbox extends LocalToolMCP {
   ): Promise<CallToolResponse> {
     const response = await super.callTool(params, approvalDecision, context);
     if (this.pendingSkillNotices.length === 0 || !isCallToolResponseResult(response)) {
+      this.recordDeliveredSkillNotices();
       return response;
     }
     const notices = this.takeSkillNotices();
+    this.recordDeliveredSkillNotices();
     const [first, ...rest] = response.result.content;
     const head: TextContentPart =
       first?.type === 'text'
@@ -3124,7 +3225,30 @@ export class Sandbox extends LocalToolMCP {
   private takeSkillNotices(): string[] {
     const notices = this.pendingSkillNotices;
     this.pendingSkillNotices = [];
-    return notices;
+    this.deliveredSkillNotices.push(...notices);
+    return notices.map(notice => notice.text);
+  }
+
+  /** Remembers the notices shown on this tool result, so a later turn's Sandbox does not repeat them. */
+  private recordDeliveredSkillNotices(): void {
+    if (this.deliveredSkillNotices.length === 0 || this.existingSandboxInfo === undefined) {
+      return;
+    }
+    const sandboxId = this.providerSandboxId(this.existingSandboxInfo.sandbox_id);
+    const shown = shownSkillNoticesBySandbox.get(sandboxId) ?? new Set<string>();
+    for (const notice of this.deliveredSkillNotices) {
+      shown.add(notice.key);
+    }
+    // Re-inserting moves the sandbox to the newest end, so the bound drops the least recently used.
+    shownSkillNoticesBySandbox.delete(sandboxId);
+    shownSkillNoticesBySandbox.set(sandboxId, shown);
+    for (const oldest of shownSkillNoticesBySandbox.keys()) {
+      if (shownSkillNoticesBySandbox.size <= MAX_SANDBOXES_WITH_SHOWN_NOTICES) {
+        break;
+      }
+      shownSkillNoticesBySandbox.delete(oldest);
+    }
+    this.deliveredSkillNotices = [];
   }
 
   /** Exec output as text, with any skill notices for the person added once. */
@@ -3358,6 +3482,9 @@ export class Sandbox extends LocalToolMCP {
   }
 
   private clearExistingSandbox(): void {
+    if (this.existingSandboxInfo !== undefined) {
+      forgetShownSkillNotices(this.providerSandboxId(this.existingSandboxInfo.sandbox_id));
+    }
     this.existingSandboxInfo = undefined;
     this.sandboxCreationPromise = undefined;
     this.sandboxInitPromise = undefined;
@@ -7061,9 +7188,15 @@ export class Sandbox extends LocalToolMCP {
       }
       skillInit = this.skillMounter?.offlineSkillsInit(skillPaths, accepted);
       this.skillCopyFailures = failed;
-      this.pendingSkillNotices = [...failed].map(([name, failure]) =>
-        skillCopyFailedNotice({ name, cause: failure.cause }),
-      );
+      // A new Sandbox is built for every turn, approvals included, and each one copies the skills in
+      // again. The host remembers the notices already shown for this sandbox, so each shows once per chat.
+      const alreadyShown = shownSkillNoticesBySandbox.get(sandboxId) ?? new Set<string>();
+      this.pendingSkillNotices = [...failed]
+        .map(([name, failure]) => ({
+          key: skillNoticeKey({ name, cause: failure.cause }),
+          text: skillCopyFailedNotice({ name, cause: failure.cause }),
+        }))
+        .filter(notice => !alreadyShown.has(notice.key));
       this.cachedSkillsSection = undefined;
     }
     if (skillInit) {
