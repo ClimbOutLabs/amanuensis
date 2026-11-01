@@ -33,6 +33,25 @@ export const MIRROR_UPSTREAM_BASES: Record<MirrorEcosystem, readonly string[]> =
   cargo: ['https://index.crates.io', 'https://static.crates.io'],
 };
 
+/**
+ * The code hosts the Go mirror serves modules from, named by the first part of a module path.
+ * A Go path that names a module from any other host is refused.
+ */
+const GO_MODULE_HOSTS: readonly string[] = [
+  'github.com',
+  'gitlab.com',
+  'bitbucket.org',
+  'codeberg.org',
+  'git.sr.ht',
+  'golang.org',
+  'google.golang.org',
+  'go.googlesource.com',
+  'gopkg.in',
+  'go.uber.org',
+  'k8s.io',
+  'sigs.k8s.io',
+];
+
 /** One download may be at most this large by default; the server setting of the same name overrides it. */
 export const DEFAULT_MIRROR_DOWNLOAD_MAX_BYTES = 1024 * 1024 * 1024;
 /** The whole cache may be at most this large by default; the server setting of the same name overrides it. */
@@ -228,6 +247,51 @@ export function isSafeMirrorPath(rawPath: string): boolean {
   return true;
 }
 
+/**
+ * The module a Go mirror path names, or undefined when the path names no module. Module proxy
+ * paths carry the module before the /@ marker, checksum database lookups carry it after
+ * /lookup/ and before the version's @, and the via route is unwrapped first. Checksum tile
+ * paths name no module, so they return undefined.
+ */
+function goModulePath(rest: string): string | undefined {
+  let tail = rest;
+  if (tail.startsWith('/via/')) {
+    const after = tail.slice('/via/'.length);
+    const slash = after.indexOf('/');
+    if (slash === -1) {
+      return undefined;
+    }
+    tail = after.slice(slash);
+  }
+  if (tail.startsWith('/sumdb/')) {
+    const after = tail.slice('/sumdb/'.length);
+    const slash = after.indexOf('/');
+    if (slash === -1) {
+      return undefined;
+    }
+    tail = after.slice(slash);
+  }
+  if (tail.startsWith('/lookup/')) {
+    const named = tail.slice('/lookup/'.length);
+    const at = named.indexOf('@');
+    return at === -1 ? named : named.slice(0, at);
+  }
+  const marker = tail.indexOf('/@');
+  if (marker === -1) {
+    return undefined;
+  }
+  return tail.slice(1, marker);
+}
+
+/**
+ * The host a module path starts with, with the module proxy escaping undone: an upper-case
+ * letter in a module path travels as a ! followed by its lower-case form.
+ */
+function goModuleHost(modulePath: string): string {
+  const first = modulePath.split('/')[0] ?? '';
+  return first.replace(/!([a-z])/g, (_match, letter: string) => letter.toUpperCase()).toLowerCase();
+}
+
 function headerValue(headers: Record<string, string | string[] | undefined>, name: string): string | undefined {
   const value = headers[name];
   return Array.isArray(value) ? value[0] : value;
@@ -350,6 +414,18 @@ export class PackageMirrorGateway {
       this.#plain(res, 403, "That package file is not on this mirror's own list, so it was not fetched.");
       this.#log({ grant, ecosystem, path: rest, status: 403, bytes: 0, cached: false, at: startedAt });
       return;
+    }
+    if (ecosystem === 'go') {
+      const modulePath = goModulePath(rest);
+      if (modulePath !== undefined && !GO_MODULE_HOSTS.includes(goModuleHost(modulePath))) {
+        this.#plain(
+          res,
+          403,
+          'That Go module comes from a code host this mirror does not fetch from. Use a module from a well-known code host, such as github.com.',
+        );
+        this.#log({ grant, ecosystem, path: rest, status: 403, bytes: 0, cached: false, at: startedAt });
+        return;
+      }
     }
     const publicBase = `http://127.0.0.1:${String(SLOT_MIRROR_GUEST_PORT)}/m/${token}`;
     if (ecosystem === 'cargo' && rest === '/config.json') {
