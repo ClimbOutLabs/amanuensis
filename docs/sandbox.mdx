@@ -177,6 +177,38 @@ cwd-relative, and Unicode hyphen or no-break-space characters inside a path are 
 their ASCII form. A rejection that survives normalisation states what was received and what was
 expected, so a retrying model has something concrete to correct.
 
+`write_file` creates a new file only; it never overwrites one. It creates any folders on the path
+that do not exist yet, so a new project can be written file by file. It never follows a link: a path
+through a file or a link is refused with a plain message naming it.
+
+## Coding in the sandbox
+
+The shell tool runs repository and workspace commands. It does not run inline code
+(`python3 -c`, `node -e` and the like), a script by path, or any other Python module; those go
+through `run_code`. Building and testing a Python project is the exception: `python3 -m pytest`,
+`python3 -m pip`, `python3 -m venv` and `python3 -m unittest` run in the shell.
+
+A reply can do as much work inside the sandbox workspace as the task needs: writing and editing
+files, running code, builds and tests. Two limits still apply to every reply:
+
+- At most five actions that can reach past the sandbox, such as sending something, changing
+  something in a connected app, or a `git push`. On a sandbox with network access, every command
+  that does more than look at files counts too, builds and test runs included, because any of them
+  could reach the internet; on an offline sandbox (sandbox slots) they do not. An action counts once
+  it was tried, even if it answered with an error; one that was refused or never sent does not, and
+  reads never do.
+- A step budget of 8 model steps, with one step handed back for each step that saved a file in the
+  sandbox (or wrote to a space), up to 12 more. When it runs out, Aman says what it changed and what
+  is left, and you can ask it to continue.
+
+The same call made twice with nothing changed in between is skipped as a repeat, so running the
+tests again after a file edit works, and running them twice in a row does not. An action that can
+reach past the sandbox is never repeated in one reply, whatever changed in between, and is not
+retried after an error: it may have gone through anyway, so Aman checks and tells you instead.
+
+If a skill cannot be copied into the sandbox, Aman says so once per chat, on the first tool result
+that follows, and keeps working without it.
+
 ## Lifecycle
 
 - Provisioned on demand when the agent needs code, files, skills, or Code Mode.
