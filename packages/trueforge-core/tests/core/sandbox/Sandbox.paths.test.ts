@@ -40,6 +40,7 @@ import {
 import {
   APPLY_PATCH_CHECK_FAILURE_HINT,
   buildWriteAndRunScriptCommand,
+  forgetShownSkillNotices,
   Sandbox,
   SANDBOX_APPLY_PATCH_TOOL_NAME,
   SANDBOX_EXEC_TOOL_NAME,
@@ -4479,6 +4480,21 @@ describe('Sandbox skills without a network', () => {
       const prompt = new InstructionBuilder('prompt');
       next.buildSkillsInstruction(prompt);
       expect(prompt.build()).toContain("gamma: unavailable (couldn't be copied into the sandbox)");
+
+      // A sandbox that is gone forgets what it showed, so a new one at the same id shows it again.
+      forgetShownSkillNotices(basename(root));
+      const fresh = makeSandbox(provider, {
+        existingSandboxId: basename(root),
+        skillMounter: new SkillMounter({ skills: [gamma] }),
+      });
+      expect(noticesOf(await fresh.callTool(execTrue, { status: 'allow', scope: 'once' }))).toEqual([
+        "The skill gamma couldn't be downloaded, so Aman is working without it. Check your internet connection.",
+      ]);
+      const afterFresh = makeSandbox(provider, {
+        existingSandboxId: basename(root),
+        skillMounter: new SkillMounter({ skills: [gamma] }),
+      });
+      expect(noticesOf(await afterFresh.callTool(execTrue, { status: 'allow', scope: 'once' }))).toBeUndefined();
 
       // Another skill left out later is still shown once.
       const delta = registrySkill({ name: 'delta', presignedUrl: 'http://127.0.0.1:9/delta.tar' });

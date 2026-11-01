@@ -271,6 +271,7 @@ import {
   countsTowardWriteCap,
   findUnbackedClaim,
   isSandboxFileEditTool,
+  OUTSIDE_ACTION_RETRY_RESULT,
   REPEATED_ACTION_OWNER_MESSAGE,
   REPEATED_ACTION_RESULT,
   repetitionStopMessage,
@@ -4672,12 +4673,15 @@ export class AgentThread {
       const countsTowardCap = countsTowardWriteCap(call.tool_info, {
         staysInWorkspace: callStaysInWorkspace({ call, toolMapping }),
       });
+      // An outside action gets no automatic retry either: one that reported an error may still
+      // have gone out, so the model is told to check first.
       const lastRun = turn.callSignatures.get(signature);
       const alreadySeen =
         seenInBatch.has(signature) ||
         (lastRun !== undefined &&
-          !retryIsDue({ lastKind: lastRun.lastKind, retried: lastRun.retried }) &&
-          (countsTowardCap || lastRun.writesAtLastRun >= turn.changesThisTurn));
+          (countsTowardCap ||
+            (!retryIsDue({ lastKind: lastRun.lastKind, retried: lastRun.retried }) &&
+              lastRun.writesAtLastRun >= turn.changesThisTurn)));
       const duplicateInStep = seenInBatch.has(signature);
       seenInBatch.add(signature);
       if (alreadySeen) {
@@ -4687,7 +4691,12 @@ export class AgentThread {
         const limit = readOnly ? REPEAT_LIMIT_READ_TOOLS : REPEAT_LIMIT_OTHER_TOOLS;
         const overLimit = duplicateInStep ? !readOnly : (lastRun?.count ?? 0) >= limit;
         repeatStop = repeatStop || (consecutive && overLimit);
-        return blocked({ call, message: REPEATED_ACTION_RESULT, ownerMessage: REPEATED_ACTION_OWNER_MESSAGE });
+        const mayHaveGoneOut = countsTowardCap && lastRun !== undefined && lastRun.lastKind !== 'ok';
+        return blocked({
+          call,
+          message: mayHaveGoneOut ? OUTSIDE_ACTION_RETRY_RESULT : REPEATED_ACTION_RESULT,
+          ownerMessage: REPEATED_ACTION_OWNER_MESSAGE,
+        });
       }
       // Only actions that can reach past the sandbox count (see countsTowardWriteCap), once they ran;
       // the calls admitted in this batch are reserved so one batch cannot overshoot the cap.

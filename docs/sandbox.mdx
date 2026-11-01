@@ -158,15 +158,18 @@ files, running code, builds and tests. Two limits still apply to every reply:
 
 - At most five actions that can reach past the sandbox, such as sending something, changing
   something in a connected app, or a `git push`. On a sandbox with network access, every command
-  that does more than look at files counts too. An action counts once it was tried, even if it
-  answered with an error; one that was refused or never sent does not, and reads never do.
+  that does more than look at files counts too, builds and test runs included, because any of them
+  could reach the internet; on an offline sandbox (sandbox slots) they do not. An action counts once
+  it was tried, even if it answered with an error; one that was refused or never sent does not, and
+  reads never do.
 - A step budget of 8 model steps, with one step handed back for each step that saved a file in the
   sandbox (or wrote to a space), up to 12 more. When it runs out, Aman says what it changed and what
   is left, and you can ask it to continue.
 
 The same call made twice with nothing changed in between is skipped as a repeat, so running the
 tests again after a file edit works, and running them twice in a row does not. An action that can
-reach past the sandbox is never repeated in one reply, whatever changed in between.
+reach past the sandbox is never repeated in one reply, whatever changed in between, and is not
+retried after an error: it may have gone through anyway, so Aman checks and tells you instead.
 
 If a skill cannot be copied into the sandbox, Aman says so once per chat, on the first tool result
 that follows, and keeps working without it.

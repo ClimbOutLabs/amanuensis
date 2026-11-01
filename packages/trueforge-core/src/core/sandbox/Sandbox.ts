@@ -1167,9 +1167,16 @@ export const sandboxWriteFileSchema = z
 
 /**
  * The skill notices already shown, per sandbox. Kept on the host, where nothing run in the sandbox
- * can change it. It lasts as long as the server process; after a restart a notice may show once more.
+ * can change it. An entry is dropped when its sandbox goes away, and the oldest go first past a bound,
+ * so it stays small; a dropped or restarted entry only means a notice may show once more.
  */
 const shownSkillNoticesBySandbox = new Map<string, Set<string>>();
+const MAX_SANDBOXES_WITH_SHOWN_NOTICES = 1_000;
+
+/** Forgets the skill notices shown for a sandbox that is gone, such as a deleted chat's. */
+export function forgetShownSkillNotices(sandboxId: string): void {
+  shownSkillNoticesBySandbox.delete(sandboxId);
+}
 
 /** A skill notice for the person, with the key that says whether it was already shown. */
 interface SkillNotice {
@@ -3232,7 +3239,15 @@ export class Sandbox extends LocalToolMCP {
     for (const notice of this.deliveredSkillNotices) {
       shown.add(notice.key);
     }
+    // Re-inserting moves the sandbox to the newest end, so the bound drops the least recently used.
+    shownSkillNoticesBySandbox.delete(sandboxId);
     shownSkillNoticesBySandbox.set(sandboxId, shown);
+    for (const oldest of shownSkillNoticesBySandbox.keys()) {
+      if (shownSkillNoticesBySandbox.size <= MAX_SANDBOXES_WITH_SHOWN_NOTICES) {
+        break;
+      }
+      shownSkillNoticesBySandbox.delete(oldest);
+    }
     this.deliveredSkillNotices = [];
   }
 
@@ -3467,6 +3482,9 @@ export class Sandbox extends LocalToolMCP {
   }
 
   private clearExistingSandbox(): void {
+    if (this.existingSandboxInfo !== undefined) {
+      forgetShownSkillNotices(this.providerSandboxId(this.existingSandboxInfo.sandbox_id));
+    }
     this.existingSandboxInfo = undefined;
     this.sandboxCreationPromise = undefined;
     this.sandboxInitPromise = undefined;

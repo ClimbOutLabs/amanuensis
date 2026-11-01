@@ -33,6 +33,7 @@ import { AgentThread } from '../../../src/core/runtime/AgentThread';
 import { InternalEventType, type ContextMessage } from '../../../src/core/runtime/AgentThread.types';
 import { MAX_TOOL_CALLS_PER_REPLY, TOO_MANY_TOOL_CALLS_MESSAGE } from '../../../src/core/runtime/modelReplyGuard';
 import {
+  OUTSIDE_ACTION_RETRY_RESULT,
   REPEATED_ACTION_RESULT,
   TOOL_MARKUP_RETRY_MESSAGE,
   WRITE_CAP_BLOCKED_RESULT,
@@ -1354,6 +1355,21 @@ describe('write cap leaves work inside the sandbox workspace alone', () => {
     await drain(thread);
 
     expect(callToolNames(toolSet)).toEqual(['exec', 'write_file']);
+  });
+
+  it('does not retry an outside action that reported an error, and says to check whether it went out', async () => {
+    const toolSet = makeResearchToolSet();
+    jest
+      .mocked(toolSet.callTool)
+      .mockImplementation(() => Promise.resolve(toolResultResponse({ text: '{"error":"timed out"}', isError: true })));
+    const thread = makeThread({
+      toolSet,
+      create: scriptedCalls([[{ name: 'draft_email', text: 'same' }], [{ name: 'draft_email', text: 'same' }]]),
+    });
+    await drain(thread);
+
+    expect(callToolNames(toolSet)).toEqual(['draft_email']);
+    expect(toolResults(thread).at(-1)?.content).toContain(OUTSIDE_ACTION_RETRY_RESULT);
   });
 
   it('counts an outside action that reported an error, since it may still have gone out', async () => {

@@ -23,6 +23,10 @@ export const TOOL_MARKUP_RETRY_MESSAGE =
 export const REPEATED_ACTION_RESULT =
   'This exact action already ran or was refused in this reply. Do not repeat it; tell the person what happened.';
 
+/** Result text for an outside action tried again after an error. Not run: the first try may have gone out. */
+export const OUTSIDE_ACTION_RETRY_RESULT =
+  'Not run again: this action reported an error, but it may still have gone through. Do not try it again in this reply. Check whether it went through, if you can, and tell the person what happened.';
+
 /** What the person reads in place of a repeat the guard skipped. */
 export const REPEATED_ACTION_OWNER_MESSAGE = 'Skipped, because I had already done this. Check the result above.';
 
