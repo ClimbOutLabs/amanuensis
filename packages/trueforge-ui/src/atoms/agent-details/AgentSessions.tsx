@@ -6,6 +6,7 @@ import { Group, Panel, Separator } from 'react-resizable-panels';
 import { useResourcePermissions } from '../../hooks/useResourcePermissions.js';
 import { useSessionShareSearch } from '../../hooks/useSessionShareSearch.js';
 import { Icon } from '../../icons/Icon.js';
+import type { HarnessAgentSessionsServer } from '../../plugins/trueforge-agent-server-adapter/agentSessionsServer.js';
 import { buildSessionResumeHref } from '../../routing/paths.js';
 import { useOptionalResolvedRoutes } from '../../routing/ResolvedRoutesContext.js';
 import { useAgentSessionsServer, useServer } from '../../server/ServerContext.js';
@@ -39,9 +40,7 @@ function entrySourceType(entry: SessionListEntry): 'schedule' | undefined {
   return 'sourceType' in entry && Reflect.get(entry, 'sourceType') === 'schedule' ? 'schedule' : undefined;
 }
 
-type RecallCapableSessionsServer = AgentSessionsServer & {
-  listRecallTimestamps: (params: { sessionId: string }) => Promise<{ turnId: string; timestamp: string }[]>;
-};
+type RecallCapableSessionsServer = AgentSessionsServer & Pick<HarnessAgentSessionsServer, 'listRecallTimestamps'>;
 
 /** Narrows to the harness server when recall timestamp support is available. */
 function hasRecallSupport(server: AgentSessionsServer): server is RecallCapableSessionsServer {
