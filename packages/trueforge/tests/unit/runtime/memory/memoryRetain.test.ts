@@ -21,13 +21,11 @@ describe('buildRetainItem', () => {
       userText: 'What is my wife’s name?',
       assistantText: 'Your wife’s name is Robin.',
       completedAt: '2026-08-30T12:00:00.000Z',
-      sessionTitle: 'Family chat',
     });
 
     expect(item).toEqual({
       content: 'User: What is my wife’s name?\n\nAssistant: Your wife’s name is Robin.',
       timestamp: '2026-08-30T12:00:00.000Z',
-      context: 'Family chat',
       document_id: 'aman-s1-t1',
       // Default provenance for a turn with no untrusted tool output: the user's own voice.
       metadata: { session_id: 's1', turn_id: 't1', source: 'aman-chat', origin: 'user_stated' },
@@ -53,17 +51,6 @@ describe('buildRetainItem', () => {
       origin: 'tool_ingested',
     });
     expect(tainted?.metadata?.['origin']).toBe('tool_ingested');
-  });
-
-  it('omits context when no session title is given', () => {
-    const item = buildRetainItem({
-      sessionId: 's1',
-      turnId: 't1',
-      userText: 'hi',
-      assistantText: 'hello',
-      completedAt: '2026-08-30T12:00:00.000Z',
-    });
-    expect(item?.context).toBeUndefined();
   });
 
   it('skips (returns undefined) when both sides are empty', () => {
@@ -146,7 +133,6 @@ describe('submitRetain', () => {
       userText: 'hi',
       assistantText: 'hello',
       completedAt: '2026-08-30T12:00:00.000Z',
-      sessionTitle: undefined,
       logger: makeLogger(),
     });
 
@@ -174,7 +160,6 @@ describe('submitRetain', () => {
       userText: 'summarize this email',
       assistantText: 'summary',
       completedAt: '2026-08-30T12:00:00.000Z',
-      sessionTitle: undefined,
       origin: 'tool_ingested',
       logger: makeLogger(),
     });
@@ -194,7 +179,6 @@ describe('submitRetain', () => {
         userText: '',
         assistantText: '',
         completedAt: '2026-08-30T12:00:00.000Z',
-        sessionTitle: undefined,
         logger: makeLogger(),
       }),
     ).resolves.toBeUndefined();
@@ -213,7 +197,6 @@ describe('submitRetain', () => {
         userText: 'hi',
         assistantText: 'hello',
         completedAt: '2026-08-30T12:00:00.000Z',
-        sessionTitle: undefined,
         logger: makeLogger(),
       }),
     ).resolves.toBeUndefined();
@@ -264,7 +247,6 @@ describe('submitRetainWithVerification', () => {
       userText: 'hi',
       assistantText: 'hello',
       completedAt: '2026-08-30T12:00:00.000Z',
-      sessionTitle: undefined,
       logger: makeLogger(),
     };
   }
@@ -345,9 +327,18 @@ describe('submitRetainWithVerification', () => {
     getOperation.mockResolvedValue({ ok: false, code: 'timeout', reason: 'timeout' });
     retryOperation.mockRejectedValue(new Error('network down'));
 
-    await expect(submitRetainWithVerification(submitParams(client))).resolves.toBeUndefined();
+    // Nothing was stored, so the caller must not claim a save.
+    await expect(submitRetainWithVerification(submitParams(client))).resolves.toBe(false);
     // Initial submission plus the one deterministic resubmission for an unreadable status.
     expect(retain).toHaveBeenCalledTimes(2);
+  });
+
+  it('resolves true once the provider holds the exchange', async () => {
+    const { client, retain, getOperation } = verifyingClient();
+    retain.mockResolvedValue({ ok: true });
+    getOperation.mockResolvedValue({ ok: true, status: 'completed' });
+
+    await expect(submitRetainWithVerification(submitParams(client))).resolves.toBe(true);
   });
 
   it('is a no-op when there is nothing to retain', async () => {
@@ -355,42 +346,42 @@ describe('submitRetainWithVerification', () => {
 
     await expect(
       submitRetainWithVerification({ ...submitParams(client), userText: '', assistantText: '' }),
-    ).resolves.toBeUndefined();
+    ).resolves.toBe(false);
     expect(retain).not.toHaveBeenCalled();
     expect(getOperation).not.toHaveBeenCalled();
   });
 });
 
-describe('buildRetainItem with summarizedContent', () => {
-  it('uses the summary instead of the verbatim transcript when provided', () => {
+describe('buildRetainItem with memoryText', () => {
+  it('stores the text as it is, without a prefix and without the transcript', () => {
     const item = buildRetainItem({
       sessionId: 's1',
       turnId: 't1',
       userText: 'Please remember that my synthetic test robot is named Bleep-Bloop.',
       assistantText: 'Got it — Bleep-Bloop is your synthetic test robot.',
       completedAt: '2026-09-19T12:00:00.000Z',
-      summarizedContent: '- User has a synthetic test robot named Bleep-Bloop.',
+      memoryText: 'The person has a synthetic test robot named Bleep-Bloop.',
     });
 
-    expect(item?.content).toBe('Turn summary: - User has a synthetic test robot named Bleep-Bloop.');
-    // The verbatim transcript is not stored when a summary is present.
-    expect(item?.content).not.toContain('User: Please remember');
+    expect(item?.content).toBe('The person has a synthetic test robot named Bleep-Bloop.');
+    expect(item?.content).not.toContain('Turn summary');
+    expect(item?.content).not.toContain('Assistant:');
   });
 
-  it('falls back to verbatim when summarizedContent is blank', () => {
+  it('stores nothing when memoryText is blank, never the transcript', () => {
     const item = buildRetainItem({
       sessionId: 's1',
       turnId: 't1',
       userText: 'hi',
       assistantText: 'hello',
       completedAt: '2026-09-19T12:00:00.000Z',
-      summarizedContent: '   ',
+      memoryText: '   ',
     });
 
-    expect(item?.content).toBe('User: hi\n\nAssistant: hello');
+    expect(item).toBeUndefined();
   });
 
-  it('uses verbatim when summarizedContent is absent (default behavior)', () => {
+  it('uses the exchange when memoryText is absent (summarization off)', () => {
     const item = buildRetainItem({
       sessionId: 's1',
       turnId: 't1',
@@ -402,7 +393,7 @@ describe('buildRetainItem with summarizedContent', () => {
     expect(item?.content).toBe('User: hi\n\nAssistant: hello');
   });
 
-  it('keeps a tool_ingested origin on the summarized path (summarization is not a trust upgrade)', () => {
+  it('keeps a tool_ingested origin (summarization is not a trust upgrade)', () => {
     const item = buildRetainItem({
       sessionId: 's1',
       turnId: 't1',
@@ -410,10 +401,23 @@ describe('buildRetainItem with summarizedContent', () => {
       assistantText: 'processed the tool output',
       completedAt: '2026-09-19T12:00:00.000Z',
       origin: 'tool_ingested',
-      summarizedContent: '- Processed tool output.',
+      memoryText: 'The person received a tool report.',
     });
 
-    expect(item?.content).toBe('Turn summary: - Processed tool output.');
+    expect(item?.content).toBe('The person received a tool report.');
     expect(item?.metadata?.['origin']).toBe('tool_ingested');
+  });
+
+  it('names the chat in metadata so recall can tell which chat a fact came from', () => {
+    const item = buildRetainItem({
+      sessionId: 's1',
+      turnId: 't1',
+      userText: 'a',
+      assistantText: 'b',
+      completedAt: '2026-09-19T12:00:00.000Z',
+      memoryText: 'The person has a cat.',
+    });
+
+    expect(item?.metadata?.['session_id']).toBe('s1');
   });
 });

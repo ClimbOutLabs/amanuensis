@@ -1,6 +1,7 @@
 import {
   extractSentinelSessionContext,
   parseAuditEntries,
+  parseUserAuditPage,
   parseUserSettings,
   type SentinelApi,
   type SentinelSessionContext,
@@ -12,6 +13,21 @@ import {
 // response bodies are parsed defensively: unknown shapes are dropped, never asserted.
 const AUDIT_LOG_URL = (sessionId: string) => `/api/v1/sessions/${encodeURIComponent(sessionId)}/audit-log`;
 const SETTINGS_URL = '/api/v1/user/settings/sentinel';
+const USER_AUDIT_LOG_URL = '/api/v1/user/audit-log';
+const BRIEF_ITEM_COMPLETIONS_URL = '/api/v1/user/brief-items/completions';
+
+/** Keys from the completions list body. Rows without a string key are dropped, never asserted. */
+function parseBriefItemCompletionKeys(body: unknown): string[] {
+  if (typeof body !== 'object' || body === null || !('data' in body) || !Array.isArray(body.data)) {
+    return [];
+  }
+  const rows: unknown[] = body.data;
+  return rows.filter(isBriefItemCompletionRow).map(row => row.item_key);
+}
+
+function isBriefItemCompletionRow(row: unknown): row is { item_key: string } {
+  return typeof row === 'object' && row !== null && 'item_key' in row && typeof row.item_key === 'string';
+}
 
 async function readError(response: Response): Promise<Error> {
   const body: unknown = await response.json().catch(() => null);
@@ -88,6 +104,21 @@ export function createSentinelApi({ fetcher, listSessionEvents }: SentinelApiDep
       return parseAuditEntries(await response.json());
     },
 
+    async listUserAuditEntries({ limit = 50, pageToken, outcome }) {
+      const query = new URLSearchParams({ limit: String(limit) });
+      if (pageToken !== undefined) {
+        query.set('page_token', pageToken);
+      }
+      if (outcome !== undefined) {
+        query.set('outcome', outcome);
+      }
+      const response = await fetcher(`${USER_AUDIT_LOG_URL}?${query.toString()}`);
+      if (!response.ok) {
+        throw await readError(response);
+      }
+      return parseUserAuditPage(await response.json());
+    },
+
     async getUserSettings() {
       const response = await fetcher(SETTINGS_URL);
       if (!response.ok) {
@@ -110,6 +141,34 @@ export function createSentinelApi({ fetcher, listSessionEvents }: SentinelApiDep
 
     async listSentinelSessionContext(sessionId: string): Promise<SentinelSessionContext> {
       return extractSentinelSessionContext(await listSessionEvents(sessionId));
+    },
+
+    async listBriefItemCompletions() {
+      const response = await fetcher(BRIEF_ITEM_COMPLETIONS_URL);
+      if (!response.ok) {
+        throw await readError(response);
+      }
+      return parseBriefItemCompletionKeys(await response.json());
+    },
+
+    async markBriefItemDone({ itemKey, section, title, sessionId }) {
+      const response = await fetcher(BRIEF_ITEM_COMPLETIONS_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ item_key: itemKey, section, title, session_id: sessionId }),
+      });
+      if (!response.ok) {
+        throw await readError(response);
+      }
+    },
+
+    async unmarkBriefItemDone(itemKey: string) {
+      const response = await fetcher(`${BRIEF_ITEM_COMPLETIONS_URL}/${encodeURIComponent(itemKey)}`, {
+        method: 'DELETE',
+      });
+      if (!response.ok) {
+        throw await readError(response);
+      }
     },
   };
 }

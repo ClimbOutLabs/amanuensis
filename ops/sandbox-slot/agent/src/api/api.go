@@ -85,12 +85,24 @@ type Server struct {
 	RootFS  string
 	// OOMKills returns the slot cgroup's cumulative OOM kill count.
 	OOMKills func() int64
+	// MirrorSocketPath is where the package mirror gateway listens inside the control volume;
+	// empty means the standard path next to the agent's own socket.
+	MirrorSocketPath string
+	// SkillNetSocketPath is where the skill network gateway listens inside the control volume;
+	// empty means the standard path beside the mirror gateway's socket.
+	SkillNetSocketPath string
 
 	sem      chan struct{}
 	sessions sessionLocks
 	once     sync.Once
 	mu       sync.Mutex
 	last     attest.Report
+
+	mirrorMu    sync.Mutex
+	mirrorToken string
+
+	skillNetMu    sync.Mutex
+	skillNetToken string
 }
 
 func (s *Server) init() { s.once.Do(func() { s.sem = make(chan struct{}, 1) }) }
@@ -163,6 +175,8 @@ type runCodeRequest struct {
 	FilesIn   []fileIn `json:"files_in"`
 	TimeoutMS int      `json:"timeout_ms"`
 	DiskMB    int      `json:"disk_mb"`
+	// PackageMirrorToken grants this call the package mirrors; empty keeps the guest offline.
+	PackageMirrorToken string `json:"package_mirror_token"`
 }
 
 type fileOut struct {
@@ -198,6 +212,9 @@ func (r *runCodeRequest) validate() error {
 	if len(r.FilesIn) > lease.MaxInputFiles {
 		return fmt.Errorf("files_in has more than %d entries", lease.MaxInputFiles)
 	}
+	if r.PackageMirrorToken != "" && !validMirrorToken(r.PackageMirrorToken) {
+		return errors.New("package_mirror_token must be 32 lowercase hex characters")
+	}
 	return nil
 }
 
@@ -219,31 +236,51 @@ func validateArgv(argv []string) error {
 }
 
 // guestEnv is the whole guest environment. Nothing from the agent's own environment is passed.
-func guestEnv() []string {
-	return []string{
+// An empty mirror token gives the offline environment, where every package tool is pinned to a
+// dead end. A token gives the mirror environment: the same list, except the package tools point at
+// this slot's loopback mirror forwarder, under that token and nothing else.
+func guestEnv(mirrorToken string) []string {
+	env := []string{
 		"PATH=/usr/local/bin:/usr/bin:/bin",
 		"LANG=C.UTF-8",
 		"HOME=/scratch",
 		"USER=root",
 		"LOGNAME=root",
 		"TMPDIR=/tmp",
-		"PIP_NO_INDEX=1",
-		"npm_config_registry=http://127.0.0.1:1/",
 		"MPLCONFIGDIR=/tmp/matplotlib",
 		"PYTHONDONTWRITEBYTECODE=1",
-		// Toolchain caches go to the writable temp directory, and nothing tries to fetch a toolchain or crates.
+		// npm never phones the audit or funding services; on the mirrors those calls would fail.
+		"npm_config_audit=false",
+		"npm_config_fund=false",
+		// Toolchain caches go to the writable temp directory, and nothing tries to fetch a toolchain.
 		"GOCACHE=/tmp/go-cache",
 		"GOPATH=/tmp/go",
 		"GOTOOLCHAIN=local",
-		"GOPROXY=off",
 		"GOTELEMETRY=off",
 		"CARGO_HOME=/tmp/cargo",
-		"CARGO_NET_OFFLINE=true",
 		"GIT_CONFIG_NOSYSTEM=1",
 		"GIT_CONFIG_GLOBAL=/dev/null",
 		"GIT_CONFIG_COUNT=0",
 		"GIT_ATTR_NOSYSTEM=1",
 	}
+	if mirrorToken == "" {
+		return append(env,
+			"PIP_NO_INDEX=1",
+			"npm_config_registry=http://127.0.0.1:1/",
+			"GOPROXY=off",
+			"CARGO_NET_OFFLINE=true",
+		)
+	}
+	base := mirrorBase(mirrorToken)
+	return append(env,
+		"PIP_INDEX_URL="+base+"/pypi/simple",
+		"UV_DEFAULT_INDEX="+base+"/pypi/simple",
+		"npm_config_registry="+base+"/npm",
+		// The mirror only: no ,direct, so a miss can never fall through to the open network.
+		"GOPROXY="+base+"/go",
+		"CARGO_SOURCE_CRATES_IO_REPLACE_WITH=aman-mirror",
+		"CARGO_SOURCE_AMAN_MIRROR_REGISTRY=sparse+"+base+"/cargo",
+	)
 }
 
 func failedChecks(r attest.Report) string {
@@ -304,7 +341,7 @@ func (s *Server) runCode(w http.ResponseWriter, r *http.Request) {
 		ID:     fmt.Sprintf("lease-%s-%d", req.RunID[:12], time.Now().UnixNano()),
 		RootFS: s.RootFS,
 		Argv:   req.Argv,
-		Env:    guestEnv(),
+		Env:    guestEnv(req.PackageMirrorToken),
 		Cwd:    "/scratch",
 		UID:    guestUID,
 		GID:    guestGID,
@@ -313,7 +350,8 @@ func (s *Server) runCode(w http.ResponseWriter, r *http.Request) {
 			{Dest: "/scratch", Source: dirs.Scratch},
 			{Dest: "/egress", Source: dirs.Egress},
 		},
-		Tmpfs: []guest.Tmpfs{{Dest: "/tmp", SizeMB: guestTmpMB}},
+		Tmpfs:         []guest.Tmpfs{{Dest: "/tmp", SizeMB: guestTmpMB}},
+		SharedNetwork: req.PackageMirrorToken != "",
 	}
 	limit := int64(req.DiskMB) << 20
 	spec.MaxFileBytes = limit
@@ -325,12 +363,14 @@ func (s *Server) runCode(w http.ResponseWriter, r *http.Request) {
 	}
 	started := time.Now()
 	oomBefore := s.OOMKills()
+	endGrant := s.beginMirrorGrant(req.PackageMirrorToken)
 	res := s.Runner.Run(r.Context(), spec, guest.Options{
 		Timeout:       time.Duration(req.TimeoutMS) * time.Millisecond,
 		StreamCap:     StreamCapBytes,
 		Guard:         watch.guard,
 		GuardInterval: guardIntervalMS * time.Millisecond,
 	})
+	endGrant()
 	oomed := s.OOMKills() > oomBefore
 
 	resp := runCodeResponse{

@@ -6,8 +6,11 @@ const profile = {
   assistant_name: 'Mira',
   assistant_identity: null,
   voice_guidance: null,
+  user_name: 'Sam Rivera',
+  address_as: 'Sam',
   user_profile: null,
   pinned_preferences: [],
+  help_areas: [],
   learned_profile: null,
   learning_enabled: false,
 };
@@ -42,6 +45,18 @@ async function loadProfile(api: ReturnType<typeof createPersonalizationApi>) {
   }
   return loaded;
 }
+
+test('personalization API reads the name fields, and reads them as unset from an older server', async () => {
+  const named = createPersonalizationApi(async () => Response.json({ data: profile }));
+  assert.deepEqual(await named.getProfile(), profile);
+
+  const { user_name: _name, address_as: _address, ...olderServerProfile } = profile;
+  const older = createPersonalizationApi(async () => Response.json({ data: olderServerProfile }));
+  assert.deepEqual(await older.getProfile(), { ...profile, user_name: null, address_as: null });
+
+  const invalid = createPersonalizationApi(async () => Response.json({ data: { ...profile, user_name: 7 } }));
+  await assert.rejects(invalid.getProfile(), /invalid/);
+});
 
 test('personalization API keeps an absent learning switch absent and rejects a non-boolean one', async () => {
   // Synthesizing a value here would make it indistinguishable from one the server sent, and the
@@ -81,6 +96,18 @@ test('personalization API sends a toggled switch even to a server that never sen
   await api.updateProfile({ ...loaded, learning_enabled: true });
 
   assert.deepEqual(savedProfiles, [{ profile: { ...profileWithoutSwitch, learning_enabled: true } }]);
+});
+
+test('personalization API keeps the help areas in the order saved and rejects an unknown area', async () => {
+  const api = createPersonalizationApi(async () =>
+    Response.json({ data: { ...profile, help_areas: ['work_money', 'focus'] } }),
+  );
+  assert.deepEqual((await api.getProfile())?.help_areas, ['work_money', 'focus']);
+
+  const unknown = createPersonalizationApi(async () =>
+    Response.json({ data: { ...profile, help_areas: ['gardening'] } }),
+  );
+  await assert.rejects(unknown.getProfile(), /personalization response was invalid/i);
 });
 
 test('personalization API rejects malformed preference data instead of exposing it to the UI', async () => {

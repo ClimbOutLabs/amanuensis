@@ -18,6 +18,8 @@ import type { ExecResult, SandboxExecParams, SandboxProvider } from '../../../..
 import { NOOP_AGENT_TRACING } from '../../../../src/core/tracing/NoopAgentTracing';
 import { makeSilentLogger } from '../../harnessMocks';
 import { TestDurableWorkspaceCoordinator } from '../../sandbox/durableWorkspaceCoordinator';
+import { fakeTrackedState } from '../../sandbox/fakeTrackedState';
+import { realCommandExec } from '../../sandbox/realCommandExec';
 
 const BOUND_REPOSITORY: BoundRepository = {
   repository_id: 'repo-no-sandbox',
@@ -108,6 +110,7 @@ describe('host request context', () => {
       threadId: 'main',
       title: 'Main',
       toolCallMemo: undefined,
+      turnToolCallLedger: undefined,
       taskState: undefined,
       isRequestContinuation: undefined,
       tracing: NOOP_AGENT_TRACING,
@@ -161,6 +164,7 @@ describe('host request context', () => {
       threadId: 'main',
       title: 'Main',
       toolCallMemo: undefined,
+      turnToolCallLedger: undefined,
       taskState: undefined,
       isRequestContinuation: undefined,
       tracing: NOOP_AGENT_TRACING,
@@ -230,14 +234,17 @@ describe('host request context', () => {
         branch = 'codex/second';
         headSha = '2222222222222222';
       }
-      return Promise.resolve({ success: true, response: { exitCode: 0, result: 'ok' } });
+      return Promise.resolve({
+        success: true,
+        response: { exitCode: 0, result: fakeTrackedState([])[params.command] ?? 'ok' },
+      });
     });
     const provider: SandboxProvider = {
       type: 'test',
       buildImage: () => Promise.resolve({ status: 'ready', reason: null, metadata: null }),
       getImageBuildStatus: () => Promise.resolve({ status: 'ready', reason: null, metadata: null }),
       createSandbox: () => Promise.resolve({ sandboxId: 'sandbox-1' }),
-      exec,
+      exec: realCommandExec(exec),
       getAdditionalInstructions: () => undefined,
       getWorkspaceDir: () => undefined,
       getToolResultDumpDir: () => '/provider/tool-results',
@@ -269,6 +276,7 @@ describe('host request context', () => {
       threadId: 'main',
       title: 'Main',
       toolCallMemo: undefined,
+      turnToolCallLedger: undefined,
       taskState: undefined,
       isRequestContinuation: undefined,
       tracing: NOOP_AGENT_TRACING,

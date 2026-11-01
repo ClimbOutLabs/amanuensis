@@ -14,6 +14,7 @@ import {
 } from '../mcp/implementationPlanGrant';
 import { ShellApprovalBindingSchema } from '../permissions/approvalTokens';
 import { TIER2_ACTION_KINDS, Tier3CardSchema, TierSchema, TrackedExecutionBindingSchema } from '../permissions/tier';
+import { GitRemotePreconditionSchema } from '../sandbox/gitRemoteObservation';
 import { StructuredEditPreconditionSchema } from '../sandbox/structuredEditPrecondition';
 import {
   ChatCompletionAssistantMessageParamSchema,
@@ -84,9 +85,26 @@ export const MapsHostsSchema = z
   .object({
     geocoder: z.string(),
     router: z.string(),
+    walking: z.string(),
+    cycling: z.string(),
+    transit: z.string(),
     tile: z.string(),
   })
   .describe('Configured maps upstream URLs for the approval card destination.');
+
+export const DocumentScopeSchema = z
+  .object({
+    staged_uploads_dir: z
+      .string()
+      .nullable()
+      .describe('Directory the sandbox stages uploaded files in, or null when it is not known.'),
+    workspace_cwd: z.string().nullable().describe('Bound project folder for this chat, or null when none is bound.'),
+    path_resolution: z
+      .enum(['host', 'remote'])
+      .nullable()
+      .describe("How this call's file paths are read: on the server's filesystem, or inside a remote sandbox."),
+  })
+  .describe('Host-derived folders the document reader may read without asking. Never model-authored.');
 
 export const InternalToolCallInfoSchema = z.object({
   type: z.enum(['truefoundry-system', 'mcp']).describe('Whether the tool is a system tool or MCP tool.'),
@@ -113,13 +131,24 @@ export const InternalToolCallInfoSchema = z.object({
     .describe(
       'How the Sentinel reads this call\'s file paths: the sandbox provider says "remote" when the sandbox filesystem is not the server\'s. Never model-authored.',
     ),
+  workspace_cwd: z
+    .string()
+    .nullable()
+    .optional()
+    .describe(
+      'Workspace the classifier judged this call against, recorded by the tool that classified it so pre-dispatch verification re-checks containment against the same root. Never model-authored.',
+    ),
   is_client_side: z.boolean().optional().describe('Whether the client must supply the tool result.'),
   // Runtime + wire: deviation from origin/main OpenAPI (which omitted this field) is accepted.
   is_thread_creation: z.boolean().optional().describe('Whether this tool call creates a subagent thread.'),
   pre_dispatch_failure: z
     .object({
-      kind: z.enum(['policy_blocked', 'pre_dispatch_failed']),
+      kind: z.enum(['policy_blocked', 'pre_dispatch_failed', 'connector_unreachable']),
       message: z.string(),
+      owner_message: z
+        .string()
+        .optional()
+        .describe('One plain line shown to the owner instead of the generic message.'),
     })
     .optional()
     .describe('Host-only failure captured while preparing the call, before provider dispatch.'),
@@ -138,12 +167,22 @@ export const InternalToolCallInfoSchema = z.object({
   structured_edit_precondition: StructuredEditPreconditionSchema.optional().describe(
     'Host-observed structured-edit target state captured before approval. Never model-authored or client supplied.',
   ),
+  git_remote_precondition: GitRemotePreconditionSchema.optional().describe(
+    'Host-observed git remotes captured before approval. Never model-authored or client supplied.',
+  ),
   maps_hosts: MapsHostsSchema.optional().describe(
     'Host-derived configured maps upstream hosts for the approval card destination. Never model-authored or client supplied.',
+  ),
+  document_scope: DocumentScopeSchema.optional().describe(
+    'Host-derived folders the document reader may read without asking. Never model-authored or client supplied.',
   ),
   // Sentinel host-only classification. Populated by the classifier in
   // ToolSet/Sandbox; always present on classified calls, never wire-visible.
   tier: TierSchema.optional().describe('Server-owned Sentinel permission tier. Never model-authored.'),
+  tier_reason: z
+    .string()
+    .optional()
+    .describe('Server-owned classifier reason code behind the tier. Never model-authored.'),
   tier3_card: Tier3CardSchema.nullable()
     .optional()
     .describe('Server-rendered approval card for Tier 2 and Tier 3 actions, or null.'),
@@ -161,6 +200,17 @@ export const InternalToolCallInfoSchema = z.object({
     .string()
     .optional()
     .describe('Text of a web search the host ran without asking, shown as a chip. Never model-authored.'),
+  grant_host: z
+    .string()
+    .nullable()
+    .optional()
+    .describe(
+      'Connector host a standing grant for this call binds to, set on a grant-eligible ask. Never model-authored.',
+    ),
+  audit_description: z
+    .string()
+    .optional()
+    .describe('Audit-row text used instead of the approval card sentence. Never model-authored, never wire-visible.'),
   held_for_owner: z
     .object({ expires_at: z.string(), duplicate: z.literal(true).optional() })
     .optional()
@@ -171,6 +221,18 @@ export const InternalToolCallInfoSchema = z.object({
     .literal(true)
     .optional()
     .describe('Set on every call to the connector the user designated as search provider. Never model-authored.'),
+  secret_path_read: z
+    .literal(true)
+    .optional()
+    .describe(
+      'Set when the call reads a sensitive path or passes a path-like argument, which is never eligible for a standing grant. Never model-authored.',
+    ),
+  mail_send: z
+    .literal(true)
+    .optional()
+    .describe(
+      "Set when the call is a send through the host's own Email sidecar, so approving it checks the Email list. Never model-authored.",
+    ),
   approval_binding: TrackedExecutionBindingSchema.nullable()
     .optional()
     .describe('Host-derived tracked-execution content/argv binding. Never model-authored.'),
@@ -187,7 +249,7 @@ export const TrueFoundrySystemToolInfoSchema = z
     host_observed_target_summary: z
       .string()
       .optional()
-      .describe('Host-observed structured-edit target summary shown during approval.'),
+      .describe('Host-observed target the call acts on, such as a file or git repository, shown during approval.'),
     ...ToolEffectHintsSchema.shape,
   })
   .openapi('TrueFoundrySystemToolInfo');
@@ -201,7 +263,7 @@ export const MCPToolInfoSchema = z
     host_observed_target_summary: z
       .string()
       .optional()
-      .describe('Host-observed structured-edit target summary shown during approval.'),
+      .describe('Host-observed target the call acts on, such as a file or git repository, shown during approval.'),
     silent_search_query: z
       .string()
       .optional()
@@ -310,6 +372,7 @@ export type ThinkingBlock = z.infer<typeof ThinkingBlockSchema>;
 export type RedactedThinkingBlock = z.infer<typeof RedactedThinkingBlockSchema>;
 export type ToolEffectHints = z.infer<typeof ToolEffectHintsSchema>;
 export type MapsHosts = z.infer<typeof MapsHostsSchema>;
+export type DocumentScope = z.infer<typeof DocumentScopeSchema>;
 export type InternalToolCallInfo = z.infer<typeof InternalToolCallInfoSchema>;
 export type RegisteredCommandExecution = z.infer<typeof RegisteredCommandExecutionSchema>;
 export type TrueFoundrySystemToolInfo = z.infer<typeof TrueFoundrySystemToolInfoSchema>;
@@ -317,6 +380,7 @@ export type MCPToolInfo = z.infer<typeof MCPToolInfoSchema>;
 export type ToolInfo = z.infer<typeof ToolInfoSchema>;
 export type InternalEnrichedToolCall = z.infer<typeof InternalEnrichedToolCallSchema>;
 export type EnrichedToolCall = z.infer<typeof EnrichedToolCallSchema>;
+export type RawToolCall = z.infer<typeof RawToolCallSchema>;
 export type RawAssistantMessage = z.infer<typeof RawAssistantMessageSchema>;
 export type InternalEnrichedAssistantMessage = z.infer<typeof InternalEnrichedAssistantMessageSchema>;
 export type EnrichedAssistantMessage = z.infer<typeof EnrichedAssistantMessageSchema>;
@@ -354,11 +418,48 @@ export interface ExtendedChatCompletionChunk extends Omit<ChatCompletionChunk, '
   usage?: CompletionUsage | null;
 }
 
+/**
+ * Which repetition guard stopped a reply, the channel it was watching, and, for the
+ * reasoning guard, how many words it had seen when it tripped. Carried on the stream
+ * result and on the reasoning error so the stop can be logged with its guard and channel
+ * instead of guessed at afterwards.
+ */
+export interface RepetitionStop {
+  guard: 'answer_units' | 'streaming_shingles';
+  channel: 'answer' | 'reasoning';
+  words?: number | undefined;
+}
+
 export interface RawAssistantMessageWithUsage {
   output: RawAssistantMessage;
   usage: CompletionUsage;
   /** null when the stream ended without a finish_reason chunk (e.g. provider omitted it). */
   finish_reason: FinishReason | null;
+  /**
+   * Set when the reply's answer text carried leaked tool-call markup. The markup is held out of
+   * output.content and never runs, and the turn is not retried. Absent when the reply had none.
+   */
+  tool_markup?: 'leaked';
+  /**
+   * Set when a repetition guard cut the answer short. output.content ends with the stop notice and
+   * nothing after the first copy of the loop. Absent when the reply was not cut.
+   */
+  repetition_stopped?: true;
+  /** Which guard cut the answer short and on which channel, present when repetition_stopped is set. */
+  repetition_stop?: RepetitionStop;
+  /**
+   * Ids of tool calls the stream stopped early because their arguments ran past the host's
+   * per-call size limit. Their arguments are partial and must never run: the reply guard
+   * refuses them with a plain message that tells the model to send the content in smaller
+   * parts. Absent when no call was cut.
+   */
+  size_cut_tool_calls?: string[];
+  /**
+   * Set when the stream stopped reading because the reply started more tool calls than the
+   * stream reads. The calls it holds are the ones before the cut; the reply guard stops the
+   * turn rather than running part of the reply. Absent when the whole reply was read.
+   */
+  tool_call_count_cut?: true;
 }
 
 export const UNKNOWN_TOOL_NAME = 'unknown';

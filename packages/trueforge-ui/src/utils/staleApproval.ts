@@ -1,10 +1,20 @@
 import { apiErrorCode } from './apiErrorCode.js';
 
 /**
- * The server refuses an approval answered after the chat moved on (409 with this `error.code`).
- * Nothing was approved or run, so the UI says so in plain words and reloads the chat.
+ * The server refuses an approval answered after the chat moved on, or one whose request ended (409
+ * with one of these `error.code`s). Nothing was approved or run, so the UI says so in plain words
+ * and reloads the chat.
  */
-const STALE_APPROVAL_CODE = 'stale_approval_continuation';
+const STALE_APPROVAL_CODES: ReadonlySet<string> = new Set(['stale_approval_continuation', 'approval_request_ended']);
+
+const ENDED_APPROVAL_CODE = 'approval_request_ended';
+
+/**
+ * The one line a person sees when they answer a request that already ended. The server's own
+ * refusal carries the same sentence; this is the UI's single owner of it, shared by the note on
+ * the card itself and the message shown when an answer is refused.
+ */
+export const REQUEST_ENDED_LINE = 'This request ended. Ask again if you still need it.';
 
 export const EXPIRED_REQUEST_TITLE = 'This request expired';
 export const EXPIRED_REQUEST_DESCRIPTION =
@@ -12,7 +22,13 @@ export const EXPIRED_REQUEST_DESCRIPTION =
 
 export function isStaleApprovalError(error: unknown): boolean {
   const detail = apiErrorCode(error);
-  return detail?.statusCode === 409 && detail.code === STALE_APPROVAL_CODE;
+  return detail?.statusCode === 409 && typeof detail.code === 'string' && STALE_APPROVAL_CODES.has(detail.code);
+}
+
+/** True when the server refused an answer because the request it answers already ended. */
+export function isEndedApprovalError(error: unknown): boolean {
+  const detail = apiErrorCode(error);
+  return detail?.statusCode === 409 && detail.code === ENDED_APPROVAL_CODE;
 }
 
 type StaleApprovalListener = () => void;

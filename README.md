@@ -1,245 +1,281 @@
 <p align="center">
-  <img src="./packages/frontend/public/aman-avatar.png" alt="Aman, the Amanuensis scribe, writing with a quill" width="180">
+  <img src="./packages/frontend/public/aman-avatar.png" alt="Mannie, the Amanuensis panda, writing with a quill" width="160">
 </p>
 
 <h1 align="center">Amanuensis</h1>
 
 <p align="center">
-  <em>A private, local-first AI workbench. Your models, your tools, your memory — on your machine.</em>
+  <strong>A chief of staff that lives on your own computer.</strong><br>
+  It knows your life, keeps track of what you'd otherwise forget, and never does anything without your knowledge.
 </p>
 
 <p align="center">
-  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MPL_2.0-brightgreen.svg" alt="License: MPL 2.0"></a>
-  <img src="https://img.shields.io/badge/node-%3E%3D22.14-brightgreen.svg" alt="Node.js >= 22.14">
-  <img src="https://img.shields.io/badge/pnpm-11.16_via_Corepack-orange.svg" alt="pnpm 11.16 via Corepack">
-  <img src="https://img.shields.io/badge/local--first-blue.svg" alt="local-first">
+  <img src="https://img.shields.io/badge/runs_on-your_own_computer-c9a95a.svg" alt="Runs on your own computer">
+  <img src="https://img.shields.io/badge/works_with-a_fully_local_model-7d5f15.svg" alt="Works with a fully local model">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/free_and-open_source-c9a95a.svg" alt="Free and open source"></a>
 </p>
 
 <p align="center">
-  <a href="docs/quickstart.mdx"><strong>Developer quickstart</strong></a> &nbsp;·&nbsp;
-  <a href="docs/install.mdx">Install</a> &nbsp;·&nbsp;
-  <a href="docs/introduction.mdx">Introduction</a> &nbsp;·&nbsp;
-  <a href="docs/deployment-security.mdx">Deployment security</a> &nbsp;·&nbsp;
-  <a href="CONTRIBUTING.md">Contributing</a>
+  <a href="#get-started"><strong>Get started</strong></a> &nbsp;·&nbsp;
+  <a href="#what-it-does">What it does</a> &nbsp;·&nbsp;
+  <a href="docs/privacy.md">Privacy</a>
 </p>
 
 <p align="center">
-  <img src="./packages/frontend/public/readme-hero.png" alt="Amanuensis after sign-in: the New Chat screen with the left navigation rail, an empty chat history, the message composer with a model selector, and the assistant panel on the right" width="850">
+  <img src="./docs/screenshots/readme/home.png" alt="The Amanuensis home screen: a greeting for Maya, a setup checklist, the message box, situation buttons such as I'm behind and Someone I look after, four suggestion cards, and the panda assistant panel on the right" width="900">
 </p>
 
-Amanuensis (Aman) is a private, local-first AI workbench built on the TrueForge agent harness. It combines a browser chat interface with configurable models, MCP tools, reusable agents and skills, sandboxed execution, session persistence, and Aman-specific personalization and memory features.
+---
 
-## ✨ Features
+## Why
 
-- 💬 **Streamed, resumable chat** — sessions organized with saved agents and folders.
-- 🧠 **Your choice of model** — configurable providers, including OpenAI-compatible endpoints and fully local Ollama; model roles assign separate models to conversation and auxiliary work.
-- 🔌 **MCP connectors** — header or OAuth authentication, tool approvals, and per-chat capability selection.
-- 📦 **Reusable skills and subagents** — `SKILL.md` instruction packs, dynamic subagents, and generative UI that renders interactive results instead of plain text.
-- 💻 **Sandboxed execution** — on-demand code and file execution through the Daytona adapter; standalone mode also supports a built-in local adapter on macOS and Linux hosts.
-- 👤 **Personalization** — personas and an inspectable personalization profile.
-- 🗄️ **Long-term memory** — on by default as local Markdown files: the model retains what matters from each chat and recalls it in later ones, with bounded recall and auditable recall events. Self-hosted Hindsight banks remain available as an experimental opt-in.
+Most AI assistants are built for people who already live in software: a keyboard, a prompt, patience for a wall of text, and the energy to explain everything from scratch every time.
 
-Capabilities are configurable. A fresh checkout does not include a model, MCP credentials, or sandbox credentials — memory works out of the box with local Markdown files.
+Most people run a household, not a terminal. They carry the flyer, the bill, the form, the appointment and the thing they promised someone, and they carry it in their head, because nothing was built to carry it for them.
 
-## 🏗️ Architecture
+Amanuensis is built for them. You give it a name (ours is Mannie). It wakes up before you do and has the day sorted. It drafts the email, then waits for you to say send. You never write a prompt: you say what's going on, the way you'd say it to a friend, and it takes it from there.
 
-```mermaid
-flowchart TB
-    Browser["Browser chat UI<br/>(packages/frontend)"]
-    Server["TrueForge server<br/>HTTP API · auth · streaming<br/>(packages/trueforge)"]
-    Runtime["Agent runtime<br/>tool orchestration · approvals · sessions<br/>(packages/trueforge-core)"]
-    Models["Model providers<br/>OpenAI-compatible · Ollama"]
-    MCP["MCP connectors<br/>header / OAuth auth"]
-    Sandbox["Sandbox<br/>Daytona · local adapter"]
-    Memory["Memory<br/>Markdown files (local)"]
-    Storage[("Storage<br/>SQLite in standalone<br/>Postgres + Redis hosted")]
+## What it does
 
-    Browser --> Server --> Runtime
-    Runtime --> Models
-    Runtime --> MCP
-    Runtime --> Sandbox
-    Runtime --> Memory
-    Server --> Storage
+- **Start the day already ahead.** Before coffee, it has read the overnight mail and the day's calendar. It tells you the few things that matter, the one that looks wrong, and the one that can wait until Friday.
+- **The reply you've been avoiding.** It finds the email that's been sitting there for nine days, drafts it in your voice, shows you, and sends when you say so.
+- **The thing you keep meaning to do.** Book the dentist. Cancel the subscription you forgot about. Work out what the letter from the city wants. It does the first step and asks before the rest.
+- **It remembers, so you can let go.** Who's allergic to what, that Thursdays are bad, that your mother's appointment moved. All of it on your own machine, where you can read it and change it.
+- **Some things should just happen.** The brief every weekday, a look at what you pay for each month, a reminder the evening before. Set once, and it keeps going.
+- **You're always in charge.** Every send and every change is shown to you first, exactly as it will happen. Say no, and nothing happens. Afterwards there's a receipt.
+- **Your inbox can't boss it around.** A message that says "ignore your instructions" is just a message. Nothing it reads can pretend to be you or slip into its memory as fact.
+- **One assistant, many hats.** Make a persona for the job search, the language you're learning or the move. Each one keeps its own memory and notes, walled off from the rest.
+- **A place for what you'd lose in chat.** The meal plan, the medicine schedule, the moving checklist. It goes into a space: a living page that updates in place while the chat scrolls away.
+- **It's yours to keep.** Your memory is plain files on your disk. Back it up, export it, move it to a new machine, and it comes with you.
 
-    style Browser fill:#e8f4ff,stroke:#4a9eff
-    style Runtime fill:#fff7e8,stroke:#e8a13d
-    style Storage fill:#eef7ee,stroke:#5aa65a
-```
+## See it
 
-## Repository layout
+### The morning brief
 
-| Path                      | Purpose                                                               |
-| ------------------------- | --------------------------------------------------------------------- |
-| `packages/trueforge`      | HTTP server, persistence, provider management, and Aman host features |
-| `packages/trueforge-core` | Agent runtime, tool orchestration, and session contracts              |
-| `packages/frontend`       | Browser application                                                   |
-| `packages/trueforge-ui`   | Reusable UI components and server-facing UI contracts                 |
-| `packages/trueforge-sdk`  | Generated TypeScript SDK                                              |
-| `docs`                    | Product, setup, architecture, and API documentation                   |
-| `ops`                     | Aman-specific design records, evaluations, and runbooks               |
+Every morning it reads the mail and the calendar and puts the day on one page: the top action item, what came in and who's waiting, replies drafted in your voice, every appointment with how to get there and when to leave, and tomorrow at a glance.
 
-## Install on your own computer
+<p align="center">
+  <img src="./docs/screenshots/readme/brief-full.jpg" alt="A complete morning brief on one long page: route maps, the top action item, an email table, a draft reply, appointments with travel times, briefings per appointment and tomorrow at a glance" width="600">
+</p>
 
-The installer sets everything up in one command. You need Docker (on Linux the installer can install it for you). Check out the release tag you were given, then run the installer.
+### Leave on time, and see every step
+
+It works out when to leave for each appointment. Activity, on the right, records every step it took and why it was allowed.
+
+<p align="center">
+  <img src="./docs/screenshots/readme/brief.jpg" alt="A table of the day's appointments with where they are, how to get there and when to leave, and the Activity panel listing what the assistant read and did" width="850">
+</p>
+
+### Spaces
+
+A living page with its sources, kept up to date by the assistant. Ask it to change something and the page updates in place.
+
+<p align="center">
+  <img src="./docs/screenshots/readme/space.jpg" alt="A space titled Apartment-Friendly Dog Breeds: a comparison table of four breeds with sources, kept up to date by the assistant" width="850">
+</p>
+
+### Memory you can read
+
+Every memory is one plain sentence you can search, edit or forget.
+
+<p align="center">
+  <img src="./docs/screenshots/readme/memory.jpg" alt="Settings, Memory: Nata remembers 22 things about you, with a search box, filters, and memories such as Maya's age, her remote work hours and her photography, each with Copy, Edit and Forget" width="850">
+</p>
+
+### Personas
+
+Each persona has its own name, model, role and knowledge library.
+
+<p align="center">
+  <img src="./docs/screenshots/readme/personas.jpg" alt="Settings, Roles and Personas: the persona Iris open for editing, with name, other names it answers to, its model Nemotron 3 Super, and its role text" width="850">
+</p>
+
+## Get started
+
+Setup takes about 15 minutes. Here is what you need:
+
+- **A Mac or a Linux computer** with about 10 GB of free space. Windows works too, through a free Microsoft add-on called WSL 2: see the [Windows guide](docs/install-windows.md). Windows support is still new, so expect a few more bumps than on a Mac or Linux. If you get stuck, [tell us](https://github.com/ClimbOutLabs/amanuensis/issues) and we'll help.
+- **Docker**, the free program Aman runs inside. On a Mac, [download Docker Desktop](https://www.docker.com/products/docker-desktop/), install it and start it. On Linux, the installer can set Docker up for you.
+- **A Together AI account**, which gives Aman a model to think with. Signing up is free, and you pay Together for what you use. You can sign up now or after the install.
+
+### Install
+
+Open the **Terminal** app, paste these two lines, and press Enter. If your Mac offers to install developer tools the first time, accept, then paste the lines again.
 
 ```bash
 git clone https://github.com/ClimbOutLabs/amanuensis && cd amanuensis
-git checkout vX.Y.Z
 ./installer/install.sh
 ```
 
-Then open http://localhost:8791 and see [docs/try-aman.md](docs/try-aman.md).
+The installer checks your computer first and tells you in plain words if something is missing. It shows its plan and asks before it changes anything. It asks a few questions one at a time: the email you will sign in with, what Aman should call you, and a password. At the end it prints the address to open in your browser.
 
-## Development quick start
+It also sets up sign-in, backups and phone access, and leaves an `aman` command behind. Run `aman doctor` if something seems wrong, and `aman upgrade` to get the newest version.
 
-> **`main` is active development and may be unstable.** To build a tagged release instead, add `--branch <tag>` to the `git clone` below; tags are listed under [Releases](https://github.com/ClimbOutLabs/amanuensis/releases).
->
-> A guided one-command installer (`installer/install.sh`, described in [docs/install.mdx](docs/install.mdx)) is coming; until it lands on `main`, use the steps below.
+### After you install
 
-The fastest path to a working chat is standalone mode: one process on your own machine, SQLite storage, no database server. Login is mandatory: `pnpm dev:login` runs a local Dex identity provider in Docker, or point it at any OIDC provider. You need [Node.js](https://nodejs.org/en/download) 22.14 or newer and pnpm 11.16.0 through [Corepack](https://pnpm.io/installation#using-corepack) (the exact version is pinned in `package.json`); on Windows, run these from [WSL](https://learn.microsoft.com/windows/wsl/install) or [Git Bash](https://git-scm.com/downloads/win):
+**1. Get a Together AI key.** Aman needs a model to think with. [Together AI](https://www.together.ai) hosts open models and is the quickest way to start.
+
+- Sign up free at [api.together.ai](https://api.together.ai).
+- Open **Settings, API keys** ([direct link](https://api.together.ai/settings/projects/~current/api-keys)) and create a key.
+- Copy it. It is shown only once.
+
+**2. Add it to Aman.** Open Aman and go to **Settings**, then **Models**. Together AI is built in: under **Available**, find **together** and click **Configure**. Paste the key you copied into the **API key** field and click **Create**. Nothing else to fill in: the address and the models come with it.
+
+Its models are now on your list. Pick the one you want in the menu under the message box.
+
+**3. Give your chief of staff a name and a personality.** Go to **Settings, Personalization**, and find **Assistant profile**. It has three fields:
+
+- **Name**: what you'll call it. Ours is Mannie.
+- **Voice guidance**: one line on how it talks, such as "Warm, direct, concise".
+- **Identity**: a few sentences on how it sees its job.
+
+While you're there, add your own name and a line about yourself at the top of the page, so it knows who it works for. Save, and the new name shows up everywhere straight away.
+
+Not sure what to write? Start from one of these and copy its two fields in. Change anything you like.
+
+| Personality                                                    | Good for                                                                                 |
+| -------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| [The steady hand](docs/personalities/steady-hand.md)           | Calm and organised. For when your days feel like too much.                               |
+| [The straight shooter](docs/personalities/straight-shooter.md) | No padding, no pep talk. For when you want the answer and nothing else.                  |
+| [The warm friend](docs/personalities/warm-friend.md)           | Kind and encouraging. For the reply you've been avoiding.                                |
+| [The coach](docs/personalities/coach.md)                       | Keeps you moving. For when you're behind or keep meaning to do things.                   |
+| [The planner](docs/personalities/planner.md)                   | Thinks ahead. For busy households, trips, moves and anything with a lot of moving parts. |
+
+None of these change what it's allowed to do. Sending, deleting and installing still wait for your OK, whatever personality you pick.
+
+**4. Go say hello.** Open the home screen and tap **I'm behind**, or just say what's on your mind. Your chief of staff asks one question at a time and takes it from there.
+
+**5. Connect your email and calendar.** This is where it starts carrying things for you. Go to **Settings, Connectors**:
+
+- **Gmail and Google Calendar.** Choose **Google**, then **Connect**. The panel walks you through making your own Google sign-in in about ten minutes, so your mail goes from Google straight to your computer and nobody else is in between. Connect mail first, then **Connect Calendar**. [Step-by-step guide](docs/google.mdx).
+- **Any other mailbox or calendar.** Choose **Email** for an IMAP mailbox (Outlook, iCloud, Fastmail and most others), and **Calendar** for a CalDAV calendar.
+
+Reading is quiet. Every draft, send and calendar change shows you a card first and waits for your OK.
+
+Once your mail and calendar are connected, tap **Run my daily brief** on the home screen to see what tomorrow morning will look like.
+
+Prefer another provider? Any service with an OpenAI-compatible API goes in the same way. Fully local models, such as Ollama or an NVIDIA DGX Spark, work too.
+
+More help: [full install guide](docs/install.mdx) · [Windows guide](docs/install-windows.md) · [first steps](docs/try-aman.md)
+
+## Your data, your rules
+
+Your memory, chats, personas and settings live on your computer. Memory is plain Markdown files you can open in any text editor; [docs/memory.md](docs/memory.md) explains how it works.
+
+Be clear about one thing: **the model sees what you send it.** If you use a hosted model, the company running it sees each chat, including what Aman knows about you and anything it reads for you. To keep everything on your computer, use a local model. Web searches, maps and connectors still reach their own services. [docs/privacy.md](docs/privacy.md) lists exactly what goes where.
+
+Sending a message, deleting anything and installing anything always wait for your OK. That rule is enforced in code, on the tool itself, not left to the model's good behaviour.
+
+## For developers and the curious
+
+### How it works
+
+```mermaid
+flowchart LR
+    You(["You<br/>browser or phone"])
+
+    subgraph Home["Runs on your computer"]
+        Server["Aman server<br/>sign-in · chat stream · schedules"]
+        Runtime["Agent runtime<br/>plans · calls tools<br/>approval gate"]
+        Builtin["Built-in tools<br/>memory · spaces · maps"]
+        Connectors["Connectors (MCP)<br/>mail · calendar · web search"]
+        Sandbox["Sandbox<br/>locked-down containers"]
+        Voice["Speech-to-text<br/>small local model"]
+        Data[("Your data<br/>memory as Markdown files<br/>chats in SQLite or Postgres")]
+    end
+
+    Models["Model<br/>hosted, such as Together AI<br/>or local on your computer"]
+
+    You --> Server --> Runtime
+    Server --> Voice
+    Server --> Data
+    Runtime --> Models
+    Runtime --> Builtin
+    Runtime --> Connectors
+    Runtime --> Sandbox
+    Builtin --> Data
+
+    classDef paper fill:#fffdf8,stroke:#c9a95a,color:#2c2a26
+    classDef gold fill:#fbf0cc,stroke:#c9a95a,color:#2c2a26
+    class Server,Runtime,Builtin,Connectors,Sandbox,Voice,Models paper
+    class You,Data gold
+    style Home fill:#f7f2e8,stroke:#d9ccb6,color:#746b5d
+```
+
+Every tool call passes the approval gate first. Reading and searching run on their own; sending, deleting and installing wait for your OK. Mail (Gmail or any IMAP mailbox) and calendars (Google or CalDAV) each run in their own container, and web search uses Tavily. Memory, spaces and maps are built into the server. Speech-to-text and memory search run on small local models. What reaches outside services is the model you chose, web searches, map lookups and the mail and calendar calls you approve; [docs/privacy.md](docs/privacy.md) has the full list.
+
+### What we built
+
+Aman began as a fork of [TrueForge](https://github.com/truefoundry/trueforge), an open-source agent harness from TrueFoundry, on 24 August 2026. Since then: **796 merged pull requests of our own, about 783,000 lines added, and test files up from 820 to 1,769.** Fewer than half of TrueForge's files are untouched.
+
+From TrueForge came the agent runtime, tool calling, the approvals framework, sessions, the HTTP server, storage, model providers, MCP support and the UI toolkit. Everything that makes it Amanuensis was built on top: memory, personas, spaces, the morning brief, mail and calendar, the approval cards, the security guards, the installer, the demo world and the look.
+
+The full accounting, area by area with pull request numbers and the git commands to check it, is in [docs/AMANUENSIS_ATTRIBUTION.md](docs/AMANUENSIS_ATTRIBUTION.md).
+
+Amanuensis was built for the Nebius × NVIDIA Global AI Hackathon and runs on NVIDIA Nemotron through Nebius Token Factory. [docs/token-factory.md](docs/token-factory.md) explains which model does which job, what it costs, and how the cost shows under each answer.
+
+### Running from source
+
+> `main` is active development. Tagged builds are under [Releases](https://github.com/ClimbOutLabs/amanuensis/releases).
+
+The fastest working setup is standalone mode: one process, SQLite, no database server. You need Node.js 22.14 or newer and pnpm through Corepack.
 
 ```bash
 git clone https://github.com/ClimbOutLabs/amanuensis && cd amanuensis
 corepack enable
 pnpm install --frozen-lockfile
 cp packages/trueforge/.env.example packages/trueforge/.env
-pnpm dev:login   # second terminal; prints the OIDC_* lines for .env
+pnpm dev:login   # in a second terminal; prints the OIDC_* lines for .env
 # add those lines and PUBLIC_BASE_URL=http://localhost:3000 to packages/trueforge/.env, then:
 pnpm standalone:dev
 ```
 
-Open `http://localhost:3000` and sign in with the account `pnpm dev:login` prints. The app ships with no model configured — connect one under **Settings → Models** before starting a chat.
+Open `http://localhost:3000`, sign in with the account `pnpm dev:login` printed, and connect a model under **Settings, Models**. [docs/quickstart.mdx](docs/quickstart.mdx) walks through it, including troubleshooting.
 
-The server runs without a file watcher (on some Windows machines the watcher stalls before the server starts), so restart `pnpm standalone:dev` to pick up backend changes — the UI itself still hot-reloads.
-
-[docs/quickstart.mdx](docs/quickstart.mdx) walks through this path in full: prerequisites, connecting your first model (a hosted API key or a fully local Ollama model), confirming a chat works, and troubleshooting the failures a fresh install actually hits.
-
-## Docker Compose (production path)
-
-When you're ready to run Aman as a shared service instead of a personal install. This is the production topology — the server containerized, Postgres replacing SQLite as durable storage, and Redis so streams and cancellations follow the client across server replicas — with no Node.js or pnpm needed on the host. Choose it when the app needs to serve more than just you, or when you want to evaluate a deployment.
-
-The app is single-user and, as shipped, this stack has no login screen: every port is bound to `127.0.0.1`, and whoever reaches port `8791` is the admin. The stack's `login` profile adds a real sign-in screen with an account you define, and needs no external identity provider; turn it on before anyone but you can reach the app (see [Deployment Security](docs/deployment-security.mdx)).
+Before you push:
 
 ```bash
-git clone https://github.com/ClimbOutLabs/amanuensis && cd amanuensis
-cp packages/trueforge/.env.example packages/trueforge/.env
-docker compose up --build
+pnpm verify   # secret scan, format, lint, types, build and tests
 ```
 
-The first build takes several minutes. `docker compose up` keeps streaming container logs in the foreground; the stack is ready when the `server` line `Agent server listening on http://0.0.0.0:8790` appears. Open `http://localhost:8791`.
+Read [AGENTS.md](AGENTS.md) and any package-level `AGENTS.md` before changing code. Generated SDK and OpenAPI files are never edited by hand.
 
-**Turn on login.** Generate a client secret and a password hash, uncomment the **Compose login profile** block in `packages/trueforge/.env`, fill in the values it names (the hash stays inside its single quotes), then start the stack with the profile. From then on, always start it with the profile.
+<details>
+<summary><strong>Repository layout</strong></summary>
 
-```bash
-openssl rand -hex 32
-docker run --rm httpd:2.4-alpine htpasswd -nbBC 10 "" 'your-password' | cut -d: -f2
-docker compose --profile login up --build
-```
+| Path                      | Purpose                                                           |
+| ------------------------- | ----------------------------------------------------------------- |
+| `packages/trueforge`      | HTTP server, storage, providers and Aman's host features          |
+| `packages/trueforge-core` | Agent runtime, tool orchestration and session contracts           |
+| `packages/frontend`       | The browser app                                                   |
+| `packages/trueforge-ui`   | UI components and server-facing UI contracts                      |
+| `packages/trueforge-sdk`  | Generated TypeScript SDK                                          |
+| `packages/amanuensis`     | `npx amanuensis`: server and chat UI with one command             |
+| `packages/aman-installer` | Single-file installer program for Windows, Mac and Linux          |
+| `installer`               | The one-command installer and the `aman` command it leaves behind |
+| `charts`                  | Helm chart for Kubernetes                                         |
+| `demo`                    | Maya's demo world: example data, scripts and the runbook          |
+| `mcp`                     | The Gmail MCP connector                                           |
+| `docs`                    | Product, setup, architecture and API docs                         |
+| `ops`                     | Design records, evaluations and runbooks                          |
 
-Open `http://localhost:8791` and click **Let's Get Started**. The identity provider runs at `https://localhost:5556` with a certificate the stack minted on first start, so the browser warns once: choose **Advanced**, proceed to localhost, and sign in with the email and password you chose.
+</details>
 
-<p align="center">
-  <img src="./packages/frontend/public/compose-get-started.png" alt="The first screen of a Compose stack with login on: the Amanuensis logo, the heading Welcome to Amanuensis, and a Let's Get Started button" width="420">
-  <img src="./packages/frontend/public/compose-login.png" alt="The Dex sign-in form the button leads to: an Email Address field, a Password field, and a Login button" width="420">
-</p>
-
-You land in **Settings → Models** as that user, with your name at the bottom of the navigation rail. Connect a model there before starting a chat; nothing is configured on a fresh stack.
-
-<p align="center">
-  <img src="./packages/frontend/public/compose-signed-in.png" alt="Signed in: Settings open on the Models page, listing model providers each with a Configure button, the signed-in user shown at the bottom of the left rail, and the assistant panel on the right" width="850">
-</p>
-
-The layout adapts to a phone-width window:
-
-<p align="center">
-  <img src="./packages/frontend/public/mobile-login.png" alt="The Dex sign-in form at phone width" width="260">
-  <img src="./packages/frontend/public/mobile-new-chat.png" alt="The New Chat screen at phone width: a menu button, the How can I help you today prompt, notices that no model and no memory bank are chosen, and the message composer" width="260">
-</p>
-
-See the [quickstart's Docker Compose section](docs/quickstart.mdx#other-ways-to-run-it) for the details that differ on this path (ports, environment, the login profile in full, reaching a host-run Ollama from the container).
-
-## Deployment modes
-
-| Mode               | Storage and coordination                                          | Intended use                                          | Start command                                                  |
-| ------------------ | ----------------------------------------------------------------- | ----------------------------------------------------- | -------------------------------------------------------------- |
-| Standalone         | SQLite; one process; no Redis peering                             | Recommended install; personal use on the same machine | `pnpm standalone:dev`                                          |
-| Hosted Compose     | Containerized server, Postgres, and Redis                         | Production path; shared deployments                   | `docker compose up --build` (`--profile login` for sign-in)    |
-| Hosted development | Postgres and Redis from Compose; API and Vite app run on the host | Multi-process development                             | `pnpm dev:infra`, then `pnpm dev`                              |
-| Kubernetes         | Helm chart with bundled or external Postgres and Redis            | Managed hosted deployments                            | See [`charts/trueforge/README.md`](charts/trueforge/README.md) |
-
-The untracked `packages/trueforge/.env` file created during setup is required by both standalone and hosted server development commands. Review every value before network exposure. The example database credentials are for local development only.
-
-## Security boundaries and limitations
-
-- Standalone mode requires OIDC login and refuses to start without `OIDC_ISSUER_URL`, `OIDC_CLIENT_ID`, and `OIDC_CLIENT_SECRET`. An http issuer is accepted only on a loopback host.
-- Hosted mode also uses a shared admin identity when OIDC is unset. Configure OIDC (the Compose `login` profile, or your own identity provider) and appropriate network controls before any shared or internet-facing deployment.
-- Tool approval and sandboxing reduce risk; they are not an unlimited safety boundary. Review enabled capabilities, provider trust, egress policy, and approval requests.
-- Model credentials stay in the harness. Built-in MCP access from Code Mode is bridged back through the harness so its stored MCP tokens do not enter the sandbox; do not assume the same boundary for arbitrary custom code, tools, or integrations. Administrators remain responsible for secret storage, transport security, and provider configuration.
-- Markdown memory stores memories as plain files under `MEMORY_MARKDOWN_DIR` (default `./data/memory`) — treat that directory as sensitive. Recall screening and live tool-output screening default off.
-- The Prompt Guard sidecar under `ops/prompt-guard` is evaluation-only and is not an accepted production security control.
-
-See [authentication](docs/authentication/overview.mdx), [sandboxing](docs/sandbox.mdx), and the [memory runbook](ops/memory/RUNBOOK.md) before enabling those features outside local development.
-
-## How memory works
-
-Aman remembers things between conversations so you don't have to repeat yourself. Here is the plain-English version of how that works — the technical details live in [Memory](#memory) below.
-
-**Memories are ordinary files.** Aman saves what matters from your conversations as plain text files (Markdown) on the server, in its memory folder (by default, `./data/memory` next to the server). There is no database to manage and nothing locked away: the files are human-readable, and they're yours.
-
-**After each chat, Aman writes a short summary.** Instead of keeping every turn word for word, Aman distills each conversation down to the important details — decisions, facts about you, things to follow up on — and saves that. This keeps the memory folder small and useful. If you'd rather keep the full transcript of every turn instead, flip the **Turn summaries** switch off in **Settings → Memory**; new turns are then saved verbatim. Either way, if summarizing ever fails, Aman keeps the full transcript as a fallback, so nothing is lost.
-
-**Aman finds memories by meaning, not just words.** When you ask something, Aman searches your memories for meaning — so "where did we stay in Paris" finds the hotel note even though it says "Hotel Lumiere" and never mentions Paris. To do that, the first time Aman runs it downloads a small helper model once (about 120 MB), automatically in the background: the download starts when the server starts, so it's usually finished before you need it. There is nothing to install and nothing to click. After that one download, memory search works fully offline, and everything stays on this server. If the download can't finish, Aman just keeps finding memories with keywords, and keeps retrying in the background.
-
-**Keep the memory folder safe.** The downloaded helper model lives inside the memory folder too, so they travel together. If you run Aman with Docker, make sure the memory folder is stored on a persistent volume: without one, your memories — and the downloaded model — disappear whenever the container is recreated.
-
-## Memory
-
-Memory is on by default. Amanuensis recalls from local Markdown files before every reply and retains what matters from each completed turn, so the model never has to remember to use it. Memories live as plain files under `MEMORY_MARKDOWN_DIR` (default `./data/memory`, relative to the server's working directory) — human-readable, portable, and yours. In Docker, mount a volume at that path so memories survive container recreates.
-
-Memories are scoped by persona. While a persona is active, what it learns is kept in that persona's own vault and is private to it until you share the vault. With no persona active, memories go to the shared vault, which every persona can read. A persona recalls from its own vault, the shared vault, and any vault shared with it. Renaming or deleting a persona never deletes its vault.
-
-Manage it in **Settings → Memory**: see what's stored, turn recall on or off (the rail toggle does the same), and check the memory status. Recall is bounded, so a large memory can't blow up the model's context window, and every recall is auditable.
-
-Prefer a hosted memory bank? Set `MEMORY_BACKEND=hindsight` to use a self-hosted [Hindsight](ops/memory/RUNBOOK.md) instance instead — currently experimental. Point Amanuensis at your bank's MCP endpoint (`{apiBase}/mcp/{bank}`) with a `Bearer` API key in **Settings → Memory**. Memory calls Hindsight's REST API directly for recall and retain, so use a key valid on both surfaces; see [the runbook's two-surfaces note](ops/memory/RUNBOOK.md#two-surfaces-one-connector) if recall stops working after a key rotation.
-
-Two optional Prompt Guard screens can check content around memory before it reaches the model, both off by default:
-
-- **Memory recall screen**: screens memories recalled from the bank before they reach the model. Turn it on per bank in Settings → Memory with the "Screen recalled memories with Prompt Guard" switch; it needs a classifier URL configured and reachable first. Your own stated memories are never withheld; it only applies to memories that came from tools, documents, or email.
-- **Tool output screen**: screens tool results before they re-enter model context. This one is environment-only, with no Settings switch, and shares the same classifier URL, token, and threshold as the recall screen.
-
-See [Deployment Security](docs/deployment-security.mdx#prompt-guard-screens) for the full configuration and [Memory design](ops/memory/DESIGN.md) for how recall and retention work.
-
-## Deployment security
-
-The `docker-compose.yml` app port is unauthenticated unless `OIDC_ISSUER_URL`, `OIDC_CLIENT_ID`, and `OIDC_CLIENT_SECRET` are all set (the `login` profile sets them against its bundled Dex); the Postgres and Redis debug ports it publishes are bound to `127.0.0.1` only. See [Deployment Security](docs/deployment-security.mdx) for the full picture: what "everyone is admin without OIDC" means, changing the default Postgres password, the two optional Prompt Guard screens, the always-on sandbox network policy and Spaces iframe restrictions, and the `minimumReleaseAge: 0` supply-chain setting.
-
-## Development and verification
-
-Use root `package.json` scripts for workspace tasks:
-
-```bash
-pnpm format:check
-pnpm typecheck
-pnpm lint:ci
-pnpm build
-pnpm test
-```
-
-`pnpm verify` runs the secret scan plus all checks above. The Git pre-push hook is change-aware: it always scans the pushed tree for private data, then runs formatting, linting, type checks, or policy tests selected from the changed files. It does not always run the full verification suite.
-
-Useful targeted commands include `pnpm test:trueforge-core`, `pnpm test:trueforge`, `pnpm test:frontend`, and `pnpm smoke`. Read [AGENTS.md](AGENTS.md) and any package-local `AGENTS.md` before changing code. Generated SDK and OpenAPI files are not edited by hand.
-
-## Further reading
+<details>
+<summary><strong>Further reading</strong></summary>
 
 - [Introduction and architecture](docs/introduction.mdx)
-- [Quickstart and initial configuration](docs/quickstart.mdx)
 - [Models, roles and personas](docs/model-roles.mdx)
 - [MCP connectors](docs/mcp-servers.mdx)
-- [Memory design](ops/memory/DESIGN.md) and [operations runbook](ops/memory/RUNBOOK.md)
-- [Upstream synchronization runbook](docs/UPSTREAM_SYNC.md) and [divergence policy](DIVERGENCE.md)
+- [Safety](docs/safety.md) and [privacy](docs/privacy.md)
+- [How memory works](docs/memory.md), the [memory design](ops/memory/DESIGN.md) and the [operations runbook](ops/memory/RUNBOOK.md)
+- [Sandbox](docs/sandbox.mdx), [schedules](docs/schedules.md), [backups](docs/backup.md), [voice input](docs/voice-input.mdx)
+- [Upstream sync runbook](docs/UPSTREAM_SYNC.md) and [divergence policy](DIVERGENCE.md)
 
-## Attribution and license
+</details>
 
-Amanuensis is derived from [TrueForge](https://github.com/truefoundry/trueforge), an open-source agent harness by [TrueFoundry](https://truefoundry.com). Upstream package names, copyright notices, source lineage, and attribution are retained; see [the attribution note](docs/AMANUENSIS_ATTRIBUTION.md).
+Other ways to run it: [Docker Compose or Kubernetes](docs/quickstart.mdx#other-ways-to-run-it) · [deployment security](docs/deployment-security.mdx)
 
-Licensed under the Mozilla Public License 2.0. Portions derived from TrueForge are MIT licensed, Copyright 2024-2026 TrueFoundry; see NOTICE. Third-party components with their own terms are listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+## License and attribution
+
+Amanuensis is licensed under the [Mozilla Public License 2.0](LICENSE). It is derived from [TrueForge](https://github.com/truefoundry/trueforge) by [TrueFoundry](https://truefoundry.com); those portions are MIT licensed, Copyright 2024-2026 TrueFoundry, and their notices are kept in [NOTICE](NOTICE). Third-party components with their own terms are listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

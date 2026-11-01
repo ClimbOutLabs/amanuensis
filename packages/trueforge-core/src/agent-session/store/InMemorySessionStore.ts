@@ -21,6 +21,7 @@ import type {
   AppendCommandExecutionStartedInput,
   AppendToEventsInput,
   AppendToThreadContextInput,
+  ApprovalDismissalRecord,
   BeginImplementationPlanDispatchInput,
   BeginImplementationPlanDispatchResult,
   CommandExecutionRecord,
@@ -40,6 +41,7 @@ import type {
   GetTurnInput,
   ImplementationPlanTurnOwner,
   ISessionStore,
+  ListApprovalDismissalsInput,
   ListImplementationPlanGrantsInput,
   ListSessionEventsInput,
   ListSessionFoldersInput,
@@ -52,6 +54,7 @@ import type {
   PatchSandboxInfoInput,
   PatchThreadCapabilityStateInput,
   PersistImplementationPlanGrantInput,
+  RecordApprovalDismissalInput,
   RecoverRunningCommandExecutionsInput,
   RemoveThreadsInput,
   RenewCommandExecutionLeaseInput,
@@ -59,6 +62,7 @@ import type {
   RevokeImplementationPlanGrantInput,
   RevokeImplementationPlanGrantResult,
   SetSessionFolderInput,
+  StampImportedSessionInput,
   TurnContextAppend,
   TurnRecordWithoutSnapshot,
   UpdateSessionFolderInput,
@@ -262,6 +266,7 @@ export class InMemorySessionStore<
   private readonly commandExecutions = new Map<string, CommandExecutionRecord>();
   private readonly implementationPlanGrants = new Map<string, Map<string, StoredImplementationPlanGrant>>();
   private readonly implementationPlanDispatches = new Map<string, StoredImplementationPlanDispatch>();
+  private readonly approvalDismissals = new Map<string, Map<string, ApprovalDismissalRecord>>();
 
   async createSession(input: CreateSessionInput<TSessionCustom>): Promise<void> {
     const key = sessionKey(input.session_id);
@@ -305,6 +310,28 @@ export class InMemorySessionStore<
     return;
   }
 
+  async stampImportedSession(input: StampImportedSessionInput): Promise<void> {
+    const stored = this.sessions.get(sessionKey(input.session_id));
+    if (stored?.record.tenant_id !== input.tenant_id) {
+      throw new SessionNotFoundError(input.session_id);
+    }
+    const stamped = input.turns.map(entry => {
+      const turn = this.turns.get(turnKey({ session_id: input.session_id, turn_id: entry.turn_id }));
+      if (turn === undefined) {
+        throw new TurnNotFoundError(entry.turn_id);
+      }
+      return { turn, entry };
+    });
+    for (const { turn, entry } of stamped) {
+      turn.created_at = new Date(entry.created_at);
+      turn.updated_at = new Date(entry.updated_at);
+    }
+    stored.record.created_at = new Date(input.created_at);
+    stored.record.updated_at = new Date(input.updated_at);
+    stored.record.last_activity_timestamp_ms = input.last_activity_timestamp_ms;
+    stored.record.metrics = deepCopy(input.metrics);
+  }
+
   async deleteSession(input: DeleteSessionInput): Promise<void> {
     const sKey = sessionKey(input.session_id);
     const stored = this.sessions.get(sKey);
@@ -322,6 +349,7 @@ export class InMemorySessionStore<
       }
     }
     this.implementationPlanGrants.delete(sKey);
+    this.approvalDismissals.delete(sKey);
     for (const [dispatchKey, dispatch] of this.implementationPlanDispatches) {
       if (dispatch.session_id === input.session_id) {
         this.implementationPlanDispatches.delete(dispatchKey);
@@ -625,6 +653,26 @@ export class InMemorySessionStore<
     }
   }
 
+  async recordApprovalDismissal(input: RecordApprovalDismissalInput): Promise<void> {
+    const sKey = sessionKey(input.session_id);
+    const dismissals = this.approvalDismissals.get(sKey) ?? new Map<string, ApprovalDismissalRecord>();
+    const key = `${input.thread_id}\u0000${input.tool_call_id}`;
+    if (!dismissals.has(key)) {
+      dismissals.set(key, {
+        thread_id: input.thread_id,
+        tool_call_id: input.tool_call_id,
+        dismissed_at: input.dismissed_at,
+      });
+    }
+    this.approvalDismissals.set(sKey, dismissals);
+  }
+
+  async listApprovalDismissals(input: ListApprovalDismissalsInput): Promise<ApprovalDismissalRecord[]> {
+    return [...(this.approvalDismissals.get(sessionKey(input.session_id))?.values() ?? [])].map(record => ({
+      ...record,
+    }));
+  }
+
   async setSessionFolder(input: SetSessionFolderInput): Promise<void> {
     const session = this.sessions.get(sessionKey(input.session_id));
     if (
@@ -655,6 +703,12 @@ export class InMemorySessionStore<
         input.agent_id !== undefined &&
         (stored.record.agent.type !== 'reference' || stored.record.agent.id !== input.agent_id)
       ) {
+        continue;
+      }
+      if (input.folder_id !== undefined && stored.record.folder_id !== input.folder_id) {
+        continue;
+      }
+      if (input.no_folder && stored.record.folder_id !== null) {
         continue;
       }
       if (createdByOrAgentIds !== undefined) {
@@ -735,6 +789,14 @@ export class InMemorySessionStore<
     const previousTurnId = input.turn.previous_turn_id;
     if (input.require_previous_turn_is_tip && previousTurnId !== stored.record.last_turn_id) {
       throw new StaleApprovalContinuationError(previousTurnId, stored.record.last_turn_id);
+    }
+    // One reply at a time: whatever the parent, a new turn waits until the chat's latest turn ends.
+    const tipTurnId = stored.record.last_turn_id;
+    if (tipTurnId !== null) {
+      const tip = this.turns.get(turnKey({ session_id: input.turn.session_id, turn_id: tipTurnId }));
+      if (tip?.state.status === 'running') {
+        throw new PreviousTurnRunningError(tipTurnId);
+      }
     }
     let previousSnapshot: TurnSnapshot | undefined;
     if (previousTurnId !== null) {

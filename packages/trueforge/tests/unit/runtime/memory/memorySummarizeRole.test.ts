@@ -49,6 +49,7 @@ function agentRecord(summarizationModelName?: string): AgentRecord {
     description: 'Test agent',
     manifest,
     external_id: null,
+    host_managed: false,
     created_by_subject: {
       subject_id: 'user-1',
       subject_type: 'user',
@@ -140,5 +141,29 @@ describe('resolveSummarizationModelFqn', () => {
 
     expect(result).toBe('openai/gpt-4o-mini');
     expect(store.getAgent).not.toHaveBeenCalled();
+  });
+
+  describe('Token Factory main model', () => {
+    it('uses the main model when the role is unset', async () => {
+      const result = await resolveSummarizationModelFqn({
+        tenantId: 'tenant-1',
+        personaModelName: 'tokenfactory/nemotron-3-super-120b-a12b',
+        sessionAgent: inlineAgent(),
+        agentStore: fakeAgentStore(),
+      });
+
+      expect(result).toBe('tokenfactory/nemotron-3-super-120b-a12b');
+    });
+
+    it('keeps an explicitly chosen summarization model', async () => {
+      const result = await resolveSummarizationModelFqn({
+        tenantId: 'tenant-1',
+        personaModelName: 'tokenfactory/nemotron-3-super-120b-a12b',
+        sessionAgent: inlineAgent('tokenfactory/gpt-oss-120b'),
+        agentStore: fakeAgentStore(),
+      });
+
+      expect(result).toBe('tokenfactory/gpt-oss-120b');
+    });
   });
 });

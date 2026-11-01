@@ -13,6 +13,9 @@ import {
   parseMcpToolArgs,
   parseSandboxArgs,
   parseSandboxResult,
+  parseSpaceWriteTooLongNote,
+  parseToolNotDoneReason,
+  parseToolRefusalNotice,
   parseToolResultDisposition,
   toStatus,
 } from '@/utils/toolCallParsing.js';
@@ -93,6 +96,17 @@ describe('toolCallParsing', () => {
       resultJson: '{"response":{"exitCode":0,"result":"streamed output"',
     });
     expect(parseSandboxResult('plain')).toEqual({ resultText: 'plain' });
+    expect(
+      parseSandboxResult(
+        JSON.stringify({
+          response: { exitCode: 0, result: 'ok' },
+          notices: ["The skill echo couldn't be loaded, so Aman is working without it."],
+        }),
+      ),
+    ).toMatchObject({
+      exitCode: 0,
+      notices: ["The skill echo couldn't be loaded, so Aman is working without it."],
+    });
   });
 
   it('buffers structured edit arguments until complete and summarizes the patch', () => {
@@ -157,6 +171,60 @@ describe('toolCallParsing', () => {
     });
   });
 
+  it('says an expired card was not answered in time, and keeps "you said no" for a real decline', () => {
+    const expired = JSON.stringify({
+      schema_version: 'tool.response.v2',
+      outcome: {
+        disposition: 'denied',
+        remediation: {
+          reason_code: 'approval_expired',
+          message: 'Nothing was done.',
+          suggested_action: 'request_approval',
+        },
+      },
+      result: { error: 'ignored' },
+    });
+    expect(parseToolNotDoneReason(expired)).toBe('nobody answered in time');
+    expect(parseToolResultDisposition(expired)?.label).toBe('Expired');
+
+    const declined = JSON.stringify({
+      schema_version: 'tool.response.v2',
+      outcome: { disposition: 'denied' },
+      result: { error: 'The person said no to this. Their reason: not now.' },
+    });
+    expect(parseToolNotDoneReason(declined)).toBe('you said no');
+    expect(parseToolResultDisposition(declined)?.label).toBe('Denied');
+  });
+
+  it('shows the plain line for a call refused before it started, and only for a refusal that asks the owner', () => {
+    const owner = 'A search was stopped: all 40 tool steps for this question were used.';
+    const refused = JSON.stringify({
+      schema_version: 'tool.response.v2',
+      outcome: {
+        disposition: 'never_ran',
+        remediation: { reason_code: 'tool_pre_dispatch_failed', message: owner, suggested_action: 'contact_user' },
+      },
+      result: 'ignored',
+    });
+    expect(parseToolRefusalNotice(refused)).toBe(owner);
+    expect(parseToolNotDoneReason(refused)).toBe(owner);
+
+    const unknownTool = JSON.stringify({
+      schema_version: 'tool.response.v2',
+      outcome: {
+        disposition: 'never_ran',
+        remediation: {
+          reason_code: 'unknown_tool',
+          message: 'Use only a tool that is available.',
+          suggested_action: 'change_strategy',
+        },
+      },
+      result: 'ignored',
+    });
+    expect(parseToolRefusalNotice(unknownTool)).toBeUndefined();
+    expect(parseToolNotDoneReason(unknownTool)).toBe('it never started');
+  });
+
   it('extracts a failure reason from remediation, then from the result content, and never for a success', () => {
     const withRemediation = JSON.stringify({
       schema_version: 'tool.response.v2',
@@ -201,19 +269,77 @@ describe('toolCallParsing', () => {
     expect(buildOutcomeText(undefined, 'x')).toBeUndefined();
   });
 
+  it('reads the plain note for a space write refused for its size, from its code alone', () => {
+    const refusalText =
+      'Refusing create_space: this write carries 4,642 characters of new content, and one write may carry at most 3,600. ' +
+      'Nothing was persisted. Send a shorter body now (a heading and the first part), then add the rest with edit_space once the space exists.';
+    const envelope = (result: unknown) =>
+      JSON.stringify({ schema_version: 'tool.response.v2', outcome: { disposition: 'executed_nonzero' }, result });
+
+    const refused = envelope({
+      error: [{ type: 'text', text: JSON.stringify({ error: refusalText, error_code: 'space_write_too_long' }) }],
+    });
+    expect(parseSpaceWriteTooLongNote(refused)).toBe('Too long for one write. Splitting it into parts.');
+
+    // The same words without the code are just a failure: the wording never drives the note.
+    const uncoded = envelope({ error: [{ type: 'text', text: JSON.stringify({ error: refusalText }) }] });
+    expect(parseSpaceWriteTooLongNote(uncoded)).toBeUndefined();
+
+    const otherCode = envelope({
+      error: [{ type: 'text', text: JSON.stringify({ error: 'boom', error_code: 'something_else' }) }],
+    });
+    expect(parseSpaceWriteTooLongNote(otherCode)).toBeUndefined();
+    expect(parseSpaceWriteTooLongNote(undefined)).toBeUndefined();
+    expect(parseSpaceWriteTooLongNote('boom')).toBeUndefined();
+  });
+
   it('builds default approval options when none declared', () => {
     expect(buildApprovalOptions(undefined)).toEqual([
-      { id: 'allow-once', label: 'Approve', hint: 'Allow this one call only.', isAllow: true },
-      { id: 'deny', label: 'Deny', hint: 'Do not run this call.', isAllow: false, confirm: {} },
+      { id: 'allow-once', isAllow: true },
+      { id: 'deny', isAllow: false },
     ]);
   });
 
-  it('labels declared options with the approval verbs, whatever label the server sent', () => {
-    const labels = buildApprovalOptions([
-      { id: 'deny', kind: 'reject-once' },
-      { id: 'allow-chat', kind: 'allow-always', label: 'Allow `pnpm test` in this chat' },
-      { id: 'allow-once', kind: 'allow-once' },
-    ]).map(option => option.label);
-    expect(labels).toEqual(['Approve', 'Approve for this chat', 'Deny']);
+  it('puts the single-use allow first, then the chat allow, then deny', () => {
+    expect(
+      buildApprovalOptions([
+        { id: 'deny', kind: 'reject-once' },
+        { id: 'allow-chat', kind: 'allow-always', label: 'Allow `pnpm test` in this chat' },
+        { id: 'allow-once', kind: 'allow-once' },
+      ]),
+    ).toEqual([
+      { id: 'allow-once', isAllow: true },
+      { id: 'allow-chat', isAllow: true },
+      { id: 'deny', isAllow: false },
+    ]);
+  });
+});
+
+describe('tool output decoding', () => {
+  it('reads a JSON string literal as text, so its line breaks and quotes are real', () => {
+    const stored = JSON.stringify('Dear Rui,\n\nThe "lease" is signed.');
+    expect(getJsonDisplayValue(stored)).toEqual({ value: 'Dear Rui,\n\nThe "lease" is signed.', isJson: false });
+    expect(getToolResultContent(stored)).toEqual({ data: 'Dear Rui,\n\nThe "lease" is signed.', isJson: false });
+  });
+
+  it('reads text inside an MCP content block the same way', () => {
+    const result = { content: [{ type: 'text', text: JSON.stringify('line one\nline two') }] };
+    expect(getToolResultContent(result)).toEqual({ data: 'line one\nline two', isJson: false });
+  });
+
+  it('shows hidden characters in a decoded JSON string as escape text, not raw', () => {
+    const stored = JSON.stringify('pay‮me​nt');
+    const { value } = getJsonDisplayValue(stored);
+    expect(value).not.toContain('‮');
+    expect(value).not.toContain('​');
+    expect(value).toContain('\\u{202E}');
+  });
+
+  it('still pretty-prints a JSON object result', () => {
+    expect(getJsonDisplayValue('{"ok":true}')).toEqual({ value: '{\n  "ok": true\n}', isJson: true });
+  });
+
+  it('shows plain text as stored', () => {
+    expect(getJsonDisplayValue('just a\nline')).toEqual({ value: 'just a\nline', isJson: false });
   });
 });

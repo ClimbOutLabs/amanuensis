@@ -1,7 +1,7 @@
 'use client';
 
-import { ThreadListItemMorePrimitive, ThreadListItemPrimitive, useAui } from '@assistant-ui/react';
-import { useCallback, useEffect, useState, type FormEvent, type KeyboardEvent, type ReactNode } from 'react';
+import { useAui } from '@assistant-ui/react';
+import { useEffect, useState, type FormEvent, type KeyboardEvent, type ReactNode } from 'react';
 
 import { auiButtonClass } from '../atoms/lib/buttonClasses.js';
 import { cn } from '../atoms/lib/cn.js';
@@ -9,13 +9,14 @@ import { useCompactLayout } from '../atoms/lib/CompactLayoutContext.js';
 import { auiInputClass } from '../atoms/lib/inputClasses.js';
 import { useIsMobile } from '../atoms/lib/useIsMobile.js';
 import { BottomSheet } from '../atoms/primitives/BottomSheet.js';
+import { Button } from '../atoms/primitives/Button.js';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '../atoms/primitives/Dialog.js';
+import { DropdownMenu } from '../atoms/primitives/DropdownMenu.js';
+import { CHAT_TITLE_MAX_LENGTH, normalizeChatTitle, useSaveChatTitle } from '../hooks/useChatTitleSave.js';
 import { Icon } from '../icons/Icon.js';
 import { useOptionalChatFolders, type ChatFolder } from '../server/ChatFolderContext.js';
-import { useOptionalServer } from '../server/ServerContext.js';
-
-/** Max chat title length; mirrors `UpdateSessionRequestSchema.title` in packages/trueforge. */
-const CHAT_TITLE_MAX_LENGTH = 200;
+import { useChatColumnFold } from '../utils/chatColumnFolds.js';
+import { useToasterOptional } from './ToasterContainer.js';
 
 /** Escape cancels without saving in every inline rename/create form below. */
 function cancelOnEscape(onCancel: () => void) {
@@ -166,24 +167,23 @@ function ChatFolderDialog({
 }
 
 /**
- * Rename dialog, styled to match `FolderManageDialog`'s rename form below. Persists via
- * `server.updateSession({ sessionId, title })`, then renames the thread-list row locally
- * (`aui.threadListItem().rename`, the same call `useSyncSessionTitle` uses) so the sidebar
- * updates immediately without waiting on a refetch.
+ * Rename dialog, styled to match `FolderManageDialog`'s rename form below. Folder rows that are
+ * not thread-list items also pass `onRenamed`, so the saved title reaches the row they render.
  */
 function RenameChatDialog({
   sessionId,
   currentTitle,
   open,
   onOpenChange,
+  onRenamed,
 }: {
   sessionId: string;
   currentTitle: string;
   open: boolean;
   onOpenChange(open: boolean): void;
+  onRenamed?: (title: string) => void;
 }) {
-  const server = useOptionalServer();
-  const aui = useAui();
+  const saveTitle = useSaveChatTitle();
   const [name, setName] = useState(currentTitle);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -194,21 +194,17 @@ function RenameChatDialog({
     setError(null);
   }, [currentTitle, open]);
 
-  if (server === null) return null;
+  if (saveTitle === null) return null;
 
   const rename = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    const normalized = name.trim();
+    const normalized = normalizeChatTitle(name);
     if (normalized.length === 0 || normalized === currentTitle) return;
     setBusy(true);
     setError(null);
     try {
-      await server.updateSession({ sessionId, title: normalized });
-      try {
-        await aui.threadListItem().rename(normalized);
-      } catch {
-        // Persistence above already succeeded; the local rename is a best-effort display update.
-      }
+      await saveTitle({ sessionId, title: normalized });
+      onRenamed?.(normalized);
       onOpenChange(false);
     } catch (renameError) {
       setError(errorMessage(renameError));
@@ -237,7 +233,7 @@ function RenameChatDialog({
           <button
             type="submit"
             className={auiButtonClass({ variant: 'secondary', className: 'h-9 shrink-0 px-3' })}
-            disabled={busy || name.trim().length === 0 || name.trim() === currentTitle}
+            disabled={busy || normalizeChatTitle(name).length === 0 || normalizeChatTitle(name) === currentTitle}
           >
             Rename
           </button>
@@ -252,18 +248,107 @@ function RenameChatDialog({
   );
 }
 
+/**
+ * Confirms before the runtime deletes this row (`adapter.delete` → `server.deleteSession`).
+ * The server deletes at once, so the success toast offers no undo.
+ */
+function ChatDeleteDialog({
+  title,
+  open,
+  onOpenChange,
+  onDelete,
+}: {
+  title: string;
+  open: boolean;
+  onOpenChange(open: boolean): void;
+  onDelete?: () => Promise<void>;
+}) {
+  const aui = useAui();
+  const toaster = useToasterOptional();
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    setError(null);
+  }, [open]);
+
+  const trimmedTitle = title.trim();
+  const body = trimmedTitle.length > 0 ? `${trimmedTitle} will be gone for good.` : 'This chat will be gone for good.';
+
+  const deleteChat = async () => {
+    if (busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      // This may unmount the row that owns the dialog, so the toast is shown from the provider above it.
+      if (onDelete !== undefined) {
+        await onDelete();
+      } else {
+        await aui.threadListItem().delete();
+      }
+      toaster?.showSuccess({ title: 'Chat deleted.' });
+      onOpenChange(false);
+    } catch {
+      setError('Could not delete this chat. Try again.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Dialog
+      open={open}
+      onOpenChange={next => {
+        if (!busy) onOpenChange(next);
+      }}
+      aria-label="Delete chat"
+      className="max-w-md"
+    >
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Delete this chat?</DialogTitle>
+          <p className="text-text-secondary text-sm">{body}</p>
+        </DialogHeader>
+        {error !== null ? (
+          <p role="alert" className="text-sm text-failure-bg">
+            {error}
+          </p>
+        ) : null}
+      </DialogContent>
+      <DialogFooter>
+        <Button.Secondary type="button" disabled={busy} onClick={() => onOpenChange(false)}>
+          Keep
+        </Button.Secondary>
+        <Button.Destructive type="button" disabled={busy} onClick={() => void deleteChat()}>
+          Delete
+        </Button.Destructive>
+      </DialogFooter>
+    </Dialog>
+  );
+}
+
 export function ThreadListItemActions({
   sessionId,
   currentFolderId,
   canDelete,
   canRename,
   title,
+  onDelete,
+  onRenamed,
 }: {
   sessionId: string;
   currentFolderId: string | null;
   canDelete: boolean;
   canRename: boolean;
   title: string;
+  /**
+   * Folder rows that are not thread-list items delete through this instead of the
+   * runtime's item delete, after the same confirmation. A failure is shown in that dialog.
+   */
+  onDelete?: () => Promise<void>;
+  /** Folder rows that are not thread-list items update their title through this after a rename saves. */
+  onRenamed?: (title: string) => void;
 }) {
   const compact = useCompactLayout();
   const isMobile = useIsMobile();
@@ -271,12 +356,8 @@ export function ThreadListItemActions({
   const [sheetOpen, setSheetOpen] = useState(false);
   const [folderOpen, setFolderOpen] = useState(false);
   const [renameOpen, setRenameOpen] = useState(false);
-  const [portalContainer, setPortalContainer] = useState<HTMLElement>();
+  const [deleteOpen, setDeleteOpen] = useState(false);
   const useSheet = isMobile || compact;
-  const setTriggerElement = useCallback((element: HTMLButtonElement | null) => {
-    const themeRoot = element?.closest('.aui-theme-root');
-    setPortalContainer(themeRoot instanceof HTMLElement ? themeRoot : undefined);
-  }, []);
 
   const moreButtonClass = auiButtonClass({
     variant: 'ghost',
@@ -293,7 +374,16 @@ export function ThreadListItemActions({
     />
   );
   const renameDialog = canRename ? (
-    <RenameChatDialog sessionId={sessionId} currentTitle={title} open={renameOpen} onOpenChange={setRenameOpen} />
+    <RenameChatDialog
+      sessionId={sessionId}
+      currentTitle={title}
+      open={renameOpen}
+      onOpenChange={setRenameOpen}
+      onRenamed={onRenamed}
+    />
+  ) : null;
+  const deleteDialog = canDelete ? (
+    <ChatDeleteDialog title={title} open={deleteOpen} onOpenChange={setDeleteOpen} onDelete={onDelete} />
   ) : null;
 
   if (useSheet) {
@@ -342,61 +432,64 @@ export function ThreadListItemActions({
                 </button>
               ) : null}
               {canDelete ? (
-                <ThreadListItemPrimitive.Delete className={deleteItemClass} onClick={() => setSheetOpen(false)}>
+                <button
+                  type="button"
+                  role="menuitem"
+                  className={deleteItemClass}
+                  onClick={() => {
+                    setSheetOpen(false);
+                    setDeleteOpen(true);
+                  }}
+                >
                   <Icon name="trash" className="size-3.5" />
                   Delete
-                </ThreadListItemPrimitive.Delete>
+                </button>
               ) : null}
             </div>
           </BottomSheet>
         ) : null}
         {folderDialog}
         {renameDialog}
+        {deleteDialog}
       </>
     );
   }
 
   return (
     <>
-      <ThreadListItemMorePrimitive.Root sharedFocusGroup>
-        <ThreadListItemMorePrimitive.Trigger
-          ref={setTriggerElement}
-          aria-label="Session actions"
-          title="Session actions"
-          className={moreButtonClass}
-        >
-          <Icon name="ellipsis" className="size-3.5" />
-        </ThreadListItemMorePrimitive.Trigger>
-        <ThreadListItemMorePrimitive.Content
-          portalProps={{ container: portalContainer }}
-          align="end"
-          sideOffset={4}
-          className="font-sans-flex z-50 min-w-[10rem] rounded-md border border-border bg-card-bg p-1 text-text-primary shadow-md"
-        >
+      <DropdownMenu
+        align="end"
+        trigger={
+          <button type="button" aria-label="Session actions" title="Session actions" className={moreButtonClass}>
+            <Icon name="ellipsis" className="size-3.5" />
+          </button>
+        }
+        className="z-50 min-w-[10rem] rounded-[1.25rem] border border-border bg-card-bg p-1 text-text-primary"
+      >
+        <div role="menu" className="flex flex-col">
           {canRename ? (
-            <ThreadListItemMorePrimitive.Item className={menuItemClass} onSelect={() => setRenameOpen(true)}>
+            <button type="button" role="menuitem" className={menuItemClass} onClick={() => setRenameOpen(true)}>
               <Icon name="pencil" className="size-3.5" />
               Rename
-            </ThreadListItemMorePrimitive.Item>
+            </button>
           ) : null}
           {chatFolders !== null ? (
-            <ThreadListItemMorePrimitive.Item className={menuItemClass} onSelect={() => setFolderOpen(true)}>
+            <button type="button" role="menuitem" className={menuItemClass} onClick={() => setFolderOpen(true)}>
               <Icon name="folder" className="size-3.5" />
               Move to folder
-            </ThreadListItemMorePrimitive.Item>
+            </button>
           ) : null}
           {canDelete ? (
-            <ThreadListItemPrimitive.Delete asChild>
-              <ThreadListItemMorePrimitive.Item className={deleteItemClass}>
-                <Icon name="trash" className="size-3.5" />
-                Delete
-              </ThreadListItemMorePrimitive.Item>
-            </ThreadListItemPrimitive.Delete>
+            <button type="button" role="menuitem" className={deleteItemClass} onClick={() => setDeleteOpen(true)}>
+              <Icon name="trash" className="size-3.5" />
+              Delete
+            </button>
           ) : null}
-        </ThreadListItemMorePrimitive.Content>
-      </ThreadListItemMorePrimitive.Root>
+        </div>
+      </DropdownMenu>
       {folderDialog}
       {renameDialog}
+      {deleteDialog}
     </>
   );
 }
@@ -516,7 +609,7 @@ export function ChatFolderSection({
   count: number;
   children: ReactNode;
 }) {
-  const [expanded, setExpanded] = useState(true);
+  const [expanded, toggleExpanded] = useChatColumnFold({ section: `folder:${folder.id}`, defaultOpen: true });
   const [manageOpen, setManageOpen] = useState(false);
   return (
     <section aria-label={folder.name} className="mt-1">
@@ -524,8 +617,8 @@ export function ChatFolderSection({
         <button
           type="button"
           aria-expanded={expanded}
-          className="flex min-w-0 flex-1 items-center gap-1.5 rounded-md px-1.5 py-1 text-left text-xs font-semibold text-text-secondary hover:bg-ghost-button-hover hover:text-text-primary"
-          onClick={() => setExpanded(value => !value)}
+          className="flex min-w-0 flex-1 items-center gap-1.5 rounded-[1.25rem] border-0 bg-transparent px-2.5 py-1 text-left text-xs font-semibold text-text-secondary hover:bg-ghost-button-hover hover:text-text-primary"
+          onClick={toggleExpanded}
         >
           <Icon name="chevron-down" className={cn('size-3 transition-transform', !expanded && '-rotate-90')} />
           <Icon name="folder" className="size-3.5" />
@@ -539,7 +632,7 @@ export function ChatFolderSection({
             variant: 'ghost',
             size: 'icon',
             className:
-              'size-6 shrink-0 text-text-secondary opacity-0 group-hover/folder:opacity-100 focus-visible:opacity-100',
+              'size-6 shrink-0 border-0 text-text-secondary opacity-0 group-hover/folder:opacity-100 focus-visible:opacity-100',
           })}
           onClick={() => setManageOpen(true)}
         >
@@ -645,7 +738,8 @@ export function NewFolderButton() {
         className={auiButtonClass({
           variant: 'ghost',
           size: 'icon',
-          className: 'size-6 shrink-0 text-text-secondary hover:bg-ghost-button-hover hover:text-text-primary',
+          className:
+            'size-6 shrink-0 border border-border text-text-secondary hover:bg-ghost-button-hover hover:text-text-primary',
         })}
         onClick={() => setOpen(true)}
       >

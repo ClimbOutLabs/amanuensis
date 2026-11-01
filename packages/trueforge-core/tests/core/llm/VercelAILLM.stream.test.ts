@@ -14,15 +14,20 @@ import { APICallError } from 'ai';
 import type { ExtendedChatCompletionChunk, RawAssistantMessageWithUsage } from '../../../src/core/llm/LLMTypes';
 import {
   chunkHasSubstance,
+  chunkSubstanceField,
   describeStreamError,
   enforceStreamDeadlines,
+  isContextLengthError,
   mapFinishReason,
   mapStreamToChunks,
   ModelOutputRepetitionError,
   ModelStreamFault,
   normalizeUsage,
+  rawChunkProgressField,
+  toolCallPieceOf,
   toStreamError,
 } from '../../../src/core/llm/VercelAILLM';
+import { MAX_TOOL_CALL_STREAM_PARTS, MAX_TOOL_CALLS_PER_REPLY } from '../../../src/core/runtime/modelReplyGuard';
 
 // ─────────── Helpers ───────────
 
@@ -283,36 +288,83 @@ describe('toStreamError', () => {
 // ─────────── mapStreamToChunks ───────────
 
 describe('mapStreamToChunks', () => {
-  it.each([['reasoning', 'reasoning-delta'] as const, ['answer', 'text-delta'] as const])(
-    'stops sustained repetition in the %s stream',
-    async (channel, type) => {
-      const repeated = `${'the same uncertain identification keeps circling without reaching a useful conclusion '.repeat(45)}.`;
-      // Two parts: ~810 words of pure repetition with zero output progress,
-      // past the progress window, so the guard must trip.
-      const parts: TextStreamPart<ToolSet>[] =
-        type === 'reasoning-delta'
-          ? [
-              { type: 'reasoning-delta', id: 'r1', text: repeated },
-              { type: 'reasoning-delta', id: 'r1', text: repeated },
-            ]
-          : [
-              { type: 'text-delta', id: 't1', text: repeated },
-              { type: 'text-delta', id: 't1', text: repeated },
-            ];
+  it('stops sustained repetition in the reasoning stream', async () => {
+    const repeated = `${'the same uncertain identification keeps circling without reaching a useful conclusion '.repeat(45)}.`;
+    // Two parts: ~810 words of pure repetition with zero output progress,
+    // past the progress window, so the guard must trip.
+    const parts: TextStreamPart<ToolSet>[] = [
+      { type: 'reasoning-delta', id: 'r1', text: repeated },
+      { type: 'reasoning-delta', id: 'r1', text: repeated },
+    ];
 
-      await expect(
-        drainStream(mapStreamToChunks({ stream: makeStream(parts), chunkMeta: CHUNK_META })),
-      ).rejects.toEqual(new ModelOutputRepetitionError(channel));
-    },
-  );
+    await expect(drainStream(mapStreamToChunks({ stream: makeStream(parts), chunkMeta: CHUNK_META }))).rejects.toEqual(
+      new ModelOutputRepetitionError(),
+    );
+  });
 
-  it('tells the user what to do next when it stops a repetitive turn', () => {
-    expect(new ModelOutputRepetitionError('reasoning').message).toBe(
-      "The model's reasoning started going in circles, so Aman stopped it before it used up the output limit. Try asking for it in smaller parts instead of all at once.",
+  it('stops a reply that repeats one sentence three times, keeps the first two, and says so', async () => {
+    const sentence = 'Let me know if you need anything else. ';
+    const parts: TextStreamPart<ToolSet>[] = [
+      { type: 'text-delta', id: 't1', text: sentence.repeat(5) },
+      makeFinishStep('stop'),
+    ];
+
+    const { final } = await drainStream(mapStreamToChunks({ stream: makeStream(parts), chunkMeta: CHUNK_META }));
+    expect(final.repetition_stopped).toBe(true);
+    expect(final.output.content).toBe(`${sentence.repeat(2).trimEnd()}\n\nStopped: the reply was repeating itself.`);
+  });
+
+  it('stops a closing-line loop before its third copy, so two copies and the stop line remain', async () => {
+    const closing = 'All set for the calendar work tomorrow, see you then.\n';
+    const parts: TextStreamPart<ToolSet>[] = [
+      { type: 'text-delta', id: 't1', text: 'Here is the summary of the calendar work.\n' },
+      ...Array.from({ length: 6 }, () => ({ type: 'text-delta' as const, id: 't1', text: closing })),
+    ];
+
+    const { final } = await drainStream(mapStreamToChunks({ stream: makeStream(parts), chunkMeta: CHUNK_META }));
+    expect(final.repetition_stopped).toBe(true);
+    expect(final.output.content).toBe(
+      `Here is the summary of the calendar work.\n${closing.repeat(2)}\nStopped: the reply was repeating itself.`,
     );
-    expect(new ModelOutputRepetitionError('answer').message).toBe(
-      "The model's answer started repeating itself, so Aman stopped it before it used up the output limit. Try asking for it in smaller parts instead of all at once.",
-    );
+  });
+
+  it('leaves a normal long answer with a few repeated words untouched', async () => {
+    const answer = [
+      'Your week is busy. Monday has the dentist at 9, and Tuesday is free until lunch.',
+      'Let me know if you need anything else.',
+      'Wednesday has two meetings, and the review is moved to Thursday morning.',
+      'Let me know if you need anything else.',
+      'Thursday also has the planning session, which runs long.',
+      '',
+    ].join('\n');
+    const parts: TextStreamPart<ToolSet>[] = [{ type: 'text-delta', id: 't1', text: answer }, makeFinishStep('stop')];
+
+    const { final } = await drainStream(mapStreamToChunks({ stream: makeStream(parts), chunkMeta: CHUNK_META }));
+    expect(final.repetition_stopped).toBeUndefined();
+    expect(final.output.content).toBe(answer);
+  });
+
+  it('leaves two identical short lines in a row untouched', async () => {
+    const parts: TextStreamPart<ToolSet>[] = [
+      { type: 'text-delta', id: 't1', text: 'Done.\nDone.\n' },
+      makeFinishStep('stop'),
+    ];
+
+    const { final } = await drainStream(mapStreamToChunks({ stream: makeStream(parts), chunkMeta: CHUNK_META }));
+    expect(final.repetition_stopped).toBeUndefined();
+    expect(final.output.content).toBe('Done.\nDone.\n');
+  });
+
+  it('stops a third identical line of six or more words and says so', async () => {
+    const line = 'Please check the build output again.\n';
+    const parts: TextStreamPart<ToolSet>[] = [
+      { type: 'text-delta', id: 't1', text: line.repeat(3) },
+      makeFinishStep('stop'),
+    ];
+
+    const { final } = await drainStream(mapStreamToChunks({ stream: makeStream(parts), chunkMeta: CHUNK_META }));
+    expect(final.repetition_stopped).toBe(true);
+    expect(final.output.content).toBe(`${line.repeat(2)}\nStopped: the reply was repeating itself.`);
   });
 
   it('does not stop repetitive reasoning while the turn keeps issuing tool calls', async () => {
@@ -362,7 +414,7 @@ describe('mapStreamToChunks', () => {
     ];
 
     await expect(drainStream(mapStreamToChunks({ stream: makeStream(parts), chunkMeta: CHUNK_META }))).rejects.toEqual(
-      new ModelOutputRepetitionError('reasoning'),
+      new ModelOutputRepetitionError(),
     );
   });
 
@@ -409,7 +461,7 @@ describe('mapStreamToChunks', () => {
     ];
 
     await expect(drainStream(mapStreamToChunks({ stream: makeStream(parts), chunkMeta: CHUNK_META }))).rejects.toEqual(
-      new ModelOutputRepetitionError('reasoning'),
+      new ModelOutputRepetitionError(),
     );
   });
 
@@ -734,6 +786,46 @@ describe('mapStreamToChunks', () => {
     expect(final.finish_reason).toBe('tool_calls');
   });
 
+  it('stops reading at one call over the stream ceiling and marks the reply cut, so a flood of calls cannot hold the step open', async () => {
+    const parts: TextStreamPart<ToolSet>[] = Array.from({ length: MAX_TOOL_CALL_STREAM_PARTS + 1 }, (_, index) => ({
+      type: 'tool-input-start' as const,
+      id: `call-${String(index)}`,
+      toolName: 'search',
+    }));
+    // Nothing after the cut is read: a finish step that never arrives is not waited for.
+    const neverRead = jest.fn();
+    async function* floodStream(): AsyncGenerator<TextStreamPart<ToolSet>> {
+      for (const part of parts) yield part;
+      neverRead();
+      yield makeFinishStep('tool-calls');
+    }
+    const { final } = await drainStream(mapStreamToChunks({ stream: floodStream(), chunkMeta: CHUNK_META }));
+
+    expect(MAX_TOOL_CALL_STREAM_PARTS).toBe(40);
+    expect(final.tool_call_count_cut).toBe(true);
+    expect(final.output.tool_calls).toHaveLength(MAX_TOOL_CALL_STREAM_PARTS);
+    expect(neverRead).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['exactly the stream ceiling', MAX_TOOL_CALL_STREAM_PARTS],
+    ['22 calls, over the reply cap but a batch the reply guard may still merge or hold', 22],
+    ['exactly the reply cap', MAX_TOOL_CALLS_PER_REPLY],
+  ])('reads a reply of %s whole and leaves it unmarked', async (_label, count) => {
+    const parts: TextStreamPart<ToolSet>[] = Array.from({ length: count }, (_, index) => ({
+      type: 'tool-input-start' as const,
+      id: `call-${String(index)}`,
+      toolName: 'search',
+    }));
+    const { final } = await drainStream(
+      mapStreamToChunks({ stream: makeStream([...parts, makeFinishStep('tool-calls')]), chunkMeta: CHUNK_META }),
+    );
+
+    expect(final.tool_call_count_cut).toBeUndefined();
+    expect(final.output.tool_calls).toHaveLength(count);
+    expect(final.finish_reason).toBe('tool_calls');
+  });
+
   it('captures google thoughtSignature from tool-input-start providerMetadata into provider_specific_fields', async () => {
     const providerMetadata: ProviderMetadata = { google: { thoughtSignature: 'google-sig-abc' } };
     const { final } = await drainStream(
@@ -867,6 +959,21 @@ describe('mapStreamToChunks', () => {
     expect(rejection).toBeInstanceOf(Error);
   });
 
+  it('raises ModelStreamFault for a provider answer that the prompt is over the context length', async () => {
+    // A shorter history can fix this one definite provider answer, so it takes the retry path.
+    const cause = Object.assign(new Error("This model's maximum context length is 32768 tokens."), {
+      data: { message: '', type: 'BadRequestError', param: null, code: 400 },
+    });
+    const rejection: unknown = await drainStream(
+      mapStreamToChunks({
+        stream: makeStream([{ type: 'error', error: cause }]),
+        chunkMeta: CHUNK_META,
+      }),
+    ).catch((error: unknown) => error);
+    expect(rejection).toBeInstanceOf(ModelStreamFault);
+    expect(isContextLengthError(rejection)).toBe(true);
+  });
+
   it('raises ModelStreamFault when the stream ends with no text, no tool call, and no finish signal', async () => {
     // The shape a provider closing the connection mid-response takes: the stream's own async
     // iterable simply ends, with no 'error' part and nothing thrown.
@@ -967,6 +1074,133 @@ describe('mapStreamToChunks', () => {
 
 // ─────────── chunkHasSubstance ───────────
 
+describe('mapStreamToChunks tool argument size limits', () => {
+  it('stops reading the stream when a call runs past its limit, and names the call on the result', async () => {
+    let pulled = 0;
+    const parts: TextStreamPart<ToolSet>[] = [
+      { type: 'tool-input-start', id: 'call-1', toolName: 'create_space' },
+      { type: 'tool-input-delta', id: 'call-1', delta: '{"body":"' },
+      { type: 'tool-input-delta', id: 'call-1', delta: 'a row of the table that keeps going well past the limit' },
+      { type: 'tool-input-delta', id: 'call-1', delta: ' and more rows after that' },
+      { type: 'text-delta', id: 't1', text: 'this text comes after the cut and must not appear' },
+      makeFinishStep('tool-calls'),
+    ];
+    async function* countingStream(): AsyncGenerator<TextStreamPart<ToolSet>> {
+      for (const part of parts) {
+        pulled += 1;
+        yield part;
+      }
+    }
+    const { final } = await drainStream(
+      mapStreamToChunks({
+        stream: countingStream(),
+        chunkMeta: CHUNK_META,
+        toolArgumentLimits: new Map([['create_space', 30]]),
+      }),
+    );
+    expect(final.size_cut_tool_calls).toEqual(['call-1']);
+    // The stream was abandoned at the cut: the parts after it were never pulled.
+    expect(pulled).toBe(3);
+    const toolCalls = final.output.tool_calls;
+    expect(toolCalls).toHaveLength(1);
+    expect(toolCalls?.[0]?.function.name).toBe('create_space');
+    // The partial arguments stay on the call, so it can resolve as never ran.
+    expect(toolCalls?.[0]?.function.arguments.length).toBeGreaterThan(30);
+    expect(final.output.content ?? '').not.toContain('must not appear');
+  });
+
+  it('lets a call under its limit finish untouched', async () => {
+    const { final } = await drainStream(
+      mapStreamToChunks({
+        stream: makeStream([
+          { type: 'tool-input-start', id: 'call-1', toolName: 'create_space' },
+          { type: 'tool-input-delta', id: 'call-1', delta: '{"body":"short"}' },
+          { type: 'tool-input-end', id: 'call-1' },
+          makeFinishStep('tool-calls'),
+        ]),
+        chunkMeta: CHUNK_META,
+        toolArgumentLimits: new Map([['create_space', 30]]),
+      }),
+    );
+    expect(final.size_cut_tool_calls).toBeUndefined();
+    expect(final.output.tool_calls?.[0]?.function.arguments).toBe('{"body":"short"}');
+  });
+
+  it('applies no limit to a tool the host did not list', async () => {
+    const bigArguments = `{"body":"${'x'.repeat(5_000)}"}`;
+    const { final } = await drainStream(
+      mapStreamToChunks({
+        stream: makeStream([
+          { type: 'tool-input-start', id: 'call-1', toolName: 'some_other_tool' },
+          { type: 'tool-input-delta', id: 'call-1', delta: bigArguments },
+          { type: 'tool-input-end', id: 'call-1' },
+          makeFinishStep('tool-calls'),
+        ]),
+        chunkMeta: CHUNK_META,
+        toolArgumentLimits: new Map([['create_space', 30]]),
+      }),
+    );
+    expect(final.size_cut_tool_calls).toBeUndefined();
+    expect(final.output.tool_calls?.[0]?.function.arguments).toBe(bigArguments);
+  });
+});
+
+describe('isContextLengthError', () => {
+  it.each([
+    "This model's maximum context length is 32768 tokens. However, you requested 40000 tokens.",
+    'prompt is too long: 210000 tokens > 200000 maximum',
+    'Input is too long for requested model.',
+    'The input token count (1200000) exceeds the maximum number of tokens allowed (1048576).',
+    'context_length_exceeded',
+    'input length and `max_tokens` exceed context limit: 198000 + 8192 > 200000, decrease input length or `max_tokens` and try again',
+    'The decoder prompt (length 40000) is longer than the maximum model length of 32768.',
+    'the request exceeds the available context size, try increasing it',
+  ])('recognizes %s', message => {
+    expect(isContextLengthError(new Error(message))).toBe(true);
+  });
+
+  it('finds the wording in the cause chain and in an API response body', () => {
+    expect(isContextLengthError(new ModelStreamFault('broke', { cause: new Error('prompt is too long') }))).toBe(true);
+    const apiError = new APICallError({
+      message: 'Bad Request',
+      url: 'http://localhost',
+      requestBodyValues: {},
+      statusCode: 400,
+      responseBody: '{"error":{"code":"context_length_exceeded"}}',
+    });
+    expect(isContextLengthError(apiError)).toBe(true);
+  });
+
+  it('does not treat a dropped stream or a timeout as a context-length error', () => {
+    expect(isContextLengthError(new ModelStreamFault('The model stream ended without any text.'))).toBe(false);
+    expect(isContextLengthError(new Error('terminated', { cause: new Error('other side closed') }))).toBe(false);
+    expect(isContextLengthError(new Error('Rate limit reached: too many tokens per minute'))).toBe(false);
+  });
+
+  it.each([
+    'Rate limit reached for requests',
+    'Request timed out.',
+    'socket hang up',
+    'other side closed',
+    'read ECONNRESET',
+    'Bad Request',
+    'Invalid request: messages must not be empty',
+  ])('does not recognize %s', message => {
+    expect(isContextLengthError(new Error(message))).toBe(false);
+  });
+
+  it('does not treat a generic 400 answer as a context-length error', () => {
+    const apiError = new APICallError({
+      message: 'Bad Request',
+      url: 'http://localhost',
+      requestBodyValues: {},
+      statusCode: 400,
+      responseBody: '{"error":{"message":"Invalid value for temperature","type":"invalid_request_error"}}',
+    });
+    expect(isContextLengthError(apiError)).toBe(false);
+  });
+});
+
 describe('chunkHasSubstance', () => {
   it('rejects a part with no reader-visible content', () => {
     expect(chunkHasSubstance({ type: 'start' })).toBe(false);
@@ -996,6 +1230,59 @@ describe('chunkHasSubstance', () => {
 
   it('accepts a step or turn finish, regardless of any accompanying usage', () => {
     expect(chunkHasSubstance(makeFinishStep('stop'))).toBe(true);
+  });
+
+  it('accepts a raw chunk whose delta carries text under a field the parser drops', () => {
+    const part: TextStreamPart<ToolSet> = {
+      type: 'raw',
+      rawValue: {
+        choices: [{ delta: { reasoning_details: [{ type: 'reasoning.text', text: 'thinking' }] } }],
+      },
+    };
+    expect(chunkHasSubstance(part)).toBe(true);
+    expect(chunkSubstanceField(part)).toBe('reasoning_details');
+    expect(rawChunkProgressField(part.rawValue)).toBe('reasoning_details');
+  });
+
+  it('accepts a raw chunk whose tool-call arguments are streaming before the call has a name', () => {
+    const part: TextStreamPart<ToolSet> = {
+      type: 'raw',
+      rawValue: {
+        choices: [{ delta: { tool_calls: [{ index: 0, function: { arguments: '{"body":"<div>' } }] } }],
+      },
+    };
+    expect(chunkHasSubstance(part)).toBe(true);
+    expect(chunkSubstanceField(part)).toBe('tool_call_arguments');
+  });
+
+  it('rejects a raw chunk that is only a role marker or an empty keepalive', () => {
+    const roleOnly: TextStreamPart<ToolSet> = {
+      type: 'raw',
+      rawValue: { choices: [{ delta: { role: 'assistant' } }] },
+    };
+    const empty: TextStreamPart<ToolSet> = { type: 'raw', rawValue: { choices: [{ delta: {} }] } };
+    const emptyText: TextStreamPart<ToolSet> = {
+      type: 'raw',
+      rawValue: { choices: [{ delta: { content: '', reasoning_details: [] } }] },
+    };
+    expect(chunkHasSubstance(roleOnly)).toBe(false);
+    expect(chunkHasSubstance(empty)).toBe(false);
+    expect(chunkHasSubstance(emptyText)).toBe(false);
+    expect(chunkSubstanceField(roleOnly)).toBeUndefined();
+  });
+
+  it('rejects a raw chunk that is not an OpenAI-shaped chunk at all', () => {
+    const part: TextStreamPart<ToolSet> = { type: 'raw', rawValue: { type: 'content_block_delta' } };
+    expect(chunkHasSubstance(part)).toBe(false);
+    expect(rawChunkProgressField('not a chunk')).toBeUndefined();
+    expect(rawChunkProgressField(null)).toBeUndefined();
+  });
+
+  it('names the field a parsed part carried its progress under', () => {
+    expect(chunkSubstanceField({ type: 'text-delta', id: 't1', text: 'a' })).toBe('content');
+    expect(chunkSubstanceField({ type: 'reasoning-delta', id: 'r1', text: 'a' })).toBe('reasoning');
+    expect(chunkSubstanceField({ type: 'tool-input-delta', id: 'c1', delta: '{' })).toBe('tool_call_arguments');
+    expect(chunkSubstanceField({ type: 'text-delta', id: 't1', text: '' })).toBeUndefined();
   });
 });
 
@@ -1034,6 +1321,28 @@ describe('enforceStreamDeadlines', () => {
     expect(deadlineController.signal.aborted).toBe(false);
   });
 
+  it('ends the read itself when the provider stream ignores the abort', async () => {
+    async function* stream() {
+      yield { type: 'start' } as TextStreamPart<ToolSet>;
+      // A provider that accepted the request and never ends its stream, abort or not.
+      await new Promise(() => undefined);
+    }
+    const deadlineController = new AbortController();
+    const outcome = collect(
+      enforceStreamDeadlines({
+        stream: stream(),
+        timeout: { firstChunkMs: 90_000, chunkMs: 60_000 },
+        hasSubstance: chunkHasSubstance,
+        deadlineController,
+      }),
+    ).then(
+      () => 'finished',
+      (error: unknown) => error,
+    );
+    await jest.advanceTimersByTimeAsync(90_000);
+    await expect(outcome).resolves.toMatchObject({ name: 'TimeoutError' });
+  });
+
   it('aborts with a first-chunk TimeoutError when no substantive part arrives in time', async () => {
     async function* stream() {
       yield { type: 'start' } as TextStreamPart<ToolSet>;
@@ -1050,13 +1359,18 @@ describe('enforceStreamDeadlines', () => {
         deadlineController,
       }),
     );
+    // Observed before the clock moves, so the rejection is never unhandled.
+    const outcome = draining.then(
+      () => 'finished',
+      (error: unknown) => error,
+    );
     await jest.advanceTimersByTimeAsync(60);
     expect(deadlineController.signal.aborted).toBe(true);
     expect(deadlineController.signal.reason).toMatchObject({
       name: 'TimeoutError',
       message: expect.stringMatching(/first chunk/i),
     });
-    void draining;
+    await expect(outcome).resolves.toMatchObject({ name: 'TimeoutError' });
   });
 
   it('aborts with a chunk TimeoutError once a substantive part has cleared the first-chunk deadline', async () => {
@@ -1075,12 +1389,257 @@ describe('enforceStreamDeadlines', () => {
         deadlineController,
       }),
     );
+    // Observed before the clock moves, so the rejection is never unhandled.
+    const outcome = draining.then(
+      () => 'finished',
+      (error: unknown) => error,
+    );
     await jest.advanceTimersByTimeAsync(30);
     expect(deadlineController.signal.aborted).toBe(true);
     expect(deadlineController.signal.reason).toMatchObject({
       name: 'TimeoutError',
       message: expect.stringMatching(/^chunk/i),
     });
-    void draining;
+    await expect(outcome).resolves.toMatchObject({ name: 'TimeoutError' });
+  });
+
+  describe('while a tool call is open', () => {
+    const toolCalls = { chunkMs: 180, pieceOf: toolCallPieceOf };
+    const opened: TextStreamPart<ToolSet> = { type: 'tool-input-start', id: 'c1', toolName: 'update_space' };
+    const argumentsArrived: TextStreamPart<ToolSet> = { type: 'tool-input-delta', id: 'c1', delta: '{"a":1}' };
+    const completed: TextStreamPart<ToolSet> = { type: 'tool-input-end', id: 'c1' };
+
+    function guarded({ gapMs, first }: { gapMs: number; first: TextStreamPart<ToolSet> }): {
+      deadlineController: AbortController;
+      outcome: Promise<unknown>;
+    } {
+      async function* stream() {
+        yield first;
+        await new Promise(resolve => setTimeout(resolve, gapMs));
+        yield argumentsArrived;
+        yield completed;
+      }
+      const deadlineController = new AbortController();
+      const outcome = collect(
+        enforceStreamDeadlines({
+          stream: stream(),
+          timeout: { firstChunkMs: 1000, chunkMs: 60 },
+          hasSubstance: chunkHasSubstance,
+          substanceField: chunkSubstanceField,
+          toolCalls,
+          deadlineController,
+        }),
+      ).then(
+        parts => parts,
+        (error: unknown) => error,
+      );
+      return { deadlineController, outcome };
+    }
+
+    it('waits the tool-call allowance for the next piece, not the ordinary bound', async () => {
+      const { deadlineController, outcome } = guarded({ gapMs: 150, first: opened });
+      await jest.advanceTimersByTimeAsync(160);
+      await expect(outcome).resolves.toHaveLength(3);
+      expect(deadlineController.signal.aborted).toBe(false);
+    });
+
+    it('still times out once the silence passes the tool-call allowance', async () => {
+      const { deadlineController, outcome } = guarded({ gapMs: 500, first: opened });
+      await jest.advanceTimersByTimeAsync(190);
+      await expect(outcome).resolves.toMatchObject({ name: 'TimeoutError' });
+      expect(deadlineController.signal.reason).toMatchObject({ message: expect.stringContaining('180ms') });
+    });
+
+    it('keeps the ordinary bound when the silence comes before any tool piece', async () => {
+      const text: TextStreamPart<ToolSet> = { type: 'text-delta', id: 't1', text: 'a' };
+      const { deadlineController, outcome } = guarded({ gapMs: 150, first: text });
+      await jest.advanceTimersByTimeAsync(70);
+      await expect(outcome).resolves.toMatchObject({ name: 'TimeoutError' });
+      expect(deadlineController.signal.reason).toMatchObject({ message: expect.stringContaining('60ms') });
+    });
+
+    it('goes back to the ordinary bound once the call has completed', async () => {
+      async function* stream(): AsyncGenerator<TextStreamPart<ToolSet>> {
+        yield opened;
+        yield completed;
+        yield { type: 'tool-call', toolCallId: 'c1', toolName: 'update_space', input: {} };
+        await new Promise(() => undefined);
+      }
+      const deadlineController = new AbortController();
+      const outcome = collect(
+        enforceStreamDeadlines({
+          stream: stream(),
+          timeout: { firstChunkMs: 1000, chunkMs: 60 },
+          hasSubstance: chunkHasSubstance,
+          substanceField: chunkSubstanceField,
+          toolCalls,
+          deadlineController,
+        }),
+      ).then(
+        () => 'finished',
+        (error: unknown) => error,
+      );
+      await jest.advanceTimersByTimeAsync(70);
+      await expect(outcome).resolves.toMatchObject({ name: 'TimeoutError' });
+    });
+  });
+});
+
+// ─────────── leaked tool-call markup ───────────
+
+describe('mapStreamToChunks leaked tool-call markup', () => {
+  function chunkText(chunks: ExtendedChatCompletionChunk[]): string {
+    return chunks.map(chunk => chunk.choices[0]?.delta.content ?? '').join('');
+  }
+
+  it('holds the DSML call out of the reply, shows only the text before it, and returns no call', async () => {
+    const parts: TextStreamPart<ToolSet>[] = [
+      { type: 'text-start', id: 't1' },
+      { type: 'text-delta', id: 't1', text: 'Let me add that for you. ' },
+      { type: 'text-delta', id: 't1', text: '<｜DSML｜tool' },
+      { type: 'text-delta', id: 't1', text: '_calls><｜DSML｜invoke name="create_event">' },
+      {
+        type: 'text-delta',
+        id: 't1',
+        text: '<｜DSML｜parameter name="title" string="true">Dentist</｜DSML｜parameter>',
+      },
+      {
+        type: 'text-delta',
+        id: 't1',
+        text: '<｜DSML｜parameter name="start" string="false">{"date_time": "2026-10-27T14:30:00", "time_zone": "America/New_York"}</｜DSML｜parameter>',
+      },
+      { type: 'text-delta', id: 't1', text: '</｜DSML｜invoke></｜DSML｜tool_calls>' },
+      { type: 'text-delta', id: 't1', text: ' Done, I added the appointment to your calendar.' },
+      { type: 'text-end', id: 't1' },
+      makeFinishStep('tool-calls'),
+    ];
+    const { chunks, final } = await drainStream(
+      mapStreamToChunks({ stream: makeStream(parts), chunkMeta: CHUNK_META }),
+    );
+    const shown = chunkText(chunks);
+    expect(shown).toBe('Let me add that for you. ');
+    expect(shown).not.toContain('DSML');
+    expect(shown).not.toContain('added the appointment');
+    expect(final.tool_markup).toBe('leaked');
+    expect(final.output.content).toBe('Let me add that for you. ');
+    expect(final.output.tool_calls).toBeUndefined();
+  });
+
+  it('holds back the lone DSML parameter line from the owner report, the exact text the model wrote', async () => {
+    const parts: TextStreamPart<ToolSet>[] = [
+      { type: 'text-start', id: 't1' },
+      { type: 'text-delta', id: 't1', text: 'Setting the reminder now.\n' },
+      {
+        type: 'text-delta',
+        id: 't1',
+        text: '<｜DSML｜parameter name="start" string="true">2026-10-23T09:10</｜DSML｜parameter>',
+      },
+      { type: 'text-end', id: 't1' },
+      makeFinishStep('stop'),
+    ];
+    const { chunks, final } = await drainStream(
+      mapStreamToChunks({ stream: makeStream(parts), chunkMeta: CHUNK_META }),
+    );
+    expect(chunkText(chunks)).toBe('Setting the reminder now.\n');
+    expect(final.tool_markup).toBe('leaked');
+    expect(final.output.tool_calls).toBeUndefined();
+  });
+
+  it('holds back an invented function_results block and shows the text before it, nothing after', async () => {
+    const parts: TextStreamPart<ToolSet>[] = [
+      { type: 'text-start', id: 't1' },
+      { type: 'text-delta', id: 't1', text: 'Adding it now. ' },
+      { type: 'text-delta', id: 't1', text: '<function_results>Event created: Dentist, Oct 27.</function_results>' },
+      { type: 'text-delta', id: 't1', text: ' Done, I added the appointment to your calendar.' },
+      { type: 'text-end', id: 't1' },
+      makeFinishStep('stop'),
+    ];
+    const { chunks, final } = await drainStream(
+      mapStreamToChunks({ stream: makeStream(parts), chunkMeta: CHUNK_META }),
+    );
+    expect(chunkText(chunks)).toBe('Adding it now. ');
+    expect(final.tool_markup).toBe('leaked');
+    expect(final.output.tool_calls).toBeUndefined();
+    expect(final.output.content).toBe('Adding it now. ');
+  });
+
+  it('streams a reply whose text merely ends near an opener in full', async () => {
+    const parts: TextStreamPart<ToolSet>[] = [
+      { type: 'text-start', id: 't1' },
+      { type: 'text-delta', id: 't1', text: 'Use a < b in code, then stop' },
+      { type: 'text-delta', id: 't1', text: ' <' },
+      { type: 'text-end', id: 't1' },
+      makeFinishStep('stop'),
+    ];
+    const { chunks, final } = await drainStream(
+      mapStreamToChunks({ stream: makeStream(parts), chunkMeta: CHUNK_META }),
+    );
+    expect(chunkText(chunks)).toBe('Use a < b in code, then stop <');
+    expect(final.tool_markup).toBeUndefined();
+    expect(final.output.content).toBe('Use a < b in code, then stop <');
+  });
+
+  it('streams a sentence that shows a bare invoke tag as an example, byte for byte', async () => {
+    const parts: TextStreamPart<ToolSet>[] = [
+      { type: 'text-start', id: 't1' },
+      { type: 'text-delta', id: 't1', text: 'Use <invoke name="x">' },
+      { type: 'text-delta', id: 't1', text: ' to start a call.' },
+      { type: 'text-end', id: 't1' },
+      makeFinishStep('stop'),
+    ];
+    const { chunks, final } = await drainStream(
+      mapStreamToChunks({ stream: makeStream(parts), chunkMeta: CHUNK_META }),
+    );
+    expect(chunkText(chunks)).toBe('Use <invoke name="x"> to start a call.');
+    expect(final.tool_markup).toBeUndefined();
+    expect(final.output.content).toBe('Use <invoke name="x"> to start a call.');
+    expect(final.output.tool_calls).toBeUndefined();
+  });
+
+  it('streams a sentence that names the closing results tag, byte for byte', async () => {
+    const parts: TextStreamPart<ToolSet>[] = [
+      { type: 'text-start', id: 't1' },
+      { type: 'text-delta', id: 't1', text: 'The closing tag </function_res' },
+      { type: 'text-delta', id: 't1', text: 'ults> ends the block.' },
+      { type: 'text-end', id: 't1' },
+      makeFinishStep('stop'),
+    ];
+    const { chunks, final } = await drainStream(
+      mapStreamToChunks({ stream: makeStream(parts), chunkMeta: CHUNK_META }),
+    );
+    expect(chunkText(chunks)).toBe('The closing tag </function_results> ends the block.');
+    expect(final.tool_markup).toBeUndefined();
+    expect(final.output.content).toBe('The closing tag </function_results> ends the block.');
+    expect(final.output.tool_calls).toBeUndefined();
+  });
+
+  it('keeps a nested-argument call streamed in multi-token pieces exact', async () => {
+    // The owner's calendar failure shape: nested start/end blocks and an attendees list whose
+    // argument JSON arrives in pieces of several tokens at once. The pieces must concatenate into
+    // the exact JSON, or the call downstream is half-formed.
+    const pieces = [
+      '{"title":"Dentist","start":{"date_time":"2026-10-27T14:30:00","time_zone":"America/New_York"},',
+      '"end":{"date_time":"2026-10-27T15:00:00","time_zone":"America/New_York"},',
+      '"attendees":[{"email":"sam@example.com","display_name":"Sam"},',
+      '{"email":"pat@example.com","display_name":"Pat"}]}',
+    ];
+    const parts: TextStreamPart<ToolSet>[] = [
+      { type: 'tool-input-start', id: 'call-0', toolName: 'create_event' },
+      ...pieces.map((delta): TextStreamPart<ToolSet> => ({ type: 'tool-input-delta', id: 'call-0', delta })),
+      { type: 'tool-input-end', id: 'call-0' },
+      makeFinishStep('tool-calls'),
+    ];
+    const { final } = await drainStream(mapStreamToChunks({ stream: makeStream(parts), chunkMeta: CHUNK_META }));
+    const call = final.output.tool_calls?.[0];
+    expect(call?.function.name).toBe('create_event');
+    expect(JSON.parse(call?.function.arguments ?? '{}')).toEqual({
+      title: 'Dentist',
+      start: { date_time: '2026-10-27T14:30:00', time_zone: 'America/New_York' },
+      end: { date_time: '2026-10-27T15:00:00', time_zone: 'America/New_York' },
+      attendees: [
+        { email: 'sam@example.com', display_name: 'Sam' },
+        { email: 'pat@example.com', display_name: 'Pat' },
+      ],
+    });
   });
 });

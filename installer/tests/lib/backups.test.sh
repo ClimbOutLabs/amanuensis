@@ -26,7 +26,7 @@ test_the_plan_names_the_daily_backup() {
   sandbox_new
   run_install --dry-run --email owner@example.invalid
   assert_flat_contains "$OUT" "Back up every day, keeping the last 7"
-  assert_flat_contains "$OUT" "Runs at 03:30 with a crontab line of your user."
+  assert_flat_contains "$OUT" "Runs at 03:30 with a scheduled task of your user (cron)."
   assert_no_path "$AMAN_HOME"
   install_machine
   run_install --dry-run
@@ -58,27 +58,35 @@ test_backups_flag_is_checked() {
 test_the_question_is_asked_once() {
   t_begin "the interactive install asks 'Back up automatically every day? [Y/n]', n turns it off, and a re-run does not ask again"
   sandbox_new
-  run_install_tty "Instance name=>
+  run_install_tty "Name for this instance=>
 Your email=>owner@example.invalid
+What should Aman call you?=>
+Connect a calendar?=>n
+Connect an email account=>n
 Back up automatically=>n
 Go ahead?=>y
-Password for owner@example.invalid=>$SENTINEL_PASSWORD
-Repeat the password=>$SENTINEL_PASSWORD"
+Enter a password for owner@example.invalid=>$SENTINEL_PASSWORD
+Enter password again=>$SENTINEL_PASSWORD"
   assert_eq "$RC" 0
   assert_contains "$OUT" "Back up automatically every day? [Y/n]"
   assert_eq "$(mode_file)" off
   assert_not_contains "$(cron_table)" "amanuensis-backup"
-  run_install_tty "Go ahead?=>y"
+  run_install_tty "Connect a calendar?=>n
+Connect an email account=>n
+Go ahead?=>y"
   assert_not_contains "$OUT" "Back up automatically every day?"
   assert_eq "$(mode_file)" off
   sandbox_drop
   sandbox_new
-  run_install_tty "Instance name=>
+  run_install_tty "Name for this instance=>
 Your email=>owner@example.invalid
+What should Aman call you?=>
+Connect a calendar?=>n
+Connect an email account=>n
 Back up automatically=>
 Go ahead?=>y
-Password for owner@example.invalid=>$SENTINEL_PASSWORD
-Repeat the password=>$SENTINEL_PASSWORD"
+Enter a password for owner@example.invalid=>$SENTINEL_PASSWORD
+Enter password again=>$SENTINEL_PASSWORD"
   assert_eq "$(mode_file)" daily "Enter keeps the default, which is yes"
   sandbox_drop
 }

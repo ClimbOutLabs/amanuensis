@@ -1,0 +1,266 @@
+// @vitest-environment jsdom
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { AMAN_GUIDE_NAME } from '@truefoundry/trueforge-core/core/personas/guide';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+import { HelpChatPanel, HelpChoices } from '@/help/HelpChatPanel.js';
+import { formatLastFullCheck, type HelpHealthCheck } from '@/help/helpModel.js';
+import { HelpProvider, useOptionalHelp, type HelpApi } from '@/help/HelpProvider.js';
+
+const { sent, composerSend, composerSetText } = vi.hoisted(() => {
+  const sent: string[] = [];
+  const composerSetText = vi.fn((text: string) => {
+    sent.push(text);
+  });
+  const composerSend = vi.fn();
+  return { sent, composerSend, composerSetText };
+});
+
+const { shellMock } = vi.hoisted(() => ({
+  shellMock: { setSettingsOpen: vi.fn() },
+}));
+
+vi.mock('@/server/ShellModeContext.js', async importOriginal => ({
+  ...(await importOriginal<typeof import('@/server/ShellModeContext.js')>()),
+  useOptionalShellMode: () => shellMock,
+}));
+
+vi.mock('@assistant-ui/react', () => ({
+  useAui: () => ({
+    composer: () => ({ setText: composerSetText, send: composerSend }),
+  }),
+}));
+
+const HEALTHY: HelpHealthCheck = {
+  checked_at: '2026-10-21T09:00:00Z',
+  model_ready: true,
+  items: [
+    { id: 'model', name: 'Your model', status: 'pass', message: 'The model answered.', next_step: null },
+    { id: 'connectors', name: 'Connectors', status: 'pass', message: 'All 2 connectors answered.', next_step: null },
+    {
+      id: 'sandbox',
+      name: 'Sandbox',
+      status: 'warn',
+      message: 'The sandbox is not ready.',
+      next_step: 'Check Settings, Sandbox.',
+    },
+  ],
+  host_report: { state: 'ok', checked_at: '2026-10-20T08:30:00Z', message: 'all good', next_step: null },
+};
+
+const NO_MODEL: HelpHealthCheck = {
+  checked_at: '2026-10-21T09:00:00Z',
+  model_ready: false,
+  items: [
+    {
+      id: 'model',
+      name: 'Your model',
+      status: 'fail',
+      message: 'No model is connected.',
+      next_step: null,
+    },
+    {
+      id: 'connectors',
+      name: 'Connectors',
+      status: 'not_set_up',
+      message: 'No connectors are set up yet.',
+      next_step: null,
+    },
+  ],
+  host_report: {
+    state: 'missing',
+    checked_at: null,
+    message: null,
+    next_step: null,
+  },
+};
+
+type ApiOptions = { check: HelpHealthCheck; guideReady?: boolean; failCheck?: boolean };
+
+function makeApi({ check, guideReady = true, failCheck = false }: ApiOptions) {
+  const getHealthCheck = vi.fn(async () => {
+    if (failCheck) {
+      throw new Error('network down');
+    }
+    return check;
+  });
+  const ensureGuide = vi.fn(async () => guideReady);
+  const api: HelpApi = { getHealthCheck, ensureGuide };
+  return { api, getHealthCheck, ensureGuide };
+}
+
+/** Starts a help session the way the header button does, then shows the panel and the choices. */
+function StartAndShow({
+  screen = 'Settings, Connectors',
+  lastError = 'Request failed (500).',
+}: {
+  screen?: string;
+  lastError?: string | null;
+}) {
+  const help = useOptionalHelp();
+  return (
+    <>
+      <button type="button" onClick={() => help?.start({ screen, lastError })}>
+        start help
+      </button>
+      <HelpChatPanel />
+      <HelpChoices />
+    </>
+  );
+}
+
+function renderHelp(options: ApiOptions & { screen?: string; lastError?: string | null }) {
+  const made = makeApi(options);
+  render(
+    <HelpProvider api={made.api}>
+      <StartAndShow screen={options.screen} lastError={options.lastError} />
+    </HelpProvider>,
+  );
+  fireEvent.click(screen.getByRole('button', { name: 'start help' }));
+  return made;
+}
+
+beforeEach(() => {
+  sent.length = 0;
+  composerSetText.mockClear();
+  composerSend.mockClear();
+  shellMock.setSettingsOpen.mockClear();
+});
+
+describe('HelpChatPanel', () => {
+  it('shows the model first and red, with its next step, when no model is connected', async () => {
+    const { ensureGuide } = renderHelp({ check: NO_MODEL });
+
+    const results = await screen.findByTestId('help-chat-results');
+    const items = within(results).getAllByRole('listitem');
+    expect(items[0]).toHaveTextContent('Your model');
+    expect(items[0]).toHaveTextContent('No model is connected.');
+    expect(within(results).getByRole('status')).toHaveTextContent('Add a model in Settings to get started.');
+    expect(items[0]?.querySelector('.text-danger')).not.toBeNull();
+    expect(within(results).getByRole('button', { name: 'Check again' })).toBeInTheDocument();
+    expect(ensureGuide).not.toHaveBeenCalled();
+    expect(composerSend).not.toHaveBeenCalled();
+    expect(screen.queryByTestId('help-choices')).toBeNull();
+  });
+
+  it('opens Settings, Models when the Settings link in the no-model line is pressed', async () => {
+    renderHelp({ check: NO_MODEL });
+
+    const status = await screen.findByRole('status');
+    fireEvent.click(within(status).getByRole('button', { name: 'Settings' }));
+
+    expect(shellMock.setSettingsOpen).toHaveBeenCalledWith(true, 'models');
+  });
+
+  it('shows the saved full check date and result, and nothing when there is no saved report', async () => {
+    renderHelp({ check: HEALTHY });
+
+    const results = await screen.findByTestId('help-chat-results');
+    const when = formatLastFullCheck('2026-10-20T08:30:00Z');
+    expect(within(results).getByText(`Full check: ${when} · all good`)).toBeInTheDocument();
+  });
+
+  it('shows no full check line when there is no saved report', async () => {
+    renderHelp({ check: NO_MODEL });
+
+    const results = await screen.findByTestId('help-chat-results');
+    expect(within(results).queryByText(/Full check:/)).toBeNull();
+  });
+
+  it('keeps Iris out of the chat when the model did not answer, and offers Check again', async () => {
+    const { getHealthCheck, ensureGuide } = renderHelp({
+      check: {
+        ...NO_MODEL,
+        items: [
+          {
+            id: 'model',
+            name: 'Your model',
+            status: 'fail',
+            message: 'The model did not answer in time.',
+            next_step: 'Check the model key in Settings, Models. Then press Check again.',
+          },
+        ],
+      },
+    });
+
+    expect(await screen.findByText('The model did not answer in time.')).toBeInTheDocument();
+    expect(ensureGuide).not.toHaveBeenCalled();
+    expect(composerSend).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Check again' }));
+    await waitFor(() => expect(getHealthCheck).toHaveBeenCalledTimes(2));
+  });
+
+  it('says how to get help when the check itself cannot run', async () => {
+    renderHelp({ check: HEALTHY, failCheck: true });
+
+    expect(
+      await screen.findByText('The check could not run. Check your connection, then press Check again.'),
+    ).toBeInTheDocument();
+    expect(composerSend).not.toHaveBeenCalled();
+  });
+
+  it('is all green when healthy, has Iris speak first, and shows the screen and last error', async () => {
+    const { ensureGuide } = renderHelp({
+      check: HEALTHY,
+      screen: 'Settings, Connectors',
+      lastError: 'Request failed (500).',
+    });
+
+    await waitFor(() => expect(composerSend).toHaveBeenCalledTimes(1));
+    expect(ensureGuide).toHaveBeenCalledTimes(1);
+    expect(sent).toHaveLength(1);
+    const message = sent[0] ?? '';
+    expect(message.startsWith(`${AMAN_GUIDE_NAME}, `)).toBe(true);
+    expect(message).toContain('You were on: Settings, Connectors.');
+    expect(message).toContain('Last error: Request failed (500).');
+    expect(message).toContain('- Your model: ok. The model answered.');
+    expect(await screen.findByTestId('help-choices')).toBeInTheDocument();
+    const disclosure = screen.getByText(`What ${AMAN_GUIDE_NAME} was told`).closest('details');
+    expect(disclosure).toHaveTextContent('You were on: Settings, Connectors. Last error: Request failed (500).');
+    const shownOutside = Array.from(screen.getByTestId('help-chat-results').querySelectorAll('p')).filter(
+      paragraph => paragraph.closest('details') === null,
+    );
+    expect(shownOutside.some(paragraph => paragraph.textContent?.includes('You were on'))).toBe(false);
+  });
+
+  it('sends one hidden message only, even if the run is started twice', async () => {
+    const { ensureGuide } = renderHelp({ check: HEALTHY });
+
+    await waitFor(() => expect(composerSend).toHaveBeenCalledTimes(1));
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(composerSend).toHaveBeenCalledTimes(1);
+    expect(ensureGuide).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps the results and says Iris could not join when she is not installed', async () => {
+    renderHelp({ check: HEALTHY, guideReady: false });
+
+    expect(
+      await screen.findByText(
+        `${AMAN_GUIDE_NAME} could not join this chat. Check your connection, then press Check again.`,
+      ),
+    ).toBeInTheDocument();
+    expect(composerSend).not.toHaveBeenCalled();
+    expect(screen.queryByTestId('help-choices')).toBeNull();
+  });
+
+  it('sends a tapped choice as the person’s own message', async () => {
+    renderHelp({ check: HEALTHY });
+    await screen.findByTestId('help-choices');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Setting up a model' }));
+
+    expect(composerSetText).toHaveBeenLastCalledWith('Setting up a model');
+    expect(composerSend).toHaveBeenCalledTimes(2);
+  });
+
+  it('adds no place to type of its own: the main composer is the only one', async () => {
+    renderHelp({ check: HEALTHY });
+    await screen.findByTestId('help-choices');
+
+    expect(screen.queryAllByRole('textbox')).toHaveLength(0);
+    expect(screen.queryByRole('button', { name: 'Send' })).toBeNull();
+  });
+});

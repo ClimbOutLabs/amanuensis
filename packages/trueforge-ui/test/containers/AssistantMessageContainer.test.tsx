@@ -5,13 +5,18 @@ import type { TrueForgeApi } from '@truefoundry/trueforge-sdk';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { MemoryRecallProvider } from '@/components/MemoryRecallContext.js';
+import { ModelUsageProvider, type ModelUsageTurnContext } from '@/components/ModelUsageContext.js';
 import { AssistantMessageContainer } from '@/containers/AssistantMessageContainer.js';
 import { MemoryTurnContextProvider } from '@/containers/MemoryTurnContextProvider.js';
+import { ModelUsageTurnProvider } from '@/containers/ModelUsageTurnProvider.js';
 import { resetWaitQueueTurnClocks } from '@/hooks/useWaitQueue.js';
 import { AgentDetailsPreferenceProvider } from '@/server/AgentDetailsPreferenceContext.js';
 import { ServerProvider } from '@/server/ServerContext.js';
+import { setModelUsageVisible } from '@/utils/modelUsageDisplayPreference.js';
+import { NANO_COMPACTION_EVENT, NANO_SUMMARY_EVENT, SUPER_EVENT } from '../fixtures/modelUsageEvents.js';
 import { createMockAgentUIServer } from '../server/mockServer.js';
 import { RuntimeHarness } from './RuntimeHarness.js';
+import { AgentDetailsHarness, agentDetailsServer, settleAgentDetails } from './agentDetailsHarness.js';
 
 // The orb draws on a 2d canvas context, which jsdom does not implement; stub
 // it like the WaitQueueIndicator suite does. The queue's stations, microcopy,
@@ -28,19 +33,46 @@ vi.mock('@/components/MapCard.js', () => ({
   ),
 }));
 
-function renderAssistantMessage(
-  messages: ThreadMessageLike[],
-  options?: { isRunning?: boolean; onRespondToToolApproval?: (options: RespondToToolApprovalOptions) => void },
-) {
-  return render(
+type RenderOptions = {
+  isRunning?: boolean;
+  onRespondToToolApproval?: (options: RespondToToolApprovalOptions) => void;
+  /** The chat's stored "Show agent details" switch; omit for a chat with no session yet (off). */
+  agentDetails?: 'expanded' | 'collapsed';
+};
+
+function assistantMessageTree(messages: ThreadMessageLike[], options?: RenderOptions) {
+  if (options?.agentDetails !== undefined) {
+    return (
+      <AgentDetailsHarness
+        agentDetails={options.agentDetails}
+        messages={messages}
+        isRunning={options.isRunning}
+        onRespondToToolApproval={options.onRespondToToolApproval}
+      >
+        <ThreadPrimitive.Messages>{() => <AssistantMessageContainer />}</ThreadPrimitive.Messages>
+      </AgentDetailsHarness>
+    );
+  }
+  return (
     <RuntimeHarness
       messages={messages}
       isRunning={options?.isRunning}
       onRespondToToolApproval={options?.onRespondToToolApproval}
     >
       <ThreadPrimitive.Messages>{() => <AssistantMessageContainer />}</ThreadPrimitive.Messages>
-    </RuntimeHarness>,
+    </RuntimeHarness>
   );
+}
+
+function renderAssistantMessage(messages: ThreadMessageLike[], options?: RenderOptions) {
+  return render(assistantMessageTree(messages, options));
+}
+
+/** Renders with the chat's "Show agent details" switch on, once the stored switch has loaded. */
+async function renderWithDetailsOn(messages: ThreadMessageLike[], options?: Omit<RenderOptions, 'agentDetails'>) {
+  const result = renderAssistantMessage(messages, { ...options, agentDetails: 'expanded' });
+  await settleAgentDetails();
+  return result;
 }
 
 function getAgentInternals(): HTMLElement {
@@ -91,6 +123,20 @@ describe('AssistantMessageContainer', () => {
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   });
 
+  it('does not render the error banner while the thread is still running', () => {
+    renderAssistantMessage(
+      [
+        {
+          role: 'assistant',
+          content: 'partial',
+          status: { type: 'incomplete', reason: 'error', error: 'boom' },
+        },
+      ],
+      { isRunning: true },
+    );
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
   it('hides the action bar while the thread is running (streaming state)', () => {
     renderAssistantMessage([{ role: 'assistant', content: 'typing...' }], { isRunning: true });
     expect(screen.queryByRole('button', { name: 'Copy' })).not.toBeInTheDocument();
@@ -133,8 +179,8 @@ describe('AssistantMessageContainer', () => {
     expect(screen.queryByText(/^\d+ \/ \d+$/)).not.toBeInTheDocument();
   });
 
-  it('labels a running turn as waiting for the model when no tool is running', () => {
-    renderAssistantMessage(
+  it('shows exactly one status line while the model thinks, even with agent details on', async () => {
+    await renderWithDetailsOn(
       [
         {
           role: 'assistant',
@@ -145,11 +191,12 @@ describe('AssistantMessageContainer', () => {
       { isRunning: true },
     );
 
-    expect(screen.getByText(/Waiting for model/)).toBeInTheDocument();
+    expect(screen.getAllByRole('status')).toHaveLength(1);
+    expect(screen.queryByText(/Waiting for model/)).not.toBeInTheDocument();
   });
 
-  it('labels a running turn as executing tools when a tool part is running', () => {
-    renderAssistantMessage(
+  it('names a running tool once, in plain words, with no raw tool name and no Awaiting Response pill', async () => {
+    await renderWithDetailsOn(
       [
         {
           role: 'assistant',
@@ -168,11 +215,17 @@ describe('AssistantMessageContainer', () => {
       { isRunning: true },
     );
 
-    expect(screen.getByText(/Executing tools/)).toBeInTheDocument();
+    expect(screen.getAllByRole('status')).toHaveLength(1);
+    expect(screen.getByRole('status')).toHaveTextContent('Lookup notes…');
+    expect(screen.queryByText(/Executing tools/)).not.toBeInTheDocument();
+    expect(screen.queryByText('lookup_notes')).not.toBeInTheDocument();
+    expect(screen.queryByText(/Awaiting Response/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/^\d+ steps? · \d+ tools?$/)).not.toBeNull();
+    expect(screen.getAllByText(/\d+ steps? · \d+ tools?/)).toHaveLength(1);
   });
 
-  it('labels a real message-level tool approval pause as waiting for approval', () => {
-    renderAssistantMessage([
+  it('shows a real message-level tool approval pause through its card, not a second label', async () => {
+    await renderWithDetailsOn([
       {
         role: 'assistant',
         content: [
@@ -197,14 +250,15 @@ describe('AssistantMessageContainer', () => {
       },
     ]);
 
-    expect(screen.getByText(/Waiting for approval/)).toBeInTheDocument();
-    expect(screen.getByRole('radiogroup', { name: 'Approval options for write_notes' })).toBeInTheDocument();
-    expect(screen.getByRole('radio', { name: 'Approve' })).toBeInTheDocument();
+    // The card itself says what waits on the person; the details row adds no label of its own.
+    expect(screen.queryByText(/Waiting for approval/)).not.toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Allow the assistant to use "write notes"?' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Allow' })).toBeInTheDocument();
     expect(screen.queryByText(/queue|position|ahead/i)).not.toBeInTheDocument();
   });
 
-  it('keeps the approval phase and controls inside the agent internals disclosure', () => {
-    renderAssistantMessage([
+  it('keeps the approval phase and controls inside the agent internals disclosure', async () => {
+    await renderWithDetailsOn([
       {
         role: 'assistant',
         content: [
@@ -230,11 +284,13 @@ describe('AssistantMessageContainer', () => {
 
     const internals = getAgentInternals();
     expect(within(internals).getByText(/1 step · 1 tool/)).toBeInTheDocument();
-    expect(within(internals).getByRole('radiogroup', { name: 'Approval options for write_notes' })).toBeInTheDocument();
+    expect(
+      within(internals).getByRole('heading', { name: 'Allow the assistant to use "write notes"?' }),
+    ).toBeInTheDocument();
   });
 
-  it('counts mixed-turn approval tools only inside the agent internals disclosure', () => {
-    renderAssistantMessage([
+  it('counts mixed-turn approval tools only inside the agent internals disclosure', async () => {
+    await renderWithDetailsOn([
       {
         role: 'assistant',
         content: [
@@ -269,13 +325,13 @@ describe('AssistantMessageContainer', () => {
 
     const cardContent = within(getAgentInternals());
     expect(cardContent.getByText(/2 steps · 2 tools/)).toBeInTheDocument();
-    expect(cardContent.getByRole('radiogroup', { name: 'Approval options for write_notes' })).toBeInTheDocument();
+    expect(cardContent.getByRole('heading', { name: 'Allow the assistant to use "write notes"?' })).toBeInTheDocument();
     expect(cardContent.queryByText('The lookup is complete.')).not.toBeInTheDocument();
   });
 
-  it('forwards the approval decision from inside the agent internals disclosure', () => {
+  it('forwards the approval decision from inside the agent internals disclosure', async () => {
     const onRespondToToolApproval = vi.fn();
-    renderAssistantMessage(
+    await renderWithDetailsOn(
       [
         {
           role: 'assistant',
@@ -314,9 +370,9 @@ describe('AssistantMessageContainer', () => {
     const internals = getAgentInternals();
     expect(within(internals).queryByTestId('assistant-message-agent-internals-toggle')).not.toBeInTheDocument();
     const card = within(internals);
-    expect(card.getByRole('radio', { name: 'Approve' })).toBeVisible();
-    expect(card.getByRole('radio', { name: 'Deny' })).toBeVisible();
-    fireEvent.click(card.getByRole('radio', { name: 'Approve' }));
+    expect(card.getByRole('button', { name: 'Allow' })).toBeVisible();
+    expect(card.getByRole('button', { name: 'Not now' })).toBeVisible();
+    fireEvent.click(card.getByRole('button', { name: 'Allow' }));
     expect(onRespondToToolApproval).toHaveBeenCalledWith(
       expect.objectContaining({ approvalId: 'approval-1', approved: true }),
     );
@@ -351,8 +407,8 @@ describe('AssistantMessageContainer', () => {
     expect(screen.queryByTestId('assistant-message-agent-internals')).not.toBeInTheDocument();
   });
 
-  it('summarizes completed tool turns as one faint line, collapsed with no chat-level preference stored', () => {
-    renderAssistantMessage([
+  it('summarizes completed tool turns as one faint line when agent details are on', async () => {
+    await renderWithDetailsOn([
       {
         role: 'assistant',
         content: [
@@ -372,11 +428,11 @@ describe('AssistantMessageContainer', () => {
 
     const internals = getAgentInternals();
     expect(internals).toHaveTextContent(/2 steps · 1 tool/);
-    expect(internals.querySelector('[hidden]')).not.toBeNull();
+    expect(within(internals).getByText('Lookup notes')).toBeVisible();
     expect(screen.queryByTestId('assistant-message-agent-internals-attention')).not.toBeInTheDocument();
   });
 
-  describe('answer text written before a tool call', () => {
+  describe('answer text written before a tool call, agent details on', () => {
     const SUMMARY = 'The PDF covers three topics: pricing, onboarding, and the support model, with details for each.';
     const toolCall = {
       type: 'tool-call' as const,
@@ -387,8 +443,8 @@ describe('AssistantMessageContainer', () => {
       result: { ok: true },
     };
 
-    it('keeps substantive text outside the collapsed internals, in order', () => {
-      renderAssistantMessage([
+    it('keeps substantive text outside the internals, in order', async () => {
+      await renderWithDetailsOn([
         {
           role: 'assistant',
           content: [{ type: 'text', text: SUMMARY }, toolCall, { type: 'text', text: 'Confirmed.' }],
@@ -398,15 +454,15 @@ describe('AssistantMessageContainer', () => {
       const summary = screen.getByText(SUMMARY);
       const internals = getAgentInternals();
       const confirmed = screen.getByText('Confirmed.');
-      expect(summary.closest('[hidden]')).toBeNull();
+      expect(summary).toBeVisible();
+      expect(internals).not.toContainElement(summary);
       expect(internals).toHaveTextContent(/1 step · 1 tool/);
-      expect(internals.querySelector('[hidden]')).not.toBeNull();
       expect(summary.compareDocumentPosition(internals) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
       expect(internals.compareDocumentPosition(confirmed) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     });
 
-    it('keeps short narration folded and hidden', () => {
-      renderAssistantMessage([
+    it('keeps short text before a tool call visible', async () => {
+      await renderWithDetailsOn([
         {
           role: 'assistant',
           content: [
@@ -417,13 +473,73 @@ describe('AssistantMessageContainer', () => {
         },
       ]);
 
-      const narration = screen.getByText('Let me search for that.');
-      expect(narration.closest('[hidden]')).not.toBeNull();
-      expect(screen.getByText('Here you go.').closest('[hidden]')).toBeNull();
+      expect(screen.getByText('Let me search for that.')).toBeVisible();
+      expect(screen.getByText('Here you go.')).toBeVisible();
     });
 
-    it('renders one disclosure per folded run with its own counts', () => {
-      renderAssistantMessage([
+    it('shows the sentence before a run_code call and the result after it', async () => {
+      await renderWithDetailsOn([
+        {
+          role: 'assistant',
+          content: [
+            { type: 'text', text: "I'll run that calculation for you." },
+            { ...toolCall, toolCallId: 'tool-run', toolName: 'run_code' },
+            { type: 'text', text: 'The result is **20**.' },
+          ],
+        },
+      ]);
+
+      expect(screen.getByText("I'll run that calculation for you.")).toBeVisible();
+      expect(screen.getByText('20')).toBeVisible();
+    });
+
+    it('shows the sentence before an undecided approval while the turn waits', async () => {
+      await renderWithDetailsOn([
+        {
+          role: 'assistant',
+          status: { type: 'requires-action', reason: 'tool-calls' },
+          content: [
+            { type: 'text', text: "I'll run that calculation for you." },
+            {
+              type: 'tool-call',
+              toolCallId: 'tool-run',
+              toolName: 'run_code',
+              args: { language: 'python', code: 'print(4 * 5)' },
+              argsText: '{"language":"python","code":"print(4 * 5)"}',
+              interrupt: { type: 'human', payload: {} },
+              approval: {
+                id: 'approval-run',
+                options: [
+                  { id: 'allow-once', kind: 'allow-once' },
+                  { id: 'deny', kind: 'reject-once' },
+                ],
+              },
+            },
+          ],
+        },
+      ]);
+
+      expect(screen.getByText("I'll run that calculation for you.")).toBeVisible();
+      expect(within(getAgentInternals()).getByRole('button', { name: 'Allow' })).toBeVisible();
+    });
+
+    it('shows the answer after a tool call while the message is still running', async () => {
+      await renderWithDetailsOn(
+        [
+          {
+            role: 'assistant',
+            status: { type: 'running' },
+            content: [toolCall, { type: 'text', text: 'The result is 2' }],
+          },
+        ],
+        { isRunning: true },
+      );
+
+      expect(await screen.findByText('The result is 2')).toBeVisible();
+    });
+
+    it('renders one disclosure per folded run with its own counts', async () => {
+      await renderWithDetailsOn([
         {
           role: 'assistant',
           content: [
@@ -440,21 +556,22 @@ describe('AssistantMessageContainer', () => {
       expect(disclosures).toHaveLength(2);
       expect(disclosures[0]).toHaveTextContent(/1 step · 1 tool/);
       expect(disclosures[1]).toHaveTextContent(/2 steps · 2 tools/);
-      expect(screen.getByText(SUMMARY).closest('[hidden]')).toBeNull();
+      expect(screen.getByText(SUMMARY)).toBeVisible();
     });
   });
 
-  it('collapses the content but keeps the attention dot when a completed turn has a tool error', () => {
-    renderAssistantMessage([erroredToolCallMessage()]);
+  it("lets the person close one answer's details while agent details are on", async () => {
+    await renderWithDetailsOn([erroredToolCallMessage()]);
 
     const internals = getAgentInternals();
-    expect(internals).toHaveTextContent(/1 step · 1 tool/);
-    expect(internals.querySelector('[hidden]')).not.toBeNull();
+    expect(within(internals).getByText('Lookup notes')).toBeVisible();
+    fireEvent.click(screen.getByTestId('assistant-message-agent-internals-toggle'));
+    expect(within(internals).getByText('Lookup notes')).not.toBeVisible();
     expect(screen.getByTestId('assistant-message-agent-internals-attention')).toBeInTheDocument();
   });
 
-  it('auto-expands the internals of a running turn when a tool errored', () => {
-    renderAssistantMessage([{ ...erroredToolCallMessage(), status: { type: 'running' } }], { isRunning: true });
+  it('auto-expands the internals of a running turn when a tool errored', async () => {
+    await renderWithDetailsOn([{ ...erroredToolCallMessage(), status: { type: 'running' } }], { isRunning: true });
 
     const internals = getAgentInternals();
     expect(internals.querySelector('[hidden]')).toBeNull();
@@ -462,37 +579,350 @@ describe('AssistantMessageContainer', () => {
   });
 
   it('reveals a completed errored turn when the stored agent-details preference is expanded', async () => {
-    const session = {
-      id: 'sess-1',
-      isMutable: true,
-      createdAt: '2026-08-03T00:00:00.000Z',
-      updatedAt: '2026-08-03T00:00:00.000Z',
-      metadata: { agent_details: 'expanded' },
-    };
-    const server = createMockAgentUIServer({
-      getSession: vi.fn(async () => session),
-      updateSession: vi.fn(async () => session),
-    });
-
-    render(
-      <ServerProvider server={server}>
-        <AgentDetailsPreferenceProvider>
-          <RuntimeHarness messages={[erroredToolCallMessage()]} threadId="t1" remoteId="sess-1">
-            <ThreadPrimitive.Messages>{() => <AssistantMessageContainer />}</ThreadPrimitive.Messages>
-          </RuntimeHarness>
-        </AgentDetailsPreferenceProvider>
-      </ServerProvider>,
-    );
-    // Let the stored session preference resolve.
-    await act(async () => {
-      await Promise.resolve();
-      await Promise.resolve();
-      await Promise.resolve();
-    });
+    await renderWithDetailsOn([erroredToolCallMessage()]);
 
     const internals = getAgentInternals();
-    expect(internals.querySelector('[hidden]')).toBeNull();
+    expect(within(internals).getByText('Lookup notes')).toBeVisible();
     expect(screen.getByTestId('assistant-message-agent-internals-attention')).toBeInTheDocument();
+    expect(screen.queryByTestId('assistant-message-not-finished')).not.toBeInTheDocument();
+  });
+});
+
+describe('AssistantMessageContainer with agent details off', () => {
+  const FIRST_LINE = 'Let me pull together your notes digest. First I will gather everything.';
+  const SECOND_LINE = 'Let me read the key notes in full before I sum up.';
+  const FINAL = 'Here is your digest: two notes need a reply today.';
+  const RAW_ERROR = 'Notes has no such entry.';
+
+  function noteCall(id: string, extra: Partial<{ result: unknown }> = {}) {
+    return {
+      type: 'tool-call' as const,
+      toolCallId: id,
+      toolName: 'read_note',
+      args: { id },
+      argsText: JSON.stringify({ id }),
+      ...extra,
+    };
+  }
+
+  const failedCall = noteCall('note-missing', {
+    result: {
+      schema_version: 'tool.response.v2',
+      outcome: { disposition: 'executed_nonzero' },
+      result: { error: RAW_ERROR },
+    },
+  });
+
+  /** Several tool steps, two in-between lines and one failed call the reply recovered from. */
+  function workedReply(): Exclude<ThreadMessageLike['content'], string> {
+    return [
+      { type: 'text', text: FIRST_LINE },
+      { ...noteCall('list'), toolName: 'list_notes', result: { ok: true } },
+      { type: 'text', text: SECOND_LINE },
+      noteCall('note-1', { result: { ok: true } }),
+      failedCall,
+      noteCall('note-2', { result: { ok: true } }),
+      { type: 'text', text: FINAL },
+    ];
+  }
+
+  function expectNoWorkShown(): void {
+    expect(screen.queryByTestId('assistant-message-agent-internals')).not.toBeInTheDocument();
+    expect(screen.queryByText(/\d+ steps?/)).not.toBeInTheDocument();
+    expect(screen.queryByText(FIRST_LINE)).not.toBeInTheDocument();
+    expect(screen.queryByText(SECOND_LINE)).not.toBeInTheDocument();
+    for (const name of [/read_note/, /list_notes/, new RegExp(RAW_ERROR)]) {
+      for (const element of screen.queryAllByText(name)) expect(element).not.toBeVisible();
+    }
+  }
+
+  it('shows the final answer and one plain line for the failed step, and nothing else of the work', async () => {
+    renderAssistantMessage([{ role: 'assistant', content: workedReply() }], { agentDetails: 'collapsed' });
+    await settleAgentDetails();
+
+    expect(screen.getByText(FINAL)).toBeVisible();
+    expectNoWorkShown();
+    expect(screen.queryByTestId('assistant-message-not-finished')).not.toBeInTheDocument();
+    expect(screen.getByTestId('assistant-message-step-not-finished')).toHaveTextContent(
+      "One step didn't finish. Turn on agent details to see it.",
+    );
+  });
+
+  it('says a hidden step did not finish when it was blocked, even under an answer that claims success', async () => {
+    const blocked = noteCall('send', {
+      result: { schema_version: 'tool.response.v2', outcome: { disposition: 'policy_blocked' }, result: {} },
+    });
+    renderAssistantMessage(
+      [
+        {
+          role: 'assistant',
+          content: [{ type: 'text', text: FIRST_LINE }, blocked, { type: 'text', text: 'Done, I sent it.' }],
+        },
+      ],
+      { agentDetails: 'collapsed' },
+    );
+    await settleAgentDetails();
+
+    expect(screen.getByText('Done, I sent it.')).toBeVisible();
+    expect(screen.getByTestId('assistant-message-step-not-finished')).toBeVisible();
+  });
+
+  it('adds no step line when every hidden step finished', async () => {
+    const content = workedReply().filter(part => part !== failedCall);
+    renderAssistantMessage([{ role: 'assistant', content }], { agentDetails: 'collapsed' });
+    await settleAgentDetails();
+
+    expect(screen.getByText(FINAL)).toBeVisible();
+    expect(screen.queryByTestId('assistant-message-step-not-finished')).not.toBeInTheDocument();
+  });
+
+  it('shows only the live progress line while the reply is still working', async () => {
+    const running = [...workedReply().slice(0, -1), noteCall('note-3')];
+    renderAssistantMessage([{ role: 'assistant', content: running, status: { type: 'running' } }], {
+      agentDetails: 'collapsed',
+      isRunning: true,
+    });
+    await settleAgentDetails();
+
+    expect(document.querySelector('[data-slot="aui_assistant-message-indicator"]')).not.toBeNull();
+    expectNoWorkShown();
+  });
+
+  it('shows the steps, the in-between lines and the failed call once agent details are on', async () => {
+    await renderWithDetailsOn([{ role: 'assistant', content: workedReply() }]);
+
+    expect(screen.getByText(FINAL)).toBeVisible();
+    expect(screen.getByText(FIRST_LINE)).toBeVisible();
+    expect(screen.getByText(SECOND_LINE)).toBeVisible();
+    const disclosures = screen.getAllByTestId('assistant-message-agent-internals');
+    expect(disclosures[1]).toHaveTextContent(/3 steps · 3 tools/);
+    for (const element of screen.getAllByText(/Read note/)) expect(element).toBeVisible();
+    expect(screen.getByText(new RegExp(RAW_ERROR))).toBeVisible();
+    expect(screen.queryByTestId('assistant-message-step-not-finished')).not.toBeInTheDocument();
+  });
+
+  it('still shows the approval card, and nothing else of the work', async () => {
+    const onRespondToToolApproval = vi.fn();
+    renderAssistantMessage(
+      [
+        {
+          role: 'assistant',
+          status: { type: 'requires-action', reason: 'tool-calls' },
+          content: [
+            { type: 'text', text: FIRST_LINE },
+            noteCall('note-1', { result: { ok: true } }),
+            {
+              type: 'tool-call',
+              toolCallId: 'tool-approval',
+              toolName: 'write_notes',
+              args: { path: 'notes.md' },
+              argsText: '{"path":"notes.md"}',
+              interrupt: { type: 'human', payload: {} },
+              approval: {
+                id: 'approval-1',
+                options: [
+                  { id: 'allow-once', kind: 'allow-once' },
+                  { id: 'deny', kind: 'reject-once' },
+                ],
+              },
+            },
+          ],
+        },
+      ],
+      { agentDetails: 'collapsed', onRespondToToolApproval },
+    );
+    await settleAgentDetails();
+
+    expect(screen.getByRole('heading', { name: 'Allow the assistant to use "write notes"?' })).toBeVisible();
+    expect(screen.queryByRole('radiogroup')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Allow' }));
+    expect(onRespondToToolApproval).toHaveBeenCalledWith(
+      expect.objectContaining({ approvalId: 'approval-1', approved: true }),
+    );
+    expectNoWorkShown();
+  });
+
+  it('says in one plain line that a failed reply did not finish, never the raw tool error', () => {
+    renderAssistantMessage([erroredToolCallMessage()]);
+
+    expect(screen.getByTestId('assistant-message-not-finished')).toHaveTextContent(
+      'This reply did not finish. Ask again, or turn on Agent details to see what went wrong.',
+    );
+    expect(screen.queryByTestId('assistant-message-agent-internals')).not.toBeInTheDocument();
+    for (const element of screen.queryAllByText(/lookup failed|lookup_notes/)) expect(element).not.toBeVisible();
+  });
+
+  it('keeps the last line as the answer when a finished reply wrote nothing after its last step', () => {
+    renderAssistantMessage([
+      {
+        role: 'assistant',
+        content: [{ type: 'text', text: FINAL }, noteCall('note-1', { result: { ok: true } })],
+      },
+    ]);
+
+    expect(screen.getByText(FINAL)).toBeVisible();
+    expect(screen.queryByTestId('assistant-message-not-finished')).not.toBeInTheDocument();
+  });
+});
+
+describe('AssistantMessageContainer when a step was refused and then done again', () => {
+  const PLAIN_LINE = 'I could not finish one of the steps in this reply. Ask me to try again.';
+  const OLD_STORED_LINE =
+    'One of the actions in this reply could not run: The update_space call was not sent because its arguments were not complete, so nothing was done with it. Send the whole call again, with all of its arguments finished. Ask again to try it once more.';
+  const LEAD =
+    'I will update the space with the full checklist now.\n\nIt has twelve steps and a timeline, so this takes one careful write.';
+  const FINAL_DONE = 'Done. The space now has the twelve steps and the timeline.';
+  const FINAL_FAILED = 'The space was not changed.';
+
+  function envelope(outcome: Record<string, unknown>) {
+    return { schema_version: 'tool.response.v2', outcome, result: {} };
+  }
+
+  const refused = (message: string) =>
+    envelope({
+      disposition: 'never_ran',
+      remediation: { reason_code: 'tool_pre_dispatch_failed', message, suggested_action: 'contact_user' },
+    });
+  const done = envelope({ disposition: 'executed_ok' });
+
+  function spaceCall(id: string, extra: { cutOff?: boolean; result?: unknown }) {
+    const argsText =
+      extra.cutOff === true
+        ? '{"name":"Harbour Market Plan","body":"- [ ] Book the stall'
+        : JSON.stringify({ name: 'Harbour Market Plan', body: '- [x] Book the stall' });
+    return {
+      type: 'tool-call' as const,
+      toolCallId: id,
+      toolName: 'update_space',
+      args: {},
+      argsText,
+      ...(extra.result === undefined ? {} : { result: extra.result }),
+    };
+  }
+
+  const failTwiceThenSucceed = (line: string) => [
+    { type: 'text' as const, text: LEAD },
+    spaceCall('try-1', { cutOff: true, result: refused(line) }),
+    spaceCall('try-2', { cutOff: true, result: refused(line) }),
+    spaceCall('try-3', { result: done }),
+    { type: 'text' as const, text: FINAL_DONE },
+  ];
+
+  const failTwice = (line: string) => [
+    { type: 'text' as const, text: LEAD },
+    spaceCall('try-1', { cutOff: true, result: refused(line) }),
+    spaceCall('try-2', { cutOff: true, result: refused(line) }),
+    { type: 'text' as const, text: FINAL_FAILED },
+  ];
+
+  it('shows the person nothing about a failure the reply recovered from, with agent details off', async () => {
+    renderAssistantMessage([{ role: 'assistant', content: failTwiceThenSucceed(PLAIN_LINE) }], {
+      agentDetails: 'collapsed',
+    });
+    await settleAgentDetails();
+
+    expect(screen.getByText(FINAL_DONE)).toBeVisible();
+    expect(screen.queryByTestId('tool-refusal-notice')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('assistant-message-step-not-finished')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('assistant-message-not-finished')).not.toBeInTheDocument();
+  });
+
+  it('says nothing about it, even for a reply stored before the plain line existed', async () => {
+    renderAssistantMessage([{ role: 'assistant', content: failTwiceThenSucceed(OLD_STORED_LINE) }], {
+      agentDetails: 'collapsed',
+    });
+    await settleAgentDetails();
+
+    expect(screen.queryByTestId('tool-refusal-notice')).not.toBeInTheDocument();
+    for (const element of screen.queryAllByText(/could not run|arguments/)) expect(element).not.toBeVisible();
+    expect(screen.queryByTestId('assistant-message-step-not-finished')).not.toBeInTheDocument();
+  });
+
+  it('keeps the recovered failure under agent details, and still says nothing in plain words', async () => {
+    await renderWithDetailsOn([{ role: 'assistant', content: failTwiceThenSucceed(PLAIN_LINE) }]);
+
+    expect(screen.getByText(FINAL_DONE)).toBeVisible();
+    expect(screen.queryByTestId('tool-refusal-notice')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('assistant-message-step-not-finished')).not.toBeInTheDocument();
+    // The failed tries are still listed with the other steps.
+    expect(screen.getByTestId('assistant-message-agent-internals')).toHaveTextContent(/3 steps · 3 tools/);
+  });
+
+  it('shows one plain line where the step happened, and the footer, when the step never finished', async () => {
+    renderAssistantMessage([{ role: 'assistant', content: failTwice(PLAIN_LINE) }], { agentDetails: 'collapsed' });
+    await settleAgentDetails();
+
+    const notice = screen.getByTestId('tool-refusal-notice');
+    expect(screen.getAllByTestId('tool-refusal-notice')).toHaveLength(1);
+    expect(notice).toHaveTextContent(PLAIN_LINE);
+    expect(notice).not.toHaveTextContent(/update_space|arguments/);
+    const lead = screen.getByText(/I will update the space/);
+    const final = screen.getByText(FINAL_FAILED);
+    // After the words that led into the step, before the words that followed it: never the first line.
+    expect(lead.compareDocumentPosition(notice) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(notice.compareDocumentPosition(final) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.getByTestId('assistant-message-step-not-finished')).toHaveTextContent(
+      "One step didn't finish. Turn on agent details to see it.",
+    );
+  });
+
+  it('still shows a reply stored with the older line, in place', async () => {
+    renderAssistantMessage([{ role: 'assistant', content: failTwice(OLD_STORED_LINE) }], {
+      agentDetails: 'collapsed',
+    });
+    await settleAgentDetails();
+
+    expect(screen.getByTestId('tool-refusal-notice')).toHaveTextContent(OLD_STORED_LINE);
+    expect(screen.getByTestId('assistant-message-step-not-finished')).toBeVisible();
+  });
+
+  it('shows the plain line once with agent details on, next to the listed steps', async () => {
+    await renderWithDetailsOn([{ role: 'assistant', content: failTwice(PLAIN_LINE) }]);
+
+    expect(screen.getAllByTestId('tool-refusal-notice')).toHaveLength(1);
+    expect(screen.getByTestId('tool-refusal-notice')).toHaveTextContent(PLAIN_LINE);
+    expect(screen.getByText(FINAL_FAILED)).toBeVisible();
+  });
+
+  it('waits for the reply to settle before saying a step is undone', async () => {
+    renderAssistantMessage(
+      [{ role: 'assistant', content: failTwice(PLAIN_LINE).slice(0, 3), status: { type: 'running' } }],
+      { agentDetails: 'collapsed', isRunning: true },
+    );
+    await settleAgentDetails();
+
+    expect(screen.queryByTestId('tool-refusal-notice')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('assistant-message-step-not-finished')).not.toBeInTheDocument();
+  });
+});
+
+describe('AssistantMessageContainer images without a chat image scope', () => {
+  const DATA_PNG = 'data:image/png;base64,iVBORw0KGgo=';
+
+  it('shows a model data: image as not shown when the turn has no session id', () => {
+    const server = Object.assign(createMockAgentUIServer(), {
+      chatImages: {
+        listTurnImages: vi.fn(() => Promise.resolve({ artifacts: [], emails: [] })),
+        showTurnImages: vi.fn(() => Promise.resolve({ status: 'done' as const, images: [] })),
+        imageUrl: ({ sessionId, imageId }: { sessionId: string; imageId: string }) =>
+          `/api/chat-images/sessions/${sessionId}/images/${imageId}`,
+      },
+    });
+    const { container } = render(
+      <ServerProvider server={server}>
+        {assistantMessageTree([
+          { role: 'assistant', content: `Here: ![model pixel](${DATA_PNG})`, metadata: { custom: { turnId: 't1' } } },
+        ])}
+      </ServerProvider>,
+    );
+    expect(container.querySelector(`img[src="${DATA_PNG}"]`)).toBeNull();
+    expect(screen.getByTestId('aui-chat-image-not-shown')).toHaveTextContent('model pixel (image not shown)');
+  });
+
+  it('shows a model data: image as not shown when there is no chat images port', () => {
+    const { container } = renderAssistantMessage([{ role: 'assistant', content: `![x](${DATA_PNG})` }]);
+    expect(container.querySelector('img')).toBeNull();
+    expect(screen.getByTestId('aui-chat-image-not-shown')).toBeInTheDocument();
   });
 });
 
@@ -528,17 +958,7 @@ describe('AssistantMessageContainer memory recall visibility', () => {
     recallOutcome?: 'ok' | 'timeout' | 'error';
   }) {
     const { agentDetails, recallOutcome = 'ok' } = options;
-    const session = {
-      id: 'sess-1',
-      isMutable: true,
-      createdAt: '2026-08-03T00:00:00.000Z',
-      updatedAt: '2026-08-03T00:00:00.000Z',
-      metadata: { agent_details: agentDetails },
-    };
-    const server = createMockAgentUIServer({
-      getSession: vi.fn(async () => session),
-      updateSession: vi.fn(async () => session),
-    });
+    const server = agentDetailsServer(agentDetails);
     const recall: TrueForgeApi.MemoryRecallPersistedEvent = {
       ...recallEvent,
       stats: { ...recallEvent.stats, outcome: recallOutcome },
@@ -567,42 +987,35 @@ describe('AssistantMessageContainer memory recall visibility', () => {
     return result;
   }
 
-  it('shows the "N recalled" segment and recall counts when agent details are expanded', async () => {
+  it('shows the recall count once, on the memory row, when agent details are expanded', async () => {
     await renderWithStoredPreference({ agentDetails: 'expanded' });
     const internals = getAgentInternals();
-    expect(within(internals).getByText(/3 recalled/)).toBeInTheDocument();
-    expect(within(internals).getByText('3 items, 1 entity')).toBeInTheDocument();
+    expect(within(internals).queryByText(/recalled/)).not.toBeInTheDocument();
+    expect(within(internals).getAllByText('3 items, 1 entity')).toHaveLength(1);
   });
 
-  it('hides the "N recalled" segment and recall counts when agent details are collapsed', async () => {
+  it('hides the recall counts when agent details are collapsed', async () => {
     await renderWithStoredPreference({ agentDetails: 'collapsed' });
     expect(screen.queryByText(/recalled/)).not.toBeInTheDocument();
     expect(screen.queryByText('Recalled memory')).not.toBeInTheDocument();
   });
 
-  it('keeps the attention dot and the recall count in the summary when a completed recall errored', async () => {
-    await renderWithStoredPreference({ agentDetails: 'collapsed', recallOutcome: 'error' });
+  it('keeps the attention dot when a completed recall errored', async () => {
+    await renderWithStoredPreference({ agentDetails: 'expanded', recallOutcome: 'error' });
 
-    const internals = getAgentInternals();
-    // The failed recall still surfaces in the summary row next to the amber dot…
-    expect(within(internals).getByText(/3 recalled/)).toBeInTheDocument();
+    expect(within(getAgentInternals()).getByText('Recall failed')).toBeInTheDocument();
     expect(screen.getByTestId('assistant-message-agent-internals-attention')).toBeInTheDocument();
-    // …while the disclosure content itself collapses on the completed turn.
-    expect(internals.querySelector('[hidden]')).not.toBeNull();
   });
 
-  it('shows the attention dot with collapsed content when the memory context fetch failed', async () => {
-    const session = {
-      id: 'sess-1',
-      isMutable: true,
-      createdAt: '2026-08-03T00:00:00.000Z',
-      updatedAt: '2026-08-03T00:00:00.000Z',
-      metadata: { agent_details: 'collapsed' },
-    };
-    const server = createMockAgentUIServer({
-      getSession: vi.fn(async () => session),
-      updateSession: vi.fn(async () => session),
-    });
+  it('shows nothing of a failed recall while agent details are off', async () => {
+    await renderWithStoredPreference({ agentDetails: 'collapsed', recallOutcome: 'error' });
+
+    expect(screen.getByText('here you go')).toBeVisible();
+    expect(screen.queryByTestId('assistant-message-agent-internals')).not.toBeInTheDocument();
+  });
+
+  it('shows the attention dot when the memory context fetch failed and agent details are on', async () => {
+    const server = agentDetailsServer('expanded');
     const listMemoryTurnContext = vi.fn(async () => {
       throw new Error('memory fetch failed');
     });
@@ -627,9 +1040,8 @@ describe('AssistantMessageContainer memory recall visibility', () => {
       await Promise.resolve();
     });
 
-    const internals = getAgentInternals();
+    expect(getAgentInternals()).toBeInTheDocument();
     expect(screen.getByTestId('assistant-message-agent-internals-attention')).toBeInTheDocument();
-    expect(internals.querySelector('[hidden]')).not.toBeNull();
   });
 });
 
@@ -680,15 +1092,14 @@ describe('AssistantMessageContainer wait queue (production path)', () => {
     expect(queueRoot()).not.toBeNull();
   });
 
-  it('lights the Writing station when the first tokens stream', () => {
+  it('says Writing in its one status line when the first tokens stream', () => {
     render(turnTree('mount-1', 'hello there'));
 
-    const writingLabel = document.querySelector('.aui-wait-queue__station--active .aui-wait-queue__label');
-    expect(writingLabel).toHaveTextContent('Writing');
-    expect(document.querySelector('.aui-wait-queue__station--arriving')).not.toBeNull();
+    expect(document.querySelector('.aui-wait-queue__microcopy')).toHaveTextContent('Writing…');
+    expect(document.querySelector('.aui-state-sprite--writing')).not.toBeNull();
   });
 
-  it('keeps one elapsed clock across a text→tool→text turn with remounts', () => {
+  it('keeps one turn clock across a text→tool→text turn with remounts, noting only quiet spells', () => {
     vi.useFakeTimers();
     try {
       vi.setSystemTime(new Date('2026-09-21T19:00:00.000Z'));
@@ -698,7 +1109,7 @@ describe('AssistantMessageContainer wait queue (production path)', () => {
 
       const { rerender } = render(turnTree('phase-text-1', 'first tokens'));
       act(() => {
-        vi.advanceTimersByTime(10_000);
+        vi.advanceTimersByTime(50_000);
       });
 
       // Text → tool phase. The mount-key change forces a full remount, like
@@ -709,18 +1120,28 @@ describe('AssistantMessageContainer wait queue (production path)', () => {
         vi.advanceTimersByTime(6_000);
       });
 
-      // 16s into the same turn: the long-wait note must carry the turn's
-      // clock, not the 6s since the remount.
-      const longWait = document.querySelector('.aui-wait-queue__longwait');
-      expect(longWait).not.toBeNull();
-      expect(longWait?.textContent).toMatch(/16s so far/);
+      // The tool call arrived 6s ago, so the turn is not quiet yet: the line names the work.
+      const line = () => document.querySelector('.aui-wait-queue__microcopy')?.textContent;
+      expect(line()).toBe('Reading…');
 
-      // …and back to text: still the same turn clock.
+      act(() => {
+        vi.advanceTimersByTime(10_000);
+      });
+
+      // 16s of quiet, 66s into the same turn: the line carries the turn's
+      // clock, not the time since the remount.
+      expect(line()).toBe('Still reading… 1 min');
+
+      // …and back to text: the new tokens end the quiet spell, and the clock is still the turn's.
       rerender(turnTree('phase-text-2', 'more tokens'));
       act(() => {
         vi.advanceTimersByTime(2_000);
       });
-      expect(document.querySelector('.aui-wait-queue__longwait')?.textContent).toMatch(/18s so far/);
+      expect(line()).toBe('Writing…');
+      act(() => {
+        vi.advanceTimersByTime(60_000);
+      });
+      expect(line()).toBe('Still writing… 2 min');
     } finally {
       vi.useRealTimers();
     }
@@ -791,10 +1212,169 @@ describe('AssistantMessageContainer wait queue (production path)', () => {
     ]);
 
     // The approval card sits inline with the call, not behind a collapsed disclosure.
-    expect(screen.getByRole('radiogroup', { name: 'Approval options for render_map' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Allow the assistant to use "render map"?' })).toBeInTheDocument();
     // No map card and no loading state anywhere while approval is pending.
     expect(screen.queryByTestId('mock-map-card')).not.toBeInTheDocument();
     expect(screen.queryByTestId('map-card-loading')).not.toBeInTheDocument();
+  });
+
+  function placesCallPart(
+    extra: Pick<ToolCallPart, 'toolCallId'> & Partial<Pick<ToolCallPart, 'result' | 'approval'>>,
+  ) {
+    return {
+      type: 'tool-call',
+      toolName: 'render_places',
+      args: { places: [] },
+      argsText: '{"places":[]}',
+      ...extra,
+    } satisfies ToolCallPart;
+  }
+
+  it('renders the pinned places inline once the pin call has run', () => {
+    renderAssistantMessage([
+      {
+        role: 'assistant',
+        content: [
+          placesCallPart({
+            toolCallId: 'tool-places-1',
+            result: JSON.stringify({
+              status: 'ok',
+              places: [
+                {
+                  name: 'Harbour Family Clinic',
+                  address: '12 Example Street, Lisbon 1100-000',
+                  languages: 'English, Portuguese',
+                  hours: null,
+                  price: null,
+                  phone: null,
+                  source_url: 'https://harbour-clinic.example/en',
+                  source_site: 'harbour-clinic.example',
+                  fetched_at: '2026-10-17T10:00:00.000Z',
+                  lat: 38.7,
+                  lng: -9.1,
+                  already_in_calendar: false,
+                },
+              ],
+              refused: [],
+              attribution: '© OpenStreetMap contributors',
+            }),
+          }),
+          { type: 'text', text: 'I found one place.' },
+        ],
+      },
+    ]);
+
+    expect(screen.queryByTestId('assistant-message-agent-internals')).not.toBeInTheDocument();
+    expect(screen.getByTestId('mock-map-card')).toHaveTextContent('1 place found');
+  });
+
+  it('shrinks a failed pin call to one quiet line when a later map in the same answer replaces it', () => {
+    renderAssistantMessage([
+      {
+        role: 'assistant',
+        content: [
+          placesCallPart({
+            toolCallId: 'tool-places-failed',
+            result: JSON.stringify({
+              status: 'error',
+              code: 'not_grounded',
+              refused: [
+                {
+                  name: 'Harbour Family Clinic',
+                  reason: 'The name is not on that page. Copy it word for word from the page and try again.',
+                },
+              ],
+            }),
+          }),
+          placesCallPart({
+            toolCallId: 'tool-places-good',
+            result: JSON.stringify({
+              status: 'ok',
+              places: [
+                {
+                  name: 'Harbour Family Clinic',
+                  address: '12 Example Street, Lisbon 1100-000',
+                  languages: null,
+                  hours: null,
+                  price: null,
+                  phone: null,
+                  source_url: 'https://harbour-clinic.example/en',
+                  source_site: 'harbour-clinic.example',
+                  fetched_at: '2026-10-17T10:00:00.000Z',
+                  lat: 38.7,
+                  lng: -9.1,
+                  already_in_calendar: false,
+                },
+              ],
+              refused: [],
+              attribution: '© OpenStreetMap contributors',
+            }),
+          }),
+          { type: 'text', text: 'Here is the place.' },
+        ],
+      },
+    ]);
+
+    expect(screen.getByTestId('map-card-replaced')).toHaveTextContent(/replaces it/);
+    expect(screen.getAllByTestId('mock-map-card')).toHaveLength(1);
+  });
+
+  it('shows a failed pin call as one quiet step with no map card, and its refusal behind Details', () => {
+    renderAssistantMessage([
+      {
+        role: 'assistant',
+        content: [
+          placesCallPart({
+            toolCallId: 'tool-places-failed-only',
+            result: JSON.stringify({
+              status: 'error',
+              code: 'not_grounded',
+              refused: [
+                {
+                  name: 'Harbour Family Clinic',
+                  reason: 'The name is not on that page. Copy it word for word from the page and try again.',
+                },
+              ],
+            }),
+          }),
+          { type: 'text', text: 'No luck.' },
+        ],
+      },
+    ]);
+
+    expect(screen.queryByTestId('map-card-replaced')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('mock-map-card')).not.toBeInTheDocument();
+    expect(screen.queryByText('Map unavailable')).not.toBeInTheDocument();
+    expect(screen.getByText('Checked places for a map')).toBeInTheDocument();
+    expect(screen.queryByText(/The name is not on that page/)).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByText('Checked places for a map'));
+    expect(screen.getByText('Left out')).toBeInTheDocument();
+    expect(screen.getByText(/The name is not on that page/)).toBeInTheDocument();
+  });
+
+  it('asks first for the pin call and shows no map until it is approved', () => {
+    renderAssistantMessage([
+      {
+        role: 'assistant',
+        content: [
+          placesCallPart({
+            toolCallId: 'tool-places-approval',
+            approval: {
+              id: 'approval-places',
+              options: [
+                { id: 'allow-once', kind: 'allow-once' },
+                { id: 'deny', kind: 'reject-once' },
+              ],
+            },
+          }),
+        ],
+        status: { type: 'requires-action', reason: 'tool-calls' },
+      },
+    ]);
+
+    expect(screen.getByRole('heading', { name: 'Allow the assistant to use "render places"?' })).toBeInTheDocument();
+    expect(screen.queryByTestId('mock-map-card')).not.toBeInTheDocument();
   });
 
   it('shows a quiet loading state while the maps call runs', () => {
@@ -832,8 +1412,298 @@ describe('AssistantMessageContainer wait queue (production path)', () => {
       { role: 'assistant', content: [{ type: 'text', text: 'Okay.' }] },
     ]);
 
-    expect(screen.getByText('This request expired.')).toBeInTheDocument();
-    expect(screen.queryByRole('radiogroup', { name: 'Approval options for render_map' })).not.toBeInTheDocument();
+    expect(screen.getByText('This request ended. Ask again if you still need it.')).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Allow the assistant to use "render map"?' })).not.toBeInTheDocument();
     expect(screen.queryByTestId('map-card-loading')).not.toBeInTheDocument();
+  });
+});
+
+describe('AssistantMessageContainer model and cost line', () => {
+  const messages: ThreadMessageLike[] = [
+    { role: 'assistant', content: 'here you go', metadata: { custom: { turnId: 'trn_1' } } },
+  ];
+
+  beforeEach(() => {
+    setModelUsageVisible(true);
+  });
+
+  async function renderWithUsage(options: {
+    usage: ModelUsageTurnContext[];
+    agentDetails?: 'expanded' | 'collapsed';
+    isRunning?: boolean;
+    threadMessages?: ThreadMessageLike[];
+  }) {
+    const { usage, agentDetails = 'collapsed', isRunning = false, threadMessages = messages } = options;
+    const server = agentDetailsServer(agentDetails);
+    const listModelUsage = vi.fn(async () => usage);
+
+    const result = render(
+      <ServerProvider server={server}>
+        <AgentDetailsPreferenceProvider>
+          <ModelUsageProvider api={{ listModelUsage }}>
+            <RuntimeHarness messages={threadMessages} threadId="t1" remoteId="sess-1" isRunning={isRunning}>
+              <ModelUsageTurnProvider>
+                <ThreadPrimitive.Messages>{() => <AssistantMessageContainer />}</ThreadPrimitive.Messages>
+              </ModelUsageTurnProvider>
+            </RuntimeHarness>
+          </ModelUsageProvider>
+        </AgentDetailsPreferenceProvider>
+      </ServerProvider>,
+    );
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    return { ...result, listModelUsage };
+  }
+
+  it('shows no usage line and no details row while agent details are off', async () => {
+    await renderWithUsage({ usage: [{ turnId: 'trn_1', events: [SUPER_EVENT] }] });
+
+    expect(screen.getByText('here you go')).toBeVisible();
+    expect(screen.queryByTestId('model-usage-overview')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('assistant-message-agent-internals')).not.toBeInTheDocument();
+  });
+
+  it('shows the usage line with the steps when agent details are on', async () => {
+    await renderWithUsage({
+      usage: [{ turnId: 'trn_1', events: [SUPER_EVENT] }],
+      agentDetails: 'expanded',
+      threadMessages: [
+        {
+          role: 'assistant',
+          content: [
+            {
+              type: 'tool-call',
+              toolCallId: 'tool-done',
+              toolName: 'lookup_notes',
+              args: {},
+              argsText: '{}',
+              result: { ok: true },
+            },
+            { type: 'text', text: 'here you go' },
+          ],
+          metadata: { custom: { turnId: 'trn_1' } },
+        },
+      ],
+    });
+
+    expect(screen.getAllByTestId('assistant-message-agent-internals')).toHaveLength(1);
+    expect(screen.getByTestId('assistant-message-agent-internals-toggle')).toHaveTextContent('1 step · 1 tool');
+    expect(within(getAgentInternals()).getByTestId('model-usage-overview')).toBeVisible();
+    expect(screen.getByTestId('model-usage-model')).toHaveTextContent('Model: Nemotron 3 Super (Token Factory)');
+    expect(screen.getByTestId('model-usage-tokens')).toHaveTextContent('Tokens: 2,140 (1,800 in, 340 out)');
+  });
+
+  it('shows the usage line when agent details are on for the chat', async () => {
+    await renderWithUsage({ usage: [{ turnId: 'trn_1', events: [SUPER_EVENT] }], agentDetails: 'expanded' });
+
+    expect(screen.getByTestId('assistant-message-agent-internals-toggle')).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getByTestId('model-usage-overview')).toBeVisible();
+  });
+
+  it('closes only the answer whose details the person closed', async () => {
+    await renderWithUsage({
+      usage: [
+        { turnId: 'trn_1', events: [SUPER_EVENT] },
+        { turnId: 'trn_2', events: [SUPER_EVENT] },
+      ],
+      agentDetails: 'expanded',
+      threadMessages: [
+        { role: 'assistant', content: 'first answer', metadata: { custom: { turnId: 'trn_1' } } },
+        { role: 'user', content: 'and then?' },
+        { role: 'assistant', content: 'second answer', metadata: { custom: { turnId: 'trn_2' } } },
+      ],
+    });
+
+    const [first, second] = screen.getAllByTestId('assistant-message-agent-internals-toggle');
+    if (first === undefined || second === undefined) throw new Error('Expected a toggle on both answers');
+    fireEvent.click(first);
+
+    expect(first).toHaveAttribute('aria-expanded', 'false');
+    expect(second).toHaveAttribute('aria-expanded', 'true');
+    const [firstUsage, secondUsage] = screen.getAllByTestId('model-usage-overview');
+    expect(firstUsage).not.toBeVisible();
+    expect(secondUsage).toBeVisible();
+  });
+
+  it('folds helper calls into the total and names the model they ran on', async () => {
+    await renderWithUsage({
+      usage: [{ turnId: 'trn_1', events: [SUPER_EVENT, NANO_SUMMARY_EVENT, NANO_COMPACTION_EVENT] }],
+      agentDetails: 'expanded',
+    });
+
+    expect(screen.getByTestId('model-usage-tokens')).toHaveTextContent('Tokens: 6,990 (6,300 in, 690 out)');
+    expect(screen.getByTestId('model-usage-helpers')).toHaveTextContent('Helper calls: 2, on Nemotron 3 Nano');
+  });
+
+  it('lists the helper calls with their model, tokens and cost in the agent details when they are on', async () => {
+    await renderWithUsage({
+      usage: [{ turnId: 'trn_1', events: [SUPER_EVENT, NANO_SUMMARY_EVENT, NANO_COMPACTION_EVENT] }],
+      agentDetails: 'expanded',
+    });
+
+    const internals = getAgentInternals();
+    expect(screen.getByTestId('assistant-message-agent-internals-toggle')).toHaveTextContent('2 helper calls');
+    const rows = within(internals).getAllByTestId('model-usage-row');
+    expect(rows.map(row => row.textContent)).toEqual([
+      expect.stringContaining('Answer·Nemotron 3 Super'),
+      expect.stringContaining('Memory summary'),
+      expect.stringContaining('Compaction'),
+    ]);
+    expect(rows[2]).toHaveTextContent('4,300 tokens (4,000 in, 300 out) · $0.0003');
+  });
+
+  it('says usage was not reported when the provider reported none', async () => {
+    await renderWithUsage({
+      usage: [
+        {
+          turnId: 'trn_1',
+          events: [{ ...SUPER_EVENT, reportedCalls: 0, inputTokens: 0, outputTokens: 0, costUsd: null }],
+        },
+      ],
+      agentDetails: 'expanded',
+    });
+
+    expect(screen.getByTestId('model-usage-tokens')).toHaveTextContent('Tokens: not reported');
+  });
+
+  it('shows nothing for a turn with no recorded usage', async () => {
+    await renderWithUsage({ usage: [{ turnId: 'trn_other', events: [SUPER_EVENT] }] });
+
+    expect(screen.queryByTestId('model-usage-overview')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('assistant-message-agent-internals')).not.toBeInTheDocument();
+  });
+
+  it('hides the line and the helper rows when the display switch is off', async () => {
+    setModelUsageVisible(false);
+    await renderWithUsage({
+      usage: [{ turnId: 'trn_1', events: [SUPER_EVENT, NANO_SUMMARY_EVENT] }],
+      agentDetails: 'expanded',
+    });
+
+    expect(screen.queryByTestId('model-usage-overview')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('model-usage-row')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('assistant-message-agent-internals')).not.toBeInTheDocument();
+  });
+
+  it('does not draw the line while the turn is still running', async () => {
+    await renderWithUsage({
+      usage: [{ turnId: 'trn_1', events: [SUPER_EVENT] }],
+      isRunning: true,
+      threadMessages: [
+        {
+          role: 'assistant',
+          content: 'here you go',
+          status: { type: 'running' },
+          metadata: { custom: { turnId: 'trn_1' } },
+        },
+      ],
+    });
+
+    expect(screen.queryByTestId('model-usage-overview')).not.toBeInTheDocument();
+  });
+
+  it('draws no line without a host usage provider', async () => {
+    render(
+      <RuntimeHarness messages={messages} threadId="t1" remoteId="sess-1">
+        <ModelUsageTurnProvider>
+          <ThreadPrimitive.Messages>{() => <AssistantMessageContainer />}</ThreadPrimitive.Messages>
+        </ModelUsageTurnProvider>
+      </RuntimeHarness>,
+    );
+
+    expect(screen.queryByTestId('model-usage-overview')).not.toBeInTheDocument();
+  });
+});
+
+describe('AssistantMessageContainer morning brief', () => {
+  const briefRequest: ThreadMessageLike = { role: 'user', content: 'Give me my morning brief.' };
+  const briefBlock = [
+    'Here is your brief.',
+    '',
+    '```json',
+    JSON.stringify({
+      digest: 'One thing to check today.',
+      items: [
+        {
+          section: 'check_first',
+          title: 'Dentist moved to **Fri 10/23**',
+          subtitle: ['*calendar*'],
+          action: { label: '[Check the time]', target: { kind: 'prompt', text: 'Check the dentist time' } },
+        },
+      ],
+    }),
+    '```',
+  ].join('\n');
+
+  function renderBriefTurn(answer: ThreadMessageLike, isRunning: boolean) {
+    return render(
+      <RuntimeHarness messages={[briefRequest, answer]} isRunning={isRunning}>
+        <ThreadPrimitive.Messages>
+          {({ message }) => (message.role === 'assistant' ? <AssistantMessageContainer /> : null)}
+        </ThreadPrimitive.Messages>
+      </RuntimeHarness>,
+    );
+  }
+
+  it('shows one quiet line instead of the raw text while the brief is being written', () => {
+    renderBriefTurn(
+      { role: 'assistant', status: { type: 'running' }, content: 'Here is your brief.\n\n```json\n{"digest": "One' },
+      true,
+    );
+    expect(screen.getByTestId('brief-writing')).toHaveTextContent('Putting your brief together…');
+    expect(screen.queryByText(/Here is your brief/)).not.toBeInTheDocument();
+    expect(screen.queryByTestId('aman-brief')).not.toBeInTheDocument();
+  });
+
+  it('shows the brief, with no markdown, once its block is complete', () => {
+    renderBriefTurn({ role: 'assistant', content: briefBlock }, false);
+    const brief = screen.getByTestId('aman-brief');
+    expect(within(brief).getByText('Dentist moved to Fri 10/23')).toBeInTheDocument();
+    expect(within(brief).getByRole('button', { name: 'Check the time' })).toBeInTheDocument();
+    expect(within(brief).getByTestId('brief-source')).toHaveTextContent('calendar');
+    expect(brief.textContent).not.toMatch(/[*[\]]/);
+    expect(screen.queryByTestId('brief-writing')).not.toBeInTheDocument();
+  });
+
+  it('falls back to the plain answer as markdown when the block never arrives', () => {
+    renderBriefTurn({ role: 'assistant', content: 'Your **mail** could not be read this morning.' }, false);
+    expect(screen.queryByTestId('aman-brief')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('brief-writing')).not.toBeInTheDocument();
+    expect(screen.getByText(/could not be read this morning/)).toBeInTheDocument();
+  });
+});
+
+describe('AssistantMessageContainer with agent details off and an answer before a later step', () => {
+  it('shows the whole answer and the short closing line', async () => {
+    const ANSWER =
+      'Here is your plan for Friday.\n\n- Lunch with Sam at 12:30\n- Dentist at 3pm, bring the insurance card';
+    const CLOSING = 'Saved to your notes.';
+    renderAssistantMessage(
+      [
+        {
+          role: 'assistant',
+          content: [
+            { type: 'text', text: ANSWER },
+            {
+              type: 'tool-call',
+              toolCallId: 'save',
+              toolName: 'write_note',
+              args: {},
+              argsText: '{}',
+              result: { ok: true },
+            },
+            { type: 'text', text: CLOSING },
+          ],
+        },
+      ],
+      { agentDetails: 'collapsed' },
+    );
+    await settleAgentDetails();
+    expect(screen.getByText(CLOSING)).toBeVisible();
+    expect(screen.getByText('Here is your plan for Friday.')).toBeVisible();
+    expect(screen.getByText('Lunch with Sam at 12:30')).toBeVisible();
   });
 });

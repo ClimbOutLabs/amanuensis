@@ -37,11 +37,11 @@ test_dry_run_plans_the_front_end() {
   run_install --dry-run --email owner@example.invalid "${TLS_ARGS[@]}"
   assert_rc 0
   assert_flat_contains "$OUT" "done DNS: aman.example.com and login.example.com resolve to this computer's public address $PUBLIC_IP"
-  assert_flat_contains "$OUT" "needs admin Install Caddy from the Ubuntu package archive"
+  assert_flat_contains "$OUT" "needs admin Install Caddy from the system package archive"
   assert_flat_contains "$OUT" "needs admin Apply the Caddyfile for aman.example.com and login.example.com"
   assert_flat_contains "$OUT" "exactly those two names"
-  assert_flat_contains "$OUT" "Open only TCP 443"
-  assert_flat_contains "$OUT" "port 80 can stay closed"
+  assert_flat_contains "$OUT" "Open only port 443"
+  assert_flat_contains "$OUT" "Port 80 can stay closed"
   assert_contains "$OUT" "--tls-root"
   run_install --dry-run --verbose --email owner@example.invalid "${TLS_ARGS[@]}"
   assert_contains "$OUT" "archive.ubuntu.com"
@@ -58,7 +58,7 @@ test_plan_skips_the_install_line_when_caddy_is_there() {
   run_install --dry-run --email owner@example.invalid "${TLS_ARGS[@]}"
   assert_rc 0
   assert_flat_contains "$OUT" "done Caddy is installed"
-  assert_not_contains "$OUT" "Install Caddy from the Ubuntu package archive"
+  assert_not_contains "$OUT" "Install Caddy from the system package archive"
   assert_flat_contains "$OUT" "needs admin Apply the Caddyfile"
   sandbox_drop
 }
@@ -129,7 +129,7 @@ test_install_with_the_flag_runs_the_root_steps() {
   assert_contains "$OUT" "Root steps for HTTPS with Caddy" "the steps were printed before they ran"
   assert_contains "$OUT" "HTTPS answers at $APP_URL"
   assert_flat_contains "$OUT" "HTTPS on, with certificates from Let"
-  assert_flat_contains "$OUT" "Open only TCP 443"
+  assert_flat_contains "$OUT" "Open only port 443"
   assert_contains "$(grep '^curl' "$STUB_LOG")" "$APP_URL/healthz"
   assert_eq "$(sed -n 's/^tls=//p' "$AMAN_HOME/state/instances/main.conf")" caddy
   sandbox_drop
@@ -195,12 +195,15 @@ test_answering_yes_on_a_terminal() {
   t_begin "on a terminal the Caddy steps run after a yes"
   sandbox_new
   dns_ready
-  run_install_tty "Instance name=>
+  run_install_tty "Name for this instance=>
 Your email=>owner@example.invalid
+What should Aman call you?=>
+Connect a calendar?=>n
+Connect an email account=>n
 Back up automatically=>y
 Go ahead?=>y
-Password for owner@example.invalid=>$SENTINEL_PASSWORD
-Repeat the password=>$SENTINEL_PASSWORD
+Enter a password for owner@example.invalid=>$SENTINEL_PASSWORD
+Enter password again=>$SENTINEL_PASSWORD
 Install Caddy and apply this configuration now?=>y" "${TLS_ARGS[@]}"
   assert_eq "$RC" 0
   assert_eq "$(sudo_calls)" 1
@@ -212,12 +215,15 @@ test_declining_on_a_terminal() {
   t_begin "on a terminal a no leaves Caddy untouched"
   sandbox_new
   dns_ready
-  run_install_tty "Instance name=>
+  run_install_tty "Name for this instance=>
 Your email=>owner@example.invalid
+What should Aman call you?=>
+Connect a calendar?=>n
+Connect an email account=>n
 Back up automatically=>y
 Go ahead?=>y
-Password for owner@example.invalid=>$SENTINEL_PASSWORD
-Repeat the password=>$SENTINEL_PASSWORD
+Enter a password for owner@example.invalid=>$SENTINEL_PASSWORD
+Enter password again=>$SENTINEL_PASSWORD
 Install Caddy and apply this configuration now?=>n" "${TLS_ARGS[@]}"
   assert_eq "$RC" 1
   assert_eq "$(sudo_calls)" 0
@@ -245,7 +251,7 @@ test_a_failing_root_script_is_reported() {
   STUB_SUDO_SH_FAIL=1
   install_tls --tls-root
   assert_rc 1
-  assert_flat_contains "$ERR" "the Caddy steps failed"
+  assert_flat_contains "$ERR" "The Caddy steps failed"
   assert_file "$AMAN_HOME/state/instances/main.conf"
   unset STUB_SUDO_SH_FAIL
   sandbox_drop

@@ -180,6 +180,7 @@ describe('sessions HTTP agent binding', () => {
 
   it('creates a named session and filters list by agent_id', async () => {
     const agent = await agentStore.createAgent({
+      host_managed: false,
       tenant_id: 'default',
       created_by_subject: {
         subject_id: STANDALONE_REQUEST_CONTEXT.subject.id,
@@ -211,8 +212,19 @@ describe('sessions HTTP agent binding', () => {
     expect(listJson.data.some(row => row.id === json.data.id)).toBe(true);
   });
 
+  it('refuses a list page size past the API limit and serves the largest allowed one', async () => {
+    // The reminders poller's exact ask: 50 per page, newest first. The API
+    // caps a page at 25, so this is refused before any store work.
+    const refused = await app.request('/?limit=50&order=desc');
+    expect(refused.status).toBe(400);
+
+    const served = await app.request('/?limit=25&order=desc');
+    expect(served.status).toBe(200);
+  });
+
   it('returns caller-scoped metrics for a named agent', async () => {
     const agent = await agentStore.createAgent({
+      host_managed: false,
       tenant_id: 'default',
       created_by_subject: {
         subject_id: STANDALONE_REQUEST_CONTEXT.subject.id,
@@ -277,6 +289,7 @@ describe('sessions HTTP agent binding', () => {
 
   it('lets an agent manager read named sessions, events, and metrics but not mutate them', async () => {
     const agent = await agentStore.createAgent({
+      host_managed: false,
       tenant_id: 'default',
       created_by_subject: { subject_id: 'owner', subject_type: 'user', subject_display_name: 'Owner' },
       name: 'managed-agent',
@@ -574,6 +587,7 @@ describe('sessions HTTP agent binding', () => {
 
   it('rejects PATCH agent on a named session', async () => {
     const agent = await agentStore.createAgent({
+      host_managed: false,
       tenant_id: 'default',
       created_by_subject: {
         subject_id: STANDALONE_REQUEST_CONTEXT.subject.id,
@@ -669,6 +683,102 @@ describe('sessions HTTP agent binding', () => {
 
     const invalid = await app.request('/api/session-folders', jsonInit('POST', { name: '   ' }));
     expect(invalid.status).toBe(400);
+  });
+
+  it('lists only the sessions filed in a folder when folder_id is given', async () => {
+    const createSession = async () => {
+      const created = await app.request('/', jsonInit('POST', { agent: { spec: inlineSpec } }));
+      expect(created.status).toBe(201);
+      const { data } = (await created.json()) as { data: { id: string } };
+      return data.id;
+    };
+    const createFolder = async (name: string) => {
+      const created = await app.request('/api/session-folders', jsonInit('POST', { name }));
+      expect(created.status).toBe(201);
+      const { data } = (await created.json()) as { data: { id: string } };
+      return data.id;
+    };
+    const listSessions = async (query: string) => {
+      const res = await app.request(`/?${query}`);
+      expect(res.status).toBe(200);
+      return ListSessionsResponseSchema.parse(await res.json());
+    };
+
+    const workId = await createFolder('Work');
+    const filedIds: string[] = [];
+    for (let i = 0; i < 3; i++) {
+      const id = await createSession();
+      const assigned = await app.request(`/${id}/folder`, jsonInit('PUT', { folder_id: workId }));
+      expect(assigned.status).toBe(200);
+      filedIds.push(id);
+    }
+    const otherFolderId = await createFolder('Other');
+    const otherId = await createSession();
+    await app.request(`/${otherId}/folder`, jsonInit('PUT', { folder_id: otherFolderId }));
+    const unfiledId = await createSession();
+
+    const all = await listSessions(`folder_id=${workId}`);
+    expect(all.data.map(s => s.id).sort()).toEqual([...filedIds].sort());
+    expect(all.data.every(s => s.folder_id === workId)).toBe(true);
+
+    const page1 = await listSessions(`folder_id=${workId}&limit=2`);
+    expect(page1.data).toHaveLength(2);
+    const next = page1.pagination.next_page_token;
+    expect(next).toBeDefined();
+    const page2 = await listSessions(`folder_id=${workId}&limit=2&page_token=${encodeURIComponent(next ?? '')}`);
+    expect(page2.data).toHaveLength(1);
+    const pagedIds = [...page1.data, ...page2.data].map(s => s.id).sort();
+    expect(pagedIds).toEqual([...filedIds].sort());
+
+    const empty = await listSessions(`folder_id=${await createFolder('Empty')}`);
+    expect(empty.data).toEqual([]);
+
+    const unfiltered = await listSessions('');
+    expect(unfiltered.data.map(s => s.id)).toEqual(expect.arrayContaining([...filedIds, otherId, unfiledId]));
+  });
+
+  it('lists only the sessions with no folder when no_folder is given', async () => {
+    const createSession = async () => {
+      const created = await app.request('/', jsonInit('POST', { agent: { spec: inlineSpec } }));
+      expect(created.status).toBe(201);
+      const { data } = (await created.json()) as { data: { id: string } };
+      return data.id;
+    };
+    const createFolder = async (name: string) => {
+      const created = await app.request('/api/session-folders', jsonInit('POST', { name }));
+      expect(created.status).toBe(201);
+      const { data } = (await created.json()) as { data: { id: string } };
+      return data.id;
+    };
+    const listSessions = async (query: string) => {
+      const res = await app.request(`/?${query}`);
+      expect(res.status).toBe(200);
+      return ListSessionsResponseSchema.parse(await res.json());
+    };
+
+    const workId = await createFolder('Work');
+    const filedId = await createSession();
+    const assigned = await app.request(`/${filedId}/folder`, jsonInit('PUT', { folder_id: workId }));
+    expect(assigned.status).toBe(200);
+    const looseIds = [await createSession(), await createSession()];
+
+    const all = await listSessions('no_folder=true');
+    expect(all.data.map(s => s.id).sort()).toEqual([...looseIds].sort());
+    expect(all.data.every(s => s.folder_id === null)).toBe(true);
+
+    const page1 = await listSessions('no_folder=true&limit=1');
+    expect(page1.data).toHaveLength(1);
+    const next = page1.pagination.next_page_token;
+    expect(next).toBeDefined();
+    const page2 = await listSessions(`no_folder=true&limit=1&page_token=${encodeURIComponent(next ?? '')}`);
+    expect(page2.data).toHaveLength(1);
+    expect([...page1.data, ...page2.data].map(s => s.id).sort()).toEqual([...looseIds].sort());
+
+    const off = await listSessions('no_folder=false');
+    expect(off.data.map(s => s.id)).toEqual(expect.arrayContaining([filedId, ...looseIds]));
+
+    const combined = await app.request(`/?no_folder=true&folder_id=${workId}`);
+    expect(combined.status).toBe(400);
   });
 
   it("does not assign another user's folder", async () => {
@@ -860,6 +970,7 @@ describe('sessions HTTP agent binding', () => {
   it('returns 404 when creating a session for a named agent the caller cannot use', async () => {
     deniedCanAccessAgent.mockClear();
     const agent = await agentStore.createAgent({
+      host_managed: false,
       tenant_id: 'default',
       created_by_subject: {
         subject_id: STANDALONE_REQUEST_CONTEXT.subject.id,

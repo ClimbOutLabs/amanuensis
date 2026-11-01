@@ -2,7 +2,8 @@
 
 /** `MEMORY_BACKEND` as resolved. */
 export const MemoryDefaultsCapabilityBackend = {
-        Markdown: "markdown",
-        Hindsight: "hindsight"
-    } as const;
-export type MemoryDefaultsCapabilityBackend = typeof MemoryDefaultsCapabilityBackend[keyof typeof MemoryDefaultsCapabilityBackend];
+    Markdown: "markdown",
+    Hindsight: "hindsight",
+} as const;
+export type MemoryDefaultsCapabilityBackend =
+    (typeof MemoryDefaultsCapabilityBackend)[keyof typeof MemoryDefaultsCapabilityBackend];

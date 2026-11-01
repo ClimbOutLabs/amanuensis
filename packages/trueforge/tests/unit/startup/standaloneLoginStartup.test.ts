@@ -23,7 +23,11 @@ async function freePort(): Promise<number> {
   return port;
 }
 
-/** Plain http request, because fetch will not let a caller override the Host header. */
+/**
+ * Plain http request, because fetch will not let a caller override the Host header. It dials
+ * `localhost`, the HOST the server was started with: the server binds the first address localhost
+ * resolves to, which is ::1 on hosts with IPv6 loopback (the CI runners), so 127.0.0.1 is refused there.
+ */
 function statusOf(options: {
   port: number;
   method: string;
@@ -32,7 +36,7 @@ function statusOf(options: {
 }): Promise<number> {
   return new Promise((resolve, reject) => {
     const req = request(
-      { host: '127.0.0.1', port: options.port, method: options.method, path: options.path, headers: options.headers },
+      { host: 'localhost', port: options.port, method: options.method, path: options.path, headers: options.headers },
       res => {
         res.resume();
         resolve(res.statusCode ?? 0);
@@ -125,6 +129,30 @@ describe('standalone login startup', () => {
     );
   });
 
+  it.each([
+    ['no allowed email', {}, /OIDC_ALLOWED_EMAILS is empty; it must hold one address/],
+    [
+      'two allowed emails',
+      { OIDC_ALLOWED_EMAILS: 'owner@example.invalid,guest@example.invalid' },
+      /lists 2 addresses; it must hold one/,
+    ],
+  ])('refuses to start with OIDC and %s', async (_label, extra, message) => {
+    const booted = boot(
+      {
+        PORT: String(await freePort()),
+        OIDC_ISSUER_URL: `http://127.0.0.1:${String(await freePort())}/dex`,
+        OIDC_CLIENT_ID: 'client-a',
+        OIDC_CLIENT_SECRET: 'secret-a',
+        ...extra,
+      },
+      dataDir,
+    );
+    running.push(booted);
+
+    expect(await booted.exited).toBe(1);
+    expect(booted.output()).toMatch(message);
+  });
+
   it('starts when the home directory cannot be created, keeping its data under APP_DATA_DIR', async () => {
     const port = await freePort();
     // A path below a regular file can never be created, as for a runtime user whose home directory is missing.
@@ -139,6 +167,7 @@ describe('standalone login startup', () => {
         OIDC_ISSUER_URL: `http://127.0.0.1:${String(await freePort())}/dex`,
         OIDC_CLIENT_ID: 'client-a',
         OIDC_CLIENT_SECRET: 'secret-a',
+        OIDC_ALLOWED_EMAILS: 'owner@example.invalid',
       },
       dataDir,
     );
@@ -160,6 +189,7 @@ describe('standalone login startup', () => {
         OIDC_ISSUER_URL: `http://127.0.0.1:${String(idpPort)}/dex`,
         OIDC_CLIENT_ID: 'client-a',
         OIDC_CLIENT_SECRET: 'secret-a',
+        OIDC_ALLOWED_EMAILS: 'owner@example.invalid',
         AUTH_COOKIE_SUFFIX: '_a',
       },
       dataDir,

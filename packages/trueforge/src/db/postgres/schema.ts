@@ -51,11 +51,16 @@ export const TABLES_TO_MOVE = [
   'repository_workspace_verification',
   'artifact_blob',
   'turn_artifact',
+  'chat_image',
+  'chat_image_turn_allowance',
+  'approval_dismissal',
   'global_settings',
   'token_factory_usage',
+  'token_factory_model_usage',
   'sentinel_audit',
   'sentinel_user_settings',
   'approval_token',
+  'brief_item_completion',
 ] as const;
 
 /**

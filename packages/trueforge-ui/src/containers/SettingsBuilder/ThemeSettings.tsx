@@ -1,32 +1,19 @@
 'use client';
 
 import { cn } from '@/atoms/lib/cn.js';
+import { Switch } from '@/atoms/primitives/Switch.js';
 import { useTheme } from '@/theme/ThemeProvider.js';
 import { PRESETS } from '@/theme/presets/index.js';
-import type { ThemePreset } from '@/theme/types.js';
+import { THEME_PRESET_IDS, type ThemePreset } from '@/theme/types.js';
+import { useModelUsageVisible } from '@/utils/modelUsageDisplayPreference.js';
 
-/** Display metadata for each theme preset. */
+/** Display metadata for each theme preset. The picker order comes from THEME_PRESET_IDS. */
 const PRESET_META: Record<ThemePreset, { label: string; description: string }> = {
-  trueforge: { label: 'Paper', description: 'Warm paper, charcoal ink, brass accents' },
-  claude: { label: 'Clay', description: 'Warm cream, serif type, orange actions' },
-  chatgpt: { label: 'Mint', description: 'Stark surfaces, high-contrast controls' },
-  gemini: { label: 'Denim', description: 'Material surfaces, blue accents' },
-  midnight: { label: 'Midnight', description: 'Deep blue-grays, navy accents' },
+  paper: { label: 'Paper', description: 'Warm paper, ink and gold' },
   forest: { label: 'Forest', description: 'Calm greens, natural tones' },
-  sunset: { label: 'Sunset', description: 'Warm oranges, terracotta' },
-  volt: { label: 'Volt', description: 'Electric green on near-black' },
+  midnight: { label: 'Midnight', description: 'Deep blue-grays, ice blue accents' },
+  'high-contrast': { label: 'High contrast', description: 'Maximum legibility, stark surfaces' },
 };
-
-const PRESET_ORDER: ThemePreset[] = [
-  'trueforge',
-  'claude',
-  'chatgpt',
-  'gemini',
-  'midnight',
-  'forest',
-  'sunset',
-  'volt',
-];
 
 /** Small color swatches previewing a preset's key surfaces. */
 function PresetSwatches({ preset, mode }: { preset: ThemePreset; mode: 'light' | 'dark' }) {
@@ -43,6 +30,7 @@ function PresetSwatches({ preset, mode }: { preset: ThemePreset; mode: 'light' |
 
 const ThemeSettings = () => {
   const { preset, setPreset, mode, preference, setTheme, isDark } = useTheme();
+  const { visible: modelUsageVisible, setVisible: setModelUsageVisible } = useModelUsageVisible();
 
   return (
     <div className="flex flex-col gap-6">
@@ -77,9 +65,30 @@ const ThemeSettings = () => {
       </div>
 
       <div>
+        <h3 className="mb-2 text-sm font-medium text-text-primary">Answers</h3>
+        <div className="flex items-start justify-between gap-3 rounded-lg border border-border bg-card-bg p-3">
+          <div className="min-w-0">
+            <p id="model-usage-display-label" className="text-sm font-medium text-text-primary">
+              Show model and cost in answer details
+            </p>
+            <p id="model-usage-display-hint" className="mt-0.5 text-xs text-text-secondary">
+              The model, provider, tokens and cost of each answer, with the helper calls behind it. Hiding it only
+              changes what you see here; usage is still counted.
+            </p>
+          </div>
+          <Switch
+            checked={modelUsageVisible}
+            onCheckedChange={setModelUsageVisible}
+            aria-labelledby="model-usage-display-label"
+            aria-describedby="model-usage-display-hint"
+          />
+        </div>
+      </div>
+
+      <div>
         <h3 className="mb-2 text-sm font-medium text-text-primary">Theme</h3>
         <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-          {PRESET_ORDER.map(name => {
+          {THEME_PRESET_IDS.map(name => {
             const meta = PRESET_META[name];
             const selected = preset === name;
             return (

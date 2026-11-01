@@ -2,12 +2,12 @@
 
 /** Host-classified reason the turn produced an abnormal handoff. */
 export const TurnStateErrorHandoffCause = {
-        ClientCancelled: "client_cancelled",
-        ServerCancelled: "server_cancelled",
-        IterationLimit: "iteration_limit",
-        FatalError: "fatal_error",
-        ModelStreamFault: "model_stream_fault",
-        ModelResponseTimeout: "model_response_timeout",
-        LoopDetected: "loop_detected"
-    } as const;
-export type TurnStateErrorHandoffCause = typeof TurnStateErrorHandoffCause[keyof typeof TurnStateErrorHandoffCause];
+    ClientCancelled: "client_cancelled",
+    ServerCancelled: "server_cancelled",
+    IterationLimit: "iteration_limit",
+    FatalError: "fatal_error",
+    ModelStreamFault: "model_stream_fault",
+    ModelResponseTimeout: "model_response_timeout",
+    LoopDetected: "loop_detected",
+} as const;
+export type TurnStateErrorHandoffCause = (typeof TurnStateErrorHandoffCause)[keyof typeof TurnStateErrorHandoffCause];

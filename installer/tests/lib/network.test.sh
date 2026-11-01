@@ -23,11 +23,11 @@ in_lib() {
 # A computer on a home network with Tailscale: a LAN address, a Tailscale address, its name and its MagicDNS name.
 fixture_full_machine() {
   fixture_network 192.168.1.20 tailscale0:100.101.102.103
-  fixture_hostname spark
-  fixture_tailscale 100.101.102.103 spark.example.ts.net
+  fixture_hostname host
+  fixture_tailscale 100.101.102.103 host.example.ts.net
 }
 
-ALL_ORIGINS="http://127.0.0.1:8791,http://localhost:8791,http://192.168.1.20:8791,http://100.101.102.103:8791,http://spark:8791,http://spark.local:8791,http://spark.example.ts.net:8791"
+ALL_ORIGINS="http://127.0.0.1:8791,http://localhost:8791,http://192.168.1.20:8791,http://100.101.102.103:8791,http://host:8791,http://host.local:8791,http://host.example.ts.net:8791"
 
 test_default_install_answers_at_every_address() {
   t_begin "the app is published on 127.0.0.1 and each private address of this computer, never on a wildcard, and answers at each name"
@@ -41,7 +41,7 @@ test_default_install_answers_at_every_address() {
   assert_contains "$compose" "- '192.168.1.20:8791:8790'"
   assert_contains "$compose" "- '100.101.102.103:8791:8790'"
   assert_not_contains "$compose" "- '8791:8790'" "no wildcard publish"
-  assert_not_contains "$compose" "0.0.0.0"
+  assert_not_contains "$compose" "'0.0.0.0:"
   assert_not_contains "$compose" "[::]"
   assert_eq "$(printf '%s\n' "$compose" | grep -c ":8790'")" 3 "one publish per address, none for the names"
   assert_contains "$compose" "- '127.0.0.1:5556:5556'"
@@ -50,6 +50,62 @@ test_default_install_answers_at_every_address() {
   assert_eq "$(env_value main OIDC_ISSUER_URL)" "http://127.0.0.1:5556/dex"
   assert_eq "$(reg_value main origins)" "$ALL_ORIGINS"
   assert_eq "$(reg_value main login_url)" "http://127.0.0.1:5556"
+  sandbox_drop
+}
+
+test_sign_in_service_listens_on_loopback_only_where_the_app_fronts_it() {
+  t_begin "the sign-in service listens on 127.0.0.1 when the app passes its pages through, and on every address when a browser reaches it directly"
+  sandbox_new_plain
+  fixture_full_machine
+  install_machine
+  assert_contains "$(cat "$AMAN_HOME/instances/main/dex.yaml")" "http: 127.0.0.1:5556"
+  assert_not_contains "$(cat "$AMAN_HOME/instances/main/dex.yaml")" "0.0.0.0"
+  sandbox_drop
+  sandbox_new_plain
+  fixture_full_machine
+  INSTALL_EXTRA=(--local-only)
+  install_machine
+  assert_contains "$(cat "$AMAN_HOME/instances/main/dex.yaml")" "http: 0.0.0.0:5556"
+  sandbox_drop
+}
+
+test_cloud_server_stays_on_this_computer() {
+  t_begin "on a cloud server the app is published on 127.0.0.1 only, with a warning, unless --home-network is given"
+  sandbox_new_plain
+  fixture_full_machine
+  mkdir -p "$SB/dmi"
+  printf 'Amazon EC2\n' >"$SB/dmi/sys_vendor"
+  export AMAN_DMI_DIR="$SB/dmi"
+  install_machine
+  assert_flat_contains "$OUT$ERR" "This looks like a cloud server"
+  assert_flat_contains "$OUT$ERR" "--home-network"
+  assert_eq "$(reg_value main origins)" ""
+  assert_not_contains "$(cat "$AMAN_HOME/instances/main/compose.yaml")" "192.168.1.20"
+  sandbox_drop
+  sandbox_new_plain
+  fixture_full_machine
+  mkdir -p "$SB/dmi"
+  printf 'Amazon EC2\n' >"$SB/dmi/sys_vendor"
+  export AMAN_DMI_DIR="$SB/dmi"
+  INSTALL_EXTRA=(--home-network)
+  install_machine
+  assert_not_contains "$OUT$ERR" "This looks like a cloud server"
+  assert_contains "$(cat "$AMAN_HOME/instances/main/compose.yaml")" "192.168.1.20"
+  unset AMAN_DMI_DIR
+  sandbox_drop
+}
+
+test_home_machine_is_not_taken_for_a_cloud_server() {
+  t_begin "a computer whose hardware names no cloud provider answers on the home network without a warning"
+  sandbox_new_plain
+  fixture_full_machine
+  mkdir -p "$SB/dmi"
+  printf 'LENOVO\n' >"$SB/dmi/sys_vendor"
+  export AMAN_DMI_DIR="$SB/dmi"
+  install_machine
+  unset AMAN_DMI_DIR
+  assert_not_contains "$OUT$ERR" "This looks like a cloud server"
+  assert_contains "$(cat "$AMAN_HOME/instances/main/compose.yaml")" "192.168.1.20"
   sandbox_drop
 }
 
@@ -100,11 +156,11 @@ test_address_flag_adds_names_and_is_checked() {
   t_begin "--address is repeatable, adds private names and addresses, and refuses public or malformed ones before any work"
   sandbox_new_plain
   fixture_network 192.168.1.20
-  INSTALL_EXTRA=(--tls off --address nas.local --address 10.9.8.7)
+  INSTALL_EXTRA=(--tls off --address files.example.local --address 10.9.8.7)
   install_machine
   assert_rc 0
-  assert_eq "$(env_value main ALLOWED_ORIGINS)" "http://127.0.0.1:8791,http://localhost:8791,http://192.168.1.20:8791,http://nas.local:8791,http://10.9.8.7:8791"
-  assert_eq "$(reg_value main extra_hosts)" "nas.local 10.9.8.7"
+  assert_eq "$(env_value main ALLOWED_ORIGINS)" "http://127.0.0.1:8791,http://localhost:8791,http://192.168.1.20:8791,http://files.example.local:8791,http://10.9.8.7:8791"
+  assert_eq "$(reg_value main extra_hosts)" "files.example.local 10.9.8.7"
   sandbox_drop
   local bad
   for bad in 203.0.113.9 aman.example.com 8.8.8.8 "not a host" "-x" "a..b"; do
@@ -124,10 +180,10 @@ test_address_flag_adds_names_and_is_checked() {
 test_address_flag_conflicts() {
   t_begin "--address cannot be combined with --local-only or --public-url"
   sandbox_new_plain
-  run_install --dry-run --yes --email owner@example.invalid --address nas.local --local-only
+  run_install --dry-run --yes --email owner@example.invalid --address files.example.local --local-only
   assert_rc 2
   assert_flat_contains "$ERR" "opposites"
-  run_install --dry-run --yes --email owner@example.invalid --address nas.local --public-url https://aman.example.invalid --login-url https://login.example.invalid
+  run_install --dry-run --yes --email owner@example.invalid --address files.example.local --public-url https://aman.example.invalid --login-url https://login.example.invalid
   assert_rc 2
   assert_flat_contains "$ERR" "--public-url"
   sandbox_drop
@@ -174,7 +230,7 @@ test_issuer_must_be_loopback_or_https() {
   for ok in http://127.0.0.1:5556/dex http://localhost:5556/dex https://login.example.com/dex; do
     if in_lib "issuer_check '$ok'" >/dev/null 2>&1; then t_pass; else t_fail "refused: $ok"; fi
   done
-  for bad in http://192.168.1.20:5556/dex http://10.1.2.3:5556/dex http://spark.local:5556/dex http://100.64.0.1:5556/dex http://203.0.113.9:5556/dex http://login.example.com:5556/dex; do
+  for bad in http://192.168.1.20:5556/dex http://10.1.2.3:5556/dex http://host.local:5556/dex http://100.64.0.1:5556/dex http://203.0.113.9:5556/dex http://login.example.com:5556/dex; do
     if in_lib "issuer_check '$bad'" >/dev/null 2>&1; then t_fail "accepted over http: $bad"; else t_pass; fi
   done
   sandbox_drop
@@ -201,7 +257,7 @@ test_private_and_public_hosts_match_the_shared_list() {
   while read -r host; do
     if in_lib "private_host '$host'"; then t_fail "public host accepted: $host"; else t_pass; fi
   done < <(each_host public cgnat)
-  fixture_tailscale 100.101.102.103 spark.example.ts.net
+  fixture_tailscale 100.101.102.103 host.example.ts.net
   fixture_network
   while read -r host; do
     STUB_ADDRS="tailscale0:$host"
@@ -246,7 +302,7 @@ test_carrier_grade_nat_is_public_without_tailscale() {
   sandbox_drop
   sandbox_new_plain
   fixture_network 192.168.1.20 tailscale0:100.64.5.5
-  fixture_tailscale 100.64.5.5 spark.example.ts.net
+  fixture_tailscale 100.64.5.5 host.example.ts.net
   install_machine
   assert_contains "$(env_value main ALLOWED_ORIGINS)" "http://100.64.5.5:8791"
   assert_contains "$(cat "$AMAN_HOME/instances/main/compose.yaml")" "- '100.64.5.5:8791:8790'"
@@ -269,7 +325,7 @@ test_a_wedged_tailscale_cannot_stall_the_install() {
   t_begin "tailscale is asked with a time limit, so a hung tailscaled costs a few seconds and the install still finishes"
   sandbox_new_plain
   fixture_network 192.168.1.20
-  fixture_tailscale 100.101.102.103 spark.example.ts.net
+  fixture_tailscale 100.101.102.103 host.example.ts.net
   STUB_TS_HANG=1
   local start=$SECONDS
   assert_eq "$(in_lib 'network_default_hosts' | tr '\n' ' ')" "127.0.0.1 localhost 192.168.1.20 "
@@ -281,9 +337,9 @@ test_tailscale_names_and_addresses() {
   t_begin "only this computer's own MagicDNS name is used, and an address that ip and tailscale both report is listed once"
   sandbox_new_plain
   fixture_network 192.168.1.20 tailscale0:100.101.102.103
-  fixture_hostname spark
-  fixture_tailscale 100.101.102.103 spark.example.ts.net
-  assert_eq "$(in_lib 'network_tailscale_name')" "spark.example.ts.net"
+  fixture_hostname host
+  fixture_tailscale 100.101.102.103 host.example.ts.net
+  assert_eq "$(in_lib 'network_tailscale_name')" "host.example.ts.net"
   assert_eq "$(in_lib 'network_ipv4_addresses' | grep -c '100.101.102.103')" 1
   assert_not_contains "$(in_lib 'network_default_hosts')" "other.example.ts.net" "a peer's name is never taken"
   sandbox_drop
@@ -294,9 +350,9 @@ test_summary_lists_the_addresses_and_the_plain_warning() {
   sandbox_new_plain
   fixture_full_machine
   install_machine
-  assert_flat_contains "$OUT" "Open http://192.168.1.20:8791 http://100.101.102.103:8791 http://spark.example.ts.net:8791 http://spark.local:8791 http://spark:8791 http://127.0.0.1:8791 http://localhost:8791"
+  assert_flat_contains "$OUT" "Open http://192.168.1.20:8791 http://100.101.102.103:8791 http://host.example.ts.net:8791 http://host.local:8791 http://host:8791 http://127.0.0.1:8791 http://localhost:8791"
   assert_flat_contains "$OUT" "Sign-in on your home network is not encrypted. Use the Tailscale address to keep it private."
-  assert_flat_contains "$OUT" "Bookmark spark.example.ts.net: it keeps working when this computer's address changes."
+  assert_flat_contains "$OUT" "Bookmark host.example.ts.net: it keeps working when this computer's address changes."
   sandbox_drop
   sandbox_new_plain
   INSTALL_EXTRA=(--local-only)
@@ -309,12 +365,15 @@ test_no_question_about_the_address() {
   t_begin "the interactive flow asks for a name and an email and never about the address"
   sandbox_new_plain
   fixture_full_machine
-  run_install_tty "Instance name=>
+  run_install_tty "Name for this instance=>
 Your email=>owner@example.invalid
+What should Aman call you?=>
+Connect a calendar?=>n
+Connect an email account=>n
 Back up automatically=>y
 Go ahead?=>y
-Password for owner@example.invalid=>$SENTINEL_PASSWORD
-Repeat the password=>$SENTINEL_PASSWORD" --tls off
+Enter a password for owner@example.invalid=>$SENTINEL_PASSWORD
+Enter password again=>$SENTINEL_PASSWORD" --tls off
   assert_eq "$RC" 0
   assert_not_contains "$OUT" "Address you will use"
   assert_not_contains "$OUT" "Address for other devices"
@@ -328,7 +387,7 @@ test_the_plan_names_the_addresses() {
   fixture_full_machine
   run_install --dry-run --email owner@example.invalid --tls off
   assert_rc 0
-  assert_flat_contains "$OUT" "It opens on port 8791 at: 127.0.0.1, localhost, 192.168.1.20, 100.101.102.103, spark, spark.local, spark.example.ts.net."
+  assert_flat_contains "$OUT" "It opens on port 8791 at: 127.0.0.1, localhost, 192.168.1.20, 100.101.102.103, host, host.local, host.example.ts.net."
   assert_flat_contains "$OUT" "the port is open to your network"
   sandbox_drop
 }
@@ -364,7 +423,7 @@ test_refresh_adds_a_new_address() {
   t_begin "instance refresh reads the addresses again, keeps the names given at install, and restarts without touching secrets"
   sandbox_new_plain
   fixture_network 192.168.1.20
-  INSTALL_EXTRA=(--tls off --address nas.local)
+  INSTALL_EXTRA=(--tls off --address files.example.local)
   install_machine
   local secret_before
   secret_before=$(env_value main OIDC_CLIENT_SECRET)
@@ -372,11 +431,11 @@ test_refresh_adds_a_new_address() {
   : >"$STUB_LOG"
   run_install instance refresh main
   assert_rc 0
-  assert_eq "$(env_value main ALLOWED_ORIGINS)" "http://127.0.0.1:8791,http://localhost:8791,http://192.168.1.77:8791,http://192.168.1.20:8791,http://nas.local:8791"
+  assert_eq "$(env_value main ALLOWED_ORIGINS)" "http://127.0.0.1:8791,http://localhost:8791,http://192.168.1.77:8791,http://192.168.1.20:8791,http://files.example.local:8791"
   assert_eq "$(reg_value main origins)" "$(env_value main ALLOWED_ORIGINS)"
   assert_eq "$(env_value main OIDC_CLIENT_SECRET)" "$secret_before" "secrets stay as they were"
   assert_contains "$(cat "$AMAN_HOME/instances/main/dex.yaml")" "- http://192.168.1.77:8791/api/v1/auth/callback"
-  assert_contains "$(cat "$AMAN_HOME/instances/main/dex.yaml")" "- http://nas.local:8791/api/v1/auth/callback"
+  assert_contains "$(cat "$AMAN_HOME/instances/main/dex.yaml")" "- http://files.example.local:8791/api/v1/auth/callback"
   assert_eq "$(env_value main OIDC_ISSUER_URL)" "http://127.0.0.1:5556/dex" "the issuer does not move"
   assert_contains "$(cat "$AMAN_HOME/instances/main/compose.yaml")" "- '192.168.1.77:8791:8790'"
   assert_log_has "--force-recreate"
@@ -468,6 +527,63 @@ test_a_legacy_instance_stays_local_with_local_only() {
   sandbox_drop
 }
 
+fixture_cloud_machine() {
+  mkdir -p "$SB/dmi"
+  printf 'Amazon EC2\n' >"$SB/dmi/sys_vendor"
+  export AMAN_DMI_DIR="$SB/dmi"
+}
+
+# Asserts instance main still answers at every address of the full machine, as it was installed.
+assert_open_at_every_address() { # label
+  assert_eq "$(reg_value main origins)" "$ALL_ORIGINS" "$1: origins record"
+  assert_eq "$(env_value main ALLOWED_ORIGINS)" "$ALL_ORIGINS" "$1: ALLOWED_ORIGINS"
+  assert_contains "$(cat "$AMAN_HOME/instances/main/compose.yaml")" "- '192.168.1.20:8791:8790'" "$1: LAN publish"
+  assert_contains "$(cat "$AMAN_HOME/instances/main/compose.yaml")" "- '100.101.102.103:8791:8790'" "$1: Tailscale publish"
+  assert_contains "$(cat "$AMAN_HOME/instances/main/dex.yaml")" "http: 127.0.0.1:5556" "$1: sign-in stays behind the app"
+}
+
+test_a_rerun_on_a_cloud_server_keeps_the_recorded_reach() {
+  t_begin "on a cloud server a plain re-run keeps an existing instance where it was opened; only a new or unrecorded one stays on this computer"
+  sandbox_new_plain
+  fixture_full_machine
+  fixture_cloud_machine
+  INSTALL_EXTRA=(--tls off --home-network)
+  install_machine
+  assert_open_at_every_address "installed with --home-network"
+  run_install --yes
+  assert_rc 0
+  assert_not_contains "$OUT$ERR" "This looks like a cloud server" "no cloud default for an instance with a recorded reach"
+  assert_open_at_every_address "plain re-run"
+  unset AMAN_DMI_DIR
+  sandbox_drop
+
+  sandbox_new_plain
+  fixture_full_machine
+  install_machine
+  assert_open_at_every_address "installed on a home machine"
+  fixture_cloud_machine
+  run_install --yes
+  assert_rc 0
+  assert_open_at_every_address "plain re-run once the machine looks like a cloud server"
+  run_install --yes --local-only
+  assert_eq "$(reg_value main origins)" "" "--local-only still closes it"
+  unset AMAN_DMI_DIR
+  sandbox_drop
+
+  sandbox_new_plain
+  fixture_full_machine
+  make_legacy_instance
+  fixture_cloud_machine
+  run_install --yes
+  assert_rc 0
+  assert_flat_contains "$OUT$ERR" "This looks like a cloud server"
+  assert_eq "$(reg_value main origins)" "" "an instance with no recorded reach is not opened on a cloud server"
+  assert_eq "$(grep -c '^origins=' "$AMAN_HOME/state/instances/main.conf")" 1 "the choice is recorded"
+  assert_not_contains "$(cat "$AMAN_HOME/instances/main/compose.yaml")" "192.168.1.20"
+  unset AMAN_DMI_DIR
+  sandbox_drop
+}
+
 test_a_hosted_instance_is_never_opened_on_the_network() {
   t_begin "an instance behind its own https address is left alone by a re-run"
   sandbox_new_plain
@@ -509,7 +625,7 @@ test_tailscale_is_used_only_on_its_own_link() {
   t_begin "a 100.64.0.0/10 address counts as private only on tailscale0, or on a utun that tailscale itself names"
   sandbox_new_plain
   fixture_network eth0:192.168.1.20 eth1:100.64.7.7 utun4:100.101.102.103 utun5:100.99.99.99
-  fixture_tailscale 100.101.102.103 spark.example.ts.net
+  fixture_tailscale 100.101.102.103 host.example.ts.net
   assert_eq "$(in_lib 'network_ipv4_addresses' | tr '\n' ' ')" "192.168.1.20 100.64.7.7 100.101.102.103 "
   assert_eq "$(in_lib 'network_default_hosts' | grep -c '^100\.')" 1 "only Tailscale's own address is a private host"
   assert_contains "$(in_lib 'network_default_hosts')" "100.101.102.103"
@@ -523,17 +639,20 @@ test_numeric_looking_names_are_not_names() {
   t_begin "a name made of numbers or hex (0x7f, 1e3) is not an address or a name, and is not taken for a private one"
   sandbox_new_plain
   local bad
-  for bad in 0x7f 1e3 0x7f.local 1e3.local 0xc0a80114 3232235796 192.168.1 spark.0x7f.local; do
+  for bad in 0x7f 1e3 0x7f.local 1e3.local 0xc0a80114 3232235796 192.168.1 host.0x7f.local; do
     if in_lib "private_host '$bad'"; then t_fail "taken for private: $bad"; else t_pass; fi
     assert_contains "$(in_lib "address_problem '$bad'")" "$bad" "$bad is refused with words"
   done
-  for bad in spark spark.local spark.example.ts.net my-nas3 nas1.local; do
+  for bad in host host.local host.example.ts.net my-files3 files1.example.local; do
     if in_lib "private_host '$bad'"; then t_pass; else t_fail "refused: $bad"; fi
   done
   sandbox_drop
 }
 
 test_default_install_answers_at_every_address
+test_sign_in_service_listens_on_loopback_only_where_the_app_fronts_it
+test_cloud_server_stays_on_this_computer
+test_home_machine_is_not_taken_for_a_cloud_server
 test_sign_in_is_registered_for_every_address
 test_a_machine_with_only_loopback_still_works
 test_public_addresses_are_not_used_over_http
@@ -554,6 +673,7 @@ test_tailscale_names_and_addresses
 test_an_existing_instance_opens_on_the_network_on_a_plain_rerun
 test_local_only_on_a_rerun_puts_an_instance_back
 test_a_legacy_instance_stays_local_with_local_only
+test_a_rerun_on_a_cloud_server_keeps_the_recorded_reach
 test_a_hosted_instance_is_never_opened_on_the_network
 test_summary_lists_the_addresses_and_the_plain_warning
 test_no_question_about_the_address

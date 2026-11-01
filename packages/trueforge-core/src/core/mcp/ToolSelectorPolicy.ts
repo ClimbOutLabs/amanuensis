@@ -7,6 +7,7 @@ import {
   MCP_AUTO_PRELOAD_MAX_TOOLS,
   selectorsIncludeAll,
   TOOL_TAG_UNCLASSIFIED,
+  TOOL_TAG_WRITE,
   toolMatchesAnySelector,
   toolRequiresApproval,
 } from './toolSelectors';
@@ -170,19 +171,26 @@ export class ToolSelectorPolicy {
    * undefined defaults to write+destructive+unclassified, i.e. fail-closed (constructor); an
    * explicit list — including empty — is exact.
    *
-   * `waiveUnclassified` lets a host that already vouches for the tool (the user's search provider
-   * running a tool its own list names) pass what the default list gates only for missing
-   * annotations. It applies to the default list alone: a list the user changed in any way, `@all`,
-   * a literal tool name, or `@unclassified` on its own, is the user's explicit choice and gates.
+   * `waiveWriteAndUnclassifiedForHostVouchedRead` lets a call the host already vouches for as a read
+   * (the user's search provider running a tool its own list names, the operator's own Email or
+   * Calendar sidecar reading the person's own data, a standing grant) pass the two tags in the
+   * default list that gate on how a tool describes itself: `@write` and `@unclassified`. A tool can
+   * carry the write tag only because an optional argument can change something, the mail server's
+   * mark-as-read choice being the standing example, and the classifier has already judged this call
+   * a read with that choice off. `@destructive` is never waived. The waiver applies to the default
+   * list alone: a list holding different tags, `@all`, or a literal tool name is the user's
+   * explicit choice and still gates.
    */
   requiresApproval(
     toolName: string,
     annotations: ToolAnnotations | undefined,
-    options?: { waiveUnclassified: boolean },
+    options?: { waiveWriteAndUnclassifiedForHostVouchedRead: boolean },
   ): boolean {
     const selectors =
-      options?.waiveUnclassified === true && this.usesDefaultApproval()
-        ? this.requireApprovalForTools.filter(selector => selector !== TOOL_TAG_UNCLASSIFIED)
+      options?.waiveWriteAndUnclassifiedForHostVouchedRead === true && this.usesDefaultApproval()
+        ? this.requireApprovalForTools.filter(
+            selector => selector !== TOOL_TAG_WRITE && selector !== TOOL_TAG_UNCLASSIFIED,
+          )
         : this.requireApprovalForTools;
     return toolRequiresApproval(toolName, annotations, selectors);
   }

@@ -79,8 +79,18 @@ export interface HarvestedFile {
 
 export interface RunCodeCallOptions {
   signal: AbortSignal | undefined;
+  /**
+   * Package mirror grant for this call, resolved by the caller for the chat's repo when the person
+   * allowed downloads for it. Undefined keeps the run fully offline.
+   */
+  packageMirrorToken: string | undefined;
   /** Turn attachments staged into ingress (harness-owned, §2.1.1). */
   attachments: TurnAttachment[] | undefined;
+  /**
+   * Reads the bytes of a `script_path` the model named. The thrown message is shown to the model, so
+   * it must say what to do next. Undefined when this run has no workspace to read from.
+   */
+  readScript: ((scriptPath: string) => Promise<Buffer>) | undefined;
   /** Progress events for the explicit provisioning step. */
   onProgress: ((message: string) => void) | undefined;
   /**
@@ -97,6 +107,8 @@ export interface RunCodeCallOptions {
  */
 export interface RunCodeBackend {
   runCode(rawInput: unknown, options: RunCodeCallOptions | undefined): Promise<RunCodeResult>;
+  /** Whether the driver can reach the package gateway, so a package download can succeed. */
+  readonly packageGatewayCapable: boolean;
   /**
    * Backend-owned scrub for dispatch-level throws. The backend owns its
    * host paths (runRoot/dataDir); the agent runtime must never see them raw,
@@ -155,6 +167,10 @@ export class RunCodeService implements RunCodeBackend {
 
   get driverKind(): IsolationDriver['kind'] {
     return this.driver.kind;
+  }
+
+  get packageGatewayCapable(): boolean {
+    return this.driver.packageGatewayCapable;
   }
 
   /**
@@ -309,15 +325,7 @@ export class RunCodeService implements RunCodeBackend {
     const input = parsed.data;
 
     if (this.activeRuns >= this.maxConcurrentRuns) {
-      return this.failedResult({
-        error_code: 'concurrency_exceeded',
-        error: errorTextForCode({ error_code: 'concurrency_exceeded', detail: undefined }),
-        runRoot: '',
-        stdout: '',
-        stderr: '',
-        filesOut: [],
-        harvestWarnings: [],
-      });
+      return this.concurrencyExceededResult();
     }
 
     // Readiness short-circuits BEFORE anything is staged.
@@ -373,11 +381,24 @@ export class RunCodeService implements RunCodeBackend {
       });
     }
 
-    // Decode + validate files_in before staging (fail closed: nothing staged).
+    // Decode + validate files_in and the program before staging (fail closed: nothing staged).
     const attachments = options?.attachments ?? [];
     const staged = this.validateAndDecodeFilesIn({ input, attachments });
     if (staged.error !== undefined) {
       return staged.error;
+    }
+    const program = await this.resolveProgram({ input, readScript: options?.readScript });
+    if (program.error !== undefined) {
+      return program.error;
+    }
+
+    // The cap is checked again here, after the readiness and provisioning
+    // waits: calls that arrived together on a cold instance all passed the
+    // first check while nothing was running yet. This check and the
+    // increment below are one synchronous step, so no call can slip
+    // between them and push the count past the cap.
+    if (this.activeRuns >= this.maxConcurrentRuns) {
+      return this.concurrencyExceededResult();
     }
 
     const runId = randomUUID().replace(/-/g, '');
@@ -386,12 +407,14 @@ export class RunCodeService implements RunCodeBackend {
     try {
       return await this.executeRun({
         input,
+        code: program.code,
         runId,
         runRoot,
         filesIn: staged.files,
         attachments,
         signal: options?.signal,
         onHarvestedFiles: options?.onHarvestedFiles,
+        packageMirrorToken: options?.packageMirrorToken,
       });
     } catch (error) {
       // dispatch itself broke (driver throw, host I/O). The service
@@ -414,6 +437,65 @@ export class RunCodeService implements RunCodeBackend {
       this.activeRuns -= 1;
       await this.removeRunRoot({ runId, runRoot });
     }
+  }
+
+  /** The program text: the inline code, or the bytes of the workspace file that script_path names. */
+  private async resolveProgram(input: {
+    input: RunCodeInput;
+    readScript: RunCodeCallOptions['readScript'];
+  }): Promise<{ code: string; error: undefined } | { code: undefined; error: RunCodeResult }> {
+    const fail = (error: string): { code: undefined; error: RunCodeResult } => ({
+      code: undefined,
+      error: this.failedResult({
+        error_code: 'invalid_input',
+        error,
+        runRoot: '',
+        stdout: '',
+        stderr: '',
+        filesOut: [],
+        harvestWarnings: [],
+      }),
+    });
+    const { code, script_path: scriptPath } = input.input;
+    if (code !== undefined && scriptPath !== undefined) {
+      return fail('Invalid run_code input: pass either code or script_path, not both.');
+    }
+    if (code !== undefined) {
+      return { code, error: undefined };
+    }
+    if (scriptPath === undefined) {
+      return fail('Invalid run_code input: pass code, or script_path to run a file from the workspace.');
+    }
+    if (input.readScript === undefined) {
+      return fail(
+        'Invalid run_code input: script_path needs the chat workspace, which is not available here. Pass the code instead.',
+      );
+    }
+    let bytes: Buffer;
+    try {
+      bytes = await input.readScript(scriptPath);
+    } catch (error) {
+      return fail(error instanceof Error ? error.message : String(error));
+    }
+    if (bytes.byteLength > RUN_CODE_CODE_MAX_BYTES) {
+      return fail(
+        `Invalid run_code input: script_path "${scriptPath}" is larger than the ${String(RUN_CODE_CODE_MAX_BYTES / 1024)} KiB code limit. Make the script shorter.`,
+      );
+    }
+    let text: string;
+    try {
+      text = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+    } catch {
+      return fail(
+        `Invalid run_code input: script_path "${scriptPath}" is not a UTF-8 text file. Write it as text with write_file, then run it again.`,
+      );
+    }
+    if (text.length === 0) {
+      return fail(
+        `Invalid run_code input: script_path "${scriptPath}" is empty. Write the code into it, then run it again.`,
+      );
+    }
+    return { code: text, error: undefined };
   }
 
   private validateAndDecodeFilesIn(input: {
@@ -470,12 +552,14 @@ export class RunCodeService implements RunCodeBackend {
 
   private async executeRun(input: {
     input: RunCodeInput;
+    code: string;
     runId: string;
     runRoot: string;
     filesIn: { name: string; bytes: Buffer }[];
     attachments: TurnAttachment[];
     signal: AbortSignal | undefined;
     onHarvestedFiles: ((files: HarvestedFile[]) => Promise<void>) | undefined;
+    packageMirrorToken: string | undefined;
   }): Promise<RunCodeResult> {
     const timeoutSeconds = Math.min(input.input.timeout_seconds ?? this.defaultTimeoutSeconds, this.maxTimeoutSeconds);
     const timeoutMs = timeoutSeconds * 1000;
@@ -485,7 +569,7 @@ export class RunCodeService implements RunCodeBackend {
     const { runRoot, ingressDir, scratchDir, egressDir } = await stageRunDirs({
       runRoot: input.runRoot,
       language: input.input.language,
-      code: input.input.code,
+      code: input.code,
       files: [...input.filesIn, ...input.attachments],
       identity,
     });
@@ -498,7 +582,7 @@ export class RunCodeService implements RunCodeBackend {
 
     const params: DriverRunParams = {
       language: input.input.language,
-      code: input.input.code,
+      code: input.code,
       filesIn: input.filesIn,
       ingressDir,
       scratchDir,
@@ -508,6 +592,7 @@ export class RunCodeService implements RunCodeBackend {
       diskMb: this.diskMb,
       runId: input.runId,
       env: SANDBOX_RUN_ENV,
+      packageMirrorToken: input.packageMirrorToken,
       sandboxIdentity: identity,
       signal: controller.signal,
       // FC pull-before-kill best-effort grace (Docker ignores it).
@@ -870,6 +955,19 @@ export class RunCodeService implements RunCodeBackend {
       harvest_warnings: input.harvestWarnings,
     };
     return this.parseResult(candidate, input.runRoot);
+  }
+
+  /** The refusal every cap hit returns, at the first check and the re-check alike. */
+  private concurrencyExceededResult(): RunCodeResult {
+    return this.failedResult({
+      error_code: 'concurrency_exceeded',
+      error: errorTextForCode({ error_code: 'concurrency_exceeded', detail: undefined }),
+      runRoot: '',
+      stdout: '',
+      stderr: '',
+      filesOut: [],
+      harvestWarnings: [],
+    });
   }
 
   private failedResult(input: {

@@ -8,7 +8,6 @@ import { useMemoryVaultState } from '@/atoms/memory/useMemoryVaultState.js';
 import { Spinner } from '@/atoms/primitives/Spinner.js';
 import { readMemoryBackend } from '@/plugins/trueforge-agent-server-adapter/lists.js';
 import { useServerCapabilities, useServerCapabilitiesSettled } from '@/server/ServerContext.js';
-import { useShellMode, type SettingsMemoryTab } from '@/server/ShellModeContext.js';
 
 // The settings panel loads only when its sub-tab mounts, like every other section module.
 const MemorySettings = lazy(() => import('./MemorySettings.js'));
@@ -22,7 +21,9 @@ function MemorySettingsFallback() {
   );
 }
 
-const MEMORY_TABS: ReadonlyArray<{ id: SettingsMemoryTab; label: string }> = [
+type MemoryTab = 'memories' | 'sharing' | 'settings';
+
+const MEMORY_TABS: ReadonlyArray<{ id: MemoryTab; label: string }> = [
   { id: 'memories', label: 'Memories' },
   { id: 'sharing', label: 'Sharing' },
   { id: 'settings', label: 'Settings' },
@@ -33,27 +34,25 @@ const MEMORY_TABS: ReadonlyArray<{ id: SettingsMemoryTab; label: string }> = [
  * list and its sharing controls; Settings is where memory is set up and tuned.
  *
  * Opens on Memories. When the server reports no memory backend once capabilities settle,
- * memory is not set up yet, so it opens on Settings instead, where setup lives. A sub-tab
- * requested through the shell (the welcome screen's setup link) always wins, and so does
- * any tab the user picks while the section is open.
+ * memory is not set up yet, so it opens on Settings instead, where setup lives. Any tab the
+ * user picks while the section is open wins.
  */
 export default function MemorySection() {
-  const { settingsMemoryTab } = useShellMode();
   const capabilities = useServerCapabilities();
   const settled = useServerCapabilitiesSettled();
   const backend = readMemoryBackend(capabilities);
   const state = useMemoryVaultState();
-  const [tab, setTab] = useState<SettingsMemoryTab>(() => settingsMemoryTab ?? 'memories');
+  const [tab, setTab] = useState<MemoryTab>('memories');
   const userPickedRef = useRef(false);
 
   useEffect(() => {
-    if (settingsMemoryTab !== undefined || userPickedRef.current) return;
+    if (userPickedRef.current) return;
     if (settled && backend === undefined) {
       setTab('settings');
     }
-  }, [settingsMemoryTab, settled, backend]);
+  }, [settled, backend]);
 
-  const selectTab = (next: SettingsMemoryTab) => {
+  const selectTab = (next: MemoryTab) => {
     userPickedRef.current = true;
     setTab(next);
   };
@@ -62,7 +61,7 @@ export default function MemorySection() {
     <div className="flex h-full min-h-0 flex-col gap-4">
       <MemoryTabs ariaLabel="Memory sections" tabs={MEMORY_TABS} activeTab={tab} onTabChange={selectTab} />
 
-      {tab === 'memories' ? <MemoryVaultFactsPanel state={state} /> : null}
+      {tab === 'memories' ? <MemoryVaultFactsPanel state={state} onOpenSettings={() => selectTab('settings')} /> : null}
       {tab === 'sharing' ? <MemoryVaultSharingPanel state={state} /> : null}
       {tab === 'settings' ? (
         <Suspense fallback={<MemorySettingsFallback />}>

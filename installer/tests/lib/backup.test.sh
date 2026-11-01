@@ -90,6 +90,21 @@ test_backup_prunes_to_seven() {
   sandbox_drop
 }
 
+test_kept_backups_are_never_pruned() {
+  t_begin "a kept backup is never pruned and does not count toward the seven"
+  sandbox_new
+  install_machine
+  mkdir -p "$AMAN_HOME/backups/20200101T000000Z-before-import"
+  local i
+  for i in 1 2 3 4 5 6 7 8 9; do
+    run_install backup
+    assert_rc 0
+  done
+  assert_eq "$(find "$AMAN_HOME/backups" -mindepth 1 -maxdepth 1 -type d -name '*Z' -o -mindepth 1 -maxdepth 1 -type d -name '*Z-[[:digit:]]*' | wc -l | tr -d ' ')" 7
+  assert_eq "$(find "$AMAN_HOME/backups" -mindepth 1 -maxdepth 1 -type d -name '*-before-import' | wc -l | tr -d ' ')" 1
+  sandbox_drop
+}
+
 test_failed_backup_leaves_nothing() {
   t_begin "a failed backup is removed instead of left half-written"
   sandbox_new
@@ -119,6 +134,7 @@ test_backup_runs_the_cli_with_a_target
 test_backup_of_stopped_instance
 test_leftover_scratch_volume_is_pruned
 test_backup_prunes_to_seven
+test_kept_backups_are_never_pruned
 test_failed_backup_leaves_nothing
 test_unknown_instance_and_empty_machine
 tests_finish

@@ -5,7 +5,7 @@ description: 'Install Amanuensis from a fresh clone with no Docker, connect a mo
 
 ## What this is
 
-Amanuensis (Aman) is a private, local-first AI workbench: a browser chat interface backed by your own choice of model, with optional tools (MCP connectors), reusable skills, sandboxed code execution, and memory. Nothing about a chat leaves your machine except the calls you explicitly configure — to a model provider, a connector, or a memory bank you point it at. This page takes a fresh checkout to a working chat end to end: install the prerequisites, start the app, connect one model, and send a first message.
+Amanuensis (Aman) is a private, local-first AI workbench: a browser chat interface backed by your own choice of model, with optional tools (MCP connectors), reusable skills, sandboxed code execution, and memory. Nothing about a chat leaves your machine except the calls you configure — to a model provider, a connector, or a memory bank you point it at — and web searches, which go to the Parallel search service by default. Remove the `parallel-web` connector or turn on Offline mode to stop them. This page takes a fresh checkout to a working chat end to end: install the prerequisites, start the app, connect one model, and send a first message.
 
 The app runs in two modes: **standalone** — one process on your own machine, SQLite storage, login required, meant for personal use — and **hosted** — Postgres and Redis, meant for a small team, gated by login once you configure it. This guide uses **standalone**: no database server and no containers for the app itself; only the local login provider runs in Docker. It is the fastest path to a working chat. The Docker Compose path, which runs the full hosted topology locally, is covered as an alternative under [Other ways to run it](#other-ways-to-run-it). See [Deployment Security](/deployment-security) before anyone besides you can reach the app.
 
@@ -16,9 +16,9 @@ The app runs in two modes: **standalone** — one process on your own machine, S
 | Node.js | 22.14 or newer | [nodejs.org](https://nodejs.org/en/download) or `brew install node` |
 | pnpm | 11.16.0 through [Corepack](https://pnpm.io/installation#using-corepack) | `corepack enable` (Corepack ships with Node.js; the exact pnpm version is pinned in `package.json`) |
 | Git | any recent version | [git-scm.com/downloads](https://git-scm.com/downloads) |
-| A Bash-compatible shell | — | macOS/Linux: built in. Windows: [WSL](https://learn.microsoft.com/windows/wsl/install) (recommended) or Git Bash, which ships with [Git for Windows](https://git-scm.com/downloads/win) |
+| A Bash-compatible shell | — | macOS/Linux: built in. Windows: [WSL2](https://learn.microsoft.com/windows/wsl/install) |
 
-On Windows, run every command below from a WSL or Git Bash shell, not PowerShell or cmd — the setup scripts use POSIX-style environment variable assignments that neither of those understand.
+On Windows, run every command below inside WSL2. Native Windows (PowerShell, cmd or Git Bash) is not supported: the setup scripts use POSIX-style environment variable assignments that those shells do not understand.
 
 ## Install and run
 
@@ -31,7 +31,7 @@ pnpm install --frozen-lockfile
 cp packages/trueforge/.env.example packages/trueforge/.env
 ```
 
-Login is mandatory in standalone mode, and the server refuses to start without it. In a second terminal run `pnpm dev:login`: it starts a local [Dex](https://dexidp.io) identity provider in Docker and prints the `OIDC_*` lines (and the account to sign in with). Add them to `packages/trueforge/.env`, together with `PUBLIC_BASE_URL=http://localhost:3000`. Any other OIDC provider works too; see [Setup Login](/authentication/overview). Then start the app:
+Login is mandatory in standalone mode, and the server refuses to start without it. In a second terminal run `pnpm dev:login`: it starts Aman's own sign-in service ([Dex](https://dexidp.io)) in Docker and prints the `OIDC_*` lines (and the account to sign in with). Add them to `packages/trueforge/.env`, together with `PUBLIC_BASE_URL=http://localhost:3000`. Standalone needs `OIDC_ALLOWED_EMAILS` to hold exactly one address; the lines it prints do. Then start the app:
 
 ```bash
 pnpm standalone:dev
@@ -40,8 +40,7 @@ pnpm standalone:dev
 The install takes a few minutes the first time. When it finishes, open [http://localhost:3000](http://localhost:3000) and sign in — that is the app.
 
 <Note>
-  `pnpm standalone:dev` starts the API server without the file watcher: on some Windows machines the watcher
-  (`tsx watch`) stalls before the server ever starts, leaving the UI unable to reach the API. The UI itself still
+  `pnpm standalone:dev` starts the API server without the file watcher. The UI itself still
   hot-reloads; restart the command to pick up server-side changes. Contributors who want backend hot reload can run
   the package-level watch scripts instead (`pnpm --filter @truefoundry/trueforge dev`).
 </Note>
@@ -144,8 +143,11 @@ None of these are required to chat with a model. Each is one sentence plus where
     ```bash
     git clone https://github.com/ClimbOutLabs/amanuensis && cd amanuensis
     cp packages/trueforge/.env.example packages/trueforge/.env
+    export CALENDAR_ACCOUNT_SECRET=$(openssl rand -hex 32)
     docker compose up --build
     ```
+
+    The `export` line makes a random secret that the app and the calendar container share, so only the app can use the calendar container's account port. Compose stops with a message if it is missing. Set it again in each new terminal, and run `docker compose down` and `up` with the same value; `pnpm smoke` makes one for you.
 
     The first build takes a few minutes (it compiles the app from source). `docker compose up` stays in the foreground
     and streams every container's log; the stack is ready when the `server` line `Agent server listening on http://0.0.0.0:8790`
@@ -168,15 +170,13 @@ None of these are required to chat with a model. Each is one sentence plus where
     <Warning>
       This stack has no login by default (`REQUIRE_AUTH=false` in `docker-compose.yml`): anyone who can reach port `8791` has
       full admin access. That is safe as shipped, because the port is bound to `127.0.0.1`. Do not change that port mapping,
-      put the app behind a reverse proxy, or open it on your network, without first turning on login (below) or configuring
-      your own identity provider; see [Deployment Security](/deployment-security).
+      put the app behind a reverse proxy, or open it on your network, without first turning on login (below) ; see [Deployment Security](/deployment-security).
     </Warning>
 
     ### Turn on login
 
-    The `login` profile runs [Dex](https://dexidp.io), a small OpenID Connect identity provider, next to the server, with
-    one account that you define in `.env`. Nothing external is involved: the app signs you in through the same OIDC
-    flow it uses with Okta or Entra ID, against an issuer that lives inside the stack.
+    The `login` profile runs [Dex](https://dexidp.io), Aman's own sign-in service, next to the server, with
+    one account that you define in `.env`. Nothing external is involved: the sign-in service lives inside the stack.
 
     1. Generate a client secret and a password hash. The hash, not the password, goes into `.env`:
 
@@ -281,7 +281,7 @@ None of these are required to chat with a model. Each is one sentence plus where
     | `postgresql.enabled`   | `true`  | Bundle Postgres; set `false` + `externalPostgres.*` to bring your own.   |
     | `redis.enabled`        | `true`  | Bundle Redis; set `false` + `externalRedis.url` (string or `valueFrom`). |
     | `server.publicBaseUrl` | `""`    | Public origin; required for OIDC and MCP OAuth callbacks.                |
-    | `configs.oidc.enabled` | `false` | Enable IdP login via `configs.oidc.*`. Default off = shared local admin — see [chart README](https://github.com/ClimbOutLabs/amanuensis/blob/main/charts/trueforge/README.md#dev-defaults-read-before-exposing). |
+    | `configs.oidc.enabled` | `false` | Enable login via `configs.oidc.*`. Default off = shared local admin; see [chart README](https://github.com/ClimbOutLabs/amanuensis/blob/main/charts/trueforge/README.md#dev-defaults-read-before-exposing). |
 
   </Tab>
 </Tabs>
@@ -357,7 +357,7 @@ With the app open in your browser and a model connected (above), this walkthroug
       </Step>
 
   <Step title="Find it under Agents">
-    Open **Agents** from the sidebar. Your saved agent is there — click **Try** to start a fresh chat with the same setup, or **Edit** to tweak it. See [Agents](/agent-library) for shared-visibility notes in hosted mode.
+    Open **More**, then **Agents** from the sidebar. Your saved agent is there — click **Try** to start a fresh chat with the same setup, or **Edit** to tweak it. See [Agents](/agent-library) for shared-visibility notes in hosted mode.
 
       </Step>
 </Steps>

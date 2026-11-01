@@ -17,6 +17,7 @@ interface Call {
   args: string[];
   env: Record<string, string>;
   interactive: boolean;
+  echo: boolean;
 }
 
 /** A scripted docker: `respond` returns the result for a call, or undefined to answer success. */
@@ -26,7 +27,13 @@ function fakeRunner(respond: (call: Call) => Partial<CommandResult> | Error | un
 } {
   const calls: Call[] = [];
   const run: CommandRunner = input => {
-    const call = { command: input.command, args: input.args, env: input.env, interactive: input.interactive };
+    const call = {
+      command: input.command,
+      args: input.args,
+      env: input.env,
+      interactive: input.interactive,
+      echo: input.echo,
+    };
     calls.push(call);
     const answer = respond(call);
     if (answer instanceof Error) {
@@ -127,7 +134,13 @@ describe('runSandboxSlots', () => {
       seen.push({ args: input.args, env: input.env });
       return Promise.resolve({
         ...OK,
-        ...defaultAnswers({ command: input.command, args: input.args, env: input.env, interactive: input.interactive }),
+        ...defaultAnswers({
+          command: input.command,
+          args: input.args,
+          env: input.env,
+          interactive: input.interactive,
+          echo: input.echo,
+        }),
       });
     };
     const result = await runSandboxSlots({ ...BASE_OPTIONS, run: runner, fix: false, instance: 'lab' });
@@ -335,7 +348,120 @@ describe('runSandboxSlots', () => {
       return undefined;
     });
     expect(result).toMatchObject({ ok: false, step: 'start' });
-    expect(!result.ok && result.error).toContain('attestation FAILED seccomp');
+    expect(!result.ok && result.error).toContain('Safety check seccomp failed: Seccomp is "0"');
+  });
+
+  test('a start failure names the failing safety check from the slot log, in plain words and without its log prefix, and reads the logs out loud', async () => {
+    const { result, calls } = await run(call => {
+      const text = joined(call);
+      if (text.includes('up -d')) {
+        return { exitCode: 1, stderr: 'container aman-slots-sandbox-2-1 is unhealthy' };
+      }
+      if (text.includes(' logs ')) {
+        return {
+          stdout:
+            'sandbox-2-1  | 2026-10-10 11:58:00 attestation FAILED network: interfaces: eth0 has a route off this computer',
+        };
+      }
+      return undefined;
+    });
+    expect(result).toMatchObject({ ok: false, step: 'start' });
+    expect(!result.ok && result.error).toContain(
+      'Safety check network failed: interfaces: eth0 has a route off this computer',
+    );
+    expect(!result.ok && result.error).not.toContain('attestation FAILED');
+    expect(!result.ok && result.error).not.toContain('sandbox-2-1  |');
+    const logs = calls.find(call => joined(call).includes(' logs '));
+    expect(logs?.echo).toBe(true);
+  });
+
+  test('a slot that is unhealthy at start writes the plain failure line to the log', async () => {
+    const { result, calls } = await run(call => {
+      const text = joined(call);
+      if (text.includes('up -d')) {
+        return { exitCode: 1, stderr: 'container aman-slots-sandbox-2-1 is unhealthy' };
+      }
+      if (text.includes(' logs ')) {
+        return {
+          stdout:
+            'sandbox-2-1  | 2026-10-10 11:58:00 attestation FAILED network: interfaces: eth0 has a route off this computer',
+        };
+      }
+      return undefined;
+    });
+    expect(result).toMatchObject({ ok: false, step: 'start' });
+    // The runner writes the output of every echoed call to the log file (see createRunCommand in main.ts),
+    // so the plain line reaches the log only by being read out loud through an echoed call.
+    const readOutLoud = calls.filter(call => call.echo).map(joined);
+    expect(
+      readOutLoud.some(line =>
+        line.includes('Safety check network failed: interfaces: eth0 has a route off this computer'),
+      ),
+    ).toBe(true);
+  });
+
+  test('a failure line that does not name a check and a reason is shown as it is', async () => {
+    const { result } = await run(call => {
+      const text = joined(call);
+      if (text.includes('up -d')) {
+        return { exitCode: 1, stderr: 'container is unhealthy' };
+      }
+      if (text.includes(' logs ')) {
+        return { stdout: 'sandbox-1-1  | 2026-10-10 11:58:00 attestation FAILED in a way nobody foresaw' };
+      }
+      return undefined;
+    });
+    expect(result).toMatchObject({ ok: false, step: 'start' });
+    expect(!result.ok && result.error).toContain('attestation FAILED in a way nobody foresaw');
+  });
+
+  test('slots that fail to start for another reason keep the log tail as the detail', async () => {
+    const { result } = await run(call => {
+      const text = joined(call);
+      if (text.includes('up -d')) {
+        return { exitCode: 1, stderr: 'image not found' };
+      }
+      if (text.includes(' logs ')) {
+        return { stdout: 'sandbox-1-1  | starting up' };
+      }
+      return undefined;
+    });
+    expect(result).toMatchObject({ ok: false, step: 'start' });
+    expect(!result.ok && result.error).toContain('image not found');
+  });
+
+  test('a slot that is down fails its check with the failing safety check from its own log', async () => {
+    const { result, calls } = await run(call => {
+      const text = joined(call);
+      if (text.includes('sandbox-2') && text.includes('healthcheck')) {
+        return { exitCode: 1, stderr: 'Error response from daemon: container is not running' };
+      }
+      if (text.includes(' logs ')) {
+        return {
+          stdout: 'sandbox-2-1  | 2026-10-10 11:57:00 attestation FAILED runsc: the sandbox runtime did not answer',
+        };
+      }
+      return undefined;
+    });
+    expect(result).toMatchObject({ ok: false, step: 'attest' });
+    expect(!result.ok && result.error).toContain('Safety check runsc failed: the sandbox runtime did not answer');
+    expect(calls.some(call => joined(call).includes(' logs ') && call.echo)).toBe(true);
+    expect(
+      calls.some(
+        call => call.echo && joined(call).includes('Safety check runsc failed: the sandbox runtime did not answer'),
+      ),
+    ).toBe(true);
+  });
+
+  test('a slot whose agent answers with its failing checks keeps that answer, and the logs are not read', async () => {
+    const { result, calls } = await run(call =>
+      joined(call).includes('sandbox-3') && joined(call).includes('healthcheck')
+        ? { exitCode: 1, stdout: 'FAIL apparmor: the profile is not enforced', stderr: 'attestation failed: apparmor' }
+        : undefined,
+    );
+    expect(result).toMatchObject({ ok: false, step: 'attest' });
+    expect(!result.ok && result.error).toContain('Sandbox 3');
+    expect(calls.some(call => joined(call).includes(' logs '))).toBe(false);
   });
 
   test('a slot whose attestation fails after start fails the run', async () => {
@@ -578,6 +704,38 @@ describe('runSandboxSlots modes', () => {
     expect(calls.some(call => call.command === 'sudo')).toBe(false);
   });
 
+  test('--check shows the plain failure line of an unhealthy slot, word for word, and reads it out loud', async () => {
+    const { result, calls } = await run(
+      call => {
+        const text = joined(call);
+        if (text.includes('sandbox-2') && text.includes('healthcheck')) {
+          return { exitCode: 1, stderr: 'Error response from daemon: container is not running' };
+        }
+        if (text.includes(' logs ')) {
+          return {
+            stdout:
+              'sandbox-2-1  | 2026-10-10 11:58:00 attestation FAILED network: interfaces: eth0 has a route off this computer',
+          };
+        }
+        return undefined;
+      },
+      false,
+      { mode: 'check', command: 'aman doctor sandbox' },
+    );
+    expect(result).toMatchObject({ ok: false, step: 'attest' });
+    expect(!result.ok && result.error).toContain(
+      'Safety check network failed: interfaces: eth0 has a route off this computer',
+    );
+    expect(!result.ok && result.error).not.toContain('attestation FAILED');
+    expect(
+      calls.some(
+        call =>
+          call.echo &&
+          joined(call).includes('Safety check network failed: interfaces: eth0 has a route off this computer'),
+      ),
+    ).toBe(true);
+  });
+
   test("--check says where the missing image is built, in the caller's own command", async () => {
     const { result } = await run(
       call => (joined(call).startsWith('image inspect') ? { exitCode: 1 } : undefined),
@@ -638,5 +796,106 @@ describe('runSandboxSlots modes', () => {
     );
     expect(!result.ok && result.fix).toContain('aman doctor sandbox --fix');
     expect(!result.ok && result.fix).not.toContain('pnpm');
+  });
+});
+
+describe('the package mirror folders of an earlier install', () => {
+  /** Mirror volumes exist for the named slots; every other call answers as usual. */
+  function mirrors(existing: number[]): (call: Call) => Partial<CommandResult> | undefined {
+    return call => {
+      if (joined(call).startsWith('volume inspect')) {
+        const name = call.args[call.args.length - 1] ?? '';
+        return existing.includes(Number(name.slice(-1)))
+          ? { stdout: '[]\n' }
+          : { exitCode: 1, stderr: 'no such volume' };
+      }
+      return undefined;
+    };
+  }
+
+  test('existing mirror folders are handed to the app user in one throwaway container, after the build and before the slots start', async () => {
+    const { result, calls } = await run(mirrors([1, 2, 3, 4]));
+    expect(result.ok).toBe(true);
+    const repairs = calls.filter(call => call.args[0] === 'run');
+    expect(repairs).toHaveLength(1);
+    expect(repairs[0]?.args).toEqual([
+      'run',
+      '--rm',
+      '--user',
+      '0:0',
+      '--network',
+      'none',
+      '--cap-drop',
+      'ALL',
+      '--cap-add',
+      'CHOWN',
+      '--read-only',
+      '-v',
+      'aman_slot_mirror_1:/mirror-1',
+      '-v',
+      'aman_slot_mirror_2:/mirror-2',
+      '-v',
+      'aman_slot_mirror_3:/mirror-3',
+      '-v',
+      'aman_slot_mirror_4:/mirror-4',
+      '--entrypoint',
+      'chown',
+      'amanuensis-sandbox-slot:local',
+      '10001:10001',
+      '/mirror-1',
+      '/mirror-2',
+      '/mirror-3',
+      '/mirror-4',
+    ]);
+    const text = calls.map(joined);
+    const repairAt = calls.findIndex(call => call.args[0] === 'run');
+    expect(repairAt).toBeGreaterThan(text.findIndex(line => line.includes('build sandbox-1')));
+    expect(repairAt).toBeLessThan(text.findIndex(line => line.includes('up -d')));
+    expect(
+      result.ok && result.checks.some(check => check.message.includes('mirror folders belong to the app user')),
+    ).toBe(true);
+  });
+
+  test('only the mirror volumes that exist are handed over', async () => {
+    const { result, calls } = await run(mirrors([2]));
+    expect(result.ok).toBe(true);
+    const repair = calls.find(call => call.args[0] === 'run');
+    expect(repair?.args).toEqual(expect.arrayContaining(['-v', 'aman_slot_mirror_2:/mirror-1', '10001:10001']));
+    expect(repair?.args.some(arg => arg.includes('_slot_mirror_1') || arg.includes('_slot_mirror_3'))).toBe(false);
+    expect(repair?.args.some(arg => arg.includes('_slot_mirror_4'))).toBe(false);
+  });
+
+  test('with no mirror volumes yet, no repair container runs', async () => {
+    const { result, calls } = await run(mirrors([]));
+    expect(result.ok).toBe(true);
+    expect(calls.some(call => call.args[0] === 'run')).toBe(false);
+  });
+
+  test('a repair that fails stops the run before the slots start', async () => {
+    const { result, calls } = await run(call =>
+      call.args[0] === 'run' ? { exitCode: 1, stderr: 'chown failed' } : mirrors([1, 2, 3, 4])(call),
+    );
+    expect(result).toMatchObject({ ok: false, step: 'start' });
+    expect(!result.ok && result.error).toContain('chown failed');
+    expect(calls.some(call => joined(call).includes('up -d'))).toBe(false);
+  });
+
+  test("a named install's mirror volumes are the ones repaired", async () => {
+    const { result, calls } = await run(mirrors([1, 2, 3, 4]), false, { instance: 'lab' });
+    expect(result.ok).toBe(true);
+    const repair = calls.find(call => call.args[0] === 'run');
+    expect(repair?.args).toEqual(
+      expect.arrayContaining(['-v', 'lab_slot_mirror_1:/mirror-1', '-v', 'lab_slot_mirror_4:/mirror-4']),
+    );
+  });
+
+  test('a read-only check and a build never inspect or repair the mirror volumes', async () => {
+    const checked = await run(mirrors([1, 2, 3, 4]), true, { mode: 'check' });
+    expect(checked.result.ok).toBe(true);
+    expect(checked.calls.some(call => joined(call).startsWith('volume inspect'))).toBe(false);
+    expect(checked.calls.some(call => call.args[0] === 'run')).toBe(false);
+    const built = await run(mirrors([1, 2, 3, 4]), false, { mode: 'build' });
+    expect(built.result.ok).toBe(true);
+    expect(built.calls.some(call => joined(call).startsWith('volume inspect'))).toBe(false);
   });
 });

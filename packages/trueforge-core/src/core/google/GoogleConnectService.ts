@@ -1,5 +1,6 @@
 import type { Logger } from 'winston';
 import { z } from 'zod';
+import { CalendarApi } from '../calendar/CalendarApi';
 import { generateOAuthState } from '../util/oauthState';
 import { checkClientWithGoogle } from './checkClient';
 import { clientProblems, type ClientProblem, type ClientType } from './clientJson';
@@ -9,7 +10,7 @@ import type {
   GoogleOwner,
   PendingGoogleAuthorizationStore,
 } from './connection';
-import { GoogleOAuthError, GoogleReconnectRequiredError } from './errors';
+import { GoogleApiError, GoogleOAuthError, GoogleReconnectRequiredError } from './errors';
 import { GoogleAccessTokens } from './GoogleAccessTokens';
 import {
   buildAuthorizationUrl,
@@ -59,10 +60,12 @@ export class GoogleConsentError extends Error {
   }
 }
 
-const GOOGLE_TEST_OUTCOMES = ['ok', 'not_connected', 'needs_reconnect', 'unreachable'] as const;
+const GOOGLE_TEST_OUTCOMES = ['ok', 'not_connected', 'needs_reconnect', 'unreachable', 'calendar_unavailable'] as const;
 
 export const GoogleTestResultSchema = z.object({
-  result: z.enum(GOOGLE_TEST_OUTCOMES),
+  result: z
+    .enum(GOOGLE_TEST_OUTCOMES)
+    .describe('calendar_unavailable: Gmail answered but Google Calendar did not, usually because its API is off.'),
   account_email: z.string().nullable().describe('The connected address when the test passed.'),
 });
 export type GoogleTestResult = z.infer<typeof GoogleTestResultSchema>;
@@ -89,6 +92,7 @@ export class GoogleConnectService {
   readonly #now: () => Date;
   readonly #fetchImpl: typeof fetch;
   readonly #logger: Logger;
+  readonly #onlyAccountEmail: string | null;
 
   constructor(input: {
     connections: GoogleConnectionStore;
@@ -96,8 +100,11 @@ export class GoogleConnectService {
     now: (() => Date) | undefined;
     fetchImpl: typeof fetch | undefined;
     logger: Logger;
+    /** When set, only this Google account can be connected (compared without regard to case). */
+    only_account_email: string | null;
   }) {
     this.#logger = input.logger;
+    this.#onlyAccountEmail = input.only_account_email?.trim().toLowerCase() ?? null;
     this.#connections = input.connections;
     this.#pending = input.pending;
     this.#now = input.now ?? (() => new Date());
@@ -163,7 +170,14 @@ export class GoogleConnectService {
     const features = [...input.features, ...grantedFeatures(stored?.granted_scopes ?? [])];
     if (!features.includes('gmail_read')) {
       throw new GoogleFeatureError(
-        'Sending needs permission to read mail too. Tick the read box as well, then connect.',
+        features.includes('gmail_compose')
+          ? 'Sending needs permission to read mail too. Tick the read box as well, then connect.'
+          : 'Calendar is added to a Google connection that already reads mail. Connect Google first, then add Calendar.',
+      );
+    }
+    if (features.includes('calendar_write') && !features.includes('calendar_read')) {
+      throw new GoogleFeatureError(
+        'Adding events needs Calendar too. Connect Calendar, then allow Aman to add events.',
       );
     }
     const scopes = scopesForFeatures(features);
@@ -236,6 +250,9 @@ export class GoogleConnectService {
         { cause: error },
       );
     }
+    if (this.#onlyAccountEmail !== null && accountEmail.trim().toLowerCase() !== this.#onlyAccountEmail) {
+      throw new GoogleConsentError("Only this demo's own Google account can be connected here.");
+    }
     const existing = await this.#connections.get(input.owner);
     const now = this.#now().toISOString();
     const record: GoogleConnectionRecord = {
@@ -277,6 +294,18 @@ export class GoogleConnectService {
           account_email: accountEmail,
           updated_at: this.#now().toISOString(),
         });
+      }
+      if (grantedFeatures(record.granted_scopes).includes('calendar_read')) {
+        const calendar = new CalendarApi({ tokens, fetchImpl: this.#fetchImpl, sleep: undefined });
+        try {
+          await calendar.calendarTimeZone();
+        } catch (error) {
+          if (!(error instanceof GoogleApiError)) {
+            throw error;
+          }
+          this.#logger.warn('Google Calendar did not answer the connection test', safeFailureFields(error));
+          return { result: 'calendar_unavailable', account_email: accountEmail };
+        }
       }
       return { result: 'ok', account_email: accountEmail };
     } catch (error) {

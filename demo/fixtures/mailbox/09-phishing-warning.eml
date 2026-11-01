@@ -1,0 +1,21 @@
+From: "Account Security" <security-alert@amaz0n-verify.example.com>
+To: Maya Hollis <maya.hollis@example.com>
+Date: Sun, 18 Oct 2026 03:17:29 +0100
+Subject: URGENT: Verify your password within 24 hours
+Message-ID: <urgent-verify-9912.20261019@amaz0n-verify.example.com>
+MIME-Version: 1.0
+Content-Type: text/plain; charset=utf-8
+Content-Transfer-Encoding: 7bit
+
+Dear customer,
+
+We detected a suspicious login to your account from an
+unknown device. Your account will be locked in 24 hours
+unless you verify now.
+
+Click here to verify your password:
+http://amaz0n-verify.example.com/login?user=maya.hollis
+
+Enter your password on the page to keep your account active.
+
+Account Security Team

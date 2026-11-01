@@ -43,8 +43,6 @@ type MemoryEmbeddingsCapabilityData = z.infer<typeof MemoryEmbeddingsCapabilityS
  * Why skills are unavailable, keyed off the sandbox build status.
  * `pending` is transient (retry); everything else (no provider / failed / unknown) reads as not configured.
  */
-const SLOT_SKILLS_REASON = 'Skills need network access, which the offline sandbox does not have yet.';
-
 function skillDisabledReason(status: SandboxBuildStatus | undefined): string {
   if (status === 'pending') {
     return 'Skills run in a sandbox whose image is still being prepared — retry shortly.';
@@ -240,6 +238,36 @@ export interface ComputeCapabilitiesDataDeps<TTransaction> {
   tenantId?: string;
 }
 
+/** The sandbox is usable only when its image build reports ready (or the local fallback applies with no status). */
+export function sandboxEnabledFromBuildStatus(status: SandboxBuildStatus | undefined): boolean {
+  return status === 'ready' || (status === undefined && isLocalSandboxFallbackEnabled());
+}
+
+/**
+ * Whether this server has a sandbox at all, from the same persisted status the bug-report path reads: no
+ * remote refresh and no write-back. Fails closed (no sandbox) if the read throws.
+ */
+export async function readServerSandboxAvailable({
+  store,
+  tenant_id,
+  logger,
+}: {
+  store: ISandboxProviderStore;
+  tenant_id: string;
+  logger: Logger;
+}): Promise<boolean> {
+  if (slotsBackendEnabled()) {
+    return sandboxEnabledFromBuildStatus((await slotSandboxBuildStatus({ logger })).status);
+  }
+  try {
+    const persisted = await readPersistedSnapshotStatus({ store, tenant_id });
+    return sandboxEnabledFromBuildStatus(persisted?.status);
+  } catch (error) {
+    logger.warn('Sandbox status read failed; reporting no sandbox on the server', extractErrorLogFields(error));
+    return false;
+  }
+}
+
 /**
  * Maps a resolved sandbox build status plus a local (zero-egress) read of the memory-provider
  * settings to the capability flags. The memory-provider read is a local DB read only, so this
@@ -260,14 +288,12 @@ async function capabilitiesFromSandboxStatus({
   globalSettingsStore: IGlobalSettingsStore;
   logger: Logger;
 }): Promise<CapabilitiesData> {
-  const sandboxEnabled = status === 'ready' || (status === undefined && isLocalSandboxFallbackEnabled());
+  const sandboxEnabled = sandboxEnabledFromBuildStatus(status);
   return {
     sandbox: { enabled: sandboxEnabled },
-    // Skills download from the network, which the slots do not have.
-    skill:
-      sandboxEnabled && !slotsBackendEnabled()
-        ? { enabled: true }
-        : { enabled: false, reason: slotsBackendEnabled() ? SLOT_SKILLS_REASON : skillDisabledReason(status) },
+    // Skills run wherever the sandbox runs: on the slots backend the host copies the skill
+    // files in and approved sites go through the skill network gateway.
+    skill: sandboxEnabled ? { enabled: true } : { enabled: false, reason: skillDisabledReason(status) },
     settings: { enabled: isAdmin },
     voice: { enabled: isVoiceAvailable() },
     memory_screen: await memoryScreenCapability({

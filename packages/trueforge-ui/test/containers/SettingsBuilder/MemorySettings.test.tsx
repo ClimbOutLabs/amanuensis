@@ -8,6 +8,16 @@ import { ServerProvider, useOptionalRefreshServerCapabilities } from '@/server/S
 import type { AgentBuilderCapabilitiesResponse, AgentUIServer } from '@/server/types.js';
 import { createMockAgentUIServer, createMockCatalog } from '../../server/mockServer.js';
 
+/** The agent's own memory setting, shown only until the person-level switch is set; the runtime hook is stubbed. */
+const recallState = vi.hoisted(() => ({ enabled: true }));
+
+vi.mock('@truefoundry/assistant-ui-runtime', async importOriginal => ({
+  ...(await importOriginal<typeof import('@truefoundry/assistant-ui-runtime')>()),
+  useTrueFoundryAgentSpec: () => ({
+    agentSpec: { config: { memory: { recallEnabled: recallState.enabled } } },
+  }),
+}));
+
 /** Memory-defaults fixture per the generated SDK type. The page only reads `backend` and
  * `markdownDir` from it; the tuning fields exist to satisfy the type. */
 const MARKDOWN_DEFAULTS = {
@@ -79,7 +89,7 @@ describe('MemorySettings (backend honesty)', () => {
 
     expect(await screen.findByText('Memory is on')).toBeInTheDocument();
     expect(screen.getByText('Markdown (local files)')).toBeInTheDocument();
-    expect(screen.getByText(/Aman saves memories as local Markdown files on the server/)).toBeInTheDocument();
+    expect(screen.getByText(/Aman saves memories as notes on this computer/)).toBeInTheDocument();
     expect(screen.getByText('How memory works')).toBeInTheDocument();
     expect(screen.queryByText('Checking memory status…')).not.toBeInTheDocument();
     expect(screen.queryByText('Memory status unavailable')).not.toBeInTheDocument();
@@ -147,9 +157,7 @@ describe('MemorySettings (backend honesty)', () => {
     expect(await screen.findByText('Memory is on')).toBeInTheDocument();
     expect(screen.getByText('Hindsight (experimental)')).toBeInTheDocument();
     expect(screen.getByText(/Markdown file memory.*does not apply here/)).toBeInTheDocument();
-    expect(
-      screen.getByText(/runs the experimental Hindsight memory backend instead of Markdown files/),
-    ).toBeInTheDocument();
+    expect(screen.getByText(/uses the experimental Hindsight memory instead of note files/)).toBeInTheDocument();
     expect(screen.queryByText('Markdown (local files)')).not.toBeInTheDocument();
     expect(screen.queryByText('How memory works')).not.toBeInTheDocument();
     expect(screen.queryByText(/Memories live in/)).not.toBeInTheDocument();
@@ -338,8 +346,7 @@ describe('MemorySettings (backend honesty)', () => {
       renderSummarizeSwitch({ enabled: true, overridden: true, defaultEnabled: false, effectiveEnabled: true });
 
       expect(await screen.findByText('Turn summaries')).toBeInTheDocument();
-      expect(screen.getByText(/important details/)).toBeInTheDocument();
-      expect(screen.getByText(/full transcript/)).toBeInTheDocument();
+      expect(screen.getByText(/saves only the lasting facts/)).toBeInTheDocument();
       const toggle = screen.getByRole('switch', { name: SWITCH_NAME });
       expect(toggle).toBeChecked();
     });
@@ -591,5 +598,100 @@ describe('MemorySettings (backend honesty)', () => {
       });
       expect(screen.getByRole('alert')).toBeInTheDocument();
     });
+  });
+});
+
+describe('MemorySettings (use memories in replies)', () => {
+  /** A memory-recall port backed by one stored value, as the server keeps it. */
+  function recallPort(initial: boolean | null) {
+    const state = { enabled: initial };
+    const setMemoryRecallEnabled = vi.fn(async (next: boolean | null) => {
+      state.enabled = next;
+      return { enabled: state.enabled };
+    });
+    return {
+      setMemoryRecallEnabled,
+      server: {
+        ...capabilitiesWith({ memoryDefaults: MARKDOWN_DEFAULTS }),
+        memoryRecall: { getMemoryRecall: async () => ({ enabled: state.enabled }), setMemoryRecallEnabled },
+      },
+    };
+  }
+
+  it('saves the switch to the server setting, not to the agent', async () => {
+    recallState.enabled = true;
+    const { server, setMemoryRecallEnabled } = recallPort(null);
+    renderMemory(server);
+
+    const recall = await screen.findByRole('switch', { name: 'Use memories in replies' });
+    // Nothing is stored yet, so the agent's own value (on) shows.
+    expect(recall).toBeChecked();
+
+    fireEvent.click(recall);
+    await waitFor(() => {
+      expect(setMemoryRecallEnabled).toHaveBeenLastCalledWith(false);
+    });
+    await waitFor(() => {
+      expect(screen.getByRole('switch', { name: 'Use memories in replies' })).not.toBeChecked();
+    });
+
+    fireEvent.click(screen.getByRole('switch', { name: 'Use memories in replies' }));
+    await waitFor(() => {
+      expect(setMemoryRecallEnabled).toHaveBeenLastCalledWith(true);
+    });
+    await waitFor(() => {
+      expect(screen.getByRole('switch', { name: 'Use memories in replies' })).toBeChecked();
+    });
+  });
+
+  it('reflects the stored setting over the agent value', async () => {
+    recallState.enabled = true;
+    renderMemory(recallPort(false).server);
+
+    await waitFor(() => {
+      expect(screen.getByRole('switch', { name: 'Use memories in replies' })).not.toBeChecked();
+    });
+  });
+
+  it('clears the switch back to the agent setting', async () => {
+    recallState.enabled = true;
+    const { server, setMemoryRecallEnabled } = recallPort(false);
+    renderMemory(server);
+
+    fireEvent.click(await screen.findByRole('button', { name: "Follow each agent's own setting" }));
+    await waitFor(() => {
+      expect(setMemoryRecallEnabled).toHaveBeenLastCalledWith(null);
+    });
+    // Nothing is stored now, so the agent's own value (on) shows and the link is gone.
+    await waitFor(() => {
+      expect(screen.getByRole('switch', { name: 'Use memories in replies' })).toBeChecked();
+    });
+    expect(screen.queryByRole('button', { name: "Follow each agent's own setting" })).not.toBeInTheDocument();
+  });
+
+  it('shows a plain message and keeps the old value when the save fails', async () => {
+    recallState.enabled = true;
+    const { server } = recallPort(true);
+    const failingServer = {
+      ...server,
+      memoryRecall: {
+        ...server.memoryRecall,
+        setMemoryRecallEnabled: async () => {
+          throw new Error('The memory switch failed with HTTP 500. Try again in a moment.');
+        },
+      },
+    };
+    renderMemory(failingServer);
+
+    fireEvent.click(await screen.findByRole('switch', { name: 'Use memories in replies' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('Try again in a moment');
+    expect(screen.getByRole('switch', { name: 'Use memories in replies' })).toBeChecked();
+  });
+
+  it('hides the recall switch while the memory backend is not confirmed', async () => {
+    renderMemory(capabilitiesWith({}));
+
+    expect(await screen.findByText('Memory status unavailable')).toBeInTheDocument();
+    expect(screen.queryByRole('switch', { name: 'Use memories in replies' })).not.toBeInTheDocument();
   });
 });

@@ -69,12 +69,19 @@ describe('DraftModelSelector', () => {
     updateAgentSpec.mockReset();
   });
 
+  it('sizes the model button label on the --text-sm scale step, not a one-off literal', async () => {
+    renderSelector();
+
+    const trigger = await screen.findByTitle('Select model');
+    expect(trigger).toHaveClass('text-sm');
+    expect(trigger.className).not.toMatch(/text-\[0\.8125rem\]/);
+  });
+
   it('filters models and updates the agent spec when a model is selected', async () => {
     renderSelector();
 
     const trigger = await screen.findByTitle('Select model');
     await waitFor(() => expect(trigger).toHaveTextContent('gpt-4.1'));
-    expect(trigger.querySelector('img')?.getAttribute('src')).toBe('https://assets.example/openai.svg');
     fireEvent.click(trigger);
 
     const listbox = screen.getByRole('listbox', { name: 'Select model' });
@@ -156,9 +163,13 @@ describe('DraftModelSelector', () => {
   });
 
   it('does not rewrite agentSpec when the selected model is already in the catalog', async () => {
+    // No reasoning effort: gpt-4.1 has none, and the effort selector rightly heals an unsupported one.
+    agentSpec = { model: { name: 'openai/gpt-4.1', params: { maxTokens: 512 } } };
     renderSelector();
 
-    await waitFor(() => expect(screen.getByTitle('Select model')).toHaveTextContent('gpt-4.1'));
+    // The label comes from the spec before the catalog loads, so wait for the catalog itself.
+    fireEvent.click(await screen.findByTitle('Select model'));
+    await screen.findByRole('option', { name: /gpt-4.1/i });
     expect(updateAgentSpec).not.toHaveBeenCalled();
   });
 
@@ -217,6 +228,15 @@ describe('DraftModelSelector', () => {
     const listbox = await screen.findByRole('listbox', { name: 'Select model' });
     expect(container.contains(listbox)).toBe(false);
     expect(document.body.contains(listbox)).toBe(true);
+  });
+
+  it('closes the open menu on Escape', async () => {
+    renderSelector();
+    fireEvent.click(await screen.findByTitle('Select model'));
+    await screen.findByRole('listbox', { name: 'Select model' });
+
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(screen.queryByRole('listbox', { name: 'Select model' })).not.toBeInTheDocument();
   });
 
   it('caps the menu height and scrolls the option list instead of growing off screen', async () => {

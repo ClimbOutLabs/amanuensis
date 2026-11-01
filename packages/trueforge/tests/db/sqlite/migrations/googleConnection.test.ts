@@ -13,6 +13,7 @@ import { createSqliteDb } from '../../../../src/db/sqlite/client';
 import type { Database } from '../../../../src/db/sqlite/types';
 
 const PREVIOUS_MIGRATION = '20261011_000001_sentinel_search_without_asking';
+const THIS_MIGRATION = '20261016_000003_google_connection';
 
 async function createMigrator(db: Kysely<Database>): Promise<Migrator> {
   return new Migrator({
@@ -49,7 +50,8 @@ describe('20261016_000003_google_connection migration', () => {
 
   it('creates both tables and removes both when rolled back', async () => {
     const migrator = await createMigrator(db);
-    expect((await migrator.migrateToLatest()).error).toBeUndefined();
+    // Stop at this migration so rolling back undoes only it, whatever lands after it.
+    expect((await migrator.migrateTo(THIS_MIGRATION)).error).toBeUndefined();
     expect(await tableNames(db)).toEqual(['google_connection', 'google_oauth_pending']);
 
     const rolledBack = await migrator.migrateTo(PREVIOUS_MIGRATION);

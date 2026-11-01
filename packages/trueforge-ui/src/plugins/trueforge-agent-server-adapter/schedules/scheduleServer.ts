@@ -14,10 +14,12 @@ import type {
   UpdateScheduleRequest,
 } from '../../../server/types.js';
 import { drainAgentsList } from '../agentsList.js';
-import { toListResult } from '../chatServer.js';
 
 /** Matches API PAGE_LIMIT for schedules list. */
 const SCHEDULES_PAGE_LIMIT = 25;
+
+/** Most server pages one list call reads while looking past reminders. */
+const MAX_PAGES_PER_LIST = 10;
 
 type AgentIndex = {
   idToName: ReadonlyMap<string, string>;
@@ -35,11 +37,12 @@ async function loadAgentIndex(client: TrueForge): Promise<AgentIndex> {
   return { idToName, nameToId };
 }
 
+/**
+ * A schedule made in a chat runs as an agent the agents list leaves out, so its id here is its name. An unknown
+ * key goes through as a name and the server answers for it.
+ */
 function resolveAgentName(agentId: string, index: AgentIndex): string {
-  const byId = index.idToName.get(agentId);
-  if (byId != null) return byId;
-  if (index.nameToId.has(agentId)) return agentId;
-  throw new Error(`Unknown agent: ${agentId}`);
+  return index.idToName.get(agentId) ?? agentId;
 }
 
 function collectAgentIds(req?: ListSchedulesParams): string[] {
@@ -54,7 +57,15 @@ function collectAgentIds(req?: ListSchedulesParams): string[] {
 }
 
 function wireStatus(manifest: TrueForgeApi.ScheduleManifest): ScheduleStatus {
-  return manifest.status ?? 'active';
+  return manifest.status === 'paused' ? 'paused' : 'active';
+}
+
+/**
+ * The Schedules page edits repeating tasks only. A one-time schedule has no repeating time, and a reminder lives in
+ * the Reminders chat; saving either from the task form would turn it into something else.
+ */
+function isRepeatingTask(wire: TrueForgeApi.Schedule): boolean {
+  return typeof wire.manifest.cron === 'string' && Reflect.get(wire.manifest, 'kind') !== 'reminder';
 }
 
 function toUiSchedule(wire: TrueForgeApi.Schedule, index: AgentIndex): Schedule {
@@ -64,8 +75,9 @@ function toUiSchedule(wire: TrueForgeApi.Schedule, index: AgentIndex): Schedule 
     name: wire.name,
     agentId,
     agentName: wire.agentName,
+    runsAs: wire.runsAs,
     task: wire.manifest.task,
-    cron: wire.manifest.cron,
+    cron: typeof wire.manifest.cron === 'string' ? wire.manifest.cron : '',
     timezone: wire.manifest.timezone ?? 'UTC',
     status: wireStatus(wire.manifest),
     lastRunAt: null,
@@ -118,7 +130,24 @@ export function createScheduleServer(options: { client: TrueForge }): ScheduleSe
         ...(req?.pageToken === undefined || req.pageToken === '' ? {} : { pageToken: req.pageToken }),
         ...(agentNames === undefined ? {} : { agentNames }),
       });
-      return toListResult(page, row => toUiSchedule(row, index));
+      // Reminders share this list and are dropped here, so a page of only reminders would hide every task behind it.
+      // The reading is bounded; past the bound the page returns empty with its next token and the person pages on.
+      const seenTokens = new Set<string>(req?.pageToken === undefined || req.pageToken === '' ? [] : [req.pageToken]);
+      let pagesRead = 1;
+      let tasks = page.data.filter(isRepeatingTask);
+      while (tasks.length === 0 && page.hasNextPage() && pagesRead < MAX_PAGES_PER_LIST) {
+        const { nextPageToken: token } = page.response.pagination;
+        if (token === undefined || seenTokens.has(token)) break;
+        seenTokens.add(token);
+        await page.getNextPage();
+        pagesRead += 1;
+        tasks = page.data.filter(isRepeatingTask);
+      }
+      const { nextPageToken } = page.response.pagination;
+      // A token seen before would send the reader round in a circle.
+      const hasMore = page.hasNextPage() && nextPageToken !== undefined && !seenTokens.has(nextPageToken);
+      const data = tasks.map(row => toUiSchedule(row, index));
+      return hasMore ? { data, nextPageToken } : { data };
     },
 
     async getSchedule({ id }): Promise<Schedule> {

@@ -58,7 +58,7 @@ describe('DeferredTool call_tool rejections', () => {
     });
 
     expect(error).toBe(
-      "call_tool rejected the mcp_server: received 'not-a-server'; expected the name of a configured MCP server. Configured servers: parallel-web.",
+      "No server named 'not-a-server'. Servers: parallel-web. The not-a-server connector is not on for this chat. To turn it on, the person opens Add-ons in the composer, goes to Connectors, and turns on not-a-server. If it is not listed there, the person can set it up in Settings, Connectors. Do not try other names; tell the person this.",
     );
   });
 
@@ -162,7 +162,7 @@ describe('DeferredTool call_tool rejections', () => {
     });
 
     expect(error).toBe(
-      "call_tool rejected the tool_name: received 'not_a_real_tool'; expected the name of a tool on 'parallel-web'. Tools on 'parallel-web': search, fetch.",
+      "call_tool rejected the tool_name: received 'not_a_real_tool'; expected the name of a tool on 'parallel-web'. Tools on 'parallel-web': search, fetch. A built-in tool is called directly by its name, never through call_tool.",
     );
   });
 
@@ -182,7 +182,7 @@ describe('DeferredTool call_tool rejections', () => {
     });
 
     expect(text).toBe('ok');
-    expect(server.callTool).toHaveBeenCalledWith({ name: 'search', arguments: {} }, undefined);
+    expect(server.callTool).toHaveBeenCalledWith({ name: 'search', arguments: {} }, undefined, undefined);
   });
 });
 
@@ -197,7 +197,7 @@ describe('DeferredTool get_tool_info rejections', () => {
     });
 
     expect(error).toBe(
-      "get_tool_info rejected the mcp_server: received 'not-a-server'; expected the name of a configured MCP server. Configured servers: parallel-web.",
+      "No server named 'not-a-server'. Servers: parallel-web. The not-a-server connector is not on for this chat. To turn it on, the person opens Add-ons in the composer, goes to Connectors, and turns on not-a-server. If it is not listed there, the person can set it up in Settings, Connectors. Do not try other names; tell the person this.",
     );
   });
 

@@ -1,4 +1,6 @@
 import { z } from '@hono/zod-openapi';
+
+import { HELP_AREA_IDS } from '@truefoundry/trueforge-core/schemas/personalizationHelpAreas';
 import { LEARNED_PROFILE_MAX_CHARACTERS, PERSONALIZATION_CONTEXT_VERSION } from '../personalization/profile';
 
 const UnsafeCdataSequence = ']]>';
@@ -26,12 +28,17 @@ const LearningEnabledSchema = z
   .describe('Whether the host may run the learned-profile distillation pass after completed turns.')
   .openapi({ example: false });
 
+const HelpAreaSchema = z.enum(HELP_AREA_IDS);
+
 const PersonalizationProfileContentExample = {
   assistant_name: 'Aman',
   assistant_identity: 'A thoughtful local-first personal assistant.',
   voice_guidance: 'Warm, direct, and concise.',
+  user_name: 'Sam Rivera',
+  address_as: 'Sam',
   user_profile: 'Prefers local-first tools and plain English.',
   pinned_preferences: ['Use short bullet points.'],
+  help_areas: ['focus'],
   learned_profile: null,
   learning_enabled: false,
 };
@@ -43,6 +50,14 @@ const PersonalizationProfileContentBaseSchema = z
       example: 'A thoughtful local-first personal assistant.',
     }),
     voice_guidance: OptionalPersonalizationTextSchema.openapi({ example: 'Warm, direct, and concise.' }),
+    // Defaulted like learned_profile below: clients that predate the two name fields still PUT
+    // a complete profile without them, and an omitted key reads as null.
+    user_name: OptionalPersonalizationTextSchema.default(null)
+      .describe('What the user is called.')
+      .openapi({ example: 'Sam Rivera' }),
+    address_as: OptionalPersonalizationTextSchema.default(null)
+      .describe('How the assistant should address the user.')
+      .openapi({ example: 'Sam' }),
     user_profile: OptionalPersonalizationTextSchema.openapi({
       example: 'Prefers local-first tools and plain English.',
     }),
@@ -50,6 +65,14 @@ const PersonalizationProfileContentBaseSchema = z
       .array(PersonalizationTextSchema.max(280))
       .max(12)
       .openapi({ example: ['Use short bullet points.'] }),
+    // Defaulted so a complete profile PUT without the key reads as no choice, and the import of
+    // an export that predates the question reads the same way.
+    help_areas: z
+      .array(HelpAreaSchema)
+      .max(HELP_AREA_IDS.length)
+      .default([])
+      .describe('The help areas the user picked for the Tour, in the order picked. Empty means none chosen.')
+      .openapi({ example: ['focus', 'family'] }),
     // Defaulted rather than required so pre-learned-profile clients that PUT without the key
     // stay valid; PUT replaces the complete profile, so an omitted key still reads as null.
     learned_profile: LearnedProfileTextSchema.nullable()
@@ -63,7 +86,7 @@ const PersonalizationProfileContentBaseSchema = z
   })
   .strict();
 
-function validatePersonalizationContent(
+export function validatePersonalizationContent(
   value: z.infer<typeof PersonalizationProfileContentBaseSchema>,
   ctx: z.RefinementCtx,
 ) {
@@ -73,6 +96,8 @@ function validatePersonalizationContent(
     (value.assistant_name?.length ?? 0) +
     (value.assistant_identity?.length ?? 0) +
     (value.voice_guidance?.length ?? 0) +
+    (value.user_name?.length ?? 0) +
+    (value.address_as?.length ?? 0) +
     (value.user_profile?.length ?? 0) +
     value.pinned_preferences.reduce((sum, preference) => sum + preference.length, 0);
   if (totalLength > 5_500) {
@@ -81,12 +106,18 @@ function validatePersonalizationContent(
   if (new Set(value.pinned_preferences).size !== value.pinned_preferences.length) {
     ctx.addIssue({ code: 'custom', message: 'Pinned preferences must be distinct.' });
   }
+  if (new Set(value.help_areas).size !== value.help_areas.length) {
+    ctx.addIssue({ code: 'custom', message: 'Help areas must be distinct.' });
+  }
   if (
     value.assistant_name === null &&
     value.assistant_identity === null &&
     value.voice_guidance === null &&
+    value.user_name === null &&
+    value.address_as === null &&
     value.user_profile === null &&
     value.pinned_preferences.length === 0 &&
+    value.help_areas.length === 0 &&
     value.learned_profile === null &&
     // The switch is content in either position, not only when on. A profile holding nothing but
     // "learning off" is exactly where a user lands by trying the toggle and changing their mind,

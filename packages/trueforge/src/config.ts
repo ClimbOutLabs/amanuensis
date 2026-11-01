@@ -33,11 +33,14 @@ import {
   MEMORY_SETTINGS_LIMITS,
 } from '@truefoundry/trueforge-core/core/memory/memorySettingsLimits';
 
+import { ARCHIVE_DEFAULT_MAX_BYTES } from './dataExport/archiveLimits';
+import { ZIP_MAX_ARCHIVE_BYTES } from './dataExport/zipStreamWriter';
 import { normalizedOrigin } from './mcp/firstParty';
 import { PACKAGE_VERSION } from './packageVersion';
 import { defaultEmbeddingModelDir } from './runtime/memory/embeddingRetrieval';
 import type { ReflectBudget } from './runtime/memory/hindsightClient';
-import { DEFAULT_TOKEN_FACTORY_CHEAPER_MODEL, DEFAULT_TOKEN_FACTORY_MODEL } from './runtime/tokenFactoryDefaults';
+import { parseModelPrices, type ModelPrices } from './runtime/modelPricing';
+import { DEFAULT_TOKEN_FACTORY_MODEL } from './runtime/tokenFactoryDefaults';
 import { MAX_CODE_MODE_SOCKET_PARENT_BYTES } from './sandbox/local/core/CodeModeUdsTransport';
 
 const DEFAULT_PORT = 8790;
@@ -165,7 +168,8 @@ export function parseOidcScopes(raw: string): string[] {
 
 /**
  * Parses `OIDC_ALLOWED_EMAILS`: comma-separated exact addresses and/or globs
- * (`*@company.com`). Empty / unset → no allowlist (any authenticated user may sign in).
+ * (`*@company.com`). Empty / unset → no allowlist (any authenticated user may sign in);
+ * standalone refuses that at startup.
  */
 export function parseOidcAllowedEmails(raw: string | undefined): string[] {
   if (raw === undefined || raw.trim() === '') {
@@ -202,6 +206,201 @@ export function parseFirstPartyMcpOrigins(raw: string | undefined): string[] {
     origins.add(origin);
   }
   return [...origins];
+}
+
+/**
+ * The mail sidecar is the operator's own service, so its origin is first-party whenever it is configured.
+ * Listing it by hand would be one more value to keep in step, and compose's `environment` would replace
+ * the one in `.env`.
+ */
+export function withMailSidecarOrigin({
+  origins,
+  mailUrl,
+}: {
+  origins: string[];
+  mailUrl: string | undefined;
+}): string[] {
+  if (mailUrl === undefined) {
+    return origins;
+  }
+  const mailOrigin = normalizedOrigin(mailUrl);
+  if (mailOrigin === undefined || origins.includes(mailOrigin)) {
+    return origins;
+  }
+  return [...origins, mailOrigin];
+}
+
+/** A path from the environment; unset or blank means none. */
+function parseOptionalPath(raw: string | undefined): string | undefined {
+  const trimmed = raw?.trim() ?? '';
+  return trimmed === '' ? undefined : trimmed;
+}
+
+/**
+ * Parses `MAIL_EMAIL_MCP_URL`: the Email connector's MCP endpoint, such as the compose sidecar's
+ * `http://mail-email:9557/mcp`. Unset or blank means no mail sidecar, so no Email connector is
+ * registered. Anything else that is not an http(s) URL fails the boot.
+ */
+export function parseMailEmailMcpUrl(raw: string | undefined): string | undefined {
+  if (raw === undefined || raw.trim() === '') {
+    return undefined;
+  }
+  const trimmed = raw.trim();
+  if (normalizedOrigin(trimmed) === undefined) {
+    throw new Error(`MAIL_EMAIL_MCP_URL must be an http(s) URL such as http://mail-email:9557/mcp, got: ${trimmed}`);
+  }
+  return trimmed;
+}
+
+/**
+ * Parses `MAIL_EMAIL_ACCOUNT_URL`: the mail sidecar's account agent, such as the compose sidecar's
+ * `http://mail-email:9559`. The Settings Email card reaches the saved account through it. Unset or
+ * blank means the instance has no account agent, so the card cannot be offered. Anything else that
+ * is not an http(s) URL fails the boot.
+ */
+export function parseMailEmailAccountUrl(raw: string | undefined): string | undefined {
+  if (raw === undefined || raw.trim() === '') {
+    return undefined;
+  }
+  const trimmed = raw.trim();
+  if (normalizedOrigin(trimmed) === undefined) {
+    throw new Error(`MAIL_EMAIL_ACCOUNT_URL must be an http(s) URL such as http://mail-email:9559, got: ${trimmed}`);
+  }
+  return trimmed;
+}
+
+/**
+ * A sidecar's MCP endpoint derived from its account agent's address: same scheme and host, the MCP
+ * port, the /mcp path. Used when the installer has not linked the connector but an account saved
+ * through Settings still needs the connector registered.
+ */
+function mcpUrlFromAccountUrl({
+  accountUrl,
+  mcpPort,
+}: {
+  accountUrl: string | undefined;
+  mcpPort: number;
+}): string | undefined {
+  if (accountUrl === undefined) {
+    return undefined;
+  }
+  try {
+    const url = new URL(accountUrl);
+    url.port = String(mcpPort);
+    url.pathname = '/mcp';
+    url.search = '';
+    url.hash = '';
+    return url.toString();
+  } catch {
+    return undefined;
+  }
+}
+
+/** The mail sidecar's MCP endpoint, derived from its account agent's address. */
+function mailMcpUrlFromAccountUrl(accountUrl: string | undefined): string | undefined {
+  return mcpUrlFromAccountUrl({ accountUrl, mcpPort: 9557 });
+}
+
+/** The calendar sidecar's MCP endpoint, derived from its account agent's address. */
+function calendarMcpUrlFromAccountUrl(accountUrl: string | undefined): string | undefined {
+  return mcpUrlFromAccountUrl({ accountUrl, mcpPort: 9558 });
+}
+
+/** The mail sidecar's MCP endpoint this host owns: the installer's link, else the one derived from its account agent. */
+export function hostMailMcpUrl({
+  mailMcpUrl,
+  mailAccountUrl,
+}: {
+  mailMcpUrl: string | undefined;
+  mailAccountUrl: string | undefined;
+}): string | undefined {
+  return mailMcpUrl ?? mailMcpUrlFromAccountUrl(mailAccountUrl);
+}
+
+/**
+ * The calendar sidecar's MCP endpoint this host owns: the configured link, else the one derived from its account
+ * agent. The installer links only the account agent, so deciding from the link alone would miss the host's own Calendar.
+ */
+export function hostCalendarMcpUrl({
+  calendarMcpUrl,
+  calendarAccountUrl,
+}: {
+  calendarMcpUrl: string | undefined;
+  calendarAccountUrl: string | undefined;
+}): string | undefined {
+  return calendarMcpUrl ?? calendarMcpUrlFromAccountUrl(calendarAccountUrl);
+}
+
+/**
+ * Parses `CALENDAR_CONNECTOR_URL`: the Calendar connector's MCP endpoint. Unset or blank means no calendar
+ * sidecar. Anything else that is not an http(s) URL fails the boot.
+ */
+export function parseCalendarConnectorUrl(raw: string | undefined): string | undefined {
+  if (raw === undefined || raw.trim() === '') {
+    return undefined;
+  }
+  const trimmed = raw.trim();
+  if (normalizedOrigin(trimmed) === undefined) {
+    throw new Error(
+      `CALENDAR_CONNECTOR_URL must be an http(s) URL such as http://calendar-caldav:9558/mcp, got: ${trimmed}`,
+    );
+  }
+  return trimmed;
+}
+
+/**
+ * Parses `CALENDAR_ACCOUNT_URL`: the calendar sidecar's account agent, such as the compose sidecar's
+ * `http://calendar-caldav:9560`. The Settings Calendar card reaches the saved account through it. Unset or
+ * blank means the instance has no account agent, so the card cannot be offered. Anything else that is not
+ * an http(s) URL fails the boot.
+ */
+export function parseCalendarAccountUrl(raw: string | undefined): string | undefined {
+  if (raw === undefined || raw.trim() === '') {
+    return undefined;
+  }
+  const trimmed = raw.trim();
+  if (normalizedOrigin(trimmed) === undefined) {
+    throw new Error(`CALENDAR_ACCOUNT_URL must be an http(s) URL such as http://calendar-caldav:9560, got: ${trimmed}`);
+  }
+  return trimmed;
+}
+
+/** The shortest account secret the calendar connector accepts; a shorter one keeps its account port closed. */
+const CALENDAR_ACCOUNT_SECRET_MIN_LENGTH = 32;
+
+/**
+ * Parses `CALENDAR_ACCOUNT_SECRET`: the value the calendar connector's account agent needs before it answers.
+ * Unset or blank means none. A value that is too short fails the boot, since the connector would refuse it.
+ */
+export function parseCalendarAccountSecret(raw: string | undefined): string | undefined {
+  if (raw === undefined || raw.trim() === '') {
+    return undefined;
+  }
+  const trimmed = raw.trim();
+  if (trimmed.length < CALENDAR_ACCOUNT_SECRET_MIN_LENGTH) {
+    throw new Error(
+      `CALENDAR_ACCOUNT_SECRET must be at least ${String(CALENDAR_ACCOUNT_SECRET_MIN_LENGTH)} characters. Set a longer random value, or remove the line to leave the Calendar card off.`,
+    );
+  }
+  return trimmed;
+}
+
+/**
+ * The first-party origins: the operator's list, plus the Calendar connector's origin when one is configured.
+ */
+export function firstPartyOriginsFor({
+  raw,
+  calendarUrl,
+}: {
+  raw: string | undefined;
+  calendarUrl: string | undefined;
+}): string[] {
+  const origins = parseFirstPartyMcpOrigins(raw);
+  const calendarOrigin = calendarUrl === undefined ? undefined : normalizedOrigin(calendarUrl);
+  if (calendarOrigin !== undefined && !origins.includes(calendarOrigin)) {
+    origins.push(calendarOrigin);
+  }
+  return origins;
 }
 
 /**
@@ -383,6 +582,21 @@ export function parseTokenFactoryMode(options: {
   throw new Error(`${options.envKey} must be one of off, fallback, force; got ${JSON.stringify(options.raw)}`);
 }
 
+/** The web search provider an instance designates at startup. */
+export type SearchProviderChoice = 'parallel' | 'tavily';
+
+/** Parses `SEARCH_PROVIDER`. Unset/blank → `parallel`, the keyless default. */
+export function parseSearchProviderChoice(options: { envKey: string; raw: string | undefined }): SearchProviderChoice {
+  if (options.raw === undefined || options.raw.trim() === '') {
+    return 'parallel';
+  }
+  const value = options.raw.trim().toLowerCase();
+  if (value === 'parallel' || value === 'tavily') {
+    return value;
+  }
+  throw new Error(`${options.envKey} must be one of parallel, tavily; got ${JSON.stringify(options.raw)}`);
+}
+
 /** Treats an unset or blank env value as absent; used where blank is the way to switch a default off. */
 function blankToUndefined(raw: string | undefined): string | undefined {
   const trimmed = raw?.trim();
@@ -447,6 +661,40 @@ export function parseTrustedProxyAddresses(raw: string | undefined): string[] {
     addresses.push(text);
   }
   return addresses;
+}
+
+const PLAIN_EMAIL_ADDRESS = /^[^\s@,<>*]+@[^\s@,<>*]+\.[^\s@,<>*]+$/;
+
+/**
+ * The addresses a demo instance may send mail to: comma-separated plain emails, lower-cased. Unset or
+ * blank is an empty list, which allows no send. A malformed entry fails the boot, since a dropped typo
+ * would quietly narrow the list.
+ */
+export function parseDemoSendAllowlist(raw: string | undefined): string[] {
+  const addresses = new Set<string>();
+  for (const entry of (raw ?? '').split(',')) {
+    const text = entry.trim().toLowerCase();
+    if (text === '') {
+      continue;
+    }
+    if (!PLAIN_EMAIL_ADDRESS.test(text)) {
+      throw new Error(`DEMO_SEND_ALLOWLIST has an entry that is not an email address: ${entry.trim()}`);
+    }
+    addresses.add(text);
+  }
+  return [...addresses];
+}
+
+/**
+ * The one Google account a demo instance may connect, lower-cased, or empty when none is named (then no
+ * Google account can be connected). A malformed value fails the boot rather than silently pinning nothing.
+ */
+export function parseDemoGoogleAccount(raw: string | undefined): string {
+  const text = (raw ?? '').trim().toLowerCase();
+  if (text !== '' && !PLAIN_EMAIL_ADDRESS.test(text)) {
+    throw new Error(`DEMO_GOOGLE_ACCOUNT is not an email address: ${text}`);
+  }
+  return text;
 }
 
 /** The loopback address of the sign-in service, or empty. */
@@ -769,6 +1017,19 @@ export function assertOidcIssuerTransportAllowed(issuerUrl: string): void {
   throw new Error('OIDC_ISSUER_URL must use https, except http on a loopback host (localhost, 127.0.0.1, ::1)');
 }
 
+/** Aman signs people in through its own sign-in service (Dex), which always serves its issuer at `/dex`. */
+export function assertOwnSignInIssuer(issuerUrl: string): void {
+  let path: string;
+  try {
+    path = new URL(issuerUrl).pathname.replace(/\/+$/, '');
+  } catch (error) {
+    throw new Error('OIDC_ISSUER_URL must be a valid URL', { cause: error });
+  }
+  if (path !== '/dex') {
+    throw new Error('Aman uses its own sign-in. Outside sign-in services are not supported.');
+  }
+}
+
 /** Cookie-name-safe suffix appended to every auth cookie name so instances on one hostname stay apart. */
 function parseAuthCookieSuffix(raw: string | undefined): string {
   const value = raw?.trim() ?? '';
@@ -778,7 +1039,7 @@ function parseAuthCookieSuffix(raw: string | undefined): string {
   return value;
 }
 
-function resolveOIDCConfig(): OIDCConfig | undefined {
+function resolveOIDCConfig({ standalone }: { standalone: boolean }): OIDCConfig | undefined {
   const issuerUrl = getEnv('OIDC_ISSUER_URL');
   const clientId = getEnv('OIDC_CLIENT_ID');
   const clientSecret = getEnv('OIDC_CLIENT_SECRET');
@@ -799,6 +1060,7 @@ function resolveOIDCConfig(): OIDCConfig | undefined {
     );
   }
   assertOidcIssuerTransportAllowed(issuerUrl);
+  assertOwnSignInIssuer(issuerUrl);
   return {
     OIDC_ISSUER_URL: issuerUrl,
     OIDC_CLIENT_ID: clientId,
@@ -815,6 +1077,7 @@ function resolveOIDCConfig(): OIDCConfig | undefined {
       getEnv('OIDC_ADMIN_ROLE_VALUE', { defaultValue: DEFAULT_OIDC_ADMIN_ROLE_VALUE }) ?? DEFAULT_OIDC_ADMIN_ROLE_VALUE,
     OIDC_SCOPES: parseOidcScopes(getEnv('OIDC_SCOPES', { defaultValue: DEFAULT_OIDC_SCOPES }) ?? DEFAULT_OIDC_SCOPES),
     OIDC_ALLOWED_EMAILS: parseOidcAllowedEmails(getEnv('OIDC_ALLOWED_EMAILS')),
+    OIDC_REQUIRE_VERIFIED_EMAIL: standalone,
   };
 }
 
@@ -823,7 +1086,7 @@ function resolveOIDCConfig(): OIDCConfig | undefined {
 // ============================================================================
 
 export interface OIDCConfig {
-  /** e.g. an Okta custom authorization server, or an Azure AD tenant's v2.0 endpoint. Env: `OIDC_ISSUER_URL`. */
+  /** Address of Aman's own sign-in service. Env: `OIDC_ISSUER_URL`. */
   OIDC_ISSUER_URL: string;
   /** Client ID for the OIDC client;*/
   OIDC_CLIENT_ID: string;
@@ -848,15 +1111,17 @@ export interface OIDCConfig {
   OIDC_ADMIN_ROLE_VALUE: string;
   /** Comma-separated OAuth scopes for the authorization request. Env: `OIDC_SCOPES`.
    * Optional; defaults to "openid,profile,email". Whitespace around entries is stripped.
-   * Okta `groups` claims require the `groups` scope; Azure AD app roles typically omit it.
    */
   OIDC_SCOPES: string[];
   /**
    * Optional allowlist of emails that may sign in. Env: `OIDC_ALLOWED_EMAILS`.
    * Comma-separated exact addresses and/or `*` globs (e.g. `alice@acme.com,*@partner.com`).
-   * Matching is case-insensitive against the ID token `email` claim. Empty = unrestricted.
+   * Matching is case-insensitive against the ID token `email` claim. Empty = unrestricted when distributed;
+   * standalone requires exactly one address.
    */
   OIDC_ALLOWED_EMAILS: string[];
+  /** Turn away tokens whose `email_verified` claim is not `true`. On for standalone, where the email is the only identity check. */
+  OIDC_REQUIRE_VERIFIED_EMAIL: boolean;
 }
 
 export interface SharedServerConfiguration {
@@ -864,6 +1129,13 @@ export interface SharedServerConfiguration {
   LOG_LEVEL: string;
   /** Log one line per HTTP request (except `/healthz`). Env: `ACCESS_LOGS`. Default true. */
   ACCESS_LOGS: boolean;
+  /**
+   * Token eval instance: Gmail and Calendar answer from the eval fixtures, and only approvals for the
+   * fixture-backed tools and maps and search are allowed through. Env: `AMAN_EVAL_MODE`. Default false.
+   */
+  AMAN_EVAL_MODE: boolean;
+  /** Folder holding the eval fixtures (inbox, calendar). Set by the package layout, not by an env var. */
+  EVAL_FIXTURE_DIR: string;
   /** Node environment. Env: `NODE_ENV`. */
   NODE_ENV: string | undefined;
   /**
@@ -942,6 +1214,56 @@ export interface SharedServerConfiguration {
    */
   FIRST_PARTY_MCP_ORIGINS: string[];
   /**
+   * MCP endpoint of the mail sidecar. When set, the Email connector is registered at boot; when unset, the
+   * sidecar is not configured and nothing mail-related is offered. Env: `MAIL_EMAIL_MCP_URL`. Default unset.
+   */
+  MAIL_EMAIL_MCP_URL: string | undefined;
+  /**
+   * The mail sidecar's account agent, such as `http://mail-email:9559`. The Settings Email card reads and
+   * changes the saved account through it. When set without MAIL_EMAIL_MCP_URL, the MCP endpoint is derived
+   * from it for registration once an account exists. Env: `MAIL_EMAIL_ACCOUNT_URL`. Default unset.
+   */
+  MAIL_EMAIL_ACCOUNT_URL: string | undefined;
+  /**
+   * The mail sidecar's MCP endpoint this host owns, resolved once: MAIL_EMAIL_MCP_URL, else the one derived
+   * from MAIL_EMAIL_ACCOUNT_URL. An Email connector at this address is first-party. Default unset.
+   */
+  MAIL_SIDECAR_MCP_URL: string | undefined;
+  /**
+   * The Calendar connector's MCP endpoint, such as the compose sidecar's `http://calendar-caldav:9558/mcp`.
+   * Its origin is added to FIRST_PARTY_MCP_ORIGINS, so the read-only calendar tools run without asking.
+   * Env: `CALENDAR_CONNECTOR_URL`. Default unset.
+   */
+  CALENDAR_CONNECTOR_URL: string | undefined;
+  /**
+   * The calendar sidecar's MCP endpoint this host owns, resolved once: CALENDAR_CONNECTOR_URL, else the one derived
+   * from CALENDAR_ACCOUNT_URL. A Calendar connector at this address is first-party. Default unset.
+   */
+  CALENDAR_SIDECAR_MCP_URL: string | undefined;
+  /**
+   * The calendar sidecar's account agent, such as `http://calendar-caldav:9560`. The Settings Calendar card reads
+   * and changes the saved account through it, and the Calendar connector is registered only while an account is
+   * saved. When set without CALENDAR_CONNECTOR_URL, the MCP endpoint is derived from it.
+   * Env: `CALENDAR_ACCOUNT_URL`. Default unset.
+   */
+  CALENDAR_ACCOUNT_URL: string | undefined;
+  /**
+   * The secret the calendar connector's account agent needs before it answers. The same value is given to the
+   * connector. With an account URL but no secret the Settings Calendar card is left off.
+   * Env: `CALENDAR_ACCOUNT_SECRET`. Default unset.
+   */
+  CALENDAR_ACCOUNT_SECRET: string | undefined;
+  /**
+   * The Email send list the server writes (`allowed_recipients.toml`). Set with the sidecar; the sidecar reads it
+   * read-only. Env: `MAIL_POLICY_FILE`. Default unset, which means no send list is written.
+   */
+  MAIL_POLICY_FILE: string | undefined;
+  /**
+   * Where the sidecar's wrapper records the hash of the send list it loaded. The server waits on it after a
+   * change. Env: `MAIL_POLICY_STATUS_FILE`. Default unset.
+   */
+  MAIL_POLICY_STATUS_FILE: string | undefined;
+  /**
    * Max concurrent read-only (Phase-A) tool-call dispatches per assistant batch.
    * Env: `TOOL_DISPATCH_MAX_CONCURRENCY`. Default 4.
    */
@@ -957,13 +1279,34 @@ export interface SharedServerConfiguration {
    */
   TOOL_CALL_TIMEOUT_MS: number;
   /**
-   * Bound in milliseconds on waiting for a model call's first output before
-   * the turn fails visibly instead of hanging. A provider that accepts the
-   * request but never produces a first chunk would otherwise leave the turn
-   * active indefinitely. Env: `MODEL_FIRST_RESPONSE_TIMEOUT_MS`. Default
-   * 600000 (10 minutes).
+   * Bound in milliseconds on waiting for a model call's first output, on every
+   * step. A provider that accepts the request and then says nothing would
+   * otherwise hold the turn open. Also the default first-chunk deadline for a
+   * provider whose `stream_timeout` does not set one.
+   * Env: `MODEL_FIRST_RESPONSE_TIMEOUT_MS`. Default 90000 (90 seconds).
    */
   MODEL_FIRST_RESPONSE_TIMEOUT_MS: number;
+  /**
+   * Bound in milliseconds on silence between a model's chunks once it has
+   * started answering. Also the default per-chunk deadline for a provider
+   * whose `stream_timeout` does not set one.
+   * Env: `MODEL_STREAM_IDLE_TIMEOUT_MS`. Default 60000 (60 seconds).
+   */
+  MODEL_STREAM_IDLE_TIMEOUT_MS: number;
+  /**
+   * Bound in milliseconds on silence between a model's chunks while one of its
+   * tool calls is open. Some servers hold a call's arguments back and send them
+   * in a few large pieces, so a long call needs more room than ordinary
+   * answering. Never shorter than `MODEL_STREAM_IDLE_TIMEOUT_MS`.
+   * Env: `MODEL_STREAM_TOOL_CALL_IDLE_TIMEOUT_MS`. Default 180000 (3 minutes).
+   */
+  MODEL_STREAM_TOOL_CALL_IDLE_TIMEOUT_MS: number;
+  /**
+   * Bound in milliseconds on one web search or page read, after which the
+   * model gets a plain tool error and the reply goes on.
+   * Env: `SEARCH_CALL_TIMEOUT_MS`. Default 120000 (2 minutes).
+   */
+  SEARCH_CALL_TIMEOUT_MS: number;
   /**
    * Client name used for Dynamic Client Registration (DCR) of MCP servers.
    * This is the client name shown on authorization-server consent screens.
@@ -999,6 +1342,16 @@ export interface SharedServerConfiguration {
   /** Disk quota of one chat's sandbox workspace on a slot, MiB. Env: `SANDBOX_SESSION_DISK_MB`. Default 2048. */
   SANDBOX_SESSION_DISK_MB: number;
   /**
+   * Directory holding the package mirror cache. Derived: `{app data dir}/package-mirror-cache`.
+   * The mirrors are the download-only package gateways the sandbox slots reach; their cache is the
+   * only thing that lives here.
+   */
+  SANDBOX_MIRROR_CACHE_DIR: string;
+  /** Largest single package file the mirrors will fetch, bytes. Env: `SANDBOX_MIRROR_DOWNLOAD_MAX_BYTES`. Default 1 GiB. */
+  SANDBOX_MIRROR_DOWNLOAD_MAX_BYTES: number;
+  /** Largest total mirror cache, bytes. Env: `SANDBOX_MIRROR_CACHE_MAX_BYTES`. Default 10 GiB. */
+  SANDBOX_MIRROR_CACHE_MAX_BYTES: number;
+  /**
    * Expected sandbox image as `<tag>@sha256:<64 hex chars>`. Never a bare
    * tag: the digest pin is enforced before any pull. Env: `SANDBOX_IMAGE`.
    * Blank (the default) leaves run_code dormant — existing standalone installs
@@ -1024,6 +1377,11 @@ export interface SharedServerConfiguration {
    * operation uses a fresh subdirectory and removes it. Derived: `{app data dir}/git-bridge`.
    */
   SANDBOX_GIT_BRIDGE_DIR: string;
+  /**
+   * The latest full check written by the installer on the computer (`aman doctor`, install, upgrade,
+   * refresh). Read only; the app never runs host commands. Derived: `{app data dir}/host-report.json`.
+   */
+  HOST_REPORT_PATH: string;
   /**
    * Proxy and certificate settings the server's own git (for sandbox slots) may use, copied from the process
    * environment: HTTPS_PROXY, NO_PROXY, SSL_CERT_FILE, SSL_CERT_DIR, GIT_SSL_CAINFO, GIT_SSL_CAPATH and
@@ -1088,6 +1446,19 @@ export interface SharedServerConfiguration {
    */
   MAX_REQUEST_BODY_BYTES: number;
   /**
+   * Max total bytes of a data export archive. The export aborts (and the download fails) rather
+   * than shipping a truncated archive when the cap is exceeded. Env: `DATA_EXPORT_MAX_BYTES`.
+   * Default 1 GiB, the same as `DATA_IMPORT_MAX_BYTES`, so a default export always fits a default
+   * import; at most 4294967294 (a zip archive without ZIP64 cannot be larger).
+   */
+  DATA_EXPORT_MAX_BYTES: number;
+  /**
+   * Max total bytes of a data import archive, compressed and uncompressed.
+   * An upload past the cap is refused before anything is read or written.
+   * Env: `DATA_IMPORT_MAX_BYTES`. Default 1 GiB.
+   */
+  DATA_IMPORT_MAX_BYTES: number;
+  /**
    * Instance-wide context size in tokens that triggers compaction, used whenever an agent spec
    * does not set `config.context_management.compaction.trigger` itself; an explicit spec value
    * always wins. Unset leaves the threshold to the model's context length (80% of it, lowered so
@@ -1107,6 +1478,19 @@ export interface SharedServerConfiguration {
    * Env: `TURN_DRAIN_SHUTDOWN_TIMEOUT_MS`. Default 30000.
    */
   TURN_DRAIN_SHUTDOWN_TIMEOUT_MS: number;
+  /**
+   * Max milliseconds a turn's drain waits for its follow-up work (memory, turn summary, profile
+   * learning, artifacts) after the answer. Past it the work keeps running unwatched.
+   * Env: `TURN_FOLLOW_UP_TIMEOUT_MS`. Default 120000.
+   */
+  TURN_FOLLOW_UP_TIMEOUT_MS: number;
+  /**
+   * Max milliseconds from accepting a turn to its first sign of work (a model chunk, a tool or
+   * connector starting). Past it the turn ends with an error asking the person to send again.
+   * Must stay above the pre-model step limit (300 s) plus `MODEL_FIRST_RESPONSE_TIMEOUT_MS`.
+   * Env: `TURN_START_TIMEOUT_MS`. Default 480000 (8 minutes).
+   */
+  TURN_START_TIMEOUT_MS: number;
   /**
    * Max seconds a single turn may execute before it is cancelled with
    * `server-execution-timeout`. Env: `SERVER_EXECUTION_TIMEOUT_SECONDS`.
@@ -1183,7 +1567,7 @@ export interface SharedServerConfiguration {
   TRUSTED_PROXY_ADDRESSES: string[];
   /**
    * Max tokens requested from the memory provider's recall endpoint.
-   * Env: `MEMORY_RECALL_MAX_TOKENS`. Default 2048.
+   * Env: `MEMORY_RECALL_MAX_TOKENS`. Default 600. Recall runs once per reply, so this bounds the block every step sends.
    */
   MEMORY_RECALL_MAX_TOKENS: number;
   /**
@@ -1283,12 +1667,27 @@ export interface SharedServerConfiguration {
    */
   MAPS_ROUTER_URL: string;
   /**
+   * Base URL of an OSRM-compatible server with a foot profile, used for walking routes.
+   * Env: `MAPS_WALKING_ROUTER_URL`. Default `https://routing.openstreetmap.de/routed-foot`.
+   */
+  MAPS_WALKING_ROUTER_URL: string;
+  /**
+   * Base URL of an OSRM-compatible server with a bike profile, used for cycling routes.
+   * Env: `MAPS_CYCLING_ROUTER_URL`. Default `https://routing.openstreetmap.de/routed-bike`.
+   */
+  MAPS_CYCLING_ROUTER_URL: string;
+  /**
+   * Base URL, including the API version, of a MOTIS-compatible public transport planner.
+   * Env: `MAPS_TRANSIT_URL`. Default `https://api.transitous.org/api/v6`.
+   */
+  MAPS_TRANSIT_URL: string;
+  /**
    * Tile URL template used by the same-origin tile proxy, with `{z}`, `{x}`, `{y}` placeholders.
    * Env: `MAPS_TILE_URL`. Default `https://tile.openstreetmap.org/{z}/{x}/{y}.png`.
    */
   MAPS_TILE_URL: string;
   /**
-   * User-Agent sent to the geocoder, router, and tile upstreams.
+   * User-Agent sent to the geocoder, router, transit planner, and tile upstreams.
    * Env: `MAPS_USER_AGENT`. Default `Amanuensis/<version> (+https://github.com/ClimbOutLabs/amanuensis)`.
    */
   MAPS_USER_AGENT: string;
@@ -1411,16 +1810,21 @@ export interface SharedServerConfiguration {
    */
   NEBIUS_API_KEY: string | undefined;
   /**
+   * The web search provider this instance designates at startup. `parallel` (the default) keeps
+   * the keyless Parallel connector; `tavily` designates the Tavily connector with `TAVILY_API_KEY`.
+   * Env: `SEARCH_PROVIDER`. Default `parallel`.
+   */
+  SEARCH_PROVIDER: SearchProviderChoice;
+  /**
+   * Tavily API key, written to the Tavily connector at startup when `SEARCH_PROVIDER` is `tavily`.
+   * Never logged. Env: `TAVILY_API_KEY`. Unset by default.
+   */
+  TAVILY_API_KEY: string | undefined;
+  /**
    * Token Factory model id used for fallback and forced routing.
    * Env: `TOKEN_FACTORY_MODEL`. Default `nvidia/nemotron-3-super-120b-a12b`.
    */
   TOKEN_FACTORY_MODEL: string;
-  /**
-   * Optional cheaper Token Factory model registered next to the default on the env-managed
-   * provider. Set it to an empty string to register only the default model.
-   * Env: `TOKEN_FACTORY_CHEAPER_MODEL`. Default `openai/gpt-oss-120b`.
-   */
-  TOKEN_FACTORY_CHEAPER_MODEL: string | undefined;
   /**
    * Token Factory base URL.
    * Env: `TOKEN_FACTORY_BASE_URL`. Default `https://api.tokenfactory.nebius.com/v1`.
@@ -1443,11 +1847,34 @@ export interface SharedServerConfiguration {
    */
   TOKEN_FACTORY_DAILY_TOKEN_CAP: number | undefined;
   /**
+   * Price overrides in USD per million tokens, as JSON keyed by upstream model id, for example
+   * `{"nvidia/nemotron-3-super-120b-a12b":{"input_per_million":0.3,"output_per_million":0.9}}`.
+   * Adds to, and wins over, the built-in Token Factory defaults; an entry also gives a model on any
+   * other provider a cost. Without a price a model shows tokens only.
+   * Env: `TOKEN_FACTORY_PRICES`. Unset means the built-in defaults only.
+   */
+  TOKEN_FACTORY_PRICES: ModelPrices;
+  /**
    * Marks this instance as a demo. `aman demo-seed` refuses to run unless it is true, so it can never touch a real
-   * instance, and the Google connection is hidden and no mail tools mount, so a demo can never reach a real mailbox.
+   * instance. Google works, but the connection is locked once made and mail goes only to DEMO_SEND_ALLOWLIST.
    * Env: `DEMO_MODE`. Default false.
    */
   DEMO_MODE: boolean;
+  /**
+   * The only addresses a demo instance may send mail to (To, Cc and Bcc alike), comma-separated, lower-cased.
+   * Empty means no send at all. Ignored outside demo mode. Env: `DEMO_SEND_ALLOWLIST`. Default empty.
+   */
+  DEMO_SEND_ALLOWLIST: string[];
+  /**
+   * The only Google account a demo instance accepts, lower-cased. Empty means none can be connected.
+   * Ignored outside demo mode. Env: `DEMO_GOOGLE_ACCOUNT`. Default empty.
+   */
+  DEMO_GOOGLE_ACCOUNT: string;
+  /**
+   * What the installer was told to call the owner. Seeds the Personalization name once, only where it is empty.
+   * Env: `OWNER_NAME`. Default empty, which seeds nothing.
+   */
+  OWNER_NAME: string;
   /**
    * Meaning-based recall for the markdown backend. When true, the server downloads
    * a small embedding model once (~120 MB, in the background) and uses it to find
@@ -1675,16 +2102,28 @@ const appDataDir = resolveAppDataDir({
 const port = parsePort(getEnv('PORT'));
 const host = getEnv('HOST', { defaultValue: DEFAULT_HOST }) ?? DEFAULT_HOST;
 
+const mailEmailMcpUrl = parseMailEmailMcpUrl(getEnv('MAIL_EMAIL_MCP_URL'));
+const mailEmailAccountUrl = parseMailEmailAccountUrl(getEnv('MAIL_EMAIL_ACCOUNT_URL'));
+const calendarConnectorUrl = parseCalendarConnectorUrl(getEnv('CALENDAR_CONNECTOR_URL'));
+const calendarAccountUrl = parseCalendarAccountUrl(getEnv('CALENDAR_ACCOUNT_URL'));
+const calendarSidecarMcpUrl = hostCalendarMcpUrl({
+  calendarMcpUrl: calendarConnectorUrl,
+  calendarAccountUrl,
+});
+const mailSidecarMcpUrl = hostMailMcpUrl({ mailMcpUrl: mailEmailMcpUrl, mailAccountUrl: mailEmailAccountUrl });
+
 const shared: SharedServerConfiguration = {
   LOG_LEVEL: getEnv('LOG_LEVEL', { defaultValue: 'info' }) ?? 'info',
   ACCESS_LOGS: parseBoolean({ envKey: 'ACCESS_LOGS', raw: getEnv('ACCESS_LOGS'), defaultValue: true }),
+  AMAN_EVAL_MODE: parseBoolean({ envKey: 'AMAN_EVAL_MODE', raw: getEnv('AMAN_EVAL_MODE'), defaultValue: false }),
+  EVAL_FIXTURE_DIR: path.join(PACKAGE_ROOT, 'evals', 'fixtures'),
   NODE_ENV: getEnv('NODE_ENV'),
   BUILD_REF: parseBuildRef(getEnv('BUILD_REF')),
   BUG_REPORT_HANDOFF_URL: parseHandoffUrl(getEnv('BUG_REPORT_HANDOFF_URL')),
   PORT: port,
   HOST: host,
   REQUIRE_AUTH: parseBoolean({ envKey: 'REQUIRE_AUTH', raw: getEnv('REQUIRE_AUTH'), defaultValue: true }),
-  OIDC: resolveOIDCConfig(),
+  OIDC: resolveOIDCConfig({ standalone }),
   AUTH_COOKIE_SUFFIX: parseAuthCookieSuffix(getEnv('AUTH_COOKIE_SUFFIX')),
   EXECUTOR_ID: standalone ? LOCAL_EXECUTOR_ID : randomAlphanumeric(6),
   MODEL_CATALOG_PATH: resolveOptionalPathEnv('MODEL_CATALOG_PATH'),
@@ -1703,7 +2142,22 @@ const shared: SharedServerConfiguration = {
     raw: getEnv('MCP_CONNECT_TIMEOUT_MS'),
     defaultValue: 30 * 1000,
   }),
-  FIRST_PARTY_MCP_ORIGINS: parseFirstPartyMcpOrigins(getEnv('FIRST_PARTY_MCP_ORIGINS')),
+  FIRST_PARTY_MCP_ORIGINS: withMailSidecarOrigin({
+    origins: firstPartyOriginsFor({
+      raw: getEnv('FIRST_PARTY_MCP_ORIGINS'),
+      calendarUrl: calendarSidecarMcpUrl,
+    }),
+    mailUrl: mailSidecarMcpUrl,
+  }),
+  MAIL_EMAIL_MCP_URL: mailEmailMcpUrl,
+  MAIL_SIDECAR_MCP_URL: mailSidecarMcpUrl,
+  MAIL_EMAIL_ACCOUNT_URL: mailEmailAccountUrl,
+  MAIL_POLICY_FILE: parseOptionalPath(getEnv('MAIL_POLICY_FILE')),
+  MAIL_POLICY_STATUS_FILE: parseOptionalPath(getEnv('MAIL_POLICY_STATUS_FILE')),
+  CALENDAR_CONNECTOR_URL: calendarConnectorUrl,
+  CALENDAR_SIDECAR_MCP_URL: calendarSidecarMcpUrl,
+  CALENDAR_ACCOUNT_URL: calendarAccountUrl,
+  CALENDAR_ACCOUNT_SECRET: parseCalendarAccountSecret(getEnv('CALENDAR_ACCOUNT_SECRET')),
   TOOL_DISPATCH_MAX_CONCURRENCY: parsePositiveInt({
     envKey: 'TOOL_DISPATCH_MAX_CONCURRENCY',
     raw: getEnv('TOOL_DISPATCH_MAX_CONCURRENCY'),
@@ -1727,7 +2181,24 @@ const shared: SharedServerConfiguration = {
     raw: getEnv('MODEL_FIRST_RESPONSE_TIMEOUT_MS'),
     // Literal mirror of DEFAULT_MODEL_FIRST_RESPONSE_TIMEOUT_MS in
     // trueforge-core's AgentThread.ts (the canonical owner).
-    defaultValue: 600_000,
+    defaultValue: 90_000,
+  }),
+  MODEL_STREAM_IDLE_TIMEOUT_MS: parsePositiveInt({
+    envKey: 'MODEL_STREAM_IDLE_TIMEOUT_MS',
+    raw: getEnv('MODEL_STREAM_IDLE_TIMEOUT_MS'),
+    // Literal mirror of DEFAULT_MODEL_IDLE_TIMEOUT_MS in trueforge-core's AgentThread.ts.
+    defaultValue: 60_000,
+  }),
+  MODEL_STREAM_TOOL_CALL_IDLE_TIMEOUT_MS: parsePositiveInt({
+    envKey: 'MODEL_STREAM_TOOL_CALL_IDLE_TIMEOUT_MS',
+    raw: getEnv('MODEL_STREAM_TOOL_CALL_IDLE_TIMEOUT_MS'),
+    // Literal mirror of DEFAULT_MODEL_TOOL_CALL_IDLE_TIMEOUT_MS in trueforge-core's streamDeadline.ts.
+    defaultValue: 180_000,
+  }),
+  SEARCH_CALL_TIMEOUT_MS: parsePositiveInt({
+    envKey: 'SEARCH_CALL_TIMEOUT_MS',
+    raw: getEnv('SEARCH_CALL_TIMEOUT_MS'),
+    defaultValue: 120_000,
   }),
   MCP_DCR_OAUTH_CLIENT_NAME:
     getEnv('MCP_DCR_OAUTH_CLIENT_NAME', { defaultValue: 'truefoundry-harness' }) ?? 'truefoundry-harness',
@@ -1754,10 +2225,22 @@ const shared: SharedServerConfiguration = {
     raw: getEnv('SANDBOX_SESSION_DISK_MB'),
     defaultValue: DEFAULT_SESSION_DISK_MB,
   }),
+  SANDBOX_MIRROR_CACHE_DIR: path.join(appDataDir, 'package-mirror-cache'),
+  SANDBOX_MIRROR_DOWNLOAD_MAX_BYTES: parsePositiveInt({
+    envKey: 'SANDBOX_MIRROR_DOWNLOAD_MAX_BYTES',
+    raw: getEnv('SANDBOX_MIRROR_DOWNLOAD_MAX_BYTES'),
+    defaultValue: 1024 * 1024 * 1024,
+  }),
+  SANDBOX_MIRROR_CACHE_MAX_BYTES: parsePositiveInt({
+    envKey: 'SANDBOX_MIRROR_CACHE_MAX_BYTES',
+    raw: getEnv('SANDBOX_MIRROR_CACHE_MAX_BYTES'),
+    defaultValue: 10 * 1024 * 1024 * 1024,
+  }),
   SANDBOX_IMAGE: getEnv('SANDBOX_IMAGE', { defaultValue: '' }) ?? '',
   SANDBOX_RUNS_DIR: path.join(appDataDir, 'sandbox-runs'),
   SANDBOX_STATE_DIR: path.join(appDataDir, 'sandbox-state'),
   SANDBOX_GIT_BRIDGE_DIR: path.join(appDataDir, 'git-bridge'),
+  HOST_REPORT_PATH: path.join(appDataDir, 'host-report.json'),
   SANDBOX_GIT_NETWORK_ENV: pickGitNetworkEnv(
     Object.fromEntries(GIT_NETWORK_ENV_NAMES.map(name => [name, getEnv(name)])),
   ),
@@ -1815,6 +2298,17 @@ const shared: SharedServerConfiguration = {
     raw: getEnv('MAX_REQUEST_BODY_BYTES'),
     defaultValue: DEFAULT_MAX_REQUEST_BODY_BYTES,
   }),
+  DATA_EXPORT_MAX_BYTES: parsePositiveInt({
+    envKey: 'DATA_EXPORT_MAX_BYTES',
+    raw: getEnv('DATA_EXPORT_MAX_BYTES'),
+    defaultValue: ARCHIVE_DEFAULT_MAX_BYTES,
+    maxValue: ZIP_MAX_ARCHIVE_BYTES,
+  }),
+  DATA_IMPORT_MAX_BYTES: parsePositiveInt({
+    envKey: 'DATA_IMPORT_MAX_BYTES',
+    raw: getEnv('DATA_IMPORT_MAX_BYTES'),
+    defaultValue: ARCHIVE_DEFAULT_MAX_BYTES,
+  }),
   CONTEXT_COMPACTION_THRESHOLD_TOKENS: parseOptionalPositiveInt({
     envKey: 'CONTEXT_COMPACTION_THRESHOLD_TOKENS',
     raw: getEnv('CONTEXT_COMPACTION_THRESHOLD_TOKENS'),
@@ -1828,6 +2322,16 @@ const shared: SharedServerConfiguration = {
     envKey: 'TURN_DRAIN_SHUTDOWN_TIMEOUT_MS',
     raw: getEnv('TURN_DRAIN_SHUTDOWN_TIMEOUT_MS'),
     defaultValue: 30_000,
+  }),
+  TURN_FOLLOW_UP_TIMEOUT_MS: parsePositiveInt({
+    envKey: 'TURN_FOLLOW_UP_TIMEOUT_MS',
+    raw: getEnv('TURN_FOLLOW_UP_TIMEOUT_MS'),
+    defaultValue: 120_000,
+  }),
+  TURN_START_TIMEOUT_MS: parsePositiveInt({
+    envKey: 'TURN_START_TIMEOUT_MS',
+    raw: getEnv('TURN_START_TIMEOUT_MS'),
+    defaultValue: 480_000,
   }),
   SERVER_EXECUTION_TIMEOUT_SECONDS: serverExecutionTimeoutSeconds,
   TURN_STREAM_TTL_SECONDS: parsePositiveInt({
@@ -1868,7 +2372,7 @@ const shared: SharedServerConfiguration = {
   MEMORY_RECALL_MAX_TOKENS: parsePositiveInt({
     envKey: 'MEMORY_RECALL_MAX_TOKENS',
     raw: getEnv('MEMORY_RECALL_MAX_TOKENS'),
-    defaultValue: 2048,
+    defaultValue: 600,
   }),
   MEMORY_RECALL_ENTITY_TOKENS: parsePositiveInt({
     envKey: 'MEMORY_RECALL_ENTITY_TOKENS',
@@ -1941,6 +2445,21 @@ const shared: SharedServerConfiguration = {
     envKey: 'MAPS_ROUTER_URL',
     raw: getEnv('MAPS_ROUTER_URL'),
     defaultValue: 'https://router.project-osrm.org',
+  }),
+  MAPS_WALKING_ROUTER_URL: parseMapsUrl({
+    envKey: 'MAPS_WALKING_ROUTER_URL',
+    raw: getEnv('MAPS_WALKING_ROUTER_URL'),
+    defaultValue: 'https://routing.openstreetmap.de/routed-foot',
+  }),
+  MAPS_CYCLING_ROUTER_URL: parseMapsUrl({
+    envKey: 'MAPS_CYCLING_ROUTER_URL',
+    raw: getEnv('MAPS_CYCLING_ROUTER_URL'),
+    defaultValue: 'https://routing.openstreetmap.de/routed-bike',
+  }),
+  MAPS_TRANSIT_URL: parseMapsUrl({
+    envKey: 'MAPS_TRANSIT_URL',
+    raw: getEnv('MAPS_TRANSIT_URL'),
+    defaultValue: 'https://api.transitous.org/api/v6',
   }),
   MAPS_TILE_URL: parseMapsUrl({
     envKey: 'MAPS_TILE_URL',
@@ -2034,11 +2553,10 @@ const shared: SharedServerConfiguration = {
     defaultValue: true,
   }),
   NEBIUS_API_KEY: getEnv('NEBIUS_API_KEY'),
+  SEARCH_PROVIDER: parseSearchProviderChoice({ envKey: 'SEARCH_PROVIDER', raw: getEnv('SEARCH_PROVIDER') }),
+  TAVILY_API_KEY: blankToUndefined(getEnv('TAVILY_API_KEY')),
   TOKEN_FACTORY_MODEL:
     getEnv('TOKEN_FACTORY_MODEL', { defaultValue: DEFAULT_TOKEN_FACTORY_MODEL }) ?? DEFAULT_TOKEN_FACTORY_MODEL,
-  TOKEN_FACTORY_CHEAPER_MODEL: blankToUndefined(
-    getEnv('TOKEN_FACTORY_CHEAPER_MODEL', { defaultValue: DEFAULT_TOKEN_FACTORY_CHEAPER_MODEL }),
-  ),
   TOKEN_FACTORY_BASE_URL:
     getEnv('TOKEN_FACTORY_BASE_URL', { defaultValue: TOKEN_FACTORY_DEFAULT_BASE_URL }) ??
     TOKEN_FACTORY_DEFAULT_BASE_URL,
@@ -2051,7 +2569,11 @@ const shared: SharedServerConfiguration = {
     envKey: 'TOKEN_FACTORY_DAILY_TOKEN_CAP',
     raw: getEnv('TOKEN_FACTORY_DAILY_TOKEN_CAP'),
   }),
+  TOKEN_FACTORY_PRICES: parseModelPrices({ envKey: 'TOKEN_FACTORY_PRICES', raw: getEnv('TOKEN_FACTORY_PRICES') }),
   DEMO_MODE: parseBoolean({ envKey: 'DEMO_MODE', raw: getEnv('DEMO_MODE'), defaultValue: false }),
+  DEMO_SEND_ALLOWLIST: parseDemoSendAllowlist(getEnv('DEMO_SEND_ALLOWLIST')),
+  DEMO_GOOGLE_ACCOUNT: parseDemoGoogleAccount(getEnv('DEMO_GOOGLE_ACCOUNT')),
+  OWNER_NAME: (getEnv('OWNER_NAME') ?? '').trim(),
   MEMORY_EMBEDDINGS_ENABLED: parseBoolean({
     envKey: 'MEMORY_EMBEDDINGS_ENABLED',
     raw: getEnv('MEMORY_EMBEDDINGS_ENABLED'),
@@ -2161,14 +2683,40 @@ const configuration: ServerConfiguration = standalone
       TRUEFOUNDRY_SANDBOX_SETTINGS: getEnv('TRUEFOUNDRY_SANDBOX_SETTINGS', { required: false }),
     };
 
+/** Settings whose whole value is a credential. */
+export const SECRET_SETTING_NAMES = [
+  'TRUEFORGE_API_KEY',
+  'NEBIUS_API_KEY',
+  'MEMORY_SCREEN_AUTH_TOKEN',
+  'OIDC_CLIENT_SECRET',
+  'TRUEFOUNDRY_API_KEY',
+  'TRUEFOUNDRY_SANDBOX_API_KEY',
+  'POSTGRES_PASSWORD',
+] as const;
+
+/** Connection URL settings: secret as a whole, and for the password inside. */
+export const SECRET_URL_SETTING_NAMES = ['DATABASE_URL', 'REDIS_URL'] as const;
+
+type SecretSettingName = (typeof SECRET_SETTING_NAMES)[number] | (typeof SECRET_URL_SETTING_NAMES)[number];
+
 /** The password a connection URL carries, decoded, or undefined when it has none or is not a URL. */
-function urlPassword(raw: string): string | undefined {
+export function urlPassword(raw: string): string | undefined {
   try {
     const password = decodeURIComponent(new URL(raw).password);
     return password === '' ? undefined : password;
   } catch {
     return undefined;
   }
+}
+
+/** The secret values among settings: each credential setting, and each connection URL with its password. */
+export function secretSettingValues(settings: Partial<Record<SecretSettingName, string | undefined>>): string[] {
+  const values: (string | undefined)[] = SECRET_SETTING_NAMES.map(name => settings[name]);
+  for (const name of SECRET_URL_SETTING_NAMES) {
+    const url = settings[name];
+    values.push(url, url === undefined ? undefined : urlPassword(url));
+  }
+  return values.filter((value): value is string => value !== undefined && value !== '');
 }
 
 /** The settings that carry secrets: what {@link getConfiguredSecretValues} reads, so a test can supply just these. */
@@ -2186,27 +2734,25 @@ export type ConfiguredSecretSettings = Pick<
 
 /**
  * Secret values this process holds from its own configuration, for the outbound secret guard:
- * service credentials, the OIDC client secret, and the passwords inside connection URLs. The one
- * place to extend when a new secret setting is added.
+ * service credentials, the OIDC client secret, and the passwords inside connection URLs. A new secret
+ * setting is added to SECRET_SETTING_NAMES and read here.
  */
 export function getConfiguredSecretValues(config: ConfiguredSecretSettings = configuration): string[] {
-  const candidates: (string | undefined)[] = [
-    config.TRUEFORGE_API_KEY,
-    config.NEBIUS_API_KEY,
-    config.MEMORY_SCREEN_AUTH_TOKEN,
-    config.OIDC?.OIDC_CLIENT_SECRET,
-  ];
-  if (!config.STANDALONE) {
-    candidates.push(
-      config.TRUEFOUNDRY_API_KEY,
-      config.TRUEFOUNDRY_SANDBOX_API_KEY,
-      config.DATABASE_URL,
-      urlPassword(config.DATABASE_URL),
-      config.REDIS_URL,
-      urlPassword(config.REDIS_URL),
-    );
-  }
-  return candidates.filter((value): value is string => value !== undefined && value !== '');
+  // POSTGRES_PASSWORD is left out: this process holds it inside DATABASE_URL.
+  return secretSettingValues({
+    TRUEFORGE_API_KEY: config.TRUEFORGE_API_KEY,
+    NEBIUS_API_KEY: config.NEBIUS_API_KEY,
+    MEMORY_SCREEN_AUTH_TOKEN: config.MEMORY_SCREEN_AUTH_TOKEN,
+    OIDC_CLIENT_SECRET: config.OIDC?.OIDC_CLIENT_SECRET,
+    ...(config.STANDALONE
+      ? {}
+      : {
+          TRUEFOUNDRY_API_KEY: config.TRUEFOUNDRY_API_KEY,
+          TRUEFOUNDRY_SANDBOX_API_KEY: config.TRUEFOUNDRY_SANDBOX_API_KEY,
+          DATABASE_URL: config.DATABASE_URL,
+          REDIS_URL: config.REDIS_URL,
+        }),
+  });
 }
 
 export function isOidcConfigured(value: ServerConfiguration): value is ServerConfiguration & { OIDC: OIDCConfig } {
@@ -2436,7 +2982,7 @@ export function assertNetworkAuthRequirement(requirement: NetworkAuthRequirement
   if (requirement.standalone) {
     throw new Error(
       'Refusing to start without login: standalone mode requires OIDC. ' +
-        'Set OIDC_ISSUER_URL, OIDC_CLIENT_ID, and OIDC_CLIENT_SECRET (REQUIRE_AUTH=false no longer opts out). ' +
+        'Set OIDC_ISSUER_URL, OIDC_CLIENT_ID, OIDC_CLIENT_SECRET and OIDC_ALLOWED_EMAILS (REQUIRE_AUTH=false no longer opts out). ' +
         'For local development run `pnpm dev:login` and add the lines it prints to packages/trueforge/.env; ' +
         'see docs/authentication/overview.mdx.',
     );
@@ -2454,6 +3000,39 @@ export function assertNetworkAuthRequirement(requirement: NetworkAuthRequirement
       'or set REQUIRE_AUTH=false to explicitly accept this risk.',
   );
 }
+
+/** Mirrors `valid_email` in installer/lib/common.sh, the canonical owner of this pattern. */
+const OWNER_EMAIL_SHAPE = /^[A-Za-z0-9._+-]+@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+$/;
+
+interface SingleOwnerSignIn {
+  /** True for `STANDALONE=true`. */
+  standalone: boolean;
+  oidc: Pick<OIDCConfig, 'OIDC_ALLOWED_EMAILS'> | undefined;
+}
+
+/** Standalone allows one literal address (distributed mode keeps its allowlist); runs at load, before the server starts. */
+export function assertSingleOwnerSignIn({ standalone, oidc }: SingleOwnerSignIn): void {
+  if (!standalone || oidc === undefined) {
+    return;
+  }
+  const allowed = oidc.OIDC_ALLOWED_EMAILS;
+  const owner = allowed[0];
+  if (allowed.length === 1 && owner !== undefined && OWNER_EMAIL_SHAPE.test(owner) && owner.length <= 254) {
+    return;
+  }
+  const fix = "Set OIDC_ALLOWED_EMAILS to the owner's email address only.";
+  if (allowed.length === 0) {
+    throw new Error(`Refusing to start: OIDC_ALLOWED_EMAILS is empty; it must hold one address. ${fix}`);
+  }
+  if (allowed.length > 1) {
+    throw new Error(
+      `Refusing to start: OIDC_ALLOWED_EMAILS lists ${String(allowed.length)} addresses; it must hold one. ${fix}`,
+    );
+  }
+  throw new Error(`Refusing to start: OIDC_ALLOWED_EMAILS must be one email address. ${fix}`);
+}
+
+assertSingleOwnerSignIn({ standalone: configuration.STANDALONE, oidc: configuration.OIDC });
 
 if (isTrueFoundryModeEnabled(configuration)) {
   // TrueFoundry authenticates each caller with their own gateway token, so browser SSO must be off.

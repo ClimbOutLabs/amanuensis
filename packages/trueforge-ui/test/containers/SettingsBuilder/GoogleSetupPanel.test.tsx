@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import GoogleSetupPanel from '@/containers/SettingsBuilder/GoogleSetupPanel.js';
@@ -63,9 +63,11 @@ function statusOf(overrides: Partial<GoogleConnectionStatus> = {}): GoogleConnec
     features: [
       { feature: 'gmail_read', label: 'Read and search your email', granted: false },
       { feature: 'gmail_compose', label: 'Save drafts and send email you approve', granted: false },
+      { feature: 'calendar_read', label: 'Read events on your calendar', granted: false },
+      { feature: 'calendar_write', label: 'Add and change events you approve', granted: false },
     ],
     hasSavedClient: false,
-    available: true,
+    locked: false,
     setup: PASTE_SETUP,
     ...overrides,
   };
@@ -79,9 +81,25 @@ function connectedStatus(overrides: Partial<GoogleConnectionStatus> = {}): Googl
     features: [
       { feature: 'gmail_read', label: 'Read and search your email', granted: true },
       { feature: 'gmail_compose', label: 'Save drafts and send email you approve', granted: false },
+      { feature: 'calendar_read', label: 'Read events on your calendar', granted: false },
+      { feature: 'calendar_write', label: 'Add and change events you approve', granted: false },
     ],
     ...overrides,
   });
+}
+
+function withCalendar(status: GoogleConnectionStatus): GoogleConnectionStatus {
+  return {
+    ...status,
+    features: status.features.map(item => (item.feature === 'calendar_read' ? { ...item, granted: true } : item)),
+  };
+}
+
+function withCalendarWrite(status: GoogleConnectionStatus): GoogleConnectionStatus {
+  return {
+    ...status,
+    features: status.features.map(item => (item.feature === 'calendar_write' ? { ...item, granted: true } : item)),
+  };
 }
 
 function makePort(overrides: Partial<GoogleSetupPort> = {}) {
@@ -110,6 +128,13 @@ function renderPanel(port: GoogleSetupPort, onChanged = vi.fn()) {
 function fillClient() {
   fireEvent.change(screen.getByLabelText('Client ID'), { target: { value: CLIENT_ID } });
   fireEvent.change(screen.getByLabelText('Client secret'), { target: { value: CLIENT_SECRET } });
+}
+
+/** Fills the client and runs the check, which the flow requires before Connect opens. */
+async function fillClientAndCheck() {
+  fillClient();
+  fireEvent.click(screen.getByRole('button', { name: 'Check my client' }));
+  expect(await screen.findByText('No problems found with this client.')).toBeInTheDocument();
 }
 
 describe('GoogleSetupPanel', () => {
@@ -185,7 +210,36 @@ describe('GoogleSetupPanel', () => {
     expect(screen.getAllByText('Add your client ID and secret first.')).toHaveLength(2);
     fillClient();
     expect(screen.queryByText('Add your client ID and secret first.')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Connect Google' })).toBeDisabled();
+    expect(
+      screen.getByText('Select Check my client above first. Connect opens once the check finds no problems.'),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Check my client' }));
+    expect(await screen.findByText('No problems found with this client.')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Connect Google' })).toBeEnabled();
+  });
+
+  it('keeps Connect closed until the check passes, and closes it again when the client changes', async () => {
+    renderPanel(makePort().port);
+    await screen.findByLabelText('Client ID');
+    await fillClientAndCheck();
+    expect(screen.getByRole('button', { name: 'Connect Google' })).toBeEnabled();
+    fireEvent.change(screen.getByLabelText('Client secret'), { target: { value: 'GOCSPX-different-secret' } });
+    expect(screen.getByRole('button', { name: 'Connect Google' })).toBeDisabled();
+  });
+
+  it('warns in paste mode, before Connect, that the page Google sends the browser to will not load', async () => {
+    renderPanel(makePort().port);
+    await screen.findByLabelText('Client ID');
+    expect(
+      screen.getByText(/If Google sends you to a page that won't load, copy the whole address/),
+    ).toBeInTheDocument();
+  });
+
+  it('gives no paste warning when the browser returns to this server', async () => {
+    renderPanel(makePort({ getGoogleStatus: async () => statusOf({ setup: WEB_SETUP }) }).port);
+    await screen.findByLabelText('Client ID');
+    expect(screen.queryByText(/If Google sends you to a page that won't load/)).not.toBeInTheDocument();
   });
 
   it('reads a dropped client JSON locally', async () => {
@@ -235,7 +289,7 @@ describe('GoogleSetupPanel', () => {
     const { port, begin } = makePort();
     renderPanel(port);
     await screen.findByLabelText('Client ID');
-    fillClient();
+    await fillClientAndCheck();
     fireEvent.click(screen.getByRole('button', { name: 'Connect Google' }));
     await waitFor(() => expect(begin).toHaveBeenCalledTimes(1));
     expect(begin.mock.calls[0]?.[0]).toMatchObject({
@@ -251,7 +305,7 @@ describe('GoogleSetupPanel', () => {
     const { port, begin } = makePort();
     renderPanel(port);
     await screen.findByLabelText('Client ID');
-    fillClient();
+    await fillClientAndCheck();
     fireEvent.click(screen.getByLabelText(/Also let Aman save drafts and send email/));
     fireEvent.click(screen.getByRole('button', { name: 'Connect Google' }));
     await waitFor(() => expect(begin).toHaveBeenCalledTimes(1));
@@ -261,7 +315,7 @@ describe('GoogleSetupPanel', () => {
   it('never keeps the secret after consent starts', async () => {
     renderPanel(makePort().port);
     await screen.findByLabelText('Client ID');
-    fillClient();
+    await fillClientAndCheck();
     fireEvent.click(screen.getByRole('button', { name: 'Connect Google' }));
     await screen.findByText('Finish in the Google window');
     expect(screen.queryByDisplayValue(CLIENT_SECRET)).not.toBeInTheDocument();
@@ -271,7 +325,7 @@ describe('GoogleSetupPanel', () => {
     const { port, complete } = makePort();
     const { onChanged } = renderPanel(port);
     await screen.findByLabelText('Client ID');
-    fillClient();
+    await fillClientAndCheck();
     fireEvent.click(screen.getByRole('button', { name: 'Connect Google' }));
     const address = 'http://127.0.0.1:53682/callback?state=s&code=c';
     fireEvent.change(await screen.findByLabelText('Address from the address bar'), { target: { value: address } });
@@ -284,7 +338,7 @@ describe('GoogleSetupPanel', () => {
   it('takes the pasted address in a plain text field, tells the user the failed page is expected, and offers a link', async () => {
     renderPanel(makePort().port);
     await screen.findByLabelText('Client ID');
-    fillClient();
+    await fillClientAndCheck();
     fireEvent.click(screen.getByRole('button', { name: 'Connect Google' }));
     const field = await screen.findByLabelText('Address from the address bar');
     expect(field).toHaveAttribute('type', 'text');
@@ -307,7 +361,7 @@ describe('GoogleSetupPanel', () => {
       }).port,
     );
     await screen.findByLabelText('Client ID');
-    fillClient();
+    await fillClientAndCheck();
     fireEvent.click(screen.getByRole('button', { name: 'Connect Google' }));
     fireEvent.change(await screen.findByLabelText('Address from the address bar'), { target: { value: 'nope' } });
     fireEvent.click(screen.getByRole('button', { name: 'Finish connecting' }));
@@ -324,7 +378,7 @@ describe('GoogleSetupPanel', () => {
       }).port,
     );
     await screen.findByLabelText('Client ID');
-    fillClient();
+    await fillClientAndCheck();
     fireEvent.click(screen.getByRole('button', { name: 'Connect Google' }));
     expect(await screen.findByText(/This panel updates by itself/)).toBeInTheDocument();
     expect(screen.queryByLabelText('Address from the address bar')).not.toBeInTheDocument();
@@ -346,13 +400,92 @@ describe('GoogleSetupPanel', () => {
     expect(await screen.findByText('Reconnect needed')).toBeInTheDocument();
     expect(
       screen.getByText(
-        /Google sign-in expired\. Mail is paused, and other parts of Aman keep working\. Select Reconnect to sign in again\./,
+        /Google sign-in expired\. Mail and calendar are paused, and other parts of Aman keep working\. Select Reconnect to sign in again\./,
       ),
     ).toBeInTheDocument();
     expect(screen.getByText(/open Audience and choose Publish app, then reconnect once\./)).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Test connection' })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Reconnect' }));
     await waitFor(() => expect(begin).toHaveBeenCalledWith({ client: null, features: ['gmail_read'] }));
+  });
+
+  it('shows Calendar as not connected, and connects it with a second consent on the saved client', async () => {
+    const { port, begin } = makePort({ getGoogleStatus: async () => connectedStatus() });
+    renderPanel(port);
+    const row = await screen.findByLabelText('Calendar');
+    expect(row).toHaveTextContent('Calendar: not connected');
+    expect(row).toHaveTextContent('Letting Aman add events is a separate step once Calendar is connected.');
+    expect(row).toHaveTextContent('Turn on the Google Calendar API');
+    expect(row).toHaveTextContent('click Enable');
+    expect(row).not.toHaveTextContent(/scope|consent screen/i);
+    const link = within(row).getByRole('link', { name: /Calendar API link/ });
+    expect(link).toHaveAttribute('href', 'https://console.cloud.google.com/apis/library/calendar-json.googleapis.com');
+    expect(link).toHaveAttribute('target', '_blank');
+    expect(screen.queryByText(/Read events on your calendar: /)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Connect Calendar' }));
+    await waitFor(() => expect(begin).toHaveBeenCalledWith({ client: null, features: ['calendar_read'] }));
+  });
+
+  it('shows Calendar as connected, with nothing left to connect', async () => {
+    renderPanel(makePort({ getGoogleStatus: async () => withCalendar(connectedStatus()) }).port);
+    expect(await screen.findByLabelText('Calendar')).toHaveTextContent('Calendar: connected');
+    expect(screen.queryByRole('button', { name: 'Connect Calendar' })).not.toBeInTheDocument();
+  });
+
+  it('offers a plain step to let Aman add events, asking Google for that one more permission', async () => {
+    const { port, begin } = makePort({ getGoogleStatus: async () => withCalendar(connectedStatus()) });
+    renderPanel(port);
+    const row = await screen.findByLabelText('Calendar');
+    expect(row).toHaveTextContent('You still approve each event before it is saved.');
+    expect(screen.queryByText(/Add and change events you approve: /)).not.toBeInTheDocument();
+    fireEvent.click(within(row).getByRole('button', { name: 'Allow Aman to add events' }));
+    await waitFor(() =>
+      expect(begin).toHaveBeenCalledWith({ client: null, features: ['calendar_read', 'calendar_write'] }),
+    );
+  });
+
+  it('says what Aman may do once adding events is allowed, with nothing left to allow', async () => {
+    renderPanel(makePort({ getGoogleStatus: async () => withCalendarWrite(withCalendar(connectedStatus())) }).port);
+    const row = await screen.findByLabelText('Calendar');
+    expect(row).toHaveTextContent('add or change events after you approve each one. It cannot delete events.');
+    expect(screen.queryByRole('button', { name: 'Allow Aman to add events' })).not.toBeInTheDocument();
+  });
+
+  it('keeps the Calendar API link once Calendar is connected, so the message that names it has somewhere to point', async () => {
+    renderPanel(makePort({ getGoogleStatus: async () => withCalendar(connectedStatus()) }).port);
+    const row = await screen.findByLabelText('Calendar');
+    expect(row).toHaveTextContent('click Enable');
+    expect(within(row).getByRole('link', { name: /Calendar API link/ })).toHaveAttribute(
+      'href',
+      'https://console.cloud.google.com/apis/library/calendar-json.googleapis.com',
+    );
+  });
+
+  it('says in plain words when mail works but Calendar did not answer', async () => {
+    renderPanel(
+      makePort({
+        getGoogleStatus: async () => withCalendar(connectedStatus()),
+        testGoogleConnection: async () => ({ result: 'calendar_unavailable', accountEmail: 'ada@example.com' }),
+      }).port,
+    );
+    fireEvent.click(await screen.findByRole('button', { name: 'Test connection' }));
+    expect(
+      await screen.findByText(
+        'Mail works, but Google Calendar did not answer. Open the Calendar API link in the Calendar section, select Enable, then test again.',
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/Working/)).not.toBeInTheDocument();
+  });
+
+  it('keeps Calendar when reconnecting', async () => {
+    const { port, begin } = makePort({
+      getGoogleStatus: async () => withCalendar(connectedStatus({ state: 'needs_reconnect' })),
+    });
+    renderPanel(port);
+    fireEvent.click(await screen.findByRole('button', { name: 'Reconnect' }));
+    await waitFor(() =>
+      expect(begin).toHaveBeenCalledWith({ client: null, features: ['gmail_read', 'calendar_read'] }),
+    );
   });
 
   it('reports a test result in plain words', async () => {
@@ -373,11 +506,12 @@ describe('GoogleSetupPanel', () => {
     });
     const { onChanged } = renderPanel(port);
     fireEvent.click(await screen.findByRole('button', { name: 'Disconnect' }));
+    expect(screen.getByRole('alertdialog')).toHaveTextContent('turns off both mail and calendar');
     expect(screen.getByRole('alertdialog')).toHaveTextContent('everywhere it is used');
     expect(screen.getByRole('alertdialog')).toHaveTextContent('Emails already sent stay in Gmail.');
     fireEvent.click(screen.getByRole('button', { name: 'Disconnect Google' }));
     expect(await screen.findByRole('status')).toHaveTextContent(
-      "Google didn't confirm. Aman removed the connection here; you can also remove access in your Google account settings.",
+      "Google didn't confirm. Aman removed the connection here. You can also remove access in your Google account settings.",
     );
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
     expect(await screen.findByText('Add yourself as a test user')).toBeInTheDocument();
@@ -422,7 +556,7 @@ describe('GoogleSetupPanel', () => {
   it('tells Mac and iPhone users how to copy the whole address, since Safari hides http://', async () => {
     renderPanel(makePort().port);
     await screen.findByLabelText('Client ID');
-    fillClient();
+    await fillClientAndCheck();
     fireEvent.click(screen.getByRole('button', { name: 'Connect Google' }));
     await screen.findByLabelText('Address from the address bar');
     expect(
@@ -445,7 +579,7 @@ describe('GoogleSetupPanel', () => {
     });
     renderPanel(port);
     await screen.findByLabelText('Client ID');
-    fillClient();
+    await fillClientAndCheck();
     fireEvent.click(screen.getByRole('button', { name: 'Connect Google' }));
     expect(window.open).toHaveBeenCalledTimes(1);
     expect(tab.location.href).toBe('');
@@ -472,7 +606,7 @@ describe('GoogleSetupPanel', () => {
       }).port,
     );
     await screen.findByLabelText('Client ID');
-    fillClient();
+    await fillClientAndCheck();
     fireEvent.click(screen.getByRole('button', { name: 'Connect Google' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('That client cannot be used.');
     expect(tab.close).toHaveBeenCalledTimes(1);
@@ -496,6 +630,10 @@ describe('GoogleSetupPanel', () => {
         await vi.advanceTimersByTimeAsync(0);
       });
       fillClient();
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: 'Check my client' }));
+        await vi.advanceTimersByTimeAsync(0);
+      });
       await act(async () => {
         fireEvent.click(screen.getByRole('button', { name: 'Connect Google' }));
         await vi.advanceTimersByTimeAsync(0);
@@ -528,6 +666,10 @@ describe('GoogleSetupPanel', () => {
         await vi.advanceTimersByTimeAsync(0);
       });
       fillClient();
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: 'Check my client' }));
+        await vi.advanceTimersByTimeAsync(0);
+      });
       await act(async () => {
         fireEvent.click(screen.getByRole('button', { name: 'Connect Google' }));
         await vi.advanceTimersByTimeAsync(0);
@@ -566,11 +708,23 @@ describe('GoogleSetupPanel', () => {
     const OFFLINE = 'Gmail needs network access. Turn off offline mode in Settings to connect.';
     const offlineApi = (offlineMode: boolean): SentinelApi => ({
       listAuditEntries: async () => [],
-      getUserSettings: async () => ({ offline_mode: offlineMode, tier2_auto_allow: [], search_without_asking: true }),
+      listBriefItemCompletions: async () => [],
+      markBriefItemDone: async () => undefined,
+      unmarkBriefItemDone: async () => undefined,
+      listUserAuditEntries: async () => ({ entries: [] }),
+      getUserSettings: async () => ({
+        offline_mode: offlineMode,
+        tier2_auto_allow: [],
+        search_without_asking: true,
+        maps_without_asking: false,
+        sandbox_without_asking: true,
+      }),
       updateUserSettings: async () => ({
         offline_mode: offlineMode,
         tier2_auto_allow: [],
         search_without_asking: true,
+        maps_without_asking: false,
+        sandbox_without_asking: true,
       }),
       listSentinelSessionContext: async () => ({ approvals: [] }),
     });
@@ -597,6 +751,7 @@ describe('GoogleSetupPanel', () => {
       expect(await screen.findByText(OFFLINE)).toBeInTheDocument();
       expect(screen.getByRole('button', { name: 'Test connection' })).toBeDisabled();
       expect(screen.getByRole('button', { name: 'Allow drafts and sending' })).toBeDisabled();
+      expect(screen.getByRole('button', { name: 'Connect Calendar' })).toBeDisabled();
       expect(screen.getByRole('button', { name: 'Disconnect' })).toBeEnabled();
     });
 
@@ -604,7 +759,7 @@ describe('GoogleSetupPanel', () => {
       renderWithSentinel(makePort().port, false);
       await screen.findByLabelText('Client ID');
       expect(screen.queryByText(OFFLINE)).not.toBeInTheDocument();
-      fillClient();
+      await fillClientAndCheck();
       expect(screen.getByRole('button', { name: 'Connect Google' })).toBeEnabled();
     });
   });

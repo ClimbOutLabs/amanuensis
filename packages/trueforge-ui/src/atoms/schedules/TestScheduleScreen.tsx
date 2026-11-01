@@ -7,7 +7,7 @@ import { Icon } from '../../icons/Icon.js';
 import { useOptionalCatalogServer, useScheduleServer } from '../../server/ServerContext.js';
 import type { ConnectorState, Schedule, ScheduleRun } from '../../server/types.js';
 import { useDraftCatalog } from '../draft/DraftCatalogProvider.js';
-import { ConnectorConnectButton } from '../draft/DraftCompositeSelector.js';
+import { ConnectorConnectButton } from '../draft/DraftToolPicker.js';
 import { cn } from '../lib/cn.js';
 import { Button } from '../primitives/Button.js';
 import { formatCadenceSummary, formatRelativeTime } from './cadence.js';
@@ -83,7 +83,7 @@ export function TestScheduleScreen({ schedule, agentName, mcpMounts, onEditConfi
   return (
     <div className="flex flex-col gap-4 px-5 py-4">
       <section className="overflow-hidden rounded-lg border border-border bg-card-bg">
-        <DetailRow label="Agent">{agentName}</DetailRow>
+        <DetailRow label="Runs as">{agentName}</DetailRow>
         <DetailRow label="Name">{schedule.name}</DetailRow>
         <DetailRow label="Status">
           <ScheduleStatusBadge status={schedule.status} />

@@ -101,6 +101,18 @@ function toolCallMemoSnapshot(overrides: Partial<ToolCallMemoSnapshot> = {}): To
     empty_inspection_nudge_generation: 0,
     no_progress_nudge_generation: 0,
     policy_blocked_calls_this_turn: 0,
+    write_calls_this_turn: 0,
+    successful_writes_this_turn: 0,
+    step_kinds_this_turn: [],
+    step_texts_this_turn: [],
+    last_call_signature: undefined,
+    tool_markup_leaks_this_turn: 0,
+    tool_markup_retries_this_turn: 0,
+    steps_by_thread: [],
+    progress_refunds_by_thread: [],
+    removed_tools: [],
+    removed_tool_rejection_streaks: [],
+    unfinished_by_thread: [],
     ...overrides,
   };
 }
@@ -330,6 +342,8 @@ export function runStoreContractSuite<
         metadata: undefined,
         source_type: undefined,
         source_id: undefined,
+        folder_id: undefined,
+        no_folder: false,
       });
       expect(listed.data.map(s => s.session_id)).toContain('created-by-session');
       expect(listed.data.find(s => s.session_id === 'created-by-session')?.created_by_subject.subject_id).toBe(
@@ -396,6 +410,8 @@ export function runStoreContractSuite<
         end_timestamp: undefined,
         source_type: undefined,
         source_id: undefined,
+        folder_id: undefined,
+        no_folder: false,
       });
       expect(filtered.data.map(row => row.session_id)).toEqual(['named-1']);
     });
@@ -819,6 +835,8 @@ export function runStoreContractSuite<
         end_timestamp: undefined,
         source_type: undefined,
         source_id: undefined,
+        folder_id: undefined,
+        no_folder: false,
       });
       expect(listed.data).toHaveLength(0);
 
@@ -985,6 +1003,88 @@ export function runStoreContractSuite<
     });
   });
 
+  describe('stampImportedSession', () => {
+    const archivedSession = {
+      created_at: new Date('2025-03-04T05:06:07.000Z'),
+      updated_at: new Date('2025-03-04T09:10:11.000Z'),
+      last_activity_timestamp_ms: Date.parse('2025-03-04T09:10:11.000Z'),
+      metrics: { total_duration_ms: 123_456, total_turns: 2, total_cost_in_usd: 0.25 },
+    };
+
+    it('overwrites the session and turn clocks and the metrics with the archived values', async () => {
+      const store = createStore();
+      await seedSession(store);
+      await store.createTurn(makeCreateTurnInput({ sessionId, turnId: 'turn-1' }));
+      await finishTurn(store, 'turn-1');
+      await store.createTurn(makeCreateTurnInput({ sessionId, turnId: 'turn-2', previousTurnId: 'turn-1' }));
+      await finishTurn(store, 'turn-2');
+
+      const turns = [
+        {
+          turn_id: 'turn-1',
+          created_at: new Date('2025-03-04T05:06:08.000Z'),
+          updated_at: new Date('2025-03-04T05:07:00.000Z'),
+        },
+        {
+          turn_id: 'turn-2',
+          created_at: new Date('2025-03-04T09:00:00.000Z'),
+          updated_at: new Date('2025-03-04T09:10:11.000Z'),
+        },
+      ];
+      await store.stampImportedSession({ tenant_id: tenant, session_id: sessionId, ...archivedSession, turns });
+
+      const session = mustGet(await store.getSession({ tenant_id: tenant, session_id: sessionId }));
+      expect(session.created_at).toEqual(archivedSession.created_at);
+      expect(session.updated_at).toEqual(archivedSession.updated_at);
+      expect(session.last_activity_timestamp_ms).toBe(archivedSession.last_activity_timestamp_ms);
+      expect(session.metrics).toEqual(archivedSession.metrics);
+      expect(session.last_turn_id).toBe('turn-2');
+
+      for (const expected of turns) {
+        const turn = mustGet(await store.getTurn({ session_id: sessionId, turn_id: expected.turn_id }));
+        expect(turn.created_at).toEqual(expected.created_at);
+        expect(turn.updated_at).toEqual(expected.updated_at);
+        expect(turn.state.status).toBe('done');
+      }
+    });
+
+    it('rejects a missing session or turn and leaves the session untouched', async () => {
+      const store = createStore();
+      await expect(
+        store.stampImportedSession({
+          tenant_id: tenant,
+          session_id: missingSessionId,
+          ...archivedSession,
+          turns: [],
+        }),
+      ).rejects.toBeInstanceOf(SessionNotFoundError);
+
+      await seedSession(store);
+      const before = mustGet(await store.getSession({ tenant_id: tenant, session_id: sessionId }));
+      await expect(
+        store.stampImportedSession({
+          tenant_id: tenant,
+          session_id: sessionId,
+          ...archivedSession,
+          turns: [
+            { turn_id: missingTurnId, created_at: archivedSession.created_at, updated_at: archivedSession.updated_at },
+          ],
+        }),
+      ).rejects.toBeInstanceOf(TurnNotFoundError);
+      await expect(
+        store.stampImportedSession({
+          tenant_id: 'other-tenant',
+          session_id: sessionId,
+          ...archivedSession,
+          turns: [],
+        }),
+      ).rejects.toBeInstanceOf(SessionNotFoundError);
+
+      const after = mustGet(await store.getSession({ tenant_id: tenant, session_id: sessionId }));
+      expect(after).toEqual(before);
+    });
+  });
+
   describe('missing session / turn', () => {
     it('rejects session mutations for a missing session', async () => {
       const store = createStore();
@@ -1087,6 +1187,8 @@ export function runStoreContractSuite<
         end_timestamp: undefined,
         source_type: undefined,
         source_id: undefined,
+        folder_id: undefined,
+        no_folder: false,
       });
       expect(desc.data.map(s => s.session_id)).toEqual(['sc', 'sb', 'sa']);
 
@@ -1102,6 +1204,8 @@ export function runStoreContractSuite<
         end_timestamp: undefined,
         source_type: undefined,
         source_id: undefined,
+        folder_id: undefined,
+        no_folder: false,
       });
       expect(asc.data.map(s => s.session_id)).toEqual(['sa', 'sb', 'sc']);
     });
@@ -1122,6 +1226,8 @@ export function runStoreContractSuite<
         end_timestamp: undefined,
         source_type: undefined,
         source_id: undefined,
+        folder_id: undefined,
+        no_folder: false,
       });
       expect(first.data).toHaveLength(2);
       expect(first.pagination.next_page_token).toBeDefined();
@@ -1137,6 +1243,8 @@ export function runStoreContractSuite<
         end_timestamp: undefined,
         source_type: undefined,
         source_id: undefined,
+        folder_id: undefined,
+        no_folder: false,
       });
       expect(second.data.map(s => s.session_id)).toEqual(['sa']);
       expect(second.pagination.next_page_token).toBeUndefined();
@@ -1153,6 +1261,8 @@ export function runStoreContractSuite<
         end_timestamp: undefined,
         source_type: undefined,
         source_id: undefined,
+        folder_id: undefined,
+        no_folder: false,
       });
       const middleSession = all.data[1];
       if (!middleSession) {
@@ -1171,6 +1281,8 @@ export function runStoreContractSuite<
         end_timestamp: middleCreatedAt,
         source_type: undefined,
         source_id: undefined,
+        folder_id: undefined,
+        no_folder: false,
       });
       expect(bounded.data.map(s => s.session_id)).toEqual(['sb']);
     });
@@ -1197,6 +1309,8 @@ export function runStoreContractSuite<
         end_timestamp: undefined,
         source_type: undefined,
         source_id: undefined,
+        folder_id: undefined,
+        no_folder: false,
       };
       const desc = await store.listSessions({ ...listArgs, limit: 10, page_token: undefined });
       expect(desc.data.map(s => s.session_id)).toEqual(['sa', 'sc', 'sb']);
@@ -1226,6 +1340,8 @@ export function runStoreContractSuite<
         end_timestamp: undefined,
         source_type: undefined,
         source_id: undefined,
+        folder_id: undefined,
+        no_folder: false,
       };
       const full = await store.listSessions({ ...listArgs, limit: 10, page_token: undefined });
       const page1 = await store.listSessions({ ...listArgs, limit: 2, page_token: undefined });
@@ -1296,6 +1412,8 @@ export function runStoreContractSuite<
         end_timestamp: undefined,
         source_type: undefined,
         source_id: undefined,
+        folder_id: undefined,
+        no_folder: false,
       };
 
       const byEnv = await store.listSessions({ ...listArgs, metadata: { env: 'prod' } });
@@ -1369,6 +1487,8 @@ export function runStoreContractSuite<
         end_timestamp: undefined,
         source_type: undefined,
         source_id: undefined,
+        folder_id: undefined,
+        no_folder: false,
       });
       expect(aliceOnly.data.map(s => s.session_id)).toEqual(['alice-session']);
       expect(aliceOnly.data[0]?.created_by_subject.subject_id).toBe('alice');
@@ -1388,6 +1508,8 @@ export function runStoreContractSuite<
         end_timestamp: undefined,
         source_type: undefined,
         source_id: undefined,
+        folder_id: undefined,
+        no_folder: false,
       });
       expect(aliceOrManaged.data.map(s => s.session_id)).toEqual(['alice-session', 'managed-session']);
 
@@ -1406,6 +1528,8 @@ export function runStoreContractSuite<
         end_timestamp: undefined,
         source_type: undefined,
         source_id: undefined,
+        folder_id: undefined,
+        no_folder: false,
       });
       expect(managedAgentOnly.data.map(s => s.session_id)).toEqual(['managed-session']);
 
@@ -1424,6 +1548,8 @@ export function runStoreContractSuite<
         end_timestamp: undefined,
         source_type: undefined,
         source_id: undefined,
+        folder_id: undefined,
+        no_folder: false,
       });
       expect(unmatched.data).toEqual([]);
     });
@@ -1481,6 +1607,8 @@ export function runStoreContractSuite<
         end_timestamp: undefined,
         source_type: 'schedule',
         source_id: undefined,
+        folder_id: undefined,
+        no_folder: false,
       });
       expect(byType.data.map(s => s.session_id).sort()).toEqual(['from-other-schedule', 'from-schedule']);
 
@@ -1496,6 +1624,8 @@ export function runStoreContractSuite<
         end_timestamp: undefined,
         source_type: 'schedule',
         source_id: 'sched-1',
+        folder_id: undefined,
+        no_folder: false,
       });
       expect(bySourceId.data.map(s => s.session_id)).toEqual(['from-schedule']);
       expect(bySourceId.data[0]?.source).toEqual(scheduleSource);
@@ -1512,8 +1642,171 @@ export function runStoreContractSuite<
         end_timestamp: undefined,
         source_type: 'schedule',
         source_id: 'missing-sched',
+        folder_id: undefined,
+        no_folder: false,
       });
       expect(unmatched.data).toEqual([]);
+    });
+
+    it('filters listSessions by folder_id, newest first, with keyset paging inside the folder', async () => {
+      const store = createStore();
+      await store.createSessionFolder({
+        tenant_id: tenant,
+        folder_id: 'folder-1',
+        created_by: 'user-1',
+        name: 'Work',
+      });
+      await store.createSessionFolder({
+        tenant_id: tenant,
+        folder_id: 'folder-2',
+        created_by: 'user-1',
+        name: 'Personal',
+      });
+      const seedFiled = async (sessionId: string, folderId: string) => {
+        await store.createSession({
+          tenant_id: tenant,
+          session_id: sessionId,
+          created_by_subject: { subject_id: 'user-1', subject_type: 'user', subject_display_name: 'user-1' },
+          agent: { type: 'inline', spec: makeAgentSpec() },
+          custom: null,
+          metadata: {},
+          external_id: null,
+          source: null,
+        });
+        await new Promise(r => setTimeout(r, 2));
+        await store.setSessionFolder({
+          tenant_id: tenant,
+          session_id: sessionId,
+          created_by: 'user-1',
+          folder_id: folderId,
+        });
+      };
+      await seedFiled('filed-1', 'folder-1');
+      await seedFiled('filed-2', 'folder-1');
+      await seedFiled('filed-3', 'folder-1');
+      await seedFiled('other-folder', 'folder-2');
+      await store.createSession({
+        tenant_id: tenant,
+        session_id: 'unfiled',
+        created_by_subject: { subject_id: 'user-1', subject_type: 'user', subject_display_name: 'user-1' },
+        agent: { type: 'inline', spec: makeAgentSpec() },
+        custom: null,
+        metadata: {},
+        external_id: null,
+        source: null,
+      });
+
+      const base = {
+        agent_id: undefined,
+        created_by_or_agent_ids: undefined,
+        metadata: undefined,
+        tenant_id: tenant,
+        order: undefined,
+        start_timestamp: undefined,
+        end_timestamp: undefined,
+        source_type: undefined,
+        source_id: undefined,
+        no_folder: false,
+      };
+
+      const all = await store.listSessions({ ...base, folder_id: 'folder-1', limit: 10, page_token: undefined });
+      expect(all.data.map(s => s.session_id)).toEqual(['filed-3', 'filed-2', 'filed-1']);
+
+      const page1 = await store.listSessions({ ...base, folder_id: 'folder-1', limit: 2, page_token: undefined });
+      expect(page1.data.map(s => s.session_id)).toEqual(['filed-3', 'filed-2']);
+      expect(page1.pagination.next_page_token).toBeDefined();
+      const page2 = await store.listSessions({
+        ...base,
+        folder_id: 'folder-1',
+        limit: 2,
+        page_token: page1.pagination.next_page_token,
+      });
+      expect(page2.data.map(s => s.session_id)).toEqual(['filed-1']);
+
+      const other = await store.listSessions({ ...base, folder_id: 'folder-2', limit: 10, page_token: undefined });
+      expect(other.data.map(s => s.session_id)).toEqual(['other-folder']);
+
+      const missing = await store.listSessions({
+        ...base,
+        folder_id: 'no-such-folder',
+        limit: 10,
+        page_token: undefined,
+      });
+      expect(missing.data).toEqual([]);
+    });
+
+    it('filters listSessions to sessions with no folder when no_folder is set, with caller scoping and keyset paging', async () => {
+      const store = createStore();
+      await store.createSessionFolder({
+        tenant_id: tenant,
+        folder_id: 'folder-1',
+        created_by: 'user-1',
+        name: 'Work',
+      });
+      const seed = async (sessionId: string, createdBy: string, folderId: string | null) => {
+        await store.createSession({
+          tenant_id: tenant,
+          session_id: sessionId,
+          created_by_subject: { subject_id: createdBy, subject_type: 'user', subject_display_name: createdBy },
+          agent: { type: 'inline', spec: makeAgentSpec() },
+          custom: null,
+          metadata: {},
+          external_id: null,
+          source: null,
+        });
+        await new Promise(r => setTimeout(r, 2));
+        if (folderId !== null) {
+          await store.setSessionFolder({
+            tenant_id: tenant,
+            session_id: sessionId,
+            created_by: createdBy,
+            folder_id: folderId,
+          });
+        }
+      };
+      await seed('filed-1', 'user-1', 'folder-1');
+      await seed('loose-1', 'user-1', null);
+      await seed('loose-2', 'user-1', null);
+      await seed('loose-3', 'user-1', null);
+      await seed('other-loose', 'user-2', null);
+
+      const base = {
+        agent_id: undefined,
+        created_by_or_agent_ids: undefined,
+        metadata: undefined,
+        tenant_id: tenant,
+        order: undefined,
+        start_timestamp: undefined,
+        end_timestamp: undefined,
+        source_type: undefined,
+        source_id: undefined,
+        folder_id: undefined,
+      };
+
+      const unscoped = await store.listSessions({ ...base, no_folder: true, limit: 10, page_token: undefined });
+      expect(unscoped.data.map(s => s.session_id)).toEqual(['other-loose', 'loose-3', 'loose-2', 'loose-1']);
+      expect(unscoped.data.every(s => s.folder_id === null)).toBe(true);
+
+      const scopedInput = {
+        ...base,
+        no_folder: true,
+        created_by_or_agent_ids: { created_by_subject_id: 'user-1', agent_ids: [] },
+      };
+      const scoped = await store.listSessions({ ...scopedInput, limit: 10, page_token: undefined });
+      expect(scoped.data.map(s => s.session_id)).toEqual(['loose-3', 'loose-2', 'loose-1']);
+
+      const page1 = await store.listSessions({ ...scopedInput, limit: 2, page_token: undefined });
+      expect(page1.data.map(s => s.session_id)).toEqual(['loose-3', 'loose-2']);
+      expect(page1.pagination.next_page_token).toBeDefined();
+      const page2 = await store.listSessions({
+        ...scopedInput,
+        limit: 2,
+        page_token: page1.pagination.next_page_token,
+      });
+      expect(page2.data.map(s => s.session_id)).toEqual(['loose-1']);
+
+      const off = await store.listSessions({ ...base, no_folder: false, limit: 10, page_token: undefined });
+      expect(off.data.map(s => s.session_id)).toEqual(['other-loose', 'loose-3', 'loose-2', 'loose-1', 'filed-1']);
     });
   });
 
@@ -1996,6 +2289,8 @@ export function runStoreContractSuite<
       const secondMemo = toolCallMemoSnapshot({
         side_effect_attempts: [{ key: '["mcp","write"]', count: 2 }],
         clarification_answered: true,
+        steps_by_thread: [{ thread_id: MAIN_THREAD_ID, steps: 3 }],
+        progress_refunds_by_thread: [{ thread_id: MAIN_THREAD_ID, refunds: 2 }],
         // Keyed by the full call signature, not just the tool name; see
         // ToolCallMemoSnapshot.pending_identical_call_nudges. Two argument variants of the
         // same tool round-trip as distinct pending entries.
@@ -2165,6 +2460,29 @@ export function runStoreContractSuite<
       expect(mustGet(session).title).toBe('First title');
     });
 
+    it('a first-message title is replaced only by a rename, and the record tracks no title source', async () => {
+      const store = createStore();
+      await seedSession(store);
+      await store.createTurn(
+        makeCreateTurnInput({ sessionId, turnId: 'turn-1', update_session_title_if_not_exist: 'Plan my week' }),
+      );
+      await finishTurn(store, 'turn-1');
+      const titled = mustGet(await store.getSession({ tenant_id: tenant, session_id: sessionId }));
+      expect(titled.title).toBe('Plan my week');
+      expect(titled).not.toHaveProperty('title_source');
+
+      await store.updateSession({
+        tenant_id: tenant,
+        session_id: sessionId,
+        agent: undefined,
+        title: 'Renamed by me',
+        metadata: undefined,
+      });
+      const renamed = mustGet(await store.getSession({ tenant_id: tenant, session_id: sessionId }));
+      expect(renamed.title).toBe('Renamed by me');
+      expect(renamed).not.toHaveProperty('title_source');
+    });
+
     it('fork from any existing turn succeeds and advances tip', async () => {
       const store = createStore();
       await seedSession(store);
@@ -2173,6 +2491,7 @@ export function runStoreContractSuite<
       await store.createTurn(
         makeCreateTurnInput({ sessionId, turnId: 'turn-2', previousTurnId: 'turn-1', firstTurnId: 'turn-1' }),
       );
+      await finishTurn(store, 'turn-2');
       // Fork from turn-1 (not the tip).
       await store.createTurn(
         makeCreateTurnInput({ sessionId, turnId: 'turn-fork', previousTurnId: 'turn-1', firstTurnId: 'turn-1' }),
@@ -2185,12 +2504,56 @@ export function runStoreContractSuite<
       const store = createStore();
       await seedSession(store);
       await store.createTurn(makeCreateTurnInput({ sessionId, turnId: 'turn-1' }));
+      await finishTurn(store, 'turn-1');
       await store.createTurn(makeCreateTurnInput({ sessionId, turnId: 'turn-root-2' }));
       const session = await store.getSession({ tenant_id: tenant, session_id: sessionId });
       expect(mustGet(session).last_turn_id).toBe('turn-root-2');
     });
 
-    it('concurrent createTurn forking the same tip: both succeed with isolated context', async () => {
+    it('rejects a new root turn while the tip is still running', async () => {
+      const store = createStore();
+      await seedSession(store);
+      await store.createTurn(makeCreateTurnInput({ sessionId, turnId: 'turn-1' }));
+      await expect(store.createTurn(makeCreateTurnInput({ sessionId, turnId: 'turn-root-2' }))).rejects.toMatchObject({
+        name: 'PreviousTurnRunningError',
+        previous_turn_id: 'turn-1',
+      });
+      const session = await store.getSession({ tenant_id: tenant, session_id: sessionId });
+      expect(mustGet(session).last_turn_id).toBe('turn-1');
+    });
+
+    it('concurrent first turns on a new chat: only the first commits', async () => {
+      const store = createStore();
+      await seedSession(store);
+      const results = await Promise.allSettled([
+        store.createTurn(makeCreateTurnInput({ sessionId, turnId: 'turn-a' })),
+        store.createTurn(makeCreateTurnInput({ sessionId, turnId: 'turn-b' })),
+      ]);
+      expect(results.map(r => r.status).sort()).toEqual(['fulfilled', 'rejected']);
+      const rejected = results.find(r => r.status === 'rejected');
+      expect(rejected?.reason).toBeInstanceOf(PreviousTurnRunningError);
+      const turns = await store.listTurns({ session_id: sessionId, limit: 10, page_token: undefined });
+      expect(turns.data).toHaveLength(1);
+    });
+
+    it('rejects a fork while the tip is a different running turn', async () => {
+      const store = createStore();
+      await seedSession(store);
+      await store.createTurn(makeCreateTurnInput({ sessionId, turnId: 'turn-1' }));
+      await finishTurn(store, 'turn-1');
+      await store.createTurn(
+        makeCreateTurnInput({ sessionId, turnId: 'turn-2', previousTurnId: 'turn-1', firstTurnId: 'turn-1' }),
+      );
+      await expect(
+        store.createTurn(
+          makeCreateTurnInput({ sessionId, turnId: 'turn-fork', previousTurnId: 'turn-1', firstTurnId: 'turn-1' }),
+        ),
+      ).rejects.toMatchObject({ name: 'PreviousTurnRunningError', previous_turn_id: 'turn-2' });
+      const session = await store.getSession({ tenant_id: tenant, session_id: sessionId });
+      expect(mustGet(session).last_turn_id).toBe('turn-2');
+    });
+
+    it('concurrent createTurn forking the same tip: only the first commits', async () => {
       const store = createStore();
       await seedSession(store);
       await store.createTurn(
@@ -2239,20 +2602,24 @@ export function runStoreContractSuite<
           }),
         ),
       ]);
-      expect(results.every(r => r.status === 'fulfilled')).toBe(true);
+      expect(results.map(r => r.status).sort()).toEqual(['fulfilled', 'rejected']);
+      const rejected = results.find(r => r.status === 'rejected');
+      expect(rejected?.reason).toBeInstanceOf(PreviousTurnRunningError);
       const session = await store.getSession({ tenant_id: tenant, session_id: sessionId });
-      expect(['turn-a', 'turn-b']).toContain(mustGet(session).last_turn_id);
+      const winner = mustGet(mustGet(session).last_turn_id);
+      expect(['turn-a', 'turn-b']).toContain(winner);
       const turns = await store.listTurns({
         session_id: sessionId,
         limit: 10,
         page_token: undefined,
       });
-      expect(turns.data.map(t => t.turn_id).sort()).toEqual(['tip', 'turn-a', 'turn-b']);
+      expect(turns.data.map(t => t.turn_id).sort()).toEqual(['tip', winner].sort());
 
-      const turnA = await store.getTurn({ session_id: sessionId, turn_id: 'turn-a' });
-      const turnB = await store.getTurn({ session_id: sessionId, turn_id: 'turn-b' });
-      expect(contextContents(turnA?.snapshot.threads[MAIN_THREAD_ID]?.context)).toEqual(['shared', 'a-only']);
-      expect(contextContents(turnB?.snapshot.threads[MAIN_THREAD_ID]?.context)).toEqual(['shared', 'b-only']);
+      const committed = await store.getTurn({ session_id: sessionId, turn_id: winner });
+      expect(contextContents(committed?.snapshot.threads[MAIN_THREAD_ID]?.context)).toEqual([
+        'shared',
+        winner === 'turn-a' ? 'a-only' : 'b-only',
+      ]);
     });
 
     it('rejects createTurn when previous turn is still running', async () => {
@@ -2611,6 +2978,48 @@ export function runStoreContractSuite<
         order: undefined,
       });
       expect(data.filter(event => event.type === EventType.TURN_DONE)).toHaveLength(0);
+    });
+
+    it('keeps steps and their events appended before the freeze', async () => {
+      const store = createStore();
+      await seedSession(store);
+      await store.createTurn(makeCreateTurnInput({ sessionId, turnId: 'turn-steps' }));
+      const keys = { session_id: sessionId, turn_id: 'turn-steps' };
+      const step = createToolResponseV2({
+        id: 'step-result',
+        thread_id: MAIN_THREAD_ID,
+        tool_call_id: 'step-call',
+        created_at: new Date().toISOString(),
+        raw_content: JSON.stringify({ ok: true }),
+        model_content: null,
+        screen: null,
+        disposition: 'executed_ok',
+        remediation: undefined,
+        admission_provenance: { source: 'user_approval', decision: 'allow', scope: 'once' },
+        memoized: false,
+        repeat_count: 1,
+      }).event;
+      await store.appendToThreadContext({
+        ...keys,
+        thread_id: MAIN_THREAD_ID,
+        context: [userMessage('step ran')],
+        current_context_usage: null,
+        completion: null,
+        tool_call_memo: undefined,
+        task_state: undefined,
+      });
+      await store.appendToEvents({ ...keys, events: [step] });
+
+      await store.freezeAndGetTurn({
+        ...keys,
+        turn_done_event: makeTurnDoneEvent(makeCancelledTurnState(CancellationReason.CancelledForNextTurn)),
+      });
+
+      const record = mustGet(await store.getTurn(keys));
+      expect(record.state.status).toBe('cancelled');
+      expect(contextContents(record.snapshot.threads[MAIN_THREAD_ID]?.context)).toContain('step ran');
+      const { data } = await store.listTurnEvents({ ...keys, limit: 10, page_token: undefined, order: undefined });
+      expect(data.map(event => event.id)).toContain('step-result');
     });
 
     it('cancels a running turn, persists turn.done, and fences all turn-scoped writes', async () => {
@@ -3643,10 +4052,23 @@ export function runStoreContractSuite<
     it('recovers only explicitly selected owners with expired leases', async () => {
       const store = createStore();
       await seedSession(store);
+      // A chat runs one turn at a time, so the second running command lives in another chat.
+      const otherSessionId = `${sessionId}-other`;
+      await store.createSession({
+        tenant_id: tenant,
+        session_id: otherSessionId,
+        created_by_subject: { subject_id: createdBy, subject_type: 'user', subject_display_name: createdBy },
+        agent: { type: 'inline', spec: makeAgentSpec() },
+        custom: null,
+        metadata: {},
+        external_id: null,
+        source: null,
+      });
+      const sessionOf = (turnId: string): string => (turnId.endsWith('replica-a') ? sessionId : otherSessionId);
       for (const turnId of ['turn-a.replica-a', 'turn-b.replica-b']) {
-        await store.createTurn(makeCreateTurnInput({ sessionId, turnId }));
+        await store.createTurn(makeCreateTurnInput({ sessionId: sessionOf(turnId), turnId }));
         await store.appendCommandExecutionStarted({
-          session_id: sessionId,
+          session_id: sessionOf(turnId),
           turn_id: turnId,
           ownership: commandOwnership({
             leaseId: `lease-${turnId}`,
@@ -3691,14 +4113,14 @@ export function runStoreContractSuite<
       ).resolves.toMatchObject({ status: 'running', disposition: null });
       await expect(
         store.getCommandExecution({
-          session_id: sessionId,
+          session_id: otherSessionId,
           turn_id: 'turn-b.replica-b',
           thread_id: MAIN_THREAD_ID,
           tool_call_id: 'call-turn-b.replica-b',
         }),
       ).resolves.toMatchObject({ status: 'terminal', disposition: 'outcome_unknown' });
       const recoveredEvents = await store.listTurnEvents({
-        session_id: sessionId,
+        session_id: otherSessionId,
         turn_id: 'turn-b.replica-b',
         limit: 10,
         page_token: undefined,
@@ -3785,6 +4207,8 @@ export function runStoreContractSuite<
         expect(
           events.data.filter(event => event.type === EventType.TOOL_RESPONSE_V2 && event.tool_call_id === toolCallId),
         ).toHaveLength(recovered);
+        // The chat takes its next turn only once this one has ended.
+        await finishTurn(store, turnId);
       }
     });
 
@@ -3849,6 +4273,75 @@ export function runStoreContractSuite<
         ).toEqual([expect.objectContaining({ disposition: 'outcome_unknown' })]);
       },
     );
+  });
+
+  describe('approval dismissals', () => {
+    it('records a dismissal once per thread and tool call, keeping the first record', async () => {
+      const store = createStore();
+      await seedSession(store);
+
+      await expect(store.listApprovalDismissals({ session_id: sessionId })).resolves.toEqual([]);
+
+      await store.recordApprovalDismissal({
+        session_id: sessionId,
+        thread_id: 'thread-child',
+        tool_call_id: 'call-send',
+        dismissed_at: '2026-10-22T10:00:00.000Z',
+      });
+      await store.recordApprovalDismissal({
+        session_id: sessionId,
+        thread_id: 'thread-child',
+        tool_call_id: 'call-send',
+        dismissed_at: '2026-10-22T11:00:00.000Z',
+      });
+
+      await expect(store.listApprovalDismissals({ session_id: sessionId })).resolves.toEqual([
+        {
+          thread_id: 'thread-child',
+          tool_call_id: 'call-send',
+          dismissed_at: '2026-10-22T10:00:00.000Z',
+        },
+      ]);
+    });
+
+    it('keeps dismissals scoped to their own session', async () => {
+      const store = createStore();
+      await seedSession(store);
+      await store.createSession({
+        tenant_id: tenant,
+        session_id: 'other-session',
+        created_by_subject: { subject_id: 'user-1', subject_type: 'user', subject_display_name: 'user-1' },
+        agent: { type: 'inline', spec: makeAgentSpec() },
+        custom: null,
+        metadata: {},
+        external_id: null,
+        source: null,
+      });
+
+      await store.recordApprovalDismissal({
+        session_id: sessionId,
+        thread_id: 'thread-child',
+        tool_call_id: 'call-send',
+        dismissed_at: '2026-10-22T10:00:00.000Z',
+      });
+
+      await expect(store.listApprovalDismissals({ session_id: 'other-session' })).resolves.toEqual([]);
+    });
+
+    it("drops a session's dismissals when the session is deleted", async () => {
+      const store = createStore();
+      await seedSession(store);
+      await store.recordApprovalDismissal({
+        session_id: sessionId,
+        thread_id: 'thread-child',
+        tool_call_id: 'call-send',
+        dismissed_at: '2026-10-22T10:00:00.000Z',
+      });
+
+      await store.deleteSession({ tenant_id: tenant, session_id: sessionId });
+
+      await expect(store.listApprovalDismissals({ session_id: sessionId })).resolves.toEqual([]);
+    });
   });
 
   describe('pagination', () => {
@@ -4005,16 +4498,20 @@ export function runStoreContractSuite<
       await store.createTurn(
         makeCreateTurnInput({ sessionId, turnId: 't2-sibling', previousTurnId: 't1', firstTurnId: 't1' }),
       );
+      await store.appendToEvents({
+        session_id: sessionId,
+        turn_id: 't2-sibling',
+        events: [makeTurnCreatedEvent('t2-sibling')],
+      });
+      await finishTurn(store, 't2-sibling');
       await store.createTurn(
         makeCreateTurnInput({ sessionId, turnId: 't2-anchor', previousTurnId: 't1', firstTurnId: 't1' }),
       );
-      for (const turnId of ['t2-sibling', 't2-anchor']) {
-        await store.appendToEvents({
-          session_id: sessionId,
-          turn_id: turnId,
-          events: [makeTurnCreatedEvent(turnId)],
-        });
-      }
+      await store.appendToEvents({
+        session_id: sessionId,
+        turn_id: 't2-anchor',
+        events: [makeTurnCreatedEvent('t2-anchor')],
+      });
       const { data } = await store.listSessionEvents({
         session_id: sessionId,
         limit: 10,
@@ -4072,6 +4569,7 @@ export function runStoreContractSuite<
         event_id: mustGet(firstPage.data[0]).event.id,
       });
 
+      await finishTurn(store, 't2');
       await store.createTurn(
         makeCreateTurnInput({ sessionId, turnId: 't2-new-active', previousTurnId: 't1', firstTurnId: 't1' }),
       );

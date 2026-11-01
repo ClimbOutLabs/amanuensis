@@ -100,6 +100,7 @@ interface SlotHealth {
  */
 export class SlotDriver implements IsolationDriver {
   readonly kind = 'slots' as const;
+  readonly packageGatewayCapable = true;
 
   private readonly clients: SlotClient[];
   private readonly logger: Logger;
@@ -219,6 +220,7 @@ export class SlotDriver implements IsolationDriver {
       files_in: filesIn,
       timeout_ms: Math.max(SLOT_MIN_AGENT_TIMEOUT_MS, params.timeoutMs - SLOT_AGENT_TIMEOUT_MARGIN_MS),
       disk_mb: params.diskMb,
+      ...(params.packageMirrorToken === undefined ? {} : { package_mirror_token: params.packageMirrorToken }),
     };
     const deadline = this.now() + params.timeoutMs + QUEUE_GRACE_MS;
     let refusal: string | undefined;

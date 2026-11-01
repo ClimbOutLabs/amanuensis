@@ -1,3 +1,4 @@
+import { HELP_AREA_IDS, type HelpAreaId } from '@truefoundry/trueforge-core/schemas/personalizationHelpAreas';
 import type { TrueForgeApi } from '@truefoundry/trueforge-sdk';
 import type { PersonalizationApi, PersonalizationProfile } from '@truefoundry/trueforge-ui';
 
@@ -8,6 +9,10 @@ interface ProfileResponse {
 
 function isNullableString(value: unknown): value is string | null {
   return value === null || typeof value === 'string';
+}
+
+function isHelpAreaId(value: unknown): value is HelpAreaId {
+  return HELP_AREA_IDS.some(id => id === value);
 }
 
 function parseProfile(data: unknown): PersonalizationProfile | null {
@@ -21,6 +26,8 @@ function parseProfile(data: unknown): PersonalizationProfile | null {
   const profile = data as Record<string, unknown>;
   // Absent on responses from a server predating the field; read as null.
   const learnedProfile = profile.learned_profile ?? null;
+  const userName = profile.user_name ?? null;
+  const addressAs = profile.address_as ?? null;
   // A server predating the toggle sends no switch at all. Its absence is carried through rather
   // than read as off: the two are indistinguishable once a value is invented, and the write
   // request is strict, so sending an invented switch back would make every save fail.
@@ -29,11 +36,15 @@ function parseProfile(data: unknown): PersonalizationProfile | null {
     !isNullableString(profile.assistant_name) ||
     !isNullableString(profile.assistant_identity) ||
     !isNullableString(profile.voice_guidance) ||
+    !isNullableString(userName) ||
+    !isNullableString(addressAs) ||
     !isNullableString(profile.user_profile) ||
     !isNullableString(learnedProfile) ||
     (learningEnabled !== undefined && typeof learningEnabled !== 'boolean') ||
     !Array.isArray(profile.pinned_preferences) ||
-    !profile.pinned_preferences.every(item => typeof item === 'string')
+    !profile.pinned_preferences.every(item => typeof item === 'string') ||
+    !Array.isArray(profile.help_areas) ||
+    !profile.help_areas.every(isHelpAreaId)
   ) {
     throw new Error('The personalization response was invalid.');
   }
@@ -42,8 +53,11 @@ function parseProfile(data: unknown): PersonalizationProfile | null {
     assistant_name: profile.assistant_name,
     assistant_identity: profile.assistant_identity,
     voice_guidance: profile.voice_guidance,
+    user_name: userName,
+    address_as: addressAs,
     user_profile: profile.user_profile,
     pinned_preferences: profile.pinned_preferences,
+    help_areas: profile.help_areas,
     learned_profile: learnedProfile,
     ...(learningEnabled === undefined ? {} : { learning_enabled: learningEnabled }),
   };

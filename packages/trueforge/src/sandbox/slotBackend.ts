@@ -3,12 +3,19 @@ import {
   extractErrorLogFields,
   GitBridge,
   rawSandboxId,
+  slotMirrorSocketPathsIn,
   SlotSandboxProvider,
+  slotSkillNetworkSocketPathsIn,
   slotSocketPathsIn,
+  type AuditLogWriter,
   type SandboxBuild,
 } from '@truefoundry/trueforge-core/core';
 import type { Logger } from 'winston';
 import configuration from '../config';
+import { PackageMirrorGateway } from './mirrors/packageMirrorGateway';
+import { packageMirrorTokens } from './mirrors/packageMirrorTokens';
+import { SkillNetworkGateway } from './skillnet/skillNetworkGateway';
+import { skillNetworkTokens } from './skillnet/skillNetworkTokens';
 
 /** Capabilities and the status page poll this; one probe per window keeps them cheap. */
 const STATUS_CACHE_MS = 10_000;
@@ -43,6 +50,81 @@ export function sandboxDisabledByInstaller(): boolean {
 /** Control socket of each slot agent, `<dir>/<n>/agent.sock` for n = 1..SANDBOX_SLOTS. */
 export function slotSocketPaths(): string[] {
   return slotSocketPathsIn({ dir: configuration.SANDBOX_SLOTS_DIR, count: configuration.SANDBOX_SLOTS });
+}
+
+/** Package mirror socket of each slot, `<dir>/<n>/mirror/mirror.sock`: where the slot agent reaches the mirrors. */
+export function slotMirrorSocketPaths(): string[] {
+  return slotMirrorSocketPathsIn({ dir: configuration.SANDBOX_SLOTS_DIR, count: configuration.SANDBOX_SLOTS });
+}
+
+/** Skill network socket of each slot, `<dir>/<n>/mirror/skillnet.sock`: where the slot agent reaches the skill network gateway. */
+export function slotSkillNetworkSocketPaths(): string[] {
+  return slotSkillNetworkSocketPathsIn({
+    dir: configuration.SANDBOX_SLOTS_DIR,
+    count: configuration.SANDBOX_SLOTS,
+  });
+}
+
+let mirrorGatewayStarted = false;
+
+/**
+ * Starts the download-only package mirrors on their per-slot sockets. Best effort by design: when
+ * the sockets cannot be opened, package downloads stay unavailable and every other sandbox call
+ * keeps working offline, so a mirror problem never takes the sandbox down.
+ */
+export async function startPackageMirrorGateway({ logger }: { logger: Logger }): Promise<void> {
+  if (mirrorGatewayStarted || !slotsBackendEnabled()) {
+    return;
+  }
+  mirrorGatewayStarted = true;
+  try {
+    const gateway = new PackageMirrorGateway({
+      registry: packageMirrorTokens,
+      cacheDir: configuration.SANDBOX_MIRROR_CACHE_DIR,
+      logger: logger.child({ module: 'package-mirrors' }),
+      maxDownloadBytes: configuration.SANDBOX_MIRROR_DOWNLOAD_MAX_BYTES,
+      maxCacheBytes: configuration.SANDBOX_MIRROR_CACHE_MAX_BYTES,
+    });
+    await gateway.listenOnSockets(slotMirrorSocketPaths());
+    logger.info('Package mirrors are listening for the sandbox slots');
+  } catch (error) {
+    logger.warn('Package mirrors could not start; sandbox package downloads stay off', {
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
+
+let skillNetworkGatewayStarted = false;
+
+/**
+ * Starts the skill network gateway on its per-slot sockets. Best effort, like the mirrors: when
+ * the sockets cannot be opened, approved skill sites stay unreachable and every other sandbox
+ * call keeps working, so a gateway problem never takes the sandbox down.
+ */
+export async function startSkillNetworkGateway({
+  logger,
+  audit,
+}: {
+  logger: Logger;
+  audit?: AuditLogWriter | null | undefined;
+}): Promise<void> {
+  if (skillNetworkGatewayStarted || !slotsBackendEnabled()) {
+    return;
+  }
+  skillNetworkGatewayStarted = true;
+  try {
+    const gateway = new SkillNetworkGateway({
+      registry: skillNetworkTokens,
+      logger: logger.child({ module: 'skill-network' }),
+      audit: audit ?? null,
+    });
+    await gateway.listenOnSockets(slotSkillNetworkSocketPaths());
+    logger.info('Skill network gateway is listening for the sandbox slots');
+  } catch (error) {
+    logger.warn('Skill network gateway could not start; approved skill sites stay unreachable', {
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
 }
 
 export function createSlotSandboxProvider({ logger }: { logger: Logger }): SlotSandboxProvider {

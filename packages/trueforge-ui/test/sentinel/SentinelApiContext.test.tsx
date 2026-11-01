@@ -9,7 +9,13 @@ import {
 } from '@/sentinel/SentinelApiContext.js';
 import type { SentinelApi, SentinelUserSettings } from '@/sentinel/types.js';
 
-const INITIAL: SentinelUserSettings = { offline_mode: false, tier2_auto_allow: [], search_without_asking: true };
+const INITIAL: SentinelUserSettings = {
+  offline_mode: false,
+  tier2_auto_allow: [],
+  search_without_asking: true,
+  maps_without_asking: false,
+  sandbox_without_asking: true,
+};
 
 function Capture({ into }: { into: { current: SentinelApiState | null } }) {
   into.current = useOptionalSentinelApiState();
@@ -21,6 +27,10 @@ function mountProvider(save: (patch: Partial<SentinelUserSettings>, call: number
   const state: { stored: SentinelUserSettings; saves: number } = { stored: INITIAL, saves: 0 };
   const api: SentinelApi = {
     listAuditEntries: vi.fn(async () => []),
+    listBriefItemCompletions: async () => [],
+    markBriefItemDone: async () => undefined,
+    unmarkBriefItemDone: async () => undefined,
+    listUserAuditEntries: vi.fn(async () => ({ entries: [] })),
     getUserSettings: vi.fn(async () => state.stored),
     updateUserSettings: vi.fn(async (patch: Partial<SentinelUserSettings>) => {
       state.saves += 1;
@@ -100,12 +110,16 @@ describe('SentinelApiProvider.updateSettings', () => {
       offline_mode: false,
       tier2_auto_allow: ['file_write'],
       search_without_asking: true,
+      maps_without_asking: false,
+      sandbox_without_asking: true,
     });
     await waitFor(() => {
       expect(sentinel().settings).toEqual({
         offline_mode: false,
         tier2_auto_allow: ['file_write'],
         search_without_asking: true,
+        maps_without_asking: false,
+        sandbox_without_asking: true,
       });
     });
     expect(api.updateUserSettings).toHaveBeenCalledTimes(2);
@@ -114,6 +128,12 @@ describe('SentinelApiProvider.updateSettings', () => {
     await act(async () => {
       await sentinel().updateSettings(current => ({ offline_mode: !current.offline_mode }));
     });
-    expect(state.stored).toEqual({ offline_mode: true, tier2_auto_allow: ['file_write'], search_without_asking: true });
+    expect(state.stored).toEqual({
+      offline_mode: true,
+      tier2_auto_allow: ['file_write'],
+      search_without_asking: true,
+      maps_without_asking: false,
+      sandbox_without_asking: true,
+    });
   });
 });

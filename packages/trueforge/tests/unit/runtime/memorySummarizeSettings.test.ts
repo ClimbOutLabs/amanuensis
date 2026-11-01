@@ -18,6 +18,7 @@ import {
   resolveMemorySummarizeEnabled,
   resolveTurnSummarizeContext,
 } from '../../../src/runtime/memorySummarizeSettings';
+import { discardedModelUsage } from '../../fixtures/discardedModelUsage';
 import { uncappedTokenFactoryBudget } from '../../fixtures/uncappedTokenFactoryBudget';
 
 const silentLogger = createLogger({ silent: true });
@@ -85,6 +86,7 @@ function agentRecord(): AgentRecord {
     description: 'Test agent',
     manifest: AgentSpecSchema.parse({ model: { name: 'openai/gpt-4o' } }),
     external_id: null,
+    host_managed: false,
     created_by_subject: {
       subject_id: 'user-1',
       subject_type: 'user',
@@ -110,6 +112,7 @@ function storeWith(values: Map<string, GlobalSettingRecord>): IGlobalSettingsSto
     deleteSetting: async input => {
       values.delete(input.key);
     },
+    compareAndSetSetting: async () => false,
   };
 }
 
@@ -173,6 +176,7 @@ describe('readMemorySummarizeSetting', () => {
         throw new Error('db down');
       },
       deleteSetting: async () => {},
+      compareAndSetSetting: async () => false,
     };
     const setting = await readMemorySummarizeSetting({ globalSettingsStore: failing, logger: silentLogger });
     expect(setting.overridden).toBe(false);
@@ -248,6 +252,7 @@ describe('resolveTurnSummarizeContext', () => {
       tenantId: 'tenant-1',
       modelProviderStore: fakeModelProviderStore(),
       tokenFactoryBudget: uncappedTokenFactoryBudget,
+      modelUsage: discardedModelUsage,
       agentStore: overrides.agentStore ?? fakeAgentStore(),
       personaModelName: undefined,
       sessionAgent: overrides.sessionAgent ?? inlineAgent(),
@@ -272,6 +277,7 @@ describe('resolveTurnSummarizeContext', () => {
       modelProviderStore,
       summarizationModelFqn: 'openai/gpt-4o',
       tokenFactoryBudget: uncappedTokenFactoryBudget,
+      modelUsage: discardedModelUsage,
     });
     expect(logged(lines, 'Turn summarization is active for this turn')).toBe(true);
   });
@@ -300,22 +306,23 @@ describe('resolveTurnSummarizeContext', () => {
     expect(logged(lines, 'not markdown')).toBe(true);
   });
 
-  it('returns undefined and logs when no summarization model resolves', async () => {
+  it('still returns a context, without a model, when no summarization model resolves', async () => {
     const { logger, lines } = capturingLogger();
     const agentStore = fakeAgentStore();
     jest.mocked(agentStore.getAgent).mockResolvedValue(undefined);
 
     // Reference agent with no registry record and no persona override: the
-    // previously-silent path that stored verbatim while the toggle claimed on.
+    // previously-silent path that stored the raw exchange while the toggle claimed on.
     const context = await resolveTurnSummarizeContext({
       ...baseParams({ logger, agentStore, sessionAgent: referenceAgent() }),
     });
 
-    expect(context).toBeUndefined();
+    // A context with no model makes the retain path save nothing, never the raw exchange.
+    expect(context).toMatchObject({ tenantId: 'tenant-1', summarizationModelFqn: undefined });
     expect(logged(lines, 'no summarization model resolved')).toBe(true);
   });
 
-  it('returns undefined and logs when the model-FQN lookup throws', async () => {
+  it('still returns a context, without a model, when the model-FQN lookup throws', async () => {
     const { logger, lines } = capturingLogger();
     const agentStore = fakeAgentStore();
     jest.mocked(agentStore.getAgent).mockRejectedValue(new Error('db down'));
@@ -324,7 +331,7 @@ describe('resolveTurnSummarizeContext', () => {
       ...baseParams({ logger, agentStore, sessionAgent: referenceAgent() }),
     });
 
-    expect(context).toBeUndefined();
+    expect(context).toMatchObject({ tenantId: 'tenant-1', summarizationModelFqn: undefined });
     expect(logged(lines, 'model FQN did not resolve')).toBe(true);
   });
 
@@ -361,5 +368,42 @@ describe('resolveTurnSummarizeContext', () => {
 
     expect(context?.summarizationModelFqn).toBe('openai/gpt-4o');
     expect(jest.mocked(agentStore.getAgent)).toHaveBeenCalledTimes(1);
+  });
+
+  it("carries the person's name on the context when the caller supplies one", async () => {
+    const { logger } = capturingLogger();
+
+    const context = await resolveTurnSummarizeContext({
+      ...baseParams({ logger }),
+      personName: 'Priya Shah',
+    });
+
+    expect(context?.personName).toBe('Priya Shah');
+  });
+
+  it('trims a supplied name, and carries no name for a blank one', async () => {
+    const { logger } = capturingLogger();
+
+    const trimmed = await resolveTurnSummarizeContext({
+      ...baseParams({ logger }),
+      personName: '  Priya Shah  ',
+    });
+    expect(trimmed?.personName).toBe('Priya Shah');
+
+    const blank = await resolveTurnSummarizeContext({
+      ...baseParams({ logger }),
+      personName: '   ',
+    });
+    expect(blank?.summarizationModelFqn).toBe('openai/gpt-4o');
+    expect(blank?.personName).toBeUndefined();
+  });
+
+  it('carries no name when the caller supplies none', async () => {
+    const { logger } = capturingLogger();
+
+    const context = await resolveTurnSummarizeContext({ ...baseParams({ logger }) });
+
+    expect(context?.summarizationModelFqn).toBe('openai/gpt-4o');
+    expect(context?.personName).toBeUndefined();
   });
 });

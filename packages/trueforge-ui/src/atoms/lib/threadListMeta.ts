@@ -39,6 +39,78 @@ export function threadListIndicesByRecency({
     .map(row => row.index);
 }
 
+/** Chats whose title contains the query, ignoring case. A blank query keeps every chat. */
+export function filterChatsByTitle<T extends { title: string }>({
+  chats,
+  query,
+}: {
+  chats: readonly T[];
+  query: string;
+}): T[] {
+  const needle = query.trim().toLocaleLowerCase();
+  if (needle === '') return [...chats];
+  return chats.filter(chat => chat.title.toLocaleLowerCase().includes(needle));
+}
+
+/** Chats shown in one group before its "Show more" row, and how many more each press adds. */
+export const RECENT_CHATS_PAGE_SIZE = 5;
+
+/**
+ * Sorts the chats for the Chats column. A chat in a folder lives only in its folder; the rest split
+ * into Today (since local midnight) and Earlier. Folders come newest-use first, and folders with no
+ * chat keep the order they were given. Within a group chats keep the order they were given.
+ */
+export function groupRecentChats<T extends { time: number; folderId: string | undefined }>({
+  chats,
+  folderIds,
+  now,
+}: {
+  chats: readonly T[];
+  /** Folder ids in the order to show them when their newest use ties. */
+  folderIds: readonly string[];
+  now: Date;
+}): { folders: { folderId: string; chats: T[] }[]; today: T[]; earlier: T[] } {
+  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  const byFolder = new Map<string, T[]>();
+  const today: T[] = [];
+  const earlier: T[] = [];
+  for (const chat of chats) {
+    if (chat.folderId !== undefined) {
+      byFolder.set(chat.folderId, [...(byFolder.get(chat.folderId) ?? []), chat]);
+    } else if (chat.time >= startOfToday) {
+      today.push(chat);
+    } else {
+      earlier.push(chat);
+    }
+  }
+  const newestUse = (list: readonly T[]) =>
+    list.length === 0 ? Number.NEGATIVE_INFINITY : Math.max(...list.map(chat => chat.time));
+  const folderOrder = folderIds
+    .map((folderId, order) => ({ folderId, order, list: byFolder.get(folderId) ?? [] }))
+    .sort((a, b) => newestUse(b.list) - newestUse(a.list) || a.order - b.order);
+  return {
+    folders: folderOrder.map(({ folderId, list }) => ({ folderId, chats: list })),
+    today,
+    earlier,
+  };
+}
+
+/**
+ * The rows a group shows: its first `limit` chats, plus the open chat even when it falls past them,
+ * in their original order.
+ */
+export function visibleChats<T extends { key: string }>({
+  chats,
+  limit,
+  openKey,
+}: {
+  chats: readonly T[];
+  limit: number;
+  openKey: string | undefined;
+}): T[] {
+  return chats.filter((chat, position) => position < limit || chat.key === openKey);
+}
+
 export function readThreadAgentName(custom: unknown): string | undefined {
   if (custom == null || typeof custom !== 'object') return undefined;
   if (!('agentName' in custom)) return undefined;

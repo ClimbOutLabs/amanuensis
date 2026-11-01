@@ -15,6 +15,7 @@ import { STANDALONE_REQUEST_CONTEXT } from '../../../src/auth/identity';
 import { McpCatalog } from '../../../src/catalog/McpCatalog';
 import configuration from '../../../src/config';
 import type {
+  CompareAndSetGlobalSettingInput,
   GetGlobalSettingInput,
   GlobalSettingRecord,
   IGlobalSettingsStore,
@@ -60,11 +61,16 @@ class CountingGlobalSettingsStore implements IGlobalSettingsStore {
   async deleteSetting(input: GetGlobalSettingInput): Promise<void> {
     return this.inner.deleteSetting(input);
   }
+
+  compareAndSetSetting(input: CompareAndSetGlobalSettingInput): Promise<boolean> {
+    return this.inner.compareAndSetSetting(input);
+  }
 }
 
 describe('beginTurnExecution turn-summarization wiring', () => {
   const originalSummarize = configuration.MEMORY_SUMMARIZE;
   const originalBackend = configuration.MEMORY_BACKEND;
+  const originalNebiusKey = configuration.NEBIUS_API_KEY;
 
   beforeEach(() => {
     configuration.MEMORY_SUMMARIZE = false;
@@ -74,15 +80,16 @@ describe('beginTurnExecution turn-summarization wiring', () => {
   afterEach(() => {
     configuration.MEMORY_SUMMARIZE = originalSummarize;
     configuration.MEMORY_BACKEND = originalBackend;
+    configuration.NEBIUS_API_KEY = originalNebiusKey;
   });
 
-  async function beginTurnWithStore(store: CountingGlobalSettingsStore) {
+  async function beginTurnWithStore(store: CountingGlobalSettingsStore, modelName = 'test-provider/test-model') {
     const logger = createLogger({ silent: true });
     const db = createSqliteDb(':memory:');
     await migrateSqliteToLatest(db);
     const tokenStore = new SqliteOAuthTokenStore(db);
     const sessionStore = new SqliteSessionStore(db);
-    const agentSpec = AgentSpecSchema.parse({ model: { name: 'test-provider/test-model' } });
+    const agentSpec = AgentSpecSchema.parse({ model: { name: modelName } });
     await sessionStore.createSession({
       tenant_id: TENANT_ID,
       session_id: 's1',
@@ -133,7 +140,7 @@ describe('beginTurnExecution turn-summarization wiring', () => {
         previous_turn_id: undefined,
         userRef: STANDALONE_REQUEST_CONTEXT.subject.id,
         deps: {
-          mcpCatalog: McpCatalog.load(),
+          mcpCatalog: McpCatalog.loadShipped(),
           globalSettingsStore: store,
           tokenFactoryBudget: uncappedTokenFactoryBudget,
           sessionStore,
@@ -220,5 +227,14 @@ describe('beginTurnExecution turn-summarization wiring', () => {
 
     // The markdown-only gate is preserved: the experimental backend retains verbatim.
     expect(summarize).toBeUndefined();
+  });
+
+  it('summarizes with the main model when it is on Token Factory and the role is unset', async () => {
+    configuration.NEBIUS_API_KEY = 'sk-test-key';
+    const store = await storeWithOverride('true');
+
+    const { summarize } = await beginTurnWithStore(store, 'tokenfactory/nemotron-3-super-120b-a12b');
+
+    expect(summarize?.summarizationModelFqn).toBe('tokenfactory/nemotron-3-super-120b-a12b');
   });
 });

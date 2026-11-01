@@ -21,8 +21,22 @@ tls_leaf_dir() { printf '%s/leaf/%s' "$(tls_dir)" "$1"; }
 tls_trust_dir() { printf '%s/trust/%s' "$(tls_dir)" "$1"; }
 tls_image() { json_get "$PINS_FILE" caddy_image; }
 
-# An instance is served over https when its record says so and it has a port for it.
-tls_active() { [ "$(reg_get "$1" tls)" = local ] && [ -n "$(reg_get "$1" tls_port)" ]; }
+# The state volume, and the home it is mounted at inside the setup container, as installer/STATE.md
+# writes them down. On Windows the state lives in that volume, so a host folder the daemon could read
+# does not exist for the https folders; the compose file mounts them from inside the volume instead.
+STATE_VOLUME=aman_home
+VOLUME_HOME=/root/.amanuensis
+
+# True when this install's home is the state volume: the home is the container home the volume is
+# mounted at, and Docker has the volume. Every other home is a folder of the computer itself.
+tls_home_in_volume() {
+  [ "$AMAN_HOME" = "$VOLUME_HOME" ] || return 1
+  D volume inspect "$STATE_VOLUME" >/dev/null 2>&1
+}
+
+# Whether an instance is served over https is the one rule in shared.sh (serves_https); this is its installer
+# form, reading the record with reg_get.
+tls_active() { serves_https "$(reg_get "$1" tls)" "$(reg_get "$1" tls_port)" "$(reg_get "$1" origins)"; }
 
 # What a re-run wants for an instance opened on the network: the flag, else what it has, else https.
 tls_target() { # name; prints local or off
@@ -55,7 +69,7 @@ tls_node() { # app_image shell_command
 }
 
 # Every name any instance served over https is opened at: the authority may vouch only for these and for private
-# addresses and names.
+# addresses.
 tls_all_names() { # name of the instance being set up
   local other
   {
@@ -68,7 +82,7 @@ tls_all_names() { # name of the instance being set up
 
 # Makes the authority (once for this computer) and the certificate for the instance's addresses (again when they
 # change or it is close to its end). The authority is made again, with every device needing to trust it again, only
-# when it lacks a name that is now needed or has no limits at all (from an earlier version); TLS_AUTHORITY_REPLACED says
+# when it lacks a name that is now needed or has older limits (from an earlier version); TLS_AUTHORITY_REPLACED says
 # so for the closing lines, and every other instance gets a certificate under the new one. A failure is fatal because
 # the instance would be unreachable.
 TLS_AUTHORITY_REPLACED=0
@@ -99,8 +113,8 @@ tls_issue() { # name app_image
   esac
 }
 
-# An authority from before the limits were added has no record of the names it may vouch for; the next install replaces it.
-tls_authority_needs_replacing() { [ -f "$(tls_ca_dir)/root.crt" ] && [ ! -f "$(tls_ca_dir)/root.names" ]; }
+# An authority made before today's limits has no record of them (or an older one); the next install replaces it.
+tls_authority_needs_replacing() { [ -f "$(tls_ca_dir)/root.crt" ] && ! grep -q '"version":2' "$(tls_ca_dir)/root.names" 2>/dev/null; }
 
 # The fingerprint of the authority's certificate, in the form a device shows it.
 tls_fingerprint() { head -n 1 "$(tls_ca_dir)/root.fingerprint" 2>/dev/null || true; }
@@ -120,7 +134,7 @@ tls_publish_trust() { # name
     "UUID_CERTIFICATE=$(uuid_from_hex "${uuid:0:32}")" "UUID_PROFILE=$(uuid_from_hex "${uuid:32:32}")" |
     write_if_changed "$dir/aman.mobileconfig" 644 || true
   open_url=$(tls_open_url "$name")
-  render_template "$TEMPLATES_DIR/tls/trust.html.tpl" "OPEN_URL=$open_url" "FINGERPRINT=$(tls_fingerprint)" | write_if_changed "$dir/index.html" 644 || true
+  render_template "$TEMPLATES_DIR/tls/trust.html.tpl" "OPEN_URL=$open_url" | write_if_changed "$dir/index.html" 644 || true
 }
 
 # 32 hex digits as a UUID.
@@ -159,9 +173,9 @@ tls_image_ensure() {
   local image
   image=$(tls_image)
   docker_image_exists "$image" && return 0
-  step_begin "pull-tls" "Downloading the https front end"
-  D pull "$image" >"$STEP_LOG" 2>&1 || step_fail "The https front end could not be downloaded" "Check this computer's network access to registry-1.docker.io (install.sh --print-network lists every host), then run aman doctor tls --fix."
-  step_ok "The https front end is downloaded"
+  step_begin "pull-tls" "Downloading the https service"
+  D pull "$image" >"$STEP_LOG" 2>&1 || step_fail "The https service could not be downloaded" "Check that this computer can reach registry-1.docker.io, then run: aman doctor tls --fix"
+  step_ok "The https service is downloaded"
 }
 
 # Issues the certificate again for every instance served over https where it is close to its end or its addresses

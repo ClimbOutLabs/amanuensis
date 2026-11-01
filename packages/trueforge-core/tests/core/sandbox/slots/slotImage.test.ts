@@ -42,12 +42,32 @@ describe('the slot image and the server agree on what is deployed', () => {
     }
   });
 
-  test('the guest image installs python-docx and lxml only from hashed wheels', () => {
+  test('the guest image has the test runners and linters a coding session needs', () => {
+    const dockerfile = read('ops/sandbox-slot/Dockerfile');
+    const requirementsIn = read('ops/sandbox-slot/guest/requirements.in');
     const requirements = read('ops/sandbox-slot/guest/requirements.txt');
-    for (const name of ['python-docx', 'lxml']) {
-      expect(requirements).toMatch(new RegExp(`^${name}==\\S+ \\\\\\n\\s+--hash=sha256:`, 'm'));
+    const guestPackage = read('ops/sandbox-slot/guest/package.json');
+    const guestLock = read('ops/sandbox-slot/guest/package-lock.json');
+
+    // Python tools are named in requirements.in and pinned, with hashes, in the compiled lock.
+    for (const tool of ['pytest', 'ruff', 'mypy']) {
+      expect(requirementsIn).toMatch(new RegExp(`^${tool}$`, 'm'));
+      expect(requirements).toMatch(new RegExp(`^${tool}==\\d+\\.\\d+\\.\\d+ `, 'm'));
     }
-    expect(read('ops/sandbox-slot/Dockerfile')).toContain('--require-hashes --only-binary=:all:');
+
+    // Node tools are pinned to one exact version in package.json, and the lock resolves that same version.
+    for (const tool of ['vitest', 'jest', 'eslint', 'prettier']) {
+      const pinned = captured(guestPackage, new RegExp(`"${tool}": "(\\d+\\.\\d+\\.\\d+)"`));
+      const locked = captured(guestLock, new RegExp(`"node_modules/${tool}": \\{\\s*"version": "([^"]+)"`));
+      expect(locked).toBe(pinned);
+      // Each one sits on the guest PATH through /usr/local/bin, the same way tsc and tsx do.
+      expect(dockerfile).toContain(`ln -s /opt/sandbox-tools/node_modules/.bin/${tool} /usr/local/bin/${tool}`);
+    }
+
+    // The build runs every tool once, so a broken install fails the build instead of a later session.
+    for (const tool of ['pytest', 'ruff', 'mypy', 'vitest', 'jest', 'eslint', 'prettier']) {
+      expect(dockerfile).toContain(`${tool} --version`);
+    }
   });
 
   test('the agent reports the build and platform the server expects', () => {

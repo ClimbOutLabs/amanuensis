@@ -71,8 +71,11 @@ async function setAssistantName(server: ApprovalTestServer, assistantName: strin
     assistant_name: assistantName,
     assistant_identity: null,
     voice_guidance: null,
+    user_name: null,
+    address_as: null,
     user_profile: null,
     pinned_preferences: [],
+    help_areas: [],
     learned_profile: null,
   });
 }
@@ -202,8 +205,11 @@ describe('persona switching inside one conversation', () => {
         assistant_name: 'Testinatrix',
         assistant_identity: 'A pirate software tester.',
         voice_guidance: 'Use pirate language and QA metaphors.',
+        user_name: null,
+        address_as: null,
         user_profile: 'The user prefers plain English.',
         pinned_preferences: ['Keep advice practical.'],
+        help_areas: [],
         learned_profile: 'The user values calm explanations.',
       });
 
@@ -590,20 +596,20 @@ describe('persona switching inside one conversation', () => {
     async () => {
       const sessionId = await createSession(server);
       await createPersona(server, {
-        display_name: 'Iris',
+        display_name: 'Ivy',
         aliases: [],
         instructions: 'Answer as a cartographer.',
         model_name: ALT_MODEL_FQN,
       });
 
-      const turnId = await runTurn(server, sessionId, 'Iris, where does this road go?');
+      const turnId = await runTurn(server, sessionId, 'Ivy, where does this road go?');
       const log = (await (await server.request(`/api/v1/sessions/${sessionId}/persona-activations`)).json()) as {
         data: { turn_id: string | null; persona_name: string | null; model_name: string | null }[];
       };
 
       expect(log.data[0]).toMatchObject({
         turn_id: turnId,
-        persona_name: 'Iris',
+        persona_name: 'Ivy',
         model_name: ALT_MODEL_FQN,
       });
     },

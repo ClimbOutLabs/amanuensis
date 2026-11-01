@@ -144,6 +144,22 @@ describe('useRuntimeConnectivity', () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
+  it('re-probes when a backgrounded page becomes visible, so a probe that failed while it slept clears', async () => {
+    fetchMock.mockRejectedValueOnce(new TypeError('Failed to fetch'));
+    const { result } = renderHook(() => useRuntimeConnectivity());
+
+    await settleProbe();
+    expect(result.current.status).toBe('offline');
+
+    act(() => {
+      document.dispatchEvent(new Event('visibilitychange'));
+    });
+    await settleProbe();
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(result.current.status).toBe('degraded');
+  });
+
   it('stays connecting without probing when fetch is unavailable', async () => {
     vi.stubGlobal('fetch', undefined);
 

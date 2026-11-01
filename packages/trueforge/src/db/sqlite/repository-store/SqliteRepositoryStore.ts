@@ -21,6 +21,7 @@ import {
   type RepositoryOwnerInput,
   type RepositoryRecord,
   type SessionBindingRecord,
+  type SetPackageDownloadsInput,
   type UnbindSessionInput,
   type VerifyCommandInput,
   type VerifyCommandMutationResult,
@@ -52,7 +53,7 @@ function purpose(value: string): VerifyCommandPurpose {
 }
 
 function proposalSourceKind(value: string): VerifyCommandProposalSourceKind {
-  if (value === 'agents_md' || value === 'package_json') {
+  if (value === 'agents_md' || value === 'makefile' || value === 'package_json' || value === 'pyproject_toml') {
     return value;
   }
   throw new Error(`invalid verification command proposal source: ${value}`);
@@ -71,7 +72,7 @@ function validateWorkspaceCwd(workspaceCwd: string): void {
 }
 
 function toRepositoryRecord(row: Selectable<RepositoryTable>): RepositoryRecord {
-  return row;
+  return { ...row, package_downloads_allowed: row.package_downloads_allowed === 1 };
 }
 
 function toCommandRecord(row: Selectable<RepositoryVerifyCommandTable>): VerifyCommandRecord {
@@ -240,6 +241,42 @@ export class SqliteRepositoryStore implements IRepositoryStore<Transaction<Datab
         ])
         .executeTakeFirst();
       return row === undefined ? undefined : toSessionBindingRecord(row);
+    };
+    return transaction ? run(transaction) : this.#db.transaction().setAccessMode('read write').execute(run);
+  }
+
+  async setPackageDownloadsAllowed(
+    input: SetPackageDownloadsInput,
+    transaction?: Transaction<Database>,
+  ): Promise<RepositoryRecord | undefined> {
+    const run = async (trx: Transaction<Database>): Promise<RepositoryRecord | undefined> => {
+      const repository = await this.getRepository(input, trx);
+      if (repository === undefined) {
+        return undefined;
+      }
+      assertRevision(repository, input.expected_revision);
+      const row = await trx
+        .updateTable('repository')
+        .set({
+          package_downloads_allowed: input.allowed ? 1 : 0,
+          revision: sql<number>`revision + 1`,
+          updated_at: nowIso(),
+        })
+        .where('id', '=', repository.id)
+        .where('tenant_id', '=', repository.tenant_id)
+        .where('created_by', '=', repository.created_by)
+        .where('revision', '=', repository.revision)
+        .returningAll()
+        .executeTakeFirst();
+      if (row === undefined) {
+        const actual = await this.getRepository(input, trx);
+        throw new RepositoryRevisionConflictError({
+          repository_id: repository.id,
+          expected_revision: repository.revision,
+          actual_revision: actual?.revision ?? repository.revision,
+        });
+      }
+      return toRepositoryRecord(row);
     };
     return transaction ? run(transaction) : this.#db.transaction().setAccessMode('read write').execute(run);
   }

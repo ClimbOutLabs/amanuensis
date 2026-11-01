@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { MapCard, type MapCardData } from '@/components/MapCard.js';
@@ -305,6 +305,74 @@ describe('MapCard', () => {
     expect(screen.getByText('Search: Nominatim')).toBeInTheDocument();
   });
 
+  describe('travel modes', () => {
+    const routeData: MapCardData = {
+      ...placeData,
+      kind: 'route',
+      pins: [],
+      from_name: 'Travessa das Gaivotas 4',
+      to_name: 'R. de Sao Bernardo 92',
+      from_lat: 38.7106,
+      from_lng: -9.1426,
+      to_lat: 38.7142,
+      to_lng: -9.1597,
+      distance_km: 1.9,
+      duration_min: 23.7,
+      route_geometry: '_p~iF~ps|U',
+    };
+
+    it('shows the mode, distance and time for a walk', () => {
+      renderCard({ data: { ...routeData, mode: 'walking' }, state: 'ready' });
+      expect(screen.getByText('Walking · 1.9 km · about 24 min')).toBeInTheDocument();
+      expect(screen.getByText('Routing: OSRM')).toBeInTheDocument();
+      expect(screen.queryByRole('list', { name: 'Steps' })).not.toBeInTheDocument();
+    });
+
+    it('shows a route with no mode as driving', () => {
+      renderCard({ data: routeData, state: 'ready' });
+      expect(screen.getByText('Driving · 1.9 km · about 24 min')).toBeInTheDocument();
+    });
+
+    it('lists the transit steps in plain words and credits the timetables', () => {
+      renderCard({
+        data: {
+          ...routeData,
+          mode: 'transit',
+          duration_min: 18,
+          departs: '09:02',
+          arrives: '09:20',
+          steps: [
+            { kind: 'walk', duration_min: 4, to_name: 'Calhariz (Bica)' },
+            {
+              kind: 'ride',
+              vehicle: 'tram',
+              line_name: '28E',
+              headsign: 'Campo Ourique',
+              from_name: 'Calhariz (Bica)',
+              to_name: 'Estrela',
+              departs: '09:06',
+              arrives: '09:16',
+              stops_count: 6,
+            },
+            { kind: 'walk', duration_min: 3, to_name: null },
+          ],
+        },
+        state: 'ready',
+      });
+      expect(
+        screen.getByText('Public transport · 1.9 km · about 18 min · leaves 09:02, arrives 09:20'),
+      ).toBeInTheDocument();
+      const items = screen.getAllByRole('listitem').map(item => item.textContent);
+      expect(items).toEqual([
+        'Walk 4 min to Calhariz (Bica)',
+        'Tram 28E toward Campo Ourique, 6 stops, leaves 09:06',
+        'Walk 3 min',
+      ]);
+      expect(screen.getByText('Timetables: Transitous')).toBeInTheDocument();
+      expect(screen.queryByText('Routing: OSRM')).not.toBeInTheDocument();
+    });
+  });
+
   it('names the routing provider on route cards', () => {
     renderCard({
       data: { ...placeData, kind: 'route', from_name: 'Madrid', to_name: 'Barcelona' },
@@ -426,5 +494,137 @@ describe('MapCard', () => {
     } finally {
       vi.unstubAllGlobals();
     }
+  });
+});
+
+describe('MapCard with several found places', () => {
+  const placesData: MapCardData = {
+    kind: 'places',
+    lat: 38.7,
+    lng: -9.1,
+    zoom: 13,
+    resolved_name: '2 places',
+    address: null,
+    pins: [{ name: 'Harbour Family Clinic', lat: 38.7, lng: -9.1 }],
+    places: [
+      {
+        name: 'Harbour Family Clinic',
+        address: '12 Example Street, Lisbon 1100-000',
+        languages: 'English, Portuguese',
+        hours: null,
+        price: null,
+        phone: '+351 210 000 111',
+        source_url: 'https://harbour-clinic.example/en',
+        source_site: 'harbour-clinic.example',
+        fetched_at: '2026-10-17T10:00:00.000Z',
+        lat: 38.7,
+        lng: -9.1,
+        already_in_calendar: true,
+      },
+      {
+        name: 'Garden Health Centre',
+        address: '4 Sample Avenue, Lisbon 1200-000',
+        languages: null,
+        hours: null,
+        price: null,
+        phone: null,
+        source_url: 'https://garden-health.example/doctors',
+        source_site: 'garden-health.example',
+        fetched_at: '2026-10-17T10:00:00.000Z',
+        lat: null,
+        lng: null,
+        already_in_calendar: false,
+      },
+    ],
+    attribution: '© OpenStreetMap contributors',
+  };
+
+  it('shows one card per place with only the fields that were found', () => {
+    renderCard({ data: placesData, state: 'ready' });
+    const cards = screen.getAllByTestId('place-card');
+    expect(cards).toHaveLength(2);
+    const first = within(cards[0] as HTMLElement);
+    expect(first.getByText('Harbour Family Clinic')).toBeInTheDocument();
+    expect(first.getByText('12 Example Street, Lisbon 1100-000')).toBeInTheDocument();
+    expect(first.getByText('English, Portuguese')).toBeInTheDocument();
+    expect(first.getByText('+351 210 000 111')).toBeInTheDocument();
+    // Fields that were not found are not shown at all, not even as a blank label.
+    expect(first.queryByText(/Hours/)).not.toBeInTheDocument();
+    expect(first.queryByText(/Price/)).not.toBeInTheDocument();
+    const second = within(cards[1] as HTMLElement);
+    expect(second.queryByText(/Languages/)).not.toBeInTheDocument();
+    expect(second.queryByText(/Phone/)).not.toBeInTheDocument();
+  });
+
+  it('cites the site and time with a link to the page', () => {
+    renderCard({ data: placesData, state: 'ready' });
+    const first = within(screen.getAllByTestId('place-card')[0] as HTMLElement);
+    const link = first.getByRole('link', { name: 'harbour-clinic.example' });
+    expect(link).toHaveAttribute('href', 'https://harbour-clinic.example/en');
+    expect(link).toHaveAttribute('target', '_blank');
+    expect(link).toHaveAttribute('rel', expect.stringContaining('noreferrer'));
+    expect(first.getByText(/^from /)).toHaveTextContent(/from harbour-clinic\.example, .*2026/);
+  });
+
+  it('marks a place that is already in the calendar and keeps the others unmarked', () => {
+    renderCard({ data: placesData, state: 'ready' });
+    const [first, second] = screen.getAllByTestId('place-card');
+    expect(within(first as HTMLElement).getByText('Already in your calendar')).toBeInTheDocument();
+    expect(within(second as HTMLElement).queryByText('Already in your calendar')).not.toBeInTheDocument();
+  });
+
+  it('says so when a place could not be put on the map, and still shows its details', () => {
+    renderCard({ data: placesData, state: 'ready' });
+    const second = within(screen.getAllByTestId('place-card')[1] as HTMLElement);
+    expect(second.getByText('Could not be placed on the map')).toBeInTheDocument();
+  });
+
+  it('draws one pin per placed place and no extra centre pin', async () => {
+    renderCard({ data: placesData, state: 'ready' });
+    await waitFor(() => expect(vi.mocked(leaflet.circleMarker).mock.calls.length).toBe(1));
+    expect(vi.mocked(leaflet.circleMarker)).toHaveBeenCalledWith([38.7, -9.1], expect.anything());
+  });
+
+  it('draws the passing places and keeps the left-out names behind Details, not on the card', async () => {
+    renderCard({
+      data: {
+        ...placesData,
+        refused: [
+          {
+            name: 'Canal Practice',
+            reason: 'The address is not on that page. Copy it word for word from the page and try again.',
+          },
+          {
+            name: 'River Clinic',
+            reason: 'The address is not on that page. Copy it word for word from the page and try again.',
+          },
+        ],
+      },
+      state: 'ready',
+    });
+    expect(screen.getByTestId('map-card')).toBeInTheDocument();
+    await waitFor(() => expect(vi.mocked(leaflet.circleMarker)).toHaveBeenCalledWith([38.7, -9.1], expect.anything()));
+    expect(screen.queryByText('Map unavailable')).not.toBeInTheDocument();
+    const details = screen.getByText('Details').closest('details');
+    if (details === null) {
+      throw new Error('the left-out list sits behind a Details disclosure');
+    }
+    expect(within(details).getByText('Left out')).toBeInTheDocument();
+    expect(within(details).getByText('Canal Practice')).toBeInTheDocument();
+    expect(within(details).getByText('River Clinic')).toBeInTheDocument();
+  });
+
+  it('shows hostile page text as inert text, and a link that is not a web address never reaches the card', () => {
+    const hostile = '<img src=x onerror=alert(1)>';
+    const [first, second] = placesData.places ?? [];
+    if (first === undefined || second === undefined) {
+      throw new Error('fixture needs two places');
+    }
+    renderCard({
+      data: { ...placesData, places: [{ ...first, name: hostile, hours: hostile }, second] },
+      state: 'ready',
+    });
+    expect(screen.getAllByText(hostile)).toHaveLength(2);
+    expect(document.querySelector('img')).not.toBeInTheDocument();
   });
 });

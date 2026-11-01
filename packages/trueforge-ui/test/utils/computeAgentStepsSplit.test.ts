@@ -27,56 +27,80 @@ function run(start: number, end: number, counts: { tools?: number; thinking?: nu
 describe('computeAgentStepsSplit', () => {
   it('treats pure text as final immediately while running', () => {
     const parts = [text('hello world')];
-    const result = computeAgentStepsSplit(parts, true);
+    const result = computeAgentStepsSplit(parts);
     expect(result.runs).toEqual([]);
     expect(result.hasFinal).toBe(true);
     expect(result.toolCount).toBe(0);
   });
 
-  it('holds back short trailing text while running when tools precede it', () => {
-    const parts = [tool(), text('hi')];
-    const result = computeAgentStepsSplit(parts, true);
-    expect(result.hasFinal).toBe(false);
-    expect(result.runs).toEqual([run(0, 2, { tools: 1 })]);
+  it('shows trailing text as final while running, even right after a tool call', () => {
+    const result = computeAgentStepsSplit([tool(), text('hi')]);
+    expect(result.hasFinal).toBe(true);
+    expect(result.runs).toEqual([run(0, 1, { tools: 1 })]);
   });
 
-  it('confirms final text once trailing content is long enough', () => {
-    const parts = [tool(), reasoning(), text('x'.repeat(500))];
-    const result = computeAgentStepsSplit(parts, true);
+  it('keeps the steps before a trailing answer folded and counted', () => {
+    const result = computeAgentStepsSplit([tool(), reasoning(), text('x'.repeat(500))]);
     expect(result.hasFinal).toBe(true);
     expect(result.runs).toEqual([run(0, 2, { tools: 1, thinking: 1 })]);
     expect(result.toolCount).toBe(1);
     expect(result.thinkingCount).toBe(1);
   });
 
-  it('confirms final when not running', () => {
-    const parts = [tool(), text('done')];
-    const result = computeAgentStepsSplit(parts, false);
-    expect(result.hasFinal).toBe(true);
-    expect(result.runs).toEqual([run(0, 1, { tools: 1 })]);
+  it('has no final answer while the trailing text is blank', () => {
+    const result = computeAgentStepsSplit([tool(), text('  \n')]);
+    expect(result.hasFinal).toBe(false);
+    expect(result.runs).toEqual([run(0, 2, { tools: 1 })]);
   });
 
-  it('promotes substantive text before a tool call into the main flow', () => {
-    const parts = [text(LONG_TEXT), tool(), text('Checked, all good.')];
-    const result = computeAgentStepsSplit(parts, false);
+  it('keeps substantive text before a tool call in the main flow', () => {
+    const result = computeAgentStepsSplit([text(LONG_TEXT), tool(), text('Checked, all good.')]);
     expect(result.runs).toEqual([run(1, 2, { tools: 1 })]);
     expect(result.hasFinal).toBe(true);
   });
 
-  it('promotes multi-line text even when it is short', () => {
+  it('keeps multi-line text before a tool call in the main flow', () => {
     const parts = [text('Findings:\n- one\n- two'), tool(), text('Done.')];
-    expect(computeAgentStepsSplit(parts, false).runs).toEqual([run(1, 2, { tools: 1 })]);
+    expect(computeAgentStepsSplit(parts).runs).toEqual([run(1, 2, { tools: 1 })]);
   });
 
-  it('keeps short narration folded with the tool call that follows it', () => {
+  it('keeps short text before a tool call visible instead of folding it with the call', () => {
     const parts = [text('Let me search for that.'), tool(), text('Here is the answer.')];
-    const result = computeAgentStepsSplit(parts, false);
-    expect(result.runs).toEqual([run(0, 2, { tools: 1 })]);
+    expect(computeAgentStepsSplit(parts).runs).toEqual([run(1, 2, { tools: 1 })]);
   });
 
-  it('keeps text visible when it has no step to fold into', () => {
-    const parts = [text(LONG_TEXT), text('Okay, one more thing.'), text(LONG_TEXT), tool(), text('Final.')];
-    expect(computeAgentStepsSplit(parts, false).runs).toEqual([run(3, 4, { tools: 1 })]);
+  it('keeps a sentence written before a tool call visible when the result follows', () => {
+    const parts = [text("I'll run that calculation for you."), tool(), text('The result is **20**.')];
+    const result = computeAgentStepsSplit(parts);
+    expect(result.runs).toEqual([run(1, 2, { tools: 1 })]);
+    expect(result.hasFinal).toBe(true);
+  });
+
+  it('marks visible text before a later folded step as in-between, never the trailing answer', () => {
+    const parts = [text('Let me look.'), tool(), text('Now the details.'), reasoning(), tool(), text('Answer.')];
+    expect(computeAgentStepsSplit(parts).interimTextIndices).toEqual([0, 2]);
+  });
+
+  it('marks only short one-line text as in-between; longer or multi-line text before a step is answer', () => {
+    const parts = [
+      text('x'.repeat(200)),
+      tool(),
+      text('x'.repeat(201)),
+      tool(),
+      text('Your plan:\n- lunch'),
+      tool(),
+      text('Saved.'),
+    ];
+    expect(computeAgentStepsSplit(parts).interimTextIndices).toEqual([0]);
+  });
+
+  it('does not mark text before a map call as in-between, since the map is the answer', () => {
+    expect(computeAgentStepsSplit([text('Here is the route.'), mapsTool()]).interimTextIndices).toEqual([]);
+  });
+
+  it('folds whitespace-only text into the surrounding steps', () => {
+    const parts = [tool(), text('\n'), tool(), text('Final.')];
+    expect(computeAgentStepsSplit(parts).runs).toEqual([run(0, 3, { tools: 2 })]);
   });
 
   it('returns one run per contiguous folded stretch with per-run counts', () => {
@@ -91,35 +115,24 @@ describe('computeAgentStepsSplit', () => {
       tool(),
       text('All done.'),
     ];
-    const result = computeAgentStepsSplit(parts, false);
+    const result = computeAgentStepsSplit(parts);
     expect(result.runs).toEqual([
       run(0, 2, { tools: 1, thinking: 1 }),
-      run(3, 6, { tools: 2 }),
+      run(4, 6, { tools: 2 }),
       run(7, 8, { tools: 1 }),
     ]);
     expect(result.toolCount).toBe(4);
     expect(result.thinkingCount).toBe(1);
   });
 
-  it('applies the streaming holdback to the trailing run only', () => {
-    const parts = [text(LONG_TEXT), tool(), text('Short follow-up.')];
-    const streaming = computeAgentStepsSplit(parts, true);
-    expect(streaming.hasFinal).toBe(false);
-    expect(streaming.runs).toEqual([run(1, 3, { tools: 1 })]);
-
-    const longTrailing = computeAgentStepsSplit([text(LONG_TEXT), tool(), text('y'.repeat(500))], true);
-    expect(longTrailing.hasFinal).toBe(true);
-    expect(longTrailing.runs).toEqual([run(1, 2, { tools: 1 })]);
-  });
-
   it('never folds a maps call, and splits the steps around it into separate runs', () => {
     const parts = [tool(), mapsTool(), reasoning(), tool(), text('x'.repeat(500))];
-    const result = computeAgentStepsSplit(parts, false);
+    const result = computeAgentStepsSplit(parts);
     expect(result.runs).toEqual([run(0, 1, { tools: 1 }), run(2, 4, { tools: 1, thinking: 1 })]);
   });
 
-  it('streams text after a lone maps call directly instead of holding it back', () => {
-    const result = computeAgentStepsSplit([mapsTool(), text('Here is the route.')], true);
+  it('treats text after a lone maps call as the final answer', () => {
+    const result = computeAgentStepsSplit([mapsTool(), text('Here is the route.')]);
     expect(result.runs).toEqual([]);
     expect(result.hasFinal).toBe(true);
   });

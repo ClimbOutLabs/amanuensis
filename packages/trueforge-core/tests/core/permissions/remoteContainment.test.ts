@@ -29,7 +29,9 @@ function servicesWithAllowlist(binDir: string): SentinelServices {
   writeFileSync(join(binDir, 'ls'), '#!/bin/sh\n');
   const shell_allowlist: ShellAllowlistConfig = {
     pinned_path: binDir,
-    commands: { ls: { args: ['-l'], operands: 'workspace_relative', offline_ok: true, subcommands: null } },
+    commands: {
+      ls: { args: ['-l'], operands: 'workspace_relative', offline_ok: true, script: null, subcommands: null },
+    },
   };
   const services = defaultSentinelServices({ pinned_path: binDir });
   services.shell_allowlist = shell_allowlist;
@@ -297,6 +299,7 @@ describe('approvals bind to the normalized path', () => {
       scope: {
         tenant_id: ctx.tenant_id,
         created_by: ctx.created_by,
+        conversation_id: ctx.conversation_id,
         repository_id: null,
         workspace_cwd: REMOTE_ROOT,
       },
@@ -353,7 +356,13 @@ describe('approvals bind to file content in a remote sandbox when the sandbox ca
 
   beforeAll(() => {
     services.tracked_store.track({
-      scope: { tenant_id: 't1', created_by: 'u1', repository_id: null, workspace_cwd: REMOTE_ROOT },
+      scope: {
+        tenant_id: 't1',
+        created_by: 'u1',
+        conversation_id: 'c1',
+        repository_id: null,
+        workspace_cwd: REMOTE_ROOT,
+      },
       file_identity: '/workspace/tool.sh',
     });
   });

@@ -1,0 +1,57 @@
+From: Luz do Tejo Energia <faturacao@luz-do-tejo.example.net>
+To: Maya Hollis <maya.hollis@example.com>
+Date: Mon, 12 Oct 2026 08:30:11 +0100
+Subject: =?UTF-8?B?QSBzdWEgZmF0dXJhIGRlIGVsZXRyaWNpZGFkZSBkZSBzZXRlbWJybyBq?=
+ =?UTF-8?B?w6EgZXN0w6EgZGlzcG9uw612ZWw=?=
+Message-ID: <fatura-202609.20261019@luz-do-tejo.example.net>
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="----=_fixture-boundary-7d3a9f2c"
+
+------=_fixture-boundary-7d3a9f2c
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: quoted-printable
+
+Ol=C3=A1, Maya,
+
+A sua fatura de eletricidade de setembro j=C3=A1 est=C3=A1 dispon=C3=ADvel.
+
+  Fatura: FT 2026/118842
+  Per=C3=ADodo: 1 a 30 de setembro de 2026
+  Consumo: 214 kWh
+  Valor a pagar: 38,47 euros
+  Pagar at=C3=A9: 30 de outubro de 2026
+
+Pode pagar por Multibanco com a entidade 21302 e a refer=C3=AAncia
+482 193 077. A fatura em PDF segue em anexo.
+
+Obrigado,
+Luz do Tejo Energia
+------=_fixture-boundary-7d3a9f2c
+Content-Type: application/pdf; name="fatura-setembro.pdf"
+Content-Transfer-Encoding: base64
+Content-Disposition: attachment; filename="fatura-setembro.pdf"
+
+JVBERi0xLjQKMSAwIG9iago8PCAvVHlwZSAvQ2F0YWxvZyAvUGFnZXMgMiAwIFIgPj4KZW5kb2Jq
+CjIgMCBvYmoKPDwgL1R5cGUgL1BhZ2VzIC9LaWRzIFszIDAgUl0gL0NvdW50IDEgPj4KZW5kb2Jq
+CjMgMCBvYmoKPDwgL1R5cGUgL1BhZ2UgL1BhcmVudCAyIDAgUiAvTWVkaWFCb3ggWzAgMCA2MTIg
+NzkyXSAvUmVzb3VyY2VzIDw8IC9Gb250IDw8IC9GMSA1IDAgUiA+PiA+PiAvQ29udGVudHMgNCAw
+IFIgPj4KZW5kb2JqCjQgMCBvYmoKPDwgL0xlbmd0aCA2MjUgPj4Kc3RyZWFtCkJUIC9GMSAxMSBU
+ZiA3MiA3NDAgVGQgKExVWiBETyBURUpPIEVORVJHSUEgLSBGQVRVUkEgREUgRUxFVFJJQ0lEQURF
+KSBUaiBFVApCVCAvRjEgMTEgVGYgNzIgNzI1IFRkIChGYXR1cmEgbi66IEZUIDIwMjYvMTE4ODQy
+KSBUaiBFVApCVCAvRjEgMTEgVGYgNzIgNzEwIFRkIChQZXLtb2RvIGRlIGZhdHVyYefjbzogMSBh
+IDMwIGRlIHNldGVtYnJvIGRlIDIwMjYpIFRqIEVUCkJUIC9GMSAxMSBUZiA3MiA2OTUgVGQgKCkg
+VGogRVQKQlQgL0YxIDExIFRmIDcyIDY4MCBUZCAoQ2xpZW50ZTogTWF5YSBIb2xsaXMpIFRqIEVU
+CkJUIC9GMSAxMSBUZiA3MiA2NjUgVGQgKENvbnN1bW86IDIxNCBrV2gpIFRqIEVUCkJUIC9GMSAx
+MSBUZiA3MiA2NTAgVGQgKFZhbG9yIGEgcGFnYXI6IDM4LDQ3IGV1cm9zKSBUaiBFVApCVCAvRjEg
+MTEgVGYgNzIgNjM1IFRkIChQYWdhciBhdOk6IDMwIGRlIG91dHVicm8gZGUgMjAyNikgVGogRVQK
+QlQgL0YxIDExIFRmIDcyIDYyMCBUZCAoKSBUaiBFVApCVCAvRjEgMTEgVGYgNzIgNjA1IFRkIChQ
+YWdhbWVudG8gcG9yIE11bHRpYmFuY286KSBUaiBFVApCVCAvRjEgMTEgVGYgNzIgNTkwIFRkIChF
+bnRpZGFkZSAyMTMwMiwgcmVmZXLqbmNpYSA0ODIgMTkzIDA3NykgVGogRVQKZW5kc3RyZWFtCmVu
+ZG9iago1IDAgb2JqCjw8IC9UeXBlIC9Gb250IC9TdWJ0eXBlIC9UeXBlMSAvQmFzZUZvbnQgL0hl
+bHZldGljYSAvRW5jb2RpbmcgL1dpbkFuc2lFbmNvZGluZyA+PgplbmRvYmoKNiAwIG9iago8PCAv
+VGl0bGUgKEZhdHVyYSBGVCAyMDI2LzExODg0MikgL1Byb2R1Y2VyIChmaXh0dXJlLWdlbmVyYXRv
+cikgPj4KZW5kb2JqCnhyZWYKMCA3CjAwMDAwMDAwMDAgNjU1MzUgZiAKMDAwMDAwMDAwOSAwMDAw
+MCBuIAowMDAwMDAwMDU4IDAwMDAwIG4gCjAwMDAwMDAxMTUgMDAwMDAgbiAKMDAwMDAwMDI0MSAw
+MDAwMCBuIAowMDAwMDAwOTE3IDAwMDAwIG4gCjAwMDAwMDEwMTQgMDAwMDAgbiAKdHJhaWxlcgo8
+PCAvU2l6ZSA3IC9Sb290IDEgMCBSIC9JbmZvIDYgMCBSID4+CnN0YXJ0eHJlZgoxMDk2CiUlRU9G
+------=_fixture-boundary-7d3a9f2c--

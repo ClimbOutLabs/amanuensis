@@ -1,12 +1,15 @@
 import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
+import { deflateRawSync } from 'node:zlib';
 import { Response as UndiciResponse } from 'undici';
 
 import {
   extractTextFromUpload,
   fetchUrlSnapshot,
-  pinnedDispatcher,
+  MAX_UPLOAD_BYTES,
 } from '../../../src/personaKnowledge/documentIngest';
+import { pinnedDispatcher } from '../../../src/runtime/publicFetch';
+import { EXAMPLE_COM_ADDRESS } from '../../fixtures/exampleComAddress';
 
 const textBytes = (text: string): Uint8Array => new TextEncoder().encode(text);
 
@@ -23,57 +26,160 @@ function crc32(bytes: Uint8Array): number {
 }
 
 /**
- * Minimal ZIP writer: stored (uncompressed) entries only. Enough for a
- * synthetic .docx — mammoth only needs the three standard parts.
+ * Minimal ZIP writer without the end record, so tests can lay the sections
+ * out themselves. `records` holds each central directory record on its own.
  */
-function storedZip(entries: Array<[name: string, content: string]>): Uint8Array {
-  const chunks: Uint8Array[] = [];
-  const central: Uint8Array[] = [];
+function zipSections({ entries, deflate }: { entries: Array<[name: string, content: Uint8Array]>; deflate: boolean }): {
+  locals: Uint8Array;
+  central: Uint8Array;
+  records: Uint8Array[];
+} {
+  const locals: Uint8Array[] = [];
+  const records: Uint8Array[] = [];
   let offset = 0;
-  const push = (target: Uint8Array[], bytes: Uint8Array): void => {
-    target.push(bytes);
-  };
   for (const [name, content] of entries) {
     const nameBytes = new TextEncoder().encode(name);
-    const dataBytes = new TextEncoder().encode(content);
-    const crc = crc32(dataBytes);
+    const dataBytes = deflate ? deflateRawSync(content) : content;
+    const method = deflate ? 8 : 0;
+    const crc = crc32(content);
     const local = new DataView(new ArrayBuffer(30));
     local.setUint32(0, 0x04034b50, true);
     local.setUint16(4, 20, true);
-    local.setUint16(8, 0, true); // stored
+    local.setUint16(8, method, true);
     local.setUint32(14, crc, true);
     local.setUint32(18, dataBytes.length, true);
-    local.setUint32(22, dataBytes.length, true);
+    local.setUint32(22, content.length, true);
     local.setUint16(26, nameBytes.length, true);
-    push(chunks, new Uint8Array(local.buffer));
-    push(chunks, nameBytes);
-    push(chunks, dataBytes);
-    const headerLength = 30 + nameBytes.length + dataBytes.length;
+    const localBytes = concatBytes([new Uint8Array(local.buffer), nameBytes, dataBytes]);
 
     const dir = new DataView(new ArrayBuffer(46));
     dir.setUint32(0, 0x02014b50, true);
-    dir.setUint16(10, 0, true); // stored
+    dir.setUint16(10, method, true);
     dir.setUint32(16, crc, true);
     dir.setUint32(20, dataBytes.length, true);
-    dir.setUint32(24, dataBytes.length, true);
+    dir.setUint32(24, content.length, true);
     dir.setUint16(28, nameBytes.length, true);
     dir.setUint32(42, offset, true);
-    push(central, new Uint8Array(dir.buffer));
-    push(central, nameBytes);
-    offset += headerLength;
+    locals.push(localBytes);
+    records.push(concatBytes([new Uint8Array(dir.buffer), nameBytes]));
+    offset += localBytes.length;
   }
-  const centralStart = offset;
-  const centralSize = central.reduce((sum, bytes) => sum + bytes.length, 0);
+  return { locals: concatBytes(locals), central: concatBytes(records), records };
+}
+
+function endRecord({
+  entries,
+  centralSize,
+  centralStart,
+}: {
+  entries: number;
+  centralSize: number;
+  centralStart: number;
+}): Uint8Array {
   const end = new DataView(new ArrayBuffer(22));
   end.setUint32(0, 0x06054b50, true);
-  end.setUint16(8, entries.length, true);
-  end.setUint16(10, entries.length, true);
+  end.setUint16(8, entries, true);
+  end.setUint16(10, entries, true);
   end.setUint32(12, centralSize, true);
   end.setUint32(16, centralStart, true);
-  const total = centralStart + centralSize + 22;
-  const out = new Uint8Array(total);
+  return new Uint8Array(end.buffer);
+}
+
+function concatBytes(parts: Uint8Array[]): Uint8Array {
+  const out = new Uint8Array(parts.reduce((sum, part) => sum + part.length, 0));
   let at = 0;
-  for (const part of [...chunks, ...central, new Uint8Array(end.buffer)]) {
+  for (const part of parts) {
+    out.set(part, at);
+    at += part.length;
+  }
+  return out;
+}
+
+/** Stored (uncompressed) zip: enough for a synthetic .docx, since mammoth only needs the three standard parts. */
+function storedZip(entries: Array<[name: string, content: string]>): Uint8Array {
+  const { locals, central } = zipSections({
+    entries: entries.map(([name, content]) => [name, textBytes(content)]),
+    deflate: false,
+  });
+  return concatBytes([
+    locals,
+    central,
+    endRecord({ entries: entries.length, centralSize: central.length, centralStart: locals.length }),
+  ]);
+}
+
+const DOCX_CONTENT_TYPES =
+  '<?xml version="1.0" encoding="UTF-8"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">' +
+  '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>' +
+  '<Default Extension="xml" ContentType="application/xml"/>' +
+  '<Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>' +
+  '</Types>';
+const DOCX_RELS =
+  '<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' +
+  '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>' +
+  '</Relationships>';
+
+/** The three parts mammoth needs, with `paddingBytes` of whitespace inside the body. */
+function docxEntries({ text, paddingBytes }: { text: string; paddingBytes: number }): Array<[string, Uint8Array]> {
+  const head = textBytes(
+    '<?xml version="1.0" encoding="UTF-8"?>' +
+      '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">' +
+      `<w:body><w:p><w:r><w:t>${text}</w:t></w:r></w:p>`,
+  );
+  const tail = textBytes('</w:body></w:document>');
+  const documentXml = new Uint8Array(head.length + paddingBytes + tail.length).fill(0x20);
+  documentXml.set(head, 0);
+  documentXml.set(tail, head.length + paddingBytes);
+  return [
+    ['[Content_Types].xml', textBytes(DOCX_CONTENT_TYPES)],
+    ['_rels/.rels', textBytes(DOCX_RELS)],
+    ['word/document.xml', documentXml],
+  ];
+}
+
+/**
+ * One deflated entry whose local header and central directory both claim
+ * `declaredSize` uncompressed bytes, whatever the data really inflates to.
+ */
+function deflatedZip(name: string, content: Uint8Array, declaredSize: number): Uint8Array {
+  const nameBytes = new TextEncoder().encode(name);
+  const compressed = deflateRawSync(content);
+  const crc = crc32(content);
+  const local = new DataView(new ArrayBuffer(30));
+  local.setUint32(0, 0x04034b50, true);
+  local.setUint16(4, 20, true);
+  local.setUint16(8, 8, true); // deflate
+  local.setUint32(14, crc, true);
+  local.setUint32(18, compressed.length, true);
+  local.setUint32(22, declaredSize, true);
+  local.setUint16(26, nameBytes.length, true);
+  const dir = new DataView(new ArrayBuffer(46));
+  dir.setUint32(0, 0x02014b50, true);
+  dir.setUint16(10, 8, true); // deflate
+  dir.setUint32(16, crc, true);
+  dir.setUint32(20, compressed.length, true);
+  dir.setUint32(24, declaredSize, true);
+  dir.setUint16(28, nameBytes.length, true);
+  dir.setUint32(42, 0, true);
+  const centralStart = 30 + nameBytes.length + compressed.length;
+  const centralSize = 46 + nameBytes.length;
+  const end = new DataView(new ArrayBuffer(22));
+  end.setUint32(0, 0x06054b50, true);
+  end.setUint16(8, 1, true);
+  end.setUint16(10, 1, true);
+  end.setUint32(12, centralSize, true);
+  end.setUint32(16, centralStart, true);
+  const parts = [
+    new Uint8Array(local.buffer),
+    nameBytes,
+    compressed,
+    new Uint8Array(dir.buffer),
+    nameBytes,
+    new Uint8Array(end.buffer),
+  ];
+  const out = new Uint8Array(parts.reduce((sum, part) => sum + part.length, 0));
+  let at = 0;
+  for (const part of parts) {
     out.set(part, at);
     at += part.length;
   }
@@ -246,20 +352,8 @@ describe('extractTextFromUpload', () => {
       '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">' +
       '<w:body><w:p><w:r><w:t>Sold the solo project for twenty million dollars</w:t></w:r></w:p></w:body></w:document>';
     const docx = storedZip([
-      [
-        '[Content_Types].xml',
-        '<?xml version="1.0" encoding="UTF-8"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">' +
-          '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>' +
-          '<Default Extension="xml" ContentType="application/xml"/>' +
-          '<Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>' +
-          '</Types>',
-      ],
-      [
-        '_rels/.rels',
-        '<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' +
-          '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>' +
-          '</Relationships>',
-      ],
+      ['[Content_Types].xml', DOCX_CONTENT_TYPES],
+      ['_rels/.rels', DOCX_RELS],
       ['word/document.xml', documentXml],
     ]);
     const extracted = await extractTextFromUpload({ filename: 'exit-story.docx', bytes: docx });
@@ -280,6 +374,23 @@ describe('extractTextFromUpload', () => {
     await expect(extractTextFromUpload({ filename: 'bomb.docx', bytes: docx })).rejects.toThrow(/enormous/);
   });
 
+  it('refuses a zip bomb whose headers understate its real size', async () => {
+    // 64 MiB of zeros deflates to a few kilobytes; every header claims 1 KiB.
+    const docx = deflatedZip('word/document.xml', new Uint8Array(64 * 1024 * 1024), 1024);
+    expect(docx.byteLength).toBeLessThan(MAX_UPLOAD_BYTES);
+    await expect(extractTextFromUpload({ filename: 'understated.docx', bytes: docx })).rejects.toThrow(/enormous/);
+  });
+
+  it('refuses a .docx whose zip structure cannot be checked', async () => {
+    const docx = storedZip([['word/document.xml', '<w:document/>']]);
+    const view = new DataView(docx.buffer, docx.byteOffset, docx.byteLength);
+    // Point the end record at a central directory that is not there.
+    view.setUint32(docx.byteLength - 22 + 16, 1, true);
+    await expect(extractTextFromUpload({ filename: 'broken.docx', bytes: docx })).rejects.toThrow(
+      /could not be opened as a Word document/,
+    );
+  });
+
   it('refuses a zip64 zip bomb before inflating it', async () => {
     // The classic EOCD carries 0xFFFF/0xFFFFFFFF sentinels; the real sizes
     // live in the zip64 records. A scanner that can't read zip64 fails open
@@ -289,26 +400,65 @@ describe('extractTextFromUpload', () => {
     await expect(extractTextFromUpload({ filename: 'bomb64.docx', bytes: docx })).rejects.toThrow(/enormous/);
   });
 
+  it('refuses a .docx whose end record points past a decoy central directory', async () => {
+    // The checker would read a harmless decoy directory at the stated offset,
+    // while the zip reader re-bases offsets by the gap before the end record
+    // and inflates the real, oversized entry instead.
+    const real = zipSections({
+      entries: docxEntries({ text: 'decoy', paddingBytes: 33 * 1024 * 1024 }),
+      deflate: true,
+    });
+    const decoy = zipSections({
+      entries: [
+        ['a', textBytes('x')],
+        ['b', textBytes('y')],
+        ['c', textBytes('z')],
+      ],
+      deflate: false,
+    });
+    const docx = concatBytes([
+      decoy.locals,
+      new Uint8Array(real.locals.length - decoy.locals.length),
+      decoy.central,
+      real.locals,
+      real.central,
+      endRecord({ entries: 3, centralSize: real.central.length, centralStart: real.locals.length }),
+    ]);
+    expect(docx.byteLength).toBeLessThan(MAX_UPLOAD_BYTES);
+    await expect(extractTextFromUpload({ filename: 'decoy.docx', bytes: docx })).rejects.toThrow(
+      /could not be opened as a Word document/,
+    );
+  });
+
+  it('refuses a .docx whose central entries share local data', async () => {
+    // Repeated entries inflate the same bytes once per entry.
+    const { locals, records } = zipSections({
+      entries: docxEntries({ text: 'shared', paddingBytes: 0 }),
+      deflate: false,
+    });
+    const documentRecord = records[2];
+    if (documentRecord === undefined) {
+      throw new Error('expected a word/document.xml record');
+    }
+    const central = concatBytes([...records, documentRecord]);
+    const docx = concatBytes([
+      locals,
+      central,
+      endRecord({ entries: records.length + 1, centralSize: central.length, centralStart: locals.length }),
+    ]);
+    await expect(extractTextFromUpload({ filename: 'shared.docx', bytes: docx })).rejects.toThrow(
+      /could not be opened as a Word document/,
+    );
+  });
+
   it('indexes a small valid zip64 .docx', async () => {
     const documentXml =
       '<?xml version="1.0" encoding="UTF-8"?>' +
       '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">' +
       '<w:body><w:p><w:r><w:t>zip64 archives are first-class</w:t></w:r></w:p></w:body></w:document>';
     const docx = storedZip64([
-      [
-        '[Content_Types].xml',
-        '<?xml version="1.0" encoding="UTF-8"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">' +
-          '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>' +
-          '<Default Extension="xml" ContentType="application/xml"/>' +
-          '<Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>' +
-          '</Types>',
-      ],
-      [
-        '_rels/.rels',
-        '<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' +
-          '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>' +
-          '</Relationships>',
-      ],
+      ['[Content_Types].xml', DOCX_CONTENT_TYPES],
+      ['_rels/.rels', DOCX_RELS],
       ['word/document.xml', documentXml],
     ]);
     const extracted = await extractTextFromUpload({ filename: 'z64.docx', bytes: docx });
@@ -334,7 +484,7 @@ describe('extractTextFromUpload', () => {
 });
 
 describe('fetchUrlSnapshot SSRF guards', () => {
-  const publicResolver = async () => ['93.184.216.34'];
+  const publicResolver = async () => [EXAMPLE_COM_ADDRESS];
   const privateResolver = async () => ['10.1.2.3'];
 
   it('blocks private IP literals without any network call', async () => {

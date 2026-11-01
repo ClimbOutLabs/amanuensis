@@ -1,8 +1,11 @@
 /** Pause on write_note approval, then resume after allow or deny. */
 import { createToolResponseV2, EventType } from '../../src/core/events/schema';
+import { deniedToolCallText } from '../../src/core/mcp/ToolSet';
+import { changeRequestReason } from '../../src/core/permissions/changeRequest';
 import { AgentThread } from '../../src/core/runtime/AgentThread';
 import { InternalEventType, type AgentThreadConstructorInput } from '../../src/core/runtime/AgentThread.types';
 import { AgentThreadOrchestrator } from '../../src/core/runtime/AgentThreadOrchestrator';
+import { LOAD_BUNDLE_TOOL_NAME } from '../../src/core/runtime/ToolBundles';
 import { NOOP_AGENT_TRACING } from '../../src/core/tracing/NoopAgentTracing';
 import { makeSilentLogger } from '../core/harnessMocks';
 import {
@@ -20,7 +23,7 @@ import {
 const ROOT_ID = 'thread_root';
 const DENY_REASON = 'not allowed in this test';
 /** ToolSet deny → isError path surfaces the structured error payload for context. */
-const DENY_RAW_CONTENT = JSON.stringify({ error: `User denied tool call: ${DENY_REASON}` });
+const DENY_RAW_CONTENT = deniedToolCallText(DENY_REASON);
 const INSTRUCTION = 'You are running in a test setup.';
 
 // Every host-produced terminal tool result now carries the canonical wrapped shape
@@ -56,7 +59,8 @@ const DENY_TOOL_CONTENT = createToolResponseV2({
   remediation: undefined,
 }).model_message.content;
 
-const WRITE_NOTE_TOOLS = [{ function: { name: WRITE_NOTE_TOOL_NAME } }];
+// load_bundle comes first: the web guidance is always offered, so every chat can read it.
+const WRITE_NOTE_TOOLS = [{ function: { name: LOAD_BUNDLE_TOOL_NAME } }, { function: { name: WRITE_NOTE_TOOL_NAME } }];
 
 const EXPECTED_TURN_1_EVENTS = [
   { type: EventType.MODEL_MESSAGE, thread_id: ROOT_ID },
@@ -103,6 +107,7 @@ const EXPECTED_TURN_1_LLM_INPUT = [
     tools: WRITE_NOTE_TOOLS,
     messages: [
       { role: 'system', content: expect.stringContaining(INSTRUCTION) },
+      { role: 'system', content: expect.stringContaining('<reply-context>') },
       { role: 'user', content: 'hello' },
     ],
   },
@@ -141,6 +146,7 @@ describe('orchestration: pause then resume on tool approval', () => {
       tools: WRITE_NOTE_TOOLS,
       messages: [
         { role: 'system', content: expect.stringContaining(INSTRUCTION) },
+        { role: 'system', content: expect.stringContaining('<reply-context>') },
         { role: 'user', content: 'hello' },
         {
           role: 'assistant',
@@ -200,9 +206,13 @@ describe('orchestration: pause then resume on tool approval', () => {
       {
         type: InternalEventType.AGENT_CONTEXT_APPEND,
         thread_id: ROOT_ID,
-        context: [{ role: 'tool', tool_call_id: WRITE_NOTE_CALL_ID, content: DENY_TOOL_CONTENT }],
+        context: [
+          { role: 'tool', tool_call_id: WRITE_NOTE_CALL_ID, content: DENY_TOOL_CONTENT },
+          { role: 'user', content: expect.stringContaining('The person declined write note') },
+        ],
       },
       { type: EventType.MODEL_MESSAGE, thread_id: ROOT_ID },
+      // The reply already says it in its own words, so the host adds no line of its own.
       { type: EventType.MODEL_MESSAGE_DELTA, thread_id: ROOT_ID, content: ROOT_FINAL },
       {
         type: InternalEventType.AGENT_CONTEXT_APPEND,
@@ -218,9 +228,9 @@ describe('orchestration: pause then resume on tool approval', () => {
     };
 
     const EXPECTED_TURN_2_INPUT = {
-      tools: WRITE_NOTE_TOOLS,
       messages: [
         { role: 'system', content: expect.stringContaining(INSTRUCTION) },
+        { role: 'system', content: expect.stringContaining('<reply-context>') },
         { role: 'user', content: 'hello' },
         {
           role: 'assistant',
@@ -234,6 +244,7 @@ describe('orchestration: pause then resume on tool approval', () => {
           ],
         },
         { role: 'tool', tool_call_id: WRITE_NOTE_CALL_ID, content: DENY_TOOL_CONTENT },
+        { role: 'user', content: expect.stringContaining('The person declined write note') },
       ],
     };
 
@@ -270,9 +281,88 @@ describe('orchestration: pause then resume on tool approval', () => {
       ]);
     });
   });
+
+  describe('change it', () => {
+    const ROOT_FINAL = 'note saved';
+    const CHANGE_TEXT = 'make it shorter';
+    const CHANGE_REQUEST_SENTENCE =
+      'The person asked for changes before approving: make it shorter. Make the changes and propose it again.';
+    const REVISED_CALL_ID = 'call-write-revised';
+
+    it('never runs the tool and hands the model the words the person asked for', async () => {
+      const { orchestrator, thread, callTool } = makeApprovalHarness(ROOT_FINAL);
+
+      await runTurn({
+        orchestrator,
+        sendBatch: [{ type: EventType.USER_MESSAGE, content: 'hello' }],
+      });
+      const resumed = await runTurn({
+        orchestrator,
+        sendBatch: [
+          {
+            type: EventType.USER_TOOL_APPROVAL,
+            thread_id: ROOT_ID,
+            tool_call_id: WRITE_NOTE_CALL_ID,
+            approval: { status: 'deny', reason: changeRequestReason(CHANGE_TEXT) },
+          },
+        ],
+      });
+
+      expect(callTool).not.toHaveBeenCalled();
+      expect(resumed.result.root_agent_error).toBeUndefined();
+      expect(llmCreateInputs(thread.definition.modelClient)).toContainEqual(
+        expect.objectContaining({
+          messages: expect.arrayContaining([
+            expect.objectContaining({
+              role: 'tool',
+              tool_call_id: WRITE_NOTE_CALL_ID,
+              content: expect.stringContaining(`"result":"${CHANGE_REQUEST_SENTENCE}"`),
+            }),
+          ]),
+        }),
+      );
+    });
+
+    it('lets the model propose a revised call that needs its own approval', async () => {
+      const { orchestrator, callTool } = makeApprovalHarness(ROOT_FINAL, REVISED_CALL_ID);
+
+      await runTurn({
+        orchestrator,
+        sendBatch: [{ type: EventType.USER_MESSAGE, content: 'hello' }],
+      });
+      await runTurn({
+        orchestrator,
+        sendBatch: [
+          {
+            type: EventType.USER_TOOL_APPROVAL,
+            thread_id: ROOT_ID,
+            tool_call_id: WRITE_NOTE_CALL_ID,
+            approval: { status: 'deny', reason: changeRequestReason(CHANGE_TEXT) },
+          },
+        ],
+      });
+      // A later message asks the model to try again, so the revised call comes in a new turn.
+      const revised = await runTurn({
+        orchestrator,
+        sendBatch: [{ type: EventType.USER_MESSAGE, content: 'try again' }],
+      });
+
+      expect(callTool).not.toHaveBeenCalled();
+      expect(revised.result.required_actions).toMatchObject([
+        {
+          type: EventType.TOOL_APPROVAL_REQUIRED,
+          thread_id: ROOT_ID,
+          tool_calls: [{ id: REVISED_CALL_ID }],
+        },
+      ]);
+    });
+  });
 });
 
-function makeApprovalHarness(finalReply: string): {
+function makeApprovalHarness(
+  finalReply: string,
+  revisedCallId?: string,
+): {
   orchestrator: AgentThreadOrchestrator;
   thread: AgentThread;
   callTool: jest.Mock;
@@ -284,6 +374,10 @@ function makeApprovalHarness(finalReply: string): {
         create: jest
           .fn()
           .mockImplementationOnce(() => writeNoteToolCallStream())
+          .mockImplementationOnce(() => textReplyStream(finalReply))
+          .mockImplementationOnce(() =>
+            revisedCallId === undefined ? textReplyStream(finalReply) : writeNoteToolCallStream(revisedCallId),
+          )
           .mockImplementation(() => textReplyStream(finalReply)),
         createNonStream: jest.fn(),
       },
@@ -317,6 +411,7 @@ function makeApprovalHarness(finalReply: string): {
     ],
     capabilityState: undefined,
     toolCallMemo: undefined,
+    turnToolCallLedger: undefined,
     taskState: undefined,
     isRequestContinuation: undefined,
     tracing: NOOP_AGENT_TRACING,

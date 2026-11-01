@@ -27,6 +27,7 @@ export function runAgentStoreContractSuite(getStore: () => IAgentStore): void {
   it('createAgent allocates an id and round-trips the manifest', async () => {
     const store = getStore();
     const created = await store.createAgent({
+      host_managed: false,
       tenant_id: TENANT,
       created_by_subject: CREATED_BY_SUBJECT,
       name: 'research',
@@ -52,6 +53,69 @@ export function runAgentStoreContractSuite(getStore: () => IAgentStore): void {
     expect(byId).toEqual(created);
   });
 
+  it('leaves host-made agents out of a list in the query, so pages stay full', async () => {
+    const store = getStore();
+    const hostMade = await store.createAgent({
+      host_managed: true,
+      tenant_id: TENANT,
+      created_by_subject: CREATED_BY_SUBJECT,
+      name: 'a-host-made-assistant',
+      description: 'Runs the schedules you make in a chat.',
+      manifest: manifest(),
+      external_id: null,
+    });
+    for (let index = 0; index < 50; index++) {
+      await store.createAgent({
+        host_managed: false,
+        tenant_id: TENANT,
+        created_by_subject: CREATED_BY_SUBJECT,
+        name: `b-agent-${String(index).padStart(2, '0')}`,
+        description: 'A saved agent.',
+        manifest: manifest(),
+        external_id: null,
+      });
+    }
+
+    const page = await store.listAgents({
+      tenant_id: TENANT,
+      agent_name: undefined,
+      include_host_managed: false,
+      limit: 50,
+      page_token: undefined,
+    });
+    expect(page.data).toHaveLength(50);
+    expect(page.data.map(agent => agent.name)).not.toContain('a-host-made-assistant');
+    expect(page.pagination.next_page_token).toBeUndefined();
+
+    const everything = await store.listAgents({
+      tenant_id: TENANT,
+      agent_name: undefined,
+      include_host_managed: true,
+      limit: undefined,
+      page_token: undefined,
+    });
+    expect(everything.data).toHaveLength(51);
+    expect(await store.getAgent({ tenant_id: TENANT, id: hostMade.id })).toEqual(hostMade);
+    expect(hostMade.host_managed).toBe(true);
+  });
+
+  it('createAgent keeps a caller-supplied id', async () => {
+    const store = getStore();
+    const created = await store.createAgent({
+      host_managed: false,
+      id: 'agent-kept-01',
+      tenant_id: TENANT,
+      created_by_subject: CREATED_BY_SUBJECT,
+      name: 'kept',
+      description: 'Keeps its id.',
+      manifest: manifest(),
+      external_id: null,
+    });
+
+    expect(created.id).toBe('agent-kept-01');
+    expect(await store.getAgent({ tenant_id: TENANT, id: 'agent-kept-01' })).toEqual(created);
+  });
+
   it('getAgent returns undefined for unknown id or name', async () => {
     const store = getStore();
     expect(await store.getAgent({ tenant_id: TENANT, id: 'missing' })).toBeUndefined();
@@ -61,6 +125,7 @@ export function runAgentStoreContractSuite(getStore: () => IAgentStore): void {
   it('updateAgent by id replaces manifest but keeps id, name, and created_at', async () => {
     const store = getStore();
     const created = await store.createAgent({
+      host_managed: false,
       tenant_id: TENANT,
       created_by_subject: CREATED_BY_SUBJECT,
       name: 'research',
@@ -109,6 +174,7 @@ export function runAgentStoreContractSuite(getStore: () => IAgentStore): void {
   it('createAgent throws AgentNameConflictError on name clash', async () => {
     const store = getStore();
     await store.createAgent({
+      host_managed: false,
       tenant_id: TENANT,
       created_by_subject: CREATED_BY_SUBJECT,
       name: 'research',
@@ -119,6 +185,7 @@ export function runAgentStoreContractSuite(getStore: () => IAgentStore): void {
 
     await expect(
       store.createAgent({
+        host_managed: false,
         tenant_id: TENANT,
         created_by_subject: CREATED_BY_SUBJECT,
         name: 'research',
@@ -132,6 +199,7 @@ export function runAgentStoreContractSuite(getStore: () => IAgentStore): void {
   it('listAgents returns only the tenant, ordered by name', async () => {
     const store = getStore();
     await store.createAgent({
+      host_managed: false,
       tenant_id: TENANT,
       created_by_subject: CREATED_BY_SUBJECT,
       name: 'zeta',
@@ -140,6 +208,7 @@ export function runAgentStoreContractSuite(getStore: () => IAgentStore): void {
       external_id: null,
     });
     await store.createAgent({
+      host_managed: false,
       tenant_id: TENANT,
       created_by_subject: CREATED_BY_SUBJECT,
       name: 'alpha',
@@ -148,6 +217,7 @@ export function runAgentStoreContractSuite(getStore: () => IAgentStore): void {
       external_id: null,
     });
     await store.createAgent({
+      host_managed: false,
       tenant_id: 'other-tenant',
       created_by_subject: CREATED_BY_SUBJECT,
       name: 'research',
@@ -157,6 +227,7 @@ export function runAgentStoreContractSuite(getStore: () => IAgentStore): void {
     });
 
     const agents = await store.listAgents({
+      include_host_managed: false,
       tenant_id: TENANT,
       agent_name: undefined,
       limit: undefined,
@@ -169,6 +240,7 @@ export function runAgentStoreContractSuite(getStore: () => IAgentStore): void {
   it('listAgents can filter by external_ids', async () => {
     const store = getStore();
     await store.createAgent({
+      host_managed: false,
       tenant_id: TENANT,
       created_by_subject: CREATED_BY_SUBJECT,
       name: 'local-only',
@@ -177,6 +249,7 @@ export function runAgentStoreContractSuite(getStore: () => IAgentStore): void {
       external_id: null,
     });
     const linked = await store.createAgent({
+      host_managed: false,
       tenant_id: TENANT,
       created_by_subject: CREATED_BY_SUBJECT,
       name: 'linked',
@@ -185,6 +258,7 @@ export function runAgentStoreContractSuite(getStore: () => IAgentStore): void {
       external_id: 'sf-agent-1',
     });
     await store.createAgent({
+      host_managed: false,
       tenant_id: TENANT,
       created_by_subject: CREATED_BY_SUBJECT,
       name: 'other-linked',
@@ -195,6 +269,7 @@ export function runAgentStoreContractSuite(getStore: () => IAgentStore): void {
 
     expect(
       await store.listAgents({
+        include_host_managed: false,
         tenant_id: TENANT,
         external_ids: ['sf-agent-1'],
         agent_name: undefined,
@@ -205,6 +280,7 @@ export function runAgentStoreContractSuite(getStore: () => IAgentStore): void {
     expect(
       (
         await store.listAgents({
+          include_host_managed: false,
           tenant_id: TENANT,
           external_ids: ['sf-agent-1', 'sf-agent-2'],
           agent_name: undefined,
@@ -215,6 +291,7 @@ export function runAgentStoreContractSuite(getStore: () => IAgentStore): void {
     ).toEqual(['linked', 'other-linked']);
     expect(
       await store.listAgents({
+        include_host_managed: false,
         tenant_id: TENANT,
         external_ids: ['missing'],
         agent_name: undefined,
@@ -224,6 +301,7 @@ export function runAgentStoreContractSuite(getStore: () => IAgentStore): void {
     ).toEqual({ data: [], pagination: { limit: 0 } });
     expect(
       await store.listAgents({
+        include_host_managed: false,
         tenant_id: TENANT,
         external_ids: [],
         agent_name: undefined,
@@ -236,6 +314,7 @@ export function runAgentStoreContractSuite(getStore: () => IAgentStore): void {
   it('listAgents filters by agent_name substring case-insensitively', async () => {
     const store = getStore();
     await store.createAgent({
+      host_managed: false,
       tenant_id: TENANT,
       created_by_subject: CREATED_BY_SUBJECT,
       name: 'alpha-bot',
@@ -244,6 +323,7 @@ export function runAgentStoreContractSuite(getStore: () => IAgentStore): void {
       external_id: null,
     });
     await store.createAgent({
+      host_managed: false,
       tenant_id: TENANT,
       created_by_subject: CREATED_BY_SUBJECT,
       name: 'bravo-bot',
@@ -252,6 +332,7 @@ export function runAgentStoreContractSuite(getStore: () => IAgentStore): void {
       external_id: null,
     });
     await store.createAgent({
+      host_managed: false,
       tenant_id: TENANT,
       created_by_subject: CREATED_BY_SUBJECT,
       name: 'unrelated',
@@ -261,6 +342,7 @@ export function runAgentStoreContractSuite(getStore: () => IAgentStore): void {
     });
 
     const matched = await store.listAgents({
+      include_host_managed: false,
       tenant_id: TENANT,
       agent_name: 'BOT',
       limit: undefined,
@@ -269,6 +351,7 @@ export function runAgentStoreContractSuite(getStore: () => IAgentStore): void {
     expect(matched.data.map(agent => agent.name)).toEqual(['alpha-bot', 'bravo-bot']);
 
     const none = await store.listAgents({
+      include_host_managed: false,
       tenant_id: TENANT,
       agent_name: 'missing',
       limit: undefined,
@@ -280,6 +363,7 @@ export function runAgentStoreContractSuite(getStore: () => IAgentStore): void {
   it('listAgents paginates with limit and page_token in name order', async () => {
     const store = getStore();
     await store.createAgent({
+      host_managed: false,
       tenant_id: TENANT,
       created_by_subject: CREATED_BY_SUBJECT,
       name: 'charlie',
@@ -288,6 +372,7 @@ export function runAgentStoreContractSuite(getStore: () => IAgentStore): void {
       external_id: null,
     });
     await store.createAgent({
+      host_managed: false,
       tenant_id: TENANT,
       created_by_subject: CREATED_BY_SUBJECT,
       name: 'alpha',
@@ -296,6 +381,7 @@ export function runAgentStoreContractSuite(getStore: () => IAgentStore): void {
       external_id: null,
     });
     await store.createAgent({
+      host_managed: false,
       tenant_id: TENANT,
       created_by_subject: CREATED_BY_SUBJECT,
       name: 'bravo',
@@ -305,6 +391,7 @@ export function runAgentStoreContractSuite(getStore: () => IAgentStore): void {
     });
 
     const page1 = await store.listAgents({
+      include_host_managed: false,
       tenant_id: TENANT,
       agent_name: undefined,
       limit: 2,
@@ -315,6 +402,7 @@ export function runAgentStoreContractSuite(getStore: () => IAgentStore): void {
     expect(page1.pagination.next_page_token).toEqual(expect.any(String));
 
     const page2 = await store.listAgents({
+      include_host_managed: false,
       tenant_id: TENANT,
       agent_name: undefined,
       limit: 2,
@@ -328,6 +416,7 @@ export function runAgentStoreContractSuite(getStore: () => IAgentStore): void {
   it('getAgent by id is tenant-scoped', async () => {
     const store = getStore();
     const created = await store.createAgent({
+      host_managed: false,
       tenant_id: TENANT,
       created_by_subject: CREATED_BY_SUBJECT,
       name: 'research',
@@ -342,6 +431,7 @@ export function runAgentStoreContractSuite(getStore: () => IAgentStore): void {
   it('createAgent persists external_id', async () => {
     const store = getStore();
     const created = await store.createAgent({
+      host_managed: false,
       tenant_id: TENANT,
       created_by_subject: CREATED_BY_SUBJECT,
       name: 'research',
@@ -356,6 +446,7 @@ export function runAgentStoreContractSuite(getStore: () => IAgentStore): void {
   it('createAgent unique external_id within a tenant; nulls and other tenants do not collide', async () => {
     const store = getStore();
     await store.createAgent({
+      host_managed: false,
       tenant_id: TENANT,
       created_by_subject: CREATED_BY_SUBJECT,
       name: 'alpha',
@@ -365,6 +456,7 @@ export function runAgentStoreContractSuite(getStore: () => IAgentStore): void {
     });
     await expect(
       store.createAgent({
+        host_managed: false,
         tenant_id: TENANT,
         created_by_subject: CREATED_BY_SUBJECT,
         name: 'beta',
@@ -374,6 +466,7 @@ export function runAgentStoreContractSuite(getStore: () => IAgentStore): void {
       }),
     ).rejects.toBeInstanceOf(AgentExternalIdConflictError);
     await store.createAgent({
+      host_managed: false,
       tenant_id: 'other-tenant',
       created_by_subject: CREATED_BY_SUBJECT,
       name: 'alpha',
@@ -382,6 +475,7 @@ export function runAgentStoreContractSuite(getStore: () => IAgentStore): void {
       external_id: 'shared-key',
     });
     await store.createAgent({
+      host_managed: false,
       tenant_id: TENANT,
       created_by_subject: CREATED_BY_SUBJECT,
       name: 'gamma',
@@ -390,6 +484,7 @@ export function runAgentStoreContractSuite(getStore: () => IAgentStore): void {
       external_id: null,
     });
     await store.createAgent({
+      host_managed: false,
       tenant_id: TENANT,
       created_by_subject: CREATED_BY_SUBJECT,
       name: 'delta',
@@ -402,6 +497,7 @@ export function runAgentStoreContractSuite(getStore: () => IAgentStore): void {
   it('updateAgent can write and clear external_id', async () => {
     const store = getStore();
     const created = await store.createAgent({
+      host_managed: false,
       tenant_id: TENANT,
       created_by_subject: CREATED_BY_SUBJECT,
       name: 'research',
@@ -426,6 +522,7 @@ export function runAgentStoreContractSuite(getStore: () => IAgentStore): void {
   it('updateAgent throws AgentExternalIdConflictError when external_id is taken', async () => {
     const store = getStore();
     await store.createAgent({
+      host_managed: false,
       tenant_id: TENANT,
       created_by_subject: CREATED_BY_SUBJECT,
       name: 'alpha',
@@ -434,6 +531,7 @@ export function runAgentStoreContractSuite(getStore: () => IAgentStore): void {
       external_id: 'shared-key',
     });
     const beta = await store.createAgent({
+      host_managed: false,
       tenant_id: TENANT,
       created_by_subject: CREATED_BY_SUBJECT,
       name: 'beta',

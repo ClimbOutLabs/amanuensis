@@ -8,6 +8,13 @@ import {
   type GitConfigEntry,
 } from '../../../permissions/gitHardening';
 import {
+  GIT_REMOTE_CHANGED_REFUSAL,
+  gitProbeRunner,
+  gitRemotesMatch,
+  observeGitRemotes,
+  type GitRemotePrecondition,
+} from '../../gitRemoteObservation';
+import {
   BRANCH_NAME,
   buildHostGitInvocation,
   parseGithubRepository,
@@ -45,11 +52,17 @@ const HOST_GIT_LIMITS: HostCommandLimits = {
 };
 const TAR_BINARY = '/usr/bin/tar';
 const HOST_PATH_ENV = { PATH: '/usr/bin:/bin' };
+/**
+ * The guest is unpacked as its own root, which cannot give files to the server's owner (only one uid is
+ * mapped into the guest), so the files are kept as the guest creates them.
+ */
+const GUEST_UNPACK_FLAGS = '--no-same-owner --no-same-permissions';
 
 /** The guest the bridge moves repositories into and out of. */
 export interface BridgeGuest {
   exec(input: {
     command: string;
+    env: Record<string, string> | undefined;
     cwd: string | undefined;
     timeoutSeconds: number | undefined;
     signal: AbortSignal | undefined;
@@ -78,6 +91,8 @@ interface RunInput {
   command: string;
   plan: HostAuthenticatedGitPlan;
   token: string | null;
+  /** The repositories the user approved; a fetch or pull that names a remote offers the token to these alone. */
+  approvedRemotes: GitRemotePrecondition | undefined;
   guest: BridgeGuest;
   sandboxId: string;
   cwd: string | undefined;
@@ -87,12 +102,30 @@ interface RunInput {
 
 class Refusal extends Error {}
 
+const UNAPPROVED_REMOTE_REFUSAL =
+  'No repository was shown for approval for this git command, so the host did not authenticate it and it was not run. Run it as a sandbox command so its repository can be reviewed.';
+
 function ok(output: string): ExecResult {
   return { success: true, response: { exitCode: 0, result: output } };
 }
 
 function failed(output: string): ExecResult {
   return { success: true, response: { exitCode: 1, result: output } };
+}
+
+/** One plain sentence for why the sandbox could not unpack; tar's own words are logged, never shown. */
+function unpackFailure(input: { stderr: string; subcommand: string }): string {
+  if (/No space left on device|File too large|Disk quota exceeded/u.test(input.stderr)) {
+    return input.subcommand === 'clone'
+      ? 'fatal: the sandbox is out of space for this repository. Start a new chat and clone it there.'
+      : 'fatal: the sandbox is out of space. Start a new chat and clone the repository there.';
+  }
+  if (
+    /Operation not permitted|Permission denied|Invalid argument|Cannot change (?:ownership|mode)/u.test(input.stderr)
+  ) {
+    return 'fatal: the sandbox could not save the repository files. Restart Aman and try again.';
+  }
+  return 'fatal: the sandbox could not unpack the repository. Restart Aman and try again.';
 }
 
 function hostFailure(stderr: string): string {
@@ -224,6 +257,7 @@ export class GitBridge {
       const cloned = await this.hostGit({
         args: ['clone', '--bare', '--quiet', ...bounded, '--', this.contact(repo.canonical), repoPath],
         token: input.token,
+        repository: repo.slug,
         network: true,
         cwd: scratch,
         input,
@@ -231,24 +265,19 @@ export class GitBridge {
       if (cloned.exitCode !== 0) {
         throw new Refusal(`fatal: could not clone ${repo.slug}: ${hostFailure(cloned.stderr)}`);
       }
-      return this.deliverAndRun({ input, scratch, rawUrl });
+      return this.deliverAndRun({ input, scratch, slug: repo.slug });
     });
   }
 
   private async fetchOrPull(input: RunInput): Promise<ExecResult> {
-    const operands = operandsOf({ args: input.plan.args, valued: new Set(['--depth']) });
-    const remote = operands[0] ?? 'origin';
-    const rawUrl = await this.remoteUrlInGuest({ remote, input });
-    const repo = parseGithubRepository(rawUrl);
-    if (repo === undefined) {
-      throw new Refusal('Only https://github.com remotes can be fetched from the sandbox.');
-    }
+    const repo = await this.fetchSource(input);
     const noTags = input.plan.args.includes('--no-tags');
     return this.withScratch(input, async scratch => {
       const repoPath = join(scratch, 'repo.git');
       const init = await this.hostGit({
         args: ['init', '--bare', '--quiet', '--template=', repoPath],
         token: undefined,
+        repository: undefined,
         network: false,
         cwd: scratch,
         input,
@@ -270,6 +299,7 @@ export class GitBridge {
           ...(noTags ? [] : ['+refs/tags/*:refs/tags/*']),
         ],
         token: input.token,
+        repository: repo.slug,
         network: true,
         cwd: repoPath,
         input,
@@ -277,34 +307,58 @@ export class GitBridge {
       if (fetched.exitCode !== 0) {
         throw new Refusal(`fatal: could not fetch ${repo.slug}: ${hostFailure(fetched.stderr)}`);
       }
-      return this.deliverAndRun({ input, scratch, rawUrl });
+      return this.deliverAndRun({ input, scratch, slug: repo.slug });
     });
   }
 
-  private async remoteUrlInGuest(input: { remote: string; input: RunInput }): Promise<string> {
-    if (input.remote.startsWith('https://')) {
-      return input.remote;
+  /**
+   * The one repository a fetch or pull contacts: the URL it names, or else the remote the user approved, read
+   * again from the guest's own config just before and refused unless it is still that repository.
+   */
+  private async fetchSource(input: RunInput): Promise<{ slug: string; canonical: string }> {
+    const { plan, approvedRemotes } = input;
+    if (plan.remote.kind === 'url') {
+      const named = parseGithubRepository(plan.remote.url);
+      if (named === undefined) {
+        throw new Refusal('Only https://github.com remotes can be fetched from the sandbox.');
+      }
+      return named;
     }
-    if (!REMOTE_NAME.test(input.remote)) {
-      throw new Refusal(`fatal: '${input.remote.slice(0, 40)}' is not a valid remote name.`);
+    if (input.token !== null && approvedRemotes === undefined) {
+      throw new Refusal(UNAPPROVED_REMOTE_REFUSAL);
     }
-    const result = await input.input.guest.exec({
-      command: `git remote get-url ${shellEscape(input.remote)}`,
-      cwd: input.input.cwd,
-      timeoutSeconds: 30,
-      signal: input.input.signal,
+    const current = await observeGitRemotes({
+      plan,
+      run: gitProbeRunner(probe =>
+        input.guest.exec({
+          command: probe.command,
+          env: probe.env,
+          cwd: input.cwd,
+          timeoutSeconds: 30,
+          signal: input.signal,
+        }),
+      ),
+      workspaceRoot: input.cwd,
     });
-    if (!result.success) {
-      throw new Refusal(result.error);
+    if (
+      approvedRemotes !== undefined &&
+      (current === undefined || !gitRemotesMatch({ approved: approvedRemotes, current }))
+    ) {
+      throw new Refusal(GIT_REMOTE_CHANGED_REFUSAL);
     }
-    if (result.response.exitCode !== 0) {
-      throw new Refusal(result.response.result.trim() || `fatal: no such remote '${input.remote}'.`);
+    const [only, ...others] = current?.remotes ?? [];
+    const repository = only === undefined ? undefined : parseGithubRepository(only.url);
+    if (repository === undefined) {
+      throw new Refusal('Only https://github.com remotes can be fetched from the sandbox.');
     }
-    return result.response.result.trim();
+    if (others.length > 0) {
+      throw new Refusal('fatal: fetch one remote at a time from the sandbox.');
+    }
+    return repository;
   }
 
   /** Puts the scratch repository into the guest and runs the user's own command against it. */
-  private async deliverAndRun(input: { input: RunInput; scratch: string; rawUrl: string }): Promise<ExecResult> {
+  private async deliverAndRun(input: { input: RunInput; scratch: string; slug: string }): Promise<ExecResult> {
     const { guest, signal } = input.input;
     const tarPath = join(input.scratch, 'repo.tar');
     const packed = await this.options.runner.run({
@@ -329,18 +383,25 @@ export class GitBridge {
     try {
       await guest.putFile({ path: `${dir}/repo.tar`, content: tar, signal });
       const unpacked = await guest.exec({
-        command: `tar -xf ${shellEscape(`${dir}/repo.tar`)} -C ${shellEscape(dir)} && rm -f ${shellEscape(`${dir}/repo.tar`)}`,
+        command: `tar ${GUEST_UNPACK_FLAGS} -xf ${shellEscape(`${dir}/repo.tar`)} -C ${shellEscape(dir)} && rm -f ${shellEscape(`${dir}/repo.tar`)}`,
+        env: undefined,
         cwd: undefined,
         timeoutSeconds: 120,
         signal,
       });
       if (!unpacked.success || unpacked.response.exitCode !== 0) {
-        throw new Refusal('fatal: the sandbox could not unpack the repository.');
+        const stderr = unpacked.success ? unpacked.response.result : unpacked.error;
+        this.options.logger.warn('git bridge could not unpack a repository in the sandbox', { stderr });
+        throw new Refusal(unpackFailure({ stderr, subcommand: input.input.plan.subcommand }));
       }
+      // Every spelling of the repository's address is mapped, so the remote resolves however its URL is written.
+      const address = `https://github.com/${input.slug}`;
       const command = [
         'git',
-        '-c',
-        `url.file://${dir}/repo.git.insteadOf=${input.rawUrl}`,
+        ...[address, `${address}/`, `${address}.git`, `${address}.git/`].flatMap(spelling => [
+          '-c',
+          `url.file://${dir}/repo.git.insteadOf=${spelling}`,
+        ]),
         input.input.plan.subcommand,
         ...input.input.plan.args,
       ]
@@ -348,13 +409,20 @@ export class GitBridge {
         .join(' ');
       return await guest.exec({
         command,
+        env: undefined,
         cwd: input.input.cwd,
         timeoutSeconds: input.input.timeoutSeconds,
         signal,
       });
     } finally {
       await guest
-        .exec({ command: `rm -rf ${shellEscape(dir)}`, cwd: undefined, timeoutSeconds: 60, signal: undefined })
+        .exec({
+          command: `rm -rf ${shellEscape(dir)}`,
+          env: undefined,
+          cwd: undefined,
+          timeoutSeconds: 60,
+          signal: undefined,
+        })
         .catch((error: unknown) => {
           this.options.logger.warn('git bridge could not remove a transfer directory', {
             error: error instanceof Error ? error.message : String(error),
@@ -371,7 +439,14 @@ export class GitBridge {
     }
     const args = input.plan.args.map(token => (token === url ? this.contact(repo.canonical) : token));
     const listed = await this.withScratch(input, scratch =>
-      this.hostGit({ args: ['ls-remote', ...args], token: input.token, network: true, cwd: scratch, input }),
+      this.hostGit({
+        args: ['ls-remote', ...args],
+        token: input.token,
+        repository: repo.slug,
+        network: true,
+        cwd: scratch,
+        input,
+      }),
     );
     return listed.exitCode === 0 ? ok(listed.stdout.toString('utf8')) : failed(`fatal: ${hostFailure(listed.stderr)}`);
   }
@@ -444,6 +519,7 @@ export class GitBridge {
     ].join('\n');
     const result = await input.guest.exec({
       command: script,
+      env: undefined,
       cwd: input.cwd,
       timeoutSeconds: 60,
       signal: input.signal,
@@ -610,6 +686,7 @@ export class GitBridge {
             `refs/aman/incoming:refs/heads/${approved.branch}`,
           ],
           token: input.token,
+          repository: approved.repository,
           network: true,
           cwd: join(scratch, 'v.git'),
           input,
@@ -623,7 +700,13 @@ export class GitBridge {
         return ok(this.describePushResult({ preview: approved, remoteTip: checked.remoteTip }));
       } finally {
         await input.guest
-          .exec({ command: `rm -rf ${shellEscape(dir)}`, cwd: undefined, timeoutSeconds: 60, signal: undefined })
+          .exec({
+            command: `rm -rf ${shellEscape(dir)}`,
+            env: undefined,
+            cwd: undefined,
+            timeoutSeconds: 60,
+            signal: undefined,
+          })
           .catch((error: unknown) => {
             this.options.logger.warn('git bridge could not remove a transfer directory', {
               error: error instanceof Error ? error.message : String(error),
@@ -641,6 +724,7 @@ export class GitBridge {
         `mkdir -p ${shellEscape(input.dir)}`,
         `git bundle create ${shellEscape(`${input.dir}/out.bundle`)} ${shellEscape(ref)}${input.preview.base === undefined ? '' : ` ${shellEscape(`^${input.preview.base}`)}`}`,
       ].join(' && '),
+      env: undefined,
       cwd,
       timeoutSeconds: 300,
       signal,
@@ -682,6 +766,7 @@ export class GitBridge {
     const init = await this.hostGit({
       args: ['init', '--bare', '--quiet', '--template=', repoPath],
       token: undefined,
+      repository: undefined,
       network: false,
       cwd: input.scratch,
       input: input.input,
@@ -701,6 +786,7 @@ export class GitBridge {
         `+refs/heads/${preview.branch}:refs/aman/remote`,
       ],
       token: input.input.token,
+      repository: preview.repository,
       network: true,
       cwd: repoPath,
       input: input.input,
@@ -718,6 +804,7 @@ export class GitBridge {
       const head = await this.hostGit({
         args: ['fetch', '--quiet', '--no-tags', '--no-write-fetch-head', '--', remoteUrl, '+HEAD:refs/aman/default'],
         token: input.input.token,
+        repository: preview.repository,
         network: true,
         cwd: repoPath,
         input: input.input,
@@ -738,6 +825,7 @@ export class GitBridge {
         `+${expectedRef}:refs/aman/incoming`,
       ],
       token: undefined,
+      repository: undefined,
       network: false,
       cwd: repoPath,
       input: input.input,
@@ -754,6 +842,7 @@ export class GitBridge {
       await this.hostGit({
         args: ['rev-parse', '--verify', 'refs/aman/incoming^{commit}'],
         token: undefined,
+        repository: undefined,
         network: false,
         cwd: repoPath,
         input: input.input,
@@ -771,6 +860,7 @@ export class GitBridge {
         await this.hostGit({
           args: ['rev-parse', '--verify', 'refs/aman/remote^{commit}'],
           token: undefined,
+          repository: undefined,
           network: false,
           cwd: repoPath,
           input: input.input,
@@ -781,6 +871,7 @@ export class GitBridge {
       const ancestor = await this.hostGit({
         args: ['merge-base', '--is-ancestor', 'refs/aman/remote', 'refs/aman/incoming'],
         token: undefined,
+        repository: undefined,
         network: false,
         cwd: repoPath,
         input: input.input,
@@ -796,6 +887,7 @@ export class GitBridge {
     const list = await this.hostGit({
       args: ['rev-list', '--reverse', ...range],
       token: undefined,
+      repository: undefined,
       network: false,
       cwd: repoPath,
       input: input.input,
@@ -827,6 +919,7 @@ export class GitBridge {
         ...range,
       ],
       token: undefined,
+      repository: undefined,
       network: false,
       cwd: repoPath,
       input: input.input,
@@ -853,6 +946,7 @@ export class GitBridge {
     ];
     const result = await input.input.guest.exec({
       command: lines.join(' && '),
+      env: undefined,
       cwd: input.input.cwd,
       timeoutSeconds: 60,
       signal: undefined,
@@ -912,6 +1006,8 @@ export class GitBridge {
   private async hostGit(input: {
     args: readonly string[];
     token: string | null | undefined;
+    /** The one GitHub repository (owner/name) the token may be offered to. */
+    repository: string | undefined;
     network: boolean;
     cwd: string | undefined;
     input: Pick<RunInput, 'timeoutSeconds' | 'signal'>;
@@ -920,6 +1016,7 @@ export class GitBridge {
     const invocation = buildHostGitInvocation({
       gitArguments: input.args,
       token,
+      credentialRepositories: input.repository === undefined ? [] : [input.repository],
       networkEntries: input.network ? this.options.networkEntries : gitLocalImportHardeningConfigEntries(),
       extraEntries: gitObjectCheckConfigEntries(),
       networkEnv: input.network ? this.options.networkEnv : undefined,

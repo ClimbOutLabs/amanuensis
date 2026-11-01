@@ -80,10 +80,20 @@ export type SettingsSection =
   | 'sandbox'
   | 'personalization'
   | 'themes'
-  | 'permissions';
+  | 'permissions'
+  | 'audit'
+  | 'about';
 
-/** Sub-tabs inside the Memory settings section. */
-export type SettingsMemoryTab = 'memories' | 'sharing' | 'settings';
+/**
+ * A host request to open Settings at one section, made after the shell has mounted (for
+ * example a right-rail link that lives outside the shell tree). The nonce is what makes it a
+ * request rather than a state: the host raises it on every ask, and the provider answers only
+ * when the nonce changes, never for the value it first mounts with.
+ */
+export type SettingsOpenRequest = {
+  section: SettingsSection;
+  nonce: number;
+};
 
 export type HistoryAgentFilter = {
   agentId?: string;
@@ -91,7 +101,7 @@ export type HistoryAgentFilter = {
   intent: HistoryAgentIntent;
 };
 
-type ShellModeContextValue = {
+export type ShellModeContextValue = {
   mode: ShellMode;
   /** Host agentConfig mode (capabilities source). */
   agentConfigMode: AgentConfig['mode'];
@@ -103,11 +113,7 @@ type ShellModeContextValue = {
   isNewChatEnabled: boolean;
   settingsOpen: boolean;
   settingsSection: SettingsSection;
-  /** Memory sub-tab requested by the last `setSettingsOpen` call that named one (e.g. the
-   * welcome screen's memory setup link asks for 'settings'); undefined means no request, so
-   * the Memory section picks its own default. Cleared whenever a section is named without one. */
-  settingsMemoryTab: SettingsMemoryTab | undefined;
-  setSettingsOpen: (open: boolean, section?: SettingsSection, memoryTab?: SettingsMemoryTab) => void;
+  setSettingsOpen: (open: boolean, section?: SettingsSection) => void;
   agentConfigOpen: boolean;
   setAgentConfigOpen: (open: boolean) => void;
   /** Agents main-pane overlay (sidebar layout). */
@@ -253,11 +259,21 @@ function libraryAgentId(agent: Pick<AgentLibraryEntry, 'agentId' | 'name'>): str
 export function ShellModeProvider({
   agentConfig = DEFAULT_AGENT_CONFIG,
   initialSettingsOpen = false,
+  settingsOpenRequest,
+  onSettingsChromeEnabledChange,
   children,
 }: {
   agentConfig?: AgentConfig;
   /** Open settings on first paint (e.g. host boot with no models). Does not re-open later. */
   initialSettingsOpen?: boolean;
+  /** Host requests to open Settings after mount; answered only when the nonce changes. */
+  settingsOpenRequest?: SettingsOpenRequest;
+  /**
+   * Reports whether Settings chrome is enabled, as this provider's own gate decides it,
+   * on mount and whenever it changes. Hosts with UI outside this tree (the right rail)
+   * show or hide their way into Settings from this same value, so the two never disagree.
+   */
+  onSettingsChromeEnabledChange?: (enabled: boolean) => void;
   children: ReactNode;
 }) {
   const capabilities = useServerCapabilities();
@@ -283,7 +299,6 @@ export function ShellModeProvider({
   const [agentsListEpoch, setAgentsListEpoch] = useState(0);
   const [settingsOpenState, setSettingsOpenState] = useState(initialSettingsOpen);
   const [settingsSection, setSettingsSection] = useState<SettingsSection>('models');
-  const [settingsMemoryTab, setSettingsMemoryTab] = useState<SettingsMemoryTab | undefined>(undefined);
   const [agentConfigOpenState, setAgentConfigOpenState] = useState(false);
   const [libraryOpenState, setLibraryOpenState] = useState(false);
   const [sessionsOpenState, setSessionsOpenState] = useState(false);
@@ -367,10 +382,9 @@ export function ShellModeProvider({
     setLibraryAgentId(null);
   }, []);
   const setSettingsOpen = useCallback(
-    (open: boolean, section?: SettingsSection, memoryTab?: SettingsMemoryTab) => {
+    (open: boolean, section?: SettingsSection) => {
       if (section !== undefined) {
         setSettingsSection(section);
-        setSettingsMemoryTab(memoryTab);
       }
       if (open) {
         setAgentConfigOpenState(false);
@@ -384,6 +398,21 @@ export function ShellModeProvider({
     },
     [setSessionsOpen, settingsEnabled, closeSpaces],
   );
+  // A host request answers through the same path as the Settings button, so the chrome gate
+  // inside setSettingsOpen still decides. The first nonce seen is the mount value and is
+  // remembered, not answered: only a later change is a fresh ask.
+  const lastSettingsRequestNonce = useRef(settingsOpenRequest?.nonce);
+  useEffect(() => {
+    if (settingsOpenRequest === undefined) return;
+    if (lastSettingsRequestNonce.current === settingsOpenRequest.nonce) return;
+    lastSettingsRequestNonce.current = settingsOpenRequest.nonce;
+    setSettingsOpen(true, settingsOpenRequest.section);
+  }, [settingsOpenRequest, setSettingsOpen]);
+  // The gate is reported even when it does not change, so a host that mounts after this
+  // provider still hears the current value from its own mount.
+  useEffect(() => {
+    onSettingsChromeEnabledChange?.(settingsEnabled);
+  }, [onSettingsChromeEnabledChange, settingsEnabled]);
   const setAgentConfigOpen = useCallback(
     (open: boolean) => {
       if (open) {
@@ -432,11 +461,20 @@ export function ShellModeProvider({
     }
   }, [schedulesEnabled]);
 
-  const openSpaces = useCallback((spaceId?: string | null) => {
-    setSelectedSpaceId(spaceId ?? null);
-    setSpacesOpenState(true);
-    setSettingsOpenState(false);
-  }, []);
+  // Like the other views, Spaces closes whatever page was open; the layout shows an open Schedules page first.
+  const openSpaces = useCallback(
+    (spaceId?: string | null) => {
+      setSelectedSpaceId(spaceId ?? null);
+      setSpacesOpenState(true);
+      setSettingsOpenState(false);
+      setAgentConfigOpenState(false);
+      setLibraryOpenState(false);
+      setLibraryAgentId(null);
+      setSessionsOpen(false);
+      setSchedulesOpenState(false);
+    },
+    [setSessionsOpen],
+  );
 
   const invalidateAgentsList = useCallback(() => {
     setAgentsListEpoch(n => n + 1);
@@ -724,7 +762,6 @@ export function ShellModeProvider({
       isNewChatEnabled,
       settingsOpen,
       settingsSection,
-      settingsMemoryTab,
       setSettingsOpen,
       agentConfigOpen,
       setAgentConfigOpen,
@@ -770,7 +807,6 @@ export function ShellModeProvider({
       isNewChatEnabled,
       settingsOpen,
       settingsSection,
-      settingsMemoryTab,
       setSettingsOpen,
       agentConfigOpen,
       setAgentConfigOpen,

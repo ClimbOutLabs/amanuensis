@@ -2,11 +2,11 @@
 
 /** Stable problem code. */
 export const GoogleClientProblemCode = {
-        InvalidClientId: "invalid_client_id",
-        InvalidClientSecret: "invalid_client_secret",
-        WrongClientType: "wrong_client_type",
-        RedirectUriNotRegistered: "redirect_uri_not_registered",
-        ClientNotFound: "client_not_found",
-        UnverifiedResponse: "unverified_response"
-    } as const;
-export type GoogleClientProblemCode = typeof GoogleClientProblemCode[keyof typeof GoogleClientProblemCode];
+    InvalidClientId: "invalid_client_id",
+    InvalidClientSecret: "invalid_client_secret",
+    WrongClientType: "wrong_client_type",
+    RedirectUriNotRegistered: "redirect_uri_not_registered",
+    ClientNotFound: "client_not_found",
+    UnverifiedResponse: "unverified_response",
+} as const;
+export type GoogleClientProblemCode = (typeof GoogleClientProblemCode)[keyof typeof GoogleClientProblemCode];

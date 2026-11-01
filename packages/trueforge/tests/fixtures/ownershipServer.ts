@@ -18,12 +18,14 @@ import { McpCatalog } from '../../src/catalog/McpCatalog';
 import { ModelCatalog } from '../../src/catalog/ModelCatalog';
 import { SandboxCatalog } from '../../src/catalog/SandboxCatalog';
 import { SkillCatalog } from '../../src/catalog/SkillCatalog';
+import { BriefItemCompletionStore } from '../../src/db/briefItemCompletionStore';
 import type { IMcpServerStore } from '../../src/db/mcpServerStore';
 import { McpServerWithAuthStore } from '../../src/db/McpServerWithAuthStore';
 import { migrateSqliteToLatest } from '../../src/db/migrateSqlite';
 import type { IModelProviderStore } from '../../src/db/modelProviderStore';
 import { PostgresAgentStore } from '../../src/db/postgres/agent-store/PostgresAgentStore';
 import { PostgresApprovalTokenStore } from '../../src/db/postgres/approval-token-store/PostgresApprovalTokenStore';
+import { PostgresChatImageStore } from '../../src/db/postgres/chat-image-store/PostgresChatImageStore';
 import { PostgresGlobalSettingsStore } from '../../src/db/postgres/global-settings-store/PostgresGlobalSettingsStore';
 import { PostgresGoogleConnectionStore } from '../../src/db/postgres/google-connection-store/PostgresGoogleConnectionStore';
 import { PostgresMcpServerStore } from '../../src/db/postgres/mcp-server-store/PostgresMcpServerStore';
@@ -44,6 +46,7 @@ import { PostgresTurnArtifactStore } from '../../src/db/postgres/turn-artifact-s
 import { SentinelAuditStore } from '../../src/db/sentinelAuditStore';
 import { SqliteAgentStore } from '../../src/db/sqlite/agent-store/SqliteAgentStore';
 import { SqliteApprovalTokenStore } from '../../src/db/sqlite/approval-token-store/SqliteApprovalTokenStore';
+import { SqliteChatImageStore } from '../../src/db/sqlite/chat-image-store/SqliteChatImageStore';
 import { createSqliteDb } from '../../src/db/sqlite/client';
 import { SqliteGlobalSettingsStore } from '../../src/db/sqlite/global-settings-store/SqliteGlobalSettingsStore';
 import { SqliteGoogleConnectionStore } from '../../src/db/sqlite/google-connection-store/SqliteGoogleConnectionStore';
@@ -63,6 +66,8 @@ import { SqliteSpaceStore } from '../../src/db/sqlite/space-store/SqliteSpaceSto
 import { SqliteOAuthTokenStore } from '../../src/db/sqlite/token-store/SqliteOAuthTokenStore';
 import { SqliteTurnArtifactStore } from '../../src/db/sqlite/turn-artifact-store/SqliteTurnArtifactStore';
 import { ActiveTurnRegistry } from '../../src/runtime/activeTurns';
+import { createChatImageService } from '../../src/runtime/chatImages/chatImageService';
+import { createImageReencoder } from '../../src/runtime/chatImages/reencodeInSandbox';
 import { EventSubscriptionRegistry } from '../../src/runtime/event-subscription';
 import { createOutboundSecretSource } from '../../src/runtime/outboundSecrets';
 import { createSentinelServices } from '../../src/runtime/sentinelServices';
@@ -131,7 +136,7 @@ type SharedDeps = Pick<
 function sharedDeps(): SharedDeps {
   return {
     modelCatalog: ModelCatalog.load(),
-    mcpCatalog: McpCatalog.load(),
+    mcpCatalog: McpCatalog.loadShipped(),
     skillCatalog: SkillCatalog.load(),
     sandboxCatalog: SandboxCatalog.load(),
     tokenFactoryBudget: uncappedTokenFactoryBudget,
@@ -231,19 +236,24 @@ async function startSqlite(): Promise<OwnershipServer> {
   const sentinelSettingsStore = new SqliteSentinelSettingsStore(db);
   const mcpToolGrantStore = new SqliteMcpToolGrantStore(db);
   const googleConnectionStore = new SqliteGoogleConnectionStore(db);
+  const outboundSecrets = createOutboundSecretSource({
+    configured: () => [],
+    modelProviders: modelProviderStore,
+    sandboxProviders: sandboxProviderStore,
+    mcpServers: mcpServerStore,
+    tokens: tokenStore,
+    googleConnections: googleConnectionStore,
+  });
   const sentinelServices = createSentinelServices({
+    demoMode: false,
+    demoSendAllowlist: [],
+    mailPolicyPath: undefined,
+    mailPolicyStatusPath: undefined,
     audit: sentinelAuditStore,
     settings: sentinelSettingsStore,
     approvalTokens: new SqliteApprovalTokenStore(db),
     toolGrants: mcpToolGrantStore,
-    outboundSecrets: createOutboundSecretSource({
-      configured: () => [],
-      modelProviders: modelProviderStore,
-      sandboxProviders: sandboxProviderStore,
-      mcpServers: mcpServerStore,
-      tokens: tokenStore,
-      googleConnections: googleConnectionStore,
-    }),
+    outboundSecrets,
   });
   const backends = await seedBackends({
     modelProviders: modelProviderStore,
@@ -252,6 +262,8 @@ async function startSqlite(): Promise<OwnershipServer> {
   const app = createServerApp({
     ...sharedDeps(),
     withTransaction: callback => db.transaction().execute(callback),
+    outboundSecrets,
+    schedulerStatus: () => 'elsewhere',
     tokenStore,
     mcpToolGrantStore,
     googleConnectionStore,
@@ -260,15 +272,25 @@ async function startSqlite(): Promise<OwnershipServer> {
     agentStore,
     personalizationStore: new SqlitePersonalizationStore(db),
     personaStore: new SqlitePersonaStore(db),
+    modelProviderStore,
     spaceStore: new SqliteSpaceStore(db),
     repositoryStore: new SqliteRepositoryStore(db),
     scheduleStore: new SqliteScheduleStore(db),
     sessionMetricsStore: new SqliteSessionMetricsStore(db),
     turnArtifactStore: new SqliteTurnArtifactStore(db),
+    chatImages: createChatImageService({
+      store: new SqliteChatImageStore(db),
+      sessionStore,
+      turnArtifactStore: new SqliteTurnArtifactStore(db),
+      reencode: createImageReencoder({ resolveSandbox: () => null }),
+      sentinel: sentinelServices,
+      fetchDeps: { fetchImpl: undefined, resolveAddresses: undefined },
+    }),
     globalSettingsStore: new SqliteGlobalSettingsStore(db),
     sessionStore,
     sentinelAuditStore,
     sentinelSettingsStore,
+    briefItemStore: new BriefItemCompletionStore(db),
     sessions: new Sessions({ sessionStore, sentinelServices }),
     resolveModelProviderStore: () => modelProviderStore,
     resolveMcpServerStore: () => mcpServerStore,
@@ -309,19 +331,24 @@ async function startPostgres(): Promise<OwnershipServer | undefined> {
   const sentinelSettingsStore = new PostgresSentinelSettingsStore(db);
   const mcpToolGrantStore = new PostgresMcpToolGrantStore(db);
   const googleConnectionStore = new PostgresGoogleConnectionStore(db);
+  const outboundSecrets = createOutboundSecretSource({
+    configured: () => [],
+    modelProviders: modelProviderStore,
+    sandboxProviders: sandboxProviderStore,
+    mcpServers: mcpServerStore,
+    tokens: tokenStore,
+    googleConnections: googleConnectionStore,
+  });
   const sentinelServices = createSentinelServices({
+    demoMode: false,
+    demoSendAllowlist: [],
+    mailPolicyPath: undefined,
+    mailPolicyStatusPath: undefined,
     audit: sentinelAuditStore,
     settings: sentinelSettingsStore,
     approvalTokens: new PostgresApprovalTokenStore(db),
     toolGrants: mcpToolGrantStore,
-    outboundSecrets: createOutboundSecretSource({
-      configured: () => [],
-      modelProviders: modelProviderStore,
-      sandboxProviders: sandboxProviderStore,
-      mcpServers: mcpServerStore,
-      tokens: tokenStore,
-      googleConnections: googleConnectionStore,
-    }),
+    outboundSecrets,
   });
   const backends = await seedBackends({
     modelProviders: modelProviderStore,
@@ -330,6 +357,8 @@ async function startPostgres(): Promise<OwnershipServer | undefined> {
   const app = createServerApp({
     ...sharedDeps(),
     withTransaction: callback => db.transaction().execute(callback),
+    outboundSecrets,
+    schedulerStatus: () => 'elsewhere',
     tokenStore,
     mcpToolGrantStore,
     googleConnectionStore,
@@ -338,15 +367,25 @@ async function startPostgres(): Promise<OwnershipServer | undefined> {
     agentStore,
     personalizationStore: new PostgresPersonalizationStore(db),
     personaStore: new PostgresPersonaStore(db),
+    modelProviderStore,
     spaceStore: new PostgresSpaceStore(db),
     repositoryStore: new PostgresRepositoryStore(db),
     scheduleStore: new PostgresScheduleStore(db),
     sessionMetricsStore: new PostgresSessionMetricsStore(db),
     turnArtifactStore: new PostgresTurnArtifactStore(db),
+    chatImages: createChatImageService({
+      store: new PostgresChatImageStore(db),
+      sessionStore,
+      turnArtifactStore: new PostgresTurnArtifactStore(db),
+      reencode: createImageReencoder({ resolveSandbox: () => null }),
+      sentinel: sentinelServices,
+      fetchDeps: { fetchImpl: undefined, resolveAddresses: undefined },
+    }),
     globalSettingsStore: new PostgresGlobalSettingsStore(db),
     sessionStore,
     sentinelAuditStore,
     sentinelSettingsStore,
+    briefItemStore: new BriefItemCompletionStore(db),
     sessions: new Sessions({ sessionStore, sentinelServices }),
     resolveModelProviderStore: () => modelProviderStore,
     resolveMcpServerStore: () => mcpServerStore,

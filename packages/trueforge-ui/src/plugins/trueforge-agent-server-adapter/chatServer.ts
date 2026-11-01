@@ -14,8 +14,10 @@
 import type { TrueForge, TrueForgeApi } from '@truefoundry/trueforge-sdk';
 import { readSessionAgentDetails, type AgentDetailsVisibility } from '../../atoms/lib/sessionAgentDetails.js';
 import { readSessionIsCreateAgent } from '../../atoms/lib/sessionCreateAgent.js';
+import { readSessionReminders, type RemindersMarker } from '../../atoms/lib/sessionReminders.js';
 import type { MemoryTurnContext } from '../../components/MemoryRecallContext.js';
-import { awaitPendingPersonaMutation } from '../../personaMutationGate.js';
+import type { ModelUsageTurnContext } from '../../components/ModelUsageContext.js';
+import { applyHeldPersona, awaitPendingPersonaMutation } from '../../personaMutationGate.js';
 import { publishSentinelEvent } from '../../sentinel/sentinelEvents.js';
 import { extractSentinelFromEvent } from '../../sentinel/types.js';
 import type {
@@ -30,6 +32,9 @@ import type {
   UpdateSessionRequest,
   UserMessageContent,
 } from '../../server/types.js';
+import { publishContextCompaction } from '../../utils/contextCompactionLive.js';
+import { LiveConnectionLostError, ReplyStoppedByRestartError } from '../../utils/liveConnection.js';
+import type { ModelUsageEvent } from '../../utils/modelUsage.js';
 import { createTrueForgeClient, type CreateTrueForgeClientOptions } from './client.js';
 import { createSessionResyncExtensions, type HarnessChatServerExtensions } from './sessionResync.js';
 import {
@@ -151,8 +156,12 @@ function delay(ms: number, abortSignal: AbortSignal | undefined): Promise<void> 
 /** UI session with create-agent intent for resume chrome and the chat-level agent-details preference. */
 export type HarnessUiSession = Session<HarnessAgentSpec> & {
   isCreateAgent: boolean;
-  /** "Show agent details" preference (session metadata `agent_details`); undefined = unset. */
+  /** "Agent details" preference (session metadata `agent_details`); undefined = unset. */
   agentDetails?: AgentDetailsVisibility;
+  /** The session's metadata, so a write that replaces it can keep every key it does not change. */
+  metadata: Record<string, string>;
+  /** Set only on the Reminders chat: what it last received and when. */
+  reminders?: RemindersMarker;
 };
 
 export type HarnessCreateSessionRequest = CreateSessionRequest<HarnessAgentSpec> & {
@@ -217,10 +226,12 @@ export function toUiAgentSpec(spec: TrueForgeApi.AgentSpec): HarnessAgentSpec {
 
 function toUiSession(session: TrueForgeApi.Session): HarnessUiSession {
   const agentDetails = readSessionAgentDetails(session.metadata);
+  const reminders = readSessionReminders(session.metadata);
   return {
     id: session.id,
     isMutable: session.agent.type === 'inline',
     isCreateAgent: readSessionIsCreateAgent(session.metadata),
+    metadata: { ...session.metadata },
     createdAt: session.createdAt,
     updatedAt: session.updatedAt,
     ...(session.title === null ? {} : { title: session.title }),
@@ -229,6 +240,7 @@ function toUiSession(session: TrueForgeApi.Session): HarnessUiSession {
     ...(session.agent.type === 'reference' && session.agent.name !== null ? { agentName: session.agent.name } : {}),
     ...(session.agent.type === 'inline' ? { agentSpec: toUiAgentSpec(session.agent.spec) } : {}),
     ...(agentDetails === undefined ? {} : { agentDetails }),
+    ...(reminders === null ? {} : { reminders }),
   };
 }
 
@@ -279,7 +291,7 @@ function toUiStreamingEvent(event: TrueForgeApi.TurnStreamingEvent): TurnStreami
  * plugin stays free of any runtime dependency on the component tree — so callers of this plugin
  * do not also need to import from the component module directly.
  */
-export type { MemoryTurnContext };
+export type { MemoryTurnContext, ModelUsageTurnContext };
 
 /** The event types `listMemoryTurnContext` reads; the server filters to them so a poll stays small. */
 const MEMORY_TURN_CONTEXT_EVENT_TYPES = ['aman.memory.recall', 'aman.profile.learned'];
@@ -332,6 +344,25 @@ export async function listMemoryTurnContext(
 }
 
 /**
+ * Every `aman.model.usage` event this session has recorded, grouped by turn, so the UI can show
+ * which model did the work under each answer and what it cost. Like `listMemoryTurnContext`, a
+ * direct `client.sessions.listEvents` read: the vendor chat pipeline cannot carry the event. Walks
+ * every page, so an older turn in a long session still shows its usage after a reload.
+ */
+export async function listModelUsageTurnContext(
+  client: TrueForge,
+  { sessionId }: { sessionId: string },
+): Promise<ModelUsageTurnContext[]> {
+  const byTurn = new Map<string, ModelUsageEvent[]>();
+  const page = await client.sessions.listEvents(sessionId, { limit: 100 });
+  for await (const item of page) {
+    if (item.event.type !== 'aman.model.usage') continue;
+    byTurn.set(item.turnId, [...(byTurn.get(item.turnId) ?? []), item.event]);
+  }
+  return [...byTurn.entries()].map(([turnId, events]) => ({ turnId, events }));
+}
+
+/**
  * Latest known lifecycle phase for one attached file this turn ingested, by the name the client
  * uploaded (see `toUiEventItem` / `toUiStreamingEvent` above for why `document.ingestion` cannot
  * reach the UI through the vendor-typed event pipeline instead).
@@ -381,14 +412,36 @@ function publishDocumentIngestionEvent(turnId: string, event: TrueForgeApi.Docum
 }
 
 /**
- * Taps Sentinel approval events off a raw SSE stream item before `toUiStreamingEvent`
- * narrows it away: the vendor `TurnStreamingEvent` union has no case for
+ * Taps Sentinel approval events off a raw stream or history item before the vendor
+ * conversion narrows it away: the vendor event unions have no case for
  * `tool.approval_required`, so it cannot travel the normal chat pipeline. The SDK parser
  * passes unknown event types and fields through, so `extractSentinelFromEvent` parses the
  * raw item defensively. Published per tool call; `SentinelStateProvider` subscribes.
  */
-function tapSentinelStreamEvent(data: TrueForgeApi.TurnStreamingEvent): void {
+function tapSentinelStreamEvent(data: TrueForgeApi.TurnStreamingEvent | TrueForgeApi.SessionEvent): void {
   for (const info of extractSentinelFromEvent(data)) publishSentinelEvent(info);
+}
+
+/**
+ * Taps the compaction start and end off a raw stream item, before the vendor conversion narrows
+ * them away. The chat stops being "compacting" when compaction ends, the reply starts, or the
+ * turn ends, so a cancelled compaction that never sends its end still clears.
+ */
+function tapContextCompactionStreamEvent(sessionId: string, data: TrueForgeApi.TurnStreamingEvent): void {
+  switch (data.type) {
+    case 'agent.context.compaction_started':
+      publishContextCompaction({ sessionId, active: true });
+      return;
+    case 'agent.context.compaction':
+    case 'model.message.delta':
+    case 'model.message':
+    case 'turn.created':
+    case 'turn.done':
+      publishContextCompaction({ sessionId, active: false });
+      return;
+    default:
+      return;
+  }
 }
 
 /**
@@ -477,6 +530,7 @@ async function* subscribeTurnOnce(
     if (item.data.type === 'document.ingestion') {
       publishDocumentIngestionEvent(turnId, item.data);
     }
+    tapContextCompactionStreamEvent(sessionId, item.data);
     tapSentinelStreamEvent(item.data);
     if (item.data.type === 'turn.done') {
       seenTurnDone.done = true;
@@ -496,10 +550,9 @@ async function* subscribeTurnOnce(
  * `turn.done` carrying that state instead of surfacing the raw 412.
  *
  * When the record still says `running`, the turn's executor died with the
- * restart and will never complete on its own: that is reported as a plain,
- * actionable error (the user can cancel the turn and send again) rather than
- * a hung loading state or a synthesized terminal state the server would
- * contradict on the next send.
+ * restart and will never complete on its own. It is cancelled, as the person
+ * would, so the chat is free for the next send, and reported as a reply the
+ * restart stopped rather than a hung loading state.
  */
 async function* fallbackToTurnFinalState(input: {
   client: TrueForge;
@@ -513,11 +566,13 @@ async function* fallbackToTurnFinalState(input: {
   const response = await client.sessions.getTurn(sessionId, turnId);
   const state = response.data.state;
   if (state.status === 'running') {
-    throw new Error(
-      'The server restarted while this turn was running, so its live updates are gone. ' +
-        'Cancel this turn and send your message again, or reload the chat.',
-      { cause: streamGoneError },
-    );
+    try {
+      await client.sessions.cancel(sessionId);
+    } catch (cancelError) {
+      // A send that the server still refuses re-attaches here and tries the cancel again.
+      throw new ReplyStoppedByRestartError({ cause: cancelError });
+    }
+    throw new ReplyStoppedByRestartError({ cause: streamGoneError });
   }
   const sequenceNumber = (cursor.sequence ?? 0) + 1;
   cursor.sequence = sequenceNumber;
@@ -546,9 +601,9 @@ async function* fallbackToTurnFinalState(input: {
  * still running server-side never surfaces as a failed turn. Resumes from
  * `cursor` (exclusive), bounded by `TURN_STREAM_RECONNECT_MAX_ATTEMPTS` with
  * capped exponential backoff. Gives up only when the caller cancels
- * (`abortSignal`), the server reports the turn is gone, or retries are
- * exhausted — rethrowing the triggering error unchanged for the caller to
- * normalize.
+ * (`abortSignal`) or the server reports the turn is gone, rethrowing that
+ * error unchanged. Exhausted retries throw `LiveConnectionLostError` so the
+ * chat resyncs from the server rather than marking the turn failed.
  */
 async function* subscribeWithReconnect(
   client: TrueForge,
@@ -581,8 +636,7 @@ async function* subscribeWithReconnect(
       }
       attempt += 1;
       if (attempt > TURN_STREAM_RECONNECT_MAX_ATTEMPTS) {
-        const error = new Error('Turn stream ended without turn.done and retries exhausted');
-        throw error;
+        throw new LiveConnectionLostError();
       }
       await delay(reconnectDelayMs(attempt), abortSignal);
       if (abortSignal && abortSignal.aborted) {
@@ -608,7 +662,7 @@ async function* subscribeWithReconnect(
       }
       attempt += 1;
       if (attempt > TURN_STREAM_RECONNECT_MAX_ATTEMPTS) {
-        throw error;
+        throw new LiveConnectionLostError({ cause: error });
       }
       await delay(reconnectDelayMs(attempt), abortSignal);
       if (abortSignal && abortSignal.aborted) {
@@ -712,7 +766,8 @@ export function createHarnessChatServer(
       // The pill's persona switch is a separate HTTP request. If the user hit
       // send while that PUT was still in flight, wait for it so the turn is
       // admitted after the new activation lands instead of answering as the
-      // old persona.
+      // old persona. A pick made on a new chat before it existed lands here, before its first turn.
+      await applyHeldPersona(sessionId);
       await awaitPendingPersonaMutation();
       const cursor: TurnStreamCursor = { sequence: undefined };
       const seenTurnDone = { done: false };
@@ -742,6 +797,7 @@ export function createHarnessChatServer(
           if (item.data.type === 'document.ingestion' && turnId !== undefined) {
             publishDocumentIngestionEvent(turnId, item.data);
           }
+          tapContextCompactionStreamEvent(sessionId, item.data);
           tapSentinelStreamEvent(item.data);
           if (item.data.type === 'turn.done') {
             seenTurnDone.done = true;
@@ -813,6 +869,9 @@ export function createHarnessChatServer(
         ...(limit === undefined ? {} : { limit }),
       });
       const data = page.data.flatMap(item => {
+        // A chat that learns of a waiting call from history (opened mid-turn, or caught up after the
+        // live stream dropped) gets its card here; the chat's one saved-card read may predate the ask.
+        tapSentinelStreamEvent(item.event);
         const converted = toUiEventItem(item);
         return converted === undefined ? [] : [converted];
       });

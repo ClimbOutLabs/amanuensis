@@ -98,7 +98,8 @@ test_list() {
   assert_contains "$OUT" "second"
   assert_contains "$OUT" "running"
   assert_contains "$OUT" "8792"
-  assert_contains "$OUT" "second@example.invalid"
+  assert_contains "$OUT" "PERSON"
+  assert_not_contains "$OUT" "OWNER"
   rm -f "$SB_STATE/up/aman-second"
   run_install instance list
   assert_contains "$OUT" "stopped"
@@ -145,7 +146,7 @@ test_purge_after_remove_deletes_the_leftover_volumes() {
   assert_contains "$(cat "$SB_STATE/volumes")" "aman_second_data" "--yes does not confirm"
   run_install instance remove second --purge-data --confirm-name second
   assert_rc 0
-  assert_contains "$OUT" "deleted its data volumes"
+  assert_contains "$OUT" "deleted its data:"
   assert_contains "$(cat "$SB_STATE/volumes_removed")" "aman_second_data"
   assert_contains "$(cat "$SB_STATE/volumes_removed")" "aman_second_dex"
   assert_not_contains "$(cat "$SB_STATE/volumes")" "aman_second_"
@@ -165,8 +166,8 @@ test_purge_failure_is_not_reported_as_success() {
   STUB_VOLUME_RM_FAIL=aman_second_data
   run_install instance remove second --purge-data --confirm-name second
   assert_rc 1
-  assert_flat_contains "$ERR" "could not delete the volumes: aman_second_data"
-  assert_not_contains "$OUT" "deleted its data volumes"
+  assert_flat_contains "$ERR" "The data could not be deleted: aman_second_data"
+  assert_not_contains "$OUT" "deleted its data:"
   assert_contains "$(cat "$SB_STATE/volumes")" "aman_second_data"
   unset STUB_VOLUME_RM_FAIL
   run_install instance remove second --purge-data --confirm-name second
@@ -207,6 +208,105 @@ test_yes_does_not_bypass_purge_confirmation() {
   sandbox_drop
 }
 
+test_purge_removes_leftovers_that_were_never_saved() {
+  t_begin "a purge removes the sandbox containers, networks and volumes of an instance that has no registry entry"
+  sandbox_new
+  install_machine
+  printf '%s\n' "ghost-slots c-ghost1" "ghost-slots c-ghost2" >"$SB_STATE/leftover_containers"
+  printf '%s\n' "ghost-slots net-ghost" >"$SB_STATE/leftover_networks"
+  printf '%s\n' ghost_slot_ws_1 ghost_slot_ctl_1 aman_ghost_data >>"$SB_STATE/volumes"
+  assert_no_path "$AMAN_HOME/state/instances/ghost.conf"
+  run_install instance remove ghost
+  assert_rc 0
+  assert_contains "$OUT" "already removed"
+  assert_contains "$OUT" "instance remove ghost --purge-data"
+  assert_no_path "$SB_STATE/volumes_removed"
+  run_install instance remove ghost --purge-data --confirm-name ghost
+  assert_rc 0
+  assert_contains "$OUT" "Removed instance ghost and deleted its data:"
+  assert_contains "$OUT" "also removed 2 containers and 1 networks"
+  assert_contains "$(cat "$SB_STATE/containers_removed")" "c-ghost1"
+  assert_contains "$(cat "$SB_STATE/containers_removed")" "c-ghost2"
+  assert_contains "$(cat "$SB_STATE/networks_removed")" "net-ghost"
+  # The sandbox tools delete the slot volumes themselves, so they are gone rather than listed as removed here.
+  assert_not_contains "$(cat "$SB_STATE/volumes")" "ghost_slot_ws_1"
+  assert_not_contains "$(cat "$SB_STATE/volumes")" "ghost_slot_ctl_1"
+  assert_contains "$(cat "$SB_STATE/volumes_removed")" "aman_ghost_data"
+  assert_contains "$(cat "$SB_STATE/volumes")" "aman_main_data" "the saved instance is untouched"
+  assert_file "$SB_STATE/up/aman-machine"
+  run_install instance remove ghost --purge-data --confirm-name ghost
+  assert_contains "$OUT" "nothing to do"
+  sandbox_drop
+}
+
+test_removing_the_last_instance_takes_the_machine_project_with_it() {
+  t_begin "purging the last instance removes the shared project and the installer's files, but keeps the log and backups"
+  sandbox_new
+  install_machine
+  assert_file "$SB_STATE/up/aman-machine"
+  assert_contains "$(cat "$SB_STATE/volumes")" "aman_stt_cache"
+  mkdir -p "$AMAN_HOME/backups/one"
+  run_install instance remove main
+  assert_rc 0
+  assert_contains "$OUT" "shared speech-to-text service and its downloaded model are kept"
+  assert_contains "$OUT" "instance remove main --purge-data"
+  assert_file "$SB_STATE/up/aman-machine"
+  assert_file "$AMAN_HOME/machine/compose.yaml"
+  run_install instance remove main --purge-data --confirm-name main
+  assert_rc 0
+  assert_contains "$OUT" "this was the last instance"
+  assert_contains "$OUT" "Your backups in $AMAN_HOME/backups were kept"
+  assert_no_path "$SB_STATE/up/aman-machine"
+  assert_not_contains "$(cat "$SB_STATE/volumes")" "aman_stt_cache"
+  assert_contains "$(cat "$SB_STATE/volumes_removed")" "aman_stt_cache"
+  assert_no_path "$AMAN_HOME/machine"
+  assert_no_path "$AMAN_HOME/instances"
+  assert_no_path "$AMAN_HOME/state/instances"
+  assert_no_path "$AMAN_HOME/state/installed"
+  assert_file "$AMAN_HOME/state/install.log"
+  assert_contains "$(cat "$AMAN_HOME/state/install.log")" "instance main purged"
+  if [ -d "$AMAN_HOME/backups/one" ]; then t_pass; else t_fail "the backups were deleted"; fi
+  sandbox_drop
+}
+
+test_removing_one_of_two_instances_leaves_the_machine_project() {
+  t_begin "purging one of two instances leaves the shared project running"
+  sandbox_new
+  install_machine
+  add_instance second
+  run_install instance remove second --purge-data --confirm-name second
+  assert_rc 0
+  assert_not_contains "$OUT" "last instance"
+  assert_file "$SB_STATE/up/aman-machine"
+  assert_contains "$(cat "$SB_STATE/volumes")" "aman_stt_cache"
+  assert_file "$AMAN_HOME/machine/compose.yaml"
+  assert_file "$AMAN_HOME/state/instances/main.conf"
+  sandbox_drop
+}
+
+test_a_failed_first_install_names_its_cleanup() {
+  t_begin "an install that fails before the instance is saved ends with the one cleanup command, and it works"
+  sandbox_new
+  echo needs_apparmor >"$SB_STATE/slots_state"
+  with_input "$SENTINEL_PASSWORD
+"
+  run_install --yes --password-stdin --email owner@example.invalid
+  clear_input
+  assert_rc 1
+  assert_no_path "$AMAN_HOME/state/instances/main.conf"
+  case "$ERR" in
+    *"install.sh instance remove main --purge-data") t_pass ;;
+    *) t_fail "the error output does not end with the cleanup command: [$ERR]" ;;
+  esac
+  printf '%s\n' "main-slots c-left" >"$SB_STATE/leftover_containers"
+  printf '%s\n' main_slot_ctl_1 >>"$SB_STATE/volumes"
+  run_install instance remove main --purge-data --confirm-name main
+  assert_rc 0
+  assert_contains "$(cat "$SB_STATE/containers_removed")" "c-left"
+  assert_not_contains "$(cat "$SB_STATE/volumes")" "main_slot_ctl_1"
+  sandbox_drop
+}
+
 test_name_validation() {
   t_begin "unsafe or reserved instance names are rejected"
   sandbox_new
@@ -229,6 +329,7 @@ test_public_url_rules() {
   assert_eq "$(env_value pub OIDC_ISSUER_URL)" "https://login.example.invalid/dex"
   assert_contains "$(cat "$AMAN_HOME/instances/pub/dex.yaml")" "issuer: https://login.example.invalid/dex"
   assert_contains "$(cat "$AMAN_HOME/instances/pub/dex.yaml")" "https://aman.example.invalid/api/v1/auth/callback"
+  assert_contains "$(cat "$AMAN_HOME/instances/pub/dex.yaml")" "http: 127.0.0.1:"
   assert_contains "$OUT" "Requirements for your reverse proxy"
   assert_eq "$(env_value pub TRUSTED_PROXY_ADDRESSES)" "172.30.0.1" "the app believes the proxy that reaches it through the network's gateway"
   assert_contains "$(cat "$STUB_LOG")" "--force-recreate --no-deps --wait --wait-timeout 120 app"
@@ -276,12 +377,67 @@ test_a_new_instance_points_to_settings_for_a_model() {
   sandbox_drop
 }
 
+test_add_warns_when_the_installed_version_differs() {
+  local builds
+  t_begin "instance add says once when the installed Aman is not the same version as this checkout, and nothing when they match"
+  sandbox_new
+  install_machine
+  add_instance same
+  assert_rc 0
+  assert_not_contains "$OUT$ERR" "not the same version as this copy"
+  repo_commit_change "newer code"
+  builds=$(log_count "docker build")
+  add_instance later
+  assert_rc 0
+  assert_flat_contains "$ERR" "The installed Aman is not the same version as this copy of its code. To use this code, run: installer/install.sh upgrade"
+  assert_eq "$(printf '%s' "$ERR" | grep -c 'not the same version as this copy')" 1 "the warning shows once"
+  assert_eq "$(log_count "docker build")" "$builds" "nothing was built"
+  sandbox_drop
+}
+
+test_add_without_a_name_asks_for_one() {
+  t_begin "instance add with no name asks for one at a terminal, with no default, and refuses an empty, taken or invalid name"
+  sandbox_new
+  install_machine
+  run_install_tty "Name for this instance:=>
+Name for this instance:=>main
+Name for this instance:=>Bad_Name
+Name for this instance:=>work
+Your email=>work@example.invalid
+What should Aman call you?=>
+Enter a password for work@example.invalid=>$SENTINEL_PASSWORD
+Enter password again=>$SENTINEL_PASSWORD" instance add
+  assert_eq "$RC" 0
+  assert_not_contains "$OUT" "Name for this instance ["
+  assert_eq "$(printf '%s' "$OUT" | grep -c 'Name for this instance:')" 4 "the question is asked until the name is usable"
+  assert_flat_contains "$OUT" "A name is needed. Use 1 to 24 lowercase letters, numbers or hyphens, starting with a letter."
+  assert_flat_contains "$OUT" "An instance called main already exists. Pick another name."
+  assert_flat_contains "$OUT" "\"Bad_Name\" has an underscore."
+  assert_file "$AMAN_HOME/state/instances/work.conf"
+  assert_flat_contains "$OUT" "Instance work is ready."
+  sandbox_drop
+}
+
+test_add_without_a_name_and_no_terminal_is_a_usage_error() {
+  t_begin "instance add with no name and no terminal stops with the usage line, as before"
+  sandbox_new
+  install_machine
+  run_install instance add
+  assert_rc 2
+  assert_flat_contains "$ERR" "usage: install.sh instance add <name>"
+  assert_not_contains "$OUT$ERR" "Name for this instance"
+  run_install instance add --yes --email work@example.invalid
+  assert_rc 2
+  assert_flat_contains "$ERR" "usage: install.sh instance add <name>"
+  sandbox_drop
+}
+
 test_add_before_install_is_refused() {
   t_begin "instance add before the machine is set up points to install.sh"
   sandbox_new
   add_instance x
   assert_rc 1
-  assert_flat_contains "$ERR" "run install.sh first"
+  assert_flat_contains "$ERR" "Run install.sh first"
   sandbox_drop
 }
 
@@ -294,23 +450,122 @@ test_instances_are_isolated_and_images_stay_local() {
   main=$(cat "$AMAN_HOME/instances/main/compose.yaml")
   second=$(cat "$AMAN_HOME/instances/second/compose.yaml")
   machine=$(cat "$AMAN_HOME/machine/compose.yaml")
-  assert_contains "$main" "name: aman_main_stt"
-  assert_contains "$second" "name: aman_second_stt"
+  assert_contains "$main" "name: aman_main_speech"
+  assert_contains "$second" "name: aman_second_speech"
   assert_not_contains "$main" "aman_second" "an instance never names another's networks"
   assert_not_contains "$second" "aman_main_"
   assert_not_contains "$(printf '%s\n' "$main" | sed -n '/^networks:/,$p')" "external: true" "no network is shared with other instances"
   assert_not_contains "$main" "aman_machine"
   assert_contains "$machine" "container_name: aman-stt"
-  assert_log_has "network connect --alias aman-stt aman_main_stt aman-stt"
-  assert_log_has "network connect --alias aman-stt aman_second_stt aman-stt"
-  assert_eq "$(sort "$SB_STATE/network_links" | tr '\n' ',')" "aman_main_stt aman-stt,aman_second_stt aman-stt," "the speech service is the only thing joined to each"
-  assert_eq "$(grep -c 'pull_policy: never' "$AMAN_HOME/instances/main/compose.yaml")" 2 "app and holder are never pulled"
+  assert_log_has "network connect --alias aman-stt-engine aman_main_speech aman-stt"
+  assert_log_has "network connect --alias aman-stt-engine aman_second_speech aman-stt"
+  assert_eq "$(sort "$SB_STATE/network_links" | tr '\n' ',')" "aman_main_speech aman-stt,aman_second_speech aman-stt," "the speech service is the only thing joined to each"
+  assert_eq "$(grep -c 'pull_policy: never' "$AMAN_HOME/instances/main/compose.yaml")" 5 "app, holder, speech relay, calendar and email connector are never pulled"
   assert_contains "$machine" "pull_policy: never"
   assert_not_contains "$(sed -n '/^  dex:/,/^configs:/p' "$AMAN_HOME/instances/main/compose.yaml")" "pull_policy" "the login image is pulled by digest"
   run_install instance remove second
   assert_rc 0
-  assert_log_has "network disconnect -f aman_second_stt aman-stt"
-  assert_not_contains "$(cat "$SB_STATE/network_links")" "aman_second_stt"
+  assert_log_has "network disconnect -f aman_second_speech aman-stt"
+  assert_not_contains "$(cat "$SB_STATE/network_links")" "aman_second_speech"
+  sandbox_drop
+}
+
+# What an instance set up by a release before the speech relay left behind: aman_<name>_stt with the speech service on it.
+seed_old_speech_network() {
+  echo "aman_$1_stt" >>"$SB_STATE/networks"
+  echo "aman_$1_stt aman-stt" >>"$SB_STATE/network_links"
+  echo "aman_$1_stt aman-stt aman-stt" >>"$SB_STATE/network_aliases"
+}
+
+test_upgrade_moves_speech_off_the_old_network() {
+  t_begin "an upgrade puts an instance on a newly named speech network and removes the old one"
+  sandbox_new
+  install_machine
+  local main
+  main=$(cat "$AMAN_HOME/instances/main/compose.yaml")
+  assert_contains "$(printf '%s\n' "$main" | sed -n '/^networks:/,$p')" "  speech:" "the network has a new key"
+  assert_contains "$main" "name: aman_main_speech"
+  assert_contains "$(printf '%s\n' "$main" | sed -n '/^  speech-link:/,/^  app:/p')" "      speech: {}" "the relay is on it"
+  assert_not_contains "$main" "_stt" "the old network is not named"
+  seed_old_speech_network main
+  repo_commit_change "app change"
+  run_install upgrade
+  assert_rc 0
+  assert_log_has "network disconnect -f aman_main_stt aman-stt"
+  assert_log_has "network rm aman_main_stt"
+  assert_not_contains "$(cat "$SB_STATE/networks")" "aman_main_stt" "the old network is gone"
+  assert_not_contains "$(cat "$SB_STATE/network_links")" "aman_main_stt"
+  assert_contains "$(cat "$SB_STATE/network_links")" "aman_main_speech aman-stt"
+  assert_contains "$(cat "$AMAN_HOME/state/instances/main.conf")" "healthy=1"
+  assert_contains "$OUT" "Instance main is running and answering"
+  sandbox_drop
+}
+
+test_old_speech_network_still_in_use_is_kept() {
+  t_begin "the old speech network stays while a container of the instance is still on it"
+  sandbox_new
+  install_machine
+  seed_old_speech_network main
+  echo "aman_main_stt aman-main-app-1" >>"$SB_STATE/network_links"
+  repo_commit_change "app change"
+  run_install upgrade
+  assert_rc 0
+  assert_log_lacks "network rm aman_main_stt"
+  assert_contains "$(cat "$SB_STATE/network_links")" "aman_main_stt aman-main-app-1"
+  sandbox_drop
+}
+
+test_speech_service_joined_without_its_name_is_joined_again() {
+  t_begin "a speech service already on the network without the name the relay dials is joined again with it"
+  sandbox_new
+  install_machine
+  : >"$SB_STATE/network_aliases"
+  repo_commit_change "app change"
+  run_install upgrade
+  assert_rc 0
+  assert_log_has "network disconnect -f aman_main_speech aman-stt"
+  assert_eq "$(cat "$SB_STATE/network_aliases")" "aman_main_speech aman-stt aman-stt-engine"
+  assert_eq "$(grep -c 'aman_main_speech aman-stt$' "$SB_STATE/network_links")" 1 "joined once"
+  sandbox_drop
+}
+
+test_remove_takes_the_old_speech_network_along() {
+  t_begin "removing an instance also removes an old speech network it left behind"
+  sandbox_new
+  install_machine
+  add_instance second
+  seed_old_speech_network second
+  run_install instance remove second
+  assert_rc 0
+  assert_log_has "network rm aman_second_stt"
+  assert_not_contains "$(cat "$SB_STATE/networks")" "aman_second_stt"
+  sandbox_drop
+}
+
+test_speech_service_is_hardened_and_cannot_reach_the_instance() {
+  t_begin "the speech service is locked down and reaches an instance only through its relay"
+  sandbox_new
+  install_machine
+  local machine main relay_block loopback_block
+  machine=$(cat "$AMAN_HOME/machine/compose.yaml")
+  main=$(cat "$AMAN_HOME/instances/main/compose.yaml")
+  assert_contains "$machine" "user: '10001:10001'" "not root"
+  assert_contains "$machine" "- ALL" "no capabilities"
+  assert_contains "$machine" "no-new-privileges:true"
+  assert_contains "$machine" "read_only: true"
+  assert_contains "$machine" "tmpfs:"
+  assert_contains "$machine" "mem_limit: 2g"
+  assert_contains "$machine" "pids_limit: 256"
+  relay_block=$(printf '%s\n' "$main" | sed -n '/^  speech-link:/,/^  app:/p')
+  loopback_block=$(printf '%s\n' "$main" | sed -n '/^  loopback:/,/^  speech-link:/p')
+  assert_contains "$relay_block" "- aman-stt" "the app finds speech under the name it always used"
+  assert_contains "$relay_block" "read_only: true"
+  assert_contains "$relay_block" "no-new-privileges:true"
+  assert_contains "$relay_block" "pids_limit"
+  assert_contains "$loopback_block" "- link"
+  assert_not_contains "$loopback_block" "- stt" "the shared network of app, login and front end is not on the speech network"
+  assert_contains "$(printf '%s\n' "$main" | sed -n '/^networks:/,$p')" "internal: true"
+  assert_eq "$(printf '%s\n' "$main" | sed -n '/^networks:/,$p' | grep -c 'internal: true')" 2 "both speech networks are internal"
   sandbox_drop
 }
 
@@ -360,7 +615,7 @@ test_refresh_puts_back_lost_settings() {
       assert_eq "$(printf '%s\n' "$after" | grep "^$other=")" "$(printf '%s\n' "$before" | grep "^$other=")" "$other is unchanged"
     done
     case "$key" in
-      OIDC_CLIENT_SECRET | TRUEFORGE_API_KEY) ;;
+      OIDC_CLIENT_SECRET | TRUEFORGE_API_KEY | CALENDAR_ACCOUNT_SECRET) ;;
       *) assert_eq "$(printf '%s\n' "$after" | grep "^$key=")" "$(printf '%s\n' "$before" | grep "^$key=")" "$key comes back as it was" ;;
     esac
   done
@@ -416,12 +671,24 @@ test_add_existing_is_idempotent
 test_list
 test_remove_keeps_volumes
 test_instances_are_isolated_and_images_stay_local
+test_upgrade_moves_speech_off_the_old_network
+test_old_speech_network_still_in_use_is_kept
+test_speech_service_joined_without_its_name_is_joined_again
+test_remove_takes_the_old_speech_network_along
+test_speech_service_is_hardened_and_cannot_reach_the_instance
 test_app_env_lacks_dex_only_values
 test_purge_after_remove_deletes_the_leftover_volumes
 test_purge_failure_is_not_reported_as_success
 test_purge_needs_typed_name
 test_yes_does_not_bypass_purge_confirmation
+test_purge_removes_leftovers_that_were_never_saved
+test_removing_the_last_instance_takes_the_machine_project_with_it
+test_removing_one_of_two_instances_leaves_the_machine_project
+test_a_failed_first_install_names_its_cleanup
 test_name_validation
+test_add_warns_when_the_installed_version_differs
+test_add_without_a_name_asks_for_one
+test_add_without_a_name_and_no_terminal_is_a_usage_error
 test_public_url_rules
 test_url_validation
 test_a_new_instance_points_to_settings_for_a_model

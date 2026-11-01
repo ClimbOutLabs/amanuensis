@@ -26,7 +26,7 @@ over hacking third-party CSS:
 <TrueForgeUI
   layout="sidebar"
   theme={{
-    preset: 'claude',
+    preset: 'paper',
     mode: 'dark',
     tokens: { primary: '#e11d48' },
     brand: { mode: 'logo', name: 'Acme', icon: '/brand/icon.svg', logo: '/brand/wordmark.svg' },
@@ -78,7 +78,7 @@ Public override surface (primitives stay theme/CSS — not slots):
 - **Attachments / toasts:** `AttachmentCard`, `AttachmentPreviewDialog`,
   `AttachmentPickerButton`, `Toast`, `ToastStack`
 - **Tools / prompts:** `ToolCallCard`, `ToolCallContentBlock`,
-  `ToolApprovalBar`, `ToolGroupCard`, `SubAgentCard`, `SandboxToolCallCard`,
+  `ToolGroupCard`, `SubAgentCard`, `SandboxToolCallCard`,
   `AgentStepsCard`, `ReasoningCard`, `AskUserPrompt`, `McpAuthPrompt`,
   `ResumeUnavailable`
 

@@ -23,6 +23,7 @@ function mockClient(
           id: 's1',
           name: 'job',
           agentName: 'alpha',
+          runsAs: 'Bender',
           createdAt: new Date('2024-01-01T00:00:00.000Z'),
           updatedAt: new Date('2024-01-01T00:00:00.000Z'),
           createdBySubject: {
@@ -72,6 +73,7 @@ describe('createScheduleServer.listSchedules', () => {
           id: 's1',
           name: 'job',
           agentName: 'alpha',
+          runsAs: 'Bender',
           createdAt: new Date('2024-01-01T00:00:00.000Z'),
           updatedAt: new Date('2024-01-01T00:00:00.000Z'),
           createdBySubject: {
@@ -102,6 +104,7 @@ describe('createScheduleServer.listSchedules', () => {
     });
     expect(page.data).toHaveLength(1);
     expect(page.data[0]?.agentId).toBe('a1');
+    expect(page.data[0]?.runsAs).toBe('Bender');
     expect(page.data[0]?.status).toBe('paused');
     expect(page.data[0]?.createdBySubject).toEqual({
       subjectId: 'user-1',
@@ -109,6 +112,36 @@ describe('createScheduleServer.listSchedules', () => {
       subjectDisplayName: 'alice@example.com',
     });
     expect(page.nextPageToken).toBe('tok');
+  });
+
+  it('resolves a schedule made in a chat, whose agent the agents list leaves out', async () => {
+    const list = vi.fn(async () => ({
+      data: [
+        {
+          id: 's2',
+          name: 'lobster-joke',
+          agentName: 'assistant-0123456789abcdef',
+          runsAs: 'Bender',
+          createdAt: new Date('2024-01-01T00:00:00.000Z'),
+          updatedAt: new Date('2024-01-01T00:00:00.000Z'),
+          createdBySubject: { subjectId: 'user-1', subjectType: 'user', subjectDisplayName: 'alice@example.com' },
+          manifest: { task: 'Tell me a lobster joke.', cron: '0 8 * * *', timezone: 'UTC', status: 'active' as const },
+        },
+      ],
+      response: { pagination: { limit: 25 } },
+      hasNextPage: () => false,
+      getNextPage: async () => undefined,
+    }));
+    const server = createScheduleServer({ client: mockClient({ list }) });
+
+    const page = await server.listSchedules({});
+    const [schedule] = page.data;
+    expect(schedule).toMatchObject({ agentId: 'assistant-0123456789abcdef', runsAs: 'Bender' });
+
+    await expect(server.listSchedules({ agentIds: [schedule?.agentId ?? ''] })).resolves.toMatchObject({
+      data: [{ runsAs: 'Bender' }],
+    });
+    expect(list).toHaveBeenLastCalledWith(expect.objectContaining({ agentNames: 'assistant-0123456789abcdef' }));
   });
 
   it('caps limit at 25', async () => {
@@ -166,5 +199,168 @@ describe('createScheduleServer schedule runs', () => {
     expect(createRun).toHaveBeenCalledWith({ scheduleId: 's1' });
     expect(run.id).toBe('run-1');
     expect(run.triggeredAt).toBe('2024-06-01T12:00:01.000Z');
+  });
+});
+
+describe('createScheduleServer.listSchedules with one-time schedules and reminders', () => {
+  function row(id: string, manifest: Record<string, unknown>) {
+    return {
+      id,
+      name: id,
+      agentName: 'alpha',
+      runsAs: 'Bender',
+      createdAt: new Date('2024-01-01T00:00:00.000Z'),
+      updatedAt: new Date('2024-01-01T00:00:00.000Z'),
+      createdBySubject: { subjectId: 'user-1', subjectType: 'user', subjectDisplayName: 'alice@example.com' },
+      manifest: { task: 'do thing', timezone: 'UTC', status: 'active', ...manifest },
+    };
+  }
+
+  it('lists repeating tasks only: a one-time schedule or a reminder is not edited as a task', async () => {
+    const list = vi.fn(async () => ({
+      data: [
+        row('repeating', { cron: '0 9 * * *' }),
+        row('once', { cron: null, runAt: '2026-10-26T18:00:00-04:00' }),
+        row('repeating-reminder', { cron: '0 9 * * *', kind: 'reminder' }),
+      ],
+      response: { pagination: { limit: 25 } },
+      hasNextPage: () => false,
+      getNextPage: async () => undefined,
+    }));
+    const server = createScheduleServer({ client: mockClient({ list }) });
+    const result = await server.listSchedules();
+    expect(result.data.map(schedule => schedule.id)).toEqual(['repeating']);
+  });
+
+  /** Pages the way the SDK does: one object that moves to the next server page when asked. */
+  function pagedList(pages: ReturnType<typeof row>[][]) {
+    return vi.fn(async () => {
+      let at = 0;
+      const page = {
+        data: pages[0] ?? [],
+        response: { pagination: { limit: 25, nextPageToken: pages.length > 1 ? 'page-1' : undefined } },
+        hasNextPage: () => at < pages.length - 1,
+        getNextPage: async () => {
+          at += 1;
+          page.data = pages[at] ?? [];
+          page.response = {
+            pagination: { limit: 25, nextPageToken: at < pages.length - 1 ? `page-${String(at + 1)}` : undefined },
+          };
+          return page;
+        },
+      };
+      return page;
+    });
+  }
+
+  it('still lists a morning brief made in a chat when newer reminders fill the first page', async () => {
+    const reminders = Array.from({ length: 25 }, (_, index) =>
+      row(`reminder-${String(index)}`, { cron: null, runAt: '2026-10-26T18:00:00-04:00', kind: 'reminder' }),
+    );
+    const morningBrief = row('morning-brief', { cron: '0 8 * * 1-5', kind: 'task' });
+    const server = createScheduleServer({ client: mockClient({ list: pagedList([reminders, [morningBrief]]) }) });
+
+    const result = await server.listSchedules();
+
+    expect(result.data.map(schedule => schedule.id)).toEqual(['morning-brief']);
+    expect(result.nextPageToken).toBeUndefined();
+  });
+
+  function reminderRows(count: number, prefix: string) {
+    return Array.from({ length: count }, (_, index) =>
+      row(`${prefix}-${String(index)}`, { cron: null, runAt: '2026-10-26T18:00:00-04:00', kind: 'reminder' }),
+    );
+  }
+
+  it('stops after ten pages of reminders and hands back the token to read on', async () => {
+    const pages = Array.from({ length: 30 }, (_, index) => reminderRows(2, `page-${String(index)}`));
+    const server = createScheduleServer({ client: mockClient({ list: pagedList(pages) }) });
+
+    const result = await server.listSchedules();
+
+    expect(result.data).toEqual([]);
+    expect(result.nextPageToken).toBe('page-10');
+  });
+
+  it('stops when the next token repeats the one just used, and offers no token', async () => {
+    const getNextPage = vi.fn();
+    const page = {
+      data: reminderRows(2, 'loop'),
+      response: { pagination: { limit: 25, nextPageToken: 'same' } },
+      hasNextPage: () => true,
+      getNextPage,
+    };
+    getNextPage.mockImplementation(async () => page);
+    const server = createScheduleServer({ client: mockClient({ list: vi.fn(async () => page) }) });
+
+    const result = await server.listSchedules({ pageToken: 'same' });
+
+    expect(result.data).toEqual([]);
+    expect(result.nextPageToken).toBeUndefined();
+    expect(getNextPage).not.toHaveBeenCalled();
+  });
+
+  it('stops a token that comes back after one more page', async () => {
+    const getNextPage = vi.fn();
+    const page = {
+      data: reminderRows(2, 'loop'),
+      response: { pagination: { limit: 25, nextPageToken: 'a' } },
+      hasNextPage: () => true,
+      getNextPage,
+    };
+    getNextPage.mockImplementation(async () => page);
+    const server = createScheduleServer({ client: mockClient({ list: vi.fn(async () => page) }) });
+
+    const result = await server.listSchedules();
+
+    expect(result.nextPageToken).toBeUndefined();
+    expect(getNextPage).toHaveBeenCalledTimes(1);
+  });
+
+  it('stops a token that cycles A, B, A, and offers no token', async () => {
+    const tokens = ['A', 'B', 'A'];
+    let at = 0;
+    const getNextPage = vi.fn();
+    const page = {
+      data: reminderRows(2, 'cycle'),
+      response: { pagination: { limit: 25, nextPageToken: tokens[0] } },
+      hasNextPage: () => true,
+      getNextPage,
+    };
+    getNextPage.mockImplementation(async () => {
+      at += 1;
+      page.response = { pagination: { limit: 25, nextPageToken: tokens[at] ?? 'A' } };
+      return page;
+    });
+    const server = createScheduleServer({ client: mockClient({ list: vi.fn(async () => page) }) });
+
+    const result = await server.listSchedules();
+
+    expect(result.data).toEqual([]);
+    expect(result.nextPageToken).toBeUndefined();
+    expect(getNextPage).toHaveBeenCalledTimes(2);
+  });
+
+  it('returns nothing and no token when every page is reminders', async () => {
+    const server = createScheduleServer({
+      client: mockClient({ list: pagedList([reminderRows(3, 'a'), reminderRows(3, 'b'), reminderRows(1, 'c')]) }),
+    });
+
+    const result = await server.listSchedules();
+
+    expect(result.data).toEqual([]);
+    expect(result.nextPageToken).toBeUndefined();
+  });
+
+  it('keeps the token to the next page after the page it stopped on', async () => {
+    const reminder = row('reminder', { cron: null, runAt: '2026-10-26T18:00:00-04:00', kind: 'reminder' });
+    const first = row('first', { cron: '0 8 * * *' });
+    const second = row('second', { cron: '0 9 * * *' });
+    const server = createScheduleServer({ client: mockClient({ list: pagedList([[reminder], [first], [second]]) }) });
+
+    const result = await server.listSchedules();
+
+    expect(result.data.map(schedule => schedule.id)).toEqual(['first']);
+    expect(result.nextPageToken).toBe('page-2');
   });
 });

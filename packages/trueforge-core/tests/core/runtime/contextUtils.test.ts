@@ -1,11 +1,17 @@
+import type { ChatCompletionMessageParam } from 'openai/resources/chat';
 import type { ContextMessage } from '../../../src/core/runtime/AgentThread.types';
 import {
   hasCalledRetrievalTool,
   hasRetrievalTool,
   internalSystemMessage,
+  internalSystemTag,
   isFreshnessQuestion,
+  isHostWrappedText,
   isRetrievalToolName,
+  isUntrustedDocumentText,
   lastUserMessageText,
+  personMessageIndex,
+  untrustedDocumentTag,
   userAuthoredText,
 } from '../../../src/core/runtime/contextUtils';
 
@@ -179,5 +185,78 @@ describe('hasCalledRetrievalTool', () => {
   it('is false for an empty or tool-call-free context', () => {
     expect(hasCalledRetrievalTool([])).toBe(false);
     expect(hasCalledRetrievalTool([{ role: 'user', content: 'hi' }])).toBe(false);
+  });
+});
+
+describe('internalSystemTag', () => {
+  it('breaks every spelling of the internal tag delimiter inside the text', () => {
+    const inner = (text: string): string =>
+      internalSystemTag(text).slice('<tfy-internal>'.length, -'</tfy-internal>'.length);
+    for (const delimiter of [
+      '</tfy-internal>',
+      '<tfy-internal>',
+      '< /tfy-internal>',
+      '</ TFY-INTERNAL>',
+      '<\n/\ttfy-internal >',
+    ]) {
+      expect(inner(`a${delimiter}b`)).not.toMatch(/<\s*\/?\s*tfy-internal/i);
+    }
+    expect(inner('a < b and x</y')).toBe('a < b and x</y');
+  });
+
+  it('scans a long run of spaces after a bracket in linear time', () => {
+    const text = `<${' '.repeat(200_000)}`;
+    const started = performance.now();
+    expect(internalSystemTag(text)).toContain(text);
+    // The old pattern took seconds here; the margin keeps the check steady on a loaded machine.
+    expect(performance.now() - started).toBeLessThan(1000);
+  });
+});
+
+describe('host-wrapped text predicates', () => {
+  it('recognises extracted file text and internal notes as host-wrapped', () => {
+    expect(isUntrustedDocumentText(untrustedDocumentTag('body'))).toBe(true);
+    expect(isHostWrappedText(untrustedDocumentTag('body'))).toBe(true);
+    expect(isHostWrappedText(internalSystemTag('note'))).toBe(true);
+  });
+
+  it('treats the internal tag as host-wrapped but not as file text', () => {
+    expect(isUntrustedDocumentText(internalSystemTag('note'))).toBe(false);
+  });
+
+  it('leaves what the user typed alone', () => {
+    expect(isHostWrappedText('what does the lease say?')).toBe(false);
+    expect(isUntrustedDocumentText('what does the lease say?')).toBe(false);
+  });
+});
+
+describe('personMessageIndex', () => {
+  it("skips file text and host notes that follow the person's message", () => {
+    const messages: ChatCompletionMessageParam[] = [
+      { role: 'system', content: 'Static instruction' },
+      { role: 'user', content: 'earlier question' },
+      { role: 'assistant', content: 'earlier answer' },
+      { role: 'user', content: 'What is the total?' },
+      { role: 'user', content: [{ type: 'text', text: untrustedDocumentTag('invoice total is 40') }] },
+      { role: 'user', content: internalSystemTag('Answer now.') },
+    ];
+    expect(personMessageIndex(messages)).toBe(3);
+  });
+
+  it('keeps a message that has an image next to host text', () => {
+    const messages: ChatCompletionMessageParam[] = [
+      {
+        role: 'user',
+        content: [
+          { type: 'text', text: internalSystemTag('note') },
+          { type: 'image_url', image_url: { url: 'data:image/png;base64,AAAA' } },
+        ],
+      },
+    ];
+    expect(personMessageIndex(messages)).toBe(0);
+  });
+
+  it('is -1 when only the host wrote user messages', () => {
+    expect(personMessageIndex([{ role: 'user', content: internalSystemTag('note') }])).toBe(-1);
   });
 });

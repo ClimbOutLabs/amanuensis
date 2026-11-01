@@ -88,6 +88,28 @@
             },
             "default": "./dist/cjs/api/resources/server/exports.js"
         },
+        "./data": {
+            "import": {
+                "types": "./dist/esm/api/resources/data/exports.d.mts",
+                "default": "./dist/esm/api/resources/data/exports.mjs"
+            },
+            "require": {
+                "types": "./dist/cjs/api/resources/data/exports.d.ts",
+                "default": "./dist/cjs/api/resources/data/exports.js"
+            },
+            "default": "./dist/cjs/api/resources/data/exports.js"
+        },
+        "./help": {
+            "import": {
+                "types": "./dist/esm/api/resources/help/exports.d.mts",
+                "default": "./dist/esm/api/resources/help/exports.mjs"
+            },
+            "require": {
+                "types": "./dist/cjs/api/resources/help/exports.d.ts",
+                "default": "./dist/cjs/api/resources/help/exports.js"
+            },
+            "default": "./dist/cjs/api/resources/help/exports.js"
+        },
         "./mcpServers": {
             "import": {
                 "types": "./dist/esm/api/resources/mcpServers/exports.d.mts",
@@ -374,6 +396,28 @@
             },
             "default": "./dist/cjs/api/resources/memory/resources/vault/exports.js"
         },
+        "./personalization/auditLog": {
+            "import": {
+                "types": "./dist/esm/api/resources/personalization/resources/auditLog/exports.d.mts",
+                "default": "./dist/esm/api/resources/personalization/resources/auditLog/exports.mjs"
+            },
+            "require": {
+                "types": "./dist/cjs/api/resources/personalization/resources/auditLog/exports.d.ts",
+                "default": "./dist/cjs/api/resources/personalization/resources/auditLog/exports.js"
+            },
+            "default": "./dist/cjs/api/resources/personalization/resources/auditLog/exports.js"
+        },
+        "./personalization/briefItems": {
+            "import": {
+                "types": "./dist/esm/api/resources/personalization/resources/briefItems/exports.d.mts",
+                "default": "./dist/esm/api/resources/personalization/resources/briefItems/exports.mjs"
+            },
+            "require": {
+                "types": "./dist/cjs/api/resources/personalization/resources/briefItems/exports.d.ts",
+                "default": "./dist/cjs/api/resources/personalization/resources/briefItems/exports.js"
+            },
+            "default": "./dist/cjs/api/resources/personalization/resources/briefItems/exports.js"
+        },
         "./settings": {
             "import": {
                 "types": "./dist/esm/api/resources/settings/exports.d.mts",
@@ -385,6 +429,17 @@
             },
             "default": "./dist/cjs/api/resources/settings/exports.js"
         },
+        "./settings/firstRunGuide": {
+            "import": {
+                "types": "./dist/esm/api/resources/settings/resources/firstRunGuide/exports.d.mts",
+                "default": "./dist/esm/api/resources/settings/resources/firstRunGuide/exports.mjs"
+            },
+            "require": {
+                "types": "./dist/cjs/api/resources/settings/resources/firstRunGuide/exports.d.ts",
+                "default": "./dist/cjs/api/resources/settings/resources/firstRunGuide/exports.js"
+            },
+            "default": "./dist/cjs/api/resources/settings/resources/firstRunGuide/exports.js"
+        },
         "./settings/mcpServers": {
             "import": {
                 "types": "./dist/esm/api/resources/settings/resources/mcpServers/exports.d.mts",
@@ -395,6 +450,17 @@
                 "default": "./dist/cjs/api/resources/settings/resources/mcpServers/exports.js"
             },
             "default": "./dist/cjs/api/resources/settings/resources/mcpServers/exports.js"
+        },
+        "./settings/memoryRecalls": {
+            "import": {
+                "types": "./dist/esm/api/resources/settings/resources/memoryRecalls/exports.d.mts",
+                "default": "./dist/esm/api/resources/settings/resources/memoryRecalls/exports.mjs"
+            },
+            "require": {
+                "types": "./dist/cjs/api/resources/settings/resources/memoryRecalls/exports.d.ts",
+                "default": "./dist/cjs/api/resources/settings/resources/memoryRecalls/exports.js"
+            },
+            "default": "./dist/cjs/api/resources/settings/resources/memoryRecalls/exports.js"
         },
         "./settings/memoryScreens": {
             "import": {
@@ -462,6 +528,17 @@
             },
             "default": "./dist/cjs/api/resources/settings/resources/skills/exports.js"
         },
+        "./settings/tokenFactoryUsage": {
+            "import": {
+                "types": "./dist/esm/api/resources/settings/resources/tokenFactoryUsage/exports.d.mts",
+                "default": "./dist/esm/api/resources/settings/resources/tokenFactoryUsage/exports.mjs"
+            },
+            "require": {
+                "types": "./dist/cjs/api/resources/settings/resources/tokenFactoryUsage/exports.d.ts",
+                "default": "./dist/cjs/api/resources/settings/resources/tokenFactoryUsage/exports.js"
+            },
+            "default": "./dist/cjs/api/resources/settings/resources/tokenFactoryUsage/exports.js"
+        },
         "./settings/toolOutputScreens": {
             "import": {
                 "types": "./dist/esm/api/resources/settings/resources/toolOutputScreens/exports.d.mts",
@@ -472,6 +549,28 @@
                 "default": "./dist/cjs/api/resources/settings/resources/toolOutputScreens/exports.js"
             },
             "default": "./dist/cjs/api/resources/settings/resources/toolOutputScreens/exports.js"
+        },
+        "./settings/calendar": {
+            "import": {
+                "types": "./dist/esm/api/resources/settings/resources/calendar/exports.d.mts",
+                "default": "./dist/esm/api/resources/settings/resources/calendar/exports.mjs"
+            },
+            "require": {
+                "types": "./dist/cjs/api/resources/settings/resources/calendar/exports.d.ts",
+                "default": "./dist/cjs/api/resources/settings/resources/calendar/exports.js"
+            },
+            "default": "./dist/cjs/api/resources/settings/resources/calendar/exports.js"
+        },
+        "./settings/email": {
+            "import": {
+                "types": "./dist/esm/api/resources/settings/resources/email/exports.d.mts",
+                "default": "./dist/esm/api/resources/settings/resources/email/exports.mjs"
+            },
+            "require": {
+                "types": "./dist/cjs/api/resources/settings/resources/email/exports.d.ts",
+                "default": "./dist/cjs/api/resources/settings/resources/email/exports.js"
+            },
+            "default": "./dist/cjs/api/resources/settings/resources/email/exports.js"
         },
         "./settings/google": {
             "import": {

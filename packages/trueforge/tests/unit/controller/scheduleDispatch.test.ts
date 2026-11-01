@@ -1,13 +1,21 @@
+import { DOCUMENT_REPORT_TOOL_NAMES } from '@truefoundry/trueforge-core/core';
+import { SANDBOX_FILE_WRITE_TOOLS } from '@truefoundry/trueforge-core/core/permissions/dispatch';
+import { MORNING_BRIEF_PROMPT } from '@truefoundry/trueforge-core/core/schedules/morningBrief';
+import { SPACE_READ_TOOL_NAMES, SPACE_WRITE_TOOL_NAMES } from '@truefoundry/trueforge-core/core/spaces/toolContract';
 import configuration from '../../../src/config';
 import {
   createHttpScheduleRunExecutor,
   loadScheduleDispatchItem,
   ScheduleAgentNotFoundError,
   scheduleDispatchLoop,
+  SchedulePersonaNotFoundError,
   scheduleRunFailureReason,
   ScheduleRunNotFoundError,
+  scheduleTaskText,
+  scheduleWithheldTools,
   startScheduleRun,
 } from '../../../src/controller/scheduleDispatch';
+import type { IBriefItemCompletionStore } from '../../../src/db/briefItemCompletionStore';
 import type { ScheduleDispatchItem, ScheduleRunRecord } from '../../../src/db/scheduleStore';
 import { ScheduleManifestSchema } from '../../../src/schemas/schedule';
 
@@ -22,6 +30,10 @@ describe('scheduleRunFailureReason', () => {
     expect(scheduleRunFailureReason(null)).toBe('Schedule run failed');
   });
 });
+
+function noBriefItemsDone(): Pick<IBriefItemCompletionStore, 'listCompletedSince'> {
+  return { listCompletedSince: jest.fn().mockResolvedValue([]) };
+}
 
 function item(): ScheduleDispatchItem {
   return {
@@ -43,6 +55,7 @@ function item(): ScheduleDispatchItem {
       tenant_id: 'default',
       agent_id: 'agent-1',
       agent_name: 'reporter',
+      persona_id: null,
       name: 'daily',
       manifest: ScheduleManifestSchema.parse({
         task: 'Write the report',
@@ -143,8 +156,10 @@ describe('startScheduleRun', () => {
 
     const prepared = await startScheduleRun({
       item: dispatchItem,
-      sessions: { getOrCreateByExternalId } as never,
-      agentStore: { getAgent } as never,
+      sessions: { getOrCreateByExternalId },
+      agentStore: { getAgent },
+      personaStore: { getPersona: jest.fn() },
+      briefItems: noBriefItemsDone(),
     });
 
     expect(getAgent).toHaveBeenCalledWith({ tenant_id: 'default', name: 'reporter' });
@@ -161,7 +176,54 @@ describe('startScheduleRun', () => {
       previous_turn_id: 'none',
       userRef: 'tester',
       agent: { id: 'agent-1', name: 'reporter' },
+      persona: undefined,
     });
+  });
+
+  it('runs as the persona the schedule kept from its chat', async () => {
+    const dispatchItem = item();
+    const withPersona = { ...dispatchItem, schedule: { ...dispatchItem.schedule, persona_id: 'persona-1' } };
+    const persona = {
+      tenant_id: 'default',
+      id: 'persona-1',
+      display_name: 'Zara',
+      aliases: [],
+      instructions: 'Be brief.',
+      model_name: 'openai/gpt-5.2',
+      created_by: 'tester',
+      created_at: '2026-08-31T00:00:00.000Z',
+      updated_at: '2026-08-31T00:00:00.000Z',
+      updated_by: 'tester',
+    };
+    const getPersona = jest.fn().mockResolvedValue(persona);
+
+    const prepared = await startScheduleRun({
+      item: withPersona,
+      sessions: {
+        getOrCreateByExternalId: jest
+          .fn()
+          .mockResolvedValue({ session: { listTurns: jest.fn().mockResolvedValue({ data: [] }) }, created: true }),
+      },
+      agentStore: { getAgent: jest.fn().mockResolvedValue({ id: 'agent-1', name: 'reporter' }) },
+      personaStore: { getPersona },
+      briefItems: noBriefItemsDone(),
+    });
+
+    expect(getPersona).toHaveBeenCalledWith({ tenant_id: 'default', created_by: 'tester', id: 'persona-1' });
+    expect(prepared?.persona).toEqual(persona);
+  });
+
+  it('fails the run in plain words when its persona was deleted', async () => {
+    const dispatchItem = item();
+    await expect(
+      startScheduleRun({
+        item: { ...dispatchItem, schedule: { ...dispatchItem.schedule, persona_id: 'persona-gone' } },
+        sessions: { getOrCreateByExternalId: jest.fn() },
+        agentStore: { getAgent: jest.fn().mockResolvedValue({ id: 'agent-1', name: 'reporter' }) },
+        personaStore: { getPersona: jest.fn().mockResolvedValue(undefined) },
+        briefItems: noBriefItemsDone(),
+      }),
+    ).rejects.toThrow(new SchedulePersonaNotFoundError());
   });
 
   it('returns undefined when the session already has a turn', async () => {
@@ -174,8 +236,10 @@ describe('startScheduleRun', () => {
 
     const prepared = await startScheduleRun({
       item: item(),
-      sessions: { getOrCreateByExternalId } as never,
-      agentStore: { getAgent } as never,
+      sessions: { getOrCreateByExternalId },
+      agentStore: { getAgent },
+      personaStore: { getPersona: jest.fn() },
+      briefItems: noBriefItemsDone(),
     });
 
     expect(prepared).toBeUndefined();
@@ -185,8 +249,10 @@ describe('startScheduleRun', () => {
     await expect(
       startScheduleRun({
         item: item(),
-        sessions: { getOrCreateByExternalId: jest.fn() } as never,
-        agentStore: { getAgent: jest.fn().mockResolvedValue(undefined) } as never,
+        sessions: { getOrCreateByExternalId: jest.fn() },
+        agentStore: { getAgent: jest.fn().mockResolvedValue(undefined) },
+        personaStore: { getPersona: jest.fn() },
+        briefItems: noBriefItemsDone(),
       }),
     ).rejects.toBeInstanceOf(ScheduleAgentNotFoundError);
   });
@@ -220,5 +286,68 @@ describe('loadScheduleDispatchItem', () => {
       }),
     ).rejects.toBeInstanceOf(ScheduleRunNotFoundError);
     expect(getSchedule).not.toHaveBeenCalled();
+  });
+});
+
+describe('scheduleTaskText', () => {
+  const owner = { tenant_id: 'default', created_by: 'tester' };
+  const now = new Date('2026-10-22T08:00:00.000Z');
+  const done = (title: string) => ({
+    item_key: `bi_${title}`,
+    section: 'decision' as const,
+    title,
+    completed_at: '2026-10-21T09:00:00.000Z',
+  });
+
+  it('leaves a non-brief task unchanged and does not read completions', async () => {
+    const listCompletedSince = jest.fn().mockResolvedValue([done('A')]);
+    const text = await scheduleTaskText({ task: 'Write the report', owner, briefItems: { listCompletedSince }, now });
+    expect(text).toBe('Write the report');
+    expect(listCompletedSince).not.toHaveBeenCalled();
+  });
+
+  it('leaves a brief unchanged when nothing was marked done in the last seven days', async () => {
+    const text = await scheduleTaskText({
+      task: MORNING_BRIEF_PROMPT,
+      owner,
+      briefItems: noBriefItemsDone(),
+      now,
+    });
+    expect(text).toBe(MORNING_BRIEF_PROMPT);
+  });
+
+  it('appends the done titles to a brief for the last seven days, without repeats', async () => {
+    const listCompletedSince = jest.fn().mockResolvedValue([done('A'), done('B'), done('A')]);
+    const text = await scheduleTaskText({ task: MORNING_BRIEF_PROMPT, owner, briefItems: { listCompletedSince }, now });
+    expect(listCompletedSince).toHaveBeenCalledWith({
+      tenant_id: 'default',
+      created_by: 'tester',
+      since: new Date('2026-10-15T08:00:00.000Z'),
+    });
+    expect(text).toBe(`${MORNING_BRIEF_PROMPT}\nAlready done, leave these out of the brief: A; B.`);
+  });
+});
+
+describe('scheduleWithheldTools', () => {
+  const briefWithheld = [...DOCUMENT_REPORT_TOOL_NAMES, ...SANDBOX_FILE_WRITE_TOOLS, ...SPACE_WRITE_TOOL_NAMES];
+
+  it('withholds the document report tools and the file write tools from a morning brief run', () => {
+    expect(scheduleWithheldTools({ name: 'morning-brief', task: MORNING_BRIEF_PROMPT })).toEqual(briefWithheld);
+    expect(scheduleWithheldTools({ name: 'my-digest', task: MORNING_BRIEF_PROMPT })).toEqual(briefWithheld);
+    expect(briefWithheld).toEqual(expect.arrayContaining(['write_file', 'apply_patch', 'replace_text']));
+  });
+
+  it('withholds the space write tools but keeps reading, mail, calendar and maps available', () => {
+    const withheld = scheduleWithheldTools({ name: 'morning-brief', task: MORNING_BRIEF_PROMPT });
+    expect(withheld).toEqual(expect.arrayContaining(['create_space', 'edit_space', 'revert_space']));
+    for (const kept of [...SPACE_READ_TOOL_NAMES, 'exec', 'gmail_search', 'calendar_list_events', 'maps_route']) {
+      expect(withheld).not.toContain(kept);
+    }
+  });
+
+  it('withholds nothing from any other schedule', () => {
+    expect(scheduleWithheldTools({ name: 'weekly-report', task: 'Write the weekly report as a document.' })).toEqual(
+      [],
+    );
   });
 });

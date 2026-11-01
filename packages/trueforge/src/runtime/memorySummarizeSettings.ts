@@ -8,6 +8,7 @@ import type { IGlobalSettingsStore } from '../db/globalSettingsStore';
 import type { IModelProviderStore } from '../db/modelProviderStore';
 import type { SummarizeTurnContext } from './memory/memoryRetain';
 import { resolveSummarizationModelFqn } from './memory/memorySummarize';
+import type { TurnModelUsage } from './modelUsage';
 import type { TokenFactoryBudget } from './tokenFactoryBudget';
 
 /**
@@ -105,8 +106,8 @@ export async function readMemorySummarizeSetting(
 
 /**
  * Effective on/off for turn construction: the stored setting. Unlike screening there is
- * no external service to AND in — summarization degrades to the verbatim transcript on
- * its own when the model call fails — so the stored value is the effective value. The
+ * no external service to AND in, so the stored value is the effective value. When summaries are
+ * on, a failed or missing summary saves nothing; the full exchange is never the fallback. The
  * markdown-only gate stays in the turn path (`resolveTurnSummarizeContext`), which also logs why
  * a non-markdown backend retains turns verbatim.
  */
@@ -122,6 +123,7 @@ export interface ResolveTurnSummarizeContextParams {
   tenantId: string;
   modelProviderStore: IModelProviderStore;
   tokenFactoryBudget: TokenFactoryBudget;
+  modelUsage: TurnModelUsage;
   agentStore: IAgentStore;
   personaModelName: string | undefined;
   sessionAgent: SessionAgent;
@@ -130,17 +132,28 @@ export interface ResolveTurnSummarizeContextParams {
    * agent-store read is skipped and the turn retains verbatim.
    */
   memoryClientPresent: boolean;
+  /**
+   * The person's name from their personalization profile, as loaded by the caller for this
+   * turn, so saved facts can be written in it. Optional: a caller without a profile resolves a
+   * context with no name, and the summarizer writes about "the person".
+   */
+  personName?: string | undefined;
+  /** Lines of the person's profile, so a summary that only repeats the profile is not saved. */
+  profileLines?: readonly string[] | undefined;
+  /** The name of the persona or assistant that replies this turn, so notes about its replies can name it. */
+  assistantName?: string | undefined;
 }
 
 /**
  * Resolves one turn's summarization context, shared by every turn-creation path (the chat
- * route and `beginTurnExecution`). Returns undefined when the turn must not summarize;
- * every such outcome is logged at debug so the effective state is observable instead of
- * silently falling back to the verbatim transcript.
+ * route and `beginTurnExecution`). Returns undefined only when the turn keeps the full exchange
+ * (setting off, a backend that digests it itself, or no memory client). When summaries are on,
+ * a context is always returned: a model that cannot be found has no FQN, and the turn then saves
+ * nothing rather than the raw exchange. Every outcome is logged at debug.
  *
  * The model-FQN lookup costs one agent-store read and runs pre-turn, because the drain
- * input does not carry agentStore/sessionAgent. A lookup failure drops summarization for
- * this turn (verbatim fallback), never the turn.
+ * input does not carry agentStore/sessionAgent. A lookup failure leaves this turn without a
+ * summary model, never fails the turn.
  */
 export async function resolveTurnSummarizeContext(
   params: ResolveTurnSummarizeContextParams,
@@ -152,6 +165,7 @@ export async function resolveTurnSummarizeContext(
     tenantId,
     modelProviderStore,
     tokenFactoryBudget,
+    modelUsage,
     agentStore,
     personaModelName,
     sessionAgent,
@@ -181,6 +195,13 @@ export async function resolveTurnSummarizeContext(
     });
     return undefined;
   }
+  // The name rides the context trimmed; a blank stored value means no name, and the
+  // summarizer falls back to writing about "the person" for this turn.
+  const trimmedPersonName = params.personName?.trim();
+  const personName = trimmedPersonName === undefined || trimmedPersonName === '' ? undefined : trimmedPersonName;
+  const trimmedAssistantName = params.assistantName?.trim();
+  const assistantName =
+    trimmedAssistantName === undefined || trimmedAssistantName === '' ? undefined : trimmedAssistantName;
   try {
     const summarizationModelFqn = await resolveSummarizationModelFqn({
       tenantId,
@@ -190,18 +211,45 @@ export async function resolveTurnSummarizeContext(
     });
     if (summarizationModelFqn === undefined || summarizationModelFqn.trim() === '') {
       logger.debug(
-        'Turn summarization is enabled but no summarization model resolved for this turn; retaining the verbatim transcript',
+        'Turn summarization is enabled but no summarization model resolved for this turn; nothing will be saved for it',
         { sessionId },
       );
-      return undefined;
+      return {
+        tenantId,
+        modelProviderStore,
+        summarizationModelFqn: undefined,
+        tokenFactoryBudget,
+        modelUsage,
+        personName,
+        profileLines: params.profileLines,
+        assistantName,
+      };
     }
     logger.debug('Turn summarization is active for this turn', { sessionId, summarizationModelFqn });
-    return { tenantId, modelProviderStore, summarizationModelFqn, tokenFactoryBudget };
+    return {
+      tenantId,
+      modelProviderStore,
+      summarizationModelFqn,
+      tokenFactoryBudget,
+      modelUsage,
+      personName,
+      profileLines: params.profileLines,
+      assistantName,
+    };
   } catch (error) {
-    logger.debug('Memory summarization disabled for this turn: the model FQN did not resolve', {
+    logger.debug('Memory summarization has no model for this turn: the model FQN did not resolve', {
       sessionId,
       ...extractErrorLogFields(error),
     });
-    return undefined;
+    return {
+      tenantId,
+      modelProviderStore,
+      summarizationModelFqn: undefined,
+      tokenFactoryBudget,
+      modelUsage,
+      personName,
+      profileLines: params.profileLines,
+      assistantName,
+    };
   }
 }

@@ -1,9 +1,8 @@
 import { render, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 
-import { WelcomeScreen } from '@/atoms/WelcomeScreen.js';
 import { BRAND_GLYPH_VIEW_BOX, BrandGlyph, BrandLogo, resolveBrandChrome, useBrandName } from '@/theme/brand.js';
-import { SlotsProvider } from '@/theme/SlotsProvider.js';
+import { SlotsProvider, useSlot } from '@/theme/SlotsProvider.js';
 import { ThemeProvider } from '@/theme/ThemeProvider.js';
 
 function BrandNameProbe() {
@@ -116,7 +115,7 @@ describe('BrandLogo', () => {
 
   it('renders the default mark and name when brand is omitted', () => {
     const { container } = render(
-      <ThemeProvider theme={{ preset: 'claude' }}>
+      <ThemeProvider theme={{ preset: 'paper' }}>
         <BrandNameProbe />
         <BrandLogo className="host-logo" />
       </ThemeProvider>,
@@ -266,12 +265,17 @@ describe('BrandLogo', () => {
       return <span className={className}>custom mark</span>;
     }
 
+    function SlotMark() {
+      const Mark = useSlot('BrandLogo');
+      return <Mark variant="icon" />;
+    }
+
     render(
       <SlotsProvider
         overrides={{ BrandLogo: CustomMark }}
         theme={{ brand: { mode: 'icon-title', name: 'Acme', icon: '/icon.svg' } }}
       >
-        <WelcomeScreen />
+        <SlotMark />
       </SlotsProvider>,
     );
 

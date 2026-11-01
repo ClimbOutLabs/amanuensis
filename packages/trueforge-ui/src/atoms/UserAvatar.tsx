@@ -1,5 +1,7 @@
 'use client';
 
+import { useOptionalPersonalization } from '../components/PersonalizationContext.js';
+import { personDisplayName } from '../components/personDisplayName.js';
 import { useOptionalCurrentUser } from '../contexts/CurrentUserContext.js';
 import { cn } from './lib/cn.js';
 import { Avatar, AvatarFallback } from './primitives/Avatar.js';
@@ -17,8 +19,12 @@ export function getUserInitials(displayName: string): string {
 // Default current-user chrome; hosts can replace it through `overrides.UserAvatar`.
 export function UserAvatar({ labeled = false, className }: UserAvatarProps) {
   const currentUser = useOptionalCurrentUser();
-  const displayName = currentUser?.displayName.trim();
-  if (!displayName) {
+  const personalization = useOptionalPersonalization();
+  const displayName = personDisplayName({
+    profile: personalization?.profile,
+    signInName: currentUser?.displayName,
+  });
+  if (displayName === undefined) {
     return null;
   }
 
@@ -38,7 +44,7 @@ export function UserAvatar({ labeled = false, className }: UserAvatarProps) {
           <AvatarFallback>{getUserInitials(displayName)}</AvatarFallback>
         </Avatar>
       </span>
-      <span className="w-full truncate text-center text-[0.625rem] leading-tight">{displayName}</span>
+      <span className="w-full truncate text-center text-xs leading-tight">{displayName}</span>
     </div>
   );
 }

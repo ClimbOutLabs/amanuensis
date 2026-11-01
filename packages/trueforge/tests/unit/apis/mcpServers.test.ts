@@ -156,7 +156,7 @@ describe('mcp-servers routers', () => {
     withTransaction = callback => db.transaction().execute(callback);
     logger = winston.createLogger({ silent: true });
     settingsRouter = createSettingsMcpServersRouter({
-      mcpCatalog: McpCatalog.load(),
+      mcpCatalog: McpCatalog.loadShipped(),
       resolveMcpServerStore: () => mcpServerStore,
       tokenStore,
       toolGrantStore,
@@ -166,7 +166,7 @@ describe('mcp-servers routers', () => {
     });
     catalogRouter = createCatalogRouter({
       modelCatalog: ModelCatalog.load(),
-      mcpCatalog: McpCatalog.load(),
+      mcpCatalog: McpCatalog.loadShipped(),
       skillCatalog: SkillCatalog.load(),
       sandboxCatalog: SandboxCatalog.load(),
     });
@@ -263,7 +263,7 @@ describe('mcp-servers routers', () => {
     expect(response.status).toBe(200);
     const body = (await response.json()) as { data: { name: string }[] };
     expect(body.data.map(server => server.name)).toEqual(
-      McpCatalog.load()
+      McpCatalog.loadShipped()
         .list()
         .map(server => server.name),
     );
@@ -1879,7 +1879,7 @@ describe('mcp-servers routers', () => {
     };
 
     function grantFor(input: { created_by: string; tool_name: string }) {
-      return { tenant_id: TENANT_ID, mcp_server_name: notesBody.name, ...input };
+      return { tenant_id: TENANT_ID, mcp_server_name: notesBody.name, mcp_server_host: 'notes.example.com', ...input };
     }
 
     async function listedGrants(): Promise<string[]> {

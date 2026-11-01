@@ -7,20 +7,22 @@ description: 'A small, inspectable local profile for assistant identity, voice, 
 
 Personalization is a single profile owned by the authenticated user. It contains only:
 
+- Your name and how the assistant should address you
 - Assistant name and concise identity guidance
 - Voice guidance
 - A concise user profile
 - Up to 12 pinned preferences
+- The areas you picked for the Tour's "What would help you most?" question, in the order picked. They shape the Tour's cards and are never sent to the model
 - An optional learned profile document, maintained by the server when profile learning is on
 - A profile learning switch, off by default
 
 The profile is stored locally in the configured database. Standalone mode uses SQLite; distributed mode uses Postgres. It is never copied from chat history automatically and it is not shared with other users.
 
-The profile records its owner, last updater, timestamps, a monotonic revision number, and a SHA-256 digest of the model-facing content. Updating a profile with identical content leaves its revision unchanged. The learning switch is not model-facing and so is deliberately outside the digest; the server compares it separately, so turning it on or off alone still writes and still advances the revision.
+The profile records its owner, last updater, timestamps, a monotonic revision number, and a SHA-256 digest of the model-facing content. Updating a profile with identical content leaves its revision unchanged. The learning switch and the help areas are not model-facing and so are deliberately outside the digest; the server compares them separately, so changing either alone still writes and still advances the revision.
 
 ## What the model sees
 
-On every root-agent turn, the server builds one bounded `<personalization-context>` section from the current profile. Dynamic subagents never receive it. Default-assistant turns receive the assistant name, identity, voice, user profile, pinned preferences, and learned profile. When a configured persona is active, that persona is the sole assistant identity: the server omits the default assistant's name, identity, and voice while retaining the user profile, pinned preferences, and learned profile.
+On every root-agent turn, the server builds one bounded `<personalization-context>` section from the current profile. Dynamic subagents never receive it. Default-assistant turns receive the assistant name, identity, voice, your name and form of address, user profile, pinned preferences, and learned profile. When a configured persona is active, that persona is the sole assistant identity: the server omits the default assistant's name, identity, and voice while retaining your name and form of address, the user profile, pinned preferences, and learned profile.
 
 The default-assistant profile projection is available through:
 

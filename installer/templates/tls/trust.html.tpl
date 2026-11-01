@@ -18,7 +18,8 @@
 <body>
 <h1>Make this device trust your home server</h1>
 <p>You only do this once per device.</p>
-<p class="note">Before you trust it, check that the fingerprint your device shows matches this one: <code>@@FINGERPRINT@@</code>. If it does not match, stop and do not trust it.</p>
+<p>Until you do, your browser warns that the page is not private when you open Aman. Do not click past that warning. Follow the steps for your device below instead.</p>
+<p class="note">Your device will show a long code called a fingerprint. Before you trust it, compare the fingerprint your device shows with the one in the terminal on the computer that runs Aman (the end of the install, or <code>aman doctor</code>). If they do not match, stop and do not trust it.</p>
 <p>
   <a class="download" href="/trust/aman.mobileconfig">Download for iPhone or iPad</a>
   <a class="download" href="/trust/ca.crt">Download for Android, Mac or Windows</a>
@@ -54,7 +55,7 @@
 
 <p>Firefox keeps its own list: Settings, Privacy and Security, View Certificates, Authorities, Import.</p>
 
-<p class="note">If you still see a warning, trust isn't finished. Don't tap through it; finish the steps.</p>
+<p class="note">If you still see a warning, trust isn't finished. Don't tap through it; finish the steps above.</p>
 
 <p>When you are done, open <a href="@@OPEN_URL@@">@@OPEN_URL@@</a>.</p>
 </body>

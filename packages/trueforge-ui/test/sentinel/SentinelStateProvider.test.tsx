@@ -40,6 +40,9 @@ const CARD = {
   destination_host: null,
   outbound_truncated: false,
   email: null,
+  calendar_event: null,
+  schedule: null,
+  persona: null,
 };
 
 describe('SentinelStateProvider', () => {
@@ -73,11 +76,23 @@ describe('SentinelStateProvider', () => {
     let finishHistory: (context: SentinelSessionContext) => void = () => {};
     const api: SentinelApi = {
       listAuditEntries: vi.fn(async () => []),
-      getUserSettings: vi.fn(async () => ({ offline_mode: false, tier2_auto_allow: [], search_without_asking: true })),
+      listBriefItemCompletions: async () => [],
+      markBriefItemDone: async () => undefined,
+      unmarkBriefItemDone: async () => undefined,
+      listUserAuditEntries: vi.fn(async () => ({ entries: [] })),
+      getUserSettings: vi.fn(async () => ({
+        offline_mode: false,
+        tier2_auto_allow: [],
+        search_without_asking: true,
+        maps_without_asking: false,
+        sandbox_without_asking: true,
+      })),
       updateUserSettings: vi.fn(async () => ({
         offline_mode: false,
         tier2_auto_allow: [],
         search_without_asking: true,
+        maps_without_asking: false,
+        sandbox_without_asking: true,
       })),
       listSentinelSessionContext: vi.fn(
         () =>
@@ -112,11 +127,23 @@ describe('SentinelStateProvider', () => {
   it('fills in a card from saved history that the live stream never delivered', async () => {
     const api: SentinelApi = {
       listAuditEntries: vi.fn(async () => []),
-      getUserSettings: vi.fn(async () => ({ offline_mode: false, tier2_auto_allow: [], search_without_asking: true })),
+      listBriefItemCompletions: async () => [],
+      markBriefItemDone: async () => undefined,
+      unmarkBriefItemDone: async () => undefined,
+      listUserAuditEntries: vi.fn(async () => ({ entries: [] })),
+      getUserSettings: vi.fn(async () => ({
+        offline_mode: false,
+        tier2_auto_allow: [],
+        search_without_asking: true,
+        maps_without_asking: false,
+        sandbox_without_asking: true,
+      })),
       updateUserSettings: vi.fn(async () => ({
         offline_mode: false,
         tier2_auto_allow: [],
         search_without_asking: true,
+        maps_without_asking: false,
+        sandbox_without_asking: true,
       })),
       listSentinelSessionContext: vi.fn(async () => ({
         approvals: [{ toolCallId: 'call-9', tier: 3 as const, card: CARD, eventId: null, threadId: null }],

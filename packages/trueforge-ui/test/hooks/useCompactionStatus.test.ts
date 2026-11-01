@@ -34,15 +34,16 @@ import { useCompactionStatus } from '@/hooks/useCompactionStatus.js';
 
 describe('useCompactionStatus', () => {
   const getLastCompactionStatus = vi.fn(async (): Promise<LastCompactionStatus | null> => null);
-  const getLastTurnInputTokens = vi.fn(async (): Promise<number | null> => null);
+  const getLastCallInputTokens = vi.fn(async (): Promise<number | null> => null);
   // hasSessionResync checks for these methods via Reflect; a plain object with
   // all five methods passes.
   const server: HarnessChatServerExtensions = {
     peekSessionTip: vi.fn(async () => null),
     dismissPendingApprovals: vi.fn(async () => ({ dismissed: 0, alreadyResolved: true })),
+    dismissEndedApproval: vi.fn(async () => undefined),
     answerHeldAction: vi.fn<HarnessChatServerExtensions['answerHeldAction']>(async () => 'done'),
     getLastCompactionStatus,
-    getLastTurnInputTokens,
+    getLastCallInputTokens,
   };
 
   beforeEach(() => {
@@ -58,7 +59,7 @@ describe('useCompactionStatus', () => {
       createdAt: '2026-09-27T11:30:00Z',
       outcome: 'applied',
     });
-    getLastTurnInputTokens.mockResolvedValueOnce(77200);
+    getLastCallInputTokens.mockResolvedValueOnce(77200);
 
     const { result } = renderHook(() => useCompactionStatus());
 

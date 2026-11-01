@@ -33,6 +33,7 @@ async function offeredToolNames({ offline }: { offline: boolean }): Promise<stri
     threadId: 'main',
     title: 'Main',
     toolCallMemo: undefined,
+    turnToolCallLedger: undefined,
     taskState: undefined,
     isRequestContinuation: undefined,
     tracing: NOOP_AGENT_TRACING,
@@ -42,6 +43,7 @@ async function offeredToolNames({ offline }: { offline: boolean }): Promise<stri
       {
         systemToolSets: [
           toolSetNamed({ name: 'maps', tool: 'render_map' }),
+          toolSetNamed({ name: 'maps-route', tool: 'render_route' }),
           toolSetNamed({ name: 'local', tool: 'get_current_datetime' }),
         ],
       },
@@ -67,12 +69,14 @@ describe('offline tool list', () => {
   it('offers the maps tool and third-party tools while online', async () => {
     const names = await offeredToolNames({ offline: false });
     expect(names).toContain('render_map');
+    expect(names).toContain('render_route');
     expect(names).toContain('search');
   });
 
   it('withholds network tools while offline and keeps local ones', async () => {
     const names = await offeredToolNames({ offline: true });
     expect(names).not.toContain('render_map');
+    expect(names).not.toContain('render_route');
     expect(names).not.toContain('search');
     expect(names).toContain('get_current_datetime');
   });

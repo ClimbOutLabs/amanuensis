@@ -14,7 +14,7 @@ test_dry_run_changes_nothing() {
   assert_contains "$OUT" "Downloads: about"
   assert_contains "$OUT" "Full list of downloads and sources: --verbose"
   assert_not_contains "$OUT" "Whisper small speech model weights" "the long list waits for --verbose"
-  assert_flat_contains "$OUT" "Everything is built on this computer; nothing is pushed anywhere"
+  assert_flat_contains "$OUT" "Everything is built on this computer. Nothing is sent anywhere."
   assert_flat_contains "$OUT" "Run code (Python, shell, files) runs in a sandbox"
   assert_flat_contains "$OUT" "and so does reading attachments (PDFs and images)"
   assert_contains "$OUT" "Dry run: nothing was changed."
@@ -180,19 +180,17 @@ test_partial_instance_dir_is_replaced() {
 }
 
 test_concurrent_run_blocked_and_stale_lock_taken_over() {
-  t_begin "a live lock blocks a run and a dead one is replaced"
+  t_begin "a lock with a fresh beat blocks a run and one whose beat stopped is replaced"
   sandbox_new
   mkdir -p "$AMAN_HOME/state/lock"
-  sleep 30 &
-  local pid=$!
-  printf '%s\n' "$pid" >"$AMAN_HOME/state/lock/pid"
+  printf 'other-run\n' >"$AMAN_HOME/state/lock/owner"
+  date +%s >"$AMAN_HOME/state/lock/beat"
   with_input "$SENTINEL_PASSWORD
 "
   run_install --yes --password-stdin --email owner@example.invalid
   assert_rc 1
-  assert_flat_contains "$ERR" "another installer run"
-  kill "$pid" 2>/dev/null || true
-  wait "$pid" 2>/dev/null || true
+  assert_flat_contains "$ERR" "Another install is running right now"
+  printf '%s\n' $(($(date +%s) - 3600)) >"$AMAN_HOME/state/lock/beat"
   with_input "$SENTINEL_PASSWORD
 "
   run_install --yes --password-stdin --email owner@example.invalid

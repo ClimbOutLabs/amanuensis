@@ -11,6 +11,7 @@ import {
   TurnAlreadyExistsError,
 } from '@truefoundry/trueforge-core/agent-session';
 import { AgentHarnessError, HeldActionRefusedError } from '@truefoundry/trueforge-core/core';
+import { createHash } from 'node:crypto';
 import { createLogger } from 'winston';
 import { TENANT_ID } from '../../../src/apis/sessions';
 import { createTurnsRouter } from '../../../src/apis/turns';
@@ -85,6 +86,20 @@ const HELD_RESULT_MESSAGE = {
 };
 
 type ContextAppend = CreateTurnInput['new_context_appends'][number];
+type DoneRequiredActions = Extract<CreateTurnInput['turn']['state'], { status: 'done' }>['required_actions'];
+
+/** A sub-agent's approval card, paused on the first turn of the session. */
+const CHILD_THREAD_ID = 'thread-child';
+const CHILD_CALL_ID = 'call-send';
+const CHILD_CARD: DoneRequiredActions = [
+  {
+    type: EventType.TOOL_APPROVAL_REQUIRED,
+    id: 'action-child',
+    created_at: '2026-10-22T10:00:00.000Z',
+    thread_id: CHILD_THREAD_ID,
+    tool_calls: [{ id: CHILD_CALL_ID, source_event_id: 'event-child' }],
+  },
+];
 
 function contextAppend(context: ContextAppend['context']): ContextAppend {
   return {
@@ -94,8 +109,15 @@ function contextAppend(context: ContextAppend['context']): ContextAppend {
   };
 }
 
+/** A decision as the host records it: bound to the call's approval token (none here) and arguments. */
 function decisionMessage(approval: RecordedApproval) {
-  return { type: EventType.USER_TOOL_APPROVAL, tool_call_id: TOOL_CALL_ID, approval };
+  return {
+    type: EventType.USER_TOOL_APPROVAL,
+    tool_call_id: TOOL_CALL_ID,
+    approval,
+    approval_token_id: null,
+    arguments_hash: createHash('sha256').update('{}').digest('hex'),
+  };
 }
 
 /** The decided tool call the tip turn already recorded, in the shape the store persists. */
@@ -107,10 +129,12 @@ function turnInput({
   turnId,
   previousTurnId,
   appends,
+  requiredActions = [],
 }: {
   turnId: string;
   previousTurnId: string | null;
   appends: ContextAppend[];
+  requiredActions?: DoneRequiredActions;
 }): CreateTurnInput {
   const now = new Date();
   return {
@@ -120,7 +144,7 @@ function turnInput({
       first_turn_id: previousTurnId === null ? turnId : FIRST_TURN_ID,
       ancestor_ids: previousTurnId === null ? [] : [previousTurnId],
       previous_turn_id: previousTurnId,
-      state: { status: 'done', output: null, required_actions: [], completed_at: now.toISOString() },
+      state: { status: 'done', output: null, required_actions: requiredActions, completed_at: now.toISOString() },
       input: [],
       created_at: now,
       updated_at: now,
@@ -156,7 +180,13 @@ function turnInput({
  */
 async function buildApp(
   recordedApproval: RecordedApproval | undefined,
-  options: { pausedFirstTurn?: boolean; heldAction?: boolean; requester?: RequestContext } = {},
+  options: {
+    pausedFirstTurn?: boolean;
+    heldAction?: boolean;
+    endedCard?: boolean;
+    liveCardOnTip?: boolean;
+    requester?: RequestContext;
+  } = {},
 ) {
   const db = createSqliteDb(':memory:');
   await migrateSqliteToLatest(db);
@@ -179,7 +209,19 @@ async function buildApp(
       }),
     },
   });
-  if (options.heldAction === true) {
+  if (options.liveCardOnTip === true) {
+    // The tip is paused on the child's card right now; the first turn never asked for it.
+    await sessionStore.createTurn(turnInput({ turnId: FIRST_TURN_ID, previousTurnId: null, appends: [] }));
+    await sessionStore.createTurn(
+      turnInput({ turnId: TIP_TURN_ID, previousTurnId: FIRST_TURN_ID, appends: [], requiredActions: CHILD_CARD }),
+    );
+  } else if (options.endedCard === true) {
+    // The child paused on its card on the first turn; the person then chatted on, so the tip no longer waits.
+    await sessionStore.createTurn(
+      turnInput({ turnId: FIRST_TURN_ID, previousTurnId: null, appends: [], requiredActions: CHILD_CARD }),
+    );
+    await sessionStore.createTurn(turnInput({ turnId: TIP_TURN_ID, previousTurnId: FIRST_TURN_ID, appends: [] }));
+  } else if (options.heldAction === true) {
     // The scheduled run ended with the call held; the answer, if any, was recorded on the tip.
     await sessionStore.createTurn(
       turnInput({
@@ -219,7 +261,7 @@ async function buildApp(
   app.route(
     '/',
     createTurnsRouter({
-      mcpCatalog: McpCatalog.load(),
+      mcpCatalog: McpCatalog.loadShipped(),
       globalSettingsStore: new SqliteGlobalSettingsStore(db),
       tokenFactoryBudget: uncappedTokenFactoryBudget,
       sessions,
@@ -281,9 +323,14 @@ describe('POST /{session_id}/turns approval conflicts', () => {
   });
 
   it.each([
-    [new PreviousTurnRunningError(TIP_TURN_ID), 'previous_turn_running'],
-    [new TurnAlreadyExistsError(TIP_TURN_ID), 'turn_already_exists'],
-  ])('maps a store conflict to 409 with code %#', async (error, code) => {
+    [
+      new PreviousTurnRunningError(TIP_TURN_ID),
+      'previous_turn_running',
+      // A person reads this one, so it never carries the store's turn ids.
+      'This chat is still working on your last message. Wait for it to finish, or press Cancel, then send again.',
+    ],
+    [new TurnAlreadyExistsError(TIP_TURN_ID), 'turn_already_exists', new TurnAlreadyExistsError(TIP_TURN_ID).message],
+  ])('maps a store conflict to 409 with code %#', async (error, code, message) => {
     const app = await buildApp({ status: 'allow' });
     rejectCreateTurnWith(error);
 
@@ -291,7 +338,7 @@ describe('POST /{session_id}/turns approval conflicts', () => {
 
     expect(response.status).toBe(409);
     expect(await response.json()).toEqual({
-      error: { message: error.message, type: 'conflict', code },
+      error: { message, type: 'conflict', code },
     });
   });
 
@@ -446,13 +493,22 @@ describe('POST /{session_id}/turns answering an action a scheduled run held', ()
       .mockRejectedValue(new PreviousTurnRunningError(TIP_TURN_ID));
   }
 
-  it('ends the turn after the tool step, so approving runs just that call and asks the model nothing', async () => {
+  it('ends the turn with no model call when the owner turns the held action down', async () => {
+    const app = await buildApp(undefined, { heldAction: true });
+    const createTurn = captureCreateTurnOptions();
+
+    await postTurn(app, approvalInput({ status: 'deny', reason: 'changed my mind' }));
+
+    expect(createTurn).toHaveBeenCalledWith(expect.objectContaining({ stop_after_tool_response: true }));
+  });
+
+  it('lets the model continue after the owner approves, so its answer uses the result', async () => {
     const app = await buildApp(undefined, { heldAction: true });
     const createTurn = captureCreateTurnOptions();
 
     await postTurn(app, approvalInput({ status: 'allow' }));
 
-    expect(createTurn).toHaveBeenCalledWith(expect.objectContaining({ stop_after_tool_response: true }));
+    expect(createTurn).toHaveBeenCalledWith(expect.objectContaining({ stop_after_tool_response: false }));
   });
 
   it('does not end the turn early for an approval that is not about a held action', async () => {
@@ -529,5 +585,105 @@ describe('POST /{session_id}/turns answering an action a scheduled run held', ()
         code: 'held_action_expired',
       },
     });
+  });
+});
+
+describe('POST /{session_id}/turns for a card whose request ended', () => {
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
+  function childDecision(approval: { status: 'allow' } | { status: 'deny'; reason: string }): TurnInputItem[] {
+    return [{ type: EventType.USER_TOOL_APPROVAL, thread_id: CHILD_THREAD_ID, tool_call_id: CHILD_CALL_ID, approval }];
+  }
+
+  async function turnCount(app: OpenAPIHono): Promise<number> {
+    const response = await app.request(`/${SESSION_ID}/turns`, { method: 'GET' });
+    const body: unknown = await response.json();
+    if (typeof body !== 'object' || body === null || !('data' in body) || !Array.isArray(body.data)) {
+      throw new Error('the turn list did not answer with data');
+    }
+    return body.data.length;
+  }
+
+  it('Dismiss answers 200 with the turn named, creates no turn, and hides the card on reload', async () => {
+    const app = await buildApp(undefined, { endedCard: true });
+    const before = await turnCount(app);
+
+    const response = await postTurn(app, childDecision({ status: 'deny', reason: 'Dismissed' }));
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ data: { id: TIP_TURN_ID } });
+    expect(await turnCount(app)).toBe(before);
+    const reloaded = await app.request(`/${SESSION_ID}/turns/${FIRST_TURN_ID}`, { method: 'GET' });
+    expect(await reloaded.json()).toMatchObject({ data: { state: { required_actions: [] } } });
+  });
+
+  it('Deny is cleared the same way as Dismiss', async () => {
+    const app = await buildApp(undefined, { endedCard: true });
+    const before = await turnCount(app);
+
+    const response = await postTurn(app, childDecision({ status: 'deny', reason: 'Not now' }));
+
+    expect(response.status).toBe(200);
+    expect(await turnCount(app)).toBe(before);
+  });
+
+  it('Dismissing the same ended card twice answers 200 both times and still creates no turn', async () => {
+    const app = await buildApp(undefined, { endedCard: true });
+    const before = await turnCount(app);
+
+    const first = await postTurn(app, childDecision({ status: 'deny', reason: 'Dismissed' }));
+    const second = await postTurn(app, childDecision({ status: 'deny', reason: 'Dismissed' }));
+
+    expect(first.status).toBe(200);
+    expect(second.status).toBe(200);
+    expect(await turnCount(app)).toBe(before);
+  });
+
+  it('Approve is refused with the ended-request conflict and no turn is created', async () => {
+    const app = await buildApp(undefined, { endedCard: true });
+    const before = await turnCount(app);
+
+    const response = await postTurn(app, childDecision({ status: 'allow' }));
+
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({
+      error: {
+        message: 'This request ended. Ask again if you still need it.',
+        type: 'conflict',
+        code: 'approval_request_ended',
+      },
+    });
+    expect(await turnCount(app)).toBe(before);
+  });
+
+  it('does not clear a decision on an id the session never issued; it keeps the unknown-thread 422', async () => {
+    const app = await buildApp(undefined, { endedCard: true });
+    const before = await turnCount(app);
+    rejectCreateTurnWith(new AgentHarnessError('invalid_send_input', 'unknown thread_id: thread-foreign'));
+
+    const response = await postTurn(app, [
+      {
+        type: EventType.USER_TOOL_APPROVAL,
+        thread_id: 'thread-foreign',
+        tool_call_id: CHILD_CALL_ID,
+        approval: { status: 'deny', reason: 'Dismissed' },
+      },
+    ]);
+
+    expect(response.status).toBe(422);
+    expect(await turnCount(app)).toBe(before);
+  });
+
+  it('does not clear a card the tip still waits on when an older turn is named', async () => {
+    const app = await buildApp(undefined, { liveCardOnTip: true });
+    rejectCreateTurnWith(new StaleApprovalContinuationError(FIRST_TURN_ID, TIP_TURN_ID));
+
+    const response = await postTurn(app, childDecision({ status: 'deny', reason: 'Dismissed' }), FIRST_TURN_ID);
+
+    expect(response.status).toBe(409);
+    const tip = await app.request(`/${SESSION_ID}/turns/${TIP_TURN_ID}`, { method: 'GET' });
+    expect(await tip.json()).toMatchObject({ data: { state: { required_actions: CHILD_CARD } } });
   });
 });

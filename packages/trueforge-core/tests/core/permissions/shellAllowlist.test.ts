@@ -3,15 +3,17 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   gitLocalConfigIsSafe,
-  hardenAllowlistedGit,
   hashArgv,
   matchAllowlist,
   OFFLINE_SHELL_COMMANDS,
+  parseReadOnlyList,
   parseSimpleCommand,
+  pinAllowlistedExec,
+  pinReadOnlyList,
   resolveOnPinnedPath,
   seedShellAllowlist,
   validateOfflineSubset,
-  type HardenedGitInvocation,
+  type PinnedExecInvocation,
   type ShellAllowlistConfig,
 } from '../../../src/core/permissions/shellAllowlist';
 
@@ -29,7 +31,7 @@ function tempConfig(): { config: ShellAllowlistConfig; cleanup: () => void } {
   const config: ShellAllowlistConfig = {
     pinned_path: dir,
     commands: {
-      mycmd: { args: ['-l'], operands: 'workspace_relative', offline_ok: true, subcommands: null },
+      mycmd: { args: ['-l'], operands: 'workspace_relative', offline_ok: true, script: null, subcommands: null },
     },
   };
   return { config, cleanup };
@@ -190,6 +192,7 @@ describe('matchAllowlist', () => {
     // it never reaches allowlist matching.
     expect(parseSimpleCommand('sh -c "mycmd"')).toBeUndefined();
     const { config, cleanup } = tempConfig();
+    writeFileSync(join(config.pinned_path, 'nice'), '#!/bin/sh\n');
     try {
       const parsed = parseSimpleCommand('nice mycmd -l');
       expect(parsed).toBeDefined();
@@ -291,7 +294,7 @@ describe('matchAllowlist for seeded git', () => {
   });
 });
 
-describe('hardenAllowlistedGit', () => {
+describe('pinAllowlistedExec', () => {
   const hardening = [
     '--no-pager',
     '--no-optional-locks',
@@ -313,25 +316,47 @@ describe('hardenAllowlistedGit', () => {
     'status.submoduleSummary=false',
   ];
 
-  function harden(command: string): HardenedGitInvocation | undefined {
+  /** Pinned dir holding fake `git`, `ls` and `nice`; the invocation must name them by absolute path. */
+  function harden(
+    command: string,
+    { workspaceRoot }: { workspaceRoot: string | undefined } = { workspaceRoot: '/ws' },
+  ): { pinned: PinnedExecInvocation | undefined; dir: string } {
     const { dir, cleanup } = tempBin('git');
+    for (const name of ['ls', 'nice']) {
+      writeFileSync(join(dir, name), '#!/bin/sh\n');
+    }
     try {
-      return hardenAllowlistedGit({ command, config: seedShellAllowlist(dir), workspace_root: '/ws' });
+      return {
+        pinned: pinAllowlistedExec({ command, config: seedShellAllowlist(dir), workspace_root: workspaceRoot }),
+        dir,
+      };
     } finally {
       cleanup();
     }
   }
 
+  test('pins a non-git command by absolute path even without a workspace root', () => {
+    const ls = harden('ls hello.txt', { workspaceRoot: undefined });
+    expect(ls.pinned?.argv).toEqual([join(ls.dir, 'ls'), 'hello.txt']);
+    expect(ls.pinned?.git_needs_workspace_root).toBe(false);
+  });
+
+  test('git without a workspace root is flagged so it is refused rather than run unhardened', () => {
+    expect(harden('git status', { workspaceRoot: undefined }).pinned?.git_needs_workspace_root).toBe(true);
+  });
+
   test('prepends global overrides and the subcommand forced flags', () => {
-    expect(harden('git status --short')?.argv).toEqual([
-      'git',
+    const status = harden('git status --short');
+    expect(status.pinned?.argv).toEqual([
+      join(status.dir, 'git'),
       ...hardening,
       'status',
       '--ignore-submodules=all',
       '--short',
     ]);
-    expect(harden('git diff --cached src')?.argv).toEqual([
-      'git',
+    const diff = harden('git diff --cached src');
+    expect(diff.pinned?.argv).toEqual([
+      join(diff.dir, 'git'),
       ...hardening,
       'diff',
       '--no-ext-diff',
@@ -340,20 +365,21 @@ describe('hardenAllowlistedGit', () => {
       '--cached',
       'src',
     ]);
-    expect(harden('git blame f.txt')?.argv).toEqual(['git', ...hardening, 'blame', '--no-textconv', 'f.txt']);
+    const blame = harden('git blame f.txt');
+    expect(blame.pinned?.argv).toEqual([join(blame.dir, 'git'), ...hardening, 'blame', '--no-textconv', 'f.txt']);
   });
 
   test('isolates system and global config and builds a local-config probe', () => {
-    const hardened = harden('git status');
-    expect(hardened?.env).toEqual({
+    const { pinned, dir } = harden('git status');
+    expect(pinned?.env).toEqual({
       GIT_CONFIG_NOSYSTEM: '1',
       GIT_CONFIG_GLOBAL: '/dev/null',
       GIT_CONFIG_COUNT: '0',
       GIT_CONFIG_PARAMETERS: '',
       GIT_ATTR_NOSYSTEM: '1',
     });
-    expect(hardened?.probe_argv).toEqual([
-      'git',
+    expect(pinned?.probe_argv).toEqual([
+      join(dir, 'git'),
       ...hardening,
       'config',
       '--local',
@@ -361,16 +387,46 @@ describe('hardenAllowlistedGit', () => {
       '--list',
       '--name-only',
     ]);
+    expect(pinned?.pinned_path).toBe(dir);
   });
 
-  test('keeps the nice wrapper in front', () => {
-    expect(harden('nice git status')?.argv.slice(0, 2)).toEqual(['nice', 'git']);
+  test('keeps the nice wrapper in front, by absolute path', () => {
+    const { pinned, dir } = harden('nice git status');
+    expect(pinned?.argv.slice(0, 2)).toEqual([join(dir, 'nice'), join(dir, 'git')]);
   });
 
-  test('leaves non-allowlisted and non-git commands alone', () => {
-    expect(harden('git push origin main')).toBeUndefined();
-    expect(harden('git -c core.fsmonitor=x status')).toBeUndefined();
-    expect(harden('ls -l')).toBeUndefined();
+  test('runs other allowlisted commands by absolute path with no probe', () => {
+    const { pinned, dir } = harden('ls -l src');
+    expect(pinned).toEqual({
+      argv: [join(dir, 'ls'), '-l', 'src'],
+      probe_argv: null,
+      env: {},
+      pinned_path: dir,
+      git_needs_workspace_root: false,
+    });
+  });
+
+  test('leaves non-allowlisted commands alone', () => {
+    expect(harden('git push origin main').pinned).toBeUndefined();
+    expect(harden('git -c core.fsmonitor=x status').pinned).toBeUndefined();
+    expect(harden('rm -rf x').pinned).toBeUndefined();
+  });
+
+  test('a wrapper that does not resolve on the pinned path is not allowlisted', () => {
+    const { dir, cleanup } = tempBin('ls');
+    try {
+      const config = seedShellAllowlist(dir);
+      const parsed = parseSimpleCommand('nice ls');
+      expect(parsed === undefined ? undefined : matchAllowlist(parsed, config)).toBeUndefined();
+    } finally {
+      cleanup();
+    }
+  });
+
+  test('glob and brace operands are not allowlisted, since argv is passed literally', () => {
+    for (const operand of ['*.ts', 'a?', 'a[0]', 'a{b,c}']) {
+      expect(harden(`ls ${operand}`).pinned).toBeUndefined();
+    }
   });
 });
 
@@ -434,5 +490,107 @@ describe('offline subset', () => {
     for (const name of OFFLINE_SHELL_COMMANDS) {
       expect(parseSimpleCommand(name)).toBeDefined();
     }
+  });
+});
+
+describe('reads the safe list adds: sed print ranges, grep and head', () => {
+  const config = seedShellAllowlist(PINNED);
+  const matches = (command: string): boolean => {
+    const parsed = parseSimpleCommand(command);
+    return parsed !== undefined && matchAllowlist(parsed, config) !== undefined;
+  };
+
+  test('allows printing a range of lines, and nothing else a sed script can do', () => {
+    expect(matches("sed -n '55,172p' README.md")).toBe(true);
+    expect(matches("sed -n '12p' README.md")).toBe(true);
+    expect(matches("sed -n '1e rm -rf x' README.md")).toBe(false);
+    expect(matches("sed -n '1w copy.txt' README.md")).toBe(false);
+    expect(matches("sed -i 's/a/b/' README.md")).toBe(false);
+    expect(matches('sed -n')).toBe(false);
+  });
+
+  test('allows a grep pattern of any shape, but never -R, which follows links out of the workspace', () => {
+    expect(matches("grep -rn 'TODO(.*)' src")).toBe(true);
+    expect(matches('grep -R TODO src')).toBe(false);
+    expect(matches('grep -f patterns.txt src')).toBe(false);
+  });
+
+  test('allows head with a count', () => {
+    expect(matches('head -n 20 README.md')).toBe(true);
+    expect(matches('head -20 README.md')).toBe(true);
+    expect(matches('head -7 README.md')).toBe(false);
+  });
+
+  test('keeps the offline subset in step with the list', () => {
+    expect(validateOfflineSubset(config)).toBe(true);
+  });
+});
+
+describe('parseReadOnlyList', () => {
+  const config = seedShellAllowlist(PINNED);
+  const parse = (command: string) => parseReadOnlyList({ command, config });
+
+  test('reads a cd followed by reads, and reads piped into reads', () => {
+    expect(parse("cd /workspace/exitramp && sed -n '55,172p' README.md")?.steps).toEqual([
+      { kind: 'cd', dir: '/workspace/exitramp' },
+      { kind: 'run', parsed: { wrapper: null, argv: ['sed', '-n', '55,172p', 'README.md'] } },
+    ]);
+    expect(parse('cd exitramp && git status && git log --oneline')?.separators).toEqual(['&&', '&&']);
+    expect(parse('grep -rn TODO src | head -20')?.separators).toEqual(['|']);
+    expect(parse('ls; pwd')?.separators).toEqual([';']);
+  });
+
+  test('is not a list for a single command, a redirect, a substitution, a background job or a command off the list', () => {
+    expect(parse('ls -la')).toBeUndefined();
+    expect(parse('cd x && cat a > b')).toBeUndefined();
+    expect(parse('cd x && cat $(echo a)')).toBeUndefined();
+    expect(parse('ls & pwd')).toBeUndefined();
+    expect(parse('cd x && rm -rf y')).toBeUndefined();
+    expect(parse('ls && ')).toBeUndefined();
+  });
+
+  test('never lets a later step run in the directory a failed cd left', () => {
+    expect(parse('cd x ; git status')).toBeUndefined();
+    expect(parse('cd x && cat a ; git status')).toBeUndefined();
+    expect(parse('cd x && cat a || git status')).toBeUndefined();
+    expect(parse('ls || cd x && cat a')).toBeUndefined();
+    expect(parse('ls | cd x && cat a')).toBeUndefined();
+    expect(parse('cd x | cat a')).toBeUndefined();
+    expect(parse('ls ; cd x && cat a | head -5')).toBeDefined();
+  });
+
+  test('keeps a quoted separator inside its argument', () => {
+    expect(parse("grep -n 'a && b' README.md && ls")?.steps).toHaveLength(2);
+  });
+});
+
+describe('pinReadOnlyList', () => {
+  test('pins every command in a list and probes git where it runs', () => {
+    const config = seedShellAllowlist(PINNED);
+    const pinned = pinReadOnlyList({
+      command: 'cd exitramp && git status && cat README.md',
+      config,
+      workspace_root: '/workspace',
+      cwd: '/workspace',
+    });
+    expect(pinned?.steps[0]).toEqual({ kind: 'cd', dir: 'exitramp' });
+    const git = pinned?.steps[1];
+    const cat = pinned?.steps[2];
+    expect(git?.kind === 'run' && git.argv[0]?.endsWith('/git')).toBe(true);
+    expect(git?.kind === 'run' && git.argv).toContain('core.fsmonitor=false');
+    expect(git?.kind === 'run' && git.cwd).toBe('/workspace/exitramp');
+    expect(cat?.kind === 'run' && cat.argv[0]?.endsWith('/cat')).toBe(true);
+    expect(pinned?.probes.map(probe => probe.cwd)).toEqual(['/workspace/exitramp']);
+    expect(pinned?.env).toMatchObject({ GIT_CONFIG_NOSYSTEM: '1' });
+  });
+
+  test('refuses git in a list without a workspace to harden it against', () => {
+    const pinned = pinReadOnlyList({
+      command: 'ls && git status',
+      config: seedShellAllowlist(PINNED),
+      workspace_root: undefined,
+      cwd: '/workspace',
+    });
+    expect(pinned?.git_needs_workspace_root).toBe(true);
   });
 });

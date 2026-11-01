@@ -8,9 +8,11 @@
  * is complete, the turn is closed with plain text. `run:call_tool` reaches a
  * deferred connector's tool: it targets `inert` unless the same message adds
  * `server:<name>`. A `text:<value>` in the same message sets the `text` argument of
- * a tool that takes one (default `inert`).
+ * a tool that takes one (default `inert`). The model never loads anything first: a tool the
+ * request does not send is never called, so a test that needs it fails.
  */
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
+import { FIND_PLACES_QUERY, GARDEN_URL, HARBOUR_ADDRESS, HARBOUR_URL, scriptedPlaces } from './groundedFinderFixtures';
 
 export const RUN_DIRECTIVE_PREFIX = 'run:';
 export const SERVER_DIRECTIVE_PREFIX = 'server:';
@@ -18,14 +20,40 @@ export const TEXT_DIRECTIVE_PREFIX = 'text:';
 const DEFAULT_TEXT_ARGUMENT = 'inert';
 const DEFAULT_CALL_TOOL_SERVER = 'inert';
 export const FINAL_TEXT = 'inert connector work is finished.';
+/** Answers with the text of the last tool result instead of FINAL_TEXT, so a test can read what the tool returned. */
+export const QUOTE_TOOL_RESULT_DIRECTIVE = 'quote_tool_result';
 export const VERIFY_THEN_COMMIT_DIRECTIVE = 'verify_then_commit';
 export const COMMIT_ONLY_DIRECTIVE = 'commit_only';
 /** Calls the write tool, then `web_search` for `WEB_SEARCH_QUERY`, then answers. */
 export const WRITE_THEN_SEARCH_DIRECTIVE = 'write_then_search';
 export const WEB_SEARCH_QUERY = 'Lantern Row bakery';
+/** Searches with Tavily, reads two result pages, then pins the places it found, then answers. */
+export const FIND_PLACES_DIRECTIVE = 'find_places';
+/**
+ * Lists the inbox, then runs one web search for the text after `search:` (to the end of the line),
+ * then maps the address the inbox names, then answers. Built for scheduled runs, which have no one to ask.
+ */
+export const BRIEF_DIRECTIVE = 'brief';
+export const SEARCH_DIRECTIVE_PREFIX = 'search:';
 /** Calls the unannotated connector tool three times in one model message, then answers. */
 export const THREE_AT_ONCE_DIRECTIVE = 'three_at_once';
 export const THREE_AT_ONCE_TEXTS = ['first', 'second', 'third'] as const;
+/**
+ * Searches the web for `WEB_SEARCH_QUERY`; once the search has answered, the model accepts the next
+ * request, sends only an empty role heartbeat, and then never says anything.
+ */
+export const STALL_AFTER_TOOL_DIRECTIVE = 'stall_after_tool';
+/** Searches the web like `STALL_AFTER_TOOL_DIRECTIVE`, then starts its answer and goes silent mid-sentence. */
+export const STALL_MID_ANSWER_DIRECTIVE = 'stall_mid_answer';
+export const STALLED_ANSWER_START = 'Here is what I found so far';
+/** Starts the answer with `STALLED_ANSWER_START` right away, with no tool first, then never says more. */
+export const STALL_AT_ONCE_DIRECTIVE = 'stall_at_once';
+/**
+ * Calls the write tool; once it has answered (a denial counts), the model thinks out loud a little at a
+ * time and never finishes, the shape of a self-hosted model that thinks for minutes per step.
+ */
+export const THINK_AFTER_WRITE_DIRECTIVE = 'think_after_write';
+const THINKING_CHUNK_INTERVAL_MS = 50;
 /**
  * A question carrying this marker makes the knowledge relevance judge keep no
  * passage, so a library lookup for it is a near-miss.
@@ -38,6 +66,8 @@ export interface ScriptedModelServer {
   baseUrl: string;
   /** Chat-completion requests served so far, oldest first. */
   requests: () => readonly ChatCompletionRequest[];
+  /** Thinking streams still open: a cancelled turn must hang up every one of them. */
+  openThinkingStreams: () => number;
   close: () => Promise<void>;
 }
 
@@ -106,6 +136,26 @@ function messageText(content: unknown): string {
   return parts.join(' ');
 }
 
+/** A text part that is one whole host-written block, such as `<aman-memory>…</aman-memory>`. */
+const HOST_BLOCK = /^\s*<([a-z][a-z-]*)>[\s\S]*<\/\1>\s*$/;
+
+/**
+ * What the person wrote in a user message. The host puts per-reply context (the reply block,
+ * recalled memory) into the same message as labelled blocks; like a real model, the script
+ * reads directives only from the person's own words, never from recalled chat titles.
+ */
+function personText(content: unknown): string {
+  const parts = typeof content === 'string' ? [content] : Array.isArray(content) ? content : [];
+  const own: string[] = [];
+  for (const part of parts) {
+    const text = typeof part === 'string' ? part : isRecord(part) ? part['text'] : undefined;
+    if (typeof text === 'string' && !HOST_BLOCK.test(text)) {
+      own.push(text);
+    }
+  }
+  return own.join(' ');
+}
+
 /** The advertised name for a directive, matched by substring so harness renaming still resolves. */
 function resolveToolName({ directive, tools }: { directive: string; tools: AdvertisedTool[] }): string | undefined {
   for (const tool of tools) {
@@ -115,6 +165,13 @@ function resolveToolName({ directive, tools }: { directive: string; tools: Adver
     }
   }
   return undefined;
+}
+
+/** The text of the last tool result in the conversation, if a tool has answered. */
+function lastToolResultText(messages: ChatMessage[]): string | undefined {
+  const results = messages.filter(message => message.role === 'tool');
+  const last = results[results.length - 1];
+  return last === undefined ? undefined : messageText(last.content);
 }
 
 /** The `run:<tool>` directive still awaiting a tool result, or undefined when none is open. */
@@ -128,7 +185,7 @@ function pendingDirective(messages: ChatMessage[]): string | undefined {
     if (message.role !== 'user') {
       continue;
     }
-    const text = messageText(message.content);
+    const text = personText(message.content);
     const match = new RegExp(`${RUN_DIRECTIVE_PREFIX}([A-Za-z0-9_-]+)`).exec(text);
     directive = match?.[1];
   }
@@ -177,6 +234,9 @@ function argumentsJsonForTool({
   if (name === 'call_tool') {
     return JSON.stringify({ mcp_server: callToolServer, tool_name: 'ask_memory', input: { question: 'inert' } });
   }
+  if (name === 'usage_summary') {
+    return '{}';
+  }
   return name.includes('ask_memory') ? '{"question":"inert"}' : JSON.stringify({ text });
 }
 
@@ -186,7 +246,7 @@ function textArgument(messages: ChatMessage[]): string {
   for (const message of messages) {
     if (message.role === 'user') {
       text =
-        new RegExp(`${TEXT_DIRECTIVE_PREFIX}(\\S+)`).exec(messageText(message.content))?.[1] ?? DEFAULT_TEXT_ARGUMENT;
+        new RegExp(`${TEXT_DIRECTIVE_PREFIX}(\\S+)`).exec(personText(message.content))?.[1] ?? DEFAULT_TEXT_ARGUMENT;
     }
   }
   return text;
@@ -199,12 +259,31 @@ function callToolServer(messages: ChatMessage[]): string {
     if (message.role !== 'user') {
       continue;
     }
-    const text = messageText(message.content);
+    const text = personText(message.content);
     if (new RegExp(`${RUN_DIRECTIVE_PREFIX}[A-Za-z0-9_-]+`).test(text)) {
       server = new RegExp(`${SERVER_DIRECTIVE_PREFIX}([A-Za-z0-9_-]+)`).exec(text)?.[1] ?? DEFAULT_CALL_TOOL_SERVER;
     }
   }
   return server;
+}
+
+/** The text after the latest `search:` directive, up to the end of its line; empty when none is given. */
+function searchDirectiveText(messages: ChatMessage[]): string {
+  let text = '';
+  for (const message of messages) {
+    if (message.role === 'user') {
+      text = new RegExp(`${SEARCH_DIRECTIVE_PREFIX}([^\\n]+)`).exec(personText(message.content))?.[1]?.trim() ?? '';
+    }
+  }
+  return text;
+}
+
+function briefSteps(messages: ChatMessage[]): { match: string; argumentsJson: string }[] {
+  return [
+    { match: 'list_inbox_threads', argumentsJson: JSON.stringify({ query: 'in:inbox' }) },
+    { match: 'tavily_search', argumentsJson: JSON.stringify({ query: searchDirectiveText(messages) }) },
+    { match: 'render_map', argumentsJson: JSON.stringify({ place_name: HARBOUR_ADDRESS }) },
+  ];
 }
 
 function sandboxArgumentsJson(purpose: 'verify' | 'commit'): string {
@@ -221,7 +300,7 @@ function directiveProgress(messages: ChatMessage[]): { directive: string | undef
   let toolResults = 0;
   for (const message of messages) {
     if (message.role === 'user') {
-      const match = new RegExp(`${RUN_DIRECTIVE_PREFIX}([A-Za-z0-9_-]+)`).exec(messageText(message.content));
+      const match = new RegExp(`${RUN_DIRECTIVE_PREFIX}([A-Za-z0-9_-]+)`).exec(personText(message.content));
       if (match?.[1] !== undefined) {
         directive = match[1];
         toolResults = 0;
@@ -311,6 +390,9 @@ function completionBody({ text, toolCalls }: { text: string | null; toolCalls: S
 
 export async function startScriptedModelServer(): Promise<ScriptedModelServer> {
   const requests: ChatCompletionRequest[] = [];
+  // Stalled streams stay open until the caller hangs up or the fixture closes.
+  const stalled = new Set<ServerResponse>();
+  const thinking = new Set<ServerResponse>();
   let callCounter = 0;
 
   async function dispatch(req: IncomingMessage, res: ServerResponse): Promise<void> {
@@ -343,6 +425,22 @@ export async function startScriptedModelServer(): Promise<ScriptedModelServer> {
         progress.toolResults === 0
           ? { match: 'inert_write', argumentsJson: '{"text":"inert"}' }
           : { match: 'web_search', argumentsJson: JSON.stringify({ query: WEB_SEARCH_QUERY }) };
+    } else if (progress.directive === FIND_PLACES_DIRECTIVE && progress.toolResults < 3) {
+      const steps = [
+        { match: 'tavily_search', argumentsJson: JSON.stringify({ query: FIND_PLACES_QUERY }) },
+        { match: 'tavily_extract', argumentsJson: JSON.stringify({ urls: [HARBOUR_URL, GARDEN_URL] }) },
+        { match: 'render_places', argumentsJson: JSON.stringify({ places: scriptedPlaces }) },
+      ];
+      requestedTool = steps[progress.toolResults];
+    } else if (
+      (progress.directive === STALL_AFTER_TOOL_DIRECTIVE || progress.directive === STALL_MID_ANSWER_DIRECTIVE) &&
+      progress.toolResults === 0
+    ) {
+      requestedTool = { match: 'tavily_search', argumentsJson: JSON.stringify({ query: WEB_SEARCH_QUERY }) };
+    } else if (progress.directive === THINK_AFTER_WRITE_DIRECTIVE && progress.toolResults === 0) {
+      requestedTool = { match: 'inert_write', argumentsJson: '{"text":"inert"}' };
+    } else if (progress.directive === BRIEF_DIRECTIVE) {
+      requestedTool = briefSteps(parsed.messages)[progress.toolResults];
     } else if (pending !== undefined) {
       requestedTool = { match: pending, argumentsJson: '' };
     }
@@ -383,7 +481,12 @@ export async function startScriptedModelServer(): Promise<ScriptedModelServer> {
     const rejectingJudge =
       parsed.messages.some(message => messageText(message.content).includes(RELEVANCE_JUDGE_TAG)) &&
       parsed.messages.some(message => messageText(message.content).includes(JUDGE_REJECT_MARKER));
-    const replyText = rejectingJudge ? '{"helpful":[]}' : FINAL_TEXT;
+    const quoteToolResult = parsed.messages.some(message =>
+      personText(message.content).includes(QUOTE_TOOL_RESULT_DIRECTIVE),
+    );
+    const replyText = rejectingJudge
+      ? '{"helpful":[]}'
+      : ((quoteToolResult ? lastToolResultText(parsed.messages) : undefined) ?? FINAL_TEXT);
 
     if (!parsed.stream) {
       res.writeHead(200, { 'content-type': 'application/json' });
@@ -396,6 +499,39 @@ export async function startScriptedModelServer(): Promise<ScriptedModelServer> {
       'cache-control': 'no-cache',
       connection: 'keep-alive',
     });
+    const stalls =
+      progress.directive === STALL_AFTER_TOOL_DIRECTIVE || progress.directive === STALL_MID_ANSWER_DIRECTIVE;
+    const stallsAtOnce = progress.directive === STALL_AT_ONCE_DIRECTIVE;
+    if (toolCalls.length === 0 && ((stalls && progress.toolResults > 0) || stallsAtOnce)) {
+      const opening =
+        progress.directive === STALL_AFTER_TOOL_DIRECTIVE
+          ? chunkEnvelope({ index: 0, delta: { role: 'assistant', content: '' }, finish_reason: null })
+          : chunkEnvelope({
+              index: 0,
+              delta: { role: 'assistant', content: STALLED_ANSWER_START },
+              finish_reason: null,
+            });
+      res.write(`data: ${JSON.stringify(opening)}\n\n`);
+      stalled.add(res);
+      res.on('close', () => stalled.delete(res));
+      return;
+    }
+    if (toolCalls.length === 0 && progress.directive === THINK_AFTER_WRITE_DIRECTIVE && progress.toolResults > 0) {
+      thinking.add(res);
+      const timer = setInterval(() => {
+        const chunk = chunkEnvelope({
+          index: 0,
+          delta: { role: 'assistant', reasoning_content: 'Still weighing it. ' },
+          finish_reason: null,
+        });
+        res.write(`data: ${JSON.stringify(chunk)}\n\n`);
+      }, THINKING_CHUNK_INTERVAL_MS);
+      res.on('close', () => {
+        clearInterval(timer);
+        thinking.delete(res);
+      });
+      return;
+    }
     const chunks = toolCalls.length > 0 ? toolCallChunks(toolCalls) : textChunks(replyText);
     for (const chunk of chunks) {
       res.write(`data: ${JSON.stringify(chunk)}\n\n`);
@@ -428,8 +564,12 @@ export async function startScriptedModelServer(): Promise<ScriptedModelServer> {
   return {
     baseUrl: `http://127.0.0.1:${String(address.port)}/v1`,
     requests: () => requests,
+    openThinkingStreams: () => thinking.size,
     close: () =>
       new Promise<void>((resolve, reject) => {
+        for (const res of [...stalled, ...thinking]) {
+          res.destroy();
+        }
         httpServer.closeAllConnections();
         httpServer.close(error => {
           if (error) {

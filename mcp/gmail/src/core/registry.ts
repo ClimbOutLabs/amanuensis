@@ -17,8 +17,12 @@ import type { OperationContext } from "./context.js";
  * declares an `outputSchema`. CLI/TUI consumers use structuredContent when
  * available; MCP hosts that respect outputSchema get type info.
  */
+export type OperationContent =
+  | { type: "text"; text: string }
+  | { type: "image"; data: string; mimeType: string };
+
 export interface OperationResult<TOutput = unknown> {
-  content: Array<{ type: string; text: string }>;
+  content: OperationContent[];
   isError?: boolean;
   structuredContent?: TOutput;
 }

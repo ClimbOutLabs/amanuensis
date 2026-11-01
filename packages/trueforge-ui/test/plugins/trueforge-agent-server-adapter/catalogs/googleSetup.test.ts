@@ -80,6 +80,22 @@ describe('createGoogleSetupApi', () => {
     expect(status.accountEmail).toBe('ada@example.com');
   });
 
+  it('sends a JSON content type on the bodiless test and disconnect calls', async () => {
+    const contentTypes: (string | null)[] = [];
+    const api = apiWith(async (input, init) => {
+      contentTypes.push(new Headers(init?.headers).get('content-type'));
+      return String(input).endsWith('/test')
+        ? reply({ data: { result: 'ok', account_email: 'ada@example.com' } })
+        : reply({ data: { revocation_confirmed: true } });
+    });
+
+    await api.testGoogleConnection();
+    const disconnected = await api.disconnectGoogle();
+
+    expect(contentTypes).toEqual(['application/json', 'application/json']);
+    expect(disconnected.revocationConfirmed).toBe(true);
+  });
+
   it('raises when the server refuses', async () => {
     const api = apiWith(async () => reply({ error: { message: 'That address has no code in it.' } }, 400));
     await expect(api.completeGoogleConsent({ address: 'x' })).rejects.toThrow();

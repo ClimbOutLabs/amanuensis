@@ -1,9 +1,24 @@
 import type { GmailMessage } from '../../../../src/core/email/gmail/gmailWire';
-import { allowsChatApproval, allowsToolGrant } from '../../../../src/core/mcp/approvalGrant';
+import {
+  allowsChatApproval,
+  allowsToolGrant,
+  approvalGrantKey,
+  effectiveToolAdmissions,
+} from '../../../../src/core/mcp/approvalGrant';
 import { verifyPreDispatch } from '../../../../src/core/permissions/dispatch';
 import { classifyUnstampedToolCall } from '../../../../src/core/runtime/AgentThread';
 import { message, plainDraft } from './fixtures';
-import { approvalProblem, approvedContext, build, json, route, sentDraft, text, type Route } from './harness';
+import {
+  approvalProblem,
+  approvedContext,
+  build,
+  json,
+  route,
+  sentDraft,
+  text,
+  threadRoute,
+  type Route,
+} from './harness';
 
 const COMPOSE = ['gmail_read', 'gmail_compose'] as const;
 
@@ -112,7 +127,12 @@ describe('draft_email', () => {
     });
 
     it('does not stack "Re:" on a subject that already has it', async () => {
-      const answering = message({ id: 'orig', threadId: 't5', subject: 'Re: Lease renewal' });
+      const answering = message({
+        id: 'orig',
+        threadId: 't5',
+        subject: 'Re: Lease renewal',
+        extraHeaders: [{ name: 'Message-ID', value: '<orig@mail.example.com>' }],
+      });
       const { tools, google } = await build({
         features: [...COMPOSE],
         routes: [route('/messages/orig', answering), created],
@@ -152,13 +172,13 @@ describe('draft_email', () => {
     });
     expect(info).toMatchObject({ tier: 3, is_approval_required: true });
     expect(info.tier3_card).toMatchObject({
-      plain_what: 'Save a draft "Lease" in your Gmail to grace@example.com. Copy: lin@example.com. It is not sent.',
+      plain_what: 'Save a draft "Lease" in your Gmail to grace@example.com. Copy: lin@example.com? It is not sent.',
       destination: null,
       recipient: null,
       email: {
         action: 'save',
-        to: ['grace@example.com'],
-        cc: ['lin@example.com'],
+        to: [{ name: '', address: 'grace@example.com' }],
+        cc: [{ name: '', address: 'lin@example.com' }],
         bcc: [],
         subject: 'Lease',
         body: 'Thursday works.',
@@ -187,11 +207,19 @@ describe('update_draft', () => {
       name: 'update_draft',
       arguments: { draft_id: 'd1', to: ['mallory@example.com'], subject: 'Keys', body: 'Send them.' },
     });
-    expect(info.tier3_card?.plain_what).toContain('It replaces "Lease" to grace@example.com and lin@example.com');
+    expect(info.tier3_card?.plain_what).toContain(
+      'It replaces "Lease" to Grace (grace@example.com) and lin@example.com',
+    );
     expect(info.tier3_card?.email).toMatchObject({
       action: 'change',
       subject: 'Keys',
-      replaces: { subject: 'Lease', to: ['grace@example.com', 'lin@example.com'] },
+      replaces: {
+        subject: 'Lease',
+        to: [
+          { name: 'Grace', address: 'grace@example.com' },
+          { name: '', address: 'lin@example.com' },
+        ],
+      },
     });
   });
 
@@ -200,6 +228,16 @@ describe('update_draft', () => {
       features: [...COMPOSE],
       routes: [
         draftRoute(threaded),
+        threadRoute({
+          id: 't9',
+          messages: [
+            message({
+              id: 'orig',
+              threadId: 't9',
+              extraHeaders: [{ name: 'Message-ID', value: '<orig@mail.example.com>' }],
+            }),
+          ],
+        }),
         url =>
           url.pathname === '/gmail/v1/users/me/drafts/d1' && url.search === ''
             ? json({ id: 'd1', message: { id: 'm', threadId: 't9' } })
@@ -241,12 +279,15 @@ describe('send_draft', () => {
     const info = await tools.toolCallInfo({ name: 'send_draft', arguments: { draft_id: 'd1' } });
     expect(info).toMatchObject({ tier: 3, is_approval_required: true });
     expect(info.tier3_card?.plain_what).toBe(
-      'Send "Lease" from your Gmail to grace@example.com and lin@example.com. Sent as "Ada".',
+      'Send "Lease" from your Gmail to Grace (grace@example.com) and lin@example.com. Sent as "Ada"?',
     );
     expect(info.tier3_card?.cannot_be_undone).toBe("Once this is sent, it can't be unsent.");
     expect(info.tier3_card?.email).toMatchObject({
       action: 'send',
-      to: ['grace@example.com', 'lin@example.com'],
+      to: [
+        { name: 'Grace', address: 'grace@example.com' },
+        { name: '', address: 'lin@example.com' },
+      ],
       subject: 'Lease',
       body: 'Thursday works.',
     });
@@ -273,7 +314,7 @@ describe('send_draft', () => {
     const { tools } = await build({ features: [...COMPOSE], routes: [draftRoute(mail)] });
     const info = await tools.toolCallInfo({ name: 'send_draft', arguments: { draft_id: 'd1' } });
     expect(info.tier3_card?.plain_what).toBe(
-      'Send "Lease" from your Gmail to a@example.com and b@example.com. Copy: c@example.com. Hidden copy: d@example.com. Sent as "Ada".',
+      'Send "Lease" from your Gmail to a@example.com and b@example.com. Copy: c@example.com. Hidden copy: d@example.com. Sent as "Ada"?',
     );
   });
 
@@ -285,6 +326,89 @@ describe('send_draft', () => {
     expect(JSON.parse(text(response))).toMatchObject({ draft_id: 'd1', message_id: 'sent-1', status: 'sent' });
     expect(google.urls).toContain('POST /gmail/v1/users/me/drafts/send');
     expect(google.bodies.at(-1)).toEqual({ id: 'd1' });
+  });
+
+  it('sends a draft as Gmail holds it, with a Reply-To naming the account, once approved', async () => {
+    const mail = plainDraft({
+      id: 'd-m1',
+      to: 'grace@example.com',
+      body: 'Thursday works.',
+      extraHeaders: [
+        { name: 'Reply-To', value: 'Ada <ada@example.com>' },
+        { name: 'Message-ID', value: '<draft-1@mail.example.com>' },
+        { name: 'Date', value: 'Thu, 22 Oct 2026 09:14:02 -0700' },
+      ],
+    });
+    const { tools, google } = await build({ features: [...COMPOSE], routes: [draftRoute(mail), sendRoute] });
+    const call = { name: 'send_draft', arguments: { draft_id: 'd1' } };
+    const info = await tools.toolCallInfo(call);
+    expect(info.is_approval_required).toBe(true);
+    expect(info.tier3_card?.plain_what).not.toContain('Replies go to');
+    const response = await tools.callTool(call, undefined, approvedContext(info));
+    expect(JSON.parse(text(response))).toMatchObject({ draft_id: 'd1', status: 'sent' });
+    expect(google.urls).toContain('POST /gmail/v1/users/me/drafts/send');
+  });
+
+  it('shows a reply address elsewhere on the card, and sends only after that card is approved', async () => {
+    const mail = plainDraft({
+      id: 'd-m1',
+      to: 'grace@example.com',
+      body: 'x',
+      extraHeaders: [{ name: 'Reply-To', value: 'Mallory <mallory@example.com>' }],
+    });
+    const { tools, google } = await build({ features: [...COMPOSE], routes: [draftRoute(mail), sendRoute] });
+    const call = { name: 'send_draft', arguments: { draft_id: 'd1' } };
+    const info = await tools.toolCallInfo(call);
+    expect(info.tier3_card?.plain_what).toContain('Replies go to: mallory@example.com');
+    expect(info.tier3_card?.email).toMatchObject({ reply_to: 'mallory@example.com' });
+    const response = await tools.callTool(call, undefined, approvedContext(info));
+    expect(JSON.parse(text(response))).toMatchObject({ draft_id: 'd1', status: 'sent' });
+    expect(google.urls).toContain('POST /gmail/v1/users/me/drafts/send');
+  });
+
+  it('will not send when the reply address changed after the card was shown', async () => {
+    let live: GmailMessage = plainDraft({
+      id: 'd-m1',
+      to: 'grace@example.com',
+      body: 'x',
+      extraHeaders: [{ name: 'Reply-To', value: 'Mallory <mallory@example.com>' }],
+    });
+    const { tools, google } = await build({
+      features: [...COMPOSE],
+      routes: [
+        url => (url.pathname === '/gmail/v1/users/me/drafts/d1' ? json(draftResource('d1', live)) : undefined),
+        sendRoute,
+      ],
+    });
+    const call = { name: 'send_draft', arguments: { draft_id: 'd1' } };
+    const info = await tools.toolCallInfo(call);
+    live = plainDraft({
+      id: 'd-m1',
+      to: 'grace@example.com',
+      body: 'x',
+      extraHeaders: [{ name: 'Reply-To', value: 'Eve <eve@example.com>' }],
+    });
+    const response = await tools.callTool(call, undefined, approvedContext(info));
+    expect(text(response)).toContain('changed after you approved it');
+    expect(google.urls.some(entry => entry.includes('/drafts/send'))).toBe(false);
+  });
+
+  it('tells the model to stop once the same send refusal comes back a second time', async () => {
+    const mail = plainDraft({
+      id: 'd-m1',
+      to: 'grace@example.com',
+      body: 'x',
+      extraHeaders: [{ name: 'X-Foo', value: 'x' }],
+    });
+    const { tools } = await build({ features: [...COMPOSE], routes: [draftRoute(mail)] });
+    const call = { name: 'send_draft', arguments: { draft_id: 'd1' } };
+    const first = await tools.toolCallInfo(call);
+    expect(first.pre_dispatch_failure?.message).toContain('header Aman cannot check (X-Foo)');
+    expect(first.pre_dispatch_failure?.message).not.toContain('Do not retry');
+    const second = await tools.toolCallInfo(call);
+    expect(second.pre_dispatch_failure?.message).toContain(
+      'Do not retry; tell the person: This draft has a header Aman cannot check (X-Foo)',
+    );
   });
 
   it('will not send a draft nobody approved, by whatever route the call arrives', async () => {
@@ -527,24 +651,54 @@ describe('send_draft', () => {
         says: 'cannot show you in full',
       },
       {
-        name: 'a Reply-To',
-        mail: plainDraft({
-          id: 'd-m1',
-          to: 'grace@example.com',
-          body: 'x',
-          extraHeaders: [{ name: 'Reply-To', value: 'mallory@example.com' }],
-        }),
-        says: 'reply address or sender',
-      },
-      {
-        name: 'a Sender',
+        name: 'a Sender from another address',
         mail: plainDraft({
           id: 'd-m1',
           to: 'grace@example.com',
           body: 'x',
           extraHeaders: [{ name: 'Sender', value: 'mallory@example.com' }],
         }),
-        says: 'reply address or sender',
+        says: 'Sender',
+      },
+      {
+        name: 'a Reply-To that hides another address before the account',
+        mail: plainDraft({
+          id: 'd-m1',
+          to: 'grace@example.com',
+          body: 'x',
+          extraHeaders: [{ name: 'Reply-To', value: 'mallory@example.com, <ada@example.com>' }],
+        }),
+        says: 'Reply-To',
+      },
+      {
+        name: 'a Sender that hides another address before the account',
+        mail: plainDraft({
+          id: 'd-m1',
+          to: 'grace@example.com',
+          body: 'x',
+          extraHeaders: [{ name: 'Sender', value: 'mallory@example.com, <ada@example.com>' }],
+        }),
+        says: 'Sender',
+      },
+      {
+        name: 'a From that hides another address before the account',
+        mail: plainDraft({
+          id: 'd-m1',
+          from: 'mallory@example.com, <ada@example.com>',
+          to: 'grace@example.com',
+          body: 'x',
+        }),
+        says: 'From line is not one plain address',
+      },
+      {
+        name: 'a header Aman cannot check',
+        mail: plainDraft({
+          id: 'd-m1',
+          to: 'grace@example.com',
+          body: 'x',
+          extraHeaders: [{ name: 'X-Foo', value: 'mallory@example.com' }],
+        }),
+        says: 'header Aman cannot check (X-Foo)',
       },
       {
         name: 'a different From',
@@ -607,18 +761,53 @@ describe('send_draft', () => {
     expect(sleeps.length).toBeGreaterThan(0);
   });
 
-  it('is not eligible for a standing "Always allow" or a chat-wide approval', async () => {
+  it('is never covered by a standing "Always allow" or by "Always allow this here"', async () => {
+    const { tools } = await build({ features: [...COMPOSE], routes: [draftRoute()] });
+    const info = await tools.toolCallInfo({ name: 'send_draft', arguments: { draft_id: 'd1' } });
+    expect(info.tier).toBe(3);
+    expect(allowsToolGrant(info)).toBe(false);
+    expect(allowsChatApproval(info)).toBe(false);
+  });
+
+  it('lets a draft, which sends nothing, be answered once for this chat but never by a standing grant', async () => {
     const { tools } = await build({ features: [...COMPOSE], routes: [draftRoute()] });
     for (const [name, args] of [
-      ['send_draft', { draft_id: 'd1' }],
       ['update_draft', { draft_id: 'd1', to: ['grace@example.com'], subject: 'Lease', body: 'x' }],
       ['draft_email', { to: ['grace@example.com'], subject: 'Lease', body: 'x' }],
     ] as const) {
       const info = await tools.toolCallInfo({ name, arguments: args });
       expect(info.tier).toBe(3);
       expect(allowsToolGrant(info)).toBe(false);
-      expect(allowsChatApproval(info)).toBe(false);
+      expect(allowsChatApproval(info)).toBe(true);
     }
+  });
+
+  it('after one Allow, asks again for the next send to the same person in the same chat', async () => {
+    const { tools } = await build({ features: [...COMPOSE], routes: [draftRoute()] });
+    const info = await tools.toolCallInfo({ name: 'send_draft', arguments: { draft_id: 'd1' } });
+    const send = (id: string) => ({
+      id,
+      type: 'function' as const,
+      function: { name: 'send_draft', arguments: '{"draft_id":"d1"}' },
+      tool_info: info,
+    });
+    const first = effectiveToolAdmissions({
+      calls: [send('call-1')],
+      decisions: new Map([['call-1', { status: 'allow' as const }]]),
+      chatApprovalGrants: new Set(),
+      implementationPlanGrants: new Set(),
+    });
+    expect(first.get('call-1')?.decision).toEqual({ status: 'allow' });
+
+    // Even a chat grant saved for this send before sends lost the chat-wide answer does not cover the next one.
+    const next = effectiveToolAdmissions({
+      calls: [send('call-2')],
+      decisions: new Map(),
+      chatApprovalGrants: new Set([approvalGrantKey(info)]),
+      implementationPlanGrants: new Set(),
+    });
+    expect(next.get('call-2')?.decision).toBeUndefined();
+    expect(info.is_approval_required).toBe(true);
   });
 });
 

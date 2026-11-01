@@ -1,6 +1,13 @@
 import type { Logger } from 'winston';
-import { privateDataReadCapability } from '../core/capabilities/builtins/PrivateDataRead';
+import { CALDAV_SERVER_NAME } from '../core/calendar/caldav/toolContract';
+import { chatProvenanceCapability } from '../core/capabilities/builtins/ChatProvenance';
 import type { TaskChecklistAccess } from '../core/capabilities/builtins/TaskChecklist';
+import {
+  MailAccountDirectory,
+  MailConnectorSource,
+  readMailAccountNames,
+} from '../core/email/mailConnector/MailConnectorSource';
+import { MAIL_CONNECTOR_NAME } from '../core/email/mailConnector/toolContract';
 import type { ILLM } from '../core/llm/ILLM';
 import type { ToolSource } from '../core/mcp/IMCPServer';
 import { RemoteMCP, type RemoteMcpHeaders } from '../core/mcp/RemoteMCP';
@@ -16,9 +23,15 @@ import {
 import type { AgentDefinition, ConfiguredModelSummary, ModelParams } from '../core/runtime/AgentDefinition';
 import type { AgentInfo } from '../core/runtime/AgentThread.types';
 import type { HostToolCallPolicy } from '../core/runtime/HostToolCallPolicy';
+import type { ToolBundleName } from '../core/runtime/toolBundleCatalog';
 import type { BoundRepository, Sandbox, SandboxInfo } from '../core/sandbox/Sandbox';
+import { fetchedPages, type FetchedPageScope } from '../core/search/fetchedPages';
+import type { PageFixtureSource } from '../core/search/pageFixtures';
+import { isTavilyConnectorUrl, tavilyAuthFromHeader, TavilyClient } from '../core/search/TavilyClient';
+import { TavilySource } from '../core/search/TavilySource';
 import type { AgentTracing } from '../core/tracing/AgentTracing';
 import { NOOP_AGENT_TRACING } from '../core/tracing/NoopAgentTracing';
+import { extractErrorLogFields } from '../core/util/errorLogFields';
 import type { ITurnResourceResolver, ResolvedAgentDefinition } from './ITurnResourceResolver';
 import type { TurnRecord } from './models/TurnRecord';
 import type { AgentSpec } from './schemas/agentSpec';
@@ -40,6 +53,19 @@ export type TurnSandboxFactory = (input: {
   tracing: AgentTracing;
   sentinel: SentinelHostContext;
 }) => Promise<Sandbox>;
+
+/** The guidance topic a host-provisioned connector's tools are grouped under: search under web, the first-party mail and calendar accounts under google. */
+function connectorBundle(input: {
+  name: string;
+  firstParty: boolean;
+  searchProvider: boolean;
+}): ToolBundleName | undefined {
+  if (input.searchProvider) {
+    return 'web';
+  }
+  const mailOrCalendar = input.name === MAIL_CONNECTOR_NAME || input.name === CALDAV_SERVER_NAME;
+  return input.firstParty && mailOrCalendar ? 'google' : undefined;
+}
 
 function specWantsSandbox(spec: AgentSpec): boolean {
   return spec.config.sandbox.enabled;
@@ -64,6 +90,12 @@ function toSelectors(entry: {
  * behavior; subclass and override to customize (tool sources, sandbox,
  * tracing).
  */
+/**
+ * Which job a model call does inside a turn: the root thread's answers, a sub-agent thread's work,
+ * or context compaction on a model the spec set explicitly. Lets a host attribute usage and cost.
+ */
+export type TurnModelRole = 'chat' | 'delegation' | 'compaction';
+
 interface ResolvedModel {
   modelClient: ILLM;
   defaultModelParams: ModelParams;
@@ -78,6 +110,18 @@ interface ResolvedModel {
   /** See AgentDefinition.modelSupportsVision. Every implementation must set this explicitly. */
   modelSupportsVision: boolean;
   modelProperties?: AgentDefinition['modelProperties'];
+  /** See AgentDefinition.modelRequestGate. Absent leaves the model unlimited. */
+  modelRequestGate?: AgentDefinition['modelRequestGate'];
+}
+
+/** The saved Authorization header of a connector, whether its headers are static or resolved at connect. */
+async function authorizationHeaderOf(headers: RemoteMcpHeaders): Promise<string | undefined> {
+  const resolved = typeof headers === 'function' ? await headers() : { headers };
+  if (!('headers' in resolved)) {
+    return undefined;
+  }
+  const found = Object.entries(resolved.headers).find(([name]) => name.toLowerCase() === 'authorization');
+  return found?.[1];
 }
 
 export class TurnResourceResolver<
@@ -88,8 +132,7 @@ export class TurnResourceResolver<
   readonly #firstPartyServers = new Set<string>();
   /** MCP servers the user designated as their search provider, with the host's list of their search tools and the argument names that are provider plumbing. */
   readonly #searchProviderServers = new Map<string, SearchProviderGrant>();
-  /** The turn's search state, shared by every thread's host context so one thread's reads bind the others. */
-  protected readonly webSearchTurn = createWebSearchTurnState();
+  readonly webSearchTurn = createWebSearchTurnState();
   readonly #models = new Map<string, Promise<ResolvedModel>>();
   #sandbox?: Sandbox | undefined;
 
@@ -105,7 +148,7 @@ export class TurnResourceResolver<
        * which case the definition falls back to the catalog name it was
        * asked to resolve.
        */
-      llm: (model: string) => Promise<ResolvedModel>;
+      llm: (model: string, role: TurnModelRole) => Promise<ResolvedModel>;
       /**
        * MCP server name → connection details. Required to use spec.mcp_servers:
        * the AgentSpec carries names only (no url/headers on the wire) — the
@@ -128,6 +171,11 @@ export class TurnResourceResolver<
       mcpConnectTimeoutMs: number;
       /** One sandbox type per runtime. Omit = no sandbox support. */
       sandboxProvider?: TurnSandboxFactory | undefined;
+      /**
+       * Page links the Tavily page reader answers from local fixtures instead of the web. Set only on an
+       * eval instance; absent, every link is read from the web.
+       */
+      pageFixtures?: PageFixtureSource | undefined;
       /**
        * Named-agent lookup (registry id → live AgentSpec). Required when a
        * session is bound by reference; omit only if all sessions use inline agents.
@@ -157,17 +205,25 @@ export class TurnResourceResolver<
        * See ITurnResourceResolver.runCodeToolCallTimeoutMs.
        */
       runCodeToolCallTimeoutMs?: number | undefined;
+      /** How long a web search or page read may take before the model gets a plain tool error instead. */
+      searchCallTimeoutMs?: number | undefined;
       /**
        * Host instance-wide bound in milliseconds on waiting for a model call's
        * first output. See ITurnResourceResolver.modelFirstResponseTimeoutMs.
        */
       modelFirstResponseTimeoutMs?: number | undefined;
+      /** See ITurnResourceResolver.modelIdleTimeoutMs. */
+      modelIdleTimeoutMs?: number | undefined;
+      /** See ITurnResourceResolver.modelToolCallIdleTimeoutMs. */
+      modelToolCallIdleTimeoutMs?: number | undefined;
       /**
        * Per-run host policy over tool calls. See ITurnResourceResolver.toolCallPolicy.
        */
       toolCallPolicy?: HostToolCallPolicy | undefined;
       /** Resolved T2 binding, independent of whether this turn enables a sandbox. */
       boundRepository?: BoundRepository | undefined;
+      /** See ITurnResourceResolver.serverSandboxAvailable. */
+      serverSandboxAvailable?: boolean | undefined;
       /** IANA timezone name the client sent with this turn. See ITurnResourceResolver.clientTimezone. */
       clientTimezone?: string | undefined;
       /**
@@ -181,8 +237,44 @@ export class TurnResourceResolver<
        * catalog; the section then omits the list.
        */
       configuredModels?: (() => Promise<readonly ConfiguredModelSummary[]>) | undefined;
+      /**
+       * Names of every connector set up for this tenant, turned on for the chat or not. Lets a call to a
+       * connector the chat does not have say whether it is missing or only turned off. Called at most once.
+       */
+      setUpConnectorNames?: (() => Promise<readonly string[]>) | undefined;
+      /**
+       * Keeps the Email account names per chat across turns. Omit to keep them for one turn only.
+       */
+      mailAccounts?: MailAccountDirectory | undefined;
     },
-  ) {}
+  ) {
+    this.#mailAccounts = deps.mailAccounts ?? new MailAccountDirectory();
+  }
+
+  readonly #mailAccounts: MailAccountDirectory;
+  #setUpConnectorNamesPromise?: Promise<readonly string[] | undefined> | undefined;
+
+  /** Single-flight; a failed read leaves the names unknown rather than failing the turn. */
+  #resolveSetUpConnectorNames(): Promise<readonly string[] | undefined> {
+    const read = this.deps.setUpConnectorNames;
+    if (read === undefined) {
+      return Promise.resolve(undefined);
+    }
+    this.#setUpConnectorNamesPromise ??= read().catch((error: unknown) => {
+      this.deps.logger.warn('Connector names could not be read', extractErrorLogFields(error));
+      return undefined;
+    });
+    return this.#setUpConnectorNamesPromise;
+  }
+
+  /**
+   * Names of every connector set up for this tenant, or undefined when that could not be
+   * read. The same single-flight read the deferred-tool wording uses, exposed so host
+   * resolvers can offer the set-up sources by default without a second read of the store.
+   */
+  get setUpConnectorNames(): Promise<readonly string[] | undefined> {
+    return this.#resolveSetUpConnectorNames();
+  }
 
   #configuredModelsPromise?: Promise<readonly ConfiguredModelSummary[]> | undefined;
 
@@ -223,12 +315,24 @@ export class TurnResourceResolver<
     return this.deps.modelFirstResponseTimeoutMs;
   }
 
+  get modelIdleTimeoutMs(): number | undefined {
+    return this.deps.modelIdleTimeoutMs;
+  }
+
+  get modelToolCallIdleTimeoutMs(): number | undefined {
+    return this.deps.modelToolCallIdleTimeoutMs;
+  }
+
   get toolCallPolicy(): HostToolCallPolicy | undefined {
     return this.deps.toolCallPolicy;
   }
 
   get boundRepository(): BoundRepository | undefined {
     return this.deps.boundRepository;
+  }
+
+  get serverSandboxAvailable(): boolean | undefined {
+    return this.deps.serverSandboxAvailable;
   }
 
   get clientTimezone(): string | undefined {
@@ -348,6 +452,7 @@ export class TurnResourceResolver<
       workspace_cwd: workspace_cwd ?? null,
       web_search: this.webSearchTurn,
     });
+    const pageScope: FetchedPageScope = { tenant_id, conversation_id: session_id };
     const toolSets = await Promise.all(
       (spec.mcp_servers ?? []).map(async entry => {
         const source = await this.getOrCreateToolSource({
@@ -360,7 +465,20 @@ export class TurnResourceResolver<
             if (search_provider !== undefined) {
               this.#searchProviderServers.set(entry.name, search_provider);
             }
-            return new RemoteMCP({
+            if (search_provider !== undefined && isTavilyConnectorUrl(url)) {
+              return new TavilySource({
+                id: entry.name,
+                name: entry.name,
+                client: new TavilyClient({
+                  auth: tavilyAuthFromHeader(await authorizationHeaderOf(headers ?? {})),
+                  fetchImpl: (target, init) => fetch(target, init),
+                }),
+                pages: fetchedPages,
+                scope: pageScope,
+                pageFixtures: this.deps.pageFixtures,
+              });
+            }
+            const remote = new RemoteMCP({
               id: entry.name,
               name: entry.name,
               url,
@@ -374,6 +492,21 @@ export class TurnResourceResolver<
               tracing,
               signal,
             });
+            if (entry.name !== MAIL_CONNECTOR_NAME || first_party !== true) {
+              return remote;
+            }
+            return new MailConnectorSource({
+              inner: remote,
+              accounts: ({ fresh }) =>
+                this.#mailAccounts.accounts({
+                  chat_id: session_id,
+                  connector_url: url,
+                  fresh,
+                  read: () => readMailAccountNames(remote),
+                }),
+              now: () => new Date(),
+              timeZone: this.deps.clientTimezone,
+            });
           },
         });
         return new ToolSet({
@@ -383,6 +516,15 @@ export class TurnResourceResolver<
           sentinel,
           firstParty: this.#firstPartyServers.has(entry.name),
           searchProvider: this.#searchProviderServers.get(entry.name),
+          bundle: connectorBundle({
+            name: entry.name,
+            firstParty: this.#firstPartyServers.has(entry.name),
+            searchProvider: this.#searchProviderServers.has(entry.name),
+          }),
+          pages: fetchedPages,
+          pagesScope: pageScope,
+          searchCallTimeoutMs: this.deps.searchCallTimeoutMs,
+          logger: this.deps.logger,
         });
       }),
     );
@@ -399,7 +541,7 @@ export class TurnResourceResolver<
       agentInfo === undefined || agentInfo.model !== undefined ? undefined : spec.auxiliary_models?.delegation;
     const selectedModel = delegation ?? spec.model;
     const modelName = agentInfo?.model ?? selectedModel.name;
-    const resolvedModel = await this.getModel(modelName);
+    const resolvedModel = await this.getModel({ modelName, role: agentInfo === undefined ? 'chat' : 'delegation' });
     const modelParams =
       agentInfo?.model !== undefined
         ? { ...resolvedModel.defaultModelParams }
@@ -419,7 +561,7 @@ export class TurnResourceResolver<
       ? spec.auxiliary_models?.compaction
       : undefined;
     const compactionModel = compactionSetting
-      ? await this.getModel(compactionSetting.name).then(resolved => ({
+      ? await this.getModel({ modelName: compactionSetting.name, role: 'compaction' }).then(resolved => ({
           modelClient: resolved.modelClient,
           modelParams: { ...resolved.defaultModelParams, ...compactionSetting.params },
           modelProperties: resolved.modelProperties,
@@ -430,6 +572,7 @@ export class TurnResourceResolver<
     // shared unchanged across the root thread and every sub-agent thread;
     // see #resolveConfiguredModels.
     const configuredModels = await this.#resolveConfiguredModels();
+    const setUpConnectorNames = await this.#resolveSetUpConnectorNames();
 
     return {
       definition: {
@@ -444,6 +587,7 @@ export class TurnResourceResolver<
         // unchanged.
         modelId: resolvedModel.modelId ?? modelName.slice(modelName.indexOf('/') + 1),
         modelSupportsVision: resolvedModel.modelSupportsVision,
+        modelRequestGate: resolvedModel.modelRequestGate,
         configuredModels,
         modelProperties: resolvedModel.modelProperties,
         clientTimezone: this.deps.clientTimezone,
@@ -468,10 +612,12 @@ export class TurnResourceResolver<
         toolCallBudget: spec.config.task_state.tool_call_budget,
         budgetedTools: spec.config.task_state.budgeted_tools,
         toolSets,
+        setUpConnectorNames,
       },
       compactionModel,
-      // The root thread carries the session's "read private data" flag across turns.
-      ...(agentInfo ? {} : { extraCapabilities: [privateDataReadCapability({ turn: this.webSearchTurn })] }),
+      // Only the root thread reads the chat's history for where its links came from. A sub-agent's results reach the
+      // same turn state through the dispatch loop as they arrive.
+      extraCapabilities: agentInfo === undefined ? [chatProvenanceCapability({ turn: this.webSearchTurn })] : [],
     };
   }
 
@@ -494,16 +640,17 @@ export class TurnResourceResolver<
   }
 
   /**
-   * Resolves `deps.llm` once per distinct model name for this turn — parent and
-   * sub-agents with the same catalog model share one promise.
+   * Resolves `deps.llm` once per distinct model name and role for this turn. The role is part of
+   * the key so each job gets its own client and a host can attribute every call to it.
    */
-  protected getModel(modelName: string): Promise<ResolvedModel> {
-    const cached = this.#models.get(modelName);
+  protected getModel({ modelName, role }: { modelName: string; role: TurnModelRole }): Promise<ResolvedModel> {
+    const key = `${role}\u0000${modelName}`;
+    const cached = this.#models.get(key);
     if (cached) {
       return cached;
     }
-    const made = this.deps.llm(modelName);
-    this.#models.set(modelName, made);
+    const made = this.deps.llm(modelName, role);
+    this.#models.set(key, made);
     return made;
   }
 }

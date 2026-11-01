@@ -1,12 +1,15 @@
-import { useTrueFoundryAgentSpec, useTrueFoundryUpdateAgentSpec } from '@truefoundry/assistant-ui-runtime';
 import { useCallback, useState, type FC, type ReactNode } from 'react';
 
+import { WORKING_ON_IT_LABEL } from '../atoms/ComposerShell.js';
 import type { AmanAvatarActivity } from '../hooks/useAvatarActivity.js';
 import { useRuntimeConnectivity } from '../hooks/useRuntimeConnectivity.js';
 import { Icon } from '../icons/Icon.js';
 import { OfflineIndicator } from '../sentinel/OfflineIndicator.js';
-import { AmanAvatarMotion, type AmanAvatarMotionSources } from './AmanAvatarMotion.js';
-import type { MemoryBankStatus } from './AmanSetupContext.js';
+import { useOptionalSentinelApiState } from '../sentinel/SentinelApiContext.js';
+import { ACTIVITY_STATE_DOT_CLASSES } from '../sentinel/activityVerbs.js';
+import { WAITING_FOR_YOU_LABEL, type SentinelUserSettings } from '../sentinel/types.js';
+import { assistantDisplayName } from '../utils/assistantName.js';
+import { AmanAvatarMotion, avatarAltText, type AmanAvatarMotionSources } from './AmanAvatarMotion.js';
 import {
   PersonalizationProvider,
   useOptionalPersonalization,
@@ -25,14 +28,13 @@ export type AmanRuntimeRailProps = {
   avatarMotion?: AmanAvatarMotionSources;
   /**
    * What the assistant is doing right now: idle, thinking (any non-streaming work: reasoning,
-   * tool calls, memory ops), writing (visible response tokens streaming into chat), or error
-   * (a surfaced failure, auto-cleared). Defaults to 'idle'. Connectivity is deliberately not
-   * part of this: the rail's status dot owns reachability.
+   * tool calls, memory ops), writing (visible response tokens streaming into chat), waiting
+   * (the turn is parked on the person), or error (a surfaced failure, auto-cleared). Defaults
+   * to 'idle'. Connectivity is deliberately not part of this: the rail's status dot owns
+   * reachability.
    */
   activity?: AmanAvatarActivity;
   modelName?: string;
-  /** Who the browser is signed in as. Without it the account row is left out. */
-  userName?: string | undefined;
   /** The persona or agent answering right now, when the host tracks one. */
   personaName?: string | undefined;
   /** Host-provided status wins; when omitted the rail probes `/healthz` itself. */
@@ -41,21 +43,24 @@ export type AmanRuntimeRailProps = {
   version?: string | undefined;
   /** Source reference the server's build was stamped with; absent on an unstamped build. */
   buildRef?: string | undefined;
-  /**
-   * The memory bank, null when memory is off, undefined when unknown. Unknown leaves the row out
-   * rather than claiming a state the host could not confirm.
-   */
-  memoryBank?: MemoryBankStatus | null | undefined;
-  /** Where "set up" points when memory is off; omitted renders plain text. */
-  settingsHref?: string | undefined;
   /** @deprecated Wrap the rail and chat shell in `PersonalizationProvider` instead. */
   personalizationApi?: PersonalizationApi;
   /**
-   * Live permissions audit feed node, provided by the host (e.g. `SentinelAuditFeed`
-   * for the active session). Renders as a "Permissions" section; omitted leaves the
-   * section out entirely.
+   * Ids of the approvals waiting on the person in this chat. Any id puts the panda in its waiting
+   * state, and puts a live Waiting for you line above the history in the Activity row.
+   */
+  pendingApprovalIds?: readonly string[];
+  /**
+   * The receipt node, provided by the host (e.g. `SentinelAuditFeed` for the active session).
+   * It is the body of the Activity row.
    */
   auditFeed?: ReactNode;
+  /**
+   * The host's way to open Settings at the Audit section. The rail renders outside the shell
+   * tree, so it cannot open Settings itself: the Audits link shows only when the host hands
+   * this over, and clicking it calls it.
+   */
+  onOpenAudits?: () => void;
 };
 
 /** Same `aui-` prefixed style as the left rail's `aui-history-collapsed` preference. */
@@ -77,103 +82,118 @@ function readStoredRailCollapsed(): boolean {
 const STATUS_LABELS: Record<AmanRuntimeRailStatus, string> = {
   ready: 'Ready',
   connecting: 'Connecting',
-  offline: 'Offline',
-  degraded: 'Degraded',
+  offline: 'Offline. Check your connection.',
+  degraded: 'Connection is slow',
 };
 
-/** Enough of a commit SHA to compare against a branch or an image tag by eye. */
-const SHORT_REF_LENGTH = 7;
-
-/** Shortens a commit SHA; anything else (a tag, a branch) is already meant to be read whole. */
-function shortenBuildRef(ref: string): string {
-  return /^[0-9a-f]{12,}$/i.test(ref) ? ref.slice(0, SHORT_REF_LENGTH) : ref;
+/**
+ * The status line: the connection when it is not fine, then the wait on the person, Ready, or a
+ * failure. While a reply runs it says nothing: the composer and the reply already say so on screen.
+ */
+function statusLineLabel({
+  status,
+  activity,
+  waitingOnPerson,
+}: {
+  status: AmanRuntimeRailStatus;
+  activity: AmanAvatarActivity;
+  waitingOnPerson: boolean;
+}): string | null {
+  if (status !== 'ready') return STATUS_LABELS[status];
+  if (waitingOnPerson) return WAITING_FOR_YOU_LABEL;
+  switch (activity) {
+    case 'idle':
+      return 'Ready';
+    case 'thinking':
+    case 'writing':
+      return null;
+    case 'waiting':
+      return WAITING_FOR_YOU_LABEL;
+    case 'error':
+      return 'Something went wrong. Send your message again.';
+  }
 }
 
-type BuildSummary = { label: string; title: string };
+type StatusTone = 'ready' | 'busy' | 'warning' | 'error';
 
-/**
- * The footer keeps one narrow line for this, so the label stays short and the tooltip carries
- * the full reference for a bug report. An unstamped build degrades to the version alone.
- * The word is "Release", not "Session": the number names the shipped build, not the chat.
- */
-function summarizeBuild({ version, buildRef }: { version: string; buildRef: string | undefined }): BuildSummary {
-  const ref = buildRef?.trim();
-  if (ref === undefined || ref === '') {
-    return { label: `Release ${version}`, title: `Release ${version}` };
-  }
-  return {
-    label: `Release ${version} · ${shortenBuildRef(ref)}`,
-    title: `Release ${version} · ${ref}`,
-  };
+/** The dot's colour: gold while working or waiting, green when ready, red on a failure. */
+function statusToneOf({
+  status,
+  activity,
+  waitingOnPerson,
+}: {
+  status: AmanRuntimeRailStatus;
+  activity: AmanAvatarActivity;
+  waitingOnPerson: boolean;
+}): StatusTone {
+  if (status === 'offline') return 'error';
+  if (status !== 'ready') return 'warning';
+  if (activity === 'error') return 'error';
+  if (waitingOnPerson || activity === 'waiting' || activity === 'thinking' || activity === 'writing') return 'busy';
+  return 'ready';
 }
 
 type RuntimeRailContentProps = Omit<AmanRuntimeRailProps, 'personalizationApi'>;
 
-/**
- * Memory recall toggle: reads the current recallEnabled flag from the agent spec
- * and provides a switch to toggle it.
- */
-const MemoryRecallToggle: FC<{ memoryBank: MemoryBankStatus | null | undefined }> = ({ memoryBank }) => {
-  const { agentSpec } = useTrueFoundryAgentSpec();
-  const updateAgentSpec = useTrueFoundryUpdateAgentSpec();
+/** One folded row of the panel: a label with its chevron on the left, closed by default. */
+const FoldedRow: FC<{ section: string; title: string; children: ReactNode }> = ({ section, title, children }) => (
+  <details className="aman-runtime-rail__details" data-section={section}>
+    <summary className="aman-runtime-rail__details-summary">
+      <Icon name="chevron-right" size={12} className="aman-runtime-rail__fold-chevron" aria-hidden="true" />
+      <span>{title}</span>
+    </summary>
+    <div className="aman-runtime-rail__details-body">{children}</div>
+  </details>
+);
 
-  const recallEnabled = agentSpec?.config?.memory?.recallEnabled ?? true;
-  const isConfigured = !!memoryBank?.connected;
-
-  const handleToggle = useCallback(() => {
-    if (!updateAgentSpec) return;
-    updateAgentSpec({
-      config: {
-        ...(agentSpec?.config ?? {}),
-        memory: {
-          ...(agentSpec?.config?.memory ?? {}),
-          recallEnabled: !recallEnabled,
-        },
-      },
-    });
-  }, [updateAgentSpec, agentSpec, recallEnabled]);
-
-  if (!isConfigured) {
-    return null;
-  }
-
-  return (
-    <label className="aman-runtime-rail__switch">
-      <input type="checkbox" checked={recallEnabled} onChange={handleToggle} aria-label="Toggle memory recall" />
-      <span>{recallEnabled ? 'On' : 'Off'}</span>
-    </label>
-  );
-};
+/** The Rules fold's sentences, one per rule; none until the settings have loaded. */
+function ruleSentences({
+  settings,
+  assistant,
+}: {
+  settings: SentinelUserSettings | null;
+  assistant: string;
+}): string[] {
+  if (settings === null) return [];
+  return [
+    settings.search_without_asking ? 'Web searches run without asking' : 'Web searches ask first',
+    settings.sandbox_without_asking
+      ? `Read-only commands and ${assistant}'s own code in the workspace run without asking. Other commands ask first.`
+      : 'Read-only commands in the workspace run without asking. Other commands ask first.',
+    settings.offline_mode ? 'Offline mode is on' : 'Offline mode is off',
+  ];
+}
 
 const RuntimeRailContent: FC<RuntimeRailContentProps> = ({
   avatarSrc,
   avatarMotion,
   activity = 'idle',
-  modelName = 'Not configured',
-  userName,
   personaName,
   status: statusOverride,
-  version,
-  buildRef,
-  memoryBank,
-  settingsHref,
+  pendingApprovalIds = [],
   auditFeed,
+  onOpenAudits,
 }) => {
   const profile = useOptionalPersonalization()?.profile;
+  const assistantName = assistantDisplayName(profile?.assistant_name);
+  const sentinel = useOptionalSentinelApiState();
+  const settings = sentinel?.settings ?? null;
+  const rules = ruleSentences({ settings, assistant: assistantName });
   const [collapsed, setCollapsed] = useState(readStoredRailCollapsed);
   // The host's explicit status always wins; otherwise the rail watches /healthz itself.
   const selfProbed = statusOverride === undefined;
   const connectivity = useRuntimeConnectivity({ enabled: selfProbed });
   const status = statusOverride ?? connectivity.status;
-  const statusLabel = STATUS_LABELS[status];
-  const trimmedVersion = version?.trim();
-  const toggleLabel = collapsed ? 'Expand rail' : 'Collapse rail';
-  // Collapsed, and at phone width where the full status row is hidden, this one string is the
-  // only place the connection state and the active model stay readable.
-  const compactSummary = `${statusLabel} · ${modelName}`;
-  const trimmedUserName = userName?.trim();
+  const waitingOnPerson = pendingApprovalIds.length > 0;
+  const statusLine = statusLineLabel({ status, activity, waitingOnPerson });
+  // Folded, the poster's tooltip is all that is left, so it still says a reply is running.
+  const compactLabel = statusLine ?? WORKING_ON_IT_LABEL;
+  const tone = statusToneOf({ status, activity, waitingOnPerson });
+  // A pending approval holds the panda in its waiting state, unless a failure takes the pose.
+  const avatarActivity: AmanAvatarActivity = waitingOnPerson && activity !== 'error' ? 'waiting' : activity;
+  const toggleLabel = collapsed ? 'Show panel' : 'Hide panel';
   const trimmedPersonaName = personaName?.trim();
-
+  const posterSrc = avatarMotion?.poster ?? avatarSrc;
   const toggleCollapsed = useCallback(() => {
     setCollapsed(previous => {
       const next = !previous;
@@ -185,11 +205,6 @@ const RuntimeRailContent: FC<RuntimeRailContentProps> = ({
       return next;
     });
   }, []);
-
-  const build =
-    trimmedVersion === undefined || trimmedVersion === ''
-      ? undefined
-      : summarizeBuild({ version: trimmedVersion, buildRef });
 
   return (
     <aside
@@ -206,56 +221,81 @@ const RuntimeRailContent: FC<RuntimeRailContentProps> = ({
           onClick={toggleCollapsed}
         >
           <Icon name={collapsed ? 'chevron-left' : 'chevron-right'} size={14} aria-hidden="true" />
-          {collapsed ? null : <span className="aman-runtime-rail__button-label">Collapse</span>}
         </button>
       </div>
 
-      {/* A dot alone, so the collapsed rail stays narrow; the label and tooltip carry the words. */}
-      <div
-        className="aman-runtime-rail__compact-status"
-        data-status={status}
-        role="img"
-        aria-label={compactSummary}
-        title={compactSummary}
-      >
-        <span className="aman-runtime-rail__status-dot" aria-hidden="true" />
-      </div>
-
-      {collapsed ? null : (
+      {collapsed ? (
+        <>
+          {/* The poster frame, with the status dot on its corner. The words are the tooltip. */}
+          <div
+            className="aman-runtime-rail__compact-status"
+            data-tone={tone}
+            role="img"
+            aria-label={compactLabel}
+            title={compactLabel}
+          >
+            {posterSrc === undefined ? null : (
+              <img src={posterSrc} alt="" className="aman-runtime-rail__compact-poster" />
+            )}
+            <span className="aman-runtime-rail__status-dot" aria-hidden="true" />
+          </div>
+          <OfflineIndicator compact />
+        </>
+      ) : (
         <>
           <OfflineIndicator />
 
-          <div className="aman-runtime-rail__avatar-card">
-            {avatarMotion ? (
-              <AmanAvatarMotion activity={activity} sources={avatarMotion} className="aman-runtime-rail__avatar" />
-            ) : avatarSrc ? (
-              <img src={avatarSrc} alt="Amanuensis avatar" className="aman-runtime-rail__avatar" />
-            ) : (
-              <span className="aman-runtime-rail__avatar-fallback" role="img" aria-label="Amanuensis avatar">
-                A
-              </span>
+          <section
+            className="aman-runtime-rail__avatar-card"
+            data-section="panda"
+            aria-labelledby="aman-runtime-rail-title"
+          >
+            {/* The frame is the picture's only box: rounded corners, no border, and nothing drawn over it. */}
+            <div className="aman-runtime-rail__avatar">
+              {avatarMotion ? (
+                <AmanAvatarMotion
+                  activity={avatarActivity}
+                  sources={avatarMotion}
+                  alt={avatarAltText(assistantName)}
+                  className="aman-runtime-rail__picture"
+                />
+              ) : avatarSrc ? (
+                <img src={avatarSrc} alt={avatarAltText(assistantName)} className="aman-runtime-rail__picture" />
+              ) : (
+                <span
+                  className="aman-runtime-rail__avatar-fallback"
+                  role="img"
+                  aria-label={avatarAltText(assistantName)}
+                >
+                  {assistantName.slice(0, 1)}
+                </span>
+              )}
+            </div>
+            <div className="aman-runtime-rail__identity">
+              <h2 id="aman-runtime-rail-title">{assistantName}</h2>
+              <p className="aui-panda__role">Chief of staff</p>
+            </div>
+          </section>
+
+          <div className="aman-runtime-rail__status" data-tone={tone} aria-live="polite">
+            {statusLine === null ? null : (
+              <>
+                <span className="aman-runtime-rail__status-dot" aria-hidden="true" />
+                <span>{statusLine}</span>
+              </>
+            )}
+            {selfProbed && (status === 'offline' || status === 'degraded') && (
+              <button
+                type="button"
+                className="aman-runtime-rail__retry"
+                onClick={connectivity.retry}
+                aria-label="Retry connectivity probe"
+                title="Retry connectivity probe"
+              >
+                Retry
+              </button>
             )}
           </div>
-
-          <div className="aman-runtime-rail__identity">
-            <h2 id="aman-runtime-rail-title">{profile?.assistant_name?.trim() || 'Amanuensis'}</h2>
-            <p>A personal assistant with a little character.</p>
-          </div>
-
-          {trimmedUserName === undefined || trimmedUserName === '' ? null : (
-            <section
-              className="aman-runtime-rail__section"
-              data-section="account"
-              aria-labelledby="aman-runtime-rail-account-label"
-            >
-              <h3 id="aman-runtime-rail-account-label" className="aman-runtime-rail__section-label">
-                Signed in
-              </h3>
-              <div className="aman-runtime-rail__section-value" title={trimmedUserName}>
-                {trimmedUserName}
-              </div>
-            </section>
-          )}
 
           {trimmedPersonaName === undefined || trimmedPersonaName === '' ? null : (
             <section
@@ -272,113 +312,42 @@ const RuntimeRailContent: FC<RuntimeRailContentProps> = ({
             </section>
           )}
 
-          <section
-            className="aman-runtime-rail__section"
-            data-section="model"
-            aria-labelledby="aman-runtime-rail-model-label"
-          >
-            <h3 id="aman-runtime-rail-model-label" className="aman-runtime-rail__section-label">
-              Model
-            </h3>
-            <div className="aman-runtime-rail__section-value" title={modelName}>
-              {modelName}
-            </div>
-            <div className="aman-runtime-rail__status" data-status={status}>
-              <span className="aman-runtime-rail__status-dot" aria-hidden="true" />
-              <span>{statusLabel}</span>
-              {selfProbed && (status === 'offline' || status === 'degraded') && (
-                <button
-                  type="button"
-                  className="aman-runtime-rail__retry"
-                  onClick={connectivity.retry}
-                  aria-label="Retry connectivity probe"
-                  title="Retry connectivity probe"
-                >
-                  Retry
-                </button>
-              )}
-            </div>
-          </section>
+          <FoldedRow section="activity" title="Activity">
+            {/* The wait line comes straight from the chat, not the receipt: a carded action is
+            written to the history only after it is answered, so while it waits the history
+            holds nothing about it, and this line is the sign of it here. */}
+            {waitingOnPerson && (
+              <p className="aman-runtime-rail__waiting">
+                <span
+                  aria-hidden="true"
+                  className={`size-2 shrink-0 rounded-full ${ACTIVITY_STATE_DOT_CLASSES.waiting}`}
+                />
+                {WAITING_FOR_YOU_LABEL}
+              </p>
+            )}
+            {auditFeed ?? <p className="aman-runtime-rail__row-text">Nothing has happened in this chat yet.</p>}
+            {onOpenAudits !== undefined && (
+              <button
+                type="button"
+                className="justify-self-start text-left text-xs text-text-secondary hover:underline underline-offset-1 mt-2"
+                onClick={onOpenAudits}
+              >
+                Audits
+              </button>
+            )}
+          </FoldedRow>
 
-          {memoryBank === undefined ? null : (
-            <section
-              className="aman-runtime-rail__section"
-              data-section="memory"
-              aria-labelledby="aman-runtime-rail-memory-label"
-            >
-              <h3 id="aman-runtime-rail-memory-label" className="aman-runtime-rail__section-label">
-                Memory
-              </h3>
-              {memoryBank === null ? (
-                <div className="aman-runtime-rail__section-value">
-                  Off
-                  {settingsHref === undefined ? null : (
-                    <>
-                      {' · '}
-                      <a href={settingsHref}>set up</a>
-                    </>
-                  )}
-                </div>
-              ) : memoryBank.connected ? (
-                <>
-                  <div className="aman-runtime-rail__section-value" title={memoryBank.name}>
-                    {memoryBank.name} · on
-                  </div>
-                  <MemoryRecallToggle memoryBank={memoryBank} />
-                </>
-              ) : (
-                <div className="aman-runtime-rail__section-value" title={memoryBank.name}>
-                  {memoryBank.name} · needs sign-in
-                  {settingsHref === undefined ? null : (
-                    <>
-                      {' · '}
-                      <a href={settingsHref}>sign in</a>
-                    </>
-                  )}
-                </div>
-              )}
-            </section>
-          )}
-
-          {/* Everything an ordinary user would not act on sits behind one closed disclosure. */}
-          {auditFeed === undefined ? null : (
-            <section
-              className="aman-runtime-rail__section"
-              data-section="permissions"
-              aria-labelledby="aman-runtime-rail-permissions-label"
-            >
-              <h3 id="aman-runtime-rail-permissions-label" className="aman-runtime-rail__section-label">
-                Permissions
-              </h3>
-              {auditFeed}
-            </section>
-          )}
-
-          <details className="aman-runtime-rail__details">
-            <summary className="aman-runtime-rail__details-summary">Details</summary>
-            <dl className="aman-runtime-rail__details-list">
-              <dt>Connection check</dt>
-              <dd>{selfProbed ? 'Run by this tab' : 'Reported by the app'}</dd>
-              {selfProbed && connectivity.latencyMs != null && (
-                <>
-                  <dt>Round trip</dt>
-                  <dd className="aman-runtime-rail__latency">{Math.round(connectivity.latencyMs)} ms</dd>
-                </>
-              )}
-              {build === undefined ? null : (
-                <>
-                  <dt>Build reference</dt>
-                  <dd className="aman-runtime-rail__details-ref">{buildRef?.trim() || 'Not stamped'}</dd>
-                </>
-              )}
-            </dl>
-          </details>
-
-          {build === undefined ? null : (
-            <p className="aman-runtime-rail__footer" title={build.title}>
-              {build.label}
-            </p>
-          )}
+          <FoldedRow section="rules" title="Rules">
+            {rules.length === 0 ? (
+              <p className="aman-runtime-rail__row-text">No rules to show yet.</p>
+            ) : (
+              <ul className="aman-runtime-rail__rules">
+                {rules.map(rule => (
+                  <li key={rule}>{rule}</li>
+                ))}
+              </ul>
+            )}
+          </FoldedRow>
         </>
       )}
     </aside>

@@ -7,6 +7,9 @@ import { AssistantMessageContainer } from '@/containers/AssistantMessageContaine
 import { clearSentinelEventSubscribers, publishSentinelEvent } from '@/sentinel/sentinelEvents.js';
 import { SentinelStateProvider } from '@/sentinel/SentinelStateProvider.js';
 import type { SentinelApprovalCard } from '@/sentinel/types.js';
+import { answerRefusalText } from '@/utils/turnRefusal.js';
+import { changeRequestReason } from '@truefoundry/trueforge-core/core/permissions/changeRequest';
+import { DEFAULT_ASSISTANT_NAME } from '@truefoundry/trueforge-core/core/personas/assistantName';
 import { RuntimeHarness } from './RuntimeHarness.js';
 
 const { answerHeldAction, reload, server } = vi.hoisted(() => {
@@ -15,9 +18,10 @@ const { answerHeldAction, reload, server } = vi.hoisted(() => {
     value: {
       peekSessionTip: vi.fn(),
       dismissPendingApprovals: vi.fn(),
+      dismissEndedApproval: vi.fn(),
       answerHeldAction: answer,
       getLastCompactionStatus: vi.fn(),
-      getLastTurnInputTokens: vi.fn(),
+      getLastCallInputTokens: vi.fn(),
     },
   };
   return { answerHeldAction: answer, reload: vi.fn(), server: current };
@@ -47,9 +51,24 @@ function card(overrides: Partial<SentinelApprovalCard> = {}): SentinelApprovalCa
     destination_host: null,
     outbound_truncated: false,
     email: null,
+    calendar_event: null,
+    schedule: null,
+    persona: null,
     ...overrides,
   };
 }
+
+const MAIL: NonNullable<SentinelApprovalCard['email']> = {
+  action: 'send',
+  to: [{ name: 'Ana', address: 'ana@example.com' }],
+  cc: [],
+  bcc: [],
+  subject: 'Lunch',
+  body: 'Lunch at noon?',
+  replaces: null,
+  reply_in_thread: null,
+  reply_to: null,
+};
 
 function heldCall(id: string): Exclude<ThreadMessageLike['content'], string>[number] {
   return {
@@ -68,6 +87,7 @@ function renderBrief(
     expiresAt?: string;
     notSaved?: number;
     heldCards?: boolean;
+    editable?: boolean;
   } = {},
 ) {
   const message: ThreadMessageLike = {
@@ -91,12 +111,12 @@ function renderBrief(
     publishSentinelEvent({
       toolCallId: 'call-held',
       tier: 3,
-      card: card(),
+      card: input.editable ? card({ email: MAIL }) : card(),
       eventId: 'evt-1',
       threadId: 'main',
       ...(input.heldCards === false
         ? { notSaved: 'too_many' as const }
-        : { held: { alwaysAllowOffered: input.alwaysAllowOffered ?? false, expiresAt: input.expiresAt ?? null } }),
+        : { held: { expiresAt: input.expiresAt ?? null }, alwaysAllowOffered: input.alwaysAllowOffered ?? false }),
     });
     for (let index = 0; index < (input.notSaved ?? 0); index += 1) {
       publishSentinelEvent({
@@ -172,10 +192,31 @@ describe('NeedsYourOkContainer', () => {
   it('sends Always allow only where the server offered it', async () => {
     answerHeldAction.mockResolvedValue(undefined);
     renderBrief({ alwaysAllowOffered: true });
-    fireEvent.click(screen.getByRole('button', { name: 'Always allow' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Always allow this tool' }));
+    fireEvent.click(screen.getByTestId('always-allow-confirm'));
     await waitFor(() => {
       expect(answerHeldAction).toHaveBeenCalledWith(expect.objectContaining({ answer: 'always_allow' }));
     });
+  });
+
+  it('shows Change it words as the owner message, and sends them as the reason without running anything', async () => {
+    answerHeldAction.mockResolvedValue(undefined);
+    renderBrief({ editable: true });
+    fireEvent.click(screen.getByRole('button', { name: 'Change it' }));
+    fireEvent.change(screen.getByRole('textbox', { name: 'What should change?' }), {
+      target: { value: 'make it shorter' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    await waitFor(() => {
+      expect(screen.getByText('make it shorter')).toHaveAttribute('data-slot', 'aui_user-message-content');
+    });
+    expect(answerHeldAction).toHaveBeenCalledWith(
+      expect.objectContaining({
+        answer: 'deny',
+        toolCallId: 'call-held',
+        reason: changeRequestReason('make it shorter'),
+      }),
+    );
   });
 
   it('records a denial without running anything', async () => {
@@ -225,8 +266,24 @@ describe('NeedsYourOkContainer', () => {
     renderBrief();
     fireEvent.click(screen.getByRole('button', { name: 'Approve' }));
     await waitFor(() => {
-      expect(screen.getByText('This chat is still busy. Try again in a moment.')).toBeInTheDocument();
+      expect(
+        screen.getByText(answerRefusalText({ code: 'previous_turn_running', assistantName: DEFAULT_ASSISTANT_NAME })),
+      ).toBeInTheDocument();
     });
+    expect(screen.getByRole('button', { name: 'Approve' })).toBeEnabled();
+  });
+
+  it('keeps the buttons when the reply could not start, since nothing was recorded', async () => {
+    answerHeldAction.mockRejectedValue(refusal(409, 'turn_could_not_start'));
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    renderBrief();
+    fireEvent.click(screen.getByRole('button', { name: 'Approve' }));
+    await waitFor(() => {
+      expect(
+        screen.getByText(answerRefusalText({ code: 'turn_could_not_start', assistantName: DEFAULT_ASSISTANT_NAME })),
+      ).toBeInTheDocument();
+    });
+    expect(screen.queryByText(/already answered/)).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Approve' })).toBeEnabled();
   });
 

@@ -16,13 +16,13 @@ import {
 } from '../../../../src/core/email/gmail/mimeText';
 import { buildRawMessage, replySubject } from '../../../../src/core/email/gmail/rawMessage';
 import {
-  addressesOf,
   addressListIsPlain,
+  mailboxesOf,
   neutralizeDeep,
   neutralizeInternalTags,
 } from '../../../../src/core/email/gmail/results';
 import { snippetOf } from '../../../../src/core/email/gmail/tokenBound';
-import { escapeDisplayText } from '../../../../src/core/permissions/extractorRegistry';
+import { escapeDisplayText } from '../../../../src/core/permissions/displayText';
 import { message, plainDraft } from './fixtures';
 
 const MB = 1_000_000;
@@ -78,7 +78,7 @@ describe.each(HOSTILE)('1 MB of %s', (_name, text) => {
   it.each([
     ['neutralizeInternalTags', () => neutralizeInternalTags(text)],
     ['neutralizeDeep', () => neutralizeDeep({ a: [text] })],
-    ['addressesOf', () => addressesOf(text)],
+    ['mailboxesOf', () => mailboxesOf(text)],
     ['addressListIsPlain', () => addressListIsPlain(text)],
     ['decodeEncodedWords', () => decodeEncodedWords(text)],
     ['contentTypeCharset', () => contentTypeCharset(text)],

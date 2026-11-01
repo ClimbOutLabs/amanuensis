@@ -38,12 +38,14 @@ export function manualRunName(): string {
 export interface ScheduleRecord {
   id: string;
   tenant_id: string;
-  /** Immutable FK to `agent.id`. */
+  /** FK to `agent.id`; changes only when the schedule's tools are changed (see `UpdateScheduleInput.agent`). */
   agent_id: string;
   /** Create-time snapshot of registry agent name. */
   agent_name: string;
   /** Slug-shaped label, unique per agent (`schedule_name_uq`). */
   name: string;
+  /** The persona it runs as, kept from the chat it was made in; null runs the agent's own assistant. */
+  persona_id: string | null;
   manifest: ScheduleManifest;
   status: ScheduleStatus;
   created_by_subject: CreatedBySubject;
@@ -124,10 +126,17 @@ export interface GetOwnedIdsInput {
 }
 
 export interface CreateScheduleInput {
+  /**
+   * Caller-supplied schedule id, used by data import so an imported schedule
+   * keeps the id its sessions and links already reference. Omitted: the store
+   * mints a fresh id.
+   */
+  id?: string;
   tenant_id: string;
   agent_id: string;
   agent_name: string;
   name: string;
+  persona_id: string | null;
   manifest: ScheduleManifest;
   created_by_subject: CreatedBySubject;
   /** Instant used to compute the first pending run when status is active. */
@@ -140,6 +149,8 @@ export interface UpdateScheduleInput {
   id: string;
   name: string;
   manifest: ScheduleManifest;
+  /** Runs the schedule as this agent from now on; omitted keeps the current one. */
+  agent?: { agent_id: string; agent_name: string };
   /**
    * Instant used to compute the next pending run when a sync runs (status/cron/timezone
    * change) and the schedule is active.
@@ -216,7 +227,7 @@ export class ScheduleNameConflictError extends Error {
 }
 
 /**
- * Pending run is replaced only when `status`, `cron`, or `timezone` change.
+ * Pending run is replaced only when `status`, `cron`, `run_at`, or `timezone` change.
  * `name` and `task` edits leave the pending row alone.
  */
 export function shouldSyncPendingRun(
@@ -226,6 +237,7 @@ export function shouldSyncPendingRun(
   return (
     previous.status !== next.status ||
     previous.manifest.cron !== next.manifest.cron ||
+    previous.manifest.run_at !== next.manifest.run_at ||
     previous.manifest.timezone !== next.manifest.timezone
   );
 }

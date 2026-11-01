@@ -16,6 +16,9 @@ import {
 } from '../../../src/core/mcp/implementationPlanGrant';
 import { connectRemoteMcp } from '../../../src/core/mcp/remoteMcpClient';
 import type { ToolSelectorConfig } from '../../../src/core/mcp/ToolSelectorPolicy';
+import { stampSentinelDecision } from '../../../src/core/mcp/ToolSet';
+import { createSentinelHostContext, defaultSentinelServices } from '../../../src/core/permissions';
+import { tier1Decision } from '../../../src/core/permissions/tier';
 import { sandboxCommandApprovalIdentity } from '../../../src/core/sandbox/Sandbox';
 import { NOOP_AGENT_TRACING } from '../../../src/core/tracing/NoopAgentTracing';
 
@@ -30,8 +33,15 @@ jest.mock('../../../src/core/mcp/remoteMcpClient', () => {
 const mockConnect = connectRemoteMcp as jest.MockedFunction<typeof connectRemoteMcp>;
 const noopLogger = { info: jest.fn(), warn: jest.fn(), error: jest.fn(), debug: jest.fn() } as unknown as Logger;
 
-/** Installs a fake connection serving exactly `tools`, and returns a ToolSet backed by it. */
-function makeRealToolSet(params: { tools: ToolSchema[]; selectors: ToolSelectorConfig }): ToolSet {
+/**
+ * Installs a fake connection serving exactly `tools`, and returns a ToolSet backed by it. With
+ * `classify`, the ToolSet runs the Sentinel classifier as it does in a live thread.
+ */
+function makeRealToolSet(params: {
+  tools: ToolSchema[];
+  selectors: ToolSelectorConfig;
+  classify?: boolean | undefined;
+}): ToolSet {
   mockConnect.mockImplementation(() =>
     Promise.resolve({
       transportType: 'streamable-http' as const,
@@ -52,7 +62,16 @@ function makeRealToolSet(params: { tools: ToolSchema[]; selectors: ToolSelectorC
     connectTimeoutMs: 5_000,
     signal: new AbortController().signal,
   });
-  return new ToolSet({ source: remote, selectors: params.selectors, preload: false });
+  const sentinel =
+    params.classify === true
+      ? createSentinelHostContext({
+          tenant_id: 'tenant-a',
+          created_by: 'user-a',
+          conversation_id: 'conversation-a',
+          services: defaultSentinelServices({ pinned_path: '/usr/bin:/bin' }),
+        })
+      : undefined;
+  return new ToolSet({ source: remote, selectors: params.selectors, preload: false, sentinel });
 }
 
 function toolInfo(serverId: string, name: string): InternalToolCallInfo {
@@ -210,6 +229,83 @@ describe('chat approval grants', () => {
   });
 });
 
+describe('chat grant key', () => {
+  it('differs by destination and recipient so one grant never covers a different target', () => {
+    const base = { ...toolInfo('notes', 'lookup_note'), effect: 'inspect' as const };
+    const card = ({ destination, recipient }: { destination: string | null; recipient: string | null }) => ({
+      plain_what: 'x',
+      plain_why: null,
+      cannot_be_undone: null,
+      why_asked_again: null,
+      destination,
+      recipient,
+      amount: null,
+      parsed_command: null,
+      outbound_text: null,
+      destination_host: null,
+      outbound_truncated: false,
+    });
+    const keyA = approvalGrantKey({ ...base, tier3_card: card({ destination: 'https://a.example', recipient: null }) });
+    const keyB = approvalGrantKey({ ...base, tier3_card: card({ destination: 'https://b.example', recipient: null }) });
+    const keyC = approvalGrantKey({ ...base, tier3_card: card({ destination: null, recipient: 'a@example.com' }) });
+    expect(new Set([keyA, keyB, keyC]).size).toBe(3);
+  });
+
+  it('bars durable scope when the tier has no reason, and keeps it for a plain read that names a recipient', () => {
+    const info: InternalToolCallInfo = { ...toolInfo('notes', 'list_events'), effect: 'inspect', tier: 3 };
+    expect(allowsChatApproval(info)).toBe(false);
+    expect(allowsToolGrant(info)).toBe(false);
+    const read = { ...info, tier_reason: 'unrecognized_tool' };
+    expect(allowsChatApproval(read)).toBe(true);
+    expect(allowsToolGrant(read)).toBe(true);
+  });
+
+  it('changes the key when only the host or only the recipient changes', () => {
+    const base = { ...toolInfo('notes', 'lookup_note'), effect: 'inspect' as const };
+    const card = (overrides: Partial<NonNullable<InternalToolCallInfo['tier3_card']>>) => ({
+      plain_what: 'x',
+      plain_why: null,
+      cannot_be_undone: null,
+      why_asked_again: null,
+      destination: null,
+      recipient: null,
+      amount: null,
+      parsed_command: null,
+      outbound_text: null,
+      destination_host: null,
+      outbound_truncated: false,
+      ...overrides,
+    });
+    const keys = [
+      approvalGrantKey({ ...base, tier3_card: card({}) }),
+      approvalGrantKey({ ...base, tier3_card: card({ destination_host: 'a.example.com' }) }),
+      approvalGrantKey({ ...base, tier3_card: card({ destination_host: 'b.example.com' }) }),
+      approvalGrantKey({ ...base, tier3_card: card({ recipient: 'a@example.com' }) }),
+      approvalGrantKey({ ...base, tier3_card: card({ recipient: 'b@example.com' }) }),
+    ];
+    expect(new Set(keys).size).toBe(5);
+  });
+
+  it('never admits a send from a chat grant, even a forged one, nor a send that read content steered', () => {
+    for (const tier_reason of ['external_service', 'content_steered']) {
+      const info: InternalToolCallInfo = {
+        ...toolInfo('notes', 'send_note'),
+        effect: 'inspect',
+        tier: 3,
+        tier_reason,
+      };
+      const effective = effectiveApprovalDecisions({
+        calls: [toolCall('call', info)],
+        decisions: new Map(),
+        chatApprovalGrants: new Set([approvalGrantKey(info)]),
+        implementationPlanGrants: new Set(),
+      });
+      expect(effective.has('call')).toBe(false);
+      expect(allowsChatApproval(info)).toBe(false);
+    }
+  });
+});
+
 describe('always-allow grant eligibility', () => {
   it('admits only a connector tool the host classified as inspection', () => {
     expect(allowsToolGrant({ ...toolInfo('notes', 'lookup_note'), effect: 'inspect' })).toBe(true);
@@ -228,6 +324,74 @@ describe('always-allow grant eligibility', () => {
     const info = await toolSet.toolCallInfo({ name: 'peek_thing', arguments: {} });
     expect(allowsToolGrant(info)).toBe(false);
     expect(allowsChatApproval(info)).toBe(false);
+  });
+
+  it('end-to-end: an annotated connector read of a secret path is never eligible for a standing grant', async () => {
+    const toolSet = makeRealToolSet({
+      tools: [
+        {
+          name: 'get-file',
+          inputSchema: { type: 'object' },
+          annotations: { readOnlyHint: true, openWorldHint: false },
+        },
+      ],
+      selectors: { enableTools: ['@all'], disableTools: [], preloadTools: [], requireApprovalForTools: ['@all'] },
+      classify: true,
+    });
+    const info = await toolSet.toolCallInfo({ name: 'get-file', arguments: { path: '/home/u/.ssh/id_rsa' } });
+    // The server's annotations alone would make this inspection; the secret path must still block the grant.
+    expect(info.effect).toBe('inspect');
+    expect(allowsToolGrant(info)).toBe(false);
+    expect(allowsChatApproval(info)).toBe(false);
+  });
+
+  it('end-to-end: an annotated connector read of an ordinary search stays eligible for a standing grant', async () => {
+    const toolSet = makeRealToolSet({
+      tools: [
+        {
+          name: 'get-file',
+          inputSchema: { type: 'object' },
+          annotations: { readOnlyHint: true, openWorldHint: false },
+        },
+      ],
+      selectors: { enableTools: ['@all'], disableTools: [], preloadTools: [], requireApprovalForTools: ['@all'] },
+      classify: true,
+    });
+    const info = await toolSet.toolCallInfo({ name: 'get-file', arguments: { query: 'quarterly review' } });
+    expect(allowsToolGrant(info)).toBe(true);
+    expect(allowsChatApproval(info)).toBe(true);
+  });
+});
+
+describe('chat-scope eligibility for a secret-path read', () => {
+  it('refuses chat scope for an inspection read flagged as a secret-path read, and keeps it for a plain one', () => {
+    const read = { ...toolInfo('apple-mail', 'list-messages'), effect: 'inspect' as const };
+    expect(allowsChatApproval({ ...read, secret_path_read: true })).toBe(false);
+    expect(allowsChatApproval(read)).toBe(true);
+  });
+
+  it('keeps a one-time admission of a secret-path read, but never admits it from a chat grant', () => {
+    const info: InternalToolCallInfo = {
+      ...toolInfo('apple-mail', 'list-messages'),
+      effect: 'inspect',
+      secret_path_read: true,
+    };
+    const call = toolCall('call-secret', info);
+    const key = approvalGrantKey(info);
+    const granted = effectiveToolAdmissions({
+      calls: [call],
+      decisions: new Map(),
+      chatApprovalGrants: new Set([key]),
+      implementationPlanGrants: new Set(),
+    });
+    expect(granted.get('call-secret')?.decision).toBeUndefined();
+    const once = effectiveToolAdmissions({
+      calls: [call],
+      decisions: new Map([['call-secret', { status: 'allow' as const, scope: 'once' as const }]]),
+      chatApprovalGrants: new Set([key]),
+      implementationPlanGrants: new Set(),
+    });
+    expect(once.get('call-secret')?.decision).toEqual({ status: 'allow', scope: 'once' });
   });
 });
 
@@ -449,4 +613,148 @@ describe('canonical tool admissions', () => {
       admission_provenance: { source: 'user_approval', decision: 'allow', scope: 'once' },
     });
   });
+});
+
+describe('connector read inspection is stamped from the classifier decision', () => {
+  const readDecision = tier1Decision({
+    reason: 'mcp_tool_grant',
+    reason_detail: 'Always allowed.',
+    sensitive_read: true,
+    inspection: true,
+  });
+
+  it('stamps inspection so the standing grant and chat scope both apply to a connector read', () => {
+    const info = { ...toolInfo('apple-mail', 'list-messages'), ...stampSentinelDecision({ decision: readDecision }) };
+    expect(info.effect).toBe('inspect');
+    expect(allowsToolGrant(info)).toBe(true);
+    expect(allowsChatApproval(info)).toBe(true);
+  });
+
+  it('leaves effect unset when the decision is not inspection', () => {
+    const plain = tier1Decision({ reason: 'gmail_read', reason_detail: null, sensitive_read: true });
+    const info = { ...toolInfo('apple-mail', 'list-messages'), ...stampSentinelDecision({ decision: plain }) };
+    expect(info.effect).toBeUndefined();
+    expect(allowsToolGrant(info)).toBe(false);
+  });
+});
+
+describe('secret-path detection covers every argument of an unannotated connector read', () => {
+  const selectors = { enableTools: ['@all'], disableTools: [], preloadTools: [], requireApprovalForTools: ['@all'] };
+
+  function attachmentToolSet(): ToolSet {
+    return makeRealToolSet({
+      tools: [{ name: 'get_attachment', inputSchema: { type: 'object' } }],
+      selectors,
+      classify: true,
+    });
+  }
+
+  it('refuses chat and always scope for a secret path in attachment_path', async () => {
+    const info = await attachmentToolSet().toolCallInfo({
+      name: 'get_attachment',
+      arguments: { attachment_path: '/home/u/.ssh/id_rsa' },
+    });
+    expect(info.secret_path_read).toBe(true);
+    expect(allowsChatApproval(info)).toBe(false);
+    expect(allowsToolGrant(info)).toBe(false);
+  });
+
+  it.each([
+    ['a very long path ending in an SSH key', { attachment_path: `${'/a'.repeat(4000)}/.ssh/id_rsa` }],
+    ['a bare credentials name under a path key', { attachment_path: 'credentials' }],
+    ['a credentials backup under a path key', { attachment_path: 'credentials.backup.json' }],
+    ['a Windows path to an SSH key', { attachment_path: 'C:\\Users\\u\\.ssh\\id_rsa' }],
+    ['a git credentials file', { attachment_path: '/home/u/.git-credentials' }],
+    ['a client secret file', { attachment_path: '/home/u/client_secret.json' }],
+    [
+      'an application default credentials file',
+      { attachment_path: '/home/u/.config/gcloud/application_default_credentials.json' },
+    ],
+    ['a token text file', { attachment_path: '/home/u/notes/github_token.txt' }],
+  ])('refuses chat and always scope for %s', async (_, args) => {
+    const info = await attachmentToolSet().toolCallInfo({ name: 'get_attachment', arguments: args });
+    expect(info.secret_path_read).toBe(true);
+    expect(allowsChatApproval(info)).toBe(false);
+    expect(allowsToolGrant(info)).toBe(false);
+  });
+
+  it('refuses chat and always scope for a secret path in other unusual argument names', async () => {
+    const toolSet = attachmentToolSet();
+    const byLocator = await toolSet.toolCallInfo({
+      name: 'get_attachment',
+      arguments: { locator: '~/.gnupg/secring.gpg' },
+    });
+    const nested = await toolSet.toolCallInfo({
+      name: 'get_attachment',
+      arguments: { payload: { nested: { keyfile: 'config/server.pem' } } },
+    });
+    for (const info of [byLocator, nested]) {
+      expect(info.secret_path_read).toBe(true);
+      expect(allowsChatApproval(info)).toBe(false);
+      expect(allowsToolGrant(info)).toBe(false);
+    }
+  });
+
+  it.each([
+    ['a free-text search that mentions a secret word', { query: 'my token budget and secret santa plans' }],
+    ['a sender search with an email address', { query: 'invoice from:alice@example.com' }],
+    ['a message id', { id: '18f2a9c0' }],
+    ['a label and a date', { label: 'INBOX', after: '2026-10-01' }],
+    ['a folder name with a space and no slash', { folder: 'Family photos' }],
+  ])('still offers chat and always scope for %s', async (_, args) => {
+    const info = await attachmentToolSet().toolCallInfo({ name: 'get_attachment', arguments: args });
+    expect(info.secret_path_read).not.toBe(true);
+    expect(allowsChatApproval(info)).toBe(true);
+    expect(allowsToolGrant(info)).toBe(true);
+  });
+
+  it.each([
+    ['a relative file with a slash', { attachment_path: 'notes/todo.md' }],
+    ['a file name with an extension and no folder', { attachment: 'todo.md' }],
+    ['a home path', { attachment_path: '~/Documents/plan' }],
+    ['a Windows drive path', { attachment_path: 'D:\\exports\\summary' }],
+    ['a path with spaces in its folder name', { attachment_path: '/home/u/My Notes/plan.md' }],
+    ['a file name with spaces and an extension', { attachment: 'Q3 report final.pdf' }],
+    ['a path nested in a list', { filters: [{ files: ['/srv/exports/2026.csv'] }] }],
+    ['a very long value with a file extension', { attachment: `${'x'.repeat(3000)} draft.docx` }],
+  ])('refuses chat and always scope for %s', async (_, args) => {
+    const info = await attachmentToolSet().toolCallInfo({ name: 'get_attachment', arguments: args });
+    expect(info.secret_path_read).toBe(true);
+    expect(allowsChatApproval(info)).toBe(false);
+    expect(allowsToolGrant(info)).toBe(false);
+  });
+});
+
+describe('calendar changes that reach guests never get a durable grant', () => {
+  it.each(['calendar_write_guests', 'caldav_calendar_guests', 'caldav_invitation_reply', 'connector_calendar_write'])(
+    'refuses chat and always scope for %s, even when the server calls the tool a read',
+    tier_reason => {
+      const info: InternalToolCallInfo = {
+        type: 'mcp',
+        mcp_server_id: 'Calendar',
+        mcp_server_name: 'Calendar',
+        original_tool_name: 'create_event',
+        is_approval_required: true,
+        effect: 'inspect',
+        tier: 3,
+        tier_reason,
+      };
+      expect(allowsChatApproval(info)).toBe(false);
+      expect(allowsToolGrant(info)).toBe(false);
+      const call: InternalEnrichedToolCall = {
+        id: 'call-1',
+        type: 'function',
+        function: { name: 'create_event', arguments: '{}' },
+        tool_info: info,
+      };
+      // A grant stored for this key, by an older rule, admits nothing.
+      const admissions = effectiveToolAdmissions({
+        calls: [call],
+        decisions: new Map(),
+        chatApprovalGrants: new Set([approvalGrantKey(info)]),
+        implementationPlanGrants: new Set(),
+      });
+      expect(admissions.get('call-1')).toEqual({ decision: undefined, admission_provenance: { source: 'automatic' } });
+    },
+  );
 });

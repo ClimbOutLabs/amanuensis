@@ -31,7 +31,7 @@ test_check_reports_without_changing() {
   run_install upgrade --check
   assert_rc 0
   assert_contains "$OUT" "speech  aman-stt:"
-  assert_contains "$OUT" "sandbox PDF and image reading (rebuilds the sandbox image)"
+  assert_contains "$OUT" "sandbox PDF and image reading (builds the sandbox again)"
   assert_eq "$(log_count "docker build")" "$builds"
   assert_eq "$(app_tag "$AMAN_HOME/release/release.json")" "$old"
   assert_no_path "$AMAN_HOME/backups"
@@ -62,6 +62,136 @@ test_successful_upgrade_backs_up_first() {
   sandbox_drop
 }
 
+test_upgrade_notes_an_old_email_account_file() {
+  t_begin "upgrade says how to reconnect email when the old account file is there"
+  sandbox_new
+  install_machine
+  printf '%s\n' '# Written by the installer for the Email connector. Keep it private: it holds the app password.' \
+    'MCP_EMAIL_SERVER_EMAIL_ADDRESS=owner@example.invalid' >"$AMAN_HOME/instances/main/.env.mail-email"
+  repo_commit_change "app change"
+  run_install upgrade
+  assert_rc 0
+  assert_contains "$OUT" "Email was set up the old way. Connect it again in Settings, then Connectors, then Email."
+  assert_file "$AMAN_HOME/instances/main/.env.mail-email"
+  run_install upgrade
+  assert_rc 0
+  assert_contains "$OUT" "Already up to date"
+  assert_contains "$OUT" "Email was set up the old way. Connect it again in Settings, then Connectors, then Email."
+  sandbox_drop
+}
+
+test_upgrade_without_an_old_email_account_file_stays_quiet() {
+  t_begin "upgrade without the old account file says nothing about reconnecting email"
+  sandbox_new
+  install_machine
+  repo_commit_change "app change"
+  run_install upgrade
+  assert_rc 0
+  assert_not_contains "$OUT" "Email was set up the old way"
+  sandbox_drop
+}
+
+test_upgrade_notes_an_old_calendar_account_file() {
+  t_begin "upgrade says how to reconnect the calendar when the old account file is there, once"
+  sandbox_new
+  install_machine
+  printf '%s\n' 'CALDAV_URL=https://caldav.example.invalid/dav/' 'CALDAV_USERNAME=owner@example.invalid' \
+    >"$AMAN_HOME/instances/main/.env.calendar"
+  repo_commit_change "app change"
+  run_install upgrade
+  assert_rc 0
+  assert_contains "$OUT" "Calendar was set up the old way. Connect it again in Settings, then Connectors, then Calendar."
+  assert_not_contains "$OUT" "Email was set up the old way"
+  assert_file "$AMAN_HOME/instances/main/.env.calendar"
+  run_install upgrade
+  assert_rc 0
+  assert_contains "$OUT" "Already up to date"
+  assert_contains "$OUT" "Calendar was set up the old way. Connect it again in Settings, then Connectors, then Calendar."
+  sandbox_drop
+}
+
+test_upgrade_moves_a_complete_old_calendar_account() {
+  t_begin "upgrade moves a complete old calendar account into the connector, deletes the old file and stays quiet after"
+  sandbox_new
+  install_machine
+  local dir=$AMAN_HOME/instances/main
+  printf '%s\n' 'CALDAV_URL=https://caldav.example.invalid/dav/' 'CALDAV_USERNAME=owner@example.invalid' \
+    'CALDAV_PASSWORD=old-sentinel-91c2' 'CALDAV_USER_EMAIL=owner@example.invalid' >"$dir/.env.calendar"
+  printf 'CALENDAR_CONNECTOR_URL=http://calendar-caldav:9558/mcp\n' >>"$dir/.env"
+  repo_commit_change "app change"
+  run_install upgrade
+  assert_rc 0
+  assert_not_contains "$OUT" "Calendar was set up the old way"
+  assert_no_path "$dir/.env.calendar"
+  assert_eq "$(grep -c '^CALENDAR_CONNECTOR_URL=' "$dir/.env" || true)" 0 "the old connector line is gone"
+  assert_contains "$(cat "$STUB_STATE/calendar-account-aman-main")" "CALDAV_PASSWORD=old-sentinel-91c2"
+  assert_not_contains "$OUT$ERR" "old-sentinel-91c2"
+  run_install upgrade
+  assert_rc 0
+  assert_not_contains "$OUT" "Calendar was set up the old way"
+  sandbox_drop
+}
+
+test_upgrade_keeps_a_calendar_account_connected_again() {
+  t_begin "upgrade never replaces an account connected again in Settings with the old file; it only deletes the old file"
+  sandbox_new
+  install_machine
+  local dir=$AMAN_HOME/instances/main
+  printf '%s\n' 'CALDAV_URL=https://new.example.invalid/dav/' 'CALDAV_USERNAME=new@example.invalid' \
+    'CALDAV_PASSWORD=new-sentinel' 'CALDAV_USER_EMAIL=new@example.invalid' >"$STUB_STATE/calendar-account-aman-main"
+  printf '%s\n' 'CALDAV_URL=https://caldav.example.invalid/dav/' 'CALDAV_USERNAME=owner@example.invalid' \
+    'CALDAV_PASSWORD=old-sentinel' 'CALDAV_USER_EMAIL=owner@example.invalid' >"$dir/.env.calendar"
+  repo_commit_change "app change"
+  run_install upgrade
+  assert_rc 0
+  assert_no_path "$dir/.env.calendar"
+  assert_contains "$(cat "$STUB_STATE/calendar-account-aman-main")" "CALDAV_PASSWORD=new-sentinel"
+  assert_not_contains "$(cat "$STUB_STATE/calendar-account-aman-main")" "old-sentinel"
+  assert_not_contains "$OUT" "Calendar was set up the old way"
+  sandbox_drop
+}
+
+test_upgrade_keeps_the_old_calendar_file_when_the_check_says_nothing() {
+  t_begin "upgrade keeps the old calendar file, and says so, when the connector's check printed nothing"
+  sandbox_new
+  install_machine
+  local dir=$AMAN_HOME/instances/main
+  printf '%s\n' 'CALDAV_URL=https://new.example.invalid/dav/' 'CALDAV_USERNAME=new@example.invalid' \
+    'CALDAV_PASSWORD=new-sentinel' 'CALDAV_USER_EMAIL=new@example.invalid' >"$STUB_STATE/calendar-account-aman-main"
+  printf '%s\n' 'CALDAV_URL=https://caldav.example.invalid/dav/' 'CALDAV_USERNAME=owner@example.invalid' \
+    'CALDAV_PASSWORD=old-sentinel' 'CALDAV_USER_EMAIL=owner@example.invalid' >"$dir/.env.calendar"
+  repo_commit_change "app change"
+  STUB_CALENDAR_CHECK=silent run_install upgrade
+  assert_rc 0
+  assert_file "$dir/.env.calendar"
+  assert_contains "$OUT" "Calendar was set up the old way. Connect it again in Settings, then Connectors, then Calendar."
+  assert_contains "$(cat "$STUB_STATE/calendar-account-aman-main")" "CALDAV_PASSWORD=new-sentinel"
+  sandbox_drop
+}
+
+test_upgrade_without_an_old_calendar_account_file_stays_quiet() {
+  t_begin "upgrade without the old calendar file says nothing about reconnecting the calendar"
+  sandbox_new
+  install_machine
+  repo_commit_change "app change"
+  run_install upgrade
+  assert_rc 0
+  assert_not_contains "$OUT" "Calendar was set up the old way"
+  sandbox_drop
+}
+
+test_upgrade_starts_the_calendar_connector_without_a_profile() {
+  t_begin "after an upgrade the instance's compose file starts the calendar connector with the instance"
+  sandbox_new
+  install_machine
+  repo_commit_change "app change"
+  run_install upgrade
+  assert_rc 0
+  assert_not_contains "$(cat "$AMAN_HOME/instances/main/compose.yaml")" "profiles: ['calendar']"
+  assert_contains "$(cat "$AMAN_HOME/instances/main/compose.yaml")" "calendar-account:/account"
+  sandbox_drop
+}
+
 test_failed_upgrade_restores_database_and_images() {
   t_begin "a failed health check restores the database and the previous images"
   sandbox_new
@@ -72,8 +202,8 @@ test_failed_upgrade_restores_database_and_images() {
   STUB_UP_FAIL_UNLESS_TAG=$old
   run_install upgrade
   assert_rc 1
-  assert_flat_contains "$ERR" "restoring the previous version"
-  assert_contains "$OUT" "Rolled back to the previous version"
+  assert_flat_contains "$ERR" "Putting the previous version back"
+  assert_contains "$OUT" "The previous version is back"
   assert_eq "$(app_tag "$AMAN_HOME/release/release.json")" "$old" "release record restored"
   assert_eq "$(compose_image main)" "$old" "compose points at the previous image"
   assert_contains "$(cat "$SB_STATE/restores")" "restore aman_main_data"
@@ -145,10 +275,40 @@ test_doctor_failure_blocks_unless_forced() {
   sandbox_new
   install_machine
   repo_commit_change "needs doctor"
+  STUB_DOCTOR_JSON='{"machine":[],"instances":{"main":[{"id":"containers","state":"fail","detail":"The main app is not running.","fix":"Run aman doctor instance --fix"}]}}'
   STUB_DOCTOR_EXIT=1
   run_install upgrade
   assert_rc 1
-  assert_flat_contains "$ERR" "doctor reports a failure"
+  assert_flat_contains "$ERR" "has a problem now, so the upgrade did not start"
+  assert_flat_contains "$ERR" "The main app is not running"
+  assert_no_path "$AMAN_HOME/backups"
+  run_install upgrade --force
+  assert_rc 0
+  sandbox_drop
+}
+
+test_gate_passes_when_the_doctor_reports_only_warnings() {
+  t_begin "an upgrade with only warnings in the doctor report passes the gate"
+  sandbox_new
+  install_machine
+  repo_commit_change "warn only"
+  STUB_DOCTOR_JSON='{"machine":[{"id":"backup","state":"warn","detail":"Daily backups are off.","fix":"Run aman backup"}],"instances":{"main":[]}}'
+  STUB_DOCTOR_EXIT=0
+  run_install upgrade
+  assert_rc 0
+  assert_contains "$OUT" "Upgraded to"
+  sandbox_drop
+}
+
+test_gate_blocks_when_the_doctor_cannot_be_checked() {
+  t_begin "a doctor run that produces no fail record but still fails blocks with its own message"
+  sandbox_new
+  install_machine
+  repo_commit_change "needs doctor"
+  STUB_DOCTOR_EXIT=1
+  run_install upgrade
+  assert_rc 1
+  assert_flat_contains "$ERR" "could not be checked, so the upgrade did not start"
   assert_no_path "$AMAN_HOME/backups"
   run_install upgrade --force
   assert_rc 0
@@ -157,7 +317,7 @@ test_doctor_failure_blocks_unless_forced() {
 
 # An install whose first start failed leaves an instance that never became healthy: no data, no backup.
 install_that_never_starts() {
-  STUB_UP_FAIL_LOG="Error: EACCES: permission denied, mkdir '/home/trueforge'"
+  STUB_UP_FAIL_LOG="Error: EACCES: permission denied, mkdir '/home/user'"
   with_input "$SENTINEL_PASSWORD
 "
   run_install --yes --password-stdin --email owner@example.invalid
@@ -167,7 +327,7 @@ install_that_never_starts() {
 }
 
 test_install_rerun_updates_instead_of_reusing_old_images() {
-  t_begin "re-running install on a newer checkout says so, plans the update, backs up what has data and builds new images"
+  t_begin "re-running install on a newer copy says so, plans the update, backs up what has data and builds new images"
   sandbox_new
   install_machine
   local old new
@@ -175,9 +335,9 @@ test_install_rerun_updates_instead_of_reusing_old_images() {
   repo_commit_change "newer checkout"
   run_install --dry-run
   assert_rc 0
-  assert_flat_contains "$OUT" "This checkout is newer than the installed version, so it will be updated."
-  assert_flat_contains "$OUT" "Update the installed version to this checkout"
-  assert_flat_contains "$OUT" "Instances that have data are backed up first."
+  assert_flat_contains "$OUT" "This copy of Aman is newer than the installed one, so it will be updated."
+  assert_flat_contains "$OUT" "Update Aman to this newer copy"
+  assert_flat_contains "$OUT" "Each instance with data is backed up first."
   assert_flat_contains "$OUT" "Restart instance main on the new version"
   assert_not_contains "$OUT" "Nothing to do"
   assert_eq "$(app_tag "$AMAN_HOME/release/release.json")" "$old" "a dry run changes nothing"
@@ -185,7 +345,8 @@ test_install_rerun_updates_instead_of_reusing_old_images() {
   assert_rc 0
   new=$(app_tag "$AMAN_HOME/release/release.json")
   if [ "$new" != "$old" ]; then t_pass; else t_fail "the old release was reused"; fi
-  assert_not_contains "$OUT$ERR" "already built"
+  assert_not_contains "$OUT$ERR" "The Aman app is already built"
+  assert_not_contains "$OUT$ERR" "The speech-to-text service is already built"
   assert_eq "$(compose_image main)" "$new" "the instance runs the new image"
   assert_eq "$(find "$AMAN_HOME/backups" -mindepth 1 -maxdepth 1 -type d | wc -l | tr -d ' ')" 1 "the instance had data, so it was backed up"
   assert_eq "$(app_tag "$AMAN_HOME/release/previous.release.json")" "$old" "the old release is kept for the rollback"
@@ -204,7 +365,7 @@ test_failed_update_through_install_rolls_back() {
   assert_rc 1
   assert_eq "$(app_tag "$AMAN_HOME/release/release.json")" "$old" "the old release is back"
   assert_eq "$(compose_image main)" "$old"
-  assert_flat_contains "$ERR" "restoring the previous version"
+  assert_flat_contains "$ERR" "Putting the previous version back"
   sandbox_drop
 }
 
@@ -216,7 +377,7 @@ test_install_rerun_of_an_instance_that_never_started_is_a_fresh_build() {
   repo_commit_change "the fix"
   run_install --yes
   assert_rc 0
-  assert_flat_contains "$OUT" "This checkout is newer than the installed version, so it will be updated."
+  assert_flat_contains "$OUT" "This copy of Aman is newer than the installed one, so it will be updated."
   assert_not_contains "$OUT$ERR" "Backing up instance"
   assert_no_path "$AMAN_HOME/backups"
   assert_eq "$(compose_image main)" "$(app_tag "$AMAN_HOME/release/release.json")"
@@ -234,7 +395,7 @@ test_upgrade_needs_no_force_when_the_instance_never_started() {
   assert_rc 0
   assert_not_contains "$ERR" "doctor reports a failure"
   assert_no_path "$AMAN_HOME/backups"
-  assert_flat_contains "$OUT" "not needed (no instance had data)"
+  assert_flat_contains "$OUT" "No backup was needed, since no instance had data yet."
   sandbox_drop
 }
 
@@ -243,10 +404,11 @@ test_upgrade_still_needs_force_for_an_instance_with_data() {
   sandbox_new
   install_machine
   repo_commit_change "needs doctor"
+  STUB_DOCTOR_JSON='{"machine":[],"instances":{"main":[{"id":"containers","state":"fail","detail":"The main app is not running.","fix":"Run aman doctor instance --fix"}]}}'
   STUB_DOCTOR_EXIT=1
   run_install upgrade
   assert_rc 1
-  assert_flat_contains "$ERR" "The doctor reports a failure for instance main, which was healthy before."
+  assert_flat_contains "$ERR" "Instance main worked before but has a problem now, so the upgrade did not start: The main app is not running."
   assert_flat_contains "$ERR" "upgrade --force"
   assert_no_path "$AMAN_HOME/backups"
   sandbox_drop
@@ -258,15 +420,78 @@ test_a_record_from_before_the_flag_counts_as_having_data() {
   install_machine
   sed -i '/^healthy=/d' "$AMAN_HOME/state/instances/main.conf"
   repo_commit_change "older record"
+  STUB_DOCTOR_JSON='{"machine":[],"instances":{"main":[{"id":"containers","state":"fail","detail":"The main app is not running.","fix":"Run aman doctor instance --fix"}]}}'
   STUB_DOCTOR_EXIT=1
   run_install upgrade
   assert_rc 1
-  assert_flat_contains "$ERR" "which was healthy before"
-  unset STUB_DOCTOR_EXIT
+  assert_flat_contains "$ERR" "worked before but has a problem now"
+  unset STUB_DOCTOR_EXIT STUB_DOCTOR_JSON
   run_install upgrade
   assert_rc 0
   assert_eq "$(find "$AMAN_HOME/backups" -mindepth 1 -maxdepth 1 -type d | wc -l | tr -d ' ')" 1
   sandbox_drop
+}
+
+# Gives the checkout a remote holding exactly what the checkout holds, so a test can move the
+# remote ahead on its own. The checkout tracks the remote copy of its branch, as a real clone
+# does. The remote is called origin unless a test names it something else.
+repo_remote_add() {
+  local remote=${1:-origin} branch
+  branch=$(git -C "$REPO" branch --show-current)
+  git init -q --bare "$SB/origin.git"
+  git -C "$REPO" remote add "$remote" "$SB/origin.git"
+  git -C "$REPO" push -q "$remote" "HEAD:refs/heads/$branch"
+  git -C "$REPO" fetch -q "$remote" "+refs/heads/$branch:refs/remotes/$remote/$branch"
+  git -C "$REPO" branch --set-upstream-to="$remote/$branch" >/dev/null
+}
+
+# Moves origin one commit ahead of the checkout, the way a newer version lands on GitHub.
+repo_remote_advance() {
+  local branch work=$SB/origin-work
+  branch=$(git -C "$REPO" branch --show-current)
+  git clone -q --branch "$branch" "$SB/origin.git" "$work"
+  printf '%s\n' "newer version" >>"$work/Dockerfile.dev"
+  git -C "$work" add -A
+  git -C "$work" -c user.name=t -c user.email=t@example.invalid commit -q -m "newer version"
+  git -C "$work" push -q origin "HEAD:refs/heads/$branch"
+  rm -rf "$work"
+}
+
+# Gives the checkout a remote holding a different branch only, so the checkout's own branch is
+# not on it, and the checkout tracks nothing.
+repo_remote_without_own_branch() {
+  local remote=${1:-origin}
+  git init -q --bare "$SB/origin.git"
+  git -C "$REPO" remote add "$remote" "$SB/origin.git"
+  git -C "$REPO" push -q "$remote" "HEAD:refs/heads/other-branch"
+}
+
+# An aman command the printed advice can call: on a real computer it is already installed; here
+# it runs this sandbox's staged installer, the way the installed command runs the real one.
+fixture_aman_command() {
+  mkdir -p "$SB/cmd"
+  cat >"$SB/cmd/aman" <<AMAN
+#!/usr/bin/env bash
+exec bash "$SB_INSTALLER/install.sh" "\$@"
+AMAN
+  chmod 755 "$SB/cmd/aman"
+}
+
+# Runs one printed command line exactly as printed, in the same environment an installer run
+# gets, with the aman command on the path. Output lands in POUT, PERR and PRC.
+run_printed_command() {
+  build_run_env
+  set +e
+  env -i "${RUN_ENV[@]}" PATH="$SB/cmd:$SB_BIN" bash -c "$1" >"$SB/pout" 2>"$SB/perr"
+  PRC=$?
+  set -e
+  POUT=$(cat "$SB/pout")
+  PERR=$(cat "$SB/perr")
+}
+
+# The command line the behind message told the person to run, without the words before it.
+printed_command() {
+  printf '%s\n' "$OUT" | sed -n 's/^To get the newer version, run: //p'
 }
 
 # The data volume exists (Docker made it when the app first started) but holds no database.
@@ -283,7 +508,7 @@ test_backup_and_upgrade_force_cope_with_an_instance_without_a_database() {
   no_database_yet main
   run_install backup
   assert_rc 0
-  assert_flat_contains "$OUT" "Instance main has no database yet, so there is nothing to back up for it"
+  assert_flat_contains "$OUT" "Instance main has no data yet, so only its settings are saved."
   assert_not_contains "$OUT$ERR" "Cannot open database"
   assert_not_contains "$OUT$ERR" "failed"
   assert_no_path "$SB_STATE/backup_runs"
@@ -317,7 +542,204 @@ test_owner_path_remove_upgrade_install() {
   sandbox_drop
 }
 
+test_upgrade_reports_a_newer_version_when_the_checkout_is_behind_origin() {
+  t_begin "upgrade says a newer version exists when the checkout is behind origin, and changes nothing"
+  sandbox_new
+  install_machine
+  repo_remote_add
+  repo_remote_advance
+  local head_before builds
+  head_before=$(git -C "$REPO" rev-parse HEAD)
+  builds=$(log_count "docker build")
+  run_install upgrade
+  assert_rc 0
+  assert_flat_contains "$OUT" "A newer version of Aman is available."
+  assert_contains "$OUT" "git -C \"$REPO\" pull && aman upgrade"
+  assert_not_contains "$OUT" "Already up to date"
+  assert_eq "$(git -C "$REPO" rev-parse HEAD)" "$head_before" "the checkout itself was not pulled"
+  assert_eq "$(log_count "docker build")" "$builds" "nothing was built"
+  assert_no_path "$AMAN_HOME/backups"
+  sandbox_drop
+}
+
+test_upgrade_stays_up_to_date_when_the_checkout_matches_origin() {
+  t_begin "upgrade still says up to date when the checkout matches origin"
+  sandbox_new
+  install_machine
+  repo_remote_add
+  run_install upgrade
+  assert_rc 0
+  assert_contains "$OUT" "Already up to date"
+  assert_not_contains "$OUT" "A newer version of Aman is available"
+  sandbox_drop
+}
+
+test_upgrade_uses_the_checkout_when_it_is_ahead_of_origin() {
+  t_begin "upgrade upgrades from the checkout as before when the checkout is ahead of origin"
+  sandbox_new
+  install_machine
+  repo_remote_add
+  local old new
+  old=$(app_tag "$AMAN_HOME/release/release.json")
+  repo_commit_change "local work"
+  run_install upgrade
+  assert_rc 0
+  assert_not_contains "$OUT" "A newer version of Aman is available"
+  new=$(app_tag "$AMAN_HOME/release/release.json")
+  if [ "$new" != "$old" ]; then t_pass; else t_fail "release not updated"; fi
+  sandbox_drop
+}
+
+test_upgrade_warns_and_carries_on_when_origin_cannot_be_reached() {
+  t_begin "upgrade says it could not check for a newer version when origin cannot be reached, and carries on with the local check"
+  sandbox_new
+  install_machine
+  repo_remote_add
+  rm -rf "$SB/origin.git"
+  run_install upgrade
+  assert_rc 0
+  assert_flat_contains "$OUT$ERR" "could not check for a newer version"
+  assert_contains "$OUT" "Already up to date"
+  sandbox_drop
+}
+
+test_upgrade_behind_without_an_upstream_names_the_source_and_branch() {
+  t_begin "upgrade behind with no upstream advises a pull naming the source and branch, and changes nothing"
+  sandbox_new
+  install_machine
+  repo_remote_add
+  git -C "$REPO" branch --unset-upstream
+  repo_remote_advance
+  local branch head_before builds
+  branch=$(git -C "$REPO" branch --show-current)
+  head_before=$(git -C "$REPO" rev-parse HEAD)
+  builds=$(log_count "docker build")
+  run_install upgrade
+  assert_rc 0
+  assert_flat_contains "$OUT" "A newer version of Aman is available."
+  assert_contains "$OUT" "git -C \"$REPO\" pull origin $branch && aman upgrade"
+  assert_not_contains "$OUT" "Already up to date"
+  assert_eq "$(git -C "$REPO" rev-parse HEAD)" "$head_before" "the checkout itself was not pulled"
+  assert_eq "$(log_count "docker build")" "$builds" "nothing was built"
+  assert_no_path "$AMAN_HOME/backups"
+  sandbox_drop
+}
+
+test_upgrade_behind_with_a_renamed_remote_and_no_upstream_names_that_remote() {
+  t_begin "upgrade behind with a renamed remote and no upstream names that remote in the pull it advises, and changes nothing"
+  sandbox_new
+  install_machine
+  repo_remote_add github
+  git -C "$REPO" branch --unset-upstream
+  repo_remote_advance
+  local branch head_before builds
+  branch=$(git -C "$REPO" branch --show-current)
+  head_before=$(git -C "$REPO" rev-parse HEAD)
+  builds=$(log_count "docker build")
+  run_install upgrade
+  assert_rc 0
+  assert_flat_contains "$OUT" "A newer version of Aman is available."
+  assert_contains "$OUT" "git -C \"$REPO\" pull github $branch && aman upgrade"
+  assert_not_contains "$OUT" "Already up to date"
+  assert_eq "$(git -C "$REPO" rev-parse HEAD)" "$head_before" "the checkout itself was not pulled"
+  assert_eq "$(log_count "docker build")" "$builds" "nothing was built"
+  assert_no_path "$AMAN_HOME/backups"
+  sandbox_drop
+}
+
+test_upgrade_warns_that_the_branch_is_not_on_the_renamed_remote_when_it_is_missing_there() {
+  t_begin "upgrade says the branch is not on the renamed remote when the checkout's branch is missing there, and carries on"
+  sandbox_new
+  install_machine
+  repo_remote_without_own_branch github
+  local branch
+  branch=$(git -C "$REPO" branch --show-current)
+  run_install upgrade
+  assert_rc 0
+  assert_flat_contains "$OUT$ERR" "on the branch $branch, which is not on github"
+  assert_not_contains "$OUT$ERR" "could not be reached"
+  assert_contains "$OUT" "Already up to date"
+  sandbox_drop
+}
+
+test_upgrade_behind_prints_one_command_that_pulls_and_then_upgrades() {
+  t_begin "upgrade behind prints one combined command, and running it as printed pulls, then upgrades"
+  sandbox_new
+  install_machine
+  repo_remote_add
+  git -C "$REPO" branch --unset-upstream
+  repo_remote_advance
+  local branch old new printed origin_head
+  branch=$(git -C "$REPO" branch --show-current)
+  old=$(app_tag "$AMAN_HOME/release/release.json")
+  origin_head=$(git -C "$SB/origin.git" rev-parse "refs/heads/$branch")
+  run_install upgrade
+  assert_rc 0
+  assert_flat_contains "$OUT" "A newer version of Aman is available."
+  assert_eq "$(printf '%s' "$OUT" | grep -c 'run:')" 1 "the message gives one next step"
+  assert_not_contains "$OUT" "Then run"
+  printed=$(printed_command)
+  assert_eq "$printed" "git -C \"$REPO\" pull origin $branch && aman upgrade" "the one printed command"
+  fixture_aman_command
+  run_printed_command "$printed"
+  assert_eq "$PRC" 0 "the printed command runs: $PERR"
+  assert_eq "$(git -C "$REPO" rev-parse HEAD)" "$origin_head" "the printed command pulled the newer version"
+  assert_flat_contains "$POUT" "Upgraded to"
+  new=$(app_tag "$AMAN_HOME/release/release.json")
+  if [ "$new" != "$old" ]; then t_pass; else t_fail "the printed command did not upgrade"; fi
+  sandbox_drop
+}
+
+test_upgrade_behind_from_a_folder_with_spaces_prints_a_command_that_works() {
+  t_begin "upgrade behind from a checkout in a folder with spaces prints a command that runs as printed"
+  sandbox_new
+  install_machine
+  local spaced="$SB/checkout with spaces"
+  mv "$REPO" "$spaced"
+  REPO=$spaced
+  repo_remote_add
+  repo_remote_advance
+  local branch printed origin_head
+  branch=$(git -C "$REPO" branch --show-current)
+  origin_head=$(git -C "$SB/origin.git" rev-parse "refs/heads/$branch")
+  run_install upgrade
+  assert_rc 0
+  assert_flat_contains "$OUT" "A newer version of Aman is available."
+  printed=$(printed_command)
+  assert_contains "$printed" "git -C \"$spaced\" pull" "the printed command quotes the folder path"
+  fixture_aman_command
+  run_printed_command "$printed"
+  assert_eq "$PRC" 0 "the printed command runs: $PERR"
+  assert_eq "$(git -C "$REPO" rev-parse HEAD)" "$origin_head" "the printed command pulled the newer version"
+  sandbox_drop
+}
+
+test_upgrade_warns_that_the_branch_is_not_on_origin_when_it_is_missing_there() {
+  t_begin "upgrade says the branch is not on origin when the checkout's branch is missing there, and carries on"
+  sandbox_new
+  install_machine
+  repo_remote_without_own_branch
+  local branch
+  branch=$(git -C "$REPO" branch --show-current)
+  run_install upgrade
+  assert_rc 0
+  assert_flat_contains "$OUT$ERR" "on the branch $branch, which is not on origin"
+  assert_not_contains "$OUT$ERR" "could not be reached"
+  assert_contains "$OUT" "Already up to date"
+  sandbox_drop
+}
+
 test_noop_when_current
+test_upgrade_reports_a_newer_version_when_the_checkout_is_behind_origin
+test_upgrade_stays_up_to_date_when_the_checkout_matches_origin
+test_upgrade_uses_the_checkout_when_it_is_ahead_of_origin
+test_upgrade_warns_and_carries_on_when_origin_cannot_be_reached
+test_upgrade_behind_without_an_upstream_names_the_source_and_branch
+test_upgrade_warns_that_the_branch_is_not_on_origin_when_it_is_missing_there
+test_upgrade_behind_with_a_renamed_remote_and_no_upstream_names_that_remote
+test_upgrade_warns_that_the_branch_is_not_on_the_renamed_remote_when_it_is_missing_there
+test_upgrade_behind_prints_one_command_that_pulls_and_then_upgrades
+test_upgrade_behind_from_a_folder_with_spaces_prints_a_command_that_works
 test_backup_and_upgrade_force_cope_with_an_instance_without_a_database
 test_owner_path_remove_upgrade_install
 test_install_rerun_updates_instead_of_reusing_old_images
@@ -328,9 +750,19 @@ test_upgrade_still_needs_force_for_an_instance_with_data
 test_a_record_from_before_the_flag_counts_as_having_data
 test_check_reports_without_changing
 test_successful_upgrade_backs_up_first
+test_upgrade_notes_an_old_email_account_file
+test_upgrade_without_an_old_email_account_file_stays_quiet
+test_upgrade_notes_an_old_calendar_account_file
+test_upgrade_moves_a_complete_old_calendar_account
+test_upgrade_keeps_a_calendar_account_connected_again
+test_upgrade_keeps_the_old_calendar_file_when_the_check_says_nothing
+test_upgrade_without_an_old_calendar_account_file_stays_quiet
+test_upgrade_starts_the_calendar_connector_without_a_profile
 test_failed_upgrade_restores_database_and_images
 test_restore_goes_only_into_the_right_volume
 test_restore_does_not_wait_for_a_migration_marker
 test_failed_build_changes_nothing
 test_doctor_failure_blocks_unless_forced
+test_gate_passes_when_the_doctor_reports_only_warnings
+test_gate_blocks_when_the_doctor_cannot_be_checked
 tests_finish

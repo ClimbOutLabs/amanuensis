@@ -14,11 +14,14 @@ import type {
   GoogleConsentStart,
   GoogleFeature,
   GoogleSetupPort,
+  GoogleTestResult,
 } from '@/server/googleSetup.js';
 import { getErrorMessage } from '@/utils/getErrorMessage.js';
+import { useAssistantDisplayName } from '../../components/PersonalizationContext.js';
 
 const GOOGLE_PROJECT_URL = 'https://console.cloud.google.com/projectcreate';
 const GOOGLE_GMAIL_API_URL = 'https://console.cloud.google.com/apis/library/gmail.googleapis.com';
+const GOOGLE_CALENDAR_API_URL = 'https://console.cloud.google.com/apis/library/calendar-json.googleapis.com';
 const GOOGLE_CONSENT_SCREEN_URL = 'https://console.cloud.google.com/apis/credentials/consent';
 const GOOGLE_CREDENTIALS_URL = 'https://console.cloud.google.com/apis/credentials';
 const GOOGLE_AUDIENCE_URL = 'https://console.cloud.google.com/auth/audience';
@@ -98,20 +101,34 @@ function CopyField({ label, value, href }: { label: string; value: string; href?
   );
 }
 
+const CALENDAR_FEATURE = 'calendar_read' satisfies GoogleFeature;
+const CALENDAR_WRITE_FEATURE = 'calendar_write' satisfies GoogleFeature;
+const CALENDAR_FEATURES: GoogleFeature[] = [CALENDAR_FEATURE, CALENDAR_WRITE_FEATURE];
+
 function grantedFeatures(status: GoogleConnectionStatus): GoogleFeature[] {
   return status.features.filter(item => item.granted).map(item => item.feature);
 }
 
-function describeTest(result: 'ok' | 'not_connected' | 'needs_reconnect' | 'unreachable', account: string | null) {
+function describeTest({
+  result,
+  account,
+  assistant,
+}: {
+  result: GoogleTestResult['result'];
+  account: string | null;
+  assistant: string;
+}) {
   switch (result) {
     case 'ok':
       return `Working. Connected as ${account ?? 'your Google account'}.`;
     case 'not_connected':
       return 'Google is not connected.';
     case 'needs_reconnect':
-      return 'Reconnect needed. Google sign-in expired and mail is paused. Select Reconnect to sign in again.';
+      return 'Reconnect needed. Google sign-in expired and mail and calendar are paused. Select Reconnect to sign in again.';
     case 'unreachable':
-      return "Aman couldn't reach Google just now. Try again in a minute.";
+      return `${assistant} couldn't reach Google just now. Try again in a minute.`;
+    case 'calendar_unavailable':
+      return 'Mail works, but Google Calendar did not answer. Open the Calendar API link in the Calendar section, select Enable, then test again.';
   }
 }
 
@@ -120,6 +137,7 @@ function describeTest(result: 'ok' | 'not_connected' | 'needs_reconnect' | 'unre
  * sent once to begin the consent, and never shown again.
  */
 export function GoogleSetupPanel({ open, onOpenChange, port, onChanged }: GoogleSetupPanelProps) {
+  const assistant = useAssistantDisplayName();
   const [status, setStatus] = useState<GoogleConnectionStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -258,7 +276,7 @@ export function GoogleSetupPanel({ open, onOpenChange, port, onChanged }: Google
   const testConnection = () =>
     run(async () => {
       const result = await port.testGoogleConnection();
-      setTestMessage(describeTest(result.result, result.accountEmail));
+      setTestMessage(describeTest({ result: result.result, account: result.accountEmail, assistant }));
       await refreshStatus();
     });
 
@@ -269,7 +287,7 @@ export function GoogleSetupPanel({ open, onOpenChange, port, onChanged }: Google
       setNotice(
         result.revocationConfirmed
           ? 'Google is disconnected and its access was revoked.'
-          : "Google didn't confirm. Aman removed the connection here; you can also remove access in your Google account settings.",
+          : `Google didn't confirm. ${assistant} removed the connection here. You can also remove access in your Google account settings.`,
       );
       setTestMessage(null);
       await refreshStatus();
@@ -284,7 +302,7 @@ export function GoogleSetupPanel({ open, onOpenChange, port, onChanged }: Google
       open={open}
       onOpenChange={onOpenChange}
       title="Google"
-      description="Connect your Google account so Aman can read your email and, with your approval, draft and send it."
+      description={`Connect your Google account so ${assistant} can read your email and, with your approval, draft and send it.`}
       className="md:max-w-2xl"
     >
       <div className="space-y-5 px-5 py-5 text-sm text-text-primary">
@@ -317,9 +335,10 @@ export function GoogleSetupPanel({ open, onOpenChange, port, onChanged }: Google
             </h3>
             {status.state === 'needs_reconnect' ? (
               <p className="rounded-md border border-warning-bg/40 bg-warning-bg/10 px-3 py-2">
-                Google sign-in expired. Mail is paused, and other parts of Aman keep working. Select Reconnect to sign
-                in again. If this keeps happening about once a week, your Google project is in Testing: either reconnect
-                each week, or in Google Cloud open Audience and choose Publish app, then reconnect once.
+                Google sign-in expired. Mail and calendar are paused, and other parts of {assistant} keep working.
+                Select Reconnect to sign in again. If this keeps happening about once a week, your Google project is in
+                Testing: either reconnect each week, or in Google Cloud open Audience and choose Publish app, then
+                reconnect once.
               </p>
             ) : (
               <>
@@ -337,12 +356,94 @@ export function GoogleSetupPanel({ open, onOpenChange, port, onChanged }: Google
               </>
             )}
             <ul className="space-y-1 text-text-secondary">
-              {status.features.map(item => (
-                <li key={item.feature}>
-                  {item.label}: {item.granted ? 'allowed' : 'not allowed'}
-                </li>
-              ))}
+              {status.features
+                .filter(item => !CALENDAR_FEATURES.includes(item.feature))
+                .map(item => (
+                  <li key={item.feature}>
+                    {item.label}: {item.granted ? 'allowed' : 'not allowed'}
+                  </li>
+                ))}
             </ul>
+            {status.state === 'connected' ? (
+              <div aria-label="Calendar" className="space-y-2 rounded-md border border-border bg-primary-bg p-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <p>
+                    <span className="font-medium">Calendar</span>:{' '}
+                    {grantedFeatures(status).includes(CALENDAR_FEATURE) ? 'connected' : 'not connected'}
+                  </p>
+                  {grantedFeatures(status).includes(CALENDAR_FEATURE) ? null : (
+                    <Button
+                      variant="secondary"
+                      size="small"
+                      type="button"
+                      disabled={busy || offline}
+                      onClick={() => void beginConsent({ useSavedClient: true, features: [CALENDAR_FEATURE] })}
+                    >
+                      Connect Calendar
+                    </Button>
+                  )}
+                </div>
+                {grantedFeatures(status).includes(CALENDAR_FEATURE) ? (
+                  <>
+                    {grantedFeatures(status).includes(CALENDAR_WRITE_FEATURE) ? (
+                      <p className="text-text-secondary">
+                        {assistant} can read events on your calendar, and add or change events after you approve each
+                        one. It cannot delete events.
+                      </p>
+                    ) : (
+                      <>
+                        <p className="text-text-secondary">
+                          {assistant} can read events on your calendar. To let {assistant} add events it finds in your
+                          mail or chats, select Allow {assistant} to add events. You still approve each event before it
+                          is saved.
+                        </p>
+                        <Button
+                          variant="secondary"
+                          size="small"
+                          type="button"
+                          disabled={busy || offline}
+                          onClick={() => void beginConsent({ useSavedClient: true, features: CALENDAR_FEATURES })}
+                        >
+                          Allow {assistant} to add events
+                        </Button>
+                      </>
+                    )}
+                    <p className="text-text-secondary">
+                      If Calendar stops answering, check that its API is still on: open this page and click Enable.
+                    </p>
+                    <CopyField
+                      label="Calendar API link"
+                      value={GOOGLE_CALENDAR_API_URL}
+                      href={GOOGLE_CALENDAR_API_URL}
+                    />
+                  </>
+                ) : (
+                  <>
+                    <p className="text-text-secondary">
+                      Lets {assistant} read events on your calendar, such as a birthday coming up. Letting {assistant}{' '}
+                      add events is a separate step once Calendar is connected.
+                    </p>
+                    <ol className="list-decimal space-y-3 pl-5">
+                      <li>
+                        <p className="font-medium">Turn on the Google Calendar API</p>
+                        <p className="text-text-secondary">On the page, click Enable.</p>
+                        <CopyField
+                          label="Calendar API link"
+                          value={GOOGLE_CALENDAR_API_URL}
+                          href={GOOGLE_CALENDAR_API_URL}
+                        />
+                      </li>
+                      <li>
+                        <p className="font-medium">Select Connect Calendar</p>
+                        <p className="text-text-secondary">
+                          On Google&apos;s screen, leave the calendar box ticked and continue.
+                        </p>
+                      </li>
+                    </ol>
+                  </>
+                )}
+              </div>
+            ) : null}
             {testMessage ? (
               <p role="status" className="text-text-secondary">
                 {testMessage}
@@ -397,8 +498,9 @@ export function GoogleSetupPanel({ open, onOpenChange, port, onChanged }: Google
                 className="rounded-md border border-border bg-primary-bg p-3"
               >
                 <p>
-                  This removes Aman&apos;s access to your Google account everywhere it is used and deletes the saved
-                  login. Emails already sent stay in Gmail. You can connect again later.
+                  Disconnecting turns off both mail and calendar. It removes {assistant}&apos;s access to your Google
+                  account everywhere it is used and deletes the saved login. Emails already sent stay in Gmail. You can
+                  connect again later.
                 </p>
                 <div className="mt-3 flex gap-2">
                   <Button
@@ -423,7 +525,7 @@ export function GoogleSetupPanel({ open, onOpenChange, port, onChanged }: Google
           <>
             <p className="font-medium">Not connected. Connect your own Google account to read your email.</p>
             <p className="text-text-secondary">
-              Use a Google Cloud project you created yourself. Aman uses your project, not a shared one, so no
+              Use a Google Cloud project you created yourself. {assistant} uses your project, not a shared one, so no
               verification or security review is needed for your own use.
             </p>
             <ol className="list-decimal space-y-4 pl-5">
@@ -495,7 +597,10 @@ export function GoogleSetupPanel({ open, onOpenChange, port, onChanged }: Google
                     className={auiInputClass('h-10')}
                     value={client.clientId}
                     autoComplete="off"
-                    onChange={event => setClient({ ...client, clientId: event.target.value })}
+                    onChange={event => {
+                      setCheck(null);
+                      setClient({ ...client, clientId: event.target.value });
+                    }}
                   />
                   <label className="block text-xs font-medium text-text-secondary" htmlFor="google-client-secret">
                     Client secret
@@ -506,7 +611,10 @@ export function GoogleSetupPanel({ open, onOpenChange, port, onChanged }: Google
                     className={auiInputClass('h-10')}
                     value={client.clientSecret}
                     autoComplete="off"
-                    onChange={event => setClient({ ...client, clientSecret: event.target.value })}
+                    onChange={event => {
+                      setCheck(null);
+                      setClient({ ...client, clientSecret: event.target.value });
+                    }}
                   />
                   <label className="block text-xs font-medium text-text-secondary" htmlFor="google-client-json">
                     Or choose the downloaded client JSON
@@ -522,7 +630,7 @@ export function GoogleSetupPanel({ open, onOpenChange, port, onChanged }: Google
                   />
                   <p className="text-xs text-text-secondary">The file is read in this browser.</p>
                   <p className="text-xs text-text-secondary">
-                    Your client secret goes to Aman once, to start sign-in, and is never shown again.
+                    Your client secret goes to {assistant} once, to start sign-in, and is never shown again.
                   </p>
                 </div>
                 <div className="mt-2">
@@ -563,7 +671,7 @@ export function GoogleSetupPanel({ open, onOpenChange, port, onChanged }: Google
                     onChange={event => setAllowCompose(event.target.checked)}
                   />
                   <span>
-                    Also let Aman save drafts and send email. Every draft and every send still asks you first.
+                    Also let {assistant} save drafts and send email. Every draft and every send still asks you first.
                   </span>
                 </label>
                 <p className="mt-2 text-text-secondary">
@@ -571,11 +679,17 @@ export function GoogleSetupPanel({ open, onOpenChange, port, onChanged }: Google
                   Advanced, then Go to your app, then Continue. A window opens for this, so allow pop-ups for this site
                   if nothing appears.
                 </p>
+                {setup.mode === 'paste' ? (
+                  <p className="mt-2 text-text-secondary">
+                    If Google sends you to a page that won&apos;t load, copy the whole address from your browser&apos;s
+                    address bar and paste it here. That page is expected, and the address finishes the sign-in.
+                  </p>
+                ) : null}
                 <div className="mt-2">
                   <Button
                     size="small"
                     type="button"
-                    disabled={busy || offline || !hasClient}
+                    disabled={busy || offline || !hasClient || check?.ok !== true}
                     onClick={() =>
                       void beginConsent({
                         useSavedClient: false,
@@ -587,6 +701,10 @@ export function GoogleSetupPanel({ open, onOpenChange, port, onChanged }: Google
                   </Button>
                   {!hasClient ? (
                     <p className="mt-1 text-xs text-text-secondary">Add your client ID and secret first.</p>
+                  ) : check?.ok !== true ? (
+                    <p className="mt-1 text-xs text-text-secondary">
+                      Select Check my client above first. Connect opens once the check finds no problems.
+                    </p>
                   ) : null}
                 </div>
               </li>

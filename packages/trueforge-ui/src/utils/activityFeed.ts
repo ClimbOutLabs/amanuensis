@@ -34,12 +34,17 @@ type ToolLabel = {
 };
 
 /** Bookkeeping tools that are never meaningful to an everyday user. */
-const INTERNAL_TOOLS = new Set(['record_finding']);
+const INTERNAL_TOOLS = new Set(['record_finding', 'load_bundle']);
 
 const TOOL_MATCHERS: Array<{ pattern: RegExp } & ToolLabel> = [
   { pattern: /^tavily_search/, kind: 'search', title: 'Searched the web', plural: 'searches' },
   { pattern: /^tavily_extract/, kind: 'read', title: 'Read web pages', plural: 'pages' },
-  { pattern: /calendar/, kind: 'calendar', title: 'Checked your calendar', plural: 'lookups' },
+  {
+    pattern: /calendar|(^|__)(list_events|get_event)$/,
+    kind: 'calendar',
+    title: 'Checked your calendar',
+    plural: 'lookups',
+  },
   { pattern: /gmail|email/, kind: 'mail', title: 'Checked email', plural: 'messages' },
   { pattern: /weather/, kind: 'search', title: 'Checked the weather', plural: 'lookups' },
   { pattern: /flight|hotel/, kind: 'search', title: 'Looked up travel options', plural: 'lookups' },

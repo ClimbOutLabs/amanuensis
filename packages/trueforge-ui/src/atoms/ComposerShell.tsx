@@ -1,8 +1,9 @@
 'use client';
 
-import { type ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 
 import { useSlot } from '../theme/SlotsProvider.js';
+import { elapsedWords } from '../utils/waitQueueJourney.js';
 import { cn } from './lib/cn.js';
 
 export type ComposerShellProps = {
@@ -11,6 +12,8 @@ export type ComposerShellProps = {
   disabled: boolean;
   canSubmit: boolean;
   isRunning?: boolean;
+  /** Stop was pressed and the turn has not stopped yet. */
+  isStopping?: boolean;
   attachments?: ReactNode;
   modelLabel?: string;
   modelIcon?: ReactNode;
@@ -21,11 +24,41 @@ export type ComposerShellProps = {
   className?: string;
 };
 
+/** The one owner of the words for a reply in progress, shown in the composer and the panel. */
+export const WORKING_ON_IT_LABEL = 'Working on it';
+
+/** How long the reply has run, rechecked every quarter minute; the words change once a minute. */
+function useRunningElapsed(): string | undefined {
+  const [startedAt] = useState(() => Date.now());
+  const [now, setNow] = useState(startedAt);
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 15_000);
+    return () => window.clearInterval(timer);
+  }, []);
+  return elapsedWords(now - startedAt);
+}
+
+/** Why Send is a Stop right now: a reply is running, and for how long once it passes a minute. */
+function RunningStatus() {
+  const elapsed = useRunningElapsed();
+  return (
+    <span role="status" className="text-text-secondary flex items-center gap-2 text-sm">
+      <span className="bg-gold size-2 shrink-0 rounded-full" aria-hidden />
+      {elapsed === undefined ? WORKING_ON_IT_LABEL : `${WORKING_ON_IT_LABEL}, ${elapsed}`}
+    </span>
+  );
+}
+
+/**
+ * The composer card. It holds the attachment chips above the input and one toolbar row below it:
+ * the `+` menu, a gold status while a turn runs, then the model, the mic and Send or Stop.
+ */
 export function ComposerShell({
   input,
   disabled,
   canSubmit,
   isRunning = false,
+  isStopping = false,
   attachments,
   modelLabel,
   modelIcon,
@@ -43,27 +76,23 @@ export function ComposerShell({
     <div
       data-slot="aui_composer-shell"
       className={cn(
-        'focus-within:ring-focus-ring/20 flex w-full flex-col gap-2 rounded-[0.75rem] border border-transparent bg-card-bg p-[var(--composer-padding,0.5rem)] shadow-[0_1.25rem_1.875rem_-1.25rem_color-mix(in_oklab,var(--primary-button-bg)_8%,transparent),0_0.75rem_1.25rem_-0.25rem_color-mix(in_oklab,var(--primary-button-bg)_8%,transparent)] transition-colors focus-within:ring-3',
-        // Gradient hairline from theme primary (faded at top → solid at bottom).
-        // padding-box paints the surface; border-box bleeds the ramp into the transparent border.
-        '[background-clip:padding-box,border-box] [background-image:linear-gradient(var(--card-bg),var(--card-bg)),linear-gradient(to_bottom,color-mix(in_oklab,var(--primary-button-bg)_25%,transparent),var(--primary-button-bg))] [background-origin:border-box]',
-        // Gradient + glow are light-only; dark falls back to the palette's neutral hairline.
-        'dark:border-border/60 dark:shadow-[0_0.625rem_1.75rem_-0.875rem_rgb(0_0_0/0.7)] dark:[background-clip:border-box] dark:[background-image:none]',
+        'border-border bg-card-bg focus-within:border-gold-line flex w-full flex-col gap-2 rounded-[1.25rem] border px-3.5 pt-3.5 pb-2.5 transition-colors',
         className,
       )}
     >
       {attachments}
       {input}
-      <div className="aui-composer-footer flex min-w-0 flex-wrap items-center justify-between gap-2 px-1">
+      <div className="aui-composer-footer flex min-w-0 flex-wrap items-center justify-between gap-2">
         <div className="aui-composer-leading flex min-w-0 max-w-full flex-wrap items-center gap-2">
           <ComposerLeftSection disabled={disabled} isRunning={isRunning} onAttach={onAttach} />
+          {isRunning ? <RunningStatus /> : null}
           {connectorStatusLabel && (
-            <span className="text-text-secondary max-w-[12rem] truncate text-xs">{connectorStatusLabel}</span>
+            <span className="text-text-secondary max-w-[12rem] truncate text-sm">{connectorStatusLabel}</span>
           )}
         </div>
-        <div className="aui-composer-actions ml-auto flex min-w-0 max-w-full shrink-0 flex-wrap items-center justify-end gap-2">
-          {modelLabel && (
-            <span className="bg-secondary-bg text-text-secondary flex max-w-[10rem] items-center gap-1 truncate rounded-full px-2 py-0.5 text-xs">
+        <div className="aui-composer-actions ml-auto flex min-w-0 max-w-full shrink-0 flex-wrap items-center justify-end gap-1">
+          {modelLabel && !isRunning && (
+            <span className="text-text-secondary flex max-w-[10rem] items-center gap-1 truncate px-2 text-sm">
               {modelIcon}
               <span className="truncate">{modelLabel}</span>
             </span>
@@ -73,6 +102,7 @@ export function ComposerShell({
             disabled={disabled}
             canSubmit={canSubmit}
             isRunning={isRunning}
+            isStopping={isStopping}
             onSubmit={onSubmit}
             onCancel={onCancel}
           />

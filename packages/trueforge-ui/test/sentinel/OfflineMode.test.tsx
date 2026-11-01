@@ -14,6 +14,10 @@ function stubApi(settings: SentinelUserSettings): { api: SentinelApi; updateUser
   }));
   const api: SentinelApi = {
     listAuditEntries: vi.fn(async () => []),
+    listBriefItemCompletions: async () => [],
+    markBriefItemDone: async () => undefined,
+    unmarkBriefItemDone: async () => undefined,
+    listUserAuditEntries: vi.fn(async () => ({ entries: [] })),
     getUserSettings: vi.fn(async () => settings),
     updateUserSettings,
     listSentinelSessionContext: vi.fn(async () => ({ approvals: [] })),
@@ -23,7 +27,13 @@ function stubApi(settings: SentinelUserSettings): { api: SentinelApi; updateUser
 
 describe('OfflineIndicator', () => {
   it('shows while the server settings say offline mode is on', async () => {
-    const { api } = stubApi({ offline_mode: true, tier2_auto_allow: [], search_without_asking: true });
+    const { api } = stubApi({
+      offline_mode: true,
+      tier2_auto_allow: [],
+      search_without_asking: true,
+      maps_without_asking: false,
+      sandbox_without_asking: true,
+    });
     render(
       <SentinelApiProvider api={api}>
         <OfflineIndicator />
@@ -32,8 +42,31 @@ describe('OfflineIndicator', () => {
     expect(await screen.findByRole('status')).toHaveTextContent('Offline mode');
   });
 
+  it('keeps a short reminder in compact form', async () => {
+    const { api } = stubApi({
+      offline_mode: true,
+      tier2_auto_allow: [],
+      search_without_asking: true,
+      maps_without_asking: false,
+      sandbox_without_asking: true,
+    });
+    render(
+      <SentinelApiProvider api={api}>
+        <OfflineIndicator compact />
+      </SentinelApiProvider>,
+    );
+    const status = await screen.findByRole('status', { name: 'Offline mode is on' });
+    expect(status).not.toHaveTextContent('Offline mode');
+  });
+
   it('hides while offline mode is off', () => {
-    const { api } = stubApi({ offline_mode: false, tier2_auto_allow: [], search_without_asking: true });
+    const { api } = stubApi({
+      offline_mode: false,
+      tier2_auto_allow: [],
+      search_without_asking: true,
+      maps_without_asking: false,
+      sandbox_without_asking: true,
+    });
     const { container } = render(
       <SentinelApiProvider api={api}>
         <OfflineIndicator />
@@ -50,6 +83,8 @@ describe('SentinelSettings', () => {
       offline_mode: false,
       tier2_auto_allow: [],
       search_without_asking: true,
+      maps_without_asking: false,
+      sandbox_without_asking: true,
     });
     render(
       <SentinelApiProvider api={api}>
@@ -73,6 +108,8 @@ describe('SentinelSettings', () => {
       offline_mode: false,
       tier2_auto_allow: [],
       search_without_asking: true,
+      maps_without_asking: false,
+      sandbox_without_asking: true,
     });
     render(
       <SentinelApiProvider api={api}>
@@ -94,11 +131,36 @@ describe('SentinelSettings', () => {
     expect(screen.getByText(/Every web search shows an approval card/)).toBeInTheDocument();
   });
 
+  it.each([true, false])(
+    'says what the search service sees, whether searches run without asking (%s) or ask',
+    async on => {
+      const { api } = stubApi({
+        offline_mode: false,
+        tier2_auto_allow: [],
+        search_without_asking: on,
+        maps_without_asking: false,
+        sandbox_without_asking: true,
+      });
+      render(
+        <SentinelApiProvider api={api}>
+          <SentinelSettings />
+        </SentinelApiProvider>,
+      );
+      expect(
+        await screen.findByText(
+          "Searches go to your search provider, which sees the search words and this instance's internet address. To stop searching, remove the search provider under Settings, then Connectors, or turn on Offline mode.",
+        ),
+      ).toBeInTheDocument();
+    },
+  );
+
   it('reports a failed search setting save beside the switch', async () => {
     const { api, updateUserSettings } = stubApi({
       offline_mode: false,
       tier2_auto_allow: [],
       search_without_asking: true,
+      maps_without_asking: false,
+      sandbox_without_asking: true,
     });
     updateUserSettings.mockRejectedValueOnce(new Error('Save failed.'));
     render(
@@ -108,5 +170,97 @@ describe('SentinelSettings', () => {
     );
     fireEvent.click(await screen.findByRole('switch', { name: 'Run web searches without asking' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('Save failed.');
+  });
+
+  it('shows maps asking when they are set to ask, and switches them to run without asking', async () => {
+    const { api, updateUserSettings } = stubApi({
+      offline_mode: false,
+      tier2_auto_allow: [],
+      search_without_asking: true,
+      maps_without_asking: false,
+      sandbox_without_asking: true,
+    });
+    render(
+      <SentinelApiProvider api={api}>
+        <SentinelSettings />
+      </SentinelApiProvider>,
+    );
+    const toggle = await screen.findByRole('switch', { name: 'Show maps without asking' });
+    expect(toggle).not.toBeChecked();
+    expect(screen.getByText('Maps ask before each one.')).toBeInTheDocument();
+    fireEvent.click(toggle);
+    await waitFor(() => {
+      expect(updateUserSettings).toHaveBeenCalledWith({ maps_without_asking: true });
+    });
+    await waitFor(() => {
+      expect(screen.getByRole('switch', { name: 'Show maps without asking' })).toBeChecked();
+    });
+    expect(
+      screen.getByText('Maps run without asking. A map asks first only if it would send a password or key.'),
+    ).toBeInTheDocument();
+  });
+
+  it('reports a failed maps save beside the switch', async () => {
+    const { api, updateUserSettings } = stubApi({
+      offline_mode: false,
+      tier2_auto_allow: [],
+      search_without_asking: true,
+      maps_without_asking: false,
+      sandbox_without_asking: true,
+    });
+    updateUserSettings.mockRejectedValueOnce(new Error('Save failed.'));
+    render(
+      <SentinelApiProvider api={api}>
+        <SentinelSettings />
+      </SentinelApiProvider>,
+    );
+    fireEvent.click(await screen.findByRole('switch', { name: 'Show maps without asking' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('Save failed.');
+  });
+
+  it('shows the sandbox switch on by default, and turning it off saves the choice', async () => {
+    const { api, updateUserSettings } = stubApi({
+      offline_mode: false,
+      tier2_auto_allow: [],
+      search_without_asking: true,
+      maps_without_asking: false,
+      sandbox_without_asking: true,
+    });
+    render(
+      <SentinelApiProvider api={api}>
+        <SentinelSettings />
+      </SentinelApiProvider>,
+    );
+    const toggle = await screen.findByRole('switch', { name: 'Run code in the sandbox without asking' });
+    expect(toggle).toBeChecked();
+    expect(
+      screen.getByText(
+        'Aman can make new files and run the scripts it wrote in this chat without asking. Changing a file that already exists, running scripts from your repository, and running tests still ask. Anything that leaves the sandbox still asks.',
+      ),
+    ).toBeInTheDocument();
+    fireEvent.click(toggle);
+    await waitFor(() => {
+      expect(updateUserSettings).toHaveBeenCalledWith({ sandbox_without_asking: false });
+    });
+    await waitFor(() => {
+      expect(screen.getByRole('switch', { name: 'Run code in the sandbox without asking' })).not.toBeChecked();
+    });
+  });
+
+  it('renders the sandbox switch unchecked when the server says it asks', async () => {
+    const { api } = stubApi({
+      offline_mode: false,
+      tier2_auto_allow: [],
+      search_without_asking: true,
+      maps_without_asking: false,
+      sandbox_without_asking: false,
+    });
+    render(
+      <SentinelApiProvider api={api}>
+        <SentinelSettings />
+      </SentinelApiProvider>,
+    );
+    expect(await screen.findByRole('switch', { name: 'Run code in the sandbox without asking' })).not.toBeChecked();
+    expect(screen.getByText('Work inside the sandbox asks before it runs.')).toBeInTheDocument();
   });
 });

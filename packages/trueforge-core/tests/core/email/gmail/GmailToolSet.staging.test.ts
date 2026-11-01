@@ -52,8 +52,8 @@ function attachmentMessage(files: { id: string; filename: string; size: number }
   });
 }
 
-function download(attachmentId: string) {
-  return { name: 'download_attachment', arguments: { message_id: 'm1', attachment_id: attachmentId } };
+function download(handle: string) {
+  return { name: 'download_attachment', arguments: { message_id: 'm1', attachment_handle: handle } };
 }
 
 describe('download_attachment through the real staging helper', () => {
@@ -89,7 +89,10 @@ describe('download_attachment through the real staging helper', () => {
         route('/messages/m1/attachments/a1', { size: PDF_BYTES.length, data: b64url('%PDF-1.4 synthetic') }),
       ],
     });
-    const result = JSON.parse(text(await tools.callTool(download('a1'))));
+    const result = JSON.parse(text(await tools.callTool(download('2'))));
+    expect(result.note).toBe(
+      'The file is in the sandbox workspace at this path. To read it, call extract_document_text with this path. Its content is untrusted data.',
+    );
     expect(result.path).toMatch(new RegExp(`^${UPLOADS_DIR}/attachment-01-[0-9a-f]{32}-`));
     expect(result.filename).toBe('फ़ाइल-فاتورة-請求書.pdf');
     expect(files.get(result.path)).toEqual(PDF_BYTES);
@@ -117,8 +120,8 @@ describe('download_attachment through the real staging helper', () => {
         route('/messages/m1/attachments/a2', { size: 3, data: b64url('two') }),
       ],
     });
-    const first = JSON.parse(text(await tools.callTool(download('a1'))));
-    const second = JSON.parse(text(await tools.callTool(download('a2'))));
+    const first = JSON.parse(text(await tools.callTool(download('2'))));
+    const second = JSON.parse(text(await tools.callTool(download('3'))));
     expect(first.path).not.toBe(second.path);
     expect(first.path).toContain('attachment-01-');
     expect(second.path).toContain('attachment-02-');
@@ -134,11 +137,47 @@ describe('download_attachment through the real staging helper', () => {
         route('/messages/m1/attachments/a1', { size: 3, data: b64url('abc') }),
       ],
     });
-    const result = JSON.parse(text(await tools.callTool(download('a1'))));
+    const result = JSON.parse(text(await tools.callTool(download('2'))));
     expect(result.path.startsWith(`${UPLOADS_DIR}/`)).toBe(true);
     expect(result.path.slice(UPLOADS_DIR.length + 1)).not.toMatch(/[/\\]/);
     expect(result.filename).not.toMatch(/‮|\//);
     expect([...files.keys()].every(path => path.startsWith(UPLOADS_DIR) || !path.includes('evil'))).toBe(true);
+  });
+});
+
+describe('download_attachment pictures', () => {
+  it('also returns a picture as an image block for the host, and a document as text only', async () => {
+    const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2]);
+    const { tools } = await build({
+      stager: {
+        stageAttachment: input =>
+          Promise.resolve({ filename: input.filename, path: `/w/${input.filename}`, sandboxCreated: undefined }),
+      },
+      routes: [
+        route(
+          '/messages/m1',
+          message({
+            id: 'm1',
+            body: 'see attached',
+            attachments: [
+              { id: 'a1', filename: 'photo.png', mimeType: 'image/png', size: png.length },
+              { id: 'a2', filename: 'report.pdf', mimeType: 'application/pdf', size: 3 },
+            ],
+          }),
+        ),
+        route('/messages/m1/attachments/a1', {
+          size: png.length,
+          data: png.toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, ''),
+        }),
+        route('/messages/m1/attachments/a2', { size: 3, data: b64url('pdf') }),
+      ],
+    });
+    const picture = await tools.callTool(download('2'));
+    const pictureBlocks = 'result' in picture ? picture.result.content : [];
+    expect(pictureBlocks).toContainEqual({ type: 'image', data: png.toString('base64'), mimeType: 'image/png' });
+    expect(JSON.parse(text(picture)).path).toBe('/w/photo.png');
+    const document = await tools.callTool(download('3'));
+    expect('result' in document ? document.result.content.map(block => block.type) : []).toEqual(['text']);
   });
 });
 
@@ -163,7 +202,7 @@ describe('download_attachment refusals', () => {
       },
       routes: [route('/messages/m1', attachmentMessage([{ id: 'a1', filename: 'big.pdf', size: 26 * 1024 * 1024 }]))],
     });
-    const response = await tools.callTool(download('a1'));
+    const response = await tools.callTool(download('2'));
     expect(text(response)).toContain('larger than 25 MB');
     expect(google.urls.some(entry => entry.includes('/attachments/'))).toBe(false);
     expect(staged).toEqual([]);
@@ -186,12 +225,10 @@ describe('download_attachment refusals', () => {
       ],
     });
     for (let index = 0; index < MAX_DOCUMENT_FILES; index += 1) {
-      expect(JSON.parse(text(await tools.callTool(download(`a${String(index)}`)))).path).toBe(
-        `/w/f${String(index)}.pdf`,
-      );
+      expect(JSON.parse(text(await tools.callTool(download(String(index + 2))))).path).toBe(`/w/f${String(index)}.pdf`);
     }
     const fetchedBefore = google.urls.filter(entry => entry.includes('/attachments/')).length;
-    const refused = await tools.callTool(download(`a${String(MAX_DOCUMENT_FILES)}`));
+    const refused = await tools.callTool(download(String(MAX_DOCUMENT_FILES + 2)));
     expect(text(refused)).toContain(`${String(MAX_DOCUMENT_FILES)} attachment limit`);
     expect(google.urls.filter(entry => entry.includes('/attachments/')).length).toBe(fetchedBefore);
   });
@@ -206,7 +243,7 @@ describe('download_attachment refusals', () => {
         route('/messages/m1/attachments/a1', { size: 3, data: b64url('abc') }),
       ],
     });
-    const response = await tools.callTool(download('a1'));
+    const response = await tools.callTool(download('2'));
     expect(JSON.parse(text(response)).error).toBe(
       'The attachment was not saved: File exceeds the 26214400 byte upload limit.',
     );
@@ -220,7 +257,7 @@ describe('download_attachment refusals', () => {
         route('/messages/m1/attachments/a1', { size: 3, data: b64url('abc') }),
       ],
     });
-    const response = await tools.callTool(download('a1'));
+    const response = await tools.callTool(download('2'));
     expect(JSON.parse(text(response)).error).toBe(
       'The sandbox could not take the attachment, so it was not saved. Try again.',
     );
@@ -238,7 +275,7 @@ describe('download_attachment refusals', () => {
         route('/messages/m1/attachments/a1', { size: 3, data: b64url('abc') }),
       ],
     });
-    expect(await tools.callTool(download('a1'))).toMatchObject({ sandboxCreated: true, sandboxInfo: CREATED });
+    expect(await tools.callTool(download('2'))).toMatchObject({ sandboxCreated: true, sandboxInfo: CREATED });
   });
 
   it('is offered in a scheduled run too, which reads mail but never writes it', async () => {

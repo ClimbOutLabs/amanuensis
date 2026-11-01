@@ -4,11 +4,17 @@ import { useCallback, useEffect, useRef, useState, type SyntheticEvent } from 'r
 
 import type { AmanAvatarActivity } from '../hooks/useAvatarActivity.js';
 
-/** Where the panda's motion clips live. The two idle variants rotate to conceal the loop. */
+/** The one accessible name for the panda, whatever it is doing. The name is the assistant's own. */
+export function avatarAltText(name: string): string {
+  return `${name}, drawn as a panda writing with a quill`;
+}
+
 export type AmanAvatarMotionSources = {
   idle: readonly string[];
   thinking: string;
   writing: string;
+  /** Absent until a waiting clip exists: the waiting state then shows the still poster. */
+  waiting?: string;
   error: string;
   /** The exact neutral frame: poster while a clip loads, and the still when motion is off. */
   poster: string;
@@ -18,6 +24,8 @@ type AmanAvatarMotionProps = {
   /** Raw activity from the agent runtime. Display policy (debounce, dwell) is applied here. */
   activity: AmanAvatarActivity;
   sources: AmanAvatarMotionSources;
+  /** The accessible name, which carries the assistant's display name. */
+  alt: string;
   className?: string;
 };
 
@@ -53,6 +61,33 @@ function pickIdleVariant({ count, except }: { count: number; except: number }): 
 }
 
 /**
+ * The clip for an activity, or `undefined` when that state has none and the still poster
+ * stands in for it.
+ */
+export function clipForActivity({
+  activity,
+  idleVariant,
+  sources,
+}: {
+  activity: AmanAvatarActivity;
+  idleVariant: number;
+  sources: AmanAvatarMotionSources;
+}): string | undefined {
+  switch (activity) {
+    case 'idle':
+      return sources.idle[idleVariant];
+    case 'thinking':
+      return sources.thinking;
+    case 'writing':
+      return sources.writing;
+    case 'waiting':
+      return sources.waiting;
+    case 'error':
+      return sources.error;
+  }
+}
+
+/**
  * A pause racing a play rejects with AbortError: the visibility/viewport watcher already
  * applied the latest intent, so that one is benign. Anything else is a real failure and
  * gets logged — a clip that cannot play at all surfaces through the element's onError.
@@ -75,7 +110,7 @@ function handlePlayRejection(error: unknown): void {
  * An idle page paints the poster alone: the `<video>` element — and its first clip
  * fetch — waits for the first non-idle activity, so idle users download no video bytes.
  */
-export function AmanAvatarMotion({ activity, sources, className }: AmanAvatarMotionProps) {
+export function AmanAvatarMotion({ activity, sources, alt, className }: AmanAvatarMotionProps) {
   const reducedMotion = usePrefersReducedMotion();
   const [display, setDisplay] = useState<AmanAvatarActivity>('idle');
   const displayRef = useRef<AmanAvatarActivity>('idle');
@@ -87,8 +122,8 @@ export function AmanAvatarMotion({ activity, sources, className }: AmanAvatarMot
   const [idleVariant, setIdleVariant] = useState(() => pickIdleVariant({ count: sources.idle.length, except: -1 }));
   /** The video element mounts on the first non-idle display: no video bytes on an idle page. */
   const [mediaLive, setMediaLive] = useState(false);
-  /** A clip that fails to load falls back to the static poster for the rest of the session. */
-  const [videoFailed, setVideoFailed] = useState(false);
+  /** The clip that failed to load. Only that clip falls back to the poster; the next state tries again. */
+  const [failedClip, setFailedClip] = useState<string | undefined>(undefined);
   /** The clip the element actually loaded: rotations and transitions only rebuild the
    *  media pipeline when the clip really changes. */
   const loadedSrcRef = useRef<string | undefined>(undefined);
@@ -102,9 +137,11 @@ export function AmanAvatarMotion({ activity, sources, className }: AmanAvatarMot
 
   useEffect(() => clearTimers, [clearTimers]);
 
+  // A new displayed state gets a fresh attempt, so a failed clip never sticks past its state.
   const commit = useCallback((next: AmanAvatarActivity): void => {
     displayRef.current = next;
     setDisplay(next);
+    setFailedClip(undefined);
   }, []);
 
   // Raw activity -> displayed activity. The send beat is immediate: the idle->thinking
@@ -125,6 +162,11 @@ export function AmanAvatarMotion({ activity, sources, className }: AmanAvatarMot
     if (activity === 'error' || current === 'error' || activity === 'idle') {
       // Errors acknowledge instantly; the provider auto-clears the raw error after 4s, so the
       // return leg is immediate too. A finished turn drops straight back to idle.
+      commit(activity);
+      return;
+    }
+    if (activity === 'waiting' || current === 'waiting') {
+      // Waiting on the person is a settled state, not work: it lands and leaves at once.
       commit(activity);
       return;
     }
@@ -162,24 +204,23 @@ export function AmanAvatarMotion({ activity, sources, className }: AmanAvatarMot
     }
   }, [display]);
 
-  const src = display === 'idle' ? sources.idle[idleVariant] : sources[display];
-  // Reduced-motion and screen-reader users get no motion; the name still reports the state.
-  const accessibleName = `Amanuensis avatar, ${display}`;
+  const clip = clipForActivity({ activity: display, idleVariant, sources });
+  const showVideo = mediaLive && !reducedMotion && clip !== undefined && clip !== failedClip;
 
   const handleVideoError = useCallback(
     (event: SyntheticEvent<HTMLVideoElement>): void => {
-      const failedSrc = event.currentTarget.currentSrc || src;
+      const failedSrc = event.currentTarget.currentSrc || clip;
       console.error(`[AmanAvatarMotion] clip failed to load (${failedSrc}); falling back to the poster`);
-      setVideoFailed(true);
+      setFailedClip(clip);
     },
-    [src],
+    [clip],
   );
 
   // Pause when the tab hides or the rail scrolls out of view; a hidden video decoding
-  // frames is pure waste. One observer + one listener per video instantiation — never
-  // rebuilt on clip swaps.
+  // frames is pure waste. One observer + one listener per mounted video — never rebuilt
+  // on clip swaps.
   useEffect(() => {
-    if (!mediaLive || reducedMotion) return;
+    if (!showVideo) return;
     const video = videoRef.current;
     if (video === null) return;
     const updatePlayback = (): void => {
@@ -202,24 +243,24 @@ export function AmanAvatarMotion({ activity, sources, className }: AmanAvatarMot
       observer.disconnect();
       document.removeEventListener('visibilitychange', updatePlayback);
     };
-  }, [mediaLive, reducedMotion]);
+  }, [showVideo]);
 
   // Swap the clip on display change. The poster (neutral frame) covers the load and the
   // incoming clip's first frame is that same pose, so the new motion starts seamlessly.
   // The outgoing clip freezes mid-motion, so the swap itself is a pose snap softened by
   // the poster beat — at rail-avatar size this reads as a blink, not a glitch.
   useEffect(() => {
-    if (!mediaLive || reducedMotion) return;
+    if (!showVideo || clip === undefined) return;
     const video = videoRef.current;
     if (video === null) return;
-    if (loadedSrcRef.current !== src) {
-      loadedSrcRef.current = src;
+    if (loadedSrcRef.current !== clip) {
+      loadedSrcRef.current = clip;
       video.load();
     }
     if (inViewRef.current && document.visibilityState === 'visible') {
       video.play().catch(handlePlayRejection);
     }
-  }, [src, mediaLive, reducedMotion]);
+  }, [clip, showVideo]);
 
   // Rotate the idle variants at each loop restart so the loop can't be detected.
   const handleEnded = (): void => {
@@ -236,10 +277,10 @@ export function AmanAvatarMotion({ activity, sources, className }: AmanAvatarMot
     }
   }, []);
 
-  if (reducedMotion || !mediaLive || videoFailed) {
+  if (!showVideo || clip === undefined) {
     // Static poster: before the first non-idle activity (no video bytes on an idle page),
-    // when the user prefers reduced motion, or when a clip failed to load.
-    return <img src={sources.poster} alt={accessibleName} className={className} />;
+    // when the user prefers reduced motion, when the state has no clip, or when a clip failed.
+    return <img src={sources.poster} alt={alt} className={className} />;
   }
 
   return (
@@ -247,7 +288,7 @@ export function AmanAvatarMotion({ activity, sources, className }: AmanAvatarMot
       ref={attachVideo}
       className={className}
       role="img"
-      aria-label={accessibleName}
+      aria-label={alt}
       muted
       playsInline
       disablePictureInPicture
@@ -258,7 +299,7 @@ export function AmanAvatarMotion({ activity, sources, className }: AmanAvatarMot
       // imperatively above: never prefetch anything on its own.
       preload="none"
       poster={sources.poster}
-      src={src}
+      src={clip}
       onEnded={handleEnded}
       onError={handleVideoError}
     />

@@ -2,13 +2,14 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
+import { EMPTY_PERSONALIZATION_PROFILE, PersonalizationProvider } from '@/components/PersonalizationContext.js';
 import { HeldActionCard, type HeldActionCardProps } from '@/sentinel/HeldActionCard.js';
 import { HELD_EXPIRED_TEXT } from '@/sentinel/heldActionErrors.js';
 import type { SentinelApprovalCard } from '@/sentinel/types.js';
 
 function card(overrides: Partial<SentinelApprovalCard> = {}): SentinelApprovalCard {
   return {
-    plain_what: 'Send a note to Ana.',
+    plain_what: 'Send a note to Ana?',
     plain_why: 'It was on the Monday list.',
     cannot_be_undone: "Once this is sent, it can't be unsent.",
     why_asked_again: null,
@@ -20,6 +21,9 @@ function card(overrides: Partial<SentinelApprovalCard> = {}): SentinelApprovalCa
     destination_host: 'mail.example.com',
     outbound_truncated: false,
     email: null,
+    calendar_event: null,
+    schedule: null,
+    persona: null,
     ...overrides,
   };
 }
@@ -45,12 +49,38 @@ describe('HeldActionCard', () => {
     renderCard();
     const text = screen.getByRole('listitem').textContent ?? '';
     expect(text.indexOf('ana@example.com')).toBeGreaterThan(-1);
-    expect(text.indexOf('Exactly what will be sent')).toBeGreaterThan(text.indexOf('ana@example.com'));
+    expect(text.indexOf('Full request')).toBeGreaterThan(text.indexOf('ana@example.com'));
     expect(screen.getByText(/Lunch at noon\?/)).toBeInTheDocument();
-    const reason = screen.getByText('Agent says: It was on the Monday list.');
-    expect(text.indexOf('Agent says')).toBeGreaterThan(text.indexOf('Exactly what will be sent'));
-    expect(text.indexOf('Agent says')).toBeGreaterThan(text.indexOf("can't be unsent"));
+    const reason = screen.getByText('Aman says: It was on the Monday list.');
+    expect(text.indexOf('Aman says')).toBeGreaterThan(text.indexOf('Full request'));
+    expect(text.indexOf('Aman says')).toBeGreaterThan(text.indexOf("can't be unsent"));
     expect(reason).toBeInTheDocument();
+    expect(screen.queryByText(/Agent says/)).not.toBeInTheDocument();
+  });
+
+  it('names the assistant by the name the person gave it when it says why', async () => {
+    render(
+      <PersonalizationProvider
+        api={{
+          getProfile: async () => ({ ...EMPTY_PERSONALIZATION_PROFILE, assistant_name: 'Mira' }),
+          updateProfile: async profile => profile,
+          deleteProfile: async () => {},
+        }}
+      >
+        <ul>
+          <HeldActionCard
+            card={card()}
+            status={{ kind: 'waiting' }}
+            alwaysAllowOffered={false}
+            onApprove={vi.fn()}
+            onAlwaysAllow={vi.fn()}
+            onDeny={vi.fn()}
+          />
+        </ul>
+      </PersonalizationProvider>,
+    );
+    expect(await screen.findByText('Mira says: It was on the Monday list.')).toBeInTheDocument();
+    expect(screen.queryByText(/Aman says|Agent says/)).not.toBeInTheDocument();
   });
 
   it('shows plainly when part of the text is cut off', () => {
@@ -71,12 +101,47 @@ describe('HeldActionCard', () => {
     expect(onDeny).toHaveBeenCalledTimes(1);
     expect(screen.queryByRole('button', { name: /this chat/i })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Always deny/i })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Always allow' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Always allow this tool' })).not.toBeInTheDocument();
   });
 
-  it('offers Always allow only when the server said it may', () => {
+  it('offers Always allow this tool only when the server said it may', () => {
+    renderCard({ alwaysAllowOffered: false });
+    expect(screen.queryByRole('button', { name: 'Always allow this tool' })).not.toBeInTheDocument();
+  });
+
+  it('asks the owner to confirm Always allow this tool before it records anything', () => {
     const { onAlwaysAllow } = renderCard({ alwaysAllowOffered: true });
-    fireEvent.click(screen.getByRole('button', { name: 'Always allow' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Always allow this tool' }));
+
+    expect(screen.getByRole('heading', { name: 'Always allow this tool?' })).toBeInTheDocument();
+    expect(screen.getByText(/You can remove this later in connector settings/)).toBeInTheDocument();
+    expect(onAlwaysAllow).not.toHaveBeenCalled();
+  });
+
+  it('says who will run the tool in the confirm step, in the assistant name and never as an agent', () => {
+    renderCard({ alwaysAllowOffered: true });
+    fireEvent.click(screen.getByRole('button', { name: 'Always allow this tool' }));
+
+    expect(
+      screen.getByText('Aman will run this tool on this connector without asking, in every chat.'),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/The agent will run/)).not.toBeInTheDocument();
+  });
+
+  it('calls nothing when the owner cancels the Always allow confirm step', () => {
+    const { onAlwaysAllow, onApprove } = renderCard({ alwaysAllowOffered: true });
+    fireEvent.click(screen.getByRole('button', { name: 'Always allow this tool' }));
+    fireEvent.click(screen.getByTestId('always-allow-cancel'));
+
+    expect(onAlwaysAllow).not.toHaveBeenCalled();
+    expect(onApprove).not.toHaveBeenCalled();
+  });
+
+  it('calls the Always allow handler once when the owner confirms', () => {
+    const { onAlwaysAllow } = renderCard({ alwaysAllowOffered: true });
+    fireEvent.click(screen.getByRole('button', { name: 'Always allow this tool' }));
+    fireEvent.click(screen.getByTestId('always-allow-confirm'));
+
     expect(onAlwaysAllow).toHaveBeenCalledTimes(1);
   });
 
@@ -106,7 +171,7 @@ describe('HeldActionCard', () => {
   ])('shows %j without hiding what was asked', (status, text) => {
     renderCard({ status });
     expect(screen.getByText(text)).toBeInTheDocument();
-    expect(screen.getByText('Send a note to Ana.')).toBeInTheDocument();
+    expect(screen.getByText('Send a note to Ana?')).toBeInTheDocument();
   });
 
   it('takes the buttons away once the action is answered or has expired', () => {
@@ -119,5 +184,53 @@ describe('HeldActionCard', () => {
     renderCard({ disabled: true });
     expect(screen.getByRole('button', { name: 'Approve' })).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Deny' })).toBeDisabled();
+  });
+
+  it('shows a proposed calendar event in full, with whether guests are emailed', () => {
+    renderCard(
+      {},
+      {
+        plain_what: 'Add "Dentist" to your Google Calendar.',
+        recipient: null,
+        destination: null,
+        destination_host: null,
+        outbound_text: null,
+        cannot_be_undone: null,
+        calendar_event: {
+          action: 'create',
+          calendar: 'ada@example.com',
+          title: 'Dentist',
+          when: 'Monday, October 19, 2026, 9:00 am to 10:00 am',
+          time_zone: 'America/New_York',
+          duration: '1 hour',
+          location: '',
+          description: '',
+          attendees: ['lin@example.com'],
+          guests_emailed: false,
+          one_of_repeating: false,
+          before: null,
+        },
+      },
+    );
+    expect(screen.getByText('Exactly what will be saved')).toBeInTheDocument();
+    expect(screen.getByText('Monday, October 19, 2026, 9:00 am to 10:00 am')).toBeInTheDocument();
+    expect(screen.getByText('America/New_York')).toBeInTheDocument();
+    expect(screen.getByText('Google will not email the guests about this.')).toBeInTheDocument();
+  });
+});
+
+describe('HeldActionCard "Change it"', () => {
+  it('shows Change it only with a handler, and sends the text as the change request', () => {
+    const onChangeRequest = vi.fn();
+    renderCard({ onChangeRequest });
+    fireEvent.click(screen.getByRole('button', { name: 'Change it' }));
+    fireEvent.change(screen.getByLabelText('What should change?'), { target: { value: 'shorter please' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    expect(onChangeRequest).toHaveBeenCalledWith('shorter please');
+  });
+
+  it('shows no Change it without a handler', () => {
+    renderCard();
+    expect(screen.queryByRole('button', { name: 'Change it' })).not.toBeInTheDocument();
   });
 });

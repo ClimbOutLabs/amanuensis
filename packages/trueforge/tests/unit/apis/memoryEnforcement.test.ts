@@ -21,6 +21,7 @@ import { z } from '@hono/zod-openapi';
 import type { Turn, TurnInputItem } from '@truefoundry/trueforge-core/agent-session';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import configuration from '../../../src/config';
+import { MEMORY_FRAMING_SENTENCE } from '../../../src/runtime/memory/memoryCapability';
 import { MEMORY_PROBE_QUERY } from '../../../src/runtime/memory/memoryProbe';
 import { TurnStreamingEventSchema } from '../../../src/schemas/events';
 import { GetMcpServerResponseSchema } from '../../../src/schemas/mcpServer';
@@ -51,8 +52,8 @@ const USER_MESSAGE_3 = 'Just checking in, no tools needed here.';
 function cannedRecallResponse() {
   return {
     results: [
-      { id: 'mem-1', text: CANNED_ITEM_TEXT, type: 'observation', occurred_start: '2026-01-05T00:00:00.000Z' },
-      { id: 'mem-2', text: CANNED_SECOND_ITEM_TEXT, type: 'world', occurred_start: '2026-02-10T00:00:00.000Z' },
+      { id: 'mem-1', text: CANNED_ITEM_TEXT, occurred_start: '2026-01-05T00:00:00.000Z' },
+      { id: 'mem-2', text: CANNED_SECOND_ITEM_TEXT, occurred_start: '2026-02-10T00:00:00.000Z' },
     ],
     entities: {
       [CANNED_ENTITY_NAME]: {
@@ -381,13 +382,11 @@ function contentText(content: unknown): string {
   return '';
 }
 
-function lastUserMessageIndex(messages: readonly { role: string; content?: unknown }[]): number {
-  for (let i = messages.length - 1; i >= 0; i -= 1) {
-    if (messages[i]?.role === 'user') {
-      return i;
-    }
-  }
-  return -1;
+/** The line that opens a recalled-memory block; the static instruction only names the tag. */
+const MEMORY_BLOCK_OPENING = '<aman-memory>\n';
+
+function memoryBlockMessages(messages: readonly { role: string; content?: unknown }[]) {
+  return messages.filter(message => contentText(message.content).includes(MEMORY_BLOCK_OPENING));
 }
 
 describe('Host-enforced memory: wiring through the real HTTP API and session store', () => {
@@ -454,22 +453,29 @@ describe('Host-enforced memory: wiring through the real HTTP API and session sto
       const recallBody = RecallRequestBodySchema.parse(recallRequest.body);
       expect(recallBody.query).toBe(USER_MESSAGE_1);
 
-      // (b) the scripted model saw the `<aman-memory>` block, carrying the canned memory text,
-      // spliced in immediately before the real final user message.
+      // (b) the scripted model saw the `<aman-memory>` block, carrying the canned memory text, in
+      // a host-context message of its own. The person's words are the last message, alone and unchanged.
       const modelRequests = server.model.requests();
       const turn1ModelRequest = modelRequests[modelRequests.length - 1];
       if (!turn1ModelRequest) {
         throw new Error('expected the scripted model server to have received a request for turn 1');
       }
-      const finalUserIndex = lastUserMessageIndex(turn1ModelRequest.messages);
-      expect(finalUserIndex).toBeGreaterThan(0);
-      const finalUserMessage = turn1ModelRequest.messages[finalUserIndex];
-      const injectedMessage = turn1ModelRequest.messages[finalUserIndex - 1];
-      expect(contentText(finalUserMessage?.content)).toContain(USER_MESSAGE_1);
-      expect(injectedMessage?.role).toBe('user');
-      const injectedText = contentText(injectedMessage?.content);
-      expect(injectedText).toContain('<aman-memory>');
-      expect(injectedText).toContain(CANNED_ITEM_TEXT);
+      const lastMessage = turn1ModelRequest.messages[turn1ModelRequest.messages.length - 1];
+      expect(lastMessage?.role).toBe('user');
+      expect(contentText(lastMessage?.content)).toBe(USER_MESSAGE_1);
+      const contextMessage = turn1ModelRequest.messages[turn1ModelRequest.messages.length - 2];
+      expect(contextMessage?.role).toBe('user');
+      // The block is never in a system message, since recalled text is data, not instructions.
+      expect(memoryBlockMessages(turn1ModelRequest.messages)).toEqual([contextMessage]);
+      const contextText = contentText(contextMessage?.content);
+      expect(contextText.indexOf("Today's date")).toBeGreaterThan(-1);
+      expect(contextText.indexOf("Today's date")).toBeLessThan(contextText.indexOf(MEMORY_BLOCK_OPENING));
+      expect(contextText).toContain(CANNED_ITEM_TEXT);
+      expect(contextText).not.toContain(USER_MESSAGE_1);
+      // The framing that marks recalled text as data stays inside the block the model reads.
+      expect(contextText).toContain(MEMORY_FRAMING_SENTENCE);
+      // The label says the notes are not the person's message and to answer the one that follows.
+      expect(contextText).toContain("Answer the person's own message");
 
       // (c) the turn's own persisted events carry the recall outcome, injected_block included
       // verbatim.
@@ -538,11 +544,8 @@ describe('Host-enforced memory: wiring through the real HTTP API and session sto
         throw new Error('expected the scripted model server to have received a request for turn 2');
       }
       // The system prompt's own memory instructions mention the `<aman-memory>` tag by name, so
-      // this only counts *user*-role messages — the only role the ephemeral splice ever uses.
-      const amanMemoryUserMessages = turn2ModelRequest.messages.filter(
-        message => message.role === 'user' && contentText(message.content).includes('<aman-memory>'),
-      );
-      expect(amanMemoryUserMessages).toHaveLength(1);
+      // this counts only messages that carry the block's opening line.
+      expect(memoryBlockMessages(turn2ModelRequest.messages)).toHaveLength(1);
 
       const turn1HistoryMessages = turn2ModelRequest.messages.filter(
         message => message.role === 'user' && contentText(message.content).includes(USER_MESSAGE_1),
@@ -550,10 +553,63 @@ describe('Host-enforced memory: wiring through the real HTTP API and session sto
       expect(turn1HistoryMessages).toHaveLength(1);
       expect(contentText(turn1HistoryMessages[0]?.content)).not.toContain('<aman-memory>');
 
-      const finalUserIndex = lastUserMessageIndex(turn2ModelRequest.messages);
-      expect(finalUserIndex).toBeGreaterThan(0);
-      expect(contentText(turn2ModelRequest.messages[finalUserIndex]?.content)).toContain(USER_MESSAGE_2);
-      expect(contentText(turn2ModelRequest.messages[finalUserIndex - 1]?.content)).toContain('<aman-memory>');
+      const turn2Last = turn2ModelRequest.messages[turn2ModelRequest.messages.length - 1];
+      expect(turn2Last?.role).toBe('user');
+      expect(contentText(turn2Last?.content)).toBe(USER_MESSAGE_2);
+    },
+    TURN_TIMEOUT_MS,
+  );
+
+  it(
+    'the person-level memory switch turns recall off for a chat on a saved agent',
+    async () => {
+      const created = await server.request(
+        '/api/v1/agents',
+        jsonInit('POST', { name: 'saved-assistant', description: 'Saved test agent.', manifest: agentSpec() }),
+      );
+      expect(created.status).toBe(201);
+      const savedSession = async (): Promise<string> => {
+        const response = await server.request(
+          '/api/v1/sessions',
+          jsonInit('POST', { agent: { name: 'saved-assistant' } }),
+        );
+        expect(response.status).toBe(201);
+        return z.object({ data: z.object({ id: z.string() }).loose() }).parse(await response.json()).data.id;
+      };
+
+      // With the switch unset, the saved agent's own setting (on) applies and recall runs.
+      const recallsBefore = hindsight.recallRequests().length;
+      const onSession = await savedSession();
+      const onTurn = await runTurn({ server, sessionId: onSession, input: plainMessage(USER_MESSAGE_1) });
+      expect(hindsight.recallRequests()).toHaveLength(recallsBefore + 1);
+      const onEvent = (await listTurnEvents(server, onSession, onTurn.id)).find(
+        event => event.type === 'aman.memory.recall',
+      );
+      expect(onEvent?.injected_block).toContain(CANNED_ITEM_TEXT);
+
+      const off = await server.request('/api/v1/settings/memory-recalls', jsonInit('PUT', { enabled: false }));
+      expect(off.status).toBe(200);
+      expect(await off.json()).toEqual({ data: { enabled: false } });
+
+      // A new chat with the same saved agent recalls nothing and sends no block to the model.
+      const offSession = await savedSession();
+      const offTurn = await runTurn({ server, sessionId: offSession, input: plainMessage(USER_MESSAGE_1) });
+      expect(requiredActions(offTurn)).toEqual([]);
+      expect(hindsight.recallRequests()).toHaveLength(recallsBefore + 1);
+      const offEvent = (await listTurnEvents(server, offSession, offTurn.id)).find(
+        event => event.type === 'aman.memory.recall',
+      );
+      expect(offEvent?.injected_block).toBeNull();
+      const modelRequests = server.model.requests();
+      const lastRequest = modelRequests[modelRequests.length - 1];
+      expect(lastRequest ? memoryBlockMessages(lastRequest.messages) : undefined).toEqual([]);
+
+      // Clearing the switch hands the choice back to the agent.
+      const cleared = await server.request('/api/v1/settings/memory-recalls', jsonInit('PUT', { enabled: null }));
+      expect(await cleared.json()).toEqual({ data: { enabled: null } });
+      const backSession = await savedSession();
+      await runTurn({ server, sessionId: backSession, input: plainMessage(USER_MESSAGE_1) });
+      expect(hindsight.recallRequests()).toHaveLength(recallsBefore + 2);
     },
     TURN_TIMEOUT_MS,
   );

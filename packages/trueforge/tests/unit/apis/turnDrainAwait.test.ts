@@ -15,10 +15,12 @@ import { SqliteTurnArtifactStore } from '../../../src/db/sqlite/turn-artifact-st
 import type { PersonalizationProfileContent } from '../../../src/personalization/profile';
 import { EventSubscriptionRegistry } from '../../../src/runtime/event-subscription';
 import { HindsightClient } from '../../../src/runtime/memory/hindsightClient';
+import { TurnModelUsageLedger } from '../../../src/runtime/modelUsage';
 import type { ProfileLearningDrainMember, ProfileLearningPassConfig } from '../../../src/runtime/profileLearning';
 import { resolveSandboxProvider } from '../../../src/runtime/sessionResources';
 import { TurnDrainRegistry } from '../../../src/runtime/turnDrains';
 import { TurnExecutionDeadline } from '../../../src/runtime/turnExecutionDeadline';
+import { discardedModelUsage } from '../../fixtures/discardedModelUsage';
 import { uncappedTokenFactoryBudget } from '../../fixtures/uncappedTokenFactoryBudget';
 
 function tick(): Promise<void> {
@@ -83,8 +85,11 @@ async function seedProfile(params: {
     assistant_name: null,
     assistant_identity: null,
     voice_guidance: null,
+    user_name: null,
+    address_as: null,
     user_profile: null,
     pinned_preferences: [],
+    help_areas: [],
     learned_profile: null,
     learning_enabled: true,
     ...params.content,
@@ -92,7 +97,7 @@ async function seedProfile(params: {
 }
 
 describe('drainTurnEvents awaits the TURN_DONE submissions', () => {
-  it('does not resolve until memory retain, profile learning, and artifact persistence all finish', async () => {
+  it('does not resolve until artifact persistence, memory retain, and profile learning all finish', async () => {
     const retainGate = Promise.withResolvers<void>();
     const profileGate = Promise.withResolvers<void>();
     const artifactsGate = Promise.withResolvers<void>();
@@ -123,6 +128,7 @@ describe('drainTurnEvents awaits the TURN_DONE submissions', () => {
         eventStore: new RecordingEventStore(),
         modelProviderStore: new SqliteModelProviderStore(db),
         tokenFactoryBudget: uncappedTokenFactoryBudget,
+        modelUsage: discardedModelUsage,
         memoryClient: undefined,
         tenantId: 'default',
         createdBy: 'user-a',
@@ -180,7 +186,7 @@ describe('drainTurnEvents awaits the TURN_DONE submissions', () => {
         executionDeadline,
         logger: winston.createLogger({ silent: true }),
         turnDrains,
-        memory: { client: memoryClient, userText: 'hi', sessionTitle: undefined },
+        memory: { client: memoryClient, userText: 'hi', attachedFiles: false },
         profileLearning,
         artifacts: {
           turnArtifactStore: new SqliteTurnArtifactStore(db),
@@ -193,7 +199,14 @@ describe('drainTurnEvents awaits the TURN_DONE submissions', () => {
         drainSettled = true;
       });
 
-      // The drain reaches the retain submission and waits on its gate.
+      // Artifact persistence runs first, ahead of any model call, and the drain waits on it.
+      await waitFor(() => sessionsGet.mock.calls.length > 0);
+      await tick();
+      expect(retain).not.toHaveBeenCalled();
+      expect(drainSettled).toBe(false);
+
+      // Releasing artifact persistence lets the retain start; the drain still waits.
+      artifactsGate.resolve();
       await waitFor(() => retain.mock.calls.length > 0);
       await tick();
       expect(drainSettled).toBe(false);
@@ -204,19 +217,95 @@ describe('drainTurnEvents awaits the TURN_DONE submissions', () => {
       await tick();
       expect(drainSettled).toBe(false);
 
-      // Releasing profile learning lets artifact persistence start; the drain still waits.
+      // Releasing profile learning lets the drain finish and unregister.
       profileGate.resolve();
-      await waitFor(() => sessionsGet.mock.calls.length > 0);
-      await tick();
-      expect(drainSettled).toBe(false);
-
-      // Releasing artifact persistence lets the drain finish and unregister.
-      artifactsGate.resolve();
       await drainPromise;
       expect(drainSettled).toBe(true);
       expect(turnDrains.size).toBe(0);
     } finally {
       await db.destroy();
     }
+  });
+
+  it("persists the answer's usage before the follow-up work, and what that work spent after it", async () => {
+    const eventStore = new RecordingEventStore();
+    const ledger = new TurnModelUsageLedger({ prices: {} });
+    const identity = {
+      model_name: 'tokenfactory/nemotron-3-super-120b-a12b',
+      model_id: 'nvidia/nemotron-3-super-120b-a12b',
+      provider: 'tokenfactory',
+    };
+    ledger.record({
+      role: 'chat',
+      identity,
+      usage: { input_tokens: 1000, output_tokens: 100, total_tokens: 1100 },
+    });
+    const memoryClient = new HindsightClient({
+      apiBase: 'https://hindsight.test.example',
+      bank: 'aman',
+      headers: {},
+      fetchImpl: () => Promise.reject(new Error('drain tests must not reach the network')),
+    });
+    const appendsWhenRetainStarted: number[] = [];
+    jest.spyOn(memoryClient, 'retain').mockImplementation(() => {
+      appendsWhenRetainStarted.push(eventStore.appends.length);
+      // The summarization call the retain makes, recorded while the drain is busy with it.
+      ledger.record({
+        role: 'summarization',
+        identity,
+        usage: { input_tokens: 200, output_tokens: 20, total_tokens: 220 },
+      });
+      return Promise.resolve({ ok: true });
+    });
+    jest.spyOn(memoryClient, 'getOperation').mockResolvedValue({ ok: true, status: 'completed' });
+
+    async function* stream(): AsyncGenerator<TurnStreamingEvent> {
+      yield {
+        type: EventType.TURN_DONE,
+        id: 'evt_done',
+        created_at: '2026-09-01T12:00:00.000Z',
+        state: {
+          status: 'done',
+          output: {
+            type: 'model.message',
+            id: 'evt_model_message',
+            thread_id: 'main',
+            created_at: '2026-09-01T12:00:00.000Z',
+            content: 'Done.',
+          },
+          required_actions: [],
+          completed_at: '2026-09-01T12:00:00.000Z',
+        },
+        thread_id: null,
+      };
+    }
+    const executionDeadline = new TurnExecutionDeadline({
+      abortController: new AbortController(),
+      default_timeout_ms: 60_000,
+      finalization_buffer_ms: 1_000,
+    });
+    executionDeadline.arm();
+
+    await drainTurnEvents({
+      trackedStream: stream(),
+      turnEventStream: new EventSubscriptionRegistry<TurnStreamingEvent>(undefined).get('stream-2'),
+      sessionId: 's1',
+      turnId: 't1',
+      executionDeadline,
+      logger: winston.createLogger({ silent: true }),
+      turnDrains: new TurnDrainRegistry(),
+      modelUsage: { ledger, eventStore },
+      memory: { client: memoryClient, userText: 'hi', attachedFiles: false },
+    });
+
+    expect(appendsWhenRetainStarted).toEqual([1]);
+    expect(eventStore.appends.map(append => append.events.map(event => event.type))).toEqual([
+      ['aman.model.usage'],
+      ['aman.model.usage'],
+    ]);
+    expect(eventStore.appends.map(append => append.events)).toEqual([
+      [expect.objectContaining({ role: 'chat', input_tokens: 1000 })],
+      [expect.objectContaining({ role: 'summarization', input_tokens: 200 })],
+    ]);
   });
 });

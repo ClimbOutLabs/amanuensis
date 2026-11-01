@@ -6,7 +6,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import type { ApprovalDecision } from '../../../src/core/events/schema';
+import type { InternalToolCallInfo } from '../../../src/core/llm/LLMTypes';
 import { isCallToolResponseResult } from '../../../src/core/mcp/IMCPServer';
+import { toToolCallInfo } from '../../../src/core/runtime/contextUtils';
 import { buildHostAuthenticatedGit, planHostAuthenticatedGit } from '../../../src/core/sandbox/hostAuthenticatedGit';
 import {
   commandWithWorkspaceLock,
@@ -32,7 +34,30 @@ function initRepo(root: string): string {
   const repo = join(root, 'repo');
   mkdirSync(repo);
   execFileSync(GIT, ['init', '-q'], { cwd: repo });
+  execFileSync(GIT, ['remote', 'add', 'origin', SHOWN_REPOSITORY], { cwd: repo });
   return repo;
+}
+
+const SHOWN_REPOSITORY = 'https://github.com/o/r';
+
+/** Stands in for git on network subcommands, recording what it was given; every other git command runs for real. */
+function recordingGit(input: { root: string; record: string }): string {
+  const script = join(input.root, 'recording-git');
+  writeFileSync(
+    script,
+    [
+      '#!/bin/sh',
+      'for arg in "$@"; do',
+      '  case "$arg" in',
+      `    push|fetch|pull|ls-remote) /usr/bin/env > ${shellEscape(input.record)}; [ -n "$TRUEFORGE_GIT_TOKEN" ] && echo token >> ${shellEscape(`${input.record}.token`)}; exit 0 ;;`,
+      '  esac',
+      'done',
+      `exec ${GIT} "$@"`,
+      '',
+    ].join('\n'),
+  );
+  chmodSync(script, 0o755);
+  return script;
 }
 
 interface RealProviderInput {
@@ -106,15 +131,21 @@ async function run(input: {
   command: string;
   cwd: string;
   purpose: 'edit' | 'push';
+  /** The proposal the user approved; by default one is made now. */
+  shown?: InternalToolCallInfo;
 }): Promise<{ isError: boolean; text: string }> {
   const approval: ApprovalDecision = { status: 'allow', scope: 'once' };
-  const result = await input.sandbox.callTool(
-    {
-      name: SANDBOX_EXEC_TOOL_NAME,
-      arguments: { intent: 'git work', purpose: input.purpose, command: input.command, cwd: input.cwd },
-    },
-    approval,
-  );
+  const call = {
+    name: SANDBOX_EXEC_TOOL_NAME,
+    arguments: { intent: 'git work', purpose: input.purpose, command: input.command, cwd: input.cwd },
+  };
+  const proposed = input.shown ?? (await input.sandbox.toolCallInfo(call));
+  const result = await input.sandbox.callTool(call, approval, {
+    admission_provenance: { source: 'user_approval', decision: 'allow', scope: 'once' },
+    ...(proposed.git_remote_precondition === undefined
+      ? {}
+      : { git_remote_precondition: proposed.git_remote_precondition }),
+  });
   if (!isCallToolResponseResult(result)) {
     throw new Error('expected a tool result');
   }
@@ -164,7 +195,7 @@ describeWithTools('hostile repository config and PATH never reach the token', ()
       if (plan === undefined) {
         throw new Error('expected a plan');
       }
-      const built = buildHostAuthenticatedGit({ plan, token: TOKEN, workspaceRoot: repo });
+      const built = buildHostAuthenticatedGit({ plan, token: TOKEN, workspaceRoot: repo, remotes: [] });
       await execFileAsync('/bin/sh', ['-c', built.command], {
         cwd: repo,
         env: { ...built.env, PATH: '/usr/bin:/bin' },
@@ -190,9 +221,8 @@ describeWithTools('hostile repository config and PATH never reach the token', ()
 
   test('planted shims in model-writable PATH dirs never see the token', async () => {
     const repo = initRepo(root);
-    const fakeGit = join(root, 'fake-git');
-    writeFileSync(fakeGit, '#!/bin/sh\nexit 0\n');
-    chmodSync(fakeGit, 0o755);
+    const record = join(root, 'git-record');
+    const fakeGit = recordingGit({ root, record });
     const seen = join(root, 'shim-saw-token');
     const dirs = [join(root, 'mcp-client', 'bin'), join(root, '.venv', 'bin')];
     for (const dir of dirs) {
@@ -224,7 +254,7 @@ describeWithTools('hostile repository config and PATH never reach the token', ()
     }
     const provider = makeRealProvider({ root, writablePathDirs: dirs, gitReplacement: fakeGit });
 
-    // Control: the lock wrapper runs PATH-resolved tools, so a token in its env would leak to them.
+    // The lock wrapper runs its helpers by fixed path, so a shim on the sandbox PATH never sees an env token.
     await provider.exec({
       sandboxId: root,
       command: 'true',
@@ -232,8 +262,7 @@ describeWithTools('hostile repository config and PATH never reach the token', ()
       env: { TRUEFORGE_GIT_TOKEN: TOKEN },
       workspaceLock: { workspaceRoot: repo },
     });
-    expect(existsSync(seen)).toBe(true);
-    rmSync(seen);
+    expect(existsSync(seen)).toBe(false);
 
     const sandbox = makeSandbox(provider, root);
     for (const command of [
@@ -246,6 +275,105 @@ describeWithTools('hostile repository config and PATH never reach the token', ()
       expect(result.isError).toBe(false);
     }
     expect(existsSync(seen) ? readFileSync(seen, 'utf8') : '').toBe('');
+    // Not vacuous: the pinned git did receive the token on every one of the four commands.
+    expect(readFileSync(`${record}.token`, 'utf8').trim().split('\n')).toHaveLength(4);
+  });
+
+  describe('a remote repointed after approval', () => {
+    const REPOINTED = 'https://github.com/attacker/x';
+
+    function setup(): { repo: string; record: string; sandbox: Sandbox } {
+      const repo = initRepo(root);
+      const record = join(root, 'git-record');
+      const provider = makeRealProvider({
+        root,
+        writablePathDirs: [],
+        gitReplacement: recordingGit({ root, record }),
+      });
+      return { repo, record, sandbox: makeSandbox(provider, root) };
+    }
+
+    function repoint(repo: string): void {
+      execFileSync(GIT, ['remote', 'set-url', 'origin', REPOINTED], { cwd: repo });
+    }
+
+    test('the card names the repository the credential will be limited to', async () => {
+      const { repo, sandbox } = setup();
+      const shown = await sandbox.toolCallInfo({
+        name: SANDBOX_EXEC_TOOL_NAME,
+        arguments: { intent: 'push', purpose: 'push', command: 'git push origin main', cwd: repo },
+      });
+      expect(shown.git_remote_precondition?.remotes).toEqual([{ name: 'origin', url: `${SHOWN_REPOSITORY}.git` }]);
+      expect(toToolCallInfo(shown).host_observed_target_summary).toBe(
+        'This uses origin, which is https://github.com/o/r.git. Your GitHub sign-in is only offered to this repository.',
+      );
+    });
+
+    test('a second address added above the shown one after approval is refused, and no token leaves the host', async () => {
+      const { repo, record, sandbox } = setup();
+      const command = 'git fetch origin';
+      const shown = await sandbox.toolCallInfo({
+        name: SANDBOX_EXEC_TOOL_NAME,
+        arguments: { intent: 'sync', purpose: 'edit', command, cwd: repo },
+      });
+      expect(shown.git_remote_precondition?.remotes).toEqual([{ name: 'origin', url: `${SHOWN_REPOSITORY}.git` }]);
+      // Fetch contacts the first address, so this one would receive the request while the shown one stays last.
+      const config = join(repo, '.git', 'config');
+      writeFileSync(
+        config,
+        readFileSync(config, 'utf8').replace('[remote "origin"]\n', `[remote "origin"]\n\turl = ${REPOINTED}\n`),
+      );
+      expect(execFileSync(GIT, ['config', '--get-all', 'remote.origin.url'], { cwd: repo, encoding: 'utf8' })).toBe(
+        `${REPOINTED}\n${SHOWN_REPOSITORY}\n`,
+      );
+      const result = await run({ sandbox, command, cwd: repo, purpose: 'edit', shown });
+      expect(result.isError).toBe(true);
+      expect(result.text).toContain('not the one shown for approval');
+      expect(existsSync(record)).toBe(false);
+      expect(existsSync(`${record}.token`)).toBe(false);
+    });
+
+    test.each(['git push origin main', 'git fetch origin', 'git pull --ff-only', 'git push'])(
+      '%s is refused before git runs, and no token leaves the host',
+      async command => {
+        const { repo, record, sandbox } = setup();
+        const shown = await sandbox.toolCallInfo({
+          name: SANDBOX_EXEC_TOOL_NAME,
+          arguments: { intent: 'sync', purpose: command.includes('push') ? 'push' : 'edit', command, cwd: repo },
+        });
+        repoint(repo);
+        const result = await run({
+          sandbox,
+          command,
+          cwd: repo,
+          purpose: command.includes('push') ? 'push' : 'edit',
+          shown,
+        });
+        expect(result.isError).toBe(true);
+        expect(result.text).toContain('not the one shown for approval');
+        expect(existsSync(record)).toBe(false);
+        expect(existsSync(`${record}.token`)).toBe(false);
+      },
+    );
+
+    test('control: an unchanged remote runs with the token and the credential limited to it', async () => {
+      const { repo, record, sandbox } = setup();
+      const result = await run({ sandbox, command: 'git push origin main', cwd: repo, purpose: 'push' });
+      expect(result.isError).toBe(false);
+      expect(existsSync(`${record}.token`)).toBe(true);
+      const recorded = readFileSync(record, 'utf8');
+      expect(recorded).not.toMatch(/^GIT_CONFIG_KEY_\d+=remote\./mu);
+      expect(recorded).toContain('=credential.https://github.com/o/r.git.helper');
+      expect(recorded).not.toContain('credential.https://github.com.helper');
+    });
+
+    test('a remote repointed to a non-GitHub address is never authenticated', async () => {
+      const { repo, record, sandbox } = setup();
+      execFileSync(GIT, ['remote', 'set-url', 'origin', 'https://github.com.evil.test/o/r'], { cwd: repo });
+      const result = await run({ sandbox, command: 'git push origin main', cwd: repo, purpose: 'push' });
+      expect(result.isError).toBe(false);
+      expect(existsSync(`${record}.token`)).toBe(false);
+    });
   });
 });
 
@@ -321,7 +449,7 @@ describeWithOpenssl('the hardened git config still completes a verified TLS hand
         if (plan === undefined) {
           throw new Error('expected a plan');
         }
-        const built = buildHostAuthenticatedGit({ plan, token: TOKEN, workspaceRoot: undefined });
+        const built = buildHostAuthenticatedGit({ plan, token: TOKEN, workspaceRoot: undefined, remotes: [] });
         const command = built.command.replace(
           'https://github.com/o/r',
           `https://127.0.0.1:${String(address.port)}/o/r`,

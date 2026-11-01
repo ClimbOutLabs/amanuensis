@@ -3,5 +3,4 @@
 /**
  * Empty success body. HTTP 200 means the cancel request was accepted (or nothing was running).
  */
-export interface CancelSessionResponse {
-}
+export type CancelSessionResponse = {};

@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 
 import { sessionIsCreateAgent } from '../atoms/lib/sessionCreateAgent.js';
@@ -214,7 +214,10 @@ export function ShellRouteSync({
           return;
         case 'session':
           shell.setLibraryOpen(false);
-          if (shell.pendingSessionId === target.sessionId || activeRemoteId === target.sessionId) return;
+          // Only the chat on screen is already there. A sidebar switch leaves `pendingSessionId` on the
+          // session the shell last opened, so it counts only while that open is still in flight.
+          if (activeRemoteId === target.sessionId) return;
+          if (activeRemoteId == null && shell.pendingSessionId === target.sessionId) return;
           openSession(target.sessionId);
           return;
         case 'agent':
@@ -365,12 +368,29 @@ export function ShellRouteSync({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [placeKey, routeGatesKey, shell.historyAgentFilter?.agentName, shell.historyAgentFilter?.intent]);
 
+  // Back/Forward can land before React renders the shell's own last navigation. The router then
+  // commits the popped entry as if nothing moved, so the location alone cannot show the pop.
+  const [popCount, setPopCount] = useState(0);
+  const handledPopCountRef = useRef(0);
+  useEffect(() => {
+    const onPop = () => setPopCount(count => count + 1);
+    window.addEventListener('popstate', onPop);
+    return () => window.removeEventListener('popstate', onPop);
+  }, []);
+
   // URL -> shell: apply on genuine location changes (Back/Forward, manual edits).
   useEffect(() => {
     if (!bootedRef.current) return;
     if (!urlSyncStartedRef.current) {
       urlSyncStartedRef.current = true;
+      handledPopCountRef.current = popCount;
       return;
+    }
+    if (handledPopCountRef.current !== popCount) {
+      handledPopCountRef.current = popCount;
+      // A pop is never the shell's own navigation, and the place to leave is the one on screen.
+      selfNavPathRef.current = null;
+      appliedUrlPlaceRef.current = place;
     }
     if (selfNavPathRef.current === location.pathname) {
       selfNavPathRef.current = null;
@@ -421,7 +441,7 @@ export function ShellRouteSync({
       applyHistoryAgentSearch(null);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [location.pathname, location.search]);
+  }, [location.pathname, location.search, popCount]);
 
   return null;
 }

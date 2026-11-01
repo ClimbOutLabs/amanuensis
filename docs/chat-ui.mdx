@@ -23,9 +23,22 @@ The sidebar's chat history list supports renaming chats, filing them into folder
 
 **Folders**: click **New folder** next to the chat history header to create a folder. Move an existing chat into one from its **···** menu (**Move to folder**), which also lets you create a folder on the spot. Folders render as collapsible sections above the unfiled chats; each folder's own **···** button opens a dialog to rename or delete it, deleting a folder keeps its chats, just unfiled.
 
-**Agent details**: while a chat is open, the toggle next to **Clear chat** in the header shows or hides the agent's internal steps (reasoning, tool calls, subagents) for that chat. It only appears once the chat has a persisted session, and is hidden while the chat is idle or on a fresh, unsaved chat.
+**Agent details**: while a chat is open, the **Show agent details** button next to **Clear chat** in the header turns the agent's internal steps on or off for that chat. The button looks pressed while they are on. With them on, each answer shows its steps, tool calls, sub-agents, the lines the model wrote between steps, and the model and cost line. With them off, you see only your message, the answer, and anything that needs you: approval cards, notices written for you, and one progress line while Aman works. If a step failed or was blocked, one plain line under the answer says so. A reply that could not finish says so in one plain line. The button only appears once the chat has a persisted session, and is hidden while the chat is idle or on a fresh, unsaved chat.
 
 A chat's **···** menu itself only appears when at least one of Rename, Delete, or Move to folder is actually available for it.
+
+## Images in chat
+
+Chat shows pictures you upload, image attachments on email Aman read, and images a sandbox run produced. Every image, from your machine or from the web, is first rebuilt inside the gVisor sandbox with no network: PNG, JPEG, GIF and WebP are accepted, SVG is refused, metadata is removed, and size, pixel and frame limits apply. The page only ever loads the rebuilt copy from Aman itself, never an image from another site.
+
+Images from the web ask first:
+
+- **Images in an email** always show a card, one per email: "Show 3 images from this email? The sender's servers will see that the email was opened."
+- **An image link in a reply** loads without asking only where a web search would (the link came back from this turn's searches and searches run without asking). Otherwise a card asks: "Show this image from example.org? That site will see that you looked at it."
+
+Every download goes through the same outbound checks and audit log as web search. Rebuilt images are kept per user for 30 days, at most 256 MB each, and are deleted with the chat.
+
+Images need the gVisor sandbox. A normal [installer](/install) install has it. An install made with `--no-sandbox`, or a server that runs code in plain Docker instead of the gVisor sandbox, shows "Image checks need the sandbox, which is off." in place of each picture.
 
 {/* 
 ## Bundled UI

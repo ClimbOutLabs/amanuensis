@@ -72,9 +72,11 @@ import { McpCatalog } from './catalog/McpCatalog';
 import { ModelCatalog } from './catalog/ModelCatalog';
 import { SandboxCatalog } from './catalog/SandboxCatalog';
 import { SkillCatalog } from './catalog/SkillCatalog';
-import { type DistributedServerConfiguration } from './config';
+import type { DistributedServerConfiguration } from './config';
 import { createController } from './controller';
 import type { AgentRecord, IAgentStore } from './db/agentStore';
+import { BriefItemCompletionStore, type IBriefItemCompletionStore } from './db/briefItemCompletionStore';
+import type { IChatImageStore } from './db/chatImageStore';
 import type { ICompletedTurnEventStore } from './db/completedTurnEvents';
 import type { IGlobalSettingsStore } from './db/globalSettingsStore';
 import type { IGoogleConnectionStore } from './db/googleConnectionStore';
@@ -105,14 +107,24 @@ import { createServerLogger, shouldColorize } from './logger';
 import type { IOAuthTokenStore } from './mcp/auth/types';
 import { PACKAGE_VERSION } from './packageVersion';
 import { ActiveTurnRegistry } from './runtime/activeTurns';
+import { registerCalendarConnectorForBoot } from './runtime/calendarAccount';
+import { createChatImageService } from './runtime/chatImages/chatImageService';
+import { CHAT_IMAGE_RETENTION_DAYS } from './runtime/chatImages/limits';
+import { createImageReencoder } from './runtime/chatImages/reencodeInSandbox';
 import { recoverAbandonedCommandExecutions } from './runtime/commandExecutionRecovery';
+import { designateTavilyAtBoot, seedDefaultSearchProviderAtBoot } from './runtime/defaultSearchProvider';
 import { EventSubscriptionRegistry } from './runtime/event-subscription';
+import { registerMailConnectorFromSavedAccountInBackground } from './runtime/mailAccount';
+import { prepareMailPolicyAtBoot, registerMailConnectorAtBoot } from './runtime/mailConnector';
 import { warmEmbeddingsAtBoot } from './runtime/memory/embeddingRetrieval';
 import { createOutboundSecretSource } from './runtime/outboundSecrets';
+import { seedOwnerNameAtBoot } from './runtime/ownerName';
 import { createSentinelServices } from './runtime/sentinelServices';
+import { getSharedRunCodeService } from './runtime/sessionResources';
 import { createTokenFactoryBudget } from './runtime/tokenFactoryBudget';
 import { ensureEnvManagedTokenFactoryProvider, seedEnvManagedDefaultChatModel } from './runtime/tokenFactoryProvider';
 import { TurnDrainRegistry } from './runtime/turnDrains';
+import { slotsBackendEnabled, startPackageMirrorGateway, startSkillNetworkGateway } from './sandbox/slotBackend';
 import { printStandaloneStartupBanner } from './startupBanner';
 import { TENANT_ID } from './tenancy';
 import {
@@ -162,6 +174,7 @@ interface ServerPersistence<TTransaction> {
   spaceStore: ISpaceStore<TTransaction>;
   repositoryStore: IRepositoryStore<TTransaction>;
   turnArtifactStore: ITurnArtifactStore<TTransaction>;
+  chatImageStore: IChatImageStore<TTransaction>;
   /** Not tenant-scoped: the persisted live tool-output screen override is global. */
   globalSettingsStore: IGlobalSettingsStore<TTransaction>;
   /** Not tenant-scoped: one counter row per UTC day for this instance. */
@@ -170,6 +183,7 @@ interface ServerPersistence<TTransaction> {
   googleConnectionStore: IGoogleConnectionStore;
   sentinelAuditStore: ISentinelAuditStore;
   sentinelSettingsStore: ISentinelSettingsStore<TTransaction>;
+  briefItemStore: IBriefItemCompletionStore;
   approvalTokenStore: ApprovalTokenStore;
   destroyDb: () => Promise<void>;
   redis: RedisClientType | undefined;
@@ -333,6 +347,7 @@ async function createStandalonePersistence(options: {
       import('./db/sqlite/space-store/SqliteSpaceStore'),
       import('./db/sqlite/repository-store/SqliteRepositoryStore'),
       import('./db/sqlite/turn-artifact-store/SqliteTurnArtifactStore'),
+      import('./db/sqlite/chat-image-store/SqliteChatImageStore'),
       import('./db/sqlite/global-settings-store/SqliteGlobalSettingsStore'),
       import('./db/sqlite/token-factory-usage-store/SqliteTokenFactoryUsageStore'),
       import('./db/sqlite/sentinel-settings-store/SqliteSentinelSettingsStore'),
@@ -356,6 +371,7 @@ async function createStandalonePersistence(options: {
     { SqliteSpaceStore },
     { SqliteRepositoryStore },
     { SqliteTurnArtifactStore },
+    { SqliteChatImageStore },
     { SqliteGlobalSettingsStore },
     { SqliteTokenFactoryUsageStore },
     { SqliteSentinelSettingsStore },
@@ -394,12 +410,14 @@ async function createStandalonePersistence(options: {
     tokenStore,
     scheduleStore: new SqliteScheduleStore(db),
     turnArtifactStore: new SqliteTurnArtifactStore(db),
+    chatImageStore: new SqliteChatImageStore(db),
     globalSettingsStore: new SqliteGlobalSettingsStore(db),
     tokenFactoryUsageStore: new SqliteTokenFactoryUsageStore(db),
     mcpToolGrantStore: new SqliteMcpToolGrantStore(db),
     googleConnectionStore: new SqliteGoogleConnectionStore(db),
     sentinelAuditStore: new SentinelAuditStore(db as Kysely<SentinelAuditDatabase>),
     sentinelSettingsStore: new SqliteSentinelSettingsStore(db),
+    briefItemStore: new BriefItemCompletionStore(db),
     approvalTokenStore: new SqliteApprovalTokenStore(db),
     modelProviderStore,
     resolveModelProviderStore: () => modelProviderStore,
@@ -448,6 +466,7 @@ async function createDistributedPersistence(options: {
       import('./db/postgres/space-store/PostgresSpaceStore'),
       import('./db/postgres/repository-store/PostgresRepositoryStore'),
       import('./db/postgres/turn-artifact-store/PostgresTurnArtifactStore'),
+      import('./db/postgres/chat-image-store/PostgresChatImageStore'),
       import('./db/postgres/global-settings-store/PostgresGlobalSettingsStore'),
       import('./db/postgres/token-factory-usage-store/PostgresTokenFactoryUsageStore'),
       import('./db/postgres/sentinel-settings-store/PostgresSentinelSettingsStore'),
@@ -471,6 +490,7 @@ async function createDistributedPersistence(options: {
     { PostgresSpaceStore },
     { PostgresRepositoryStore },
     { PostgresTurnArtifactStore },
+    { PostgresChatImageStore },
     { PostgresGlobalSettingsStore },
     { PostgresTokenFactoryUsageStore },
     { PostgresSentinelSettingsStore },
@@ -560,12 +580,14 @@ async function createDistributedPersistence(options: {
     tokenStore,
     scheduleStore: new PostgresScheduleStore(db),
     turnArtifactStore: new PostgresTurnArtifactStore(db),
+    chatImageStore: new PostgresChatImageStore(db),
     globalSettingsStore: new PostgresGlobalSettingsStore(db),
     tokenFactoryUsageStore: new PostgresTokenFactoryUsageStore(db),
     mcpToolGrantStore: new PostgresMcpToolGrantStore(db),
     googleConnectionStore: new PostgresGoogleConnectionStore(db),
     sentinelAuditStore: new SentinelAuditStore(db as Kysely<SentinelAuditDatabase>),
     sentinelSettingsStore: new PostgresSentinelSettingsStore(db),
+    briefItemStore: new BriefItemCompletionStore(db),
     approvalTokenStore: new PostgresApprovalTokenStore(db),
     modelProviderStore,
     resolveModelProviderStore,
@@ -599,18 +621,21 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     spaceStore,
     repositoryStore,
     turnArtifactStore,
+    chatImageStore,
     globalSettingsStore,
     tokenFactoryUsageStore,
     mcpToolGrantStore,
     googleConnectionStore,
     sentinelAuditStore,
     sentinelSettingsStore,
+    briefItemStore,
     approvalTokenStore,
     destroyDb,
     redis,
     serviceFoundryClient,
   } = persistence;
 
+  const modelCatalog = ModelCatalog.load();
   // The env-managed Token Factory provider and default model are written before the first request,
   // so no Settings step is needed. TrueFoundry mode lists providers from TrueFoundry instead.
   if (!isTrueFoundryModeEnabled(configuration)) {
@@ -621,8 +646,8 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
         apiKey: configuration.NEBIUS_API_KEY,
         baseUrl: configuration.TOKEN_FACTORY_BASE_URL,
         model: configuration.TOKEN_FACTORY_MODEL,
-        cheaperModel: configuration.TOKEN_FACTORY_CHEAPER_MODEL,
       },
+      catalogModels: modelCatalog.list().find(entry => entry.type === 'tokenfactory')?.models ?? [],
       logger,
     });
     if (outcome !== 'skipped') {
@@ -633,6 +658,71 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
       });
     }
   }
+  const mcpCatalog = McpCatalog.load(configuration.MCP_CATALOG_PATH);
+  // Runs before the default seed, so an instance set to Tavily never also gets the Parallel connector as its provider.
+  if (!isTrueFoundryModeEnabled(configuration)) {
+    await designateTavilyAtBoot({
+      choice: configuration.SEARCH_PROVIDER,
+      tavilyApiKey: configuration.TAVILY_API_KEY,
+      catalog: mcpCatalog,
+      mcpServerStore: mcpOAuthStore,
+      tenant_id: TENANT_ID,
+      logger,
+    });
+  }
+  // Offered once so the first search needs no setup.
+  await seedDefaultSearchProviderAtBoot({
+    trueFoundryMode: isTrueFoundryModeEnabled(configuration),
+    globalSettingsStore,
+    mcpServerStore: mcpOAuthStore,
+    catalog: mcpCatalog,
+    tenant_id: TENANT_ID,
+    logger,
+  });
+  // Registered at boot when the mail sidecar is configured; a no-op otherwise.
+  await registerMailConnectorAtBoot({
+    url: configuration.MAIL_EMAIL_MCP_URL,
+    mcpServerStore: mcpOAuthStore,
+    tenant_id: TENANT_ID,
+    logger,
+  });
+  await prepareMailPolicyAtBoot({
+    url: configuration.MAIL_EMAIL_MCP_URL,
+    policyPath: configuration.MAIL_POLICY_FILE,
+    logger,
+  });
+  // An account saved through Settings on an instance the installer never linked still needs the
+  // connector: the account agent is asked in the background, and the connector is registered
+  // from what it reports. With the installer's link configured, the steps above already ran.
+  if (configuration.MAIL_EMAIL_MCP_URL === undefined) {
+    registerMailConnectorFromSavedAccountInBackground({
+      accountUrl: configuration.MAIL_EMAIL_ACCOUNT_URL,
+      mcpUrl: configuration.MAIL_SIDECAR_MCP_URL,
+      policyPath: configuration.MAIL_POLICY_FILE,
+      fetchImpl: undefined,
+      mcpServerStore: mcpOAuthStore,
+      tenant_id: TENANT_ID,
+      logger,
+    });
+  }
+  await registerCalendarConnectorForBoot({
+    accountUrl: configuration.CALENDAR_ACCOUNT_URL,
+    secret: configuration.CALENDAR_ACCOUNT_SECRET,
+    connectorUrl: configuration.CALENDAR_CONNECTOR_URL,
+    mcpUrl: configuration.CALENDAR_SIDECAR_MCP_URL,
+    fetchImpl: undefined,
+    mcpServerStore: mcpOAuthStore,
+    tenant_id: TENANT_ID,
+    logger,
+  });
+  await seedOwnerNameAtBoot({
+    owner_name: configuration.OWNER_NAME,
+    oidc: configuration.OIDC,
+    globalSettingsStore,
+    personalizationStore,
+    tenant_id: TENANT_ID,
+    logger,
+  });
   const tokenFactoryBudget = createTokenFactoryBudget({
     store: tokenFactoryUsageStore,
     cap: configuration.TOKEN_FACTORY_DAILY_TOKEN_CAP,
@@ -656,21 +746,36 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
   const turnDrains = new TurnDrainRegistry();
   const requestReplyRouter = new RequestReplyRouter();
   const eventSubscriptions = new EventSubscriptionRegistry<TurnStreamingEvent>(redis);
+  const outboundSecrets = createOutboundSecretSource({
+    configured: () => getConfiguredSecretValues(configuration),
+    modelProviders: modelProviderStore,
+    sandboxProviders: sandboxProviderStore,
+    mcpServers: mcpOAuthStore,
+    tokens: tokenStore,
+    googleConnections: googleConnectionStore,
+  });
   const sentinelServices = createSentinelServices({
+    demoMode: configuration.DEMO_MODE,
+    demoSendAllowlist: configuration.DEMO_SEND_ALLOWLIST,
     audit: sentinelAuditStore,
     settings: sentinelSettingsStore,
     approvalTokens: approvalTokenStore,
     toolGrants: mcpToolGrantStore,
-    outboundSecrets: createOutboundSecretSource({
-      configured: () => getConfiguredSecretValues(configuration),
-      modelProviders: modelProviderStore,
-      sandboxProviders: sandboxProviderStore,
-      mcpServers: mcpOAuthStore,
-      tokens: tokenStore,
-      googleConnections: googleConnectionStore,
-    }),
+    outboundSecrets,
+    mailPolicyPath: configuration.MAIL_POLICY_FILE,
+    mailPolicyStatusPath: configuration.MAIL_POLICY_STATUS_FILE,
   });
   const sessions = new Sessions({ sessionStore, sentinelServices });
+  const chatImages = createChatImageService({
+    store: chatImageStore,
+    sessionStore,
+    turnArtifactStore,
+    reencode: createImageReencoder({
+      resolveSandbox: () => (slotsBackendEnabled() ? getSharedRunCodeService(logger) : null),
+    }),
+    sentinel: sentinelServices,
+    fetchDeps: { fetchImpl: undefined, resolveAddresses: undefined },
+  });
 
   const oidc = isOidcConfigured(configuration) ? configuration.OIDC : undefined;
   if (oidc) {
@@ -728,8 +833,8 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
   const resolveSandboxProviderStore = (c: Context) => persistence.resolveSandboxProviderStore(resolveRequestContext(c));
   const resolveSkillStore = (c: Context) => persistence.resolveSkillStore(resolveRequestContext(c));
   const app = createServerApp({
-    modelCatalog: ModelCatalog.load(),
-    mcpCatalog: McpCatalog.load(),
+    modelCatalog,
+    mcpCatalog,
     skillCatalog: SkillCatalog.load(),
     sandboxCatalog: SandboxCatalog.load(),
     resolveModelProviderStore,
@@ -748,6 +853,7 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     sandboxProviderStore,
     personalizationStore,
     personaStore,
+    modelProviderStore,
     spaceStore,
     repositoryStore,
     turnArtifactStore,
@@ -757,7 +863,9 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     sessionMetricsStore,
     sentinelAuditStore,
     sentinelSettingsStore,
+    briefItemStore,
     sessions,
+    chatImages,
     activeTurns,
     turnDrains,
     redis,
@@ -767,6 +875,13 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     oidcDiscovery,
     authenticator,
     authorizer,
+    outboundSecrets,
+    schedulerStatus: () => {
+      if (controller === undefined) {
+        return 'elsewhere';
+      }
+      return controller.isRunning() ? 'running' : 'stopped';
+    },
   });
 
   return {
@@ -780,7 +895,9 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     requestReplyRouter,
     sessionStore,
     turnArtifactStore,
+    chatImageStore,
     turnDrains,
+    sentinelAuditStore,
   };
 }
 
@@ -856,7 +973,9 @@ try {
     requestReplyRouter,
     sessionStore,
     turnArtifactStore,
+    chatImageStore,
     turnDrains,
+    sentinelAuditStore,
   } = configuration.STANDALONE
     ? await createServerRuntime(
         await createStandalonePersistence({ sqlitePath: configuration.SQLITE_PATH, logger }),
@@ -867,7 +986,8 @@ try {
   // Turn artifact retention: persisted run_code/sandbox result files are
   // downloads, not a permanent archive. One startup-anchored sweep a day
   // deletes index rows older than TURN_ARTIFACT_RETENTION_DAYS plus blobs no
-  // surviving row references. Best effort: failures are logged, never fatal.
+  // surviving row references, and chat images past their retention.
+  // Best effort: failures are logged, never fatal.
   let artifactRetentionInFlight = false;
   const sweepExpiredTurnArtifacts = async (): Promise<void> => {
     if (artifactRetentionInFlight) {
@@ -880,6 +1000,12 @@ try {
       });
       if (deleted > 0) {
         logger.info('Deleted expired turn artifact rows', { count: deleted });
+      }
+      const deletedImages = await chatImageStore.deleteImagesOlderThan({
+        older_than: new Date(Date.now() - CHAT_IMAGE_RETENTION_DAYS * 86_400_000).toISOString(),
+      });
+      if (deletedImages > 0) {
+        logger.info('Deleted expired chat images', { count: deletedImages });
       }
     } catch (error) {
       logger.warn('Turn artifact retention sweep failed', extractErrorLogFields(error));
@@ -1039,6 +1165,14 @@ try {
   // advisory only; the backend boots regardless of STT state.
   startSttAvailabilityWatcher({ logger });
 
+  // The download-only package mirrors for the sandbox slots. Best effort: when they cannot
+  // start, sandbox package downloads stay off and everything else keeps working.
+  await startPackageMirrorGateway({ logger });
+
+  // The skill network gateway for the sandbox slots. Best effort: when it cannot start,
+  // approved skill sites stay unreachable and everything else keeps working.
+  await startSkillNetworkGateway({ logger, audit: sentinelAuditStore });
+
   const server = serve(
     {
       fetch: app.fetch,
@@ -1093,8 +1227,9 @@ try {
       // closed covers the gap where the registry is empty before that late track().
       await activeTurns.shutdownAndWait(CancellationReason.Abandoned);
       await closed;
-      // Wait for detached turn drains (memory retain, profile learning, artifact persistence)
-      // with a bounded timeout so a stuck provider call cannot hang shutdown forever. This
+      // Wait for detached turn drains (artifact persistence, memory retain, profile learning)
+      // with a bounded timeout so a stuck provider call cannot hang shutdown forever. Each drain
+      // also stops watching its follow-up work after its own time limit. This
       // runs before the Redis/DB teardown below because drains still dual-write events.
       if (turnDrains.size > 0) {
         logger.info(`Waiting for ${String(turnDrains.size)} in-flight turn drains before shutdown`);

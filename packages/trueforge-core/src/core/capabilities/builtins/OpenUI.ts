@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { InstructionBuilder } from '../../InstructionBuilder';
 import { toolResultResponse } from '../../mcp/IMCPServer';
 import { defineTool, LocalToolMCP, type ToolDefinition } from '../../mcp/LocalToolMCP';
+import type { ToolBundleName } from '../../runtime/toolBundleCatalog';
 import type { AgentTracing } from '../../tracing/AgentTracing';
 import { NOOP_AGENT_TRACING } from '../../tracing/NoopAgentTracing';
 import type { AgentCapability } from '../AgentCapability';
@@ -258,7 +259,7 @@ export function buildOpenUIInstruction(builder: InstructionBuilder): void {
     dedent`
       1. Will the response be UI heavy and will contain components which are not supported by markdown? Use openui if the answer is yes.
       2. \`\`\`openui\`\`\` fencing must be closed.
-      3. Interactive UI inside a reply is openui; write HTML files only when the user asks for a file or page to keep or share, or when the result needs arbitrary HTML, CSS, or scripts that openui components cannot express.`,
+      3. Interactive UI inside a reply is openui; write HTML files only when the user asks for a file or page to keep or share, or when the result needs arbitrary HTML or CSS that openui components cannot express. HTML previews do not run scripts.`,
   );
 }
 
@@ -286,7 +287,7 @@ function buildOpenUIDeferredInstruction(builder: InstructionBuilder): void {
       Before writing any \`\`\`openui fence, the Agent MUST call ${GET_OPENUI_INSTRUCTIONS_TOOL_NAME} with arguments {}.
       Do not invent OpenUI syntax or component APIs without loading those instructions.
 
-      Use OpenUI only when the response is UI-heavy and needs components markdown does not support. Interactive UI inside a reply is openui; write HTML files only when the user asks for a file or page to keep or share, or when the result needs arbitrary HTML, CSS, or scripts that openui components cannot express.
+      Use OpenUI only when the response is UI-heavy and needs components markdown does not support. Interactive UI inside a reply is openui; write HTML files only when the user asks for a file or page to keep or share, or when the result needs arbitrary HTML or CSS that openui components cannot express. HTML previews do not run scripts.
     `.trim(),
   );
 }
@@ -294,6 +295,7 @@ function buildOpenUIDeferredInstruction(builder: InstructionBuilder): void {
 export class OpenUIInstructions extends LocalToolMCP {
   readonly name = OPENUI_SERVER_ID;
   readonly displayName = 'OpenUI';
+  protected override readonly bundle: ToolBundleName = 'extras';
 
   constructor(tracing: AgentTracing) {
     super({ tracing });
@@ -322,10 +324,12 @@ export function openUI(options?: { preload?: boolean; tracing?: AgentTracing }):
   if (preload) {
     return {
       instructionBuilders: [buildOpenUIInstruction],
+      bundle: 'extras',
     };
   }
   return {
     systemToolSets: [new OpenUIInstructions(options?.tracing ?? NOOP_AGENT_TRACING)],
     instructionBuilders: [buildOpenUIDeferredInstruction],
+    bundle: 'extras',
   };
 }

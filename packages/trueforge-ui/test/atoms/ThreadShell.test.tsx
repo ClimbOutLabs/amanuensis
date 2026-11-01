@@ -25,9 +25,11 @@ describe('ThreadRootShell', () => {
 
     const root = screen.getByTestId('thread-root');
     const width = root.style.getPropertyValue('--thread-max-width');
-    // Keeps the message list and composer column readable (roughly 880-960px) instead of
-    // leaving very large, disproportionate gutters on wide viewports.
-    expect(width).toBe('min(48rem, 100% - 2rem)');
+    // Keeps the message list and composer column readable (48rem) instead of leaving very large,
+    // disproportionate gutters on wide viewports; only a folded side panel lends it more.
+    expect(width).toBe(
+      'min(calc(48rem + var(--thread-extra-left, 0rem) + var(--thread-extra-right, 0rem)), 100% - 2rem)',
+    );
   });
 });
 
@@ -59,7 +61,7 @@ describe('ThreadViewportShell', () => {
     expect(viewport).toHaveAttribute('data-slot', 'aui_thread-viewport');
     // CSS smooth scroll fights assistant-ui autoScroll and causes bounce on large streams.
     expect(viewport.className).not.toMatch(/\bscroll-smooth\b/);
-    expect(viewport.firstElementChild).toHaveClass('min-h-full', 'justify-center', 'pb-4');
+    expect(viewport.firstElementChild).toHaveClass('min-h-full', 'justify-[safe_center]', 'pb-4');
     expect(viewport).toHaveTextContent('Welcome');
 
     rerender(
@@ -90,8 +92,23 @@ describe('ThreadComposerAreaShell', () => {
         Populated composer
       </ThreadComposerAreaShell>,
     );
-    expect(composer).toHaveClass('rounded-t-(--composer-radius)');
+    // Phones keep the rounded tab; desktop drops it so messages do not look like they sit in a box.
+    expect(composer).toHaveClass('rounded-t-(--composer-radius)', 'md:rounded-t-none');
     expect(composer).toHaveTextContent('Populated composer');
+  });
+
+  it('sits lower on desktop and puts no fade over the messages above the composer', () => {
+    render(<ThreadComposerAreaShell data-testid="composer">Composer</ThreadComposerAreaShell>);
+
+    const composer = screen.getByTestId('composer');
+    expect(composer).toHaveClass(
+      'pb-[max(1rem,env(safe-area-inset-bottom,0px))]',
+      'md:pb-[max(0.75rem,env(safe-area-inset-bottom,0px))]',
+    );
+    // A gradient fade above the composer washed over the bottom of a waiting approval card
+    // while it was scrolled into view, so its buttons looked faded. It must not come back.
+    expect(composer.className).not.toMatch(/md:before:/);
+    expect(composer.className).not.toMatch(/md:pb-\[max\(1\.5rem/);
   });
 });
 

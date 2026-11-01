@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import type { ToolOutputScreenDecision } from '../../schemas/toolOutputScreen';
+import { isRecipientPolicyDenial } from '../email/mailConnector/recipientRefusal';
 import {
   ImplementationPlanAdmissionBlockedError,
   StructuredEditPreconditionBlockedError,
@@ -29,10 +30,28 @@ import { awaitWithAbort, signalAbortError, throwIfSignalAborted } from '../util/
 // createToolCallMemoState below); every entry written by this version of the host already
 // carries its own `message`, so this is a compatibility path, not a normal dependency.
 import type { Logger } from 'winston';
-import { verifyPreDispatch, type SentinelCallIdentity, type SentinelServices } from '../permissions';
+import {
+  SANDBOX_FILE_WRITE_TOOLS,
+  verifyPreDispatch,
+  type SentinelCallIdentity,
+  type SentinelServices,
+} from '../permissions';
+import { APPROVAL_EXPIRED_REASON_CODE, isExpiredApproval } from '../permissions/approvalExpiry';
+import { toJsonSafeParams } from '../permissions/approvalTokens';
+import { heldCallAuditText, recordNotPreparedRefusals } from '../permissions/audit';
+import type { SentinelDispatchContext } from '../permissions/context';
 import { HELD_REASON_CODE, HELD_RESULT_TEXT } from '../permissions/heldActions';
+import { MAPS_ASK_REASON } from '../permissions/mapsToolNames';
+import { collectOutboundStrings } from '../permissions/outboundGuard';
+import {
+  isSearchAskReason,
+  isSilentSearchReason,
+  recordToolResultProvenance,
+  resultTexts,
+} from '../permissions/webSearch';
 import { identicalCallNudgeMessage } from '../runtime/contextUtils';
-import { CALL_TOOL_NAME, tryUnwrapCallToolInput } from '../runtime/DeferredTool';
+import { CALL_TOOL_NAME, tryParseCallToolWrapper } from '../runtime/DeferredTool';
+import { connectorUnreachableText, type ToolResultKind, type UnfinishedKind } from '../runtime/replyBudget';
 import type { SandboxInfo, WorkspaceVerificationReceiptCandidate } from '../sandbox/Sandbox';
 import { approvalGrantKey } from './approvalGrant';
 import type { MappedMCPTool } from './convertMCPServers';
@@ -45,7 +64,14 @@ import {
   isClientSideToolRequiredResponse,
   toolResultResponse,
 } from './IMCPServer';
-import { deniedToolCallText } from './ToolSet';
+import { parseToolCallArguments } from './toolArgumentCheck';
+import { deniedToolCallRemediation, deniedToolCallResponse, REPEATED_DENIAL_REMEDIATION } from './ToolSet';
+
+/** An image a tool returned. The host stores and shows it; it never becomes part of the model's text. */
+export interface ToolResultImage {
+  mime: string;
+  data: Buffer;
+}
 
 export interface ToolCallResult {
   message: LLMToolMessage;
@@ -75,6 +101,32 @@ export interface ToolCallResult {
   /** Set by a response processor that changed the result text; absent when the model saw it as returned. */
   outputTransform?: ToolOutputTransform | undefined;
   admissionProvenance: ToolAdmissionProvenance;
+  /** Image blocks of the provider result, set aside for the host. */
+  images: readonly ToolResultImage[];
+}
+
+/** The base64 image blocks of an MCP result's content, decoded. Anything malformed is skipped. */
+function toolResultImages(content: unknown): ToolResultImage[] {
+  if (!Array.isArray(content)) {
+    return [];
+  }
+  const blocks: unknown[] = content;
+  const images: ToolResultImage[] = [];
+  for (const block of blocks) {
+    if (
+      typeof block === 'object' &&
+      block !== null &&
+      'type' in block &&
+      block.type === 'image' &&
+      'data' in block &&
+      typeof block.data === 'string' &&
+      'mimeType' in block &&
+      typeof block.mimeType === 'string'
+    ) {
+      images.push({ mime: block.mimeType, data: Buffer.from(block.data, 'base64') });
+    }
+  }
+  return images;
 }
 
 export function shouldStopAfterMemoizedReplay(
@@ -101,7 +153,7 @@ export function selectRepeatedActionStopMessage(input: {
   repeatedGithubFileRead: boolean;
 }): string {
   if (input.repeatedDeniedApproval) {
-    return 'The model repeated an action the user already denied or that is waiting for their OK, so the turn was stopped. Change strategy or explain why a different action is needed.';
+    return 'Stopped because the assistant kept asking for something you said no to, or something still waiting for your OK. Tell it what you want instead.';
   }
   if (input.repeatedSideEffects) {
     return 'The model attempted a side-effecting action whose dependent precondition was violated (a preceding workspace mutation did not complete as expected, or the durable execution marker was missing), so the turn was stopped and the action was not retried.';
@@ -124,6 +176,14 @@ interface MemoEntry {
   count: number;
   disposition: ToolResultDisposition;
   remediation: ToolResultRemediation | undefined;
+  /**
+   * The turn's workspace mutation epoch when this result was produced. A
+   * successful write since then advances the epoch, and an entry stamped with
+   * an older epoch is never replayed: the call dispatches again and sees the
+   * post-write world. Verification entries already carry the epoch in their
+   * key, so for them the stamp always matches when the key does.
+   */
+  mutationEpoch: number;
 }
 
 export interface ToolCallMemoSnapshot {
@@ -135,6 +195,14 @@ export interface ToolCallMemoSnapshot {
     count: number;
     disposition: ToolResultDisposition;
     remediation: ToolResultRemediation | undefined;
+    /**
+     * The workspace mutation epoch when the result was produced (see
+     * MemoEntry.mutationEpoch). A snapshot written before read entries were
+     * stamped omits it; hydration treats such an entry as produced at the
+     * snapshot's own epoch, so its replay behavior for the rest of that turn
+     * is unchanged.
+     */
+    mutation_epoch?: number | undefined;
   }[];
   /** Side-effecting calls are remembered only as attempted; their responses are never replayed. */
   side_effect_attempts: { key: string; count: number }[];
@@ -155,15 +223,29 @@ export interface ToolCallMemoSnapshot {
    * upload that errors, then an exec that never runs) cannot reset the count.
    */
   consecutive_failed_batches: number;
-  /** How many times each distinct call (tool plus arguments) was made this turn. */
-  call_signatures: { key: string; count: number }[];
+  /**
+   * How many times each distinct call (tool plus arguments) ran this turn, and the write count at its last
+   * run. A snapshot written before the re-run rule omits the latter.
+   */
+  call_signatures: {
+    key: string;
+    count: number;
+    writes_at_last_run?: number | undefined;
+    last_kind?: ToolResultKind | null | undefined;
+    retried?: boolean | undefined;
+  }[];
   denied_approval_identities: string[];
   repeated_denied_approval: boolean;
   inspection_calls_before_edit: number;
   inspection_budget_warned: boolean;
   edit_observed: boolean;
   clarification_answered: boolean;
-  /** Monotonic host-owned generation used to scope repeatable verification commands. */
+  /**
+   * Monotonic host-owned generation advanced by every successful write. It
+   * scopes repeatable verification commands (through their memo keys) and
+   * memoized read replay (through each entry's stamp): a result produced at
+   * an older generation is never served again.
+   */
   workspace_mutation_epoch: number;
   /**
    * Host-authored notes that were decided (a guard's counter just reached its nudge threshold)
@@ -186,6 +268,29 @@ export interface ToolCallMemoSnapshot {
   no_progress_nudge_generation: number;
   /** Policy-denied calls in the current turn; the per-turn guard budget. */
   policy_blocked_calls_this_turn: number;
+  /** Write calls admitted to dispatch in the current turn; the per-turn write cap. */
+  write_calls_this_turn: number;
+  /** Write calls that ran and succeeded in the current turn; decides the unbacked-claim notice. */
+  successful_writes_this_turn: number;
+  /** Kinds of step that ran and succeeded in the current turn; back clone, run, and read claims. */
+  step_kinds_this_turn: TurnStepKind[];
+  /** Prose of the steps that carried tool calls in the current turn, in step order. */
+  step_texts_this_turn: string[];
+  /** Signature of the call made last in the turn, across threads; the consecutive-repeat stop. */
+  last_call_signature: string | undefined;
+  /** Tool calls written as text in the turn, and the retries sent for them. */
+  tool_markup_leaks_this_turn: number;
+  tool_markup_retries_this_turn: number;
+  /** Steps (model calls) each thread of the turn has made, keyed by thread id. */
+  steps_by_thread: { thread_id: string; steps: number }[];
+  /** Steps refunded to each thread of the turn for landing a space write, keyed by thread id. */
+  progress_refunds_by_thread: { thread_id: string; refunds: number }[];
+  /** Tools removed from the rest of the reply after a decline or an unavailable result. */
+  removed_tools: string[];
+  /** Calls to removed tools in a row, per thread. */
+  removed_tool_rejection_streaks: { thread_id: string; streak: number }[];
+  /** Why each thread's reply did not finish, if it did not. */
+  unfinished_by_thread: { thread_id: string; kind: UnfinishedKind }[];
 }
 
 /** The guard kinds that can defer a host-authored note before stopping the turn. */
@@ -233,6 +338,18 @@ type LegacyToolCallMemoSnapshot = Omit<
   | 'empty_inspection_nudge_generation'
   | 'no_progress_nudge_generation'
   | 'policy_blocked_calls_this_turn'
+  | 'write_calls_this_turn'
+  | 'successful_writes_this_turn'
+  | 'step_kinds_this_turn'
+  | 'step_texts_this_turn'
+  | 'last_call_signature'
+  | 'tool_markup_leaks_this_turn'
+  | 'tool_markup_retries_this_turn'
+  | 'steps_by_thread'
+  | 'progress_refunds_by_thread'
+  | 'removed_tools'
+  | 'removed_tool_rejection_streaks'
+  | 'unfinished_by_thread'
 > & {
   read_results: { key: string; response: CallToolResponse; failure: boolean; count: number }[];
   // Explicit `| undefined` (the repo's dominant optional-property convention under
@@ -240,7 +357,17 @@ type LegacyToolCallMemoSnapshot = Omit<
   workspace_mutation_epoch?: number | undefined;
   consecutive_no_progress_batches?: number | undefined;
   consecutive_failed_batches: number | undefined;
-  call_signatures: { key: string; count: number }[] | undefined;
+  // `writes_at_last_run` is absent in snapshots written before the re-run rule; hydration treats the
+  // call as not re-runnable until a write runs, the same as a call recorded in this turn.
+  call_signatures:
+    | {
+        key: string;
+        count: number;
+        writes_at_last_run?: number | undefined;
+        last_kind?: ToolResultKind | null | undefined;
+        retried?: boolean | undefined;
+      }[]
+    | undefined;
   pending_identical_call_nudges?: (string | SnapshotPendingHostNote)[] | undefined;
   failed_batch_nudge_generation?: number | undefined;
   empty_inspection_nudge_generation?: number | undefined;
@@ -248,7 +375,156 @@ type LegacyToolCallMemoSnapshot = Omit<
   // Optional like the counters above: a snapshot written before this guard existed
   // omits the key, and hydration defaults it to 0.
   policy_blocked_calls_this_turn?: number | undefined;
+  // Same as the policy counter: a snapshot written before the write cap omits the key.
+  write_calls_this_turn?: number | undefined;
+  successful_writes_this_turn?: number | undefined;
+  step_kinds_this_turn?: TurnStepKind[] | undefined;
+  // A snapshot written before step prose was kept for the claim check omits the key.
+  step_texts_this_turn?: string[] | undefined;
+  last_call_signature?: string | undefined;
+  tool_markup_leaks_this_turn?: number | undefined;
+  tool_markup_retries_this_turn?: number | undefined;
+  // Added with the reply step budget: a snapshot written before it omits these keys.
+  steps_by_thread?: { thread_id: string; steps: number }[] | undefined;
+  progress_refunds_by_thread?: { thread_id: string; refunds: number }[] | undefined;
+  removed_tools?: string[] | undefined;
+  removed_tool_rejection_streaks?: { thread_id: string; streak: number }[] | undefined;
+  unfinished_by_thread?: { thread_id: string; kind: UnfinishedKind }[] | undefined;
 };
+
+/**
+ * Tool-call counts for one user turn. The main thread and every sub-agent it starts share one
+ * instance by reference, so the repeat and write limits hold across the whole turn.
+ */
+export interface CallSignatureRecord {
+  /** How many times the call ran this turn. */
+  count: number;
+  /** Write calls admitted this turn when the call last ran. It may run again once this has risen. */
+  writesAtLastRun: number;
+  /** Kind of the call's last result; a retryable error may be tried once more. */
+  lastKind: ToolResultKind | null;
+  /** Whether the one retry of a retryable error has already run. */
+  retried: boolean;
+}
+
+/** A kind of step that can back a claim in the reply: any sandbox step, a sandbox command, a git step, a read. */
+export type TurnStepKind = 'sandbox' | 'command' | 'git' | 'read';
+
+export interface TurnToolCallLedger {
+  /** Exact-call signatures that ran this turn, with the count and the write count at their last run. */
+  callSignatures: Map<string, CallSignatureRecord>;
+  /** Signature of the call made last, across every thread; undefined before the first call. */
+  lastCallSignature: string | undefined;
+  /** Write calls (tier 3) admitted to dispatch this turn. Enforces the per-turn write cap. */
+  writeCallsThisTurn: number;
+  /** Write calls that ran and succeeded this turn. Decides the unbacked-claim note. */
+  successfulWritesThisTurn: number;
+  /** Kinds of step that ran and succeeded this turn. Decides the unbacked-claim note for clones, runs, and reads. */
+  stepKindsThisTurn: Set<TurnStepKind>;
+  /**
+   * Prose of the steps that carried tool calls this turn, in step order. The unbacked-claim
+   * check reads it at the turn's final step, so a claim made in an early step's prose is
+   * checked against the whole turn the same way the final step's own prose is.
+   */
+  stepTextsThisTurn: string[];
+  /** Tool calls written as text this turn. None of them ran. */
+  toolMarkupLeaksThisTurn: number;
+  /** Retries sent to the model for tool calls written as text this turn. */
+  toolMarkupRetriesThisTurn: number;
+  /** Set when the write cap stopped the turn; the turn ends whichever thread hit it. */
+  stoppedForWriteCap: boolean;
+  /** Model calls made per thread this turn. The reply's step budget is checked against each thread's own count. */
+  stepsByThread: Map<string, number>;
+  /** Steps handed back to each thread for landing a space write; bounded per thread by the refund cap. */
+  progressRefundsByThread: Map<string, number>;
+  /** Tool names removed from the rest of the reply after a decline or an unavailable result. */
+  removedTools: string[];
+  /** Calls to removed tools in a row, per thread; two end that thread's reply by forcing its answer. */
+  removedToolRejectionStreaks: Map<string, number>;
+  /**
+   * Why each thread's reply did not finish, from its last action that did not end well. The first
+   * reason stays until a later action in the same thread finishes cleanly.
+   */
+  unfinishedByThread: Map<string, UnfinishedKind>;
+}
+
+export function createTurnToolCallLedger(): TurnToolCallLedger {
+  return {
+    callSignatures: new Map(),
+    lastCallSignature: undefined,
+    writeCallsThisTurn: 0,
+    successfulWritesThisTurn: 0,
+    stepKindsThisTurn: new Set(),
+    stepTextsThisTurn: [],
+    toolMarkupLeaksThisTurn: 0,
+    toolMarkupRetriesThisTurn: 0,
+    stoppedForWriteCap: false,
+    stepsByThread: new Map(),
+    progressRefundsByThread: new Map(),
+    removedTools: [],
+    removedToolRejectionStreaks: new Map(),
+    unfinishedByThread: new Map(),
+  };
+}
+
+/**
+ * One turn's ledger from the ledgers its in-flight threads were snapshotted with. Every counter only
+ * rises within a turn, so the largest value any snapshot holds is the latest one. `ledgers[0]` is the
+ * root thread, whose last call is the one that counts as consecutive.
+ */
+export function mergeTurnToolCallLedgers(ledgers: readonly TurnToolCallLedger[]): TurnToolCallLedger {
+  const merged = createTurnToolCallLedger();
+  merged.lastCallSignature = ledgers[0]?.lastCallSignature;
+  for (const ledger of ledgers) {
+    for (const [signature, record] of ledger.callSignatures) {
+      const existing = merged.callSignatures.get(signature);
+      // The record that ran most recently is the one with the higher count.
+      const latest = existing === undefined || record.count >= existing.count ? record : existing;
+      merged.callSignatures.set(signature, {
+        count: Math.max(existing?.count ?? 0, record.count),
+        writesAtLastRun: Math.max(existing?.writesAtLastRun ?? 0, record.writesAtLastRun),
+        lastKind: latest.lastKind,
+        retried: (existing?.retried ?? false) || record.retried,
+      });
+    }
+    for (const [threadId, steps] of ledger.stepsByThread) {
+      merged.stepsByThread.set(threadId, Math.max(merged.stepsByThread.get(threadId) ?? 0, steps));
+    }
+    for (const [threadId, refunds] of ledger.progressRefundsByThread) {
+      merged.progressRefundsByThread.set(
+        threadId,
+        Math.max(merged.progressRefundsByThread.get(threadId) ?? 0, refunds),
+      );
+    }
+    merged.removedTools = [...new Set([...merged.removedTools, ...ledger.removedTools])];
+    for (const [threadId, streak] of ledger.removedToolRejectionStreaks) {
+      merged.removedToolRejectionStreaks.set(
+        threadId,
+        Math.max(merged.removedToolRejectionStreaks.get(threadId) ?? 0, streak),
+      );
+    }
+    for (const [threadId, kind] of ledger.unfinishedByThread) {
+      if (!merged.unfinishedByThread.has(threadId)) {
+        merged.unfinishedByThread.set(threadId, kind);
+      }
+    }
+    merged.writeCallsThisTurn = Math.max(merged.writeCallsThisTurn, ledger.writeCallsThisTurn);
+    merged.successfulWritesThisTurn = Math.max(merged.successfulWritesThisTurn, ledger.successfulWritesThisTurn);
+    for (const kind of ledger.stepKindsThisTurn) {
+      merged.stepKindsThisTurn.add(kind);
+    }
+    for (const text of ledger.stepTextsThisTurn) {
+      // Snapshots of one turn overlap (a later one holds the earlier steps too), so a text
+      // already present is the same step seen again, not a step that ran twice.
+      if (!merged.stepTextsThisTurn.includes(text)) {
+        merged.stepTextsThisTurn.push(text);
+      }
+    }
+    merged.toolMarkupLeaksThisTurn = Math.max(merged.toolMarkupLeaksThisTurn, ledger.toolMarkupLeaksThisTurn);
+    merged.toolMarkupRetriesThisTurn = Math.max(merged.toolMarkupRetriesThisTurn, ledger.toolMarkupRetriesThisTurn);
+  }
+  return merged;
+}
 
 export interface ToolCallMemoState {
   entries: Map<string, MemoEntry>;
@@ -258,7 +534,6 @@ export interface ToolCallMemoState {
   consecutiveEmptyInspectionBatches: number;
   consecutiveNoProgressBatches: number;
   consecutiveFailedBatches: number;
-  callSignatures: Map<string, number>;
   deniedApprovalIdentities: Set<string>;
   repeatedDeniedApproval: boolean;
   inspectionCallsBeforeEdit: number;
@@ -290,6 +565,11 @@ export interface ToolCallMemoState {
    * codes and recovery paths, and must not be misdiagnosed as "not allowed here".
    */
   policyBlockedCallsThisTurn: number;
+  /**
+   * Turn-wide counts (repeats, write cap, tool-markup). Shared by reference across the turn's threads;
+   * the snapshot keeps them, so an approval continuation keeps the count.
+   */
+  turn: TurnToolCallLedger;
 }
 
 export function createToolCallMemoState(
@@ -303,7 +583,7 @@ export function createToolCallMemoState(
     consecutiveEmptyInspectionBatches: 0,
     consecutiveNoProgressBatches: 0,
     consecutiveFailedBatches: 0,
-    callSignatures: new Map(),
+    turn: createTurnToolCallLedger(),
     deniedApprovalIdentities: new Set(),
     repeatedDeniedApproval: false,
     inspectionCallsBeforeEdit: 0,
@@ -321,6 +601,7 @@ export function createToolCallMemoState(
   if (snapshot === undefined) {
     return state;
   }
+  const snapshotMutationEpoch = snapshot.workspace_mutation_epoch ?? 0;
   for (const entry of snapshot.read_results) {
     let disposition: ToolResultDisposition;
     let remediation: ToolResultRemediation | undefined;
@@ -334,12 +615,17 @@ export function createToolCallMemoState(
       disposition = entry.response.result.isError === true ? 'executed_nonzero' : 'executed_ok';
       remediation = undefined;
     }
+    // An entry a pre-stamp snapshot recorded carries no epoch of its own; it
+    // is treated as produced at the snapshot's epoch (see the field's note).
+    const mutationEpoch =
+      'mutation_epoch' in entry && entry.mutation_epoch !== undefined ? entry.mutation_epoch : snapshotMutationEpoch;
     state.entries.set(entry.key, {
       response: entry.response,
       failure: entry.failure,
       count: entry.count,
       disposition,
       remediation,
+      mutationEpoch,
     });
   }
   for (const entry of snapshot.side_effect_attempts) {
@@ -356,11 +642,17 @@ export function createToolCallMemoState(
   // Runtime hydration is the compatibility boundary for snapshots written
   // before the mutation epoch (or the no-progress counter) became part of
   // the canonical contract.
-  state.workspaceMutationEpoch = snapshot.workspace_mutation_epoch ?? 0;
+  state.workspaceMutationEpoch = snapshotMutationEpoch;
   state.consecutiveNoProgressBatches = snapshot.consecutive_no_progress_batches ?? 0;
   state.consecutiveFailedBatches = snapshot.consecutive_failed_batches ?? 0;
   for (const entry of snapshot.call_signatures ?? []) {
-    state.callSignatures.set(entry.key, entry.count);
+    state.turn.callSignatures.set(entry.key, {
+      count: entry.count,
+      writesAtLastRun: entry.writes_at_last_run ?? snapshot.write_calls_this_turn ?? 0,
+      // A snapshot written before the retry rule omits these: the call has no retry left to spend.
+      lastKind: entry.last_kind ?? null,
+      retried: entry.retried ?? true,
+    });
   }
   // Legacy snapshots stored a bare tool name, or a {signature, tool_name} pair with no `kind` or
   // `message` — both predate this generalization, when every entry was necessarily an
@@ -383,11 +675,33 @@ export function createToolCallMemoState(
   state.emptyInspectionNudgeGeneration = snapshot.empty_inspection_nudge_generation ?? 0;
   state.noProgressNudgeGeneration = snapshot.no_progress_nudge_generation ?? 0;
   state.policyBlockedCallsThisTurn = snapshot.policy_blocked_calls_this_turn ?? 0;
+  state.turn.writeCallsThisTurn = snapshot.write_calls_this_turn ?? 0;
+  state.turn.successfulWritesThisTurn = snapshot.successful_writes_this_turn ?? 0;
+  state.turn.stepKindsThisTurn = new Set(snapshot.step_kinds_this_turn ?? []);
+  state.turn.stepTextsThisTurn = [...(snapshot.step_texts_this_turn ?? [])];
+  state.turn.lastCallSignature = snapshot.last_call_signature;
+  state.turn.toolMarkupLeaksThisTurn = snapshot.tool_markup_leaks_this_turn ?? 0;
+  state.turn.toolMarkupRetriesThisTurn = snapshot.tool_markup_retries_this_turn ?? 0;
+  for (const entry of snapshot.steps_by_thread ?? []) {
+    state.turn.stepsByThread.set(entry.thread_id, entry.steps);
+  }
+  for (const entry of snapshot.progress_refunds_by_thread ?? []) {
+    state.turn.progressRefundsByThread.set(entry.thread_id, entry.refunds);
+  }
+  state.turn.removedTools = [...(snapshot.removed_tools ?? [])];
+  for (const entry of snapshot.removed_tool_rejection_streaks ?? []) {
+    state.turn.removedToolRejectionStreaks.set(entry.thread_id, entry.streak);
+  }
+  for (const entry of snapshot.unfinished_by_thread ?? []) {
+    state.turn.unfinishedByThread.set(entry.thread_id, entry.kind);
+  }
   return state;
 }
 
 export function cloneToolCallMemoState(source: ToolCallMemoState): ToolCallMemoState {
   const state = createToolCallMemoState();
+  // Shared, not copied: every clone of this turn's memo counts into the same totals.
+  state.turn = source.turn;
   for (const [key, entry] of source.entries) {
     state.entries.set(key, { ...entry });
   }
@@ -398,9 +712,6 @@ export function cloneToolCallMemoState(source: ToolCallMemoState): ToolCallMemoS
   state.consecutiveEmptyInspectionBatches = source.consecutiveEmptyInspectionBatches;
   state.consecutiveNoProgressBatches = source.consecutiveNoProgressBatches;
   state.consecutiveFailedBatches = source.consecutiveFailedBatches;
-  for (const [key, count] of source.callSignatures) {
-    state.callSignatures.set(key, count);
-  }
   state.deniedApprovalIdentities = new Set(source.deniedApprovalIdentities);
   state.repeatedDeniedApproval = source.repeatedDeniedApproval;
   state.inspectionCallsBeforeEdit = source.inspectionCallsBeforeEdit;
@@ -428,6 +739,7 @@ export function toToolCallMemoSnapshot(state: ToolCallMemoState): ToolCallMemoSn
         count: entry.count,
         disposition: entry.disposition,
         remediation: entry.remediation,
+        mutation_epoch: entry.mutationEpoch,
       })),
     side_effect_attempts: [...state.sideEffectAttempts.entries()]
       .sort(([left], [right]) => left.localeCompare(right))
@@ -436,9 +748,15 @@ export function toToolCallMemoSnapshot(state: ToolCallMemoState): ToolCallMemoSn
     consecutive_empty_inspection_batches: state.consecutiveEmptyInspectionBatches,
     consecutive_no_progress_batches: state.consecutiveNoProgressBatches,
     consecutive_failed_batches: state.consecutiveFailedBatches,
-    call_signatures: [...state.callSignatures.entries()]
+    call_signatures: [...state.turn.callSignatures.entries()]
       .sort(([left], [right]) => left.localeCompare(right))
-      .map(([key, count]) => ({ key, count })),
+      .map(([key, record]) => ({
+        key,
+        count: record.count,
+        writes_at_last_run: record.writesAtLastRun,
+        last_kind: record.lastKind,
+        retried: record.retried,
+      })),
     denied_approval_identities: [...state.deniedApprovalIdentities].sort(),
     repeated_denied_approval: state.repeatedDeniedApproval,
     inspection_calls_before_edit: state.inspectionCallsBeforeEdit,
@@ -451,6 +769,26 @@ export function toToolCallMemoSnapshot(state: ToolCallMemoState): ToolCallMemoSn
     empty_inspection_nudge_generation: state.emptyInspectionNudgeGeneration,
     no_progress_nudge_generation: state.noProgressNudgeGeneration,
     policy_blocked_calls_this_turn: state.policyBlockedCallsThisTurn,
+    write_calls_this_turn: state.turn.writeCallsThisTurn,
+    successful_writes_this_turn: state.turn.successfulWritesThisTurn,
+    step_kinds_this_turn: [...state.turn.stepKindsThisTurn].sort(),
+    step_texts_this_turn: [...state.turn.stepTextsThisTurn],
+    last_call_signature: state.turn.lastCallSignature,
+    tool_markup_leaks_this_turn: state.turn.toolMarkupLeaksThisTurn,
+    tool_markup_retries_this_turn: state.turn.toolMarkupRetriesThisTurn,
+    steps_by_thread: [...state.turn.stepsByThread.entries()]
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([thread_id, steps]) => ({ thread_id, steps })),
+    progress_refunds_by_thread: [...state.turn.progressRefundsByThread.entries()]
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([thread_id, refunds]) => ({ thread_id, refunds })),
+    removed_tools: [...state.turn.removedTools],
+    removed_tool_rejection_streaks: [...state.turn.removedToolRejectionStreaks.entries()]
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([thread_id, streak]) => ({ thread_id, streak })),
+    unfinished_by_thread: [...state.turn.unfinishedByThread.entries()]
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([thread_id, kind]) => ({ thread_id, kind })),
   };
 }
 
@@ -501,8 +839,12 @@ async function verifySentinelPreDispatch(input: {
     return undefined;
   }
   const info = toolCall.tool_info;
-  // A silent Tier 1 call only needs the dispatch re-check when it is a shell command.
-  if (info.tier === undefined || (info.tier === 1 && (info.mint_tool_name ?? info.original_tool_name) !== 'exec')) {
+  // A silent Tier 1 call only needs the dispatch re-check when it is a shell command or a sandbox file write.
+  const mintToolName = info.mint_tool_name ?? info.original_tool_name;
+  if (
+    info.tier === undefined ||
+    (info.tier === 1 && mintToolName !== 'exec' && !SANDBOX_FILE_WRITE_TOOLS.has(mintToolName))
+  ) {
     return undefined;
   }
   const needsApproval = info.tier === 3 || (info.approval_token_id ?? null) !== null;
@@ -520,27 +862,48 @@ async function verifySentinelPreDispatch(input: {
   // minted) against the underlying tool's name and inner input, not the wrapper
   // (see DeferredTool.toolCallInfo). When mint unwrapped, the verifier must hash
   // the same inner input, or every approved deferred call fails as "action
-  // identity changed". Wrapper-classified fallbacks keep
-  // original_tool_name === 'call_tool' and are verified against the wrapper.
+  // identity changed". The token covers neither the tool name nor the server, so
+  // the wire wrapper must still name exactly what was classified. Wrapper-classified
+  // fallbacks keep original_tool_name === 'call_tool' and are verified against the wrapper.
   if (info.is_deferred === true && info.original_tool_name !== CALL_TOOL_NAME) {
-    canonicalParams = tryUnwrapCallToolInput(canonicalParams) ?? canonicalParams;
+    const wrapper = tryParseCallToolWrapper(canonicalParams);
+    if (wrapper !== undefined) {
+      if (wrapper.tool_name !== info.original_tool_name || wrapper.mcp_server !== info.mcp_server_name) {
+        return 'The deferred tool call no longer names the tool that was approved; request approval again.';
+      }
+      canonicalParams = wrapper.input;
+    }
   }
-  // When the mint site recorded its exact identity (sandbox: invoked name and
-  // normalized args, while original_tool_name is remapped for display), verify
-  // against the recorded values instead of reconstructing.
-  if (info.mint_canonical_params !== undefined) {
-    canonicalParams = info.mint_canonical_params;
-  }
+  // Host-observed state an approval also binds (a Gmail draft as shown on the card) cannot be re-derived
+  // from the wire alone, so the tool set re-reads it here from the wire arguments; the token check below
+  // then compares that whole re-derivation with what was approved.
+  let live: Record<string, unknown> | undefined;
   try {
-    const live = await input.toolInfo.toolSet.liveMintParams?.({
+    live = await input.toolInfo.toolSet.liveMintParams?.({
       name: input.toolInfo.originalToolName,
       arguments: wireArguments,
     });
-    if (live !== undefined) {
-      canonicalParams = live;
-    }
   } catch {
     return 'The approved action could not be re-checked; request approval again.';
+  }
+  if (live !== undefined) {
+    canonicalParams = live;
+  } else if (info.mint_canonical_params !== undefined) {
+    // Where mint recorded its exact identity (sandbox: invoked name and
+    // normalized args, while original_tool_name is remapped for display), the
+    // wire arguments are re-derived the way mint derived them and must equal what
+    // was approved. Verifying the recorded values alone would let arguments edited
+    // after classification run under the earlier decision.
+    const rederived = toJsonSafeParams(
+      input.toolInfo.toolSet.mintCanonicalParams?.({
+        name: input.toolInfo.originalToolName,
+        arguments: canonicalParams,
+      }) ?? canonicalParams,
+    );
+    if (JSON.stringify(canonicalValue(rederived)) !== JSON.stringify(canonicalValue(info.mint_canonical_params))) {
+      return 'Tool arguments changed since approval; request approval again.';
+    }
+    canonicalParams = rederived;
   }
   const offline = await sentinel.services.isOffline({
     tenant_id: sentinel.identity.tenant_id,
@@ -555,7 +918,7 @@ async function verifySentinelPreDispatch(input: {
   return await verifyPreDispatch({
     call: {
       connector,
-      tool_name: info.mint_tool_name ?? info.original_tool_name,
+      tool_name: mintToolName,
       tool_type: info.type,
       canonical_params: canonicalParams,
       tier: info.tier,
@@ -565,6 +928,11 @@ async function verifySentinelPreDispatch(input: {
     },
     ctx: {
       ...sentinel.identity,
+      // The workspace the classifier judged against, when the classifying tool recorded
+      // it (the sandbox does): the containment recheck runs against that same root, which
+      // for a chat with no repository bound is the provider's default workspace rather
+      // than no workspace at all.
+      workspace_cwd: info.workspace_cwd ?? sentinel.identity.workspace_cwd,
       services: sentinel.services,
       offline,
       path_resolution: info.path_resolution,
@@ -597,12 +965,61 @@ export const POLICY_BLOCKED_STOP_AT = 3;
 /** Times the same call may be made in one turn before the host ends the turn. */
 export const IDENTICAL_CALL_STOP_AT = 4;
 /**
+ * Identical calls in a row a reply may make before the next one ends it. A read leaves things as
+ * they were, so a brief may list or search the same thing a few times.
+ */
+export const REPEAT_LIMIT_READ_TOOLS = 3;
+/** The same limit for a tool that writes or sends, or that is not known to be a read. */
+export const REPEAT_LIMIT_OTHER_TOOLS = 1;
+/**
  * Occurrence at which the host nudges instead of stopping: the second time a signature repeats,
  * one internal system message is appended telling the model the result is already above and it
  * must not repeat the call (see IDENTICAL_CALL_NUDGE_MESSAGE in AgentThread's runtime context
  * helpers). The turn is not stopped until IDENTICAL_CALL_STOP_AT.
  */
 export const IDENTICAL_CALL_NUDGE_AT = 2;
+/**
+ * Tier 3 calls a turn may run before the host stops it. Only reads the host itself vouches for
+ * (isHostVouchedRead) never count: searches have their own limits. The call past the cap never runs; the
+ * turn ends once the batch that reached the cap has resolved.
+ */
+export const MAX_WRITE_CALLS_PER_TURN = 5;
+
+/**
+ * Whether a call only reads and changes nothing: a host-classified inspection, a tool its server
+ * declares read-only, or a call the classifier ran as the search provider's search or page read.
+ * Missing metadata counts as a change, so it never resolves to the reassuring answer.
+ */
+export function isReadOnlyCall(
+  info: Pick<InternalToolCallInfo, 'effect' | 'read_only_hint' | 'search_provider_call' | 'tier_reason'>,
+): boolean {
+  if (info.effect !== undefined) {
+    return info.effect === 'inspect';
+  }
+  if (info.read_only_hint === true) {
+    return true;
+  }
+  return isSearchProviderRead(info);
+}
+
+function isSearchProviderRead(info: Pick<InternalToolCallInfo, 'search_provider_call' | 'tier_reason'>): boolean {
+  return (
+    info.search_provider_call === true &&
+    info.tier_reason !== undefined &&
+    (isSilentSearchReason(info.tier_reason) || isSearchAskReason(info.tier_reason))
+  );
+}
+
+/**
+ * Whether the host itself ruled a call a read: the search provider's search or page read, or a maps
+ * lookup. Only these skip the write cap; a server's own read-only claim never does, so a write it
+ * wrongly calls read-only still counts.
+ */
+export function isHostVouchedRead(info: Pick<InternalToolCallInfo, 'search_provider_call' | 'tier_reason'>): boolean {
+  return isSearchProviderRead(info) || info.tier_reason === MAPS_ASK_REASON;
+}
+/** Tool calls written as text that the model is asked to redo in one turn; past this the turn ends. */
+export const MAX_TOOL_MARKUP_RETRIES_PER_TURN = 2;
 
 /**
  * What makes two calls "the same" for the per-turn repeat budget: the tool and its arguments.
@@ -699,8 +1116,7 @@ export function prepareSideEffectToolCalls({
       toolCall.tool_info.held_for_owner !== undefined ||
       toolCall.tool_info.is_thread_creation === true ||
       toolCall.tool_info.is_client_side === true ||
-      toolCall.tool_info.effect === 'inspect' ||
-      (toolCall.tool_info.effect === undefined && toolCall.tool_info.read_only_hint === true) ||
+      isReadOnlyCall(toolCall.tool_info) ||
       approvalDecisions.get(toolCall.id)?.status === 'deny' ||
       (toolCall.tool_info.is_approval_required === true && approvalDecisions.get(toolCall.id)?.status !== 'allow')
     ) {
@@ -730,6 +1146,7 @@ export function prepareSideEffectToolCalls({
       if (
         toolCall.tool_info.effect === 'edit' ||
         toolCall.tool_info.effect === 'commit' ||
+        toolCall.tool_info.effect === 'push' ||
         toolCall.tool_info.effect === 'execute'
       ) {
         projectedMutationEpoch += 1;
@@ -864,6 +1281,16 @@ function isReadOnlyDispatch(toolCall: InternalEnrichedToolCall): boolean {
 }
 
 /**
+ * Whether a settled read outcome is a failure the model would act on: the
+ * dispatch itself failed, or the provider answered with an error result.
+ * Non-result responses (auth, approval, client-side) are not failures to
+ * retry; each carries its own next step.
+ */
+function isFailedReadOutcome(outcome: ToolCallExecutionOutcome): boolean {
+  return outcome.failure || (isCallToolResponseResult(outcome.response) && outcome.response.result.isError === true);
+}
+
+/**
  * Per-batch admission limiter for concurrent read-only dispatch. At most
  * `maxConcurrency` tasks hold a permit at once; a released permit transfers
  * directly to the longest-waiting task. `acquire` rejects (and leaves the
@@ -987,6 +1414,7 @@ export async function executeToolCalls({
   runCodeToolCallTimeoutMs,
   logger,
   sentinel,
+  unreachableServerNames,
 }: {
   assistantMessage: InternalEnrichedAssistantMessage;
   toolMapping: Map<string, MappedMCPTool>;
@@ -1038,12 +1466,9 @@ export async function executeToolCalls({
    * approved Tier 3 calls are re-verified byte-for-byte immediately before
    * invocation, and Tier 3 approved/denied outcomes are audit-logged.
    */
-  sentinel?:
-    | {
-        services: SentinelServices;
-        identity: SentinelCallIdentity;
-      }
-    | undefined;
+  sentinel?: SentinelDispatchContext | undefined;
+  /** Servers left out of this turn's tool list because they could not be reached. */
+  unreachableServerNames?: ReadonlySet<string> | undefined;
 }): Promise<ExecuteToolCallsResult> {
   const toolMessages: ToolCallResult[] = [];
   const initializationInfo: MCPServerInitInfo[] = [];
@@ -1087,10 +1512,15 @@ export async function executeToolCalls({
       admissionProvenance,
     });
     if (!toolInfo) {
+      // A tool the person already saw a card for can vanish when its connector drops off. Say so plainly.
+      const connectorGone = unreachableServerNames?.has(toolCall.tool_info.mcp_server_name) === true;
+      const connectorText = connectorUnreachableText(toolCall.tool_info.mcp_server_name);
       return {
         toolCall,
         toolInfo,
-        response: toolResultResponse({ text: `Tool ${toolCall.function.name} not found in tool mapping` }),
+        response: toolResultResponse({
+          text: connectorGone ? connectorText : `Tool ${toolCall.function.name} not found in tool mapping`,
+        }),
         failure: true,
         completedAt: new Date().toISOString(),
         memoized: false,
@@ -1098,11 +1528,13 @@ export async function executeToolCalls({
         blockedPrivateFallback: false,
         repeatedSideEffect: false,
         disposition: 'never_ran',
-        remediation: {
-          reason_code: 'unknown_tool',
-          message: 'Use only a tool that is available in this conversation, or continue without a tool.',
-          suggested_action: 'change_strategy',
-        },
+        remediation: connectorGone
+          ? { reason_code: 'connector_unreachable', message: connectorText, suggested_action: 'retry' }
+          : {
+              reason_code: 'unknown_tool',
+              message: 'Use only a tool that is available in this conversation, or continue without a tool.',
+              suggested_action: 'change_strategy',
+            },
         admissionProvenance: admission,
       };
     }
@@ -1127,14 +1559,21 @@ export async function executeToolCalls({
         remediation: policyBlocked
           ? {
               reason_code: 'tool_policy_blocked',
-              message: 'Use a tool that is allowed in this conversation or change strategy.',
-              suggested_action: 'change_strategy',
+              message:
+                preparationFailure.owner_message ??
+                'Use a tool that is allowed in this conversation or change strategy.',
+              suggested_action: preparationFailure.owner_message === undefined ? 'change_strategy' : 'contact_user',
             }
-          : {
-              reason_code: 'tool_pre_dispatch_failed',
-              message: 'The tool could not be prepared and was not executed. Retry once or choose another tool.',
-              suggested_action: 'retry',
-            },
+          : preparationFailure.kind === 'connector_unreachable'
+            ? { reason_code: 'connector_unreachable', message: preparationFailure.message, suggested_action: 'retry' }
+            : {
+                reason_code: 'tool_pre_dispatch_failed',
+                // A refusal the owner must hear about (the reply guard, the search budget) carries its plain line.
+                message:
+                  preparationFailure.owner_message ??
+                  'The tool could not be prepared and was not executed. Retry once or choose another tool.',
+                suggested_action: preparationFailure.owner_message === undefined ? 'retry' : 'contact_user',
+              },
         admissionProvenance: admission,
       };
     }
@@ -1216,6 +1655,26 @@ export async function executeToolCalls({
       sentinel,
     });
     if (sentinelVerificationError !== undefined) {
+      // The blocked result below is unchanged; this only leaves a row in the activity log, so a
+      // call stopped at the last check is visible beside the actions that ran.
+      if (sentinel !== undefined && sentinel.services.audit !== null) {
+        try {
+          await sentinel.services.audit.record({
+            tenant_id: sentinel.identity.tenant_id,
+            created_by: sentinel.identity.created_by,
+            conversation_id: sentinel.identity.conversation_id,
+            tier: toolCall.tool_info.tier ?? 3,
+            tool_name: toolCall.tool_info.original_tool_name,
+            description: 'This call no longer matched the approval it was given, so it was not run.',
+            outcome: 'auto_denied',
+            auto_deny_reason: null,
+          });
+        } catch (error) {
+          logger?.warn('Could not record a stopped call in the activity log', {
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+      }
       return {
         toolCall,
         toolInfo,
@@ -1248,7 +1707,7 @@ export async function executeToolCalls({
         return {
           toolCall,
           toolInfo,
-          response: toolResultResponse({ text: deniedToolCallText(approvalDecision.reason), isError: true }),
+          response: deniedToolCallResponse(approvalDecision.reason),
           failure: true,
           completedAt: new Date().toISOString(),
           memoized: false,
@@ -1256,7 +1715,7 @@ export async function executeToolCalls({
           blockedPrivateFallback: false,
           repeatedSideEffect: false,
           disposition: 'denied',
-          remediation: undefined,
+          remediation: deniedToolCallRemediation(approvalDecision.reason),
           admissionProvenance: admission,
         };
       }
@@ -1265,27 +1724,19 @@ export async function executeToolCalls({
         memoState.deniedApprovalIdentities.has(approvalGrantKey(toolCall.tool_info))
       ) {
         memoState.repeatedDeniedApproval = true;
+        // A repeat of a "no" from earlier in this turn is that same "no": no new card, and the same firm result.
         return {
           toolCall,
           toolInfo,
-          response: toolResultResponse({
-            text: JSON.stringify({
-              error: 'This exact action was already denied in this turn. Change strategy or explain what you need.',
-            }),
-            isError: true,
-          }),
+          response: deniedToolCallResponse(undefined),
           failure: true,
           completedAt: new Date().toISOString(),
           memoized: false,
           repeatCount: 1,
           blockedPrivateFallback: false,
           repeatedSideEffect: false,
-          disposition: 'policy_blocked',
-          remediation: {
-            reason_code: 'repeated_denied_action',
-            message: 'Change strategy or explain why a different action is needed.',
-            suggested_action: 'change_strategy',
-          },
+          disposition: 'denied',
+          remediation: REPEATED_DENIAL_REMEDIATION,
           admissionProvenance: admission,
         };
       }
@@ -1320,9 +1771,7 @@ export async function executeToolCalls({
         };
       }
       const shouldMemoize =
-        toolCall.tool_info.effect === 'inspect' ||
-        (toolCall.tool_info.effect === undefined && toolCall.tool_info.read_only_hint === true) ||
-        isGithubFileRead(toolInfo.toolSet.name, toolInfo.originalToolName);
+        isReadOnlyCall(toolCall.tool_info) || isGithubFileRead(toolInfo.toolSet.name, toolInfo.originalToolName);
       const shouldReplayCompleted = shouldMemoize || toolCall.tool_info.effect === 'verify';
       const key = memoKey(
         toolInfo,
@@ -1334,7 +1783,12 @@ export async function executeToolCalls({
       const dispatchId = `dispatch-${createHash('sha256')
         .update(JSON.stringify([threadId, toolCall.id, key]), 'utf8')
         .digest('hex')}`;
-      const previous = shouldReplayCompleted ? memoState.entries.get(key) : undefined;
+      const completedEntry = shouldReplayCompleted ? memoState.entries.get(key) : undefined;
+      // An entry produced before the turn's latest successful write may
+      // describe a world that no longer exists, so only an entry stamped
+      // with the current mutation epoch may be replayed. A stale entry
+      // falls through to a fresh dispatch, whose result replaces it below.
+      const previous = completedEntry?.mutationEpoch === memoState.workspaceMutationEpoch ? completedEntry : undefined;
       if (previous !== undefined) {
         previous.count += 1;
         return {
@@ -1508,6 +1962,9 @@ export async function executeToolCalls({
             ...(toolCall.tool_info.structured_edit_precondition === undefined
               ? {}
               : { structured_edit_precondition: toolCall.tool_info.structured_edit_precondition }),
+            ...(toolCall.tool_info.git_remote_precondition === undefined
+              ? {}
+              : { git_remote_precondition: toolCall.tool_info.git_remote_precondition }),
           },
         );
       };
@@ -1571,6 +2028,7 @@ export async function executeToolCalls({
               count: 1,
               disposition: result.result.isError === true ? 'executed_nonzero' : 'executed_ok',
               remediation: undefined,
+              mutationEpoch: memoState.workspaceMutationEpoch,
             };
           },
           (error: unknown) => {
@@ -1628,6 +2086,7 @@ export async function executeToolCalls({
           count: 1,
           disposition: failed ? 'executed_nonzero' : 'executed_ok',
           remediation: undefined,
+          mutationEpoch: memoState.workspaceMutationEpoch,
         });
       }
       const unavailable = isGithubFileContentUnavailable(response);
@@ -1652,7 +2111,9 @@ export async function executeToolCalls({
       if (
         isCallToolResponseResult(response) &&
         ((response.result.isError !== true &&
-          (toolCall.tool_info.effect === 'edit' || toolCall.tool_info.effect === 'commit')) ||
+          (toolCall.tool_info.effect === 'edit' ||
+            toolCall.tool_info.effect === 'commit' ||
+            toolCall.tool_info.effect === 'push')) ||
           toolCall.tool_info.effect === 'execute')
       ) {
         memoState.workspaceMutationEpoch += 1;
@@ -1790,8 +2251,23 @@ export async function executeToolCalls({
       }),
     ),
   );
+  const epochBeforeStatefulPhase = memoState.workspaceMutationEpoch;
   for (const { index, toolCall } of statefulPhase) {
     outcomes.set(index, await executeOne(toolCall));
+  }
+  // A failed read in a mixed batch may have failed only because the write it
+  // depended on sits in the same batch and had not landed yet. When a
+  // stateful call moved the mutation epoch, each failed read gets one fresh
+  // dispatch and the fresh result replaces the failed one, whichever way the
+  // fresh attempt lands. Successful reads keep their pre-write result by
+  // design, and no read is re-dispatched more than once here.
+  if (memoState.workspaceMutationEpoch !== epochBeforeStatefulPhase) {
+    for (const { index, toolCall } of readPhase) {
+      const outcome = outcomes.get(index);
+      if (outcome !== undefined && isFailedReadOutcome(outcome)) {
+        outcomes.set(index, await executeOne(toolCall));
+      }
+    }
   }
   const results = assistantMessage.tool_calls.map((_, index) => {
     const outcome = outcomes.get(index);
@@ -1800,24 +2276,47 @@ export async function executeToolCalls({
     }
     return outcome;
   });
+  // A call refused while it was prepared never reaches classification, so it has no classify-time row.
+  // Record each refusal so Recent actions shows what was not done. Refused before classification means no tier
+  // was set, so it is recorded at Tier 3, the tier that always asks before a change.
+  if (sentinel !== undefined) {
+    await recordNotPreparedRefusals({
+      services: sentinel.services,
+      identity: sentinel.identity,
+      refusals: results.flatMap(({ toolCall }) => {
+        const failure = toolCall.tool_info.pre_dispatch_failure;
+        return failure === undefined
+          ? []
+          : [
+              {
+                toolName: toolCall.tool_info.original_tool_name,
+                tier: toolCall.tool_info.tier,
+                message: failure.owner_message ?? failure.message,
+              },
+            ];
+      }),
+    });
+  }
   // Sentinel: record outcomes once dispatch is settled. Auto-denied calls were
   // recorded at classify time; carded calls record the user's decision and
   // relaxed Tier 2 calls record that they ran.
   if (sentinel?.services.audit !== null && sentinel?.services.audit !== undefined) {
     const audit = sentinel.services.audit;
-    for (const { toolCall, disposition } of results) {
+    for (const { toolCall, disposition, response, admissionProvenance: admitted } of results) {
       const info = toolCall.tool_info;
       if ((info.tier !== 2 && info.tier !== 3) || info.tier3_card === null) {
         continue;
       }
-      const status = approvalDecisions.get(toolCall.id)?.status;
+      const decision = approvalDecisions.get(toolCall.id);
+      const status = decision?.status;
       const asked = info.tier === 3 || (info.approval_token_id ?? null) !== null;
-      let outcome: 'approved' | 'denied' | 'ran';
+      let outcome: 'approved' | 'denied' | 'auto_denied' | 'ran';
       if (asked) {
         if (status !== 'allow' && status !== 'deny') {
           continue;
         }
-        outcome = status === 'allow' ? 'approved' : 'denied';
+        // A card nobody answered in time must not read as "You declined" in the activity log.
+        outcome = status === 'allow' ? 'approved' : isExpiredApproval(decision) ? 'auto_denied' : 'denied';
       } else if (disposition === 'executed_ok' || disposition === 'executed_nonzero') {
         outcome = 'ran';
       } else {
@@ -1829,10 +2328,36 @@ export async function executeToolCalls({
         conversation_id: sentinel.identity.conversation_id,
         tier: info.tier,
         tool_name: info.original_tool_name,
-        description: info.tier3_card?.plain_what ?? info.original_tool_name,
+        // A chat grant answers without a card, so the row says so instead of reading like the person's own click.
+        description:
+          admitted.source === 'chat_grant'
+            ? `Allowed for this chat, no card shown: ${heldCallAuditText(info)}`
+            : heldCallAuditText(info),
         outcome,
-        auto_deny_reason: null,
+        auto_deny_reason: outcome === 'auto_denied' ? APPROVAL_EXPIRED_REASON_CODE : null,
       });
+      // An approved send can still be refused by the mail service itself when a recipient is not
+      // on its list. The row above records the person's decision; this one records that the send
+      // was then refused, so the log does not read as if the message went out.
+      if (outcome === 'approved' && info.mail_send === true && isRecipientPolicyDenial(response)) {
+        try {
+          await audit.record({
+            tenant_id: sentinel.identity.tenant_id,
+            created_by: sentinel.identity.created_by,
+            conversation_id: sentinel.identity.conversation_id,
+            tier: info.tier,
+            tool_name: info.original_tool_name,
+            description:
+              'The mail service refused the recipient after this send was approved, so the message was not sent.',
+            outcome: 'denied',
+            auto_deny_reason: null,
+          });
+        } catch (error) {
+          logger?.warn('Could not record a refused send in the activity log', {
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+      }
     }
   }
   for (const {
@@ -1870,6 +2395,7 @@ export async function executeToolCalls({
           content: 'Waiting for user to authenticate. Please try again 1 time.',
         },
         rawContent: 'Waiting for user to authenticate. Please try again 1 time.',
+        images: [],
         toolCallInfo: toolCall.tool_info,
         screen: undefined,
         failure: true,
@@ -1901,6 +2427,16 @@ export async function executeToolCalls({
     }
 
     const { result, wasInitialized } = response;
+    // Every result the model sees passes here, so where its links came from is known on every thread.
+    if (sentinel !== undefined) {
+      const sent = collectOutboundStrings(parseToolCallArguments(toolCall) ?? {});
+      recordToolResultProvenance({
+        state: sentinel.web_search,
+        tool_name: toolCall.tool_info.original_tool_name,
+        argument_values: sent === undefined ? [] : [...sent.values, ...sent.plumbing],
+        texts: resultTexts(result),
+      });
+    }
 
     let content: string;
     let isStructuredContent = false;
@@ -1932,7 +2468,13 @@ export async function executeToolCalls({
         .filter((c): c is { type: 'text'; text: string } => c.type === 'text')
         .map(c => c.text)
         .join('\n');
-      content = textContent || JSON.stringify(result.content);
+      // Image bytes go to the host, not into the model's text.
+      const otherBlocks = result.content.filter(c => c.type !== 'image');
+      content =
+        textContent ||
+        (otherBlocks.length === 0 && result.content.length > 0
+          ? `Returned ${String(result.content.length)} image(s).`
+          : JSON.stringify(otherBlocks));
     } else {
       content = JSON.stringify(result.content);
     }
@@ -1940,6 +2482,7 @@ export async function executeToolCalls({
     toolMessages.push({
       message: { role: 'tool', tool_call_id: toolCall.id, content },
       rawContent: content,
+      images: result.isError ? [] : toolResultImages(result.content),
       toolCallInfo: toolCall.tool_info,
       screen: undefined,
       failure: failure || result.isError === true,

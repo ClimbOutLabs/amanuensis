@@ -6,6 +6,7 @@ import { InvalidPageTokenError, type AgentSpec } from '@truefoundry/trueforge-co
 import type { Context } from 'hono';
 import type { Authorizer } from '../auth/authorizer';
 import { createdBySubjectFromRequestContext, type ResolveRequestContext } from '../auth/identity';
+import type { McpCatalog } from '../catalog/McpCatalog';
 import configuration from '../config';
 import {
   AgentExternalIdConflictError,
@@ -38,6 +39,8 @@ export interface AgentsRouterDeps<TTransaction> {
   resolveMcpServerStore: (c: Context) => IMcpServerStore<TTransaction>;
   resolveSkillStore: ResolveSkillStore<TTransaction>;
   resolveSandboxProviderStore: (c: Context) => ISandboxProviderStore<TTransaction>;
+  /** When present, remembered mounts of a deleted search provider do not fail validation. */
+  mcpCatalog?: McpCatalog | undefined;
   withTransaction: WithTransaction<TTransaction>;
   resolveRequestContext: ResolveRequestContext;
   authorizer: Authorizer;
@@ -61,6 +64,7 @@ async function validateManifest<TTransaction>({
   skillStore,
   sandboxProviderStore,
   tenant_id,
+  mcpCatalog,
 }: {
   spec: AgentSpec;
   modelProviderStore: IModelProviderStore<TTransaction>;
@@ -68,6 +72,7 @@ async function validateManifest<TTransaction>({
   skillStore: ISkillStore<TTransaction>;
   sandboxProviderStore: ISandboxProviderStore<TTransaction>;
   tenant_id: string;
+  mcpCatalog?: McpCatalog | undefined;
 }): Promise<AgentSpec> {
   await validateAgentSpec({
     spec,
@@ -76,6 +81,7 @@ async function validateManifest<TTransaction>({
     mcpServerStore,
     skillStore,
     sandboxProviderStore,
+    searchProviderPresetNames: mcpCatalog?.searchProviderPresetNames(),
   });
   return spec;
 }
@@ -113,6 +119,7 @@ export function createAgentsRouter<TTransaction>(deps: AgentsRouterDeps<TTransac
       skillStore: deps.resolveSkillStore(c),
       sandboxProviderStore: deps.resolveSandboxProviderStore(c),
       tenant_id: requestContext.tenant_id,
+      mcpCatalog: deps.mcpCatalog,
     });
     try {
       const record = await deps.resolveAgentStore(c).createAgent({
@@ -121,6 +128,7 @@ export function createAgentsRouter<TTransaction>(deps: AgentsRouterDeps<TTransac
         description: body.description,
         manifest,
         external_id: null,
+        host_managed: false,
         created_by_subject: createdBySubjectFromRequestContext(requestContext),
       });
       return c.json({ data: toWireAgent(record) }, 201);
@@ -217,6 +225,7 @@ export function createAgentsRouter<TTransaction>(deps: AgentsRouterDeps<TTransac
       skillStore: deps.resolveSkillStore(c),
       sandboxProviderStore: deps.resolveSandboxProviderStore(c),
       tenant_id: requestContext.tenant_id,
+      mcpCatalog: deps.mcpCatalog,
     });
     const record = await deps.resolveAgentStore(c).updateAgent({
       tenant_id: requestContext.tenant_id,

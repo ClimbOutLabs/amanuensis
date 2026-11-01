@@ -18,7 +18,7 @@ export type {
   HandoffRepositoryBinding,
 } from './runtime/AbnormalHandoff';
 export type { AgentDefinition, ConfiguredModelSummary, ModelParams } from './runtime/AgentDefinition';
-export { AgentThread } from './runtime/AgentThread';
+export { AgentThread, MODEL_STOPPED_ANSWERING_MESSAGE } from './runtime/AgentThread';
 export type {
   AgentInfo,
   AgentParent,
@@ -33,8 +33,16 @@ export type {
 export { AgentThreadOrchestrator } from './runtime/AgentThreadOrchestrator';
 export { stageAttachment } from './runtime/attachmentStaging';
 export type { StagedAttachment } from './runtime/attachmentStaging';
+export { isHostWrappedText, isUntrustedDocumentText, personMessageIndex } from './runtime/contextUtils';
 export type { CreateDynamicSubAgentThread } from './runtime/CreateDynamicSubAgentThread';
-export { isAgentInputUserMessage, isEmptyMessageContent, isFileContentPart } from './runtime/UserInputMessage';
+export { measurePromptRequest } from './runtime/promptReport';
+export type { PromptReport, PromptReportInput, PromptReportRow } from './runtime/promptReport';
+export {
+  extractBase64,
+  isAgentInputUserMessage,
+  isEmptyMessageContent,
+  isFileContentPart,
+} from './runtime/UserInputMessage';
 export type { AgentInputUserMessage } from './runtime/UserInputMessage';
 
 // Deterministic local document extraction/report capability.
@@ -50,10 +58,10 @@ export type {
 export type { StructuredDocumentReport } from '../documents/documentRenderer';
 export type { NetWorthObservationInput, NetWorthReport } from '../documents/netWorthReport';
 export { DEFAULT_OCR_LANGUAGES, requiredOcrLanguages } from '../documents/ocrLanguages';
+export { DOCUMENTS_SERVER_ID, EXTRACT_DOCUMENT_TEXT_TOOL_NAME } from '../documents/toolContract';
 export {
   CREATE_DOCUMENT_REPORT_TOOL_NAME,
-  DOCUMENTS_SERVER_ID,
-  EXTRACT_DOCUMENT_TEXT_TOOL_NAME,
+  DOCUMENT_REPORT_TOOL_NAMES,
   SUMMARIZE_NET_WORTH_TOOL_NAME,
   documentCapability,
 } from './capabilities/builtins/DocumentTools';
@@ -65,7 +73,9 @@ export type {
   AgentThreadExecutionContext,
   PostToolCallAgentContextProcessor,
   PreLLMEphemeralAgentContextProcessor,
+  PreSendContextProcessor,
 } from './capabilities/AgentContextProcessor';
+export type { ToolResponseProcessor, ToolResponseProcessorResult } from './capabilities/ToolResponseProcessor';
 
 // Built-in factories
 export { getModelOutputExceedsContextError } from '../schemas/modelTokenLimits';
@@ -95,11 +105,7 @@ export {
   largeToolResponse,
 } from './capabilities/builtins/LargeToolResponse';
 export { openUI } from './capabilities/builtins/OpenUI';
-export {
-  REPLACE_TASK_CHECKLIST_TOOL_NAME,
-  TASK_CHECKLIST_SERVER_ID,
-  taskChecklist,
-} from './capabilities/builtins/TaskChecklist';
+export { TASK_CHECKLIST_SERVER_ID, taskChecklist } from './capabilities/builtins/TaskChecklist';
 export type { TaskChecklistAccess } from './capabilities/builtins/TaskChecklist';
 export { TOKEN_BUDGET_SAFETY_MARGIN } from './capabilities/builtins/tokenBudgetConstants';
 export { toolOutputScreen } from './capabilities/builtins/ToolOutputScreen';
@@ -109,6 +115,7 @@ export {
   renderWebSearchResultsMarkdown,
   webSearchRendering,
 } from './capabilities/builtins/WebSearchRendering';
+export { resolveLocalTime } from './util/clientTimezone';
 
 // MCP contracts
 export type { ApprovalDecision } from './events/schema';
@@ -170,9 +177,21 @@ export { ToolSet } from './mcp/ToolSet';
 export { isFailoverRetryable, withFailover } from './llm/failoverLanguageModel';
 export type { FailoverLanguageModelOptions } from './llm/failoverLanguageModel';
 export type { AgentMetadata, ILLM, LLMCreateParams, LLMCreateParamsStreaming } from './llm/ILLM';
+export { ModelRequestGate } from './llm/ModelRequestGate';
+export type { ModelRequestSlot } from './llm/ModelRequestGate';
+export {
+  MODEL_WAITING_EVENT_TYPE,
+  MODEL_WAITING_MESSAGE,
+  ModelWaitingEventSchema,
+  buildModelWaitingEvent,
+} from './llm/modelWaitingEvent';
+export type { ModelWaitingEvent, ModelWaitingEventEnvelope } from './llm/modelWaitingEvent';
 export { ResponseFormatSchema, toOpenAIResponseFormat } from './llm/responseFormat';
 export type { ResponseFormat } from './llm/responseFormat';
+export { streamDeadlineDetailsOf } from './llm/streamDeadline';
+export type { StreamDeadlineDetails } from './llm/streamDeadline';
 export {
+  ModelOutputRepetitionError,
   SUPPORTED_REASONING_EFFORTS,
   TOKEN_FACTORY_DEFAULT_BASE_URL,
   VERCEL_AI_PROVIDER_NAMES,
@@ -185,6 +204,7 @@ export {
   ActionRequiredEventSchema,
   AgentInputUserMessageSchema,
   ContextCompactionEventSchema,
+  ContextCompactionStartedEventSchema,
   DocumentIngestionEventSchema,
   EventIdSchema,
   EventType,
@@ -210,6 +230,7 @@ export {
 export type {
   AgentOutputEvent,
   ContextCompactionEvent,
+  ContextCompactionStartedEvent,
   DocumentIngestionEvent,
   MCPAuthRequiredEvent,
   MCPServerAuthInfo,
@@ -227,12 +248,18 @@ export type {
 export { CompletionUsageSchema } from './llm/LLMTypes';
 export type { CompletionUsage, ExtendedChatCompletionChunk, RawAssistantMessageWithUsage } from './llm/LLMTypes';
 export type { ChatCompletionContentPartRefusal, ChatCompletionContentPartText } from './llm/openaiSchemas';
-export type { ToolCallMemoSnapshot } from './mcp/executeToolCalls';
+export type { ToolCallMemoSnapshot, ToolCallResult } from './mcp/executeToolCalls';
 export { InternalEventType } from './runtime/AgentThread.types';
 export type { AgentThreadSendBatch, ContextMessage } from './runtime/AgentThread.types';
+export { isInternalSystemMessage } from './runtime/contextUtils';
 export { AgentThreadMetricsSchema } from './runtime/metrics';
 export type { AgentThreadMetrics } from './runtime/metrics';
-export { TaskFindingSchema, TaskPhaseSchema, TaskStateSchema } from './runtime/taskState';
+export {
+  REPLACE_TASK_CHECKLIST_TOOL_NAME,
+  TaskFindingSchema,
+  TaskPhaseSchema,
+  TaskStateSchema,
+} from './runtime/taskState';
 export type { TaskFinding, TaskPhase, TaskState, TaskStateSnapshot } from './runtime/taskState';
 
 // Tracing
@@ -249,6 +276,7 @@ export {
   ImplementationPlanAdmissionBlockedError,
   McpConnectionError,
   McpDcrConfigurationError,
+  McpRedirectRefusedError,
   StructuredEditPreconditionBlockedError,
   ToolPolicyBlockedError,
   ToolPreDispatchError,
@@ -298,6 +326,12 @@ export type {
 export { runCodeStatusFromReadiness } from './sandbox/driver/runCodeStatus';
 export { DisabledDriver } from './sandbox/driver/sandboxDisabled';
 export { GIT_NETWORK_ENV_NAMES, pickGitNetworkEnv } from './sandbox/hostAuthenticatedGit';
+export {
+  PACKAGE_GIT_DEPENDENCY_MESSAGE,
+  commandDownloadsPackages,
+  findCommandLineGitDependency,
+  findGitDependency,
+} from './sandbox/packageMirrors';
 export { DaytonaSandboxProvider } from './sandbox/provider/DaytonaProvider';
 export type { DaytonaSandboxProviderOptions } from './sandbox/provider/DaytonaProvider';
 export { absolutizeRelativeExecEnv } from './sandbox/provider/execEnv';
@@ -306,6 +340,7 @@ export {
   ensureExecSuccess,
   executeVerifiedWorkspaceCommit,
   shellEscape,
+  withTrustedPath,
   workspaceTerminationCommand,
 } from './sandbox/provider/Provider';
 export type {
@@ -364,14 +399,23 @@ export { GitBridge } from './sandbox/slots/git/gitBridge';
 export { execFileRunner } from './sandbox/slots/git/hostCommand';
 export { probeSlotAttachments } from './sandbox/slots/slotAttachmentProbe';
 export type { SlotAttachmentProbeResult } from './sandbox/slots/slotAttachmentProbe';
-export { DEFAULT_SESSION_DISK_MB, slotSocketPathsIn } from './sandbox/slots/slotContract';
+export {
+  DEFAULT_SESSION_DISK_MB,
+  SLOT_MIRROR_GUEST_PORT,
+  SLOT_MIRROR_SOCKET_NAME,
+  SLOT_SKILL_NETWORK_GUEST_PORT,
+  SLOT_SKILL_NETWORK_SOCKET_NAME,
+  slotMirrorSocketPathsIn,
+  slotSkillNetworkSocketPathsIn,
+  slotSocketPathsIn,
+} from './sandbox/slots/slotContract';
 export { SLOT_FIX_COMMAND, SLOT_NOT_READY_MESSAGE, SlotDriver } from './sandbox/slots/SlotDriver';
 export { SlotSandboxProvider } from './sandbox/slots/SlotSandboxProvider';
 export { extractStructuredEditPaths, repositoryRootsMatch } from './sandbox/structuredEditPaths';
 export type { StructuredEditPathRequest, StructuredEditPathResolution } from './sandbox/structuredEditPaths';
 
 // Skills: the ISkillMounter seam lets hosts plug in their own skill sources
-export { InstructionBuilder } from './InstructionBuilder';
+export { InstructionBuilder, rootAgentIdentity, type RootAgentNames } from './InstructionBuilder';
 export {
   SKILLS_PREAMBLE,
   SkillMounter,
@@ -387,6 +431,12 @@ export type { HostToolCallPolicy, HostToolCallPolicyBlock, HostToolCallPolicyCal
 
 // Sentinel: three-tier permission system for tool execution
 export {
+  callResultSource,
+  callReturnsOutsideContent,
+  contextHasOutsideToolResult,
+} from './capabilities/builtins/ChatProvenance';
+export type { ToolResultSource } from './capabilities/builtins/ChatProvenance';
+export {
   InMemoryApprovalTokenStore,
   hasApprovalScope,
   hashApprovalTokenId,
@@ -401,7 +451,7 @@ export type {
   MintApprovalTokenInput,
   ShellApprovalBinding,
 } from './permissions/approvalTokens';
-export { recordClassificationAudit } from './permissions/audit';
+export { recordClassificationAudit, recordHeldActionAudit } from './permissions/audit';
 export type { AuditLogWriter, AuditOutcome, AuditRecordInput } from './permissions/audit';
 export {
   canonicalShellForm,
@@ -410,7 +460,7 @@ export {
   mapsDestinationHosts,
   shellBindingFromForm,
 } from './permissions/classifier';
-export type { ClassifyContext, SentinelAction } from './permissions/classifier';
+export type { ClassifyContext, ReminderLine, SentinelAction } from './permissions/classifier';
 export {
   DEFAULT_PINNED_PATH,
   classifyContextFor,
@@ -422,11 +472,35 @@ export type { SentinelCallIdentity, SentinelHostContext, SentinelServices } from
 export { verifyPreDispatch } from './permissions/dispatch';
 export type { DispatchCheckContext, VerifiableCall } from './permissions/dispatch';
 export {
+  DEFAULT_MAPS_TRAVEL_MODE,
+  MAPS_TRAVEL_MODES,
+  MapsRouteResultSchema,
+  MapsTransitStepSchema,
+  MapsTravelModeSchema,
+} from './permissions/mapsRouteSchemas';
+export type {
+  MapsRouteResult,
+  MapsTransitStep,
+  MapsTransitVehicle,
+  MapsTravelMode,
+} from './permissions/mapsRouteSchemas';
+export {
   MAPS_TOOL_NAMES,
   RENDER_MAP_TOOL_NAME,
+  RENDER_PLACES_TOOL_NAME,
   RENDER_ROUTE_TOOL_NAME,
   isMapsToolName,
 } from './permissions/mapsToolNames';
+export { checkOutboundStrings, collectOutboundStrings } from './permissions/outboundGuard';
+export type { OutboundGuardRule, OutboundGuardVerdict } from './permissions/outboundGuard';
+export {
+  isTrustedLink,
+  isTrustedPicture,
+  recordPageImageUrls,
+  recordPersonText,
+  searchResultUrls,
+} from './permissions/provenance';
+export type { SearchResultUrls } from './permissions/provenance';
 export {
   AUTO_DENY_REASONS,
   TIER2_ACTION_KINDS,
@@ -443,9 +517,27 @@ export type {
   Tier,
   Tier2ActionKind,
   Tier3Card,
+  Tier3Persona,
+  Tier3Schedule,
   TierDecision,
   TrackedExecutionBinding,
 } from './permissions/tier';
-export type { ToolGrantKey, ToolGrantStore } from './permissions/toolGrants';
-export { createWebSearchTurnState } from './permissions/webSearch';
+export type { ToolGrantIdentity, ToolGrantKey, ToolGrantStore } from './permissions/toolGrants';
+export {
+  PAGE_PICTURES_LABEL,
+  SILENT_SEARCH_LIMIT,
+  createWebSearchTurnState,
+  pageImageUrls,
+} from './permissions/webSearch';
 export type { SearchProviderGrant, WebSearchTurnState } from './permissions/webSearch';
+export {
+  FETCHED_PAGE_TEXT_MAX_CHARS,
+  FetchedPageStore,
+  fetchedPages,
+  isPageReaderTool,
+  isSearchResultTool,
+  recordFetchedPages,
+} from './search/fetchedPages';
+export type { FetchedPageScope } from './search/fetchedPages';
+export { groundPlace, isInCalendar, normalizedWords } from './search/groundPlace';
+export type { GroundedPlace, PlaceClaim } from './search/groundPlace';

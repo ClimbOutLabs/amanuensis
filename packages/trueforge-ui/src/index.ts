@@ -71,6 +71,8 @@ export type {
   TableRowProps,
   TableTokenPaginationProps,
 } from './atoms/primitives/Table.js';
+export { AllClear, GoldTick, HandNote, Highlight, StubTear } from './atoms/Reward.js';
+export type { AllClearProps, HandNoteProps, RewardPlayProps, StubTearProps } from './atoms/Reward.js';
 export { ScheduleFormDrawer } from './atoms/schedules/ScheduleFormDrawer.js';
 export type { ScheduleFormDrawerProps } from './atoms/schedules/ScheduleFormDrawer.js';
 export { ScheduleFormFields } from './atoms/schedules/ScheduleFormFields.js';
@@ -84,6 +86,8 @@ export { TestScheduleScreen } from './atoms/schedules/TestScheduleScreen.js';
 export type { ScheduleMcpMount, TestScheduleScreenProps } from './atoms/schedules/TestScheduleScreen.js';
 export { SchedulesButton } from './atoms/SchedulesButton.js';
 export type { SchedulesButtonProps } from './atoms/SchedulesButton.js';
+export { useHighlightedCard, useRewardLedger } from './hooks/useRewardLedger.js';
+export type { HighlightCandidates, RewardContext, RewardRequest } from './hooks/useRewardLedger.js';
 export { Icon } from './icons/Icon.js';
 export type { IconProps } from './icons/Icon.js';
 
@@ -139,6 +143,10 @@ export { UserMessageEdit } from './atoms/UserMessageEdit.js';
 export type { UserMessageEditProps } from './atoms/UserMessageEdit.js';
 export { WelcomeScreen } from './atoms/WelcomeScreen.js';
 export type { WelcomeScreenProps } from './atoms/WelcomeScreen.js';
+export { TurnImages } from './chatImages/ChatImages.js';
+export { ChatImageScope } from './chatImages/chatImageScope.js';
+export type { ChatImageScopeValue } from './chatImages/chatImageScope.js';
+export type { ChatImagesCatalog } from './plugins/trueforge-agent-server-adapter/catalogs/chatImagesCatalog.js';
 
 export { AgentStepsCard } from './atoms/adapters/AgentStepsCardAdapter.js';
 export type { AgentStepsCardProps } from './atoms/adapters/AgentStepsCardAdapter.js';
@@ -200,8 +208,6 @@ export { ThreadListRow } from './atoms/ThreadListRow.js';
 export type { ThreadListRowProps } from './atoms/ThreadListRow.js';
 export { Toast, ToastStack } from './atoms/Toast.js';
 export type { ToastProps, ToastStackProps } from './atoms/Toast.js';
-export { ToolApprovalBar } from './atoms/ToolApprovalBar.js';
-export type { ToolApprovalBarProps } from './atoms/ToolApprovalBar.js';
 export { ToolCallCard } from './atoms/ToolCallCard.js';
 export type { ToolCallCardProps, ToolCallStatus } from './atoms/ToolCallCard.js';
 export { ToolCallContentBlock } from './atoms/ToolCallContentBlock.js';
@@ -210,11 +216,14 @@ export { ToolGroupCard } from './atoms/ToolGroupCard.js';
 export type { ToolGroupCardProps } from './atoms/ToolGroupCard.js';
 export { AmanAvatarMotion } from './components/AmanAvatarMotion.js';
 export type { AmanAvatarMotionSources } from './components/AmanAvatarMotion.js';
+export { AmanSetupTicket } from './components/AmanFirstRunGuide.js';
+export type { FirstRunTarget, SetupItem } from './components/AmanFirstRunGuide.js';
 export { AmanRuntimeRail } from './components/AmanRuntimeRail.js';
 export type { AmanRuntimeRailProps, AmanRuntimeRailStatus } from './components/AmanRuntimeRail.js';
 export { AmanSetupProvider, useOptionalAmanSetup } from './components/AmanSetupContext.js';
-export type { AmanSetupState, MemoryBankStatus } from './components/AmanSetupContext.js';
-export { AmanWelcome, amanSetupItems, amanWelcomeHeading } from './components/AmanWelcome.js';
+export type { AmanSetupState, FirstRunGuideState } from './components/AmanSetupContext.js';
+export { AmanTour, type AmanTourProps } from './components/AmanTour.js';
+export { AmanWelcome } from './components/AmanWelcome.js';
 export { BugReportProvider, useBugReport, useOptionalBugReport } from './components/BugReportContext.js';
 export type {
   AppBugReportBundle,
@@ -246,6 +255,8 @@ export type {
 } from './components/ImplementationPlanGrantContext.js';
 export { MemoryRecallProvider, useOptionalMemoryRecall } from './components/MemoryRecallContext.js';
 export type { MemoryRecallApi, MemoryTurnContext } from './components/MemoryRecallContext.js';
+export { ModelUsageProvider, useOptionalModelUsage } from './components/ModelUsageContext.js';
+export type { ModelUsageApi, ModelUsageTurnContext } from './components/ModelUsageContext.js';
 export { EMPTY_PERSONA_DRAFT, PersonaProvider, useOptionalPersonas, usePersonas } from './components/PersonaContext.js';
 export type {
   NewPersonaKnowledgeDocument,
@@ -268,8 +279,23 @@ export {
 export type { PersonalizationApi, PersonalizationProfile } from './components/PersonalizationContext.js';
 export { PersonalizationPanel } from './components/PersonalizationPanel.js';
 export type { PersonalizationPanelProps } from './components/PersonalizationPanel.js';
+export {
+  RepositoryWorkProvider,
+  useOptionalRepositoryWork,
+  useRepositoryWork,
+} from './components/RepositoryWorkContext.js';
+export type {
+  GithubRepositoryDetails,
+  GithubRepositoryOption,
+  RepositoryCommandProposal,
+  RepositorySummary,
+  RepositoryWorkApi,
+  SessionRepositoryBinding,
+  StartRepositoryWorkResult,
+} from './components/RepositoryWorkContext.js';
 export { RunCodeStatusProvider, useOptionalRunCodeStatus } from './components/RunCodeStatusContext.js';
 export type { RunCodeStatus, RunCodeStatusApi } from './components/RunCodeStatusContext.js';
+export type { TourCapabilities } from './components/tourPrompts.js';
 export { VoiceInputProvider, useOptionalVoiceInput } from './components/VoiceInputContext.js';
 export type { VoiceAvailability, VoiceInputApi, VoiceTranscription } from './components/VoiceInputContext.js';
 export { AgentStepsContainer } from './containers/AgentStepsContainer.js';
@@ -302,8 +328,6 @@ export type { ThreadContainerProps } from './containers/ThreadContainer.js';
 export { ThreadListContainer } from './containers/ThreadListContainer.js';
 export type { ThreadListContainerProps } from './containers/ThreadListContainer.js';
 export { ToasterProvider, useToaster, useToasterOptional } from './containers/ToasterContainer.js';
-export { ToolApprovalContainer } from './containers/ToolApprovalContainer.js';
-export type { ToolApprovalOption } from './containers/ToolApprovalContainer.js';
 export { ToolCallContainer } from './containers/ToolCallContainer.js';
 export { ToolCallContentBlockContainer } from './containers/ToolCallContentBlockContainer.js';
 export { ToolGroupContainer } from './containers/ToolGroupContainer.js';
@@ -311,6 +335,7 @@ export type { ThreadGroupPart } from './containers/ToolGroupContainer.js';
 export { TrueForgeUI } from './containers/TrueForgeUI.js';
 export type {
   ChatFolder,
+  ChatFolderSession,
   ChatFolderSnapshot,
   ChatFolderStore,
   ChatLayout,
@@ -324,6 +349,19 @@ export { TrueFoundryChatProvider } from './containers/TrueFoundryChatProvider.js
 export type { TrueFoundryChatProviderProps } from './containers/TrueFoundryChatProvider.js';
 export { UserEditComposerContainer } from './containers/UserEditComposerContainer.js';
 export { UserMessageContainer } from './containers/UserMessageContainer.js';
+export { ThreadWorkOnRepoControls, WorkOnRepoControls } from './containers/WorkOnRepoControls.js';
+export type { WorkOnRepoControlsProps } from './containers/WorkOnRepoControls.js';
+export { HELP_BUTTON_LABEL, IRIS_HELP_CHOICES } from './help/helpModel.js';
+export type {
+  HelpHealthCheck,
+  HelpHealthItem,
+  HelpHealthStatus,
+  HelpHostReport,
+  HelpHostReportState,
+} from './help/helpModel.js';
+export { HelpProvider, useOptionalHelp } from './help/HelpProvider.js';
+export type { HelpApi, HelpPhase, HelpSession } from './help/HelpProvider.js';
+export { HelpStuckButton } from './help/HelpStuckButton.js';
 export { useApprovalNav } from './hooks/useApprovalNav.js';
 export type { ApprovalNavState } from './hooks/useApprovalNav.js';
 export type { AmanAvatarActivity } from './hooks/useAvatarActivity.js';
@@ -348,6 +386,8 @@ export { useResourcePermissions } from './hooks/useResourcePermissions.js';
 export type { UseResourcePermissionsOptions, UseResourcePermissionsResult } from './hooks/useResourcePermissions.js';
 export { useRuntimeConnectivity } from './hooks/useRuntimeConnectivity.js';
 export type { RuntimeConnectivity, UseRuntimeConnectivityOptions } from './hooks/useRuntimeConnectivity.js';
+export { EmailApprovalCard } from './sentinel/EmailApprovalCard.js';
+export type { EmailApprovalCardProps } from './sentinel/EmailApprovalCard.js';
 export { OfflineIndicator } from './sentinel/OfflineIndicator.js';
 export { PermissionApprovalCard } from './sentinel/PermissionApprovalCard.js';
 export type { PermissionApprovalCardProps } from './sentinel/PermissionApprovalCard.js';
@@ -367,6 +407,7 @@ export {
   extractSentinelSessionContext,
   parseAuditEntries,
   parseToolTier,
+  parseUserAuditPage,
   parseUserSettings,
 } from './sentinel/types.js';
 export type {
@@ -376,6 +417,8 @@ export type {
   SentinelAuditEntry,
   SentinelAuditOutcome,
   SentinelSessionContext,
+  SentinelUserAuditEntry,
+  SentinelUserAuditPage,
   SentinelUserSettings,
   ToolTier,
 } from './sentinel/types.js';
@@ -421,6 +464,7 @@ export type {
 // Server port types + factory
 export { AgentDetailsToggleButton } from './atoms/AgentDetailsToggleButton.js';
 export { ClearChatButton } from './atoms/ClearChatButton.js';
+export { railMenuRowClassName } from './atoms/lib/buttonClasses.js';
 export {
   IS_CREATE_AGENT_METADATA_KEY,
   isCreateAgentMetadataValue,
@@ -429,6 +473,7 @@ export {
 } from './atoms/lib/sessionCreateAgent.js';
 export { SelectAgentEmptyState } from './atoms/SelectAgentEmptyState.js';
 export { ShellActionsActionSlot } from './atoms/ShellActionsActionSlot.js';
+export type { ShellActionsActionSlotProps } from './atoms/ShellActionsActionSlot.js';
 export type {
   ConnectorChecks,
   ConnectorConnectionFailureKind,
@@ -466,7 +511,12 @@ export {
   useOptionalShellMode,
   useShellMode,
 } from './server/ShellModeContext.js';
-export type { AgentConfig, SelectLibraryAgentRequest, ShellMode } from './server/ShellModeContext.js';
+export type {
+  AgentConfig,
+  SelectLibraryAgentRequest,
+  SettingsOpenRequest,
+  ShellMode,
+} from './server/ShellModeContext.js';
 export type {
   AgentBuilderCapabilitiesResponse,
   AgentBuilderServer,

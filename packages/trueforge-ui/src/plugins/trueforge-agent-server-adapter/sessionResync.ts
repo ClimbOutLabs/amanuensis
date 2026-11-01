@@ -57,6 +57,11 @@ export interface HarnessChatServerExtensions {
     reason: string;
   }): Promise<{ dismissed: number; alreadyResolved: boolean }>;
   /**
+   * Clear the card of a request that already ended. Nothing runs: the server records the dismissal
+   * and the card stays cleared after a reload.
+   */
+  dismissEndedApproval(request: { sessionId: string; threadId: string; toolCallId: string }): Promise<void>;
+  /**
    * Answer an action a scheduled run held for the owner. Approving runs just that call, once;
    * the server refuses it when the hold ran out or no longer matches what the owner was shown.
    * Resolves with what became of the call, read from the answer's own turn.
@@ -66,6 +71,8 @@ export interface HarnessChatServerExtensions {
     threadId: string;
     toolCallId: string;
     answer: HeldActionDecision;
+    /** Sent with a deny: the text the agent reads as the reason. */
+    reason?: string | undefined;
   }): Promise<HeldActionOutcome>;
   /**
    * Read the most recent context compaction event for a session.
@@ -73,39 +80,32 @@ export interface HarnessChatServerExtensions {
    */
   getLastCompactionStatus(request: { sessionId: string }): Promise<LastCompactionStatus | null>;
   /**
-   * Read the input token count from the session's most recent turn.
-   * This is the actual number the model saw for its last request.
-   * Returns `null` when the session has no turns yet or tokens are unknown.
+   * Read the input tokens of the session's most recent model call: the context
+   * size the model last saw. Returns `null` when no turn has run yet, or the
+   * turn predates this figure.
    */
-  getLastTurnInputTokens(request: { sessionId: string }): Promise<number | null>;
+  getLastCallInputTokens(request: { sessionId: string }): Promise<number | null>;
 }
+
+/** The reason the agent reads when a card for an ended request is cleared. */
+export const ENDED_APPROVAL_DISMISS_REASON = 'Dismissed after the request ended.';
 
 /** Type guard for servers that provide the harness chat extensions. */
 export function hasSessionResync(server: object): server is HarnessChatServerExtensions {
   const peek: unknown = Reflect.get(server, 'peekSessionTip');
   const dismiss: unknown = Reflect.get(server, 'dismissPendingApprovals');
+  const dismissEnded: unknown = Reflect.get(server, 'dismissEndedApproval');
   const answerHeld: unknown = Reflect.get(server, 'answerHeldAction');
   const compaction: unknown = Reflect.get(server, 'getLastCompactionStatus');
-  const tokens: unknown = Reflect.get(server, 'getLastTurnInputTokens');
+  const tokens: unknown = Reflect.get(server, 'getLastCallInputTokens');
   return (
     typeof peek === 'function' &&
     typeof dismiss === 'function' &&
+    typeof dismissEnded === 'function' &&
     typeof answerHeld === 'function' &&
     typeof compaction === 'function' &&
     typeof tokens === 'function'
   );
-}
-
-/**
- * Pending tool approvals are automatically denied after this long without a
- * decision. The age is derived from the persisted `tool.approval_required`
- * event timestamp, so it holds while the browser is backgrounded or closed.
- * Fail-closed: an unanswered approval never becomes an approval.
- */
-export const APPROVAL_AUTO_DENY_MINUTES = 30;
-
-export function approvalAutoDenyReason(): string {
-  return `Automatically denied: the approval was not answered within ${APPROVAL_AUTO_DENY_MINUTES} minutes.`;
 }
 
 const PENDING_APPROVALS_MESSAGE = 'user message cannot be sent while approvals or questions are pending';
@@ -206,20 +206,44 @@ export function createSessionResyncExtensions(client: Pick<TrueForge, 'sessions'
     return { dismissed: input.length, alreadyResolved: false };
   }
 
+  async function dismissEndedApproval({
+    sessionId,
+    threadId,
+    toolCallId,
+  }: {
+    sessionId: string;
+    threadId: string;
+    toolCallId: string;
+  }): Promise<void> {
+    await client.sessions.createTurn(sessionId, {
+      input: [
+        {
+          type: 'user.tool_approval',
+          threadId,
+          toolCallId,
+          approval: { status: 'deny', reason: ENDED_APPROVAL_DISMISS_REASON },
+        },
+      ],
+      previousTurnId: 'auto',
+    });
+  }
+
   async function answerHeldAction({
     sessionId,
     threadId,
     toolCallId,
     answer,
+    reason,
   }: {
     sessionId: string;
     threadId: string;
     toolCallId: string;
     answer: HeldActionDecision;
+    reason?: string | undefined;
   }): Promise<HeldActionOutcome> {
     const approval: TrueForgeApi.ApprovalDecision =
       answer === 'deny'
-        ? { status: 'deny' }
+        ? { status: 'deny', ...(reason === undefined ? {} : { reason }) }
         : { status: 'allow', scope: answer === 'always_allow' ? 'always' : 'once' };
     const stream = await client.sessions.createTurnStream(sessionId, {
       input: [{ type: 'user.tool_approval', threadId, toolCallId, approval }],
@@ -258,7 +282,7 @@ export function createSessionResyncExtensions(client: Pick<TrueForge, 'sessions'
     return undefined;
   }
 
-  async function getLastTurnInputTokens({ sessionId }: { sessionId: string }): Promise<number | null> {
+  async function getLastCallInputTokens({ sessionId }: { sessionId: string }): Promise<number | null> {
     const tip = await readTipTurn({ sessionId });
     if (tip == null) return null;
     const state: unknown = tip.state;
@@ -266,16 +290,18 @@ export function createSessionResyncExtensions(client: Pick<TrueForge, 'sessions'
     const status: unknown = Reflect.get(state, 'status');
     if (status !== 'done' && status !== 'cancelled' && status !== 'error') return null;
     const metrics: unknown = Reflect.get(state, 'metrics');
-    const inputTokens = readTurnMetricNumber(metrics, 'totalInputTokens', 'total_input_tokens');
+    // The turn total sums every call, so it would overstate the context size.
+    const inputTokens = readTurnMetricNumber(metrics, 'lastCallInputTokens', 'last_call_input_tokens');
     return inputTokens ?? null;
   }
 
   return {
     peekSessionTip,
     dismissPendingApprovals,
+    dismissEndedApproval,
     answerHeldAction,
     getLastCompactionStatus,
-    getLastTurnInputTokens,
+    getLastCallInputTokens,
   };
 }
 

@@ -11,13 +11,50 @@ const initialProfile: PersonalizationProfile = {
   assistant_name: 'Mira',
   assistant_identity: 'A thoughtful local assistant.',
   voice_guidance: 'Warm and direct.',
+  user_name: null,
+  address_as: null,
   user_profile: 'Values privacy.',
   pinned_preferences: ['Use short summaries.'],
+  help_areas: [],
   learned_profile: null,
   learning_enabled: false,
 };
 
 describe('PersonalizationPanel', () => {
+  it('asks for the name and form of address first and saves them', async () => {
+    const updateProfile = vi.fn(async profile => ({ ...profile }));
+    render(
+      <PersonalizationProvider
+        api={{
+          getProfile: async () => null,
+          updateProfile,
+          deleteProfile: async () => {},
+        }}
+      >
+        <PersonalizationPanel />
+      </PersonalizationProvider>,
+    );
+
+    const nameField = await screen.findByLabelText('Your name');
+    const addressField = screen.getByLabelText('How Aman should address you');
+    const [firstSection] = screen.getAllByRole('region');
+    expect(firstSection).toHaveAccessibleName('About you');
+    expect(firstSection).toContainElement(nameField);
+    expect(firstSection).toContainElement(addressField);
+    // The name fields come before everything else on the page, including the assistant's own profile.
+    expect(nameField.compareDocumentPosition(screen.getByLabelText('Name'))).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+
+    fireEvent.change(nameField, { target: { value: 'Sam Rivera' } });
+    fireEvent.change(addressField, { target: { value: 'Sam' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save personalization' }));
+
+    await waitFor(() =>
+      expect(updateProfile).toHaveBeenCalledWith(
+        expect.objectContaining({ user_name: 'Sam Rivera', address_as: 'Sam' }),
+      ),
+    );
+  });
+
   it('loads and saves the profile from Settings while updating the runtime identity', async () => {
     const updateProfile = vi.fn(async profile => ({ ...profile }));
     render(
@@ -164,6 +201,39 @@ describe('PersonalizationPanel', () => {
     expect(screen.getByText(/at most once an hour/)).toBeInTheDocument();
   });
 
+  it('shows no help-area picker in Settings and keeps the help areas already saved', async () => {
+    // The "What would help you most?" picker lives on the New Chat home, not in Settings.
+    // Areas a person already picked stay on their profile: a Settings save carries them
+    // through unchanged rather than dropping them with the removed section.
+    const updateProfile = vi.fn(async (profile: PersonalizationProfile) => ({ ...profile }));
+    render(
+      <PersonalizationProvider
+        api={{
+          getProfile: async () => ({ ...initialProfile, help_areas: ['new_country', 'family'] }),
+          updateProfile,
+          deleteProfile: async () => {},
+        }}
+      >
+        <PersonalizationPanel />
+      </PersonalizationProvider>,
+    );
+
+    await screen.findByDisplayValue('Mira');
+    expect(screen.queryByText('What would help you most?')).not.toBeInTheDocument();
+    expect(screen.queryByRole('checkbox', { name: 'I just moved here' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('checkbox', { name: 'Someone I look after' })).not.toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Sage' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save personalization' }));
+
+    await waitFor(() =>
+      expect(updateProfile).toHaveBeenCalledWith(
+        expect.objectContaining({ assistant_name: 'Sage', help_areas: ['new_country', 'family'] }),
+      ),
+    );
+    expect(await screen.findByRole('status')).toHaveTextContent('Personalization saved.');
+  });
+
   it('persists the learning switch through the ordinary save flow', async () => {
     const updateProfile = vi.fn(async (profile: PersonalizationProfile) => ({ ...profile }));
     render(
@@ -203,8 +273,11 @@ describe('PersonalizationPanel', () => {
       assistant_name: null,
       assistant_identity: null,
       voice_guidance: null,
+      user_name: null,
+      address_as: null,
       user_profile: null,
       pinned_preferences: [],
+      help_areas: [],
       learned_profile: null,
       learning_enabled: true,
     };
@@ -277,8 +350,11 @@ describe('PersonalizationPanel', () => {
       assistant_name: 'Mira',
       assistant_identity: null,
       voice_guidance: null,
+      user_name: null,
+      address_as: null,
       user_profile: null,
       pinned_preferences: [],
+      help_areas: [],
       learned_profile: null,
     };
     const updateProfile = vi.fn(async (profile: PersonalizationProfile) => ({ ...profile }));

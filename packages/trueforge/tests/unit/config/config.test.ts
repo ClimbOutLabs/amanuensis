@@ -8,8 +8,11 @@ import {
   isLoopbackHost,
   isPrivateNetworkHost,
   parseAllowedOrigins,
+  parseDemoGoogleAccount,
+  parseDemoSendAllowlist,
   parseLoginUpstreamUrl,
   parsePublicBaseUrl,
+  parseSearchProviderChoice,
   parseTokenFactoryMode,
   parseTrustedProxyAddresses,
   TrueForgeAuthMode,
@@ -259,7 +262,9 @@ describe('assertNetworkAuthRequirement', () => {
           host,
           requireAuth: true,
         }),
-      ).toThrow(/Refusing to start without login.*OIDC_ISSUER_URL, OIDC_CLIENT_ID, and OIDC_CLIENT_SECRET/);
+      ).toThrow(
+        /Refusing to start without login.*OIDC_ISSUER_URL, OIDC_CLIENT_ID, OIDC_CLIENT_SECRET and OIDC_ALLOWED_EMAILS/,
+      );
     });
 
     it('no longer honors REQUIRE_AUTH=false', () => {
@@ -340,6 +345,25 @@ describe('assertNetworkAuthRequirement', () => {
   });
 });
 
+describe('parseSearchProviderChoice', () => {
+  const parse = (raw: string | undefined) => parseSearchProviderChoice({ envKey: 'SEARCH_PROVIDER', raw });
+
+  it('defaults to parallel when unset or blank', () => {
+    expect(parse(undefined)).toBe('parallel');
+    expect(parse('  ')).toBe('parallel');
+  });
+
+  it('parses parallel and tavily case-insensitively', () => {
+    expect(parse('tavily')).toBe('tavily');
+    expect(parse('TAVILY')).toBe('tavily');
+    expect(parse('Parallel')).toBe('parallel');
+  });
+
+  it('rejects any other provider, naming the allowed ones', () => {
+    expect(() => parse('exa')).toThrow('SEARCH_PROVIDER must be one of parallel, tavily; got "exa"');
+  });
+});
+
 describe('parseTokenFactoryMode', () => {
   const parse = (raw: string | undefined) =>
     parseTokenFactoryMode({ envKey: 'TOKEN_FACTORY_MODE', raw, defaultValue: 'off' });
@@ -409,23 +433,22 @@ describe('parseAllowedOrigins', () => {
   it('keeps plain http for this computer and private networks, and https for anything', () => {
     expect(
       parseAllowedOrigins(
-        'http://127.0.0.1:8791, http://localhost:8791,http://192.168.1.20:8791,http://100.101.102.103:8791,http://spark.local:8791,https://aman.example.com',
+        'http://127.0.0.1:8791, http://localhost:8791,http://192.168.1.20:8791,http://100.101.102.103:8791,http://host.example.local:8791,https://aman.example.com',
       ),
     ).toEqual([
       'http://127.0.0.1:8791',
       'http://localhost:8791',
       'http://192.168.1.20:8791',
       'http://100.101.102.103:8791',
-      'http://spark.local:8791',
+      'http://host.example.local:8791',
       'https://aman.example.com',
     ]);
   });
 
   it('normalises and removes duplicates', () => {
-    expect(parseAllowedOrigins('HTTP://Spark.Local:8791,http://spark.local:8791,https://a.example.com:443')).toEqual([
-      'http://spark.local:8791',
-      'https://a.example.com',
-    ]);
+    expect(
+      parseAllowedOrigins('HTTP://Host.Example.Local:8791,http://host.example.local:8791,https://a.example.com:443'),
+    ).toEqual(['http://host.example.local:8791', 'https://a.example.com']);
   });
 
   it.each(['http://203.0.113.9:8791', 'http://aman.example.com', 'http://8.8.8.8'])(
@@ -436,11 +459,11 @@ describe('parseAllowedOrigins', () => {
   );
 
   it.each([
-    'ftp://spark:8791',
-    'http://spark:8791/app',
-    'http://user@spark:8791',
-    'http://spark:8791?x=1',
-    'spark',
+    'ftp://host:8791',
+    'http://host:8791/app',
+    'http://user@host:8791',
+    'http://host:8791?x=1',
+    'host',
     'http://',
   ])('refuses %s', entry => {
     expect(() => parseAllowedOrigins(entry)).toThrow(/ALLOWED_ORIGINS/);
@@ -500,4 +523,37 @@ describe('parseTrustedProxyAddresses', () => {
       expect(() => parseTrustedProxyAddresses(value)).toThrow(/TRUSTED_PROXY_ADDRESSES/);
     },
   );
+});
+
+describe('parseDemoSendAllowlist', () => {
+  it('is empty when unset or blank, which allows no send', () => {
+    expect(parseDemoSendAllowlist(undefined)).toEqual([]);
+    expect(parseDemoSendAllowlist('  , ')).toEqual([]);
+  });
+
+  it('lower-cases, trims and drops repeats', () => {
+    expect(parseDemoSendAllowlist(' Maya@Demo.Example, friend@demo.example ,maya@demo.example')).toEqual([
+      'maya@demo.example',
+      'friend@demo.example',
+    ]);
+  });
+
+  it.each(['maya', '*@demo.example', 'Maya <maya@demo.example>', 'a@b'])('refuses %s at load', value => {
+    expect(() => parseDemoSendAllowlist(value)).toThrow(/DEMO_SEND_ALLOWLIST/);
+  });
+});
+
+describe('parseDemoGoogleAccount', () => {
+  it('is empty when unset or blank, which lets no account connect', () => {
+    expect(parseDemoGoogleAccount(undefined)).toBe('');
+    expect(parseDemoGoogleAccount('  ')).toBe('');
+  });
+
+  it('lower-cases and trims', () => {
+    expect(parseDemoGoogleAccount(' Maya@Demo.Example ')).toBe('maya@demo.example');
+  });
+
+  it.each(['maya', 'a@b', 'maya@demo.example, other@demo.example'])('refuses %s at load', value => {
+    expect(() => parseDemoGoogleAccount(value)).toThrow(/DEMO_GOOGLE_ACCOUNT/);
+  });
 });

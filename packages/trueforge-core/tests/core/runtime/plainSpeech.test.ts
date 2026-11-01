@@ -2,15 +2,29 @@ import type { ILLM, LLMCreateParamsStreaming } from '../../../src/core/llm/ILLM'
 import { AgentThread } from '../../../src/core/runtime/AgentThread';
 import { PLAIN_SPEECH_PROMPT } from '../../../src/core/runtime/contextUtils';
 import { NOOP_AGENT_TRACING } from '../../../src/core/tracing/NoopAgentTracing';
-import { finalAnswerStream, makeSilentLogger, makeStubPublicSandbox } from '../harnessMocks';
+import {
+  finalAnswerStream,
+  hostText,
+  makeSilentLogger,
+  makeStubPublicSandbox,
+  readGuidanceModel,
+} from '../harnessMocks';
 
-async function systemPrompt(input: { instruction: string; network?: 'none' | undefined }): Promise<string> {
-  const create = jest.fn((_request: LLMCreateParamsStreaming) => finalAnswerStream());
+async function systemPrompt(input: {
+  instruction: string;
+  network?: 'none' | undefined;
+  message?: string | undefined;
+  /** A topic whose guidance the model reads first. */
+  reads?: string | undefined;
+}): Promise<string> {
+  const reader = input.reads === undefined ? undefined : readGuidanceModel(input.reads);
+  const create = reader?.create ?? jest.fn((_request: LLMCreateParamsStreaming) => finalAnswerStream());
   const modelClient: ILLM = { create, createNonStream: jest.fn() };
   const thread = new AgentThread({
     threadId: 'main',
     title: 'Main',
     toolCallMemo: undefined,
+    turnToolCallLedger: undefined,
     taskState: undefined,
     isRequestContinuation: undefined,
     tracing: NOOP_AGENT_TRACING,
@@ -22,7 +36,7 @@ async function systemPrompt(input: { instruction: string; network?: 'none' | und
       instruction: input.instruction,
       toolSets: [],
     },
-    context: [{ role: 'user', content: 'Fetch https://example.com for me.' }],
+    context: [{ role: 'user', content: input.message ?? 'Fetch https://example.com for me.' }],
     sandbox: makeStubPublicSandbox({ network: input.network }),
   });
 
@@ -30,8 +44,7 @@ async function systemPrompt(input: { instruction: string; network?: 'none' | und
     // Draining is enough; the assertion is on the request sent to the model.
   }
 
-  const content = create.mock.calls[0]?.[0].messages.find(message => message.role === 'system')?.content;
-  return typeof content === 'string' ? content : '';
+  return hostText(create);
 }
 
 describe('host-owned plain speech rule', () => {
@@ -47,13 +60,17 @@ describe('host-owned plain speech rule', () => {
   );
 
   it('keeps the shell out of the source contract and tells the model the sandbox is offline', async () => {
-    const offline = await systemPrompt({ instruction: 'test', network: 'none' });
+    const offline = await systemPrompt({ instruction: 'test', network: 'none', reads: 'web' });
     expect(offline).not.toContain('the sandbox exec tool when it retrieves');
     expect(offline).not.toContain('curl');
     expect(offline).toContain('Retrieval capabilities include search, browsing, lookup, and fetch tools.');
 
-    const online = await systemPrompt({ instruction: 'test' });
+    // The exec tool is always sent, so the web guidance names it whenever the sandbox can reach the network.
+    const online = await systemPrompt({ instruction: 'test', reads: 'web' });
     expect(online).toContain('the sandbox exec tool when it retrieves an already identified source');
     expect(online).toContain('curl');
+
+    const unread = await systemPrompt({ instruction: 'test' });
+    expect(unread).not.toContain('<source-discovery>');
   });
 });

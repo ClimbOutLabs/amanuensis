@@ -3,7 +3,11 @@
   "private": true,
   "description": "Global command line tools baked into the sandbox guest image; the lockfile pins every transitive package.",
   "dependencies": {
+    "eslint": "10.13.0",
+    "jest": "30.5.2",
+    "prettier": "3.9.10",
     "tsx": "4.23.15",
-    "typescript": "7.0.2"
+    "typescript": "7.0.2",
+    "vitest": "5.0.5"
   }
 }

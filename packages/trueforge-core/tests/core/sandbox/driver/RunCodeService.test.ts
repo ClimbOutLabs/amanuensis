@@ -9,6 +9,7 @@ import type {
   IsolationDriver,
 } from '../../../../src/core/sandbox/driver/IsolationDriver';
 import {
+  RUN_CODE_CODE_MAX_BYTES,
   RunCodeService,
   validateRunCodeStartupConfig,
   type HarvestedFile,
@@ -26,6 +27,7 @@ const OK_RESULT: DriverRunResult = {
 
 class FakeDriver implements IsolationDriver {
   readonly kind = 'docker' as const;
+  readonly packageGatewayCapable = false;
   readiness: DriverReadiness = { ready: true };
   runBehavior: (params: DriverRunParams) => Promise<DriverRunResult> = () => Promise.resolve({ ...OK_RESULT });
   runs: DriverRunParams[] = [];
@@ -253,6 +255,72 @@ describe('RunCodeService', () => {
     const firstResult = await first;
     expect(firstResult.status).toBe('ok');
     await single.dispose().catch(() => undefined);
+  });
+
+  it('caps a cold-start burst that piles up while the image is provisioning', async () => {
+    const capped = new RunCodeService({
+      driver,
+      dataDir,
+      defaultTimeoutSeconds: 120,
+      maxTimeoutSeconds: 600,
+      memoryMb: 512,
+      diskMb: 1024,
+      outputCapKb: 256,
+      maxConcurrentRuns: 2,
+      imagePullTimeoutSeconds: 120,
+      harvestGraceMs: 2000,
+      logger: makeSilentLogger(),
+      now: undefined,
+      sleepMs: () => new Promise<void>(resolve => setTimeout(resolve, 25)),
+    });
+    // Cold instance: the image is missing, so every call waits on the one
+    // shared pull. Hold the pull open until the whole burst is waiting on it.
+    driver.readiness = { ready: false, error_code: 'image_missing', error: 'image not pulled yet' };
+    let releasePull: () => void = () => undefined;
+    const pullGate = new Promise<void>(resolve => {
+      releasePull = resolve;
+    });
+    driver.provision = (): Promise<void> =>
+      pullGate.then(() => {
+        driver.readiness = { ready: true };
+      });
+    // Count how many runs are actually executing at the same moment.
+    let runningNow = 0;
+    let runningPeak = 0;
+    let releaseRuns: () => void = () => undefined;
+    const runGate = new Promise<void>(resolve => {
+      releaseRuns = resolve;
+    });
+    driver.runBehavior = async () => {
+      runningNow += 1;
+      runningPeak = Math.max(runningPeak, runningNow);
+      await runGate;
+      runningNow -= 1;
+      return { ...OK_RESULT };
+    };
+    const burst = Array.from({ length: 5 }, () => capped.runCode(VALID_INPUT));
+    // Every call passes the first cap check while the counter is still 0 and
+    // piles onto the shared pull.
+    await new Promise(resolve => setTimeout(resolve, 100));
+    releasePull();
+    // Let the released calls reach the driver before opening the run gate,
+    // so any over-cap runs are already counted in the peak.
+    await new Promise(resolve => setTimeout(resolve, 100));
+    releaseRuns();
+    const results = await Promise.all(burst);
+    expect(runningPeak).toBe(2);
+    let okCount = 0;
+    let refusedCount = 0;
+    for (const result of results) {
+      if (result.status === 'ok') {
+        okCount += 1;
+      } else if (result.error_code === 'concurrency_exceeded') {
+        refusedCount += 1;
+      }
+    }
+    expect(okCount).toBe(2);
+    expect(refusedCount).toBe(3);
+    await capped.dispose().catch(() => undefined);
   });
 
   it('runs the happy path with a curated environment and clamped timeout', async () => {
@@ -504,6 +572,8 @@ describe('RunCodeService', () => {
         attachments: [{ name: 'photo.png', bytes: Buffer.from('img') }],
         onProgress: undefined,
         onHarvestedFiles: undefined,
+        packageMirrorToken: undefined,
+        readScript: undefined,
       },
     );
     expect(result.status).toBe('ok');
@@ -542,6 +612,8 @@ describe('RunCodeService', () => {
         attachments: [{ name: 'photo.png', bytes: Buffer.from('x') }],
         onProgress: undefined,
         onHarvestedFiles: undefined,
+        packageMirrorToken: undefined,
+        readScript: undefined,
       },
     );
     if (collision.status === 'failed') {
@@ -591,6 +663,8 @@ describe('RunCodeService', () => {
       signal: undefined,
       attachments: undefined,
       onProgress: undefined,
+      packageMirrorToken: undefined,
+      readScript: undefined,
       onHarvestedFiles: async files => {
         sinkFiles = files;
         // The sink must observe the run root before the finally-block cleanup deletes it.
@@ -617,6 +691,8 @@ describe('RunCodeService', () => {
       signal: undefined,
       attachments: undefined,
       onProgress: undefined,
+      packageMirrorToken: undefined,
+      readScript: undefined,
       onHarvestedFiles: async () => {
         throw new Error('disk on fire');
       },
@@ -1029,5 +1105,131 @@ describe('validateRunCodeStartupConfig', () => {
     expect(() => {
       validateRunCodeStartupConfig({ ...base, image: 'sandbox:latest', imageConfigured: false });
     }).not.toThrow();
+  });
+});
+
+describe('RunCodeService script_path', () => {
+  let dataDir: string;
+  let driver: FakeDriver;
+  let service: RunCodeService;
+
+  beforeEach(async () => {
+    dataDir = await mkdtemp(join(tmpdir(), 'runcode-script-test-'));
+    driver = new FakeDriver();
+    service = makeService(driver, dataDir);
+  });
+
+  afterEach(async () => {
+    await service.dispose().catch(() => undefined);
+    await rm(dataDir, { recursive: true, force: true });
+  });
+
+  function callOptions(scripts: Record<string, Buffer> | undefined) {
+    const readScript =
+      scripts === undefined
+        ? undefined
+        : async (scriptPath: string): Promise<Buffer> => {
+            const bytes = scripts[scriptPath];
+            if (bytes === undefined) {
+              throw new Error(`script_path "${scriptPath}" could not be read.`);
+            }
+            return bytes;
+          };
+    return {
+      signal: undefined,
+      attachments: undefined,
+      onProgress: undefined,
+      packageMirrorToken: undefined,
+      onHarvestedFiles: undefined,
+      readScript,
+    };
+  }
+
+  it('runs the workspace file as the program and never writes back to it', async () => {
+    const script = Buffer.from('print("size")');
+    const staged: string[] = [];
+    driver.runBehavior = async params => {
+      staged.push(await readFile(join(params.ingressDir, '__runcode_main.py'), 'utf8'));
+      return { ...OK_RESULT };
+    };
+    const result = await service.runCode(
+      { language: 'python', script_path: '/workspace/size.py' },
+      callOptions({ '/workspace/size.py': script }),
+    );
+    expect(result.status).toBe('ok');
+    expect(staged).toEqual(['print("size")']);
+    expect(script.toString()).toBe('print("size")');
+  });
+
+  it('refuses both code and script_path', async () => {
+    const result = await service.runCode(
+      { language: 'python', code: 'print(1)', script_path: '/workspace/size.py' },
+      callOptions({ '/workspace/size.py': Buffer.from('print(2)') }),
+    );
+    expect(result.status).toBe('failed');
+    if (result.status === 'failed') {
+      expect(result.error_code).toBe('invalid_input');
+      expect(result.error).toMatch(/either code or script_path, not both/);
+    }
+    expect(driver.runs).toHaveLength(0);
+  });
+
+  it('refuses a call with neither code nor script_path', async () => {
+    const result = await service.runCode({ language: 'python' }, callOptions({}));
+    expect(result.status).toBe('failed');
+    if (result.status === 'failed') {
+      expect(result.error_code).toBe('invalid_input');
+      expect(result.error).toMatch(/pass code, or script_path/);
+    }
+    expect(driver.runs).toHaveLength(0);
+  });
+
+  it('refuses script_path when this run has no workspace to read from', async () => {
+    const result = await service.runCode(
+      { language: 'python', script_path: '/workspace/size.py' },
+      callOptions(undefined),
+    );
+    expect(result.status).toBe('failed');
+    if (result.status === 'failed') {
+      expect(result.error_code).toBe('invalid_input');
+      expect(result.error).toMatch(/script_path needs the chat workspace/);
+    }
+    expect(driver.runs).toHaveLength(0);
+  });
+
+  it('surfaces the workspace reader message when the file cannot be read', async () => {
+    const result = await service.runCode({ language: 'python', script_path: '/workspace/missing.py' }, callOptions({}));
+    expect(result.status).toBe('failed');
+    if (result.status === 'failed') {
+      expect(result.error_code).toBe('invalid_input');
+      expect(result.error).toContain('script_path "/workspace/missing.py" could not be read.');
+    }
+    expect(driver.runs).toHaveLength(0);
+  });
+
+  it('refuses a script that is not UTF-8 text', async () => {
+    const result = await service.runCode(
+      { language: 'python', script_path: '/workspace/blob.py' },
+      callOptions({ '/workspace/blob.py': Buffer.from([0xff, 0xfe, 0x00]) }),
+    );
+    expect(result.status).toBe('failed');
+    if (result.status === 'failed') {
+      expect(result.error_code).toBe('invalid_input');
+      expect(result.error).toMatch(/is not a UTF-8 text file/);
+    }
+    expect(driver.runs).toHaveLength(0);
+  });
+
+  it('applies the same code size cap to a script file as to inline code', async () => {
+    const result = await service.runCode(
+      { language: 'python', script_path: '/workspace/big.py' },
+      callOptions({ '/workspace/big.py': Buffer.alloc(RUN_CODE_CODE_MAX_BYTES + 1, 'a') }),
+    );
+    expect(result.status).toBe('failed');
+    if (result.status === 'failed') {
+      expect(result.error_code).toBe('invalid_input');
+      expect(result.error).toMatch(/larger than the 512 KiB code limit/);
+    }
+    expect(driver.runs).toHaveLength(0);
   });
 });

@@ -21,7 +21,12 @@ import { slotSandboxBuildStatus } from '../../../src/sandbox/slotBackend';
 
 const mockSlotStatus = jest.mocked(slotSandboxBuildStatus);
 
-const CapabilitiesBodySchema = z.object({ data: z.object({ sandbox: z.object({ enabled: z.boolean() }) }) });
+const CapabilitiesBodySchema = z.object({
+  data: z.object({
+    sandbox: z.object({ enabled: z.boolean() }),
+    skill: z.object({ enabled: z.boolean(), reason: z.string().optional() }),
+  }),
+});
 type CapabilitiesBody = z.infer<typeof CapabilitiesBodySchema>;
 
 async function capabilities(): Promise<CapabilitiesBody['data']> {
@@ -54,5 +59,22 @@ describe('sandbox capability on the slot backend', () => {
   it('is off while no slot is usable', async () => {
     mockSlotStatus.mockResolvedValue({ status: 'failed', reason: 'no slots', metadata: null });
     expect((await capabilities()).sandbox).toEqual({ enabled: false });
+  });
+});
+
+// Skills are served host-side on slots: the host copies the skill files in, and approved sites go
+// through the skill network gateway. So the skill flag follows the sandbox flag.
+describe('skill capability on the slot backend', () => {
+  it('is on when the sandbox is on, with no offline reason', async () => {
+    mockSlotStatus.mockResolvedValue({ status: 'ready', reason: null, metadata: null });
+    expect((await capabilities()).skill).toEqual({ enabled: true });
+  });
+
+  it('is off with the sandbox reason while no slot is usable', async () => {
+    mockSlotStatus.mockResolvedValue({ status: 'failed', reason: 'no slots', metadata: null });
+    expect((await capabilities()).skill).toEqual({
+      enabled: false,
+      reason: 'Skills run in a sandbox, which is not configured.',
+    });
   });
 });

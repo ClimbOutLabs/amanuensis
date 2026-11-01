@@ -33,6 +33,33 @@ describe('maps config', () => {
     expect(config.MAPS_USER_AGENT).toMatch(/^Amanuensis\//);
   });
 
+  it('defaults the walking, cycling and transit services', async () => {
+    delete process.env['MAPS_WALKING_ROUTER_URL'];
+    delete process.env['MAPS_CYCLING_ROUTER_URL'];
+    delete process.env['MAPS_TRANSIT_URL'];
+    const config = await loadConfig();
+    expect(config.MAPS_WALKING_ROUTER_URL).toBe('https://routing.openstreetmap.de/routed-foot');
+    expect(config.MAPS_CYCLING_ROUTER_URL).toBe('https://routing.openstreetmap.de/routed-bike');
+    expect(config.MAPS_TRANSIT_URL).toBe('https://api.transitous.org/api/v6');
+  });
+
+  it('accepts custom travel service URLs and trims a trailing slash', async () => {
+    process.env['MAPS_WALKING_ROUTER_URL'] = 'https://foot.example.internal/';
+    process.env['MAPS_CYCLING_ROUTER_URL'] = 'https://bike.example.internal';
+    process.env['MAPS_TRANSIT_URL'] = 'https://transit.example.internal/api/v6/';
+    const config = await loadConfig();
+    expect(config.MAPS_WALKING_ROUTER_URL).toBe('https://foot.example.internal');
+    expect(config.MAPS_CYCLING_ROUTER_URL).toBe('https://bike.example.internal');
+    expect(config.MAPS_TRANSIT_URL).toBe('https://transit.example.internal/api/v6');
+  });
+
+  it('rejects an invalid travel service URL', async () => {
+    process.env['MAPS_TRANSIT_URL'] = 'not a url';
+    await expect(loadConfig()).rejects.toThrow('MAPS_TRANSIT_URL must be a valid URL');
+    process.env['MAPS_TRANSIT_URL'] = 'https://transit.example/api?key=1';
+    await expect(loadConfig()).rejects.toThrow('MAPS_TRANSIT_URL must not include a query or hash');
+  });
+
   it('accepts custom http(s) URLs', async () => {
     process.env['MAPS_GEOCODER_URL'] = 'https://geocode.example.internal/';
     process.env['MAPS_ROUTER_URL'] = 'https://routes.example.internal';

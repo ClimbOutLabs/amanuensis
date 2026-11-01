@@ -236,7 +236,7 @@ describe('pill click against the real API', () => {
     expect(await screen.findByTestId('active-persona')).toHaveTextContent('Squidward');
 
     // Real clicks: open the picker, pick the other persona.
-    fireEvent.click(await screen.findByRole('button', { name: 'Choose who answers this chat' }));
+    fireEvent.click(await screen.findByTitle('Choose a persona'));
     fireEvent.click(await screen.findByRole('menuitem', { name: 'Spongebob' }));
 
     // The pill PUT fired exactly like the bug report's click.
@@ -262,7 +262,7 @@ describe('pill click against the real API', () => {
       );
 
       expect(await screen.findByTestId('active-persona')).toHaveTextContent('Squidward');
-      fireEvent.click(await screen.findByRole('button', { name: 'Choose who answers this chat' }));
+      fireEvent.click(await screen.findByTitle('Choose a persona'));
       fireEvent.click(await screen.findByRole('menuitem', { name: 'Spongebob' }));
 
       // The PUT is in flight. A turn created now (via the gate, like

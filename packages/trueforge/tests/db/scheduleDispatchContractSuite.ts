@@ -68,6 +68,7 @@ export function runScheduleDispatchContractSuite<TTransaction>(deps: {
   async function seedAgent(): Promise<{ id: string; name: string }> {
     seq += 1;
     const agent = await deps.getAgentStore().createAgent({
+      host_managed: false,
       tenant_id: TENANT,
       created_by_subject: USER_SUBJECT,
       name: `agent-${String(Date.now())}-${String(seq)}`,
@@ -112,6 +113,7 @@ export function runScheduleDispatchContractSuite<TTransaction>(deps: {
       tenant_id: TENANT,
       agent_id: agent.id,
       agent_name: agent.name,
+      persona_id: null,
       name: `sched-${String(Date.now())}-${String(seq)}`,
       manifest: manifest({ status, cron }),
       created_by_subject: USER_SUBJECT,
@@ -404,5 +406,110 @@ export function runScheduleDispatchContractSuite<TTransaction>(deps: {
       expect(Date.parse(next?.scheduled_for ?? '')).toBeGreaterThan(before);
       expect(await scheduledRunsFor(seeded.schedule.id)).toEqual([]);
     }
+  });
+
+  describe('one-time schedule', () => {
+    /** Only Date is faked: the store and the dispatch pass still wait on real timers. */
+    function fakeClock(at: string): void {
+      jest.useFakeTimers({
+        now: new Date(at),
+        doNotFake: [
+          'nextTick',
+          'setImmediate',
+          'setTimeout',
+          'setInterval',
+          'clearTimeout',
+          'clearInterval',
+          'queueMicrotask',
+          'performance',
+          'hrtime',
+          'cancelAnimationFrame',
+          'requestAnimationFrame',
+          'requestIdleCallback',
+          'cancelIdleCallback',
+        ],
+      });
+    }
+
+    afterEach(() => {
+      jest.useRealTimers();
+    });
+
+    async function seedOneTime(runAt: string): Promise<ScheduleRecord> {
+      const agent = await seedAgent();
+      const { schedule, pendingRun } = await deps.getScheduleStore().createScheduleAndRun({
+        tenant_id: TENANT,
+        agent_id: agent.id,
+        agent_name: agent.name,
+        persona_id: null,
+        name: `once-${String(Date.now())}-${String(seq)}`,
+        manifest: manifest({ cron: null, run_at: runAt, kind: 'reminder' }),
+        created_by_subject: USER_SUBJECT,
+        runFrom: new Date(),
+      });
+      expect(pendingRun?.scheduled_for).toBe(new Date(runAt).toISOString());
+      return schedule;
+    }
+
+    it('runs once at its time, then is done and never runs again', async () => {
+      fakeClock('2026-10-26T20:00:00.000Z');
+      const store = deps.getScheduleStore();
+      const schedule = await seedOneTime('2026-10-26T18:00:00-04:00');
+      const triggered: string[] = [];
+      const pass = () =>
+        dispatchScheduledRuns({
+          store,
+          withTransaction: deps.withTransaction,
+          onTriggered: item => {
+            if (item.schedule.id === schedule.id) {
+              triggered.push(item.run.id);
+            }
+          },
+          logger,
+        });
+
+      await pass();
+      expect(triggered).toEqual([]);
+
+      jest.setSystemTime(new Date('2026-10-26T22:00:30.000Z'));
+      await pass();
+      expect(triggered).toHaveLength(1);
+
+      const done = await store.getSchedule({ tenant_id: TENANT, id: schedule.id });
+      expect(done).toMatchObject({ status: 'done', manifest: { status: 'done', run_at: '2026-10-26T18:00:00-04:00' } });
+      expect(await store.getScheduledRunFor({ tenant_id: TENANT, schedule_id: schedule.id })).toBeUndefined();
+
+      for (const later of ['2026-10-26T23:00:00.000Z', '2026-11-30T00:00:00.000Z']) {
+        jest.setSystemTime(new Date(later));
+        await pass();
+      }
+      expect(triggered).toHaveLength(1);
+      const runs = await store.listRuns({
+        tenant_id: TENANT,
+        schedule_id: schedule.id,
+        limit: 10,
+        page_token: undefined,
+      });
+      expect(runs.data.map(run => run.status)).toEqual(['triggered']);
+    });
+
+    it('is done even when handing the run off fails, so it is not retried', async () => {
+      fakeClock('2026-10-26T20:00:00.000Z');
+      const store = deps.getScheduleStore();
+      const schedule = await seedOneTime('2026-10-26T21:00:00Z');
+      jest.setSystemTime(new Date('2026-10-26T21:00:30.000Z'));
+      await dispatchScheduledRuns({
+        store,
+        withTransaction: deps.withTransaction,
+        onTriggered: item => {
+          if (item.schedule.id === schedule.id) {
+            throw new Error('executor unavailable');
+          }
+        },
+        logger,
+      });
+      expect(await store.getSchedule({ tenant_id: TENANT, id: schedule.id })).toMatchObject({ status: 'done' });
+      expect(await store.getScheduledRunFor({ tenant_id: TENANT, schedule_id: schedule.id })).toBeUndefined();
+    });
   });
 }

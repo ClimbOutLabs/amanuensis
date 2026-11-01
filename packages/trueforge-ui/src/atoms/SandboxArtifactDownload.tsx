@@ -11,6 +11,8 @@ export type SandboxArtifactDownloadProps = {
   fileDownloadBaseUrl?: string;
   onDownloadArtifact?: (path: string, filename: string) => Promise<void>;
   onFetchFile?: (path: string) => Promise<Blob>;
+  /** Builds the host picture-proxy URL for one external picture on a chat page; see HtmlArtifactPreview. */
+  pictureProxyUrl?: (url: string) => string;
   readOnly?: boolean;
 };
 
@@ -33,21 +35,14 @@ export function SandboxArtifactDownload({
   fileDownloadBaseUrl,
   onDownloadArtifact,
   onFetchFile,
+  pictureProxyUrl,
   readOnly,
 }: SandboxArtifactDownloadProps) {
   const ChatFileDownload = useSlot('ChatFileDownload');
   const artifacts = useMemo(() => parseSandboxArtifacts(code), [code]);
   if (artifacts.length === 0) {
-    // Nothing parsed: show the raw block instead of an empty reply, so the user
-    // at least sees what the model wrote.
-    return (
-      <pre
-        data-testid="aui-sandbox-artifacts-raw"
-        className="aui-sandbox-artifacts-raw my-2 overflow-x-auto rounded-lg border border-border bg-card-bg p-3 font-mono text-sm text-text-secondary"
-      >
-        {code}
-      </pre>
-    );
+    // A block naming no file shows nothing: its raw text means nothing to the person reading.
+    return null;
   }
 
   // Check if there are any HTML artifacts to preview
@@ -65,6 +60,7 @@ export function SandboxArtifactDownload({
               artifact={artifact}
               onDownloadArtifact={onDownloadArtifact}
               onFetchFile={onFetchFile}
+              pictureProxyUrl={pictureProxyUrl}
               readOnly={readOnly}
             />
           ))}
@@ -98,11 +94,13 @@ function HtmlArtifactPreviewWrapper({
   artifact,
   onDownloadArtifact,
   onFetchFile,
+  pictureProxyUrl,
   readOnly,
 }: {
   artifact: SandboxArtifact;
   onDownloadArtifact: (path: string, filename: string) => Promise<void>;
   onFetchFile: (path: string) => Promise<Blob>;
+  pictureProxyUrl?: (url: string) => string;
   readOnly?: boolean;
 }) {
   const HtmlArtifactPreview = useSlot('HtmlArtifactPreview');
@@ -149,6 +147,7 @@ function HtmlArtifactPreviewWrapper({
       content={blob}
       filename={artifact.name}
       onFetchRelatedFile={onFetchFile}
+      pictureProxyUrl={pictureProxyUrl}
       onDownload={() => {
         onDownloadArtifact(artifact.path, artifact.name).catch((err: unknown) => {
           setError(err instanceof Error ? err.message : 'Failed to download HTML artifact');

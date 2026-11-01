@@ -69,7 +69,9 @@ async function postTurnRejectingWith(error: AgentHarnessError): Promise<Response
           repository_id: null,
           workspace_cwd: null,
         },
-        answersOnlyHeldActions: () => Promise.resolve(false),
+        answersOnlyDeniedHeldActions: () => Promise.resolve(false),
+        answersOnlyEndedApprovals: () => Promise.resolve(false),
+        dismissEndedApprovals: () => Promise.reject(new Error('unexpected dismissal')),
         createTurn: () => Promise.reject(error),
         classifyApprovalResubmission: () => Promise.resolve({ outcome: 'unrecorded' }),
       }),
@@ -80,7 +82,7 @@ async function postTurnRejectingWith(error: AgentHarnessError): Promise<Response
   app.route(
     '/',
     createTurnsRouter({
-      mcpCatalog: McpCatalog.load(),
+      mcpCatalog: McpCatalog.loadShipped(),
       globalSettingsStore: new SqliteGlobalSettingsStore(db),
       tokenFactoryBudget: uncappedTokenFactoryBudget,
       sessions,

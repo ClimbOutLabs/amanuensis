@@ -93,6 +93,7 @@ describe('no-progress guard', () => {
       threadId: 'main',
       title: 'Main',
       toolCallMemo: undefined,
+      turnToolCallLedger: undefined,
       taskState: undefined,
       isRequestContinuation: undefined,
       tracing: NOOP_AGENT_TRACING,
@@ -112,6 +113,46 @@ describe('no-progress guard', () => {
     expect(events.at(-1)).toMatchObject({ type: 'internal.agent.done', status: 'done' });
   });
 
+  it('ends with a plain line naming the assistant when the model keeps going after the host note', async () => {
+    let round = 0;
+    const create = jest.fn(() => {
+      round += 1;
+      return unknownToolStream({ toolName: `tool_variant_${String(round)}`, callId: `call-${String(round)}` });
+    });
+    const modelClient: ILLM = { create, createNonStream: jest.fn() };
+    const thread = new AgentThread({
+      threadId: 'main',
+      title: 'Main',
+      toolCallMemo: undefined,
+      turnToolCallLedger: undefined,
+      taskState: undefined,
+      isRequestContinuation: undefined,
+      tracing: NOOP_AGENT_TRACING,
+      logger: makeSilentLogger(),
+      definition: {
+        modelClient,
+        modelId: undefined,
+        configuredModels: undefined,
+        instruction: 'test',
+        toolSets: [],
+        identity: { assistantName: 'Nata' },
+      },
+      context: [{ role: 'user', content: 'do the thing' }],
+    });
+
+    const events = [];
+    for await (const event of thread.execute({ signal: new AbortController().signal })) {
+      events.push(event);
+    }
+
+    expect(events.at(-1)).toMatchObject({
+      type: 'internal.agent.done',
+      status: 'error',
+      error:
+        'Nata kept sending a request in a form the tool cannot take, so this reply stopped. Ask again in other words.',
+    });
+  });
+
   it('does not stop before five consecutive blocked-before-dispatch batches', async () => {
     const create = jest
       .fn()
@@ -124,6 +165,7 @@ describe('no-progress guard', () => {
       threadId: 'main',
       title: 'Main',
       toolCallMemo: undefined,
+      turnToolCallLedger: undefined,
       taskState: undefined,
       isRequestContinuation: undefined,
       tracing: NOOP_AGENT_TRACING,
@@ -141,7 +183,7 @@ describe('no-progress guard', () => {
       expect.objectContaining({
         type: 'internal.agent.done',
         status: 'error',
-        error: expect.stringContaining('blocked before they ran'),
+        error: expect.stringContaining('kept sending a request in a form the tool cannot take'),
       }),
     );
     expect(events.at(-1)).toMatchObject({ type: 'internal.agent.done', status: 'done' });
@@ -166,6 +208,7 @@ describe('no-progress nudge', () => {
       threadId: 'main',
       title: 'Main',
       toolCallMemo: undefined,
+      turnToolCallLedger: undefined,
       taskState: undefined,
       isRequestContinuation: undefined,
       tracing: NOOP_AGENT_TRACING,
@@ -223,6 +266,7 @@ describe('no-progress nudge', () => {
       threadId: 'main',
       title: 'Main',
       toolCallMemo: undefined,
+      turnToolCallLedger: undefined,
       taskState: undefined,
       isRequestContinuation: undefined,
       tracing: NOOP_AGENT_TRACING,
@@ -264,6 +308,7 @@ describe('no-progress nudge', () => {
       threadId: 'main',
       title: 'Main',
       toolCallMemo: undefined,
+      turnToolCallLedger: undefined,
       taskState: undefined,
       isRequestContinuation: undefined,
       tracing: NOOP_AGENT_TRACING,

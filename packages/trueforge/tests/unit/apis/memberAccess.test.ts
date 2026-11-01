@@ -1,7 +1,7 @@
 /**
- * What a signed-in member (non-admin) can and cannot do over the real HTTP surface. Hosted-demo judges are members:
- * they chat, but cannot change server settings, connectors, providers or the sandbox, and never see another
- * person's sessions.
+ * What a signed-in member (non-admin) can and cannot do over the real HTTP surface of a hosted deployment, where
+ * several people share one server: they chat, but cannot change server settings, connectors, providers or the
+ * sandbox, and never see another person's sessions.
  */
 import { z } from '@hono/zod-openapi';
 import { HTTPException } from 'hono/http-exception';
@@ -13,7 +13,7 @@ const OWNER = 'owner@demo.example';
 const JUDGE = 'judge1@demo.example';
 const OTHER_JUDGE = 'judge2@demo.example';
 
-/** The caller is named by `x-test-user`; only the owner carries the admin role, as under the installer's settings. */
+/** The caller is named by `x-test-user`; only the owner carries the admin role. */
 const headerAuthenticator: Authenticator = {
   authenticate: c => {
     const user = c.req.header('x-test-user');
@@ -60,6 +60,7 @@ const SETTINGS_PATHS = [
   '/api/v1/settings/run-code',
   '/api/v1/settings/tool-output-screens',
   '/api/v1/settings/memory-screens',
+  '/api/v1/settings/memory-recalls',
   '/api/v1/settings/memory-summarize',
   '/api/v1/settings/anything-added-later',
 ];
@@ -98,6 +99,25 @@ describe('a member (non-admin) over HTTP', () => {
     it.each(SETTINGS_PATHS.slice(0, -1))('lets the owner reach %s', async path => {
       const response = await server.request(path, as(OWNER));
       expect([401, 403]).not.toContain(response.status);
+    });
+
+    // The Email and Calendar accounts belong to the whole instance, so only an admin may read or change them.
+    const ACCOUNT_ROUTES: { method: string; path: string }[] = ['email', 'calendar'].flatMap(kind => [
+      { method: 'GET', path: `/api/v1/user/settings/${kind}/status` },
+      { method: 'POST', path: `/api/v1/user/settings/${kind}` },
+      { method: 'DELETE', path: `/api/v1/user/settings/${kind}` },
+    ]);
+
+    it.each(ACCOUNT_ROUTES)('refuses a member on $method $path', async ({ method, path }) => {
+      const body = method === 'GET' ? undefined : JSON.stringify({});
+      const response = await server.request(path, as(JUDGE, { method, ...(body === undefined ? {} : { body }) }));
+      expect(response.status).toBe(403);
+      expect(await response.json()).toEqual({ error: { message: 'Admin access required' } });
+    });
+
+    it.each(['email', 'calendar'])('lets the owner reach the %s status', async kind => {
+      const response = await server.request(`/api/v1/user/settings/${kind}/status`, as(OWNER));
+      expect(response.status).toBe(200);
     });
 
     it('refuses an unauthenticated caller before any role check', async () => {

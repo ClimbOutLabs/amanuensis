@@ -7,9 +7,9 @@ import { assessDraft } from '../../../../src/core/email/gmail/draftAssessment';
 import { hashDraft } from '../../../../src/core/email/gmail/draftReview';
 import { hasHiddenCharacters, stripInvisible } from '../../../../src/core/email/gmail/mimeText';
 import { DraftEmailSchema } from '../../../../src/core/email/gmail/toolContract';
-import { escapeDisplayText } from '../../../../src/core/permissions/extractorRegistry';
-import { plainDraft } from './fixtures';
-import { approvalProblem, build, json, route, text } from './harness';
+import { escapeDisplayText } from '../../../../src/core/permissions/displayText';
+import { message, plainDraft } from './fixtures';
+import { approvalProblem, build, json, route, text, threadRoute } from './harness';
 
 const ACCOUNT = 'ada@example.com';
 const COMPOSE = ['gmail_read', 'gmail_compose'] as const;
@@ -531,6 +531,24 @@ describe('message ids are RFC ids, and the chain is under the review hash', () =
       routes: [
         url => (url.pathname === '/gmail/v1/users/me/drafts/d1' ? json({ id: 'd1', message: live }) : undefined),
         url => (url.pathname.endsWith('/drafts/send') ? json({ id: 's', threadId: 't9' }) : undefined),
+        threadRoute({
+          id: 't9',
+          messages: [
+            message({
+              id: 'first',
+              threadId: 't9',
+              extraHeaders: [header('Message-ID', '<a@mail.example.com>')],
+            }),
+            message({
+              id: 'second',
+              threadId: 't9',
+              extraHeaders: [
+                header('Message-ID', '<b@mail.example.com>'),
+                header('References', '<a@mail.example.com>'),
+              ],
+            }),
+          ],
+        }),
       ],
     });
     const info = await tools.toolCallInfo({ name: 'send_draft', arguments: { draft_id: 'd1' } });
@@ -566,7 +584,7 @@ describe('the name a message is sent under is shown and hashed', () => {
     });
     const info = await tools.toolCallInfo({ name: 'send_draft', arguments: { draft_id: 'd1' } });
     expect(info.tier3_card?.plain_what).toBe(
-      'Send "Lease" from your Gmail to grace@example.com. Sent as "Lovelace, Ada".',
+      'Send "Lease" from your Gmail to grace@example.com. Sent as "Lovelace, Ada"?',
     );
   });
 
@@ -577,7 +595,7 @@ describe('the name a message is sent under is shown and hashed', () => {
     });
     const info = await tools.toolCallInfo({ name: 'send_draft', arguments: { draft_id: 'd1' } });
     expect(info.tier3_card?.plain_what).toBe(
-      'Send "Lease" from your Gmail to grace@example.com. Sent as "Ada. Hidden copy: nobody".',
+      'Send "Lease" from your Gmail to grace@example.com. Sent as "Ada. Hidden copy: nobody"?',
     );
     expect(info.tier3_card?.email?.bcc).toEqual([]);
   });
@@ -589,7 +607,7 @@ describe('the name a message is sent under is shown and hashed', () => {
     });
     expect(
       (await encoded.tools.toolCallInfo({ name: 'send_draft', arguments: { draft_id: 'd1' } })).tier3_card?.plain_what,
-    ).toContain('Sent as "Ada Müller".');
+    ).toContain('Sent as "Ada Müller"?');
     const bare = await build({ features: [...COMPOSE], routes: COMPOSE_ROUTES(() => draftFrom('ada@example.com')) });
     expect(
       (await bare.tools.toolCallInfo({ name: 'send_draft', arguments: { draft_id: 'd1' } })).tier3_card?.plain_what,

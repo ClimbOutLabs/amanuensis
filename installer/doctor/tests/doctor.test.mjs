@@ -10,6 +10,7 @@ import {
   rmSync,
   statSync,
   symlinkSync,
+  utimesSync,
   writeFileSync,
 } from 'node:fs';
 import path from 'node:path';
@@ -28,7 +29,7 @@ import {
 } from './world.mjs';
 
 // The document a healthy world prints: same shape and keys as before the text report was restyled.
-const HEALTHY_JSON = `{"machine":[{"id":"docker","state":"ok","detail":"Docker 27.1.1 is running and Compose 2.29.1 is available.","fix":""},{"id":"runtime","state":"ok","detail":"A supported Docker runtime is in use.","fix":""},{"id":"credentials","state":"ok","detail":"No Docker settings file, so no credential store is in use.","fix":""},{"id":"images","state":"ok","detail":"All 3 images are ready.","fix":""},{"id":"disk","state":"ok","detail":"50.0 GB is free for Docker data.","fix":""},{"id":"docker_memory","state":"ok","detail":"Docker has 16.0 GB of memory.","fix":""},{"id":"clock","state":"ok","detail":"This machine and Docker agree on the time.","fix":""},{"id":"backup","state":"ok","detail":"No backup yet; one is made automatically before your first upgrade.","fix":""}],"instances":{"main":[{"id":"config","state":"ok","detail":"The settings files exist and are private to you.","fix":""},{"id":"containers","state":"ok","detail":"All 2 parts of instance main are running.","fix":""},{"id":"ports","state":"ok","detail":"Aman listens on this computer only.","fix":""},{"id":"service","state":"ok","detail":"The app answers its health check.","fix":""},{"id":"login","state":"ok","detail":"The login provider answers.","fix":""},{"id":"database","state":"ok","detail":"The database can be written to.","fix":""},{"id":"disk","state":"ok","detail":"50.0 GB is free where the data lives.","fix":""},{"id":"clock","state":"ok","detail":"The clock is within 60 seconds of the login provider.","fix":""},{"id":"run_code","state":"off","detail":"run_code is not available: no sandbox isolation driver is configured for this deployment.","fix":""},{"id":"attachments","state":"off","detail":"Reading attachments is off: this instance was installed without the sandbox, so the assistant cannot read PDFs, images or email attachments.","fix":""},{"id":"demo","state":"off","detail":"Demo mode is off.","fix":""},{"id":"model","state":"off","detail":"No Token Factory key is set (NEBIUS_API_KEY), so the hosted model is not checked.","fix":""}]}}
+const HEALTHY_JSON = `{"machine":[{"id":"docker","state":"ok","detail":"Docker 28.0.1 is running and Compose 2.29.1 is available.","fix":""},{"id":"runtime","state":"ok","detail":"A supported Docker runtime is in use.","fix":""},{"id":"credentials","state":"ok","detail":"No Docker settings file, so no credential store is in use.","fix":""},{"id":"images","state":"ok","detail":"All 3 images are ready.","fix":""},{"id":"disk","state":"ok","detail":"50.0 GB is free for Docker data.","fix":""},{"id":"docker_memory","state":"ok","detail":"Docker has 16.0 GB of memory.","fix":""},{"id":"clock","state":"ok","detail":"This machine and Docker agree on the time.","fix":""},{"id":"backup","state":"ok","detail":"No backup yet; one is made automatically before your first upgrade.","fix":""}],"instances":{"main":[{"id":"config","state":"ok","detail":"The settings files exist and are private to you.","fix":""},{"id":"containers","state":"ok","detail":"All 2 parts of instance main are running.","fix":""},{"id":"ports","state":"ok","detail":"Aman listens on this computer only.","fix":""},{"id":"service","state":"ok","detail":"The app answers its health check.","fix":""},{"id":"login","state":"ok","detail":"The login provider answers.","fix":""},{"id":"database","state":"ok","detail":"The database can be written to.","fix":""},{"id":"disk","state":"ok","detail":"50.0 GB is free where the data lives.","fix":""},{"id":"clock","state":"ok","detail":"The clock is within 60 seconds of the login provider.","fix":""},{"id":"run_code","state":"off","detail":"run_code is not available: no sandbox isolation driver is configured for this deployment.","fix":""},{"id":"attachments","state":"off","detail":"Reading attachments is off: this instance was installed without the sandbox, so the assistant cannot read PDFs, images or email attachments.","fix":""},{"id":"demo","state":"off","detail":"Demo mode is off.","fix":""},{"id":"model","state":"off","detail":"No Token Factory key is set (NEBIUS_API_KEY), so the hosted model is not checked.","fix":""}]}}
 `;
 
 let world;
@@ -150,7 +151,7 @@ describe('document and exit codes', () => {
     assert.match(plain.stdout, /All checks passed\./);
     assert.doesNotMatch(plain.stdout, /\(docker\)/);
     const verbose = world.run(['--verbose']);
-    assert.match(verbose.stdout, /Docker 27\.1\.1 is running and Compose 2\.29\.1 is available\. \(docker\)/);
+    assert.match(verbose.stdout, /Docker 28\.0\.1 is running and Compose 2\.29\.1 is available\. \(docker\)/);
   });
 
   it('--summary is one line when everything passed, with the number of checks and nothing else', () => {
@@ -170,7 +171,7 @@ describe('document and exit codes', () => {
     assert.match(flat, /This computer x Only 1\.0 GB is free for Docker data/);
     assert.match(flat, /\d+ other checks passed\. Full report: aman doctor/);
     assert.doesNotMatch(flat, /All \d+ checks passed/);
-    assert.doesNotMatch(flat, /Docker 27\.1\.1 is running/);
+    assert.doesNotMatch(flat, /Docker 28\.0\.1 is running/);
     assert.doesNotMatch(flat, /Instance main/);
   });
 
@@ -195,7 +196,9 @@ describe('document and exit codes', () => {
   it('is read-only: only inspection commands reach Docker', () => {
     make();
     world.run();
-    const allowed = /^(--version|info|version|compose version|ps|port|exec|image inspect)\b/;
+    // The host report is the one write: a throwaway container that mounts an instance's data volume with no network.
+    const allowed =
+      /^(--version|info|version|compose version|ps|port|exec|image inspect|volume inspect aman_[a-z0-9-]+_data$|run --rm -i --network none -v aman_[a-z0-9-]+_data:\/data )/;
     for (const call of world.calls()) {
       assert.match(call, allowed, call);
     }
@@ -394,6 +397,23 @@ describe('unsupported runtimes', () => {
     world.set('version', { out: 'Docker Engine - Community;\n' });
     world.set('cli_version', { out: 'podman version 5.0.0\n' });
     assert.equal(machine(world.json(), 'runtime').state, 'fail');
+  });
+
+  it('fails on native Linux with an Engine older than 28, and passes for 28, Docker Desktop and WSL2', () => {
+    make();
+    const info = (version, os) => ({ out: `${version}|x86_64|[]|${world.dockerRoot}|${DAEMON_TIME}|${os}\n`, rc: 0 });
+    world.set('info', info('27.5.1', 'Ubuntu 24.04'));
+    const check = machine(world.json(), 'runtime');
+    assert.equal(check.state, 'fail');
+    assert.match(
+      check.detail,
+      /Docker Engine 27\.5\.1 lets other devices on your network reach ports meant for this computer only/,
+    );
+    assertFixed(check);
+    world.set('info', info('28.0.0', 'Ubuntu 24.04'));
+    assert.equal(machine(world.json(), 'runtime').state, 'ok');
+    world.set('info', info('27.5.1', 'Docker Desktop'));
+    assert.equal(machine(world.json(), 'runtime').state, 'ok');
   });
 });
 
@@ -651,46 +671,128 @@ describe('instance settings file', () => {
     assert.doesNotMatch(world.json().stdout, /SENTINEL-hash/);
   });
 
-  it('reports the sign-in user count without printing a hash', () => {
-    make();
-    const file = path.join(world.instanceDir('main'), 'dex.env');
-    writeFileSync(
-      file,
-      [
-        "DEX_USER_PASSWORD_HASH='SENTINEL-owner-hash'",
-        "DEX_USER_PASSWORD_HASH_JUDGE1='SENTINEL-judge1-hash'",
-        "DEX_USER_PASSWORD_HASH_JUDGE_TWO='SENTINEL-judge2-hash'",
-        '',
-      ].join('\n'),
-    );
-    chmodSync(file, 0o600);
-    world.writeEnv('main', 0o600, 'OIDC_ALLOWED_EMAILS=o@x.invalid,a@x.invalid,b@x.invalid\n');
-    const check = find(world.json().doc.instances.main, 'config');
-    assert.equal(check.state, 'ok');
-    assert.match(check.detail, /3 sign-in user\(s\): the owner and 2 member\(s\)/);
-    assert.doesNotMatch(world.json().stdout, /SENTINEL/);
-  });
+  describe('one account per instance', () => {
+    const OWNER = 'owner@x.invalid';
+    const fixCommand = 'Run aman doctor instance --fix';
 
-  it('warns when fewer emails are allowed than there are users', () => {
-    make();
-    const file = path.join(world.instanceDir('main'), 'dex.env');
-    writeFileSync(file, "DEX_USER_PASSWORD_HASH='h1'\nDEX_USER_PASSWORD_HASH_JUDGE1='h2'\n");
-    chmodSync(file, 0o600);
-    world.writeEnv('main', 0o600, 'OIDC_ALLOWED_EMAILS=o@x.invalid\n');
-    const check = find(world.json().doc.instances.main, 'config');
-    assert.equal(check.state, 'warn');
-    assert.match(check.detail, /2 sign-in user\(s\)/);
-    assert.match(check.detail, /Fewer emails are allowed/);
-    assert.match(check.fix, /add-user/);
-  });
+    function setUp({ allowed, envText, hashes = [], registered = true, records = '' }) {
+      world?.dispose();
+      make();
+      const file = path.join(world.instanceDir('main'), 'dex.env');
+      writeFileSync(file, ["DEX_USER_PASSWORD_HASH='SENTINEL-owner-hash'", ...hashes, ''].join('\n'));
+      chmodSync(file, 0o600);
+      world.writeEnv('main', 0o600, envText ?? (allowed === undefined ? '' : `OIDC_ALLOWED_EMAILS=${allowed}\n`));
+      if (registered) {
+        const dir = path.join(world.home, 'state', 'instances');
+        mkdirSync(dir, { recursive: true });
+        writeFileSync(path.join(dir, 'main.conf'), `name=main\nowner_email=${OWNER}\n${records}`);
+      }
+      return find(world.json().doc.instances.main, 'config');
+    }
 
-  it('does not warn about a wildcard allowlist', () => {
-    make();
-    const file = path.join(world.instanceDir('main'), 'dex.env');
-    writeFileSync(file, "DEX_USER_PASSWORD_HASH='h1'\nDEX_USER_PASSWORD_HASH_JUDGE1='h2'\n");
-    chmodSync(file, 0o600);
-    world.writeEnv('main', 0o600, 'OIDC_ALLOWED_EMAILS=*@x.invalid\n');
-    assert.equal(find(world.json().doc.instances.main, 'config').state, 'ok');
+    it('is quiet when only the owner can sign in', () => {
+      const check = setUp({ allowed: OWNER });
+      assert.equal(check.state, 'ok');
+      assert.equal(check.detail, 'The settings files exist and are private to you.');
+      assert.doesNotMatch(world.json().stdout, /SENTINEL/);
+    });
+
+    it('warns with the fix command and names the extra emails left from add-user', () => {
+      const check = setUp({
+        allowed: `${OWNER},a@x.invalid,B@x.invalid`,
+        hashes: [
+          "DEX_USER_PASSWORD_HASH_JUDGE1='SENTINEL-judge1-hash'",
+          "DEX_USER_PASSWORD_HASH_JUDGE_TWO='SENTINEL-judge2-hash'",
+        ],
+      });
+      assert.equal(check.state, 'warn');
+      assert.equal(check.detail, 'More than the owner can sign in: a@x.invalid, b@x.invalid.');
+      assert.equal(check.fix, fixCommand);
+      assert.doesNotMatch(world.json().stdout, /SENTINEL/);
+    });
+
+    it('does not mistake the owner in another case or with spaces for an extra user', () => {
+      const check = setUp({ allowed: ` ${OWNER.toUpperCase()} ` });
+      assert.equal(check.state, 'ok');
+    });
+
+    it('takes the first allowed email for the owner when the record is gone', () => {
+      assert.equal(setUp({ allowed: OWNER, registered: false }).state, 'ok');
+      const check = setUp({ allowed: `${OWNER},a@x.invalid`, registered: false });
+      assert.equal(check.state, 'warn');
+      assert.match(check.detail, /: a@x\.invalid\./);
+    });
+
+    it('warns about a pattern, which lets more than the owner in', () => {
+      const check = setUp({ allowed: '*@x.invalid' });
+      assert.equal(check.state, 'warn');
+      assert.match(check.detail, /\*@x\.invalid/);
+      assert.equal(check.fix, fixCommand);
+    });
+
+    it('warns about left-over password hashes even when the emails are already the owner only', () => {
+      const check = setUp({ allowed: OWNER, hashes: ["DEX_USER_PASSWORD_HASH_JUDGE1='SENTINEL-judge1-hash'"] });
+      assert.equal(check.state, 'warn');
+      assert.equal(check.detail, 'More than the owner can sign in: judge1.');
+      assert.equal(check.fix, fixCommand);
+      assert.doesNotMatch(world.json().stdout, /SENTINEL/);
+    });
+
+    it('reads every allowed-emails line, since Compose takes the last one', () => {
+      const check = setUp({ allowed: `${OWNER}\nOIDC_ALLOWED_EMAILS=late@x.invalid` });
+      assert.equal(check.state, 'warn');
+      assert.equal(check.detail, 'More than the owner can sign in: late@x.invalid.');
+    });
+
+    for (const [what, line] of [
+      ['an indented line', '  OIDC_ALLOWED_EMAILS=late@x.invalid'],
+      ['a tab-indented line', '\tOIDC_ALLOWED_EMAILS=late@x.invalid'],
+      ['export and a tab', 'export\tOIDC_ALLOWED_EMAILS=late@x.invalid'],
+      ['export and several spaces', '  export   OIDC_ALLOWED_EMAILS=late@x.invalid'],
+      ['blanks around the equals sign', 'OIDC_ALLOWED_EMAILS = late@x.invalid'],
+      ['a colon for the equals sign', 'OIDC_ALLOWED_EMAILS: late@x.invalid'],
+      ['a no-break space before it', '\u00a0OIDC_ALLOWED_EMAILS=late@x.invalid'],
+    ]) {
+      it(`reads an allowed-emails line Compose also reads: ${what}`, () => {
+        const check = setUp({ envText: `OIDC_ALLOWED_EMAILS=${OWNER}\n${line}\n` });
+        assert.equal(check.state, 'warn');
+        assert.equal(check.detail, 'More than the owner can sign in: late@x.invalid.');
+        assert.equal(check.fix, fixCommand);
+      });
+    }
+
+    it('warns about a user record left in the registry when the emails are the owner only', () => {
+      const check = setUp({ allowed: OWNER, records: 'user_judge1=member:judge1@x.invalid\n' });
+      assert.equal(check.state, 'warn');
+      assert.equal(check.detail, 'More than the owner can sign in: judge1@x.invalid.');
+      assert.equal(check.fix, fixCommand);
+    });
+
+    for (const [what, value] of [
+      ['double quotes', `"${OWNER}"`],
+      ['single quotes', `'${OWNER}'`],
+      ['quotes and a comment', `"${OWNER}" # the owner`],
+      ['a comment', `${OWNER} # the owner`],
+      ['a Windows line ending', `${OWNER}\r`],
+    ]) {
+      it(`is quiet when the owner-only value has ${what}`, () => {
+        assert.equal(setUp({ envText: `OIDC_ALLOWED_EMAILS=${value}\n` }).state, 'ok');
+        assert.equal(setUp({ envText: `  export OIDC_ALLOWED_EMAILS=${value}\n` }).state, 'ok');
+        assert.equal(setUp({ envText: `OIDC_ALLOWED_EMAILS=${value}\n`, registered: false }).state, 'ok');
+      });
+    }
+
+    it('does not take a comment or a longer name for the allowed emails', () => {
+      const check = setUp({
+        envText: `OIDC_ALLOWED_EMAILS=${OWNER}\n# OIDC_ALLOWED_EMAILS=late@x.invalid\nOIDC_ALLOWED_EMAILS_NOTE=late@x.invalid\n`,
+      });
+      assert.equal(check.state, 'ok');
+    });
+
+    it('no longer mentions members or add-user', () => {
+      const check = setUp({ allowed: `${OWNER},a@x.invalid` });
+      assert.doesNotMatch(`${check.detail} ${check.fix}`, /member|add-user|list-users/i);
+    });
   });
 
   it('fails when the file is missing', () => {
@@ -746,6 +848,26 @@ describe('instance service health', () => {
     const service = find(result.doc.instances.main, 'service');
     assert.equal(service.state, 'off', 'one line for the problem, not two');
     assert.ok(!world.calls().some(call => call.startsWith('exec')));
+  });
+
+  it('names the https part in plain words when it is down', () => {
+    make();
+    containers([
+      app(),
+      dex(),
+      world.psLine({
+        id: 'c3',
+        name: 'aman-main-tls-1',
+        state: 'exited',
+        status: 'Exited (1) 3 minutes ago',
+        service: 'tls',
+      }),
+    ]);
+    const result = world.json();
+    assert.match(
+      find(result.doc.instances.main, 'containers').detail,
+      /The main secure connection is not running\./,
+    );
   });
 
   it('ignores a one-shot container that exited cleanly', () => {
@@ -849,6 +971,20 @@ describe('doctor sandbox', () => {
     world.set('node', { rc: 1 });
     const result = world.shim(['doctor', 'sandbox']);
     assert.equal(result.code, 1);
+    assert.ok(!world.calls().some(line => line.includes('--only run_code')));
+  });
+
+  it('shows the plain safety check line the setup prints for an unhealthy slot', () => {
+    make();
+    ready();
+    world.set('node', {
+      out: 'Safety check network failed: interfaces: eth0 has a route off this computer\n',
+      rc: 1,
+    });
+    const result = world.shim(['doctor', 'sandbox']);
+    assert.equal(result.code, 1);
+    assert.match(result.stdout, /Safety check network failed: interfaces: eth0 has a route off this computer/);
+    assert.doesNotMatch(result.stdout, /attestation FAILED/);
     assert.ok(!world.calls().some(line => line.includes('--only run_code')));
   });
 
@@ -1189,31 +1325,58 @@ describe('why an instance does not run', () => {
   it('names the cause from the container log in one sentence and never asks anyone to read logs', () => {
     make();
     containers([app({ state: 'exited', status: 'Exited (1) 3 minutes ago' }), dex()]);
-    world.set('logs_c1', { out: "Error: EACCES: permission denied, mkdir '/home/trueforge'\n" });
+    world.set('logs_c1', { out: "Error: EACCES: permission denied, mkdir '/home/user'\n" });
     world.set('logs_c2', { out: '' });
     const check = find(world.json().doc.instances.main, 'containers');
     assert.equal(check.state, 'fail');
     assert.match(
       check.detail,
-      /The app could not start: it was not allowed to create a folder \(\/home\/trueforge\)\. This is a bug in Aman, not a problem on your computer\./,
+      /The app could not start: it was not allowed to create a folder \(\/home\/user\)\. This is a bug in Aman, not a problem on your computer\./,
     );
     assert.match(check.fix, /aman doctor instance --fix/);
     assert.doesNotMatch(`${check.detail} ${check.fix}`, /docker (compose|logs)|compose\.yaml|\.env/);
   });
 
-  it('shows the state and, with --fix, asks the installer to render the instance again and restart it', () => {
+  it('with --fix, does not claim fixed when the problem is still there after the refresh', () => {
     make();
     const repo = world.sandbox();
     world.installerStub(repo);
     containers([app({ state: 'exited', status: 'Exited (1) 3 minutes ago' }), dex()]);
-    const shown = world.shim(['doctor', 'instance']);
-    assert.equal(shown.code, 1);
-    assert.match(shown.stdout, /x The main app is not running\./);
-    assert.ok(!world.calls().some(line => line.startsWith('install.sh')));
+    const fixed = world.shim(['doctor', 'instance', '--fix', '--yes']);
+    assert.equal(fixed.code, 1, fixed.stderr + fixed.stdout);
+    assert.ok(world.calls().includes(`install.sh --home ${world.home} --yes instance refresh main`));
+    assert.doesNotMatch(fixed.stdout, /Instance main is fixed/);
+    assert.match(fixed.stdout, /The main app is not running\./);
+  });
+
+  it('with --fix, claims fixed when the refresh leaves no failing check', () => {
+    make();
+    const repo = world.sandbox();
+    const dir = path.join(repo, 'installer');
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(
+      path.join(dir, 'install.sh'),
+      `#!/usr/bin/env bash\necho "install.sh $*" >> "$FAKE_DOCKER_DIR/calls.log"\nprintf '%s\\n' 'c1|aman-main-app-1|running|Up 2 minutes|app' 'c2|aman-main-dex-1|running|Up 2 minutes|dex' > "$FAKE_DOCKER_DIR/ps.out"\nexit 0\n`,
+    );
+    chmodSync(path.join(dir, 'install.sh'), 0o755);
+    containers([app({ state: 'exited', status: 'Exited (1) 3 minutes ago' }), dex()]);
     const fixed = world.shim(['doctor', 'instance', '--fix', '--yes']);
     assert.equal(fixed.code, 0, fixed.stderr + fixed.stdout);
     assert.ok(world.calls().includes(`install.sh --home ${world.home} --yes instance refresh main`));
     assert.match(fixed.stdout, /Instance main is fixed/);
+  });
+
+  it('--fix renders again when the containers are healthy but more than the owner can sign in', () => {
+    make();
+    const repo = world.sandbox();
+    world.installerStub(repo);
+    world.writeEnv('main', 0o600, 'OIDC_ALLOWED_EMAILS=owner@x.invalid,extra@x.invalid\n');
+    const dir = path.join(world.home, 'state', 'instances');
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(path.join(dir, 'main.conf'), 'name=main\nowner_email=owner@x.invalid\n');
+    const fixed = world.shim(['doctor', 'instance', '--fix', '--yes']);
+    assert.equal(fixed.code, 0, fixed.stderr + fixed.stdout);
+    assert.ok(world.calls().includes(`install.sh --home ${world.home} --yes instance refresh main`));
   });
 
   it('fix asks first and changes nothing when the answer is not yes', () => {
@@ -1273,8 +1436,8 @@ describe('network address check', () => {
   it('counts a name given at install as listed', () => {
     make();
     world.network('main', {
-      origins: 'http://127.0.0.1:8791,http://localhost:8791,http://192.168.1.20:8791,http://nas.local:8791',
-      extraHosts: 'nas.local',
+      origins: 'http://127.0.0.1:8791,http://localhost:8791,http://192.168.1.20:8791,http://files.example.local:8791',
+      extraHosts: 'files.example.local',
     });
     assert.equal(find(world.json().doc.instances.main, 'network').state, 'ok');
   });
@@ -1383,6 +1546,23 @@ describe('https on the network', () => {
     assert.equal(tlsCheck(), undefined);
   });
 
+  it('pays no attention to the https settings an instance kept after it was closed back to this computer', () => {
+    make();
+    world.tls('main', { origins: '', healthz: 0 });
+    const result = world.json();
+    assert.equal(result.code, 0, result.stderr);
+    assert.equal(find(result.doc.machine, 'tls'), undefined);
+  });
+
+  it('does not renew the certificate of an instance closed back to this computer', () => {
+    make();
+    const repo = world.sandbox();
+    world.installerStub(repo);
+    world.tls('main', { origins: '', endsInSeconds: 59 * 86400 });
+    world.shim(['doctor', '--json']);
+    assert.ok(!world.calls().includes(`install.sh --home ${world.home} tls`));
+  });
+
   it('is ok while the certificate lasts, lists every address, and answers over https', () => {
     make();
     world.tls('main');
@@ -1414,13 +1594,15 @@ describe('https on the network', () => {
       /Daily backups are off, so the https certificate is renewed only when you run an aman command/,
     );
     assert.equal(check.fix, 'Run aman doctor backup --fix');
+    assert.match(check.detail, /fingerprint, to compare on a device before trusting it: AA:BB:CC/);
   });
 
   it('warns about an authority from before it had limits, and about one that does not cover a name, with the one fix', () => {
     make();
     world.tls('main', { constrained: false });
-    assert.match(tlsCheck().detail, /has no limit on the names it can vouch for/);
+    assert.match(tlsCheck().detail, /can vouch for more names than it should/);
     assert.equal(tlsCheck().fix, 'Run aman doctor tls --fix');
+    assert.match(tlsCheck().detail, /fingerprint, to compare on a device before trusting it: AA:BB:CC/);
     make();
     world.tls('main', { covers: false });
     assert.match(tlsCheck().detail, /does not cover every name of instance main/);
@@ -1528,6 +1710,25 @@ describe('aman backup and aman upgrade', () => {
     assert.ok(world.calls().includes(`install.sh --home ${world.home} upgrade --check`));
   });
 
+  it('aman password runs the installer to set a new owner password, with the arguments given', () => {
+    make();
+    const repo = world.sandbox();
+    world.installerStub(repo);
+    assert.equal(world.shim(['password']).code, 0);
+    assert.equal(world.shim(['password', '--instance', 'main', '--password-stdin']).code, 0);
+    assert.ok(world.calls().includes(`install.sh --home ${world.home} instance password`));
+    assert.ok(
+      world.calls().includes(`install.sh --home ${world.home} instance password --instance main --password-stdin`),
+    );
+  });
+
+  it('aman --help says the password command is run on the computer where Aman is installed', () => {
+    make();
+    const result = world.shim(['--help']);
+    assert.match(result.stderr, /aman password \[--instance NAME\] \[--password-stdin\]/);
+    assert.match(result.stderr, /on the computer where Aman is installed/);
+  });
+
   it('say plainly when the folder Aman was installed from is gone', () => {
     make();
     const result = world.shim(['backup']);
@@ -1543,6 +1744,50 @@ describe('aman backup and aman upgrade', () => {
     const result = runInstalled(['backup']);
     assert.equal(result.status, 0, result.stderr);
     assert.ok(world.calls().includes(`install.sh --home ${world.home} backup`));
+  });
+});
+
+describe('aman import and aman migrate', () => {
+  it('import into the one instance through the installer, with the display name passed on', () => {
+    make();
+    world.installerStub(world.sandbox());
+    assert.equal(world.shim(['import', '/x/aman-export.zip', '--display-name', 'Sam Example']).code, 0);
+    assert.ok(
+      world
+        .calls()
+        .includes(`install.sh --home ${world.home} instance import main /x/aman-export.zip --display-name Sam Example`),
+    );
+  });
+
+  it('import passes --dry-run on to the installer', () => {
+    make();
+    world.installerStub(world.sandbox());
+    assert.equal(world.shim(['import', '/x/aman-export.zip', '--dry-run']).code, 0);
+    assert.ok(
+      world.calls().includes(`install.sh --home ${world.home} instance import main /x/aman-export.zip --dry-run`),
+    );
+  });
+
+  it('import needs --instance when this computer has more than one, and a file always', () => {
+    make({ instances: ['main', 'second'] });
+    world.installerStub(world.sandbox());
+    const several = world.shim(['import', '/x/aman-export.zip']);
+    assert.equal(several.code, 2);
+    assert.match(several.stderr, /has 2 instances, so Aman cannot tell which one to import into\. Run aman import/);
+    assert.equal(world.shim(['import', '/x/aman-export.zip', '--instance', 'second']).code, 0);
+    assert.ok(world.calls().includes(`install.sh --home ${world.home} instance import second /x/aman-export.zip`));
+    const none = world.shim(['import']);
+    assert.equal(none.code, 2);
+    assert.match(none.stderr, /aman import needs the export file\. Run aman import FILE\./);
+  });
+
+  it('migrate runs the installer with the folder and the options given', () => {
+    make();
+    world.installerStub(world.sandbox());
+    assert.equal(world.shim(['migrate', '--from-compose', '/x/old-aman', '--user', 'sam-id']).code, 0);
+    assert.ok(
+      world.calls().includes(`install.sh --home ${world.home} migrate --from-compose /x/old-aman --user sam-id`),
+    );
   });
 });
 
@@ -1912,5 +2157,175 @@ describe('sandbox settings that are incomplete', () => {
     assert.ok(install, fixed.stdout + fixed.stderr);
     assert.ok(install.includes('--name main'));
     assert.ok(!install.includes('--yes'), install);
+  });
+});
+
+describe('the sandbox row of the plain doctor', () => {
+  const slot = (n, state, status) =>
+    world.psLine({ id: `s${n}`, name: `aman-slots-sandbox-${n}-1`, state, status, service: `sandbox-${n}` });
+  const healthySlots = () => [1, 2, 3, 4].map(n => slot(n, 'running', 'Up 2 minutes (healthy)'));
+
+  it('shows the failing safety check line of an unhealthy slot, with no instance at all', () => {
+    make({ instances: [] });
+    const lines = healthySlots();
+    lines[1] = slot(2, 'running', 'Up 2 minutes (unhealthy)');
+    world.set('ps', { out: `${lines.join('\n')}\n`, rc: 0 });
+    world.set('logs_s2', {
+      out: '2026-10-10 11:58:00 attestation FAILED network: interfaces: eth0 has a route off this computer\n',
+    });
+    const result = world.json();
+    assert.equal(result.code, 1);
+    const check = machine(result, 'sandbox');
+    assert.ok(check, 'sandbox check present');
+    assert.equal(check.state, 'fail');
+    assert.match(check.detail, /Safety check network failed: interfaces: eth0 has a route off this computer/);
+    assert.doesNotMatch(check.detail, /attestation FAILED/);
+    assert.equal(check.fix, 'Run aman doctor sandbox --fix');
+    const text = world.run();
+    assert.match(text.stdout, /Safety check network failed: interfaces:/);
+  });
+
+  it('shows the safety check line of a slot that never started', () => {
+    make({ instances: [] });
+    const lines = healthySlots();
+    lines[0] = slot(1, 'exited', 'Exited (1) 2 minutes ago');
+    world.set('ps', { out: `${lines.join('\n')}\n`, rc: 0 });
+    world.set('logs_s1', {
+      out: '2026-10-10 11:57:00 attestation FAILED runsc: the sandbox runtime did not answer\n',
+    });
+    const check = machine(world.json(), 'sandbox');
+    assert.equal(check.state, 'fail');
+    assert.match(check.detail, /Safety check runsc failed: the sandbox runtime did not answer/);
+    assert.equal(check.fix, 'Run aman doctor sandbox --fix');
+  });
+
+  it('shows the plain failure line, word for word, for an unhealthy slot', () => {
+    make({ instances: [] });
+    const lines = healthySlots();
+    lines[2] = slot(3, 'running', 'Up 2 minutes (unhealthy)');
+    world.set('ps', { out: `${lines.join('\n')}\n`, rc: 0 });
+    world.set('logs_s3', {
+      out: '2026-10-10 11:58:00 attestation FAILED seccomp: Seccomp is "0"\n',
+    });
+    const check = machine(world.json(), 'sandbox');
+    assert.ok(check, 'sandbox check present');
+    assert.equal(check.state, 'fail');
+    assert.equal(check.detail, 'A sandbox slot failed: Safety check seccomp failed: Seccomp is "0"');
+    assert.equal(check.fix, 'Run aman doctor sandbox --fix');
+    const text = world.run();
+    assert.match(text.stdout, /Safety check seccomp failed/);
+    assert.doesNotMatch(text.stdout, /attestation FAILED/);
+  });
+
+  it('is ok when every slot is running and healthy, and absent when there are no slots', () => {
+    make({ instances: [] });
+    world.set('ps', { out: `${healthySlots().join('\n')}\n`, rc: 0 });
+    const check = machine(world.json(), 'sandbox');
+    assert.ok(check, 'sandbox check present');
+    assert.equal(check.state, 'ok');
+    world.dispose();
+    make();
+    assert.equal(machine(world.json(), 'sandbox'), undefined);
+  });
+
+  it('still fails, without inventing a reason, when an unhealthy slot logged no attestation line', () => {
+    make({ instances: [] });
+    const lines = healthySlots();
+    lines[3] = slot(4, 'running', 'Up 2 minutes (unhealthy)');
+    world.set('ps', { out: `${lines.join('\n')}\n`, rc: 0 });
+    world.set('logs_s4', { out: 'some other problem entirely\n' });
+    const check = machine(world.json(), 'sandbox');
+    assert.equal(check.state, 'fail');
+    assert.doesNotMatch(check.detail, /attestation FAILED/);
+    assert.equal(check.fix, 'Run aman doctor sandbox --fix');
+  });
+
+  it('records nothing when Docker cannot be reached', () => {
+    make({ instances: [] });
+    world.set('ps', { out: `${healthySlots().join('\n')}\n`, rc: 0 });
+    world.set('info', { err: 'Cannot connect to the Docker daemon', rc: 1 });
+    assert.equal(machine(world.json(), 'sandbox'), undefined);
+  });
+});
+
+describe('backup with no instances', () => {
+  function noInstances(mode, ageDays) {
+    make({ instances: [] });
+    mkdirSync(path.join(world.home, 'state'), { recursive: true });
+    if (mode !== null) {
+      writeFileSync(path.join(world.home, 'state', 'backups'), `${mode}\n`);
+    }
+    world.crontab('30 3 * * * /x/aman backup >/dev/null 2>&1 # amanuensis-backup\n');
+    world.backup('20261007T030000Z', ageDays);
+  }
+
+  it('passes quietly in the report, whatever the mode or the age of the last backup', () => {
+    noInstances('daily', 3);
+    let result = world.json();
+    assert.equal(result.code, 0, result.stderr);
+    assert.deepEqual(machine(result, 'backup'), {
+      id: 'backup',
+      state: 'ok',
+      detail: 'No instances yet; nothing to back up.',
+      fix: '',
+    });
+    world.dispose();
+    noInstances('off', 20);
+    assert.equal(machine(world.json(), 'backup').state, 'ok');
+    world.dispose();
+    noInstances(null, 9);
+    assert.equal(machine(world.json(), 'backup').state, 'ok');
+  });
+
+  it('doctor backup shows no warning, and --fix neither repeats one nor calls the installer', () => {
+    noInstances('daily', 3);
+    world.installerStub(world.sandbox());
+    const shown = world.shim(['doctor', 'backup']);
+    assert.equal(shown.code, 0, shown.stdout + shown.stderr);
+    assert.doesNotMatch(shown.stdout, /days old/);
+    assert.match(shown.stdout, /No instances yet; nothing to back up\./);
+    const fixed = world.shim(['doctor', 'backup', '--fix']);
+    assert.equal(fixed.code, 0, fixed.stdout + fixed.stderr);
+    assert.doesNotMatch(fixed.stdout, /days old/);
+    assert.ok(!world.calls().some(line => line.startsWith('install.sh')));
+  });
+
+  it('still warns when an instance exists', () => {
+    make();
+    mkdirSync(path.join(world.home, 'state'), { recursive: true });
+    writeFileSync(path.join(world.home, 'state', 'backups'), 'daily\n');
+    world.crontab('30 3 * * * /x/aman backup >/dev/null 2>&1 # amanuensis-backup\n');
+    world.backup('20261005T030000Z', 5);
+    assert.equal(machine(world.json(), 'backup').state, 'warn');
+  });
+});
+
+describe('the daily backup warning', () => {
+  it('names the newest backup in its own clause, with the home folder shown as ~', () => {
+    make();
+    mkdirSync(path.join(world.home, 'state'), { recursive: true });
+    writeFileSync(path.join(world.home, 'state', 'backups'), 'daily\n');
+    world.crontab('30 3 * * * /x/aman backup >/dev/null 2>&1 # amanuensis-backup\n');
+    world.backup('20261005T030000Z', 5);
+    const check = machine(world.json(), 'backup');
+    assert.equal(check.state, 'warn');
+    assert.equal(
+      check.detail,
+      'Daily backups are scheduled, but the last one is 5 days old. The newest backup is in ~/home/backups/20261005T030000Z.',
+    );
+    assert.equal(check.fix, 'Run aman doctor backup --fix');
+  });
+
+  it('still says none has been made yet when there is no backup', () => {
+    make();
+    mkdirSync(path.join(world.home, 'state'), { recursive: true });
+    const modeFile = path.join(world.home, 'state', 'backups');
+    writeFileSync(modeFile, 'daily\n');
+    const old = world.now - 3 * 86400;
+    utimesSync(modeFile, old, old);
+    world.crontab('30 3 * * * /x/aman backup >/dev/null 2>&1 # amanuensis-backup\n');
+    const check = machine(world.json(), 'backup');
+    assert.equal(check.state, 'warn');
+    assert.equal(check.detail, 'Daily backups are scheduled, but none has been made yet.');
   });
 });

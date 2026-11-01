@@ -4,9 +4,11 @@
  * give the same verdict. Search uses it first; maps and URL fetch are meant to reuse it.
  *
  * It is a tripwire for accidental or injected leaks, not a proof of absence: text is normalized,
- * percent-decoded once, and read together with the turn's earlier searches, but a secret the model
- * encodes some other way past every rule below is outside what a deterministic scan can see.
+ * percent-decoded until it stops changing, and read together with the turn's earlier searches, but a
+ * secret the model encodes some other way past every rule below is outside what a deterministic scan can see.
  */
+
+import { SERVER_SECRET_REASON } from './searchHoldText.js';
 
 /** Most characters one string of the arguments (a query, an objective) may carry in a silent call. */
 export const OUTBOUND_MAX_CHARS = 200;
@@ -154,26 +156,71 @@ const CONFUSABLES: Readonly<Record<string, string>> = {
 const CONFUSABLE_CHARS = new RegExp(`[${Object.keys(CONFUSABLES).join('')}]`, 'g');
 
 /**
- * Folds the spellings a tripwire would otherwise miss: look-alike forms (full-width digits,
- * ligatures), combining marks, format characters (zero-width joiners, bidi controls, tag characters)
- * that split a token invisibly, and a few look-alike letters.
+ * The value of a decimal digit in any script. Unicode lists each script's digits as ten in a row from
+ * zero, so the distance from the first digit of its contiguous range, mod ten, is the value. The range is
+ * found in the code space, not in the text, because the text may hold only part of it.
  */
-function normalizeForScan(text: string): string {
-  return text
-    .normalize('NFKD')
-    .replace(/\p{M}/gu, '')
-    .normalize('NFKC')
-    .replace(/\p{Cf}/gu, '')
-    .replace(CONFUSABLE_CHARS, char => CONFUSABLES[char] ?? char);
+function decimalDigitValue(digit: string): number {
+  const code = digit.codePointAt(0) ?? 0;
+  let start = code;
+  while (start > 0 && /\p{Nd}/u.test(String.fromCodePoint(start - 1))) {
+    start -= 1;
+  }
+  return (code - start) % 10;
 }
 
-/** Percent-escapes decoded once; an escape that does not decode (a stray `%`) stays as written. */
+/** Drops format characters (zero-width joiners, bidi controls, tag characters) and folds the look-alike letters above. */
+export function foldHiddenAndLookalikeChars(text: string): string {
+  return text.replace(/\p{Cf}/gu, '').replace(CONFUSABLE_CHARS, char => CONFUSABLES[char] ?? char);
+}
+
+/**
+ * Folds the spellings a tripwire would otherwise miss: look-alike forms (full-width letters, ligatures),
+ * digits from any script, combining marks, format characters (zero-width joiners, bidi controls, tag
+ * characters) that split a token invisibly, and a few look-alike letters.
+ */
+function normalizeForScan(text: string): string {
+  return foldHiddenAndLookalikeChars(text.normalize('NFKD').replace(/\p{M}/gu, '').normalize('NFKC')).replace(
+    /\p{Nd}/gu,
+    digit => String(decimalDigitValue(digit)),
+  );
+}
+
+/** The form every scan compares: look-alikes and digits folded, then percent escapes decoded until stable. */
+export function scanForm(text: string): string {
+  return decodeUntilStable(normalizeForScan(text));
+}
+
+/**
+ * Decodes percent escapes again and again until nothing changes, so an escape wrapped in another (`%2540`)
+ * reads as the character it finally stands for. Each pass shortens the text, so this always ends.
+ */
+function decodeUntilStable(text: string): string {
+  let current = text;
+  let next = decodeOnce(current);
+  while (next !== current) {
+    current = next;
+    next = decodeOnce(current);
+  }
+  return current;
+}
+
+/**
+ * Percent-escapes decoded once. A run that is not valid UTF-8 is decoded escape by escape, so one bad
+ * escape does not hide the good ones beside it; an escape that does not decode (a stray `%`) stays as written.
+ */
 function decodeOnce(text: string): string {
   return text.replace(/(?:%[0-9A-Fa-f]{2})+/g, run => {
     try {
       return decodeURIComponent(run);
     } catch {
-      return run;
+      return run.replace(/%[0-9A-Fa-f]{2}/g, escape => {
+        try {
+          return decodeURIComponent(escape);
+        } catch {
+          return escape;
+        }
+      });
     }
   });
 }
@@ -184,7 +231,7 @@ function withoutUrlOrigin(text: string): string {
 }
 
 /** Letters and digits only, lower-cased: spacing, punctuation and case cannot hide a secret. */
-function compactForm(text: string): string {
+export function compactForm(text: string): string {
   return text.toLowerCase().replace(/[^\p{L}\p{N}]/gu, '');
 }
 
@@ -202,6 +249,8 @@ const KEY_PREFIXES: readonly RegExp[] = [
   /\bsk-ant-[A-Za-z0-9_-]{10,}/,
   // OpenAI and compatible: the digit requirement keeps `sk-learn-...` style words out.
   /\bsk-(?=[A-Za-z0-9_-]*\d)[A-Za-z0-9_-]{20,}/,
+  // Tavily search keys.
+  /\btvly-[A-Za-z0-9_-]{16,}/,
   // Slack.
   /\bxox[abprso]-[A-Za-z0-9-]{10,}/,
   /\bxapp-[A-Za-z0-9-]{10,}/,
@@ -270,7 +319,7 @@ function lowerToUpperTransitions(word: string): number {
 }
 
 /** A long run of letters only: a word or an identifier (`internationalization`, `IllegalArgumentException`). */
-function looksLikeWord(run: string): boolean {
+export function looksLikeWord(run: string): boolean {
   return /^[A-Za-z]+$/.test(run) && lowerToUpperTransitions(run) <= Math.floor(run.length / 6);
 }
 
@@ -365,13 +414,61 @@ function containsServerSecret(input: { texts: readonly string[]; secrets: readon
   return false;
 }
 
+const SECRET_MASK = '••••••';
+/** A secret at least this long keeps its first and last two characters on screen; a shorter one shows none. */
+const MASK_REVEAL_MIN_LENGTH = 12;
+
+function maskSecretText(text: string): string {
+  return text.length >= MASK_REVEAL_MIN_LENGTH ? `${text.slice(0, 2)}${SECRET_MASK}${text.slice(-2)}` : SECRET_MASK;
+}
+
+/**
+ * Copy of tool arguments with every written-out spelling of a server-held secret masked, for text a
+ * user sees. Undefined when the secret is not found as written (split across values or calls, or
+ * hidden by spacing), so the caller hides the whole text instead of guessing which part to keep.
+ * `plumbingFields` must match the scan that found the secret, so values are glued in the same order.
+ */
+export function maskServerSecrets(input: {
+  params: Record<string, unknown>;
+  secrets: readonly string[];
+  earlier?: string | undefined;
+  plumbingFields?: readonly string[] | undefined;
+}): Record<string, unknown> | undefined {
+  const spellings = input.secrets
+    .filter(secret => normalizeForScan(secret).length >= OUTBOUND_MIN_SECRET_LENGTH)
+    .flatMap(secretSpellings)
+    .filter(spelling => spelling !== '')
+    .sort((a, b) => b.length - a.length);
+  const maskString = (text: string): string =>
+    spellings.reduce((masked, spelling) => masked.split(spelling).join(maskSecretText(spelling)), text);
+  const visit = (node: unknown): unknown => {
+    if (typeof node === 'string') {
+      return maskString(node);
+    }
+    if (Array.isArray(node)) {
+      return node.map(visit);
+    }
+    if (typeof node === 'object' && node !== null) {
+      return Object.fromEntries(Object.entries(node).map(([key, child]) => [maskString(key), visit(child)]));
+    }
+    return node;
+  };
+  const masked = visit(input.params);
+  const strings = collectOutboundStrings(masked, input.plumbingFields);
+  if (!isRecord(masked) || strings === undefined) {
+    return undefined;
+  }
+  const verdict = checkOutboundStrings({ strings, secrets: input.secrets, earlier: input.earlier });
+  return !verdict.ok && verdict.rule === 'server_secret' ? undefined : masked;
+}
+
 /** Most characters of earlier outbound text kept to catch a secret sent in pieces across calls. */
 export const OUTBOUND_EARLIER_MAX_CHARS = 1024;
 
 /** User text first, then plumbing values, so `userCount` splits the two. */
 function scannedValues(strings: OutboundStrings): { raw: string[]; decoded: string[]; userCount: number } {
   const raw = [...strings.values, ...strings.scalars, ...strings.plumbing].map(normalizeForScan);
-  return { raw, decoded: raw.map(decodeOnce), userCount: strings.values.length + strings.scalars.length };
+  return { raw, decoded: raw.map(decodeUntilStable), userCount: strings.values.length + strings.scalars.length };
 }
 
 /**
@@ -392,7 +489,7 @@ export function appendOutboundTrace(input: { earlier: string; strings: OutboundS
  * (provider keys, OAuth tokens and client secrets, the API key, other configured secrets); a query
  * containing one is blocked. `earlier` is the text of the calls that already went out this turn
  * without asking: a secret that straddles the boundary is still seen. Everything else is pattern
- * based. Text is normalized and percent-decoded once before the rules run; the original spelling is
+ * based. Text is normalized and percent-decoded until stable before the rules run; the original spelling is
  * scanned as well. A short identifier-shaped plumbing value skips the encoded-run rule only.
  */
 export function checkOutboundStrings(input: {
@@ -402,7 +499,7 @@ export function checkOutboundStrings(input: {
 }): OutboundGuardVerdict {
   const { raw, decoded, userCount } = scannedValues(input.strings);
   const keys = input.strings.keys.map(normalizeForScan);
-  const keyTexts = [...keys, ...keys.map(decodeOnce)];
+  const keyTexts = [...keys, ...keys.map(decodeUntilStable)];
   const text = [...raw, ...decoded, ...keyTexts].join('\n');
   // A plumbing value shaped like a short identifier (a session id) is expected to look random, so only
   // the encoded-run rule skips it. The model writes these fields, so a longer value, or one with
@@ -455,7 +552,7 @@ export function checkOutboundStrings(input: {
 export function describeOutboundRule(rule: OutboundGuardRule): string {
   switch (rule) {
     case 'server_secret':
-      return 'it contains a secret this server holds';
+      return SERVER_SECRET_REASON;
     case 'private_key':
       return 'it contains a private key';
     case 'jwt':
@@ -473,4 +570,8 @@ export function describeOutboundRule(rule: OutboundGuardRule): string {
     case 'uninspectable':
       return 'its arguments are too large to inspect';
   }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }

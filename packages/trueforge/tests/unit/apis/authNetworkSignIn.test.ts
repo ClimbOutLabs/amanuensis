@@ -16,8 +16,8 @@ const ORIGINS = [
   'http://localhost:8791',
   'http://192.168.1.20:8791',
   'http://100.101.102.103:8791',
-  'http://spark.local:8791',
-  'http://spark.example.ts.net:8791',
+  'http://host.example.local:8791',
+  'http://host.example.ts.net:8791',
   'https://aman.example.com',
 ];
 
@@ -33,6 +33,7 @@ const OIDC_CONFIG = {
   OIDC_ADMIN_ROLE_VALUE: 'owner@example.com',
   OIDC_SCOPES: ['openid', 'profile', 'email'],
   OIDC_ALLOWED_EMAILS: NO_EMAILS,
+  OIDC_REQUIRE_VERIFIED_EMAIL: false,
 };
 const CLIENT_ID = 'network-client';
 const STATE_COOKIE = 'oauth_state';
@@ -201,7 +202,7 @@ describe('signing in to an instance opened on several addresses', () => {
     'http://evil.example:8791',
     'http://203.0.113.9:8791',
     'http://[::1]:8791',
-    'http://spark:8791',
+    'http://host:8791',
   ])('gives %s a plain page, no redirect and no cookie', async origin => {
     const app = router();
     for (const path of ['/login', '/callback?code=a&state=b']) {

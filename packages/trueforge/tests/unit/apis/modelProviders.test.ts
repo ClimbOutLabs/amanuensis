@@ -24,6 +24,7 @@ import {
   ListModelProvidersResponseSchema,
 } from '../../../src/schemas/modelProvider';
 import { SECRET_REDACTION } from '../../../src/utils/secretRedaction';
+import { uncappedTokenFactoryBudget } from '../../fixtures/uncappedTokenFactoryBudget';
 
 const model = {
   model_id: 'claude-sonnet-4-6',
@@ -104,7 +105,7 @@ async function createRouters(options: { envManagedNames?: ReadonlySet<string> } 
   const globalSettingsStore = new SqliteGlobalSettingsStore(db);
   return {
     settingsRouter: createSettingsRouter({
-      mcpCatalog: McpCatalog.load(),
+      mcpCatalog: McpCatalog.loadShipped(),
       resolveModelProviderStore: () => modelProviderStore,
       resolveMcpServerStore: () =>
         new McpServerWithAuthStore({
@@ -117,6 +118,7 @@ async function createRouters(options: { envManagedNames?: ReadonlySet<string> } 
       resolveSkillStore: () => new SqliteSkillStore(db),
       resolveSandboxProviderStore: () => new SqliteSandboxProviderStore(db),
       globalSettingsStore,
+      tokenFactoryBudget: uncappedTokenFactoryBudget,
       envManagedModelProviderNames: options.envManagedNames ?? new Set(),
       withTransaction: callback => db.transaction().execute(callback),
       logger: winston.createLogger({ silent: true }),
@@ -124,7 +126,7 @@ async function createRouters(options: { envManagedNames?: ReadonlySet<string> } 
     }),
     catalogRouter: createCatalogRouter({
       modelCatalog: ModelCatalog.load(),
-      mcpCatalog: McpCatalog.load(),
+      mcpCatalog: McpCatalog.loadShipped(),
       skillCatalog: SkillCatalog.load(),
       sandboxCatalog: SandboxCatalog.load(),
     }),

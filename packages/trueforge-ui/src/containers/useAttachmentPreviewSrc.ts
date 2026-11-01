@@ -23,20 +23,14 @@ function useFileObjectUrl(file: File | undefined): string | undefined {
   return src;
 }
 
-/** Preview URL for staged composer files (object URL) or sent message attachments (data URI). */
+/**
+ * Preview URL (object URL) for a picture the person picked on this device. Stored attachments have no
+ * local preview: chat shows only their re-encoded copy.
+ */
 export function useAttachmentPreviewSrc(): string | undefined {
   const type = useAuiState(s => s.attachment.type);
   const contentType = useAuiState(s => s.attachment.contentType);
   const file = useAuiState(s => ('file' in s.attachment ? s.attachment.file : undefined));
-  const contentSrc = useAuiState(s => {
-    if (!isImageAttachment(s.attachment.type, s.attachment.contentType)) return undefined;
-    const imagePart = s.attachment.content?.find(part => part.type === 'image');
-    if (imagePart?.type === 'image' && imagePart.image) return imagePart.image;
-    return undefined;
-  });
-
   const image = isImageAttachment(type, contentType);
-  const fileSrc = useFileObjectUrl(image ? file : undefined);
-  if (!image) return undefined;
-  return fileSrc ?? contentSrc;
+  return useFileObjectUrl(image ? file : undefined);
 }

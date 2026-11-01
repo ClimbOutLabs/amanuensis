@@ -4,7 +4,7 @@
 # @@IF_NAME@@ is kept without the marker when IF_NAME=1 is given and dropped otherwise.
 
 render_template() {
-  local file=$1 line pair key value marker
+  local file=$1 line pair key value marker LC_ALL=C
   shift
   [ -f "$file" ] || die "template missing: $file"
   while IFS= read -r line || [ -n "$line" ]; do
@@ -46,8 +46,8 @@ safe_value() {
 # through shell builtins, so a secret never reaches argv.
 env_managed_set() {
   local env=$1 key=$2 value=$3 line inblock=0 written=0
-  [ -f "$env" ] || die "$env is missing"
-  grep -q '^# >>> managed by the installer' "$env" || die "the managed block of $env is missing"
+  [ -f "$env" ] || die "The settings file $env is missing."
+  grep -q '^# >>> managed by the installer' "$env" || die "The settings file $env is missing the part the installer manages."
   {
     while IFS= read -r line || [ -n "$line" ]; do
       case "$line" in
@@ -69,4 +69,16 @@ env_managed_set() {
       printf '%s\n' "$line"
     done <"$env"
   } | write_if_changed "$env" 600 || true
+}
+
+# Removes every line of an instance .env outside the managed block that Compose reads as KEY, so the managed value is
+# the one Compose reads. Needs lib/shared.sh.
+env_drop_outside_block() { # env key
+  local env=$1 key=$2
+  [ -f "$env" ] || return 0
+  LC_ALL=C awk -v re="$(env_key_line_re "$key")" '
+    /^# >>> managed by the installer/ { inblock = 1 }
+    /^# <<< end of managed block/ { inblock = 0 }
+    !inblock && $0 ~ re { next }
+    { print }' "$env" | write_if_changed "$env" 600 || true
 }

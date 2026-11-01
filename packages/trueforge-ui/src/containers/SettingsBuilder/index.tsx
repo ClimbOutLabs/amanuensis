@@ -1,11 +1,21 @@
 'use client';
 
-import { lazy, Suspense, useCallback, useEffect, useMemo } from 'react';
+import {
+  lazy,
+  Suspense,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type KeyboardEvent as ReactKeyboardEvent,
+} from 'react';
 
 import { useDraftCatalog } from '@/atoms/draft/DraftCatalogProvider.js';
 import { auiButtonClass } from '@/atoms/lib/buttonClasses.js';
 import { cn } from '@/atoms/lib/cn.js';
 import { useCompactLayout } from '@/atoms/lib/CompactLayoutContext.js';
+import { tablistTargetIndex } from '@/atoms/lib/tablistKeys.js';
 import { Spinner } from '@/atoms/primitives/Spinner.js';
 import { useOptionalPersonalization } from '@/components/PersonalizationContext.js';
 import { useOptionalRunCodeStatus } from '@/components/RunCodeStatusContext.js';
@@ -30,6 +40,33 @@ const PersonalizationSettings = lazy(() =>
 const SentinelSettings = lazy(() =>
   import('@/sentinel/SentinelSettings.js').then(module => ({ default: module.SentinelSettings })),
 );
+const AuditLogSettings = lazy(() =>
+  import('@/sentinel/AuditLogSettings.js').then(module => ({ default: module.AuditLogSettings })),
+);
+const AboutSettings = lazy(() => import('./AboutSettings.js'));
+
+type SettingsNavItem = {
+  id: SettingsSection;
+  label: string;
+  icon:
+    | 'cpu'
+    | 'brain'
+    | 'plug'
+    | 'box-archive'
+    | 'lightbulb'
+    | 'cube'
+    | 'robot'
+    | 'palette'
+    | 'lock'
+    | 'clock-rotate-left'
+    | 'info';
+};
+
+const SETTINGS_PANEL_ID = 'settings-panel';
+
+function settingsTabId(section: SettingsSection) {
+  return `settings-tab-${section}`;
+}
 
 function SettingsSectionFallback() {
   return (
@@ -47,6 +84,8 @@ const TruefoundrySettingsBuilder = () => {
   const { refresh: refreshDraftCatalog } = useDraftCatalog();
   // dock/widget panels are ~mobile width even on a wide viewport — keep Settings stacked.
   const compact = useCompactLayout();
+  const navRef = useRef<HTMLElement>(null);
+  const [scrollEdges, setScrollEdges] = useState({ start: false, end: false });
   const hasSkills = catalog?.skillCatalog != null;
   const hasSandbox = useOptionalRunCodeStatus() != null;
   const hasPersonalization = useOptionalPersonalization() != null;
@@ -75,7 +114,7 @@ const TruefoundrySettingsBuilder = () => {
     if (!hasPersonalization && section === 'personalization') {
       setSettingsOpen(settingsOpen, 'models');
     }
-    if (!hasSentinel && section === 'permissions') {
+    if (!hasSentinel && (section === 'permissions' || section === 'audit')) {
       setSettingsOpen(settingsOpen, 'models');
     }
   }, [hasSkills, hasSandbox, hasPersonalization, hasSentinel, section, settingsOpen, setSettingsOpen]);
@@ -92,18 +131,8 @@ const TruefoundrySettingsBuilder = () => {
     return () => window.removeEventListener('keydown', onKeyDown, true);
   }, [closeSettings, settingsOpen]);
 
-  const sections = useMemo<
-    Array<{
-      id: SettingsSection;
-      label: string;
-      icon: 'cpu' | 'brain' | 'plug' | 'box-archive' | 'lightbulb' | 'cube' | 'robot' | 'palette' | 'lock';
-    }>
-  >(() => {
-    const baseSections: Array<{
-      id: SettingsSection;
-      label: string;
-      icon: 'cpu' | 'brain' | 'plug' | 'box-archive' | 'lightbulb' | 'cube' | 'robot' | 'palette' | 'lock';
-    }> = [
+  const sections = useMemo<SettingsNavItem[]>(() => {
+    const baseSections: SettingsNavItem[] = [
       { id: 'models', label: 'Models', icon: 'cpu' },
       { id: 'model-roles', label: 'Roles and Personas', icon: 'brain' },
       { id: 'connectors', label: 'Connectors', icon: 'plug' },
@@ -123,9 +152,56 @@ const TruefoundrySettingsBuilder = () => {
     }
     if (hasSentinel) {
       baseSections.push({ id: 'permissions', label: 'Permissions', icon: 'lock' });
+      baseSections.push({ id: 'audit', label: 'Audit', icon: 'clock-rotate-left' });
     }
+    baseSections.push({ id: 'about', label: 'About', icon: 'info' });
     return baseSections;
   }, [hasSkills, hasSandbox, hasPersonalization, hasSentinel]);
+
+  // The one section both the tab strip and the body show. A stored section the host no longer
+  // offers falls back to Models here, so the highlighted tab and the content cannot disagree.
+  const activeSection = sections.find(item => item.id === section)?.id ?? 'models';
+
+  const panelVisible = settingsOpen && catalog != null;
+
+  const updateScrollEdges = useCallback(() => {
+    const nav = navRef.current;
+    if (nav == null) return;
+    const start = nav.scrollLeft > 1;
+    const end = nav.scrollLeft + nav.clientWidth < nav.scrollWidth - 1;
+    setScrollEdges(current => (current.start === start && current.end === end ? current : { start, end }));
+  }, []);
+
+  // Bring the selected tab into view, centred where the strip has room. Only the strip scrolls,
+  // never the page, so a tab that is already visible stays put.
+  useEffect(() => {
+    if (!panelVisible) return;
+    const nav = navRef.current;
+    const tab = nav?.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]');
+    if (nav != null && tab != null) {
+      const navRect = nav.getBoundingClientRect();
+      const tabRect = tab.getBoundingClientRect();
+      nav.scrollLeft += tabRect.left - navRect.left - (navRect.width - tabRect.width) / 2;
+    }
+    updateScrollEdges();
+  }, [panelVisible, activeSection, sections, updateScrollEdges]);
+
+  useEffect(() => {
+    if (!panelVisible) return;
+    window.addEventListener('resize', updateScrollEdges);
+    return () => window.removeEventListener('resize', updateScrollEdges);
+  }, [panelVisible, updateScrollEdges]);
+
+  const onTabKeyDown = (event: ReactKeyboardEvent<HTMLElement>) => {
+    const current = sections.findIndex(item => item.id === activeSection);
+    const next = tablistTargetIndex({ key: event.key, current, count: sections.length });
+    if (next === null) return;
+    const item = sections[next];
+    if (item === undefined) return;
+    event.preventDefault();
+    setSettingsOpen(true, item.id);
+    navRef.current?.querySelectorAll<HTMLElement>('[role="tab"]').item(next)?.focus();
+  };
 
   if (!settingsOpen || !catalog) return null;
 
@@ -145,50 +221,82 @@ const TruefoundrySettingsBuilder = () => {
       </header>
 
       <div className={cn('flex min-h-0 flex-1 flex-col', !compact && 'md:flex-row')}>
-        <nav
-          aria-label="Settings sections"
-          className={cn(
-            'flex w-full gap-1 overflow-x-auto border-b border-border bg-secondary-bg/40 p-2',
-            compact ? 'min-w-0' : 'justify-center md:w-48 md:flex-col md:justify-start md:border-b-0 md:border-r',
-          )}
-        >
-          {sections.map(item => (
-            <button
-              key={item.id}
-              type="button"
-              aria-current={section === item.id ? 'page' : undefined}
-              {...(compact ? { title: item.label } : {})}
-              className={cn(
-                'flex min-h-9 items-center gap-2 rounded-md px-3 text-sm font-medium transition-colors',
-                'focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-focus-ring',
-                // Narrow panels scroll horizontally rather than crushing five labels together.
-                compact ? 'min-w-fit flex-none justify-center gap-1.5 px-2.5' : 'shrink-0',
-                section === item.id
-                  ? 'bg-primary-button-bg text-primary-button-text'
-                  : 'text-text-secondary hover:bg-ghost-button-hover/60 hover:text-text-primary',
-              )}
-              onClick={() => {
-                setSettingsOpen(true, item.id);
-              }}
-            >
-              <Icon name={item.icon} className="h-4 w-4 shrink-0" />
-              {compact ? <span className="truncate">{item.label}</span> : item.label}
-            </button>
-          ))}
-        </nav>
+        <div className={cn('relative min-w-0 w-full', !compact && 'md:w-48 md:flex-none')}>
+          <nav
+            ref={navRef}
+            role="tablist"
+            aria-label="Settings sections"
+            onKeyDown={onTabKeyDown}
+            onScroll={updateScrollEdges}
+            className={cn(
+              'flex w-full justify-start gap-1 overflow-x-auto border-b border-border bg-secondary-bg/40 p-2',
+              compact ? 'min-w-0' : 'md:h-full md:flex-col md:border-b-0 md:border-r',
+            )}
+          >
+            {sections.map(item => {
+              const selected = item.id === activeSection;
+              return (
+                <button
+                  key={item.id}
+                  type="button"
+                  role="tab"
+                  id={settingsTabId(item.id)}
+                  aria-selected={selected}
+                  aria-controls={SETTINGS_PANEL_ID}
+                  tabIndex={selected ? 0 : -1}
+                  {...(compact ? { title: item.label } : {})}
+                  className={cn(
+                    'flex min-h-9 items-center gap-2 rounded-md border border-transparent bg-transparent px-3 text-sm font-medium transition-colors',
+                    'focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-focus-ring',
+                    // Narrow panels scroll horizontally rather than crushing five labels together.
+                    compact ? 'min-w-fit flex-none justify-center gap-1.5 px-2.5' : 'shrink-0',
+                    selected
+                      ? 'bg-primary-button-bg text-primary-button-text'
+                      : 'text-text-secondary hover:bg-ghost-button-hover/60 hover:text-text-primary',
+                  )}
+                  onClick={() => {
+                    setSettingsOpen(true, item.id);
+                  }}
+                >
+                  <Icon name={item.icon} className="h-4 w-4 shrink-0" />
+                  {compact ? <span className="truncate">{item.label}</span> : item.label}
+                </button>
+              );
+            })}
+          </nav>
+          {scrollEdges.start ? (
+            <span
+              aria-hidden="true"
+              className="pointer-events-none absolute inset-y-0 left-0 w-8 bg-linear-to-r from-primary-bg to-transparent"
+            />
+          ) : null}
+          {scrollEdges.end ? (
+            <span
+              aria-hidden="true"
+              className="pointer-events-none absolute inset-y-0 right-0 w-8 bg-linear-to-l from-primary-bg to-transparent"
+            />
+          ) : null}
+        </div>
 
-        <section className="flex flex-col h-full flex-1 overflow-y-hidden px-6 py-4">
-          <div className="w-full max-w-210 h-full min-h-0 flex flex-col mx-auto">
+        <section
+          id={SETTINGS_PANEL_ID}
+          role="tabpanel"
+          aria-labelledby={settingsTabId(activeSection)}
+          className="flex flex-col h-full flex-1 overflow-y-auto scroll-pb-6 px-6 py-4"
+        >
+          <div className="w-full max-w-210 h-full min-h-0 flex flex-col mx-auto pb-6">
             <Suspense fallback={<SettingsSectionFallback />}>
-              {section === 'models' ? <ModelSettings /> : null}
-              {section === 'model-roles' ? <ModelRoleSettings /> : null}
-              {section === 'connectors' ? <ConnectorSettings /> : null}
-              {section === 'memory' ? <MemorySection /> : null}
-              {section === 'themes' ? <ThemeSettings /> : null}
-              {section === 'skills' && hasSkills ? <SkillSettings /> : null}
-              {section === 'sandbox' && hasSandbox ? <SandboxSettings /> : null}
-              {section === 'personalization' && hasPersonalization ? <PersonalizationSettings /> : null}
-              {section === 'permissions' && hasSentinel ? <SentinelSettings /> : null}
+              {activeSection === 'models' ? <ModelSettings /> : null}
+              {activeSection === 'model-roles' ? <ModelRoleSettings /> : null}
+              {activeSection === 'connectors' ? <ConnectorSettings /> : null}
+              {activeSection === 'memory' ? <MemorySection /> : null}
+              {activeSection === 'themes' ? <ThemeSettings /> : null}
+              {activeSection === 'skills' ? <SkillSettings /> : null}
+              {activeSection === 'sandbox' ? <SandboxSettings /> : null}
+              {activeSection === 'personalization' ? <PersonalizationSettings /> : null}
+              {activeSection === 'permissions' ? <SentinelSettings /> : null}
+              {activeSection === 'audit' ? <AuditLogSettings /> : null}
+              {activeSection === 'about' ? <AboutSettings /> : null}
             </Suspense>
           </div>
         </section>

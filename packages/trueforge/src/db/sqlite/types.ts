@@ -31,6 +31,7 @@ import type {
   ToolCallMemoSnapshot,
 } from '@truefoundry/trueforge-core/core';
 import type { CurrentContextUsage } from '@truefoundry/trueforge-core/core/runtime/contextUsage';
+import type { HelpAreaId } from '@truefoundry/trueforge-core/schemas/personalizationHelpAreas';
 import type { ColumnType, Generated, JSONColumnType } from 'kysely';
 import type { McpServerManifest } from '../../schemas/mcpServer';
 import type { ModelProviderManifest } from '../../schemas/modelProvider';
@@ -41,6 +42,8 @@ import type {
 } from '../../schemas/sandboxProvider';
 import type { ScheduleManifest, ScheduleRunStatus, ScheduleStatus } from '../../schemas/schedule';
 import type { SkillManifest } from '../../schemas/skill';
+import type { BriefItemCompletionTable } from '../briefItemCompletionStore';
+import type { ChatImageOrigin } from '../chatImageStore';
 import type { OAuthClient, OAuthPendingAuthorizationData, OAuthServer, OAuthToken } from '../mcpServerStore';
 
 /**
@@ -90,6 +93,8 @@ export interface SessionTable {
   /** Inline spec binding; XOR with `agent_id`. */
   agent_spec: JsonbColumn<AgentSpec> | null;
   title: string | null;
+  /** Unused; kept because installed databases already have the column. */
+  title_source: string | null;
   /** FK -> session_folder.id, ON DELETE SET NULL. */
   folder_id: string | null;
   last_turn_id: string | null;
@@ -194,6 +199,10 @@ export interface SentinelUserSettingsTable {
   tier2_auto_allow: JsonbColumn<Tier2ActionKind[]>;
   /** SQLite's 0/1 integer boolean. */
   search_without_asking: number;
+  /** SQLite's 0/1 integer boolean. */
+  maps_without_asking: number;
+  /** SQLite's 0/1 integer boolean. */
+  sandbox_without_asking: number;
   created_at: string;
   updated_at: string;
 }
@@ -229,6 +238,31 @@ export interface TurnArtifactTable {
   created_at: string;
 }
 
+/** Re-encoded chat image. PRIMARY KEY (session_id, image_id); UNIQUE (session_id, source_key); session cascade. */
+export interface ChatImageTable {
+  tenant_id: string;
+  created_by: string;
+  session_id: string;
+  turn_id: string;
+  image_id: string;
+  source_key: string;
+  origin: ChatImageOrigin;
+  mime: string;
+  width: number;
+  height: number;
+  size: number;
+  data: Buffer;
+  created_at: string;
+}
+
+/** A cleared card whose request ended; never runs. PRIMARY KEY (session_id, thread_id, tool_call_id). */
+export interface ApprovalDismissalTable {
+  session_id: string;
+  thread_id: string;
+  tool_call_id: string;
+  dismissed_at: string;
+}
+
 /** Global key/value settings shared across tenants (e.g. persisted feature overrides). PRIMARY KEY (key). */
 /** "Always allow this tool" grant. PRIMARY KEY (tenant_id, created_by, mcp_server_name, tool_name). */
 export interface McpToolGrantTable {
@@ -236,6 +270,8 @@ export interface McpToolGrantTable {
   created_by: string;
   mcp_server_name: string;
   tool_name: string;
+  /** Connector host the grant was given for; null for a connector with no URL. */
+  mcp_server_host: string | null;
   created_at: string;
 }
 
@@ -278,6 +314,16 @@ export interface GlobalSettingsTable {
 export interface TokenFactoryUsageTable {
   usage_date: string;
   used_tokens: number;
+  updated_at: string;
+}
+
+/** One row per UTC day and upstream model id; not tenant-scoped. */
+export interface TokenFactoryModelUsageTable {
+  usage_date: string;
+  model_id: string;
+  input_tokens: number;
+  output_tokens: number;
+  calls: number;
   updated_at: string;
 }
 
@@ -416,6 +462,8 @@ export interface SkillTable {
   name: string;
   /** SkillManifest document; replaced whole on every upsert */
   manifest: JsonbColumn<SkillManifest>;
+  /** The person's approved site list for this skill's network access, or null when not approved */
+  network_approval: JsonbColumn<string[]> | null;
   created_at: string;
   updated_at: string;
 }
@@ -452,6 +500,8 @@ export interface AgentTable {
   /** AgentSpec document; replaced whole on every upsert */
   manifest: JsonbColumn<AgentSpec>;
   external_id: string | null;
+  /** 1 for an agent the host made to run a chat's schedules; agent lists leave these out. */
+  host_managed: Generated<number>;
   created_by_subject: JsonbColumn<CreatedBySubject>;
   created_at: string;
   updated_at: string;
@@ -472,6 +522,8 @@ export interface ScheduleTable {
   agent_name: string;
   /** Display label; not unique. */
   name: string;
+  /** Persona a schedule made in a chat runs as; null runs the agent's own assistant. */
+  persona_id: string | null;
   /** ScheduleManifest document ({ task, cron, timezone }); replaced whole on update */
   manifest: JsonbColumn<ScheduleManifest>;
   /** `paused` stops triggering and drops the pending run; in-flight runs continue */
@@ -510,8 +562,11 @@ export interface PersonalizationProfileTable {
   assistant_name: string | null;
   assistant_identity: string | null;
   voice_guidance: string | null;
+  user_name: string | null;
+  address_as: string | null;
   user_profile: string | null;
   pinned_preferences: JsonbColumn<string[]>;
+  help_areas: JsonbColumn<HelpAreaId[]>;
   /** Host-maintained learned document; null until the learning pass writes one. */
   learned_profile: string | null;
   /** User switch for the learning pass, stored as SQLite's 0/1 integer boolean. */
@@ -627,6 +682,7 @@ export interface RepositoryTable {
   name: string;
   clone_url: string;
   default_branch: string | null;
+  package_downloads_allowed: Generated<number>;
   revision: Generated<number>;
   created_at: string;
   updated_at: string;
@@ -702,6 +758,7 @@ export interface Database {
   space: SpaceTable;
   space_revision: SpaceRevisionTable;
   sentinel_audit: SentinelAuditTable;
+  brief_item_completion: BriefItemCompletionTable;
   approval_token: ApprovalTokenTable;
   sentinel_user_settings: SentinelUserSettingsTable;
   implementation_plan_grant: ImplementationPlanGrantTable;
@@ -735,6 +792,9 @@ export interface Database {
   repository_workspace_verification: RepositoryWorkspaceVerificationTable;
   artifact_blob: ArtifactBlobTable;
   turn_artifact: TurnArtifactTable;
+  chat_image: ChatImageTable;
+  approval_dismissal: ApprovalDismissalTable;
   global_settings: GlobalSettingsTable;
   token_factory_usage: TokenFactoryUsageTable;
+  token_factory_model_usage: TokenFactoryModelUsageTable;
 }

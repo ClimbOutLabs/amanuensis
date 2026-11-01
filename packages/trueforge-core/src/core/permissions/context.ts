@@ -27,11 +27,38 @@ export interface SentinelServices {
   tier2AutoAllow: (input: { tenant_id: string; created_by: string }) => Promise<ReadonlySet<Tier2ActionKind>>;
   /** Whether the user lets the designated search provider run without asking. Default on. */
   searchWithoutAsking: (input: { tenant_id: string; created_by: string }) => Promise<boolean>;
+  /** Whether the user lets embedded maps run without asking, behind the outbound secret guard. Off unless the host says. */
+  mapsWithoutAsking: (input: { tenant_id: string; created_by: string }) => Promise<boolean>;
+  /** Whether the user lets in-sandbox work (code, commands, workspace files, package installs) run without asking. Default off. */
+  sandboxWithoutAsking: (input: { tenant_id: string; created_by: string }) => Promise<boolean>;
   /** Exact secret values the host holds for this user, for the outbound secret guard. */
   outboundSecrets: (input: { tenant_id: string; created_by: string }) => Promise<readonly string[]>;
   /** True when no person watches this turn (a scheduled run), so a call that would ask is held for the owner. */
   unattended: boolean;
+  /** On a demo instance, the only addresses mail may go to; null when this is not a demo. Empty allows no send. */
+  demoSendAllowlist: readonly string[] | null;
+  /** Addresses the Email connector may send to without a new-recipient card, lowercased. Empty allows no send. */
+  mail_listed_addresses: (input: { tenant_id: string; created_by: string }) => Promise<readonly string[]>;
+  /**
+   * Adds exact addresses to the Email send list, then waits until the sidecar loads it. The default adds nothing,
+   * so a host that does not implement it fails closed.
+   */
+  mail_add_recipients: (
+    input: { tenant_id: string; created_by: string },
+    addresses: readonly string[],
+  ) => Promise<MailAddRecipientsResult>;
+  /**
+   * Waits until the sidecar runs the Email list the server holds. Checked before every approved mail send, so a
+   * send never runs on a list the sidecar has not loaded. Fails closed by default.
+   */
+  mail_list_loaded: (input: { tenant_id: string; created_by: string }) => Promise<MailListLoadedResult>;
 }
+
+/** `loaded`: the sidecar runs the new list. `not_loaded`: it did not in time. `refused`: an address is not allowed. */
+export type MailAddRecipientsResult = 'loaded' | 'not_loaded' | 'refused';
+
+/** `loaded`: the sidecar runs the server's list. `not_loaded`: it does not, or there is no list. */
+export type MailListLoadedResult = 'loaded' | 'not_loaded';
 
 /** Server-owned identity for one tool call. Never agent-supplied. */
 export interface SentinelCallIdentity {
@@ -60,8 +87,14 @@ export function defaultSentinelServices(input: { pinned_path: string }): Sentine
     isOffline: () => Promise.resolve(false),
     tier2AutoAllow: () => Promise.resolve(new Set<Tier2ActionKind>()),
     searchWithoutAsking: () => Promise.resolve(true),
+    mapsWithoutAsking: () => Promise.resolve(false),
+    sandboxWithoutAsking: () => Promise.resolve(false),
     outboundSecrets: () => Promise.resolve([]),
     unattended: false,
+    demoSendAllowlist: null,
+    mail_listed_addresses: () => Promise.resolve([]),
+    mail_add_recipients: () => Promise.resolve('not_loaded'),
+    mail_list_loaded: () => Promise.resolve('not_loaded'),
   };
 }
 
@@ -94,7 +127,7 @@ export interface SentinelHostContext {
   conversation_id: string;
   /** Workspace root for boundary checks; null when the session has no workspace. */
   workspace_cwd: string | null;
-  /** Host state for the turn's silent web searches. Shared by every thread of the turn. */
+  /** Host state for the turn's lookups and where their links came from. Shared by every thread of the turn. */
   web_search: WebSearchTurnState;
 }
 
@@ -125,19 +158,26 @@ export function createSentinelHostContext(input: {
   };
 }
 
+/** What one tool dispatch needs from the sentinel: shared services, this call's identity, and the turn's search state. */
+export interface SentinelDispatchContext {
+  services: SentinelServices;
+  identity: SentinelCallIdentity;
+  /** Where each result's links and addresses are recorded before the model sees it. */
+  web_search: WebSearchTurnState;
+}
+
 /**
- * Converts a SentinelHostContext to the { services, identity } shape expected
+ * Converts a SentinelHostContext to the { services, identity, web_search } shape expected
  * by executeToolCalls. Per-call fields not available at the host level
  * (repository_id, workspace_cwd, agent_intent) default to null.
  */
-export function toDispatchSentinelContext(
-  host: SentinelHostContext | undefined,
-): { services: SentinelServices; identity: SentinelCallIdentity } | undefined {
+export function toDispatchSentinelContext(host: SentinelHostContext | undefined): SentinelDispatchContext | undefined {
   if (host === undefined) {
     return undefined;
   }
   return {
     services: host.services,
+    web_search: host.web_search,
     identity: {
       tenant_id: host.tenant_id,
       created_by: host.created_by,

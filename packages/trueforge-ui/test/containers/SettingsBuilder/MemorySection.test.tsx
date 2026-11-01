@@ -1,14 +1,11 @@
 // @vitest-environment jsdom
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import type { TrueForgeApi } from '@truefoundry/trueforge-sdk';
 import type { ReactNode } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 
 import { DraftCatalogProvider } from '@/atoms/draft/DraftCatalogProvider.js';
 import { MemoryVaultPage } from '@/atoms/memory/MemoryVaultPage.js';
-import { AmanSetupProvider } from '@/components/AmanSetupContext.js';
-import { AmanWelcome } from '@/components/AmanWelcome.js';
-import { EMPTY_PERSONALIZATION_PROFILE, PersonalizationProvider } from '@/components/PersonalizationContext.js';
 import TruefoundrySettingsBuilder from '@/containers/SettingsBuilder/index.js';
 import type { MemoryVaultCatalog } from '@/plugins/trueforge-agent-server-adapter/catalogs/memoryVaultCatalog.js';
 import { ServerProvider } from '@/server/ServerContext.js';
@@ -66,6 +63,7 @@ const vaultCatalog: MemoryVaultCatalog = {
   listEntries: async () => [
     { id: 'fact-1', text: 'The user drinks tea in the morning.', timestamp: '2026-10-15T08:00:00.000Z', persona: null },
   ],
+  getSummaryStatus: async () => ({ summaryPending: false }),
   updateEntry: async options => ({
     id: options.entryId,
     text: options.text,
@@ -131,7 +129,7 @@ async function openSettings() {
 
 async function openMemorySection() {
   await openSettings();
-  fireEvent.click(screen.getByRole('button', { name: 'Memory' }));
+  fireEvent.click(screen.getByRole('tab', { name: 'Memory' }));
   await waitFor(() => {
     expect(screen.getByRole('tab', { name: 'Memories' })).toBeInTheDocument();
   });
@@ -142,7 +140,7 @@ describe('Settings Memory section', () => {
     render(<TestShell server={createServer({ memorySetUp: true })} />);
     await openSettings();
 
-    expect(screen.getByRole('button', { name: 'Memory' })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: 'Memory' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Memory vault' })).not.toBeInTheDocument();
   });
 
@@ -150,7 +148,12 @@ describe('Settings Memory section', () => {
     render(<TestShell server={createServer({ memorySetUp: true })} />);
     await openMemorySection();
 
-    expect(screen.getAllByRole('tab').map(tab => tab.textContent)).toEqual(['Memories', 'Sharing', 'Settings']);
+    const memoryTabs = screen.getByRole('tablist', { name: 'Memory sections' });
+    expect(
+      within(memoryTabs)
+        .getAllByRole('tab')
+        .map(tab => tab.textContent),
+    ).toEqual(['Memories', 'Sharing', 'Settings']);
   });
 
   it('opens on Memories when memory is set up', async () => {
@@ -177,7 +180,7 @@ describe('Settings Memory section', () => {
 
     fireEvent.click(screen.getByRole('tab', { name: 'Sharing' }));
     expect(screen.getByRole('tab', { name: 'Sharing' })).toHaveAttribute('aria-selected', 'true');
-    expect(await screen.findByText(/nothing to share with/)).toBeInTheDocument();
+    expect(await screen.findByText(/nothing to share\./)).toBeInTheDocument();
   });
 
   it('moves between sub-tabs with the arrow keys, Home, and End', async () => {
@@ -210,35 +213,6 @@ describe('Settings Memory section', () => {
     fireEvent.keyDown(settingsTab, { key: 'Home' });
     expect(memoriesTab).toHaveAttribute('aria-selected', 'true');
     expect(memoriesTab).toHaveFocus();
-  });
-
-  it("opens the Memory section's Settings sub-tab from the welcome screen's memory setup link", async () => {
-    const personalizationApi = {
-      getProfile: async () => ({ ...EMPTY_PERSONALIZATION_PROFILE }),
-      updateProfile: async () => ({ ...EMPTY_PERSONALIZATION_PROFILE }),
-      deleteProfile: async () => {},
-    };
-    render(
-      <TestShell server={createServer({ memorySetUp: true })}>
-        <PersonalizationProvider api={personalizationApi}>
-          <AmanSetupProvider value={{ modelName: 'local-model', memoryBank: null, settingsHref: '/settings' }}>
-            <AmanWelcome />
-          </AmanSetupProvider>
-        </PersonalizationProvider>
-      </TestShell>,
-    );
-
-    fireEvent.click(await screen.findByRole('button', { name: 'Connect a memory bank in Settings › Memory' }));
-
-    await waitFor(() => {
-      expect(screen.getByRole('heading', { name: 'Settings' })).toBeInTheDocument();
-    });
-    expect(screen.getByRole('button', { name: 'Memory' })).toHaveAttribute('aria-current', 'page');
-    // Memory is set up here, so the section alone would open on Memories; the link asks for Settings.
-    await waitFor(() => {
-      expect(screen.getByRole('tab', { name: 'Settings' })).toHaveAttribute('aria-selected', 'true');
-    });
-    expect(await screen.findByText('Memory settings content')).toBeInTheDocument();
   });
 });
 

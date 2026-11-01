@@ -6,6 +6,8 @@ import { createServer } from 'node:http';
 
 export const STANDIN_CLIENT_ID = 'smoke-client';
 export const STANDIN_CLIENT_SECRET = 'smoke-secret';
+// A standalone server starts only with its one owner named; nobody can sign in through the stand-in anyway.
+export const STANDIN_OWNER_EMAIL = 'smoke-owner@example.invalid';
 
 /** Env lines a child server needs to treat the stand-in as its login provider. */
 export function standinOidcEnv(issuer) {
@@ -13,6 +15,7 @@ export function standinOidcEnv(issuer) {
     OIDC_ISSUER_URL: issuer,
     OIDC_CLIENT_ID: STANDIN_CLIENT_ID,
     OIDC_CLIENT_SECRET: STANDIN_CLIENT_SECRET,
+    OIDC_ALLOWED_EMAILS: STANDIN_OWNER_EMAIL,
   };
 }
 

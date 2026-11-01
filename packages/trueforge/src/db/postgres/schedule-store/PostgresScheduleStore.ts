@@ -4,7 +4,7 @@ import {
   paginateOffsetRows,
 } from '@truefoundry/trueforge-core/agent-session/store/OffsetPageToken';
 import { sql, type Kysely, type Selectable, type Transaction } from 'kysely';
-import { nextTriggerAfter } from '../../../runtime/cron';
+import { firstRunAfter } from '../../../runtime/cron';
 import { newId } from '../../../utils/id';
 import {
   cronRunName,
@@ -41,6 +41,7 @@ function toScheduleRecord(row: Selectable<ScheduleTable>): ScheduleRecord {
     agent_id: row.agent_id,
     agent_name: row.agent_name,
     name: row.name,
+    persona_id: row.persona_id,
     manifest: parseStoredScheduleManifest(row.manifest),
     status: row.status,
     created_by_subject: CreatedBySubjectSchema.parse(row.created_by_subject),
@@ -88,11 +89,7 @@ export class PostgresScheduleStore implements IScheduleStore<Transaction<Databas
     if (schedule.status !== 'active') {
       return undefined;
     }
-    const nextTrigger = nextTriggerAfter({
-      cron: schedule.manifest.cron,
-      timezone: schedule.manifest.timezone,
-      from,
-    });
+    const nextTrigger = firstRunAfter({ manifest: schedule.manifest, from });
     return this.createRun(
       {
         tenant_id: schedule.tenant_id,
@@ -141,11 +138,12 @@ export class PostgresScheduleStore implements IScheduleStore<Transaction<Databas
       row = await db
         .insertInto('schedule')
         .values({
-          id: newId(),
+          id: input.id ?? newId(),
           tenant_id: input.tenant_id,
           agent_id: input.agent_id,
           agent_name: input.agent_name,
           name: input.name,
+          persona_id: input.persona_id,
           manifest: json(input.manifest),
           // Column mirrors the manifest so the dispatch scan and API reads share one value.
           status: input.manifest.status,
@@ -188,7 +186,13 @@ export class PostgresScheduleStore implements IScheduleStore<Transaction<Databas
     try {
       row = await db
         .updateTable('schedule')
-        .set({ name: input.name, manifest: json(input.manifest), status: input.manifest.status, updated_at: now() })
+        .set({
+          name: input.name,
+          manifest: json(input.manifest),
+          status: input.manifest.status,
+          ...(input.agent === undefined ? {} : { agent_id: input.agent.agent_id, agent_name: input.agent.agent_name }),
+          updated_at: now(),
+        })
         .where('tenant_id', '=', input.tenant_id)
         .where('id', '=', input.id)
         .returningAll()
@@ -196,7 +200,7 @@ export class PostgresScheduleStore implements IScheduleStore<Transaction<Databas
     } catch (error) {
       if (isUniqueViolation(error)) {
         throw new ScheduleNameConflictError(
-          { tenant_id: input.tenant_id, agent_name: previous.agent_name, name: input.name },
+          { tenant_id: input.tenant_id, agent_name: input.agent?.agent_name ?? previous.agent_name, name: input.name },
           { cause: error },
         );
       }

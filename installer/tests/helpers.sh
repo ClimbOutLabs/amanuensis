@@ -45,8 +45,9 @@ sandbox_new() {
   fixture_repo "$REPO"
   fixture_node_runtime
   unset STUB_DOCKER_DENIED STUB_DOCKER_DOWN STUB_ROOTLESS STUB_PODMAN STUB_BUILD_FAIL STUB_BUILD_OOM STUB_DOCKER_MEM_BYTES STUB_UP_FAIL_UNLESS_TAG \
-    STUB_DOCKER_ROOT STUB_DOCKER_ROOT_KB AMAN_PASSWORD STUB_BUSY_PORTS STUB_BACKUP_FAIL STUB_VOLUME_RM_FAIL STUB_ENGINE_VERSION STUB_COMPOSE_VERSION STUB_DOCTOR_EXIT STUB_VIA_SG STUB_VIA_SUDO \
-    STUB_CURL_FAIL STUB_CURL_CORRUPT STUB_SUDO_SH_FAIL STUB_APPARMOR STUB_CGROUP STUB_DOCKER_OS STUB_NO_BUNDLE STUB_UP_FAIL_LOG STUB_ADDRS STUB_HOSTNAME STUB_TS_IP STUB_TS_NAME STUB_TS_HANG STUB_NODE_VERSION STUB_PKI_FAIL STUB_SANDBOX_DOCTOR_EXIT STUB_SLOT_BUILD_RC STUB_DEMO_FAIL || true
+    STUB_DOCKER_ROOT STUB_DOCKER_ROOT_KB AMAN_PASSWORD STUB_BUSY_PORTS STUB_BACKUP_FAIL STUB_VOLUME_RM_FAIL STUB_ENGINE_VERSION STUB_COMPOSE_VERSION STUB_DOCTOR_EXIT STUB_DOCTOR_JSON STUB_VIA_SG STUB_VIA_SUDO \
+    STUB_CURL_FAIL STUB_CURL_CORRUPT STUB_SUDO_SH_FAIL STUB_SUDO_REFUSE STUB_SLOT_DISK_FAIL STUB_APPARMOR STUB_CGROUP STUB_DOCKER_OS STUB_NO_BUNDLE STUB_UP_FAIL_LOG STUB_ADDRS STUB_HOSTNAME STUB_TS_IP STUB_TS_NAME STUB_TS_HANG STUB_NODE_VERSION STUB_PKI_FAIL STUB_SANDBOX_DOCTOR_EXIT STUB_SLOT_BUILD_RC STUB_DEMO_FAIL STUB_IMPORT_FAIL STUB_IMPORT_SIGNAL \
+    STUB_MODEL_DOWNLOADING STUB_MODEL_BROKEN STUB_EXPORT_USERS STUB_EXPORT_FAIL STUB_EXPORT_LIST_FAIL STUB_PGDUMP_FAIL STUB_OLD_PG_STOPPED STUB_COPY_SIGNAL STUB_FAIL_ON || true
   STUB_DF_KB=50000000
   INSTALL_EXTRA=()
   RUN_ENV_EXTRA=()
@@ -161,10 +162,14 @@ sandbox_drop() {
 
 # A tiny git checkout standing in for the repository: the build contexts and the slots compose file the doctor looks for.
 fixture_repo() {
-  mkdir -p "$1/ops/aman-stt"
+  mkdir -p "$1/ops/aman-stt" "$1/ops/calendar-sidecar" "$1/ops/compose/mail-email"
   printf 'FROM scratch\n' >"$1/Dockerfile.dev"
   printf 'name: slots\n' >"$1/docker-compose.slots.yml"
   printf 'FROM scratch\n' >"$1/ops/aman-stt/Dockerfile"
+  printf 'FROM scratch\n' >"$1/ops/calendar-sidecar/Dockerfile"
+  printf '#!/bin/sh\n' >"$1/ops/compose/mail-email/entrypoint.sh"
+  printf '# account agent fixture\n' >"$1/ops/compose/mail-email/account_agent.py"
+  printf '# sign-in check fixture\n' >"$1/ops/compose/mail-email/email_check.py"
   (
     cd "$1"
     git init -q .
@@ -185,7 +190,7 @@ repo_commit_change() {
 # The environment every installer run gets: nothing from the caller except the stub switches.
 build_run_env() {
   RUN_ENV=(PATH="$SB_BIN" HOME="$SB/user" AMAN_HOME="$AMAN_HOME" AMAN_REPO_ROOT="$REPO"
-    AMAN_OS_RELEASE="${AMAN_OS_RELEASE:-$SB/os-release}"
+    AMAN_OS_RELEASE="${AMAN_OS_RELEASE:-$SB/os-release}" AMAN_DMI_DIR="${AMAN_DMI_DIR:-$SB/no-dmi}"
     STUB_LOG="$STUB_LOG" STUB_STATE="$STUB_STATE" STUB_BIN="$STUB_BIN" STUB_USER="$STUB_USER"
     STUB_DOCKER_SRC="$STUB_DOCKER_SRC" STUB_REAL_DF="$STUB_REAL_DF"
     STUB_DOCKER_DENIED="${STUB_DOCKER_DENIED:-}" STUB_DOCKER_DOWN="${STUB_DOCKER_DOWN:-}"
@@ -195,9 +200,13 @@ build_run_env() {
     STUB_BUSY_PORTS="${STUB_BUSY_PORTS:-}" STUB_BACKUP_FAIL="${STUB_BACKUP_FAIL:-}" STUB_VOLUME_RM_FAIL="${STUB_VOLUME_RM_FAIL:-}"
     STUB_ENGINE_VERSION="${STUB_ENGINE_VERSION:-}" ${STUB_COMPOSE_VERSION+STUB_COMPOSE_VERSION="$STUB_COMPOSE_VERSION"}
     STUB_CURL_FAIL="${STUB_CURL_FAIL:-}" STUB_CURL_CORRUPT="${STUB_CURL_CORRUPT:-}" STUB_SUDO_SH_FAIL="${STUB_SUDO_SH_FAIL:-}"
+    STUB_SUDO_REFUSE="${STUB_SUDO_REFUSE:-}" STUB_SLOT_DISK_FAIL="${STUB_SLOT_DISK_FAIL:-}"
     STUB_APPARMOR="${STUB_APPARMOR:-}" STUB_CGROUP="${STUB_CGROUP:-}" STUB_DOCKER_OS="${STUB_DOCKER_OS:-}" STUB_NO_BUNDLE="${STUB_NO_BUNDLE:-}"
-    STUB_UP_FAIL_LOG="${STUB_UP_FAIL_LOG:-}" STUB_ADDRS="${STUB_ADDRS:-}" STUB_HOSTNAME="${STUB_HOSTNAME:-}" STUB_TS_IP="${STUB_TS_IP:-}" STUB_TS_NAME="${STUB_TS_NAME:-}" STUB_TS_HANG="${STUB_TS_HANG:-}" STUB_NODE_VERSION="${STUB_NODE_VERSION:-}" STUB_SANDBOX_DOCTOR_EXIT="${STUB_SANDBOX_DOCTOR_EXIT:-}" STUB_SLOT_BUILD_RC="${STUB_SLOT_BUILD_RC:-}" STUB_DEMO_FAIL="${STUB_DEMO_FAIL:-}"
-    STUB_DOCTOR_EXIT="${STUB_DOCTOR_EXIT:-}" STUB_DOCKER_ROOT="${STUB_DOCKER_ROOT:-}" STUB_DOCKER_ROOT_KB="${STUB_DOCKER_ROOT_KB:-}"
+    STUB_UP_FAIL_LOG="${STUB_UP_FAIL_LOG:-}" STUB_ADDRS="${STUB_ADDRS:-}" STUB_HOSTNAME="${STUB_HOSTNAME:-}" STUB_TS_IP="${STUB_TS_IP:-}" STUB_TS_NAME="${STUB_TS_NAME:-}" STUB_TS_HANG="${STUB_TS_HANG:-}" STUB_NODE_VERSION="${STUB_NODE_VERSION:-}" STUB_SANDBOX_DOCTOR_EXIT="${STUB_SANDBOX_DOCTOR_EXIT:-}" STUB_SLOT_BUILD_RC="${STUB_SLOT_BUILD_RC:-}" STUB_DEMO_FAIL="${STUB_DEMO_FAIL:-}" STUB_IMPORT_FAIL="${STUB_IMPORT_FAIL:-}" STUB_IMPORT_SIGNAL="${STUB_IMPORT_SIGNAL:-}"
+    STUB_MODEL_DOWNLOADING="${STUB_MODEL_DOWNLOADING:-}" STUB_MODEL_BROKEN="${STUB_MODEL_BROKEN:-}" STUB_EXPORT_USERS="${STUB_EXPORT_USERS:-}"
+    STUB_EXPORT_FAIL="${STUB_EXPORT_FAIL:-}" STUB_EXPORT_LIST_FAIL="${STUB_EXPORT_LIST_FAIL:-}" STUB_PGDUMP_FAIL="${STUB_PGDUMP_FAIL:-}" STUB_OLD_PG_STOPPED="${STUB_OLD_PG_STOPPED:-}" STUB_COPY_SIGNAL="${STUB_COPY_SIGNAL:-}" AMAN_IMPORT_POLL_SECONDS=0 STUB_FAIL_ON="${STUB_FAIL_ON:-}"
+    STUB_DOCTOR_EXIT="${STUB_DOCTOR_EXIT:-}" STUB_DOCTOR_JSON="${STUB_DOCTOR_JSON:-}" STUB_DOCKER_ROOT="${STUB_DOCKER_ROOT:-}" STUB_DOCKER_ROOT_KB="${STUB_DOCKER_ROOT_KB:-}"
+    STUB_CALENDAR_REFUSES="${STUB_CALENDAR_REFUSES:-}" STUB_CALENDAR_CHECK="${STUB_CALENDAR_CHECK:-}"
     STUB_UI_SH="$INSTALLER_DIR/lib/ui.sh" STUB_REAL_NODE="$STUB_REAL_NODE" STUB_PKI_FAIL="${STUB_PKI_FAIL:-}"
     AMAN_CADDY_ETC="$SB/etc-caddy" AMAN_SYS_NET="$SB/sysnet" AMAN_EDGE_WAIT_TRIES=1 ${RUN_ENV_EXTRA[@]+"${RUN_ENV_EXTRA[@]}"}
     ${AMAN_PASSWORD+AMAN_PASSWORD="$AMAN_PASSWORD"})
@@ -225,7 +234,7 @@ run_install_tty() {
   set +e
   OUT=$(python3 "$TESTS_DIR/pty_run.py" "$SB/answers" -- env -i "${RUN_ENV[@]}" TERM=dumb bash "$SB_INSTALLER/install.sh" "$@")
   set -e
-  RC=$(printf '%s\n' "$OUT" | sed -n 's/^\[exit \([0-9]*\)\]$/\1/p' | tail -n 1)
+  RC=$(printf '%s\n' "$OUT" | sed -n 's/^\[exit \([[:digit:]]*\)\]$/\1/p' | tail -n 1)
   ERR=
 }
 
@@ -236,6 +245,27 @@ with_input() {
 }
 
 clear_input() { INPUT_FILE=; }
+
+# The email sign-in check runs python3 with -c. This stand-in records what it was given and answers with the text in
+# imap_answer (ok when absent). Every other python3 call goes to the real one, so the rest of the installer is unchanged.
+install_python_stub() {
+  local real
+  real=$(command -v python3)
+  rm -f "$SB_BIN/python3"
+  cat >"$SB_BIN/python3" <<'STUB'
+#!/usr/bin/env bash
+case "$*" in
+  *imaplib*)
+    printf '%s\n' "$*" >>"$STUB_STATE/imap_argv"
+    cat >"$STUB_STATE/imap_stdin"
+    cat "$STUB_STATE/imap_answer" 2>/dev/null || echo ok
+    ;;
+  *) exec "$STUB_REAL_PY3" "$@" ;;
+esac
+STUB
+  chmod 755 "$SB_BIN/python3"
+  RUN_ENV_EXTRA+=("STUB_REAL_PY3=$real")
+}
 
 os_release_ubuntu() {
   printf 'ID=ubuntu\nVERSION_CODENAME=noble\nUBUNTU_CODENAME=noble\n' >"$SB/os-release"

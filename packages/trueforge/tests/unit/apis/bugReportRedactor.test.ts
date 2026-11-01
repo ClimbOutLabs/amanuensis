@@ -10,12 +10,12 @@ import {
 const SECRET_BEARER = 'SECRET_TOKEN_abc123';
 const SECRET_API_KEY = 'sk-live-FAKEKEY1234567890';
 const SECRET_AUTH_HEADER = `Authorization: Bearer ${SECRET_BEARER}`;
-const HOME_PATH = 'C:\\Users\\jordan\\secret-project';
+const HOME_PATH = 'C:\\Users\\alex\\secret-project';
 
 /** Planted personal data — likewise must never appear in the bundle. */
-const PERSONAL_NAME = 'Jordan Casillas';
-const PERSONAL_EMAIL = 'jordan.casillas@example.com';
-const PERSONAL_FACT = 'Jordan lives at 221 Baker Street and their dog is named Comet';
+const PERSONAL_NAME = 'Alex Rivera';
+const PERSONAL_EMAIL = 'alex.rivera@example.com';
+const PERSONAL_FACT = 'Alex lives at 14 Example Terrace and their dog is named Comet';
 
 const PLANTED_SECRETS = [SECRET_BEARER, SECRET_API_KEY, SECRET_AUTH_HEADER, HOME_PATH];
 const PLANTED_PERSONAL = [PERSONAL_NAME, PERSONAL_EMAIL, PERSONAL_FACT];
@@ -442,6 +442,43 @@ describe('buildBugReportBundle', () => {
     });
     expect(bundle.chat?.omitted_messages).toBe(bounded.omittedMessages);
     expect(bundle.chat?.notes).toContain(`oldest ${String(bounded.omittedMessages)} messages were left out`);
+  });
+
+  it('carries nothing of a held search card, masked or not', () => {
+    const card = {
+      plain_what:
+        'Search the web through finder for: debug sy••••••11. This search contains something that looks like a password or key.',
+      outbound_text: 'query: debug sy••••••11',
+    };
+    const rows = [
+      {
+        turn_id: 't1',
+        event: {
+          type: 'tool.approval_required',
+          created_at: '2026-01-01T00:00:01.000Z',
+          tool_calls: [{ id: 'c1', tier: 3, tier3_card: card }],
+        },
+      },
+    ];
+    const bundle = buildBugReportBundle({
+      build: { version: '0.1.4' },
+      session: {
+        id: 's3',
+        agentName: null,
+        model: 'local/qwen',
+        createdAt: '2026-01-01T00:00:00.000Z',
+        connectors: [],
+        skills: [],
+        sandboxEnabled: false,
+      },
+      description: undefined,
+      events: rows,
+      configFlags: { sandbox_enabled: false, skill_enabled: false, settings_enabled: false },
+      includeChat: false,
+    });
+    const serialized = JSON.stringify(bundle);
+    expect(serialized).not.toContain('debug');
+    expect(serialized).not.toContain('sy••••••11');
   });
 
   it('says in plain words what happened, with timing, tool names, exit codes, and every failed step', () => {

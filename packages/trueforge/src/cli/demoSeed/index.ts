@@ -1,21 +1,41 @@
+import type { CalendarDay } from '@truefoundry/trueforge-core/core/util/calendarDay';
+import { isValidTimezone } from '@truefoundry/trueforge-core/core/util/clientTimezone';
 import { parseArgs } from 'node:util';
+import { DEFAULT_TOKEN_FACTORY_MODEL } from '../../runtime/tokenFactoryDefaults';
+import { envManagedDefaultModelName } from '../../runtime/tokenFactoryProvider';
 import type { Command } from '../command';
 import { UsageError, type CliIo } from '../io';
-import { isValidTimeZone } from './calendar';
 import type { DemoSeedSession } from './session';
+import { parseDemoDay } from './storyDays.mjs';
 import { DEFAULT_DEMO_TIME_ZONE, DEFAULT_DEMO_USER } from './world';
 
-const USAGE = `Usage: aman demo-seed [--reset] [--user <email>] [--timezone <iana>] [--model <provider/model>]
+const USAGE = `Usage: aman demo-seed [--reset | --fresh] [--user <email>] [--timezone <iana>] [--today <YYYY-MM-DD>] [--model <provider/model>]
 
-Seeds one synthetic demo world (a persona, memory notes, a morning-briefing schedule and a finished
-briefing chat) for the demo user. Every record is marked demo_synthetic. Re-running it is safe, and
-dates are relative to today in the user's time zone. Needs DEMO_MODE=true.
+Seeds one synthetic demo world for the demo user: Maya, a fictional designer who moved to Lisbon. It writes
+two personas with knowledge libraries, memory notes, a Tasks space, and a Morning brief schedule. Her email and calendar are not seeded here; they live in her connected email and calendar accounts. Nothing
+the assistant reads says she is made up. Every date in her world is counted from "today", so the tasks, notes and her
+mail (made with pnpm demo:import-mailbox) always line up with the day. Re-running it rewrites the Tasks space to that
+day's list; --reset removes the synthetic records. --fresh removes everything the demo user made, then seeds again. Needs DEMO_MODE=true.
 
   --reset              Remove the synthetic records only, then stop
+  --fresh              Remove everything the user made (chats, spaces, memory, schedules, personas, profile, files), then seed
   --user <email>       Demo user's login (default: ${DEFAULT_DEMO_USER})
   --timezone <iana>    Time zone that defines "today" (default: ${DEFAULT_DEMO_TIME_ZONE})
-  --model <p/model>    Model for the persona and briefing agent (default: first configured model)
+  --today <day>        Treat this day as "today", such as 2026-10-19 (default: the real today in the time zone)
+  --model <p/model>    Model for the personas and agent (default: the Super model when configured, else the first configured model)
 `;
+
+/** The `--today` day, or undefined when the flag is absent. */
+function parseToday(text: string | undefined): CalendarDay | undefined {
+  if (text === undefined) {
+    return undefined;
+  }
+  try {
+    return parseDemoDay(text);
+  } catch (error) {
+    throw new UsageError('--today must be a real day written YYYY-MM-DD, such as 2026-10-19.', { cause: error });
+  }
+}
 
 export interface DemoSeedDeps {
   now(): Date;
@@ -43,8 +63,10 @@ function parseOptions(args: readonly string[]) {
       args: [...args],
       options: {
         reset: { type: 'boolean', default: false },
+        fresh: { type: 'boolean', default: false },
         user: { type: 'string' },
         timezone: { type: 'string' },
+        today: { type: 'string' },
         model: { type: 'string' },
         help: { type: 'boolean', short: 'h', default: false },
       },
@@ -62,6 +84,11 @@ function pickModel({ requested, available }: { requested: string | undefined; av
       throw new UsageError(`Unknown model "${requested}". Configured models: ${available.join(', ') || 'none'}.`);
     }
     return requested;
+  }
+  // The demo is tuned for the Token Factory Super model; fall back to the first configured one.
+  const superModel = envManagedDefaultModelName(DEFAULT_TOKEN_FACTORY_MODEL);
+  if (available.includes(superModel)) {
+    return superModel;
   }
   const [first] = available;
   if (first === undefined) {
@@ -81,17 +108,26 @@ export function createDemoSeed(deps: DemoSeedDeps): Command {
       await io.stderr(USAGE);
       return 0;
     }
+    if (options.fresh && options.reset) {
+      throw new UsageError('Use either --fresh or --reset, not both.');
+    }
     const userId = (options.user ?? DEFAULT_DEMO_USER).trim();
     if (userId === '' || /\s/.test(userId)) {
       throw new UsageError('--user must be a login email without spaces.');
     }
     const timeZone = options.timezone ?? DEFAULT_DEMO_TIME_ZONE;
-    if (!isValidTimeZone(timeZone)) {
-      throw new UsageError(`Unknown time zone "${timeZone}". Use an IANA name such as Europe/Madrid.`);
+    if (!isValidTimezone(timeZone)) {
+      throw new UsageError(`Unknown time zone "${timeZone}". Use an IANA name such as Europe/Lisbon.`);
     }
 
+    const today = parseToday(options.today);
+
     if (!(await deps.demoModeEnabled())) {
-      await io.stderr('Refusing to seed: DEMO_MODE is not true. This command only runs on a demo instance.\n');
+      await io.stderr(
+        options.fresh
+          ? 'Start fresh only works on a demo instance. Nothing was removed.\n'
+          : 'Refusing to seed: DEMO_MODE is not true. This command only runs on a demo instance.\n',
+      );
       return 1;
     }
 
@@ -103,10 +139,33 @@ export function createDemoSeed(deps: DemoSeedDeps): Command {
         await printJson({ io, value: { action: 'reset', user: userId, removed } });
         return 0;
       }
+      // Picked before anything is removed, so a missing model never leaves an empty instance.
       const modelName = pickModel({ requested: options.model, available: session.models });
-      const report = await session.seed({ userId, now: deps.now(), timeZone, modelName });
-      await io.stderr(`Seeded the synthetic demo world for ${userId} (today in ${timeZone}).\n`);
-      await printJson({ io, value: { action: 'seed', user: userId, time_zone: timeZone, model: modelName, report } });
+      const removed = options.fresh ? await session.fresh({ userId }) : undefined;
+      if (removed !== undefined) {
+        await io.stderr(`Removed everything ${userId} made.\n`);
+      }
+      const report = await session.seed({ userId, now: deps.now(), timeZone, modelName, today });
+      await io.stderr(
+        `Seeded the synthetic demo world for ${userId} (${options.today === undefined ? `today in ${timeZone}` : `pretending today is ${options.today}`}).\n`,
+      );
+      if (report.knowledge.still_indexing > 0) {
+        await io.stderr(
+          `${String(report.knowledge.still_indexing)} knowledge document(s) are still indexing; restart the app to finish them.\n`,
+        );
+      }
+      await printJson({
+        io,
+        value: {
+          action: options.fresh ? 'fresh' : 'seed',
+          user: userId,
+          time_zone: timeZone,
+          today: options.today ?? null,
+          model: modelName,
+          removed: removed ?? null,
+          report,
+        },
+      });
       return 0;
     } finally {
       await session.close();

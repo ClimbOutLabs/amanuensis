@@ -61,8 +61,23 @@ RUN pip install --no-cache-dir --break-system-packages --no-deps --require-hashe
  && npm ci --prefix /opt/sandbox-tools --omit=dev --ignore-scripts --no-audit --no-fund \
  && ln -s /opt/sandbox-tools/node_modules/.bin/tsc /usr/local/bin/tsc \
  && ln -s /opt/sandbox-tools/node_modules/.bin/tsx /usr/local/bin/tsx \
+ && ln -s /opt/sandbox-tools/node_modules/.bin/vitest /usr/local/bin/vitest \
+ && ln -s /opt/sandbox-tools/node_modules/.bin/jest /usr/local/bin/jest \
+ && ln -s /opt/sandbox-tools/node_modules/.bin/eslint /usr/local/bin/eslint \
+ && ln -s /opt/sandbox-tools/node_modules/.bin/prettier /usr/local/bin/prettier \
  && npm cache clean --force \
  && rm -rf /tmp/* /root/.npm /root/.cache
+
+# Run every test and check tool once, so a broken install fails this build instead of a later session.
+# These are only the image copies on /usr/local/bin: a project's own pinned tools, in its node_modules/.bin
+# or its Python environment, are what its test commands resolve first, and nothing here changes that.
+RUN pytest --version \
+ && ruff --version \
+ && mypy --version \
+ && vitest --version \
+ && jest --version \
+ && eslint --version \
+ && prettier --version
 
 # The document pipeline reads attachments inside the guest with pdfinfo, pdftotext and pdftoppm (poppler-utils)
 # and tesseract. poppler-data carries the character maps that PDFs in Japanese, Chinese and Korean need to give
@@ -93,5 +108,11 @@ COPY --from=agent /out/aman-slot-agent /usr/local/bin/aman-slot-agent
 COPY --from=guest / /rootfs
 RUN mkdir -p /workspace /run/aman /run/runsc /tmp \
  && chown 65532:65532 /workspace /run/aman
+# The package mirror volume mounts at /run/aman/mirror, and the installer starts the slots before the
+# app, so this dir is the one a fresh mirror volume takes its ownership from. The app binds the mirror
+# socket in it as its own user (10001), so the dir belongs to that user; the slot only connects through
+# the socket and writes nothing in the dir.
+RUN mkdir -p /run/aman/mirror \
+ && chown 10001:10001 /run/aman/mirror
 USER 65532:65532
 ENTRYPOINT ["/usr/local/bin/aman-slot-agent"]

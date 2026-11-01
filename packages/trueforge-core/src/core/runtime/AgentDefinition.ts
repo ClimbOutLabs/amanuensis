@@ -1,7 +1,10 @@
+import type { RootAgentNames } from '../InstructionBuilder';
 import type { ILLM } from '../llm/ILLM';
 import type { LLMUserMessage } from '../llm/LLMTypes';
+import type { ModelRequestGate } from '../llm/ModelRequestGate';
 import type { ResponseFormat } from '../llm/responseFormat';
 import type { IToolSet } from '../mcp/IMCPServer';
+import type { ReplyStepBudget } from './replyBudget';
 
 export type ModelParams = Record<string, unknown>;
 
@@ -35,6 +38,14 @@ export interface AgentDefinition {
    */
   modelId: string | undefined;
   /**
+   * The host's per-model limit on requests in flight, when the resolved model has one: the
+   * shared gate, the key naming this model in it, and how many of its requests may be sent at
+   * once. A step takes a place before it sends its request and hands it back when the reply
+   * finishes, so a second reply waits instead of racing a model that serves one at a time.
+   * Undefined means the model takes as many requests as arrive.
+   */
+  modelRequestGate?: { gate: ModelRequestGate; key: string; limit: number } | undefined;
+  /**
    * Whether the resolved model can read images directly, from the
    * configured model's `properties.vision` (absent means false). Governs
    * how UserInputMessage attaches images: sent as `image_url` parts when
@@ -65,6 +76,11 @@ export interface AgentDefinition {
    * to UTC.
    */
   clientTimezone?: string | undefined;
+  /**
+   * Names for the root assistant's identity section. Omitted or empty values use the default assistant name and
+   * the neutral "person you work for" wording. Sub-agent threads ignore it.
+   */
+  identity?: RootAgentNames | undefined;
   instruction?: string | undefined;
   messages?: readonly LLMUserMessage[] | undefined;
   modelParams?: ModelParams | undefined;
@@ -89,6 +105,21 @@ export interface AgentDefinition {
    * `toolCallBudget` is set; ignored otherwise.
    */
   budgetedTools?: readonly string[] | undefined;
+  /**
+   * Model calls one reply may make on the main thread and on each sub-agent. Undefined uses the
+   * production budget; only tests raise it, to exercise guards that need longer replies.
+   */
+  stepBudget?: ReplyStepBudget | undefined;
 
   toolSets?: readonly IToolSet[] | undefined;
+  /**
+   * Every connector set up for this tenant, whether or not this chat has it. Undefined when unknown; a
+   * call to a connector the chat lacks then cannot say whether it is only turned off.
+   */
+  setUpConnectorNames?: readonly string[] | undefined;
+  /**
+   * Offers the model no tools at all, neither connector tools nor built-in ones such as
+   * schedules, files or checklists. For an agent that may only answer from what it already knows.
+   */
+  readOnly?: boolean | undefined;
 }

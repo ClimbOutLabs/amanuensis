@@ -23,11 +23,10 @@ function hasDismissPort(server: object): server is Pick<HarnessChatServerExtensi
 const DISMISS_REASON = 'Dismissed from the action-needed banner.';
 
 /**
- * Prominent fallback for pending tool approvals. The approval card renders on
- * the assistant message, but when the stream died (or the send was rejected
- * with the pending-approvals 422) the card may never appear, so this banner
- * does not depend on it. Offers the fail-closed escape hatch: deny everything
- * pending so the chat can continue.
+ * Prominent fallback for pending tool approvals, shown only when the thread is blocked: the
+ * send was rejected with the pending-approvals 422, or the stream died. Offers the fail-closed
+ * escape hatch: deny everything pending so the chat can continue. While a card is waiting the
+ * composer strip carries the signal instead.
  */
 export function PendingApprovalsBanner(): React.JSX.Element | null {
   const { pending } = useAnswerableApprovals();
@@ -58,7 +57,12 @@ export function PendingApprovalsBanner(): React.JSX.Element | null {
         });
       }
     } catch (error) {
-      if (isStaleApprovalError(error)) reload();
+      if (isStaleApprovalError(error)) {
+        // The requests ended or the chat moved on while dismissing: nothing is left to deny, so
+        // reload to the current state instead of showing the server's error.
+        reload();
+        return;
+      }
       toaster?.showError(error instanceof Error ? error : new Error('Could not dismiss the pending approvals.'));
     } finally {
       setDismissing(false);
@@ -66,14 +70,14 @@ export function PendingApprovalsBanner(): React.JSX.Element | null {
   }, [server, sessionId, dismissing, reload, toaster]);
 
   const count = pending.length;
-  if (count === 0 && !blocked) return null;
+  if (!blocked) return null;
   const canDismiss = server != null && hasDismissPort(server) && sessionId != null;
 
   return (
     <div
       data-role="host-pending-approvals"
       role="alert"
-      className="aui-pending-approvals-root border-warning-bg bg-warning-bg/10 text-warning-bg m-2 rounded-md border p-3"
+      className="aui-pending-approvals-root border-gold-line bg-gold-soft text-text-primary m-2 rounded-md border p-3"
     >
       <div className="text-sm font-medium">Action needed</div>
       <p className="mt-1 text-sm">

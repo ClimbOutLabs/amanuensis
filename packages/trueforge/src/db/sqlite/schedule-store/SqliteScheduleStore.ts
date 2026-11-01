@@ -8,7 +8,7 @@ import {
   paginateOffsetRows,
 } from '@truefoundry/trueforge-core/agent-session/store/OffsetPageToken';
 import { sql, type ExpressionBuilder, type Kysely, type Transaction } from 'kysely';
-import { nextTriggerAfter } from '../../../runtime/cron';
+import { firstRunAfter } from '../../../runtime/cron';
 import type { ScheduleManifest, ScheduleRunStatus, ScheduleStatus } from '../../../schemas/schedule';
 import { newId } from '../../../utils/id';
 import {
@@ -47,6 +47,7 @@ function scheduleColumns(eb: ExpressionBuilder<Database, 'schedule'>) {
     'agent_id' as const,
     'agent_name' as const,
     'name' as const,
+    'persona_id' as const,
     jsonText<ScheduleManifest>(eb.ref('manifest')).as('manifest'),
     'status' as const,
     jsonText<CreatedBySubject>(eb.ref('created_by_subject')).as('created_by_subject'),
@@ -77,6 +78,7 @@ interface ScheduleRow {
   agent_id: string;
   agent_name: string;
   name: string;
+  persona_id: string | null;
   manifest: ScheduleManifest;
   status: ScheduleStatus;
   created_by_subject: CreatedBySubject;
@@ -153,11 +155,12 @@ export class SqliteScheduleStore implements IScheduleStore<Transaction<Database>
       row = await db
         .insertInto('schedule')
         .values({
-          id: newId(),
+          id: input.id ?? newId(),
           tenant_id: input.tenant_id,
           agent_id: input.agent_id,
           agent_name: input.agent_name,
           name: input.name,
+          persona_id: input.persona_id,
           manifest: jsonbBind(input.manifest),
           // Column mirrors the manifest so the dispatch scan and API reads share one value.
           status: input.manifest.status,
@@ -206,6 +209,7 @@ export class SqliteScheduleStore implements IScheduleStore<Transaction<Database>
           name: input.name,
           manifest: jsonbBind(input.manifest),
           status: input.manifest.status,
+          ...(input.agent === undefined ? {} : { agent_id: input.agent.agent_id, agent_name: input.agent.agent_name }),
           updated_at: nowIso(),
         })
         .where('tenant_id', '=', input.tenant_id)
@@ -215,7 +219,7 @@ export class SqliteScheduleStore implements IScheduleStore<Transaction<Database>
     } catch (error) {
       if (isUniqueViolation(error)) {
         throw new ScheduleNameConflictError(
-          { tenant_id: input.tenant_id, agent_name: previous.agent_name, name: input.name },
+          { tenant_id: input.tenant_id, agent_name: input.agent?.agent_name ?? previous.agent_name, name: input.name },
           { cause: error },
         );
       }
@@ -252,11 +256,7 @@ export class SqliteScheduleStore implements IScheduleStore<Transaction<Database>
     if (schedule.status !== 'active') {
       return undefined;
     }
-    const nextTrigger = nextTriggerAfter({
-      cron: schedule.manifest.cron,
-      timezone: schedule.manifest.timezone,
-      from,
-    });
+    const nextTrigger = firstRunAfter({ manifest: schedule.manifest, from });
     return this.createRun(
       {
         tenant_id: schedule.tenant_id,

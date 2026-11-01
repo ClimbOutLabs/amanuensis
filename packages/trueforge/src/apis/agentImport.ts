@@ -20,13 +20,6 @@ export interface AgentImportRouterDeps {
   resolveImportAgentStore: (serviceFoundryServerHeaders: Record<string, string>) => IAgentStore;
 }
 
-function errorDetail(error: unknown): string {
-  if (!(error instanceof Error)) {
-    return String(error);
-  }
-  return error.stack ? `${error.message}\n${error.stack}` : error.message;
-}
-
 export function createAgentImportRouter(deps: AgentImportRouterDeps) {
   const router = new OpenAPIHono();
 
@@ -50,6 +43,7 @@ export function createAgentImportRouter(deps: AgentImportRouterDeps) {
           description: agent.description ?? agent.name,
           manifest: agent.manifest,
           external_id: null,
+          host_managed: false,
           created_by_subject: agent.created_by_subject,
           custom: {
             trueFoundryManagedAgentId: agent.truefoundry_managed_agent_id,
@@ -91,7 +85,8 @@ export function createAgentImportRouter(deps: AgentImportRouterDeps) {
       if (error instanceof SessionImportValidationError) {
         return c.json({ error: { message: error.message } }, 400);
       }
-      throw new HTTPException(500, { message: errorDetail(error), cause: error });
+      // The app error handler logs the failure in full and answers with a generic 500.
+      throw error;
     }
   };
 
@@ -102,12 +97,8 @@ export function createAgentImportRouter(deps: AgentImportRouterDeps) {
       });
     }
     const { tenant_id } = c.req.valid('query');
-    try {
-      const data = await deps.sessionStore.getImportSessionsCheckpoint({ tenant_id });
-      return c.json({ data }, 200);
-    } catch (error) {
-      throw new HTTPException(500, { message: errorDetail(error), cause: error });
-    }
+    const data = await deps.sessionStore.getImportSessionsCheckpoint({ tenant_id });
+    return c.json({ data }, 200);
   };
 
   router.openapi(importAgentsRoute, importAgentsHandler);

@@ -8,6 +8,7 @@
  */
 import { getDefaultWritePaths, SandboxManager } from '@anthropic-ai/sandbox-runtime';
 import { SANDBOX_ALLOWED_EGRESS_DOMAINS } from '@truefoundry/trueforge-core/core';
+import { carriesHostAuthenticatedGitToken } from '@truefoundry/trueforge-core/core/sandbox/hostAuthenticatedGit';
 import { throwIfSignalAborted } from '@truefoundry/trueforge-core/core/util/abort';
 import { execFile, spawn, type ChildProcess } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
@@ -63,7 +64,7 @@ export function commandPath(platform: LocalSandboxPlatform): string {
   return COMMAND_PATH_BY_PLATFORM[platform];
 }
 
-/** Cwd-relative venv created at local sandbox init (host `python -m venv`). */
+/** Cwd-relative venv, built inside the sandbox at init. */
 export const SANDBOX_VENV_DIR = '.venv';
 
 function sandboxVenvPath(sandboxRootPath: string): string {
@@ -115,6 +116,27 @@ export const SRT_HOST_BINARIES_BY_PLATFORM = {
 
 export function srtHostBinaryNames(platform: LocalSandboxPlatform): readonly string[] {
   return SRT_HOST_BINARIES_BY_PLATFORM[platform];
+}
+
+/** Absolute host paths of the Linux helpers SRT spawns; a bare name would be looked up on a model-writable PATH. */
+export interface SrtHostBinaryPaths {
+  bwrap: string;
+  socat: string;
+  rg: string;
+}
+
+/** Resolves the helpers on the host's system dirs; undefined where SRT needs none (macOS). */
+async function resolveSrtHostBinaries(platform: LocalSandboxPlatform): Promise<SrtHostBinaryPaths | undefined> {
+  if (platform !== 'linux') {
+    return undefined;
+  }
+  const [bwrap, socat, rg] = await Promise.all(
+    srtHostBinaryNames(platform).map(name => resolveCommandOnHost({ platform, name })),
+  );
+  if (bwrap === undefined || socat === undefined || rg === undefined) {
+    throw new Error('SRT host helpers (bwrap, socat, rg) must resolve to absolute paths');
+  }
+  return { bwrap, socat, rg };
 }
 
 /** SRT's own host-dep check (bwrap/socat/rg on Linux). Does not require initSrt. */
@@ -261,6 +283,12 @@ function filesystemPolicy(params: { sandboxRootPath: string; platform: LocalSand
   };
 }
 
+/** The pinned PATH's absolute entries, or the platform's system PATH when it names none. */
+function pinnedAbsolutePath(params: { pinned: string | undefined; platform: LocalSandboxPlatform }): string {
+  const absolute = (params.pinned ?? '').split(':').filter(entry => isAbsolute(entry));
+  return absolute.length > 0 ? absolute.join(':') : commandPath(params.platform);
+}
+
 /** Curated env for the sandboxed command — never the full host process.env. */
 function commandEnv(params: {
   sandboxRootPath: string;
@@ -270,6 +298,10 @@ function commandEnv(params: {
   const tmp = join(params.sandboxRootPath, '.tmp');
   const home = join(params.sandboxRootPath, '.home');
   const venvDir = sandboxVenvPath(params.sandboxRootPath);
+  // A token-carrying exec keeps the caller's pinned PATH: the workspace-relative dirs below are model-writable.
+  const tokenPath = carriesHostAuthenticatedGitToken(params.extra)
+    ? pinnedAbsolutePath({ pinned: params.extra?.['PATH'], platform: params.platform })
+    : undefined;
   const locked = {
     HOME: home,
     TMPDIR: tmp,
@@ -278,7 +310,7 @@ function commandEnv(params: {
     VIRTUAL_ENV: venvDir,
     // Cwd-relative layout dirs (not host-absolute). Absolute paths under
     // `Application Support` break PATH lookup (`mcp-client: command not found`).
-    PATH: `${join(SANDBOX_VENV_DIR, 'bin')}:mcp-client/bin:${commandPath(params.platform)}`,
+    PATH: tokenPath ?? `${join(SANDBOX_VENV_DIR, 'bin')}:mcp-client/bin:${commandPath(params.platform)}`,
   };
   return {
     ...params.extra,
@@ -460,11 +492,19 @@ export async function initSrt(params: {
   platform: LocalSandboxPlatform;
   /** Dedicated Code Mode UDS parent (realpath); grant this path, not host /tmp. */
   codeModeSocketParentPath?: string | undefined;
+  /** Host paths found by the support probe; resolved from the system dirs when absent. */
+  hostBinaries?: SrtHostBinaryPaths | undefined;
 }): Promise<void> {
+  const hostBinaries = params.hostBinaries ?? (await resolveSrtHostBinaries(params.platform));
   activePlatform = params.platform;
   codeModeSocketParentPath =
     params.codeModeSocketParentPath === undefined ? undefined : realpathSync(params.codeModeSocketParentPath);
-  await SandboxManager.initialize(buildSessionConfig(params.platform));
+  await SandboxManager.initialize({
+    ...buildSessionConfig(params.platform),
+    ...(hostBinaries === undefined
+      ? {}
+      : { bwrapPath: hostBinaries.bwrap, socatPath: hostBinaries.socat, ripgrep: { command: hostBinaries.rg } }),
+  });
 }
 
 export async function resetSrt(): Promise<void> {
@@ -525,6 +565,12 @@ export async function runSupervisorSession(params: {
   onChildSpawn?: (pid: number) => void;
   /** Hard wall-clock limit for the sandboxed command; caller must choose deliberately. */
   timeoutMs: number;
+  /**
+   * Sites the person approved for the skills in this chat, added to this one command's allowed
+   * domains only. An approval is one person's decision for one chat: it never joins the shared
+   * egress list the next lines build on.
+   */
+  extraAllowedDomains?: readonly string[] | undefined;
 }): Promise<SessionResult> {
   const {
     sandboxRootPath,
@@ -547,7 +593,7 @@ export async function runSupervisorSession(params: {
     {
       filesystem: filesystemPolicy({ sandboxRootPath, platform }),
       network: {
-        allowedDomains: allowedNetworkDomains(),
+        allowedDomains: [...new Set([...allowedNetworkDomains(), ...(params.extraAllowedDomains ?? [])])],
         deniedDomains: [],
       },
     },

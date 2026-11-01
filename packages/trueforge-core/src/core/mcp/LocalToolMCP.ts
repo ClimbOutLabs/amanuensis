@@ -2,7 +2,9 @@ import type { CallToolRequest, ListToolsResult, ToolAnnotations } from '@modelco
 import { z } from 'zod';
 import type { ApprovalDecision } from '../events/schema';
 import type { InternalToolCallInfo } from '../llm/LLMTypes';
+import { isMapsToolName } from '../permissions/mapsToolNames';
 import type { AgentTracing } from '../tracing/AgentTracing';
+import type { ToolBundleName } from '../runtime/toolBundleCatalog';
 import {
   type CallToolResponse,
   isCallToolResponseResult,
@@ -11,7 +13,7 @@ import {
   type ToolInvocationContext,
   toolResultResponse,
 } from './IMCPServer';
-import { deniedToolCallText, toolEffectHints } from './ToolSet';
+import { deniedToolCallResponse, toolEffectHints } from './ToolSet';
 
 function withValidatedInput<T extends z.ZodType>(
   schema: T,
@@ -20,6 +22,7 @@ function withValidatedInput<T extends z.ZodType>(
     approvalDecision?: ApprovalDecision,
     context?: ToolInvocationContext,
   ) => Promise<CallToolResponse>,
+  onInvalid?: (error: z.ZodError) => string,
 ) {
   return async (
     raw: unknown,
@@ -29,7 +32,10 @@ function withValidatedInput<T extends z.ZodType>(
     const parsed = schema.safeParse(raw);
     if (!parsed.success) {
       return toolResultResponse({
-        text: JSON.stringify({ error: 'Validation failed', details: z.treeifyError(parsed.error) }),
+        text:
+          onInvalid !== undefined
+            ? onInvalid(parsed.error)
+            : JSON.stringify({ error: 'Validation failed', details: z.treeifyError(parsed.error) }),
         isError: true,
       });
     }
@@ -52,6 +58,11 @@ export function defineTool<T extends z.ZodType>(config: {
   description: string;
   schema: T;
   /**
+   * Renders an invalid-input error for the model. Absent, the error stays the shared
+   * `Validation failed` JSON shape, so tools that pin it keep it.
+   */
+  invalidInput?: ((error: z.ZodError) => string) | undefined;
+  /**
    * MCP tool annotations (readOnlyHint, destructiveHint, openWorldHint).
    * Surfaced on toolCallInfo so the permission layer classifies built-in
    * tools from the same server-declared metadata remote tools carry.
@@ -73,7 +84,7 @@ export function defineTool<T extends z.ZodType>(config: {
     description: config.description,
     inputSchema: jsonSchema,
     ...(config.annotations !== undefined && { annotations: config.annotations }),
-    execute: withValidatedInput(config.schema, config.handler),
+    execute: withValidatedInput(config.schema, config.handler, config.invalidInput),
   };
 }
 
@@ -89,6 +100,8 @@ export abstract class LocalToolMCP implements IToolSet {
   readonly preload: boolean = true;
   readonly hasPreloadedTools: boolean = true;
   readonly tracingEnabled: boolean = true;
+  /** The guidance topic every tool of this set is grouped under; undefined groups them under none. */
+  protected readonly bundle: ToolBundleName | undefined = undefined;
 
   private readonly tracing: AgentTracing;
 
@@ -105,6 +118,11 @@ export abstract class LocalToolMCP implements IToolSet {
   }
 
   protected abstract getTools(): ToolDefinition[];
+
+  bundleOf(_toolName: string): ToolBundleName | undefined {
+    void _toolName;
+    return this.bundle;
+  }
 
   listTools(): Promise<ListToolsResolvedResponse> {
     return Promise.resolve({
@@ -134,10 +152,7 @@ export abstract class LocalToolMCP implements IToolSet {
       },
       async span => {
         if (approvalDecision?.status === 'deny') {
-          return toolResultResponse({
-            text: deniedToolCallText(approvalDecision.reason),
-            isError: true,
-          });
+          return deniedToolCallResponse(approvalDecision.reason);
         }
         const response = await this.executeTool(params, approvalDecision, context);
         span.setOutput(JSON.stringify(response));
@@ -147,6 +162,11 @@ export abstract class LocalToolMCP implements IToolSet {
         return response;
       },
     );
+  }
+
+  /** The host's own maps tools, the only built-ins the classifier rules a read by name. */
+  isHostVouchedReadTool(name: string): boolean {
+    return isMapsToolName(name) && this.getTools().some(tool => tool.name === name);
   }
 
   // Local tools are not approval gated by default.

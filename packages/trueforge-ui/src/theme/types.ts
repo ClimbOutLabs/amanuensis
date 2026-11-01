@@ -3,7 +3,12 @@ import type { ComponentType, CSSProperties, FC, ReactNode, SVGProps } from 'reac
 
 export type ThemeMode = 'light' | 'dark' | 'system';
 
-export type ThemePreset = 'trueforge' | 'claude' | 'chatgpt' | 'gemini' | 'midnight' | 'forest' | 'sunset' | 'volt';
+/** Picker order. The first entry is the default for new users. */
+export const THEME_PRESET_IDS = ['paper', 'forest', 'midnight', 'high-contrast'] as const;
+
+export type ThemePreset = (typeof THEME_PRESET_IDS)[number];
+
+export const DEFAULT_THEME_PRESET: ThemePreset = 'paper';
 
 export type SemanticTokens = {
   // Across product
@@ -21,6 +26,8 @@ export type SemanticTokens = {
   inputBorder: string;
   textPrimary: string;
   textSecondary: string;
+  /** Hints such as placeholders: lighter than secondary text, still AA against the input background. */
+  textMuted: string;
   // Type scale
   textXs: string;
   textSm: string;
@@ -78,7 +85,20 @@ export type SemanticTokens = {
   chart7: string;
   chart8: string;
   // Kept internals
+  /** Keyboard focus ring. Gold ink in light mode, bright gold in dark. */
   focusRing: string;
+  /** The one highlight: fills, marks, the pending badge. Never text in light mode. */
+  gold: string;
+  /** Gold as words and lines: links, active nav, the focus ring's partner in light mode. */
+  goldInk: string;
+  /** Soft gold fill behind a selected or pending card. */
+  goldSoft: string;
+  /** Edge for a gold-soft fill, where a bright edge alone would be too faint. */
+  goldLine: string;
+  /** Centre of the panda's frame, sampled from the picture: parchment in light, the wall's glow in dark. */
+  pandaGlowFrom: string;
+  /** Rim of the panda's frame, sampled from the picture: wood in light, the deep wall in dark. */
+  pandaGlowTo: string;
   radius: string;
   composerRadius: string;
   overlay: string;
@@ -219,6 +239,8 @@ export type ThemeConfig = {
   className?: string;
   icons?: IconMap;
   classNames?: ContentClassNames;
+  /** Load Google Sans from Google Fonts. Defaults to true; set false for hosts whose CSP keeps the page on its own origin. */
+  webFonts?: boolean;
 };
 
 export type BuiltInLayout = 'sidebar' | 'drawer' | 'dock' | 'widget';
@@ -239,6 +261,7 @@ export const TOKEN_CSS_VARS: Record<keyof SemanticTokens, string> = {
   inputBorder: '--input-border',
   textPrimary: '--text-primary',
   textSecondary: '--text-secondary',
+  textMuted: '--text-muted',
   textXs: '--text-xs',
   textSm: '--text-sm',
   textBase: '--text-base',
@@ -284,6 +307,12 @@ export const TOKEN_CSS_VARS: Record<keyof SemanticTokens, string> = {
   chart7: '--chart-7',
   chart8: '--chart-8',
   focusRing: '--focus-ring',
+  gold: '--gold',
+  goldInk: '--gold-ink',
+  goldSoft: '--gold-soft',
+  goldLine: '--gold-line',
+  pandaGlowFrom: '--panda-glow-from',
+  pandaGlowTo: '--panda-glow-to',
   radius: '--radius',
   composerRadius: '--composer-radius',
   overlay: '--overlay',

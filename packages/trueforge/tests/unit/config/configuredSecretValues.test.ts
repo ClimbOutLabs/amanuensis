@@ -33,6 +33,7 @@ describe('getConfiguredSecretValues', () => {
           OIDC_USER_ROLE_CLAIM: 'email',
           OIDC_ADMIN_ROLE_VALUE: 'owner@example.invalid',
           OIDC_ALLOWED_EMAILS: ['owner@example.invalid'],
+          OIDC_REQUIRE_VERIFIED_EMAIL: false,
           OIDC_SCOPES: ['openid'],
         },
       }),
@@ -58,6 +59,41 @@ describe('getConfiguredSecretValues', () => {
       'p@ss/word-0005',
       'redis://:redis-pass-0006@cache.internal:6379',
       'redis-pass-0006',
+    ]);
+  });
+
+  it('returns every secret a fully configured distributed process holds, in the same order as always', () => {
+    expect(
+      getConfiguredSecretValues({
+        STANDALONE: false,
+        ...synthetic,
+        OIDC: {
+          OIDC_ISSUER_URL: 'http://127.0.0.1:5556/dex',
+          OIDC_CLIENT_ID: 'client',
+          OIDC_CLIENT_SECRET: 'synthetic-client-secret-0007',
+          OIDC_USER_REFERENCE_CLAIM: 'email',
+          OIDC_USER_DISPLAY_NAME_CLAIM: 'name',
+          OIDC_USER_ROLE_CLAIM: 'email',
+          OIDC_ADMIN_ROLE_VALUE: 'owner@example.invalid',
+          OIDC_ALLOWED_EMAILS: ['owner@example.invalid'],
+          OIDC_REQUIRE_VERIFIED_EMAIL: false,
+          OIDC_SCOPES: ['openid'],
+        },
+        TRUEFOUNDRY_API_KEY: 'synthetic-platform-key-0004',
+        TRUEFOUNDRY_SANDBOX_API_KEY: 'synthetic-sandbox-key-0008',
+        DATABASE_URL: 'postgres://app:db-pass-0009@db.internal:5432/app',
+        REDIS_URL: 'redis://cache.internal:6379',
+      }),
+    ).toEqual([
+      'synthetic-service-key-0001',
+      'synthetic-nebius-key-0002',
+      'synthetic-screen-token-0003',
+      'synthetic-client-secret-0007',
+      'synthetic-platform-key-0004',
+      'synthetic-sandbox-key-0008',
+      'postgres://app:db-pass-0009@db.internal:5432/app',
+      'db-pass-0009',
+      'redis://cache.internal:6379',
     ]);
   });
 });

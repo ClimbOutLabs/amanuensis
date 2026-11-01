@@ -12,7 +12,7 @@
  */
 import { z } from 'zod';
 import { emptyTaskChecklist } from '../../../src/agent-session/schemas/taskChecklist';
-import { REPLACE_TASK_CHECKLIST_TOOL_NAME, taskChecklist } from '../../../src/core/capabilities/builtins/TaskChecklist';
+import { taskChecklist } from '../../../src/core/capabilities/builtins/TaskChecklist';
 import type { InternalToolCallInfo } from '../../../src/core/llm/LLMTypes';
 import { toolResultResponse } from '../../../src/core/mcp/IMCPServer';
 import { defineTool, LocalToolMCP, type ToolDefinition } from '../../../src/core/mcp/LocalToolMCP';
@@ -20,7 +20,7 @@ import { createSentinelHostContext, type SentinelHostContext } from '../../../sr
 import { verifyPreDispatch } from '../../../src/core/permissions/dispatch';
 import { classifyUnstampedToolCall } from '../../../src/core/runtime/AgentThread';
 import { TaskStateToolSet } from '../../../src/core/runtime/TaskStateToolSet';
-import { TASK_STATE_TOOL_NAME } from '../../../src/core/runtime/taskState';
+import { REPLACE_TASK_CHECKLIST_TOOL_NAME, TASK_STATE_TOOL_NAME } from '../../../src/core/runtime/taskState';
 import type { AgentTracing } from '../../../src/core/tracing/AgentTracing';
 import { NOOP_AGENT_TRACING } from '../../../src/core/tracing/NoopAgentTracing';
 
@@ -195,6 +195,9 @@ test('maps calls keep the host-stamped hosts on the card instead of the unnamed 
     maps_hosts: {
       geocoder: 'https://geocode.example.internal',
       router: 'https://routes.example.internal',
+      walking: 'https://foot.example.internal',
+      cycling: 'https://bike.example.internal',
+      transit: 'https://transit.example.internal',
       tile: 'https://tiles.example.internal/{z}/{x}/{y}.png',
     },
   };

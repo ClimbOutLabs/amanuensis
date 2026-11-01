@@ -3,7 +3,7 @@
 Hard-cut `tfy-web-components`. Own primitives (shadcn-style, in-repo),
 Markdown/OpenUI/syntax-highlighter/Monaco, Lucide icons (swappable map +
 SVG transform), and a **theme object** with presets
-(`trueforge` | `claude` | `chatgpt` | `gemini`) plus full token / className /
+(`paper` | `forest` | `midnight` | `high-contrast`) plus full token / className /
 icon / **brand** / **content classNames** customization. Shell also accepts a
 **custom layout** React component built from `Thread`, thread list, etc.
 
@@ -43,7 +43,7 @@ track (orthogonal to [`docs/server.md`](./server.md)).
 | Icons           | Lucide defaults; host can replace map + supply SVG transforms                            |
 | Brand           | Icon/logo URLs (per-mode) via `theme.brand`; component marks via the `BrandLogo` slot    |
 | Theme API       | Object (not string-only); every look aspect customizable                                 |
-| Presets         | Inspired-by packs: `trueforge` (default), `claude`, `chatgpt`, `gemini`                  |
+| Presets         | Four themes: `paper` (default), `forest`, `midnight`, `high-contrast`                    |
 | Custom styles   | CSS tokens + `className`; host may also import CSS (documented). No “load CSS file” prop |
 | Light / dark    | Controlled `mode` on the theme object **or** omit → uncontrolled `useTheme().setTheme`   |
 | React overrides | Structural pieces via **`overrides` / slots**; full chrome via **`layout` component**    |
@@ -75,7 +75,7 @@ Rebuild in-repo (keep existing atom **names** / slots where possible, change
 props):
 
 - Bubbles: `AssistantMessageBubble`, `UserMessageBubble`, `UserMessageEdit`
-- Tools: `ToolCallCard`, `ToolCallContentBlock`, `ToolApprovalBar`,
+- Tools: `ToolCallCard`, `ToolCallContentBlock`,
   `ToolGroupCard`, `SubAgentCard`, `SandboxToolCallCard`, `AgentStepsCard`,
   `ReasoningCard`
 - Prompts: `AskUserPrompt`, `McpAuthPrompt`, `ResumeUnavailable`
@@ -112,7 +112,7 @@ New direct dependencies this implies: `monaco-editor`, `react-syntax-highlighter
 ```ts
 type ThemeMode = "light" | "dark" | "system";
 
-type ThemePreset = "trueforge" | "claude" | "chatgpt" | "gemini";
+type ThemePreset = "paper" | "forest" | "midnight" | "high-contrast";
 
 type SemanticTokens = {
   // Across product
@@ -204,7 +204,7 @@ type BrandConfig =
   | { mode: "logo"; name: string; icon: BrandImage; logo: BrandImage; href?: string };
 
 type ThemeConfig = {
-  preset?: ThemePreset; // default: "trueforge"
+  preset?: ThemePreset; // default: "paper"
   mode?: ThemeMode; // omit = uncontrolled (useTheme().setTheme)
   tokens?: Partial<SemanticTokens>;
   brand?: BrandConfig; // set brand.mode, then required fields
@@ -268,7 +268,7 @@ function MyLayout({ className }: { className?: string }) {
 <TrueForgeUI
   layout={MyLayout} // or 'sidebar' | 'drawer' | 'dock' | 'widget'
   theme={{
-    preset: 'claude',
+    preset: 'paper',
     mode: 'dark',
     tokens: { primaryButtonBg: '#…', fontFamily: '"My Font", system-ui' },
     brand: {
@@ -406,23 +406,25 @@ function CenteredLayout() {
   server={server}
   agentConfig={{ mode: 'SingleAgent', name: 'my-agent' }}
   layout={CenteredLayout}
-  theme={{ preset: 'gemini' }}
+  theme={{ preset: 'forest' }}
 />;
 ```
 
-## Presets (inspired-by)
+## Presets
 
-Ship as CSS variable maps under e.g. `src/theme/presets/`:
+Ship as CSS variable maps under `src/theme/presets/`:
 
-| Preset      | Intent (not a clone)                                    |
-| ----------- | ------------------------------------------------------- |
-| `trueforge` | Current indigo semantic look                            |
-| `claude`    | Warm paper bg, soft borders, restrained accent          |
-| `chatgpt`   | Cool gray chrome, green/teal send accent, flat bubbles  |
-| `gemini`    | Light airy surface, blue accent, slightly larger radius |
+| Preset          | Look                               |
+| --------------- | ---------------------------------- |
+| `paper`         | Warm paper, ink and gold (default) |
+| `forest`        | Calm greens, natural tones         |
+| `midnight`      | Deep blue-grays, ice blue accents  |
+| `high-contrast` | Maximum legibility, stark surfaces |
 
-Each preset defines **light + dark** token sets. Document that these are
-stylistic homages, not product replicas.
+Each preset defines **light + dark** token sets. Gold is the highlight in
+every preset except Midnight, which uses ice blue; a preset changes surfaces,
+never the highlight. Saved preferences for removed presets resolve to `paper`,
+and the old `chatgpt` and `mint` ids resolve to `high-contrast`.
 
 ## Markdown / OpenUI / syntax-highlighter / Monaco
 
@@ -525,7 +527,7 @@ overrides apply in the example app.
 
 ### Phase 5 — Presets + polish
 
-1. Ship `claude` / `chatgpt` / `gemini` / `trueforge` packs.
+1. Ship the `paper`, `forest`, `midnight` and `high-contrast` packs.
 2. Example app: theme switcher + custom layout demo + content classNames demo.
 3. Drop `tfy-web-components` from `dependencies` / `peerDependencies`.
 4. CHANGELOG + migration guide (slot props, styles, brand, layout, classNames).

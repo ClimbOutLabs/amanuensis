@@ -14,11 +14,14 @@ import { defaultSentinelServices } from '@truefoundry/trueforge-core/core/permis
 import { NOOP_AGENT_TRACING } from '@truefoundry/trueforge-core/core/tracing/NoopAgentTracing';
 import { createLogger } from 'winston';
 import { SqliteGoogleConnectionStore } from '../../../src/db/sqlite/google-connection-store/SqliteGoogleConnectionStore';
+import { SqliteSessionStore } from '../../../src/db/sqlite/session-store/SqliteSessionStore';
 import type { MemoryConfig } from '../../../src/runtime/memory/memoryCapability';
 import type { MemoryTurnContext, ToolOutputScreenConfig } from '../../../src/runtime/MemoryTurnResourceResolver';
 import { SpaceTurnResourceResolver, type SpaceToolStore } from '../../../src/runtime/spaceCapability';
 import { createSqliteTestDatabase, type SqliteTestDatabase } from '../../db/sqlite/testDatabase';
 import { FakeSandboxProvider } from '../../fixtures/fakeSandboxProvider';
+import { FakeTurnArtifactStore } from '../../fixtures/fakeTurnArtifactStore';
+import { uncappedTokenFactoryBudget } from '../../fixtures/uncappedTokenFactoryBudget';
 
 const READ = 'https://www.googleapis.com/auth/gmail.readonly';
 const OWNER = { tenant_id: 't1', created_by: 'u1' };
@@ -45,7 +48,7 @@ const memory: MemoryTurnContext = {
   config: MEMORY_CONFIG,
   sessionId: 's1',
   previousTurnId: null,
-  sessionTitle: undefined,
+  summarize: undefined,
   providerServerName: undefined,
 };
 
@@ -153,6 +156,19 @@ describe('download_attachment follows the chat sandbox', () => {
         authority: { tenantId: OWNER.tenant_id, userRef: OWNER.created_by },
         sessionId: 's1',
         logger,
+        startsAnswer: true,
+      },
+      {
+        store: new FakeTurnArtifactStore(),
+        tenantId: OWNER.tenant_id,
+        sessionId: 's1',
+        turnId: 't1',
+        logger: createLogger({ silent: true }),
+      },
+      {
+        sessionStore: new SqliteSessionStore(env.db),
+        budget: uncappedTokenFactoryBudget,
+        authority: { tenantId: OWNER.tenant_id, userRef: OWNER.created_by },
       },
     );
   }

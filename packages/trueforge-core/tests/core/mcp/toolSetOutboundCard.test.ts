@@ -9,6 +9,7 @@ import { connectRemoteMcp } from '../../../src/core/mcp/remoteMcpClient';
 import type { SentinelServices } from '../../../src/core/permissions/context';
 import { DeferredTool } from '../../../src/core/runtime/DeferredTool';
 import { NOOP_AGENT_TRACING } from '../../../src/core/tracing/NoopAgentTracing';
+import { createWebSearchTurnState } from '../../../src/core/permissions/webSearch';
 
 jest.mock('../../../src/core/mcp/remoteMcpClient', () => {
   const actual = jest.requireActual<typeof import('../../../src/core/mcp/remoteMcpClient')>(
@@ -72,7 +73,7 @@ describe('approval card for connector calls', () => {
     expect(info.tier).toBe(3);
     expect(info.is_approval_required).toBe(true);
     expect(info.tier3_card).toMatchObject({
-      plain_what: 'Search the web with web_search on exa.',
+      plain_what: 'Search the web on exa?',
       destination_host: 'mcp.exa.ai',
       outbound_text: 'query: my salary history',
     });
@@ -95,7 +96,7 @@ describe('approval card for connector calls', () => {
     expect(info.is_deferred).toBe(true);
     expect(info.tier).toBe(3);
     expect(info.tier3_card).toMatchObject({
-      plain_what: 'Search the web with web_search on exa.',
+      plain_what: 'Search the web on exa?',
       destination_host: 'mcp.exa.ai',
       outbound_text: 'query: my salary history',
     });
@@ -105,9 +106,9 @@ describe('approval card for connector calls', () => {
     [
       'web_fetch',
       { urls: ['https://www.usps.com/'], objective: 'o' },
-      'Fetch a web page with web_fetch on parallel-web.',
+      'Fetch a web page on parallel-web?',
     ],
-    ['web_search', { objective: 'o', search_queries: ['q'] }, 'Search the web with web_search on parallel-web.'],
+    ['web_search', { objective: 'o', search_queries: ['q'] }, 'Search the web on parallel-web?'],
   ])('shows %s on the Parallel connector the same way directly and through call_tool', async (name, input, what) => {
     const tool: ToolSchema = { name, description: 'Parallel tool.', inputSchema: schema };
     const toolSet = makeToolSet({ name: 'parallel-web', url: 'https://search.parallel.ai/mcp', tools: [tool] });
@@ -137,7 +138,7 @@ describe('approval card for connector calls', () => {
     });
     expect(info.tier).toBe(3);
     expect(info.tier3_card).toMatchObject({
-      plain_what: 'Send an email to alice@example.com.',
+      plain_what: 'Send an email to alice@example.com?',
       recipient: 'alice@example.com',
       destination_host: 'gmail.example.com',
     });
@@ -155,7 +156,7 @@ describe('approval card for connector calls', () => {
     });
     for (const info of [direct, wrapped]) {
       expect(info.tier).toBe(3);
-      expect(info.tier3_card?.plain_what).toBe("Aman doesn't know this tool yet: frobnicate.");
+      expect(info.tier3_card?.plain_what).toBe('Allow this new tool from misc?');
       expect(info.tier3_card?.destination_host).toBe('misc.example.com');
       expect(info.tier3_card?.outbound_text).toBe('id: 7');
     }
@@ -207,7 +208,7 @@ describe('approval is bound to the connector it was granted for', () => {
       threadId: 'main',
       approvalDecisions: new Map<string, ApprovalDecision>([['call-1', { status: 'allow' }]]),
       memoState: createToolCallMemoState(),
-      sentinel: { services, identity },
+      sentinel: { services, identity, web_search: createWebSearchTurnState() },
     });
     const outcome = result.toolCallResults[0];
     if (outcome === undefined) {

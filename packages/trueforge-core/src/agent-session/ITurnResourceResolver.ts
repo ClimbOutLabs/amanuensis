@@ -4,6 +4,7 @@ import type { CompactionModel } from '../core/capabilities/builtins/ContextCompa
 import type { TaskChecklistAccess } from '../core/capabilities/builtins/TaskChecklist';
 import type { ModelMessageEvent } from '../core/events/schema';
 import type { SentinelHostContext } from '../core/permissions';
+import type { WebSearchTurnState } from '../core/permissions/webSearch';
 import type { AgentDefinition } from '../core/runtime/AgentDefinition';
 import type { AgentInfo } from '../core/runtime/AgentThread.types';
 import type { HostToolCallPolicy } from '../core/runtime/HostToolCallPolicy';
@@ -33,6 +34,8 @@ export interface ResolvedAgentDefinition {
  * per-request state (secrets, providers, caches) freely.
  */
 export interface ITurnResourceResolver<TTurnCustom extends object = Record<string, never>> {
+  /** The turn's lookup state and where its links came from, shared by every thread's host context. */
+  readonly webSearchTurn: WebSearchTurnState;
   /** Host-owned durable task state shared by the root thread's checklist and compaction. */
   readonly compactionContext?: TaskChecklistAccess | undefined;
   /**
@@ -68,12 +71,28 @@ export interface ITurnResourceResolver<TTurnCustom extends object = Record<strin
    */
   readonly modelFirstResponseTimeoutMs?: number | undefined;
   /**
+   * Host instance-wide bound in milliseconds on silence between a model call's
+   * chunks. Undefined falls back to the core default (see DEFAULT_MODEL_IDLE_TIMEOUT_MS).
+   */
+  readonly modelIdleTimeoutMs?: number | undefined;
+  /**
+   * Host instance-wide bound in milliseconds on silence between a model call's
+   * chunks while one of its tool calls is open. Undefined falls back to the core
+   * default (see DEFAULT_MODEL_TOOL_CALL_IDLE_TIMEOUT_MS).
+   */
+  readonly modelToolCallIdleTimeoutMs?: number | undefined;
+  /**
    * Per-run host policy over tool calls, consulted synchronously during
    * assistant-message enrichment before any provider dispatch. A block resolves
    * the call as `policy_blocked` with the host message as the tool error.
    * Undefined disables the hook.
    */
   readonly toolCallPolicy?: HostToolCallPolicy | undefined;
+  /**
+   * Whether this server has a sandbox at all, from the host's sandbox status (not this chat's switch).
+   * Undefined is read as no sandbox on the server.
+   */
+  readonly serverSandboxAvailable?: boolean | undefined;
   /** Host-resolved T2 repository binding, available even when the sandbox capability is disabled. */
   readonly boundRepository?: BoundRepository | undefined;
   /**

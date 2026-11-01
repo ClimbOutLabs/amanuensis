@@ -1,0 +1,385 @@
+/**
+ * The reply guard: arguments repaired before classification, exact duplicates merged, calls that
+ * must not run flagged with plain reasons, and the per-reply cap counted after merging.
+ */
+import type { ChatCompletionTool } from 'openai/resources/chat';
+import type { RawAssistantMessage, RawToolCall } from '../../../src/core/llm/LLMTypes';
+import type { ContextMessage } from '../../../src/core/runtime/AgentThread.types';
+import {
+  collectKnownEventIds,
+  guardModelReply,
+  MAX_TOOL_CALLS_PER_REPLY,
+  shellCommandInRunCodeMessage,
+  TOOL_CALL_SIZE_CUT_MESSAGE,
+} from '../../../src/core/runtime/modelReplyGuard';
+
+const TOOLS: ChatCompletionTool[] = [
+  {
+    type: 'function',
+    function: {
+      name: 'web_fetch',
+      parameters: {
+        type: 'object',
+        properties: { urls: { type: 'array', items: { type: 'string' } }, full_content: { type: 'boolean' } },
+        required: ['urls'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'create_event',
+      parameters: {
+        type: 'object',
+        properties: { title: { type: 'string' } },
+        required: ['title'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'get_event',
+      parameters: {
+        type: 'object',
+        properties: { event_id: { type: 'string' } },
+        required: ['event_id'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'list_events',
+      parameters: {
+        type: 'object',
+        properties: { limit: { type: 'integer' } },
+      },
+    },
+  },
+];
+
+function call(id: string, name: string, args: Record<string, unknown> | string): RawToolCall {
+  return {
+    id,
+    type: 'function',
+    function: { name, arguments: typeof args === 'string' ? args : JSON.stringify(args) },
+  };
+}
+
+function guard(
+  calls: RawToolCall[],
+  knownEventIds: ReadonlySet<string> = new Set(),
+  readOnlyTools: ReadonlySet<string> = new Set(),
+  sizeCutCalls: ReadonlySet<string> = new Set(),
+  callCountCut = false,
+) {
+  const message: RawAssistantMessage = { role: 'assistant', content: null, tool_calls: calls };
+  return guardModelReply({
+    message,
+    tools: TOOLS,
+    knownEventIds,
+    readOnlyTools,
+    sizeCutCalls,
+    callCountCut,
+    sandboxToolNames: { runCode: undefined, exec: undefined },
+  });
+}
+
+describe('guardModelReply', () => {
+  it('rewrites repaired arguments into the call that will be classified', () => {
+    const outcome = guard([call('a', 'web_fetch', { urls: ['https://example.com'], full_content: 'false', extra: 1 })]);
+    expect(outcome.invalidCalls.size).toBe(0);
+    const sent = outcome.message.tool_calls?.[0];
+    expect(JSON.parse(sent?.function.arguments ?? '{}')).toEqual({
+      urls: ['https://example.com'],
+      full_content: false,
+    });
+  });
+
+  it('flags a call whose arguments cannot be repaired, keyed by its id', () => {
+    const outcome = guard([call('a', 'web_fetch', { urls: ['https://example.com'], full_content: '[' })]);
+    expect(outcome.invalidCalls.get('a')).toContain(
+      'full_content must be true or false, for example "full_content": true, or leave it out',
+    );
+  });
+
+  it('drops an unusable optional true-or-false value from a read-only tool and lets the call through', () => {
+    const outcome = guard(
+      [call('a', 'web_fetch', { urls: ['https://example.com'], full_content: '> ' })],
+      new Set(),
+      new Set(['web_fetch']),
+    );
+    expect(outcome.invalidCalls.size).toBe(0);
+    expect(JSON.parse(outcome.message.tool_calls?.[0]?.function.arguments ?? '{}')).toEqual({
+      urls: ['https://example.com'],
+    });
+  });
+
+  it('treats arguments streamed as empty text as an empty object when the tool allows one', () => {
+    // A provider that streams no argument text sends the call with '' for its arguments; the
+    // executor reads that as {}, so the guard must not refuse it as incomplete.
+    const outcome = guard([call('a', 'list_events', '')]);
+    expect(outcome.invalidCalls.size).toBe(0);
+    expect(outcome.message.tool_calls).toHaveLength(1);
+    expect(outcome.tooManyCalls).toBe(false);
+  });
+
+  it('sends an empty-arguments call with a required field through the plain argument message instead', () => {
+    const outcome = guard([call('a', 'create_event', '')]);
+    const message = outcome.invalidCalls.get('a');
+    expect(message).toContain('title must be text');
+    expect(message).toContain('was not sent');
+    expect(message).not.toContain('not complete');
+  });
+
+  it('leaves calls to tools with no offered schema untouched', () => {
+    const outcome = guard([call('a', 'mystery_tool', { anything: '[' })]);
+    expect(outcome.invalidCalls.size).toBe(0);
+    expect(outcome.message.tool_calls).toHaveLength(1);
+  });
+
+  it('merges exact duplicates and keeps the first', () => {
+    const outcome = guard([
+      call('a', 'get_event', { event_id: 'evt-1' }),
+      call('b', 'get_event', { event_id: 'evt-1' }),
+      call('c', 'get_event', { event_id: 'evt-2' }),
+    ]);
+    expect(outcome.message.tool_calls?.map(entry => entry.id)).toEqual(['a', 'c']);
+    expect(outcome.tooManyCalls).toBe(false);
+  });
+
+  it('counts the cap after merging: 22 identical reads are one call, 21 different ones are too many', () => {
+    const flood = guard(
+      Array.from({ length: 22 }, (_, index) => call(`g${String(index)}`, 'get_event', { event_id: 'evt-1' })),
+    );
+    expect(flood.tooManyCalls).toBe(false);
+    expect(flood.message.tool_calls).toHaveLength(1);
+
+    const varied = guard(
+      Array.from({ length: MAX_TOOL_CALLS_PER_REPLY + 1 }, (_, index) =>
+        call(`g${String(index)}`, 'get_event', { event_id: `evt-${String(index)}` }),
+      ),
+    );
+    expect(varied.tooManyCalls).toBe(true);
+
+    const atCap = guard(
+      Array.from({ length: MAX_TOOL_CALLS_PER_REPLY }, (_, index) =>
+        call(`g${String(index)}`, 'get_event', { event_id: `evt-${String(index)}` }),
+      ),
+    );
+    expect(atCap.tooManyCalls).toBe(false);
+  });
+
+  it('treats a reply the stream stopped reading as too many, whatever its merged count', () => {
+    const cut = guard([call('a', 'get_event', { event_id: 'evt-1' })], new Set(), new Set(), new Set(), true);
+    expect(cut.tooManyCalls).toBe(true);
+    expect(cut.message.tool_calls).toHaveLength(1);
+  });
+
+  it('counts every call toward the cap, held ones included: exempting held calls in an unattended run is the runtime recount, not the guard', () => {
+    const batch = guard(
+      Array.from({ length: 22 }, (_, index) =>
+        call(`g${String(index)}`, 'get_event', { event_id: `evt-${String(index)}` }),
+      ),
+    );
+    expect(batch.tooManyCalls).toBe(true);
+    expect(batch.message.tool_calls).toHaveLength(22);
+  });
+
+  it('blocks a get_event for an uncreated event only when the same reply creates', () => {
+    const blocked = guard([
+      call('a', 'create_event', { title: 'Dentist' }),
+      call('b', 'get_event', { event_id: 'evt-new' }),
+    ]);
+    expect(blocked.invalidCalls.get('b')).toContain('has not been created yet');
+
+    const known = guard(
+      [call('a', 'create_event', { title: 'Dentist' }), call('b', 'get_event', { event_id: 'evt-new' })],
+      new Set(['evt-new']),
+    );
+    expect(known.invalidCalls.size).toBe(0);
+
+    const noCreate = guard([call('b', 'get_event', { event_id: 'evt-new' })]);
+    expect(noCreate.invalidCalls.size).toBe(0);
+  });
+
+  it('steers a truncated create_space to a small create first, never to resending the whole call', () => {
+    const outcome = guard([call('a', 'create_space', '{"name":"Dog breeds","body":"# Dog breeds\\n| Breed |')]);
+    const message = outcome.invalidCalls.get('a');
+    expect(message).toContain('The create_space call was stopped while it was still being written');
+    expect(message).toContain('the rest of the content never arrived');
+    expect(message).toContain('nothing was created');
+    expect(message).toContain('Do not send the same call again');
+    expect(message).toContain('Create the space with its name and only the first small part of the content');
+    expect(message).toContain('then add the rest with edit_space in follow-up calls');
+    expect(message).not.toContain('Send the content in smaller parts with edit_space');
+    expect(message).not.toContain('Send the whole call again');
+  });
+
+  it('steers a truncated edit_space to smaller parts too', () => {
+    const outcome = guard([
+      call('a', 'edit_space', '{"space_name":"Dog breeds","edits":[{"type":"search","search":"a","replace":"'),
+    ]);
+    const message = outcome.invalidCalls.get('a');
+    expect(message).toContain('The edit_space call was stopped while it was still being written');
+    expect(message).toContain('the rest of the content never arrived');
+    expect(message).toContain('nothing was written');
+    expect(message).toContain('Do not send the same call again');
+    expect(message).toContain('Send the content in smaller parts with edit_space');
+    expect(message).not.toContain('Send the whole call again');
+  });
+
+  it('gives a truncated create_space and a truncated edit_space different recovery text', () => {
+    const created = guard([call('a', 'create_space', '{"name":"Dog breeds","body":"# Dog breeds\\n| Breed |')]);
+    const edited = guard([
+      call('a', 'edit_space', '{"space_name":"Dog breeds","edits":[{"type":"search","search":"a","replace":"'),
+    ]);
+    // The tool names alone always differ; the recovery text itself has to differ too, so
+    // compare with both names blanked out.
+    const blankToolNames = (text: string | undefined): string =>
+      (text ?? '').replaceAll('create_space', 'TOOL').replaceAll('edit_space', 'TOOL');
+    expect(blankToolNames(created.invalidCalls.get('a'))).not.toBe(blankToolNames(edited.invalidCalls.get('a')));
+  });
+
+  it('keeps the resend-whole message for a truncated call to any other tool', () => {
+    const outcome = guard([call('a', 'web_fetch', '{"urls":["https://example.com')]);
+    const message = outcome.invalidCalls.get('a');
+    expect(message).toContain('nothing was done with it');
+    expect(message).toContain('Send the whole call again, with all of its arguments finished.');
+  });
+
+  it('flags a size-cut call with the smaller-parts message, even though its arguments never finished', () => {
+    const outcome = guard(
+      [call('a', 'create_event', '{"title":"A very long title that was still being writ')],
+      new Set(),
+      new Set(),
+      new Set(['a']),
+    );
+    expect(outcome.invalidCalls.get('a')).toBe(TOOL_CALL_SIZE_CUT_MESSAGE);
+    // The call stays in the reply so it resolves as never ran, with that reason.
+    expect(outcome.message.tool_calls).toHaveLength(1);
+  });
+
+  it('flags a size-cut call even when its arguments happen to parse', () => {
+    const outcome = guard([call('a', 'create_event', { title: 'Dentist' })], new Set(), new Set(), new Set(['a']));
+    expect(outcome.invalidCalls.get('a')).toBe(TOOL_CALL_SIZE_CUT_MESSAGE);
+  });
+
+  it('leaves the other calls in the same reply alone when one call was size-cut', () => {
+    const outcome = guard(
+      [call('a', 'create_event', '{"title":"half-written'), call('b', 'get_event', { event_id: 'evt-1' })],
+      new Set(['evt-1']),
+      new Set(),
+      new Set(['a']),
+    );
+    expect(outcome.invalidCalls.size).toBe(1);
+    expect(outcome.invalidCalls.has('b')).toBe(false);
+  });
+});
+
+describe('guardModelReply with a shell command sent to run_code', () => {
+  const RUN_CODE_TOOLS: ChatCompletionTool[] = [
+    {
+      type: 'function',
+      function: {
+        name: 'run_code',
+        parameters: {
+          type: 'object',
+          properties: { language: { type: 'string', enum: ['python', 'node'] }, code: { type: 'string' } },
+          required: ['language'],
+        },
+      },
+    },
+  ];
+  const clone = 'git clone --branch main https://github.com/ClimbOutLabs/exitramp.git exitramp';
+
+  function guardRunCode(calls: RawToolCall[], exec: string | undefined) {
+    return guardModelReply({
+      message: { role: 'assistant', content: null, tool_calls: calls },
+      tools: RUN_CODE_TOOLS,
+      knownEventIds: new Set(),
+      readOnlyTools: new Set(),
+      sizeCutCalls: new Set(),
+      callCountCut: false,
+      sandboxToolNames: { runCode: 'run_code', exec },
+    });
+  }
+
+  it.each(['bash', 'sh', 'shell', 'zsh', 'Bash'])('points language %s at the shell tool', language => {
+    const outcome = guardRunCode([call('a', 'run_code', { language, code: clone })], 'exec');
+    const message = outcome.invalidCalls.get('a');
+    expect(message).toBe(shellCommandInRunCodeMessage({ runCodeToolName: 'run_code', execToolName: 'exec' }));
+    expect(message).toContain('Call the exec tool instead');
+    expect(message).not.toContain('some of its arguments were wrong');
+    expect(outcome.flaggedCalls).toEqual([
+      { callId: 'a', toolName: 'run_code', argumentKeys: ['language', 'code'], reason: 'shell_command_in_run_code' },
+    ]);
+  });
+
+  it('points a shell command under an unknown language at the shell tool', () => {
+    const outcome = guardRunCode([call('a', 'run_code', { language: 'git', code: clone })], 'exec');
+    expect(outcome.flaggedCalls[0]?.reason).toBe('shell_command_in_run_code');
+  });
+
+  it('says there is no shell tool when this chat has none', () => {
+    const outcome = guardRunCode([call('a', 'run_code', { language: 'bash', code: clone })], undefined);
+    expect(outcome.invalidCalls.get('a')).toContain('There is no shell tool in this chat');
+  });
+
+  it('keeps the usual argument message for a wrong call that is not a shell command', () => {
+    const outcome = guardRunCode([call('a', 'run_code', { language: 'ruby', code: 'puts 1' })], 'exec');
+    expect(outcome.invalidCalls.get('a')).toContain('some of its arguments were wrong');
+    expect(outcome.flaggedCalls[0]?.reason).toBe('wrong_arguments');
+  });
+
+  it('lets a valid run_code call through', () => {
+    const outcome = guardRunCode([call('a', 'run_code', { language: 'python', code: 'print(1)' })], 'exec');
+    expect(outcome.invalidCalls.size).toBe(0);
+    expect(outcome.flaggedCalls).toEqual([]);
+  });
+});
+
+describe('guardModelReply flagged calls', () => {
+  it('records each stopped call with its keys and reason, never its values', () => {
+    const outcome = guard(
+      [call('a', 'create_event', '{"title":"half'), call('b', 'web_fetch', { urls: 'https://secret.example' })],
+      new Set(),
+      new Set(),
+      new Set(['a']),
+    );
+    expect(outcome.flaggedCalls).toEqual([
+      { callId: 'a', toolName: 'create_event', argumentKeys: [], reason: 'size_cut' },
+      { callId: 'b', toolName: 'web_fetch', argumentKeys: ['urls'], reason: 'wrong_arguments' },
+    ]);
+    expect(JSON.stringify(outcome.flaggedCalls)).not.toContain('secret.example');
+  });
+});
+
+describe('collectKnownEventIds', () => {
+  it('finds ids in tool results, earlier calls and pasted text', () => {
+    const context: ContextMessage[] = [
+      { role: 'user', content: 'Context: {"id": "evt-pasted"}' },
+      {
+        role: 'assistant',
+        content: null,
+        tool_calls: [
+          {
+            id: 'c1',
+            type: 'function',
+            function: { name: 'get_event', arguments: '{"event_id":"evt-read"}' },
+            tool_info: {
+              type: 'mcp',
+              mcp_server_id: 's',
+              mcp_server_name: 's',
+              original_tool_name: 'get_event',
+              is_approval_required: false,
+            },
+          },
+        ],
+      },
+      { role: 'tool', tool_call_id: 'c1', content: '{"event":{"id":"evt-1","title":"Dentist"}}' },
+    ];
+    expect(collectKnownEventIds(context)).toEqual(new Set(['evt-pasted', 'evt-read', 'evt-1']));
+  });
+});

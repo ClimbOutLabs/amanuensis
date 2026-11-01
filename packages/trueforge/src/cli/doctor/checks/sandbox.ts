@@ -73,7 +73,7 @@ const ATTACHMENT_PROBLEMS = {
   sandbox_unavailable: 'The sandbox is not running, so attachments cannot be read.',
   file_not_sent: 'A test file could not be sent into the sandbox.',
   file_changed: 'A test file came back from the sandbox changed.',
-  tools_missing: 'This sandbox cannot read PDFs, Word documents and images yet.',
+  tools_missing: 'This sandbox cannot read PDFs, office documents and images yet.',
 } as const;
 
 /** Reading PDFs, images and email attachments: a file sent into the sandbox comes back and the sandbox has what it needs to read it. */
@@ -103,7 +103,7 @@ export async function checkAttachments({ deps, timeoutMs }: { deps: DoctorDeps; 
     if (probe.state === 'ready') {
       return okCheck({
         id,
-        detail: 'Reading attachments is ready: PDFs, Word documents, images and email attachments can be read.',
+        detail: 'Reading attachments is ready: PDFs, office documents, images and email attachments can be read.',
       });
     }
     if (probe.state === 'busy') {

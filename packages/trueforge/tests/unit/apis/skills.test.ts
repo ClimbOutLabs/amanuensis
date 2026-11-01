@@ -60,7 +60,7 @@ describe('skills routers', () => {
     });
     catalogRouter = createCatalogRouter({
       modelCatalog: ModelCatalog.load(),
-      mcpCatalog: McpCatalog.load(),
+      mcpCatalog: McpCatalog.loadShipped(),
       skillCatalog: SkillCatalog.load(),
       sandboxCatalog: SandboxCatalog.load(),
     });
@@ -136,6 +136,7 @@ describe('skills routers', () => {
             repository_name: 'team-a',
             version: 3,
           },
+          network_approval: null,
           created_at: now,
           updated_at: now,
         },
@@ -146,6 +147,7 @@ describe('skills routers', () => {
       validateAgentSkills: jest.fn(),
       deleteSkill: jest.fn(),
       resolveTurnSkills: jest.fn(),
+      setSkillNetworkApproval: jest.fn(),
     };
     const router = createAvailableSkillsRouter({
       resolveSkillStore: () => skillStore,
@@ -183,6 +185,7 @@ describe('skills routers', () => {
       tenant_id: 'default',
       name: 'agent-skill:acme/team-a/echo:3' as const,
       manifest: registryManifest,
+      network_approval: null,
       created_at: now,
       updated_at: now,
     };
@@ -194,6 +197,7 @@ describe('skills routers', () => {
       validateAgentSkills: jest.fn(),
       deleteSkill: jest.fn(),
       resolveTurnSkills: jest.fn(),
+      setSkillNetworkApproval: jest.fn(),
     };
     const router = createSkillsRouter({
       resolveSkillStore: () => managedStore,
@@ -234,6 +238,7 @@ describe('skills routers', () => {
       validateAgentSkills: jest.fn(),
       deleteSkill: jest.fn(),
       resolveTurnSkills: jest.fn(),
+      setSkillNetworkApproval: jest.fn(),
     };
     const router = createSkillsRouter({
       resolveSkillStore: () => managedStore,
@@ -288,6 +293,103 @@ describe('skills routers', () => {
     expect(response.status).toBe(404);
     expect(await response.json()).toEqual({
       error: { message: 'No skill with this name: does-not-exist' },
+    });
+  });
+
+  describe('network approval', () => {
+    const tenX = {
+      type: 'git' as const,
+      name: 'ten-x',
+      url: 'https://github.com/example/ten-x',
+      ref: 'main',
+      description: 'Works with GitHub from the sandbox.',
+      network_hosts: ['github.com', 'api.github.com'],
+    };
+
+    beforeAll(async () => {
+      const created = await settingsRouter.request('/', putInit(wrapManifest(tenX)));
+      expect(created.status).toBe(200);
+    });
+
+    it('GET shows the declared sites, no approval yet, and no send line for GitHub', async () => {
+      const response = await settingsRouter.request('/ten-x/network-approval');
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({
+        data: { declared_hosts: ['github.com', 'api.github.com'], approved_hosts: null, send_capable: false },
+      });
+    });
+
+    it('PUT stores the approval for exactly the declared list', async () => {
+      const response = await settingsRouter.request(
+        '/ten-x/network-approval',
+        putInit({ hosts: ['api.github.com', 'github.com'] }),
+      );
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({
+        data: {
+          declared_hosts: ['github.com', 'api.github.com'],
+          approved_hosts: ['github.com', 'api.github.com'],
+          send_capable: false,
+        },
+      });
+      const state = await settingsRouter.request('/ten-x/network-approval');
+      expect(await state.json()).toEqual({
+        data: {
+          declared_hosts: ['github.com', 'api.github.com'],
+          approved_hosts: ['github.com', 'api.github.com'],
+          send_capable: false,
+        },
+      });
+    });
+
+    it('PUT refuses a list that is not the declared list, with the next step in plain words', async () => {
+      const response = await settingsRouter.request('/ten-x/network-approval', putInit({ hosts: ['github.com'] }));
+      expect(response.status).toBe(422);
+      const body = (await response.json()) as { error: { message: string } };
+      expect(body.error.message).toContain('The list of sites changed since this page was loaded');
+    });
+
+    it('DELETE takes the approval back', async () => {
+      const removed = await settingsRouter.request('/ten-x/network-approval', { method: 'DELETE' });
+      expect(removed.status).toBe(200);
+      const state = await settingsRouter.request('/ten-x/network-approval');
+      expect(await state.json()).toEqual({
+        data: { declared_hosts: ['github.com', 'api.github.com'], approved_hosts: null, send_capable: false },
+      });
+    });
+
+    it('a skill that declares no sites reports an empty list and never a send line', async () => {
+      const response = await settingsRouter.request('/algorithmic-art/network-approval');
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({
+        data: { declared_hosts: [], approved_hosts: null, send_capable: false },
+      });
+    });
+
+    it('a mail skill is flagged send-capable so Settings can name the sending', async () => {
+      const mailSkill = {
+        type: 'git' as const,
+        name: 'mail-reader',
+        url: 'https://github.com/example/mail-reader',
+        ref: 'main',
+        description: 'Reads mail.',
+        network_hosts: ['gmail.googleapis.com'],
+      };
+      const created = await settingsRouter.request('/', putInit(wrapManifest(mailSkill)));
+      expect(created.status).toBe(200);
+      const response = await settingsRouter.request('/mail-reader/network-approval');
+      expect(await response.json()).toEqual({
+        data: { declared_hosts: ['gmail.googleapis.com'], approved_hosts: null, send_capable: true },
+      });
+    });
+
+    it('all three routes 404 for an unknown skill name', async () => {
+      const get = await settingsRouter.request('/nope/network-approval');
+      expect(get.status).toBe(404);
+      const put = await settingsRouter.request('/nope/network-approval', putInit({ hosts: [] }));
+      expect(put.status).toBe(404);
+      const del = await settingsRouter.request('/nope/network-approval', { method: 'DELETE' });
+      expect(del.status).toBe(404);
     });
   });
 });

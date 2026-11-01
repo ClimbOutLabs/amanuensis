@@ -3,6 +3,8 @@ import { ThreadPrimitive, type ThreadMessageLike } from '@assistant-ui/react';
 import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { changeRequestReason } from '@truefoundry/trueforge-core/core/permissions/changeRequest';
+
 import { AssistantMessageContainer } from '@/containers/AssistantMessageContainer.js';
 import { clearSentinelEventSubscribers, publishSentinelEvent } from '@/sentinel/sentinelEvents.js';
 import { SentinelStateProvider } from '@/sentinel/SentinelStateProvider.js';
@@ -37,6 +39,9 @@ function card(plain_what: string): SentinelApprovalCard {
     destination_host: null,
     outbound_truncated: false,
     email: null,
+    calendar_event: null,
+    schedule: null,
+    persona: null,
   };
 }
 
@@ -49,16 +54,19 @@ const ALLOW_ONCE_THEN_DENY: ApprovalOptions = [
   { id: 'deny', kind: 'reject-once', confirm: {} },
 ];
 
+type ToolCallArgs = Extract<Exclude<ThreadMessageLike['content'], string>[number], { type: 'tool-call' }>['args'];
+
 function pendingCall(
   id: string,
   toolName: string,
   options: ApprovalOptions = ALLOW_ONCE_THEN_DENY,
+  args: ToolCallArgs = {},
 ): Exclude<ThreadMessageLike['content'], string>[number] {
   return {
     type: 'tool-call',
     toolCallId: id,
     toolName,
-    args: {},
+    args,
     interrupt: { type: 'human', payload: {} },
     approval: {
       id,
@@ -77,11 +85,21 @@ type PendingCall = {
   thread?: string;
   /** Approval options the server declared; defaults to allow-once then deny. */
   options?: ApprovalOptions;
+  /** What the server said about chat scope; absent from older servers. */
+  chatAllowOffered?: boolean;
+  /** What the server said about a standing "Always allow this tool"; absent when it did not say. */
+  alwaysAllowOffered?: boolean;
+  /** Tool name; defaults to a generic name per call. */
+  toolName?: string;
+  /** Arguments the call carries; defaults to none. */
+  args?: ToolCallArgs;
+  /** Card the server sent; defaults to a plain "Do <id>" card. */
+  card?: SentinelApprovalCard;
 };
 
 /** Renders pending calls with the given tiers; the runtime reports each as awaiting approval. */
 function renderPending(calls: PendingCall[], onRespondToToolApproval = vi.fn()) {
-  const content = calls.map(call => pendingCall(call.id, `tool_${call.id}`, call.options));
+  const content = calls.map(call => pendingCall(call.id, call.toolName ?? `tool_${call.id}`, call.options, call.args));
   pendingApprovals.current = calls.map(call => ({ approvalId: call.id, threadId: call.thread ?? 'main' }));
   const message: ThreadMessageLike = {
     role: 'assistant',
@@ -100,9 +118,11 @@ function renderPending(calls: PendingCall[], onRespondToToolApproval = vi.fn()) 
       publishSentinelEvent({
         toolCallId: call.id,
         tier: call.tier,
-        card: card(`Do ${call.id}`),
+        card: call.card ?? card(`Do ${call.id}`),
         eventId: call.event ?? 'evt-1',
         threadId: call.thread ?? 'main',
+        ...(call.chatAllowOffered === undefined ? {} : { chatAllowOffered: call.chatAllowOffered }),
+        ...(call.alwaysAllowOffered === undefined ? {} : { alwaysAllowOffered: call.alwaysAllowOffered }),
       });
     }
   });
@@ -127,14 +147,14 @@ describe('ToolCallContainer Sentinel approvals', () => {
   it('renders the plain-language card for a Tier 2 approval', () => {
     renderPending([{ id: 'a', tier: 2 }]);
     expect(screen.getByText('Do a')).toBeInTheDocument();
-    expect(screen.getByText('Needs your OK')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Approve' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Allow' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Not now' })).toBeInTheDocument();
   });
 
   it('approves a single Tier 2 call through the part, without a batch button', () => {
     const { onRespondToToolApproval } = renderPending([{ id: 'a', tier: 2 }]);
     expect(screen.queryByRole('button', { name: /Approve all/ })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Approve' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Allow' }));
     expect(onRespondToToolApproval).toHaveBeenCalledWith(expect.objectContaining({ approvalId: 'a', approved: true }));
   });
 
@@ -154,7 +174,7 @@ describe('ToolCallContainer Sentinel approvals', () => {
 
   it('Approve all sends allow-once for each call even when allow-chat is declared first', () => {
     const chatFirst: ApprovalOptions = [
-      { id: 'allow-chat', kind: 'allow-always', label: 'Approve for this chat' },
+      { id: 'allow-chat', kind: 'allow-always', label: 'Always allow this here' },
       { id: 'allow-once', kind: 'allow-once' },
       { id: 'deny', kind: 'reject-once', confirm: {} },
     ];
@@ -191,7 +211,7 @@ describe('ToolCallContainer Sentinel approvals', () => {
       { id: 'b', tier: 2 },
       { id: 'danger', tier: 3 },
     ]);
-    const tier3Card = screen.getByText('Do danger').closest('div.rounded-lg');
+    const tier3Card = screen.getByText('Do danger').closest('article');
     expect(tier3Card).not.toBeNull();
     if (tier3Card instanceof HTMLElement) {
       expect(within(tier3Card).queryByRole('button', { name: /Approve all/ })).not.toBeInTheDocument();
@@ -213,7 +233,7 @@ describe('ToolCallContainer Sentinel approvals', () => {
       { id: 'a', tier: 2 },
       { id: 'b', tier: 2 },
     ]);
-    fireEvent.click(firstButton('Deny'));
+    fireEvent.click(firstButton('Not now'));
     expect(onRespondToToolApproval).toHaveBeenCalledWith(expect.objectContaining({ approvalId: 'a', approved: false }));
     expect(respondToApproval).not.toHaveBeenCalled();
   });
@@ -256,13 +276,13 @@ describe('ToolCallContainer Sentinel approvals', () => {
           id: 'a',
           tier,
           options: [
-            { id: 'allow-chat', kind: 'allow-always', label: 'Approve for this chat' },
+            { id: 'allow-chat', kind: 'allow-always', label: 'Always allow this here' },
             { id: 'allow-once', kind: 'allow-once' },
             { id: 'deny', kind: 'reject-once', confirm: {} },
           ],
         },
       ]);
-      fireEvent.click(screen.getByRole('button', { name: 'Approve' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Allow' }));
       expect(onRespondToToolApproval).toHaveBeenCalledWith(
         expect.objectContaining({ approvalId: 'a', approved: true, optionId: 'allow-once' }),
       );
@@ -282,10 +302,216 @@ describe('ToolCallContainer Sentinel approvals', () => {
         ],
       },
     ]);
-    fireEvent.click(screen.getByRole('button', { name: 'Approve' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Allow' }));
     const [response] = onRespondToToolApproval.mock.calls[0] ?? [];
     expect(response).toMatchObject({ approvalId: 'a', approved: true });
     expect(response).not.toHaveProperty('optionId');
     expect(respondToApproval).not.toHaveBeenCalled();
+  });
+  describe('Always allow this here', () => {
+    const declaredChat: ApprovalOptions = [
+      { id: 'allow-once', kind: 'allow-once' },
+      { id: 'allow-chat', kind: 'allow-always' },
+      { id: 'deny', kind: 'reject-once', confirm: {} },
+    ];
+
+    it('is hidden when the server refuses chat scope, even if the option is declared', () => {
+      renderPending([{ id: 'a', tier: 3, options: declaredChat, chatAllowOffered: false }]);
+      expect(screen.queryByRole('button', { name: 'Always allow this here' })).not.toBeInTheDocument();
+    });
+
+    it('is shown when the server offers it', () => {
+      renderPending([{ id: 'a', tier: 3, options: declaredChat, chatAllowOffered: true }]);
+      expect(screen.getByRole('button', { name: 'Always allow this here' })).toBeInTheDocument();
+    });
+
+    it('follows the declared options when an older server says nothing', () => {
+      renderPending([{ id: 'a', tier: 3, options: declaredChat }]);
+      expect(screen.getByRole('button', { name: 'Always allow this here' })).toBeInTheDocument();
+    });
+  });
+});
+
+describe('ToolCallContainer always allow this tool', () => {
+  const ALWAYS_ALLOW_TOOL = 'Always allow this tool';
+
+  it('offers Always allow this tool only on a card the server says may be always allowed', () => {
+    renderPending([{ id: 'read', tier: 3, alwaysAllowOffered: true }]);
+    expect(screen.getByRole('button', { name: ALWAYS_ALLOW_TOOL })).toBeInTheDocument();
+  });
+
+  it('never offers it when the server did not say so, or said no', () => {
+    renderPending([
+      { id: 'send', tier: 3 },
+      { id: 'write', tier: 3, alwaysAllowOffered: false },
+    ]);
+    expect(screen.queryByRole('button', { name: ALWAYS_ALLOW_TOOL })).not.toBeInTheDocument();
+  });
+
+  it('asks for confirmation, and records nothing when the owner cancels', () => {
+    renderPending([{ id: 'read', tier: 3, alwaysAllowOffered: true }]);
+    fireEvent.click(screen.getByRole('button', { name: ALWAYS_ALLOW_TOOL }));
+    expect(screen.getByRole('heading', { name: 'Always allow this tool?' })).toBeInTheDocument();
+    expect(respondToApproval).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByTestId('always-allow-cancel'));
+    expect(respondToApproval).not.toHaveBeenCalled();
+  });
+
+  it('approves the call with the standing option once the owner confirms', () => {
+    renderPending([{ id: 'read', tier: 3, alwaysAllowOffered: true }]);
+    fireEvent.click(screen.getByRole('button', { name: ALWAYS_ALLOW_TOOL }));
+    fireEvent.click(screen.getByTestId('always-allow-confirm'));
+    expect(respondToApproval.mock.calls).toEqual([
+      [{ approvalId: 'read', approved: true, optionId: 'allow-standing' }],
+    ]);
+  });
+});
+
+describe('ToolCallContainer "Change it"', () => {
+  const REASON = changeRequestReason('make it shorter');
+
+  function renderMessage(message: ThreadMessageLike) {
+    render(
+      <RuntimeHarness messages={[message]}>
+        <SentinelStateProvider>
+          <ThreadPrimitive.Messages>{() => <AssistantMessageContainer />}</ThreadPrimitive.Messages>
+        </SentinelStateProvider>
+      </RuntimeHarness>,
+    );
+  }
+
+  it('shows the words the person typed as their own user message after the change request', () => {
+    renderMessage({
+      role: 'assistant',
+      content: [
+        {
+          type: 'tool-call',
+          toolCallId: 'call-mail',
+          toolName: 'send_email',
+          args: {},
+          approval: { id: 'call-mail', approved: false, reason: REASON },
+          result: { error: REASON },
+          isError: true,
+        },
+      ],
+      status: { type: 'complete', reason: 'stop' },
+    });
+
+    expect(screen.getByText('make it shorter')).toHaveAttribute('data-slot', 'aui_user-message-content');
+  });
+
+  it('shows no user message for an ordinary denial', () => {
+    renderMessage({
+      role: 'assistant',
+      content: [
+        {
+          type: 'tool-call',
+          toolCallId: 'call-mail',
+          toolName: 'send_email',
+          args: {},
+          approval: { id: 'call-mail', approved: false, reason: 'not now' },
+          result: { error: 'not now' },
+          isError: true,
+        },
+      ],
+      status: { type: 'complete', reason: 'stop' },
+    });
+
+    expect(document.querySelector('[data-slot="aui_user-message-content"]')).toBeNull();
+  });
+
+  describe('add a persona card', () => {
+    const personaCard: SentinelApprovalCard = {
+      ...card('Add a persona: Tutor? Helps with maths.'),
+      persona: { name: 'Tutor', description: 'Helps with maths.', instructions: 'Be patient.', model_name: 'model-a' },
+    };
+
+    function renderPersonaApproval(onRespondToToolApproval = vi.fn()) {
+      pendingApprovals.current = [{ approvalId: 'persona-1', threadId: 'main' }];
+      const message: ThreadMessageLike = {
+        role: 'assistant',
+        content: [pendingCall('persona-1', 'create_persona')],
+        status: { type: 'requires-action', reason: 'tool-calls' },
+      };
+      render(
+        <RuntimeHarness messages={[message]} onRespondToToolApproval={onRespondToToolApproval}>
+          <SentinelStateProvider>
+            <ThreadPrimitive.Messages>{() => <AssistantMessageContainer />}</ThreadPrimitive.Messages>
+          </SentinelStateProvider>
+        </RuntimeHarness>,
+      );
+      act(() => {
+        publishSentinelEvent({
+          toolCallId: 'persona-1',
+          tier: 3,
+          card: personaCard,
+          eventId: 'evt-persona',
+          threadId: 'main',
+        });
+      });
+      return { onRespondToToolApproval };
+    }
+
+    it('offers Change it between the safe verb and the quiet no', () => {
+      renderPersonaApproval();
+      const labels = screen
+        .getAllByRole('button')
+        .map(button => button.textContent)
+        .filter(text => text === 'Allow' || text === 'Change it' || text === 'Not now');
+      expect(labels).toEqual(['Allow', 'Change it', 'Not now']);
+    });
+
+    it('sends the words as the reason, declines the call, and never grants it', () => {
+      const { onRespondToToolApproval } = renderPersonaApproval();
+      fireEvent.click(screen.getByRole('button', { name: 'Change it' }));
+      fireEvent.change(screen.getByRole('textbox', { name: 'What should change?' }), {
+        target: { value: 'make it shorter' },
+      });
+      fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+
+      expect(onRespondToToolApproval).toHaveBeenCalledTimes(1);
+      expect(onRespondToToolApproval).toHaveBeenCalledWith(
+        expect.objectContaining({ approvalId: 'persona-1', approved: false, reason: REASON }),
+      );
+      expect(respondToApproval).not.toHaveBeenCalled();
+    });
+  });
+});
+
+describe('ToolCallContainer sandbox approval', () => {
+  it('shows the command once, on the card, with one status line and no running line', () => {
+    const command = 'git clone https://github.com/example/exitramp.git';
+    renderPending([
+      {
+        id: 'exec-1',
+        tier: 3,
+        toolName: 'exec',
+        args: { command },
+        card: {
+          plain_what: 'Run this command?',
+          plain_why: null,
+          cannot_be_undone: 'Commands can change or delete files.',
+          why_asked_again: null,
+          destination: null,
+          recipient: null,
+          amount: null,
+          parsed_command: command,
+          outbound_text: null,
+          destination_host: null,
+          outbound_truncated: false,
+          email: null,
+          calendar_event: null,
+          schedule: null,
+          persona: null,
+        },
+      },
+    ]);
+    expect(screen.getByRole('heading', { name: 'Run this command?' })).toBeInTheDocument();
+    expect(screen.getAllByText(command)).toHaveLength(1);
+    expect(screen.queryByText('Execution details')).not.toBeInTheDocument();
+    expect(screen.queryByText(/Running/)).not.toBeInTheDocument();
+    expect(screen.queryByText('Awaiting Response…')).not.toBeInTheDocument();
+    expect(screen.getAllByText('Waiting for you')).toHaveLength(1);
   });
 });

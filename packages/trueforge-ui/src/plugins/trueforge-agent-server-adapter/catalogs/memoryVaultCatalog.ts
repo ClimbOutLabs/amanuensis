@@ -4,17 +4,25 @@ import { getErrorMessage } from '../../../utils/getErrorMessage.js';
 import type { CreateTrueForgeClientOptions } from '../client.js';
 
 /** One memory fact as the vault presents it. */
-export interface MemoryVaultEntry {
-  id: string;
-  text: string;
-  timestamp: string;
-  persona: string | null;
-}
+const MemoryVaultEntrySchema = z.object({
+  id: z.string(),
+  text: z.string(),
+  timestamp: z.string(),
+  persona: z.string().nullable(),
+});
 
 /** Per-persona sharing config: which vault namespaces each persona may read. */
-export interface MemoryVaultSharing {
-  shares: Record<string, string[]>;
-}
+const MemoryVaultSharingSchema = z.object({
+  shares: z.record(z.string(), z.array(z.string())),
+});
+
+export type MemoryVaultEntry = z.infer<typeof MemoryVaultEntrySchema>;
+export type MemoryVaultSharing = z.infer<typeof MemoryVaultSharingSchema>;
+
+/** Whether a vault is still owed a turn summary after a failed attempt. */
+export type MemoryVaultSummaryStatus = {
+  summaryPending: boolean;
+};
 
 /** Wire namespace of a persona's own vault. */
 export function personaVaultNamespace(displayName: string): string {
@@ -23,6 +31,7 @@ export function personaVaultNamespace(displayName: string): string {
 
 export interface MemoryVaultCatalog {
   listEntries(namespace?: string): Promise<MemoryVaultEntry[]>;
+  getSummaryStatus(namespace?: string): Promise<MemoryVaultSummaryStatus>;
   updateEntry(options: { entryId: string; text: string }): Promise<MemoryVaultEntry>;
   deleteEntry(entryId: string): Promise<void>;
   exportEntries(namespace?: string): Promise<{ namespace: string; exportedAt: string; entries: MemoryVaultEntry[] }>;
@@ -33,17 +42,6 @@ export interface MemoryVaultCatalog {
   getSharing(): Promise<MemoryVaultSharing>;
   updateSharing(sharing: MemoryVaultSharing): Promise<MemoryVaultSharing>;
 }
-
-const MemoryVaultEntrySchema = z.object({
-  id: z.string(),
-  text: z.string(),
-  timestamp: z.string(),
-  persona: z.string().nullable(),
-});
-
-const MemoryVaultSharingSchema = z.object({
-  shares: z.record(z.string(), z.array(z.string())),
-});
 
 const ErrorSchema = z.object({ error: z.object({ message: z.string() }) });
 
@@ -114,6 +112,22 @@ export function createMemoryVaultCatalog(options: CreateTrueForgeClientOptions =
   return {
     listEntries: namespace =>
       request('GET', `/api/v1/memory/vault${namespaceQuery(namespace)}`, undefined, parseEntries),
+    getSummaryStatus: async namespace => {
+      const parsed = z
+        .object({ data: z.object({ summary_pending: z.boolean() }) })
+        .safeParse(
+          await request(
+            'GET',
+            `/api/v1/memory/vault/summary-status${namespaceQuery(namespace)}`,
+            undefined,
+            value => value,
+          ),
+        );
+      if (!parsed.success) {
+        throw new Error('The server returned an unexpected memory payload');
+      }
+      return { summaryPending: parsed.data.data.summary_pending };
+    },
     updateEntry: ({ entryId, text }) =>
       request('PUT', `/api/v1/memory/vault/${encodeURIComponent(entryId)}`, { text }, parseEntry),
     deleteEntry: entryId =>

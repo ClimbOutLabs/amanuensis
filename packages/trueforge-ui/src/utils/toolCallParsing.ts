@@ -1,20 +1,22 @@
 import type { ToolApprovalOption as AuiToolApprovalOption, ToolCallMessagePartProps } from '@assistant-ui/react';
+import { APPROVAL_EXPIRED_REASON_CODE } from '@truefoundry/trueforge-core/core/permissions/approvalExpiry';
+import { escapeDisplayText } from '@truefoundry/trueforge-core/core/permissions/displayText';
+import {
+  DEFAULT_MAPS_TRAVEL_MODE,
+  MapsRouteResultSchema,
+} from '@truefoundry/trueforge-core/core/permissions/mapsRouteSchemas';
+import {
+  SPACE_WRITE_TOO_LONG_ERROR_CODE,
+  SPACE_WRITE_TOO_LONG_NOTE,
+} from '@truefoundry/trueforge-core/core/spaces/toolContract';
 import { parse as parsePartialJson } from 'partial-json';
 
 import type { ToolCallStatus } from '../atoms/ToolCallCard.js';
-import type { MapCardData, MapPin } from '../components/MapCard.js';
-import { APPROVAL_CHOICES } from '../sentinel/approvalChoices.js';
+import type { MapCardData, MapPin, MapPlace, MapRefusedPlace } from '../components/MapCard.js';
 
 export type ApprovalOptionView = {
   id: string;
-  label: string;
   isAllow: boolean;
-  hint?: string;
-  grants?: readonly string[];
-  confirm?: {
-    title?: string;
-    description?: string;
-  };
 };
 
 export type ToolDispositionView = {
@@ -48,11 +50,8 @@ export const SANDBOX_TOOL_NAMES = new Set([
 /** MCP meta-tools that wrap actual tool calls. */
 export const MCP_META_TOOLS = new Set(['call_tool', 'list_tools', 'get_tool_info']);
 
-const APPROVAL_OPTION_CHOICES: Record<string, { label: string; hint: string }> = {
-  'allow-once': APPROVAL_CHOICES.approve,
-  'allow-always': APPROVAL_CHOICES.approveForChat,
-  'reject-once': APPROVAL_CHOICES.deny,
-};
+/** The option kinds an approval card can answer with. */
+const APPROVAL_OPTION_KINDS: ReadonlySet<string> = new Set(['allow-once', 'allow-always', 'reject-once']);
 
 const isAllowKind = (kind: string) => kind === 'allow-once' || kind === 'allow-always';
 
@@ -97,6 +96,95 @@ function parseToolResultEnvelope(content: unknown): Record<string, unknown> | un
   return parsed;
 }
 
+/**
+ * The plain line the host wrote for the owner when it refused a call it could not show in full, or
+ * undefined for any other result. Only a policy block that asks to contact the user qualifies.
+ */
+export function parseToolRefusalNotice(content: unknown): string | undefined {
+  const outcome = parseToolResultEnvelope(content)?.outcome;
+  if (!isUnknownRecord(outcome) || !isUnknownRecord(outcome.remediation)) {
+    return undefined;
+  }
+  // A call refused before it started (the reply guard, the search budget) carries the same plain line as a policy block.
+  const refusedBeforeStart =
+    outcome.disposition === 'never_ran' && outcome.remediation.reason_code === 'tool_pre_dispatch_failed';
+  if (outcome.disposition !== 'policy_blocked' && !refusedBeforeStart) {
+    return undefined;
+  }
+  const { suggested_action: action, message } = outcome.remediation;
+  return action === 'contact_user' && typeof message === 'string' ? message : undefined;
+}
+
+/** True for a call whose request for the person's OK expired unanswered: not their "no". */
+function isExpiredApprovalResult(content: unknown): boolean {
+  const outcome = parseToolResultEnvelope(content)?.outcome;
+  return (
+    isUnknownRecord(outcome) &&
+    outcome.disposition === 'denied' &&
+    isUnknownRecord(outcome.remediation) &&
+    outcome.remediation.reason_code === APPROVAL_EXPIRED_REASON_CODE
+  );
+}
+
+const EMAIL_SEND_TOOL_NAMES = new Set(['send_draft', 'send_email']);
+
+const DECLINED_REASON = 'you said no';
+
+/**
+ * The short plain reason a call did not run (refused, denied, or never started), or undefined when it ran.
+ * Refused calls must never read as finished, so every step label is built from this.
+ */
+export function parseToolNotDoneReason(content: unknown): string | undefined {
+  const disposition = parseToolResultDisposition(content);
+  switch (disposition?.disposition) {
+    case 'denied':
+      return isExpiredApprovalResult(content) ? 'nobody answered in time' : DECLINED_REASON;
+    case 'policy_blocked':
+      return parseToolRefusalNotice(content) ?? disposition.remediation ?? 'a safety rule blocked it';
+    case 'never_ran':
+      return parseToolRefusalNotice(content) ?? 'it never started';
+    default:
+      return undefined;
+  }
+}
+
+/** A call's result and its card answer. A "no" on the card fills the result locally with no envelope. */
+type ToolCallOutcomeSource = { result?: unknown; approval?: { approved?: boolean | undefined } | undefined };
+
+/** How a denied call shows, whether the result says so or the person said no on the card. */
+function deniedView({
+  expired,
+  remediation,
+}: {
+  expired: boolean;
+  remediation: string | undefined;
+}): ToolDispositionView {
+  return {
+    disposition: 'denied',
+    label: expired ? 'Expired' : 'Denied',
+    tone: 'muted',
+    ...(remediation ? { remediation } : {}),
+  };
+}
+
+/** The disposition a call shows, counting a "no" on its card before the server's result arrives. */
+export function toolCallDisposition(part: ToolCallOutcomeSource): ToolDispositionView | undefined {
+  return (
+    parseToolResultDisposition(part.result) ??
+    (part.approval?.approved === false ? deniedView({ expired: false, remediation: undefined }) : undefined)
+  );
+}
+
+/** The plain reason a call did not run, counting a "no" on its card, or undefined when it ran. */
+export function toolCallNotDoneReason(part: ToolCallOutcomeSource): string | undefined {
+  return parseToolNotDoneReason(part.result) ?? (part.approval?.approved === false ? DECLINED_REASON : undefined);
+}
+
+/** Step wording for a call that did not run: email sends say "Not sent", everything else "Not done". */
+export function notDoneText({ toolName, reason }: { toolName: string; reason: string }): string {
+  return `${EMAIL_SEND_TOOL_NAMES.has(toolName) ? 'Not sent' : 'Not done'}: ${reason}`;
+}
+
 export function parseToolResultDisposition(content: unknown): ToolDispositionView | undefined {
   const envelope = parseToolResultEnvelope(content);
   const outcome = envelope?.outcome;
@@ -107,12 +195,7 @@ export function parseToolResultDisposition(content: unknown): ToolDispositionVie
       : undefined;
   switch (outcome.disposition) {
     case 'denied':
-      return {
-        disposition: outcome.disposition,
-        label: 'Denied',
-        tone: 'muted',
-        ...(remediation ? { remediation } : {}),
-      };
+      return deniedView({ expired: isExpiredApprovalResult(content), remediation });
     case 'policy_blocked':
       return {
         disposition: outcome.disposition,
@@ -215,6 +298,53 @@ export function getToolFailureReason(
   const envelope = parseToolResultEnvelope(content);
   const visibleResult = envelope?.result ?? content;
   return findErrorText(visibleResult, 0);
+}
+
+/**
+ * Hunts a parsed tool-result payload for an `error_code` field, unwrapping the same shapes
+ * findErrorText unwraps: stringified JSON and MCP content items along the way.
+ */
+function findErrorCode(value: unknown, depth: number): string | undefined {
+  if (depth > MAX_ERROR_TEXT_SEARCH_DEPTH) return undefined;
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (trimmed[0] !== '{' && trimmed[0] !== '[') return undefined;
+    try {
+      return findErrorCode(JSON.parse(trimmed), depth + 1);
+    } catch {
+      return undefined;
+    }
+  }
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const nested = findErrorCode(item, depth + 1);
+      if (nested) return nested;
+    }
+    return undefined;
+  }
+  if (isUnknownRecord(value)) {
+    if (typeof value.error_code === 'string') return value.error_code;
+    for (const key of ['error', 'content', 'text', 'message'] as const) {
+      if (key in value) {
+        const nested = findErrorCode(value[key], depth + 1);
+        if (nested) return nested;
+      }
+    }
+  }
+  return undefined;
+}
+
+/**
+ * The plain note to show for a space write the tool layer refused for carrying too much new
+ * content in one call, or undefined for any other result. A size refusal is a normal step in
+ * building a space in parts, not a failure, so the step shows this note in place of the
+ * refusal text, which is written for the model. The refusal is told apart by the stable code
+ * its result carries, never by its wording.
+ */
+export function parseSpaceWriteTooLongNote(content: unknown): string | undefined {
+  const envelope = parseToolResultEnvelope(content);
+  const visibleResult = envelope?.result ?? content;
+  return findErrorCode(visibleResult, 0) === SPACE_WRITE_TOO_LONG_ERROR_CODE ? SPACE_WRITE_TOO_LONG_NOTE : undefined;
 }
 
 /** Truncates a failure reason to a single inline line, for display next to the outcome label. */
@@ -363,7 +493,7 @@ export function allowChatOptionId(options: readonly AuiToolApprovalOption[] | un
 }
 
 export function buildApprovalOptions(options: readonly AuiToolApprovalOption[] | undefined): ApprovalOptionView[] {
-  const declared = options?.filter(o => Object.hasOwn(APPROVAL_OPTION_CHOICES, o.kind));
+  const declared = options?.filter(o => APPROVAL_OPTION_KINDS.has(o.kind));
   if (declared && declared.length > 0) {
     const allow = declared
       .filter(o => isAllowKind(o.kind))
@@ -371,20 +501,16 @@ export function buildApprovalOptions(options: readonly AuiToolApprovalOption[] |
     const reject = declared.filter(o => !isAllowKind(o.kind));
     const mapped: ApprovalOptionView[] = [...allow, ...reject].map(o => ({
       id: o.id,
-      label: APPROVAL_OPTION_CHOICES[o.kind]?.label ?? o.id,
-      hint: APPROVAL_OPTION_CHOICES[o.kind]?.hint,
       isAllow: isAllowKind(o.kind),
-      grants: o.grants,
-      confirm: o.confirm != null ? (typeof o.confirm === 'object' ? o.confirm : {}) : undefined,
     }));
     if (reject.length === 0) {
-      mapped.push({ id: '__deny', ...APPROVAL_CHOICES.deny, isAllow: false, confirm: {} });
+      mapped.push({ id: '__deny', isAllow: false });
     }
     return mapped;
   }
   return [
-    { id: 'allow-once', ...APPROVAL_CHOICES.approve, isAllow: true },
-    { id: 'deny', ...APPROVAL_CHOICES.deny, isAllow: false, confirm: {} },
+    { id: 'allow-once', isAllow: true },
+    { id: 'deny', isAllow: false },
   ];
 }
 
@@ -454,6 +580,7 @@ export function parseSandboxResult(result: string | undefined): {
   exitCode?: number | null;
   resultText?: string;
   resultJson?: string;
+  notices?: string[];
 } {
   if (result === undefined) return {};
   const parsed = parseJsonIncrementally(result);
@@ -465,10 +592,14 @@ export function parseSandboxResult(result: string | undefined): {
   const response = isUnknownRecord(visibleResult.response) ? visibleResult.response : undefined;
   const exitCode = typeof response?.exitCode === 'number' ? response.exitCode : null;
   const resultText = typeof response?.result === 'string' ? response.result : undefined;
+  const notices = Array.isArray(visibleResult.notices)
+    ? visibleResult.notices.filter((notice): notice is string => typeof notice === 'string')
+    : [];
   return {
     exitCode,
     resultText,
     resultJson: parsed.isPartial ? result : JSON.stringify(visibleResult, null, 2),
+    ...(notices.length > 0 ? { notices } : {}),
   };
 }
 
@@ -494,12 +625,25 @@ export function parseMcpToolArgs(argsText: string | undefined): {
   }
 }
 
+/**
+ * The one place tool output is decoded for display. A host may store a plain text result as a JSON
+ * string literal, so its line breaks read as `\n` and its quotes as `\"`; those become real text here.
+ */
 export function getJsonDisplayValue(content: string | undefined): {
   value: string;
   isJson: boolean;
 } {
   if (!content?.trim()) return { value: '', isJson: false };
   const trimmed = content.trim();
+  if (trimmed[0] === '"') {
+    try {
+      const decoded: unknown = JSON.parse(trimmed);
+      if (typeof decoded === 'string')
+        return { value: escapeDisplayText(decoded, { keepNewlines: true }), isJson: false };
+    } catch {
+      /* not a JSON string literal: show it as stored */
+    }
+  }
   if (trimmed[0] !== '{' && trimmed[0] !== '[') {
     return { value: content, isJson: false };
   }
@@ -583,23 +727,11 @@ export function mcpDisplayName(
 }
 
 export interface ParsedMapsResult {
-  state: 'ready' | 'blocked' | 'unavailable';
+  /** `refused`: every place failed the page check, so no card renders; the step shows the reasons. */
+  state: 'ready' | 'blocked' | 'unavailable' | 'refused';
   data: MapCardData | null;
   blockedMessage?: string;
-}
-
-interface MapsEndpoint {
-  name: string;
-  lat: number;
-  lng: number;
-}
-
-function parseMapsEndpoint(value: unknown): MapsEndpoint | undefined {
-  if (!isUnknownRecord(value)) return undefined;
-  const { resolved_name: name, lat, lng } = value;
-  return typeof name === 'string' && typeof lat === 'number' && typeof lng === 'number'
-    ? { name, lat, lng }
-    : undefined;
+  refused?: MapRefusedPlace[];
 }
 
 /**
@@ -624,8 +756,106 @@ function unwrapMapsPayload(resultString: string): unknown {
   }
 }
 
+/** Plain failure text for a route no service could find, by the mode that was asked for. */
+function noRouteMessage(mode: unknown): string {
+  switch (mode) {
+    case 'transit':
+      return 'No public transport route was found between the two places. Walking may still work.';
+    case 'walking':
+      return 'No walking route was found between the two places.';
+    case 'cycling':
+      return 'No cycling route was found between the two places.';
+    default:
+      return 'No driving route was found between the two places.';
+  }
+}
+
+function isWebLink(value: string): boolean {
+  try {
+    const { protocol } = new URL(value);
+    return protocol === 'https:' || protocol === 'http:';
+  } catch {
+    return false;
+  }
+}
+
+function textOrNull(value: unknown): string | null {
+  return typeof value === 'string' && value !== '' ? value : null;
+}
+
+/** A found place as the card shows it; a place without a name, address or ordinary web link is dropped. */
+function parsePlace(value: unknown): MapPlace | undefined {
+  if (!isUnknownRecord(value)) return undefined;
+  const { name, address, source_url: sourceUrl, source_site: sourceSite, fetched_at: fetchedAt } = value;
+  if (
+    typeof name !== 'string' ||
+    typeof address !== 'string' ||
+    typeof sourceUrl !== 'string' ||
+    !isWebLink(sourceUrl) ||
+    typeof sourceSite !== 'string' ||
+    typeof fetchedAt !== 'string'
+  ) {
+    return undefined;
+  }
+  const { lat, lng } = value;
+  const placed = typeof lat === 'number' && typeof lng === 'number';
+  return {
+    name,
+    address,
+    languages: textOrNull(value.languages),
+    hours: textOrNull(value.hours),
+    price: textOrNull(value.price),
+    phone: textOrNull(value.phone),
+    source_url: sourceUrl,
+    source_site: sourceSite,
+    fetched_at: fetchedAt,
+    lat: placed ? lat : null,
+    lng: placed ? lng : null,
+    already_in_calendar: value.already_in_calendar === true,
+  };
+}
+
+/** The places a pin call refused, as written by the server: a name and a plain reason each. */
+function parseRefusedPlaces(body: Record<string, unknown>): MapRefusedPlace[] {
+  if (!Array.isArray(body.refused)) {
+    return [];
+  }
+  return body.refused.flatMap(candidate => {
+    if (!isUnknownRecord(candidate)) {
+      return [];
+    }
+    const { name, reason } = candidate;
+    return typeof name === 'string' && typeof reason === 'string' ? [{ name, reason }] : [];
+  });
+}
+
+function parsePlacesResult(body: Record<string, unknown>, attribution: string): ParsedMapsResult {
+  const places = Array.isArray(body.places) ? body.places.flatMap(candidate => parsePlace(candidate) ?? []) : [];
+  if (places.length === 0) {
+    return { state: 'unavailable', data: null };
+  }
+  const pins: MapPin[] = places.flatMap(place =>
+    place.lat === null || place.lng === null ? [] : [{ name: place.name, lat: place.lat, lng: place.lng }],
+  );
+  const centre = pins.length === 0 ? { lat: 0, lng: 0 } : { lat: pins[0]?.lat ?? 0, lng: pins[0]?.lng ?? 0 };
+  return {
+    state: 'ready',
+    data: {
+      kind: 'places',
+      ...centre,
+      zoom: pins.length > 1 ? 13 : 15,
+      resolved_name: places.length === 1 ? '1 place found' : `${String(places.length)} places found`,
+      address: null,
+      pins,
+      places,
+      refused: parseRefusedPlaces(body),
+      attribution,
+    },
+  };
+}
+
 /**
- * Parse a render_map / render_route tool result into map card data.
+ * Parse a render_map / render_route / render_places tool result into map card data.
  * Error results map to blocked/unavailable states; no card renders raw errors.
  */
 export function parseMapsResult(resultString: string | undefined, toolName: string): ParsedMapsResult {
@@ -642,7 +872,13 @@ export function parseMapsResult(resultString: string | undefined, toolName: stri
       return { state: 'unavailable', data: null, blockedMessage: 'The place could not be found.' };
     }
     if (code === 'no_route') {
-      return { state: 'unavailable', data: null, blockedMessage: 'No driving route was found between the two places.' };
+      return { state: 'unavailable', data: null, blockedMessage: noRouteMessage(body.mode) };
+    }
+    if (code === 'invalid_time') {
+      return { state: 'unavailable', data: null, blockedMessage: 'The time for the trip could not be understood.' };
+    }
+    if (code === 'not_grounded') {
+      return { state: 'refused', data: null, refused: parseRefusedPlaces(body) };
     }
     if (code === 'rate_limited') {
       return {
@@ -658,11 +894,12 @@ export function parseMapsResult(resultString: string | undefined, toolName: stri
   }
   const attribution = typeof body.attribution === 'string' ? body.attribution : '© OpenStreetMap contributors';
   if (toolName === 'render_route') {
-    const from = parseMapsEndpoint(body.from);
-    const to = parseMapsEndpoint(body.to);
-    if (from === undefined || to === undefined) {
+    // Results saved before travel modes existed carry no mode and were driving routes.
+    const route = MapsRouteResultSchema.safeParse({ mode: DEFAULT_MAPS_TRAVEL_MODE, ...body });
+    if (!route.success) {
       return { state: 'unavailable', data: null };
     }
+    const { from, to } = route.data;
     return {
       state: 'ready',
       data: {
@@ -670,21 +907,28 @@ export function parseMapsResult(resultString: string | undefined, toolName: stri
         lat: (from.lat + to.lat) / 2,
         lng: (from.lng + to.lng) / 2,
         zoom: 6,
-        resolved_name: `${from.name} to ${to.name}`,
+        resolved_name: `${from.resolved_name} to ${to.resolved_name}`,
         address: null,
         pins: [],
-        from_name: from.name,
-        to_name: to.name,
+        from_name: from.resolved_name,
+        to_name: to.resolved_name,
         from_lat: from.lat,
         from_lng: from.lng,
         to_lat: to.lat,
         to_lng: to.lng,
-        distance_km: typeof body.distance_km === 'number' ? body.distance_km : undefined,
-        duration_min: typeof body.duration_min === 'number' ? body.duration_min : undefined,
-        route_geometry: typeof body.route_geometry === 'string' ? body.route_geometry : undefined,
-        attribution,
+        distance_km: route.data.distance_km,
+        duration_min: route.data.duration_min,
+        route_geometry: route.data.route_geometry,
+        mode: route.data.mode,
+        ...(route.data.mode === 'transit'
+          ? { departs: route.data.departs, arrives: route.data.arrives, steps: route.data.steps }
+          : {}),
+        attribution: route.data.attribution,
       },
     };
+  }
+  if (toolName === 'render_places') {
+    return parsePlacesResult(body, attribution);
   }
   const pins: MapPin[] = [];
   if (Array.isArray(body.pins)) {

@@ -53,6 +53,26 @@ test_compose_v2_or_newer_passes() {
   done
 }
 
+test_engine_before_28_on_native_linux_is_refused() {
+  t_begin "Docker Engine 27 on native Linux is refused with a plain reason; 28, Docker Desktop and WSL2 pass"
+  sandbox_new
+  fixture_uname Linux x86_64
+  STUB_ENGINE_VERSION=27.5.1
+  run_install --dry-run
+  assert_rc 1
+  assert_flat_contains "$OUT$ERR" "Docker Engine 27.5.1 lets other devices on your network reach ports meant for this computer only"
+  assert_flat_contains "$OUT$ERR" "Install Docker Engine 28 or newer (install.sh --print-root-steps shows the steps)"
+  STUB_ENGINE_VERSION=28.0.0
+  run_install --dry-run
+  assert_not_contains "$OUT$ERR" "lets other devices on your network"
+  STUB_ENGINE_VERSION=27.5.1
+  STUB_DOCKER_OS="Docker Desktop"
+  run_install --dry-run
+  assert_not_contains "$OUT$ERR" "lets other devices on your network"
+  unset STUB_DOCKER_OS
+  sandbox_drop
+}
+
 test_unreadable_compose_version_is_named() {
   local version
   t_begin "an empty or garbage Compose version is rejected and named"
@@ -70,13 +90,14 @@ test_blocker_stops_before_any_prompt() {
   t_begin "a runtime blocker exits non-zero before the instance prompts"
   sandbox_new
   STUB_COMPOSE_VERSION=1.29.2
-  run_install_tty "Instance name=>
+  run_install_tty "Name for this instance=>
 Your email=>owner@example.invalid
+Connect an email account=>n
 "
   assert_eq "$RC" 1
   assert_contains "$OUT" "Stopped before changing anything"
   assert_flat_contains "$OUT" "Compose 1.29.2 is too old"
-  assert_not_contains "$OUT" "Instance name"
+  assert_not_contains "$OUT" "Name for this instance"
   assert_not_contains "$OUT" "Password"
   assert_no_path "$AMAN_HOME"
   sandbox_drop
@@ -103,7 +124,7 @@ test_group_member_without_relogin_uses_sg() {
   printf 'testuser\n' >"$SB_STATE/group_members"
   install_machine
   assert_contains "$OUT" "Open a new terminal window"
-  assert_contains "$OUT" "without a re-login"
+  assert_flat_contains "$OUT" "your other terminals do not have yet"
   assert_log_has "sg docker -c"
   assert_log_lacks "usermod"
   assert_log_lacks "sudo docker"
@@ -131,7 +152,7 @@ test_doctor_follows_sudo_access() {
   rm -f "$SB_BIN/sg"
   INSTALL_EXTRA=(--add-docker-group)
   install_machine
-  assert_flat_contains "$ERR" "using sudo for Docker during this run only"
+  assert_flat_contains "$ERR" "Using sudo for Docker during this run only"
   assert_log_has "sudo env AMANUENSIS_HOME=$AMAN_HOME HOME=$SB/user timeout 180 $AMAN_HOME/bin/aman doctor"
   sandbox_drop
 }
@@ -155,7 +176,10 @@ test_install_offer_declined() {
   sandbox_new
   os_release_ubuntu
   rm -f "$SB_BIN/docker"
-  with_input "
+  with_input "n
+
+
+
 
 
 y
@@ -240,7 +264,10 @@ test_group_decline_stops_without_sudo() {
   sandbox_new
   STUB_DOCKER_DENIED=1
   : >"$SB_STATE/group_members"
-  with_input "
+  with_input "n
+
+
+
 
 
 y
@@ -309,6 +336,7 @@ test_rootless_is_unsupported
 test_podman_is_unsupported
 test_old_engine_and_compose_v1
 test_compose_v2_or_newer_passes
+test_engine_before_28_on_native_linux_is_refused
 test_unreadable_compose_version_is_named
 test_blocker_stops_before_any_prompt
 test_daemon_down

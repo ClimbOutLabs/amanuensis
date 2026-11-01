@@ -23,7 +23,7 @@ import (
 )
 
 const (
-	agentVersion = "0.3.0"
+	agentVersion = "0.5.0"
 	socketPath   = "/run/aman/agent.sock"
 	volumeDir    = "/workspace"
 	leaseDir     = "/workspace/.leases"
@@ -141,6 +141,20 @@ func run() error {
 		TreeDir:   treeDir,
 		RootFS:    rootFS,
 		OOMKills:  api.CgroupOOMKills(cgroupRoot),
+	}
+
+	// The package mirror forwarder listens on the slot's loopback for guests with a download grant.
+	// Failing to start it never opens anything: granted calls then fail at the tool, and the slot
+	// keeps serving offline calls.
+	if err := srv.StartMirrorForwarder(); err != nil {
+		log.Printf("package mirrors unavailable in this slot: %v", err)
+	}
+
+	// The skill network forwarder listens beside it, for guests with an approved skill grant.
+	// Failing to start it never opens anything: granted calls then fail at the tool, and the slot
+	// keeps serving offline calls.
+	if err := srv.StartSkillNetworkForwarder(); err != nil {
+		log.Printf("skill network unavailable in this slot: %v", err)
 	}
 
 	_ = os.Remove(socketPath)

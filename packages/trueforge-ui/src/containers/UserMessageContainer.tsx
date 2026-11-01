@@ -2,11 +2,13 @@
 
 import { useActionBarCopy, useActionBarEdit, useThreadIsRunning } from '@assistant-ui/core/react';
 import { MessagePrimitive, useAui, useAuiState } from '@assistant-ui/react';
+import { isMorningBriefPrompt } from '@truefoundry/trueforge-core/core/schedules/morningBrief';
 
 import { copyText } from '@/utils/copyText.js';
 import { useActiveSessionCanManage } from '../hooks/useResourcePermissions.js';
 import { useSlot } from '../theme/SlotsProvider.js';
 import { MessageAttachmentsContainer } from './AttachmentsContainer.js';
+import { messageText } from './briefTurn.js';
 
 export function UserMessageContainer() {
   const UserMessageBubble = useSlot('UserMessageBubble');
@@ -15,16 +17,14 @@ export function UserMessageContainer() {
   const canManageSession = useActiveSessionCanManage();
   const aui = useAui();
   const createdAt = useAuiState(s => s.message.createdAt);
-  const text = useAuiState(s =>
-    s.message.content
-      .filter((part): part is { type: 'text'; text: string } => part.type === 'text')
-      .map(part => part.text)
-      .join('\n'),
-  );
+  const text = useAuiState(s => messageText(s.message.content));
   const { edit, disabled: editDisabled } = useActionBarEdit();
   const { copy, isCopied } = useActionBarCopy({
     copyToClipboard: value => copyText(value),
   });
+
+  // A morning brief request is hidden: the brief itself is the turn's answer.
+  if (isMorningBriefPrompt(text)) return null;
 
   return (
     <MessagePrimitive.Root data-role="user">

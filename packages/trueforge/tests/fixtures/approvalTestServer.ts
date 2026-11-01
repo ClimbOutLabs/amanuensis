@@ -31,11 +31,13 @@ import { SandboxCatalog } from '../../src/catalog/SandboxCatalog';
 import { SkillCatalog } from '../../src/catalog/SkillCatalog';
 import configuration, { TrueForgeAuthMode } from '../../src/config';
 import { McpServerWithAuthStore } from '../../src/db/McpServerWithAuthStore';
+import { BriefItemCompletionStore } from '../../src/db/briefItemCompletionStore';
 import type { IMcpServerStore } from '../../src/db/mcpServerStore';
 import { migrateSqliteToLatest } from '../../src/db/migrateSqlite';
 import { SentinelAuditStore } from '../../src/db/sentinelAuditStore';
 import { SqliteAgentStore } from '../../src/db/sqlite/agent-store/SqliteAgentStore';
 import { SqliteApprovalTokenStore } from '../../src/db/sqlite/approval-token-store/SqliteApprovalTokenStore';
+import { SqliteChatImageStore } from '../../src/db/sqlite/chat-image-store/SqliteChatImageStore';
 import { createSqliteDb } from '../../src/db/sqlite/client';
 import { SqliteGlobalSettingsStore } from '../../src/db/sqlite/global-settings-store/SqliteGlobalSettingsStore';
 import { SqliteGoogleConnectionStore } from '../../src/db/sqlite/google-connection-store/SqliteGoogleConnectionStore';
@@ -55,6 +57,8 @@ import { SqliteSpaceStore } from '../../src/db/sqlite/space-store/SqliteSpaceSto
 import { SqliteOAuthTokenStore } from '../../src/db/sqlite/token-store/SqliteOAuthTokenStore';
 import { SqliteTurnArtifactStore } from '../../src/db/sqlite/turn-artifact-store/SqliteTurnArtifactStore';
 import { ActiveTurnRegistry } from '../../src/runtime/activeTurns';
+import { createChatImageService } from '../../src/runtime/chatImages/chatImageService';
+import { createImageReencoder } from '../../src/runtime/chatImages/reencodeInSandbox';
 import { EventSubscriptionRegistry } from '../../src/runtime/event-subscription';
 import { createOutboundSecretSource } from '../../src/runtime/outboundSecrets';
 import { createSentinelServices } from '../../src/runtime/sentinelServices';
@@ -83,6 +87,8 @@ export interface ApprovalTestServer {
   mcpServerStore: () => IMcpServerStore;
   /** Same contract as `mcpServerStore`: reads private turn metadata the HTTP surface does not expose. */
   sessionStore: () => SqliteSessionStore;
+  /** The database itself, so a test can construct any other store over the same data. */
+  db: () => SqliteDb;
   /** Replaces the operator's first-party origin list, as booting with another `FIRST_PARTY_MCP_ORIGINS` would. */
   setFirstPartyOrigins: (origins: string[]) => void;
   close: () => Promise<void>;
@@ -92,8 +98,9 @@ function buildApp(input: {
   db: SqliteDb;
   sandboxProvider: SandboxProvider | undefined;
   authenticator: Authenticator;
-}): OpenAPIHono {
-  const { db, sandboxProvider, authenticator } = input;
+  turnDrains: TurnDrainRegistry;
+}): ReturnType<typeof createServerApp> {
+  const { db, sandboxProvider, authenticator, turnDrains } = input;
   const sessionStore = new SqliteSessionStore(db);
   const tokenStore = new SqliteOAuthTokenStore(db);
   const agentStore = new SqliteAgentStore(db);
@@ -111,23 +118,28 @@ function buildApp(input: {
   const mcpToolGrantStore = new SqliteMcpToolGrantStore(db);
   const googleConnectionStore = new SqliteGoogleConnectionStore(db);
   // Same composition as main.ts, so approval tokens are durable and shared across turns.
+  const outboundSecrets = createOutboundSecretSource({
+    configured: () => [],
+    modelProviders: modelProviderStore,
+    sandboxProviders: sandboxProviderStore,
+    mcpServers: mcpServerStore,
+    tokens: tokenStore,
+    googleConnections: googleConnectionStore,
+  });
   const sentinelServices = createSentinelServices({
+    demoMode: false,
+    demoSendAllowlist: [],
+    mailPolicyPath: undefined,
+    mailPolicyStatusPath: undefined,
     audit: sentinelAuditStore,
     settings: sentinelSettingsStore,
     approvalTokens: new SqliteApprovalTokenStore(db),
     toolGrants: mcpToolGrantStore,
-    outboundSecrets: createOutboundSecretSource({
-      configured: () => [],
-      modelProviders: modelProviderStore,
-      sandboxProviders: sandboxProviderStore,
-      mcpServers: mcpServerStore,
-      tokens: tokenStore,
-      googleConnections: googleConnectionStore,
-    }),
+    outboundSecrets,
   });
   return createServerApp({
     modelCatalog: ModelCatalog.load(),
-    mcpCatalog: McpCatalog.load(),
+    mcpCatalog: McpCatalog.loadShipped(),
     skillCatalog: SkillCatalog.load(),
     sandboxCatalog: SandboxCatalog.load(),
     withTransaction: callback => db.transaction().execute(callback),
@@ -140,25 +152,37 @@ function buildApp(input: {
     agentStore,
     personalizationStore: new SqlitePersonalizationStore(db),
     personaStore: new SqlitePersonaStore(db),
+    modelProviderStore,
     spaceStore: new SqliteSpaceStore(db),
     repositoryStore: new SqliteRepositoryStore(db),
     scheduleStore: new SqliteScheduleStore(db),
     sessionMetricsStore: new SqliteSessionMetricsStore(db),
     turnArtifactStore: new SqliteTurnArtifactStore(db),
+    chatImages: createChatImageService({
+      store: new SqliteChatImageStore(db),
+      sessionStore,
+      turnArtifactStore: new SqliteTurnArtifactStore(db),
+      reencode: createImageReencoder({ resolveSandbox: () => null }),
+      sentinel: sentinelServices,
+      fetchDeps: { fetchImpl: undefined, resolveAddresses: undefined },
+    }),
     globalSettingsStore,
     tokenFactoryBudget: uncappedTokenFactoryBudget,
     sessionStore,
     sentinelAuditStore,
     sentinelSettingsStore,
+    briefItemStore: new BriefItemCompletionStore(db),
     sessions: new Sessions({ sessionStore, sentinelServices }),
     activeTurns: new ActiveTurnRegistry(),
-    turnDrains: new TurnDrainRegistry(),
+    turnDrains,
     requestReplyRouter: new RequestReplyRouter(),
     eventSubscriptions: new EventSubscriptionRegistry<TurnStreamingEvent>(undefined),
     logger: createLogger({ silent: true }),
     oidcDiscovery: undefined,
     authenticator,
     authorizer: new TrueForgeAuthorizer(),
+    outboundSecrets,
+    schedulerStatus: () => 'elsewhere',
     resolveModelProviderStore: () => modelProviderStore,
     resolveMcpServerStore: () => mcpServerStore,
     resolveAgentStore: () => agentStore,
@@ -262,7 +286,9 @@ export async function startApprovalTestServer(options?: {
   const originalFirstPartyOrigins = configuration.FIRST_PARTY_MCP_ORIGINS;
   configuration.FIRST_PARTY_MCP_ORIGINS = options?.memoryProvider === true ? [mcp.origin] : [];
 
-  let app = buildApp({ db, sandboxProvider: options?.sandboxProvider, authenticator });
+  // One registry for the server's life, so close() can wait for turn drains the way main.ts does.
+  const turnDrains = new TurnDrainRegistry();
+  let app = buildApp({ db, sandboxProvider: options?.sandboxProvider, authenticator, turnDrains });
   if (options?.memoryProvider === true) {
     await registerMemoryProvider({ app, mcp });
   }
@@ -272,19 +298,27 @@ export async function startApprovalTestServer(options?: {
     // contract is uniformly async, so normalise here rather than at every call.
     request: async (path, init) => await app.request(path, init),
     restart: async () => {
+      await app.guidesSettled();
+      // A restart stands in for the process going away, so running replies are cut off, not drained.
       await db.destroy();
       db = createSqliteDb(databaseFile);
-      app = buildApp({ db, sandboxProvider: options?.sandboxProvider, authenticator });
+      app = buildApp({ db, sandboxProvider: options?.sandboxProvider, authenticator, turnDrains });
     },
     mcp,
     model,
     mcpServerStore: () => new SqliteMcpServerStore(db),
     sessionStore: () => new SqliteSessionStore(db),
+    db: () => db,
     setFirstPartyOrigins: origins => {
       configuration.FIRST_PARTY_MCP_ORIGINS = origins;
     },
     close: async () => {
       configuration.FIRST_PARTY_MCP_ORIGINS = originalFirstPartyOrigins;
+      // The guide installs write into the temp directory removed below, so they finish first.
+      await app.guidesSettled();
+      // Like main.ts shutdown: a finished turn's drain still writes events and memory (a scheduled
+      // run saves to the vault), so it settles before the database and the caller's directories go.
+      await turnDrains.shutdownAndWait({ timeoutMs: configuration.TURN_DRAIN_SHUTDOWN_TIMEOUT_MS });
       await db.destroy();
       await model.close();
       await mcp.close();

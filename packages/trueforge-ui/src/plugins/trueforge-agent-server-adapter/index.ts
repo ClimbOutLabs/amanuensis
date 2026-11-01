@@ -6,13 +6,17 @@ import type { CatalogServer, PermissionsServer } from '../../server/types.js';
 import { createHarnessAgentMetricsServer } from './agentMetricsServer.js';
 import { createHarnessAgentSessionsServer } from './agentSessionsServer.js';
 import { createHarnessBuilderServer } from './builderServer.js';
+import { createChatImagesCatalog } from './catalogs/chatImagesCatalog.js';
 import { createConnectorCatalog } from './catalogs/connectorCatalog.js';
+import { createMemoryRecallCatalog } from './catalogs/memoryRecallCatalog.js';
 import { createMemoryScreenCatalog } from './catalogs/memoryScreenCatalog.js';
 import { createMemorySummarizeCatalog } from './catalogs/memorySummarizeCatalog.js';
 import { createMemoryVaultCatalog } from './catalogs/memoryVaultCatalog.js';
 import { createModelProviderCatalog } from './catalogs/modelProviderCatalog.js';
 import { createSandboxProviderCatalog } from './catalogs/sandboxProviderCatalog.js';
+import { createScheduleToolsCatalog } from './catalogs/scheduleToolsCatalog.js';
 import { createSkillCatalog } from './catalogs/skillCatalog.js';
+import { createTokenFactoryUsageCatalog } from './catalogs/tokenFactoryUsageCatalog.js';
 import { createToolOutputScreenCatalog } from './catalogs/toolOutputScreenCatalog.js';
 import { createHarnessChatServer } from './chatServer.js';
 import { createTrueForgeClient, type CreateTrueForgeClientOptions } from './client.js';
@@ -59,6 +63,7 @@ export {
   createHarnessChatServer,
   listDocumentIngestionTurnContext,
   listMemoryTurnContext,
+  listModelUsageTurnContext,
   subscribeToDocumentIngestion,
   toHarnessAgentSpec,
   toUiAgentSpec,
@@ -67,23 +72,15 @@ export {
   type DocumentIngestionLiveEvent,
   type DocumentIngestionTurnContext,
   type MemoryTurnContext,
+  type ModelUsageTurnContext,
 } from './chatServer.js';
 export { createTrueForgeClient } from './client.js';
 export type { CreateTrueForgeClientOptions } from './client.js';
-export {
-  getCapabilities,
-  getMemoryBankStatus,
-  listConfiguredMcpServers,
-  listModels,
-  listSkills,
-  readMemoryBackend,
-} from './lists.js';
+export { getCapabilities, listConfiguredMcpServers, listModels, listSkills, readMemoryBackend } from './lists.js';
 export type { BuildIdentity } from './lists.js';
 export { createHarnessPermissionsServer, type CreateHarnessPermissionsServerOptions } from './permissionsServer.js';
 export { createScheduleServer } from './schedules/scheduleServer.js';
 export {
-  APPROVAL_AUTO_DENY_MINUTES,
-  approvalAutoDenyReason,
   isPendingApprovalsError,
   publishBlockedSend,
   subscribeToBlockedSend,
@@ -109,9 +106,9 @@ export function createTrueForgeAgentUIServer(options: CreateTrueForgeAgentUIServ
   const catalog =
     catalogOverride ??
     ({
-      modelCatalog: createModelProviderCatalog(client),
+      modelCatalog: createModelProviderCatalog(client, clientOptions),
       connectorCatalog: createConnectorCatalog(client, clientOptions),
-      skillCatalog: createSkillCatalog(client),
+      skillCatalog: createSkillCatalog(client, clientOptions),
       sandboxCatalog: createSandboxProviderCatalog(client),
     } satisfies CatalogServer);
 
@@ -130,10 +127,14 @@ export function createTrueForgeAgentUIServer(options: CreateTrueForgeAgentUIServ
   // reports "not supported" on other servers.
   return {
     ...server,
+    scheduleTools: createScheduleToolsCatalog(clientOptions),
     toolOutputScreen: createToolOutputScreenCatalog(clientOptions),
+    chatImages: createChatImagesCatalog(clientOptions),
     memoryScreen: createMemoryScreenCatalog(clientOptions),
+    memoryRecall: createMemoryRecallCatalog(clientOptions),
     memorySummarize: createMemorySummarizeCatalog(clientOptions),
     memoryVault: createMemoryVaultCatalog(clientOptions),
+    tokenFactoryUsage: createTokenFactoryUsageCatalog(client),
   };
 }
 

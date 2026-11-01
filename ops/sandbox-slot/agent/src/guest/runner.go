@@ -56,8 +56,18 @@ type Result struct {
 const infraPrefix = "running container:"
 
 func (r *Runner) runscArgs(tail ...string) []string {
+	return r.runscArgsNetwork(false, tail...)
+}
+
+// runscArgsNetwork picks the guest's network: an isolated loopback-only stack by default, or the
+// slot's own namespace for a mirror-granted call, whose only interface is that same loopback.
+func (r *Runner) runscArgsNetwork(shared bool, tail ...string) []string {
+	network := "--network=none"
+	if shared {
+		network = "--network=host"
+	}
 	base := []string{
-		r.Runsc, "--root", r.StateDir, "--rootless", "--network=none",
+		r.Runsc, "--root", r.StateDir, "--rootless", network,
 		"--platform=systrap", "--overlay2=root:memory",
 	}
 	return append(base, tail...)
@@ -153,7 +163,7 @@ func (r *Runner) Run(ctx context.Context, spec Spec, opts Options) Result {
 	// The Sentry can crash (for example when the host refuses it a thread) and exit 2, which looks like
 	// the program exiting 2; its panic log is the only reliable tell.
 	panicLog := filepath.Join(bundle, "panic.log")
-	argv := r.runscArgs("--panic-log="+panicLog, "run", "--bundle", bundle, spec.ID)
+	argv := r.runscArgsNetwork(spec.SharedNetwork, "--panic-log="+panicLog, "run", "--bundle", bundle, spec.ID)
 	pid, exited, err := r.Reaper.Spawn(r.Runsc, argv, &os.ProcAttr{
 		Env:   []string{"PATH=/usr/local/bin:/usr/bin:/bin", "HOME=/tmp"},
 		Files: []*os.File{devnull, outW, errW},

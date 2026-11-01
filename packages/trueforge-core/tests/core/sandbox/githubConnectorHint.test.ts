@@ -1,3 +1,4 @@
+import { connectorUnavailableLine } from '../../../src/core/connectors/connectorAvailability';
 import {
   GITHUB_ACCESS_OR_MISSING_REPO_HINT,
   GITHUB_CONNECTOR_MISSING_HINT,
@@ -69,6 +70,13 @@ describe('getGithubConnectorHint', () => {
     expect(getGithubConnectorHint({ command, output: credentialFailureOutput, connectorState: 'not-attached' })).toBe(
       GITHUB_CONNECTOR_MISSING_HINT,
     );
+  });
+
+  it('builds the missing-connector hint from the shared connector line, with one place to turn it on', () => {
+    expect(GITHUB_CONNECTOR_MISSING_HINT).toContain(
+      connectorUnavailableLine({ connector: 'GitHub', availability: 'unknown' }),
+    );
+    expect(GITHUB_CONNECTOR_MISSING_HINT).not.toContain('Add-ons > Connectors');
   });
 
   it('returns the unresolved-credential hint when the connector is attached but no credential reached the sandbox', () => {

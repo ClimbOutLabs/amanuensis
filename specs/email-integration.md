@@ -22,7 +22,7 @@ Gmail support built into Aman. The user connects their own Google account in Set
 
 **Testing or Published.** A project left in Testing signs the user out every 7 days. The panel offers both choices in plain words and never assumes the user will publish. When Google stops accepting the sign-in, Aman shows Reconnect needed, pauses mail, and keeps everything else working.
 
-**Settings routes are for the browser only.** Agents, sandboxes, and API clients cannot call them. A cross-site form cannot start a test or a disconnect. On a demo instance every Google route except the status read is refused and no mail tools are mounted.
+**Settings routes are for the browser only.** Agents, sandboxes, and API clients cannot call them. A cross-site form cannot start a test or a disconnect. On a demo instance the owner connects one named Google account (`DEMO_GOOGLE_ACCOUNT`) before visitors arrive; any other account is refused, and with no account named nothing can be connected. A demo consent asks for every feature. Once a working connection for that account with every feature is saved, the panel cannot reconnect or disconnect it; until then the named account can connect again to add what is missing. A login Google stopped accepting can be reconnected, but only with the named account. Mail tools are mounted, drafts work, and a send is allowed only to the addresses in `DEMO_SEND_ALLOWLIST`; the demo refuses sends it cannot fully check, including every connector action that is not declared read-only.
 
 **Disconnect never gets stuck.** Aman asks Google to revoke its access, then deletes the saved sign-in. If Google does not confirm, the sign-in is still deleted and the user is told how to remove access in their Google account settings.
 
@@ -74,9 +74,9 @@ Any other tool name is refused. A raw send that skips the draft does not exist.
 
 ## Safety Model
 
-**What a send delivers is what the user saw.** The card is built from the draft as Gmail holds it, never from the model's words. Aman remembers a fingerprint of that draft: recipients, copy, hidden copy, subject, text, thread, reply headers, and the sender name. The send goes ahead only if the draft still matches. An edit made after review, by anyone, makes the send stop and ask again. A review is used once and lasts 30 minutes. It lives in memory, so after a restart or an expiry the user is asked again.
+**What a send delivers is what the user saw.** The card is built from the draft as Gmail holds it, never from the model's words. Aman remembers a fingerprint of that draft: recipients, copy, hidden copy, where replies go, subject, text, thread, reply headers, and the sender name. The send goes ahead only if the draft still matches. An edit made after review, by anyone, makes the send stop and ask again. A review is used once and lasts 30 minutes. It lives in memory, so after a restart or an expiry the user is asked again.
 
-**Only drafts Aman can show in full are sent.** A draft is refused when it has an attachment, an HTML version, extra headers such as a reply address, a different sender, a body too long to read, odd blank space at its edges, or a recipient list that a mail reader might split differently. Headers that are not shown must be in a closed, simple format.
+**Only drafts Aman can show in full are sent.** A draft is refused when it has an attachment, an HTML version, a header Aman does not know, a different sender, a From, Reply-To or Sender line that is not exactly one plain address, a body too long to read, odd blank space at its edges, or a recipient list that a mail reader might split differently. A reply address other than the account is allowed only because the card shows it as "Replies go to". Headers that are not shown must be in a closed, simple format.
 
 **Nothing may be hidden.** Text with characters that do not show, such as zero-width marks or Unicode tag characters, is refused, except in the few places they are part of normal writing, such as emoji and some scripts.
 
@@ -84,7 +84,7 @@ Any other tool name is refused. A raw send that skips the draft does not exist.
 
 **A send is never repeated blindly.** Requests that create or send are not retried after a failure that may have happened after Gmail acted. If the outcome is unknown, Aman says the send may have gone through and tells the user to check the Sent folder before trying again.
 
-**After reading mail, outbound searches ask.** Once a conversation has read mail, web searches in it ask first, so mail content cannot leave in a query unseen.
+**After reading mail, outbound searches are checked.** Once a conversation has read mail or calendar, a web search or map in it runs without asking only when its text carries nothing copied from that mail or calendar: no sender name, email address, phone number, long number, copied five-word phrase or code-like string. A map may name a street address from the mail. Otherwise it asks, or in a scheduled run it is skipped and the owner is told.
 
 **Scheduled runs read but never write.** The write tools are not offered to a scheduled run and a call is refused.
 

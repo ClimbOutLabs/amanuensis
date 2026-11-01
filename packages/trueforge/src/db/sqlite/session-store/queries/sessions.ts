@@ -21,6 +21,7 @@ import type {
   GetSessionByExternalIdInput,
   GetSessionInput,
   ListSessionsInput,
+  StampImportedSessionInput,
   UpdateSessionInput,
 } from '@truefoundry/trueforge-core/agent-session/store/ISessionStore';
 import {
@@ -32,6 +33,7 @@ import {
   SessionExternalIdConflictError,
   SessionNotFoundError,
   SessionStoreInvariantError,
+  TurnNotFoundError,
 } from '@truefoundry/trueforge-core/agent-session/store/SessionStoreErrors';
 import { sql, type Kysely } from 'kysely';
 import { sessionAgentFromColumns, sessionAgentToColumns } from '../../../sessionAgentColumns';
@@ -189,6 +191,38 @@ export async function createSession(db: Kysely<Database>, input: CreateSessionIn
   }
 }
 
+export async function stampImportedSession(db: Kysely<Database>, input: StampImportedSessionInput): Promise<void> {
+  await db.transaction().execute(async trx => {
+    const updated = await trx
+      .updateTable('session')
+      .set({
+        created_at: input.created_at.toISOString(),
+        updated_at: input.updated_at.toISOString(),
+        last_activity_timestamp_ms: input.last_activity_timestamp_ms,
+        metrics: jsonbBind(input.metrics),
+      })
+      .where('tenant_id', '=', input.tenant_id)
+      .where('session_id', '=', input.session_id)
+      .returning('session_id')
+      .executeTakeFirst();
+    if (updated === undefined) {
+      throw new SessionNotFoundError(input.session_id);
+    }
+    for (const turn of input.turns) {
+      const stamped = await trx
+        .updateTable('turn')
+        .set({ created_at: turn.created_at.toISOString(), updated_at: turn.updated_at.toISOString() })
+        .where('session_id', '=', input.session_id)
+        .where('turn_id', '=', turn.turn_id)
+        .returning('turn_id')
+        .executeTakeFirst();
+      if (stamped === undefined) {
+        throw new TurnNotFoundError(turn.turn_id);
+      }
+    }
+  });
+}
+
 export async function deleteSession(db: Kysely<Database>, input: DeleteSessionInput): Promise<void> {
   await db
     .deleteFrom('session')
@@ -304,6 +338,12 @@ export async function listSessions(
 
   if (input.agent_id !== undefined) {
     query = query.where('agent_id', '=', input.agent_id);
+  }
+  if (input.folder_id !== undefined) {
+    query = query.where('folder_id', '=', input.folder_id);
+  }
+  if (input.no_folder) {
+    query = query.where('folder_id', 'is', null);
   }
   query = whereCreatedByOrAgentIds(query, input.created_by_or_agent_ids);
   if (input.metadata !== undefined) {

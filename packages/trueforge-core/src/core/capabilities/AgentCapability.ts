@@ -1,6 +1,7 @@
 import type { ToolOutputScreenDecision } from '../../schemas/toolOutputScreen';
 import type { InstructionBuilder } from '../InstructionBuilder';
 import type { IToolSet } from '../mcp/IMCPServer';
+import type { ToolBundleName } from '../runtime/toolBundleCatalog';
 import type {
   PostToolCallAgentContextProcessor,
   PreLLMAgentContextProcessor,
@@ -32,6 +33,8 @@ export interface AgentCapability {
   readonly toolResponseProcessors?: readonly ToolResponseProcessor[] | undefined;
   readonly untrustedTextScreens?: readonly UntrustedTextScreen[] | undefined;
   readonly instructionBuilders?: readonly ((builder: InstructionBuilder) => void)[] | undefined;
+  /** The guidance topic `instructionBuilders` write into, returned by load_bundle. Absent: sent in the system prompt. */
+  readonly bundle?: ToolBundleName | undefined;
   /**
    * Cross-turn durable state. `key` must be unique across capabilities on a
    * thread (`tfy.` reserved for builtins). `load` hydrates from the previous

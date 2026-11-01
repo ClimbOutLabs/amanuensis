@@ -9,7 +9,7 @@ import { contextCompaction, type CompactionModel } from '../core/capabilities/bu
 import { currentDateTime } from '../core/capabilities/builtins/CurrentDateTime';
 import { documentCapability } from '../core/capabilities/builtins/DocumentTools';
 import { dynamicSubAgents } from '../core/capabilities/builtins/DynamicSubAgents';
-import { largeToolResponse } from '../core/capabilities/builtins/LargeToolResponse';
+import { ingestionBudgets, largeToolResponse } from '../core/capabilities/builtins/LargeToolResponse';
 import { openUI } from '../core/capabilities/builtins/OpenUI';
 import { repositoryBindingContext } from '../core/capabilities/builtins/RepositoryBindingContext';
 import {
@@ -23,7 +23,7 @@ import type { BoundRepository, Sandbox } from '../core/sandbox/Sandbox';
 import type { AgentTracing } from '../core/tracing/AgentTracing';
 import type { AgentSpec } from './schemas/agentSpec';
 
-export function builtinsFromSpec(input: {
+export interface BuiltinsFromSpecInput {
   spec: AgentSpec;
   definition: AgentDefinition;
   /**
@@ -46,7 +46,11 @@ export function builtinsFromSpec(input: {
    */
   compactionThresholdTokensDefault?: number | undefined;
   boundRepository?: BoundRepository | undefined;
-}): AgentCapability[] {
+  /** Built-in tool names this run does not offer. */
+  withheldTools?: readonly string[] | undefined;
+}
+
+export function builtinsFromSpec(input: BuiltinsFromSpecInput): AgentCapability[] {
   const {
     spec,
     definition,
@@ -59,6 +63,7 @@ export function builtinsFromSpec(input: {
     compactionContext,
     compactionThresholdTokensDefault,
     boundRepository,
+    withheldTools,
   } = input;
   const config = spec.config;
   const checklistState = new TaskChecklistRequestState(compactionContext);
@@ -76,7 +81,7 @@ export function builtinsFromSpec(input: {
   ];
 
   if (!isChild && sandboxAvailable && sandbox !== undefined) {
-    capabilities.push(documentCapability({ sandbox, tracing }));
+    capabilities.push(documentCapability({ sandbox, tracing, boundRepository, withheldTools }));
   }
 
   if (!isChild && compactionContext !== undefined) {
@@ -114,6 +119,9 @@ export function builtinsFromSpec(input: {
     );
   }
 
+  // Before largeToolResponse: the size thresholds must measure what the budgets leave in the history.
+  capabilities.push(ingestionBudgets());
+
   if (config.context_management.large_tool_response.enabled) {
     capabilities.push(
       largeToolResponse({
@@ -129,4 +137,15 @@ export function builtinsFromSpec(input: {
   }
 
   return capabilities;
+}
+
+/**
+ * The capabilities a thread runs with: the spec's builtins, then the host's extra capabilities.
+ * Root threads, sub-agent threads and the prompt report all assemble through this one function.
+ */
+export function threadCapabilities({
+  extraCapabilities,
+  ...input
+}: BuiltinsFromSpecInput & { extraCapabilities?: readonly AgentCapability[] | undefined }): AgentCapability[] {
+  return [...builtinsFromSpec(input), ...(extraCapabilities ?? [])];
 }

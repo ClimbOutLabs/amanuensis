@@ -3,14 +3,15 @@ import type { ISessionStore } from '@truefoundry/trueforge-core/agent-session';
 import type { Context } from 'hono';
 import { rm } from 'node:fs/promises';
 import path from 'node:path';
-import { ulid } from 'ulid';
 import type { ResolveRequestContext } from '../auth/identity';
 import type { IModelProviderStore } from '../db/modelProviderStore';
 import { PersonaNameConflictError, type IPersonaStore } from '../db/personaStore';
 import type { SessionCustom, TurnCustom } from '../db/sessionCustom';
 import { personaKnowledgeLocation } from '../personaKnowledge/knowledgePaths';
 import { closePersonaKnowledgeRepository } from '../personaKnowledge/sqliteKnowledgeRepository';
+import { createPersonaForOwner } from '../personas/createPersona';
 import { buildPersonaContext, type Persona, type PersonaActivation } from '../personas/persona';
+import { activateSessionPersona } from '../personas/sessionPersona';
 import {
   createPersonaRoute,
   deletePersonaRoute,
@@ -61,12 +62,18 @@ export interface PersonasRouterDeps {
   resolveRequestContext: ResolveRequestContext;
   /** Deleting a persona also removes its knowledge library database and pending upload blobs. */
   knowledgeDir: string;
+  /** Installs or refreshes the built-in Aman guide for the requester, so the list shows it current. */
+  ensureAmanGuide: (input: { userId: string; modelProviderStore: IModelProviderStore }) => Promise<void>;
 }
 
 /** Persona CRUD (mounted at /api/v1/personas). */
 export function createPersonasRouter(deps: PersonasRouterDeps) {
   const listHandler: RouteHandler<typeof listPersonasRoute> = async c => {
     const requestContext = deps.resolveRequestContext(c);
+    await deps.ensureAmanGuide({
+      userId: requestContext.subject.id,
+      modelProviderStore: deps.resolveModelProviderStore(c),
+    });
     const personas = await deps.personaStore.listPersonas({
       tenant_id: TENANT_ID,
       created_by: requestContext.subject.id,
@@ -77,21 +84,13 @@ export function createPersonasRouter(deps: PersonasRouterDeps) {
   const createHandler: RouteHandler<typeof createPersonaRoute> = async c => {
     const requestContext = deps.resolveRequestContext(c);
     const { persona } = c.req.valid('json');
-    // A persona whose model does not exist cannot answer, so it is refused at
-    // write time rather than accepted and failed at the first invocation.
-    await assertPersonaModelAvailable({
-      displayName: persona.display_name,
-      modelName: persona.model_name,
-      tenant_id: TENANT_ID,
-      modelProviderStore: deps.resolveModelProviderStore(c),
-    });
     try {
-      const created = await deps.personaStore.createPersona({
+      const created = await createPersonaForOwner({
         tenant_id: TENANT_ID,
-        created_by: requestContext.subject.id,
-        updated_by: requestContext.subject.id,
-        id: ulid().toLowerCase(),
-        ...persona,
+        owner_id: requestContext.subject.id,
+        content: persona,
+        personaStore: deps.personaStore,
+        modelProviderStore: deps.resolveModelProviderStore(c),
       });
       return c.json({ data: toWirePersona(created) }, 201);
     } catch (error) {
@@ -257,15 +256,11 @@ export function createSessionPersonasRouter(deps: SessionPersonasRouterDeps) {
     if (personaId !== null && persona === undefined) {
       return c.json({ error: { message: `Persona not found: ${personaId}` } }, 404);
     }
-    const recorded = await deps.personaStore.recordPersonaActivation({
+    const recorded = await activateSessionPersona({
+      store: deps.personaStore,
       tenant_id: TENANT_ID,
-      id: ulid().toLowerCase(),
       session_id: sessionId,
-      turn_id: null,
-      persona_id: persona?.id ?? null,
-      persona_name: persona?.display_name ?? null,
-      model_name: persona?.model_name ?? null,
-      source: persona === undefined ? 'default' : 'explicit',
+      persona,
     });
     return c.json({ data: toWireActivation(recorded) }, 200);
   };

@@ -10,6 +10,7 @@ Cut a new release when:
 2. `main` HEAD is verified buildable on the exact head:
    - `pnpm install --frozen-lockfile` succeeds from a fresh checkout
    - `pnpm typecheck` passes
+   - `pnpm guide:build` runs as part of `pnpm build`, so each release ships a fresh Aman guide; commit the regenerated `knowledgePack.generated.ts` if it changed
    - `pnpm test` passes (or the focused suites covering the merged changes)
 
 Do not cut a release on an unverified head. If verification fails, fix `main` first.
@@ -32,8 +33,8 @@ This creates the `v0.2.0` tag on the current `main` HEAD and publishes the relea
 
 ## After cutting a release
 
-1. Update `README.md`: change the `--branch` pin in both install commands (Quick start and Docker Compose) to the new tag.
-2. Open a PR with the README change (follow `.github/pull_request_template.md`). The README pin keeps users on the latest stable release.
+1. Update `README.md`: the "Install on your own computer" section names the newest release tag and says whether it includes the installer. Change it to the new tag, and make the `git checkout <tag>` step the default once the release includes `installer/install.sh`.
+2. Open a PR with the README change (follow `.github/pull_request_template.md`). The named tag keeps users on the latest stable release.
 
 ## Versioning
 
@@ -47,5 +48,5 @@ Tags use `vMAJOR.MINOR.PATCH`:
 
 - [ ] New tag exists at https://github.com/ClimbOutLabs/amanuensis/releases
 - [ ] Tag points at a verified `main` HEAD
-- [ ] README install commands pin the new tag
+- [ ] README install section names the new tag
 - [ ] Private data scan passes on changed files

@@ -1,6 +1,11 @@
 import { mkdir } from 'node:fs/promises';
 import path from 'node:path';
+import { createLogger } from 'winston';
+import { McpCatalog } from '../../catalog/McpCatalog';
+import { SkillCatalog } from '../../catalog/SkillCatalog';
 import { flattenProviderModels } from '../../db/modelProviderStore';
+import { getPersonaKnowledgeIndexer } from '../../personaKnowledge/knowledgeIndexer';
+import { createKnowledgeLibrary } from './knowledgeLibrary';
 import { buildDemoSession, type DemoSeedSession } from './session';
 
 /**
@@ -32,11 +37,31 @@ export async function openDemoSeedSession(): Promise<DemoSeedSession> {
     await migrateSqliteToLatest(db);
     const { TENANT_ID } = await import('../../tenancy');
     const providers = await new SqliteModelProviderStore(db).listProviders({ tenant_id: TENANT_ID });
+    // The seed indexes the personas' libraries itself; the logger is quiet because the status of each document is reported.
+    const indexer = getPersonaKnowledgeIndexer({
+      knowledgeDir: configuration.PERSONA_KNOWLEDGE_DIR,
+      modelDir: configuration.MEMORY_EMBEDDINGS_MODEL_DIR,
+      logger: { info: () => undefined, warn: () => undefined, error: () => undefined },
+    });
     return buildDemoSession({
       db,
       tenantId: TENANT_ID,
       memoryDir: configuration.MEMORY_MARKDOWN_DIR,
       models: flattenProviderModels(providers).map(model => model.name),
+      connectors: {
+        mailUrl: configuration.MAIL_EMAIL_MCP_URL,
+        catalog: McpCatalog.load(configuration.MCP_CATALOG_PATH),
+        skillCatalog: SkillCatalog.load(),
+        // The seed reports connector outcomes itself; the boot steps' own log lines would only repeat them.
+        logger: createLogger({ silent: true }),
+      },
+      knowledge: createKnowledgeLibrary({
+        knowledgeDir: configuration.PERSONA_KNOWLEDGE_DIR,
+        tenantId: TENANT_ID,
+        enqueue: ({ personaId, documentId }) => {
+          indexer.enqueue({ tenantId: TENANT_ID, personaId, documentId });
+        },
+      }),
     });
   } catch (error) {
     await db.destroy();

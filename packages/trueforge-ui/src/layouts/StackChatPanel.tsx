@@ -4,6 +4,7 @@ import { lazy, Suspense, useEffect, type ReactNode } from 'react';
 
 import { useAui } from '../assistant-ui.js';
 import { AgentDetailsToggleButton } from '../atoms/AgentDetailsToggleButton.js';
+import { ChatHeaderMenu } from '../atoms/ChatHeaderMenu.js';
 import { NamedAgentHeaderLabel } from '../atoms/NamedAgentHeaderLabel.js';
 import { PageHeader } from '../atoms/PageHeader.js';
 import { ShellActions } from '../atoms/ShellActions.js';
@@ -12,6 +13,7 @@ import { cn } from '../atoms/lib/cn.js';
 import { Spinner } from '../atoms/primitives/Spinner.js';
 import { AgentConfigDrawerContainer } from '../containers/AgentConfigDrawerContainer.js';
 import { Thread } from '../containers/Thread.js';
+import { HelpNewChatBridge } from '../help/HelpStuckButton.js';
 import { Icon } from '../icons/Icon.js';
 import { useOptionalShellMode } from '../server/ShellModeContext.js';
 import { useSlot } from '../theme/SlotsProvider.js';
@@ -34,7 +36,6 @@ export type StackChatPanelProps = {
 export function StackChatPanel({ className, threadHeaderEnd }: StackChatPanelProps) {
   const aui = useAui();
   const shell = useOptionalShellMode();
-  const ClearChatButton = useSlot('ClearChatButton');
   const AgentDetailsPage = useSlot('AgentDetailsPage');
   const AgentsLibrary = useSlot('AgentsLibrary');
   const SessionsPage = useSlot('SessionsPage');
@@ -75,6 +76,7 @@ export function StackChatPanel({ className, threadHeaderEnd }: StackChatPanelPro
 
   return (
     <div className={cn('relative flex h-full min-h-0 flex-col', className)}>
+      <HelpNewChatBridge />
       {settingsOpen ? (
         <div className="min-h-0 flex-1">
           <Suspense
@@ -126,6 +128,9 @@ export function StackChatPanel({ className, threadHeaderEnd }: StackChatPanelPro
       ) : (
         <>
           <PageHeader
+            helpAction
+            singleLine
+            menu={<ChatHeaderMenu />}
             start={
               <>
                 {showNewActions ? (
@@ -155,7 +160,6 @@ export function StackChatPanel({ className, threadHeaderEnd }: StackChatPanelPro
             title={<NamedAgentHeaderLabel />}
             end={
               <>
-                <ClearChatButton />
                 <AgentDetailsToggleButton />
                 <SaveAgentButton />
                 {threadHeaderEnd}

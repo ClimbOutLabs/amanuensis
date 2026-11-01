@@ -4,6 +4,8 @@ import { AgentsClient } from "./api/resources/agents/client/Client.js";
 import { AuthClient } from "./api/resources/auth/client/Client.js";
 import { BugReportsClient } from "./api/resources/bugReports/client/Client.js";
 import { CatalogsClient } from "./api/resources/catalogs/client/Client.js";
+import { DataClient } from "./api/resources/data/client/Client.js";
+import { HelpClient } from "./api/resources/help/client/Client.js";
 import { InternalClient } from "./api/resources/internal/client/Client.js";
 import { McpServersClient } from "./api/resources/mcpServers/client/Client.js";
 import { MemoryClient } from "./api/resources/memory/client/Client.js";
@@ -24,14 +26,13 @@ import { SkillsClient } from "./api/resources/skills/client/Client.js";
 import { SpacesClient } from "./api/resources/spaces/client/Client.js";
 import { VoiceClient } from "./api/resources/voice/client/Client.js";
 import type { BaseClientOptions, BaseRequestOptions } from "./BaseClient.js";
-import { normalizeClientOptionsWithAuth, type NormalizedClientOptionsWithAuth } from "./BaseClient.js";
+import { type NormalizedClientOptionsWithAuth, normalizeClientOptionsWithAuth } from "./BaseClient.js";
 import * as core from "./core/index.js";
 
 export declare namespace TrueForge {
     export type Options = BaseClientOptions;
 
-    export interface RequestOptions extends BaseRequestOptions {
-    }
+    export interface RequestOptions extends BaseRequestOptions {}
 }
 
 export class TrueForge {
@@ -41,6 +42,8 @@ export class TrueForge {
     protected _auth: AuthClient | undefined;
     protected _bugReports: BugReportsClient | undefined;
     protected _server: ServerClient | undefined;
+    protected _data: DataClient | undefined;
+    protected _help: HelpClient | undefined;
     protected _mcpServers: McpServersClient | undefined;
     protected _models: ModelsClient | undefined;
     protected _personalization: PersonalizationClient | undefined;
@@ -61,7 +64,6 @@ export class TrueForge {
     protected _settings: SettingsClient | undefined;
 
     constructor(options: TrueForge.Options) {
-
         this._options = normalizeClientOptionsWithAuth(options);
     }
 
@@ -83,6 +85,14 @@ export class TrueForge {
 
     public get server(): ServerClient {
         return (this._server ??= new ServerClient(this._options));
+    }
+
+    public get data(): DataClient {
+        return (this._data ??= new DataClient(this._options));
+    }
+
+    public get help(): HelpClient {
+        return (this._help ??= new HelpClient(this._options));
     }
 
     public get mcpServers(): McpServersClient {
@@ -167,16 +177,24 @@ export class TrueForge {
      * @param {core.PassthroughRequest.RequestOptions} requestOptions - Per-request overrides (timeout, retries, headers, abort signal).
      * @returns {Promise<Response>} A standard Response object.
      */
-    public async fetch(input: Request | string | URL, init?: RequestInit, requestOptions?: core.PassthroughRequest.RequestOptions): Promise<Response> {
-
-        return core.makePassthroughRequest(input, init, {
-            baseUrl: this._options.baseUrl ?? this._options.environment,
-            headers: this._options.headers,
-            timeoutInSeconds: this._options.timeoutInSeconds,
-            maxRetries: this._options.maxRetries,
-            fetch: this._options.fetch,
-            logging: this._options.logging,
-            getAuthHeaders: async () => (await this._options.authProvider.getAuthRequest()).headers,
-        }, requestOptions);
+    public async fetch(
+        input: Request | string | URL,
+        init?: RequestInit,
+        requestOptions?: core.PassthroughRequest.RequestOptions,
+    ): Promise<Response> {
+        return core.makePassthroughRequest(
+            input,
+            init,
+            {
+                baseUrl: this._options.baseUrl ?? this._options.environment,
+                headers: this._options.headers,
+                timeoutInSeconds: this._options.timeoutInSeconds,
+                maxRetries: this._options.maxRetries,
+                fetch: this._options.fetch,
+                logging: this._options.logging,
+                getAuthHeaders: async () => (await this._options.authProvider.getAuthRequest()).headers,
+            },
+            requestOptions,
+        );
     }
 }

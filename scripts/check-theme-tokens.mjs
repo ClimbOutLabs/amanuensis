@@ -5,7 +5,7 @@
  *
  * Scans packages/trueforge-ui/src and packages/frontend/src and fails on:
  * - hex color literals (#fff, #1a1a1a), except fully-transparent #00000000
- * - rgb(), rgba(), hsl(), hsla() literals
+ * - rgb(), rgba(), hsl(), hsla(), oklch() literals
  * - named CSS colors used as values (white, black, ...)
  * - Tailwind built-in palette classes (bg-white, text-gray-500, ...)
  *
@@ -81,7 +81,8 @@ function isThemeDefinition(rel) {
 const HEX_RE = /#[0-9a-fA-F]{8}\b|#[0-9a-fA-F]{6}\b|#[0-9a-fA-F]{4}\b|#[0-9a-fA-F]{3}\b/g;
 // #00000000 / #0000 is `transparent` written longhand; the rule allows transparent.
 const TRANSPARENT_HEX_RE = /^#0{4}$|^#0{8}$/i;
-const COLOR_FN_RE = /\b(?:rgb|rgba|hsl|hsla)\s*\(/gi;
+// Not `\b`: an underscore is a word character, so `_rgb(` inside a Tailwind arbitrary value would slip past.
+const COLOR_FN_RE = /(?<![A-Za-z0-9-])(?:rgb|rgba|hsl|hsla|oklch)\s*\(/gi;
 
 const NAMED_COLORS = new Set(
   'aliceblue antiquewhite aqua aquamarine azure beige bisque black blanchedalmond blue blueviolet brown burlywood cadetblue chartreuse chocolate coral cornflowerblue cornsilk crimson cyan darkblue darkcyan darkgoldenrod darkgray darkgrey darkgreen darkkhaki darkmagenta darkolivegreen darkorange darkorchid darkred darksalmon darkseagreen darkslateblue darkslategray darkslategrey darkturquoise darkviolet deeppink deepskyblue dimgray dimgrey dodgerblue firebrick floralwhite forestgreen fuchsia gainsboro ghostwhite gold goldenrod gray grey green greenyellow honeydew hotpink indianred indigo ivory khaki lavender lavenderblush lawngreen lemonchiffon lightblue lightcoral lightcyan lightgoldenrodyellow lightgray lightgrey lightgreen lightpink lightsalmon lightseagreen lightskyblue lightslategray lightslategrey lightsteelblue lightyellow lime limegreen linen magenta maroon mediumaquamarine mediumblue mediumorchid mediumpurple mediumseagreen mediumslateblue mediumspringgreen mediumturquoise mediumvioletred midnightblue mintcream mistyrose moccasin navajowhite navy oldlace olive olivedrab orange orangered orchid palegoldenrod palegreen paleturquoise palevioletred papayawhip peachpuff peru pink plum powderblue purple rebeccapurple red rosybrown royalblue saddlebrown salmon sandybrown seagreen seashell sienna silver skyblue slateblue slategray slategrey snow springgreen steelblue tan teal thistle tomato turquoise violet wheat white whitesmoke yellow yellowgreen'.split(

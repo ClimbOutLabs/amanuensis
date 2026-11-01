@@ -7,7 +7,15 @@
  */
 import type { InternalToolCallInfo } from '../llm/LLMTypes';
 import type { SentinelCallIdentity, SentinelServices } from './context';
-import type { AutoDenyReason, Tier, TierDecision } from './tier';
+import { MAPS_SILENT_REASON } from './mapsToolNames';
+import {
+  ASKED_FIRST_SAY,
+  isSearchHoldCardText,
+  savedSearchHold,
+  SEARCH_SERVER_FALLBACK,
+  searchHoldAuditText,
+} from './searchHoldText';
+import { type AutoDenyReason, SANDBOX_SILENT_REASONS, type Tier, type TierDecision } from './tier';
 
 /** Recorded outcome, per tier. */
 export type AuditOutcome = 'logged' | 'ran' | 'approved' | 'denied' | 'auto_denied';
@@ -46,7 +54,9 @@ export async function recordClassificationAudit(input: {
   }
   const decision = input.decision;
   let outcome: AuditOutcome | null = null;
-  if (decision.tier === 1 && decision.sensitive_read) {
+  const silentRun = decision.reason === MAPS_SILENT_REASON;
+  const silentSandboxRun = SANDBOX_SILENT_REASONS.has(decision.reason);
+  if (decision.tier === 1 && (decision.sensitive_read || silentRun || silentSandboxRun)) {
     outcome = 'logged';
   } else if (decision.tier === 3 && decision.auto_deny !== null) {
     outcome = 'auto_denied';
@@ -94,15 +104,63 @@ export async function recordStandingTrustRun(input: {
 }
 
 /**
+ * Audit row text for a call that asked. Any search provider call, or a card shaped like a held
+ * search, is described without its query, including calls stored before audit_description existed.
+ */
+export function heldCallAuditText(
+  info: Pick<InternalToolCallInfo, 'original_tool_name' | 'audit_description' | 'search_provider_call' | 'tier3_card'>,
+): string {
+  if (info.audit_description !== undefined) {
+    return info.audit_description;
+  }
+  const card = info.tier3_card ?? null;
+  if (info.search_provider_call === true || (card !== null && isSearchHoldCardText(card.plain_what))) {
+    return searchHoldAuditText({
+      server: SEARCH_SERVER_FALLBACK,
+      say: savedSearchHold(card?.why_asked_again ?? null)?.say ?? ASKED_FIRST_SAY,
+      page: false,
+    });
+  }
+  return card?.plain_what ?? info.original_tool_name;
+}
+
+/**
  * Record what became of an action an unattended run held: held ('logged'), then refused or turned
  * down ('denied'), or approved without a later dispatch row ('approved'). An approval that still asks
  * is recorded after dispatch like any other.
  */
+/**
+ * One `auto_denied` row per call refused before it ran. A call refused before classification has no tier,
+ * so it is recorded at Tier 3, the tier that always asks before a change.
+ */
+export async function recordNotPreparedRefusals(input: {
+  services: SentinelServices;
+  identity: Pick<SentinelCallIdentity, 'tenant_id' | 'created_by' | 'conversation_id'>;
+  refusals: readonly { toolName: string; tier: Tier | undefined; message: string }[];
+}): Promise<void> {
+  const writer = input.services.audit;
+  if (writer === null) {
+    return;
+  }
+  for (const refusal of input.refusals) {
+    await writer.record({
+      tenant_id: input.identity.tenant_id,
+      created_by: input.identity.created_by,
+      conversation_id: input.identity.conversation_id,
+      tier: refusal.tier ?? 3,
+      tool_name: refusal.toolName,
+      description: `${refusal.toolName}: not done. ${refusal.message}`,
+      outcome: 'auto_denied',
+      auto_deny_reason: 'tool_not_prepared',
+    });
+  }
+}
+
 export async function recordHeldActionAudit(input: {
   services: SentinelServices;
   identity: Pick<SentinelCallIdentity, 'tenant_id' | 'created_by' | 'conversation_id'>;
   info: InternalToolCallInfo;
-  outcome: Extract<AuditOutcome, 'logged' | 'approved' | 'denied'>;
+  outcome: Extract<AuditOutcome, 'logged' | 'approved' | 'denied' | 'auto_denied'>;
   /** What happened, in plain words, written before the action's own description. */
   note: string;
 }): Promise<void> {
@@ -116,7 +174,7 @@ export async function recordHeldActionAudit(input: {
     conversation_id: input.identity.conversation_id,
     tier: input.info.tier ?? 3,
     tool_name: input.info.original_tool_name,
-    description: `${input.note}: ${input.info.tier3_card?.plain_what ?? input.info.original_tool_name}`,
+    description: `${input.note}: ${heldCallAuditText(input.info)}`,
     outcome: input.outcome,
     auto_deny_reason: null,
   });

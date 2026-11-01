@@ -18,8 +18,27 @@ import {
   ComposerAttachmentsContainer,
   MessageAttachmentsContainer,
 } from '@/containers/AttachmentsContainer.js';
+import { ServerProvider } from '@/server/ServerContext.js';
 import { SlotsProvider } from '@/theme/SlotsProvider.js';
+import { createMockAgentUIServer } from '../server/mockServer.js';
 import { RuntimeHarness } from './RuntimeHarness.js';
+
+function sentImageMessage(attachmentId: string): ThreadMessageLike {
+  return {
+    role: 'user',
+    content: 'Please inspect this',
+    attachments: [
+      {
+        id: attachmentId,
+        type: 'image',
+        name: 'result.png',
+        contentType: 'image/png',
+        status: { type: 'complete' },
+        content: [{ type: 'image', image: 'data:image/png;base64,iVBORw0KGgo=', filename: 'result.png' }],
+      },
+    ],
+  };
+}
 
 beforeAll(() => {
   Object.defineProperty(URL, 'createObjectURL', {
@@ -144,44 +163,50 @@ describe('attachment containers', () => {
     });
   });
 
-  it('opens a full-size preview for a sent image attachment', () => {
+  it('never previews the stored original of a sent image', () => {
     render(
-      <RuntimeHarness
-        messages={[
-          {
-            role: 'user',
-            content: 'Please inspect this',
-            attachments: [
-              {
-                id: 'image-1',
-                type: 'image',
-                name: 'result.png',
-                contentType: 'image/png',
-                status: { type: 'complete' },
-                content: [
-                  {
-                    type: 'image',
-                    image: 'data:image/png;base64,iVBORw0KGgo=',
-                    filename: 'result.png',
-                  },
-                ],
-              },
-            ],
-          },
-        ]}
-      >
+      <RuntimeHarness messages={[sentImageMessage('image-1')]}>
         <ThreadPrimitive.Messages>{() => <MessageAttachmentsContainer />}</ThreadPrimitive.Messages>
       </RuntimeHarness>,
     );
 
     expect(screen.queryByRole('button', { name: 'Remove file' })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Open attachment preview' }));
+    expect(screen.queryByRole('button', { name: 'Open attachment preview' })).not.toBeInTheDocument();
+    expect(document.querySelector('img[src^="data:"]')).toBeNull();
+    expect(screen.getByText('result.png')).toBeInTheDocument();
+  });
 
-    const dialog = screen.getByRole('dialog', { name: 'Attachment preview' });
-    expect(dialog).toHaveAttribute('open');
+  it('opens a full-size preview of the re-encoded copy of a sent image', async () => {
+    const imageId = 'b'.repeat(32);
+    const showTurnImages = vi.fn(() =>
+      Promise.resolve({
+        status: 'done' as const,
+        images: [{ status: 'shown' as const, image_id: imageId, width: 4, height: 4 }],
+      }),
+    );
+    const server = Object.assign(createMockAgentUIServer(), {
+      chatImages: {
+        listTurnImages: vi.fn(),
+        showTurnImages,
+        imageUrl: ({ sessionId, imageId: id }: { sessionId: string; imageId: string }) =>
+          `/api/chat-images/sessions/${sessionId}/images/${id}`,
+      },
+    });
+    render(
+      <ServerProvider server={server}>
+        <RuntimeHarness messages={[sentImageMessage('turn-9-file-0')]} threadId="local-1" remoteId="session-1">
+          <ThreadPrimitive.Messages>{() => <MessageAttachmentsContainer />}</ThreadPrimitive.Messages>
+        </RuntimeHarness>
+      </ServerProvider>,
+    );
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Open attachment preview' }));
     expect(screen.getByRole('img', { name: 'Attachment preview' })).toHaveAttribute(
       'src',
-      'data:image/png;base64,iVBORw0KGgo=',
+      `/api/chat-images/sessions/session-1/images/${imageId}`,
+    );
+    expect(showTurnImages).toHaveBeenCalledWith(
+      expect.objectContaining({ sessionId: 'session-1', turnId: 'turn-9', source: { kind: 'upload', index: 0 } }),
     );
   });
 });

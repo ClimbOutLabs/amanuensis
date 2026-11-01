@@ -12,6 +12,12 @@ export const SentinelUserSettingsSchema = z
     search_without_asking: z
       .boolean()
       .describe('While on, your designated search provider runs web searches without asking. Off asks for each one.'),
+    maps_without_asking: z.boolean().describe('While on, map requests run without asking. Off asks for each one.'),
+    sandbox_without_asking: z
+      .boolean()
+      .describe(
+        'While on, code, commands and workspace files in the sandbox run without asking. Off asks for each one.',
+      ),
   })
   .openapi('SentinelUserSettings');
 
@@ -22,6 +28,8 @@ export const UpdateSentinelUserSettingsRequestSchema = z
       'Replaces the relaxed Tier 2 kinds; omitted keeps the current set.',
     ),
     search_without_asking: z.boolean().optional().describe('New search setting; omitted keeps the current value.'),
+    maps_without_asking: z.boolean().optional().describe('New maps setting; omitted keeps the current value.'),
+    sandbox_without_asking: z.boolean().optional().describe('New sandbox setting; omitted keeps the current value.'),
   })
   .openapi('UpdateSentinelUserSettingsRequest');
 

@@ -27,7 +27,7 @@ const client = new TrueForge({
 });
 ```
 
-Point `baseUrl` at your running TrueForge server; `http://localhost:8790` is the Quickstart default. When [OIDC login](/authentication/overview) is enabled, pass `token` (an ID token from your IdP; see [Get a token and connect](/api/quickstart#get-a-token-and-connect)). When login is off, omit it.
+Point `baseUrl` at your running TrueForge server; `http://localhost:8790` is the Quickstart default. When [OIDC login](/authentication/overview) is enabled, pass `token` (an ID token from Aman's sign-in service; see [Get a token and connect](/api/quickstart#get-a-token-and-connect)). When login is off, omit it.
 
 ## Quick Start
 
@@ -597,7 +597,7 @@ Last event on every stream. `state.status` is one of:
 - **`cancelled`** — carries a `reason`: `client-cancelled`, `server-execution-timeout`, `cancelled-for-next-turn`, or `abandoned`.
 - **`error`** — carries a `message`.
 
-`metrics`, when present, aggregates the whole turn: `total_input_tokens`, `total_output_tokens`, `total_tokens`, `total_cache_read_tokens`, `total_cache_write_tokens`, `total_reasoning_tokens`, and `total_cost_in_usd`.
+`metrics`, when present, aggregates the whole turn: `total_input_tokens`, `total_output_tokens`, `total_tokens`, `total_cache_read_tokens`, `total_cache_write_tokens`, `total_reasoning_tokens`, and `total_cost_in_usd`. `last_call_input_tokens` is the input of the turn's last model call, the context size the model last saw; it is absent on turns recorded before it existed.
 
 ```json turn.done — paused for approval wrap
 {

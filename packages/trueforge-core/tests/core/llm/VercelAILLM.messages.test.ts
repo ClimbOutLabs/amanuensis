@@ -12,7 +12,9 @@ import {
   toAssistantModelMessage,
   toFilePart,
   toUserContent,
+  VERCEL_AI_PROVIDER_NAMES,
 } from '../../../src/core/llm/VercelAILLM';
+import { internalSystemTag, untrustedDocumentTag } from '../../../src/core/runtime/contextUtils';
 
 // ─────────── parseMimeFromDataUri ───────────
 
@@ -348,10 +350,9 @@ describe('toAssistantModelMessage', () => {
 // ─────────── convertMessages ───────────
 
 describe('convertMessages', () => {
-  it('extracts system messages as instructions (joined with double newlines)', () => {
+  it('extracts the leading system message as instructions', () => {
     const messages: ChatCompletionMessageParam[] = [
       { role: 'system', content: 'Prompt A' },
-      { role: 'system', content: 'Prompt B' },
       { role: 'user', content: 'hi' },
     ];
     const { instructions, messages: result } = convertMessages({
@@ -359,9 +360,21 @@ describe('convertMessages', () => {
       provider: 'google-gemini',
       providerName: 'google-gemini',
     });
+    expect(instructions).toBe('Prompt A');
+    expect(result).toEqual([{ role: 'user', content: 'hi' }]);
+  });
+
+  it('keeps system messages as instructions when there is no user message to carry them', () => {
+    const { instructions, messages: result } = convertMessages({
+      messages: [
+        { role: 'system', content: 'Prompt A' },
+        { role: 'system', content: 'Prompt B' },
+      ],
+      provider: 'openai',
+      providerName: 'openai',
+    });
     expect(instructions).toBe('Prompt A\n\nPrompt B');
-    expect(result).toHaveLength(1);
-    expect(result[0]).toMatchObject({ role: 'user' });
+    expect(result).toEqual([]);
   });
 
   it('returns undefined instructions when there are no system messages', () => {
@@ -371,6 +384,84 @@ describe('convertMessages', () => {
       providerName: 'google-gemini',
     });
     expect(instructions).toBeUndefined();
+  });
+
+  it('a later system message is per-reply context in its own message before the current one, not instructions', () => {
+    const { instructions, messages: result } = convertMessages({
+      messages: [
+        { role: 'system', content: 'Static instruction' },
+        { role: 'user', content: 'earlier question' },
+        { role: 'assistant', content: 'earlier answer' },
+        { role: 'system', content: 'Host context for this reply.' },
+        { role: 'user', content: 'current question' },
+      ],
+      provider: 'openai',
+      providerName: 'openai',
+    });
+    expect(instructions).toBe('Static instruction');
+    expect(result.slice(-2)).toEqual([
+      {
+        role: 'user',
+        content: [
+          { type: 'text', text: 'Host context for this reply.' },
+          { type: 'text', text: expect.stringContaining("Answer the person's own message") },
+        ],
+      },
+      { role: 'user', content: 'current question' },
+    ]);
+  });
+
+  it("host context goes before the person's message, not before attached file text that follows it", () => {
+    const fileText = untrustedDocumentTag('Extracted text for notes.pdf: the invoice total is 40.');
+    const nudge = internalSystemTag('Answer the person now.');
+    const { messages: result } = convertMessages({
+      messages: [
+        { role: 'system', content: 'Static instruction' },
+        { role: 'system', content: 'Host context for this reply.' },
+        { role: 'user', content: 'What is the total?' },
+        { role: 'user', content: [{ type: 'text', text: fileText }] },
+        { role: 'user', content: nudge },
+      ],
+      provider: 'openai',
+      providerName: 'openai',
+    });
+    expect(result).toEqual([
+      {
+        role: 'user',
+        content: [
+          { type: 'text', text: 'Host context for this reply.' },
+          { type: 'text', text: expect.stringContaining("Answer the person's own message") },
+        ],
+      },
+      { role: 'user', content: 'What is the total?' },
+      { role: 'user', content: [{ type: 'text', text: fileText }] },
+      { role: 'user', content: nudge },
+    ]);
+    // The host context makes no claim about which message follows, and calls none of it the person's message.
+    expect(JSON.stringify(result[0])).not.toContain('comes next');
+  });
+
+  it('the static instruction is never a later system message, even with no history', () => {
+    const { instructions, messages: result } = convertMessages({
+      messages: [
+        { role: 'system', content: 'Static instruction' },
+        { role: 'system', content: 'Host context for this reply.' },
+        { role: 'user', content: 'hi' },
+      ],
+      provider: 'anthropic',
+      providerName: 'anthropic',
+    });
+    expect(instructions).toBe('Static instruction');
+    expect(result).toEqual([
+      {
+        role: 'user',
+        content: [
+          { type: 'text', text: 'Host context for this reply.' },
+          { type: 'text', text: expect.stringContaining("Answer the person's own message") },
+        ],
+      },
+      { role: 'user', content: 'hi' },
+    ]);
   });
 
   it('preserves user/assistant/tool message ordering', () => {
@@ -452,6 +543,86 @@ describe('convertMessages', () => {
 });
 
 // ─────────── convertTools ───────────
+
+const STATIC_INSTRUCTION = 'Static instruction';
+const REPLY_CONTEXT = "Today's date is 2026-10-22.";
+const RECALLED_BLOCK = '<aman-memory>\nFrom something Aman read: Robin moved to Lisbon.\n</aman-memory>';
+const EARLIER_HISTORY: ChatCompletionMessageParam[] = [
+  { role: 'user', content: 'earlier question' },
+  { role: 'assistant', content: 'earlier answer' },
+];
+
+/** The message list AgentThread sends for one reply: static instruction, history, per-reply block, recall, current message. */
+function replyMessages({
+  history,
+  recalled,
+  userText,
+}: {
+  history: ChatCompletionMessageParam[];
+  recalled: string;
+  userText: string;
+}): ChatCompletionMessageParam[] {
+  return [
+    { role: 'system', content: STATIC_INSTRUCTION },
+    ...history,
+    { role: 'system', content: REPLY_CONTEXT },
+    { role: 'system', content: recalled },
+    { role: 'user', content: userText },
+  ];
+}
+
+describe.each(VERCEL_AI_PROVIDER_NAMES)('convertMessages on %s', provider => {
+  it.each([
+    ['with history', EARLIER_HISTORY],
+    ['with no history', []],
+  ])('keeps the per-reply block and recalled memory out of the system prompt, %s', (_label, history) => {
+    const { instructions, messages: result } = convertMessages({
+      messages: replyMessages({ history, recalled: RECALLED_BLOCK, userText: 'current question' }),
+      provider,
+      providerName: provider,
+    });
+    expect(instructions).toBe(STATIC_INSTRUCTION);
+    expect(result.some(message => message.role === 'system')).toBe(false);
+    // The person's words are the last message, alone and unchanged; the recalled block sits before it.
+    expect(result.slice(-2)).toEqual([
+      {
+        role: 'user',
+        content: [
+          { type: 'text', text: REPLY_CONTEXT },
+          { type: 'text', text: RECALLED_BLOCK },
+          { type: 'text', text: expect.stringContaining("Answer the person's own message") },
+        ],
+      },
+      { role: 'user', content: 'current question' },
+    ]);
+  });
+
+  it('two consecutive replies send byte-identical instructions', () => {
+    const firstReply = convertMessages({
+      messages: replyMessages({
+        history: [],
+        recalled: '<aman-memory>\nFrom something Aman read: Robin likes tea.\n</aman-memory>',
+        userText: 'Remember that Robin likes tea.',
+      }),
+      provider,
+      providerName: provider,
+    });
+    const secondReply = convertMessages({
+      messages: replyMessages({
+        history: [
+          { role: 'user', content: 'Remember that Robin likes tea.' },
+          { role: 'assistant', content: 'Saved.' },
+        ],
+        recalled: RECALLED_BLOCK,
+        userText: 'Where does Robin live now?',
+      }),
+      provider,
+      providerName: provider,
+    });
+    expect(secondReply.instructions).toBe(firstReply.instructions);
+    expect(secondReply.messages).not.toEqual(firstReply.messages);
+  });
+});
 
 describe('convertTools', () => {
   it('returns undefined for undefined input', () => {

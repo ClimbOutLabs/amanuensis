@@ -503,7 +503,7 @@ export function formatSourceEntry(hit: PersonaKnowledgeHit): string {
     if (rawTitle === '' || SAFE_URL_SCHEME_PATTERN.test(rawTitle) || rawTitle === rawUrl) {
       return url;
     }
-    return `${inertFooterText(prettifyUrlDerivedTitle(rawTitle), TITLE_MAX_LENGTH)} — ${url}`;
+    return `${inertFooterText(prettifyUrlDerivedTitle(rawTitle), TITLE_MAX_LENGTH)}, ${url}`;
   }
   const title = inertFooterText(prettifyUrlDerivedTitle(rawTitle), TITLE_MAX_LENGTH);
   if (label !== '') {

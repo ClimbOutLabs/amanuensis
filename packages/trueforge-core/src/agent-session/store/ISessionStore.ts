@@ -22,7 +22,7 @@ import type { SessionRecord } from '../models/SessionRecord';
 import type { TurnRecord } from '../models/TurnRecord';
 import type { PersistedTurnEvent, SessionEventItem, TurnDoneEvent } from '../schemas/events';
 import type { TokenPagination } from '../schemas/pagination';
-import type { SessionMetadata } from '../schemas/session';
+import type { SessionMetadata, SessionMetrics } from '../schemas/session';
 import type { TaskChecklist, TaskChecklistItem } from '../schemas/taskChecklist';
 import type { CancellationReason, TerminalTurnState } from '../schemas/turn';
 
@@ -50,6 +50,18 @@ export type UpdateSessionInput<TSessionCustom extends object = Record<string, ne
   title: SessionRecord<TSessionCustom>['title'] | undefined;
   metadata: SessionRecord<TSessionCustom>['metadata'] | undefined;
 };
+
+/** Archived timestamps and metrics for a session that data import has just replayed. */
+export interface StampImportedSessionInput {
+  tenant_id: string;
+  session_id: string;
+  created_at: Date;
+  updated_at: Date;
+  last_activity_timestamp_ms: number;
+  metrics: SessionMetrics;
+  /** One entry per replayed turn; each turn must already exist in the session. */
+  turns: { turn_id: string; created_at: Date; updated_at: Date }[];
+}
 
 export interface GetSessionInput {
   tenant_id: string;
@@ -143,6 +155,21 @@ export interface DeleteSessionFolderInput {
   created_by: string;
 }
 
+/** A card whose request already ended and was cleared. It can never run, so this only hides it. */
+export interface ApprovalDismissalRecord {
+  thread_id: string;
+  tool_call_id: string;
+  dismissed_at: string;
+}
+
+export interface RecordApprovalDismissalInput extends ApprovalDismissalRecord {
+  session_id: string;
+}
+
+export interface ListApprovalDismissalsInput {
+  session_id: string;
+}
+
 export interface SetSessionFolderInput {
   tenant_id: string;
   session_id: string;
@@ -161,6 +188,10 @@ export interface ListSessionsInput {
   end_timestamp: Date | undefined;
   /** When set, only sessions bound to this named agent id. */
   agent_id: string | undefined;
+  /** When set, only sessions filed in this folder. */
+  folder_id: string | undefined;
+  /** When true, only sessions with no folder. Never combined with `folder_id`. */
+  no_folder: boolean;
   /** When set, match creator or named-agent binding. Empty `agent_ids` means creator-only. */
   created_by_or_agent_ids:
     | {
@@ -434,6 +465,17 @@ export interface ISessionStore<
    */
   createSession(input: CreateSessionInput<TSessionCustom>): Promise<void>;
 
+  /**
+   * Import-only. Overwrites the clock-stamped fields that createSession,
+   * createTurn and the turn-state writes set to "now" (session and turn
+   * `created_at` / `updated_at`, `last_activity_timestamp_ms`, `metrics`) with
+   * the archived values, so a restored chat keeps its original dates and
+   * totals. Bypasses the terminal-turn fence; nothing else calls it.
+   * Missing session or turn rejects with the matching not-found error and
+   * writes nothing.
+   */
+  stampImportedSession(input: StampImportedSessionInput): Promise<void>;
+
   /** Permanently removes a session and all related data; missing sessions are a no-op. */
   deleteSession(input: DeleteSessionInput): Promise<void>;
 
@@ -553,13 +595,16 @@ export interface ISessionStore<
    * Also bumps `session.last_activity_timestamp_ms` and increments
    * `session.metrics.total_turns` in that same atomic unit.
    *
+   * One reply at a time: while the session's tip is `running`, reject with
+   * `PreviousTurnRunningError` naming the tip, whatever `previous_turn_id` is.
+   * Only a Cancel or the turn's own end frees the chat. Of two concurrent
+   * creates on one session, only the first commits.
+   *
    * Fork semantics for `turn.previous_turn_id`:
-   * - `null` — new root turn (no parent); always allowed.
+   * - `null` — new root turn (no parent).
    * - string — fork/chain from that turn when it exists. Tip-equality is NOT
-   *   required; concurrent forks from the same tip both succeed. Unknown id is
-   *   allowed (relaxed) and treated as no inheritance. If that turn exists and
-   *   is still `running`, reject with {@link PreviousTurnRunningError} —
-   *   callers must {@link freezeAndGetTurn} first.
+   *   required. Unknown id is allowed (relaxed) and treated as no inheritance.
+   *   If that turn exists and is still `running`, reject the same way.
    * `last_turn_id` always advances to the new turn in the same atomic unit.
    *
    * `update_session_title_if_not_exist`: when set AND `session.title` is
@@ -630,6 +675,15 @@ export interface ISessionStore<
 
   /** Fails closed selected records left running by a prior process; providers cannot be reattached. */
   recoverRunningCommandExecutions(input: RecoverRunningCommandExecutionsInput): Promise<number>;
+
+  /**
+   * Records that a card whose request ended was cleared. Nothing runs and no turn is created.
+   * Recording the same thread and tool call again keeps the first record.
+   */
+  recordApprovalDismissal(input: RecordApprovalDismissalInput): Promise<void>;
+
+  /** Every dismissal recorded for the session, so a reload does not show cleared cards again. */
+  listApprovalDismissals(input: ListApprovalDismissalsInput): Promise<ApprovalDismissalRecord[]>;
 
   /** Adds thread snapshots to the turn (sub-agent spawns). */
   addThreads(input: AddThreadsInput): Promise<void>;

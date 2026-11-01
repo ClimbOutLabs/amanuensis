@@ -49,8 +49,7 @@ describe('LocalSandboxProvider cancellation propagation', () => {
     const sandboxRootPathParent = await mkdtemp(join(tmpdir(), 'tfy-local-cancel-'));
     const codeModeSocketParentPath = await mkdtemp(join(tmpdir(), 'tfy-local-cm-'));
     const sandboxId = join(sandboxRootPathParent, 'sandbox');
-    await mkdir(join(sandboxId, '.venv', 'bin'), { recursive: true });
-    await writeFile(join(sandboxId, '.venv', 'bin', 'python'), '');
+    await mkdir(sandboxId);
 
     const session: hostRun.SessionResult = {
       stdoutText: '',
@@ -95,8 +94,7 @@ describe('LocalSandboxProvider cancellation propagation', () => {
     const sandboxRootPathParent = await mkdtemp(join(tmpdir(), 'tfy-local-cancel-'));
     const codeModeSocketParentPath = await mkdtemp(join(tmpdir(), 'tfy-local-cm-'));
     const sandboxId = join(sandboxRootPathParent, 'sandbox');
-    await mkdir(join(sandboxId, '.venv', 'bin'), { recursive: true });
-    await writeFile(join(sandboxId, '.venv', 'bin', 'python'), '');
+    await mkdir(sandboxId);
 
     const session: hostRun.SessionResult = {
       stdoutText: '',
@@ -145,6 +143,15 @@ describe('LocalSandboxProvider cancellation propagation', () => {
     jest.mocked(hostRun.initSrt).mockResolvedValue(undefined);
     const resetSrt = jest.mocked(hostRun.resetSrt).mockResolvedValue(undefined);
     jest.mocked(codeMode.assertCodeModeSocketParentPath).mockReturnValue(codeModeSocketParentPath);
+    jest.mocked(hostRun.runSupervisorSession).mockResolvedValue({
+      stdoutText: '',
+      stderrText: 'missing-python-for-cancellation-test: not found',
+      exitCode: 127,
+      protocolError: undefined,
+      timedOut: false,
+      signal: undefined,
+      childPid: undefined,
+    });
     const removeSandbox = jest.mocked(hostRun.removeSandbox);
     jest.mocked(ulid).mockReturnValueOnce('OWNED-ROOT').mockReturnValueOnce('PREEXISTING-ROOT');
     const provider = new LocalSandboxProvider({

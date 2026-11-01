@@ -2,6 +2,8 @@ import type { CallToolRequest } from '@modelcontextprotocol/sdk/types.js';
 import dedent from 'dedent';
 import type { Logger } from 'winston';
 import { z } from 'zod';
+import { type ConnectorAvailability, connectorUnavailableLine } from '../connectors/connectorAvailability';
+import { isMailConnectorGuess, MAIL_CONNECTOR_NAME } from '../email/mailConnector/toolContract';
 import type { ApprovalDecision } from '../events/schema';
 import { InstructionBuilder } from '../InstructionBuilder';
 import type { InternalToolCallInfo } from '../llm/LLMTypes';
@@ -13,6 +15,7 @@ import {
   isCallToolResponseResult,
   type IToolSet,
   type ListToolsResolvedResponse,
+  type ToolInvocationContext,
   toolResultResponse,
 } from '../mcp/IMCPServer';
 import { defineTool, LocalToolMCP, type ToolDefinition } from '../mcp/LocalToolMCP';
@@ -20,6 +23,7 @@ import type { ConnectorBinding } from '../permissions/approvalTokens';
 import { structuredEditRejection } from '../sandbox/structuredEditRejection';
 import type { AgentTracing } from '../tracing/AgentTracing';
 import { extractErrorLogFields } from '../util/errorLogFields';
+import { findBundle, TOOL_BUNDLE_NAMES } from './toolBundleCatalog';
 
 export const DEFERRED_TOOLS_SERVER_ID = 'deferred-tools';
 const DEFERRED_TOOLS_INSTRUCTION = 'deferred-tools-instructions';
@@ -50,6 +54,8 @@ const ALIASABLE_META_TOOL_NAMES: ReadonlySet<string> = new Set([
 
 /** Cap on how many names a rejection lists, so a server with hundreds of tools stays readable. */
 const MAX_LISTED_NAMES = 20;
+
+const STOP_GUESSING = 'Do not try other names; tell the person this.';
 
 /** Renders a name list for a rejection hint, bounded to {@link MAX_LISTED_NAMES}. */
 function boundedNameList(names: readonly string[]): string {
@@ -82,21 +88,26 @@ const callToolSchema = z.object({
   input: z.record(z.string(), z.unknown()).default({}).describe('Arguments to pass to the tool.'),
 });
 
+export type CallToolWrapper = z.infer<typeof callToolSchema>;
+
 /**
- * Extract the inner tool input from a deferred `call_tool` wrapper's arguments.
+ * Parse a deferred `call_tool` wrapper's arguments.
  *
  * Mirrors the unwrap branch of DeferredTool.toolCallInfo: when mint classified
  * the underlying tool, the approval token covers (underlying_name, input), so
- * the verifier must hash the same inner input. Returns undefined when the
- * wrapper does not parse: mint then classified the wrapper itself, and the
- * verifier must hash the wrapper too.
+ * the verifier must hash the same inner input and confirm the wrapper still
+ * names that tool and server. Returns undefined when the wrapper does not
+ * parse: the verifier must then hash the wrapper too, matching a mint that
+ * classified the wrapper itself (the metadata-unavailable fallback).
  */
-export function tryUnwrapCallToolInput(wrapperArgs: Record<string, unknown>): Record<string, unknown> | undefined {
+export function tryParseCallToolWrapper(wrapperArgs: Record<string, unknown>): CallToolWrapper | undefined {
   const parsed = callToolSchema.safeParse(wrapperArgs);
-  if (!parsed.success) {
-    return undefined;
-  }
-  return parsed.data.input;
+  return parsed.success ? parsed.data : undefined;
+}
+
+/** The inner tool input of a deferred `call_tool` wrapper, or undefined when the wrapper does not parse. */
+export function tryUnwrapCallToolInput(wrapperArgs: Record<string, unknown>): Record<string, unknown> | undefined {
+  return tryParseCallToolWrapper(wrapperArgs)?.input;
 }
 
 interface ResolvedServerTools {
@@ -117,26 +128,22 @@ export class DeferredTool extends LocalToolMCP {
   private readonly serverMap: Map<string, IToolSet>;
   private readonly tools: ToolDefinition[];
   private readonly logger: Logger;
-  /**
-   * Host (built-in, systemToolSets) tool providers, e.g. get_current_datetime. Their tools
-   * are called directly by name, never through call_tool, but a model that has just learned
-   * server tools live behind call_tool sometimes addresses a host tool the same way. See
-   * routeToHostTool.
-   */
-  private readonly hostToolSets: readonly IToolSet[];
+  /** Undefined when the list could not be read, so nothing is claimed about what is set up. */
+  private readonly setUpConnectorNames: readonly string[] | undefined;
 
   constructor(
     servers: readonly IToolSet[],
     options: {
       tracing: AgentTracing;
       logger: Logger;
-      hostToolSets?: readonly IToolSet[];
+      /** Every connector set up for the tenant, whether or not this chat has it. */
+      setUpConnectorNames?: readonly string[] | undefined;
     },
   ) {
     super({ tracing: options.tracing });
     this.logger = options.logger.child({ module: 'DeferredTool' });
+    this.setUpConnectorNames = options.setUpConnectorNames;
     this.serverMap = new Map(servers.map(s => [s.name, s]));
-    this.hostToolSets = options.hostToolSets ?? [];
     this.tools = this.buildTools();
   }
 
@@ -161,7 +168,9 @@ export class DeferredTool extends LocalToolMCP {
         The following MCP servers have deferred tool loading. Their tools are NOT pre-loaded.
         ${deferredList}
 
-        The Agent MUST use ${LIST_TOOLS_NAME} and ${GET_TOOL_INFO_NAME} to discover tools before calling them.`,
+        The Agent MUST use ${LIST_TOOLS_NAME} and ${GET_TOOL_INFO_NAME} to discover tools before calling them.
+        Built-in tools are called directly by name, never through ${LIST_TOOLS_NAME}.
+        When a server is not available, the result says why in one line: tell the person that line and never try other server names.`,
     );
   }
 
@@ -186,7 +195,16 @@ export class DeferredTool extends LocalToolMCP {
         tool: params.name,
         errors: parsed.error.issues,
       });
-      return { ...(await super.toolCallInfo(params)), is_deferred: true };
+      // A wrapper that does not parse names no real tool, so there is nothing
+      // to judge: fail closed with the reason instead of carding call_tool.
+      return {
+        ...(await super.toolCallInfo(params)),
+        is_deferred: true,
+        pre_dispatch_failure: {
+          kind: 'pre_dispatch_failed',
+          message: `${CALL_TOOL_NAME} needs the name of a server, the name of a tool on it, and the tool's arguments.`,
+        },
+      };
     }
     if (ALIASABLE_META_TOOL_NAMES.has(parsed.data.tool_name)) {
       // Aliased to a local meta tool: same info as calling that meta tool directly, not the
@@ -198,19 +216,45 @@ export class DeferredTool extends LocalToolMCP {
       return { ...base, is_deferred: true };
     }
     const server = this.resolveServer(parsed.data.mcp_server);
-    if (!server) {
-      this.logger.warn(`Server not found for toolCallInfo`, {
-        mcpServer: parsed.data.mcp_server,
-        toolName: parsed.data.tool_name,
-        availableServers: [...this.serverMap.keys()],
+    if (server) {
+      const underlying = await server.toolCallInfo({
+        name: parsed.data.tool_name,
+        arguments: parsed.data.input,
       });
-      return { ...(await super.toolCallInfo(params)), is_deferred: true };
+      return { ...underlying, is_deferred: true };
     }
-    const underlying = await server.toolCallInfo({
-      name: parsed.data.tool_name,
-      arguments: parsed.data.input,
+    this.logger.warn(`Server not found for toolCallInfo`, {
+      mcpServer: parsed.data.mcp_server,
+      toolName: parsed.data.tool_name,
+      availableServers: [...this.serverMap.keys()],
     });
-    return { ...underlying, is_deferred: true };
+    // A built-in tool is never run through call_tool, and anything else names no connector:
+    // fail closed with the reason, never with an approval card for call_tool.
+    return {
+      ...(await super.toolCallInfo(params)),
+      is_deferred: true,
+      pre_dispatch_failure: {
+        kind: 'pre_dispatch_failed',
+        message: this.serverNotFoundText(parsed.data.mcp_server),
+      },
+    };
+  }
+
+  /**
+   * The params an approval for a `call_tool` call is re-checked against at dispatch, as the
+   * wrapped connector re-derives them, exactly as for a direct call to it. The wrapper's own
+   * tools bind only to their arguments, so anything that is not a resolved server returns undefined.
+   */
+  async liveMintParams(params: CallToolRequest['params']): Promise<Record<string, unknown> | undefined> {
+    if (params.name !== CALL_TOOL_NAME) {
+      return undefined;
+    }
+    const parsed = callToolSchema.safeParse(params.arguments);
+    if (!parsed.success || ALIASABLE_META_TOOL_NAMES.has(parsed.data.tool_name)) {
+      return undefined;
+    }
+    const server = this.resolveServer(parsed.data.mcp_server);
+    return server?.liveMintParams?.({ name: parsed.data.tool_name, arguments: parsed.data.input });
   }
 
   /** The connector a `call_tool` wrapper will reach right now, as its own tool set reports it. */
@@ -222,10 +266,17 @@ export class DeferredTool extends LocalToolMCP {
     if (!parsed.success || ALIASABLE_META_TOOL_NAMES.has(parsed.data.tool_name)) {
       return undefined;
     }
-    return this.resolveServer(parsed.data.mcp_server)?.resolveConnector?.({
+    const server = this.resolveServer(parsed.data.mcp_server);
+    return server?.resolveConnector?.({
       name: parsed.data.tool_name,
       arguments: parsed.data.input,
     });
+  }
+
+  /** The id and display name of the connector a `call_tool` wrapper names, or undefined when it names none. */
+  resolvedServer(name: string): { id: string; name: string } | undefined {
+    const server = this.resolveServer(name);
+    return server === undefined ? undefined : { id: server.id, name: server.name };
   }
 
   private resolveServer(name: string): IToolSet | undefined {
@@ -233,91 +284,62 @@ export class DeferredTool extends LocalToolMCP {
   }
 
   /**
-   * Finds the host (systemToolSets) provider exposing `toolName`, if any. Host tools are
-   * normally called directly by name, not through call_tool, so this only runs after the
-   * named MCP server has already failed to resolve the name, so it never shadows a real
-   * server tool of the same name.
+   * The set-up connector the model most likely meant: the same name in any case, or the Email connector for a
+   * mail-like guess. Undefined when the name matches nothing that is set up.
    */
-  private async findHostToolProvider(toolName: string): Promise<IToolSet | undefined> {
-    for (const hostSet of this.hostToolSets) {
-      const listed = await hostSet.listTools();
-      if (isAuthRequired(listed)) {
-        continue;
-      }
-      if (listed.result.tools.some(t => t.name === toolName)) {
-        return hostSet;
-      }
+  private meantConnector(mcpServer: string): string | undefined {
+    const lowered = mcpServer.toLowerCase();
+    const known = [...new Set([...(this.setUpConnectorNames ?? []), ...this.serverMap.keys()])];
+    const sameName = known.find(name => name.toLowerCase() === lowered);
+    if (sameName !== undefined) {
+      return sameName;
     }
-    return undefined;
+    return isMailConnectorGuess(mcpServer) && known.includes(MAIL_CONNECTOR_NAME) ? MAIL_CONNECTOR_NAME : undefined;
   }
 
   /**
-   * Routes a call_tool invocation whose tool_name is not on the named MCP server, but matches
-   * a host tool instead, running the host tool directly rather than rejecting the call. Returns
-   * undefined when no host tool matches, so the caller falls back to the ordinary rejection.
+   * One plain line the model can pass on: the connector's name here, that it is turned off or not set up,
+   * or, for a built-in bundle's name, how to load that bundle. A connector line ends the search.
    */
-  private async routeToHostTool(
-    toolName: string,
-    args: Record<string, unknown>,
-  ): Promise<CallToolResponse | undefined> {
-    const hostSet = await this.findHostToolProvider(toolName);
-    if (!hostSet) {
-      return undefined;
+  private serverNotFoundText(mcpServer: string): string {
+    const meant = this.meantConnector(mcpServer);
+    if (meant !== undefined) {
+      const availability: ConnectorAvailability = this.serverMap.has(meant) ? 'in-chat' : 'turned-off';
+      const line = connectorUnavailableLine({ connector: meant, availability });
+      return availability === 'in-chat' ? `No server named '${mcpServer}'. ${line}` : `${line} ${STOP_GUESSING}`;
     }
-    // Only a call that needs no approval is routed. Anything else must be called directly, so the host classifies
-    // it, shows its own card and checks its own approval; a connector's generic card would not cover it.
-    const info = await hostSet.toolCallInfo({ name: toolName, arguments: args });
-    if (
-      (info.tier !== undefined && info.tier > 1) ||
-      info.is_approval_required === true ||
-      info.pre_dispatch_failure !== undefined
-    ) {
-      return toolResultResponse({
-        text: JSON.stringify({ error: `'${toolName}' is a built-in tool, so call ${toolName} directly.` }),
-        isError: true,
-      });
+    const bundle = findBundle({ name: mcpServer, offered: TOOL_BUNDLE_NAMES });
+    if ('found' in bundle) {
+      return `'${mcpServer}' is a built-in tool bundle, not a server. Built-in tools are called directly by name, never through ${CALL_TOOL_NAME}.`;
     }
-    const response = await hostSet.callTool({ name: toolName, arguments: args });
-    return this.withHostRoutingNote(response, toolName);
+    const servers = [...this.serverMap.keys()];
+    const serverList = servers.length === 0 ? 'none' : boundedNameList(servers);
+    const availability: ConnectorAvailability = this.setUpConnectorNames === undefined ? 'unknown' : 'not-set-up';
+    return `No server named '${mcpServer}'. Servers: ${serverList}. ${connectorUnavailableLine({ connector: mcpServer, availability })} ${STOP_GUESSING}`;
   }
 
-  /** Prepends a short note to a routed host-tool result, without disturbing its content. */
-  private withHostRoutingNote(response: CallToolResponse, toolName: string): CallToolResponse {
-    if (!isCallToolResponseResult(response)) {
-      return response;
-    }
-    const note = {
-      type: 'text' as const,
-      text: `Note: routed to the host tool '${toolName}'; it is not on the requested MCP server. Call ${toolName} directly next time instead of through ${CALL_TOOL_NAME}.`,
-    };
-    return {
-      ...response,
-      result: { ...response.result, content: [note, ...response.result.content] },
-    };
-  }
-
-  private serverNotFoundResponse(callerTool: string, mcpServer: string): CallToolResponse {
+  /** A connector this chat has that did not answer when its tools were listed. The detail is for the model only. */
+  private notAnsweringResponse(mcpServer: string, error: unknown): CallToolResponse {
     return toolResultResponse({
       text: JSON.stringify({
-        error: structuredEditRejection({
-          tool: callerTool,
-          what: 'the mcp_server',
-          received: `'${mcpServer}'`,
-          expected: 'the name of a configured MCP server',
-          hint: `Configured servers: ${boundedNameList([...this.serverMap.keys()])}.`,
-        }),
+        error: `The ${mcpServer} connector is set up but is not answering yet. Try again in a minute. Do not try other names; tell the person this if it keeps failing.`,
+        detail: error instanceof Error ? error.message : 'unknown',
       }),
       isError: true,
     });
   }
 
-  private async resolveServerTools(
-    mcpServer: string,
-    callerTool: string = LIST_TOOLS_NAME,
-  ): Promise<CallToolResponse | ResolvedServerTools> {
-    const server = this.resolveServer(mcpServer);
+  private serverNotFoundResponse(mcpServer: string): CallToolResponse {
+    return toolResultResponse({
+      text: JSON.stringify({ error: this.serverNotFoundText(mcpServer) }),
+      isError: true,
+    });
+  }
+
+  private async resolveServerTools(input: { mcpServer: string }): Promise<CallToolResponse | ResolvedServerTools> {
+    const server = this.resolveServer(input.mcpServer);
     if (!server) {
-      return this.serverNotFoundResponse(callerTool, mcpServer);
+      return this.serverNotFoundResponse(input.mcpServer);
     }
 
     const listResponse = await server.listTools();
@@ -334,7 +356,7 @@ export class DeferredTool extends LocalToolMCP {
 
   private async runListTools(input: { mcp_server: string }): Promise<CallToolResponse> {
     try {
-      const resolved = await this.resolveServerTools(input.mcp_server);
+      const resolved = await this.resolveServerTools({ mcpServer: input.mcp_server });
       if (!isResolvedServerTools(resolved)) {
         return resolved;
       }
@@ -348,10 +370,7 @@ export class DeferredTool extends LocalToolMCP {
         ...extractErrorLogFields(error),
         mcpServer: input.mcp_server,
       });
-      return toolResultResponse({
-        text: JSON.stringify({ error: `Failed to list tools for '${input.mcp_server}'.` }),
-        isError: true,
-      });
+      return this.notAnsweringResponse(input.mcp_server, error);
     }
   }
 
@@ -369,7 +388,7 @@ export class DeferredTool extends LocalToolMCP {
 
   private async runGetToolInfo(input: { mcp_server: string; tool_name: string }): Promise<CallToolResponse> {
     try {
-      const resolved = await this.resolveServerTools(input.mcp_server, GET_TOOL_INFO_NAME);
+      const resolved = await this.resolveServerTools({ mcpServer: input.mcp_server });
       if (!isResolvedServerTools(resolved)) {
         return resolved;
       }
@@ -405,12 +424,7 @@ export class DeferredTool extends LocalToolMCP {
         mcpServer: input.mcp_server,
         toolName: input.tool_name,
       });
-      return toolResultResponse({
-        text: JSON.stringify({
-          error: `Failed to get tool info: ${error instanceof Error ? error.message : 'unknown'}`,
-        }),
-        isError: true,
-      });
+      return this.notAnsweringResponse(input.mcp_server, error);
     }
   }
 
@@ -418,9 +432,9 @@ export class DeferredTool extends LocalToolMCP {
     return defineTool({
       name: GET_TOOL_INFO_NAME,
       description: dedent`
-        Get description, inputSchema and outputSchema for a specific tool on an MCP server.
+        Get description, inputSchema and outputSchema for a tool, by its server and name.
         If outputSchema is null, it will NOT be present in ${GET_TOOL_OUTPUT_SCHEMA_NAME} as well.
-        The Agent MUST call ${LIST_TOOLS_NAME} first to know which tools are available.`,
+        Call ${LIST_TOOLS_NAME} first to know which tools a server has.`,
       schema: getToolInfoSchema,
       annotations: { readOnlyHint: true, openWorldHint: false },
       handler: async (input: { mcp_server: string; tool_name: string }) => this.runGetToolInfo(input),
@@ -429,7 +443,7 @@ export class DeferredTool extends LocalToolMCP {
 
   private async runGetToolOutputSchema(input: { mcp_server: string; tool_name: string }): Promise<CallToolResponse> {
     try {
-      const resolved = await this.resolveServerTools(input.mcp_server, GET_TOOL_OUTPUT_SCHEMA_NAME);
+      const resolved = await this.resolveServerTools({ mcpServer: input.mcp_server });
       if (!isResolvedServerTools(resolved)) {
         return resolved;
       }
@@ -463,12 +477,7 @@ export class DeferredTool extends LocalToolMCP {
         mcpServer: input.mcp_server,
         toolName: input.tool_name,
       });
-      return toolResultResponse({
-        text: JSON.stringify({
-          error: `Failed to get output schema: ${error instanceof Error ? error.message : 'unknown'}`,
-        }),
-        isError: true,
-      });
+      return this.notAnsweringResponse(input.mcp_server, error);
     }
   }
 
@@ -531,8 +540,8 @@ export class DeferredTool extends LocalToolMCP {
     return defineTool({
       name: CALL_TOOL_NAME,
       description: dedent`
-        Call a tool on an MCP server.
-        The Agent MUST call ${LIST_TOOLS_NAME} and ${GET_TOOL_INFO_NAME} before calling a tool.
+        Call a tool by its server and name.
+        The Agent MUST call ${GET_TOOL_INFO_NAME} before calling a tool. Built-in tools are called directly by name, never through ${CALL_TOOL_NAME}.
         ${LIST_TOOLS_NAME}, ${GET_TOOL_INFO_NAME} and ${GET_TOOL_OUTPUT_SCHEMA_NAME} are also accepted as
         ${CALL_TOOL_NAME}'s tool_name: it runs that meta tool directly with the given input, since they
         are meta tools rather than tools on an MCP server.`,
@@ -540,10 +549,11 @@ export class DeferredTool extends LocalToolMCP {
       handler: async (
         input: { mcp_server: string; tool_name: string; input: Record<string, unknown> },
         approvalDecision?: ApprovalDecision,
+        context?: ToolInvocationContext,
       ) => {
         const server = this.resolveServer(input.mcp_server);
         if (!server) {
-          return this.serverNotFoundResponse(CALL_TOOL_NAME, input.mcp_server);
+          return this.serverNotFoundResponse(input.mcp_server);
         }
 
         if (ALIASABLE_META_TOOL_NAMES.has(input.tool_name)) {
@@ -565,16 +575,22 @@ export class DeferredTool extends LocalToolMCP {
           });
         }
 
+        let resolved: CallToolResponse | ResolvedServerTools;
         try {
-          const resolved = await this.resolveServerTools(input.mcp_server, CALL_TOOL_NAME);
-          if (!isResolvedServerTools(resolved)) {
-            return resolved;
-          }
+          resolved = await this.resolveServerTools({ mcpServer: input.mcp_server });
+        } catch (error) {
+          this.logger.error('call_tool could not list tools', {
+            ...extractErrorLogFields(error),
+            mcpServer: input.mcp_server,
+            toolName: input.tool_name,
+          });
+          return this.notAnsweringResponse(input.mcp_server, error);
+        }
+        if (!isResolvedServerTools(resolved)) {
+          return resolved;
+        }
+        try {
           if (!resolved.tools.some(t => t.name === input.tool_name)) {
-            const hostRoute = await this.routeToHostTool(input.tool_name, input.input);
-            if (hostRoute) {
-              return hostRoute;
-            }
             return toolResultResponse({
               text: JSON.stringify({
                 error: structuredEditRejection({
@@ -582,14 +598,18 @@ export class DeferredTool extends LocalToolMCP {
                   what: 'the tool_name',
                   received: `'${input.tool_name}'`,
                   expected: `the name of a tool on '${input.mcp_server}'`,
-                  hint: `Tools on '${input.mcp_server}': ${boundedNameList(resolved.tools.map(t => t.name))}.`,
+                  hint: `Tools on '${input.mcp_server}': ${boundedNameList(resolved.tools.map(t => t.name))}. A built-in tool is called directly by its name, never through ${CALL_TOOL_NAME}.`,
                 }),
               }),
               isError: true,
             });
           }
 
-          const response = await server.callTool({ name: input.tool_name, arguments: input.input }, approvalDecision);
+          const response = await server.callTool(
+            { name: input.tool_name, arguments: input.input },
+            approvalDecision,
+            context,
+          );
 
           if (isAuthRequired(response)) {
             return response;

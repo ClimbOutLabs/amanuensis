@@ -330,8 +330,11 @@ const FLAG_TAG_POSITIONS = FLAG_REGIONS.flatMap(region =>
 ).join('|');
 const FLAG_ENDINGS = FLAG_REGIONS.map(region => `${BLACK_FLAG}${tagCodes(region)}${CANCEL_TAG}`).join('|');
 
+/** Every character that does not show, before any allowance for real writing. */
+const HIDDEN_CLASS = '[\\p{Default_Ignorable_Code_Point}\\p{Cc}\\p{Zl}\\p{Zp}\\p{Co}\\u2800\\uFFF9-\\uFFFB]';
+
 const HIDDEN_SOURCE = [
-  '(?!\\t|\\n|\\r|\\u200B|\\u200C|\\u200D|\\uFE0E|\\uFE0F|\\u180B|\\u180C|\\u180D|\\u180F|[\\u{E0100}-\\u{E01EF}]|[\\u{E0030}-\\u{E0039}\\u{E0061}-\\u{E007A}\\u{E007F}])[\\p{Default_Ignorable_Code_Point}\\p{Cc}\\p{Zl}\\p{Zp}\\p{Co}\\u2800\\uFFF9-\\uFFFB]',
+  `(?!\\t|\\n|\\r|\\u200B|\\u200C|\\u200D|\\uFE0E|\\uFE0F|\\u180B|\\u180C|\\u180D|\\u180F|[\\u{E0100}-\\u{E01EF}]|[\\u{E0030}-\\u{E0039}\\u{E0061}-\\u{E007A}\\u{E007F}])${HIDDEN_CLASS}`,
   outOfContext({
     character: '\\u200D',
     allowed: `(?<=${PICTOGRAPH_OR_MODIFIER}\\uFE0F?)(?=\\u200D\\p{Extended_Pictographic})|(?<=${INDIC})(?=\\u200D${INDIC})|(?<=${INDIC_MARK})`,
@@ -374,4 +377,14 @@ export function countIdeographicSelectors(text: string): number {
 /** The one test for "this text has a character that would not show", so what is read or sent is what is seen. */
 export function hasHiddenCharacters(text: string): boolean {
   return HIDDEN_ANYWHERE.test(text);
+}
+
+const ANY_HIDDEN = new RegExp(`(?![\\t\\n\\r])(?:${HIDDEN_CLASS}|\\p{Cf}|\\p{Surrogate})`, 'u');
+
+/**
+ * Like hasHiddenCharacters with none of the allowances for real writing, and every format control: for text
+ * that never needs a joiner or selector, such as a field name or an address.
+ */
+export function hasAnyHiddenCharacter(text: string): boolean {
+  return ANY_HIDDEN.test(text);
 }

@@ -1,0 +1,268 @@
+'use client';
+
+import { useAui } from '@assistant-ui/react';
+import { AMAN_GUIDE_NAME } from '@truefoundry/trueforge-core/core/personas/guide';
+import { useEffect, useId, useRef, type ReactNode } from 'react';
+
+import { cn } from '../atoms/lib/cn.js';
+import { Button } from '../atoms/primitives/Button.js';
+import { useOptionalComposerBusyState } from '../hooks/useComposerBusyState.js';
+import { Icon } from '../icons/Icon.js';
+import { useOptionalShellMode } from '../server/ShellModeContext.js';
+import {
+  buildIrisHelpMessage,
+  formatLastFullCheck,
+  IRIS_HELP_CHOICES,
+  sortHelpItems,
+  type HelpHealthCheck,
+  type HelpHealthItem,
+  type HelpHealthStatus,
+} from './helpModel.js';
+import { useOptionalHelp, type HelpContextValue, type HelpSession } from './HelpProvider.js';
+
+const ITEM_ICON: Record<HelpHealthStatus, string> = {
+  fail: 'circle-exclamation',
+  warn: 'triangle-exclamation',
+  pass: 'circle-check',
+  not_set_up: 'circle-check',
+};
+
+const ITEM_TEXT_CLASS: Record<HelpHealthStatus, string> = {
+  fail: 'text-danger',
+  warn: 'text-warning',
+  pass: 'text-success',
+  not_set_up: 'text-text-secondary',
+};
+
+const ITEM_WORD: Record<HelpHealthStatus, string> = {
+  fail: 'Needs fixing',
+  warn: 'Needs a look',
+  pass: 'OK',
+  not_set_up: 'Not set up',
+};
+
+const SECTION_CLASS = 'flex w-full max-w-3xl flex-col gap-3 rounded-xl border border-border bg-card-bg p-4';
+
+/** Sends a message as the person's own, through the composer, the same way the tour's cards do. */
+function useSendAsPerson(): (text: string) => void {
+  const aui = useAui();
+  const busy = useOptionalComposerBusyState();
+  return (text: string) => {
+    aui.composer().setText(text);
+    const send = () => aui.composer().send();
+    if (busy === null) {
+      send();
+    } else {
+      busy.send(send);
+    }
+  };
+}
+
+/**
+ * Runs the health check once per run, then has Iris speak first, but only when the model answered
+ * and Iris is installed. Anything else keeps the results and the next steps on screen. The run
+ * guard makes sure one run sends at most one message, even when effects run twice.
+ */
+function useHelpRunner(help: HelpContextValue | null): void {
+  const sendAsPerson = useSendAsPerson();
+  const startedRun = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (help === null || help.session === null || help.api === null) {
+      return;
+    }
+    const { api, update } = help;
+    const session = help.session;
+    if (session.phase !== 'pending' || startedRun.current === session.runKey) {
+      return;
+    }
+    startedRun.current = session.runKey;
+    const run = async () => {
+      update({ phase: 'checking' });
+      let check: HelpHealthCheck;
+      try {
+        check = await api.getHealthCheck();
+      } catch {
+        update({ phase: 'check_failed' });
+        return;
+      }
+      update({ check });
+      if (!check.model_ready) {
+        update({ phase: 'no_model' });
+        return;
+      }
+      update({ phase: 'joining' });
+      let ready: boolean;
+      try {
+        ready = await api.ensureGuide();
+      } catch {
+        ready = false;
+      }
+      if (!ready) {
+        update({ phase: 'unavailable' });
+        return;
+      }
+      const message = buildIrisHelpMessage({ check, screen: session.screen, lastError: session.lastError });
+      try {
+        sendAsPerson(message);
+        update({ phase: 'joined', sentMessage: message });
+      } catch {
+        update({ phase: 'unavailable' });
+      }
+    };
+    void run();
+  }, [help, sendAsPerson]);
+}
+
+function ItemRow({ item }: { item: HelpHealthItem }) {
+  return (
+    <li className="flex flex-col gap-1 border-b border-border py-2 last:border-b-0">
+      <div className={cn('flex items-center gap-2 text-sm font-semibold', ITEM_TEXT_CLASS[item.status])}>
+        <Icon name={ITEM_ICON[item.status]} aria-hidden />
+        <span>{item.name}</span>
+        <span className="font-normal">({ITEM_WORD[item.status]})</span>
+      </div>
+      <p className="text-sm text-text-primary">{item.message}</p>
+      {item.next_step === null ? null : (
+        <p className={cn('text-sm', item.status === 'fail' ? 'text-danger' : 'text-text-secondary')}>
+          {item.next_step}
+        </p>
+      )}
+    </li>
+  );
+}
+
+/** The saved full check: its date and result. With no readable saved report it shows nothing. */
+function HostReportLine({ help }: { help: HelpContextValue }) {
+  const report = help.session?.check?.host_report;
+  if (report === undefined || report.checked_at === null || report.message === null) {
+    return null;
+  }
+  const when = formatLastFullCheck(report.checked_at);
+  return (
+    <div className="flex flex-col gap-1 text-sm text-text-secondary">
+      <p>
+        Full check: {when} · {report.message}
+      </p>
+      {report.next_step === null ? null : <p>{report.next_step}</p>}
+    </div>
+  );
+}
+
+/** Opens Settings › Models in place when the shell is there; plain text otherwise. */
+function SettingsModelsLink() {
+  const shell = useOptionalShellMode();
+  if (shell === null) {
+    return <>Settings</>;
+  }
+  return (
+    <button
+      type="button"
+      className="text-text-primary underline underline-offset-2 hover:text-primary-button-bg"
+      onClick={() => shell.setSettingsOpen(true, 'models')}
+    >
+      Settings
+    </button>
+  );
+}
+
+function phaseLine(session: HelpSession): ReactNode {
+  switch (session.phase) {
+    case 'pending':
+    case 'checking':
+      return 'Checking the app. This takes a few seconds.';
+    case 'joining':
+      return `${AMAN_GUIDE_NAME} is joining this chat.`;
+    case 'unavailable':
+      return `${AMAN_GUIDE_NAME} could not join this chat. Check your connection, then press Check again.`;
+    case 'check_failed':
+      return 'The check could not run. Check your connection, then press Check again.';
+    case 'no_model':
+      return (
+        <>
+          Add a model in <SettingsModelsLink /> to get started.
+        </>
+      );
+    case 'joined':
+      return null;
+  }
+}
+
+/** The results, shown at the top of the help chat, with the next step for each problem. */
+export function HelpChatPanel() {
+  const help = useOptionalHelp();
+  useHelpRunner(help);
+  const statusId = useId();
+  if (help === null || help.session === null) {
+    return null;
+  }
+  const session = help.session;
+  const line = phaseLine(session);
+  const showCheckAgain = session.phase !== 'joined' && session.phase !== 'joining' && session.phase !== 'checking';
+  return (
+    <section aria-labelledby={statusId} className="mx-auto flex w-full flex-col items-center gap-3 px-4 pt-4">
+      <div className={SECTION_CLASS} data-testid="help-chat-results">
+        <h2 id={statusId} className="text-base font-semibold text-text-primary">
+          Quick health check
+        </h2>
+        {line === null ? null : (
+          <p role="status" className="text-sm text-text-secondary">
+            {line}
+          </p>
+        )}
+        {session.check === null ? null : (
+          <>
+            <ul className="m-0 list-none p-0">
+              {sortHelpItems(session.check.items).map(item => (
+                <ItemRow key={item.id} item={item} />
+              ))}
+            </ul>
+            <HostReportLine help={help} />
+          </>
+        )}
+        {session.sentMessage === null ? null : (
+          <details className="text-sm text-text-secondary">
+            <summary className="cursor-pointer">What {AMAN_GUIDE_NAME} was told</summary>
+            <p className="mt-2 whitespace-pre-wrap">{session.sentMessage}</p>
+          </details>
+        )}
+        {showCheckAgain ? (
+          <div>
+            <Button type="button" variant="secondary" size="small" onClick={help.checkAgain}>
+              Check again
+            </Button>
+          </div>
+        ) : null}
+      </div>
+    </section>
+  );
+}
+
+/**
+ * The one-tap answers under the guide's first message. Tapping sends the choice as the person's own
+ * message; anything else goes in the main composer, the chat's only place to type.
+ */
+export function HelpChoices() {
+  const help = useOptionalHelp();
+  const sendAsPerson = useSendAsPerson();
+  const groupId = useId();
+  if (help === null || help.session === null || help.session.phase !== 'joined') {
+    return null;
+  }
+  return (
+    <section aria-labelledby={groupId} className="mx-auto flex w-full max-w-3xl flex-col gap-3 px-4 pb-4">
+      <h2 id={groupId} className="sr-only">
+        Choose where you are stuck
+      </h2>
+      <ul className="m-0 flex list-none flex-wrap gap-2 p-0" data-testid="help-choices">
+        {IRIS_HELP_CHOICES.map(choice => (
+          <li key={choice}>
+            <Button type="button" variant="secondary" size="small" onClick={() => sendAsPerson(choice)}>
+              {choice}
+            </Button>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}

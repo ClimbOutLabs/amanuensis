@@ -4,6 +4,7 @@ import { lazy, Suspense, useRef } from 'react';
 
 import { useAui } from '../assistant-ui.js';
 import { AgentDetailsToggleButton } from '../atoms/AgentDetailsToggleButton.js';
+import { ChatHeaderMenu } from '../atoms/ChatHeaderMenu.js';
 import { NamedAgentHeaderLabel } from '../atoms/NamedAgentHeaderLabel.js';
 import { PageHeader } from '../atoms/PageHeader.js';
 import { ShellActions } from '../atoms/ShellActions.js';
@@ -13,6 +14,7 @@ import { useIsMobile } from '../atoms/lib/useIsMobile.js';
 import { Spinner } from '../atoms/primitives/Spinner.js';
 import { AgentConfigDrawerContainer } from '../containers/AgentConfigDrawerContainer.js';
 import { Thread } from '../containers/Thread.js';
+import { HelpNewChatBridge } from '../help/HelpStuckButton.js';
 import { Icon } from '../icons/Icon.js';
 import { shellIsMutable, useOptionalShellMode } from '../server/ShellModeContext.js';
 import { useSlot } from '../theme/SlotsProvider.js';
@@ -26,7 +28,6 @@ export function DrawerLayout({ className }: { className?: string }) {
   const aui = useAui();
   const shell = useOptionalShellMode();
   const isMobile = useIsMobile();
-  const ClearChatButton = useSlot('ClearChatButton');
   const AgentDetailsPage = useSlot('AgentDetailsPage');
   const AgentsLibrary = useSlot('AgentsLibrary');
   const SessionsPage = useSlot('SessionsPage');
@@ -66,6 +67,7 @@ export function DrawerLayout({ className }: { className?: string }) {
 
   return (
     <div className={cn('relative flex h-full min-h-0 w-full bg-primary-bg', className)}>
+      <HelpNewChatBridge />
       {showAgentConfig ? (
         <aside
           role="dialog"
@@ -79,6 +81,8 @@ export function DrawerLayout({ className }: { className?: string }) {
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
         {/* Keep ShellActions mounted across Settings open/close so host action-slot state persists. */}
         <PageHeader
+          helpAction
+          menu={!overlayOpen ? <ChatHeaderMenu /> : null}
           className="bg-topbar-bg"
           title={
             !overlayOpen ? (
@@ -101,7 +105,6 @@ export function DrawerLayout({ className }: { className?: string }) {
             <>
               {!overlayOpen ? (
                 <>
-                  <ClearChatButton />
                   <AgentDetailsToggleButton />
                   <SaveAgentButton />
                 </>

@@ -31,8 +31,8 @@ function servicesWithTempAllowlist(): { services: SentinelServices; cleanup: () 
   const shell_allowlist: ShellAllowlistConfig = {
     pinned_path: dir,
     commands: {
-      mycmd: { args: ['-l'], operands: 'workspace_relative', offline_ok: true, subcommands: null },
-      ls: { args: ['-l'], operands: 'workspace_relative', offline_ok: true, subcommands: null },
+      mycmd: { args: ['-l'], operands: 'workspace_relative', offline_ok: true, script: null, subcommands: null },
+      ls: { args: ['-l'], operands: 'workspace_relative', offline_ok: true, script: null, subcommands: null },
     },
   };
   const services = defaultSentinelServices({ pinned_path: dir });
@@ -48,8 +48,8 @@ function servicesWithCatAllowlist(): { services: SentinelServices; cleanup: () =
   const shell_allowlist: ShellAllowlistConfig = {
     pinned_path: dir,
     commands: {
-      cat: { args: ['-n'], operands: 'workspace_relative', offline_ok: true, subcommands: null },
-      ls: { args: ['-l'], operands: 'workspace_relative', offline_ok: true, subcommands: null },
+      cat: { args: ['-n'], operands: 'workspace_relative', offline_ok: true, script: null, subcommands: null },
+      ls: { args: ['-l'], operands: 'workspace_relative', offline_ok: true, script: null, subcommands: null },
     },
   };
   const services = defaultSentinelServices({ pinned_path: dir });
@@ -98,7 +98,13 @@ function mcpAction(tool_name: string, canonical_params: Record<string, unknown>)
 
 function trackScript(ctx: ClassifyContext, file_identity: string): void {
   ctx.services.tracked_store.track({
-    scope: { tenant_id: 't1', created_by: 'u1', repository_id: 'r1', workspace_cwd: ctx.workspace_cwd },
+    scope: {
+      tenant_id: 't1',
+      created_by: 'u1',
+      conversation_id: ctx.conversation_id,
+      repository_id: 'r1',
+      workspace_cwd: ctx.workspace_cwd,
+    },
     file_identity,
   });
 }
@@ -470,6 +476,52 @@ describe('Suite B - workspace containment escapes', () => {
     }
   });
 
+  test('B9 GUARD: a read-only list whose cd follows a link out of the workspace is Tier 3', async () => {
+    const ws = mkdtempSync(join(tmpdir(), 'sentinel-ws-'));
+    const outside = mkdtempSync(join(tmpdir(), 'sentinel-out-'));
+    const { services, cleanup } = servicesWithCatAllowlist();
+    try {
+      writeFileSync(join(outside, 'secret.txt'), 'x');
+      symlinkSync(outside, join(ws, 'linkdir'));
+      const decision = await classifyTier(
+        action('exec', { command: 'cd linkdir && cat secret.txt', cwd: ws }),
+        makeCtx({ services, workspace_cwd: ws }),
+      );
+      expect(decision.tier).toBe(3);
+    } finally {
+      rmSync(ws, { recursive: true, force: true });
+      rmSync(outside, { recursive: true, force: true });
+      cleanup();
+    }
+  });
+
+  test('B10 GAP: a read-only list whose directory is repointed out of the workspace after classification is refused at dispatch', async () => {
+    const ws = mkdtempSync(join(tmpdir(), 'sentinel-ws-'));
+    const outside = mkdtempSync(join(tmpdir(), 'sentinel-out-'));
+    const { services, cleanup } = servicesWithCatAllowlist();
+    try {
+      mkdirSync(join(ws, 'repo'));
+      writeFileSync(join(ws, 'repo', 'notes.txt'), 'x');
+      writeFileSync(join(outside, 'notes.txt'), 'x');
+      const params = { command: 'cd repo && cat notes.txt', cwd: ws };
+      const ctx = makeCtx({ services, workspace_cwd: ws });
+      const decision = await classifyTier(action('exec', params), ctx);
+      expect(decision).toMatchObject({ tier: 1, reason: 'shell_read_only_list' });
+
+      rmSync(join(ws, 'repo'), { recursive: true, force: true });
+      symlinkSync(outside, join(ws, 'repo'));
+      const result = await verifyPreDispatch({
+        call: verifiableCall({ canonical_params: params, tier: 1 }),
+        ctx: { ...ctx, offline: false },
+      });
+      expect(result).toContain('outside the workspace');
+    } finally {
+      rmSync(ws, { recursive: true, force: true });
+      rmSync(outside, { recursive: true, force: true });
+      cleanup();
+    }
+  });
+
   test('B6 GAP: write through a symlinked parent pointing outside is Tier 3', async () => {
     const ws = mkdtempSync(join(tmpdir(), 'sentinel-ws-'));
     const outside = mkdtempSync(join(tmpdir(), 'sentinel-out-'));
@@ -486,6 +538,63 @@ describe('Suite B - workspace containment escapes', () => {
       rmSync(outside, { recursive: true, force: true });
     }
   });
+
+  test('writes into the sandbox tool folders are Tier 3', async () => {
+    const ws = mkdtempSync(join(tmpdir(), 'sentinel-ws-'));
+    try {
+      for (const dir of ['.venv/bin', 'mcp-client/bin', 'sub/.venv/bin', '.venv/lib/site-packages', 'src']) {
+        mkdirSync(join(ws, dir), { recursive: true });
+      }
+      const ctx = makeCtx({ workspace_cwd: ws });
+      for (const tool of ['write_file', 'replace_text']) {
+        for (const path of [
+          '.venv/bin/flock',
+          'mcp-client/bin/sh',
+          'sub/.venv/bin/cat',
+          '.venv/lib/site-packages/zz.pth',
+          '.venv/pyvenv.cfg',
+          'mcp-client/sitecustomize.py',
+        ]) {
+          const decision = await classifyTier(action(tool, { path, content: 'x' }), ctx);
+          expect(decision.tier).toBe(3);
+          expect(decision.reason).toBe('sandbox_tool_write');
+          expect(decision.card?.plain_what).toBe(
+            `Save \`${path}\` in a folder where this workspace keeps programs it can run?`,
+          );
+          expect(decision.card?.cannot_be_undone).toBe(
+            'A program saved here could run instead of a trusted one. Approve only if you asked for this file.',
+          );
+        }
+        expect((await classifyTier(action(tool, { path: 'src/x.py', content: 'x' }), ctx)).tier).toBe(2);
+      }
+    } finally {
+      rmSync(ws, { recursive: true, force: true });
+    }
+  });
+
+  test.each([
+    { link: 'mcp-client', target: 'tools', path: 'tools/bin/git', layout: ['tools/bin'] },
+    { link: '.venv/bin', target: 'tools', path: 'tools/flock', layout: ['.venv', 'tools'] },
+  ])(
+    'a symlinked sandbox tool folder ($link) is still Tier 3 to write through',
+    async ({ link, target, path, layout }) => {
+      const ws = mkdtempSync(join(tmpdir(), 'sentinel-ws-'));
+      try {
+        for (const dir of layout) {
+          mkdirSync(join(ws, dir), { recursive: true });
+        }
+        symlinkSync(join(ws, target), join(ws, link));
+        const ctx = makeCtx({ workspace_cwd: ws });
+        for (const tool of ['write_file', 'replace_text']) {
+          const decision = await classifyTier(action(tool, { path, content: 'x' }), ctx);
+          expect(decision.tier).toBe(3);
+          expect(decision.reason).toBe('sandbox_tool_write');
+        }
+      } finally {
+        rmSync(ws, { recursive: true, force: true });
+      }
+    },
+  );
 
   test('B8 GAP: writes to git control files and symlinks into .git are Tier 3', async () => {
     const ws = mkdtempSync(join(tmpdir(), 'sentinel-ws-'));
@@ -721,6 +830,7 @@ describe('Suite D - approval token integrity', () => {
 
       // A new conversation must not inherit the grant.
       const ctx2 = makeCtx({ services: ctx1.services, workspace_cwd: dir, conversation_id: 'conv-2' });
+      trackScript(ctx2, script);
       const again = await classifyTier(action('exec', params), ctx2);
       expect(again.tier).toBe(3);
       expect(again.reason).toBe('tracked_executable_unapproved');
@@ -1018,6 +1128,30 @@ describe('Suite G - dispatch time-of-check', () => {
     } finally {
       rmSync(ws, { recursive: true, force: true });
       cleanup();
+    }
+  });
+
+  test('G3 GAP: repointing a symlinked parent at .venv/bin between classification and dispatch asks again', async () => {
+    const ws = mkdtempSync(join(tmpdir(), 'sentinel-ws-'));
+    try {
+      mkdirSync(join(ws, 'harmless'));
+      mkdirSync(join(ws, '.venv', 'bin'), { recursive: true });
+      symlinkSync(join(ws, 'harmless'), join(ws, 'linkdir'));
+      const ctx = makeCtx({ workspace_cwd: ws });
+      const params = { path: 'linkdir/flock', content: 'x' };
+      const decision = await classifyTier(action('write_file', params), ctx);
+      expect(decision.tier).toBe(2); // classified while the link pointed at an ordinary folder
+
+      rmSync(join(ws, 'linkdir'));
+      symlinkSync(join(ws, '.venv', 'bin'), join(ws, 'linkdir')); // repointed at a tool folder after classification
+
+      const result = await verifyPreDispatch({
+        call: verifiableCall({ tool_name: 'write_file', canonical_params: params, tier: 2 }),
+        ctx: { ...ctx, offline: false },
+      });
+      expect(result).toMatch(/tool folder at dispatch; request approval again/i);
+    } finally {
+      rmSync(ws, { recursive: true, force: true });
     }
   });
 });

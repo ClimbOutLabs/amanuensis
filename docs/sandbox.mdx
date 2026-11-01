@@ -28,6 +28,7 @@ That means:
 ## The Docker sandbox
 
 Code the assistant writes with `run_code` (Python and Node.js) runs in an isolated Docker container with no network access. **Settings → Sandbox** shows whether it can run right now: ready, or off with the reason (Docker not available to the server, image not downloaded, image signature not verified, and so on) and what to do about it. Use **Re-check** after you fix the cause. The image and the limits for each run (time, memory, disk) come from the server configuration and change only with a restart.
+A script the assistant writes in the chat's workspace runs with `run_code` by name (`script_path`). The run reads a copy of that one file and never changes it. Package installs work only in a chat bound to a repository where downloads are allowed, and only on a sandbox that can reach the package gateway (sandbox slots). The Docker sandbox has no network for packages, so an install there is refused before any approval prompt.
 
 Settings no longer offers a choice of sandbox provider. Docker is the only option offered there.
 
@@ -39,16 +40,27 @@ A second backend runs `run_code` and the shell and file tools in four hardened s
 - Each chat's workspace has a size limit (2 GB by default), enforced while a command runs. On Linux, setup (the installer, `aman doctor sandbox --fix`, or `pnpm sandbox:slots --fix`) also gives each slot a fixed-size disk of its own (16 GB by default, `--disk-gb` to change it): after asking, it creates the disk files under `/var/lib/aman-slots`, adds them to `/etc/fstab` and mounts them, so a runaway command can fill only its own slot's disk. On Docker Desktop and WSL2 there is no per-slot disk; the virtual machine's disk bounds the workspaces. `installer/install.sh instance remove <name> --purge-data` removes the instance's disk files along with its data (`pnpm sandbox:slots --down --purge` does it for a checkout-only setup).
 - A command can use at most 128 processes. Allowed environment variables for a command are a short list (locale, terminal, language runtime and git settings); others are refused with their names.
 - The installer's instance compose file sets `SANDBOX_BACKEND=slots` and `SANDBOX_SLOTS_DIR` for the app and mounts the control volumes, so there is nothing to add to any command. Each instance has its own slots (a Compose project named `<instance>-slots`). Installing with `--no-sandbox` leaves run code off. The default backend outside the installer stays `docker`.
-- The guest image has Python 3 with pypdf, pdfplumber, reportlab, python-docx, openpyxl, pandas, matplotlib and Pillow; Node.js with TypeScript; bash and coreutils; git; gcc, g++ and make; and poppler-utils with poppler-data, and Tesseract with language data, for reading PDFs and images. Packages cannot be downloaded.
-- Files you attach in chat reach the sandbox the same way as on Docker, and the sandbox never fetches anything: the server sends the file into the chat's workspace (under `/workspace/.aman/uploads`) and offers it to `run_code` under `/ingress`. The text of a PDF or image is read inside the sandbox and placed in the message, so any model sees it without running code. Gmail attachments use the same path: Aman fetches the file from Gmail, sends it into the chat's workspace, and reads it there. Text taken from a file is passed to the model as data, not instructions, and goes through the tool-output screen when one is configured. Word documents (`.docx` and `.odt`) are read the same way, inside the sandbox, with Python's standard library. Other files are read with `run_code`.
+- The guest image has Python 3 with pypdf, pdfplumber, reportlab, python-docx, openpyxl, pandas, matplotlib and Pillow, plus pytest, ruff and mypy for testing and checking code; Node.js with TypeScript, plus vitest, jest, eslint and prettier for testing and checking code; bash and coreutils; git; gcc, g++ and make; and poppler-utils with poppler-data, and Tesseract with language data, for reading PDFs and images. More packages can be downloaded only as described under Package downloads below.
+- Files you attach in chat reach the sandbox the same way as on Docker, and the sandbox never fetches anything: the server sends the file into the chat's workspace (under `/workspace/.aman/uploads`) and offers it to `run_code` under `/ingress`. The text of a PDF or image is read inside the sandbox and placed in the message, so any model sees it without running code. Gmail attachments use the same path: Aman fetches the file from Gmail, sends it into the chat's workspace, and reads it there. Text taken from a file is passed to the model as data, not instructions, and goes through the tool-output screen when one is configured. Office documents, saved emails, web pages and text files are read the same way, inside the sandbox; see [Document attachments](#document-attachments). Other files are read with `run_code`.
 - Languages: PDF text works in any language (poppler-data covers Chinese, Japanese and Korean PDFs). Scanned pages and images are read with Tesseract: it detects each page's script and reads the page with that script's languages only (Latin: English, Portuguese, Spanish, French, German, Italian, Dutch; Devanagari: Hindi, Marathi; Arabic; Cyrillic: Russian; Chinese, simplified and traditional; Japanese; Korean). `DOCUMENT_OCR_LANGUAGES` (default: the Latin set) is used when a page's script cannot be detected, for example a page with very little text. Setting it to a language the image lacks is ignored for that language, so OCR keeps working.
 - `pnpm test:slots-live` (from the checkout, `--instance <name>` for an instance other than `main`) proves it end to end on an installed instance: it reads generated PDFs and scanned images in each script family through that instance's sandbox, prints a line per case, and ends with a verdict. The test images are drawn in a throwaway container, so nothing is installed on the host.
 - `aman doctor` reports `attachments`: ok when a test file sent into the sandbox comes back and the sandbox has the PDF and OCR tools and every language above; a failure with `aman doctor sandbox --fix` otherwise; a warning when the sandbox was too busy to check. A status list (`aman doctor --local`) and the upgrade check skip this live test. An install from before this release gets the tools and languages from `install.sh upgrade`, which rebuilds the sandbox image (about 140 MB larger); a plain `install.sh` re-run also starts running slots again when the image was rebuilt.
 - Files in a chat's `/workspace` persist between commands. Processes do not: a background process ends when its command returns.
-- Optional toolchains: `pnpm sandbox:slots --add go`, `--add rust` or `--add java` (a comma list works) adds Go 1.27, Rust 1.99 (rustc and cargo) or OpenJDK 21 to the guest image and rebuilds it; `--remove` takes one out again, and the choice stays until you remove it. The Go and Rust archives are downloaded on the host and checked against checksums pinned in the repository; Java comes from the Ubuntu archive. Guests stay offline, so `go get`, `cargo add` and Maven cannot download dependencies: only the standard libraries are available.
+- Optional toolchains: `pnpm sandbox:slots --add go`, `--add rust` or `--add java` (a comma list works) adds Go 1.27, Rust 1.99 (rustc and cargo) or OpenJDK 21 to the guest image and rebuilds it; `--remove` takes one out again, and the choice stays until you remove it. The Go and Rust archives are downloaded on the host and checked against checksums pinned in the repository; Java comes from the Ubuntu archive. Guests have no network of their own, so Go and Cargo dependencies come only through the package mirrors described below, and Maven cannot download dependencies at all.
 - Approvals judge a path in `/workspace` by its name: `..` is collapsed and anything that ends up outside `/workspace` asks, as with a local sandbox. The server cannot follow symlinks inside a slot, so for shell commands the thing that actually keeps a command inside its workspace is the guest, which mounts only that chat's workspace; a silent (Tier 1) command is contained by the guest's view, not by its tier. The slot agent opens every path of its own file reads and writes without following links.
 - Skills are not available on slots yet.
 - Git works through the server. `git clone`, `fetch`, `pull`, `ls-remote` and `push` of github.com repositories run as one plain command; the server does the network part with your GitHub connector's token and hands the result to the sandbox as files. The token is never placed in a slot and a slot never contacts GitHub. A push shows an approval card naming the repository, the branch and the commits first, and then sends only those commits as a fast-forward: forced pushes, deleting branches, pushing tags and changes to submodules or `.gitmodules` are refused. Repositories over 100 MB are refused; use `git clone --depth 1`.
+
+## Package downloads
+
+A project often needs packages before its code can build or its tests can run. On the slots backend, those downloads go through Aman's own mirrors, never straight from the sandbox to the internet:
+
+- The sandbox itself still has no network. When a chat works on a repository and you have allowed downloads for that repository, the package tools inside the sandbox (pip, npm, Go and Cargo) are pointed at Aman's mirrors for that command, and the slot passes only those download requests through. Each chat gets its own short-lived token, tied to that repository, so one chat cannot use another chat's allowance.
+- The mirrors run on the host, one per package type, and each speaks its registry's own standard mirror protocol: the simple index for Python packages, the npm registry read interface, the Go module proxy protocol, and the cargo sparse index. A mirror only ever downloads. It has no way to accept a publish or an upload, and it refuses anything that is not a download request, so `npm publish`, `cargo publish` and `twine upload` from the sandbox always fail.
+- Each mirror fetches only from its own package site list (PyPI, the npm registry, the Go module proxy and checksum database, and the crates index and file host). If a package's own metadata names a file somewhere else, or an answer tries to redirect somewhere else, the mirror refuses. The public package sites can log these requests, including package names and this computer's address, exactly as they would for a normal install on this computer.
+- A project that needs a package from a git address cannot be served yet, and the command stops with that message instead of trying.
+- Downloads are kept in a cache on the host so repeat installs are quick. One file may be at most 1 GB and the whole cache at most 10 GB; the oldest files are removed first when the cache fills. Every download is written to the server log with the package, the version, the repository and the chat that asked, and when.
+- Allowing downloads is per repository and stays off until you allow it (the repositories API carries the setting as `package_downloads_allowed`). Taking the allowance back stops new downloads on the next command and ends any live mirror token for that repository at once.
 
 ## Enabling the sandbox on an agent
 
@@ -67,10 +79,11 @@ completes, so the download still works after the sandbox itself is gone. A file 
 kept, with the size involved. A turn still in progress has no persisted copy yet, so its download
 route falls back to the live sandbox until the turn finishes.
 
-## PDF, Word and image text extraction
+## PDF and image text extraction
 
-The Aman sandbox includes local PDF and OCR tools, and reads Word documents (`.docx` and `.odt`). As soon as the supported PDF, Word and image
-attachments in an upload are staged, their text is extracted in a single batched call and placed
+The Aman sandbox includes local PDF and OCR tools. As soon as the supported
+attachments in an upload are staged (PDFs, images, and the formats under
+[Document attachments](#document-attachments)), their text is extracted in a single batched call and placed
 directly in the message the model receives, using embedded PDF text when available and
 OCR (in the languages listed above) for image-only PDF pages and for uploaded images, so any model, including a
 text-only one, sees the content without deciding to call a tool for it. Batching the call keeps
@@ -78,9 +91,42 @@ the page, character, and byte caps shared across the whole upload and keeps only
 running in the sandbox at a time. Extraction runs inside the sandbox (on slots, inside the slot's guest, which has no network) and does not send document
 contents to an external OCR service. Very long documents are truncated in the message with a
 note; the `extract_document_text` tool re-extracts a file on demand for page- and
-line-addressable provenance, or for the remainder of a truncated document. A Word file has no fixed pages, so it is cut into pages of about 3,000 characters, and `page_start` and `page_end` work on it as they do on a PDF. Tracked changes are read as they stand now (insertions kept, deletions dropped), and form fields, content controls, text boxes and nested tables are read too. Headers, footers and comments are not. A file that is damaged, protected with a password, or saved in the older `.doc` format gets a plain message saying so; the reader's own error text is never shown. Attachments of an
+line-addressable provenance, or for the remainder of a truncated document. Attachments of an
 unsupported type get no extraction note; the upload announcement already lists them and the
 model can read them with its own file tools.
+
+## Document attachments
+
+Office documents, saved emails, web pages and text files are read inside the sandbox by one
+reader that uses only Python's standard library, so it works in every sandbox image (slots,
+Docker, the local sandbox) with nothing extra installed. It never runs in the server process.
+
+| Kind | Extensions | What comes out |
+| --- | --- | --- |
+| Word | `.docx`, `.docm`, `.dotx`, `.doc` (Word 97-2003) | Paragraphs in order, tables row by row (cells joined by ` \| `), tracked insertions without deletions, content controls, field results, text boxes, then footnotes, endnotes and comments |
+| Excel | `.xlsx`, `.xlsm`, `.xls` (Excel 97-2003) | Each sheet under `Sheet: <name>` (hidden sheets marked), one row per line; dates shown as dates; a formula with no saved value shown as the formula |
+| CSV | `.csv`, `.tsv` | One row per line; the separator (comma, semicolon, tab, pipe) is detected |
+| PowerPoint | `.pptx`, `.pptm`, `.ppsx` | Each slide under `Slide <n>`, its text and tables, then its speaker notes; slide numbers and footers are left out |
+| OpenDocument | `.odt`, `.ods`, `.odp` | The same as the Word, Excel and PowerPoint rows above |
+| RTF | `.rtf` | Text and tables, with the file's code page and Unicode characters |
+| Web page | `.html`, `.htm`, `.xhtml` | Text and tables, without scripts and styles |
+| Email | `.eml`, `.msg` (Outlook) | From, To, Cc, Date and Subject, the plain body (or the HTML body as text), then each attachment: its text when it is one of these kinds, nested emails up to three levels; a PDF or image inside a saved email is named but not read (save it as its own file to read it) |
+| Text | `.txt`, `.md`, `.json`, `.xml`, `.ics`, `.vcf`, `.log`, `.yaml` | As it is, in UTF-8, UTF-16 or Windows-1252 |
+
+The reader looks at the bytes, not only the name: an RTF or HTML file saved as `.doc`, or a bank
+statement saved as HTML or tab-separated text under an `.xls` name, is read for what it is. The
+text is cut into pages of about 3,000 characters, so `extract_document_text` reads long files in
+`page_start`/`page_end` windows the same way as a PDF, and an open-ended tool read shows a short
+window and names the next range. Limits: 25 MB per file (the same cap as PDFs), at most 100 MB and
+5,000 entries once a zip-based file (`.docx`, `.xlsx`, `.pptx`, OpenDocument) is unpacked, 1,000,000
+characters of text per file (the result says when a file holds more), 2 GB of memory and 60 seconds
+per read. An XML part that declares a document type is refused, so a file cannot define entities or
+pull in other files.
+
+A file that cannot be read gets a plain reason, never the reader's own output (which could quote
+the file): damaged or incomplete, protected with a password (an encrypted `.docx`/`.xlsx`/`.pptx`,
+`.doc` or `.xls`), saved in a very old format (Word 6/95, Excel 5/95, `.ppt`), too large, or not a
+kind of document that can be read. A document with no text (only pictures) says so.
 
 ## Repository-bound coding sessions
 
@@ -88,10 +134,12 @@ A session can be bound to one registered repository and an absolute checkout pat
 
 Confirmed commands are host-owned. The agent invokes a command by ID, while the harness supplies the exact command, working directory, purpose, and timeout. A missing command or invalid checkout fails clearly instead of falling back to a guessed command or directory.
 
-To reduce first-run setup friction, the harness can propose commands from two bounded repository files after a checkout is bound:
+To reduce first-run setup friction, the harness can propose commands from four bounded repository files after a checkout is bound:
 
 - `package.json` scripts named `build`, `test`, or `verify`
 - explicit `Build:`, `Test:`, or `Verify:` command declarations in `AGENTS.md`
+- `pyproject.toml`: the pytest, Ruff and mypy tool tables, and explicit scripts in the Hatch default environment
+- `Makefile` targets named `build`, `test`, `lint`, `check`, or `verify`
 
 Proposals are never executable. Review and confirm a proposal before it enters the command registry. The registry remains the source of truth even if the source file later changes.
 
@@ -100,6 +148,10 @@ A successful `verify` command can authorize a separately approved commit in the 
 Verification authorization is process-local in this release. It survives normal turn reconstruction in one running server, but a server restart or replica hop loses it and the commit fails closed by asking for verification again. The runtime exposes an asynchronous receipt-store boundary so deployments can replace that owner with durable, cross-replica storage without changing sandbox admission.
 
 The repository endpoints live under `/api/v1/repositories`; session binding lives under `/api/v1/sessions/{session_id}/repository`.
+
+### Working on a repo from a chat
+
+The chat has a "Work on a repo" button. The person picks one of their GitHub repos (read through the GitHub connector attached to the chat) or pastes a GitHub address, and picks a branch. Aman then asks, in the chat, to clone the repo into the sandbox workspace; the clone goes through the usual host git path, so it asks for approval like any other clone. When the clone finishes, the chat is bound to the checkout, the chat shows the repo and branch it is working on, and the command proposals found in the repo files appear in one card for the person to confirm or dismiss. A repo larger than 100 MB cannot be opened yet, and without a GitHub connector the picker says to connect GitHub first, under Connectors. Public repos can be opened by address without a connector.
 
 ## Structured file edits
 

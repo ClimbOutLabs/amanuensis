@@ -4,7 +4,7 @@ import { act, render, screen } from '@testing-library/react';
 import { useCallback, useEffect, useState } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { AmanAvatarMotion, type AmanAvatarMotionSources } from '@/components/AmanAvatarMotion.js';
+import { AmanAvatarMotion, avatarAltText, type AmanAvatarMotionSources } from '@/components/AmanAvatarMotion.js';
 import {
   AVATAR_ACTIVITY_ERROR_AUTO_CLEAR_MS,
   AvatarActivityProvider,
@@ -22,6 +22,8 @@ import {
  * clip the panda actually displays stay correct across a realistic session.
  */
 
+const ALT = avatarAltText('Maya');
+
 const SOURCES: AmanAvatarMotionSources = {
   idle: ['/clips/idle-a.mp4', '/clips/idle-b.mp4'],
   thinking: '/clips/thinking.mp4',
@@ -29,6 +31,8 @@ const SOURCES: AmanAvatarMotionSources = {
   error: '/clips/error.mp4',
   poster: '/clips/poster.jpg',
 };
+
+const WITH_WAITING: AmanAvatarMotionSources = { ...SOURCES, waiting: '/clips/waiting.mp4' };
 
 type JourneyControl = {
   sink: ReturnType<typeof useAvatarActivitySink>;
@@ -43,7 +47,7 @@ function SinkProbe({ control }: { control: JourneyControl }) {
   return null;
 }
 
-function JourneyStage({ control }: { control: JourneyControl }) {
+function JourneyStage({ control, sources = SOURCES }: { control: JourneyControl; sources?: AmanAvatarMotionSources }) {
   // The host pattern, per TrueFoundryChatProvider docs: the provider's onActivity
   // feeds host state, which flows back into the rail's `activity` prop. The callback
   // is stable: a new identity would look like a re-subscription to the provider,
@@ -60,19 +64,19 @@ function JourneyStage({ control }: { control: JourneyControl }) {
   return (
     <AvatarActivityProvider onActivity={onActivity}>
       <SinkProbe control={control} />
-      <AmanAvatarMotion activity={activity} sources={SOURCES} />
+      <AmanAvatarMotion activity={activity} sources={sources} alt={ALT} />
     </AvatarActivityProvider>
   );
 }
 
-function setup(): JourneyControl {
+function setup(sources: AmanAvatarMotionSources = SOURCES): JourneyControl {
   const control: JourneyControl = { sink: null, timeline: [] };
-  render(<JourneyStage control={control} />);
+  render(<JourneyStage control={control} sources={sources} />);
   return control;
 }
 
 function avatar(): HTMLElement {
-  return screen.getByRole('img', { name: /Amanuensis avatar/ });
+  return screen.getByRole('img', { name: ALT });
 }
 
 function displayedActivity(): AmanAvatarActivity {
@@ -80,6 +84,7 @@ function displayedActivity(): AmanAvatarActivity {
   if (src === SOURCES.thinking) return 'thinking';
   if (src === SOURCES.writing) return 'writing';
   if (src === SOURCES.error) return 'error';
+  if (src === WITH_WAITING.waiting) return 'waiting';
   return 'idle';
 }
 
@@ -90,7 +95,7 @@ function rawTimeline(control: JourneyControl): AmanAvatarActivity[] {
 /** The bridge reports this when the user sends and the turn starts with no visible tokens yet. */
 function sendBeat(control: JourneyControl): void {
   act(() => {
-    control.sink?.reportDerived({ isBusy: true, isTextStreaming: false });
+    control.sink?.reportDerived({ isBusy: true, isTextStreaming: false, isWaiting: false });
   });
 }
 
@@ -98,14 +103,21 @@ function sendBeat(control: JourneyControl): void {
 function streamingBeat(control: JourneyControl, text: string): void {
   void text;
   act(() => {
-    control.sink?.reportDerived({ isBusy: true, isTextStreaming: true });
+    control.sink?.reportDerived({ isBusy: true, isTextStreaming: true, isWaiting: false });
+  });
+}
+
+/** The bridge reports this while the turn is parked on the person: an approval or an answer. */
+function waitingBeat(control: JourneyControl): void {
+  act(() => {
+    control.sink?.reportDerived({ isBusy: true, isTextStreaming: false, isWaiting: true });
   });
 }
 
 /** The bridge reports this when the turn completes. */
 function idleBeat(control: JourneyControl): void {
   act(() => {
-    control.sink?.reportDerived({ isBusy: false, isTextStreaming: false });
+    control.sink?.reportDerived({ isBusy: false, isTextStreaming: false, isWaiting: false });
   });
 }
 
@@ -314,6 +326,49 @@ describe('avatar activity journey', () => {
 
     idleBeat(control);
     expect(displayedActivity()).toBe('idle');
+  });
+
+  it('changes the clip at every state of a turn: idle, thinking, writing, waiting, error', () => {
+    const control = setup(WITH_WAITING);
+    const srcs: string[] = [];
+    const record = (): void => {
+      const src = avatar().getAttribute('src');
+      if (src !== null) srcs.push(src);
+    };
+
+    expect(displayedActivity()).toBe('idle');
+    record();
+    sendBeat(control);
+    record();
+    advance(500);
+    streamingBeat(control, 'Hel');
+    advance(1500);
+    record();
+    // The turn parks on an approval: the panda waits for the person, not thinks.
+    waitingBeat(control);
+    record();
+    expect(displayedActivity()).toBe('waiting');
+    act(() => {
+      control.sink?.reportError();
+    });
+    record();
+    expect(displayedActivity()).toBe('error');
+
+    expect(rawTimeline(control)).toEqual(['idle', 'thinking', 'writing', 'waiting', 'error']);
+    // Five beats, four different clips: no state reuses another's clip.
+    expect(new Set(srcs).size).toBe(5);
+    expect(srcs[3]).toBe(WITH_WAITING.waiting);
+  });
+
+  it('a turn blocked on the person shows the poster when there is no waiting clip', () => {
+    const control = setup();
+    sendBeat(control);
+    advance(1200);
+    waitingBeat(control);
+
+    expect(rawTimeline(control)).toEqual(['idle', 'thinking', 'waiting']);
+    expect(avatar().tagName).toBe('IMG');
+    expect(avatar()).toHaveAttribute('src', SOURCES.poster);
   });
 
   it('keeps a single video element with the poster across the whole journey', () => {

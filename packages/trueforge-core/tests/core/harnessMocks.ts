@@ -1,6 +1,6 @@
 import type { Logger } from 'winston';
 import winston from 'winston';
-import type { ILLM } from '../../src/core/llm/ILLM';
+import type { ILLM, LLMCreateParamsStreaming } from '../../src/core/llm/ILLM';
 import type { ExtendedChatCompletionChunk, RawAssistantMessageWithUsage } from '../../src/core/llm/LLMTypes';
 import { getEmptyUsage } from '../../src/core/llm/LLMTypes';
 import type { AgentToolSchema, IToolSet, ListToolsResponse } from '../../src/core/mcp/IMCPServer';
@@ -109,14 +109,16 @@ export function makeStubPublicSandbox(
 export async function* unknownToolStream({
   toolName,
   callId,
+  args = '{}',
 }: {
   toolName: string;
   callId: string;
+  args?: string;
 }): AsyncGenerator<ExtendedChatCompletionChunk, RawAssistantMessageWithUsage, unknown> {
   const call = {
     id: callId,
     type: 'function' as const,
-    function: { name: toolName, arguments: '{}' },
+    function: { name: toolName, arguments: args },
   };
   yield {
     id: `chunk-${callId}`,
@@ -134,20 +136,18 @@ export async function* unknownToolStream({
 
 /** Streamed assistant turn that ends the conversation with a final answer. */
 // eslint-disable-next-line @typescript-eslint/require-await -- async generator fixture, not awaiting I/O
-export async function* finalAnswerStream(): AsyncGenerator<
-  ExtendedChatCompletionChunk,
-  RawAssistantMessageWithUsage,
-  unknown
-> {
+export async function* finalAnswerStream(
+  text = 'done',
+): AsyncGenerator<ExtendedChatCompletionChunk, RawAssistantMessageWithUsage, unknown> {
   yield {
     id: 'chunk-final',
     object: 'chat.completion.chunk',
     created: 0,
     model: 'test-model',
-    choices: [{ index: 0, delta: { role: 'assistant', content: 'done' }, finish_reason: 'stop' }],
+    choices: [{ index: 0, delta: { role: 'assistant', content: text }, finish_reason: 'stop' }],
   };
   return {
-    output: { role: 'assistant', content: 'done' },
+    output: { role: 'assistant', content: text },
     usage: getEmptyUsage(),
     finish_reason: 'stop',
   };
@@ -178,4 +178,28 @@ export function mcpServerNamesFromTools(tools: unknown): string[] {
     }
   }
   return names;
+}
+
+/** A model client that reads one topic's guidance with load_bundle on its first call, then answers. */
+export function readGuidanceModel(topic: string) {
+  let calls = 0;
+  const create = jest.fn((request: LLMCreateParamsStreaming) => {
+    void request;
+    calls += 1;
+    return calls === 1
+      ? unknownToolStream({ toolName: 'load_bundle', callId: 'read-guidance', args: JSON.stringify({ name: topic }) })
+      : finalAnswerStream();
+  });
+  return { create, createNonStream: jest.fn() };
+}
+
+/** What the host told the model: the system messages of its first request, then the guidance it read. */
+export function hostText(create: { mock: { calls: [LLMCreateParamsStreaming][] } }): string {
+  const system = (create.mock.calls[0]?.[0].messages ?? []).flatMap(message =>
+    message.role === 'system' && typeof message.content === 'string' ? [message.content] : [],
+  );
+  const guidance = (create.mock.calls[1]?.[0].messages ?? []).flatMap(message =>
+    message.role === 'tool' && typeof message.content === 'string' ? [message.content] : [],
+  );
+  return [...system, ...guidance].join('\n');
 }

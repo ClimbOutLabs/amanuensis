@@ -110,6 +110,11 @@ export interface DriverRunParams {
    * passed through.
    */
   env: Readonly<Record<string, string>>;
+  /**
+   * Package mirror grant for this run, issued for the chat's repo when the person allowed downloads
+   * for it. Slot drivers pass it to the agent; the Docker driver ignores it and the run stays offline.
+   */
+  packageMirrorToken: string | undefined;
   /** Container user; the wrapper stages the run dirs so this uid can use them. */
   sandboxIdentity: SandboxIdentity;
   /** Cancels the run: the driver must kill the container/VM on abort. */
@@ -141,6 +146,11 @@ export interface DriverRunResult {
 
 export interface IsolationDriver {
   readonly kind: 'docker' | 'firecracker' | 'slots';
+  /**
+   * True only when the driver passes the run's package mirror token to the agent, so a package
+   * download can reach the package gateway. Offline drivers say false.
+   */
+  readonly packageGatewayCapable: boolean;
   /**
    * Idempotent readiness: image present and verified, daemon/KVM reachable. Never pulls the
    * image, but it is neither quick nor read-only: the Docker driver also creates and removes

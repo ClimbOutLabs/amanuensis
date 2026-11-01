@@ -4,7 +4,73 @@
 SANDBOX_NODE_MAJOR=22
 SANDBOX_NODE_MINOR=14
 
-lowercase() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]'; }
+# ASCII only: a Turkish locale would turn I into a dotless i and break comparisons with plain words.
+lowercase() { printf '%s' "$1" | LC_ALL=C tr '[:upper:]' '[:lower:]'; }
+
+# A path for a person to read: the home folder becomes ~. Here, not in ui.sh, because the doctor's checks use it
+# before the terminal style is loaded (and --json never loads it).
+ui_path() {
+  case "$1" in
+    "${HOME:-/nonexistent}") printf '~' ;;
+    "${HOME:-/nonexistent}"/*) printf '~%s' "${1#"$HOME"}" ;;
+    *) printf '%s' "$1" ;;
+  esac
+}
+
+# ---- who besides the owner can sign in --------------------------------------------------------------------------
+# An earlier version let `instance add-user` add sign-in users: a registry record, a password hash in dex.env and an
+# allowed email each. The installer removes them and the doctor reports them, both through this one rule.
+
+# The lines of an env file that Compose reads as KEY, as a POSIX ERE for awk under LC_ALL=C: any blanks (a no-break
+# space too) before it, `export` and blanks, blanks before `=` or `:`, or the bare key, which takes the caller's value.
+# Broad on purpose: a line it wrongly takes is only removed, a line it missed would keep its users.
+env_key_line_re() { # key
+  printf '^[^#A-Za-z0-9_]*(export[^#A-Za-z0-9_]+)?%s[^#A-Za-z0-9_=:]*([=:]|$)' "$1"
+}
+
+# The value of every line Compose reads as KEY, as Compose reads it: unquoted, without a trailing comment or CR.
+env_key_values() { # env file, key
+  [ -f "$1" ] || return 0
+  LC_ALL=C awk -v re="$(env_key_line_re "$2")" -v q="'" '
+    $0 ~ re {
+      sub(re, ""); sub(/\r$/, ""); sub(/^[ \t]+/, "")
+      c = substr($0, 1, 1)
+      if (c == "\"" || c == q) { $0 = substr($0, 2); n = index($0, c); if (n) $0 = substr($0, 1, n - 1) }
+      else { sub(/[ \t]#.*/, ""); sub(/[ \t]+$/, "") }
+      print
+    }' "$1"
+}
+
+# What to call the sign-in users of an instance beyond its owner, comma separated: their emails, else the names behind
+# leftover records and password hashes. Empty when only the owner can sign in. Every OIDC_ALLOWED_EMAILS line counts
+# because Compose reads the last one, wherever it sits. Hashes are never printed.
+extra_sign_in_users() { # registry file, instance folder
+  local reg=$1 dir=$2 owner emails names
+  owner=$(sed -n 's/^owner_email=//p' "$reg" 2>/dev/null | head -n 1)
+  # With the record gone, the first allowed email is taken for the owner's.
+  if [ -z "$owner" ]; then
+    owner=$(env_key_values "$dir/.env" OIDC_ALLOWED_EMAILS | head -n 1 | cut -d, -f1)
+  fi
+  emails=$(
+    {
+      LC_ALL=C sed -n 's/^user_[a-z0-9-]*=[^:]*://p' "$reg" 2>/dev/null
+      env_key_values "$dir/.env" OIDC_ALLOWED_EMAILS | tr ',' '\n'
+    } | LC_ALL=C awk -v owner="$(lowercase "$owner")" '
+      { e = tolower($0); gsub(/^[ \t"\x27]+|[ \t"\x27]+$/, "", e) }
+      e != "" && e != owner && !seen[e]++ { print e }'
+  )
+  if [ -n "$emails" ]; then
+    names=$emails
+  else
+    names=$(
+      {
+        LC_ALL=C sed -n 's/^user_\([a-z0-9-]*\)=.*/\1/p' "$reg" 2>/dev/null
+        LC_ALL=C sed -n 's/^DEX_USER_PASSWORD_HASH_\([A-Z0-9_]*\)=.*/\1/p' "$dir/dex.env" 2>/dev/null | LC_ALL=C tr '[:upper:]_' '[:lower:]-'
+      } | awk '!seen[$0]++'
+    )
+  fi
+  printf '%s\n' "$names" | awk 'NF { if (n++) printf ", "; printf "%s", $0 }'
+}
 
 # True when the Node.js on this computer is new enough to run the sandbox setup.
 sandbox_node_ok() {
@@ -15,8 +81,18 @@ sandbox_node_ok() {
   major=${v%%.*}
   minor=${v#*.}
   minor=${minor%%.*}
-  case "$major$minor" in '' | *[!0-9]*) return 1 ;; esac
+  case "$major$minor" in '' | *[![:digit:]]*) return 1 ;; esac
   [ "$major" -gt "$SANDBOX_NODE_MAJOR" ] || { [ "$major" -eq "$SANDBOX_NODE_MAJOR" ] && [ "$minor" -ge "$SANDBOX_NODE_MINOR" ]; }
+}
+
+# ---- whether an instance is served over https -------------------------------------------------------------------
+# An instance is served over https when it is opened on the network (its record lists the addresses it answers at),
+# its record asks for https with a certificate made on this computer, and it has a port for it. This is the one
+# rule: the compose file, the doctor and the closing lines all decide by it, so the https settings an instance
+# keeps in its record after it was closed back to this computer alone count for nothing anywhere. The values come
+# from the instance's record; each program reads them with its own reader.
+serves_https() { # tls tls_port origins
+  [ "$1" = local ] && [ -n "$2" ] && [ -n "$3" ]
 }
 
 # ---- the folder the installer runs from -------------------------------------------------------------------------

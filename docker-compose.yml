@@ -66,6 +66,10 @@ services:
     # another's namespace, and the joined containers read this hosts file.
     extra_hosts:
       - 'host.docker.internal:host-gateway'
+    # The calendar network is shared with the calendar connector only (see calendar-caldav).
+    networks:
+      - default
+      - calendar
     restart: unless-stopped
 
   # Serves both the API and the UI on one port.
@@ -117,6 +121,16 @@ services:
       # the server forwards recorded WAV audio and degrades gracefully when
       # the sidecar is unreachable (typed chat keeps working).
       STT_URL: http://aman-stt:8001
+      # Email send list the server writes, and the sidecar's status file it reads (see mail-email).
+      MAIL_POLICY_FILE: /data/mail-policy/allowed_recipients.toml
+      MAIL_POLICY_STATUS_FILE: /data/mail-policy-status/loaded.sha256
+      # The sidecar's account agent, which the Settings Email card talks to (see mail-email).
+      MAIL_EMAIL_ACCOUNT_URL: http://mail-email:9559
+      # The calendar sidecar's account agent, which the Settings Calendar card talks to (see calendar-caldav).
+      CALENDAR_ACCOUNT_URL: http://calendar-caldav:9560
+      # Guards the calendar account port; the same value goes to calendar-caldav. There is no default: `pnpm smoke`
+      # makes a random one for each run, and for plain `docker compose` set it in the shell (openssl rand -hex 32).
+      CALENDAR_ACCOUNT_SECRET: ${CALENDAR_ACCOUNT_SECRET:?set CALENDAR_ACCOUNT_SECRET to a random value of 32 or more characters, for example from openssl rand -hex 32}
     # Secrets and Postgres credentials (POSTGRES_USER, …).
     # `environment` above overrides any colliding keys from this file.
     # TRUEFORGE_API_KEY is deliberately not overridden: set it here and the server and controller
@@ -134,6 +148,9 @@ services:
       # Persistent persona knowledge libraries; without this, libraries vanish
       # on container recreate.
       - persona-knowledge-data:/data/persona-knowledge
+      # The Email send list. The server is its only writer; the sidecar mounts it read-only.
+      - mail-policy:/data/mail-policy
+      - mail-policy-status:/data/mail-policy-status:ro
     depends_on:
       loopback:
         condition: service_started
@@ -190,6 +207,73 @@ services:
     # pins device=cpu. No GPU reservations here.
     restart: unless-stopped
 
+  # Email connector sidecar. Private to the Compose network: `expose` only, never `ports`.
+  # The server reaches it as http://mail-email:9557/mcp. The server has no login of its own,
+  # so nothing outside this network may reach it.
+  mail-email:
+    image: ghcr.io/wh1isper/mcp-email-server@sha256:1c4d5333028a6b86867b5c73db121060086a8fb96e40ceb4262d14aae37f8852
+    # The wrapper starts the sidecar on the send list the server writes, and restarts it when that list changes.
+    entrypoint: ['/bin/sh', '/usr/local/bin/aman-mail-entrypoint']
+    command: ['streamable-http', '--host', '0.0.0.0', '--port', '9557']
+    environment:
+      # Only requests addressed to this service name pass the DNS-rebinding check.
+      MCP_ALLOWED_HOSTS: mail-email
+      # Env-supplied accounts are read from the environment only. `plaintext` makes the
+      # server never touch the OS keyring, and no account is written to the config file.
+      MCP_EMAIL_SERVER_CREDENTIAL_STORAGE: plaintext
+      # The send list the server owns. It is read-only here; the server is the only writer.
+      MCP_EMAIL_SERVER_CONFIG_PATH: /policy/allowed_recipients.toml
+      # Where the wrapper records the hash of the list it started with. The server waits on it.
+      AMAN_MAIL_STATUS_FILE: /mail-status/loaded.sha256
+      # The account agent: the account file it owns, its private-network port, and its own path in the image.
+      AMAN_MAIL_ACCOUNT_FILE: /account/.env.mail-email
+      AMAN_MAIL_ACCOUNT_PORT: '9559'
+      AMAN_MAIL_ACCOUNT_AGENT: /usr/local/bin/aman-mail-account-agent
+      AMAN_MAIL_EMAIL_CHECK: /usr/local/bin/aman-mail-email-check
+      # Attachment content is read only so the server can hand it to the agent as data, never as instructions.
+      MCP_EMAIL_SERVER_ENABLE_ATTACHMENT_CONTENT: 'true'
+    volumes:
+      - ./ops/compose/mail-email/entrypoint.sh:/usr/local/bin/aman-mail-entrypoint:ro
+      - ./ops/compose/mail-email/account_agent.py:/usr/local/bin/aman-mail-account-agent:ro
+      - ./ops/compose/mail-email/email_check.py:/usr/local/bin/aman-mail-email-check:ro
+      # The account file itself, in a volume this sidecar owns, so the agent can save accounts the
+      # Settings card sends. No host file is bound here: a missing bind source would be created as a
+      # folder and break the account file, and a host-owned file is unreadable to this sidecar.
+      - mail-account:/account
+      - mail-policy:/policy:ro
+      - mail-policy-status:/mail-status
+      - mail-email-data:/data
+    expose:
+      - '9557'
+      - '9559'
+    restart: unless-stopped
+
+  # Calendar connector sidecar (CalDAV). Built from ops/calendar-sidecar and private: `expose` only, never `ports`,
+  # on its own network. The server reaches it as http://calendar-caldav:9558/mcp.
+  # The calendar login lives in a volume this sidecar owns, which the Settings Calendar card saves
+  # through the sidecar's account agent on port 9560. The tool server runs only while a login is saved.
+  calendar-caldav:
+    build:
+      context: ./ops/calendar-sidecar
+    environment:
+      # Only these tools are offered. Writes need the confirm token, not an interactive prompt.
+      CALDAV_ALLOW_TOOLS: list_calendars,list_events,get_event,search_events,create_event,update_event,delete_event,respond_to_event
+      ELICITATION: 'false'
+      # The account agent: the account file it owns and its private-network port.
+      CALENDAR_ACCOUNT_FILE: /account/.env.calendar
+      CALENDAR_ACCOUNT_PORT: '9560'
+      # Only a caller that presents this secret can read, replace or remove the account (same value as the server).
+      CALENDAR_ACCOUNT_SECRET: ${CALENDAR_ACCOUNT_SECRET:?set CALENDAR_ACCOUNT_SECRET to a random value of 32 or more characters, for example from openssl rand -hex 32}
+    # A network of its own, shared with the app's `loopback` only, so the mail connector cannot reach the account port.
+    networks:
+      - calendar
+    volumes:
+      - calendar-account:/account
+    expose:
+      - '9558'
+      - '9560'
+    restart: unless-stopped
+
   # Schedule controller: runs the periodic control loops (schedule dispatch) as a separate service.
   controller:
     # Runs the image the `server` service builds. Building it here too makes Compose build
@@ -220,8 +304,8 @@ services:
   # Login profile. Start with `docker compose --profile login up --build` after
   # setting the OIDC_*, DEX_* and NODE_EXTRA_CA_CERTS values in
   # packages/trueforge/.env (docs/quickstart.mdx walks through it). The app
-  # then shows a real sign-in screen backed by one local account, with no
-  # external identity provider.
+  # then shows a real sign-in screen backed by one local account, on Aman's own
+  # sign-in service. Standalone also needs OIDC_ALLOWED_EMAILS (the owner).
 
   # One-shot: mints a self-signed certificate for https://localhost:5556 the
   # first time the profile runs. OIDC issuers must be HTTPS; the server trusts
@@ -265,8 +349,23 @@ services:
       retries: 10
     restart: unless-stopped
 
+networks:
+  # Between the app's `loopback` and the calendar connector only. Not internal: the connector reaches the calendar
+  # server on the internet.
+  calendar: {}
+
 volumes:
   dex-tls:
+  # The Email send list. Holds only addresses, never credentials.
+  mail-policy:
+  # Records which send list the Email sidecar loaded. Written by the sidecar, read by the server.
+  mail-policy-status:
+  # Mail metadata index (SQLite). Holds mail metadata at rest, never credentials.
+  mail-email-data:
+  # The Email account file, owned by the connector. Holds the app password; nothing else reads it.
+  mail-account:
+  # The Calendar login file, owned by the connector. Holds the app password; nothing else reads it.
+  calendar-account:
   # Persistent Markdown memory files .
   memory-data:
   # Persistent persona knowledge libraries (SQLite per persona).

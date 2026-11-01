@@ -274,7 +274,10 @@ describe('validateAgentSpec', () => {
     setCachedLocalSandboxSupport(undefined);
   });
 
-  async function setup(options?: { reasoningEfforts?: ReasoningEffort[] | undefined }) {
+  async function setup(options?: {
+    reasoningEfforts?: ReasoningEffort[] | undefined;
+    maxConcurrentRequests?: number | undefined;
+  }) {
     const db = createSqliteDb(':memory:');
     await migrateSqliteToLatest(db);
     const modelProviderStore = new SqliteModelProviderStore(db);
@@ -295,6 +298,9 @@ describe('validateAgentSpec', () => {
               context_length: 128000,
               max_output_tokens: 4096,
               ...(options?.reasoningEfforts !== undefined ? { reasoning_efforts: options.reasoningEfforts } : {}),
+              ...(options?.maxConcurrentRequests !== undefined
+                ? { max_concurrent_requests: options.maxConcurrentRequests }
+                : {}),
             },
           },
         ],
@@ -326,6 +332,26 @@ describe('validateAgentSpec', () => {
       defaultModelParams: { max_tokens: 4096 },
       modelProperties: { context_length: 128000, max_output_tokens: 4096 },
     });
+  });
+
+  it('limits a custom provider model to one request at a time unless its settings say otherwise', async () => {
+    const stores = await setup();
+    await expect(
+      getModelDetails({
+        tenant_id: 'default',
+        name: 'test-provider/test-model',
+        store: stores.modelProviderStore,
+      }),
+    ).resolves.toMatchObject({ maxConcurrentRequests: 1 });
+
+    const raised = await setup({ maxConcurrentRequests: 3 });
+    await expect(
+      getModelDetails({
+        tenant_id: 'default',
+        name: 'test-provider/test-model',
+        store: raised.modelProviderStore,
+      }),
+    ).resolves.toMatchObject({ maxConcurrentRequests: 3 });
   });
 
   it('rejects malformed model FQN with 422', async () => {
@@ -411,6 +437,77 @@ describe('validateAgentSpec', () => {
     ).rejects.toMatchObject({
       status: 422,
       message: expect.stringContaining('Unknown MCP server "missing-mcp"'),
+    } satisfies Partial<HTTPException>);
+  });
+
+  /** The state after the search switch: Tavily holds the search provider role, Parallel is deleted. */
+  async function setupWithTavilyDesignated() {
+    const stores = await setup();
+    await stores.mcpServerStore.upsertServer({
+      tenant_id: 'default',
+      name: 'tavily',
+      manifest: {
+        type: 'remote',
+        name: 'tavily',
+        url: 'https://mcp.tavily.com/mcp',
+        description: 'Invented search connector.',
+        search_provider: true,
+      },
+      first_party: false,
+    });
+    return stores;
+  }
+
+  it('accepts a remembered mount of a deleted search provider preset once another provider holds the role', async () => {
+    const stores = await setupWithTavilyDesignated();
+    await expect(
+      validateAgentSpec({
+        spec: AgentSpecSchema.parse({
+          model: { name: 'test-provider/test-model' },
+          instructions: 'test',
+          mcp_servers: [{ name: 'parallel-web' }],
+        }),
+        tenant_id: 'default',
+        searchProviderPresetNames: ['parallel-web', 'tavily'],
+        ...stores,
+      }),
+    ).resolves.toBeUndefined();
+  });
+
+  it('still rejects an unknown server that is not a search provider preset when preset names are passed', async () => {
+    const stores = await setupWithTavilyDesignated();
+    await expect(
+      validateAgentSpec({
+        spec: AgentSpecSchema.parse({
+          model: { name: 'test-provider/test-model' },
+          instructions: 'test',
+          mcp_servers: [{ name: 'parallel-web' }, { name: 'missing-mcp' }],
+        }),
+        tenant_id: 'default',
+        searchProviderPresetNames: ['parallel-web', 'tavily'],
+        ...stores,
+      }),
+    ).rejects.toMatchObject({
+      status: 422,
+      message: expect.stringContaining('Unknown MCP server "missing-mcp"'),
+    } satisfies Partial<HTTPException>);
+  });
+
+  it('still rejects the deleted preset mount when the caller passes no preset names', async () => {
+    const stores = await setupWithTavilyDesignated();
+    await expect(
+      validateAgentSpec({
+        spec: AgentSpecSchema.parse({
+          model: { name: 'test-provider/test-model' },
+          instructions: 'test',
+          mcp_servers: [{ name: 'parallel-web' }],
+        }),
+        tenant_id: 'default',
+        ...stores,
+      }),
+    ).rejects.toMatchObject({
+      status: 422,
+      message: expect.stringContaining('Unknown MCP server "parallel-web"'),
     } satisfies Partial<HTTPException>);
   });
 
@@ -558,6 +655,7 @@ describe('validateAgentSpec', () => {
             repository_name: 'team-a',
             version: 1,
           },
+          network_approval: null,
           created_at: now,
           updated_at: now,
         },
@@ -569,6 +667,9 @@ describe('validateAgentSpec', () => {
         throw new Error('unused');
       },
       deleteSkill: async () => {
+        throw new Error('unused');
+      },
+      setSkillNetworkApproval: async () => {
         throw new Error('unused');
       },
       listSkillVersions: async () => [],

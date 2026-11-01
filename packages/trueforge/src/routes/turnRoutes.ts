@@ -4,6 +4,7 @@
  * Handlers are registered in apis/turns.ts.
  */
 import { createRoute, z } from '@hono/zod-openapi';
+import type { MiddlewareHandler } from 'hono';
 import { RequestErrorResponseSchema } from '../schemas/errors';
 import { TurnStreamingEventSchema } from '../schemas/events';
 import { SessionIdParamsSchema } from '../schemas/session';
@@ -82,8 +83,15 @@ export const getTurnRoute = createRoute({
   },
 });
 
+/** Downloads carry user and model content: the browser must save them, never sniff them into a page. */
+const noSniff: MiddlewareHandler = async (c, next) => {
+  await next();
+  c.header('X-Content-Type-Options', 'nosniff');
+};
+
 export const downloadSandboxFileRoute = createRoute({
   method: 'get',
+  middleware: [noSniff] as const,
   path: '/{session_id}/turns/{turn_id}/download-sandbox-file',
   tags: [OpenApiTag.AGENT_SESSIONS],
   summary: 'Download a file from the turn sandbox',
@@ -253,11 +261,13 @@ Use \`previous_turn_id\` to chain to the session's last turn (defaults to \`auto
       description:
         'The turn conflicts with the session as stored. `error.code` says which: ' +
         '`stale_approval_continuation` (the approval was answered against a turn that is no longer the tip), ' +
-        '`previous_turn_running` (the prior turn is still executing), ' +
+        '`previous_turn_running` (the chat is still answering; wait or cancel, then send again), ' +
         '`turn_already_exists` (that turn id is taken), or ' +
         '`approval_conflict` (a resubmitted decision contradicts the one already recorded), or ' +
+        '`approval_request_ended` (the approval answers a request that already ended; it cannot run, so ask again), or ' +
         '`held_action_expired`, `held_action_changed`, `held_action_not_allowed`, `held_action_tool_gone` or ' +
-        '`held_action_sign_in` (a held action cannot run now; nothing was done).',
+        '`held_action_sign_in` (a held action cannot run now; nothing was done), or ' +
+        '`turn_could_not_start` (the reply could not start in time; send again).',
     },
     412: {
       content: { 'application/json': { schema: RequestErrorResponseSchema } },

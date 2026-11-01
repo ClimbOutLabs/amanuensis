@@ -3,6 +3,8 @@
 import { ThreadPrimitive, useAuiState } from '@assistant-ui/react';
 import { useEffect, useRef, type ReactNode } from 'react';
 import { preloadMarkdownOpenUI } from '../atoms/Markdown.js';
+import { HelpChatPanel, HelpChoices } from '../help/HelpChatPanel.js';
+import { useOptionalHelp } from '../help/HelpProvider.js';
 import { AvatarActivityBridge } from '../hooks/useAvatarActivity.js';
 import { ComposerBusyProvider } from '../hooks/useComposerBusyState.js';
 import { useSyncSessionTitle } from '../hooks/useSyncSessionTitle.js';
@@ -12,15 +14,20 @@ import { useSlot } from '../theme/SlotsProvider.js';
 import { isNewChatView } from '../utils/isNewChatView.js';
 import { ApprovalFocusProvider } from './approvalFocus.js';
 import { AssistantMessageContainer } from './AssistantMessageContainer.js';
+import { ChatNoticeContainer } from './ChatNoticeContainer.js';
+import { ConnectionStatusContainer } from './ConnectionStatusContainer.js';
 import { DocumentIngestionStatusProvider } from './DocumentIngestionStatusProvider.js';
 import { HistoryLoaderContainer } from './HistoryLoaderContainer.js';
 import { ThreadImplementationPlanGrantControls } from './ImplementationPlanGrantControls.js';
 import { MemoryTurnContextProvider } from './MemoryTurnContextProvider.js';
+import { ModelUsageTurnProvider } from './ModelUsageTurnProvider.js';
 import { PendingApprovalsBanner } from './PendingApprovalsBanner.js';
 import { ResumeUnavailableContainer } from './ResumeUnavailableContainer.js';
 import { TerminalErrorContainer } from './TerminalErrorContainer.js';
 import { UserEditComposerContainer } from './UserEditComposerContainer.js';
 import { UserMessageContainer } from './UserMessageContainer.js';
+import { ThreadWorkOnRepoControls } from './WorkOnRepoControls.js';
+import { WorkOnRepoPanelProvider } from './workOnRepoPanel.js';
 
 export { isNewChatView } from '../utils/isNewChatView.js';
 
@@ -74,6 +81,10 @@ export function ThreadContainer({ composer }: ThreadContainerProps) {
 
   const isEmpty = useAuiState(isNewChatView);
   const isLoading = useAuiState(s => s.thread.isLoading);
+  const help = useOptionalHelp();
+  const localThreadId = useAuiState(s => s.threadListItem.id);
+  // The help chat takes the place of the welcome tour in the chat it was started in.
+  const helpHere = help !== null && help.isSessionFor(localThreadId);
   // Entrance animation gate: shells mounted during the thread's first paint stay
   // static; only messages arriving afterwards animate. Resets on thread switch
   // since the container does not remount between threads.
@@ -101,56 +112,73 @@ export function ThreadContainer({ composer }: ThreadContainerProps) {
 
   return (
     <MemoryTurnContextProvider>
-      <DocumentIngestionStatusProvider>
-        <SentinelStateProvider>
-          <ComposerBusyProvider>
-            <AvatarActivityBridge />
-            <ApprovalFocusProvider>
-              <ThreadPrimitive.Root asChild>
-                <ThreadRootShell>
-                  <ThreadPrimitive.Viewport asChild autoScroll>
-                    <ThreadViewportShell isEmpty={isEmpty}>
-                      {isEmpty && <WelcomeScreen heading={welcomeHeading} />}
-                      {isEmpty && !isLoading && composer}
-                      {isLoading ? (
-                        <MessageListSkeleton />
-                      ) : (
-                        !isEmpty && (
-                          <>
-                            <HistoryLoaderContainer />
-                            <PendingApprovalsBanner />
-                            <MessageGroup>
-                              <ThreadPrimitive.Messages>
-                                {({ message }) => (
-                                  <AnimatedMessageShell animate={initialPaintDone.current}>
-                                    <ThreadMessage isEditing={message.role === 'user' && message.composer.isEditing} />
-                                  </AnimatedMessageShell>
-                                )}
-                              </ThreadPrimitive.Messages>
-                              <TerminalErrorContainer />
-                              <ResumeUnavailableContainer />
-                            </MessageGroup>
-                          </>
-                        )
-                      )}
-                    </ThreadViewportShell>
-                  </ThreadPrimitive.Viewport>
+      <ModelUsageTurnProvider>
+        <DocumentIngestionStatusProvider>
+          <SentinelStateProvider>
+            <ComposerBusyProvider>
+              <AvatarActivityBridge />
+              <ApprovalFocusProvider>
+                <WorkOnRepoPanelProvider>
+                  <ThreadPrimitive.Root asChild>
+                    <ThreadRootShell>
+                      {/* The empty chat opens at its top: the first frame is taller than the screen on purpose. */}
+                      <ThreadPrimitive.Viewport asChild autoScroll={!isEmpty}>
+                        <ThreadViewportShell isEmpty={isEmpty}>
+                          {helpHere ? <HelpChatPanel /> : null}
+                          {isEmpty && !helpHere && <WelcomeScreen heading={welcomeHeading} />}
+                          {isEmpty && !isLoading && (
+                            <>
+                              {helpHere ? null : <ThreadWorkOnRepoControls />}
+                              {composer}
+                            </>
+                          )}
+                          {isLoading ? (
+                            <MessageListSkeleton />
+                          ) : (
+                            !isEmpty && (
+                              <>
+                                <HistoryLoaderContainer />
+                                <PendingApprovalsBanner />
+                                <MessageGroup>
+                                  <ThreadPrimitive.Messages>
+                                    {({ message }) => (
+                                      <AnimatedMessageShell animate={initialPaintDone.current}>
+                                        <ThreadMessage
+                                          isEditing={message.role === 'user' && message.composer.isEditing}
+                                        />
+                                      </AnimatedMessageShell>
+                                    )}
+                                  </ThreadPrimitive.Messages>
+                                  <TerminalErrorContainer />
+                                  <ChatNoticeContainer />
+                                  <ResumeUnavailableContainer />
+                                  <ConnectionStatusContainer />
+                                </MessageGroup>
+                                {helpHere ? <HelpChoices /> : null}
+                              </>
+                            )
+                          )}
+                        </ThreadViewportShell>
+                      </ThreadPrimitive.Viewport>
 
-                  {!isLoading && !isEmpty && (
-                    <ThreadComposerAreaShell isEmpty={isEmpty}>
-                      <ThreadPrimitive.ScrollToBottom asChild>
-                        <ScrollToBottomButton />
-                      </ThreadPrimitive.ScrollToBottom>
-                      <ThreadImplementationPlanGrantControls />
-                      {composer}
-                    </ThreadComposerAreaShell>
-                  )}
-                </ThreadRootShell>
-              </ThreadPrimitive.Root>
-            </ApprovalFocusProvider>
-          </ComposerBusyProvider>
-        </SentinelStateProvider>
-      </DocumentIngestionStatusProvider>
+                      {!isLoading && !isEmpty && (
+                        <ThreadComposerAreaShell isEmpty={isEmpty}>
+                          <ThreadPrimitive.ScrollToBottom asChild>
+                            <ScrollToBottomButton />
+                          </ThreadPrimitive.ScrollToBottom>
+                          <ThreadImplementationPlanGrantControls />
+                          <ThreadWorkOnRepoControls />
+                          {composer}
+                        </ThreadComposerAreaShell>
+                      )}
+                    </ThreadRootShell>
+                  </ThreadPrimitive.Root>
+                </WorkOnRepoPanelProvider>
+              </ApprovalFocusProvider>
+            </ComposerBusyProvider>
+          </SentinelStateProvider>
+        </DocumentIngestionStatusProvider>
+      </ModelUsageTurnProvider>
     </MemoryTurnContextProvider>
   );
 }

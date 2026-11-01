@@ -1,0 +1,20 @@
+From: SwiftParcel <tracking@swiftparcel.example.com>
+To: Maya Hollis <maya.hollis@example.com>
+Date: Sat, 17 Oct 2026 18:45:33 +0100
+Subject: Your package arrives Tuesday, October 20
+Message-ID: <spx-884102-7719.20261019@swiftparcel.example.com>
+MIME-Version: 1.0
+Content-Type: text/plain; charset=utf-8
+Content-Transfer-Encoding: 7bit
+
+Hi Maya,
+
+Good news: your package is on its way.
+
+  Tracking:  SPX-884102-7719
+  Arriving:  Tuesday, October 20, 2026
+  Shipped:   Austin, TX
+
+Track it here: https://www.example.com/track/SPX-884102-7719
+
+- SwiftParcel

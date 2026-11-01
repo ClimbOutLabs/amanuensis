@@ -11,6 +11,8 @@ const UPSTREAM_TIMEOUT_MS = 15_000;
 
 /** Only what a browser needs to sign in: never the token, userinfo, key, discovery or device endpoints. */
 const BROWSER_PATHS = [/^\/auth(\/.+)?$/, /^\/approval$/, /^\/callback$/, /^\/static\/.+$/, /^\/theme\/.+$/];
+/** What the sign-in service shows again after a wrong password: its form with the password box. */
+const PASSWORD_FORM_MARKER = /name=["']password["']/i;
 const PASSWORD_POST_PATH = /^\/auth\/[^/]+\/login$/;
 /** Each of these makes the sign-in service store a new sign-in request. */
 const PAGE_START_PATH = /^\/auth(\/[^/]+)?$/;
@@ -24,6 +26,14 @@ const SECURITY_HEADERS: Record<string, string> = {
   'cache-control': 'no-store',
 };
 
+function tooManyText(retryAfterSeconds: number, scope: 'address' | 'account'): string {
+  if (scope === 'address') {
+    return `Too many sign-in attempts. Wait ${String(retryAfterSeconds)} seconds and try again.`;
+  }
+  const minutes = Math.max(1, Math.ceil(retryAfterSeconds / 60));
+  return `Too many wrong passwords. Try again in ${String(minutes)} ${minutes === 1 ? 'minute' : 'minutes'}.`;
+}
+
 /** The sign-in service can be passed through only when it sits on this computer and has a path of its own. */
 export function isProxiableIssuer(issuerUrl: string): boolean {
   try {
@@ -32,6 +42,27 @@ export function isProxiableIssuer(issuerUrl: string): boolean {
   } catch {
     return false;
   }
+}
+
+/** An IPv6 visitor can pick any address in the /64 their network hands out, so the whole /64 is one visitor. */
+export function groupIpv6By64(address: string): string {
+  if (!address.includes(':') || address.includes('.')) {
+    return address;
+  }
+  const [head = '', tail] = address.split('::');
+  const front = head === '' ? [] : head.split(':');
+  const back = tail === undefined || tail === '' ? [] : tail.split(':');
+  const groups =
+    tail === undefined
+      ? front
+      : [...front, ...Array<string>(Math.max(0, 8 - front.length - back.length)).fill('0'), ...back];
+  if (groups.length !== 8 || groups.some(group => !/^[0-9a-f]{1,4}$/i.test(group))) {
+    return address;
+  }
+  return `${groups
+    .slice(0, 4)
+    .map(group => group.toLowerCase().padStart(4, '0'))
+    .join(':')}::/64`;
 }
 
 /**
@@ -49,9 +80,9 @@ function clientKeyFor(trustedProxies: readonly string[]): (c: Context) => string
     }
     const forwarded = c.req.header('x-forwarded-for')?.split(',').at(-1)?.trim();
     if ((isLoopbackHost(remote) || trustedProxies.includes(remote)) && forwarded !== undefined && forwarded !== '') {
-      return forwarded;
+      return groupIpv6By64(forwarded);
     }
-    return remote;
+    return groupIpv6By64(remote);
   };
 }
 
@@ -125,8 +156,8 @@ export function createLoginProxy({
     throw new Error('The sign-in service must have the same path where it runs and where browsers find it');
   }
 
-  const tooMany = (retryAfterSeconds: number): Response =>
-    new Response(`Too many sign-in attempts. Wait ${String(retryAfterSeconds)} seconds and try again.`, {
+  const tooMany = (retryAfterSeconds: number, scope: 'address' | 'account' = 'address'): Response =>
+    new Response(tooManyText(retryAfterSeconds, scope), {
       status: 429,
       headers: {
         'content-type': 'text/plain; charset=UTF-8',
@@ -181,7 +212,7 @@ export function createLoginProxy({
     }
     const permit = guessing && body !== undefined ? limiter.begin(key, account) : undefined;
     if (permit !== undefined && !permit.allowed) {
-      return tooMany(permit.retryAfterSeconds);
+      return tooMany(permit.retryAfterSeconds, permit.scope);
     }
     const headers = new Headers();
     for (const name of FORWARDED_REQUEST_HEADERS) {
@@ -203,8 +234,25 @@ export function createLoginProxy({
       permit?.finish('abandon');
       return c.text('The sign-in service did not answer.', 502);
     }
-    // A redirect means the password was accepted; the form shown again means it was not.
-    permit?.finish(response.status >= 300 && response.status < 400 ? 'success' : 'failure');
+    // A redirect means the password was accepted; the form shown again (200, or 401 as the real service answers) means
+    // it was not. Any other answer (a bad request, an unknown sign-in state) tested no password, so it is not held
+    // against the address.
+    let answerBody: ArrayBuffer | null = null;
+    if (permit !== undefined && (response.status === 200 || response.status === 401)) {
+      try {
+        answerBody = await response.arrayBuffer();
+      } catch {
+        permit.finish('abandon');
+        return c.text('The sign-in service did not answer.', 502);
+      }
+    }
+    if (response.status >= 300 && response.status < 400) {
+      permit?.finish('success');
+    } else if (answerBody !== null && PASSWORD_FORM_MARKER.test(new TextDecoder().decode(answerBody))) {
+      permit?.finish('failure');
+    } else {
+      permit?.finish('abandon');
+    }
     const out = new Headers(SECURITY_HEADERS);
     for (const name of RETURNED_RESPONSE_HEADERS) {
       const value = response.headers.get(name);
@@ -218,6 +266,9 @@ export function createLoginProxy({
       const own = ownNames.find(name => location.startsWith(`${name}/`));
       out.set('location', own === undefined ? location : `${matchedOrigin}${location.slice(own.length)}`);
     }
-    return new Response(method === 'HEAD' ? null : response.body, { status: response.status, headers: out });
+    return new Response(method === 'HEAD' ? null : (answerBody ?? response.body), {
+      status: response.status,
+      headers: out,
+    });
   };
 }

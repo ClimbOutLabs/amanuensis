@@ -1,5 +1,5 @@
 import { OpenAPIHono } from '@hono/zod-openapi';
-import type { AgentSpec } from '@truefoundry/trueforge-core/agent-session';
+import type { AgentSpec, TurnInputItem } from '@truefoundry/trueforge-core/agent-session';
 import { AgentSpecSchema, SessionHandle, Sessions, TurnHandle } from '@truefoundry/trueforge-core/agent-session';
 import { SandboxNotAvailableError, type SandboxProvider } from '@truefoundry/trueforge-core/core';
 import { createLogger } from 'winston';
@@ -52,7 +52,7 @@ async function buildApp(options?: { sandboxProvider?: SandboxProvider | undefine
   app.route(
     '/',
     createTurnsRouter({
-      mcpCatalog: McpCatalog.load(),
+      mcpCatalog: McpCatalog.loadShipped(),
       globalSettingsStore: new SqliteGlobalSettingsStore(db),
       tokenFactoryBudget: uncappedTokenFactoryBudget,
       sessions,
@@ -227,6 +227,9 @@ describe('GET /{session_id}/turns/{turn_id}/download-sandbox-file', () => {
     const response = await app.request(downloadUrl({ sessionId: session.session_id, path: '/workspace/report.pdf' }));
 
     expect(response.status).toBe(404);
+    expect(await response.json()).toEqual({
+      error: { message: 'This reply could not be found. Reload the chat, then try again.' },
+    });
   });
 
   it('serves the persisted copy when one exists, without touching the sandbox provider', async () => {
@@ -273,6 +276,8 @@ describe('GET /{session_id}/turns/{turn_id}/download-sandbox-file', () => {
 
     expect(response.status).toBe(200);
     expect(Buffer.from(await response.arrayBuffer())).toEqual(data);
+    expect(response.headers.get('content-disposition')).toMatch(/^attachment;/);
+    expect(response.headers.get('x-content-type-options')).toBe('nosniff');
   });
 
   it('returns 413 with a clear reason for a file that was skipped for size, without calling the sandbox', async () => {
@@ -514,6 +519,7 @@ describe('run_code harvest download journey', () => {
     expect(response.status).toBe(200);
     expect(Buffer.from(await response.arrayBuffer())).toEqual(data);
     expect(response.headers.get('content-disposition')).toContain('plot.png');
+    expect(response.headers.get('x-content-type-options')).toBe('nosniff');
   });
 });
 
@@ -542,5 +548,149 @@ describe('toContentDisposition', () => {
         header,
       );
     }
+  });
+});
+
+/** One scripted turn of a request: `input` says whether a person started it or an approval continued it. */
+interface ScriptedTurn {
+  turnId: string;
+  previousTurnId: string | null;
+  input: TurnInputItem[];
+}
+
+/** Like `createSessionWithSandboxTurn`, but answers `getTurn` by id, so a lookup can walk a request's turns. */
+async function createSessionWithTurns(params: {
+  sessionStore: SqliteSessionStore;
+  sessions: Sessions<SessionCustom, TurnCustom>;
+  sessionId: string;
+  turns: ScriptedTurn[];
+}): Promise<void> {
+  await createSessionWithSandboxTurn({
+    sessionStore: params.sessionStore,
+    sessions: params.sessions,
+    sessionId: params.sessionId,
+    turnId: 'unused',
+    sandboxId: null,
+  });
+  const handle = await params.sessions.get({
+    tenant_id: STANDALONE_REQUEST_CONTEXT.tenant_id,
+    session_id: params.sessionId,
+  });
+  if (handle === undefined) {
+    throw new Error(`test session ${params.sessionId} was never created`);
+  }
+  const createdAt = new Date('2026-01-01T00:00:00.000Z');
+  const byId = new Map(
+    params.turns.map(turn => [
+      turn.turnId,
+      TurnHandle.fromRecord<TurnCustom>({
+        store: params.sessionStore,
+        turn: {
+          turn_id: turn.turnId,
+          session_id: params.sessionId,
+          first_turn_id: params.turns[0]?.turnId ?? turn.turnId,
+          ancestor_ids: [],
+          previous_turn_id: turn.previousTurnId,
+          state: { status: 'done', output: null, required_actions: [], completed_at: createdAt.toISOString() },
+          input: turn.input,
+          // A run_code-only turn (the slots sandbox) never opens an exec workspace.
+          snapshot: { threads: {}, mcp_servers: null, sandbox_info: null },
+          created_at: createdAt,
+          updated_at: createdAt,
+          custom: null,
+        },
+      }),
+    ]),
+  );
+  jest.spyOn(handle, 'getTurn').mockImplementation(async turnId => byId.get(turnId));
+}
+
+describe('a run_code file the reply names by the folder it was written to', () => {
+  const PDF = Buffer.from('%PDF weekly food budget');
+  const personAsked: TurnInputItem[] = [{ type: 'user.message', content: 'Make a weekly budget chart as a PDF.' }];
+
+  async function harvest(input: { turnArtifactStore: SqliteTurnArtifactStore; sessionId: string; turnId: string }) {
+    const sink = buildRunCodeHarvestSink({
+      store: input.turnArtifactStore,
+      tenantId: STANDALONE_REQUEST_CONTEXT.tenant_id,
+      sessionId: input.sessionId,
+      turnId: input.turnId,
+      logger: createLogger({ silent: true }),
+    });
+    await sink([{ name: 'weekly_food_budget.pdf', bytes: PDF, size_bytes: PDF.length, sha256: 'x' }]);
+  }
+
+  it('downloads the kept copy after the run workspace is reset', async () => {
+    // Any live-sandbox read would fail: the run workspace is gone once the run ends.
+    const provider = new FakeSandboxProvider(new Map());
+    const { app, sessions, sessionStore, turnArtifactStore } = await buildApp({ sandboxProvider: provider });
+    await createSessionWithTurns({
+      sessionStore,
+      sessions,
+      sessionId: 's1',
+      turns: [{ turnId: 'turn-1', previousTurnId: null, input: personAsked }],
+    });
+    await harvest({ turnArtifactStore, sessionId: 's1', turnId: 'turn-1' });
+
+    for (const path of ['/egress/weekly_food_budget.pdf', '/scratch/weekly_food_budget.pdf']) {
+      const response = await app.request(downloadUrl({ sessionId: 's1', path }));
+      expect(response.status).toBe(200);
+      expect(Buffer.from(await response.arrayBuffer())).toEqual(PDF);
+      expect(response.headers.get('content-disposition')).toContain('weekly_food_budget.pdf');
+    }
+  });
+
+  it('finds a file made before an approval pause from the reply that came after it', async () => {
+    const { app, sessions, sessionStore, turnArtifactStore } = await buildApp({
+      sandboxProvider: new FakeSandboxProvider(new Map()),
+    });
+    await createSessionWithTurns({
+      sessionStore,
+      sessions,
+      sessionId: 's1',
+      turns: [
+        { turnId: 'turn-1', previousTurnId: null, input: personAsked },
+        {
+          turnId: 'turn-2',
+          previousTurnId: 'turn-1',
+          input: [
+            { type: 'user.tool_approval', thread_id: 'main', tool_call_id: 'call-1', approval: { status: 'allow' } },
+          ],
+        },
+      ],
+    });
+    await harvest({ turnArtifactStore, sessionId: 's1', turnId: 'turn-1' });
+
+    const response = await app.request(
+      downloadUrl({ sessionId: 's1', turnId: 'turn-2', path: '/egress/weekly_food_budget.pdf' }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(Buffer.from(await response.arrayBuffer())).toEqual(PDF);
+  });
+
+  it('does not reach a file from an earlier request the person started separately', async () => {
+    const { app, sessions, sessionStore, turnArtifactStore } = await buildApp({
+      sandboxProvider: new FakeSandboxProvider(new Map()),
+    });
+    await createSessionWithTurns({
+      sessionStore,
+      sessions,
+      sessionId: 's1',
+      turns: [
+        { turnId: 'turn-1', previousTurnId: null, input: personAsked },
+        { turnId: 'turn-2', previousTurnId: 'turn-1', input: personAsked },
+      ],
+    });
+    await harvest({ turnArtifactStore, sessionId: 's1', turnId: 'turn-1' });
+
+    const response = await app.request(
+      downloadUrl({ sessionId: 's1', turnId: 'turn-2', path: '/egress/weekly_food_budget.pdf' }),
+    );
+
+    expect(response.status).toBe(412);
+    expect(await response.json()).toEqual({
+      error: { message: 'This file was in a temporary workspace that has been cleared. Ask Aman to make it again.' },
+    });
   });
 });

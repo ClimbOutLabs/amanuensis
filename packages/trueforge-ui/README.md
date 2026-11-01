@@ -206,7 +206,7 @@ export default function App() {
     defaultAgentSpec: { model: { name: 'openai-main/gpt-4.1' } },
   }}
   theme={{
-    preset: 'claude',
+    preset: 'paper',
     brand: { mode: 'icon-title', name: 'Acme', icon: '/icon.svg' },
   }}
   overrides={{/* slot overrides */}}
@@ -244,7 +244,7 @@ const server = {
   server={server}
   layout="sidebar"
   theme={{
-    preset: 'claude', // 'trueforge' | 'claude' | 'chatgpt' | 'gemini'
+    preset: 'paper', // 'paper' | 'forest' | 'midnight' | 'high-contrast'
     mode: 'dark', // omit for uncontrolled (useTheme().setTheme works)
     tokens: {
       primaryBg: 'oklch(0.14 0.02 260)',
@@ -517,7 +517,7 @@ function MyBubble({ children, error, actionBar, className }: AssistantMessageBub
 />;
 ```
 
-Overridable slots include composer pieces (`ComposerShell`, `ComposerLeftSection`, `ComposerRightSection`, `ComposerSendButton`), messages (`AssistantMessageBubble`, `UserMessageBubble`, `UserMessageEdit`), `Markdown`, `WelcomeScreen`, thread-list atoms, agent metrics (`AgentMetrics`, `AgentMetricsView`, `AgentMetricsTimeRangeFilter`, `AgentMetricCard`, `AgentMetricStatistics`, `AgentMetricChart`), and tool/prompt cards (`ToolCallCard`, `ToolApprovalBar`, `ToolGroupCard`, `SubAgentCard`, `SandboxToolCallCard`, `AgentStepsCard`, `ReasoningCard`, `AskUserPrompt`, `McpAuthPrompt`, and more).
+Overridable slots include composer pieces (`ComposerShell`, `ComposerLeftSection`, `ComposerRightSection`, `ComposerSendButton`), messages (`AssistantMessageBubble`, `UserMessageBubble`, `UserMessageEdit`), `Markdown`, `WelcomeScreen`, thread-list atoms, agent metrics (`AgentMetrics`, `AgentMetricsView`, `AgentMetricsTimeRangeFilter`, `AgentMetricCard`, `AgentMetricStatistics`, `AgentMetricChart`), and tool/prompt cards (`ToolCallCard`, `ToolGroupCard`, `SubAgentCard`, `SandboxToolCallCard`, `AgentStepsCard`, `ReasoningCard`, `AskUserPrompt`, `McpAuthPrompt`, and more).
 
 See [docs/customization.md](./docs/customization.md) for the full slot list.
 

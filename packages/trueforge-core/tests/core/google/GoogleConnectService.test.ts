@@ -6,12 +6,16 @@ import {
   GoogleFeatureError,
 } from '../../../src/core/google/GoogleConnectService';
 import { GOOGLE_REVOKE_URL, GOOGLE_TOKEN_URL, hashState } from '../../../src/core/google/oauth';
+import { grantedFeatures } from '../../../src/core/google/scopes';
 import type { GoogleSetupInfo } from '../../../src/core/google/setupMode';
 import { capturingLogger, connectedRecord, FakeConnections, FakeGoogle, FakePending, json, OWNER } from './fakes';
 
 const PROFILE_URL = 'https://gmail.googleapis.com/gmail/v1/users/me/profile';
+const CALENDAR_EVENTS_URL = 'https://www.googleapis.com/calendar/v3/calendars/primary/events';
 const READ = 'https://www.googleapis.com/auth/gmail.readonly';
 const COMPOSE = 'https://www.googleapis.com/auth/gmail.compose';
+const CALENDAR = 'https://www.googleapis.com/auth/calendar.events.readonly';
+const CALENDAR_WRITE = 'https://www.googleapis.com/auth/calendar.events';
 const SETUP: GoogleSetupInfo = {
   mode: 'paste',
   client_type: 'desktop',
@@ -27,7 +31,7 @@ function stateOf(authorizationUrl: string): string {
   return new URL(authorizationUrl).searchParams.get('state') ?? '';
 }
 
-function setup(now = new Date('2026-10-15T12:00:00.000Z')) {
+function setup(now = new Date('2026-10-15T12:00:00.000Z'), onlyAccountEmail: string | null = null) {
   const connections = new FakeConnections();
   const pending = new FakePending();
   const google = new FakeGoogle();
@@ -39,6 +43,7 @@ function setup(now = new Date('2026-10-15T12:00:00.000Z')) {
     now: () => clock,
     fetchImpl: google.fetch,
     logger,
+    only_account_email: onlyAccountEmail,
   });
   return {
     warnings,
@@ -261,6 +266,49 @@ describe('GoogleConnectService', () => {
     });
   });
 
+  describe('pinned account', () => {
+    async function signIn(input: { pinned: string | null; signedInAs: string }) {
+      const ctx = setup(undefined, input.pinned);
+      ctx.google.on(GOOGLE_TOKEN_URL, () => json({ access_token: 'at', refresh_token: 'rt', scope: READ }));
+      ctx.google.on(PROFILE_URL, () => json({ emailAddress: input.signedInAs }));
+      const { authorization_url } = await ctx.service.begin({
+        owner: OWNER,
+        setup: SETUP,
+        client: CLIENT,
+        features: ['gmail_read'],
+      });
+      return {
+        ...ctx,
+        complete: () => ctx.service.complete({ owner: OWNER, state: stateOf(authorization_url), code: 'c' }),
+      };
+    }
+
+    it('refuses any other Google account and stores nothing', async () => {
+      const { complete, connections } = await signIn({
+        pinned: 'maya@demo.example',
+        signedInAs: 'judge@gmail.example',
+      });
+      await expect(complete()).rejects.toThrow(GoogleConsentError);
+      expect(await connections.get(OWNER)).toBeNull();
+    });
+
+    it('says in plain words that only the demo account can be connected', async () => {
+      const { complete } = await signIn({ pinned: 'maya@demo.example', signedInAs: 'judge@gmail.example' });
+      await expect(complete()).rejects.toThrow("Only this demo's own Google account can be connected here.");
+    });
+
+    it('accepts the pinned account whatever its capitals', async () => {
+      const { complete, connections } = await signIn({ pinned: 'maya@demo.example', signedInAs: 'Maya@Demo.Example' });
+      await expect(complete()).resolves.toMatchObject({ status: 'connected' });
+      expect((await connections.get(OWNER))?.account_email).toBe('Maya@Demo.Example');
+    });
+
+    it('lets any account connect when nothing is pinned', async () => {
+      const { complete } = await signIn({ pinned: null, signedInAs: 'ada@example.com' });
+      await expect(complete()).resolves.toMatchObject({ account_email: 'ada@example.com' });
+    });
+  });
+
   describe('adding a feature', () => {
     it('reuses the stored client, asks for the union, and never revokes the login it replaces', async () => {
       const { service, google, connections } = setup();
@@ -282,6 +330,92 @@ describe('GoogleConnectService', () => {
       expect(record.refresh_token).toBe('rt-new');
       expect(record.granted_scopes).toEqual([READ, COMPOSE]);
       expect(google.requests.some(request => request.url.startsWith(GOOGLE_REVOKE_URL))).toBe(false);
+    });
+
+    it('adds Calendar as a second consent: both scopes asked, both stored, the older token never revoked', async () => {
+      const { service, google, connections } = setup();
+      await connections.save(connectedRecord({ granted_scopes: [READ, COMPOSE] }));
+      google.on(GOOGLE_TOKEN_URL, () =>
+        json({ access_token: 'at2', refresh_token: 'rt-new', scope: `${READ} ${COMPOSE} ${CALENDAR}` }),
+      );
+      google.on(PROFILE_URL, () => json({ emailAddress: 'ada@example.com' }));
+
+      const { authorization_url } = await service.begin({
+        owner: OWNER,
+        setup: SETUP,
+        client: null,
+        features: ['calendar_read'],
+      });
+      expect(new URL(authorization_url).searchParams.get('scope')).toBe(`${READ} ${COMPOSE} ${CALENDAR}`);
+      const record = await service.complete({ owner: OWNER, state: stateOf(authorization_url), code: 'code' });
+
+      expect(record.refresh_token).toBe('rt-new');
+      expect(record.granted_scopes).toEqual([READ, COMPOSE, CALENDAR]);
+      expect(google.requests.some(request => request.url.startsWith(GOOGLE_REVOKE_URL))).toBe(false);
+    });
+
+    it('keeps Calendar through a later consent for something else', async () => {
+      const { service, connections } = setup();
+      await connections.save(connectedRecord({ granted_scopes: [READ, CALENDAR] }));
+      const { authorization_url } = await service.begin({
+        owner: OWNER,
+        setup: SETUP,
+        client: null,
+        features: ['gmail_compose'],
+      });
+      expect(new URL(authorization_url).searchParams.get('scope')).toBe(`${READ} ${COMPOSE} ${CALENDAR}`);
+    });
+
+    it('records no Calendar when the user unticked it on the consent screen', async () => {
+      const { service, google, connections } = setup();
+      await connections.save(connectedRecord({ granted_scopes: [READ] }));
+      google.on(GOOGLE_TOKEN_URL, () => json({ access_token: 'at', refresh_token: 'rt', scope: READ }));
+      google.on(PROFILE_URL, () => json({ emailAddress: 'ada@example.com' }));
+      const { authorization_url } = await service.begin({
+        owner: OWNER,
+        setup: SETUP,
+        client: null,
+        features: ['calendar_read'],
+      });
+      const record = await service.complete({ owner: OWNER, state: stateOf(authorization_url), code: 'code' });
+      expect(grantedFeatures(record.granted_scopes)).toEqual(['gmail_read']);
+    });
+
+    it('lets a user who reads Calendar add events as one more consent, keeping every scope they had', async () => {
+      const { service, google, connections } = setup();
+      await connections.save(connectedRecord({ granted_scopes: [READ, CALENDAR] }));
+      google.on(GOOGLE_TOKEN_URL, () =>
+        json({ access_token: 'at2', refresh_token: 'rt-new', scope: `${READ} ${CALENDAR} ${CALENDAR_WRITE}` }),
+      );
+      google.on(PROFILE_URL, () => json({ emailAddress: 'ada@example.com' }));
+
+      const { authorization_url } = await service.begin({
+        owner: OWNER,
+        setup: SETUP,
+        client: null,
+        features: ['calendar_read', 'calendar_write'],
+      });
+      expect(new URL(authorization_url).searchParams.get('scope')).toBe(`${READ} ${CALENDAR} ${CALENDAR_WRITE}`);
+      const record = await service.complete({ owner: OWNER, state: stateOf(authorization_url), code: 'code' });
+      expect(grantedFeatures(record.granted_scopes)).toEqual(['gmail_read', 'calendar_read', 'calendar_write']);
+      expect(google.requests.some(request => request.url.startsWith(GOOGLE_REVOKE_URL))).toBe(false);
+    });
+
+    it('refuses to add events without Calendar, with a plain message', async () => {
+      const { service, pending, connections } = setup();
+      await connections.save(connectedRecord({ granted_scopes: [READ] }));
+      await expect(
+        service.begin({ owner: OWNER, setup: SETUP, client: null, features: ['calendar_write'] }),
+      ).rejects.toThrow('Adding events needs Calendar too');
+      expect(pending.records.size).toBe(0);
+    });
+
+    it('refuses to ask for Calendar before mail is connected, with a plain message', async () => {
+      const { service, pending } = setup();
+      await expect(
+        service.begin({ owner: OWNER, setup: SETUP, client: CLIENT, features: ['calendar_read'] }),
+      ).rejects.toThrow('Connect Google first, then add Calendar');
+      expect(pending.records.size).toBe(0);
     });
 
     it('refuses to ask for sending alone, with a plain message', async () => {
@@ -316,6 +450,26 @@ describe('GoogleConnectService', () => {
       await connections.save(connectedRecord());
       google.on(GOOGLE_TOKEN_URL, () => json({ access_token: 'at' }));
       google.on(PROFILE_URL, () => json({ emailAddress: 'ada@example.com' }));
+      expect(await service.test(OWNER)).toEqual({ result: 'ok', account_email: 'ada@example.com' });
+    });
+
+    it('also checks Calendar when it was granted, and says when its API is off', async () => {
+      const { service, google, connections } = setup();
+      await connections.save(connectedRecord({ granted_scopes: [READ, CALENDAR] }));
+      google.on(GOOGLE_TOKEN_URL, () => json({ access_token: 'at' }));
+      google.on(PROFILE_URL, () => json({ emailAddress: 'ada@example.com' }));
+      google.on(CALENDAR_EVENTS_URL, () =>
+        json({ error: { status: 'PERMISSION_DENIED', errors: [{ reason: 'accessNotConfigured' }] } }, 403),
+      );
+      expect(await service.test(OWNER)).toEqual({ result: 'calendar_unavailable', account_email: 'ada@example.com' });
+    });
+
+    it('passes when Calendar answers', async () => {
+      const { service, google, connections } = setup();
+      await connections.save(connectedRecord({ granted_scopes: [READ, CALENDAR] }));
+      google.on(GOOGLE_TOKEN_URL, () => json({ access_token: 'at' }));
+      google.on(PROFILE_URL, () => json({ emailAddress: 'ada@example.com' }));
+      google.on(CALENDAR_EVENTS_URL, () => json({ timeZone: 'America/Sao_Paulo', items: [] }));
       expect(await service.test(OWNER)).toEqual({ result: 'ok', account_email: 'ada@example.com' });
     });
 
@@ -414,6 +568,7 @@ describe('GoogleConnectService', () => {
       const { connections } = setup();
       await connections.save(connectedRecord());
       const unreachable = new GoogleConnectService({
+        only_account_email: null,
         connections,
         pending: new FakePending(),
         now: undefined,

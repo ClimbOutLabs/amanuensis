@@ -3,7 +3,13 @@
  * which saves grant the mark. A change of policy is a change to these tables and to
  * `src/mcp/firstParty.ts`, nothing else.
  */
-import { firstPartyAfterSave, isFirstPartyOrigin, normalizedOrigin } from '../../../src/mcp/firstParty';
+import {
+  firstPartyAfterSave,
+  isFirstPartyOrigin,
+  isHostSidecar,
+  isReservedConnectorName,
+  normalizedOrigin,
+} from '../../../src/mcp/firstParty';
 import type { McpServerManifest } from '../../../src/schemas/mcpServer';
 
 const LISTED_ORIGIN = 'https://memory.internal:8443';
@@ -113,7 +119,13 @@ describe('firstPartyAfterSave', () => {
       false,
     ],
     ['a memory provider when the operator listed nothing', remote({ memory_provider: true }), true, [], false],
-    ['a memory provider whose check did not pass in this save', remote({ memory_provider: true }), false, ORIGINS, false],
+    [
+      'a memory provider whose check did not pass in this save',
+      remote({ memory_provider: true }),
+      false,
+      ORIGINS,
+      false,
+    ],
     ['a connector added by URL on a listed origin', remote(), true, ORIGINS, false],
     ['a connector whose memory provider designation is off', remote({ memory_provider: false }), true, ORIGINS, false],
   ] as const)('%s', (_label, manifest, memoryProviderChecked, origins, expected) => {
@@ -121,6 +133,45 @@ describe('firstPartyAfterSave', () => {
   });
 
   it('never marks a gateway-managed manifest', () => {
-    expect(firstPartyAfterSave({ manifest: gatewayManifest, memoryProviderChecked: true, origins: ORIGINS })).toBe(false);
+    expect(firstPartyAfterSave({ manifest: gatewayManifest, memoryProviderChecked: true, origins: ORIGINS })).toBe(
+      false,
+    );
+  });
+});
+
+describe('isHostSidecar', () => {
+  const HOST = { mailUrl: 'http://mail-email:9557/mcp', calendarUrl: 'http://[::1]:9558/mcp' };
+
+  it.each([
+    ['Email at the mail address', 'Email', 'http://mail-email:9557/mcp', true],
+    ['Email at the mail address in another letter case', 'Email', 'HTTP://Mail-Email:9557/mcp', true],
+    ['Calendar at an IPv6 address', 'Calendar', 'http://[::1]:9558/mcp', true],
+    ['Calendar at the same IPv6 address written out in full', 'Calendar', 'http://[0:0:0:0:0:0:0:1]:9558/mcp', true],
+    ['Calendar at another IPv6 address', 'Calendar', 'http://[::2]:9558/mcp', false],
+    ['Calendar at the IPv6 address on another port', 'Calendar', 'http://[::1]:9559/mcp', false],
+    ['Calendar at the IPv4 address that looks the same', 'Calendar', 'http://127.0.0.1:9558/mcp', false],
+    ['Email at the calendar address', 'Email', 'http://[::1]:9558/mcp', false],
+    ['another name at the mail address', 'My mail', 'http://mail-email:9557/mcp', false],
+    ['Email in lower case at the mail address', 'email', 'http://mail-email:9557/mcp', false],
+  ])('%s', (_label, name, url, expected) => {
+    expect(isHostSidecar({ name, url, ...HOST })).toBe(expected);
+  });
+
+  it('trusts nothing when the host has no sidecar set up', () => {
+    expect(
+      isHostSidecar({ name: 'Email', url: 'http://mail-email:9557/mcp', mailUrl: undefined, calendarUrl: undefined }),
+    ).toBe(false);
+  });
+});
+
+describe('reserved connector names', () => {
+  it.each([
+    ['Email', true],
+    ['Calendar', true],
+    ['email', false],
+    ['Email ', false],
+    ['My calendar', false],
+  ])('%s is reserved: %s', (name, reserved) => {
+    expect(isReservedConnectorName(name)).toBe(reserved);
   });
 });

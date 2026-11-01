@@ -163,3 +163,26 @@ describe('built-in tool JSON schemas', () => {
     expect(failures).toEqual([]);
   });
 });
+
+/** Required fields of an emitted JSON Schema, sorted so the comparison ignores property order. */
+function requiredFieldsOf(inputSchema: unknown): string[] {
+  if (typeof inputSchema !== 'object' || inputSchema === null || !('required' in inputSchema)) {
+    return [];
+  }
+  const { required } = inputSchema;
+  return Array.isArray(required) ? required.filter((field): field is string => typeof field === 'string').sort() : [];
+}
+
+describe('tools with rewritten descriptions keep the fields the model must send', () => {
+  it.each([
+    ['exec', ['command', 'intent', 'purpose']],
+    ['run_code', ['language']],
+    ['ask_user_question', ['options', 'question']],
+    ['create_sub_agent', ['input', 'name']],
+  ])('%s', async (name, required) => {
+    const tools = await discoverBuiltInTools();
+    const tool = tools.find(candidate => candidate.name === name);
+    expect(tool).toBeDefined();
+    expect(requiredFieldsOf(tool?.inputSchema)).toEqual(required);
+  });
+});

@@ -1,229 +1,151 @@
-import { AgentSpecSchema, type AgentSpec } from '@truefoundry/trueforge-core/agent-session';
+import { AgentSpecSchema } from '@truefoundry/trueforge-core/agent-session';
+import { isoDay, type CalendarDay } from '@truefoundry/trueforge-core/core/util/calendarDay';
 import type { PersonalizationProfileContent } from '../../personalization/profile';
-import type { PersonaContent } from '../../personas/persona';
-import { ScheduleManifestSchema, type ScheduleManifest } from '../../schemas/schedule';
-import { addDays, clockLabel, dayInZone, isoDay, longDayLabel, weekdayOf, type CalendarDay } from './calendar';
-import { encodePolyline, type LatLng } from './polyline';
+import { ScheduleManifestSchema } from '../../schemas/schedule';
+import { photographyGuide, relocationGuide } from './maya/knowledge';
+import { mayaMemoryNotes } from './maya/memories';
+import { junePersona, PDF_GUIDANCE, theoPersona, WORKSPACE_GUIDANCE } from './maya/personas';
+import { BACKUP_CLINIC, GP_CLINIC, HOME, VISA_CLINIC } from './maya/places';
+import { tasksSpaceBody } from './maya/tasks';
+import type { DemoNote, DemoSpace, DemoWorld } from './model';
 
-/** Provenance stamped on every seeded record; reset removes exactly the records that carry it. */
-export const DEMO_MARKER = 'demo_synthetic';
+/**
+ * Provenance stamped on seeded memory notes and library documents; reset removes exactly the records that carry
+ * it. The assistant reads it, so it is a plain name that says nothing about the data being made up.
+ */
+export const DEMO_MARKER = 'maya';
 
-/** Persona ids and schedule/agent names that start with this are seeded; the ids are free-form strings. */
-export const DEMO_ID_PREFIX = 'demo-synthetic';
-export const DEMO_PERSONA_ID = `${DEMO_ID_PREFIX}-persona`;
+/** Persona ids, space ids and the agent name that start with this are seeded; ids people create are bare ULIDs. */
+export const DEMO_ID_PREFIX = 'maya';
+export const DEMO_JUNE_ID = `${DEMO_ID_PREFIX}-persona-june`;
+export const DEMO_THEO_ID = `${DEMO_ID_PREFIX}-persona-theo`;
 export const DEMO_AGENT_NAME = `${DEMO_ID_PREFIX}-assistant`;
-export const DEMO_SCHEDULE_NAME = `${DEMO_ID_PREFIX}-morning-briefing`;
+export const DEMO_TASKS_SPACE_ID = `${DEMO_ID_PREFIX}-tasks`;
+
+/** The demo schedule's task, in the owner's own words; the demo does not use the product's morning brief prompt. */
+export const DEMO_BRIEF_TASK = `Run the Morning Brief as a Personal Intelligence Briefing, a markdown dashboard, adaptive, never a text dump. Do this, in order:
+1. EMAIL: check what came in since yesterday's brief (inbox). List what needs me, most important first, one line each: who, what they want, and by when. Check all email. Compare with memory to see if you can help Maya in any way.
+2. DRAFT REPLIES: for each email that needs an answer, write a draft reply in my voice and show it in the chat. Do not create email drafts in the mailbox. Do not send anything. Tell me which responses have been drafted in chat.
+3. APPOINTMENTS I TRAVEL TO: for each event with an address, tell me when to leave, how long it takes and the best way to get there (driving, transit or walking), with a map. Add a buffer of 10 minutes.
+4. BRIEFING FOR EACH APPOINTMENT: who I'm meeting, what we last emailed about, anything I promised them, and anything in my memories about them or the topic. Give me 2 or 3 talking points, and anything I need to bring.
+5. TOMORROW AT A GLANCE: anything early tomorrow I should prepare for today.
+
+Do not add opinions from personas or anyone else.
+Never send email or change my calendar during the brief. Do not create or change spaces during the brief; the reply is the dashboard. If something on the calendar needs changing, put it on my "Needs your OK" list.
+
+PERSONAL INTELLIGENCE:
+- Research is allowed to deepen external facts (people, organizations, events, topics). Keep searches neutral and public, never personal. Personal detail comes only from what I know about Maya (memory/profile), never from a search.
+- Weave what I know about Maya into every briefing: her life context, relationships, plans, and preferences. Personal, not a reading list; specifics come from my knowledge, not seeded here.
+- Be efficient, not truncated: cover what's useful richly, but no filler; each section tight, and the whole as short as possible while still genuinely useful.
+- PRIVACY SPINE: the brief is private and can say anything. Drafts are in her voice, carry only recipient-relevant facts, and never send. Nothing escapes.
+- Surface the single most important actionable item first, on its own highlighted card, never buried.
+
+OUTPUT: write the brief directly in your reply as markdown. Do not write files, run commands, or use any tool to build it. Draw each route once; the route maps show above the brief by themselves, so do not add map images, image links or placeholders. Sections: header, 📥 Email table, 📝 Drafts, 📅 Calendar table, 🧭 Travel table, 🎯 Briefing per appointment, 🔭 Tomorrow, ✅ Needs your OK, with bold priority labels and emoji markers. Adapt: drop empty sections, never render filler. Plain, direct words; no flowery filler; no em dashes. The reply holds only the brief: no notes about what you are doing or planning, no text before or after it.`;
+
+/** How reset tells the seeded profile from one the person wrote: the assistant reads it, so it carries no marker. */
+export const DEMO_USER_PROFILE =
+  'Maya is a 38-year-old UX designer who moved from Austin to Lisbon, shoots street photography, and is learning Portuguese.';
+
+/** The character the demo assistant is given, in the owner's words. */
+export const DEMO_ASSISTANT_IDENTITY = `Have opinions. You're allowed to disagree, prefer things, find stuff amusing or boring.
+
+Come back with answers, not questions: try to figure it out or build it yourself before asking.
+
+When looking for something, search wide before giving up: try different wordings, look further back, and open the likely messages and attachments. Say where you found it. Look up numbers (nutrition, money, schedules, specs) before stating them; "let me check" beats a confident wrong answer.
+
+Be bold with internal work: reading, organizing, learning.
+
+Use rich cards, tables, and dashboards for summaries, plans and comparisons; plain text otherwise.
+
+Never preachy, never flowery.
+
+Vibe
+Best friend who knows where to look. Wants Maya to grow. Keeps her accountable with kindness. Never lies to make her feel better. Optimistic, pragmatic, growth-focused, supportive. Concise when needed, thorough when it matters. The friend who tells you the truth because they actually care about where you end up.`;
 
 export const DEFAULT_DEMO_USER = 'judge@example.com';
-/** The fictional user lives in Barcelona, so "today" is Barcelona's today unless overridden. */
-export const DEFAULT_DEMO_TIME_ZONE = 'Europe/Madrid';
-
-const APPOINTMENT_HOUR = 16;
-const EARLY_MINUTES = 15;
-const CUSHION_MINUTES = 10;
-
-const FROM_PLACE = 'Poblenou, Barcelona';
-const TO_PLACE = 'Hospital Clinic, Barcelona';
-const FROM_POINT: LatLng = { lat: 41.4033, lng: 2.2022 };
-const TO_POINT: LatLng = { lat: 41.3893, lng: 2.1511 };
-const ROUTE_WAYPOINTS: readonly LatLng[] = [
-  FROM_POINT,
-  { lat: 41.3991, lng: 2.1852 },
-  { lat: 41.3944, lng: 2.1694 },
-  { lat: 41.3912, lng: 2.1583 },
-  TO_POINT,
-];
-const ROUTE_DISTANCE_KM = 5.6;
-const ROUTE_DURATION_MIN = 16;
-
-export interface DemoNote {
-  key: string;
-  body: string;
-}
-
-/** What the pre-baked briefing chat shows, in the order the turn runs. */
-export interface DemoBriefing {
-  title: string;
-  userText: string;
-  routeArguments: { from_place: string; to_place: string };
-  routeResult: {
-    from: { resolved_name: string; lat: number; lng: number };
-    to: { resolved_name: string; lat: number; lng: number };
-    distance_km: number;
-    duration_min: number;
-    route_geometry: string;
-    attribution: string;
-  };
-  finalText: string;
-}
-
-export interface DemoWorld {
-  /** The seeded day (`YYYY-MM-DD` in the user's zone); a changed day means the dated content is stale. */
-  day: string;
-  persona: PersonaContent;
-  profile: PersonalizationProfileContent;
-  notes: DemoNote[];
-  agentDescription: string;
-  agentSpec: AgentSpec;
-  scheduleManifest: ScheduleManifest;
-  briefing: DemoBriefing;
-}
+/** Maya lives in Lisbon, so "today" is Lisbon's today unless the caller names a day. */
+export const DEFAULT_DEMO_TIME_ZONE = 'Europe/Lisbon';
 
 export interface DemoWorldInput {
-  now: Date;
+  /** "Today" in the user's zone; every date in her world, and in her mail, is counted from it. */
+  today: CalendarDay;
   timeZone: string;
-  /** Fully qualified `provider/model` for the persona and the briefing agent. */
+  /** Fully qualified `provider/model` for the personas and the agent. */
   modelName: string;
 }
 
-function minutesLabel(totalMinutes: number): string {
-  return clockLabel({ hour: Math.floor(totalMinutes / 60), minute: totalMinutes % 60 });
-}
-
-const SATURDAY = 6;
-
-/** Day offsets for the week's errands: the next three working days, then the coming Saturday and the Sunday after. */
-function weekPlan(today: CalendarDay): { library: number; sync: number; bill: number; pot: number; call: number } {
-  const ahead = Array.from({ length: 14 }, (_, index) => index + 1);
-  const isWorkday = (offset: number): boolean => {
-    const weekday = weekdayOf(addDays({ day: today, days: offset }));
-    return weekday !== 0 && weekday !== SATURDAY;
-  };
-  const [library = 1, sync = 2, bill = 3] = ahead.filter(isWorkday);
-  const pot = ahead.find(offset => weekdayOf(addDays({ day: today, days: offset })) === SATURDAY) ?? 6;
-  return { library, sync, bill, pot, call: pot + 1 };
-}
-
-/** The seed does not guess which sandbox backend exists; the app reports an unavailable sandbox itself. */
-const PDF_GUIDANCE =
-  'When she asks for a PDF or a file, build it with run_code and say where to download it. If run_code is not available, say so plainly and give the checklist as plain text she can print.';
-
-/** Everything the seed writes, derived from "today" in the user's zone so the dates stay relative. */
-export function buildDemoWorld(input: DemoWorldInput): DemoWorld {
-  const today = dayInZone({ now: input.now, timeZone: input.timeZone });
-  const label = (offset: number): string => longDayLabel(addDays({ day: today, days: offset }));
-  const todayLabel = label(0);
-  const plan = weekPlan(today);
-
-  const appointmentMinutes = APPOINTMENT_HOUR * 60;
-  const latestLeave = appointmentMinutes - EARLY_MINUTES - ROUTE_DURATION_MIN;
-  const leaveBy = Math.floor((latestLeave - CUSHION_MINUTES) / 5) * 5;
-  const appointmentLabel = minutesLabel(appointmentMinutes);
-  const leaveLabel = minutesLabel(leaveBy);
-
-  const notes: DemoNote[] = [
+function buildSpaces(today: CalendarDay): DemoSpace[] {
+  return [
     {
-      key: 'style',
-      body: 'Mara prefers short, friendly answers. She leaves 15 minutes early for anything medical.',
-    },
-    {
-      key: 'travel',
-      body: 'Mara usually gets around Barcelona by metro and taxi, not by car. Her insurance card lives in the blue wallet.',
-    },
-    {
-      key: 'home-area',
-      body: "Mara's home area is Gràcia, Barcelona. Only the neighborhood is noted, never a street address.",
-    },
-    {
-      key: 'work-area',
-      body: "Mara's work area is Poblenou, Barcelona, where her team has a shared office. Only the neighborhood is noted, never a street address.",
-    },
-    {
-      key: 'appointment-today',
-      body:
-        `Appointment today, ${todayLabel}, at ${appointmentLabel}: check-up with Dr. Halloran, her GP, at ${TO_PLACE}. ` +
-        'Bring the referral letter from the orthopedics department and the insurance card from the blue wallet. ' +
-        `Today Mara is working from the Poblenou office, so she would head to the clinic from there. ` +
-        'Her friend Teo Marsh (teo.marsh@example.com) suggested coffee after the appointment.',
-    },
-    {
-      key: 'project-balcony',
-      body: `Project: balcony herb garden. The basil and mint are doing well. Next step is a larger pot for the basil, planned for ${label(plan.pot)}.`,
-    },
-    {
-      key: 'project-lisbon',
-      body: 'Project: a Lisbon weekend with Teo Marsh in mid-November. Flights are not booked yet; Mara wants to agree dates first.',
-    },
-    {
-      key: 'week-overview',
-      body: [
-        `What is on Mara's plate this week, starting ${todayLabel}:`,
-        `- ${todayLabel}: ${appointmentLabel} appointment with Dr. Halloran at ${TO_PLACE}.`,
-        ...[
-          { offset: plan.library, text: 'return the library books.' },
-          { offset: plan.sync, text: 'team sync at 10:00 in the Poblenou office.' },
-          { offset: plan.bill, text: 'pay the quarterly utility bill.' },
-          { offset: plan.pot, text: 'buy a larger pot for the basil.' },
-          { offset: plan.call, text: 'call Teo about the Lisbon dates.' },
-        ]
-          .sort((a, b) => a.offset - b.offset)
-          .map(item => `- ${label(item.offset)}: ${item.text}`),
-      ].join('\n'),
+      id: DEMO_TASKS_SPACE_ID,
+      content: {
+        name: 'Tasks',
+        purpose: "Maya's task list: what is open, what is in progress and what is done.",
+        status: 'active',
+        format: 'markdown',
+        body: tasksSpaceBody(today),
+      },
     },
   ];
+}
 
-  const agentSpec = AgentSpecSchema.parse({
-    model: { name: input.modelName },
-    config: { sandbox: { enabled: true } },
-    instructions: [
-      'You are Aman, a calm personal assistant for Mara Hollis, a fictional demo user.',
-      'Use what you remember about her. Keep answers short and friendly.',
-      'For an appointment brief: recall the appointment, use render_route from where she starts to the appointment place, then give a short brief with when to leave and what to bring.',
-      PDF_GUIDANCE,
-    ].join(' '),
-  });
+function buildNotes(today: CalendarDay): DemoNote[] {
+  return [
+    ...mayaMemoryNotes(today),
+    {
+      key: 'gp-search',
+      body: `Maya needs a regular English-speaking GP. Shortlist: ${GP_CLINIC.name} (${GP_CLINIC.address}, open ${GP_CLINIC.hours}) is the first choice and ${BACKUP_CLINIC.name} (${BACKUP_CLINIC.address}) the backup. ${VISA_CLINIC.name} is already booked for her visa medical, so do not suggest it as a GP.`,
+    },
+  ];
+}
 
-  const route = {
-    from: { resolved_name: 'Poblenou, Barcelona, Catalonia, Spain', ...FROM_POINT },
-    to: { resolved_name: 'Hospital Clínic de Barcelona, Barcelona, Catalonia, Spain', ...TO_POINT },
-    distance_km: ROUTE_DISTANCE_KM,
-    duration_min: ROUTE_DURATION_MIN,
-    route_geometry: encodePolyline(ROUTE_WAYPOINTS),
-    attribution: '© OpenStreetMap contributors',
+/** Everything the seed writes for "today" in the user's zone. */
+export function buildDemoWorld(input: DemoWorldInput): DemoWorld {
+  const profile: PersonalizationProfileContent = {
+    assistant_name: 'Nata',
+    assistant_identity: DEMO_ASSISTANT_IDENTITY,
+    voice_guidance: 'Warm, friendly, honest, direct and caring.',
+    user_name: 'Maya',
+    address_as: 'Maya',
+    user_profile: DEMO_USER_PROFILE,
+    pinned_preferences: [
+      'Keep answers short and warm.',
+      'Always mention the penicillin allergy when a doctor comes up.',
+    ],
+    help_areas: ['new_country', 'work_money'],
+    learned_profile: null,
+    learning_enabled: true,
   };
 
   return {
-    day: isoDay(today),
-    persona: {
-      display_name: 'Sol',
-      aliases: ['Planner'],
+    day: isoDay(input.today),
+    timeZone: input.timeZone,
+    personas: [
+      { id: DEMO_JUNE_ID, content: junePersona(input.modelName), knowledge: relocationGuide() },
+      { id: DEMO_THEO_ID, content: theoPersona(input.modelName), knowledge: photographyGuide() },
+    ],
+    profile,
+    notes: buildNotes(input.today),
+    spaces: buildSpaces(input.today),
+    agentDescription: "Maya's personal assistant.",
+    agentSpec: AgentSpecSchema.parse({
+      model: { name: input.modelName },
+      // Her mailbox is small: the brief reads whole results instead of sandbox previews it would have to read back.
+      config: { sandbox: { enabled: true }, context_management: { large_tool_response: { enabled: false } } },
       instructions: [
-        'Sol is a calm planner who helps Mara Hollis, a fictional demo user, with appointments, errands and weekly planning.',
-        'Be brief and friendly. Use what you remember about her before asking.',
+        'You are Nata, a calm personal assistant for Maya, who just moved from Austin to Lisbon.',
+        'Use what you remember about her. Warm, friendly, honest, direct and caring.',
+        'Do your planning in your private reasoning. Your reply holds only the answer for the person.',
+        'If a tool fails or a service is not connected, say so plainly and stop there; never invent what it would have returned.',
+        WORKSPACE_GUIDANCE,
         PDF_GUIDANCE,
       ].join(' '),
-      model_name: input.modelName,
-    },
-    profile: {
-      assistant_name: null,
-      assistant_identity: null,
-      voice_guidance: 'Warm, plain and brief.',
-      user_profile: `Mara Hollis, a fictional demo user (${DEMO_MARKER}). Lives in Gràcia, Barcelona and works in Poblenou.`,
-      pinned_preferences: ['Keep answers short and friendly.', 'Leave 15 minutes early for anything medical.'],
-      learned_profile: null,
-      learning_enabled: false,
-    },
-    notes,
-    agentDescription: `Synthetic demo assistant (${DEMO_MARKER}).`,
-    agentSpec,
+    }),
     scheduleManifest: ScheduleManifestSchema.parse({
-      task: 'Good morning. Check my memory for anything happening today. If there is an appointment, map the route to it and give me a short brief: when to leave, how to get there and what to bring.',
+      task: [DEMO_BRIEF_TASK, `Work out travel from my place, ${HOME.address}, unless I say otherwise.`].join(' '),
       cron: '30 7 * * *',
       timezone: input.timeZone,
       status: 'active',
     }),
-    briefing: {
-      title: 'Brief me before my 4 pm appointment',
-      userText: 'Brief me before my 4 pm appointment.',
-      routeArguments: { from_place: FROM_PLACE, to_place: TO_PLACE },
-      routeResult: route,
-      finalText: [
-        `Your appointment is today at ${appointmentLabel} with Dr. Halloran at Hospital Clínic.`,
-        '',
-        `- Leave by ${leaveLabel} from Poblenou. By road it is about ${String(ROUTE_DURATION_MIN)} minutes (${String(ROUTE_DISTANCE_KM)} km), so a taxi gets you there early, as you like for anything medical.`,
-        '- Bring the referral letter from the orthopedics department and your insurance card from the blue wallet.',
-        '- Teo suggested coffee after, if you have time.',
-      ].join('\n'),
-    },
   };
 }

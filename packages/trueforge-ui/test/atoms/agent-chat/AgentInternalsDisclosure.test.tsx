@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 
 import { AgentInternalsDisclosure } from '@/atoms/agent-chat/AgentInternalsDisclosure.js';
@@ -28,10 +28,41 @@ describe('AgentInternalsDisclosure', () => {
     expect(screen.getByTestId('trace-body')).toBeVisible();
   });
 
-  it('has no per-turn expand control', () => {
+  it('shows and hides the trace from the summary toggle', () => {
     renderDisclosure();
 
-    expect(screen.queryByRole('button')).not.toBeInTheDocument();
+    const toggle = screen.getByRole('button', { name: '3 steps · 2 tools · 6s' });
+    expect(toggle).toHaveAttribute('type', 'button');
+    expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    expect(toggle).toHaveAttribute('aria-controls', screen.getByTestId('trace-body').parentElement?.id);
+
+    fireEvent.click(toggle);
+    expect(toggle).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getByTestId('trace-body')).toBeVisible();
+
+    fireEvent.click(toggle);
+    expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.getByTestId('trace-body')).not.toBeVisible();
+  });
+
+  it('follows the chat-level switch again when it changes', () => {
+    const { rerender } = renderDisclosure();
+    fireEvent.click(screen.getByTestId(`${PREFIX}-agent-internals-toggle`));
+    expect(screen.getByTestId('trace-body')).toBeVisible();
+
+    rerender(
+      <AgentInternalsDisclosure summary="3 steps · 2 tools · 6s" dataTestPrefix={PREFIX} expanded>
+        <div data-testid="trace-body">trace contents</div>
+      </AgentInternalsDisclosure>,
+    );
+    expect(screen.getByTestId('trace-body')).toBeVisible();
+    fireEvent.click(screen.getByTestId(`${PREFIX}-agent-internals-toggle`));
+    expect(screen.getByTestId('trace-body')).not.toBeVisible();
+  });
+
+  it('offers no toggle while the content is held open for a pending approval', () => {
+    renderDisclosure({ lockOpen: true });
+
     expect(screen.queryByTestId(`${PREFIX}-agent-internals-toggle`)).not.toBeInTheDocument();
   });
 
@@ -62,23 +93,11 @@ describe('AgentInternalsDisclosure', () => {
     expect(screen.getByTestId('trace-body')).toBeVisible();
   });
 
-  it('shows the live status label with a spinner while running', () => {
-    renderDisclosure({ isRunning: true, liveLabel: 'Executing tools' });
+  it('shows only its summary while running, never a second live status line or spinner', () => {
+    renderDisclosure({ isRunning: true });
 
-    expect(screen.getByText(/Executing tools/)).toBeInTheDocument();
-    expect(screen.getByTestId(`${PREFIX}-agent-internals-live-spinner`)).toBeInTheDocument();
-  });
-
-  it('shows the plain summary once the run completes', () => {
-    const { rerender } = renderDisclosure({ isRunning: true, liveLabel: 'Executing tools' });
-    expect(screen.getByText(/Executing tools/)).toBeInTheDocument();
-
-    rerender(
-      <AgentInternalsDisclosure summary="3 steps · 2 tools · 6s" dataTestPrefix={PREFIX} expanded={false}>
-        <div data-testid="trace-body">trace contents</div>
-      </AgentInternalsDisclosure>,
-    );
-    expect(screen.queryByText('Executing tools')).not.toBeInTheDocument();
     expect(screen.getByText('3 steps · 2 tools · 6s')).toBeInTheDocument();
+    expect(screen.queryByRole('status')).not.toBeInTheDocument();
+    expect(document.querySelector('.animate-spin')).toBeNull();
   });
 });

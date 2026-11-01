@@ -15,6 +15,9 @@ import { useSlot } from '../theme/SlotsProvider.js';
 import { extractSearchCitationSources, type CitationToolCall } from '../utils/citationMarkers.js';
 import { useToasterOptional } from './ToasterContainer.js';
 
+/** Names what failed; the server's message under it says what to do next. */
+const DOWNLOAD_FAILED_TITLE = 'The file could not be downloaded';
+
 function filenameFromPath(path: string): string {
   return path.split('/').pop() || 'download';
 }
@@ -40,6 +43,17 @@ export function AssistantTextContainer() {
   const partState = useAuiState(s => s.part as MessagePartState & (TextMessagePart | ReasoningMessagePart));
   const messageParts = useAuiState(s => s.message.parts);
   const messageId = useAuiState(s => s.message.id);
+  // The chat this message belongs to: its id scopes the picture proxy, so a chat page only ever
+  // shows pictures this chat saw. Absent (no open thread), pages keep today's behaviour.
+  const sessionId = useAuiState(s => s.threadListItem?.remoteId ?? undefined);
+  const pictureProxyUrl = useMemo(
+    () =>
+      sessionId === undefined
+        ? undefined
+        : (url: string) =>
+            `/api/chat-pictures?session_id=${encodeURIComponent(sessionId)}&url=${encodeURIComponent(url)}`,
+    [sessionId],
+  );
 
   // Citation sources for model-emitted markers like 【14†excerpts】: the same message's
   // web_search / web_fetch results carry the ID→title mapping the model cited against.
@@ -105,7 +119,7 @@ export function AssistantTextContainer() {
       triggerBrowserDownload(await downloadSandboxFile(path), filenameFromPath(path));
     } catch (error) {
       if (toaster != null) {
-        toaster.showError(error);
+        toaster.showError(error, { title: DOWNLOAD_FAILED_TITLE });
       } else {
         console.error('Failed to download sandbox artifact', error);
       }
@@ -126,8 +140,9 @@ export function AssistantTextContainer() {
         onDownloadArtifact={handleDownloadArtifact}
         onFetchFile={handleFetchFile}
         citationSources={citationSources}
+        pictureProxyUrl={pictureProxyUrl}
       />
     ),
-    [Markdown, text, isStreaming, handleDownloadArtifact, handleFetchFile, citationSources],
+    [Markdown, text, isStreaming, handleDownloadArtifact, handleFetchFile, citationSources, pictureProxyUrl],
   );
 }

@@ -1,0 +1,21 @@
+{
+  "name": "trueforge-calendar-sidecar",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Private CalDAV calendar connector: serves @ni-c/caldav-mcp over HTTP on the Compose network.",
+  "license": "MPL-2.0",
+  "type": "module",
+  "engines": {
+    "node": ">=22.14.0"
+  },
+  "scripts": {
+    "test": "node --test \"test/*.test.mjs\""
+  },
+  "dependencies": {
+    "@ni-c/caldav-mcp": "0.1.5",
+    "mcp-approval": "0.8.2",
+    "mcp-internal-hosts": "0.2.1",
+    "mcp-tool-allowlist": "0.2.1",
+    "supergateway": "4.2.0"
+  }
+}

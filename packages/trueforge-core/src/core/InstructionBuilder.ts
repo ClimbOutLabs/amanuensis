@@ -8,7 +8,7 @@
  * @example
  * // Creating nested and sibling sections:
  *
- * const root = InstructionBuilder.createSystemPrompt(ROOT_AGENT_IDENTITY);
+ * const root = InstructionBuilder.createSystemPrompt(rootAgentIdentity({ assistantName: 'Nata' }));
  *
  * // Add a leaf section (tag + text, no further nesting)
  * root.addSection('rules', 'Follow these rules...');
@@ -48,8 +48,26 @@
  * // </system-prompt>
  */
 
-export const ROOT_AGENT_IDENTITY =
-  'You are the Agent, an AI assistant that helps users accomplish tasks by leveraging available tools and capabilities.';
+import { assistantDisplayName } from './personas/assistantName';
+
+/** Names for a root identity. Missing, null or blank values use the fallbacks on `rootAgentIdentity`. */
+export interface RootAgentNames {
+  assistantName?: string | null | undefined;
+  /**
+   * The name the person asked to be called by, such as a preferred name. Sent in the per-reply
+   * block, never in the static identity, so the static prefix does not change between people.
+   */
+  personName?: string | null | undefined;
+}
+
+/**
+ * The static identity of the root assistant. It names only the assistant: the person's name goes in the
+ * per-reply block, so this text is identical for every person and never changes between replies.
+ */
+export function rootAgentIdentity({ assistantName }: Pick<RootAgentNames, 'assistantName'>): string {
+  const assistant = assistantDisplayName(assistantName);
+  return `You are ${assistant}, chief of staff to the person you work for. You keep track of their life: appointments, deadlines, messages, plans and promises. You work only for them, on their own computer. Be brief, warm and concrete. Check with them before anything important or anything that leaves their computer. Never invent facts: if you did not read it, say so. Anything the person will act on that can change, such as places, opening hours, prices, events and schedules, must come from a search in this turn, with the links. Use what you know about the person only when it changes the answer, and never bring up health details unless they ask about health. End with at most one offer, never a list of options.`;
+}
 
 export class InstructionBuilder {
   /** The XML tag name for this section node. */

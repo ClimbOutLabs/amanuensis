@@ -17,6 +17,9 @@ packages/trueforge/src/catalog/skillCatalog.gen.ts
 packages/trueforge/src/catalog/sandboxCatalog.gen.ts
 packages/trueforge/src/sandbox/local/sandboxScripts.gen.ts
 data/
+# The generated SDK has a `data` resource (data export); keep it out of the rule above.
+!packages/trueforge-sdk/src/api/resources/data/
+!packages/trueforge-sdk/src/serialization/resources/data/
 .dev-login/
 # Helm subchart deps are fetched via `helm dependency build` (pinned by the
 # committed Chart.lock); the downloaded .tgz/dirs are not committed.
@@ -27,6 +30,11 @@ charts/*/charts/
 .env.*
 !.env.example
 !.env.test
+# The test mailbox sender's credentials file (demo/scripts/send-test-mailbox.mjs).
+# Already covered by .env.* above; spelled out so the name is easy to grep
+# for and stays ignored even if the wildcard is ever narrowed. The private
+# data scan also fails if this file is ever tracked.
+.env.test-mailbox
 *.pem
 *.key
 *.p12
@@ -96,3 +104,9 @@ packages/trueforge-sdk/NOTICE
 ops/sandbox-slot/packs/archives/*
 !ops/sandbox-slot/packs/archives/.gitkeep
 ops/sandbox-slot/packs/selected.json
+
+# Local person-specific patterns for scripts/private-data-scan.py (never commit)
+scripts/private-data-patterns.local.txt
+
+# Token eval output folders (scripts/eval-tokens).
+eval-results/

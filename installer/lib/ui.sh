@@ -24,7 +24,7 @@ ui_init() {
   local loc=${LC_ALL:-} term=${TERM:-} cols=
   if [ -z "$loc" ]; then loc=${LC_CTYPE:-}; fi
   if [ -z "$loc" ]; then loc=${LANG:-}; fi
-  loc=$(printf '%s' "$loc" | tr '[:upper:]' '[:lower:]')
+  loc=$(printf '%s' "$loc" | LC_ALL=C tr '[:upper:]' '[:lower:]')
   UI_UTF8=0
   case "$loc" in *utf-8* | *utf8*) UI_UTF8=1 ;; esac
   if [ "$term" = dumb ]; then UI_UTF8=0; fi
@@ -45,13 +45,13 @@ ui_init() {
   if [ -t 2 ]; then
     cols=${COLUMNS:-}
     case "$cols" in
-      '' | *[!0-9]*)
+      '' | *[![:digit:]]*)
         cols=
         if command -v stty >/dev/null 2>&1; then cols=$(stty size <&2 2>/dev/null | awk '{print $2}'); fi
         ;;
     esac
     case "$cols" in
-      '' | *[!0-9]*) ;;
+      '' | *[![:digit:]]*) ;;
       *) if [ "$cols" -lt "$UI_WIDTH" ]; then UI_WIDTH=$cols; fi ;;
     esac
     if [ "$UI_WIDTH" -lt 40 ]; then UI_WIDTH=40; fi
@@ -121,14 +121,6 @@ _ui_put() {
 # A marker line: "  X " then the text. COLOR styles the marker only.
 _ui_marked() { # color marker text [tail]
   _ui_block "  $(_ui_s "$1" "$2") " 4 "$3" '' "${4:-}"
-}
-
-ui_path() {
-  case "$1" in
-    "${HOME:-/nonexistent}") printf '~' ;;
-    "${HOME:-/nonexistent}"/*) printf '~%s' "${1#"$HOME"}" ;;
-    *) printf '%s' "$1" ;;
-  esac
 }
 
 # 9s, 2m 05s, 1h 02m
@@ -285,11 +277,15 @@ ui_summary_end() { # [total elapsed]
 
 # ---- prompts (stderr) -----------------------------------------------------------------------------
 
-# "  > Label [default] " without a newline.
+# "  > Label [default] " without a newline. A label ending in a colon keeps the colon after the default.
 ui_prompt_head() { # label [default]
-  local UI_FD=2 line
-  line="  $(_ui_s 1 "$S_PROMPT") $1"
-  if [ -n "${2:-}" ]; then line="$line $(_ui_s 2 "[$2]")"; fi
+  local UI_FD=2 line label=$1 colon=''
+  if [ -n "${2:-}" ] && [[ $label == *: ]]; then
+    label=${label%:}
+    colon=:
+  fi
+  line="  $(_ui_s 1 "$S_PROMPT") $label"
+  if [ -n "${2:-}" ]; then line="$line $(_ui_s 2 "[$2]")$colon"; fi
   printf '%s ' "$line" >&2
 }
 
@@ -326,7 +322,7 @@ ui_confirm() { # question y|n
       printf '\n' >&2
       return 1
     fi
-    case "$(printf '%s' "$answer" | tr '[:upper:]' '[:lower:]')" in
+    case "$(printf '%s' "$answer" | LC_ALL=C tr '[:upper:]' '[:lower:]')" in
       y | yes) return 0 ;;
       n | no) return 1 ;;
       '') [ "$def" = y ] && return 0 || return 1 ;;
@@ -337,10 +333,11 @@ ui_confirm() { # question y|n
   return 1
 }
 
-# Reads a secret without echo into VAR. Returns 1 at the end of the input.
+# Reads a secret without echo into VAR. Returns 1 at the end of the input. Every label ends in "(not shown):".
 ui_password() { # VAR label
-  local __value='' __rc=0 UI_FD=2
-  ui_prompt_head "$2 (not shown)"
+  local __value='' __rc=0 UI_FD=2 __label=$2
+  __label="${__label%:} (not shown):"
+  ui_prompt_head "$__label"
   IFS= read -rs __value || __rc=1
   printf '\n' >&2
   printf -v "$1" '%s' "$__value"

@@ -1,6 +1,6 @@
 /** Reads a Gmail message into the plain fields the tools return. Mail text is data and is never interpreted here. */
 import type { GmailMessage, MessagePart } from './gmailWire';
-import { htmlToText } from './htmlText';
+import { htmlImageLinks, htmlToText, MAX_HTML_CHARS } from './htmlText';
 import {
   contentTypeCharset,
   decodeBytes,
@@ -16,13 +16,20 @@ const MAX_HEADER_CHARS = 1000;
 /** Longest attachment name and media type kept, cut before anything else looks at them. */
 const MAX_FILENAME_CHARS = 255;
 const MAX_MIME_CHARS = 100;
-const MAX_ATTACHMENT_ID_CHARS = 512;
+const MAX_HANDLE_CHARS = 64;
 
 /** Longest raw header read at all, so nothing downstream parses an unbounded value. */
 export const MAX_RAW_HEADER_CHARS = 10_000;
 
+/**
+ * One file of a message. `handle` is the MIME part id, which stays the same across reads; Gmail's `attachmentId`
+ * changes on every read, so it is only good for the fetch that follows the read it came from.
+ */
 export interface AttachmentInfo {
-  id: string;
+  handle: string;
+  /** Absent when Gmail returned the bytes inline in `data`. */
+  attachmentId: string | undefined;
+  data: string | undefined;
   filename: string;
   mimeType: string;
   size: number;
@@ -160,18 +167,22 @@ function decodeInto(input: { part: MessagePart; data: string; into: Collected; k
 function collect(input: { part: MessagePart; into: Collected; limits: WalkLimits }): void {
   const { part, into, limits } = input;
   const attachmentId = part.body?.attachmentId;
-  if (attachmentId !== undefined) {
+  const named = part.filename !== undefined && part.filename !== '';
+  // Gmail serves small files inline in body.data; a named part with data is a file, not message text.
+  const inlineData = attachmentId === undefined && named ? part.body?.data : undefined;
+  if (attachmentId !== undefined || inlineData !== undefined) {
     // Any part Gmail serves by attachment id is a file, named or not.
     into.attachmentTotal += 1;
+    // Gmail sends an empty part id when the whole message is the file; an empty handle can never be opened.
+    const partId = part.partId === undefined || part.partId === '' ? undefined : part.partId;
     if (into.attachments.length < limits.maxAttachments) {
       into.attachments.push({
-        id: attachmentId.slice(0, MAX_ATTACHMENT_ID_CHARS),
-        filename:
-          part.filename !== undefined && part.filename !== ''
-            ? part.filename.slice(0, MAX_FILENAME_CHARS)
-            : 'attachment',
+        handle: (partId ?? `att${String(into.attachmentTotal)}`).slice(0, MAX_HANDLE_CHARS),
+        attachmentId,
+        data: inlineData,
+        filename: named ? (part.filename ?? '').slice(0, MAX_FILENAME_CHARS) : 'attachment',
         mimeType: (part.mimeType ?? 'application/octet-stream').slice(0, MAX_MIME_CHARS),
-        size: part.body?.size ?? 0,
+        size: part.body?.size ?? Math.floor(((inlineData ?? '').length * 3) / 4),
       });
     }
   } else if (part.body?.data !== undefined && (part.filename === undefined || part.filename === '')) {
@@ -250,6 +261,15 @@ export function readBody(input: { message: GmailMessage; maxChars: number }): { 
   const plain = found.plain.join('\n');
   const body = plain.trim() !== '' ? plain : htmlToText(found.html.join('\n'));
   return { body: stripInvisible(body).trim(), cut: found.cut };
+}
+
+/** The web addresses of a message's HTML images, at most `max`; the HTML is read up to its usual limit. */
+export function linkedImagesOf(input: { message: GmailMessage; max: number }): string[] {
+  const found = walk({
+    message: input.message,
+    limits: { text: true, maxPlainChars: Number.POSITIVE_INFINITY, maxHtmlChars: MAX_HTML_CHARS, maxAttachments: 0 },
+  });
+  return htmlImageLinks({ source: found.html.join('\n'), max: input.max });
 }
 
 /** The first `max` attachments of a message and how many it has, found without decoding any text. */

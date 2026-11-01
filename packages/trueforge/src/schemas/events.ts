@@ -12,6 +12,7 @@ import {
 } from '@truefoundry/trueforge-core/agent-session';
 import {
   ContextCompactionEventSchema,
+  ContextCompactionStartedEventSchema,
   DocumentIngestionEventSchema,
   MCPAuthRequiredEventSchema,
   MCPInitializeEventSchema,
@@ -28,6 +29,8 @@ import {
 } from '@truefoundry/trueforge-core/core';
 import { EVENTS_PAGE_LIMIT } from './common';
 import { MemoryRecallPersistedEventSchema, type MemoryRecallPersistedEvent } from './memoryEvents';
+import { ModelUsagePersistedEventSchema, type ModelUsagePersistedEvent } from './modelUsageEvents';
+import { ModelWaitingPersistedEventSchema, type ModelWaitingPersistedEvent } from './modelWaitingEvents';
 import { ProfileLearnedPersistedEventSchema, type ProfileLearnedPersistedEvent } from './profileLearningEvents';
 import { ProvisioningPersistedEventSchema, type ProvisioningPersistedEvent } from './provisionEvents';
 import { SkillUsedPersistedEventSchema, type SkillUsedPersistedEvent } from './skillEvents';
@@ -35,10 +38,10 @@ import { SkillUsedPersistedEventSchema, type SkillUsedPersistedEvent } from './s
 /**
  * `SessionEventSchema` (agent-session, core) enumerates only built-in durable events and
  * deliberately excludes passthrough events. `aman.memory.recall`, `aman.profile.learned`,
- * `aman.skill.used`, and `aman.sandbox.provisioning` are passthrough events registered by
+ * `aman.skill.used`, `aman.sandbox.provisioning`, `aman.model.usage`, and `aman.model.waiting` are passthrough events registered by
  * trueforge (see runtime/memory/memoryEvents.ts, schemas/memoryEvents.ts,
  * runtime/profileLearning.ts, schemas/profileLearningEvents.ts,
- * schemas/skillEvents.ts, schemas/provisionEvents.ts), so the actual persisted event stream
+ * schemas/skillEvents.ts, schemas/provisionEvents.ts, schemas/modelUsageEvents.ts, schemas/modelWaitingEvents.ts), so the actual persisted event stream
  * this route lists can include them, so this widens the wire schema to match what the store
  * can actually return, the same way any future passthrough event added here would.
  */
@@ -49,6 +52,8 @@ export const SessionEventWithPassthroughSchema = z
     ProfileLearnedPersistedEventSchema,
     SkillUsedPersistedEventSchema,
     ProvisioningPersistedEventSchema,
+    ModelUsagePersistedEventSchema,
+    ModelWaitingPersistedEventSchema,
   ])
   .openapi('SessionEvent');
 
@@ -65,6 +70,7 @@ export const SessionEventTypeSchema = z
     ProfileLearnedPersistedEventSchema.shape.type.value,
     SkillUsedPersistedEventSchema.shape.type.value,
     ProvisioningPersistedEventSchema.shape.type.value,
+    ModelWaitingPersistedEventSchema.shape.type.value,
   ])
   .openapi('SessionEventType');
 
@@ -102,10 +108,14 @@ export const TurnStreamingEventSchema = z
     ProfileLearnedPersistedEventSchema,
     SkillUsedPersistedEventSchema,
     ProvisioningPersistedEventSchema,
+    ModelUsagePersistedEventSchema,
+    ModelWaitingPersistedEventSchema,
     // Context compaction can run mid-turn and writes to the live stream just like the
     // persisted log; omitting it here breaks SDK deserialization of the turn stream the
     // moment compaction fires (see AgentThread.ts / ContextCompaction.ts).
     ContextCompactionEventSchema,
+    // Yielded live before the summary call so a client can say what the slow wait is.
+    ContextCompactionStartedEventSchema,
     // Document-ingestion progress is likewise yielded live, one event per file, from the turn
     // loop's pre-model extraction step (see AgentThread.extractStagedDocuments); omitting it here
     // breaks SDK deserialization of the turn stream the moment an upload's extraction reports
@@ -177,5 +187,10 @@ export const ListSessionEventsResponseSchema = z
  * (see db/completedTurnEvents.ts).
  */
 export type PersistedPassthroughEvent =
-  MemoryRecallPersistedEvent | ProfileLearnedPersistedEvent | SkillUsedPersistedEvent | ProvisioningPersistedEvent;
+  | MemoryRecallPersistedEvent
+  | ProfileLearnedPersistedEvent
+  | SkillUsedPersistedEvent
+  | ProvisioningPersistedEvent
+  | ModelUsagePersistedEvent
+  | ModelWaitingPersistedEvent;
 export type TurnStreamingEvent = z.infer<typeof TurnStreamingEventSchema>;

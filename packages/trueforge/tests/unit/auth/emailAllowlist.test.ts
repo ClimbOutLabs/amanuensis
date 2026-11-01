@@ -3,7 +3,7 @@ import type { OIDCConfig } from '../../../src/config';
 
 function config(overrides: Partial<OIDCConfig> = {}): OIDCConfig {
   return {
-    OIDC_ISSUER_URL: 'https://example.okta.com/oauth2/default',
+    OIDC_ISSUER_URL: 'https://login.example.test/dex',
     OIDC_CLIENT_ID: 'client-id',
     OIDC_CLIENT_SECRET: 'client-secret',
     OIDC_USER_REFERENCE_CLAIM: 'sub',
@@ -12,6 +12,7 @@ function config(overrides: Partial<OIDCConfig> = {}): OIDCConfig {
     OIDC_ADMIN_ROLE_VALUE: 'admin',
     OIDC_SCOPES: ['openid', 'profile', 'email'],
     OIDC_ALLOWED_EMAILS: [],
+    OIDC_REQUIRE_VERIFIED_EMAIL: false,
     ...overrides,
   };
 }
@@ -67,5 +68,21 @@ describe('assertEmailAllowed', () => {
     expect(() =>
       assertEmailAllowed({ email: 'alice@company.com' }, config({ OIDC_ALLOWED_EMAILS: ['*@company.com'] })),
     ).not.toThrow();
+  });
+
+  it('ignores email_verified unless verified email is required', () => {
+    expect(() => assertEmailAllowed({ email: 'a@company.com', email_verified: false }, config())).not.toThrow();
+  });
+
+  it('refuses email_verified that is not true when verified email is required, even with no allowlist', () => {
+    const required = config({ OIDC_REQUIRE_VERIFIED_EMAIL: true });
+    expect(() => assertEmailAllowed({ email: 'a@company.com', email_verified: false }, required)).toThrow(
+      EmailNotAllowedError,
+    );
+    expect(() => assertEmailAllowed({ email: 'a@company.com', email_verified: true }, required)).not.toThrow();
+    expect(() => assertEmailAllowed({ email: 'a@company.com' }, required)).toThrow(EmailNotAllowedError);
+    expect(() => assertEmailAllowed({ email: 'a@company.com', email_verified: 'false' }, required)).toThrow(
+      EmailNotAllowedError,
+    );
   });
 });

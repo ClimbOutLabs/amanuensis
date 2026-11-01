@@ -12,6 +12,7 @@ import { STANDALONE_REQUEST_CONTEXT } from '../../../src/auth/identity';
 import { McpCatalog } from '../../../src/catalog/McpCatalog';
 import configuration from '../../../src/config';
 import type {
+  CompareAndSetGlobalSettingInput,
   GetGlobalSettingInput,
   GlobalSettingRecord,
   IGlobalSettingsStore,
@@ -35,6 +36,7 @@ import { SqliteSpaceStore } from '../../../src/db/sqlite/space-store/SqliteSpace
 import { SqliteOAuthTokenStore } from '../../../src/db/sqlite/token-store/SqliteOAuthTokenStore';
 import { ActiveTurnRegistry } from '../../../src/runtime/activeTurns';
 import { EventSubscriptionRegistry } from '../../../src/runtime/event-subscription/index.js';
+import { MEMORY_RECALL_ENABLED_SETTING_KEY } from '../../../src/runtime/memoryRecallSettings';
 import { MEMORY_SCREEN_ENABLED_SETTING_KEY } from '../../../src/runtime/memoryScreenSettings';
 import { MEMORY_SUMMARIZE_SETTING_KEY } from '../../../src/runtime/memorySummarizeSettings';
 import { toolOutputScreenCapability, type ToolOutputScreenConfig } from '../../../src/runtime/toolOutputScreen';
@@ -77,6 +79,10 @@ class CountingGlobalSettingsStore implements IGlobalSettingsStore {
 
   async deleteSetting(input: GetGlobalSettingInput): Promise<void> {
     return this.inner.deleteSetting(input);
+  }
+
+  compareAndSetSetting(input: CompareAndSetGlobalSettingInput): Promise<boolean> {
+    return this.inner.compareAndSetSetting(input);
   }
 }
 
@@ -169,7 +175,7 @@ describe('beginTurnExecution tool-output screen wiring', () => {
       previous_turn_id: undefined,
       userRef: STANDALONE_REQUEST_CONTEXT.subject.id,
       deps: {
-        mcpCatalog: McpCatalog.load(),
+        mcpCatalog: McpCatalog.loadShipped(),
         globalSettingsStore: store,
         tokenFactoryBudget: uncappedTokenFactoryBudget,
         sessionStore,
@@ -209,10 +215,11 @@ describe('beginTurnExecution tool-output screen wiring', () => {
     const { capturedResolver, ctorArgs } = await beginTurnWithStore(store);
 
     // One settings read per turn per domain: tool-output screen, turn summarization and
-    // the recall screen.
+    // the recall switch and the recall screen.
     expect(store.getSettingCalls).toEqual([
       { key: TOOL_OUTPUT_SCREEN_ENABLED_SETTING_KEY },
       { key: MEMORY_SUMMARIZE_SETTING_KEY },
+      { key: MEMORY_RECALL_ENABLED_SETTING_KEY },
       { key: MEMORY_SCREEN_ENABLED_SETTING_KEY },
     ]);
     expect(capturedResolver).toEqual({ __mockToolOutputScreenResolver: true });
@@ -229,6 +236,7 @@ describe('beginTurnExecution tool-output screen wiring', () => {
     expect(store.getSettingCalls).toEqual([
       { key: TOOL_OUTPUT_SCREEN_ENABLED_SETTING_KEY },
       { key: MEMORY_SUMMARIZE_SETTING_KEY },
+      { key: MEMORY_RECALL_ENABLED_SETTING_KEY },
       { key: MEMORY_SCREEN_ENABLED_SETTING_KEY },
     ]);
     expect(toolOutputScreenConfig(ctorArgs).enabled).toBe(true);
@@ -297,9 +305,9 @@ describe('beginTurnExecution tool-output screen wiring', () => {
       expect(given).toBe(googleStore);
     });
 
-    it('never gives a demo instance a real mailbox, even with a stored Google login', async () => {
-      const { given } = await googleConnectionsOf({ demoMode: true });
-      expect(given).toBeUndefined();
+    it('keeps Google on a demo instance, where the sentinel holds sends to the demo list', async () => {
+      const { given, googleStore } = await googleConnectionsOf({ demoMode: true });
+      expect(given).toBe(googleStore);
     });
   });
 });

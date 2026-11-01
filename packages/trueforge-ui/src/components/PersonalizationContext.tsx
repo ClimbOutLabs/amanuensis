@@ -1,13 +1,22 @@
 'use client';
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type FC, type ReactNode } from 'react';
+import { assistantDisplayName } from '../utils/assistantName.js';
+
+import type { HelpAreaId } from '@truefoundry/trueforge-core/schemas/personalizationHelpAreas';
 
 export type PersonalizationProfile = {
   assistant_name: string | null;
   assistant_identity: string | null;
   voice_guidance: string | null;
+  /** What the user is called; the first thing a new user is asked for. */
+  user_name: string | null;
+  /** How the assistant should address the user: a short form, a title, pronouns. */
+  address_as: string | null;
   user_profile: string | null;
   pinned_preferences: string[];
+  /** The areas the person picked for the Tour, in the order picked; empty when none. */
+  help_areas: HelpAreaId[];
   /** Host-learned markdown document; null until the learning pass writes one. */
   learned_profile: string | null;
   /**
@@ -34,8 +43,11 @@ export const EMPTY_PERSONALIZATION_PROFILE: PersonalizationProfile = {
   assistant_name: null,
   assistant_identity: null,
   voice_guidance: null,
+  user_name: null,
+  address_as: null,
   user_profile: null,
   pinned_preferences: [],
+  help_areas: [],
   learned_profile: null,
 };
 
@@ -99,6 +111,11 @@ export const PersonalizationProvider: FC<{ api: PersonalizationApi; children: Re
 
 export function useOptionalPersonalization(): PersonalizationContextValue | null {
   return useContext(PersonalizationContext);
+}
+
+/** The assistant's display name from the profile, or the default before one is chosen. */
+export function useAssistantDisplayName(): string {
+  return assistantDisplayName(useOptionalPersonalization()?.profile?.assistant_name);
 }
 
 export function usePersonalization(): PersonalizationContextValue {

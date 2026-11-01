@@ -71,7 +71,7 @@ describe('probeSlotAttachments', () => {
     expect(result).toEqual({ state: 'not_ready', problem: 'tools_missing' });
   });
 
-  it('is not ready when the image cannot read Word documents', async () => {
+  it('is not ready when the image cannot read office documents', async () => {
     const { result } = await probe({
       answerShell: command => (command.includes('command -v pdfinfo') ? 'AMAN_MISSING:python3\n' : undefined),
     });

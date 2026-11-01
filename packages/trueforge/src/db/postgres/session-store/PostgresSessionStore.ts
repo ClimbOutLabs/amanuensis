@@ -19,6 +19,7 @@ import type {
   AppendCommandExecutionStartedInput,
   AppendToEventsInput,
   AppendToThreadContextInput,
+  ApprovalDismissalRecord,
   BeginImplementationPlanDispatchInput,
   BeginImplementationPlanDispatchResult,
   CommandExecutionRecord,
@@ -37,6 +38,7 @@ import type {
   GetTaskChecklistInput,
   GetTurnInput,
   ISessionStore,
+  ListApprovalDismissalsInput,
   ListImplementationPlanGrantsInput,
   ListSessionEventsInput,
   ListSessionFoldersInput,
@@ -48,6 +50,7 @@ import type {
   PatchSandboxInfoInput,
   PatchThreadCapabilityStateInput,
   PersistImplementationPlanGrantInput,
+  RecordApprovalDismissalInput,
   RecoverRunningCommandExecutionsInput,
   RemoveThreadsInput,
   RenewCommandExecutionLeaseInput,
@@ -55,6 +58,7 @@ import type {
   RevokeImplementationPlanGrantInput,
   RevokeImplementationPlanGrantResult,
   SetSessionFolderInput,
+  StampImportedSessionInput,
   TurnRecordWithoutSnapshot,
   UpdateSessionFolderInput,
   UpdateSessionInput,
@@ -72,6 +76,10 @@ import type { AppendPassthroughEventsInput, ICompletedTurnEventStore } from '../
 import type { SessionCustom, TurnCustom } from '../../sessionCustom';
 import { json, jsonUnknown } from '../sqlExpressions';
 import type { Database, TurnCheckpoint, TurnThreadCheckpoint } from '../types';
+import {
+  listApprovalDismissals as listApprovalDismissalsQuery,
+  recordApprovalDismissal as recordApprovalDismissalQuery,
+} from './queries/approvalDismissals';
 import { patchThreadCapabilityState as patchThreadCapabilityStateQuery } from './queries/capabilities';
 import {
   appendCommandExecutionResult as appendCommandExecutionResultQuery,
@@ -109,6 +117,7 @@ import {
   getSessionByExternalId as getSessionByExternalIdQuery,
   getSession as getSessionQuery,
   listSessions as listSessionsQuery,
+  stampImportedSession as stampImportedSessionQuery,
   updateSession as updateSessionQuery,
 } from './queries/sessions';
 import {
@@ -173,6 +182,10 @@ export class PostgresSessionStore implements ISessionStore<SessionCustom, TurnCu
 
   createSession(input: CreateSessionInput<SessionCustom>): Promise<void> {
     return createSessionQuery(this.db, input);
+  }
+
+  stampImportedSession(input: StampImportedSessionInput): Promise<void> {
+    return stampImportedSessionQuery(this.db, input);
   }
 
   deleteSession(input: DeleteSessionInput): Promise<void> {
@@ -245,6 +258,14 @@ export class PostgresSessionStore implements ISessionStore<SessionCustom, TurnCu
 
   deleteSessionFolder(input: DeleteSessionFolderInput): Promise<void> {
     return deleteSessionFolderQuery(this.db, input);
+  }
+
+  recordApprovalDismissal(input: RecordApprovalDismissalInput): Promise<void> {
+    return recordApprovalDismissalQuery(this.db, input);
+  }
+
+  listApprovalDismissals(input: ListApprovalDismissalsInput): Promise<ApprovalDismissalRecord[]> {
+    return listApprovalDismissalsQuery(this.db, input);
   }
 
   setSessionFolder(input: SetSessionFolderInput): Promise<void> {

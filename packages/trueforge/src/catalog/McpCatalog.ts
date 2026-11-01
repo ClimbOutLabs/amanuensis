@@ -8,7 +8,6 @@
  * override: `MCP_CATALOG_PATH` (file on disk).
  */
 import type { SearchProviderGrant } from '@truefoundry/trueforge-core/core';
-import configuration from '../config';
 import { McpCatalogFileSchema, type CatalogMcpServer, type CatalogPreset } from '../schemas/mcpCatalog';
 import { loadYamlAtPath, parseYamlString } from './loadYaml';
 import { shippedMcpCatalogYaml } from './mcpCatalog.gen';
@@ -20,10 +19,13 @@ export class McpCatalog {
     this.mcpServers = mcpServers;
   }
 
-  /** Loads and validates the catalog. Throws on any error. */
-  static load(): McpCatalog {
-    if (configuration.MCP_CATALOG_PATH !== undefined) {
-      const file = loadYamlAtPath(configuration.MCP_CATALOG_PATH, McpCatalogFileSchema);
+  /**
+   * Loads and validates the catalog, from `catalogPath` when set. Throws on any error. The caller
+   * passes the path so this module stays free of runtime config: migrations bundle it on its own.
+   */
+  static load(catalogPath: string | undefined): McpCatalog {
+    if (catalogPath !== undefined) {
+      const file = loadYamlAtPath(catalogPath, McpCatalogFileSchema);
       return new McpCatalog(file.mcp_servers);
     }
     return McpCatalog.loadShipped();
@@ -42,6 +44,11 @@ export class McpCatalog {
       void serverOnly;
       return preset;
     });
+  }
+
+  /** Names of the presets offered as a web search provider (today parallel-web and tavily). */
+  searchProviderPresetNames(): readonly string[] {
+    return this.mcpServers.filter(entry => entry.search_provider === true).map(entry => entry.name);
   }
 
   /**

@@ -9,6 +9,7 @@ import type { KnowledgeDocumentStatus } from '../schemas/personaKnowledge';
 import { PersonaKnowledgeDocumentSchema } from '../schemas/personaKnowledge';
 import type {
   IndexedKnowledgeChunk,
+  KnowledgeDocumentChunk,
   KnowledgeDocumentRecord,
   KnowledgeSearchHit,
   NewKnowledgeDocument,
@@ -42,6 +43,9 @@ const SCHEMA_STATEMENTS = [
 // better-sqlite3 returns `unknown` for row reads; the zod schemas are the
 // contract that turns a row into a typed record instead of an assertion.
 const CountRowSchema = z.object({ count: z.number() });
+const UsedBytesRowSchema = z.object({ bytes: z.number() });
+
+const ChunkRowSchema = z.object({ chunk_index: z.number(), text: z.string() });
 
 /**
  * Document rows as SQLite stores them: `title_explicit` is an INTEGER flag.
@@ -149,10 +153,20 @@ export class SqlitePersonaKnowledgeRepository implements PersonaKnowledgeReposit
     return row === undefined ? undefined : toDocumentRecord(row);
   }
 
+  listDocumentChunks(input: { documentId: string }): KnowledgeDocumentChunk[] {
+    const rows = this.#db
+      .prepare('SELECT chunk_index, text FROM knowledge_chunks WHERE document_id = ? ORDER BY chunk_index ASC')
+      .all(input.documentId);
+    return rows.map(row => {
+      const parsed = ChunkRowSchema.parse(row);
+      return { chunkIndex: parsed.chunk_index, text: parsed.text };
+    });
+  }
+
   createDocument(input: NewKnowledgeDocument): KnowledgeDocumentRecord {
     const now = new Date().toISOString();
     const record: KnowledgeDocumentRecord = {
-      id: ulid(),
+      id: input.id ?? ulid(),
       title: input.title,
       title_explicit: input.titleExplicit,
       source_kind: input.source_kind,
@@ -274,6 +288,16 @@ export class SqlitePersonaKnowledgeRepository implements PersonaKnowledgeReposit
       )
       .get();
     return CountRowSchema.parse(row).count;
+  }
+
+  usedBytes(): number {
+    const row = this.#db
+      .prepare(
+        `SELECT (page_count - freelist_count) * page_size AS bytes
+         FROM pragma_page_count(), pragma_freelist_count(), pragma_page_size()`,
+      )
+      .get();
+    return UsedBytesRowSchema.parse(row).bytes;
   }
 
   searchNearest(input: { embedding: Float32Array; limit: number }): KnowledgeSearchHit[] {

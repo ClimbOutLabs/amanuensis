@@ -33,6 +33,7 @@ export function newEventId(): string {
 export const EventType = {
   AGENT_CONTEXT_OVERWRITE: 'agent.context.overwrite',
   AGENT_CONTEXT_COMPACTION: 'agent.context.compaction',
+  AGENT_CONTEXT_COMPACTION_STARTED: 'agent.context.compaction_started',
   DOCUMENT_INGESTION: 'document.ingestion',
   MCP_AUTH_REQUIRED: 'mcp.auth_required',
   MCP_INITIALIZE: 'mcp.initialize',
@@ -151,8 +152,16 @@ export const AgentInputUserMessageSchema = z
 export type AgentInputUserMessage = z.infer<typeof AgentInputUserMessageSchema>;
 
 // persisted to redis - thread_id is stripped
+/**
+ * A recorded decision applies only to the call it was issued for: it names that call's approval token and
+ * arguments hash, and a decision whose binding does not match the call in context is ignored. Contexts
+ * saved before the binding existed parse with null and are never honoured, so they ask again.
+ */
 export const AgentApprovalDecisionMessageSchema = UserToolApprovalMessageSchema.omit({
   thread_id: true,
+}).extend({
+  approval_token_id: z.string().nullable().default(null),
+  arguments_hash: z.string().nullable().default(null),
 });
 
 export const InputTokensBreakdownSchema = z.object({
@@ -458,7 +467,7 @@ export const ThreadDoneEventSchema = BaseThreadDoneEventSchema.extend({
   state: ThreadStateSchema,
 }).openapi('ThreadDoneEvent');
 
-const ContextMessageSchema = z.union([
+export const ContextMessageSchema = z.union([
   LLMUserMessageSchema,
   LLMSystemMessageSchema,
   InternalEnrichedAssistantMessageSchema,
@@ -499,8 +508,8 @@ export const ContextCompactionEventSchema = z
     created_at: z.string().describe('ISO 8601 event timestamp.'),
     thread_id: z.string().describe('Thread the compaction ran on.'),
     mode: z.enum(['coding', 'conversation']).describe('Which host template was used for the summary.'),
-    tokens_before: z.number().int().nonnegative().describe('Estimated context tokens before this attempt.'),
-    tokens_after: z.number().int().nonnegative().describe('Estimated context tokens after this attempt.'),
+    tokens_before: z.number().nonnegative().describe('Estimated context tokens before this attempt.'),
+    tokens_after: z.number().nonnegative().describe('Estimated context tokens after this attempt.'),
     summary_chars: z.number().int().nonnegative().describe('Length of the persisted summary text, in characters.'),
     outcome: z
       .enum(['applied', 'skipped_invalid', 'skipped_blocked', 'truncated_fallback'])
@@ -527,6 +536,24 @@ export const ContextCompactionEventSchema = z
       ),
   })
   .openapi('ContextCompactionEvent');
+
+/**
+ * Yielded before a compaction pass calls the summarizer, which can take minutes on a slow model, so
+ * a client can say the conversation is being tidied instead of looking stuck. The matching
+ * `agent.context.compaction` event ends it; a cancelled turn may end without one.
+ */
+export const ContextCompactionStartedEventSchema = z
+  .object({
+    type: z
+      .literal(EventType.AGENT_CONTEXT_COMPACTION_STARTED)
+      .describe('A context-compaction attempt started. It ends with agent.context.compaction or the turn ending.'),
+    id: EventIdSchema,
+    created_at: z.string().describe('ISO 8601 event timestamp.'),
+    thread_id: z.string().describe('Thread the compaction runs on.'),
+    mode: z.enum(['coding', 'conversation']).describe('Which host template is used for the summary.'),
+    tokens_before: z.number().nonnegative().describe('Estimated context tokens before this attempt.'),
+  })
+  .openapi('ContextCompactionStartedEvent');
 
 export const MCPServerAuthInfoSchema = z
   .object({
@@ -646,6 +673,7 @@ export const ApprovalToolCallRefSchema = z
       .optional()
       .describe('Set when a scheduled run could not save this action for the owner, and why. It will not run.'),
     can_always_allow: z.boolean().optional().describe('Whether the owner may allow this tool for good.'),
+    can_chat_allow: z.boolean().optional().describe('Whether the user may approve this tool for the rest of the chat.'),
     expires_at: z.string().optional().describe('ISO 8601 time after which a held action can no longer be approved.'),
   })
   .openapi('ApprovalToolCallRef');
@@ -716,6 +744,7 @@ export type BaseThreadDoneEvent = z.infer<typeof BaseThreadDoneEventSchema>;
 export type ThreadDoneEvent = z.infer<typeof ThreadDoneEventSchema>;
 export type ThreadOverwriteContextEvent = z.infer<typeof ThreadOverwriteContextEventSchema>;
 export type ContextCompactionEvent = z.infer<typeof ContextCompactionEventSchema>;
+export type ContextCompactionStartedEvent = z.infer<typeof ContextCompactionStartedEventSchema>;
 export type BaseMCPAuthRequiredEvent = z.infer<typeof BaseMCPAuthRequiredEventSchema>;
 export type MCPServerAuthInfo = z.infer<typeof MCPServerAuthInfoSchema>;
 export type MCPAuthRequiredEvent = z.infer<typeof MCPAuthRequiredEventSchema>;

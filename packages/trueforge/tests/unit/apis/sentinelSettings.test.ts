@@ -69,6 +69,8 @@ describe('Sentinel user settings routes', () => {
       offline_mode: false,
       tier2_auto_allow: [],
       search_without_asking: true,
+      maps_without_asking: true,
+      sandbox_without_asking: true,
     });
   });
 
@@ -79,6 +81,8 @@ describe('Sentinel user settings routes', () => {
       offline_mode: false,
       tier2_auto_allow: ['file_write'],
       search_without_asking: true,
+      maps_without_asking: true,
+      sandbox_without_asking: true,
     });
 
     await server.request(SETTINGS_PATH, patch('alice', { offline_mode: true }));
@@ -87,17 +91,67 @@ describe('Sentinel user settings routes', () => {
       offline_mode: true,
       tier2_auto_allow: ['file_write'],
       search_without_asking: false,
+      maps_without_asking: true,
+      sandbox_without_asking: true,
     });
-    expect(await read('bob')).toEqual({ offline_mode: false, tier2_auto_allow: [], search_without_asking: true });
+    expect(await read('bob')).toEqual({
+      offline_mode: false,
+      tier2_auto_allow: [],
+      search_without_asking: true,
+      maps_without_asking: true,
+      sandbox_without_asking: true,
+    });
   });
 
-  it('rejects an unknown Tier 2 kind and a non-boolean offline or search setting', async () => {
+  it('round-trips the maps setting in snake_case and leaves the other fields alone', async () => {
+    const saved = await server.request(SETTINGS_PATH, patch('dana', { maps_without_asking: true }));
+    expect(saved.status).toBe(200);
+    expect(await read('dana')).toEqual({
+      offline_mode: false,
+      tier2_auto_allow: [],
+      search_without_asking: true,
+      maps_without_asking: true,
+      sandbox_without_asking: true,
+    });
+
+    await server.request(SETTINGS_PATH, patch('dana', { maps_without_asking: false }));
+    expect((await read('dana')).maps_without_asking).toBe(false);
+  });
+
+  it('runs the sandbox without asking by default and round-trips the sandbox setting in snake_case', async () => {
+    expect((await read('erin')).sandbox_without_asking).toBe(true);
+
+    const saved = await server.request(SETTINGS_PATH, patch('erin', { sandbox_without_asking: false }));
+    expect(saved.status).toBe(200);
+    expect(await read('erin')).toEqual({
+      offline_mode: false,
+      tier2_auto_allow: [],
+      search_without_asking: true,
+      maps_without_asking: true,
+      sandbox_without_asking: false,
+    });
+
+    await server.request(SETTINGS_PATH, patch('erin', { sandbox_without_asking: true }));
+    expect((await read('erin')).sandbox_without_asking).toBe(true);
+  });
+
+  it('rejects an unknown Tier 2 kind and a non-boolean offline, search or maps setting', async () => {
     const unknownKind = await server.request(SETTINGS_PATH, patch('carol', { tier2_auto_allow: ['reformat_disk'] }));
     expect(unknownKind.status).toBe(400);
     const badOffline = await server.request(SETTINGS_PATH, patch('carol', { offline_mode: 'yes' }));
     expect(badOffline.status).toBe(400);
     const badSearch = await server.request(SETTINGS_PATH, patch('carol', { search_without_asking: 'no' }));
     expect(badSearch.status).toBe(400);
-    expect(await read('carol')).toEqual({ offline_mode: false, tier2_auto_allow: [], search_without_asking: true });
+    const badMaps = await server.request(SETTINGS_PATH, patch('carol', { maps_without_asking: 'yes' }));
+    expect(badMaps.status).toBe(400);
+    const badSandbox = await server.request(SETTINGS_PATH, patch('carol', { sandbox_without_asking: 'yes' }));
+    expect(badSandbox.status).toBe(400);
+    expect(await read('carol')).toEqual({
+      offline_mode: false,
+      tier2_auto_allow: [],
+      search_without_asking: true,
+      maps_without_asking: true,
+      sandbox_without_asking: true,
+    });
   });
 });

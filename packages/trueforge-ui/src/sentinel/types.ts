@@ -13,6 +13,10 @@
  * UI rule for consumers: never infer a tier. Tier-specific UI renders only when the
  * server sent an explicit `tier`.
  */
+import { changeRequestText } from '@truefoundry/trueforge-core/core/permissions/changeRequest';
+import { savedSearchHold, withHoldSay } from '@truefoundry/trueforge-core/core/permissions/searchHoldText';
+import { readStoredMailbox, type Tier3Mailbox } from '@truefoundry/trueforge-core/core/permissions/tierMailbox';
+import type { BriefSection } from '@truefoundry/trueforge-core/core/schedules/morningBrief';
 
 /** Sentinel permission tier: 1 silent, 2 asks unless the user relaxed its kind, 3 always asks. */
 export const TOOL_TIERS = [1, 2, 3] as const;
@@ -44,16 +48,70 @@ const APPROVAL_EMAIL_ACTIONS = ['send', 'save', 'change'] as const;
 
 export type SentinelApprovalEmailAction = (typeof APPROVAL_EMAIL_ACTIONS)[number];
 
+/** One recipient of a mail card: the name it is shown with, empty when it has none, and the address mail goes to. */
+export type SentinelApprovalMailbox = Tier3Mailbox;
+
 /** The whole message of a mail card, so what is approved is everything that is sent. */
 export type SentinelApprovalEmail = {
   action: SentinelApprovalEmailAction;
-  to: string[];
-  cc: string[];
-  bcc: string[];
+  to: SentinelApprovalMailbox[];
+  cc: SentinelApprovalMailbox[];
+  bcc: SentinelApprovalMailbox[];
   subject: string;
   body: string;
   /** The saved draft a change replaces, or null. */
-  replaces: { subject: string; to: string[] } | null;
+  replaces: { subject: string; to: SentinelApprovalMailbox[] } | null;
+  /** The message a reply answers in its thread, or null when the message is not a reply. */
+  reply_in_thread: { subject: string; from: string } | null;
+  /** The address replies go to when it is not the sender, or null when replies go to the sender. */
+  reply_to: string | null;
+};
+
+const APPROVAL_CALENDAR_ACTIONS = ['create', 'change'] as const;
+
+export type SentinelApprovalCalendarAction = (typeof APPROVAL_CALENDAR_ACTIONS)[number];
+
+/** The whole event of a calendar card, in plain words, so what is approved is everything that is written. */
+export type SentinelApprovalCalendarEvent = {
+  action: SentinelApprovalCalendarAction;
+  /** The account whose main calendar is written. */
+  calendar: string;
+  title: string;
+  /** Local date and time in plain words. */
+  when: string;
+  time_zone: string;
+  duration: string;
+  /** Empty when there is none. */
+  location: string;
+  /** Empty when the write sets none. */
+  description: string;
+  attendees: string[];
+  /** True when Google emails the guests about this. */
+  guests_emailed: boolean;
+  /** True when a change touches one date of a repeating event. */
+  one_of_repeating: boolean;
+  /** The event as it is now, for a change; null for a new event. */
+  before: { title: string; when: string; duration: string; location: string } | null;
+};
+
+const APPROVAL_SCHEDULE_ACTIONS = ['create', 'delete'] as const;
+
+export type SentinelApprovalScheduleAction = (typeof APPROVAL_SCHEDULE_ACTIONS)[number];
+
+/** The whole schedule a chat call creates or deletes, in plain words. */
+export type SentinelApprovalSchedule = {
+  action: SentinelApprovalScheduleAction;
+  /** Schedule name in plain words. */
+  name: string;
+  /** When it runs, in plain words. */
+  when: string;
+  time_zone: string;
+  /** The whole instruction each run gets. */
+  task: string;
+  /** Who runs it: the assistant name, or the agent name. */
+  runs_as: string;
+  /** The next three runs in plain words for a new schedule; empty for a delete. */
+  next_runs: string[];
 };
 
 /**
@@ -85,14 +143,36 @@ export type SentinelApprovalCard = {
   destination_host: string | null;
   /** True when part of outbound_text is cut and not shown in full. */
   outbound_truncated: boolean;
+  /** Arguments a search service adds on its own, shown behind a Details disclosure; null or absent when none. */
+  outbound_plumbing_text?: string | null | undefined;
   /** The whole message when the action is sending or saving mail, or null. */
   email: SentinelApprovalEmail | null;
+  /** The whole event when the action adds or changes a calendar event, or null. */
+  calendar_event: SentinelApprovalCalendarEvent | null;
+  /** The whole schedule when the action creates or deletes one, or null. */
+  schedule: SentinelApprovalSchedule | null;
+  /** The whole persona when the action adds one, or null. */
+  persona: SentinelApprovalPersona | null;
+  /** For a mail send to addresses not on the Email list: those addresses. Approving adds them. Otherwise null. */
+  mail_new_recipients?: string[] | null;
+  /** True when a card carrying mail_new_recipients approves saving a draft rather than sending. */
+  mail_draft?: boolean | undefined;
+};
+
+/** The whole persona a chat call adds, in plain words. */
+export type SentinelApprovalPersona = {
+  /** Persona name in plain words. */
+  name: string;
+  /** One line on what the persona is for. */
+  description: string;
+  /** The whole instruction text the persona follows. */
+  instructions: string;
+  /** The model the persona answers with. */
+  model_name: string;
 };
 
 /** What the server says about an action a scheduled run held for its owner instead of asking. */
 export type HeldActionInfo = {
-  /** Whether "Always allow" may be offered; the server refuses it for other tools. */
-  alwaysAllowOffered: boolean;
   /** ISO time after which the held action can no longer be approved, or null when not sent. */
   expiresAt: string | null;
 };
@@ -106,6 +186,10 @@ export type SentinelApprovalInfo = {
   eventId: string | null;
   /** Thread that owns the call; a sub-agent's calls carry its own thread id. */
   threadId: string | null;
+  /** False when the server refuses chat scope for this call; absent from servers that do not say. */
+  chatAllowOffered?: boolean | undefined;
+  /** True when the server lets the owner always allow this tool; the server refuses it for other tools. */
+  alwaysAllowOffered?: boolean | undefined;
   /** Present only for an action a scheduled run held; such a card never pauses the chat. */
   held?: HeldActionInfo | undefined;
   /** Present only for an action a scheduled run could not save for the owner, and why. */
@@ -121,6 +205,35 @@ export type ApprovalAnswer = 'approved' | 'denied';
 export const SENTINEL_AUDIT_OUTCOMES = ['logged', 'ran', 'approved', 'denied', 'auto_denied'] as const;
 
 export type SentinelAuditOutcome = (typeof SENTINEL_AUDIT_OUTCOMES)[number];
+
+/** The one owner of the words for a call that ran because the person's settings allow it. */
+export const ALLOWED_BY_SETTINGS_LABEL = 'Allowed by your settings';
+
+/** The one owner of the words for a call held for the person's OK. */
+export const WAITING_FOR_YOU_LABEL = 'Waiting for you';
+
+/**
+ * Plain-word outcome labels for the owner. `logged` is shared by two kinds of row, so a row's own
+ * label comes from `sentinelAuditLabel`; this entry names the outcome in the filter.
+ */
+export const SENTINEL_AUDIT_OUTCOME_LABELS: Record<SentinelAuditOutcome, string> = {
+  logged: 'Allowed by your settings, or waiting for you',
+  ran: 'Ran',
+  approved: 'Approved',
+  denied: 'Denied',
+  auto_denied: 'Refused',
+};
+
+/**
+ * The label for one audit row. A `logged` row is a Tier 1 call that ran under the person's settings,
+ * or a Tier 2 or Tier 3 call waiting for them; only the stored tier tells them apart.
+ */
+export function sentinelAuditLabel(entry: Pick<SentinelAuditEntry, 'outcome' | 'tier'>): string {
+  if (entry.outcome === 'logged') {
+    return entry.tier === 1 ? ALLOWED_BY_SETTINGS_LABEL : WAITING_FOR_YOU_LABEL;
+  }
+  return SENTINEL_AUDIT_OUTCOME_LABELS[entry.outcome];
+}
 
 function parseAuditOutcome(value: unknown): SentinelAuditOutcome | undefined {
   for (const outcome of SENTINEL_AUDIT_OUTCOMES) {
@@ -145,6 +258,18 @@ export type SentinelAuditEntry = {
   reason?: string;
 };
 
+/** One row of the owner's audit log across every chat. */
+export type SentinelUserAuditEntry = SentinelAuditEntry & {
+  /** False once the chat the entry came from has been deleted. */
+  chat_exists: boolean;
+};
+
+/** One page of the owner's audit log; `nextPageToken` is absent on the last page. */
+export type SentinelUserAuditPage = {
+  entries: SentinelUserAuditEntry[];
+  nextPageToken?: string | undefined;
+};
+
 /** User-level Sentinel preferences. */
 export type SentinelUserSettings = {
   /** While on, actions that reach outside this machine are auto-denied without an approval card. */
@@ -153,6 +278,10 @@ export type SentinelUserSettings = {
   tier2_auto_allow: Tier2ActionKind[];
   /** While on, the search provider you designated runs web searches without asking. Default: on. */
   search_without_asking: boolean;
+  /** While on, maps run without asking; after a mail or calendar read they are checked first. Default: off. */
+  maps_without_asking: boolean;
+  /** While on, code, commands and workspace files in the sandbox run without asking. Default: on. */
+  sandbox_without_asking: boolean;
 };
 
 /**
@@ -160,11 +289,20 @@ export type SentinelUserSettings = {
  * server's HTTP API plus the SDK client; trueforge-ui only declares the contract.
  *
  * - `GET /api/v1/sessions/{sessionId}/audit-log?limit=N` -> `{ entries: [...] }`
+ * - `GET /api/v1/user/audit-log?limit=N&page_token=T&outcome=O` -> `{ data: [...], pagination }`
  * - `GET /api/v1/user/settings/sentinel` -> `{ data: settings }`
  * - `PATCH /api/v1/user/settings/sentinel` with a settings patch -> `{ data: settings }`
+ * - `GET /api/v1/user/brief-items/completions` -> `{ data: [{ item_key, ... }] }`
+ * - `POST /api/v1/user/brief-items/completions` -> marks a brief item done
+ * - `DELETE /api/v1/user/brief-items/completions/{item_key}` -> removes the mark
  */
 export type SentinelApi = {
   listAuditEntries: (input: { sessionId: string; limit?: number }) => Promise<SentinelAuditEntry[]>;
+  listUserAuditEntries: (input: {
+    limit?: number;
+    pageToken?: string | undefined;
+    outcome?: SentinelAuditOutcome | undefined;
+  }) => Promise<SentinelUserAuditPage>;
   getUserSettings: () => Promise<SentinelUserSettings>;
   updateUserSettings: (patch: Partial<SentinelUserSettings>) => Promise<SentinelUserSettings>;
   /**
@@ -173,6 +311,17 @@ export type SentinelApi = {
    * stream already delivered.
    */
   listSentinelSessionContext: (sessionId: string) => Promise<SentinelSessionContext>;
+  /** Keys of the morning brief items this person marked done in the last 7 days. */
+  listBriefItemCompletions: () => Promise<string[]>;
+  /** Saves a brief item as done, and writes it to the audit log for `sessionId`. */
+  markBriefItemDone: (input: {
+    itemKey: string;
+    section: BriefSection;
+    title: string;
+    sessionId: string;
+  }) => Promise<void>;
+  /** Removes a done mark again (the Undo on a brief row). */
+  unmarkBriefItemDone: (itemKey: string) => Promise<void>;
 };
 
 /** Durable per-tool-call Sentinel state for one session. */
@@ -180,6 +329,8 @@ export type SentinelSessionContext = {
   approvals: SentinelApprovalInfo[];
   /** Answers already given, by tool call id. Absent when the host reads none. */
   answers?: Record<string, ApprovalAnswer> | undefined;
+  /** The words the owner typed with a "Change it" answer, by tool call id. Absent when the host reads none. */
+  changeRequests?: Record<string, string> | undefined;
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -223,6 +374,27 @@ function cardFlag(record: Record<string, unknown>, { snake, camel }: { snake: st
   return record[snake] === true || record[camel] === true;
 }
 
+const SEARCH_QUERY_MARKER = ' for: ';
+
+// Search cards saved before the hold reason moved into plain_what: the reason was filed as
+// "seen before", and a held key was written out in full. The key is not recoverable here, so the
+// whole query is dropped for that case.
+function readSavedHoldReason(card: SentinelApprovalCard): SentinelApprovalCard {
+  const saved = savedSearchHold(card.why_asked_again);
+  if (saved === undefined) return card;
+  if (saved.secret) {
+    const marker = card.plain_what.indexOf(SEARCH_QUERY_MARKER);
+    const heading = marker === -1 ? card.plain_what : card.plain_what.slice(0, marker);
+    return {
+      ...card,
+      plain_what: withHoldSay(heading, saved.say),
+      why_asked_again: null,
+      outbound_text: null,
+    };
+  }
+  return { ...card, plain_what: withHoldSay(card.plain_what, saved.say), why_asked_again: null };
+}
+
 function stringList(value: unknown): string[] | undefined {
   return Array.isArray(value) && value.every(item => typeof item === 'string')
     ? value.filter((item): item is string => typeof item === 'string')
@@ -233,19 +405,36 @@ function parseEmailAction(value: unknown): SentinelApprovalEmailAction | undefin
   return APPROVAL_EMAIL_ACTIONS.find(action => action === value);
 }
 
+function mailboxList(value: unknown): SentinelApprovalMailbox[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const mailboxes: SentinelApprovalMailbox[] = [];
+  for (const item of value) {
+    const mailbox = readStoredMailbox(item);
+    if (mailbox === undefined) return undefined;
+    mailboxes.push(mailbox);
+  }
+  return mailboxes;
+}
+
 function parseEmail(value: unknown): SentinelApprovalEmail | null {
   if (!isRecord(value)) return null;
   const action = parseEmailAction(value.action);
-  const to = stringList(value.to);
-  const cc = stringList(value.cc);
-  const bcc = stringList(value.bcc);
+  const to = mailboxList(value.to);
+  const cc = mailboxList(value.cc);
+  const bcc = mailboxList(value.bcc);
   const subject = optionalString(value, 'subject');
   const body = optionalString(value, 'body');
   if (action === undefined || to === undefined || cc === undefined || bcc === undefined) return null;
   if (subject === undefined || body === undefined) return null;
   const replaced = value.replaces;
   const replacedSubject = isRecord(replaced) ? optionalString(replaced, 'subject') : undefined;
-  const replacedTo = isRecord(replaced) ? stringList(replaced.to) : undefined;
+  const replacedTo = isRecord(replaced) ? mailboxList(replaced.to) : undefined;
+  // The SDK camel-cases the keys it knows, so a card that came through it names this one replyInThread.
+  const thread = value.reply_in_thread ?? value.replyInThread;
+  const threadSubject = isRecord(thread) ? optionalString(thread, 'subject') : undefined;
+  const threadFrom = isRecord(thread) ? optionalString(thread, 'from') : undefined;
+  // A card from before this field existed has no reply address, so it replies to the sender as it did then.
+  const replyTo = optionalString(value, 'reply_to') ?? optionalString(value, 'replyTo') ?? null;
   return {
     action,
     to,
@@ -255,14 +444,113 @@ function parseEmail(value: unknown): SentinelApprovalEmail | null {
     body,
     replaces:
       replacedSubject === undefined || replacedTo === undefined ? null : { subject: replacedSubject, to: replacedTo },
+    reply_in_thread:
+      threadSubject === undefined || threadFrom === undefined ? null : { subject: threadSubject, from: threadFrom },
+    reply_to: replyTo,
   };
+}
+
+function parseCalendarAction(value: unknown): SentinelApprovalCalendarAction | undefined {
+  return APPROVAL_CALENDAR_ACTIONS.find(action => action === value);
+}
+
+function parseCalendarBefore(value: unknown): SentinelApprovalCalendarEvent['before'] {
+  if (!isRecord(value)) return null;
+  const title = optionalString(value, 'title');
+  const when = optionalString(value, 'when');
+  const duration = optionalString(value, 'duration');
+  const location = optionalString(value, 'location');
+  if (title === undefined || when === undefined || duration === undefined || location === undefined) return null;
+  return { title, when, duration, location };
+}
+
+/** A card missing any field is not shown as an event, so a partial event is never approved as if it were whole. */
+function parseCalendarEvent(value: unknown): SentinelApprovalCalendarEvent | null {
+  if (!isRecord(value)) return null;
+  const action = parseCalendarAction(value.action);
+  const calendar = optionalString(value, 'calendar');
+  const title = optionalString(value, 'title');
+  const when = optionalString(value, 'when');
+  const time_zone = optionalString(value, 'time_zone') ?? optionalString(value, 'timeZone');
+  const duration = optionalString(value, 'duration');
+  const location = optionalString(value, 'location');
+  const description = optionalString(value, 'description');
+  const attendees = stringList(value.attendees);
+  const guests_emailed = optionalBoolean(value, 'guests_emailed') ?? optionalBoolean(value, 'guestsEmailed');
+  const one_of_repeating = optionalBoolean(value, 'one_of_repeating') ?? optionalBoolean(value, 'oneOfRepeating');
+  if (
+    action === undefined ||
+    calendar === undefined ||
+    title === undefined ||
+    when === undefined ||
+    time_zone === undefined ||
+    duration === undefined ||
+    location === undefined ||
+    description === undefined ||
+    attendees === undefined ||
+    guests_emailed === undefined ||
+    one_of_repeating === undefined
+  ) {
+    return null;
+  }
+  return {
+    action,
+    calendar,
+    title,
+    when,
+    time_zone,
+    duration,
+    location,
+    description,
+    attendees,
+    guests_emailed,
+    one_of_repeating,
+    before: parseCalendarBefore(value.before),
+  };
+}
+
+/** A card missing any field is not shown as a persona, so a partial one is never approved as if it were whole. */
+function parsePersona(value: unknown): SentinelApprovalPersona | null {
+  if (!isRecord(value)) return null;
+  const name = optionalString(value, 'name');
+  const description = optionalString(value, 'description');
+  const instructions = optionalString(value, 'instructions');
+  const model_name = optionalString(value, 'model_name') ?? optionalString(value, 'modelName');
+  if (name === undefined || description === undefined || instructions === undefined || model_name === undefined) {
+    return null;
+  }
+  return { name, description, instructions, model_name };
+}
+
+/** A card missing any field is not shown as a schedule, so a partial schedule is never approved as if it were whole. */
+function parseSchedule(value: unknown): SentinelApprovalSchedule | null {
+  if (!isRecord(value)) return null;
+  const action = APPROVAL_SCHEDULE_ACTIONS.find(candidate => candidate === value.action);
+  const name = optionalString(value, 'name');
+  const when = optionalString(value, 'when');
+  const time_zone = optionalString(value, 'time_zone') ?? optionalString(value, 'timeZone');
+  const task = optionalString(value, 'task');
+  const runs_as = optionalString(value, 'runs_as') ?? optionalString(value, 'runsAs');
+  const next_runs = stringList(value.next_runs ?? value.nextRuns);
+  if (
+    action === undefined ||
+    name === undefined ||
+    when === undefined ||
+    time_zone === undefined ||
+    task === undefined ||
+    runs_as === undefined ||
+    next_runs === undefined
+  ) {
+    return null;
+  }
+  return { action, name, when, time_zone, task, runs_as, next_runs };
 }
 
 function parseApprovalCard(value: unknown): SentinelApprovalCard | undefined {
   if (!isRecord(value)) return undefined;
   const plain_what = optionalString(value, 'plain_what') ?? optionalString(value, 'plainWhat');
   if (plain_what === undefined) return undefined;
-  return {
+  return readSavedHoldReason({
     plain_what,
     plain_why: cardString(value, { snake: 'plain_why', camel: 'plainWhy' }),
     cannot_be_undone: cardString(value, { snake: 'cannot_be_undone', camel: 'cannotBeUndone' }),
@@ -274,8 +562,21 @@ function parseApprovalCard(value: unknown): SentinelApprovalCard | undefined {
     outbound_text: cardString(value, { snake: 'outbound_text', camel: 'outboundText' }),
     destination_host: cardString(value, { snake: 'destination_host', camel: 'destinationHost' }),
     outbound_truncated: cardFlag(value, { snake: 'outbound_truncated', camel: 'outboundTruncated' }),
+    outbound_plumbing_text: cardString(value, { snake: 'outbound_plumbing_text', camel: 'outboundPlumbingText' }),
     email: parseEmail(value.email),
-  };
+    calendar_event: parseCalendarEvent(value.calendar_event ?? value.calendarEvent),
+    schedule: parseSchedule(value.schedule),
+    persona: parsePersona(value.persona),
+    mail_new_recipients: parseNewRecipients(value.mail_new_recipients ?? value.mailNewRecipients),
+    mail_draft: cardFlag(value, { snake: 'mail_draft', camel: 'mailDraft' }),
+  });
+}
+
+/** The addresses a send would add to the Email list, or null when there are none to read. */
+function parseNewRecipients(value: unknown): string[] | null {
+  if (!Array.isArray(value)) return null;
+  const addresses = value.filter((item): item is string => typeof item === 'string');
+  return addresses.length === 0 ? null : addresses;
 }
 
 function toolCallIdFrom(record: Record<string, unknown>): string | undefined {
@@ -287,7 +588,6 @@ function toolCallIdFrom(record: Record<string, unknown>): string | undefined {
 function parseHeldInfo(ref: Record<string, unknown>): HeldActionInfo | undefined {
   if (ref.held !== true) return undefined;
   return {
-    alwaysAllowOffered: ref.can_always_allow === true || ref.canAlwaysAllow === true,
     expiresAt: nullableString(ref, 'expires_at') ?? nullableString(ref, 'expiresAt'),
   };
 }
@@ -307,11 +607,15 @@ function parseApprovalInfo(
   if (tier === undefined || card === undefined || toolCallId === undefined) return undefined;
   const held = parseHeldInfo(ref);
   const notSaved = parseNotSaved(ref);
+  const chatAllowOffered = ref.can_chat_allow ?? ref.canChatAllow;
+  const alwaysAllowOffered = ref.can_always_allow ?? ref.canAlwaysAllow;
   return {
     toolCallId,
     tier,
     card,
     ...origin,
+    ...(typeof chatAllowOffered === 'boolean' ? { chatAllowOffered } : {}),
+    ...(typeof alwaysAllowOffered === 'boolean' ? { alwaysAllowOffered } : {}),
     ...(held === undefined ? {} : { held }),
     ...(notSaved === undefined ? {} : { notSaved }),
   };
@@ -362,15 +666,30 @@ function answersFromEvent(event: unknown): [string, ApprovalAnswer][] {
   return answers;
 }
 
+/** The words the owner typed for a "Change it" answer, by tool call id. */
+function changeRequestsFromEvent(event: unknown): [string, string][] {
+  if (!isRecord(event) || event.type !== 'turn.created' || !Array.isArray(event.input)) return [];
+  const requests: [string, string][] = [];
+  for (const item of event.input) {
+    if (!isRecord(item) || item.type !== 'user.tool_approval' || !isRecord(item.approval)) continue;
+    const toolCallId = optionalString(item, 'tool_call_id') ?? optionalString(item, 'toolCallId');
+    const words = changeRequestText(optionalString(item.approval, 'reason'));
+    if (toolCallId !== undefined && words !== undefined) requests.push([toolCallId, words]);
+  }
+  return requests;
+}
+
 /** Folds raw session events into per-tool-call Sentinel state (later events win). */
 export function extractSentinelSessionContext(events: unknown[]): SentinelSessionContext {
   const approvals = new Map<string, SentinelApprovalInfo>();
   const answers: Record<string, ApprovalAnswer> = {};
+  const changeRequests: Record<string, string> = {};
   for (const event of events) {
     for (const approval of extractSentinelFromEvent(event)) approvals.set(approval.toolCallId, approval);
     for (const [toolCallId, answer] of answersFromEvent(event)) answers[toolCallId] = answer;
+    for (const [toolCallId, words] of changeRequestsFromEvent(event)) changeRequests[toolCallId] = words;
   }
-  return { approvals: [...approvals.values()], answers };
+  return { approvals: [...approvals.values()], answers, changeRequests };
 }
 
 function parseAuditEntry(value: unknown): SentinelAuditEntry | undefined {
@@ -422,13 +741,37 @@ export function parseAuditEntries(body: unknown): SentinelAuditEntry[] {
   return entries;
 }
 
+/** Parses a per-user audit page (`{ data: [...], pagination }`); rows that fail to parse are dropped. */
+export function parseUserAuditPage(body: unknown): SentinelUserAuditPage {
+  if (!isRecord(body) || !Array.isArray(body.data)) return { entries: [] };
+  const entries: SentinelUserAuditEntry[] = [];
+  for (const item of body.data) {
+    const entry = parseAuditEntry(item);
+    if (entry === undefined || !isRecord(item) || typeof item.chat_exists !== 'boolean') continue;
+    entries.push({ ...entry, chat_exists: item.chat_exists });
+  }
+  const pagination = isRecord(body.pagination) ? body.pagination : undefined;
+  const nextPageToken = pagination === undefined ? undefined : optionalString(pagination, 'next_page_token');
+  return nextPageToken === undefined || nextPageToken === '' ? { entries } : { entries, nextPageToken };
+}
+
 /** Parses a settings response body (`{ data: settings }`); absent fields fall back to safe defaults. */
 export function parseUserSettings(body: unknown): SentinelUserSettings {
   const settings = isRecord(body) ? body.data : undefined;
-  if (!isRecord(settings)) return { offline_mode: false, tier2_auto_allow: [], search_without_asking: true };
+  if (!isRecord(settings)) {
+    return {
+      offline_mode: false,
+      tier2_auto_allow: [],
+      search_without_asking: true,
+      maps_without_asking: true,
+      sandbox_without_asking: true,
+    };
+  }
   return {
     offline_mode: optionalBoolean(settings, 'offline_mode') ?? false,
     tier2_auto_allow: tier2ActionKindArray(settings.tier2_auto_allow),
     search_without_asking: optionalBoolean(settings, 'search_without_asking') ?? true,
+    maps_without_asking: optionalBoolean(settings, 'maps_without_asking') ?? true,
+    sandbox_without_asking: optionalBoolean(settings, 'sandbox_without_asking') ?? true,
   };
 }
