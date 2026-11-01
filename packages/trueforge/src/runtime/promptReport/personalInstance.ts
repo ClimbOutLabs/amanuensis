@@ -124,6 +124,10 @@ function unusedSpaceStore(): SpaceTurnContext['store'] {
     listSpacesWithAggregate: () => unused('listSpacesWithAggregate'),
     getSpace: () => unused('getSpace'),
     getSpaceRevision: () => unused('getSpaceRevision'),
+    listSpaceFolders: () => unused('listSpaceFolders'),
+    createSpaceFolder: () => unused('createSpaceFolder'),
+    setSpaceFolder: () => unused('setSpaceFolder'),
+    listSpaceFolderAssignments: () => unused('listSpaceFolderAssignments'),
   };
 }
 

@@ -522,7 +522,12 @@ export const ImportSpaceRecordSchema = z.object({
 export type ImportSpaceRecord = z.infer<typeof ImportSpaceRecordSchema>;
 
 export const ImportSpacesFileSchema = z.array(
-  z.object({ space: ImportSpaceRecordSchema, revisions: z.array(ImportSpaceRecordSchema) }),
+  z.object({
+    space: ImportSpaceRecordSchema,
+    revisions: z.array(ImportSpaceRecordSchema),
+    /** Absent from exports made before spaces had folders. */
+    folder_id: z.string().min(1).nullable().default(null),
+  }),
 );
 export type ImportSpacesFile = z.infer<typeof ImportSpacesFileSchema>;
 

@@ -287,7 +287,7 @@ describe('reply step budget', () => {
       expect(thread.turnToolCallLedger.progressRefundsByThread.get('main')).toBe(MAX_PROGRESS_STEP_REFUNDS);
       expect(model.requests).toHaveLength(8 + MAX_PROGRESS_STEP_REFUNDS + 1);
       expect(model.requests.at(-1)?.tools).toBeUndefined();
-      expect(JSON.stringify(model.requests.at(-1)?.messages)).toContain('Say which space you changed');
+      expect(JSON.stringify(model.requests.at(-1)?.messages)).toContain('which space, or which files in the sandbox');
     });
 
     it('a refused space write refunds nothing', async () => {
@@ -305,7 +305,7 @@ describe('reply step budget', () => {
       expect(model.requests).toHaveLength(9);
       expect(model.requests[8]?.tools).toBeUndefined();
       expect(thread.turnToolCallLedger.progressRefundsByThread.get('main')).toBeUndefined();
-      expect(JSON.stringify(model.requests[8]?.messages)).not.toContain('Say which space you changed');
+      expect(JSON.stringify(model.requests[8]?.messages)).not.toContain('which space, or which files in the sandbox');
     });
   });
 

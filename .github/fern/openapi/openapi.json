@@ -2298,6 +2298,21 @@
         ],
         "type": "object"
       },
+      "CreateSpaceFolderRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "description": "Folder name, trimmed to 1 through 64 characters.",
+            "maxLength": 64,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "type": "object"
+      },
       "CreateSpaceRequest": {
         "additionalProperties": false,
         "properties": {
@@ -2495,6 +2510,10 @@
         "type": "object"
       },
       "DeleteSkillResponse": {
+        "properties": {},
+        "type": "object"
+      },
+      "DeleteSpaceFolderResponse": {
         "properties": {},
         "type": "object"
       },
@@ -3085,6 +3104,17 @@
         ],
         "type": "object"
       },
+      "GetMemoryRecallResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/MemoryRecall"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
       "GetMemoryScreenResponse": {
         "properties": {
           "data": {
@@ -3458,6 +3488,17 @@
         "properties": {
           "data": {
             "$ref": "#/components/schemas/ConfiguredSkill"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
+      "GetSpaceFolderResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/SpaceFolder"
           }
         },
         "required": [
@@ -5259,6 +5300,20 @@
         ],
         "type": "object"
       },
+      "ListSpaceFoldersResponse": {
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/SpaceFolder"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
       "ListSpacesData": {
         "additionalProperties": false,
         "properties": {
@@ -6261,6 +6316,21 @@
             "type": "boolean"
           }
         },
+        "type": "object"
+      },
+      "MemoryRecall": {
+        "properties": {
+          "enabled": {
+            "description": "Whether replies use saved memories. `null` when not set, so each agent follows its own memory setting.",
+            "type": [
+              "boolean",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "enabled"
+        ],
         "type": "object"
       },
       "MemoryRecallCurated": {
@@ -10005,6 +10075,24 @@
         ],
         "type": "object"
       },
+      "SetSpaceFolderRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "folder_id": {
+            "maxLength": 64,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "folder_id"
+        ],
+        "type": "object"
+      },
+      "SetSpaceFolderResponse": {
+        "properties": {},
+        "type": "object"
+      },
       "SettingsCapability": {
         "properties": {
           "enabled": {
@@ -10187,6 +10275,15 @@
             "format": "date-time",
             "type": "string"
           },
+          "folder_id": {
+            "description": "The folder the space sits in, or null when it is not in one.",
+            "maxLength": 64,
+            "minLength": 1,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "format": {
             "$ref": "#/components/schemas/SpaceFormat"
           },
@@ -10223,6 +10320,7 @@
           "purpose",
           "status",
           "body",
+          "folder_id",
           "revision",
           "created_at",
           "updated_at"
@@ -10258,6 +10356,37 @@
           "purpose",
           "status",
           "body"
+        ],
+        "type": "object"
+      },
+      "SpaceFolder": {
+        "additionalProperties": false,
+        "properties": {
+          "created_at": {
+            "description": "ISO 8601 creation timestamp.",
+            "type": "string"
+          },
+          "id": {
+            "description": "Immutable server-generated folder identifier.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "name": {
+            "description": "Folder name, trimmed to 1 through 64 characters.",
+            "maxLength": 64,
+            "minLength": 1,
+            "type": "string"
+          },
+          "updated_at": {
+            "description": "ISO 8601 last-update timestamp.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "created_at",
+          "updated_at"
         ],
         "type": "object"
       },
@@ -13064,6 +13193,24 @@
         ],
         "type": "object"
       },
+      "UpdateMemoryRecallRequest": {
+        "example": {
+          "enabled": false
+        },
+        "properties": {
+          "enabled": {
+            "description": "`true` or `false` sets the switch for every chat. `null` clears it back to each agent setting.",
+            "type": [
+              "boolean",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "enabled"
+        ],
+        "type": "object"
+      },
       "UpdateMemoryScreenRequest": {
         "example": {
           "enabled": true
@@ -13349,6 +13496,21 @@
         },
         "required": [
           "manifest"
+        ],
+        "type": "object"
+      },
+      "UpdateSpaceFolderRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "description": "Folder name, trimmed to 1 through 64 characters.",
+            "maxLength": 64,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
         ],
         "type": "object"
       },
@@ -22118,6 +22280,116 @@
         "x-fern-sdk-method-name": "get"
       }
     },
+    "/api/v1/settings/memory-recalls": {
+      "get": {
+        "description": "Whether replies use saved memories for every chat. `enabled` is null when the switch was never set.",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetMemoryRecallResponse"
+                }
+              }
+            },
+            "description": "The stored memory recall switch."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication required."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Admin access required."
+          }
+        },
+        "summary": "Get the memory recall switch",
+        "tags": [
+          "Capabilities"
+        ],
+        "x-fern-sdk-group-name": [
+          "settings",
+          "memoryRecalls"
+        ],
+        "x-fern-sdk-method-name": "get"
+      },
+      "put": {
+        "description": "Sets whether replies use saved memories in every chat, including chats with a saved agent. `null` clears the switch so each agent follows its own setting.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateMemoryRecallRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetMemoryRecallResponse"
+                }
+              }
+            },
+            "description": "The stored memory recall switch after the update."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request body."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication required."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Admin access required."
+          }
+        },
+        "summary": "Create, replace, or clear the memory recall switch",
+        "tags": [
+          "Capabilities"
+        ],
+        "x-fern-sdk-group-name": [
+          "settings",
+          "memoryRecalls"
+        ],
+        "x-fern-sdk-method-name": "create_or_update"
+      }
+    },
     "/api/v1/settings/memory-screens": {
       "get": {
         "description": "The persisted override for the recall screen, or the `MEMORY_SCREEN_ENABLED` env default when none is stored.",
@@ -23414,6 +23686,177 @@
         "x-fern-sdk-method-name": "list_versions"
       }
     },
+    "/api/v1/space-folders": {
+      "get": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListSpaceFoldersResponse"
+                }
+              }
+            },
+            "description": "The authenticated user's space folders, ordered by name."
+          }
+        },
+        "summary": "List space folders",
+        "tags": [
+          "Spaces"
+        ],
+        "x-fern-sdk-group-name": [
+          "space-folders"
+        ],
+        "x-fern-sdk-method-name": "list"
+      },
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateSpaceFolderRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetSpaceFolderResponse"
+                }
+              }
+            },
+            "description": "The created folder."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid folder name."
+          }
+        },
+        "summary": "Create a space folder",
+        "tags": [
+          "Spaces"
+        ],
+        "x-fern-sdk-group-name": [
+          "space-folders"
+        ],
+        "x-fern-sdk-method-name": "create"
+      }
+    },
+    "/api/v1/space-folders/{folder_id}": {
+      "delete": {
+        "description": "Deletes the folder and leaves its spaces without a folder.",
+        "parameters": [
+          {
+            "description": "Immutable space folder identifier.",
+            "in": "path",
+            "name": "folder_id",
+            "required": true,
+            "schema": {
+              "description": "Immutable space folder identifier.",
+              "maxLength": 64,
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeleteSpaceFolderResponse"
+                }
+              }
+            },
+            "description": "Folder deleted or already absent."
+          }
+        },
+        "summary": "Delete a space folder",
+        "tags": [
+          "Spaces"
+        ],
+        "x-fern-sdk-group-name": [
+          "space-folders"
+        ],
+        "x-fern-sdk-method-name": "delete"
+      },
+      "put": {
+        "parameters": [
+          {
+            "description": "Immutable space folder identifier.",
+            "in": "path",
+            "name": "folder_id",
+            "required": true,
+            "schema": {
+              "description": "Immutable space folder identifier.",
+              "maxLength": 64,
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateSpaceFolderRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetSpaceFolderResponse"
+                }
+              }
+            },
+            "description": "The renamed folder."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid folder name."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Folder not found for this user."
+          }
+        },
+        "summary": "Rename a space folder",
+        "tags": [
+          "Spaces"
+        ],
+        "x-fern-sdk-group-name": [
+          "space-folders"
+        ],
+        "x-fern-sdk-method-name": "update"
+      }
+    },
     "/api/v1/spaces": {
       "get": {
         "description": "Returns the authenticated user’s spaces, ordered by name.",
@@ -23797,6 +24240,107 @@
           "spaces"
         ],
         "x-fern-sdk-method-name": "update"
+      }
+    },
+    "/api/v1/spaces/{space_id}/folder": {
+      "delete": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "space_id",
+            "required": true,
+            "schema": {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SetSpaceFolderResponse"
+                }
+              }
+            },
+            "description": "Space is no longer in a folder."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Space not found for this user."
+          }
+        },
+        "summary": "Take a space out of its folder",
+        "tags": [
+          "Spaces"
+        ],
+        "x-fern-sdk-group-name": [
+          "spaces"
+        ],
+        "x-fern-sdk-method-name": "clear_folder"
+      },
+      "put": {
+        "description": "Placement is not an edit: the space revision and timestamps stay as they were.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "space_id",
+            "required": true,
+            "schema": {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetSpaceFolderRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SetSpaceFolderResponse"
+                }
+              }
+            },
+            "description": "Space moved."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Space or folder not found for this user."
+          }
+        },
+        "summary": "Move a space into a folder",
+        "tags": [
+          "Spaces"
+        ],
+        "x-fern-sdk-group-name": [
+          "spaces"
+        ],
+        "x-fern-sdk-method-name": "set_folder"
       }
     },
     "/api/v1/spaces/{space_id}/revert": {
