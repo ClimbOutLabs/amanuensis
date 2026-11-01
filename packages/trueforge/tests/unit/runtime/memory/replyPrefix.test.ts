@@ -37,6 +37,7 @@ const CONFIG: MemoryConfig = {
   screen: { enabled: false, url: '', authToken: '', threshold: 0.5, timeoutMs: 1500, maxConcurrency: 8 },
   curated: { enabled: false, maxModels: 3, maxTokens: 512 },
   reflect: { enabled: false, budget: 'low', maxTokens: 512, timeoutMs: 8000 },
+  pages: { maxCount: 6, maxTokens: 1500 },
 };
 
 function makeLogger() {

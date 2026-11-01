@@ -853,6 +853,10 @@ function createTurnResolver(deps: {
           maxTokens: configuration.MEMORY_REFLECT_MAX_TOKENS,
           timeoutMs: configuration.MEMORY_REFLECT_TIMEOUT_MS,
         },
+        pages: {
+          maxCount: configuration.MEMORY_PAGES_MAX_COUNT,
+          maxTokens: configuration.MEMORY_PAGES_MAX_TOKENS,
+        },
       }),
       sessionId,
       previousTurnId: previousTurnId ?? null,

@@ -81,9 +81,12 @@ import type {
   MemoryClient,
   MemoryVaultEntry,
   MemoryVaultFailure,
+  PageLoadResult,
   SummaryOutcomeNote,
   UpdateMemoryVaultEntryOutcome,
 } from './memoryClient';
+import { loadPagesForMessage } from './memoryPageLoader';
+import { recordVaultTimeZone } from './memoryState';
 import { rankNamedPeopleFirst } from './recallNameBoost';
 
 export interface MarkdownMemoryClientConfig {
@@ -527,6 +530,30 @@ export class MarkdownMemoryClient implements MemoryClient {
       timeoutMs,
       `markdown vault lookup ${entryId}`,
     );
+  }
+
+  /** Every vault directory this client may read, own vault first; the same order recall uses. */
+  private async readVaultDirs(): Promise<string[]> {
+    const readable = await vaultReadNamespaces({
+      baseDir: this.baseDir,
+      tenantNamespace: this.namespace,
+      scope: this.vaultScope,
+    });
+    return readable.map(namespace => namespaceDirFor(this.baseDir, namespace));
+  }
+
+  async loadPages(params: { message: string; maxPages: number; maxTokens: number }): Promise<PageLoadResult> {
+    let vaultDirs: string[];
+    try {
+      vaultDirs = await this.readVaultDirs();
+    } catch {
+      return { pages: [], stats: { candidates: 0, loaded: 0, dropped_over_count: 0, dropped_over_budget: 0 } };
+    }
+    return loadPagesForMessage({ vaultDirs, ...params });
+  }
+
+  async noteTimeZone(timeZone: string): Promise<void> {
+    await recordVaultTimeZone({ vaultDir: this.namespaceDir(), timeZone });
   }
 
   async listEntries(params: { namespace: string; timeoutMs: number }): Promise<ListMemoryVaultEntriesOutcome> {

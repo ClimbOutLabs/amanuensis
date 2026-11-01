@@ -20,6 +20,7 @@ import type {
   RetainOutcome,
   RetryOperationOutcome,
 } from './hindsightClient';
+import type { LoadedPage, PageLoadStats } from './memoryPageLoader';
 
 export interface MemoryClient {
   recall(params: {
@@ -102,6 +103,25 @@ export interface MemoryClient {
    * chat. Only the markdown client implements it. Never throws.
    */
   completeOperation?(operationId: string): Promise<void>;
+
+  /**
+   * Optional: the people and matter pages a message names, across every vault this client may
+   * read, in priority order and within the caps. Only the markdown client implements it, as
+   * pages live beside the daily logs. Never throws.
+   */
+  loadPages?(params: { message: string; maxPages: number; maxTokens: number }): Promise<PageLoadResult>;
+
+  /**
+   * Optional: record the person's time zone on the vault this client writes into, so the pages
+   * there count "today" the way the person does. Only the markdown client implements it. Never throws.
+   */
+  noteTimeZone?(timeZone: string): Promise<void>;
+}
+
+/** What `loadPages` hands back: the pages the model sees and the counts the memory event records. */
+export interface PageLoadResult {
+  pages: LoadedPage[];
+  stats: PageLoadStats;
 }
 
 /** One turn-summary attempt's outcome, noted on the client that owns the turn's vault. */

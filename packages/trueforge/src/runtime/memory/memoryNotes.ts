@@ -1,4 +1,5 @@
 import type { ToolResultSource } from '@truefoundry/trueforge-core/core';
+import { z } from 'zod';
 import { MEMORY_ORIGIN_METADATA_KEY } from './memoryOrigin';
 
 /** Metadata key naming where a note came from. Notes the person said carry no such key. */
@@ -179,4 +180,106 @@ export function isNoteTooOld({
   const today = Math.floor(now.getTime() / MILLISECONDS_PER_DAY);
   const foundDay = Math.min(Math.floor(found / MILLISECONDS_PER_DAY), today);
   return today - foundDay > READ_CONTENT_NOTE_MAX_AGE_DAYS;
+}
+
+/**
+ * Where a fact on a page came from. The host sets this from the log entry's origin and note source;
+ * the model never chooses it. `you_said` and `you_edited` are the person's own words and are never
+ * rewritten by the nightly pass.
+ */
+export const FACT_SOURCES = [
+  'you_said',
+  'you_edited',
+  'sent_mail',
+  'mail',
+  'calendar',
+  'read_content',
+  'inferred',
+] as const;
+
+export const FactSourceSchema = z.enum(FACT_SOURCES);
+export type FactSource = z.infer<typeof FactSourceSchema>;
+
+/** A fact's day at year, month, or day precision. */
+export const FactDateSchema = z.string().regex(/^\d{4}(?:-(?:0[1-9]|1[0-2])(?:-(?:0[1-9]|[12]\d|3[01]))?)?$/);
+export type FactDate = z.infer<typeof FactDateSchema>;
+
+/** Fact ids are `f_` and a short lowercase token, unique within a vault for the life of the fact. */
+export const FactIdSchema = z.string().regex(/^f_[a-z0-9]{1,16}$/);
+export type FactId = z.infer<typeof FactIdSchema>;
+
+/**
+ * The hidden marker at the end of one page bullet. `seen` is for facts on probation (Unconfirmed);
+ * `since` and `until` are for facts that are or were true. Keys render in this order.
+ */
+export const FactMarkerSchema = z.strictObject({
+  id: FactIdSchema,
+  src: FactSourceSchema,
+  since: FactDateSchema.optional(),
+  until: FactDateSchema.optional(),
+  seen: FactDateSchema.optional(),
+});
+export type FactMarker = z.infer<typeof FactMarkerSchema>;
+
+const FACT_MARKER_KEYS = ['id', 'src', 'since', 'until', 'seen'] as const;
+
+/** A fact marker as it sits at the end of a bullet; any run of spaces is accepted between its keys. */
+const FACT_MARKER_PATTERN = /^<!--\s*fact:\s*((?:[a-z]+=[^\s]+\s*)+)-->$/;
+
+export function formatFactMarker(marker: FactMarker): string {
+  const parts: string[] = [];
+  for (const key of FACT_MARKER_KEYS) {
+    const value = marker[key];
+    if (value !== undefined) {
+      parts.push(`${key}=${value}`);
+    }
+  }
+  return `<!-- fact: ${parts.join(' ')} -->`;
+}
+
+/** The marker a fact-marker line carries, or undefined when the line is not a well-formed fact marker. */
+export function parseFactMarker(line: string): FactMarker | undefined {
+  const body = FACT_MARKER_PATTERN.exec(line.trim())?.[1];
+  if (body === undefined) {
+    return undefined;
+  }
+  const fields: Record<string, string> = {};
+  for (const pair of body.trim().split(/\s+/)) {
+    const separator = pair.indexOf('=');
+    const key = pair.slice(0, separator);
+    if (key in fields) {
+      return undefined;
+    }
+    fields[key] = pair.slice(separator + 1);
+  }
+  const parsed = FactMarkerSchema.safeParse(fields);
+  return parsed.success ? parsed.data : undefined;
+}
+
+/** A bullet's text split from the fact marker that ends it; `marker` is undefined when the line has none. */
+export function splitFactMarker(line: string): { text: string; marker: FactMarker | undefined } {
+  const start = line.lastIndexOf('<!--');
+  if (start === -1) {
+    return { text: line, marker: undefined };
+  }
+  const marker = parseFactMarker(line.slice(start));
+  return marker === undefined ? { text: line, marker: undefined } : { text: line.slice(0, start).trimEnd(), marker };
+}
+
+/** The first and last calendar day a fact date covers, so dates of any precision compare as day ranges. */
+export function factDateBounds(date: FactDate): { first: string; last: string } {
+  const [year, month, day] = date.split('-');
+  if (day !== undefined) {
+    return { first: date, last: date };
+  }
+  if (month !== undefined) {
+    const lastDay = new Date(Date.UTC(Number(year), Number(month), 0)).getUTCDate();
+    return { first: `${date}-01`, last: `${date}-${String(lastDay).padStart(2, '0')}` };
+  }
+  return { first: `${date}-01-01`, last: `${date}-12-31` };
+}
+
+/** Whether a fact with this `until` has ended as of `today` (a `YYYY-MM-DD` day): its last covered day is before today. */
+export function factHasEnded({ until, today }: { until: FactDate; today: string }): boolean {
+  return factDateBounds(until).last < today;
 }
