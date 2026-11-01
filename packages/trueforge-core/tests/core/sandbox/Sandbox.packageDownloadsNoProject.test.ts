@@ -72,16 +72,20 @@ function makeProvider(
     createSandbox: () => Promise.resolve({ sandboxId: 'raw-1' }),
     exec: realCommandExec((params: SandboxExecParams): Promise<ExecResult> => {
       execCalls.push(params);
+      // realpath answers with the path it was given, so a script_path run can read its script.
+      const realpath = /^realpath -e -- '([^']*)'$/u.exec(params.command)?.[1];
       const result =
-        params.command === 'git rev-parse --show-toplevel'
-          ? workspaceDir
-          : params.command === 'git rev-parse --abbrev-ref HEAD'
-            ? 'main'
-            : params.command === 'git rev-parse HEAD'
-              ? '0123456789abcdef'
-              : params.command === 'git rev-parse --absolute-git-dir'
-                ? `${workspaceDir}/.git`
-                : '';
+        realpath !== undefined
+          ? realpath
+          : params.command === 'git rev-parse --show-toplevel'
+            ? workspaceDir
+            : params.command === 'git rev-parse --abbrev-ref HEAD'
+              ? 'main'
+              : params.command === 'git rev-parse HEAD'
+                ? '0123456789abcdef'
+                : params.command === 'git rev-parse --absolute-git-dir'
+                  ? `${workspaceDir}/.git`
+                  : '';
       return Promise.resolve({ success: true, response: { exitCode: 0, result } });
     }),
     acknowledgeWorkspaceTermination: () => Promise.resolve(),
@@ -515,6 +519,74 @@ describe('package downloads from run_code in a chat without a project', () => {
     const hostCommands = execCalls.filter(params => params.command !== 'pip install requests');
     expect(hostCommands.length).toBeGreaterThan(0);
     expect(hostCommands.every(params => params.packageMirrorToken === undefined)).toBe(true);
+  });
+});
+
+describe('a run_code script that downloads packages, in a chat without a project', () => {
+  const SCRIPT_PATH = '/work/install.py';
+  const SCRIPT_CALL = {
+    name: SANDBOX_RUN_CODE_TOOL_NAME,
+    arguments: { language: 'python', script_path: SCRIPT_PATH },
+  };
+
+  it('never turns the allowance on from an approved script run, and does not run the script', async () => {
+    const runCodeCalls: RecordedRunCodeCall[] = [];
+    const allowPackageDownloads = jest.fn(async () => undefined);
+    const sandbox = makeSandbox({
+      execCalls: [],
+      allowed: () => false,
+      allowPackageDownloads,
+      runCodeCalls,
+      files: { [SCRIPT_PATH]: 'pip install requests' },
+    });
+    // The card for a script run cannot show what the script says, so it is the ordinary card.
+    const info = await sandbox.toolCallInfo(SCRIPT_CALL);
+    expect(info.tier3_card?.plain_what).not.toBe(NO_PROJECT_CARD_WHAT);
+
+    const response = await sandbox.callTool(SCRIPT_CALL, { status: 'allow' });
+    expect(resultText(response)).toContain('Run the install on its own first');
+    expect(allowPackageDownloads).not.toHaveBeenCalled();
+    expect(runCodeCalls).toHaveLength(0);
+  });
+
+  it('runs the script with the mirror token once downloads are allowed', async () => {
+    const runCodeCalls: RecordedRunCodeCall[] = [];
+    const allowPackageDownloads = jest.fn(async () => undefined);
+    const sandbox = makeSandbox({
+      execCalls: [],
+      allowed: () => true,
+      allowPackageDownloads,
+      runCodeCalls,
+      files: { [SCRIPT_PATH]: 'pip install requests' },
+    });
+    const response = await sandbox.callTool(SCRIPT_CALL, { status: 'allow' });
+    if (!isCallToolResponseResult(response)) {
+      throw new Error('Expected a tool result');
+    }
+    expect(response.result.isError ?? false).toBe(false);
+    expect(allowPackageDownloads).not.toHaveBeenCalled();
+    expect(runCodeCalls).toHaveLength(1);
+    expect(runCodeCalls[0]?.options?.packageMirrorToken).toBe('mirror-token');
+  });
+
+  it('runs a script that downloads nothing as before, with no token while downloads are off', async () => {
+    const runCodeCalls: RecordedRunCodeCall[] = [];
+    const allowPackageDownloads = jest.fn(async () => undefined);
+    const sandbox = makeSandbox({
+      execCalls: [],
+      allowed: () => false,
+      allowPackageDownloads,
+      runCodeCalls,
+      files: { [SCRIPT_PATH]: 'print(1)' },
+    });
+    const response = await sandbox.callTool(SCRIPT_CALL, { status: 'allow' });
+    if (!isCallToolResponseResult(response)) {
+      throw new Error('Expected a tool result');
+    }
+    expect(response.result.isError ?? false).toBe(false);
+    expect(allowPackageDownloads).not.toHaveBeenCalled();
+    expect(runCodeCalls).toHaveLength(1);
+    expect(runCodeCalls[0]?.options?.packageMirrorToken).toBeUndefined();
   });
 });
 

@@ -1800,6 +1800,9 @@ const OFFLINE_NETWORK_COMMAND_REFUSAL =
 const PACKAGE_INSTALL_UNAVAILABLE_REFUSAL =
   'Packages cannot be downloaded on this server, so this install was not run. Use the standard library or the packages that are already installed. Do not retry it and do not try another tool for the same job.';
 
+const SCRIPT_PACKAGE_DOWNLOAD_REFUSAL =
+  'This script downloads packages, and downloads are not allowed in this chat yet, so it was not run. Run the install on its own first, so the person can allow downloads, then run the script again.';
+
 const PACKAGE_INSTALL_NEEDS_SEALED_SANDBOX_REFUSAL =
   'Package downloads need the sealed sandbox, and this server is not using it. Move this work to a server that uses the sealed sandbox, then try the install again.';
 
@@ -4067,24 +4070,54 @@ export class Sandbox extends LocalToolMCP {
   }
 
   /**
-   * The run_code form of the record step: the text scanned for downloads is the call's own code,
-   * or the script file's text for a script_path call. A script that cannot be read records
-   * nothing: the run then goes ahead with no mirror token and an install inside it fails in the
-   * sandbox, never the reverse.
+   * The run_code form of the record step. Only the call's own code counts: it is part of the
+   * approved arguments, so the download card the person saw was built from the same text. A
+   * script_path call never records the allowance, because the card could not show what the script
+   * says, and the file can change after the card was shown.
    */
   private async recordRunCodeDownloadsApproval(input: RunCodeInput): Promise<string | undefined> {
-    let text = input.code;
-    if (text === undefined && input.script_path !== undefined) {
-      try {
-        text = (await this.readRunCodeScript(input.script_path)).toString('utf8');
-      } catch {
-        return undefined;
-      }
-    }
-    if (text === undefined) {
+    if (input.code === undefined) {
       return undefined;
     }
-    return this.recordPackageDownloadsApproval({ command: text });
+    return this.recordPackageDownloadsApproval({ command: input.code });
+  }
+
+  /**
+   * The refusal for a script_path run whose script downloads packages while this chat's scope has
+   * not allowed downloads, or undefined when the run may go ahead. Without it the install would
+   * fail inside the sandbox with no way for the person to allow it, since only a call whose own
+   * arguments name the download can show the download card. A script that cannot be read is left
+   * to the run itself, which reports that plainly.
+   */
+  private async scriptPackageDownloadRefusal(input: RunCodeInput): Promise<string | undefined> {
+    const loadAllowed = this.loadPackageDownloadsAllowed;
+    if (
+      input.code !== undefined ||
+      input.script_path === undefined ||
+      loadAllowed === undefined ||
+      !this.packageGatewayAvailable()
+    ) {
+      return undefined;
+    }
+    let text: string;
+    try {
+      text = (await this.readRunCodeScript(input.script_path)).toString('utf8');
+    } catch {
+      return undefined;
+    }
+    if (!commandDownloadsPackages(text)) {
+      return undefined;
+    }
+    try {
+      if (await loadAllowed()) {
+        return undefined;
+      }
+    } catch (error) {
+      this.logger.warn('Could not read the package download setting; the script run is refused', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+    return SCRIPT_PACKAGE_DOWNLOAD_REFUSAL;
   }
 
   /**
@@ -5110,6 +5143,10 @@ export class Sandbox extends LocalToolMCP {
       if (allowanceRefusal !== undefined) {
         return hostRefusalResponse(allowanceRefusal);
       }
+    }
+    const scriptDownloadRefusal = await this.scriptPackageDownloadRefusal(input);
+    if (scriptDownloadRefusal !== undefined) {
+      return hostRefusalResponse(scriptDownloadRefusal);
     }
     // the turn's abort signal reaches the backend (provisioning observes
     // it); provisioning progress is honest — every driver message is logged
