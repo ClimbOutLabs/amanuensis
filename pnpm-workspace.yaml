@@ -38,4 +38,5 @@ overrides:
   google-auth-library: '^10.9.0'
 
 patchedDependencies:
+  '@openuidev/react-lang@0.2.15': patches/@openuidev__react-lang@0.2.15.patch
   '@truefoundry/assistant-ui-runtime@0.1.37': patches/@truefoundry__assistant-ui-runtime@0.1.37.patch

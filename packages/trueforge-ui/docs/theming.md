@@ -418,13 +418,13 @@ Ship as CSS variable maps under `src/theme/presets/`:
 | --------------- | ---------------------------------- |
 | `paper`         | Warm paper, ink and gold (default) |
 | `forest`        | Calm greens, natural tones         |
-| `midnight`      | Deep blue-grays, navy accents      |
+| `midnight`      | Deep blue-grays, ice blue accents  |
 | `high-contrast` | Maximum legibility, stark surfaces |
 
-Each preset defines **light + dark** token sets. Gold is the highlight in every
-preset; a preset changes surfaces, never the highlight. Saved preferences for
-removed presets resolve to `paper`, and the old `chatgpt` and `mint` ids resolve
-to `high-contrast`.
+Each preset defines **light + dark** token sets. Gold is the highlight in
+every preset except Midnight, which uses ice blue; a preset changes surfaces,
+never the highlight. Saved preferences for removed presets resolve to `paper`,
+and the old `chatgpt` and `mint` ids resolve to `high-contrast`.
 
 ## Markdown / OpenUI / syntax-highlighter / Monaco
 

@@ -162,6 +162,13 @@ export interface IToolSet {
   isHostVouchedReadTool?(name: string): boolean;
 
   /**
+   * Whether a call to this tool, with these arguments, can only change things inside this server's
+   * own contained workspace, so nothing it does reaches past it. Such calls do not count toward the
+   * per-reply cap on outside actions. Absent means never.
+   */
+  staysInWorkspace?(input: { name: string; argumentsText: string }): boolean;
+
+  /**
    * The connector this call goes to as of now, for re-checking an approval at dispatch. Absent on
    * tool sets whose approvals are not bound to a connector.
    */
