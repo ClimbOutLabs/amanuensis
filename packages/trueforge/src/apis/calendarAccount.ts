@@ -43,7 +43,7 @@ function providerTable(): CalendarAccountStatus['providers'] {
     account_url_template: preset.account_url_template,
     help_url: preset.help_url,
     help_hint: preset.help_hint,
-    setup_steps: preset.setup_steps,
+    setup_steps: [...preset.setup_steps],
   }));
 }
 
