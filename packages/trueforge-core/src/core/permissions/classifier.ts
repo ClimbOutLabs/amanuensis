@@ -35,7 +35,7 @@ import {
   MAIL_CONTENT_TOOL_NAME,
 } from '../email/mailConnector/toolContract';
 import { GOOGLE_SETUP_SERVER_ID, GOOGLE_SETUP_STATUS_TOOL_NAME } from '../google/setupToolContract';
-import type { DocumentScope, MapsHosts } from '../llm/LLMTypes';
+import type { BrowserClickReview, DocumentScope, MapsHosts } from '../llm/LLMTypes';
 import {
   isPersonaWriteToolName,
   LIST_PERSONAS_TOOL_NAME,
@@ -65,7 +65,7 @@ import {
   type ShellApprovalBinding,
 } from './approvalTokens';
 import { recordClassificationAudit } from './audit';
-import { browserOpenCard, classifyBrowserViewTool } from './browserTier';
+import { browserOpenCard, classifyBrowserActionTool, classifyBrowserViewTool } from './browserTier';
 import {
   BROWSER_OPEN_GUARD_REASON,
   BROWSER_OPEN_PRIVATE_DETAIL_REASON,
@@ -259,6 +259,13 @@ export interface SentinelAction {
   persona_write?: Tier3Persona | undefined;
   /** The reminder a set or cancel call touches, settled by the schedule tool set so the activity line reads it plainly. */
   reminder?: ReminderLine | undefined;
+  /**
+   * Context for a browser_click call, read from the live page before the click: the site, the
+   * element's accessible name, whether it submits a form, and the form's values. Set by the browser
+   * tool set from the sidecar's read, never from model params. Undefined when the host could not
+   * read it, which fails the call closed to the generic Tier 3 path.
+   */
+  browser_click?: BrowserClickReview | undefined;
 }
 
 /** What the activity line says about one reminder: when it is due in plain words (set only), and what it says. */
@@ -3647,13 +3654,21 @@ export async function classifyTier(action: SentinelAction, ctx: ClassifyContext)
       });
     }
     // Aman's own browser. Opening a page sends its address, so it goes through the outbound checks (see
-    // classifyBrowserOpen); the tools that only look at the open page run silently.
+    // classifyBrowserOpen); the tools that only look at the open page run silently, and the tools that
+    // act on it are classified by classifyBrowserActionTool (a commit click asks first).
     if (action.tool_name === BROWSER_OPEN_TOOL_NAME) {
       return classifyBrowserOpen({ action, ctx });
     }
     const browserView = classifyBrowserViewTool(action);
     if (browserView !== undefined) {
       return browserView;
+    }
+    const browserAction = await classifyBrowserActionTool({
+      action,
+      mintToken: () => mintPlainToken({ ctx, tool_name: action.tool_name, params: action.canonical_params }),
+    });
+    if (browserAction !== undefined) {
+      return steeringChecked({ decision: browserAction, ctx, guests: [] });
     }
   }
 

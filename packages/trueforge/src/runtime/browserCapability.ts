@@ -1,16 +1,26 @@
 /**
- * Aman's own browser: `browser_open`, `browser_read`, `browser_scroll`, `browser_back` and
- * `browser_screenshot`. Every call here is read-only (Tier 1, see browserTier.ts in trueforge-core):
- * nothing is typed into a field and nothing is clicked that could submit anything. A page the
- * browser reads is untrusted content, exactly like an email (see provenance.ts); the model never
- * sees the browser's own screenshot (`browser_screenshot` saves it for the receipt and for the
- * person to look at).
+ * Aman's own browser: `browser_open`, `browser_read`, `browser_scroll`, `browser_back`,
+ * `browser_screenshot`, `browser_type`, `browser_select` and `browser_click`. Opening, reading,
+ * scrolling, going back, a screenshot, typing and selecting are Tier 1 (see browserTier.ts in
+ * trueforge-core): nothing has left the computer yet. A click may or may not need the person's OK,
+ * decided server-side from what the live page says about the clicked element, never from model
+ * text. A page the browser reads is untrusted content, exactly like an email (see provenance.ts);
+ * the model never sees the browser's own screenshot (`browser_screenshot` saves it for the receipt
+ * and for the person to look at).
  *
  * The browser itself runs in a private sidecar (ops/browser-sidecar): a real, headed Chromium with
  * one persistent profile per person. This capability only calls its HTTP API.
  */
+import type { CallToolRequest } from '@modelcontextprotocol/sdk/types.js';
 import type { AgentCapability, AgentTracing } from '@truefoundry/trueforge-core/core';
-import { defineTool, LocalToolMCP, toolResultResponse, type ToolDefinition } from '@truefoundry/trueforge-core/core';
+import {
+  BROWSER_CLICK_TOOL_NAME,
+  defineTool,
+  LocalToolMCP,
+  toolResultResponse,
+  type ToolDefinition,
+} from '@truefoundry/trueforge-core/core';
+import type { BrowserClickReview, InternalToolCallInfo } from '@truefoundry/trueforge-core/core/llm/LLMTypes';
 import type { ToolBundleName } from '@truefoundry/trueforge-core/core/runtime/toolBundleCatalog';
 import type { Logger } from 'winston';
 import { z } from 'zod';
@@ -19,14 +29,25 @@ import configuration from '../config';
 export const BROWSER_SERVER_ID = 'browser';
 
 /** Browser tools read a page and move around it; nothing here submits anything. */
-const BROWSER_TOOL_ANNOTATIONS = { readOnlyHint: true, openWorldHint: true } as const;
+const BROWSER_READ_ANNOTATIONS = { readOnlyHint: true, openWorldHint: true } as const;
+/** Typing and selecting change a field on the page, but nothing has left the computer yet. */
+const BROWSER_PREPARE_ANNOTATIONS = { readOnlyHint: false, openWorldHint: false } as const;
+/** A click may submit something; the real tier comes from browserTier.ts, never from these hints. */
+const BROWSER_CLICK_ANNOTATIONS = { readOnlyHint: false, openWorldHint: true } as const;
 
 const OPEN_INPUT_SCHEMA = z.object({ url: z.string().min(1).max(2048) }).strict();
 const SCROLL_INPUT_SCHEMA = z.object({ direction: z.enum(['up', 'down']) }).strict();
 const EMPTY_INPUT_SCHEMA = z.object({}).strict();
+const REF_SCHEMA = z.string().min(1).max(32);
+const TYPE_INPUT_SCHEMA = z.object({ ref: REF_SCHEMA, text: z.string().max(4000) }).strict();
+const SELECT_INPUT_SCHEMA = z.object({ ref: REF_SCHEMA, option: z.string().min(1).max(200) }).strict();
+const CLICK_INPUT_SCHEMA = z.object({ ref: REF_SCHEMA }).strict();
 
 export type BrowserOpenInput = z.infer<typeof OPEN_INPUT_SCHEMA>;
 export type BrowserScrollInput = z.infer<typeof SCROLL_INPUT_SCHEMA>;
+export type BrowserTypeInput = z.infer<typeof TYPE_INPUT_SCHEMA>;
+export type BrowserSelectInput = z.infer<typeof SELECT_INPUT_SCHEMA>;
+export type BrowserClickInput = z.infer<typeof CLICK_INPUT_SCHEMA>;
 
 /** What the sidecar answered to a request, or that the sidecar itself could not be reached. */
 export type SidecarResult<T> = { ok: true; body: T } | { ok: false; message: string };
@@ -36,11 +57,21 @@ const REFUSAL_MESSAGES: Record<string, string> = {
   private_network: "That address is on this computer or a private network, so Aman's browser will not open it.",
   unresolved: "That address could not be found, so Aman's browser will not open it.",
   not_a_url: 'That is not a web address Aman can open.',
+  sensitive_field: 'This field is for a password or payment detail. Ask the person to type it themselves.',
+  unknown_ref: 'That part of the page is gone. Read the page again to get a fresh ref, then try again.',
+  stale_ref: 'That part of the page is gone. Read the page again to get a fresh ref, then try again.',
+  no_such_option: 'That option is not on the list. Read the page again to see the choices, then try again.',
 };
 
 function refusalMessage(reason: unknown): string {
   const text = typeof reason === 'string' ? REFUSAL_MESSAGES[reason] : undefined;
-  return text ?? 'Aman will not open that address.';
+  return text ?? 'Aman will not do that.';
+}
+
+/** The `ref` argument of a browser_click call, or undefined when it is missing or not a string. */
+function clickRef(params: CallToolRequest['params']): string | undefined {
+  const ref = params.arguments?.['ref'];
+  return typeof ref === 'string' && ref !== '' ? ref : undefined;
 }
 
 /** Calls one route of the browser sidecar, with the shared secret and the configured navigation timeout. */
@@ -94,7 +125,8 @@ interface MovedBody {
   url: string;
 }
 
-interface OpenBody {
+/** A call that may be refused by the sidecar (open, type, select, click) instead of acting. */
+interface RefusableReadBody {
   status: 'ok' | 'refused';
   text?: string;
   reason?: string;
@@ -111,11 +143,20 @@ function movedMessage(url: unknown): string {
   return `The page went to ${shown}, a different site from the one that was opened, so it was not read. To read it, open that address with browser_open.`;
 }
 
+interface ClickInfoBody {
+  status: 'ok' | 'refused';
+  site?: string;
+  accessible_name?: string;
+  is_form_submit?: boolean;
+  form_values?: Record<string, string>;
+  reason?: string;
+}
+
 function readResult({
   result,
   logger,
 }: {
-  result: SidecarResult<ReadBody | OpenBody | MovedBody>;
+  result: SidecarResult<ReadBody | RefusableReadBody | MovedBody>;
   logger: Logger;
 }): ReturnType<typeof toolResultResponse> {
   if (!result.ok) {
@@ -150,16 +191,46 @@ class BrowserTool extends LocalToolMCP {
     super({ tracing });
   }
 
+  /**
+   * Stamps `browser_click` with what the live page says about the clicked element, read without
+   * clicking it, so the classifier decides the tier from the page itself, never from model text.
+   * Left unset (and so classified fail-closed) when the sidecar cannot be reached or the ref is gone.
+   */
+  override async toolCallInfo(
+    params: Parameters<LocalToolMCP['toolCallInfo']>[0],
+    resolveUnderlyingTool?: boolean,
+  ): Promise<InternalToolCallInfo> {
+    const info = await super.toolCallInfo(params, resolveUnderlyingTool);
+    if (params.name !== BROWSER_CLICK_TOOL_NAME || resolveUnderlyingTool === false) {
+      return info;
+    }
+    const ref = clickRef(params);
+    if (ref === undefined) {
+      return info;
+    }
+    const result = await callBrowserSidecar<ClickInfoBody>({ path: '/click-info', owner: this.owner, body: { ref } });
+    if (!result.ok || result.body.status !== 'ok') {
+      return info;
+    }
+    const review: BrowserClickReview = {
+      site: result.body.site ?? '',
+      accessible_name: result.body.accessible_name ?? '',
+      is_form_submit: result.body.is_form_submit === true,
+      form_values: result.body.form_values ?? {},
+    };
+    return { ...info, browser_click: review };
+  }
+
   private readonly tools: ToolDefinition[] = [
     defineTool({
       name: 'browser_open',
-      annotations: BROWSER_TOOL_ANNOTATIONS,
+      annotations: BROWSER_READ_ANNOTATIONS,
       description:
         "Open a web page in Aman's own browser (not the user's browser) and read it back as text. Only http and https addresses; never a file, app or local-network address. Use when the user asks to find something on a site or open a specific page.",
       schema: OPEN_INPUT_SCHEMA,
       handler: async (input: BrowserOpenInput) =>
         readResult({
-          result: await callBrowserSidecar<OpenBody | MovedBody>({
+          result: await callBrowserSidecar<RefusableReadBody | MovedBody>({
             path: '/open',
             owner: this.owner,
             body: { url: input.url },
@@ -169,7 +240,7 @@ class BrowserTool extends LocalToolMCP {
     }),
     defineTool({
       name: 'browser_read',
-      annotations: BROWSER_TOOL_ANNOTATIONS,
+      annotations: BROWSER_READ_ANNOTATIONS,
       description:
         'Read the page currently open in the browser: its title, address, headings, links, buttons and fields, each actionable one with a short ref. A password or payment field never shows its value.',
       schema: EMPTY_INPUT_SCHEMA,
@@ -181,7 +252,7 @@ class BrowserTool extends LocalToolMCP {
     }),
     defineTool({
       name: 'browser_scroll',
-      annotations: BROWSER_TOOL_ANNOTATIONS,
+      annotations: BROWSER_READ_ANNOTATIONS,
       description: 'Scroll the open page up or down, then read it again.',
       schema: SCROLL_INPUT_SCHEMA,
       handler: async (input: BrowserScrollInput) =>
@@ -192,7 +263,7 @@ class BrowserTool extends LocalToolMCP {
     }),
     defineTool({
       name: 'browser_back',
-      annotations: BROWSER_TOOL_ANNOTATIONS,
+      annotations: BROWSER_READ_ANNOTATIONS,
       description: 'Go back to the previous page in the browser, then read it.',
       schema: EMPTY_INPUT_SCHEMA,
       handler: async () =>
@@ -203,7 +274,7 @@ class BrowserTool extends LocalToolMCP {
     }),
     defineTool({
       name: 'browser_screenshot',
-      annotations: BROWSER_TOOL_ANNOTATIONS,
+      annotations: BROWSER_READ_ANNOTATIONS,
       description:
         'Take a picture of the open page, for the person to look at. The picture is saved to the chat; it is not read by the model.',
       schema: EMPTY_INPUT_SCHEMA,
@@ -225,6 +296,53 @@ class BrowserTool extends LocalToolMCP {
         // The image itself never reaches the model: only a confirmation that one was saved.
         return toolResultResponse({ text: JSON.stringify({ status: 'ok', saved: true }) });
       },
+    }),
+    defineTool({
+      name: 'browser_type',
+      annotations: BROWSER_PREPARE_ANNOTATIONS,
+      description:
+        'Type text into a field on the open page, by its ref from browser_read. Refused for a password, card or one-time-code field: ask the person to type those themselves. Nothing is submitted; read the page again to see what was typed.',
+      schema: TYPE_INPUT_SCHEMA,
+      handler: async (input: BrowserTypeInput) =>
+        readResult({
+          result: await callBrowserSidecar<RefusableReadBody | MovedBody>({
+            path: '/type',
+            owner: this.owner,
+            body: input,
+          }),
+          logger: this.logger,
+        }),
+    }),
+    defineTool({
+      name: 'browser_select',
+      annotations: BROWSER_PREPARE_ANNOTATIONS,
+      description: 'Pick an option on a dropdown field, by its ref from browser_read and the option text.',
+      schema: SELECT_INPUT_SCHEMA,
+      handler: async (input: BrowserSelectInput) =>
+        readResult({
+          result: await callBrowserSidecar<RefusableReadBody | MovedBody>({
+            path: '/select',
+            owner: this.owner,
+            body: input,
+          }),
+          logger: this.logger,
+        }),
+    }),
+    defineTool({
+      name: BROWSER_CLICK_TOOL_NAME,
+      annotations: BROWSER_CLICK_ANNOTATIONS,
+      description:
+        'Click a link, button, tab or other element on the open page, by its ref from browser_read. A click that submits a form, or whose label is a word like pay, buy, send, delete, cancel a membership and similar, shows the person an approval card first; everything else runs right away.',
+      schema: CLICK_INPUT_SCHEMA,
+      handler: async (input: BrowserClickInput) =>
+        readResult({
+          result: await callBrowserSidecar<RefusableReadBody | MovedBody>({
+            path: '/click',
+            owner: this.owner,
+            body: input,
+          }),
+          logger: this.logger,
+        }),
     }),
   ];
 

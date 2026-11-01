@@ -34,6 +34,26 @@ try {
 const SITE_A = '93.184.216.34';
 const SITE_B = '93.184.216.35';
 
+const CHECKOUT_FIXTURE_HTML = `<!doctype html>
+<html>
+  <body>
+    <h1>Checkout</h1>
+    <form id="order-form">
+      <label for="name">Name on card</label>
+      <input id="name" name="name" value="Ada Lovelace" />
+      <label for="country">Country</label>
+      <select id="country" name="country">
+        <option value="us">United States</option>
+        <option value="uk">United Kingdom</option>
+      </select>
+      <button type="submit" id="place-order">Place order</button>
+    </form>
+    <dialog open>
+      <button type="button" id="dialog-cancel" onclick="this.closest('dialog').close()">Cancel</button>
+    </dialog>
+  </body>
+</html>`;
+
 /** A fixture web server that records every request it gets. */
 async function fixture(routes) {
   const hits = [];
@@ -68,6 +88,7 @@ async function withWorld(run) {
   const siteB = await fixture({ '*': html('<h1>Mail inbox</h1><p>Your private messages</p>') });
   const siteA = await fixture({
     '/': ACCOUNT_PAGE,
+    '/checkout': (_req, res) => res.writeHead(200, { 'content-type': 'text/html' }).end(CHECKOUT_FIXTURE_HTML),
     '/redirect-private': (_req, res) => res.writeHead(302, { location: `${internalUrl}/api/admin` }).end(),
     '/redirect-metadata': (_req, res) =>
       res.writeHead(302, { location: 'http://169.254.169.254/latest/meta-data/' }).end(),
@@ -296,3 +317,73 @@ test(
     });
   },
 );
+
+/** The ref the snapshot text gave a line naming `label`, such as `[e3] button Place order`. */
+function refFor(text, label) {
+  const line = text.split('\n').find(candidate => candidate.includes(label));
+  return /^\[(e\d+)\]/.exec(line ?? '')?.[1];
+}
+
+test('types into a field, then fills it', { skip: !browsersAvailable }, async () => {
+  await withWorld(async ({ sidecar }) => {
+    const opened = await sidecar.open({ owner: 'owner-1', url: 'http://site-a.test/checkout' });
+    const ref = refFor(opened.text, 'Name on card');
+    const typed = await sidecar.type({ owner: 'owner-1', ref, text: 'Grace Hopper' });
+    assert.equal(typed.status, 'ok');
+    assert.match(typed.text, /Grace Hopper/);
+  });
+});
+
+test('refuses to type into a password field', { skip: !browsersAvailable }, async () => {
+  await withWorld(async ({ sidecar }) => {
+    const opened = await sidecar.open({ owner: 'owner-1', url: 'http://site-a.test/' });
+    const ref = refFor(opened.text, 'Password');
+    const typed = await sidecar.type({ owner: 'owner-1', ref, text: 'hunter2' });
+    assert.deepEqual(typed, { status: 'refused', reason: 'sensitive_field' });
+  });
+});
+
+test('selects an option', { skip: !browsersAvailable }, async () => {
+  await withWorld(async ({ sidecar }) => {
+    const opened = await sidecar.open({ owner: 'owner-1', url: 'http://site-a.test/checkout' });
+    const ref = refFor(opened.text, 'Country');
+    const selected = await sidecar.select({ owner: 'owner-1', ref, option: 'United Kingdom' });
+    assert.equal(selected.status, 'ok');
+  });
+});
+
+test('click-info reads a submit button without clicking it', { skip: !browsersAvailable }, async () => {
+  await withWorld(async ({ sidecar }) => {
+    const opened = await sidecar.open({ owner: 'owner-1', url: 'http://site-a.test/checkout' });
+    const ref = refFor(opened.text, 'Place order');
+    const info = await sidecar.clickInfo({ owner: 'owner-1', ref });
+    assert.equal(info.status, 'ok');
+    assert.equal(info.is_form_submit, true);
+    assert.equal(info.accessible_name, 'Place order');
+    assert.equal(info.form_values.name, 'Ada Lovelace');
+    // Nothing changed: the form is still there to click for real.
+    const read = await sidecar.read({ owner: 'owner-1' });
+    assert.match(read.text, /Place order/);
+  });
+});
+
+test("click-info on a dialog's plain Cancel button is not a form submit", { skip: !browsersAvailable }, async () => {
+  await withWorld(async ({ sidecar }) => {
+    const opened = await sidecar.open({ owner: 'owner-1', url: 'http://site-a.test/checkout' });
+    const ref = refFor(opened.text, 'Cancel');
+    const info = await sidecar.clickInfo({ owner: 'owner-1', ref });
+    assert.equal(info.status, 'ok');
+    assert.equal(info.is_form_submit, false);
+  });
+});
+
+test('click performs a real click and reads the result', { skip: !browsersAvailable }, async () => {
+  await withWorld(async ({ sidecar }) => {
+    const opened = await sidecar.open({ owner: 'owner-1', url: 'http://site-a.test/checkout' });
+    const ref = refFor(opened.text, 'Cancel');
+    const clicked = await sidecar.click({ owner: 'owner-1', ref });
+    assert.equal(clicked.status, 'ok');
+    // The dialog's own script closed it; the page is otherwise unchanged.
+    assert.match(clicked.text, /Checkout/);
+  });
+});
