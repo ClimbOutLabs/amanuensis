@@ -31,7 +31,7 @@ import { validateAgentSpec } from './sessionResources';
 import { errorResult, jsonResult, plainIssues } from './toolResults';
 
 /** A description is one line in the card. */
-const AGENT_DESCRIPTION_MAX_LENGTH = 160;
+const CARD_DESCRIPTION_MAX_LENGTH = 160;
 
 export const CreateAgentToolSchema = z
   .object({
@@ -40,7 +40,7 @@ export const CreateAgentToolSchema = z
       .string()
       .trim()
       .min(1)
-      .max(AGENT_DESCRIPTION_MAX_LENGTH)
+      .max(CARD_DESCRIPTION_MAX_LENGTH)
       .refine(value => !/[\r\n]/.test(value), 'The description must be one line.')
       .describe('One line on what the agent is for.'),
     instructions: z
@@ -113,7 +113,7 @@ function chatSpec(runner: ChatRunner): AgentSpec {
   return runner.kind === 'plain' ? runner.spec : runner.agent.manifest;
 }
 
-/** Turns the checks a saved agent must pass into one plain line that names the fix. */
+/** Matches the message text of `validateAgentSpec` and its stores; it must follow if those strings change. */
 function plainSaveProblem(error: HTTPException): string {
   const message = error.message;
   const connector = /^Unknown MCP server "(.+)" — not configured$/.exec(message)?.[1];

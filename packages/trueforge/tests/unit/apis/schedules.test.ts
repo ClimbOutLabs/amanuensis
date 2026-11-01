@@ -288,7 +288,7 @@ describe('schedule RBAC', () => {
 });
 
 describe('who a schedule runs as', () => {
-  it('names a saved agent by its name and a chat-made schedule by its assistant, never the stored agent name', async () => {
+  it('names a schedule by the agent it runs as, including one a chat made before agents were saved by name', async () => {
     const { app, asUser, postJson, agentStore, scheduleStore } = await setup();
     asUser(ALICE);
     const fromPage = await postJson('/', 'POST', scheduleBody);
@@ -324,8 +324,7 @@ describe('who a schedule runs as', () => {
 
     const listed = ListSchedulesResponseSchema.parse(await (await app.request('/')).json()).data;
     const chatMade = listed.find(schedule => schedule.name === 'lobster-joke');
-    expect(chatMade?.runs_as).toBe('Your assistant');
-    expect(listed.map(schedule => schedule.runs_as)).not.toContain(chatAgent.name);
+    expect(chatMade?.runs_as).toBe(chatAgent.name);
   });
 });
 

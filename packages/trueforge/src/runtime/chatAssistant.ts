@@ -1,7 +1,6 @@
 import type { AgentSpec, CreatedBySubject } from '@truefoundry/trueforge-core/agent-session';
 import { createHash } from 'node:crypto';
 import { AgentNameConflictError, type AgentRecord, type IAgentStore } from '../db/agentStore';
-import type { IPersonalizationStore } from '../db/personalizationStore';
 import type { IPersonaStore } from '../db/personaStore';
 import type { ScheduleRecord } from '../db/scheduleStore';
 import type { Persona } from '../personas/persona';
@@ -10,16 +9,14 @@ import type { Persona } from '../personas/persona';
 export const CHAT_ASSISTANT_DESCRIPTION = 'Runs the schedules you make in a chat.';
 
 const CHAT_ASSISTANT_NAME_PREFIX = 'assistant-';
-const UNNAMED_ASSISTANT = 'Your assistant';
 
-/** Who a schedule made in one chat runs as, settled by the host so the model never names it. */
+/**
+ * The persona a chat is talking to, and the hidden agent a reminder made in that chat binds to until reminders
+ * stop needing one. Schedules for a task bind to a saved agent instead.
+ */
 export interface ChatAssistant {
-  /** The persona or assistant name, for the "runs as" line. */
-  display_name: string;
-  persona_id: string | null;
-  /** Changes whenever the chat's assistant does, so an approval covers only the one it was shown. */
-  approval_key: string;
-  /** The stored agent the schedule binds to. A plain chat's is made on first use, so call it only once approved. */
+  persona: Pick<Persona, 'id' | 'display_name'> | null;
+  /** The stored agent a reminder binds to. A plain chat's is made on first use, so call it only once approved. */
   agent: () => Promise<AgentRecord>;
 }
 
@@ -100,32 +97,22 @@ export function chatModelName(runner: ChatRunner): string {
   return runner.kind === 'plain' ? runner.spec.model.name : runner.agent.manifest.model.name;
 }
 
-/** The assistant a chat's turn runs as right now, for a schedule made in that chat. */
+/** The assistant a chat's turn runs as right now, for a reminder made in that chat. */
 export function resolveChatAssistant(input: {
   tenant_id: string;
   owner: CreatedBySubject;
   runner: ChatRunner;
   persona: Persona | undefined;
-  /** The name the owner gave their assistant; null when unset. */
-  assistantName: string | null;
   agentStore: Pick<IAgentStore<unknown>, 'getAgent' | 'createAgent'>;
 }): ChatAssistant {
   const { runner, persona } = input;
-  const persona_id = persona?.id ?? null;
-  const personaKey = `persona:${persona_id ?? 'none'}`;
+  const chatPersona = persona === undefined ? null : { id: persona.id, display_name: persona.display_name };
   if (runner.kind === 'saved') {
-    return {
-      display_name: persona?.display_name ?? runner.agent.name,
-      persona_id,
-      approval_key: `agent:${runner.agent.id}|${personaKey}`,
-      agent: () => Promise.resolve(runner.agent),
-    };
+    return { persona: chatPersona, agent: () => Promise.resolve(runner.agent) };
   }
   const name = chatAssistantAgentName({ owner: input.owner, spec: runner.spec });
   return {
-    display_name: persona?.display_name ?? input.assistantName ?? UNNAMED_ASSISTANT,
-    persona_id,
-    approval_key: `chat:${name}|${personaKey}`,
+    persona: chatPersona,
     agent: () =>
       getOrCreateChatAssistantAgent({
         tenant_id: input.tenant_id,
@@ -137,50 +124,26 @@ export function resolveChatAssistant(input: {
   };
 }
 
-/**
- * Who a saved schedule runs as, in plain words: its persona, the assistant for a chat-made agent, else the agent.
- * Names come from the schedule's creator, so the chat and the Schedules page show the same thing.
- */
+/** Who a saved schedule runs as, in plain words: its persona, else its agent. */
 export function scheduleRunsAs(input: {
   tenant_id: string;
-  agentStore: Pick<IAgentStore<unknown>, 'getAgent'>;
   personaStore: Pick<IPersonaStore<unknown>, 'getPersona'>;
-  personalizationStore: Pick<IPersonalizationStore<unknown>, 'getProfile'>;
 }): (schedule: ScheduleRecord) => Promise<string> {
   const { tenant_id } = input;
   const personas = new Map<string, Promise<Persona | undefined>>();
-  const agents = new Map<string, Promise<AgentRecord | undefined>>();
-  const assistantNames = new Map<string, Promise<string | null>>();
-  const cached = <T>(map: Map<string, Promise<T>>, key: string, load: () => Promise<T>): Promise<T> => {
-    const hit = map.get(key);
-    if (hit !== undefined) {
-      return hit;
-    }
-    const loading = load();
-    map.set(key, loading);
-    return loading;
-  };
   return async schedule => {
-    const owner = schedule.created_by_subject;
     const { persona_id } = schedule;
     if (persona_id !== null) {
-      const persona = await cached(personas, `${owner.subject_id}\n${persona_id}`, () =>
-        input.personaStore.getPersona({ tenant_id, created_by: owner.subject_id, id: persona_id }),
-      );
+      const owner = schedule.created_by_subject.subject_id;
+      const key = `${owner}\n${persona_id}`;
+      const loading =
+        personas.get(key) ?? input.personaStore.getPersona({ tenant_id, created_by: owner, id: persona_id });
+      personas.set(key, loading);
+      const persona = await loading;
       if (persona !== undefined) {
         return persona.display_name;
       }
     }
-    const agent = await cached(agents, schedule.agent_id, () =>
-      input.agentStore.getAgent({ tenant_id, id: schedule.agent_id }),
-    );
-    if (agent === undefined || !isChatAssistantAgent({ agent, owner })) {
-      return schedule.agent_name;
-    }
-    const assistantName = await cached(assistantNames, owner.subject_id, async () => {
-      const profile = await input.personalizationStore.getProfile({ tenant_id, created_by: owner.subject_id });
-      return profile?.assistant_name ?? null;
-    });
-    return assistantName ?? UNNAMED_ASSISTANT;
+    return schedule.agent_name;
   };
 }

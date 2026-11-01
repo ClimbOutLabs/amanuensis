@@ -91,7 +91,7 @@ import { resolveSandboxProvider, validateAgentSpec } from '../runtime/sessionRes
 import type { TokenFactoryBudget } from '../runtime/tokenFactoryBudget';
 import type { TurnDrainRegistry } from '../runtime/turnDrains';
 import type { Schedule, ScheduleRun } from '../schemas/schedule';
-import { agentIfAccessible, canReadAgentBoundResource, resolveManagedAgentIds } from './agentAccess';
+import { agentIfAccessible, canReadAgentBoundResource, resolveManagedAgentIds, usableAgentByName } from './agentAccess';
 import { getTurnExecutionError, startTurnInProcess } from './turns';
 
 /** Runtime + Context store resolvers needed to start a schedule turn. */
@@ -331,9 +331,7 @@ async function toWireSchedules<TTransaction>(input: {
 }): Promise<Schedule[]> {
   const runsAs = scheduleRunsAs({
     tenant_id: input.tenant_id,
-    agentStore: input.deps.agentStore,
     personaStore: input.deps.personaStore,
-    personalizationStore: input.deps.personalizationStore,
   });
   return Promise.all(input.records.map(async record => toWireSchedule(record, await runsAs(record))));
 }
@@ -565,11 +563,11 @@ export function createSchedulesRouter<TTransaction>(deps: SchedulesRouterDeps<TT
 
     validateManifest(body.manifest);
 
-    const agent = await agentIfAccessible({
+    const agent = await usableAgentByName({
+      store: deps.resolveAgentStore(c),
       authorizer: deps.authorizer,
       context: requestContext,
-      action: 'use',
-      agent: await deps.resolveAgentStore(c).getAgent({ tenant_id: requestContext.tenant_id, name: body.agent_name }),
+      name: body.agent_name,
     });
     if (agent === undefined) {
       return c.json({ error: { message: `Agent not found: ${body.agent_name}` } }, 404);

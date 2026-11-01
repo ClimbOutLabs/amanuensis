@@ -26,6 +26,21 @@ export async function agentIfAccessible(input: {
   return allowed ? input.agent : undefined;
 }
 
+/** The tenant's agent with this name, only when the caller may use it; missing and forbidden read the same. */
+export async function usableAgentByName<TTransaction>(input: {
+  store: Pick<IAgentStore<TTransaction>, 'getAgent'>;
+  authorizer: Authorizer;
+  context: RequestContext;
+  name: string;
+}): Promise<AgentRecord | undefined> {
+  return agentIfAccessible({
+    authorizer: input.authorizer,
+    context: input.context,
+    action: 'use',
+    agent: await input.store.getAgent({ tenant_id: input.context.tenant_id, name: input.name }),
+  });
+}
+
 /** Resolve the authorizer list scope against the agent store without extra store filters. */
 export async function listAccessibleAgents<TTransaction>(input: {
   store: IAgentStore<TTransaction>;

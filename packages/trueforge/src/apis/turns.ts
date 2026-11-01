@@ -164,7 +164,7 @@ import { checkSnapshotStatus } from '../sandbox/providerUtils';
 import { resolveSkillNetworkGrant } from '../sandbox/skillnet/skillNetworkGrant';
 import { skillNetworkTokens } from '../sandbox/skillnet/skillNetworkTokens';
 import type { MemoryProviderSettings } from '../schemas/mcpServer';
-import { canReadAgentBoundResource } from './agentAccess';
+import { canReadAgentBoundResource, usableAgentByName } from './agentAccess';
 import { readServerSandboxAvailable } from './capabilities';
 
 export function toWireTurn<TCustom extends object>(record: TurnRecordWithoutSnapshot<TCustom>): Turn {
@@ -2613,20 +2613,24 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
               ...deps.schedules,
               tenant_id: requestContext.tenant_id,
               owner: scheduleOwner,
-              // A schedule made here runs as whatever runs this turn: the chat's agent or setup, and its persona.
+              // A reminder made here still runs as a hidden agent; a schedule for a task runs as a saved agent.
               chatAssistant: resolveChatAssistant({
                 tenant_id: requestContext.tenant_id,
                 owner: scheduleOwner,
                 runner: chatRunner,
                 persona: persona?.kind === 'persona' ? persona.persona : undefined,
-                assistantName: profile?.assistant_name ?? null,
                 agentStore,
               }),
+              usableAgent: name =>
+                usableAgentByName({
+                  store: agentStore,
+                  authorizer: deps.authorizer,
+                  context: requestContext,
+                  name,
+                }),
               runsAs: scheduleRunsAs({
                 tenant_id: requestContext.tenant_id,
-                agentStore,
                 personaStore: deps.personaStore,
-                personalizationStore: deps.personalizationStore,
               }),
               logger: deps.logger,
             },

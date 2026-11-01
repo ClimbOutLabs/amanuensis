@@ -187,18 +187,14 @@ function unusedScheduleStore(): IScheduleStore<unknown> {
 
 /** Schedules mount only where they run; the schedule tools are built from this context. */
 function scheduleContext(logger: Logger): NonNullable<SpaceTurnContext['schedules']> {
-  const assistant: ChatAssistant = {
-    display_name: 'Assistant',
-    persona_id: null,
-    approval_key: 'prompt-report',
-    agent: () => unused('agent'),
-  };
+  const assistant: ChatAssistant = { persona: null, agent: () => unused('agent') };
   return {
     store: unusedScheduleStore(),
     withTransaction: () => unused('withTransaction'),
     tenant_id: TENANT_ID,
     owner: { subject_id: CREATED_BY, subject_type: 'user', subject_display_name: 'Prompt report' },
     chatAssistant: assistant,
+    usableAgent: () => unused('usableAgent'),
     runsAs: () => Promise.resolve('you'),
     logger,
   };
