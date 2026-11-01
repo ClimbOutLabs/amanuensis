@@ -415,7 +415,7 @@ describe('list_agents', () => {
     );
     const { info, result } = await dispatch({ built, args: {}, name: 'list_agents' });
     expect(info).toMatchObject({ tier: 1, is_approval_required: false });
-    expect(info.tier3_card).toBeUndefined();
+    expect(info.tier3_card ?? null).toBeNull();
     const { agents } = JSON.parse(resultText(result));
     expect(agents).toEqual(
       expect.arrayContaining([

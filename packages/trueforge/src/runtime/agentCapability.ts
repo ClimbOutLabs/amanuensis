@@ -5,6 +5,7 @@ import type {
   AgentTracing,
   InstructionBuilder,
   SentinelHostContext,
+  Tier3Agent,
 } from '@truefoundry/trueforge-core/core';
 import { classifyHostToolCall, defineTool, LocalToolMCP, type ToolDefinition } from '@truefoundry/trueforge-core/core';
 import {
@@ -108,6 +109,19 @@ interface PreparedCreate {
   name: string;
 }
 
+/** The card shows the exact setup that would be saved. */
+function agentReview({ name, description, spec }: PreparedCreate): Tier3Agent {
+  return {
+    name,
+    description,
+    instructions: spec.instructions ?? '',
+    model_name: spec.model.name,
+    connectors: (spec.mcp_servers ?? []).map(server => server.name),
+    skills: (spec.skills ?? []).map(skill => skill.name),
+    sandbox_enabled: spec.config.sandbox.enabled,
+  };
+}
+
 const NOT_APPROVED = 'Nothing was saved because the user has not approved it. Ask again if they still want it.';
 
 const SKILLS_NEED_SANDBOX =
@@ -186,15 +200,15 @@ export class AgentToolSet extends LocalToolMCP {
   ): Promise<Awaited<ReturnType<LocalToolMCP['toolCallInfo']>>> {
     const info = await super.toolCallInfo(params, resolveUnderlyingTool);
     // A preview while the call streams in has no arguments yet: classifying it would only repeat side effects (an audit row, a live read).
-    if (resolveUnderlyingTool === false || !isAgentWriteToolName(params.name)) {
+    if (resolveUnderlyingTool === false) {
       return info;
     }
-    const prepared = await this.#prepareCreate(params.arguments ?? {});
-    if (!prepared.ok) {
+    const prepared = isAgentWriteToolName(params.name) ? await this.#prepareCreate(params.arguments ?? {}) : undefined;
+    if (prepared !== undefined && !prepared.ok) {
       // Not a permission wall: the model can fix the call or ask the user.
       return { ...info, pre_dispatch_failure: { kind: 'pre_dispatch_failed', message: prepared.message } };
     }
-    const { approved, spec, description, name } = prepared.value;
+    const approved = prepared?.value.approved ?? params.arguments ?? {};
     const decision = await classifyHostToolCall({
       sentinel: this.#options.sentinel,
       repository_id: null,
@@ -209,15 +223,7 @@ export class AgentToolSet extends LocalToolMCP {
           destructive_hint: info.destructive_hint,
           open_world_hint: info.open_world_hint,
         },
-        agent_write: {
-          name,
-          description,
-          instructions: spec.instructions ?? '',
-          model_name: spec.model.name,
-          connectors: (spec.mcp_servers ?? []).map(server => server.name),
-          skills: (spec.skills ?? []).map(skill => skill.name),
-          sandbox_enabled: spec.config.sandbox.enabled,
-        },
+        ...(prepared === undefined ? {} : { agent_write: agentReview(prepared.value) }),
       },
     });
     return {
