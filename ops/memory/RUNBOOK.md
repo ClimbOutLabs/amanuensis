@@ -146,6 +146,36 @@ values for a turn are what the `aman.memory.recall` event reflects.
 | `http_error`               | A non-2xx answer; `http_status` and `detail` carry what the provider said.                                    |
 | `invalid_response`         | The answer was unreadable, unparseable, or over `MEMORY_MAX_RESPONSE_BYTES`.                                  |
 
+## Memory pages
+
+These notes apply to the Markdown memory backend. A vault is one folder under `MEMORY_MARKDOWN_DIR`.
+The pages and their format are described in [the design](DESIGN.md#pages).
+
+### Look at a vault's page history
+
+The vault keeps its own git history of `people/` and `matters/`, started the first time Aman writes a
+page. From the vault folder:
+
+    git log --oneline
+    git show <commit>
+
+A person's hand edits appear as commits named "Your edits". To undo a change, use `git revert <commit>`
+in the vault. The daily log is never in this history.
+
+### A stuck lock
+
+If memory answers "Memory is busy right now", another writer holds the vault's lock. Wait a minute
+first. A lock older than 60 seconds is taken over automatically, so a crashed writer clears itself.
+If it does not clear, stop Aman, delete `.memory-state/lock` in the vault, and start it again. Leftover
+files named `lock.takeover-*` in the same folder are safe to delete at that point too.
+
+### Files in `.memory-state/`
+
+- `aliases.json` is a cache of page names. Deleting it is safe. It is rebuilt on the next turn that
+  needs it.
+- `timezone` holds the vault's time zone. It is written again from the next chat.
+- `lock` is described above.
+
 ## Evaluation-only Prompt Guard sidecar
 
 The classifier assets and reproducible container build live in
