@@ -200,15 +200,15 @@ describe('the document staging bridge', () => {
 
   it('refuses an unsupported type in plain words, without reading or staging it', async () => {
     const { tools, files } = await makeTools();
-    files.set('/workspace/notes.docx', Buffer.from('not a real document'));
+    files.set('/workspace/deck.ppt', Buffer.from('not a real document'));
 
     const response = await tools.callTool({
       name: EXTRACT_DOCUMENT_TEXT_TOOL_NAME,
-      arguments: { file_paths: ['/workspace/notes.docx'] },
+      arguments: { file_paths: ['/workspace/deck.ppt'] },
     });
     const document = extractionOf(response).documents[0];
-    expect(document?.issue).toContain('not supported');
-    expect(document?.issue).toContain('Convert it to PDF');
+    expect(document?.issue).toContain('.ppt is an old format');
+    expect(document?.issue).toContain('Save it as .pptx or as a PDF');
     expect(stagedCopies(files)).toHaveLength(0);
   });
 

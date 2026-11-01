@@ -112,7 +112,8 @@ function observation(
   return { ...input, source };
 }
 
-const unusedWordText = (): Promise<{ text: string }> => Promise.reject(new Error('no Word file in this test'));
+const unusedTextReader = (): Promise<{ text: string; truncated: boolean }> =>
+  Promise.reject(new Error('no office or text file in this test'));
 
 describe('local document pipeline', () => {
   it('preserves native multiline PDF text and OCRs only the empty mixed-PDF page', async () => {
@@ -124,7 +125,7 @@ describe('local document pipeline', () => {
       budget: undefined,
       pageRange: undefined,
       downloadFile: async () => pdf,
-      runWordText: unusedWordText,
+      runTextReader: unusedTextReader,
       runNativePdfText: async () => ({
         total_pages: 2,
         pages: [
@@ -156,7 +157,7 @@ describe('local document pipeline', () => {
       budget: undefined,
       pageRange: undefined,
       downloadFile: async () => syntheticPng(),
-      runWordText: unusedWordText,
+      runTextReader: unusedTextReader,
       runNativePdfText: async () => ({ total_pages: 0, pages: [] }),
       runOcr: async input => {
         calls.push({ pages: input.pages, content: Buffer.from(input.filePath) });
@@ -175,7 +176,7 @@ describe('local document pipeline', () => {
       budget: undefined,
       pageRange: undefined,
       downloadFile: async () => syntheticPng(),
-      runWordText: unusedWordText,
+      runTextReader: unusedTextReader,
       runNativePdfText: async () => ({ total_pages: 0, pages: [] }),
       runOcr: async () => {
         throw new Error('(exit code 1): tesseract failed');
@@ -191,6 +192,7 @@ describe('local document pipeline', () => {
 
   it('reports a file that cannot be found as not found, never as an OCR problem', async () => {
     const result = await extractDocumentText({
+      runTextReader: unusedTextReader,
       files: [{ filename: 'lease.pdf', path: 'uploads/lease.pdf' }],
       onFileProgress: undefined,
       budget: undefined,
@@ -208,6 +210,7 @@ describe('local document pipeline', () => {
 
   it('keeps the OCR tools sentence for a read file whose OCR tools are missing from the image', async () => {
     const result = await extractDocumentText({
+      runTextReader: unusedTextReader,
       files: [{ filename: 'scan.pdf', path: 'uploads/scan.pdf' }],
       onFileProgress: undefined,
       budget: undefined,
@@ -226,6 +229,7 @@ describe('local document pipeline', () => {
 
   it('reports a damaged PDF with the reader detail, not as missing and not as an OCR problem', async () => {
     const result = await extractDocumentText({
+      runTextReader: unusedTextReader,
       files: [{ filename: 'damaged.pdf', path: 'uploads/damaged.pdf' }],
       onFileProgress: undefined,
       budget: undefined,
@@ -246,6 +250,7 @@ describe('local document pipeline', () => {
 
   it('does not read a damaged trailer message as a missing file', async () => {
     const result = await extractDocumentText({
+      runTextReader: unusedTextReader,
       files: [{ filename: 'broken.pdf', path: 'uploads/broken.pdf' }],
       onFileProgress: undefined,
       budget: undefined,
@@ -266,6 +271,7 @@ describe('local document pipeline', () => {
 
   it('reports a file it cannot open for permission with the reader detail, not as missing', async () => {
     const result = await extractDocumentText({
+      runTextReader: unusedTextReader,
       files: [{ filename: 'sealed.pdf', path: 'uploads/sealed.pdf' }],
       onFileProgress: undefined,
       budget: undefined,
@@ -286,6 +292,7 @@ describe('local document pipeline', () => {
 
   it('reports a node-style missing file error as not found', async () => {
     const result = await extractDocumentText({
+      runTextReader: unusedTextReader,
       files: [{ filename: 'gone.pdf', path: 'uploads/gone.pdf' }],
       onFileProgress: undefined,
       budget: undefined,
@@ -303,6 +310,7 @@ describe('local document pipeline', () => {
 
   it('keeps the OCR tools sentence when pdfinfo is missing from the image', async () => {
     const result = await extractDocumentText({
+      runTextReader: unusedTextReader,
       files: [{ filename: 'scan.pdf', path: 'uploads/scan.pdf' }],
       onFileProgress: undefined,
       budget: undefined,
@@ -321,6 +329,7 @@ describe('local document pipeline', () => {
 
   it('keeps the OCR tools sentence when pdftotext is missing from the image', async () => {
     const result = await extractDocumentText({
+      runTextReader: unusedTextReader,
       files: [{ filename: 'scan.pdf', path: 'uploads/scan.pdf' }],
       onFileProgress: undefined,
       budget: undefined,
@@ -348,7 +357,7 @@ describe('local document pipeline', () => {
       budget: undefined,
       pageRange: undefined,
       downloadFile: async () => syntheticPng(),
-      runWordText: unusedWordText,
+      runTextReader: unusedTextReader,
       runNativePdfText: async () => ({ total_pages: 0, pages: [] }),
       runOcr: async () => [{ page_number: 1, text: 'x'.repeat(MAX_CHARS_PER_DOCUMENT + 100) }],
     });
@@ -623,7 +632,7 @@ describe('local document pipeline', () => {
         const entry = files.find(candidate => candidate[0] === filename);
         return filename.endsWith('.pdf') ? makePdf([entry?.[1] ?? []]) : syntheticPng();
       },
-      runWordText: unusedWordText,
+      runTextReader: unusedTextReader,
       runNativePdfText: async input => {
         const filename = input.filePath.slice(input.filePath.lastIndexOf('/') + 1);
         const entry = files.find(candidate => candidate[0] === filename);
@@ -691,7 +700,7 @@ describe('document page-range extraction', () => {
       budget: overrides.budget,
       pageRange: overrides.pageRange,
       downloadFile: async () => syntheticPdf(),
-      runWordText: unusedWordText,
+      runTextReader: unusedTextReader,
       runNativePdfText: async input => {
         const pages = Object.entries(overrides.nativePages ?? {}).map(([page, text]) => ({
           page_number: Number(page),
@@ -740,66 +749,113 @@ describe('document page-range extraction', () => {
     expect(result.documents[0]?.pages).toHaveLength(0);
   });
 
-  it('fails loudly and helpfully on old Word and RTF files it cannot read', async () => {
+  it('fails loudly and helpfully on an old format it cannot read', async () => {
     const input = pdfInput({});
-    input.files = [{ filename: 'contract.doc', path: 'uploads/contract.doc' }];
+    input.files = [{ filename: 'deck.ppt', path: 'uploads/deck.ppt' }];
     const result = await extractDocumentText(input);
     expect(result.documents[0]?.issue).toBe(
-      "I can't read contract.doc yet: .doc files are not supported. Convert it to PDF and I'll read all of it.",
+      "I can't read deck.ppt: .ppt is an old format. Save it as .pptx or as a PDF and I'll read all of it.",
     );
     expect(result.documents[0]?.pages).toHaveLength(0);
   });
 
-  describe('Word documents', () => {
+  describe('office documents, e-mails and text files', () => {
     const zipHeader = Buffer.concat([Buffer.from([0x50, 0x4b, 0x03, 0x04]), Buffer.alloc(32)]);
 
-    function wordInput({ filename, bytes, text }: { filename: string; bytes: Buffer; text: string }) {
-      const reads: string[] = [];
+    function wordInput({
+      filename,
+      bytes,
+      text,
+      truncated = false,
+    }: {
+      filename: string;
+      bytes: Buffer;
+      text: string;
+      truncated?: boolean;
+    }) {
+      const reads: { filePath: string; extension: string }[] = [];
       const input = pdfInput({});
       input.files = [{ filename, path: `uploads/${filename}` }];
       input.downloadFile = async () => bytes;
-      input.runWordText = async call => {
-        reads.push(call.filePath);
-        return { text };
+      input.runTextReader = async call => {
+        reads.push(call);
+        return { text, truncated };
       };
       return { input, reads };
     }
 
-    it('accepts .docx and .odt as readable attachments, in any letter case', () => {
-      for (const name of ['plan.docx', 'PLAN.DOCX', 'notes.odt', 'scan.pdf', 'photo.png']) {
+    it('accepts the formats people attach to e-mails, in any letter case', () => {
+      for (const name of [
+        'plan.docx',
+        'PLAN.DOCX',
+        'notes.odt',
+        'scan.pdf',
+        'photo.png',
+        'plan.doc',
+        'plan.rtf',
+        'sheet.xlsx',
+        'sheet.xls',
+        'sheet.ods',
+        'bank.csv',
+        'deck.pptx',
+        'deck.odp',
+        'page.html',
+        'fwd.eml',
+        'fwd.msg',
+        'notes.txt',
+        'readme.md',
+        'invite.ics',
+      ]) {
         expect(isSupportedDocumentExtension(name)).toBe(true);
       }
-      for (const name of ['plan.doc', 'plan.rtf', 'sheet.xlsx', 'notes.txt']) {
+      for (const name of ['deck.ppt', 'archive.zip', 'program.exe', 'noextension']) {
         expect(isSupportedDocumentExtension(name)).toBe(false);
       }
     });
 
-    it.each(['plan.docx', 'notes.odt'])('reads %s as one text page with line numbers', async filename => {
-      const { input, reads } = wordInput({ filename, bytes: zipHeader, text: 'Reunião às 19h\n\nSegunda linha\n' });
-      const result = await extractDocumentText(input);
-      expect(reads).toEqual([`uploads/${filename}`]);
-      expect(result.documents[0]).toMatchObject({
-        extraction_mode: 'text',
-        issue: null,
-        pages: [
-          {
-            page_number: 1,
-            extraction_mode: 'text',
-            lines: [
-              { line_number: 1, text: 'Reunião às 19h' },
-              { line_number: 3, text: 'Segunda linha' },
-            ],
-          },
-        ],
-      });
-    });
+    it.each(['plan.docx', 'notes.odt', 'sheet.xlsx', 'mail.eml', 'notes.txt'])(
+      'reads %s as one text page with line numbers',
+      async filename => {
+        const { input, reads } = wordInput({ filename, bytes: zipHeader, text: 'Reunião às 19h\n\nSegunda linha\n' });
+        const result = await extractDocumentText(input);
+        expect(reads).toEqual([{ filePath: `uploads/${filename}`, extension: `.${filename.split('.')[1] ?? ''}` }]);
+        expect(result.documents[0]).toMatchObject({
+          extraction_mode: 'text',
+          issue: null,
+          pages: [
+            {
+              page_number: 1,
+              extraction_mode: 'text',
+              lines: [
+                { line_number: 1, text: 'Reunião às 19h' },
+                { line_number: 3, text: 'Segunda linha' },
+              ],
+            },
+          ],
+        });
+      },
+    );
 
-    it('does not send a file to the reader unless it is a zip', async () => {
-      const { input, reads } = wordInput({ filename: 'fake.docx', bytes: Buffer.from('plain text'), text: 'x' });
+    it('passes on the plain reason the reader gives when a file cannot be read', async () => {
+      const { input } = wordInput({ filename: 'fake.docx', bytes: Buffer.from('plain text'), text: 'x' });
+      input.runTextReader = () =>
+        Promise.reject(new Error('The file is damaged or incomplete. Ask the sender to send it again.'));
       const result = await extractDocumentText(input);
-      expect(reads).toEqual([]);
       expect(result.documents[0]?.issue).toBe(
         'Could not extract fake.docx: The file is damaged or incomplete. Ask the sender to send it again.',
+      );
+    });
+
+    it('says when a file held more text than can be read, on the window that reaches the end', async () => {
+      const { input } = wordInput({
+        filename: 'big.xlsx',
+        bytes: zipHeader,
+        text: 'row\n'.repeat(10),
+        truncated: true,
+      });
+      const result = await extractDocumentText(input);
+      expect(result.documents[0]?.issue).toBe(
+        'big.xlsx holds more text than can be read; the text after page 1 is not shown.',
       );
     });
 
@@ -821,15 +877,7 @@ describe('document page-range extraction', () => {
       expect(result.documents[0]?.issue).toBe('Skipped huge.docx: document byte limit exceeded.');
     });
 
-    it('tells a password-protected or older Word file from a damaged one, without reading either', async () => {
-      const ole = Buffer.concat([Buffer.from('d0cf11e0a1b11ae1', 'hex'), Buffer.alloc(64)]);
-      const { input, reads } = wordInput({ filename: 'locked.docx', bytes: ole, text: 'x' });
-      const result = await extractDocumentText(input);
-      expect(reads).toEqual([]);
-      expect(result.documents[0]?.issue).toContain('protected with a password or saved in an older Word format');
-    });
-
-    describe('a Word file longer than one window', () => {
+    describe('a file longer than one window', () => {
       // Thirty paragraphs of about 1,000 characters make ten pages.
       const longText = Array.from(
         { length: 30 },
@@ -875,7 +923,7 @@ describe('document page-range extraction', () => {
         );
       });
 
-      it('keeps a Word file bigger than the tool-output limit readable, window by window, to the end', async () => {
+      it('keeps a file bigger than the tool-output limit readable, window by window, to the end', async () => {
         // About 300,000 characters: far past what one tool answer may hold.
         const huge = Array.from({ length: 300 }, (_, i) => `Paragraph ${String(i)} ${'word '.repeat(190)}`).join('\n');
         const { input } = wordInput({ filename: 'huge.docx', bytes: zipHeader, text: huge });
@@ -922,10 +970,11 @@ describe('document page-range extraction', () => {
 
     it('names the supported types when a file is none of them', async () => {
       const input = pdfInput({});
-      input.files = [{ filename: 'sheet.xlsx', path: 'uploads/sheet.xlsx' }];
+      input.files = [{ filename: 'archive.zip', path: 'uploads/archive.zip' }];
       const result = await extractDocumentText(input);
       expect(result.documents[0]?.issue).toBe(
-        'Unsupported document type for sheet.xlsx; expected a PDF, a Word document (.docx or .odt) or a raster image.',
+        'Unsupported document type for archive.zip; expected a PDF, an image, an office document ' +
+          '(Word, Excel, PowerPoint, OpenDocument, RTF, CSV), an e-mail (.eml, .msg), a web page or a text file.',
       );
     });
   });
@@ -953,7 +1002,7 @@ describe('document page-range extraction', () => {
     const input = pdfInput({ pageRange: { page_start: 2, page_end: 3 } });
     input.files = [{ filename: 'photo.png', path: 'uploads/photo.png' }];
     const result = await extractDocumentText(input);
-    expect(result.documents[0]?.issue).toContain('page_start/page_end apply to PDF and Word files only');
+    expect(result.documents[0]?.issue).toContain('page_start/page_end do not apply to images');
   });
 
   it('drops a page that does not fit whole and names the exact next page_start', async () => {
@@ -1010,7 +1059,7 @@ describe('files are checked by their bytes before OCR', () => {
       budget: undefined,
       pageRange: undefined,
       downloadFile: async () => bytes,
-      runWordText: unusedWordText,
+      runTextReader: unusedTextReader,
       runNativePdfText: async () => ({ total_pages: totalPages, pages: [] }),
       runOcr: async input => {
         ocrCalls.push({ pages: input.pages, maxPages: input.maxPages });

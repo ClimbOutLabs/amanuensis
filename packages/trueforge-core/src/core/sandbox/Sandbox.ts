@@ -7,9 +7,16 @@ import {
   MAX_BYTES_PER_DOCUMENT,
   MAX_CHARS_PER_DOCUMENT,
   MAX_PAGES_PER_DOCUMENT,
+  MAX_TOTAL_DOCUMENT_CHARS,
 } from '../../documents/documentExtraction';
+import {
+  DOCUMENT_TEXT_SCRIPT,
+  MAX_UNPACKED_DOCUMENT_BYTES,
+  MAX_ZIP_ENTRIES,
+  parseDocumentTextOutput,
+  type DocumentTextResult,
+} from '../../documents/documentText';
 import { ocrLanguageSelectionScript } from '../../documents/ocrLanguages';
-import { parseWordTextOutput, WORD_TEXT_SCRIPT } from '../../documents/wordText';
 import {
   ImplementationPlanAdmissionBlockedError,
   StructuredEditPreconditionBlockedError,
@@ -6816,15 +6823,27 @@ export class Sandbox extends LocalToolMCP {
   }
 
   /**
-   * Reads the text of a staged .docx or .odt inside the selected sandbox. The output is cut at twice the
-   * per-document character cap so the extraction can say plainly that only the head is shown.
+   * Reads the text of a staged office document, e-mail, web page or text file inside the selected sandbox, with
+   * Python's standard library only. The output is cut at the aggregate character cap; the result says when it was.
    */
-  async runWordDocumentText(input: { filePath: string; signal: AbortSignal | undefined }): Promise<{ text: string }> {
+  async runTextDocumentReader(input: {
+    filePath: string;
+    extension: string;
+    signal: AbortSignal | undefined;
+  }): Promise<DocumentTextResult> {
     const { sandboxId, canonicalFilePath } = await this.canonicalStagedFilePath(input.filePath, {
       allowSnapshots: true,
     });
-    const marker = `AMAN_WORD_TEXT_${randomUUID().replace(/-/g, '')}:`;
-    const command = `set -eu; ulimit -v 2097152; timeout 60 python3 -I -c ${shellEscape(WORD_TEXT_SCRIPT)} ${shellEscape(canonicalFilePath)} ${String(MAX_CHARS_PER_DOCUMENT * 2)} ${shellEscape(marker)}`;
+    const marker = `AMAN_DOCUMENT_TEXT_${randomUUID().replace(/-/g, '')}:`;
+    const args = [
+      canonicalFilePath,
+      input.extension,
+      String(MAX_TOTAL_DOCUMENT_CHARS),
+      marker,
+      String(MAX_UNPACKED_DOCUMENT_BYTES),
+      String(MAX_ZIP_ENTRIES),
+    ];
+    const command = `set -eu; ulimit -v 2097152; timeout 60 python3 -I -S -c ${shellEscape(DOCUMENT_TEXT_SCRIPT)} ${args.map(shellEscape).join(' ')}`;
     const result = await this.provider.exec({
       sandboxId,
       command,
@@ -6836,13 +6855,13 @@ export class Sandbox extends LocalToolMCP {
     }
     if (result.response.exitCode !== 0) {
       // The reader's output can quote the file; the server log keeps it, the person gets a plain sentence.
-      this.logger.warn('Word document reader failed', {
+      this.logger.warn('Document text reader failed', {
         exit_code: result.response.exitCode,
         output: result.response.result.slice(0, 2000),
       });
       throw new Error(plainReaderFailure({ exitCode: result.response.exitCode, output: result.response.result }));
     }
-    return { text: parseWordTextOutput({ output: result.response.result, marker }) };
+    return parseDocumentTextOutput({ output: result.response.result, marker });
   }
 
   /**

@@ -71,13 +71,13 @@ const filePathListSchema = z
 const extractDocumentTextSchema = z
   .object({
     file_paths: filePathListSchema,
-    page_start: z.number().int().positive().optional().describe('First PDF page to read (1-based). Defaults to 1.'),
+    page_start: z.number().int().positive().optional().describe('First page to read (1-based). Defaults to 1.'),
     page_end: z
       .number()
       .int()
       .positive()
       .optional()
-      .describe('Last PDF page to read (inclusive). Defaults to a full window past page_start.'),
+      .describe('Last page to read (inclusive). Defaults to a full window past page_start.'),
   })
   .strict()
   .refine(data => data.page_end === undefined || data.page_start === undefined || data.page_end >= data.page_start, {
@@ -267,7 +267,7 @@ export function buildDocumentsInstruction(
   builder.addSection(
     DOCUMENTS_INSTRUCTION_SECTION,
     dedent`
-      Supported PDF and raster-image attachments are staged in the sandbox, listed in the Uploaded files announcement, and their text is already placed in the message that follows (native PDF text first, local OCR fallback for scanned pages and images), so it does not need to be fetched to be read. Use documents/${EXTRACT_DOCUMENT_TEXT_TOOL_NAME} only to re-extract with page/line-addressable provenance for citation, or when the inline text was truncated or reported unavailable. A PDF staged from an email or chat attachment is read with documents/${EXTRACT_DOCUMENT_TEXT_TOOL_NAME} using its staged path, the same as an announced upload. A file in the project folder can be read by its project path; it is staged and read the same as an upload. A file outside the project folder asks the person first.${reportGuidance} Unreadable or unsupported files produce issues, never guesses. Do not use the language model as a PDF/OCR parser or invent missing values.
+      Supported attachments (PDF, images, Word .docx/.doc, Excel .xlsx/.xls, CSV, PowerPoint .pptx, OpenDocument, RTF, HTML, e-mails saved as .eml or .msg, and text files) are staged in the sandbox, listed in the Uploaded files announcement, and their text is already placed in the message that follows (native PDF text first, local OCR fallback for scanned pages and images; office, e-mail and text files are read as they are, a spreadsheet row by row with cells separated by " | ", and an e-mail with the text of its attachments), so it does not need to be fetched to be read. Use documents/${EXTRACT_DOCUMENT_TEXT_TOOL_NAME} only to re-extract with page/line-addressable provenance for citation, or when the inline text was truncated or reported unavailable. A file staged from an email or chat attachment is read with documents/${EXTRACT_DOCUMENT_TEXT_TOOL_NAME} using its staged path, the same as an announced upload. A file in the project folder can be read by its project path; it is staged and read the same as an upload. A file outside the project folder asks the person first.${reportGuidance} Unreadable or unsupported files produce issues, never guesses. Do not use the language model as a PDF/OCR parser or invent missing values.
     `.trim(),
   );
 }
@@ -340,6 +340,10 @@ export async function extractDocumentsFromSandbox(
           throwIfSignalAborted(signal);
           return sandbox.runDocumentText({ ...input, filePath: snapshotFor(input.filePath).filePath, signal });
         },
+        runTextReader: input => {
+          throwIfSignalAborted(signal);
+          return sandbox.runTextDocumentReader({ ...input, filePath: snapshotFor(input.filePath).filePath, signal });
+        },
         onFileProgress,
         budget,
         pageRange,
@@ -404,7 +408,7 @@ export class DocumentTools extends LocalToolMCP {
     defineTool({
       name: EXTRACT_DOCUMENT_TEXT_TOOL_NAME,
       description:
-        'Extract page- and line-addressable text from PDF/image attachments. Native PDF text first, local OCR fallback. Returns per-file issues and SHA-256 provenance; never infers unreadable content. For long PDFs, page with page_start/page_end; each result names the exact next range.',
+        'Extract page- and line-addressable text from attachments: PDF, images, Word (.docx, .doc), Excel (.xlsx, .xls), CSV, PowerPoint (.pptx), OpenDocument, RTF, HTML, e-mails (.eml, .msg) and text files. Native PDF text first, local OCR fallback. Returns per-file issues and SHA-256 provenance; never infers unreadable content. For long files, page with page_start/page_end; each result names the exact next range.',
       schema: extractDocumentTextSchema,
       handler: (input, approvalDecision) => this.extractText(input, approvalDecision),
     }),

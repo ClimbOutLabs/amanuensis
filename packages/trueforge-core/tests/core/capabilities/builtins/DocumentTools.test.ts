@@ -20,13 +20,16 @@ describe('DocumentTools guidance', () => {
     expect(schemaText).toContain('attachment note in a tool result');
   });
 
-  it('tells the model to read a staged attachment PDF with the extraction tool at its staged path', () => {
+  it('tells the model to read a staged attachment with the extraction tool at its staged path', () => {
     const builder = new InstructionBuilder('system-prompt');
     buildDocumentsInstruction(builder);
     const text = builder.build();
     expect(text).toContain(
-      'A PDF staged from an email or chat attachment is read with documents/extract_document_text using its staged path, the same as an announced upload.',
+      'A file staged from an email or chat attachment is read with documents/extract_document_text using its staged path, the same as an announced upload.',
     );
+    for (const format of ['Word .docx/.doc', 'Excel .xlsx/.xls', 'PowerPoint .pptx', '.eml or .msg']) {
+      expect(text).toContain(format);
+    }
     expect(text).toContain('Unreadable or unsupported files produce issues, never guesses.');
     expect(text).toContain('Do not use the language model as a PDF/OCR parser or invent missing values.');
   });
