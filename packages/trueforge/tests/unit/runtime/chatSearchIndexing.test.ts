@@ -387,6 +387,34 @@ describe('ChatSearchIndexer', () => {
     expect(await pending()).toBeUndefined();
   });
 
+  it('takes a pass write back when the search is turned off while that write runs', async () => {
+    await seedFinishedChat('late-chat');
+
+    let chatSearch: ChatSearchIndexer | undefined;
+    let turnedOff = false;
+    class LateWriteStore extends SqliteSessionStore {
+      override async indexChatMessages(input: Parameters<SqliteSessionStore['indexChatMessages']>[0]): Promise<void> {
+        if (!turnedOff && chatSearch !== undefined && input.documents.length > 0) {
+          // The clear runs between the pass's last switch check and its write landing.
+          turnedOff = true;
+          await setSwitch(false);
+          await chatSearch.followSwitch({ ...PERSON, enabled: false });
+        }
+        await super.indexChatMessages(input);
+      }
+    }
+    chatSearch = indexer(new LateWriteStore(env.db));
+    await chatSearch.requestPass(PERSON);
+    await setSwitch(true);
+    await chatSearch.followSwitch({ ...PERSON, enabled: true });
+    await chatSearch.idle();
+
+    expect(turnedOff).toBe(true);
+    await setSwitch(true);
+    expect(await store.searchChatHistory(searchFor('ferry'))).toEqual([]);
+    expect(await pending()).toBeUndefined();
+  });
+
   it('adds a finished turn with the persona that answered it once the search is on', async () => {
     await setSwitch(true);
     await seedFinishedChat('chat-1', {
