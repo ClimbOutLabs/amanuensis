@@ -43,6 +43,7 @@ export const SEED_IDS = {
   personaResearcher: 'persona-researcher',
   personaChef: 'persona-chef',
   space: 'space-1',
+  spaceFolder: 'space-folder-1',
   scheduleDaily: 'schedule-1',
   scheduleWeekly: 'schedule-2',
   agentName: 'reporter',
@@ -575,6 +576,18 @@ export async function seedRichInstance<TTransaction>(input: SeedRichInstanceInpu
     format: 'markdown',
     expected_revision: 1,
     expected_aggregate_revision: aggregateAfterCreate.revision,
+  });
+  await stores.spaceStore.createSpaceFolder({
+    tenant_id: tenantId,
+    created_by: userId,
+    id: SEED_IDS.spaceFolder,
+    name: 'Moving',
+  });
+  await stores.spaceStore.setSpaceFolder({
+    tenant_id: tenantId,
+    created_by: userId,
+    space_id: SEED_IDS.space,
+    folder_id: SEED_IDS.spaceFolder,
   });
 
   await stores.mcpServerStore.createServer({

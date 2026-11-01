@@ -21,6 +21,8 @@ export const TABLES_TO_MOVE = [
   'space_aggregate',
   'space',
   'space_revision',
+  'space_folder',
+  'space_folder_assignment',
   'implementation_plan_grant',
   'implementation_plan_dispatch',
   'turn',

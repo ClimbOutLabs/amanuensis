@@ -11,7 +11,7 @@ import { useModelUsageVisible } from '@/utils/modelUsageDisplayPreference.js';
 const PRESET_META: Record<ThemePreset, { label: string; description: string }> = {
   paper: { label: 'Paper', description: 'Warm paper, ink and gold' },
   forest: { label: 'Forest', description: 'Calm greens, natural tones' },
-  midnight: { label: 'Midnight', description: 'Deep blue-grays, navy accents' },
+  midnight: { label: 'Midnight', description: 'Deep blue-grays, ice blue accents' },
   'high-contrast': { label: 'High contrast', description: 'Maximum legibility, stark surfaces' },
 };
 

@@ -30,6 +30,7 @@ import { FakeTurnArtifactStore } from '../../fixtures/fakeTurnArtifactStore';
 import { INERT_WEB_SEARCH_TOOL, startInertMcpServer, type InertMcpServer } from '../../fixtures/inertMcpServer';
 import { installRecordedMail, MAIL_SENDER_NAME } from '../../fixtures/recordedMail';
 import { uncappedTokenFactoryBudget } from '../../fixtures/uncappedTokenFactoryBudget';
+import { noSpaceFolders } from './spaceFolderStoreFake';
 
 const READ = 'https://www.googleapis.com/auth/gmail.readonly';
 const OWNER = { tenant_id: 't1', created_by: 'u1' };
@@ -65,6 +66,7 @@ const STORE: SpaceToolStore = {
   revertSpace: jest.fn(),
   listSpacesWithAggregate: jest.fn(),
   getSpace: jest.fn(),
+  ...noSpaceFolders,
   getSpaceRevision: jest.fn(),
 };
 
