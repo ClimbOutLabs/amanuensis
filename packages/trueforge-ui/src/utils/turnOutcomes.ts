@@ -225,7 +225,10 @@ export function turnOutcomeLines(parts: readonly TurnOutcomePart[]): string[] {
 
 type ThreadMessages = readonly { readonly id: string; readonly content: readonly TurnOutcomePart[] }[];
 
-/** One answer per thread messages list, so every message on the page asking costs one scan, not one each. */
+/**
+ * One answer per thread messages list, so every message on the page asking costs one scan, not one each.
+ * Keyed on the list itself: this relies on assistant-ui replacing the list whenever a message changes.
+ */
 const lastReminderByThread = new WeakMap<ThreadMessages, string | null>();
 
 /** The id of the last message in the thread that set a reminder, if any. */
