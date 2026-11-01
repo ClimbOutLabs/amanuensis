@@ -117,6 +117,10 @@ const TOOL_WORDS: ReadonlyMap<string, ToolWords> = new Map([
     'persona_switch',
   ]),
   ...words({ doing: 'Making a persona', done: 'Made a persona', thing: 'A new persona' }, ['create_persona']),
+  ...words({ doing: 'Checking your agents', done: 'Checked your agents', thing: 'Your agents' }, [
+    'list_agents',
+    'agent_read',
+  ]),
   ...words({ doing: 'Saving an agent', done: 'Saved an agent', thing: 'A new agent' }, ['create_agent', 'agent_write']),
   ...words({ doing: 'Showing a picture', done: 'Showed a picture', thing: 'A picture' }, ['show_image']),
   ...words({ doing: 'Making a report', done: 'Made a report', thing: 'A report' }, ['create_document_report']),

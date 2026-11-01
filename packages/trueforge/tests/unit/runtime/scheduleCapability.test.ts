@@ -336,6 +336,13 @@ describe('create_schedule', () => {
     expect(info.pre_dispatch_failure?.message).toContain('Fix this and try again.');
   });
 
+  it('tells the model to call list_agents before naming an agent or making one', async () => {
+    const built = await setup();
+    const { result } = await built.tools.listTools();
+    const create = result.tools.find(tool => tool.name === 'create_schedule');
+    expect(create?.description).toContain('Call list_agents first');
+  });
+
   it('offers an agent field the model must fill, described in plain words', async () => {
     const built = await setup();
     const { result } = await built.tools.listTools();
@@ -644,7 +651,7 @@ describe('the schedule rule in the system prompt', () => {
       build(prompt);
     }
     expect(prompt.build()).toContain(
-      'Repeating tasks need create_schedule. A schedule runs as a saved agent. If none fits, make one with create_agent first. A morning brief should use an agent with the connectors the brief needs. For "remind me" use set_reminder: it only reaches the user and needs no approval. Never say something is scheduled or set unless create_schedule or set_reminder succeeded in this chat.',
+      'Repeating tasks need create_schedule. A schedule runs as a saved agent. Call list_agents to see which saved agents exist before naming one or making a new one with create_agent. A morning brief should use an agent with the connectors the brief needs. For "remind me" use set_reminder: it only reaches the user and needs no approval. Never say something is scheduled or set unless create_schedule or set_reminder succeeded in this chat.',
     );
   });
 });

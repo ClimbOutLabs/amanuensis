@@ -38,6 +38,14 @@ describe('toolWords', () => {
     }
   });
 
+  it('reads checking the agent list as checking your agents, from the tool name or the reason', () => {
+    for (const name of ['list_agents', 'agent_read']) {
+      expect(toolDoingWords(name)).toBe('Checking your agents');
+      expect(toolDoneWords(name)).toBe('Checked your agents');
+    }
+    expect(toolStepTitle({ toolName: 'list_agents', state: 'not_done' })).toBe('Your agents');
+  });
+
   it('reads saving an agent as saving an agent, from the tool name or the reason', () => {
     for (const name of ['create_agent', 'agent_write']) {
       expect(toolDoingWords(name)).toBe('Saving an agent');

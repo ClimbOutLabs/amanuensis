@@ -15,7 +15,7 @@ import { existsSync, readFileSync, realpathSync } from 'fs';
 import os from 'os';
 import path from 'path';
 import { DOCUMENTS_SERVER_ID, EXTRACT_DOCUMENT_TEXT_TOOL_NAME } from '../../documents/toolContract';
-import { AGENT_SERVER_ID, isAgentWriteToolName } from '../agents/toolContract';
+import { AGENT_SERVER_ID, isAgentWriteToolName, LIST_AGENTS_TOOL_NAME } from '../agents/toolContract';
 import type { CalendarWriteReview } from '../calendar/eventWrite';
 import { CALENDAR_SERVER_ID, isCalendarReadToolName, isCalendarWriteToolName } from '../calendar/toolContract';
 import type { ReviewableDraft } from '../email/gmail/draftReview';
@@ -2741,8 +2741,14 @@ function agentWriteCard(input: { review: Tier3Agent; agent_intent: string | null
   };
 }
 
-/** Saving an agent always asks with its full setup. Any other agent tool name fails closed. */
+/**
+ * Saving an agent always asks with its full setup. Reading the list runs without asking. Any other agent tool
+ * name fails closed.
+ */
 async function classifyAgentTool(action: SentinelAction, ctx: ClassifyContext): Promise<TierDecision> {
+  if (action.tool_name === LIST_AGENTS_TOOL_NAME) {
+    return tier1Decision({ reason: 'agent_read', reason_detail: 'Read your agents.', sensitive_read: false });
+  }
   if (!isAgentWriteToolName(action.tool_name)) {
     return failClosedDecision({ reason_detail: 'Unknown agent tool.' });
   }

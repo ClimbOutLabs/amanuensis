@@ -294,7 +294,7 @@ export class ScheduleToolSet extends LocalToolMCP {
       defineTool({
         name: CREATE_SCHEDULE_TOOL_NAME,
         description:
-          "The only way to make a recurring task. It runs as a saved agent, named in agent: if none fits, make one with create_agent first. For a plain reminder use set_reminder instead. Never say it is scheduled unless this succeeded. Ask first if how often or when is unclear. Times use the user's time zone. Morning brief: set morning_brief, not task, and pick an agent with the connectors the brief needs. The user approves a card first.",
+          "The only way to make a recurring task. It runs as a saved agent, named in agent. Call list_agents first to see which saved agents exist; if none fits, make one with create_agent. For a plain reminder use set_reminder instead. Never say it is scheduled unless this succeeded. Ask first if how often or when is unclear. Times use the user's time zone. Morning brief: set morning_brief, not task, and pick an agent with the connectors the brief needs. The user approves a card first.",
         schema: CreateScheduleToolSchema,
         annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
         handler: (input, approval) => this.#create({ input, approval }),
@@ -911,7 +911,7 @@ export class ScheduleToolSet extends LocalToolMCP {
 
 const SCHEDULE_INSTRUCTION_SECTION = 'schedules';
 const SCHEDULE_INSTRUCTION =
-  'Repeating tasks need create_schedule. A schedule runs as a saved agent. If none fits, make one with create_agent first. A morning brief should use an agent with the connectors the brief needs. For "remind me" use set_reminder: it only reaches the user and needs no approval. Never say something is scheduled or set unless create_schedule or set_reminder succeeded in this chat. If not, say so plainly.';
+  'Repeating tasks need create_schedule. A schedule runs as a saved agent. Call list_agents to see which saved agents exist before naming one or making a new one with create_agent. A morning brief should use an agent with the connectors the brief needs. For "remind me" use set_reminder: it only reaches the user and needs no approval. Never say something is scheduled or set unless create_schedule or set_reminder succeeded in this chat. If not, say so plainly.';
 
 function buildScheduleInstruction(builder: InstructionBuilder): void {
   builder.addSection(SCHEDULE_INSTRUCTION_SECTION, SCHEDULE_INSTRUCTION);

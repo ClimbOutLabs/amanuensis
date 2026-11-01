@@ -59,6 +59,17 @@ describe('Agent tool classification', () => {
     expect(decision).toMatchObject({ tier: 3, auto_deny: 'destination_unverifiable', card: null });
   });
 
+  it('reads the agent list without asking', async () => {
+    const decision = await classifyTier(agentAction('list_agents'), makeCtx());
+    expect(decision).toMatchObject({
+      tier: 1,
+      reason: 'agent_read',
+      card: null,
+      auto_deny: null,
+      sensitive_read: false,
+    });
+  });
+
   it('fails closed on an agent tool it does not know', async () => {
     const decision = await classifyTier(agentAction('delete_agent', MORNING_BRIEF_AGENT), makeCtx());
     expect(decision.tier).toBe(3);

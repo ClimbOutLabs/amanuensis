@@ -35,7 +35,8 @@ const MORNING_BRIEF = {
   description: 'Reads my calendar each morning.',
 };
 
-async function setup(input: { runner?: ChatRunner } = {}) {
+async function setup(input: { runner?: ChatRunner; forbidden?: readonly string[] } = {}) {
+  const { forbidden } = input;
   const db = createSqliteDb(':memory:');
   await migrateSqliteToLatest(db);
   const modelProviderStore = new SqliteModelProviderStore(db);
@@ -74,6 +75,16 @@ async function setup(input: { runner?: ChatRunner } = {}) {
     created_by: OWNER.subject_id,
     conversation_id: 'chat-1',
   });
+  const listAll = async () =>
+    (
+      await agentStore.listAgents({
+        tenant_id: 'default',
+        agent_name: undefined,
+        include_host_managed: true,
+        limit: undefined,
+        page_token: undefined,
+      })
+    ).data;
   const tools = new AgentToolSet({
     tracing: NOOP_AGENT_TRACING,
     agentStore,
@@ -85,18 +96,9 @@ async function setup(input: { runner?: ChatRunner } = {}) {
     tenant_id: 'default',
     owner: OWNER,
     runner,
+    listUsableAgents: async () => (await listAll()).filter(agent => !(forbidden ?? []).includes(agent.name)),
     sentinel,
   });
-  const listAll = async () =>
-    (
-      await agentStore.listAgents({
-        tenant_id: 'default',
-        agent_name: undefined,
-        include_host_managed: true,
-        limit: undefined,
-        page_token: undefined,
-      })
-    ).data;
   return { tools, sentinel, agentStore, listAll };
 }
 
@@ -106,10 +108,11 @@ type Setup = Awaited<ReturnType<typeof setup>>;
 async function dispatch(input: {
   built: Setup;
   args: Record<string, unknown>;
+  name?: string | undefined;
   decision?: ApprovalDecision | undefined;
 }) {
   const { tools, sentinel } = input.built;
-  const name = 'create_agent';
+  const name = input.name ?? 'create_agent';
   const info = await tools.toolCallInfo({ name, arguments: input.args });
   const message: InternalEnrichedAssistantMessage = {
     role: 'assistant',
@@ -390,5 +393,66 @@ describe('create_agent', () => {
     const approvedFirst = await first.tools.liveMintParams({ name: 'create_agent', arguments: MORNING_BRIEF });
     const approvedSecond = await second.tools.liveMintParams({ name: 'create_agent', arguments: MORNING_BRIEF });
     expect(approvedFirst).not.toEqual(approvedSecond);
+  });
+});
+
+describe('list_agents', () => {
+  const saved = (name: string, spec: AgentSpec, description = 'Test agent.') => ({
+    tenant_id: 'default',
+    name,
+    description,
+    manifest: spec,
+    external_id: null,
+    host_managed: false,
+    created_by_subject: OWNER,
+  });
+
+  it('lists each usable agent by name, description, model, connectors, skills and sandbox, with no card', async () => {
+    const built = await setup();
+    await built.agentStore.createAgent(saved('researcher', CHAT_SPEC, 'Researches things.'));
+    await built.agentStore.createAgent(
+      saved('mailer', AgentSpecSchema.parse({ model: { name: OTHER_MODEL }, mcp_servers: [{ name: 'mail' }] })),
+    );
+    const { info, result } = await dispatch({ built, args: {}, name: 'list_agents' });
+    expect(info).toMatchObject({ tier: 1, is_approval_required: false });
+    expect(info.tier3_card).toBeUndefined();
+    const { agents } = JSON.parse(resultText(result));
+    expect(agents).toEqual(
+      expect.arrayContaining([
+        {
+          name: 'researcher',
+          description: 'Researches things.',
+          model_name: CHAT_MODEL,
+          connectors: ['calendar'],
+          skills: [],
+          sandbox_enabled: false,
+        },
+        {
+          name: 'mailer',
+          description: 'Test agent.',
+          model_name: OTHER_MODEL,
+          connectors: ['mail'],
+          skills: [],
+          sandbox_enabled: false,
+        },
+      ]),
+    );
+    expect(agents).toHaveLength(2);
+  });
+
+  it('leaves out agents the owner may not use', async () => {
+    const built = await setup({ forbidden: ['secret'] });
+    await built.agentStore.createAgent(saved('secret', CHAT_SPEC));
+    await built.agentStore.createAgent(saved('shared', CHAT_SPEC));
+    const { result } = await dispatch({ built, args: {}, name: 'list_agents' });
+    expect(JSON.parse(resultText(result)).agents.map((agent: { name: string }) => agent.name)).toEqual(['shared']);
+  });
+
+  it('returns an empty list when there are no agents, and refuses any arguments', async () => {
+    const built = await setup();
+    const { result } = await dispatch({ built, args: {}, name: 'list_agents' });
+    expect(JSON.parse(resultText(result))).toEqual({ agents: [] });
+    const { result: extra } = await dispatch({ built, args: { name: 'x' }, name: 'list_agents' });
+    expect(extra.toolCallResults[0]?.message.content).not.toContain('"agents"');
   });
 });

@@ -1,10 +1,11 @@
 /**
- * Canonical owner of the agent tool names. Saving an agent always asks first. Nothing here edits or deletes
- * an agent.
+ * Canonical owner of the agent tool names. Saving an agent always asks first; reading the list runs without a
+ * card. Nothing here edits or deletes an agent.
  */
 export const AGENT_SERVER_ID = 'agents';
 
 export const CREATE_AGENT_TOOL_NAME = 'create_agent';
+export const LIST_AGENTS_TOOL_NAME = 'list_agents';
 
 /** Calls that save a new agent and so show an approval card first. */
 export function isAgentWriteToolName(tool_name: string): boolean {

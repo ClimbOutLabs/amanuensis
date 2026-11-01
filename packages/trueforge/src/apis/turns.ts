@@ -164,7 +164,7 @@ import { checkSnapshotStatus } from '../sandbox/providerUtils';
 import { resolveSkillNetworkGrant } from '../sandbox/skillnet/skillNetworkGrant';
 import { skillNetworkTokens } from '../sandbox/skillnet/skillNetworkTokens';
 import type { MemoryProviderSettings } from '../schemas/mcpServer';
-import { canReadAgentBoundResource, usableAgentByName } from './agentAccess';
+import { canReadAgentBoundResource, listAccessibleAgents, usableAgentByName } from './agentAccess';
 import { readServerSandboxAvailable } from './capabilities';
 
 export function toWireTurn<TCustom extends object>(record: TurnRecordWithoutSnapshot<TCustom>): Turn {
@@ -2605,6 +2605,18 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
               tenant_id: requestContext.tenant_id,
               owner: scheduleOwner,
               runner: chatRunner,
+              listUsableAgents: async () =>
+                (
+                  await listAccessibleAgents({
+                    store: agentStore,
+                    context: requestContext,
+                    authorizer: deps.authorizer,
+                    action: 'use',
+                    agent_name: undefined,
+                    limit: undefined,
+                    page_token: undefined,
+                  })
+                ).data,
             },
       schedules:
         deps.schedules === undefined || chatRunner === undefined

@@ -11,6 +11,7 @@ import {
   AGENT_SERVER_ID,
   CREATE_AGENT_TOOL_NAME,
   isAgentWriteToolName,
+  LIST_AGENTS_TOOL_NAME,
 } from '@truefoundry/trueforge-core/core/agents/toolContract';
 import type { ApprovalDecision } from '@truefoundry/trueforge-core/core/events/schema';
 import { stampSentinelDecision } from '@truefoundry/trueforge-core/core/mcp/ToolSet';
@@ -18,7 +19,7 @@ import { HTTPException } from 'hono/http-exception';
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import type { McpCatalog } from '../catalog/McpCatalog';
-import { AgentNameConflictError, type IAgentStore } from '../db/agentStore';
+import { AgentNameConflictError, type AgentRecord, type IAgentStore } from '../db/agentStore';
 import type { IMcpServerStore } from '../db/mcpServerStore';
 import type { IModelProviderStore } from '../db/modelProviderStore';
 import type { ISandboxProviderStore } from '../db/sandboxProviderStore';
@@ -74,6 +75,8 @@ export const CreateAgentToolSchema = z
 
 export type CreateAgentToolInput = z.infer<typeof CreateAgentToolSchema>;
 
+const ListAgentsToolSchema = z.object({}).strict();
+
 /** What the agent tool needs from the host for one chat turn. */
 export interface AgentTurnContext {
   agentStore: IAgentStore;
@@ -87,6 +90,8 @@ export interface AgentTurnContext {
   owner: CreatedBySubject;
   /** What runs the chat; a new agent starts from its setup and changes only what the call names. */
   runner: ChatRunner;
+  /** Every saved agent the owner may use. */
+  listUsableAgents: () => Promise<AgentRecord[]>;
 }
 
 interface AgentToolSetOptions extends AgentTurnContext {
@@ -135,8 +140,8 @@ function plainSaveProblem(error: HTTPException): string {
 }
 
 /**
- * Saves one agent for the person in this chat. It can only create: existing agents are never edited or deleted
- * here. Creating always shows a card first.
+ * Saves one agent for the person in this chat, and lists the ones they can use. It can only create: existing
+ * agents are never edited or deleted here. Creating always shows a card first.
  */
 export class AgentToolSet extends LocalToolMCP {
   readonly name = AGENT_SERVER_ID;
@@ -155,6 +160,14 @@ export class AgentToolSet extends LocalToolMCP {
         schema: CreateAgentToolSchema,
         annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
         handler: (input, approval) => this.#create({ input, approval }),
+      }),
+      defineTool({
+        name: LIST_AGENTS_TOOL_NAME,
+        description:
+          'List the saved agents the user can use: each name, one-line description, model, connectors, skills and whether the sandbox is on. Call this before create_agent or before naming an agent in create_schedule, to see which already exist.',
+        schema: ListAgentsToolSchema,
+        annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
+        handler: () => this.#list(),
       }),
     ];
   }
@@ -291,6 +304,20 @@ export class AgentToolSet extends LocalToolMCP {
     };
   }
 
+  async #list() {
+    const agents = await this.#options.listUsableAgents();
+    return jsonResult({
+      agents: agents.map(agent => ({
+        name: agent.name,
+        description: agent.description,
+        model_name: agent.manifest.model.name,
+        connectors: (agent.manifest.mcp_servers ?? []).map(server => server.name),
+        skills: (agent.manifest.skills ?? []).map(skill => skill.name),
+        sandbox_enabled: agent.manifest.config.sandbox.enabled,
+      })),
+    });
+  }
+
   #duplicateMessage(name: string): string {
     return `Nothing was saved because you already have an agent named "${name}". Try again with another name.`;
   }
@@ -336,7 +363,7 @@ export class AgentToolSet extends LocalToolMCP {
 
 const AGENT_INSTRUCTION_SECTION = 'agents';
 const AGENT_INSTRUCTION =
-  "An agent is a saved setup the user can pick later: its model, instructions, connectors, skills and sandbox. Before calling create_agent, say in plain words what you would save, which is this chat's current setup unless the user asked for something else, and ask them to confirm or change it. Call create_agent only after they answered. It shows the user a card to approve. Say an agent was saved only when create_agent succeeded. Never change or delete an agent from chat.";
+  "An agent is a saved setup the user can pick later: its model, instructions, connectors, skills and sandbox. Before making one, call list_agents to see which already exist. Before calling create_agent, say in plain words what you would save, which is this chat's current setup unless the user asked for something else, and ask them to confirm or change it. Call create_agent only after they answered. It shows the user a card to approve. Say an agent was saved only when create_agent succeeded. Never change or delete an agent from chat.";
 
 function buildAgentInstruction(builder: InstructionBuilder): void {
   builder.addSection(AGENT_INSTRUCTION_SECTION, AGENT_INSTRUCTION);
