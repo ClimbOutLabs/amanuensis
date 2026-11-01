@@ -9177,6 +9177,10 @@
             "description": "While on, actions that reach outside this machine are denied automatically.",
             "type": "boolean"
           },
+          "package_downloads_without_project_allowed": {
+            "description": "While on, the sandbox may download packages in your chats that are not working on a project, through the download-only mirrors. The allowance also covers scheduled runs. Off, the first download in such a chat asks.",
+            "type": "boolean"
+          },
           "sandbox_without_asking": {
             "description": "While on, code, commands and workspace files in the sandbox run without asking. Off asks for each one.",
             "type": "boolean"
@@ -9202,7 +9206,8 @@
           "search_without_asking",
           "maps_without_asking",
           "sandbox_without_asking",
-          "chat_search_enabled"
+          "chat_search_enabled",
+          "package_downloads_without_project_allowed"
         ],
         "type": "object"
       },
@@ -13306,6 +13311,10 @@
           },
           "offline_mode": {
             "description": "New offline mode value; omitted keeps the current value.",
+            "type": "boolean"
+          },
+          "package_downloads_without_project_allowed": {
+            "description": "New package download setting for chats without a project; omitted keeps the current value.",
             "type": "boolean"
           },
           "sandbox_without_asking": {

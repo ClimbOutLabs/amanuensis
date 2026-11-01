@@ -7,6 +7,8 @@ export interface SentinelUserSettings {
     mapsWithoutAsking: boolean;
     /** While on, actions that reach outside this machine are denied automatically. */
     offlineMode: boolean;
+    /** While on, the sandbox may download packages in your chats that are not working on a project, through the download-only mirrors. The allowance also covers scheduled runs. Off, the first download in such a chat asks. */
+    packageDownloadsWithoutProjectAllowed: boolean;
     /** While on, code, commands and workspace files in the sandbox run without asking. Off asks for each one. */
     sandboxWithoutAsking: boolean;
     /** While on, your designated search provider runs web searches without asking. Off asks for each one. */

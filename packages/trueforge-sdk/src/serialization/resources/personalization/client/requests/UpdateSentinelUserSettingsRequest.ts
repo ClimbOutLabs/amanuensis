@@ -11,6 +11,10 @@ export const UpdateSentinelUserSettingsRequest: core.serialization.Schema<
     chatSearchEnabled: core.serialization.property("chat_search_enabled", core.serialization.boolean().optional()),
     mapsWithoutAsking: core.serialization.property("maps_without_asking", core.serialization.boolean().optional()),
     offlineMode: core.serialization.property("offline_mode", core.serialization.boolean().optional()),
+    packageDownloadsWithoutProjectAllowed: core.serialization.property(
+        "package_downloads_without_project_allowed",
+        core.serialization.boolean().optional(),
+    ),
     sandboxWithoutAsking: core.serialization.property(
         "sandbox_without_asking",
         core.serialization.boolean().optional(),
@@ -27,6 +31,7 @@ export declare namespace UpdateSentinelUserSettingsRequest {
         chat_search_enabled?: boolean | null;
         maps_without_asking?: boolean | null;
         offline_mode?: boolean | null;
+        package_downloads_without_project_allowed?: boolean | null;
         sandbox_without_asking?: boolean | null;
         search_without_asking?: boolean | null;
         tier2_auto_allow?: "file_write"[] | null;
