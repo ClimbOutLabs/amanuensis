@@ -30,6 +30,7 @@ test_presets() {
   t_begin "each preset maps to its provider's address; other providers have none built in"
   sandbox_new
   assert_eq "$(in_lib 'calendar_preset_url google person@gmail.com')" "https://calendar.google.com/calendar/dav/person@gmail.com/user/" "google"
+  assert_eq "$(in_lib 'calendar_preset_url google a#b@gmail.com')" "https://calendar.google.com/calendar/dav/a%23b@gmail.com/user/" "google encodes characters a calendar address cannot hold"
   assert_eq "$(in_lib 'calendar_preset_url fastmail owner@fastmail.com')" "https://caldav.fastmail.com/dav/" "fastmail"
   assert_eq "$(in_lib 'calendar_preset_url yahoo owner@yahoo.com')" "https://caldav.calendar.yahoo.com" "yahoo"
   assert_eq "$(in_lib 'calendar_preset_url gmx owner@gmx.com')" "https://caldav.gmx.com/" "gmx.com"
@@ -345,6 +346,28 @@ test_google_calendar_flags_save() {
   sandbox_drop
 }
 
+test_gmail_reask_shows_menu_and_google_steps() {
+  t_begin "a Gmail address with another provider shows the menu again; picking Google shows its steps and saves"
+  sandbox_new
+  install_for_calendar
+  with_input "2
+person@gmail.com
+1
+
+$CAL_SECRET
+"
+  run_install instance calendar main
+  clear_input
+  assert_rc 0
+  assert_eq "$(printf '%s' "$OUT" | grep -o 'Which calendar provider is yours?' | wc -l | tr -d ' ')" "2" "the provider menu is shown again after the Gmail refusal"
+  assert_flat_contains "$OUT" "Turn on 2-Step Verification for your Google account, if it is not on yet."
+  assert_flat_contains "$OUT" "When you are asked, type your Gmail address and paste the app password."
+  assert_eq "$(cal_value CALDAV_URL)" "https://calendar.google.com/calendar/dav/person@gmail.com/user/"
+  assert_eq "$(cal_value CALDAV_USERNAME)" "person@gmail.com"
+  assert_secret_only_in_volume
+  sandbox_drop
+}
+
 test_gmail_with_fastmail_stops() {
   t_begin "a Gmail address with another provider stops with the Pick Google message and writes nothing"
   sandbox_new
@@ -374,5 +397,6 @@ test_a_failed_sign_in_check_keeps_the_account
 test_yes_names_missing_value
 test_refusals_at_install
 test_google_calendar_flags_save
+test_gmail_reask_shows_menu_and_google_steps
 test_gmail_with_fastmail_stops
 tests_finish

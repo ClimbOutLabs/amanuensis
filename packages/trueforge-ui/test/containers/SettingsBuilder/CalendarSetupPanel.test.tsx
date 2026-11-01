@@ -45,7 +45,7 @@ const GOOGLE: CalendarProviderInfo = {
     'Turn on 2-Step Verification for your Google account, if it is not on yet. Google only offers app passwords after that.',
     'Open myaccount.google.com/apppasswords, type a name such as Aman, and select Create.',
     'Copy the 16-letter password Google shows. Google shows it only once.',
-    'Pick Google below, type your Gmail address, and paste the app password. Leave the login name empty.',
+    'When you are asked, type your Gmail address and paste the app password. The login name can be left empty or kept the same as your email address.',
   ],
 };
 

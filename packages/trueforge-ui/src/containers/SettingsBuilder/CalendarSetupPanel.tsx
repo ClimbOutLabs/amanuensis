@@ -2,6 +2,8 @@
 
 import { useCallback, useState } from 'react';
 
+import { CALDAV_GOOGLE_PROVIDER_KEY } from '@truefoundry/trueforge-core/core/calendar/caldav/presets';
+
 import { auiInputClass } from '@/atoms/lib/inputClasses.js';
 import type { CalendarAccountStatus, CalendarSetupPort } from '@/server/calendarSetup.js';
 import AccountSetupPanel from './AccountSetupPanel.js';
@@ -23,7 +25,7 @@ const LABEL_CLASS = 'mb-2 block text-xs font-semibold uppercase tracking-wide te
  * is never shown back. The saved address and login are put back in the form so a change keeps them.
  */
 export default function CalendarSetupPanel({ open, onOpenChange, port, onChanged }: CalendarSetupPanelProps) {
-  const [providerKey, setProviderKey] = useState('google');
+  const [providerKey, setProviderKey] = useState(CALDAV_GOOGLE_PROVIDER_KEY);
   const [email, setEmail] = useState('');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');

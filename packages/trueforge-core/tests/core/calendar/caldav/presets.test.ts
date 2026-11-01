@@ -2,6 +2,7 @@ import { spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import {
+  CALDAV_GOOGLE_PROVIDER_KEY,
   CALDAV_PROVIDER_PRESETS,
   caldavEmailProblem,
   caldavPasswordProblem,
@@ -27,6 +28,18 @@ function installerPresetRows(): string[][] {
     .slice(start + "CALENDAR_PRESETS='".length, end)
     .split('\n')
     .map(line => line.trim().split(/\s+/));
+}
+
+/** The installer's Google setup step lines, in order, from calendar_google_steps in installer/lib/calendar.sh. */
+function installerGoogleSteps(): string[] {
+  const shell = readFileSync(CALENDAR_SH, 'utf8');
+  const start = shell.indexOf('calendar_google_steps() {');
+  const end = shell.indexOf('\n}', start);
+  return shell
+    .slice(start, end)
+    .split('\n')
+    .map(line => /^ui_line "(.*)"$/.exec(line.trim())?.[1])
+    .filter((line): line is string => line !== undefined);
 }
 
 /** Runs one installer function with the given arguments and returns what it printed. */
@@ -118,6 +131,27 @@ describe('calendar provider presets', () => {
     const url = caldavPresetUrl({ provider_key: 'google', email: 'person@gmail.com' });
     expect(url).toBe('https://calendar.google.com/calendar/dav/person@gmail.com/user/');
     expect(url === null ? 'missing' : caldavUrlProblem(url)).toBeNull();
+  });
+
+  it('exports the Google provider key as one constant', () => {
+    expect(CALDAV_GOOGLE_PROVIDER_KEY).toBe('google');
+    expect(caldavProviderPreset(CALDAV_GOOGLE_PROVIDER_KEY)?.name).toBe('Google');
+  });
+
+  it('keeps the installer Google steps in sync with the preset setup steps', () => {
+    expect(installerGoogleSteps()).toEqual([...(caldavProviderPreset(CALDAV_GOOGLE_PROVIDER_KEY)?.setup_steps ?? [])]);
+    for (const step of caldavProviderPreset(CALDAV_GOOGLE_PROVIDER_KEY)?.setup_steps ?? []) {
+      expect(step).not.toContain('below');
+    }
+  });
+
+  it('encodes the email address into the Google address, the same way the installer does', () => {
+    const email = "o'brien@gmail.com";
+    const url = caldavPresetUrl({ provider_key: CALDAV_GOOGLE_PROVIDER_KEY, email });
+    expect(url).toBe('https://calendar.google.com/calendar/dav/o%27brien@gmail.com/user/');
+    expect(url === null ? 'missing' : caldavUrlProblem(url)).toBeNull();
+    expect(url === null ? 'missing' : caldavProviderKeyForUrl(url)).toBe(CALDAV_GOOGLE_PROVIDER_KEY);
+    expect(installerSays('calendar_preset_url', CALDAV_GOOGLE_PROVIDER_KEY, email)).toBe(url);
   });
 
   it('knows Gmail addresses need the Google provider', () => {

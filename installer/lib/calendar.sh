@@ -55,6 +55,24 @@ gmx:gmx.com https://caldav.gmx.com/
 gmx:gmx.net https://caldav.gmx.net/
 webde https://caldav.web.de'
 
+# The email address with every character a calendar address cannot hold written as %XX, so an address
+# such as o'brien@ still builds a usable calendar address. Mirrors encodeEmailForUrl in
+# packages/trueforge-core/src/core/calendar/caldav/presets.ts; a test there checks the two agree.
+calendar_encode_email() { # email
+  local email=$1 i ch hex out=
+  for ((i = 0; i < ${#email}; i++)); do
+    ch=${email:i:1}
+    case "$ch" in
+      [A-Za-z0-9._~@+,:=-]) out+=$ch ;;
+      *)
+        printf -v hex '%02X' "'$ch"
+        out+="%$hex"
+        ;;
+    esac
+  done
+  printf '%s\n' "$out"
+}
+
 calendar_preset_url() { # provider email
   local key=$1 email=$2 url prefix suffix
   if [ "$key" = gmx ]; then key=gmx:$(lowercase "${email##*@}"); fi
@@ -62,9 +80,30 @@ calendar_preset_url() { # provider email
   prefix=${url%%\{email\}*}
   if [ "$prefix" != "$url" ]; then
     suffix=${url#*\{email\}}
-    url=$prefix$email$suffix
+    url=$prefix$(calendar_encode_email "$email")$suffix
   fi
   printf '%s\n' "$url"
+}
+
+# The provider menu, printed before the provider question and again when the question is asked again.
+calendar_provider_menu() {
+  ui_line "Which calendar provider is yours?"
+  ui_line "  1 Google"
+  ui_line "  2 Fastmail"
+  ui_line "  3 Yahoo"
+  ui_line "  4 GMX (gmx.com or gmx.net)"
+  ui_line "  5 web.de"
+  ui_line "  6 Other provider, such as iCloud or Zoho: you type its address"
+}
+
+# Google's app password steps, printed as soon as Google is picked, before the email and password are
+# asked for. The words are the setup_steps of the Google preset in packages/trueforge-core; a test there
+# keeps these lines in sync with them.
+calendar_google_steps() {
+  ui_line "Turn on 2-Step Verification for your Google account, if it is not on yet. Google only offers app passwords after that."
+  ui_line "Open myaccount.google.com/apppasswords, type a name such as Aman, and select Create."
+  ui_line "Copy the 16-letter password Google shows. Google shows it only once."
+  ui_line "When you are asked, type your Gmail address and paste the app password. The login name can be left empty or kept the same as your email address."
 }
 
 calendar_is_gmail() { # email
@@ -153,7 +192,7 @@ calendar_ask_password() {
 # Asks the calendar questions. In the install it asks "Connect a calendar?" first, with No as the default. The instance
 # command passes CAL_EXPLICIT=1 and always asks the rest. Flags answer any question they cover.
 calendar_collect() { # install|instance
-  local names count preset
+  local names count preset google_steps_shown=0
   CAL_PROVIDER=$OPT_CAL_PROVIDER
   CAL_EMAIL=$OPT_CAL_EMAIL
   CAL_URL=$OPT_CAL_URL
@@ -185,16 +224,14 @@ calendar_collect() { # install|instance
   fi
   if [ "$ASSUME_YES" = 1 ]; then calendar_require_flags; fi
   if [ -z "$CAL_PROVIDER" ] && [ "$ASSUME_YES" != 1 ] && [ "$DRY_RUN" != 1 ]; then
-    ui_line "Which calendar provider is yours?"
-    ui_line "  1 Google"
-    ui_line "  2 Fastmail"
-    ui_line "  3 Yahoo"
-    ui_line "  4 GMX (gmx.com or gmx.net)"
-    ui_line "  5 web.de"
-    ui_line "  6 Other provider, such as iCloud or Zoho: you type its address"
+    calendar_provider_menu
   fi
   ask_valid CAL_PROVIDER "Your provider (type a number)" "" "" calendar_provider_problem
   CAL_PROVIDER=$(calendar_provider_key "$CAL_PROVIDER")
+  if [ "$CAL_PROVIDER" = google ]; then
+    calendar_google_steps
+    google_steps_shown=1
+  fi
   ask_valid CAL_EMAIL "Email address of the calendar account" "" "The address you sign in to the calendar with." email_problem
   while calendar_is_gmail "$CAL_EMAIL" && [ "$CAL_PROVIDER" != google ]; do
     if [ "$ASSUME_YES" = 1 ]; then
@@ -202,9 +239,14 @@ calendar_collect() { # install|instance
     fi
     ui_line "Gmail calendars use the Google provider. Pick Google and try again. Nothing was saved."
     CAL_PROVIDER=
+    calendar_provider_menu
     ask_valid CAL_PROVIDER "Your provider (type a number)" "" "" calendar_provider_problem
     CAL_PROVIDER=$(calendar_provider_key "$CAL_PROVIDER")
   done
+  if [ "$CAL_PROVIDER" = google ] && [ "$google_steps_shown" != 1 ]; then
+    calendar_google_steps
+    google_steps_shown=1
+  fi
   preset=$(calendar_preset_url "$CAL_PROVIDER" "$CAL_EMAIL")
   if [ -n "$preset" ]; then
     if [ -n "$CAL_URL" ] && [ "$CAL_URL" != "$preset" ]; then
@@ -219,12 +261,6 @@ calendar_collect() { # install|instance
     ask_valid CAL_URL "Calendar address (starts with https://)" "" "The full address from your provider's help page." calendar_url_problem
   fi
   ask_valid CAL_USER "Login name" "$CAL_EMAIL" "Usually the same as the email address." calendar_user_problem
-  if [ "$CAL_PROVIDER" = google ]; then
-    ui_line "Turn on 2-Step Verification for your Google account, if it is not on yet. Google only offers app passwords after that."
-    ui_line "Open myaccount.google.com/apppasswords, type a name such as Aman, and select Create."
-    ui_line "Copy the 16-letter password Google shows. Google shows it only once."
-    ui_line "Pick Google below, type your Gmail address, and paste the app password. Leave the login name empty."
-  fi
   calendar_ask_password
   ui_line "Calendar: $(calendar_provider_name "$CAL_PROVIDER") at $CAL_URL, signed in as $CAL_USER."
 }

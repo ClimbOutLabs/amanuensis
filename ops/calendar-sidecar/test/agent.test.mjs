@@ -17,6 +17,17 @@ const WRONG = 'CANARY-WRONG-PASSWORD-9z';
 const HOST = 'caldav.example.invalid';
 const USERNAME = 'owner@example.invalid';
 const PUBLIC_ADDRESS = '93.184.216.34';
+const GOOGLE_USER = 'person@gmail.com';
+// Shaped like Google's real discovery answer: the principal and the calendar home are on Google's
+// CalDAV service host, apidata.googleusercontent.com, under /caldav/v2/, not on calendar.google.com.
+const GOOGLE_DISCOVERY_BODY =
+  '<?xml version="1.0" encoding="UTF-8"?>' +
+  '<d:multistatus xmlns:d="DAV:" xmlns:cal="urn:ietf:params:xml:ns:caldav"><d:response>' +
+  `<d:href>https://apidata.googleusercontent.com/caldav/v2/${GOOGLE_USER}/user</d:href>` +
+  '<d:propstat><d:status>HTTP/1.1 200 OK</d:status><d:prop>' +
+  `<d:current-user-principal><d:href>https://apidata.googleusercontent.com/caldav/v2/${GOOGLE_USER}/user</d:href></d:current-user-principal>` +
+  `<cal:calendar-home-set><d:href>https://apidata.googleusercontent.com/caldav/v2/${GOOGLE_USER}/</d:href></cal:calendar-home-set>` +
+  '</d:prop></d:propstat></d:response></d:multistatus>';
 
 describe('the calendar account agent', () => {
   let folder;
@@ -56,7 +67,7 @@ describe('the calendar account agent', () => {
         '-subj',
         `/CN=${HOST}`,
         '-addext',
-        `subjectAltName=DNS:${HOST}`,
+        `subjectAltName=DNS:${HOST},DNS:calendar.google.com,DNS:apidata.googleusercontent.com`,
         '-keyout',
         key,
         '-out',
@@ -75,6 +86,31 @@ describe('the calendar account agent', () => {
       if (behavior === 'redirect') {
         res.writeHead(302, { Location: 'https://other.example.invalid/' });
         res.end('redirect echoing ' + (req.headers.authorization ?? ''));
+        return;
+      }
+      if (behavior === 'google') {
+        // Google's calendar address redirects to its CalDAV service host, which then answers with
+        // the discovery body above. The fake server stands in for both hosts on the checked address.
+        const googleExpected = `Basic ${Buffer.from(`${GOOGLE_USER}:${CANARY}`).toString('base64')}`;
+        if (req.headers.authorization !== googleExpected) {
+          res.writeHead(401, { 'WWW-Authenticate': 'Basic realm="x"' });
+          res.end();
+          return;
+        }
+        if (req.url.startsWith('/calendar/dav/')) {
+          res.writeHead(301, {
+            Location: `https://apidata.googleusercontent.com:${calendarPort}/caldav/v2/${GOOGLE_USER}/user`,
+          });
+          res.end();
+          return;
+        }
+        if (req.url.startsWith('/caldav/v2/')) {
+          res.writeHead(207, { 'Content-Type': 'application/xml' });
+          res.end(GOOGLE_DISCOVERY_BODY);
+          return;
+        }
+        res.writeHead(404);
+        res.end();
         return;
       }
       const expected = `Basic ${Buffer.from(`${USERNAME}:${CANARY}`).toString('base64')}`;
@@ -173,6 +209,24 @@ describe('the calendar account agent', () => {
     assert.equal(seen.length, 1);
     assert.ok(!redirected.text.includes(CANARY));
     assert.equal(existsSync(file), false);
+  });
+
+  it('signs in to Google through its redirect to the CalDAV service host and its discovery answer', async () => {
+    behavior = 'google';
+    const saved = await call(
+      'POST',
+      payload({
+        url: `https://calendar.google.com:${calendarPort}/calendar/dav/${GOOGLE_USER}/user/`,
+        username: GOOGLE_USER,
+        email: GOOGLE_USER,
+      }),
+    );
+    assert.equal(saved.status, 200);
+    assert.deepEqual(
+      seen.map(request => request.url),
+      [`/calendar/dav/${GOOGLE_USER}/user/`, `/caldav/v2/${GOOGLE_USER}/user`],
+    );
+    assert.ok(!saved.text.includes(CANARY));
   });
 
   it('follows one redirect to another path on the same server, such as a trailing slash', async () => {

@@ -6,7 +6,7 @@
  * itself. The rules for typed values mirror the installer's and are worded for a person; the calendar
  * sidecar applies the strict rules again before it saves anything.
  */
-import { mailAddressProblem } from '../../email/mailConnector/presets';
+import { mailAddressProblem } from '../../email/mailConnector/presets.js';
 
 export interface CaldavProviderPreset {
   /** Stable key, the same word the installer uses: google, fastmail, yahoo, gmx, webde, other. */
@@ -33,11 +33,12 @@ export interface CaldavProviderPreset {
   setup_steps: readonly string[];
 }
 
+export const CALDAV_GOOGLE_PROVIDER_KEY = 'google';
 export const CALDAV_OTHER_PROVIDER_KEY = 'other';
 
 export const CALDAV_PROVIDER_PRESETS: readonly CaldavProviderPreset[] = [
   {
-    key: 'google',
+    key: CALDAV_GOOGLE_PROVIDER_KEY,
     name: 'Google',
     server_url: null,
     domain_urls: [],
@@ -48,7 +49,7 @@ export const CALDAV_PROVIDER_PRESETS: readonly CaldavProviderPreset[] = [
       'Turn on 2-Step Verification for your Google account, if it is not on yet. Google only offers app passwords after that.',
       'Open myaccount.google.com/apppasswords, type a name such as Aman, and select Create.',
       'Copy the 16-letter password Google shows. Google shows it only once.',
-      'Pick Google below, type your Gmail address, and paste the app password. Leave the login name empty.',
+      'When you are asked, type your Gmail address and paste the app password. The login name can be left empty or kept the same as your email address.',
     ],
   },
   {
@@ -118,6 +119,25 @@ function emailDomain(email: string): string {
   return (email.split('@')[1] ?? '').toLowerCase();
 }
 
+// Characters that can go into a calendar address path as they are. Anything else in the email address
+// is written as %XX, so an address such as o'brien@ still builds a usable calendar address instead of
+// one the address rules refuse. The installer does the same in calendar_encode_email.
+const URL_SAFE_CHARACTER = /^[A-Za-z0-9._~@+,:=-]$/;
+
+function encodeEmailForUrl(email: string): string {
+  let encoded = '';
+  for (const character of email) {
+    if (URL_SAFE_CHARACTER.test(character)) {
+      encoded += character;
+    } else {
+      for (const byte of new TextEncoder().encode(character)) {
+        encoded += `%${byte.toString(16).toUpperCase().padStart(2, '0')}`;
+      }
+    }
+  }
+  return encoded;
+}
+
 /** The built-in calendar address for a provider and account, or null when the address has to be typed. */
 export function caldavPresetUrl(input: { provider_key: string; email: string }): string | null {
   const preset = caldavProviderPreset(input.provider_key);
@@ -128,7 +148,9 @@ export function caldavPresetUrl(input: { provider_key: string; email: string }):
   return (
     preset.domain_urls.find(entry => entry.domain === domain)?.url ??
     preset.server_url ??
-    (preset.account_url_template === null ? null : preset.account_url_template.split('{email}').join(input.email))
+    (preset.account_url_template === null
+      ? null
+      : preset.account_url_template.split('{email}').join(encodeEmailForUrl(input.email)))
   );
 }
 

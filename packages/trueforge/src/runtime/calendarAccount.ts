@@ -4,6 +4,7 @@
  * its plain lines, and how a save request is resolved against the presets.
  */
 import {
+  CALDAV_GOOGLE_PROVIDER_KEY,
   CALDAV_OTHER_NEEDS_ADDRESS_MESSAGE,
   CALDAV_OTHER_PROVIDER_KEY,
   caldavEmailProblem,
@@ -147,7 +148,7 @@ function resolveCalendarAccountSave(
   if (emailProblem !== null) {
     return { ok: false, message: emailProblem };
   }
-  if (isGoogleMailAddress(request.email) && request.provider_key !== 'google') {
+  if (isGoogleMailAddress(request.email) && request.provider_key !== CALDAV_GOOGLE_PROVIDER_KEY) {
     return { ok: false, message: GMAIL_NEEDS_GOOGLE_PROVIDER_MESSAGE };
   }
   if (caldavProviderPreset(request.provider_key) === undefined) {
