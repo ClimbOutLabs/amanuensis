@@ -1448,6 +1448,10 @@ print(json.dumps({
 type ReplaceTextDispatchOutcome =
   { kind: 'match_rejected'; rejection: string } | { kind: 'dispatched'; exec: ExecResult; payloadDigest: string };
 
+/** Said only where the shell can fetch: a sandbox with no internet is never told to save fetched content. */
+const FETCHED_CONTENT_TO_FILE_SENTENCE =
+  'When fetching remote content, the Agent MUST save it to a file first, then extract from the file. Do not pipe large fetches through grep or sed into the tool response.';
+
 /** Network sentence of the exec description; the offline wording replaces the retrieval and admission claims. */
 function execNetworkSentences({
   offline,
@@ -1457,10 +1461,10 @@ function execNetworkSentences({
   skillNetworkHosts: readonly string[];
 }): string {
   if (!offline) {
-    return 'Exec provides retrieval of an already identified public source; it does not provide search or discovery. Network egress requires PermissionGate admission.';
+    return `Exec provides retrieval of an already identified public source; it does not provide search or discovery. Network egress requires PermissionGate admission. ${FETCHED_CONTENT_TO_FILE_SENTENCE}`;
   }
   if (skillNetworkHosts.length > 0) {
-    return `This shell can reach only the sites approved for the skills in this chat: ${skillNetworkHosts.join(', ')}. Every other site is refused. Never use it to fetch web content from any other site.`;
+    return `This shell can reach only the sites approved for the skills in this chat: ${skillNetworkHosts.join(', ')}. Every other site is refused. Never use it to fetch web content from any other site. ${FETCHED_CONTENT_TO_FILE_SENTENCE}`;
   }
   return 'This shell has no internet access. Never use it to fetch web content.';
 }
