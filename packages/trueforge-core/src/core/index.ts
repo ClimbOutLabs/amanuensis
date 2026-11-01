@@ -329,6 +329,7 @@ export { GIT_NETWORK_ENV_NAMES, pickGitNetworkEnv } from './sandbox/hostAuthenti
 export {
   PACKAGE_GIT_DEPENDENCY_MESSAGE,
   commandDownloadsPackages,
+  commandInstallsPackages,
   findCommandLineGitDependency,
   findGitDependency,
 } from './sandbox/packageMirrors';

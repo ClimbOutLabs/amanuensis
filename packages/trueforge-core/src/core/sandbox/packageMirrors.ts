@@ -218,8 +218,21 @@ const SHELL_PROGRAMS = new Set(['sh', 'bash', 'zsh', 'dash', 'ksh']);
 /** How deep shell -c, eval and alias text is followed: enough for real commands, bounded for hostile ones. */
 const MAX_NESTING = 4;
 
-/** The ecosystem one simple command downloads packages from, or undefined when it downloads none. */
-function segmentDownloadEcosystem(argv: readonly string[]): PackageDownloadEcosystem | undefined {
+/** One simple command that can fetch packages: its ecosystem, and whether installing is its point. */
+interface SegmentDownload {
+  ecosystem: PackageDownloadEcosystem;
+  /**
+   * True when downloading packages is what the command is for (an install, an add, a sync).
+   * False when the command only might fetch while doing something else (a build, a test, a
+   * run, a fetch-and-run tool): those run without a download grant, and the downloads-off
+   * note explains it if they do try to download. Only explicit installs ask on the
+   * first-download card and record the allowance when approved.
+   */
+  explicit: boolean;
+}
+
+/** The download one simple command can make, or undefined when it downloads none. */
+function segmentDownload(argv: readonly string[]): SegmentDownload | undefined {
   const program = argv[0];
   if (program === undefined) {
     return undefined;
@@ -227,7 +240,7 @@ function segmentDownloadEcosystem(argv: readonly string[]): PackageDownloadEcosy
   const base = program.slice(program.lastIndexOf('/') + 1);
   const sub = argv[1];
   if (PIP_PROGRAM.test(base) && (sub === 'install' || sub === 'download')) {
-    return 'pypi';
+    return { ecosystem: 'pypi', explicit: true };
   }
   if (
     PYTHON_PROGRAM.test(base) &&
@@ -236,73 +249,70 @@ function segmentDownloadEcosystem(argv: readonly string[]): PackageDownloadEcosy
     PIP_PROGRAM.test(argv[2]) &&
     (argv[3] === 'install' || argv[3] === 'download')
   ) {
-    return 'pypi';
+    return { ecosystem: 'pypi', explicit: true };
   }
-  if (base === 'pipx' && (sub === 'install' || sub === 'run' || sub === 'inject' || sub === 'upgrade')) {
-    return 'pypi';
+  if (base === 'pipx' && (sub === 'install' || sub === 'inject' || sub === 'upgrade')) {
+    return { ecosystem: 'pypi', explicit: true };
+  }
+  if (base === 'pipx' && sub === 'run') {
+    return { ecosystem: 'pypi', explicit: false };
   }
   if (base === 'pip-sync') {
-    return 'pypi';
+    return { ecosystem: 'pypi', explicit: true };
   }
   if (
     (base === 'pdm' || base === 'pipenv') &&
     (sub === 'install' || sub === 'add' || sub === 'sync' || sub === 'update')
   ) {
-    return 'pypi';
+    return { ecosystem: 'pypi', explicit: true };
   }
   if (NPM_PROGRAMS.has(base) && sub !== undefined && NPM_INSTALL_WORDS.has(sub)) {
-    return 'npm';
+    return { ecosystem: 'npm', explicit: true };
   }
   // A bare yarn or bun installs the project's dependencies.
   if ((base === 'yarn' || base === 'bun') && (sub === undefined || sub.startsWith('-'))) {
-    return 'npm';
+    return { ecosystem: 'npm', explicit: true };
   }
   // npx, bunx and dlx fetch the package they are asked to run when it is not installed.
   if (base === 'npx' || base === 'bunx' || ((base === 'pnpm' || base === 'yarn') && sub === 'dlx')) {
-    return 'npm';
+    return { ecosystem: 'npm', explicit: false };
   }
   if (NPM_PROGRAMS.has(base) && (sub === 'run' || sub === 'run-script') && SETUP_SCRIPT_NAMES.has(argv[2] ?? '')) {
-    return 'npm';
+    return { ecosystem: 'npm', explicit: false };
   }
   if ((base === 'yarn' || base === 'pnpm') && sub !== undefined && SETUP_SCRIPT_NAMES.has(sub) && sub !== 'install') {
-    return 'npm';
+    return { ecosystem: 'npm', explicit: false };
   }
   if (base === 'make' && argv.slice(1).some(word => !word.startsWith('-') && SETUP_SCRIPT_NAMES.has(word))) {
-    return 'any';
+    return { ecosystem: 'any', explicit: false };
   }
-  if (
-    base === 'cargo' &&
-    (sub === 'build' ||
-      sub === 'test' ||
-      sub === 'run' ||
-      sub === 'check' ||
-      sub === 'clippy' ||
-      sub === 'fetch' ||
-      sub === 'update' ||
-      sub === 'add' ||
-      sub === 'install')
-  ) {
-    return 'cargo';
+  if (base === 'cargo' && (sub === 'fetch' || sub === 'update' || sub === 'add' || sub === 'install')) {
+    return { ecosystem: 'cargo', explicit: true };
   }
-  if (
-    base === 'go' &&
-    (sub === 'build' || sub === 'test' || sub === 'run' || sub === 'get' || sub === 'install' || sub === 'vet')
-  ) {
-    return 'go';
+  if (base === 'cargo' && (sub === 'build' || sub === 'test' || sub === 'run' || sub === 'check' || sub === 'clippy')) {
+    return { ecosystem: 'cargo', explicit: false };
+  }
+  if (base === 'go' && (sub === 'get' || sub === 'install')) {
+    return { ecosystem: 'go', explicit: true };
+  }
+  if (base === 'go' && (sub === 'build' || sub === 'test' || sub === 'run' || sub === 'vet')) {
+    return { ecosystem: 'go', explicit: false };
   }
   if (base === 'go' && sub === 'mod' && (argv[2] === 'download' || argv[2] === 'tidy' || argv[2] === 'vendor')) {
-    return 'go';
+    return { ecosystem: 'go', explicit: true };
   }
   if (
     (base === 'uv' && sub === 'pip' && argv[2] === 'install') ||
-    (base === 'uv' && (sub === 'sync' || sub === 'add' || sub === 'run')) ||
-    (base === 'uv' && sub === 'tool' && (argv[2] === 'install' || argv[2] === 'run')) ||
-    base === 'uvx'
+    (base === 'uv' && (sub === 'sync' || sub === 'add')) ||
+    (base === 'uv' && sub === 'tool' && argv[2] === 'install')
   ) {
-    return 'pypi';
+    return { ecosystem: 'pypi', explicit: true };
+  }
+  if ((base === 'uv' && sub === 'run') || (base === 'uv' && sub === 'tool' && argv[2] === 'run') || base === 'uvx') {
+    return { ecosystem: 'pypi', explicit: false };
   }
   if (base === 'poetry' && (sub === 'install' || sub === 'add' || sub === 'update')) {
-    return 'pypi';
+    return { ecosystem: 'pypi', explicit: true };
   }
   // A program held in a variable ($p install ...) could be any package tool.
   if (
@@ -310,14 +320,15 @@ function segmentDownloadEcosystem(argv: readonly string[]): PackageDownloadEcosy
     sub !== undefined &&
     (NPM_INSTALL_WORDS.has(sub) || sub === 'download' || sub === 'get' || sub === 'sync')
   ) {
-    return 'any';
+    return { ecosystem: 'any', explicit: false };
   }
   return undefined;
 }
 
-/** One simple command that downloads packages, with the words that name it and its arguments. */
+/** One simple command that can fetch packages, with the words that name it and its arguments. */
 interface DownloadCommand {
   ecosystem: PackageDownloadEcosystem;
+  explicit: boolean;
   argv: readonly string[];
 }
 
@@ -391,9 +402,9 @@ function downloadCommands(text: string, depth = 0): DownloadCommand[] {
   const found: DownloadCommand[] = [];
   const aliases = new Map<string, string[]>();
   const add = (argv: readonly string[]): void => {
-    const ecosystem = segmentDownloadEcosystem(argv);
-    if (ecosystem !== undefined) {
-      found.push({ ecosystem, argv });
+    const download = segmentDownload(argv);
+    if (download !== undefined) {
+      found.push({ ...download, argv });
     }
   };
   for (const words of splitShellCommands(text)) {
@@ -495,16 +506,29 @@ export function commandDownloadsPackages(command: string): boolean {
   return downloadCommands(command).length > 0;
 }
 
+/**
+ * Whether a command is an explicit install: downloading packages is its point, not a side
+ * effect it might have. Only these commands show the first-download card and record the
+ * download allowance when the person approves them. A build, test or run command that only
+ * might fetch runs without the card and without a grant.
+ */
+export function commandInstallsPackages(command: string): boolean {
+  return downloadCommands(command).some(download => download.explicit);
+}
+
 /** The public package sites a download can come from, named in one list for sentences a person reads. */
 export function packageDownloadSitesText(): string {
   const names = siteNamesFor('any');
   return `${names.slice(0, -1).join(', ')} and ${names[names.length - 1] ?? ''}`;
 }
 
-/** The sites one command downloads from, named for the tools it actually uses, in the order it uses them. */
+/** The sites one command's explicit installs download from, named for the tools used, in order. */
 function downloadSiteNames(command: string): string[] {
   const sites: string[] = [];
-  for (const { ecosystem } of downloadCommands(command)) {
+  for (const { ecosystem, explicit } of downloadCommands(command)) {
+    if (!explicit) {
+      continue;
+    }
     for (const name of siteNamesFor(ecosystem)) {
       if (!sites.includes(name)) {
         sites.push(name);
@@ -515,8 +539,9 @@ function downloadSiteNames(command: string): string[] {
 }
 
 /**
- * The one sentence the first-download approval card shows, or undefined when the command downloads
- * nothing. The sites are named for the tools this command actually uses, in the order it uses them.
+ * The one sentence the first-download approval card shows, or undefined when the command is not
+ * an explicit install. The sites are named for the tools this command actually uses, in the
+ * order it uses them.
  */
 export function packageDownloadCardWhat(command: string): string | undefined {
   const sites = downloadSiteNames(command);

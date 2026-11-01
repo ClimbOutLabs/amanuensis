@@ -1,6 +1,7 @@
 import {
   PACKAGE_GIT_DEPENDENCY_MESSAGE,
   commandDownloadsPackages,
+  commandInstallsPackages,
   findCommandLineGitDependency,
   findGitDependency,
   packageDownloadCardWhat,
@@ -367,6 +368,65 @@ describe('PACKAGE_GIT_DEPENDENCY_MESSAGE', () => {
   });
 });
 
+describe('commandInstallsPackages', () => {
+  it.each([
+    'pip install requests',
+    'pip download requests',
+    'python3 -m pip install flask',
+    'npm ci',
+    'npm install',
+    'pnpm add vitest',
+    'yarn',
+    'yarn install',
+    'cargo add serde',
+    'cargo install ripgrep',
+    'cargo fetch',
+    'go get example.com/mod',
+    'go mod download',
+    'uv pip install httpx',
+    'uv sync',
+    'uv tool install ruff',
+    'pipx install black',
+    'poetry install',
+    'bash -c "pip install requests"',
+    "python3 -c \"import subprocess; subprocess.run(['pip', 'install', 'x'])\"",
+  ])('treats %s as an explicit install', command => {
+    expect(commandInstallsPackages(command)).toBe(true);
+  });
+
+  it.each([
+    'npx tsc',
+    'npx prettier --write .',
+    'npm run prepare',
+    'uv run pytest',
+    'make init',
+    'make install',
+    'cargo build',
+    'cargo test',
+    'go build ./...',
+    'go test ./...',
+    'uvx ruff',
+    'pipx run black',
+    'npm run setup',
+    'ls -la',
+  ])('does not treat %s as an explicit install, though it may still fetch', command => {
+    expect(commandInstallsPackages(command)).toBe(false);
+  });
+
+  it('still recognises the might-fetch commands as downloads for the wider checks', () => {
+    for (const command of [
+      'npx tsc',
+      'npm run prepare',
+      'uv run pytest',
+      'make init',
+      'cargo build',
+      'go test ./...',
+    ]) {
+      expect(commandDownloadsPackages(command)).toBe(true);
+    }
+  });
+});
+
 describe('packageDownloadCardWhat', () => {
   it('names only the sites the command actually uses', () => {
     expect(packageDownloadCardWhat('pip install requests')).toBe(
@@ -375,10 +435,10 @@ describe('packageDownloadCardWhat', () => {
     expect(packageDownloadCardWhat('npm ci')).toBe(
       "Aman wants to download this project's packages from the public package sites (npm).",
     );
-    expect(packageDownloadCardWhat('go build ./...')).toBe(
+    expect(packageDownloadCardWhat('go get example.com/mod')).toBe(
       "Aman wants to download this project's packages from the public package sites (the Go package site).",
     );
-    expect(packageDownloadCardWhat('cargo build')).toBe(
+    expect(packageDownloadCardWhat('cargo install ripgrep')).toBe(
       "Aman wants to download this project's packages from the public package sites (crates.io).",
     );
   });
@@ -398,10 +458,12 @@ describe('packageDownloadCardWhat', () => {
     );
   });
 
-  it('names every site when the tool behind the command is not known', () => {
-    expect(packageDownloadCardWhat('make install')).toBe(
-      "Aman wants to download this project's packages from the public package sites (PyPI, npm, the Go package site, crates.io).",
-    );
+  it('is undefined for a command that only might fetch, so it gets no download card', () => {
+    expect(packageDownloadCardWhat('cargo build')).toBeUndefined();
+    expect(packageDownloadCardWhat('go build ./...')).toBeUndefined();
+    expect(packageDownloadCardWhat('make install')).toBeUndefined();
+    expect(packageDownloadCardWhat('npx tsc')).toBeUndefined();
+    expect(packageDownloadCardWhat('uv run pytest')).toBeUndefined();
   });
 
   it('says the allowance for chats without a project also covers scheduled runs', () => {

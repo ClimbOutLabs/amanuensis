@@ -62,38 +62,81 @@ function check(state: {
 
 describe('createPackageMirrorAllowanceCheck', () => {
   it('holds while the chat is the person’s and their allowance for chats without a project is on', async () => {
-    expect(await check({ owner: 'u1', withoutProject: true }).allowanceHolds(grant())).toBe(true);
-    expect(await check({ owner: 'u1', withoutProject: false }).allowanceHolds(grant())).toBe(false);
+    expect(await check({ owner: 'u1', withoutProject: true }).allowanceHolds(grant())).toBe('holds');
+    expect(await check({ owner: 'u1', withoutProject: false }).allowanceHolds(grant())).toBe('off');
   });
 
   it('follows the repo’s own allowance for a repo grant', async () => {
-    expect(await check({ owner: 'u1', repoAllowed: true }).allowanceHolds(grant({ repository_id: 'r1' }))).toBe(true);
-    expect(await check({ owner: 'u1', repoAllowed: false }).allowanceHolds(grant({ repository_id: 'r1' }))).toBe(false);
+    expect(await check({ owner: 'u1', repoAllowed: true }).allowanceHolds(grant({ repository_id: 'r1' }))).toBe(
+      'holds',
+    );
+    expect(await check({ owner: 'u1', repoAllowed: false }).allowanceHolds(grant({ repository_id: 'r1' }))).toBe('off');
     expect(await check({ owner: 'u1', repoAllowed: undefined }).allowanceHolds(grant({ repository_id: 'r1' }))).toBe(
-      false,
+      'off',
     );
   });
 
   it('ends a grant whose chat was deleted or belongs to someone else', async () => {
-    expect(await check({ owner: undefined, withoutProject: true }).allowanceHolds(grant())).toBe(false);
-    expect(await check({ owner: 'u2', withoutProject: true }).allowanceHolds(grant())).toBe(false);
+    expect(await check({ owner: undefined, withoutProject: true }).allowanceHolds(grant())).toBe('off');
+    expect(await check({ owner: 'u2', withoutProject: true }).allowanceHolds(grant())).toBe('off');
   });
 
-  it('counts a failed read as off', async () => {
-    expect(await check({ owner: 'u1', failSettings: true }).allowanceHolds(grant())).toBe(false);
+  it('counts a failed read as unavailable, not off, and does not cache it', async () => {
+    const state: { owner?: string | undefined; withoutProject?: boolean; failSettings?: boolean } = {
+      owner: 'u1',
+      withoutProject: true,
+      failSettings: true,
+    };
+    const { allowanceHolds, reads } = check(state);
+    expect(await allowanceHolds(grant())).toBe('unavailable');
+    state.failSettings = false;
+    expect(await allowanceHolds(grant())).toBe('holds');
+    expect(reads.settings).toBe(2);
+  });
+
+  it('shares one read between checks that arrive while it is still running', async () => {
+    let release: (() => void) | undefined;
+    const gate = new Promise<void>(resolve => {
+      release = resolve;
+    });
+    let settingsReads = 0;
+    const allowanceHolds = createPackageMirrorAllowanceCheck({
+      sessionStore: {
+        getSession: async () => ({
+          tenant_id: 't1',
+          session_id: 's1',
+          created_by_subject: { subject_id: 'u1', subject_type: 'user', subject_display_name: 'u1' },
+        }),
+      },
+      repositoryStore: { getRepository: async () => undefined },
+      sentinelSettingsStore: {
+        get: async () => {
+          settingsReads += 1;
+          await gate;
+          return { ...DEFAULT_SENTINEL_USER_SETTINGS, package_downloads_without_project_allowed: true };
+        },
+      },
+      now: () => 0,
+    });
+    const first = allowanceHolds(grant());
+    const second = allowanceHolds(grant());
+    release?.();
+    expect(await first).toBe('holds');
+    expect(await second).toBe('holds');
+    expect(settingsReads).toBe(1);
   });
 
   it('reuses an answer for a few seconds, then reads again', async () => {
     const clock = { now: 0 };
     const state = { owner: 'u1', withoutProject: true, clock };
     const { allowanceHolds, reads } = check(state);
-    expect(await allowanceHolds(grant())).toBe(true);
+    expect(await allowanceHolds(grant())).toBe('holds');
     state.withoutProject = false;
     clock.now = 1_000;
-    expect(await allowanceHolds(grant())).toBe(true);
+    expect(await allowanceHolds(grant())).toBe('holds');
     expect(reads.settings).toBe(1);
     clock.now = 6_000;
-    expect(await allowanceHolds(grant())).toBe(false);
+    expect(await allowanceHolds(grant())).toBe('off');
     expect(reads.settings).toBe(2);
   });
 });
