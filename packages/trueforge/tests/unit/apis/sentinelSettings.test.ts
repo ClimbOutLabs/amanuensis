@@ -1,6 +1,8 @@
 import { HTTPException } from 'hono/http-exception';
+import { makeAgentSpec } from '../../../../trueforge-core/tests/agent-session/testHelpers';
 import type { Authenticator } from '../../../src/auth/authenticator';
 import type { RequestContext } from '../../../src/auth/identity';
+import { SqliteGlobalSettingsStore } from '../../../src/db/sqlite/global-settings-store/SqliteGlobalSettingsStore';
 import { GetSentinelUserSettingsResponseSchema } from '../../../src/schemas/sentinelSettings';
 import { startApprovalTestServer, type ApprovalTestServer } from '../../fixtures/approvalTestServer';
 
@@ -71,6 +73,7 @@ describe('Sentinel user settings routes', () => {
       search_without_asking: true,
       maps_without_asking: true,
       sandbox_without_asking: true,
+      chat_search_enabled: false,
     });
   });
 
@@ -83,6 +86,7 @@ describe('Sentinel user settings routes', () => {
       search_without_asking: true,
       maps_without_asking: true,
       sandbox_without_asking: true,
+      chat_search_enabled: false,
     });
 
     await server.request(SETTINGS_PATH, patch('alice', { offline_mode: true }));
@@ -93,6 +97,7 @@ describe('Sentinel user settings routes', () => {
       search_without_asking: false,
       maps_without_asking: true,
       sandbox_without_asking: true,
+      chat_search_enabled: false,
     });
     expect(await read('bob')).toEqual({
       offline_mode: false,
@@ -100,6 +105,7 @@ describe('Sentinel user settings routes', () => {
       search_without_asking: true,
       maps_without_asking: true,
       sandbox_without_asking: true,
+      chat_search_enabled: false,
     });
   });
 
@@ -112,6 +118,7 @@ describe('Sentinel user settings routes', () => {
       search_without_asking: true,
       maps_without_asking: true,
       sandbox_without_asking: true,
+      chat_search_enabled: false,
     });
 
     await server.request(SETTINGS_PATH, patch('dana', { maps_without_asking: false }));
@@ -129,6 +136,7 @@ describe('Sentinel user settings routes', () => {
       search_without_asking: true,
       maps_without_asking: true,
       sandbox_without_asking: false,
+      chat_search_enabled: false,
     });
 
     await server.request(SETTINGS_PATH, patch('erin', { sandbox_without_asking: true }));
@@ -152,6 +160,47 @@ describe('Sentinel user settings routes', () => {
       search_without_asking: true,
       maps_without_asking: true,
       sandbox_without_asking: true,
+      chat_search_enabled: false,
     });
+  });
+
+  it('removes the person index when the past-chat search is turned off, and asks for a pass when it is turned on', async () => {
+    const store = server.sessionStore();
+    await store.createSession({
+      tenant_id: 'default',
+      session_id: 'chat-searchable',
+      created_by_subject: { subject_id: 'searcher', subject_type: 'user', subject_display_name: 'searcher' },
+      agent: { type: 'inline', spec: makeAgentSpec() },
+      custom: null,
+      metadata: {},
+      external_id: null,
+      source: null,
+    });
+    await store.indexChatMessages({
+      tenant_id: 'default',
+      session_id: 'chat-searchable',
+      turn_id: 'turn-1',
+      persona_id: null,
+      documents: [{ message_id: 'user', role: 'user', text: 'the ferry leaves at nine', created_at: new Date() }],
+    });
+    const search = {
+      tenant_id: 'default',
+      query: 'ferry',
+      created_by_subject_id: 'searcher',
+      exclude_session_id: null,
+      persona_ids: [],
+      from: null,
+      to: null,
+      limit: 8,
+    };
+    expect(await store.searchChatHistory(search)).toHaveLength(1);
+
+    expect((await server.request(SETTINGS_PATH, patch('searcher', { chat_search_enabled: true }))).status).toBe(200);
+    const globalSettings = new SqliteGlobalSettingsStore(server.db());
+    expect((await globalSettings.getSetting({ key: 'chat_search_backfill_pending' }))?.value).toContain('searcher');
+
+    expect((await server.request(SETTINGS_PATH, patch('searcher', { chat_search_enabled: false }))).status).toBe(200);
+    expect(await store.searchChatHistory(search)).toEqual([]);
+    expect(await globalSettings.getSetting({ key: 'chat_search_backfill_pending' })).toBeUndefined();
   });
 });

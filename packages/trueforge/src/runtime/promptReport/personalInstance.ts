@@ -332,6 +332,8 @@ export async function buildPersonalInstance(input: {
       budget: unusedTokenFactoryBudget(),
       authority: { tenantId: TENANT_ID, userRef: CREATED_BY },
     },
+    // The prompt report never searches past chats: the tool stays out of its listing.
+    undefined,
   );
   const resolved = await resolver.resolveAgentDefinition({
     spec,

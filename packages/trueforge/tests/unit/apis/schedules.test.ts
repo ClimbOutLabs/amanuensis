@@ -20,10 +20,13 @@ import type { SessionCustom, TurnCustom } from '../../../src/db/sessionCustom';
 import { SqliteAgentStore } from '../../../src/db/sqlite/agent-store/SqliteAgentStore';
 import { createSqliteDb } from '../../../src/db/sqlite/client';
 import { SqliteGlobalSettingsStore } from '../../../src/db/sqlite/global-settings-store/SqliteGlobalSettingsStore';
+import { SqlitePersonaStore } from '../../../src/db/sqlite/persona-store/SqlitePersonaStore';
 import { SqliteScheduleStore } from '../../../src/db/sqlite/schedule-store/SqliteScheduleStore';
+import { SqliteSentinelSettingsStore } from '../../../src/db/sqlite/sentinel-settings-store/SqliteSentinelSettingsStore';
 import { SqliteSessionStore } from '../../../src/db/sqlite/session-store/SqliteSessionStore';
 import { ActiveTurnRegistry } from '../../../src/runtime/activeTurns';
 import { CHAT_ASSISTANT_DESCRIPTION, getOrCreateChatAssistantAgent } from '../../../src/runtime/chatAssistant';
+import { ChatSearchIndexer } from '../../../src/runtime/chatSearchIndexing';
 import { EventSubscriptionRegistry } from '../../../src/runtime/event-subscription';
 import { validateAgentSpec } from '../../../src/runtime/sessionResources';
 import { TurnDrainRegistry } from '../../../src/runtime/turnDrains';
@@ -1079,5 +1082,75 @@ describe('audit rows for schedule firings', () => {
       outcome: 'logged',
     });
     expect(records[1]?.conversation_id).toBe(records[0]?.conversation_id);
+  });
+
+  it('adds a delivered reminder to the past-chat search as soon as it is written', async () => {
+    const built = await setup();
+    const agent = await built.agentStore.getAgent({ tenant_id: 'default', name: 'reporter' });
+    if (agent === undefined) {
+      throw new Error('The reporter agent was not created.');
+    }
+    const { pendingRun } = await built.scheduleStore.createScheduleAndRun({
+      tenant_id: 'default',
+      agent_id: agent.id,
+      agent_name: agent.name,
+      name: 'reminder-medicine',
+      persona_id: null,
+      manifest: ScheduleManifestSchema.parse({
+        task: 'Take the medicine',
+        run_at: '2026-10-19T18:00:00-04:00',
+        timezone: 'America/New_York',
+        kind: 'reminder',
+      }),
+      created_by_subject: ALICE_SUBJECT,
+      runFrom: new Date('2026-10-18T12:00:00.000Z'),
+    });
+    if (pendingRun === undefined) {
+      throw new Error('Expected the reminder to queue a run');
+    }
+    const sessionStore = new SqliteSessionStore(built.db);
+    const sentinelSettingsStore = new SqliteSentinelSettingsStore(built.db);
+    await sentinelSettingsStore.patch({
+      tenant_id: 'default',
+      created_by: 'alice',
+      offline_mode: undefined,
+      tier2_auto_allow: undefined,
+      search_without_asking: undefined,
+      maps_without_asking: undefined,
+      sandbox_without_asking: undefined,
+      chat_search_enabled: true,
+    });
+    const execution = createScheduleExecutionRouter({
+      ...stubTurnExecutionDeps(built.agentStore, built.scheduleStore, built.db),
+      sessions: new Sessions<SessionCustom, TurnCustom>({ sessionStore }),
+      sessionStore,
+      chatSearchIndexer: new ChatSearchIndexer({
+        sessionStore,
+        globalSettingsStore: new SqliteGlobalSettingsStore(built.db),
+        sentinelSettingsStore,
+        personaStore: new SqlitePersonaStore(built.db),
+        logger: winston.createLogger({ silent: true }),
+      }),
+    });
+
+    const response = await execution.request('/runs/execute', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ schedule_run_id: pendingRun.id }),
+    });
+
+    expect(response.status).toBe(204);
+    const hits = await sessionStore.searchChatHistory({
+      tenant_id: 'default',
+      query: 'medicine',
+      created_by_subject_id: 'alice',
+      exclude_session_id: null,
+      persona_ids: [],
+      from: null,
+      to: null,
+      limit: 8,
+    });
+    expect(hits).toHaveLength(1);
+    expect(hits[0]?.snippet).toContain('Take the medicine');
   });
 });

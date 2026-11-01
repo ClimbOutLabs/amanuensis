@@ -172,6 +172,7 @@ describe('download_attachment follows the chat sandbox', () => {
         budget: uncappedTokenFactoryBudget,
         authority: { tenantId: OWNER.tenant_id, userRef: OWNER.created_by },
       },
+      undefined,
     );
   }
 

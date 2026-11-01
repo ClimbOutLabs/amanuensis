@@ -59,6 +59,7 @@ import { SqliteTurnArtifactStore } from '../../src/db/sqlite/turn-artifact-store
 import { ActiveTurnRegistry } from '../../src/runtime/activeTurns';
 import { createChatImageService } from '../../src/runtime/chatImages/chatImageService';
 import { createImageReencoder } from '../../src/runtime/chatImages/reencodeInSandbox';
+import { ChatSearchIndexer } from '../../src/runtime/chatSearchIndexing';
 import { EventSubscriptionRegistry } from '../../src/runtime/event-subscription';
 import { createOutboundSecretSource } from '../../src/runtime/outboundSecrets';
 import { createSentinelServices } from '../../src/runtime/sentinelServices';
@@ -137,7 +138,15 @@ function buildApp(input: {
     toolGrants: mcpToolGrantStore,
     outboundSecrets,
   });
+  const personaStore = new SqlitePersonaStore(db);
   return createServerApp({
+    chatSearchIndexer: new ChatSearchIndexer({
+      sessionStore,
+      globalSettingsStore,
+      sentinelSettingsStore,
+      personaStore,
+      logger: createLogger({ silent: true }),
+    }),
     modelCatalog: ModelCatalog.load(),
     mcpCatalog: McpCatalog.loadShipped(),
     skillCatalog: SkillCatalog.load(),
@@ -151,7 +160,7 @@ function buildApp(input: {
     sandboxProviderResolver: sandboxProvider === undefined ? undefined : () => Promise.resolve(sandboxProvider),
     agentStore,
     personalizationStore: new SqlitePersonalizationStore(db),
-    personaStore: new SqlitePersonaStore(db),
+    personaStore,
     modelProviderStore,
     spaceStore: new SqliteSpaceStore(db),
     repositoryStore: new SqliteRepositoryStore(db),

@@ -32,6 +32,7 @@ function stubApi(entries: SentinelAuditEntry[]): SentinelApi {
       search_without_asking: true,
       maps_without_asking: false,
       sandbox_without_asking: true,
+      chat_search_enabled: false,
     })),
     updateUserSettings: vi.fn(async () => ({
       offline_mode: false,
@@ -39,6 +40,7 @@ function stubApi(entries: SentinelAuditEntry[]): SentinelApi {
       search_without_asking: true,
       maps_without_asking: false,
       sandbox_without_asking: true,
+      chat_search_enabled: false,
     })),
     listSentinelSessionContext: vi.fn(async () => ({ approvals: [] })),
   };

@@ -8,6 +8,7 @@ export const SentinelUserSettings: core.serialization.ObjectSchema<
     serializers.SentinelUserSettings.Raw,
     TrueForge.SentinelUserSettings
 > = core.serialization.object({
+    chatSearchEnabled: core.serialization.property("chat_search_enabled", core.serialization.boolean()),
     mapsWithoutAsking: core.serialization.property("maps_without_asking", core.serialization.boolean()),
     offlineMode: core.serialization.property("offline_mode", core.serialization.boolean()),
     sandboxWithoutAsking: core.serialization.property("sandbox_without_asking", core.serialization.boolean()),
@@ -20,6 +21,7 @@ export const SentinelUserSettings: core.serialization.ObjectSchema<
 
 export declare namespace SentinelUserSettings {
     export interface Raw {
+        chat_search_enabled: boolean;
         maps_without_asking: boolean;
         offline_mode: boolean;
         sandbox_without_asking: boolean;

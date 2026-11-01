@@ -81,6 +81,7 @@ import {
   getOrCreateChatAssistantAgent,
   scheduleRunsAs,
 } from '../runtime/chatAssistant';
+import type { ChatSearchIndexer } from '../runtime/chatSearchIndexing';
 import { validateManifest } from '../runtime/cron';
 import type { EventSubscriptionRegistry } from '../runtime/event-subscription';
 import { createMemoryClient } from '../runtime/memory/createMemoryClient';
@@ -135,6 +136,8 @@ export interface ScheduleTurnExecutionDeps<TTransaction> {
   globalSettingsStore: IGlobalSettingsStore<TTransaction>;
   /** Scheduled runs on Token Factory count against the same daily cap as chat turns. */
   tokenFactoryBudget: TokenFactoryBudget;
+  /** A scheduled run joins the past-chat search like any chat; absent, it is not added. */
+  chatSearchIndexer?: ChatSearchIndexer | undefined;
   /** The activity log a firing is written to; absent, firings run exactly as before and are not recorded. */
   audit?: AuditLogWriter | null | undefined;
 }
@@ -195,7 +198,7 @@ export async function startScheduleRunOnRequest<TTransaction>(params: {
   const { c, item, deps } = params;
   if (item.schedule.manifest.kind === 'reminder') {
     // A reminder needs no model: the host writes its line into the Reminders chat itself.
-    const deliveredSessionId = await deliverReminder({
+    const delivered = await deliverReminder({
       item,
       sessions: deps.sessions,
       sessionStore: deps.sessionStore,
@@ -203,11 +206,18 @@ export async function startScheduleRunOnRequest<TTransaction>(params: {
       now: new Date(),
       audit: deps.audit,
     });
+    // A reminder line is a finished turn like any other, so it joins the past-chat search now.
+    await deps.chatSearchIndexer?.indexFinishedTurn({
+      tenant_id: item.schedule.tenant_id,
+      created_by: item.schedule.created_by_subject.subject_id,
+      session_id: delivered.session_id,
+      turn_id: delivered.turn_id,
+    });
     await recordScheduleFiring({
       audit: deps.audit,
       logger: deps.logger,
       item,
-      session_id: deliveredSessionId,
+      session_id: delivered.session_id,
       tool_name: SET_REMINDER_TOOL_NAME,
       description: `The reminder ran: ${item.schedule.manifest.task}`,
     });
@@ -298,6 +308,7 @@ export async function startScheduleRunOnRequest<TTransaction>(params: {
       sandboxProviderResolver: deps.sandboxProviderResolver,
       globalSettingsStore: deps.globalSettingsStore,
       tokenFactoryBudget: deps.tokenFactoryBudget,
+      chatSearchIndexer: deps.chatSearchIndexer,
       personalizationProfile,
       personaContext: prepared.persona === undefined ? undefined : buildPersonaContext(prepared.persona),
       memoryClient,

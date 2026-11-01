@@ -183,6 +183,7 @@ describe('ModelSettings', () => {
         search_without_asking: true,
         maps_without_asking: false,
         sandbox_without_asking: true,
+        chat_search_enabled: false,
       };
       const api: SentinelApi = {
         listAuditEntries: vi.fn(async () => []),

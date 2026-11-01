@@ -233,6 +233,7 @@ export interface SentinelUserSettingsTable {
   search_without_asking: boolean;
   maps_without_asking: boolean;
   sandbox_without_asking: boolean;
+  chat_search_enabled: boolean;
   created_at: Date;
   updated_at: Date;
 }
@@ -291,6 +292,25 @@ export interface ApprovalDismissalTable {
   thread_id: string;
   tool_call_id: string;
   dismissed_at: Date;
+}
+
+/**
+ * One searchable message of a finished turn in the past-chat search index.
+ * PRIMARY KEY (tenant_id, session_id, turn_id, message_id). `search_vector` is generated
+ * from `body` by the database and never written by the app.
+ */
+export interface ChatSearchDocumentTable {
+  tenant_id: string;
+  session_id: string;
+  turn_id: string;
+  message_id: string;
+  role: string;
+  /** The persona the turn ran under; null for the main assistant. */
+  persona_id: string | null;
+  body: string;
+  /** The message's searchable words, built by the shared matching rule. */
+  search_words: string[];
+  created_at: Date;
 }
 
 /** Global key/value settings shared across tenants (e.g. persisted feature overrides). PRIMARY KEY (key). */
@@ -994,6 +1014,7 @@ export interface Database {
   turn_artifact: TurnArtifactTable;
   chat_image: ChatImageTable;
   approval_dismissal: ApprovalDismissalTable;
+  chat_search_document: ChatSearchDocumentTable;
   global_settings: GlobalSettingsTable;
   token_factory_usage: TokenFactoryUsageTable;
   token_factory_model_usage: TokenFactoryModelUsageTable;
