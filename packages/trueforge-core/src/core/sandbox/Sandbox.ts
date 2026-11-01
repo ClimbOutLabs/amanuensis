@@ -3150,6 +3150,9 @@ export class Sandbox extends LocalToolMCP {
     sandboxInstructions.addContent(
       'The sandbox holds no git credentials. The host authenticates network git (clone, fetch, pull, push, ls-remote over https://github.com) only when it is one plain command: no -c, -C, env overrides, pipes or chaining. Never ask for or search for tokens.',
     );
+    sandboxInstructions.addContent(
+      'When fetching remote content, the Agent MUST save it to a file first, then extract from the file. Do not pipe large fetches through grep or sed into the tool response.',
+    );
     if (this.boundRepository !== undefined) {
       const state = this.boundRepositoryState;
       const commands = this.boundRepository.commands

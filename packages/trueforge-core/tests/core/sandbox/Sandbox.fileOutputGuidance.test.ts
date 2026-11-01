@@ -58,6 +58,17 @@ describe('Sandbox file-output guidance', () => {
     );
   });
 
+  it('tells the Agent to save fetched remote content to a file before extracting from it', () => {
+    const sandbox = makeSandbox(true);
+    const builder = new InstructionBuilder('root');
+    sandbox.buildInstruction(builder);
+    const prompt = builder.build();
+
+    expect(prompt).toContain(
+      'When fetching remote content, the Agent MUST save it to a file first, then extract from the file. Do not pipe large fetches through grep or sed into the tool response.',
+    );
+  });
+
   it('omits the file-output section when file downloads are disabled', () => {
     const sandbox = makeSandbox(false);
     const builder = new InstructionBuilder('root');

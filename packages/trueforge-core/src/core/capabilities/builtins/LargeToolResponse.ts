@@ -1,6 +1,6 @@
 import dedent from 'dedent';
 import type { Logger } from 'winston';
-import { estimateTokensForString } from '../../llm/usage';
+import { describeContentSize, estimateTokensForString } from '../../llm/usage';
 import type { ToolCallResult } from '../../mcp/executeToolCalls';
 import type { ContextMessage } from '../../runtime/AgentThread.types';
 import type { Sandbox, SandboxInfo } from '../../sandbox/Sandbox';
@@ -450,10 +450,23 @@ export class LargeToolResponseProcessor implements ToolResponseProcessor {
     this.logger = param.logger.child({ module: 'LargeToolResponse' });
   }
 
+  // The thresholds are set in tokens, estimated at four characters per token; the reason states
+  // them in characters, which is what the model can plan against. An entry at or over the
+  // individual threshold was blocked for its own size; a smaller one was blocked only because
+  // the batch as a whole went over the total threshold.
+  private blockReasonDescription(entry: ToolResultWithInfo): string {
+    const perResult = (this.individualTokenThreshold * 4).toLocaleString('en-US');
+    const combined = (this.totalTokenThreshold * 4).toLocaleString('en-US');
+    return entry.originalTokens >= this.individualTokenThreshold
+      ? `this result is over the ${perResult}-character limit for a single tool result`
+      : `the results in this batch together are over the ${combined}-character combined limit`;
+  }
+
   private createLargeToolResponseGuidance(options: {
     sandbox: Sandbox | undefined;
     toolName: string | undefined;
     serverId: string | undefined;
+    entry: ToolResultWithInfo;
   }): string {
     // The first step is driven by the fetch-semantics registry (keyed by the
     // tool's original name), never by sniffing the result content.
@@ -475,18 +488,25 @@ export class LargeToolResponseProcessor implements ToolResponseProcessor {
       steps.push(createDynamicSubAgentLargeToolResponseGuidance());
     }
 
-    return `The Agent has not seen this tool result. Do not present anything as if it came from this result.\n\nContent too big. To handle a large tool call the Agent can do the following:\n${steps
+    return `The Agent has not seen this tool result. Do not present anything as if it came from this result.\n\nContent too big (${this.blockReasonDescription(options.entry)}). To handle a large tool call the Agent can do the following:\n${steps
       .map((step, index) => `${String(index + 1)}. ${step}`)
       .join(
         '\n',
       )}\n\nIf the Agent cannot reduce the output or re-run the tool with a narrower request, it must tell the user the result was too large to use and answer only from what it actually has, saying so.`;
   }
 
-  private createFileDumpMessage(params: { filePath: string; preview: string; originalContent: string }): string {
-    const { filePath, preview, originalContent } = params;
+  private createFileDumpMessage(params: {
+    filePath: string;
+    preview: string;
+    originalContent: string;
+    size: string;
+    reason: string;
+  }): string {
+    const { filePath, preview, originalContent, size, reason } = params;
     const steps: string[] = [
       dedent`Use sandbox to read parts of the file or extract data.
-      Use ${SANDBOX_SCHEMA_INFER_TAG} to undertand the schema.`,
+      Use ${SANDBOX_SCHEMA_INFER_TAG} to understand the schema.
+      The file's total size is given above. Plan reads against it, for example extract fields with a script or read sized ranges, instead of probing with small incremental reads.`,
     ];
 
     if (this.dynamicSubAgentsPresent) {
@@ -502,7 +522,7 @@ export class LargeToolResponseProcessor implements ToolResponseProcessor {
     const structuralSummary = jsonStructuralSummary(originalContent);
     const structureSection = structuralSummary === undefined ? '' : `\n\nStructure:\n${structuralSummary}`;
 
-    return `The Agent has not seen this tool result. Do not present anything as if it came from this result.\n\nContent too large. Result saved to: ${filePath}.\n\n${guidance}${structureSection}\n\nIf the Agent cannot read the saved file, it must tell the user the result was too large to use and answer only from what it actually has, saying so.\n\nPreview (first and last ${String(this.previewNumberOfCharacters)} chars):\n${preview}`;
+    return `The Agent has not seen this tool result. Do not present anything as if it came from this result.\n\nContent too large (${size}; ${reason}). Result saved to: ${filePath}.\n\n${guidance}${structureSection}\n\nIf the Agent cannot read the saved file, it must tell the user the result was too large to use and answer only from what it actually has, saying so.\n\nPreview (first and last ${String(this.previewNumberOfCharacters)} chars):\n${preview}`;
   }
 
   private buildResultsWithInfo(results: ToolCallResult[], sandbox: Sandbox | undefined): ToolResultWithInfo[] {
@@ -651,7 +671,7 @@ export class LargeToolResponseProcessor implements ToolResponseProcessor {
             content: entry.originalContent,
           }),
         });
-        newContent = `${this.createLargeToolResponseGuidance({ sandbox, toolName, serverId })}\n\nPreview (first and last ${String(this.previewNumberOfCharacters)} chars):\n${preview}`;
+        newContent = `${this.createLargeToolResponseGuidance({ sandbox, toolName, serverId, entry })}\n\nPreview (first and last ${String(this.previewNumberOfCharacters)} chars):\n${preview}`;
         if (sandbox) {
           queueSandboxDump = true;
         }
@@ -702,6 +722,8 @@ export class LargeToolResponseProcessor implements ToolResponseProcessor {
         filePath: stored.filePath,
         preview,
         originalContent: entry.originalContent,
+        size: describeContentSize(entry.originalContent),
+        reason: this.blockReasonDescription(entry),
       });
       entry.toolCallResult.isStructuredContent = false;
       return stored.sandboxCreated;
