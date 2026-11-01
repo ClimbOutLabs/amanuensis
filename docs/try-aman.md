@@ -6,7 +6,7 @@ Setting it up takes about 45 minutes. Most of that is waiting while things downl
 
 ## What you need
 
-- A computer with 16 GB of memory (8 GB is the bare minimum, and the first install is slow there) and about 30 GB of free disk space. It stays on while you use Aman.
+- A computer with 16 GB of memory (8 GB is the bare minimum, and the first install is slow there) and free disk space: about 20 GB on a Mac, about 45 GB on Linux. It stays on while you use Aman.
 - **Mac:** [Docker Desktop](https://www.docker.com/products/docker-desktop/). After installing it, open Docker Desktop, go to Settings, Resources, and set Memory to 8 GB or more. Then click Apply.
 - **Windows:** Windows 11 (or Windows 10 with the latest updates). You will install Ubuntu inside Windows (called WSL) and Docker Desktop; the steps are below.
 - **Linux (Ubuntu or Debian):** nothing extra. The installer offers to install Docker for you. Your user must be allowed to use `sudo`.

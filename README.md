@@ -94,7 +94,7 @@ Each persona has its own name, model, role and knowledge library.
 
 Setup takes about 15 minutes. Here is what you need:
 
-- **A Mac or a Linux computer** with 16 GB of memory (8 GB is the bare minimum, and the first install is slow there) and about 30 GB of free disk space. Aman itself takes about 10 GB; on Linux, the rest is set aside for the sandbox where Aman runs code. Windows works too, through a free Microsoft add-on called WSL 2: see the [Windows guide](docs/install-windows.md). Windows support is still new, so expect a few more bumps than on a Mac or Linux. If you get stuck, [tell us](https://github.com/ClimbOutLabs/amanuensis/issues) and we'll help.
+- **A Mac or a Linux computer** with 16 GB of memory (8 GB is the bare minimum, and the first install is slow there) and free disk space: about 20 GB on a Mac, about 45 GB on Linux. Aman itself takes about 10 GB; on Linux it also keeps room for the two sandbox disks where it runs code. Windows works too, through a free Microsoft add-on called WSL 2: see the [Windows guide](docs/install-windows.md). Windows support is still new, so expect a few more bumps than on a Mac or Linux. If you get stuck, [tell us](https://github.com/ClimbOutLabs/amanuensis/issues) and we'll help.
 - **Docker**, the free program Aman runs inside. On a Mac, [download Docker Desktop](https://www.docker.com/products/docker-desktop/), install it and start it. On Linux, the installer can set Docker up for you.
 - **A Together AI account**, which gives Aman a model to think with. Signing up is free, and you pay Together for what you use. You can sign up now or after the install.
 
