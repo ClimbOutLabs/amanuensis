@@ -40,13 +40,44 @@ function sameServerRedirect({ response, target }) {
   }
 }
 
+// Google's one cross-server move: the calendar address on calendar.google.com sends the client to
+// Google's CalDAV service host, apidata.googleusercontent.com, under /caldav/v2/. That move, and no
+// other cross-server redirect, may be followed, and only after the new host passes the same address
+// checks as the first one (see checkSignIn).
+const GOOGLE_CALENDAR_HOST = 'calendar.google.com';
+const GOOGLE_CALDAV_HOST = 'apidata.googleusercontent.com';
+const GOOGLE_CALDAV_PATH = '/caldav/v2/';
+
+/** The Google CalDAV address a redirect points to, when the target is Google's calendar address, else null. */
+function googleCaldavRedirect({ response, target }) {
+  if (target.hostname !== GOOGLE_CALENDAR_HOST) {
+    return null;
+  }
+  const location = response.headers?.location;
+  if (typeof location !== 'string') {
+    return null;
+  }
+  try {
+    const next = new URL(location, target);
+    return next.protocol === 'https:' &&
+      next.hostname === GOOGLE_CALDAV_HOST &&
+      next.pathname.startsWith(GOOGLE_CALDAV_PATH)
+      ? next
+      : null;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Words: ok (signed in), login (the server refused the login), server (the address could not be reached,
  * or answered something else), certificate (its security certificate was not accepted), redirect (it sent
  * the login to another server), blocked (not an address this service may use).
  * The connection goes only to an address that passed the address rules. One redirect to another path on the
- * same server is followed, since providers often add a trailing slash; any other redirect is refused, so
- * neither a changing DNS answer nor a redirect can lead the login somewhere else.
+ * same server is followed, since providers often add a trailing slash. Google's calendar address may also
+ * redirect once to Google's CalDAV service host; that host is checked the same way before the login is
+ * sent to it. Any other redirect is refused, so neither a changing DNS answer nor a redirect can lead the
+ * login somewhere else.
  */
 export async function checkSignIn(account, deps = {}) {
   const host = hostOf(account.url);
@@ -62,7 +93,16 @@ export async function checkSignIn(account, deps = {}) {
   if (answer.next === null) {
     return 'redirect';
   }
-  const second = await attempt({ account, target: answer.next, allowed, deps });
+  let secondAllowed = allowed;
+  if (answer.next.origin !== first.origin) {
+    // The only cross-server target attempt() returns is Google's CalDAV host. Check it like the first host.
+    const checked = await allowedAddresses(hostOf(answer.next.toString()), deps);
+    if (!checked.ok) {
+      return 'redirect';
+    }
+    secondAllowed = checked;
+  }
+  const second = await attempt({ account, target: answer.next, allowed: secondAllowed, deps });
   // A second redirect is not followed either.
   return second.word;
 }
@@ -110,7 +150,7 @@ function attempt({ account, target, allowed, deps }) {
       } else if (status === 401 || status === 403) {
         finish('login');
       } else if (REDIRECT_STATUSES.has(status)) {
-        finish('redirect', sameServerRedirect({ response, target }));
+        finish('redirect', sameServerRedirect({ response, target }) ?? googleCaldavRedirect({ response, target }));
       } else {
         finish('server');
       }

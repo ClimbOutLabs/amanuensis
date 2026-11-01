@@ -18,6 +18,8 @@ The calendar login is kept in one file, `/account/.env.calendar`, in a volume th
 - `CALDAV_USERNAME` and `CALDAV_PASSWORD`: the login.
 - `CALDAV_USER_EMAIL`: your own email address, used to find your invitations.
 
+For a Google account, the Settings Calendar card and the installer fill in Google's CalDAV address from the email address.
+
 Two things write the file, and both go through the account agent, which checks the address first:
 
 - The Settings Calendar card, over the agent's HTTP port. The agent also checks the sign-in before it saves. The request must carry `Authorization: Bearer <CALENDAR_ACCOUNT_SECRET>` and a JSON body, or the agent refuses it (401 without the secret, 415 for another kind of body).

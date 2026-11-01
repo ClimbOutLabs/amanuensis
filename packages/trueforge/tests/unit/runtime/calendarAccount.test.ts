@@ -4,6 +4,7 @@ import {
   registerCalendarConnectorForBoot,
   registerCalendarConnectorFromSavedAccountInBackground,
   removeCalendarAccount,
+  saveCalendarAccount,
   syncCalendarConnectorWithAccount,
   type CalendarAccountState,
 } from '../../../src/runtime/calendarAccount';
@@ -192,6 +193,68 @@ describe('the Calendar connector follows the saved account', () => {
     expect(failure instanceof Error ? failure.message : '').not.toContain(CANARY);
     expect(failure instanceof Error ? failure.cause : undefined).toBeInstanceOf(Error);
   });
+});
+
+describe('saving a calendar account', () => {
+  it('sends a Google save with the address built from the email address', async () => {
+    const bodies: string[] = [];
+    const fetchImpl = jest.fn(async (_input: string | Request | URL, init?: RequestInit) => {
+      bodies.push(typeof init?.body === 'string' ? init.body : '');
+      return new Response(
+        JSON.stringify({
+          connected: true,
+          url: 'https://calendar.google.com/calendar/dav/person@gmail.com/user/',
+          username: 'person@gmail.com',
+          email: 'person@gmail.com',
+          sign_in: 'ok',
+        }),
+      );
+    });
+    const state = await saveCalendarAccount(
+      { accountUrl: ACCOUNT_URL, secret: SECRET, fetchImpl, logger },
+      {
+        provider_key: 'google',
+        email: 'person@gmail.com',
+        password: 'abcd efgh ijkl mnop',
+        username: undefined,
+        calendar_url: undefined,
+      },
+    );
+    expect(JSON.parse(bodies[0] ?? '{}')).toEqual({
+      url: 'https://calendar.google.com/calendar/dav/person@gmail.com/user/',
+      username: 'person@gmail.com',
+      password: 'abcd efgh ijkl mnop',
+      email: 'person@gmail.com',
+    });
+    expect(state.account).toEqual({
+      url: 'https://calendar.google.com/calendar/dav/person@gmail.com/user/',
+      username: 'person@gmail.com',
+      email: 'person@gmail.com',
+    });
+  });
+
+  it.each(['fastmail', 'other'])(
+    'refuses a Gmail address with the %s provider before asking the agent',
+    async provider => {
+      const fetchImpl = jest.fn();
+      await expect(
+        saveCalendarAccount(
+          { accountUrl: ACCOUNT_URL, secret: SECRET, fetchImpl, logger },
+          {
+            provider_key: provider,
+            email: 'person@gmail.com',
+            password: 'abcd efgh ijkl mnop',
+            username: undefined,
+            calendar_url: undefined,
+          },
+        ),
+      ).rejects.toMatchObject({
+        failure: 'invalid_request',
+        message: 'Gmail calendars use the Google provider. Pick Google and try again. Nothing was saved.',
+      });
+      expect(fetchImpl).not.toHaveBeenCalled();
+    },
+  );
 });
 
 describe('the boot step for the Calendar connector', () => {

@@ -4,6 +4,7 @@
  * its plain lines, and how a save request is resolved against the presets.
  */
 import {
+  CALDAV_GOOGLE_PROVIDER_KEY,
   CALDAV_OTHER_NEEDS_ADDRESS_MESSAGE,
   CALDAV_OTHER_PROVIDER_KEY,
   caldavEmailProblem,
@@ -13,7 +14,7 @@ import {
   caldavProviderPreset,
   caldavUrlProblem,
   caldavUserProblem,
-  GOOGLE_ADDRESS_MESSAGE,
+  GMAIL_NEEDS_GOOGLE_PROVIDER_MESSAGE,
   isGoogleMailAddress,
 } from '@truefoundry/trueforge-core/core/calendar/caldav/presets';
 import type { Logger } from 'winston';
@@ -147,8 +148,8 @@ function resolveCalendarAccountSave(
   if (emailProblem !== null) {
     return { ok: false, message: emailProblem };
   }
-  if (isGoogleMailAddress(request.email)) {
-    return { ok: false, message: GOOGLE_ADDRESS_MESSAGE };
+  if (isGoogleMailAddress(request.email) && request.provider_key !== CALDAV_GOOGLE_PROVIDER_KEY) {
+    return { ok: false, message: GMAIL_NEEDS_GOOGLE_PROVIDER_MESSAGE };
   }
   if (caldavProviderPreset(request.provider_key) === undefined) {
     return { ok: false, message: 'That calendar provider is not on the list. Pick one and try again.' };

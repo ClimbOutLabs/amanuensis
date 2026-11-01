@@ -40,7 +40,19 @@ Ask Aman to open an attachment and it reads the file in the sandbox: PDFs (inclu
 
 Calendar is separate from mail and is off until you connect it. Once it is on, ask Aman things like "Any birthdays coming up?" or "What is on my calendar Thursday?". Aman can list events in a date range, search them by words, and open one event to see its guests, place, description and how it repeats. Reading never changes anything, and Aman never replies to an invite.
 
-To connect Calendar, finish the mail setup first, then:
+### Connect Google Calendar with an app password
+
+This is the simpler way to connect Google Calendar only. It does not connect Gmail.
+
+1. Turn on 2-Step Verification for your Google account, if it is not on yet. Google only offers app passwords after that.
+2. Open myaccount.google.com/apppasswords, type a name such as Aman, and select Create.
+3. Copy the 16-letter password Google shows. Google shows it only once.
+4. Open Settings, then Connectors, then Calendar, and select Connect.
+5. Pick Google, type your Gmail address (for example, yourusername@gmail.com), leave the login name empty, paste the app password, and select Connect.
+
+Aman fills in the calendar address from your email address: `https://calendar.google.com/calendar/dav/yourusername@gmail.com/user/`. The CalDAV card can work with any calendar on the account. If a Google Workspace admin has turned app passwords off for your account, use the Google panel instead.
+
+To connect Calendar through the Google panel, finish the mail setup first, then:
 
 1. In the Calendar section of the Google panel, open the Calendar API link and click Enable. Without this, Aman says the Google Calendar API isn't turned on.
 2. Select Connect Calendar and leave the calendar box ticked on Google's screen. Aman reuses the client you already saved, so there is nothing to retype.

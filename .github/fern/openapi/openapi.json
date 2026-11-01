@@ -1220,6 +1220,13 @@
       },
       "CalendarProvider": {
         "properties": {
+          "account_url_template": {
+            "description": "A built-in calendar address made from the email address; null when the provider does not use one.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "help_hint": {
             "description": "One plain sentence on how to get an app password.",
             "type": "string"
@@ -1232,7 +1239,7 @@
             ]
           },
           "key": {
-            "description": "Stable provider key, such as fastmail or other.",
+            "description": "Stable provider key, such as google or other.",
             "type": "string"
           },
           "name": {
@@ -1240,19 +1247,28 @@
             "type": "string"
           },
           "server_url": {
-            "description": "The built-in calendar address; null when it depends on the email domain or is typed.",
+            "description": "The built-in calendar address; null when it depends on the email domain, the email address or is typed.",
             "type": [
               "string",
               "null"
             ]
+          },
+          "setup_steps": {
+            "description": "Plain steps to show before the form; empty when the hint is enough.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
           }
         },
         "required": [
           "key",
           "name",
           "server_url",
+          "account_url_template",
           "help_url",
-          "help_hint"
+          "help_hint",
+          "setup_steps"
         ],
         "type": "object"
       },
