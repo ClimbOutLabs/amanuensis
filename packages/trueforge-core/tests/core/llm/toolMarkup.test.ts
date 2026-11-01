@@ -415,6 +415,8 @@ describe('ToolMarkupGuard stray closing tags', () => {
     ],
     ['close it with </parameter> and save the file.', 'close it with </parameter> and save the file.'],
     ['The "</invoke>" tag ends a call.', 'The "</invoke>" tag ends a call.'],
+    ['The tag **</invoke>** closes the call.', 'The tag **</invoke>** closes the call.'],
+    ['Okay </tool_calls>**Done** and set.', 'Okay **Done** and set.'],
   ])('judges %j the same when it arrives one character at a time', (text, shown) => {
     const guard = new ToolMarkupGuard();
     let out = '';
@@ -423,6 +425,37 @@ describe('ToolMarkupGuard stray closing tags', () => {
     }
     expect(guard.finish()).toBe('clean');
     expect(out + guard.heldText).toBe(shown);
+  });
+
+  it.each([
+    'The tag **</invoke>** closes the call.',
+    'The tag _</invoke>_ closes the call.',
+    'Cut ~~</invoke>~~ here.',
+  ])('keeps a closing tag inside emphasis: %s', text => {
+    const guard = new ToolMarkupGuard();
+    expect(guard.push(text) + guard.heldText).toBe(text);
+    expect(guard.finish()).toBe('clean');
+  });
+
+  it('keeps a closing tag that ends a sentence line without punctuation', () => {
+    const guard = new ToolMarkupGuard();
+    const text = '- close each value with </parameter>\n- then save.';
+    expect(guard.push(text) + guard.heldText).toBe(text);
+    expect(guard.finish()).toBe('clean');
+  });
+
+  it('pairs a prose opening tag with one closing tag only', () => {
+    const guard = new ToolMarkupGuard();
+    const shown = guard.push('You call it as <invoke name="x"> in the docs.\nAll booked.\n</invoke>\nDone.');
+    expect(shown + guard.heldText).toBe('You call it as <invoke name="x"> in the docs.\nAll booked.\nDone.');
+    expect(guard.finish()).toBe('clean');
+  });
+
+  it('hides a run with text glued after it even when a prose opening tag of that name is open', () => {
+    const guard = new ToolMarkupGuard();
+    const shown = guard.push('Use <parameter name="a"> like this. Done.</parameter></invoke>Your trip is booked.');
+    expect(shown + guard.heldText).toBe('Use <parameter name="a"> like this. Done. Your trip is booked.');
+    expect(guard.finish()).toBe('clean');
   });
 
   it('keeps a quoted closing tag a sentence names', () => {

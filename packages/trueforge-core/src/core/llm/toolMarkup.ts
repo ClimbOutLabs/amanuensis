@@ -46,7 +46,7 @@ const MAX_OPENER_LENGTH = Math.max(...ALL_OPENERS.map(opener => opener.length));
 
 type CandidateVerdict =
   | { verdict: 'markup' }
-  | { verdict: 'dead'; deadLength: number }
+  | { verdict: 'dead'; deadLength: number; pairs?: string }
   | { verdict: 'stray'; length: number; replacement?: string }
   | { verdict: 'undecided' };
 
@@ -321,8 +321,8 @@ interface CandidateContext {
   endOfStream: boolean;
   /** The character just before the candidate, or '' at the start of the reply. */
   before: string;
-  /** Tag names whose opening tag was released as prose earlier in the reply. */
-  proseNames: ReadonlySet<string>;
+  /** Opening tags released as prose earlier in the reply and not yet closed, by tag name. */
+  proseOpeners: ReadonlyMap<string, number>;
 }
 
 /** The tag name in an opening or closing tag's text: `<parameter name=...` and `</parameter>` both give "parameter". */
@@ -330,32 +330,38 @@ function tagName(text: string): string | undefined {
   return /^<\/?([^\s<>/=]+)/.exec(text)?.[1];
 }
 
-/** Opening punctuation a closing tag may follow and still stand as its own word. */
-const OPENS_WORD = /^$|[\s([{"'`]$/u;
+/** Opening punctuation, quotes and emphasis a closing tag may follow and still stand as its own word. */
+const OPENS_WORD = /^$|[\s([{"'`*_~]$/u;
 /** Closing punctuation a closing tag may come before and still stand as its own word. */
 const CLOSES_WORD = /^[.,;:!?)\]}]/u;
-/** A quote or backtick that closes a word: followed by the end, a blank or closing punctuation. */
-const CLOSING_QUOTE = /^["'`](?:$|[\s.,;:!?)\]}])/u;
+/**
+ * Quotes and emphasis marks that close a word: followed by the end, a blank or closing punctuation.
+ * Followed by a letter they open the next word instead, which is text glued to the tag.
+ */
+const CLOSING_MARKS = /^["'`*_~]+(?:$|[\s.,;:!?)\]}])/u;
+const MARKS_ONLY = /^["'`*_~]+$/u;
 
 /**
- * Judges a closing tag that starts a candidate, by what it closes and where it sits. A run of
- * closing tags with only blanks between them is judged together. A run whose tag closes an opening
- * tag already released as prose is prose too. A run that stands alone on its line is a stray marker,
- * hidden with the blanks after it. A run inside a line is prose when it stands as its own word (a
- * sentence naming the tag), and a stray marker when text is glued to it with no space; a run glued on
- * both sides leaves a space, so the words around it stay apart. While the rest of the run or line may
- * still be arriving, the run waits; the end of the stream settles it with whatever it got.
+ * Judges a closing tag that starts a candidate, by where it sits and what it closes. A run of closing
+ * tags with only blanks between them is judged together.
+ * - A run alone on its line is a stray marker, hidden with its line.
+ * - Text glued straight after a run is a reply that went on writing after a call it wrote as text: the
+ *   run is hidden, leaving a space when text is glued before it too.
+ * - A run that stands as its own word (blanks, punctuation, quotes or emphasis on both sides) is a
+ *   sentence naming the tag, and stays.
+ * - A run glued only to the text before it closes an opening tag released as prose, when one of that
+ *   name is still open, and stays paired with it; otherwise it is hidden.
+ * While the rest of the run or line may still be arriving, the run waits; the end of the stream
+ * settles it with whatever it got.
  */
 function judgeClosingTag(text: string, context: CandidateContext): CandidateVerdict {
-  const { startsLine, endOfStream, before, proseNames } = context;
+  const { startsLine, endOfStream, before, proseOpeners } = context;
   const tag = STRAY_CLOSING_TAGS.find(candidate => text.startsWith(candidate));
   if (tag === undefined) {
     return { verdict: 'undecided' };
   }
   const name = tagName(tag);
-  if (name !== undefined && proseNames.has(name)) {
-    return { verdict: 'dead', deadLength: tag.length };
-  }
+  const opener = name !== undefined && (proseOpeners.get(name) ?? 0) > 0 ? name : undefined;
   // The end of the run: a closing tag the line adds after blanks alone joins the run.
   let runEnd = tag.length;
   for (;;) {
@@ -372,41 +378,49 @@ function judgeClosingTag(text: string, context: CandidateContext): CandidateVerd
   const rest = text.slice(runEnd);
   const newlineAt = rest.indexOf('\n');
   const lineRest = newlineAt === -1 ? rest : rest.slice(0, newlineAt);
-  if (/[^ \t\r]/.test(lineRest)) {
-    // One more tag of the run may still be arriving: while it can, the run waits. The tag
-    // arrives after the blanks that follow the run, so the wait is judged on the tail after
-    // those blanks, the same blanks the run scan above steps over.
-    let tailAt = 0;
-    while (
-      tailAt < lineRest.length &&
-      (lineRest.charAt(tailAt) === ' ' || lineRest.charAt(tailAt) === '\t' || lineRest.charAt(tailAt) === '\r')
-    ) {
-      tailAt++;
-    }
-    const arrivingTail = lineRest.slice(tailAt);
-    if (newlineAt === -1 && !endOfStream && STRAY_CLOSING_TAGS.some(candidate => candidate.startsWith(arrivingTail))) {
+  const gluedBefore = !OPENS_WORD.test(before);
+  const keptAsWord: CandidateVerdict = { verdict: 'dead', deadLength: runEnd };
+  const pairedWithOpener: CandidateVerdict | undefined =
+    opener === undefined ? undefined : { verdict: 'dead', deadLength: runEnd, pairs: opener };
+  if (!/[^ \t\r]/.test(lineRest)) {
+    if (newlineAt === -1 && !endOfStream) {
       return { verdict: 'undecided' };
     }
-    // A quote right after the run closes a word only if what follows it says so.
-    if (/^["'`]$/u.test(lineRest) && newlineAt === -1 && !endOfStream) {
-      return { verdict: 'undecided' };
+    if (startsLine) {
+      // The line break goes with the run when the run was the whole line.
+      return { verdict: 'stray', length: runEnd + lineRest.length + (newlineAt !== -1 ? 1 : 0) };
     }
-    const gluedBefore = !OPENS_WORD.test(before);
-    const gluedAfter = !/^\s/u.test(lineRest) && !CLOSES_WORD.test(lineRest) && !CLOSING_QUOTE.test(lineRest);
-    if (!gluedBefore && !gluedAfter) {
-      return { verdict: 'dead', deadLength: runEnd };
+    if (!gluedBefore) {
+      return keptAsWord;
     }
-    return gluedBefore && gluedAfter
-      ? { verdict: 'stray', length: runEnd, replacement: ' ' }
-      : { verdict: 'stray', length: runEnd };
+    // When words came before it on the line the break stays, so the line after it keeps its own line.
+    return pairedWithOpener ?? { verdict: 'stray', length: runEnd + lineRest.length };
   }
-  if (newlineAt === -1 && !endOfStream) {
+  // One more tag of the run may still be arriving: while it can, the run waits. The tag arrives
+  // after the blanks that follow the run, so the wait is judged on the tail after those blanks.
+  let tailAt = 0;
+  while (
+    tailAt < lineRest.length &&
+    (lineRest.charAt(tailAt) === ' ' || lineRest.charAt(tailAt) === '\t' || lineRest.charAt(tailAt) === '\r')
+  ) {
+    tailAt++;
+  }
+  const arrivingTail = lineRest.slice(tailAt);
+  if (newlineAt === -1 && !endOfStream && STRAY_CLOSING_TAGS.some(candidate => candidate.startsWith(arrivingTail))) {
     return { verdict: 'undecided' };
   }
-  // The line break goes with the run when the run was the whole line. When words came before
-  // it on the line the break stays, so the line after it keeps its own line.
-  const throughLineBreak = startsLine && newlineAt !== -1 ? 1 : 0;
-  return { verdict: 'stray', length: runEnd + lineRest.length + throughLineBreak };
+  // Quotes or emphasis right after the run close a word only if what follows them says so.
+  if (MARKS_ONLY.test(lineRest) && newlineAt === -1 && !endOfStream) {
+    return { verdict: 'undecided' };
+  }
+  const gluedAfter = !/^\s/u.test(lineRest) && !CLOSES_WORD.test(lineRest) && !CLOSING_MARKS.test(lineRest);
+  if (gluedAfter) {
+    return gluedBefore ? { verdict: 'stray', length: runEnd, replacement: ' ' } : { verdict: 'stray', length: runEnd };
+  }
+  if (!gluedBefore) {
+    return keptAsWord;
+  }
+  return pairedWithOpener ?? { verdict: 'stray', length: runEnd };
 }
 
 /**
@@ -494,8 +508,8 @@ export class ToolMarkupGuard {
   #candidateBefore = '';
   /** The last character released, so a candidate at the start of the held text knows what came before it. */
   #lastReleased = '';
-  /** Tag names whose opening tag was released as prose, so their closing tags are prose too. */
-  #proseNames = new Set<string>();
+  /** Opening tags released as prose and not yet closed, by tag name: each pairs with one closing tag. */
+  #proseOpeners = new Map<string, number>();
   /** Whether the scan is inside an indented code block, where nothing is markup. */
   #indented = false;
   /** Whether the next unconsumed character starts a line. */
@@ -548,10 +562,14 @@ export class ToolMarkupGuard {
         }
         if (judged.verdict === 'dead') {
           // Prose after all: release the dead token and scan what follows it afresh. An opening tag
-          // released as prose makes its closing tag prose too.
+          // released as prose waits for one closing tag to pair with; a closing tag kept by that
+          // pairing closes it.
           const opened = candidate.startsWith('</') ? undefined : tagName(candidate);
           if (opened !== undefined) {
-            this.#proseNames.add(opened);
+            this.#proseOpeners.set(opened, (this.#proseOpeners.get(opened) ?? 0) + 1);
+          }
+          if (judged.pairs !== undefined) {
+            this.#proseOpeners.set(judged.pairs, (this.#proseOpeners.get(judged.pairs) ?? 1) - 1);
           }
           emit += this.#take(this.#candidateAt + judged.deadLength);
           this.#candidateAt = undefined;
@@ -609,7 +627,7 @@ export class ToolMarkupGuard {
       startsLine: this.#candidateStartsLine,
       endOfStream,
       before: this.#candidateBefore,
-      proseNames: this.#proseNames,
+      proseOpeners: this.#proseOpeners,
     };
   }
 
