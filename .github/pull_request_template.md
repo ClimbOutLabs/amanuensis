@@ -1,8 +1,8 @@
 ## Spec
 
-<!-- Nontrivial changes require a spec. Link the spec document, or paste a concise spec inline for small changes. No spec, no merge. -->
+<!-- Nontrivial changes require a spec. Link the spec file under specs/ (see specs/README.md), or paste a concise spec inline for small changes. No spec, no merge. -->
 
-- Spec:
+- Spec: specs/<branch-name>.md
 - [ ] This change is trivial (typo, formatting, or other change too small for a spec)
 
 ## Description
