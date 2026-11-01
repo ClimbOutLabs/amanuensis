@@ -38,11 +38,11 @@ Not covered: `.ppt` and other pre-2007 PowerPoint, Word 6/95 and Excel 5/95. The
 ## 3. Limits and safety
 
 - Existing caps hold: 25 MB per file, the shared per-call and per-session page, character and byte budgets.
-- A zip-based file may unpack to at most 100 MB and 5,000 entries; a password-protected zip entry is refused.
+- One read may unpack at most 100 MB and 5,000 zip entries in total, shared by any zip-based files nested inside an email; a password-protected zip entry is refused.
 - At most 1,000,000 characters per file; the result says when a file held more.
 - An XML part that declares a document type is refused, so no entity expansion and no external entities.
 - Compound-file chains, directory trees and spreadsheet records are bounds-checked and loop-checked.
-- Every failure is a fixed code turned into a plain sentence (damaged, password-protected, very old format, too large, not a readable document). The reader's own output never reaches the message, because it could quote the file; the server log keeps it.
+- Every failure is a fixed code turned into a plain sentence with a next step (damaged, password-protected, very old format, too large, too slow, not a readable document). No raw error reaches the message, from the reader or from the sandbox around it, because it could quote the file or name sandbox paths; the server log keeps it.
 - Text from a file is data, not instructions, as for PDFs.
 
 ## 4. Tests

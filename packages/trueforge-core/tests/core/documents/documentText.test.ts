@@ -469,6 +469,58 @@ describe('the document reader that runs in the sandbox', () => {
     expect(() => read({ bytes: bomb })).toThrow('The file is too large to read.');
   });
 
+  it('refuses entity declarations in any encoding, including UTF-16 with no byte-order mark', () => {
+    const declared =
+      '<?xml version="1.0" encoding="UTF-16"?><!DOCTYPE d [<!ENTITY a "AAAAAAAAAA"><!ENTITY b "&a;&a;&a;&a;">]>' +
+      '<office:document-content xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0"><office:body><office:text><text:p>&b;</text:p></office:text></office:body></office:document-content>';
+    const script = [
+      'import sys, io, zipfile',
+      'buffer = io.BytesIO()',
+      'with zipfile.ZipFile(buffer, "w") as z: z.writestr("content.xml", sys.argv[1].encode("utf-16-le"))',
+      'sys.stdout.buffer.write(buffer.getvalue())',
+    ].join('\n');
+    const bytes = execFileSync('python3', ['-I', '-c', script, declared]);
+    const output = run({ bytes, extension: '.odt', limit: 100_000 });
+    expect(output).toBe(`${MARKER}ERR:UNREADABLE\n`);
+  });
+
+  it('shares one unpack budget across the zips inside an e-mail', () => {
+    // Each attachment alone fits the 100 MB budget; together they do not.
+    const zip = zipOf(
+      {
+        'word/document.xml':
+          '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body/></w:document>',
+      },
+      { repeatBytes: 60 * 1024 * 1024 },
+    );
+    const part = (name: string): string =>
+      [
+        '--b',
+        `Content-Type: application/octet-stream; name="${name}"`,
+        `Content-Disposition: attachment; filename="${name}"`,
+        'Content-Transfer-Encoding: base64',
+        '',
+        zip.toString('base64'),
+      ].join('\r\n');
+    const eml = [
+      'From: a@example.com',
+      'Subject: two files',
+      'Content-Type: multipart/mixed; boundary="b"',
+      '',
+      '--b',
+      'Content-Type: text/plain',
+      '',
+      'see attached',
+      part('one.docx'),
+      part('two.docx'),
+      '--b--',
+      '',
+    ].join('\r\n');
+    const text = read({ bytes: Buffer.from(eml), extension: '.eml' });
+    const notes = text.split('\n').filter(line => line.startsWith('(This attachment could not be read'));
+    expect(notes).toEqual(['(This attachment could not be read: the file is too large to read.)']);
+  });
+
   it('does not follow an external entity in an .odt', () => {
     const secret = join(dir, 'secret.txt');
     writeFileSync(secret, 'TOP-SECRET-VALUE');
@@ -499,7 +551,7 @@ describe('parseDocumentTextOutput', () => {
   });
 
   it('says so when the reader gave no answer at all', () => {
-    expect(() => parseDocumentTextOutput({ output: 'Traceback...', marker: MARKER })).toThrow('gave no answer');
+    expect(() => parseDocumentTextOutput({ output: 'Traceback...', marker: MARKER })).toThrow(UNREADABLE);
   });
 });
 

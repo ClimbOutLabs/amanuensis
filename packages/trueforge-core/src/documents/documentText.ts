@@ -8,6 +8,8 @@
  * so a spreadsheet saved as HTML or a Word file saved as RTF is still read for what it is.
  */
 
+import { DocumentReadError } from './documentReadError';
+
 /** Most bytes a zip-based document may unpack to, so a small zip cannot fill the sandbox's memory. */
 export const MAX_UNPACKED_DOCUMENT_BYTES = 100 * 1024 * 1024;
 
@@ -61,10 +63,12 @@ import sys, io, re, csv, zipfile, struct, datetime, email
 from email import policy
 from html.parser import HTMLParser
 from xml.etree import ElementTree as ET
+from xml.parsers import expat
 
 path, hint, limit, mark, max_unpacked, max_entries = (
     sys.argv[1], sys.argv[2].lower(), int(sys.argv[3]), sys.argv[4], int(sys.argv[5]), int(sys.argv[6]))
 sys.stdout.reconfigure(encoding='utf-8')
+budget = {'bytes': max_unpacked, 'entries': max_entries}
 MAX_DEPTH = 3
 
 
@@ -146,28 +150,21 @@ def read_csv(data, out, tab):
 
 # ---------- XML helpers ----------
 
+def refuse_declaration(*_):
+    raise Problem('UNREADABLE')
+
+
 def safe_xml(data):
-    """Refuses any document type declaration, which is the only way an XML file can define entities."""
-    head = data[:1 << 20]
-    if head.startswith(b'\xff\xfe') or head.startswith(b'\xfe\xff'):
-        head = head.decode('utf-16', 'ignore')
-    else:
-        head = head.decode('utf-8', 'ignore').lstrip('\ufeff')
-    i = 0
-    while True:
-        while i < len(head) and head[i] in ' \t\r\n':
-            i += 1
-        if head.startswith('<?', i):
-            end = head.find('?>', i)
-        elif head.startswith('<!--', i):
-            end = head.find('-->', i)
-        elif head.startswith('<', i) and not head.startswith('<!', i):
-            return data
-        else:
-            raise Problem('UNREADABLE')
-        if end < 0:
-            raise Problem('UNREADABLE')
-        i = end + 2
+    """Runs expat over the whole part first and refuses any document type or entity declaration, whatever the
+    encoding, so an XML part can never define or expand entities; then the part is parsed for real."""
+    scanner = expat.ParserCreate()
+    scanner.SetParamEntityParsing(expat.XML_PARAM_ENTITY_PARSING_NEVER)
+    scanner.StartDoctypeDeclHandler = refuse_declaration
+    scanner.EntityDeclHandler = refuse_declaration
+    scanner.UnparsedEntityDeclHandler = refuse_declaration
+    scanner.ExternalEntityRefHandler = refuse_declaration
+    scanner.Parse(data, True)
+    return data
 
 
 def parse_xml(data):
@@ -184,7 +181,10 @@ def open_zip(data):
     except zipfile.BadZipFile:
         raise Problem('DAMAGED')
     entries = z.infolist()
-    if len(entries) > max_entries or sum(e.file_size for e in entries) > max_unpacked:
+    # One budget for the whole read, so a file cannot multiply it by nesting zips inside an e-mail.
+    budget['bytes'] -= sum(e.file_size for e in entries)
+    budget['entries'] -= len(entries)
+    if budget['bytes'] < 0 or budget['entries'] < 0:
         raise Problem('TOO_BIG')
     if any(e.flag_bits & 1 for e in entries):
         raise Problem('PROTECTED')
@@ -1588,16 +1588,18 @@ export interface DocumentTextResult {
 export function parseDocumentTextOutput(input: { output: string; marker: string }): DocumentTextResult {
   const at = input.output.indexOf(input.marker);
   if (at < 0) {
-    throw new Error('The document reader gave no answer.');
+    throw new DocumentReadError(UNREADABLE_MESSAGE);
   }
   const after = input.output.slice(at + input.marker.length);
   const status = after.split('\n', 1)[0]?.trim() ?? '';
   if (status.startsWith('ERR:')) {
     const code = status.slice(4);
-    throw new Error(Object.entries(DOCUMENT_TEXT_PROBLEMS).find(([key]) => key === code)?.[1] ?? UNREADABLE_MESSAGE);
+    throw new DocumentReadError(
+      Object.entries(DOCUMENT_TEXT_PROBLEMS).find(([key]) => key === code)?.[1] ?? UNREADABLE_MESSAGE,
+    );
   }
   if (status !== 'OK' && status !== 'OK TRUNCATED') {
-    throw new Error(UNREADABLE_MESSAGE);
+    throw new DocumentReadError(UNREADABLE_MESSAGE);
   }
   const newline = after.indexOf('\n');
   return { text: newline < 0 ? '' : after.slice(newline + 1), truncated: status === 'OK TRUNCATED' };

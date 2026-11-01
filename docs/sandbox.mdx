@@ -118,15 +118,16 @@ statement saved as HTML or tab-separated text under an `.xls` name, is read for 
 text is cut into pages of about 3,000 characters, so `extract_document_text` reads long files in
 `page_start`/`page_end` windows the same way as a PDF, and an open-ended tool read shows a short
 window and names the next range. Limits: 25 MB per file (the same cap as PDFs), at most 100 MB and
-5,000 entries once a zip-based file (`.docx`, `.xlsx`, `.pptx`, OpenDocument) is unpacked, 1,000,000
+5,000 entries unpacked from zip-based files (`.docx`, `.xlsx`, `.pptx`, OpenDocument) per read, nested ones included, 1,000,000
 characters of text per file (the result says when a file holds more), 2 GB of memory and 60 seconds
-per read. An XML part that declares a document type is refused, so a file cannot define entities or
-pull in other files.
+per read. An XML part that declares a document type is refused, in any text encoding, so a file
+cannot define entities or pull in other files.
 
-A file that cannot be read gets a plain reason, never the reader's own output (which could quote
-the file): damaged or incomplete, protected with a password (an encrypted `.docx`/`.xlsx`/`.pptx`,
-`.doc` or `.xls`), saved in a very old format (Word 6/95, Excel 5/95, `.ppt`), too large, or not a
-kind of document that can be read. A document with no text (only pictures) says so.
+A file that cannot be read gets a plain reason with what to do next, never a raw error (which
+could quote the file or name sandbox paths; the server log keeps it): damaged or incomplete,
+protected with a password (an encrypted `.docx`/`.xlsx`/`.pptx`, `.doc` or `.xls`), saved in a very
+old format (Word 6/95, Excel 5/95, `.ppt`), too large, too slow to read, or not a kind of document
+that can be read. A document with no text (only pictures) says so.
 
 ## Repository-bound coding sessions
 

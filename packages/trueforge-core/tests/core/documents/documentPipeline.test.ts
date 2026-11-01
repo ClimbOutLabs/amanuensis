@@ -20,6 +20,7 @@ import {
   type DocumentExtraction,
   type ExtractedDocument,
 } from '../../../src/documents/documentExtraction';
+import { DocumentReadError } from '../../../src/documents/documentReadError';
 import { createStructuredDocumentDocx } from '../../../src/documents/documentRenderer';
 import {
   netWorthAsDocumentReport,
@@ -186,7 +187,8 @@ describe('local document pipeline', () => {
     expect(result.documents[0]).toMatchObject({
       filename: 'unreadable.png',
       pages: [],
-      issue: expect.stringContaining('tesseract failed'),
+      issue:
+        'Could not extract unreadable.png. Try again; if it keeps failing, check that the sandbox is ready under Settings, Sandbox.',
     });
   });
 
@@ -227,7 +229,7 @@ describe('local document pipeline', () => {
     );
   });
 
-  it('reports a damaged PDF with the reader detail, not as missing and not as an OCR problem', async () => {
+  it('reports a damaged PDF as damaged, not as missing and not as an OCR problem', async () => {
     const result = await extractDocumentText({
       runTextReader: unusedTextReader,
       files: [{ filename: 'damaged.pdf', path: 'uploads/damaged.pdf' }],
@@ -242,7 +244,7 @@ describe('local document pipeline', () => {
     });
 
     expect(result.documents[0]?.issue).toBe(
-      "Could not extract damaged.pdf: (exit code 2): Syntax Error: Couldn't read xref table",
+      'Could not extract damaged.pdf: the file is damaged or incomplete. Ask the sender to send it again.',
     );
     expect(result.documents[0]?.issue).not.toContain('could not be found');
     expect(result.documents[0]?.issue).not.toContain('pdftoppm');
@@ -263,13 +265,13 @@ describe('local document pipeline', () => {
     });
 
     expect(result.documents[0]?.issue).toBe(
-      "Could not extract broken.pdf: (exit code 2): Syntax Error: Couldn't find trailer dictionary",
+      'Could not extract broken.pdf: the file is damaged or incomplete. Ask the sender to send it again.',
     );
     expect(result.documents[0]?.issue).not.toContain('could not be found');
     expect(result.documents[0]?.issue).not.toContain('pdftoppm');
   });
 
-  it('reports a file it cannot open for permission with the reader detail, not as missing', async () => {
+  it('never shows the reader detail, which can name sandbox paths, for a file it cannot open', async () => {
     const result = await extractDocumentText({
       runTextReader: unusedTextReader,
       files: [{ filename: 'sealed.pdf', path: 'uploads/sealed.pdf' }],
@@ -284,8 +286,9 @@ describe('local document pipeline', () => {
     });
 
     expect(result.documents[0]?.issue).toBe(
-      "Could not extract sealed.pdf: (exit code 1): I/O Error: Couldn't open file 'uploads/sealed.pdf': Permission denied",
+      'Could not extract sealed.pdf. Try again; if it keeps failing, check that the sandbox is ready under Settings, Sandbox.',
     );
+    expect(result.documents[0]?.issue).not.toContain('uploads/');
     expect(result.documents[0]?.issue).not.toContain('could not be found');
     expect(result.documents[0]?.issue).not.toContain('pdftoppm');
   });
@@ -402,7 +405,7 @@ describe('local document pipeline', () => {
     expect(snapshotLimits).toEqual(Array.from({ length: aggregateFileCount }, () => MAX_BYTES_PER_DOCUMENT));
     expect(verify).toHaveBeenCalledTimes(aggregateFileCount);
     expect(cleanup).toHaveBeenCalledTimes(aggregateFileCount);
-    expect(JSON.stringify(refused)).toContain('aggregate byte limit');
+    expect(JSON.stringify(refused)).toContain('more than can be read at once');
   });
 
   it('rejects tampered provenance and excludes safe conflicts from deterministic draft totals', () => {
@@ -839,10 +842,20 @@ describe('document page-range extraction', () => {
     it('passes on the plain reason the reader gives when a file cannot be read', async () => {
       const { input } = wordInput({ filename: 'fake.docx', bytes: Buffer.from('plain text'), text: 'x' });
       input.runTextReader = () =>
-        Promise.reject(new Error('The file is damaged or incomplete. Ask the sender to send it again.'));
+        Promise.reject(new DocumentReadError('The file is damaged or incomplete. Ask the sender to send it again.'));
       const result = await extractDocumentText(input);
       expect(result.documents[0]?.issue).toBe(
         'Could not extract fake.docx: The file is damaged or incomplete. Ask the sender to send it again.',
+      );
+    });
+
+    it('never shows a raw failure, which can name sandbox paths or provider details', async () => {
+      const { input } = wordInput({ filename: 'notes.docx', bytes: zipHeader, text: 'x' });
+      input.runTextReader = () =>
+        Promise.reject(new Error('slot 3 exec failed: /var/lib/aman-slots/3/workspace/.aman/uploads/notes.docx'));
+      const result = await extractDocumentText(input);
+      expect(result.documents[0]?.issue).toBe(
+        'Could not extract notes.docx. Try again; if it keeps failing, check that the sandbox is ready under Settings, Sandbox.',
       );
     });
 

@@ -9,6 +9,7 @@ import {
   MAX_PAGES_PER_DOCUMENT,
   MAX_TOTAL_DOCUMENT_CHARS,
 } from '../../documents/documentExtraction';
+import { DocumentReadError } from '../../documents/documentReadError';
 import {
   DOCUMENT_TEXT_SCRIPT,
   MAX_UNPACKED_DOCUMENT_BYTES,
@@ -6756,7 +6757,12 @@ export class Sandbox extends LocalToolMCP {
    * Extraction starts at firstPage; returned pages carry absolute 1-based
    * page numbers and total_pages is the true document total, never capped.
    */
-  async runDocumentText(input: {
+  /** Native PDF text; a failure is logged here with its raw detail, which never reaches the person. */
+  runDocumentText(input: Parameters<Sandbox['readPdfText']>[0]): ReturnType<Sandbox['readPdfText']> {
+    return this.loggedDocumentRead({ reader: 'PDF text', read: () => this.readPdfText(input) });
+  }
+
+  private async readPdfText(input: {
     filePath: string;
     firstPage?: number | undefined;
     maxPages: number;
@@ -6826,7 +6832,12 @@ export class Sandbox extends LocalToolMCP {
    * Reads the text of a staged office document, e-mail, web page or text file inside the selected sandbox, with
    * Python's standard library only. The output is cut at the aggregate character cap; the result says when it was.
    */
-  async runTextDocumentReader(input: {
+  /** Office, e-mail and text files; a failure is logged here with its raw detail, which never reaches the person. */
+  runTextDocumentReader(input: Parameters<Sandbox['readTextDocument']>[0]): ReturnType<Sandbox['readTextDocument']> {
+    return this.loggedDocumentRead({ reader: 'document text', read: () => this.readTextDocument(input) });
+  }
+
+  private async readTextDocument(input: {
     filePath: string;
     extension: string;
     signal: AbortSignal | undefined;
@@ -6859,7 +6870,9 @@ export class Sandbox extends LocalToolMCP {
         exit_code: result.response.exitCode,
         output: result.response.result.slice(0, 2000),
       });
-      throw new Error(plainReaderFailure({ exitCode: result.response.exitCode, output: result.response.result }));
+      throw new DocumentReadError(
+        plainReaderFailure({ exitCode: result.response.exitCode, output: result.response.result }),
+      );
     }
     return parseDocumentTextOutput({ output: result.response.result, marker });
   }
@@ -6868,7 +6881,30 @@ export class Sandbox extends LocalToolMCP {
    * Runs the local OCR tools inside the selected sandbox, never in the server process. A PDF is read one
    * page per call, so a failure or timeout on a later page keeps the pages already read.
    */
-  async runDocumentOcr(input: {
+  /** OCR of PDF pages or an image; a failure is logged here with its raw detail, which never reaches the person. */
+  runDocumentOcr(input: Parameters<Sandbox['readOcr']>[0]): ReturnType<Sandbox['readOcr']> {
+    return this.loggedDocumentRead({ reader: 'OCR', read: () => this.readOcr(input) });
+  }
+
+  /**
+   * Runs a document reader and logs a failure's raw detail on the server. The error goes on unchanged; the
+   * extraction turns anything but a DocumentReadError into a fixed sentence for the person.
+   */
+  private async loggedDocumentRead<T>({ reader, read }: { reader: string; read: () => Promise<T> }): Promise<T> {
+    try {
+      return await read();
+    } catch (error) {
+      if (!(error instanceof DocumentReadError)) {
+        this.logger.warn('Document reader failed', {
+          reader,
+          error: error instanceof Error ? error.message.slice(0, 2000) : String(error).slice(0, 2000),
+        });
+      }
+      throw error;
+    }
+  }
+
+  private async readOcr(input: {
     filePath: string;
     kind: 'pdf' | 'image';
     pages: readonly number[] | undefined;

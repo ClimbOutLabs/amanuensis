@@ -16,6 +16,7 @@ import {
   type DocumentPageRange,
   type ExtractedDocument,
 } from '../../../documents/documentExtraction';
+import { DocumentReadError } from '../../../documents/documentReadError';
 import {
   createStructuredDocumentDocx,
   DOCUMENT_REPORT_MAX_NOTE_LENGTH,
@@ -300,7 +301,12 @@ export async function extractDocumentsFromSandbox(
   let remainingSnapshotBytes = budget.maxTotalBytes - budget.totalBytes;
   for (const path of file_paths) {
     if (remainingSnapshotBytes < 1) {
-      snapshots.set(path, new Error(`Document aggregate byte limit of ${String(budget.maxTotalBytes)} exceeded`));
+      snapshots.set(
+        path,
+        new DocumentReadError(
+          'together with the other files, this is more than can be read at once. Ask for this file on its own.',
+        ),
+      );
       continue;
     }
     try {

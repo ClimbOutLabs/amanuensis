@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { extname } from 'node:path';
 import { estimateTokens } from '../core/email/gmail/tokenBound';
+import { DocumentReadError } from './documentReadError';
 import { splitTextPages, TEXT_DOCUMENT_EXTENSIONS, type DocumentTextResult } from './documentText';
 import { extensionMatchesImage, inspectImageHeader, looksLikePdf, MAX_OCR_PIXELS } from './fileSniff';
 
@@ -125,7 +126,15 @@ function linesFromText(text: string): DocumentTextLine[] {
     .filter(line => line.text.trim().length > 0);
 }
 
+/**
+ * The issue shown for a file that failed to read. Only a DocumentReadError's own sentence is shown; any other
+ * failure becomes a fixed sentence, because raw errors can carry sandbox paths, provider details or file text.
+ * The sandbox logs the raw detail.
+ */
 function issueMessage(error: unknown, filename: string): string {
+  if (error instanceof DocumentReadError) {
+    return `Could not extract ${filename}: ${error.message}`;
+  }
   const detail = error instanceof Error ? error.message : String(error);
   // The OCR sentence belongs only to a file that was read but gave no text because the
   // OCR tools are missing from the sandbox image; a file that cannot be found is a
@@ -139,7 +148,13 @@ function issueMessage(error: unknown, filename: string): string {
   if (/not found|enoent|cannot find|no such file/i.test(detail)) {
     return `Could not read ${filename}: the file could not be found.`;
   }
-  return `Could not extract ${filename}: ${detail}`;
+  if (/too large|byte limit|exceeds/i.test(detail)) {
+    return `Could not extract ${filename}: the file is too large to read. Send a smaller file or only the part you need.`;
+  }
+  if (/syntax error|xref|trailer|damaged|corrupt/i.test(detail)) {
+    return `Could not extract ${filename}: the file is damaged or incomplete. Ask the sender to send it again.`;
+  }
+  return `Could not extract ${filename}. Try again; if it keeps failing, check that the sandbox is ready under Settings, Sandbox.`;
 }
 
 function sourceHash(buffer: Buffer): string {
@@ -412,7 +427,7 @@ export async function extractDocumentText(input: {
           sha256: '',
           extraction_mode: null,
           pages: [],
-          issue: `Could not read ${file.filename}: ${error instanceof Error ? error.message : String(error)}`,
+          issue: issueMessage(error, file.filename),
         },
         fileStartedAt,
       );
