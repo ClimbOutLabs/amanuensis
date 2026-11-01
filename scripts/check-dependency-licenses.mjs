@@ -1,55 +1,92 @@
 #!/usr/bin/env node
 /**
- * Fails when any third-party dependency carries a strong or network copyleft
- * license (see scripts/dependency-license-policy.mjs). Covers every package
- * manager the repo ships dependencies through:
- * - the pnpm workspace, read from the installed tree (run `pnpm install` first)
- * - standalone npm projects, read from each tracked package-lock.json
- * - Python, by resolving each tracked requirements*.txt with pip (25 or newer)
+ * Fails when any third-party dependency lacks a license on the accepted list
+ * in scripts/dependency-license-policy.mjs. Reads every way the repo pulls in
+ * dependencies:
+ * - the pnpm workspace, from the installed tree (run `pnpm install` first)
+ * - standalone npm projects, from each tracked package-lock.json
+ * - Python, from each tracked requirements*.txt / requirements*.lock, with
+ *   license data from PyPI for the exact pinned version (files that are not
+ *   fully pinned are resolved with pip first)
+ * - Go, from each tracked go.mod
+ * Dockerfiles must install Python packages from a requirements file, so the
+ * check sees them. OS packages from apt are out of scope.
+ *
+ * A package whose license metadata is missing or unclear can be listed in
+ * scripts/dependency-licenses-reviewed.txt with the SPDX license a person read
+ * in its license text. That license must still be on the accepted list.
  *
  * Usage: node scripts/check-dependency-licenses.mjs
- * Exit 0 when clean, 1 with one line per offending package otherwise.
+ * Exit 0 when clean, 1 with one line per problem otherwise.
  */
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { licenseProblem } from './dependency-license-policy.mjs';
 
-const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const MIN_PIP_MAJOR = 25; // older pip leaves License-Expression out of its install report
+const here = dirname(fileURLToPath(import.meta.url));
+const root = resolve(here, '..');
+const REVIEWED_PATH = join(here, 'dependency-licenses-reviewed.txt');
+const PYPI = 'https://pypi.org/pypi';
 
-function run(cmd, args, options = {}) {
-  return execFileSync(cmd, args, { cwd: root, encoding: 'utf8', maxBuffer: 256 * 1024 * 1024, ...options });
+class CheckError extends Error {}
+
+function run(cmd, args, { what, next }) {
+  try {
+    return execFileSync(cmd, args, {
+      cwd: root,
+      encoding: 'utf8',
+      maxBuffer: 256 * 1024 * 1024,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+  } catch (caught) {
+    throw new CheckError(`Could not ${what}. ${next}`, { cause: caught });
+  }
 }
 
-function trackedFiles(pattern) {
-  return run('git', ['ls-files', '-z', '--', pattern]).split('\0').filter(Boolean);
+function trackedFiles(...patterns) {
+  const out = run('git', ['ls-files', '-z', '--', ...patterns], {
+    what: 'list the files in this repository',
+    next: 'Run the check from inside the repository.',
+  });
+  return out.split('\0').filter(Boolean);
 }
 
-/** README and license text a package ships, or null when it ships none. */
-function shippedText(dir) {
-  const names = readdirSync(dir, { withFileTypes: true })
-    .filter(entry => entry.isFile() && /^(readme|license|licence|copying)/i.test(entry.name))
-    .map(entry => entry.name);
-  const text = names.map(n => readFileSync(join(dir, n), 'utf8')).join('\n');
-  return text.length > 0 ? text : null;
+/** `ecosystem:name@version` -> SPDX expression, from the reviewed file. */
+function readReviewed() {
+  const reviewed = new Map();
+  for (const [index, raw] of readFileSync(REVIEWED_PATH, 'utf8').split('\n').entries()) {
+    const line = raw.trim();
+    if (line === '' || line.startsWith('#')) {
+      continue;
+    }
+    const [key, expression, source] = line.split('::').map(part => part.trim());
+    if (!key || !expression || !source) {
+      throw new CheckError(
+        `Line ${index + 1} of ${REVIEWED_PATH} is not "package :: license :: where it was checked". Fix that line.`,
+      );
+    }
+    reviewed.set(key, expression);
+  }
+  return reviewed;
 }
 
 function pnpmPackages() {
-  const byLicense = JSON.parse(run('pnpm', ['licenses', 'list', '--recursive', '--json']));
-  return Object.values(byLicense)
+  const out = run('pnpm', ['licenses', 'list', '--recursive', '--json'], {
+    what: 'list the pnpm workspace packages',
+    next: 'Run `pnpm install`, then run this check again.',
+  });
+  return Object.values(JSON.parse(out))
     .flat()
-    .map(pkg => {
-      const declared = pkg.license && pkg.license !== 'Unknown' ? [pkg.license] : [];
-      return {
+    .flatMap(pkg =>
+      pkg.versions.map(version => ({
+        key: `npm:${pkg.name}@${version}`,
         source: 'pnpm workspace',
-        name: `${pkg.name}@${pkg.versions.join(', ')}`,
-        declared,
-        shippedText: declared.length > 0 ? null : shippedText(pkg.paths[0]),
-      };
-    });
+        statements: pkg.license && pkg.license !== 'Unknown' ? [pkg.license] : [],
+      })),
+    );
 }
 
 function npmLockPackages(lockPath) {
@@ -57,19 +94,30 @@ function npmLockPackages(lockPath) {
   return Object.entries(lock.packages ?? {})
     .filter(([path, entry]) => path !== '' && !entry.link)
     .map(([path, entry]) => ({
+      key: `npm:${path.slice(path.lastIndexOf('node_modules/') + 'node_modules/'.length)}@${entry.version}`,
       source: lockPath,
-      name: `${path.slice(path.lastIndexOf('node_modules/') + 'node_modules/'.length)}@${entry.version}`,
-      declared: entry.license ? [entry.license] : [],
-      shippedText: null,
+      statements: entry.license ? [entry.license] : [],
     }));
 }
 
-function pipMajor() {
-  const match = run('python3', ['-m', 'pip', '--version']).match(/^pip (\d+)\./);
-  return match ? Number(match[1]) : 0;
+/** Requirement lines with continuations joined and comments and options dropped. */
+function requirementLines(text) {
+  return text
+    .replace(/\\\r?\n/g, ' ')
+    .split(/\r?\n/)
+    .map(line => line.replace(/(^|\s)#.*$/, '').trim())
+    .filter(line => line !== '' && !line.startsWith('-'));
 }
 
-function pythonPackages(requirementsPath) {
+const PIN = /^([A-Za-z0-9][A-Za-z0-9._-]*)(?:\[[^\]]*\])?\s*==\s*([^\s;]+)/;
+
+/** Exact pins of a requirements file; files with any unpinned line are resolved with pip. */
+function pythonPins(requirementsPath) {
+  const lines = requirementLines(readFileSync(join(root, requirementsPath), 'utf8'));
+  const pins = lines.map(line => line.match(PIN));
+  if (pins.every(Boolean)) {
+    return pins.map(([, name, version]) => ({ name, version }));
+  }
   const dir = mkdtempSync(join(tmpdir(), 'license-check-'));
   const report = join(dir, 'report.json');
   try {
@@ -88,72 +136,141 @@ function pythonPackages(requirementsPath) {
         requirementsPath,
       ],
       {
-        stdio: ['ignore', 'ignore', 'inherit'],
+        what: `resolve ${requirementsPath} with pip`,
+        next: 'Make sure python3 and pip are installed and the file installs cleanly, then run this check again.',
       },
     );
-    const { install } = JSON.parse(readFileSync(report, 'utf8'));
-    return install.map(({ metadata }) => {
-      const classifiers = (metadata.classifier ?? [])
-        .filter(c => c.startsWith('License ::'))
-        .map(c => c.split('::').at(-1).trim());
-      // Most to least authoritative: the SPDX expression, trove classifiers,
-      // then a one-line license field. A multi-line license field is the full
-      // license document, which lists bundled third-party notices, so it is
-      // read as shipped text instead.
-      const licenseField = (metadata.license ?? '').trim();
-      const oneLine = licenseField !== '' && !licenseField.includes('\n');
-      const declared = metadata.license_expression
-        ? [metadata.license_expression]
-        : classifiers.length > 0
-          ? classifiers
-          : oneLine
-            ? [licenseField]
-            : [];
-      const text = [oneLine ? '' : licenseField, metadata.description ?? ''].join('\n').trim();
-      return {
-        source: requirementsPath,
-        name: `${metadata.name}@${metadata.version}`,
-        declared,
-        shippedText: text || null,
-      };
-    });
+    return JSON.parse(readFileSync(report, 'utf8')).install.map(({ metadata }) => ({
+      name: metadata.name,
+      version: metadata.version,
+    }));
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
 }
 
-function main() {
-  if (!existsSync(join(root, 'node_modules'))) {
-    console.error('Dependencies are not installed. Run `pnpm install`, then run this check again.');
-    process.exit(1);
-  }
-  const requirements = trackedFiles('*requirements*.txt');
-  if (requirements.length > 0 && pipMajor() < MIN_PIP_MAJOR) {
-    console.error(
-      `This check needs pip ${MIN_PIP_MAJOR} or newer. Run \`python3 -m pip install --upgrade pip\`, then run it again.`,
+/** License statements of one PyPI release, most authoritative first. */
+async function pypiStatements({ name, version }) {
+  const response = await fetch(`${PYPI}/${encodeURIComponent(name)}/${encodeURIComponent(version)}/json`);
+  if (!response.ok) {
+    throw new CheckError(
+      `Could not read ${name} ${version} from PyPI (HTTP ${response.status}). Check the network and the pinned version, then run this check again.`,
     );
-    process.exit(1);
   }
+  const { info } = await response.json();
+  if (info.license_expression) {
+    return [info.license_expression];
+  }
+  const classifiers = (info.classifiers ?? [])
+    .filter(c => c.startsWith('License ::') && c !== 'License :: OSI Approved')
+    .map(c => c.split('::').at(-1).trim());
+  if (classifiers.length > 0) {
+    return classifiers;
+  }
+  // A multi-line license field is the license document itself, not its name.
+  const field = (info.license ?? '').trim();
+  return field !== '' && !field.includes('\n') ? [field] : [];
+}
 
+async function pythonPackages(requirementsPaths) {
+  const releases = new Map();
+  for (const path of requirementsPaths) {
+    for (const pin of pythonPins(path)) {
+      const key = `pypi:${pin.name.toLowerCase().replace(/[._-]+/g, '-')}@${pin.version}`;
+      if (!releases.has(key)) {
+        releases.set(key, { key, source: path, pin });
+      }
+    }
+  }
+  return Promise.all(
+    [...releases.values()].map(async ({ key, source, pin }) => ({
+      key,
+      source,
+      statements: await pypiStatements(pin),
+    })),
+  );
+}
+
+/** Go modules carry no license metadata, so each one needs a reviewed entry. */
+function goPackages(goModPath) {
+  const text = readFileSync(join(root, goModPath), 'utf8').replace(/\/\/.*$/gm, '');
+  const requires = [...text.matchAll(/^\s*require\s*\(([^)]*)\)/gm)].flatMap(m => m[1].split('\n'));
+  requires.push(...[...text.matchAll(/^\s*require\s+([^(\s].*)$/gm)].map(m => m[1]));
+  return requires
+    .map(line => line.trim().split(/\s+/))
+    .filter(([module, version]) => module && version)
+    .map(([module, version]) => ({ key: `go:${module}@${version}`, source: goModPath, statements: [] }));
+}
+
+/** Dockerfile `pip install` commands that name packages instead of a requirements file. */
+function inlinePipInstalls() {
+  const problems = [];
+  for (const path of trackedFiles('*Dockerfile*', '*.dockerfile')) {
+    const text = readFileSync(join(root, path), 'utf8').replace(/\\\r?\n/g, ' ');
+    for (const match of text.matchAll(/pip3?\s+install\s+([^&|;\n]*)/g)) {
+      const args = match[1].split(/\s+/).filter(Boolean);
+      const usesFile = args.some(a => a === '-r' || a.startsWith('--requirement') || /^-r\S/.test(a));
+      const packages = args.filter(a => !a.startsWith('-') && !a.startsWith('/') && !a.includes('$'));
+      const onlyPip = packages.every(p => p === 'pip');
+      if (!usesFile && !onlyPip) {
+        problems.push(
+          `- ${path} installs Python packages inline (${packages.join(' ')}). Move them to a requirements file and install with \`pip install -r\`.`,
+        );
+      }
+    }
+  }
+  return problems;
+}
+
+async function main() {
+  if (!existsSync(join(root, 'node_modules'))) {
+    throw new CheckError('Dependencies are not installed. Run `pnpm install`, then run this check again.');
+  }
+  const reviewed = readReviewed();
   const packages = [
     ...pnpmPackages(),
     ...trackedFiles('*package-lock.json').flatMap(npmLockPackages),
-    ...requirements.flatMap(pythonPackages),
+    ...(await pythonPackages(trackedFiles('*requirements*.txt', '*requirements*.lock'))),
+    ...trackedFiles('*go.mod').flatMap(goPackages),
   ];
-  const problems = packages
-    .map(pkg => ({ pkg, problem: licenseProblem(pkg) }))
-    .filter(({ problem }) => problem !== null);
+
+  const problems = inlinePipInstalls();
+  const used = new Set();
+  for (const pkg of packages) {
+    const statements = reviewed.has(pkg.key) ? [reviewed.get(pkg.key)] : pkg.statements;
+    if (reviewed.has(pkg.key)) {
+      used.add(pkg.key);
+    }
+    const problem = licenseProblem(statements);
+    if (problem) {
+      problems.push(`- ${pkg.key} (${pkg.source}) ${problem}`);
+    }
+  }
+  for (const key of reviewed.keys()) {
+    if (!used.has(key)) {
+      problems.push(
+        `- ${key} is listed in scripts/dependency-licenses-reviewed.txt but is no longer a dependency. Remove that line.`,
+      );
+    }
+  }
 
   if (problems.length === 0) {
-    console.log(`Checked ${packages.length} dependencies: no copyleft licenses.`);
+    console.log(`Checked ${packages.length} dependencies: every license is on the accepted list.`);
     return;
   }
-  console.error('These dependencies have licenses Aman cannot ship under MPL-2.0:\n');
-  for (const { pkg, problem } of problems) {
-    console.error(`- ${pkg.name} (${pkg.source}) ${problem}`);
-  }
-  console.error('\nReplace each one with a dependency under a permissive or weak copyleft license.');
-  process.exit(1);
+  console.error(`${problems.length} dependency license problem(s):\n`);
+  console.error([...new Set(problems)].join('\n'));
+  console.error(
+    '\nReplace each dependency with one under an accepted license. If its metadata is only missing or unclear, read its license text and add it to scripts/dependency-licenses-reviewed.txt.',
+  );
+  process.exitCode = 1;
 }
 
-main();
+main().catch(error => {
+  if (error instanceof CheckError) {
+    console.error(error.message);
+    process.exitCode = 1;
+    return;
+  }
+  throw error;
+});

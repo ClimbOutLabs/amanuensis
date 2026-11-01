@@ -202,9 +202,11 @@ Open [http://localhost:8791](http://localhost:8791). Credentials come from `pack
 
 ## Dependency licenses
 
-Aman is licensed under MPL-2.0, so its dependencies must not use a strong or network copyleft license that would pull the whole project under its terms. That covers the GPL and AGPL families, SSPL, EUPL, OSL, RPL, CPAL, Sleepycat and Creative Commons ShareAlike. Permissive licenses (MIT, Apache-2.0, BSD, ISC and similar) are fine. So is weak copyleft that stays with its own files or library, such as MPL-2.0, LGPL and EPL. A dual-licensed package passes when one of its choices passes.
+Aman is licensed under MPL-2.0. Every dependency must use a license from the accepted list in [`scripts/dependency-license-policy.mjs`](scripts/dependency-license-policy.mjs). That list holds permissive licenses (MIT, Apache-2.0, BSD, ISC and similar) and weak copyleft that stays with its own files or library (MPL-2.0, LGPL, EPL-2.0). Everything else fails: strong or network copyleft such as GPL and AGPL, source-available or non-commercial terms, proprietary terms, and packages that declare no license at all. A dual-licensed package passes when one of its choices is accepted.
 
-CI runs `pnpm licenses:check` when a pull request changes dependencies. It reads every package in the pnpm workspace, every tracked `package-lock.json`, and every tracked `requirements*.txt` (resolved with pip 25 or newer). A package that declares no license is judged by the README and license text it ships. If the check fails, replace the dependency with one under an allowed license. To run it locally, run `pnpm install` first.
+CI runs `pnpm licenses:check` when a pull request changes dependencies. It reads the pnpm workspace, every tracked `package-lock.json`, every tracked `requirements*.txt` and `requirements*.lock` (license data comes from PyPI for each pinned version), and every tracked `go.mod`. Dockerfiles must install Python packages from a requirements file, so the check can see them. OS packages installed with `apt` are not covered.
+
+If a package's license metadata is missing or unclear, read its license text and add a line to [`scripts/dependency-licenses-reviewed.txt`](scripts/dependency-licenses-reviewed.txt) with the SPDX license you found and where you found it. That license must still be on the accepted list. Go modules have no license metadata, so each one needs a line there. If a package has no license, or one that is not accepted, replace it. To run the check locally, run `pnpm install` first.
 
 ## Generated code - do not edit by hand
 

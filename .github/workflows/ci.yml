@@ -119,11 +119,16 @@ jobs:
               - '**/package.json'
               - '**/package-lock.json'
               - '**/requirements*.txt'
+              - '**/requirements*.lock'
+              - '**/go.mod'
+              - '**/*Dockerfile*'
+              - '**/*.dockerfile'
               - 'pnpm-lock.yaml'
               - 'pnpm-workspace.yaml'
               - 'patches/**'
               - 'scripts/check-dependency-licenses.mjs'
               - 'scripts/dependency-license-policy.mjs'
+              - 'scripts/dependency-licenses-reviewed.txt'
               - 'tests/scripts/dependency-license-policy.test.mjs'
               - '.github/workflows/ci.yml'
             chart:
@@ -419,7 +424,7 @@ jobs:
           node-version: '24'
           cache: 'pnpm'
 
-      # Older pip leaves License-Expression out of its install report.
+      # Resolves requirements files that are not fully pinned.
       - name: Setup Python
         uses: actions/setup-python@v6
         with:

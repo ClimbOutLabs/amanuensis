@@ -4,11 +4,9 @@
  */
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { licenseProblem, unavoidableCopyleft } from '../../scripts/dependency-license-policy.mjs';
+import { expressionAccepted, licenseProblem } from '../../scripts/dependency-license-policy.mjs';
 
-const declared = (...licenses) => licenseProblem({ declared: licenses, shippedText: null });
-
-test('permissive and weak copyleft licenses pass', () => {
+test('accepted SPDX ids and exact aliases pass', () => {
   for (const license of [
     'MIT',
     'Apache-2.0',
@@ -18,44 +16,55 @@ test('permissive and weak copyleft licenses pass', () => {
     'LGPL-3.0-or-later',
     'EPL-2.0',
     'BSD License',
+    'MIT License',
   ]) {
-    assert.equal(declared(license), null, license);
+    assert.equal(licenseProblem([license]), null, license);
   }
-  assert.equal(declared('GNU Lesser General Public License v3 (LGPLv3)'), null);
-  assert.equal(declared('GNU Library or Lesser General Public License (LGPL)'), null);
+  assert.equal(licenseProblem(['GNU Lesser General Public License v3 (LGPLv3)']), null);
 });
 
-test('strong and network copyleft licenses fail', () => {
+test('copyleft, source-available, proprietary and unknown licenses fail', () => {
   for (const license of [
     'GPL-3.0-only',
     'GPL-2.0-or-later',
-    'GPLv3',
     'AGPL-3.0',
     'SSPL-1.0',
     'EUPL-1.2',
-    'OSL-3.0',
     'CC-BY-SA-4.0',
     'GNU General Public License v2 or later (GPLv2+)',
-    'GNU Affero General Public License v3',
+    'BUSL-1.1',
+    'Elastic-2.0',
+    'CC-BY-NC-4.0',
+    'UNLICENSED',
+    'SEE LICENSE IN LICENSE.md',
+    'Proprietary',
+    'LicenseRef-Commercial',
+    'MIT-like',
   ]) {
-    assert.match(declared(license) ?? '', /uses a .* license/, license);
+    assert.match(licenseProblem([license]) ?? '', /not on the accepted list/, license);
   }
 });
 
-test('an OR is clean when any branch is clean; an AND needs every part clean', () => {
-  assert.deepEqual(unavoidableCopyleft('(MIT OR GPL-3.0-or-later)'), []);
-  assert.deepEqual(unavoidableCopyleft('BSD-3-Clause OR GPL-2.0'), []);
-  assert.deepEqual(unavoidableCopyleft('MIT AND GPL-2.0-only'), ['GPL / AGPL']);
-  assert.deepEqual(unavoidableCopyleft('(GPL-2.0-only OR AGPL-3.0-only) AND MIT'), ['GPL / AGPL']);
-  assert.deepEqual(unavoidableCopyleft('GPL-2.0-only WITH Classpath-exception-2.0'), ['GPL / AGPL']);
+test('a package with no license fails', () => {
+  assert.equal(licenseProblem([]), 'declares no license');
+  assert.equal(licenseProblem(['  ']), 'declares no license');
 });
 
-test('every declared statement must be clean', () => {
-  assert.match(declared('MIT', 'GNU General Public License v3 (GPLv3)') ?? '', /GPL/);
+test('an OR passes when any branch passes; an AND needs every part', () => {
+  assert.equal(expressionAccepted('(MIT OR GPL-3.0-or-later)'), true);
+  assert.equal(expressionAccepted('BSD-3-Clause OR GPL-2.0'), true);
+  assert.equal(expressionAccepted('MIT AND GPL-2.0-only'), false);
+  assert.equal(expressionAccepted('(GPL-2.0-only OR AGPL-3.0-only) AND MIT'), false);
+  assert.equal(expressionAccepted('Apache-2.0 WITH LLVM-exception'), true);
+  assert.equal(expressionAccepted('GPL-2.0-only WITH Classpath-exception-2.0'), false);
 });
 
-test('an undeclared package is judged by the text it ships', () => {
-  assert.equal(licenseProblem({ declared: [], shippedText: '# curry\nA tiny helper.' }), null);
-  assert.match(licenseProblem({ declared: [], shippedText: 'Licensed under the GNU GPL v3.' }) ?? '', /mentions GPL/);
-  assert.match(licenseProblem({ declared: [''], shippedText: null }) ?? '', /declares no license and ships no text/);
+test('malformed expressions fail', () => {
+  for (const expression of ['MIT OR', '(MIT', 'MIT)', 'AND MIT', 'MIT, Apache-2.0', '']) {
+    assert.equal(expressionAccepted(expression), false, expression);
+  }
+});
+
+test('every license statement must pass', () => {
+  assert.match(licenseProblem(['MIT', 'GNU General Public License v3 (GPLv3)']) ?? '', /GPLv3/);
 });

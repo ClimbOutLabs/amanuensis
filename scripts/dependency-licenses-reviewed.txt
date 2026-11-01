@@ -1,0 +1,14 @@
+# Licenses read by hand for dependencies whose license metadata is missing or
+# unclear. Used by scripts/check-dependency-licenses.mjs.
+#
+# One entry per line: `ecosystem:name@version :: SPDX expression :: where it was checked`
+# (ecosystem is npm, pypi or go; PyPI names are lower case with dashes). The
+# expression replaces the package's own metadata and must still pass the
+# accepted list, so an entry can never let a copyleft or unlicensed package
+# through. An entry that matches no dependency fails the check.
+
+npm:filter-iterator@0.0.1 :: MIT :: "License" section of its Readme.md
+pypi:mypy-extensions@1.1.0 :: MIT :: LICENSE file in the wheel
+pypi:tiktoken@0.14.0 :: MIT :: LICENSE file in the wheel
+pypi:pypdfium2@5.13.0 :: BSD-3-Clause AND Apache-2.0 AND CC-BY-4.0 AND MIT AND FTL AND Unicode-3.0 AND IJG AND BSD-2-Clause AND libpng-2.0 AND Zlib AND Apache-2.0 WITH LLVM-exception AND libtiff :: LICENSES/ and BUILD_LICENSES/ in the linux_x64 wheel (the bundled Anti-Grain Geometry 2.3 notice is a permissive one with no SPDX id)
+pypi:pypdfium2@5.14.0 :: BSD-3-Clause AND Apache-2.0 AND CC-BY-4.0 AND MIT AND FTL AND Unicode-3.0 AND IJG AND BSD-2-Clause AND libpng-2.0 AND Zlib AND Apache-2.0 WITH LLVM-exception :: LICENSES/ and BUILD_LICENSES/ in the linux_x64 wheel (the bundled Anti-Grain Geometry 2.3 notice is a permissive one with no SPDX id)
