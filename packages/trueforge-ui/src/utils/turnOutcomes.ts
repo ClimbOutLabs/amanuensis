@@ -223,8 +223,19 @@ export function turnOutcomeLines(parts: readonly TurnOutcomePart[]): string[] {
   return lines;
 }
 
+/** The id of the last message in the thread that set a reminder, if any. */
+export function lastReminderMessageId(
+  messages: readonly { readonly id: string; readonly content: readonly TurnOutcomePart[] }[],
+): string | undefined {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (message !== undefined && turnSetReminder(message.content)) return message.id;
+  }
+  return undefined;
+}
+
 /** Whether a finished turn set a reminder: the same check that writes its outcome line. */
-export function turnSetReminder(parts: readonly TurnOutcomePart[]): boolean {
+function turnSetReminder(parts: readonly TurnOutcomePart[]): boolean {
   return parts.some(
     part =>
       part.type === 'tool-call' &&

@@ -33,7 +33,7 @@ import {
   toolStepUnfinished,
 } from '../utils/recoveredSteps.js';
 import { hasPendingAskUserResponse, hasPendingToolApproval } from '../utils/toolCallParsing.js';
-import { turnOutcomeLines, turnSetReminder } from '../utils/turnOutcomes.js';
+import { lastReminderMessageId, turnOutcomeLines } from '../utils/turnOutcomes.js';
 import { AgentStepsContainer } from './AgentStepsContainer.js';
 import { AssistantTextContainer } from './AssistantTextContainer.js';
 import { useDocumentIngestionStatusLine } from './DocumentIngestionStatusProvider.js';
@@ -235,9 +235,10 @@ export function AssistantMessageContainer() {
   // a calendar change, an email sent, a draft saved) each get one plain line under the reply instead.
   // With details on the step rows already carry them, and a running turn shows none until it settles.
   const outcomeLines = !agentDetailsVisible && settled ? turnOutcomeLines(parts) : [];
-  // The offer of browser notices shows once per reply, under the answer, whether details are on or off:
-  // inside a step it was repeated for every reminder and hidden with the steps.
-  const offerReminderNotices = settled && turnSetReminder(parts);
+  // The offer of browser notices shows under the answer of the latest reply that set a reminder, whether
+  // details are on or off: inside a step it was repeated for every reminder and hidden with the steps.
+  const isLatestReminderReply = useAuiState(s => lastReminderMessageId(s.thread.messages) === s.message.id);
+  const offerReminderNotices = settled && isLatestReminderReply;
 
   // The step rows below render only while agent details are on. Errors and approvals surface with an
   // amber dot and auto-expand while the turn is running; a clean completed run with no tools, no

@@ -208,21 +208,22 @@ describe('ToolMarkupGuard prose that only talks about markup', () => {
 });
 
 describe('ToolMarkupGuard prose naming the strong tags', () => {
-  it('hides a closing results tag named in a sentence, since a closing tag outside code is always stray', () => {
+  it('keeps a sentence that names the closing results tag as text, byte for byte', () => {
     const guard = new ToolMarkupGuard();
-    const shown = guard.push('The closing tag </function_results> ends the block.');
+    const text = 'The closing tag </function_results> ends the block.';
+    const shown = guard.push(text);
     expect(guard.inMarkup).toBe(false);
-    expect(shown + guard.heldText).toBe('The closing tag  ends the block.');
+    expect(shown + guard.heldText).toBe(text);
     expect(guard.finish()).toBe('clean');
   });
 
-  it('hides that tag the same way when it streams in pieces, split inside the tag', () => {
+  it('keeps that sentence whole when it streams in pieces, split inside the tag', () => {
     const guard = new ToolMarkupGuard();
     let shown = '';
     shown += guard.push('The closing tag </function_res');
     shown += guard.push('ults> ends the block.');
     expect(guard.inMarkup).toBe(false);
-    expect(shown + guard.heldText).toBe('The closing tag  ends the block.');
+    expect(shown + guard.heldText).toBe('The closing tag </function_results> ends the block.');
     expect(guard.finish()).toBe('clean');
   });
 
@@ -367,15 +368,15 @@ describe('ToolMarkupGuard stray closing tags', () => {
     expect(guard.finish()).toBe('clean');
   });
 
-  it('hides a closing tag before closing punctuation', () => {
+  it('keeps a closing tag that a sentence names before closing punctuation', () => {
     const guard = new ToolMarkupGuard();
     const shown = guard.push('A call ends with </invoke>. Then the reply goes on.');
-    expect(shown + guard.heldText).toBe('A call ends with . Then the reply goes on.');
+    expect(shown + guard.heldText).toBe('A call ends with </invoke>. Then the reply goes on.');
     expect(guard.finish()).toBe('clean');
   });
 
-  it.each(['"Your errands" are set.', "'Your errands' are set.", '`x` set.', ' and nothing else.'])(
-    'hides a closing tag with %s after it',
+  it.each(['"Your errands" are set.', "'Your errands' are set.", '`x` set.'])(
+    'hides a closing tag with %s glued to it',
     after => {
       const guard = new ToolMarkupGuard();
       const shown = guard.push(`Okay </tool_calls>${after}`);
@@ -383,6 +384,53 @@ describe('ToolMarkupGuard stray closing tags', () => {
       expect(guard.finish()).toBe('clean');
     },
   );
+
+  it('leaves a space where a tag glued on both sides was hidden', () => {
+    const guard = new ToolMarkupGuard();
+    const shown = guard.push('Done.</tool_calls>Your errands are set.');
+    expect(shown + guard.heldText).toBe('Done. Your errands are set.');
+    expect(guard.finish()).toBe('clean');
+  });
+
+  it('keeps a closing tag a sentence names, with spaces around it', () => {
+    const guard = new ToolMarkupGuard();
+    const text = 'close it with </parameter> and save the file.';
+    expect(guard.push(text) + guard.heldText).toBe(text);
+    expect(guard.finish()).toBe('clean');
+  });
+
+  it('keeps a closing tag whose opening tag was kept as prose', () => {
+    const guard = new ToolMarkupGuard();
+    const text = 'Set <parameter name="timeout">30</parameter> in the config.';
+    expect(guard.push(text) + guard.heldText).toBe(text);
+    expect(guard.finish()).toBe('clean');
+  });
+
+  it.each([
+    ['Done.</tool_calls>Your errands are set.', 'Done. Your errands are set.'],
+    ['Okay </tool_calls>"Your errands" are set.', 'Okay "Your errands" are set.'],
+    [
+      'Set <parameter name="timeout">30</parameter> in the config.',
+      'Set <parameter name="timeout">30</parameter> in the config.',
+    ],
+    ['close it with </parameter> and save the file.', 'close it with </parameter> and save the file.'],
+    ['The "</invoke>" tag ends a call.', 'The "</invoke>" tag ends a call.'],
+  ])('judges %j the same when it arrives one character at a time', (text, shown) => {
+    const guard = new ToolMarkupGuard();
+    let out = '';
+    for (const char of text) {
+      out += guard.push(char);
+    }
+    expect(guard.finish()).toBe('clean');
+    expect(out + guard.heldText).toBe(shown);
+  });
+
+  it('keeps a quoted closing tag a sentence names', () => {
+    const guard = new ToolMarkupGuard();
+    const text = 'The "</invoke>" tag ends a call.';
+    expect(guard.push(text) + guard.heldText).toBe(text);
+    expect(guard.finish()).toBe('clean');
+  });
 
   it('keeps a closing tag that a sentence names in code', () => {
     const guard = new ToolMarkupGuard();
@@ -501,24 +549,25 @@ describe('ToolMarkupGuard stray closing tags', () => {
     expect(shown + guard.heldText).toBe('Done.');
   });
 
-  it('hides a closing tag with words after it on the line', () => {
+  it('keeps a closing tag named in a sentence with words after it on the line', () => {
     const guard = new ToolMarkupGuard();
     const sentence = 'End the block with </tool_call> and then stop.';
-    expect(guard.push(sentence) + guard.heldText).toBe('End the block with  and then stop.');
+    expect(guard.push(sentence) + guard.heldText).toBe(sentence);
     expect(guard.finish()).toBe('clean');
   });
 
-  it('hides a closing tag inside a sentence', () => {
+  it('keeps a closing tag named inside a sentence as text', () => {
     const guard = new ToolMarkupGuard();
-    const shown = guard.push('Close the block with </tool_call> at the end.');
-    expect(shown + guard.heldText).toBe('Close the block with  at the end.');
+    const text = 'Close the block with </tool_call> at the end.';
+    const shown = guard.push(text);
+    expect(shown + guard.heldText).toBe(text);
     expect(guard.finish()).toBe('clean');
   });
 
-  it('hides a pair of closing tags inside a sentence', () => {
+  it('keeps a pair of closing tags named in a sentence as text', () => {
     const guard = new ToolMarkupGuard();
     const sentence = 'End the block with </tool_call></tool_calls> and then stop.';
-    expect(guard.push(sentence) + guard.heldText).toBe('End the block with  and then stop.');
+    expect(guard.push(sentence) + guard.heldText).toBe(sentence);
     expect(guard.finish()).toBe('clean');
   });
 
@@ -640,10 +689,11 @@ describe('ToolMarkupGuard plain parameter fragments', () => {
     expect(guard.finish()).toBe('clean');
   });
 
-  it('hides a plain parameter closing tag inside a sentence', () => {
+  it('keeps a plain parameter closing tag named in a sentence as text', () => {
     const guard = new ToolMarkupGuard();
-    const shown = guard.push('End the call with </parameter> and then stop.');
-    expect(shown + guard.heldText).toBe('End the call with  and then stop.');
+    const text = 'End the call with </parameter> and then stop.';
+    const shown = guard.push(text);
+    expect(shown + guard.heldText).toBe(text);
     expect(guard.finish()).toBe('clean');
   });
 });

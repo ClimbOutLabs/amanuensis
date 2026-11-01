@@ -215,6 +215,23 @@ describe('AssistantMessageContainer browser notices offer', () => {
     expect(prompts[0]?.closest('[data-testid="assistant-message-agent-internals"]')).toBeNull();
   });
 
+  it('offers notices only under the latest reply that set a reminder', () => {
+    notificationsNotAsked();
+    const { container } = render(
+      <RuntimeHarness
+        messages={[reminderTurn('rem-1'), { role: 'user', content: 'and another' }, reminderTurn('rem-2')]}
+      >
+        <RemindersProvider>
+          <ThreadPrimitive.Messages>{() => <AssistantMessageContainer />}</ThreadPrimitive.Messages>
+        </RemindersProvider>
+      </RuntimeHarness>,
+    );
+    const prompts = container.querySelectorAll('[data-role="reminder-notification-prompt"]');
+    expect(prompts).toHaveLength(1);
+    const roots = container.querySelectorAll('[data-role="assistant"]');
+    expect(prompts[0] !== undefined && roots[roots.length - 1]?.contains(prompts[0])).toBe(true);
+  });
+
   it('does not offer notices when the reminder was declined', () => {
     notificationsNotAsked();
     const declined: ThreadMessageLike = {
