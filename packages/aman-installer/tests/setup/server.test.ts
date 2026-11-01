@@ -6,9 +6,10 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 
 import { FakeHost } from '../../src/host/fakeHost.ts';
+import type { SetupAnswers } from '../../src/setup/answers.ts';
 import type { DryRunOutcome, EngineRunner } from '../../src/setup/engine.ts';
 import { parseEvents } from '../../src/setup/events.ts';
-import { runDirFor } from '../../src/setup/runs.ts';
+import { runDirFor, writeRunRecord } from '../../src/setup/runs.ts';
 import { runSetup, type SetupDeps } from '../../src/setup/setup.ts';
 import type { InstanceRecord, ReleaseRecord, StateStore, StateSummary } from '../../src/state/state.ts';
 
@@ -269,6 +270,38 @@ function livePid(): { pid: number; stop: () => void } {
       child.kill('SIGKILL');
     },
   };
+}
+
+const RUN_ANSWERS: SetupAnswers = {
+  email: 'you@example.com',
+  yourName: 'You',
+  backups: 'daily',
+  reach: 'network',
+  installDocker: false,
+  advanced: { ...ANSWERS.advanced },
+};
+
+// A run record left on disk by an earlier wizard, as a setup opened
+// later finds it: the run's stream and log in the run folder, and the
+// record naming the pid the run started under. The run carried the
+// email, calendar and Token Factory sections, so a Try again must ask
+// for every secret again.
+async function seedRunRecord(harness: Harness, options: { pid: number; eventsText: string }): Promise<void> {
+  const runDir = runDirFor(harness.stateHome, harness.tempRoot);
+  await mkdir(runDir, { recursive: true });
+  const eventsFile = join(runDir, 'events.jsonl');
+  const logFile = join(runDir, 'run.log');
+  await writeFile(eventsFile, options.eventsText);
+  await writeFile(logFile, 'the run log\n');
+  await writeRunRecord(runDir, {
+    pid: options.pid,
+    startedAtSeconds: Math.floor(Date.now() / 1000),
+    eventsFile,
+    logFile,
+    answers: RUN_ANSWERS,
+    needsPassword: true,
+    secretsNeeded: { emailPassword: true, calendarPassword: true, tokenFactoryKey: true },
+  });
 }
 
 test('the server refuses requests without the token and serves the page with it', async () => {
@@ -711,6 +744,75 @@ test('a retry whose fresh plan asks for a new admin step waits until the screen 
     assert.deepEqual(retry.data, { started: true });
     assert.equal(harness.engine.installCalls.length, 2);
     assert.ok(harness.engine.installCalls[1]?.args.includes('--sandbox-root'));
+  } finally {
+    sleeper.stop();
+    handle.close();
+    await handle.closed;
+  }
+});
+
+test('an attached wizard whose run is over allows Try again and Start Docker, even when the pid lives on', async () => {
+  const harness = await makeHarness();
+  const sleeper = livePid();
+  harness.engine.installPid = sleeper.pid;
+  // The run is over: its stream ends in a final line. The pid it names
+  // has since been taken over by an unrelated process that is still
+  // alive, as a recycled pid would be, so the pid alone says the run
+  // is going while everything else says it has stopped.
+  await seedRunRecord(harness, { pid: sleeper.pid, eventsText: FAILED_EVENTS });
+  const handle = await runSetup(harness.deps, { noBrowser: true });
+  try {
+    assert.equal(handle.mode, 'attach');
+    const progress = await call(handle.url, '/api/progress');
+    assert.equal(progress.data['status'], 'failed');
+    assert.equal(progress.data['failedStep'], 'Start the app');
+    assert.equal(progress.data['needsPassword'], true);
+    assert.equal(progress.data['needsTokenFactoryKey'], true);
+    // A new install flow stays refused: attach never turns into fresh.
+    const plan = await call(handle.url, '/api/plan', { body: { answers: ANSWERS, secrets: SECRETS } });
+    assert.equal(plan.status, 400);
+    const docker = await call(handle.url, '/api/start-docker', { body: {} });
+    assert.deepEqual(docker.data, { started: true });
+    assert.equal(harness.engine.dockerCalls, 1);
+    harness.engine.installEventsText = SUCCESS_EVENTS;
+    const retry = await call(handle.url, '/api/retry', { body: SECRETS });
+    assert.deepEqual(retry.data, { started: true });
+    assert.equal(harness.engine.installCalls.length, 1);
+    const retryCall = harness.engine.installCalls[0];
+    assert.ok(retryCall !== undefined);
+    assert.ok(retryCall.args.includes('--token-factory-key-stdin'));
+    assert.deepEqual(retryCall.stdinLines, [
+      SECRETS.password,
+      SECRETS.tokenFactoryKey,
+      SECRETS.calendarPassword,
+      SECRETS.emailPassword,
+    ]);
+  } finally {
+    sleeper.stop();
+    handle.close();
+    await handle.closed;
+  }
+});
+
+test('an attached wizard whose run is still going refuses Try again and Start Docker', async () => {
+  const harness = await makeHarness();
+  const sleeper = livePid();
+  harness.engine.installPid = sleeper.pid;
+  // No final line in the stream and the pid is the run's own, alive:
+  // this run is still going, and the gate must keep refusing.
+  await seedRunRecord(harness, { pid: sleeper.pid, eventsText: IN_FLIGHT_EVENTS });
+  const handle = await runSetup(harness.deps, { noBrowser: true });
+  try {
+    assert.equal(handle.mode, 'attach');
+    const progress = await call(handle.url, '/api/progress');
+    assert.equal(progress.data['status'], 'running');
+    const retry = await call(handle.url, '/api/retry', { body: SECRETS });
+    assert.equal(retry.status, 400);
+    assert.match(String(retry.data['error']), /already running/);
+    const docker = await call(handle.url, '/api/start-docker', { body: {} });
+    assert.equal(docker.status, 400);
+    assert.equal(harness.engine.installCalls.length, 0);
+    assert.equal(harness.engine.dockerCalls, 0);
   } finally {
     sleeper.stop();
     handle.close();

@@ -249,7 +249,13 @@ export class SetupSession {
         if (kind === 'flow') {
           return RUNNING_LINE;
         }
-        return this.currentRun !== null && pidAlive(this.currentRun.pid) ? RUNNING_LINE : null;
+        // Stopped is the same test the retry and the start gate use: a
+        // live pid whose stream has no final line yet is a run still
+        // going, and a finished run counts as stopped even when its pid
+        // number has been taken over by something else since.
+        return this.currentRun !== null && pidAlive(this.currentRun.pid) && !runFinished(this.currentRun)
+          ? RUNNING_LINE
+          : null;
       }
     }
   }
