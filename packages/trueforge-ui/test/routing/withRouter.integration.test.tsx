@@ -63,7 +63,7 @@ import { TrueForgeUI } from '@/containers/TrueForgeUI.js';
 import { useShellMode } from '@/server/ShellModeContext.js';
 import { DEFAULT_SESSION_TIME_WINDOW_MS } from '@/utils/sessionShareUrl.js';
 
-beforeAll(() => {
+beforeAll(async () => {
   HTMLDialogElement.prototype.showModal = function showModal() {
     this.setAttribute('open', '');
   };
@@ -71,7 +71,19 @@ beforeAll(() => {
     this.removeAttribute('open');
     this.dispatchEvent(new Event('close'));
   };
-});
+
+  // The first boot pays the lazy shell and server adapter module loads. Boot once here so
+  // that cost lands outside every test's wait window; the long timeout is only for this
+  // one-time setup wait, never for an assertion.
+  const warmUp = renderApp();
+  await waitFor(
+    () => {
+      expect(screen.getByTestId('pending')).toBeInTheDocument();
+    },
+    { timeout: 30_000 },
+  );
+  warmUp.unmount();
+}, 40_000);
 
 afterEach(() => {
   window.history.replaceState(null, '', '/');
