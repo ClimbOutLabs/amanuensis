@@ -36,6 +36,16 @@ const PLAN_STDOUT = `The plan
     total: about 700 MB (0.7 GB)
 `;
 
+const PLAN_NO_ADMIN_STDOUT = `The plan
+
+  > to do        Create the folder for Aman's own files
+`;
+
+const IN_FLIGHT_EVENTS = [
+  '{"type":"phase_start","name":"Building the app","index":4,"total":6,"elapsed_seconds":1}',
+  '{"type":"step_start","name":"Building the Aman app (this might take a while)","phase":"Building the app","elapsed_seconds":1}',
+].join('\n');
+
 const SUCCESS_EVENTS = [
   '{"type":"phase_start","name":"Building the app","index":4,"total":6,"elapsed_seconds":1}',
   '{"type":"step_start","name":"Building the Aman app (this might take a while)","phase":"Building the app","elapsed_seconds":1}',
@@ -56,13 +66,14 @@ class FakeEngine implements EngineRunner {
   dockerCalls = 0;
   checksText = PASS_EVENTS;
   checksExit = 0;
+  planStdout = PLAN_STDOUT;
   installEventsText = SUCCESS_EVENTS;
   installPid = 0;
 
   async dryRun(args: readonly string[]): Promise<DryRunOutcome> {
     this.dryRunCalls.push({ args });
     if (args.includes('--email')) {
-      return { exitCode: 0, stdout: PLAN_STDOUT, stderr: '', events: parseEvents(PASS_EVENTS) };
+      return { exitCode: 0, stdout: this.planStdout, stderr: '', events: parseEvents(PASS_EVENTS) };
     }
     return { exitCode: this.checksExit, stdout: '', stderr: '', events: parseEvents(this.checksText) };
   }
@@ -412,6 +423,12 @@ test('a second setup against a live run attaches instead of starting over', asyn
       const progress = await call(second.url, '/api/progress');
       assert.equal(progress.data['status'], 'running');
       assert.equal(harness.engine.installCalls.length, 1);
+      // An attached server may watch the run but never start work:
+      // a plan is refused before the engine is asked for anything.
+      const dryRunsBefore = harness.engine.dryRunCalls.length;
+      const plan = await call(second.url, '/api/plan', { body: { answers: ANSWERS, secrets: SECRETS } });
+      assert.equal(plan.status, 400);
+      assert.equal(harness.engine.dryRunCalls.length, dryRunsBefore);
     } finally {
       second.close();
       await second.closed;
@@ -431,9 +448,19 @@ test('an installed machine gets the changes-nothing answer', async () => {
     const state = await call(handle.url, '/api/state');
     assert.equal(state.data['mode'], 'already');
     assert.equal(state.data['publicUrl'], 'http://127.0.0.1:8791');
+    // The mode binds the server, not just the page: no call may start
+    // work on a machine that is already set up.
+    const checks = await call(handle.url, '/api/checks', { body: {} });
+    assert.equal(checks.status, 400);
+    const plan = await call(handle.url, '/api/plan', { body: { answers: ANSWERS, secrets: SECRETS } });
+    assert.equal(plan.status, 400);
     const install = await call(handle.url, '/api/install', { body: { planId: 'anything' } });
     assert.equal(install.status, 400);
+    const docker = await call(handle.url, '/api/start-docker', { body: {} });
+    assert.equal(docker.status, 400);
+    assert.equal(harness.engine.dryRunCalls.length, 0);
     assert.equal(harness.engine.installCalls.length, 0);
+    assert.equal(harness.engine.dockerCalls, 0);
   } finally {
     handle.close();
     await handle.closed;
@@ -452,6 +479,13 @@ test('a live lock that is not this wizard says an install is already running', a
     const handle = await runSetup(harness.deps, { noBrowser: true });
     try {
       assert.equal(handle.mode, 'locked');
+      // A locked server starts nothing either.
+      const plan = await call(handle.url, '/api/plan', { body: { answers: ANSWERS, secrets: SECRETS } });
+      assert.equal(plan.status, 400);
+      const docker = await call(handle.url, '/api/start-docker', { body: {} });
+      assert.equal(docker.status, 400);
+      assert.equal(harness.engine.installCalls.length, 0);
+      assert.equal(harness.engine.dockerCalls, 0);
       // The lock is still there, untouched.
       assert.equal(await readFile(join(lockDir, 'pid'), 'utf8'), `${String(sleeper.pid)}\n`);
     } finally {
@@ -463,7 +497,7 @@ test('a live lock that is not this wizard says an install is already running', a
   }
 });
 
-test('a failed run shows its step, asks for the password again, and Try again reruns it', async () => {
+test('a failed run shows its step, asks for every secret again, and Try again reruns the same install', async () => {
   const harness = await makeHarness({ dockerOk: false });
   const sleeper = livePid();
   harness.engine.installPid = sleeper.pid;
@@ -477,17 +511,44 @@ test('a failed run shows its step, asks for the password again, and Try again re
     assert.equal(progress.data['status'], 'failed');
     assert.equal(progress.data['failedStep'], 'Start the app');
     assert.equal(progress.data['needsPassword'], true);
+    // The first run carried email, calendar and Token Factory sections,
+    // so the failure screen asks for those secrets again too.
+    assert.equal(progress.data['needsEmailPassword'], true);
+    assert.equal(progress.data['needsCalendarPassword'], true);
+    assert.equal(progress.data['needsTokenFactoryKey'], true);
     assert.equal(progress.data['dockerDown'], true);
     const noPassword = await call(handle.url, '/api/retry', { body: { password: '' } });
     assert.equal(noPassword.status, 400);
+    // The password alone is not enough: the other secrets are missing.
+    const passwordOnly = await call(handle.url, '/api/retry', { body: { password: 'Newpass!234' } });
+    assert.equal(passwordOnly.status, 400);
+    assert.equal(harness.engine.installCalls.length, 1);
     const docker = await call(handle.url, '/api/start-docker', { body: {} });
     assert.deepEqual(docker.data, { started: true });
     assert.equal(harness.engine.dockerCalls, 1);
     harness.engine.installEventsText = SUCCESS_EVENTS;
-    const retry = await call(handle.url, '/api/retry', { body: { password: 'Newpass!234' } });
+    const retrySecrets = {
+      password: 'Newpass!234',
+      tokenFactoryKey: 'tf-Newkey!234',
+      calendarPassword: 'cal-Newpass!234',
+      emailPassword: 'em-Newpass!234',
+    };
+    const retry = await call(handle.url, '/api/retry', { body: retrySecrets });
     assert.deepEqual(retry.data, { started: true });
     assert.equal(harness.engine.installCalls.length, 2);
-    assert.equal(harness.engine.installCalls[1]?.stdinLines[0], 'Newpass!234');
+    const retryCall = harness.engine.installCalls[1];
+    assert.ok(retryCall !== undefined);
+    // The retried run is the reviewed run: the same sections, their
+    // flags intact, and their secrets on stdin in the installer's order.
+    assert.ok(retryCall.args.includes('--token-factory-key-stdin'));
+    assert.ok(retryCall.args.includes('--calendar-password-stdin'));
+    assert.ok(retryCall.args.includes('--email-password-stdin'));
+    assert.deepEqual(retryCall.stdinLines, [
+      retrySecrets.password,
+      retrySecrets.tokenFactoryKey,
+      retrySecrets.calendarPassword,
+      retrySecrets.emailPassword,
+    ]);
   } finally {
     sleeper.stop();
     handle.close();
@@ -504,6 +565,154 @@ test('a cloud machine is known to the page, from the hardware names', async () =
     const state = await call(handle.url, '/api/state');
     assert.equal(state.data['cloudVm'], true);
   } finally {
+    handle.close();
+    await handle.closed;
+  }
+});
+
+test('Try again against a run that is still going starts nothing', async () => {
+  const harness = await makeHarness();
+  const sleeper = livePid();
+  harness.engine.installPid = sleeper.pid;
+  harness.engine.installEventsText = IN_FLIGHT_EVENTS;
+  const handle = await runSetup(harness.deps, { noBrowser: true });
+  try {
+    await call(handle.url, '/api/checks', { body: {} });
+    const plan = await call(handle.url, '/api/plan', { body: { answers: ANSWERS, secrets: SECRETS } });
+    await call(handle.url, '/api/install', { body: { planId: plan.data['planId'] } });
+    const progress = await call(handle.url, '/api/progress');
+    assert.equal(progress.data['status'], 'running');
+    const retry = await call(handle.url, '/api/retry', { body: SECRETS });
+    assert.equal(retry.status, 400);
+    assert.match(String(retry.data['error']), /already running/);
+    assert.equal(harness.engine.installCalls.length, 1);
+  } finally {
+    sleeper.stop();
+    handle.close();
+    await handle.closed;
+  }
+});
+
+test('a second setup that decided fresh before a run began cannot start over it', async () => {
+  const harness = await makeHarness();
+  const sleeper = livePid();
+  harness.engine.installPid = sleeper.pid;
+  harness.engine.installEventsText = IN_FLIGHT_EVENTS;
+  const first = await runSetup(harness.deps, { noBrowser: true });
+  const engine2 = new FakeEngine();
+  const deps2: SetupDeps = { ...harness.deps, engine: engine2, store: new FakeStore() };
+  const second = await runSetup(deps2, { noBrowser: true });
+  try {
+    // Both servers opened on an empty machine, so both decided fresh.
+    assert.equal(second.mode, 'fresh');
+    await call(first.url, '/api/checks', { body: {} });
+    const plan = await call(first.url, '/api/plan', { body: { answers: ANSWERS, secrets: SECRETS } });
+    const started = await call(first.url, '/api/install', { body: { planId: plan.data['planId'] } });
+    assert.deepEqual(started.data, { started: true });
+    // The second server walks its own flow, but its Install meets the
+    // live run on disk and is refused: its engine never starts, and the
+    // run record still names the first run.
+    await call(second.url, '/api/checks', { body: {} });
+    const plan2 = await call(second.url, '/api/plan', { body: { answers: ANSWERS, secrets: SECRETS } });
+    assert.equal(plan2.status, 200);
+    const started2 = await call(second.url, '/api/install', { body: { planId: plan2.data['planId'] } });
+    assert.equal(started2.status, 400);
+    assert.match(String(started2.data['error']), /already running/);
+    assert.equal(engine2.installCalls.length, 0);
+    const parsed: unknown = JSON.parse(await readFile(join(runDirFor(harness.stateHome, harness.tempRoot), 'run.json'), 'utf8'));
+    assert.ok(isRecord(parsed));
+    assert.equal(parsed['pid'], sleeper.pid);
+  } finally {
+    sleeper.stop();
+    second.close();
+    await second.closed;
+    first.close();
+    await first.closed;
+  }
+});
+
+test('an install begun elsewhere after setup opened keeps this wizard from starting over it', async () => {
+  const harness = await makeHarness();
+  const sleeper = livePid();
+  harness.engine.installPid = sleeper.pid;
+  const handle = await runSetup(harness.deps, { noBrowser: true });
+  try {
+    assert.equal(handle.mode, 'fresh');
+    await call(handle.url, '/api/checks', { body: {} });
+    const plan = await call(handle.url, '/api/plan', { body: { answers: ANSWERS, secrets: SECRETS } });
+    assert.equal(plan.status, 200);
+    // Another install takes the state lock now, after this server
+    // already decided the machine was free.
+    const lockDir = join(harness.stateHome, 'state', 'lock');
+    await mkdir(lockDir, { recursive: true });
+    await writeFile(join(lockDir, 'owner'), 'install.sh 456\n');
+    await writeFile(join(lockDir, 'beat'), `${String(Math.floor(Date.now() / 1000))}\n`);
+    await writeFile(join(lockDir, 'pid'), `${String(sleeper.pid)}\n`);
+    const started = await call(handle.url, '/api/install', { body: { planId: plan.data['planId'] } });
+    assert.equal(started.status, 400);
+    assert.match(String(started.data['error']), /already running/);
+    assert.equal(harness.engine.installCalls.length, 0);
+  } finally {
+    sleeper.stop();
+    handle.close();
+    await handle.closed;
+  }
+});
+
+test('a newer plan drops the older one, secrets and all', async () => {
+  const harness = await makeHarness();
+  const sleeper = livePid();
+  harness.engine.installPid = sleeper.pid;
+  const handle = await runSetup(harness.deps, { noBrowser: true });
+  try {
+    await call(handle.url, '/api/checks', { body: {} });
+    const first = await call(handle.url, '/api/plan', { body: { answers: ANSWERS, secrets: SECRETS } });
+    const second = await call(handle.url, '/api/plan', { body: { answers: ANSWERS, secrets: SECRETS } });
+    const stale = await call(handle.url, '/api/install', { body: { planId: first.data['planId'] } });
+    assert.equal(stale.status, 400);
+    assert.equal(harness.engine.installCalls.length, 0);
+    const started = await call(handle.url, '/api/install', { body: { planId: second.data['planId'] } });
+    assert.deepEqual(started.data, { started: true });
+    assert.equal(harness.engine.installCalls.length, 1);
+  } finally {
+    sleeper.stop();
+    handle.close();
+    await handle.closed;
+  }
+});
+
+test('a retry whose fresh plan asks for a new admin step waits until the screen has shown it', async () => {
+  const harness = await makeHarness();
+  const sleeper = livePid();
+  harness.engine.installPid = sleeper.pid;
+  harness.engine.planStdout = PLAN_NO_ADMIN_STDOUT;
+  harness.engine.installEventsText = FAILED_EVENTS;
+  const handle = await runSetup(harness.deps, { noBrowser: true });
+  try {
+    await call(handle.url, '/api/checks', { body: {} });
+    const plan = await call(handle.url, '/api/plan', { body: { answers: ANSWERS, secrets: SECRETS } });
+    await call(handle.url, '/api/install', { body: { planId: plan.data['planId'] } });
+    const progress = await call(handle.url, '/api/progress');
+    assert.equal(progress.data['status'], 'failed');
+    assert.deepEqual(progress.data['retryAdminRows'], []);
+    // The world changed: a fresh plan for the same answers now has an
+    // admin step the failure screen has not shown.
+    harness.engine.planStdout = PLAN_STDOUT;
+    const early = await call(handle.url, '/api/retry', { body: SECRETS });
+    assert.equal(early.status, 400);
+    assert.equal(harness.engine.installCalls.length, 1);
+    // The screen is refreshed, and now lists the admin step.
+    const refreshed = await call(handle.url, '/api/progress');
+    const rows = refreshed.data['retryAdminRows'];
+    assert.ok(Array.isArray(rows));
+    assert.ok(rows.some(row => isRecord(row) && row['text'] === 'Set up the sandbox on this computer'));
+    harness.engine.installEventsText = SUCCESS_EVENTS;
+    const retry = await call(handle.url, '/api/retry', { body: SECRETS });
+    assert.deepEqual(retry.data, { started: true });
+    assert.equal(harness.engine.installCalls.length, 2);
+    assert.ok(harness.engine.installCalls[1]?.args.includes('--sandbox-root'));
+  } finally {
+    sleeper.stop();
     handle.close();
     await handle.closed;
   }

@@ -116,6 +116,10 @@ Docker stopped answering, so the setup cannot go on.
 Start Docker, then choose Try again.
 Start Docker
 Your password, typed again so the setup can go on
+Email app password, typed again so the setup can go on
+Calendar app password, typed again so the setup can go on
+Token Factory key, typed again so the setup can go on
+Trying again also runs these steps, which change this computer:
 Aman is ready
 Open Aman
 On your phone, open this address or point the camera at the code:

@@ -201,8 +201,14 @@ test('the password rule matches the installer wording', () => {
   assert.equal(passwordProblem('a'.repeat(73)), PASSWORD_TOO_LONG_LINE);
   // Bytes, not characters: 40 accented letters are 80 bytes.
   assert.equal(passwordProblem('é'.repeat(40)), PASSWORD_TOO_LONG_LINE);
-  // 36 accented letters are exactly 72 bytes, so only the number is missing.
-  assert.equal(passwordProblem('é'.repeat(36)), 'That password still needs a number.');
+  // 36 accented letters are exactly 72 bytes. The installer's symbol
+  // test is [[:punct:]] under LC_ALL=C, so an accented letter is not a
+  // symbol to it: the number and the symbol are both missing.
+  assert.equal(passwordProblem('é'.repeat(36)), 'That password still needs a number and a symbol, like @ # $ %.');
+  // A password whose only non-letter is an accented letter still needs
+  // a symbol, however much it looks like one.
+  assert.equal(passwordProblem('pässword1'), 'That password still needs a symbol, like @ # $ %.');
+  assert.equal(passwordProblem('pässword1!'), '');
 });
 
 test('the name default is the part of the email before the @', () => {

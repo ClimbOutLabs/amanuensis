@@ -61,12 +61,19 @@ export const EMPTY_ADVANCED: AdvancedAnswers = {
 
 export const EMPTY_SECRETS: SetupSecrets = { password: '', emailPassword: '', calendarPassword: '', tokenFactoryKey: '' };
 
-function emailGiven(answers: SetupAnswers): boolean {
+// Which of the Advanced sections the person's answers fill in. The run
+// record keeps these (never the secrets themselves) so a later Try again
+// knows which secrets it must ask for again.
+export function emailSectionGiven(answers: SetupAnswers): boolean {
   return answers.advanced.emailProvider !== '' && answers.advanced.emailAddress !== '';
 }
 
-function calendarGiven(answers: SetupAnswers): boolean {
+export function calendarSectionGiven(answers: SetupAnswers): boolean {
   return answers.advanced.calendarProvider !== '' && answers.advanced.calendarEmail !== '';
+}
+
+export function tokenFactorySectionGiven(answers: SetupAnswers): boolean {
+  return answers.advanced.tokenFactoryModel !== '' || answers.advanced.tokenFactoryDailyCap !== '';
 }
 
 function tokenFactoryGiven(secrets: SetupSecrets): boolean {
@@ -76,7 +83,7 @@ function tokenFactoryGiven(secrets: SetupSecrets): boolean {
 // The flags the email section adds, in the installer's own names. The app
 // password itself is never a flag; it goes on stdin.
 function emailArgs(answers: SetupAnswers): string[] {
-  if (!emailGiven(answers)) {
+  if (!emailSectionGiven(answers)) {
     return [];
   }
   const a = answers.advanced;
@@ -90,7 +97,7 @@ function emailArgs(answers: SetupAnswers): string[] {
 }
 
 function calendarArgs(answers: SetupAnswers): string[] {
-  if (!calendarGiven(answers)) {
+  if (!calendarSectionGiven(answers)) {
     return [];
   }
   const a = answers.advanced;
@@ -203,13 +210,29 @@ export function stdinLines(options: {
   if (tokenFactoryGiven(secrets)) {
     lines.push(secrets.tokenFactoryKey);
   }
-  if (calendarGiven(answers)) {
+  if (calendarSectionGiven(answers)) {
     lines.push(secrets.calendarPassword);
   }
-  if (emailGiven(answers)) {
+  if (emailSectionGiven(answers)) {
     lines.push(secrets.emailPassword);
   }
   return lines;
+}
+
+// The installer's symbol test is [[:punct:]] under LC_ALL=C
+// (password_problem in installer/lib/common.sh): the ASCII punctuation
+// characters and no others. An accented letter is not a symbol to the
+// installer, so it is not one here either; the page must never promise
+// a password the run would then refuse.
+const SYMBOL_CHARS = '!"#$%&\'()*+,-./:;<=>?@[\\]^_`{|}~';
+
+function hasSymbol(password: string): boolean {
+  for (const char of password) {
+    if (SYMBOL_CHARS.includes(char)) {
+      return true;
+    }
+  }
+  return false;
 }
 
 // The installer's password rule, mirrored for the wizard's live feedback
@@ -230,7 +253,7 @@ export function passwordProblem(password: string): string {
   if (!/[0-9]/.test(password)) {
     missing.push(PASSWORD_LACK_NUMBER);
   }
-  if (!/[^A-Za-z0-9\s]/.test(password)) {
+  if (!hasSymbol(password)) {
     missing.push(PASSWORD_LACK_SYMBOL);
   }
   if (missing.length === 0) {

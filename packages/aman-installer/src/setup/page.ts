@@ -187,6 +187,22 @@ export function setupPageHtml(): string {
       <label for="retry-password" data-text="retryPasswordLabel"></label>
       <input type="password" id="retry-password">
     </div>
+    <div id="retry-tf-row" class="hidden">
+      <label for="retry-tf" data-text="retryTokenFactoryKeyLabel"></label>
+      <input type="password" id="retry-tf">
+    </div>
+    <div id="retry-cal-row" class="hidden">
+      <label for="retry-cal" data-text="retryCalendarPasswordLabel"></label>
+      <input type="password" id="retry-cal">
+    </div>
+    <div id="retry-em-row" class="hidden">
+      <label for="retry-em" data-text="retryEmailPasswordLabel"></label>
+      <input type="password" id="retry-em">
+    </div>
+    <div id="retry-admin" class="hidden">
+      <p data-text="retryAdminIntro"></p>
+      <div id="retry-admin-rows"></div>
+    </div>
     <p>
       <button class="primary" id="try-again" data-text="tryAgain"></button>
       <button id="start-docker" class="hidden" data-text="startDocker"></button>
@@ -315,11 +331,21 @@ function runChecks() {
 }
 
 function pwBytes(pw) { return new TextEncoder().encode(pw).length; }
+// The installer's symbol rule (password_problem, under LC_ALL=C): a
+// symbol is one of the ASCII punctuation characters, nothing else. An
+// accented letter does not count, here or in the installer.
+function pwHasSymbol(pw) {
+  for (var i = 0; i < pw.length; i++) {
+    var c = pw.charCodeAt(i);
+    if ((c >= 33 && c <= 47) || (c >= 58 && c <= 64) || (c >= 91 && c <= 96) || (c >= 123 && c <= 126)) { return true; }
+  }
+  return false;
+}
 function pwLacks(pw) {
   var lacks = [];
   if (pwBytes(pw) < 8) { lacks.push(WORDS.lackLength); }
   if (!/[0-9]/.test(pw)) { lacks.push(WORDS.lackNumber); }
-  if (!/[^A-Za-z0-9\\s]/.test(pw)) { lacks.push(WORDS.lackSymbol); }
+  if (!pwHasSymbol(pw)) { lacks.push(WORDS.lackSymbol); }
   return lacks;
 }
 function pwProblem(pw) {
@@ -335,7 +361,7 @@ function validateAbout() {
   var lacks = pwLacks(pw);
   el('rule-length').className = pwBytes(pw) >= 8 ? 'ok' : 'miss';
   el('rule-number').className = /[0-9]/.test(pw) ? 'ok' : 'miss';
-  el('rule-symbol').className = /[^A-Za-z0-9\\s]/.test(pw) ? 'ok' : 'miss';
+  el('rule-symbol').className = pwHasSymbol(pw) ? 'ok' : 'miss';
   el('rule-bytes').className = pwBytes(pw) <= 72 ? 'ok' : 'miss';
   var problem = pw === '' ? WORDS.missing : pwProblem(pw);
   var message = problem;
@@ -400,7 +426,13 @@ function fmtElapsed(seconds) {
 function renderProgress(data) {
   var progress = data.progress;
   el('elapsed').textContent = fmtElapsed(progress.elapsedSeconds || 0);
-  el('admin-note').classList.toggle('hidden', !progress.adminPrompt);
+  var adminNote = el('admin-note');
+  if (progress.adminPrompt) {
+    adminNote.textContent = progress.adminPrompt;
+    adminNote.classList.remove('hidden');
+  } else {
+    adminNote.classList.add('hidden');
+  }
   var html = '';
   progress.phases.forEach(function (phase, index) {
     var total = Math.max(phase.steps.length, 1);
@@ -443,6 +475,9 @@ function showDone(data) {
   var done = data.done || {};
   el('done-title').textContent = done.warning ? TEXT.doneWarningTitle : TEXT.doneTitle;
   el('done-warning').classList.toggle('hidden', !done.warning);
+  if (done.warning && done.verdict) {
+    el('done-warning').textContent = done.verdict;
+  }
   if (done.publicUrl) {
     el('open-aman').href = done.publicUrl;
     el('done-address').textContent = done.publicUrl;
@@ -465,9 +500,29 @@ function showFailed(data) {
   el('failed-step').textContent = data.failedStep || '';
   el('failedlog').textContent = state.log;
   el('retry-password-row').classList.toggle('hidden', !data.needsPassword);
+  el('retry-tf-row').classList.toggle('hidden', !data.needsTokenFactoryKey);
+  el('retry-cal-row').classList.toggle('hidden', !data.needsCalendarPassword);
+  el('retry-em-row').classList.toggle('hidden', !data.needsEmailPassword);
+  var adminRows = data.retryAdminRows || [];
+  var adminHtml = '';
+  adminRows.forEach(function (row) {
+    adminHtml += '<div class="row"><div>' + badge('admin') + '</div><div class="grow">' + esc(row.text) + '</div></div>';
+  });
+  el('retry-admin-rows').innerHTML = adminHtml;
+  el('retry-admin').classList.toggle('hidden', adminRows.length === 0);
   el('start-docker').classList.toggle('hidden', !(data.dockerDown && data.startDockerAvailable));
   state.dockerReady = false;
   show('s-failed');
+}
+
+function refreshFailed() {
+  api('/api/progress').then(function (res) {
+    var data = res.data;
+    if (data && data.progress && data.status === 'failed') {
+      state.log = data.log || state.log;
+      showFailed(data);
+    }
+  });
 }
 
 function boot() {
@@ -551,10 +606,23 @@ el('start-docker').addEventListener('click', function () {
 });
 el('try-again').addEventListener('click', function () {
   showError('');
-  var password = el('retry-password').value;
-  api('/api/retry', { password: password }).then(function (res) {
-    if (res.data && res.data.started) { el('retry-password').value = ''; enterInstalling(); }
-    else { showError((res.data && res.data.error) || TEXT.working); }
+  var body = {
+    password: el('retry-password').value,
+    tokenFactoryKey: el('retry-tf').value,
+    calendarPassword: el('retry-cal').value,
+    emailPassword: el('retry-em').value
+  };
+  api('/api/retry', body).then(function (res) {
+    if (res.data && res.data.started) {
+      el('retry-password').value = '';
+      el('retry-tf').value = '';
+      el('retry-cal').value = '';
+      el('retry-em').value = '';
+      enterInstalling();
+    } else {
+      showError((res.data && res.data.error) || TEXT.working);
+      refreshFailed();
+    }
   });
 });
 boot();

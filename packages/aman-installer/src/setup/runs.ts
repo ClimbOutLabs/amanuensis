@@ -14,6 +14,15 @@ import { isSetupAnswers, type SetupAnswers } from './answers.ts';
 // the state home again. The record holds the run's answers so a later
 // setup can pick the run up; it never holds a secret.
 
+// Which of a run's secrets a Try again must ask for again, because the
+// secrets themselves are never kept: one flag per Advanced section the
+// run's answers fill in. The sign-in password has its own flag below.
+export interface RunSecretsNeeded {
+  emailPassword: boolean;
+  calendarPassword: boolean;
+  tokenFactoryKey: boolean;
+}
+
 export interface RunRecord {
   pid: number;
   startedAtSeconds: number;
@@ -24,6 +33,7 @@ export interface RunRecord {
   // instance exists yet): a Try again then asks for it again, because
   // the password itself is never kept.
   needsPassword: boolean;
+  secretsNeeded: RunSecretsNeeded;
 }
 
 export function runDirFor(stateHome: string, tempRoot: string): string {
@@ -54,18 +64,30 @@ export async function readRunRecord(dir: string): Promise<RunRecord | null> {
   if (!isRecord(parsed)) {
     return null;
   }
-  const { pid, startedAtSeconds, eventsFile, logFile, answers, needsPassword } = parsed;
+  const { pid, startedAtSeconds, eventsFile, logFile, answers, needsPassword, secretsNeeded } = parsed;
   if (
     typeof pid !== 'number' ||
     typeof startedAtSeconds !== 'number' ||
     typeof eventsFile !== 'string' ||
     typeof logFile !== 'string' ||
     !isSetupAnswers(answers) ||
-    typeof needsPassword !== 'boolean'
+    typeof needsPassword !== 'boolean' ||
+    !isRunSecretsNeeded(secretsNeeded)
   ) {
     return null;
   }
-  return { pid, startedAtSeconds, eventsFile, logFile, answers, needsPassword };
+  return { pid, startedAtSeconds, eventsFile, logFile, answers, needsPassword, secretsNeeded };
+}
+
+function isRunSecretsNeeded(value: unknown): value is RunSecretsNeeded {
+  if (!isRecord(value)) {
+    return false;
+  }
+  return (
+    typeof value['emailPassword'] === 'boolean' &&
+    typeof value['calendarPassword'] === 'boolean' &&
+    typeof value['tokenFactoryKey'] === 'boolean'
+  );
 }
 
 export function pidAlive(pid: number): boolean {
