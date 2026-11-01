@@ -16,6 +16,8 @@ if (process.argv[1] !== undefined && fileURLToPath(import.meta.url) === process.
       profilesDir: process.env.BROWSER_PROFILES_DIR ?? DEFAULT_PROFILES_DIR,
       navTimeoutMs: Number(process.env.BROWSER_NAV_TIMEOUT_MS ?? DEFAULT_NAV_TIMEOUT_MS),
       proxyServer: process.env.BROWSER_PROXY,
+      // The gate's own log line only: never the page's content, never a login.
+      log: message => process.stdout.write(`${message}\n`),
     });
     server = createHttpServer({ sidecar, secret });
   } catch (error) {

@@ -12,7 +12,7 @@
  * one persistent profile per person. This capability only calls its HTTP API.
  */
 import type { CallToolRequest } from '@modelcontextprotocol/sdk/types.js';
-import type { AgentCapability, AgentTracing } from '@truefoundry/trueforge-core/core';
+import type { AgentCapability, AgentTracing, ApprovalDecision } from '@truefoundry/trueforge-core/core';
 import {
   BROWSER_CLICK_TOOL_NAME,
   defineTool,
@@ -152,6 +152,35 @@ interface ClickInfoBody {
   reason?: string;
 }
 
+/** The sidecar's answer to a click: `ok`, a plain refusal, caught by the request gate, or the page moved sites. */
+interface ClickBody {
+  status: 'ok' | 'refused' | 'needs_approval' | 'moved';
+  text?: string;
+  reason?: string;
+  url?: string;
+  site?: string;
+  accessible_name?: string;
+  form_values?: Record<string, string>;
+}
+
+function needsApprovalResult(body: ClickBody): ReturnType<typeof toolResultResponse> {
+  const label = body.accessible_name === undefined || body.accessible_name === '' ? '(no label)' : body.accessible_name;
+  const values = Object.entries(body.form_values ?? {})
+    .map(([key, value]) => `${key}: ${value}`)
+    .join(', ');
+  return toolResultResponse({
+    text: JSON.stringify({
+      status: 'needs_approval',
+      message:
+        `Stop. Clicking "${label}" on ${body.site ?? 'this site'} tried to send something, and Aman stopped it ` +
+        'because the person had not said OK. Nothing was sent. Tell the person plainly: this needs their OK, ' +
+        `name the button and the site, and do not click it again without asking them first.` +
+        (values === '' ? '' : ` The form held: ${values}.`),
+    }),
+    isError: true,
+  });
+}
+
 function readResult({
   result,
   logger,
@@ -191,6 +220,20 @@ class BrowserTool extends LocalToolMCP {
     super({ tracing });
   }
 
+  /** What the live page says about a clicked ref right now, or undefined when it cannot be read. */
+  private async readClickReview(ref: string): Promise<BrowserClickReview | undefined> {
+    const result = await callBrowserSidecar<ClickInfoBody>({ path: '/click-info', owner: this.owner, body: { ref } });
+    if (!result.ok || result.body.status !== 'ok') {
+      return undefined;
+    }
+    return {
+      site: result.body.site ?? '',
+      accessible_name: result.body.accessible_name ?? '',
+      is_form_submit: result.body.is_form_submit === true,
+      form_values: result.body.form_values ?? {},
+    };
+  }
+
   /**
    * Stamps `browser_click` with what the live page says about the clicked element, read without
    * clicking it, so the classifier decides the tier from the page itself, never from model text.
@@ -208,17 +251,31 @@ class BrowserTool extends LocalToolMCP {
     if (ref === undefined) {
       return info;
     }
-    const result = await callBrowserSidecar<ClickInfoBody>({ path: '/click-info', owner: this.owner, body: { ref } });
-    if (!result.ok || result.body.status !== 'ok') {
-      return info;
+    const review = await this.readClickReview(ref);
+    return review === undefined ? info : { ...info, browser_click: review };
+  }
+
+  /**
+   * Re-reads the click's context right before dispatch, so an approval given for one page cannot
+   * click a different one: the generic "parameters changed since approval" check then compares this
+   * fresh read against what the token was minted over (see browserTier.ts). A ref dispatch cannot
+   * read throws, which the dispatch path turns into its own "could not be re-checked" refusal.
+   */
+  async liveMintParams(
+    params: Parameters<LocalToolMCP['toolCallInfo']>[0],
+  ): Promise<Record<string, unknown> | undefined> {
+    if (params.name !== BROWSER_CLICK_TOOL_NAME) {
+      return undefined;
     }
-    const review: BrowserClickReview = {
-      site: result.body.site ?? '',
-      accessible_name: result.body.accessible_name ?? '',
-      is_form_submit: result.body.is_form_submit === true,
-      form_values: result.body.form_values ?? {},
-    };
-    return { ...info, browser_click: review };
+    const ref = clickRef(params);
+    if (ref === undefined) {
+      throw new Error('browser_click is missing its ref');
+    }
+    const review = await this.readClickReview(ref);
+    if (review === undefined) {
+      throw new Error('could not re-read the clicked element');
+    }
+    return { ref, review };
   }
 
   private readonly tools: ToolDefinition[] = [
@@ -334,15 +391,41 @@ class BrowserTool extends LocalToolMCP {
       description:
         'Click a link, button, tab or other element on the open page, by its ref from browser_read. A click that submits a form, or whose label is a word like pay, buy, send, delete, cancel a membership and similar, shows the person an approval card first; everything else runs right away.',
       schema: CLICK_INPUT_SCHEMA,
-      handler: async (input: BrowserClickInput) =>
-        readResult({
-          result: await callBrowserSidecar<RefusableReadBody | MovedBody>({
-            path: '/click',
-            owner: this.owner,
-            body: input,
-          }),
-          logger: this.logger,
-        }),
+      handler: async (input: BrowserClickInput, approvalDecision?: ApprovalDecision) => {
+        const result = await callBrowserSidecar<ClickBody>({
+          path: '/click',
+          owner: this.owner,
+          body: { ref: input.ref, approved: approvalDecision?.status === 'allow' },
+        });
+        if (!result.ok) {
+          this.logger.warn('browser sidecar call failed', { message: result.message });
+          return toolResultResponse({
+            text: JSON.stringify({ status: 'error', message: result.message }),
+            isError: true,
+          });
+        }
+        const body = result.body;
+        if (body.status === 'needs_approval') {
+          this.logger.warn('browser click gate caught an unapproved write', {
+            site: body.site,
+            accessible_name: body.accessible_name,
+          });
+          return needsApprovalResult(body);
+        }
+        if (body.status === 'refused') {
+          return toolResultResponse({
+            text: JSON.stringify({ status: 'error', message: refusalMessage(body.reason) }),
+            isError: true,
+          });
+        }
+        if (body.status === 'moved') {
+          return toolResultResponse({
+            text: JSON.stringify({ status: 'error', message: movedMessage(body.url) }),
+            isError: true,
+          });
+        }
+        return toolResultResponse({ text: body.text ?? '' });
+      },
     }),
   ];
 
