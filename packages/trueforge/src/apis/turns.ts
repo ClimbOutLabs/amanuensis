@@ -593,6 +593,7 @@ function createTurnResolver(deps: {
       mailAccounts: mailAccountDirectory,
       mcpRequestTimeoutMs: configuration.MCP_REQUEST_TIMEOUT_MS,
       mcpConnectTimeoutMs: configuration.MCP_CONNECT_TIMEOUT_MS,
+      mcpMaxResponseBytes: configuration.MCP_TOOL_CALL_MAX_RESPONSE_BYTES,
       pageFixtures: configuration.AMAN_EVAL_MODE ? evalPageFixtures() : undefined,
       sandboxProvider: async ({ spec, existingSandboxId, tracing, sentinel }) => {
         const provider = await sandboxProviderResolver({
