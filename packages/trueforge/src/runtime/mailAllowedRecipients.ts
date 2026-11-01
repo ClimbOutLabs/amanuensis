@@ -188,9 +188,11 @@ export async function waitForSidecarLoadedHash({
 export async function waitForCurrentSidecarList({
   path,
   statusPath,
+  timeoutMs = SIDECAR_LOAD_TIMEOUT_MS,
 }: {
   path: string;
   statusPath: string;
+  timeoutMs?: number;
 }): Promise<boolean> {
   let text: string;
   try {
@@ -198,7 +200,7 @@ export async function waitForCurrentSidecarList({
   } catch {
     return false;
   }
-  return waitForSidecarLoadedHash({ statusPath, hash: allowedRecipientsFileHash(text) });
+  return waitForSidecarLoadedHash({ statusPath, hash: allowedRecipientsFileHash(text), timeoutMs });
 }
 
 async function sidecarLoadedHash(statusPath: string): Promise<string | null> {
