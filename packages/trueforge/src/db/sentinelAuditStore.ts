@@ -1,6 +1,6 @@
 import { decodePageToken, encodePageToken } from '@truefoundry/trueforge-core/agent-session/store/PageToken';
 import type { AuditLogWriter, AuditOutcome, AuditRecordInput } from '@truefoundry/trueforge-core/core';
-import type { Kysely } from 'kysely';
+import { SqliteAdapter, sql, type Kysely, type RawBuilder } from 'kysely';
 import { z } from 'zod';
 
 import { newId } from '../utils/id';
@@ -10,6 +10,7 @@ export interface SentinelAuditDatabase {
   session: {
     tenant_id: string;
     session_id: string;
+    title: string | null;
   };
   sentinel_audit: {
     id: string;
@@ -70,6 +71,8 @@ export interface ListUserSentinelAuditInput {
 export interface UserSentinelAuditRecord extends SentinelAuditRecord {
   /** False once the chat the entry came from has been deleted. */
   chat_exists: boolean;
+  /** Title of the chat the entry came from; null when deleted or not yet titled. */
+  session_title: string | null;
 }
 
 export interface UserSentinelAuditPage {
@@ -112,6 +115,13 @@ const IMPORT_BATCH_SIZE = 50;
  * contract from trueforge-core so classification decisions are persisted,
  * and exposes per-chat and per-user listings for the audit routes.
  */
+/** The chat owner's subject id. SQLite stores the JSON as text and Postgres as jsonb, so the read differs. */
+function chatOwnerSubjectId(db: Kysely<SentinelAuditDatabase>): RawBuilder<string | null> {
+  return db.getExecutor().adapter instanceof SqliteAdapter
+    ? sql<string | null>`json_extract(session.created_by_subject, '$.subject_id')`
+    : sql<string | null>`session.created_by_subject->>'subject_id'`;
+}
+
 export class SentinelAuditStore implements ISentinelAuditStore {
   readonly #db: Kysely<SentinelAuditDatabase>;
 
@@ -162,7 +172,13 @@ export class SentinelAuditStore implements ISentinelAuditStore {
           .onRef('session.session_id', '=', 'sentinel_audit.conversation_id'),
       )
       .selectAll('sentinel_audit')
-      .select('session.session_id as joined_session_id')
+      .select([
+        'session.session_id as joined_session_id',
+        // Only the chat's own owner sees its title; another user's chat still counts as existing.
+        sql<string | null>`CASE WHEN ${chatOwnerSubjectId(this.#db)} = ${input.created_by} THEN session.title END`.as(
+          'joined_session_title',
+        ),
+      ])
       .where('sentinel_audit.tenant_id', '=', input.tenant_id)
       .where('sentinel_audit.created_by', '=', input.created_by);
     if (input.outcome !== undefined) {
@@ -185,6 +201,7 @@ export class SentinelAuditStore implements ISentinelAuditStore {
     const entries = rows.slice(0, input.limit).map(row => ({
       ...toRecord(row),
       chat_exists: row.joined_session_id !== null,
+      session_title: row.joined_session_title,
     }));
     const last = entries.at(-1);
     return {
