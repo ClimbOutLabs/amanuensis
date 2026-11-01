@@ -798,7 +798,9 @@ describe('document page-range extraction', () => {
       const { input, reads } = wordInput({ filename: 'fake.docx', bytes: Buffer.from('plain text'), text: 'x' });
       const result = await extractDocumentText(input);
       expect(reads).toEqual([]);
-      expect(result.documents[0]?.issue).toBe('fake.docx is not a valid Word document, so it cannot be read.');
+      expect(result.documents[0]?.issue).toBe(
+        'Could not extract fake.docx: The file is damaged or incomplete. Ask the sender to send it again.',
+      );
     });
 
     it('says plainly when the document holds no text', async () => {
@@ -819,11 +821,90 @@ describe('document page-range extraction', () => {
       expect(result.documents[0]?.issue).toBe('Skipped huge.docx: document byte limit exceeded.');
     });
 
-    it('rejects a page range, which only a PDF has', async () => {
-      const { input } = wordInput({ filename: 'plan.docx', bytes: zipHeader, text: 'x' });
-      input.pageRange = { page_start: 2, page_end: 3 };
+    it('tells a password-protected or older Word file from a damaged one, without reading either', async () => {
+      const ole = Buffer.concat([Buffer.from('d0cf11e0a1b11ae1', 'hex'), Buffer.alloc(64)]);
+      const { input, reads } = wordInput({ filename: 'locked.docx', bytes: ole, text: 'x' });
       const result = await extractDocumentText(input);
-      expect(result.documents[0]?.issue).toBe('page_start/page_end apply to PDF files only; plan.docx is not a PDF.');
+      expect(reads).toEqual([]);
+      expect(result.documents[0]?.issue).toContain('protected with a password or saved in an older Word format');
+    });
+
+    describe('a Word file longer than one window', () => {
+      // Thirty paragraphs of about 1,000 characters make ten pages.
+      const longText = Array.from(
+        { length: 30 },
+        (_, index) => `Paragraph ${String(index + 1)} ${'word '.repeat(190)}`,
+      ).join('\n');
+
+      it('reads the page range that was asked for, with absolute page numbers', async () => {
+        const { input } = wordInput({ filename: 'long.docx', bytes: zipHeader, text: longText });
+        input.pageRange = { page_start: 3, page_end: 4 };
+        const result = await extractDocumentText(input);
+        const document = result.documents[0];
+        expect(document?.pages.map(page => page.page_number)).toEqual([3, 4]);
+        expect(document?.pages[0]?.lines[0]?.text).toMatch(/^Paragraph \d+ /);
+        expect(document?.issue).toContain('Read pages 3-4 of 10 total');
+        expect(document?.issue).toContain('page_start=5');
+      });
+
+      it('says a page past the end is past the end, with the page count', async () => {
+        const { input } = wordInput({ filename: 'long.docx', bytes: zipHeader, text: longText });
+        input.pageRange = { page_start: 40, page_end: 41 };
+        const result = await extractDocumentText(input);
+        expect(result.documents[0]?.issue).toBe('page_start 40 is beyond the end of long.docx (10 pages).');
+      });
+
+      it('shows the whole file as numbered pages when no range is asked for', async () => {
+        const { input } = wordInput({ filename: 'long.docx', bytes: zipHeader, text: longText });
+        const result = await extractDocumentText(input);
+        const document = result.documents[0];
+        expect(document?.pages.map(page => page.page_number)).toEqual(Array.from({ length: 10 }, (_, i) => i + 1));
+        expect(document?.issue).toBeNull();
+      });
+
+      it('shows an open-ended tool read as a window that stays small, and names the next range', async () => {
+        const { input } = wordInput({ filename: 'long.docx', bytes: zipHeader, text: longText });
+        input.budget = createSessionDocumentExtractionBudget();
+        const result = await extractDocumentText(input);
+        const document = result.documents[0];
+        const shown = document?.pages.reduce((sum, page) => sum + page.lines.reduce((n, l) => n + l.text.length, 0), 0);
+        expect(shown).toBeLessThanOrEqual(12_000 * 1.2);
+        expect(document?.pages.length).toBeLessThan(10);
+        expect(document?.issue).toMatch(
+          /Read pages 1-\d+ of 10 total\. For the next pages, call extract_document_text with page_start=\d+/,
+        );
+      });
+
+      it('keeps a Word file bigger than the tool-output limit readable, window by window, to the end', async () => {
+        // About 300,000 characters: far past what one tool answer may hold.
+        const huge = Array.from({ length: 300 }, (_, i) => `Paragraph ${String(i)} ${'word '.repeat(190)}`).join('\n');
+        const { input } = wordInput({ filename: 'huge.docx', bytes: zipHeader, text: huge });
+        input.budget = createSessionDocumentExtractionBudget();
+        const seen: number[] = [];
+        let next: number | undefined = undefined;
+        for (let call = 0; call < 200; call += 1) {
+          input.pageRange = next === undefined ? undefined : { page_start: next, page_end: next + 99 };
+          const result = await extractDocumentText(input);
+          const document = result.documents[0];
+          seen.push(...(document?.pages.map(page => page.page_number) ?? []));
+          const issue = document?.issue ?? '';
+          const match = /page_start=(\d+)/.exec(issue);
+          if (match === null) {
+            break;
+          }
+          next = Number(match[1]);
+        }
+        const total = Math.max(...seen);
+        expect(total).toBeGreaterThan(90);
+        expect(seen).toEqual(Array.from({ length: total }, (_, i) => i + 1));
+      });
+
+      it('cuts a single line longer than a page into pages, never splitting a character', async () => {
+        const { input } = wordInput({ filename: 'wall.docx', bytes: zipHeader, text: '\u{1F600}'.repeat(4000) });
+        const result = await extractDocumentText(input);
+        const shown = result.documents[0]?.pages.map(page => page.lines.map(line => line.text).join('')).join('');
+        expect(shown).toBe('\u{1F600}'.repeat(4000));
+      });
     });
 
     it('says only the head is shown when the text passes the per-document character cap', async () => {
@@ -833,7 +914,10 @@ describe('document page-range extraction', () => {
         text: 'a'.repeat(MAX_CHARS_PER_DOCUMENT + 500),
       });
       const result = await extractDocumentText(input);
-      expect(result.documents[0]?.issue).toContain('only its head is shown');
+      const document = result.documents[0];
+      // The text is cut into pages, and what passes the cap is read with the next page_start.
+      expect(document?.pages.length).toBeGreaterThan(1);
+      expect(document?.issue).toMatch(/Read pages 1-\d+ of \d+ total.*page_start=\d+/);
     });
 
     it('names the supported types when a file is none of them', async () => {
@@ -869,7 +953,7 @@ describe('document page-range extraction', () => {
     const input = pdfInput({ pageRange: { page_start: 2, page_end: 3 } });
     input.files = [{ filename: 'photo.png', path: 'uploads/photo.png' }];
     const result = await extractDocumentText(input);
-    expect(result.documents[0]?.issue).toContain('page_start/page_end apply to PDF files only');
+    expect(result.documents[0]?.issue).toContain('page_start/page_end apply to PDF and Word files only');
   });
 
   it('drops a page that does not fit whole and names the exact next page_start', async () => {

@@ -4,7 +4,7 @@ import { shellEscape } from '../provider/Provider';
 import { SlotSandboxProvider } from './SlotSandboxProvider';
 
 /** What the document pipeline runs in the guest; a slot image built before attachments were supported lacks them. */
-const GUEST_DOCUMENT_TOOLS = ['pdfinfo', 'pdftotext', 'pdftoppm', 'tesseract'] as const;
+const GUEST_DOCUMENT_TOOLS = ['pdfinfo', 'pdftotext', 'pdftoppm', 'tesseract', 'python3'] as const;
 /** Marks the lines of the probe command's output that name something missing; every other line is ignored. */
 const MISSING_MARKER = 'AMAN_MISSING:';
 /** Cleanup gets its own short allowance so a probe that timed out can still remove its throwaway workspace. */
@@ -25,8 +25,7 @@ function missingToolsCommand(ocrLanguages: readonly string[]): string {
     language =>
       `printf '%s\\n' "$languages" | grep -qx -- ${shellEscape(language)} || echo ${shellEscape(`${MISSING_MARKER}tesseract-${language}`)}`,
   );
-  const wordReader = `python3 -I -c 'import docx, lxml' >/dev/null 2>&1 || echo ${shellEscape(`${MISSING_MARKER}python-docx`)}`;
-  return [...tools, wordReader, 'languages=$(tesseract --list-langs 2>/dev/null || true)', ...languages].join('; ');
+  return [...tools, 'languages=$(tesseract --list-langs 2>/dev/null || true)', ...languages].join('; ');
 }
 
 /**
