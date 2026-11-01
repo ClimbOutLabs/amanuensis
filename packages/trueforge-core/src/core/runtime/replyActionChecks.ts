@@ -1,10 +1,19 @@
 import type { InternalToolCallInfo } from '../llm/LLMTypes';
-import { isReadOnlyCall, MAX_WRITE_CALLS_PER_TURN, type TurnStepKind } from '../mcp/executeToolCalls';
 import {
+  isHostVouchedRead,
+  isReadOnlyCall,
+  MAX_WRITE_CALLS_PER_TURN,
+  type TurnStepKind,
+} from '../mcp/executeToolCalls';
+import { sandboxCommandEffect } from '../sandbox/commandClassification';
+import {
+  SANDBOX_APPLY_PATCH_TOOL_NAME,
   SANDBOX_EXEC_TOOL_NAME,
   SANDBOX_MCP_SERVER_ID,
+  SANDBOX_REPLACE_TEXT_TOOL_NAME,
   SANDBOX_RUN_CODE_TOOL_NAME,
   SANDBOX_RUN_REGISTERED_COMMAND_TOOL_NAME,
+  SANDBOX_WRITE_FILE_TOOL_NAME,
 } from '../sandbox/Sandbox';
 
 /** Sent to the model when its reply carried a tool call as text, so that call did not run. */
@@ -18,15 +27,91 @@ export const REPEATED_ACTION_RESULT =
 /** What the person reads in place of a repeat the guard skipped. */
 export const REPEATED_ACTION_OWNER_MESSAGE = 'Skipped, because I had already done this. Check the result above.';
 
-/** Result text for a write call past the per-turn cap. Not run; the turn ends after this batch. */
-export const WRITE_CAP_BLOCKED_RESULT = `Not run: this reply already made the maximum of ${String(MAX_WRITE_CALLS_PER_TURN)} changes. Do not make more changes; tell the person what was changed.`;
+/** Result text for a change past the per-turn cap. Not run; the turn ends after this batch. */
+export const WRITE_CAP_BLOCKED_RESULT = `Not run: this reply already reached the limit of ${String(MAX_WRITE_CALLS_PER_TURN)} actions outside the sandbox workspace, such as sending or changing things in a connected app. Do not make more of them; tell the person what was done.`;
 
 /** What the person reads in place of a change the write cap skipped. */
-export const WRITE_CAP_OWNER_MESSAGE =
-  'Skipped, because I had already made the most changes allowed in one reply. Ask again for the rest.';
+export const WRITE_CAP_OWNER_MESSAGE = `Skipped, because I had already done ${String(MAX_WRITE_CALLS_PER_TURN)} things outside the sandbox in one reply. Ask again for the rest.`;
 
 /** Ends the turn, shown to the person, when the write cap stopped a call. */
-export const WRITE_CAP_STOP_MESSAGE = `Stopped after ${String(MAX_WRITE_CALLS_PER_TURN)} changes in one reply to avoid repeats. Check what was changed, then ask again if you need more.`;
+export const WRITE_CAP_STOP_MESSAGE = `Stopped after ${String(MAX_WRITE_CALLS_PER_TURN)} actions outside the sandbox in one reply. Check what was done, then ask again if you need more.`;
+
+/**
+ * Whether a call counts toward the per-turn cap on changes. The cap is for actions that leave the
+ * sandbox: a send, a connector write, a git push. Work inside the sandbox workspace (writing and
+ * editing files, running code, builds and tests) stays in the sandbox and can be undone there, so a
+ * coding task is not cut off part way; the repeat guard still stops a call made over and over.
+ * A read the host vouches for (a search, a page read, a map lookup) never counts; a server's own
+ * read-only claim is not enough. A call held for the owner does not run now.
+ */
+export function countsTowardWriteCap(info: InternalToolCallInfo, argumentsText: string): boolean {
+  if (info.tier !== 3 || info.held_for_owner !== undefined || isHostVouchedRead(info)) {
+    return false;
+  }
+  if (info.mcp_server_name !== SANDBOX_MCP_SERVER_ID) {
+    return true;
+  }
+  return info.original_tool_name === SANDBOX_EXEC_TOOL_NAME && execPushes(argumentsText);
+}
+
+/**
+ * Whether a call that ran and succeeded changed something, so the same call may sensibly run again:
+ * tests run again after a file edit, for example. Counts every action the write cap counts, plus the
+ * sandbox's own edits: a file written or edited, and an exec whose command edits, commits or pushes.
+ */
+export function changesState(info: InternalToolCallInfo, argumentsText: string): boolean {
+  if (countsTowardWriteCap(info, argumentsText)) {
+    return true;
+  }
+  if (info.mcp_server_name !== SANDBOX_MCP_SERVER_ID) {
+    return false;
+  }
+  if (isSandboxFileEdit(info)) {
+    return true;
+  }
+  if (info.original_tool_name !== SANDBOX_EXEC_TOOL_NAME || info.effect === 'inspect') {
+    return false;
+  }
+  const effect = execEffect(argumentsText);
+  return effect === undefined || effect === 'edit' || effect === 'commit' || effect === 'push';
+}
+
+const SANDBOX_FILE_EDIT_TOOLS: ReadonlySet<string> = new Set([
+  SANDBOX_WRITE_FILE_TOOL_NAME,
+  SANDBOX_APPLY_PATCH_TOOL_NAME,
+  SANDBOX_REPLACE_TEXT_TOOL_NAME,
+]);
+
+/** Whether a call is one of the sandbox's own file tools: writing a new file, or editing one. */
+export function isSandboxFileEdit(info: Pick<InternalToolCallInfo, 'mcp_server_name' | 'original_tool_name'>): boolean {
+  return info.mcp_server_name === SANDBOX_MCP_SERVER_ID && SANDBOX_FILE_EDIT_TOOLS.has(info.original_tool_name);
+}
+
+/** Whether an exec call pushes out of the sandbox, by its declared purpose or by its command. */
+function execPushes(argumentsText: string): boolean {
+  return execEffect(argumentsText) === 'push';
+}
+
+/**
+ * What an exec call does, from its declared purpose when that is push and otherwise from its command.
+ * Undefined when the arguments cannot be read, which callers treat as the riskier answer.
+ */
+function execEffect(argumentsText: string): string | undefined {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(argumentsText);
+  } catch {
+    return undefined;
+  }
+  if (typeof parsed !== 'object' || parsed === null) {
+    return undefined;
+  }
+  const { purpose, command } = parsed as { purpose?: unknown; command?: unknown };
+  if (purpose === 'push') {
+    return 'push';
+  }
+  return typeof command === 'string' ? sandboxCommandEffect(command) : undefined;
+}
 
 /** Ends the turn, shown to the person, when the model kept sending tool calls that were blocked before they ran. */
 export function blockedCallsStopMessage(assistantName: string): string {

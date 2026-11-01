@@ -108,7 +108,6 @@ import {
   FAILED_BATCH_STOP_AT,
   IDENTICAL_CALL_NUDGE_AT,
   IDENTICAL_CALL_STOP_AT,
-  isHostVouchedRead,
   isReadOnlyCall,
   MAX_TOOL_MARKUP_RETRIES_PER_TURN,
   MAX_WRITE_CALLS_PER_TURN,
@@ -267,7 +266,10 @@ import {
 import {
   BLOCKED_CALLS_PARENT_MESSAGE,
   blockedCallsStopMessage,
+  changesState,
+  countsTowardWriteCap,
   findUnbackedClaim,
+  isSandboxFileEdit,
   REPEATED_ACTION_OWNER_MESSAGE,
   REPEATED_ACTION_RESULT,
   repetitionStopMessage,
@@ -4582,10 +4584,10 @@ export class AgentThread {
 
   /**
    * Host-owned per-turn loop guard, run before dispatch, on counts shared by the whole turn. A call
-   * whose exact arguments already ran or were refused earlier in the turn is not run again. A tier 3
-   * call past MAX_WRITE_CALLS_PER_TURN is not run either, unless the host vouches it is a read
-   * (isHostVouchedRead). Both end the turn after their batch resolves, and the repeat also ends it when the same
-   * call comes straight after the one before.
+   * whose exact arguments already ran or were refused earlier in the turn is not run again, unless a
+   * change has run since. An action outside the sandbox workspace past MAX_WRITE_CALLS_PER_TURN is not
+   * run either (countsTowardWriteCap). Both end the turn after their batch resolves, and the repeat also
+   * ends it when the same call comes straight after the one before.
    */
   private applyToolCallLoopGuard({ calls, turn }: { calls: InternalEnrichedToolCall[]; turn: TurnToolCallLedger }): {
     calls: InternalEnrichedToolCall[];
@@ -4595,6 +4597,7 @@ export class AgentThread {
     const seenInBatch = new Set<string>();
     let previous = turn.lastCallSignature;
     let writeCapBlocked = 0;
+    let admittedCappedInBatch = 0;
     let repeatedBlocked = 0;
     let repeatStop = false;
     const blocked = ({
@@ -4626,7 +4629,7 @@ export class AgentThread {
         seenInBatch.has(signature) ||
         (lastRun !== undefined &&
           !retryIsDue({ lastKind: lastRun.lastKind, retried: lastRun.retried }) &&
-          lastRun.writesAtLastRun >= turn.writeCallsThisTurn);
+          lastRun.writesAtLastRun >= turn.changesThisTurn);
       const duplicateInStep = seenInBatch.has(signature);
       seenInBatch.add(signature);
       if (alreadySeen) {
@@ -4638,19 +4641,15 @@ export class AgentThread {
         repeatStop = repeatStop || (consecutive && overLimit);
         return blocked({ call, message: REPEATED_ACTION_RESULT, ownerMessage: REPEATED_ACTION_OWNER_MESSAGE });
       }
-      // Every tier 3 call counts except a read the host itself vouches for: a search or page read
-      // leaves the computer but has its own limits. A server's read-only claim is not enough. A write
-      // held for the owner in an unattended run does not run now.
-      if (
-        call.tool_info.tier === 3 &&
-        !isHostVouchedRead(call.tool_info) &&
-        call.tool_info.held_for_owner === undefined
-      ) {
-        if (turn.writeCallsThisTurn >= MAX_WRITE_CALLS_PER_TURN) {
+      // Only actions that leave the sandbox count (see countsTowardWriteCap). The count is of ones
+      // that ran and succeeded; the calls admitted in this batch are reserved so one batch cannot
+      // overshoot the cap.
+      if (countsTowardWriteCap(call.tool_info, call.function.arguments)) {
+        if (turn.writeCallsThisTurn + admittedCappedInBatch >= MAX_WRITE_CALLS_PER_TURN) {
           writeCapBlocked += 1;
           return blocked({ call, message: WRITE_CAP_BLOCKED_RESULT, ownerMessage: WRITE_CAP_OWNER_MESSAGE });
         }
-        turn.writeCallsThisTurn += 1;
+        admittedCappedInBatch += 1;
       }
       return call;
     });
@@ -4984,6 +4983,12 @@ export class AgentThread {
       if (result.disposition === 'executed_ok' && !result.failure) {
         if (writes) {
           nextToolCallMemo.turn.successfulWritesThisTurn += 1;
+        }
+        if (toolCall !== undefined && countsTowardWriteCap(toolCall.tool_info, toolCall.function.arguments)) {
+          nextToolCallMemo.turn.writeCallsThisTurn += 1;
+        }
+        if (toolCall !== undefined && changesState(toolCall.tool_info, toolCall.function.arguments)) {
+          nextToolCallMemo.turn.changesThisTurn += 1;
         }
         if (result.toolCallInfo !== undefined) {
           for (const kind of stepKindsOf(result.toolCallInfo)) {
@@ -5352,7 +5357,8 @@ export class AgentThread {
         this.noteUnfinished(unfinished);
       }
     }
-    // A step that landed a space write is progress, not spent budget; a build in parts needs many such steps.
+    // A step that landed a space write or a sandbox file edit is progress, not spent budget; a build in
+    // parts needs many such steps.
     const refundsSoFar = replyTurn.progressRefundsByThread.get(this.threadId) ?? 0;
     const refund = progressRefundFor({
       refundsSoFar,
@@ -5367,6 +5373,7 @@ export class AgentThread {
                 disposition: result.disposition,
                 failure: result.failure,
                 savedNothing: spaceWriteSavedNothing(result.message.content),
+                sandboxFileEdit: isSandboxFileEdit(call.tool_info),
               },
             ];
       }),
@@ -5419,7 +5426,7 @@ export class AgentThread {
       const settled = settledByCallId.get(callId);
       nextToolCallMemo.turn.callSignatures.set(signature, {
         count: (previousRecord?.count ?? 0) + 1,
-        writesAtLastRun: nextToolCallMemo.turn.writeCallsThisTurn,
+        writesAtLastRun: nextToolCallMemo.turn.changesThisTurn,
         lastKind: settled?.kind ?? previousRecord?.lastKind ?? null,
         retried: settled?.retried ?? previousRecord?.retried ?? false,
       });

@@ -1218,3 +1218,127 @@ describe('turn-wide counts across threads', () => {
     expect(toolResults(sub).some(result => result.content.includes(REPEATED_ACTION_RESULT))).toBe(false);
   });
 });
+
+/** A stand-in for the sandbox: every call asks (tier 3), like an unrelaxed sandbox. `failing` tools return an error. */
+function makeSandboxToolSet(input: { failing?: readonly string[] } = {}) {
+  const toolSet = makeMockIMCPServer({
+    name: 'sandbox',
+    preload: true,
+    tools: ['write_file', 'exec', 'draft_email'].map(name => ({
+      name,
+      description: name,
+      inputSchema: { type: 'object' as const, properties: {} },
+      preload: true,
+    })),
+  });
+  jest.mocked(toolSet.toolCallInfo).mockImplementation((params: CallToolRequest['params']) =>
+    Promise.resolve({
+      type: 'truefoundry-system' as const,
+      mcp_server_id: toolSet.id,
+      mcp_server_name: 'sandbox',
+      original_tool_name: params.name,
+      is_approval_required: false,
+      tier: 3 as const,
+      tier_reason: 'arbitrary_code_execution',
+    }),
+  );
+  jest
+    .mocked(toolSet.callTool)
+    .mockImplementation((params: CallToolRequest['params']) =>
+      Promise.resolve(
+        input.failing?.includes(params.name) === true
+          ? toolResultResponse({ text: '{"error":"write_file rejected the write"}', isError: true })
+          : toolResultResponse({ text: '{"ok":true}' }),
+      ),
+    );
+  return toolSet;
+}
+
+/** One reply per batch of calls with free-form arguments, then a plain final answer. */
+function scriptedArgs(batches: { name: string; args: Record<string, unknown> }[][]): ILLM['create'] {
+  let round = 0;
+  return jest.fn((_request: LLMCreateParamsStreaming) => {
+    const batch = batches[round];
+    round += 1;
+    return batch === undefined
+      ? replyStream({ text: 'Done.' })
+      : replyStream({
+          calls: batch.map((call, index) => ({
+            id: `call-${String(round)}-${String(index)}`,
+            name: call.name,
+            args: call.args,
+          })),
+        });
+  });
+}
+
+describe('write cap leaves work inside the sandbox workspace alone', () => {
+  it('lets one reply create a whole project, more files than the cap', async () => {
+    const toolSet = makeSandboxToolSet();
+    const files = Array.from({ length: MAX_WRITE_CALLS_PER_TURN + 7 }, (_, index) => [
+      { name: 'write_file', args: { path: `ytmusic-mcp/module_${String(index)}.py`, content: 'x = 1\n' } },
+    ]);
+    const thread = makeThread({ toolSet, create: scriptedArgs(files) });
+    const events = await drain(thread);
+
+    expect(callToolNames(toolSet)).toHaveLength(MAX_WRITE_CALLS_PER_TURN + 7);
+    expect(toolResults(thread).some(result => result.content.includes(WRITE_CAP_BLOCKED_RESULT))).toBe(false);
+    expect(events.at(-1)).toMatchObject({ type: InternalEventType.AGENT_DONE, status: 'done' });
+  });
+
+  it('runs the same test command again after a file changed, but not twice in a row', async () => {
+    const toolSet = makeSandboxToolSet();
+    const tests = { name: 'exec', args: { purpose: 'verify', command: 'python3 -m pytest -q' } };
+    const thread = makeThread({
+      toolSet,
+      create: scriptedArgs([
+        [tests],
+        [{ name: 'write_file', args: { path: 'fix.py', content: 'x = 2\n' } }],
+        [tests],
+        [tests],
+      ]),
+    });
+    await drain(thread);
+
+    expect(callToolNames(toolSet)).toEqual(['exec', 'write_file', 'exec']);
+    expect(toolResults(thread).at(-1)?.content).toContain(REPEATED_ACTION_RESULT);
+  });
+
+  it('still caps git pushes out of the sandbox', async () => {
+    const toolSet = makeSandboxToolSet();
+    const pushes = Array.from({ length: MAX_WRITE_CALLS_PER_TURN + 2 }, (_, index) => [
+      { name: 'exec', args: { purpose: 'push', command: `git push origin branch-${String(index)}` } },
+    ]);
+    const thread = makeThread({ toolSet, create: scriptedArgs(pushes) });
+    const events = await drain(thread);
+
+    expect(callToolNames(toolSet)).toHaveLength(MAX_WRITE_CALLS_PER_TURN);
+    expect(toolResults(thread).some(result => result.content.includes(WRITE_CAP_BLOCKED_RESULT))).toBe(true);
+    expect(events.at(-1)).toMatchObject({
+      type: InternalEventType.AGENT_DONE,
+      status: 'error',
+      error: WRITE_CAP_STOP_MESSAGE,
+    });
+  });
+
+  it('counts only actions outside the sandbox that succeeded', async () => {
+    const toolSet = makeResearchToolSet();
+    let attempt = 0;
+    jest.mocked(toolSet.callTool).mockImplementation(() => {
+      attempt += 1;
+      return Promise.resolve(
+        attempt <= 3
+          ? toolResultResponse({ text: '{"error":"mail server unavailable"}', isError: true })
+          : toolResultResponse({ text: '{"ok":true}' }),
+      );
+    });
+    const drafts = Array.from({ length: MAX_WRITE_CALLS_PER_TURN + 3 }, (_, index) => [
+      { name: 'draft_email', text: `draft ${String(index)}` },
+    ]);
+    const thread = makeThread({ toolSet, create: scriptedCalls(drafts) });
+    await drain(thread);
+
+    // Three failed and did not count, so five more ran before the cap.
+    expect(callToolNames(toolSet)).toHaveLength(MAX_WRITE_CALLS_PER_TURN + 3);
+  });
+});

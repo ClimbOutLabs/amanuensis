@@ -7167,7 +7167,7 @@ export class Sandbox extends LocalToolMCP {
       this.skillCopyFailures = failed;
       // A new Sandbox is built for every turn, approvals included, and each one copies the skills in
       // again. The sandbox keeps a record of the notices already shown, so each shows once per chat.
-      const alreadyShown = await this.readShownSkillNotices(sandboxId);
+      const alreadyShown = failed.size === 0 ? new Set<string>() : await this.readShownSkillNotices(sandboxId);
       this.pendingSkillNotices = [...failed]
         .map(([name, failure]) => ({
           key: skillNoticeKey({ name, cause: failure.cause }),
