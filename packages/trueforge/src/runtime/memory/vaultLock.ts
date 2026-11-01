@@ -12,7 +12,7 @@ import { z } from 'zod';
 /** The lock file, inside the state folder so git and export never see it. */
 export const VAULT_LOCK_FILE = path.join('.memory-state', 'lock');
 
-/** A lock older than this is judged abandoned (a crashed holder) and taken over. */
+/** A lock not renewed for this long is judged abandoned (a crashed holder) and taken over. */
 export const VAULT_LOCK_STALE_AFTER_MS = 60_000;
 
 /** How long a caller waits for a busy vault before giving up. */
@@ -35,6 +35,23 @@ export class VaultBusyError extends Error {
   }
 }
 
+/** Thrown by `assertHeld` when the lock was taken over or could not be kept. The message is for the person. */
+export class VaultLockLostError extends Error {
+  constructor(options?: { cause?: unknown }) {
+    super('Memory was busy for too long and another writer took over. Nothing more was saved. Try again.', options);
+    this.name = 'VaultLockLostError';
+  }
+}
+
+/** Passed to the work so it can check, before each write, that it still owns the vault. */
+export interface VaultLockHandle {
+  /** Resolves while this call still holds the lock; throws `VaultLockLostError` once it does not. */
+  assertHeld(): Promise<void>;
+}
+
+/** Starts calling `tick` every `intervalMs` and returns a function that stops it. `tick` never rejects. */
+export type VaultLockScheduler = (tick: () => Promise<void>, intervalMs: number) => () => void;
+
 export interface VaultLockOptions {
   vaultDir: string;
   staleAfterMs?: number | undefined;
@@ -45,6 +62,8 @@ export interface VaultLockOptions {
   sleep?: ((ms: number) => Promise<void>) | undefined;
   /** Written into the lock record. Default the current process id. */
   pid?: number | undefined;
+  /** Runs the renewal ticks, for tests. Default a real interval. */
+  schedule?: VaultLockScheduler | undefined;
 }
 
 /**
@@ -62,13 +81,21 @@ export interface VaultLockOptions {
  *   same lock stale finds a different lock once it gets the claim and backs off.
  * - A lock whose file cannot be read as a record (empty, partial, foreign) is only stale by the
  *   file's age, never at once.
+ * - Renewal: while `work` runs, the holder rewrites the record with a fresh `acquired_at` every
+ *   quarter of the stale age, under the same claim as release, so a working holder is never
+ *   judged abandoned and a renewal cannot interleave with a takeover. A renewal that finds
+ *   another token marks the lock lost; `assertHeld` on the handle given to `work` then throws
+ *   `VaultLockLostError`, so work with several slow steps can stop before writing again.
  * - Release removes the lock only when it still carries this call's token.
  *
  * Callers wait (25 ms, doubling, at most 250 ms between tries) until `waitMs` has passed, then
  * get `VaultBusyError`. The state folder is created when missing. The lock is not re-entrant:
  * nested calls on one vault wait like strangers.
  */
-export async function withVaultLock<T>(options: VaultLockOptions, work: () => Promise<T>): Promise<T> {
+export async function withVaultLock<T>(
+  options: VaultLockOptions,
+  work: (lock: VaultLockHandle) => Promise<T>,
+): Promise<T> {
   const lockPath = path.join(options.vaultDir, VAULT_LOCK_FILE);
   const staleAfterMs = options.staleAfterMs ?? VAULT_LOCK_STALE_AFTER_MS;
   const waitMs = options.waitMs ?? VAULT_LOCK_WAIT_MS;
@@ -102,10 +129,140 @@ export async function withVaultLock<T>(options: VaultLockOptions, work: () => Pr
     await rm(tempPath, { force: true });
   }
 
+  const renewal = startRenewal({
+    lockPath,
+    token,
+    pid,
+    now,
+    staleAfterMs,
+    schedule: options.schedule ?? defaultSchedule,
+  });
   try {
-    return await work();
+    return await work({ assertHeld: renewal.assertHeld });
   } finally {
+    // Renewal stops first so it cannot rewrite the record while release is removing it.
+    await renewal.stop();
     await release({ lockPath, token, now, staleAfterMs });
+  }
+}
+
+function defaultSchedule(tick: () => Promise<void>, intervalMs: number): () => void {
+  const timer = setInterval(() => {
+    void tick();
+  }, intervalMs);
+  return () => {
+    clearInterval(timer);
+  };
+}
+
+/** Keeps the record fresh and remembers whether the lock was lost. Ticks never overlap and never throw. */
+function startRenewal({
+  lockPath,
+  token,
+  pid,
+  now,
+  staleAfterMs,
+  schedule,
+}: {
+  lockPath: string;
+  token: string;
+  pid: number;
+  now: () => number;
+  staleAfterMs: number;
+  schedule: VaultLockScheduler;
+}): { assertHeld: () => Promise<void>; stop: () => Promise<void> } {
+  let lost = false;
+  let failure: { error: unknown } | undefined;
+  let running: Promise<void> | undefined;
+
+  const tick = async (): Promise<void> => {
+    if (running !== undefined || lost) {
+      return;
+    }
+    running = (async () => {
+      try {
+        const outcome = await renew({ lockPath, token, pid, now, staleAfterMs });
+        lost = outcome === 'lost';
+        failure = undefined;
+      } catch (error) {
+        failure = { error };
+      }
+    })();
+    await running;
+    running = undefined;
+  };
+
+  const cancel = schedule(tick, Math.max(1, Math.floor(staleAfterMs / 4)));
+
+  return {
+    async assertHeld() {
+      if (lost) {
+        throw new VaultLockLostError();
+      }
+      if (failure !== undefined) {
+        throw new VaultLockLostError({ cause: failure.error });
+      }
+      let raw: string;
+      try {
+        raw = await readFile(lockPath, 'utf8');
+      } catch (error) {
+        lost = hasErrorCode(error, 'ENOENT');
+        throw new VaultLockLostError({ cause: error });
+      }
+      if (parseRecord(raw)?.token !== token) {
+        lost = true;
+        throw new VaultLockLostError();
+      }
+    },
+    async stop() {
+      cancel();
+      await running;
+    },
+  };
+}
+
+/**
+ * Rewrites our record with a fresh `acquired_at`. `skipped` when a taker holds the claim on our
+ * token (the next tick sees the outcome), `lost` when the lock now carries another token.
+ */
+async function renew({
+  lockPath,
+  token,
+  pid,
+  now,
+  staleAfterMs,
+}: {
+  lockPath: string;
+  token: string;
+  pid: number;
+  now: () => number;
+  staleAfterMs: number;
+}): Promise<'renewed' | 'skipped' | 'lost'> {
+  const claimPath = await tryClaim({ lockPath, identity: token, now, staleAfterMs });
+  if (claimPath === undefined) {
+    return 'skipped';
+  }
+  const tempPath = `${lockPath}.${token}.renew`;
+  try {
+    let raw: string;
+    try {
+      raw = await readFile(lockPath, 'utf8');
+    } catch (error) {
+      if (hasErrorCode(error, 'ENOENT')) {
+        return 'lost';
+      }
+      throw error;
+    }
+    if (parseRecord(raw)?.token !== token) {
+      return 'lost';
+    }
+    const record: VaultLockRecord = { pid, acquired_at: new Date(now()).toISOString(), token };
+    await writeFile(tempPath, JSON.stringify(record));
+    await rename(tempPath, lockPath);
+    return 'renewed';
+  } finally {
+    await rm(tempPath, { force: true });
+    await rm(claimPath, { force: true });
   }
 }
 

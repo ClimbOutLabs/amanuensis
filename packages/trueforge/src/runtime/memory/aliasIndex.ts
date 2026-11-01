@@ -4,7 +4,7 @@
  * that is rebuilt whenever any page's content hash differs from the one recorded.
  */
 import { createHash, randomUUID } from 'node:crypto';
-import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { z } from 'zod';
 
@@ -50,17 +50,28 @@ export interface AliasMatch {
 }
 
 /**
- * Text as compared: lowercase, accents folded away, every character other than letters,
- * digits, `@`, `.`, and `'` turned into one space, surrounding space trimmed. Keeps an
- * email address one token and keeps possessives recognisable.
+ * Text as compared: lowercase, accents folded away, curly apostrophes made straight, every
+ * character other than letters, digits, `@`, `.`, and `'` turned into one space, surrounding
+ * space trimmed. Keeps an email address one token. Apostrophes survive only inside a word and
+ * as a possessive ending (`'s`, or a bare `'` after an `s`), so quotes around a word fall away.
  */
 export function normalizeAliasText(text: string): string {
   return text
     .normalize('NFKD')
     .replace(/\p{M}+/gu, '')
     .toLowerCase()
+    .replace(/[\u2018\u2019\u02BC]/g, "'")
     .replace(/[^\p{L}\p{N}@.']+/gu, ' ')
-    .trim();
+    .split(' ')
+    .map(trimApostrophes)
+    .filter(token => token !== '')
+    .join(' ');
+}
+
+function trimApostrophes(token: string): string {
+  const core = token.replace(/^'+/, '').replace(/'+$/, '');
+  const hadTrailing = token.replace(/^'+/, '').length > core.length;
+  return hadTrailing && core.endsWith('s') ? `${core}'` : core;
 }
 
 interface Token {
@@ -106,7 +117,7 @@ function tokenMatch({
   if (message === candidate) {
     return 'direct';
   }
-  if (isLast && message === `${candidate}'s`) {
+  if (isLast && (message === `${candidate}'s` || (candidate.endsWith('s') && message === `${candidate}'`))) {
     return 'possessive';
   }
   return undefined;
@@ -149,7 +160,7 @@ function earliestHit(hits: AliasHit[]): AliasHit | undefined {
  * Pages whose title or an alias appears in `text` as whole words, case- and accent-
  * insensitive, with punctuation around a hit ignored (`(Wendy)`, `Wendy,`, `Wendy!`) and a
  * trailing `.` on an alias or a word ignored (`W.` finds `W.` and `W`). A hit followed by
- * `'s` is possessive. One match per page: the earliest hit, and a direct hit anywhere wins
+ * `'s` (or a bare `'` after an `s`, as in `James' car`) is possessive. One match per page: the earliest hit, and a direct hit anywhere wins
  * over a possessive one. Results are ordered by `position`.
  */
 export function matchAliases({ index, text }: { index: AliasIndexFile; text: string }): AliasMatch[] {
@@ -206,10 +217,21 @@ export function aliasIndexPage(input: {
 /**
  * The vault's alias index, rebuilt when it is missing, unreadable, or any page's bytes have
  * changed since it was written (a page added, removed, or edited by anyone). A rebuild reads
- * every page and writes the file back by temp file plus rename. The caller need not hold the
- * vault lock: a stale read only costs a rebuild on the next call.
+ * every page. With `persist` it also writes the file back by temp file plus rename; callers pass
+ * it only for vaults the scope can write, so a read never creates or changes a vault. A vault with
+ * no `people/` or `matters/` folder gives an empty index and writes nothing. The caller need not
+ * hold the vault lock: a stale read only costs a rebuild on the next call.
  */
-export async function loadAliasIndex({ vaultDir }: { vaultDir: string }): Promise<AliasIndexFile> {
+export async function loadAliasIndex({
+  vaultDir,
+  persist = false,
+}: {
+  vaultDir: string;
+  persist?: boolean | undefined;
+}): Promise<AliasIndexFile> {
+  if (!(await hasPageFolder(vaultDir))) {
+    return { version: 1, pages: [] };
+  }
   const listings = await hashedListings({ vaultDir });
   const cached = await readCachedIndex({ vaultDir });
   if (cached !== undefined && sameEntries({ cached: cached.pages, listings })) {
@@ -224,8 +246,25 @@ export async function loadAliasIndex({ vaultDir }: { vaultDir: string }): Promis
     }
   }
   const index: AliasIndexFile = { version: 1, pages };
-  await writeAliasIndex({ vaultDir, index });
+  if (persist) {
+    await writeAliasIndex({ vaultDir, index });
+  }
   return index;
+}
+
+async function hasPageFolder(vaultDir: string): Promise<boolean> {
+  for (const folder of ['people', 'matters']) {
+    try {
+      if ((await stat(path.join(vaultDir, folder))).isDirectory()) {
+        return true;
+      }
+    } catch (error) {
+      if (!isMissingFile(error)) {
+        throw error;
+      }
+    }
+  }
+  return false;
 }
 
 function indexPath(vaultDir: string): string {

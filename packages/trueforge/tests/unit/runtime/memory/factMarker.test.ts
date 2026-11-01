@@ -1,8 +1,6 @@
 import fc from 'fast-check';
 import {
   FACT_SOURCES,
-  factDateBounds,
-  factHasEnded,
   formatMarker,
   parseMarker,
   splitFactMarker,
@@ -107,20 +105,6 @@ describe('fact marker grammar', () => {
       text: '- Says <!-- fact: id=f_1 src=mail --> but goes on',
       marker: undefined,
     });
-  });
-
-  it('expands partial dates to day ranges', () => {
-    expect(factDateBounds('2024')).toEqual({ first: '2024-01-01', last: '2024-12-31' });
-    expect(factDateBounds('2024-02')).toEqual({ first: '2024-02-01', last: '2024-02-29' });
-    expect(factDateBounds('2023-02')).toEqual({ first: '2023-02-01', last: '2023-02-28' });
-    expect(factDateBounds('2026-10-31')).toEqual({ first: '2026-10-31', last: '2026-10-31' });
-  });
-
-  it('ends a fact only once its last covered day is behind today', () => {
-    expect(factHasEnded({ until: '2026-10', today: '2026-10-31' })).toBe(false);
-    expect(factHasEnded({ until: '2026-10', today: '2026-11-01' })).toBe(true);
-    expect(factHasEnded({ until: '2026-10-31', today: '2026-10-31' })).toBe(false);
-    expect(factHasEnded({ until: '2026-10-31', today: '2026-11-01' })).toBe(true);
   });
 });
 

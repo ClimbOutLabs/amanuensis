@@ -31,7 +31,13 @@ import {
   WRAPPER_OVERHEAD_TOKENS,
 } from '../../../../src/runtime/memory/memoryCapability';
 import type { MemoryClient } from '../../../../src/runtime/memory/memoryClient';
-import { newMemoryPage } from '../../../../src/runtime/memory/memoryPages';
+import {
+  DRAFTING_HEADING,
+  draftingLines,
+  HOUSEHOLD_LINE,
+  renderPageForModel,
+} from '../../../../src/runtime/memory/memoryPageLoader';
+import { newMemoryPage, parseMemoryPage } from '../../../../src/runtime/memory/memoryPages';
 import type { ScreenClassifyResult, ScreenClient } from '../../../../src/runtime/memory/screenClient';
 import { LEARNED_PROFILE_CLEARED_CONTENT } from '../../../../src/runtime/profileLearning';
 
@@ -532,6 +538,43 @@ describe('HindsightMemoryProcessor.processPreLLM', () => {
     const events = await collect(processor.processPreLLM(makeExecution([{ role: 'user', content: 'hi' }])));
 
     expect(passthroughEvent(events)['injected_block']).toContain('[2026-09-20] fact');
+  });
+
+  it('records the time zone of an attended turn on the vault', async () => {
+    const noteTimeZone = jest.fn().mockResolvedValue(undefined);
+    const capability = hindsightMemoryCapability({
+      client: Object.assign(makeClient({}), { noteTimeZone }),
+      config: DEFAULT_CONFIG,
+      logger: makeLogger(),
+      sessionId: 's1',
+      previousTurnId: null,
+      timeZone: 'Asia/Tokyo',
+    });
+    const processor = capability.preLLMProcessors?.[0];
+    if (!processor) {
+      throw new Error('expected a preLLM processor');
+    }
+    await collect(processor.processPreLLM(makeExecution([{ role: 'user', content: 'hi' }])));
+    expect(noteTimeZone).toHaveBeenCalledWith('Asia/Tokyo');
+  });
+
+  it('does not record a time zone on a turn that runs with memory off, such as a scheduled run', async () => {
+    const noteTimeZone = jest.fn().mockResolvedValue(undefined);
+    const capability = hindsightMemoryCapability({
+      client: Object.assign(makeClient({}), { noteTimeZone }),
+      config: DEFAULT_CONFIG,
+      logger: makeLogger(),
+      sessionId: 's1',
+      previousTurnId: null,
+      recallEnabled: false,
+      timeZone: 'Asia/Tokyo',
+    });
+    const processor = capability.preLLMProcessors?.[0];
+    if (!processor) {
+      throw new Error('expected a preLLM processor');
+    }
+    await collect(processor.processPreLLM(makeExecution([{ role: 'user', content: 'hi' }])));
+    expect(noteTimeZone).not.toHaveBeenCalled();
   });
 
   it.each(['2026-09-20', '2026-09-20T00:00:00.000Z', '2026-09-20T00:00:00Z'])(
@@ -1835,7 +1878,7 @@ describe('HindsightMemoryProcessor curated and reflect layers', () => {
 });
 
 describe('HindsightMemoryProcessor pages layer', () => {
-  const wendyText = '[page: Wendy — person, household]\nHow you write to them:\n- Short and casual. (you said)';
+  const wendyText = '[page: Wendy — person, household]\nNow:\n- Booked the movie. (you said)';
   const loadedWendy = {
     vaultDir: '/v',
     kind: 'person' as const,
@@ -1844,6 +1887,7 @@ describe('HindsightMemoryProcessor pages layer', () => {
     reason: 'direct' as const,
     page: newMemoryPage({ kind: 'person', title: 'Wendy', aliases: [], household: true }),
     text: wendyText,
+    drafting: [] as string[],
     estimatedTokens: estimateTokens(wendyText),
   };
   const fact: RecallItem = { id: '1', occurred_start: '2026-08-14', text: 'filed on 14 April' };
@@ -1980,6 +2024,103 @@ describe('HindsightMemoryProcessor pages layer', () => {
       withheld: 1,
       records: [expect.objectContaining({ id: 'page:#0', withheld: true })],
     });
+  });
+
+  it('puts a household contact’s style lines and the household line under one fixed heading after the pages', async () => {
+    const wendyPage = parseMemoryPage({
+      content: [
+        '---',
+        'kind: person',
+        'title: Wendy',
+        'aliases: [my wife]',
+        'household: true',
+        '---',
+        '# Wendy',
+        '',
+        '## How you write to them',
+        '- Short and casual. No sign-off. <!-- fact: id=f_01 src=sent_mail since=2026-10-31 -->',
+        '',
+        '## Now',
+        '- Booked the movie for Saturday. <!-- fact: id=f_02 src=mail since=2026-10-30 -->',
+        '',
+      ].join('\n'),
+      fallback: { kind: 'person', title: 'Wendy' },
+    });
+    const text = renderPageForModel({ title: 'Wendy', page: wendyPage });
+    const drafting = draftingLines({ title: 'Wendy', page: wendyPage });
+    const client: MemoryClient = Object.assign(makeClient({}), {
+      loadPages: jest.fn().mockResolvedValue({
+        pages: [{ ...loadedWendy, page: wendyPage, text, drafting, estimatedTokens: estimateTokens(text) }],
+        stats: { candidates: 1, loaded: 1, dropped_over_count: 0, dropped_over_budget: 0 },
+      }),
+    });
+    const event = await run({ client, message: 'Book the movie with my wife' });
+    const block = String(event['injected_block']);
+    expect(block).toContain(
+      [
+        '[page: Wendy — person, household; also called: my wife]',
+        'Now:',
+        '- Booked the movie for Saturday. (from mail, since 2026-10-30)',
+        DRAFTING_HEADING,
+        'Wendy:',
+        '- Short and casual. No sign-off.',
+        `- ${HOUSEHOLD_LINE}`,
+      ].join('\n'),
+    );
+    expect(block.split(DRAFTING_HEADING)).toHaveLength(2);
+    expect(block.split('Short and casual').length).toBe(2);
+  });
+
+  it('leaves out the drafting lines of a page the budget drops', async () => {
+    const client: MemoryClient = Object.assign(makeClient({}), {
+      loadPages: jest.fn().mockResolvedValue({
+        pages: [
+          loadedWendy,
+          { ...loadedWendy, slug: 'sam', title: 'Sam', text: 'x'.repeat(400), drafting: ['Sam:', '- Be brief.'] },
+        ],
+        stats: { candidates: 2, loaded: 2, dropped_over_count: 0, dropped_over_budget: 0 },
+      }),
+    });
+    const event = await run({
+      client,
+      message: 'Wendy and Sam',
+      config: { ...DEFAULT_CONFIG, pages: { maxCount: 6, maxTokens: estimateTokens(wendyText) + 10 } },
+    });
+    expect(event['injected_block']).not.toContain(DRAFTING_HEADING);
+    expect(event['injected_block']).not.toContain('Be brief');
+  });
+
+  it('keeps the drafting lines of a page the recall screen withholds out of the block', async () => {
+    const classify = jest.fn().mockImplementation(async ({ text }: { text: string }) => ({
+      ok: true,
+      flagged: text.includes('[page:'),
+      score: text.includes('[page:') ? 0.9 : 0.1,
+      reasonCode: null,
+      reason: null,
+    }));
+    const client: MemoryClient = Object.assign(makeClient({}), {
+      loadPages: jest.fn().mockResolvedValue({
+        pages: [{ ...loadedWendy, drafting: ['Wendy:', '- Be brief.'] }],
+        stats: { candidates: 1, loaded: 1, dropped_over_count: 0, dropped_over_budget: 0 },
+      }),
+    });
+    const event = await run({
+      client,
+      message: 'Wendy?',
+      config: {
+        ...DEFAULT_CONFIG,
+        screen: {
+          enabled: true,
+          url: 'https://screen.example',
+          authToken: 'tok',
+          threshold: 0.5,
+          timeoutMs: 50,
+          maxConcurrency: 8,
+        },
+      },
+      screenClient: makeScreenClient(classify),
+    });
+    expect(String(event['injected_block'] ?? '')).not.toContain('Be brief');
   });
 
   it('keeps the turn going when loading pages throws', async () => {

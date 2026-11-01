@@ -549,7 +549,7 @@ export class MarkdownMemoryClient implements MemoryClient {
     } catch {
       return { pages: [], stats: { candidates: 0, loaded: 0, dropped_over_count: 0, dropped_over_budget: 0 } };
     }
-    return loadPagesForMessage({ vaultDirs, ...params });
+    return loadPagesForMessage({ vaultDirs, writeVaultDir: this.namespaceDir(), ...params });
   }
 
   async noteTimeZone(timeZone: string): Promise<void> {

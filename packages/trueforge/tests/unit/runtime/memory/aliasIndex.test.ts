@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
@@ -51,6 +51,44 @@ describe('aliasIndex', () => {
       );
       expect(normalizeAliasText("Wendy's")).toBe("wendy's");
       expect(normalizeAliasText('W.')).toBe('w.');
+    });
+  });
+
+  describe('apostrophes', () => {
+    it('folds curly apostrophes and drops quotes around a word', () => {
+      expect(normalizeAliasText('Wendy\u2019s')).toBe("wendy's");
+      expect(normalizeAliasText("'Sam'")).toBe('sam');
+      expect(normalizeAliasText('\u2018Sam\u2019')).toBe('sam');
+      expect(normalizeAliasText("James' car")).toBe("james' car");
+    });
+
+    it('matches a name in single quotes', () => {
+      expect(slugs("ask 'Sam' about it")).toContain('sam');
+      expect(matchAliases({ index, text: "ask 'Sam' about it" })[0]).toEqual(
+        expect.objectContaining({ slug: 'sam', possessive: false }),
+      );
+    });
+
+    it('treats a curly possessive like a straight one', () => {
+      expect(matchAliases({ index, text: 'Wendy\u2019s sister' })).toEqual([
+        expect.objectContaining({ slug: 'wendy', possessive: true }),
+      ]);
+    });
+
+    it('treats a bare trailing apostrophe after s as possessive', () => {
+      const james: AliasIndexFile = {
+        version: 1,
+        pages: [{ kind: 'person', slug: 'james', title: 'James', content_hash: 'f', aliases: [] }],
+      };
+      expect(matchAliases({ index: james, text: "James' car" })).toEqual([
+        expect.objectContaining({ slug: 'james', possessive: true }),
+      ]);
+      expect(matchAliases({ index: james, text: "James's car" })).toEqual([
+        expect.objectContaining({ slug: 'james', possessive: true }),
+      ]);
+      expect(matchAliases({ index: james, text: 'James\u2019 car' })).toEqual([
+        expect.objectContaining({ slug: 'james', possessive: true }),
+      ]);
     });
   });
 
@@ -124,7 +162,7 @@ describe('aliasIndex', () => {
         slug: 'madrid',
         page: newMemoryPage({ kind: 'matter', title: 'Madrid', aliases: ['the move'], status: 'active' }),
       });
-      const loaded = await loadAliasIndex({ vaultDir });
+      const loaded = await loadAliasIndex({ vaultDir, persist: true });
       expect(loaded.pages.map(page => [page.kind, page.slug, page.title, page.aliases])).toEqual([
         ['person', 'wendy', 'Wendy', ['my wife']],
         ['matter', 'madrid', 'Madrid', ['the move']],
@@ -137,14 +175,14 @@ describe('aliasIndex', () => {
       const vaultDir = await makeVault();
       const page = newMemoryPage({ kind: 'person', title: 'Wendy', aliases: ['my wife'], household: true });
       await writeMemoryPage({ vaultDir, kind: 'person', slug: 'wendy', page });
-      const first = await loadAliasIndex({ vaultDir });
+      const first = await loadAliasIndex({ vaultDir, persist: true });
       const cacheFile = path.join(vaultDir, ALIAS_INDEX_FILE);
       const tampered: AliasIndexFile = {
         ...first,
         pages: first.pages.map(entry => ({ ...entry, aliases: ['from cache'] })),
       };
       await writeFile(cacheFile, JSON.stringify(tampered));
-      expect((await loadAliasIndex({ vaultDir })).pages[0]?.aliases).toEqual(['from cache']);
+      expect((await loadAliasIndex({ vaultDir, persist: true })).pages[0]?.aliases).toEqual(['from cache']);
 
       await writeMemoryPage({
         vaultDir,
@@ -152,7 +190,7 @@ describe('aliasIndex', () => {
         slug: 'wendy',
         page: newMemoryPage({ kind: 'person', title: 'Wendy', aliases: ['my wife', 'W.'], household: true }),
       });
-      expect((await loadAliasIndex({ vaultDir })).pages[0]?.aliases).toEqual(['my wife', 'W.']);
+      expect((await loadAliasIndex({ vaultDir, persist: true })).pages[0]?.aliases).toEqual(['my wife', 'W.']);
 
       await writeMemoryPage({
         vaultDir,
@@ -160,7 +198,34 @@ describe('aliasIndex', () => {
         slug: 'sam',
         page: newMemoryPage({ kind: 'person', title: 'Sam', aliases: [], household: false }),
       });
-      expect((await loadAliasIndex({ vaultDir })).pages.map(entry => entry.slug)).toEqual(['sam', 'wendy']);
+      expect((await loadAliasIndex({ vaultDir, persist: true })).pages.map(entry => entry.slug)).toEqual([
+        'sam',
+        'wendy',
+      ]);
+    });
+
+    it('rebuilds in memory without writing when persist is off', async () => {
+      const vaultDir = await makeVault();
+      await writeMemoryPage({
+        vaultDir,
+        kind: 'person',
+        slug: 'wendy',
+        page: newMemoryPage({ kind: 'person', title: 'Wendy', aliases: ['my wife'], household: true }),
+      });
+      const loaded = await loadAliasIndex({ vaultDir });
+      expect(loaded.pages.map(page => page.slug)).toEqual(['wendy']);
+      expect(await readdir(vaultDir)).toEqual(['people']);
+    });
+
+    it('never creates the vault folder or a state folder for a vault with no pages', async () => {
+      const parent = await makeVault();
+      const missing = path.join(parent, 'ghost');
+      expect(await loadAliasIndex({ vaultDir: missing, persist: true })).toEqual({ version: 1, pages: [] });
+      expect(await readdir(parent)).toEqual([]);
+      const bare = path.join(parent, 'bare');
+      await mkdir(bare);
+      expect(await loadAliasIndex({ vaultDir: bare, persist: true })).toEqual({ version: 1, pages: [] });
+      expect(await readdir(bare)).toEqual([]);
     });
 
     it('rebuilds from an unreadable cache and from a page with no front matter', async () => {
@@ -169,7 +234,7 @@ describe('aliasIndex', () => {
       await writeFile(path.join(vaultDir, ALIAS_INDEX_FILE), '{not json');
       await mkdir(path.join(vaultDir, 'people'), { recursive: true });
       await writeFile(path.join(vaultDir, 'people', 'sam-plumber.md'), '- fixed the sink\n');
-      const loaded = await loadAliasIndex({ vaultDir });
+      const loaded = await loadAliasIndex({ vaultDir, persist: true });
       expect(loaded.pages).toEqual([
         expect.objectContaining({ kind: 'person', slug: 'sam-plumber', title: 'sam-plumber', aliases: [] }),
       ]);
@@ -177,7 +242,7 @@ describe('aliasIndex', () => {
 
     it('is empty for a vault with no pages and does not need a state folder first', async () => {
       const vaultDir = await makeVault();
-      expect(await loadAliasIndex({ vaultDir })).toEqual({ version: 1, pages: [] });
+      expect(await loadAliasIndex({ vaultDir, persist: true })).toEqual({ version: 1, pages: [] });
     });
 
     it('indexes what a rendered page says, not what the file name says', async () => {
@@ -190,7 +255,7 @@ describe('aliasIndex', () => {
       });
       await mkdir(path.join(vaultDir, 'people'), { recursive: true });
       await writeFile(path.join(vaultDir, 'people', 'sam-plumber.md'), renderMemoryPage(page));
-      const loaded = await loadAliasIndex({ vaultDir });
+      const loaded = await loadAliasIndex({ vaultDir, persist: true });
       expect(loaded.pages[0]?.title).toBe('Sam (plumber)');
     });
   });

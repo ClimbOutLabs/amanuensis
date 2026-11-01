@@ -284,21 +284,3 @@ export function splitFactMarker(line: string): { text: string; marker: FactMarke
   const marker = parseMarker(line.slice(start));
   return marker?.kind === 'fact' ? { text: line.slice(0, start).trimEnd(), marker } : { text: line, marker: undefined };
 }
-
-/** The first and last calendar day a fact date covers, so dates of any precision compare as day ranges. */
-export function factDateBounds(date: FactDate): { first: string; last: string } {
-  const [year, month, day] = date.split('-');
-  if (day !== undefined) {
-    return { first: date, last: date };
-  }
-  if (month !== undefined) {
-    const lastDay = new Date(Date.UTC(Number(year), Number(month), 0)).getUTCDate();
-    return { first: `${date}-01`, last: `${date}-${String(lastDay).padStart(2, '0')}` };
-  }
-  return { first: `${date}-01-01`, last: `${date}-12-31` };
-}
-
-/** Whether a fact with this `until` has ended as of `today` (a `YYYY-MM-DD` day): its last covered day is before today. */
-export function factHasEnded({ until, today }: { until: FactDate; today: string }): boolean {
-  return factDateBounds(until).last < today;
-}

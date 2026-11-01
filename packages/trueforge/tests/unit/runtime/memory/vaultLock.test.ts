@@ -6,8 +6,10 @@ import path from 'node:path';
 import {
   VAULT_LOCK_FILE,
   VaultBusyError,
+  VaultLockLostError,
   withVaultLock,
   type VaultLockRecord,
+  type VaultLockScheduler,
 } from '../../../../src/runtime/memory/vaultLock';
 
 async function makeVault(): Promise<string> {
@@ -308,5 +310,127 @@ describe('withVaultLock', () => {
     const vaultDir = path.join(await makeVault(), 'fresh');
     await withVaultLock({ vaultDir }, async () => undefined);
     expect(await exists(path.join(vaultDir, '.memory-state'))).toBe(true);
+  });
+
+  describe('renewal and fencing', () => {
+    it('keeps a slow holder from being taken over by a waiter with a short stale age', async () => {
+      const vaultDir = await makeVault();
+      let waiterRan = false;
+      const holder = withVaultLock({ vaultDir, staleAfterMs: 200 }, async lock => {
+        await new Promise(resolve => setTimeout(resolve, 800));
+        await lock.assertHeld();
+      });
+      await new Promise(resolve => setTimeout(resolve, 20));
+      const waiter = withVaultLock({ vaultDir, staleAfterMs: 200, waitMs: 500 }, async () => {
+        waiterRan = true;
+      });
+      await expect(waiter).rejects.toBeInstanceOf(VaultBusyError);
+      await holder;
+      expect(waiterRan).toBe(false);
+    });
+
+    it('renews the record with a fresh time on each tick', async () => {
+      const vaultDir = await makeVault();
+      const lockFile = path.join(vaultDir, VAULT_LOCK_FILE);
+      let tickNow: () => Promise<void> = async () => undefined;
+      let intervalSeen = 0;
+      const schedule: VaultLockScheduler = (tick, intervalMs) => {
+        tickNow = tick;
+        intervalSeen = intervalMs;
+        return () => undefined;
+      };
+      let clock = 1_000_000;
+      await withVaultLock({ vaultDir, staleAfterMs: 60_000, now: () => clock, schedule }, async lock => {
+        clock += 40_000;
+        await tickNow();
+        const record: unknown = JSON.parse(await readFile(lockFile, 'utf8'));
+        expect(isLockRecord(record) && Date.parse(record.acquired_at)).toBe(clock);
+        await lock.assertHeld();
+      });
+      expect(intervalSeen).toBe(15_000);
+      expect(await readdir(path.join(vaultDir, '.memory-state'))).toEqual([]);
+    });
+
+    it('tells a holder whose lock was taken over, and does not overwrite the new holder', async () => {
+      const vaultDir = await makeVault();
+      const lockFile = path.join(vaultDir, VAULT_LOCK_FILE);
+      let tickNow: () => Promise<void> = async () => undefined;
+      const schedule: VaultLockScheduler = tick => {
+        tickNow = tick;
+        return () => undefined;
+      };
+      const newer: VaultLockRecord = { pid: 2, acquired_at: new Date().toISOString(), token: 'new-holder' };
+      let caught: unknown;
+      await withVaultLock({ vaultDir, schedule }, async lock => {
+        await writeFile(lockFile, JSON.stringify(newer));
+        await tickNow();
+        try {
+          await lock.assertHeld();
+        } catch (error) {
+          caught = error;
+        }
+      });
+      expect(caught).toBeInstanceOf(VaultLockLostError);
+      expect(caught instanceof Error && caught.message).toBe(
+        'Memory was busy for too long and another writer took over. Nothing more was saved. Try again.',
+      );
+      expect(await readFile(lockFile, 'utf8')).toBe(JSON.stringify(newer));
+    });
+
+    it('notices a takeover on assertHeld even before a renewal tick runs', async () => {
+      const vaultDir = await makeVault();
+      const lockFile = path.join(vaultDir, VAULT_LOCK_FILE);
+      await withVaultLock({ vaultDir, schedule: () => () => undefined }, async lock => {
+        await lock.assertHeld();
+        await writeFile(lockFile, JSON.stringify({ pid: 2, acquired_at: new Date().toISOString(), token: 'x' }));
+        await expect(lock.assertHeld()).rejects.toBeInstanceOf(VaultLockLostError);
+      });
+    });
+
+    it('keeps a renewal failure from crashing and reports it through assertHeld', async () => {
+      const vaultDir = await makeVault();
+      const lockFile = path.join(vaultDir, VAULT_LOCK_FILE);
+      let tickNow: () => Promise<void> = async () => undefined;
+      const schedule: VaultLockScheduler = tick => {
+        tickNow = tick;
+        return () => undefined;
+      };
+      let caught: unknown;
+      await withVaultLock({ vaultDir, schedule }, async lock => {
+        const record: unknown = JSON.parse(await readFile(lockFile, 'utf8'));
+        if (!isLockRecord(record)) {
+          throw new Error('no record');
+        }
+        // A folder where the renewal's temp record goes makes the renewal fail.
+        await mkdir(`${lockFile}.${record.token}.renew`);
+        await tickNow();
+        try {
+          await lock.assertHeld();
+        } catch (error) {
+          caught = error;
+        }
+      });
+      expect(caught).toBeInstanceOf(VaultLockLostError);
+      expect(caught instanceof Error && caught.cause).toBeDefined();
+    });
+
+    it('stops its timer and leaves nothing running after it returns', async () => {
+      const vaultDir = await makeVault();
+      let stopped = 0;
+      const schedule: VaultLockScheduler = () => () => {
+        stopped += 1;
+      };
+      await withVaultLock({ vaultDir, schedule }, async () => undefined);
+      await expect(
+        withVaultLock({ vaultDir, schedule }, async () => {
+          throw new Error('boom');
+        }),
+      ).rejects.toThrow('boom');
+      expect(stopped).toBe(2);
+      const spy = jest.spyOn(global, 'clearInterval');
+      await withVaultLock({ vaultDir }, async () => undefined);
+      expect(spy).toHaveBeenCalledTimes(1);
+      spy.mockRestore();
+    });
   });
 });

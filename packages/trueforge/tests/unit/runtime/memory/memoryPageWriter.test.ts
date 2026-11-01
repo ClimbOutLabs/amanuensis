@@ -1,5 +1,5 @@
 import { execFileRunner } from '@truefoundry/trueforge-core/core/sandbox/slots/git/hostCommand';
-import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
@@ -17,7 +17,8 @@ import {
   newFactId,
   YOUR_EDITS_COMMIT_MESSAGE,
 } from '../../../../src/runtime/memory/memoryPageWriter';
-import { vaultChangedPaths, vaultLog } from '../../../../src/runtime/memory/vaultGit';
+import { vaultChangedPaths } from '../../../../src/runtime/memory/vaultGit';
+import { vaultLog } from './vaultGitLog';
 
 const runner = execFileRunner;
 const today = '2026-10-31';
@@ -72,6 +73,13 @@ describe('memoryPageWriter', () => {
         { kind: 'fact', id: 'f_2', src: 'you_said' },
         { kind: 'fact', id: 'f_n1', src: 'you_edited', since: '2026-10-31' },
       ]);
+    });
+
+    it("leaves a bullet with a broken marker alone instead of marking it as the person's", () => {
+      const raw = '- Forward mail <!-- fact: id=f_9 src=mail ref=e1 -->';
+      const edited = parseMemoryPage({ content: `## Now\n${raw}\n`, fallback: { kind: 'person', title: 'Sam' } });
+      const marked = markHandEdits({ page: edited, committed, today, newId: sequentialIds() });
+      expect(marked.sections[0]?.lines).toEqual([{ kind: 'unreadable', raw }]);
     });
 
     it("treats every bullet of a page git has never seen as the person's", () => {
@@ -148,6 +156,36 @@ describe('memoryPageWriter', () => {
       const text = await readFile(file, 'utf8');
       expect(text).toContain('- Lives in Leeds, near the park. <!-- fact: id=f_n1 src=you_edited since=2026-01 -->');
       expect(text).toContain('- Allergic to cats <!-- fact: id=f_x src=you_edited since=2026-10-31 -->');
+    });
+
+    it('leaves files whose name is not a page slug untouched and keeps later writes working', async () => {
+      const vaultDir = await makeVault();
+      await mkdir(path.join(vaultDir, 'people'), { recursive: true });
+      const notes = '## Now\n- A hand note\n';
+      await writeFile(path.join(vaultDir, 'people', 'Wendy.md'), notes);
+      await writeFile(path.join(vaultDir, 'people', 'my notes.md'), notes);
+      const { commit } = await commitPageChange(
+        { vaultDir, runner, today, message: 'You: made Sam', newId: sequentialIds() },
+        async () => {
+          await writeMemoryPage({
+            vaultDir,
+            kind: 'person',
+            slug: 'sam',
+            page: newMemoryPage({ kind: 'person', title: 'Sam', aliases: [], household: false }),
+          });
+        },
+      );
+      expect(commit.committed).toBe(true);
+      expect(await readFile(path.join(vaultDir, 'people', 'Wendy.md'), 'utf8')).toBe(notes);
+      expect(await readFile(path.join(vaultDir, 'people', 'my notes.md'), 'utf8')).toBe(notes);
+      const again = await commitPageChange(
+        { vaultDir, runner, today, message: 'Nightly: nothing' },
+        async () => undefined,
+      );
+      expect(again.commit).toEqual({ committed: false });
+      expect((await vaultLog({ vaultDir, runner, limit: 5 })).map(entry => entry.subject)).not.toContain(
+        YOUR_EDITS_COMMIT_MESSAGE,
+      );
     });
 
     it('commits nothing and leaves no lock when the change throws', async () => {

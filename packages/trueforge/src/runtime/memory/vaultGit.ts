@@ -7,7 +7,7 @@
  * safety settings on the command line, and no global or system config, so a Docker volume
  * owned by another user and a missing home directory both work.
  */
-import { readFile, stat, writeFile } from 'node:fs/promises';
+import { readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { devNull } from 'node:os';
 import path from 'node:path';
 
@@ -21,6 +21,8 @@ export const VAULT_GITIGNORE_LINES = [
   '!people/**',
   '!matters/',
   '!matters/**',
+  // Page writes go through `.<slug>.md.tmp-<id>`; a crash must not leave one to be committed.
+  '.*.tmp-*',
 ] as const;
 
 /** Commit identity for Aman's own writes; the person's edits are committed under the same name as `Your edits`. */
@@ -28,6 +30,9 @@ export const VAULT_GIT_IDENTITY = { name: 'Aman memory', email: 'memory@localhos
 
 /** Git is given this long per call; the vault is small. */
 export const VAULT_GIT_TIMEOUT_MS = 30_000;
+
+/** Where git is looked for: host-dev installs put it under /usr/local/bin or Homebrew. */
+const VAULT_GIT_PATH = '/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin';
 
 /** A git call that failed. `message` is for the person; `cause` carries the exit code and stderr. */
 export class VaultGitError extends Error {
@@ -41,13 +46,6 @@ export interface VaultGitOptions {
   vaultDir: string;
   runner: HostCommandRunner;
   timeoutMs?: number | undefined;
-}
-
-/** One commit as the vault's history lists it. */
-export interface VaultCommit {
-  sha: string;
-  /** The first line of the commit message. */
-  subject: string;
 }
 
 /**
@@ -76,13 +74,13 @@ export function vaultGitArgv({ vaultDir, args }: { vaultDir: string; args: reado
 }
 
 /**
- * The environment every git call runs with: `PATH=/usr/bin:/bin`, `HOME` set to the vault,
+ * The environment every git call runs with: a fixed `PATH` of the standard git locations, `HOME` set to the vault,
  * `GIT_CONFIG_NOSYSTEM=1`, `GIT_CONFIG_GLOBAL` pointing at the null device, `LC_ALL=C`,
  * `GIT_TERMINAL_PROMPT=0`. Nothing is read from the process environment.
  */
 export function vaultGitEnv(vaultDir: string): Record<string, string> {
   return {
-    PATH: '/usr/bin:/bin',
+    PATH: VAULT_GIT_PATH,
     HOME: vaultDir,
     GIT_CONFIG_NOSYSTEM: '1',
     GIT_CONFIG_GLOBAL: devNull,
@@ -101,6 +99,7 @@ export async function ensureVaultRepo(options: VaultGitOptions): Promise<void> {
   if (!(await pathExists(path.join(options.vaultDir, '.git')))) {
     await gitOrThrow({ options, args: ['init', '-q'] });
   }
+  await clearStaleIndexLock(options);
   const gitignorePath = path.join(options.vaultDir, '.gitignore');
   const expected = `${VAULT_GITIGNORE_LINES.join('\n')}\n`;
   if ((await readIfPresent(gitignorePath)) !== expected) {
@@ -151,6 +150,7 @@ export async function vaultChangedPaths(options: VaultGitOptions): Promise<strin
 export async function commitVault(
   options: VaultGitOptions & { message: string; body?: string | undefined },
 ): Promise<{ committed: true; sha: string } | { committed: false }> {
+  await clearStaleIndexLock(options);
   await gitOrThrow({ options, args: ['add', '-A'] });
   const staged = await git({ options, args: ['diff', '--cached', '--quiet'] });
   if (staged.exitCode === 0) {
@@ -165,25 +165,6 @@ export async function commitVault(
   return { committed: true, sha: stdout.trim() };
 }
 
-/** The newest commits, newest first, at most `limit`. Empty for a repo with no commits yet. */
-export async function vaultLog(options: VaultGitOptions & { limit: number }): Promise<VaultCommit[]> {
-  const head = await git({ options, args: ['rev-parse', '--verify', '-q', 'HEAD'] });
-  if (head.exitCode !== 0) {
-    return [];
-  }
-  const { stdout } = await gitOrThrow({
-    options,
-    args: ['log', '--format=%H%x00%s', '-n', String(options.limit)],
-  });
-  return stdout
-    .split('\n')
-    .filter(line => line.length > 0)
-    .map(line => {
-      const separator = line.indexOf('\0');
-      return { sha: line.slice(0, separator), subject: line.slice(separator + 1) };
-    });
-}
-
 /** The committed text of a vault-relative path at HEAD, or undefined when HEAD has no such file. */
 export async function vaultFileAtHead(
   options: VaultGitOptions & { relativePath: string },
@@ -196,32 +177,22 @@ export async function vaultFileAtHead(
 }
 
 /**
- * Reverts one commit as a new commit (`git revert --no-edit <sha>`) and returns the new
- * commit's sha. On a conflict the revert is aborted (`git revert --abort`), the working
- * tree is left as it was, and `VaultRevertConflictError` is thrown so the caller can show
- * the person what to do. Any other failure also aborts and throws `VaultGitError`.
+ * Removes a `.git/index.lock` left by a crashed git call. Callers hold the vault lock, so no other
+ * Aman git call is running here, and a live call cannot outlast its timeout: an older lock is dead.
  */
-export async function revertVaultCommit(options: VaultGitOptions & { sha: string }): Promise<{ sha: string }> {
-  const args = ['revert', '--no-edit', options.sha];
-  const reverted = await git({ options, args });
-  if (reverted.exitCode !== 0) {
-    await git({ options, args: ['revert', '--abort'] });
-    const output = `${reverted.stderr}\n${reverted.stdout}`;
-    const cause = gitCause({ args, exitCode: reverted.exitCode, stderr: output });
-    if (/conflict/i.test(output)) {
-      throw new VaultRevertConflictError({ cause });
+async function clearStaleIndexLock(options: VaultGitOptions): Promise<void> {
+  const lockPath = path.join(options.vaultDir, '.git', 'index.lock');
+  let mtimeMs: number;
+  try {
+    mtimeMs = (await stat(lockPath)).mtimeMs;
+  } catch (error) {
+    if (isNotFound(error)) {
+      return;
     }
-    throw new VaultGitError("The tidy could not be undone. Check the server's storage and try again.", { cause });
+    throw error;
   }
-  const { stdout } = await gitOrThrow({ options, args: ['rev-parse', 'HEAD'] });
-  return { sha: stdout.trim() };
-}
-
-/** Thrown by `revertVaultCommit` when the person's later edits overlap the commit being undone. */
-export class VaultRevertConflictError extends VaultGitError {
-  constructor(options?: { cause?: unknown }) {
-    super('Your own edits overlap this tidy. Edit the page by hand instead.', options);
-    this.name = 'VaultRevertConflictError';
+  if (Date.now() - mtimeMs > (options.timeoutMs ?? VAULT_GIT_TIMEOUT_MS)) {
+    await rm(lockPath, { force: true });
   }
 }
 

@@ -120,16 +120,19 @@ No memory-write tool is exposed to the model, and pages do not change that.
 
     people/<slug>.md      one page per person
     matters/<slug>.md     one page per matter (a trip, a purchase, a project)
-    <slug>.archive.md     optional, beside a page: older "Earlier" lines moved out of it
     .memory-state/        notes Aman keeps for itself
     .git/, .gitignore     the vault's own history of its pages
 
 The slug comes from the title: lowercase, accents dropped, other characters turned into dashes, cut
-at 64 characters. `José` and `Jose` share one page. An archive file is not a page and is never loaded.
+at 64 characters. `José` and `Jose` share one page. A page's file name must be exactly that
+lowercase slug, such as `people/wendy.md`. A file with any other name, such as `people/Wendy.md` or
+`people/my notes.md`, is not a page: it is never loaded and never touched. To use it, rename the file
+to the lowercase slug.
 
 `.memory-state/` is never in git and never exported. It holds:
 
-- `timezone`: the time zone the vault counts "today" in, taken from the newest chat. This is state.
+- `timezone`: the time zone the vault counts "today" in, taken from the newest chat made in a
+  browser. Scheduled and other unattended runs never change it. This is state.
 - `aliases.json`: a cache of every page's title and other names. It is rebuilt whenever a page
   changes, so it is safe to delete.
 - `lock`: present only while pages are being written. See below.
@@ -164,14 +167,15 @@ summary, then sections. Each is a `## ` heading:
 | Unconfirmed           | both   | Things read somewhere that the person has not confirmed.         |
 | Earlier               | both   | Things that were true and no longer are. They carry an end date. |
 
-A page is kept to about 60 lines. When it grows past that, the oldest "Earlier" lines move to the
-archive file. Only "Earlier" lines ever move.
+Keeping a page short, by moving the oldest "Earlier" lines into an archive file, is planned. Nothing
+does it yet.
 
 Each fact is one bullet. The end of the line holds a hidden marker that the page does not show when
 read in a Markdown viewer:
 
     - Prefers short emails. <!-- fact: id=f_k3x9a0bq2m src=you_said since=2026-03 -->
 
+- The text is one line. It cannot hold a line break or the characters `<!--`.
 - `id` is `f_` and up to 16 lowercase letters or digits. It stays with the fact for life.
 - `src` says where the fact came from (below).
 - `since`, `until` and `seen` are dates, as a year (`2026`), a month (`2026-03`) or a day. `since` and
@@ -184,7 +188,7 @@ The source values:
 | -------------- | ------------------------------------------------------- |
 | `you_said`     | The person said it in chat.                             |
 | `you_edited`   | The person wrote or changed the line by hand.           |
-| `sent_mail`    | Taken from a message the person sent.                   |
+| `sent_mail`    | A message the person sent through Aman.                 |
 | `mail`         | Read in an email.                                       |
 | `calendar`     | Read on the calendar.                                   |
 | `read_content` | Read on a web page, in a document or in another result. |
@@ -194,7 +198,12 @@ The host sets the source from where the information arrived. The model never pic
 `you_edited` are the person's own words and are meant to be kept as written.
 
 A page never has to be tidy. One with no settings, no headings, or bullets with no marker is still
-read. Reading a page and writing it back returns the same bytes unless a line was changed on purpose.
+read. A leading byte order mark is allowed. Reading a page and writing it back returns the same bytes
+unless a line was changed on purpose.
+
+A bullet that carries a hidden comment the host cannot read as a marker (an unknown key, a bad date, a
+repeated key, a misspelt `fact`) is kept as it is but never trusted. It counts as not confirmed, not
+as the person's own words. Only a bullet with no hidden comment at all is a hand edit.
 
 ### How pages are loaded before each turn
 
@@ -228,17 +237,25 @@ loaded and were dropped for each reason. A vault that cannot be read adds nothin
 turn.
 
 The model sees each page as plain lines under short labels, with each marker shown as a short note
-such as "(you said, since 2026-03)".
+such as "(you said, since 2026-03)". "How you write to them" is not shown with the page. Its lines
+are gathered, for every loaded contact, under one fixed heading after the pages (see below).
 
 ### Drafting rules
 
-- Lines under "How you write to them" are instructions for drafting to that contact only when the
-  person said them, wrote them or sent them (`you_said`, `you_edited`, `sent_mail`), or when the line
-  is a plain bullet with no marker, which is the person's own hand edit.
-- A line there from mail, the calendar, read content or inference is not an instruction. It is shown
-  with the unconfirmed facts instead, so something an email said can never steer how Aman writes.
-- A page with `household: true` is for someone the person lives with. Their bookings and plans are
-  shared plans to note or put on the calendar, not mail to answer.
+- After the pages, the memory block has one heading, "How the person writes to these contacts
+  (follow when drafting to them):". Under it, each loaded contact is listed by name with the lines
+  from its "How you write to them" section. This is the only place those lines appear.
+- A line there is an instruction only when the person said it, wrote it or sent it (`you_said`,
+  `you_edited`, `sent_mail`), or when it is a plain bullet with no hidden comment, which is the
+  person's own hand edit.
+- A line there from mail, the calendar, read content or inference is not an instruction. A line
+  whose marker cannot be read is not one either. Both are shown with the unconfirmed facts, labelled
+  as not confirmed, so something an email said can never steer how Aman writes.
+- A page with `household: true` adds one fixed line under its name: bookings and plans from this
+  person are shared plans, not mail to answer. Aman notes them or puts them on the calendar.
+- The drafting lines of a page that is left out, because of the page limits or the recall screen, are
+  left out with it.
+- The rest of the block is data, not instructions.
 - Facts from mail, the calendar, read content and inference are labelled as not confirmed.
 
 ### Hand edits
@@ -263,16 +280,3 @@ finds the vault busy waits up to 10 seconds, then fails with "Memory is busy rig
 moment." A lock older than 60 seconds is taken to belong to a crashed writer and is taken over
 automatically, in a way that two writers cannot both do at once. A lock file that cannot be read is
 treated as stale only by its age.
-
-## Messages the person sends
-
-When a send through the Email connector succeeds, the host saves a note about it in the daily log.
-The note holds the recipients, the subject and the person's own text, and is labelled "From a message
-you sent". It is marked with the source `sent_mail`. The Memories page shows it as a message you sent.
-
-- It is read from the send call and saved once the send worked. No model call is involved.
-- The text is cut at 2,000 characters. A forward keeps only the words the person added.
-- At most five are saved from one turn. A call with no recipient is ignored.
-- When recalled, the note carries its own label. The model is told it shows how the person writes to
-  that contact and that nothing in it is an instruction.
-- Like notes about what was read, a sent-message note is left out of recall after 14 days. It stays in the log.

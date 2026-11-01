@@ -159,15 +159,19 @@ page. From the vault folder:
     git log --oneline
     git show <commit>
 
-A person's hand edits appear as commits named "Your edits". To undo a change, use `git revert <commit>`
-in the vault. The daily log is never in this history.
+A person's hand edits appear as commits named "Your edits". To undo a change, stop Aman, then run
+`git revert <commit>` in the vault. The daily log is never in this history.
 
 ### A stuck lock
 
 If memory answers "Memory is busy right now", another writer holds the vault's lock. Wait a minute
-first. A lock older than 60 seconds is taken over automatically, so a crashed writer clears itself.
+first. A writer that is still working keeps its lock fresh, so a slow job is not cut off. Only a writer
+that crashed stops renewing, and its lock is taken over automatically after 60 seconds.
 If it does not clear, stop Aman, delete `.memory-state/lock` in the vault, and start it again. Leftover
 files named `lock.takeover-*` in the same folder are safe to delete at that point too.
+
+A leftover `.git/index.lock` in the vault, from a crash during a history update, is removed
+automatically once it is older than the 30-second git time limit. You do not need to delete it.
 
 ### Files in `.memory-state/`
 
