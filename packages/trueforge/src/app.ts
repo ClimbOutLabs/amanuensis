@@ -1173,7 +1173,6 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
         spaceStore: deps.spaceStore,
         googleConnectionStore: deps.googleConnectionStore,
         repositoryStore: deps.repositoryStore,
-        sentinelSettingsStore: deps.sentinelSettingsStore,
         turnArtifactStore: deps.turnArtifactStore,
         globalSettingsStore: deps.globalSettingsStore,
         sentinelSettingsStore: deps.sentinelSettingsStore,

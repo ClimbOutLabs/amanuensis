@@ -282,15 +282,13 @@ export interface TurnsRouterDeps {
   /** Per-user Google logins; absent, no Gmail tools mount. */
   googleConnectionStore?: IGoogleConnectionStore | undefined;
   repositoryStore: IRepositoryStore;
-  /**
-   * Per-person settings, for the package download allowance of chats without a project. Absent,
-   * those chats get no download wiring, exactly as before this allowance existed.
-   */
-  sentinelSettingsStore?: ISentinelSettingsStore | undefined;
   turnArtifactStore: ITurnArtifactStore;
   /** Not tenant-scoped: the persisted live tool-output screen override is global. */
   globalSettingsStore: IGlobalSettingsStore;
-  /** Per-person settings, for the past-chat search switch; absent, the search tool stays off. */
+  /**
+   * Per-person settings, for the past-chat search switch and the package download allowance of
+   * chats without a project. Absent, the search tool stays off and those chats get no download wiring.
+   */
   sentinelSettingsStore?: ISentinelSettingsStore | undefined;
   /** Per-instance daily Token Factory counters; refuses new turns past `TOKEN_FACTORY_DAILY_TOKEN_CAP`. */
   tokenFactoryBudget: TokenFactoryBudget;
@@ -332,13 +330,14 @@ export type BeginTurnExecutionDeps = Pick<
   /** Fork-only: required unconditionally by createTurnResolver's memory/repository wiring. */
   tokenStore: IOAuthTokenStore;
   repositoryStore: IRepositoryStore;
-  /** Per-person settings, for the package download allowance of chats without a project. */
-  sentinelSettingsStore?: ISentinelSettingsStore | undefined;
   sessionStore: ISessionStore<SessionCustom, TurnCustom> & ICompletedTurnEventStore;
   spaceStore: ISpaceStore;
   /** Per-user Google logins; absent, no Gmail tools mount. */
   googleConnectionStore?: IGoogleConnectionStore | undefined;
-  /** Per-person settings, for the past-chat search switch; absent, the search tool stays off. */
+  /**
+   * Per-person settings, for the past-chat search switch and the package download allowance of
+   * chats without a project. Absent, the search tool stays off and those chats get no download wiring.
+   */
   sentinelSettingsStore?: ISentinelSettingsStore | undefined;
   /** persists run_code's harvested result files as turn artifacts at harvest time. */
   turnArtifactStore: ITurnArtifactStore;
@@ -796,6 +795,7 @@ function createTurnResolver(deps: {
                       search_without_asking: undefined,
                       maps_without_asking: undefined,
                       sandbox_without_asking: undefined,
+                      chat_search_enabled: undefined,
                       package_downloads_without_project_allowed: true,
                     });
                     return;

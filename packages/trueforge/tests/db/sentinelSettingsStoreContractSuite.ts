@@ -123,6 +123,7 @@ export function runSentinelSettingsStoreContractSuite(getStore: () => ISentinelS
       maps_without_asking: false,
       sandbox_without_asking: true,
       chat_search_enabled: false,
+      package_downloads_without_project_allowed: false,
     });
     expect(await store.patch({ ...alice, ...keepAll, chat_search_enabled: true })).toEqual({
       offline_mode: false,
@@ -131,6 +132,7 @@ export function runSentinelSettingsStoreContractSuite(getStore: () => ISentinelS
       maps_without_asking: false,
       sandbox_without_asking: true,
       chat_search_enabled: true,
+      package_downloads_without_project_allowed: false,
     });
     expect(await store.patch({ ...alice, ...keepAll, offline_mode: true })).toEqual({
       offline_mode: true,

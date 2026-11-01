@@ -29,6 +29,7 @@ const settings = {
   maps_without_asking: false,
   sandbox_without_asking: false,
   chat_search_enabled: false,
+  package_downloads_without_project_allowed: false,
 };
 
 const api: SentinelApi = {
