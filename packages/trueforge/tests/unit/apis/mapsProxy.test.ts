@@ -15,6 +15,7 @@ import type { Authenticator } from '../../../src/auth/authenticator';
 import { resolveRequestContext, type RequestContext } from '../../../src/auth/identity';
 import { createUiSessionAuthMiddleware } from '../../../src/auth/middleware';
 import configuration from '../../../src/config';
+import type { IGlobalSettingsStore } from '../../../src/db/globalSettingsStore';
 import { TENANT_ID } from '../../../src/tenancy';
 import { InMemorySentinelSettingsStore } from '../../fixtures/InMemorySentinelSettingsStore';
 
@@ -105,6 +106,12 @@ function pngResponse(init: ResponseInit = {}): Response {
 describe('tile proxy route', () => {
   const store = new InMemorySentinelSettingsStore();
   const logger = createLogger({ silent: true });
+  const globalSettingsStore: IGlobalSettingsStore = {
+    getSetting: () => Promise.resolve(undefined),
+    setSetting: () => Promise.reject(new Error('not used by the tile proxy')),
+    deleteSetting: () => Promise.resolve(),
+    compareAndSetSetting: () => Promise.resolve(false),
+  };
   let app: Hono;
   let fetchSpy: jest.SpyInstance<Promise<Response>, Parameters<typeof fetch>>;
 
@@ -122,7 +129,13 @@ describe('tile proxy route', () => {
     app.use('*', createUiSessionAuthMiddleware(cookieAuthenticator));
     app.route(
       '/api/maps',
-      createMapsRouter({ sentinelSettingsStore: store, resolveRequestContext, logger, now: () => 1_000_000 }),
+      createMapsRouter({
+        sentinelSettingsStore: store,
+        globalSettingsStore,
+        resolveRequestContext,
+        logger,
+        now: () => 1_000_000,
+      }),
     );
     fetchSpy = jest.spyOn(globalThis, 'fetch');
   });

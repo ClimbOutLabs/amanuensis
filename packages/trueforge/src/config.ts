@@ -140,6 +140,12 @@ function getEnv(key: string, options?: GetEnvOptions): string | undefined {
   return undefined;
 }
 
+/** Whether an environment variable carries a real value: present and not blank. */
+function envIsSet(key: string): boolean {
+  const value = getEnv(key, { required: false });
+  return value !== undefined && value.trim() !== '';
+}
+
 function randomAlphanumeric(length: number): string {
   return Array.from({ length }, () => Math.floor(Math.random() * 36).toString(36)).join('');
 }
@@ -812,6 +818,14 @@ function parseMapsUrl({
   }
   return value.endsWith('/') && value.length > 1 ? value.slice(0, -1) : value;
 }
+
+/** Built-in maps upstream defaults, used when neither the environment nor Settings sets a value. */
+export const MAPS_GEOCODER_DEFAULT_URL = 'https://nominatim.openstreetmap.org';
+export const MAPS_ROUTER_DEFAULT_URL = 'https://router.project-osrm.org';
+export const MAPS_WALKING_ROUTER_DEFAULT_URL = 'https://routing.openstreetmap.de/routed-foot';
+export const MAPS_CYCLING_ROUTER_DEFAULT_URL = 'https://routing.openstreetmap.de/routed-bike';
+export const MAPS_TRANSIT_DEFAULT_URL = 'https://api.transitous.org/api/v6';
+export const MAPS_TILE_DEFAULT_URL = 'https://tile.openstreetmap.org/{z}/{x}/{y}.png';
 
 /** Parses `MAPS_ROUTER_PROVIDER`. Unset/blank → `osrm`. Unknown values throw. */
 function parseMapsRouterProvider(raw: string | undefined): string {
@@ -1692,6 +1706,19 @@ export interface SharedServerConfiguration {
    */
   MAPS_USER_AGENT: string;
   /**
+   * Whether each maps URL above came from its environment variable (true) or fell back to
+   * the built-in default (false). The maps settings helper uses this to apply the rule that
+   * an environment value wins over a value saved in Settings.
+   */
+  MAPS_URL_FROM_ENV: {
+    MAPS_GEOCODER_URL: boolean;
+    MAPS_ROUTER_URL: boolean;
+    MAPS_WALKING_ROUTER_URL: boolean;
+    MAPS_CYCLING_ROUTER_URL: boolean;
+    MAPS_TRANSIT_URL: boolean;
+    MAPS_TILE_URL: boolean;
+  };
+  /**
    * Bearer token for the memory recall screen classifier. Distinct from any memory-provider
    * credential. Env: `MEMORY_SCREEN_AUTH_TOKEN`. Default empty.
    */
@@ -2438,38 +2465,46 @@ const shared: SharedServerConfiguration = {
   MAPS_GEOCODER_URL: parseMapsUrl({
     envKey: 'MAPS_GEOCODER_URL',
     raw: getEnv('MAPS_GEOCODER_URL'),
-    defaultValue: 'https://nominatim.openstreetmap.org',
+    defaultValue: MAPS_GEOCODER_DEFAULT_URL,
   }),
   MAPS_ROUTER_PROVIDER: parseMapsRouterProvider(getEnv('MAPS_ROUTER_PROVIDER', { required: false })),
   MAPS_ROUTER_URL: parseMapsUrl({
     envKey: 'MAPS_ROUTER_URL',
     raw: getEnv('MAPS_ROUTER_URL'),
-    defaultValue: 'https://router.project-osrm.org',
+    defaultValue: MAPS_ROUTER_DEFAULT_URL,
   }),
   MAPS_WALKING_ROUTER_URL: parseMapsUrl({
     envKey: 'MAPS_WALKING_ROUTER_URL',
     raw: getEnv('MAPS_WALKING_ROUTER_URL'),
-    defaultValue: 'https://routing.openstreetmap.de/routed-foot',
+    defaultValue: MAPS_WALKING_ROUTER_DEFAULT_URL,
   }),
   MAPS_CYCLING_ROUTER_URL: parseMapsUrl({
     envKey: 'MAPS_CYCLING_ROUTER_URL',
     raw: getEnv('MAPS_CYCLING_ROUTER_URL'),
-    defaultValue: 'https://routing.openstreetmap.de/routed-bike',
+    defaultValue: MAPS_CYCLING_ROUTER_DEFAULT_URL,
   }),
   MAPS_TRANSIT_URL: parseMapsUrl({
     envKey: 'MAPS_TRANSIT_URL',
     raw: getEnv('MAPS_TRANSIT_URL'),
-    defaultValue: 'https://api.transitous.org/api/v6',
+    defaultValue: MAPS_TRANSIT_DEFAULT_URL,
   }),
   MAPS_TILE_URL: parseMapsUrl({
     envKey: 'MAPS_TILE_URL',
     raw: getEnv('MAPS_TILE_URL'),
-    defaultValue: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+    defaultValue: MAPS_TILE_DEFAULT_URL,
     requiredPlaceholders: ['{z}', '{x}', '{y}'],
   }),
   MAPS_USER_AGENT:
     getEnv('MAPS_USER_AGENT', { required: false }) ??
     `Amanuensis/${PACKAGE_VERSION} (+https://github.com/ClimbOutLabs/amanuensis)`,
+  MAPS_URL_FROM_ENV: {
+    MAPS_GEOCODER_URL: envIsSet('MAPS_GEOCODER_URL'),
+    MAPS_ROUTER_URL: envIsSet('MAPS_ROUTER_URL'),
+    MAPS_WALKING_ROUTER_URL: envIsSet('MAPS_WALKING_ROUTER_URL'),
+    MAPS_CYCLING_ROUTER_URL: envIsSet('MAPS_CYCLING_ROUTER_URL'),
+    MAPS_TRANSIT_URL: envIsSet('MAPS_TRANSIT_URL'),
+    MAPS_TILE_URL: envIsSet('MAPS_TILE_URL'),
+  },
   MEMORY_SCREEN_AUTH_TOKEN: getEnv('MEMORY_SCREEN_AUTH_TOKEN', { defaultValue: '' }) ?? '',
   MEMORY_SCREEN_THRESHOLD: parseUnitInterval({
     envKey: 'MEMORY_SCREEN_THRESHOLD',

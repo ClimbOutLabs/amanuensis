@@ -44,6 +44,7 @@ import { ulid } from 'ulid';
 import type { Logger } from 'winston';
 import { z } from 'zod';
 import configuration from '../config';
+import type { IGlobalSettingsStore } from '../db/globalSettingsStore';
 import {
   SpaceAggregateRevisionConflictError,
   SpaceFolderNotFoundError,
@@ -70,6 +71,7 @@ import { toolImagesCapability, type ToolImagesOptions } from './chatImages/toolI
 import { googleCapability, sandboxAttachmentStager } from './googleCapability';
 import { googleSetupCapability } from './googleSetupCapability';
 import { mapsCapability } from './mapsCapability';
+import { resolveMapsServers } from './mapsSettings';
 import { MemoryTurnResourceResolver } from './MemoryTurnResourceResolver';
 import { personaCapability, type PersonaTurnContext } from './personaCapability';
 import { scheduleCapability, type ScheduleTurnContext } from './scheduleCapability';
@@ -2756,6 +2758,8 @@ export interface SpaceTurnContext {
   store: SpaceToolStore;
   /** Per-user Google logins; absent, no Gmail tools mount. */
   googleConnections?: GoogleConnectionStore | undefined;
+  /** Instance settings store; absent, the maps tools use the environment addresses only. */
+  globalSettingsStore?: IGlobalSettingsStore | undefined;
   authority: SpaceTurnAuthority;
   /** Chat session id: keys the delta-failure breaker per session (see SpaceCapabilityOptions). */
   sessionId: string;
@@ -2823,6 +2827,16 @@ export class SpaceTurnResourceResolver extends MemoryTurnResourceResolver {
     const sentinel = this.#sentinel(input);
     const schedules = this.#space.schedules;
     const personas = this.#space.personas;
+    // One read per agent definition, like the other instance settings: the maps
+    // addresses saved in Settings apply to the whole answer built from this
+    // definition, and a change applies from the next answer with no restart.
+    const mapsServers =
+      this.#space.globalSettingsStore === undefined
+        ? undefined
+        : await resolveMapsServers({
+            globalSettingsStore: this.#space.globalSettingsStore,
+            logger: this.#space.logger,
+          });
     return {
       ...resolved,
       extraCapabilities: [
@@ -2831,6 +2845,7 @@ export class SpaceTurnResourceResolver extends MemoryTurnResourceResolver {
         mapsCapability({
           tracing: input.tracing,
           logger: this.#space.logger,
+          servers: mapsServers,
           pages_scope: { tenant_id: input.tenant_id, conversation_id: input.session_id },
           timezone: this.clientTimezone,
           starts_answer: this.#space.startsAnswer,
