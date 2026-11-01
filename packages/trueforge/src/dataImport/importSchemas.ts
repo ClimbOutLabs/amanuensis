@@ -44,6 +44,7 @@ import { z } from 'zod';
 
 import { parseTurnCustom } from '../db/sessionCustom';
 import { NameSchema } from '../schemas/common';
+import { DeliverySchema } from '../schemas/deliveries';
 import { SessionEventWithPassthroughSchema } from '../schemas/events';
 import { McpServerManifestSchema } from '../schemas/mcpServer';
 import { PersonaActivationSchema, PersonaSchema, validatePersonaContentNames } from '../schemas/persona';
@@ -89,6 +90,7 @@ export const LEFT_OUT = {
   chatDetail: 'chat detail',
   checklistDetail: 'checklist detail',
   permissionSetting: 'permission setting',
+  deliveryAttempt: 'delivery attempt',
 } as const;
 
 export const LEFT_OUT_PLURALS: Readonly<Record<string, string>> = {
@@ -100,6 +102,7 @@ export const LEFT_OUT_PLURALS: Readonly<Record<string, string>> = {
   [LEFT_OUT.chatDetail]: 'chat details',
   [LEFT_OUT.checklistDetail]: 'checklist details',
   [LEFT_OUT.permissionSetting]: 'permission settings',
+  [LEFT_OUT.deliveryAttempt]: 'delivery attempts',
 };
 
 /** Host-owned turn data; one this version does not store is left out. */
@@ -577,3 +580,7 @@ export const ImportAuditRecordSchema = z.object({
 });
 export type ImportAuditRecord = z.infer<typeof ImportAuditRecordSchema>;
 export const ImportAuditFileSchema = z.array(ImportAuditRecordSchema);
+
+/** The feed an export carries. Push devices belong to a device, so they are never in an export. */
+export const ImportDeliveriesFileSchema = z.array(DeliverySchema);
+export type ImportDelivery = z.infer<typeof DeliverySchema>;

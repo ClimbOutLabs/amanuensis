@@ -82,6 +82,7 @@ import {
   scheduleRunsAs,
 } from '../runtime/chatAssistant';
 import { validateManifest } from '../runtime/cron';
+import type { DeliveryService } from '../runtime/delivery/deliveryService';
 import type { EventSubscriptionRegistry } from '../runtime/event-subscription';
 import { createMemoryClient } from '../runtime/memory/createMemoryClient';
 import { resolveMemoryProvider } from '../runtime/memory/memoryProvider';
@@ -100,6 +101,8 @@ export interface ScheduleTurnExecutionDeps<TTransaction> {
   scheduleStore: IScheduleStore<TTransaction>;
   /** A morning brief run leaves out the items the owner already marked done. */
   briefItemStore: IBriefItemCompletionStore;
+  /** A due reminder is also put in the person's feed, and pushed to their devices, through this. */
+  deliveryService: DeliveryService;
   sessions: Sessions<SessionCustom, TurnCustom>;
   activeTurns: ActiveTurnRegistry;
   /** Tracks in-flight turn event drains so shutdown can wait for them. */
@@ -201,7 +204,7 @@ export async function startScheduleRunOnRequest<TTransaction>(params: {
       sessionStore: deps.sessionStore,
       agentStore: deps.agentStore,
       now: new Date(),
-      audit: deps.audit,
+      deliveries: deps.deliveryService,
     });
     await recordScheduleFiring({
       audit: deps.audit,

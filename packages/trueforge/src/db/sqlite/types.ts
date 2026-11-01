@@ -44,7 +44,9 @@ import type { ScheduleManifest, ScheduleRunStatus, ScheduleStatus } from '../../
 import type { SkillManifest } from '../../schemas/skill';
 import type { BriefItemCompletionTable } from '../briefItemCompletionStore';
 import type { ChatImageOrigin } from '../chatImageStore';
+import type { DeliveryAttemptTable, DeliveryTable } from '../deliveryStore';
 import type { OAuthClient, OAuthPendingAuthorizationData, OAuthServer, OAuthToken } from '../mcpServerStore';
+import type { PushSubscriptionTable } from '../pushSubscriptionStore';
 
 /**
  * Trace-level state for one thread at one turn (`turn_thread.checkpoint`).
@@ -759,6 +761,9 @@ export interface Database {
   space_revision: SpaceRevisionTable;
   sentinel_audit: SentinelAuditTable;
   brief_item_completion: BriefItemCompletionTable;
+  delivery: DeliveryTable;
+  delivery_attempt: DeliveryAttemptTable;
+  push_subscription: PushSubscriptionTable;
   approval_token: ApprovalTokenTable;
   sentinel_user_settings: SentinelUserSettingsTable;
   implementation_plan_grant: ImplementationPlanGrantTable;

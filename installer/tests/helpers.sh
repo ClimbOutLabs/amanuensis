@@ -15,7 +15,7 @@ CURRENT_TEST=
 
 # System tools the installer needs. docker, sudo, sg, id and friends are never taken from the host.
 TOOLS="bash sh env awk sed grep egrep cut tr od head tail sort uniq wc cat cp mv rm mkdir rmdir chmod mktemp date cmp find
-basename dirname uname kill sleep ln install git sha256sum shasum tee readlink ls touch xargs timeout getconf true false python3 diff tar gzip stat"
+basename dirname uname kill sleep ln install git sha256sum shasum tee readlink ls touch xargs timeout getconf true false python3 diff tar gzip stat openssl"
 
 sandbox_new() {
   SB=$(mktemp -d)

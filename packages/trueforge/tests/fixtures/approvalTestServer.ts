@@ -30,9 +30,9 @@ import { ModelCatalog } from '../../src/catalog/ModelCatalog';
 import { SandboxCatalog } from '../../src/catalog/SandboxCatalog';
 import { SkillCatalog } from '../../src/catalog/SkillCatalog';
 import configuration, { TrueForgeAuthMode } from '../../src/config';
-import { McpServerWithAuthStore } from '../../src/db/McpServerWithAuthStore';
 import { BriefItemCompletionStore } from '../../src/db/briefItemCompletionStore';
 import type { IMcpServerStore } from '../../src/db/mcpServerStore';
+import { McpServerWithAuthStore } from '../../src/db/McpServerWithAuthStore';
 import { migrateSqliteToLatest } from '../../src/db/migrateSqlite';
 import { SentinelAuditStore } from '../../src/db/sentinelAuditStore';
 import { SqliteAgentStore } from '../../src/db/sqlite/agent-store/SqliteAgentStore';
@@ -63,6 +63,7 @@ import { EventSubscriptionRegistry } from '../../src/runtime/event-subscription'
 import { createOutboundSecretSource } from '../../src/runtime/outboundSecrets';
 import { createSentinelServices } from '../../src/runtime/sentinelServices';
 import { TurnDrainRegistry } from '../../src/runtime/turnDrains';
+import { deliveryDeps } from './deliveryDeps';
 import { INERT_SERVER_NAME, startInertMcpServer, type InertMcpServer } from './inertMcpServer';
 import { startScriptedModelServer, type ScriptedModelServer } from './scriptedModelServer';
 import { uncappedTokenFactoryBudget } from './uncappedTokenFactoryBudget';
@@ -172,6 +173,7 @@ function buildApp(input: {
     sentinelAuditStore,
     sentinelSettingsStore,
     briefItemStore: new BriefItemCompletionStore(db),
+    ...deliveryDeps(db),
     sessions: new Sessions({ sessionStore, sentinelServices }),
     activeTurns: new ActiveTurnRegistry(),
     turnDrains,

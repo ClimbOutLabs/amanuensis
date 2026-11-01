@@ -35,6 +35,7 @@ import {
   ListSchedulesResponseSchema,
   ScheduleManifestSchema,
 } from '../../../src/schemas/schedule';
+import { deliveryDeps } from '../../fixtures/deliveryDeps';
 import { FakeTurnArtifactStore } from '../../fixtures/fakeTurnArtifactStore';
 import { uncappedTokenFactoryBudget } from '../../fixtures/uncappedTokenFactoryBudget';
 
@@ -99,6 +100,7 @@ function stubTurnExecutionDeps(
     mcpCatalog: McpCatalog.loadShipped(),
     scheduleStore,
     briefItemStore: new BriefItemCompletionStore(db),
+    ...deliveryDeps(db),
     sessions: new Sessions<SessionCustom, TurnCustom>({ sessionStore }),
     agentStore,
     personaStore: { getPersona: () => Promise.resolve(undefined) },
@@ -1020,7 +1022,7 @@ describe('audit rows for schedule firings', () => {
     ]);
   });
 
-  it('writes the firing row and the delivery row for a reminder, both keyed on the Reminders chat', async () => {
+  it('writes the delivery row and the firing row for a reminder, both keyed on the Reminders chat', async () => {
     const built = await setup();
     const agent = await built.agentStore.getAgent({ tenant_id: 'default', name: 'reporter' });
     if (agent === undefined) {
@@ -1052,6 +1054,7 @@ describe('audit rows for schedule firings', () => {
       sessions: new Sessions<SessionCustom, TurnCustom>({ sessionStore }),
       sessionStore,
       audit,
+      deliveryService: deliveryDeps(built.db, audit).deliveryService,
     });
 
     const response = await execution.request('/runs/execute', {
@@ -1066,10 +1069,10 @@ describe('audit rows for schedule firings', () => {
       tenant_id: 'default',
       created_by: 'alice',
       tier: 1,
-      tool_name: 'set_reminder',
-      description: 'Delivered the reminder: Take the medicine',
+      tool_name: 'delivery.created',
       outcome: 'logged',
     });
+    expect(records[0]?.description).toContain('Take the medicine');
     expect(records[1]).toMatchObject({
       tenant_id: 'default',
       created_by: 'alice',
