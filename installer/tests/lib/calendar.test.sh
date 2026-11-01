@@ -29,6 +29,7 @@ assert_secret_only_in_volume() {
 test_presets() {
   t_begin "each preset maps to its provider's address; other providers have none built in"
   sandbox_new
+  assert_eq "$(in_lib 'calendar_preset_url google person@gmail.com')" "https://calendar.google.com/calendar/dav/person@gmail.com/user/" "google"
   assert_eq "$(in_lib 'calendar_preset_url fastmail owner@fastmail.com')" "https://caldav.fastmail.com/dav/" "fastmail"
   assert_eq "$(in_lib 'calendar_preset_url yahoo owner@yahoo.com')" "https://caldav.calendar.yahoo.com" "yahoo"
   assert_eq "$(in_lib 'calendar_preset_url gmx owner@gmx.com')" "https://caldav.gmx.com/" "gmx.com"
@@ -37,15 +38,6 @@ test_presets() {
   assert_eq "$(in_lib 'calendar_preset_url webde owner@web.de')" "https://caldav.web.de" "web.de"
   assert_eq "$(in_lib 'calendar_preset_url other owner@icloud.com')" "" "other has no preset"
   assert_eq "$(in_lib 'calendar_preset_url gmx OWNER@GMX.NET')" "https://caldav.gmx.net/" "the domain is matched in lower case"
-  sandbox_drop
-}
-
-test_gmail_is_skipped() {
-  t_begin "Gmail and Googlemail addresses are skipped; other domains are not"
-  sandbox_new
-  if in_lib 'calendar_is_gmail person@gmail.com'; then t_pass; else t_fail "gmail.com not matched"; fi
-  if in_lib 'calendar_is_gmail person@GoogleMail.com'; then t_pass; else t_fail "googlemail.com not matched"; fi
-  if in_lib 'calendar_is_gmail person@fastmail.com'; then t_fail "fastmail matched as gmail"; else t_pass; fi
   sandbox_drop
 }
 
@@ -174,7 +166,7 @@ test_connect_prompt_yes_asks_the_calendar_questions() {
 Your email=>owner@example.invalid
 What should Aman call you?=>
 Connect a calendar?=>y
-Your provider (type a number)=>1
+Your provider (type a number)=>2
 Email address of the calendar account=>owner@example.invalid
 Login name=>
 App password for the calendar=>$CAL_SECRET
@@ -194,7 +186,7 @@ test_second_run_replaces_the_account() {
   t_begin "running the calendar command twice keeps one account, the later one"
   sandbox_new
   install_for_calendar
-  with_input "1
+  with_input "2
 owner@example.invalid
 
 $CAL_SECRET
@@ -202,7 +194,7 @@ $CAL_SECRET
   run_install instance calendar main
   clear_input
   assert_rc 0
-  with_input "1
+  with_input "2
 second@example.invalid
 
 $CAL_SECRET
@@ -221,7 +213,7 @@ test_app_restarts_to_learn_of_the_calendar() {
   sandbox_new
   install_for_calendar
   : >"$STUB_LOG"
-  with_input "1
+  with_input "2
 owner@example.invalid
 
 $CAL_SECRET
@@ -240,7 +232,7 @@ test_piped_input_and_remove() {
   t_begin "piped answers connect the calendar; --remove empties the volume and says so"
   sandbox_new
   install_for_calendar
-  with_input "1
+  with_input "2
 owner@example.invalid
 
 $CAL_SECRET
@@ -337,19 +329,34 @@ test_refusals_at_install() {
   sandbox_drop
 }
 
-test_gmail_skip_writes_nothing() {
-  t_begin "a Gmail address is skipped with the Google message and writes nothing"
+test_google_calendar_flags_save() {
+  t_begin "Google calendar flags save the account with the address built from the Gmail address"
+  sandbox_new
+  install_for_calendar
+  with_input "$CAL_SECRET
+"
+  run_install instance calendar main --yes --calendar-provider google --calendar-email person@gmail.com --calendar-password-stdin
+  clear_input
+  assert_rc 0
+  assert_eq "$(cal_value CALDAV_URL)" "https://calendar.google.com/calendar/dav/person@gmail.com/user/"
+  assert_eq "$(cal_value CALDAV_USERNAME)" "person@gmail.com"
+  assert_eq "$(cal_value CALDAV_PASSWORD)" "$CAL_SECRET"
+  assert_secret_only_in_volume
+  sandbox_drop
+}
+
+test_gmail_with_fastmail_stops() {
+  t_begin "a Gmail address with another provider stops with the Pick Google message and writes nothing"
   sandbox_new
   install_for_calendar
   run_install instance calendar main --yes --calendar-provider fastmail --calendar-email person@gmail.com
-  assert_rc 0
-  assert_contains "$OUT$ERR" "Google Calendar is already connected through the Google connector"
+  assert_rc 2
+  assert_flat_contains "$ERR" "Gmail calendars use the Google provider. Pick Google and try again. Nothing was saved."
   assert_no_path "$(CAL_VOLUME)"
   sandbox_drop
 }
 
 test_presets
-test_gmail_is_skipped
 test_url_refusals
 test_secret_rules
 test_agent_secret_and_network
@@ -366,5 +373,6 @@ test_a_refused_address_saves_nothing
 test_a_failed_sign_in_check_keeps_the_account
 test_yes_names_missing_value
 test_refusals_at_install
-test_gmail_skip_writes_nothing
+test_google_calendar_flags_save
+test_gmail_with_fastmail_stops
 tests_finish

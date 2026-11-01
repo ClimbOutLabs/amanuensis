@@ -639,7 +639,7 @@ install_execute() {
     instance_create
     AMAN_PASSWORD=
   fi
-  if [ -n "$CAL_TARGET" ] && [ -n "$CAL_EMAIL" ] && [ -z "$CAL_SKIP" ]; then calendar_apply "$CAL_TARGET"; fi
+  if [ -n "$CAL_TARGET" ] && [ -n "$CAL_EMAIL" ]; then calendar_apply "$CAL_TARGET"; fi
   if [ -n "$EM_TARGET" ] && [ -n "$EM_ADDRESS" ] && [ -z "$EM_SKIP" ]; then email_apply "$EM_TARGET"; fi
   tf_rotation_apply
   if tls_authority_needs_replacing && [ -n "$(tls_instances)" ]; then

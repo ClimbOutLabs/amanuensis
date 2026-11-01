@@ -10,6 +10,7 @@ import {
   caldavProviderPreset,
   caldavUrlProblem,
   caldavUserProblem,
+  GMAIL_NEEDS_GOOGLE_PROVIDER_MESSAGE,
   isGoogleMailAddress,
 } from '../../../../src/core/calendar/caldav/presets';
 import { EMAIL_PROVIDER_PRESETS } from '../../../../src/core/email/mailConnector/presets';
@@ -44,20 +45,29 @@ function installerSays(fn: string, ...args: string[]): string {
 }
 
 describe('calendar provider presets', () => {
-  it('lists the providers in the card order, Other last', () => {
-    expect(CALDAV_PROVIDER_PRESETS.map(preset => preset.key)).toEqual(['fastmail', 'yahoo', 'gmx', 'webde', 'other']);
+  it('lists the providers in the card order, Google first and Other last', () => {
+    expect(CALDAV_PROVIDER_PRESETS.map(preset => preset.key)).toEqual([
+      'google',
+      'fastmail',
+      'yahoo',
+      'gmx',
+      'webde',
+      'other',
+    ]);
   });
 
   it('matches the installer preset table row for row', () => {
     const expected = CALDAV_PROVIDER_PRESETS.flatMap(preset => [
       ...(preset.server_url === null ? [] : [[preset.key, preset.server_url]]),
       ...preset.domain_urls.map(entry => [`${preset.key}:${entry.domain}`, entry.url]),
+      ...(preset.account_url_template === null ? [] : [[preset.key, preset.account_url_template]]),
     ]);
     expect(installerPresetRows()).toEqual(expected);
   });
 
   it('gives the same address as the installer for every provider and domain', () => {
     const cases: [string, string][] = [
+      ['google', 'person@gmail.com'],
       ['fastmail', 'owner@example.invalid'],
       ['yahoo', 'owner@example.invalid'],
       ['gmx', 'owner@gmx.com'],
@@ -77,6 +87,8 @@ describe('calendar provider presets', () => {
   it('works the provider out from a saved address', () => {
     expect(caldavProviderKeyForUrl('https://caldav.fastmail.com/dav/')).toBe('fastmail');
     expect(caldavProviderKeyForUrl('https://caldav.gmx.net/')).toBe('gmx');
+    expect(caldavProviderKeyForUrl('https://calendar.google.com/calendar/dav/person@gmail.com/user/')).toBe('google');
+    expect(caldavProviderKeyForUrl('https://calendar.google.com/calendar/')).toBe('other');
     expect(caldavProviderKeyForUrl('https://nas.example.invalid/dav/')).toBe('other');
   });
 
@@ -89,6 +101,8 @@ describe('calendar provider presets', () => {
       "Your calendar provider's help pages explain how to make an app password.",
     );
     expect(caldavProviderPreset('other')?.help_url).toBeNull();
+    expect(caldavProviderPreset('google')?.setup_steps).toHaveLength(4);
+    expect(caldavProviderPreset('fastmail')?.setup_steps).toEqual([]);
   });
 
   it('uses the same app password help page as the email presets for the same provider', () => {
@@ -100,10 +114,19 @@ describe('calendar provider presets', () => {
     }
   });
 
-  it('knows Gmail addresses use the Google connector', () => {
+  it('builds the Google address from the email address', () => {
+    const url = caldavPresetUrl({ provider_key: 'google', email: 'person@gmail.com' });
+    expect(url).toBe('https://calendar.google.com/calendar/dav/person@gmail.com/user/');
+    expect(url === null ? 'missing' : caldavUrlProblem(url)).toBeNull();
+  });
+
+  it('knows Gmail addresses need the Google provider', () => {
     expect(isGoogleMailAddress('person@gmail.com')).toBe(true);
     expect(isGoogleMailAddress('person@GoogleMail.com')).toBe(true);
     expect(isGoogleMailAddress('person@fastmail.com')).toBe(false);
+    expect(GMAIL_NEEDS_GOOGLE_PROVIDER_MESSAGE).toBe(
+      'Gmail calendars use the Google provider. Pick Google and try again. Nothing was saved.',
+    );
   });
 });
 

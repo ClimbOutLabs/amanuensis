@@ -14,7 +14,6 @@ CAL_URL=
 CAL_USER=
 CAL_PASSWORD=
 CAL_TARGET=
-CAL_SKIP=
 
 # True when any calendar flag was given on the command line.
 calendar_flags_given() {
@@ -23,16 +22,18 @@ calendar_flags_given() {
 
 calendar_provider_key() { # number or name -> key, nothing when unknown
   case "$1" in
-    1 | fastmail) echo fastmail ;;
-    2 | yahoo) echo yahoo ;;
-    3 | gmx) echo gmx ;;
-    4 | webde) echo webde ;;
-    5 | other) echo other ;;
+    1 | google) echo google ;;
+    2 | fastmail) echo fastmail ;;
+    3 | yahoo) echo yahoo ;;
+    4 | gmx) echo gmx ;;
+    5 | webde) echo webde ;;
+    6 | other) echo other ;;
   esac
 }
 
 calendar_provider_name() { # key -> the name a person sees
   case "$1" in
+    google) echo Google ;;
     fastmail) echo Fastmail ;;
     yahoo) echo Yahoo ;;
     gmx) echo GMX ;;
@@ -42,20 +43,28 @@ calendar_provider_name() { # key -> the name a person sees
 }
 
 # Built-in addresses, each from the provider's own help pages. One row per address: the provider key, or
-# gmx:DOMAIN for GMX because its address depends on the domain, then the address. A provider with no row, and GMX
-# with another domain, has its address typed. iCloud and Zoho have no verified address here, so they go under Other.
+# gmx:DOMAIN for GMX because its address depends on the domain, then the address. Google's row holds {email},
+# which is replaced with the account's email address. A provider with no row, and GMX with another domain, has
+# its address typed. iCloud and Zoho have no verified address here, so they go under Other.
 # The Settings Calendar card reads the same table from packages/trueforge-core (CALDAV_PROVIDER_PRESETS); a test there
 # fails if the two differ.
-CALENDAR_PRESETS='fastmail https://caldav.fastmail.com/dav/
+CALENDAR_PRESETS='google https://calendar.google.com/calendar/dav/{email}/user/
+fastmail https://caldav.fastmail.com/dav/
 yahoo https://caldav.calendar.yahoo.com
 gmx:gmx.com https://caldav.gmx.com/
 gmx:gmx.net https://caldav.gmx.net/
 webde https://caldav.web.de'
 
 calendar_preset_url() { # provider email
-  local key=$1
-  if [ "$key" = gmx ]; then key=gmx:$(lowercase "${2##*@}"); fi
-  printf '%s\n' "$CALENDAR_PRESETS" | awk -v key="$key" '$1 == key { print $2 }'
+  local key=$1 email=$2 url prefix suffix
+  if [ "$key" = gmx ]; then key=gmx:$(lowercase "${email##*@}"); fi
+  url=$(printf '%s\n' "$CALENDAR_PRESETS" | awk -v key="$key" '$1 == key { print $2 }')
+  prefix=${url%%\{email\}*}
+  if [ "$prefix" != "$url" ]; then
+    suffix=${url#*\{email\}}
+    url=$prefix$email$suffix
+  fi
+  printf '%s\n' "$url"
 }
 
 calendar_is_gmail() { # email
@@ -67,7 +76,7 @@ calendar_is_gmail() { # email
 
 calendar_provider_problem() {
   if [ -z "$(calendar_provider_key "$1")" ]; then
-    echo "Type a number from 1 to 5, or one of fastmail, yahoo, gmx, webde, other."
+    echo "Type a number from 1 to 6, or one of google, fastmail, yahoo, gmx, webde, other."
   fi
 }
 
@@ -109,7 +118,7 @@ calendar_secret_problem() {
 
 # Checked before any question when --yes is used: nobody can answer, so each missing value is named.
 calendar_require_flags() {
-  [ -n "$CAL_PROVIDER" ] || usage_die "With --yes the calendar needs --calendar-provider: fastmail, yahoo, gmx, webde or other."
+  [ -n "$CAL_PROVIDER" ] || usage_die "With --yes the calendar needs --calendar-provider: google, fastmail, yahoo, gmx, webde or other."
   [ -n "$CAL_EMAIL" ] || usage_die "With --yes the calendar needs --calendar-email ADDRESS, the email address of the calendar account."
 }
 
@@ -150,7 +159,6 @@ calendar_collect() { # install|instance
   CAL_URL=$OPT_CAL_URL
   CAL_USER=$OPT_CAL_USER
   CAL_PASSWORD=
-  CAL_SKIP=
   CAL_TARGET=
   if [ "$1" = install ]; then
     # Only the instance this run creates, or the only one there is, can take a calendar in the install.
@@ -178,20 +186,25 @@ calendar_collect() { # install|instance
   if [ "$ASSUME_YES" = 1 ]; then calendar_require_flags; fi
   if [ -z "$CAL_PROVIDER" ] && [ "$ASSUME_YES" != 1 ] && [ "$DRY_RUN" != 1 ]; then
     ui_line "Which calendar provider is yours?"
-    ui_line "  1 Fastmail"
-    ui_line "  2 Yahoo"
-    ui_line "  3 GMX (gmx.com or gmx.net)"
-    ui_line "  4 web.de"
-    ui_line "  5 Other provider, such as iCloud or Zoho: you type its address"
+    ui_line "  1 Google"
+    ui_line "  2 Fastmail"
+    ui_line "  3 Yahoo"
+    ui_line "  4 GMX (gmx.com or gmx.net)"
+    ui_line "  5 web.de"
+    ui_line "  6 Other provider, such as iCloud or Zoho: you type its address"
   fi
   ask_valid CAL_PROVIDER "Your provider (type a number)" "" "" calendar_provider_problem
   CAL_PROVIDER=$(calendar_provider_key "$CAL_PROVIDER")
   ask_valid CAL_EMAIL "Email address of the calendar account" "" "The address you sign in to the calendar with." email_problem
-  if calendar_is_gmail "$CAL_EMAIL"; then
-    ui_line "Google Calendar is already connected through the Google connector. A Gmail address does not need this step, so no calendar is set up here."
-    CAL_SKIP=gmail
-    return 0
-  fi
+  while calendar_is_gmail "$CAL_EMAIL" && [ "$CAL_PROVIDER" != google ]; do
+    if [ "$ASSUME_YES" = 1 ]; then
+      usage_die "Gmail calendars use the Google provider. Pick Google and try again. Nothing was saved."
+    fi
+    ui_line "Gmail calendars use the Google provider. Pick Google and try again. Nothing was saved."
+    CAL_PROVIDER=
+    ask_valid CAL_PROVIDER "Your provider (type a number)" "" "" calendar_provider_problem
+    CAL_PROVIDER=$(calendar_provider_key "$CAL_PROVIDER")
+  done
   preset=$(calendar_preset_url "$CAL_PROVIDER" "$CAL_EMAIL")
   if [ -n "$preset" ]; then
     if [ -n "$CAL_URL" ] && [ "$CAL_URL" != "$preset" ]; then
@@ -206,13 +219,19 @@ calendar_collect() { # install|instance
     ask_valid CAL_URL "Calendar address (starts with https://)" "" "The full address from your provider's help page." calendar_url_problem
   fi
   ask_valid CAL_USER "Login name" "$CAL_EMAIL" "Usually the same as the email address." calendar_user_problem
+  if [ "$CAL_PROVIDER" = google ]; then
+    ui_line "Turn on 2-Step Verification for your Google account, if it is not on yet. Google only offers app passwords after that."
+    ui_line "Open myaccount.google.com/apppasswords, type a name such as Aman, and select Create."
+    ui_line "Copy the 16-letter password Google shows. Google shows it only once."
+    ui_line "Pick Google below, type your Gmail address, and paste the app password. Leave the login name empty."
+  fi
   calendar_ask_password
   ui_line "Calendar: $(calendar_provider_name "$CAL_PROVIDER") at $CAL_URL, signed in as $CAL_USER."
 }
 
-# The plan row for the install. Nothing is shown when the calendar was not asked for or was skipped.
+# The plan row for the install. Nothing is shown when the calendar was not asked for.
 calendar_plan_row() {
-  [ -n "$CAL_EMAIL" ] && [ -z "$CAL_SKIP" ] && [ -n "$CAL_TARGET" ] || return 0
+  [ -n "$CAL_EMAIL" ] && [ -n "$CAL_TARGET" ] || return 0
   plan_add todo "Connect the calendar of $CAL_EMAIL to instance $CAL_TARGET" \
     "The calendar connector keeps the app password in its own private storage."
 }
@@ -360,7 +379,6 @@ cmd_instance_calendar() {
   [ -n "$REL_CALENDAR_TAG" ] ||
     die "The installed version of Aman has no calendar connector yet. Run install.sh upgrade first, then run this command again."
   calendar_collect instance
-  if [ -n "$CAL_SKIP" ]; then return 0; fi
   calendar_apply "$name"
 }
 

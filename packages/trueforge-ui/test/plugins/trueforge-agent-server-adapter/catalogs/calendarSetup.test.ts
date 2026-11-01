@@ -14,13 +14,32 @@ const STATUS_BODY = {
     provider_key: 'fastmail',
     providers: [
       {
+        key: 'google',
+        name: 'Google',
+        server_url: null,
+        account_url_template: 'https://calendar.google.com/calendar/dav/{email}/user/',
+        help_url: 'https://support.google.com/accounts/answer/185833',
+        help_hint: 'Google: make an app password.',
+        setup_steps: ['Turn on 2-Step Verification.', 'Make an app password.'],
+      },
+      {
         key: 'fastmail',
         name: 'Fastmail',
         server_url: 'https://caldav.fastmail.com/dav/',
+        account_url_template: null,
         help_url: 'https://www.fastmail.help/hc/en-us/articles/360058752854-App-passwords',
         help_hint: 'Fastmail: make an app password.',
+        setup_steps: [],
       },
-      { key: 'other', name: 'Other', server_url: null, help_url: null, help_hint: 'Ask your provider.' },
+      {
+        key: 'other',
+        name: 'Other',
+        server_url: null,
+        account_url_template: null,
+        help_url: null,
+        help_hint: 'Ask your provider.',
+        setup_steps: [],
+      },
     ],
   },
 };
@@ -65,9 +84,12 @@ describe('createCalendarSetupApi', () => {
     expect(status.email).toBe('owner@example.invalid');
     expect(status.username).toBe('owner-login');
     expect(status.calendarUrl).toBe('https://caldav.fastmail.com/dav/');
-    expect(status.providers[0]?.serverUrl).toBe('https://caldav.fastmail.com/dav/');
-    expect(status.providers[0]?.helpUrl).toContain('fastmail.help');
-    expect(status.providers[1]?.helpUrl).toBeNull();
+    expect(status.providers[0]?.accountUrlTemplate).toBe('https://calendar.google.com/calendar/dav/{email}/user/');
+    expect(status.providers[0]?.setupSteps).toEqual(['Turn on 2-Step Verification.', 'Make an app password.']);
+    expect(status.providers[1]?.serverUrl).toBe('https://caldav.fastmail.com/dav/');
+    expect(status.providers[1]?.helpUrl).toContain('fastmail.help');
+    expect(status.providers[1]?.setupSteps).toEqual([]);
+    expect(status.providers[2]?.helpUrl).toBeNull();
   });
 
   it('saves with snake_case on the wire, the session cookie, and no bearer header', async () => {

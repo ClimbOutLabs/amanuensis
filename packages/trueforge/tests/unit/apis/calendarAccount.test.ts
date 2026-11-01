@@ -174,7 +174,9 @@ describe('the calendar settings endpoints', () => {
     expect(data.available).toBe(true);
     expect(data.state).toBe('not_connected');
     expect(data.email).toBeNull();
+    expect(data.provider_key).toBe('google');
     expect(data.providers.map((provider: { key: string }) => provider.key)).toEqual([
+      'google',
       'fastmail',
       'yahoo',
       'gmx',
@@ -186,10 +188,13 @@ describe('the calendar settings endpoints', () => {
         key: preset.key,
         name: preset.name,
         server_url: preset.server_url,
+        account_url_template: preset.account_url_template,
         help_url: preset.help_url,
         help_hint: preset.help_hint,
+        setup_steps: preset.setup_steps,
       })),
     );
+    expect(data.providers[0]?.setup_steps).toHaveLength(4);
   });
 
   it('reports Connected with the email, and never the password', async () => {
@@ -207,6 +212,48 @@ describe('the calendar settings endpoints', () => {
     agent.script([{ status: 200, body: { ...CONNECTED, url: 'https://caldav.fastmail.com/dav/' } }]);
     const { text } = await call({ method: 'GET', path: '/status' });
     expect(JSON.parse(text).data.provider_key).toBe('fastmail');
+  });
+
+  it('reports a saved Google account as the Google provider', async () => {
+    agent.script([
+      {
+        status: 200,
+        body: {
+          ...CONNECTED,
+          url: 'https://calendar.google.com/calendar/dav/person@gmail.com/user/',
+          username: 'person@gmail.com',
+          email: 'person@gmail.com',
+        },
+      },
+    ]);
+    const { text } = await call({ method: 'GET', path: '/status' });
+    expect(JSON.parse(text).data.provider_key).toBe('google');
+  });
+
+  it('saves a Google login with the address built from the email address', async () => {
+    agent.script([
+      {
+        status: 200,
+        body: {
+          ...CONNECTED,
+          url: 'https://calendar.google.com/calendar/dav/person@gmail.com/user/',
+          username: 'person@gmail.com',
+          email: 'person@gmail.com',
+        },
+      },
+    ]);
+    const { status } = await call({
+      method: 'POST',
+      path: '/',
+      body: { provider_key: 'google', email: 'person@gmail.com', password: 'abcd efgh ijkl mnop' },
+    });
+    expect(status).toBe(201);
+    expect(JSON.parse(agent.calls[0]?.body ?? '{}')).toEqual({
+      url: 'https://calendar.google.com/calendar/dav/person@gmail.com/user/',
+      username: 'person@gmail.com',
+      password: 'abcd efgh ijkl mnop',
+      email: 'person@gmail.com',
+    });
   });
 
   it('reports a stopped sign-in in plain words', async () => {
@@ -308,7 +355,11 @@ describe('the calendar settings endpoints', () => {
       },
       {
         body: { provider_key: 'fastmail', email: 'person@gmail.com', password: CANARY },
-        says: 'use the Google connector',
+        says: 'Pick Google and try again',
+      },
+      {
+        body: { provider_key: 'other', email: 'person@gmail.com', password: CANARY },
+        says: 'Pick Google and try again',
       },
       { body: { provider_key: 'other', email: EMAIL, password: CANARY }, says: 'Type the calendar address' },
       {

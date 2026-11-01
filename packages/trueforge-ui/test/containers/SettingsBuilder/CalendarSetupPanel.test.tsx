@@ -34,36 +34,59 @@ afterEach(() => {
 
 const CANARY = 'CANARY-APP-PASSWORD-7f3d9';
 
+const GOOGLE: CalendarProviderInfo = {
+  key: 'google',
+  name: 'Google',
+  serverUrl: null,
+  accountUrlTemplate: 'https://calendar.google.com/calendar/dav/{email}/user/',
+  helpUrl: 'https://support.google.com/accounts/answer/185833',
+  helpHint: 'Google: turn on 2-Step Verification, then make an app password at myaccount.google.com/apppasswords.',
+  setupSteps: [
+    'Turn on 2-Step Verification for your Google account, if it is not on yet. Google only offers app passwords after that.',
+    'Open myaccount.google.com/apppasswords, type a name such as Aman, and select Create.',
+    'Copy the 16-letter password Google shows. Google shows it only once.',
+    'Pick Google below, type your Gmail address, and paste the app password. Leave the login name empty.',
+  ],
+};
+
 const FASTMAIL: CalendarProviderInfo = {
   key: 'fastmail',
   name: 'Fastmail',
   serverUrl: 'https://caldav.fastmail.com/dav/',
+  accountUrlTemplate: null,
   helpUrl: 'https://www.fastmail.help/hc/en-us/articles/360058752854-App-passwords',
   helpHint: 'Fastmail: make an app password under Settings, Privacy & Security.',
+  setupSteps: [],
 };
 
 const GMX: CalendarProviderInfo = {
   key: 'gmx',
   name: 'GMX',
   serverUrl: null,
+  accountUrlTemplate: null,
   helpUrl: 'https://support.gmx.com/security/2fa/application-specific-passwords.html',
   helpHint: 'GMX: make an application-specific password.',
+  setupSteps: [],
 };
 
 const WEBDE: CalendarProviderInfo = {
   key: 'webde',
   name: 'web.de',
   serverUrl: 'https://caldav.web.de',
+  accountUrlTemplate: null,
   helpUrl: null,
   helpHint: 'web.de: make an application-specific password.',
+  setupSteps: [],
 };
 
 const OTHER: CalendarProviderInfo = {
   key: 'other',
   name: 'Other',
   serverUrl: null,
+  accountUrlTemplate: null,
   helpUrl: null,
   helpHint: "Your calendar provider's help pages explain how to make an app password.",
+  setupSteps: [],
 };
 
 function statusOf(overrides: Partial<CalendarAccountStatus> = {}): CalendarAccountStatus {
@@ -74,7 +97,7 @@ function statusOf(overrides: Partial<CalendarAccountStatus> = {}): CalendarAccou
     username: null,
     calendarUrl: null,
     providerKey: 'fastmail',
-    providers: [FASTMAIL, GMX, WEBDE, OTHER],
+    providers: [GOOGLE, FASTMAIL, GMX, WEBDE, OTHER],
     ...overrides,
   };
 }
@@ -98,6 +121,7 @@ describe('CalendarSetupPanel', () => {
     renderPanel(port);
     const select = await screen.findByLabelText(/calendar provider/i);
     expect([...select.querySelectorAll('option')].map(option => option.textContent)).toEqual([
+      'Google',
       'Fastmail',
       'GMX',
       'web.de',
@@ -118,6 +142,32 @@ describe('CalendarSetupPanel', () => {
     // After the answer the form is gone and the password is nowhere on the page.
     expect(await screen.findByText(/Connected as/)).toBeTruthy();
     expect(document.body.textContent).not.toContain(CANARY);
+  });
+
+  it('shows the Google steps, says the address comes from the email, and saves Google with no typed address', async () => {
+    const port = makePort(statusOf({ providerKey: 'google' }));
+    renderPanel(port);
+    const select = await screen.findByLabelText(/calendar provider/i);
+    expect(select).toHaveValue('google');
+    expect(screen.getByText('Before you start')).toBeTruthy();
+    for (const step of GOOGLE.setupSteps) {
+      expect(screen.getByText(step)).toBeTruthy();
+    }
+    expect(screen.getByText(/Calendar address: filled in from your email address/)).toBeTruthy();
+
+    fireEvent.change(select, { target: { value: 'fastmail' } });
+    expect(screen.queryByText('Before you start')).toBeNull();
+    fireEvent.change(select, { target: { value: 'google' } });
+    fireEvent.change(screen.getByLabelText(/email address/i), { target: { value: 'person@gmail.com' } });
+    fireEvent.change(screen.getByLabelText(/app password/i), { target: { value: CANARY } });
+    fireEvent.click(screen.getByRole('button', { name: 'Connect' }));
+
+    await waitFor(() => expect(port.saveCalendarAccount).toHaveBeenCalled());
+    expect(vi.mocked(port.saveCalendarAccount).mock.calls[0]?.[0]).toEqual({
+      providerKey: 'google',
+      email: 'person@gmail.com',
+      password: CANARY,
+    });
   });
 
   it('shows the provider hint and a new-tab help link under the app password field', async () => {
