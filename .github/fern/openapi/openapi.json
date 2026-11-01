@@ -6348,6 +6348,9 @@
           "curated": {
             "$ref": "#/components/schemas/MemoryRecallCurated"
           },
+          "pages": {
+            "$ref": "#/components/schemas/MemoryRecallPages"
+          },
           "reflect": {
             "$ref": "#/components/schemas/MemoryRecallReflect"
           }
@@ -6355,6 +6358,43 @@
         "required": [
           "curated",
           "reflect"
+        ],
+        "type": "object"
+      },
+      "MemoryRecallPages": {
+        "properties": {
+          "candidates": {
+            "description": "Pages the message named, across the vaults it may read.",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "dropped_over_budget": {
+            "description": "Pages left out by the page token budget.",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "dropped_over_count": {
+            "description": "Pages left out by the page count cap.",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "loaded": {
+            "description": "Pages in the injected block, after screening and budget.",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "withheld": {
+            "description": "Pages the recall screen kept out of the block.",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "candidates",
+          "loaded",
+          "dropped_over_count",
+          "dropped_over_budget",
+          "withheld"
         ],
         "type": "object"
       },

@@ -8,6 +8,7 @@ import { MemoryRecallEventSchema } from '../../schemas/memoryEvents';
 export {
   MemoryCuratedStatsSchema,
   MemoryLayersStatsSchema,
+  MemoryPagesStatsSchema,
   MemoryRecallEventSchema,
   MemoryRecallStatsSchema,
   MemoryReflectStatsSchema,
@@ -18,6 +19,7 @@ export {
 export type {
   MemoryCuratedStats,
   MemoryLayersStats,
+  MemoryPagesStats,
   MemoryRecallEvent,
   MemoryRecallStats,
   MemoryReflectStats,

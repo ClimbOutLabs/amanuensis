@@ -4,5 +4,6 @@ import type * as TrueForge from "../index.js";
 
 export interface MemoryRecallLayers {
     curated: TrueForge.MemoryRecallCurated;
+    pages?: TrueForge.MemoryRecallPages;
     reflect: TrueForge.MemoryRecallReflect;
 }

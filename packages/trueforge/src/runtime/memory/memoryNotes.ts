@@ -1,4 +1,5 @@
 import type { ToolResultSource } from '@truefoundry/trueforge-core/core';
+import { z } from 'zod';
 import { MEMORY_ORIGIN_METADATA_KEY } from './memoryOrigin';
 
 /** Metadata key naming where a note came from. Notes the person said carry no such key. */
@@ -13,14 +14,14 @@ export const ASSISTANT_RESPONSE_SOURCE = 'assistant_response';
 /** Where a saved note came from: a kind of tool result, or the assistant's own reply. */
 export type MemoryNoteSource = ToolResultSource | typeof ASSISTANT_RESPONSE_SOURCE;
 
-const NOTE_SOURCES: readonly MemoryNoteSource[] = [
+const NOTE_SOURCES = [
   'email',
   'calendar',
   'web',
   'attachment',
   'other',
   'assistant_response',
-];
+] as const satisfies readonly MemoryNoteSource[];
 
 export function isMemoryNoteSource(value: string): value is MemoryNoteSource {
   return NOTE_SOURCES.some(source => source === value);
@@ -44,37 +45,19 @@ const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Se
 
 const NOTE_DATE_PATTERN = /^(\d{4})-(\d{2})-(\d{2})$/;
 
-/**
- * Hidden trailer line carrying a note's source and day. It travels inside the note's stored text, so every
- * store hands it back at recall, and it is the one place the source and day are read from.
- */
-const NOTE_MARKER_PATTERN = /^<!-- note: ([a-z_]{1,32}) (\d{4}-\d{2}-\d{2}) -->$/;
-
-export function formatNoteMarker({ source, date }: NoteProvenance): string {
-  return `<!-- note: ${source} ${date} -->`;
-}
-
-/** The provenance a trailer line carries, or undefined when the line is not a note marker with a known source. */
-export function parseNoteMarker(line: string): NoteProvenance | undefined {
-  const match = NOTE_MARKER_PATTERN.exec(line.trimEnd());
-  const source = match?.[1];
-  const date = match?.[2];
-  return source !== undefined && date !== undefined && isMemoryNoteSource(source) ? { source, date } : undefined;
-}
-
 /** A note's text split into its body and the marker on its last line, when it ends with one. */
 function splitNoteTrailer(text: string): { body: string; provenance: NoteProvenance | undefined } {
   const trimmed = text.trimEnd();
   const lastLineStart = trimmed.lastIndexOf('\n') + 1;
-  const provenance = parseNoteMarker(trimmed.slice(lastLineStart));
-  return provenance === undefined
-    ? { body: text, provenance: undefined }
-    : { body: trimmed.slice(0, lastLineStart).trimEnd(), provenance };
+  const marker = parseMarker(trimmed.slice(lastLineStart));
+  return marker?.kind === 'note'
+    ? { body: trimmed.slice(0, lastLineStart).trimEnd(), provenance: { source: marker.source, date: marker.date } }
+    : { body: text, provenance: undefined };
 }
 
 /** The stored text of a note: its labeled sentence, then the hidden marker. */
 export function noteRetainContent({ text, source, date }: { text: string } & NoteProvenance): string {
-  return `${text}\n\n${formatNoteMarker({ source, date })}`;
+  return `${text}\n\n${formatMarker({ kind: 'note', source, date })}`;
 }
 
 /** A note's text without the hidden marker, for showing to the model or the person. */
@@ -179,4 +162,125 @@ export function isNoteTooOld({
   const today = Math.floor(now.getTime() / MILLISECONDS_PER_DAY);
   const foundDay = Math.min(Math.floor(found / MILLISECONDS_PER_DAY), today);
   return today - foundDay > READ_CONTENT_NOTE_MAX_AGE_DAYS;
+}
+
+/**
+ * Where a fact on a page came from. The host sets this from the log entry's origin and note source;
+ * the model never chooses it. `you_said` and `you_edited` are the person's own words and are never
+ * rewritten by the nightly pass.
+ */
+export const FACT_SOURCES = [
+  'you_said',
+  'you_edited',
+  'sent_mail',
+  'mail',
+  'calendar',
+  'read_content',
+  'inferred',
+] as const;
+
+export const FactSourceSchema = z.enum(FACT_SOURCES);
+export type FactSource = z.infer<typeof FactSourceSchema>;
+
+/** A fact's day at year, month, or day precision. */
+export const FactDateSchema = z.string().regex(/^\d{4}(?:-(?:0[1-9]|1[0-2])(?:-(?:0[1-9]|[12]\d|3[01]))?)?$/);
+export type FactDate = z.infer<typeof FactDateSchema>;
+
+/** Fact ids are `f_` and a short lowercase token, unique within a vault for the life of the fact. */
+export const FactIdSchema = z.string().regex(/^f_[a-z0-9]{1,16}$/);
+export type FactId = z.infer<typeof FactIdSchema>;
+
+const NoteMarkerSchema = z.strictObject({
+  kind: z.literal('note'),
+  source: z.enum(NOTE_SOURCES),
+  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+});
+
+/**
+ * The fact variant of the hidden marker at the end of one page bullet. `seen` is for facts on probation
+ * (Unconfirmed); `since` and `until` are for facts that are or were true. Keys render in this order.
+ */
+export const FactMarkerSchema = z.strictObject({
+  kind: z.literal('fact'),
+  id: FactIdSchema,
+  src: FactSourceSchema,
+  since: FactDateSchema.optional(),
+  until: FactDateSchema.optional(),
+  seen: FactDateSchema.optional(),
+});
+export type FactMarker = z.infer<typeof FactMarkerSchema>;
+
+/**
+ * Every hidden `<!-- kind: ... -->` marker. A note marker rides at the end of a daily-log entry and carries
+ * its source and day; a fact marker rides at the end of a page bullet. This is the one owner of both grammars.
+ */
+export const MarkerSchema = z.discriminatedUnion('kind', [NoteMarkerSchema, FactMarkerSchema]);
+export type Marker = z.infer<typeof MarkerSchema>;
+
+const FACT_MARKER_KEYS = ['id', 'src', 'since', 'until', 'seen'] as const;
+
+const MARKER_PATTERN = /^<!--\s*([a-z]+):\s*(.*?)\s*-->$/;
+
+/** A marker line cut into its kind and its whitespace-separated body tokens. */
+function tokenizeMarker(line: string): { kind: string; tokens: string[] } | undefined {
+  const match = MARKER_PATTERN.exec(line);
+  const kind = match?.[1];
+  const body = match?.[2];
+  return kind === undefined || body === undefined ? undefined : { kind, tokens: body.split(/\s+/).filter(Boolean) };
+}
+
+/** Note tokens are positional (`<source> <date>`, as logs already hold them); fact tokens are `key=value`. */
+function markerFields({ kind, tokens }: { kind: string; tokens: string[] }): Record<string, string> | undefined {
+  if (kind === 'note') {
+    const [source, date, ...rest] = tokens;
+    return source === undefined || date === undefined || rest.length > 0 ? undefined : { kind, source, date };
+  }
+  const fields: Record<string, string> = { kind };
+  for (const token of tokens) {
+    const separator = token.indexOf('=');
+    const key = token.slice(0, separator);
+    if (separator === -1 || key in fields) {
+      return undefined;
+    }
+    fields[key] = token.slice(separator + 1);
+  }
+  return fields;
+}
+
+export function formatMarker(marker: Marker): string {
+  if (marker.kind === 'note') {
+    return `<!-- note: ${marker.source} ${marker.date} -->`;
+  }
+  const parts: string[] = [];
+  for (const key of FACT_MARKER_KEYS) {
+    const value = marker[key];
+    if (value !== undefined) {
+      parts.push(`${key}=${value}`);
+    }
+  }
+  return `<!-- fact: ${parts.join(' ')} -->`;
+}
+
+/**
+ * The marker a line carries, or undefined when the line is not a well-formed marker. Fact markers accept any
+ * run of spaces between keys; note markers must be written exactly as `formatMarker` writes them.
+ */
+export function parseMarker(line: string): Marker | undefined {
+  const tokenized = tokenizeMarker(line.trim());
+  const fields = tokenized === undefined ? undefined : markerFields(tokenized);
+  const parsed = MarkerSchema.safeParse(fields);
+  if (!parsed.success || (parsed.data.kind === 'note' && formatMarker(parsed.data) !== line.trimEnd())) {
+    return undefined;
+  }
+  return parsed.data;
+}
+
+/** A bullet's text split from the fact marker that ends it; `marker` is undefined when the line has none. */
+export function splitFactMarker(line: string): { text: string; marker: FactMarker | undefined } {
+  const start = line.lastIndexOf('<!--');
+  if (start === -1) {
+    return { text: line, marker: undefined };
+  }
+  const marker = parseMarker(line.slice(start));
+  return marker?.kind === 'fact' ? { text: line.slice(0, start).trimEnd(), marker } : { text: line, marker: undefined };
 }

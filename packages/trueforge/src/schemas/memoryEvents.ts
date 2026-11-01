@@ -99,10 +99,23 @@ export const MemoryReflectStatsSchema = z
   })
   .openapi('MemoryRecallReflect');
 
+/** The pages layer: people and matter pages the message named, loaded in full before recall. */
+export const MemoryPagesStatsSchema = z
+  .object({
+    candidates: z.number().int().nonnegative().describe('Pages the message named, across the vaults it may read.'),
+    loaded: z.number().int().nonnegative().describe('Pages in the injected block, after screening and budget.'),
+    dropped_over_count: z.number().int().nonnegative().describe('Pages left out by the page count cap.'),
+    dropped_over_budget: z.number().int().nonnegative().describe('Pages left out by the page token budget.'),
+    withheld: z.number().int().nonnegative().describe('Pages the recall screen kept out of the block.'),
+  })
+  .openapi('MemoryRecallPages');
+
 export const MemoryLayersStatsSchema = z
   .object({
     curated: MemoryCuratedStatsSchema,
     reflect: MemoryReflectStatsSchema,
+    // Optional so events written before pages existed stay valid.
+    pages: MemoryPagesStatsSchema.optional(),
   })
   .openapi('MemoryRecallLayers');
 
@@ -203,6 +216,7 @@ export type MemoryScreenRecord = z.infer<typeof MemoryScreenRecordSchema>;
 export type MemoryScreenStats = z.infer<typeof MemoryScreenStatsSchema>;
 export type MemoryCuratedStats = z.infer<typeof MemoryCuratedStatsSchema>;
 export type MemoryReflectStats = z.infer<typeof MemoryReflectStatsSchema>;
+export type MemoryPagesStats = z.infer<typeof MemoryPagesStatsSchema>;
 export type MemoryLayersStats = z.infer<typeof MemoryLayersStatsSchema>;
 export type MemoryRecallEvent = z.infer<typeof MemoryRecallEventSchema>;
 export type MemoryRecallPersistedEvent = z.infer<typeof MemoryRecallPersistedEventSchema>;

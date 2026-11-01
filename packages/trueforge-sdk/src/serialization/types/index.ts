@@ -291,6 +291,7 @@ export * from "./MemoryRecall.js";
 export * from "./MemoryRecallCurated.js";
 export * from "./MemoryRecallCuratedOutcome.js";
 export * from "./MemoryRecallLayers.js";
+export * from "./MemoryRecallPages.js";
 export * from "./MemoryRecallPersistedEvent.js";
 export * from "./MemoryRecallReflect.js";
 export * from "./MemoryRecallReflectOutcome.js";

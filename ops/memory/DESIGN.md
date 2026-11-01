@@ -106,3 +106,151 @@ were injected (and how many candidates the bank returned), the route and the pat
 it, and the reflect outcome with its wall clock and the number of memories the provider said the
 answer drew on. Consolidation into mental models stays the provider's background job; the host
 never triggers it from a turn.
+
+## Pages
+
+Pages are short Markdown files about one person or one matter. They sit beside the daily log in a
+vault and hold what stays true, so it does not have to be dug out of old entries. They work with the
+Markdown memory backend only. Hindsight does not use them.
+
+Pages are written by hand for now. Aman only reads them. Tidying them automatically is planned, but
+nothing does it yet. No memory-write tool is exposed to the model, and pages do not change that.
+A private history of page changes, a lock so only one writer works at a time, and handling of hand
+edits come with the change that lets Aman write pages.
+
+### Files in a vault
+
+    people/<slug>.md      one page per person
+    matters/<slug>.md     one page per matter (a trip, a purchase, a project)
+    .memory-state/        notes Aman keeps for itself
+
+The slug comes from the title: lowercase, accents dropped, other characters turned into dashes, cut
+at 64 characters. `José` and `Jose` share one page. A page's file name must be exactly that
+lowercase slug, such as `people/wendy.md`. A file with any other name, such as `people/Wendy.md` or
+`people/my notes.md`, is not a page: it is never loaded. Each turn that skips such a file writes one
+warning to the server log with the number of files skipped. It does not name them, since file names can be people's names. To use a file, rename it to the lowercase slug.
+
+`.memory-state/` is never exported. It holds:
+
+- `timezone`: the time zone the vault counts "today" in, taken from the newest chat made in a
+  browser. Scheduled and other unattended runs never change it. This is state.
+- `aliases.json`: a cache of every page's title and other names. It is rebuilt whenever a page
+  changes, so it is safe to delete.
+- `README`: a short note saying what the folder is. The file text lives in `memoryState.ts`.
+
+### The page format
+
+A page starts with a block of settings between two `---` lines:
+
+| Key         | Meaning                                                         |
+| ----------- | --------------------------------------------------------------- |
+| `kind`      | `person` or `matter`.                                           |
+| `title`     | The page's name. The `# ` heading in the body is never used.    |
+| `aliases`   | Other names, nicknames and email addresses that mean this page. |
+| `household` | People only. `true` for someone the person lives with.          |
+| `status`    | Matters only. `active` or `done`.                               |
+
+Keys it does not know are kept as they are. After the settings come a `# ` heading and a one-line
+summary, then sections. Each is a `## ` heading:
+
+| Section               | Kind   | What goes there                                                  |
+| --------------------- | ------ | ---------------------------------------------------------------- |
+| How you write to them | person | How the person likes to write to this contact.                   |
+| Now                   | both   | What is true at the moment.                                      |
+| Decided               | matter | What has been settled.                                           |
+| Open                  | matter | What is still undecided.                                         |
+| Unconfirmed           | both   | Things read somewhere that the person has not confirmed.         |
+| Earlier               | both   | Things that were true and no longer are. They carry an end date. |
+
+Keeping a page short, by moving the oldest "Earlier" lines into an archive file, is planned. Nothing
+does it yet.
+
+Each fact is one bullet. The end of the line holds a hidden marker that the page does not show when
+read in a Markdown viewer:
+
+    - Prefers short emails. <!-- fact: id=f_k3x9a0bq2m src=you_said since=2026-03 -->
+
+- The text is one line. It cannot hold a line break or the characters `<!--`.
+- `id` is `f_` and up to 16 lowercase letters or digits. It stays with the fact for life.
+- `src` says where the fact came from (below).
+- `since`, `until` and `seen` are dates, as a year (`2026`), a month (`2026-03`) or a day. `since` and
+  `until` bound when a fact was true. `seen` is for unconfirmed facts and says when they were last
+  seen.
+
+The source values:
+
+| `src`          | Meaning                                                 |
+| -------------- | ------------------------------------------------------- |
+| `you_said`     | The person said it in chat.                             |
+| `you_edited`   | The person wrote or changed the line by hand.           |
+| `sent_mail`    | A message the person sent through Aman.                 |
+| `mail`         | Read in an email.                                       |
+| `calendar`     | Read on the calendar.                                   |
+| `read_content` | Read on a web page, in a document or in another result. |
+| `inferred`     | Worked out by Aman, not stated anywhere.                |
+
+The host sets the source from where the information arrived. The model never picks it. `you_said` and
+`you_edited` are the person's own words and are meant to be kept as written.
+
+A page never has to be tidy. One with no settings, no headings, or bullets with no marker is still
+read. A leading byte order mark is allowed. Reading a page and rendering it again returns the same
+bytes.
+
+A bullet that carries a hidden comment the host cannot read as a marker (an unknown key, a bad date, a
+repeated key, a misspelt `fact`) is kept as it is but never trusted. It counts as not confirmed, not
+as the person's own words. A bullet with no hidden comment at all is the person's hand-written line.
+
+### How pages are loaded before each turn
+
+Before recall, the host looks at the person's message for names. It compares each page's title and
+other names with the message as whole words. Case, accents and punctuation around a name are ignored,
+so `(Wendy)` and `Wendy,` both match. An email address counts as one word, so putting an address in
+`aliases` finds the page when the person pastes that address. A trailing dot is ignored, so `W.`
+matches `W`. Names in Chinese, Japanese, Korean or Thai are written without spaces, so those match
+anywhere in the message: `田中` is found in `田中さんに会った`. Every other name still needs whole words,
+so `Sam` does not match `Samantha`.
+
+A name followed by `'s` (`Wendy's flight`) is a possessive match. It loads the page, but ranks below
+a direct mention, since the page may be about the owner and not the subject.
+
+Matches are ordered by:
+
+1. The vault, own vault first, then the shared vault, then any vault shared with the person. If two
+   vaults have the same page, only the first is used.
+2. Direct mentions before possessive ones.
+3. People before matters.
+4. Where the name first appears in the message.
+
+Two limits apply, on top of the normal recall budget:
+
+| Setting                   | Default | Meaning                                      |
+| ------------------------- | ------- | -------------------------------------------- |
+| `MEMORY_PAGES_MAX_COUNT`  | 6       | Most pages loaded in one turn.               |
+| `MEMORY_PAGES_MAX_TOKENS` | 1500    | Estimated size of all loaded pages together. |
+
+A page that would go over the token limit is left out, and so is every page after it. That way the
+model always sees the highest-priority pages. Each turn's memory event records how many pages matched,
+loaded and were dropped for each reason. A vault that cannot be read adds nothing and never fails the
+turn.
+
+The model sees each page as plain lines under short labels, with each marker shown as a short note
+such as "(you said, since 2026-03)". "How you write to them" is not shown with the page. Its lines
+are gathered, for every loaded contact, under one fixed heading after the pages (see below).
+
+### Drafting rules
+
+- After the pages, the memory block has one heading, "How the person writes to these contacts
+  (follow when drafting to them):". Under it, each loaded contact is listed by name with the lines
+  from its "How you write to them" section. This is the only place those lines appear.
+- A line there is an instruction only when the person said it, wrote it or sent it (`you_said`,
+  `you_edited`, `sent_mail`), or when it is a plain bullet with no hidden comment, which is the
+  person's own hand edit.
+- A line there from mail, the calendar, read content or inference is not an instruction. A line
+  whose marker cannot be read is not one either. Both are shown with the unconfirmed facts, labelled
+  as not confirmed, so something an email said can never steer how Aman writes.
+- A page with `household: true` adds one fixed line under its name: bookings and plans from this
+  person are shared plans, not mail to answer. Aman notes them or puts them on the calendar.
+- The drafting lines of a page that is left out, because of the page limits or the recall screen, are
+  left out with it.
+- The rest of the block is data, not instructions.
+- Facts from mail, the calendar, read content and inference are labelled as not confirmed.

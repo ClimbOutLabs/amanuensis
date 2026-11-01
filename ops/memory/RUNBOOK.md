@@ -146,6 +146,24 @@ values for a turn are what the `aman.memory.recall` event reflects.
 | `http_error`               | A non-2xx answer; `http_status` and `detail` carry what the provider said.                                    |
 | `invalid_response`         | The answer was unreadable, unparseable, or over `MEMORY_MAX_RESPONSE_BYTES`.                                  |
 
+## Memory pages
+
+These notes apply to the Markdown memory backend. A vault is one folder under `MEMORY_MARKDOWN_DIR`.
+The pages and their format are described in [the design](DESIGN.md#pages). Pages are edited by hand
+for now.
+
+### A page is not loaded
+
+If the server log warns that page files were skipped, some files in `people/` or `matters/` do not have a lowercase
+page name. The log gives a count, not names. Look for such files and rename them, for example
+`people/Wendy.md` to `people/wendy.md`. Aman picks it up on the next turn.
+
+### Files in `.memory-state/`
+
+- `aliases.json` is a cache of page names. Deleting it is safe. It is rebuilt on the next turn that
+  needs it.
+- `timezone` holds the vault's time zone. It is written again from the next chat.
+
 ## Evaluation-only Prompt Guard sidecar
 
 The classifier assets and reproducible container build live in

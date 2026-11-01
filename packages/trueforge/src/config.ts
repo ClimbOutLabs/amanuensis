@@ -1606,6 +1606,17 @@ export interface SharedServerConfiguration {
    */
   MEMORY_RECALL_MAX_ENTITIES: number;
   /**
+   * Most people and matter pages loaded in full before a turn, by priority.
+   * Env: `MEMORY_PAGES_MAX_COUNT`. Default 6.
+   */
+  MEMORY_PAGES_MAX_COUNT: number;
+  /**
+   * Token budget for the loaded pages, on top of `MEMORY_RECALL_MAX_TOKENS`. A page that would
+   * overflow it, and every page after, is left out.
+   * Env: `MEMORY_PAGES_MAX_TOKENS`. Default 1500.
+   */
+  MEMORY_PAGES_MAX_TOKENS: number;
+  /**
    * Max milliseconds for a memory retain (or operation-status) call.
    * Env: `MEMORY_RETAIN_TIMEOUT_MS`. Default 10000.
    */
@@ -2399,6 +2410,16 @@ const shared: SharedServerConfiguration = {
     envKey: 'MEMORY_RECALL_MAX_ITEMS',
     raw: getEnv('MEMORY_RECALL_MAX_ITEMS'),
     defaultValue: 12,
+  }),
+  MEMORY_PAGES_MAX_COUNT: parsePositiveInt({
+    envKey: 'MEMORY_PAGES_MAX_COUNT',
+    raw: getEnv('MEMORY_PAGES_MAX_COUNT'),
+    defaultValue: 6,
+  }),
+  MEMORY_PAGES_MAX_TOKENS: parsePositiveInt({
+    envKey: 'MEMORY_PAGES_MAX_TOKENS',
+    raw: getEnv('MEMORY_PAGES_MAX_TOKENS'),
+    defaultValue: 1500,
   }),
   MEMORY_RECALL_MAX_ENTITIES: parsePositiveInt({
     envKey: 'MEMORY_RECALL_MAX_ENTITIES',

@@ -16,6 +16,7 @@ import type {
   MentalModel,
   RecallItem,
 } from '../../../../src/runtime/memory/hindsightClient';
+import { estimateTokens } from '../../../../src/runtime/memory/markdownMemoryFiles';
 import {
   applyRelevanceGate,
   extractPreviousExchange,
@@ -29,8 +30,17 @@ import {
   weightedRecallQuery,
   WRAPPER_OVERHEAD_TOKENS,
 } from '../../../../src/runtime/memory/memoryCapability';
+import type { MemoryClient } from '../../../../src/runtime/memory/memoryClient';
+import {
+  DRAFTING_HEADING,
+  draftingLines,
+  HOUSEHOLD_LINE,
+  renderPageForModel,
+} from '../../../../src/runtime/memory/memoryPageLoader';
+import { parseMemoryPage } from '../../../../src/runtime/memory/memoryPages';
 import type { ScreenClassifyResult, ScreenClient } from '../../../../src/runtime/memory/screenClient';
 import { LEARNED_PROFILE_CLEARED_CONTENT } from '../../../../src/runtime/profileLearning';
+import { pageOf } from './pageFixtures';
 
 const DEFAULT_CONFIG: MemoryConfig = {
   recallMaxTokens: 2048,
@@ -46,6 +56,7 @@ const DEFAULT_CONFIG: MemoryConfig = {
   screen: { enabled: false, url: '', authToken: '', threshold: 0.5, timeoutMs: 1500, maxConcurrency: 8 },
   curated: { enabled: false, maxModels: 3, maxTokens: 512 },
   reflect: { enabled: false, budget: 'low', maxTokens: 512, timeoutMs: 8000 },
+  pages: { maxCount: 6, maxTokens: 1500 },
 };
 
 /** DEFAULT_CONFIG with the recall screen turned on and its timeout small enough to keep tests fast. */
@@ -528,6 +539,43 @@ describe('HindsightMemoryProcessor.processPreLLM', () => {
     const events = await collect(processor.processPreLLM(makeExecution([{ role: 'user', content: 'hi' }])));
 
     expect(passthroughEvent(events)['injected_block']).toContain('[2026-09-20] fact');
+  });
+
+  it('records the time zone of an attended turn on the vault', async () => {
+    const noteTimeZone = jest.fn().mockResolvedValue(undefined);
+    const capability = hindsightMemoryCapability({
+      client: Object.assign(makeClient({}), { noteTimeZone }),
+      config: DEFAULT_CONFIG,
+      logger: makeLogger(),
+      sessionId: 's1',
+      previousTurnId: null,
+      timeZone: 'Asia/Tokyo',
+    });
+    const processor = capability.preLLMProcessors?.[0];
+    if (!processor) {
+      throw new Error('expected a preLLM processor');
+    }
+    await collect(processor.processPreLLM(makeExecution([{ role: 'user', content: 'hi' }])));
+    expect(noteTimeZone).toHaveBeenCalledWith('Asia/Tokyo');
+  });
+
+  it('does not record a time zone on a turn that runs with memory off, such as a scheduled run', async () => {
+    const noteTimeZone = jest.fn().mockResolvedValue(undefined);
+    const capability = hindsightMemoryCapability({
+      client: Object.assign(makeClient({}), { noteTimeZone }),
+      config: DEFAULT_CONFIG,
+      logger: makeLogger(),
+      sessionId: 's1',
+      previousTurnId: null,
+      recallEnabled: false,
+      timeZone: 'Asia/Tokyo',
+    });
+    const processor = capability.preLLMProcessors?.[0];
+    if (!processor) {
+      throw new Error('expected a preLLM processor');
+    }
+    await collect(processor.processPreLLM(makeExecution([{ role: 'user', content: 'hi' }])));
+    expect(noteTimeZone).not.toHaveBeenCalled();
   });
 
   it.each(['2026-09-20', '2026-09-20T00:00:00.000Z', '2026-09-20T00:00:00Z'])(
@@ -1827,6 +1875,290 @@ describe('HindsightMemoryProcessor curated and reflect layers', () => {
     expect(formatted.block.startsWith(`<aman-memory>\n${BACKGROUND_NOT_WORK_SENTENCE}`)).toBe(true);
     expect(MEMORY_FRAMING_SENTENCE).toContain(BACKGROUND_NOT_WORK_SENTENCE);
     expect(MEMORY_FRAMING_SENTENCE).not.toContain('never a recalled topic in its place');
+  });
+});
+
+describe('HindsightMemoryProcessor pages layer', () => {
+  const wendyText = '[page: Wendy — person, household]\nNow:\n- Booked the movie. (you said)';
+  const loadedWendy = {
+    vaultDir: '/v',
+    kind: 'person' as const,
+    slug: 'wendy',
+    title: 'Wendy',
+    reason: 'direct' as const,
+    page: pageOf({ front: { kind: 'person', title: 'Wendy', aliases: [], household: true } }),
+    text: wendyText,
+    drafting: [] as string[],
+    estimatedTokens: estimateTokens(wendyText),
+  };
+  const fact: RecallItem = { id: '1', occurred_start: '2026-08-14', text: 'filed on 14 April' };
+
+  async function run(input: {
+    client: MemoryClient;
+    message: string;
+    config?: MemoryConfig;
+    screenClient?: ScreenClient;
+    logger?: ReturnType<typeof makeLogger>;
+  }) {
+    const capability = hindsightMemoryCapability({
+      client: input.client,
+      config: input.config ?? DEFAULT_CONFIG,
+      logger: input.logger ?? makeLogger(),
+      sessionId: 's1',
+      previousTurnId: null,
+      ...(input.screenClient ? { screenClient: input.screenClient } : {}),
+    });
+    const processor = capability.preLLMProcessors?.[0];
+    if (!processor) {
+      throw new Error('expected a preLLM processor');
+    }
+    return passthroughEvent(
+      await collect(processor.processPreLLM(makeExecution([{ role: 'user', content: input.message }]))),
+    );
+  }
+
+  it('puts the pages the message names ahead of recalled items and records the layer', async () => {
+    const loadPages = jest.fn().mockResolvedValue({
+      pages: [loadedWendy],
+      stats: { candidates: 2, loaded: 1, dropped_over_count: 0, dropped_over_budget: 1 },
+      skippedFiles: [],
+    });
+    const client: MemoryClient = Object.assign(
+      makeClient({ recall: jest.fn().mockResolvedValue({ ok: true, results: [fact], entities: [] }) }),
+      {
+        loadPages,
+      },
+    );
+    const event = await run({ client, message: 'Is Wendy free Saturday?' });
+    expect(loadPages).toHaveBeenCalledWith({ message: 'Is Wendy free Saturday?', maxPages: 6, maxTokens: 1500 });
+    expect(event['injected_block']).toBe(
+      [
+        '<aman-memory>',
+        MEMORY_FRAMING_SENTENCE,
+        wendyText,
+        '[2026-08-14] filed on 14 April',
+        '(memory: 1 items, 0 entities; 8 tokens of 2048 budget; 1 pages)',
+        '</aman-memory>',
+      ].join('\n'),
+    );
+    expect(event['layers']).toMatchObject({
+      pages: { candidates: 2, loaded: 1, dropped_over_count: 0, dropped_over_budget: 1, withheld: 0 },
+    });
+  });
+
+  it('injects a page even when recall finds nothing', async () => {
+    const client: MemoryClient = Object.assign(makeClient({}), {
+      loadPages: jest.fn().mockResolvedValue({
+        pages: [loadedWendy],
+        stats: { candidates: 1, loaded: 1, dropped_over_count: 0, dropped_over_budget: 0 },
+        skippedFiles: [],
+      }),
+    });
+    const event = await run({ client, message: 'Wendy?' });
+    expect(event['injected_block']).toContain(wendyText);
+    expect(event['layers']).toMatchObject({ pages: { loaded: 1 } });
+  });
+
+  it('records no pages layer on a backend without pages, and keeps the block as before', async () => {
+    const event = await run({
+      client: makeClient({ recall: jest.fn().mockResolvedValue({ ok: true, results: [fact], entities: [] }) }),
+      message: 'Wendy?',
+    });
+    expect(event['injected_block']).toBe(
+      formatMemoryBlock({ results: [fact], entities: [], budgetTokens: 2048 }).block,
+    );
+    expect(event['layers']).not.toHaveProperty('pages');
+  });
+
+  it('drops pages past the page budget and counts them', async () => {
+    const client: MemoryClient = Object.assign(makeClient({}), {
+      loadPages: jest.fn().mockResolvedValue({
+        pages: [loadedWendy, { ...loadedWendy, slug: 'sam', title: 'Sam', text: 'x'.repeat(400) }],
+        stats: { candidates: 2, loaded: 2, dropped_over_count: 0, dropped_over_budget: 0 },
+        skippedFiles: [],
+      }),
+    });
+    const event = await run({
+      client,
+      message: 'Wendy and Sam',
+      config: { ...DEFAULT_CONFIG, pages: { maxCount: 6, maxTokens: estimateTokens(wendyText) + 10 } },
+    });
+    expect(event['injected_block']).toContain(wendyText);
+    expect(event['injected_block']).not.toContain('xxxx');
+    expect(event['injected_block']).toContain('1 pages; 1 pages dropped over budget');
+    expect(event['layers']).toMatchObject({ pages: { loaded: 1, dropped_over_budget: 1 } });
+  });
+
+  it("withholds a page the recall screen flags, and never the person's own turn", async () => {
+    const classify = jest.fn().mockImplementation(async ({ text }: { text: string }) => ({
+      ok: true,
+      flagged: text.includes('[page:'),
+      score: text.includes('[page:') ? 0.9 : 0.1,
+      reasonCode: null,
+      reason: null,
+    }));
+    const client: MemoryClient = Object.assign(
+      makeClient({ recall: jest.fn().mockResolvedValue({ ok: true, results: [fact], entities: [] }) }),
+      {
+        loadPages: jest.fn().mockResolvedValue({
+          pages: [loadedWendy],
+          stats: { candidates: 1, loaded: 1, dropped_over_count: 0, dropped_over_budget: 0 },
+          skippedFiles: [],
+        }),
+      },
+    );
+    const event = await run({
+      client,
+      message: 'Wendy?',
+      config: {
+        ...DEFAULT_CONFIG,
+        screen: {
+          enabled: true,
+          url: 'https://screen.example',
+          authToken: 'tok',
+          threshold: 0.5,
+          timeoutMs: 50,
+          maxConcurrency: 8,
+        },
+      },
+      screenClient: makeScreenClient(classify),
+    });
+    expect(event['injected_block']).not.toContain('[page:');
+    expect(event['injected_block']).toContain('filed on 14 April');
+    expect(event['layers']).toMatchObject({ pages: { loaded: 0, withheld: 1 } });
+    expect(event['screen']).toMatchObject({
+      withheld: 1,
+      records: [expect.objectContaining({ id: 'page:#0', withheld: true })],
+    });
+  });
+
+  it('puts a household contact’s style lines and the household line under one fixed heading after the pages', async () => {
+    const wendyPage = parseMemoryPage({
+      content: [
+        '---',
+        'kind: person',
+        'title: Wendy',
+        'aliases: [my wife]',
+        'household: true',
+        '---',
+        '# Wendy',
+        '',
+        '## How you write to them',
+        '- Short and casual. No sign-off. <!-- fact: id=f_01 src=sent_mail since=2026-10-31 -->',
+        '',
+        '## Now',
+        '- Booked the movie for Saturday. <!-- fact: id=f_02 src=mail since=2026-10-30 -->',
+        '',
+      ].join('\n'),
+      fallback: { kind: 'person', title: 'Wendy' },
+    });
+    const text = renderPageForModel({ title: 'Wendy', page: wendyPage });
+    const drafting = draftingLines({ title: 'Wendy', page: wendyPage });
+    const client: MemoryClient = Object.assign(makeClient({}), {
+      loadPages: jest.fn().mockResolvedValue({
+        pages: [{ ...loadedWendy, page: wendyPage, text, drafting, estimatedTokens: estimateTokens(text) }],
+        stats: { candidates: 1, loaded: 1, dropped_over_count: 0, dropped_over_budget: 0 },
+        skippedFiles: [],
+      }),
+    });
+    const event = await run({ client, message: 'Book the movie with my wife' });
+    const block = String(event['injected_block']);
+    expect(block).toContain(
+      [
+        '[page: Wendy — person, household; also called: my wife]',
+        'Now:',
+        '- Booked the movie for Saturday. (from mail, since 2026-10-30)',
+        DRAFTING_HEADING,
+        'Wendy:',
+        '- Short and casual. No sign-off.',
+        `- ${HOUSEHOLD_LINE}`,
+      ].join('\n'),
+    );
+    expect(block.split(DRAFTING_HEADING)).toHaveLength(2);
+    expect(block.split('Short and casual').length).toBe(2);
+  });
+
+  it('leaves out the drafting lines of a page the budget drops', async () => {
+    const client: MemoryClient = Object.assign(makeClient({}), {
+      loadPages: jest.fn().mockResolvedValue({
+        pages: [
+          loadedWendy,
+          { ...loadedWendy, slug: 'sam', title: 'Sam', text: 'x'.repeat(400), drafting: ['Sam:', '- Be brief.'] },
+        ],
+        stats: { candidates: 2, loaded: 2, dropped_over_count: 0, dropped_over_budget: 0 },
+        skippedFiles: [],
+      }),
+    });
+    const event = await run({
+      client,
+      message: 'Wendy and Sam',
+      config: { ...DEFAULT_CONFIG, pages: { maxCount: 6, maxTokens: estimateTokens(wendyText) + 10 } },
+    });
+    expect(event['injected_block']).not.toContain(DRAFTING_HEADING);
+    expect(event['injected_block']).not.toContain('Be brief');
+  });
+
+  it('keeps the drafting lines of a page the recall screen withholds out of the block', async () => {
+    const classify = jest.fn().mockImplementation(async ({ text }: { text: string }) => ({
+      ok: true,
+      flagged: text.includes('[page:'),
+      score: text.includes('[page:') ? 0.9 : 0.1,
+      reasonCode: null,
+      reason: null,
+    }));
+    const client: MemoryClient = Object.assign(makeClient({}), {
+      loadPages: jest.fn().mockResolvedValue({
+        pages: [{ ...loadedWendy, drafting: ['Wendy:', '- Be brief.'] }],
+        stats: { candidates: 1, loaded: 1, dropped_over_count: 0, dropped_over_budget: 0 },
+        skippedFiles: [],
+      }),
+    });
+    const event = await run({
+      client,
+      message: 'Wendy?',
+      config: {
+        ...DEFAULT_CONFIG,
+        screen: {
+          enabled: true,
+          url: 'https://screen.example',
+          authToken: 'tok',
+          threshold: 0.5,
+          timeoutMs: 50,
+          maxConcurrency: 8,
+        },
+      },
+      screenClient: makeScreenClient(classify),
+    });
+    expect(String(event['injected_block'] ?? '')).not.toContain('Be brief');
+  });
+
+  it('warns once, without failing the turn, when page files were skipped for their name', async () => {
+    const logger = makeLogger();
+    const warn = jest.spyOn(logger, 'warn');
+    const client: MemoryClient = Object.assign(makeClient({}), {
+      loadPages: jest.fn().mockResolvedValue({
+        pages: [loadedWendy],
+        stats: { candidates: 1, loaded: 1, dropped_over_count: 0, dropped_over_budget: 0 },
+        skippedFiles: ['people/Wendy.md'],
+      }),
+    });
+    const event = await run({ client, message: 'Wendy?', logger });
+    expect(event['injected_block']).toContain(wendyText);
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('Rename them to lowercase'), { count: 1 });
+    expect(JSON.stringify(warn.mock.calls)).not.toContain('Wendy.md');
+  });
+
+  it('keeps the turn going when loading pages throws', async () => {
+    const client: MemoryClient = Object.assign(
+      makeClient({ recall: jest.fn().mockResolvedValue({ ok: true, results: [fact], entities: [] }) }),
+      {
+        loadPages: jest.fn().mockRejectedValue(new Error('disk gone')),
+      },
+    );
+    const event = await run({ client, message: 'Wendy?' });
+    expect(event['injected_block']).toContain('filed on 14 April');
+    expect(event['layers']).not.toHaveProperty('pages');
   });
 });
 
