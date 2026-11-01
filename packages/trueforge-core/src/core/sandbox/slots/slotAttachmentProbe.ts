@@ -11,7 +11,7 @@ const MISSING_MARKER = 'AMAN_MISSING:';
 const CLEANUP_TIMEOUT_MS = 5_000;
 
 export type SlotAttachmentProbeResult =
-  /** A file went in and came back, and the guest has the PDF and OCR tools. */
+  /** A file went in and came back, and the guest has the PDF, Word and OCR tools. */
   | { state: 'ready' }
   /** The probe ran out of time, for example because every slot was busy; nothing is known to be wrong. */
   | { state: 'busy' }
@@ -25,7 +25,8 @@ function missingToolsCommand(ocrLanguages: readonly string[]): string {
     language =>
       `printf '%s\\n' "$languages" | grep -qx -- ${shellEscape(language)} || echo ${shellEscape(`${MISSING_MARKER}tesseract-${language}`)}`,
   );
-  return [...tools, 'languages=$(tesseract --list-langs 2>/dev/null || true)', ...languages].join('; ');
+  const wordReader = `python3 -I -c 'import docx, lxml' >/dev/null 2>&1 || echo ${shellEscape(`${MISSING_MARKER}python-docx`)}`;
+  return [...tools, wordReader, 'languages=$(tesseract --list-langs 2>/dev/null || true)', ...languages].join('; ');
 }
 
 /**

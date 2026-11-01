@@ -113,6 +113,56 @@ describe('reading a staged document on sandbox slots', () => {
     }
   });
 
+  it('reads a Word file in the sandbox with the isolated Python reader and a size and time limit', async () => {
+    const commands: string[] = [];
+    const { sandbox } = await slotSandbox({
+      answerShell: command => {
+        const marker = /AMAN_WORD_TEXT_[0-9a-f]+:/.exec(command)?.[0];
+        if (marker === undefined) {
+          return undefined;
+        }
+        commands.push(command);
+        return `${marker}OK\nReunião às 19h\n`;
+      },
+    });
+    const staged = await stageAttachment({
+      sandbox,
+      filename: 'plan.docx',
+      bytes: Buffer.concat([Buffer.from([0x50, 0x4b, 0x03, 0x04]), Buffer.alloc(16)]),
+      mime: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      ordinal: 1,
+    });
+
+    const extraction = await extractDocumentsFromSandbox(sandbox, [staged.path]);
+
+    expect(extraction.documents[0]?.pages[0]?.lines[0]?.text).toBe('Reunião às 19h');
+    expect(extraction.documents[0]?.extraction_mode).toBe('text');
+    expect(commands).toHaveLength(1);
+    expect(commands[0]).toContain('python3 -I -c');
+    expect(commands[0]).toContain('ulimit -v');
+    expect(commands[0]).toContain('timeout 60');
+  });
+
+  it('says why a Word file could not be read, in plain words', async () => {
+    const { sandbox } = await slotSandbox({
+      answerShell: command => {
+        const marker = /AMAN_WORD_TEXT_[0-9a-f]+:/.exec(command)?.[0];
+        return marker === undefined ? undefined : `${marker}ERR:TOO_BIG\n`;
+      },
+    });
+    const staged = await stageAttachment({
+      sandbox,
+      filename: 'bomb.docx',
+      bytes: Buffer.concat([Buffer.from([0x50, 0x4b, 0x03, 0x04]), Buffer.alloc(16)]),
+      mime: 'application/octet-stream',
+      ordinal: 1,
+    });
+    const extraction = await extractDocumentsFromSandbox(sandbox, [staged.path]);
+    const issue = extraction.documents[0]?.issue ?? '';
+    expect(issue).toMatch(/^Could not extract .*bomb\.docx: /);
+    expect(issue).toContain('The document is too large once unpacked, so it was not read.');
+  });
+
   it('fails, rather than returning nothing, when the first page cannot be read', async () => {
     const { sandbox } = await slotSandbox({
       answerShell: command =>
