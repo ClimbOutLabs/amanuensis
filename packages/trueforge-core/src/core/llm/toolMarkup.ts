@@ -24,11 +24,8 @@ const STRAY_CLOSING_TAGS: readonly string[] = [
  * parameter tag is a candidate anywhere for the same reason; position settles it, since only
  * one that opens its line is judged a call fragment, and one a sentence names is prose. The DSML
  * and chat-template tokens use a fullwidth bar (U+FF5C) inside the brackets; that character is data
- * the detector matches, never text Aman writes itself. A closing tag is a candidate too: it is a
- * stray marker and is hidden when nothing but blanks follows it on its line, and prose when words
- * follow it there, wherever on the line it sits. A run of closing tags with only blanks between
- * them is judged as one, by what follows the last of them. Text glued to a closing tag, with no
- * space or closing punctuation between, is never prose either, so only the tag is hidden.
+ * the detector matches, never text Aman writes itself. A closing tag outside code is always a stray
+ * marker and is hidden wherever it sits; prose that names one puts it in code.
  */
 const CANDIDATE_OPENERS: readonly string[] = [
   '<tool_calls',
@@ -316,14 +313,13 @@ function judgeOwnShape(text: string, startsLine: boolean, endOfStream: boolean):
 }
 
 /**
- * Judges a closing tag that starts a candidate. A run of closing tags on the line, with only
- * blanks between them, is judged together: they arrive as the tail of one call written as
- * text, so what follows the last of them decides, not what follows the first. Nothing but
- * blanks after the run on its line makes it stray markers, hidden together with those blanks;
- * words after the run on the line make it prose named in a sentence, released as text,
- * wherever on the line the run sits. While the rest of the line has not arrived the run waits,
- * since either outcome is still possible; the end of the stream settles it with whatever line
- * it got.
+ * Judges a closing tag that starts a candidate. Aman never writes these tags itself, so outside code a
+ * closing tag is always a stray marker from a call written as text, wherever it sits and whatever
+ * follows it. A run of closing tags on the line, with only blanks between them, is judged together.
+ * When nothing but blanks follows the run on its line, those blanks go with it; when words follow,
+ * only the run is hidden. While a further tag of the run may still be arriving, or the rest of the
+ * line has not arrived, the run waits; the end of the stream settles it with whatever line it got.
+ * Prose that names a tag puts it in code, where it is never judged.
  */
 function judgeClosingTag(text: string, startsLine: boolean, endOfStream: boolean): CandidateVerdict {
   const tag = STRAY_CLOSING_TAGS.find(candidate => text.startsWith(candidate));
@@ -344,12 +340,6 @@ function judgeClosingTag(text: string, startsLine: boolean, endOfStream: boolean
     runEnd = at + next.length;
   }
   const rest = text.slice(runEnd);
-  if (/^[^\s.,;:!?)\]}'"`]/u.test(rest)) {
-    // Text glued straight to the tag (a word, **, an emoji, an opening bracket) is never a sentence
-    // naming the tag, which goes on with a space or closing punctuation: it is a reply that went on
-    // writing after a call it wrote as text. Only the tag is hidden.
-    return { verdict: 'stray', length: runEnd };
-  }
   const newlineAt = rest.indexOf('\n');
   const lineRest = newlineAt === -1 ? rest : rest.slice(0, newlineAt);
   if (/[^ \t\r]/.test(lineRest)) {
@@ -367,7 +357,8 @@ function judgeClosingTag(text: string, startsLine: boolean, endOfStream: boolean
     if (newlineAt === -1 && !endOfStream && STRAY_CLOSING_TAGS.some(candidate => candidate.startsWith(arrivingTail))) {
       return { verdict: 'undecided' };
     }
-    return { verdict: 'dead', deadLength: tag.length };
+    // Words follow on the line: the run is hidden and the words stay.
+    return { verdict: 'stray', length: runEnd };
   }
   if (newlineAt === -1 && !endOfStream) {
     return { verdict: 'undecided' };

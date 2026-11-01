@@ -1596,7 +1596,7 @@ describe('mapStreamToChunks leaked tool-call markup', () => {
     expect(final.output.tool_calls).toBeUndefined();
   });
 
-  it('streams a sentence that names the closing results tag, byte for byte', async () => {
+  it('hides a closing results tag a sentence names, since one outside code is always stray', async () => {
     const parts: TextStreamPart<ToolSet>[] = [
       { type: 'text-start', id: 't1' },
       { type: 'text-delta', id: 't1', text: 'The closing tag </function_res' },
@@ -1607,9 +1607,9 @@ describe('mapStreamToChunks leaked tool-call markup', () => {
     const { chunks, final } = await drainStream(
       mapStreamToChunks({ stream: makeStream(parts), chunkMeta: CHUNK_META }),
     );
-    expect(chunkText(chunks)).toBe('The closing tag </function_results> ends the block.');
+    expect(chunkText(chunks)).toBe('The closing tag  ends the block.');
     expect(final.tool_markup).toBeUndefined();
-    expect(final.output.content).toBe('The closing tag </function_results> ends the block.');
+    expect(final.output.content).toBe('The closing tag  ends the block.');
     expect(final.output.tool_calls).toBeUndefined();
   });
 
