@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, readdir, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
-import { FACT_SOURCES, formatFactMarker, type FactMarker } from '../../../../src/runtime/memory/memoryNotes';
+import { FACT_SOURCES, formatMarker, type FactMarker } from '../../../../src/runtime/memory/memoryNotes';
 import {
   addFact,
   appendPageArchive,
@@ -226,7 +226,10 @@ describe('memoryPages', () => {
       const madrid = parseMemoryPage({ content: MADRID, fallback: { kind: 'matter', title: 'x' } });
       const changed = addFact(madrid, {
         section: 'Now',
-        fact: { text: 'Movers booked for 3 March.', marker: { id: 'f_13', src: 'you_said', since: '2026-10-31' } },
+        fact: {
+          text: 'Movers booked for 3 March.',
+          marker: { kind: 'fact', id: 'f_13', src: 'you_said', since: '2026-10-31' },
+        },
       });
       const text = renderMemoryPage(changed);
       expect(text).toContain('colour: teal');
@@ -242,7 +245,10 @@ describe('memoryPages', () => {
     it('appends a fact to a section and leaves every other line byte-identical', () => {
       const changed = addFact(wendy(), {
         section: 'Now',
-        fact: { text: 'Dentist on Tuesday.', marker: { id: 'f_05', src: 'you_said', since: '2026-10-31' } },
+        fact: {
+          text: 'Dentist on Tuesday.',
+          marker: { kind: 'fact', id: 'f_05', src: 'you_said', since: '2026-10-31' },
+        },
       });
       expect(renderMemoryPage(changed)).toBe(
         WENDY.replace(
@@ -257,12 +263,12 @@ describe('memoryPages', () => {
       const page = parseMemoryPage({ content: '## Now\n- a <!-- fact: id=f_1 src=you_said -->\n', fallback });
       const changed = addFact(page, {
         section: 'How you write to them',
-        fact: { text: 'Warmly.', marker: { id: 'f_2', src: 'you_said' } },
+        fact: { text: 'Warmly.', marker: { kind: 'fact', id: 'f_2', src: 'you_said' } },
       });
       expect(changed.sections.map(section => section.heading)).toEqual(['How you write to them', 'Now']);
       const later = addFact(changed, {
         section: 'Earlier',
-        fact: { text: 'old', marker: { id: 'f_3', src: 'you_said' } },
+        fact: { text: 'old', marker: { kind: 'fact', id: 'f_3', src: 'you_said' } },
       });
       expect(later.sections.map(section => section.heading)).toEqual(['How you write to them', 'Now', 'Earlier']);
     });
@@ -272,7 +278,7 @@ describe('memoryPages', () => {
       expect(findFact(moved, 'f_03')?.section.name).toBe('Earlier');
       expect(findFact(moved, 'f_03')?.fact).toEqual({
         text: 'Might be travelling the week of Nov 16.',
-        marker: { id: 'f_03', src: 'read_content', until: '2026-11-20' },
+        marker: { kind: 'fact', id: 'f_03', src: 'read_content', until: '2026-11-20' },
       });
       const earlier = moved.sections.find(section => section.name === 'Earlier');
       expect(earlier?.lines.filter(line => line.kind === 'fact').map(line => line.fact.marker.id)).toEqual([
@@ -286,6 +292,7 @@ describe('memoryPages', () => {
     it('updates until in place for a fact already in Earlier', () => {
       const moved = moveFactToEarlier(wendy(), { id: 'f_04', until: '2026-04' });
       expect(findFact(moved, 'f_04')?.fact.marker).toEqual({
+        kind: 'fact',
         id: 'f_04',
         src: 'you_said',
         since: '2024-01',
@@ -296,15 +303,17 @@ describe('memoryPages', () => {
 
     it('leaves the page unchanged for an unknown id', () => {
       expect(renderMemoryPage(moveFactToEarlier(wendy(), { id: 'f_99', until: '2026-11-01' }))).toBe(WENDY);
-      expect(renderMemoryPage(updateFactMarker(wendy(), { id: 'f_99', marker: { id: 'f_99', src: 'you_said' } }))).toBe(
-        WENDY,
-      );
+      expect(
+        renderMemoryPage(
+          updateFactMarker(wendy(), { id: 'f_99', marker: { kind: 'fact', id: 'f_99', src: 'you_said' } }),
+        ),
+      ).toBe(WENDY);
     });
 
     it('rewrites a marker and nothing else', () => {
       const changed = updateFactMarker(wendy(), {
         id: 'f_02',
-        marker: { id: 'f_02', src: 'you_edited', since: '2026-10-30' },
+        marker: { kind: 'fact', id: 'f_02', src: 'you_edited', since: '2026-10-30' },
       });
       expect(renderMemoryPage(changed)).toBe(
         WENDY.replace(
@@ -355,7 +364,10 @@ describe('memoryPages', () => {
       for (let index = 0; index < 50; index++) {
         page = addFact(page, {
           section: 'Earlier',
-          fact: { text: `old ${String(index)}`, marker: { id: `f_e${String(index)}`, src: 'you_said', until: '2025' } },
+          fact: {
+            text: `old ${String(index)}`,
+            marker: { kind: 'fact', id: `f_e${String(index)}`, src: 'you_said', until: '2025' },
+          },
         });
       }
       const before = pageLineCount(page);
@@ -414,7 +426,11 @@ describe('memoryPages', () => {
     it('appends to the archive with a heading on first write', async () => {
       const vaultDir = await makeVault();
       const lines = [
-        { kind: 'fact', fact: { text: 'old', marker: { id: 'f_1', src: 'you_said', until: '2025' } }, raw: undefined },
+        {
+          kind: 'fact',
+          fact: { text: 'old', marker: { kind: 'fact', id: 'f_1', src: 'you_said', until: '2025' } },
+          raw: undefined,
+        },
         { kind: 'other', raw: '' },
       ] as const;
       await appendPageArchive({ vaultDir, kind: 'person', slug: 'wendy', title: 'Wendy', lines });
@@ -457,13 +473,14 @@ describe('memoryPages', () => {
     );
     const marker: fc.Arbitrary<FactMarker> = fc.record(
       {
+        kind: fc.constant<'fact'>('fact'),
         id: fc.stringMatching(/^f_[a-z0-9]{1,8}$/),
         src: fc.constantFrom(...FACT_SOURCES),
         since: factDate,
         until: factDate,
         seen: factDate,
       },
-      { requiredKeys: ['id', 'src'] },
+      { requiredKeys: ['kind', 'id', 'src'] },
     );
     // One line of text, with no comment opener (which would be read as a marker) and no leading dash.
     const factText = fc
@@ -544,8 +561,8 @@ describe('memoryPages', () => {
         fc.constantFrom(...PAGE_SECTIONS).map(name => `## ${name}`),
         fc.string({ maxLength: 30, unit: 'grapheme' }).map(name => `## ${name}`),
         fc.string({ maxLength: 30, unit: 'grapheme' }).map(name => `# ${name}`),
-        fc.tuple(factText, marker).map(([text, factMarker]) => `- ${text} ${formatFactMarker(factMarker)}`),
-        fc.tuple(factText, marker).map(([text, factMarker]) => `  * ${text}   ${formatFactMarker(factMarker)}  `),
+        fc.tuple(factText, marker).map(([text, factMarker]) => `- ${text} ${formatMarker(factMarker)}`),
+        fc.tuple(factText, marker).map(([text, factMarker]) => `  * ${text}   ${formatMarker(factMarker)}  `),
         factText.map(text => `- ${text}`),
         factText.map(text => `- ${text} <!-- fact: id=bad -->`),
         fc.tuple(fc.string({ maxLength: 10 }), fc.string({ maxLength: 10 })).map(([k, v]) => `${k}: ${v}`),

@@ -51,7 +51,7 @@ async function writeFresh(vaultDir: string, slug: string, front: PageFrontMatter
       section: 'Now',
       fact: {
         text: `fact ${String(index)} about ${front.title}`,
-        marker: { id: `f_${slug}${String(index)}`, src: 'you_said' },
+        marker: { kind: 'fact', id: `f_${slug}${String(index)}`, src: 'you_said' },
       },
     });
   }

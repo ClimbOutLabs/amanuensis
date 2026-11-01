@@ -15,7 +15,7 @@ import { parse, stringify, type ToStringOptions } from 'yaml';
 import { z } from 'zod';
 
 import type { FactDate, FactId, FactMarker, FactSource } from './memoryNotes';
-import { formatFactMarker, splitFactMarker } from './memoryNotes';
+import { formatMarker, splitFactMarker } from './memoryNotes';
 import { isPageSlug, pageSlug } from './pageSlug';
 
 export const PAGE_KINDS = ['person', 'matter'] as const;
@@ -286,7 +286,7 @@ export function stampUnmarkedBullets(
             kind: 'fact',
             fact: {
               text: line.raw.replace(BULLET_PREFIX_PATTERN, '').trim(),
-              marker: { id: input.newId(), src: input.src, since: input.since },
+              marker: { kind: 'fact', id: input.newId(), src: input.src, since: input.since },
             },
             raw: undefined,
           };
@@ -582,7 +582,7 @@ function renderLine(line: PageLine): string {
   if (line.raw !== undefined) {
     return line.raw;
   }
-  return line.kind === 'fact' ? `- ${line.fact.text} ${formatFactMarker(line.fact.marker)}` : line.raw;
+  return line.kind === 'fact' ? `- ${line.fact.text} ${formatMarker(line.fact.marker)}` : line.raw;
 }
 
 function renderFrontMatterLines(page: MemoryPage): string[] {

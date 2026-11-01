@@ -55,8 +55,8 @@ describe('memoryPageWriter', () => {
       });
       const marked = markHandEdits({ page: edited, committed, today, newId: sequentialIds() });
       expect(marked.sections[0]?.lines.map(line => (line.kind === 'fact' ? line.fact.marker : line.raw))).toEqual([
-        { id: 'f_1', src: 'you_edited', since: '2026-01' },
-        { id: 'f_2', src: 'you_said' },
+        { kind: 'fact', id: 'f_1', src: 'you_edited', since: '2026-01' },
+        { kind: 'fact', id: 'f_2', src: 'you_said' },
       ]);
     });
 
@@ -68,9 +68,9 @@ describe('memoryPageWriter', () => {
       });
       const marked = markHandEdits({ page: edited, committed, today, newId: sequentialIds() });
       expect(marked.sections[0]?.lines.map(line => (line.kind === 'fact' ? line.fact.marker : line.raw))).toEqual([
-        { id: 'f_1', src: 'mail', since: '2026-01' },
-        { id: 'f_2', src: 'you_said' },
-        { id: 'f_n1', src: 'you_edited', since: '2026-10-31' },
+        { kind: 'fact', id: 'f_1', src: 'mail', since: '2026-01' },
+        { kind: 'fact', id: 'f_2', src: 'you_said' },
+        { kind: 'fact', id: 'f_n1', src: 'you_edited', since: '2026-10-31' },
       ]);
     });
 
@@ -79,7 +79,7 @@ describe('memoryPageWriter', () => {
       const marked = markHandEdits({ page: fresh, committed: undefined, today, newId: sequentialIds() });
       expect(marked.sections[0]?.lines[0]).toMatchObject({
         kind: 'fact',
-        fact: { marker: { id: 'f_n1', src: 'you_edited' } },
+        fact: { marker: { kind: 'fact', id: 'f_n1', src: 'you_edited' } },
       });
     });
   });
@@ -94,7 +94,7 @@ describe('memoryPageWriter', () => {
             newMemoryPage({ kind: 'person', title: 'Wendy', aliases: ['my wife'], household: true }),
             {
               section: 'Now',
-              fact: { text: 'Likes the sea.', marker: { id: newId(), src: 'you_said', since: today } },
+              fact: { text: 'Likes the sea.', marker: { kind: 'fact', id: newId(), src: 'you_said', since: today } },
             },
           );
           await writeMemoryPage({ vaultDir, kind: 'person', slug: 'wendy', page });
@@ -116,7 +116,7 @@ describe('memoryPageWriter', () => {
         async ({ newId }) => {
           const page = addFact(newMemoryPage({ kind: 'person', title: 'Sam', aliases: [], household: false }), {
             section: 'Now',
-            fact: { text: 'Lives in Leeds.', marker: { id: newId(), src: 'mail', since: '2026-01' } },
+            fact: { text: 'Lives in Leeds.', marker: { kind: 'fact', id: newId(), src: 'mail', since: '2026-01' } },
           });
           await writeMemoryPage({ vaultDir, kind: 'person', slug: 'sam', page });
         },
@@ -142,8 +142,8 @@ describe('memoryPageWriter', () => {
         section.lines.map(line => (line.kind === 'fact' ? line.fact.marker : undefined)),
       );
       expect(markers?.filter(marker => marker !== undefined)).toEqual([
-        { id: 'f_n1', src: 'you_edited', since: '2026-01' },
-        { id: 'f_x', src: 'you_edited', since: today },
+        { kind: 'fact', id: 'f_n1', src: 'you_edited', since: '2026-01' },
+        { kind: 'fact', id: 'f_x', src: 'you_edited', since: today },
       ]);
       const text = await readFile(file, 'utf8');
       expect(text).toContain('- Lives in Leeds, near the park. <!-- fact: id=f_n1 src=you_edited since=2026-01 -->');
