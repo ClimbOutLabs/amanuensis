@@ -286,6 +286,7 @@ instance_up() {
     stt_attach "$name" || true
   fi
   stt_forget_old_network "$name"
+  sandbox_retired_volumes_remove "$name"
   # From now on the instance may hold data worth backing up; an instance that never got here holds none.
   if reg_exists "$name"; then reg_set "$name" healthy 1; fi
   step_ok "Instance $name is running and answering"

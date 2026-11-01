@@ -191,7 +191,7 @@ test_slot_image_creates_the_mirror_dir() {
     assert_contains "$(cat "$dockerfile")" "USER 10001:10001" "$dockerfile runs as the server user the mirror dir belongs to"
   done
   assert_contains "$(cat "$repo/docker-compose.slots.yml")" "user: '65532:65532'" "the slots run as 65532, the user who connects through the mirror socket"
-  for slot in 1 2 3 4; do
+  for slot in 1 2; do
     assert_contains "$(cat "$INSTALLER_DIR/templates/instance/compose.yaml.tpl")" "- slot_mirror_$slot:/run/aman-slots/$slot/mirror" "the instance mounts mirror volume $slot where the server binds its socket"
     assert_contains "$(cat "$repo/docker-compose.slots.yml")" "- slot_mirror_$slot:/run/aman/mirror" "slot $slot mounts the same volume at the dir its image creates"
   done

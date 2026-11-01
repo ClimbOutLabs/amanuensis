@@ -88,9 +88,9 @@ describe('SlotsReporter', () => {
       'profile',
       'disks',
       'start',
-      check('start', 'Started 4 sandboxes'),
+      check('start', 'Started 2 sandboxes'),
       'attest',
-      check('attest', 'All 4 sandboxes passed every safety check'),
+      check('attest', 'All 2 sandboxes passed every safety check'),
     ]);
     reporter.finish({ result: OK, imageSizeMb: 1842 });
     const text = c.all();
@@ -107,10 +107,10 @@ describe('SlotsReporter', () => {
     }
     expect(text).toContain('+ Docker 29.1.0 aarch64 is running');
     expect(text).toContain('+ Built the sandbox');
-    expect(text).toContain('+ Started 4 sandboxes');
-    expect(text).toContain('Ready. 4 sandboxes are running.');
+    expect(text).toContain('+ Started 2 sandboxes');
+    expect(text).toContain('Ready. 2 sandboxes are running.');
     expect(text).toContain('Image     1.8 GB');
-    expect(text).toContain('Disks     4 of 16 GB under /var/lib/aman-slots/aman');
+    expect(text).toContain('Disks     2 of 16 GB under /var/lib/aman-slots/aman');
     expect(text).toContain('Log       ~/.amanuensis/state/sandbox.log');
   });
 
@@ -123,7 +123,7 @@ describe('SlotsReporter', () => {
       'profile',
       'disks',
       'start',
-      check('start', 'Started 4 sandboxes'),
+      check('start', 'Started 2 sandboxes'),
       'attest',
       check('attest', 'ok'),
     ]);

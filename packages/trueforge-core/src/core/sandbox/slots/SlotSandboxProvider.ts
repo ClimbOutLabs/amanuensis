@@ -416,7 +416,17 @@ export class SlotSandboxProvider implements SandboxProvider {
 
   private resolve(sandboxId: string): { client: SlotClient; sessionId: string } {
     const parsed = parseSandboxId(sandboxId);
-    const client = parsed === undefined ? undefined : this.clients[parsed.slot];
+    // Installs from before had four slots; the setup moved the chats of slots 3 and 4 into slots 1 and 2
+    // before removing the old slots, so an old id still resolves: slot 3 to slot 1, slot 4 to slot 2.
+    const index =
+      parsed === undefined || this.clients.length === 0
+        ? undefined
+        : parsed.slot < this.clients.length
+          ? parsed.slot
+          : parsed.slot <= 3
+            ? parsed.slot % this.clients.length
+            : undefined;
+    const client = index === undefined ? undefined : this.clients[index];
     if (parsed === undefined || client === undefined) {
       throw new SandboxNotAvailableError(sandboxId);
     }

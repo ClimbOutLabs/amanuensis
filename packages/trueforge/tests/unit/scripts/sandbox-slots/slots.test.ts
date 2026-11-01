@@ -455,23 +455,23 @@ describe('runSandboxSlots', () => {
 
   test('a slot whose agent answers with its failing checks keeps that answer, and the logs are not read', async () => {
     const { result, calls } = await run(call =>
-      joined(call).includes('sandbox-3') && joined(call).includes('healthcheck')
+      joined(call).includes('sandbox-2') && joined(call).includes('healthcheck')
         ? { exitCode: 1, stdout: 'FAIL apparmor: the profile is not enforced', stderr: 'attestation failed: apparmor' }
         : undefined,
     );
     expect(result).toMatchObject({ ok: false, step: 'attest' });
-    expect(!result.ok && result.error).toContain('Sandbox 3');
+    expect(!result.ok && result.error).toContain('Sandbox 2');
     expect(calls.some(call => joined(call).includes(' logs '))).toBe(false);
   });
 
   test('a slot whose attestation fails after start fails the run', async () => {
     const { result } = await run(call =>
-      joined(call).includes('sandbox-3') && joined(call).includes('healthcheck')
+      joined(call).includes('sandbox-2') && joined(call).includes('healthcheck')
         ? { exitCode: 1, stderr: 'attestation failed: apparmor: wrong profile' }
         : undefined,
     );
     expect(result).toMatchObject({ ok: false, step: 'attest' });
-    expect(!result.ok && result.error).toContain('Sandbox 3');
+    expect(!result.ok && result.error).toContain('Sandbox 2');
   });
 });
 
@@ -511,6 +511,133 @@ describe('toolchain packs', () => {
     const { result, calls } = await run(() => undefined, false, { packsPort, addPacks: ['go'] });
     expect(result).toMatchObject({ ok: false, step: 'packs', fix: 'Run it again.' });
     expect(calls.some(call => joined(call).includes(' build '))).toBe(false);
+  });
+});
+
+describe('the extra slots of an install from before two slots', () => {
+  /** Slots 3 and 4 still run as containers of the slots project, and their volumes exist. */
+  function oldInstall(call: Call): Partial<CommandResult> | undefined {
+    const text = joined(call);
+    if (text.startsWith('ps -aq') && (text.includes('service=sandbox-3') || text.includes('service=sandbox-4'))) {
+      return { stdout: text.includes('sandbox-3') ? 'c3\n' : 'c4\n' };
+    }
+    if (text.startsWith('volume inspect')) {
+      return { stdout: '[]\n' };
+    }
+    return undefined;
+  }
+
+  test('a full run removes their containers and volumes before the slots start', async () => {
+    const { result, calls } = await run(oldInstall);
+    expect(result.ok).toBe(true);
+    const text = calls.map(joined);
+    const removed = text.indexOf('rm --force c3 c4');
+    expect(removed).toBeGreaterThan(-1);
+    for (const slot of ['3', '4']) {
+      for (const kind of ['ws', 'ctl', 'mirror']) {
+        expect(text).toContain(`volume rm aman_slot_${kind}_${slot}`);
+      }
+    }
+    expect(removed).toBeLessThan(text.findIndex(line => line.includes('up -d')));
+    expect(text.some(line => line.includes('aman_slot_ctl_1') && line.startsWith('volume rm'))).toBe(false);
+    expect(result.ok && result.checks.some(check => check.message.includes('Removed the extra sandboxes'))).toBe(true);
+  });
+
+  test('a read-only check reports them and changes nothing', async () => {
+    const { result, calls } = await run(oldInstall, false, { mode: 'check' });
+    expect(result).toMatchObject({ ok: false, step: 'retire' });
+    expect(!result.ok && result.fix).toContain('pnpm sandbox:slots --fix');
+    expect(calls.some(call => call.args[0] === 'rm' || joined(call).startsWith('volume rm'))).toBe(false);
+  });
+
+  test('the chats of the extra slots are moved into the slots that stay, before their workspaces are removed', async () => {
+    const withChats = (call: Call): Partial<CommandResult> | undefined => {
+      const text = joined(call);
+      if (call.args[0] === 'run' && call.args.includes('ls')) {
+        if (text.includes('aman_slot_ws_3:/from:ro')) {
+          return { stdout: `${'a'.repeat(32)}\n` };
+        }
+        if (text.includes('aman_slot_ws_4:/from:ro')) {
+          return { stdout: `${'b'.repeat(32)}\n` };
+        }
+      }
+      return oldInstall(call);
+    };
+    const { result, calls } = await run(withChats);
+    expect(result.ok).toBe(true);
+    const text = calls.map(joined);
+    const moves = calls.filter(call => call.args.includes('move-sessions'));
+    expect(moves).toHaveLength(2);
+    expect(moves[0]?.args).toEqual(
+      expect.arrayContaining(['aman_slot_ws_3:/from', 'aman_slot_ws_1:/to', 'a'.repeat(32)]),
+    );
+    expect(moves[1]?.args).toEqual(
+      expect.arrayContaining(['aman_slot_ws_4:/from', 'aman_slot_ws_2:/to', 'b'.repeat(32)]),
+    );
+    const firstMove = text.findIndex(line => line.includes('move-sessions'));
+    expect(firstMove).toBeGreaterThan(-1);
+    // The retired containers stop first, so nothing writes while the folders move; the workspaces
+    // themselves are only removed after the move.
+    expect(firstMove).toBeGreaterThan(text.indexOf('rm --force c3 c4'));
+    expect(firstMove).toBeLessThan(text.indexOf('volume rm aman_slot_ws_3'));
+  });
+
+  test('on a native Linux host their disks go only with --fix and after agreeing', async () => {
+    const linuxOld = (call: Call): Partial<CommandResult> | undefined => {
+      const text = joined(call);
+      if (text.startsWith('info --format {{.OperatingSystem}}')) {
+        return { stdout: 'Ubuntu 24.04.3 LTS\n' };
+      }
+      if (call.command === 'uname') {
+        return { stdout: '6.8.0-1-generic\n' };
+      }
+      if (call.command === 'findmnt') {
+        return { stdout: `ext4 ${String(16 * 2 ** 30)}\n` };
+      }
+      if (call.command === 'find') {
+        return { stdout: '/var/lib/aman-slots/aman/ws-3\n/var/lib/aman-slots/aman/ws-3.img\n' };
+      }
+      if (text.startsWith('volume inspect')) {
+        return { stdout: `/var/lib/aman-slots/aman/ws-${call.args[call.args.length - 1]?.slice(-1) ?? ''}\n` };
+      }
+      return undefined;
+    };
+    // Without --fix the disks are cleanup the run cannot do: they stay, the slots still start, and the
+    // result warns about the disks instead of failing.
+    const withoutFix = await run(linuxOld, false, { platform: 'linux' });
+    expect(withoutFix.result.ok).toBe(true);
+    expect(
+      withoutFix.result.ok &&
+        withoutFix.result.warnings.some(warning => warning.includes('disks of the extra sandboxes')),
+    ).toBe(true);
+    expect(withoutFix.calls.some(call => call.command === 'sudo')).toBe(false);
+
+    const questions: string[] = [];
+    const fixed = await run(linuxOld, true, {
+      platform: 'linux',
+      confirm: question => {
+        questions.push(question);
+        return Promise.resolve(true);
+      },
+    });
+    expect(fixed.result.ok).toBe(true);
+    expect(questions.some(question => question.includes('remove the disks of the extra sandboxes'))).toBe(true);
+    expect(fixed.calls.map(call => call.args)).toContainEqual([
+      'sh',
+      '/repo/ops/sandbox-slot/disks/setup-disks.sh',
+      'retire',
+      '/var/lib/aman-slots/aman',
+      String(SLOT_COUNT),
+    ]);
+
+    // Saying no to the cleanup also leaves the disks and lets the run finish, with the same warning.
+    const declined = await run(linuxOld, true, { platform: 'linux', confirm: () => Promise.resolve(false) });
+    expect(declined.result.ok).toBe(true);
+    expect(
+      declined.result.ok && declined.result.warnings.some(warning => warning.includes('disks of the extra sandboxes')),
+    ).toBe(true);
+    expect(declined.calls.some(call => call.command === 'sudo')).toBe(false);
+    expect(declined.calls.some(call => call.args.includes('retire'))).toBe(false);
   });
 });
 
@@ -566,7 +693,7 @@ describe('the per-slot disks on a native Linux host', () => {
     expect(questions[0]).toContain('16 GB');
     const sudo = calls.filter(call => call.command === 'sudo');
     expect(sudo.map(call => call.args)).toEqual([
-      ['sh', '/repo/ops/sandbox-slot/disks/setup-disks.sh', 'setup', ROOT, '16', '4'],
+      ['sh', '/repo/ops/sandbox-slot/disks/setup-disks.sh', 'setup', ROOT, '16', String(SLOT_COUNT)],
     ]);
     const up = calls.find(call => joined(call).includes('up -d'));
     expect(up?.args).toEqual(expect.arrayContaining(['-f', '/repo/docker-compose.slots-disks.yml']));
@@ -619,7 +746,7 @@ describe('the per-slot disks on a native Linux host', () => {
     expect(up).toBeGreaterThan(removed);
     const withoutFix = await run(host({ disks: true, oldVolumes: true }), false, linux);
     expect(withoutFix.result).toMatchObject({ ok: false, step: 'disk' });
-    expect(withoutFix.calls.some(call => joined(call).startsWith('volume rm'))).toBe(false);
+    expect(withoutFix.calls.some(call => joined(call).startsWith('volume rm --force'))).toBe(false);
   });
 
   test('Docker Desktop and WSL2 use no per-slot disks', async () => {
@@ -814,7 +941,7 @@ describe('the package mirror folders of an earlier install', () => {
   }
 
   test('existing mirror folders are handed to the app user in one throwaway container, after the build and before the slots start', async () => {
-    const { result, calls } = await run(mirrors([1, 2, 3, 4]));
+    const { result, calls } = await run(mirrors([1, 2]));
     expect(result.ok).toBe(true);
     const repairs = calls.filter(call => call.args[0] === 'run');
     expect(repairs).toHaveLength(1);
@@ -834,18 +961,12 @@ describe('the package mirror folders of an earlier install', () => {
       'aman_slot_mirror_1:/mirror-1',
       '-v',
       'aman_slot_mirror_2:/mirror-2',
-      '-v',
-      'aman_slot_mirror_3:/mirror-3',
-      '-v',
-      'aman_slot_mirror_4:/mirror-4',
       '--entrypoint',
       'chown',
       'amanuensis-sandbox-slot:local',
       '10001:10001',
       '/mirror-1',
       '/mirror-2',
-      '/mirror-3',
-      '/mirror-4',
     ]);
     const text = calls.map(joined);
     const repairAt = calls.findIndex(call => call.args[0] === 'run');
@@ -873,7 +994,7 @@ describe('the package mirror folders of an earlier install', () => {
 
   test('a repair that fails stops the run before the slots start', async () => {
     const { result, calls } = await run(call =>
-      call.args[0] === 'run' ? { exitCode: 1, stderr: 'chown failed' } : mirrors([1, 2, 3, 4])(call),
+      call.args[0] === 'run' ? { exitCode: 1, stderr: 'chown failed' } : mirrors([1, 2])(call),
     );
     expect(result).toMatchObject({ ok: false, step: 'start' });
     expect(!result.ok && result.error).toContain('chown failed');
@@ -881,20 +1002,20 @@ describe('the package mirror folders of an earlier install', () => {
   });
 
   test("a named install's mirror volumes are the ones repaired", async () => {
-    const { result, calls } = await run(mirrors([1, 2, 3, 4]), false, { instance: 'lab' });
+    const { result, calls } = await run(mirrors([1, 2]), false, { instance: 'lab' });
     expect(result.ok).toBe(true);
     const repair = calls.find(call => call.args[0] === 'run');
     expect(repair?.args).toEqual(
-      expect.arrayContaining(['-v', 'lab_slot_mirror_1:/mirror-1', '-v', 'lab_slot_mirror_4:/mirror-4']),
+      expect.arrayContaining(['-v', 'lab_slot_mirror_1:/mirror-1', '-v', 'lab_slot_mirror_2:/mirror-2']),
     );
   });
 
   test('a read-only check and a build never inspect or repair the mirror volumes', async () => {
-    const checked = await run(mirrors([1, 2, 3, 4]), true, { mode: 'check' });
+    const checked = await run(mirrors([1, 2]), true, { mode: 'check' });
     expect(checked.result.ok).toBe(true);
     expect(checked.calls.some(call => joined(call).startsWith('volume inspect'))).toBe(false);
     expect(checked.calls.some(call => call.args[0] === 'run')).toBe(false);
-    const built = await run(mirrors([1, 2, 3, 4]), false, { mode: 'build' });
+    const built = await run(mirrors([1, 2]), false, { mode: 'build' });
     expect(built.result.ok).toBe(true);
     expect(built.calls.some(call => joined(call).startsWith('volume inspect'))).toBe(false);
   });
