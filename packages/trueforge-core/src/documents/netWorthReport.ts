@@ -1,5 +1,6 @@
 import { sourceForLine, type DocumentExtraction, type DocumentSource } from './documentExtraction';
 import { DOCUMENT_REPORT_MAX_NOTES, type StructuredDocumentReport } from './documentRenderer';
+import { ReportInputError } from './reportInputError';
 
 export type NetWorthClassification = 'asset' | 'liability';
 export type NetWorthEntryStatus = 'included' | 'conflict' | 'uncertain';
@@ -180,7 +181,7 @@ export function summarizeNetWorth(
     .reduce((total, entry) => safeAdd(total, Math.abs(entry.amount_cents)), 0);
   const net_worth_cents = assets_cents - liabilities_cents;
   if (!Number.isSafeInteger(net_worth_cents)) {
-    throw new Error('Net-worth total exceeds the safe integer range');
+    throw new ReportInputError('Net-worth total exceeds the safe integer range');
   }
   return {
     draft: true,
@@ -195,7 +196,7 @@ export function summarizeNetWorth(
 function safeAdd(left: number, right: number): number {
   const total = left + right;
   if (!Number.isSafeInteger(total)) {
-    throw new Error('Report total exceeds the safe integer range');
+    throw new ReportInputError('Report total exceeds the safe integer range');
   }
   return total;
 }

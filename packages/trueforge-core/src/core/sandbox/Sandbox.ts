@@ -7,7 +7,16 @@ import {
   MAX_BYTES_PER_DOCUMENT,
   MAX_CHARS_PER_DOCUMENT,
   MAX_PAGES_PER_DOCUMENT,
+  MAX_TOTAL_DOCUMENT_CHARS,
 } from '../../documents/documentExtraction';
+import { DocumentReadError } from '../../documents/documentReadError';
+import {
+  DOCUMENT_TEXT_SCRIPT,
+  MAX_UNPACKED_DOCUMENT_BYTES,
+  MAX_ZIP_ENTRIES,
+  parseDocumentTextOutput,
+  type DocumentTextResult,
+} from '../../documents/documentText';
 import { ocrLanguageSelectionScript } from '../../documents/ocrLanguages';
 import {
   ImplementationPlanAdmissionBlockedError,
@@ -127,7 +136,14 @@ import {
   type SandboxInit,
   type SandboxProvider,
 } from './provider/Provider';
-import { SANDBOX_START_FAILED_MESSAGE, SandboxNotAvailableError, validateNoPathTraversal } from './SandboxErrors';
+import { plainReaderFailure } from './readerFailure';
+import {
+  SANDBOX_START_FAILED_MESSAGE,
+  SandboxFileNotFoundError,
+  SandboxFileTooLargeError,
+  SandboxNotAvailableError,
+  validateNoPathTraversal,
+} from './SandboxErrors';
 import { formatSandboxId, rawSandboxId } from './sandboxRef';
 import {
   SKILL_COPY_FAILED_REASON,
@@ -5156,13 +5172,28 @@ export class Sandbox extends LocalToolMCP {
 
   /** Resolves every symlink and requires each path component to exist, or throws. */
   private async canonicalSandboxPath({ sandboxId, path }: { sandboxId: string; path: string }): Promise<string> {
-    const canonical = canonicalPathFromExec(
-      await this.hostExec({ sandboxId, command: `realpath -e -- ${shellEscape(path)}` }),
-    );
+    const canonical = canonicalPathFromExec(await this.realpathOfExisting({ sandboxId, path }));
     if (canonical === undefined) {
       throw new Error(`realpath did not resolve ${path}`);
     }
     return canonical;
+  }
+
+  /**
+   * Runs `realpath -e`. When it fails and nothing is at the path, throws SandboxFileNotFoundError, so callers tell a
+   * missing file from other failures by type rather than by the shell's wording.
+   */
+  private async realpathOfExisting({ sandboxId, path }: { sandboxId: string; path: string }): Promise<ExecResult> {
+    const result = await this.hostExec({ sandboxId, command: `realpath -e -- ${shellEscape(path)}` });
+    if (successfulExec(result)) {
+      return result;
+    }
+    // `test -e` exits 1 only when nothing is there; any other outcome keeps the original failure.
+    const probe = await this.hostExec({ sandboxId, command: `test -e ${shellEscape(path)}` });
+    if (probe.success && probe.response.exitCode === 1) {
+      throw new SandboxFileNotFoundError(path);
+    }
+    return result;
   }
 
   /** Dispatches `run_code` through the configured isolation driver. */
@@ -6771,7 +6802,7 @@ export class Sandbox extends LocalToolMCP {
       }
       const status = result.response.result.split(`${marker}:`)[1]?.trim();
       if (status?.startsWith('TOO_LARGE:')) {
-        throw new Error(`Document exceeds the ${String(maxBytes)} byte limit`);
+        throw new SandboxFileTooLargeError(input.filePath, Number(status.slice('TOO_LARGE:'.length)), maxBytes);
       }
       if (status === 'CHANGED') {
         throw new Error('Document changed while it was being snapshotted; upload it again and retry');
@@ -6848,7 +6879,7 @@ export class Sandbox extends LocalToolMCP {
     }
     const containingDir = allowedDir ?? uploadDir;
     const canonicalize = async (path: string): Promise<string> => {
-      const result = await this.hostExec({ sandboxId, command: `realpath -e -- ${shellEscape(path)}` });
+      const result = await this.realpathOfExisting({ sandboxId, path });
       ensureExecSuccess(result);
       if (!result.success) {
         throw new Error('Unreachable: canonical path result was not successful');
@@ -6874,7 +6905,12 @@ export class Sandbox extends LocalToolMCP {
    * Extraction starts at firstPage; returned pages carry absolute 1-based
    * page numbers and total_pages is the true document total, never capped.
    */
-  async runDocumentText(input: {
+  /** Native PDF text; a failure is logged here with its raw detail, which never reaches the person. */
+  runDocumentText(input: Parameters<Sandbox['readPdfText']>[0]): ReturnType<Sandbox['readPdfText']> {
+    return this.loggedDocumentRead({ reader: 'PDF text', read: () => this.readPdfText(input) });
+  }
+
+  private async readPdfText(input: {
     filePath: string;
     firstPage?: number | undefined;
     maxPages: number;
@@ -6941,10 +6977,82 @@ export class Sandbox extends LocalToolMCP {
   }
 
   /**
+   * Reads the text of a staged office document, e-mail, web page or text file inside the selected sandbox, with
+   * Python's standard library only. The output is cut at the aggregate character cap; the result says when it was.
+   */
+  /** Office, e-mail and text files; a failure is logged here with its raw detail, which never reaches the person. */
+  runTextDocumentReader(input: Parameters<Sandbox['readTextDocument']>[0]): ReturnType<Sandbox['readTextDocument']> {
+    return this.loggedDocumentRead({ reader: 'document text', read: () => this.readTextDocument(input) });
+  }
+
+  private async readTextDocument(input: {
+    filePath: string;
+    extension: string;
+    signal: AbortSignal | undefined;
+  }): Promise<DocumentTextResult> {
+    const { sandboxId, canonicalFilePath } = await this.canonicalStagedFilePath(input.filePath, {
+      allowSnapshots: true,
+    });
+    const marker = `AMAN_DOCUMENT_TEXT_${randomUUID().replace(/-/g, '')}:`;
+    const args = [
+      canonicalFilePath,
+      input.extension,
+      String(MAX_TOTAL_DOCUMENT_CHARS),
+      marker,
+      String(MAX_UNPACKED_DOCUMENT_BYTES),
+      String(MAX_ZIP_ENTRIES),
+    ];
+    const command = `set -eu; ulimit -v 2097152; timeout 60 python3 -I -S -c ${shellEscape(DOCUMENT_TEXT_SCRIPT)} ${args.map(shellEscape).join(' ')}`;
+    const result = await this.provider.exec({
+      sandboxId,
+      command,
+      timeoutSeconds: SKILL_DOWNLOAD_TIMEOUT_SECONDS,
+      ...(input.signal === undefined ? {} : { signal: input.signal }),
+    });
+    if (!result.success) {
+      throw new Error(result.error);
+    }
+    if (result.response.exitCode !== 0) {
+      // The reader's output can quote the file; the server log keeps it, the person gets a plain sentence.
+      this.logger.warn('Document text reader failed', {
+        exit_code: result.response.exitCode,
+        output: result.response.result.slice(0, 2000),
+      });
+      throw new DocumentReadError(
+        plainReaderFailure({ exitCode: result.response.exitCode, output: result.response.result }),
+      );
+    }
+    return parseDocumentTextOutput({ output: result.response.result, marker });
+  }
+
+  /**
    * Runs the local OCR tools inside the selected sandbox, never in the server process. A PDF is read one
    * page per call, so a failure or timeout on a later page keeps the pages already read.
    */
-  async runDocumentOcr(input: {
+  /** OCR of PDF pages or an image; a failure is logged here with its raw detail, which never reaches the person. */
+  runDocumentOcr(input: Parameters<Sandbox['readOcr']>[0]): ReturnType<Sandbox['readOcr']> {
+    return this.loggedDocumentRead({ reader: 'OCR', read: () => this.readOcr(input) });
+  }
+
+  /**
+   * Runs a document reader and logs a failure's raw detail on the server. The error goes on unchanged; the
+   * extraction turns anything but a DocumentReadError into a fixed sentence for the person.
+   */
+  private async loggedDocumentRead<T>({ reader, read }: { reader: string; read: () => Promise<T> }): Promise<T> {
+    try {
+      return await read();
+    } catch (error) {
+      if (!(error instanceof DocumentReadError)) {
+        this.logger.warn('Document reader failed', {
+          reader,
+          error: error instanceof Error ? error.message.slice(0, 2000) : String(error).slice(0, 2000),
+        });
+      }
+      throw error;
+    }
+  }
+
+  private async readOcr(input: {
     filePath: string;
     kind: 'pdf' | 'image';
     pages: readonly number[] | undefined;

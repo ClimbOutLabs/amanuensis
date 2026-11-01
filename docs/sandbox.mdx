@@ -41,7 +41,7 @@ A second backend runs `run_code` and the shell and file tools in four hardened s
 - A command can use at most 128 processes. Allowed environment variables for a command are a short list (locale, terminal, language runtime and git settings); others are refused with their names.
 - The installer's instance compose file sets `SANDBOX_BACKEND=slots` and `SANDBOX_SLOTS_DIR` for the app and mounts the control volumes, so there is nothing to add to any command. Each instance has its own slots (a Compose project named `<instance>-slots`). Installing with `--no-sandbox` leaves run code off. The default backend outside the installer stays `docker`.
 - The guest image has Python 3 with pypdf, pdfplumber, reportlab, python-docx, openpyxl, pandas, matplotlib and Pillow, plus pytest, ruff and mypy for testing and checking code; Node.js with TypeScript, plus vitest, jest, eslint and prettier for testing and checking code; bash and coreutils; git; gcc, g++ and make; and poppler-utils with poppler-data, and Tesseract with language data, for reading PDFs and images. More packages can be downloaded only as described under Package downloads below.
-- Files you attach in chat reach the sandbox the same way as on Docker, and the sandbox never fetches anything: the server sends the file into the chat's workspace (under `/workspace/.aman/uploads`) and offers it to `run_code` under `/ingress`. The text of a PDF or image is read inside the sandbox and placed in the message, so any model sees it without running code. Gmail attachments use the same path: Aman fetches the file from Gmail, sends it into the chat's workspace, and reads it there. Text taken from a file is passed to the model as data, not instructions, and goes through the tool-output screen when one is configured. DOCX and other files are read with `run_code` (python-docx and friends).
+- Files you attach in chat reach the sandbox the same way as on Docker, and the sandbox never fetches anything: the server sends the file into the chat's workspace (under `/workspace/.aman/uploads`) and offers it to `run_code` under `/ingress`. The text of a PDF or image is read inside the sandbox and placed in the message, so any model sees it without running code. Gmail attachments use the same path: Aman fetches the file from Gmail, sends it into the chat's workspace, and reads it there. Text taken from a file is passed to the model as data, not instructions, and goes through the tool-output screen when one is configured. Office documents, saved emails, web pages and text files are read the same way, inside the sandbox; see [Document attachments](#document-attachments). Other files are read with `run_code`.
 - Languages: PDF text works in any language (poppler-data covers Chinese, Japanese and Korean PDFs). Scanned pages and images are read with Tesseract: it detects each page's script and reads the page with that script's languages only (Latin: English, Portuguese, Spanish, French, German, Italian, Dutch; Devanagari: Hindi, Marathi; Arabic; Cyrillic: Russian; Chinese, simplified and traditional; Japanese; Korean). `DOCUMENT_OCR_LANGUAGES` (default: the Latin set) is used when a page's script cannot be detected, for example a page with very little text. Setting it to a language the image lacks is ignored for that language, so OCR keeps working.
 - `pnpm test:slots-live` (from the checkout, `--instance <name>` for an instance other than `main`) proves it end to end on an installed instance: it reads generated PDFs and scanned images in each script family through that instance's sandbox, prints a line per case, and ends with a verdict. The test images are drawn in a throwaway container, so nothing is installed on the host.
 - `aman doctor` reports `attachments`: ok when a test file sent into the sandbox comes back and the sandbox has the PDF and OCR tools and every language above; a failure with `aman doctor sandbox --fix` otherwise; a warning when the sandbox was too busy to check. A status list (`aman doctor --local`) and the upgrade check skip this live test. An install from before this release gets the tools and languages from `install.sh upgrade`, which rebuilds the sandbox image (about 140 MB larger); a plain `install.sh` re-run also starts running slots again when the image was rebuilt.
@@ -81,8 +81,9 @@ route falls back to the live sandbox until the turn finishes.
 
 ## PDF and image text extraction
 
-The Aman sandbox includes local PDF and OCR tools. As soon as the supported PDF and image
-attachments in an upload are staged, their text is extracted in a single batched call and placed
+The Aman sandbox includes local PDF and OCR tools. As soon as the supported
+attachments in an upload are staged (PDFs, images, and the formats under
+[Document attachments](#document-attachments)), their text is extracted in a single batched call and placed
 directly in the message the model receives, using embedded PDF text when available and
 OCR (in the languages listed above) for image-only PDF pages and for uploaded images, so any model, including a
 text-only one, sees the content without deciding to call a tool for it. Batching the call keeps
@@ -93,6 +94,40 @@ note; the `extract_document_text` tool re-extracts a file on demand for page- an
 line-addressable provenance, or for the remainder of a truncated document. Attachments of an
 unsupported type get no extraction note; the upload announcement already lists them and the
 model can read them with its own file tools.
+
+## Document attachments
+
+Office documents, saved emails, web pages and text files are read inside the sandbox by one
+reader that uses only Python's standard library, so it works in every sandbox image (slots,
+Docker, the local sandbox) with nothing extra installed. It never runs in the server process.
+
+| Kind | Extensions | What comes out |
+| --- | --- | --- |
+| Word | `.docx`, `.docm`, `.dotx`, `.doc` (Word 97-2003) | Paragraphs in order, tables row by row (cells joined by ` \| `), tracked insertions without deletions, content controls, field results, text boxes, then footnotes, endnotes and comments |
+| Excel | `.xlsx`, `.xlsm`, `.xls` (Excel 97-2003) | Each sheet under `Sheet: <name>` (hidden sheets marked), one row per line; dates shown as dates; a formula with no saved value shown as the formula |
+| CSV | `.csv`, `.tsv` | One row per line; the separator (comma, semicolon, tab, pipe) is detected |
+| PowerPoint | `.pptx`, `.pptm`, `.ppsx` | Each slide under `Slide <n>`, its text and tables, then its speaker notes; slide numbers and footers are left out |
+| OpenDocument | `.odt`, `.ods`, `.odp` | The same as the Word, Excel and PowerPoint rows above |
+| RTF | `.rtf` | Text and tables, with the file's code page and Unicode characters |
+| Web page | `.html`, `.htm`, `.xhtml` | Text and tables, without scripts and styles |
+| Email | `.eml`, `.msg` (Outlook) | From, To, Cc, Date and Subject, the plain body (or the HTML body as text), then each attachment: its text when it is one of these kinds, nested emails up to three levels; a PDF or image inside a saved email is named but not read (save it as its own file to read it) |
+| Text | `.txt`, `.md`, `.json`, `.xml`, `.ics`, `.vcf`, `.log`, `.yaml` | As it is, in UTF-8, UTF-16 or Windows-1252 |
+
+The reader looks at the bytes, not only the name: an RTF or HTML file saved as `.doc`, or a bank
+statement saved as HTML or tab-separated text under an `.xls` name, is read for what it is. The
+text is cut into pages of about 3,000 characters, so `extract_document_text` reads long files in
+`page_start`/`page_end` windows the same way as a PDF, and an open-ended tool read shows a short
+window and names the next range. Limits: 25 MB per file (the same cap as PDFs), at most 100 MB and
+5,000 entries unpacked from zip-based files (`.docx`, `.xlsx`, `.pptx`, OpenDocument) per read, nested ones included, 1,000,000
+characters of text per file (the result says when a file holds more), 2 GB of memory and 60 seconds
+per read. An XML part that declares a document type is refused, in any text encoding, so a file
+cannot define entities or pull in other files.
+
+A file that cannot be read gets a plain reason with what to do next, never a raw error (which
+could quote the file or name sandbox paths; the server log keeps it): damaged or incomplete,
+protected with a password (an encrypted `.docx`/`.xlsx`/`.pptx`, `.doc` or `.xls`), saved in a very
+old format (Word 6/95, Excel 5/95, `.ppt`), too large, too slow to read, or not a kind of document
+that can be read. A document with no text (only pictures) says so.
 
 ## Repository-bound coding sessions
 
