@@ -7,10 +7,11 @@ import {
 } from '../../../src/core/permissions/browserToolNames';
 import { classifyTier, type ClassifyContext, type SentinelAction } from '../../../src/core/permissions/classifier';
 import { defaultSentinelServices, type SentinelServices } from '../../../src/core/permissions/context';
-import { recordPersonText, recordUntrustedText } from '../../../src/core/permissions/provenance';
+import { carriedPrivateDetails, recordPersonText, recordUntrustedText } from '../../../src/core/permissions/provenance';
 import {
   countsAsSilentLookup,
   createWebSearchTurnState,
+  recordToolResultProvenance,
   SILENT_SEARCH_LIMIT,
 } from '../../../src/core/permissions/webSearch';
 
@@ -178,5 +179,45 @@ describe('browser open and what the address carries', () => {
     const ctx = makeCtx();
     await classifyTier(open('https://hulu.com/?q=first-half'), ctx);
     expect(ctx.web_search.sentText).toContain('first-half');
+  });
+});
+
+describe("browser pages are the person's own", () => {
+  const readWith = (tool_name: string): ClassifyContext => {
+    const ctx = makeCtx();
+    recordToolResultProvenance({
+      state: ctx.web_search,
+      tool_name,
+      argument_values: [],
+      texts: ['# Account\nhttps://hulu.com/account\nSigned in as jane.doe@example.com'],
+    });
+    return ctx;
+  };
+
+  it('counts a detail read in the signed-in browser as private, like one read in their mail', () => {
+    const { provenance } = readWith(BROWSER_READ_TOOL_NAME).web_search;
+    expect(carriedPrivateDetails({ provenance, values: ['https://x.example/?q=jane.doe@example.com'] })).toHaveLength(
+      1,
+    );
+  });
+
+  it('does not count the same text on a public page', () => {
+    const { provenance } = readWith('web_fetch').web_search;
+    expect(carriedPrivateDetails({ provenance, values: ['https://x.example/?q=jane.doe@example.com'] })).toHaveLength(
+      0,
+    );
+  });
+});
+
+describe('the open card', () => {
+  it('names the site the browser will really go to', async () => {
+    const decision = await classifyTier(open('HTTPS://hulu.com@Evil-X.net/claim'), ctxAfterReading());
+    expect(decision.card?.destination).toBe('https://hulu.com@evil-x.net/claim');
+    expect(decision.card?.destination_host).toBe('evil-x.net');
+  });
+
+  it('spells a look-alike international name the way the browser reads it', async () => {
+    const decision = await classifyTier(open('https://аpple.com/'), ctxAfterReading());
+    expect(decision.card?.destination_host).toBe('xn--pple-43d.com');
   });
 });

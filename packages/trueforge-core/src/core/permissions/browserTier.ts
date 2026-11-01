@@ -11,8 +11,13 @@ import { BROWSER_EXPLORE_REASON, BROWSER_OPEN_TOOL_NAME, isBrowserToolName } fro
 import type { SentinelAction } from './classifier';
 import { tier1Decision, type Tier3Card, type TierDecision } from './tier';
 
-/** The card for an open that asks: the exact address, which is everything the open sends. */
-export function browserOpenCard(input: { url: string; plain_what: string; plain_why: string | null }): Tier3Card {
+/** The card for an open that asks: the exact address, which is everything the open sends, and the site it goes to. */
+export function browserOpenCard(input: {
+  url: string;
+  host: string | null;
+  plain_what: string;
+  plain_why: string | null;
+}): Tier3Card {
   return {
     plain_what: input.plain_what,
     plain_why: input.plain_why,
@@ -23,7 +28,7 @@ export function browserOpenCard(input: { url: string; plain_what: string; plain_
     amount: null,
     parsed_command: null,
     outbound_text: input.url,
-    destination_host: null,
+    destination_host: input.host,
     outbound_truncated: false,
   };
 }

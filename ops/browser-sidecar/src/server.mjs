@@ -1,5 +1,5 @@
-// Private HTTP API in front of a headed Chromium: one persistent profile per person, reached only
-// from the app server over the Compose network. Every request must carry the shared secret in the
+// Private HTTP API in front of a headed Chromium: one persistent profile per person and one tab per
+// chat, reached only through the browser gateway. Every request must carry the shared secret in the
 // `X-Browser-Secret` header; nothing here is published to the host or to any other service.
 import { Buffer } from 'node:buffer';
 import { createHash, timingSafeEqual } from 'node:crypto';
@@ -11,7 +11,6 @@ import { URL } from 'node:url';
 import { chromium } from 'playwright-core';
 
 import { RefAssigner, renderSnapshot } from './snapshot.mjs';
-import { safeNavigationTarget } from './urlSafety.mjs';
 
 const MAX_BODY_BYTES = 256 * 1024;
 
@@ -37,35 +36,62 @@ function originOf(url) {
   }
 }
 
+/** The most chats one person may have open at once; opening another closes the one used longest ago. */
+export const MAX_TABS_PER_PERSON = 8;
+
+/** Answered by the sidecar itself instead of the network: a browser does not navigate to No Content. */
+const STAY_PUT = { status: 204 };
+
 /**
- * One browser context (and its ref table) per person, kept open across requests so logins survive.
- *
- * `allowedOrigin` is the site of the last address the model opened, which the app server checked
- * and classified. Content from any other site is never returned (see `#checkedPage`), and the page
- * cannot move its own tab to another site (see `guardNavigation`): the person's logins live in this
- * profile, so a page that could send the tab to their mail would otherwise get the mail read back.
- * `expected` is the one top-level navigation the sidecar itself is about to make on the model's
- * request (the address it opens, or a step back), and is used up by the first request that matches.
+ * One tab per chat. `allowedOrigin` is the site of the last address the model opened in this chat,
+ * which the app server checked and classified. Content from any other site is never returned (see
+ * `#checkedPage`), and the page cannot move its own tab to another site (see `guardNavigation`): the
+ * person's logins live in this profile, so a page that could send the tab to their mail would
+ * otherwise get the mail read back. `goingBack` marks the one history step the model asked for.
+ * `refusedRedirect` is where the last navigation tried to redirect to, off the opened site, and
+ * `movedTo` is set when the model's own open was refused that way, until the next open.
  */
-function createOwnerSession({ context, page }) {
-  const session = { context, page, refs: new RefAssigner(), allowedOrigin: undefined, expected: undefined };
-  // A page may not open windows of its own: a popup is closed before it can load anything, and its
-  // first request is refused below.
-  context.on('page', other => {
-    if (other !== session.page) {
-      other.close().catch(() => undefined);
-    }
-  });
-  return session;
+function createTab(page) {
+  return {
+    page,
+    refs: new RefAssigner(),
+    allowedOrigin: undefined,
+    goingBack: false,
+    refusedRedirect: undefined,
+    movedTo: undefined,
+  };
 }
 
 /**
- * The route handler every request in a person's context passes through. Top-level navigations the
- * page starts itself (a script setting `location`, a form that submits itself, a meta refresh) may
- * stay on the opened site, and are refused when they would leave it. Navigations of any other tab
- * are refused outright. Everything else continues to the egress proxy, which checks where it goes.
+ * Where a same-site navigation really goes. The browser follows redirects without asking the route
+ * handler, so the sidecar fetches each hop itself (through the same proxy and cookie jar) and hands the
+ * browser only a hop that stays on the opened site; a hop to another site is recorded and refused.
  */
-async function guardNavigation(session, route) {
+async function followOnSite(tab, route) {
+  let response;
+  try {
+    response = await route.fetch({ maxRedirects: 0 });
+  } catch {
+    return route.abort('failed');
+  }
+  const location = response.headers().location;
+  if (response.status() >= 300 && response.status() < 400 && location !== undefined) {
+    const next = new URL(location, route.request().url()).href;
+    if (originOf(next) !== tab.allowedOrigin) {
+      tab.refusedRedirect = next;
+      return route.fulfill(STAY_PUT);
+    }
+  }
+  return route.fulfill({ response });
+}
+
+/**
+ * The route handler every request in a person's browser passes through. Top-level navigations of a
+ * chat's tab may stay on the site that chat opened, hop by hop, and are refused when they would leave
+ * it. Pages that are not a chat's tab (a popup) get nothing. Everything else continues to the egress
+ * proxy, which checks where it goes.
+ */
+async function guardNavigation(profile, route) {
   const request = route.request();
   if (!request.isNavigationRequest()) {
     return route.continue();
@@ -76,44 +102,49 @@ async function guardNavigation(session, route) {
   } catch {
     return route.abort('blockedbyclient');
   }
-  if (frame.page() !== session.page) {
+  const tab = profile.tabsByPage.get(frame.page());
+  if (tab === undefined) {
     return route.abort('blockedbyclient');
   }
   if (frame.parentFrame() !== null) {
     return route.continue();
   }
-  const expected = session.expected;
-  if (
-    expected !== undefined &&
-    request.method() === 'GET' &&
-    (expected.kind === 'back' || request.url() === expected.url)
-  ) {
-    session.expected = undefined;
+  if (tab.goingBack && request.method() === 'GET') {
+    // History may hold another site; `#checkedPage` then reports it as moved instead of reading it.
+    tab.goingBack = false;
     return route.continue();
   }
-  const target = originOf(request.url());
-  if (target !== undefined && target === session.allowedOrigin) {
-    return route.continue();
+  if (tab.allowedOrigin !== undefined && originOf(request.url()) === tab.allowedOrigin) {
+    return followOnSite(tab, route);
   }
-  // Answered here with No Content, which a browser does not navigate to: the tab stays on its page,
-  // and the request never leaves the browser.
-  return route.fulfill({ status: 204 });
+  return route.fulfill(STAY_PUT);
+}
+
+/**
+ * The checks the egress gateway runs for an address, asked before the browser is touched so the model
+ * gets a plain refusal. The gateway alone resolves names: the browser's network has no other way out.
+ */
+async function askGateway({ proxyServer, url }) {
+  const response = await fetch(`${proxyServer}/check?url=${encodeURIComponent(url)}`);
+  const body = await response.json();
+  if (body?.ok === true && typeof body.url === 'string') {
+    return { ok: true, url: new URL(body.url) };
+  }
+  return { ok: false, reason: typeof body?.reason === 'string' ? body.reason : 'unresolved' };
 }
 
 export class BrowserSidecar {
-  #sessions = new Map();
+  #profiles = new Map();
   #profilesDir;
   #navTimeoutMs;
   #launch;
   #proxyServer;
-  #resolve;
 
   /**
    * `proxyServer` is the egress gateway every browser request goes through; it is required, so the
-   * browser never talks to the network directly. `resolve` stands in for DNS in the early address
-   * check, for tests; the same policy (`urlSafety.mjs`) runs either way.
+   * browser never talks to the network directly.
    */
-  constructor({ profilesDir, navTimeoutMs, proxyServer, launch = launchPersistentChromium, resolve }) {
+  constructor({ profilesDir, navTimeoutMs, proxyServer, launch = launchPersistentChromium }) {
     if (typeof proxyServer !== 'string' || proxyServer === '') {
       throw new Error('the browser needs its egress proxy (BROWSER_PROXY)');
     }
@@ -121,116 +152,167 @@ export class BrowserSidecar {
     this.#navTimeoutMs = navTimeoutMs;
     this.#launch = launch;
     this.#proxyServer = proxyServer;
-    this.#resolve = resolve;
   }
 
-  /** One launch per person, even when two requests for them arrive together. */
-  sessionFor(owner) {
-    const existing = this.#sessions.get(owner);
+  /** One browser per person, launched once even when two requests for them arrive together. */
+  profileFor(owner) {
+    const existing = this.#profiles.get(owner);
     if (existing !== undefined) {
       return existing;
     }
-    const starting = this.#startSession(owner);
-    this.#sessions.set(owner, starting);
-    starting.catch(() => this.#sessions.delete(owner));
+    const starting = this.#startProfile(owner);
+    this.#profiles.set(owner, starting);
+    starting.catch(() => this.#profiles.delete(owner));
     return starting;
   }
 
-  async #startSession(owner) {
+  async #startProfile(owner) {
     const { context, page } = await this.#launch({
       userDataDir: path.join(this.#profilesDir, ownerDirName(owner)),
       proxyServer: this.#proxyServer,
     });
-    const session = createOwnerSession({ context, page });
-    await context.route('**/*', route => guardNavigation(session, route));
-    return session;
+    const profile = { context, spare: page, tabs: new Map(), tabsByPage: new Map(), opening: Promise.resolve() };
+    // A page may not open windows of its own. Tabs are opened only inside `opening`, so a page that
+    // is still not a tab once that settles is a popup: it is closed, and its requests are refused.
+    context.on('page', other => {
+      void profile.opening.then(() => {
+        if (!profile.tabsByPage.has(other)) {
+          other.close().catch(() => undefined);
+        }
+      });
+    });
+    await context.route('**/*', route => guardNavigation(profile, route));
+    return profile;
   }
 
-  /** Runs one navigation the model asked for: the only kind that may leave the opened site. */
-  async #navigate(session, expected, go) {
-    session.expected = expected;
-    try {
-      await go();
-    } finally {
-      session.expected = undefined;
-    }
+  /** The tab for one chat, opened on first use; the person's least recently used tab closes past the cap. */
+  async tabFor({ owner, tab: tabId }) {
+    const profile = await this.profileFor(owner);
+    const result = profile.opening.then(async () => {
+      const existing = profile.tabs.get(tabId);
+      if (existing !== undefined) {
+        profile.tabs.delete(tabId);
+        profile.tabs.set(tabId, existing);
+        return existing;
+      }
+      const page = profile.spare ?? (await profile.context.newPage());
+      profile.spare = undefined;
+      // A download never opens in the browser; refusing it keeps the tab from navigating to a file.
+      page.on('download', download => {
+        download.cancel().catch(() => undefined);
+      });
+      const tab = createTab(page);
+      profile.tabs.set(tabId, tab);
+      profile.tabsByPage.set(page, tab);
+      if (profile.tabs.size > MAX_TABS_PER_PERSON) {
+        const [oldestId, oldest] = profile.tabs.entries().next().value;
+        profile.tabs.delete(oldestId);
+        profile.tabsByPage.delete(oldest.page);
+        await oldest.page.close().catch(() => undefined);
+      }
+      return tab;
+    });
+    profile.opening = result.then(
+      () => undefined,
+      () => undefined,
+    );
+    return result;
   }
 
   /**
-   * The person's page, or where it went instead: when the tab is on a site other than the one the
-   * model opened (a redirect, or history), nothing of it is returned. The model is told the address,
-   * and opening it is a new `browser_open` that the app server classifies on its own.
+   * The chat's page, or where it went instead: when the tab is on a site other than the one the model
+   * opened (history, or a redirect that was refused), nothing of it is returned. The model is told the
+   * address, and opening it is a new `browser_open` that the app server classifies on its own.
    */
-  #checkedPage(session) {
-    const url = session.page.url();
+  #checkedPage(tab) {
+    if (tab.movedTo !== undefined) {
+      return { ok: false, result: { status: 'moved', url: tab.movedTo } };
+    }
+    const url = tab.page.url();
     if (url === 'about:blank') {
       return { ok: true };
     }
     const origin = originOf(url);
-    if (origin === undefined || origin !== session.allowedOrigin) {
+    if (origin === undefined || origin !== tab.allowedOrigin) {
       return { ok: false, result: { status: 'moved', url } };
     }
     return { ok: true };
   }
 
-  async open({ owner, url }) {
-    const target = await safeNavigationTarget(url, { resolve: this.#resolve });
+  async open({ owner, tab: tabId, url }) {
+    const target = await askGateway({ proxyServer: this.#proxyServer, url });
     if (!target.ok) {
       return { status: 'refused', reason: target.reason };
     }
-    const session = await this.sessionFor(owner);
-    session.refs.reset();
-    session.allowedOrigin = target.url.origin;
-    await this.#navigate(session, { kind: 'goto', url: target.url.href }, () =>
-      session.page.goto(target.url.href, { timeout: this.#navTimeoutMs, waitUntil: 'domcontentloaded' }),
-    );
-    return this.read({ owner });
+    const tab = await this.tabFor({ owner, tab: tabId });
+    tab.refs.reset();
+    tab.allowedOrigin = target.url.origin;
+    tab.refusedRedirect = undefined;
+    tab.movedTo = undefined;
+    try {
+      await tab.page.goto(target.url.href, { timeout: this.#navTimeoutMs, waitUntil: 'domcontentloaded' });
+    } catch (error) {
+      // A refused redirect leaves the navigation without a page, which is reported as the move below.
+      if (tab.refusedRedirect === undefined) {
+        throw error;
+      }
+    }
+    if (tab.refusedRedirect !== undefined) {
+      tab.movedTo = tab.refusedRedirect;
+      tab.allowedOrigin = undefined;
+    }
+    return this.#read(tab);
   }
 
-  async read({ owner }) {
-    const session = await this.sessionFor(owner);
-    const checked = this.#checkedPage(session);
+  async read({ owner, tab: tabId }) {
+    return this.#read(await this.tabFor({ owner, tab: tabId }));
+  }
+
+  async #read(tab) {
+    const checked = this.#checkedPage(tab);
     if (!checked.ok) {
       return checked.result;
     }
-    const nodes = await session.page.evaluate(EXTRACT_SCRIPT);
-    const refs = session.refs.refsFor(nodes);
-    const text = renderSnapshot({ title: await session.page.title(), url: session.page.url(), nodes, refs });
+    const nodes = await tab.page.evaluate(EXTRACT_SCRIPT);
+    const refs = tab.refs.refsFor(nodes);
+    const text = renderSnapshot({ title: await tab.page.title(), url: tab.page.url(), nodes, refs });
     return { status: 'ok', text };
   }
 
-  async scroll({ owner, direction }) {
-    const session = await this.sessionFor(owner);
-    const amount = direction === 'up' ? -800 : 800;
-    await session.page.mouse.wheel(0, amount);
-    return this.read({ owner });
+  async scroll({ owner, tab: tabId, direction }) {
+    const tab = await this.tabFor({ owner, tab: tabId });
+    await tab.page.mouse.wheel(0, direction === 'up' ? -800 : 800);
+    return this.#read(tab);
   }
 
-  async back({ owner }) {
-    const session = await this.sessionFor(owner);
-    session.refs.reset();
-    await this.#navigate(session, { kind: 'back' }, () =>
-      session.page.goBack({ timeout: this.#navTimeoutMs, waitUntil: 'domcontentloaded' }),
-    );
-    return this.read({ owner });
+  async back({ owner, tab: tabId }) {
+    const tab = await this.tabFor({ owner, tab: tabId });
+    tab.refs.reset();
+    tab.goingBack = true;
+    try {
+      await tab.page.goBack({ timeout: this.#navTimeoutMs, waitUntil: 'domcontentloaded' });
+    } finally {
+      tab.goingBack = false;
+    }
+    return this.#read(tab);
   }
 
-  async screenshot({ owner }) {
-    const session = await this.sessionFor(owner);
-    const checked = this.#checkedPage(session);
+  async screenshot({ owner, tab: tabId }) {
+    const tab = await this.tabFor({ owner, tab: tabId });
+    const checked = this.#checkedPage(tab);
     if (!checked.ok) {
       return checked.result;
     }
-    const buffer = await session.page.screenshot({ type: 'png' });
+    const buffer = await tab.page.screenshot({ type: 'png' });
     return { status: 'ok', png_base64: buffer.toString('base64') };
   }
 
   async close() {
-    for (const starting of this.#sessions.values()) {
-      const session = await starting.catch(() => undefined);
-      await session?.context.close();
+    for (const starting of this.#profiles.values()) {
+      const profile = await starting.catch(() => undefined);
+      await profile?.context.close();
     }
-    this.#sessions.clear();
+    this.#profiles.clear();
   }
 }
 
@@ -270,11 +352,6 @@ export async function launchPersistentChromium({ userDataDir, proxyServer, execu
     args: ['--force-webrtc-ip-handling-policy=disable_non_proxied_udp'],
   });
   const page = context.pages()[0] ?? (await context.newPage());
-  // A click that starts a download never opens the download in the browser (see the capability layer,
-  // which decides where it is saved); refusing it here keeps the tab itself from navigating to a file.
-  page.on('download', download => {
-    download.cancel().catch(() => undefined);
-  });
   return { context, page };
 }
 
@@ -298,19 +375,46 @@ async function readJsonBody(req) {
 }
 
 const ROUTES = {
-  'POST /open': (sidecar, body) => sidecar.open({ owner: body.owner, url: body.url }),
-  'POST /read': (sidecar, body) => sidecar.read({ owner: body.owner }),
-  'POST /scroll': (sidecar, body) => sidecar.scroll({ owner: body.owner, direction: body.direction }),
-  'POST /back': (sidecar, body) => sidecar.back({ owner: body.owner }),
-  'POST /screenshot': (sidecar, body) => sidecar.screenshot({ owner: body.owner }),
+  'POST /open': (sidecar, where, body) => sidecar.open({ ...where, url: body.url }),
+  'POST /read': (sidecar, where) => sidecar.read(where),
+  'POST /scroll': (sidecar, where, body) => sidecar.scroll({ ...where, direction: body.direction }),
+  'POST /back': (sidecar, where) => sidecar.back(where),
+  'POST /screenshot': (sidecar, where) => sidecar.screenshot(where),
 };
 
-export function createHttpServer({ sidecar, secret }) {
+const MAX_ID_LENGTH = 256;
+const isId = value => typeof value === 'string' && value !== '' && value.length <= MAX_ID_LENGTH;
+
+/** A peer address as the gateway's lookup spells it: an IPv4 client reached over a dual-stack socket loses its prefix. */
+function plainAddress(address) {
+  return typeof address === 'string' && address.startsWith('::ffff:') ? address.slice('::ffff:'.length) : address;
+}
+
+/**
+ * `allowedPeers` returns the addresses calls may come from: the gateway's. Chromium runs in this container, so a
+ * call from anywhere in it (loopback, or this container's own address) is refused even with the right secret.
+ */
+export function createHttpServer({ sidecar, secret, allowedPeers }) {
   if (typeof secret !== 'string' || secret.length < MIN_SECRET_LENGTH) {
     throw new Error(`BROWSER_SECRET must be at least ${String(MIN_SECRET_LENGTH)} characters`);
   }
+  if (typeof allowedPeers !== 'function') {
+    throw new Error('the browser API needs the gateway it answers (BROWSER_API_PEER)');
+  }
   return createServer((req, res) => {
-    void handleRequest({ req, res, sidecar, secret });
+    void (async () => {
+      let peers;
+      try {
+        peers = await allowedPeers();
+      } catch {
+        peers = [];
+      }
+      if (!peers.map(plainAddress).includes(plainAddress(req.socket.remoteAddress))) {
+        res.writeHead(403).end(JSON.stringify({ status: 'error', message: 'calls come through the gateway only' }));
+        return;
+      }
+      await handleRequest({ req, res, sidecar, secret });
+    })();
   });
 }
 
@@ -334,11 +438,12 @@ async function handleRequest({ req, res, sidecar, secret }) {
   }
   try {
     const body = await readJsonBody(req);
-    if (typeof body.owner !== 'string' || body.owner === '') {
-      res.writeHead(400).end(JSON.stringify({ status: 'error', message: 'owner is required' }));
+    // `owner` picks the person's browser profile; `tab` picks the chat's tab inside it.
+    if (!isId(body.owner) || !isId(body.tab)) {
+      res.writeHead(400).end(JSON.stringify({ status: 'error', message: 'owner and tab are required' }));
       return;
     }
-    const result = await route(sidecar, body);
+    const result = await route(sidecar, { owner: body.owner, tab: body.tab }, body);
     res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify(result));
   } catch (error) {
     res

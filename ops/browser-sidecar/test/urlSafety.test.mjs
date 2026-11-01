@@ -95,3 +95,9 @@ test('safeNavigationTarget refuses localhost written with a trailing dot', async
   const result = await safeNavigationTarget('http://localhost./', { resolve: async () => ['93.184.216.34'] });
   assert.deepEqual(result, { ok: false, reason: 'private_network' });
 });
+
+test('refuses documentation, benchmarking and relay ranges, which are never a real site', () => {
+  for (const address of ['192.0.2.10', '198.51.100.7', '203.0.113.1', '192.88.99.1', '255.255.255.255', '3fff::1']) {
+    assert.equal(isPrivateAddress(address), true, address);
+  }
+});

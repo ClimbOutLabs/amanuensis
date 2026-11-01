@@ -145,9 +145,26 @@ test('a name that changes its answer is looked up once per request, and the chec
   });
 });
 
-test('a request that is not an absolute http URL is refused', async () => {
+test('a request that is neither an absolute http URL nor the address check is not answered', async () => {
   await withProxy({}, async ({ port, dials }) => {
-    assert.equal((await getThrough(port, '/relative')).status, 400);
+    assert.equal((await getThrough(port, '/relative')).status, 404);
+    assert.deepEqual(dials, []);
+  });
+});
+
+test('the address check answers by the same rules, and never connects anywhere', async () => {
+  const names = { 'site.test': ['93.184.216.34'], 'internal.test': ['10.0.0.8'] };
+  await withProxy(names, async ({ port, dials }) => {
+    const check = async url => {
+      const response = await fetch(`http://127.0.0.1:${String(port)}/check?url=${encodeURIComponent(url)}`);
+      return response.json();
+    };
+    assert.deepEqual(await check('http://site.test/a?b=1'), { ok: true, url: 'http://site.test/a?b=1' });
+    assert.deepEqual(await check('https://internal.test/'), { ok: false, reason: 'private_network' });
+    assert.deepEqual(await check('http://169.254.169.254/'), { ok: false, reason: 'private_network' });
+    assert.deepEqual(await check('http://nowhere.test/'), { ok: false, reason: 'unresolved' });
+    assert.deepEqual(await check('file:///etc/passwd'), { ok: false, reason: 'scheme' });
+    assert.deepEqual(await check('not a url'), { ok: false, reason: 'not_a_url' });
     assert.deepEqual(dials, []);
   });
 });

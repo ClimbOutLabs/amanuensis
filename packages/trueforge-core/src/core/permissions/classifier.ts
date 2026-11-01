@@ -2093,10 +2093,13 @@ async function classifyBrowserOpen(input: { action: SentinelAction; ctx: Classif
   const strings = collectOutboundStrings(action.canonical_params);
   const provenance = ctx.web_search.provenance;
   const ask = async (reason: string, reasonSay: string, shownUrl: string = url): Promise<TierDecision> => {
-    const shown = escapeDisplayText(shownUrl);
+    // The card shows the address as the browser will read it, so a look-alike spelling cannot hide the real site.
+    const parsed = URL.canParse(shownUrl) ? new URL(shownUrl) : undefined;
+    const shown = escapeDisplayText(parsed?.href ?? shownUrl);
     return tier3Decision({
       card: browserOpenCard({
         url: shown,
+        host: parsed === undefined ? null : escapeDisplayText(parsed.hostname),
         plain_what: withHoldSay(`Open ${shown}?`, reasonSay),
         plain_why: plainWhy(ctx.agent_intent),
       }),

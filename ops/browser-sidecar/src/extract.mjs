@@ -1,7 +1,6 @@
 // Runs inside the page (`page.evaluate`), so it may only use the DOM and plain JS: no imports, no
-// Node globals. Walks the visible, interactive elements of the page and returns them in the order
-// `snapshot.mjs` renders: headings first, then the rest, each already tagged with the field kind
-// that governs whether its value may be shown.
+// Node globals. Walks the visible headings, text and controls of the page in reading order, each
+// already tagged with the field kind that governs whether its value may be shown.
 
 /** Attribute and name patterns that mark a field as a password, a card number, or a one-time code. */
 function fieldKind(element) {
@@ -115,61 +114,45 @@ function domPath(element) {
   return parts.join('/');
 }
 
-/** True when this element submits its form: a submit input/button, or a plain button inside a form. */
-function isFormSubmit(element) {
-  const form = element.closest('form');
-  if (form === null) {
-    return false;
-  }
-  const type = (element.getAttribute('type') ?? '').toLowerCase();
-  if (element.tagName === 'BUTTON') {
-    return type === '' || type === 'submit';
-  }
-  return element.tagName === 'INPUT' && type === 'submit';
-}
+/** Text a person reads on the page, outside headings and controls. */
+const TEXT_TAGS = new Set(['P', 'LI', 'TD', 'TH', 'DT', 'DD', 'BLOCKQUOTE', 'PRE', 'FIGCAPTION']);
+const MAX_TEXT_CHARS = 1000;
 
-/** Values of every named field on the clicked button's form, for the approval card. Sensitive values are masked. */
-export function formValuesOf(element) {
-  const form = element.closest('form');
-  if (form === null) {
-    return {};
-  }
-  const values = {};
-  for (const field of form.elements) {
-    const name = field.name || field.id;
-    if (name === '' || name === undefined) {
-      continue;
+/** The visible text of one text block, or '' when a block around it already carries that text. */
+function blockText(element) {
+  for (let parent = element.parentElement; parent !== null; parent = parent.parentElement) {
+    if (TEXT_TAGS.has(parent.tagName)) {
+      return '';
     }
-    const kind = fieldKind(field);
-    values[name] = kind === null ? (field.value ?? '') : `[hidden: ${kind} field]`;
   }
-  return values;
+  const text = (element.innerText ?? '').replace(/\s+/g, ' ').trim();
+  return text.length > MAX_TEXT_CHARS ? `${text.slice(0, MAX_TEXT_CHARS)}…` : text;
 }
 
-/** Visible, interactive-first page content: headings and interactive elements, each with a stable id. */
+/** Visible page content in reading order: headings, text, and the controls, each with a stable id. */
 export function extractSnapshotNodes() {
   const nodes = [];
-  const seen = new Set();
-  const walk = selector => {
-    for (const element of document.querySelectorAll(selector)) {
-      if (!isVisible(element) || seen.has(element)) {
-        continue;
-      }
-      seen.add(element);
-      const actionable = INTERACTIVE_TAGS.has(element.tagName);
-      nodes.push({
-        id: domPath(element),
-        role: roleOf(element),
-        name: accessibleName(element),
-        value: element.tagName === 'INPUT' || element.tagName === 'TEXTAREA' ? element.value : undefined,
-        field_kind: fieldKind(element),
-        actionable,
-        is_form_submit: actionable ? isFormSubmit(element) : false,
-      });
+  const selector = [...HEADING_TAGS, ...TEXT_TAGS, ...INTERACTIVE_TAGS].join(',');
+  for (const element of document.querySelectorAll(selector)) {
+    if (!isVisible(element)) {
+      continue;
     }
-  };
-  // Headings first, then the interactive elements, matching how the model should scan a page.
-  walk(Array.from(HEADING_TAGS).join(','));
-  walk(Array.from(INTERACTIVE_TAGS).join(','));
+    if (TEXT_TAGS.has(element.tagName)) {
+      const text = blockText(element);
+      if (text !== '') {
+        nodes.push({ id: domPath(element), role: 'text', name: text, field_kind: null, actionable: false });
+      }
+      continue;
+    }
+    const actionable = INTERACTIVE_TAGS.has(element.tagName);
+    nodes.push({
+      id: domPath(element),
+      role: roleOf(element),
+      name: accessibleName(element),
+      value: element.tagName === 'INPUT' || element.tagName === 'TEXTAREA' ? element.value : undefined,
+      field_kind: fieldKind(element),
+      actionable,
+    });
+  }
   return nodes;
 }

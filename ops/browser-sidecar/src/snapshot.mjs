@@ -1,14 +1,14 @@
 // Turns the page elements `extract.mjs` reads out of the DOM into the short text the model reads
-// instead of a screenshot: the title and address, then one line per element, each actionable one
-// carrying a short ref such as `e14`. A password, card or one-time-code field never shows its value.
+// instead of a screenshot: the title and address, then the page's text and one line per heading or
+// control, each actionable one carrying a short ref such as `e14`. A password, card or one-time-code
+// field never shows its value.
 
 /** About four characters per token; the budget this module cuts text to. */
 const TARGET_TOKENS = 8000;
 const CHARS_PER_TOKEN = 4;
 const MAX_CHARS = TARGET_TOKENS * CHARS_PER_TOKEN;
 
-const CUT_NOTE =
-  '\n…(cut; this page has more. Scroll, or ask a narrower question, to see the rest.)';
+const CUT_NOTE = '\n…(cut; this page has more. Scroll, or ask a narrower question, to see the rest.)';
 
 /** A sensitive field's value is never shown, however the page or the model asks for it. */
 export function sensitivityOf(node) {
@@ -25,6 +25,9 @@ export function sensitivityOf(node) {
 }
 
 function oneLine({ node, ref }) {
+  if (node.role === 'text') {
+    return node.name;
+  }
   const hidden = sensitivityOf(node);
   const name = node.name === '' ? '(no label)' : node.name;
   const prefix = ref === null ? '-' : `[${ref}]`;
@@ -38,8 +41,7 @@ function oneLine({ node, ref }) {
 }
 
 /**
- * Builds the snapshot text. `nodes` is the extractor's flat, already visible-and-interactive-first
- * ordered list; `refs` maps each actionable node to the short id it keeps for this page (stable
+ * Builds the snapshot text. `nodes` is the extractor's flat list of visible content in reading order; `refs` maps each actionable node to the short id it keeps for this page (stable
  * across re-reads of the same page, assigned once by the caller that tracks them).
  */
 export function renderSnapshot({ title, url, nodes, refs }) {

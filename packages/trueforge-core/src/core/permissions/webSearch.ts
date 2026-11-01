@@ -230,7 +230,10 @@ export function toolReturnsOutsideContent(toolName: string): boolean {
 /** The kind of content a tool's result is, so a card or a memory note can say where something was read. */
 export function readSourceOf(toolName: string): ReadSource {
   const baseName = baseToolName(toolName);
-  if (isSearchResultTool(baseName) || isPageReaderTool(baseName) || isBrowserToolName(baseName)) {
+  if (isBrowserToolName(baseName)) {
+    return 'browser_page';
+  }
+  if (isSearchResultTool(baseName) || isPageReaderTool(baseName)) {
     return 'page';
   }
   if (isGmailReadToolName(baseName) || isMailReadToolName(baseName)) {

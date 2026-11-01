@@ -1,3 +1,4 @@
+import { lookup } from 'node:dns/promises';
 import { fileURLToPath } from 'node:url';
 import { BrowserSidecar, createHttpServer } from './server.mjs';
 
@@ -5,10 +6,16 @@ export const DEFAULT_PORT = 8792;
 export const DEFAULT_PROFILES_DIR = '/profiles';
 export const DEFAULT_NAV_TIMEOUT_MS = 30_000;
 
+/** The addresses a host name has now; the gateway's can change when its container is recreated. */
+async function addressesOf(host) {
+  return (await lookup(host, { all: true })).map(entry => entry.address);
+}
+
 if (process.argv[1] !== undefined && fileURLToPath(import.meta.url) === process.argv[1]) {
   const secret = process.env.BROWSER_SECRET;
-  // Read once, then dropped from this process's environment so nothing it starts inherits it.
+  // Read once, then dropped from this process's environment so Chromium never inherits it.
   delete process.env.BROWSER_SECRET;
+  const peer = process.env.BROWSER_API_PEER;
   let server;
   let sidecar;
   try {
@@ -17,7 +24,11 @@ if (process.argv[1] !== undefined && fileURLToPath(import.meta.url) === process.
       navTimeoutMs: Number(process.env.BROWSER_NAV_TIMEOUT_MS ?? DEFAULT_NAV_TIMEOUT_MS),
       proxyServer: process.env.BROWSER_PROXY,
     });
-    server = createHttpServer({ sidecar, secret });
+    server = createHttpServer({
+      sidecar,
+      secret,
+      allowedPeers: peer === undefined || peer === '' ? undefined : () => addressesOf(peer),
+    });
   } catch (error) {
     process.stderr.write(
       `browser sidecar: ${error instanceof Error ? error.message : String(error)}, refusing to start\n`,

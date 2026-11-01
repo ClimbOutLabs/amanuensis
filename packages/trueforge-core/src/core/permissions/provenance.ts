@@ -16,7 +16,8 @@ interface ProvenanceValues {
 }
 
 /** Where the assistant read a value: as the sender of an email, or the kind of content it appeared in. */
-export type ReadSource = 'email_sender' | 'email' | 'event' | 'page' | 'file' | 'tool_result' | 'other';
+export type ReadSource =
+  'email_sender' | 'email' | 'event' | 'page' | 'browser_page' | 'file' | 'tool_result' | 'other';
 
 export interface ReadOrigin {
   source: ReadSource;
@@ -291,8 +292,14 @@ export function recordUntrustedText(input: { provenance: ChatProvenance; text: s
   if (input.text.trim() !== '') {
     input.provenance.read_content = true;
   }
-  if (input.source === 'event' || input.source === 'file' || input.source === 'other') {
-    // The person's own events, their files and the host's notes on their chat hold their details too.
+  if (
+    input.source === 'event' ||
+    input.source === 'browser_page' ||
+    input.source === 'file' ||
+    input.source === 'other'
+  ) {
+    // The person's own events, the pages their signed-in browser shows, their files and the host's notes on
+    // their chat hold their details too.
     recordDetails(input.provenance, input.text);
   }
   for (const key of recordText(input.provenance.untrusted, input.text)) {
@@ -591,7 +598,7 @@ export function hasReadContent(provenance: ChatProvenance): boolean {
 
 /**
  * The person's own details a call's text carries: an address or a phone number the chat saw in the person's
- * words, their own mail or their events. Pages, files and tool output do not count: a detail only they named is
+ * words, their own mail, their events or a page in their signed-in browser. Other pages, files and tool output do not count: a detail only they named is
  * that content's own value, and sending it back to its source is ordinary. Mail does count even when a stranger
  * wrote it, because the mailbox is the person's; the cost is an extra question, never a leak. Each value is
  * folded the same way the record was, so a detail counts however the value spells it.

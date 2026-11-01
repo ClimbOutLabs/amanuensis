@@ -134,6 +134,12 @@ services:
       # Guards the calendar account port; the same value goes to calendar-caldav. There is no default: `pnpm smoke`
       # makes a random one for each run, and for plain `docker compose` set it in the shell (openssl rand -hex 32).
       CALENDAR_ACCOUNT_SECRET: ${CALENDAR_ACCOUNT_SECRET:?set CALENDAR_ACCOUNT_SECRET to a random value of 32 or more characters, for example from openssl rand -hex 32}
+      # Aman's browser, reached through its gateway (see browser-gateway). Used only when BROWSER_ENABLED is true in
+      # packages/trueforge/.env and the stack runs with the browser profile.
+      BROWSER_URL: http://browser-gateway:8792
+      # Guards the browser's API; the same value goes to the browser. Made like the calendar secret above:
+      # `pnpm smoke` makes a random one, and plain `docker compose` needs it set in the shell.
+      BROWSER_SECRET: ${BROWSER_SECRET:?set BROWSER_SECRET to a random value of 32 or more characters, for example from openssl rand -hex 32}
     # Secrets and Postgres credentials (POSTGRES_USER, …).
     # `environment` above overrides any colliding keys from this file.
     # TRUEFORGE_API_KEY is deliberately not overridden: set it here and the server and controller
@@ -294,11 +300,11 @@ services:
     # runs first.
     init: true
     environment:
-      # Guards the sidecar's whole HTTP API; the same value goes to the server as BROWSER_SECRET.
-      # There is no default: set a random one in packages/trueforge/.env (openssl rand -hex 32).
-      # The sidecar keeps it out of Chromium's environment.
+      # The same value the server sends (see the server's BROWSER_SECRET). The sidecar keeps it out of Chromium's
+      # environment, and answers only calls that come through the gateway, so nothing inside this container can use it.
       BROWSER_SECRET: ${BROWSER_SECRET:?set BROWSER_SECRET to a random value of 32 or more characters, for example from openssl rand -hex 32}
       BROWSER_PROXY: http://browser-gateway:3128
+      BROWSER_API_PEER: browser-gateway
     networks:
       - browser-internal
     volumes:

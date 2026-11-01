@@ -13,7 +13,7 @@ import { createServer as createHttpServer, request as httpRequest } from 'node:h
 import { createServer as createNetServer, connect as netConnect } from 'node:net';
 import { URL } from 'node:url';
 
-import { resolvePublic } from './urlSafety.mjs';
+import { resolvePublic, safeNavigationTarget } from './urlSafety.mjs';
 
 /** Request headers that describe the hop to the proxy, not the request; never forwarded. */
 const HOP_HEADERS = new Set([
@@ -61,6 +61,23 @@ function forwardedHeaders(headers) {
 }
 
 /**
+ * `GET /check?url=…`: whether the browser may be sent to an address, by the same rules the proxy
+ * applies to every request. The sidecar asks this before it opens a page, so the model gets a plain
+ * refusal instead of a failed load; the sidecar has no DNS of its own to answer it.
+ */
+async function answerCheck({ req, res, resolve }) {
+  const asked = new URL(req.url ?? '/', 'http://gateway.invalid');
+  const raw = asked.searchParams.get('url');
+  if (req.method !== 'GET' || asked.pathname !== '/check' || raw === null) {
+    res.writeHead(404, { 'content-type': 'text/plain' }).end('not found');
+    return;
+  }
+  const target = await safeNavigationTarget(raw, { resolve });
+  const body = target.ok ? { ok: true, url: target.url.href } : { ok: false, reason: target.reason };
+  res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify(body));
+}
+
+/**
  * The forward proxy. `resolve` and `dial` exist so tests can stand in for DNS and for the final TCP
  * connect; every policy decision still runs through `resolvePublic`.
  */
@@ -69,6 +86,10 @@ export function createEgressProxy({ resolve, dial = defaultDial, log = () => und
 
   server.on('request', (req, res) => {
     void (async () => {
+      if (req.url?.startsWith('/')) {
+        await answerCheck({ req, res, resolve });
+        return;
+      }
       let url;
       try {
         url = new URL(req.url ?? '');
