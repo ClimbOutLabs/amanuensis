@@ -7,7 +7,16 @@ import {
   MAX_BYTES_PER_DOCUMENT,
   MAX_CHARS_PER_DOCUMENT,
   MAX_PAGES_PER_DOCUMENT,
+  MAX_TOTAL_DOCUMENT_CHARS,
 } from '../../documents/documentExtraction';
+import { DocumentReadError } from '../../documents/documentReadError';
+import {
+  DOCUMENT_TEXT_SCRIPT,
+  MAX_UNPACKED_DOCUMENT_BYTES,
+  MAX_ZIP_ENTRIES,
+  parseDocumentTextOutput,
+  type DocumentTextResult,
+} from '../../documents/documentText';
 import { ocrLanguageSelectionScript } from '../../documents/ocrLanguages';
 import {
   ImplementationPlanAdmissionBlockedError,
@@ -130,7 +139,14 @@ import {
   type SandboxInit,
   type SandboxProvider,
 } from './provider/Provider';
-import { SANDBOX_START_FAILED_MESSAGE, SandboxNotAvailableError, validateNoPathTraversal } from './SandboxErrors';
+import { plainReaderFailure } from './readerFailure';
+import {
+  SANDBOX_START_FAILED_MESSAGE,
+  SandboxFileNotFoundError,
+  SandboxFileTooLargeError,
+  SandboxNotAvailableError,
+  validateNoPathTraversal,
+} from './SandboxErrors';
 import { formatSandboxId, rawSandboxId } from './sandboxRef';
 import {
   SKILL_COPY_FAILED_REASON,
@@ -1169,7 +1185,35 @@ export const sandboxWriteFileSchema = z
     return { ...rest, content };
   });
 
-const WRITE_FILE_SCRIPT = `import hashlib
+/**
+ * The skill notices already shown, per sandbox. Kept on the host, where nothing run in the sandbox
+ * can change it. An entry is dropped when its sandbox goes away, and the oldest go first past a bound,
+ * so it stays small; a dropped or restarted entry only means a notice may show once more.
+ */
+const shownSkillNoticesBySandbox = new Map<string, Set<string>>();
+const MAX_SANDBOXES_WITH_SHOWN_NOTICES = 1_000;
+
+/** Forgets the skill notices shown for a sandbox that is gone, such as a deleted chat's. */
+export function forgetShownSkillNotices(sandboxId: string): void {
+  shownSkillNoticesBySandbox.delete(sandboxId);
+}
+
+/** A skill notice for the person, with the key that says whether it was already shown. */
+interface SkillNotice {
+  key: string;
+  text: string;
+}
+
+/**
+ * One notice per skill and cause. The cause is kept as a plain string, not the notice's wording, so
+ * rewording a notice does not show it again and a new cause is shown once like the others.
+ */
+function skillNoticeKey(input: { name: string; cause: string }): string {
+  return JSON.stringify([input.name, input.cause]);
+}
+
+export const WRITE_FILE_SCRIPT = `import errno
+import hashlib
 import json
 import os
 import secrets
@@ -1201,13 +1245,40 @@ if not path_parts or any(part == ".." for part in path_parts):
     stop("path must stay within cwd")
 parts = cwd_parts + path_parts
 
+DIRECTORY_FLAGS = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+
+def open_folder(name, parent_fd, shown):
+    try:
+        return os.open(name, DIRECTORY_FLAGS, dir_fd=parent_fd)
+    except OSError as error:
+        if error.errno in (errno.ENOTDIR, errno.ELOOP):
+            stop("%s is a file or a link, not a folder, so write_file cannot create a file inside it" % shown)
+        raise
+
+def open_or_create_folder(name, parent_fd, shown, created):
+    try:
+        return open_folder(name, parent_fd, shown)
+    except FileNotFoundError:
+        pass
+    try:
+        os.mkdir(name, 0o755, dir_fd=parent_fd)
+        created.append(shown)
+    except FileExistsError:
+        pass
+    return open_folder(name, parent_fd, shown)
+
 directory_fds = []
-root_fd = os.open(workspace_cwd, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+created_directories = []
+try:
+    root_fd = os.open(workspace_cwd, DIRECTORY_FLAGS)
+except OSError as error:
+    stop("the workspace folder could not be opened: %s" % (error.strerror or error))
 directory_fds.append(root_fd)
 parent_fd = root_fd
 try:
-    for part in parts[:-1]:
-        parent_fd = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=parent_fd)
+    for index, part in enumerate(parts[:-1]):
+        shown = "/".join(parts[: index + 1])
+        parent_fd = open_or_create_folder(part, parent_fd, shown, created_directories)
         directory_fds.append(parent_fd)
     target_name = parts[-1]
     content_bytes = payload["content"].encode("utf-8")
@@ -1238,6 +1309,8 @@ try:
             os.unlink(temporary_name, dir_fd=parent_fd)
         except FileNotFoundError:
             pass
+except OSError as error:
+    stop("%s could not be written: %s" % (relative_path, error.strerror or error))
 finally:
     for directory_fd in reversed(directory_fds):
         os.close(directory_fd)
@@ -1246,6 +1319,7 @@ print(json.dumps({
     "path": relative_path,
     "byte_length": len(content_bytes),
     "sha256": hashlib.sha256(content_bytes).hexdigest(),
+    "created_directories": created_directories,
 }))
 `;
 
@@ -1378,6 +1452,10 @@ print(json.dumps({
 type ReplaceTextDispatchOutcome =
   { kind: 'match_rejected'; rejection: string } | { kind: 'dispatched'; exec: ExecResult; payloadDigest: string };
 
+/** Said only where the shell can fetch: a sandbox with no internet is never told to save fetched content. */
+const FETCHED_CONTENT_TO_FILE_SENTENCE =
+  'When fetching remote content, the Agent MUST save it to a file first, then extract from the file. Do not pipe large fetches through grep or sed into the tool response.';
+
 /** Network sentence of the exec description; the offline wording replaces the retrieval and admission claims. */
 function execNetworkSentences({
   offline,
@@ -1387,10 +1465,10 @@ function execNetworkSentences({
   skillNetworkHosts: readonly string[];
 }): string {
   if (!offline) {
-    return 'Exec provides retrieval of an already identified public source; it does not provide search or discovery. Network egress requires PermissionGate admission.';
+    return `Exec provides retrieval of an already identified public source; it does not provide search or discovery. Network egress requires PermissionGate admission. ${FETCHED_CONTENT_TO_FILE_SENTENCE}`;
   }
   if (skillNetworkHosts.length > 0) {
-    return `This shell can reach only the sites approved for the skills in this chat: ${skillNetworkHosts.join(', ')}. Every other site is refused. Never use it to fetch web content from any other site.`;
+    return `This shell can reach only the sites approved for the skills in this chat: ${skillNetworkHosts.join(', ')}. Every other site is refused. Never use it to fetch web content from any other site. ${FETCHED_CONTENT_TO_FILE_SENTENCE}`;
   }
   return 'This shell has no internet access. Never use it to fetch web content.';
 }
@@ -1469,7 +1547,7 @@ export const SANDBOX_REPLACE_TEXT_DESCRIPTION =
   'Replace one exact passage in a UTF-8 file beneath cwd; old_text must match exactly and uniquely. Pass old_text_lines and new_text_lines, one element per line, blank lines as empty strings. Writes atomically. Never stages, commits or pushes.';
 
 const SANDBOX_WRITE_FILE_DESCRIPTION =
-  'Create one new UTF-8 file beneath cwd. Pass content_lines, one element per line, blank lines as empty strings. Use replace_text or apply_patch for existing files. Never stages, commits or pushes.';
+  'Create one new UTF-8 file beneath cwd, creating any missing folders on its path. Pass content_lines, one element per line, blank lines as empty strings. Use replace_text or apply_patch for existing files. Never stages, commits or pushes.';
 
 export function createSandboxWriteFileDescription({ fileDownload }: { fileDownload: boolean }): string {
   return fileDownload
@@ -2124,8 +2202,10 @@ export class Sandbox extends LocalToolMCP {
   private unavailableSkillsCache: Map<string, string> = new Map<string, string>();
   // Kept apart from the prerequisite cache, which the prerequisite check clears.
   private skillCopyFailures: ReadonlyMap<string, SkillCopyFailure> = new Map<string, SkillCopyFailure>();
-  // Plain lines for the person, shown once on the next exec result.
-  private pendingSkillNotices: string[] = [];
+  // Plain lines for the person, shown once on the next tool result.
+  private pendingSkillNotices: SkillNotice[] = [];
+  // Notices already put on a tool result in this turn, not yet recorded in the sandbox.
+  private deliveredSkillNotices: SkillNotice[] = [];
   /** Flag to track if we've already checked prerequisites. */
   private prerequisitesChecked = false;
   /** PATH-resolution cache for the exec interpreter guard (preflight runs per call). */
@@ -3003,6 +3083,45 @@ export class Sandbox extends LocalToolMCP {
     return this.provider.network !== 'none';
   }
 
+  /**
+   * File edits, run_code (always offline) and plan submissions stay in the workspace. A command stays
+   * when it only inspects; otherwise only while nothing it runs can reach the network, and a push
+   * never stays, since the host carries it out.
+   */
+  staysInWorkspace({ name, argumentsText }: { name: string; argumentsText: string }): boolean {
+    if (
+      name === SANDBOX_WRITE_FILE_TOOL_NAME ||
+      name === SANDBOX_APPLY_PATCH_TOOL_NAME ||
+      name === SANDBOX_REPLACE_TEXT_TOOL_NAME ||
+      name === SANDBOX_RUN_CODE_TOOL_NAME ||
+      name === SANDBOX_SUBMIT_IMPLEMENTATION_PLAN_TOOL_NAME
+    ) {
+      return true;
+    }
+    const networked = this.hasNetwork() || this.skillNetworkHostsForChat.length > 0;
+    if (name === SANDBOX_RUN_REGISTERED_COMMAND_TOOL_NAME) {
+      return !networked;
+    }
+    if (name !== SANDBOX_EXEC_TOOL_NAME) {
+      return false;
+    }
+    let argumentsValue: unknown;
+    try {
+      argumentsValue = JSON.parse(argumentsText);
+    } catch {
+      return false;
+    }
+    const purpose = purposeFromToolArguments(argumentsValue);
+    if (purpose === undefined) {
+      return false;
+    }
+    const { effect } = sandboxInvocationPolicy({ command: commandFromToolArguments(argumentsValue), purpose });
+    if (effect === 'push') {
+      return false;
+    }
+    return effect === 'inspect' || !networked;
+  }
+
   /** Atomically refreshes model-visible repository root, branch, and HEAD before each model request. */
   async refreshBoundRepositoryState(options: { signal?: AbortSignal | undefined } = {}): Promise<void> {
     const binding = this.boundRepository;
@@ -3141,9 +3260,11 @@ export class Sandbox extends LocalToolMCP {
   ): Promise<CallToolResponse> {
     const response = await super.callTool(params, approvalDecision, context);
     if (this.pendingSkillNotices.length === 0 || !isCallToolResponseResult(response)) {
+      this.recordDeliveredSkillNotices();
       return response;
     }
     const notices = this.takeSkillNotices();
+    this.recordDeliveredSkillNotices();
     const [first, ...rest] = response.result.content;
     const head: TextContentPart =
       first?.type === 'text'
@@ -3158,7 +3279,30 @@ export class Sandbox extends LocalToolMCP {
   private takeSkillNotices(): string[] {
     const notices = this.pendingSkillNotices;
     this.pendingSkillNotices = [];
-    return notices;
+    this.deliveredSkillNotices.push(...notices);
+    return notices.map(notice => notice.text);
+  }
+
+  /** Remembers the notices shown on this tool result, so a later turn's Sandbox does not repeat them. */
+  private recordDeliveredSkillNotices(): void {
+    if (this.deliveredSkillNotices.length === 0 || this.existingSandboxInfo === undefined) {
+      return;
+    }
+    const sandboxId = this.providerSandboxId(this.existingSandboxInfo.sandbox_id);
+    const shown = shownSkillNoticesBySandbox.get(sandboxId) ?? new Set<string>();
+    for (const notice of this.deliveredSkillNotices) {
+      shown.add(notice.key);
+    }
+    // Re-inserting moves the sandbox to the newest end, so the bound drops the least recently used.
+    shownSkillNoticesBySandbox.delete(sandboxId);
+    shownSkillNoticesBySandbox.set(sandboxId, shown);
+    for (const oldest of shownSkillNoticesBySandbox.keys()) {
+      if (shownSkillNoticesBySandbox.size <= MAX_SANDBOXES_WITH_SHOWN_NOTICES) {
+        break;
+      }
+      shownSkillNoticesBySandbox.delete(oldest);
+    }
+    this.deliveredSkillNotices = [];
   }
 
   /** Exec output as text, with any skill notices for the person added once. */
@@ -3392,6 +3536,9 @@ export class Sandbox extends LocalToolMCP {
   }
 
   private clearExistingSandbox(): void {
+    if (this.existingSandboxInfo !== undefined) {
+      forgetShownSkillNotices(this.providerSandboxId(this.existingSandboxInfo.sandbox_id));
+    }
     this.existingSandboxInfo = undefined;
     this.sandboxCreationPromise = undefined;
     this.sandboxInitPromise = undefined;
@@ -5129,13 +5276,28 @@ export class Sandbox extends LocalToolMCP {
 
   /** Resolves every symlink and requires each path component to exist, or throws. */
   private async canonicalSandboxPath({ sandboxId, path }: { sandboxId: string; path: string }): Promise<string> {
-    const canonical = canonicalPathFromExec(
-      await this.hostExec({ sandboxId, command: `realpath -e -- ${shellEscape(path)}` }),
-    );
+    const canonical = canonicalPathFromExec(await this.realpathOfExisting({ sandboxId, path }));
     if (canonical === undefined) {
       throw new Error(`realpath did not resolve ${path}`);
     }
     return canonical;
+  }
+
+  /**
+   * Runs `realpath -e`. When it fails and nothing is at the path, throws SandboxFileNotFoundError, so callers tell a
+   * missing file from other failures by type rather than by the shell's wording.
+   */
+  private async realpathOfExisting({ sandboxId, path }: { sandboxId: string; path: string }): Promise<ExecResult> {
+    const result = await this.hostExec({ sandboxId, command: `realpath -e -- ${shellEscape(path)}` });
+    if (successfulExec(result)) {
+      return result;
+    }
+    // `test -e` exits 1 only when nothing is there; any other outcome keeps the original failure.
+    const probe = await this.hostExec({ sandboxId, command: `test -e ${shellEscape(path)}` });
+    if (probe.success && probe.response.exitCode === 1) {
+      throw new SandboxFileNotFoundError(path);
+    }
+    return result;
   }
 
   /** Dispatches `run_code` through the configured isolation driver. */
@@ -6771,7 +6933,7 @@ export class Sandbox extends LocalToolMCP {
       }
       const status = result.response.result.split(`${marker}:`)[1]?.trim();
       if (status?.startsWith('TOO_LARGE:')) {
-        throw new Error(`Document exceeds the ${String(maxBytes)} byte limit`);
+        throw new SandboxFileTooLargeError(input.filePath, Number(status.slice('TOO_LARGE:'.length)), maxBytes);
       }
       if (status === 'CHANGED') {
         throw new Error('Document changed while it was being snapshotted; upload it again and retry');
@@ -6848,7 +7010,7 @@ export class Sandbox extends LocalToolMCP {
     }
     const containingDir = allowedDir ?? uploadDir;
     const canonicalize = async (path: string): Promise<string> => {
-      const result = await this.hostExec({ sandboxId, command: `realpath -e -- ${shellEscape(path)}` });
+      const result = await this.realpathOfExisting({ sandboxId, path });
       ensureExecSuccess(result);
       if (!result.success) {
         throw new Error('Unreachable: canonical path result was not successful');
@@ -6874,7 +7036,12 @@ export class Sandbox extends LocalToolMCP {
    * Extraction starts at firstPage; returned pages carry absolute 1-based
    * page numbers and total_pages is the true document total, never capped.
    */
-  async runDocumentText(input: {
+  /** Native PDF text; a failure is logged here with its raw detail, which never reaches the person. */
+  runDocumentText(input: Parameters<Sandbox['readPdfText']>[0]): ReturnType<Sandbox['readPdfText']> {
+    return this.loggedDocumentRead({ reader: 'PDF text', read: () => this.readPdfText(input) });
+  }
+
+  private async readPdfText(input: {
     filePath: string;
     firstPage?: number | undefined;
     maxPages: number;
@@ -6941,10 +7108,82 @@ export class Sandbox extends LocalToolMCP {
   }
 
   /**
+   * Reads the text of a staged office document, e-mail, web page or text file inside the selected sandbox, with
+   * Python's standard library only. The output is cut at the aggregate character cap; the result says when it was.
+   */
+  /** Office, e-mail and text files; a failure is logged here with its raw detail, which never reaches the person. */
+  runTextDocumentReader(input: Parameters<Sandbox['readTextDocument']>[0]): ReturnType<Sandbox['readTextDocument']> {
+    return this.loggedDocumentRead({ reader: 'document text', read: () => this.readTextDocument(input) });
+  }
+
+  private async readTextDocument(input: {
+    filePath: string;
+    extension: string;
+    signal: AbortSignal | undefined;
+  }): Promise<DocumentTextResult> {
+    const { sandboxId, canonicalFilePath } = await this.canonicalStagedFilePath(input.filePath, {
+      allowSnapshots: true,
+    });
+    const marker = `AMAN_DOCUMENT_TEXT_${randomUUID().replace(/-/g, '')}:`;
+    const args = [
+      canonicalFilePath,
+      input.extension,
+      String(MAX_TOTAL_DOCUMENT_CHARS),
+      marker,
+      String(MAX_UNPACKED_DOCUMENT_BYTES),
+      String(MAX_ZIP_ENTRIES),
+    ];
+    const command = `set -eu; ulimit -v 2097152; timeout 60 python3 -I -S -c ${shellEscape(DOCUMENT_TEXT_SCRIPT)} ${args.map(shellEscape).join(' ')}`;
+    const result = await this.provider.exec({
+      sandboxId,
+      command,
+      timeoutSeconds: SKILL_DOWNLOAD_TIMEOUT_SECONDS,
+      ...(input.signal === undefined ? {} : { signal: input.signal }),
+    });
+    if (!result.success) {
+      throw new Error(result.error);
+    }
+    if (result.response.exitCode !== 0) {
+      // The reader's output can quote the file; the server log keeps it, the person gets a plain sentence.
+      this.logger.warn('Document text reader failed', {
+        exit_code: result.response.exitCode,
+        output: result.response.result.slice(0, 2000),
+      });
+      throw new DocumentReadError(
+        plainReaderFailure({ exitCode: result.response.exitCode, output: result.response.result }),
+      );
+    }
+    return parseDocumentTextOutput({ output: result.response.result, marker });
+  }
+
+  /**
    * Runs the local OCR tools inside the selected sandbox, never in the server process. A PDF is read one
    * page per call, so a failure or timeout on a later page keeps the pages already read.
    */
-  async runDocumentOcr(input: {
+  /** OCR of PDF pages or an image; a failure is logged here with its raw detail, which never reaches the person. */
+  runDocumentOcr(input: Parameters<Sandbox['readOcr']>[0]): ReturnType<Sandbox['readOcr']> {
+    return this.loggedDocumentRead({ reader: 'OCR', read: () => this.readOcr(input) });
+  }
+
+  /**
+   * Runs a document reader and logs a failure's raw detail on the server. The error goes on unchanged; the
+   * extraction turns anything but a DocumentReadError into a fixed sentence for the person.
+   */
+  private async loggedDocumentRead<T>({ reader, read }: { reader: string; read: () => Promise<T> }): Promise<T> {
+    try {
+      return await read();
+    } catch (error) {
+      if (!(error instanceof DocumentReadError)) {
+        this.logger.warn('Document reader failed', {
+          reader,
+          error: error instanceof Error ? error.message.slice(0, 2000) : String(error).slice(0, 2000),
+        });
+      }
+      throw error;
+    }
+  }
+
+  private async readOcr(input: {
     filePath: string;
     kind: 'pdf' | 'image';
     pages: readonly number[] | undefined;
@@ -7188,9 +7427,15 @@ export class Sandbox extends LocalToolMCP {
       }
       skillInit = this.skillMounter?.offlineSkillsInit(skillPaths, accepted);
       this.skillCopyFailures = failed;
-      this.pendingSkillNotices = [...failed].map(([name, failure]) =>
-        skillCopyFailedNotice({ name, cause: failure.cause }),
-      );
+      // A new Sandbox is built for every turn, approvals included, and each one copies the skills in
+      // again. The host remembers the notices already shown for this sandbox, so each shows once per chat.
+      const alreadyShown = shownSkillNoticesBySandbox.get(sandboxId) ?? new Set<string>();
+      this.pendingSkillNotices = [...failed]
+        .map(([name, failure]) => ({
+          key: skillNoticeKey({ name, cause: failure.cause }),
+          text: skillCopyFailedNotice({ name, cause: failure.cause }),
+        }))
+        .filter(notice => !alreadyShown.has(notice.key));
       this.cachedSkillsSection = undefined;
     }
     if (skillInit) {

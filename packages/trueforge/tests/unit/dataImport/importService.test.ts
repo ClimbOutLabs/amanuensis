@@ -380,6 +380,11 @@ describe('runDataImport', () => {
         revision: 2,
       });
       expect([revision1?.body, revision2?.body]).toEqual(['Draft one.', 'Draft two.']);
+      const spaceFolders = await target.stores.spaceStore.listSpaceFolders({ tenant_id: TENANT, created_by: 'bob' });
+      expect(spaceFolders.map(folder => [folder.id, folder.name])).toEqual([[SEED_IDS.spaceFolder, 'Moving']]);
+      expect(
+        await target.stores.spaceStore.listSpaceFolderAssignments({ tenant_id: TENANT, created_by: 'bob' }),
+      ).toEqual([{ space_id: SEED_IDS.space, folder_id: SEED_IDS.spaceFolder }]);
 
       expect(await target.stores.globalSettingsStore.getSetting({ key: IMPORT_IN_PROGRESS_KEY })).toBeUndefined();
 
@@ -1101,6 +1106,61 @@ describe('runDataImport reads schedules from before one-time schedules', () => {
   });
 });
 
+describe('runDataImport reads spaces from before spaces had folders', () => {
+  /** An export made before space folders: no space_folders.json, and no folder on any space entry. */
+  async function olderFormat(archive: Buffer): Promise<Buffer> {
+    return repack(archive, entries => {
+      entries.delete('space_folders.json');
+      const spaces = listAt(parseJson(entries.get('spaces.json') ?? Buffer.alloc(0), 'spaces.json'), 'spaces.json');
+      for (const item of spaces) {
+        Reflect.deleteProperty(recordAt(item, 'space entry'), 'folder_id');
+      }
+      entries.set('spaces.json', Buffer.from(JSON.stringify(spaces)));
+    });
+  }
+
+  it('imports the spaces with no folder', async () => {
+    const { source, archive } = await seededArchive();
+    const target = await makeInstance('target-older-space-folders');
+    try {
+      const older = await olderFormat(archive);
+      const names = readZipEntries(older).map(entry => entry.name);
+      expect(names).not.toContain('space_folders.json');
+
+      await runDataImport(importDeps(target), importRequest(older));
+
+      const owner = { tenant_id: TENANT, created_by: 'bob' };
+      expect(await target.stores.spaceStore.getSpace({ ...owner, space_id: SEED_IDS.space })).toBeDefined();
+      expect(await target.stores.spaceStore.listSpaceFolders(owner)).toEqual([]);
+      expect(await target.stores.spaceStore.listSpaceFolderAssignments(owner)).toEqual([]);
+    } finally {
+      await source.close();
+      await target.close();
+    }
+  });
+
+  it('refuses a space that points at a folder the export does not carry', async () => {
+    const { source, archive } = await seededArchive();
+    const target = await makeInstance('target-missing-space-folder');
+    try {
+      const broken = await repack(archive, entries => {
+        entries.set('space_folders.json', Buffer.from('[]'));
+      });
+
+      const error = await importError(target, broken);
+
+      expect(error).toBeInstanceOf(DataImportError);
+      expect(error).toMatchObject({ status: 400 });
+      expect(
+        await target.stores.spaceStore.getSpace({ tenant_id: TENANT, created_by: 'bob', space_id: SEED_IDS.space }),
+      ).toBeUndefined();
+    } finally {
+      await source.close();
+      await target.close();
+    }
+  });
+});
+
 describe('runDataImport reads chat schedules from before schedules could change their tools', () => {
   it("keeps a chat's schedule on its agent, with its connectors, skills and sandbox, when the export did not yet mark the host-made agent", async () => {
     const source = await makeInstance('source-chat-schedule');
@@ -1254,6 +1314,7 @@ describe('runDataImport refuses an instance that is not fresh', () => {
         'personas',
         'a personalization profile',
         'spaces',
+        'space folders',
         'schedules',
         'agents',
         'connectors',

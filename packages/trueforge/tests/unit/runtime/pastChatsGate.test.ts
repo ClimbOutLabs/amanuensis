@@ -13,6 +13,7 @@ import { SpaceTurnResourceResolver, type SpaceToolStore } from '../../../src/run
 import { createSqliteTestDatabase, type SqliteTestDatabase } from '../../db/sqlite/testDatabase';
 import { FakeTurnArtifactStore } from '../../fixtures/fakeTurnArtifactStore';
 import { uncappedTokenFactoryBudget } from '../../fixtures/uncappedTokenFactoryBudget';
+import { noSpaceFolders } from './spaceFolderStoreFake';
 
 const OWNER = { tenant_id: 't1', created_by: 'u1' };
 
@@ -48,6 +49,7 @@ const STORE: SpaceToolStore = {
   listSpacesWithAggregate: jest.fn(),
   getSpace: jest.fn(),
   getSpaceRevision: jest.fn(),
+  ...noSpaceFolders,
 };
 
 function stubModel(): ILLM {

@@ -1,6 +1,7 @@
 import {
   execFileRunner,
   extractErrorLogFields,
+  forgetShownSkillNotices,
   GitBridge,
   rawSandboxId,
   slotMirrorSocketPathsIn,
@@ -161,6 +162,7 @@ export async function slotSandboxBuildStatus({ logger }: { logger: Logger }): Pr
 export async function removeSlotWorkspace({ sandboxId, logger }: { sandboxId: string; logger: Logger }): Promise<void> {
   try {
     await createSlotSandboxProvider({ logger }).destroySandbox({ sandboxId: rawSandboxId(sandboxId) });
+    forgetShownSkillNotices(rawSandboxId(sandboxId));
   } catch (error) {
     logger.warn('Could not remove the sandbox workspace of a deleted chat', extractErrorLogFields(error));
   }

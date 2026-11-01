@@ -3,6 +3,8 @@ import type { Logger } from 'winston';
 import { createLogger, format, transports } from 'winston';
 import type { AgentThreadExecutionContext } from '../../../../src/core/capabilities/AgentContextProcessor';
 import {
+  DEFAULT_INDIVIDUAL_TOOL_TOKEN_THRESHOLD,
+  DEFAULT_TOTAL_TOOL_TOKEN_THRESHOLD,
   LargeToolResponseProcessor,
   SANDBOX_LARGE_OUTPUT_HEAD_CHARS,
   jsonStructuralSummary,
@@ -10,6 +12,7 @@ import {
 import type { ToolCallResult } from '../../../../src/core/mcp/executeToolCalls';
 import type { IToolSet } from '../../../../src/core/mcp/IMCPServer';
 import { getEmptyCurrentContextUsage } from '../../../../src/core/runtime/contextUsage';
+import { DEFERRED_TOOLS_SERVER_ID, GET_TOOL_INFO_NAME } from '../../../../src/core/runtime/DeferredTool';
 import type { Sandbox } from '../../../../src/core/sandbox/Sandbox';
 import type { ToolOutputScreenDecision } from '../../../../src/schemas/toolOutputScreen';
 import { makeMockIMCPServer, makeSilentLogger, makeStubPublicSandbox } from '../../harnessMocks';
@@ -448,6 +451,130 @@ describe('LargeToolResponseProcessor', () => {
       await processMcpResults({ results: [result] });
 
       expect(parsedSummary(result)['result_kind']).toBe('collection');
+    });
+  });
+
+  describe('block reason and size wording', () => {
+    it('names the single-result limit, in characters, in the panic-path guidance', async () => {
+      // 16,000 characters is 4,000 tokens: over the 1,000-token test threshold on its own.
+      const content = '\x00\x01\x02\x03'.repeat(4000);
+      const result = makeMcpResult({ content, originalToolName: 'list_items', toolSet: makeStubPublicSandbox() });
+
+      await processMcpResults({ results: [result] });
+
+      expect(result.message.content).toContain(
+        'Content too big (this result is over the 4,000-character limit for a single tool result).',
+      );
+    });
+
+    it('names the combined limit, in characters, when only the batch total is over', async () => {
+      // 750 tokens each: under the individual bar, over the batch bar together.
+      const contents = ['\x00\x01'.repeat(1500), '\x00\x02'.repeat(1500), '\x00\x03'.repeat(1500)];
+      const results = contents.map(content =>
+        makeMcpResult({ content, originalToolName: 'list_items', toolSet: makeStubPublicSandbox() }),
+      );
+
+      await processMcpResults({ results });
+
+      const replaced = results.filter(entry => entry.outputTransform === 'replaced');
+      expect(replaced).toHaveLength(1);
+      expect(replaced[0]?.message.content).toContain(
+        'Content too big (the results in this batch together are over the 8,000-character combined limit).',
+      );
+    });
+
+    it('names the combined limit, in characters, in the saved-to-file message when only the batch total is over', async () => {
+      const sandbox = makeStubPublicSandbox();
+      jest.spyOn(sandbox, 'writeArtifact').mockResolvedValue({ filePath: '/tmp/tool-results/list_items_0.txt' });
+      // 750 tokens each: under the individual bar, over the batch bar together, and not
+      // summarizable, so the blocked one takes the saved-to-file path with the batch reason.
+      const contents = ['\x00\x01'.repeat(1500), '\x00\x02'.repeat(1500), '\x00\x03'.repeat(1500)];
+      const results = contents.map(content =>
+        makeMcpResult({
+          content,
+          originalToolName: 'list_items',
+          toolSet: makeMockIMCPServer({ name: 'list-server', preload: false }),
+        }),
+      );
+
+      await processMcpResults({ results, sandbox });
+
+      const replaced = results.filter(entry => entry.outputTransform === 'replaced');
+      expect(replaced).toHaveLength(1);
+      expect(replaced[0]?.message.content).toContain(
+        'Content too large (3,000 characters; the results in this batch together are over the 8,000-character combined limit). Result saved to: /tmp/tool-results/list_items_0.txt.',
+      );
+      expect(replaced[0]?.message.content).not.toContain('limit for a single tool result');
+      const untouched = results.filter(entry => entry.outputTransform !== 'replaced');
+      expect(untouched.map(entry => entry.message.content)).toEqual(contents.slice(1));
+    });
+
+    it('puts the total size and the limit into the saved-to-file message', async () => {
+      const sandbox = makeStubPublicSandbox();
+      jest.spyOn(sandbox, 'writeArtifact').mockResolvedValue({ filePath: '/tmp/tool-results/list_items_0.txt' });
+      const content = '\x00\x01\x02\x03'.repeat(4000);
+      const result = makeMcpResult({
+        content,
+        originalToolName: 'list_items',
+        toolSet: makeMockIMCPServer({ name: 'list-server', preload: false }),
+      });
+
+      await processMcpResults({ results: [result], sandbox });
+
+      expect(result.message.content).toContain(
+        'Content too large (16,000 characters; this result is over the 4,000-character limit for a single tool result). Result saved to: /tmp/tool-results/list_items_0.txt.',
+      );
+      expect(result.message.content).toContain('to understand the schema');
+      expect(result.message.content).not.toContain('undertand');
+      expect(result.message.content).toContain('Plan reads against it');
+    });
+  });
+
+  describe('threshold boundaries at the compiled defaults', () => {
+    async function processWithDefaults(results: ToolCallResult[]): Promise<void> {
+      const processor = new LargeToolResponseProcessor({
+        dynamicSubAgentsPresent: false,
+        individualTokenThreshold: DEFAULT_INDIVIDUAL_TOOL_TOKEN_THRESHOLD,
+        totalTokenThreshold: DEFAULT_TOTAL_TOOL_TOKEN_THRESHOLD,
+        previewNumberOfCharacters: 100,
+        logger: makeSilentLogger(),
+      });
+      const execution: Readonly<AgentThreadExecutionContext> = {
+        threadId: 'thread-1',
+        sandbox: undefined,
+        currentContextUsage: getEmptyCurrentContextUsage(),
+        context: [],
+      };
+      await processor.process(results, execution);
+    }
+
+    it('still blocks a result of exactly 6,000 tokens', async () => {
+      // 24,000 characters is exactly 6,000 tokens: at the threshold, and blocking
+      // stays at-or-over (no boundary move was ported).
+      const content = '\x00\x01\x02\x03'.repeat(6000);
+      const result = makeMcpResult({ content, originalToolName: 'list_items', toolSet: makeStubPublicSandbox() });
+
+      await processWithDefaults([result]);
+
+      expect(result.outputTransform).toBe('replaced');
+      expect(result.message.content).not.toBe(content);
+    });
+
+    it('still replaces a get_tool_info result over the token cap', async () => {
+      // 32,000 characters is 8,000 tokens. There is no second, character-based cap
+      // exempting get_tool_info: the one token cap governs it like every other tool.
+      const content = '\x00\x01\x02\x03'.repeat(8000);
+      const result = makeMcpResult({
+        content,
+        originalToolName: GET_TOOL_INFO_NAME,
+        toolSet: makeMockIMCPServer({ name: DEFERRED_TOOLS_SERVER_ID, preload: true }),
+        serverId: DEFERRED_TOOLS_SERVER_ID,
+      });
+
+      await processWithDefaults([result]);
+
+      expect(result.outputTransform).toBe('replaced');
+      expect(result.message.content).not.toBe(content);
     });
   });
 });

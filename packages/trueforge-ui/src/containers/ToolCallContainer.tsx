@@ -30,7 +30,6 @@ import { RefusedPlaceList } from '../components/RefusedPlaceList.js';
 import { useActiveSessionCanManage } from '../hooks/useResourcePermissions.js';
 import { useHighlightedCard } from '../hooks/useRewardLedger.js';
 import { useWaitingToolCallIds } from '../hooks/useWaitingToolCallIds.js';
-import { ReminderNotificationPrompt } from '../reminders/ReminderNotificationPrompt.js';
 import { useOptionalReminders } from '../reminders/RemindersContext.js';
 import { ALWAYS_ALLOW_TOOL_OPTION_ID, offersChangeIt, SAVE_DRAFT_OPTION_ID } from '../sentinel/approvalChoices.js';
 import { EmailApprovalCard } from '../sentinel/EmailApprovalCard.js';
@@ -483,7 +482,7 @@ function ToolCallPart(part: ToolCallMessagePartProps) {
   useEffect(() => {
     if (personaAdded) void reloadPersonas?.();
   }, [personaAdded, reloadPersonas]);
-  // A reminder set in this chat: look for the Reminders chat now, and offer browser notices once.
+  // A reminder set in this chat: look for the Reminders chat now. The notices offer shows under the reply.
   const reminders = useOptionalReminders();
   const reminderSet = part.toolName === SET_REMINDER_TOOL_NAME && part.status?.type === 'complete';
   const reminderSetNotice = reminders?.reminderSet;
@@ -748,11 +747,5 @@ function ToolCallPart(part: ToolCallMessagePartProps) {
       approvalId={showApproval ? approval?.id : undefined}
     />
   );
-  if (!reminderSet) return card;
-  return (
-    <>
-      {card}
-      <ReminderNotificationPrompt />
-    </>
-  );
+  return card;
 }

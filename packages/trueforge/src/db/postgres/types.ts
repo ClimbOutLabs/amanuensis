@@ -173,6 +173,27 @@ export interface SpaceRevisionTable {
   created_at: Date;
 }
 
+/** An owner's space folder. PRIMARY KEY (tenant_id, created_by, id). */
+export interface SpaceFolderTable {
+  tenant_id: string;
+  created_by: string;
+  id: string;
+  name: string;
+  created_at: Date;
+  updated_at: Date;
+}
+
+/**
+ * Which folder a space sits in, kept apart from `space` so a move is not a content edit.
+ * PRIMARY KEY (tenant_id, created_by, space_id); both references cascade on delete.
+ */
+export interface SpaceFolderAssignmentTable {
+  tenant_id: string;
+  created_by: string;
+  space_id: string;
+  folder_id: string;
+}
+
 /**
  * Append-only Sentinel permission audit log. One row per classified tool call,
  * written before the action executes. PRIMARY KEY (id).
@@ -956,6 +977,8 @@ export interface Database {
   space_aggregate: SpaceAggregateTable;
   space: SpaceTable;
   space_revision: SpaceRevisionTable;
+  space_folder: SpaceFolderTable;
+  space_folder_assignment: SpaceFolderAssignmentTable;
   sentinel_audit: SentinelAuditTable;
   brief_item_completion: BriefItemCompletionTable;
   approval_token: ApprovalTokenTable;

@@ -2298,6 +2298,21 @@
         ],
         "type": "object"
       },
+      "CreateSpaceFolderRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "description": "Folder name, trimmed to 1 through 64 characters.",
+            "maxLength": 64,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "type": "object"
+      },
       "CreateSpaceRequest": {
         "additionalProperties": false,
         "properties": {
@@ -2495,6 +2510,10 @@
         "type": "object"
       },
       "DeleteSkillResponse": {
+        "properties": {},
+        "type": "object"
+      },
+      "DeleteSpaceFolderResponse": {
         "properties": {},
         "type": "object"
       },
@@ -3469,6 +3488,17 @@
         "properties": {
           "data": {
             "$ref": "#/components/schemas/ConfiguredSkill"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
+      "GetSpaceFolderResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/SpaceFolder"
           }
         },
         "required": [
@@ -5261,6 +5291,20 @@
           "data": {
             "items": {
               "$ref": "#/components/schemas/ConfiguredSkill"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
+      "ListSpaceFoldersResponse": {
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/SpaceFolder"
             },
             "type": "array"
           }
@@ -10041,6 +10085,24 @@
         ],
         "type": "object"
       },
+      "SetSpaceFolderRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "folder_id": {
+            "maxLength": 64,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "folder_id"
+        ],
+        "type": "object"
+      },
+      "SetSpaceFolderResponse": {
+        "properties": {},
+        "type": "object"
+      },
       "SettingsCapability": {
         "properties": {
           "enabled": {
@@ -10223,6 +10285,15 @@
             "format": "date-time",
             "type": "string"
           },
+          "folder_id": {
+            "description": "The folder the space sits in, or null when it is not in one.",
+            "maxLength": 64,
+            "minLength": 1,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "format": {
             "$ref": "#/components/schemas/SpaceFormat"
           },
@@ -10259,6 +10330,7 @@
           "purpose",
           "status",
           "body",
+          "folder_id",
           "revision",
           "created_at",
           "updated_at"
@@ -10294,6 +10366,37 @@
           "purpose",
           "status",
           "body"
+        ],
+        "type": "object"
+      },
+      "SpaceFolder": {
+        "additionalProperties": false,
+        "properties": {
+          "created_at": {
+            "description": "ISO 8601 creation timestamp.",
+            "type": "string"
+          },
+          "id": {
+            "description": "Immutable server-generated folder identifier.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "name": {
+            "description": "Folder name, trimmed to 1 through 64 characters.",
+            "maxLength": 64,
+            "minLength": 1,
+            "type": "string"
+          },
+          "updated_at": {
+            "description": "ISO 8601 last-update timestamp.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "created_at",
+          "updated_at"
         ],
         "type": "object"
       },
@@ -13411,6 +13514,21 @@
         },
         "required": [
           "manifest"
+        ],
+        "type": "object"
+      },
+      "UpdateSpaceFolderRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "description": "Folder name, trimmed to 1 through 64 characters.",
+            "maxLength": 64,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
         ],
         "type": "object"
       },
@@ -23586,6 +23704,177 @@
         "x-fern-sdk-method-name": "list_versions"
       }
     },
+    "/api/v1/space-folders": {
+      "get": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListSpaceFoldersResponse"
+                }
+              }
+            },
+            "description": "The authenticated user's space folders, ordered by name."
+          }
+        },
+        "summary": "List space folders",
+        "tags": [
+          "Spaces"
+        ],
+        "x-fern-sdk-group-name": [
+          "space-folders"
+        ],
+        "x-fern-sdk-method-name": "list"
+      },
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateSpaceFolderRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetSpaceFolderResponse"
+                }
+              }
+            },
+            "description": "The created folder."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid folder name."
+          }
+        },
+        "summary": "Create a space folder",
+        "tags": [
+          "Spaces"
+        ],
+        "x-fern-sdk-group-name": [
+          "space-folders"
+        ],
+        "x-fern-sdk-method-name": "create"
+      }
+    },
+    "/api/v1/space-folders/{folder_id}": {
+      "delete": {
+        "description": "Deletes the folder and leaves its spaces without a folder.",
+        "parameters": [
+          {
+            "description": "Immutable space folder identifier.",
+            "in": "path",
+            "name": "folder_id",
+            "required": true,
+            "schema": {
+              "description": "Immutable space folder identifier.",
+              "maxLength": 64,
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeleteSpaceFolderResponse"
+                }
+              }
+            },
+            "description": "Folder deleted or already absent."
+          }
+        },
+        "summary": "Delete a space folder",
+        "tags": [
+          "Spaces"
+        ],
+        "x-fern-sdk-group-name": [
+          "space-folders"
+        ],
+        "x-fern-sdk-method-name": "delete"
+      },
+      "put": {
+        "parameters": [
+          {
+            "description": "Immutable space folder identifier.",
+            "in": "path",
+            "name": "folder_id",
+            "required": true,
+            "schema": {
+              "description": "Immutable space folder identifier.",
+              "maxLength": 64,
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateSpaceFolderRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetSpaceFolderResponse"
+                }
+              }
+            },
+            "description": "The renamed folder."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid folder name."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Folder not found for this user."
+          }
+        },
+        "summary": "Rename a space folder",
+        "tags": [
+          "Spaces"
+        ],
+        "x-fern-sdk-group-name": [
+          "space-folders"
+        ],
+        "x-fern-sdk-method-name": "update"
+      }
+    },
     "/api/v1/spaces": {
       "get": {
         "description": "Returns the authenticated user’s spaces, ordered by name.",
@@ -23969,6 +24258,107 @@
           "spaces"
         ],
         "x-fern-sdk-method-name": "update"
+      }
+    },
+    "/api/v1/spaces/{space_id}/folder": {
+      "delete": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "space_id",
+            "required": true,
+            "schema": {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SetSpaceFolderResponse"
+                }
+              }
+            },
+            "description": "Space is no longer in a folder."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Space not found for this user."
+          }
+        },
+        "summary": "Take a space out of its folder",
+        "tags": [
+          "Spaces"
+        ],
+        "x-fern-sdk-group-name": [
+          "spaces"
+        ],
+        "x-fern-sdk-method-name": "clear_folder"
+      },
+      "put": {
+        "description": "Placement is not an edit: the space revision and timestamps stay as they were.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "space_id",
+            "required": true,
+            "schema": {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetSpaceFolderRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SetSpaceFolderResponse"
+                }
+              }
+            },
+            "description": "Space moved."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Space or folder not found for this user."
+          }
+        },
+        "summary": "Move a space into a folder",
+        "tags": [
+          "Spaces"
+        ],
+        "x-fern-sdk-group-name": [
+          "spaces"
+        ],
+        "x-fern-sdk-method-name": "set_folder"
       }
     },
     "/api/v1/spaces/{space_id}/revert": {
