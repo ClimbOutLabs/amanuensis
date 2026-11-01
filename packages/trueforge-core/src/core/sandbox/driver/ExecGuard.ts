@@ -41,7 +41,7 @@ const SHELL_NAMES = new Set(['sh', 'bash', 'dash', 'zsh']);
 
 /**
  * Code-flag letters per interpreter family, matched ANYWHERE in short
- * clusters: python `-uc`/`-Buc`/`-Suc` (and `-mjson.tool`) execute; node
+ * clusters: python `-uc`/`-Buc`/`-Suc` execute; node
  * `-pe` and `--eval`/`--print` execute; perl `-lne`/`-pE`/`-nE` execute.
  * A plain `-u`, `-S`, `-`, or `--version` carries no code letter and stays
  * allowed. An arg-taking short flag that swallows the code letter
@@ -50,7 +50,7 @@ const SHELL_NAMES = new Set(['sh', 'bash', 'dash', 'zsh']);
  */
 function codeFlagPattern(base: string): RegExp | undefined {
   if (base.startsWith('python')) {
-    return /^-[A-Za-z]*[cm]/;
+    return /^-[A-Za-z]*c/;
   }
   if (base === 'node' || base === 'nodejs') {
     return /^-[A-Za-z]*[ep]/;
@@ -60,6 +60,35 @@ function codeFlagPattern(base: string): RegExp | undefined {
   }
   if (base === 'ruby') {
     return /^-[A-Za-z]*[e]/;
+  }
+  return undefined;
+}
+
+const PYTHON_MODULE_NAME = /^[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*$/;
+
+/**
+ * Finds python's `-m <module>` (also clustered, `-Bm pytest` or `-mpytest`) among the options that
+ * come before any script operand. `optionCount` is how many operands are python's own options, up to
+ * and including the one naming the module; later operands belong to the module. Undefined when the
+ * command does not use `-m`.
+ */
+function pythonModuleInvocation(operands: readonly string[]): { optionCount: number; valid: boolean } | undefined {
+  for (let index = 0; index < operands.length; index += 1) {
+    const op = operands[index] ?? '';
+    if (op === '-' || op === '--' || !op.startsWith('-')) {
+      return undefined;
+    }
+    if (op.startsWith('--')) {
+      continue;
+    }
+    const at = op.indexOf('m', 1);
+    if (at === -1) {
+      continue;
+    }
+    const attached = op.slice(at + 1);
+    const moduleName = attached.length > 0 ? attached : operands[index + 1];
+    const optionCount = attached.length > 0 ? index + 1 : index + 2;
+    return { optionCount, valid: moduleName !== undefined && PYTHON_MODULE_NAME.test(moduleName) };
   }
   return undefined;
 }
@@ -328,11 +357,15 @@ function classifySegment(input: { argv: string[]; hasHeredoc: boolean; host: Exe
     // stay allowed.
     const codeFlag = codeFlagPattern(base);
     const isNode = base === 'node' || base === 'nodejs';
-    const runsCode = operands.some(op => codeFlag?.test(op) === true || (isNode && /^--(eval|print)(=|$)/.test(op)));
+    const pythonModule = base.startsWith('python') ? pythonModuleInvocation(operands) : undefined;
+    const optionOperands = pythonModule === undefined ? operands : operands.slice(0, pythonModule.optionCount);
+    const runsCode = optionOperands.some(
+      op => codeFlag?.test(op) === true || (isNode && /^--(eval|print)(=|$)/.test(op)),
+    );
     if (runsCode) {
       return {
         verdict: 'reject',
-        reason: `exec must not run ${base} with a code-flag operand (-c/-e/-m in any short-flag cluster, node --eval/--print): use the run_code tool instead`,
+        reason: `exec must not run ${base} with inline code (-c for python, -e/-p/--eval/--print for node, -e for perl and ruby): use the run_code tool instead`,
       };
     }
     if (input.hasHeredoc) {
@@ -340,6 +373,17 @@ function classifySegment(input: { argv: string[]; hasHeredoc: boolean; host: Exe
         verdict: 'reject',
         reason: `exec must not run ${base} with heredoc input: use the run_code tool instead`,
       };
+    }
+    if (pythonModule !== undefined) {
+      // `python3 -m pytest`, `-m pip`, `-m venv`: an installed module run by name, the way a
+      // project is built and tested. Everything after the module name is that module's own
+      // arguments, so it is not read as a script file.
+      return pythonModule.valid
+        ? { verdict: 'allow' }
+        : {
+            verdict: 'reject',
+            reason: `exec must run ${base} -m with a module name such as pytest or pip`,
+          };
     }
     if (operands.some(op => op === '-')) {
       return {
@@ -398,6 +442,7 @@ export function interpreterInvocationRefusal(reason: string): string {
     `Invalid exec input: ${reason}. ` +
     `exec is for repository and workspace commands (git, build, test, file inspection) — ` +
     `it must not run python/node code. Use the run_code tool instead. ` +
+    `Running an installed python module by name, such as python3 -m pytest or python3 -m pip, is allowed. ` +
     `Do not work around this by renaming the interpreter or wrapping the invocation.`
   );
 }

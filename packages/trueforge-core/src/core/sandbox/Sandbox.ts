@@ -1165,7 +1165,8 @@ export const sandboxWriteFileSchema = z
     return { ...rest, content };
   });
 
-const WRITE_FILE_SCRIPT = `import hashlib
+export const WRITE_FILE_SCRIPT = `import errno
+import hashlib
 import json
 import os
 import secrets
@@ -1197,13 +1198,40 @@ if not path_parts or any(part == ".." for part in path_parts):
     stop("path must stay within cwd")
 parts = cwd_parts + path_parts
 
+DIRECTORY_FLAGS = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+
+def open_folder(name, parent_fd, shown):
+    try:
+        return os.open(name, DIRECTORY_FLAGS, dir_fd=parent_fd)
+    except OSError as error:
+        if error.errno in (errno.ENOTDIR, errno.ELOOP):
+            stop("%s is a file or a link, not a folder, so write_file cannot create a file inside it" % shown)
+        raise
+
+def open_or_create_folder(name, parent_fd, shown, created):
+    try:
+        return open_folder(name, parent_fd, shown)
+    except FileNotFoundError:
+        pass
+    try:
+        os.mkdir(name, 0o755, dir_fd=parent_fd)
+        created.append(shown)
+    except FileExistsError:
+        pass
+    return open_folder(name, parent_fd, shown)
+
 directory_fds = []
-root_fd = os.open(workspace_cwd, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+created_directories = []
+try:
+    root_fd = os.open(workspace_cwd, DIRECTORY_FLAGS)
+except OSError as error:
+    stop("the workspace folder could not be opened: %s" % (error.strerror or error))
 directory_fds.append(root_fd)
 parent_fd = root_fd
 try:
-    for part in parts[:-1]:
-        parent_fd = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=parent_fd)
+    for index, part in enumerate(parts[:-1]):
+        shown = "/".join(parts[: index + 1])
+        parent_fd = open_or_create_folder(part, parent_fd, shown, created_directories)
         directory_fds.append(parent_fd)
     target_name = parts[-1]
     content_bytes = payload["content"].encode("utf-8")
@@ -1234,6 +1262,8 @@ try:
             os.unlink(temporary_name, dir_fd=parent_fd)
         except FileNotFoundError:
             pass
+except OSError as error:
+    stop("%s could not be written: %s" % (relative_path, error.strerror or error))
 finally:
     for directory_fd in reversed(directory_fds):
         os.close(directory_fd)
@@ -1242,6 +1272,7 @@ print(json.dumps({
     "path": relative_path,
     "byte_length": len(content_bytes),
     "sha256": hashlib.sha256(content_bytes).hexdigest(),
+    "created_directories": created_directories,
 }))
 `;
 
@@ -1465,7 +1496,7 @@ export const SANDBOX_REPLACE_TEXT_DESCRIPTION =
   'Replace one exact passage in a UTF-8 file beneath cwd; old_text must match exactly and uniquely. Pass old_text_lines and new_text_lines, one element per line, blank lines as empty strings. Writes atomically. Never stages, commits or pushes.';
 
 const SANDBOX_WRITE_FILE_DESCRIPTION =
-  'Create one new UTF-8 file beneath cwd. Pass content_lines, one element per line, blank lines as empty strings. Use replace_text or apply_patch for existing files. Never stages, commits or pushes.';
+  'Create one new UTF-8 file beneath cwd, creating any missing folders on its path. Pass content_lines, one element per line, blank lines as empty strings. Use replace_text or apply_patch for existing files. Never stages, commits or pushes.';
 
 export function createSandboxWriteFileDescription({ fileDownload }: { fileDownload: boolean }): string {
   return fileDownload

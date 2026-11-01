@@ -27,8 +27,10 @@ describe('classifyExecCommand', () => {
       ["python3 - <<'EOF'\nprint(1)\nEOF", 'quoted heredoc'],
       ['python3 script.py', 'script file operand'],
       ['python script.py --flag', 'script file with flags'],
-      ['python3 -m http.server', '-m module'],
-      ['python3 -mjson.tool', '-m glued to module name'],
+      ['python3 -m', '-m without a module name'],
+      ["python3 -m 'not a module'", '-m with something that is not a module name'],
+      ["python3 -cm 'print(1)'", '-c before -m in one cluster'],
+      ["python3 -c 'print(1)' -m pytest", '-c before a later -m'],
       ['perl -e"print 1"', 'perl -e glued to its argument'],
       // Clustered short flags: the code letter executes from ANY position in
       // the cluster (all confirmed against live interpreters, Sep 2026).
@@ -93,6 +95,17 @@ describe('classifyExecCommand', () => {
       ['npm run build', 'npm script'],
       ['FOO=1 git status', 'env prefix on a normal command'],
       ['sh -c "git status"', 'sh -c of a normal command'],
+      // Installed modules run by name are how a Python project is built and tested.
+      ['python3 -m pytest', '-m pytest'],
+      ['python3 -m pytest tests/test_verify.py -q', '-m pytest with test paths after the module'],
+      ['python3 -m pytest -c pytest.ini', "a -c after the module is the module's own argument"],
+      ['python3 -m pip install -e .', '-m pip'],
+      ['python3 -m venv .venv', '-m venv'],
+      ['python3 -B -m pytest', '-m after another flag'],
+      ['python3 -Bm pytest', '-m clustered with another flag'],
+      ['python3 -mjson.tool data.json', '-m glued to a dotted module name'],
+      ['python3 -m http.server 8000', '-m with a dotted module name'],
+      ['cd proj && python3 -m pytest', '-m pytest after cd'],
     ];
     for (const [command, label] of cases) {
       it(`allows: ${label}`, () => {
