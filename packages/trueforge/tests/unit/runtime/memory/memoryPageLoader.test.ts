@@ -72,7 +72,7 @@ describe('memoryPageLoader', () => {
         '- Short and casual. No sign-off. (from mail you sent, since 2026-10-31)',
         'Now:',
         '- Booked the movie for Saturday 7 PM. (from mail, 2026-10-30 to 2026-11-01)',
-        '- Hand-written line with no marker yet',
+        '- Hand-written line with no marker yet (you wrote)',
         'Unconfirmed (not confirmed by you):',
         '- Might be travelling the week of Nov 16. (read content, not confirmed, seen 2026-10-29)',
         'Earlier:',
@@ -84,6 +84,14 @@ describe('memoryPageLoader', () => {
   it('lists the writing instructions of a person page', () => {
     const page = parseMemoryPage({ content: WENDY, fallback: { kind: 'person', title: 'Wendy' } });
     expect(writingInstructions(page)).toEqual(['Short and casual. No sign-off.']);
+  });
+
+  it('counts a bullet the person typed by hand under "How you write to them" as an instruction', () => {
+    const page = parseMemoryPage({
+      content: '---\nkind: person\ntitle: Sam\n---\n# Sam\n\n## How you write to them\n- First names only.\n',
+      fallback: { kind: 'person', title: 'Sam' },
+    });
+    expect(writingInstructions(page)).toEqual(['First names only.']);
   });
 
   it('loads the pages a message names, own vault first, people before matters', async () => {

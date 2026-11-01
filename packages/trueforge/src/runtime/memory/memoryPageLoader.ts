@@ -5,7 +5,14 @@
 import { loadAliasIndex, matchAliases, type AliasMatch } from './aliasIndex';
 import { estimateTokens } from './markdownMemoryFiles';
 import type { FactMarker, FactSource } from './memoryNotes';
-import { PAGE_SECTIONS, pageFacts, readMemoryPage, type MemoryPage, type PageKind, type PageLine } from './memoryPages';
+import {
+  PAGE_SECTIONS,
+  readMemoryPage,
+  unmarkedBulletText,
+  type MemoryPage,
+  type PageKind,
+  type PageLine,
+} from './memoryPages';
 
 /** Why a page was loaded, recorded on the turn's memory event. */
 export type PageLoadReason = 'direct' | 'possessive';
@@ -77,6 +84,11 @@ function dateSpan(marker: FactMarker): string | undefined {
 
 function renderLine(line: PageLine): string | undefined {
   if (line.kind === 'other') {
+    // A bullet with no marker is one the person typed by hand, so it reads as their own words.
+    const bullet = unmarkedBulletText(line.raw);
+    if (bullet !== undefined) {
+      return `- ${bullet} (${SOURCE_LABELS.you_edited})`;
+    }
     const text = line.raw.trim();
     return text === '' ? undefined : text;
   }
@@ -243,7 +255,11 @@ export async function loadPagesForMessage(input: {
 
 /** The "How you write to them" lines of a loaded person page, as instructions for drafting. */
 export function writingInstructions(page: MemoryPage): string[] {
-  return pageFacts(page)
-    .filter(entry => entry.section.name === WRITING_SECTION && INSTRUCTION_SOURCES.has(entry.fact.marker.src))
-    .map(entry => entry.fact.text);
+  return page.sections
+    .filter(section => section.name === WRITING_SECTION)
+    .flatMap(section => section.lines.filter(isInstructionLine))
+    .flatMap(line => {
+      const text = line.kind === 'fact' ? line.fact.text : unmarkedBulletText(line.raw);
+      return text === undefined ? [] : [text];
+    });
 }

@@ -457,6 +457,11 @@ export async function freePageSlug(input: { vaultDir: string; kind: PageKind; ti
 const FENCE = '---';
 const BULLET_PREFIX_PATTERN = /^\s*[-*]\s+/;
 const UNMARKED_BULLET_PATTERN = /^\s*[-*]\s+\S/;
+
+/** The text of a bullet that has no fact marker (a line the person typed by hand), or undefined for any other line. */
+export function unmarkedBulletText(raw: string): string | undefined {
+  return UNMARKED_BULLET_PATTERN.test(raw) ? raw.replace(BULLET_PREFIX_PATTERN, '').trimEnd() : undefined;
+}
 const YAML_LINE: ToStringOptions = { lineWidth: 0 };
 const YAML_FLOW: ToStringOptions = { lineWidth: 0, collectionStyle: 'flow', flowCollectionPadding: false };
 
