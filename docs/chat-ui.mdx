@@ -27,6 +27,16 @@ The sidebar's chat history list supports renaming chats, filing them into folder
 
 A chat's **···** menu itself only appears when at least one of Rename, Delete, or Move to folder is actually available for it.
 
+## Spaces and folders
+
+The **Spaces** page lists the pages Aman keeps up to date for you. You can file them into folders, the same way as chats.
+
+**Folders**: click **New folder** at the top of the Spaces page to create a folder. Open a space, choose **Space actions**, then **Move to folder**, to file it. That dialog also lets you create a folder on the spot, and **No folder** takes the space back out. Folders show as collapsible sections above the spaces that have no folder. Each folder's own **···** button opens a dialog to rename or delete it. Deleting a folder keeps every space in it, just without a folder.
+
+You can also ask Aman to file a space for you, for example "put my Pets space in a folder called Home". Aman uses an existing folder with that name or makes a new one, and can take a space out of a folder. Aman cannot rename or delete folders.
+
+Moving a space is not a change to the space. Its version number and its updated time stay as they were, and going back to an earlier version keeps the space in its folder. Space folders are separate from chat folders.
+
 ## Images in chat
 
 Chat shows pictures you upload, image attachments on email Aman read, and images a sandbox run produced. Every image, from your machine or from the web, is first rebuilt inside the gVisor sandbox with no network: PNG, JPEG, GIF and WebP are accepted, SVG is refused, metadata is removed, and size, pixel and frame limits apply. The page only ever loads the rebuilt copy from Aman itself, never an image from another site.

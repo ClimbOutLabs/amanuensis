@@ -223,6 +223,10 @@ describe('progressRefundFor', () => {
     expect(progressRefundFor({ results: [], refundsSoFar: 0 })).toBe(0);
   });
 
+  it('refunds nothing for moving a space into a folder', () => {
+    expect(progressRefundFor({ results: [{ ...landed, toolName: 'move_space' }], refundsSoFar: 0 })).toBe(0);
+  });
+
   it('refunds one step when a sandbox file edit landed, and nothing when it failed', () => {
     const fileEdit = { ...landed, toolName: 'write_file', sandboxFileEdit: true };
     expect(progressRefundFor({ results: [fileEdit], refundsSoFar: 0 })).toBe(1);

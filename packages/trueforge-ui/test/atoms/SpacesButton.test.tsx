@@ -6,6 +6,7 @@ import { SpacesButton } from '@/atoms/SpacesButton.js';
 import { ShellModeProvider, useShellMode } from '@/server/ShellModeContext.js';
 import { SpaceProvider, type Space, type SpaceStore } from '@/server/SpaceContext.js';
 import { SlotsProvider } from '@/theme/SlotsProvider.js';
+import { noSpaceFolders } from '../server/noSpaceFolders.js';
 
 const SPAIN_HOUSES: Space = {
   id: 's-spain-houses',
@@ -14,6 +15,7 @@ const SPAIN_HOUSES: Space = {
   status: 'active',
   body: '| Address | Price | Status |\n| --- | --- | --- |\n| Calle Mayor 1 | 250000 | Viewed |',
   format: 'markdown',
+  folder_id: null,
   revision: 2,
   created_at: '2026-09-01T00:00:00.000Z',
   updated_at: '2026-09-10T00:00:00.000Z',
@@ -28,6 +30,7 @@ function mockStore(spaces: Space[] = [SPAIN_HOUSES]): SpaceStore {
       return found;
     }),
     delete: vi.fn(async () => {}),
+    ...noSpaceFolders,
   };
 }
 

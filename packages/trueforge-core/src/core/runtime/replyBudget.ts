@@ -11,7 +11,7 @@
 import { z } from 'zod';
 import type { ToolResultDisposition } from '../events/schema';
 import { UNKNOWN_TOOL_NAME } from '../llm/LLMTypes';
-import { isSpaceWriteToolName } from '../spaces/toolContract';
+import { isSpaceContentWriteToolName } from '../spaces/toolContract';
 
 export const ToolResultKindSchema = z.enum([
   'ok',
@@ -113,7 +113,7 @@ export function progressRefundFor({
 }): number {
   const landedWrite = results.some(
     result =>
-      (isSpaceWriteToolName(result.toolName) || result.sandboxFileEdit === true) &&
+      (isSpaceContentWriteToolName(result.toolName) || result.sandboxFileEdit === true) &&
       result.disposition === 'executed_ok' &&
       !result.failure &&
       !result.savedNothing,
