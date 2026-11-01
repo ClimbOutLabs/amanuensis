@@ -3,7 +3,10 @@ import { createServer, request as httpRequest, type Server } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createLogger, transports } from 'winston';
-import type { PackageMirrorAllowanceCheck } from '../../../../src/sandbox/mirrors/packageMirrorAllowance';
+import type {
+  PackageMirrorAllowanceCheck,
+  PackageMirrorAllowanceResult,
+} from '../../../../src/sandbox/mirrors/packageMirrorAllowance';
 import {
   PackageMirrorGateway,
   isPublicAddress,
@@ -298,8 +301,22 @@ describe('PackageMirrorGateway', () => {
     }
   });
 
+  it('says the chat was deleted, not that downloads were turned off, and takes the grant back', async () => {
+    const harness = await setup({ allowanceHolds: () => Promise.resolve('chat_deleted') });
+    try {
+      const refused = await call(harness.port, { path: '/npm/leftpad', token: harness.token });
+      expect(refused.status).toBe(403);
+      expect(refused.body).toContain('This chat was deleted');
+      expect(refused.body).not.toContain('turned off');
+      expect(harness.registry.resolve(harness.token)).toBeUndefined();
+      expect(harness.upstreamHits).toEqual([]);
+    } finally {
+      await harness.close();
+    }
+  });
+
   it('keeps the grant and asks for a retry when the allowance cannot be checked', async () => {
-    let result: 'holds' | 'off' | 'unavailable' = 'unavailable';
+    let result: PackageMirrorAllowanceResult = 'unavailable';
     const harness = await setup({ allowanceHolds: () => Promise.resolve(result) });
     try {
       const refused = await call(harness.port, { path: '/npm/leftpad', token: harness.token });

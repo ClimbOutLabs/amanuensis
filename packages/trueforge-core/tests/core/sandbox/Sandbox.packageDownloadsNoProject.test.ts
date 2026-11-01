@@ -676,6 +676,23 @@ describe('a run_code script that downloads packages, in a chat without a project
     expect(runCodeCalls[0]?.options?.packageMirrorToken).toBe('mirror-token');
   });
 
+  it('runs a script that only builds or tests while downloads are off, with no token', async () => {
+    const runCodeCalls: RecordedRunCodeCall[] = [];
+    const sandbox = makeSandbox({
+      execCalls: [],
+      allowed: () => false,
+      allowPackageDownloads: async () => undefined,
+      runCodeCalls,
+      files: {
+        [SCRIPT_PATH]: 'import subprocess\nsubprocess.run(["go", "test", "./..."])\nsubprocess.run(["npx", "tsc"])',
+      },
+    });
+    const response = await sandbox.callTool(SCRIPT_CALL, { status: 'allow' });
+    expect(resultText(response)).not.toContain('Run the install on its own first');
+    expect(runCodeCalls).toHaveLength(1);
+    expect(runCodeCalls[0]?.options?.packageMirrorToken).toBeUndefined();
+  });
+
   it('runs a script that downloads nothing as before, with no token while downloads are off', async () => {
     const runCodeCalls: RecordedRunCodeCall[] = [];
     const allowPackageDownloads = jest.fn(async () => undefined);
@@ -768,7 +785,7 @@ describe('when downloads cannot work in a chat without a project', () => {
   it.each([
     ['pip install requests', 'pip'],
     ['npm install left-pad', 'npm'],
-    ['cargo build', 'cargo'],
+    ['cargo install ripgrep', 'cargo'],
     ['go get example.com/mod', 'go'],
   ])(
     'refuses %s before any card when the driver cannot reach the gateway, and never runs it',
@@ -797,6 +814,43 @@ describe('when downloads cannot work in a chat without a project', () => {
       expect(execCalls.some(params => params.command === command)).toBe(false);
     },
   );
+
+  it.each(['go test ./...', 'npx tsc', 'cargo build', 'uv run pytest', 'make init', 'npm run setup'])(
+    'runs %s as an ordinary command when the driver cannot reach the gateway',
+    async command => {
+      const execCalls: SandboxExecParams[] = [];
+      const sandbox = makeSandbox({
+        execCalls,
+        allowed: () => false,
+        allowPackageDownloads: async () => undefined,
+        runCodeService: DOCKER_RUN_CODE_SERVICE,
+      });
+      const call = {
+        name: SANDBOX_EXEC_TOOL_NAME,
+        arguments: { intent: 'Build and test', purpose: 'execute', command },
+      };
+      const response = await sandbox.callTool(call, { status: 'allow' });
+      expect(resultText(response)).not.toContain('Package downloads need the sealed sandbox');
+      expect(execCalls.some(params => params.command === command)).toBe(true);
+    },
+  );
+
+  it('runs a build command as an ordinary command when no download wiring exists', async () => {
+    const execCalls: SandboxExecParams[] = [];
+    const sandbox = makeSandbox({
+      execCalls,
+      allowed: () => false,
+      allowPackageDownloads: async () => undefined,
+      loaders: false,
+    });
+    const call = {
+      name: SANDBOX_EXEC_TOOL_NAME,
+      arguments: { intent: 'Run the tests', purpose: 'execute', command: 'go test ./...' },
+    };
+    const response = await sandbox.callTool(call, { status: 'allow' });
+    expect(resultText(response)).not.toContain('Packages cannot be downloaded on this server');
+    expect(execCalls.some(params => params.command === 'go test ./...')).toBe(true);
+  });
 
   it('refuses an install before any card when no download wiring exists, and never runs it', async () => {
     const execCalls: SandboxExecParams[] = [];

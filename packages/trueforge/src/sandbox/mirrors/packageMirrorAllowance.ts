@@ -8,11 +8,12 @@ const ALLOWANCE_RECHECK_MS = 5_000;
 
 /**
  * Whether a grant's allowance still holds in the shared database: 'holds' while it does, 'off'
- * when the database says it ended, and 'unavailable' when the database could not be read at
- * all. 'unavailable' is not 'off': the grant stays in place and the person is told to try
- * again, because nothing they did turned downloads off.
+ * when downloads were turned off, 'chat_deleted' when the chat is gone or is no longer the
+ * person's, and 'unavailable' when the database could not be read at all. 'unavailable' is not
+ * 'off': the grant stays in place and the person is told to try again, because nothing they did
+ * turned downloads off.
  */
-export type PackageMirrorAllowanceResult = 'holds' | 'off' | 'unavailable';
+export type PackageMirrorAllowanceResult = 'holds' | 'off' | 'chat_deleted' | 'unavailable';
 
 /** Whether a grant's allowance still holds in the shared database. */
 export type PackageMirrorAllowanceCheck = (grant: PackageMirrorGrant) => Promise<PackageMirrorAllowanceResult>;
@@ -41,7 +42,7 @@ export function createPackageMirrorAllowanceCheck(deps: {
   const read = async (grant: PackageMirrorGrant): Promise<Exclude<PackageMirrorAllowanceResult, 'unavailable'>> => {
     const session = await deps.sessionStore.getSession({ tenant_id: grant.tenant_id, session_id: grant.session_id });
     if (session?.created_by_subject.subject_id !== grant.created_by) {
-      return 'off';
+      return 'chat_deleted';
     }
     if (grant.repository_id === undefined) {
       const settings = await deps.sentinelSettingsStore.get({

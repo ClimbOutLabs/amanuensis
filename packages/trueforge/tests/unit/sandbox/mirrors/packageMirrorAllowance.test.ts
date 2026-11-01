@@ -77,8 +77,8 @@ describe('createPackageMirrorAllowanceCheck', () => {
   });
 
   it('ends a grant whose chat was deleted or belongs to someone else', async () => {
-    expect(await check({ owner: undefined, withoutProject: true }).allowanceHolds(grant())).toBe('off');
-    expect(await check({ owner: 'u2', withoutProject: true }).allowanceHolds(grant())).toBe('off');
+    expect(await check({ owner: undefined, withoutProject: true }).allowanceHolds(grant())).toBe('chat_deleted');
+    expect(await check({ owner: 'u2', withoutProject: true }).allowanceHolds(grant())).toBe('chat_deleted');
   });
 
   it('counts a failed read as unavailable, not off, and does not cache it', async () => {

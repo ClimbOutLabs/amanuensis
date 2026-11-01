@@ -365,12 +365,14 @@ export class PackageMirrorGateway {
       this.#log({ grant, ecosystem, path: rawPath, status: 503, bytes: 0, cached: false, at: startedAt });
       return;
     }
-    if (allowance === 'off') {
+    if (allowance === 'off' || allowance === 'chat_deleted') {
       this.#registry.revoke(token);
       this.#plain(
         res,
         403,
-        'Package downloads were turned off for this chat, so this download was stopped. Turn them on again in Settings, then try again.',
+        allowance === 'chat_deleted'
+          ? 'This chat was deleted, so this download was stopped. Start a new chat to keep working.'
+          : 'Package downloads were turned off for this chat, so this download was stopped. Turn them on again in Settings, then try again.',
       );
       this.#log({ grant, ecosystem, path: rawPath, status: 403, bytes: 0, cached: false, at: startedAt });
       return;

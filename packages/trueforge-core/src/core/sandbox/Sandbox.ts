@@ -1922,7 +1922,7 @@ function sandboxExecPreflightFailure(input: {
   if (!input.hasNetwork && !input.skillNetworkGranted && sandboxCommandHasNetworkIntent(input.command)) {
     return OFFLINE_NETWORK_COMMAND_REFUSAL;
   }
-  if (input.packageDownloadBlock !== undefined && commandDownloadsPackages(input.command)) {
+  if (input.packageDownloadBlock !== undefined && commandInstallsPackages(input.command)) {
     return input.packageDownloadBlock === 'driver'
       ? PACKAGE_INSTALL_NEEDS_SEALED_SANDBOX_REFUSAL
       : PACKAGE_INSTALL_UNAVAILABLE_REFUSAL;
@@ -4250,7 +4250,7 @@ export class Sandbox extends LocalToolMCP {
   }
 
   /**
-   * The refusal for a script_path run whose script downloads packages while this chat's scope has
+   * The refusal for a script_path run whose script installs packages while this chat's scope has
    * not allowed downloads, or undefined when the run may go ahead. Without it the install would
    * fail inside the sandbox with no way for the person to allow it, since only a call whose own
    * arguments name the download can show the download card. A script that cannot be read is left
@@ -4272,7 +4272,7 @@ export class Sandbox extends LocalToolMCP {
     } catch {
       return undefined;
     }
-    if (!commandDownloadsPackages(text)) {
+    if (!commandInstallsPackages(text)) {
       return undefined;
     }
     try {
