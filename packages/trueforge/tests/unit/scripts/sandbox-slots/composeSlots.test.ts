@@ -302,7 +302,7 @@ describe('installer/templates/instance/compose.yaml.tpl calendar connector', () 
       })
       .loose()
       .parse(load('docker-compose.yml'));
-    expect(dev.services.loopback.networks).toEqual(['default', 'calendar']);
+    expect(dev.services.loopback.networks).toEqual(['default', 'calendar', 'browser-control']);
     expect(dev.services['calendar-caldav'].environment.CALENDAR_ACCOUNT_SECRET).toBe(
       dev.services.server.environment.CALENDAR_ACCOUNT_SECRET,
     );
@@ -313,6 +313,28 @@ describe('installer/templates/instance/compose.yaml.tpl calendar connector', () 
       .filter(([name]) => name !== 'loopback' && name !== 'calendar-caldav')
       .filter(([, service]) => JSON.stringify(service).includes('"calendar"'));
     expect(others.map(([name]) => name)).toEqual([]);
+  });
+
+  test("the dev stack walls the browser off: its only network is internal and holds nothing of the app's", () => {
+    const Service = z.object({ networks: z.array(z.string()).optional() }).loose();
+    const dev = z
+      .object({
+        services: z.record(z.string(), Service),
+        networks: z.record(z.string(), z.object({ internal: z.boolean().optional() }).loose().nullable()),
+      })
+      .loose()
+      .parse(load('docker-compose.yml'));
+    const on = (network: string): string[] =>
+      Object.entries(dev.services)
+        .filter(([, service]) => service.networks?.includes(network) === true)
+        .map(([name]) => name)
+        .sort();
+    expect(dev.services['browser']?.networks).toEqual(['browser-internal']);
+    expect(dev.networks['browser-internal']?.internal).toBe(true);
+    expect(dev.networks['browser-control']?.internal).toBe(true);
+    expect(on('browser-internal')).toEqual(['browser', 'browser-gateway']);
+    expect(on('browser-control')).toEqual(['browser-gateway', 'loopback']);
+    expect(on('browser-egress')).toEqual(['browser-gateway']);
   });
 
   test('the app is told nothing about a calendar agent when the connector is left out', () => {
