@@ -48,9 +48,11 @@ const GetSessionUnauthenticatedSchema = z.object({
 const GetSessionAuthenticatedSchema = z
   .object({
     user: GetSessionUserSchema,
-    controlPlaneURL: z.url(),
+    controlPlaneURL: z.url().optional(),
   })
-  .transform(({ user, controlPlaneURL: public_base_url }) => ({ user, public_base_url }));
+  .transform(({ user, controlPlaneURL }): { user: z.infer<typeof GetSessionUserSchema>; public_base_url?: string } =>
+    controlPlaneURL === undefined ? { user } : { user, public_base_url: controlPlaneURL },
+  );
 
 const GetSessionWireSchema = z.union([GetSessionUnauthenticatedSchema, GetSessionAuthenticatedSchema]);
 
@@ -480,7 +482,9 @@ export class TrueFoundryServiceFoundryServerClient {
 
   /**
    * `GET v1/session` for RequestContext mapping (always called with a bearer token).
-   * SFY optional-auth soft failure (`user: null` on 200) → 401; malformed → 500.
+   * ServiceFoundry optional-auth soft failure (`user: null` on 200) → 401; malformed → 500.
+   * `controlPlaneURL` is optional on the wire: a session without it still
+   * authenticates, and MCP OAuth refuses later at authorize time instead.
    */
   async getSession(accessToken: string): Promise<GetSessionResponse> {
     let payload: unknown;

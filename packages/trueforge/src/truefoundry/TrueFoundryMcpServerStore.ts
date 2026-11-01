@@ -61,9 +61,13 @@ export function resolveAuthorizeRedirectURL(input: { returnTo?: string; publicBa
     const publicBase = new URL(getPublicUiBasePath(), `${origin}/`);
     return new URL(safeReturnTo(input.returnTo), publicBase).href;
   } catch (error) {
-    throw new McpConnectionError('Tenant public base URL from session is required for TrueFoundry MCP OAuth', 500, {
-      cause: error,
-    });
+    throw new McpConnectionError(
+      'MCP sign-in cannot start because your session did not include the address of your TrueFoundry workspace. Sign in again, then try connecting once more.',
+      500,
+      {
+        cause: error,
+      },
+    );
   }
 }
 
@@ -236,7 +240,10 @@ export class TrueFoundryMcpServerStore<TTransaction = never> implements IMcpServ
     }
     const publicBaseUrl = this.#publicBaseUrl;
     if (publicBaseUrl === undefined || publicBaseUrl.trim() === '') {
-      throw new McpConnectionError('Tenant public base URL from session is required for TrueFoundry MCP OAuth', 500);
+      throw new McpConnectionError(
+        'MCP sign-in cannot start because your session did not include the address of your TrueFoundry workspace. Sign in again, then try connecting once more.',
+        500,
+      );
     }
     return this.#client.getMcpAuthorize({
       accessToken: await this.#asUser(),

@@ -185,7 +185,8 @@ describe('TrueFoundryMcpServerStore', () => {
     it('throws when session public base URL is missing', async () => {
       const { store } = createStore({ publicBaseUrl: '' });
       await expect(store.authorize({ tenant_id: TENANT, name: 'github', userRef: 'user-1' })).rejects.toMatchObject({
-        message: 'Tenant public base URL from session is required for TrueFoundry MCP OAuth',
+        message:
+          'MCP sign-in cannot start because your session did not include the address of your TrueFoundry workspace. Sign in again, then try connecting once more.',
         statusCode: 500,
       });
     });
