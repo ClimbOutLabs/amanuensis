@@ -17,7 +17,7 @@ One instance serves one person. If two people in the same household need it, the
 - On Linux, Docker Engine 28 or newer: older versions let other devices on your network reach ports meant for this computer only, so the installer and `aman doctor` stop and say so.
 - Docker needs at least 6 GB of memory for the first build, when the Aman images have to be built here. The installer blocks below 6 GB and warns between 6 and 8 GB; 8 GB or more is recommended.
 - Your own model: the address of a model server you already run, for example `http://host.docker.internal:11434/v1`. The address and any API key are entered in the app afterwards, not in the installer. The installer never scans your machine for models.
-- A git checkout of this repository. The installer runs from the checkout and builds the images from source.
+- A git checkout of this repository. The installer runs from the checkout. It downloads the Aman images for the version you install, and builds them from source only when no download is available.
 
 ## The one command
 

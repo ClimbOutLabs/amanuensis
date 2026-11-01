@@ -33,9 +33,10 @@ This creates the `v0.2.0` tag on the current `main` HEAD and publishes the relea
 
 ## After cutting a release
 
-1. Wait for the `Images` workflow to finish green on the new tag. It publishes the three Aman images that the installer downloads. The README must not point at a tag whose images are missing, or installs fall back to building on every computer.
-2. Update `README.md`: the "Install on your own computer" section names the newest release tag and says whether it includes the installer. Change it to the new tag, and make the `git checkout <tag>` step the default once the release includes `installer/install.sh`.
-3. Open a PR with the README change (follow `.github/pull_request_template.md`). The named tag keeps users on the latest stable release.
+1. Make sure the three Aman packages on ghcr.io (`aman-app`, `aman-stt`, `aman-calendar-caldav`) are public. Then check that a pull works while logged out, for example with `docker logout ghcr.io` followed by `docker pull ghcr.io/climboutlabs/aman-app:<12-character id>`. A private package makes every installer fall back to a long build.
+2. Wait for the `Images` workflow to finish green on the new tag. It publishes the three Aman images that the installer downloads. The README must not point at a tag whose images are missing, or installs fall back to building on every computer.
+3. Update `README.md`: the "Install on your own computer" section names the newest release tag and says whether it includes the installer. Change it to the new tag, and make the `git checkout <tag>` step the default once the release includes `installer/install.sh`.
+4. Open a PR with the README change (follow `.github/pull_request_template.md`). The named tag keeps users on the latest stable release.
 
 ## Versioning
 

@@ -174,7 +174,7 @@ image_ensure() {
         fi
       fi
       D tag "$remote" "$tag" >>"$STEP_LOG" 2>&1 || step_fail "The downloaded $what could not be prepared" "Run install.sh again with --build-from-source."
-      IMAGE_DIGEST=$(D image inspect --format '{{index .RepoDigests 0}}' "$remote" 2>/dev/null || true)
+      IMAGE_DIGEST=$(D image inspect --format '{{range .RepoDigests}}{{println .}}{{end}}' "$remote" 2>/dev/null | grep "^$REL_REGISTRY/$name@sha256:" | head -n 1 || true)
       step_ok "Downloaded $what"
       return 0
     fi
