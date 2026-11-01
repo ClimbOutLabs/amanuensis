@@ -7,6 +7,17 @@
 
 version: 2
 
+# The chart's Postgres and Redis dependencies are OCI charts on Docker Hub
+# (oci://registry-1.docker.io/bitnamicharts in charts/trueforge/Chart.yaml).
+# The helm-registry type does not support OCI registries, so the host is
+# declared as a docker-registry instead. The charts are public, so the entry
+# carries no credentials; declaring the registry is what lets a Dependabot
+# job reach the host at all.
+registries:
+  dockerhub:
+    type: docker-registry
+    url: https://registry-1.docker.io
+
 updates:
   # pnpm workspace — Dependabot uses the npm ecosystem for pnpm.
   - package-ecosystem: npm
@@ -53,6 +64,8 @@ updates:
     directory: /charts/trueforge
     schedule:
       interval: weekly
+    registries:
+      - dockerhub
     groups:
       helm:
         patterns:
