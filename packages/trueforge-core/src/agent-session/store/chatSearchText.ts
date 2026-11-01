@@ -1,10 +1,17 @@
 /**
  * The one matching rule for past-chat search. Every store indexes and queries the same words,
- * built here, so a search finds the same chats whichever store serves it: text is split into
- * lowercase letter-and-digit words, common English filler words are dropped, and plural,
- * -ing / -ed and silent -e endings are taken off. A message matches when it holds every query
- * word as a whole word, so "trip" matches "trips" and "tripped" but never "tripod".
+ * built here, so a search finds the same chats whichever store serves it: text is put in
+ * NFKC form, split into lowercase letter-and-digit words (combining marks stay inside the
+ * word they belong to, so scripts that build letters from marks are not broken apart),
+ * common English filler words are dropped, and plural, -ing / -ed and silent -e endings are
+ * taken off. A message matches when it holds every query word as a whole word, so "trip"
+ * matches "trips" and "tripped" but never "tripod".
  */
+
+/** NFKC first so a letter written as a base plus a combining mark becomes the single letter. */
+function normalizeChatSearchText(text: string): string {
+  return text.normalize('NFKC').toLowerCase().normalize('NFKC');
+}
 
 export const CHAT_SEARCH_SNIPPET_MAX_CHARS = 300;
 
@@ -118,9 +125,8 @@ function chatSearchStem(word: string): string {
 
 /** The searchable words of a text, in order, filler words left out. */
 export function chatSearchWords(text: string): string[] {
-  return text
-    .toLowerCase()
-    .split(/[^\p{L}\p{N}]+/u)
+  return normalizeChatSearchText(text)
+    .split(/[^\p{L}\p{M}\p{N}]+/u)
     .filter(word => word.length > 0 && !CHAT_SEARCH_STOPWORDS.has(word))
     .map(chatSearchStem);
 }
@@ -138,8 +144,8 @@ export function chatSearchIndexWords(text: string): string[] {
 /** Where the first word of `text` that matches one of `terms` starts, or -1. */
 function firstMatchOffset(text: string, terms: readonly string[]): number {
   const wanted = new Set(terms);
-  for (const match of text.matchAll(/[\p{L}\p{N}]+/gu)) {
-    const word = match[0].toLowerCase();
+  for (const match of text.matchAll(/[\p{L}\p{M}\p{N}]+/gu)) {
+    const word = normalizeChatSearchText(match[0]);
     if (!CHAT_SEARCH_STOPWORDS.has(word) && wanted.has(chatSearchStem(word))) {
       return match.index;
     }

@@ -52,6 +52,10 @@ export async function indexChatMessages(db: Kysely<Database>, input: IndexChatMe
           created_at: document.created_at,
         })),
       )
+      // A second write for the same turn can hold rows this delete could not see yet;
+      // both writes carry the same documents, so keeping the rows already there is right
+      // and a primary-key error must not fail the write (and restart a whole pass).
+      .onConflict(oc => oc.doNothing())
       .execute();
   });
 }

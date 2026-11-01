@@ -8,7 +8,7 @@ import { withMigrationTransaction } from '../migrationTransaction';
  * shared matching rule, so every store matches alike) in an array the GIN index searches.
  * The index is derived data, rebuilt from the chats, so it is never exported. The session
  * foreign key cascades, so a deleted chat leaves the index at once.
- * Mirrors db/sqlite/migrations/20261031_000001_chat_search.ts.
+ * Mirrors db/sqlite/migrations/20261102_000001_chat_search.ts.
  */
 export async function up(db: Kysely<unknown>): Promise<void> {
   await withMigrationTransaction(db, async trx => {

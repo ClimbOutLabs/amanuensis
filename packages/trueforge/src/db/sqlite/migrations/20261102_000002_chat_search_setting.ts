@@ -3,7 +3,7 @@ import { sql, type Kysely } from 'kysely';
 /**
  * Per-user switch for past-chat search: 1 lets the assistant search the person's own earlier
  * chats when they ask, 0 (the default) means the search tool is not offered at all.
- * Mirrors db/postgres/migrations/20261031_000002_chat_search_setting.ts.
+ * Mirrors db/postgres/migrations/20261102_000002_chat_search_setting.ts.
  */
 export async function up(db: Kysely<unknown>): Promise<void> {
   // Kysely's SqliteAdapter reports supportsTransactionalDdl: false, so the Migrator runs this

@@ -9,7 +9,7 @@ import { sql, type Kysely } from 'kysely';
  * The index is derived data, rebuilt from the chats, so it is never exported. The session
  * foreign key cascades, so a deleted chat leaves the index at once. Triggers keep the FTS5
  * table in step with the document rows inside the same transaction.
- * Mirrors db/postgres/migrations/20261031_000001_chat_search.ts.
+ * Mirrors db/postgres/migrations/20261102_000001_chat_search.ts.
  */
 export async function up(db: Kysely<unknown>): Promise<void> {
   await db.transaction().execute(async trx => {
