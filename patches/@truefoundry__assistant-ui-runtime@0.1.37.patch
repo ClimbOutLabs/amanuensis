@@ -1,8 +1,44 @@
+diff --git a/dist/chunk-4O6D3YUJ.js b/dist/chunk-4O6D3YUJ.js
+index e693ec6b5aa02ec85cdf85801d388eb532d14bca..98fc7d449a3cdd07ff86bf3ca4fa427e72aa451d 100644
+--- a/dist/chunk-4O6D3YUJ.js
++++ b/dist/chunk-4O6D3YUJ.js
+@@ -1,6 +1,4 @@
+ // src/plugins/truefoundry-agent-server-adapter/chatServer.ts
+-import { AgentSessionClient } from "truefoundry-gateway-sdk/agents";
+-import { PrivateAgentSessionClient } from "truefoundry-gateway-sdk/agents/private";
+ 
+ // src/plugins/truefoundry-agent-server-adapter/normalizeAgentSpec.ts
+ function isRecord(value) {
+@@ -143,9 +141,11 @@ async function toListResult(page, map) {
+   };
+ }
+ function createTrueFoundryChatServer(opts) {
+-  const gatewayOpts = { apiKey: opts.apiKey, baseUrl: opts.baseUrl };
+-  const client = opts.client ?? new AgentSessionClient(gatewayOpts);
+-  const privateClient = opts.privateClient ?? new PrivateAgentSessionClient(gatewayOpts);
++  if (opts.client == null || opts.privateClient == null) {
++    throw new Error("createTrueFoundryChatServer needs opts.client and opts.privateClient: this build does not include truefoundry-gateway-sdk");
++  }
++  const client = opts.client;
++  const privateClient = opts.privateClient;
+   const sessionTypeCache = /* @__PURE__ */ new Map();
+   const sessionTypeProbes = /* @__PURE__ */ new Map();
+   function cacheSessionType(session) {
 diff --git a/dist/index.d.ts b/dist/index.d.ts
-index 6c2f1b9a90a9b2b690c8f6f938e875678cb87f3d..f921ece5274c7abe0a17e7ed3027da6ac0a8f626 100644
+index 6c2f1b9a90a9b2b690c8f6f938e875678cb87f3d..21166333a0e8519710856389804e8d64e3221190 100644
 --- a/dist/index.d.ts
 +++ b/dist/index.d.ts
-@@ -78,6 +78,8 @@ type PendingResponseRef = {
+@@ -5,9 +5,6 @@ export { f as AgentBuilderCapabilitiesResponse, g as AgentBuilderServer, h as Ag
+ import { AssistantClient } from '@assistant-ui/store';
+ export { isEventDelta, mergeEventDelta } from './server/index.js';
+ export { CreateTrueFoundryAgentUIServerOptions, CreateTrueFoundryChatServerOptions, RequireApprovalToolSelectorItem, RequireApprovalToolsSelectorTag, TfyAgentSelectorEntry, TfyAgentSpec, TfyCollaborator, TfyConnectorSelectorEntry, TfyCreateSessionRequest, TfyFinishReason, TfyListSessionsParams, TfyMcpServerInitInfo, TfyMcpServerMount, TfyMcpToolInfo, TfyModelMessageUsage, TfyModelParams, TfyModelSelectorEntry, TfyResponseFormat, TfyRuntimeConfig, TfySaveAgentResult, TfySession, TfySkillMount, TfySkillSelectorEntry, TfySubject, TfySystemToolInfo, TfyThreadState, TfyToolInfo, TfyTurn, TfyTurnCancelledReason, TfyTurnState, TfyTurnStateDoneOutput, ToolsSelectorItem, ToolsSelectorTag, TrueFoundryAgentUIServer, TrueFoundryChatServer, createTrueFoundryAgentUIServer, createTrueFoundryChatServer, getTfyMcpInitServers, getTfyThreadState, getTfyUsage, isTfyMcpToolInfo, isTfySystemToolInfo, isTfyToolInfo } from './plugins/truefoundry-agent-server-adapter/index.js';
+-import 'truefoundry-gateway-sdk/agents';
+-import 'truefoundry-gateway-sdk/agents/private';
+-import 'truefoundry-gateway-sdk';
+ 
+ type NamedAgentConfig = {
+     mode: "named";
+@@ -78,6 +75,8 @@ type PendingResponseRef = {
  type ApprovalDecisionRef = {
      id: string;
      approved: boolean;
@@ -11,7 +47,7 @@ index 6c2f1b9a90a9b2b690c8f6f938e875678cb87f3d..f921ece5274c7abe0a17e7ed3027da6a
      reason?: string;
  };
  type ThreadBucket = {
-@@ -86,9 +88,12 @@ type ThreadBucket = {
+@@ -86,9 +85,12 @@ type ThreadBucket = {
      toolResults: Map<string, string>;
      pendingApprovals: Map<string, {
          id: string;
@@ -24,7 +60,7 @@ index 6c2f1b9a90a9b2b690c8f6f938e875678cb87f3d..f921ece5274c7abe0a17e7ed3027da6a
      done: boolean;
      title?: string;
      agentInfo?: AgentInfo;
-@@ -138,9 +143,18 @@ declare function toTrueFoundryApprovalInputs(message: Extract<ThreadMessage, {
+@@ -138,9 +140,18 @@ declare function toTrueFoundryApprovalInputs(message: Extract<ThreadMessage, {
      role: "assistant";
  }>, response: RespondToToolApprovalOptions, defaultThreadId?: string): UserToolApprovalEvent[];
  
@@ -43,7 +79,7 @@ index 6c2f1b9a90a9b2b690c8f6f938e875678cb87f3d..f921ece5274c7abe0a17e7ed3027da6a
      runningTurn?: Turn;
      unstable_resume?: boolean;
  };
-@@ -247,6 +261,8 @@ type TrueFoundryRuntimeExtras = {
+@@ -247,6 +258,8 @@ type TrueFoundryRuntimeExtras = {
          mcpServers: McpAuthRequiredEvent["mcpServers"];
      } | null;
      resumeUnavailable: boolean;
@@ -52,7 +88,7 @@ index 6c2f1b9a90a9b2b690c8f6f938e875678cb87f3d..f921ece5274c7abe0a17e7ed3027da6a
      sandboxId: string | undefined;
      respondToToolApproval: (response: RespondToToolApprovalOptions) => void;
      respondToToolResponse: (response: RespondToToolResponseOptions) => void;
-@@ -333,6 +349,9 @@ declare const useTrueFoundryHistoryPagination: () => {
+@@ -333,6 +346,9 @@ declare const useTrueFoundryHistoryPagination: () => {
   * arrive in this client. Falls back to `false` on runtimes that predate the flag.
   */
  declare const useTrueFoundryResumeUnavailable: () => boolean;
@@ -62,7 +98,7 @@ index 6c2f1b9a90a9b2b690c8f6f938e875678cb87f3d..f921ece5274c7abe0a17e7ed3027da6a
  /** Returns a function to reset (re-submit) a user turn from any render context. */
  declare const useTrueFoundryResetFromTurn: () => (turnId: string) => Promise<void>;
  /** Current draft agent spec and sync state (draft mode only). */
-@@ -381,4 +400,7 @@ declare function getSession(server: AgentChatServer, sessionId: string): Promise
+@@ -381,4 +397,7 @@ declare function getSession(server: AgentChatServer, sessionId: string): Promise
   */
  declare const trueFoundryAttachmentAdapter: AttachmentAdapter;
  
@@ -1282,6 +1318,35 @@ index bddf93d1f4ad64c3df464ec48e884fc6f586e816..1e38629c58a686fc109de87cc8b182bb
      task: string;
      cron: string;
      timezone: string;
+diff --git a/package.json b/package.json
+index d1e7b5e71380bbae062da1b0524b8165c21f4cd3..2a30f93bf8012676a491d555d5c7109326450e81 100644
+--- a/package.json
++++ b/package.json
+@@ -59,15 +59,11 @@
+   },
+   "peerDependencies": {
+     "@types/react": "*",
+-    "react": "^18 || ^19",
+-    "truefoundry-gateway-sdk": "^0.4.0-rc.6"
++    "react": "^18 || ^19"
+   },
+   "peerDependenciesMeta": {
+     "@types/react": {
+       "optional": true
+-    },
+-    "truefoundry-gateway-sdk": {
+-      "optional": true
+     }
+   },
+   "devDependencies": {
+@@ -76,7 +72,6 @@
+     "@types/react": "^19.2.17",
+     "jsdom": "^29.1.1",
+     "react": "^19.2.4",
+-    "truefoundry-gateway-sdk": "0.4.0-rc.6",
+     "tsup": "^8.5.0",
+     "typescript": "^5.9.3",
+     "vitest": "4.1.9"
 diff --git a/src/convertTurnMessages.test.ts b/src/convertTurnMessages.test.ts
 index a67eaed30cdf64df8b21030ad9df53ed938c99c3..9e46b7fce8541db691f7d51308858fbeaf0547d7 100644
 --- a/src/convertTurnMessages.test.ts

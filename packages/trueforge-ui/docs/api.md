@@ -9,19 +9,18 @@ like `Button` / `IconButton` are styled via theme tokens / CSS (not
 
 ## Quick start
 
-| Export                           | Notes                                                                                |
-| -------------------------------- | ------------------------------------------------------------------------------------ |
-| `TrueForgeUI`                    | Slots + runtime + built-in layout                                                    |
-| `TrueForgeUIProps`, `ChatLayout` | Props / layout union                                                                 |
-| `TrueForgeServerConfig`          | `server` prop: `type: "truefoundry"` \| `type: "trueforge"` \| ready `AgentUIServer` |
+| Export                           | Notes                                                       |
+| -------------------------------- | ----------------------------------------------------------- |
+| `TrueForgeUI`                    | Slots + runtime + built-in layout                           |
+| `TrueForgeUIProps`, `ChatLayout` | Props / layout union                                        |
+| `TrueForgeServerConfig`          | `server` prop: `type: "trueforge"` \| ready `AgentUIServer` |
 
 ### Built-in servers
 
-| `server` config                                                      | What the SDK does                                                                       |
-| -------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
-| `{ type: 'truefoundry', apiKey, controlPlaneURL, gatewayPlaneURL? }` | Calls runtime `createTrueFoundryAgentUIServer`                                          |
-| `{ type: 'trueforge', baseUrl?, token?, fetch?, catalog? }`          | Dynamic-imports `plugins/trueforge-agent-server-adapter` → full Harness `AgentUIServer` |
-| Ready `AgentUIServer`                                                | Passthrough (host-composed or `createTrueFoundryServer`)                                |
+| `server` config                                             | What the SDK does                                                                       |
+| ----------------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| `{ type: 'trueforge', baseUrl?, token?, fetch?, catalog? }` | Dynamic-imports `plugins/trueforge-agent-server-adapter` → full Harness `AgentUIServer` |
+| Ready `AgentUIServer`                                       | Passthrough (host-composed)                                                             |
 
 TrueForge hosts need `@truefoundry/trueforge-sdk`. Cookie apps pass `fetch`; embeds usually pass `token`.
 
