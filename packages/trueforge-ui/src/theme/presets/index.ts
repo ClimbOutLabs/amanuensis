@@ -331,7 +331,7 @@ const highContrast: PresetTokens = {
   },
 };
 
-/** Deep blue-grays with navy accents, for night owls. */
+/** Deep blue-grays with ice blue accents, for night owls. */
 const midnight: PresetTokens = {
   light: {
     sidebarBg: '#e8edf5',

@@ -268,10 +268,12 @@ export interface ToolCallMemoSnapshot {
   no_progress_nudge_generation: number;
   /** Policy-denied calls in the current turn; the per-turn guard budget. */
   policy_blocked_calls_this_turn: number;
-  /** Write calls admitted to dispatch in the current turn; the per-turn write cap. */
+  /** Actions outside the sandbox workspace that ran and succeeded in the current turn; the per-turn write cap. */
   write_calls_this_turn: number;
   /** Write calls that ran and succeeded in the current turn; decides the unbacked-claim notice. */
   successful_writes_this_turn: number;
+  /** Calls that ran, succeeded and changed something in the current turn; an identical call may run again after one. */
+  changes_this_turn: number;
   /** Kinds of step that ran and succeeded in the current turn; back clone, run, and read claims. */
   step_kinds_this_turn: TurnStepKind[];
   /** Prose of the steps that carried tool calls in the current turn, in step order. */
@@ -340,6 +342,7 @@ type LegacyToolCallMemoSnapshot = Omit<
   | 'policy_blocked_calls_this_turn'
   | 'write_calls_this_turn'
   | 'successful_writes_this_turn'
+  | 'changes_this_turn'
   | 'step_kinds_this_turn'
   | 'step_texts_this_turn'
   | 'last_call_signature'
@@ -378,6 +381,7 @@ type LegacyToolCallMemoSnapshot = Omit<
   // Same as the policy counter: a snapshot written before the write cap omits the key.
   write_calls_this_turn?: number | undefined;
   successful_writes_this_turn?: number | undefined;
+  changes_this_turn?: number | undefined;
   step_kinds_this_turn?: TurnStepKind[] | undefined;
   // A snapshot written before step prose was kept for the claim check omits the key.
   step_texts_this_turn?: string[] | undefined;
@@ -399,7 +403,7 @@ type LegacyToolCallMemoSnapshot = Omit<
 export interface CallSignatureRecord {
   /** How many times the call ran this turn. */
   count: number;
-  /** Write calls admitted this turn when the call last ran. It may run again once this has risen. */
+  /** changesThisTurn when the call last ran. It may run again once this has risen. */
   writesAtLastRun: number;
   /** Kind of the call's last result; a retryable error may be tried once more. */
   lastKind: ToolResultKind | null;
@@ -415,10 +419,12 @@ export interface TurnToolCallLedger {
   callSignatures: Map<string, CallSignatureRecord>;
   /** Signature of the call made last, across every thread; undefined before the first call. */
   lastCallSignature: string | undefined;
-  /** Write calls (tier 3) admitted to dispatch this turn. Enforces the per-turn write cap. */
+  /** Actions outside the sandbox workspace that ran and succeeded this turn (see countsTowardWriteCap). Enforces the per-turn write cap. */
   writeCallsThisTurn: number;
   /** Write calls that ran and succeeded this turn. Decides the unbacked-claim note. */
   successfulWritesThisTurn: number;
+  /** Calls that ran, succeeded and changed something this turn (see changesState); an identical call may run again after one. */
+  changesThisTurn: number;
   /** Kinds of step that ran and succeeded this turn. Decides the unbacked-claim note for clones, runs, and reads. */
   stepKindsThisTurn: Set<TurnStepKind>;
   /**
@@ -454,6 +460,7 @@ export function createTurnToolCallLedger(): TurnToolCallLedger {
     lastCallSignature: undefined,
     writeCallsThisTurn: 0,
     successfulWritesThisTurn: 0,
+    changesThisTurn: 0,
     stepKindsThisTurn: new Set(),
     stepTextsThisTurn: [],
     toolMarkupLeaksThisTurn: 0,
@@ -510,6 +517,7 @@ export function mergeTurnToolCallLedgers(ledgers: readonly TurnToolCallLedger[])
     }
     merged.writeCallsThisTurn = Math.max(merged.writeCallsThisTurn, ledger.writeCallsThisTurn);
     merged.successfulWritesThisTurn = Math.max(merged.successfulWritesThisTurn, ledger.successfulWritesThisTurn);
+    merged.changesThisTurn = Math.max(merged.changesThisTurn, ledger.changesThisTurn);
     for (const kind of ledger.stepKindsThisTurn) {
       merged.stepKindsThisTurn.add(kind);
     }
@@ -648,7 +656,7 @@ export function createToolCallMemoState(
   for (const entry of snapshot.call_signatures ?? []) {
     state.turn.callSignatures.set(entry.key, {
       count: entry.count,
-      writesAtLastRun: entry.writes_at_last_run ?? snapshot.write_calls_this_turn ?? 0,
+      writesAtLastRun: entry.writes_at_last_run ?? snapshot.changes_this_turn ?? 0,
       // A snapshot written before the retry rule omits these: the call has no retry left to spend.
       lastKind: entry.last_kind ?? null,
       retried: entry.retried ?? true,
@@ -677,6 +685,7 @@ export function createToolCallMemoState(
   state.policyBlockedCallsThisTurn = snapshot.policy_blocked_calls_this_turn ?? 0;
   state.turn.writeCallsThisTurn = snapshot.write_calls_this_turn ?? 0;
   state.turn.successfulWritesThisTurn = snapshot.successful_writes_this_turn ?? 0;
+  state.turn.changesThisTurn = snapshot.changes_this_turn ?? 0;
   state.turn.stepKindsThisTurn = new Set(snapshot.step_kinds_this_turn ?? []);
   state.turn.stepTextsThisTurn = [...(snapshot.step_texts_this_turn ?? [])];
   state.turn.lastCallSignature = snapshot.last_call_signature;
@@ -771,6 +780,7 @@ export function toToolCallMemoSnapshot(state: ToolCallMemoState): ToolCallMemoSn
     policy_blocked_calls_this_turn: state.policyBlockedCallsThisTurn,
     write_calls_this_turn: state.turn.writeCallsThisTurn,
     successful_writes_this_turn: state.turn.successfulWritesThisTurn,
+    changes_this_turn: state.turn.changesThisTurn,
     step_kinds_this_turn: [...state.turn.stepKindsThisTurn].sort(),
     step_texts_this_turn: [...state.turn.stepTextsThisTurn],
     last_call_signature: state.turn.lastCallSignature,
@@ -979,9 +989,10 @@ export const REPEAT_LIMIT_OTHER_TOOLS = 1;
  */
 export const IDENTICAL_CALL_NUDGE_AT = 2;
 /**
- * Tier 3 calls a turn may run before the host stops it. Only reads the host itself vouches for
- * (isHostVouchedRead) never count: searches have their own limits. The call past the cap never runs; the
- * turn ends once the batch that reached the cap has resolved.
+ * Actions outside the sandbox workspace (sends, connector writes, git pushes) a turn may make before
+ * the host stops it. Reads and work inside the sandbox workspace never count; see
+ * countsTowardWriteCap. Only calls that ran and succeeded count. The call past the cap never runs;
+ * the turn ends once the batch that reached the cap has resolved.
  */
 export const MAX_WRITE_CALLS_PER_TURN = 5;
 

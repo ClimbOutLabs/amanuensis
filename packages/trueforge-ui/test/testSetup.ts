@@ -77,6 +77,20 @@ if (typeof Blob !== 'undefined' && typeof Blob.prototype.arrayBuffer !== 'functi
   };
 }
 
+// jsdom's Blob does not implement text() either. Since Node 24, undici's Response#blob() builds
+// its result with the global Blob, which the jsdom environment replaces, so every fetched blob
+// in a test is a jsdom Blob. Browsers implement text() (UTF-8 decode), so fill it the same way.
+if (typeof Blob !== 'undefined' && typeof Blob.prototype.text !== 'function') {
+  Blob.prototype.text = function text(this: Blob): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result as string);
+      reader.onerror = () => reject(reader.error);
+      reader.readAsText(this, 'utf-8');
+    });
+  };
+}
+
 // jsdom does not implement <dialog>'s showModal/close/show methods (the element
 // renders, but the imperative API is a no-op that never toggles the `open`
 // attribute or fires `close`). Every modal built on HTMLDialogElement

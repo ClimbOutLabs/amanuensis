@@ -253,6 +253,17 @@
             },
             "default": "./dist/cjs/api/resources/skills/exports.js"
         },
+        "./spaceFolders": {
+            "import": {
+                "types": "./dist/esm/api/resources/spaceFolders/exports.d.mts",
+                "default": "./dist/esm/api/resources/spaceFolders/exports.mjs"
+            },
+            "require": {
+                "types": "./dist/cjs/api/resources/spaceFolders/exports.d.ts",
+                "default": "./dist/cjs/api/resources/spaceFolders/exports.js"
+            },
+            "default": "./dist/cjs/api/resources/spaceFolders/exports.js"
+        },
         "./spaces": {
             "import": {
                 "types": "./dist/esm/api/resources/spaces/exports.d.mts",
@@ -450,6 +461,17 @@
                 "default": "./dist/cjs/api/resources/settings/resources/mcpServers/exports.js"
             },
             "default": "./dist/cjs/api/resources/settings/resources/mcpServers/exports.js"
+        },
+        "./settings/memoryRecalls": {
+            "import": {
+                "types": "./dist/esm/api/resources/settings/resources/memoryRecalls/exports.d.mts",
+                "default": "./dist/esm/api/resources/settings/resources/memoryRecalls/exports.mjs"
+            },
+            "require": {
+                "types": "./dist/cjs/api/resources/settings/resources/memoryRecalls/exports.d.ts",
+                "default": "./dist/cjs/api/resources/settings/resources/memoryRecalls/exports.js"
+            },
+            "default": "./dist/cjs/api/resources/settings/resources/memoryRecalls/exports.js"
         },
         "./settings/memoryScreens": {
             "import": {
