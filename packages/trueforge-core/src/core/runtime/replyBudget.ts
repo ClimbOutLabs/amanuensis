@@ -11,7 +11,7 @@
 import { z } from 'zod';
 import type { ToolResultDisposition } from '../events/schema';
 import { UNKNOWN_TOOL_NAME } from '../llm/LLMTypes';
-import { isSpaceWriteToolName } from '../spaces/toolContract';
+import { isSpaceWriteToolName, MOVE_SPACE_TOOL_NAME } from '../spaces/toolContract';
 
 export const ToolResultKindSchema = z.enum([
   'ok',
@@ -106,6 +106,7 @@ export function progressRefundFor({
   const landedWrite = results.some(
     result =>
       isSpaceWriteToolName(result.toolName) &&
+      result.toolName !== MOVE_SPACE_TOOL_NAME &&
       result.disposition === 'executed_ok' &&
       !result.failure &&
       !result.savedNothing,

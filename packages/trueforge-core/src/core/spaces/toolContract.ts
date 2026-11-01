@@ -12,6 +12,7 @@ export const CREATE_SPACE_TOOL_NAME = 'create_space';
 export const UPDATE_SPACE_TOOL_NAME = 'update_space';
 export const EDIT_SPACE_TOOL_NAME = 'edit_space';
 export const REVERT_SPACE_TOOL_NAME = 'revert_space';
+export const MOVE_SPACE_TOOL_NAME = 'move_space';
 export const LIST_BLOCKS_TOOL_NAME = 'list_blocks';
 
 /**
@@ -52,6 +53,10 @@ const SPACE_WRITE_TOOLS: readonly SpaceToolContract[] = [
     name: REVERT_SPACE_TOOL_NAME,
     activity_line: () => 'Restored an earlier version of a space.',
   },
+  {
+    name: MOVE_SPACE_TOOL_NAME,
+    activity_line: () => 'Moved a space to a folder.',
+  },
 ];
 
 const SPACE_READ_TOOLS: readonly SpaceToolContract[] = [
@@ -63,7 +68,7 @@ const SPACE_READ_TOOLS: readonly SpaceToolContract[] = [
 export const SPACE_WRITE_TOOL_NAMES = SPACE_WRITE_TOOLS.map(tool => tool.name);
 export const SPACE_READ_TOOL_NAMES = SPACE_READ_TOOLS.map(tool => tool.name);
 
-/** Calls that create, change or restore a space. */
+/** Calls that create, change, restore or file a space. */
 export function isSpaceWriteToolName(tool_name: string): boolean {
   return SPACE_WRITE_TOOLS.some(tool => tool.name === tool_name);
 }

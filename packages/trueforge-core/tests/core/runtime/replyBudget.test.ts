@@ -223,6 +223,10 @@ describe('progressRefundFor', () => {
     expect(progressRefundFor({ results: [], refundsSoFar: 0 })).toBe(0);
   });
 
+  it('refunds nothing for moving a space into a folder', () => {
+    expect(progressRefundFor({ results: [{ ...landed, toolName: 'move_space' }], refundsSoFar: 0 })).toBe(0);
+  });
+
   it('refunds nothing for a write that saved nothing new, such as an append already at the end', () => {
     expect(progressRefundFor({ results: [{ ...landed, savedNothing: true }], refundsSoFar: 0 })).toBe(0);
   });
