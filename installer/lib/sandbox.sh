@@ -174,6 +174,7 @@ preflight_sandbox() {
   fi
   if sandbox_native_linux; then
     need_gb=$(sandbox_disks_need_gb)
+    if [ "$need_gb" -gt 0 ]; then need_gb=$((need_gb + $(sandbox_docker_share_gb))); fi
     free=$(free_kb "$SLOT_DISK_ROOT")
     case "${free:-}" in
       '' | *[![:digit:]]*) ;;
@@ -186,6 +187,28 @@ preflight_sandbox() {
     if [ "$(id -u)" != 0 ] && ! command -v sudo >/dev/null 2>&1; then
       check_block "The sandbox setup needs administrator rights, and sudo is not installed" "Run the installer as root, or pass --no-sandbox to install without run code."
     fi
+  fi
+}
+
+# The filesystem a path is on, named by df; two paths with the same name share one disk's free space.
+sandbox_filesystem_of() {
+  local path=$1
+  while [ ! -e "$path" ] && [ "$path" != / ]; do path=$(dirname "$path"); done
+  df -Pk "$path" 2>/dev/null | awk 'NR == 2 {print $1}'
+}
+
+# Docker's own room (the 10 GB the Docker data check asks for) counts against the sandbox disks too when
+# Docker's data is on the same disk: on their own each check would pass on the same free space.
+sandbox_docker_share_gb() {
+  local root root_fs slot_fs
+  root=$(D info --format '{{.DockerRootDir}}' 2>/dev/null || true)
+  [ -n "$root" ] && [ -d "$root" ] || { printf '0'; return 0; }
+  root_fs=$(sandbox_filesystem_of "$root")
+  slot_fs=$(sandbox_filesystem_of "$SLOT_DISK_ROOT")
+  if [ -n "$root_fs" ] && [ "$root_fs" = "$slot_fs" ]; then
+    printf '10'
+  else
+    printf '0'
   fi
 }
 
@@ -318,7 +341,11 @@ sandbox_print_root_steps() {
   if [ "$step" = apparmor ]; then
     ui_hint "It adds a security rule for the sandbox, which the system loads again at every start."
   fi
-  ui_hint "It sets up $SLOT_COUNT disks of up to $SLOT_DISK_GB GB that use space only as they fill."
+  if [ "$step" = retire ]; then
+    ui_hint "It removes the disks of the extra sandboxes an older version of Aman made."
+  else
+    ui_hint "It sets up $SLOT_COUNT disks of up to $SLOT_DISK_GB GB that use space only as they fill."
+  fi
 }
 
 # The id Docker has for the slot image now; changes only when a rebuild changed the image.
@@ -364,6 +391,17 @@ sandbox_ensure() {
       fi
       root_ready "instance $name was not started"
       fix_args=(--fix --yes)
+      ;;
+    retire)
+      # Removing the extra sandboxes of an older version is cleanup, not setup: a no never stops the
+      # instance (or rolls an upgrade back). The disks stay, and the doctor keeps reporting them.
+      sandbox_print_root_steps "$step"
+      if consent_root "Set up the sandbox now?" "$OPT_SANDBOX_ROOT"; then
+        root_ready "instance $name was not started"
+        fix_args=(--fix --yes)
+      else
+        warn "The extra sandboxes of an older version were left in place. Their chats were kept. Remove them with: $(sandbox_repair_command) --fix"
+      fi
       ;;
   esac
   sandbox_run --instance "$name" ${fix_args[@]+"${fix_args[@]}"} ||

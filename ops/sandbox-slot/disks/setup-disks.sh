@@ -91,8 +91,10 @@ if [ "$mode" = remove ]; then
 fi
 
 if [ "$mode" = retire ]; then
+  # No install ever had more than four slots, so retiring stops at slot 4, the same slots the
+  # TypeScript side names as retired.
   i=$((count + 1))
-  while [ "$i" -le 16 ]; do
+  while [ "$i" -le 4 ]; do
     remove_disk "$i"
     i=$((i + 1))
   done

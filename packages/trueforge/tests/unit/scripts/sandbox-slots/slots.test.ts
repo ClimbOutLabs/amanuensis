@@ -545,9 +545,41 @@ describe('the extra slots of an install from before two slots', () => {
 
   test('a read-only check reports them and changes nothing', async () => {
     const { result, calls } = await run(oldInstall, false, { mode: 'check' });
-    expect(result).toMatchObject({ ok: false, step: 'start' });
+    expect(result).toMatchObject({ ok: false, step: 'retire' });
     expect(!result.ok && result.fix).toContain('pnpm sandbox:slots --fix');
     expect(calls.some(call => call.args[0] === 'rm' || joined(call).startsWith('volume rm'))).toBe(false);
+  });
+
+  test('the chats of the extra slots are moved into the slots that stay, before their workspaces are removed', async () => {
+    const withChats = (call: Call): Partial<CommandResult> | undefined => {
+      const text = joined(call);
+      if (call.args[0] === 'run' && call.args.includes('ls')) {
+        if (text.includes('aman_slot_ws_3:/from:ro')) {
+          return { stdout: `${'a'.repeat(32)}\n` };
+        }
+        if (text.includes('aman_slot_ws_4:/from:ro')) {
+          return { stdout: `${'b'.repeat(32)}\n` };
+        }
+      }
+      return oldInstall(call);
+    };
+    const { result, calls } = await run(withChats);
+    expect(result.ok).toBe(true);
+    const text = calls.map(joined);
+    const moves = calls.filter(call => call.args.includes('move-sessions'));
+    expect(moves).toHaveLength(2);
+    expect(moves[0]?.args).toEqual(
+      expect.arrayContaining(['aman_slot_ws_3:/from', 'aman_slot_ws_1:/to', 'a'.repeat(32)]),
+    );
+    expect(moves[1]?.args).toEqual(
+      expect.arrayContaining(['aman_slot_ws_4:/from', 'aman_slot_ws_2:/to', 'b'.repeat(32)]),
+    );
+    const firstMove = text.findIndex(line => line.includes('move-sessions'));
+    expect(firstMove).toBeGreaterThan(-1);
+    // The retired containers stop first, so nothing writes while the folders move; the workspaces
+    // themselves are only removed after the move.
+    expect(firstMove).toBeGreaterThan(text.indexOf('rm --force c3 c4'));
+    expect(firstMove).toBeLessThan(text.indexOf('volume rm aman_slot_ws_3'));
   });
 
   test('on a native Linux host their disks go only with --fix and after agreeing', async () => {
@@ -570,8 +602,14 @@ describe('the extra slots of an install from before two slots', () => {
       }
       return undefined;
     };
+    // Without --fix the disks are cleanup the run cannot do: they stay, the slots still start, and the
+    // result warns about the disks instead of failing.
     const withoutFix = await run(linuxOld, false, { platform: 'linux' });
-    expect(withoutFix.result).toMatchObject({ ok: false, step: 'disk' });
+    expect(withoutFix.result.ok).toBe(true);
+    expect(
+      withoutFix.result.ok &&
+        withoutFix.result.warnings.some(warning => warning.includes('disks of the extra sandboxes')),
+    ).toBe(true);
     expect(withoutFix.calls.some(call => call.command === 'sudo')).toBe(false);
 
     const questions: string[] = [];
@@ -592,9 +630,14 @@ describe('the extra slots of an install from before two slots', () => {
       String(SLOT_COUNT),
     ]);
 
+    // Saying no to the cleanup also leaves the disks and lets the run finish, with the same warning.
     const declined = await run(linuxOld, true, { platform: 'linux', confirm: () => Promise.resolve(false) });
-    expect(declined.result).toMatchObject({ ok: false, step: 'disk' });
+    expect(declined.result.ok).toBe(true);
+    expect(
+      declined.result.ok && declined.result.warnings.some(warning => warning.includes('disks of the extra sandboxes')),
+    ).toBe(true);
     expect(declined.calls.some(call => call.command === 'sudo')).toBe(false);
+    expect(declined.calls.some(call => call.args.includes('retire'))).toBe(false);
   });
 });
 

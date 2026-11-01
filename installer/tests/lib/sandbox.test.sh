@@ -218,6 +218,14 @@ test_cgroup_and_low_disk() {
   run_install --dry-run --no-sandbox --email owner@example.invalid
   assert_rc 0
   assert_not_contains "$OUT" "slot"
+  # On one disk, Docker's own 10 GB counts against the sandbox disks too: 35 GB free passes each
+  # check on its own, but the two together need 42 GB.
+  mkdir -p "$SB/dockerroot"
+  STUB_DOCKER_ROOT=$SB/dockerroot
+  STUB_DF_KB=$((35 * 1024 * 1024))
+  run_install --dry-run --email owner@example.invalid
+  assert_rc 1
+  assert_flat_contains "$OUT$ERR" "Less than 42 GB free for the sandbox disks under /var/lib/aman-slots"
   sandbox_drop
 }
 
@@ -400,6 +408,33 @@ Set up the sandbox now?=>n"
   assert_flat_contains "$OUT$ERR" "administrator rights that were not given"
   assert_log_lacks "--fix --yes"
   assert_no_path "$AMAN_HOME/state/instances/main.conf"
+  sandbox_drop
+}
+
+test_retire_declined_still_installs() {
+  t_begin "saying no to removing the extra sandboxes of an older version leaves them, and the install still finishes"
+  sandbox_new
+  printf 'needs_retire\n' >"$SB_STATE/slots_state"
+  with_input "$SENTINEL_PASSWORD\n"
+  run_install --yes --password-stdin --email owner@example.invalid
+  clear_input
+  assert_rc 0
+  assert_flat_contains "$OUT$ERR" "extra sandboxes of an older version were left in place"
+  assert_log_lacks "--fix"
+  assert_file "$AMAN_HOME/state/instances/main.conf"
+  assert_eq "$(cat "$SB_STATE/slots_state")" needs_retire
+  sandbox_drop
+}
+
+test_retire_with_the_flag() {
+  t_begin "--sandbox-root approves removing the extra sandboxes and passes --fix --yes to the setup"
+  sandbox_new
+  printf 'needs_retire\n' >"$SB_STATE/slots_state"
+  INSTALL_EXTRA=(--sandbox-root)
+  install_machine
+  assert_eq "$RC" 0
+  assert_log_has "--fix --yes"
+  assert_eq "$(cat "$SB_STATE/slots_state")" ready
   sandbox_drop
 }
 
@@ -811,6 +846,8 @@ test_root_steps_with_the_flag
 test_root_steps_stop_before_the_setup_when_the_password_is_refused
 test_root_steps_answered_yes_on_a_terminal
 test_root_steps_declined_on_a_terminal
+test_retire_declined_still_installs
+test_retire_with_the_flag
 test_healthy_slots_need_no_root
 test_rerun_restarts_healthy_slots_when_the_image_changed
 test_slot_image_failure_stops_before_anything_runs
