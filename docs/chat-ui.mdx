@@ -40,6 +40,12 @@ Every download goes through the same outbound checks and audit log as web search
 
 Images need the gVisor sandbox. A normal [installer](/install) install has it. An install made with `--no-sandbox`, or a server that runs code in plain Docker instead of the gVisor sandbox, shows "Image checks need the sandbox, which is off." in place of each picture.
 
+## Links, and pictures outside a chat answer
+
+Links in an answer, or on any page the app renders from markdown, ask before they open a site outside this app. The dialog shows the full address first. Tick "Don't ask again" for that site and links to it open straight away after that; the choice is kept on this device only. Links to this app itself open as before, without asking.
+
+A picture from another site outside a chat answer is not loaded until you choose **Show image** and confirm, because the site will see that you looked at it. "Don't ask again" works there too, per site: a site you trusted loads its pictures on its own from then on. Pictures inside a chat answer follow the rebuild flow above instead.
+
 {/* 
 ## Bundled UI
 
