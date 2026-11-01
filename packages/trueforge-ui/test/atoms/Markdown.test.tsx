@@ -38,6 +38,7 @@ vi.mock('katex', async importOriginal => {
 afterEach(() => {
   cleanup();
   window.localStorage.removeItem(EXTERNAL_URL_TRUST_STORAGE_KEY);
+  window.localStorage.removeItem('aui-trusted-external-hosts');
   clearSessionImageTrust();
   vi.restoreAllMocks();
 });
@@ -122,12 +123,13 @@ describe('Markdown', () => {
     expect(openSpy).not.toHaveBeenCalled();
   });
 
-  it('skips the link dialog after trusting a host', () => {
+  it('skips the link dialog after trusting an origin', () => {
     const openSpy = vi.spyOn(window, 'open').mockReturnValue(null);
     render(<Markdown content="See [docs](https://example.com/docs) for details." />);
     const link = screen.getByRole('link', { name: 'docs' });
 
     fireEvent.click(link);
+    expect(screen.getByRole('checkbox')).toHaveTextContent("Don't ask again for links to https://example.com");
     fireEvent.click(screen.getByRole('checkbox'));
     fireEvent.click(screen.getByRole('button', { name: 'Open link' }));
     expect(openSpy).toHaveBeenCalledTimes(1);
@@ -136,6 +138,28 @@ describe('Markdown', () => {
     fireEvent.click(link);
     expect(screen.queryByRole('dialog', { name: 'Open external link' })).not.toBeInTheDocument();
     expect(openSpy).toHaveBeenCalledTimes(2);
+  });
+
+  it('still confirms a link to the same host on another scheme or port after trusting an origin', () => {
+    const openSpy = vi.spyOn(window, 'open').mockReturnValue(null);
+    render(
+      <Markdown
+        content={'See [secure](https://example.com/docs) and [other](http://example.com:8080/docs) for details.'}
+      />,
+    );
+    const secureLink = screen.getByRole('link', { name: 'secure' });
+    const otherLink = screen.getByRole('link', { name: 'other' });
+
+    fireEvent.click(secureLink);
+    fireEvent.click(screen.getByRole('checkbox'));
+    fireEvent.click(screen.getByRole('button', { name: 'Open link' }));
+    expect(openSpy).toHaveBeenCalledTimes(1);
+
+    // Trusting https://example.com must not also trust http://example.com:8080.
+    fireEvent.click(otherLink);
+    expect(openSpy).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole('dialog', { name: 'Open external link' })).toBeInTheDocument();
+    expect(screen.getByTestId('aui-external-url-confirm-url')).toHaveTextContent('http://example.com:8080/docs');
   });
 
   it('does not confirm same-origin links', () => {

@@ -368,7 +368,7 @@ function makeComponents(opts: {
     br() {
       return <br />;
     },
-    // External http(s) links confirm first; hosts the person trusted skip the dialog.
+    // External http(s) links confirm first; origins the person trusted skip the dialog.
     a: MarkdownExternalLink,
     table({ node: _node, ...props }) {
       return readOnly ? <ScrollableTable {...props} /> : <table {...props} />;

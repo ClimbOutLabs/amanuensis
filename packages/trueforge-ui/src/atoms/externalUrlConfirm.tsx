@@ -14,15 +14,15 @@ import {
 
 import { Icon } from '../icons/Icon.js';
 import {
-  getHostname,
+  getOrigin,
   getSessionImageTrustVersion,
   isExternalHttpUrl,
   isSessionImageUrlTrusted,
-  isTrustedLinkHost,
+  isTrustedLinkOrigin,
   openExternalHttpUrl,
   subscribeToSessionImageTrust,
   trustImageUrl,
-  trustLinkHost,
+  trustLinkOrigin,
   trustSessionImageUrl,
 } from './externalUrlTrust.js';
 import { cn } from './lib/cn.js';
@@ -99,12 +99,9 @@ export function ExternalUrlConfirmProvider({ children }: { children: ReactNode }
   }, []);
 
   const checkSessionImageUrlTrusted = useCallback(
-    (url: string) => {
-      // Reading the version keeps this check tied to the shared store, so a
-      // new version means the answer is read again instead of served stale.
-      void sessionTrustVersion;
-      return isSessionImageUrlTrusted(url);
-    },
+    // The snapshot version goes into the check itself, so the answer is the
+    // trust state as of the version this provider is rendering from.
+    (url: string) => isSessionImageUrlTrusted(url, sessionTrustVersion),
     [sessionTrustVersion],
   );
 
@@ -115,9 +112,9 @@ export function ExternalUrlConfirmProvider({ children }: { children: ReactNode }
 
   const confirm = useCallback(() => {
     if (pending == null) return;
-    const host = getHostname(pending.url);
+    const origin = getOrigin(pending.url);
     if (pending.kind === 'link') {
-      if (dontAskAgain && host != null) trustLinkHost(host);
+      if (dontAskAgain && origin != null) trustLinkOrigin(origin);
       openExternalHttpUrl(pending.url);
       close();
       return;
@@ -136,7 +133,7 @@ export function ExternalUrlConfirmProvider({ children }: { children: ReactNode }
     [checkSessionImageUrlTrusted, requestImageConfirm, requestLinkConfirm],
   );
 
-  const pendingHost = pending != null && pending.kind === 'link' ? getHostname(pending.url) : null;
+  const pendingOrigin = pending != null && pending.kind === 'link' ? getOrigin(pending.url) : null;
   const title = pending?.kind === 'image' ? 'Show external image' : 'Open external link';
   const description =
     pending?.kind === 'image'
@@ -148,9 +145,9 @@ export function ExternalUrlConfirmProvider({ children }: { children: ReactNode }
       ? null
       : pending.kind === 'image'
         ? "Don't ask again for this image"
-        : pendingHost == null
+        : pendingOrigin == null
           ? null
-          : `Don't ask again for links to ${pendingHost}`;
+          : `Don't ask again for links to ${pendingOrigin}`;
 
   return (
     <ExternalUrlConfirmContext.Provider value={value}>
@@ -212,7 +209,7 @@ export function MarkdownExternalLink({
   const dangerous = href != null && href !== '' && isDangerousNavigationUrl(href);
   const external = href != null && href !== '' && !dangerous && isExternalHttpUrl(href);
   // External destinations never stay in href — middle-click / context-menu bypass onClick.
-  // Activation always goes through guardNavigation (trusted hosts skip the dialog there).
+  // Activation always goes through guardNavigation (trusted origins skip the dialog there).
   const anchorHref = dangerous ? undefined : external ? '#' : href;
 
   const guardNavigation = (event: MouseEvent<HTMLAnchorElement>) => {
@@ -224,8 +221,8 @@ export function MarkdownExternalLink({
     if (!isExternalHttpUrl(href)) return;
 
     event.preventDefault();
-    const host = getHostname(href);
-    if (host != null && isTrustedLinkHost(host)) {
+    const origin = getOrigin(href);
+    if (origin != null && isTrustedLinkOrigin(origin)) {
       openExternalHttpUrl(href);
       return;
     }
