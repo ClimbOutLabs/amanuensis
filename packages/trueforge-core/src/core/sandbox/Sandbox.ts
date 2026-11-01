@@ -119,6 +119,7 @@ import {
 } from './hostAuthenticatedGit';
 import {
   commandDownloadsPackages,
+  commandInstallsPackages,
   findCommandLineGitDependency,
   findGitDependency,
   outputShowsBlockedDownload,
@@ -2569,10 +2570,12 @@ export class Sandbox extends LocalToolMCP {
         }`;
       }
     }
-    // The first download in a scope that has not allowed downloads gets its own card wording: what
-    // the person is agreeing to is downloads for this repo, or for their chats without a project,
-    // not just this one command. A failed read leaves the ordinary card in place; the command
-    // still runs offline, never the reverse.
+    // The first explicit install in a scope that has not allowed downloads gets its own card
+    // wording: what the person is agreeing to is downloads for this repo, or for their chats
+    // without a project, not just this one command. A command that only might fetch (a build,
+    // a test, a run) gets no download card: it runs without a grant, and the downloads-off
+    // note explains it if it does try to download. A failed read leaves the ordinary card in
+    // place; the command still runs offline, never the reverse.
     let packageCard: { plain_what: string } | undefined;
     const packageCardText =
       params.name === SANDBOX_EXEC_TOOL_NAME && !invalidExecPreflight
@@ -2583,7 +2586,7 @@ export class Sandbox extends LocalToolMCP {
     if (
       packageCardText !== undefined &&
       this.loadPackageDownloadsAllowed !== undefined &&
-      commandDownloadsPackages(packageCardText)
+      commandInstallsPackages(packageCardText)
     ) {
       try {
         if (!(await this.loadPackageDownloadsAllowed())) {
@@ -2698,9 +2701,10 @@ export class Sandbox extends LocalToolMCP {
             ? {}
             : { pre_dispatch_failure: structuredEditPreDispatchFailure }
           : { pre_dispatch_failure: sentinelStamp.pre_dispatch_failure }),
-      // The first download in a scope always asks, even when the person lets sandbox work run
-      // without asking: without the card the allowance is never recorded, and the install would
-      // fail inside the sandbox with no explanation. A call the host already refused asks nothing.
+      // The first explicit install in a scope always asks, even when the person lets sandbox
+      // work run without asking: without the card the allowance is never recorded, and the
+      // install would fail inside the sandbox with no explanation. A call the host already
+      // refused asks nothing.
       is_approval_required: invalidCall
         ? false
         : packageCard !== undefined &&
@@ -4204,15 +4208,16 @@ export class Sandbox extends LocalToolMCP {
   }
 
   /**
-   * Records this chat's scope's download allowance after the person approved a download command,
+   * Records this chat's scope's download allowance after the person approved an explicit install,
    * or returns the plain refusal to run the command when the record cannot be saved. Running the
    * command offline after an approval would fail in a way that hides why, so a failed save stops it
-   * before anything runs. Anything that is not an unapproved download command is left alone.
+   * before anything runs. Anything that is not an unapproved explicit install is left alone: a
+   * command that only might fetch never turns downloads on, approved or not.
    */
   private async recordPackageDownloadsApproval(input: { command: string }): Promise<string | undefined> {
     const allow = this.allowPackageDownloads;
     const loadAllowed = this.loadPackageDownloadsAllowed;
-    if (allow === undefined || loadAllowed === undefined || !commandDownloadsPackages(input.command)) {
+    if (allow === undefined || loadAllowed === undefined || !commandInstallsPackages(input.command)) {
       return undefined;
     }
     try {

@@ -353,7 +353,19 @@ export class PackageMirrorGateway {
       );
       return;
     }
-    if (!(await this.#allowanceHolds(grant))) {
+    const allowance = await this.#allowanceHolds(grant);
+    if (allowance === 'unavailable') {
+      // The check could not be read, so nothing is decided: the grant stays in place and
+      // the person is told to try again, not that downloads were turned off.
+      this.#plain(
+        res,
+        503,
+        'Package downloads cannot be checked right now, so this download did not go ahead. Try again in a moment.',
+      );
+      this.#log({ grant, ecosystem, path: rawPath, status: 503, bytes: 0, cached: false, at: startedAt });
+      return;
+    }
+    if (allowance === 'off') {
       this.#registry.revoke(token);
       this.#plain(
         res,

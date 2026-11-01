@@ -431,6 +431,107 @@ describe('the first download always asks, even when sandbox work runs without as
   });
 });
 
+describe('build and test commands that only might fetch, in a chat without a project', () => {
+  let home: string;
+  let workspace: string;
+  let homedirSpy: jest.SpyInstance<string, []>;
+  beforeEach(() => {
+    home = mkdtempSync(join(os.tmpdir(), 'package-downloads-home-'));
+    workspace = mkdtempSync(join(os.tmpdir(), 'package-downloads-workspace-'));
+    homedirSpy = jest.spyOn(os, 'homedir').mockReturnValue(home);
+  });
+  afterEach(() => {
+    homedirSpy.mockRestore();
+    rmSync(home, { recursive: true, force: true });
+    rmSync(workspace, { recursive: true, force: true });
+  });
+
+  it.each([
+    'npx tsc --noEmit',
+    'npx prettier --check .',
+    'npm run prepare',
+    'uv run pytest',
+    'make init',
+    'cargo build',
+    'cargo test',
+    'go build ./...',
+    'go test ./...',
+  ])('shows %s no download card, and its approval records no allowance', async command => {
+    const execCalls: SandboxExecParams[] = [];
+    const allowPackageDownloads = jest.fn(async () => undefined);
+    const sandbox = makeSandbox({
+      execCalls,
+      allowed: () => false,
+      allowPackageDownloads,
+      sandboxWithoutAsking: true,
+      workspaceDir: workspace,
+    });
+    const call = {
+      name: SANDBOX_EXEC_TOOL_NAME,
+      arguments: { intent: 'Check the work', purpose: 'execute' as const, command },
+    };
+    const info = await sandbox.toolCallInfo(call);
+    expect(info.tier3_card?.plain_what ?? '').not.toContain('download');
+
+    const response = await sandbox.callTool(call, { status: 'allow' });
+    if (!isCallToolResponseResult(response)) {
+      throw new Error('Expected a tool result');
+    }
+    expect(response.result.isError).toBe(false);
+    expect(allowPackageDownloads).not.toHaveBeenCalled();
+    const run = execCalls.find(params => params.command === command);
+    expect(run).toBeDefined();
+    expect(run?.packageMirrorToken).toBeUndefined();
+  });
+
+  it('never records the allowance when one of these commands is approved on its ordinary card', async () => {
+    const execCalls: SandboxExecParams[] = [];
+    const allowPackageDownloads = jest.fn(async () => undefined);
+    const sandbox = makeSandbox({
+      execCalls,
+      allowed: () => false,
+      allowPackageDownloads,
+      workspaceDir: workspace,
+    });
+    const call = {
+      name: SANDBOX_EXEC_TOOL_NAME,
+      arguments: { intent: 'Build the project', purpose: 'execute' as const, command: 'cargo build' },
+    };
+    const response = await sandbox.callTool(call, { status: 'allow' });
+    if (!isCallToolResponseResult(response)) {
+      throw new Error('Expected a tool result');
+    }
+    expect(response.result.isError).toBe(false);
+    expect(allowPackageDownloads).not.toHaveBeenCalled();
+  });
+
+  it('adds the downloads-off note when one of these commands does try to download', async () => {
+    const execCalls: SandboxExecParams[] = [];
+    const sandbox = makeSandbox({
+      execCalls,
+      allowed: () => false,
+      allowPackageDownloads: async () => undefined,
+      sandboxWithoutAsking: true,
+      workspaceDir: workspace,
+      commandResults: {
+        'cargo build': {
+          exitCode: 101,
+          result: 'error: attempting to make an HTTP request, but --offline was specified',
+        },
+      },
+    });
+    const call = {
+      name: SANDBOX_EXEC_TOOL_NAME,
+      arguments: { intent: 'Build the project', purpose: 'execute' as const, command: 'cargo build' },
+    };
+    const response = await sandbox.callTool(call, { status: 'allow' });
+    if (!isCallToolResponseResult(response)) {
+      throw new Error('Expected a tool result');
+    }
+    expect(resultText(response)).toContain('Package downloads are off for chats without a project');
+  });
+});
+
 describe('package downloads from run_code in a chat without a project', () => {
   const INSTALLING_CODE = 'pip install requests';
 
