@@ -194,6 +194,33 @@ describe('DropdownMenu', () => {
     expect(onOpenChange).toHaveBeenLastCalledWith(false);
     expect(screen.getByRole('menu')).toBeInTheDocument();
   });
+
+  it('calls the latest onOpenChange when an outside mousedown closes the menu', () => {
+    const firstOnOpenChange = vi.fn();
+    const secondOnOpenChange = vi.fn();
+    const { rerender } = render(
+      <DropdownMenu trigger={<button>Actions</button>} onOpenChange={firstOnOpenChange}>
+        <DropdownMenuItem>Rename</DropdownMenuItem>
+      </DropdownMenu>,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Actions' }));
+    expect(screen.getByRole('menu')).toBeInTheDocument();
+    expect(firstOnOpenChange).toHaveBeenCalledWith(true);
+    firstOnOpenChange.mockClear();
+
+    rerender(
+      <DropdownMenu trigger={<button>Actions</button>} onOpenChange={secondOnOpenChange}>
+        <DropdownMenuItem>Rename</DropdownMenuItem>
+      </DropdownMenu>,
+    );
+
+    fireEvent.mouseDown(document.body);
+
+    expect(firstOnOpenChange).not.toHaveBeenCalled();
+    expect(secondOnOpenChange).toHaveBeenCalledWith(false);
+    expect(screen.queryByRole('menu')).not.toBeInTheDocument();
+  });
 });
 
 describe('DropdownMenu dismissal', () => {
