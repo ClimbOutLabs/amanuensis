@@ -92,7 +92,7 @@ import type { ActiveTurnRegistry, TurnAdmission } from '../runtime/activeTurns';
 import { findTurnArtifact } from '../runtime/artifacts/findTurnArtifact';
 import { submitArtifactPersistence } from '../runtime/artifacts/persistTurnArtifacts';
 import { chatModelName, resolveChatAssistant, scheduleRunsAs, type ChatRunner } from '../runtime/chatAssistant';
-import { indexChatTurn } from '../runtime/chatSearchIndexing';
+import type { ChatSearchIndexer } from '../runtime/chatSearchIndexing';
 import { readChatSearchEnabled } from '../runtime/chatSearchSettings';
 import { StreamGoneError, type EventSubscription, type EventSubscriptionRegistry } from '../runtime/event-subscription';
 import { buildInternalSourceToolPolicy, type InternalSourceState } from '../runtime/internalSourceGuard';
@@ -290,6 +290,8 @@ export interface TurnsRouterDeps {
    * chats without a project. Absent, the search tool stays off and those chats get no download wiring.
    */
   sentinelSettingsStore?: ISentinelSettingsStore | undefined;
+  /** Adds finished turns to the past-chat search for people who turned it on; absent, nothing is added. */
+  chatSearchIndexer?: ChatSearchIndexer | undefined;
   /** Per-instance daily Token Factory counters; refuses new turns past `TOKEN_FACTORY_DAILY_TOKEN_CAP`. */
   tokenFactoryBudget: TokenFactoryBudget;
   /** Resumable live turn-event transport: create-turn writes, subscribe polls. */
@@ -339,6 +341,10 @@ export type BeginTurnExecutionDeps = Pick<
    * chats without a project. Absent, the search tool stays off and those chats get no download wiring.
    */
   sentinelSettingsStore?: ISentinelSettingsStore | undefined;
+  /** Lists the person's personas for the past-chat search; absent, the search tool stays off. */
+  personaStore?: Pick<IPersonaStore, 'listPersonas'> | undefined;
+  /** Adds finished turns to the past-chat search for people who turned it on; absent, nothing is added. */
+  chatSearchIndexer?: ChatSearchIndexer | undefined;
   /** persists run_code's harvested result files as turn artifacts at harvest time. */
   turnArtifactStore: ITurnArtifactStore;
   /** Same override point as the chat path's `TurnsRouterDeps.sandboxProviderResolver`; defaults to {@link resolveSandboxProvider}. */
@@ -406,6 +412,8 @@ function createTurnResolver(deps: {
   memoryRecallEnabled: boolean | undefined;
   /** The person's past-chat search switch for this turn; off, the search tool is not offered. */
   chatSearchEnabled: boolean;
+  /** Lists the person's personas, so the search keeps to the chats this persona may recall; absent, the tool is not offered. */
+  personaStore: Pick<IPersonaStore, 'listPersonas'> | undefined;
   spaceStore: ISpaceStore;
   /** Per-user Google logins; absent, no Gmail tools mount. */
   googleConnectionStore?: IGoogleConnectionStore | undefined;
@@ -463,6 +471,7 @@ function createTurnResolver(deps: {
     memorySummarize,
     memoryRecallEnabled,
     chatSearchEnabled,
+    personaStore,
     spaceStore,
     googleConnectionStore,
     turnArtifactStore,
@@ -948,11 +957,18 @@ function createTurnResolver(deps: {
     },
     { store: turnArtifactStore, tenantId: tenant_id, sessionId, turnId, logger },
     { sessionStore, budget: tokenFactoryBudget, authority: { tenantId: tenant_id, userRef } },
-    {
-      sessionStore,
-      authority: { tenantId: tenant_id, userRef },
-      enabled: chatSearchEnabled,
-    },
+    chatSearchEnabled && personaStore !== undefined
+      ? {
+          sessionStore,
+          personaStore,
+          memoryDir: configuration.MEMORY_MARKDOWN_DIR,
+          scope:
+            deps.personaContext === undefined
+              ? undefined
+              : { personaName: deps.personaContext.persona_name, personaId: deps.personaContext.persona_id },
+          authority: { tenantId: tenant_id, userRef },
+        }
+      : undefined,
   );
   if (switchedByMessage === true) {
     resolver.switches.markSwitched();
@@ -1253,11 +1269,13 @@ export interface DrainTurnEventsInput {
         tenantId: string;
       }
     | undefined;
-  /** Present on every turn: the finished turn joins the past-chat search index in the follow-up. */
+  /** The finished turn joins the past-chat search in the follow-up when its owner has the search on. */
   chatSearch?:
     | {
-        sessionStore: ISessionStore<SessionCustom, TurnCustom>;
+        indexer: ChatSearchIndexer;
         tenantId: string;
+        /** Whose chat this is: the switch and the index are that person's. */
+        createdBy: string;
       }
     | undefined;
 }
@@ -1462,24 +1480,19 @@ async function runTurnFollowUp(params: {
         logger,
       });
     }
-    if (chatSearch !== undefined) {
-      // The finished turn joins the past-chat search index, so a later chat can find it.
-      const finishedTurn = await chatSearch.sessionStore
-        .getTurn({ session_id: sessionId, turn_id: turnId })
-        .catch(() => undefined);
-      if (finishedTurn !== undefined) {
-        await indexChatTurn({
-          sessionStore: chatSearch.sessionStore,
-          tenant_id: chatSearch.tenantId,
-          turn: finishedTurn,
-          logger,
-        });
-      }
-    }
     // The summarization and profile learning calls above record after the first flush.
     await flushUsage();
   } catch (error) {
     logger.error('Turn follow-up work failed', { sessionId, turnId, ...extractErrorLogFields(error) });
+  }
+  if (chatSearch !== undefined) {
+    // Outside the steps above, so a failure there never keeps the turn out of the search. It never throws.
+    await chatSearch.indexer.indexFinishedTurn({
+      tenant_id: chatSearch.tenantId,
+      created_by: chatSearch.createdBy,
+      session_id: sessionId,
+      turn_id: turnId,
+    });
   }
 }
 
@@ -1790,6 +1803,7 @@ async function beginAcceptedTurnExecution(
         memorySummarize,
         memoryRecallEnabled,
         chatSearchEnabled,
+        personaStore: deps.personaStore,
         clientTimezone: deps.clientTimezone,
         toolOutputScreenEnabled,
         turnArtifactStore: deps.turnArtifactStore,
@@ -1861,7 +1875,14 @@ async function beginAcceptedTurnExecution(
       logger: deps.logger,
       turnDrains: deps.turnDrains,
       modelUsage: { ledger: modelUsage, eventStore: deps.sessionStore },
-      chatSearch: { sessionStore: deps.sessionStore, tenantId: tenant_id },
+      chatSearch:
+        deps.chatSearchIndexer === undefined
+          ? undefined
+          : {
+              indexer: deps.chatSearchIndexer,
+              tenantId: tenant_id,
+              createdBy: session.record.created_by_subject.subject_id,
+            },
       memory:
         deps.memoryClient === undefined
           ? undefined
@@ -2668,6 +2689,7 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
       memorySummarize,
       memoryRecallEnabled,
       chatSearchEnabled,
+      personaStore: deps.personaStore,
       spaceStore: deps.spaceStore,
       googleConnectionStore: deps.googleConnectionStore,
       clientTimezone: body.client_timezone,
@@ -3038,7 +3060,14 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
                   },
                 },
           profileLearning,
-          chatSearch: { sessionStore: deps.sessionStore, tenantId: requestContext.tenant_id },
+          chatSearch:
+            deps.chatSearchIndexer === undefined
+              ? undefined
+              : {
+                  indexer: deps.chatSearchIndexer,
+                  tenantId: requestContext.tenant_id,
+                  createdBy: session.record.created_by_subject.subject_id,
+                },
           artifacts: {
             turnArtifactStore: deps.turnArtifactStore,
             sandboxProviderStore,

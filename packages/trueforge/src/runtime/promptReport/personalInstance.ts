@@ -30,7 +30,6 @@ import type { IScheduleStore } from '../../db/scheduleStore';
 import type { ChatAssistant } from '../chatAssistant';
 import type { MemoryConfig } from '../memory/memoryCapability';
 import type { MemoryTurnContext, ToolOutputScreenConfig } from '../MemoryTurnResourceResolver';
-import type { PastChatsSessionReader } from '../pastChats';
 import { SpaceTurnResourceResolver, type SpaceTurnContext } from '../spaceCapability';
 import type { TokenFactoryBudget } from '../tokenFactoryBudget';
 import type { UsageSessionReader } from '../usageSummaryCapability';
@@ -125,13 +124,6 @@ function unusedSpaceStore(): SpaceTurnContext['store'] {
     listSpacesWithAggregate: () => unused('listSpacesWithAggregate'),
     getSpace: () => unused('getSpace'),
     getSpaceRevision: () => unused('getSpaceRevision'),
-  };
-}
-
-function unusedPastChatsReader(): PastChatsSessionReader {
-  return {
-    searchChatHistory: () => unused('searchChatHistory'),
-    getSession: () => unused('getSession'),
   };
 }
 
@@ -336,12 +328,8 @@ export async function buildPersonalInstance(input: {
       budget: unusedTokenFactoryBudget(),
       authority: { tenantId: TENANT_ID, userRef: CREATED_BY },
     },
-    {
-      // The prompt report never searches past chats: the tool stays out of its listing.
-      sessionStore: unusedPastChatsReader(),
-      authority: { tenantId: TENANT_ID, userRef: CREATED_BY },
-      enabled: false,
-    },
+    // The prompt report never searches past chats: the tool stays out of its listing.
+    undefined,
   );
   const resolved = await resolver.resolveAgentDefinition({
     spec,

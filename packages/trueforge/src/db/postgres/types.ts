@@ -285,9 +285,11 @@ export interface ChatSearchDocumentTable {
   turn_id: string;
   message_id: string;
   role: string;
+  /** The persona the turn ran under; null for the main assistant. */
+  persona_id: string | null;
   body: string;
-  /** Generated from `body` by the database; never written by the app. */
-  search_vector: Generated<unknown>;
+  /** The message's searchable words, built by the shared matching rule. */
+  search_words: string[];
   created_at: Date;
 }
 

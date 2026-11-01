@@ -1,12 +1,14 @@
 import type {
   ChatSearchHit,
+  ClearChatSearchIndexInput,
   IndexChatMessagesInput,
   SearchChatHistoryInput,
 } from '@truefoundry/trueforge-core/agent-session/store/ISessionStore';
 import {
   buildChatSearchSnippet,
+  chatSearchIndexWords,
   chatSearchQueryTerms,
-} from '@truefoundry/trueforge-core/agent-session/store/chatSearchSnippet';
+} from '@truefoundry/trueforge-core/agent-session/store/chatSearchText';
 import { type Kysely, sql } from 'kysely';
 import type { Database } from '../../types';
 
@@ -45,7 +47,9 @@ export async function indexChatMessages(db: Kysely<Database>, input: IndexChatMe
           turn_id: input.turn_id,
           message_id: document.message_id,
           role: document.role,
+          persona_id: input.persona_id,
           body: document.text,
+          search_words: chatSearchIndexWords(document.text).join(' '),
           created_at: document.created_at.toISOString(),
         })),
       )
@@ -58,52 +62,68 @@ interface ChatSearchRow {
   body: string;
   title: string | null;
   session_created_at: string;
-  doc_created_at: string;
-  rank: number;
 }
 
 /**
- * Searches the FTS5 index over the caller's own chats. FTS5's `bm25` ranks lower for a
- * better match; the best-ranked message of each chat becomes its one hit.
+ * Searches the caller's own chats: FTS5 finds the messages holding every query word, the window
+ * keeps each chat's newest one, and only `limit` chats leave the database.
  */
 export async function searchChatHistory(db: Kysely<Database>, input: SearchChatHistoryInput): Promise<ChatSearchHit[]> {
   const terms = chatSearchQueryTerms(input.query);
   if (terms.length === 0 || input.limit <= 0) {
     return [];
   }
-  const match = terms.map(term => `"${term}"`).join(' AND ');
-  const fromIso = input.from === null ? null : input.from.toISOString();
-  const toIso = input.to === null ? null : input.to.toISOString();
+  // Terms are letter-and-digit words, so quoting each one makes a plain AND of whole words.
+  const match = terms.map(term => `"${term}"`).join(' ');
+  const exclusion = input.exclude_session_id === null ? sql`` : sql`AND d.session_id != ${input.exclude_session_id}`;
+  const fromBound = input.from === null ? sql`` : sql`AND d.created_at >= ${input.from.toISOString()}`;
+  const toBound = input.to === null ? sql`` : sql`AND d.created_at < ${input.to.toISOString()}`;
   const rows = await sql<ChatSearchRow>`
-    SELECT
-      d.session_id AS session_id,
-      d.body AS body,
-      d.created_at AS doc_created_at,
-      s.title AS title,
-      s.created_at AS session_created_at,
-      bm25(chat_search_fts) AS rank
-    FROM chat_search_fts
-    JOIN chat_search_document d ON d.rowid = chat_search_fts.rowid
-    JOIN session s ON s.tenant_id = d.tenant_id AND s.session_id = d.session_id
-    WHERE chat_search_fts MATCH ${match}
-      AND d.tenant_id = ${input.tenant_id}
-      AND json_extract(s.created_by_subject, '$.subject_id') = ${input.created_by_subject_id}
-      AND (${input.exclude_session_id} IS NULL OR d.session_id != ${input.exclude_session_id})
-      AND (${fromIso} IS NULL OR d.created_at >= ${fromIso})
-      AND (${toIso} IS NULL OR d.created_at < ${toIso})
-    ORDER BY rank ASC, d.created_at DESC
+    WITH matched AS (
+      SELECT
+        d.session_id,
+        d.body,
+        d.created_at,
+        ROW_NUMBER() OVER (
+          PARTITION BY d.session_id
+          ORDER BY d.created_at DESC, d.turn_id DESC, d.message_id DESC
+        ) AS newest
+      FROM chat_search_fts
+      JOIN chat_search_document d ON d.doc_id = chat_search_fts.rowid
+      JOIN session s ON s.tenant_id = d.tenant_id AND s.session_id = d.session_id
+      WHERE chat_search_fts MATCH ${match}
+        AND d.tenant_id = ${input.tenant_id}
+        AND json_extract(s.created_by_subject, '$.subject_id') = ${input.created_by_subject_id}
+        AND (d.persona_id IS NULL OR d.persona_id IN (SELECT value FROM json_each(${JSON.stringify(input.persona_ids)})))
+        ${exclusion}
+        ${fromBound}
+        ${toBound}
+    )
+    SELECT m.session_id, m.body, s.title, s.created_at AS session_created_at
+    FROM matched m
+    JOIN session s ON s.tenant_id = ${input.tenant_id} AND s.session_id = m.session_id
+    WHERE m.newest = 1
+    ORDER BY m.created_at DESC, m.session_id ASC
+    LIMIT ${input.limit}
   `.execute(db);
 
-  const bestBySession = new Map<string, ChatSearchRow>();
-  for (const row of rows.rows) {
-    if (!bestBySession.has(row.session_id)) {
-      bestBySession.set(row.session_id, row);
-    }
-  }
-  return [...bestBySession.values()].slice(0, input.limit).map(row => ({
+  return rows.rows.map(row => ({
     session_id: row.session_id,
     title: row.title,
     created_at: new Date(row.session_created_at),
     snippet: buildChatSearchSnippet(row.body, input.query),
   }));
+}
+
+/** Removes the search rows of every chat the subject created in the tenant; the FTS5 rows follow by trigger. */
+export async function clearChatSearchIndex(db: Kysely<Database>, input: ClearChatSearchIndexInput): Promise<void> {
+  await sql`
+    DELETE FROM chat_search_document
+    WHERE tenant_id = ${input.tenant_id}
+      AND session_id IN (
+        SELECT session_id FROM session
+        WHERE tenant_id = ${input.tenant_id}
+          AND json_extract(created_by_subject, '$.subject_id') = ${input.created_by_subject_id}
+      )
+  `.execute(db);
 }

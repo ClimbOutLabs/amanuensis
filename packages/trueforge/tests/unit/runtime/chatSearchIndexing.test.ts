@@ -1,11 +1,14 @@
 /**
- * The words a finished turn adds to the past-chat search index, and the backfill that fills
- * the index for chats which already exist. Indexing takes the person's own typed words and
- * the assistant's final replies only: tool calls, tool output, attachments and host-wrapped
- * text never become documents.
+ * The words a finished turn adds to the past-chat search index, and the indexer that keeps
+ * the index only for people who turned the search on. Indexing takes the person's own typed
+ * words and the assistant's final replies only: tool calls, tool output, attachments and
+ * host-wrapped text never become documents.
  */
 import type { TurnRecordWithoutSnapshot } from '@truefoundry/trueforge-core/agent-session';
-import { InMemorySessionStore } from '@truefoundry/trueforge-core/agent-session';
+import type {
+  ISessionStore,
+  SearchChatHistoryInput,
+} from '@truefoundry/trueforge-core/agent-session/store/ISessionStore';
 import { EventType, newEventId } from '@truefoundry/trueforge-core/core';
 import { createLogger } from 'winston';
 import {
@@ -15,8 +18,14 @@ import {
 } from '../../../../trueforge-core/tests/agent-session/testHelpers';
 import type { SessionCustom, TurnCustom } from '../../../src/db/sessionCustom';
 import { SqliteGlobalSettingsStore } from '../../../src/db/sqlite/global-settings-store/SqliteGlobalSettingsStore';
+import { SqlitePersonaStore } from '../../../src/db/sqlite/persona-store/SqlitePersonaStore';
+import { SqliteSentinelSettingsStore } from '../../../src/db/sqlite/sentinel-settings-store/SqliteSentinelSettingsStore';
 import { SqliteSessionStore } from '../../../src/db/sqlite/session-store/SqliteSessionStore';
-import { chatSearchDocumentsForTurn, runChatSearchBackfill } from '../../../src/runtime/chatSearchIndexing';
+import {
+  ChatSearchIndexer,
+  chatSearchDocumentsForTurn,
+  requestChatSearchBackfill,
+} from '../../../src/runtime/chatSearchIndexing';
 import { TENANT_ID } from '../../../src/tenancy';
 import { createSqliteTestDatabase, type SqliteTestDatabase } from '../../db/sqlite/testDatabase';
 
@@ -120,6 +129,19 @@ describe('chatSearchDocumentsForTurn', () => {
     expect(documents[0]?.text).toBe('Please read this menu.');
   });
 
+  it('leaves out a host-wrapped message stored as plain text', () => {
+    const documents = chatSearchDocumentsForTurn(
+      turnWith({
+        input: [
+          { type: EventType.USER_MESSAGE, content: '<tfy-internal>hidden host note about ferries</tfy-internal>' },
+          { type: EventType.USER_MESSAGE, content: 'What about the bus?' },
+        ],
+        state: doneState('The bus leaves at ten.'),
+      }),
+    );
+    expect(documents[0]?.text).toBe('What about the bus?');
+  });
+
   it('indexes only the person words when the turn did not finish with a reply', () => {
     const documents = chatSearchDocumentsForTurn(
       turnWith({
@@ -135,22 +157,76 @@ describe('chatSearchDocumentsForTurn', () => {
   });
 });
 
-describe('runChatSearchBackfill', () => {
+/** A store whose index writes fail, as during a database outage. */
+class FailingIndexStore extends SqliteSessionStore {
+  override indexChatMessages(): Promise<void> {
+    return Promise.reject(new Error('database is busy'));
+  }
+}
+
+const PERSON = { tenant_id: TENANT_ID, created_by: 'user-1' };
+
+function searchFor(query: string): SearchChatHistoryInput {
+  return {
+    tenant_id: TENANT_ID,
+    query,
+    created_by_subject_id: PERSON.created_by,
+    exclude_session_id: null,
+    persona_ids: ['p-work'],
+    from: null,
+    to: null,
+    limit: 8,
+  };
+}
+
+describe('ChatSearchIndexer', () => {
   let env: SqliteTestDatabase;
+  let store: SqliteSessionStore;
+  let globalSettingsStore: SqliteGlobalSettingsStore;
+  let sentinelSettingsStore: SqliteSentinelSettingsStore;
 
   beforeEach(async () => {
     env = await createSqliteTestDatabase();
+    store = new SqliteSessionStore(env.db);
+    globalSettingsStore = new SqliteGlobalSettingsStore(env.db);
+    sentinelSettingsStore = new SqliteSentinelSettingsStore(env.db);
   }, 120_000);
 
   afterEach(async () => {
     await env.teardown();
   });
 
-  async function seedFinishedChat(store: SqliteSessionStore, sessionId: string, title: string): Promise<void> {
+  function indexer(sessionStore: ISessionStore<SessionCustom, TurnCustom> = store): ChatSearchIndexer {
+    return new ChatSearchIndexer({
+      sessionStore,
+      globalSettingsStore,
+      sentinelSettingsStore,
+      personaStore: new SqlitePersonaStore(env.db),
+      logger,
+    });
+  }
+
+  async function setSwitch(enabled: boolean): Promise<void> {
+    await sentinelSettingsStore.patch({
+      ...PERSON,
+      offline_mode: undefined,
+      tier2_auto_allow: undefined,
+      search_without_asking: undefined,
+      maps_without_asking: undefined,
+      sandbox_without_asking: undefined,
+      chat_search_enabled: enabled,
+    });
+  }
+
+  async function pending(): Promise<string | undefined> {
+    return (await globalSettingsStore.getSetting({ key: 'chat_search_backfill_pending' }))?.value;
+  }
+
+  async function seedFinishedChat(sessionId: string, custom: TurnCustom | null = null): Promise<void> {
     await store.createSession({
       tenant_id: TENANT_ID,
       session_id: sessionId,
-      created_by_subject: { subject_id: 'user-1', subject_type: 'user', subject_display_name: 'user-1' },
+      created_by_subject: { subject_id: PERSON.created_by, subject_type: 'user', subject_display_name: 'user-1' },
       agent: { type: 'inline', spec: makeAgentSpec() },
       custom: null,
       metadata: {},
@@ -159,7 +235,8 @@ describe('runChatSearchBackfill', () => {
     });
     const createInput = makeCreateTurnInput<TurnCustom>({ sessionId, turnId: `${sessionId}-turn-1` });
     createInput.turn.input = [{ type: EventType.USER_MESSAGE, content: 'When does the ferry to the island leave?' }];
-    createInput.update_session_title_if_not_exist = title;
+    createInput.turn.custom = custom;
+    createInput.update_session_title_if_not_exist = sessionId;
     await store.createTurn(createInput);
     const state = doneState('The ferry leaves at nine in the morning.');
     await store.updateTurnState({
@@ -170,88 +247,70 @@ describe('runChatSearchBackfill', () => {
     });
   }
 
-  it('fills the index for chats that already exist, then reports done', async () => {
-    const store = new SqliteSessionStore(env.db);
-    await seedFinishedChat(store, 'old-chat-1', 'Island trip plans');
-    await seedFinishedChat(store, 'old-chat-2', 'Harbour notes');
-
-    const before = await store.searchChatHistory({
-      tenant_id: TENANT_ID,
-      query: 'ferry',
-      created_by_subject_id: 'user-1',
-      exclude_session_id: null,
-      from: null,
-      to: null,
-      limit: 8,
-    });
-    expect(before).toEqual([]);
-
-    const result = await runChatSearchBackfill({
-      sessionStore: store,
-      globalSettingsStore: new SqliteGlobalSettingsStore(env.db),
-      logger,
-    });
-    expect(result).toEqual({ sessions_scanned: 2, turns_indexed: 2, done: true });
-
-    const hits = await store.searchChatHistory({
-      tenant_id: TENANT_ID,
-      query: 'ferry',
-      created_by_subject_id: 'user-1',
-      exclude_session_id: null,
-      from: null,
-      to: null,
-      limit: 8,
-    });
-    expect(hits.map(hit => hit.session_id).sort()).toEqual(['old-chat-1', 'old-chat-2']);
-
-    const again = await runChatSearchBackfill({
-      sessionStore: store,
-      globalSettingsStore: new SqliteGlobalSettingsStore(env.db),
-      logger,
-    });
-    expect(again).toEqual({ sessions_scanned: 0, turns_indexed: 0, done: true });
+  it('adds nothing while the person has the search off', async () => {
+    await seedFinishedChat('chat-1');
+    await indexer().indexFinishedTurn({ ...PERSON, session_id: 'chat-1', turn_id: 'chat-1-turn-1' });
+    await setSwitch(true);
+    expect(await store.searchChatHistory(searchFor('ferry'))).toEqual([]);
   });
 
-  it('resumes from the saved page instead of starting over', async () => {
-    const store = new SqliteSessionStore(env.db);
-    await seedFinishedChat(store, 'old-chat-1', 'Island trip plans');
-    const settings = new SqliteGlobalSettingsStore(env.db);
-    // A cursor that points past the only page: the walk ends at once and marks itself done.
-    await settings.setSetting({ key: 'chat_search_backfill_done', value: 'true' });
-    const result = await runChatSearchBackfill({ sessionStore: store, globalSettingsStore: settings, logger });
-    expect(result.done).toBe(true);
-    expect(result.sessions_scanned).toBe(0);
+  it('adds a finished turn with the persona that answered it once the search is on', async () => {
+    await setSwitch(true);
+    await seedFinishedChat('chat-1', {
+      persona: { persona_id: 'p-work', persona_name: 'Work', model_name: 'test/model', source: 'sticky' },
+    });
+    await indexer().indexFinishedTurn({ ...PERSON, session_id: 'chat-1', turn_id: 'chat-1-turn-1' });
+    expect((await store.searchChatHistory(searchFor('ferry'))).map(hit => hit.session_id)).toEqual(['chat-1']);
+    expect(await store.searchChatHistory({ ...searchFor('ferry'), persona_ids: [] })).toEqual([]);
   });
-});
 
-describe('indexing into a memory store', () => {
-  it('keeps the same behaviour on the in-memory store the import replay uses', async () => {
-    const store = new InMemorySessionStore<SessionCustom, TurnCustom>();
-    await store.createSession({
-      tenant_id: TENANT_ID,
-      session_id: 'memory-chat',
-      created_by_subject: { subject_id: 'user-1', subject_type: 'user', subject_display_name: 'user-1' },
-      agent: { type: 'inline', spec: makeAgentSpec() },
-      custom: null,
-      metadata: {},
-      external_id: null,
-      source: null,
+  it('fills in earlier chats when the search is turned on, then forgets them when it is turned off', async () => {
+    await seedFinishedChat('old-chat-1');
+    await seedFinishedChat('old-chat-2');
+    const chatSearch = indexer();
+
+    await chatSearch.requestPass(PERSON);
+    await setSwitch(true);
+    await chatSearch.followSwitch({ ...PERSON, enabled: true });
+    await chatSearch.idle();
+    expect((await store.searchChatHistory(searchFor('ferry'))).map(hit => hit.session_id).sort()).toEqual([
+      'old-chat-1',
+      'old-chat-2',
+    ]);
+    expect(await pending()).toBeUndefined();
+
+    await setSwitch(false);
+    await chatSearch.followSwitch({ ...PERSON, enabled: false });
+    await setSwitch(true);
+    expect(await store.searchChatHistory(searchFor('ferry'))).toEqual([]);
+  });
+
+  it('drops a requested pass, and writes nothing, when the switch is off by the time it runs', async () => {
+    await seedFinishedChat('old-chat-1');
+    await requestChatSearchBackfill({ globalSettingsStore, person: PERSON });
+    const chatSearch = indexer();
+    await chatSearch.resumePending();
+    await chatSearch.idle();
+    expect(await pending()).toBeUndefined();
+    await setSwitch(true);
+    expect(await store.searchChatHistory(searchFor('ferry'))).toEqual([]);
+  });
+
+  it('asks for a pass when a write fails, and the pass adds the turn later', async () => {
+    await setSwitch(true);
+    await seedFinishedChat('chat-1');
+    await indexer(new FailingIndexStore(env.db)).indexFinishedTurn({
+      ...PERSON,
+      session_id: 'chat-1',
+      turn_id: 'chat-1-turn-1',
     });
-    await store.indexChatMessages({
-      tenant_id: TENANT_ID,
-      session_id: 'memory-chat',
-      turn_id: 'turn-1',
-      documents: [{ message_id: 'user', role: 'user', text: 'ferry times please', created_at: new Date() }],
-    });
-    const hits = await store.searchChatHistory({
-      tenant_id: TENANT_ID,
-      query: 'ferry',
-      created_by_subject_id: 'user-1',
-      exclude_session_id: null,
-      from: null,
-      to: null,
-      limit: 8,
-    });
-    expect(hits).toHaveLength(1);
+    expect(await pending()).toContain('user-1');
+    expect(await store.searchChatHistory(searchFor('ferry'))).toEqual([]);
+
+    const recovered = indexer();
+    await recovered.resumePending();
+    await recovered.idle();
+    expect((await store.searchChatHistory(searchFor('ferry'))).map(hit => hit.session_id)).toEqual(['chat-1']);
+    expect(await pending()).toBeUndefined();
   });
 });

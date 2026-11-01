@@ -111,7 +111,7 @@ import { registerCalendarConnectorForBoot } from './runtime/calendarAccount';
 import { createChatImageService } from './runtime/chatImages/chatImageService';
 import { CHAT_IMAGE_RETENTION_DAYS } from './runtime/chatImages/limits';
 import { createImageReencoder } from './runtime/chatImages/reencodeInSandbox';
-import { startChatSearchBackfill } from './runtime/chatSearchIndexing';
+import { ChatSearchIndexer } from './runtime/chatSearchIndexing';
 import { recoverAbandonedCommandExecutions } from './runtime/commandExecutionRecovery';
 import { designateTavilyAtBoot, seedDefaultSearchProviderAtBoot } from './runtime/defaultSearchProvider';
 import { EventSubscriptionRegistry } from './runtime/event-subscription';
@@ -833,7 +833,15 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
   const resolveAgentStore = (c: Context) => persistence.resolveAgentStore(resolveRequestContext(c));
   const resolveSandboxProviderStore = (c: Context) => persistence.resolveSandboxProviderStore(resolveRequestContext(c));
   const resolveSkillStore = (c: Context) => persistence.resolveSkillStore(resolveRequestContext(c));
+  const chatSearchIndexer = new ChatSearchIndexer({
+    sessionStore,
+    globalSettingsStore,
+    sentinelSettingsStore,
+    personaStore,
+    logger,
+  });
   const app = createServerApp({
+    chatSearchIndexer,
     modelCatalog,
     mcpCatalog,
     skillCatalog: SkillCatalog.load(),
@@ -899,7 +907,7 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     chatImageStore,
     turnDrains,
     sentinelAuditStore,
-    globalSettingsStore,
+    chatSearchIndexer,
   };
 }
 
@@ -978,7 +986,7 @@ try {
     chatImageStore,
     turnDrains,
     sentinelAuditStore,
-    globalSettingsStore,
+    chatSearchIndexer,
   } = configuration.STANDALONE
     ? await createServerRuntime(
         await createStandalonePersistence({ sqlitePath: configuration.SQLITE_PATH, logger }),
@@ -1022,8 +1030,8 @@ try {
   }, 86_400_000);
   artifactRetentionTimer.unref();
 
-  // Fill the past-chat search index for chats that predate it; a no-op once done.
-  startChatSearchBackfill({ sessionStore, globalSettingsStore, logger });
+  // Finish past-chat search passes a stop, an import or a failed write left pending.
+  void chatSearchIndexer.resumePending();
 
   // Abandoned Google consents hold a client secret; consent reads already purge, this covers an idle install.
   const googlePendingPurgeTimer = setInterval(() => {

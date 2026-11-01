@@ -82,6 +82,7 @@ import {
   getOrCreateChatAssistantAgent,
   scheduleRunsAs,
 } from '../runtime/chatAssistant';
+import type { ChatSearchIndexer } from '../runtime/chatSearchIndexing';
 import { validateManifest } from '../runtime/cron';
 import type { EventSubscriptionRegistry } from '../runtime/event-subscription';
 import { createMemoryClient } from '../runtime/memory/createMemoryClient';
@@ -138,6 +139,8 @@ export interface ScheduleTurnExecutionDeps<TTransaction> {
   globalSettingsStore: IGlobalSettingsStore<TTransaction>;
   /** Scheduled runs on Token Factory count against the same daily cap as chat turns. */
   tokenFactoryBudget: TokenFactoryBudget;
+  /** A scheduled run joins the past-chat search like any chat; absent, it is not added. */
+  chatSearchIndexer?: ChatSearchIndexer | undefined;
   /** The activity log a firing is written to; absent, firings run exactly as before and are not recorded. */
   audit?: AuditLogWriter | null | undefined;
 }
@@ -302,6 +305,7 @@ export async function startScheduleRunOnRequest<TTransaction>(params: {
       sandboxProviderResolver: deps.sandboxProviderResolver,
       globalSettingsStore: deps.globalSettingsStore,
       tokenFactoryBudget: deps.tokenFactoryBudget,
+      chatSearchIndexer: deps.chatSearchIndexer,
       personalizationProfile,
       personaContext: prepared.persona === undefined ? undefined : buildPersonaContext(prepared.persona),
       memoryClient,

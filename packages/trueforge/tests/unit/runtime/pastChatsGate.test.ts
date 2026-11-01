@@ -132,11 +132,15 @@ describe('the past-chat search switch', () => {
         budget: uncappedTokenFactoryBudget,
         authority: { tenantId: OWNER.tenant_id, userRef: OWNER.created_by },
       },
-      {
-        sessionStore,
-        authority: { tenantId: OWNER.tenant_id, userRef: OWNER.created_by },
-        enabled,
-      },
+      enabled
+        ? {
+            sessionStore,
+            personaStore: { listPersonas: async () => [] },
+            memoryDir: '',
+            scope: undefined,
+            authority: { tenantId: OWNER.tenant_id, userRef: OWNER.created_by },
+          }
+        : undefined,
     );
   }
 

@@ -2,7 +2,10 @@ import { sql, type Kysely } from 'kysely';
 
 /**
  * The past-chat search index: one row per searchable message of a finished turn (the person's
- * own words, or the assistant's final reply), plus the FTS5 table that searches the words.
+ * own words, or the assistant's final reply), plus the FTS5 table that searches its words. The
+ * words are built in code by the shared matching rule and stored space-separated, so the FTS5
+ * `ascii` tokenizer only splits on those spaces and every store matches alike. `doc_id` is an
+ * INTEGER PRIMARY KEY so the FTS5 rows keep pointing at the right document after a VACUUM.
  * The index is derived data, rebuilt from the chats, so it is never exported. The session
  * foreign key cascades, so a deleted chat leaves the index at once. Triggers keep the FTS5
  * table in step with the document rows inside the same transaction.
@@ -12,14 +15,17 @@ export async function up(db: Kysely<unknown>): Promise<void> {
   await db.transaction().execute(async trx => {
     await sql`
       CREATE TABLE chat_search_document (
+        doc_id INTEGER PRIMARY KEY,
         tenant_id TEXT NOT NULL,
         session_id TEXT NOT NULL REFERENCES session(session_id) ON DELETE CASCADE,
         turn_id TEXT NOT NULL,
         message_id TEXT NOT NULL,
         role TEXT NOT NULL CHECK (role IN ('user', 'assistant')),
+        persona_id TEXT,
         body TEXT NOT NULL,
+        search_words TEXT NOT NULL,
         created_at TEXT NOT NULL,
-        PRIMARY KEY (tenant_id, session_id, turn_id, message_id)
+        UNIQUE (tenant_id, session_id, turn_id, message_id)
       ) STRICT
     `.execute(trx);
     await sql`
@@ -27,20 +33,20 @@ export async function up(db: Kysely<unknown>): Promise<void> {
     `.execute(trx);
     await sql`
       CREATE VIRTUAL TABLE chat_search_fts USING fts5(
-        body,
+        search_words,
         content='chat_search_document',
-        content_rowid='rowid',
-        tokenize='porter unicode61'
+        content_rowid='doc_id',
+        tokenize='ascii'
       )
     `.execute(trx);
     await sql`
       CREATE TRIGGER chat_search_document_ai AFTER INSERT ON chat_search_document BEGIN
-        INSERT INTO chat_search_fts (rowid, body) VALUES (new.rowid, new.body);
+        INSERT INTO chat_search_fts (rowid, search_words) VALUES (new.doc_id, new.search_words);
       END
     `.execute(trx);
     await sql`
       CREATE TRIGGER chat_search_document_ad AFTER DELETE ON chat_search_document BEGIN
-        INSERT INTO chat_search_fts (chat_search_fts, rowid, body) VALUES ('delete', old.rowid, old.body);
+        INSERT INTO chat_search_fts (chat_search_fts, rowid, search_words) VALUES ('delete', old.doc_id, old.search_words);
       END
     `.execute(trx);
     await sql`

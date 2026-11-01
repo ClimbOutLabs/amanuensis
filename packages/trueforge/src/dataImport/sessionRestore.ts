@@ -36,7 +36,6 @@ import { getHeapStatistics } from 'node:v8';
 import { formatArchiveBytes } from '../dataExport/archiveLimits';
 
 import type { SessionCustom, TurnCustom } from '../db/sessionCustom';
-import { chatSearchDocumentsForTurn } from '../runtime/chatSearchIndexing';
 import { detachConnectors } from './connectorImport';
 import { DataImportError } from './importError';
 import type { ImportEvent, ImportSessionEntry, ImportTurnRecord } from './importSchemas';
@@ -112,7 +111,6 @@ function synthesizedTurnDoneEvent(state: TerminalTurnState): TurnDoneEvent {
 
 async function restoreTurn(
   store: ISessionStore<SessionCustom, TurnCustom>,
-  tenantId: string,
   session: ImportSessionEntry['session'],
   entry: ImportSessionEntry['turns'][number],
   previous: { threads: ReadonlyMap<string, ThreadSnapshot>; isFirstTurn: boolean; answered: boolean },
@@ -260,10 +258,9 @@ async function restoreTurn(
     await store.appendToEvents({ session_id: sessionId, turn_id: turn.turn_id, events: replayEvents });
   }
 
-  let finalState: TerminalTurnState;
   if (turn.state.status === 'running' || holdsOutstandingAction) {
     const completedAt = turn.updated_at;
-    finalState = {
+    const state: TerminalTurnState = {
       status: 'cancelled',
       reason: CancellationReason.Abandoned,
       completed_at: completedAt,
@@ -276,39 +273,14 @@ async function restoreTurn(
       session_id: sessionId,
       turn_id: turn.turn_id,
       reason: CancellationReason.Abandoned,
-      turn_done_event: { ...synthesizedTurnDoneEvent(finalState), created_at: completedAt },
+      turn_done_event: { ...synthesizedTurnDoneEvent(state), created_at: completedAt },
     });
-  } else {
-    finalState = turn.state;
-    const doneEvent =
-      streamDone?.state.status === finalState.status ? streamDone : synthesizedTurnDoneEvent(finalState);
-    await store.updateTurnState({
-      session_id: sessionId,
-      turn_id: turn.turn_id,
-      state: finalState,
-      turn_done_event: doneEvent,
-    });
+    return;
   }
 
-  // The search index is derived data and never travels in an export, so each restored turn
-  // is indexed again here from what was restored.
-  await store.indexChatMessages({
-    tenant_id: tenantId,
-    session_id: sessionId,
-    turn_id: turn.turn_id,
-    documents: chatSearchDocumentsForTurn({
-      turn_id: turn.turn_id,
-      session_id: sessionId,
-      first_turn_id: turn.first_turn_id,
-      ancestor_ids: turn.ancestor_ids,
-      previous_turn_id: turn.previous_turn_id,
-      state: finalState,
-      input: turn.input,
-      created_at: new Date(turn.created_at),
-      updated_at: new Date(turn.updated_at),
-      custom: turn.custom,
-    }),
-  });
+  const state: TerminalTurnState = turn.state;
+  const doneEvent = streamDone?.state.status === state.status ? streamDone : synthesizedTurnDoneEvent(state);
+  await store.updateTurnState({ session_id: sessionId, turn_id: turn.turn_id, state, turn_done_event: doneEvent });
 }
 
 type TurnEntry = ImportSessionEntry['turns'][number];
@@ -418,7 +390,7 @@ export async function restoreSessions(
     const continuedTurnIds = new Set(entry.turns.map(({ turn }) => turn.previous_turn_id));
     const indexById = turnIndexById(entry.turns);
     for (const [index, turnEntry] of entry.turns.entries()) {
-      await restoreTurn(store, context.tenantId, session, turnEntry, {
+      await restoreTurn(store, session, turnEntry, {
         threads: threadsOf(baseTurn(entry.turns, { index, indexById })),
         isFirstTurn: index === 0,
         answered: continuedTurnIds.has(turnEntry.turn.turn_id),
@@ -480,14 +452,10 @@ export async function replaySessions(
         const base = baseTurn(entry.turns, { index, indexById });
         if (base !== undefined) {
           // Every thread of the base is new to this store, so it lands with its whole context.
-          await restoreTurn(store, context.tenantId, session, base, {
-            threads: new Map(),
-            isFirstTurn: false,
-            answered: true,
-          });
+          await restoreTurn(store, session, base, { threads: new Map(), isFirstTurn: false, answered: true });
           landed.push(base);
         }
-        await restoreTurn(store, context.tenantId, session, turnEntry, {
+        await restoreTurn(store, session, turnEntry, {
           threads: threadsOf(base),
           isFirstTurn: index === 0,
           answered: continuedTurnIds.has(turnEntry.turn.turn_id),
