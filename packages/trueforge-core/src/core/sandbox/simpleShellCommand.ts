@@ -35,6 +35,8 @@ const RESERVED_FIRST_WORDS = new Set([
 const ASSIGNMENT = /^[A-Za-z_][A-Za-z0-9_]*\+?=/;
 const NAME_START = /[A-Za-z_]/;
 const NAME_CHAR = /[A-Za-z0-9_]/;
+// Longest first, so `:-` wins over `-` and `##` over `#`.
+const EXPANSION_OPERATORS = [':-', ':+', ':=', '##', '%%', '-', '+', '=', '#', '%'];
 const SPECIAL_PARAMETERS = new Set([
   '@',
   '*',
@@ -58,13 +60,13 @@ const SPECIAL_PARAMETERS = new Set([
 /**
  * Parses `command` as one simple command, or returns null when it is anything
  * else. Deliberately conservative: it accepts plain words, single and double
- * quotes, backslash escapes, and `$NAME` / `${...}` parameter expansions, and
- * returns null for pipelines, lists, redirections, background jobs,
- * subshells, compound commands, comments, leading assignments, command,
- * process or arithmetic substitution (anywhere, including inside double
- * quotes and parameter defaults), ANSI-C quoting, and unterminated quotes.
- * Null never causes a wrong "ok"; it only means the caller cannot vouch for
- * the command's exit status.
+ * quotes, backslash escapes, `$NAME` and special parameters, and the `${...}`
+ * forms that parameterExpansionEnd lists. It returns null for pipelines,
+ * lists, redirections, background jobs, subshells, compound commands,
+ * comments, leading assignments, any command, process or arithmetic
+ * substitution, ANSI-C quoting, unterminated quotes, and every other `${...}`
+ * form. Null never causes a wrong "ok"; it only means the caller cannot vouch
+ * for the command's exit status.
  */
 export function parseSimpleShellCommand(command: string): SimpleShellCommand | null {
   const words: string[] = [];
@@ -111,6 +113,9 @@ export function parseSimpleShellCommand(command: string): SimpleShellCommand | n
       return true;
     }
     if (next !== undefined && SPECIAL_PARAMETERS.has(next)) {
+      if (isPidThenSubstitution(command, i)) {
+        return false;
+      }
       word += command.slice(i, i + 2);
       raw += command.slice(i, i + 2);
       i += 2;
@@ -223,55 +228,109 @@ export function parseSimpleShellCommand(command: string): SimpleShellCommand | n
 
 /**
  * Index of the `}` closing a `${...}` expansion whose body starts at `start`,
- * or null when the body is unterminated or contains a command, process or
- * arithmetic substitution (including inside a `${VAR:-default}` value).
+ * or null unless the body is one of the forms bash expands without error:
+ * `${P}`, `${#NAME}`, or `${P<op>WORD}` (P not `#` or `!`) with op one of `:-` `-` `:+` `+`
+ * `:=` `=` (NAME only) `#` `##` `%` `%%`. WORD may hold plain characters,
+ * `$NAME`, special parameters and nested expansions of these forms; quotes,
+ * backslashes, newlines and any command, process or arithmetic substitution
+ * make it null.
  */
 function parameterExpansionEnd(command: string, start: number): number | null {
-  let depth = 1;
-  let quote: "'" | '"' | null = null;
-  for (let i = start; i < command.length; i += 1) {
-    const ch = command[i];
-    if (quote === "'") {
-      if (ch === "'") {
-        quote = null;
-      }
-      continue;
+  if (command[start] === '#') {
+    const lengthEnd = parameterEnd(command, start + 1);
+    if (lengthEnd !== null && lengthEnd.isName && command[lengthEnd.end] === '}') {
+      return lengthEnd.end;
     }
-    if (ch === '\\') {
-      i += 1;
-      continue;
+  }
+  // After `${`, bash reads a leading `#` or `!` as a length or indirection prefix,
+  // so `$#` and `$!` are only safe here on their own.
+  if ((command[start] === '#' || command[start] === '!') && command[start + 1] !== '}') {
+    return null;
+  }
+  const parameter = parameterEnd(command, start);
+  if (parameter === null) {
+    return null;
+  }
+  let i = parameter.end;
+  if (command[i] === '}') {
+    return i;
+  }
+  const operator = EXPANSION_OPERATORS.find(op => command.startsWith(op, i));
+  if (operator === undefined) {
+    return null;
+  }
+  if (operator.endsWith('=') && !parameter.isName) {
+    return null; // assigning to a positional or special parameter is an error
+  }
+  i += operator.length;
+  while (i < command.length) {
+    const ch = command[i] ?? '';
+    if (ch === '}') {
+      return i;
     }
-    if (ch === '`') {
-      return null;
-    }
-    if (ch === '$' && (command[i + 1] === '(' || command[i + 1] === '[')) {
+    if (ch === "'" || ch === '"' || ch === '\\' || ch === '`' || ch === '\n' || ch === '\r') {
       return null;
     }
     if ((ch === '<' || ch === '>') && command[i + 1] === '(') {
       return null;
     }
-    if (ch === '"') {
-      quote = quote === '"' ? null : '"';
-      continue;
-    }
-    if (ch === "'" && quote === null) {
-      quote = "'";
-      continue;
-    }
-    if (quote !== null) {
-      continue;
-    }
-    if (ch === '$' && command[i + 1] === '{') {
-      depth += 1;
-      i += 1;
-      continue;
-    }
-    if (ch === '}') {
-      depth -= 1;
-      if (depth === 0) {
-        return i;
+    if (ch === '$') {
+      const next = command[i + 1];
+      if (next === '{') {
+        const nestedEnd = parameterExpansionEnd(command, i + 2);
+        if (nestedEnd === null) {
+          return null;
+        }
+        i = nestedEnd + 1;
+        continue;
+      }
+      if (next === '(' || next === '[' || next === "'" || next === '"') {
+        return null;
+      }
+      if (isPidThenSubstitution(command, i)) {
+        return null;
+      }
+      if (next !== undefined && (NAME_START.test(next) || SPECIAL_PARAMETERS.has(next))) {
+        const nested = parameterEnd(command, i + 1);
+        if (nested === null) {
+          return null;
+        }
+        i = nested.end;
+        continue;
       }
     }
+    i += 1;
   }
   return null;
+}
+
+/** End of the parameter (name, digits or one special character) starting at `start`. */
+function parameterEnd(command: string, start: number): { end: number; isName: boolean } | null {
+  const first = command[start];
+  if (first === undefined) {
+    return null;
+  }
+  if (NAME_START.test(first)) {
+    let end = start + 1;
+    while (end < command.length && NAME_CHAR.test(command[end] ?? '')) {
+      end += 1;
+    }
+    return { end, isName: true };
+  }
+  if (/[0-9]/.test(first)) {
+    let end = start + 1;
+    while (end < command.length && /[0-9]/.test(command[end] ?? '')) {
+      end += 1;
+    }
+    return { end, isName: false };
+  }
+  if (SPECIAL_PARAMETERS.has(first)) {
+    return { end: start + 1, isName: false };
+  }
+  return null;
+}
+
+/** Bash reads `$$(` as `$` followed by a command substitution, not as `$$` then `(`. */
+function isPidThenSubstitution(command: string, dollarIndex: number): boolean {
+  return command[dollarIndex + 1] === '$' && command[dollarIndex + 2] === '(';
 }

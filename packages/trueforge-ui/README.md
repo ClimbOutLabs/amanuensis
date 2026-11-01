@@ -5,7 +5,7 @@
 [License](./LICENSE)
 
 A themeable, composable React SDK for building production-ready AI agent chat applications.  
-Build your own agent chat platform with a flexible UI layer that works with **TrueFoundry** (Control Plane + Gateway), **TrueForge** (harness), or any custom backend. The SDK is fully open source, giving you complete control over your architecture, components, and integrations.  
+Build your own agent chat platform with a flexible UI layer that works with **TrueForge** (harness) or any custom backend. The SDK is fully open source, giving you complete control over your architecture, components, and integrations.  
 Powered by [assistant-ui](https://www.assistant-ui.com/), it follows the familiar **shadcn/ui** and **Tailwind CSS variable** theming conventions, making it easy to customize every aspect of the experience.
 
 **Features**

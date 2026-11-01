@@ -52,20 +52,20 @@ surface is split across the `AgentMetrics`, `AgentMetricsView`,
 
 The built-in TrueForge config enables permissions automatically through the
 Harness endpoint and accepts an explicit `PermissionsServer` override.
-TrueFoundry and custom servers remain permissive unless they provide the optional
+Custom servers remain permissive unless they provide the optional
 port. `useResourcePermissions` reads `USE`, `MANAGE`, and `DELETE` grants, while
 `PermissionGuard` keeps denied actions visible and explained.
 
 ## Compose
 
-| Export                                                        | Notes                           |
-| ------------------------------------------------------------- | ------------------------------- |
-| `TrueFoundryChatProvider`                                     | Named-agent runtime + toasts    |
-| `TrueFoundryChatProviderProps`                                | `client` XOR `apiKey`+`baseUrl` |
-| `Thread`                                                      | Full thread + composer          |
-| `ThreadContainer`, `ComposerContainer`, `ThreadListContainer` | Building blocks                 |
-| `ToasterProvider`, `useToaster`, `useToasterOptional`         | Success and error toasts        |
-| Other `*Container` exports                                    | Advanced message / tool wiring  |
+| Export                                                        | Notes                          |
+| ------------------------------------------------------------- | ------------------------------ |
+| `TrueFoundryChatProvider`                                     | Named-agent runtime + toasts   |
+| `TrueFoundryChatProviderProps`                                | Takes an `AgentUIServer`       |
+| `Thread`                                                      | Full thread + composer         |
+| `ThreadContainer`, `ComposerContainer`, `ThreadListContainer` | Building blocks                |
+| `ToasterProvider`, `useToaster`, `useToasterOptional`         | Success and error toasts       |
+| Other `*Container` exports                                    | Advanced message / tool wiring |
 
 ## Slots / theme
 
@@ -81,7 +81,6 @@ port. `useResourcePermissions` reads `USE`, `MANAGE`, and `DELETE` grants, while
 | Export                                                                                | Notes                                         |
 | ------------------------------------------------------------------------------------- | --------------------------------------------- |
 | `useAui`, `useAuiState`, `AssistantState`                                             | Also `@truefoundry/trueforge-ui/assistant-ui` |
-| `AgentSessionClient`                                                                  | Gateway client                                |
 | `useTrueFoundryAgentRuntime`, `trueFoundryAttachmentAdapter`, other `useTrueFoundry*` | Runtime hooks                                 |
 
 ### Spaces
