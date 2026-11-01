@@ -2145,7 +2145,8 @@ describe('HindsightMemoryProcessor pages layer', () => {
     const event = await run({ client, message: 'Wendy?', logger });
     expect(event['injected_block']).toContain(wendyText);
     expect(warn).toHaveBeenCalledTimes(1);
-    expect(warn).toHaveBeenCalledWith(expect.stringContaining('skipped'), { files: ['people/Wendy.md'] });
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('Rename them to lowercase'), { count: 1 });
+    expect(JSON.stringify(warn.mock.calls)).not.toContain('Wendy.md');
   });
 
   it('keeps the turn going when loading pages throws', async () => {

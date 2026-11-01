@@ -154,8 +154,9 @@ for now.
 
 ### A page is not loaded
 
-If the server log warns that page files were skipped, the listed file names are not the lowercase page
-name. Rename `people/Wendy.md` to `people/wendy.md`, for example. Aman picks it up on the next turn.
+If the server log warns that page files were skipped, some files in `people/` or `matters/` do not have a lowercase
+page name. The log gives a count, not names. Look for such files and rename them, for example
+`people/Wendy.md` to `people/wendy.md`. Aman picks it up on the next turn.
 
 ### Files in `.memory-state/`
 

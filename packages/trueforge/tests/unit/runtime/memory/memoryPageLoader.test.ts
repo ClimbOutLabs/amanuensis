@@ -177,8 +177,9 @@ describe('memoryPageLoader', () => {
   it('names page files whose file name is not a lowercase page name, and still loads the rest', async () => {
     const vaultDir = await makeVault();
     await writeFresh(vaultDir, 'wendy', { kind: 'person', title: 'Wendy', aliases: [], household: false });
-    await writePageFile({ vaultDir, kind: 'person', slug: 'Wendy', content: '# Wendy\n' });
-    await writePageFile({ vaultDir, kind: 'matter', slug: 'my notes', content: '# Notes\n' });
+    await writeFile(path.join(vaultDir, 'people', 'Wendy.md'), '# Wendy\n');
+    await mkdir(path.join(vaultDir, 'matters'), { recursive: true });
+    await writeFile(path.join(vaultDir, 'matters', 'my notes.md'), '# Notes\n');
     const { pages, skippedFiles } = await loadPagesForMessage({
       vaultDirs: [vaultDir],
       writeVaultDir: vaultDir,

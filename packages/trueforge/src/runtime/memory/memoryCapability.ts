@@ -1762,9 +1762,12 @@ export class HindsightMemoryProcessor implements PreLLMProcessor, PreLLMEphemera
         maxTokens: this.config.pages.maxTokens,
       });
       if (loaded.skippedFiles.length > 0) {
-        this.logger.warn('Memory page files skipped because the file name is not a lowercase page name', {
-          files: loaded.skippedFiles,
-        });
+        this.logger.warn(
+          'Some memory page files were not read because their file name is not a lowercase name. Rename them to lowercase.',
+          {
+            count: loaded.skippedFiles.length,
+          },
+        );
       }
       return {
         entries: loaded.pages.map(page => ({

@@ -128,7 +128,7 @@ The slug comes from the title: lowercase, accents dropped, other characters turn
 at 64 characters. `José` and `Jose` share one page. A page's file name must be exactly that
 lowercase slug, such as `people/wendy.md`. A file with any other name, such as `people/Wendy.md` or
 `people/my notes.md`, is not a page: it is never loaded. Each turn that skips such a file writes one
-warning to the server log that lists the file names. To use the file, rename it to the lowercase slug.
+warning to the server log with the number of files skipped. It does not name them, since file names can be people's names. To use a file, rename it to the lowercase slug.
 
 `.memory-state/` is never exported. It holds:
 

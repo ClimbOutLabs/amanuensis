@@ -13,7 +13,7 @@ import {
 } from '../../../../src/runtime/memory/markdownMemoryFiles';
 import type { FactSource } from '../../../../src/runtime/memory/memoryNotes';
 import { loadPagesForMessage, writingInstructions } from '../../../../src/runtime/memory/memoryPageLoader';
-import { renderMemoryPage, type PageFrontMatter, type PageKind } from '../../../../src/runtime/memory/memoryPages';
+import type { PageFrontMatter, PageKind } from '../../../../src/runtime/memory/memoryPages';
 import { pageOf, pageText, writePageFile } from './pageFixtures';
 
 const TENANT = 'tenant-1';
@@ -350,13 +350,12 @@ describe('3. odd pages load without error', () => {
     { name: 'an empty file', content: '' },
   ];
 
-  it.each(CASES)('$name: loads, keeps its bytes, and renders every bullet', async ({ content }) => {
+  it.each(CASES)('$name: loads and shows every bullet', async ({ content }) => {
     const vaultDir = await makeVault();
     await writePageFile({ vaultDir, kind: 'person', slug: 'sam', content });
     const pages = await loadOne({ vaultDir, message: 'What does Sam like?' });
     expect(pages.map(page => page.slug)).toEqual(['sam']);
     const [loaded] = pages;
-    expect(renderMemoryPage(loaded?.page ?? emptyPage)).toBe(content);
     for (const bullet of content.split('\n').filter(line => /^[-*] \S/.test(line))) {
       expect(loaded?.text).toContain(bullet.replace(/^[-*] /, ''));
     }

@@ -5,13 +5,13 @@ import { stringify } from 'yaml';
 import type { FactMarker } from '../../../../src/runtime/memory/memoryNotes';
 import { formatMarker } from '../../../../src/runtime/memory/memoryNotes';
 import {
-  PAGE_FOLDERS,
-  PAGE_SECTIONS,
+  pagePath,
   parseMemoryPage,
   type MemoryPage,
   type PageFrontMatter,
   type PageKind,
   type PageSection,
+  type PageSectionBlock,
 } from '../../../../src/runtime/memory/memoryPages';
 
 export interface FixtureFact {
@@ -19,6 +19,16 @@ export interface FixtureFact {
   text: string;
   marker: FactMarker;
 }
+
+/** The section names a page may have; a test checks the parser still reads each as a known section. */
+export const SECTION_NAMES: readonly PageSection[] = [
+  'How you write to them',
+  'Now',
+  'Decided',
+  'Open',
+  'Unconfirmed',
+  'Earlier',
+];
 
 const FLOW = { lineWidth: 0, collectionStyle: 'flow', flowCollectionPadding: false } as const;
 const LINE = { lineWidth: 0 } as const;
@@ -51,7 +61,7 @@ export function pageText({
     summary ?? '',
     '',
   ];
-  for (const name of PAGE_SECTIONS) {
+  for (const name of SECTION_NAMES) {
     const own = facts.filter(fact => fact.section === name);
     if (own.length === 0 && !DEFAULT_SECTIONS[front.kind].includes(name)) {
       continue;
@@ -80,7 +90,14 @@ export async function writePageFile({
   slug: string;
   content: string;
 }): Promise<void> {
-  const folder = path.join(vaultDir, PAGE_FOLDERS[kind]);
-  await mkdir(folder, { recursive: true });
-  await writeFile(path.join(folder, `${slug}.md`), content);
+  const file = pagePath({ vaultDir, kind, slug });
+  await mkdir(path.dirname(file), { recursive: true });
+  await writeFile(file, content);
+}
+
+/** Every readable fact on the page with the section it sits in, in page order. */
+export function factsOf(page: MemoryPage): { section: PageSectionBlock; fact: { text: string; marker: FactMarker } }[] {
+  return page.sections.flatMap(section =>
+    section.lines.flatMap(line => (line.kind === 'fact' ? [{ section, fact: line.fact }] : [])),
+  );
 }
