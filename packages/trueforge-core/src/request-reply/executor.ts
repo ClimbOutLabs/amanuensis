@@ -93,7 +93,10 @@ export class RequestReplyExecutor {
     this.channel = requestChannel(executorId);
     this.heartbeatKey = heartbeatKey(executorId);
     this.heartbeatIntervalMs = heartbeatIntervalMs;
-    this.heartbeatTtlMs = Math.ceil(this.heartbeatIntervalMs * 1.5);
+    // Three intervals of margin: one delayed beat (a blocked event loop, a slow
+    // Redis call) must not expire the key and fail every waiting caller. A dead
+    // executor is still detected within three intervals, well under the reply timeout.
+    this.heartbeatTtlMs = Math.ceil(this.heartbeatIntervalMs * 3);
   }
 
   async init(): Promise<void> {
@@ -281,9 +284,20 @@ export class RequestReplyExecutor {
   }
 
   // This function should never throw!
-  // This is called during graceful shutdown
+  // This is called during graceful shutdown. Intake stops, but the heartbeat
+  // keeps beating until every running request has settled: a caller whose
+  // request is still running must not fail with NoResponderError just because
+  // the reply lands after the heartbeat key would have expired.
   async drain(): Promise<void> {
-    await this.close();
+    if (!this.closed) {
+      this.closed = true;
+      try {
+        await this.subscriberClient.unsubscribe(this.channel);
+      } catch {
+        // ignore: connection may already be closed
+      }
+    }
     await Promise.allSettled(Array.from(this.runningRequests.values()));
+    this.stopHeartbeat();
   }
 }

@@ -85,6 +85,12 @@ export async function redisRequest<T extends JSONValue>({
     // We already checked that the executor was alive before sending, but it may have
     // died while we wait. Recheck here so we fail soon instead of waiting until the timeout.
     if ((await redisClient.exists(aliveK)) === 0) {
+      // One final check of the reply key: the executor may have written its
+      // reply just before the heartbeat expired, and that reply still counts.
+      const finalReply = await getDelReply(redisClient, rKey);
+      if (finalReply) {
+        return finalReply;
+      }
       throw new NoResponderError(executorId);
     }
     if (performance.now() >= replyDeadline) {
