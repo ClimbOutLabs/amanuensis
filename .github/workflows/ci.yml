@@ -121,6 +121,9 @@ jobs:
               - '**/requirements*.txt'
               - '**/requirements*.lock'
               - '**/go.mod'
+              - '**/pyproject.toml'
+              - '**/setup.py'
+              - '**/setup.cfg'
               - '**/*Dockerfile*'
               - '**/*.dockerfile'
               - 'pnpm-lock.yaml'
@@ -423,15 +426,6 @@ jobs:
         with:
           node-version: '24'
           cache: 'pnpm'
-
-      # Resolves requirements files that are not fully pinned.
-      - name: Setup Python
-        uses: actions/setup-python@v6
-        with:
-          python-version: '3.12'
-
-      - name: Install pip
-        run: python3 -m pip install pip==26.2.2
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile --ignore-scripts

@@ -6,6 +6,12 @@
  * source-available and proprietary terms, and licenses that are missing or
  * not recognised.
  */
+import spdxExceptionIds from 'spdx-exceptions' with { type: 'json' };
+import spdxLicenseIds from 'spdx-license-ids' with { type: 'json' };
+import deprecatedSpdxLicenseIds from 'spdx-license-ids/deprecated.json' with { type: 'json' };
+
+const SPDX_LICENSE_IDS = new Set([...spdxLicenseIds, ...deprecatedSpdxLicenseIds]);
+const SPDX_EXCEPTION_IDS = new Set(spdxExceptionIds);
 
 export const ACCEPTED_LICENSES = new Set([
   '0BSD',
@@ -45,6 +51,27 @@ export const ACCEPTED_LICENSES = new Set([
   'Zlib',
 ]);
 
+// SPDX exceptions that only grant extra permissions. `X WITH exception` passes
+// only when X is accepted and the exception is listed here.
+export const ACCEPTED_EXCEPTIONS = new Set([
+  'Autoconf-exception-2.0',
+  'Autoconf-exception-3.0',
+  'Bison-exception-2.2',
+  'Classpath-exception-2.0',
+  'Font-exception-2.0',
+  'GCC-exception-2.0',
+  'GCC-exception-3.1',
+  'Libtool-exception',
+  'Linux-syscall-note',
+  'LLVM-exception',
+  'LZMA-exception',
+  'OCaml-LGPL-linking-exception',
+  'Qt-LGPL-exception-1.1',
+  'Swift-exception',
+  'Universal-FOSS-exception-1.0',
+  'WxWindows-exception-3.1',
+]);
+
 const ACCEPTED_FAMILIES = new Set(['Apache family', 'BSD family', 'public domain']);
 
 // Exact spellings packages use instead of an SPDX id, mapped to what they
@@ -76,69 +103,134 @@ const ALIASES = new Map(
   }),
 );
 
-/** The accepted SPDX id a single license term stands for, or null. */
+// Plain-text names of licenses that are never accepted. A statement that
+// matches is a recognised license even when it is not an SPDX id.
+const REJECTED_NAMES =
+  /\b(?:A?GPL|L?GPL|General Public License|SSPL|Server Side Public|EUPL|European Union Public|BUSL|Business Source|Commons Clause|NonCommercial|ShareAlike|Proprietary|Elastic License)\b/i;
+
+const TROVE_PREFIX = 'License ::';
+
+/** The license name inside a Python trove classifier, or the statement unchanged. */
+function withoutTrovePrefix(statement) {
+  return statement.startsWith(TROVE_PREFIX) ? statement.split('::').at(-1).trim() : statement;
+}
+
+/** The accepted SPDX id or family a single license term stands for, or null. */
 export function acceptedLicense(term) {
-  const trimmed = term.trim();
+  const trimmed = withoutTrovePrefix(term.trim());
   const id = ALIASES.get(trimmed.toLowerCase()) ?? trimmed;
   return ACCEPTED_LICENSES.has(id) || ACCEPTED_FAMILIES.has(id) ? id : null;
 }
 
 /**
- * Whether an SPDX expression is acceptable: an OR passes when any branch
- * passes, an AND only when every part does. `X WITH exception` is judged by X,
- * since an exception only ever grants more. Parentheses group. Anything that is
- * not a well-formed expression of known terms is not acceptable.
+ * Parses an SPDX expression into a tree of `{ id, exception? }` leaves joined
+ * by `{ op: 'AND' | 'OR', left, right }`, or returns null when it is not
+ * well formed. AND binds tighter than OR; parentheses group.
  */
-export function expressionAccepted(expression) {
+function parseExpression(expression) {
   const tokens = expression.match(/\(|\)|[^\s()]+/g) ?? [];
   let pos = 0;
   const keyword = word => tokens[pos]?.toUpperCase() === word;
+  const isOperand = token => token !== undefined && token !== '(' && token !== ')' && !/^(AND|OR|WITH)$/i.test(token);
 
-  const parseOr = () => {
-    let ok = parseAnd();
-    while (keyword('OR')) {
+  const parseBinary = (op, parseOperand) => {
+    let node = parseOperand();
+    while (keyword(op)) {
       pos += 1;
-      ok = parseAnd() || ok;
+      node = { op, left: node, right: parseOperand() };
     }
-    return ok;
+    return node;
   };
-
-  const parseAnd = () => {
-    let ok = parseTerm();
-    while (keyword('AND')) {
-      pos += 1;
-      ok = parseTerm() && ok;
-    }
-    return ok;
-  };
-
+  const parseOr = () => parseBinary('OR', () => parseBinary('AND', parseTerm));
   const parseTerm = () => {
     if (tokens[pos] === '(') {
       pos += 1;
-      const ok = parseOr();
+      const node = parseOr();
       if (tokens[pos] !== ')') {
         throw new Error('unbalanced parentheses');
       }
       pos += 1;
-      return ok;
+      return node;
     }
     const id = tokens[pos];
-    if (id === undefined || id === ')' || keyword('AND') || keyword('OR') || keyword('WITH')) {
+    if (!isOperand(id)) {
       throw new Error('missing license id');
     }
     pos += 1;
-    if (keyword('WITH')) {
-      pos += 2;
+    if (!keyword('WITH')) {
+      return { id };
     }
-    return acceptedLicense(id) !== null;
+    const exception = tokens[pos + 1];
+    if (!isOperand(exception)) {
+      throw new Error('missing exception id');
+    }
+    pos += 2;
+    return { id, exception };
   };
 
   try {
-    const ok = parseOr();
-    return pos === tokens.length && ok;
+    const tree = parseOr();
+    return pos === tokens.length ? tree : null;
   } catch {
-    return false;
+    return null;
   }
+}
+
+function evaluate(node, leaf) {
+  if ('op' in node) {
+    const left = evaluate(node.left, leaf);
+    const right = evaluate(node.right, leaf);
+    return node.op === 'AND' ? left && right : left || right;
+  }
+  return leaf(node);
+}
+
+function everyLeaf(node, test) {
+  return 'op' in node ? everyLeaf(node.left, test) && everyLeaf(node.right, test) : test(node);
+}
+
+/**
+ * Whether an SPDX expression is acceptable: an OR passes when any branch
+ * passes, an AND only when every part does. `X WITH exception` passes when X
+ * is accepted and the exception is on the accepted exception list. Anything
+ * that is not a well-formed expression of known terms is not acceptable.
+ */
+export function expressionAccepted(expression) {
+  const tree = parseExpression(expression);
+  return (
+    tree !== null &&
+    evaluate(
+      tree,
+      ({ id, exception }) =>
+        acceptedLicense(id) !== null && (exception === undefined || ACCEPTED_EXCEPTIONS.has(exception)),
+    )
+  );
+}
+
+/**
+ * Whether a license statement names a known license, accepted or not: a
+ * Python trove classifier, an accepted name, npm's UNLICENSED, an SPDX
+ * expression made only of SPDX ids, or the plain name of a rejected license.
+ * A reviewed entry may only stand in for metadata that is missing or not
+ * recognised.
+ */
+export function recognisedLicense(statement) {
+  const trimmed = statement.trim();
+  if (trimmed.startsWith(TROVE_PREFIX) || acceptedLicense(trimmed) !== null || trimmed === 'UNLICENSED') {
+    return true;
+  }
+  const tree = parseExpression(trimmed);
+  if (
+    tree !== null &&
+    everyLeaf(
+      tree,
+      ({ id, exception }) =>
+        SPDX_LICENSE_IDS.has(id.replace(/\+$/, '')) && (exception === undefined || SPDX_EXCEPTION_IDS.has(exception)),
+    )
+  ) {
+    return true;
+  }
+  return REJECTED_NAMES.test(trimmed);
 }
 
 /**
@@ -157,4 +249,18 @@ export function licenseProblem(statements) {
     return null;
   }
   return `has a license that is not on the accepted list: ${rejected.map(s => s.split('\n')[0].slice(0, 120)).join('; ')}`;
+}
+
+/**
+ * Judges a reviewed entry against the package's own metadata. An entry may
+ * only replace metadata that is missing or not recognised, so it can never
+ * overrule a license the package declares. Returns the problem as a sentence,
+ * or null when the entry may be used.
+ */
+export function reviewedEntryProblem(declaredStatements) {
+  const recognised = declaredStatements.map(s => s.trim()).filter(s => s !== '' && recognisedLicense(s));
+  if (recognised.length === 0) {
+    return null;
+  }
+  return `has a reviewed entry, but its own metadata already names a license (${recognised.map(s => s.slice(0, 120)).join('; ')}). A reviewed entry can only fill in missing or unclear metadata. Remove the entry`;
 }

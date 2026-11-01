@@ -43,6 +43,7 @@
     "postinstall": "pnpm --filter @truefoundry/trueforge-core build:gen",
     "pre-push": "node scripts/pre-push.mjs",
     "prepare": "husky || true",
+    "benchmark:lock-python": "cd benchmark && uv pip compile requirements.in --universal --generate-hashes --python-version 3.11 -o requirements.txt && uv pip compile requirements-deepagents.in --universal --generate-hashes --python-version 3.11 -o requirements-deepagents.txt",
     "sandbox:slots:lock-python": "cd ops/sandbox-slot/guest && uv pip compile requirements.in --universal --generate-hashes --python-version 3.12 -o requirements.txt",
     "sandbox:slots": "pnpm --filter @truefoundry/trueforge sandbox:slots",
     "test:sandbox-slot-agent": "cd ops/sandbox-slot/agent && go test ./test/...",
@@ -112,6 +113,8 @@
     "prettier": "^3.9.6",
     "prettier-plugin-organize-imports": "^4.3.0",
     "railway": "^3.11.0",
+    "spdx-exceptions": "2.5.0",
+    "spdx-license-ids": "3.0.22",
     "typescript": "~5.9.3",
     "typescript-eslint": "8.68.0"
   },

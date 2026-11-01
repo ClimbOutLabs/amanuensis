@@ -5,7 +5,8 @@
 # (ecosystem is npm, pypi or go; PyPI names are lower case with dashes). The
 # expression replaces the package's own metadata and must still pass the
 # accepted list, so an entry can never let a copyleft or unlicensed package
-# through. An entry that matches no dependency fails the check.
+# through. An entry is refused when the package's own metadata already names a
+# license, and an entry that matches no dependency fails the check.
 
 pypi:mypy-extensions@1.1.0 :: MIT :: LICENSE file in the wheel
 pypi:tiktoken@0.14.0 :: MIT :: LICENSE file in the wheel

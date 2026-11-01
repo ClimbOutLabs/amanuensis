@@ -5,26 +5,27 @@
  * dependencies:
  * - the pnpm workspace, from the installed tree (run `pnpm install` first)
  * - standalone npm projects, from each tracked package-lock.json
- * - Python, from each tracked requirements*.txt / requirements*.lock, with
- *   license data from PyPI for the exact pinned version (files that are not
- *   fully pinned are resolved with pip first)
+ * - Python, from each tracked requirements*.txt / requirements*.lock, which
+ *   must pin every package exactly; license data comes from PyPI for that
+ *   version
  * - Go, from each tracked go.mod
- * Dockerfiles must install Python packages from a requirements file, so the
- * check sees them. OS packages from apt are out of scope.
+ * Dockerfiles must install packages from those files rather than by name, and
+ * Python packaging manifests (pyproject.toml, setup.py, setup.cfg) are not
+ * read, so tracking one fails. OS packages from apt are out of scope.
  *
  * A package whose license metadata is missing or unclear can be listed in
  * scripts/dependency-licenses-reviewed.txt with the SPDX license a person read
- * in its license text. That license must still be on the accepted list.
+ * in its license text. That license must still be on the accepted list, and
+ * the entry is refused when the package's own metadata names a license.
  *
  * Usage: node scripts/check-dependency-licenses.mjs
  * Exit 0 when clean, 1 with one line per problem otherwise.
  */
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { licenseProblem } from './dependency-license-policy.mjs';
+import { licenseProblem, reviewedEntryProblem } from './dependency-license-policy.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const root = resolve(here, '..');
@@ -111,42 +112,14 @@ function requirementLines(text) {
 
 const PIN = /^([A-Za-z0-9][A-Za-z0-9._-]*)(?:\[[^\]]*\])?\s*==\s*([^\s;]+)/;
 
-/** Exact pins of a requirements file; files with any unpinned line are resolved with pip. */
+/** Exact pins of a requirements file, or the lines that are not pinned exactly. */
 function pythonPins(requirementsPath) {
   const lines = requirementLines(readFileSync(join(root, requirementsPath), 'utf8'));
-  const pins = lines.map(line => line.match(PIN));
-  if (pins.every(Boolean)) {
-    return pins.map(([, name, version]) => ({ name, version }));
+  const unpinned = lines.filter(line => !PIN.test(line));
+  if (unpinned.length > 0) {
+    return { pins: [], unpinned };
   }
-  const dir = mkdtempSync(join(tmpdir(), 'license-check-'));
-  const report = join(dir, 'report.json');
-  try {
-    run(
-      'python3',
-      [
-        '-m',
-        'pip',
-        'install',
-        '--dry-run',
-        '--ignore-installed',
-        '--quiet',
-        '--report',
-        report,
-        '-r',
-        requirementsPath,
-      ],
-      {
-        what: `resolve ${requirementsPath} with pip`,
-        next: 'Make sure python3 and pip are installed and the file installs cleanly, then run this check again.',
-      },
-    );
-    return JSON.parse(readFileSync(report, 'utf8')).install.map(({ metadata }) => ({
-      name: metadata.name,
-      version: metadata.version,
-    }));
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
+  return { pins: lines.map(line => line.match(PIN)).map(([, name, version]) => ({ name, version })), unpinned };
 }
 
 /** License statements of one PyPI release, most authoritative first. */
@@ -161,9 +134,9 @@ async function pypiStatements({ name, version }) {
   if (info.license_expression) {
     return [info.license_expression];
   }
-  const classifiers = (info.classifiers ?? [])
-    .filter(c => c.startsWith('License ::') && c !== 'License :: OSI Approved')
-    .map(c => c.split('::').at(-1).trim());
+  const classifiers = (info.classifiers ?? []).filter(
+    c => c.startsWith('License ::') && c !== 'License :: OSI Approved',
+  );
   if (classifiers.length > 0) {
     return classifiers;
   }
@@ -172,10 +145,16 @@ async function pypiStatements({ name, version }) {
   return field !== '' && !field.includes('\n') ? [field] : [];
 }
 
-async function pythonPackages(requirementsPaths) {
+async function pythonPackages({ requirementsPaths, problems }) {
   const releases = new Map();
   for (const path of requirementsPaths) {
-    for (const pin of pythonPins(path)) {
+    const { pins, unpinned } = pythonPins(path);
+    if (unpinned.length > 0) {
+      problems.push(
+        `- ${path} does not pin ${unpinned.join(', ')} to one version. Lock it with \`uv pip compile\` (keep the ranges in a .in file) so the check reads exactly what installs.`,
+      );
+    }
+    for (const pin of pins) {
       const key = `pypi:${pin.name.toLowerCase().replace(/[._-]+/g, '-')}@${pin.version}`;
       if (!releases.has(key)) {
         releases.set(key, { key, source: path, pin });
@@ -202,24 +181,80 @@ function goPackages(goModPath) {
     .map(([module, version]) => ({ key: `go:${module}@${version}`, source: goModPath, statements: [] }));
 }
 
-/** Dockerfile `pip install` commands that name packages instead of a requirements file. */
-function inlinePipInstalls() {
+// Package installs by name in a Dockerfile bypass every manifest this check reads.
+const NAMED_INSTALLS = [
+  { pattern: /\b(?:pip[0-9.]*|pipx|uv\s+pip|uv\s+tool)\s+install\s+([^&|;\n]*)/g, tool: 'pip' },
+  { pattern: /\bnpm\s+(?:install|i|add)\s+([^&|;\n]*)/g, tool: 'npm' },
+  { pattern: /\b(?:pnpm|yarn)\s+(?:global\s+)?add\s+([^&|;\n]*)/g, tool: 'pnpm/yarn' },
+  { pattern: /\bgo\s+install\s+([^&|;\n]*)/g, tool: 'go' },
+  { pattern: /\bcargo\s+install\s+([^&|;\n]*)/g, tool: 'cargo' },
+  { pattern: /\bgem\s+install\s+([^&|;\n]*)/g, tool: 'gem' },
+];
+
+/** Names of the npm packages this repository publishes. */
+function workspacePackageNames() {
+  return new Set(
+    trackedFiles('*package.json')
+      .map(path => JSON.parse(readFileSync(join(root, path), 'utf8')).name)
+      .filter(name => typeof name === 'string'),
+  );
+}
+
+/** A package argument without quotes or a version suffix (`name@1.2.3` -> `name`). */
+function packageName(arg) {
+  const bare = arg.replace(/^["']|["']$/g, '');
+  const at = bare.lastIndexOf('@');
+  return at > 0 ? bare.slice(0, at) : bare;
+}
+
+/**
+ * Dockerfile commands that install packages by name instead of from a checked
+ * file. Installing a package this repository publishes is fine: its
+ * dependencies are the workspace's, which the pnpm check already reads.
+ */
+function namedInstalls() {
   const problems = [];
+  const ownPackages = workspacePackageNames();
   for (const path of trackedFiles('*Dockerfile*', '*.dockerfile')) {
-    const text = readFileSync(join(root, path), 'utf8').replace(/\\\r?\n/g, ' ');
-    for (const match of text.matchAll(/pip3?\s+install\s+([^&|;\n]*)/g)) {
-      const args = match[1].split(/\s+/).filter(Boolean);
-      const usesFile = args.some(a => a === '-r' || a.startsWith('--requirement') || /^-r\S/.test(a));
-      const packages = args.filter(a => !a.startsWith('-') && !a.startsWith('/') && !a.includes('$'));
-      const onlyPip = packages.every(p => p === 'pip');
-      if (!usesFile && !onlyPip) {
-        problems.push(
-          `- ${path} installs Python packages inline (${packages.join(' ')}). Move them to a requirements file and install with \`pip install -r\`.`,
+    const text = readFileSync(join(root, path), 'utf8')
+      .replace(/\\\r?\n/g, ' ')
+      .replace(/^\s*#.*$/gm, '');
+    for (const { pattern, tool } of NAMED_INSTALLS) {
+      for (const match of text.matchAll(pattern)) {
+        const args = match[1].split(/\s+/).filter(Boolean);
+        const usesFile = args.some(a => a === '-r' || a.startsWith('--requirement') || /^-r\S/.test(a));
+        const packages = args.filter(
+          a =>
+            !a.startsWith('-') &&
+            !a.startsWith('/') &&
+            !a.startsWith('.') &&
+            !(tool === 'npm' && ownPackages.has(packageName(a))),
         );
+        const onlyPip = tool === 'pip' && packages.every(p => p === 'pip');
+        if (!usesFile && !onlyPip && packages.length > 0) {
+          problems.push(
+            `- ${path} installs packages by name with ${tool} (${packages.join(' ')}). Install them from a lockfile or pinned requirements file this check reads.`,
+          );
+        }
       }
     }
   }
   return problems;
+}
+
+/** Python packaging manifests, whose dependencies this check does not read. */
+function packagingManifests() {
+  return trackedFiles('*pyproject.toml', '*setup.cfg', '*setup.py')
+    .filter(path => {
+      const text = readFileSync(join(root, path), 'utf8');
+      return path.endsWith('setup.py')
+        ? /\b(?:setuptools|distutils)\b/.test(text)
+        : path.endsWith('setup.cfg') || /^\[(?:project|tool\.poetry)/m.test(text);
+    })
+    .map(
+      path =>
+        `- ${path} declares Python dependencies, which this check does not read. Install them from a pinned requirements file instead.`,
+    );
 }
 
 async function main() {
@@ -227,19 +262,28 @@ async function main() {
     throw new CheckError('Dependencies are not installed. Run `pnpm install`, then run this check again.');
   }
   const reviewed = readReviewed();
+  const problems = [...namedInstalls(), ...packagingManifests()];
   const packages = [
     ...pnpmPackages(),
     ...trackedFiles('*package-lock.json').flatMap(npmLockPackages),
-    ...(await pythonPackages(trackedFiles('*requirements*.txt', '*requirements*.lock'))),
+    ...(await pythonPackages({
+      requirementsPaths: trackedFiles('*requirements*.txt', '*requirements*.lock'),
+      problems,
+    })),
     ...trackedFiles('*go.mod').flatMap(goPackages),
   ];
 
-  const problems = inlinePipInstalls();
   const used = new Set();
   for (const pkg of packages) {
-    const statements = reviewed.has(pkg.key) ? [reviewed.get(pkg.key)] : pkg.statements;
+    let statements = pkg.statements;
     if (reviewed.has(pkg.key)) {
       used.add(pkg.key);
+      const refused = reviewedEntryProblem(pkg.statements);
+      if (refused) {
+        problems.push(`- ${pkg.key} (${pkg.source}) ${refused}.`);
+      } else {
+        statements = [reviewed.get(pkg.key)];
+      }
     }
     const problem = licenseProblem(statements);
     if (problem) {
