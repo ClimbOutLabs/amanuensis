@@ -169,6 +169,7 @@ Workspace tasks go through `package.json` scripts - if a repeatable workflow is 
 | `pnpm smoke:npx`                                     | Pack the published CLI and boot it like `npx`         |
 | `pnpm chart:lint` / `pnpm chart:template`            | Validate the Helm chart                               |
 | `pnpm clean` / `pnpm clean:all`                      | Remove build outputs (+ `node_modules` for `:all`)    |
+| `pnpm licenses:check`                                | Check dependency licenses (see below)                 |
 
 ## Testing
 
@@ -198,6 +199,14 @@ pnpm smoke:down
 ```
 
 Open [http://localhost:8791](http://localhost:8791). Credentials come from `packages/trueforge/.env`. The app is on host `:8791` (offset from local `pnpm dev` on `:8790`); Postgres and Redis stay on the compose network only.
+
+## Dependency licenses
+
+Aman is licensed under MPL-2.0. Every dependency must use a license from the accepted list in [`scripts/dependency-license-policy.mjs`](scripts/dependency-license-policy.mjs). That list holds permissive licenses (MIT, Apache-2.0, BSD, ISC and similar) and weak copyleft that stays with its own files or library (MPL-2.0, LGPL, EPL-2.0). Everything else fails: strong or network copyleft such as GPL and AGPL, source-available or non-commercial terms, proprietary terms, and packages that declare no license at all. A dual-licensed package passes when one of its choices is accepted.
+
+CI runs `pnpm licenses:check` when a pull request changes dependencies. It reads the pnpm workspace, every tracked `package-lock.json`, every tracked `requirements*.txt` and `requirements*.lock` (license data comes from PyPI for each pinned version), and every tracked `go.mod`. Requirements files must pin every package to one version; keep version ranges in a `.in` file and lock it with `uv pip compile`. Dockerfiles must install packages from these files rather than by name. Python packaging manifests (`pyproject.toml` with dependencies, `setup.py`, `setup.cfg`) are not read, so the check fails on them. OS packages installed with `apt` are not covered.
+
+If a package's license metadata is missing or unclear, read its license text and add a line to [`scripts/dependency-licenses-reviewed.txt`](scripts/dependency-licenses-reviewed.txt) with the SPDX license you found and where you found it. That license must still be on the accepted list, and an entry is refused when the package's own metadata already names a license. A `WITH` exception must also be on the accepted exception list. Go modules have no license metadata, so each one needs a line there. If a package has no license, or one that is not accepted, replace it. To run the check locally, run `pnpm install` first.
 
 ## Generated code - do not edit by hand
 
@@ -230,7 +239,7 @@ Prettier and ESLint run as pre-commit hooks via husky + lint-staged.
 
 1. Fork (or branch) and create a topic branch: `git checkout -b my-fix`.
 2. Make your change, with tests where it makes sense. Do not commit generated OpenAPI/SDK output (forks: source only; `main` regenerates after merge).
-3. Make sure `pnpm build`, `pnpm test`, `pnpm typecheck`, `pnpm lint:ci`, and `pnpm format:check` pass - CI runs exactly these.
+3. Make sure `pnpm build`, `pnpm test`, `pnpm typecheck`, `pnpm lint:ci`, and `pnpm format:check` pass - CI runs exactly these. If you added or changed a dependency, also run `pnpm licenses:check`.
 4. Keep PRs focused and reasonably small; describe **what** changed and **why** in the description.
 5. Open the PR. The maintainer will review it; squash-merge is the norm.
 6. **Please avoid rebasing or force-pushing once a maintainer has started reviewing.** It can make iterative reviewing harder. To update your branch, merge `main` instead. We squash-merge at the end, so messy in-PR history is fine.

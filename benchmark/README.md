@@ -141,7 +141,7 @@ per arm with `RATES_<ARM>` (see `.env.example`) when an arm runs a different mod
 ```bash
 # 1. install (core arms + judge)
 python -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
+pip install --require-hashes -r requirements.txt
 
 # 2. configure
 cp .env.example .env            # fill in keys, hosts, models
@@ -199,8 +199,10 @@ setup.py                     create the CMA env/agent/vault (TrueForge + deepage
 bench_matrix.py              run {arm × task × trial}; resumable, timeout-guarded
 judge.py                     blind criteria-only grader
 aggregate.py                 accuracy + cost + latency -> summary.csv
-requirements.txt             core arms + judge
-requirements-deepagents.txt  deepagents arm (separate venv)
+requirements.in              core arms + judge (version ranges)
+requirements.txt             the same, locked (`pnpm benchmark:lock-python`)
+requirements-deepagents.in   deepagents arm (separate venv)
+requirements-deepagents.txt  the same, locked
 Dockerfile                   core pipeline
 .env.example                 all configuration
 ```
