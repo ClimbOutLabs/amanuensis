@@ -34,6 +34,7 @@ jobs:
       packages: ${{ steps.packages.outputs.list }}
       chart: ${{ steps.filter.outputs.chart }}
       store: ${{ steps.filter.outputs.store }}
+      dependencies: ${{ steps.filter.outputs.dependencies }}
 
     steps:
       - name: Check out repository code
@@ -113,6 +114,17 @@ jobs:
               - 'package.json'
               - 'pnpm-workspace.yaml'
               - 'tsconfig.base.json'
+              - '.github/workflows/ci.yml'
+            dependencies:
+              - '**/package.json'
+              - '**/package-lock.json'
+              - '**/requirements*.txt'
+              - 'pnpm-lock.yaml'
+              - 'pnpm-workspace.yaml'
+              - 'patches/**'
+              - 'scripts/check-dependency-licenses.mjs'
+              - 'scripts/dependency-license-policy.mjs'
+              - 'tests/scripts/dependency-license-policy.test.mjs'
               - '.github/workflows/ci.yml'
             chart:
               - 'charts/trueforge/**'
@@ -386,6 +398,45 @@ jobs:
           COMMAND_EXECUTION_TEST_REDIS_URL: redis://localhost:56379
         run: pnpm test:store:postgres
 
+  # Runs when dependency manifests or the check itself change.
+  dependency-licenses:
+    name: Dependency Licenses
+    needs: detect-changes
+    if: needs.detect-changes.outputs.dependencies == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out repository code
+        uses: actions/checkout@v7
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          cache: 'pnpm'
+
+      # Older pip leaves License-Expression out of its install report.
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Install pip
+        run: python3 -m pip install pip==26.2.2
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile --ignore-scripts
+
+      - name: Test the license policy
+        run: pnpm test:licenses
+
+      - name: Check dependency licenses
+        run: pnpm licenses:check
+
   # No dependency install: must run fast and stay green even when pnpm install fails.
   private-data-scan:
     name: Private data scan
@@ -439,6 +490,7 @@ jobs:
       - aman-installer-exe
       - chart-checks
       - store-tests
+      - dependency-licenses
       - private-data-scan
       - generated-contract-drift
     runs-on: ubuntu-latest
@@ -453,11 +505,12 @@ jobs:
           AMAN_INSTALLER_EXE: ${{ needs.aman-installer-exe.result }}
           CHART_CHECKS: ${{ needs.chart-checks.result }}
           STORE_TESTS: ${{ needs.store-tests.result }}
+          DEPENDENCY_LICENSES: ${{ needs.dependency-licenses.result }}
           PRIVATE_DATA_SCAN: ${{ needs.private-data-scan.result }}
           GENERATED_CONTRACT_DRIFT: ${{ needs.generated-contract-drift.result }}
         run: |
           ok() { [ "$1" = success ] || [ "$1" = skipped ]; }
-          echo "detect-changes=$DETECT_CHANGES migration-order=$MIGRATION_ORDER typecheck-and-build=$TYPECHECK_AND_BUILD package-checks=$PACKAGE_CHECKS chart-checks=$CHART_CHECKS store-tests=$STORE_TESTS private-data-scan=$PRIVATE_DATA_SCAN generated-contract-drift=$GENERATED_CONTRACT_DRIFT"
+          echo "detect-changes=$DETECT_CHANGES migration-order=$MIGRATION_ORDER typecheck-and-build=$TYPECHECK_AND_BUILD package-checks=$PACKAGE_CHECKS chart-checks=$CHART_CHECKS store-tests=$STORE_TESTS dependency-licenses=$DEPENDENCY_LICENSES private-data-scan=$PRIVATE_DATA_SCAN generated-contract-drift=$GENERATED_CONTRACT_DRIFT"
           [ "$DETECT_CHANGES" = success ] || exit 1
           [ "$MIGRATION_ORDER" = success ] || exit 1
           [ "$TYPECHECK_AND_BUILD" = success ] || exit 1
@@ -465,5 +518,6 @@ jobs:
           ok "$AMAN_INSTALLER_EXE" || exit 1
           ok "$CHART_CHECKS" || exit 1
           ok "$STORE_TESTS" || exit 1
+          ok "$DEPENDENCY_LICENSES" || exit 1
           [ "$PRIVATE_DATA_SCAN" = success ] || exit 1
           [ "$GENERATED_CONTRACT_DRIFT" = success ] || exit 1

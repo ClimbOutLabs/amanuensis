@@ -169,6 +169,7 @@ Workspace tasks go through `package.json` scripts - if a repeatable workflow is 
 | `pnpm smoke:npx`                                     | Pack the published CLI and boot it like `npx`         |
 | `pnpm chart:lint` / `pnpm chart:template`            | Validate the Helm chart                               |
 | `pnpm clean` / `pnpm clean:all`                      | Remove build outputs (+ `node_modules` for `:all`)    |
+| `pnpm licenses:check`                                | Check dependency licenses (see below)                 |
 
 ## Testing
 
@@ -198,6 +199,12 @@ pnpm smoke:down
 ```
 
 Open [http://localhost:8791](http://localhost:8791). Credentials come from `packages/trueforge/.env`. The app is on host `:8791` (offset from local `pnpm dev` on `:8790`); Postgres and Redis stay on the compose network only.
+
+## Dependency licenses
+
+Aman is licensed under MPL-2.0, so its dependencies must not use a strong or network copyleft license that would pull the whole project under its terms. That covers the GPL and AGPL families, SSPL, EUPL, OSL, RPL, CPAL, Sleepycat and Creative Commons ShareAlike. Permissive licenses (MIT, Apache-2.0, BSD, ISC and similar) are fine. So is weak copyleft that stays with its own files or library, such as MPL-2.0, LGPL and EPL. A dual-licensed package passes when one of its choices passes.
+
+CI runs `pnpm licenses:check` when a pull request changes dependencies. It reads every package in the pnpm workspace, every tracked `package-lock.json`, and every tracked `requirements*.txt` (resolved with pip 25 or newer). A package that declares no license is judged by the README and license text it ships. If the check fails, replace the dependency with one under an allowed license. To run it locally, run `pnpm install` first.
 
 ## Generated code - do not edit by hand
 
@@ -230,7 +237,7 @@ Prettier and ESLint run as pre-commit hooks via husky + lint-staged.
 
 1. Fork (or branch) and create a topic branch: `git checkout -b my-fix`.
 2. Make your change, with tests where it makes sense. Do not commit generated OpenAPI/SDK output (forks: source only; `main` regenerates after merge).
-3. Make sure `pnpm build`, `pnpm test`, `pnpm typecheck`, `pnpm lint:ci`, and `pnpm format:check` pass - CI runs exactly these.
+3. Make sure `pnpm build`, `pnpm test`, `pnpm typecheck`, `pnpm lint:ci`, and `pnpm format:check` pass - CI runs exactly these. If you added or changed a dependency, also run `pnpm licenses:check`.
 4. Keep PRs focused and reasonably small; describe **what** changed and **why** in the description.
 5. Open the PR. The maintainer will review it; squash-merge is the norm.
 6. **Please avoid rebasing or force-pushing once a maintainer has started reviewing.** It can make iterative reviewing harder. To update your branch, merge `main` instead. We squash-merge at the end, so messy in-PR history is fine.
