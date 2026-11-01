@@ -22,7 +22,7 @@ function createClient(): TrueFoundryServiceFoundryServerClient {
     tls: { enabled: false, dir: '' },
     httpTimeoutMs: 5_000,
     httpAgentTimeoutMs: 5_000,
-    apiKey: <redacted>'api-key',
+    apiKey: 'key',
   });
 }
 
