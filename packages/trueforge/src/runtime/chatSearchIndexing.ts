@@ -8,6 +8,7 @@ import type { IGlobalSettingsStore } from '../db/globalSettingsStore';
 import type { IPersonaStore } from '../db/personaStore';
 import type { ISentinelSettingsStore } from '../db/sentinelSettingsStore';
 import type { SessionCustom, TurnCustom } from '../db/sessionCustom';
+import type { PersonaActivation } from '../personas/persona';
 
 /** Text the person typed, without attachments or text the host wrapped around the message. */
 function personText(text: string): string {
@@ -75,6 +76,10 @@ function personKey(person: ChatSearchPerson): string {
 
 function cursorKey(person: ChatSearchPerson): string {
   return `chat_search_backfill_cursor:${personKey(person)}`;
+}
+
+function generationKey(person: ChatSearchPerson): string {
+  return `chat_search_generation:${personKey(person)}`;
 }
 
 const PersonKeySchema = z.tuple([z.string(), z.string()]);
@@ -146,8 +151,26 @@ export interface ChatSearchIndexerDeps {
   sessionStore: ISessionStore<SessionCustom, TurnCustom>;
   globalSettingsStore: IGlobalSettingsStore;
   sentinelSettingsStore: ISentinelSettingsStore;
-  personaStore: Pick<IPersonaStore, 'getTurnPersonaActivation'>;
+  personaStore: Pick<IPersonaStore, 'listSessionPersonaActivations'>;
   logger: Logger;
+}
+
+/** The switch state a write must still see to go ahead: on, and in the same switch generation it started in. */
+interface ChatSearchSwitchState {
+  enabled: boolean;
+  generation: number;
+}
+
+/**
+ * Whether the persona that answered a turn is known. A turn whose persona cannot be
+ * decided is not indexed at all: guessing the main assistant would hand its words to
+ * every persona, so the safe answer is to leave it out until a pass can decide it.
+ */
+type PersonaDecision = { decided: true; persona_id: string | null } | { decided: false };
+
+function activationTime(activation: PersonaActivation): number {
+  const parsed = Date.parse(activation.created_at);
+  return Number.isNaN(parsed) ? 0 : parsed;
 }
 
 /**
@@ -169,16 +192,18 @@ export class ChatSearchIndexer {
   async indexFinishedTurn(input: ChatSearchPerson & { session_id: string; turn_id: string }): Promise<void> {
     const person = { tenant_id: input.tenant_id, created_by: input.created_by };
     try {
-      if (!(await this.#enabled(person))) {
+      const before = await this.#switchState(person);
+      if (!before.enabled) {
         return;
       }
       const turn = await this.#deps.sessionStore.getTurn({ session_id: input.session_id, turn_id: input.turn_id });
       if (turn === undefined || turn.state.status === 'running') {
         return;
       }
-      await this.#writeTurn({ tenant_id: input.tenant_id, turn });
-      // The switch went off while this write ran: take the write back, since the clear may have run first.
-      if (!(await this.#enabled(person))) {
+      await this.#writeTurn({ tenant_id: input.tenant_id, turn, generation: before.generation, person });
+      // The switch changed while this write ran: take the write back, since the clear may have run first.
+      const after = await this.#switchState(person);
+      if (!after.enabled || after.generation !== before.generation) {
         await this.#deps.sessionStore.indexChatMessages({
           tenant_id: input.tenant_id,
           session_id: input.session_id,
@@ -212,10 +237,22 @@ export class ChatSearchIndexer {
     await requestChatSearchBackfill({ globalSettingsStore: this.#deps.globalSettingsStore, person });
   }
 
-  /** Follows the saved switch: on runs the requested pass, off removes the person's rows and pending work. */
+  /**
+   * Follows the saved switch: on runs the requested pass, off removes the person's rows and
+   * pending work. Every follow bumps the person's switch generation, so work started under
+   * an older setting stops at its next write instead of finishing the old plan, and a pass
+   * that was told to forget can never drop the work of a newer switch-on.
+   */
   async followSwitch(input: ChatSearchPerson & { enabled: boolean }): Promise<void> {
     const person = { tenant_id: input.tenant_id, created_by: input.created_by };
+    await this.#bumpGeneration(person);
     if (input.enabled) {
+      // The request that turned the switch on normally asked for a pass first, but make
+      // sure one is pending for this generation even when it did not.
+      const key = personKey(person);
+      await updatePending(this.#deps.globalSettingsStore, pending =>
+        pending[key] === undefined ? { ...pending, [key]: randomUUID() } : undefined,
+      );
       this.#start(person);
       return;
     }
@@ -270,9 +307,29 @@ export class ChatSearchIndexer {
       if (token === undefined) {
         return;
       }
-      if (!(await this.#walkChats(person))) {
-        await this.#forget(person);
+      const state = await this.#switchState(person);
+      if (!state.enabled) {
+        // The switch is off: drop only the request this pass started with. A request
+        // made while this pass ran belongs to a newer switch-on and stays.
+        const dropped = await updatePending(this.#deps.globalSettingsStore, pending =>
+          pending[key] === token ? withoutPerson(pending, key) : undefined,
+        );
+        if (dropped) {
+          await this.#deps.globalSettingsStore.deleteSetting({ key: cursorKey(person) });
+        }
+        const now = await this.#switchState(person);
+        if (now.enabled && (await readPending(this.#deps.globalSettingsStore)).pending[key] !== undefined) {
+          continue;
+        }
         return;
+      }
+      const walked = await this.#walkChats(person, state.generation);
+      if (walked === 'stale') {
+        // The switch changed under this pass: start over from the state that is saved now.
+        continue;
+      }
+      if (walked === 'off') {
+        continue;
       }
       const finished = await updatePending(this.#deps.globalSettingsStore, pending =>
         pending[key] === token ? withoutPerson(pending, key) : undefined,
@@ -285,11 +342,19 @@ export class ChatSearchIndexer {
     }
   }
 
-  /** Walks the person's chats from the saved page onward; false when the switch is off. */
-  async #walkChats(person: ChatSearchPerson): Promise<boolean> {
+  /**
+   * Walks the person's chats from the saved page onward. The switch generation is checked
+   * again before every write, so a pass never writes for a setting that has moved on:
+   * 'off' when the switch is off in this generation, 'stale' when the generation changed.
+   */
+  async #walkChats(person: ChatSearchPerson, generation: number): Promise<'completed' | 'off' | 'stale'> {
     for (;;) {
-      if (!(await this.#enabled(person))) {
-        return false;
+      const state = await this.#switchState(person);
+      if (!state.enabled) {
+        return state.generation === generation ? 'off' : 'stale';
+      }
+      if (state.generation !== generation) {
+        return 'stale';
       }
       const saved = await this.#deps.globalSettingsStore.getSetting({ key: cursorKey(person) });
       const page = await this.#deps.sessionStore.listSessions({
@@ -308,17 +373,39 @@ export class ChatSearchIndexer {
         source_id: undefined,
       });
       for (const session of page.data) {
-        await this.#writeSessionTurns({ tenant_id: person.tenant_id, session_id: session.session_id });
+        const written = await this.#writeSessionTurns({
+          tenant_id: person.tenant_id,
+          session_id: session.session_id,
+          generation,
+          person,
+        });
+        if (written === 'stale') {
+          return 'stale';
+        }
+        if (written === 'off') {
+          const now = await this.#switchState(person);
+          return now.generation === generation ? 'off' : 'stale';
+        }
       }
       const next = page.pagination.next_page_token;
       if (next === undefined) {
-        return this.#enabled(person);
+        const end = await this.#switchState(person);
+        if (!end.enabled) {
+          return end.generation === generation ? 'off' : 'stale';
+        }
+        return end.generation === generation ? 'completed' : 'stale';
       }
       await this.#deps.globalSettingsStore.setSetting({ key: cursorKey(person), value: next });
     }
   }
 
-  async #writeSessionTurns(input: { tenant_id: string; session_id: string }): Promise<void> {
+  async #writeSessionTurns(input: {
+    tenant_id: string;
+    session_id: string;
+    generation: number;
+    person: ChatSearchPerson;
+  }): Promise<'written' | 'off' | 'stale'> {
+    const activations = await this.#activationsFor(input);
     let pageToken: string | undefined;
     for (;;) {
       const page = await this.#deps.sessionStore.listTurns({
@@ -328,51 +415,170 @@ export class ChatSearchIndexer {
       });
       for (const turn of page.data) {
         if (turn.state.status !== 'running') {
-          await this.#writeTurn({ tenant_id: input.tenant_id, turn });
+          const written = await this.#writeTurn({
+            tenant_id: input.tenant_id,
+            turn,
+            generation: input.generation,
+            activations,
+            person: input.person,
+          });
+          if (written !== 'written') {
+            return written;
+          }
         }
       }
       pageToken = page.pagination.next_page_token;
       if (pageToken === undefined) {
-        return;
+        return 'written';
       }
     }
   }
 
-  async #writeTurn(input: { tenant_id: string; turn: TurnRecordWithoutSnapshot<TurnCustom> }): Promise<void> {
+  /**
+   * Writes one turn, after checking the switch one last time for this write. A turn whose
+   * persona cannot be decided is cleared from the index instead of being guessed.
+   */
+  async #writeTurn(input: {
+    tenant_id: string;
+    turn: TurnRecordWithoutSnapshot<TurnCustom>;
+    generation: number;
+    activations?: PersonaActivation[];
+    person: ChatSearchPerson;
+  }): Promise<'written' | 'off' | 'stale'> {
     const { turn } = input;
+    const state = await this.#switchState(input.person);
+    if (!state.enabled) {
+      return 'off';
+    }
+    if (state.generation !== input.generation) {
+      return 'stale';
+    }
+    const activations =
+      input.activations ?? (await this.#activationsFor({ tenant_id: input.tenant_id, session_id: turn.session_id }));
+    const decision = await this.#personaDecisionOf({ tenant_id: input.tenant_id, turn, activations });
     await this.#deps.sessionStore.indexChatMessages({
       tenant_id: input.tenant_id,
       session_id: turn.session_id,
       turn_id: turn.turn_id,
-      persona_id: await this.#personaIdOf(input),
-      documents: chatSearchDocumentsForTurn(turn),
+      persona_id: decision.decided ? decision.persona_id : null,
+      documents: decision.decided ? chatSearchDocumentsForTurn(turn) : [],
+    });
+    return 'written';
+  }
+
+  async #activationsFor(input: { tenant_id: string; session_id: string }): Promise<PersonaActivation[]> {
+    return await this.#deps.personaStore.listSessionPersonaActivations({
+      tenant_id: input.tenant_id,
+      session_id: input.session_id,
+      limit: 1000,
     });
   }
 
-  /** The persona that answered the turn, or null for the main assistant. Older turns kept it only in the activation log. */
-  async #personaIdOf(input: {
+  /**
+   * The persona that answered the turn, following the same inheritance the turn resolver
+   * uses: the turn's own snapshot first, then its recorded activation, then the decision
+   * inherited from earlier turns in its own chain (a later manual choice made before this
+   * turn wins over an earlier turn's snapshot), then a manual choice made before the turn
+   * with no earlier turn to inherit from. A chat that never had any persona choice before
+   * the turn is the main assistant's. Anything else cannot be decided and is left out.
+   */
+  async #personaDecisionOf(input: {
     tenant_id: string;
     turn: TurnRecordWithoutSnapshot<TurnCustom>;
-  }): Promise<string | null> {
-    const snapshot = input.turn.custom?.persona;
+    activations: PersonaActivation[];
+  }): Promise<PersonaDecision> {
+    const { turn, activations } = input;
+    const snapshot = turn.custom?.persona;
     if (snapshot !== undefined) {
-      return snapshot?.persona_id ?? null;
+      return { decided: true, persona_id: snapshot?.persona_id ?? null };
     }
-    const activation = await this.#deps.personaStore.getTurnPersonaActivation({
-      tenant_id: input.tenant_id,
-      session_id: input.turn.session_id,
-      turn_id: input.turn.turn_id,
-    });
-    return activation?.persona_id ?? null;
+    const exact = activations.find(activation => activation.turn_id === turn.turn_id);
+    if (exact !== undefined) {
+      return { decided: true, persona_id: exact.persona_id };
+    }
+    const manualId = turn.custom?.manual_persona_activation_id;
+    const ownManual =
+      manualId === undefined || manualId === null
+        ? undefined
+        : activations.find(activation => activation.id === manualId);
+    const turnTime = turn.created_at.getTime();
+    const visited = new Set<string>([turn.turn_id]);
+    let parentId = turn.previous_turn_id;
+    while (parentId !== null && !visited.has(parentId)) {
+      visited.add(parentId);
+      const parent = await this.#deps.sessionStore.getTurn({ session_id: turn.session_id, turn_id: parentId });
+      if (parent === undefined) {
+        break;
+      }
+      const parentSnapshot = parent.custom?.persona;
+      const parentExact =
+        parentSnapshot === undefined
+          ? activations.find(activation => activation.turn_id === parent.turn_id)
+          : undefined;
+      if (parentSnapshot !== undefined || parentExact !== undefined) {
+        const inherited: PersonaDecision = {
+          decided: true,
+          persona_id:
+            parentSnapshot !== undefined ? (parentSnapshot?.persona_id ?? null) : (parentExact?.persona_id ?? null),
+        };
+        if (ownManual !== undefined && ownManual.id !== (parent.custom?.manual_persona_activation_id ?? null)) {
+          return { decided: true, persona_id: ownManual.persona_id };
+        }
+        const parentTime = parent.created_at.getTime();
+        const manualBetween = activations.find(
+          activation =>
+            activation.turn_id === null &&
+            activationTime(activation) >= parentTime &&
+            activationTime(activation) <= turnTime,
+        );
+        return manualBetween === undefined ? inherited : { decided: true, persona_id: manualBetween.persona_id };
+      }
+      parentId = parent.previous_turn_id;
+    }
+    if (ownManual !== undefined) {
+      return { decided: true, persona_id: ownManual.persona_id };
+    }
+    const manualBefore = activations.find(
+      activation => activation.turn_id === null && activationTime(activation) <= turnTime,
+    );
+    if (manualBefore !== undefined) {
+      return { decided: true, persona_id: manualBefore.persona_id };
+    }
+    const anyBefore = activations.some(activation => activationTime(activation) <= turnTime);
+    return anyBefore ? { decided: false } : { decided: true, persona_id: null };
   }
 
-  /** Reads the switch. A failed read throws, so a passing outage never clears anyone's index. */
-  async #enabled(person: ChatSearchPerson): Promise<boolean> {
+  /** Reads the switch and its generation. A failed read throws, so a passing outage never clears anyone's index. */
+  async #switchState(person: ChatSearchPerson): Promise<ChatSearchSwitchState> {
     const settings = await this.#deps.sentinelSettingsStore.get({
       tenant_id: person.tenant_id,
       created_by: person.created_by,
     });
-    return settings.chat_search_enabled;
+    const row = await this.#deps.globalSettingsStore.getSetting({ key: generationKey(person) });
+    const generation = row === undefined ? 0 : Number.parseInt(row.value, 10);
+    return {
+      enabled: settings.chat_search_enabled,
+      generation: Number.isNaN(generation) ? 0 : generation,
+    };
+  }
+
+  /** Moves the person's switch generation forward by one, with compare-and-set retries. */
+  async #bumpGeneration(person: ChatSearchPerson): Promise<void> {
+    const key = generationKey(person);
+    for (;;) {
+      const row = await this.#deps.globalSettingsStore.getSetting({ key });
+      const current = row === undefined ? 0 : Number.parseInt(row.value, 10);
+      const next = (Number.isNaN(current) ? 0 : current) + 1;
+      if (
+        await this.#deps.globalSettingsStore.compareAndSetSetting({
+          key,
+          expected: row?.value ?? null,
+          value: String(next),
+        })
+      ) {
+        return;
+      }
+    }
   }
 
   async #forget(person: ChatSearchPerson): Promise<void> {
@@ -388,6 +594,13 @@ export class ChatSearchIndexer {
       tenant_id: person.tenant_id,
       created_by_subject_id: person.created_by,
     });
+    // A switch-on that raced this forget has the last word: ask for a fresh pass so
+    // nothing it turned on is lost with the rows just cleared.
+    const state = await this.#switchState(person);
+    if (state.enabled) {
+      await requestChatSearchBackfill({ globalSettingsStore: this.#deps.globalSettingsStore, person });
+      this.#start(person);
+    }
   }
 
   async #requestQuietly(person: ChatSearchPerson): Promise<void> {

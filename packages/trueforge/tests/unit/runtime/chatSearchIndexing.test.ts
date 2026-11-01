@@ -247,11 +247,144 @@ describe('ChatSearchIndexer', () => {
     });
   }
 
+  async function seedSession(sessionId: string): Promise<void> {
+    await store.createSession({
+      tenant_id: TENANT_ID,
+      session_id: sessionId,
+      created_by_subject: { subject_id: PERSON.created_by, subject_type: 'user', subject_display_name: 'user-1' },
+      agent: { type: 'inline', spec: makeAgentSpec() },
+      custom: null,
+      metadata: {},
+      external_id: null,
+      source: null,
+    });
+  }
+
+  async function finishTurn(sessionId: string, turnId: string): Promise<void> {
+    const state = doneState('The ferry leaves at nine in the morning.');
+    await store.updateTurnState({
+      session_id: sessionId,
+      turn_id: turnId,
+      state,
+      turn_done_event: makeTurnDoneEvent(state),
+    });
+  }
+
+  async function seedTurn(
+    sessionId: string,
+    turnId: string,
+    custom: TurnCustom | null,
+    previousTurnId?: string,
+  ): Promise<void> {
+    const createInput = makeCreateTurnInput<TurnCustom>({
+      sessionId,
+      turnId,
+      ...(previousTurnId === undefined ? {} : { previousTurnId }),
+    });
+    createInput.turn.input = [{ type: EventType.USER_MESSAGE, content: 'When does the ferry to the island leave?' }];
+    createInput.turn.custom = custom;
+    await store.createTurn(createInput);
+    await finishTurn(sessionId, turnId);
+  }
+
   it('adds nothing while the person has the search off', async () => {
     await seedFinishedChat('chat-1');
     await indexer().indexFinishedTurn({ ...PERSON, session_id: 'chat-1', turn_id: 'chat-1-turn-1' });
     await setSwitch(true);
     expect(await store.searchChatHistory(searchFor('ferry'))).toEqual([]);
+  });
+
+  it('gives a turn with an empty custom block the persona chosen before it, not the main assistant', async () => {
+    await setSwitch(true);
+    await seedSession('chat-1');
+    const personaStore = new SqlitePersonaStore(env.db);
+    await personaStore.recordPersonaActivation({
+      tenant_id: TENANT_ID,
+      id: 'activation-1',
+      session_id: 'chat-1',
+      turn_id: null,
+      persona_id: 'p-work',
+      persona_name: 'Work',
+      model_name: 'test/model',
+      source: 'explicit',
+    });
+    await seedTurn('chat-1', 'chat-1-turn-1', {});
+
+    await indexer().indexFinishedTurn({ ...PERSON, session_id: 'chat-1', turn_id: 'chat-1-turn-1' });
+
+    expect((await store.searchChatHistory(searchFor('ferry'))).map(hit => hit.session_id)).toEqual(['chat-1']);
+    expect(await store.searchChatHistory({ ...searchFor('ferry'), persona_ids: ['p-home'] })).toEqual([]);
+    expect(await store.searchChatHistory({ ...searchFor('ferry'), persona_ids: [] })).toEqual([]);
+  });
+
+  it('inherits the persona from the earlier turn a turn follows', async () => {
+    await setSwitch(true);
+    await seedSession('chat-1');
+    await seedTurn('chat-1', 'chat-1-turn-1', {
+      persona: { persona_id: 'p-work', persona_name: 'Work', model_name: 'test/model', source: 'sticky' },
+    });
+    await seedTurn('chat-1', 'chat-1-turn-2', {}, 'chat-1-turn-1');
+
+    await indexer().indexFinishedTurn({ ...PERSON, session_id: 'chat-1', turn_id: 'chat-1-turn-2' });
+
+    expect((await store.searchChatHistory(searchFor('ferry'))).map(hit => hit.session_id)).toEqual(['chat-1']);
+    expect(await store.searchChatHistory({ ...searchFor('ferry'), persona_ids: [] })).toEqual([]);
+  });
+
+  it('leaves out a turn whose persona cannot be decided', async () => {
+    await setSwitch(true);
+    await seedSession('chat-1');
+    const personaStore = new SqlitePersonaStore(env.db);
+    await personaStore.recordPersonaActivation({
+      tenant_id: TENANT_ID,
+      id: 'activation-1',
+      session_id: 'chat-1',
+      turn_id: 'some-other-turn',
+      persona_id: 'p-work',
+      persona_name: 'Work',
+      model_name: 'test/model',
+      source: 'invocation',
+    });
+    await seedTurn('chat-1', 'chat-1-turn-1', {});
+
+    await indexer().indexFinishedTurn({ ...PERSON, session_id: 'chat-1', turn_id: 'chat-1-turn-1' });
+
+    expect(await store.searchChatHistory(searchFor('ferry'))).toEqual([]);
+    expect(await store.searchChatHistory({ ...searchFor('ferry'), persona_ids: [] })).toEqual([]);
+  });
+
+  it('still fills in every chat when the switch is turned off and on again while a pass is running', async () => {
+    await seedFinishedChat('race-chat-1');
+    await seedFinishedChat('race-chat-2');
+    await seedFinishedChat('race-chat-3');
+
+    let chatSearch: ChatSearchIndexer | undefined;
+    let toggled = false;
+    class TogglingStore extends SqliteSessionStore {
+      override async indexChatMessages(input: Parameters<SqliteSessionStore['indexChatMessages']>[0]): Promise<void> {
+        if (!toggled && chatSearch !== undefined) {
+          toggled = true;
+          await setSwitch(false);
+          await chatSearch.followSwitch({ ...PERSON, enabled: false });
+          await setSwitch(true);
+          await chatSearch.followSwitch({ ...PERSON, enabled: true });
+        }
+        await super.indexChatMessages(input);
+      }
+    }
+    chatSearch = indexer(new TogglingStore(env.db));
+    await chatSearch.requestPass(PERSON);
+    await setSwitch(true);
+    await chatSearch.followSwitch({ ...PERSON, enabled: true });
+    await chatSearch.idle();
+
+    expect(toggled).toBe(true);
+    expect((await store.searchChatHistory(searchFor('ferry'))).map(hit => hit.session_id).sort()).toEqual([
+      'race-chat-1',
+      'race-chat-2',
+      'race-chat-3',
+    ]);
+    expect(await pending()).toBeUndefined();
   });
 
   it('adds a finished turn with the persona that answered it once the search is on', async () => {

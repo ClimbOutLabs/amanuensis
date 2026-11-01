@@ -4687,6 +4687,35 @@ export function runStoreContractSuite<
       await expect(store.searchChatHistory(searchInput({ query: 'tri' }))).resolves.toEqual([]);
     });
 
+    it('keeps words written with combining marks whole, in either letter form', async () => {
+      const store = createStore();
+      await seedSession(store);
+      await seedSecondSession(store, 'letters-session', createdBy);
+      await seedSecondSession(store, 'cafe-session', createdBy);
+      await indexOne(store, { session: sessionId, turn: 'turn-1', text: 'हिन्दी ferry notes', at: docAt('01') });
+      await indexOne(store, {
+        session: 'letters-session',
+        turn: 'turn-1',
+        text: 'ह ि न ् द ी ferry notes',
+        at: docAt('02'),
+      });
+      await indexOne(store, {
+        session: 'cafe-session',
+        turn: 'turn-1',
+        text: 'İstanbul and a café stop',
+        at: docAt('03'),
+      });
+
+      const hindiHits = await store.searchChatHistory(searchInput({ query: 'हिन्दी' }));
+      expect(hindiHits.map(hit => hit.session_id)).toEqual([sessionId]);
+      const cafeHits = await store.searchChatHistory(searchInput({ query: 'café' }));
+      expect(cafeHits.map(hit => hit.session_id)).toEqual(['cafe-session']);
+      await expect(store.searchChatHistory(searchInput({ query: 'caf' }))).resolves.toEqual([]);
+      const istanbulHits = await store.searchChatHistory(searchInput({ query: 'İstanbul' }));
+      expect(istanbulHits.map(hit => hit.session_id)).toEqual(['cafe-session']);
+      await expect(store.searchChatHistory(searchInput({ query: 'stanbul' }))).resolves.toEqual([]);
+    });
+
     it('needs every query word in one message, not spread across a chat', async () => {
       const store = createStore();
       await seedSession(store);
