@@ -40,21 +40,30 @@ export interface SpaceToolContract {
   activity_line: SpaceActivityLine;
 }
 
-const SPACE_WRITE_TOOLS: readonly SpaceToolContract[] = [
+/** A write tool also says whether it changes what the space holds; filing into a folder does not. */
+export interface SpaceWriteToolContract extends SpaceToolContract {
+  changes_content: boolean;
+}
+
+const SPACE_WRITE_TOOLS: readonly SpaceWriteToolContract[] = [
   {
     name: CREATE_SPACE_TOOL_NAME,
+    changes_content: true,
     activity_line: space_name => (space_name === null ? 'Created a space.' : `Created the space ${space_name}.`),
   },
   {
     name: EDIT_SPACE_TOOL_NAME,
+    changes_content: true,
     activity_line: space_name => (space_name === null ? 'Updated a space.' : `Updated the space ${space_name}.`),
   },
   {
     name: REVERT_SPACE_TOOL_NAME,
+    changes_content: true,
     activity_line: () => 'Restored an earlier version of a space.',
   },
   {
     name: MOVE_SPACE_TOOL_NAME,
+    changes_content: false,
     activity_line: () => 'Moved a space to a folder.',
   },
 ];
@@ -71,6 +80,11 @@ export const SPACE_READ_TOOL_NAMES = SPACE_READ_TOOLS.map(tool => tool.name);
 /** Calls that create, change, restore or file a space. */
 export function isSpaceWriteToolName(tool_name: string): boolean {
   return SPACE_WRITE_TOOLS.some(tool => tool.name === tool_name);
+}
+
+/** Calls that create, edit or restore the content of a space; filing a space in a folder is not one. */
+export function isSpaceContentWriteToolName(tool_name: string): boolean {
+  return SPACE_WRITE_TOOLS.some(tool => tool.name === tool_name && tool.changes_content);
 }
 
 /** Calls that only read spaces. */

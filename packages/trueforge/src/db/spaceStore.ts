@@ -120,6 +120,12 @@ export interface SpaceFolderAssignment {
   folder_id: string;
 }
 
+/** Folders and placements read together, so every placement names a folder in the same list. */
+export interface SpaceFolderSnapshot {
+  folders: SpaceFolderRecord[];
+  assignments: SpaceFolderAssignment[];
+}
+
 export class SpaceNotFoundError extends Error {
   readonly id: string;
 
@@ -219,4 +225,6 @@ export interface ISpaceStore<TTransaction = never> {
     input: ListSpaceFolderAssignmentsInput,
     transaction?: TTransaction,
   ): Promise<SpaceFolderAssignment[]>;
+  /** Reads every folder and placement from one consistent view, for callers that need the two to agree. */
+  readSpaceFolderSnapshot(input: OwnerScopedInput, transaction?: TTransaction): Promise<SpaceFolderSnapshot>;
 }

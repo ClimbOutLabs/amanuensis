@@ -21,6 +21,7 @@ import {
   type SpaceFolderAssignment,
   type SpaceFolderIdentityInput,
   type SpaceFolderRecord,
+  type SpaceFolderSnapshot,
   type SpaceIdentityInput,
   type SpaceListResult,
   type SpaceMutationResult,
@@ -433,6 +434,16 @@ export class SqliteSpaceStore implements ISpaceStore<Transaction<Database>> {
       query = query.where('space_id', 'in', input.space_ids);
     }
     return await query.orderBy('space_id').execute();
+  }
+
+  async readSpaceFolderSnapshot(
+    input: OwnerScopedInput,
+    transaction?: Transaction<Database>,
+  ): Promise<SpaceFolderSnapshot> {
+    return await this.#read(transaction, async trx => ({
+      folders: await this.listSpaceFolders(input, trx),
+      assignments: await this.listSpaceFolderAssignments(input, trx),
+    }));
   }
 
   async #throwSpaceMutationFailure(

@@ -14,7 +14,7 @@ import { DropdownMenu } from '../atoms/primitives/DropdownMenu.js';
 import { CHAT_TITLE_MAX_LENGTH, normalizeChatTitle, useSaveChatTitle } from '../hooks/useChatTitleSave.js';
 import { Icon } from '../icons/Icon.js';
 import { useOptionalChatFolders, type ChatFolder } from '../server/ChatFolderContext.js';
-import { cancelOnEscape, errorMessage, FolderMoveDialog, FolderSection, NewFolderControl } from './FolderControls.js';
+import { cancelOnEscape, FolderMoveDialog, FolderSection, NewFolderControl } from './FolderControls.js';
 import { useToasterOptional } from './ToasterContainer.js';
 
 const deleteItemClass =
@@ -89,8 +89,8 @@ function RenameChatDialog({
       await saveTitle({ sessionId, title: normalized });
       onRenamed?.(normalized);
       onOpenChange(false);
-    } catch (renameError) {
-      setError(errorMessage(renameError, 'Could not update this chat'));
+    } catch {
+      setError('Could not rename the chat. Try again.');
     } finally {
       setBusy(false);
     }

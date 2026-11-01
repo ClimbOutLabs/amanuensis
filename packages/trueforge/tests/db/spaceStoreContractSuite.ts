@@ -432,6 +432,42 @@ export function runSpaceStoreContractSuite(getStore: () => ISpaceStore): void {
       ).rejects.toBeInstanceOf(SpaceFolderNotFoundError);
     });
 
+    it('reads folders and placements together, only for the owner', async () => {
+      const store = getStore();
+      const created = await createSpace(store);
+      await store.createSpaceFolder({ ...OWNER, id: 'f-1', name: 'Homes' });
+      await store.createSpaceFolder({ ...OTHER_OWNER, id: 'f-other', name: 'Theirs' });
+      await store.setSpaceFolder({ ...OWNER, space_id: created.id, folder_id: 'f-1' });
+
+      const snapshot = await store.readSpaceFolderSnapshot(OWNER);
+
+      expect(snapshot.folders.map(folder => folder.id)).toEqual(['f-1']);
+      expect(snapshot.assignments).toEqual([{ space_id: created.id, folder_id: 'f-1' }]);
+      expect(await store.readSpaceFolderSnapshot(OTHER_OWNER)).toEqual({
+        folders: [expect.objectContaining({ id: 'f-other' })],
+        assignments: [],
+      });
+    });
+
+    it('either files the space or reports the folder missing when the folder is deleted at the same time', async () => {
+      const store = getStore();
+      const created = await createSpace(store);
+      for (let attempt = 0; attempt < 10; attempt += 1) {
+        const folder_id = `f-race-${String(attempt)}`;
+        await store.createSpaceFolder({ ...OWNER, id: folder_id, name: `Race ${String(attempt)}` });
+        const [filed] = await Promise.allSettled([
+          store.setSpaceFolder({ ...OWNER, space_id: created.id, folder_id }),
+          store.deleteSpaceFolder({ ...OWNER, folder_id }),
+        ]);
+        if (filed.status === 'rejected') {
+          expect(filed.reason).toBeInstanceOf(SpaceFolderNotFoundError);
+        }
+        // Whatever the order, a placement never outlives its folder.
+        const { folders, assignments } = await store.readSpaceFolderSnapshot(OWNER);
+        expect(assignments.every(a => folders.some(f => f.id === a.folder_id))).toBe(true);
+      }
+    });
+
     it('moves a space into a folder and back out without touching its revision, timestamps or history', async () => {
       const store = getStore();
       const created = await createSpace(store);

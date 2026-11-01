@@ -2,7 +2,7 @@ import { z } from '@hono/zod-openapi';
 import { FolderFieldsSchema, FolderIdSchema, FolderNameSchema } from './folder';
 
 export const SessionFolderIdParamsSchema = z
-  .object({ folder_id: z.string().min(1).max(64).describe('Immutable session folder identifier.') })
+  .object({ folder_id: FolderIdSchema.describe('Immutable session folder identifier.') })
   .openapi('SessionFolderIDParams');
 
 export const SessionFolderSchema = z

@@ -21,6 +21,7 @@ import {
   type SpaceFolderAssignment,
   type SpaceFolderIdentityInput,
   type SpaceFolderRecord,
+  type SpaceFolderSnapshot,
   type SpaceIdentityInput,
   type SpaceListResult,
   type SpaceMutationResult,
@@ -398,6 +399,8 @@ export class PostgresSpaceStore implements ISpaceStore<Transaction<Database>> {
         .where('tenant_id', '=', input.tenant_id)
         .where('created_by', '=', input.created_by)
         .where('id', '=', folder_id)
+        // Blocks a concurrent folder delete until this placement commits.
+        .forKeyShare()
         .executeTakeFirst();
       if (folder === undefined) {
         throw new SpaceFolderNotFoundError({ id: folder_id });
@@ -432,6 +435,16 @@ export class PostgresSpaceStore implements ISpaceStore<Transaction<Database>> {
       query = query.where('space_id', 'in', input.space_ids);
     }
     return await query.orderBy('space_id').execute();
+  }
+
+  async readSpaceFolderSnapshot(
+    input: OwnerScopedInput,
+    transaction?: Transaction<Database>,
+  ): Promise<SpaceFolderSnapshot> {
+    return await this.#read(transaction, async trx => ({
+      folders: await this.listSpaceFolders(input, trx),
+      assignments: await this.listSpaceFolderAssignments(input, trx),
+    }));
   }
 
   async #throwSpaceMutationFailure(

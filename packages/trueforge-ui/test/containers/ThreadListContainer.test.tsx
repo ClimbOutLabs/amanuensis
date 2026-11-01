@@ -822,6 +822,41 @@ describe('ThreadListContainer', () => {
     });
   });
 
+  it('shows a plain sentence, not the server reply, when a chat folder cannot be renamed', async () => {
+    const chatFolders: ChatFolderStore = {
+      load: async () => ({
+        folders: [{ id: 'folder-work', name: 'Work' }],
+        assignments: [],
+        folderSessions: [{ folderId: 'folder-work', sessions: [] }],
+        unfiledSessions: [],
+      }),
+      createFolder: async ({ name }) => ({ id: 'folder-new', name }),
+      renameFolder: async () => {
+        throw new Error('{"error":{"code":"session_folder_not_found"}}');
+      },
+      deleteFolder: async () => {},
+      setSessionFolder: async () => {},
+    };
+
+    renderThreadList({
+      adapter: {
+        threadId: 'thread-1',
+        threads: [{ status: 'regular', id: 'thread-1', remoteId: 'session-1', title: 'Unfiled chat' }],
+      },
+      chatFolders,
+    });
+
+    await screen.findByRole('region', { name: 'Work' });
+    fireEvent.click(screen.getByRole('button', { name: 'Manage Work' }));
+    fireEvent.change(screen.getByRole('textbox', { name: 'Folder name' }), { target: { value: 'Office' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Rename' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Could not rename the folder. The folder may no longer exist. Refresh the page and try again.',
+    );
+    expect(screen.queryByText(/session_folder_not_found/)).not.toBeInTheDocument();
+  });
+
   it('shows every chat in a folder even when the recent list only has the first page', async () => {
     const folderSessions = Array.from({ length: 35 }, (_, index) => {
       const number = index + 1;

@@ -422,16 +422,17 @@ export async function runDataExport<TTransaction>(
   await writeJsonEntry(context, 'personalization.json', profile ?? null);
 
   // space_folders.json: shaped like folders.json so one import schema reads both.
-  const spaceFolders = await deps.spaceStore.listSpaceFolders({ tenant_id: tenantId, created_by: subjectId });
+  const { folders: spaceFolders, assignments: spaceFolderAssignments } = await deps.spaceStore.readSpaceFolderSnapshot({
+    tenant_id: tenantId,
+    created_by: subjectId,
+  });
   await writeJsonArrayEntry(
     context,
     'space_folders.json',
     spaceFolders.map(({ id, ...folder }) => ({ ...folder, folder_id: id })),
   );
   const spaceFolderBySpaceId = new Map(
-    (await deps.spaceStore.listSpaceFolderAssignments({ tenant_id: tenantId, created_by: subjectId })).map(
-      assignment => [assignment.space_id, assignment.folder_id],
-    ),
+    spaceFolderAssignments.map(assignment => [assignment.space_id, assignment.folder_id]),
   );
 
   // spaces.json: each space with every revision and the folder it sits in.

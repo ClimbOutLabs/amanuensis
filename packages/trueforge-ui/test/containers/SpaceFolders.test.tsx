@@ -217,10 +217,10 @@ describe('Space page folder actions', () => {
     await waitFor(() => expect(store.setSpaceFolder).toHaveBeenCalledWith({ spaceId: 's-homes', folderId: null }));
   });
 
-  it('shows the reason and keeps the space where it was when the move fails', async () => {
+  it('shows a plain sentence, not the server reply, and keeps the space where it was when the move fails', async () => {
     const store = folderStore({ spaces: [{ ...TRIP }], folders: [{ id: 'folder-a', name: 'Travel' }] });
     store.setSpaceFolder = vi.fn(async () => {
-      throw new Error('Folder not found. Refresh the page and try again.');
+      throw new Error('{"error":{"code":"space_folder_not_found"}}');
     });
     render(<Harness store={store} initialSpaceId="s-trip" />);
 
@@ -229,7 +229,49 @@ describe('Space page folder actions', () => {
     fireEvent.click(await screen.findByRole('menuitem', { name: 'Move to folder' }));
     fireEvent.click(await screen.findByRole('button', { name: 'Travel' }));
 
-    expect(await screen.findByRole('alert')).toHaveTextContent('Folder not found. Refresh the page and try again.');
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Could not move the space. The folder may no longer exist. Refresh the page and try again.',
+    );
+    expect(screen.queryByText(/space_folder_not_found/)).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'No folder' })).not.toBeInTheDocument();
+  });
+
+  it('says what to do next when a folder rename or delete fails', async () => {
+    const store = folderStore({ spaces: [{ ...HOMES }], folders: [{ id: 'folder-a', name: 'Moving' }] });
+    store.renameFolder = vi.fn(async () => {
+      throw new Error('{"error":"raw"}');
+    });
+    store.deleteFolder = vi.fn(async () => {
+      throw new Error('');
+    });
+    render(<Harness store={store} />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Manage Moving' }));
+    fireEvent.change(screen.getByRole('textbox', { name: 'Folder name' }), { target: { value: 'Relocation' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Rename' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Could not rename the folder. The folder may no longer exist. Refresh the page and try again.',
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Delete folder' }));
+    await waitFor(() =>
+      expect(screen.getByRole('alert')).toHaveTextContent(
+        'Could not delete the folder. Refresh the page and try again.',
+      ),
+    );
+  });
+
+  it('says what to do next when a new folder cannot be made', async () => {
+    const store = folderStore({ spaces: [{ ...TRIP }], folders: [] });
+    store.createFolder = vi.fn(async () => {
+      throw new Error('{"error":"raw"}');
+    });
+    render(<Harness store={store} />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'New folder' }));
+    fireEvent.change(screen.getByRole('textbox', { name: 'New folder name' }), { target: { value: 'Travel' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Create' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Could not create the folder. Try again.');
   });
 });

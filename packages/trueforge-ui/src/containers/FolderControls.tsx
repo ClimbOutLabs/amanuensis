@@ -21,10 +21,29 @@ export interface FolderOperations {
 
 export type FolderKind = 'chat' | 'space';
 
-const KIND_WORDS: Record<FolderKind, { one: string; many: string; failure: string }> = {
-  chat: { one: 'chat', many: 'chats', failure: 'Could not update this chat' },
-  space: { one: 'space', many: 'spaces', failure: 'Could not update this space' },
+const KIND_WORDS: Record<FolderKind, { one: string; many: string }> = {
+  chat: { one: 'chat', many: 'chats' },
+  space: { one: 'space', many: 'spaces' },
 };
+
+type FolderAction = 'create' | 'move' | 'rename' | 'delete';
+
+/**
+ * What the person reads when a folder change fails. Server replies are for developers, so they are
+ * never shown: each action gets one plain sentence with the next step.
+ */
+function folderFailureMessage({ kind, action }: { kind: FolderKind; action: FolderAction }): string {
+  switch (action) {
+    case 'create':
+      return 'Could not create the folder. Try again.';
+    case 'move':
+      return `Could not move the ${KIND_WORDS[kind].one}. The folder may no longer exist. Refresh the page and try again.`;
+    case 'rename':
+      return 'Could not rename the folder. The folder may no longer exist. Refresh the page and try again.';
+    case 'delete':
+      return 'Could not delete the folder. Refresh the page and try again.';
+  }
+}
 
 /** Escape cancels without saving in every inline rename/create form. */
 export function cancelOnEscape(onCancel: () => void) {
@@ -33,10 +52,6 @@ export function cancelOnEscape(onCancel: () => void) {
     event.preventDefault();
     onCancel();
   };
-}
-
-export function errorMessage(error: unknown, fallback: string): string {
-  return error instanceof Error && error.message.length > 0 ? error.message : fallback;
 }
 
 /**
@@ -77,8 +92,8 @@ export function FolderMoveDialog({
     try {
       await onMove(folderId);
       onOpenChange(false);
-    } catch (moveError) {
-      setError(errorMessage(moveError, words.failure));
+    } catch {
+      setError(folderFailureMessage({ kind, action: 'move' }));
     } finally {
       setBusy(false);
     }
@@ -90,12 +105,14 @@ export function FolderMoveDialog({
     if (normalized.length === 0) return;
     setBusy(true);
     setError(null);
+    let action: FolderAction = 'create';
     try {
       const created = await createFolder({ name: normalized });
+      action = 'move';
       await onMove(created.id);
       onOpenChange(false);
-    } catch (createError) {
-      setError(errorMessage(createError, words.failure));
+    } catch {
+      setError(folderFailureMessage({ kind, action }));
     } finally {
       setBusy(false);
     }
@@ -212,8 +229,8 @@ function FolderManageDialog({
     try {
       await operations.renameFolder({ folderId: folder.id, name: normalized });
       onOpenChange(false);
-    } catch (renameError) {
-      setError(errorMessage(renameError, words.failure));
+    } catch {
+      setError(folderFailureMessage({ kind, action: 'rename' }));
     } finally {
       setBusy(false);
     }
@@ -225,8 +242,8 @@ function FolderManageDialog({
     try {
       await operations.deleteFolder({ folderId: folder.id });
       onOpenChange(false);
-    } catch (deleteError) {
-      setError(errorMessage(deleteError, words.failure));
+    } catch {
+      setError(folderFailureMessage({ kind, action: 'delete' }));
     } finally {
       setBusy(false);
     }
@@ -393,8 +410,8 @@ function FolderCreateDialog({
     try {
       await createFolder({ name: normalized });
       onOpenChange(false);
-    } catch (createError) {
-      setError(errorMessage(createError, words.failure));
+    } catch {
+      setError(folderFailureMessage({ kind, action: 'create' }));
     } finally {
       setBusy(false);
     }
