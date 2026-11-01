@@ -41,6 +41,24 @@ const SOURCE_LABELS: Readonly<Record<FactSource, string>> = {
   inferred: 'inferred, not confirmed',
 };
 
+const WRITING_SECTION = 'How you write to them';
+const UNCONFIRMED_LABEL = 'Unconfirmed (not confirmed by you)';
+
+/**
+ * The only sources whose lines may stand as drafting instructions: the person's own words and the
+ * messages they sent. Mail, calendar, read content and inferred lines are never instructions.
+ */
+const INSTRUCTION_SOURCES: ReadonlySet<FactSource> = new Set<FactSource>(['you_said', 'you_edited', 'sent_mail']);
+
+/** A marker-less bullet is the person's own hand edit, so it counts as `you_edited`. */
+function isInstructionLine(line: PageLine): boolean {
+  return line.kind === 'other' || INSTRUCTION_SOURCES.has(line.fact.marker.src);
+}
+
+function renderLines(lines: readonly PageLine[]): string[] {
+  return lines.map(renderLine).filter((line): line is string => line !== undefined);
+}
+
 function dateSpan(marker: FactMarker): string | undefined {
   if (marker.seen !== undefined) {
     return `seen ${marker.seen}`;
@@ -87,13 +105,28 @@ export function renderPageForModel(input: { title: string; page: MemoryPage }): 
   const header = `[page: ${input.title} — ${flags.join(', ')}${names.length > 0 ? `; also called: ${names.join(', ')}` : ''}]`;
   const summary = page.preamble.map(line => line.trim()).filter(line => line !== '' && !line.startsWith('# '));
   const lines: string[] = [header, ...summary];
+  // A line under "How you write to them" that the person did not write or send is not an instruction:
+  // it is shown with the unconfirmed facts instead, so read content never reaches the drafting heading.
+  const demoted = renderLines(
+    page.sections
+      .filter(section => section.name === WRITING_SECTION)
+      .flatMap(section => section.lines.filter(line => !isInstructionLine(line))),
+  );
+  let demotedShown = demoted.length === 0;
   for (const section of page.sections) {
-    const body = section.lines.map(renderLine).filter((line): line is string => line !== undefined);
-    if (body.length === 0) {
-      continue;
+    const writing = section.name === WRITING_SECTION;
+    const unconfirmed = section.name === 'Unconfirmed';
+    const body = renderLines(writing ? section.lines.filter(isInstructionLine) : section.lines);
+    if (unconfirmed && !demotedShown) {
+      body.push(...demoted);
+      demotedShown = true;
     }
-    const label = section.name === 'Unconfirmed' ? 'Unconfirmed (not confirmed by you)' : section.heading.trim();
-    lines.push(`${label}:`, ...body);
+    if (body.length > 0) {
+      lines.push(`${unconfirmed ? UNCONFIRMED_LABEL : section.heading.trim()}:`, ...body);
+    }
+  }
+  if (!demotedShown) {
+    lines.push(`${UNCONFIRMED_LABEL}:`, ...demoted);
   }
   return lines.join('\n');
 }
@@ -211,6 +244,6 @@ export async function loadPagesForMessage(input: {
 /** The "How you write to them" lines of a loaded person page, as instructions for drafting. */
 export function writingInstructions(page: MemoryPage): string[] {
   return pageFacts(page)
-    .filter(entry => entry.section.name === 'How you write to them')
+    .filter(entry => entry.section.name === WRITING_SECTION && INSTRUCTION_SOURCES.has(entry.fact.marker.src))
     .map(entry => entry.fact.text);
 }
