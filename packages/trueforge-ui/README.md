@@ -557,7 +557,7 @@ const agentServer: AgentUIServer = {
 <TrueForgeUI server={agentServer} layout="sidebar" />;
 ```
 
-See [docs/server.md](./docs/server.md) for the full method list and BYO guidance.
+See the [server reference](../../docs/ui-sdk/reference/server.mdx) for the full method list.
 
 ---
 
@@ -590,7 +590,6 @@ Curated public API: [docs/api.md](./docs/api.md).
 | [docs/architecture.md](./docs/architecture.md)   | Atoms, containers, slots      |
 | [docs/customization.md](./docs/customization.md) | Theme, slots, custom layout   |
 | [docs/compatibility.md](./docs/compatibility.md) | Peer matrix                   |
-| [docs/server.md](./docs/server.md)               | Server port + BYO             |
 | [docs/theming.md](./docs/theming.md)             | Themes, brand, icons, presets |
 | [CHANGELOG.md](./CHANGELOG.md)                   | Migration notes               |
 

@@ -30,7 +30,7 @@ Defaults may ship TFY look; every surface must accept a host override.
 ## Constraint
 
 All work in **`@truefoundry/trueforge-ui`**. No runtime package changes for this
-track (orthogonal to [`docs/server.md`](./server.md)).
+track.
 
 ## Locked decisions
 
@@ -559,7 +559,7 @@ no longer depends on tfy.
 - Dual-running tfy + shadcn
 - Moving structural atom overrides into `theme` (those stay in `overrides`;
   full chrome uses `layout` instead)
-- Runtime / Server abstraction work (see [`docs/server.md`](./server.md))
+- Runtime / Server abstraction work
 
 ## PR sequence
 
