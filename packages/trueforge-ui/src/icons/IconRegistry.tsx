@@ -73,6 +73,7 @@ import {
   Terminal,
   Trash2,
   TriangleAlert,
+  Volume2,
   Wrench,
   X,
 } from 'lucide-react';
@@ -165,6 +166,8 @@ const defaults: Record<string, IconEntry> = {
   'dollar-sign': DollarSign,
   bars: Menu,
   mic: Mic,
+  'volume-high': Volume2,
+  stop: Square,
   'panel-left-close': PanelLeftClose,
   'panel-left-open': PanelLeftOpen,
   plus: Plus,
