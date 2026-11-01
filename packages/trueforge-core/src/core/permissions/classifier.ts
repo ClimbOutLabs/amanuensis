@@ -1047,8 +1047,8 @@ async function sandboxRunPlacement({
 
 /**
  * The silent run of `run_code`: code Aman wrote in this chat, given as the call's own `code` or as a file it
- * wrote this session. It passes the same install and code-origin checks as a silent command. Code that starts
- * a program or loads anything beyond the standard library keeps its card.
+ * wrote this session. It passes the install and code-origin checks. Code that starts a program or loads
+ * anything beyond the standard library keeps its card.
  */
 async function runCodePlacement({
   params,
