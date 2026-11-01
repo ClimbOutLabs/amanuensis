@@ -6,12 +6,11 @@ Setting it up takes about 45 minutes. Most of that is waiting while things downl
 
 ## What you need
 
-- A computer with at least 16 GB of memory and 30 GB of free disk space. It stays on while you use Aman.
+- A computer with 16 GB of memory (8 GB is the bare minimum, and the first install is slow there) and free disk space: about 20 GB on a Mac, about 45 GB on Linux. It stays on while you use Aman.
 - **Mac:** [Docker Desktop](https://www.docker.com/products/docker-desktop/). After installing it, open Docker Desktop, go to Settings, Resources, and set Memory to 8 GB or more. Then click Apply.
 - **Windows:** Windows 11 (or Windows 10 with the latest updates). You will install Ubuntu inside Windows (called WSL) and Docker Desktop; the steps are below.
 - **Linux (Ubuntu or Debian):** nothing extra. The installer offers to install Docker for you. Your user must be allowed to use `sudo`.
-- A GitHub account that has been given access to the Aman code (ask the person who sent you this).
-- An API key for an AI model (OpenAI, Anthropic or Google Gemini). You create it on that company's website; it is pasted into Aman after the install. This is the only part that costs money, and it is billed by that company, not by Aman.
+- An API key for an AI model (Together AI, OpenAI, Anthropic or Google Gemini). You create it on that company's website; it is pasted into Aman after the install. This is the only part that costs money, and it is billed by that company, not by Aman.
 
 ## Step 1: get the code
 
@@ -28,8 +27,6 @@ git clone https://github.com/ClimbOutLabs/amanuensis
 cd amanuensis
 git checkout vX.Y.Z
 ```
-
-The first line asks you to sign in to GitHub. Your GitHub password does not work there; use a "personal access token" instead (on GitHub: your profile picture, Settings, Developer settings, Personal access tokens, Generate new token; give it access to the Aman repository with "Contents: read"). Paste the token where it asks for a password.
 
 On a Mac, the first `git` command may show a window offering to install "command line developer tools". Click Install and wait, then run the line again.
 
@@ -75,7 +72,7 @@ Click **Let's Get Started**, then enter the email and the password you chose. Yo
 
 ## Step 4: add your AI model
 
-Aman does not come with a model. In **Settings, Models**, find the company you have a key for (OpenAI, Anthropic, Google Gemini), click **Configure**, paste the key, and save. Its models now appear in the model picker at the bottom of the chat screen.
+Aman does not come with a model. In **Settings, Models**, find the company you have a key for (Together AI, OpenAI, Anthropic, Google Gemini), click **Configure**, paste the key, and save. Its models now appear in the model picker at the bottom of the chat screen.
 
 ## Step 5: first things to try
 

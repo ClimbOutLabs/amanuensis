@@ -9,6 +9,12 @@
 
 <!-- What changed, why, and what the user-facing impact is. -->
 
+## Docs
+
+<!-- A change to features, install or run paths, or architecture updates the affected docs in this PR (README, docs/, installer/STATE.md, guides). -->
+
+- [ ] Docs updated for this change, or this change needs no doc update
+
 ## Testing
 
 <!-- What you ran and the results. -->
