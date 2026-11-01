@@ -242,7 +242,11 @@ print_plan() {
     total_gb=$(awk -v mb="$DL_TOTAL_MB" 'BEGIN {printf "%.1f", mb / 1024}')
     hosts=$(printf '%s' "$DL_HOSTS" | tr ' ' '\n' | sort -u | tr '\n' ' ')
     for host in $hosts; do count=$((count + 1)); done
-    ui_hint "Downloads: about $total_gb GB from $count sites. The first run takes several minutes, mostly to build the app."
+    if [ "$PLAN_BUILDS_APP" = 1 ]; then
+      ui_hint "Downloads: about $total_gb GB from $count sites. The first run takes several minutes, mostly to build the app."
+    else
+      ui_hint "Downloads: about $total_gb GB from $count sites. The first run takes several minutes."
+    fi
     if [ "$UI_VERBOSE" = 1 ]; then
       say "  First-run downloads (approximate):$DL_LINES"
       say "    total: about $DL_TOTAL_MB MB ($total_gb GB)"
@@ -344,9 +348,9 @@ plan_build() {
     fi
   fi
 
-  plan_image "$REL_APP_TAG" "The Aman app is built" "Build the Aman app" app-base app-deps dockerfile-frontend
-  plan_image "$REL_STT_TAG" "The speech-to-text service is built" "Build the speech-to-text service" stt-base stt-deps
-  plan_image "$REL_CALENDAR_TAG" "The calendar connector is built" "Build the calendar connector"
+  plan_aman_image "$REL_APP_TAG" "The Aman app is built" "Download the Aman app" "Build the Aman app" app-image app-base app-deps dockerfile-frontend
+  plan_aman_image "$REL_STT_TAG" "The speech-to-text service is built" "Download the speech-to-text service" "Build the speech-to-text service" stt-image stt-base stt-deps
+  plan_aman_image "$REL_CALENDAR_TAG" "The calendar connector is built" "Download the calendar connector" "Build the calendar connector" calendar-image
   plan_image "$REL_DEX_IMAGE" "The sign-in service is downloaded" "Download the sign-in service" dex
   plan_image "$REL_MAIL_EMAIL_IMAGE" "The email connector is downloaded" "Download the email connector" mail-email
   plan_tls
@@ -518,6 +522,23 @@ plan_image() { # tag, have text, todo text, download ids...
   fi
 }
 
+# An Aman image is downloaded when CI published it for this source, unless --build-from-source asks for a build. The
+# build's own base images and packages are listed only for a build, so the downloads list stays true.
+plan_aman_image() { # tag, have text, download text, build text, download id, build download ids...
+  local tag=$1 have=$2 get=$3 build=$4 pull_id=$5 dl
+  shift 5
+  if docker_available_for_probes && docker_image_exists "$tag"; then
+    plan_add have "$have"
+  elif [ "$OPT_BUILD_FROM_SOURCE" = 1 ]; then
+    plan_add todo "$build"
+    if [ "$tag" = "$REL_APP_TAG" ]; then PLAN_BUILDS_APP=1; fi
+    for dl in "$@"; do dl_add "$dl"; done
+  else
+    plan_add todo "$get"
+    dl_add "$pull_id"
+  fi
+}
+
 need_new_instance() {
   [ -z "$(reg_names)" ] || { [ -n "$OPT_NAME" ] && ! reg_exists "$OPT_NAME"; }
 }
@@ -527,6 +548,7 @@ cmd_install() {
   INSTALL_T0=$SECONDS
   DL_TOTAL_MB=0
   DL_LINES=
+  PLAN_BUILDS_APP=0
   DL_HOSTS=
   release_resolve
   AMAN_PASSWORD=

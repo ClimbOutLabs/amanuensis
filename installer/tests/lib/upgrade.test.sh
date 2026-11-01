@@ -45,6 +45,7 @@ test_successful_upgrade_backs_up_first() {
   local old new
   old=$(app_tag "$AMAN_HOME/release/release.json")
   repo_commit_change "app change"
+  STUB_PULL_FAIL=climboutlabs
   run_install upgrade
   assert_rc 0
   new=$(app_tag "$AMAN_HOME/release/release.json")
@@ -261,6 +262,7 @@ test_failed_build_changes_nothing() {
   local old
   old=$(app_tag "$AMAN_HOME/release/release.json")
   repo_commit_change "does not build"
+  STUB_PULL_FAIL=climboutlabs
   STUB_BUILD_FAIL=1
   run_install upgrade
   assert_rc 1

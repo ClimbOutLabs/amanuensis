@@ -230,8 +230,8 @@ test_plan_words_and_nothing_printed_twice() {
   local after
   after=${OUT#*Building the app (4 of 6)}
   assert_not_contains "$after" "to do" "the plan is not printed again"
-  assert_flat_contains "$after" "+ Built the Aman app"
-  assert_flat_contains "$after" "+ Built the speech-to-text service"
+  assert_flat_contains "$after" "+ Downloaded the Aman app"
+  assert_flat_contains "$after" "+ Downloaded the speech-to-text service"
   assert_flat_contains "$after" "+ Downloaded the sign-in service"
   assert_flat_contains "$after" "+ Instance main is running and answering"
   sandbox_drop
@@ -299,6 +299,7 @@ test_lines_stay_readable_in_72_columns() {
 test_docker_output_stays_in_a_log() {
   t_begin "builds print one progress line each and keep the docker output in a private log file"
   sandbox_new
+  STUB_PULL_FAIL=climboutlabs
   with_input "$SENTINEL_PASSWORD
 "
   run_install --yes --password-stdin --email owner@example.invalid
@@ -317,6 +318,7 @@ test_docker_output_stays_in_a_log() {
 test_a_failed_build_shows_the_log_tail_and_its_path() {
   t_begin "a failed build prints the last log lines and the log path, not the whole output"
   sandbox_new
+  STUB_PULL_FAIL=climboutlabs
   STUB_BUILD_FAIL=1
   with_input "$SENTINEL_PASSWORD
 "

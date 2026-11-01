@@ -15,9 +15,9 @@ One instance serves one person. If two people in the same household need it, the
 - 10 GB of free disk space, and on Linux 20 GB more under `/var/lib` for the sandbox's slot disks (they are sparse and use real space only as code runs).
 - Nothing else: no Node.js is needed. For the sandbox setup the installer downloads a pinned Node.js from nodejs.org (about 35 MB, checked against a SHA-256 pinned in the repository) into `~/.amanuensis/runtime/node`, and uses it only to run that setup. `--use-host-node` uses your own Node.js 22.14 or newer instead; `--no-sandbox` skips all of it.
 - On Linux, Docker Engine 28 or newer: older versions let other devices on your network reach ports meant for this computer only, so the installer and `aman doctor` stop and say so.
-- Docker needs at least 6 GB of memory for the first build. The installer blocks below 6 GB and warns between 6 and 8 GB; 8 GB or more is recommended.
+- Docker needs at least 6 GB of memory for the first build, when the Aman images have to be built here. The installer blocks below 6 GB and warns between 6 and 8 GB; 8 GB or more is recommended.
 - Your own model: the address of a model server you already run, for example `http://host.docker.internal:11434/v1`. The address and any API key are entered in the app afterwards, not in the installer. The installer never scans your machine for models.
-- A git checkout of this repository. The installer runs from the checkout and builds the images from source.
+- A git checkout of this repository. The installer runs from the checkout. It downloads the Aman images for the version you install, and builds them from source only when no download is available.
 
 ## The one command
 
@@ -54,7 +54,7 @@ Everything else is generated: ports, secrets, and the login setup.
 
 ### What it downloads, and how big
 
-The printed plan lists every first-run download with its approximate size, including the speech model weights and the embedding model. Expect a few gigabytes in total on a first install, mostly model weights and container image layers. The installer downloads over HTTPS and never pipes anything to a shell.
+The printed plan lists every first-run download with its approximate size, including the speech model weights and the embedding model. The three Aman images (the app, the speech-to-text service and the calendar connector) are downloaded when they are published for the version you install. They are built on this computer only when no download is available, which takes much longer and needs more memory. Expect a few gigabytes in total on a first install, mostly model weights and container image layers. The installer downloads over HTTPS and never pipes anything to a shell.
 
 ### Flags you may not have seen
 
@@ -67,6 +67,7 @@ The printed plan lists every first-run download with its approximate size, inclu
 - `--tls caddy`: serve `--public-url` and `--login-url` over https with Caddy on this computer. See [Https with Caddy](#https-with-caddy).
 - `--tls-root`: let the installer run the printed root steps for `--tls caddy` (and for the Caddy removal of `instance remove`) without asking. `--yes` alone never uses sudo.
 - `--public-ip ADDRESS`: this computer's public IPv4 address for the DNS check of `--tls caddy`, instead of asking a lookup service.
+- `--build-from-source`: build the three Aman images on this computer instead of downloading them. Use it when the download is blocked, or when you have changed the code yourself.
 - `--install-docker`: let the installer run the printed root steps to install Docker Engine (Debian, Ubuntu).
 - `--add-docker-group`: let the installer add your user to the docker group (needs sudo).
 - `--sandbox-root`: let the installer run the printed root steps for the sandbox (AppArmor profile, slot disks) without asking. `--yes` alone never uses sudo.

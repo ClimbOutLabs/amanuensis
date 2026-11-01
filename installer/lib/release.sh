@@ -1,6 +1,9 @@
 # shellcheck shell=bash
 # Release manifest and local image builds. Images are built from this checkout and never pushed.
 
+# The registry CI publishes the Aman images to. One owner for the name, so it changes in one place.
+REL_REGISTRY=ghcr.io/climboutlabs
+
 # Flat string values only, so the manifest can be read without a JSON tool.
 json_get() {
   sed -n "s/^[[:space:]]*\"$2\"[[:space:]]*:[[:space:]]*\"\([^\"]*\)\".*/\1/p" "$1" | head -n 1
@@ -73,6 +76,9 @@ release_resolve() {
   REL_CALENDAR_TAG=aman-calendar-caldav:$(source_id ops/calendar-sidecar)
   REL_DEX_IMAGE=$(json_get "$PINS_FILE" dex_image)
   REL_MAIL_EMAIL_IMAGE=$(json_get "$PINS_FILE" mail_email_image)
+  REL_APP_DIGEST=
+  REL_STT_DIGEST=
+  REL_CALENDAR_DIGEST=
 }
 
 # The resolved manifest recorded under release/; the previous one is kept for rollback.
@@ -87,6 +93,9 @@ release_write() {
     printf '  "app_image": "%s",\n' "$REL_APP_TAG"
     printf '  "stt_image": "%s",\n' "$REL_STT_TAG"
     printf '  "calendar_image": "%s",\n' "$REL_CALENDAR_TAG"
+    printf '  "app_image_digest": "%s",\n' "$REL_APP_DIGEST"
+    printf '  "stt_image_digest": "%s",\n' "$REL_STT_DIGEST"
+    printf '  "calendar_image_digest": "%s",\n' "$REL_CALENDAR_DIGEST"
     printf '  "dex_image": "%s",\n' "$REL_DEX_IMAGE"
     printf '  "mail_email_image": "%s"\n' "$REL_MAIL_EMAIL_IMAGE"
     printf '}\n'
@@ -143,23 +152,47 @@ build_stt_image() {
   step_ok "Built the speech-to-text service"
 }
 
-# Builds whatever is missing. Pulls the login image by digest. Nothing is pushed anywhere.
+# Puts one Aman image in place under its local tag. $1 local tag, $2 name in the registry, $3 build function,
+# $4 the message when it is already here, $5 what it is, for the messages. Sets IMAGE_DIGEST to the downloaded digest,
+# or empty when it was built here. Only the app image is checked against this checkout's commit: the speech and
+# calendar tags are named by their own source id, which already identifies the content.
+image_ensure() {
+  local tag=$1 name=$2 build=$3 have=$4 what=$5 remote rev
+  IMAGE_DIGEST=
+  if docker_image_exists "$tag"; then
+    ui_skip "$have"
+    return 0
+  fi
+  if [ "$OPT_BUILD_FROM_SOURCE" != 1 ]; then
+    remote="$REL_REGISTRY/$name:${tag#*:}"
+    step_begin "pull-$name" "Downloading $what"
+    if D pull "$remote" >"$STEP_LOG" 2>&1; then
+      if [ "$name" = aman-app ]; then
+        rev=$(D image inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$remote" 2>/dev/null || true)
+        if [ "$rev" != "$REL_REF" ]; then
+          step_fail "The downloaded Aman app does not match this copy of the code" "Run install.sh again with --build-from-source."
+        fi
+      fi
+      D tag "$remote" "$tag" >>"$STEP_LOG" 2>&1 || step_fail "The downloaded $what could not be prepared" "Run install.sh again with --build-from-source."
+      IMAGE_DIGEST=$(D image inspect --format '{{range .RepoDigests}}{{println .}}{{end}}' "$remote" 2>/dev/null | grep "^$REL_REGISTRY/$name@sha256:" | head -n 1 || true)
+      step_ok "Downloaded $what"
+      return 0
+    fi
+    ui_step_abort
+    ui_skip "Not available to download; building it here"
+  fi
+  "$build"
+}
+
+# Puts the three Aman images in place. A local copy is kept as it is. Otherwise the copy CI published for this source
+# is downloaded, and built here only when no download is possible.
 images_ensure() {
-  if docker_image_exists "$REL_APP_TAG"; then
-    ui_skip "The Aman app is already built"
-  else
-    build_app_image
-  fi
-  if docker_image_exists "$REL_STT_TAG"; then
-    ui_skip "The speech-to-text service is already built"
-  else
-    build_stt_image
-  fi
-  if docker_image_exists "$REL_CALENDAR_TAG"; then
-    ui_skip "The calendar connector is already built"
-  else
-    build_calendar_image
-  fi
+  image_ensure "$REL_APP_TAG" aman-app build_app_image "The Aman app is already built" "the Aman app"
+  REL_APP_DIGEST=$IMAGE_DIGEST
+  image_ensure "$REL_STT_TAG" aman-stt build_stt_image "The speech-to-text service is already built" "the speech-to-text service"
+  REL_STT_DIGEST=$IMAGE_DIGEST
+  image_ensure "$REL_CALENDAR_TAG" aman-calendar-caldav build_calendar_image "The calendar connector is already built" "the calendar connector"
+  REL_CALENDAR_DIGEST=$IMAGE_DIGEST
   if docker_image_exists "$REL_DEX_IMAGE"; then
     ui_skip "The sign-in service is already downloaded"
   else

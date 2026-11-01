@@ -66,8 +66,8 @@ test_first_install() {
   assert_mode "$AMAN_HOME/state" 700
   assert_file "$AMAN_HOME/release/release.json"
   assert_file "$AMAN_HOME/state/installed"
-  assert_log_has "docker build -f $REPO/Dockerfile.dev"
-  assert_log_has "docker build -t aman-stt:"
+  assert_log_has "docker pull ghcr.io/climboutlabs/aman-app:"
+  assert_log_has "docker pull ghcr.io/climboutlabs/aman-stt:"
   assert_log_has "ghcr.io/dexidp/dex@sha256:"
   assert_log_lacks "docker push"
   assert_log_lacks "docker.sock"
@@ -153,12 +153,13 @@ test_failed_build_then_rerun_converges() {
   t_begin "a failed build leaves no instance and a rerun finishes"
   sandbox_new
   STUB_BUILD_FAIL=1
+  export STUB_PULL_FAIL=climboutlabs
   with_input "$SENTINEL_PASSWORD
 "
   run_install --yes --password-stdin --email owner@example.invalid
   assert_rc 1
   assert_no_path "$AMAN_HOME/state/instances/main.conf"
-  unset STUB_BUILD_FAIL
+  unset STUB_BUILD_FAIL STUB_PULL_FAIL
   with_input "$SENTINEL_PASSWORD
 "
   run_install --yes --password-stdin --email owner@example.invalid
