@@ -7,14 +7,6 @@ export class StateStoreError extends Error {}
 
 export class StateBusyError extends StateStoreError {}
 
-// The state volume could not be reached because Docker itself did not
-// answer: it is not running, or its command never started.
-export class StateDockerError extends StateStoreError {}
-
-// The helper image Docker needs for the state volume could not be got, for
-// example because the computer is offline the first time it is needed.
-export class StateImageError extends StateStoreError {}
-
 export const REGISTRY_DIR = 'state/instances';
 export const RELEASE_FILE = 'release/release.json';
 export const PREVIOUS_RELEASE_FILE = 'release/previous.release.json';
@@ -39,12 +31,16 @@ export interface InstanceRecord {
   entries: readonly RegistryEntry[];
 }
 
+// Every line is kept, blank ones included, so a file the store writes back
+// is the file it read: only the empty piece after a final line break is
+// dropped, and renderRegistry puts that line break back.
 export function parseRegistry(text: string): readonly RegistryEntry[] {
+  const lines = text.split('\n');
+  if (lines.length > 0 && lines[lines.length - 1] === '') {
+    lines.pop();
+  }
   const entries: RegistryEntry[] = [];
-  for (const line of text.split('\n')) {
-    if (line === '') {
-      continue;
-    }
+  for (const line of lines) {
     const splitAt = line.indexOf('=');
     if (splitAt === -1) {
       entries.push({ key: null, value: line });
@@ -170,44 +166,16 @@ export function releaseIsReadable(record: ReleaseRecord): boolean {
 }
 
 // When a backup was made, as the backend can know it: a folder home reads
-// the backup folder's own time, the volume reads the time in the backup's
-// name (the installer names each backup by the time it was made). Null
-// when the backend cannot say.
+// the backup folder's own time. Null when the backend cannot say.
 export interface BackupEntry {
   name: string;
   timeSeconds: number | null;
 }
 
-// The time in a backup's name, in epoch seconds: the installer names
-// each backup by the UTC time it was made, and words may follow the
-// stamp (a kept backup is named after its stamp). Null when the name
-// does not start with a stamp. The volume backend answers a backup's
-// stat from this, and the doctor reads the age of the backups on a
-// Windows disk from it.
-const BACKUP_STAMP = /^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})Z/;
-
-export function backupNameTimeSeconds(name: string): number | null {
-  const match = BACKUP_STAMP.exec(name);
-  if (match === null) {
-    return null;
-  }
-  return (
-    Date.UTC(
-      Number(match[1]),
-      Number(match[2]) - 1,
-      Number(match[3]),
-      Number(match[4]),
-      Number(match[5]),
-      Number(match[6]),
-    ) / 1000
-  );
-}
-
 // The certificate authority's facts, as the backend can read them. The
 // key's mode is the octal text the shell's file_mode prints, or null when
-// there is no key file. On the volume the store reads none of the tls
-// folder's stats in this stage, so every fact is absent there; the
-// certificate itself is read on its own, through readCaCertificate.
+// there is no key file. The certificate itself is read on its own, through
+// readCaCertificate.
 export interface CertificateAuthorityFacts {
   certPresent: boolean;
   keyMode: string | null;
@@ -238,7 +206,7 @@ export interface StatePathStat {
   isDirectory: boolean;
 }
 
-// The low-level shape both backends provide: state files as text, folder
+// The low-level shape the backend provides: state files as text, folder
 // listings as names, and writes of whole files that already differ.
 export interface StateBackend {
   readText: (path: string) => Promise<string | null>;
@@ -246,14 +214,11 @@ export interface StateBackend {
   writeChangedFiles: (files: readonly { path: string; text: string }[]) => Promise<void>;
   removeFile: (path: string) => Promise<void>;
   // The stat facts the summary needs, or null when the path is not there
-  // or the backend cannot say. A backend answers from what it already
-  // holds where it can: the volume answers for a backup from the time in
-  // its name, and for nothing else in this stage.
+  // or the backend cannot say.
   statPath?: (path: string) => Promise<StatePathStat | null>;
   // Drops whatever the backend has cached about the state, so the next
   // read goes back to the source. Only a backend that caches needs it:
-  // the volume backend holds the tree it tarred out and the certificate
-  // it fetched, while the folder backend reads the folder every time.
+  // the folder backend reads the folder every time.
   refreshCache?: () => void;
 }
 
@@ -262,27 +227,29 @@ export interface StateStore {
   // The local authority's certificate, public part only, or null when
   // this computer has none. It is read on its own, not as part of the
   // summary: the summary's facts about the authority come from file
-  // stats, and on the volume the certificate is fetched by itself, so
-  // nothing else in the tls folder is ever read out of it.
+  // stats.
   readCaCertificate: () => Promise<string | null>;
   // Drops what the store has cached about the state, so the next read
-  // sees what an outside writer changed: the shell, running in its own
-  // container, writes the same state this store reads, and the store
-  // cannot see those writes happen. A command calls this when such a
-  // run has finished, before anything reads the state again.
+  // sees what an outside writer changed: the shell writes the same state
+  // this store reads, and the store cannot see those writes happen. A
+  // command calls this when such a run has finished, before anything
+  // reads the state again.
   refreshCache: () => void;
   writeInstance: (record: InstanceRecord) => Promise<boolean>;
   setInstanceValue: (options: { name: string; key: string; value: string }) => Promise<boolean>;
   removeInstance: (name: string) => Promise<void>;
-  writeRelease: (record: ReleaseRecord) => Promise<boolean>;
+  // Writes the release record. With upgrade set, the record it replaces
+  // is kept in previous.release.json, which STATE.md defines as the
+  // record from before the last upgrade; a plain write never touches it.
+  writeRelease: (record: ReleaseRecord, options?: { upgrade?: boolean }) => Promise<boolean>;
   // The backups choice, in the one file the shell keeps it in, in the
   // shell's own words (daily or off, one line).
   setBackupsMode: (mode: 'daily' | 'off') => Promise<boolean>;
 }
 
 async function readSummaryFrom(backend: StateBackend): Promise<StateSummary> {
-  // A name found by listing the volume is untrusted until it fits the
-  // instance name rule, since status prints it.
+  // A name found by listing the registry folder is untrusted until it
+  // fits the instance name rule, since status prints it.
   const names = (await backend.listNames(REGISTRY_DIR))
     .filter(name => name.endsWith('.conf'))
     .map(name => name.slice(0, -'.conf'.length))
@@ -405,7 +372,7 @@ export function createStateStore(backend: StateBackend): StateStore {
     removeInstance: async name => {
       await backend.removeFile(`${REGISTRY_DIR}/${checkedInstanceName(name)}.conf`);
     },
-    writeRelease: async record => {
+    writeRelease: async (record, options) => {
       for (const field of [
         record.schema,
         record.sourceRef,
@@ -425,7 +392,7 @@ export function createStateStore(backend: StateBackend): StateStore {
         return false;
       }
       const changed: { path: string; text: string }[] = [];
-      if (current !== null) {
+      if (current !== null && options?.upgrade === true) {
         changed.push({ path: PREVIOUS_RELEASE_FILE, text: current });
       }
       changed.push({ path: RELEASE_FILE, text });

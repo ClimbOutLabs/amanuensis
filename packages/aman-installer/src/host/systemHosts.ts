@@ -18,12 +18,6 @@ export class SystemHost implements Host {
   }
 }
 
-export class WindowsHost extends SystemHost {
-  constructor() {
-    super('windows');
-  }
-}
-
 export class DarwinHost extends SystemHost {
   constructor() {
     super('darwin');

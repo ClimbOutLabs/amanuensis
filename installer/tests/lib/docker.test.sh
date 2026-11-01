@@ -99,7 +99,24 @@ Connect an email account=>n
   assert_flat_contains "$OUT" "Compose 1.29.2 is too old"
   assert_not_contains "$OUT" "Name for this instance"
   assert_not_contains "$OUT" "Password"
-  assert_no_path "$AMAN_HOME"
+  assert_file "$AMAN_HOME/state/install.log"
+  assert_contains "$(cat "$AMAN_HOME/state/install.log")" "check failed:" "the stop is recorded in the run log"
+  assert_contains "$(cat "$AMAN_HOME/state/install.log")" "too old" "the blocker is recorded in the run log"
+  assert_no_path "$AMAN_HOME/state/instances"
+  assert_no_path "$AMAN_HOME/release"
+  sandbox_drop
+}
+
+test_wsl_without_integration() {
+  t_begin "in a WSL distro Docker Desktop is not connected to, the run names the WSL Integration setting"
+  sandbox_new
+  STUB_DOCKER_WSL=1
+  run_install --dry-run
+  assert_rc 1
+  assert_flat_contains "$OUT$ERR" "Docker Desktop is not connected to this WSL distro"
+  assert_flat_contains "$OUT$ERR" "WSL Integration"
+  assert_flat_contains "$OUT$ERR" "Apply & Restart"
+  assert_not_contains "$OUT$ERR" "Docker did not answer"
   sandbox_drop
 }
 
@@ -339,6 +356,7 @@ test_compose_v2_or_newer_passes
 test_engine_before_28_on_native_linux_is_refused
 test_unreadable_compose_version_is_named
 test_blocker_stops_before_any_prompt
+test_wsl_without_integration
 test_daemon_down
 test_group_member_without_relogin_uses_sg
 test_non_member_is_added_then_sg

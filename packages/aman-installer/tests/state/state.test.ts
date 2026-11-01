@@ -3,7 +3,6 @@ import { test } from 'node:test';
 
 import {
   StateStoreError,
-  backupNameTimeSeconds,
   createStateStore,
   parseRegistry,
   parseRelease,
@@ -39,6 +38,13 @@ test('the first line of a key wins, as with the shell reader', () => {
 test('a line with no key survives a round trip untouched', () => {
   const entries = parseRegistry('name=main\na stray line\n');
   assert.equal(renderRegistry(entries), 'name=main\na stray line\n');
+});
+
+test('a blank line survives a round trip untouched', () => {
+  const entries = parseRegistry('name=main\n\npublic_url=https://example.invalid\n');
+  assert.equal(renderRegistry(entries), 'name=main\n\npublic_url=https://example.invalid\n');
+  const next = withRegistryValue(entries, 'public_url', 'https://other.invalid');
+  assert.equal(renderRegistry(next), 'name=main\n\npublic_url=https://other.invalid\n');
 });
 
 test('setting a value replaces its line where it stands and keeps the others', () => {
@@ -218,15 +224,6 @@ test('an instance name the registry cannot hold is refused', async () => {
   });
 });
 
-test('the time in a backup name is the UTC time it names, with or without words after it', () => {
-  const stamp = Date.UTC(2026, 9, 20, 3, 4, 5) / 1000;
-  assert.equal(backupNameTimeSeconds('20261020T030405Z'), stamp);
-  assert.equal(backupNameTimeSeconds('20261020T030405Z-keep'), stamp);
-  assert.equal(backupNameTimeSeconds('20261020T030405Z-1'), stamp);
-  assert.equal(backupNameTimeSeconds('not-a-backup'), null);
-  assert.equal(backupNameTimeSeconds('20261020T030405'), null);
-});
-
 test('writing the backups choice writes the one record the shell reads, once', async () => {
   const backend = memoryBackend(new Map());
   const store = createStateStore(backend);
@@ -239,7 +236,7 @@ test('writing the backups choice writes the one record the shell reads, once', a
   assert.equal((await store.readSummary()).backupsMode, 'off');
 });
 
-test('writing a release keeps the old record as the previous one', async () => {
+test('writing a release keeps the old record as the previous one only on an upgrade', async () => {
   const backend = memoryBackend(new Map([['release/release.json', RELEASE_TEXT]]));
   const store = createStateStore(backend);
   const current = parseRelease(RELEASE_TEXT);
@@ -247,8 +244,12 @@ test('writing a release keeps the old record as the previous one', async () => {
   assert.equal(await store.writeRelease(current), false);
   const next: ReleaseRecord = { ...current, appImage: 'aman-app:def456' };
   assert.equal(await store.writeRelease(next), true);
-  assert.equal(backend.files.get('release/previous.release.json'), RELEASE_TEXT);
+  assert.equal(backend.files.get('release/previous.release.json'), undefined);
   assert.equal(backend.files.get('release/release.json'), renderRelease(next));
+  const after: ReleaseRecord = { ...next, appImage: 'aman-app:ghi789' };
+  assert.equal(await store.writeRelease(after, { upgrade: true }), true);
+  assert.equal(backend.files.get('release/previous.release.json'), renderRelease(next));
+  assert.equal(backend.files.get('release/release.json'), renderRelease(after));
 });
 
 test('a name found by listing that is not an instance name is left out of the summary', async () => {

@@ -122,18 +122,6 @@ services:
 @@IF_TLS@@      - ./tls.Caddyfile:/etc/caddy/Caddyfile:ro
 @@IF_TLS_HOST@@      - @@TLS_LEAF_DIR@@:/certs:ro
 @@IF_TLS_HOST@@      - @@TLS_TRUST_DIR@@:/srv/trust:ro
-@@IF_TLS_VOLUME@@      - type: volume
-@@IF_TLS_VOLUME@@        source: aman_home
-@@IF_TLS_VOLUME@@        target: /certs
-@@IF_TLS_VOLUME@@        read_only: true
-@@IF_TLS_VOLUME@@        volume:
-@@IF_TLS_VOLUME@@          subpath: tls/leaf/@@NAME@@
-@@IF_TLS_VOLUME@@      - type: volume
-@@IF_TLS_VOLUME@@        source: aman_home
-@@IF_TLS_VOLUME@@        target: /srv/trust
-@@IF_TLS_VOLUME@@        read_only: true
-@@IF_TLS_VOLUME@@        volume:
-@@IF_TLS_VOLUME@@          subpath: tls/trust/@@NAME@@
 @@IF_TLS@@    # It needs no privileges beyond the one its binary is marked with, and writes only to memory.
 @@IF_TLS@@    cap_drop:
 @@IF_TLS@@      - ALL
@@ -263,12 +251,6 @@ volumes:
     name: aman_@@NAME@@_dex
     labels:
       com.amanuensis.instance: @@NAME@@
-@@IF_TLS_VOLUME@@
-@@IF_TLS_VOLUME@@  # The state volume itself, declared so the https folders above can be mounted from inside it.
-@@IF_TLS_VOLUME@@  # The setup that put the state there made it; Compose never makes it.
-@@IF_TLS_VOLUME@@  aman_home:
-@@IF_TLS_VOLUME@@    name: aman_home
-@@IF_TLS_VOLUME@@    external: true
 
 @@IF_EMAIL@@  # The Email send list. Holds only addresses, never credentials.
 @@IF_EMAIL@@  mail-policy:

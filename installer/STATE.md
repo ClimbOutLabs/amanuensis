@@ -11,9 +11,6 @@ be rolled back alone.
 ## Where the home is
 
 - Mac and Linux: `~/.amanuensis` on the host.
-- Windows: the Docker volume `aman_home`, mounted at `/root/.amanuensis`
-  inside the setup container. The source checkout lives in the volume
-  `aman_source`, mounted at `/src`.
 - The doctor shim finds the home from `AMANUENSIS_HOME` when it is set, else
   from the `state/source` file next to its own install folder, else
   `~/.amanuensis`.
@@ -42,11 +39,12 @@ Paths below are relative to the home.
 | `backups/<timestamp>/`                 | One folder per backup. See "Backups".                                                                                |
 | `bin/aman`                             | The doctor shim, copied in by the installer on install and upgrade. Mode 755.                                        |
 | `bin/aman-sandbox.mjs`                 | The sandbox setup copy the doctor runs.                                                                              |
+| `lib/`                                 | The helper files the aman command loads: shell libraries it shares with the installer, and `pki.mjs`.                |
 | `runtime/`                             | What the installer downloads to run itself, including `runtime/node/` (the pinned Node).                             |
 
 The `release.json` in a checkout's `installer/` folder is a different file:
-it is the pins manifest the installer ships (image digests, among them the
-helper image the Windows state commands run, and the Node version), not state. Only `release/release.json` in the home is state.
+it is the pins manifest the installer ships (image digests and the Node
+version), not state. Only `release/release.json` in the home is state.
 
 ## The registry file
 
@@ -98,10 +96,9 @@ backups are pruned to the newest seven.
 ## The lock
 
 Only one run works on a home at a time. The lock is the folder `state/lock`,
-taken with `mkdir`, which is atomic everywhere. Three programs follow this
-contract: the shell installer (`lock_acquire` in `lib/common.sh`), the
-TypeScript installer's folder lock, and the script the TypeScript installer
-runs against the `aman_home` volume. Each run, shell or TypeScript, uses the
+taken with `mkdir`, which is atomic everywhere. Two programs follow this
+contract: the shell installer (`lock_acquire` in `lib/common.sh`) and the
+TypeScript installer's folder lock. Each run, shell or TypeScript, uses the
 same rules, so a lock taken by one is honoured by the others.
 
 What the lock folder holds:
@@ -122,8 +119,8 @@ The rules:
 - **A lock is dead only when its beat stopped.** A lock whose `beat` is more
   than 120 seconds old belongs to a holder that stopped without cleaning up.
   Age since the lock was made means nothing: a live holder can be an hour in.
-  The pid means nothing either, because in the volume the holder ran in its
-  own container, whose shell is process 1, so a pid there names that
+  The pid means nothing either, because a holder can run in its own
+  container, whose shell is process 1, so a pid there names that
   container's processes. The wait after a crash is therefore up to two
   minutes, and the busy message says so.
 - **A lock with no beat yet gets a moment.** A holder is between `mkdir` and
@@ -147,7 +144,7 @@ The rules:
 - **Only the owner removes the lock.** At the end of a run, the holder removes
   `state/lock` only if `owner` still holds its token. A holder whose lock was
   taken over leaves the new holder's lock alone.
-- **Busy is exit code 3** in the volume script, and the busy message in every
+- The busy message in every
   program names the wait: wait for the run to finish, or two minutes if an
   install was stopped a moment ago.
 
@@ -169,5 +166,5 @@ longer than the dead limit while the others stay out.
   home.
 - Volumes an instance owns on Docker are named after it: `aman_<name>_data`
   and `aman_<name>_dex`, its Compose project is `aman-<name>`, and the
-  shared volumes are `aman_home`, `aman_source`, `aman_stt_cache` and
+  shared volumes are `aman_stt_cache` and
   `aman_machine`.

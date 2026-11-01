@@ -115,6 +115,51 @@ test_public_base_url_is_the_host_facing_origin() {
   sandbox_drop
 }
 
+test_doctor_lists_instances_from_the_registry() {
+  t_begin "the real doctor shim lists instances from the registry, not from the folders on disk"
+  sandbox_new
+  install_machine
+  mkdir -p "$AMAN_HOME/instances/ghost"
+  cp "$AMAN_HOME/state/instances/main.conf" "$AMAN_HOME/state/instances/extra.conf"
+  local out rc=0
+  out=$(real_doctor --json) || rc=$?
+  assert_contains "$out" '"instances":{"extra":[' "a registry file with no folder is listed"
+  assert_contains "$out" '"main":[' "the installed instance is listed"
+  assert_not_contains "$out" '"ghost"' "a folder with no registry file is not an instance"
+  sandbox_drop
+}
+
+# Lays out a shim install by hand: bin/aman and the lib files beside it, in $1.
+shim_layout() {
+  local home=$1 lib
+  mkdir -p "$home/bin" "$home/lib" "$home/state/instances"
+  cp "$INSTALLER_DIR/doctor/aman" "$home/bin/aman"
+  for lib in ui shared diagnose network schedule host-report; do
+    cp "$INSTALLER_DIR/lib/$lib.sh" "$home/lib/"
+  done
+  cp "$INSTALLER_DIR/doctor/pki.mjs" "$home/lib/"
+}
+
+test_doctor_home_needs_a_recorded_source() {
+  t_begin "the shim treats its own folder as home only when state/source names a checkout"
+  sandbox_new
+  local layout="$SB/layout-home" userhome="$SB/user-home" out rc=0
+  shim_layout "$layout"
+  printf 'name=layout\n' >"$layout/state/instances/fromlayout.conf"
+  mkdir -p "$userhome/.amanuensis/state/instances"
+  printf 'name=user\n' >"$userhome/.amanuensis/state/instances/fromuser.conf"
+  : >"$layout/state/source"
+  out=$(env -u AMANUENSIS_HOME HOME="$userhome" PATH="$SB_BIN" bash "$layout/bin/aman" doctor --json --local) || rc=$?
+  assert_contains "$out" '"fromuser"' "an empty state/source falls back to the home folder"
+  assert_not_contains "$out" '"fromlayout"' "the layout folder is not used as home"
+  printf '%s\n' "$SB_INSTALLER" >"$layout/state/source"
+  rc=0
+  out=$(env -u AMANUENSIS_HOME HOME="$userhome" PATH="$SB_BIN" bash "$layout/bin/aman" doctor --json --local) || rc=$?
+  assert_contains "$out" '"fromlayout"' "a recorded source makes the layout folder the home"
+  assert_not_contains "$out" '"fromuser"' "the home folder is not used then"
+  sandbox_drop
+}
+
 test_token_factory_settings_match_the_server() {
   t_begin "the installer writes the default model and the setting names the server reads"
   local repo=$INSTALLER_DIR/.. defaults config key
@@ -220,4 +265,6 @@ test_doctor_sandbox_fix_uses_the_same_entry
 test_layout_and_release_record
 test_compose_service_and_project_names
 test_public_base_url_is_the_host_facing_origin
+test_doctor_lists_instances_from_the_registry
+test_doctor_home_needs_a_recorded_source
 tests_finish

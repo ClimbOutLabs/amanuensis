@@ -28,6 +28,8 @@ check_ok() { ui_ok "$1"; }
 check_warn() { ui_warn "$1" "${2:-}" "${3:-}"; }
 check_block() { # what is wrong, what to do next, technical details
   PLAN_BLOCKERS="$PLAN_BLOCKERS$1"$'\n'
+  LOG_STARTED=1
+  log_event "check failed: $1"
   ui_fail "$1" "${2:-}" "${3:-}"
 }
 
@@ -524,6 +526,7 @@ need_new_instance() {
 
 cmd_install() {
   local name
+  LOG_STARTED=1
   INSTALL_T0=$SECONDS
   DL_TOTAL_MB=0
   DL_LINES=
@@ -667,7 +670,11 @@ check_result() {
   local name
   [ -x "$(doctor_shim)" ] || return 0
   # Includes the model and the public https checks, which wait on the network.
+  # The run can take minutes; show it as running. The doctor's own summary
+  # stays the verdict, so the step line ends without a result of its own.
+  ui_step_start "Running the doctor's full check" ""
   AMAN_REPORT_COMMAND=install DOCTOR_TIMEOUT=180 run_doctor --summary || DOCTOR_PROBLEMS=1
+  ui_step_abort
   for name in $(reg_names); do
     if instance_sandbox_wanted "$name"; then sandbox_verify "$name"; fi
   done

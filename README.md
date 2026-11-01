@@ -251,7 +251,7 @@ Read [AGENTS.md](AGENTS.md) and any package-level `AGENTS.md` before changing co
 | `packages/trueforge-ui`   | UI components and server-facing UI contracts                      |
 | `packages/trueforge-sdk`  | Generated TypeScript SDK                                          |
 | `packages/amanuensis`     | `npx amanuensis`: server and chat UI with one command             |
-| `packages/aman-installer` | Single-file installer program for Windows, Mac and Linux          |
+| `packages/aman-installer` | The installer's TypeScript side: state reads, doctor and status   |
 | `installer`               | The one-command installer and the `aman` command it leaves behind |
 | `charts`                  | Helm chart for Kubernetes                                         |
 | `demo`                    | Maya's demo world: example data, scripts and the runbook          |
