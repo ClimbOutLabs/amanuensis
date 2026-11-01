@@ -13,10 +13,20 @@ version: 2
 # declared as a docker-registry instead. The charts are public, so the entry
 # carries no credentials; declaring the registry is what lets a Dependabot
 # job reach the host at all.
+#
+# The helm job also checks the container images named in
+# charts/trueforge/values.yaml, and those live on tfy.jfrog.io (the
+# trueforge image, the alpine image, and the bitnamilegacy postgresql and
+# redis images). That host allows anonymous pulls, as values.yaml records,
+# so it is declared the same way with no credentials. Without it the job
+# fails with private_source_authentication_failure on those images.
 registries:
   dockerhub:
     type: docker-registry
     url: https://registry-1.docker.io
+  jfrog:
+    type: docker-registry
+    url: https://tfy.jfrog.io
 
 updates:
   # pnpm workspace — Dependabot uses the npm ecosystem for pnpm.
@@ -66,6 +76,7 @@ updates:
       interval: weekly
     registries:
       - dockerhub
+      - jfrog
     groups:
       helm:
         patterns:
