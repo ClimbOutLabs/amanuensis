@@ -327,6 +327,7 @@ describe("PersonalizationClient", () => {
 
         const rawResponseBody = {
             data: {
+                chat_search_enabled: true,
                 maps_without_asking: true,
                 offline_mode: true,
                 sandbox_without_asking: true,
@@ -346,6 +347,7 @@ describe("PersonalizationClient", () => {
         const response = await client.personalization.getSentinelSettings();
         expect(response).toEqual({
             data: {
+                chatSearchEnabled: true,
                 mapsWithoutAsking: true,
                 offlineMode: true,
                 sandboxWithoutAsking: true,
@@ -380,6 +382,7 @@ describe("PersonalizationClient", () => {
         const rawRequestBody = {};
         const rawResponseBody = {
             data: {
+                chat_search_enabled: true,
                 maps_without_asking: true,
                 offline_mode: true,
                 sandbox_without_asking: true,
@@ -400,6 +403,7 @@ describe("PersonalizationClient", () => {
         const response = await client.personalization.updateSentinelSettings();
         expect(response).toEqual({
             data: {
+                chatSearchEnabled: true,
                 mapsWithoutAsking: true,
                 offlineMode: true,
                 sandboxWithoutAsking: true,

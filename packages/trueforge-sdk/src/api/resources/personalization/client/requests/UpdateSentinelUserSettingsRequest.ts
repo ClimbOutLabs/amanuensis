@@ -5,6 +5,8 @@
  *     {}
  */
 export interface UpdateSentinelUserSettingsRequest {
+    /** New past-chat search setting; omitted keeps the current value. */
+    chatSearchEnabled?: boolean;
     /** New maps setting; omitted keeps the current value. */
     mapsWithoutAsking?: boolean;
     /** New offline mode value; omitted keeps the current value. */

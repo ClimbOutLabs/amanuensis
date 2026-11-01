@@ -9165,6 +9165,10 @@
       },
       "SentinelUserSettings": {
         "properties": {
+          "chat_search_enabled": {
+            "description": "While on, the assistant can search your own past chats when you ask. Off means it cannot.",
+            "type": "boolean"
+          },
           "maps_without_asking": {
             "description": "While on, map requests run without asking. Off asks for each one.",
             "type": "boolean"
@@ -9197,7 +9201,8 @@
           "tier2_auto_allow",
           "search_without_asking",
           "maps_without_asking",
-          "sandbox_without_asking"
+          "sandbox_without_asking",
+          "chat_search_enabled"
         ],
         "type": "object"
       },
@@ -13291,6 +13296,10 @@
       },
       "UpdateSentinelUserSettingsRequest": {
         "properties": {
+          "chat_search_enabled": {
+            "description": "New past-chat search setting; omitted keeps the current value.",
+            "type": "boolean"
+          },
           "maps_without_asking": {
             "description": "New maps setting; omitted keeps the current value.",
             "type": "boolean"
