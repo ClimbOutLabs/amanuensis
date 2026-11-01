@@ -535,7 +535,7 @@ function parseSandboxBackend(options: { envKey: string; raw: string | undefined 
 }
 
 /** Most slot services the compose files define. */
-export const SANDBOX_MAX_SLOTS = 4;
+export const SANDBOX_MAX_SLOTS = 2;
 
 /** Which long-term memory backend Aman uses. */
 export type MemoryBackend = 'markdown' | 'hindsight';
@@ -1332,7 +1332,7 @@ export interface SharedServerConfiguration {
   SANDBOX_BACKEND: SandboxBackend;
   /** Name of the installer instance this server runs as; empty outside the installer. Env: `INSTALLER_INSTANCE`. */
   INSTALLER_INSTANCE: string;
-  /** Number of slot agents to use, 1 to 4. Env: `SANDBOX_SLOTS`. Default 4. */
+  /** Number of slot agents to use, 1 to 2. Env: `SANDBOX_SLOTS`. Default 2. */
   SANDBOX_SLOTS: number;
   /**
    * Directory holding one control directory per slot (`<dir>/<n>/agent.sock`). Env: `SANDBOX_SLOTS_DIR`.

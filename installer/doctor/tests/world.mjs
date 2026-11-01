@@ -234,7 +234,7 @@ export function createWorld({ instances = ['main'] } = {}) {
       for (const name of wired) {
         writeFileSync(
           path.join(world.instanceDir(name), 'compose.yaml'),
-          "services:\n  app:\n    environment:\n      SANDBOX_BACKEND: slots\n      SANDBOX_SLOTS: '4'\n      SANDBOX_SLOTS_DIR: /run/aman-slots\n",
+          "services:\n  app:\n    environment:\n      SANDBOX_BACKEND: slots\n      SANDBOX_SLOTS: '2'\n      SANDBOX_SLOTS_DIR: /run/aman-slots\n",
         );
       }
       return repo;

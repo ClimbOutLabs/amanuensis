@@ -10,8 +10,6 @@ x-disk-size: &disk-size
 services:
   sandbox-1: *disk-size
   sandbox-2: *disk-size
-  sandbox-3: *disk-size
-  sandbox-4: *disk-size
 
 volumes:
   slot_ws_1:
@@ -20,9 +18,3 @@ volumes:
   slot_ws_2:
     driver: local
     driver_opts: { type: none, o: bind, device: '${AMAN_SLOTS_DISK_DIR:?run pnpm sandbox:slots}/ws-2' }
-  slot_ws_3:
-    driver: local
-    driver_opts: { type: none, o: bind, device: '${AMAN_SLOTS_DISK_DIR:?run pnpm sandbox:slots}/ws-3' }
-  slot_ws_4:
-    driver: local
-    driver_opts: { type: none, o: bind, device: '${AMAN_SLOTS_DISK_DIR:?run pnpm sandbox:slots}/ws-4' }

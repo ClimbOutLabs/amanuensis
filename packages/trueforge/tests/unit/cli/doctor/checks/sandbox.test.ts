@@ -1,7 +1,7 @@
 import { checkAttachments, checkRunCode } from '../../../../../src/cli/doctor/checks/sandbox';
 import { fakeDeps } from '../fakeDeps';
 
-const SLOT_ENV = { SANDBOX_BACKEND: 'slots', SANDBOX_SLOTS: '4', SANDBOX_SLOTS_DIR: '/run/aman-slots' };
+const SLOT_ENV = { SANDBOX_BACKEND: 'slots', SANDBOX_SLOTS: '2', SANDBOX_SLOTS_DIR: '/run/aman-slots' };
 
 describe('run_code', () => {
   it('is off, with the reason, when the instance has no sandbox', async () => {
@@ -21,14 +21,7 @@ describe('run_code', () => {
     });
     const check = await checkRunCode({ deps, timeoutMs: 1000 });
     expect(check).toMatchObject({ id: 'run_code', state: 'ok' });
-    expect(asked).toEqual([
-      [
-        '/run/aman-slots/1/agent.sock',
-        '/run/aman-slots/2/agent.sock',
-        '/run/aman-slots/3/agent.sock',
-        '/run/aman-slots/4/agent.sock',
-      ],
-    ]);
+    expect(asked).toEqual([['/run/aman-slots/1/agent.sock', '/run/aman-slots/2/agent.sock']]);
   });
 
   it('fails with the sandbox repair command when no slot is usable', async () => {
@@ -87,7 +80,7 @@ describe('attachments', () => {
       detail: 'Reading attachments is ready: PDFs, images and email attachments can be read.',
       fix: '',
     });
-    expect(asked[0]?.socketPaths).toHaveLength(4);
+    expect(asked[0]?.socketPaths).toHaveLength(2);
     expect(asked[0]?.socketPaths[0]).toBe('/run/aman-slots/1/agent.sock');
     // The probe runs with the instance's real quota and OCR languages.
     expect(asked[0]?.treeDiskMb).toBe(4096);

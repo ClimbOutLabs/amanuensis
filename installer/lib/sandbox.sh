@@ -7,11 +7,12 @@
 # decides when to run it and asks before any sudo.
 
 SLOT_IMAGE=amanuensis-sandbox-slot:local
-SLOT_COUNT=4
+SLOT_COUNT=2
+# Installs from before had four slots; the slot setup removes the ones past SLOT_COUNT.
+SLOT_RETIRED='3 4'
 # The slot setup always uses /var/lib/aman-slots; the override only lets tests point the checks here elsewhere.
 SLOT_DISK_ROOT=${AMAN_SLOT_DISK_ROOT:-/var/lib/aman-slots}
 SLOT_DISK_GB=16
-SLOT_MIN_FREE_KB=$((20 * 1024 * 1024))
 SLOT_APPARMOR_FILE=/etc/apparmor.d/aman-sandbox-slot
 SANDBOX_DOCKER_BOOT_CHECKED=0
 SANDBOX_BUNDLE_IN_IMAGE=/app/packages/trueforge/dist/sandbox-slots.js
@@ -148,7 +149,7 @@ sandbox_native_linux() {
 }
 
 preflight_sandbox() {
-  local cgroup free
+  local cgroup free need_gb
   sandbox_needed || return 0
   if [ "$OPT_HOST_NODE" = 1 ]; then
     if ! sandbox_node_ok; then
@@ -172,12 +173,13 @@ preflight_sandbox() {
     esac
   fi
   if sandbox_native_linux; then
+    need_gb=$(sandbox_disks_need_gb)
     free=$(free_kb "$SLOT_DISK_ROOT")
     case "${free:-}" in
       '' | *[![:digit:]]*) ;;
       *)
-        if [ "$free" -lt "$SLOT_MIN_FREE_KB" ]; then
-          check_block "Less than 20 GB free for the sandbox disks under $SLOT_DISK_ROOT ($((free / 1024 / 1024)) GB free)" "Make room there, or pass --no-sandbox to install without run code."
+        if [ "$need_gb" -gt 0 ] && [ "$free" -lt $((need_gb * 1024 * 1024)) ]; then
+          check_block "Less than $need_gb GB free for the sandbox disks under $SLOT_DISK_ROOT ($((free / 1024 / 1024)) GB free)" "Make room there, or pass --no-sandbox to install without run code."
         fi
         ;;
     esac
@@ -185,6 +187,25 @@ preflight_sandbox() {
       check_block "The sandbox setup needs administrator rights, and sudo is not installed" "Run the installer as root, or pass --no-sandbox to install without run code."
     fi
   fi
+}
+
+# Room the sandbox disks still to be made need: each may fill completely, so the slot setup wants its full size free
+# for every disk it creates (setup-disks.sh checks the same). Disks that already exist are not counted again.
+sandbox_disks_need_gb() {
+  local name slot need=0
+  for name in $(printf '%s\n' $(reg_names) "$(sandbox_first_instance)" | sort -u); do
+    if reg_exists "$name"; then
+      instance_sandbox_wanted "$name" || continue
+    elif [ "$OPT_NO_SANDBOX" = 1 ]; then
+      continue
+    fi
+    slot=1
+    while [ "$slot" -le "$SLOT_COUNT" ]; do
+      [ -f "$(sandbox_disk_dir "$name")/ws-$slot.img" ] || need=$((need + SLOT_DISK_GB))
+      slot=$((slot + 1))
+    done
+  done
+  printf '%s' "$need"
 }
 
 sandbox_slots_running() {
@@ -414,4 +435,18 @@ sandbox_down() {
   fi
   sandbox_run "${args[@]}" --instance "$name" ||
     die "The sandboxes of $name could not be stopped, so the removal was not finished. Run the same command again: $again"
+}
+
+# The control and mirror volumes of the slots an older install had past SLOT_COUNT. The slot setup removes their
+# containers, workspaces and disks, but the app mounts these two until it starts again from its new compose file, so
+# they go once it has. Quiet and best effort: a volume something still uses stays for the next start.
+sandbox_retired_volumes_remove() {
+  local name=$1 slot kind
+  for slot in $SLOT_RETIRED; do
+    for kind in ctl mirror; do
+      if docker_volume_exists "${name}_slot_${kind}_${slot}"; then
+        D volume rm "${name}_slot_${kind}_${slot}" >/dev/null 2>&1 || true
+      fi
+    done
+  done
 }

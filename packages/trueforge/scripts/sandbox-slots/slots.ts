@@ -26,7 +26,14 @@ export type CommandRunner = (input: {
 
 export class CommandNotFoundError extends Error {}
 
-export const SLOT_COUNT = 4;
+export const SLOT_COUNT = 2;
+/**
+ * Installs from before had four slots. The slots past SLOT_COUNT, with their volumes and disks, are removed on
+ * the next run, so an upgrade frees what they held.
+ */
+export const RETIRED_SLOTS: readonly number[] = [3, 4];
+/** A removal deletes the disks of every slot an install may have, retired ones included. */
+const MOST_SLOTS_EVER = Math.max(SLOT_COUNT, ...RETIRED_SLOTS);
 export const SLOT_IMAGE = 'amanuensis-sandbox-slot:local';
 /** The user the app runs as; it binds its package mirror sockets inside the mirror volumes. */
 const APP_USER = '10001:10001';
@@ -308,6 +315,7 @@ class Slots {
           await this.ensureProfile();
         }
         this.stage('disks');
+        await this.retireSlots();
         if (this.diskMode === 'hard') {
           await this.ensureDisks();
         }
@@ -553,6 +561,135 @@ class Slots {
     });
   }
 
+  /**
+   * Removes the slots an older install had past SLOT_COUNT: their containers, their volumes and, on Linux, their
+   * disks. A control or mirror volume the instance's app still mounts stays until the app is started again
+   * without it; the installer removes it then. A read-only check only reports what is left.
+   */
+  private async retireSlots(): Promise<void> {
+    const project = slotsProject(this.options.instance);
+    const containers: string[] = [];
+    for (const slot of RETIRED_SLOTS) {
+      const found = await this.run({
+        args: [
+          'ps',
+          '-aq',
+          '--filter',
+          `label=com.docker.compose.project=${project}`,
+          '--filter',
+          `label=com.docker.compose.service=sandbox-${String(slot)}`,
+        ],
+      });
+      containers.push(...found.stdout.split(/\s+/).filter(id => id !== ''));
+    }
+    const disks = this.diskMode === 'hard' ? await this.retiredDisks() : [];
+    if (containers.length === 0 && disks.length === 0) {
+      await this.removeRetiredVolumes();
+      return;
+    }
+    if (this.options.mode !== 'up') {
+      throw new StepFailure(
+        disks.length > 0 ? 'disk' : 'start',
+        `This computer still has the extra sandboxes of an older version of Aman, which now uses ${String(SLOT_COUNT)}.`,
+        `Run ${this.options.command} --fix to remove them.`,
+      );
+    }
+    if (containers.length > 0) {
+      const removed = await this.run({ args: ['rm', '--force', ...containers], echo: true });
+      if (removed.exitCode !== 0) {
+        const failed = withDetail({
+          sentence: 'The extra sandboxes could not be removed',
+          detail: tail(removed.stderr),
+        });
+        throw new StepFailure(
+          'start',
+          failed.message,
+          `Make sure Docker is running, then run ${this.options.command} --fix again.`,
+          undefined,
+          failed.detail,
+        );
+      }
+    }
+    await this.removeRetiredVolumes();
+    if (disks.length > 0) {
+      await this.retireDisks();
+    }
+    this.record({
+      step: 'start',
+      status: 'ok',
+      message: `Removed the extra sandboxes of an older version; ${String(SLOT_COUNT)} sandboxes are enough`,
+    });
+  }
+
+  /** The volumes of retired slots that still exist and that no container uses; the rest are left as they are. */
+  private async removeRetiredVolumes(): Promise<void> {
+    if (this.options.mode !== 'up') {
+      return;
+    }
+    const names = RETIRED_SLOTS.flatMap(slot =>
+      ['ws', 'ctl', 'mirror'].map(kind => `${this.options.instance}_slot_${kind}_${String(slot)}`),
+    );
+    for (const name of names) {
+      const inspect = await this.run({ args: ['volume', 'inspect', name] });
+      if (inspect.exitCode !== 0) {
+        continue;
+      }
+      // Fails while the app still mounts it; the installer removes it after the app starts without it.
+      await this.run({ args: ['volume', 'rm', name] });
+    }
+  }
+
+  /** Disk files or mount points of retired slots under the instance's disk folder. */
+  private async retiredDisks(): Promise<string[]> {
+    const root = diskRoot(this.options.instance);
+    const tests = RETIRED_SLOTS.flatMap(slot => [`ws-${String(slot)}`, `ws-${String(slot)}.img`]).flatMap(
+      (name, index) => (index === 0 ? ['-name', name] : ['-o', '-name', name]),
+    );
+    let found: CommandResult;
+    try {
+      // A missing folder means no disks at all; find then prints nothing.
+      found = await this.run({ command: 'find', args: [root, '-maxdepth', '1', '(', ...tests, ')', '-print'] });
+    } catch (error: unknown) {
+      if (error instanceof CommandNotFoundError) {
+        return [];
+      }
+      throw error;
+    }
+    return found.stdout.split('\n').filter(line => line.trim() !== '');
+  }
+
+  private async retireDisks(): Promise<void> {
+    const root = diskRoot(this.options.instance);
+    if (!this.mayFix) {
+      throw new StepFailure(
+        'disk',
+        `This computer still has the disks of the extra sandboxes of an older version of Aman, which now uses ${String(SLOT_COUNT)}.`,
+        `Run ${this.options.command} --fix. It asks first, then your password once, to remove them.`,
+      );
+    }
+    const agreed = await this.options.confirm(
+      `This will remove the disks of the extra sandboxes an older version of Aman made under ${root}, and their lines in /etc/fstab. It needs root.`,
+    );
+    if (!agreed) {
+      throw new StepFailure(
+        'disk',
+        'Removing the old sandbox disks was not confirmed, so nothing was changed.',
+        `Run ${this.options.command} --fix again and answer yes. Add --yes when no one is at the keyboard.`,
+      );
+    }
+    const retired = await this.runDiskScript(['retire', root, String(SLOT_COUNT)]);
+    if (retired.exitCode !== 0) {
+      const failed = withDetail({ sentence: 'Removing the old sandbox disks failed', detail: tail(retired.stderr) });
+      throw new StepFailure(
+        'disk',
+        failed.message,
+        `Make sure your account may use sudo, then run ${this.options.command} --fix again.`,
+        undefined,
+        failed.detail,
+      );
+    }
+  }
+
   private async ensureDisks(): Promise<void> {
     const root = diskRoot(this.options.instance);
     const mounted = await this.readDisks();
@@ -571,7 +708,7 @@ class Slots {
       throw new StepFailure(
         'disk',
         "The sandbox workspaces do not have a disk limit of their own yet, so a runaway program could fill this computer's disk.",
-        `Run ${this.options.command} --fix. It asks first, then your password once, to create four fixed-size disk files that fill only as they are used.`,
+        `Run ${this.options.command} --fix. It asks first, then your password once, to create ${String(SLOT_COUNT)} fixed-size disk files that fill only as they are used.`,
       );
     }
     const staleNote =
@@ -855,6 +992,8 @@ export async function stopSandboxSlots(options: {
       '-f',
       join(options.repoRoot, SLOTS_COMPOSE_FILE),
       'down',
+      // Also stops the extra slots of an install from before SLOT_COUNT dropped.
+      '--remove-orphans',
       ...(options.purge ? ['--volumes'] : []),
     ],
     cwd: options.repoRoot,
@@ -863,7 +1002,23 @@ export async function stopSandboxSlots(options: {
     env,
   });
   const root = diskRoot(options.instance);
-  if (!options.purge || options.platform !== 'linux' || down.exitCode !== 0) {
+  if (!options.purge || down.exitCode !== 0) {
+    return down;
+  }
+  // The compose file no longer names the volumes of retired slots, so --volumes leaves them.
+  for (const slot of RETIRED_SLOTS) {
+    for (const kind of ['ws', 'ctl', 'mirror']) {
+      await options.run({
+        command: 'docker',
+        args: ['volume', 'rm', '--force', `${options.instance}_slot_${kind}_${String(slot)}`],
+        cwd: options.repoRoot,
+        echo: false,
+        interactive: false,
+        env,
+      });
+    }
+  }
+  if (options.platform !== 'linux') {
     return down;
   }
   const present = await options.run({
@@ -881,8 +1036,8 @@ export async function stopSandboxSlots(options: {
   return options.run({
     command: options.isRoot ? 'sh' : 'sudo',
     args: options.isRoot
-      ? [script, 'remove', root, String(SLOT_COUNT)]
-      : ['sh', script, 'remove', root, String(SLOT_COUNT)],
+      ? [script, 'remove', root, String(MOST_SLOTS_EVER)]
+      : ['sh', script, 'remove', root, String(MOST_SLOTS_EVER)],
     cwd: options.repoRoot,
     echo: true,
     interactive: !options.isRoot,

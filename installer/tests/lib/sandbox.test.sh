@@ -15,9 +15,9 @@ test_dry_run_plans_the_sandbox() {
   run_install --dry-run --email owner@example.invalid
   assert_rc 0
   assert_flat_contains "$OUT" "Build the sandbox"
-  assert_flat_contains "$OUT" "Start 4 sandboxes for main"
+  assert_flat_contains "$OUT" "Start 2 sandboxes for main"
   assert_flat_contains "$OUT" "needs admin Set up the sandbox on this computer"
-  assert_flat_contains "$OUT" "Needs admin. Adds a security rule for the sandbox and sets up 4 disks of up to 16 GB that use space only as they fill."
+  assert_flat_contains "$OUT" "Needs admin. Adds a security rule for the sandbox and sets up 2 disks of up to 16 GB that use space only as they fill."
   assert_flat_contains "$OUT" "Each part is skipped if it is already in place."
   assert_flat_contains "$OUT" "--sandbox-root"
   assert_flat_contains "$OUT" "Run code (Python, shell, files) runs in a sandbox, and so does reading attachments (PDFs and images)"
@@ -35,7 +35,7 @@ test_plan_has_no_root_line_in_docker_desktop() {
   STUB_DOCKER_OS="Docker Desktop"
   run_install --dry-run --email owner@example.invalid
   assert_rc 0
-  assert_flat_contains "$OUT" "Start 4 sandboxes for main"
+  assert_flat_contains "$OUT" "Start 2 sandboxes for main"
   assert_not_contains "$OUT" "needs admin"
   sandbox_drop
 }
@@ -214,7 +214,7 @@ test_cgroup_and_low_disk() {
   STUB_DF_KB=$((15 * 1024 * 1024))
   run_install --dry-run --email owner@example.invalid
   assert_rc 1
-  assert_flat_contains "$OUT$ERR" "Less than 20 GB free for the sandbox disks under /var/lib/aman-slots"
+  assert_flat_contains "$OUT$ERR" "Less than 32 GB free for the sandbox disks under /var/lib/aman-slots"
   run_install --dry-run --no-sandbox --email owner@example.invalid
   assert_rc 0
   assert_not_contains "$OUT" "slot"
@@ -255,13 +255,14 @@ test_rendered_compose_wires_the_app_to_the_slots() {
   compose=$(cat "$AMAN_HOME/instances/main/compose.yaml")
   assert_contains "$compose" "INSTALLER_INSTANCE: 'main'"
   assert_contains "$compose" "SANDBOX_BACKEND: slots"
-  assert_contains "$compose" "SANDBOX_SLOTS: '4'"
+  assert_contains "$compose" "SANDBOX_SLOTS: '2'"
   assert_contains "$compose" "SANDBOX_SLOTS_DIR: /run/aman-slots"
   assert_contains "$compose" "- slot_ctl_1:/run/aman-slots/1:ro"
-  assert_contains "$compose" "- slot_ctl_4:/run/aman-slots/4:ro"
+  assert_contains "$compose" "- slot_ctl_2:/run/aman-slots/2:ro"
   assert_contains "$compose" "- slot_mirror_1:/run/aman-slots/1/mirror"
-  assert_contains "$compose" "- slot_mirror_4:/run/aman-slots/4/mirror"
-  assert_contains "$compose" "name: main_slot_ctl_3"
+  assert_contains "$compose" "- slot_mirror_2:/run/aman-slots/2/mirror"
+  assert_contains "$compose" "name: main_slot_ctl_2"
+  assert_not_contains "$compose" "slot_ctl_3"
   assert_contains "$compose" "name: main_slot_mirror_2"
   assert_not_contains "$compose" "docker.sock"
   assert_not_contains "$compose" "slot_ws_"
@@ -307,7 +308,7 @@ test_root_steps_need_consent_yes_is_not_enough() {
   assert_flat_contains "$ERR" "--sandbox-root"
   assert_flat_contains "$OUT" "The sandbox needs administrator rights on this computer."
   assert_flat_contains "$OUT" "adds a security rule for the sandbox"
-  assert_flat_contains "$OUT" "sets up 4 disks of up to 16 GB that use space only as they fill"
+  assert_flat_contains "$OUT" "sets up 2 disks of up to 16 GB that use space only as they fill"
   assert_not_contains "$OUT" "setup-disks.sh"
   assert_log_lacks "--fix"
   assert_no_path "$AMAN_HOME/state/instances/main.conf"
@@ -375,7 +376,7 @@ Enter password again=>$SENTINEL_PASSWORD
 Set up the sandbox now?=>y"
   assert_eq "$RC" 0
   assert_flat_contains "$OUT" "The sandbox needs administrator rights on this computer."
-  assert_flat_contains "$OUT" "sets up 4 disks of up to 16 GB"
+  assert_flat_contains "$OUT" "sets up 2 disks of up to 16 GB"
   assert_not_contains "$OUT" "loads again at every start" "only the missing part is listed"
   assert_log_has "--fix --yes"
   sandbox_drop
@@ -407,11 +408,30 @@ test_healthy_slots_need_no_root() {
   sandbox_new
   mkdir -p "$SB_STATE/up"
   : >"$SB_STATE/up/main-slots"
-  printf 'main_slot_ctl_1\nmain_slot_ctl_2\nmain_slot_ctl_3\nmain_slot_ctl_4\nmain_slot_mirror_1\nmain_slot_mirror_2\nmain_slot_mirror_3\nmain_slot_mirror_4\n' >"$SB_STATE/volumes"
+  printf 'main_slot_ctl_1\nmain_slot_ctl_2\nmain_slot_mirror_1\nmain_slot_mirror_2\n' >"$SB_STATE/volumes"
   printf 'ready\n' >"$SB_STATE/slots_state"
   install_machine
   assert_contains "$OUT" "The sandboxes of instance main are already running"
   assert_log_lacks "--fix"
+  sandbox_drop
+}
+
+test_old_slot_volumes_go_once_the_app_starts_without_them() {
+  t_begin "the control and mirror volumes of sandboxes 3 and 4 from an older install go once the app starts without them"
+  sandbox_new
+  mkdir -p "$SB_STATE/up"
+  : >"$SB_STATE/up/main-slots"
+  printf 'main_slot_ctl_1\nmain_slot_ctl_2\nmain_slot_ctl_3\nmain_slot_ctl_4\nmain_slot_mirror_1\nmain_slot_mirror_2\nmain_slot_mirror_3\nmain_slot_mirror_4\n' >"$SB_STATE/volumes"
+  printf 'ready\n' >"$SB_STATE/slots_state"
+  install_machine
+  local volumes
+  volumes=$(cat "$SB_STATE/volumes")
+  assert_contains "$volumes" "main_slot_ctl_2" "the volumes of the two sandboxes in use stay"
+  assert_contains "$volumes" "main_slot_mirror_2"
+  assert_not_contains "$volumes" "main_slot_ctl_3"
+  assert_not_contains "$volumes" "main_slot_ctl_4"
+  assert_not_contains "$volumes" "main_slot_mirror_3"
+  assert_not_contains "$volumes" "main_slot_mirror_4"
   sandbox_drop
 }
 
@@ -606,13 +626,13 @@ test_existing_instance_without_wiring_gets_it() {
   sed -i '/^sandbox=/d' "$AMAN_HOME/state/instances/main.conf"
   run_install --dry-run
   assert_rc 0
-  assert_contains "$OUT" "Start 4 sandboxes for main"
+  assert_contains "$OUT" "Start 2 sandboxes for main"
   run_install --yes
   assert_rc 0
   assert_contains "$(cat "$AMAN_HOME/instances/main/compose.yaml")" "SANDBOX_BACKEND: slots"
   assert_log_has "node $AMAN_HOME/bin/aman-sandbox.mjs --instance main --repo-root $REPO"
   run_install --yes
-  assert_contains "$OUT" "The 4 sandboxes of instance main are running"
+  assert_contains "$OUT" "The 2 sandboxes of instance main are running"
   sandbox_drop
 }
 
@@ -628,7 +648,7 @@ test_rerun_turns_the_sandbox_on_and_keeps_the_data() {
   assert_rc 0
   assert_flat_contains "$OUT" "Turn on the sandbox for instance main (run code, PDF and image reading)"
   assert_flat_contains "$OUT" "Build the sandbox"
-  assert_not_contains "$OUT" "Start 4 sandboxes for main"
+  assert_not_contains "$OUT" "Start 2 sandboxes for main"
   assert_eq "$(sed -n 's/^sandbox=//p' "$AMAN_HOME/state/instances/main.conf")" off "a dry run changes nothing"
   run_install --yes --name main
   assert_rc 0
@@ -642,7 +662,7 @@ test_rerun_turns_the_sandbox_on_and_keeps_the_data() {
   assert_contains "$(cat "$SB_STATE/volumes")" "aman_main_data" "the data volume is still there"
   assert_flat_contains "$OUT" "Run code on, in a sandbox"
   run_install --yes --name main
-  assert_contains "$OUT" "The 4 sandboxes of instance main are running"
+  assert_contains "$OUT" "The 2 sandboxes of instance main are running"
   assert_not_contains "$OUT" "Turn on the sandbox"
   sandbox_drop
 }
