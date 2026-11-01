@@ -416,10 +416,15 @@ describe('verification state capture in a bound repository', () => {
         `#!/bin/sh\necho python3 >> '${fixture.marker}'\nexec '${realPython}' "$@"\n`,
       );
       chmodSync(join(localBin, 'python3'), 0o755);
+      // Track names already linked rather than probing with existsSync: existsSync follows the
+      // link, so a dangling entry (e.g. a broken symlink in the runner's /usr/bin) reads as absent
+      // and the merged-/usr /bin pass would try to link the same name again (EEXIST).
+      const linked = new Set<string>();
       for (const dir of ['/usr/bin', '/bin']) {
         for (const name of readdirSync(dir)) {
-          if (!name.startsWith('python') && !existsSync(join(systemBin, name))) {
+          if (!name.startsWith('python') && !linked.has(name)) {
             symlinkSync(join(dir, name), join(systemBin, name));
+            linked.add(name);
           }
         }
       }
