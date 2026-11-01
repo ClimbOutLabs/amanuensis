@@ -29,6 +29,7 @@ vi.mock('@/sentinel/SentinelStateProvider.js', () => ({
         calendar_event: null,
         schedule: null,
         persona: null,
+        agent: null,
         plain_what: 'Send this reply?',
       },
     }),

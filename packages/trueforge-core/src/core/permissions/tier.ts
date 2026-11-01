@@ -50,6 +50,7 @@ export const GRANT_BARRED_TIER_REASONS: ReadonlySet<string> = new Set([
   'connector_calendar_write',
   'schedule_write',
   'persona_write',
+  'agent_write',
   CONTENT_STEERED_REASON,
 ]);
 
@@ -66,6 +67,7 @@ export const CHAT_GRANTABLE_CONSEQUENCE_REASONS: ReadonlySet<string> = new Set([
   'mcp_open_world_hint',
   'schedule_write',
   'persona_write',
+  'agent_write',
 ]);
 
 /**
@@ -182,6 +184,20 @@ export const Tier3PersonaSchema = z
   .describe('The persona a chat call adds, shown in full.')
   .openapi('Tier3Persona');
 
+/** A saved agent that a chat call adds, shown in full. Existing agents are never changed by a call. */
+export const Tier3AgentSchema = z
+  .object({
+    name: z.string().describe('Agent name.'),
+    description: z.string().describe('One line on what the agent is for.'),
+    instructions: z.string().describe('The whole instruction text the agent follows.'),
+    model_name: z.string().describe('The model the agent answers with.'),
+    connectors: z.array(z.string()).describe('Names of the connectors the agent can use.'),
+    skills: z.array(z.string()).describe('Names of the skills the agent can use.'),
+    sandbox_enabled: z.boolean().describe('True when the agent can run code in a sandbox.'),
+  })
+  .describe('The agent a chat call adds, shown in full.')
+  .openapi('Tier3Agent');
+
 /**
  * Server-rendered approval card for Tier 3 actions and for Tier 2 actions that ask. Destination/recipient/amount come from
  * the server-side extractor registry over canonical params, never agent text.
@@ -220,6 +236,7 @@ export const Tier3CardSchema = z
     calendar_event: Tier3CalendarEventSchema.nullable().optional(),
     schedule: Tier3ScheduleSchema.nullable().optional(),
     persona: Tier3PersonaSchema.nullable().optional(),
+    agent: Tier3AgentSchema.nullable().optional(),
     mail_new_recipients: z
       .array(z.string())
       .nullable()
@@ -235,6 +252,7 @@ export const Tier3CardSchema = z
 export type Tier3Card = z.infer<typeof Tier3CardSchema>;
 export type Tier3Schedule = z.infer<typeof Tier3ScheduleSchema>;
 export type Tier3Persona = z.infer<typeof Tier3PersonaSchema>;
+export type Tier3Agent = z.infer<typeof Tier3AgentSchema>;
 
 /** Machine-readable classifier verdict attached to every classified action. */
 export interface TierDecision {

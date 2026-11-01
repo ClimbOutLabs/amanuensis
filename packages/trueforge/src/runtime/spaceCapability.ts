@@ -63,6 +63,7 @@ import {
   SpaceSchema,
   SpaceStatusSchema,
 } from '../schemas/space';
+import { agentCapability, type AgentTurnContext } from './agentCapability';
 import { toolImagesCapability, type ToolImagesOptions } from './chatImages/toolImagesCapability';
 import { googleCapability, sandboxAttachmentStager } from './googleCapability';
 import { googleSetupCapability } from './googleSetupCapability';
@@ -2649,6 +2650,8 @@ export interface SpaceTurnContext {
   schedules?: ScheduleTurnContext | undefined;
   /** Present where the chat has a model to answer with; absent, no persona tool mounts. */
   personas?: PersonaTurnContext | undefined;
+  /** Present only where schedules run (standalone) and the chat has a setup to start from; absent, no agent tool mounts. */
+  agents?: AgentTurnContext | undefined;
   /** The request carries a new message from the person, not an approval resuming the same answer. */
   startsAnswer: boolean;
 }
@@ -2707,6 +2710,7 @@ export class SpaceTurnResourceResolver extends MemoryTurnResourceResolver {
     const sentinel = this.#sentinel(input);
     const schedules = this.#space.schedules;
     const personas = this.#space.personas;
+    const agents = this.#space.agents;
     return {
       ...resolved,
       extraCapabilities: [
@@ -2725,6 +2729,7 @@ export class SpaceTurnResourceResolver extends MemoryTurnResourceResolver {
         ...(personas === undefined
           ? []
           : [personaCapability({ ...personas, switches: this.switches, tracing: input.tracing, sentinel })]),
+        ...(agents === undefined ? [] : [agentCapability({ ...agents, tracing: input.tracing, sentinel })]),
         ...(schedules === undefined
           ? []
           : [

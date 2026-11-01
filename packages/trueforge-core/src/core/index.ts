@@ -516,6 +516,7 @@ export type {
   AutoDenyReason,
   Tier,
   Tier2ActionKind,
+  Tier3Agent,
   Tier3Card,
   Tier3Persona,
   Tier3Schedule,

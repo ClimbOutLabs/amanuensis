@@ -88,6 +88,7 @@ import {
   subscribeTurnRoute,
 } from '../routes/turnRoutes';
 import type { ActiveTurnRegistry, TurnAdmission } from '../runtime/activeTurns';
+import type { AgentTurnContext } from '../runtime/agentCapability';
 import { findTurnArtifact } from '../runtime/artifacts/findTurnArtifact';
 import { submitArtifactPersistence } from '../runtime/artifacts/persistTurnArtifacts';
 import { chatModelName, resolveChatAssistant, scheduleRunsAs, type ChatRunner } from '../runtime/chatAssistant';
@@ -408,6 +409,8 @@ function createTurnResolver(deps: {
   schedules?: ScheduleTurnContext | undefined;
   /** Chat turns that have a model to answer with; absent, no persona tool mounts. */
   personas?: PersonaTurnContext | undefined;
+  /** Chat turns where schedules run and the chat has a setup to start from; absent, no agent tool mounts. */
+  agents?: AgentTurnContext | undefined;
 }): SpaceTurnResourceResolver {
   const {
     mcpCatalog,
@@ -450,6 +453,7 @@ function createTurnResolver(deps: {
     modelUsage,
     schedules,
     personas,
+    agents,
   } = deps;
   const tenant_id = session.tenant_id;
   const sessionId = session.session_id;
@@ -889,6 +893,7 @@ function createTurnResolver(deps: {
       sessionId,
       schedules,
       personas,
+      agents,
       logger,
       startsAnswer,
     },
@@ -2586,6 +2591,20 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
               session_id: session.session_id,
               default_assistant_name: profile?.assistant_name ?? null,
               logger: deps.logger,
+            },
+      agents:
+        deps.schedules === undefined || chatRunner === undefined
+          ? undefined
+          : {
+              agentStore,
+              modelProviderStore,
+              mcpServerStore,
+              skillStore,
+              sandboxProviderStore,
+              mcpCatalog: deps.mcpCatalog,
+              tenant_id: requestContext.tenant_id,
+              owner: scheduleOwner,
+              runner: chatRunner,
             },
       schedules:
         deps.schedules === undefined || chatRunner === undefined

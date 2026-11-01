@@ -8,6 +8,7 @@ import { StubTear } from '../atoms/Reward.js';
 import { useAssistantDisplayName } from '../components/PersonalizationContext.js';
 import { useRewardLedger } from '../hooks/useRewardLedger.js';
 import { Icon } from '../icons/Icon.js';
+import { AgentDetails } from './AgentDetails.js';
 import { AlwaysAllowToolControl } from './AlwaysAllowToolControl.js';
 import { APPROVAL_CHOICES, isNewRecipientCard } from './approvalChoices.js';
 import {
@@ -144,7 +145,7 @@ function OutboundBlock({ text, truncated }: { text: string; truncated: boolean }
 }
 
 /**
- * Approval ticket for calendar, schedule, persona and other non-mail actions. The question is the
+ * Approval ticket for calendar, schedule, persona, agent and other non-mail actions. The question is the
  * title, the rows show only what the server sent, and the stub says what it is. The header pill is the
  * one status line. The raw request and the connector's arguments fold into Details unless `outboundOpen`
  * is set. Mail uses EmailApprovalCard instead.
@@ -177,7 +178,7 @@ export const PermissionApprovalCard: FC<PermissionApprovalCardProps> = ({
     card.parsed_command !== null ||
     card.destination_host !== null;
 
-  const { calendar_event: calendarEvent, schedule, persona } = card;
+  const { calendar_event: calendarEvent, schedule, persona, agent } = card;
   // A new-recipient send never offers a standing grant or a chat-wide allow: approving it adds addresses.
   const newRecipients = isNewRecipientCard(card);
   const stub = approvalStub(card);
@@ -256,6 +257,8 @@ export const PermissionApprovalCard: FC<PermissionApprovalCardProps> = ({
         {schedule !== null && <ScheduleDetails schedule={schedule} />}
 
         {persona !== null && <PersonaDetails persona={persona} />}
+
+        {agent !== null && <AgentDetails agent={agent} />}
 
         {outboundOpen && outboundShown !== null && (
           <OutboundBlock text={outboundShown} truncated={card.outbound_truncated} />

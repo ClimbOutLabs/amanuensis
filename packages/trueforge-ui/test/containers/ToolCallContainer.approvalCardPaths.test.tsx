@@ -77,6 +77,7 @@ function draftCard(): SentinelApprovalCard {
     calendar_event: null,
     schedule: null,
     persona: null,
+    agent: null,
   };
 }
 

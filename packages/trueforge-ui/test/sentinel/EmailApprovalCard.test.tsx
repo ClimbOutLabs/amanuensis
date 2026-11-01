@@ -39,6 +39,7 @@ function cardWith(emailOverrides: Partial<SentinelApprovalEmail> = {}): Sentinel
     calendar_event: null,
     schedule: null,
     persona: null,
+    agent: null,
   };
 }
 

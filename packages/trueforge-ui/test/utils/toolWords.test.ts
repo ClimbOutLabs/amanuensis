@@ -38,6 +38,14 @@ describe('toolWords', () => {
     }
   });
 
+  it('reads saving an agent as saving an agent, from the tool name or the reason', () => {
+    for (const name of ['create_agent', 'agent_write']) {
+      expect(toolDoingWords(name)).toBe('Saving an agent');
+      expect(toolDoneWords(name)).toBe('Saved an agent');
+    }
+    expect(toolStepTitle({ toolName: 'create_agent', state: 'not_done' })).toBe('A new agent');
+  });
+
   it('titles a step that did not run by what it is, never as underway or done', () => {
     expect(toolStepTitle({ toolName: 'web_search', state: 'running' })).toBe('Searching the web');
     expect(toolStepTitle({ toolName: 'web_search', state: 'done' })).toBe('Searched the web');

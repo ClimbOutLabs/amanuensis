@@ -23,6 +23,7 @@ const TRAVEL_PLANNER_CARD = {
   email: null,
   calendar_event: null,
   schedule: null,
+  agent: null,
   persona: {
     name: 'Travel planner',
     description: 'Plans trips in detail, with a day-by-day route.',

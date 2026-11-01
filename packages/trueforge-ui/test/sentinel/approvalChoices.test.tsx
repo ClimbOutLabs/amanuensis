@@ -26,6 +26,7 @@ const card: SentinelApprovalCard = {
   calendar_event: null,
   schedule: null,
   persona: null,
+  agent: null,
 };
 
 const buttonNames = () => screen.getAllByRole('button').map(button => button.textContent);
@@ -186,6 +187,23 @@ describe('offersChangeIt', () => {
       offersChangeIt({
         ...card,
         persona: { name: 'Tutor', description: 'Helps', instructions: 'Be patient.', model_name: 'model-a' },
+      }),
+    ).toBe(true);
+  });
+
+  it('offers Change it for a new agent', () => {
+    expect(
+      offersChangeIt({
+        ...card,
+        agent: {
+          name: 'tutor',
+          description: 'Helps',
+          instructions: 'Be patient.',
+          model_name: 'model-a',
+          connectors: [],
+          skills: [],
+          sandbox_enabled: false,
+        },
       }),
     ).toBe(true);
   });

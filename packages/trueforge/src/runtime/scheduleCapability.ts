@@ -13,7 +13,6 @@ import {
   defineTool,
   extractErrorLogFields,
   LocalToolMCP,
-  toolResultResponse,
   type ToolDefinition,
 } from '@truefoundry/trueforge-core/core';
 import type { ApprovalDecision } from '@truefoundry/trueforge-core/core/events/schema';
@@ -52,6 +51,7 @@ import {
 } from '../schemas/schedule';
 import { ChatAssistantUnavailableError, type ChatAssistant } from './chatAssistant';
 import { firstRunAfter, nextTriggerAfter, validateManifest } from './cron';
+import { errorResult, jsonResult, plainIssues } from './toolResults';
 
 /** Cron day-of-week order: index 0 is Sunday. */
 const WEEKDAYS = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'] as const;
@@ -270,14 +270,6 @@ export function cronFromRecurrence(
   return { ok: true, cron: `${at} ${days.length === 7 ? '*' : days.join(',')}` };
 }
 
-/** Each problem with the call, by field, in one line. */
-function plainIssues(error: z.ZodError): string {
-  const issues = error.issues.map(issue =>
-    issue.path.length === 0 ? issue.message : `${issue.path.join('.')}: ${issue.message}`,
-  );
-  return `These details were not valid: ${issues.join('; ')}.`;
-}
-
 /**
  * Older tool lists offered an `agent` field. A schedule always runs as this chat's assistant, so a stray one is
  * dropped and the person still gets the card.
@@ -290,14 +282,6 @@ function withoutRetiredAgent(params: CallToolRequest['params']): CallToolRequest
     ...params,
     arguments: Object.fromEntries(Object.entries(params.arguments).filter(([key]) => key !== 'agent')),
   };
-}
-
-function jsonResult(value: unknown) {
-  return toolResultResponse({ text: JSON.stringify(value) });
-}
-
-function errorResult(message: string) {
-  return toolResultResponse({ text: JSON.stringify({ error: message }), isError: true });
 }
 
 /**

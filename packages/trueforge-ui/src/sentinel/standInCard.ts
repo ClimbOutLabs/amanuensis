@@ -81,5 +81,6 @@ export function standInApprovalCard({
     calendar_event: null,
     schedule: null,
     persona: null,
+    agent: null,
   };
 }

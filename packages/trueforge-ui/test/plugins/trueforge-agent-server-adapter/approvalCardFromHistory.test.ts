@@ -45,6 +45,7 @@ const draftApproval = {
         calendar_event: null,
         schedule: null,
         persona: null,
+        agent: null,
       },
     },
   ],

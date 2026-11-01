@@ -24,6 +24,7 @@ function card(overrides: Partial<SentinelApprovalCard> = {}): SentinelApprovalCa
     calendar_event: null,
     schedule: null,
     persona: null,
+    agent: null,
     ...overrides,
   };
 }

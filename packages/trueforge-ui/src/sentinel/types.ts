@@ -153,6 +153,8 @@ export type SentinelApprovalCard = {
   schedule: SentinelApprovalSchedule | null;
   /** The whole persona when the action adds one, or null. */
   persona: SentinelApprovalPersona | null;
+  /** The whole agent when the action saves one, or null. */
+  agent: SentinelApprovalAgent | null;
   /** For a mail send to addresses not on the Email list: those addresses. Approving adds them. Otherwise null. */
   mail_new_recipients?: string[] | null;
   /** True when a card carrying mail_new_recipients approves saving a draft rather than sending. */
@@ -169,6 +171,24 @@ export type SentinelApprovalPersona = {
   instructions: string;
   /** The model the persona answers with. */
   model_name: string;
+};
+
+/** The whole agent a chat call saves, in plain words. */
+export type SentinelApprovalAgent = {
+  /** Agent name. */
+  name: string;
+  /** One line on what the agent is for. */
+  description: string;
+  /** The whole instruction text the agent follows. */
+  instructions: string;
+  /** The model the agent answers with. */
+  model_name: string;
+  /** Names of the connectors the agent can use. */
+  connectors: string[];
+  /** Names of the skills the agent can use. */
+  skills: string[];
+  /** True when the agent can run code in a sandbox. */
+  sandbox_enabled: boolean;
 };
 
 /** What the server says about an action a scheduled run held for its owner instead of asking. */
@@ -522,6 +542,30 @@ function parsePersona(value: unknown): SentinelApprovalPersona | null {
   return { name, description, instructions, model_name };
 }
 
+/** A card missing any field is not shown as an agent, so a partial one is never approved as if it were whole. */
+function parseAgent(value: unknown): SentinelApprovalAgent | null {
+  if (!isRecord(value)) return null;
+  const name = optionalString(value, 'name');
+  const description = optionalString(value, 'description');
+  const instructions = optionalString(value, 'instructions');
+  const model_name = optionalString(value, 'model_name') ?? optionalString(value, 'modelName');
+  const connectors = stringList(value.connectors);
+  const skills = stringList(value.skills);
+  const sandbox_enabled = optionalBoolean(value, 'sandbox_enabled') ?? optionalBoolean(value, 'sandboxEnabled');
+  if (
+    name === undefined ||
+    description === undefined ||
+    instructions === undefined ||
+    model_name === undefined ||
+    connectors === undefined ||
+    skills === undefined ||
+    sandbox_enabled === undefined
+  ) {
+    return null;
+  }
+  return { name, description, instructions, model_name, connectors, skills, sandbox_enabled };
+}
+
 /** A card missing any field is not shown as a schedule, so a partial schedule is never approved as if it were whole. */
 function parseSchedule(value: unknown): SentinelApprovalSchedule | null {
   if (!isRecord(value)) return null;
@@ -567,6 +611,7 @@ function parseApprovalCard(value: unknown): SentinelApprovalCard | undefined {
     calendar_event: parseCalendarEvent(value.calendar_event ?? value.calendarEvent),
     schedule: parseSchedule(value.schedule),
     persona: parsePersona(value.persona),
+    agent: parseAgent(value.agent),
     mail_new_recipients: parseNewRecipients(value.mail_new_recipients ?? value.mailNewRecipients),
     mail_draft: cardFlag(value, { snake: 'mail_draft', camel: 'mailDraft' }),
   });

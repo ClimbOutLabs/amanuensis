@@ -5,13 +5,7 @@ import type {
   InstructionBuilder,
   SentinelHostContext,
 } from '@truefoundry/trueforge-core/core';
-import {
-  classifyHostToolCall,
-  defineTool,
-  LocalToolMCP,
-  toolResultResponse,
-  type ToolDefinition,
-} from '@truefoundry/trueforge-core/core';
+import { classifyHostToolCall, defineTool, LocalToolMCP, type ToolDefinition } from '@truefoundry/trueforge-core/core';
 import type { ApprovalDecision } from '@truefoundry/trueforge-core/core/events/schema';
 import { stampSentinelDecision } from '@truefoundry/trueforge-core/core/mcp/ToolSet';
 import {
@@ -31,6 +25,7 @@ import { personaMatchKey, personaNameKeys, type Persona, type PersonaContent } f
 import { activateSessionPersona } from '../personas/sessionPersona';
 import { PersonaContentSchema, PersonaNameSchema } from '../schemas/persona';
 import type { PersonaSwitchLog } from './personaSwitchClaim';
+import { errorResult, jsonResult, plainIssues } from './toolResults';
 
 /** A description is one line in the card and in the persona list. */
 const PERSONA_DESCRIPTION_MAX_LENGTH = 160;
@@ -129,22 +124,6 @@ function handedBackMessage(name: string): string {
 /** A persona's first line is its one-line description: the description leads the stored instructions. */
 function firstLine(text: string): string {
   return text.split('\n', 1)[0] ?? '';
-}
-
-function jsonResult(value: unknown) {
-  return toolResultResponse({ text: JSON.stringify(value) });
-}
-
-function errorResult(message: string) {
-  return toolResultResponse({ text: JSON.stringify({ error: message }), isError: true });
-}
-
-/** Each problem with the call, by field, in one line. */
-function plainIssues(error: z.ZodError): string {
-  const issues = error.issues.map(issue =>
-    issue.path.length === 0 ? issue.message : `${issue.path.join('.')}: ${issue.message}`,
-  );
-  return `These details were not valid: ${issues.join('; ')}.`;
 }
 
 /**

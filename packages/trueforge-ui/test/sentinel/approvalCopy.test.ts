@@ -26,6 +26,7 @@ function cardWith(overrides: Partial<SentinelApprovalCard>): SentinelApprovalCar
     calendar_event: null,
     schedule: null,
     persona: null,
+    agent: null,
     ...overrides,
   };
 }
@@ -121,6 +122,22 @@ describe('approval copy', () => {
     });
     expect(approvalQuestion(card)).toBe('Add the persona "Tax helper"?');
     expect(approvalStub(card)).toEqual({ what: 'New persona', detail: 'Tax helper' });
+  });
+
+  it('calls an agent save a save of an agent in the title and the stub', () => {
+    const card = cardWith({
+      agent: {
+        name: 'morning-brief',
+        description: 'Reads my mail.',
+        instructions: 'Sum up the day.',
+        model_name: 'fast',
+        connectors: ['mail'],
+        skills: [],
+        sandbox_enabled: false,
+      },
+    });
+    expect(approvalQuestion(card)).toBe('Save the agent "morning-brief"?');
+    expect(approvalStub(card)).toEqual({ what: 'New agent', detail: 'morning-brief' });
   });
 
   it('asks a new schedule to be created', () => {
