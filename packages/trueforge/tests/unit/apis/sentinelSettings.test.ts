@@ -71,6 +71,7 @@ describe('Sentinel user settings routes', () => {
       search_without_asking: true,
       maps_without_asking: true,
       sandbox_without_asking: true,
+      chat_search_enabled: false,
     });
   });
 
@@ -83,6 +84,7 @@ describe('Sentinel user settings routes', () => {
       search_without_asking: true,
       maps_without_asking: true,
       sandbox_without_asking: true,
+      chat_search_enabled: false,
     });
 
     await server.request(SETTINGS_PATH, patch('alice', { offline_mode: true }));
@@ -93,6 +95,7 @@ describe('Sentinel user settings routes', () => {
       search_without_asking: false,
       maps_without_asking: true,
       sandbox_without_asking: true,
+      chat_search_enabled: false,
     });
     expect(await read('bob')).toEqual({
       offline_mode: false,
@@ -100,6 +103,7 @@ describe('Sentinel user settings routes', () => {
       search_without_asking: true,
       maps_without_asking: true,
       sandbox_without_asking: true,
+      chat_search_enabled: false,
     });
   });
 
@@ -112,6 +116,7 @@ describe('Sentinel user settings routes', () => {
       search_without_asking: true,
       maps_without_asking: true,
       sandbox_without_asking: true,
+      chat_search_enabled: false,
     });
 
     await server.request(SETTINGS_PATH, patch('dana', { maps_without_asking: false }));
@@ -129,6 +134,7 @@ describe('Sentinel user settings routes', () => {
       search_without_asking: true,
       maps_without_asking: true,
       sandbox_without_asking: false,
+      chat_search_enabled: false,
     });
 
     await server.request(SETTINGS_PATH, patch('erin', { sandbox_without_asking: true }));
@@ -152,6 +158,7 @@ describe('Sentinel user settings routes', () => {
       search_without_asking: true,
       maps_without_asking: true,
       sandbox_without_asking: true,
+      chat_search_enabled: false,
     });
   });
 });

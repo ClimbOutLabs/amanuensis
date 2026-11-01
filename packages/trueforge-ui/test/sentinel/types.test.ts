@@ -707,6 +707,7 @@ describe('parseUserSettings', () => {
       search_without_asking: true,
       maps_without_asking: true,
       sandbox_without_asking: true,
+      chat_search_enabled: false,
     };
     expect(parseUserSettings(null)).toEqual(defaults);
     expect(parseUserSettings({})).toEqual(defaults);
@@ -727,6 +728,7 @@ describe('parseUserSettings', () => {
       search_without_asking: true,
       maps_without_asking: true,
       sandbox_without_asking: true,
+      chat_search_enabled: false,
     });
   });
 
@@ -753,6 +755,7 @@ describe('parseUserSettings', () => {
       search_without_asking: true,
       maps_without_asking: true,
       sandbox_without_asking: true,
+      chat_search_enabled: false,
     });
   });
 });
