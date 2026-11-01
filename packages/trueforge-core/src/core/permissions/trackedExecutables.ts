@@ -166,12 +166,36 @@ export function canonicalWriteTarget(input: {
   if (input.resolution === 'remote') {
     return lexicalPath(input);
   }
+  const absolute = path.isAbsolute(input.p) ? input.p : path.resolve(input.cwd, input.p);
+  // Folders that do not exist yet are created by the write, so the target resolves through its
+  // nearest existing ancestor. A missing folder cannot be a link, so appending the missing names
+  // lexically cannot hide where the write lands.
+  const missing: string[] = [path.basename(absolute)];
+  let ancestor = path.dirname(absolute);
+  for (;;) {
+    try {
+      return path.join(realpathSync(ancestor), ...missing);
+    } catch (error) {
+      const parent = path.dirname(ancestor);
+      if (!isMissingPathError(error) || parent === ancestor || isLinkPath(ancestor)) {
+        return null;
+      }
+      missing.unshift(path.basename(ancestor));
+      ancestor = parent;
+    }
+  }
+}
+
+function isMissingPathError(error: unknown): boolean {
+  return typeof error === 'object' && error !== null && 'code' in error && error.code === 'ENOENT';
+}
+
+/** True when the path itself is a symlink (dangling or not); such a folder is never treated as missing. */
+function isLinkPath(p: string): boolean {
   try {
-    const absolute = path.isAbsolute(input.p) ? input.p : path.resolve(input.cwd, input.p);
-    const parent = path.dirname(absolute);
-    return path.join(realpathSync(parent), path.basename(absolute));
+    return lstatSync(p).isSymbolicLink();
   } catch {
-    return null;
+    return false;
   }
 }
 

@@ -4,7 +4,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'no
 import { mkdir, writeFile } from 'node:fs/promises';
 import { createServer, type Server } from 'node:http';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import type { ApprovalDecision, ToolAdmissionProvenance } from '../../../src/core/events/schema';
 import { InstructionBuilder } from '../../../src/core/InstructionBuilder';
 import type { ILLM, LLMCreateParamsStreaming } from '../../../src/core/llm/ILLM';
@@ -40,6 +40,7 @@ import {
 import {
   APPLY_PATCH_CHECK_FAILURE_HINT,
   buildWriteAndRunScriptCommand,
+  forgetShownSkillNotices,
   Sandbox,
   SANDBOX_APPLY_PATCH_TOOL_NAME,
   SANDBOX_EXEC_TOOL_NAME,
@@ -4177,6 +4178,8 @@ function slotLikeProvider(input: {
     getGitCredentialsPath: () => join(root, '.git-credentials'),
     getSkillsDir: () => skillsDir,
     getSkillDownloaderPath: () => join(root, 'skill_downloader.py'),
+    // Each provider has its own sandbox, like a real one, so state kept per sandbox never leaks between tests.
+    createSandbox: () => Promise.resolve({ sandboxId: basename(root) }),
     uploadFile: async ({ remotePath, content }) => {
       if (refuseUpload?.(remotePath) === true) {
         throw new Error('upload refused');
@@ -4449,6 +4452,64 @@ describe('Sandbox skills without a network', () => {
     }
   });
 
+  it('shows a skill notice once per chat, not again on the sandbox built for a later turn or approval', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'sandbox-skills-'));
+    try {
+      const skillsDir = join(root, 'skills');
+      const provider = slotLikeProvider({ root, skillsDir, execCalls: [] });
+      const gamma = registrySkill({ name: 'gamma', presignedUrl: 'http://127.0.0.1:9/gamma.tar' });
+      const noticesOf = (response: Awaited<ReturnType<Sandbox['callTool']>>): unknown => {
+        if (!isCallToolResponseResult(response) || response.result.content[0]?.type !== 'text') {
+          throw new Error('Expected a text result');
+        }
+        return (JSON.parse(response.result.content[0].text) as Record<string, unknown>)['notices'];
+      };
+
+      const first = makeSandbox(provider, { skillMounter: new SkillMounter({ skills: [gamma] }) });
+      expect(noticesOf(await first.callTool(execTrue, { status: 'allow', scope: 'once' }))).toEqual([
+        "The skill gamma couldn't be downloaded, so Aman is working without it. Check your internet connection.",
+      ]);
+      expect(noticesOf(await first.callTool(execTrue, { status: 'allow', scope: 'once' }))).toBeUndefined();
+
+      // Each turn, an approval continuation included, builds a new Sandbox on the same sandbox.
+      const next = makeSandbox(provider, {
+        existingSandboxId: basename(root),
+        skillMounter: new SkillMounter({ skills: [gamma] }),
+      });
+      expect(noticesOf(await next.callTool(execTrue, { status: 'allow', scope: 'once' }))).toBeUndefined();
+      const prompt = new InstructionBuilder('prompt');
+      next.buildSkillsInstruction(prompt);
+      expect(prompt.build()).toContain("gamma: unavailable (couldn't be copied into the sandbox)");
+
+      // A sandbox that is gone forgets what it showed, so a new one at the same id shows it again.
+      forgetShownSkillNotices(basename(root));
+      const fresh = makeSandbox(provider, {
+        existingSandboxId: basename(root),
+        skillMounter: new SkillMounter({ skills: [gamma] }),
+      });
+      expect(noticesOf(await fresh.callTool(execTrue, { status: 'allow', scope: 'once' }))).toEqual([
+        "The skill gamma couldn't be downloaded, so Aman is working without it. Check your internet connection.",
+      ]);
+      const afterFresh = makeSandbox(provider, {
+        existingSandboxId: basename(root),
+        skillMounter: new SkillMounter({ skills: [gamma] }),
+      });
+      expect(noticesOf(await afterFresh.callTool(execTrue, { status: 'allow', scope: 'once' }))).toBeUndefined();
+
+      // Another skill left out later is still shown once.
+      const delta = registrySkill({ name: 'delta', presignedUrl: 'http://127.0.0.1:9/delta.tar' });
+      const later = makeSandbox(provider, {
+        existingSandboxId: basename(root),
+        skillMounter: new SkillMounter({ skills: [gamma, delta] }),
+      });
+      expect(noticesOf(await later.callTool(execTrue, { status: 'allow', scope: 'once' }))).toEqual([
+        "The skill delta couldn't be downloaded, so Aman is working without it. Check your internet connection.",
+      ]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it('a skill whose upload is refused leaves only itself out; the other skill still works', async () => {
     const root = mkdtempSync(join(tmpdir(), 'sandbox-skills-'));
     const archives = await serveArchives(
@@ -4600,5 +4661,33 @@ describe('Sandbox host bookkeeping', () => {
     expect(buildWriteAndRunScriptCommand({ scriptPath: 'skill_downloader.py', scriptContent: 'pass\n' })).toMatch(
       / && python3 -I -S 'skill_downloader\.py'$/u,
     );
+  });
+});
+
+describe('staysInWorkspace', () => {
+  const exec = (purpose: string, command: string): { name: string; argumentsText: string } => ({
+    name: 'exec',
+    argumentsText: JSON.stringify({ intent: 'Run', purpose, command }),
+  });
+
+  it('keeps file edits, run_code and offline commands in the workspace, but never a push', () => {
+    const sandbox = makeSandbox(makeProvider({ network: 'none' }));
+
+    expect(sandbox.staysInWorkspace({ name: 'write_file', argumentsText: '{}' })).toBe(true);
+    expect(sandbox.staysInWorkspace({ name: 'run_code', argumentsText: '{}' })).toBe(true);
+    expect(sandbox.staysInWorkspace(exec('verify', 'python3 -m pytest -q'))).toBe(true);
+    expect(sandbox.staysInWorkspace(exec('push', 'git push origin main'))).toBe(false);
+    expect(sandbox.staysInWorkspace(exec('edit', 'git push origin main'))).toBe(false);
+    expect(sandbox.staysInWorkspace({ name: 'exec', argumentsText: 'not json' })).toBe(false);
+    expect(sandbox.staysInWorkspace({ name: 'some_other_tool', argumentsText: '{}' })).toBe(false);
+  });
+
+  it('counts a command on a sandbox with network as able to reach past it, unless it only inspects', () => {
+    const sandbox = makeSandbox(makeProvider());
+
+    expect(sandbox.staysInWorkspace(exec('execute', 'curl -X POST https://example.com'))).toBe(false);
+    expect(sandbox.staysInWorkspace(exec('verify', 'python3 -m pytest -q'))).toBe(false);
+    expect(sandbox.staysInWorkspace(exec('inspect', 'ls -la'))).toBe(true);
+    expect(sandbox.staysInWorkspace({ name: 'write_file', argumentsText: '{}' })).toBe(true);
   });
 });

@@ -583,6 +583,7 @@ describe('Data export route', () => {
       'folders.json',
       'personas.json',
       'personalization.json',
+      'space_folders.json',
       'spaces.json',
       'agents.json',
       'schedules.json',

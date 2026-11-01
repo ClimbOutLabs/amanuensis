@@ -5935,6 +5935,221 @@ await client.skills.listVersions({
 </dl>
 </details>
 
+## SpaceFolders
+<details><summary><code>client.spaceFolders.<a href="/src/api/resources/spaceFolders/client/Client.ts">list</a>() -> TrueForge.ListSpaceFoldersResponse</code></summary>
+<dl>
+<dd>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.spaceFolders.list();
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**requestOptions:** `SpaceFoldersClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
+<details><summary><code>client.spaceFolders.<a href="/src/api/resources/spaceFolders/client/Client.ts">create</a>({ ...params }) -> TrueForge.GetSpaceFolderResponse</code></summary>
+<dl>
+<dd>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.spaceFolders.create({
+    name: "name"
+});
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**request:** `TrueForge.CreateSpaceFolderRequest`
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**requestOptions:** `SpaceFoldersClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
+<details><summary><code>client.spaceFolders.<a href="/src/api/resources/spaceFolders/client/Client.ts">update</a>(folder_id, { ...params }) -> TrueForge.GetSpaceFolderResponse</code></summary>
+<dl>
+<dd>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.spaceFolders.update("folder_id", {
+    name: "name"
+});
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**folder_id:** `string` — Immutable space folder identifier.
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**request:** `TrueForge.UpdateSpaceFolderRequest`
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**requestOptions:** `SpaceFoldersClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
+<details><summary><code>client.spaceFolders.<a href="/src/api/resources/spaceFolders/client/Client.ts">delete</a>(folder_id) -> TrueForge.DeleteSpaceFolderResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+Deletes the folder and leaves its spaces without a folder.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.spaceFolders.delete("folder_id");
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**folder_id:** `string` — Immutable space folder identifier.
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**requestOptions:** `SpaceFoldersClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
 ## Spaces
 <details><summary><code>client.spaces.<a href="/src/api/resources/spaces/client/Client.ts">list</a>({ ...params }) -> TrueForge.ListSpacesResponse</code></summary>
 <dl>
@@ -6252,6 +6467,128 @@ await client.spaces.delete("space_id", {
 <dd>
 
 **request:** `TrueForge.DeleteSpacesRequest`
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**requestOptions:** `SpacesClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
+<details><summary><code>client.spaces.<a href="/src/api/resources/spaces/client/Client.ts">setFolder</a>(space_id, { ...params }) -> TrueForge.SetSpaceFolderResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+Placement is not an edit: the space revision and timestamps stay as they were.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.spaces.setFolder("space_id", {
+    folderId: "folder_id"
+});
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**space_id:** `string`
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**request:** `TrueForge.SetSpaceFolderRequest`
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**requestOptions:** `SpacesClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
+<details><summary><code>client.spaces.<a href="/src/api/resources/spaces/client/Client.ts">clearFolder</a>(space_id) -> TrueForge.SetSpaceFolderResponse</code></summary>
+<dl>
+<dd>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.spaces.clearFolder("space_id");
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**space_id:** `string`
 
 </dd>
 </dl>
@@ -8230,6 +8567,127 @@ await client.settings.mcpServers.delete("name");
 <dd>
 
 **requestOptions:** `McpServersClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
+## Settings MemoryRecalls
+<details><summary><code>client.settings.memoryRecalls.<a href="/src/api/resources/settings/resources/memoryRecalls/client/Client.ts">get</a>() -> TrueForge.GetMemoryRecallResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+Whether replies use saved memories for every chat. `enabled` is null when the switch was never set.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.settings.memoryRecalls.get();
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**requestOptions:** `MemoryRecallsClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
+<details><summary><code>client.settings.memoryRecalls.<a href="/src/api/resources/settings/resources/memoryRecalls/client/Client.ts">createOrUpdate</a>({ ...params }) -> TrueForge.GetMemoryRecallResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+Sets whether replies use saved memories in every chat, including chats with a saved agent. `null` clears the switch so each agent follows its own setting.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.settings.memoryRecalls.createOrUpdate({
+    enabled: false
+});
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**request:** `TrueForge.settings.UpdateMemoryRecallRequest`
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**requestOptions:** `MemoryRecallsClient.RequestOptions`
 
 </dd>
 </dl>

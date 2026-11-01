@@ -35,10 +35,25 @@ describe('SpaceContentSchema format', () => {
       id: 's-1',
       ...BASE_SPACE,
       format: 'html',
+      folder_id: null,
       revision: 1,
       created_at: '2026-09-13T00:00:00.000Z',
       updated_at: '2026-09-13T00:00:00.000Z',
     });
     expect(parsed.format).toBe('html');
+  });
+
+  it('carries the folder on the wire record but never in the revisioned content', () => {
+    const wire = {
+      id: 's-1',
+      ...BASE_SPACE,
+      folder_id: 'folder-1',
+      revision: 1,
+      created_at: '2026-09-13T00:00:00.000Z',
+      updated_at: '2026-09-13T00:00:00.000Z',
+    };
+
+    expect(SpaceSchema.parse(wire).folder_id).toBe('folder-1');
+    expect(SpaceContentSchema.safeParse({ ...BASE_SPACE, folder_id: 'folder-1' }).success).toBe(false);
   });
 });
