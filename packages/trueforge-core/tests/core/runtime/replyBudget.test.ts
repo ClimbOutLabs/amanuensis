@@ -227,6 +227,14 @@ describe('progressRefundFor', () => {
     expect(progressRefundFor({ results: [{ ...landed, toolName: 'move_space' }], refundsSoFar: 0 })).toBe(0);
   });
 
+  it('refunds one step when a sandbox file edit landed, and nothing when it failed', () => {
+    const fileEdit = { ...landed, toolName: 'write_file', sandboxFileEdit: true };
+    expect(progressRefundFor({ results: [fileEdit], refundsSoFar: 0 })).toBe(1);
+    expect(progressRefundFor({ results: [{ ...fileEdit, failure: true }], refundsSoFar: 0 })).toBe(0);
+    // A connector tool that happens to be named write_file is not the sandbox's.
+    expect(progressRefundFor({ results: [{ ...landed, toolName: 'write_file' }], refundsSoFar: 0 })).toBe(0);
+  });
+
   it('refunds nothing for a write that saved nothing new, such as an append already at the end', () => {
     expect(progressRefundFor({ results: [{ ...landed, savedNothing: true }], refundsSoFar: 0 })).toBe(0);
   });
@@ -246,8 +254,8 @@ describe('progressRefundFor', () => {
 });
 
 describe('STEP_BUDGET_SPENT_AFTER_SPACE_WRITE_MESSAGE', () => {
-  it('asks for the changed space and says they can ask you to continue exactly once', () => {
-    expect(STEP_BUDGET_SPENT_AFTER_SPACE_WRITE_MESSAGE).toContain('Say which space you changed');
+  it('asks what changed, a space or sandbox files, and says they can ask you to continue exactly once', () => {
+    expect(STEP_BUDGET_SPENT_AFTER_SPACE_WRITE_MESSAGE).toContain('which space, or which files in the sandbox');
     expect(STEP_BUDGET_SPENT_AFTER_SPACE_WRITE_MESSAGE.split('they can ask you to continue')).toHaveLength(2);
   });
 });

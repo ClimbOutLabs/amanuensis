@@ -48,15 +48,15 @@ export const REMOVED_TOOL_STREAK_STOP_AT = 2;
 /** Why a step is answered with no tools. */
 export type ForcedAnswer = 'budget' | 'removed_streak' | 'empty_after_tools';
 
-/** Steps one thread may get back in a reply for landing space writes. With the base budget this bounds a reply at 8 + 12 steps. */
+/** Steps one thread may get back in a reply for landing space writes or sandbox file edits. With the base budget this bounds a reply at 8 + 12 steps. */
 export const MAX_PROGRESS_STEP_REFUNDS = 12;
 
 export const STEP_BUDGET_SPENT_MESSAGE =
   'The step budget for this reply is spent. Answer with what you have, and say plainly that you stopped before finishing and that they can ask you to continue.';
 
-/** Used when the budget runs out after space writes landed. */
+/** Used when the budget runs out after space writes or sandbox file edits landed. */
 export const STEP_BUDGET_SPENT_AFTER_SPACE_WRITE_MESSAGE =
-  'The step budget for this reply is spent. Answer with what you have. Say which space you changed and what is still missing, and say plainly that you stopped before finishing and that they can ask you to continue.';
+  'The step budget for this reply is spent. Answer with what you have. Say what you changed (which space, or which files in the sandbox) and what is still missing, and say plainly that you stopped before finishing and that they can ask you to continue.';
 
 /** Sent when a step ended with no words after tools ran, so the model must say what it did. */
 export const EMPTY_AFTER_TOOLS_MESSAGE =
@@ -92,20 +92,28 @@ export function replyStepBudgetFor({
 }
 
 /**
- * Steps to hand back after one tool batch: one when a space write in it landed cleanly, so a build
- * done in parts is not cut off by its own progress. Refused or failed writes, and writes that saved
- * nothing new, earn nothing, and the total per thread never passes MAX_PROGRESS_STEP_REFUNDS.
+ * Steps to hand back after one tool batch: one when a space write or a sandbox file edit in it landed
+ * cleanly, so a build done in parts (a space, or a project written file by file in the sandbox) is not
+ * cut off by its own progress. Refused or failed writes, and writes that saved nothing new, earn
+ * nothing, and the total per thread never passes MAX_PROGRESS_STEP_REFUNDS.
  */
 export function progressRefundFor({
   results,
   refundsSoFar,
 }: {
-  results: readonly { toolName: string; disposition: ToolResultDisposition; failure: boolean; savedNothing: boolean }[];
+  results: readonly {
+    toolName: string;
+    disposition: ToolResultDisposition;
+    failure: boolean;
+    savedNothing: boolean;
+    /** True for the sandbox's own file tools (write_file, apply_patch, replace_text). */
+    sandboxFileEdit?: boolean | undefined;
+  }[];
   refundsSoFar: number;
 }): number {
   const landedWrite = results.some(
     result =>
-      isSpaceContentWriteToolName(result.toolName) &&
+      (isSpaceContentWriteToolName(result.toolName) || result.sandboxFileEdit === true) &&
       result.disposition === 'executed_ok' &&
       !result.failure &&
       !result.savedNothing,
