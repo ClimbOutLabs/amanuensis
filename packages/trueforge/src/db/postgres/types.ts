@@ -234,6 +234,7 @@ export interface SentinelUserSettingsTable {
   maps_without_asking: boolean;
   sandbox_without_asking: boolean;
   chat_search_enabled: boolean;
+  package_downloads_without_project_allowed: boolean;
   created_at: Date;
   updated_at: Date;
 }

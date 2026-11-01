@@ -125,6 +125,7 @@ import { getSharedRunCodeService } from './runtime/sessionResources';
 import { createTokenFactoryBudget } from './runtime/tokenFactoryBudget';
 import { ensureEnvManagedTokenFactoryProvider, seedEnvManagedDefaultChatModel } from './runtime/tokenFactoryProvider';
 import { TurnDrainRegistry } from './runtime/turnDrains';
+import { createPackageMirrorAllowanceCheck } from './sandbox/mirrors/packageMirrorAllowance';
 import { slotsBackendEnabled, startPackageMirrorGateway, startSkillNetworkGateway } from './sandbox/slotBackend';
 import { printStandaloneStartupBanner } from './startupBanner';
 import { TENANT_ID } from './tenancy';
@@ -833,6 +834,13 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
   const resolveAgentStore = (c: Context) => persistence.resolveAgentStore(resolveRequestContext(c));
   const resolveSandboxProviderStore = (c: Context) => persistence.resolveSandboxProviderStore(resolveRequestContext(c));
   const resolveSkillStore = (c: Context) => persistence.resolveSkillStore(resolveRequestContext(c));
+  // Mirror grants are checked against the shared database, so turning downloads off or deleting a
+  // chat through any server ends them here too.
+  const packageMirrorAllowanceHolds = createPackageMirrorAllowanceCheck({
+    sessionStore,
+    repositoryStore,
+    sentinelSettingsStore,
+  });
   const chatSearchIndexer = new ChatSearchIndexer({
     sessionStore,
     globalSettingsStore,
@@ -908,6 +916,7 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     turnDrains,
     sentinelAuditStore,
     chatSearchIndexer,
+    packageMirrorAllowanceHolds,
   };
 }
 
@@ -987,6 +996,7 @@ try {
     turnDrains,
     sentinelAuditStore,
     chatSearchIndexer,
+    packageMirrorAllowanceHolds,
   } = configuration.STANDALONE
     ? await createServerRuntime(
         await createStandalonePersistence({ sqlitePath: configuration.SQLITE_PATH, logger }),
@@ -1181,7 +1191,7 @@ try {
 
   // The download-only package mirrors for the sandbox slots. Best effort: when they cannot
   // start, sandbox package downloads stay off and everything else keeps working.
-  await startPackageMirrorGateway({ logger });
+  await startPackageMirrorGateway({ logger, allowanceHolds: packageMirrorAllowanceHolds });
 
   // The skill network gateway for the sandbox slots. Best effort: when it cannot start,
   // approved skill sites stay unreachable and everything else keeps working.

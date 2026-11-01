@@ -87,6 +87,7 @@ describe('SentinelStateProvider', () => {
         maps_without_asking: false,
         sandbox_without_asking: true,
         chat_search_enabled: false,
+        package_downloads_without_project_allowed: false,
       })),
       updateUserSettings: vi.fn(async () => ({
         offline_mode: false,
@@ -95,6 +96,7 @@ describe('SentinelStateProvider', () => {
         maps_without_asking: false,
         sandbox_without_asking: true,
         chat_search_enabled: false,
+        package_downloads_without_project_allowed: false,
       })),
       listSentinelSessionContext: vi.fn(
         () =>
@@ -140,6 +142,7 @@ describe('SentinelStateProvider', () => {
         maps_without_asking: false,
         sandbox_without_asking: true,
         chat_search_enabled: false,
+        package_downloads_without_project_allowed: false,
       })),
       updateUserSettings: vi.fn(async () => ({
         offline_mode: false,
@@ -148,6 +151,7 @@ describe('SentinelStateProvider', () => {
         maps_without_asking: false,
         sandbox_without_asking: true,
         chat_search_enabled: false,
+        package_downloads_without_project_allowed: false,
       })),
       listSentinelSessionContext: vi.fn(async () => ({
         approvals: [{ toolCallId: 'call-9', tier: 3 as const, card: CARD, eventId: null, threadId: null }],

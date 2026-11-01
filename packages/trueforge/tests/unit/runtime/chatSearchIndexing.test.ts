@@ -215,6 +215,7 @@ describe('ChatSearchIndexer', () => {
       maps_without_asking: undefined,
       sandbox_without_asking: undefined,
       chat_search_enabled: enabled,
+      package_downloads_without_project_allowed: undefined,
     });
   }
 

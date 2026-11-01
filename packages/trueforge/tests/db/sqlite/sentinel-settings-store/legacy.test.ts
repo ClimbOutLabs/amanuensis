@@ -27,6 +27,7 @@ describe('SqliteSentinelSettingsStore with a legacy stored row', () => {
       maps_without_asking: false,
       sandbox_without_asking: true,
       chat_search_enabled: false,
+      package_downloads_without_project_allowed: false,
     });
   });
 

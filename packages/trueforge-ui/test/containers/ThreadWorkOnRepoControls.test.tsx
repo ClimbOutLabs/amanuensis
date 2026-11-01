@@ -34,6 +34,8 @@ function fakeApi(): RepositoryWorkApi {
     startRepositoryWork: vi.fn(),
     getSessionRepository: vi.fn(),
     getRepository: vi.fn(),
+    listRepositories: vi.fn().mockResolvedValue([]),
+    setRepositoryPackageDownloads: vi.fn(),
     listCommandProposals: vi.fn().mockResolvedValue([]),
     confirmCommandProposal: vi.fn(),
     dismissCommandProposal: vi.fn(),

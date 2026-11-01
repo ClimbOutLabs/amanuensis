@@ -498,6 +498,7 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
     resolveSkillStore: deps.resolveSkillStore,
     tokenStore: deps.tokenStore,
     repositoryStore: deps.repositoryStore,
+    sentinelSettingsStore: deps.sentinelSettingsStore,
     sessionStore: deps.sessionStore,
     spaceStore: deps.spaceStore,
     googleConnectionStore: deps.googleConnectionStore,

@@ -11,6 +11,10 @@ export const SentinelUserSettings: core.serialization.ObjectSchema<
     chatSearchEnabled: core.serialization.property("chat_search_enabled", core.serialization.boolean()),
     mapsWithoutAsking: core.serialization.property("maps_without_asking", core.serialization.boolean()),
     offlineMode: core.serialization.property("offline_mode", core.serialization.boolean()),
+    packageDownloadsWithoutProjectAllowed: core.serialization.property(
+        "package_downloads_without_project_allowed",
+        core.serialization.boolean(),
+    ),
     sandboxWithoutAsking: core.serialization.property("sandbox_without_asking", core.serialization.boolean()),
     searchWithoutAsking: core.serialization.property("search_without_asking", core.serialization.boolean()),
     tier2AutoAllow: core.serialization.property(
@@ -24,6 +28,7 @@ export declare namespace SentinelUserSettings {
         chat_search_enabled: boolean;
         maps_without_asking: boolean;
         offline_mode: boolean;
+        package_downloads_without_project_allowed: boolean;
         sandbox_without_asking: boolean;
         search_without_asking: boolean;
         tier2_auto_allow: "file_write"[];

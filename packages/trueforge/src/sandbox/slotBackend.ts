@@ -13,6 +13,7 @@ import {
 } from '@truefoundry/trueforge-core/core';
 import type { Logger } from 'winston';
 import configuration from '../config';
+import type { PackageMirrorAllowanceCheck } from './mirrors/packageMirrorAllowance';
 import { PackageMirrorGateway } from './mirrors/packageMirrorGateway';
 import { packageMirrorTokens } from './mirrors/packageMirrorTokens';
 import { SkillNetworkGateway } from './skillnet/skillNetworkGateway';
@@ -73,7 +74,13 @@ let mirrorGatewayStarted = false;
  * the sockets cannot be opened, package downloads stay unavailable and every other sandbox call
  * keeps working offline, so a mirror problem never takes the sandbox down.
  */
-export async function startPackageMirrorGateway({ logger }: { logger: Logger }): Promise<void> {
+export async function startPackageMirrorGateway({
+  logger,
+  allowanceHolds,
+}: {
+  logger: Logger;
+  allowanceHolds: PackageMirrorAllowanceCheck;
+}): Promise<void> {
   if (mirrorGatewayStarted || !slotsBackendEnabled()) {
     return;
   }
@@ -81,6 +88,7 @@ export async function startPackageMirrorGateway({ logger }: { logger: Logger }):
   try {
     const gateway = new PackageMirrorGateway({
       registry: packageMirrorTokens,
+      allowanceHolds,
       cacheDir: configuration.SANDBOX_MIRROR_CACHE_DIR,
       logger: logger.child({ module: 'package-mirrors' }),
       maxDownloadBytes: configuration.SANDBOX_MIRROR_DOWNLOAD_MAX_BYTES,

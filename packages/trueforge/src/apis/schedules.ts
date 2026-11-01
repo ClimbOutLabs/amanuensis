@@ -55,6 +55,7 @@ import {
   type ScheduleRecord,
   type ScheduleRunRecord,
 } from '../db/scheduleStore';
+import type { ISentinelSettingsStore } from '../db/sentinelSettingsStore';
 import type { SessionCustom, TurnCustom } from '../db/sessionCustom';
 import type { ISkillStore } from '../db/skillStore';
 import type { ISpaceStore } from '../db/spaceStore';
@@ -124,6 +125,8 @@ export interface ScheduleTurnExecutionDeps<TTransaction> {
    */
   tokenStore: IOAuthTokenStore<TTransaction>;
   repositoryStore: IRepositoryStore<TTransaction>;
+  /** Per-person settings, so a scheduled run's chats resolve the package download allowance like a chat turn. */
+  sentinelSettingsStore?: ISentinelSettingsStore<TTransaction> | undefined;
   sessionStore: ISessionStore<SessionCustom, TurnCustom> & ICompletedTurnEventStore;
   spaceStore: ISpaceStore<TTransaction>;
   /** Per-user Google logins; absent, no Gmail tools mount. */
@@ -301,6 +304,7 @@ export async function startScheduleRunOnRequest<TTransaction>(params: {
       skillStore: deps.resolveSkillStore(c),
       tokenStore: deps.tokenStore,
       repositoryStore: deps.repositoryStore,
+      sentinelSettingsStore: deps.sentinelSettingsStore,
       sessionStore: deps.sessionStore,
       spaceStore: deps.spaceStore,
       googleConnectionStore: deps.googleConnectionStore,

@@ -14,6 +14,7 @@ describe('sentinelSettingsServices', () => {
       maps_without_asking: false,
       sandbox_without_asking: false,
       chat_search_enabled: undefined,
+      package_downloads_without_project_allowed: false,
     });
 
     expect(await services.isOffline({ tenant_id: 't1', created_by: 'alice' })).toBe(true);
@@ -41,6 +42,7 @@ describe('sentinelSettingsServices', () => {
       maps_without_asking: undefined,
       sandbox_without_asking: undefined,
       chat_search_enabled: undefined,
+      package_downloads_without_project_allowed: undefined,
     });
     expect((await services.tier2AutoAllow(alice)).has('file_write')).toBe(true);
   });

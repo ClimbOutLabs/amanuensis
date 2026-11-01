@@ -4200,6 +4200,52 @@ describe('runDataImport when Aman internals have changed', () => {
     }
   });
 
+  it('reads permission settings from before the download allowance without noting them', async () => {
+    const { source, archive } = await seededArchive();
+    const target = await makeInstance('target-older-downloads');
+    try {
+      const older = await repack(archive, entries => {
+        const settings = recordAt(parseJson(entries.get('settings.json'), 'settings.json'), 'settings');
+        delete recordAt(settings['permission_settings'], 'permission settings')[
+          'package_downloads_without_project_allowed'
+        ];
+        entries.set('settings.json', Buffer.from(JSON.stringify(settings)));
+      });
+
+      const result = await runDataImport(importDeps(target), importRequest(older));
+      expect(result.summary).not.toContain('permission setting');
+      expect(
+        (await target.stores.sentinelSettingsStore.get({ tenant_id: TENANT, created_by: 'alice' }))
+          .package_downloads_without_project_allowed,
+      ).toBe(false);
+    } finally {
+      await source.close();
+      await target.close();
+    }
+  });
+
+  it('never turns the download allowance on, whatever the export file says', async () => {
+    const { source, archive } = await seededArchive();
+    const target = await makeInstance('target-downloads-off');
+    try {
+      // The seed exports the allowance as on; the import must still leave it off.
+      const entries = new Map(readZipEntries(archive).map(entry => [entry.name, entry.data]));
+      const settings = recordAt(parseJson(entries.get('settings.json'), 'settings.json'), 'settings');
+      expect(recordAt(settings['permission_settings'], 'permission settings')).toMatchObject({
+        package_downloads_without_project_allowed: true,
+      });
+
+      await runDataImport(importDeps(target), importRequest(archive));
+      expect(
+        (await target.stores.sentinelSettingsStore.get({ tenant_id: TENANT, created_by: 'alice' }))
+          .package_downloads_without_project_allowed,
+      ).toBe(false);
+    } finally {
+      await source.close();
+      await target.close();
+    }
+  });
+
   it('still refuses a chat message that is itself broken', async () => {
     const { source, archive } = await seededArchive();
     const target = await makeInstance('target-broken-message');

@@ -34,6 +34,7 @@ describe('OfflineIndicator', () => {
       maps_without_asking: false,
       sandbox_without_asking: true,
       chat_search_enabled: false,
+      package_downloads_without_project_allowed: false,
     });
     render(
       <SentinelApiProvider api={api}>
@@ -51,6 +52,7 @@ describe('OfflineIndicator', () => {
       maps_without_asking: false,
       sandbox_without_asking: true,
       chat_search_enabled: false,
+      package_downloads_without_project_allowed: false,
     });
     render(
       <SentinelApiProvider api={api}>
@@ -69,6 +71,7 @@ describe('OfflineIndicator', () => {
       maps_without_asking: false,
       sandbox_without_asking: true,
       chat_search_enabled: false,
+      package_downloads_without_project_allowed: false,
     });
     const { container } = render(
       <SentinelApiProvider api={api}>
@@ -89,6 +92,7 @@ describe('SentinelSettings', () => {
       maps_without_asking: false,
       sandbox_without_asking: true,
       chat_search_enabled: false,
+      package_downloads_without_project_allowed: false,
     });
     render(
       <SentinelApiProvider api={api}>
@@ -115,6 +119,7 @@ describe('SentinelSettings', () => {
       maps_without_asking: false,
       sandbox_without_asking: true,
       chat_search_enabled: false,
+      package_downloads_without_project_allowed: false,
     });
     render(
       <SentinelApiProvider api={api}>
@@ -146,6 +151,7 @@ describe('SentinelSettings', () => {
         maps_without_asking: false,
         sandbox_without_asking: true,
         chat_search_enabled: false,
+        package_downloads_without_project_allowed: false,
       });
       render(
         <SentinelApiProvider api={api}>
@@ -168,6 +174,7 @@ describe('SentinelSettings', () => {
       maps_without_asking: false,
       sandbox_without_asking: true,
       chat_search_enabled: false,
+      package_downloads_without_project_allowed: false,
     });
     updateUserSettings.mockRejectedValueOnce(new Error('Save failed.'));
     render(
@@ -187,6 +194,7 @@ describe('SentinelSettings', () => {
       maps_without_asking: false,
       sandbox_without_asking: true,
       chat_search_enabled: false,
+      package_downloads_without_project_allowed: false,
     });
     render(
       <SentinelApiProvider api={api}>
@@ -216,6 +224,7 @@ describe('SentinelSettings', () => {
       maps_without_asking: false,
       sandbox_without_asking: true,
       chat_search_enabled: false,
+      package_downloads_without_project_allowed: false,
     });
     updateUserSettings.mockRejectedValueOnce(new Error('Save failed.'));
     render(
@@ -235,6 +244,7 @@ describe('SentinelSettings', () => {
       maps_without_asking: false,
       sandbox_without_asking: true,
       chat_search_enabled: false,
+      package_downloads_without_project_allowed: false,
     });
     render(
       <SentinelApiProvider api={api}>
@@ -265,6 +275,7 @@ describe('SentinelSettings', () => {
       maps_without_asking: false,
       sandbox_without_asking: false,
       chat_search_enabled: false,
+      package_downloads_without_project_allowed: false,
     });
     render(
       <SentinelApiProvider api={api}>

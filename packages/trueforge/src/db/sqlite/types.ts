@@ -226,6 +226,7 @@ export interface SentinelUserSettingsTable {
   sandbox_without_asking: number;
   /** SQLite's 0/1 integer boolean. */
   chat_search_enabled: number;
+  package_downloads_without_project_allowed: number;
   created_at: string;
   updated_at: string;
 }

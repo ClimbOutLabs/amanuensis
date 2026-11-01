@@ -3,6 +3,7 @@ import type { ResolveRequestContext } from '../auth/identity';
 import type { ISentinelSettingsStore } from '../db/sentinelSettingsStore';
 import { getSentinelUserSettingsRoute, updateSentinelUserSettingsRoute } from '../routes/sentinelSettingsRoutes';
 import type { ChatSearchIndexer } from '../runtime/chatSearchIndexing';
+import { packageMirrorTokens } from '../sandbox/mirrors/packageMirrorTokens';
 import type { UpdateSentinelUserSettingsRequest } from '../schemas/sentinelSettings';
 import { TENANT_ID } from './sessions';
 
@@ -41,7 +42,13 @@ export function createSentinelSettingsRouter(deps: SentinelSettingsRouterDeps) {
       maps_without_asking: body.maps_without_asking,
       sandbox_without_asking: body.sandbox_without_asking,
       chat_search_enabled: body.chat_search_enabled,
+      package_downloads_without_project_allowed: body.package_downloads_without_project_allowed,
     });
+    if (body.package_downloads_without_project_allowed === false) {
+      // Taking the allowance back ends every live mirror grant for the person's chats without a
+      // project at once, in this same request.
+      packageMirrorTokens.revokePersonWithoutRepository(person);
+    }
     if (body.chat_search_enabled !== undefined) {
       await deps.chatSearchIndexer.followSwitch({ ...person, enabled: settings.chat_search_enabled });
     }

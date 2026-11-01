@@ -1119,6 +1119,7 @@ describe('audit rows for schedule firings', () => {
       maps_without_asking: undefined,
       sandbox_without_asking: undefined,
       chat_search_enabled: true,
+      package_downloads_without_project_allowed: undefined,
     });
     const execution = createScheduleExecutionRouter({
       ...stubTurnExecutionDeps(built.agentStore, built.scheduleStore, built.db),
