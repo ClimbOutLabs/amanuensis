@@ -1,7 +1,21 @@
 ---
 title: "Install"
-description: "Install Amanuensis with the one-command installer: Docker prerequisite, first login, extra instances, remote access, doctor, backup and upgrade."
+description: "Install Amanuensis with the guided setup wizard: Docker prerequisite, first login, extra instances, remote access, doctor, backup and upgrade."
 ---
+
+## The setup wizard: the default way in
+
+Most people set Amanuensis up with the guided wizard. It is a page that opens in your browser and walks through the same install this page describes, one screen at a time: it checks your computer and says in plain words what to fix, asks who you are and the few choices that matter, shows the whole plan before anything changes, then installs with a progress bar and finishes with the address to open. The wizard drives the same `installer/install.sh` described below; it adds no steps of its own.
+
+On a Mac or Linux computer with Node.js 22 or newer, from the repository root:
+
+```bash
+node packages/aman-installer/src/main.ts setup
+```
+
+The page is served on this computer only, at an address with a one-time token in it; it is not reachable from any other device. Your password and any keys are handed to the installer directly and are never shown in the page's address, stored in the browser, or written to a log. If you would rather not open a browser, `--no-browser` prints the address instead. Running `aman` with no command on a computer with nothing installed opens the wizard too. On Windows, the wizard runs inside WSL2: see the [Windows install guide](/install-windows).
+
+The one command below stays for scripted installs and for computers without Node.js: it asks the same questions in the terminal instead.
 
 ## What this is
 

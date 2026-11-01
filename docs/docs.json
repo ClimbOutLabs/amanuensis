@@ -40,7 +40,7 @@
         "groups": [
           {
             "group": "Getting Started",
-            "pages": ["introduction", "install", "quickstart"]
+            "pages": ["introduction", "install", "install-windows", "quickstart"]
           },
           {
             "group": "Your Data and Safety",

@@ -3,12 +3,21 @@
 The TypeScript side of the Aman installer. Installing itself is the shell
 installer's job (`installer/install.sh` in this repository); this package
 reads the state that installer writes, in the layout `installer/STATE.md`
-writes down, and it is where the `aman setup` wizard will live: a local
-web page that drives the shell installer for the person.
+writes down, and it is the home of the `aman setup` wizard: a local web
+page that drives the shell installer for the person.
 
 What it can do today:
 
 - `aman --version` prints its version.
+- `aman setup` serves the guided setup wizard: a page on this computer
+  only (127.0.0.1, a random port, a one-time token in the address) that
+  checks the computer, asks who the install is for and the few choices
+  that matter, shows the installer's plan, then runs the installer on
+  its progress stream (`install.sh --events`) and reports the result.
+  `--no-browser` prints the page's address instead of opening it.
+  Running `aman` with no command on a computer with nothing installed
+  opens the wizard too. The wizard adds no install steps of its own and
+  changes nothing on a computer where Aman is already set up.
 - `aman doctor` checks this computer (Docker, its runtime, its credential
   store, the images, free disk, memory, the clock, backups, the sandbox
   slots, the folder Aman was installed from, and https) and then each
