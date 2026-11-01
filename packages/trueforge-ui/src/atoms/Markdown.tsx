@@ -21,7 +21,7 @@ import { remarkCitationMarkers } from '../utils/remarkCitationMarkers.js';
 import { remarkNormalizeProseTypography } from '../utils/remarkNormalizeProseTypography.js';
 import { transformMarkdownSource } from '../utils/transformMarkdownSource.js';
 import { ExternalUrlConfirmProvider, MarkdownExternalLink, useExternalUrlConfirm } from './externalUrlConfirm.js';
-import { getHostname, isTrustedHost } from './externalUrlTrust.js';
+import { isTrustedImageUrl } from './externalUrlTrust.js';
 import { auiButtonClass } from './lib/buttonClasses.js';
 import { cn } from './lib/cn.js';
 import type { OpenUiFenceBlockProps } from './OpenUiFenceBlock.js';
@@ -188,18 +188,16 @@ function SpacePicture({ src, alt }: { src: string; alt: string }) {
 /**
  * A remote image outside a chat turn, shown as a fixed-size thumbnail. The browser fetches it only
  * after the person confirms, so an image URL in a prompt-injected page never reaches its host on
- * render. Confirming trusts the host for the rest of the session; "Don't ask again" in the dialog
- * remembers the host on this device, and a remembered host's images load without asking. Loads
- * with no referrer; a failed load shows the alt text instead of an empty box.
+ * render. Confirming trusts this exact image for the rest of the session; "Don't ask again" in
+ * the dialog remembers this exact image on this device, and a remembered image loads without
+ * asking. Other images from the same host still ask first. Loads with no referrer; a failed load
+ * shows the alt text instead of an empty box.
  */
 function RemoteImageThumbnail({ src, alt }: { src: string; alt: string }) {
   const [failed, setFailed] = useState(false);
-  const { requestImageConfirm, isSessionImageHostTrusted } = useExternalUrlConfirm();
+  const { requestImageConfirm, isSessionImageUrlTrusted } = useExternalUrlConfirm();
   const host = remoteImageHost(src);
-  const imageHost = getHostname(src);
-  const hostTrusted =
-    imageHost != null && (isTrustedHost({ kind: 'images', host: imageHost }) || isSessionImageHostTrusted(imageHost));
-  const showImage = hostTrusted;
+  const showImage = isTrustedImageUrl(src) || isSessionImageUrlTrusted(src);
   const label = alt !== '' ? alt : 'External image';
   return (
     <span

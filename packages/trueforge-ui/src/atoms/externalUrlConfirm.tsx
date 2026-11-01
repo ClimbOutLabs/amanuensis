@@ -6,13 +6,25 @@ import {
   useContext,
   useMemo,
   useState,
+  useSyncExternalStore,
   type ComponentPropsWithoutRef,
   type MouseEvent,
   type ReactNode,
 } from 'react';
 
 import { Icon } from '../icons/Icon.js';
-import { getHostname, isExternalHttpUrl, isTrustedHost, openExternalHttpUrl, trustHost } from './externalUrlTrust.js';
+import {
+  getHostname,
+  getSessionImageTrustVersion,
+  isExternalHttpUrl,
+  isSessionImageUrlTrusted,
+  isTrustedLinkHost,
+  openExternalHttpUrl,
+  subscribeToSessionImageTrust,
+  trustImageUrl,
+  trustLinkHost,
+  trustSessionImageUrl,
+} from './externalUrlTrust.js';
 import { cn } from './lib/cn.js';
 import { Button } from './primitives/Button.js';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from './primitives/Dialog.js';
@@ -25,7 +37,7 @@ type PendingExternalUrl = {
 type ExternalUrlConfirmContextValue = {
   requestLinkConfirm: (url: string) => void;
   requestImageConfirm: (url: string) => void;
-  isSessionImageHostTrusted: (host: string) => boolean;
+  isSessionImageUrlTrusted: (url: string) => boolean;
 };
 
 const ExternalUrlConfirmContext = createContext<ExternalUrlConfirmContextValue | null>(null);
@@ -71,7 +83,10 @@ function ConfirmCheckbox({ checked }: { checked: boolean }) {
 export function ExternalUrlConfirmProvider({ children }: { children: ReactNode }) {
   const [pending, setPending] = useState<PendingExternalUrl | null>(null);
   const [dontAskAgain, setDontAskAgain] = useState(false);
-  const [sessionImageHosts, setSessionImageHosts] = useState(() => new Set<string>());
+  // Session image trust is shared across every provider on the page, so a
+  // choice in one message still counts in the next one. Subscribing here makes
+  // this provider re-render when another message records a choice.
+  const sessionTrustVersion = useSyncExternalStore(subscribeToSessionImageTrust, getSessionImageTrustVersion, () => 0);
 
   const requestLinkConfirm = useCallback((url: string) => {
     setDontAskAgain(false);
@@ -83,9 +98,14 @@ export function ExternalUrlConfirmProvider({ children }: { children: ReactNode }
     setPending({ kind: 'image', url });
   }, []);
 
-  const isSessionImageHostTrusted = useCallback(
-    (host: string) => sessionImageHosts.has(host.toLowerCase()),
-    [sessionImageHosts],
+  const checkSessionImageUrlTrusted = useCallback(
+    (url: string) => {
+      // Reading the version keeps this check tied to the shared store, so a
+      // new version means the answer is read again instead of served stale.
+      void sessionTrustVersion;
+      return isSessionImageUrlTrusted(url);
+    },
+    [sessionTrustVersion],
   );
 
   const close = useCallback(() => {
@@ -97,19 +117,13 @@ export function ExternalUrlConfirmProvider({ children }: { children: ReactNode }
     if (pending == null) return;
     const host = getHostname(pending.url);
     if (pending.kind === 'link') {
-      if (dontAskAgain && host != null) trustHost({ kind: 'links', host });
+      if (dontAskAgain && host != null) trustLinkHost(host);
       openExternalHttpUrl(pending.url);
       close();
       return;
     }
-    if (host != null) {
-      if (dontAskAgain) trustHost({ kind: 'images', host });
-      setSessionImageHosts(prev => {
-        const next = new Set(prev);
-        next.add(host.toLowerCase());
-        return next;
-      });
-    }
+    trustSessionImageUrl(pending.url);
+    if (dontAskAgain) trustImageUrl(pending.url);
     close();
   }, [close, dontAskAgain, pending]);
 
@@ -117,12 +131,12 @@ export function ExternalUrlConfirmProvider({ children }: { children: ReactNode }
     () => ({
       requestLinkConfirm,
       requestImageConfirm,
-      isSessionImageHostTrusted,
+      isSessionImageUrlTrusted: checkSessionImageUrlTrusted,
     }),
-    [isSessionImageHostTrusted, requestImageConfirm, requestLinkConfirm],
+    [checkSessionImageUrlTrusted, requestImageConfirm, requestLinkConfirm],
   );
 
-  const pendingHost = pending != null ? getHostname(pending.url) : null;
+  const pendingHost = pending != null && pending.kind === 'link' ? getHostname(pending.url) : null;
   const title = pending?.kind === 'image' ? 'Show external image' : 'Open external link';
   const description =
     pending?.kind === 'image'
@@ -130,11 +144,13 @@ export function ExternalUrlConfirmProvider({ children }: { children: ReactNode }
       : "You're leaving this app to visit an external link:";
   const confirmLabel = pending?.kind === 'image' ? 'Show image' : 'Open link';
   const checkboxLabel =
-    pendingHost == null
+    pending == null
       ? null
-      : pending?.kind === 'image'
-        ? `Don't ask again for images from ${pendingHost}`
-        : `Don't ask again for links to ${pendingHost}`;
+      : pending.kind === 'image'
+        ? "Don't ask again for this image"
+        : pendingHost == null
+          ? null
+          : `Don't ask again for links to ${pendingHost}`;
 
   return (
     <ExternalUrlConfirmContext.Provider value={value}>
@@ -209,7 +225,7 @@ export function MarkdownExternalLink({
 
     event.preventDefault();
     const host = getHostname(href);
-    if (host != null && isTrustedHost({ kind: 'links', host })) {
+    if (host != null && isTrustedLinkHost(host)) {
       openExternalHttpUrl(href);
       return;
     }
