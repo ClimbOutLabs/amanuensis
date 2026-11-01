@@ -368,6 +368,7 @@ export {
   SKILL_DOWNLOAD_TIMEOUT_SECONDS,
   Sandbox,
   buildWriteAndRunScriptCommand,
+  forgetShownSkillNotices,
 } from './sandbox/Sandbox';
 export type {
   BoundRepository,

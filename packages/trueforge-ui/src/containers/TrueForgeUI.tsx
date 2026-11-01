@@ -14,7 +14,7 @@ export type {
   ChatFolderStore,
 } from '../server/ChatFolderContext.js';
 export type { AgentConfig, SettingsOpenRequest } from '../server/ShellModeContext.js';
-export type { Space, SpaceStatus, SpaceStore } from '../server/SpaceContext.js';
+export type { Space, SpaceFolder, SpaceStatus, SpaceStore } from '../server/SpaceContext.js';
 export type { TrueForgeBuiltInServerConfig, TrueForgeServerConfig } from '../server/TrueForgeServerConfig.js';
 export type { LayoutProp } from '../theme/types.js';
 export type { ChatLayout, TrueForgeUIProps } from './TrueForgeUIShell.js';
