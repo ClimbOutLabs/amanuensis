@@ -769,7 +769,7 @@ SOFTWARE.
 
 ## 10. Local voice for spoken replies (Apache-2.0, MIT, BSD)
 
-The `ops/aman-tts` image reads replies aloud on the person's own computer. Its build downloads these files, pinned by SHA-256 in `ops/aman-tts/pins.py`, and the image contains them unmodified except that only three voices are kept.
+The `ops/aman-tts` image reads replies aloud on the person's own computer. Its build downloads these files, pinned by SHA-256 in `ops/aman-tts/pins.py`, and the image contains them unmodified except that only six American English voices are kept.
 
 | Component                                   | License      | Copyright                                            | Source                                                                 |
 | ------------------------------------------- | ------------ | ---------------------------------------------------- | ---------------------------------------------------------------------- |

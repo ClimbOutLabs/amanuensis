@@ -1,5 +1,6 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { SERVER_VOICE_STORAGE_KEY } from '../../src/utils/speechReplyPreferences';
 import {
   SERVER_VOICE_RETRY_MS,
   createSpokenReplyPlayer,
@@ -7,12 +8,17 @@ import {
   type ServerVoiceApi,
 } from '../../src/utils/spokenReplyPlayer';
 
-function serverVoice(behavior: (text: string) => Promise<Blob>): ServerVoiceApi & { texts: string[] } {
+function serverVoice(
+  behavior: (text: string) => Promise<Blob>,
+): ServerVoiceApi & { texts: string[]; voices: string[] } {
   const texts: string[] = [];
+  const voices: string[] = [];
   return {
     texts,
-    speak: ({ text }) => {
+    voices,
+    speak: ({ text, voice }) => {
       texts.push(text);
+      voices.push(voice);
       return behavior(text);
     },
   };
@@ -27,6 +33,23 @@ const wav = (text: string) => {
 };
 
 describe('createSpokenReplyPlayer', () => {
+  afterEach(() => {
+    window.localStorage.removeItem(SERVER_VOICE_STORAGE_KEY);
+  });
+
+  it('reads with the computer voice the person picked, the default until then', async () => {
+    const server = serverVoice(text => Promise.resolve(wav(text)));
+    const player = createSpokenReplyPlayer({ serverVoice: server, playAudio: () => Promise.resolve() });
+
+    await player.speak('Hello.');
+    window.localStorage.setItem(SERVER_VOICE_STORAGE_KEY, 'am_fenrir');
+    await player.speak('Hello again.');
+    window.localStorage.setItem(SERVER_VOICE_STORAGE_KEY, 'not_a_voice');
+    await player.speak('And again.');
+
+    expect(server.voices).toEqual(['af_heart', 'am_fenrir', 'af_heart']);
+  });
+
   it('prefers the server voice when it answers', async () => {
     const server = serverVoice(text => Promise.resolve(wav(text)));
     const played: string[] = [];

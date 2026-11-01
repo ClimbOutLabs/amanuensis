@@ -6,9 +6,18 @@ import { isVoiceCaptureSupported } from '../atoms/lib/voiceRecorder.js';
 import { Switch } from '../atoms/primitives/Switch.js';
 import { isHotkeyId, PUSH_TO_TALK_HOTKEYS, usePushToTalkHotkey } from '../utils/pushToTalkHotkey.js';
 import { useSpeechVoices } from '../utils/speechOutput.js';
-import { readSpeechVoiceURI, useSpeakVoiceReplies, writeSpeechVoiceURI } from '../utils/speechReplyPreferences.js';
+import {
+  isServerVoiceId,
+  readSpeechVoiceURI,
+  SERVER_VOICES,
+  useServerVoice,
+  useSpeakVoiceReplies,
+  writeSpeechVoiceURI,
+} from '../utils/speechReplyPreferences.js';
 import { useSpokenReply } from './SpokenReplyContext.js';
 import { useOptionalVoiceInput } from './VoiceInputContext.js';
+
+const SERVER_VOICE_SAMPLE = 'Hi, this is how I will sound when I read my answers to you.';
 
 const selectClassName =
   'w-full rounded-md border border-border/70 bg-secondary-bg px-3 py-2.5 text-sm text-text-primary outline-none transition-colors focus-visible:border-focus-ring focus-visible:ring-2 focus-visible:ring-focus-ring/50';
@@ -19,6 +28,8 @@ export function VoiceReplySettings() {
   const voices = useSpeechVoices();
   const spokenReply = useSpokenReply();
   const [voiceURI, setVoiceURI] = useState(() => readSpeechVoiceURI() ?? '');
+  const { voice: serverVoice, setVoice: setServerVoice } = useServerVoice();
+  const hasServerVoice = spokenReply.hasServerVoice();
 
   if (!spokenReply.canSpeak()) return null;
 
@@ -46,10 +57,38 @@ export function VoiceReplySettings() {
           aria-describedby="voice-reply-switch-hint"
         />
       </div>
+      {hasServerVoice && (
+        <div className="mt-4">
+          <label htmlFor="voice-reply-server-voice" className="mb-1.5 block text-sm font-medium text-text-primary">
+            Voice
+          </label>
+          <select
+            id="voice-reply-server-voice"
+            aria-describedby="voice-reply-server-voice-hint"
+            className={selectClassName}
+            value={serverVoice}
+            onChange={event => {
+              if (!isServerVoiceId(event.target.value)) return;
+              setServerVoice(event.target.value);
+              // A short sample, so the person hears the voice they picked.
+              void spokenReply.speak(SERVER_VOICE_SAMPLE);
+            }}
+          >
+            {SERVER_VOICES.map(voice => (
+              <option key={voice.id} value={voice.id}>
+                {voice.label}
+              </option>
+            ))}
+          </select>
+          <p id="voice-reply-server-voice-hint" className="mt-1 text-xs leading-snug text-text-secondary">
+            This voice runs on your own computer. Pick one to hear a short sample. Saved in this browser only.
+          </p>
+        </div>
+      )}
       {voices.length > 0 && (
         <div className="mt-4">
           <label htmlFor="voice-reply-voice" className="mb-1.5 block text-sm font-medium text-text-primary">
-            Voice
+            {hasServerVoice ? 'Backup voice' : 'Voice'}
           </label>
           <select
             id="voice-reply-voice"
@@ -67,6 +106,11 @@ export function VoiceReplySettings() {
               </option>
             ))}
           </select>
+          {hasServerVoice && (
+            <p className="mt-1 text-xs leading-snug text-text-secondary">
+              Your browser's voice reads replies when the voice on your computer is not running.
+            </p>
+          )}
         </div>
       )}
     </section>

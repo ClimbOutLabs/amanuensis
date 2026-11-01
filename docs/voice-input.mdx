@@ -59,6 +59,8 @@ Point the server at the published port by setting `STT_URL=http://localhost:8001
 
 Replies can be read aloud. When the voice container is running, replies are read by a voice that runs on your own computer. When it is not, your browser's built-in voice reads them instead.
 
+**Choosing the voice.** Pick one of six voices in Personalization under "Voice replies". Heart is the default. Picking a voice plays a short sample. The choice is saved in this browser only.
+
 **What it is.** A small container called `aman-tts`. It runs the Kokoro voice model (Apache-2.0) on the computer's processor and turns reply text into audio. The model and its voices are built into the container, so it never goes online.
 
 **Nothing leaves your computer.** The browser sends the reply text to the server, which passes it to `aman-tts` and sends the audio back. The text and the audio stay on your computer, and neither is saved or written to the logs.
