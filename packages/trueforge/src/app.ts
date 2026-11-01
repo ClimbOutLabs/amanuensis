@@ -65,6 +65,7 @@ import {
   createAuthMiddleware,
   createUiSessionAuthMiddleware,
   truefoundryAdminMiddleware,
+  tryAuthenticate,
 } from './auth/middleware';
 import type { OidcDiscoveryHandle } from './auth/oidc';
 import { createRequestGuardMiddleware } from './auth/requestGuard';
@@ -646,6 +647,7 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
       tokenStore: deps.tokenStore,
       mcpServerStore: deps.resolveMcpServerStore(),
       logger: deps.logger,
+      resolveSession: c => tryAuthenticate({ authenticator: deps.authenticator, context: c }),
     }),
   );
   app.route(

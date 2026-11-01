@@ -164,12 +164,9 @@ export function createAuthRouter(params: {
         return soft;
       }
       // Standalone has one account, so a refused person is told why; a shared allowlist stays undisclosed.
+      // Other exchange errors can carry the provider response and address, so they stay in the log above.
       const reason =
-        error instanceof EmailNotAllowedError && configuration.STANDALONE
-          ? OWNER_ONLY_MESSAGE
-          : error instanceof Error
-            ? error.message
-            : 'login_failed';
+        error instanceof EmailNotAllowedError && configuration.STANDALONE ? OWNER_ONLY_MESSAGE : 'login_failed';
       return c.redirect(oauthErrorRedirect(reason), 302);
     }
   });

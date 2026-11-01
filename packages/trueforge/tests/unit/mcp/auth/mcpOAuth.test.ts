@@ -346,7 +346,7 @@ describe('buildMcpAuthorizationUrl', () => {
     const { tokenStore } = newStores();
     stubOauthFetch({});
 
-    const authUrl = await buildMcpAuthorizationUrl({
+    const { authorizationUrl: authUrl, state } = await buildMcpAuthorizationUrl({
       tokenStore,
       client: sampleClient,
       serverId: SERVER_ID,
@@ -364,9 +364,9 @@ describe('buildMcpAuthorizationUrl', () => {
     expect(authUrl.searchParams.get('code_challenge')).toBeTruthy();
     expect(authUrl.searchParams.get('resource')).toBe(resourceUrlFromServerUrl(SERVER_URL).href);
 
-    const state = authUrl.searchParams.get('state');
     expect(state).toBeTruthy();
-    const pending = await tokenStore.consumePendingAuthorization({ state: state! });
+    expect(authUrl.searchParams.get('state')).toBe(state);
+    const pending = await tokenStore.consumePendingAuthorization({ state });
     expect(pending).toMatchObject({
       state,
       id: SERVER_ID,
@@ -384,7 +384,7 @@ describe('buildMcpAuthorizationUrl', () => {
       server: { ...sampleClient.server, codeChallengeMethodsSupported: null },
     };
 
-    const authUrl = await buildMcpAuthorizationUrl({
+    const { authorizationUrl: authUrl } = await buildMcpAuthorizationUrl({
       tokenStore,
       client,
       serverId: SERVER_ID,
@@ -660,7 +660,7 @@ describe('completeMcpAuthorization', () => {
     const stores = newStores();
     await stores.mcpServerStore.saveClient({ id: SERVER_ID, record: sampleClient });
 
-    const authUrl = await buildMcpAuthorizationUrl({
+    const { authorizationUrl: authUrl, state } = await buildMcpAuthorizationUrl({
       tokenStore: stores.tokenStore,
       client: sampleClient,
       serverId: SERVER_ID,
@@ -669,7 +669,7 @@ describe('completeMcpAuthorization', () => {
       mcpServerName: SERVER_NAME,
       returnTo: '/connected',
     });
-    const state = authUrl.searchParams.get('state')!;
+    expect(authUrl.searchParams.get('state')).toBe(state);
 
     const { tokenBodies } = stubOauthFetch({
       tokenResponse: {
@@ -737,7 +737,7 @@ describe('completeMcpAuthorization', () => {
     const stores = newStores();
     const deleteClient = jest.spyOn(stores.mcpServerStore, 'deleteClient');
     await stores.mcpServerStore.saveClient({ id: SERVER_ID, record: sampleClient });
-    const authUrl = await buildMcpAuthorizationUrl({
+    const { state } = await buildMcpAuthorizationUrl({
       tokenStore: stores.tokenStore,
       client: sampleClient,
       serverId: SERVER_ID,
@@ -746,7 +746,6 @@ describe('completeMcpAuthorization', () => {
       mcpServerName: SERVER_NAME,
       returnTo: '/after',
     });
-    const state = authUrl.searchParams.get('state')!;
 
     globalThis.fetch = (async (input, init) => {
       const url = String(input);
