@@ -242,7 +242,11 @@ print_plan() {
     total_gb=$(awk -v mb="$DL_TOTAL_MB" 'BEGIN {printf "%.1f", mb / 1024}')
     hosts=$(printf '%s' "$DL_HOSTS" | tr ' ' '\n' | sort -u | tr '\n' ' ')
     for host in $hosts; do count=$((count + 1)); done
-    ui_hint "Downloads: about $total_gb GB from $count sites. The first run takes several minutes, mostly to build the app."
+    if [ "$PLAN_BUILDS_APP" = 1 ]; then
+      ui_hint "Downloads: about $total_gb GB from $count sites. The first run takes several minutes, mostly to build the app."
+    else
+      ui_hint "Downloads: about $total_gb GB from $count sites. The first run takes several minutes."
+    fi
     if [ "$UI_VERBOSE" = 1 ]; then
       say "  First-run downloads (approximate):$DL_LINES"
       say "    total: about $DL_TOTAL_MB MB ($total_gb GB)"
@@ -527,6 +531,7 @@ plan_aman_image() { # tag, have text, download text, build text, download id, bu
     plan_add have "$have"
   elif [ "$OPT_BUILD_FROM_SOURCE" = 1 ]; then
     plan_add todo "$build"
+    if [ "$tag" = "$REL_APP_TAG" ]; then PLAN_BUILDS_APP=1; fi
     for dl in "$@"; do dl_add "$dl"; done
   else
     plan_add todo "$get"
@@ -543,6 +548,7 @@ cmd_install() {
   INSTALL_T0=$SECONDS
   DL_TOTAL_MB=0
   DL_LINES=
+  PLAN_BUILDS_APP=0
   DL_HOSTS=
   release_resolve
   AMAN_PASSWORD=
