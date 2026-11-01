@@ -1,22 +1,20 @@
 /**
  * Pages: one Markdown file per person (`people/<slug>.md`) or matter (`matters/<slug>.md`)
- * inside a vault, read and written by the nightly pass, Settings, and the chat tools.
+ * inside a vault.
  *
  * Canonical owner of the page format. A parsed page keeps every line's raw text, and a line
  * is rendered from its raw text unless something changed it, so parse then render returns the
  * exact bytes for any input, however oddly shaped. Only lines a change touched are rendered
  * canonically.
  */
-import { randomUUID } from 'node:crypto';
 import type { Dirent } from 'node:fs';
-import { mkdir, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
+import { readFile, readdir } from 'node:fs/promises';
 import path from 'node:path';
 import { parse, stringify, type ToStringOptions } from 'yaml';
 import { z } from 'zod';
 
-import type { FactDate, FactId, FactMarker, FactSource } from './memoryNotes';
 import { FactMarkerSchema, formatMarker, splitFactMarker } from './memoryNotes';
-import { isPageSlug, pageSlug } from './pageSlug';
+import { isPageSlug } from './pageSlug';
 
 export const PAGE_KINDS = ['person', 'matter'] as const;
 export const PageKindSchema = z.enum(PAGE_KINDS);
@@ -29,12 +27,6 @@ export const PAGE_FOLDERS: Readonly<Record<PageKind, string>> = { person: 'peopl
 export const PAGE_SECTIONS = ['How you write to them', 'Now', 'Decided', 'Open', 'Unconfirmed', 'Earlier'] as const;
 export const PageSectionSchema = z.enum(PAGE_SECTIONS);
 export type PageSection = z.infer<typeof PageSectionSchema>;
-
-/** Which sections a fresh page of each kind starts with. */
-export const PAGE_SECTIONS_BY_KIND: Readonly<Record<PageKind, readonly PageSection[]>> = {
-  person: ['How you write to them', 'Now', 'Unconfirmed', 'Earlier'],
-  matter: ['Now', 'Decided', 'Open', 'Unconfirmed', 'Earlier'],
-};
 
 export const MatterStatusSchema = z.enum(['active', 'done']);
 export type MatterStatus = z.infer<typeof MatterStatusSchema>;
@@ -77,25 +69,6 @@ export const PageFactTextSchema = z
 /** One fact bullet: its text without the leading `- ` and without the marker, plus the marker. */
 export const PageFactSchema = z.object({ text: PageFactTextSchema, marker: FactMarkerSchema });
 export type PageFact = z.infer<typeof PageFactSchema>;
-
-/** Thrown when fact text could not stand as one bullet. The message says what to change. */
-export class PageFactTextError extends Error {
-  constructor(message: string, options: { cause: unknown }) {
-    super(message, options);
-    this.name = 'PageFactTextError';
-  }
-}
-
-/** The fact with its text checked and trimmed, or a `PageFactTextError`. Every writer builds facts through this. */
-export function parsePageFact(fact: PageFact): PageFact {
-  const parsed = PageFactSchema.safeParse(fact);
-  if (!parsed.success) {
-    throw new PageFactTextError(parsed.error.issues[0]?.message ?? 'A fact must be one line of plain text.', {
-      cause: parsed.error,
-    });
-  }
-  return parsed.data;
-}
 
 /**
  * One line of a page body. A `fact` line is a bullet that ends with a readable fact marker. An
@@ -201,24 +174,6 @@ export function renderMemoryPage(page: MemoryPage): string {
   return `${page.hasBom ? BOM : ''}${endsWithNewlineSuffix(lines, page.endsWithNewline)}`;
 }
 
-/** A fresh page with its kind's standard sections, a `# <title>` line, and an empty summary line. */
-export function newMemoryPage(frontMatter: PageFrontMatter): MemoryPage {
-  return {
-    frontMatter,
-    extraFrontMatter: {},
-    frontMatterBlock: { kind: 'canonical' },
-    preamble: [`# ${frontMatter.title}`, '', ''],
-    sections: PAGE_SECTIONS_BY_KIND[frontMatter.kind].map((name): PageSectionBlock => ({
-      name,
-      rawHeading: undefined,
-      heading: name,
-      lines: [],
-    })),
-    endsWithNewline: true,
-    hasBom: false,
-  };
-}
-
 /** Every fact on the page with the section it sits in, in page order. */
 export function pageFacts(page: MemoryPage): { section: PageSectionBlock; fact: PageFact }[] {
   const entries: { section: PageSectionBlock; fact: PageFact }[] = [];
@@ -230,124 +185,6 @@ export function pageFacts(page: MemoryPage): { section: PageSectionBlock; fact: 
     }
   }
   return entries;
-}
-
-/** The fact with this id, wherever it sits, or undefined. */
-export function findFact(page: MemoryPage, id: FactId): { section: PageSectionBlock; fact: PageFact } | undefined {
-  return pageFacts(page).find(entry => entry.fact.marker.id === id);
-}
-
-/**
- * The page with a fact appended to a section: the new line goes after the section's last
- * non-blank line, so a parsed section keeps its closing blank line last. A section the page
- * lacks is added after the last section that precedes it in `PAGE_SECTIONS` order (or at the
- * end). The new line is canonical. Throws `PageFactTextError` when the text cannot stand as one
- * line. Returns a new page; the input is not changed.
- */
-export function addFact(page: MemoryPage, input: { section: PageSection; fact: PageFact }): MemoryPage {
-  const line: PageLine = { kind: 'fact', fact: parsePageFact(input.fact), raw: undefined };
-  if (!page.sections.some(section => section.name === input.section)) {
-    const created: PageSectionBlock = {
-      name: input.section,
-      rawHeading: undefined,
-      heading: input.section,
-      lines: [line],
-    };
-    return { ...page, sections: insertSection({ sections: page.sections, section: created, name: input.section }) };
-  }
-  return {
-    ...page,
-    sections: page.sections.map(section =>
-      section.name === input.section
-        ? { ...section, lines: insertAfterLastContent({ lines: section.lines, line }) }
-        : section,
-    ),
-  };
-}
-
-/**
- * The page with one fact moved to the end of Earlier, its marker gaining `until` (and losing
- * `seen`). The id and text are kept. A fact already in Earlier only gets its `until` updated
- * in place. Unknown id: the page is returned unchanged.
- */
-export function moveFactToEarlier(page: MemoryPage, input: { id: FactId; until: FactDate }): MemoryPage {
-  const found = findFact(page, input.id);
-  if (found === undefined) {
-    return page;
-  }
-  const marker = markerWithUntil({ marker: found.fact.marker, until: input.until });
-  if (found.section.name === 'Earlier') {
-    return rewriteFact({ page, id: input.id, marker });
-  }
-  return addFact(removeFact({ page, id: input.id }), {
-    section: 'Earlier',
-    fact: { text: found.fact.text, marker },
-  });
-}
-
-/**
- * The page with one fact's marker rewritten (`src`, dates); its text and position are kept.
- * Unknown id: unchanged.
- */
-export function updateFactMarker(page: MemoryPage, input: { id: FactId; marker: FactMarker }): MemoryPage {
-  if (findFact(page, input.id) === undefined) {
-    return page;
-  }
-  return rewriteFact({ page, id: input.id, marker: input.marker });
-}
-
-/**
- * The page with every hand-written bullet (`- ` or `* `, any indent, no hidden comment) inside a
- * known section turned into a fact with a fresh id, the given source and `since`. Bullets outside
- * known sections, bullets with a broken marker, and every other line stay as they are. This is how a hand-written line becomes
- * the person's own fact at the next write.
- */
-export function stampUnmarkedBullets(
-  page: MemoryPage,
-  input: { src: FactSource; since: FactDate; newId: () => FactId },
-): MemoryPage {
-  return {
-    ...page,
-    sections: page.sections.map(section => {
-      if (section.name === undefined) {
-        return section;
-      }
-      return {
-        ...section,
-        lines: section.lines.map((line): PageLine => {
-          if (line.kind !== 'other' || !UNMARKED_BULLET_PATTERN.test(line.raw)) {
-            return line;
-          }
-          return {
-            kind: 'fact',
-            fact: parsePageFact({
-              text: line.raw.replace(BULLET_PREFIX_PATTERN, ''),
-              marker: { kind: 'fact', id: input.newId(), src: input.src, since: input.since },
-            }),
-            raw: undefined,
-          };
-        }),
-      };
-    }),
-  };
-}
-
-/**
- * The page with its summary set. The summary is the third preamble line when the preamble
- * starts with a `# ` line, a blank line, and any third line (blank or not): that line is
- * replaced. Otherwise a blank line, the summary and a blank line are inserted right after
- * the `# ` line, and a preamble with no `# ` line first gets `# <title>`.
- */
-export function setSummary(page: MemoryPage, summary: string): MemoryPage {
-  const { preamble } = page;
-  const [first, second, third] = preamble;
-  if (first?.startsWith('# ')) {
-    if (second !== undefined && isBlankText(second) && third !== undefined) {
-      return { ...page, preamble: [first, second, summary, ...preamble.slice(3)] };
-    }
-    return { ...page, preamble: [first, '', summary, '', ...preamble.slice(1)] };
-  }
-  return { ...page, preamble: [`# ${page.frontMatter.title}`, '', summary, '', ...preamble] };
 }
 
 /** Where a page lives: `<vaultDir>/<folder>/<slug>.md`. */
@@ -376,6 +213,16 @@ export async function listMemoryPages(vaultDir: string): Promise<PageListing[]> 
   return listings;
 }
 
+/** The `.md` files in a vault's page folders that `listMemoryPages` skips because the name is not a page slug, as `folder/file.md`. */
+export async function listSkippedPageFiles(vaultDir: string): Promise<string[]> {
+  const skipped: string[] = [];
+  for (const kind of PAGE_KINDS) {
+    const names = await listFolderMarkdownNames(path.join(vaultDir, PAGE_FOLDERS[kind]));
+    skipped.push(...names.filter(name => !isPageSlug(name)).map(name => `${PAGE_FOLDERS[kind]}/${name}.md`));
+  }
+  return skipped;
+}
+
 /** The page at this path, or undefined when the file does not exist. Read errors other than ENOENT throw. */
 export async function readMemoryPage(input: {
   vaultDir: string;
@@ -394,46 +241,6 @@ export async function readMemoryPage(input: {
     throw error;
   }
   return parseMemoryPage({ content, fallback: { kind: input.kind, title: input.title ?? input.slug } });
-}
-
-/**
- * Writes a page by temp file plus rename in the page's own folder, so a crash never leaves a
- * half-written page and the old file stays until the new one is complete. Creates the folder.
- * Callers hold the vault lock.
- */
-export async function writeMemoryPage(input: {
-  vaultDir: string;
-  kind: PageKind;
-  slug: string;
-  page: MemoryPage;
-}): Promise<void> {
-  const target = pagePath(input);
-  const folder = path.dirname(target);
-  await mkdir(folder, { recursive: true });
-  const temp = path.join(folder, `.${input.slug}.md.tmp-${randomUUID()}`);
-  try {
-    await writeFile(temp, renderMemoryPage(input.page), 'utf8');
-    await rename(temp, target);
-  } catch (error) {
-    await rm(temp, { force: true });
-    throw error;
-  }
-}
-
-/**
- * A slug for a new page that no existing page in the folder uses: `pageSlug(title)`, then
- * `-2`, `-3`, … on a clash with a page whose title differs. A page with the same title
- * keeps its slug (the caller then has an existing page, not a new one).
- */
-export async function freePageSlug(input: { vaultDir: string; kind: PageKind; title: string }): Promise<string> {
-  const base = pageSlug(input.title);
-  for (let suffix = 1; ; suffix++) {
-    const candidate = suffix === 1 ? base : `${base}-${String(suffix)}`;
-    const existing = await readMemoryPage({ vaultDir: input.vaultDir, kind: input.kind, slug: candidate });
-    if (existing === undefined || existing.frontMatter.title === input.title) {
-      return candidate;
-    }
-  }
 }
 
 const FENCE = '---';
@@ -456,15 +263,11 @@ function isBlankText(text: string): boolean {
   return text.trim() === '';
 }
 
-function isBlankLine(line: PageLine): boolean {
-  return line.kind === 'other' && isBlankText(line.raw);
-}
-
 function isErrnoCode(error: unknown, code: string): boolean {
   return typeof error === 'object' && error !== null && 'code' in error && error.code === code;
 }
 
-async function listFolderSlugs(folder: string): Promise<string[]> {
+async function listFolderMarkdownNames(folder: string): Promise<string[]> {
   let entries: Dirent[];
   try {
     entries = await readdir(folder, { withFileTypes: true });
@@ -477,8 +280,11 @@ async function listFolderSlugs(folder: string): Promise<string[]> {
   return entries
     .filter(entry => entry.isFile() && entry.name.endsWith('.md'))
     .map(entry => entry.name.slice(0, -'.md'.length))
-    .filter(isPageSlug)
     .sort((a, b) => (a < b ? -1 : 1));
+}
+
+async function listFolderSlugs(folder: string): Promise<string[]> {
+  return (await listFolderMarkdownNames(folder)).filter(isPageSlug);
 }
 
 function readFrontMatterMap(block: string[]): Record<string, unknown> {
@@ -617,77 +423,4 @@ function renderLines(page: MemoryPage): string[] {
 
 function endsWithNewlineSuffix(lines: string[], endsWithNewline: boolean): string {
   return endsWithNewline ? `${lines.join('\n')}\n` : lines.join('\n');
-}
-
-function markerWithUntil({ marker, until }: { marker: FactMarker; until: FactDate }): FactMarker {
-  const kept: FactMarker = { ...marker, until };
-  delete kept.seen;
-  return kept;
-}
-
-function mapLines({ page, change }: { page: MemoryPage; change: (lines: PageLine[]) => PageLine[] }): MemoryPage {
-  return {
-    ...page,
-    sections: page.sections.map(section => ({ ...section, lines: change(section.lines) })),
-  };
-}
-
-// Only the first line with the id is touched: a pasted duplicate is the person's to sort out.
-function rewriteFact({ page, id, marker }: { page: MemoryPage; id: FactId; marker: FactMarker }): MemoryPage {
-  let done = false;
-  return mapLines({
-    page,
-    change: lines =>
-      lines.map((line): PageLine => {
-        if (!done && line.kind === 'fact' && line.fact.marker.id === id) {
-          done = true;
-          return { kind: 'fact', fact: { text: line.fact.text, marker }, raw: undefined };
-        }
-        return line;
-      }),
-  });
-}
-
-function removeFact({ page, id }: { page: MemoryPage; id: FactId }): MemoryPage {
-  let done = false;
-  return mapLines({
-    page,
-    change: lines =>
-      lines.filter(line => {
-        if (!done && line.kind === 'fact' && line.fact.marker.id === id) {
-          done = true;
-          return false;
-        }
-        return true;
-      }),
-  });
-}
-
-function insertAfterLastContent({ lines, line }: { lines: PageLine[]; line: PageLine }): PageLine[] {
-  let at = 0;
-  for (const [index, existing] of lines.entries()) {
-    if (!isBlankLine(existing)) {
-      at = index + 1;
-    }
-  }
-  return [...lines.slice(0, at), line, ...lines.slice(at)];
-}
-
-function insertSection({
-  sections,
-  section,
-  name,
-}: {
-  sections: PageSectionBlock[];
-  section: PageSectionBlock;
-  name: PageSection;
-}): PageSectionBlock[] {
-  const position = PAGE_SECTIONS.indexOf(name);
-  let at = 0;
-  for (const [index, existing] of sections.entries()) {
-    if (existing.name !== undefined && PAGE_SECTIONS.indexOf(existing.name) < position) {
-      at = index + 1;
-    }
-  }
-  return [...sections.slice(0, at), section, ...sections.slice(at)];
 }

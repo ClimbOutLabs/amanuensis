@@ -1761,6 +1761,11 @@ export class HindsightMemoryProcessor implements PreLLMProcessor, PreLLMEphemera
         maxPages: this.config.pages.maxCount,
         maxTokens: this.config.pages.maxTokens,
       });
+      if (loaded.skippedFiles.length > 0) {
+        this.logger.warn('Memory page files skipped because the file name is not a lowercase page name', {
+          files: loaded.skippedFiles,
+        });
+      }
       return {
         entries: loaded.pages.map(page => ({
           text: sanitizeMemoryText(page.text),

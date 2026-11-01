@@ -10,7 +10,8 @@ import {
   normalizeAliasText,
   type AliasIndexFile,
 } from '../../../../src/runtime/memory/aliasIndex';
-import { newMemoryPage, renderMemoryPage, writeMemoryPage } from '../../../../src/runtime/memory/memoryPages';
+import type { PageFrontMatter } from '../../../../src/runtime/memory/memoryPages';
+import { pageText, writePageFile } from './pageFixtures';
 
 const index: AliasIndexFile = {
   version: 1,
@@ -114,6 +115,28 @@ describe('aliasIndex', () => {
       expect(slugs('moved on')).toEqual([]);
     });
 
+    it('does not match a Latin name inside a longer word', () => {
+      expect(slugs('Samantha called')).toEqual([]);
+      expect(slugs('Sam called')).toEqual(['sam', 'sam-plumber']);
+    });
+
+    it('finds a name in a script written without spaces inside running text', () => {
+      const names: AliasIndexFile = {
+        version: 1,
+        pages: [
+          { kind: 'person', slug: 'tanaka', title: '田中', content_hash: 'f', aliases: ['たなか'] },
+          { kind: 'person', slug: 'kim', title: '김민수', content_hash: 'g', aliases: [] },
+          { kind: 'person', slug: 'somchai', title: 'สมชาย', content_hash: 'h', aliases: [] },
+        ],
+      };
+      const found = (text: string) => matchAliases({ index: names, text }).map(match => match.slug);
+      expect(found('田中さんに会った')).toEqual(['tanaka']);
+      expect(found('今日はたなかさんと話した')).toEqual(['tanaka']);
+      expect(found('김민수씨를 만났어요')).toEqual(['kim']);
+      expect(found('วันนี้เจอสมชายที่ตลาด')).toEqual(['somchai']);
+      expect(found('山田さんに会った')).toEqual([]);
+    });
+
     it('folds accents both ways', () => {
       expect(slugs('call Jose')).toEqual(['jose']);
       expect(slugs('call José')).toEqual(['jose']);
@@ -150,17 +173,17 @@ describe('aliasIndex', () => {
   describe('loadAliasIndex', () => {
     it('builds the index from the pages and writes the cache', async () => {
       const vaultDir = await makeVault();
-      await writeMemoryPage({
+      await writePageFile({
         vaultDir,
         kind: 'person',
         slug: 'wendy',
-        page: newMemoryPage({ kind: 'person', title: 'Wendy', aliases: ['my wife'], household: true }),
+        content: pageText({ front: { kind: 'person', title: 'Wendy', aliases: ['my wife'], household: true } }),
       });
-      await writeMemoryPage({
+      await writePageFile({
         vaultDir,
         kind: 'matter',
         slug: 'madrid',
-        page: newMemoryPage({ kind: 'matter', title: 'Madrid', aliases: ['the move'], status: 'active' }),
+        content: pageText({ front: { kind: 'matter', title: 'Madrid', aliases: ['the move'], status: 'active' } }),
       });
       const loaded = await loadAliasIndex({ vaultDir, persist: true });
       expect(loaded.pages.map(page => [page.kind, page.slug, page.title, page.aliases])).toEqual([
@@ -173,8 +196,8 @@ describe('aliasIndex', () => {
 
     it('reuses the cache while pages are unchanged, and rebuilds when any page changes', async () => {
       const vaultDir = await makeVault();
-      const page = newMemoryPage({ kind: 'person', title: 'Wendy', aliases: ['my wife'], household: true });
-      await writeMemoryPage({ vaultDir, kind: 'person', slug: 'wendy', page });
+      const front: PageFrontMatter = { kind: 'person', title: 'Wendy', aliases: ['my wife'], household: true };
+      await writePageFile({ vaultDir, kind: 'person', slug: 'wendy', content: pageText({ front }) });
       const first = await loadAliasIndex({ vaultDir, persist: true });
       const cacheFile = path.join(vaultDir, ALIAS_INDEX_FILE);
       const tampered: AliasIndexFile = {
@@ -184,19 +207,19 @@ describe('aliasIndex', () => {
       await writeFile(cacheFile, JSON.stringify(tampered));
       expect((await loadAliasIndex({ vaultDir, persist: true })).pages[0]?.aliases).toEqual(['from cache']);
 
-      await writeMemoryPage({
+      await writePageFile({
         vaultDir,
         kind: 'person',
         slug: 'wendy',
-        page: newMemoryPage({ kind: 'person', title: 'Wendy', aliases: ['my wife', 'W.'], household: true }),
+        content: pageText({ front: { kind: 'person', title: 'Wendy', aliases: ['my wife', 'W.'], household: true } }),
       });
       expect((await loadAliasIndex({ vaultDir, persist: true })).pages[0]?.aliases).toEqual(['my wife', 'W.']);
 
-      await writeMemoryPage({
+      await writePageFile({
         vaultDir,
         kind: 'person',
         slug: 'sam',
-        page: newMemoryPage({ kind: 'person', title: 'Sam', aliases: [], household: false }),
+        content: pageText({ front: { kind: 'person', title: 'Sam', aliases: [], household: false } }),
       });
       expect((await loadAliasIndex({ vaultDir, persist: true })).pages.map(entry => entry.slug)).toEqual([
         'sam',
@@ -206,11 +229,11 @@ describe('aliasIndex', () => {
 
     it('rebuilds in memory without writing when persist is off', async () => {
       const vaultDir = await makeVault();
-      await writeMemoryPage({
+      await writePageFile({
         vaultDir,
         kind: 'person',
         slug: 'wendy',
-        page: newMemoryPage({ kind: 'person', title: 'Wendy', aliases: ['my wife'], household: true }),
+        content: pageText({ front: { kind: 'person', title: 'Wendy', aliases: ['my wife'], household: true } }),
       });
       const loaded = await loadAliasIndex({ vaultDir });
       expect(loaded.pages.map(page => page.slug)).toEqual(['wendy']);
@@ -247,14 +270,11 @@ describe('aliasIndex', () => {
 
     it('indexes what a rendered page says, not what the file name says', async () => {
       const vaultDir = await makeVault();
-      const page = newMemoryPage({
-        kind: 'person',
-        title: 'Sam (plumber)',
-        aliases: ['the plumber'],
-        household: false,
+      const content = pageText({
+        front: { kind: 'person', title: 'Sam (plumber)', aliases: ['the plumber'], household: false },
       });
       await mkdir(path.join(vaultDir, 'people'), { recursive: true });
-      await writeFile(path.join(vaultDir, 'people', 'sam-plumber.md'), renderMemoryPage(page));
+      await writeFile(path.join(vaultDir, 'people', 'sam-plumber.md'), content);
       const loaded = await loadAliasIndex({ vaultDir, persist: true });
       expect(loaded.pages[0]?.title).toBe('Sam (plumber)');
     });

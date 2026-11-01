@@ -37,9 +37,10 @@ import {
   HOUSEHOLD_LINE,
   renderPageForModel,
 } from '../../../../src/runtime/memory/memoryPageLoader';
-import { newMemoryPage, parseMemoryPage } from '../../../../src/runtime/memory/memoryPages';
+import { parseMemoryPage } from '../../../../src/runtime/memory/memoryPages';
 import type { ScreenClassifyResult, ScreenClient } from '../../../../src/runtime/memory/screenClient';
 import { LEARNED_PROFILE_CLEARED_CONTENT } from '../../../../src/runtime/profileLearning';
+import { pageOf } from './pageFixtures';
 
 const DEFAULT_CONFIG: MemoryConfig = {
   recallMaxTokens: 2048,
@@ -1885,7 +1886,7 @@ describe('HindsightMemoryProcessor pages layer', () => {
     slug: 'wendy',
     title: 'Wendy',
     reason: 'direct' as const,
-    page: newMemoryPage({ kind: 'person', title: 'Wendy', aliases: [], household: true }),
+    page: pageOf({ front: { kind: 'person', title: 'Wendy', aliases: [], household: true } }),
     text: wendyText,
     drafting: [] as string[],
     estimatedTokens: estimateTokens(wendyText),
@@ -1897,11 +1898,12 @@ describe('HindsightMemoryProcessor pages layer', () => {
     message: string;
     config?: MemoryConfig;
     screenClient?: ScreenClient;
+    logger?: ReturnType<typeof makeLogger>;
   }) {
     const capability = hindsightMemoryCapability({
       client: input.client,
       config: input.config ?? DEFAULT_CONFIG,
-      logger: makeLogger(),
+      logger: input.logger ?? makeLogger(),
       sessionId: 's1',
       previousTurnId: null,
       ...(input.screenClient ? { screenClient: input.screenClient } : {}),
@@ -1919,6 +1921,7 @@ describe('HindsightMemoryProcessor pages layer', () => {
     const loadPages = jest.fn().mockResolvedValue({
       pages: [loadedWendy],
       stats: { candidates: 2, loaded: 1, dropped_over_count: 0, dropped_over_budget: 1 },
+      skippedFiles: [],
     });
     const client: MemoryClient = Object.assign(
       makeClient({ recall: jest.fn().mockResolvedValue({ ok: true, results: [fact], entities: [] }) }),
@@ -1948,6 +1951,7 @@ describe('HindsightMemoryProcessor pages layer', () => {
       loadPages: jest.fn().mockResolvedValue({
         pages: [loadedWendy],
         stats: { candidates: 1, loaded: 1, dropped_over_count: 0, dropped_over_budget: 0 },
+        skippedFiles: [],
       }),
     });
     const event = await run({ client, message: 'Wendy?' });
@@ -1971,6 +1975,7 @@ describe('HindsightMemoryProcessor pages layer', () => {
       loadPages: jest.fn().mockResolvedValue({
         pages: [loadedWendy, { ...loadedWendy, slug: 'sam', title: 'Sam', text: 'x'.repeat(400) }],
         stats: { candidates: 2, loaded: 2, dropped_over_count: 0, dropped_over_budget: 0 },
+        skippedFiles: [],
       }),
     });
     const event = await run({
@@ -1998,6 +2003,7 @@ describe('HindsightMemoryProcessor pages layer', () => {
         loadPages: jest.fn().mockResolvedValue({
           pages: [loadedWendy],
           stats: { candidates: 1, loaded: 1, dropped_over_count: 0, dropped_over_budget: 0 },
+          skippedFiles: [],
         }),
       },
     );
@@ -2052,6 +2058,7 @@ describe('HindsightMemoryProcessor pages layer', () => {
       loadPages: jest.fn().mockResolvedValue({
         pages: [{ ...loadedWendy, page: wendyPage, text, drafting, estimatedTokens: estimateTokens(text) }],
         stats: { candidates: 1, loaded: 1, dropped_over_count: 0, dropped_over_budget: 0 },
+        skippedFiles: [],
       }),
     });
     const event = await run({ client, message: 'Book the movie with my wife' });
@@ -2079,6 +2086,7 @@ describe('HindsightMemoryProcessor pages layer', () => {
           { ...loadedWendy, slug: 'sam', title: 'Sam', text: 'x'.repeat(400), drafting: ['Sam:', '- Be brief.'] },
         ],
         stats: { candidates: 2, loaded: 2, dropped_over_count: 0, dropped_over_budget: 0 },
+        skippedFiles: [],
       }),
     });
     const event = await run({
@@ -2102,6 +2110,7 @@ describe('HindsightMemoryProcessor pages layer', () => {
       loadPages: jest.fn().mockResolvedValue({
         pages: [{ ...loadedWendy, drafting: ['Wendy:', '- Be brief.'] }],
         stats: { candidates: 1, loaded: 1, dropped_over_count: 0, dropped_over_budget: 0 },
+        skippedFiles: [],
       }),
     });
     const event = await run({
@@ -2121,6 +2130,22 @@ describe('HindsightMemoryProcessor pages layer', () => {
       screenClient: makeScreenClient(classify),
     });
     expect(String(event['injected_block'] ?? '')).not.toContain('Be brief');
+  });
+
+  it('warns once, without failing the turn, when page files were skipped for their name', async () => {
+    const logger = makeLogger();
+    const warn = jest.spyOn(logger, 'warn');
+    const client: MemoryClient = Object.assign(makeClient({}), {
+      loadPages: jest.fn().mockResolvedValue({
+        pages: [loadedWendy],
+        stats: { candidates: 1, loaded: 1, dropped_over_count: 0, dropped_over_budget: 0 },
+        skippedFiles: ['people/Wendy.md'],
+      }),
+    });
+    const event = await run({ client, message: 'Wendy?', logger });
+    expect(event['injected_block']).toContain(wendyText);
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('skipped'), { files: ['people/Wendy.md'] });
   });
 
   it('keeps the turn going when loading pages throws', async () => {

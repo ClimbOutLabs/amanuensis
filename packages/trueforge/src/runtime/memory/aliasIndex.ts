@@ -149,6 +149,29 @@ function hitAt({
   return possessive ? 'possessive' : 'direct';
 }
 
+// Scripts written without spaces between words: a name in them sits inside a longer run of text.
+const UNSPACED_SCRIPT = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}\p{Script=Thai}]/u;
+
+function substringHits({
+  normalizedText,
+  normalizedCandidate,
+  alias,
+}: {
+  normalizedText: string;
+  normalizedCandidate: string;
+  alias: string;
+}): AliasHit[] {
+  const hits: AliasHit[] = [];
+  for (
+    let at = normalizedText.indexOf(normalizedCandidate);
+    at !== -1;
+    at = normalizedText.indexOf(normalizedCandidate, at + 1)
+  ) {
+    hits.push({ position: at, possessive: false, alias });
+  }
+  return hits;
+}
+
 function earliestHit(hits: AliasHit[]): AliasHit | undefined {
   return hits.reduce<AliasHit | undefined>(
     (best, hit) => (best === undefined || hit.position < best.position ? hit : best),
@@ -157,20 +180,27 @@ function earliestHit(hits: AliasHit[]): AliasHit | undefined {
 }
 
 /**
- * Pages whose title or an alias appears in `text` as whole words, case- and accent-
+ * Pages whose title or an alias appears in `text` as whole words (anywhere in the text for a
+ * name in a script written without spaces, such as Chinese, Japanese, Korean or Thai), case- and accent-
  * insensitive, with punctuation around a hit ignored (`(Wendy)`, `Wendy,`, `Wendy!`) and a
  * trailing `.` on an alias or a word ignored (`W.` finds `W.` and `W`). A hit followed by
  * `'s` (or a bare `'` after an `s`, as in `James' car`) is possessive. One match per page: the earliest hit, and a direct hit anywhere wins
  * over a possessive one. Results are ordered by `position`.
  */
 export function matchAliases({ index, text }: { index: AliasIndexFile; text: string }): AliasMatch[] {
-  const messages = tokenize(normalizeAliasText(text));
+  const normalizedText = normalizeAliasText(text);
+  const messages = tokenize(normalizedText);
   const matches: AliasMatch[] = [];
   for (const page of index.pages) {
     const hits: AliasHit[] = [];
     for (const candidate of [page.title, ...page.aliases]) {
-      const candidateTokens = tokenize(normalizeAliasText(candidate)).map(entry => entry.token);
+      const normalizedCandidate = normalizeAliasText(candidate);
+      const candidateTokens = tokenize(normalizedCandidate).map(entry => entry.token);
       if (candidateTokens.length === 0) {
+        continue;
+      }
+      if (UNSPACED_SCRIPT.test(normalizedCandidate)) {
+        hits.push(...substringHits({ normalizedText, normalizedCandidate, alias: candidate }));
         continue;
       }
       for (let start = 0; start + candidateTokens.length <= messages.length; start++) {

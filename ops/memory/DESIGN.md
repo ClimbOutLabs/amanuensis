@@ -113,35 +113,30 @@ Pages are short Markdown files about one person or one matter. They sit beside t
 vault and hold what stays true, so it does not have to be dug out of old entries. They work with the
 Markdown memory backend only. Hindsight does not use them.
 
-Pages are written by hand for now. Tidying them automatically is planned, but nothing does it yet.
-No memory-write tool is exposed to the model, and pages do not change that.
+Pages are written by hand for now. Aman only reads them. Tidying them automatically is planned, but
+nothing does it yet. No memory-write tool is exposed to the model, and pages do not change that.
+A private history of page changes, a lock so only one writer works at a time, and handling of hand
+edits come with the change that lets Aman write pages.
 
 ### Files in a vault
 
     people/<slug>.md      one page per person
     matters/<slug>.md     one page per matter (a trip, a purchase, a project)
     .memory-state/        notes Aman keeps for itself
-    .git/, .gitignore     the vault's own history of its pages
 
 The slug comes from the title: lowercase, accents dropped, other characters turned into dashes, cut
 at 64 characters. `José` and `Jose` share one page. A page's file name must be exactly that
 lowercase slug, such as `people/wendy.md`. A file with any other name, such as `people/Wendy.md` or
-`people/my notes.md`, is not a page: it is never loaded and never touched. To use it, rename the file
-to the lowercase slug.
+`people/my notes.md`, is not a page: it is never loaded. Each turn that skips such a file writes one
+warning to the server log that lists the file names. To use the file, rename it to the lowercase slug.
 
-`.memory-state/` is never in git and never exported. It holds:
+`.memory-state/` is never exported. It holds:
 
 - `timezone`: the time zone the vault counts "today" in, taken from the newest chat made in a
   browser. Scheduled and other unattended runs never change it. This is state.
 - `aliases.json`: a cache of every page's title and other names. It is rebuilt whenever a page
   changes, so it is safe to delete.
-- `lock`: present only while pages are being written. See below.
 - `README`: a short note saying what the folder is. The file text lives in `memoryState.ts`.
-
-The vault becomes a git repo the first time Aman writes a page. Each write is one commit. The
-`.gitignore` is a whitelist: it ignores everything except `.gitignore`, `people/` and `matters/`. So
-the daily log and `.memory-state/` are never in the history, and undoing a commit can never touch the
-log.
 
 ### The page format
 
@@ -198,12 +193,12 @@ The host sets the source from where the information arrived. The model never pic
 `you_edited` are the person's own words and are meant to be kept as written.
 
 A page never has to be tidy. One with no settings, no headings, or bullets with no marker is still
-read. A leading byte order mark is allowed. Reading a page and writing it back returns the same bytes
-unless a line was changed on purpose.
+read. A leading byte order mark is allowed. Reading a page and rendering it again returns the same
+bytes.
 
 A bullet that carries a hidden comment the host cannot read as a marker (an unknown key, a bad date, a
 repeated key, a misspelt `fact`) is kept as it is but never trusted. It counts as not confirmed, not
-as the person's own words. Only a bullet with no hidden comment at all is a hand edit.
+as the person's own words. A bullet with no hidden comment at all is the person's hand-written line.
 
 ### How pages are loaded before each turn
 
@@ -211,7 +206,9 @@ Before recall, the host looks at the person's message for names. It compares eac
 other names with the message as whole words. Case, accents and punctuation around a name are ignored,
 so `(Wendy)` and `Wendy,` both match. An email address counts as one word, so putting an address in
 `aliases` finds the page when the person pastes that address. A trailing dot is ignored, so `W.`
-matches `W`.
+matches `W`. Names in Chinese, Japanese, Korean or Thai are written without spaces, so those match
+anywhere in the message: `田中` is found in `田中さんに会った`. Every other name still needs whole words,
+so `Sam` does not match `Samantha`.
 
 A name followed by `'s` (`Wendy's flight`) is a possessive match. It loads the page, but ranks below
 a direct mention, since the page may be about the owner and not the subject.
@@ -257,26 +254,3 @@ are gathered, for every loaded contact, under one fixed heading after the pages 
   left out with it.
 - The rest of the block is data, not instructions.
 - Facts from mail, the calendar, read content and inference are labelled as not confirmed.
-
-### Hand edits
-
-A page is a plain file, so the person can edit it. Any page that differs from the last commit counts
-as a hand edit. Before Aman writes any page, it takes the hand edits in first and commits them on
-their own with the message "Your edits". Then it makes its own change as a separate commit. Two
-things happen to markers:
-
-- A bullet whose text changed keeps its id and dates, and its source becomes `you_edited`.
-- A bullet in a known section with no marker gets a new id, the source `you_edited` and today's date as
-  `since`.
-
-Everything else on the page is left alone. Because history is kept in the vault, any change can be
-looked at, or undone, with ordinary git commands.
-
-### The lock
-
-Only one writer touches a vault's pages at a time. The lock is the file `.memory-state/lock`. It is
-held only around page writes and git calls. Appending to the daily log never takes it. A writer that
-finds the vault busy waits up to 10 seconds, then fails with "Memory is busy right now. Try again in a
-moment." A lock older than 60 seconds is taken to belong to a crashed writer and is taken over
-automatically, in a way that two writers cannot both do at once. A lock file that cannot be read is
-treated as stale only by its age.

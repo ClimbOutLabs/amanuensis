@@ -122,6 +122,8 @@ export interface MemoryClient {
 export interface PageLoadResult {
   pages: LoadedPage[];
   stats: PageLoadStats;
+  /** Page files left out because their name is not a page name (e.g. `people/Wendy.md`). */
+  skippedFiles: string[];
 }
 
 /** One turn-summary attempt's outcome, noted on the client that owns the turn's vault. */

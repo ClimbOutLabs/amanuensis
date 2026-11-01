@@ -6,7 +6,14 @@ import type { MemoryPagesStats } from '../../schemas/memoryEvents';
 import { loadAliasIndex, matchAliases, type AliasMatch } from './aliasIndex';
 import { estimateTokens } from './markdownMemoryFiles';
 import type { FactMarker, FactSource } from './memoryNotes';
-import { readMemoryPage, unmarkedBulletText, type MemoryPage, type PageKind, type PageLine } from './memoryPages';
+import {
+  listSkippedPageFiles,
+  readMemoryPage,
+  unmarkedBulletText,
+  type MemoryPage,
+  type PageKind,
+  type PageLine,
+} from './memoryPages';
 
 /** Why a page was loaded, recorded on the turn's memory event. */
 export type PageLoadReason = 'direct' | 'possessive';
@@ -185,6 +192,7 @@ function compareCandidates(a: Candidate, b: Candidate): number {
  * by count and by estimated tokens. `vaultDirs` is in read-priority order (own vault first).
  * The same slug in a later vault is skipped. A page that would overflow the token budget, and
  * every page after it, is dropped so the order the model sees stays the priority order.
+ * `skippedFiles` names page files left out because their name is not a page slug.
  * Never throws: a vault whose index or page cannot be read contributes nothing.
  */
 export async function loadPagesForMessage(input: {
@@ -194,11 +202,13 @@ export async function loadPagesForMessage(input: {
   message: string;
   maxPages: number;
   maxTokens: number;
-}): Promise<{ pages: LoadedPage[]; stats: PageLoadStats }> {
+}): Promise<{ pages: LoadedPage[]; stats: PageLoadStats; skippedFiles: string[] }> {
   const candidates: Candidate[] = [];
+  const skippedFiles: string[] = [];
   for (const [vaultIndex, vaultDir] of input.vaultDirs.entries()) {
     let matches: AliasMatch[];
     try {
+      skippedFiles.push(...(await listSkippedPageFiles(vaultDir)));
       matches = matchAliases({
         index: await loadAliasIndex({ vaultDir, persist: vaultDir === input.writeVaultDir }),
         text: input.message,
@@ -268,7 +278,7 @@ export async function loadPagesForMessage(input: {
     });
   }
   stats.loaded = pages.length;
-  return { pages, stats };
+  return { pages, stats, skippedFiles };
 }
 
 /** The "How you write to them" lines of a loaded person page, as instructions for drafting. */

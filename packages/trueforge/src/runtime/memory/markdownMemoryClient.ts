@@ -547,7 +547,11 @@ export class MarkdownMemoryClient implements MemoryClient {
     try {
       vaultDirs = await this.readVaultDirs();
     } catch {
-      return { pages: [], stats: { candidates: 0, loaded: 0, dropped_over_count: 0, dropped_over_budget: 0 } };
+      return {
+        pages: [],
+        stats: { candidates: 0, loaded: 0, dropped_over_count: 0, dropped_over_budget: 0 },
+        skippedFiles: [],
+      };
     }
     return loadPagesForMessage({ vaultDirs, writeVaultDir: this.namespaceDir(), ...params });
   }

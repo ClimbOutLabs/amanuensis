@@ -1,6 +1,6 @@
 /**
  * The vault's `.memory-state/` folder: the time zone the vault's pages count "today" in, and the
- * lock, cursor and alias cache other modules keep there. Never exported, never in git.
+ * alias cache other modules keep there. Never exported.
  */
 import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -16,7 +16,6 @@ const STATE_README = `This folder is kept by Aman and is not part of your memory
 
 timezone      The time zone your memory pages count "today" in. Set from your newest chat.
 aliases.json  A cache of the names on your pages. Safe to delete; it is rebuilt.
-lock          Present only while Aman is writing pages. Safe to delete if Aman is not running.
 `;
 
 /** A time zone name as `Intl` accepts it; anything else is left unrecorded. */

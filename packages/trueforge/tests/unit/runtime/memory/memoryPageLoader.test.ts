@@ -11,13 +11,8 @@ import {
   renderPageForModel,
   writingInstructions,
 } from '../../../../src/runtime/memory/memoryPageLoader';
-import {
-  addFact,
-  newMemoryPage,
-  parseMemoryPage,
-  writeMemoryPage,
-  type PageFrontMatter,
-} from '../../../../src/runtime/memory/memoryPages';
+import { parseMemoryPage, type PageFrontMatter } from '../../../../src/runtime/memory/memoryPages';
+import { pageText, writePageFile, type FixtureFact } from './pageFixtures';
 
 const WENDY = `---
 kind: person
@@ -48,17 +43,12 @@ async function makeVault(): Promise<string> {
 }
 
 async function writeFresh(vaultDir: string, slug: string, front: PageFrontMatter, facts = 1): Promise<void> {
-  let page = newMemoryPage(front);
-  for (let index = 0; index < facts; index++) {
-    page = addFact(page, {
-      section: 'Now',
-      fact: {
-        text: `fact ${String(index)} about ${front.title}`,
-        marker: { kind: 'fact', id: `f_${slug}${String(index)}`, src: 'you_said' },
-      },
-    });
-  }
-  await writeMemoryPage({ vaultDir, kind: front.kind, slug, page });
+  const fixtureFacts: FixtureFact[] = Array.from({ length: facts }, (_unused, index) => ({
+    section: 'Now',
+    text: `fact ${String(index)} about ${front.title}`,
+    marker: { kind: 'fact', id: `f_${slug}${String(index)}`, src: 'you_said' },
+  }));
+  await writePageFile({ vaultDir, kind: front.kind, slug, content: pageText({ front, facts: fixtureFacts }) });
 }
 
 async function exists(file: string): Promise<boolean> {
@@ -182,6 +172,22 @@ describe('memoryPageLoader', () => {
       ['sam', 'direct'],
       ['wendy', 'possessive'],
     ]);
+  });
+
+  it('names page files whose file name is not a lowercase page name, and still loads the rest', async () => {
+    const vaultDir = await makeVault();
+    await writeFresh(vaultDir, 'wendy', { kind: 'person', title: 'Wendy', aliases: [], household: false });
+    await writePageFile({ vaultDir, kind: 'person', slug: 'Wendy', content: '# Wendy\n' });
+    await writePageFile({ vaultDir, kind: 'matter', slug: 'my notes', content: '# Notes\n' });
+    const { pages, skippedFiles } = await loadPagesForMessage({
+      vaultDirs: [vaultDir],
+      writeVaultDir: vaultDir,
+      message: 'Wendy?',
+      maxPages: 6,
+      maxTokens: 5_000,
+    });
+    expect(pages.map(page => page.slug)).toEqual(['wendy']);
+    expect(skippedFiles.sort()).toEqual(['matters/my notes.md', 'people/Wendy.md']);
   });
 
   it('skips a slug already loaded from an earlier vault', async () => {

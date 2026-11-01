@@ -149,36 +149,19 @@ values for a turn are what the `aman.memory.recall` event reflects.
 ## Memory pages
 
 These notes apply to the Markdown memory backend. A vault is one folder under `MEMORY_MARKDOWN_DIR`.
-The pages and their format are described in [the design](DESIGN.md#pages).
+The pages and their format are described in [the design](DESIGN.md#pages). Pages are edited by hand
+for now.
 
-### Look at a vault's page history
+### A page is not loaded
 
-The vault keeps its own git history of `people/` and `matters/`, started the first time Aman writes a
-page. From the vault folder:
-
-    git log --oneline
-    git show <commit>
-
-A person's hand edits appear as commits named "Your edits". To undo a change, stop Aman, then run
-`git revert <commit>` in the vault. The daily log is never in this history.
-
-### A stuck lock
-
-If memory answers "Memory is busy right now", another writer holds the vault's lock. Wait a minute
-first. A writer that is still working keeps its lock fresh, so a slow job is not cut off. Only a writer
-that crashed stops renewing, and its lock is taken over automatically after 60 seconds.
-If it does not clear, stop Aman, delete `.memory-state/lock` in the vault, and start it again. Leftover
-files named `lock.takeover-*` in the same folder are safe to delete at that point too.
-
-A leftover `.git/index.lock` in the vault, from a crash during a history update, is removed
-automatically once it is older than the 30-second git time limit. You do not need to delete it.
+If the server log warns that page files were skipped, the listed file names are not the lowercase page
+name. Rename `people/Wendy.md` to `people/wendy.md`, for example. Aman picks it up on the next turn.
 
 ### Files in `.memory-state/`
 
 - `aliases.json` is a cache of page names. Deleting it is safe. It is rebuilt on the next turn that
   needs it.
 - `timezone` holds the vault's time zone. It is written again from the next chat.
-- `lock` is described above.
 
 ## Evaluation-only Prompt Guard sidecar
 
