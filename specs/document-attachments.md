@@ -43,6 +43,7 @@ Not covered: `.ppt` and other pre-2007 PowerPoint, Word 6/95 and Excel 5/95. The
 - An XML part that declares a document type is refused, so no entity expansion and no external entities.
 - Compound-file chains, directory trees and spreadsheet records are bounds-checked and loop-checked.
 - Every failure is a fixed code turned into a plain sentence with a next step (damaged, password-protected, very old format, too large, too slow, not a readable document). No raw error reaches the message, from the reader or from the sandbox around it, because it could quote the file or name sandbox paths; the server log keeps it.
+- The same holds for reading a project file by path and for the report tools. A missing file, a folder or a file over the size limit is told apart by its error type, never by the error's wording. A report the renderer refuses still names what to change.
 - Text from a file is data, not instructions, as for PDFs.
 
 ## 4. Tests

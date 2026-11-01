@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { extname } from 'node:path';
 import { estimateTokens } from '../core/email/gmail/tokenBound';
+import { SandboxFileNotFoundError, SandboxFileTooLargeError } from '../core/sandbox/SandboxErrors';
 import { DocumentReadError } from './documentReadError';
 import { splitTextPages, TEXT_DOCUMENT_EXTENSIONS, type DocumentTextResult } from './documentText';
 import { extensionMatchesImage, inspectImageHeader, looksLikePdf, MAX_OCR_PIXELS } from './fileSniff';
@@ -135,6 +136,12 @@ function issueMessage(error: unknown, filename: string): string {
   if (error instanceof DocumentReadError) {
     return `Could not extract ${filename}: ${error.message}`;
   }
+  if (error instanceof SandboxFileNotFoundError) {
+    return `Could not read ${filename}: the file could not be found.`;
+  }
+  if (error instanceof SandboxFileTooLargeError) {
+    return `Could not extract ${filename}: the file is too large to read. Send a smaller file or only the part you need.`;
+  }
   const detail = error instanceof Error ? error.message : String(error);
   // The OCR sentence belongs only to a file that was read but gave no text because the
   // OCR tools are missing from the sandbox image; a file that cannot be found is a
@@ -144,12 +151,6 @@ function issueMessage(error: unknown, filename: string): string {
     /(?:pdftoppm|tesseract|pdftotext|pdfinfo)[^\n]*not found|command not found/i.test(detail)
   ) {
     return `No extractable text in ${filename}; local OCR requires pdftoppm and tesseract in the sandbox image.`;
-  }
-  if (/not found|enoent|cannot find|no such file/i.test(detail)) {
-    return `Could not read ${filename}: the file could not be found.`;
-  }
-  if (/too large|byte limit|exceeds/i.test(detail)) {
-    return `Could not extract ${filename}: the file is too large to read. Send a smaller file or only the part you need.`;
   }
   if (/syntax error|xref|trailer|damaged|corrupt/i.test(detail)) {
     return `Could not extract ${filename}: the file is damaged or incomplete. Ask the sender to send it again.`;

@@ -137,7 +137,13 @@ import {
   type SandboxProvider,
 } from './provider/Provider';
 import { plainReaderFailure } from './readerFailure';
-import { SANDBOX_START_FAILED_MESSAGE, SandboxNotAvailableError, validateNoPathTraversal } from './SandboxErrors';
+import {
+  SANDBOX_START_FAILED_MESSAGE,
+  SandboxFileNotFoundError,
+  SandboxFileTooLargeError,
+  SandboxNotAvailableError,
+  validateNoPathTraversal,
+} from './SandboxErrors';
 import { formatSandboxId, rawSandboxId } from './sandboxRef';
 import {
   SKILL_COPY_FAILED_REASON,
@@ -5166,13 +5172,28 @@ export class Sandbox extends LocalToolMCP {
 
   /** Resolves every symlink and requires each path component to exist, or throws. */
   private async canonicalSandboxPath({ sandboxId, path }: { sandboxId: string; path: string }): Promise<string> {
-    const canonical = canonicalPathFromExec(
-      await this.hostExec({ sandboxId, command: `realpath -e -- ${shellEscape(path)}` }),
-    );
+    const canonical = canonicalPathFromExec(await this.realpathOfExisting({ sandboxId, path }));
     if (canonical === undefined) {
       throw new Error(`realpath did not resolve ${path}`);
     }
     return canonical;
+  }
+
+  /**
+   * Runs `realpath -e`. When it fails and nothing is at the path, throws SandboxFileNotFoundError, so callers tell a
+   * missing file from other failures by type rather than by the shell's wording.
+   */
+  private async realpathOfExisting({ sandboxId, path }: { sandboxId: string; path: string }): Promise<ExecResult> {
+    const result = await this.hostExec({ sandboxId, command: `realpath -e -- ${shellEscape(path)}` });
+    if (successfulExec(result)) {
+      return result;
+    }
+    // `test -e` exits 1 only when nothing is there; any other outcome keeps the original failure.
+    const probe = await this.hostExec({ sandboxId, command: `test -e ${shellEscape(path)}` });
+    if (probe.success && probe.response.exitCode === 1) {
+      throw new SandboxFileNotFoundError(path);
+    }
+    return result;
   }
 
   /** Dispatches `run_code` through the configured isolation driver. */
@@ -6781,7 +6802,7 @@ export class Sandbox extends LocalToolMCP {
       }
       const status = result.response.result.split(`${marker}:`)[1]?.trim();
       if (status?.startsWith('TOO_LARGE:')) {
-        throw new Error(`Document exceeds the ${String(maxBytes)} byte limit`);
+        throw new SandboxFileTooLargeError(input.filePath, Number(status.slice('TOO_LARGE:'.length)), maxBytes);
       }
       if (status === 'CHANGED') {
         throw new Error('Document changed while it was being snapshotted; upload it again and retry');
@@ -6858,7 +6879,7 @@ export class Sandbox extends LocalToolMCP {
     }
     const containingDir = allowedDir ?? uploadDir;
     const canonicalize = async (path: string): Promise<string> => {
-      const result = await this.hostExec({ sandboxId, command: `realpath -e -- ${shellEscape(path)}` });
+      const result = await this.realpathOfExisting({ sandboxId, path });
       ensureExecSuccess(result);
       if (!result.success) {
         throw new Error('Unreachable: canonical path result was not successful');

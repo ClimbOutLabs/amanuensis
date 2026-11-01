@@ -4,6 +4,7 @@ import {
   DocumentTools,
   SUMMARIZE_NET_WORTH_TOOL_NAME,
 } from '../../../src/core/capabilities/builtins/DocumentTools';
+import { SandboxFileNotFoundError, SandboxFileTooLargeError } from '../../../src/core/sandbox/SandboxErrors';
 import { NOOP_AGENT_TRACING } from '../../../src/core/tracing/NoopAgentTracing';
 import {
   createDocumentExtractionBudget,
@@ -28,7 +29,7 @@ import {
   type NetWorthObservationInput,
 } from '../../../src/documents/netWorthReport';
 import { EXTRACT_DOCUMENT_TEXT_TOOL_NAME } from '../../../src/documents/toolContract';
-import { makeStubPublicSandbox } from '../harnessMocks';
+import { makeSilentLogger, makeStubPublicSandbox } from '../harnessMocks';
 import { syntheticPdf, syntheticPng } from './syntheticFiles';
 
 function makePdf(pageLines: readonly (readonly string[])[]): Buffer {
@@ -199,10 +200,10 @@ describe('local document pipeline', () => {
       onFileProgress: undefined,
       budget: undefined,
       pageRange: undefined,
-      downloadFile: async () => makePdf([['Rent: $10.00']]),
-      runNativePdfText: async () => {
-        throw new Error('error: uploads/lease.pdf: No such file or directory');
+      downloadFile: async () => {
+        throw new SandboxFileNotFoundError('uploads/lease.pdf');
       },
+      runNativePdfText: async () => ({ total_pages: 0, pages: [] }),
       runOcr: async () => [],
     });
 
@@ -293,7 +294,10 @@ describe('local document pipeline', () => {
     expect(result.documents[0]?.issue).not.toContain('pdftoppm');
   });
 
-  it('reports a node-style missing file error as not found', async () => {
+  it.each([
+    ['a provider whose slot is gone', 'slot 3 not found'],
+    ['a reader that lost its copy', "ENOENT: no such file or directory, open 'uploads/gone.pdf'"],
+  ])('does not tell the person the file is missing for %s', async (_case, message) => {
     const result = await extractDocumentText({
       runTextReader: unusedTextReader,
       files: [{ filename: 'gone.pdf', path: 'uploads/gone.pdf' }],
@@ -302,13 +306,33 @@ describe('local document pipeline', () => {
       pageRange: undefined,
       downloadFile: async () => makePdf([['Rent: $10.00']]),
       runNativePdfText: async () => {
-        throw new Error("ENOENT: no such file or directory, open 'uploads/gone.pdf'");
+        throw new Error(message);
       },
       runOcr: async () => [],
     });
 
-    expect(result.documents[0]?.issue).toBe('Could not read gone.pdf: the file could not be found.');
-    expect(result.documents[0]?.issue).not.toContain('pdftoppm');
+    expect(result.documents[0]?.issue).toBe(
+      'Could not extract gone.pdf. Try again; if it keeps failing, check that the sandbox is ready under Settings, Sandbox.',
+    );
+  });
+
+  it('reports a file over the size limit as too large by its error type', async () => {
+    const result = await extractDocumentText({
+      runTextReader: unusedTextReader,
+      files: [{ filename: 'huge.pdf', path: 'uploads/huge.pdf' }],
+      onFileProgress: undefined,
+      budget: undefined,
+      pageRange: undefined,
+      downloadFile: async () => {
+        throw new SandboxFileTooLargeError('uploads/huge.pdf', 30, 20);
+      },
+      runNativePdfText: async () => ({ total_pages: 0, pages: [] }),
+      runOcr: async () => [],
+    });
+
+    expect(result.documents[0]?.issue).toBe(
+      'Could not extract huge.pdf: the file is too large to read. Send a smaller file or only the part you need.',
+    );
   });
 
   it('keeps the OCR tools sentence when pdfinfo is missing from the image', async () => {
@@ -379,7 +403,7 @@ describe('local document pipeline', () => {
       // Honor the requested cap so the byte accounting is exact.
       return Promise.resolve({ filePath: input.filePath, content: Buffer.alloc(input.maxBytes ?? 0), verify, cleanup });
     });
-    const tools = new DocumentTools(sandbox, NOOP_AGENT_TRACING);
+    const tools = new DocumentTools({ sandbox, tracing: NOOP_AGENT_TRACING, logger: makeSilentLogger() });
     // The tool path carries a session-scale aggregate budget (10x the
     // per-call caps): 40 full-size snapshots exactly exhaust it. The tool
     // schema caps each call at 32 files, so exhaustion takes three calls
@@ -504,7 +528,7 @@ describe('local document pipeline', () => {
   it('requires approval before a document artifact can be written', async () => {
     const sandbox = makeStubPublicSandbox();
     const writeArtifact = jest.spyOn(sandbox, 'writeArtifact');
-    const tools = new DocumentTools(sandbox, NOOP_AGENT_TRACING);
+    const tools = new DocumentTools({ sandbox, tracing: NOOP_AGENT_TRACING, logger: makeSilentLogger() });
     const report = {
       title: 'Evidence Summary',
       summary: 'Draft summary',
@@ -536,7 +560,7 @@ describe('local document pipeline', () => {
       written.push(input.content);
       return Promise.resolve({ filePath: `/tmp/tool-results/${input.fileName}` });
     });
-    const tools = new DocumentTools(sandbox, NOOP_AGENT_TRACING);
+    const tools = new DocumentTools({ sandbox, tracing: NOOP_AGENT_TRACING, logger: makeSilentLogger() });
     const sections = ['Income', 'Expenses', 'Accounts', 'Tax'].map((heading, sectionIndex) => ({
       heading,
       rows: Array.from({ length: 52 }, (_, rowIndex) => ({
@@ -586,7 +610,7 @@ describe('local document pipeline', () => {
         filePath: `/tmp/tool-results/${input.fileName}`,
       }),
     );
-    const tools = new DocumentTools(sandbox, NOOP_AGENT_TRACING);
+    const tools = new DocumentTools({ sandbox, tracing: NOOP_AGENT_TRACING, logger: makeSilentLogger() });
     const report = {
       title: 'Evidence Summary',
       summary: 'Draft summary',
