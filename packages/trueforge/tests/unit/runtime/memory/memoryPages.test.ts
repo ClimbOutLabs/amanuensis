@@ -140,9 +140,42 @@ describe('memoryPages', () => {
       );
     });
 
-    it('reads the facts of a CRLF file', () => {
+    it('reads a CRLF person page: settings, sections and facts', () => {
       const page = parseMemoryPage({ content: WENDY.replace(/\n/g, '\r\n'), fallback });
-      expect(factsOf(page).map(entry => entry.fact.marker.id)).toEqual(['f_01', 'f_02', 'f_03', 'f_04']);
+      expect(page.frontMatter).toEqual({
+        kind: 'person',
+        title: 'Wendy',
+        aliases: ['Wendy', 'my wife', 'wendy@example.com'],
+        household: true,
+      });
+      expect(page.sections.map(entry => entry.name)).toEqual([
+        'How you write to them',
+        'Now',
+        'Unconfirmed',
+        'Earlier',
+      ]);
+      expect(factsOf(page).map(entry => [entry.section.name, entry.fact.marker.id, entry.fact.text])).toEqual(
+        factsOf(parseMemoryPage({ content: WENDY, fallback })).map(entry => [
+          entry.section.name,
+          entry.fact.marker.id,
+          entry.fact.text,
+        ]),
+      );
+    });
+
+    it('reads a CRLF matter page: status and sections', () => {
+      const page = parseMemoryPage({
+        content: MADRID.replace('status: active', 'status: done').replace(/\n/g, '\r\n'),
+        fallback: { kind: 'matter', title: 'x' },
+      });
+      expect(page.frontMatter).toEqual({
+        kind: 'matter',
+        title: 'The Madrid move',
+        aliases: ['Madrid', 'the move'],
+        status: 'done',
+      });
+      expect(page.sections.map(entry => entry.name)).toEqual(['Now', 'Decided', 'Open', 'Unconfirmed', 'Earlier']);
+      expect(factsOf(page).map(entry => entry.fact.marker.id)).toEqual(['f_10', 'f_11', 'f_12']);
     });
 
     it('quotes titles and aliases YAML would otherwise misread', () => {

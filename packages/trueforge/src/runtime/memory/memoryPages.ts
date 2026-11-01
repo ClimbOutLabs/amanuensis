@@ -102,8 +102,7 @@ interface PageParseFallback {
 /**
  * Reads a page from its text. Never throws: a page with no front matter, a broken YAML block,
  * no headings, or bullets with no marker is still a page. The front matter is the lines
- * between a first line `---` and the next line `---` (both exact, after dropping a trailing
- * `\r`); with no closing fence there is no front matter and every line is body. A block that
+ * between a first line `---` and the next line `---` (both exact); with no closing fence there is no front matter and every line is body. A block that
  * does not parse, or parses to something other than a map, is treated as
  * missing. A known key whose value does not fit the schema takes its fallback (`kind` and
  * `title` from `fallback`, the rest their defaults); unknown keys are ignored. The `# ` heading
@@ -111,7 +110,8 @@ interface PageParseFallback {
  */
 export function parseMemoryPage({ content, fallback }: { content: string; fallback: PageParseFallback }): MemoryPage {
   const text = content.startsWith(BOM) ? content.slice(BOM.length) : content;
-  const split = text.split('\n');
+  // Windows line endings (`\r\n`) end a line the same way, so no line keeps a trailing `\r`.
+  const split = text.split(/\r?\n/);
   const lines = text.endsWith('\n') ? split.slice(0, -1) : split;
 
   let values: Record<string, unknown> = {};
@@ -197,7 +197,7 @@ export function unmarkedBulletText(raw: string): string | undefined {
 }
 
 function isFenceLine(line: string): boolean {
-  return line.replace(/\r$/, '') === FENCE;
+  return line === FENCE;
 }
 
 function isErrnoCode(error: unknown, code: string): boolean {
