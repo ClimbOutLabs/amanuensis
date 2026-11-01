@@ -1,7 +1,7 @@
 import { execFile, execFileSync } from 'node:child_process';
 import { createHash, randomBytes } from 'node:crypto';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { mkdir, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { createServer, type Server } from 'node:http';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -4177,6 +4177,7 @@ function slotLikeProvider(input: {
     getGitCredentialsPath: () => join(root, '.git-credentials'),
     getSkillsDir: () => skillsDir,
     getSkillDownloaderPath: () => join(root, 'skill_downloader.py'),
+    downloadFile: ({ path }) => readFile(path),
     uploadFile: async ({ remotePath, content }) => {
       if (refuseUpload?.(remotePath) === true) {
         throw new Error('upload refused');
@@ -4444,6 +4445,49 @@ describe('Sandbox skills without a network', () => {
           "The skill gamma couldn't be downloaded, so Aman is working without it. Check your internet connection.",
         ],
       });
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('shows a skill notice once per chat, not again on the sandbox built for a later turn or approval', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'sandbox-skills-'));
+    try {
+      const skillsDir = join(root, 'skills');
+      const provider = slotLikeProvider({ root, skillsDir, execCalls: [] });
+      const gamma = registrySkill({ name: 'gamma', presignedUrl: 'http://127.0.0.1:9/gamma.tar' });
+      const noticesOf = (response: Awaited<ReturnType<Sandbox['callTool']>>): unknown => {
+        if (!isCallToolResponseResult(response) || response.result.content[0]?.type !== 'text') {
+          throw new Error('Expected a text result');
+        }
+        return (JSON.parse(response.result.content[0].text) as Record<string, unknown>)['notices'];
+      };
+
+      const first = makeSandbox(provider, { skillMounter: new SkillMounter({ skills: [gamma] }) });
+      expect(noticesOf(await first.callTool(execTrue, { status: 'allow', scope: 'once' }))).toEqual([
+        "The skill gamma couldn't be downloaded, so Aman is working without it. Check your internet connection.",
+      ]);
+      expect(noticesOf(await first.callTool(execTrue, { status: 'allow', scope: 'once' }))).toBeUndefined();
+
+      // Each turn, an approval continuation included, builds a new Sandbox on the same sandbox.
+      const next = makeSandbox(provider, {
+        existingSandboxId: 'raw-1',
+        skillMounter: new SkillMounter({ skills: [gamma] }),
+      });
+      expect(noticesOf(await next.callTool(execTrue, { status: 'allow', scope: 'once' }))).toBeUndefined();
+      const prompt = new InstructionBuilder('prompt');
+      next.buildSkillsInstruction(prompt);
+      expect(prompt.build()).toContain("gamma: unavailable (couldn't be copied into the sandbox)");
+
+      // Another skill left out later is still shown once.
+      const delta = registrySkill({ name: 'delta', presignedUrl: 'http://127.0.0.1:9/delta.tar' });
+      const later = makeSandbox(provider, {
+        existingSandboxId: 'raw-1',
+        skillMounter: new SkillMounter({ skills: [gamma, delta] }),
+      });
+      expect(noticesOf(await later.callTool(execTrue, { status: 'allow', scope: 'once' }))).toEqual([
+        "The skill delta couldn't be downloaded, so Aman is working without it. Check your internet connection.",
+      ]);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

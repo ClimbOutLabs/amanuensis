@@ -1165,6 +1165,34 @@ export const sandboxWriteFileSchema = z
     return { ...rest, content };
   });
 
+/** Where the sandbox records which skill notices this chat has already shown. */
+const SKILL_NOTICE_RECORD_NAME = 'skill-notices-shown.json';
+
+/** A skill notice for the person, with the key that says whether it was already shown. */
+interface SkillNotice {
+  key: string;
+  text: string;
+}
+
+/**
+ * One notice per skill and cause. The cause is kept as a plain string, not the notice's wording, so
+ * rewording a notice does not show it again and a new cause is shown once like the others.
+ */
+export function skillNoticeKey(input: { name: string; cause: string }): string {
+  return JSON.stringify([input.name, input.cause]);
+}
+
+/** Reads the record of shown notices. A damaged record counts as empty: at worst a notice shows once more. */
+export function parseShownSkillNotices(text: string): Set<string> {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    return new Set<string>();
+  }
+  return new Set(Array.isArray(parsed) ? parsed.filter((key): key is string => typeof key === 'string') : []);
+}
+
 export const WRITE_FILE_SCRIPT = `import errno
 import hashlib
 import json
@@ -2140,8 +2168,10 @@ export class Sandbox extends LocalToolMCP {
   private unavailableSkillsCache: Map<string, string> = new Map<string, string>();
   // Kept apart from the prerequisite cache, which the prerequisite check clears.
   private skillCopyFailures: ReadonlyMap<string, SkillCopyFailure> = new Map<string, SkillCopyFailure>();
-  // Plain lines for the person, shown once on the next exec result.
-  private pendingSkillNotices: string[] = [];
+  // Plain lines for the person, shown once on the next tool result.
+  private pendingSkillNotices: SkillNotice[] = [];
+  // Notices already put on a tool result in this turn, not yet recorded in the sandbox.
+  private deliveredSkillNotices: SkillNotice[] = [];
   /** Flag to track if we've already checked prerequisites. */
   private prerequisitesChecked = false;
   /** PATH-resolution cache for the exec interpreter guard (preflight runs per call). */
@@ -3138,9 +3168,11 @@ export class Sandbox extends LocalToolMCP {
   ): Promise<CallToolResponse> {
     const response = await super.callTool(params, approvalDecision, context);
     if (this.pendingSkillNotices.length === 0 || !isCallToolResponseResult(response)) {
+      await this.recordDeliveredSkillNotices();
       return response;
     }
     const notices = this.takeSkillNotices();
+    await this.recordDeliveredSkillNotices();
     const [first, ...rest] = response.result.content;
     const head: TextContentPart =
       first?.type === 'text'
@@ -3155,7 +3187,48 @@ export class Sandbox extends LocalToolMCP {
   private takeSkillNotices(): string[] {
     const notices = this.pendingSkillNotices;
     this.pendingSkillNotices = [];
-    return notices;
+    this.deliveredSkillNotices.push(...notices);
+    return notices.map(notice => notice.text);
+  }
+
+  private skillNoticeRecordPath(sandboxId: string): string {
+    return `${this.provider.getToolResultDumpDir(sandboxId).replace(/\/+$/g, '')}/${SKILL_NOTICE_RECORD_NAME}`;
+  }
+
+  /** Keys of the skill notices this chat's sandbox has already shown. Empty when there is no record yet. */
+  private async readShownSkillNotices(sandboxId: string): Promise<Set<string>> {
+    let text: string;
+    try {
+      const raw = await this.provider.downloadFile({ sandboxId, path: this.skillNoticeRecordPath(sandboxId) });
+      text = raw.toString('utf-8');
+    } catch {
+      return new Set<string>();
+    }
+    return parseShownSkillNotices(text);
+  }
+
+  /** Adds the notices shown on this tool result to the sandbox's record, so a later turn does not repeat them. */
+  private async recordDeliveredSkillNotices(): Promise<void> {
+    if (this.deliveredSkillNotices.length === 0 || this.existingSandboxInfo === undefined) {
+      return;
+    }
+    const delivered = this.deliveredSkillNotices;
+    this.deliveredSkillNotices = [];
+    const sandboxId = this.providerSandboxId(this.existingSandboxInfo.sandbox_id);
+    try {
+      const shown = await this.readShownSkillNotices(sandboxId);
+      for (const notice of delivered) {
+        shown.add(notice.key);
+      }
+      await this.provider.uploadFile({
+        sandboxId,
+        remotePath: this.skillNoticeRecordPath(sandboxId),
+        content: Buffer.from(JSON.stringify([...shown].sort()), 'utf-8'),
+      });
+    } catch (error) {
+      // The notice was shown; failing to record it only means it may show once more.
+      this.logger.warn('Could not record shown skill notices', extractErrorLogFields(error));
+    }
   }
 
   /** Exec output as text, with any skill notices for the person added once. */
@@ -7092,9 +7165,15 @@ export class Sandbox extends LocalToolMCP {
       }
       skillInit = this.skillMounter?.offlineSkillsInit(skillPaths, accepted);
       this.skillCopyFailures = failed;
-      this.pendingSkillNotices = [...failed].map(([name, failure]) =>
-        skillCopyFailedNotice({ name, cause: failure.cause }),
-      );
+      // A new Sandbox is built for every turn, approvals included, and each one copies the skills in
+      // again. The sandbox keeps a record of the notices already shown, so each shows once per chat.
+      const alreadyShown = await this.readShownSkillNotices(sandboxId);
+      this.pendingSkillNotices = [...failed]
+        .map(([name, failure]) => ({
+          key: skillNoticeKey({ name, cause: failure.cause }),
+          text: skillCopyFailedNotice({ name, cause: failure.cause }),
+        }))
+        .filter(notice => !alreadyShown.has(notice.key));
       this.cachedSkillsSection = undefined;
     }
     if (skillInit) {
