@@ -48,6 +48,18 @@ describe('TrueFoundryServiceFoundryServerClient getSession', () => {
     await expect(createClient().getSession('token')).resolves.toEqual({ user: SESSION_USER });
   });
 
+  it('authenticates a session whose controlPlaneURL is null', async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse({ user: SESSION_USER, controlPlaneURL: null }));
+
+    await expect(createClient().getSession('token')).resolves.toEqual({ user: SESSION_USER });
+  });
+
+  it('authenticates a session whose controlPlaneURL is an empty string', async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse({ user: SESSION_USER, controlPlaneURL: '' }));
+
+    await expect(createClient().getSession('token')).resolves.toEqual({ user: SESSION_USER });
+  });
+
   it('maps controlPlaneURL to public_base_url when the session has one', async () => {
     fetchMock.mockResolvedValueOnce(
       jsonResponse({ user: SESSION_USER, controlPlaneURL: 'https://tenant.example.com' }),

@@ -186,7 +186,7 @@ describe('TrueFoundryMcpServerStore', () => {
       const { store } = createStore({ publicBaseUrl: '' });
       await expect(store.authorize({ tenant_id: TENANT, name: 'github', userRef: 'user-1' })).rejects.toMatchObject({
         message:
-          'MCP sign-in cannot start because your session did not include the address of your TrueFoundry workspace. Sign in again, then try connecting once more.',
+          'MCP sign-in cannot start because your session did not include the address of your TrueFoundry workspace. Sign in again, then try connecting once more.\nIf this keeps happening, ask your TrueFoundry admin to check your account.',
         statusCode: 500,
       });
     });

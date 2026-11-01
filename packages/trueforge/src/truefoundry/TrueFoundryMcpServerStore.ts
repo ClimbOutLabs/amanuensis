@@ -50,6 +50,10 @@ function withoutAuthorization(headers: Record<string, string> | undefined): Reco
   return Object.fromEntries(Object.entries(headers).filter(([name]) => name.toLowerCase() !== 'authorization'));
 }
 
+/** Shown when the session carried no workspace address to build the sign-in redirect from. */
+const MISSING_WORKSPACE_ADDRESS_MESSAGE =
+  'MCP sign-in cannot start because your session did not include the address of your TrueFoundry workspace. Sign in again, then try connecting once more.\nIf this keeps happening, ask your TrueFoundry admin to check your account.';
+
 /**
  * Absolute FE landing for the upstream authorize `redirectURL`.
  * Origin from the tenant session `public_base_url`; UI path prefix from process
@@ -61,13 +65,9 @@ export function resolveAuthorizeRedirectURL(input: { returnTo?: string; publicBa
     const publicBase = new URL(getPublicUiBasePath(), `${origin}/`);
     return new URL(safeReturnTo(input.returnTo), publicBase).href;
   } catch (error) {
-    throw new McpConnectionError(
-      'MCP sign-in cannot start because your session did not include the address of your TrueFoundry workspace. Sign in again, then try connecting once more.',
-      500,
-      {
-        cause: error,
-      },
-    );
+    throw new McpConnectionError(MISSING_WORKSPACE_ADDRESS_MESSAGE, 500, {
+      cause: error,
+    });
   }
 }
 
@@ -240,10 +240,7 @@ export class TrueFoundryMcpServerStore<TTransaction = never> implements IMcpServ
     }
     const publicBaseUrl = this.#publicBaseUrl;
     if (publicBaseUrl === undefined || publicBaseUrl.trim() === '') {
-      throw new McpConnectionError(
-        'MCP sign-in cannot start because your session did not include the address of your TrueFoundry workspace. Sign in again, then try connecting once more.',
-        500,
-      );
+      throw new McpConnectionError(MISSING_WORKSPACE_ADDRESS_MESSAGE, 500);
     }
     return this.#client.getMcpAuthorize({
       accessToken: await this.#asUser(),
