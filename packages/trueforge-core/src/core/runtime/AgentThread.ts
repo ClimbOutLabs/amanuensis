@@ -1584,6 +1584,7 @@ export async function classifyUnstampedToolCall(input: {
       },
       maps_hosts: info.maps_hosts,
       document_scope: info.document_scope,
+      browser_click: info.browser_click,
     },
   });
   return { ...info, ...stampSentinelDecision({ decision }) };
@@ -3272,6 +3273,12 @@ export class AgentThread {
         bankedCount: () => this.taskState.findings.length,
       });
       tfyManagedServers.push(this.taskStateToolSet);
+    }
+    // The guide's one live tool: a host-owned exception to readOnly, set only by the
+    // host for the guide persona. It joins the managed servers so the model is
+    // offered exactly this tool set and no other.
+    if (this.definition.guideSearchToolSet !== undefined) {
+      tfyManagedServers.push(this.definition.guideSearchToolSet);
     }
     if (this.sandbox) {
       tfyManagedServers.push(this.sandbox);

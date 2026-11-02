@@ -571,7 +571,7 @@ function parseSandboxBackend(options: { envKey: string; raw: string | undefined 
 }
 
 /** Most slot services the compose files define. */
-export const SANDBOX_MAX_SLOTS = 4;
+export const SANDBOX_MAX_SLOTS = 2;
 
 /** Which long-term memory backend Aman uses. */
 export type MemoryBackend = 'markdown' | 'hindsight';
@@ -1242,6 +1242,8 @@ export interface SharedServerConfiguration {
   MCP_REQUEST_TIMEOUT_MS: number;
   /** Max milliseconds for an MCP transport connection. Env: `MCP_CONNECT_TIMEOUT_MS`. Default 30 seconds. */
   MCP_CONNECT_TIMEOUT_MS: number;
+  /** Max bytes for one remote MCP tool-call HTTP response body (not GET SSE). Env: `MCP_TOOL_CALL_MAX_RESPONSE_BYTES`. Default 50 MB. */
+  MCP_TOOL_CALL_MAX_RESPONSE_BYTES: number;
   /**
    * Origins of the operator's own memory provider, as normalized `scheme://host[:port]` strings.
    * A connector saved as the memory provider on one of these origins is first-party: its tools that
@@ -1388,7 +1390,7 @@ export interface SharedServerConfiguration {
   SANDBOX_BACKEND: SandboxBackend;
   /** Name of the installer instance this server runs as; empty outside the installer. Env: `INSTALLER_INSTANCE`. */
   INSTALLER_INSTANCE: string;
-  /** Number of slot agents to use, 1 to 4. Env: `SANDBOX_SLOTS`. Default 4. */
+  /** Number of slot agents to use, 1 to 2. Env: `SANDBOX_SLOTS`. Default 2. */
   SANDBOX_SLOTS: number;
   /**
    * Directory holding one control directory per slot (`<dir>/<n>/agent.sock`). Env: `SANDBOX_SLOTS_DIR`.
@@ -2210,6 +2212,11 @@ const shared: SharedServerConfiguration = {
     envKey: 'MCP_CONNECT_TIMEOUT_MS',
     raw: getEnv('MCP_CONNECT_TIMEOUT_MS'),
     defaultValue: 30 * 1000,
+  }),
+  MCP_TOOL_CALL_MAX_RESPONSE_BYTES: parsePositiveInt({
+    envKey: 'MCP_TOOL_CALL_MAX_RESPONSE_BYTES',
+    raw: getEnv('MCP_TOOL_CALL_MAX_RESPONSE_BYTES'),
+    defaultValue: 50 * 1024 * 1024,
   }),
   FIRST_PARTY_MCP_ORIGINS: withMailSidecarOrigin({
     origins: firstPartyOriginsFor({

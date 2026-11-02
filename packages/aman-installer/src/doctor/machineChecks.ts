@@ -368,6 +368,10 @@ async function checkImages(
     ['dex_image', summary.release?.dexImage ?? null],
     ['stt_image', summary.release?.sttImage ?? null],
     ['tts_image', summary.release?.ttsImage ?? null],
+    ['calendar_image', summary.release?.calendarImage ?? null],
+    ['browser_image', summary.release?.browserImage ?? null],
+    ['browser_gateway_image', summary.release?.browserGatewayImage ?? null],
+    ['mail_email_image', summary.release?.mailEmailImage ?? null],
   ];
   let checked = 0;
   let missing = '';

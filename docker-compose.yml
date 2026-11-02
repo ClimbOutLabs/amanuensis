@@ -307,9 +307,9 @@ services:
       - '9560'
     restart: unless-stopped
 
-  # Aman's own browser (ops/browser-sidecar): a real, headed Chromium under Xvfb. Off unless the
-  # `browser` profile runs, since it is a separate browser with its own logins that a person opts
-  # into, not something every install needs.
+  # Aman's own browser (ops/browser-sidecar): a real, headed Chromium under Xvfb. The installer turns it
+  # on in every instance; this development stack runs it only with the `browser` profile, so an
+  # ordinary `up` does not build Chromium.
   #
   # It reads hostile pages, so it is walled off: its only network is `browser-internal`, which is
   # internal (no route out) and holds nothing but `browser-gateway`. Every request Chromium makes

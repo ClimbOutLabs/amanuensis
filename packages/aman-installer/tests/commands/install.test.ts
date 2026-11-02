@@ -70,6 +70,7 @@ const IDS: SourceIds = {
   'aman-stt': 'aman-stt:0123456789cd',
   'aman-tts': 'aman-tts:0123456789cd',
   'aman-calendar-caldav': 'aman-calendar-caldav:0123456789ef',
+  'aman-browser': 'aman-browser:0123456789ef',
 };
 const RELEASE_BASE = 'https://github.com/ClimbOutLabs/amanuensis/releases';
 const MANIFEST_URL = `${RELEASE_BASE}/latest/download/manifest.json`;
@@ -487,6 +488,8 @@ class FreshVolumeRunner implements ProcessRunner {
         sttImage: IDS['aman-stt'],
         ttsImage: IDS['aman-tts'],
         calendarImage: IDS['aman-calendar-caldav'],
+        browserImage: 'aman-browser:abc123',
+        browserGatewayImage: 'aman-browser-gateway:abc123',
         dexImage: 'ghcr.io/example/dex@sha256:aaaa',
         mailEmailImage: 'ghcr.io/example/mail@sha256:bbbb',
       }),

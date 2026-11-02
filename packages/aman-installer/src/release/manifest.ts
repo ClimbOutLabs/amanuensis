@@ -10,6 +10,8 @@ export interface SourceIds {
   'aman-stt': string;
   'aman-tts': string;
   'aman-calendar-caldav': string;
+  // The browser and its gateway are built from one folder, so one tag names both.
+  'aman-browser': string;
 }
 
 export interface ReleaseManifest {
@@ -19,7 +21,13 @@ export interface ReleaseManifest {
   sourceIds: SourceIds;
 }
 
-const SOURCE_ID_KEYS: readonly (keyof SourceIds)[] = ['aman-app', 'aman-stt', 'aman-tts', 'aman-calendar-caldav'];
+const SOURCE_ID_KEYS: readonly (keyof SourceIds)[] = [
+  'aman-app',
+  'aman-stt',
+  'aman-tts',
+  'aman-calendar-caldav',
+  'aman-browser',
+];
 const SHA256_HEX = /^[a-f0-9]{64}$/;
 
 export function sha256Hex(data: Uint8Array): string {
@@ -63,6 +71,7 @@ export function manifestToBytes(manifest: ReleaseManifest): Uint8Array {
       'aman-stt': manifest.sourceIds['aman-stt'],
       'aman-tts': manifest.sourceIds['aman-tts'],
       'aman-calendar-caldav': manifest.sourceIds['aman-calendar-caldav'],
+      'aman-browser': manifest.sourceIds['aman-browser'],
     },
   };
   return new TextEncoder().encode(`${JSON.stringify(ordered, null, 2)}\n`);
@@ -118,14 +127,21 @@ export function parseManifest(bytes: Uint8Array): ReleaseManifest | null {
   const stt = ids['aman-stt'];
   const tts = ids['aman-tts'];
   const calendar = ids['aman-calendar-caldav'];
-  if (app === undefined || stt === undefined || tts === undefined || calendar === undefined) {
+  const browser = ids['aman-browser'];
+  if (app === undefined || stt === undefined || tts === undefined || calendar === undefined || browser === undefined) {
     return null;
   }
   return {
     schema: 1,
     release,
     files,
-    sourceIds: { 'aman-app': app, 'aman-stt': stt, 'aman-tts': tts, 'aman-calendar-caldav': calendar },
+    sourceIds: {
+      'aman-app': app,
+      'aman-stt': stt,
+      'aman-tts': tts,
+      'aman-calendar-caldav': calendar,
+      'aman-browser': browser,
+    },
   };
 }
 

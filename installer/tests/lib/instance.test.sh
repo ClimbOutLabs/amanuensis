@@ -463,7 +463,7 @@ test_instances_are_isolated_and_images_stay_local() {
   assert_log_has "network connect --alias aman-tts-engine aman_main_speech aman-tts"
   assert_log_has "network connect --alias aman-tts-engine aman_second_speech aman-tts"
   assert_eq "$(sort "$SB_STATE/network_links" | tr '\n' ',')" "aman_main_speech aman-stt,aman_main_speech aman-tts,aman_second_speech aman-stt,aman_second_speech aman-tts," "the speech services are the only things joined to each"
-  assert_eq "$(grep -c 'pull_policy: never' "$AMAN_HOME/instances/main/compose.yaml")" 5 "app, holder, speech relay, calendar and email connector are never pulled"
+  assert_eq "$(grep -c 'pull_policy: never' "$AMAN_HOME/instances/main/compose.yaml")" 7 "app, holder, speech relay, calendar and email connector, the browser and its gateway are never pulled"
   assert_contains "$machine" "pull_policy: never"
   assert_not_contains "$(sed -n '/^  dex:/,/^configs:/p' "$AMAN_HOME/instances/main/compose.yaml")" "pull_policy" "the login image is pulled by digest"
   run_install instance remove second
@@ -583,7 +583,7 @@ test_speech_service_is_hardened_and_cannot_reach_the_instance() {
   assert_contains "$loopback_block" "- link"
   assert_not_contains "$loopback_block" "- stt" "the shared network of app, login and front end is not on the speech network"
   assert_contains "$(printf '%s\n' "$main" | sed -n '/^networks:/,$p')" "internal: true"
-  assert_eq "$(printf '%s\n' "$main" | sed -n '/^networks:/,$p' | grep -c 'internal: true')" 2 "both speech networks are internal"
+  assert_eq "$(printf '%s\n' "$main" | sed -n '/^networks:/,$p' | grep -c 'internal: true')" 4 "both speech networks and the browser's two are internal"
   sandbox_drop
 }
 
@@ -633,7 +633,7 @@ test_refresh_puts_back_lost_settings() {
       assert_eq "$(printf '%s\n' "$after" | grep "^$other=")" "$(printf '%s\n' "$before" | grep "^$other=")" "$other is unchanged"
     done
     case "$key" in
-      OIDC_CLIENT_SECRET | TRUEFORGE_API_KEY | CALENDAR_ACCOUNT_SECRET) ;;
+      OIDC_CLIENT_SECRET | TRUEFORGE_API_KEY | CALENDAR_ACCOUNT_SECRET | BROWSER_SECRET) ;;
       *) assert_eq "$(printf '%s\n' "$after" | grep "^$key=")" "$(printf '%s\n' "$before" | grep "^$key=")" "$key comes back as it was" ;;
     esac
   done

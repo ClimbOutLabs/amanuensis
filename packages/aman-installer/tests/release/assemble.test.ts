@@ -15,6 +15,7 @@ const IDS: SourceIds = {
   'aman-stt': 'aman-stt:0123456789cd',
   'aman-tts': 'aman-tts:0123456789cd',
   'aman-calendar-caldav': 'aman-calendar-caldav:0123456789ef',
+  'aman-browser': 'aman-browser:0123456789ef',
 };
 
 function part(
