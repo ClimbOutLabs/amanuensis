@@ -129,7 +129,7 @@ An instance served with `--tls caddy` also has a site file in `/etc/caddy/aman.d
 
 ## Using it from other devices
 
-The first run is local only. To reach an instance from another device on your network, you put your own reverse proxy in front of it. The installer configures nothing outside the machine; it only prints what your proxy must satisfy:
+Devices on your home network can already reach an instance over https (see [First login](#first-login)). To reach it from the internet, let the installer set up Caddy (see [Https with Caddy](#https-with-caddy)) or put your own reverse proxy in front of it. For your own proxy the installer configures nothing outside the machine; `--print-proxy-requirements` prints what it must satisfy:
 
 - One HTTPS origin per instance, plus one HTTPS origin per login server. Never a path prefix.
 - The `Host` header forwarded to the instance.
