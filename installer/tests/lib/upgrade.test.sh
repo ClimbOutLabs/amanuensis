@@ -486,7 +486,7 @@ test_a_record_from_before_the_flag_counts_as_having_data() {
 repo_remote_add() {
   local remote=${1:-origin} branch
   branch=$(git -C "$REPO" branch --show-current)
-  git init -q --bare "$SB/origin.git"
+  git -c init.defaultBranch=main init -q --bare "$SB/origin.git"
   git -C "$REPO" remote add "$remote" "$SB/origin.git"
   git -C "$REPO" push -q "$remote" "HEAD:refs/heads/$branch"
   git -C "$REPO" fetch -q "$remote" "+refs/heads/$branch:refs/remotes/$remote/$branch"
@@ -509,7 +509,7 @@ repo_remote_advance() {
 # not on it, and the checkout tracks nothing.
 repo_remote_without_own_branch() {
   local remote=${1:-origin}
-  git init -q --bare "$SB/origin.git"
+  git -c init.defaultBranch=main init -q --bare "$SB/origin.git"
   git -C "$REPO" remote add "$remote" "$SB/origin.git"
   git -C "$REPO" push -q "$remote" "HEAD:refs/heads/other-branch"
 }

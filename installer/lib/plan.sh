@@ -511,6 +511,8 @@ docker_available_for_probes() {
 plan_image() { # tags (one, or several built by the same step, space separated), have text, todo text, download ids...
   local tags=$1 have=$2 text=$3 dl tag built=1
   shift 3
+  # A step with no image to look for would otherwise always read as done.
+  [ -n "${tags// /}" ] || die "The installer could not name the images for this step: $text. Run the installer from a complete copy of the Aman code."
   if docker_available_for_probes; then
     for tag in $tags; do
       docker_image_exists "$tag" || built=0

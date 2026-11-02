@@ -23,14 +23,19 @@ export const HOME_TOPICS: Record<HomeTopicId, { label: string; cards: readonly C
 };
 `;
 
-async function fixture({ tour = TOUR_FIXTURE, topics, requiredCards = [] }) {
+async function fixture({ tour = TOUR_FIXTURE, topics, requiredCards = [], docs = {} }) {
   const dir = await mkdtemp(path.join(tmpdir(), 'aman-guide-'));
   const topicsDir = path.join(dir, 'topics');
+  const docsDir = path.join(dir, 'docs');
   await mkdir(topicsDir);
+  await mkdir(docsDir);
   await writeFile(path.join(dir, 'tourPrompts.ts'), tour);
   await writeFile(path.join(dir, 'required-cards.json'), JSON.stringify(requiredCards));
   for (const [name, text] of Object.entries(topics)) {
     await writeFile(path.join(topicsDir, name), text);
+  }
+  for (const [name, text] of Object.entries(docs)) {
+    await writeFile(path.join(docsDir, name), text);
   }
   const outPath = path.join(dir, 'out', 'knowledgePack.generated.ts');
   return {
@@ -38,6 +43,7 @@ async function fixture({ tour = TOUR_FIXTURE, topics, requiredCards = [] }) {
     options: {
       tourPath: path.join(dir, 'tourPrompts.ts'),
       topicsDir,
+      docsDir,
       requiredCardsPath: path.join(dir, 'required-cards.json'),
       outPath,
       repoRoot,
@@ -165,5 +171,70 @@ test('the build fails on a duplicate topic id or an empty body', async () => {
   } finally {
     await rm(dupe.dir, { recursive: true, force: true });
     await rm(empty.dir, { recursive: true, force: true });
+  }
+});
+
+function docsPage({ title, body }) {
+  return `---\ntitle: '${title}'\ndescription: 'A test page.'\n---\n${body}\n`;
+}
+
+test('a docs page joins the pack, chunked at its headings, with its public source named', async () => {
+  const fx = await fixture({
+    topics: { 'a.md': topic({ id: 'a', covers: 'brief, code, email' }) },
+    docs: {
+      'backups.mdx': docsPage({
+        title: 'Backups',
+        body: 'Backups keep a copy of everything.\n\n## Make a backup\n\nRun the backup command.\n\n## Restore one\n\nPick a copy and restore it.',
+      }),
+    },
+  });
+  try {
+    const result = await buildAmanGuide(fx.options);
+    const docsEntries = result.topics.filter(item => item.id.startsWith('docs-'));
+    assert.deepEqual(
+      docsEntries.map(item => item.id),
+      ['docs-backups', 'docs-backups-2', 'docs-backups-3'],
+    );
+    assert.equal(docsEntries[0].title, 'Backups');
+    assert.equal(docsEntries[1].title, 'Backups: Make a backup');
+    const written = await readFile(fx.outPath, 'utf8');
+    assert.match(written, /Backups keep a copy of everything\./);
+    assert.match(written, /github\.com\/ClimbOutLabs\/amanuensis\/blob\/main\/docs\/backups\.mdx/);
+  } finally {
+    await rm(fx.dir, { recursive: true, force: true });
+  }
+});
+
+test('an API reference docs page stays out of the pack', async () => {
+  const fx = await fixture({
+    topics: { 'a.md': topic({ id: 'a', covers: 'brief, code, email' }) },
+    docs: {
+      'backups.mdx': docsPage({ title: 'Backups', body: 'Backups keep a copy of everything.' }),
+      'endpoints.mdx': `---\ntitle: 'Endpoints'\nopenapi: 'api/openapi.json'\n---\nGenerated endpoint reference.\n`,
+    },
+  });
+  try {
+    const result = await buildAmanGuide(fx.options);
+    const ids = result.topics.map(item => item.id);
+    assert.ok(ids.includes('docs-backups'));
+    assert.ok(!ids.some(id => id.includes('endpoints')), `endpoints page leaked into the pack: ${ids.join(', ')}`);
+    const written = await readFile(fx.outPath, 'utf8');
+    assert.doesNotMatch(written, /Generated endpoint reference\./);
+  } finally {
+    await rm(fx.dir, { recursive: true, force: true });
+  }
+});
+
+test('the real repo pack includes at least one docs page', async () => {
+  const outDir = await mkdtemp(path.join(tmpdir(), 'aman-guide-real-docs-'));
+  try {
+    const outPath = path.join(outDir, 'knowledgePack.generated.ts');
+    const result = await buildAmanGuide({ repoRoot, outPath });
+    assert.ok(
+      result.topics.some(item => item.id.startsWith('docs-')),
+      'no docs page in the real pack',
+    );
+  } finally {
+    await rm(outDir, { recursive: true, force: true });
   }
 });

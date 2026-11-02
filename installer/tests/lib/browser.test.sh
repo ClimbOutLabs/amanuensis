@@ -105,8 +105,19 @@ test_the_plan_has_one_row_for_the_browser() {
   sandbox_drop
 }
 
+test_a_plan_step_with_no_image_name_stops() {
+  t_begin "a plan step whose image tags came out empty stops the run instead of reading as done"
+  sandbox_new
+  local out rc=0
+  out=$(PATH=$SB_BIN "$SB_BIN/bash" -c ". '$INSTALLER_DIR/lib/common.sh'; . '$INSTALLER_DIR/lib/ui.sh'; . '$INSTALLER_DIR/lib/plan.sh'; plan_image ' ' \"Aman's browser is built\" \"Build Aman's browser\"" 2>&1) || rc=$?
+  if [ "$rc" != 0 ]; then t_pass; else t_fail "the step read as done"; fi
+  assert_flat_contains "$out" "The installer could not name the images for this step: Build Aman's browser."
+  sandbox_drop
+}
+
 test_a_new_instance_has_the_browser_on
 test_the_plan_has_one_row_for_the_browser
+test_a_plan_step_with_no_image_name_stops
 test_a_short_secret_below_the_managed_part_is_dropped
 test_removing_an_instance_says_the_browser_sign_ins_are_kept_and_purging_deletes_them
 test_the_secret_is_made_once_and_kept_out_of_the_compose_file
