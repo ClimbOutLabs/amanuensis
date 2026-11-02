@@ -24,6 +24,21 @@ const BROWSER_TOOL_ANNOTATIONS = { readOnlyHint: true, openWorldHint: true } as 
 const OPEN_INPUT_SCHEMA = z.object({ url: z.string().min(1).max(2048) }).strict();
 const SCROLL_INPUT_SCHEMA = z.object({ direction: z.enum(['up', 'down']) }).strict();
 const EMPTY_INPUT_SCHEMA = z.object({}).strict();
+const CLICK_INPUT_SCHEMA = z.object({ ref: z.string().min(1).max(32) }).strict();
+const TYPE_INPUT_SCHEMA = z
+  .object({ ref: z.string().min(1).max(32), text: z.string().max(2000), submit: z.boolean().optional() })
+  .strict();
+
+type BrowserClickInput = z.infer<typeof CLICK_INPUT_SCHEMA>;
+type BrowserTypeInput = z.infer<typeof TYPE_INPUT_SCHEMA>;
+
+/** The sidecar found no element for the ref: the page changed since it was read, or the field is a password. */
+const ActReplySchema = z.discriminatedUnion('status', [
+  z.object({ status: z.literal('ok'), text: z.string() }),
+  z.object({ status: z.literal('no_element') }),
+  z.object({ status: z.literal('moved'), url: z.string() }),
+  z.object({ status: z.literal('closed') }),
+]);
 
 export type BrowserOpenInput = z.infer<typeof OPEN_INPUT_SCHEMA>;
 export type BrowserScrollInput = z.infer<typeof SCROLL_INPUT_SCHEMA>;
@@ -219,6 +234,22 @@ class BrowserTool extends LocalToolMCP {
       handler: async () => this.page('/back'),
     }),
     defineTool({
+      name: 'browser_click',
+      annotations: { readOnlyHint: false, openWorldHint: true },
+      description:
+        'Click a link, button or other control on the open page by its ref from the last read (like e14), then read the page. The page stays on the site that was opened.',
+      schema: CLICK_INPUT_SCHEMA,
+      handler: async (input: BrowserClickInput) => this.act('/click', input),
+    }),
+    defineTool({
+      name: 'browser_type',
+      annotations: { readOnlyHint: false, openWorldHint: true },
+      description:
+        'Type text into a field on the open page by its ref from the last read, replacing what is there. Set submit to press Enter afterwards. Never for passwords: use browser_sign_in.',
+      schema: TYPE_INPUT_SCHEMA,
+      handler: async (input: BrowserTypeInput) => this.act('/type', input),
+    }),
+    defineTool({
       name: 'browser_sign_in',
       annotations: { readOnlyHint: false, openWorldHint: true },
       description:
@@ -296,6 +327,26 @@ class BrowserTool extends LocalToolMCP {
       case 'no_form':
         return errorResponse(
           "No sign-in form was found on the open page. Open the site's sign-in page, then try again.",
+        );
+      case 'moved':
+        return errorResponse(movedMessage(result.body.url));
+      case 'closed':
+        return errorResponse(CLOSED_MESSAGE);
+      case 'ok':
+        return toolResultResponse({ text: result.body.text });
+    }
+  }
+
+  private async act(path: string, body: Record<string, unknown>): Promise<ReturnType<typeof toolResultResponse>> {
+    const result = await callBrowserSidecar({ path, tab: this.tab, schema: ActReplySchema, body });
+    if (!result.ok) {
+      this.logger.warn('browser sidecar call failed', { message: result.message });
+      return errorResponse(result.message);
+    }
+    switch (result.body.status) {
+      case 'no_element':
+        return errorResponse(
+          'That ref is not on the page any more, or it is a password field. Read the page again with browser_read and use a ref from that read. Use browser_sign_in for passwords.',
         );
       case 'moved':
         return errorResponse(movedMessage(result.body.url));

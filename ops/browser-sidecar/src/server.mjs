@@ -428,6 +428,66 @@ export class BrowserSidecar {
     return this.#read(tab);
   }
 
+  /** The element a ref from the last read names, or undefined when the page changed since. */
+  async #elementFor(tab, ref) {
+    const path = typeof ref === 'string' ? tab.refs.pathFor(ref) : undefined;
+    if (path === undefined) {
+      return undefined;
+    }
+    const handle = await tab.page.evaluateHandle(domPath => {
+      let node = document.body;
+      for (const part of domPath.split('/')) {
+        const [tag, index] = part.split(':');
+        node = Array.from(node?.children ?? []).filter(child => child.tagName === tag)[Number(index)];
+        if (node === undefined) {
+          return null;
+        }
+      }
+      return node;
+    }, path);
+    return handle.asElement() ?? undefined;
+  }
+
+  /** Clicks one control the last read gave a ref, then reads the page. Leaving the opened site stays refused. */
+  async click({ owner, tab: tabId, ref }) {
+    const tab = await this.#tabFor({ owner, tab: tabId, create: false });
+    const checked = this.#checkedPage(tab);
+    if (!checked.ok) {
+      return checked.result;
+    }
+    const element = await this.#elementFor(tab, ref);
+    if (element === undefined) {
+      return { status: 'no_element' };
+    }
+    await element.click({ timeout: 5000 });
+    await tab.page.waitForLoadState('domcontentloaded', { timeout: this.#navTimeoutMs }).catch(() => undefined);
+    await tab.page.waitForLoadState('networkidle', { timeout: 3000 }).catch(() => undefined);
+    return this.#read(tab);
+  }
+
+  /** Types into one field the last read gave a ref, and presses Enter when asked. Password fields are left to sign-in. */
+  async type({ owner, tab: tabId, ref, text, submit }) {
+    const tab = await this.#tabFor({ owner, tab: tabId, create: false });
+    const checked = this.#checkedPage(tab);
+    if (!checked.ok) {
+      return checked.result;
+    }
+    const element = await this.#elementFor(tab, ref);
+    if (element === undefined || typeof text !== 'string') {
+      return { status: 'no_element' };
+    }
+    if ((await element.getAttribute('type'))?.toLowerCase() === 'password') {
+      return { status: 'no_element' };
+    }
+    await element.fill(text, { timeout: 5000 });
+    if (submit === true) {
+      await element.press('Enter');
+      await tab.page.waitForLoadState('domcontentloaded', { timeout: this.#navTimeoutMs }).catch(() => undefined);
+      await tab.page.waitForLoadState('networkidle', { timeout: 3000 }).catch(() => undefined);
+    }
+    return this.#read(tab);
+  }
+
   async screenshot({ owner, tab: tabId }) {
     const tab = await this.#tabFor({ owner, tab: tabId, create: false });
     const checked = this.#checkedPage(tab);
@@ -512,6 +572,9 @@ const ROUTES = {
   'POST /back': (sidecar, where) => sidecar.back(where),
   'POST /screenshot': (sidecar, where) => sidecar.screenshot(where),
   'POST /where': (sidecar, where) => sidecar.where(where),
+  'POST /click': (sidecar, where, body) => sidecar.click({ ...where, ref: body.ref }),
+  'POST /type': (sidecar, where, body) =>
+    sidecar.type({ ...where, ref: body.ref, text: body.text, submit: body.submit }),
   'POST /sign_in': (sidecar, where, body) =>
     typeof body.origin === 'string' && typeof body.username === 'string' && typeof body.password === 'string'
       ? sidecar.signIn({ ...where, origin: body.origin, username: body.username, password: body.password })
