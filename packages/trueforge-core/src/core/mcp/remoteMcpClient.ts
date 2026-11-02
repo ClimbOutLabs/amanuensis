@@ -12,6 +12,7 @@ import {
 } from '@modelcontextprotocol/sdk/types.js';
 import { context, propagation } from '@opentelemetry/api';
 import { McpConnectionError, McpRedirectRefusedError } from '../errors';
+import { currentMcpOutboundFetchOptions, mcpOutboundBaseFetch, withOutboundHttpRetries } from '../util/outboundFetch';
 import { withTimeout } from '../util/promiseUtils';
 import { isRedirectStatus, redirectTargetOrigin } from '../util/redirects';
 import type { ToolSchema } from './IMCPServer';
@@ -143,7 +144,7 @@ function createRedirectGuardFetch({ sameOriginOnly }: { sameOriginOnly: boolean 
       let currentUrl: string | URL = requestUrl;
       let currentInit = init;
       for (let hop = 0; ; hop += 1) {
-        const response = await fetch(currentUrl, { ...currentInit, redirect: 'manual' });
+        const response = await mcpOutboundBaseFetch(currentUrl, { ...currentInit, redirect: 'manual' });
         if (!isRedirectStatus(response.status)) {
           return response;
         }
@@ -369,9 +370,12 @@ export async function connectRemoteMcp(params: {
   const url = new URL(params.url);
   const requestOptions = { signal: params.signal };
   const redirectRefusal = createRedirectGuardFetch({ sameOriginOnly: params.refuseRedirects !== true });
-  const fetchFn = withMaxResponseBytes(
-    redirectRefusal.fetch,
-    params.maxResponseBytes ?? DEFAULT_MAX_MCP_RESPONSE_BYTES,
+  // Retries sit outside the guard and the size cap: a retry replays the whole request, and
+  // only ever for a failure that means the server never answered (tool calls are not
+  // replayable once upstream may have received them, so the MCP options are not idempotent).
+  const fetchFn = withOutboundHttpRetries(
+    withMaxResponseBytes(redirectRefusal.fetch, params.maxResponseBytes ?? DEFAULT_MAX_MCP_RESPONSE_BYTES),
+    currentMcpOutboundFetchOptions(),
   );
   const candidates = params.knownTransportType
     ? [params.knownTransportType, ...TRANSPORT_PROBE_ORDER.filter(t => t !== params.knownTransportType)]

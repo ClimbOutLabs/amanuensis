@@ -284,6 +284,26 @@ export {
 } from './errors';
 export { REDIS_KEY_NAMESPACE, redisKey } from './redisKeys';
 export { describeUnknownError, extractErrorLogFields } from './util/errorLogFields';
+export {
+  DEFAULT_MCP_HTTP_BODY_TIMEOUT_MS,
+  DEFAULT_MCP_HTTP_CONNECT_TIMEOUT_MS,
+  DEFAULT_MCP_HTTP_HEADERS_TIMEOUT_MS,
+  DEFAULT_MCP_HTTP_MAX_RETRIES,
+  DEFAULT_MODEL_HTTP_BODY_TIMEOUT_MS,
+  DEFAULT_MODEL_HTTP_CONNECT_TIMEOUT_MS,
+  DEFAULT_MODEL_HTTP_HEADERS_TIMEOUT_MS,
+  DEFAULT_MODEL_HTTP_MAX_RETRIES,
+  configureOutboundFetches,
+  createOutboundFetch,
+  currentMcpOutboundFetchOptions,
+  defaultMcpOutboundFetchOptions,
+  defaultModelOutboundFetchOptions,
+  isRetryableOutboundTransportError,
+  mcpOutboundBaseFetch,
+  modelOutboundFetch,
+  withOutboundHttpRetries,
+} from './util/outboundFetch';
+export type { OutboundFetch, OutboundFetchOptions } from './util/outboundFetch';
 export { PromiseTimeoutError, withTimeout } from './util/promiseUtils';
 export { isRedirectStatus, redirectTargetOrigin } from './util/redirects';
 
