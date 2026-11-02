@@ -14,6 +14,8 @@ import type {
   ApprovalDismissalRecord,
   BeginImplementationPlanDispatchInput,
   BeginImplementationPlanDispatchResult,
+  ChatSearchHit,
+  ClearChatSearchIndexInput,
   CommandExecutionRecord,
   CompleteImplementationPlanDispatchInput,
   CreateSessionFolderInput,
@@ -30,6 +32,7 @@ import type {
   GetTaskChecklistInput,
   GetTurnInput,
   ISessionStore,
+  IndexChatMessagesInput,
   ListApprovalDismissalsInput,
   ListImplementationPlanGrantsInput,
   ListSessionEventsInput,
@@ -49,6 +52,7 @@ import type {
   ReplaceTaskChecklistInput,
   RevokeImplementationPlanGrantInput,
   RevokeImplementationPlanGrantResult,
+  SearchChatHistoryInput,
   SetSessionFolderInput,
   StampImportedSessionInput,
   TurnRecordWithoutSnapshot,
@@ -70,6 +74,11 @@ import {
   recordApprovalDismissal as recordApprovalDismissalQuery,
 } from './queries/approvalDismissals';
 import { patchThreadCapabilityState as patchThreadCapabilityStateQuery } from './queries/capabilities';
+import {
+  clearChatSearchIndex as clearChatSearchIndexQuery,
+  indexChatMessages as indexChatMessagesQuery,
+  searchChatHistory as searchChatHistoryQuery,
+} from './queries/chatSearch';
 import {
   appendCommandExecutionResult as appendCommandExecutionResultQuery,
   appendCommandExecutionStarted as appendCommandExecutionStartedQuery,
@@ -242,6 +251,18 @@ export class SqliteSessionStore implements ISessionStore<SessionCustom, TurnCust
 
   listApprovalDismissals(input: ListApprovalDismissalsInput): Promise<ApprovalDismissalRecord[]> {
     return listApprovalDismissalsQuery(this.db, input);
+  }
+
+  indexChatMessages(input: IndexChatMessagesInput): Promise<void> {
+    return indexChatMessagesQuery(this.db, input);
+  }
+
+  searchChatHistory(input: SearchChatHistoryInput): Promise<ChatSearchHit[]> {
+    return searchChatHistoryQuery(this.db, input);
+  }
+
+  clearChatSearchIndex(input: ClearChatSearchIndexInput): Promise<void> {
+    return clearChatSearchIndexQuery(this.db, input);
   }
 
   setSessionFolder(input: SetSessionFolderInput): Promise<void> {

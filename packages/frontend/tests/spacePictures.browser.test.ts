@@ -95,12 +95,6 @@ test(
       server: { host: '127.0.0.1', port: 0 },
       resolve: {
         conditions: ['trueforge-dev', ...defaultClientConditions],
-        alias: [
-          {
-            find: /^truefoundry-gateway-sdk(\/.*)?$/,
-            replacement: fileURLToPath(new URL('../src/gatewaySdkStub.ts', import.meta.url)),
-          },
-        ],
         dedupe: ['react', 'react-dom', '@assistant-ui/core', '@assistant-ui/store', '@assistant-ui/react'],
       },
       plugins: [spacePictureRoute(gradientPng(), seen)],

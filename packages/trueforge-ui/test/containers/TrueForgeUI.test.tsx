@@ -33,15 +33,6 @@ vi.mock('@truefoundry/assistant-ui-runtime', () => ({
   useTrueFoundryUpdateAgentSpec: () => vi.fn(),
 }));
 
-vi.mock('@truefoundry/assistant-ui-runtime/plugins/truefoundry-agent-server-adapter', () => ({
-  createTrueFoundryAgentUIServer: vi.fn(
-    () =>
-      new Promise(() => {
-        /* never resolves — keep init loader visible */
-      }),
-  ),
-}));
-
 vi.mock('thinking-orbs', () => ({
   ThinkingOrb: () => <div data-testid="thinking-orb" />,
 }));
@@ -361,23 +352,6 @@ describe('TrueForgeUI', () => {
       expect(screen.queryByRole('status', { name: 'Loading' })).not.toBeInTheDocument();
     });
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
-  });
-
-  it('shows a loader while truefoundry server init is pending', () => {
-    render(
-      <TrueForgeUI
-        server={{
-          type: 'truefoundry',
-          apiKey: 'k',
-          controlPlaneURL: 'https://cp.example',
-        }}
-        layout="sidebar"
-        className="h-96"
-      />,
-    );
-
-    expect(screen.getByRole('status', { name: 'Loading' })).toBeInTheDocument();
-    expect(screen.getByTestId('thinking-orb')).toBeInTheDocument();
   });
 });
 

@@ -7437,6 +7437,35 @@
         ],
         "type": "object"
       },
+      "OwnChatSearchHit": {
+        "properties": {
+          "matched_at": {
+            "description": "When the matching message was written.",
+            "format": "date-time",
+            "type": "string"
+          },
+          "session_id": {
+            "type": "string"
+          },
+          "snippet": {
+            "description": "Part of the matching message, at most 300 characters.",
+            "type": "string"
+          },
+          "title": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "session_id",
+          "title",
+          "snippet",
+          "matched_at"
+        ],
+        "type": "object"
+      },
       "PermissionResourceType": {
         "description": "Resource type to evaluate permissions for.",
         "enum": [
@@ -9156,6 +9185,34 @@
         ],
         "type": "string"
       },
+      "SearchOwnChatsResponse": {
+        "properties": {
+          "data": {
+            "properties": {
+              "hits": {
+                "description": "Newest match first, one per chat.",
+                "items": {
+                  "$ref": "#/components/schemas/OwnChatSearchHit"
+                },
+                "type": "array"
+              },
+              "search_enabled": {
+                "description": "False while past-chat search is off in Settings; nothing is indexed then and hits is empty.",
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "search_enabled",
+              "hits"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
       "SentinelAuditRecord": {
         "properties": {
           "auto_deny_reason": {
@@ -9209,12 +9266,20 @@
       },
       "SentinelUserSettings": {
         "properties": {
+          "chat_search_enabled": {
+            "description": "While on, the assistant can search your own past chats when you ask. Off means it cannot.",
+            "type": "boolean"
+          },
           "maps_without_asking": {
             "description": "While on, map requests run without asking. Off asks for each one.",
             "type": "boolean"
           },
           "offline_mode": {
             "description": "While on, actions that reach outside this machine are denied automatically.",
+            "type": "boolean"
+          },
+          "package_downloads_without_project_allowed": {
+            "description": "While on, the sandbox may download packages in your chats that are not working on a project, through the download-only mirrors. The allowance also covers scheduled runs. Off, the first download in such a chat asks.",
             "type": "boolean"
           },
           "sandbox_without_asking": {
@@ -9241,7 +9306,9 @@
           "tier2_auto_allow",
           "search_without_asking",
           "maps_without_asking",
-          "sandbox_without_asking"
+          "sandbox_without_asking",
+          "chat_search_enabled",
+          "package_downloads_without_project_allowed"
         ],
         "type": "object"
       },
@@ -13394,12 +13461,20 @@
       },
       "UpdateSentinelUserSettingsRequest": {
         "properties": {
+          "chat_search_enabled": {
+            "description": "New past-chat search setting; omitted keeps the current value.",
+            "type": "boolean"
+          },
           "maps_without_asking": {
             "description": "New maps setting; omitted keeps the current value.",
             "type": "boolean"
           },
           "offline_mode": {
             "description": "New offline mode value; omitted keeps the current value.",
+            "type": "boolean"
+          },
+          "package_downloads_without_project_allowed": {
+            "description": "New package download setting for chats without a project; omitted keeps the current value.",
             "type": "boolean"
           },
           "sandbox_without_asking": {
@@ -24702,6 +24777,78 @@
           "briefItems"
         ],
         "x-fern-sdk-method-name": "undo"
+      }
+    },
+    "/api/v1/user/chat-search": {
+      "get": {
+        "description": "Finds your own chats with a message holding every search word, newest match first, with a short excerpt. Returns nothing while past-chat search is off.",
+        "parameters": [
+          {
+            "description": "Words to look for. A chat matches when one message holds every word.",
+            "in": "query",
+            "name": "query",
+            "required": true,
+            "schema": {
+              "description": "Words to look for. A chat matches when one message holds every word.",
+              "maxLength": 500,
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "description": "Most chats to return.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "description": "Most chats to return.",
+              "maximum": 20,
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SearchOwnChatsResponse"
+                }
+              }
+            },
+            "description": "Matching chats."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The search was blank or too long."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "OIDC is configured and the request has no valid session cookie."
+          }
+        },
+        "summary": "Search the words inside your own chats",
+        "tags": [
+          "Agent Sessions"
+        ],
+        "x-fern-sdk-group-name": [
+          "sessions"
+        ],
+        "x-fern-sdk-method-name": "search_own_chats"
       }
     },
     "/api/v1/user/settings/calendar": {

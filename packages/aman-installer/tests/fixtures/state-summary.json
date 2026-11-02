@@ -5,6 +5,8 @@
     "appImage": "aman-app:abc123def456",
     "sttImage": "aman-stt:abc123def456",
     "calendarImage": "aman-calendar-caldav:abc123def456",
+    "browserImage": "aman-browser:abc123def456",
+    "browserGatewayImage": "aman-browser-gateway:abc123def456",
     "dexImage": "ghcr.io/example/dex@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     "mailEmailImage": "ghcr.io/example/mail@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
   },
@@ -15,6 +17,8 @@
     "appImage": "aman-app:0123456789ab",
     "sttImage": "aman-stt:0123456789ab",
     "calendarImage": "aman-calendar-caldav:0123456789ab",
+    "browserImage": null,
+    "browserGatewayImage": null,
     "dexImage": "ghcr.io/example/dex@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     "mailEmailImage": "ghcr.io/example/mail@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
   },

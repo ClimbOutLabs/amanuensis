@@ -53,6 +53,7 @@ import {
 import type { ActiveTurnRegistry } from '../runtime/activeTurns';
 import { executorFromTurnId } from '../runtime/peeringIds';
 import { validateAgentSpec } from '../runtime/sessionResources';
+import { packageMirrorTokens } from '../sandbox/mirrors/packageMirrorTokens';
 import { removeSlotWorkspace, slotsBackendEnabled } from '../sandbox/slotBackend';
 import { honoQueriesToRecord } from '../schemas/deepObjectQuery';
 import { isSessionAgentNameRef, parseListSessionsQuery, type Session } from '../schemas/session';
@@ -498,6 +499,8 @@ export function createSessionsRouter(deps: SessionsRouterDeps) {
       tenant_id: requestContext.tenant_id,
       session_id: sessionId,
     });
+    // A deleted chat keeps no package download grant.
+    packageMirrorTokens.revokeSession(sessionId);
     if (sandboxId !== undefined) {
       void removeSlotWorkspace({ sandboxId, logger: deps.logger });
     }

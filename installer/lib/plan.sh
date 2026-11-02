@@ -334,7 +334,7 @@ plan_build() {
   INSTALL_UPGRADE=0
   PLAN_UPGRADE_NOTE=
   if [ "$have_release" = 1 ] && release_load "$RELEASE_DIR/release.json"; then
-    if [ "$CUR_APP_TAG" != "$REL_APP_TAG" ] || [ "$CUR_STT_TAG" != "$REL_STT_TAG" ] || [ "$CUR_CALENDAR_TAG" != "$REL_CALENDAR_TAG" ] || [ "$CUR_DEX_IMAGE" != "$REL_DEX_IMAGE" ] || [ "$CUR_MAIL_EMAIL_IMAGE" != "$REL_MAIL_EMAIL_IMAGE" ]; then
+    if [ "$CUR_APP_TAG" != "$REL_APP_TAG" ] || [ "$CUR_STT_TAG" != "$REL_STT_TAG" ] || [ "$CUR_CALENDAR_TAG" != "$REL_CALENDAR_TAG" ] || [ "$CUR_BROWSER_TAG" != "$REL_BROWSER_TAG" ] || [ "$CUR_BROWSER_GATEWAY_TAG" != "$REL_BROWSER_GATEWAY_TAG" ] || [ "$CUR_DEX_IMAGE" != "$REL_DEX_IMAGE" ] || [ "$CUR_MAIL_EMAIL_IMAGE" != "$REL_MAIL_EMAIL_IMAGE" ]; then
       # A re-run never quietly reuses older images: this checkout is what gets installed.
       INSTALL_UPGRADE=1
       PLAN_UPGRADE_NOTE="This copy of Aman is newer than the installed one, so it will be updated."
@@ -347,6 +347,7 @@ plan_build() {
   plan_image "$REL_APP_TAG" "The Aman app is built" "Build the Aman app" app-base app-deps dockerfile-frontend
   plan_image "$REL_STT_TAG" "The speech-to-text service is built" "Build the speech-to-text service" stt-base stt-deps
   plan_image "$REL_CALENDAR_TAG" "The calendar connector is built" "Build the calendar connector"
+  plan_image "$REL_BROWSER_TAG $REL_BROWSER_GATEWAY_TAG" "Aman's browser is built" "Build Aman's browser" browser-base browser-deps browser-gateway-base
   plan_image "$REL_DEX_IMAGE" "The sign-in service is downloaded" "Download the sign-in service" dex
   plan_image "$REL_MAIL_EMAIL_IMAGE" "The email connector is downloaded" "Download the email connector" mail-email
   plan_tls
@@ -507,10 +508,17 @@ docker_available_for_probes() {
 }
 
 # plan_image TAG TEXT download-ids...
-plan_image() { # tag, have text, todo text, download ids...
-  local tag=$1 have=$2 text=$3 dl
+plan_image() { # tags (one, or several built by the same step, space separated), have text, todo text, download ids...
+  local tags=$1 have=$2 text=$3 dl tag built=1
   shift 3
-  if docker_available_for_probes && docker_image_exists "$tag"; then
+  if docker_available_for_probes; then
+    for tag in $tags; do
+      docker_image_exists "$tag" || built=0
+    done
+  else
+    built=0
+  fi
+  if [ "$built" = 1 ]; then
     plan_add have "$have"
   else
     plan_add todo "$text"
