@@ -1,6 +1,6 @@
 # Spec: Browser Control
 
-**Status:** draft
+**Status:** approved
 
 ## Problem
 
