@@ -236,6 +236,32 @@ test_low_disk_blocks() {
   sandbox_drop
 }
 
+test_a_blocked_run_leaves_its_record() {
+  t_begin "a run stopped by a failed check leaves the reason in the run log, and nothing else"
+  sandbox_new
+  STUB_DF_KB=1000000
+  run_install --yes --email owner@example.invalid
+  assert_rc 1
+  assert_file "$AMAN_HOME/state/install.log"
+  assert_contains "$(cat "$AMAN_HOME/state/install.log")" "check failed:" "the stop is recorded"
+  assert_contains "$(cat "$AMAN_HOME/state/install.log")" "GB free" "the blocker is recorded"
+  assert_no_path "$AMAN_HOME/state/instances"
+  assert_no_path "$AMAN_HOME/release"
+  sandbox_drop
+}
+
+test_a_run_stopped_at_a_question_leaves_its_record() {
+  t_begin "a run stopped at a question leaves the reason in the run log"
+  sandbox_new
+  run_install_tty "Name for this instance=>\nYour email=><EOF>"
+  assert_eq "$RC" 1
+  assert_file "$AMAN_HOME/state/install.log"
+  assert_contains "$(cat "$AMAN_HOME/state/install.log")" "The input ended before a valid answer" "the stop is recorded"
+  assert_no_path "$AMAN_HOME/state/instances"
+  assert_no_path "$AMAN_HOME/release"
+  sandbox_drop
+}
+
 test_print_only_flags() {
   t_begin "print flags show requirements and hosts without touching anything"
   sandbox_new
@@ -268,4 +294,6 @@ test_concurrent_run_blocked_and_stale_lock_taken_over
 test_password_mismatch_stops
 test_declining_changes_nothing
 test_low_disk_blocks
+test_a_blocked_run_leaves_its_record
+test_a_run_stopped_at_a_question_leaves_its_record
 tests_finish

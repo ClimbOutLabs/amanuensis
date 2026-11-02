@@ -1,25 +1,15 @@
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
-import { chmod, cp, mkdir, mkdtemp, readFile, utimes, writeFile } from 'node:fs/promises';
+import { chmod, cp, mkdir, mkdtemp, utimes, writeFile } from 'node:fs/promises';
 import { release as osRelease, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 
 import { runDoctor, type DoctorDeps } from '../../src/doctor/doctor.ts';
 import { FakeHost } from '../../src/host/fakeHost.ts';
-import {
-  commandLine,
-  okBytesResult,
-  okResult,
-  StubProcessRunner,
-  type ProcessBytesResult,
-  type ProcessResult,
-  type ProcessRunner,
-} from '../../src/runner/processRunner.ts';
+import { commandLine, okResult, StubProcessRunner, type ProcessResult } from '../../src/runner/processRunner.ts';
 import { folderBackend } from '../../src/state/folderBackend.ts';
 import { createStateStore } from '../../src/state/state.ts';
-import { buildTar } from '../../src/state/tar.ts';
-import { VOLUME_HOME, volumeBackend } from '../../src/state/volumeBackend.ts';
 
 // The contract between the shell doctor and this one, over one fixture
 // state: the machine checks must agree record for record, and the
@@ -28,8 +18,7 @@ import { VOLUME_HOME, volumeBackend } from '../../src/state/volumeBackend.ts';
 // (settings files, the container list, ports, public and network
 // addresses); those stay with the shell in this stage, so the comparison
 // takes the shell's instance records down to the ones the in-image call
-// made. Both TypeScript reads of the state, folder and volume, must give
-// the whole document identically.
+// made.
 
 const NOW = 1791633600;
 const GIB = 1024 * 1024 * 1024;
@@ -84,12 +73,9 @@ elif [ "$args" = 'ps -a --filter label=com.docker.compose.project=aman-main --fo
   printf '%s\\n' 'dex00001|aman-main-dex-1|running|Up 2 hours (healthy)|dex'
 elif [ "$args" = 'exec -e AMAN_HOST_EPOCH=1791633600 app00001 aman doctor --text' ]; then
   printf '%s\\n' 'service\tok\tThe app is running.\t' 'login\tok\tSign-in is ready.\t' 'database\tok\tThe database answers.\t' 'disk\tok\tPlenty of space.\t' 'clock\tok\tThe clocks agree.\t' 'run_code\tok\tCode running is ready.\t' 'attachments\tok\tAttachments are ready.\t' 'demo\toff\tSkipped: the demo is off.\t' 'model\twarn\tThe model is slow to answer.\tRun aman doctor model --fix'
-elif [ "$args" = 'volume inspect aman_home' ]; then
-  printf '%s\\n' '[{"Name":"aman_home"}]'
 else
   case "$args" in
     'port '*) exit 0 ;;
-    'run --rm -i -v aman_home:'*) cat > /dev/null; exit 0 ;;
     *) echo "unexpected docker call: $args" >&2; exit 99 ;;
   esac
 fi
@@ -204,53 +190,7 @@ function dockerAnswers(): Map<string, ProcessResult> {
   ]);
 }
 
-// The volume as a runner: the state files tar out of a map, the backups
-// list by name, and every other command is a Docker probe for the stub.
-class VolumeWorldRunner implements ProcessRunner {
-  private readonly files: Map<string, string>;
-  private readonly inner: StubProcessRunner;
-
-  constructor(files: Map<string, string>, inner: StubProcessRunner) {
-    this.files = files;
-    this.inner = inner;
-  }
-
-  run(command: string, args: readonly string[]): Promise<ProcessResult> {
-    if (args.includes('ls')) {
-      const dir = args[args.length - 1];
-      if (dir === VOLUME_HOME) {
-        // The tree read first asks which of its folders the volume holds.
-        const names = new Set<string>();
-        for (const path of this.files.keys()) {
-          const first = path.split('/')[0];
-          if (first !== undefined && first !== '') {
-            names.add(first);
-          }
-        }
-        return Promise.resolve(okResult(`${[...names].join('\n')}\n`));
-      }
-      return Promise.resolve(okResult('20261009T120000Z\n20261008T120000Z\n'));
-    }
-    return this.inner.run(command, args);
-  }
-
-  runBytes(command: string, args: readonly string[], stdin: Uint8Array): Promise<ProcessBytesResult> {
-    void command;
-    void stdin;
-    if (args.includes('tar') && args.includes('-c')) {
-      const tar = buildTar([...this.files].map(([path, text]) => ({ path, mode: 0o600, text })));
-      return Promise.resolve(okBytesResult(tar));
-    }
-    return Promise.resolve({
-      exitCode: 1,
-      stdout: new Uint8Array(),
-      stderr: 'the doctor writes nothing',
-      started: true,
-    });
-  }
-}
-
-test('the shell doctor and this one agree on the fixture state, folder and volume', async () => {
+test('the shell doctor and this one agree on the fixture state', async () => {
   const root = await mkdtemp(join(tmpdir(), 'aman-doctor-contract-'));
   const fixtureSource = new URL('../fixtures/doctor-home/', import.meta.url).pathname;
 
@@ -324,28 +264,9 @@ test('the shell doctor and this one agree on the fixture state, folder and volum
   assert.equal(folderCode, 0);
   const folderDoc = parseDocument(printed[0] ?? '');
 
-  const volumeFiles = new Map<string, string>([
-    ['state/instances/main.conf', await readFile(join(folderHome, 'state', 'instances', 'main.conf'), 'utf8')],
-    ['state/backups', 'daily\n'],
-    ['state/source', `${checkoutDir}\n`],
-    ['release/release.json', await readFile(join(folderHome, 'release', 'release.json'), 'utf8')],
-  ]);
-  printed.length = 0;
-  const volumeRunner = new VolumeWorldRunner(volumeFiles, new StubProcessRunner(dockerAnswers()));
-  const volumeDeps: DoctorDeps = {
-    ...baseDeps,
-    runner: volumeRunner,
-    store: createStateStore(volumeBackend(volumeRunner)),
-    stateHome: null,
-  };
-  const volumeCode = await runDoctor(volumeDeps, { json: true });
-  assert.equal(volumeCode, 0);
-  const volumeDoc = parseDocument(printed[0] ?? '');
 
   // The machine checks agree exactly, record for record.
   assert.deepEqual(folderDoc.machine, shellDoc.machine);
-  // The two TypeScript reads of the same state agree on the whole document.
-  assert.deepEqual(volumeDoc, folderDoc);
   // The records the instance's own doctor made agree; the shell's extra
   // host-side records are its own in this stage.
   const shellMain = shellDoc.instances['main'] ?? [];

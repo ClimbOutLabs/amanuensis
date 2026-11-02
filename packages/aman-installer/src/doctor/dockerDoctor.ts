@@ -18,11 +18,8 @@ import type { ProcessRunner } from '../runner/processRunner.ts';
 
 export const MIN_MEMORY_BYTES = 6 * 1024 * 1024 * 1024;
 
-// The oldest Engine that can mount one folder inside a volume, which is
-// how the https folders are mounted on a Windows PC, where the state
-// lives in a volume: mounting a folder inside a volume arrived in
-// Engine 26.
-export const MIN_ENGINE_VERSION_FOR_SUBPATH = '26.0.0';
+// The oldest Engine this check accepts, on every system.
+export const MIN_ENGINE_VERSION = '26.0.0';
 
 export interface DoctorDeps {
   host: Host;
@@ -51,9 +48,9 @@ function versionParts(version: string): [number, number, number] | null {
 // A version Docker reports in a shape this check cannot read is not
 // judged here; a version that was never reported at all fails earlier,
 // as ENGINE_VERSION_MISSING.
-function engineSupportsSubpath(engineVersion: string): boolean {
+function engineMeetsFloor(engineVersion: string): boolean {
   const parts = versionParts(engineVersion);
-  const floor = versionParts(MIN_ENGINE_VERSION_FOR_SUBPATH);
+  const floor = versionParts(MIN_ENGINE_VERSION);
   if (parts === null || floor === null) {
     return true;
   }
@@ -117,7 +114,7 @@ export async function checkDocker(deps: DoctorDeps): Promise<number> {
   if (memoryBytes === null && host.kind === 'linux') {
     // On Linux, Docker Engine uses the computer's own memory directly, so
     // the host total is the memory Docker can use when Docker reports none.
-    // On Windows and Mac, Docker gets only part of the computer's memory,
+    // On a Mac, Docker gets only part of the computer's memory,
     // so a missing report fails below instead of passing on a wrong guess.
     memoryBytes = host.memoryBytes();
   }
@@ -135,7 +132,7 @@ export async function checkDocker(deps: DoctorDeps): Promise<number> {
     print(problemText(ENGINE_VERSION_MISSING));
     return 1;
   }
-  if (!engineSupportsSubpath(engineVersion)) {
+  if (!engineMeetsFloor(engineVersion)) {
     print(problemText(ENGINE_TOO_OLD[host.kind]));
     return 1;
   }

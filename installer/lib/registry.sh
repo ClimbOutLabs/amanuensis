@@ -29,15 +29,21 @@ reg_write() {
   } | write_if_changed "$(reg_file "$name")" 600 || true
 }
 
-# reg_set NAME key value: replaces the line of a key, or appends it.
+# reg_set NAME key value: replaces the first line of a key, or appends it.
+# Later lines of the same key are left alone, the same as the TypeScript
+# store's withRegistryValue.
 reg_set() {
   local name=$1 key=$2 value=$3 line found=0
   {
     while IFS= read -r line || [ -n "$line" ]; do
       case "$line" in
         "$key="*)
-          printf '%s=%s\n' "$key" "$value"
-          found=1
+          if [ "$found" = 0 ]; then
+            printf '%s=%s\n' "$key" "$value"
+            found=1
+          else
+            printf '%s\n' "$line"
+          fi
           ;;
         *) printf '%s\n' "$line" ;;
       esac

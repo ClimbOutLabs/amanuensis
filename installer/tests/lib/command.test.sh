@@ -203,7 +203,37 @@ test_upgrade_restores_the_command_and_its_files
 test_a_group_writable_checkout_is_made_private_once
 test_a_folder_above_the_checkout_is_never_changed
 test_a_link_in_the_installer_is_said_and_left_alone
+test_the_command_subcommand_refuses_an_unsafe_checkout() {
+  t_begin "install.sh command refuses a checkout under a folder others can change, and installs nothing"
+  sandbox_new
+  install_machine
+  rm -f "$AMAN_HOME/bin/aman"
+  chmod g+w "$SB"
+  run_install command
+  assert_rc 1
+  assert_flat_contains "$ERR" "A folder above the folder Aman was installed from can be changed by other users"
+  assert_flat_contains "$ERR" "Move the folder to one only you can change"
+  assert_no_path "$AMAN_HOME/bin/aman"
+  sandbox_drop
+}
+
+test_the_command_subcommand_tightens_a_writable_checkout() {
+  t_begin "install.sh command makes a group-writable checkout private and then installs"
+  sandbox_new
+  install_machine
+  rm -f "$AMAN_HOME/bin/aman"
+  chmod -R g+w "$REPO"
+  run_install command
+  assert_rc 0
+  assert_flat_contains "$OUT" "The aman command is installed"
+  assert_file "$AMAN_HOME/bin/aman"
+  assert_eq "$(find "$REPO" -perm -g+w | wc -l | tr -d ' ')" 0 "the checkout was made private"
+  sandbox_drop
+}
+
 test_the_command_subcommand_puts_the_files_back
+test_the_command_subcommand_refuses_an_unsafe_checkout
+test_the_command_subcommand_tightens_a_writable_checkout
 test_a_rerun_with_nothing_to_do_still_checks_run_code
 test_a_busy_port_moves_the_instance
 test_the_proxy_requirements_belong_to_public_urls

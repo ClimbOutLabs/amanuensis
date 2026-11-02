@@ -52,6 +52,11 @@ case "$cmd" in
       echo "Cannot connect to the Docker daemon at unix:///var/run/docker.sock. Is the docker daemon running?" >&2
       exit 1
     fi
+    if [ -n "${STUB_DOCKER_WSL:-}" ]; then
+      # The words the Docker Desktop shim prints in a WSL distro it is not connected to.
+      echo "The command 'docker' could not be found in this WSL 2 distro. We recommend to activate the WSL integration in Docker Desktop settings." >&2
+      exit 1
+    fi
     if [ "${1:-}" = "--format" ]; then
       secopts=$(printf '[name=seccomp,profile=builtin%s%s]' "${STUB_ROOTLESS:+ name=rootless}" "${STUB_APPARMOR:+ name=apparmor}")
       case "${2:-}" in

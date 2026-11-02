@@ -120,8 +120,23 @@ edge_public_ip() {
   printf '%s' "$ip"
 }
 
+# Prints the IPv4 addresses a name resolves to, space separated, or nothing
+# when it does not resolve. Fails (status 1, no output) when this computer has
+# no tool that can look a name up, so the caller can report the check itself
+# instead of a missing record. getent is a Linux tool and macOS does not ship
+# it; macOS has dscacheutil, and dig is the last resort on either.
 edge_resolve() {
-  getent ahostsv4 "$1" 2>/dev/null | awk '{print $1}' | sort -u | tr '\n' ' ' || true
+  local lines
+  if command -v getent >/dev/null 2>&1; then
+    lines=$(getent ahostsv4 "$1" 2>/dev/null | awk '{print $1}' | sort -u || true)
+  elif command -v dscacheutil >/dev/null 2>&1; then
+    lines=$(dscacheutil -q host -a name "$1" 2>/dev/null | sed -n 's/^ip_address: //p' | sort -u || true)
+  elif command -v dig >/dev/null 2>&1; then
+    lines=$(dig +short A "$1" 2>/dev/null | awk '/^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$/' | sort -u || true)
+  else
+    return 1
+  fi
+  printf '%s' "$lines" | tr '\n' ' '
 }
 
 # Both names must resolve to this computer's public address. Sets EDGE_DNS_PROBLEM (empty when fine).
@@ -134,7 +149,10 @@ edge_dns_check() {
     return 0
   fi
   for host in "$@"; do
-    got=$(edge_resolve "$host")
+    if ! got=$(edge_resolve "$host"); then
+      EDGE_DNS_PROBLEM="$host could not be checked: this computer has no tool for looking up names. Nothing was requested from Let's Encrypt."
+      return 0
+    fi
     got=${got% }
     if [ -z "$got" ]; then
       EDGE_DNS_PROBLEM="$host does not resolve yet. Create an A record for it pointing at $EDGE_PUBLIC_IP, wait until it resolves, then run this again. Nothing was requested from Let's Encrypt."

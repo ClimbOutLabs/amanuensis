@@ -65,11 +65,11 @@ test('a ready computer passes every check and runs the golden command lines', as
   assert.equal(recording.goldenText(), golden);
 });
 
-test('no Docker on Windows says so in Windows words and stops', async () => {
-  const { deps, printed, recording } = runDoctor({ kind: 'windows', answers: new Map() });
+test('no Docker on a Mac says so in Mac words and stops', async () => {
+  const { deps, printed, recording } = runDoctor({ kind: 'darwin', answers: new Map() });
   const exitCode = await checkDocker(deps);
   assert.equal(exitCode, 1);
-  assert.deepEqual(printed, [problemText(DOCKER_NOT_INSTALLED.windows)]);
+  assert.deepEqual(printed, [problemText(DOCKER_NOT_INSTALLED.darwin)]);
   assert.ok(printed[0]?.includes('Docker Desktop'));
   assert.deepEqual(recording.lines(), ['docker --version']);
 });
@@ -91,16 +91,6 @@ test('a missing Compose tool on Linux is the third check', async () => {
   const exitCode = await checkDocker(deps);
   assert.equal(exitCode, 1);
   assert.equal(printed[2], problemText(COMPOSE_MISSING.linux));
-});
-
-test('low memory on Windows names Settings and Resources', async () => {
-  const { deps, printed } = runDoctor({ kind: 'windows', answers: goodAnswers(4 * GIB) });
-  const exitCode = await checkDocker(deps);
-  assert.equal(exitCode, 1);
-  const last = printed[printed.length - 1];
-  assert.equal(last, problemText(LOW_MEMORY.windows));
-  assert.ok(last?.includes('Settings'));
-  assert.ok(last?.includes('Resources'));
 });
 
 test('low memory on a Mac names Docker Desktop, not its settings pages', async () => {
@@ -127,11 +117,11 @@ test('Docker that does not report an Engine version fails that check, after Comp
   ]);
 });
 
-test('an Engine too old for the https folder mounts fails the Engine check, after memory', async () => {
+test('an Engine too old fails the Engine check, after memory', async () => {
   const answers = goodAnswers(8 * GIB);
   answers.set('docker --version', okResult('Docker version 25.0.3, build 0a1b2c3\n'));
   answers.set('docker info --format {{.ServerVersion}}', okResult('25.0.3\n'));
-  const { deps, printed } = runDoctor({ kind: 'windows', answers });
+  const { deps, printed } = runDoctor({ kind: 'darwin', answers });
   const exitCode = await checkDocker(deps);
   assert.equal(exitCode, 1);
   assert.deepEqual(printed, [
@@ -139,11 +129,11 @@ test('an Engine too old for the https folder mounts fails the Engine check, afte
     'Docker is running, Engine version 25.0.3.',
     'Docker Compose is ready, version 2.29.1.',
     'Docker has 8 GB of memory to work with, which is enough.',
-    problemText(ENGINE_TOO_OLD.windows),
+    problemText(ENGINE_TOO_OLD.darwin),
   ]);
 });
 
-test('the oldest Engine that can mount a folder inside a volume passes', async () => {
+test('the oldest Engine the check accepts passes', async () => {
   const answers = goodAnswers(8 * GIB);
   answers.set('docker --version', okResult('Docker version 26.0.0, build 0a1b2c3\n'));
   answers.set('docker info --format {{.ServerVersion}}', okResult('26.0.0\n'));
@@ -153,16 +143,16 @@ test('the oldest Engine that can mount a folder inside a volume passes', async (
   assert.equal(printed[printed.length - 1], 'Docker is ready for Aman on this computer.');
 });
 
-test('Docker that does not report its memory on Windows fails instead of counting the whole computer', async () => {
+test('Docker that does not report its memory on a Mac fails instead of counting the whole computer', async () => {
   const answers = goodAnswers(8 * GIB);
   answers.set('docker info --format {{.MemTotal}}', okResult('\n'));
   // The fake host reports 16 GB of computer memory, so the old silent
   // fallback to the host total would have passed this check.
-  const { deps, printed } = runDoctor({ kind: 'windows', answers });
+  const { deps, printed } = runDoctor({ kind: 'darwin', answers });
   const exitCode = await checkDocker(deps);
   assert.equal(exitCode, 1);
   const last = printed[printed.length - 1];
-  assert.equal(last, problemText(MEMORY_NOT_REPORTED.windows));
+  assert.equal(last, problemText(MEMORY_NOT_REPORTED.darwin));
 });
 
 test('on Linux a memory Docker does not report falls back to the computer memory', async () => {
