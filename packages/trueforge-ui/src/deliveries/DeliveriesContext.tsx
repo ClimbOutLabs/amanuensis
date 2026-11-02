@@ -17,6 +17,8 @@ import type { DeliveriesApi, DeliveryItem } from './types.js';
 /** How often an open page asks the server how many items are unread. */
 export const DELIVERIES_POLL_MS = 30_000;
 const PAGE_SIZE = 25;
+/** Most ids the server takes in one mark-seen call. */
+const MARK_SEEN_BATCH = 100;
 
 type DeliveriesValue = {
   api: DeliveriesApi;
@@ -29,6 +31,8 @@ type DeliveriesValue = {
   refresh: () => Promise<void>;
   /** Marks items seen on the server, and updates the list at once. */
   markSeen: (ids: readonly string[]) => Promise<void>;
+  /** Marks every unread item seen, including ones not loaded yet. */
+  markAllSeen: () => Promise<void>;
   /** Chats that have an unread item leading to them. */
   unreadChatIds: ReadonlySet<string>;
   /** Marks every unread item that leads to this chat as seen. */
@@ -67,6 +71,7 @@ export const DeliveriesProvider: FC<{ api: DeliveriesApi; pollMs?: number; child
   const [panelOpen, setPanelOpen] = useState(false);
   const [requestedId, setRequestedId] = useState<string | null>(null);
   const lastCount = useRef<number | null>(null);
+  const panelOpenRef = useRef(false);
 
   const loadFirstPage = useCallback(async () => {
     const page = await api.list({ limit: PAGE_SIZE });
@@ -78,8 +83,8 @@ export const DeliveriesProvider: FC<{ api: DeliveriesApi; pollMs?: number; child
     try {
       const count = await api.unreadCount();
       setUnreadCount(count);
-      // The list is fetched again only when something changed, or the first time.
-      if (lastCount.current !== count) {
+      // The list is fetched again when the count changed, the first time, and while the panel is open.
+      if (lastCount.current !== count || panelOpenRef.current) {
         lastCount.current = count;
         await loadFirstPage();
       }
@@ -122,7 +127,10 @@ export const DeliveriesProvider: FC<{ api: DeliveriesApi; pollMs?: number; child
         current.map(item => (ids.includes(item.id) && item.seenAt === null ? { ...item, seenAt: now } : item)),
       );
       try {
-        const count = await api.markSeen(ids);
+        let count = 0;
+        for (let start = 0; start < ids.length; start += MARK_SEEN_BATCH) {
+          count = await api.markSeen(ids.slice(start, start + MARK_SEEN_BATCH));
+        }
         lastCount.current = count;
         setUnreadCount(count);
       } catch {
@@ -132,6 +140,30 @@ export const DeliveriesProvider: FC<{ api: DeliveriesApi; pollMs?: number; child
       }
     },
     [api, refresh],
+  );
+
+  const markAllSeen = useCallback(async () => {
+    const now = new Date().toISOString();
+    setItems(current => current.map(item => (item.seenAt === null ? { ...item, seenAt: now } : item)));
+    try {
+      const count = await api.markAllSeen();
+      lastCount.current = count;
+      setUnreadCount(count);
+    } catch {
+      // The server still has them unread, so the next check puts the marks back.
+      lastCount.current = null;
+      void refresh();
+    }
+  }, [api, refresh]);
+
+  // Opening the panel always shows the latest items, even when the unread count did not change.
+  const openPanel = useCallback(
+    (open: boolean) => {
+      panelOpenRef.current = open;
+      setPanelOpen(open);
+      if (open) void loadFirstPage().catch(() => undefined);
+    },
+    [loadFirstPage],
   );
 
   const unreadChatIds = useMemo(() => {
@@ -160,12 +192,13 @@ export const DeliveriesProvider: FC<{ api: DeliveriesApi; pollMs?: number; child
       loadMore,
       refresh,
       markSeen,
+      markAllSeen,
       unreadChatIds,
       markChatSeen,
       requestedId,
       requestOpen: setRequestedId,
       panelOpen,
-      setPanelOpen,
+      setPanelOpen: openPanel,
     }),
     [
       api,
@@ -175,10 +208,12 @@ export const DeliveriesProvider: FC<{ api: DeliveriesApi; pollMs?: number; child
       loadMore,
       refresh,
       markSeen,
+      markAllSeen,
       unreadChatIds,
       markChatSeen,
       requestedId,
       panelOpen,
+      openPanel,
     ],
   );
 

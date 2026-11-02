@@ -2,7 +2,7 @@
  * Backend-agnostic behavioural contract for IDeliveryStore.
  * Runs under jest against a fresh store per test (see backend test files).
  */
-import type { IDeliveryStore } from '../../src/db/deliveryStore';
+import { DELIVERY_EXPORT_LIMIT, type IDeliveryStore } from '../../src/db/deliveryStore';
 
 const ALICE = { tenant_id: 't1', created_by: 'alice' };
 const BOB = { tenant_id: 't1', created_by: 'bob' };
@@ -97,6 +97,20 @@ export function runDeliveryStoreContractSuite(getStore: () => IDeliveryStore): v
     expect((await store.get({ ...ALICE, id: b.id }))?.seen_at).toBeNull();
   });
 
+  it('marks all of one person’s unread seen and leaves everyone else’s', async () => {
+    const store = getStore();
+    for (let index = 0; index < 120; index += 1) {
+      await store.create(reminder(ALICE, `item ${String(index)}`));
+    }
+    await store.create(reminder(BOB, 'bob'));
+    await store.create(reminder(OTHER_TENANT, 'other'));
+
+    await expect(store.markAllSeen(ALICE)).resolves.toBe(120);
+    await expect(store.countUnread(ALICE)).resolves.toBe(0);
+    await expect(store.countUnread(BOB)).resolves.toBe(1);
+    await expect(store.countUnread(OTHER_TENANT)).resolves.toBe(1);
+  });
+
   it('records channel attempts in order and returns them with the delivery', async () => {
     const store = getStore();
     const made = await store.create(reminder(ALICE));
@@ -139,6 +153,26 @@ export function runDeliveryStoreContractSuite(getStore: () => IDeliveryStore): v
     expect(imported.deliveries[0]?.attempts).toHaveLength(1);
     await expect(store.list({ ...ALICE, limit: 10 })).resolves.toMatchObject({ deliveries: [{ id: made.id }] });
   });
+
+  it('imports a full export where every delivery went to many devices', async () => {
+    const store = getStore();
+    const made = await store.create(reminder(ALICE));
+    const [template] = await store.listForExport(ALICE);
+    if (template === undefined) {
+      throw new Error('The template delivery did not read back.');
+    }
+    const attempts = Array.from({ length: 12 }, () => ({ ...attempt(), channel: 'web_push' as const }));
+    const full = Array.from({ length: DELIVERY_EXPORT_LIMIT }, (_, index) => ({
+      ...template,
+      id: `${made.id}-${String(index).padStart(4, '0')}`,
+      attempts,
+    }));
+
+    await expect(store.importDeliveries({ ...BOB, deliveries: full })).resolves.toBe(DELIVERY_EXPORT_LIMIT);
+    await expect(store.countUnread(BOB)).resolves.toBe(DELIVERY_EXPORT_LIMIT);
+    const page = await store.list({ ...BOB, limit: 1 });
+    expect(page.deliveries[0]?.attempts).toHaveLength(12);
+  }, 60_000);
 }
 
 function attempt() {

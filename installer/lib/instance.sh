@@ -267,13 +267,13 @@ push_keypair() { # app_image
   printf '%s\n' "$out"
 }
 
-# The key pair and contact the app signs push notices with, so a closed page still hears about a due reminder. They are
+# The key pair the app signs push notices with, so a closed page still hears about a due reminder. They are
 # made once, in the settings file, and an existing pair is never changed. An older instance gets them on its next
 # refresh or upgrade. A file without the installer's managed part gets the lines at its end. A missing file gets nothing.
 # When no key can be made, push stays off and the rest works as before.
 web_push_backfill() { # name app_image
-  local name=$1 env keys public private
-  env="$(instance_dir "$name")/.env"
+  local env keys public private
+  env="$(instance_dir "$1")/.env"
   [ -f "$env" ] || return 0
   if ! grep -q '^WEB_PUSH_PUBLIC_KEY=..*' "$env" || ! grep -q '^WEB_PUSH_PRIVATE_KEY=..*' "$env"; then
     keys=$(push_keypair "$2") || {
@@ -284,9 +284,6 @@ web_push_backfill() { # name app_image
     private=${keys#* }
     web_push_env_set "$env" WEB_PUSH_PUBLIC_KEY "$public"
     web_push_env_set "$env" WEB_PUSH_PRIVATE_KEY "$private"
-  fi
-  if ! grep -q '^WEB_PUSH_SUBJECT=..*' "$env"; then
-    web_push_env_set "$env" WEB_PUSH_SUBJECT "mailto:$(reg_get "$name" owner_email)"
   fi
 }
 

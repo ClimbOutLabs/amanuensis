@@ -1,3 +1,5 @@
+import { createPublicKey } from 'node:crypto';
+
 import { z } from '@hono/zod-openapi';
 
 /** How loud a delivery is. A note only waits in the app; a nudge may also reach a device; a call is the loudest. */
@@ -108,10 +110,45 @@ export const DeliveryIdParamSchema = z
   .object({ delivery_id: z.string().min(1).describe('Delivery id.') })
   .openapi('DeliveryIdParam');
 
+/** Whether a base64url value is an uncompressed point on P-256, the only key web push accepts. */
+function isP256Point(value: string): boolean {
+  const bytes = Buffer.from(value, 'base64url');
+  if (bytes.length !== 65 || bytes[0] !== 0x04 || bytes.toString('base64url') !== value) {
+    return false;
+  }
+  try {
+    createPublicKey({
+      key: {
+        kty: 'EC',
+        crv: 'P-256',
+        x: bytes.subarray(1, 33).toString('base64url'),
+        y: bytes.subarray(33).toString('base64url'),
+      },
+      format: 'jwk',
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function isAuthSecret(value: string): boolean {
+  const bytes = Buffer.from(value, 'base64url');
+  return bytes.length === 16 && bytes.toString('base64url') === value;
+}
+
 export const PushKeysSchema = z
   .object({
-    p256dh: z.string().min(1).max(256).describe('The device public key, base64url.'),
-    auth: z.string().min(1).max(256).describe('The device auth secret, base64url.'),
+    p256dh: z
+      .string()
+      .max(256)
+      .refine(isP256Point, 'This is not a device push key. Turn notices off and on again.')
+      .describe('The device public key: a P-256 point, base64url.'),
+    auth: z
+      .string()
+      .max(256)
+      .refine(isAuthSecret, 'This is not a device push secret. Turn notices off and on again.')
+      .describe('The device auth secret: 16 bytes, base64url.'),
   })
   .openapi('PushKeys');
 
@@ -138,9 +175,9 @@ export const GetPushSubscriptionResponseSchema = z
   .object({ data: PushSubscriptionSchema })
   .openapi('GetPushSubscriptionResponse');
 
-export const DeletePushSubscriptionRequestQuerySchema = z
+export const DeletePushSubscriptionRequestSchema = z
   .object({ endpoint: z.url().max(2048).describe('The push service address of the device to remove.') })
-  .openapi('DeletePushSubscriptionRequestQuery');
+  .openapi('DeletePushSubscriptionRequest');
 
 export const DeletePushSubscriptionResponseSchema = z.object({}).openapi('DeletePushSubscriptionResponse');
 

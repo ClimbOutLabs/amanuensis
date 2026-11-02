@@ -97,11 +97,24 @@ export interface IDeliveryStore {
   list(input: ListDeliveriesInput): Promise<DeliveryPage>;
   /** Marks the owner's listed deliveries seen. Already seen ones keep their first time. Resolves to how many changed. */
   markSeen(input: DeliveryOwner & { ids: readonly string[]; now?: Date }): Promise<number>;
+  /** Marks every unread delivery of the owner seen, loaded on a page or not. Resolves to how many changed. */
+  markAllSeen(input: DeliveryOwner & { now?: Date }): Promise<number>;
   countUnread(input: DeliveryOwner): Promise<number>;
   /** The owner's newest deliveries for a data export. */
   listForExport(input: DeliveryOwner): Promise<Delivery[]>;
   /** Adds exported deliveries under the owner; pass the import transaction. One already there keeps its row. Resolves to how many were added. */
   importDeliveries(input: ImportDeliveriesInput, transaction?: Kysely<DeliveryDatabase>): Promise<number>;
+}
+
+/** Rows per insert on import, well under the bound-variable limits of SQLite and Postgres. */
+const IMPORT_BATCH_SIZE = 200;
+
+function batches<T>(rows: readonly T[]): T[][] {
+  const out: T[][] = [];
+  for (let start = 0; start < rows.length; start += IMPORT_BATCH_SIZE) {
+    out.push(rows.slice(start, start + IMPORT_BATCH_SIZE));
+  }
+  return out;
 }
 
 const CursorSchema = z.object({ created_at: z.string(), id: z.string() });
@@ -278,6 +291,18 @@ export class DeliveryStore implements IDeliveryStore {
     return rows.length;
   }
 
+  async markAllSeen(input: DeliveryOwner & { now?: Date }): Promise<number> {
+    const rows = await this.#db
+      .updateTable('delivery')
+      .set({ seen_at: (input.now ?? new Date()).toISOString() })
+      .where('tenant_id', '=', input.tenant_id)
+      .where('created_by', '=', input.created_by)
+      .where('seen_at', 'is', null)
+      .returning('id')
+      .execute();
+    return rows.length;
+  }
+
   async countUnread(input: DeliveryOwner): Promise<number> {
     const row = await this.#db
       .selectFrom('delivery')
@@ -303,30 +328,32 @@ export class DeliveryStore implements IDeliveryStore {
   }
 
   async importDeliveries(input: ImportDeliveriesInput, transaction?: Kysely<DeliveryDatabase>): Promise<number> {
-    if (input.deliveries.length === 0) {
-      return 0;
-    }
     const db = transaction ?? this.#db;
-    const inserted = await db
-      .insertInto('delivery')
-      .values(
-        input.deliveries.map(delivery => ({
-          id: delivery.id,
-          tenant_id: input.tenant_id,
-          created_by: input.created_by,
-          kind: delivery.kind,
-          level: delivery.level,
-          text: delivery.text,
-          reason: delivery.reason,
-          link: delivery.link === null ? null : JSON.stringify(delivery.link),
-          created_at: delivery.created_at,
-          seen_at: delivery.seen_at,
-        })),
-      )
-      .onConflict(conflict => conflict.column('id').doNothing())
-      .returning('id')
-      .execute();
-    const addedIds = new Set(inserted.map(row => row.id));
+    const addedIds = new Set<string>();
+    for (const batch of batches(input.deliveries)) {
+      const inserted = await db
+        .insertInto('delivery')
+        .values(
+          batch.map(delivery => ({
+            id: delivery.id,
+            tenant_id: input.tenant_id,
+            created_by: input.created_by,
+            kind: delivery.kind,
+            level: delivery.level,
+            text: delivery.text,
+            reason: delivery.reason,
+            link: delivery.link === null ? null : JSON.stringify(delivery.link),
+            created_at: delivery.created_at,
+            seen_at: delivery.seen_at,
+          })),
+        )
+        .onConflict(conflict => conflict.column('id').doNothing())
+        .returning('id')
+        .execute();
+      for (const row of inserted) {
+        addedIds.add(row.id);
+      }
+    }
     const attempts = input.deliveries
       .filter(delivery => addedIds.has(delivery.id))
       .flatMap(delivery =>
@@ -342,8 +369,8 @@ export class DeliveryStore implements IDeliveryStore {
           attempted_at: attempt.attempted_at,
         })),
       );
-    if (attempts.length > 0) {
-      await db.insertInto('delivery_attempt').values(attempts).execute();
+    for (const batch of batches(attempts)) {
+      await db.insertInto('delivery_attempt').values(batch).execute();
     }
     return addedIds.size;
   }

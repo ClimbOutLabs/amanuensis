@@ -20,6 +20,12 @@ One server-side feed of things Aman wants a person to see, called deliveries. Ea
 
 **Push carries no content.** The push payload is the delivery id and a short title such as "Reminder". It never holds the reminder text, the reason or the assistant's name. The page fetches details after the person opens it.
 
+**Push names no one.** The contact every push carries defaults to the project's public page, not the owner's email. The owner can set their own with `WEB_PUSH_SUBJECT`.
+
+**A bounded number of devices.** A person keeps notices on for at most 10 devices. Turning on another drops the one turned on longest ago. A notice goes to at most 4 devices at a time.
+
+**New keys mean new subscriptions.** Each device records the key it was turned on with. After the keys change, a device on the old key is removed instead of sent to, and turning notices on again makes a fresh subscription with the new key.
+
 **Push is opt-in per device.** A person turns notices on from a click in Settings. Push is off unless the server has a key pair. The installer creates the key pair at install, and on upgrade for instances that have none.
 
 **The service worker stays inert.** It shows notices and opens items. It has no fetch handler and stores nothing, so it cannot touch API calls or streams.
@@ -42,6 +48,7 @@ One server-side feed of things Aman wants a person to see, called deliveries. Ea
 
 - Delivery text stays in the person's own database
 - Push payloads hold only an id and a generic title, so the push service never sees reminder text
+- The push service (Google, Apple or Mozilla, by browser) sees this computer's address and the project page as contact, and nothing about the person
 - Push subscriptions are not exported, since they are tied to one browser
 - Nothing in this spec texts or calls anyone
 
@@ -55,6 +62,9 @@ All tests use synthetic data, never a person's real data.
 - One person never sees or marks another person's deliveries
 - The push payload holds no reminder text
 - A dead push subscription is removed
+- A device on an old key is removed, and turning notices on again re-subscribes
+- An 11th device drops the oldest
+- A full export with many devices per item imports
 - An upgraded install gets push keys
 - The service worker takes no fetch events
 - Older export files import through the upgrade step

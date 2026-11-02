@@ -4,9 +4,18 @@ import { useCallback, useEffect, useState } from 'react';
 
 import { useAssistantDisplayName } from '../components/PersonalizationContext.js';
 import { useOptionalDeliveries } from './DeliveriesContext.js';
-import { currentPushSubscription, disablePush, enablePush, pushSupport, type PushBlocker } from './pushDevice.js';
+import {
+  currentPushSubscription,
+  disablePush,
+  enablePush,
+  pushSupport,
+  subscribedWithKey,
+  type PushBlocker,
+} from './pushDevice.js';
 
 const BLOCKER_WORDS: Record<PushBlocker, string> = {
+  needs_https:
+    'Notices need a secure address. Open Aman at an address that starts with https, or on this computer at localhost, then come back here.',
   unsupported:
     'This browser cannot show notices when Aman is closed. Try a recent version of Chrome, Edge, Firefox or Safari.',
   iphone_needs_home_screen:
@@ -34,7 +43,10 @@ export function ReachMeSettings() {
     void Promise.all([currentPushSubscription().catch(() => null), api.pushPublicKey().catch(() => null)]).then(
       ([subscription, key]) => {
         if (cancelled) return;
-        setState(subscription === null ? 'off' : 'on');
+        // A subscription made with an older key gets nothing, so it reads as off until it is turned on again.
+        setState(
+          subscription !== null && key !== null && subscribedWithKey({ subscription, publicKey: key }) ? 'on' : 'off',
+        );
         setServerReady(key !== null);
       },
     );

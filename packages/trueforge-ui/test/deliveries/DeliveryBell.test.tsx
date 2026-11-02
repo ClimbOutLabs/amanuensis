@@ -101,12 +101,37 @@ describe('the bell', () => {
 
     fireEvent.click(await within(phone.container).findByRole('button', { name: /Notifications/ }));
     fireEvent.click(await within(phone.container).findByRole('button', { name: /Mark all seen/ }));
-    await waitFor(() => expect(api.markSeen).toHaveBeenCalled());
+    await waitFor(() => expect(api.markAllSeen).toHaveBeenCalled());
 
     // The laptop's next check reads the shared server state.
     await waitFor(() => expect(within(laptop.container).getByRole('button', { name: 'Notifications' })).toBeTruthy(), {
       timeout: 3_000,
     });
+  });
+
+  it('marks every unread item seen, including ones not loaded yet', async () => {
+    const { api, state } = fakeServer([item({ id: 'a' })]);
+    vi.mocked(api.unreadCount).mockResolvedValueOnce(150);
+    renderDevice(api);
+    fireEvent.click(await screen.findByRole('button', { name: 'Notifications, 150 unread' }));
+    fireEvent.click(await screen.findByRole('button', { name: /Mark all seen/ }));
+
+    await waitFor(() => expect(api.markAllSeen).toHaveBeenCalledTimes(1));
+    expect(api.markSeen).not.toHaveBeenCalled();
+    expect(state.items.every(row => row.seenAt !== null)).toBe(true);
+    expect(await screen.findByRole('button', { name: 'Notifications' })).toBeTruthy();
+  });
+
+  it('shows the latest items each time the panel opens, even when the count did not change', async () => {
+    const { api, state } = fakeServer([item({ id: 'a', text: 'First thing' })]);
+    renderDevice(api);
+    const bell = await screen.findByRole('button', { name: 'Notifications, 1 unread' });
+
+    // One item was seen elsewhere and another arrived, so the count is still 1.
+    state.items = [item({ id: 'b', text: 'Second thing' }), { ...item({ id: 'a', text: 'First thing' }), seenAt: 'x' }];
+    fireEvent.click(bell);
+
+    expect(await screen.findByRole('button', { name: /Second thing/ })).toBeTruthy();
   });
 
   it('says what an empty feed means', async () => {

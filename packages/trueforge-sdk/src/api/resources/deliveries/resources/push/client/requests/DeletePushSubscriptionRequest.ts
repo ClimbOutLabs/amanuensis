@@ -6,7 +6,7 @@
  *         endpoint: "endpoint"
  *     }
  */
-export interface DeleteSubscriptionPushRequest {
+export interface DeletePushSubscriptionRequest {
     /** The push service address of the device to remove. */
     endpoint: string;
 }

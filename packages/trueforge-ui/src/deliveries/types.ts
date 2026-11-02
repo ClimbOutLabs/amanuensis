@@ -31,10 +31,13 @@ export type DeliveriesApi = {
   unreadCount(): Promise<number>;
   /** Marks items seen on every device. Resolves to the unread count afterwards. */
   markSeen(ids: readonly string[]): Promise<number>;
+  /** Marks every unread item seen on every device, loaded or not. Resolves to the unread count afterwards. */
+  markAllSeen(): Promise<number>;
   /** Resolves to null when the item is not the signed-in person's. */
   get(id: string): Promise<DeliveryItem | null>;
   /** The key a browser needs to turn notices on, or null while push is off on the server. */
   pushPublicKey(): Promise<string | null>;
-  savePushDevice(device: PushDevice): Promise<void>;
+  /** Resolves to `taken` when this address already gets another account's notices; a fresh subscription is needed. */
+  savePushDevice(device: PushDevice): Promise<'saved' | 'taken'>;
   removePushDevice(endpoint: string): Promise<void>;
 };

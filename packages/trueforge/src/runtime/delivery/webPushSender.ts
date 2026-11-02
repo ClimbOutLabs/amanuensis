@@ -9,6 +9,8 @@ import type { DeliveryChannelSender } from './deliveryChannel';
 /** How long a push service keeps a notice for a device that is off. */
 const PUSH_TTL_SECONDS = 24 * 60 * 60;
 const PUSH_TIMEOUT_MS = 10_000;
+/** Pushes in flight at once for one delivery, so a long device list never floods the push services. */
+const PUSH_CONCURRENCY = 4;
 
 /**
  * The only words a push carries. They name no person, chat or reminder text, because a notice can show on a
@@ -108,6 +110,16 @@ export function createWebPushSender({
         at: now(),
       });
     }
+    if (target.server_key !== settings.publicKey) {
+      // The keys changed since this device turned notices on, so the push service would refuse every notice.
+      await subscriptions.removeById({ ...owner, id: target.id });
+      return attempt({
+        outcome: 'gone',
+        detail: 'This device was set up with an older key, so it was removed. Turn notices on there again in Settings.',
+        target: target.id,
+        at: now(),
+      });
+    }
     try {
       const request = await buildPushPayload(
         { data: pushBody(delivery), options: { ttl: PUSH_TTL_SECONDS, urgency: 'normal' } },
@@ -165,7 +177,12 @@ export function createWebPushSender({
       }
       const owner = { tenant_id, created_by };
       const targets = await subscriptions.listTargets(owner);
-      return Promise.all(targets.map(target => sendOne({ target, delivery, owner })));
+      const results: DeliveryAttempt[] = [];
+      for (let start = 0; start < targets.length; start += PUSH_CONCURRENCY) {
+        const wave = targets.slice(start, start + PUSH_CONCURRENCY);
+        results.push(...(await Promise.all(wave.map(target => sendOne({ target, delivery, owner })))));
+      }
+      return results;
     },
   };
 }

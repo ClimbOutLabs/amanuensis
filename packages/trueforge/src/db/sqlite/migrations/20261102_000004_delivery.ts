@@ -45,6 +45,7 @@ export async function up(db: Kysely<unknown>): Promise<void> {
         p256dh TEXT NOT NULL,
         auth TEXT NOT NULL,
         label TEXT,
+        server_key TEXT NOT NULL,
         created_at TEXT NOT NULL
       ) STRICT
     `.execute(trx);

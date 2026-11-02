@@ -85,7 +85,7 @@ export function DeliveryBell() {
   }, [open, setPanelOpen]);
 
   if (deliveries === null) return null;
-  const { unreadCount, items, hasMore, loadMore, markSeen } = deliveries;
+  const { unreadCount, items, hasMore, loadMore, markSeen, markAllSeen } = deliveries;
 
   const onOpen = (item: DeliveryItem) => {
     void markSeen([item.id]);
@@ -94,7 +94,6 @@ export function DeliveryBell() {
       openDeliveryLink({ shell, link: item.link });
     }
   };
-  const unreadIds = items.filter(item => item.seenAt === null).map(item => item.id);
 
   return (
     <div ref={rootRef} className="relative">
@@ -125,10 +124,10 @@ export function DeliveryBell() {
         >
           <div className="border-border flex items-center justify-between border-b px-3 py-2">
             <h2 className="text-text-primary text-sm font-semibold">Notifications</h2>
-            {unreadIds.length > 0 ? (
+            {unreadCount > 0 ? (
               <button
                 type="button"
-                onClick={() => void markSeen(unreadIds)}
+                onClick={() => void markAllSeen()}
                 className="text-text-secondary hover:bg-ghost-button-hover rounded-lg px-2 py-1 text-xs"
               >
                 Mark all seen

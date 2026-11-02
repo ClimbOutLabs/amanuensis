@@ -2579,6 +2579,20 @@
         "properties": {},
         "type": "object"
       },
+      "DeletePushSubscriptionRequest": {
+        "properties": {
+          "endpoint": {
+            "description": "The push service address of the device to remove.",
+            "format": "uri",
+            "maxLength": 2048,
+            "type": "string"
+          }
+        },
+        "required": [
+          "endpoint"
+        ],
+        "type": "object"
+      },
       "DeletePushSubscriptionResponse": {
         "properties": {},
         "type": "object"
@@ -8683,15 +8697,13 @@
       "PushKeys": {
         "properties": {
           "auth": {
-            "description": "The device auth secret, base64url.",
+            "description": "The device auth secret: 16 bytes, base64url.",
             "maxLength": 256,
-            "minLength": 1,
             "type": "string"
           },
           "p256dh": {
-            "description": "The device public key, base64url.",
+            "description": "The device public key: a P-256 point, base64url.",
             "maxLength": 256,
-            "minLength": 1,
             "type": "string"
           }
         },
@@ -25568,6 +25580,41 @@
         "x-fern-sdk-method-name": "mark_seen"
       }
     },
+    "/api/v1/user/deliveries/seen-all": {
+      "post": {
+        "description": "Marks every unread delivery of the signed-in person seen on every device.",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetDeliveryUnreadCountResponse"
+                }
+              }
+            },
+            "description": "The unread count after marking."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "OIDC is configured and the request has no valid session cookie."
+          }
+        },
+        "summary": "Mark every delivery seen",
+        "tags": [
+          "Deliveries"
+        ],
+        "x-fern-sdk-group-name": [
+          "deliveries"
+        ],
+        "x-fern-sdk-method-name": "mark_all_seen"
+      }
+    },
     "/api/v1/user/deliveries/unread-count": {
       "get": {
         "description": "Counts deliveries the signed-in person has not seen on any device.",
@@ -25700,20 +25747,16 @@
     "/api/v1/user/push/subscriptions": {
       "delete": {
         "description": "Removes a device. Removing one that is not saved is not an error.",
-        "parameters": [
-          {
-            "description": "The push service address of the device to remove.",
-            "in": "query",
-            "name": "endpoint",
-            "required": true,
-            "schema": {
-              "description": "The push service address of the device to remove.",
-              "format": "uri",
-              "maxLength": 2048,
-              "type": "string"
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeletePushSubscriptionRequest"
+              }
             }
-          }
-        ],
+          },
+          "required": true
+        },
         "responses": {
           "200": {
             "content": {
@@ -25757,7 +25800,7 @@
         "x-fern-sdk-method-name": "delete_subscription"
       },
       "post": {
-        "description": "Saves a device so due reminders and nudges reach it. Saving the same device again changes nothing.",
+        "description": "Saves a device so due reminders and nudges reach it. A person keeps up to 10 devices; another drops the oldest.",
         "requestBody": {
           "content": {
             "application/json": {
@@ -25798,6 +25841,16 @@
               }
             },
             "description": "OIDC is configured and the request has no valid session cookie."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "This device address belongs to another person. Subscribe again for a new address."
           }
         },
         "summary": "Turn notices on for a device",

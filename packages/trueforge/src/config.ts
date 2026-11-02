@@ -403,8 +403,14 @@ function base64UrlByteLength(value: string): number | undefined {
 }
 
 /**
- * Parses `WEB_PUSH_PUBLIC_KEY`, `WEB_PUSH_PRIVATE_KEY` and `WEB_PUSH_SUBJECT`. All unset means push is off.
- * Some but not all, or a value that is not a key, fails the boot with the one thing to do next.
+ * The contact every push names when WEB_PUSH_SUBJECT is unset. Push services see it on each notice, so it is the
+ * project's public page rather than anything about the person.
+ */
+export const DEFAULT_WEB_PUSH_SUBJECT = 'https://github.com/ClimbOutLabs/amanuensis';
+
+/**
+ * Parses `WEB_PUSH_PUBLIC_KEY`, `WEB_PUSH_PRIVATE_KEY` and the optional `WEB_PUSH_SUBJECT`. No keys means push is off.
+ * One key without the other, or a value that is not a key, fails the boot with the one thing to do next.
  */
 export function parseWebPushSettings(raw: {
   publicKey: string | undefined;
@@ -413,13 +419,13 @@ export function parseWebPushSettings(raw: {
 }): WebPushSettings | undefined {
   const publicKey = blankToUndefined(raw.publicKey?.trim());
   const privateKey = blankToUndefined(raw.privateKey?.trim());
-  const subject = blankToUndefined(raw.subject?.trim());
-  if (publicKey === undefined && privateKey === undefined && subject === undefined) {
+  const subject = blankToUndefined(raw.subject?.trim()) ?? DEFAULT_WEB_PUSH_SUBJECT;
+  if (publicKey === undefined && privateKey === undefined) {
     return undefined;
   }
-  if (publicKey === undefined || privateKey === undefined || subject === undefined) {
+  if (publicKey === undefined || privateKey === undefined) {
     throw new Error(
-      'WEB_PUSH_PUBLIC_KEY, WEB_PUSH_PRIVATE_KEY and WEB_PUSH_SUBJECT must all be set, or all left out. Set the missing ones, or remove the others to leave push off.',
+      'WEB_PUSH_PUBLIC_KEY and WEB_PUSH_PRIVATE_KEY must both be set, or both left out. Run the installer again to make a new pair.',
     );
   }
   if (base64UrlByteLength(publicKey) !== VAPID_PUBLIC_KEY_BYTES) {
@@ -429,7 +435,9 @@ export function parseWebPushSettings(raw: {
     throw new Error('WEB_PUSH_PRIVATE_KEY is not a push key. Run the installer again to make a new pair.');
   }
   if (!/^(mailto:[^\s@]+@[^\s@]+|https:\/\/\S+)$/.test(subject)) {
-    throw new Error('WEB_PUSH_SUBJECT must start with mailto: or https://. Set it to mailto: and your email address.');
+    throw new Error(
+      'WEB_PUSH_SUBJECT must start with mailto: or https://. Fix it, or remove the line to use the default.',
+    );
   }
   return { publicKey, privateKey, subject };
 }
@@ -1339,8 +1347,8 @@ export interface SharedServerConfiguration {
    */
   CALENDAR_ACCOUNT_SECRET: string | undefined;
   /**
-   * The VAPID key pair and contact the server signs web push with. Push is off when all three are unset.
-   * Env: `WEB_PUSH_PUBLIC_KEY`, `WEB_PUSH_PRIVATE_KEY`, `WEB_PUSH_SUBJECT`. Default unset.
+   * The VAPID key pair the server signs web push with, and the contact push services see. Push is off when the keys
+   * are unset. Env: `WEB_PUSH_PUBLIC_KEY`, `WEB_PUSH_PRIVATE_KEY`, `WEB_PUSH_SUBJECT` (defaults to the project page).
    */
   WEB_PUSH: WebPushSettings | undefined;
   /**

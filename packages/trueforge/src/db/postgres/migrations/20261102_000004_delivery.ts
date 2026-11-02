@@ -53,6 +53,7 @@ export async function up(db: Kysely<unknown>): Promise<void> {
       .addColumn('p256dh', 'text', col => col.notNull())
       .addColumn('auth', 'text', col => col.notNull())
       .addColumn('label', 'text')
+      .addColumn('server_key', 'text', col => col.notNull())
       .addColumn('created_at', 'timestamptz', col => col.notNull())
       .execute();
     await trx.schema

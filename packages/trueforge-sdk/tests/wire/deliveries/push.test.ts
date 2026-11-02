@@ -80,7 +80,7 @@ describe("PushClient", () => {
     test("create_subscription (2)", async () => {
         const server = mockServerPool.createServer();
         const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
-        const rawRequestBody = { endpoint: "endpoint", keys: { auth: "x", p256dh: "x" } };
+        const rawRequestBody = { endpoint: "endpoint", keys: { auth: "auth", p256dh: "p256dh" } };
         const rawResponseBody = { error: { message: "message" } };
 
         server
@@ -96,8 +96,8 @@ describe("PushClient", () => {
             return await client.deliveries.push.createSubscription({
                 endpoint: "endpoint",
                 keys: {
-                    auth: "x",
-                    p256Dh: "x",
+                    auth: "auth",
+                    p256Dh: "p256dh",
                 },
             });
         }).rejects.toThrow(TrueForgeTypes.BadRequestError);
@@ -106,7 +106,7 @@ describe("PushClient", () => {
     test("create_subscription (3)", async () => {
         const server = mockServerPool.createServer();
         const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
-        const rawRequestBody = { endpoint: "endpoint", keys: { auth: "x", p256dh: "x" } };
+        const rawRequestBody = { endpoint: "endpoint", keys: { auth: "auth", p256dh: "p256dh" } };
         const rawResponseBody = { error: { message: "message" } };
 
         server
@@ -122,22 +122,49 @@ describe("PushClient", () => {
             return await client.deliveries.push.createSubscription({
                 endpoint: "endpoint",
                 keys: {
-                    auth: "x",
-                    p256Dh: "x",
+                    auth: "auth",
+                    p256Dh: "p256dh",
                 },
             });
         }).rejects.toThrow(TrueForgeTypes.UnauthorizedError);
     });
 
+    test("create_subscription (4)", async () => {
+        const server = mockServerPool.createServer();
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
+        const rawRequestBody = { endpoint: "endpoint", keys: { auth: "auth", p256dh: "p256dh" } };
+        const rawResponseBody = { error: { message: "message" } };
+
+        server
+            .mockEndpoint()
+            .post("/api/v1/user/push/subscriptions")
+            .jsonBody(rawRequestBody)
+            .respondWith()
+            .statusCode(409)
+            .jsonBody(rawResponseBody)
+            .build();
+
+        await expect(async () => {
+            return await client.deliveries.push.createSubscription({
+                endpoint: "endpoint",
+                keys: {
+                    auth: "auth",
+                    p256Dh: "p256dh",
+                },
+            });
+        }).rejects.toThrow(TrueForgeTypes.ConflictError);
+    });
+
     test("delete_subscription (1)", async () => {
         const server = mockServerPool.createServer();
         const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
-
+        const rawRequestBody = { endpoint: "endpoint" };
         const rawResponseBody = {};
 
         server
             .mockEndpoint()
             .delete("/api/v1/user/push/subscriptions")
+            .jsonBody(rawRequestBody)
             .respondWith()
             .statusCode(200)
             .jsonBody(rawResponseBody)
@@ -152,12 +179,13 @@ describe("PushClient", () => {
     test("delete_subscription (2)", async () => {
         const server = mockServerPool.createServer();
         const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
-
+        const rawRequestBody = { endpoint: "endpoint" };
         const rawResponseBody = { error: { message: "message" } };
 
         server
             .mockEndpoint()
             .delete("/api/v1/user/push/subscriptions")
+            .jsonBody(rawRequestBody)
             .respondWith()
             .statusCode(400)
             .jsonBody(rawResponseBody)
@@ -173,12 +201,13 @@ describe("PushClient", () => {
     test("delete_subscription (3)", async () => {
         const server = mockServerPool.createServer();
         const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
-
+        const rawRequestBody = { endpoint: "endpoint" };
         const rawResponseBody = { error: { message: "message" } };
 
         server
             .mockEndpoint()
             .delete("/api/v1/user/push/subscriptions")
+            .jsonBody(rawRequestBody)
             .respondWith()
             .statusCode(401)
             .jsonBody(rawResponseBody)

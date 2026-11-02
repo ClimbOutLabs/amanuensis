@@ -68,8 +68,8 @@ function unreadCountOf(body: unknown): number {
   return data.unread_count;
 }
 
-function json(body: unknown): RequestInit {
-  return { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) };
+function json(body: unknown, method: 'POST' | 'DELETE' = 'POST'): RequestInit {
+  return { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) };
 }
 
 /** Backs `DeliveriesProvider`: the signed-in person's feed and push devices. */
@@ -93,6 +93,9 @@ export function createDeliveriesApi(fetcher: typeof fetch): DeliveriesApi {
     async markSeen(ids) {
       return unreadCountOf(await readBody(await fetcher(apiPath(`${DELIVERIES_URL}/seen`), json({ ids }))));
     },
+    async markAllSeen() {
+      return unreadCountOf(await readBody(await fetcher(apiPath(`${DELIVERIES_URL}/seen-all`), json({}))));
+    },
     async get(id) {
       const response = await fetcher(apiPath(`${DELIVERIES_URL}/${encodeURIComponent(id)}`));
       if (response.status === 404) {
@@ -107,22 +110,24 @@ export function createDeliveriesApi(fetcher: typeof fetch): DeliveriesApi {
       return isRecord(data) && typeof data.public_key === 'string' ? data.public_key : null;
     },
     async savePushDevice(device: PushDevice) {
-      await readBody(
-        await fetcher(
-          apiPath(`${PUSH_URL}/subscriptions`),
-          json({
-            endpoint: device.endpoint,
-            keys: { p256dh: device.p256dh, auth: device.auth },
-            label: device.label,
-          }),
-        ),
+      const response = await fetcher(
+        apiPath(`${PUSH_URL}/subscriptions`),
+        json({
+          endpoint: device.endpoint,
+          keys: { p256dh: device.p256dh, auth: device.auth },
+          label: device.label,
+        }),
       );
+      // 409: another account holds this address; the caller makes a fresh subscription.
+      if (response.status === 409) {
+        return 'taken';
+      }
+      await readBody(response);
+      return 'saved';
     },
     async removePushDevice(endpoint) {
-      const query = new URLSearchParams({ endpoint });
-      await readBody(
-        await fetcher(`${apiPath(`${PUSH_URL}/subscriptions`)}?${query.toString()}`, { method: 'DELETE' }),
-      );
+      // The address goes in the body, so it stays out of request logs.
+      await readBody(await fetcher(apiPath(`${PUSH_URL}/subscriptions`), json({ endpoint }, 'DELETE')));
     },
   };
 }

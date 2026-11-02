@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { DeliveriesProvider } from '@/deliveries/DeliveriesContext.js';
 import { ReachMeSettings } from '@/deliveries/ReachMeSettings.js';
 
-import { fakeServer } from './fakeDeliveriesApi.js';
+import { fakeServer, SERVER_KEY } from './fakeDeliveriesApi.js';
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -13,19 +13,45 @@ afterEach(() => {
   Reflect.deleteProperty(window, 'PushManager');
 });
 
-function stubPushBrowser() {
-  const subscription = {
-    endpoint: 'https://push.example.test/device',
-    getKey: (name: string) => new TextEncoder().encode(name).buffer,
-    unsubscribe: vi.fn(() => Promise.resolve(true)),
+function keyBuffer(base64url: string): ArrayBuffer {
+  const raw = window.atob(base64url.replace(/-/g, '+').replace(/_/g, '/'));
+  const bytes = new Uint8Array(raw.length);
+  for (let i = 0; i < raw.length; i += 1) bytes[i] = raw.charCodeAt(i);
+  return bytes.buffer;
+}
+
+type StubSubscription = {
+  endpoint: string;
+  options: { applicationServerKey: ArrayBuffer | null };
+  getKey: (name: string) => ArrayBuffer;
+  unsubscribe: () => Promise<boolean>;
+};
+
+/** A browser that can take push. `existingKey` makes it start with a subscription made with that key. */
+function stubPushBrowser({ existingKey }: { existingKey?: string } = {}) {
+  let made = 0;
+  const unsubscribed: string[] = [];
+  const makeSubscription = (key: ArrayBuffer | null): StubSubscription => {
+    made += 1;
+    const endpoint = `https://push.example.test/device-${String(made)}`;
+    return {
+      endpoint,
+      options: { applicationServerKey: key },
+      getKey: (name: string) => new TextEncoder().encode(name).buffer,
+      unsubscribe: () => {
+        unsubscribed.push(endpoint);
+        current = null;
+        return Promise.resolve(true);
+      },
+    };
   };
-  let current: typeof subscription | null = null;
+  let current: StubSubscription | null = existingKey === undefined ? null : makeSubscription(keyBuffer(existingKey));
   const registration = {
     pushManager: {
       getSubscription: vi.fn(() => Promise.resolve(current)),
-      subscribe: vi.fn(() => {
-        current = subscription;
-        return Promise.resolve(subscription);
+      subscribe: vi.fn((options: { applicationServerKey: Uint8Array<ArrayBuffer> }) => {
+        current = makeSubscription(options.applicationServerKey.buffer);
+        return Promise.resolve(current);
       }),
     },
   };
@@ -49,7 +75,7 @@ function stubPushBrowser() {
     static requestPermission = requestPermission;
   };
   vi.stubGlobal('Notification', stub);
-  return { registration, subscription, requestPermission };
+  return { registration, requestPermission, unsubscribed };
 }
 
 function renderSettings() {
@@ -67,7 +93,7 @@ describe('Settings, Reach me', () => {
     const browser = stubPushBrowser();
     const { api } = renderSettings();
     const button = await screen.findByRole('button', { name: 'Turn on for this device' });
-    await waitFor(() => expect((button as HTMLButtonElement).disabled).toBe(false));
+    await waitFor(() => expect(button).toHaveProperty('disabled', false));
     expect(browser.requestPermission).not.toHaveBeenCalled();
 
     fireEvent.click(button);
@@ -75,7 +101,7 @@ describe('Settings, Reach me', () => {
     await waitFor(() => expect(api.savePushDevice).toHaveBeenCalled());
     expect(browser.requestPermission).toHaveBeenCalledTimes(1);
     expect(api.savePushDevice).toHaveBeenCalledWith({
-      endpoint: 'https://push.example.test/device',
+      endpoint: 'https://push.example.test/device-1',
       p256dh: expect.any(String),
       auth: expect.any(String),
       label: 'This device',
@@ -87,12 +113,60 @@ describe('Settings, Reach me', () => {
     stubPushBrowser();
     const { api } = renderSettings();
     const on = await screen.findByRole('button', { name: 'Turn on for this device' });
-    await waitFor(() => expect((on as HTMLButtonElement).disabled).toBe(false));
+    await waitFor(() => expect(on).toHaveProperty('disabled', false));
     fireEvent.click(on);
     fireEvent.click(await screen.findByRole('button', { name: 'Turn off on this device' }));
 
-    await waitFor(() => expect(api.removePushDevice).toHaveBeenCalledWith('https://push.example.test/device'));
+    await waitFor(() => expect(api.removePushDevice).toHaveBeenCalledWith('https://push.example.test/device-1'));
     expect(await screen.findByRole('button', { name: 'Turn on for this device' })).toBeTruthy();
+  });
+
+  it('reads as off after the server keys change, and turning on makes a new subscription', async () => {
+    const browser = stubPushBrowser({ existingKey: 'BwgJCgsM' });
+    const { api } = renderSettings();
+    const on = await screen.findByRole('button', { name: 'Turn on for this device' });
+    await waitFor(() => expect(on).toHaveProperty('disabled', false));
+    expect(screen.getByText('Off for this device.')).toBeTruthy();
+
+    fireEvent.click(on);
+
+    await waitFor(() => expect(api.savePushDevice).toHaveBeenCalled());
+    expect(browser.unsubscribed).toEqual(['https://push.example.test/device-1']);
+    expect(api.savePushDevice).toHaveBeenCalledWith(
+      expect.objectContaining({ endpoint: 'https://push.example.test/device-2' }),
+    );
+    expect(await screen.findByText('On for this device.')).toBeTruthy();
+  });
+
+  it('shows on for a subscription made with the current key', async () => {
+    stubPushBrowser({ existingKey: SERVER_KEY });
+    renderSettings();
+    expect(await screen.findByText('On for this device.')).toBeTruthy();
+  });
+
+  it('makes a fresh subscription when another account holds this browser’s address', async () => {
+    const browser = stubPushBrowser();
+    const { api } = renderSettings();
+    vi.mocked(api.savePushDevice).mockResolvedValueOnce('taken');
+    const on = await screen.findByRole('button', { name: 'Turn on for this device' });
+    await waitFor(() => expect(on).toHaveProperty('disabled', false));
+
+    fireEvent.click(on);
+
+    await waitFor(() => expect(api.savePushDevice).toHaveBeenCalledTimes(2));
+    expect(browser.unsubscribed).toEqual(['https://push.example.test/device-1']);
+    expect(vi.mocked(api.savePushDevice).mock.calls[1]?.[0]).toMatchObject({
+      endpoint: 'https://push.example.test/device-2',
+    });
+    expect(await screen.findByText('On for this device.')).toBeTruthy();
+  });
+
+  it('says to use a secure address on a plain http page', () => {
+    stubPushBrowser();
+    vi.stubGlobal('isSecureContext', false);
+    renderSettings();
+    expect(screen.getByText(/Notices need a secure address/)).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Turn on for this device' })).toBeNull();
   });
 
   it('says in plain words that an iPhone needs Aman on the Home Screen', () => {

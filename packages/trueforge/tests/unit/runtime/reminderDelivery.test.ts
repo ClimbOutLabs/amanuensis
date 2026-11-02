@@ -15,7 +15,7 @@ import { createSqliteDb } from '../../../src/db/sqlite/client';
 import { SqliteScheduleStore } from '../../../src/db/sqlite/schedule-store/SqliteScheduleStore';
 import { SqliteSessionStore } from '../../../src/db/sqlite/session-store/SqliteSessionStore';
 import { createDeliveryService } from '../../../src/runtime/delivery/deliveryService';
-import { deliverReminder } from '../../../src/runtime/reminderDelivery';
+import { REMINDER_FEED_TEXT_MAX, deliverReminder } from '../../../src/runtime/reminderDelivery';
 import type { Delivery } from '../../../src/schemas/deliveries';
 import { ScheduleManifestSchema } from '../../../src/schemas/schedule';
 
@@ -123,6 +123,24 @@ describe('deliverReminder', () => {
     ]);
     expect(pushed.map(d => d.id)).toEqual([page.deliveries[0]?.id]);
     await expect(deliveryStore.countUnread(owner)).resolves.toBe(1);
+  });
+
+  it('delivers a very long reminder: every word in the chat, a shortened item in the feed', async () => {
+    const { dueReminder, deliver, deliveryStore, sessionStore } = await setup();
+    const what = 'Bring the forms. '.repeat(200).trim();
+    const item = await dueReminder({ what, runAt: '2026-10-19T18:00:00-04:00', name: 'r-long' });
+
+    const sessionId = await deliver(item, new Date('2026-10-19T22:00:05.000Z'));
+
+    const [feed] = (await deliveryStore.list({ tenant_id: TENANT, created_by: OWNER.subject_id, limit: 1 })).deliveries;
+    expect(feed?.text.length).toBeLessThanOrEqual(REMINDER_FEED_TEXT_MAX);
+    expect(feed?.text.endsWith('…')).toBe(true);
+    const session = await sessionStore.getSession({ tenant_id: TENANT, session_id: sessionId });
+    const turn =
+      session?.last_turn_id == null
+        ? undefined
+        : await sessionStore.getTurn({ session_id: sessionId, turn_id: session.last_turn_id });
+    expect(turn?.state).toMatchObject({ status: 'done', output: { content: expect.stringContaining(what) } });
   });
 
   it('records the delivery and each channel tried in the activity log, with the reason', async () => {

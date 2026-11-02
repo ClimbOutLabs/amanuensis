@@ -8,7 +8,7 @@ function recordingFetch(respond: (seen: Seen) => Response) {
   const calls: Seen[] = [];
   const fetcher: typeof fetch = async (input, init) => {
     const request = new Request(new URL(String(input), 'http://localhost'), init);
-    const body: unknown = request.method === 'GET' || request.method === 'DELETE' ? undefined : await request.json();
+    const body: unknown = request.method === 'GET' ? undefined : await request.json();
     const seen = { method: request.method, url: request.url, body };
     calls.push(seen);
     return respond(seen);
@@ -78,7 +78,10 @@ test('saves a push device with its keys and removes it by address', async () => 
   );
   const api = createDeliveriesApi(fetcher);
   assert.equal(await api.pushPublicKey(), 'KEY');
-  await api.savePushDevice({ endpoint: 'https://push.example.test/a', p256dh: 'p', auth: 'a', label: 'This device' });
+  assert.equal(
+    await api.savePushDevice({ endpoint: 'https://push.example.test/a', p256dh: 'p', auth: 'a', label: 'This device' }),
+    'saved',
+  );
   await api.removePushDevice('https://push.example.test/a');
   assert.deepEqual(calls[1]?.body, {
     endpoint: 'https://push.example.test/a',
@@ -86,7 +89,24 @@ test('saves a push device with its keys and removes it by address', async () => 
     label: 'This device',
   });
   assert.equal(calls[2]?.method, 'DELETE');
-  assert.equal(new URL(calls[2]?.url ?? '').searchParams.get('endpoint'), 'https://push.example.test/a');
+  // The address goes in the body, never the query string, so it stays out of request logs.
+  assert.equal(new URL(calls[2]?.url ?? '').search, '');
+  assert.deepEqual(calls[2]?.body, { endpoint: 'https://push.example.test/a' });
+});
+
+test('reports an address another account holds, and marks everything seen in one call', async () => {
+  const taken = createDeliveriesApi(async () =>
+    Response.json({ error: { message: 'Another account.' } }, { status: 409 }),
+  );
+  assert.equal(
+    await taken.savePushDevice({ endpoint: 'https://x.test/a', p256dh: 'p', auth: 'a', label: 'x' }),
+    'taken',
+  );
+
+  const { fetcher, calls } = recordingFetch(() => Response.json({ data: { unread_count: 0 } }));
+  assert.equal(await createDeliveriesApi(fetcher).markAllSeen(), 0);
+  assert.equal(calls[0]?.method, 'POST');
+  assert.equal(new URL(calls[0]?.url ?? '').pathname, '/api/v1/user/deliveries/seen-all');
 });
 
 test('push is off when the server sends no key, and a server error says what it said', async () => {

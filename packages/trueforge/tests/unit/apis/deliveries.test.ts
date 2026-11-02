@@ -1,3 +1,5 @@
+import { generateKeyPairSync, randomBytes } from 'node:crypto';
+
 import { OpenAPIHono } from '@hono/zod-openapi';
 
 import { createDeliveriesRouter, createPushRouter } from '../../../src/apis/deliveries';
@@ -111,14 +113,41 @@ describe('deliveries routes', () => {
     await expect((await json('/deliveries/unread-count')).json()).resolves.toEqual({ data: { unread_count: 1 } });
   });
 
+  it('answers a bad page token with 400 and what to do', async () => {
+    const { json } = await build();
+    const response = await json('/deliveries?page_token=not-a-token');
+    expect(response.status).toBe(400);
+    expect(JSON.stringify(await response.json())).toContain('Reload');
+  });
+
+  it('marks every unread item seen, past what one page holds', async () => {
+    const { json, give } = await build();
+    for (let index = 0; index < 120; index += 1) {
+      await give('alice', `item ${String(index)}`);
+    }
+    const response = await json('/deliveries/seen-all', { method: 'POST', body: {} });
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ data: { unread_count: 0 } });
+  });
+
   it('refuses an empty list of ids', async () => {
     const { json } = await build();
     expect((await json('/deliveries/seen', { method: 'POST', body: { ids: [] } })).status).toBe(400);
   });
 });
 
+/** A real device key pair's public half, as a browser hands it over. */
+function devicePoint(): string {
+  const { publicKey } = generateKeyPairSync('ec', { namedCurve: 'prime256v1' });
+  return publicKey.export({ format: 'der', type: 'spki' }).subarray(-65).toString('base64url');
+}
+
 describe('push routes', () => {
-  const subscription = { endpoint: 'https://push.example.test/abc', keys: { p256dh: 'p', auth: 'a' }, label: 'Laptop' };
+  const subscription = {
+    endpoint: 'https://push.example.test/abc',
+    keys: { p256dh: devicePoint(), auth: randomBytes(16).toString('base64url') },
+    label: 'Laptop',
+  };
 
   it('hands out the public key, or null while push is off', async () => {
     const on = await build();
@@ -136,11 +165,30 @@ describe('push routes', () => {
       GetPushSubscriptionResponseSchema.parse(await first.json()).data.id,
     );
 
-    const removed = await json(`/push/subscriptions?endpoint=${encodeURIComponent(subscription.endpoint)}`, {
-      method: 'DELETE',
-      body: undefined,
-    });
+    const removed = await json('/push/subscriptions', { method: 'DELETE', body: { endpoint: subscription.endpoint } });
     expect(removed.status).toBe(200);
+  });
+
+  it('refuses device keys that are not real push keys', async () => {
+    const { json } = await build();
+    const notOnCurve = Buffer.concat([Buffer.from([4]), Buffer.alloc(64, 1)]).toString('base64url');
+    for (const keys of [
+      { ...subscription.keys, p256dh: 'p' },
+      { ...subscription.keys, p256dh: notOnCurve },
+      { ...subscription.keys, auth: 'a' },
+    ]) {
+      const response = await json('/push/subscriptions', { method: 'POST', body: { ...subscription, keys } });
+      expect(response.status).toBe(400);
+    }
+  });
+
+  it('never hands one person’s device address to another', async () => {
+    const { json, as } = await build();
+    expect((await json('/push/subscriptions', { method: 'POST', body: subscription })).status).toBe(201);
+    as('bob');
+    const response = await json('/push/subscriptions', { method: 'POST', body: subscription });
+    expect(response.status).toBe(409);
+    expect(JSON.stringify(await response.json())).toContain('Turn notices on again');
   });
 
   it('refuses a device address that is not https', async () => {

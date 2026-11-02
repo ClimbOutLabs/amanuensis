@@ -1,7 +1,7 @@
 import type { DeliveriesApi } from './types.js';
 
 /** Why this browser cannot take push notices, in words the person reads. Null when it can. */
-export type PushBlocker = 'unsupported' | 'iphone_needs_home_screen' | 'denied';
+export type PushBlocker = 'needs_https' | 'unsupported' | 'iphone_needs_home_screen' | 'denied';
 
 export type PushSupport = { blocker: PushBlocker | null; permission: NotificationPermission | 'unsupported' };
 
@@ -19,6 +19,8 @@ function isHomeScreenApp(): boolean {
 /** What this browser can do about push right now. */
 export function pushSupport(): PushSupport {
   const permission = typeof Notification === 'undefined' ? 'unsupported' : Notification.permission;
+  // Browsers hide the push parts on a plain http address other than localhost, such as one on the home network.
+  if (window.isSecureContext === false) return { blocker: 'needs_https', permission };
   const capable = 'serviceWorker' in navigator && 'PushManager' in window && permission !== 'unsupported';
   if (!capable) {
     // On an iPhone the push parts only exist once Aman is on the Home Screen.
@@ -53,8 +55,30 @@ export async function currentPushSubscription(): Promise<PushSubscription | null
   return registration === undefined ? null : registration.pushManager.getSubscription();
 }
 
+/** Whether this subscription was made with the server's current key. One made with an older key gets no notices. */
+export function subscribedWithKey({
+  subscription,
+  publicKey,
+}: {
+  subscription: PushSubscription;
+  publicKey: string;
+}): boolean {
+  const current = subscription.options.applicationServerKey;
+  return current !== null && bufferToBase64Url(current) === publicKey.replace(/=+$/, '');
+}
+
+function deviceOf({ subscription, label }: { subscription: PushSubscription; label: string }) {
+  return {
+    endpoint: subscription.endpoint,
+    p256dh: bufferToBase64Url(subscription.getKey('p256dh')),
+    auth: bufferToBase64Url(subscription.getKey('auth')),
+    label,
+  };
+}
+
 /**
- * Turns notices on for this device. Call it from the person's click: the browser asks for permission here.
+ * Turns notices on for this device. Call it from the person's click: the browser asks for permission here. A
+ * subscription made with an older server key, or one whose address another account holds, is replaced.
  */
 export async function enablePush({ api, label }: { api: DeliveriesApi; label: string }): Promise<void> {
   const publicKey = await api.pushPublicKey();
@@ -69,15 +93,22 @@ export async function enablePush({ api, label }: { api: DeliveriesApi; label: st
   }
   const registration = await navigator.serviceWorker.register(api.pushWorker.url, { scope: api.pushWorker.scope });
   await navigator.serviceWorker.ready;
-  const subscription =
-    (await registration.pushManager.getSubscription()) ??
-    (await registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: keyBytes(publicKey) }));
-  await api.savePushDevice({
-    endpoint: subscription.endpoint,
-    p256dh: bufferToBase64Url(subscription.getKey('p256dh')),
-    auth: bufferToBase64Url(subscription.getKey('auth')),
-    label,
-  });
+  const subscribe = () =>
+    registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: keyBytes(publicKey) });
+  let subscription = await registration.pushManager.getSubscription();
+  if (subscription !== null && !subscribedWithKey({ subscription, publicKey })) {
+    await subscription.unsubscribe();
+    subscription = null;
+  }
+  subscription ??= await subscribe();
+  if ((await api.savePushDevice(deviceOf({ subscription, label }))) === 'saved') return;
+  // Another account on this server holds this address. A fresh subscription gets an address of its own.
+  await subscription.unsubscribe();
+  const fresh = await subscribe();
+  if ((await api.savePushDevice(deviceOf({ subscription: fresh, label }))) === 'taken') {
+    await fresh.unsubscribe();
+    throw new Error('Notices could not be turned on for this browser. Reload the page, then try again.');
+  }
 }
 
 /** Turns notices off for this device, here and on the server. */

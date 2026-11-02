@@ -104,13 +104,14 @@ export class PushClient {
     }
 
     /**
-     * Saves a device so due reminders and nudges reach it. Saving the same device again changes nothing.
+     * Saves a device so due reminders and nudges reach it. A person keeps up to 10 devices; another drops the oldest.
      *
      * @param {TrueForge.deliveries.CreatePushSubscriptionRequest} request
      * @param {PushClient.RequestOptions} requestOptions - Request-specific configuration.
      *
      * @throws {@link TrueForge.BadRequestError}
      * @throws {@link TrueForge.UnauthorizedError}
+     * @throws {@link TrueForge.ConflictError}
      * @throws {@link errors.TrueForgeError}
      * @throws {@link errors.TrueForgeTimeoutError}
      *
@@ -203,6 +204,17 @@ export class PushClient {
                         }),
                         _response.rawResponse,
                     );
+                case 409:
+                    throw new TrueForge.ConflictError(
+                        serializers.RequestErrorResponse.parseOrThrow(_response.error.body, {
+                            unrecognizedObjectKeys: "passthrough",
+                            allowUnrecognizedUnionMembers: true,
+                            allowUnrecognizedEnumValues: true,
+                            skipValidation: true,
+                            breadcrumbsPrefix: ["response"],
+                        }),
+                        _response.rawResponse,
+                    );
                 default:
                     throw new errors.TrueForgeError({
                         statusCode: _response.error.statusCode,
@@ -223,7 +235,7 @@ export class PushClient {
     /**
      * Removes a device. Removing one that is not saved is not an error.
      *
-     * @param {TrueForge.deliveries.DeleteSubscriptionPushRequest} request
+     * @param {TrueForge.deliveries.DeletePushSubscriptionRequest} request
      * @param {PushClient.RequestOptions} requestOptions - Request-specific configuration.
      *
      * @throws {@link TrueForge.BadRequestError}
@@ -237,20 +249,16 @@ export class PushClient {
      *     })
      */
     public deleteSubscription(
-        request: TrueForge.deliveries.DeleteSubscriptionPushRequest,
+        request: TrueForge.deliveries.DeletePushSubscriptionRequest,
         requestOptions?: PushClient.RequestOptions,
     ): core.HttpResponsePromise<TrueForge.DeletePushSubscriptionResponse> {
         return core.HttpResponsePromise.fromPromise(this.__deleteSubscription(request, requestOptions));
     }
 
     private async __deleteSubscription(
-        request: TrueForge.deliveries.DeleteSubscriptionPushRequest,
+        request: TrueForge.deliveries.DeletePushSubscriptionRequest,
         requestOptions?: PushClient.RequestOptions,
     ): Promise<core.WithRawResponse<TrueForge.DeletePushSubscriptionResponse>> {
-        const { endpoint } = request;
-        const _queryParams: Record<string, unknown> = {
-            endpoint,
-        };
         const _authRequest: core.AuthRequest = await this._options.authProvider.getAuthRequest();
         const _headers: core.Fetcher.Args["headers"] = mergeHeaders(
             _authRequest.headers,
@@ -265,11 +273,18 @@ export class PushClient {
             ),
             method: "DELETE",
             headers: _headers,
-            queryString: core.url
-                .queryBuilder()
-                .addMany(_queryParams)
-                .mergeAdditional(requestOptions?.queryParams)
-                .build(),
+            contentType: "application/json",
+            queryString: core.url.queryBuilder().mergeAdditional(requestOptions?.queryParams).build(),
+            requestType: "json",
+            body: mergeAdditionalBodyParameters(
+                serializers.deliveries.DeletePushSubscriptionRequest.jsonOrThrow(request, {
+                    unrecognizedObjectKeys: "passthrough",
+                    allowUnrecognizedUnionMembers: true,
+                    allowUnrecognizedEnumValues: true,
+                    omitUndefined: true,
+                }),
+                requestOptions?.additionalBodyParameters,
+            ),
             timeoutMs: (requestOptions?.timeoutInSeconds ?? this._options?.timeoutInSeconds ?? 60) * 1000,
             maxRetries: requestOptions?.maxRetries ?? this._options?.maxRetries,
             abortSignal: requestOptions?.abortSignal,

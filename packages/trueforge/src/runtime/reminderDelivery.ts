@@ -26,6 +26,13 @@ export function reminderLineText(input: { what: string; due: Date; timezone: str
   return `Reminder: ${input.what}\n\nDue ${formatRunTime({ at: input.due, timezone: input.timezone })}.`;
 }
 
+/** The most a feed item holds. A longer reminder keeps every word in its chat line and is cut short in the feed. */
+export const REMINDER_FEED_TEXT_MAX = 2000;
+
+function feedText(what: string): string {
+  return what.length <= REMINDER_FEED_TEXT_MAX ? what : `${what.slice(0, REMINDER_FEED_TEXT_MAX - 1).trimEnd()}…`;
+}
+
 export class ReminderAgentNotFoundError extends Error {
   constructor(options?: ErrorOptions) {
     super('The assistant that set this reminder was deleted. Set the reminder again in a chat.', options);
@@ -165,7 +172,7 @@ export async function deliverReminder(params: {
     created_by: owner.subject_id,
     kind: 'reminder',
     level: 'nudge',
-    text: what,
+    text: feedText(what),
     reason: `You asked to be reminded on ${formatRunTime({ at: new Date(run.scheduled_for), timezone: schedule.manifest.timezone })}.`,
     link: { type: 'chat', session_id: sessionId },
   });

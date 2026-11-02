@@ -41,8 +41,20 @@ function subscriptions(targets: PushTarget[]) {
   return { store, removed };
 }
 
-const TARGET_A: PushTarget = { id: 'a', endpoint: 'https://push.example.test/a', p256dh: 'p', auth: 'x' };
-const TARGET_B: PushTarget = { id: 'b', endpoint: 'https://push.example.test/b', p256dh: 'p', auth: 'x' };
+const TARGET_A: PushTarget = {
+  id: 'a',
+  endpoint: 'https://push.example.test/a',
+  p256dh: 'p',
+  auth: 'x',
+  server_key: 'pub',
+};
+const TARGET_B: PushTarget = {
+  id: 'b',
+  endpoint: 'https://push.example.test/b',
+  p256dh: 'p',
+  auth: 'x',
+  server_key: 'pub',
+};
 
 beforeEach(() => {
   mockedBuild.mockReset();
@@ -164,6 +176,49 @@ describe('web push sender', () => {
     expect(fetchPush).not.toHaveBeenCalled();
   });
 
+  it('removes a device set up with an older key instead of sending to it', async () => {
+    const { store, removed } = subscriptions([{ ...TARGET_A, server_key: 'old' }, TARGET_B]);
+    const fetchPush = jest.fn(() => Promise.resolve({ status: 201 }));
+    const sender = createWebPushSender({ subscriptions: store, settings: SETTINGS, fetchPush });
+
+    const attempts = await sender.send({ delivery: delivery(), ...OWNER });
+
+    expect(attempts.map(a => [a.target, a.outcome])).toEqual([
+      ['a', 'gone'],
+      ['b', 'sent'],
+    ]);
+    expect(attempts[0]?.detail).toMatch(/Turn notices on there again/);
+    expect(removed).toEqual(['a']);
+    expect(fetchPush).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps no more than a few pushes in flight at once', async () => {
+    const targets = Array.from({ length: 10 }, (_, index) => ({
+      ...TARGET_A,
+      id: String(index),
+      endpoint: `https://push.example.test/${String(index)}`,
+    }));
+    const { store } = subscriptions(targets);
+    let inFlight = 0;
+    let most = 0;
+    const sender = createWebPushSender({
+      subscriptions: store,
+      settings: SETTINGS,
+      fetchPush: async () => {
+        inFlight += 1;
+        most = Math.max(most, inFlight);
+        await new Promise(resolve => setTimeout(resolve, 1));
+        inFlight -= 1;
+        return { status: 201 };
+      },
+    });
+
+    const attempts = await sender.send({ delivery: delivery(), ...OWNER });
+
+    expect(attempts.map(a => a.target)).toEqual(targets.map(target => target.id));
+    expect(most).toBeLessThanOrEqual(4);
+  });
+
   it('sends nothing when the person has no device', async () => {
     const { store } = subscriptions([]);
     const sender = createWebPushSender({ subscriptions: store, settings: SETTINGS });
@@ -174,8 +229,8 @@ describe('web push sender', () => {
 describe('web push sender, outside addresses', () => {
   it('never calls an address that points inside the network, and removes the device', async () => {
     const { store, removed } = subscriptions([
-      { id: 'lan', endpoint: 'https://internal.example.test/push', p256dh: 'p', auth: 'x' },
-      { id: 'loopback', endpoint: 'https://127.0.0.1/push', p256dh: 'p', auth: 'x' },
+      { id: 'lan', endpoint: 'https://internal.example.test/push', p256dh: 'p', auth: 'x', server_key: 'pub' },
+      { id: 'loopback', endpoint: 'https://127.0.0.1/push', p256dh: 'p', auth: 'x', server_key: 'pub' },
     ]);
     const sender = createWebPushSender({
       subscriptions: store,

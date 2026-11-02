@@ -1,7 +1,7 @@
 import { createRoute } from '@hono/zod-openapi';
 import {
   CreatePushSubscriptionRequestSchema,
-  DeletePushSubscriptionRequestQuerySchema,
+  DeletePushSubscriptionRequestSchema,
   DeletePushSubscriptionResponseSchema,
   DeliveriesPageQuerySchema,
   DeliveryIdParamSchema,
@@ -82,6 +82,23 @@ export const markDeliveriesSeenRoute = createRoute({
   },
 });
 
+export const markAllDeliveriesSeenRoute = createRoute({
+  method: 'post',
+  path: '/seen-all',
+  tags: [OpenApiTag.DELIVERIES],
+  summary: 'Mark every delivery seen',
+  description: 'Marks every unread delivery of the signed-in person seen on every device.',
+  'x-fern-sdk-group-name': ['deliveries'],
+  'x-fern-sdk-method-name': 'mark_all_seen',
+  responses: {
+    200: {
+      content: { 'application/json': { schema: GetDeliveryUnreadCountResponseSchema } },
+      description: 'The unread count after marking.',
+    },
+    401: unauthorizedResponse,
+  },
+});
+
 export const getDeliveryRoute = createRoute({
   method: 'get',
   path: '/{delivery_id}',
@@ -123,7 +140,8 @@ export const createPushSubscriptionRoute = createRoute({
   path: '/subscriptions',
   tags: [OpenApiTag.DELIVERIES],
   summary: 'Turn notices on for a device',
-  description: 'Saves a device so due reminders and nudges reach it. Saving the same device again changes nothing.',
+  description:
+    'Saves a device so due reminders and nudges reach it. A person keeps up to 10 devices; another drops the oldest.',
   'x-fern-sdk-group-name': ['deliveries', 'push'],
   'x-fern-sdk-method-name': 'create_subscription',
   request: {
@@ -136,6 +154,10 @@ export const createPushSubscriptionRoute = createRoute({
     },
     400: invalidRequestResponse,
     401: unauthorizedResponse,
+    409: {
+      content: { 'application/json': { schema: RequestErrorResponseSchema } },
+      description: 'This device address belongs to another person. Subscribe again for a new address.',
+    },
   },
 });
 
@@ -147,7 +169,9 @@ export const deletePushSubscriptionRoute = createRoute({
   description: 'Removes a device. Removing one that is not saved is not an error.',
   'x-fern-sdk-group-name': ['deliveries', 'push'],
   'x-fern-sdk-method-name': 'delete_subscription',
-  request: { query: DeletePushSubscriptionRequestQuerySchema },
+  request: {
+    body: { content: { 'application/json': { schema: DeletePushSubscriptionRequestSchema } }, required: true },
+  },
   responses: {
     200: {
       content: { 'application/json': { schema: DeletePushSubscriptionResponseSchema } },

@@ -180,6 +180,47 @@ describe("DeliveriesClient", () => {
         }).rejects.toThrow(TrueForgeTypes.UnauthorizedError);
     });
 
+    test("mark_all_seen (1)", async () => {
+        const server = mockServerPool.createServer();
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
+
+        const rawResponseBody = { data: { unread_count: 1 } };
+
+        server
+            .mockEndpoint()
+            .post("/api/v1/user/deliveries/seen-all")
+            .respondWith()
+            .statusCode(200)
+            .jsonBody(rawResponseBody)
+            .build();
+
+        const response = await client.deliveries.markAllSeen();
+        expect(response).toEqual({
+            data: {
+                unreadCount: 1,
+            },
+        });
+    });
+
+    test("mark_all_seen (2)", async () => {
+        const server = mockServerPool.createServer();
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
+
+        const rawResponseBody = { error: { message: "message" } };
+
+        server
+            .mockEndpoint()
+            .post("/api/v1/user/deliveries/seen-all")
+            .respondWith()
+            .statusCode(401)
+            .jsonBody(rawResponseBody)
+            .build();
+
+        await expect(async () => {
+            return await client.deliveries.markAllSeen();
+        }).rejects.toThrow(TrueForgeTypes.UnauthorizedError);
+    });
+
     test("get_unread_count (1)", async () => {
         const server = mockServerPool.createServer();
         const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });

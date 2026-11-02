@@ -1,5 +1,7 @@
 import { OpenAPIHono, type RouteHandler } from '@hono/zod-openapi';
 
+import { InvalidPageTokenError } from '@truefoundry/trueforge-core/agent-session';
+
 import type { ResolveRequestContext } from '../auth/identity';
 import type { IDeliveryStore } from '../db/deliveryStore';
 import type { IPushSubscriptionStore } from '../db/pushSubscriptionStore';
@@ -10,6 +12,7 @@ import {
   getDeliveryUnreadCountRoute,
   getPushConfigRoute,
   listDeliveriesRoute,
+  markAllDeliveriesSeenRoute,
   markDeliveriesSeenRoute,
 } from '../routes/deliveryRoutes';
 
@@ -34,8 +37,18 @@ export function createDeliveriesRouter(deps: DeliveriesRouterDeps) {
 
   const listHandler: RouteHandler<typeof listDeliveriesRoute> = async c => {
     const query = c.req.valid('query');
-    const page = await deps.deliveryStore.list({ ...ownerOf(c), limit: query.limit, page_token: query.page_token });
-    return c.json({ data: page.deliveries, next_page_token: page.next_page_token }, 200);
+    try {
+      const page = await deps.deliveryStore.list({ ...ownerOf(c), limit: query.limit, page_token: query.page_token });
+      return c.json({ data: page.deliveries, next_page_token: page.next_page_token }, 200);
+    } catch (error) {
+      if (error instanceof InvalidPageTokenError) {
+        return c.json(
+          { error: { message: 'That page of your feed is out of date. Reload to start from the newest.' } },
+          400,
+        );
+      }
+      throw error;
+    }
   };
 
   const unreadHandler: RouteHandler<typeof getDeliveryUnreadCountRoute> = async c => {
@@ -47,6 +60,13 @@ export function createDeliveriesRouter(deps: DeliveriesRouterDeps) {
     const owner = ownerOf(c);
     const { ids } = c.req.valid('json');
     await deps.deliveryStore.markSeen({ ...owner, ids });
+    const unread_count = await deps.deliveryStore.countUnread(owner);
+    return c.json({ data: { unread_count } }, 200);
+  };
+
+  const seenAllHandler: RouteHandler<typeof markAllDeliveriesSeenRoute> = async c => {
+    const owner = ownerOf(c);
+    await deps.deliveryStore.markAllSeen(owner);
     const unread_count = await deps.deliveryStore.countUnread(owner);
     return c.json({ data: { unread_count } }, 200);
   };
@@ -65,6 +85,7 @@ export function createDeliveriesRouter(deps: DeliveriesRouterDeps) {
   router.openapi(listDeliveriesRoute, listHandler);
   router.openapi(getDeliveryUnreadCountRoute, unreadHandler);
   router.openapi(markDeliveriesSeenRoute, seenHandler);
+  router.openapi(markAllDeliveriesSeenRoute, seenAllHandler);
   router.openapi(getDeliveryRoute, getHandler);
   return router;
 }
@@ -93,12 +114,23 @@ export function createPushRouter(deps: PushRouterDeps) {
       p256dh: body.keys.p256dh,
       auth: body.keys.auth,
       label: body.label ?? null,
+      server_key: deps.publicKey,
     });
-    return c.json({ data: saved }, 201);
+    if (saved.outcome === 'taken') {
+      return c.json(
+        {
+          error: {
+            message: 'This browser gets notices for another account. Turn notices on again to set it up for you.',
+          },
+        },
+        409,
+      );
+    }
+    return c.json({ data: saved.subscription }, 201);
   };
 
   const deleteHandler: RouteHandler<typeof deletePushSubscriptionRoute> = async c => {
-    const { endpoint } = c.req.valid('query');
+    const { endpoint } = c.req.valid('json');
     await deps.pushSubscriptionStore.removeByEndpoint({ ...ownerOf(c), endpoint });
     return c.json({}, 200);
   };

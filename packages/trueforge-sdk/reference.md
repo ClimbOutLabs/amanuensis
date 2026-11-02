@@ -6877,6 +6877,61 @@ await client.deliveries.markSeen({
 </dl>
 </details>
 
+<details><summary><code>client.deliveries.<a href="/src/api/resources/deliveries/client/Client.ts">markAllSeen</a>() -> TrueForge.GetDeliveryUnreadCountResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+Marks every unread delivery of the signed-in person seen on every device.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.deliveries.markAllSeen();
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**requestOptions:** `DeliveriesClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
 <details><summary><code>client.deliveries.<a href="/src/api/resources/deliveries/client/Client.ts">getUnreadCount</a>() -> TrueForge.GetDeliveryUnreadCountResponse</code></summary>
 <dl>
 <dd>
@@ -7343,7 +7398,7 @@ await client.deliveries.push.getConfig();
 <dl>
 <dd>
 
-Saves a device so due reminders and nudges reach it. Saving the same device again changes nothing.
+Saves a device so due reminders and nudges reach it. A person keeps up to 10 devices; another drops the oldest.
 </dd>
 </dl>
 </dd>
@@ -7445,7 +7500,7 @@ await client.deliveries.push.deleteSubscription({
 <dl>
 <dd>
 
-**request:** `TrueForge.deliveries.DeleteSubscriptionPushRequest`
+**request:** `TrueForge.deliveries.DeletePushSubscriptionRequest`
 
 </dd>
 </dl>
