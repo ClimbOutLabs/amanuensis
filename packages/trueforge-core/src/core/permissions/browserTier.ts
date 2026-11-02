@@ -75,7 +75,7 @@ export const BROWSER_COMMIT_WORDS: readonly string[] = [
 ];
 
 /** Multi-word commit phrases that are not single words on their own. */
-const BROWSER_COMMIT_PHRASES: readonly string[] = ['sign up'];
+const BROWSER_COMMIT_PHRASES: readonly string[] = ['sign up', 'check out'];
 
 /**
  * "Cancel" alone closes any ordinary dialog (a form's own Cancel button, a modal's close button) and
@@ -92,13 +92,17 @@ function hasWord(text: string, word: string): boolean {
   return new RegExp(`\\b${word}\\b`).test(text);
 }
 
+function hasPhrase(text: string, phrase: string): boolean {
+  return new RegExp(`\\b${phrase}\\b`).test(text);
+}
+
 /** Whether an element's accessible name matches a commit word or phrase. */
 export function matchesCommitWord(accessibleName: string): boolean {
   const text = normalizedName(accessibleName);
   if (BROWSER_COMMIT_WORDS.some(word => hasWord(text, word))) {
     return true;
   }
-  if (BROWSER_COMMIT_PHRASES.some(phrase => text.includes(phrase))) {
+  if (BROWSER_COMMIT_PHRASES.some(phrase => hasPhrase(text, phrase))) {
     return true;
   }
   return hasWord(text, 'cancel') && BROWSER_CANCEL_QUALIFIERS.some(qualifier => hasWord(text, qualifier));

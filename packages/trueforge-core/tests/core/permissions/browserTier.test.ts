@@ -63,6 +63,46 @@ describe('matchesCommitWord: each commit word on its own', () => {
     expect(matchesCommitWord('Sign-up now')).toBe(true);
   });
 
+  it('matches every commit word spelled out here, so dropping one from the list fails', () => {
+    // Written out on purpose, not read from the exported list: a test that iterates the list
+    // stays green when a word is dropped from it.
+    for (const label of [
+      'Pay',
+      'Buy',
+      'Purchase',
+      'Order',
+      'Checkout',
+      'Confirm',
+      'Submit',
+      'Send',
+      'Delete',
+      'Remove',
+      'Unsubscribe',
+      'Subscribe',
+      'Transfer',
+      'Book',
+      'Reserve',
+      'Accept',
+      'Agree',
+      'Sign up',
+    ]) {
+      expect(matchesCommitWord(label)).toBe(true);
+      expect(matchesCommitWord(`Please ${label.toLowerCase()} now`)).toBe(true);
+    }
+  });
+
+  it('matches "check out" in each of its spellings, the spaced form of the checkout word', () => {
+    for (const label of ['Check out', 'Check-out', 'check_out', 'CHECK OUT', 'Check Out Now', 'Please check out now']) {
+      expect(matchesCommitWord(label)).toBe(true);
+    }
+  });
+
+  it('neither half of "check out" matches on its own, and neither do unrelated words', () => {
+    for (const label of ['Check', 'Out', 'Out of stock', 'Check our prices', 'Check outerwear', 'Look out']) {
+      expect(matchesCommitWord(label)).toBe(false);
+    }
+  });
+
   it('plain links, tabs and menus do not match', () => {
     for (const label of ['Help center', 'Account settings', 'Show more', 'Next', 'Learn more', 'FAQ']) {
       expect(matchesCommitWord(label)).toBe(false);
@@ -80,6 +120,24 @@ describe('matchesCommitWord: "cancel" needs what it cancels', () => {
     expect(matchesCommitWord(`Cancel your ${qualifier}`)).toBe(true);
   });
 
+  it('matches "cancel" with each qualifier spelled out here, so dropping one from the list fails', () => {
+    // Written out on purpose, not read from the exported list, for the same reason as the words above.
+    for (const label of [
+      'Cancel membership',
+      'Cancel subscription',
+      'Cancel plan',
+      'Cancel order',
+      'Cancel account',
+      'Cancel your membership',
+      'Cancel your subscription',
+      'Cancel your plan',
+      'Cancel your order',
+      'Cancel your account',
+    ]) {
+      expect(matchesCommitWord(label)).toBe(true);
+    }
+  });
+
   it('"Cancel" near an unrelated word still does not match', () => {
     expect(matchesCommitWord('Cancel search')).toBe(false);
     expect(matchesCommitWord('Cancel this dialog')).toBe(false);
@@ -93,6 +151,12 @@ describe('classifyBrowserClickKind', () => {
 
   it('a commit word is a commit even outside a form', () => {
     expect(classifyBrowserClickKind({ accessible_name: 'Buy now', is_form_submit: false })).toBe('commit');
+  });
+
+  it('a spaced, hyphenated or underscored check out label is a commit even outside a form', () => {
+    for (const label of ['Check out', 'Check-out', 'check_out']) {
+      expect(classifyBrowserClickKind({ accessible_name: label, is_form_submit: false })).toBe('commit');
+    }
   });
 
   it('a link, a tab or "show more" is explore', () => {

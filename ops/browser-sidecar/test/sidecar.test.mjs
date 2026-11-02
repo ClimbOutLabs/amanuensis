@@ -101,6 +101,15 @@ async function withWorld(run) {
   const siteA = await fixture({
     '/': ACCOUNT_PAGE,
     '/checkout': (_req, res) => res.writeHead(200, { 'content-type': 'text/html' }).end(CHECKOUT_FIXTURE_HTML),
+    '/linked-controls': html(`<h1>Linked controls</h1>
+      <form id="linked-form">
+        <label for="item">Item</label>
+        <input id="item" name="item" value="Notebook" />
+        <input type="submit" value="Pay now" />
+        <input type="image" alt="Buy with image" style="width: 120px; height: 24px" />
+      </form>
+      <button type="submit" form="linked-form">Send order</button>
+      <input type="submit" form="linked-form" value="Subscribe outside" />`),
     '/redirect-private': (_req, res) => res.writeHead(302, { location: `${internalUrl}/api/admin` }).end(),
     '/redirect-metadata': (_req, res) =>
       res.writeHead(302, { location: 'http://169.254.169.254/latest/meta-data/' }).end(),
@@ -627,6 +636,52 @@ test("click-info on a dialog's plain Cancel button is not a form submit", { skip
   });
 });
 
+test('click-info reads a submit input from its value, which is its label', { skip: !browsersAvailable }, async () => {
+  await withWorld(async ({ sidecar }) => {
+    const opened = await sidecar.open({ owner: 'owner-1', tab: 'chat-1', url: 'http://site-a.test/linked-controls' });
+    const ref = refFor(opened.text, 'Pay now');
+    const info = await sidecar.clickInfo({ owner: 'owner-1', tab: 'chat-1', ref });
+    assert.equal(info.status, 'ok');
+    assert.equal(info.accessible_name, 'Pay now');
+    assert.equal(info.is_form_submit, true);
+    assert.equal(info.form_values.item, 'Notebook');
+  });
+});
+
+test(
+  'click-info reads an image input as a form submit, named by its alt text',
+  { skip: !browsersAvailable },
+  async () => {
+    await withWorld(async ({ sidecar }) => {
+      const opened = await sidecar.open({ owner: 'owner-1', tab: 'chat-1', url: 'http://site-a.test/linked-controls' });
+      const ref = refFor(opened.text, 'Buy with image');
+      const info = await sidecar.clickInfo({ owner: 'owner-1', tab: 'chat-1', ref });
+      assert.equal(info.status, 'ok');
+      assert.equal(info.accessible_name, 'Buy with image');
+      assert.equal(info.is_form_submit, true);
+      assert.equal(info.form_values.item, 'Notebook');
+    });
+  },
+);
+
+test(
+  "click-info reads a submit control outside its form, linked by the form attribute, with that form's values",
+  { skip: !browsersAvailable },
+  async () => {
+    await withWorld(async ({ sidecar }) => {
+      const opened = await sidecar.open({ owner: 'owner-1', tab: 'chat-1', url: 'http://site-a.test/linked-controls' });
+      for (const label of ['Send order', 'Subscribe outside']) {
+        const ref = refFor(opened.text, label);
+        const info = await sidecar.clickInfo({ owner: 'owner-1', tab: 'chat-1', ref });
+        assert.equal(info.status, 'ok', label);
+        assert.equal(info.accessible_name, label, label);
+        assert.equal(info.is_form_submit, true, label);
+        assert.equal(info.form_values.item, 'Notebook', label);
+      }
+    });
+  },
+);
+
 test('click performs a real click and reads the result', { skip: !browsersAvailable }, async () => {
   await withWorld(async ({ sidecar }) => {
     const opened = await sidecar.open({ owner: 'owner-1', tab: 'chat-1', url: 'http://site-a.test/checkout' });
@@ -649,4 +704,86 @@ test('a ref resolves back to the DOM path it was given to, and an unknown ref re
   assert.equal(refs.resolve('e99'), undefined);
   refs.reset();
   assert.equal(refs.resolve('e1'), undefined);
+});
+
+/**
+ * A sidecar on a fake page and a fake gateway check, with no Chromium: the one page has a single
+ * field, given ref e1 by the opening read. `state` lets a test make that field vanish from the
+ * page (`elementGone`, so its handle is gone) or unreadable once found (`infoReadable` false, so
+ * the read of it comes back empty), which are the two different stale cases the actions refuse.
+ */
+async function withFakeSidecar(run) {
+  if (BrowserSidecar === undefined) {
+    return;
+  }
+  const gateway = createServer((_req, res) => {
+    res
+      .writeHead(200, { 'content-type': 'application/json' })
+      .end(JSON.stringify({ ok: true, url: 'http://site-a.test/' }));
+  });
+  await new Promise(resolve => gateway.listen(0, '127.0.0.1', resolve));
+  const state = { elementGone: false, infoReadable: true };
+  const element = { fill: async () => undefined, click: async () => undefined };
+  const page = {
+    url: () => 'http://site-a.test/',
+    title: async () => 'Fake page',
+    on: () => undefined,
+    goto: async () => undefined,
+    evaluate: async script => {
+      if (typeof script === 'string' && script.includes('return extractSnapshotNodes()')) {
+        return [{ id: 'HTML:0/INPUT:0', role: 'textbox', name: 'Name', value: '', field_kind: null, actionable: true }];
+      }
+      if (!state.infoReadable) {
+        return null;
+      }
+      return { field_kind: null, is_form_submit: false, accessible_name: 'Name', form_values: {}, tag: 'INPUT' };
+    },
+    evaluateHandle: async () => ({ asElement: () => (state.elementGone ? null : element) }),
+  };
+  const context = {
+    on: () => undefined,
+    route: async () => undefined,
+    newCDPSession: async () => ({
+      on: () => undefined,
+      send: async method => (method === 'Page.getFrameTree' ? { frameTree: { frame: { id: 'main' } } } : {}),
+    }),
+    close: async () => undefined,
+  };
+  const sidecar = new BrowserSidecar({
+    profilesDir: '/tmp',
+    navTimeoutMs: 1000,
+    proxyServer: `http://127.0.0.1:${String(gateway.address().port)}`,
+    launch: async () => ({ context, page }),
+  });
+  try {
+    const opened = await sidecar.open({ owner: 'owner-1', tab: 'chat-1', url: 'http://site-a.test/' });
+    assert.equal(opened.status, 'ok');
+    await run({ sidecar, state });
+  } finally {
+    await sidecar.close();
+    gateway.close();
+  }
+}
+
+test('type with a ref the page never gave is refused as an unknown ref, with no browser', async () => {
+  await withFakeSidecar(async ({ sidecar }) => {
+    const typed = await sidecar.type({ owner: 'owner-1', tab: 'chat-1', ref: 'e99', text: 'hello' });
+    assert.deepEqual(typed, { status: 'refused', reason: 'unknown_ref' });
+  });
+});
+
+test('type with a ref whose element is gone from the page is refused as a stale ref, with no browser', async () => {
+  await withFakeSidecar(async ({ sidecar, state }) => {
+    state.elementGone = true;
+    const typed = await sidecar.type({ owner: 'owner-1', tab: 'chat-1', ref: 'e1', text: 'hello' });
+    assert.deepEqual(typed, { status: 'refused', reason: 'stale_ref' });
+  });
+});
+
+test('type with a ref whose element can no longer be read is refused as a stale ref, with no browser', async () => {
+  await withFakeSidecar(async ({ sidecar, state }) => {
+    state.infoReadable = false;
+    const typed = await sidecar.type({ owner: 'owner-1', tab: 'chat-1', ref: 'e1', text: 'hello' });
+    assert.deepEqual(typed, { status: 'refused', reason: 'stale_ref' });
+  });
 });

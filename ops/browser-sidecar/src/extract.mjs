@@ -53,6 +53,23 @@ function accessibleName(element) {
       return label.textContent.trim();
     }
   }
+  if (element.tagName === 'INPUT') {
+    // A button-like input carries its label in its own value, and an image input in its alt text:
+    // neither has text content, so without this step such a control reads as having no name at all.
+    const inputType = (element.getAttribute('type') ?? '').toLowerCase();
+    if (inputType === 'image') {
+      const alt = element.getAttribute('alt');
+      if (alt !== null && alt.trim() !== '') {
+        return alt.trim();
+      }
+    }
+    if (inputType === 'submit' || inputType === 'button' || inputType === 'reset' || inputType === 'image') {
+      const value = element.getAttribute('value');
+      if (value !== null && value.trim() !== '') {
+        return value.trim();
+      }
+    }
+  }
   const placeholder = element.getAttribute('placeholder');
   if (placeholder !== null && placeholder.trim() !== '') {
     return placeholder.trim();
@@ -129,9 +146,20 @@ function blockText(element) {
   return text.length > MAX_TEXT_CHARS ? `${text.slice(0, MAX_TEXT_CHARS)}…` : text;
 }
 
-/** True when this element submits its form: a submit input/button, or a plain button inside a form. */
+/**
+ * The form this control belongs to: the form around it, or the one its `form` attribute names when
+ * it sits outside that form. The platform's own `form` property covers both, so it goes first.
+ */
+function formOf(element) {
+  if (element.form !== undefined && element.form !== null) {
+    return element.form;
+  }
+  return element.closest('form');
+}
+
+/** True when this element submits its form: a submit input/button, an image input, or a plain button in a form. */
 function isFormSubmit(element) {
-  const form = element.closest('form');
+  const form = formOf(element);
   if (form === null) {
     return false;
   }
@@ -139,12 +167,12 @@ function isFormSubmit(element) {
   if (element.tagName === 'BUTTON') {
     return type === '' || type === 'submit';
   }
-  return element.tagName === 'INPUT' && type === 'submit';
+  return element.tagName === 'INPUT' && (type === 'submit' || type === 'image');
 }
 
 /** Values of every named field on the clicked button's form, for the approval card. Sensitive values are masked. */
 export function formValuesOf(element) {
-  const form = element.closest('form');
+  const form = formOf(element);
   if (form === null) {
     return {};
   }

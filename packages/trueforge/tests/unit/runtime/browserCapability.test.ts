@@ -163,7 +163,7 @@ describe('browser capability', () => {
     const result = await call('browser_type', { ref: 'e1', text: 'hunter2' });
     expect(result.isError).toBe(true);
     expect(JSON.parse(textOf(result)).message).toBe(
-      'This field is for a password or payment detail. Ask the person to type it themselves.',
+      'This field is for a password, a payment detail or a one-time code. Ask the person to type it themselves.',
     );
     expect(sent[0]?.url).toBe('http://browser-relay:8792/type');
     expect(sent[0]?.body).toEqual({ ref: 'e1', text: 'hunter2', owner: 'tenant-1:person-1', tab: 'chat-1' });
@@ -206,6 +206,16 @@ describe('browser capability', () => {
         body: { ref: 'e3', owner: 'tenant-1:person-1', tab: 'chat-1' },
       },
     ]);
+  });
+
+  it('toolCallInfo leaves browser_click unset when click-info says the tab moved to another site', async () => {
+    const { toolSet } = mount(path =>
+      path === '/click-info'
+        ? { json: { status: 'moved', url: 'https://mail.example/inbox' } }
+        : { json: { status: 'ok', text: '' } },
+    );
+    const info = await toolSet.toolCallInfo({ name: 'browser_click', arguments: { ref: 'e3' } });
+    expect(info.browser_click).toBeUndefined();
   });
 
   it('toolCallInfo leaves browser_click unset when the sidecar cannot be reached, failing closed', async () => {
