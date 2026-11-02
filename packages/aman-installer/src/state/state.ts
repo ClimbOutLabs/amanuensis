@@ -110,6 +110,8 @@ export interface ReleaseRecord {
   appImage: string | null;
   sttImage: string | null;
   calendarImage: string | null;
+  browserImage: string | null;
+  browserGatewayImage: string | null;
   dexImage: string | null;
   mailEmailImage: string | null;
 }
@@ -140,6 +142,8 @@ export function parseRelease(text: string): ReleaseRecord | null {
     appImage: stringField(parsed, 'app_image'),
     sttImage: stringField(parsed, 'stt_image'),
     calendarImage: stringField(parsed, 'calendar_image'),
+    browserImage: stringField(parsed, 'browser_image'),
+    browserGatewayImage: stringField(parsed, 'browser_gateway_image'),
     dexImage: stringField(parsed, 'dex_image'),
     mailEmailImage: stringField(parsed, 'mail_email_image'),
   };
@@ -154,6 +158,8 @@ export function renderRelease(record: ReleaseRecord): string {
     ['app_image', record.appImage],
     ['stt_image', record.sttImage],
     ['calendar_image', record.calendarImage],
+    ['browser_image', record.browserImage],
+    ['browser_gateway_image', record.browserGatewayImage],
     ['dex_image', record.dexImage],
     ['mail_email_image', record.mailEmailImage],
   ];
@@ -412,6 +418,8 @@ export function createStateStore(backend: StateBackend): StateStore {
         record.appImage,
         record.sttImage,
         record.calendarImage,
+        record.browserImage,
+        record.browserGatewayImage,
         record.dexImage,
         record.mailEmailImage,
       ]) {

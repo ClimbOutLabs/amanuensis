@@ -51,7 +51,10 @@ of the browser control feature).
 
 ## Running it
 
-Set `BROWSER_ENABLED=true` in `packages/trueforge/.env`, then start the stack with the browser profile.
+The installer turns the browser on in every instance. Installing or upgrading builds both images, makes
+`BROWSER_SECRET` once in the instance's `.env`, and starts the browser and its gateway with the instance.
+
+For development from this repository, set `BROWSER_ENABLED=true` in `packages/trueforge/.env`, then start the stack with the browser profile.
 Compose gives the server `BROWSER_URL=http://browser-relay:8792` and the same `BROWSER_SECRET` as the
 gateway. `pnpm smoke` makes a random secret for each run. With plain `docker compose`, set one in the
 shell first (32 or more characters, for example from `openssl rand -hex 32`):

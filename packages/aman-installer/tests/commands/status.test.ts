@@ -20,6 +20,8 @@ const RELEASE: ReleaseRecord = {
   appImage: 'aman-app:abc123',
   sttImage: 'aman-stt:abc123',
   calendarImage: 'aman-calendar-caldav:abc123',
+  browserImage: 'aman-browser:abc123',
+  browserGatewayImage: 'aman-browser-gateway:abc123',
   dexImage: 'ghcr.io/example/dex@sha256:aaaa',
   mailEmailImage: 'ghcr.io/example/mail@sha256:bbbb',
 };
