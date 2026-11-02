@@ -90,16 +90,27 @@ export function createChatSearchCatalog(options: CreateTrueForgeClientOptions = 
   }
 
   async function searchOwnChats(input: { query: string; signal?: AbortSignal }): Promise<OwnChatSearchResult> {
-    const response = await fetchImpl(`${base}/api/v1/user/chat-search?query=${encodeURIComponent(input.query)}`, {
-      method: 'GET',
-      headers: options.token === undefined ? {} : { Authorization: `Bearer ${options.token}` },
-      ...(input.signal === undefined ? {} : { signal: input.signal }),
-    });
+    let response: Response;
+    try {
+      response = await fetchImpl(`${base}/api/v1/user/chat-search?query=${encodeURIComponent(input.query)}`, {
+        method: 'GET',
+        headers: options.token === undefined ? {} : { Authorization: `Bearer ${options.token}` },
+        ...(input.signal === undefined ? {} : { signal: input.signal }),
+      });
+    } catch (caught) {
+      if (input.signal?.aborted === true) {
+        throw caught;
+      }
+      throw new Error('Searching your chats failed. Check your connection, then try again.', { cause: caught });
+    }
     const responseBody: unknown = await response.json().catch(() => undefined);
     if (!response.ok) {
+      // Only a refused search carries words meant for the person; any other failure text stays internal.
       const failure = z.object({ error: z.object({ message: z.string() }) }).safeParse(responseBody);
       throw new Error(
-        failure.success ? failure.data.error.message : 'Searching your chats failed. Try again in a moment.',
+        response.status === 400 && failure.success
+          ? failure.data.error.message
+          : 'Searching your chats failed. Try again in a moment.',
       );
     }
     const parsed = OwnChatSearchResponseSchema.safeParse(responseBody);
