@@ -215,4 +215,3 @@ describe('browser capability', () => {
     expect(info.browser_click).toBeUndefined();
   });
 });
-

@@ -637,3 +637,16 @@ test('click performs a real click and reads the result', { skip: !browsersAvaila
     assert.match(clicked.text, /Checkout/);
   });
 });
+
+test('a ref resolves back to the DOM path it was given to, and an unknown ref resolves to nothing', async () => {
+  const { RefAssigner } = await import('../src/snapshot.mjs');
+  const refs = new RefAssigner();
+  const given = refs.refsFor([
+    { id: 'HTML:0/BUTTON:1', actionable: true },
+    { id: 'HTML:0/P:0', actionable: false },
+  ]);
+  assert.equal(refs.resolve(given.get('HTML:0/BUTTON:1')), 'HTML:0/BUTTON:1');
+  assert.equal(refs.resolve('e99'), undefined);
+  refs.reset();
+  assert.equal(refs.resolve('e1'), undefined);
+});

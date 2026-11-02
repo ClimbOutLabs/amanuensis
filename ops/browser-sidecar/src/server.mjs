@@ -442,7 +442,10 @@ export class BrowserSidecar {
       return found.result;
     }
     const info = await found.tab.page.evaluate(elementInfoScript(found.path));
-    const sensitive = info === null ? null : sensitivityOf({ field_kind: info.field_kind });
+    if (info === null) {
+      return { status: 'refused', reason: 'stale_ref' };
+    }
+    const sensitive = sensitivityOf({ field_kind: info.field_kind });
     if (sensitive !== null) {
       return { status: 'refused', reason: 'sensitive_field' };
     }

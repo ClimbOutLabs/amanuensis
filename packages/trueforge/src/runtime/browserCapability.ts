@@ -230,7 +230,12 @@ class BrowserTool extends LocalToolMCP {
     if (ref === undefined) {
       return info;
     }
-    const result = await callBrowserSidecar({ path: '/click-info', tab: this.tab, schema: ClickInfoReplySchema, body: { ref } });
+    const result = await callBrowserSidecar({
+      path: '/click-info',
+      tab: this.tab,
+      schema: ClickInfoReplySchema,
+      body: { ref },
+    });
     if (!result.ok || result.body.status !== 'ok') {
       return info;
     }
