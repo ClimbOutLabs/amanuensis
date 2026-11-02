@@ -10,6 +10,7 @@ import type { RequestContext } from '../../../src/auth/identity';
 import configuration from '../../../src/config';
 import { EXPORT_SCHEMA_VERSION } from '../../../src/dataExport/exportService';
 import { ZipStreamWriter } from '../../../src/dataExport/zipStreamWriter';
+import { DeliveryStore } from '../../../src/db/deliveryStore';
 import { SentinelAuditStore } from '../../../src/db/sentinelAuditStore';
 import { SqliteAgentStore } from '../../../src/db/sqlite/agent-store/SqliteAgentStore';
 import { SqliteGlobalSettingsStore } from '../../../src/db/sqlite/global-settings-store/SqliteGlobalSettingsStore';
@@ -101,6 +102,7 @@ describe('Data import route', () => {
       globalSettingsStore: new SqliteGlobalSettingsStore(db),
       sentinelSettingsStore: new SqliteSentinelSettingsStore(db),
       auditStore: new SentinelAuditStore(db),
+      deliveryStore: new DeliveryStore(db),
       turnArtifactStore: new SqliteTurnArtifactStore(db),
       mcpServerStore: new SqliteMcpServerStore(db),
     };

@@ -12,6 +12,7 @@ If you use a hosted model, the company running it sees each chat: your messages,
 - **To the model you chose:** your message, the chat so far, what Aman knows about you, the memories Aman recalls for that message, and the results of any tools Aman used. With a local model, this stays on your computer.
 - **To the web search service:** the search words, and the links Aman opens from the results, when Aman searches the web. The service also sees this computer's internet address.
 - **To the map service:** the places and routes Aman looks up, after you approve the card.
+- **To your browser's push service (Google, Apple or Mozilla), only for devices where you turned notices on:** a sealed notice holding an item number and a generic title such as "Reminder", never the reminder text. The service also sees this computer's internet address and the project's public page as the sender's contact.
 - **To a connector's service:** whatever a connector call sends, such as an email you approved. Calls that send or change something show a card first; see [Safety story](/safety).
 
 ## What stays on your machine

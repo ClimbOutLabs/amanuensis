@@ -8,6 +8,7 @@ import { createServer, defaultClientConditions } from 'vite';
 
 import { DEV_OPTIMIZE_DEPS } from '../src/devPrebundle.ts';
 import { findChromiumExecutable } from './support/findChromiumExecutable.ts';
+import { FIRST_LOAD_TIMEOUT_MS } from './support/firstLoad.ts';
 import { privateViteCache } from './support/viteCache.ts';
 
 const RENDER_TIMEOUT_MS = 45_000;
@@ -46,7 +47,7 @@ test(
           const label = `${preset}/${mode}`;
           await page.goto(
             `http://127.0.0.1:${address.port}/tests/fixtures/dock-edge.fixture.html?preset=${preset}&mode=${mode}`,
-            { waitUntil: 'domcontentloaded', timeout: RENDER_TIMEOUT_MS },
+            { waitUntil: 'domcontentloaded', timeout: FIRST_LOAD_TIMEOUT_MS },
           );
           const panel = page.locator('[data-aui-compact-layout]');
           await panel.waitFor({ state: 'visible', timeout: RENDER_TIMEOUT_MS });
