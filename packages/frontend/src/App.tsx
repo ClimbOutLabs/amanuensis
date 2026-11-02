@@ -41,6 +41,7 @@ import {
 import { memo, useEffect, useMemo, useState } from 'react';
 import { ThinkingOrb } from 'thinking-orbs';
 import { AuthErrorScreen } from './AuthErrorScreen';
+import { BrowserLivePage } from './BrowserLivePage';
 import { createAuthAwareFetch } from './authFetch';
 import { probeSession, type SessionState } from './authSession';
 import { parseAuthErrorReason, shouldShowAuthErrorScreen, stripAuthErrorSearch } from './authStatusSearch';
@@ -503,6 +504,15 @@ export function App() {
     return (
       <ThemeProvider theme={appTheme}>
         <GetStartedScreen />
+      </ThemeProvider>
+    );
+  }
+
+  // The live browser view is a bare page of its own: it needs the session, but none of the app boot.
+  if (window.location.pathname === apiPath('/browser-live')) {
+    return (
+      <ThemeProvider theme={appTheme}>
+        <BrowserLivePage />
       </ThemeProvider>
     );
   }
