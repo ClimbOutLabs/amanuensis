@@ -61,6 +61,7 @@ ask_valid() {
 consent_root() {
   [ "$2" = 1 ] && return 0
   [ "$ASSUME_YES" = 1 ] && return 1
+  ui_event_admin "$1"
   ui_confirm "$1" n
 }
 

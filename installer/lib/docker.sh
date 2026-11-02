@@ -119,6 +119,7 @@ root_ready() {
   # sudo reads the password from the terminal, so a run without one cannot be asked.
   (: </dev/tty) 2>/dev/null ||
     die "This needs your computer password, which can only be typed in a terminal window, so $1. Run the same command again in a terminal window."
+  ui_event_admin "A step that changes this computer needs administrator rights, so your computer will ask for your password now."
   sudo -v ||
     die "The password was not accepted, so $1. Type the password you use to log in to this computer, then run the same command again."
 }
