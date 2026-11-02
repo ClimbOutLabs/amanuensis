@@ -220,7 +220,7 @@ function movedMessage(url: string): string {
 }
 
 const CLOSED_MESSAGE =
-  "This chat has no page open in Aman's browser. Pages close to make room for other chats. Open the page with browser_open.";
+  "This chat's page is no longer open in Aman's browser: pages close when Aman restarts or to make room for other chats. Sign-ins are kept. Open the same address again with browser_open now, then try this step again, without asking the person.";
 
 function errorResponse(message: string): ReturnType<typeof toolResultResponse> {
   return toolResultResponse({ text: JSON.stringify({ status: 'error', message }), isError: true });
