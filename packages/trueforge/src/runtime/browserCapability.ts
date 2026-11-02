@@ -11,9 +11,14 @@
  * The live view, the person's own look at their browser (see apis/browserLive.ts), reaches the same
  * sidecar through the callers below, so the shared secret stays on this server either way.
  */
-import type { AgentCapability, AgentTracing } from '@truefoundry/trueforge-core/core';
+import type {
+  AgentCapability,
+  AgentTracing,
+  PreLLMEphemeralAgentContextProcessor,
+} from '@truefoundry/trueforge-core/core';
 import { defineTool, LocalToolMCP, toolResultResponse, type ToolDefinition } from '@truefoundry/trueforge-core/core';
 import type { ToolBundleName } from '@truefoundry/trueforge-core/core/runtime/toolBundleCatalog';
+import { randomUUID } from 'node:crypto';
 import type { Logger } from 'winston';
 import { z } from 'zod';
 import configuration from '../config';
@@ -253,6 +258,7 @@ class BrowserTool extends LocalToolMCP {
     private readonly tab: BrowserTabRef,
     private readonly logger: Logger,
     tracing: AgentTracing,
+    private readonly screenshots: Map<string, string>,
   ) {
     super({ tracing });
   }
@@ -331,7 +337,7 @@ class BrowserTool extends LocalToolMCP {
       name: 'browser_screenshot',
       annotations: BROWSER_TOOL_ANNOTATIONS,
       description:
-        'Take a picture of the open page and show it to the person in the chat. The model does not see the picture.',
+        'Take a picture of the open page, show it to the person in the chat, and look at it yourself. Use it when the page text is not enough, for example for a layout, a chart or a picture check.',
       schema: EMPTY_INPUT_SCHEMA,
       handler: async () => {
         const result = await callBrowserSidecar({ path: '/screenshot', tab: this.tab, schema: ScreenshotReplySchema });
@@ -345,8 +351,18 @@ class BrowserTool extends LocalToolMCP {
         if (result.body.status === 'closed') {
           return errorResponse(CLOSED_MESSAGE);
         }
-        // The image block goes to the chat for the person; the model reads only the text beside it.
-        const response = toolResultResponse({ text: JSON.stringify({ status: 'ok', shown_to_person: true }) });
+        // The image block goes to the chat for the person; the picture also reaches the model through
+        // the screenshot viewer below, as an image right after this result.
+        const picture = randomUUID();
+        this.screenshots.set(picture, result.body.png_base64);
+        const response = toolResultResponse({
+          text: JSON.stringify({
+            status: 'ok',
+            shown_to_person: true,
+            picture,
+            note: 'The picture follows as an image.',
+          }),
+        });
         return {
           ...response,
           result: {
@@ -440,6 +456,47 @@ export interface BrowserCapabilityOptions {
 }
 
 /** Build the browser capability. Callers only add this when `configuration.BROWSER_ENABLED` is true. */
+type LlmMessages = Parameters<PreLLMEphemeralAgentContextProcessor['processPreLLMEphemeral']>[0];
+
+/**
+ * Shows this reply's screenshots to the model: each one goes in as an image right after the tool
+ * results it came with. Only pictures taken in this reply are kept, so older ones never come back.
+ */
+class ScreenshotViewer implements PreLLMEphemeralAgentContextProcessor {
+  constructor(private readonly screenshots: Map<string, string>) {}
+
+  processPreLLMEphemeral(input: LlmMessages): LlmMessages | undefined {
+    if (this.screenshots.size === 0) {
+      return undefined;
+    }
+    const messages = [...input];
+    for (const [picture, png] of this.screenshots) {
+      const at = messages.findIndex(
+        message => message.role === 'tool' && typeof message.content === 'string' && message.content.includes(picture),
+      );
+      if (at < 0) {
+        continue;
+      }
+      let after = at + 1;
+      while (after < messages.length && messages[after]?.role === 'tool') {
+        after += 1;
+      }
+      messages.splice(after, 0, {
+        role: 'user',
+        content: [
+          { type: 'text', text: 'The browser screenshot you just took:' },
+          { type: 'image_url', image_url: { url: `data:image/png;base64,${png}` } },
+        ],
+      });
+    }
+    return messages;
+  }
+}
+
 export function browserCapability(options: BrowserCapabilityOptions): AgentCapability {
-  return { systemToolSets: [new BrowserTool(options.tab, options.logger, options.tracing)] };
+  const screenshots = new Map<string, string>();
+  return {
+    systemToolSets: [new BrowserTool(options.tab, options.logger, options.tracing, screenshots)],
+    preLLMEphemeralProcessors: [new ScreenshotViewer(screenshots)],
+  };
 }
