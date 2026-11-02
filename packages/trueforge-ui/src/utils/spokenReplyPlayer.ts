@@ -1,5 +1,5 @@
 import { pickOnDeviceVoice } from './speechOutput.js';
-import { readSpeechVoiceURI } from './speechReplyPreferences.js';
+import { readServerVoice, readSpeechVoiceURI, type ServerVoiceId } from './speechReplyPreferences.js';
 
 /** Host port for the voice running on the person's own computer (`POST /api/v1/voice/speak`). */
 export type ServerVoiceApi = {
@@ -7,7 +7,7 @@ export type ServerVoiceApi = {
    * Resolves with WAV audio for the text. Rejects with a ServerVoiceRefusal when the voice is fine but
    * will not read this piece, and with any other error when the voice is off or the request fails.
    */
-  speak: (input: { text: string; signal?: AbortSignal }) => Promise<Blob>;
+  speak: (input: { text: string; voice: ServerVoiceId; signal?: AbortSignal }) => Promise<Blob>;
 };
 
 /** Why a working server voice turned one piece down: nothing in it to say, too long once spelled out, or busy. */
@@ -34,6 +34,8 @@ export type SpokenReplyPlayer = {
   stop: () => void;
   /** False when neither the computer's voice nor the browser's voice can read aloud. */
   canSpeak: () => boolean;
+  /** Whether the host wired the voice on the person's own computer. */
+  hasServerVoice: () => boolean;
   /** The key of what is being read right now, or null. */
   speakingKey: () => string | null;
   /** Calls the listener whenever `speakingKey` changes; returns a function that stops listening. */
@@ -195,9 +197,13 @@ export function createSpokenReplyPlayer(deps: SpokenReplyPlayerDeps): SpokenRepl
     if (server === null || now() < serverDownUntil || pieces.length === 0) {
       return readWithBrowser(text, signal);
     }
+    // One voice for the whole reply, even if the choice changes while it is read.
+    const voice = readServerVoice();
     const fetchPiece = (index: number): Promise<Blob> => {
       const piece = pieces[index];
-      return piece === undefined ? Promise.reject(new Error('no such piece')) : server.speak({ text: piece, signal });
+      return piece === undefined
+        ? Promise.reject(new Error('no such piece'))
+        : server.speak({ text: piece, voice, signal });
     };
     let next = fetchPiece(0);
     // Rejections of a prefetch are read when its turn comes; until then they must not surface as unhandled.
@@ -251,6 +257,7 @@ export function createSpokenReplyPlayer(deps: SpokenReplyPlayerDeps): SpokenRepl
   return {
     stop,
     canSpeak: () => deps.serverVoice !== null || currentBrowserSpeak() !== null,
+    hasServerVoice: () => deps.serverVoice !== null,
     speakingKey: () => currentKey,
     subscribe: listener => {
       listeners.add(listener);

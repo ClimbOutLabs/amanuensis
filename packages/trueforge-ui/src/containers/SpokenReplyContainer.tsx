@@ -14,7 +14,13 @@ import {
   pendingApprovalCallIds,
   type SpeechContentPart,
 } from '../utils/speechText.js';
-import { disarmSpokenReply, noteUserMessage, takeSpokenReply } from '../utils/voiceTurn.js';
+import {
+  disarmSpokenReply,
+  noteUserMessage,
+  setHandsFree,
+  takeSpokenReply,
+  voiceReplyDone,
+} from '../utils/voiceTurn.js';
 
 type SpeakableMessage = {
   readonly id: string;
@@ -68,14 +74,23 @@ export function SpokenReplyContainer() {
   // where the turn ends.
   const replyDue = useRef(false);
 
-  // Switching chats, or leaving this one, ends a reply in progress and any voice send still waiting.
+  // Switching chats, or leaving this one, ends a reply in progress, any voice send still waiting,
+  // and a hands-free conversation.
   useEffect(() => {
     disarmSpokenReply();
+    setHandsFree('off');
     replyDue.current = false;
     spokenReply.stop();
   }, [threadId, spokenReply]);
 
-  useEffect(() => () => spokenReply.stop(), [spokenReply]);
+  // Leaving the chat view ends a reply in progress and a hands-free conversation.
+  useEffect(
+    () => () => {
+      setHandsFree('off');
+      spokenReply.stop();
+    },
+    [spokenReply],
+  );
 
   // A new user message is either the voice send's own message or the end of that send.
   useEffect(() => {
@@ -92,7 +107,9 @@ export function SpokenReplyContainer() {
       runThreadId.current = threadId;
       return;
     }
-    if (finished) replyDue.current = takeSpokenReply(latestUserId);
+    if (!finished) return;
+    replyDue.current = takeSpokenReply(latestUserId);
+    if (!replyDue.current) voiceReplyDone();
   }, [isRunning, threadId, latestUserId]);
 
   useEffect(() => {
@@ -101,11 +118,13 @@ export function SpokenReplyContainer() {
     if (message === undefined || message.status?.type === 'running') return;
     replyDue.current = false;
     // Switching chats ends a run as seen here too; only the chat the voice turn started in is read.
-    if (runThreadId.current !== threadId) return;
-    if (!enabled || !spokenReply.canSpeak()) return;
+    if (runThreadId.current !== threadId || !enabled || !spokenReply.canSpeak()) {
+      voiceReplyDone();
+      return;
+    }
     const sentinelLine = approvalLine(message.content, sentinel);
     const text = sentinelLine ?? limitSpeechWords(finalAnswerSpeech(message.content));
-    void spokenReply.speak(text, { key: message.id });
+    void spokenReply.speak(text, { key: message.id }).then(voiceReplyDone, voiceReplyDone);
   }, [isRunning, messages, enabled, sentinel, threadId, spokenReply]);
 
   return null;

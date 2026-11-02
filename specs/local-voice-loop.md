@@ -2,7 +2,7 @@
 
 **Status:** implemented
 
-**Scope note:** v1 ships local speech-to-text input only: a tap-to-record mic button in the chat composer, transcribed by the local `aman-stt` sidecar. A local text-to-speech voice, the `aman-tts` sidecar, now backs spoken replies (see `docs/voice-input.mdx`). Hands-free mode, the push-to-talk hotkey, and the clipboard bridge are future work; the sections below describe the full target.
+**Scope note:** Everything in Scope below has shipped: tap to record, hold to talk (the mic or configurable keys), replies read aloud by the local `aman-tts` voice with the browser voice as a fallback, hands-free conversation, paste from the clipboard, and copy on every answer. The audio data flow is documented in `docs/voice-input.mdx` ("Where your voice goes"); the privacy dashboard links it when the dashboard ships.
 
 ## Problem
 

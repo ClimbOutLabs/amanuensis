@@ -265,11 +265,11 @@ const REFUSAL_BY_STATUS: ReadonlyMap<number, ServerVoiceRefusalReason> = new Map
 
 export function createServerVoiceApi(fetcher: typeof fetch): ServerVoiceApi {
   return {
-    async speak({ text, signal }: { text: string; signal?: AbortSignal }): Promise<Blob> {
+    async speak({ text, voice, signal }: { text: string; voice: string; signal?: AbortSignal }): Promise<Blob> {
       const response = await fetcher(apiPath('/api/v1/voice/speak'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text }),
+        body: JSON.stringify({ text, voice }),
         signal: signal ?? null,
       });
       if (!response.ok) {

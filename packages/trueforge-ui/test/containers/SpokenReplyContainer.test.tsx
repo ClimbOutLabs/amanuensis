@@ -9,7 +9,9 @@ import {
   armSpokenReply,
   clearDraftFromVoice,
   disarmSpokenReply,
+  getHandsFree,
   markDraftFromVoice,
+  setHandsFree,
   takeDraftFromVoice,
 } from '@/utils/voiceTurn.js';
 import {
@@ -128,6 +130,7 @@ describe('SpokenReplyContainer', () => {
     stopSpokenReply();
     removeSpeechSynthesis();
     clearDraftFromVoice();
+    setHandsFree('off');
     window.localStorage.clear();
     threadRunning.value = false;
   });
@@ -277,4 +280,47 @@ describe('SpokenReplyContainer', () => {
     ).resolves.toBeDefined();
     expect(synthesis.speak).not.toHaveBeenCalled();
   });
+
+  it('a hands-free conversation listens again only once the reply has been read aloud', async () => {
+    await sendAndFinishHandsFree();
+    expect(getHandsFree()).toBe('answering');
+
+    await act(async () => {
+      for (const call of synthesis.speak.mock.calls) call[0].finish();
+    });
+    await settle();
+    expect(getHandsFree()).toBe('listen-due');
+  });
+
+  it('a hands-free conversation listens again at once when there is nothing to read', async () => {
+    window.localStorage.setItem(SPEAK_VOICE_REPLIES_STORAGE_KEY, 'false');
+
+    await sendAndFinishHandsFree();
+
+    expect(getHandsFree()).toBe('listen-due');
+  });
+
+  it('switching chats ends a hands-free conversation', async () => {
+    const { rerender } = render(thread({ messages: [], running: false, threadId: 'chat-a' }));
+    await settle();
+    setHandsFree('answering');
+
+    rerender(thread({ messages: [], running: false, threadId: 'chat-b' }));
+    await settle();
+
+    expect(getHandsFree()).toBe('off');
+  });
+
+  async function sendAndFinishHandsFree() {
+    const { rerender } = render(thread({ messages: [], running: false }));
+    setHandsFree('answering');
+    markDraftFromVoice();
+    armSpokenReply({ fromVoice: takeDraftFromVoice(), text: PROMPT });
+    const prompt = [userMessage(PROMPT)];
+    const reply = [{ type: 'text' as const, text: 'Hello there.' }];
+    rerender(thread({ messages: prompt, running: true }));
+    await settle();
+    rerender(thread({ messages: [...prompt, assistantMessage(reply)], running: false }));
+    await settle();
+  }
 });
