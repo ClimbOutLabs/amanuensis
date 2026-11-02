@@ -107,7 +107,8 @@ describe('mail-email entrypoint wrapper', () => {
     await writeFile(replacement, LIST_V2);
     await rename(replacement, policy);
     await eventually(async () => (await readOrEmpty(status)) === allowedRecipientsFileHash(LIST_V2));
-    expect(await startCount()).toBeGreaterThanOrEqual(2);
+    // The wrapper writes the hash once it has launched the new server, which may not have logged its start yet.
+    await eventually(async () => (await startCount()) >= 2);
   }, 30_000);
 
   it('starts the server without an env recipient list, so the list file always decides', async () => {
