@@ -130,7 +130,11 @@ export async function callBrowserSidecar<Schema extends z.ZodType>(input: {
     const json: unknown = await response.json();
     const parsed = input.schema.safeParse(json);
     if (!response.ok || !parsed.success) {
-      return { ok: false, message: "Aman's browser could not do that. Try again in a moment." };
+      const detail =
+        typeof json === 'object' && json !== null && 'message' in json && typeof json.message === 'string'
+          ? ` (${json.message.slice(0, 300)})`
+          : '';
+      return { ok: false, message: `Aman's browser could not do that${detail}. Try again in a moment.` };
     }
     return { ok: true, body: parsed.data };
   } catch (error) {
