@@ -398,7 +398,7 @@ export class InMemorySessionStore<
     if (terms.length === 0 || input.limit <= 0) {
       return [];
     }
-    const personaIds = new Set(input.persona_ids);
+    const personaIds = input.personas.kind === 'only' ? new Set(input.personas.persona_ids) : undefined;
     const newestBySession = new Map<
       string,
       { session: SessionRecord<TSessionCustom>; text: string; matchedAt: Date; order: string }
@@ -417,7 +417,7 @@ export class InMemorySessionStore<
         continue;
       }
       for (const [turnId, turn] of byTurn) {
-        if (turn.persona_id !== null && !personaIds.has(turn.persona_id)) {
+        if (turn.persona_id !== null && personaIds !== undefined && !personaIds.has(turn.persona_id)) {
           continue;
         }
         for (const message of turn.messages) {
@@ -460,6 +460,7 @@ export class InMemorySessionStore<
         title: entry.session.title,
         created_at: entry.session.created_at,
         snippet: buildChatSearchSnippet(entry.text, input.query),
+        matched_at: entry.matchedAt,
       }));
   }
 

@@ -3,8 +3,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 
-import { sessionIsCreateAgent } from '../atoms/lib/sessionCreateAgent.js';
 import { findAgentByName } from '../atoms/lib/useSearchAgentsList.js';
+import { useOpenChatById } from '../hooks/useOpenChatById.js';
 import {
   useOptionalAgentSessionsServer,
   useOptionalCatalogServer,
@@ -91,45 +91,13 @@ export function ShellRouteSync({
   const bootedRef = useRef(false);
   const bootPlaceRef = useRef<RoutePlace | null>(null);
   const bootHistoryAgentRef = useRef<HistoryAgentSearch | null>(null);
-  // Latest session id the URL asked for, so slower lookups cannot bind over it.
-  const requestedSessionRef = useRef<string | null>(null);
   const requestedHistoryAgentRef = useRef<string | null>(null);
   // Boot owns the first URL; the ongoing effects skip their initial commit so
   // they do not fight boot with the stale first-render place.
   const shellSyncStartedRef = useRef(false);
   const urlSyncStartedRef = useRef(false);
 
-  /**
-   * A URL carries only the id, so ask the server whether it names a mutable
-   * draft or an agent chat; guessing "mutable" opens an agent session as a
-   * blank draft. `requestedSessionRef` drops replies a later place superseded.
-   */
-  const openSession = useCallback(
-    (sessionId: string) => {
-      requestedSessionRef.current = sessionId;
-      if (server == null) {
-        shell.openHistorySession({ sessionId });
-        return;
-      }
-      void server
-        .getSession({ sessionId })
-        .then(session => {
-          if (requestedSessionRef.current !== sessionId) return;
-          shell.openHistorySession({
-            sessionId,
-            isMutable: session.isMutable,
-            isCreateAgent: sessionIsCreateAgent(session),
-            ...(session.agentName != null ? { agentName: session.agentName } : {}),
-          });
-        })
-        .catch(() => {
-          if (requestedSessionRef.current !== sessionId) return;
-          // Unreachable session: bind by id alone rather than stranding the shell.
-          shell.openHistorySession({ sessionId });
-        });
-    },
-    [server, shell],
-  );
+  const openSession = useOpenChatById();
 
   const applyHistoryAgentSearch = useCallback(
     (next: HistoryAgentSearch | null) => {

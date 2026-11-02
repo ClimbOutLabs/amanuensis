@@ -24,6 +24,8 @@ Aman can also look through your earlier chats when you ask, for example "what di
 
 The search follows the same rule as memory. A persona finds its own chats, chats with the main assistant, and chats of personas whose vault is shared with it. A chat with a persona whose vault is not shared stays out of the search.
 
+You can also search the words inside your chats yourself. Open the search box at the top of the Chats list and type. Chats whose titles match come first, and below them, under "In messages", come chats where a message holds your words, each with a short piece of that message. Click one to open it. This search covers all of your own chats, whichever persona answered, because you can already open every chat in your list. It needs the same switch: while past-chat search is off, the box matches titles only.
+
 A message matches when it contains every word you searched for, as a whole word. Small filler words such as "the" are ignored, and "trip", "trips" and "tripped" count as the same word, while different words such as "made" and "mad" stay apart.
 
 Manage it in **Settings → Memory**: see what's stored, turn recall on or off (the rail toggle does the same), and check the memory status. Recall is bounded, so a large memory can't blow up the model's context window, and every recall is auditable.

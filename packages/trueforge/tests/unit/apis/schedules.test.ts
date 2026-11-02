@@ -1146,7 +1146,7 @@ describe('audit rows for schedule firings', () => {
       query: 'medicine',
       created_by_subject_id: 'alice',
       exclude_session_id: null,
-      persona_ids: [],
+      personas: { kind: 'only', persona_ids: [] },
       from: null,
       to: null,
       limit: 8,

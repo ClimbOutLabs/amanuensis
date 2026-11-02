@@ -62,6 +62,7 @@ interface ChatSearchRow {
   body: string;
   title: string | null;
   session_created_at: string;
+  matched_at: string;
 }
 
 /**
@@ -78,6 +79,10 @@ export async function searchChatHistory(db: Kysely<Database>, input: SearchChatH
   const exclusion = input.exclude_session_id === null ? sql`` : sql`AND d.session_id != ${input.exclude_session_id}`;
   const fromBound = input.from === null ? sql`` : sql`AND d.created_at >= ${input.from.toISOString()}`;
   const toBound = input.to === null ? sql`` : sql`AND d.created_at < ${input.to.toISOString()}`;
+  const personaFilter =
+    input.personas.kind === 'all'
+      ? sql``
+      : sql`AND (d.persona_id IS NULL OR d.persona_id IN (SELECT value FROM json_each(${JSON.stringify(input.personas.persona_ids)})))`;
   const rows = await sql<ChatSearchRow>`
     WITH matched AS (
       SELECT
@@ -94,12 +99,12 @@ export async function searchChatHistory(db: Kysely<Database>, input: SearchChatH
       WHERE chat_search_fts MATCH ${match}
         AND d.tenant_id = ${input.tenant_id}
         AND json_extract(s.created_by_subject, '$.subject_id') = ${input.created_by_subject_id}
-        AND (d.persona_id IS NULL OR d.persona_id IN (SELECT value FROM json_each(${JSON.stringify(input.persona_ids)})))
+        ${personaFilter}
         ${exclusion}
         ${fromBound}
         ${toBound}
     )
-    SELECT m.session_id, m.body, s.title, s.created_at AS session_created_at
+    SELECT m.session_id, m.body, s.title, s.created_at AS session_created_at, m.created_at AS matched_at
     FROM matched m
     JOIN session s ON s.tenant_id = ${input.tenant_id} AND s.session_id = m.session_id
     WHERE m.newest = 1
@@ -112,6 +117,7 @@ export async function searchChatHistory(db: Kysely<Database>, input: SearchChatH
     title: row.title,
     created_at: new Date(row.session_created_at),
     snippet: buildChatSearchSnippet(row.body, input.query),
+    matched_at: new Date(row.matched_at),
   }));
 }
 

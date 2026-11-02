@@ -7437,6 +7437,35 @@
         ],
         "type": "object"
       },
+      "OwnChatSearchHit": {
+        "properties": {
+          "matched_at": {
+            "description": "When the matching message was written.",
+            "format": "date-time",
+            "type": "string"
+          },
+          "session_id": {
+            "type": "string"
+          },
+          "snippet": {
+            "description": "Part of the matching message, at most 300 characters.",
+            "type": "string"
+          },
+          "title": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "session_id",
+          "title",
+          "snippet",
+          "matched_at"
+        ],
+        "type": "object"
+      },
       "PermissionResourceType": {
         "description": "Resource type to evaluate permissions for.",
         "enum": [
@@ -9155,6 +9184,34 @@
           "saved_agent"
         ],
         "type": "string"
+      },
+      "SearchOwnChatsResponse": {
+        "properties": {
+          "data": {
+            "properties": {
+              "hits": {
+                "description": "Newest match first, one per chat.",
+                "items": {
+                  "$ref": "#/components/schemas/OwnChatSearchHit"
+                },
+                "type": "array"
+              },
+              "search_enabled": {
+                "description": "False while past-chat search is off in Settings; nothing is indexed then and hits is empty.",
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "search_enabled",
+              "hits"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
       },
       "SentinelAuditRecord": {
         "properties": {
@@ -24720,6 +24777,78 @@
           "briefItems"
         ],
         "x-fern-sdk-method-name": "undo"
+      }
+    },
+    "/api/v1/user/chat-search": {
+      "get": {
+        "description": "Finds your own chats with a message holding every search word, newest match first, with a short excerpt. Returns nothing while past-chat search is off.",
+        "parameters": [
+          {
+            "description": "Words to look for. A chat matches when one message holds every word.",
+            "in": "query",
+            "name": "query",
+            "required": true,
+            "schema": {
+              "description": "Words to look for. A chat matches when one message holds every word.",
+              "maxLength": 500,
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "description": "Most chats to return.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "description": "Most chats to return.",
+              "maximum": 20,
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SearchOwnChatsResponse"
+                }
+              }
+            },
+            "description": "Matching chats."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The search was blank or too long."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "OIDC is configured and the request has no valid session cookie."
+          }
+        },
+        "summary": "Search the words inside your own chats",
+        "tags": [
+          "Agent Sessions"
+        ],
+        "x-fern-sdk-group-name": [
+          "sessions"
+        ],
+        "x-fern-sdk-method-name": "search_own_chats"
       }
     },
     "/api/v1/user/settings/calendar": {

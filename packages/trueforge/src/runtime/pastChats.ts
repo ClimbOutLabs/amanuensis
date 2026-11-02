@@ -118,21 +118,32 @@ export async function searchPastChats(deps: {
     query: deps.input.query,
     created_by_subject_id: deps.userRef,
     exclude_session_id: deps.currentSessionId,
-    persona_ids: deps.personaIds,
+    personas: { kind: 'only', persona_ids: deps.personaIds },
     from,
     to,
     limit: PAST_CHATS_HIT_LIMIT,
   });
+  return await keepOwnChatHits({
+    sessionStore: deps.sessionStore,
+    tenantId: deps.tenantId,
+    userRef: deps.userRef,
+    hits,
+  });
+}
+
+/** Drops every hit whose chat cannot be shown to belong to the person, checked against the chat record itself. */
+export async function keepOwnChatHits(deps: {
+  sessionStore: Pick<PastChatsSessionReader, 'getSession'>;
+  tenantId: string;
+  userRef: string;
+  hits: readonly ChatSearchHit[];
+}): Promise<ChatSearchHit[]> {
   const kept: ChatSearchHit[] = [];
-  for (const hit of hits) {
-    const session = await deps.sessionStore.getSession({
-      tenant_id: deps.tenantId,
-      session_id: hit.session_id,
-    });
-    if (session?.created_by_subject.subject_id !== deps.userRef) {
-      continue;
+  for (const hit of deps.hits) {
+    const session = await deps.sessionStore.getSession({ tenant_id: deps.tenantId, session_id: hit.session_id });
+    if (session?.created_by_subject.subject_id === deps.userRef) {
+      kept.push(hit);
     }
-    kept.push(hit);
   }
   return kept;
 }

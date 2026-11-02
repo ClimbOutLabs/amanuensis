@@ -465,17 +465,21 @@ export interface IndexChatMessagesInput {
   documents: readonly ChatSearchDocument[];
 }
 
+/**
+ * Whose persona chats a search may return. Messages written with no persona always count.
+ * 'only' limits persona messages to the listed ids, for an assistant reading another persona's
+ * chats; 'all' returns every persona's, for the person searching their own chat list.
+ */
+export type ChatSearchPersonaScope = { kind: 'all' } | { kind: 'only'; persona_ids: readonly string[] };
+
 export interface SearchChatHistoryInput {
   tenant_id: string;
   /** Free text; a chat matches when one of its indexed messages holds every query word (see chatSearchText). */
   query: string;
   /** Only chats this subject created are searched. */
   created_by_subject_id: string;
-  /**
-   * The personas whose messages may be returned. Messages written with no persona are always
-   * searchable; a message written under a persona only when that persona's id is listed.
-   */
-  persona_ids: readonly string[];
+  /** Which personas' messages may be returned. */
+  personas: ChatSearchPersonaScope;
   /** The chat the search runs from; never among the hits. `null` excludes nothing. */
   exclude_session_id: string | null;
   /** Inclusive lower bound on the matched message's time; `null` is unbounded. */
@@ -499,6 +503,8 @@ export interface ChatSearchHit {
   created_at: Date;
   /** Excerpt of the chat's best-matching message, at most 300 characters. */
   snippet: string;
+  /** When the matched message was written. */
+  matched_at: Date;
 }
 
 /**
@@ -545,7 +551,7 @@ export interface ISessionStore<
 
   /**
    * Word search over the indexed messages of the chats `created_by_subject_id` created in the
-   * tenant, limited to the personas `persona_ids` allows. At most one hit per chat, its newest
+   * tenant, limited to the personas `personas` allows. At most one hit per chat, its newest
    * matching message; chats with the newest match come first, ties by session id. `from` / `to`
    * bound the matched message's time. A query with no searchable words matches nothing.
    */

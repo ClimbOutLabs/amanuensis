@@ -1,6 +1,6 @@
 # Spec: Past Chat Search
 
-**Status:** draft
+**Status:** approved
 
 ## Problem
 
@@ -27,7 +27,7 @@ The sidebar "Search chats" box searches the words inside messages too, using the
 
 ## Server
 
-- A new route, `GET /api/v1/sessions/search?query=...&limit=...`, returns `{ data: [{ session_id, title, snippet, matched_at }] }`. It reads the switch first. When the switch is off it returns an empty list with `search_enabled: false`, so the sidebar can show its hint.
+- A new route, `GET /api/v1/user/chat-search?query=...&limit=...`, returns `{ data: { search_enabled, hits: [{ session_id, title, snippet, matched_at }] } }`. It reads the switch first. When the switch is off it returns no hits with `search_enabled: false`, so the sidebar can show its hint.
 - The store's `searchChatHistory` input changes its persona filter to a discriminated union: `{ kind: 'all' }` for the sidebar, and `{ kind: 'only', persona_ids }` for the assistant's tool. All three stores (in-memory, SQLite, Postgres) and the store contract suite change together.
 - Every hit is re-checked against its chat record before it is returned, the same as the tool does.
 
