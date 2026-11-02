@@ -201,5 +201,42 @@ export function extractSnapshotNodes() {
       actionable,
     });
   }
+  // Pages also make plain boxes clickable (a styled bar with a click handler). Each outermost one that
+  // shows a hand cursor, or has a click handler or keyboard focus, and holds no real control, is a button too.
+  const seen = new Set(nodes.map(node => node.id));
+  let extra = 0;
+  for (const element of document.querySelectorAll('div,span,img,label,td,li,p,section,svg,i')) {
+    if (extra >= 300) {
+      break;
+    }
+    const clickable =
+      element.hasAttribute('onclick') ||
+      (element.hasAttribute('tabindex') && element.getAttribute('tabindex') !== '-1') ||
+      window.getComputedStyle(element).cursor === 'pointer';
+    if (!clickable || !isVisible(element)) {
+      continue;
+    }
+    const parent = element.parentElement;
+    if (parent !== null && window.getComputedStyle(parent).cursor === 'pointer') {
+      continue;
+    }
+    if (element.closest('a,button,input,select,textarea,[role]') !== null) {
+      continue;
+    }
+    if (element.querySelector('a,button,input,select,textarea') !== null) {
+      continue;
+    }
+    const id = domPath(element);
+    if (seen.has(id)) {
+      continue;
+    }
+    seen.add(id);
+    extra += 1;
+    const text = (element.innerText ?? element.getAttribute('aria-label') ?? element.getAttribute('title') ?? '')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .slice(0, 200);
+    nodes.push({ id, role: 'button', name: text, value: undefined, field_kind: null, actionable: true });
+  }
   return nodes;
 }
