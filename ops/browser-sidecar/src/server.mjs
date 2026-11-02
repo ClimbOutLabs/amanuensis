@@ -10,7 +10,8 @@ import path from 'node:path';
 import { URL } from 'node:url';
 import { chromium } from 'playwright-core';
 
-import { RefAssigner, renderSnapshot } from './snapshot.mjs';
+import { elementAtPath } from './extract.mjs';
+import { RefAssigner, renderSnapshot, sensitivityOf } from './snapshot.mjs';
 
 const MAX_BODY_BYTES = 256 * 1024;
 
@@ -18,10 +19,14 @@ const MAX_BODY_BYTES = 256 * 1024;
  * extract.mjs as one script for the page. `page.evaluate(fn)` sends only the function's own source, so
  * the helpers and tables it uses must travel with it: the whole module goes, minus its `export`s.
  */
-const EXTRACT_SCRIPT = `(() => {\n${readFileSync(new URL('./extract.mjs', import.meta.url), 'utf8').replace(
-  /^export /gm,
-  '',
-)}\nreturn extractSnapshotNodes();\n})()`;
+const EXTRACT_MODULE = readFileSync(new URL('./extract.mjs', import.meta.url), 'utf8').replace(/^export /gm, '');
+
+const EXTRACT_SCRIPT = `(() => {\n${EXTRACT_MODULE}\nreturn extractSnapshotNodes();\n})()`;
+
+/** The same bundled module, ending in a read of one element's field, submit and form context. */
+function elementInfoScript(domPath) {
+  return `(() => {\n${EXTRACT_MODULE}\nreturn elementInfo(${JSON.stringify(domPath)});\n})()`;
+}
 
 /** A URL's scheme, host without a leading `www.`, and port, or undefined for one with no host (about:blank, data:). */
 function siteOf(url) {
@@ -374,6 +379,98 @@ export class BrowserSidecar {
     return { status: 'ok', png_base64: buffer.toString('base64') };
   }
 
+  /**
+   * The live element a ref names in the chat's tab, or the result that says why there is none: no
+   * tab, a page that moved to another site (see `#checkedPage`), an unknown ref, or one the page
+   * no longer has. Only `open` creates a tab, so an action on a chat with no page open is closed.
+   */
+  async #elementFor({ owner, tab: tabId, ref }) {
+    const tab = await this.#tabFor({ owner, tab: tabId, create: false });
+    if (tab === undefined) {
+      return { ok: false, result: NO_TAB };
+    }
+    const checked = this.#checkedPage(tab);
+    if (!checked.ok) {
+      return { ok: false, result: checked.result };
+    }
+    const path = tab.refs.resolve(ref);
+    if (path === undefined) {
+      return { ok: false, result: { status: 'refused', reason: 'unknown_ref' } };
+    }
+    const handle = await tab.page.evaluateHandle(elementAtPath, path);
+    const element = handle.asElement();
+    if (element === null) {
+      return { ok: false, result: { status: 'refused', reason: 'stale_ref' } };
+    }
+    return { ok: true, tab, path, element };
+  }
+
+  /** Field, submit and form context for a ref, without changing the page: the click gate's dry run. */
+  async clickInfo({ owner, tab: tabId, ref }) {
+    const found = await this.#elementFor({ owner, tab: tabId, ref });
+    if (!found.ok) {
+      return found.result;
+    }
+    const info = await found.tab.page.evaluate(elementInfoScript(found.path));
+    if (info === null) {
+      return { status: 'refused', reason: 'stale_ref' };
+    }
+    return {
+      status: 'ok',
+      site: new URL(found.tab.page.url()).hostname,
+      accessible_name: info.accessible_name,
+      is_form_submit: info.is_form_submit,
+      form_values: info.form_values,
+    };
+  }
+
+  /** Performs a click already approved (or found Tier 1), then reads the page it lands on. */
+  async click({ owner, tab: tabId, ref }) {
+    const found = await this.#elementFor({ owner, tab: tabId, ref });
+    if (!found.ok) {
+      return found.result;
+    }
+    found.tab.refs.reset();
+    await found.element.click({ timeout: this.#navTimeoutMs });
+    return this.#read(found.tab);
+  }
+
+  /** Types into a field; refuses a password, card or one-time-code field instead of typing into it. */
+  async type({ owner, tab: tabId, ref, text }) {
+    const found = await this.#elementFor({ owner, tab: tabId, ref });
+    if (!found.ok) {
+      return found.result;
+    }
+    const info = await found.tab.page.evaluate(elementInfoScript(found.path));
+    if (info === null) {
+      return { status: 'refused', reason: 'stale_ref' };
+    }
+    const sensitive = sensitivityOf({ field_kind: info.field_kind });
+    if (sensitive !== null) {
+      return { status: 'refused', reason: 'sensitive_field' };
+    }
+    await found.element.fill(text, { timeout: this.#navTimeoutMs });
+    return this.#read(found.tab);
+  }
+
+  /** Picks an option on a `<select>`, by its value, falling back to its visible label. */
+  async select({ owner, tab: tabId, ref, option }) {
+    const found = await this.#elementFor({ owner, tab: tabId, ref });
+    if (!found.ok) {
+      return found.result;
+    }
+    try {
+      await found.element.selectOption(option, { timeout: this.#navTimeoutMs });
+    } catch {
+      try {
+        await found.element.selectOption({ label: option }, { timeout: this.#navTimeoutMs });
+      } catch {
+        return { status: 'refused', reason: 'no_such_option' };
+      }
+    }
+    return this.#read(found.tab);
+  }
+
   async close() {
     for (const starting of this.#profiles.values()) {
       const profile = await starting.catch(() => undefined);
@@ -447,6 +544,10 @@ const ROUTES = {
   'POST /scroll': (sidecar, where, body) => sidecar.scroll({ ...where, direction: body.direction }),
   'POST /back': (sidecar, where) => sidecar.back(where),
   'POST /screenshot': (sidecar, where) => sidecar.screenshot(where),
+  'POST /click-info': (sidecar, where, body) => sidecar.clickInfo({ ...where, ref: body.ref }),
+  'POST /click': (sidecar, where, body) => sidecar.click({ ...where, ref: body.ref }),
+  'POST /type': (sidecar, where, body) => sidecar.type({ ...where, ref: body.ref, text: body.text }),
+  'POST /select': (sidecar, where, body) => sidecar.select({ ...where, ref: body.ref, option: body.option }),
 };
 
 const MAX_ID_LENGTH = 256;
