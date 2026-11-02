@@ -68,6 +68,7 @@ import { SqliteTurnArtifactStore } from '../../src/db/sqlite/turn-artifact-store
 import { ActiveTurnRegistry } from '../../src/runtime/activeTurns';
 import { createChatImageService } from '../../src/runtime/chatImages/chatImageService';
 import { createImageReencoder } from '../../src/runtime/chatImages/reencodeInSandbox';
+import { ChatSearchIndexer } from '../../src/runtime/chatSearchIndexing';
 import { EventSubscriptionRegistry } from '../../src/runtime/event-subscription';
 import { createOutboundSecretSource } from '../../src/runtime/outboundSecrets';
 import { createSentinelServices } from '../../src/runtime/sentinelServices';
@@ -260,7 +261,16 @@ async function startSqlite(): Promise<OwnershipServer> {
     modelProviders: modelProviderStore,
     mcpServers: new SqliteMcpServerStore(db),
   });
+  const personaStore = new SqlitePersonaStore(db);
+  const globalSettingsStore = new SqliteGlobalSettingsStore(db);
   const app = createServerApp({
+    chatSearchIndexer: new ChatSearchIndexer({
+      sessionStore,
+      globalSettingsStore,
+      sentinelSettingsStore,
+      personaStore,
+      logger: createLogger({ silent: true }),
+    }),
     ...sharedDeps(),
     withTransaction: callback => db.transaction().execute(callback),
     outboundSecrets,
@@ -272,7 +282,7 @@ async function startSqlite(): Promise<OwnershipServer> {
     sandboxProviderStore,
     agentStore,
     personalizationStore: new SqlitePersonalizationStore(db),
-    personaStore: new SqlitePersonaStore(db),
+    personaStore,
     modelProviderStore,
     spaceStore: new SqliteSpaceStore(db),
     repositoryStore: new SqliteRepositoryStore(db),
@@ -287,7 +297,7 @@ async function startSqlite(): Promise<OwnershipServer> {
       sentinel: sentinelServices,
       fetchDeps: { fetchImpl: undefined, resolveAddresses: undefined },
     }),
-    globalSettingsStore: new SqliteGlobalSettingsStore(db),
+    globalSettingsStore,
     sessionStore,
     sentinelAuditStore,
     sentinelSettingsStore,
@@ -356,7 +366,16 @@ async function startPostgres(): Promise<OwnershipServer | undefined> {
     modelProviders: modelProviderStore,
     mcpServers: new PostgresMcpServerStore(db),
   });
+  const personaStore = new PostgresPersonaStore(db);
+  const globalSettingsStore = new PostgresGlobalSettingsStore(db);
   const app = createServerApp({
+    chatSearchIndexer: new ChatSearchIndexer({
+      sessionStore,
+      globalSettingsStore,
+      sentinelSettingsStore,
+      personaStore,
+      logger: createLogger({ silent: true }),
+    }),
     ...sharedDeps(),
     withTransaction: callback => db.transaction().execute(callback),
     outboundSecrets,
@@ -368,7 +387,7 @@ async function startPostgres(): Promise<OwnershipServer | undefined> {
     sandboxProviderStore,
     agentStore,
     personalizationStore: new PostgresPersonalizationStore(db),
-    personaStore: new PostgresPersonaStore(db),
+    personaStore,
     modelProviderStore,
     spaceStore: new PostgresSpaceStore(db),
     repositoryStore: new PostgresRepositoryStore(db),
@@ -383,7 +402,7 @@ async function startPostgres(): Promise<OwnershipServer | undefined> {
       sentinel: sentinelServices,
       fetchDeps: { fetchImpl: undefined, resolveAddresses: undefined },
     }),
-    globalSettingsStore: new PostgresGlobalSettingsStore(db),
+    globalSettingsStore,
     sessionStore,
     sentinelAuditStore,
     sentinelSettingsStore,

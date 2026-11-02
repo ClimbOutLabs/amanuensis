@@ -59,6 +59,7 @@ import { SqliteTurnArtifactStore } from '../../src/db/sqlite/turn-artifact-store
 import { ActiveTurnRegistry } from '../../src/runtime/activeTurns';
 import { createChatImageService } from '../../src/runtime/chatImages/chatImageService';
 import { createImageReencoder } from '../../src/runtime/chatImages/reencodeInSandbox';
+import { ChatSearchIndexer } from '../../src/runtime/chatSearchIndexing';
 import { EventSubscriptionRegistry } from '../../src/runtime/event-subscription';
 import { createOutboundSecretSource } from '../../src/runtime/outboundSecrets';
 import { createSentinelServices } from '../../src/runtime/sentinelServices';
@@ -99,8 +100,9 @@ function buildApp(input: {
   db: SqliteDb;
   sandboxProvider: SandboxProvider | undefined;
   authenticator: Authenticator;
+  turnDrains: TurnDrainRegistry;
 }): ReturnType<typeof createServerApp> {
-  const { db, sandboxProvider, authenticator } = input;
+  const { db, sandboxProvider, authenticator, turnDrains } = input;
   const sessionStore = new SqliteSessionStore(db);
   const tokenStore = new SqliteOAuthTokenStore(db);
   const agentStore = new SqliteAgentStore(db);
@@ -137,7 +139,15 @@ function buildApp(input: {
     toolGrants: mcpToolGrantStore,
     outboundSecrets,
   });
+  const personaStore = new SqlitePersonaStore(db);
   return createServerApp({
+    chatSearchIndexer: new ChatSearchIndexer({
+      sessionStore,
+      globalSettingsStore,
+      sentinelSettingsStore,
+      personaStore,
+      logger: createLogger({ silent: true }),
+    }),
     modelCatalog: ModelCatalog.load(),
     mcpCatalog: McpCatalog.loadShipped(),
     skillCatalog: SkillCatalog.load(),
@@ -151,7 +161,7 @@ function buildApp(input: {
     sandboxProviderResolver: sandboxProvider === undefined ? undefined : () => Promise.resolve(sandboxProvider),
     agentStore,
     personalizationStore: new SqlitePersonalizationStore(db),
-    personaStore: new SqlitePersonaStore(db),
+    personaStore,
     modelProviderStore,
     spaceStore: new SqliteSpaceStore(db),
     repositoryStore: new SqliteRepositoryStore(db),
@@ -175,7 +185,7 @@ function buildApp(input: {
     ...deliveryDeps(db),
     sessions: new Sessions({ sessionStore, sentinelServices }),
     activeTurns: new ActiveTurnRegistry(),
-    turnDrains: new TurnDrainRegistry(),
+    turnDrains,
     requestReplyRouter: new RequestReplyRouter(),
     eventSubscriptions: new EventSubscriptionRegistry<TurnStreamingEvent>(undefined),
     logger: createLogger({ silent: true }),
@@ -287,7 +297,9 @@ export async function startApprovalTestServer(options?: {
   const originalFirstPartyOrigins = configuration.FIRST_PARTY_MCP_ORIGINS;
   configuration.FIRST_PARTY_MCP_ORIGINS = options?.memoryProvider === true ? [mcp.origin] : [];
 
-  let app = buildApp({ db, sandboxProvider: options?.sandboxProvider, authenticator });
+  // One registry for the server's life, so close() can wait for turn drains the way main.ts does.
+  const turnDrains = new TurnDrainRegistry();
+  let app = buildApp({ db, sandboxProvider: options?.sandboxProvider, authenticator, turnDrains });
   if (options?.memoryProvider === true) {
     await registerMemoryProvider({ app, mcp });
   }
@@ -298,9 +310,10 @@ export async function startApprovalTestServer(options?: {
     request: async (path, init) => await app.request(path, init),
     restart: async () => {
       await app.guidesSettled();
+      // A restart stands in for the process going away, so running replies are cut off, not drained.
       await db.destroy();
       db = createSqliteDb(databaseFile);
-      app = buildApp({ db, sandboxProvider: options?.sandboxProvider, authenticator });
+      app = buildApp({ db, sandboxProvider: options?.sandboxProvider, authenticator, turnDrains });
     },
     mcp,
     model,
@@ -314,6 +327,9 @@ export async function startApprovalTestServer(options?: {
       configuration.FIRST_PARTY_MCP_ORIGINS = originalFirstPartyOrigins;
       // The guide installs write into the temp directory removed below, so they finish first.
       await app.guidesSettled();
+      // Like main.ts shutdown: a finished turn's drain still writes events and memory (a scheduled
+      // run saves to the vault), so it settles before the database and the caller's directories go.
+      await turnDrains.shutdownAndWait({ timeoutMs: configuration.TURN_DRAIN_SHUTDOWN_TIMEOUT_MS });
       await db.destroy();
       await model.close();
       await mcp.close();

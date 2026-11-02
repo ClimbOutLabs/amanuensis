@@ -92,7 +92,9 @@ async function setup() {
     logger: winston.createLogger({ silent: true }),
   });
   const deliver = (item: ScheduleDispatchItem, now: Date) =>
-    deliverReminder({ item, sessions, sessionStore, agentStore, now, deliveries });
+    deliverReminder({ item, sessions, sessionStore, agentStore, now, deliveries }).then(
+      delivered => delivered.session_id,
+    );
 
   return { sessionStore, dueReminder, deliver, auditRecords, deliveryStore, pushed };
 }

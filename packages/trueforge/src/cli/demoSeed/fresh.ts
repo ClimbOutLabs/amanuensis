@@ -111,6 +111,9 @@ async function removeSpaces<TTransaction>({
   for (;;) {
     const spaces = await stores.spaceStore.listSpaces({ ...owner, status: undefined, limit: SPACE_LIST_LIMIT });
     if (spaces.length === 0) {
+      for (const folder of await stores.spaceStore.listSpaceFolders(owner)) {
+        await stores.spaceStore.deleteSpaceFolder({ ...owner, folder_id: folder.id });
+      }
       return removed;
     }
     for (const space of spaces) {

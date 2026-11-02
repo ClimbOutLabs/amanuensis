@@ -344,6 +344,134 @@ describe('ToolMarkupGuard indented code blocks', () => {
 });
 
 describe('ToolMarkupGuard stray closing tags', () => {
+  it('hides a closing tag with the next sentence glued straight to it', () => {
+    const guard = new ToolMarkupGuard();
+    const shown = guard.push('Prior to that </tool_calls>Your errands are now on the calendar.');
+    expect(shown + guard.heldText).toBe('Prior to that Your errands are now on the calendar.');
+    expect(guard.finish()).toBe('clean');
+  });
+
+  it('hides a glued closing tag when the word after it arrives in the next piece', () => {
+    const guard = new ToolMarkupGuard();
+    let shown = '';
+    for (const piece of ['Done. </tool_', 'calls>', 'Your errands are set.']) {
+      shown += guard.push(piece);
+    }
+    expect(shown + guard.heldText).toBe('Done. Your errands are set.');
+    expect(guard.finish()).toBe('clean');
+  });
+
+  it.each(['**Done**', '(done)', '😀 done', '“Done”'])('hides a closing tag with %s glued to it', after => {
+    const guard = new ToolMarkupGuard();
+    const shown = guard.push(`Okay </tool_calls>${after} and set.`);
+    expect(shown + guard.heldText).toBe(`Okay ${after} and set.`);
+    expect(guard.finish()).toBe('clean');
+  });
+
+  it('keeps a closing tag that a sentence names before closing punctuation', () => {
+    const guard = new ToolMarkupGuard();
+    const shown = guard.push('A call ends with </invoke>. Then the reply goes on.');
+    expect(shown + guard.heldText).toBe('A call ends with </invoke>. Then the reply goes on.');
+    expect(guard.finish()).toBe('clean');
+  });
+
+  it.each(['"Your errands" are set.', "'Your errands' are set.", '`x` set.'])(
+    'hides a closing tag with %s glued to it',
+    after => {
+      const guard = new ToolMarkupGuard();
+      const shown = guard.push(`Okay </tool_calls>${after}`);
+      expect(shown + guard.heldText).toBe(`Okay ${after}`);
+      expect(guard.finish()).toBe('clean');
+    },
+  );
+
+  it('leaves a space where a tag glued on both sides was hidden', () => {
+    const guard = new ToolMarkupGuard();
+    const shown = guard.push('Done.</tool_calls>Your errands are set.');
+    expect(shown + guard.heldText).toBe('Done. Your errands are set.');
+    expect(guard.finish()).toBe('clean');
+  });
+
+  it('keeps a closing tag a sentence names, with spaces around it', () => {
+    const guard = new ToolMarkupGuard();
+    const text = 'close it with </parameter> and save the file.';
+    expect(guard.push(text) + guard.heldText).toBe(text);
+    expect(guard.finish()).toBe('clean');
+  });
+
+  it('keeps a closing tag whose opening tag was kept as prose', () => {
+    const guard = new ToolMarkupGuard();
+    const text = 'Set <parameter name="timeout">30</parameter> in the config.';
+    expect(guard.push(text) + guard.heldText).toBe(text);
+    expect(guard.finish()).toBe('clean');
+  });
+
+  it.each([
+    ['Done.</tool_calls>Your errands are set.', 'Done. Your errands are set.'],
+    ['Okay </tool_calls>"Your errands" are set.', 'Okay "Your errands" are set.'],
+    [
+      'Set <parameter name="timeout">30</parameter> in the config.',
+      'Set <parameter name="timeout">30</parameter> in the config.',
+    ],
+    ['close it with </parameter> and save the file.', 'close it with </parameter> and save the file.'],
+    ['The "</invoke>" tag ends a call.', 'The "</invoke>" tag ends a call.'],
+    ['The tag **</invoke>** closes the call.', 'The tag **</invoke>** closes the call.'],
+    ['Okay </tool_calls>**Done** and set.', 'Okay **Done** and set.'],
+  ])('judges %j the same when it arrives one character at a time', (text, shown) => {
+    const guard = new ToolMarkupGuard();
+    let out = '';
+    for (const char of text) {
+      out += guard.push(char);
+    }
+    expect(guard.finish()).toBe('clean');
+    expect(out + guard.heldText).toBe(shown);
+  });
+
+  it.each([
+    'The tag **</invoke>** closes the call.',
+    'The tag _</invoke>_ closes the call.',
+    'Cut ~~</invoke>~~ here.',
+  ])('keeps a closing tag inside emphasis: %s', text => {
+    const guard = new ToolMarkupGuard();
+    expect(guard.push(text) + guard.heldText).toBe(text);
+    expect(guard.finish()).toBe('clean');
+  });
+
+  it('keeps a closing tag that ends a sentence line without punctuation', () => {
+    const guard = new ToolMarkupGuard();
+    const text = '- close each value with </parameter>\n- then save.';
+    expect(guard.push(text) + guard.heldText).toBe(text);
+    expect(guard.finish()).toBe('clean');
+  });
+
+  it('pairs a prose opening tag with one closing tag only', () => {
+    const guard = new ToolMarkupGuard();
+    const shown = guard.push('You call it as <invoke name="x"> in the docs.\nAll booked.\n</invoke>\nDone.');
+    expect(shown + guard.heldText).toBe('You call it as <invoke name="x"> in the docs.\nAll booked.\nDone.');
+    expect(guard.finish()).toBe('clean');
+  });
+
+  it('hides a run with text glued after it even when a prose opening tag of that name is open', () => {
+    const guard = new ToolMarkupGuard();
+    const shown = guard.push('Use <parameter name="a"> like this. Done.</parameter></invoke>Your trip is booked.');
+    expect(shown + guard.heldText).toBe('Use <parameter name="a"> like this. Done. Your trip is booked.');
+    expect(guard.finish()).toBe('clean');
+  });
+
+  it('keeps a quoted closing tag a sentence names', () => {
+    const guard = new ToolMarkupGuard();
+    const text = 'The "</invoke>" tag ends a call.';
+    expect(guard.push(text) + guard.heldText).toBe(text);
+    expect(guard.finish()).toBe('clean');
+  });
+
+  it('keeps a closing tag that a sentence names in code', () => {
+    const guard = new ToolMarkupGuard();
+    const shown = guard.push('The block ends with `</tool_calls>` and nothing else.');
+    expect(shown + guard.heldText).toBe('The block ends with `</tool_calls>` and nothing else.');
+    expect(guard.finish()).toBe('clean');
+  });
+
   it('hides a stray closing tool-call line and keeps the answer around it', () => {
     const guard = new ToolMarkupGuard();
     const shown = guard.push('Let me look.\n</tool_call>\nThe space is ready.');

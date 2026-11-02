@@ -9,8 +9,8 @@ import { currentPushSubscription, enablePush, pushSupport } from '../deliveries/
 type Offer = 'checking' | 'offer' | 'none';
 
 /**
- * Shown under a reminder that was just set, when this device could take notices but has not turned them on.
- * "Not now" hides it until the next reminder. Settings, Reach me, turns them on or off at any time.
+ * Shown under the latest reply that set a reminder, when this device could take notices but has not turned
+ * them on. "Not now" hides it until the next reminder. Settings, Reach me, turns them on or off at any time.
  */
 export function ReminderNotificationPrompt() {
   const deliveries = useOptionalDeliveries();

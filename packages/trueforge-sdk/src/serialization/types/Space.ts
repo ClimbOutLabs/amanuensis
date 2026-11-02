@@ -10,6 +10,7 @@ export const Space: core.serialization.ObjectSchema<serializers.Space.Raw, TrueF
     {
         body: core.serialization.string(),
         createdAt: core.serialization.property("created_at", core.serialization.date()),
+        folderId: core.serialization.property("folder_id", core.serialization.string().nullable()),
         format: SpaceFormat.optional(),
         id: core.serialization.string(),
         name: core.serialization.string(),
@@ -24,6 +25,7 @@ export declare namespace Space {
     export interface Raw {
         body: string;
         created_at: string;
+        folder_id?: string | null;
         format?: SpaceFormat.Raw | null;
         id: string;
         name: string;

@@ -129,6 +129,46 @@ async function createPersona(deps: DataExportDeps<never>, input: { id: string; n
   });
 }
 
+describe('runDataExport space folders', () => {
+  it('writes each space folder placement from the same read as the folder list', async () => {
+    const { deps, close } = await makeDeps({ kind: 'markdown', markdownDir: join(tmpdir(), 'unused-memory') });
+    try {
+      const owner = { tenant_id: TENANT_ID, created_by: 'alice' };
+      await deps.spaceStore.createSpaceFolder({ ...owner, id: 'folder-1', name: 'Homes' });
+      const read = deps.spaceStore;
+      const refuseSeparateReads = (): never => {
+        throw new Error('Folders and placements must come from one snapshot.');
+      };
+      const spaceStore: DataExportDeps<never>['spaceStore'] = {
+        getAggregate: input => read.getAggregate(input),
+        listSpaces: input => read.listSpaces(input),
+        listSpacesWithAggregate: input => read.listSpacesWithAggregate(input),
+        getSpace: input => read.getSpace(input),
+        getSpaceRevision: input => read.getSpaceRevision(input),
+        createSpace: input => read.createSpace(input),
+        updateSpace: input => read.updateSpace(input),
+        revertSpace: input => read.revertSpace(input),
+        deleteSpace: input => read.deleteSpace(input),
+        createSpaceFolder: input => read.createSpaceFolder(input),
+        updateSpaceFolder: input => read.updateSpaceFolder(input),
+        deleteSpaceFolder: input => read.deleteSpaceFolder(input),
+        setSpaceFolder: input => read.setSpaceFolder(input),
+        listSpaceFolders: refuseSeparateReads,
+        listSpaceFolderAssignments: refuseSeparateReads,
+        readSpaceFolderSnapshot: input => read.readSpaceFolderSnapshot(input),
+      };
+      const sink = new CollectingWritable();
+      await runDataExport({ ...deps, spaceStore }, exportRequest(), sink);
+      const entries = readZipEntries(sink.buffer());
+
+      const folders: unknown = JSON.parse(zipEntryText(entries, 'space_folders.json'));
+      expect(folders).toEqual([expect.objectContaining({ folder_id: 'folder-1', name: 'Homes' })]);
+    } finally {
+      await close();
+    }
+  });
+});
+
 describe('runDataExport memory backends', () => {
   it('renders a client (hindsight) backend into Markdown files in the vault layout', async () => {
     const { client } = listing({

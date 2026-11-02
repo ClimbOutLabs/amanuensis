@@ -18,6 +18,14 @@ export const SentinelUserSettingsSchema = z
       .describe(
         'While on, code, commands and workspace files in the sandbox run without asking. Off asks for each one.',
       ),
+    chat_search_enabled: z
+      .boolean()
+      .describe('While on, the assistant can search your own past chats when you ask. Off means it cannot.'),
+    package_downloads_without_project_allowed: z
+      .boolean()
+      .describe(
+        'While on, the sandbox may download packages in your chats that are not working on a project, through the download-only mirrors. The allowance also covers scheduled runs. Off, the first download in such a chat asks.',
+      ),
   })
   .openapi('SentinelUserSettings');
 
@@ -30,6 +38,14 @@ export const UpdateSentinelUserSettingsRequestSchema = z
     search_without_asking: z.boolean().optional().describe('New search setting; omitted keeps the current value.'),
     maps_without_asking: z.boolean().optional().describe('New maps setting; omitted keeps the current value.'),
     sandbox_without_asking: z.boolean().optional().describe('New sandbox setting; omitted keeps the current value.'),
+    chat_search_enabled: z
+      .boolean()
+      .optional()
+      .describe('New past-chat search setting; omitted keeps the current value.'),
+    package_downloads_without_project_allowed: z
+      .boolean()
+      .optional()
+      .describe('New package download setting for chats without a project; omitted keeps the current value.'),
   })
   .openapi('UpdateSentinelUserSettingsRequest');
 

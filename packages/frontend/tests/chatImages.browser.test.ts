@@ -122,12 +122,6 @@ test('chat images: no remote image request ever leaves the page', { timeout: 180
     // Same resolution as the app: workspace packages load from source, one React instance.
     resolve: {
       conditions: ['trueforge-dev', ...defaultClientConditions],
-      alias: [
-        {
-          find: /^truefoundry-gateway-sdk(\/.*)?$/,
-          replacement: fileURLToPath(new URL('../src/gatewaySdkStub.ts', import.meta.url)),
-        },
-      ],
       dedupe: ['react', 'react-dom', '@assistant-ui/core', '@assistant-ui/store', '@assistant-ui/react'],
     },
     plugins: [chatImageRoute(gradientPng())],

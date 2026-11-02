@@ -18,6 +18,19 @@ import { INERT_SERVER_NAME } from '../../fixtures/inertMcpServer';
  * set the next check never answers and ignores every abort, like a stuck read.
  */
 let offlineCheckHang: Promise<unknown> | undefined;
+
+/**
+ * A step that never answers while the test runs. The test releases every one before the server
+ * closes, so the wedged turn's drain can finish and close() does not wait out its shutdown limit.
+ */
+const wedgedSteps: (() => void)[] = [];
+function wedge(): Promise<undefined> {
+  const step = Promise.withResolvers<undefined>();
+  wedgedSteps.push(() => {
+    step.resolve(undefined);
+  });
+  return step.promise;
+}
 jest.mock('../../../src/runtime/sentinelSettingsServices', () => {
   const actual = jest.requireActual<typeof sentinelSettings>('../../../src/runtime/sentinelSettingsServices');
   return {
@@ -131,7 +144,7 @@ async function reloadTurns(server: ApprovalTestServer, sessionId: string): Promi
 
 /** Sends a message whose run hangs before the model, and waits until its turn exists. */
 async function sendStuckReply(server: ApprovalTestServer, sessionId: string): Promise<void> {
-  offlineCheckHang = new Promise(() => undefined);
+  offlineCheckHang = wedge();
   void server.request(
     `/api/v1/sessions/${sessionId}/turns`,
     jsonInit({ input: message('Hello there.'), stream: false }),
@@ -173,6 +186,9 @@ describe('a reply that never reaches the model', () => {
     admissionGate = undefined;
     configuration.TURN_START_TIMEOUT_MS = original.startTimeoutMs;
     configuration.SERVER_EXECUTION_TIMEOUT_SECONDS = original.executionTimeoutSeconds;
+    for (const release of wedgedSteps.splice(0)) {
+      release();
+    }
     await server.close();
   });
 
@@ -214,7 +230,7 @@ describe('a reply that never reaches the model', () => {
     configuration.TURN_START_TIMEOUT_MS = 1_000;
     const sessionId = await createSession(server);
     // A setup step before the turn exists that never answers and ignores the abort.
-    admissionGate = new Promise(() => undefined);
+    admissionGate = wedge();
     const sentAt = Date.now();
     const response = await server.request(
       `/api/v1/sessions/${sessionId}/turns`,

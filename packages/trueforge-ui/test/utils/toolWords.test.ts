@@ -6,6 +6,8 @@ describe('toolWords', () => {
   it('reads a known tool in plain words while it runs and once it is done', () => {
     expect(toolDoingWords('edit_space')).toBe('Updating the space');
     expect(toolDoneWords('edit_space')).toBe('Changed a space');
+    expect(toolDoingWords('move_space')).toBe('Moving a space to a folder');
+    expect(toolDoneWords('move_space')).toBe('Moved a space to a folder');
     // update_space is retired: it has no wording of its own any more.
     expect(toolDoingWords('update_space')).toBeUndefined();
     expect(toolDoneWords('update_space')).toBe(TOOL_DONE_FALLBACK);

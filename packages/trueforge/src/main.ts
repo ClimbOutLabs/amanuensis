@@ -113,6 +113,7 @@ import { registerCalendarConnectorForBoot } from './runtime/calendarAccount';
 import { createChatImageService } from './runtime/chatImages/chatImageService';
 import { CHAT_IMAGE_RETENTION_DAYS } from './runtime/chatImages/limits';
 import { createImageReencoder } from './runtime/chatImages/reencodeInSandbox';
+import { ChatSearchIndexer } from './runtime/chatSearchIndexing';
 import { recoverAbandonedCommandExecutions } from './runtime/commandExecutionRecovery';
 import { designateTavilyAtBoot, seedDefaultSearchProviderAtBoot } from './runtime/defaultSearchProvider';
 import { createDeliveryService } from './runtime/delivery/deliveryService';
@@ -128,6 +129,7 @@ import { getSharedRunCodeService } from './runtime/sessionResources';
 import { createTokenFactoryBudget } from './runtime/tokenFactoryBudget';
 import { ensureEnvManagedTokenFactoryProvider, seedEnvManagedDefaultChatModel } from './runtime/tokenFactoryProvider';
 import { TurnDrainRegistry } from './runtime/turnDrains';
+import { createPackageMirrorAllowanceCheck } from './sandbox/mirrors/packageMirrorAllowance';
 import { slotsBackendEnabled, startPackageMirrorGateway, startSkillNetworkGateway } from './sandbox/slotBackend';
 import { printStandaloneStartupBanner } from './startupBanner';
 import { TENANT_ID } from './tenancy';
@@ -850,7 +852,22 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
   const resolveAgentStore = (c: Context) => persistence.resolveAgentStore(resolveRequestContext(c));
   const resolveSandboxProviderStore = (c: Context) => persistence.resolveSandboxProviderStore(resolveRequestContext(c));
   const resolveSkillStore = (c: Context) => persistence.resolveSkillStore(resolveRequestContext(c));
+  // Mirror grants are checked against the shared database, so turning downloads off or deleting a
+  // chat through any server ends them here too.
+  const packageMirrorAllowanceHolds = createPackageMirrorAllowanceCheck({
+    sessionStore,
+    repositoryStore,
+    sentinelSettingsStore,
+  });
+  const chatSearchIndexer = new ChatSearchIndexer({
+    sessionStore,
+    globalSettingsStore,
+    sentinelSettingsStore,
+    personaStore,
+    logger,
+  });
   const app = createServerApp({
+    chatSearchIndexer,
     modelCatalog,
     mcpCatalog,
     skillCatalog: SkillCatalog.load(),
@@ -920,6 +937,8 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     chatImageStore,
     turnDrains,
     sentinelAuditStore,
+    chatSearchIndexer,
+    packageMirrorAllowanceHolds,
   };
 }
 
@@ -998,6 +1017,8 @@ try {
     chatImageStore,
     turnDrains,
     sentinelAuditStore,
+    chatSearchIndexer,
+    packageMirrorAllowanceHolds,
   } = configuration.STANDALONE
     ? await createServerRuntime(
         await createStandalonePersistence({ sqlitePath: configuration.SQLITE_PATH, logger }),
@@ -1040,6 +1061,9 @@ try {
     void sweepExpiredTurnArtifacts();
   }, 86_400_000);
   artifactRetentionTimer.unref();
+
+  // Finish past-chat search passes a stop, an import or a failed write left pending.
+  void chatSearchIndexer.resumePending();
 
   // Abandoned Google consents hold a client secret; consent reads already purge, this covers an idle install.
   const googlePendingPurgeTimer = setInterval(() => {
@@ -1189,7 +1213,7 @@ try {
 
   // The download-only package mirrors for the sandbox slots. Best effort: when they cannot
   // start, sandbox package downloads stay off and everything else keeps working.
-  await startPackageMirrorGateway({ logger });
+  await startPackageMirrorGateway({ logger, allowanceHolds: packageMirrorAllowanceHolds });
 
   // The skill network gateway for the sandbox slots. Best effort: when it cannot start,
   // approved skill sites stay unreachable and everything else keeps working.

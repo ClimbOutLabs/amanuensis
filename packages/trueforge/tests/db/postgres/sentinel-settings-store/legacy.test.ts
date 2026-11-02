@@ -41,6 +41,8 @@ describePg('PostgresSentinelSettingsStore with a legacy stored row', () => {
       search_without_asking: true,
       maps_without_asking: false,
       sandbox_without_asking: true,
+      chat_search_enabled: false,
+      package_downloads_without_project_allowed: false,
     });
   });
 

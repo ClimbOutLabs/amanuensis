@@ -19,7 +19,6 @@ import { changeRequestReason, changeRequestText } from '@truefoundry/trueforge-c
 import { isMapsToolName } from '@truefoundry/trueforge-core/core/permissions/mapsToolNames';
 import { isSearchHoldCardText } from '@truefoundry/trueforge-core/core/permissions/searchHoldText';
 import { CREATE_PERSONA_TOOL_NAME } from '@truefoundry/trueforge-core/core/personas/toolContract';
-import { SET_REMINDER_TOOL_NAME } from '@truefoundry/trueforge-core/core/schedules/toolContract';
 import { useCallback, useEffect, useState } from 'react';
 
 import { useIsMobile } from '../atoms/lib/useIsMobile.js';
@@ -30,7 +29,6 @@ import { RefusedPlaceList } from '../components/RefusedPlaceList.js';
 import { useActiveSessionCanManage } from '../hooks/useResourcePermissions.js';
 import { useHighlightedCard } from '../hooks/useRewardLedger.js';
 import { useWaitingToolCallIds } from '../hooks/useWaitingToolCallIds.js';
-import { ReminderNotificationPrompt } from '../reminders/ReminderNotificationPrompt.js';
 import { ALWAYS_ALLOW_TOOL_OPTION_ID, offersChangeIt, SAVE_DRAFT_OPTION_ID } from '../sentinel/approvalChoices.js';
 import { EmailApprovalCard } from '../sentinel/EmailApprovalCard.js';
 import { PermissionApprovalCard } from '../sentinel/PermissionApprovalCard.js';
@@ -482,8 +480,6 @@ function ToolCallPart(part: ToolCallMessagePartProps) {
   useEffect(() => {
     if (personaAdded) void reloadPersonas?.();
   }, [personaAdded, reloadPersonas]);
-  // A reminder set in this chat: offer notices on this device, so it can reach the person with the page closed.
-  const reminderSet = part.toolName === SET_REMINDER_TOOL_NAME && part.status?.type === 'complete';
   const isRequiresAction = part.status?.type === 'requires-action';
   const stateApproval = useAuiState(s => (s.part.type === 'tool-call' ? s.part.approval : undefined));
   const approval = stateApproval ?? part.approval;
@@ -742,11 +738,5 @@ function ToolCallPart(part: ToolCallMessagePartProps) {
       approvalId={showApproval ? approval?.id : undefined}
     />
   );
-  if (!reminderSet) return card;
-  return (
-    <>
-      {card}
-      <ReminderNotificationPrompt />
-    </>
-  );
+  return card;
 }

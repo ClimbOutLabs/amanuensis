@@ -386,6 +386,11 @@ describe('runDataImport', () => {
         revision: 2,
       });
       expect([revision1?.body, revision2?.body]).toEqual(['Draft one.', 'Draft two.']);
+      const spaceFolders = await target.stores.spaceStore.listSpaceFolders({ tenant_id: TENANT, created_by: 'bob' });
+      expect(spaceFolders.map(folder => [folder.id, folder.name])).toEqual([[SEED_IDS.spaceFolder, 'Moving']]);
+      expect(
+        await target.stores.spaceStore.listSpaceFolderAssignments({ tenant_id: TENANT, created_by: 'bob' }),
+      ).toEqual([{ space_id: SEED_IDS.space, folder_id: SEED_IDS.spaceFolder }]);
 
       expect(await target.stores.globalSettingsStore.getSetting({ key: IMPORT_IN_PROGRESS_KEY })).toBeUndefined();
 
@@ -1107,6 +1112,61 @@ describe('runDataImport reads schedules from before one-time schedules', () => {
   });
 });
 
+describe('runDataImport reads spaces from before spaces had folders', () => {
+  /** An export made before space folders: no space_folders.json, and no folder on any space entry. */
+  async function olderFormat(archive: Buffer): Promise<Buffer> {
+    return repack(archive, entries => {
+      entries.delete('space_folders.json');
+      const spaces = listAt(parseJson(entries.get('spaces.json') ?? Buffer.alloc(0), 'spaces.json'), 'spaces.json');
+      for (const item of spaces) {
+        Reflect.deleteProperty(recordAt(item, 'space entry'), 'folder_id');
+      }
+      entries.set('spaces.json', Buffer.from(JSON.stringify(spaces)));
+    });
+  }
+
+  it('imports the spaces with no folder', async () => {
+    const { source, archive } = await seededArchive();
+    const target = await makeInstance('target-older-space-folders');
+    try {
+      const older = await olderFormat(archive);
+      const names = readZipEntries(older).map(entry => entry.name);
+      expect(names).not.toContain('space_folders.json');
+
+      await runDataImport(importDeps(target), importRequest(older));
+
+      const owner = { tenant_id: TENANT, created_by: 'bob' };
+      expect(await target.stores.spaceStore.getSpace({ ...owner, space_id: SEED_IDS.space })).toBeDefined();
+      expect(await target.stores.spaceStore.listSpaceFolders(owner)).toEqual([]);
+      expect(await target.stores.spaceStore.listSpaceFolderAssignments(owner)).toEqual([]);
+    } finally {
+      await source.close();
+      await target.close();
+    }
+  });
+
+  it('refuses a space that points at a folder the export does not carry', async () => {
+    const { source, archive } = await seededArchive();
+    const target = await makeInstance('target-missing-space-folder');
+    try {
+      const broken = await repack(archive, entries => {
+        entries.set('space_folders.json', Buffer.from('[]'));
+      });
+
+      const error = await importError(target, broken);
+
+      expect(error).toBeInstanceOf(DataImportError);
+      expect(error).toMatchObject({ status: 400 });
+      expect(
+        await target.stores.spaceStore.getSpace({ tenant_id: TENANT, created_by: 'bob', space_id: SEED_IDS.space }),
+      ).toBeUndefined();
+    } finally {
+      await source.close();
+      await target.close();
+    }
+  });
+});
+
 describe('runDataImport reads chat schedules from before schedules could change their tools', () => {
   it("keeps a chat's schedule on its agent, with its connectors, skills and sandbox, when the export did not yet mark the host-made agent", async () => {
     const source = await makeInstance('source-chat-schedule');
@@ -1260,6 +1320,7 @@ describe('runDataImport refuses an instance that is not fresh', () => {
         'personas',
         'a personalization profile',
         'spaces',
+        'space folders',
         'schedules',
         'agents',
         'connectors',
@@ -4189,6 +4250,70 @@ describe('runDataImport when Aman internals have changed', () => {
 
       const result = await runDataImport(importDeps(target), importRequest(older));
       expect(result.summary).not.toContain('permission setting');
+    } finally {
+      await source.close();
+      await target.close();
+    }
+  });
+
+  it('reads permission settings from before the past-chat search switch as off, without noting them', async () => {
+    const { source, archive } = await seededArchive();
+    const target = await makeInstance('target-older-chat-search');
+    try {
+      const older = await repack(archive, entries => {
+        const settings = recordAt(parseJson(entries.get('settings.json'), 'settings.json'), 'settings');
+        delete recordAt(settings['permission_settings'], 'permission settings')['chat_search_enabled'];
+        entries.set('settings.json', Buffer.from(JSON.stringify(settings)));
+      });
+
+      const result = await runDataImport(importDeps(target), importRequest(older));
+      expect(result.summary).not.toContain('permission setting');
+    } finally {
+      await source.close();
+      await target.close();
+    }
+  });
+
+  it('reads permission settings from before the download allowance without noting them', async () => {
+    const { source, archive } = await seededArchive();
+    const target = await makeInstance('target-older-downloads');
+    try {
+      const older = await repack(archive, entries => {
+        const settings = recordAt(parseJson(entries.get('settings.json'), 'settings.json'), 'settings');
+        delete recordAt(settings['permission_settings'], 'permission settings')[
+          'package_downloads_without_project_allowed'
+        ];
+        entries.set('settings.json', Buffer.from(JSON.stringify(settings)));
+      });
+
+      const result = await runDataImport(importDeps(target), importRequest(older));
+      expect(result.summary).not.toContain('permission setting');
+      expect(
+        (await target.stores.sentinelSettingsStore.get({ tenant_id: TENANT, created_by: 'alice' }))
+          .package_downloads_without_project_allowed,
+      ).toBe(false);
+    } finally {
+      await source.close();
+      await target.close();
+    }
+  });
+
+  it('never turns the download allowance on, whatever the export file says', async () => {
+    const { source, archive } = await seededArchive();
+    const target = await makeInstance('target-downloads-off');
+    try {
+      // The seed exports the allowance as on; the import must still leave it off.
+      const entries = new Map(readZipEntries(archive).map(entry => [entry.name, entry.data]));
+      const settings = recordAt(parseJson(entries.get('settings.json'), 'settings.json'), 'settings');
+      expect(recordAt(settings['permission_settings'], 'permission settings')).toMatchObject({
+        package_downloads_without_project_allowed: true,
+      });
+
+      await runDataImport(importDeps(target), importRequest(archive));
+      expect(
+        (await target.stores.sentinelSettingsStore.get({ tenant_id: TENANT, created_by: 'alice' }))
+          .package_downloads_without_project_allowed,
+      ).toBe(false);
     } finally {
       await source.close();
       await target.close();

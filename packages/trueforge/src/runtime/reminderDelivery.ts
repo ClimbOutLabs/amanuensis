@@ -35,8 +35,9 @@ export class ReminderAgentNotFoundError extends Error {
 
 /**
  * Writes one due reminder into the owner's Reminders chat as a finished assistant line, then puts it in the
- * owner's feed, which also pushes it to their devices. The host writes it itself: no model is called, so it
- * lands at once and costs nothing. The chat is made on the first reminder and reused after. Returns the session id.
+ * owner's feed, which also pushes it to their devices and records it in the activity log. The host writes it
+ * itself: no model is called, so it lands at once and costs nothing. The chat is made on the first reminder
+ * and reused after. Returns the chat and the turn it wrote.
  */
 export async function deliverReminder(params: {
   item: ScheduleDispatchItem;
@@ -46,7 +47,7 @@ export async function deliverReminder(params: {
   now: Date;
   /** The feed the reminder is also delivered through; it writes the reason to Activity. */
   deliveries: Pick<DeliveryService, 'deliver'>;
-}): Promise<string> {
+}): Promise<{ session_id: string; turn_id: string }> {
   const { item, sessions, sessionStore, agentStore, now } = params;
   const { schedule, run } = item;
   const owner = schedule.created_by_subject;
@@ -168,5 +169,5 @@ export async function deliverReminder(params: {
     reason: `You asked to be reminded on ${formatRunTime({ at: new Date(run.scheduled_for), timezone: schedule.manifest.timezone })}.`,
     link: { type: 'chat', session_id: sessionId },
   });
-  return sessionId;
+  return { session_id: sessionId, turn_id: turnId };
 }

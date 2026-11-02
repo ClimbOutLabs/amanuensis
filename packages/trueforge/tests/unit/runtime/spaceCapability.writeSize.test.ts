@@ -45,6 +45,7 @@ import {
   type SpaceToolStore,
 } from '../../../src/runtime/spaceCapability';
 import { SPACE_WRITE_MAX_LENGTH } from '../../../src/schemas/space';
+import { noSpaceFolders } from './spaceFolderStoreFake';
 
 const NOOP_EXECUTION_TRACE: AgentExecutionTrace = {
   runInContext: operation => operation(),
@@ -72,6 +73,10 @@ const NOOP_TRACING: AgentTracing = {
 
 /** A small stateful store: just enough of the production fencing for the tool layer to run. */
 class InMemorySpaceStore implements SpaceToolStore {
+  listSpaceFolders = noSpaceFolders.listSpaceFolders;
+  createSpaceFolder = noSpaceFolders.createSpaceFolder;
+  setSpaceFolder = noSpaceFolders.setSpaceFolder;
+  listSpaceFolderAssignments = noSpaceFolders.listSpaceFolderAssignments;
   private spaces = new Map<string, SpaceRecord>();
   private history = new Map<string, SpaceRecord[]>();
   private aggregateRevision = 0;

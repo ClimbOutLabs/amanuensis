@@ -14,6 +14,7 @@ import type { TokenPagination } from '../schemas/pagination';
 import { emptyTaskChecklist, TaskChecklistSchema } from '../schemas/taskChecklist';
 import type { TerminalTurnState } from '../schemas/turn';
 import { assertCreateTurnThreadDelta } from './assertCreateTurnThreadDelta';
+import { buildChatSearchSnippet, chatSearchIndexWords, chatSearchQueryTerms } from './chatSearchText';
 import type {
   AddThreadsAndAppendEventsInput,
   AddThreadsInput,
@@ -24,6 +25,8 @@ import type {
   ApprovalDismissalRecord,
   BeginImplementationPlanDispatchInput,
   BeginImplementationPlanDispatchResult,
+  ChatSearchHit,
+  ClearChatSearchIndexInput,
   CommandExecutionRecord,
   CompleteImplementationPlanDispatchInput,
   CreateSessionFolderInput,
@@ -40,6 +43,7 @@ import type {
   GetTaskChecklistInput,
   GetTurnInput,
   ImplementationPlanTurnOwner,
+  IndexChatMessagesInput,
   ISessionStore,
   ListApprovalDismissalsInput,
   ListImplementationPlanGrantsInput,
@@ -61,6 +65,7 @@ import type {
   ReplaceTaskChecklistInput,
   RevokeImplementationPlanGrantInput,
   RevokeImplementationPlanGrantResult,
+  SearchChatHistoryInput,
   SetSessionFolderInput,
   StampImportedSessionInput,
   TurnContextAppend,
@@ -251,6 +256,11 @@ function paginate<T>(items: T[], limit: number, pageToken?: string): { data: T[]
   };
 }
 
+interface StoredChatSearchTurn {
+  persona_id: string | null;
+  messages: { message_id: string; text: string; created_at: Date; words: ReadonlySet<string> }[];
+}
+
 /**
  * Reference ISessionStore implementation. Proves the contract without SSE/subscription
  * hooks. Deep-copies on read/write boundaries so callers cannot mutate stored state.
@@ -267,6 +277,8 @@ export class InMemorySessionStore<
   private readonly implementationPlanGrants = new Map<string, Map<string, StoredImplementationPlanGrant>>();
   private readonly implementationPlanDispatches = new Map<string, StoredImplementationPlanDispatch>();
   private readonly approvalDismissals = new Map<string, Map<string, ApprovalDismissalRecord>>();
+  /** Per session, per turn: the turn's persona and its indexed messages with their searchable words. */
+  private readonly chatSearchDocuments = new Map<string, Map<string, StoredChatSearchTurn>>();
 
   async createSession(input: CreateSessionInput<TSessionCustom>): Promise<void> {
     const key = sessionKey(input.session_id);
@@ -350,12 +362,117 @@ export class InMemorySessionStore<
     }
     this.implementationPlanGrants.delete(sKey);
     this.approvalDismissals.delete(sKey);
+    this.chatSearchDocuments.delete(sKey);
     for (const [dispatchKey, dispatch] of this.implementationPlanDispatches) {
       if (dispatch.session_id === input.session_id) {
         this.implementationPlanDispatches.delete(dispatchKey);
       }
     }
     this.sessions.delete(sKey);
+  }
+
+  async indexChatMessages(input: IndexChatMessagesInput): Promise<void> {
+    const sKey = sessionKey(input.session_id);
+    const stored = this.sessions.get(sKey);
+    if (stored?.record.tenant_id !== input.tenant_id) {
+      return;
+    }
+    let byTurn = this.chatSearchDocuments.get(sKey);
+    if (byTurn === undefined) {
+      byTurn = new Map();
+      this.chatSearchDocuments.set(sKey, byTurn);
+    }
+    byTurn.set(input.turn_id, {
+      persona_id: input.persona_id,
+      messages: input.documents.map(document => ({
+        message_id: document.message_id,
+        text: document.text,
+        created_at: document.created_at,
+        words: new Set(chatSearchIndexWords(document.text)),
+      })),
+    });
+  }
+
+  async searchChatHistory(input: SearchChatHistoryInput): Promise<ChatSearchHit[]> {
+    const terms = chatSearchQueryTerms(input.query);
+    if (terms.length === 0 || input.limit <= 0) {
+      return [];
+    }
+    const personaIds = new Set(input.persona_ids);
+    const newestBySession = new Map<
+      string,
+      { session: SessionRecord<TSessionCustom>; text: string; matchedAt: Date; order: string }
+    >();
+    for (const [sKey, byTurn] of this.chatSearchDocuments) {
+      const stored = this.sessions.get(sKey);
+      if (stored === undefined) {
+        continue;
+      }
+      const { record } = stored;
+      if (
+        record.tenant_id !== input.tenant_id ||
+        record.created_by_subject.subject_id !== input.created_by_subject_id ||
+        (input.exclude_session_id !== null && record.session_id === input.exclude_session_id)
+      ) {
+        continue;
+      }
+      for (const [turnId, turn] of byTurn) {
+        if (turn.persona_id !== null && !personaIds.has(turn.persona_id)) {
+          continue;
+        }
+        for (const message of turn.messages) {
+          if (input.from !== null && message.created_at < input.from) {
+            continue;
+          }
+          if (input.to !== null && message.created_at >= input.to) {
+            continue;
+          }
+          if (!terms.every(term => message.words.has(term))) {
+            continue;
+          }
+          // Within a chat the newest message wins; equal times fall to the larger turn id, then message id.
+          const order = `${turnId}\0${message.message_id}`;
+          const current = newestBySession.get(record.session_id);
+          if (
+            current === undefined ||
+            message.created_at > current.matchedAt ||
+            (message.created_at.getTime() === current.matchedAt.getTime() && order > current.order)
+          ) {
+            newestBySession.set(record.session_id, {
+              session: record,
+              text: message.text,
+              matchedAt: message.created_at,
+              order,
+            });
+          }
+        }
+      }
+    }
+    return [...newestBySession.values()]
+      .sort(
+        (a, b) =>
+          b.matchedAt.getTime() - a.matchedAt.getTime() ||
+          (a.session.session_id < b.session.session_id ? -1 : a.session.session_id > b.session.session_id ? 1 : 0),
+      )
+      .slice(0, input.limit)
+      .map(entry => ({
+        session_id: entry.session.session_id,
+        title: entry.session.title,
+        created_at: entry.session.created_at,
+        snippet: buildChatSearchSnippet(entry.text, input.query),
+      }));
+  }
+
+  async clearChatSearchIndex(input: ClearChatSearchIndexInput): Promise<void> {
+    for (const sKey of [...this.chatSearchDocuments.keys()]) {
+      const record = this.sessions.get(sKey)?.record;
+      if (
+        record === undefined ||
+        (record.tenant_id === input.tenant_id && record.created_by_subject.subject_id === input.created_by_subject_id)
+      ) {
+        this.chatSearchDocuments.delete(sKey);
+      }
+    }
   }
 
   private implementationPlanOwnerMatches(input: ListImplementationPlanGrantsInput): boolean {

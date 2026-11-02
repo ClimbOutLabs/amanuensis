@@ -1,14 +1,23 @@
 // @vitest-environment jsdom
 import { ThreadPrimitive, type ThreadMessageLike } from '@assistant-ui/react';
-import { render, screen } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
+import { act, render, screen } from '@testing-library/react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { AssistantMessageContainer } from '@/containers/AssistantMessageContainer.js';
+import { DeliveriesProvider } from '@/deliveries/DeliveriesContext.js';
+import { fakeServer } from '../deliveries/fakeDeliveriesApi.js';
 import { AgentDetailsHarness, settleAgentDetails } from './agentDetailsHarness.js';
 import { RuntimeHarness } from './RuntimeHarness.js';
 
 // The orb draws on a 2d canvas context, which jsdom does not implement; stub it like the
 // AssistantMessageContainer suite does.
+// This device could take notices but has not turned them on, so the offer is due.
+vi.mock('@/deliveries/pushDevice.js', () => ({
+  pushSupport: () => ({ blocker: null, permission: 'default' }),
+  currentPushSubscription: () => Promise.resolve(null),
+  enablePush: () => Promise.resolve(),
+}));
+
 vi.mock('thinking-orbs', () => ({
   ThinkingOrb: ({ state }: { state: string }) => <div data-testid="thinking-orb" data-state={state} />,
 }));
@@ -150,5 +159,117 @@ describe('AssistantMessageContainer outcome lines', () => {
     await settleAgentDetails();
     expect(screen.queryByTestId('assistant-message-agent-internals')).not.toBeInTheDocument();
     expect(screen.getByTestId('assistant-message-outcome')).toHaveTextContent(REMINDER_LINE);
+  });
+});
+
+describe('AssistantMessageContainer browser notices offer', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    window.localStorage.clear();
+  });
+
+  /** The offer is decided after this device's push state is read. */
+  async function settleOffer() {
+    await act(async () => {
+      await new Promise(resolve => setTimeout(resolve, 0));
+    });
+  }
+
+  const fourReminders: ThreadMessageLike = {
+    role: 'assistant',
+    content: [
+      reminderPart('rem-1'),
+      reminderPart('rem-2'),
+      reminderPart('rem-3'),
+      reminderPart('rem-4'),
+      { type: 'text', text: 'Done, four reminders are set.' },
+    ],
+  };
+
+  function visiblePrompts(container: HTMLElement): Element[] {
+    return Array.from(container.querySelectorAll('[data-role="reminder-notification-prompt"]')).filter(
+      prompt => prompt.closest('[hidden]') === null,
+    );
+  }
+
+  it('offers notices once under the reply, not once per reminder, while details are off', async () => {
+    const { container } = render(
+      <RuntimeHarness messages={[fourReminders]}>
+        <DeliveriesProvider api={fakeServer([]).api}>
+          <ThreadPrimitive.Messages>{() => <AssistantMessageContainer />}</ThreadPrimitive.Messages>
+        </DeliveriesProvider>
+      </RuntimeHarness>,
+    );
+    await settleOffer();
+    expect(container.querySelectorAll('[data-role="reminder-notification-prompt"]')).toHaveLength(1);
+    expect(visiblePrompts(container)).toHaveLength(1);
+  });
+
+  it('offers notices once outside the step rows while details are on', async () => {
+    const { container } = render(
+      <AgentDetailsHarness agentDetails="expanded" messages={[fourReminders]}>
+        <DeliveriesProvider api={fakeServer([]).api}>
+          <ThreadPrimitive.Messages>{() => <AssistantMessageContainer />}</ThreadPrimitive.Messages>
+        </DeliveriesProvider>
+      </AgentDetailsHarness>,
+    );
+    await settleOffer();
+    await settleAgentDetails();
+    const prompts = container.querySelectorAll('[data-role="reminder-notification-prompt"]');
+    expect(prompts).toHaveLength(1);
+    expect(prompts[0]?.closest('[data-testid="assistant-message-agent-internals"]')).toBeNull();
+  });
+
+  it('offers notices only under the latest reply that set a reminder', async () => {
+    const { container } = render(
+      <RuntimeHarness
+        messages={[reminderTurn('rem-1'), { role: 'user', content: 'and another' }, reminderTurn('rem-2')]}
+      >
+        <DeliveriesProvider api={fakeServer([]).api}>
+          <ThreadPrimitive.Messages>{() => <AssistantMessageContainer />}</ThreadPrimitive.Messages>
+        </DeliveriesProvider>
+      </RuntimeHarness>,
+    );
+    await settleOffer();
+    const prompts = container.querySelectorAll('[data-role="reminder-notification-prompt"]');
+    expect(prompts).toHaveLength(1);
+    const roots = container.querySelectorAll('[data-role="assistant"]');
+    expect(prompts[0] !== undefined && roots[roots.length - 1]?.contains(prompts[0])).toBe(true);
+  });
+
+  it('does not offer notices when the reminder was declined', async () => {
+    const declined: ThreadMessageLike = {
+      role: 'assistant',
+      content: [
+        { ...reminderPart('rem-1'), result: envelope(mcpText({ error: 'Not approved.' }), 'denied') },
+        { type: 'text', text: 'Okay, I did not set it.' },
+      ],
+    };
+    const { container } = render(
+      <RuntimeHarness messages={[declined]}>
+        <DeliveriesProvider api={fakeServer([]).api}>
+          <ThreadPrimitive.Messages>{() => <AssistantMessageContainer />}</ThreadPrimitive.Messages>
+        </DeliveriesProvider>
+      </RuntimeHarness>,
+    );
+    await settleOffer();
+    expect(container.querySelectorAll('[data-role="reminder-notification-prompt"]')).toHaveLength(0);
+  });
+
+  it('does not offer notices while the reminder turn is still running', async () => {
+    const running: ThreadMessageLike = {
+      role: 'assistant',
+      status: { type: 'running' },
+      content: [reminderPart('rem-1'), { type: 'text', text: 'Setting it now.' }],
+    };
+    const { container } = render(
+      <RuntimeHarness messages={[running]} isRunning>
+        <DeliveriesProvider api={fakeServer([]).api}>
+          <ThreadPrimitive.Messages>{() => <AssistantMessageContainer />}</ThreadPrimitive.Messages>
+        </DeliveriesProvider>
+      </RuntimeHarness>,
+    );
+    await settleOffer();
+    expect(container.querySelectorAll('[data-role="reminder-notification-prompt"]')).toHaveLength(0);
   });
 });
