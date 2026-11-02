@@ -95,6 +95,8 @@ test('user settings read and patch the server envelope', async () => {
     search_without_asking: false,
     maps_without_asking: true,
     sandbox_without_asking: true,
+    chat_search_enabled: false,
+    package_downloads_without_project_allowed: false,
   });
   assert.equal(seen[0]?.url, '/api/v1/user/settings/sentinel');
   assert.equal(seen[0]?.method, 'GET');

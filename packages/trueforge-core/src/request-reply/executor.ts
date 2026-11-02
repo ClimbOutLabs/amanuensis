@@ -62,6 +62,8 @@ export class RequestReplyExecutor {
   private initialized = false;
   private runningRequests = new Map<string, Promise<void>>();
   private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
+  /** A heartbeat stop was asked for while requests were still running; it takes effect when the last one settles. */
+  private heartbeatStopPending = false;
 
   constructor({
     executorId,
@@ -93,7 +95,10 @@ export class RequestReplyExecutor {
     this.channel = requestChannel(executorId);
     this.heartbeatKey = heartbeatKey(executorId);
     this.heartbeatIntervalMs = heartbeatIntervalMs;
-    this.heartbeatTtlMs = Math.ceil(this.heartbeatIntervalMs * 1.5);
+    // Three intervals of margin: one delayed beat (a blocked event loop, a slow
+    // Redis call) must not expire the key and fail every waiting caller. A dead
+    // executor is still detected within three intervals, well under the reply timeout.
+    this.heartbeatTtlMs = Math.ceil(this.heartbeatIntervalMs * 3);
   }
 
   async init(): Promise<void> {
@@ -165,15 +170,31 @@ export class RequestReplyExecutor {
       return;
     }
     this.logger.info('[RequestReplyExecutor] Starting heartbeat', { executorId: this.executorId });
-    this.stopHeartbeat();
+    this.heartbeatStopPending = false;
+    this.clearHeartbeatTimer();
     void this.beat();
     this.heartbeatTimer = setInterval(() => {
       void this.beat();
     }, this.heartbeatIntervalMs);
   }
 
-  /** A stopped heartbeat makes callers fail fast with NoResponderError. */
+  /**
+   * A stopped heartbeat makes callers fail fast with NoResponderError, so the
+   * stop waits while any request is still running: a caller whose request is
+   * in flight must not fail just because intake stopped, whatever stopped it
+   * (close, drain, a subscriber error or a dropped connection). The stop
+   * takes effect when the last running request settles.
+   */
   private stopHeartbeat(): void {
+    if (this.runningRequests.size > 0) {
+      this.heartbeatStopPending = true;
+      return;
+    }
+    this.heartbeatStopPending = false;
+    this.clearHeartbeatTimer();
+  }
+
+  private clearHeartbeatTimer(): void {
     if (this.heartbeatTimer) {
       this.logger.info('[RequestReplyExecutor] Stopping heartbeat', { executorId: this.executorId });
       clearInterval(this.heartbeatTimer);
@@ -259,31 +280,46 @@ export class RequestReplyExecutor {
     const pid = randomUUID();
     const requestPromise = this.processRequestFromMessage(message).finally(() => {
       this.runningRequests.delete(pid);
+      if (this.runningRequests.size === 0 && this.heartbeatStopPending) {
+        this.stopHeartbeat();
+      }
     });
     this.runningRequests.set(pid, requestPromise);
   }
 
-  // This function should never throw!
-  // Stops intake: unsubscribe from the channel and stop the heartbeat. Never
-  // closes the clients — the caller owns their lifecycle.
-  async close(): Promise<void> {
+  /** Stops intake: no new messages are taken once closed. Never throws. */
+  private async stopIntake(): Promise<void> {
     if (this.closed) {
       return;
     }
-    this.logger.info('[RequestReplyExecutor] Closing', { executorId: this.executorId });
     this.closed = true;
     try {
       await this.subscriberClient.unsubscribe(this.channel);
     } catch {
       // ignore: connection may already be closed
     }
+  }
+
+  // This function should never throw!
+  // Stops intake: unsubscribe from the channel and stop the heartbeat. Never
+  // closes the clients. The caller owns their lifecycle.
+  async close(): Promise<void> {
+    if (this.closed) {
+      return;
+    }
+    this.logger.info('[RequestReplyExecutor] Closing', { executorId: this.executorId });
+    await this.stopIntake();
     this.stopHeartbeat();
   }
 
   // This function should never throw!
-  // This is called during graceful shutdown
+  // This is called during graceful shutdown. Intake stops, but the heartbeat
+  // keeps beating until every running request has settled: a caller whose
+  // request is still running must not fail with NoResponderError just because
+  // the reply lands after the heartbeat key would have expired.
   async drain(): Promise<void> {
-    await this.close();
+    await this.stopIntake();
     await Promise.allSettled(Array.from(this.runningRequests.values()));
+    this.stopHeartbeat();
   }
 }

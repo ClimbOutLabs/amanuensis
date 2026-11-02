@@ -20,6 +20,8 @@ import { rehypeHighlightText } from '../utils/rehypeHighlightText.js';
 import { remarkCitationMarkers } from '../utils/remarkCitationMarkers.js';
 import { remarkNormalizeProseTypography } from '../utils/remarkNormalizeProseTypography.js';
 import { transformMarkdownSource } from '../utils/transformMarkdownSource.js';
+import { ExternalUrlConfirmProvider, MarkdownExternalLink, useExternalUrlConfirm } from './externalUrlConfirm.js';
+import { isTrustedImageUrl } from './externalUrlTrust.js';
 import { auiButtonClass } from './lib/buttonClasses.js';
 import { cn } from './lib/cn.js';
 import type { OpenUiFenceBlockProps } from './OpenUiFenceBlock.js';
@@ -184,14 +186,18 @@ function SpacePicture({ src, alt }: { src: string; alt: string }) {
 }
 
 /**
- * A remote image outside a chat turn, shown as a fixed-size thumbnail. The browser fetches it only when
- * the person asks, so an image URL in a prompt-injected page never reaches its host on render. Loads
- * with no referrer; a failed load shows the alt text instead of an empty box.
+ * A remote image outside a chat turn, shown as a fixed-size thumbnail. The browser fetches it only
+ * after the person confirms, so an image URL in a prompt-injected page never reaches its host on
+ * render. Confirming trusts this exact image for the rest of the session; "Don't ask again" in
+ * the dialog remembers this exact image on this device, and a remembered image loads without
+ * asking. Other images from the same host still ask first. Loads with no referrer; a failed load
+ * shows the alt text instead of an empty box.
  */
 function RemoteImageThumbnail({ src, alt }: { src: string; alt: string }) {
-  const [requested, setRequested] = useState(false);
   const [failed, setFailed] = useState(false);
+  const { requestImageConfirm, isSessionImageUrlTrusted } = useExternalUrlConfirm();
   const host = remoteImageHost(src);
+  const showImage = isTrustedImageUrl(src) || isSessionImageUrlTrusted(src);
   const label = alt !== '' ? alt : 'External image';
   return (
     <span
@@ -199,7 +205,7 @@ function RemoteImageThumbnail({ src, alt }: { src: string; alt: string }) {
       data-testid="aui-remote-image-placeholder"
     >
       <span className="flex h-24 w-40 max-w-full items-center justify-center overflow-hidden rounded-lg border border-border bg-secondary-bg p-2 text-center">
-        {requested && !failed ? (
+        {showImage && !failed ? (
           <img
             src={src}
             alt={alt}
@@ -219,7 +225,7 @@ function RemoteImageThumbnail({ src, alt }: { src: string; alt: string }) {
               className: 'h-auto max-w-full whitespace-normal py-1 text-center',
             })}
             aria-label={`Show image: ${label}`}
-            onClick={() => setRequested(true)}
+            onClick={() => requestImageConfirm(src)}
           >
             Show image: {label}
           </button>
@@ -362,14 +368,8 @@ function makeComponents(opts: {
     br() {
       return <br />;
     },
-    // Chat markdown links should open in a new tab.
-    a({ href, children, node: _node, ...props }) {
-      return (
-        <a {...props} href={href} target="_blank" rel="noopener noreferrer">
-          {children}
-        </a>
-      );
-    },
+    // External http(s) links confirm first; origins the person trusted skip the dialog.
+    a: MarkdownExternalLink,
     table({ node: _node, ...props }) {
       return readOnly ? <ScrollableTable {...props} /> : <table {...props} />;
     },
@@ -625,18 +625,20 @@ export function Markdown({
   );
 
   return (
-    <div
-      className={cn('aui-markdown markdown-body min-w-0 max-w-full overflow-x-clip', classNames.markdown, className)}
-    >
-      <ReactMarkdown
-        remarkPlugins={remarkPlugins}
-        rehypePlugins={rehypePlugins}
-        components={components}
-        urlTransform={markdownUrlTransform}
+    <ExternalUrlConfirmProvider>
+      <div
+        className={cn('aui-markdown markdown-body min-w-0 max-w-full overflow-x-clip', classNames.markdown, className)}
       >
-        {transformedContent}
-      </ReactMarkdown>
-    </div>
+        <ReactMarkdown
+          remarkPlugins={remarkPlugins}
+          rehypePlugins={rehypePlugins}
+          components={components}
+          urlTransform={markdownUrlTransform}
+        >
+          {transformedContent}
+        </ReactMarkdown>
+      </div>
+    </ExternalUrlConfirmProvider>
   );
 }
 

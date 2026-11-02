@@ -15,6 +15,7 @@ import {
 } from '@truefoundry/trueforge-core/core/spaces/toolContract';
 import { SpaceNotFoundError, SpaceRevisionNotFoundError, type SpaceRecord } from '../../../src/db/spaceStore';
 import { spaceCapability, type SpaceToolStore } from '../../../src/runtime/spaceCapability';
+import { noSpaceFolders } from './spaceFolderStoreFake';
 
 const NOOP_EXECUTION_TRACE: AgentExecutionTrace = {
   runInContext: operation => operation(),
@@ -156,6 +157,7 @@ function makeHistoryStore(): SpaceToolStore {
       });
     },
     getSpace: async input => rows.get(input.space_id),
+    ...noSpaceFolders,
     getSpaceRevision: async input => history.get(key(input.space_id, input.revision)),
     listSpacesWithAggregate: async () => ({
       records: [...rows.values()].filter(record => record.created_by === AUTHORITY.userRef),

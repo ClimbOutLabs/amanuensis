@@ -21,7 +21,9 @@ describePg('PostgresSpaceStore (ISpaceStore contract)', () => {
 
   beforeEach(async () => {
     if (env !== undefined) {
-      await sql`TRUNCATE TABLE space, space_aggregate, space_revision`.execute(env.db);
+      await sql`TRUNCATE TABLE space, space_aggregate, space_revision, space_folder, space_folder_assignment`.execute(
+        env.db,
+      );
     }
   });
 

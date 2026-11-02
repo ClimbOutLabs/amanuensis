@@ -4,6 +4,7 @@
  * `/api/v1/spaces` routes.
  */
 import { z } from '@hono/zod-openapi';
+import { FolderIdSchema } from './folder';
 
 /**
  * Bound on the human-facing list endpoint. This only needs to keep one HTTP response and the
@@ -182,6 +183,7 @@ export const SpaceSchema = z
   .object({
     id: z.string().trim().min(1).max(128),
     ...SpaceContentSchema.shape,
+    folder_id: FolderIdSchema.nullable().describe('The folder the space sits in, or null when it is not in one.'),
     revision: z.number().int().positive(),
     created_at: z.iso.datetime(),
     updated_at: z.iso.datetime(),

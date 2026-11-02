@@ -401,7 +401,7 @@ cmd_instance_calendar() {
   warn_if_installed_older
   dir=$(instance_dir "$name")
   # The connector's compose settings need the shared secret, so an instance from before it gets one first.
-  calendar_secret_backfill "$name"
+  env_secret_backfill "$name" CALENDAR_ACCOUNT_SECRET
   if [ "$OPT_REMOVE" = 1 ]; then
     # The saved password is deleted for good from the connector's volume, through its account agent.
     # The file an older installer kept in the instance folder, and its settings line, go too.

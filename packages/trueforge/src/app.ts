@@ -27,6 +27,7 @@ import { createCapabilitiesRouter } from './apis/capabilities';
 import { createCatalogRouter } from './apis/catalog';
 import { createChatImagesRouter } from './apis/chatImages';
 import { createChatPicturesRouter } from './apis/chatPictures';
+import { createChatSearchRouter } from './apis/chatSearch';
 import { createDataExportRouter } from './apis/dataExport';
 import { createDataImportRouter } from './apis/dataImport';
 import { createEmailAccountRouter, EMAIL_SETTINGS_BASE_PATH } from './apis/emailAccount';
@@ -49,6 +50,7 @@ import { createInternalMetricsRouter } from './apis/sessionMetrics';
 import { createInternalSessionsRouter, createSessionsRouter, sandboxIdOfLastTurn } from './apis/sessions';
 import { createSettingsRouter } from './apis/settings';
 import { createAvailableSkillsRouter, type ResolveSkillStore } from './apis/skills';
+import { createSpaceFolderAssignmentsRouter, createSpaceFoldersRouter } from './apis/spaceFolders';
 import { createSpacePicturesRouter } from './apis/spacePictures';
 import { createSpacesRouter } from './apis/spaces';
 import { createTurnsRouter } from './apis/turns';
@@ -113,6 +115,7 @@ import { OPENAPI_DOCUMENT_TAGS } from './routes/openapiTags';
 import type { ActiveTurnRegistry } from './runtime/activeTurns';
 import type { ChatImageService } from './runtime/chatImages/chatImageService';
 import { createChatPictureService } from './runtime/chatPictures/chatPictureService';
+import type { ChatSearchIndexer } from './runtime/chatSearchIndexing';
 import { resolveDefaultChatModel } from './runtime/defaultChatModel';
 import type { EventSubscriptionRegistry } from './runtime/event-subscription';
 import { resolveSandboxProvider } from './runtime/sessionResources';
@@ -294,6 +297,8 @@ export interface ServerDeps<TTransaction> {
   sessionMetricsStore: ISessionMetricsStore;
   sentinelAuditStore: ISentinelAuditStore;
   sentinelSettingsStore: ISentinelSettingsStore<TTransaction>;
+  /** Keeps the past-chat search index for people who turned the search on. */
+  chatSearchIndexer: ChatSearchIndexer;
   briefItemStore: IBriefItemCompletionStore;
   turnArtifactStore: ITurnArtifactStore<TTransaction>;
   /** Not tenant-scoped: the persisted live tool-output screen override is global. */
@@ -494,6 +499,7 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
     resolveSkillStore: deps.resolveSkillStore,
     tokenStore: deps.tokenStore,
     repositoryStore: deps.repositoryStore,
+    sentinelSettingsStore: deps.sentinelSettingsStore,
     sessionStore: deps.sessionStore,
     spaceStore: deps.spaceStore,
     googleConnectionStore: deps.googleConnectionStore,
@@ -501,6 +507,7 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
     sandboxProviderResolver: deps.sandboxProviderResolver,
     globalSettingsStore: deps.globalSettingsStore,
     tokenFactoryBudget: deps.tokenFactoryBudget,
+    chatSearchIndexer: deps.chatSearchIndexer,
     audit: deps.sentinelAuditStore,
   };
 
@@ -752,6 +759,7 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
       globalSettingsStore: deps.globalSettingsStore,
       sentinelAuditStore: deps.sentinelAuditStore,
       turnArtifactStore: deps.turnArtifactStore,
+      chatSearchIndexer: deps.chatSearchIndexer,
       tokenStore: deps.tokenStore,
       resolveMcpServerStore: deps.resolveMcpServerStore,
       resolveAgentStore: deps.resolveAgentStore,
@@ -867,10 +875,23 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
     ),
   );
   app.route(
+    '/api/v1/user/chat-search',
+    withAuth(
+      createChatSearchRouter({
+        sessionStore: deps.sessionStore,
+        sentinelSettingsStore: deps.sentinelSettingsStore,
+        resolveRequestContext,
+        logger: deps.logger,
+      }),
+      authMiddleware,
+    ),
+  );
+  app.route(
     '/api/v1/user/settings/sentinel',
     withAuth(
       createSentinelSettingsRouter({
         sentinelSettingsStore: deps.sentinelSettingsStore,
+        chatSearchIndexer: deps.chatSearchIndexer,
         resolveRequestContext,
       }),
       authMiddleware,
@@ -1011,6 +1032,26 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
     '/api/v1/spaces',
     withAuth(
       createSpacesRouter({
+        spaceStore: deps.spaceStore,
+        resolveRequestContext,
+      }),
+      authMiddleware,
+    ),
+  );
+  app.route(
+    '/api/v1/spaces',
+    withAuth(
+      createSpaceFolderAssignmentsRouter({
+        spaceStore: deps.spaceStore,
+        resolveRequestContext,
+      }),
+      authMiddleware,
+    ),
+  );
+  app.route(
+    '/api/v1/space-folders',
+    withAuth(
+      createSpaceFoldersRouter({
         spaceStore: deps.spaceStore,
         resolveRequestContext,
       }),
@@ -1174,6 +1215,8 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
         repositoryStore: deps.repositoryStore,
         turnArtifactStore: deps.turnArtifactStore,
         globalSettingsStore: deps.globalSettingsStore,
+        sentinelSettingsStore: deps.sentinelSettingsStore,
+        chatSearchIndexer: deps.chatSearchIndexer,
         tokenFactoryBudget: deps.tokenFactoryBudget,
         eventSubscriptions: deps.eventSubscriptions,
         resolveSandboxProviderStore: deps.resolveSandboxProviderStore,

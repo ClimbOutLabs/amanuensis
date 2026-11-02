@@ -30,7 +30,7 @@ export const AMAN_GUIDE_TOPICS: readonly AmanGuideTopic[] = [
     id: 'code',
     title: 'Reading files and running code',
     covers: [],
-    body: 'Aman can read files and run code in a sandbox, a small separate space on your computer. For example, ask Aman to add up your expenses by category and draw a chart.\n\nThe sandbox must be set up first. Open Settings, then Sandbox. The "Read files and run code" card only appears once the sandbox is ready.\n\nCode runs only inside the sandbox. Anything Aman writes to a file there stays in the sandbox until you ask it to move the file.',
+    body: 'Aman can read files and run code in a sandbox, a small separate space on your computer. For example, ask Aman to add up your expenses by category and draw a chart.\n\nThe sandbox must be set up first. Open Settings, then Sandbox. The "Read files and run code" card only appears once the sandbox is ready.\n\nCode runs only inside the sandbox. Anything Aman writes to a file there stays in the sandbox until you ask it to move the file.\n\nSometimes code needs a package that is not installed yet, for example a chart library. Aman can download packages from the public package sites (PyPI, npm, the Go package site and crates.io) through its own mirrors, never straight from the sandbox to the internet. The first time a chat wants to download, Aman asks you. In a chat that is working on a project, your answer covers that project. In a chat without a project, your answer covers your chats without a project, including chats run on a schedule. You can change your mind at any time: open Settings, then Sandbox, and use the switches under "Package downloads". Turning a switch off stops downloads in that scope at once. Publishing or uploading a package is never possible this way, only downloading.',
   },
   {
     id: 'connect-mail-calendar',
@@ -90,7 +90,7 @@ export const AMAN_GUIDE_TOPICS: readonly AmanGuideTopic[] = [
     id: 'memory',
     title: 'Memory',
     covers: [],
-    body: 'Aman remembers what matters to you. Ask "What do you remember about me so far?" to see it.\n\nMemory is on by default. It is stored as plain Markdown files on your own computer. Open Settings, then Memory, to read, change or delete what Aman remembers.\n\nMemory search uses a small model that runs on your computer. Nothing about it is sent away.',
+    body: 'Aman remembers what matters to you. Ask "What do you remember about me so far?" to see it.\n\nMemory is on by default. It is stored as plain Markdown files on your own computer. Open Settings, then Memory, to read, change or delete what Aman remembers.\n\nMemory search uses a small model that runs on your computer. Nothing about it is sent away.\n\nSearching your past chats is separate from memory. When it is on, Aman can look through your own earlier chats when you ask, for example "What did we decide about the Lisbon trip last week?" It searches what you typed and Aman\'s final replies, in the chats the assistant you are asking is allowed to see: its own chats, chats with your main assistant, and chats shared with it. The chat you are in now is never included.\n\nIt is off by default. Turn it on in Settings, then Memory: "Let Aman search your past chats when you ask". A chat you delete leaves the search at once.',
   },
   {
     id: 'personas',

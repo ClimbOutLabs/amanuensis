@@ -3,7 +3,7 @@ import { isLLMContextMessage } from '../runtime/contextUtils';
 import type { UnfinishedKind } from '../runtime/replyBudget';
 import { envelopedResult, turnBoundaryIndex } from '../runtime/replyToolDumpRepair';
 import { isRecord } from '../util/records';
-import { CREATE_SPACE_TOOL_NAME, isSpaceWriteToolName, SPACE_WRITE_NOTHING_SAVED_FIELD } from './toolContract';
+import { CREATE_SPACE_TOOL_NAME, isSpaceContentWriteToolName, SPACE_WRITE_NOTHING_SAVED_FIELD } from './toolContract';
 
 /** What this turn's space writes did to one space. `changes` counts the saved writes, a creation included. */
 export interface SpaceWrites {
@@ -63,7 +63,8 @@ export function spaceWritesThisTurn(context: readonly ContextMessage[]): SpaceWr
       continue;
     }
     const call = calls.get(message.tool_call_id);
-    if (call === undefined || !isSpaceWriteToolName(call.tool)) {
+    // Filing a space in a folder changes nothing in the space, so it is never reported as a saved change.
+    if (call === undefined || !isSpaceContentWriteToolName(call.tool)) {
       continue;
     }
     const result = spaceWriteResult(message.content);
