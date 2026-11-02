@@ -63,6 +63,58 @@ export const MAX_TABS_PER_PERSON = 8;
 /** How many times a read is tried while the page keeps moving to a new page of its site. */
 const READ_ATTEMPTS = 3;
 
+/** Draws the model's labels over the page: one box and ref per control in view, and a 100 px grid. */
+const MARK_SCRIPT = marks => {
+  const layer = document.createElement('div');
+  layer.id = '__aman_marks';
+  layer.style.cssText = 'position:fixed;inset:0;pointer-events:none;z-index:2147483647;font:bold 11px sans-serif';
+  const width = window.innerWidth;
+  const height = window.innerHeight;
+  for (let x = 100; x < width; x += 100) {
+    layer.insertAdjacentHTML(
+      'beforeend',
+      `<div style="position:absolute;left:${x}px;top:0;bottom:0;border-left:1px dashed rgba(0,120,255,.35)"></div><div style="position:absolute;left:${x + 2}px;top:0;color:#0078ff;background:#fff">${x}</div>`,
+    );
+  }
+  for (let y = 100; y < height; y += 100) {
+    layer.insertAdjacentHTML(
+      'beforeend',
+      `<div style="position:absolute;top:${y}px;left:0;right:0;border-top:1px dashed rgba(0,120,255,.35)"></div><div style="position:absolute;top:${y + 2}px;left:0;color:#0078ff;background:#fff">${y}</div>`,
+    );
+  }
+  for (const { path, ref } of marks) {
+    let node = document.body;
+    for (const part of path.split('/')) {
+      const [tag, index] = part.split(':');
+      node = Array.from(node?.children ?? []).filter(child => child.tagName === tag)[Number(index)];
+      if (node === undefined) {
+        break;
+      }
+    }
+    if (node === undefined) {
+      continue;
+    }
+    const rect = node.getBoundingClientRect();
+    if (
+      rect.width === 0 ||
+      rect.height === 0 ||
+      rect.bottom < 0 ||
+      rect.top > height ||
+      rect.right < 0 ||
+      rect.left > width
+    ) {
+      continue;
+    }
+    const box = document.createElement('div');
+    box.style.cssText = `position:absolute;left:${rect.left}px;top:${rect.top}px;width:${rect.width}px;height:${rect.height}px;outline:2px solid #e00`;
+    const label = document.createElement('div');
+    label.textContent = ref;
+    label.style.cssText = `position:absolute;left:${rect.left}px;top:${Math.max(0, rect.top - 14)}px;background:#e00;color:#fff;padding:0 2px`;
+    layer.append(box, label);
+  }
+  document.documentElement.append(layer);
+};
+
 /** The answer for a chat with no tab: it never opened a page, or its tab closed to make room for others. */
 const NO_TAB = { status: 'closed' };
 
@@ -559,8 +611,9 @@ export class BrowserSidecar {
     if (read.status !== 'ok') {
       return read;
     }
-    const png = await page.screenshot({ type: 'png' });
-    return { status: 'ok', text: read.text, png_base64: png.toString('base64') };
+    const marked = await this.#markedShot(tab);
+    const png = marked ?? (await page.screenshot({ type: 'png' })).toString('base64');
+    return { status: 'ok', text: read.text, png_base64: png };
   }
 
   async screenshot({ owner, tab: tabId }) {
@@ -570,7 +623,29 @@ export class BrowserSidecar {
       return checked.result;
     }
     const buffer = await tab.page.screenshot({ type: 'png' });
-    return { status: 'ok', png_base64: buffer.toString('base64') };
+    const marked = await this.#markedShot(tab);
+    return { status: 'ok', png_base64: buffer.toString('base64'), marked_png_base64: marked };
+  }
+
+  /**
+   * The screenshot the model sees: each control with a ref from the page text gets a red box and its
+   * ref, and a light grid every 100 pixels gives positions. Vision models place clicks badly by eye,
+   * so the labels let the model click by ref and the grid helps with spots that have none.
+   */
+  async #markedShot(tab) {
+    const read = await this.#read(tab);
+    if (read.status !== 'ok') {
+      return undefined;
+    }
+    const marks = tab.refs.entries().map(([path, ref]) => ({ path, ref }));
+    const page = tab.page;
+    await page.evaluate(MARK_SCRIPT, marks).catch(() => undefined);
+    try {
+      const buffer = await page.screenshot({ type: 'png' });
+      return buffer.toString('base64');
+    } finally {
+      await page.evaluate(() => document.getElementById('__aman_marks')?.remove()).catch(() => undefined);
+    }
   }
 
   /**

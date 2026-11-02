@@ -87,6 +87,11 @@ export class RefAssigner {
     return refs;
   }
 
+  /** Every [path, ref] pair given on this page. */
+  entries() {
+    return [...this.#byPath.entries()];
+  }
+
   /** The DOM path a ref was given to on this page, or undefined. */
   pathFor(ref) {
     for (const [path, given] of this.#byPath) {

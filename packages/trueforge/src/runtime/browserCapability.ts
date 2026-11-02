@@ -83,7 +83,7 @@ const PageReplySchema = z.discriminatedUnion('status', [
   RefusedReplySchema,
 ]);
 const ScreenshotReplySchema = z.discriminatedUnion('status', [
-  z.object({ status: z.literal('ok'), png_base64: z.string().min(1) }),
+  z.object({ status: z.literal('ok'), png_base64: z.string().min(1), marked_png_base64: z.string().min(1).optional() }),
   MovedReplySchema,
   ClosedReplySchema,
 ]);
@@ -236,6 +236,10 @@ function movedMessage(url: string): string {
   return `The page went to ${shown}, a different site from the one that was opened, so it was not read. To read it, open that address with browser_open.`;
 }
 
+/** How the model reads its labelled screenshots. */
+const MARKED_NOTE =
+  'The picture follows as an image. Red boxes are controls, each labelled with its ref: click those with browser_click and the ref, not by position. Blue numbers are pixel positions every 100 px, for browser_mouse on spots with no ref.';
+
 const CLOSED_MESSAGE =
   "This chat's page is no longer open in Aman's browser: pages close when Aman restarts or to make room for other chats. Sign-ins are kept. Open the same address again with browser_open now, then try this step again, without asking the person.";
 
@@ -322,7 +326,7 @@ class BrowserTool extends LocalToolMCP {
       name: 'browser_mouse',
       annotations: { readOnlyHint: false, openWorldHint: true },
       description:
-        'Use the mouse at a spot on the open page, in pixels of the latest screenshot (the view is 1280x800): move, hover, click, double_click, right_click, or drag from x,y to to_x,to_y. For hover menus, sliders, charts and maps. Prefer browser_click with a ref when the thing has one. You get the page text and a new screenshot back.',
+        'Use the mouse at a spot on the open page, in pixels of the latest screenshot (the view is 1280x800; read positions off its blue grid): move, hover, click, double_click, right_click, or drag from x,y to to_x,to_y. For hover menus, sliders, charts and maps. Prefer browser_click with a ref when the thing has one. You get the page text and a new screenshot back.',
       schema: MOUSE_INPUT_SCHEMA,
       handler: async (input: BrowserMouseInput) => this.mouse(input),
     }),
@@ -379,14 +383,9 @@ class BrowserTool extends LocalToolMCP {
         // The image block goes to the chat for the person; the picture also reaches the model through
         // the screenshot viewer below, as an image right after this result.
         const picture = randomUUID();
-        this.screenshots.set(picture, result.body.png_base64);
+        this.screenshots.set(picture, result.body.marked_png_base64 ?? result.body.png_base64);
         const response = toolResultResponse({
-          text: JSON.stringify({
-            status: 'ok',
-            shown_to_person: true,
-            picture,
-            note: 'The picture follows as an image.',
-          }),
+          text: JSON.stringify({ status: 'ok', shown_to_person: true, picture, note: MARKED_NOTE }),
         });
         return {
           ...response,
@@ -486,7 +485,7 @@ class BrowserTool extends LocalToolMCP {
         const picture = randomUUID();
         this.screenshots.set(picture, result.body.png_base64);
         return toolResultResponse({
-          text: `${result.body.text}\n\n(picture ${picture}: a screenshot after the mouse action follows as an image)`,
+          text: `${result.body.text}\n\n(picture ${picture}: ${MARKED_NOTE})`,
         });
       }
     }
