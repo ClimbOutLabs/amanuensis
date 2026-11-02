@@ -106,6 +106,7 @@ import { serverTlsServeOptions } from './http/tls';
 import { createServerLogger, shouldColorize } from './logger';
 import type { IOAuthTokenStore } from './mcp/auth/types';
 import { PACKAGE_VERSION } from './packageVersion';
+import { closePersonaKnowledgeIndexers } from './personaKnowledge/knowledgeIndexer';
 import { ActiveTurnRegistry } from './runtime/activeTurns';
 import { registerCalendarConnectorForBoot } from './runtime/calendarAccount';
 import { createChatImageService } from './runtime/chatImages/chatImageService';
@@ -1259,6 +1260,8 @@ try {
         logger.info(`Waiting for ${String(turnDrains.size)} in-flight turn drains before shutdown`);
       }
       await turnDrains.shutdownAndWait({ timeoutMs: configuration.TURN_DRAIN_SHUTDOWN_TIMEOUT_MS });
+      // Finish the library document being indexed; queued ones resume on the next start.
+      await closePersonaKnowledgeIndexers();
       clearInterval(commandExecutionRecoveryTimer);
       clearInterval(artifactRetentionTimer);
       oidcDiscovery?.stop();

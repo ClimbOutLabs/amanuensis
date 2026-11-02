@@ -103,7 +103,7 @@ describe('PersonaKnowledgeIndexer', () => {
     await new Promise(resolve => setTimeout(resolve, 500));
     const { dbPath } = personaKnowledgeLocation({ knowledgeDir, tenantId: 'default', personaId: 'ghost' });
     expect(existsSync(dbPath)).toBe(false);
-    indexer.close();
+    await indexer.close();
   });
 
   it('indexes a text document end to end and cleans up the blob', async () => {
@@ -142,7 +142,45 @@ describe('PersonaKnowledgeIndexer', () => {
       }
       await new Promise(resolve => setTimeout(resolve, 50));
     }
-    indexer.close();
+    await indexer.close();
+  });
+
+  it('closing waits for the document being indexed, so its writes land before close resolves', async () => {
+    mockModel.ready = true;
+    const knowledgeDir = mkdtempSync(path.join(tmpdir(), 'pk-indexer-'));
+    const indexer = new PersonaKnowledgeIndexer({ knowledgeDir, modelDir: path.join(knowledgeDir, 'm'), logger });
+    const embedPassages = mockModel.embedPassages;
+    let releaseEmbedding = (): void => undefined;
+    const embeddingReleased = new Promise<void>(resolve => {
+      releaseEmbedding = resolve;
+    });
+    mockModel.embedPassages = async texts => {
+      await embeddingReleased;
+      return embedPassages(texts);
+    };
+    try {
+      const documentId = await addTextDocument(knowledgeDir, indexer, 'yara', 'Notes about the harbour ferry.');
+      await waitForStatus(knowledgeDir, 'yara', documentId, 'indexing');
+
+      let closed = false;
+      const closing = indexer.close().then(() => {
+        closed = true;
+      });
+      await new Promise(resolve => setTimeout(resolve, 100));
+      expect(closed).toBe(false);
+
+      releaseEmbedding();
+      await closing;
+      const { dbPath } = personaKnowledgeLocation({ knowledgeDir, tenantId: 'default', personaId: 'yara' });
+      const repo = openPersonaKnowledgeRepository({ dbPath, dimensions: 384 });
+      try {
+        expect(repo.getDocument({ documentId })?.status).toBe('ready');
+      } finally {
+        repo.close();
+      }
+    } finally {
+      mockModel.embedPassages = embedPassages;
+    }
   });
 
   it('pauses on a missing search model, keeps the blob, and fails after retries', async () => {
@@ -175,7 +213,7 @@ describe('PersonaKnowledgeIndexer', () => {
     expect(readMessage()).toContain('couldn’t be downloaded');
     // Terminal failure: the blob is finally cleaned up.
     expect(existsSync(blobPath(knowledgeDir, 'zara', documentId))).toBe(false);
-    indexer.close();
+    await indexer.close();
     mockModel.ready = true;
   }, 30000);
 
@@ -204,7 +242,7 @@ describe('PersonaKnowledgeIndexer', () => {
 
     await indexer.recover();
     await waitForStatus(knowledgeDir, 'zara', document.id, 'ready');
-    indexer.close();
+    await indexer.close();
   });
 
   it('rejects traversal segments in writeKnowledgeBlob before creating any directory', async () => {
