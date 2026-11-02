@@ -32,7 +32,7 @@ export type BrowserScrollInput = z.infer<typeof SCROLL_INPUT_SCHEMA>;
 const RefusedReplySchema = z.object({ status: z.literal('refused'), reason: z.string() });
 /** The tab is on a site other than the one opened, so the sidecar returned nothing of it. */
 const MovedReplySchema = z.object({ status: z.literal('moved'), url: z.string() });
-/** This chat's tab was closed to make room for the person's other chats. */
+/** This chat has no page open: it never opened one, or its tab closed to make room for other chats. */
 const ClosedReplySchema = z.object({ status: z.literal('closed') });
 const PageReplySchema = z.discriminatedUnion('status', [
   z.object({ status: z.literal('ok'), text: z.string() }),
@@ -126,7 +126,7 @@ function movedMessage(url: string): string {
 }
 
 const CLOSED_MESSAGE =
-  "Aman's browser closed this chat's page to make room for other chats. Open the page again with browser_open.";
+  "This chat has no page open in Aman's browser. Pages close to make room for other chats. Open the page with browser_open.";
 
 function errorResponse(message: string): ReturnType<typeof toolResultResponse> {
   return toolResultResponse({ text: JSON.stringify({ status: 'error', message }), isError: true });

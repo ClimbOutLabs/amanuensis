@@ -99,6 +99,29 @@ async function withWorld(run) {
     '/same-site-nav': html(`<h1>First</h1><script>setTimeout(() => { location = '/'; }, 50);</script>`),
     '/hop-away': html(`<h1>Hopper</h1><script>setTimeout(() => { location = '/redirect-site-b'; }, 50);</script>`),
     '/hop-home': (_req, res) => res.writeHead(302, { location: '/' }).end(),
+    // A page that steps forward through history once it loads; no-store keeps it out of the back cache.
+    '/goes-forward': (_req, res) => {
+      res.writeHead(200, { 'content-type': 'text/html', 'cache-control': 'no-store' });
+      res.end('<!doctype html><h1>Forwarder</h1><script>setTimeout(() => history.forward(), 100);</script>');
+    },
+    // Pages that replace their own document with another site's, each in its own way.
+    '/replace-away': html(
+      `<h1>Replacer</h1><script>setTimeout(() => location.replace('http://site-b.test/inbox'), 50);</script>`,
+    ),
+    '/refresh-away': (_req, res) => {
+      res.writeHead(200, { 'content-type': 'text/html' });
+      res.end('<!doctype html><meta http-equiv="refresh" content="0; url=http://site-b.test/inbox"><h1>Refresher</h1>');
+    },
+    '/self-away': html(
+      `<h1>Self opener</h1><script>setTimeout(() => window.open('http://site-b.test/inbox', '_self'), 50);</script>`,
+    ),
+    // A page in its own browsing context group, which moves to another page of the site that redirects away.
+    '/isolated-hop': (_req, res) => {
+      res.writeHead(200, { 'content-type': 'text/html', 'cross-origin-opener-policy': 'same-origin' });
+      res.end(
+        `<!doctype html><h1>Isolated</h1><script>setTimeout(() => { location = '/redirect-site-b'; }, 50);</script>`,
+      );
+    },
     '/to-www': (_req, res) => res.writeHead(302, { location: 'http://www.site-a.test/' }).end(),
     '/bomb': (_req, res) => {
       res.writeHead(200, { 'content-type': 'text/html', 'content-encoding': 'gzip' }).end(BOMB);
@@ -194,9 +217,7 @@ test(
   async () => {
     await withWorld(async ({ sidecar }) => {
       await sidecar.open({ owner: 'owner-1', tab: 'chat-1', url: 'http://site-b.test/inbox' });
-      const other = await sidecar.read({ owner: 'owner-1', tab: 'chat-2' });
-      assert.equal(other.status, 'ok');
-      assert.doesNotMatch(other.text, /Mail inbox/);
+      assert.deepEqual(await sidecar.read({ owner: 'owner-1', tab: 'chat-2' }), { status: 'closed' });
       await sidecar.open({ owner: 'owner-1', tab: 'chat-2', url: 'http://site-a.test/' });
       const first = await sidecar.read({ owner: 'owner-1', tab: 'chat-1' });
       assert.equal(first.status, 'ok');
@@ -318,6 +339,42 @@ test('going back to another site is not read', { skip: !browsersAvailable }, asy
   });
 });
 
+test('a page cannot step forward through history to another site', { skip: !browsersAvailable }, async () => {
+  await withWorld(async ({ sidecar, siteB }) => {
+    await sidecar.open({ owner: 'owner-1', tab: 'chat-1', url: 'http://site-a.test/goes-forward' });
+    await sidecar.open({ owner: 'owner-1', tab: 'chat-1', url: 'http://site-b.test/inbox' });
+    await sidecar.open({ owner: 'owner-1', tab: 'chat-1', url: 'http://site-a.test/' });
+    assert.equal((await sidecar.back({ owner: 'owner-1', tab: 'chat-1' })).status, 'moved');
+    const hitsBefore = siteB.hits.length;
+    const home = await sidecar.back({ owner: 'owner-1', tab: 'chat-1' });
+    assert.equal(home.status, 'ok');
+    assert.match(home.text, /Forwarder/);
+    await settle();
+    assert.equal(siteB.hits.length, hitsBefore);
+    const read = await sidecar.read({ owner: 'owner-1', tab: 'chat-1' });
+    assert.equal(read.status, 'ok');
+    assert.match(read.text, /Forwarder/);
+  });
+});
+
+for (const [label, route, own] of [
+  ['replacing itself', '/replace-away', /Replacer/],
+  ['a refresh tag', '/refresh-away', /Refresher/],
+  ['opening into its own tab', '/self-away', /Self opener/],
+  ['a redirect after moving to its own browsing context group', '/isolated-hop', /Isolated/],
+]) {
+  test(`a page cannot swap itself for another site by ${label}`, { skip: !browsersAvailable }, async () => {
+    await withWorld(async ({ sidecar, siteB }) => {
+      await sidecar.open({ owner: 'owner-1', tab: 'chat-1', url: `http://site-a.test${route}` });
+      await settle();
+      assert.deepEqual(siteB.hits, []);
+      const read = await sidecar.read({ owner: 'owner-1', tab: 'chat-1' });
+      assert.equal(read.status, 'ok');
+      assert.match(read.text, own);
+    });
+  });
+}
+
 test('Chromium does not get the shared secret', { skip: BrowserSidecar === undefined }, async () => {
   const { browserEnv } = await import('../src/server.mjs');
   const env = browserEnv({ BROWSER_SECRET: 's'.repeat(40), PATH: '/usr/bin', DISPLAY: ':99', HOME: '/home/pwuser' });
@@ -414,13 +471,34 @@ test(
   async () => {
     const { MAX_TABS_PER_PERSON } = await import('../src/server.mjs');
     await withWorld(async ({ sidecar }) => {
-      await sidecar.open({ owner: 'owner-1', tab: 'chat-0', url: 'http://site-a.test/' });
-      for (let index = 1; index <= MAX_TABS_PER_PERSON; index += 1) {
-        await sidecar.read({ owner: 'owner-1', tab: `chat-${String(index)}` });
+      for (let index = 0; index <= MAX_TABS_PER_PERSON; index += 1) {
+        await sidecar.open({ owner: 'owner-1', tab: `chat-${String(index)}`, url: 'http://site-a.test/' });
       }
       assert.deepEqual(await sidecar.read({ owner: 'owner-1', tab: 'chat-0' }), { status: 'closed' });
       const again = await sidecar.open({ owner: 'owner-1', tab: 'chat-0', url: 'http://site-a.test/' });
       assert.equal(again.status, 'ok');
+    });
+  },
+);
+
+test(
+  'only opening a page makes a tab, so a chat with none never closes another',
+  { skip: !browsersAvailable },
+  async () => {
+    const { MAX_TABS_PER_PERSON } = await import('../src/server.mjs');
+    await withWorld(async ({ sidecar }) => {
+      const live = Array.from({ length: MAX_TABS_PER_PERSON }, (_, index) => `chat-${String(index)}`);
+      for (const tab of live) {
+        await sidecar.open({ owner: 'owner-1', tab, url: 'http://site-a.test/' });
+      }
+      for (const call of ['read', 'scroll', 'back', 'screenshot']) {
+        assert.deepEqual(await sidecar[call]({ owner: 'owner-1', tab: 'chat-gone', direction: 'down' }), {
+          status: 'closed',
+        });
+      }
+      for (const tab of live) {
+        assert.equal((await sidecar.read({ owner: 'owner-1', tab })).status, 'ok', tab);
+      }
     });
   },
 );

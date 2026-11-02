@@ -104,11 +104,11 @@ describe('browser capability', () => {
     expect(textOf(result)).toContain('browser_open');
   });
 
-  it('tells the chat to open the page again when its tab was closed to make room', async () => {
+  it('tells a chat with no page open to open one', async () => {
     const { call } = mount(() => ({ json: { status: 'closed' } }));
     const result = await call('browser_read');
     expect(result.isError).toBe(true);
-    expect(textOf(result)).toContain('Open the page again with browser_open');
+    expect(textOf(result)).toContain('Open the page with browser_open');
   });
 
   it.each([

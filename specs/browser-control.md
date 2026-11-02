@@ -45,7 +45,7 @@ In scope: the browser container and gateway, the browser tools, their permission
 - **Where it flows:**
   - Page text goes to the model, like a fetched page.
   - Screenshots stay in the chat for the person.
-  - Logins and cookies never leave the browser's container.
+  - Logins and cookies are stored only in the person's browser profile, on a volume only the browser's container mounts.
   - The addresses Aman opens go to those sites, under the checks above.
 - **What stays on the device:** the profiles, the browser, the gateway and every page Aman reads. Nothing goes to a third-party service other than the sites themselves and the model provider.
 - **Password, payment and one-time-code fields never show their values in the page text.**

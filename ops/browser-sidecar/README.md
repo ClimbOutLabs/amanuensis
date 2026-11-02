@@ -21,8 +21,9 @@ The browser reads hostile pages, so it shares a network with nothing of Aman's.
   browser's container never holds it. The sidecar answers only calls that arrive from the gateway.
 - Chromium runs with its sandbox on, with a stripped environment, in a container with no
   capabilities, no privilege gain and a read-only root.
-- Each chat has its own tab, and only sees the page it opened. A person keeps at most eight tabs;
-  opening a ninth closes the one used longest ago, and that chat is told to open its page again.
+- Each chat has its own tab, and only sees the page it opened. Only opening a page makes a tab. A person
+  keeps at most eight tabs; opening a ninth closes the one used longest ago, and a chat with no tab is
+  told to open its page again.
 - A page cannot move its tab to another site, open windows, or run service workers. Each redirect of
   the tab is checked as its response arrives, and one to another site is refused. A site's own `www.`
   name and a move from http to https count as the same site. When the tab is on another site (after

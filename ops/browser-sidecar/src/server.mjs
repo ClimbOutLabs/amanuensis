@@ -60,8 +60,8 @@ export const MAX_TABS_PER_PERSON = 8;
 /** How many times a read is tried while the page keeps moving to a new page of its site. */
 const READ_ATTEMPTS = 3;
 
-/** How many closed chats a person's browser remembers, so a chat whose tab was closed is told so. */
-const MAX_REMEMBERED_CLOSED_TABS = 100;
+/** The answer for a chat with no tab: it never opened a page, or its tab closed to make room for others. */
+const NO_TAB = { status: 'closed' };
 
 /** Answered by the sidecar itself instead of the network: a browser does not navigate to No Content. */
 const STAY_PUT = { status: 204 };
@@ -74,9 +74,8 @@ const STAY_PUT = { status: 204 };
  * get the mail read back. `goingBack` marks the one history step the model asked for.
  * `refusedRedirect` is where the last navigation tried to redirect to, off the opened site, and
  * `movedTo` is set when the model's own open was refused that way, until the next open.
- * `closedBefore` marks a tab opened again after the cap closed this chat's earlier one.
  */
-function createTab({ page, closedBefore }) {
+function createTab({ page }) {
   return {
     page,
     refs: new RefAssigner(),
@@ -84,7 +83,6 @@ function createTab({ page, closedBefore }) {
     goingBack: false,
     refusedRedirect: undefined,
     movedTo: undefined,
-    closedBefore,
   };
 }
 
@@ -211,7 +209,6 @@ export class BrowserSidecar {
       spare: page,
       tabs: new Map(),
       tabsByPage: new Map(),
-      closedTabs: new Set(),
       opening: Promise.resolve(),
     };
     // A page may not open windows of its own. Tabs are opened only inside `opening`, so a page that
@@ -227,8 +224,11 @@ export class BrowserSidecar {
     return profile;
   }
 
-  /** The tab for one chat, opened on first use; the person's least recently used tab closes past the cap. */
-  async tabFor({ owner, tab: tabId }) {
+  /**
+   * The chat's tab, now its most recently used one. Only `browser_open` opens a tab, so a chat with no
+   * page open never pushes out another chat's tab; the person's least recently used tab closes past the cap.
+   */
+  async #tabFor({ owner, tab: tabId, create }) {
     const profile = await this.profileFor(owner);
     const result = profile.opening.then(async () => {
       const existing = profile.tabs.get(tabId);
@@ -237,14 +237,16 @@ export class BrowserSidecar {
         profile.tabs.set(tabId, existing);
         return existing;
       }
+      if (!create) {
+        return undefined;
+      }
       const page = profile.spare ?? (await profile.context.newPage());
       profile.spare = undefined;
-      const closedBefore = profile.closedTabs.delete(tabId);
       // A download never opens in the browser; refusing it keeps the tab from navigating to a file.
       page.on('download', download => {
         download.cancel().catch(() => undefined);
       });
-      const tab = createTab({ page, closedBefore });
+      const tab = createTab({ page });
       await guardRedirects({ tab, cdp: await profile.context.newCDPSession(page) });
       profile.tabs.set(tabId, tab);
       profile.tabsByPage.set(page, tab);
@@ -252,10 +254,6 @@ export class BrowserSidecar {
         const [oldestId, oldest] = profile.tabs.entries().next().value;
         profile.tabs.delete(oldestId);
         profile.tabsByPage.delete(oldest.page);
-        profile.closedTabs.add(oldestId);
-        if (profile.closedTabs.size > MAX_REMEMBERED_CLOSED_TABS) {
-          profile.closedTabs.delete(profile.closedTabs.values().next().value);
-        }
         await oldest.page.close().catch(() => undefined);
       }
       return tab;
@@ -273,8 +271,8 @@ export class BrowserSidecar {
    * address, and opening it is a new `browser_open` that the app server classifies on its own.
    */
   #checkedPage(tab) {
-    if (tab.closedBefore && tab.opened === undefined) {
-      return { ok: false, result: { status: 'closed' } };
+    if (tab === undefined) {
+      return { ok: false, result: NO_TAB };
     }
     if (tab.movedTo !== undefined) {
       return { ok: false, result: { status: 'moved', url: tab.movedTo } };
@@ -294,10 +292,9 @@ export class BrowserSidecar {
     if (!target.ok) {
       return { status: 'refused', reason: target.reason };
     }
-    const tab = await this.tabFor({ owner, tab: tabId });
+    const tab = await this.#tabFor({ owner, tab: tabId, create: true });
     tab.refs.reset();
     tab.opened = target.url.href;
-    tab.closedBefore = false;
     tab.refusedRedirect = undefined;
     tab.movedTo = undefined;
     try {
@@ -316,7 +313,7 @@ export class BrowserSidecar {
   }
 
   async read({ owner, tab: tabId }) {
-    return this.#read(await this.tabFor({ owner, tab: tabId }));
+    return this.#read(await this.#tabFor({ owner, tab: tabId, create: false }));
   }
 
   /**
@@ -344,13 +341,19 @@ export class BrowserSidecar {
   }
 
   async scroll({ owner, tab: tabId, direction }) {
-    const tab = await this.tabFor({ owner, tab: tabId });
+    const tab = await this.#tabFor({ owner, tab: tabId, create: false });
+    if (tab === undefined) {
+      return NO_TAB;
+    }
     await tab.page.mouse.wheel(0, direction === 'up' ? -800 : 800);
     return this.#read(tab);
   }
 
   async back({ owner, tab: tabId }) {
-    const tab = await this.tabFor({ owner, tab: tabId });
+    const tab = await this.#tabFor({ owner, tab: tabId, create: false });
+    if (tab === undefined) {
+      return NO_TAB;
+    }
     tab.refs.reset();
     tab.goingBack = true;
     try {
@@ -362,7 +365,7 @@ export class BrowserSidecar {
   }
 
   async screenshot({ owner, tab: tabId }) {
-    const tab = await this.tabFor({ owner, tab: tabId });
+    const tab = await this.#tabFor({ owner, tab: tabId, create: false });
     const checked = this.#checkedPage(tab);
     if (!checked.ok) {
       return checked.result;
