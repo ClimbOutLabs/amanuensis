@@ -160,6 +160,7 @@ export type {
 } from './mcp/implementationPlanGrant';
 export { RemoteMCP } from './mcp/RemoteMCP';
 export type { RemoteMcpHeaders, ResolveHeadersResult } from './mcp/RemoteMCP';
+export { DEFAULT_MAX_MCP_RESPONSE_BYTES } from './mcp/remoteMcpClient';
 export type { RemoteMcpConnection, RemoteMcpTransportType } from './mcp/remoteMcpClient';
 export type { ToolSelectorConfig } from './mcp/ToolSelectorPolicy';
 export {
