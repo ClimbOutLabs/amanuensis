@@ -32,6 +32,60 @@ export const SLOT_COUNT = 2;
  * the next run, so an upgrade frees what they held.
  */
 export const RETIRED_SLOTS: readonly number[] = [3, 4];
+/**
+ * Moves the chat folders of one retired slot into the slot that takes its chats over. Run with `sh -c`
+ * inside a throwaway container: the first argument is the retired slot's workspace, the second the staying
+ * slot's workspace, and the rest are the session ids to move. A move between slot disks is a copy, so each
+ * folder is copied to a temporary name and only renamed into place once the copy has finished; a copy that
+ * runs out of room or is stopped leaves the chat where it was and no partial folder at the destination.
+ * Leftover temporary copies of an earlier stopped move are removed first, and the run stops before it
+ * starts when the folders to move need more room than the staying slot's disk has free.
+ */
+export const MOVE_RETIRED_SESSIONS_SCRIPT = [
+  'from=$1',
+  'to=$2',
+  'shift 2',
+  'sessions=$to/sessions',
+  'mkdir -p "$sessions" || exit 1',
+  'for stale in "$sessions"/.aman-move-*; do',
+  '  if [ -e "$stale" ]; then rm -rf "$stale"; fi',
+  'done',
+  'need_kb=0',
+  'for id in "$@"; do',
+  '  src=$from/sessions/$id',
+  '  dst=$sessions/$id',
+  '  if [ -d "$src" ] && [ ! -e "$dst" ]; then',
+  '    size_kb=$(du -sk "$src" | awk \'{print $1}\')',
+  '    case $size_kb in \'\'|*[!0-9]*) echo "could not tell how much room a chat needs" >&2; exit 1 ;; esac',
+  '    need_kb=$((need_kb + size_kb))',
+  '  fi',
+  'done',
+  'if [ "$need_kb" -gt 0 ]; then',
+  '  free_kb=$(df -Pk "$sessions" | awk \'NR == 2 {print $4}\')',
+  '  case $free_kb in \'\'|*[!0-9]*) echo "could not tell how much room is left" >&2; exit 1 ;; esac',
+  '  if [ "$need_kb" -gt "$free_kb" ]; then',
+  '    echo "not enough room on the disk the chats move to" >&2',
+  '    exit 1',
+  '  fi',
+  'fi',
+  'for id in "$@"; do',
+  '  src=$from/sessions/$id',
+  '  dst=$sessions/$id',
+  '  tmp=$sessions/.aman-move-$id',
+  '  if [ ! -d "$src" ] || [ -e "$dst" ]; then continue; fi',
+  '  if ! cp -a "$src" "$tmp"; then',
+  '    rm -rf "$tmp"',
+  '    echo "a chat could not be copied, so it was left where it was" >&2',
+  '    exit 1',
+  '  fi',
+  '  if ! mv "$tmp" "$dst"; then',
+  '    rm -rf "$tmp"',
+  '    echo "a chat could not be moved into place, so it was left where it was" >&2',
+  '    exit 1',
+  '  fi',
+  '  rm -rf "$src"',
+  'done',
+].join('\n');
 /** A removal deletes the disks of every slot an install may have, retired ones included. */
 const MOST_SLOTS_EVER = Math.max(SLOT_COUNT, ...RETIRED_SLOTS);
 export const SLOT_IMAGE = 'amanuensis-sandbox-slot:local';
@@ -689,7 +743,9 @@ class Slots {
 
   /**
    * Moves each retired slot's chat folders into the workspace of the slot that takes its chats over, with
-   * one throwaway container per retired slot. A folder the target already has is left where it is.
+   * one throwaway container per retired slot. A folder the target already has is left where it is. The
+   * container runs MOVE_RETIRED_SESSIONS_SCRIPT, which copies through a temporary name, so a move that
+   * fails partway never leaves a partial folder where the finished one would go.
    */
   private async moveRetiredSessions(sessions: { slot: number; sessionIds: string[] }[]): Promise<void> {
     for (const { slot, sessionIds } of sessions) {
@@ -708,8 +764,10 @@ class Slots {
           'sh',
           SLOT_IMAGE,
           '-c',
-          'mkdir -p /to/sessions; for id in "$@"; do if [ -d "/from/sessions/$id" ] && [ ! -e "/to/sessions/$id" ]; then mv "/from/sessions/$id" "/to/sessions/$id"; fi; done',
+          MOVE_RETIRED_SESSIONS_SCRIPT,
           'move-sessions',
+          '/from',
+          '/to',
           ...sessionIds,
         ],
         echo: true,

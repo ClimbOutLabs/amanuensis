@@ -150,6 +150,23 @@ describe('SlotSandboxProvider', () => {
     );
   });
 
+  test('with one slot in use, only slot 3 ids resolve, to slot 1; slot 2 and slot 4 ids do not', async () => {
+    const { provider, agents: started } = await providerFor([healthy]);
+    const fromSlot3 = await provider.exec({ sandboxId: `s3-${'a'.repeat(32)}`, command: 'echo ok' });
+    expect(fromSlot3.success).toBe(true);
+    expect(started[0]?.requests).toHaveLength(1);
+    expect(started[0]?.requests[0]?.body).toMatchObject({ session_id: 'a'.repeat(32) });
+    // Slot 2 was a working slot, not a retired one, and slot 4's chats were moved to slot 2, which is
+    // not in use here: neither id's files are on slot 1, so neither resolves to it.
+    await expect(provider.exec({ sandboxId: `s2-${'b'.repeat(32)}`, command: 'x' })).rejects.toBeInstanceOf(
+      SandboxNotAvailableError,
+    );
+    await expect(provider.exec({ sandboxId: `s4-${'c'.repeat(32)}`, command: 'x' })).rejects.toBeInstanceOf(
+      SandboxNotAvailableError,
+    );
+    expect(started[0]?.requests).toHaveLength(1);
+  });
+
   test('a non-zero exit is still a successful call', async () => {
     const { provider } = await providerFor([
       () => ({ status: 200, body: execResponse({ exit_code: 3, output: 'bad' }) }),

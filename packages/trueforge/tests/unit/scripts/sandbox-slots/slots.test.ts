@@ -1,6 +1,11 @@
+import { spawnSync } from 'node:child_process';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { PackError, type PacksPort } from '../../../../scripts/sandbox-slots/packs';
 import {
   CommandNotFoundError,
+  MOVE_RETIRED_SESSIONS_SCRIPT,
   runSandboxSlots,
   SLOT_COUNT,
   stopSandboxSlots,
@@ -569,10 +574,10 @@ describe('the extra slots of an install from before two slots', () => {
     const moves = calls.filter(call => call.args.includes('move-sessions'));
     expect(moves).toHaveLength(2);
     expect(moves[0]?.args).toEqual(
-      expect.arrayContaining(['aman_slot_ws_3:/from', 'aman_slot_ws_1:/to', 'a'.repeat(32)]),
+      expect.arrayContaining(['aman_slot_ws_3:/from', 'aman_slot_ws_1:/to', '/from', '/to', 'a'.repeat(32)]),
     );
     expect(moves[1]?.args).toEqual(
-      expect.arrayContaining(['aman_slot_ws_4:/from', 'aman_slot_ws_2:/to', 'b'.repeat(32)]),
+      expect.arrayContaining(['aman_slot_ws_4:/from', 'aman_slot_ws_2:/to', '/from', '/to', 'b'.repeat(32)]),
     );
     const firstMove = text.findIndex(line => line.includes('move-sessions'));
     expect(firstMove).toBeGreaterThan(-1);
@@ -580,6 +585,27 @@ describe('the extra slots of an install from before two slots', () => {
     // themselves are only removed after the move.
     expect(firstMove).toBeGreaterThan(text.indexOf('rm --force c3 c4'));
     expect(firstMove).toBeLessThan(text.indexOf('volume rm aman_slot_ws_3'));
+  });
+
+  test('a move that fails stops the run and removes no workspace', async () => {
+    const failingMove = (call: Call): Partial<CommandResult> | undefined => {
+      const text = joined(call);
+      if (call.args[0] === 'run' && call.args.includes('ls')) {
+        if (text.includes('aman_slot_ws_3:/from:ro')) {
+          return { stdout: `${'a'.repeat(32)}\n` };
+        }
+      }
+      if (call.args.includes('move-sessions')) {
+        return { exitCode: 1, stderr: 'not enough room on the disk the chats move to' };
+      }
+      return oldInstall(call);
+    };
+    const { result, calls } = await run(failingMove);
+    expect(result).toMatchObject({ ok: false, step: 'start' });
+    expect(!result.ok && result.error).toContain('could not be moved, so nothing was removed');
+    const text = calls.map(joined);
+    expect(text.some(line => line.startsWith('volume rm'))).toBe(false);
+    expect(text.some(line => line.includes('up -d'))).toBe(false);
   });
 
   test('on a native Linux host their disks go only with --fix and after agreeing', async () => {
@@ -1018,5 +1044,110 @@ describe('the package mirror folders of an earlier install', () => {
     const built = await run(mirrors([1, 2]), false, { mode: 'build' });
     expect(built.result.ok).toBe(true);
     expect(built.calls.some(call => joined(call).startsWith('volume inspect'))).toBe(false);
+  });
+});
+
+describe('the script that moves the chats of the extra slots', () => {
+  const SESSION = 'a'.repeat(32);
+
+  /** A retired workspace holding one chat and an empty staying workspace, in a fresh temp folder. */
+  function stageMove(content = 'the whole chat\n'): { root: string; from: string; to: string } {
+    const root = mkdtempSync(join(tmpdir(), 'aman-move-'));
+    const from = join(root, 'from');
+    const to = join(root, 'to');
+    mkdirSync(join(from, 'sessions', SESSION), { recursive: true });
+    writeFileSync(join(from, 'sessions', SESSION, 'chat.txt'), content);
+    mkdirSync(join(to, 'sessions'), { recursive: true });
+    return { root, from, to };
+  }
+
+  function runMoveScript(input: { from: string; to: string; pathPrefix?: string }): {
+    status: number | null;
+    stderr: string;
+  } {
+    const result = spawnSync(
+      'sh',
+      ['-c', MOVE_RETIRED_SESSIONS_SCRIPT, 'move-sessions', input.from, input.to, SESSION],
+      {
+        encoding: 'utf8',
+        env:
+          input.pathPrefix === undefined
+            ? process.env
+            : { ...process.env, PATH: `${input.pathPrefix}:${process.env['PATH'] ?? ''}` },
+      },
+    );
+    return { status: result.status, stderr: result.stderr };
+  }
+
+  /** A folder of stand-in commands, so a test can make one tool fail or answer as it chooses. */
+  function stubBin(root: string, stubs: Record<string, string>): string {
+    const bin = join(root, 'bin');
+    mkdirSync(bin, { recursive: true });
+    for (const [name, body] of Object.entries(stubs)) {
+      writeFileSync(join(bin, name), `#!/bin/sh\n${body}\n`, { mode: 0o755 });
+    }
+    return bin;
+  }
+
+  test('a finished move puts the whole folder in place and removes the original', () => {
+    const { from, to } = stageMove();
+    const result = runMoveScript({ from, to });
+    expect(result.status).toBe(0);
+    expect(readFileSync(join(to, 'sessions', SESSION, 'chat.txt'), 'utf8')).toBe('the whole chat\n');
+    expect(existsSync(join(from, 'sessions', SESSION))).toBe(false);
+    expect(existsSync(join(to, 'sessions', `.aman-move-${SESSION}`))).toBe(false);
+  });
+
+  test('a leftover temporary copy of a stopped move is removed on the rerun', () => {
+    const { from, to } = stageMove();
+    const leftover = join(to, 'sessions', `.aman-move-${SESSION}`);
+    mkdirSync(leftover, { recursive: true });
+    writeFileSync(join(leftover, 'chat.txt'), 'partial\n');
+    const result = runMoveScript({ from, to });
+    expect(result.status).toBe(0);
+    expect(readFileSync(join(to, 'sessions', SESSION, 'chat.txt'), 'utf8')).toBe('the whole chat\n');
+    expect(existsSync(leftover)).toBe(false);
+  });
+
+  test('a copy that fails partway leaves the original intact and no folder at the destination', () => {
+    const { root, from, to } = stageMove();
+    // The stand-in copy writes a partial folder under the temporary name, then fails the way a copy
+    // that runs out of room does.
+    const bin = stubBin(root, {
+      cp: [
+        'for last; do :; done',
+        'mkdir -p "$last"',
+        'printf \'partial\\n\' > "$last/chat.txt"',
+        "echo 'No space left on device' >&2",
+        'exit 1',
+      ].join('\n'),
+    });
+    const failed = runMoveScript({ from, to, pathPrefix: bin });
+    expect(failed.status).not.toBe(0);
+    expect(readFileSync(join(from, 'sessions', SESSION, 'chat.txt'), 'utf8')).toBe('the whole chat\n');
+    expect(existsSync(join(to, 'sessions', SESSION))).toBe(false);
+    expect(existsSync(join(to, 'sessions', `.aman-move-${SESSION}`))).toBe(false);
+    // A rerun with room again finishes the move.
+    const retried = runMoveScript({ from, to });
+    expect(retried.status).toBe(0);
+    expect(readFileSync(join(to, 'sessions', SESSION, 'chat.txt'), 'utf8')).toBe('the whole chat\n');
+    expect(existsSync(join(from, 'sessions', SESSION))).toBe(false);
+  });
+
+  test('when there is not enough room the move does not start', () => {
+    const { root, from, to } = stageMove('x'.repeat(64 * 1024));
+    const bin = stubBin(root, {
+      df: [
+        "printf '%s\\n' 'Filesystem 1024-blocks Used Available Capacity Mounted on'",
+        "printf '%s\\n' 'stub 999999 999998 1 100% /to'",
+      ].join('\n'),
+      cp: `touch ${join(root, 'cp-called')}`,
+    });
+    const result = runMoveScript({ from, to, pathPrefix: bin });
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain('not enough room');
+    expect(existsSync(join(root, 'cp-called'))).toBe(false);
+    expect(existsSync(join(from, 'sessions', SESSION))).toBe(true);
+    expect(existsSync(join(to, 'sessions', SESSION))).toBe(false);
   });
 });

@@ -414,18 +414,22 @@ export class SlotSandboxProvider implements SandboxProvider {
     }
   }
 
+  /** The slot a retired slot's chats went to, as an index: slot 3 to slot 1, slot 4 to slot 2, and no other slot. */
+  private retiredIndex(slot: number): number | undefined {
+    const target = slot === 2 ? 0 : slot === 3 ? 1 : undefined;
+    return target !== undefined && target < this.clients.length ? target : undefined;
+  }
+
   private resolve(sandboxId: string): { client: SlotClient; sessionId: string } {
     const parsed = parseSandboxId(sandboxId);
     // Installs from before had four slots; the setup moved the chats of slots 3 and 4 into slots 1 and 2
-    // before removing the old slots, so an old id still resolves: slot 3 to slot 1, slot 4 to slot 2.
-    const index =
-      parsed === undefined || this.clients.length === 0
-        ? undefined
-        : parsed.slot < this.clients.length
-          ? parsed.slot
-          : parsed.slot <= 3
-            ? parsed.slot % this.clients.length
-            : undefined;
+    // before removing the old slots, so an old id still resolves: slot 3 to slot 1, slot 4 to slot 2. That
+    // mapping is fixed and does not follow the number of slots in use: with one slot in use a slot 4 id
+    // does not resolve, because its chats are on slot 2, and a slot 2 id does not resolve either.
+    let index: number | undefined;
+    if (parsed !== undefined && this.clients.length > 0) {
+      index = parsed.slot < this.clients.length ? parsed.slot : this.retiredIndex(parsed.slot);
+    }
     const client = index === undefined ? undefined : this.clients[index];
     if (parsed === undefined || client === undefined) {
       throw new SandboxNotAvailableError(sandboxId);
