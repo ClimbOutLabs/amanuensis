@@ -21,6 +21,51 @@ function fieldKind(element) {
 
 const INTERACTIVE_TAGS = new Set(['A', 'BUTTON', 'INPUT', 'SELECT', 'TEXTAREA']);
 const HEADING_TAGS = new Set(['H1', 'H2', 'H3', 'H4', 'H5', 'H6']);
+/** Controls a page builds from plain elements, such as a custom dropdown's options, which can be clicked too. */
+const INTERACTIVE_ROLES = [
+  'button',
+  'link',
+  'option',
+  'menuitem',
+  'menuitemradio',
+  'menuitemcheckbox',
+  'tab',
+  'combobox',
+  'checkbox',
+  'radio',
+  'switch',
+  'treeitem',
+];
+const ROLE_SELECTOR = INTERACTIVE_ROLES.map(role => `[role="${role}"]`).join(',');
+
+/** What a person sees as a control's state: the chosen option and the choices of a dropdown, or whether a box is ticked. */
+function controlValue(element) {
+  if (element.tagName === 'SELECT') {
+    const chosen = element.selectedOptions[0]?.textContent?.trim() ?? '';
+    const choices = Array.from(element.options)
+      .map(option => option.textContent?.trim() ?? '')
+      .filter(text => text !== '')
+      .slice(0, 40);
+    return `${chosen === '' ? '(none)' : chosen} (choices: ${choices.join(' | ')})`;
+  }
+  if (element.tagName === 'INPUT') {
+    const type = (element.getAttribute('type') ?? 'text').toLowerCase();
+    if (type === 'checkbox' || type === 'radio') {
+      return element.checked ? 'checked' : 'not checked';
+    }
+    return element.value;
+  }
+  if (element.tagName === 'TEXTAREA') {
+    return element.value;
+  }
+  const state =
+    element.getAttribute('aria-checked') ??
+    element.getAttribute('aria-selected') ??
+    element.getAttribute('aria-expanded');
+  return state === null
+    ? undefined
+    : `${element.getAttribute('aria-expanded') !== null ? 'expanded' : 'checked'}: ${state}`;
+}
 
 function isVisible(element) {
   const style = window.getComputedStyle(element);
@@ -132,24 +177,26 @@ function blockText(element) {
 /** Visible page content in reading order: headings, text, and the controls, each with a stable id. */
 export function extractSnapshotNodes() {
   const nodes = [];
-  const selector = [...HEADING_TAGS, ...TEXT_TAGS, ...INTERACTIVE_TAGS].join(',');
+  const selector = [...HEADING_TAGS, ...TEXT_TAGS, ...INTERACTIVE_TAGS, ROLE_SELECTOR].join(',');
   for (const element of document.querySelectorAll(selector)) {
     if (!isVisible(element)) {
       continue;
     }
-    if (TEXT_TAGS.has(element.tagName)) {
+    const roleControl = element.matches(ROLE_SELECTOR);
+    if (TEXT_TAGS.has(element.tagName) && !roleControl) {
       const text = blockText(element);
       if (text !== '') {
         nodes.push({ id: domPath(element), role: 'text', name: text, field_kind: null, actionable: false });
       }
       continue;
     }
-    const actionable = INTERACTIVE_TAGS.has(element.tagName);
+    const actionable = INTERACTIVE_TAGS.has(element.tagName) || roleControl;
+    const name = accessibleName(element);
     nodes.push({
       id: domPath(element),
       role: roleOf(element),
-      name: accessibleName(element),
-      value: element.tagName === 'INPUT' || element.tagName === 'TEXTAREA' ? element.value : undefined,
+      name: name === '' && roleControl ? (element.innerText ?? '').replace(/\s+/g, ' ').trim().slice(0, 200) : name,
+      value: controlValue(element),
       field_kind: fieldKind(element),
       actionable,
     });

@@ -488,6 +488,28 @@ export class BrowserSidecar {
     return this.#read(tab);
   }
 
+  /** Picks one choice of a dropdown the last read gave a ref, by the text shown for it, then reads the page. */
+  async select({ owner, tab: tabId, ref, option }) {
+    const tab = await this.#tabFor({ owner, tab: tabId, create: false });
+    const checked = this.#checkedPage(tab);
+    if (!checked.ok) {
+      return checked.result;
+    }
+    const element = await this.#elementFor(tab, ref);
+    if (element === undefined || typeof option !== 'string') {
+      return { status: 'no_element' };
+    }
+    const picked = await element
+      .selectOption({ label: option }, { timeout: 5000 })
+      .catch(() => element.selectOption(option, { timeout: 5000 }))
+      .catch(() => undefined);
+    if (picked === undefined) {
+      return { status: 'no_element' };
+    }
+    await tab.page.waitForLoadState('networkidle', { timeout: 3000 }).catch(() => undefined);
+    return this.#read(tab);
+  }
+
   async screenshot({ owner, tab: tabId }) {
     const tab = await this.#tabFor({ owner, tab: tabId, create: false });
     const checked = this.#checkedPage(tab);
@@ -573,6 +595,7 @@ const ROUTES = {
   'POST /screenshot': (sidecar, where) => sidecar.screenshot(where),
   'POST /where': (sidecar, where) => sidecar.where(where),
   'POST /click': (sidecar, where, body) => sidecar.click({ ...where, ref: body.ref }),
+  'POST /select': (sidecar, where, body) => sidecar.select({ ...where, ref: body.ref, option: body.option }),
   'POST /type': (sidecar, where, body) =>
     sidecar.type({ ...where, ref: body.ref, text: body.text, submit: body.submit }),
   'POST /sign_in': (sidecar, where, body) =>

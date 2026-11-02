@@ -29,7 +29,10 @@ const TYPE_INPUT_SCHEMA = z
   .object({ ref: z.string().min(1).max(32), text: z.string().max(2000), submit: z.boolean().optional() })
   .strict();
 
+const SELECT_INPUT_SCHEMA = z.object({ ref: z.string().min(1).max(32), option: z.string().min(1).max(500) }).strict();
+
 type BrowserClickInput = z.infer<typeof CLICK_INPUT_SCHEMA>;
+type BrowserSelectInput = z.infer<typeof SELECT_INPUT_SCHEMA>;
 type BrowserTypeInput = z.infer<typeof TYPE_INPUT_SCHEMA>;
 
 /** The sidecar found no element for the ref: the page changed since it was read, or the field is a password. */
@@ -242,6 +245,14 @@ class BrowserTool extends LocalToolMCP {
       handler: async (input: BrowserClickInput) => this.act('/click', input),
     }),
     defineTool({
+      name: 'browser_select',
+      annotations: { readOnlyHint: false, openWorldHint: true },
+      description:
+        'Pick a choice in a dropdown (combobox) on the open page by its ref and the choice text shown in the last read, then read the page. For checkboxes, radio buttons and custom dropdowns, use browser_click.',
+      schema: SELECT_INPUT_SCHEMA,
+      handler: async (input: BrowserSelectInput) => this.act('/select', input),
+    }),
+    defineTool({
       name: 'browser_type',
       annotations: { readOnlyHint: false, openWorldHint: true },
       description:
@@ -346,7 +357,7 @@ class BrowserTool extends LocalToolMCP {
     switch (result.body.status) {
       case 'no_element':
         return errorResponse(
-          'That ref is not on the page any more, or it is a password field. Read the page again with browser_read and use a ref from that read. Use browser_sign_in for passwords.',
+          'That ref is not on the page any more, the choice is not in that dropdown, or it is a password field. Read the page again with browser_read and use a ref from that read. Use browser_sign_in for passwords.',
         );
       case 'moved':
         return errorResponse(movedMessage(result.body.url));
