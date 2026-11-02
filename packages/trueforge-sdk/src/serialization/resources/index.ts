@@ -4,6 +4,8 @@ export * from "./bugReports/client/requests/index.js";
 export * as bugReports from "./bugReports/index.js";
 export * from "./data/client/requests/index.js";
 export * as data from "./data/index.js";
+export * from "./deliveries/client/requests/index.js";
+export * as deliveries from "./deliveries/index.js";
 export * from "./internal/client/requests/index.js";
 export * as internal from "./internal/index.js";
 export * as memory from "./memory/index.js";
