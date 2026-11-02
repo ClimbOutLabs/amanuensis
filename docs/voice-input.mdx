@@ -8,6 +8,23 @@ The chat composer has a microphone button beside Send. Tap it to start recording
 
 Transcription runs fully on your own hardware. The browser encodes the recording as 16 kHz mono WAV and posts it to the agent server (`POST /api/v1/voice/transcribe`); the server forwards the bytes to the `aman-stt` sidecar, which runs Whisper `small` (int8, CPU) via faster-whisper and returns the transcript. The browser never talks to the sidecar directly, and no audio or transcript ever leaves your machine. When the sidecar is unreachable, the mic button shows as unavailable and everything else keeps working.
 
+## Ways to talk
+
+- **Tap to record.** Tap the mic, talk, and tap it again. Your words go into the message box so you can check them before you send.
+- **Hold to talk.** Hold the mic, talk, and let go. Your words are sent as soon as they are written down.
+- **Hold-to-talk keys.** On a computer, hold Ctrl + Shift + Space while you talk, and let go to send. You can pick other keys, or turn them off, in Personalization under "Talking to Aman". The choice is saved in this browser only.
+- **Hands-free.** Tap the hands-free button beside the mic. Aman listens, sends what you said when you pause, reads the answer aloud, and then listens again. Tap the button again to stop. Hands-free also stops when you switch chats, leave the page, take the mic by hand, or stay quiet for 30 seconds. It is never on unless you turn it on, and it only listens in the chat where you turned it on.
+- **Paste.** Choose "Paste from clipboard" in the `+` menu to add copied text to your message. To copy an answer, use the copy button under it.
+
+## Where your voice goes
+
+This section is the voice feature's data-flow record.
+
+- **Your voice.** The browser records only while the mic is on: while you record, hold, or have hands-free on. The recording goes to the Aman server on your computer, which passes it to `aman-stt` and gets the words back. The recording is not saved.
+- **The answer read aloud.** The answer's text goes to the Aman server, which passes it to `aman-tts` and sends the audio back. When `aman-tts` is not running, your browser's built-in voice reads it instead, and the text stays in the browser.
+- **What never leaves your computer.** Your recordings, the words written down from them, and the audio of the answers. No speech service on the internet is called.
+- **What is kept.** Only the messages themselves, like any typed message. The server logs sizes, timings and status codes, never what was said.
+
 ## Deployment
 
 `docker-compose.yml` runs `aman-stt` as a sidecar next to the server:
@@ -41,6 +58,8 @@ Point the server at the published port by setting `STT_URL=http://localhost:8001
 ## Spoken replies: the voice on your computer
 
 Replies can be read aloud. When the voice container is running, replies are read by a voice that runs on your own computer. When it is not, your browser's built-in voice reads them instead.
+
+**Choosing the voice.** Pick one of six voices in Personalization under "Voice replies". Heart is the default. Picking a voice plays a short sample. The choice is saved in this browser only.
 
 **What it is.** A small container called `aman-tts`. It runs the Kokoro voice model (Apache-2.0) on the computer's processor and turns reply text into audio. The model and its voices are built into the container, so it never goes online.
 

@@ -17,7 +17,7 @@ vi.mock('@/atoms/lib/voiceRecorder.js', () => ({
 }));
 
 import type { StartVoiceRecordingOptions } from '@/atoms/lib/voiceRecorder.js';
-import { VoiceInputButton } from '@/atoms/VoiceInputButton.js';
+import { HOLD_TO_SEND_MS, VoiceInputButton } from '@/atoms/VoiceInputButton.js';
 import { useSpokenReply } from '@/components/SpokenReplyContext.js';
 import {
   VoiceInputProvider,
@@ -25,7 +25,8 @@ import {
   type VoiceInputApi,
   type VoiceTranscription,
 } from '@/components/VoiceInputContext.js';
-import { clearDraftFromVoice, takeDraftFromVoice } from '@/utils/voiceTurn.js';
+import { PUSH_TO_TALK_HOTKEY_STORAGE_KEY } from '@/utils/pushToTalkHotkey.js';
+import { clearDraftFromVoice, setHandsFree, takeDraftFromVoice, voiceReplyDone } from '@/utils/voiceTurn.js';
 import { installSpeechSynthesis, removeSpeechSynthesis, stopSpokenReply } from '../utils/speechSynthesisFake.js';
 
 const DEFAULT_TRANSCRIPTION: VoiceTranscription = {
@@ -377,4 +378,241 @@ describe('VoiceInputButton and read-aloud replies', () => {
 
     expect(takeDraftFromVoice()).toBe(true);
   });
+});
+
+describe('VoiceInputButton push-to-talk', () => {
+  let requestSubmit: ReturnType<typeof vi.fn<(submitter?: HTMLElement | null) => void>>;
+
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    clearDraftFromVoice();
+    window.localStorage.removeItem(PUSH_TO_TALK_HOTKEY_STORAGE_KEY);
+    requestSubmit = vi.fn<(submitter?: HTMLElement | null) => void>();
+    HTMLFormElement.prototype.requestSubmit = requestSubmit;
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  function renderInForm(api: VoiceInputApi) {
+    return render(
+      <form>
+        <VoiceInputProvider api={api}>
+          <VoiceInputButton disabled={false} />
+        </VoiceInputProvider>
+      </form>,
+    );
+  }
+
+  // jsdom has no PointerEvent; a MouseEvent of the same type carries `button` the way a browser does.
+  function pointer(target: Element, type: 'pointerdown' | 'pointerup') {
+    fireEvent(target, new MouseEvent(type, { bubbles: true, cancelable: true, button: 0 }));
+  }
+
+  async function settle() {
+    await act(async () => {
+      await Promise.resolve();
+    });
+  }
+
+  it('holding the mic and letting go sends the spoken words', async () => {
+    const { api, transcribeMock } = makeApi();
+    renderInForm(api);
+    const mic = await screen.findByRole('button', { name: 'Record voice message' });
+
+    pointer(mic, 'pointerdown');
+    await screen.findByRole('button', { name: 'Stop and transcribe' });
+    vi.setSystemTime(Date.now() + HOLD_TO_SEND_MS);
+    pointer(screen.getByRole('button', { name: 'Stop and transcribe' }), 'pointerup');
+
+    await screen.findByRole('button', { name: 'Record voice message' });
+    await settle();
+    expect(transcribeMock).toHaveBeenCalledTimes(1);
+    expect(mockSetText).toHaveBeenCalledWith('existing draft hello world');
+    expect(requestSubmit).toHaveBeenCalledTimes(1);
+  });
+
+  it('a short press is a tap: recording goes on and nothing is sent', async () => {
+    const { api, transcribeMock } = makeApi();
+    renderInForm(api);
+    const mic = await screen.findByRole('button', { name: 'Record voice message' });
+
+    pointer(mic, 'pointerdown');
+    const recording = await screen.findByRole('button', { name: 'Stop and transcribe' });
+    pointer(recording, 'pointerup');
+    fireEvent.click(recording, { detail: 1 });
+
+    expect(screen.getByRole('button', { name: 'Stop and transcribe' })).toBeInTheDocument();
+    expect(transcribeMock).not.toHaveBeenCalled();
+
+    // The next tap puts the words in the box without sending them.
+    fireEvent.click(screen.getByRole('button', { name: 'Stop and transcribe' }));
+    await screen.findByRole('button', { name: 'Record voice message' });
+    await settle();
+    expect(mockSetText).toHaveBeenCalledWith('existing draft hello world');
+    expect(requestSubmit).not.toHaveBeenCalled();
+  });
+
+  it('holding the hotkey records and letting go of Space sends', async () => {
+    const { api } = makeApi();
+    renderInForm(api);
+    await screen.findByRole('button', { name: 'Record voice message' });
+
+    fireEvent.keyDown(window, { code: 'Space', key: ' ', ctrlKey: true, shiftKey: true });
+    await screen.findByRole('button', { name: 'Stop and transcribe' });
+    vi.setSystemTime(Date.now() + HOLD_TO_SEND_MS);
+    fireEvent.keyUp(window, { code: 'Space', key: ' ' });
+
+    await screen.findByRole('button', { name: 'Record voice message' });
+    await settle();
+    expect(requestSubmit).toHaveBeenCalledTimes(1);
+  });
+
+  it('the hotkey does nothing when switched off', async () => {
+    window.localStorage.setItem(PUSH_TO_TALK_HOTKEY_STORAGE_KEY, 'off');
+    const { api } = makeApi();
+    renderInForm(api);
+    await screen.findByRole('button', { name: 'Record voice message' });
+
+    fireEvent.keyDown(window, { code: 'Space', key: ' ', ctrlKey: true, shiftKey: true });
+    await settle();
+    expect(mockStartVoiceRecording).not.toHaveBeenCalled();
+  });
+
+  it('an empty transcript is never sent', async () => {
+    const { api } = makeApi({ transcribe: async () => ({ ...DEFAULT_TRANSCRIPTION, text: '  ' }) });
+    renderInForm(api);
+    const mic = await screen.findByRole('button', { name: 'Record voice message' });
+
+    pointer(mic, 'pointerdown');
+    await screen.findByRole('button', { name: 'Stop and transcribe' });
+    vi.setSystemTime(Date.now() + HOLD_TO_SEND_MS);
+    pointer(screen.getByRole('button', { name: 'Stop and transcribe' }), 'pointerup');
+
+    await screen.findByRole('button', { name: 'Record voice message' });
+    await settle();
+    expect(requestSubmit).not.toHaveBeenCalled();
+  });
+});
+
+describe('VoiceInputButton hands-free', () => {
+  let silence: ((event: 'pause' | 'quiet') => void) | undefined;
+
+  beforeEach(() => {
+    clearDraftFromVoice();
+    setHandsFree('off');
+    silence = undefined;
+    mockStartVoiceRecording.mockImplementation(async (options: StartVoiceRecordingOptions) => {
+      silence = options.onSilence;
+      return makeRecorder();
+    });
+    // Stands in for the composer: a send takes the voice draft.
+    HTMLFormElement.prototype.requestSubmit = vi.fn<(submitter?: HTMLElement | null) => void>(() => {
+      takeDraftFromVoice();
+    });
+  });
+
+  function composer(api: VoiceInputApi, { isRunning = false }: { isRunning?: boolean } = {}) {
+    return (
+      <form>
+        <VoiceInputProvider api={api}>
+          <VoiceInputButton disabled={isRunning} isRunning={isRunning} />
+        </VoiceInputProvider>
+      </form>
+    );
+  }
+
+  async function startHandsFree() {
+    const { api, transcribeMock } = makeApi();
+    const view = render(composer(api));
+    fireEvent.click(await screen.findByRole('button', { name: 'Start hands-free conversation' }));
+    await screen.findByText('Listening. Pause to send.');
+    return { api, transcribeMock, view };
+  }
+
+  it('sends on a pause, waits for the answer, then listens again', async () => {
+    const { transcribeMock } = await startHandsFree();
+    expect(mockStartVoiceRecording).toHaveBeenCalledTimes(1);
+
+    act(() => silence?.('pause'));
+    await screen.findByText('Waiting for the answer…');
+    expect(transcribeMock).toHaveBeenCalledTimes(1);
+    expect(HTMLFormElement.prototype.requestSubmit).toHaveBeenCalledTimes(1);
+
+    act(() => voiceReplyDone());
+    await screen.findByText('Listening. Pause to send.');
+    expect(mockStartVoiceRecording).toHaveBeenCalledTimes(2);
+  });
+
+  it('stops after a long quiet and says how to start again', async () => {
+    await startHandsFree();
+
+    act(() => silence?.('quiet'));
+
+    expect(await screen.findByText(/Hands-free stopped because it was quiet/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Start hands-free conversation' })).toBeInTheDocument();
+  });
+
+  it('stops when the message could not be sent', async () => {
+    HTMLFormElement.prototype.requestSubmit = vi.fn<(submitter?: HTMLElement | null) => void>();
+    await startHandsFree();
+
+    act(() => silence?.('pause'));
+
+    expect(await screen.findByText(/could not be sent yet/)).toBeInTheDocument();
+    act(() => voiceReplyDone());
+    expect(mockStartVoiceRecording).toHaveBeenCalledTimes(1);
+  });
+
+  it('turning it off releases the mic and ends the conversation', async () => {
+    await startHandsFree();
+    const recorder = await mockStartVoiceRecording.mock.results[0]?.value;
+
+    fireEvent.click(screen.getByRole('button', { name: 'Stop hands-free conversation' }));
+
+    expect(recorder.cancel).toHaveBeenCalled();
+    act(() => voiceReplyDone());
+    expect(mockStartVoiceRecording).toHaveBeenCalledTimes(1);
+  });
+
+  it('switching chats ends the conversation', async () => {
+    await startHandsFree();
+
+    act(() => {
+      window.dispatchEvent(new Event('trueforge:routechange'));
+    });
+
+    expect(await screen.findByRole('button', { name: 'Start hands-free conversation' })).toBeInTheDocument();
+  });
+
+  it('while Aman answers only the hands-free switch shows, and listening resumes after a remount', async () => {
+    const { api, view } = await startHandsFree();
+    act(() => silence?.('pause'));
+    await screen.findByText('Waiting for the answer…');
+
+    view.rerender(composer(api, { isRunning: true }));
+    expect(screen.queryByRole('button', { name: 'Record voice message' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Stop hands-free conversation' })).toBeInTheDocument();
+
+    // An approval pause mounts a new composer; the conversation carries on there.
+    view.unmount();
+    render(composer(api));
+    act(() => voiceReplyDone());
+    await screen.findByText('Listening. Pause to send.');
+    expect(mockStartVoiceRecording).toHaveBeenCalledTimes(2);
+  });
+
+  it('shows nothing while a turn runs when hands-free is off', async () => {
+    const { api } = makeApi();
+    const { container } = render(composer(api, { isRunning: true }));
+    await settleAll();
+    expect(container.querySelector('button')).toBeNull();
+  });
+
+  async function settleAll() {
+    await act(async () => {
+      await Promise.resolve();
+    });
+  }
 });

@@ -1,9 +1,15 @@
 // @vitest-environment jsdom
 import { fireEvent, render, screen } from '@testing-library/react';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { SpokenReplyProvider } from '@/components/SpokenReplyContext.js';
 import { VoiceReplySettings } from '@/components/VoiceReplySettings.js';
-import { SPEAK_VOICE_REPLIES_STORAGE_KEY, SPEECH_VOICE_STORAGE_KEY } from '@/utils/speechReplyPreferences.js';
+import {
+  SERVER_VOICE_STORAGE_KEY,
+  SPEAK_VOICE_REPLIES_STORAGE_KEY,
+  SPEECH_VOICE_STORAGE_KEY,
+} from '@/utils/speechReplyPreferences.js';
+import type { ServerVoiceApi } from '@/utils/spokenReplyPlayer.js';
 import { installSpeechSynthesis, makeVoice, removeSpeechSynthesis } from '../utils/speechSynthesisFake.js';
 
 describe('VoiceReplySettings', () => {
@@ -51,5 +57,31 @@ describe('VoiceReplySettings', () => {
     const { container } = render(<VoiceReplySettings />);
 
     expect(container).toBeEmptyDOMElement();
+  });
+
+  it('offers the computer voices when that voice is wired, and plays a sample of the one picked', () => {
+    const speak = vi.fn<ServerVoiceApi['speak']>(() => new Promise<Blob>(() => {}));
+    render(
+      <SpokenReplyProvider serverVoice={{ speak }}>
+        <VoiceReplySettings />
+      </SpokenReplyProvider>,
+    );
+
+    const picker = screen.getByLabelText('Voice');
+    expect(picker).toHaveValue('af_heart');
+    expect(screen.getAllByRole('option', { name: /, a (woman|man)/ })).toHaveLength(6);
+    expect(screen.getByLabelText('Backup voice')).toBeInTheDocument();
+
+    fireEvent.change(picker, { target: { value: 'am_fenrir' } });
+
+    expect(window.localStorage.getItem(SERVER_VOICE_STORAGE_KEY)).toBe('am_fenrir');
+    expect(speak).toHaveBeenCalledWith(expect.objectContaining({ voice: 'am_fenrir' }));
+  });
+
+  it('shows only the browser voices when no computer voice is wired', () => {
+    render(<VoiceReplySettings />);
+
+    expect(screen.queryByRole('option', { name: /, a (woman|man)/ })).toBeNull();
+    expect(screen.queryByLabelText('Backup voice')).toBeNull();
   });
 });

@@ -1,4 +1,5 @@
 import { createBooleanDisplayPreference } from './booleanDisplayPreference.js';
+import { createDisplayPreference } from './displayPreference.js';
 
 /**
  * Whether replies to a voice-sent message are read aloud. Kept in this browser like the other
@@ -37,4 +38,39 @@ export function writeSpeechVoiceURI(voiceURI: string | null): void {
   } catch {
     // Not kept; the choice still applies until the page reloads.
   }
+}
+
+/**
+ * Voices of the reading voice on the person's own computer. The ids are the voices baked into the
+ * `aman-tts` image (`VOICE_IDS` in its pins); the first is its default.
+ */
+export const SERVER_VOICES = [
+  { id: 'af_heart', label: 'Heart, a woman (default)' },
+  { id: 'af_bella', label: 'Bella, a woman' },
+  { id: 'af_nicole', label: 'Nicole, a woman' },
+  { id: 'af_sarah', label: 'Sarah, a woman' },
+  { id: 'am_michael', label: 'Michael, a man' },
+  { id: 'am_fenrir', label: 'Fenrir, a man' },
+] as const;
+
+export type ServerVoiceId = (typeof SERVER_VOICES)[number]['id'];
+
+export const SERVER_VOICE_STORAGE_KEY = 'aman.server_voice';
+
+export function isServerVoiceId(value: string): value is ServerVoiceId {
+  return SERVER_VOICES.some(voice => voice.id === value);
+}
+
+const serverVoice = createDisplayPreference<ServerVoiceId>({
+  storageKey: SERVER_VOICE_STORAGE_KEY,
+  defaultValue: 'af_heart',
+  parse: stored => (isServerVoiceId(stored) ? stored : undefined),
+  serialize: id => id,
+});
+
+/** The computer voice the person picked; read when each reply is read aloud. */
+export const readServerVoice = serverVoice.read;
+
+export function useServerVoice(): { voice: ServerVoiceId; setVoice: (voice: ServerVoiceId) => void } {
+  return { voice: serverVoice.useValue(), setVoice: serverVoice.set };
 }

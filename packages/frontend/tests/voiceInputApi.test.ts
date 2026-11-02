@@ -197,20 +197,20 @@ test('transcribe aborts a hanging request at the client timeout', async () => {
   await assert.rejects(api.transcribe({ audio: new Blob(['x']) }), /timed out/);
 });
 
-test('server voice posts the reply text and returns the audio', async () => {
+test('server voice posts the reply text and the chosen voice, and returns the audio', async () => {
   const calls: { url: string; init: RequestInit | undefined }[] = [];
   const fetcher: typeof fetch = async (url, init) => {
     calls.push({ url: String(url), init });
     return new Response(new Uint8Array([1, 2, 3]), { status: 200, headers: { 'content-type': 'audio/wav' } });
   };
 
-  const audio = await createServerVoiceApi(fetcher).speak({ text: 'Hello there.' });
+  const audio = await createServerVoiceApi(fetcher).speak({ text: 'Hello there.', voice: 'am_michael' });
 
   assert.equal(audio.size, 3);
   assert.equal(calls.length, 1);
   assert.match(calls[0]?.url ?? '', /\/api\/v1\/voice\/speak$/);
   assert.equal(calls[0]?.init?.method, 'POST');
-  assert.equal(calls[0]?.init?.body, JSON.stringify({ text: 'Hello there.' }));
+  assert.equal(calls[0]?.init?.body, JSON.stringify({ text: 'Hello there.', voice: 'am_michael' }));
 });
 
 test('server voice rejects with the server message when the voice is off', async () => {
@@ -220,11 +220,14 @@ test('server voice rejects with the server message when the voice is off', async
       503,
     );
 
-  await assert.rejects(createServerVoiceApi(fetcher).speak({ text: 'Hi.' }), /not available right now/);
+  await assert.rejects(
+    createServerVoiceApi(fetcher).speak({ text: 'Hi.', voice: 'af_heart' }),
+    /not available right now/,
+  );
 });
 
 test('server voice rejects an answer that is not audio', async () => {
   const fetcher: typeof fetch = async () => jsonResponse({}, 200);
 
-  await assert.rejects(createServerVoiceApi(fetcher).speak({ text: 'Hi.' }), /not audio/);
+  await assert.rejects(createServerVoiceApi(fetcher).speak({ text: 'Hi.', voice: 'af_heart' }), /not audio/);
 });
