@@ -8,6 +8,7 @@ export const BROWSER_READ_TOOL_NAME = 'browser_read';
 export const BROWSER_SCROLL_TOOL_NAME = 'browser_scroll';
 export const BROWSER_BACK_TOOL_NAME = 'browser_back';
 export const BROWSER_SCREENSHOT_TOOL_NAME = 'browser_screenshot';
+export const BROWSER_SIGN_IN_TOOL_NAME = 'browser_sign_in';
 
 export const BROWSER_TOOL_NAMES = [
   BROWSER_OPEN_TOOL_NAME,
@@ -15,6 +16,7 @@ export const BROWSER_TOOL_NAMES = [
   BROWSER_SCROLL_TOOL_NAME,
   BROWSER_BACK_TOOL_NAME,
   BROWSER_SCREENSHOT_TOOL_NAME,
+  BROWSER_SIGN_IN_TOOL_NAME,
 ] as const;
 
 export type BrowserToolName = (typeof BROWSER_TOOL_NAMES)[number];

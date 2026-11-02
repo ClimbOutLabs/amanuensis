@@ -48,6 +48,7 @@ const FIRST_PARTY_REQUIRES_NETWORK: Record<string, boolean> = {
   browser_scroll: true,
   browser_back: true,
   browser_screenshot: true,
+  browser_sign_in: true,
 };
 
 /**

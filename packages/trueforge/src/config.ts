@@ -1310,6 +1310,11 @@ export interface SharedServerConfiguration {
    */
   BROWSER_NAV_TIMEOUT_MS: number;
   /**
+   * Saved sign-ins the browser fills in, one per site. Env: `BROWSER_LOGIN_1` to `BROWSER_LOGIN_9`, each
+   * `https://site.example|username|password`. Default none.
+   */
+  BROWSER_LOGINS: BrowserLogin[];
+  /**
    * The Email send list the server writes (`allowed_recipients.toml`). Set with the sidecar; the sidecar reads it
    * read-only. Env: `MAIL_POLICY_FILE`. Default unset, which means no send list is written.
    */
@@ -2168,6 +2173,38 @@ const calendarSidecarMcpUrl = hostCalendarMcpUrl({
 });
 const mailSidecarMcpUrl = hostMailMcpUrl({ mailMcpUrl: mailEmailMcpUrl, mailAccountUrl: mailEmailAccountUrl });
 
+export interface BrowserLogin {
+  origin: string;
+  username: string;
+  password: string;
+}
+
+/** Reads `BROWSER_LOGIN_1` to `BROWSER_LOGIN_9`: a site address, then the username, then the password, split by `|`. */
+function parseBrowserLogins(): BrowserLogin[] {
+  const logins: BrowserLogin[] = [];
+  for (let n = 1; n <= 9; n += 1) {
+    const raw = getEnv(`BROWSER_LOGIN_${String(n)}`)?.trim();
+    if (raw === undefined || raw === '') {
+      continue;
+    }
+    const first = raw.indexOf('|');
+    const second = first < 0 ? -1 : raw.indexOf('|', first + 1);
+    if (second < 0) {
+      throw new Error(`BROWSER_LOGIN_${String(n)} must look like https://site.example|username|password.`);
+    }
+    let origin: string;
+    try {
+      origin = new URL(raw.slice(0, first)).origin;
+    } catch (error) {
+      throw new Error(`BROWSER_LOGIN_${String(n)} must start with the site's address, like https://site.example.`, {
+        cause: error,
+      });
+    }
+    logins.push({ origin, username: raw.slice(first + 1, second), password: raw.slice(second + 1) });
+  }
+  return logins;
+}
+
 const browserEnabled = parseBoolean({ envKey: 'BROWSER_ENABLED', raw: getEnv('BROWSER_ENABLED'), defaultValue: false });
 const browserUrl = parseBrowserUrl(getEnv('BROWSER_URL'));
 const browserSecret = parseBrowserSecret(getEnv('BROWSER_SECRET'));
@@ -2224,6 +2261,7 @@ const shared: SharedServerConfiguration = {
   BROWSER_ENABLED: browserEnabled,
   BROWSER_URL: browserUrl,
   BROWSER_SECRET: browserSecret,
+  BROWSER_LOGINS: parseBrowserLogins(),
   BROWSER_NAV_TIMEOUT_MS: parsePositiveInt({
     envKey: 'BROWSER_NAV_TIMEOUT_MS',
     raw: getEnv('BROWSER_NAV_TIMEOUT_MS'),

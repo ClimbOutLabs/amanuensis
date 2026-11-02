@@ -364,6 +364,70 @@ export class BrowserSidecar {
     return this.#read(tab);
   }
 
+  /** The address of the chat's page, so the app server can pick the saved login for that site. */
+  async where({ owner, tab: tabId }) {
+    const tab = await this.#tabFor({ owner, tab: tabId, create: false });
+    const checked = this.#checkedPage(tab);
+    if (!checked.ok) {
+      return checked.result;
+    }
+    return { status: 'ok', url: tab.page.url() };
+  }
+
+  /**
+   * Fills the page's sign-in form with a saved login and submits it, only while the page is still on
+   * `origin`. A form that asks for the username first and the password on a second step is handled too.
+   */
+  async signIn({ owner, tab: tabId, origin, username, password }) {
+    const tab = await this.#tabFor({ owner, tab: tabId, create: false });
+    const checked = this.#checkedPage(tab);
+    if (!checked.ok) {
+      return checked.result;
+    }
+    const page = tab.page;
+    const onOrigin = () => {
+      try {
+        return new URL(page.url()).origin === origin;
+      } catch {
+        return false;
+      }
+    };
+    if (!onOrigin()) {
+      return { status: 'no_form' };
+    }
+    const passwordField = page.locator('input[type="password"]:visible').first();
+    const USER_FIELDS =
+      'input[autocomplete="username"]:visible, input[type="email"]:visible, input[name*="user" i]:visible, input[id*="user" i]:visible, input[name*="email" i]:visible, input[name*="login" i]:visible, input[type="text"]:visible';
+    // The username box in the password's own form, so a search box elsewhere on the page is never filled.
+    const form = passwordField.locator('xpath=ancestor::form[1]');
+    const userField =
+      (await passwordField.count()) > 0 && (await form.count()) > 0
+        ? form.locator(USER_FIELDS).first()
+        : page.locator(USER_FIELDS).first();
+    const timeout = this.#navTimeoutMs;
+    if ((await passwordField.count()) === 0) {
+      if ((await userField.count()) === 0) {
+        return { status: 'no_form' };
+      }
+      await userField.fill(username);
+      await userField.press('Enter');
+      await passwordField.waitFor({ state: 'visible', timeout }).catch(() => undefined);
+      if ((await passwordField.count()) === 0 || !onOrigin()) {
+        return { status: 'no_form' };
+      }
+    } else if ((await userField.count()) > 0) {
+      await userField.fill(username);
+    }
+    await passwordField.fill(password);
+    tab.refs.reset();
+    await Promise.all([
+      page.waitForLoadState('domcontentloaded', { timeout }).catch(() => undefined),
+      passwordField.press('Enter'),
+    ]);
+    await page.waitForLoadState('networkidle', { timeout: 5000 }).catch(() => undefined);
+    return this.#read(tab);
+  }
+
   async screenshot({ owner, tab: tabId }) {
     const tab = await this.#tabFor({ owner, tab: tabId, create: false });
     const checked = this.#checkedPage(tab);
@@ -447,6 +511,11 @@ const ROUTES = {
   'POST /scroll': (sidecar, where, body) => sidecar.scroll({ ...where, direction: body.direction }),
   'POST /back': (sidecar, where) => sidecar.back(where),
   'POST /screenshot': (sidecar, where) => sidecar.screenshot(where),
+  'POST /where': (sidecar, where) => sidecar.where(where),
+  'POST /sign_in': (sidecar, where, body) =>
+    typeof body.origin === 'string' && typeof body.username === 'string' && typeof body.password === 'string'
+      ? sidecar.signIn({ ...where, origin: body.origin, username: body.username, password: body.password })
+      : { status: 'no_form' },
 };
 
 const MAX_ID_LENGTH = 256;

@@ -46,6 +46,18 @@ const ScreenshotReplySchema = z.discriminatedUnion('status', [
   ClosedReplySchema,
 ]);
 
+const WhereReplySchema = z.discriminatedUnion('status', [
+  z.object({ status: z.literal('ok'), url: z.string() }),
+  MovedReplySchema,
+  ClosedReplySchema,
+]);
+const SignInReplySchema = z.discriminatedUnion('status', [
+  z.object({ status: z.literal('ok'), text: z.string() }),
+  z.object({ status: z.literal('no_form') }),
+  MovedReplySchema,
+  ClosedReplySchema,
+]);
+
 type BrowserPageReply = z.infer<typeof PageReplySchema>;
 
 /** What the sidecar answered to a request, or why there is no usable answer. */
@@ -207,6 +219,14 @@ class BrowserTool extends LocalToolMCP {
       handler: async () => this.page('/back'),
     }),
     defineTool({
+      name: 'browser_sign_in',
+      annotations: { readOnlyHint: false, openWorldHint: true },
+      description:
+        "Sign in to the site open in the browser with the person's saved login for that site, then read the page. Use when a page asks to sign in or a session has expired. You never see the password.",
+      schema: EMPTY_INPUT_SCHEMA,
+      handler: async () => this.signIn(),
+    }),
+    defineTool({
       name: 'browser_screenshot',
       annotations: BROWSER_TOOL_ANNOTATIONS,
       description:
@@ -239,6 +259,52 @@ class BrowserTool extends LocalToolMCP {
       },
     }),
   ];
+
+  /** Signs in with the saved login for the open page's site. The password goes to the browser and never to the model. */
+  private async signIn(): Promise<ReturnType<typeof toolResultResponse>> {
+    const where = await callBrowserSidecar({ path: '/where', tab: this.tab, schema: WhereReplySchema });
+    if (!where.ok) {
+      return errorResponse(where.message);
+    }
+    if (where.body.status === 'moved') {
+      return errorResponse(movedMessage(where.body.url));
+    }
+    if (where.body.status === 'closed') {
+      return errorResponse(CLOSED_MESSAGE);
+    }
+    let origin: string;
+    try {
+      origin = new URL(where.body.url).origin;
+    } catch {
+      return errorResponse('The open page has no web address to sign in to.');
+    }
+    const login = configuration.BROWSER_LOGINS.find(saved => saved.origin === origin);
+    if (login === undefined) {
+      return errorResponse(`There is no saved sign-in for ${origin}. Ask the person to add one.`);
+    }
+    const result = await callBrowserSidecar({
+      path: '/sign_in',
+      tab: this.tab,
+      schema: SignInReplySchema,
+      body: { origin, username: login.username, password: login.password },
+    });
+    if (!result.ok) {
+      this.logger.warn('browser sign-in failed', { message: result.message });
+      return errorResponse(result.message);
+    }
+    switch (result.body.status) {
+      case 'no_form':
+        return errorResponse(
+          "No sign-in form was found on the open page. Open the site's sign-in page, then try again.",
+        );
+      case 'moved':
+        return errorResponse(movedMessage(result.body.url));
+      case 'closed':
+        return errorResponse(CLOSED_MESSAGE);
+      case 'ok':
+        return toolResultResponse({ text: result.body.text });
+    }
+  }
 
   protected getTools(): ToolDefinition[] {
     return this.tools;
