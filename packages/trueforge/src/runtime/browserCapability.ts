@@ -27,6 +27,7 @@ import {
   type ToolDefinition,
 } from '@truefoundry/trueforge-core/core';
 import type { BrowserClickReview, InternalToolCallInfo } from '@truefoundry/trueforge-core/core/llm/LLMTypes';
+import { escapeDisplayText } from '@truefoundry/trueforge-core/core/permissions/displayText';
 import type { ToolBundleName } from '@truefoundry/trueforge-core/core/runtime/toolBundleCatalog';
 import type { Logger } from 'winston';
 import { z } from 'zod';
@@ -255,6 +256,11 @@ function needsApprovalResult(body: BrowserNeedsApprovalReply): ReturnType<typeof
   });
 }
 
+/** Text for a durable record, escaped the same way the approval card escapes it, so a crafted label cannot hide or fake text. */
+function shown(text: string): string {
+  return escapeDisplayText(text).replace(/"/g, '\\"');
+}
+
 class BrowserTool extends LocalToolMCP {
   readonly name = BROWSER_SERVER_ID;
   readonly displayName = 'Browser';
@@ -279,8 +285,8 @@ class BrowserTool extends LocalToolMCP {
     if (writer === null) {
       return;
     }
-    const label = body.accessible_name === '' ? '(no label)' : body.accessible_name;
-    const site = body.site === '' ? 'the page' : body.site;
+    const label = body.accessible_name === '' ? '(no label)' : shown(body.accessible_name);
+    const site = body.site === '' ? 'the page' : shown(body.site);
     await writer.record({
       tenant_id: this.sentinel.tenant_id,
       created_by: this.sentinel.created_by,

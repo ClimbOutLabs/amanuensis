@@ -360,6 +360,27 @@ describe('browser capability', () => {
     expect(records[0]?.description).toMatch(/shop\.example/);
   });
 
+  it('a caught click receipt escapes hidden and control characters in the label and the site, like the card does', async () => {
+    const { writer, records } = recordingAuditWriter();
+    const { call } = mount(
+      () => ({
+        json: {
+          status: 'needs_approval',
+          site: 'shop\u0007.example',
+          accessible_name: 'Cont\u0007inue "now"',
+          form_values: {},
+          png_base64: null,
+        },
+      }),
+      writer,
+    );
+    await call('browser_click', { ref: 'e5' });
+    expect(records).toHaveLength(1);
+    expect(records[0]?.description).toContain('Cont\\u{0007}inue \\"now\\"');
+    expect(records[0]?.description).toContain('shop\\u{0007}.example');
+    expect(records[0]?.description).not.toContain('\u0007');
+  });
+
   it('an approved click that goes through writes no gate receipt: it was never caught', async () => {
     const { writer, records } = recordingAuditWriter();
     const { toolSet } = mount(() => ({ json: { status: 'ok', text: 'Order placed' } }), writer);
