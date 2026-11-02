@@ -431,7 +431,13 @@ export {
   shouldDownscaleImage,
   withImageDownscaling,
 } from './server/imageAttachmentAdapter.js';
-export type { ServerVoiceApi, SpokenReplyPlayer, SpokenReplyVoice } from './utils/spokenReplyPlayer.js';
+export { ServerVoiceRefusal } from './utils/spokenReplyPlayer.js';
+export type {
+  ServerVoiceApi,
+  ServerVoiceRefusalReason,
+  SpokenReplyPlayer,
+  SpokenReplyVoice,
+} from './utils/spokenReplyPlayer.js';
 
 // Curated chrome hooks (same instance as the SDK runtime). Deep primitives: install @assistant-ui/react.
 export { useAui, useAuiState } from './assistant-ui.js';

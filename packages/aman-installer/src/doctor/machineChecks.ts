@@ -367,6 +367,7 @@ async function checkImages(
     ['app_image', summary.release?.appImage ?? null],
     ['dex_image', summary.release?.dexImage ?? null],
     ['stt_image', summary.release?.sttImage ?? null],
+    ['tts_image', summary.release?.ttsImage ?? null],
   ];
   let checked = 0;
   let missing = '';

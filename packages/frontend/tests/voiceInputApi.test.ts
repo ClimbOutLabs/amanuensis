@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
+import { ServerVoiceRefusal } from '@truefoundry/trueforge-ui';
+
 import { createServerVoiceApi, createVoiceInputApi } from '../src/voiceInputApi';
 
 const transcription = {
@@ -224,6 +226,21 @@ test('server voice rejects with the server message when the voice is off', async
     createServerVoiceApi(fetcher).speak({ text: 'Hi.', voice: 'af_heart' }),
     /not available right now/,
   );
+});
+
+test('server voice reports a refused piece as a refusal, not an outage', async () => {
+  const cases: [number, string][] = [
+    [400, 'nothing_to_say'],
+    [413, 'too_long'],
+    [429, 'busy'],
+  ];
+  for (const [status, reason] of cases) {
+    const fetcher: typeof fetch = async () => jsonResponse({ error: { message: 'refused', code: 'x' } }, status);
+    await assert.rejects(
+      createServerVoiceApi(fetcher).speak({ text: 'Hi.' }),
+      (error: unknown) => error instanceof ServerVoiceRefusal && error.reason === reason,
+    );
+  }
 });
 
 test('server voice rejects an answer that is not audio', async () => {

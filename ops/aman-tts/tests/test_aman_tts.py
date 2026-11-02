@@ -3,8 +3,10 @@ import io
 import json
 import logging
 import os
+import asyncio
 import sys
 import tempfile
+import threading
 import unittest
 import wave
 import zipfile
@@ -18,7 +20,7 @@ from fastapi.testclient import TestClient  # noqa: E402
 import aman_tts  # noqa: E402
 import build_assets  # noqa: E402
 from aman_tts import AssetVerificationError, Settings, create_app, encode_wav, verify_model_file  # noqa: E402
-from phonemes import Lexicon, number_words, ordinal_words, normalize, split_chunks, to_phonemes  # noqa: E402
+from phonemes import Lexicon, number_words, ordinal_words, normalize, split_chunks, to_phonemes, whole_words  # noqa: E402
 from pins import PinnedAsset  # noqa: E402
 
 SECRET_TEXT = "my bank password is hunter two"
@@ -34,14 +36,34 @@ class FakeSynthesizer:
     def __init__(self, settings: Settings) -> None:
         FakeSynthesizer.calls = []
 
-    def speak(self, text: str, voice: str) -> np.ndarray:
+    def speak(self, text: str, voice: str, cancelled) -> np.ndarray:
         FakeSynthesizer.calls.append((text, voice))
         return np.sin(np.linspace(0, 100, 2400, dtype=np.float32)) * 0.5
 
 
 class SilentSynthesizer(FakeSynthesizer):
-    def speak(self, text: str, voice: str) -> np.ndarray:
+    def speak(self, text: str, voice: str, cancelled) -> np.ndarray:
         return np.zeros(0, dtype=np.float32)
+
+
+class LongTextSynthesizer(FakeSynthesizer):
+    def speak(self, text: str, voice: str, cancelled) -> np.ndarray:
+        if text != "Hello.":
+            raise aman_tts.TextTooLong("too many sounds")
+        return super().speak(text, voice, cancelled)
+
+
+class BlockingSynthesizer(FakeSynthesizer):
+    """Holds the one synthesis slot until released, so other requests have to wait."""
+
+    started = threading.Event()
+    release = threading.Event()
+
+    def speak(self, text: str, voice: str, cancelled) -> np.ndarray:
+        if text != "Hello.":
+            BlockingSynthesizer.started.set()
+            BlockingSynthesizer.release.wait(5)
+        return super().speak(text, voice, cancelled)
 
 
 class BrokenSynthesizer:
@@ -126,10 +148,68 @@ class SpeakTest(unittest.TestCase):
             ]
         self.assertEqual([res.status_code for res in cases], [400] * len(cases))
 
+    def test_too_many_sounds_after_spelling_out_is_413(self):
+        with client_for(LongTextSynthesizer) as client:
+            res = client.post("/v1/speak", json={"text": "%" * 600})
+        self.assertEqual(res.status_code, 413)
+
+    def test_busy_when_the_queue_is_full(self):
+        BlockingSynthesizer.started.clear()
+        BlockingSynthesizer.release.clear()
+        with client_for(BlockingSynthesizer, max_waiting=0) as client:
+            first: list[int] = []
+            holder = threading.Thread(
+                target=lambda: first.append(client.post("/v1/speak", json={"text": "One."}).status_code)
+            )
+            holder.start()
+            self.assertTrue(BlockingSynthesizer.started.wait(5))
+            busy = client.post("/v1/speak", json={"text": "Two."})
+            BlockingSynthesizer.release.set()
+            holder.join(5)
+        self.assertEqual(busy.status_code, 429)
+        self.assertEqual(busy.headers["retry-after"], "2")
+        self.assertEqual(first, [200])
+
     def test_nothing_to_say_is_a_bad_request(self):
         with client_for(SilentSynthesizer) as client:
             res = client.post("/v1/speak", json={"text": "```code only```"})
         self.assertEqual(res.status_code, 400)
+
+
+class CancelTest(unittest.TestCase):
+    def test_reading_stops_between_pieces_once_the_caller_hangs_up(self):
+        pieces: list[int] = []
+
+        class Request:
+            def __init__(self) -> None:
+                self.checks = 0
+
+            async def is_disconnected(self) -> bool:
+                self.checks += 1
+                return self.checks > 1
+
+        class Slow(FakeSynthesizer):
+            def speak(self, text, voice, cancelled):
+                for piece in range(100):
+                    if cancelled():
+                        raise aman_tts.SpeechCancelled()
+                    pieces.append(piece)
+                    threading.Event().wait(0.05)
+                return super().speak(text, voice, cancelled)
+
+        result = asyncio.run(aman_tts._speak_until_disconnect(Request(), Slow(Settings()), "Long text.", "af_heart"))
+        self.assertIsNone(result)
+        self.assertLess(len(pieces), 100)
+
+    def test_a_caller_gone_before_its_turn_is_never_read(self):
+        class Gone:
+            async def is_disconnected(self) -> bool:
+                return True
+
+        FakeSynthesizer.calls = []
+        result = asyncio.run(aman_tts._speak_until_disconnect(Gone(), FakeSynthesizer(Settings()), "Hi.", "af_heart"))
+        self.assertIsNone(result)
+        self.assertEqual(FakeSynthesizer.calls, [])
 
 
 class PrivacyTest(unittest.TestCase):
@@ -245,6 +325,13 @@ class PhonemesTest(unittest.TestCase):
 
     def test_unknown_words_are_sounded_out(self):
         self.assertEqual(to_phonemes("Zorp", LEXICON), "ˈzɔɹp.")
+
+    def test_long_digit_runs_are_read_one_by_one(self):
+        digits = "7" * 5000
+        self.assertEqual(whole_words(digits)[:3], ["seven", "seven", "seven"])
+        self.assertEqual(whole_words("1000"), ["one", "thousand"])
+        self.assertTrue(to_phonemes(f"Code {digits}.", LEXICON))
+        self.assertTrue(to_phonemes(f"${digits}.50 and {digits}th", LEXICON))
 
     def test_split_chunks_respects_the_limit(self):
         sentence = "wˈʌn tˈu θɹˈi."

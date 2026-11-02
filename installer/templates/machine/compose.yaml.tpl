@@ -34,7 +34,8 @@ services:
 @@IF_TTS@@    image: @@TTS_IMAGE@@
 @@IF_TTS@@    pull_policy: never
 @@IF_TTS@@    container_name: aman-tts
-@@IF_TTS@@    # Reached the same way as aman-stt. Its voice files are inside the image, so it needs no network access.
+@@IF_TTS@@    # Reached the same way as aman-stt. Its voice files are inside the image, so it sits only on an internal network
+@@IF_TTS@@    # with no way out; each instance's speech network is joined to it later.
 @@IF_TTS@@    user: '10001:10001'
 @@IF_TTS@@    cap_drop:
 @@IF_TTS@@      - ALL
@@ -49,7 +50,7 @@ services:
 @@IF_TTS@@    environment:
 @@IF_TTS@@      AMAN_TTS_CPU_THREADS: ${AMAN_TTS_CPU_THREADS:-4}
 @@IF_TTS@@    networks:
-@@IF_TTS@@      - machine
+@@IF_TTS@@      - voice
 @@IF_TTS@@    restart: unless-stopped
 
 volumes:
@@ -59,3 +60,6 @@ volumes:
 networks:
   machine:
     name: aman_machine
+@@IF_TTS@@  voice:
+@@IF_TTS@@    name: aman_machine_voice
+@@IF_TTS@@    internal: true

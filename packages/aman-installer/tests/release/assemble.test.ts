@@ -13,6 +13,7 @@ import {
 const IDS: SourceIds = {
   'aman-app': 'aman-app:0123456789ab',
   'aman-stt': 'aman-stt:0123456789cd',
+  'aman-tts': 'aman-tts:0123456789cd',
   'aman-calendar-caldav': 'aman-calendar-caldav:0123456789ef',
 };
 

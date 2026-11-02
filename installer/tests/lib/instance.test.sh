@@ -569,6 +569,9 @@ test_speech_service_is_hardened_and_cannot_reach_the_instance() {
   assert_contains "$voice_block" "mem_limit: 1g"
   assert_contains "$voice_block" "pull_policy: never"
   assert_not_contains "$voice_block" "volumes:" "the voice keeps nothing on disk"
+  assert_contains "$voice_block" "- voice" "the voice is on its own network"
+  assert_not_contains "$voice_block" "- machine" "the voice is not on the network with a way out"
+  assert_contains "$(printf '%s\n' "$machine" | sed -n '/^  voice:/,$p')" "internal: true" "the voice network has no way out"
   relay_block=$(printf '%s\n' "$main" | sed -n '/^  speech-link:/,/^  app:/p')
   loopback_block=$(printf '%s\n' "$main" | sed -n '/^  loopback:/,/^  speech-link:/p')
   assert_contains "$relay_block" "- aman-stt" "the app finds speech under the name it always used"

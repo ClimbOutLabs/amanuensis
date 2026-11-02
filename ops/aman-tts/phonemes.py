@@ -15,9 +15,9 @@ import re
 import unicodedata
 from collections.abc import Iterator
 
-# Longest phoneme string handed to the model at once; the model's own limit is
-# 510 tokens, and 400 leaves room for the boundary tokens and odd characters.
-MAX_CHUNK_CHARS = 400
+# Longest phoneme string handed to the model at once. The model takes up to 510 tokens, but its
+# memory grows with the length of each run: 400 went past the container's 1 GB, 150 peaks near 500 MB.
+MAX_CHUNK_CHARS = 150
 
 _ONES = (
     "zero one two three four five six seven eight nine ten eleven twelve thirteen "
@@ -54,7 +54,7 @@ def _under_thousand(n: int) -> list[str]:
 def number_words(n: int) -> list[str]:
     """Spell a non-negative integer in English words; past a trillion, digit by digit."""
     if n >= 10**12:
-        return [_ONES[int(d)] for d in str(n)]
+        return digit_words(str(n))
     words: list[str] = []
     for scale, name in _SCALES:
         if n >= scale:
@@ -63,6 +63,23 @@ def number_words(n: int) -> list[str]:
     if n or not words:
         words += _under_thousand(n)
     return words
+
+
+# Longer runs of digits are read one by one. Turning them into a number first is pointless, and
+# Python refuses past about 4300 digits.
+MAX_NUMBER_DIGITS = 12
+
+
+def digit_words(digits: str) -> list[str]:
+    return [_ONES[int(d)] for d in digits]
+
+
+def whole_words(digits: str) -> list[str]:
+    """Spell a run of digits as a number, or digit by digit when it is too long to be one."""
+    digits = digits or "0"
+    if len(digits.lstrip("0")) > MAX_NUMBER_DIGITS:
+        return digit_words(digits)
+    return number_words(int(digits))
 
 
 def ordinal_words(n: int) -> list[str]:
@@ -79,17 +96,16 @@ def ordinal_words(n: int) -> list[str]:
 
 def _decimal_words(text: str) -> list[str]:
     whole, _, fraction = text.replace(",", "").partition(".")
-    words = number_words(int(whole or "0"))
+    words = whole_words(whole)
     if fraction:
         words.append("point")
-        words += [_ONES[int(d)] for d in fraction]
+        words += digit_words(fraction)
     return words
 
 
 def _money_words(text: str) -> list[str]:
     whole, _, cents = text.replace(",", "").partition(".")
-    dollars = int(whole or "0")
-    words = number_words(dollars) + ["dollar" if dollars == 1 else "dollars"]
+    words = whole_words(whole) + ["dollar" if whole.lstrip("0") == "1" else "dollars"]
     if cents:
         cent_value = int((cents + "0")[:2])
         if cent_value:
@@ -160,7 +176,9 @@ def _tokens(text: str) -> Iterator[tuple[str, str]]:
             for word in _money_words(value[1:]):
                 yield "word", word
         elif kind == "ordinal":
-            for word in ordinal_words(int(value[:-2])):
+            digits = value[:-2]
+            spelled = digit_words(digits) if len(digits) > MAX_NUMBER_DIGITS else ordinal_words(int(digits))
+            for word in spelled:
                 yield "word", word
         elif kind == "number":
             for word in _decimal_words(value):

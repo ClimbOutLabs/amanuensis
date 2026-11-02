@@ -45,6 +45,8 @@
     "sandbox:slots:lock-python": "cd ops/sandbox-slot/guest && uv pip compile requirements.in --universal --generate-hashes --python-version 3.12 -o requirements.txt",
     "sandbox:slots": "pnpm --filter @truefoundry/trueforge sandbox:slots",
     "test:sandbox-slot-agent": "cd ops/sandbox-slot/agent && go test ./test/...",
+    "test:aman-tts": "python3 -m unittest discover -s ops/aman-tts/tests",
+    "lock:aman-tts": "cd ops/aman-tts && pip-compile --generate-hashes --output-file=requirements.txt requirements.in",
     "sdk:generate": "bash scripts/generate-sdk.sh",
     "sdk:check": "bash scripts/check-generated-contracts.sh",
     "sdk:types": "pnpm --filter @truefoundry/trueforge-sdk exec tsc --project ./tsconfig.cjs.json --emitDeclarationOnly --noCheck",

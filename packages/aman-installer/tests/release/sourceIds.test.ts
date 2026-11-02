@@ -25,9 +25,11 @@ function fixtureClone(): string {
   const dir = mkdtempSync(join(tmpdir(), 'aman-installer-source-ids-'));
   git(dir, ['init', '-q']);
   mkdirSync(join(dir, 'ops', 'aman-stt'), { recursive: true });
+  mkdirSync(join(dir, 'ops', 'aman-tts'), { recursive: true });
   mkdirSync(join(dir, 'ops', 'calendar-sidecar'), { recursive: true });
   writeFileSync(join(dir, 'Dockerfile.dev'), 'FROM node\n');
   writeFileSync(join(dir, 'ops', 'aman-stt', 'Dockerfile'), 'FROM python\n');
+  writeFileSync(join(dir, 'ops', 'aman-tts', 'Dockerfile'), 'FROM python:3.12\n');
   writeFileSync(join(dir, 'ops', 'calendar-sidecar', 'Dockerfile'), 'FROM node\n');
   git(dir, ['add', '.']);
   git(dir, ['-c', 'user.email=test@example.com', '-c', 'user.name=Test', 'commit', '-q', '-m', 'fixture']);
@@ -44,10 +46,12 @@ test('the manifest source ids equal the shell source_id of the same clone', asyn
   assert.ok(ids !== null);
   const head = git(clone, ['rev-parse', 'HEAD']).slice(0, 12);
   const stt = git(clone, ['rev-parse', 'HEAD:ops/aman-stt']).slice(0, 12);
+  const tts = git(clone, ['rev-parse', 'HEAD:ops/aman-tts']).slice(0, 12);
   const calendar = git(clone, ['rev-parse', 'HEAD:ops/calendar-sidecar']).slice(0, 12);
   assert.deepEqual(ids, {
     'aman-app': `aman-app:${head}`,
     'aman-stt': `aman-stt:${stt}`,
+    'aman-tts': `aman-tts:${tts}`,
     'aman-calendar-caldav': `aman-calendar-caldav:${calendar}`,
   });
   const manifest = buildManifest({ release: 'v1.2.3', files: [], sourceIds: ids });

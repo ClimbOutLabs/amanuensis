@@ -15,12 +15,18 @@ Base URL (container-internal): `http://aman-tts:8002`
   `voice` is optional; the default is `af_heart`.
 - Text cap: 5000 characters (`AMAN_TTS_MAX_TEXT_CHARS`); longer text is
   refused with 413. The body is also capped while it streams in.
+- Sound cap: 3000 sounds after numbers and symbols are spelled out
+  (`AMAN_TTS_MAX_PHONEMES`, about two minutes of speech); more is refused with 413.
+  This is the cap that keeps memory in bounds: measured at the cap, a run peaks near
+  500 MB, under the 1 GB the container gets.
 - 200 response: `audio/wav`, 24 kHz mono 16-bit PCM, with `x-voice` and
   `x-model` headers.
 - Errors: `400` bad JSON, empty text, unknown voice, or nothing to read aloud;
-  `413` text too long; `503` model not loaded.
+  `413` text too long; `429` busy (with `Retry-After`); `503` model not loaded.
 
 One synthesis runs at a time; a single run already uses every configured thread.
+At most two more requests wait (`AMAN_TTS_MAX_WAITING`); more get 429. A request
+whose caller hangs up stops between pieces of text and is never finished.
 
 ### `GET /healthz`
 
@@ -72,6 +78,8 @@ and run the tests.
 | ------------------------- | ---------------------- | -------------------------------------- |
 | `AMAN_TTS_CPU_THREADS`    | `4`                    | onnxruntime threads                    |
 | `AMAN_TTS_MAX_TEXT_CHARS` | `5000`                 | text cap per request                   |
+| `AMAN_TTS_MAX_PHONEMES`   | `3000`                 | sound cap per request                  |
+| `AMAN_TTS_MAX_WAITING`    | `2`                    | requests that may wait their turn      |
 | `AMAN_TTS_DEFAULT_VOICE`  | `af_heart`             | voice used when the request names none |
 | `AMAN_TTS_ASSET_DIR`      | `/opt/aman-tts/assets` | where the baked assets live            |
 
@@ -80,9 +88,13 @@ people speak, then listen, so the two rarely run at once.
 
 ## Tests
 
-No model needed; a fake synthesizer covers the HTTP contract:
+No model needed; a fake synthesizer covers the HTTP contract. CI runs these
+whenever this folder changes:
 
 ```
-pip install -r requirements.txt httpx
-python -m unittest discover -s tests
+pip install --require-hashes -r requirements.txt && pip install httpx==0.28.1
+pnpm test:aman-tts
 ```
+
+To change a Python package, edit `requirements.in`, then run `pnpm lock:aman-tts`
+(needs `pip-tools`) to rewrite the hashed `requirements.txt`.

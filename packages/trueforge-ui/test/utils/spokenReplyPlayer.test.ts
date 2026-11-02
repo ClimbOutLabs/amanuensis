@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { SERVER_VOICE_STORAGE_KEY } from '../../src/utils/speechReplyPreferences';
 import {
   SERVER_VOICE_RETRY_MS,
+  ServerVoiceRefusal,
   createSpokenReplyPlayer,
   splitForSpeech,
   type ServerVoiceApi,
@@ -123,6 +124,60 @@ describe('createSpokenReplyPlayer', () => {
 
     expect(played).toEqual(['a']);
     expect(browserSpeak).toHaveBeenCalledWith(`${'b'.repeat(1000)}. ${'c'.repeat(1000)}.`, expect.any(AbortSignal));
+  });
+
+  it('skips a piece with nothing to say and keeps using the server voice', async () => {
+    let now = 0;
+    const pieces = `${'a'.repeat(1000)}. ${'b'.repeat(1000)}. ${'c'.repeat(1000)}.`;
+    const server = serverVoice(text =>
+      text.startsWith('b')
+        ? Promise.reject(new ServerVoiceRefusal({ reason: 'nothing_to_say', message: 'nothing' }))
+        : Promise.resolve(wav(text)),
+    );
+    const played: string[] = [];
+    const browserSpeak = vi.fn((_text: string, _signal: AbortSignal) => Promise.resolve());
+    const player = createSpokenReplyPlayer({
+      serverVoice: server,
+      playAudio: audio => {
+        played.push((clipText.get(audio) ?? '').slice(0, 1));
+        return Promise.resolve();
+      },
+      browserSpeak,
+      now: () => now,
+    });
+
+    await expect(player.speak(pieces)).resolves.toBe('server');
+    expect(played).toEqual(['a', 'c']);
+    expect(browserSpeak).not.toHaveBeenCalled();
+
+    now = 1;
+    await player.speak('Next reply.');
+    expect(server.texts.at(-1)).toBe('Next reply.');
+  });
+
+  it('reads a busy or overlong piece with the browser, without counting it as an outage', async () => {
+    const server = serverVoice(text =>
+      text.startsWith('a')
+        ? Promise.reject(new ServerVoiceRefusal({ reason: 'busy', message: 'busy' }))
+        : Promise.resolve(wav(text)),
+    );
+    const played: string[] = [];
+    const browserSpeak = vi.fn((_text: string, _signal: AbortSignal) => Promise.resolve());
+    const player = createSpokenReplyPlayer({
+      serverVoice: server,
+      playAudio: audio => {
+        played.push((clipText.get(audio) ?? '').slice(0, 1));
+        return Promise.resolve();
+      },
+      browserSpeak,
+    });
+
+    await expect(player.speak(`${'a'.repeat(1000)}. ${'b'.repeat(1000)}.`)).resolves.toBe('server');
+
+    expect(browserSpeak).toHaveBeenCalledWith(`${'a'.repeat(1000)}.`, expect.any(AbortSignal));
+    expect(played).toEqual(['b']);
+    await player.speak('Then this.');
+    expect(server.texts.at(-1)).toBe('Then this.');
   });
 
   it('falls back when the browser refuses to play the clip', async () => {

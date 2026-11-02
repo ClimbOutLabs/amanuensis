@@ -15,6 +15,7 @@ const SCRIPT = [
   '. "$2/release.sh"',
   'checkout_app_tag',
   'printf \'aman-stt:%s\\n\' "$(source_id ops/aman-stt)"',
+  'printf \'aman-tts:%s\\n\' "$(source_id ops/aman-tts)"',
   'printf \'aman-calendar-caldav:%s\\n\' "$(source_id ops/calendar-sidecar)"',
 ].join('\n');
 
@@ -34,7 +35,7 @@ export async function sourceIdsFromCheckout({
   const found: Partial<Record<keyof SourceIds, string>> = {};
   for (const line of result.stdout.split('\n')) {
     const trimmed = line.trim();
-    for (const key of ['aman-app', 'aman-stt', 'aman-calendar-caldav'] as const) {
+    for (const key of ['aman-app', 'aman-stt', 'aman-tts', 'aman-calendar-caldav'] as const) {
       if (trimmed.startsWith(`${key}:`)) {
         found[key] = trimmed;
       }
@@ -42,11 +43,12 @@ export async function sourceIdsFromCheckout({
   }
   const app = found['aman-app'];
   const stt = found['aman-stt'];
+  const tts = found['aman-tts'];
   const calendar = found['aman-calendar-caldav'];
-  if (app === undefined || stt === undefined || calendar === undefined) {
+  if (app === undefined || stt === undefined || tts === undefined || calendar === undefined) {
     return null;
   }
-  return { 'aman-app': app, 'aman-stt': stt, 'aman-calendar-caldav': calendar };
+  return { 'aman-app': app, 'aman-stt': stt, 'aman-tts': tts, 'aman-calendar-caldav': calendar };
 }
 
 export function installerLibDir(checkoutDir: string): string {

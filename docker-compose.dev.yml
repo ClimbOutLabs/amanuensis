@@ -68,7 +68,8 @@ services:
     build:
       context: ops/aman-tts
     image: amanuensis-aman-tts:latest
-    # Loopback-only: the sidecar has no authentication.
+    # Loopback-only: the sidecar has no authentication. Unlike docker-compose.yml it stays on the default network,
+    # because the server runs on the host here and an internal network cannot publish a port.
     ports:
       - '127.0.0.1:8002:8002'
     mem_limit: 1g

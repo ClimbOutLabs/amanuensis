@@ -3,9 +3,26 @@ import { readServerVoice, readSpeechVoiceURI, type ServerVoiceId } from './speec
 
 /** Host port for the voice running on the person's own computer (`POST /api/v1/voice/speak`). */
 export type ServerVoiceApi = {
-  /** Resolves with WAV audio for the text; rejects when the voice is off, busy or the request fails. */
+  /**
+   * Resolves with WAV audio for the text. Rejects with a ServerVoiceRefusal when the voice is fine but
+   * will not read this piece, and with any other error when the voice is off or the request fails.
+   */
   speak: (input: { text: string; voice: ServerVoiceId; signal?: AbortSignal }) => Promise<Blob>;
 };
+
+/** Why a working server voice turned one piece down: nothing in it to say, too long once spelled out, or busy. */
+export type ServerVoiceRefusalReason = 'nothing_to_say' | 'too_long' | 'busy';
+
+/** The server voice is working but would not read this one piece; not a sign that it is down. */
+export class ServerVoiceRefusal extends Error {
+  readonly reason: ServerVoiceRefusalReason;
+
+  constructor({ reason, message, cause }: { reason: ServerVoiceRefusalReason; message: string; cause?: unknown }) {
+    super(message, cause === undefined ? undefined : { cause });
+    this.name = 'ServerVoiceRefusal';
+    this.reason = reason;
+  }
+}
 
 /** Which voice read the reply: the computer's own, the browser's built-in one, or none at all. */
 export type SpokenReplyVoice = 'server' | 'browser' | 'none';
@@ -195,9 +212,21 @@ export function createSpokenReplyPlayer(deps: SpokenReplyPlayerDeps): SpokenRepl
       let audio: Blob;
       try {
         audio = await next;
-      } catch {
+      } catch (error) {
         if (signal.aborted) {
           return index === 0 ? 'none' : 'server';
+        }
+        if (error instanceof ServerVoiceRefusal) {
+          // One piece turned down is not an outage: skip it when it holds nothing to say, otherwise
+          // the browser reads just that piece, and the server voice goes on with the next.
+          if (index + 1 < pieces.length) {
+            next = fetchPiece(index + 1);
+            next.catch(() => undefined);
+          }
+          const piece = pieces[index] ?? '';
+          if (error.reason !== 'nothing_to_say') await readWithBrowser(piece, signal);
+          if (signal.aborted) return 'server';
+          continue;
         }
         serverDownUntil = now() + SERVER_VOICE_RETRY_MS;
         const rest = pieces.slice(index).join(' ');

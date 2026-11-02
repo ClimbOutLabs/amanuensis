@@ -201,6 +201,51 @@ describe('POST /speak', () => {
     expect(await res.json()).toMatchObject({ error: { code: 'bad_text' } });
   });
 
+  it('passes on that the voice is busy, with when to try again', async () => {
+    fakeTts.reply = res => {
+      res.writeHead(429, { 'content-type': 'application/json', 'retry-after': '2' });
+      res.end(JSON.stringify({ detail: 'Busy reading other text' }));
+    };
+
+    const res = await appWith().request('/speak', speakRequest({ text: 'Hi.' }));
+
+    expect(res.status).toBe(429);
+    expect(res.headers.get('retry-after')).toBe('2');
+    expect(await res.json()).toMatchObject({ error: { code: 'tts_busy' } });
+  });
+
+  it('passes on text the voice finds too long once spelled out', async () => {
+    fakeTts.reply = res => {
+      res.writeHead(413, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ detail: 'Text is too long to read at once' }));
+    };
+
+    const res = await appWith().request('/speak', speakRequest({ text: '%'.repeat(600) }));
+
+    expect(res.status).toBe(413);
+    expect(await res.json()).toMatchObject({ error: { code: 'text_too_long' } });
+  });
+
+  it('stops the voice work when the caller stops listening', async () => {
+    let upstreamClosed: () => void = () => {};
+    const closed = new Promise<void>(resolve => {
+      upstreamClosed = resolve;
+    });
+    fakeTts.reply = res => {
+      // Never answers, as a long reading would not; the caller hangs up first.
+      res.on('close', () => upstreamClosed());
+    };
+    const caller = new AbortController();
+
+    const pending = appWith().request('/speak', { ...speakRequest({ text: 'A long reply.' }), signal: caller.signal });
+    await new Promise(resolve => setTimeout(resolve, 50));
+    caller.abort();
+    await Promise.resolve(pending).catch(() => undefined);
+
+    await closed;
+    expect(fakeTts.calls).toHaveLength(1);
+  });
+
   it('treats a non-audio answer as a failure', async () => {
     fakeTts.reply = res => {
       res.writeHead(200, { 'content-type': 'application/json' });

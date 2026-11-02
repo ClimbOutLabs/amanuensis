@@ -27,6 +27,8 @@ import time
 import wave
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
+import threading
+from collections.abc import Callable
 from typing import Protocol
 
 import numpy as np
@@ -41,6 +43,8 @@ SAMPLE_RATE = 24000
 WAV_CONTENT_TYPE = "audio/wav"
 # Pause placed between model chunks, which always end at a sentence or word break.
 CHUNK_GAP_SECONDS = 0.15
+# How often a request being read checks that its caller is still there.
+DISCONNECT_POLL_SECONDS = 0.1
 VOCAB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "kokoro_vocab.json")
 
 
@@ -59,6 +63,11 @@ def _env_int(name: str, default: int) -> int:
 class Settings:
     cpu_threads: int = field(default_factory=lambda: _env_int("AMAN_TTS_CPU_THREADS", 4))
     max_text_chars: int = field(default_factory=lambda: _env_int("AMAN_TTS_MAX_TEXT_CHARS", 5000))
+    # The cap that bounds memory: symbols and numbers grow when spelled out, so the work is measured
+    # in sounds after expansion, not in characters typed.
+    max_phonemes: int = field(default_factory=lambda: _env_int("AMAN_TTS_MAX_PHONEMES", 3000))
+    # Requests allowed to wait while one is being read; more are turned away as busy.
+    max_waiting: int = field(default_factory=lambda: _env_int("AMAN_TTS_MAX_WAITING", 2))
     asset_dir: str = field(default_factory=lambda: os.environ.get("AMAN_TTS_ASSET_DIR", "/opt/aman-tts/assets"))
     default_voice: str = field(default_factory=lambda: os.environ.get("AMAN_TTS_DEFAULT_VOICE", VOICE_IDS[0]))
 
@@ -70,6 +79,14 @@ class Settings:
 
 class AssetVerificationError(Exception):
     """The baked model file does not match its pin; it must not load."""
+
+
+class TextTooLong(Exception):
+    """The text spells out to more sounds than one request may make."""
+
+
+class SpeechCancelled(Exception):
+    """The caller went away, so the rest of the text is not read."""
 
 
 def verify_model_file(path: str) -> None:
@@ -90,8 +107,12 @@ class Synthesizer(Protocol):
     model_label: str
     voices: tuple[str, ...]
 
-    def speak(self, text: str, voice: str) -> np.ndarray:
-        """Return 24 kHz mono float32 audio for the text."""
+    def speak(self, text: str, voice: str, cancelled: Callable[[], bool]) -> np.ndarray:
+        """Return 24 kHz mono float32 audio for the text.
+
+        Raises TextTooLong past the sound cap, and SpeechCancelled when `cancelled` turns true
+        between pieces.
+        """
         ...
 
 
@@ -103,6 +124,7 @@ class KokoroSynthesizer:
     def __init__(self, settings: Settings) -> None:
         import onnxruntime as rt
 
+        self._max_phonemes = settings.max_phonemes
         model_path = os.path.join(settings.asset_dir, MODEL_FILE)
         verify_model_file(model_path)
         options = rt.SessionOptions()
@@ -119,11 +141,16 @@ class KokoroSynthesizer:
     def _tokens(self, phonemes: str) -> list[int]:
         return [self._vocab[ch] for ch in phonemes if ch in self._vocab]
 
-    def speak(self, text: str, voice: str) -> np.ndarray:
+    def speak(self, text: str, voice: str, cancelled: Callable[[], bool]) -> np.ndarray:
         styles = self._styles[voice]
+        phonemes = to_phonemes(text, self._lexicon)
+        if len(phonemes) > self._max_phonemes:
+            raise TextTooLong(f"{len(phonemes)} sounds is over the {self._max_phonemes} cap")
         gap = np.zeros(int(SAMPLE_RATE * CHUNK_GAP_SECONDS), dtype=np.float32)
         parts: list[np.ndarray] = []
-        for chunk in split_chunks(to_phonemes(text, self._lexicon)):
+        for chunk in split_chunks(phonemes):
+            if cancelled():
+                raise SpeechCancelled()
             tokens = self._tokens(chunk)
             if not tokens:
                 continue
@@ -160,6 +187,8 @@ class ServiceState:
     model_error: str | None = None
     # One synthesis at a time: a single run already uses every configured thread.
     in_flight: asyncio.Semaphore = field(default_factory=lambda: asyncio.Semaphore(1))
+    # Requests holding or waiting for the slot above.
+    queued: int = 0
 
 
 def _parse_speak_body(body: bytes) -> tuple[str, str | None]:
@@ -193,7 +222,7 @@ def create_app(
             if settings.default_voice not in synthesizer.voices:
                 raise AssetVerificationError(f"default voice {settings.default_voice!r} is not baked into the image")
             # Warm the kernels so the first real reply is not slow.
-            await asyncio.to_thread(synthesizer.speak, "Hello.", settings.default_voice)
+            await asyncio.to_thread(synthesizer.speak, "Hello.", settings.default_voice, lambda: False)
             state.synthesizer = synthesizer
             LOGGER.info("Model warm: %s (%d voices)", synthesizer.model_label, len(synthesizer.voices))
         except Exception as exc:
@@ -234,12 +263,18 @@ def create_app(
         if voice_id not in synthesizer.voices:
             raise HTTPException(status_code=400, detail=f"Unknown voice; choose one of {', '.join(synthesizer.voices)}")
 
-        async with state.in_flight:
-            try:
-                audio = await asyncio.to_thread(synthesizer.speak, text, voice_id)
-            except Exception as exc:
-                LOGGER.exception("speak failed")
-                raise HTTPException(status_code=500, detail="Speech synthesis failed") from exc
+        if state.queued > settings.max_waiting:
+            LOGGER.info("speak rejected: busy")
+            raise HTTPException(status_code=429, detail="Busy reading other text", headers={"Retry-After": "2"})
+        state.queued += 1
+        try:
+            async with state.in_flight:
+                audio = await _speak_until_disconnect(request, synthesizer, text, voice_id)
+        finally:
+            state.queued -= 1
+        if audio is None:
+            LOGGER.info("speak cancelled: caller went away")
+            return Response(status_code=499)
         if audio.size == 0:
             raise HTTPException(status_code=400, detail="text has nothing to say aloud")
 
@@ -257,6 +292,36 @@ def create_app(
         )
 
     return app
+
+
+async def _speak_until_disconnect(
+    request: Request, synthesizer: Synthesizer, text: str, voice_id: str
+) -> np.ndarray | None:
+    """Reads the text aloud, stopping between pieces once the caller hangs up; None when it did."""
+    if await request.is_disconnected():
+        return None
+    cancel = threading.Event()
+
+    async def watch() -> None:
+        while not cancel.is_set():
+            if await request.is_disconnected():
+                cancel.set()
+                return
+            await asyncio.sleep(DISCONNECT_POLL_SECONDS)
+
+    watcher = asyncio.create_task(watch())
+    try:
+        return await asyncio.to_thread(synthesizer.speak, text, voice_id, cancel.is_set)
+    except SpeechCancelled:
+        return None
+    except TextTooLong as exc:
+        raise HTTPException(status_code=413, detail="Text is too long to read at once") from exc
+    except Exception as exc:
+        LOGGER.exception("speak failed")
+        raise HTTPException(status_code=500, detail="Speech synthesis failed") from exc
+    finally:
+        cancel.set()
+        watcher.cancel()
 
 
 async def _read_bounded_body(request: Request, max_bytes: int) -> bytes:

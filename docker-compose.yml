@@ -66,10 +66,12 @@ services:
     # another's namespace, and the joined containers read this hosts file.
     extra_hosts:
       - 'host.docker.internal:host-gateway'
-    # The calendar network is shared with the calendar connector only (see calendar-caldav).
+    # The calendar network is shared with the calendar connector only (see calendar-caldav), and the voice network
+    # with the voice only (see aman-tts).
     networks:
       - default
       - calendar
+      - voice
     restart: unless-stopped
 
   # Serves both the API and the UI on one port.
@@ -212,9 +214,10 @@ services:
 
   # Local text-to-speech sidecar (Kokoro-82M int8 ONNX, CPU-only). The server
   # posts reply text here and returns the audio to the browser. No host port
-  # is published, and the voice files are baked into the image, so it needs
-  # no network access at all. Shares cores 16-19 with aman-stt: a person
-  # speaks, then listens, so the two rarely run at once.
+  # is published, and the voice files are baked into the image, so it sits
+  # only on the internal voice network: no way out, and nothing but the app
+  # can reach it. Shares cores 16-19 with aman-stt: a person speaks, then
+  # listens, so the two rarely run at once.
   aman-tts:
     build:
       context: ops/aman-tts
@@ -224,6 +227,8 @@ services:
     environment:
       # onnxruntime threads; 4 matches the 4 pinned cores.
       AMAN_TTS_CPU_THREADS: '4'
+    networks:
+      - voice
     restart: unless-stopped
 
   # Email connector sidecar. Private to the Compose network: `expose` only, never `ports`.
@@ -372,6 +377,9 @@ networks:
   # Between the app's `loopback` and the calendar connector only. Not internal: the connector reaches the calendar
   # server on the internet.
   calendar: {}
+  # Between the app's `loopback` and the voice only. Internal: the voice needs no network access.
+  voice:
+    internal: true
 
 volumes:
   dex-tls:
