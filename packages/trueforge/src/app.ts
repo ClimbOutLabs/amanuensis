@@ -67,6 +67,7 @@ import {
   createAuthMiddleware,
   createUiSessionAuthMiddleware,
   truefoundryAdminMiddleware,
+  tryAuthenticate,
 } from './auth/middleware';
 import type { OidcDiscoveryHandle } from './auth/oidc';
 import { createRequestGuardMiddleware } from './auth/requestGuard';
@@ -653,6 +654,7 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
       tokenStore: deps.tokenStore,
       mcpServerStore: deps.resolveMcpServerStore(),
       logger: deps.logger,
+      resolveSession: c => tryAuthenticate({ authenticator: deps.authenticator, context: c }),
     }),
   );
   app.route(
@@ -970,6 +972,18 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
       createUiSessionAuthMiddleware(deps.authenticator),
     ),
   );
+  // Live view of Aman's browser, browser session only: the signed-in person watches and drives the
+  // tabs of their own browser profile, and no agent or API token can see or steer it for them.
+  app.route(
+    '/api/browser/live',
+    withAuth(
+      createBrowserLiveRouter({
+        resolveRequestContext,
+        logger: deps.logger,
+      }),
+      createUiSessionAuthMiddleware(deps.authenticator),
+    ),
+  );
   // Space pictures, browser session only: the owner\'s own spaces link them, and no agent or API token may fetch on the person\'s behalf.
   app.route(
     '/api/space-pictures',
@@ -999,18 +1013,6 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
         }),
         sessions: deps.sessions,
         resolveRequestContext,
-      }),
-      createUiSessionAuthMiddleware(deps.authenticator),
-    ),
-  );
-  // Live view of Aman's browser, browser session only: the signed-in person watches and drives the
-  // tabs of their own browser profile, and no agent or API token can see or steer it for them.
-  app.route(
-    '/api/browser/live',
-    withAuth(
-      createBrowserLiveRouter({
-        resolveRequestContext,
-        logger: deps.logger,
       }),
       createUiSessionAuthMiddleware(deps.authenticator),
     ),

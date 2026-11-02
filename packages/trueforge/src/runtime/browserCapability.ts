@@ -8,6 +8,8 @@
  *
  * The browser itself runs in a private sidecar (ops/browser-sidecar): a real, headed Chromium with
  * one persistent profile per person and one tab per chat. This capability only calls its HTTP API.
+ * The live view, the person's own look at their browser (see apis/browserLive.ts), reaches the same
+ * sidecar through the callers below, so the shared secret stays on this server either way.
  */
 import type { AgentCapability, AgentTracing } from '@truefoundry/trueforge-core/core';
 import { defineTool, LocalToolMCP, toolResultResponse, type ToolDefinition } from '@truefoundry/trueforge-core/core';
