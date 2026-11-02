@@ -12,6 +12,8 @@ import { findChromiumExecutable } from './support/findChromiumExecutable.ts';
 import { privateViteCache } from './support/viteCache.ts';
 
 const RENDER_TIMEOUT_MS = 45_000;
+/** The first page waits for the dev server's cold compile, which is slow while other suites run. */
+const FIRST_LOAD_TIMEOUT_MS = 120_000;
 
 type ColumnBox = { width: number; leftGap: number; rightGap: number; transition: string };
 
@@ -67,8 +69,8 @@ test(
 
       const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
       const page = await context.newPage();
-      await page.goto(`${origin}/`, { waitUntil: 'domcontentloaded', timeout: RENDER_TIMEOUT_MS });
-      await page.getByRole('complementary', { name: 'Recent chats' }).waitFor({ timeout: RENDER_TIMEOUT_MS });
+      await page.goto(`${origin}/`, { waitUntil: 'domcontentloaded', timeout: FIRST_LOAD_TIMEOUT_MS });
+      await page.getByRole('complementary', { name: 'Recent chats' }).waitFor({ timeout: FIRST_LOAD_TIMEOUT_MS });
       const composer = page.getByRole('textbox').first();
       await composer.waitFor({ timeout: RENDER_TIMEOUT_MS });
       await composer.fill('Hello');

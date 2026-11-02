@@ -1,15 +1,21 @@
 /**
- * Voice input route definitions.
+ * Voice route definitions.
  * Mounted at /api/v1/voice; handlers are registered in apis/voice.ts.
  *
  * The browser posts recorded audio to `POST /transcribe`; the handler forwards
  * the bytes to the `aman-stt` sidecar and returns the transcript. `GET /status`
  * lets the composer hide voice input when the sidecar is unreachable.
+ * `POST /speak` turns reply text into audio with the `aman-tts` sidecar.
  */
 import { createRoute, z } from '@hono/zod-openapi';
 
 import { RequestErrorResponseSchema } from '../schemas/errors';
-import { VoiceStatusResponseSchema, VoiceTranscriptionResponseSchema } from '../schemas/voice';
+import {
+  MAX_SPEAK_TEXT_CHARS,
+  SpeakVoiceRequestSchema,
+  VoiceStatusResponseSchema,
+  VoiceTranscriptionResponseSchema,
+} from '../schemas/voice';
 import { OpenApiTag } from './openapiTags';
 
 export const transcribeVoiceRoute = createRoute({
@@ -68,6 +74,52 @@ export const getVoiceStatusRoute = createRoute({
     200: {
       content: { 'application/json': { schema: VoiceStatusResponseSchema } },
       description: 'STT availability.',
+    },
+  },
+});
+
+export const speakVoiceRoute = createRoute({
+  method: 'post',
+  path: '/speak',
+  tags: [OpenApiTag.AGENT_SESSIONS],
+  summary: 'Read reply text aloud',
+  description: `Turns reply text into speech with the voice running on this computer and returns WAV audio. Text over ${String(MAX_SPEAK_TEXT_CHARS)} characters is refused. Each person may make a limited number of requests per minute.`,
+  'x-fern-sdk-group-name': ['voice'],
+  'x-fern-sdk-method-name': 'speak',
+  request: {
+    body: {
+      content: { 'application/json': { schema: SpeakVoiceRequestSchema } },
+      required: true,
+    },
+  },
+  responses: {
+    200: {
+      content: { 'audio/wav': { schema: z.string().openapi({ type: 'string', format: 'binary' }) } },
+      description: 'Spoken audio, 24 kHz mono 16-bit WAV.',
+    },
+    400: {
+      content: { 'application/json': { schema: RequestErrorResponseSchema } },
+      description: 'The text is empty, has nothing to read aloud, or names an unknown voice.',
+    },
+    401: {
+      content: { 'application/json': { schema: RequestErrorResponseSchema } },
+      description: 'Authentication required.',
+    },
+    413: {
+      content: { 'application/json': { schema: RequestErrorResponseSchema } },
+      description: `The text is over the ${String(MAX_SPEAK_TEXT_CHARS)} character limit.`,
+    },
+    429: {
+      content: { 'application/json': { schema: RequestErrorResponseSchema } },
+      description: 'Too many requests; wait for the Retry-After seconds.',
+    },
+    502: {
+      content: { 'application/json': { schema: RequestErrorResponseSchema } },
+      description: 'The voice service returned an unexpected response.',
+    },
+    503: {
+      content: { 'application/json': { schema: RequestErrorResponseSchema } },
+      description: 'The voice on this computer is off or still starting.',
     },
   },
 });

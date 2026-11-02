@@ -109,6 +109,7 @@ export interface ReleaseRecord {
   sourceRef: string | null;
   appImage: string | null;
   sttImage: string | null;
+  ttsImage: string | null;
   calendarImage: string | null;
   browserImage: string | null;
   browserGatewayImage: string | null;
@@ -141,6 +142,7 @@ export function parseRelease(text: string): ReleaseRecord | null {
     sourceRef: stringField(parsed, 'source_ref'),
     appImage: stringField(parsed, 'app_image'),
     sttImage: stringField(parsed, 'stt_image'),
+    ttsImage: stringField(parsed, 'tts_image'),
     calendarImage: stringField(parsed, 'calendar_image'),
     browserImage: stringField(parsed, 'browser_image'),
     browserGatewayImage: stringField(parsed, 'browser_gateway_image'),
@@ -157,6 +159,7 @@ export function renderRelease(record: ReleaseRecord): string {
     ['source_ref', record.sourceRef],
     ['app_image', record.appImage],
     ['stt_image', record.sttImage],
+    ['tts_image', record.ttsImage],
     ['calendar_image', record.calendarImage],
     ['browser_image', record.browserImage],
     ['browser_gateway_image', record.browserGatewayImage],
@@ -417,6 +420,7 @@ export function createStateStore(backend: StateBackend): StateStore {
         record.sourceRef,
         record.appImage,
         record.sttImage,
+        record.ttsImage,
         record.calendarImage,
         record.browserImage,
         record.browserGatewayImage,
