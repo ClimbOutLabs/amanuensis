@@ -4354,7 +4354,7 @@ export function runStoreContractSuite<
         tenant_id: tenant,
         query: 'ferry',
         created_by_subject_id: createdBy,
-        persona_ids: [],
+        personas: { kind: 'only', persona_ids: [] },
         exclude_session_id: null,
         from: null,
         to: null,
@@ -4648,13 +4648,51 @@ export function runStoreContractSuite<
 
       const sharedOnly = await store.searchChatHistory(searchInput({ query: 'ferry note home' }));
       expect(sharedOnly).toEqual([]);
-      const asHome = await store.searchChatHistory(searchInput({ query: 'home ferry', persona_ids: ['home'] }));
+      const asHome = await store.searchChatHistory(
+        searchInput({ query: 'home ferry', personas: { kind: 'only', persona_ids: ['home'] } }),
+      );
       expect(asHome.map(hit => hit.snippet)).toEqual(['Home ferry note']);
       await expect(
-        store.searchChatHistory(searchInput({ query: 'work ferry', persona_ids: ['home'] })),
+        store.searchChatHistory(
+          searchInput({ query: 'work ferry', personas: { kind: 'only', persona_ids: ['home'] } }),
+        ),
       ).resolves.toEqual([]);
       const mainOnly = await store.searchChatHistory(searchInput({ query: 'ferry' }));
       expect(mainOnly.map(hit => hit.snippet)).toEqual(['Shared ferry note']);
+    });
+
+    it("returns every persona's messages to a search over all personas, still only the person's own", async () => {
+      const store = createStore();
+      await seedSession(store);
+      await seedSecondSession(store, 'other-person-session', 'someone-else');
+      await indexOne(store, {
+        session: sessionId,
+        turn: 'turn-home',
+        text: 'Home ferry note',
+        at: docAt('01'),
+        persona: 'home',
+      });
+      await indexOne(store, {
+        session: sessionId,
+        turn: 'turn-main',
+        text: 'Shared ferry note',
+        at: docAt('02'),
+        persona: null,
+      });
+      await indexOne(store, {
+        session: 'other-person-session',
+        turn: 'turn-1',
+        text: 'Their ferry note',
+        at: docAt('03'),
+        persona: 'home',
+      });
+
+      const hits = await store.searchChatHistory(searchInput({ query: 'home ferry', personas: { kind: 'all' } }));
+      expect(hits.map(hit => hit.snippet)).toEqual(['Home ferry note']);
+      expect(hits[0]?.matched_at).toEqual(docAt('01'));
+      const all = await store.searchChatHistory(searchInput({ personas: { kind: 'all' } }));
+      expect(all.map(hit => hit.session_id)).toEqual([sessionId]);
+      expect(all[0]?.matched_at).toEqual(docAt('02'));
     });
 
     it('ignores filler words in the query and in the messages', async () => {

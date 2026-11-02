@@ -5239,6 +5239,71 @@ for await (const item of response) {
 </dl>
 </details>
 
+<details><summary><code>client.sessions.<a href="/src/api/resources/sessions/client/Client.ts">searchOwnChats</a>({ ...params }) -> TrueForge.SearchOwnChatsResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+Finds your own chats with a message holding every search word, newest match first, with a short excerpt. Returns nothing while past-chat search is off.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.sessions.searchOwnChats({
+    query: "query"
+});
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**request:** `TrueForge.SearchOwnChatsSessionsRequest`
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**requestOptions:** `SessionsClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
 ## SessionPersonas
 <details><summary><code>client.sessionPersonas.<a href="/src/api/resources/sessionPersonas/client/Client.ts">get</a>(session_id) -> TrueForge.GetSessionPersonaResponse</code></summary>
 <dl>

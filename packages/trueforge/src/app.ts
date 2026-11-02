@@ -27,6 +27,7 @@ import { createCapabilitiesRouter } from './apis/capabilities';
 import { createCatalogRouter } from './apis/catalog';
 import { createChatImagesRouter } from './apis/chatImages';
 import { createChatPicturesRouter } from './apis/chatPictures';
+import { createChatSearchRouter } from './apis/chatSearch';
 import { createDataExportRouter } from './apis/dataExport';
 import { createDataImportRouter } from './apis/dataImport';
 import { createEmailAccountRouter, EMAIL_SETTINGS_BASE_PATH } from './apis/emailAccount';
@@ -869,6 +870,18 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
         audit: deps.sentinelAuditStore,
         sessionStore: deps.sessionStore,
         resolveRequestContext,
+      }),
+      authMiddleware,
+    ),
+  );
+  app.route(
+    '/api/v1/user/chat-search',
+    withAuth(
+      createChatSearchRouter({
+        sessionStore: deps.sessionStore,
+        sentinelSettingsStore: deps.sentinelSettingsStore,
+        resolveRequestContext,
+        logger: deps.logger,
       }),
       authMiddleware,
     ),
