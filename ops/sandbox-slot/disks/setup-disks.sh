@@ -3,6 +3,7 @@
 # its slot's disk and nothing else. Run as root by `pnpm sandbox:slots --fix` after the user agrees.
 #   setup-disks.sh setup  <dir> <size_gb> <count>
 #   setup-disks.sh remove <dir> <count>
+#   setup-disks.sh retire <dir> <keep>    removes the disks of slots past <keep> that an older install made
 # Safe to run again: existing disks are kept and only the missing steps are done.
 set -eu
 
@@ -19,8 +20,8 @@ mode="${1:-}"
 dir="${2:-}"
 case "$mode" in
   setup) size_gb="${3:-}"; count="${4:-}" ;;
-  remove) size_gb=""; count="${3:-}" ;;
-  *) fail "usage: setup-disks.sh setup <dir> <size_gb> <count> | remove <dir> <count>" ;;
+  remove | retire) size_gb=""; count="${3:-}" ;;
+  *) fail "usage: setup-disks.sh setup <dir> <size_gb> <count> | remove <dir> <count> | retire <dir> <keep>" ;;
 esac
 
 case "$dir" in
@@ -58,29 +59,45 @@ has_fstab_line() {
   [ -f "$FSTAB" ] && awk -v img="$1" '$1 == img { found = 1 } END { exit !found }' "$FSTAB"
 }
 
+# Unmounts, unlists and deletes the disk of slot $1.
+remove_disk() {
+  img="$dir/ws-$1.img"
+  mp="$dir/ws-$1"
+  # Unmount only what this script mounted: the mount's device must be a loop device backed by our image.
+  if mountpoint -q "$mp" 2>/dev/null; then
+    source_dev="$(findmnt -n -o SOURCE --mountpoint "$mp")"
+    if losetup -n -O NAME -j "$img" 2>/dev/null | grep -qx "$source_dev"; then
+      umount "$mp"
+    else
+      echo "setup-disks: $mp is mounted from something else; leaving it alone" >&2
+    fi
+  fi
+  # Drop exactly our fstab line and the comment above it.
+  if has_fstab_line "$img"; then
+    awk -v img="$img" '$1 != img && $0 != "# aman-sandbox-slots: " img' "$FSTAB" | write_fstab
+  fi
+  rm -f "$img"
+  rmdir "$mp" 2>/dev/null || true
+}
+
 if [ "$mode" = remove ]; then
   i=1
   while [ "$i" -le "$count" ]; do
-    img="$dir/ws-$i.img"
-    mp="$dir/ws-$i"
-    # Unmount only what this script mounted: the mount's device must be a loop device backed by our image.
-    if mountpoint -q "$mp" 2>/dev/null; then
-      source_dev="$(findmnt -n -o SOURCE --mountpoint "$mp")"
-      if losetup -n -O NAME -j "$img" 2>/dev/null | grep -qx "$source_dev"; then
-        umount "$mp"
-      else
-        echo "setup-disks: $mp is mounted from something else; leaving it alone" >&2
-      fi
-    fi
-    # Drop exactly our fstab line and the comment above it.
-    if has_fstab_line "$img"; then
-      awk -v img="$img" '$1 != img && $0 != "# aman-sandbox-slots: " img' "$FSTAB" | write_fstab
-    fi
-    rm -f "$img"
-    rmdir "$mp" 2>/dev/null || true
+    remove_disk "$i"
     i=$((i + 1))
   done
   rmdir "$dir" 2>/dev/null || true
+  exit 0
+fi
+
+if [ "$mode" = retire ]; then
+  # No install ever had more than four slots, so retiring stops at slot 4, the same slots the
+  # TypeScript side names as retired.
+  i=$((count + 1))
+  while [ "$i" -le 4 ]; do
+    remove_disk "$i"
+    i=$((i + 1))
+  done
   exit 0
 fi
 

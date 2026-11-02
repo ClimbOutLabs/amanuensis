@@ -12,7 +12,7 @@ One instance serves one person. If two people in the same household need it, the
 ## What you need
 
 - A computer with Docker: Docker Engine with Compose v2 or newer on Linux, or Docker Desktop on macOS. On Windows, run inside WSL2; native Windows is not supported. Rootless Docker and Podman are not supported.
-- 10 GB of free disk space, and on Linux 20 GB more under `/var/lib` for the sandbox's slot disks (they are sparse and use real space only as code runs).
+- 10 GB of free disk space, and on Linux 32 GB more under `/var/lib` for the sandbox's two slot disks of 16 GB. They are sparse and use real space only as code runs, but each may fill completely, so setup wants the room for both.
 - Nothing else: no Node.js is needed. For the sandbox setup the installer downloads a pinned Node.js from nodejs.org (about 35 MB, checked against a SHA-256 pinned in the repository) into `~/.amanuensis/runtime/node`, and uses it only to run that setup. `--use-host-node` uses your own Node.js 22.14 or newer instead; `--no-sandbox` skips all of it.
 - On Linux, Docker Engine 28 or newer: older versions let other devices on your network reach ports meant for this computer only, so the installer and `aman doctor` stop and say so.
 - Docker needs at least 6 GB of memory for the first build. The installer blocks below 6 GB and warns between 6 and 8 GB; 8 GB or more is recommended.
@@ -34,7 +34,7 @@ The installer works in phases and shows you a printed plan before changing anyth
 3. **Downloads.** Fetches third-party base images by pinned digest and the model weight files listed in the printed plan.
 4. **Images.** Downloads the pinned Node.js runtime for the sandbox setup, builds the app and helper images locally from the checked-out source, then the sandbox slot image (its build log goes to `~/.amanuensis/state/sandbox.log`; the terminal shows one progress line).
 5. **Machine services.** Starts the shared speech-to-text service.
-6. **First instance.** Prompts for the instance details, starts the four sandbox slots (asking before the `sudo` steps on Linux: installing the AppArmor profile in `/etc/apparmor.d` and loading it, creating the slot disks, and enabling Docker at boot if it is not), then starts your stack connected to them.
+6. **First instance.** Prompts for the instance details, starts the two sandbox slots (asking before the `sudo` steps on Linux: installing the AppArmor profile in `/etc/apparmor.d` and loading it, creating the slot disks, and enabling Docker at boot if it is not), then starts your stack connected to them.
 7. **Doctor and summary.** Runs the health checks, then proves the sandbox: every slot's safety checks and a real call from the app to the slots. Prints your URLs, versions, backup location, and next steps.
 
 ### What it asks
