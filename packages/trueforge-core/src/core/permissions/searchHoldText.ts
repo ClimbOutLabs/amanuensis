@@ -73,6 +73,7 @@ const READ_PLACE: Record<ReadSource, string> = {
   email: 'an email',
   event: 'a calendar event',
   page: 'a page',
+  browser_page: 'a page',
   file: 'a file',
   tool_result: 'a tool result',
   other: 'something',

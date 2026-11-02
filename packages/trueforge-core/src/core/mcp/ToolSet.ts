@@ -24,7 +24,7 @@ import { isMapsToolName } from '../permissions/mapsToolNames';
 import { appendOutboundTrace, collectOutboundStrings } from '../permissions/outboundGuard';
 import {
   isSearchAskReason,
-  isSilentSearchReason,
+  countsAsSilentLookup,
   resultTexts,
   runOneAtATime,
   type SearchProviderGrant,
@@ -505,7 +505,7 @@ export class ToolSet implements IToolSet {
     if (
       decision === undefined &&
       classification !== undefined &&
-      isSilentSearchReason(classification.reason) &&
+      countsAsSilentLookup({ tool_name: params.name, reason: classification.reason }) &&
       this.sentinel !== undefined
     ) {
       // Classified as silent a moment ago inside this one-at-a-time step, so the count is current.
