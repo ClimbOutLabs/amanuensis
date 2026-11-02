@@ -69,9 +69,28 @@ describe('useComposerInputActions', () => {
     expect(mockShowError).toHaveBeenCalledWith(expect.any(Error), { title: 'Could not paste' });
   });
 
+  it('names Cmd+V on an Apple device', async () => {
+    installClipboard(async () => {
+      throw new DOMException('denied', 'NotAllowedError');
+    });
+    const agent = vi
+      .spyOn(navigator, 'userAgent', 'get')
+      .mockReturnValue('Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0)');
+    const { result } = renderHook(() => useComposerInputActions(vi.fn()));
+
+    await act(async () => {
+      result.current.find(action => action.id === 'paste')?.onSelect();
+      await Promise.resolve();
+    });
+
+    agent.mockRestore();
+    const shown = mockShowError.mock.lastCall?.[0];
+    expect(shown instanceof Error ? shown.message : '').toContain('Cmd+V');
+  });
+
   it('appendPasted keeps an empty draft clean and adds a new line otherwise', () => {
-    expect(appendPasted('', 'hi')).toBe('hi');
-    expect(appendPasted('a', '')).toBe('a');
-    expect(appendPasted('a\n', 'b')).toBe('a\nb');
+    expect(appendPasted({ current: '', pasted: 'hi' })).toBe('hi');
+    expect(appendPasted({ current: 'a', pasted: '' })).toBe('a');
+    expect(appendPasted({ current: 'a\n', pasted: 'b' })).toBe('a\nb');
   });
 });

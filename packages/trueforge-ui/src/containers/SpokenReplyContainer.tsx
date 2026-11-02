@@ -83,7 +83,14 @@ export function SpokenReplyContainer() {
     spokenReply.stop();
   }, [threadId, spokenReply]);
 
-  useEffect(() => () => spokenReply.stop(), [spokenReply]);
+  // Leaving the chat view ends a reply in progress and a hands-free conversation.
+  useEffect(
+    () => () => {
+      setHandsFree('off');
+      spokenReply.stop();
+    },
+    [spokenReply],
+  );
 
   // A new user message is either the voice send's own message or the end of that send.
   useEffect(() => {

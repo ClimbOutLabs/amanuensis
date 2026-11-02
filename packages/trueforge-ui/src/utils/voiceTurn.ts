@@ -73,6 +73,7 @@ export function takeSpokenReply(latestUserId: string | undefined): boolean {
 export type HandsFree = 'off' | 'listening' | 'answering' | 'listen-due';
 
 let handsFree: HandsFree = 'off';
+let handsFreeStartedAt = 0;
 const handsFreeListeners = new Set<() => void>();
 
 export function getHandsFree(): HandsFree {
@@ -81,8 +82,14 @@ export function getHandsFree(): HandsFree {
 
 export function setHandsFree(next: HandsFree): void {
   if (handsFree === next) return;
+  if (handsFree === 'off') handsFreeStartedAt = Date.now();
   handsFree = next;
   for (const listener of handsFreeListeners) listener();
+}
+
+/** How long the current hands-free conversation has been on; 0 when it is off. */
+export function handsFreeElapsedMs(): number {
+  return handsFree === 'off' ? 0 : Date.now() - handsFreeStartedAt;
 }
 
 function subscribeHandsFree(listener: () => void): () => void {

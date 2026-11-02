@@ -6,14 +6,19 @@ import type { DraftComposerAction } from '../atoms/draft/DraftComposerActionsMen
 import { useToasterOptional } from '../containers/ToasterContainer.js';
 
 const PASTE_FAILED_TITLE = 'Could not paste';
-const PASTE_FAILED_MESSAGE = 'Allow this site to see your clipboard, or paste into the message box with Ctrl+V.';
+
+/** Apple keyboards paste with Cmd, everything else with Ctrl. */
+function pasteFailedMessage(): string {
+  const apple = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.userAgent);
+  return `Allow this site to see your clipboard, or paste into the message box with ${apple ? 'Cmd+V' : 'Ctrl+V'}.`;
+}
 
 function canReadClipboard(): boolean {
   return typeof navigator !== 'undefined' && typeof navigator.clipboard?.readText === 'function';
 }
 
 /** Adds clipboard text to the end of the draft, on its own line when the draft already has text. */
-export function appendPasted(current: string, pasted: string): string {
+export function appendPasted({ current, pasted }: { current: string; pasted: string }): string {
   if (pasted === '') return current;
   if (current.trim() === '') return pasted;
   return current.endsWith('\n') ? `${current}${pasted}` : `${current}\n${pasted}`;
@@ -32,9 +37,9 @@ export function useComposerInputActions(onAttach: (() => void) | undefined): Dra
     try {
       const pasted = await navigator.clipboard.readText();
       const composer = aui.composer();
-      composer.setText(appendPasted(composer.getState().text, pasted));
+      composer.setText(appendPasted({ current: composer.getState().text, pasted }));
     } catch (error) {
-      toaster?.showError(new Error(PASTE_FAILED_MESSAGE, { cause: error }), { title: PASTE_FAILED_TITLE });
+      toaster?.showError(new Error(pasteFailedMessage(), { cause: error }), { title: PASTE_FAILED_TITLE });
     }
   };
   if (onAttach === undefined) return [];

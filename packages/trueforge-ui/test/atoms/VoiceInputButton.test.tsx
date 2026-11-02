@@ -17,7 +17,7 @@ vi.mock('@/atoms/lib/voiceRecorder.js', () => ({
 }));
 
 import type { StartVoiceRecordingOptions } from '@/atoms/lib/voiceRecorder.js';
-import { HOLD_TO_SEND_MS, VoiceInputButton } from '@/atoms/VoiceInputButton.js';
+import { HANDS_FREE_MAX_MS, HOLD_TO_SEND_MS, VoiceInputButton } from '@/atoms/VoiceInputButton.js';
 import { useSpokenReply } from '@/components/SpokenReplyContext.js';
 import {
   VoiceInputProvider,
@@ -480,6 +480,26 @@ describe('VoiceInputButton push-to-talk', () => {
     expect(mockStartVoiceRecording).not.toHaveBeenCalled();
   });
 
+  it('the hotkey is left to the page when the mic cannot act', async () => {
+    const { api } = makeApi();
+    render(
+      <form>
+        <VoiceInputProvider api={api}>
+          <VoiceInputButton disabled />
+        </VoiceInputProvider>
+      </form>,
+    );
+    await screen.findByRole('button', { name: 'Record voice message' });
+
+    const event = new KeyboardEvent('keydown', { code: 'Space', ctrlKey: true, shiftKey: true, cancelable: true });
+    act(() => {
+      window.dispatchEvent(event);
+    });
+
+    expect(event.defaultPrevented).toBe(false);
+    expect(mockStartVoiceRecording).not.toHaveBeenCalled();
+  });
+
   it('an empty transcript is never sent', async () => {
     const { api } = makeApi({ transcribe: async () => ({ ...DEFAULT_TRANSCRIPTION, text: '  ' }) });
     renderInForm(api);
@@ -560,7 +580,7 @@ describe('VoiceInputButton hands-free', () => {
 
     act(() => silence?.('pause'));
 
-    expect(await screen.findByText(/could not be sent yet/)).toBeInTheDocument();
+    expect(await screen.findByText(/could not be sent/)).toBeInTheDocument();
     act(() => voiceReplyDone());
     expect(mockStartVoiceRecording).toHaveBeenCalledTimes(1);
   });
@@ -576,14 +596,133 @@ describe('VoiceInputButton hands-free', () => {
     expect(mockStartVoiceRecording).toHaveBeenCalledTimes(1);
   });
 
-  it('switching chats ends the conversation', async () => {
+  it('switching chats ends the conversation and releases the mic', async () => {
     await startHandsFree();
+    const recorder = await mockStartVoiceRecording.mock.results[0]?.value;
+
+    // What the chat view does when the chat really changes.
+    act(() => setHandsFree('off'));
+
+    expect(recorder.cancel).toHaveBeenCalled();
+    expect(await screen.findByRole('button', { name: 'Start hands-free conversation' })).toBeInTheDocument();
+  });
+
+  it('keeps listening when the address changes without a chat switch, as when a new chat gets its id', async () => {
+    await startHandsFree();
+    const recorder = await mockStartVoiceRecording.mock.results[0]?.value;
 
     act(() => {
       window.dispatchEvent(new Event('trueforge:routechange'));
     });
 
-    expect(await screen.findByRole('button', { name: 'Start hands-free conversation' })).toBeInTheDocument();
+    expect(recorder.cancel).not.toHaveBeenCalled();
+    expect(screen.getByText('Listening. Pause to send.')).toBeInTheDocument();
+  });
+
+  function micOpening() {
+    const recorder = makeRecorder();
+    let open: () => void = () => {};
+    mockStartVoiceRecording.mockImplementation(
+      (options: StartVoiceRecordingOptions) =>
+        new Promise(resolve => {
+          silence = options.onSilence;
+          open = () => resolve(recorder);
+        }),
+    );
+    return { recorder, open: () => open() };
+  }
+
+  it('turning it off while the mic is still opening drops that recording', async () => {
+    const mic = micOpening();
+    const { api } = makeApi();
+    render(composer(api));
+    fireEvent.click(await screen.findByRole('button', { name: 'Start hands-free conversation' }));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Stop hands-free conversation' }));
+    await act(async () => {
+      mic.open();
+      await Promise.resolve();
+    });
+    act(() => silence?.('pause'));
+
+    expect(mic.recorder.cancel).toHaveBeenCalledTimes(1);
+    expect(HTMLFormElement.prototype.requestSubmit).not.toHaveBeenCalled();
+    expect(screen.queryByText('Listening. Pause to send.')).toBeNull();
+  });
+
+  it('hiding the tab while the mic is still opening drops that recording', async () => {
+    const mic = micOpening();
+    const { api } = makeApi();
+    render(composer(api));
+    fireEvent.click(await screen.findByRole('button', { name: 'Start hands-free conversation' }));
+
+    const visibility = vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden');
+    act(() => {
+      document.dispatchEvent(new Event('visibilitychange'));
+    });
+    await act(async () => {
+      mic.open();
+      await Promise.resolve();
+    });
+    visibility.mockRestore();
+    act(() => silence?.('pause'));
+
+    expect(mic.recorder.cancel).toHaveBeenCalledTimes(1);
+    expect(HTMLFormElement.prototype.requestSubmit).not.toHaveBeenCalled();
+  });
+
+  it('ends after 30 minutes and says how to start again', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    try {
+      await startHandsFree();
+      act(() => silence?.('pause'));
+      await screen.findByText('Waiting for the answer…');
+
+      vi.setSystemTime(Date.now() + HANDS_FREE_MAX_MS);
+      act(() => voiceReplyDone());
+
+      expect(await screen.findByText(/Hands-free stopped after 30 minutes/)).toBeInTheDocument();
+      expect(mockStartVoiceRecording).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('a turn sent by hand while listening stops the listen until it is answered', async () => {
+    const { api, view } = await startHandsFree();
+    const recorder = await mockStartVoiceRecording.mock.results[0]?.value;
+
+    view.rerender(composer(api, { isRunning: true }));
+
+    expect(recorder.cancel).toHaveBeenCalled();
+    expect(await screen.findByText('Waiting for the answer…')).toBeInTheDocument();
+    act(() => voiceReplyDone());
+    expect(mockStartVoiceRecording).toHaveBeenCalledTimes(1);
+    view.rerender(composer(api));
+    await screen.findByText('Listening. Pause to send.');
+    expect(mockStartVoiceRecording).toHaveBeenCalledTimes(2);
+  });
+
+  it('a reply read aloud by hand pauses the listen and it resumes after', async () => {
+    installSpeechSynthesis();
+    try {
+      await startHandsFree();
+      const recorder = await mockStartVoiceRecording.mock.results[0]?.value;
+
+      const player = renderHook(() => useSpokenReply()).result.current;
+      act(() => {
+        void player.speak('A reply.', { key: 'msg-1' });
+      });
+
+      expect(recorder.cancel).toHaveBeenCalled();
+      await screen.findByText('Waiting for the answer…');
+      act(() => player.stop());
+      await screen.findByText('Listening. Pause to send.');
+      expect(mockStartVoiceRecording).toHaveBeenCalledTimes(2);
+    } finally {
+      stopSpokenReply();
+      removeSpeechSynthesis();
+    }
   });
 
   it('while Aman answers only the hands-free switch shows, and listening resumes after a remount', async () => {
