@@ -48,6 +48,7 @@ const TOOL_RESULT_SOURCE_OF_READ: Record<ReadSource, ToolResultSource> = {
   email: 'email',
   event: 'calendar',
   page: 'web',
+  browser_page: 'web',
   file: 'attachment',
   tool_result: 'other',
   other: 'other',

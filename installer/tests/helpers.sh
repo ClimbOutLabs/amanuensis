@@ -162,11 +162,14 @@ sandbox_drop() {
 
 # A tiny git checkout standing in for the repository: the build contexts and the slots compose file the doctor looks for.
 fixture_repo() {
-  mkdir -p "$1/ops/aman-stt" "$1/ops/calendar-sidecar" "$1/ops/compose/mail-email"
+  mkdir -p "$1/ops/aman-stt" "$1/ops/calendar-sidecar" "$1/ops/browser-sidecar" "$1/ops/compose/mail-email"
   printf 'FROM scratch\n' >"$1/Dockerfile.dev"
   printf 'name: slots\n' >"$1/docker-compose.slots.yml"
   printf 'FROM scratch\n' >"$1/ops/aman-stt/Dockerfile"
   printf 'FROM scratch\n' >"$1/ops/calendar-sidecar/Dockerfile"
+  printf 'FROM scratch\n' >"$1/ops/browser-sidecar/Dockerfile"
+  printf 'FROM scratch\n' >"$1/ops/browser-sidecar/Dockerfile.gateway"
+  printf '{"defaultAction": "SCMP_ACT_ERRNO"}\n' >"$1/ops/browser-sidecar/seccomp_profile.json"
   printf '#!/bin/sh\n' >"$1/ops/compose/mail-email/entrypoint.sh"
   printf '# account agent fixture\n' >"$1/ops/compose/mail-email/account_agent.py"
   printf '# sign-in check fixture\n' >"$1/ops/compose/mail-email/email_check.py"

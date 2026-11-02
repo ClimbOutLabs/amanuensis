@@ -16,6 +16,7 @@ import path from 'node:path';
 import { Transform, type Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import type { Logger } from 'winston';
+import type { PackageMirrorAllowanceCheck } from './packageMirrorAllowance';
 import type { PackageMirrorGrant, PackageMirrorTokenRegistry } from './packageMirrorTokens';
 
 export type MirrorEcosystem = 'pypi' | 'npm' | 'go' | 'cargo';
@@ -33,6 +34,25 @@ export const MIRROR_UPSTREAM_BASES: Record<MirrorEcosystem, readonly string[]> =
   cargo: ['https://index.crates.io', 'https://static.crates.io'],
 };
 
+/**
+ * The code hosts the Go mirror serves modules from, named by the first part of a module path.
+ * A Go path that names a module from any other host is refused.
+ */
+const GO_MODULE_HOSTS: readonly string[] = [
+  'github.com',
+  'gitlab.com',
+  'bitbucket.org',
+  'codeberg.org',
+  'git.sr.ht',
+  'golang.org',
+  'google.golang.org',
+  'go.googlesource.com',
+  'gopkg.in',
+  'go.uber.org',
+  'k8s.io',
+  'sigs.k8s.io',
+];
+
 /** One download may be at most this large by default; the server setting of the same name overrides it. */
 export const DEFAULT_MIRROR_DOWNLOAD_MAX_BYTES = 1024 * 1024 * 1024;
 /** The whole cache may be at most this large by default; the server setting of the same name overrides it. */
@@ -45,6 +65,8 @@ const UPSTREAM_TIMEOUT_MS = 10 * 60 * 1000;
 
 export interface PackageMirrorGatewayOptions {
   registry: PackageMirrorTokenRegistry;
+  /** Whether a grant's allowance still holds in the shared database; a grant that fails it is taken back. */
+  allowanceHolds: PackageMirrorAllowanceCheck;
   cacheDir: string;
   logger: Logger;
   maxDownloadBytes?: number;
@@ -228,6 +250,51 @@ export function isSafeMirrorPath(rawPath: string): boolean {
   return true;
 }
 
+/**
+ * The module a Go mirror path names, or undefined when the path names no module. Module proxy
+ * paths carry the module before the /@ marker, checksum database lookups carry it after
+ * /lookup/ and before the version's @, and the via route is unwrapped first. Checksum tile
+ * paths name no module, so they return undefined.
+ */
+function goModulePath(rest: string): string | undefined {
+  let tail = rest;
+  if (tail.startsWith('/via/')) {
+    const after = tail.slice('/via/'.length);
+    const slash = after.indexOf('/');
+    if (slash === -1) {
+      return undefined;
+    }
+    tail = after.slice(slash);
+  }
+  if (tail.startsWith('/sumdb/')) {
+    const after = tail.slice('/sumdb/'.length);
+    const slash = after.indexOf('/');
+    if (slash === -1) {
+      return undefined;
+    }
+    tail = after.slice(slash);
+  }
+  if (tail.startsWith('/lookup/')) {
+    const named = tail.slice('/lookup/'.length);
+    const at = named.indexOf('@');
+    return at === -1 ? named : named.slice(0, at);
+  }
+  const marker = tail.indexOf('/@');
+  if (marker === -1) {
+    return undefined;
+  }
+  return tail.slice(1, marker);
+}
+
+/**
+ * The host a module path starts with, with the module proxy escaping undone: an upper-case
+ * letter in a module path travels as a ! followed by its lower-case form.
+ */
+function goModuleHost(modulePath: string): string {
+  const first = modulePath.split('/')[0] ?? '';
+  return first.replace(/!([a-z])/g, (_match, letter: string) => letter.toUpperCase()).toLowerCase();
+}
+
 function headerValue(headers: Record<string, string | string[] | undefined>, name: string): string | undefined {
   const value = headers[name];
   return Array.isArray(value) ? value[0] : value;
@@ -241,6 +308,7 @@ function headerValue(headers: Record<string, string | string[] | undefined>, nam
  */
 export class PackageMirrorGateway {
   readonly #registry: PackageMirrorTokenRegistry;
+  readonly #allowanceHolds: PackageMirrorAllowanceCheck;
   readonly #cacheDir: string;
   readonly #logger: Logger;
   readonly #maxDownloadBytes: number;
@@ -251,6 +319,7 @@ export class PackageMirrorGateway {
 
   constructor(options: PackageMirrorGatewayOptions) {
     this.#registry = options.registry;
+    this.#allowanceHolds = options.allowanceHolds;
     this.#cacheDir = options.cacheDir;
     this.#logger = options.logger;
     this.#maxDownloadBytes = options.maxDownloadBytes ?? DEFAULT_MIRROR_DOWNLOAD_MAX_BYTES;
@@ -341,7 +410,35 @@ export class PackageMirrorGateway {
     const token = Array.isArray(tokenHeader) ? tokenHeader[0] : tokenHeader;
     const grant = token === undefined ? undefined : this.#registry.resolve(token);
     if (grant === undefined || token === undefined) {
-      this.#plain(res, 403, 'This sandbox has no package download grant. Allow downloads for this repo first.');
+      this.#plain(
+        res,
+        403,
+        'This sandbox has no package download grant. Allow package downloads in this chat first, then try again.',
+      );
+      return;
+    }
+    const allowance = await this.#allowanceHolds(grant);
+    if (allowance === 'unavailable') {
+      // The check could not be read, so nothing is decided: the grant stays in place and
+      // the person is told to try again, not that downloads were turned off.
+      this.#plain(
+        res,
+        503,
+        'Package downloads cannot be checked right now, so this download did not go ahead. Try again in a moment.',
+      );
+      this.#log({ grant, ecosystem, path: rawPath, status: 503, bytes: 0, cached: false, at: startedAt });
+      return;
+    }
+    if (allowance === 'off' || allowance === 'chat_deleted') {
+      this.#registry.revoke(token);
+      this.#plain(
+        res,
+        403,
+        allowance === 'chat_deleted'
+          ? 'This chat was deleted, so this download was stopped. Start a new chat to keep working.'
+          : 'Package downloads were turned off for this chat, so this download was stopped. Turn them on again in Settings, then try again.',
+      );
+      this.#log({ grant, ecosystem, path: rawPath, status: 403, bytes: 0, cached: false, at: startedAt });
       return;
     }
     // The rest of the path goes upstream exactly as written, trailing slash and all.
@@ -350,6 +447,18 @@ export class PackageMirrorGateway {
       this.#plain(res, 403, "That package file is not on this mirror's own list, so it was not fetched.");
       this.#log({ grant, ecosystem, path: rest, status: 403, bytes: 0, cached: false, at: startedAt });
       return;
+    }
+    if (ecosystem === 'go') {
+      const modulePath = goModulePath(rest);
+      if (modulePath !== undefined && !GO_MODULE_HOSTS.includes(goModuleHost(modulePath))) {
+        this.#plain(
+          res,
+          403,
+          'That Go module comes from a code host this mirror does not fetch from. Use a module from a well-known code host, such as github.com.',
+        );
+        this.#log({ grant, ecosystem, path: rest, status: 403, bytes: 0, cached: false, at: startedAt });
+        return;
+      }
     }
     const publicBase = `http://127.0.0.1:${String(SLOT_MIRROR_GUEST_PORT)}/m/${token}`;
     if (ecosystem === 'cargo' && rest === '/config.json') {

@@ -17,7 +17,7 @@ test_doctor_reads_what_the_installer_wrote() {
   out=$(real_doctor --json --instance main) || rc=$?
   assert_eq "$rc" 0 "doctor exit code on a fresh install"
   assert_contains "$out" '"instances":{"main":[' "instance discovered under instances/"
-  assert_contains "$out" '"id":"images","state":"ok","detail":"All 3 images are ready.' "app_image, dex_image and stt_image read from release.json"
+  assert_contains "$out" '"id":"images","state":"ok","detail":"All 7 images are ready.' "every image the installer recorded in release.json, the connectors and the browser too"
   assert_contains "$out" '"id":"config","state":"ok"' ".env mode 0600 accepted"
   assert_contains "$out" '"id":"containers","state":"ok","detail":"All 3 parts of instance main are running.'
   assert_contains "$out" '"id":"backup","state":"ok","detail":"Daily backups are on' "a fresh install is not warned about backups"

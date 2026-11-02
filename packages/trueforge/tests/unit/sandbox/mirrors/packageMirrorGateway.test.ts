@@ -3,6 +3,10 @@ import { createServer, request as httpRequest, type Server } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createLogger, transports } from 'winston';
+import type {
+  PackageMirrorAllowanceCheck,
+  PackageMirrorAllowanceResult,
+} from '../../../../src/sandbox/mirrors/packageMirrorAllowance';
 import {
   PackageMirrorGateway,
   isPublicAddress,
@@ -66,7 +70,11 @@ interface Harness {
   close: () => Promise<void>;
 }
 
-async function setup(options?: { maxDownloadBytes?: number; maxCacheBytes?: number }): Promise<Harness> {
+async function setup(options?: {
+  maxDownloadBytes?: number;
+  maxCacheBytes?: number;
+  allowanceHolds?: PackageMirrorAllowanceCheck;
+}): Promise<Harness> {
   const upstreamHits: string[] = [];
   const otherHits: string[] = [];
   let upstreamPort = 0;
@@ -182,6 +190,7 @@ async function setup(options?: { maxDownloadBytes?: number; maxCacheBytes?: numb
   const cacheDir = mkdtempSync(join(tmpdir(), 'aman-mirror-test-'));
   const gateway = new PackageMirrorGateway({
     registry,
+    allowanceHolds: options?.allowanceHolds ?? (() => Promise.resolve('holds')),
     cacheDir,
     logger: silentLogger,
     upstreamBases: {
@@ -274,6 +283,51 @@ describe('PackageMirrorGateway', () => {
         (await call(harness.port, { path: '/npm/leftpad', token: 'ffffffffffffffffffffffffffffffff' })).status,
       ).toBe(403);
       expect(harness.upstreamHits).toEqual([]);
+    } finally {
+      await harness.close();
+    }
+  });
+
+  it('stops a grant whose allowance no longer holds in the shared database, and takes it back', async () => {
+    const harness = await setup({ allowanceHolds: () => Promise.resolve('off') });
+    try {
+      const refused = await call(harness.port, { path: '/npm/leftpad', token: harness.token });
+      expect(refused.status).toBe(403);
+      expect(refused.body).toContain('Package downloads were turned off for this chat');
+      expect(harness.registry.resolve(harness.token)).toBeUndefined();
+      expect(harness.upstreamHits).toEqual([]);
+    } finally {
+      await harness.close();
+    }
+  });
+
+  it('says the chat was deleted, not that downloads were turned off, and takes the grant back', async () => {
+    const harness = await setup({ allowanceHolds: () => Promise.resolve('chat_deleted') });
+    try {
+      const refused = await call(harness.port, { path: '/npm/leftpad', token: harness.token });
+      expect(refused.status).toBe(403);
+      expect(refused.body).toContain('This chat was deleted');
+      expect(refused.body).not.toContain('turned off');
+      expect(harness.registry.resolve(harness.token)).toBeUndefined();
+      expect(harness.upstreamHits).toEqual([]);
+    } finally {
+      await harness.close();
+    }
+  });
+
+  it('keeps the grant and asks for a retry when the allowance cannot be checked', async () => {
+    let result: PackageMirrorAllowanceResult = 'unavailable';
+    const harness = await setup({ allowanceHolds: () => Promise.resolve(result) });
+    try {
+      const refused = await call(harness.port, { path: '/npm/leftpad', token: harness.token });
+      expect(refused.status).toBe(503);
+      expect(refused.body).toContain('cannot be checked right now');
+      expect(refused.body).toContain('Try again');
+      expect(harness.registry.resolve(harness.token)).toBeDefined();
+      expect(harness.upstreamHits).toEqual([]);
+      result = 'holds';
+      const served = await call(harness.port, { path: '/npm/leftpad', token: harness.token });
+      expect(served.status).toBe(200);
     } finally {
       await harness.close();
     }
@@ -419,16 +473,70 @@ describe('PackageMirrorGateway', () => {
     const harness = await setup();
     try {
       const info = await call(harness.port, {
-        path: '/go/example.com/mod/@v/v1.0.0.info',
+        path: '/go/github.com/example/mod/@v/v1.0.0.info',
         token: harness.token,
       });
       expect(info.status).toBe(200);
       const sum = await call(harness.port, {
-        path: '/go/sumdb/sum.golang.org/lookup/example.com/mod@v1.0.0',
+        path: '/go/sumdb/sum.golang.org/lookup/github.com/example/mod@v1.0.0',
         token: harness.token,
       });
       expect(sum.status).toBe(200);
-      expect(sum.body).toBe('upstream saw /sumdb/sum.golang.org/lookup/example.com/mod@v1.0.0');
+      expect(sum.body).toBe('upstream saw /sumdb/sum.golang.org/lookup/github.com/example/mod@v1.0.0');
+    } finally {
+      await harness.close();
+    }
+  });
+
+  it('serves Go modules from other hosts on the list, through the proxy and the checksum database', async () => {
+    const harness = await setup();
+    try {
+      const list = await call(harness.port, {
+        path: '/go/gitlab.com/example/library/@v/list',
+        token: harness.token,
+      });
+      expect(list.status).toBe(200);
+      const mod = await call(harness.port, {
+        path: '/go/golang.org/x/mod/@v/v0.17.0.mod',
+        token: harness.token,
+      });
+      expect(mod.status).toBe(200);
+      const sum = await call(harness.port, {
+        path: '/go/sumdb/sum.golang.org/lookup/gopkg.in/example/library.v2@v2.0.0',
+        token: harness.token,
+      });
+      expect(sum.status).toBe(200);
+      expect(sum.body).toBe('upstream saw /sumdb/sum.golang.org/lookup/gopkg.in/example/library.v2@v2.0.0');
+    } finally {
+      await harness.close();
+    }
+  });
+
+  it('refuses a Go module whose host is not on the list', async () => {
+    const harness = await setup();
+    try {
+      const reply = await call(harness.port, {
+        path: '/go/modules.example.net/library/@v/v1.2.3.info',
+        token: harness.token,
+      });
+      expect(reply.status).toBe(403);
+      expect(reply.body).toContain('well-known code host');
+      expect(harness.upstreamHits).toEqual([]);
+    } finally {
+      await harness.close();
+    }
+  });
+
+  it('refuses a checksum database lookup for a module whose host is not on the list', async () => {
+    const harness = await setup();
+    try {
+      const reply = await call(harness.port, {
+        path: '/go/sumdb/sum.golang.org/lookup/modules.example.net/library@v1.2.3',
+        token: harness.token,
+      });
+      expect(reply.status).toBe(403);
+      expect(reply.body).toContain('well-known code host');
+      expect(harness.upstreamHits).toEqual([]);
     } finally {
       await harness.close();
     }
@@ -543,6 +651,7 @@ describe('PackageMirrorGateway sockets', () => {
     const socketPath = join(dir, 'mirror.sock');
     const gateway = new PackageMirrorGateway({
       registry: new PackageMirrorTokenRegistry(),
+      allowanceHolds: () => Promise.resolve('holds'),
       cacheDir: join(dir, 'cache'),
       logger: silentLogger,
     });
@@ -580,5 +689,79 @@ describe('PackageMirrorTokenRegistry', () => {
     const second = registry.issue(input);
     registry.revokeSession('s');
     expect(registry.resolve(second)).toBeUndefined();
+  });
+});
+
+describe('PackageMirrorGateway with a grant for a chat without a project', () => {
+  function issueWithoutProject(harness: Harness): string {
+    return harness.registry.issue({ tenant_id: 'tenant-1', created_by: 'owner-1', session_id: 'session-2' });
+  }
+
+  it('serves downloads through the mirror on a project-less grant', async () => {
+    const harness = await setup();
+    try {
+      const token = issueWithoutProject(harness);
+      const metadata = await call(harness.port, { path: '/npm/leftpad', token });
+      expect(metadata.status).toBe(200);
+      const tarball = await call(harness.port, { path: '/npm/leftpad/-/leftpad-1.0.0.tgz', token });
+      expect(tarball.status).toBe(200);
+      expect(tarball.body).toBe('fake tarball bytes');
+      const wheel = await call(harness.port, { path: '/pypi/simple/requests/', token });
+      expect(wheel.status).toBe(200);
+    } finally {
+      await harness.close();
+    }
+  });
+
+  it('refuses publishing and uploads on a project-less grant', async () => {
+    const harness = await setup();
+    try {
+      const token = issueWithoutProject(harness);
+      const npmPublish = await call(harness.port, { method: 'PUT', path: '/npm/leftpad', token });
+      expect(npmPublish.status).toBe(405);
+      const pythonUpload = await call(harness.port, { method: 'POST', path: '/pypi/', token });
+      expect(pythonUpload.status).toBe(405);
+      const cargoPublish = await call(harness.port, { method: 'POST', path: '/cargo/api/v1/crates/new', token });
+      expect(cargoPublish.status).toBe(405);
+      expect(harness.upstreamHits).toEqual([]);
+      expect(readdirSync(harness.cacheDir)).toEqual([]);
+    } finally {
+      await harness.close();
+    }
+  });
+
+  it('refuses an address that is not a package mirror, and a redirect off the list', async () => {
+    const harness = await setup();
+    try {
+      const token = issueWithoutProject(harness);
+      const unknown = await call(harness.port, { path: '/evil.example.net/leftpad.tgz', token });
+      expect(unknown.status).toBe(404);
+      expect(unknown.body).toContain('There is no package mirror at that address.');
+      const offList = await call(harness.port, { path: '/pypi/redir-off', token });
+      expect(offList.status).toBe(502);
+      const offListPath = await call(harness.port, {
+        path: '/npm/off-list/evil.example.net/evil-9.9.9.tgz',
+        token,
+      });
+      expect(offListPath.status).toBe(403);
+    } finally {
+      await harness.close();
+    }
+  });
+
+  it('stops serving a project-less grant the moment it is taken back', async () => {
+    const harness = await setup();
+    try {
+      const token = issueWithoutProject(harness);
+      expect((await call(harness.port, { path: '/npm/leftpad', token })).status).toBe(200);
+      harness.registry.revokePersonWithoutRepository({ tenant_id: 'tenant-1', created_by: 'owner-1' });
+      const refused = await call(harness.port, { path: '/npm/leftpad', token });
+      expect(refused.status).toBe(403);
+      expect(refused.body).toContain('Allow package downloads in this chat first');
+      // The repository grant of the same person keeps working.
+      expect((await call(harness.port, { path: '/npm/leftpad', token: harness.token })).status).toBe(200);
+    } finally {
+      await harness.close();
+    }
   });
 });

@@ -74,6 +74,8 @@ nested:
   "app_image": "aman-app:<source id>",
   "stt_image": "aman-stt:<source id>",
   "calendar_image": "aman-calendar-caldav:<source id>",
+  "browser_image": "aman-browser:<source id>",
+  "browser_gateway_image": "aman-browser-gateway:<source id>",
   "dex_image": "<image pinned by digest>",
   "mail_email_image": "<image pinned by digest>"
 }

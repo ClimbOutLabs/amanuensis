@@ -16,7 +16,8 @@ interface ProvenanceValues {
 }
 
 /** Where the assistant read a value: as the sender of an email, or the kind of content it appeared in. */
-export type ReadSource = 'email_sender' | 'email' | 'event' | 'page' | 'file' | 'tool_result' | 'other';
+export type ReadSource =
+  'email_sender' | 'email' | 'event' | 'page' | 'browser_page' | 'file' | 'tool_result' | 'other';
 
 export interface ReadOrigin {
   source: ReadSource;
@@ -291,8 +292,14 @@ export function recordUntrustedText(input: { provenance: ChatProvenance; text: s
   if (input.text.trim() !== '') {
     input.provenance.read_content = true;
   }
-  if (input.source === 'event' || input.source === 'file' || input.source === 'other') {
-    // The person's own events, their files and the host's notes on their chat hold their details too.
+  if (
+    input.source === 'event' ||
+    input.source === 'browser_page' ||
+    input.source === 'file' ||
+    input.source === 'other'
+  ) {
+    // The person's own events, the pages their signed-in browser shows, their files and the host's notes on
+    // their chat hold their details too.
     recordDetails(input.provenance, input.text);
   }
   for (const key of recordText(input.provenance.untrusted, input.text)) {
@@ -476,7 +483,7 @@ function isBareSite(url: string): boolean {
  * its site: a shared site (a forms host, a link shortener) serves anyone's page, so the person naming the site once
  * does not vouch for a page on it that read content chose.
  */
-function steeredUrl(input: { provenance: ChatProvenance; url: string }): boolean {
+export function steeredUrl(input: { provenance: ChatProvenance; url: string }): boolean {
   const { provenance } = input;
   const key = urlKey(input.url);
   const host = parsedUrl(input.url)?.hostname;
@@ -566,6 +573,18 @@ export function isTrustedLink(input: { provenance: ChatProvenance; url: string }
   return key !== undefined && input.provenance.trusted.urls.has(key);
 }
 
+/**
+ * Whether the person vouched for a link: they gave it (or a search returned it) exactly, or it names only a site, with
+ * no path or query, that the person named. Such a link carries nothing but what the person already chose.
+ */
+export function isPersonVouchedUrl(input: { provenance: ChatProvenance; url: string }): boolean {
+  if (isTrustedLink(input)) {
+    return true;
+  }
+  const host = parsedUrl(input.url)?.hostname;
+  return host !== undefined && isBareSite(input.url) && input.provenance.trusted.hosts.has(hostKey(host));
+}
+
 /** Whether a picture may be shown: a trusted link, or exactly a picture an opened page or a search result listed. */
 export function isTrustedPicture(input: { provenance: ChatProvenance; url: string }): boolean {
   const key = urlKey(input.url);
@@ -579,7 +598,7 @@ export function hasReadContent(provenance: ChatProvenance): boolean {
 
 /**
  * The person's own details a call's text carries: an address or a phone number the chat saw in the person's
- * words, their own mail or their events. Pages, files and tool output do not count: a detail only they named is
+ * words, their own mail, their events or a page in their signed-in browser. Other pages, files and tool output do not count: a detail only they named is
  * that content's own value, and sending it back to its source is ordinary. Mail does count even when a stranger
  * wrote it, because the mailbox is the person's; the cost is an extra question, never a leak. Each value is
  * folded the same way the record was, so a detail counts however the value spells it.
