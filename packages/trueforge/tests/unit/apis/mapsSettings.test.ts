@@ -11,6 +11,7 @@ import configuration from '../../../src/config';
 import { migrateSqliteToLatest } from '../../../src/db/migrateSqlite';
 import { createSqliteDb } from '../../../src/db/sqlite/client';
 import { SqliteGlobalSettingsStore } from '../../../src/db/sqlite/global-settings-store/SqliteGlobalSettingsStore';
+import { GetMapsSettingsResponseSchema, TestMapsSettingsResponseSchema } from '../../../src/schemas/mapsSettings';
 
 const silentLogger = createLogger({ silent: true });
 
@@ -47,16 +48,10 @@ afterEach(() => {
   configuration.MAPS_URL_FROM_ENV = { ...savedFromEnv };
 });
 
-interface FieldState {
-  value: string | null;
-  default_value: string;
-  set_by_environment: boolean;
-}
-
 async function getFields(router: Awaited<ReturnType<typeof createRouter>>['router']) {
   const response = await router.request('/');
   expect(response.status).toBe(200);
-  const body: { data: Record<string, FieldState> } = await response.json();
+  const body = GetMapsSettingsResponseSchema.parse(await response.json());
   return body.data;
 }
 
@@ -77,7 +72,7 @@ describe('maps settings router', () => {
     const { router, globalSettingsStore } = await createRouter();
     const put = await router.request('/', putInit({ maps_router_url: 'https://osrm.example.com' }));
     expect(put.status).toBe(200);
-    const putBody: { data: Record<string, FieldState> } = await put.json();
+    const putBody = GetMapsSettingsResponseSchema.parse(await put.json());
     expect(putBody.data['maps_router_url']?.value).toBe('https://osrm.example.com');
     expect((await globalSettingsStore.getSetting({ key: 'maps_router_url' }))?.value).toBe('https://osrm.example.com');
 
@@ -153,7 +148,7 @@ describe('maps settings router', () => {
     });
     const response = await router.request('/test', { method: 'POST' });
     expect(response.status).toBe(200);
-    const body: { data: Record<string, { ok: boolean; message: string | null }> } = await response.json();
+    const body = TestMapsSettingsResponseSchema.parse(await response.json());
     expect(body.data['maps_router_url']).toEqual({ ok: true, message: null });
     expect(body.data['maps_geocoder_url']?.ok).toBe(false);
     expect(body.data['maps_geocoder_url']?.message).toContain("didn't answer");

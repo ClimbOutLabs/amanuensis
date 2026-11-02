@@ -238,7 +238,14 @@ export async function readMapsSettingsState(
     const saved = await readSavedMapsServerUrl({ deps, spec });
     return { value: saved, defaultUrl: spec.defaultUrl, setByEnvironment: false };
   };
-  const [router, walking, cycling, geocoder, transit, tile] = await Promise.all(MAPS_SERVER_FIELDS.map(displayFor));
+  const [router, walking, cycling, geocoder, transit, tile] = await Promise.all([
+    displayFor('router'),
+    displayFor('walking'),
+    displayFor('cycling'),
+    displayFor('geocoder'),
+    displayFor('transit'),
+    displayFor('tile'),
+  ]);
   return { router, walking, cycling, geocoder, transit, tile };
 }
 
@@ -340,6 +347,13 @@ export async function testMapsServers({
       };
     }
   };
-  const [router, walking, cycling, geocoder, transit, tile] = await Promise.all(MAPS_SERVER_FIELDS.map(resultFor));
+  const [router, walking, cycling, geocoder, transit, tile] = await Promise.all([
+    resultFor('router'),
+    resultFor('walking'),
+    resultFor('cycling'),
+    resultFor('geocoder'),
+    resultFor('transit'),
+    resultFor('tile'),
+  ]);
   return { router, walking, cycling, geocoder, transit, tile };
 }
