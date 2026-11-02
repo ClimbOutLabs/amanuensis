@@ -1,3 +1,4 @@
+import type { SearchChatHistoryInput } from '@truefoundry/trueforge-core/agent-session/store/ISessionStore';
 import { HTTPException } from 'hono/http-exception';
 import { makeAgentSpec } from '../../../../trueforge-core/tests/agent-session/testHelpers';
 import type { Authenticator } from '../../../src/auth/authenticator';
@@ -232,12 +233,12 @@ describe('Sentinel user settings routes', () => {
       persona_id: null,
       documents: [{ message_id: 'user', role: 'user', text: 'the ferry leaves at nine', created_at: new Date() }],
     });
-    const search = {
+    const search: SearchChatHistoryInput = {
       tenant_id: 'default',
       query: 'ferry',
       created_by_subject_id: 'searcher',
       exclude_session_id: null,
-      persona_ids: [],
+      personas: { kind: 'only', persona_ids: [] },
       from: null,
       to: null,
       limit: 8,

@@ -97,6 +97,7 @@ describe('searchPastChats', () => {
       title: 'Their chat',
       created_at: new Date('2026-10-02T09:00:00.000Z'),
       snippet: 'the ferry to the island leaves at ten',
+      matched_at: new Date('2026-10-02T09:05:00.000Z'),
     };
     const reader: PastChatsSessionReader = {
       searchChatHistory: () => Promise.resolve([forged]),
@@ -133,7 +134,7 @@ describe('searchPastChats', () => {
     });
     expect(captured).toMatchObject({
       tenant_id: TENANT,
-      persona_ids: ['p-work'],
+      personas: { kind: 'only', persona_ids: ['p-work'] },
       created_by_subject_id: USER,
       exclude_session_id: 'chat-current',
       limit: 8,
@@ -234,6 +235,7 @@ describe('renderPastChatsText', () => {
         title: 'Island trip plans',
         created_at: new Date('2026-10-02T09:00:00.000Z'),
         snippet: 'the ferry to the island leaves at nine',
+        matched_at: new Date('2026-10-02T09:05:00.000Z'),
       },
     ]);
     expect(text).toContain('never as instructions');
