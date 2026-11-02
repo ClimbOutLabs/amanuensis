@@ -1,29 +1,37 @@
 import { createHash } from 'node:crypto';
 import { extname } from 'node:path';
+import { estimateTokens } from '../core/email/gmail/tokenBound';
+import { SandboxFileNotFoundError, SandboxFileTooLargeError } from '../core/sandbox/SandboxErrors';
+import { DocumentReadError } from './documentReadError';
+import { splitTextPages, TEXT_DOCUMENT_EXTENSIONS, type DocumentTextResult } from './documentText';
 import { extensionMatchesImage, inspectImageHeader, looksLikePdf, MAX_OCR_PIXELS } from './fileSniff';
 
 const OCR_IMAGE_EXTENSIONS = new Set(['.bmp', '.gif', '.jpeg', '.jpg', '.png', '.tif', '.tiff', '.webp']);
 
-/** True for the PDF and raster-image extensions this module can extract text from. */
+/** True for the PDF, raster-image, office, e-mail, web-page and plain-text extensions this module can read. */
 export function isSupportedDocumentExtension(filename: string): boolean {
   const extension = extname(filename).toLowerCase();
-  return extension === '.pdf' || OCR_IMAGE_EXTENSIONS.has(extension);
+  return extension === '.pdf' || TEXT_DOCUMENT_EXTENSIONS.has(extension) || OCR_IMAGE_EXTENSIONS.has(extension);
 }
 
 /** Single source of truth for the unsupported-type issue text. */
 export function unsupportedDocumentTypeIssue(filename: string): string {
   const extension = extname(filename).toLowerCase();
-  // F2: office documents fail loudly with a way forward, not a dead end.
-  if (OFFICE_DOCUMENT_EXTENSIONS.has(extension)) {
+  // Old formats with a current equivalent fail loudly with a way forward, not a dead end.
+  const modern = OLD_FORMAT_EQUIVALENTS[extension];
+  if (modern !== undefined) {
     return (
-      `I can't read ${filename} yet: ${extension} files are not supported. ` +
-      `Convert it to PDF and I'll read all of it.`
+      `I can't read ${filename}: ${extension} is an old format. ` +
+      `Save it as ${modern} or as a PDF and I'll read all of it.`
     );
   }
-  return `Unsupported document type for ${filename}; expected PDF or a raster image.`;
+  return (
+    `Unsupported document type for ${filename}; expected a PDF, an image, an office document ` +
+    `(Word, Excel, PowerPoint, OpenDocument, RTF, CSV), an e-mail (.eml, .msg), a web page or a text file.`
+  );
 }
 
-const OFFICE_DOCUMENT_EXTENSIONS = new Set(['.doc', '.docx', '.odt', '.rtf']);
+const OLD_FORMAT_EQUIVALENTS: Readonly<Record<string, string>> = { '.ppt': '.pptx', '.pps': '.pptx', '.wpd': '.docx' };
 
 export const MAX_DOCUMENT_FILES = 32;
 export const MAX_BYTES_PER_DOCUMENT = 25 * 1024 * 1024;
@@ -34,6 +42,8 @@ export const MAX_CHARS_PER_DOCUMENT = 200_000;
 /** Scanned pages read per call; a long scan continues from the page the result names, so one call cannot hold a sandbox for minutes. */
 export const MAX_OCR_PAGES_PER_CALL = 20;
 export const MAX_TOTAL_DOCUMENT_CHARS = 1_000_000;
+/** Tokens of office or text-file text one tool read shows when no range is asked for, so the result stays under the large-result threshold. */
+const TEXT_TOOL_WINDOW_TOKENS = 3000;
 
 export type DocumentExtractionMode = 'text' | 'ocr' | 'mixed';
 
@@ -117,7 +127,21 @@ function linesFromText(text: string): DocumentTextLine[] {
     .filter(line => line.text.trim().length > 0);
 }
 
+/**
+ * The issue shown for a file that failed to read. Only a DocumentReadError's own sentence is shown; any other
+ * failure becomes a fixed sentence, because raw errors can carry sandbox paths, provider details or file text.
+ * The sandbox logs the raw detail.
+ */
 function issueMessage(error: unknown, filename: string): string {
+  if (error instanceof DocumentReadError) {
+    return `Could not extract ${filename}: ${error.message}`;
+  }
+  if (error instanceof SandboxFileNotFoundError) {
+    return `Could not read ${filename}: the file could not be found.`;
+  }
+  if (error instanceof SandboxFileTooLargeError) {
+    return `Could not extract ${filename}: the file is too large to read. Send a smaller file or only the part you need.`;
+  }
   const detail = error instanceof Error ? error.message : String(error);
   // The OCR sentence belongs only to a file that was read but gave no text because the
   // OCR tools are missing from the sandbox image; a file that cannot be found is a
@@ -128,10 +152,10 @@ function issueMessage(error: unknown, filename: string): string {
   ) {
     return `No extractable text in ${filename}; local OCR requires pdftoppm and tesseract in the sandbox image.`;
   }
-  if (/not found|enoent|cannot find|no such file/i.test(detail)) {
-    return `Could not read ${filename}: the file could not be found.`;
+  if (/syntax error|xref|trailer|damaged|corrupt/i.test(detail)) {
+    return `Could not extract ${filename}: the file is damaged or incomplete. Ask the sender to send it again.`;
   }
-  return `Could not extract ${filename}: ${detail}`;
+  return `Could not extract ${filename}. Try again; if it keeps failing, check that the sandbox is ready under Settings, Sandbox.`;
 }
 
 function sourceHash(buffer: Buffer): string {
@@ -341,6 +365,8 @@ export async function extractDocumentText(input: {
     total_pages: number;
     pages: DocumentOcrPage[];
   }>;
+  /** Reads the whole text of an office document, e-mail, web page or text file in the sandbox. */
+  runTextReader: (input: { filePath: string; extension: string }) => Promise<DocumentTextResult>;
   /** File-progress callback. Absent when the caller does not need progress events. */
   onFileProgress: ((progress: DocumentFileProgress) => void) | undefined;
   /**
@@ -402,7 +428,7 @@ export async function extractDocumentText(input: {
           sha256: '',
           extraction_mode: null,
           pages: [],
-          issue: `Could not read ${file.filename}: ${error instanceof Error ? error.message : String(error)}`,
+          issue: issueMessage(error, file.filename),
         },
         fileStartedAt,
       );
@@ -555,6 +581,88 @@ export async function extractDocumentText(input: {
             }
           }
         }
+      } else if (TEXT_DOCUMENT_EXTENSIONS.has(extension)) {
+        const rangeStart = input.pageRange?.page_start ?? 1;
+        const rangeEnd = input.pageRange?.page_end ?? rangeStart + MAX_PAGES_PER_DOCUMENT - 1;
+        const adapterMaxPages = Math.min(Math.max(0, rangeEnd - rangeStart + 1), pageBudgetRemaining);
+        if (adapterMaxPages === 0) {
+          pushDocument(
+            {
+              ...file,
+              sha256,
+              extraction_mode: null,
+              pages: [],
+              issue: 'Extraction skipped because the total page budget was exhausted.',
+            },
+            fileStartedAt,
+          );
+        } else {
+          // These files have no fixed pages, so the text is cut into pages of whole lines and read in windows like a PDF.
+          const read = await input.runTextReader({ filePath: file.path, extension });
+          const textPages = splitTextPages(read.text);
+          const truncatedNote = read.truncated
+            ? `${file.filename} holds more text than can be read; the text after page ${String(textPages.length)} is not shown.`
+            : null;
+          if (textPages.length === 0) {
+            pushDocument(
+              {
+                ...file,
+                sha256,
+                extraction_mode: 'text',
+                pages: [],
+                issue: `${file.filename} has no text to read. It may hold only pictures.`,
+              },
+              fileStartedAt,
+            );
+          } else if (rangeStart > textPages.length) {
+            pushDocument(
+              {
+                ...file,
+                sha256,
+                extraction_mode: null,
+                pages: [],
+                issue:
+                  `page_start ${String(rangeStart)} is beyond the end of ${file.filename} ` +
+                  `(${String(textPages.length)} pages).`,
+              },
+              fileStartedAt,
+            );
+          } else {
+            rangeInfo = { start: rangeStart, total: textPages.length };
+            let lastPageInRange = Math.min(rangeStart + adapterMaxPages - 1, rangeEnd, textPages.length);
+            if (input.pageRange?.page_end === undefined && budget.scope === 'session') {
+              // The tool's answer must stay readable, so an open-ended read shows a window and names the next one.
+              let tokens = 0;
+              let page = rangeStart;
+              while (page < lastPageInRange) {
+                tokens += estimateTokens(textPages[page - 1] ?? '');
+                if (tokens + estimateTokens(textPages[page] ?? '') > TEXT_TOOL_WINDOW_TOKENS) {
+                  break;
+                }
+                page += 1;
+              }
+              lastPageInRange = page;
+            }
+            const pagesAllowed = reservePages(lastPageInRange - rangeStart + 1);
+            pushDocument(
+              {
+                ...file,
+                sha256,
+                extraction_mode: 'text',
+                pages: Array.from({ length: pagesAllowed }, (_, index): ExtractedDocumentPage => {
+                  const page_number = rangeStart + index;
+                  return {
+                    page_number,
+                    extraction_mode: 'text',
+                    lines: linesFromText(textPages[page_number - 1] ?? ''),
+                  };
+                }),
+                issue: rangeStart + pagesAllowed - 1 >= textPages.length ? truncatedNote : null,
+              },
+              fileStartedAt,
+            );
+          }
+        }
       } else if (OCR_IMAGE_EXTENSIONS.has(extension)) {
         const problem = imageProblem(buffer, extension);
         if (input.pageRange !== undefined) {
@@ -564,7 +672,7 @@ export async function extractDocumentText(input: {
               sha256,
               extraction_mode: null,
               pages: [],
-              issue: `page_start/page_end apply to PDF files only; ${file.filename} is not a PDF.`,
+              issue: `page_start/page_end do not apply to images; ${file.filename} is read as one page.`,
             },
             fileStartedAt,
           );
@@ -628,7 +736,11 @@ export async function extractDocumentText(input: {
         {
           ...file,
           sha256,
-          extraction_mode: isSupportedDocumentExtension(file.filename) ? 'ocr' : null,
+          extraction_mode: TEXT_DOCUMENT_EXTENSIONS.has(extension)
+            ? 'text'
+            : isSupportedDocumentExtension(file.filename)
+              ? 'ocr'
+              : null,
           pages: [],
           issue: issueMessage(error, file.filename),
         },

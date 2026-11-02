@@ -329,6 +329,7 @@ export { GIT_NETWORK_ENV_NAMES, pickGitNetworkEnv } from './sandbox/hostAuthenti
 export {
   PACKAGE_GIT_DEPENDENCY_MESSAGE,
   commandDownloadsPackages,
+  commandInstallsPackages,
   findCommandLineGitDependency,
   findGitDependency,
 } from './sandbox/packageMirrors';
@@ -368,6 +369,7 @@ export {
   SKILL_DOWNLOAD_TIMEOUT_SECONDS,
   Sandbox,
   buildWriteAndRunScriptCommand,
+  forgetShownSkillNotices,
 } from './sandbox/Sandbox';
 export type {
   BoundRepository,
@@ -453,6 +455,17 @@ export type {
 } from './permissions/approvalTokens';
 export { recordClassificationAudit, recordHeldActionAudit } from './permissions/audit';
 export type { AuditLogWriter, AuditOutcome, AuditRecordInput } from './permissions/audit';
+export {
+  BROWSER_BACK_TOOL_NAME,
+  BROWSER_EXPLORE_REASON,
+  BROWSER_OPEN_TOOL_NAME,
+  BROWSER_READ_TOOL_NAME,
+  BROWSER_SCREENSHOT_TOOL_NAME,
+  BROWSER_SCROLL_TOOL_NAME,
+  BROWSER_TOOL_NAMES,
+  isBrowserToolName,
+} from './permissions/browserToolNames';
+export type { BrowserToolName } from './permissions/browserToolNames';
 export {
   canonicalShellForm,
   classifyHostToolCall,

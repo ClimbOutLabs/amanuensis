@@ -10,6 +10,9 @@
 # the download layer stays cached when only package.json / scripts change.
 # See https://pnpm.io/cli/fetch. BuildKit cache mounts are avoided so the same
 # file builds on Railway Metal (which requires a hardcoded service id in mount ids).
+#
+# `pnpm fetch` also writes a full node_modules/.pnpm; remove it so --prod install
+# does not inherit build tooling into the runtime image.
 
 FROM node:24-slim@sha256:d6aa754f16b3197301076f047b5def2f02ea1dbbc2ca920407d46d7ec7f87b20 AS base
 ENV PNPM_HOME=/pnpm
@@ -29,7 +32,8 @@ COPY pnpm-lock.yaml pnpm-workspace.yaml ./
 # Patched dependencies are part of the lockfile's install contract. They must
 # be available during `pnpm fetch`, before the workspace source is copied.
 COPY patches patches
-RUN pnpm fetch
+# Populate /pnpm/store only; drop the full virtual store fetch also writes.
+RUN pnpm fetch && rm -rf node_modules
 
 # ---------------------------------------------------------------------------
 # workspace: install inputs shared by every stage below — the manifests plus the

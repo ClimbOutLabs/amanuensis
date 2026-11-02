@@ -19,6 +19,7 @@ render_compose() { # if_tls_host if_tls_volume
     . "$INSTALLER_DIR/lib/templates.sh"
     render_template "$INSTALLER_DIR/templates/instance/compose.yaml.tpl" \
       "NAME=main" "IF_CALENDAR=0" "CALENDAR_IMAGE=" "IF_EMAIL=0" "MAIL_EMAIL_IMAGE=" \
+      "IF_BROWSER=0" "BROWSER_IMAGE=" "BROWSER_GATEWAY_IMAGE=" \
       "STT_NETWORK=aman_main_stt" "APP_IMAGE=aman-app:test" "DEX_IMAGE=dex:test" \
       "IF_SANDBOX=0" "IF_EDGE=0" "LOGIN_HOST=" "LOGIN_PORT=5556" "DEX_TELEMETRY_PORT=5557" \
       "APP_PORTS=      - '127.0.0.1:8791:8790'" \

@@ -40,6 +40,19 @@
       "description": "Local tag of the calendar sidecar image built from ops/calendar-sidecar, aman-calendar-caldav:<source id>.",
       "type": "string"
     },
+    "browser_image": {
+      "description": "Local tag of Aman's browser image built from ops/browser-sidecar, aman-browser:<source id>.",
+      "type": "string"
+    },
+    "browser_gateway_image": {
+      "description": "Local tag of the browser's gateway image built from ops/browser-sidecar/Dockerfile.gateway, aman-browser-gateway:<source id>.",
+      "type": "string"
+    },
+    "caddy_image": {
+      "description": "Web server image that serves an instance over https on the local network, pinned by multi-arch index digest.",
+      "type": "string",
+      "pattern": "^[a-z0-9./_-]+(:[A-Za-z0-9._-]+)?@sha256:[a-f0-9]{64}$"
+    },
     "broker_image": {
       "description": "Reserved for the sandbox broker, absent until it ships.",
       "type": "string",

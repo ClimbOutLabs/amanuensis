@@ -23,6 +23,7 @@ import {
   type SpaceRecord,
 } from '../../../src/db/spaceStore';
 import { blockFingerprint, spaceCapability, type SpaceToolStore } from '../../../src/runtime/spaceCapability';
+import { noSpaceFolders } from './spaceFolderStoreFake';
 
 /** The default record body: one table, so one block (b1) whose content is the whole body. */
 const TABLE_BODY = '| Address | Price |\n| --- | --- |\n| Calle Mayor 1 | 250000 |';
@@ -69,6 +70,7 @@ function makeStore(overrides: Partial<ISpaceStore> = {}): SpaceToolStore {
       .fn()
       .mockResolvedValue({ records: [], aggregate_revision: 0, has_more: false, next_offset: null }),
     getSpace: jest.fn(),
+    ...noSpaceFolders,
     getSpaceRevision: jest.fn(),
     ...overrides,
   };
@@ -558,6 +560,7 @@ describe('space capability', () => {
         {
           name: 'Spain houses',
           link: '/spaces/space-1',
+          folder: null,
           purpose: 'Track candidate houses in Spain.',
           status: 'active',
           format: 'markdown',
@@ -568,6 +571,7 @@ describe('space capability', () => {
         {
           name: 'Spain houses (archive)',
           link: '/spaces/space-2',
+          folder: null,
           purpose: 'Track candidate houses in Spain.',
           status: 'archived',
           format: 'markdown',
@@ -576,6 +580,7 @@ describe('space capability', () => {
           updated_at: '2026-09-13T00:00:00.000Z',
         },
       ],
+      folders: [],
       aggregate_revision: 4,
       has_more: false,
     });
@@ -595,6 +600,7 @@ describe('space capability', () => {
       space: {
         name: 'Spain houses',
         link: '/spaces/space-1',
+        folder: null,
         purpose: 'Track candidate houses in Spain.',
         status: 'active',
         body: '| Address | Price |\n| --- | --- |\n| Calle Mayor 1 | 250000 |',
@@ -845,6 +851,7 @@ describe('space capability', () => {
       space: {
         name: 'Spain houses',
         link: '/spaces/space-1',
+        folder: null,
         purpose: 'Track candidate houses in Spain.',
         status: 'active',
         format: 'markdown',

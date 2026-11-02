@@ -2,26 +2,35 @@ import { sql, type Kysely, type Selectable, type Transaction } from 'kysely';
 import { SPACE_REVISION_HISTORY_LIMIT } from '../../../schemas/space';
 import {
   SpaceAggregateRevisionConflictError,
+  SpaceFolderNotFoundError,
   SpaceNotFoundError,
   SpaceRevisionConflictError,
   SpaceRevisionNotFoundError,
+  type CreateSpaceFolderInput,
   type CreateSpaceInput,
   type DeleteSpaceInput,
   type GetSpaceRevisionInput,
   type ISpaceStore,
+  type ListSpaceFolderAssignmentsInput,
   type ListSpacesInput,
   type OwnerScopedInput,
   type RevertSpaceInput,
+  type SetSpaceFolderInput,
   type SpaceAggregate,
   type SpaceDeleteResult,
+  type SpaceFolderAssignment,
+  type SpaceFolderIdentityInput,
+  type SpaceFolderRecord,
+  type SpaceFolderSnapshot,
   type SpaceIdentityInput,
   type SpaceListResult,
   type SpaceMutationResult,
   type SpaceRecord,
+  type UpdateSpaceFolderInput,
   type UpdateSpaceInput,
 } from '../../spaceStore';
 import { now } from '../sqlExpressions';
-import type { Database, SpaceRevisionTable, SpaceTable } from '../types';
+import type { Database, SpaceFolderTable, SpaceRevisionTable, SpaceTable } from '../types';
 
 function toSpace(row: Selectable<SpaceTable>): SpaceRecord {
   return {
@@ -53,6 +62,17 @@ function toSpaceRevision(row: Selectable<SpaceRevisionTable>): SpaceRecord {
     revision: row.revision,
     created_at: row.created_at.toISOString(),
     updated_at: row.created_at.toISOString(),
+  };
+}
+
+function toSpaceFolder(row: Selectable<SpaceFolderTable>): SpaceFolderRecord {
+  return {
+    tenant_id: row.tenant_id,
+    created_by: row.created_by,
+    id: row.id,
+    name: row.name,
+    created_at: row.created_at.toISOString(),
+    updated_at: row.updated_at.toISOString(),
   };
 }
 
@@ -285,6 +305,146 @@ export class PostgresSpaceStore implements ISpaceStore<Transaction<Database>> {
       }
       return await this.#throwSpaceMutationFailure(input, trx);
     });
+  }
+
+  async listSpaceFolders(input: OwnerScopedInput, transaction?: Transaction<Database>): Promise<SpaceFolderRecord[]> {
+    const db = transaction ?? this.#db;
+    const rows = await db
+      .selectFrom('space_folder')
+      .selectAll()
+      .where('tenant_id', '=', input.tenant_id)
+      .where('created_by', '=', input.created_by)
+      .orderBy('name')
+      .orderBy('id')
+      .execute();
+    return rows.map(toSpaceFolder);
+  }
+
+  async createSpaceFolder(
+    input: CreateSpaceFolderInput,
+    transaction?: Transaction<Database>,
+  ): Promise<SpaceFolderRecord> {
+    const db = transaction ?? this.#db;
+
+    const row = await db
+      .insertInto('space_folder')
+      .values({
+        tenant_id: input.tenant_id,
+        created_by: input.created_by,
+        id: input.id,
+        name: input.name,
+        created_at: now(),
+        updated_at: now(),
+      })
+      .returningAll()
+      .executeTakeFirstOrThrow();
+    return toSpaceFolder(row);
+  }
+
+  async updateSpaceFolder(
+    input: UpdateSpaceFolderInput,
+    transaction?: Transaction<Database>,
+  ): Promise<SpaceFolderRecord> {
+    const db = transaction ?? this.#db;
+    const row = await db
+      .updateTable('space_folder')
+      .set({ name: input.name, updated_at: now() })
+      .where('tenant_id', '=', input.tenant_id)
+      .where('created_by', '=', input.created_by)
+      .where('id', '=', input.folder_id)
+      .returningAll()
+      .executeTakeFirst();
+    if (row === undefined) {
+      throw new SpaceFolderNotFoundError({ id: input.folder_id });
+    }
+    return toSpaceFolder(row);
+  }
+
+  async deleteSpaceFolder(input: SpaceFolderIdentityInput, transaction?: Transaction<Database>): Promise<void> {
+    const db = transaction ?? this.#db;
+    // Assignments go with the folder through ON DELETE CASCADE.
+    await db
+      .deleteFrom('space_folder')
+      .where('tenant_id', '=', input.tenant_id)
+      .where('created_by', '=', input.created_by)
+      .where('id', '=', input.folder_id)
+      .execute();
+  }
+
+  async setSpaceFolder(input: SetSpaceFolderInput, transaction?: Transaction<Database>): Promise<void> {
+    await this.#write(transaction, async trx => {
+      const space = await trx
+        .selectFrom('space')
+        .select('id')
+        .where('tenant_id', '=', input.tenant_id)
+        .where('created_by', '=', input.created_by)
+        .where('id', '=', input.space_id)
+        .executeTakeFirst();
+      if (space === undefined) {
+        throw new SpaceNotFoundError({ id: input.space_id });
+      }
+      const folder_id = input.folder_id;
+      if (folder_id === null) {
+        await trx
+          .deleteFrom('space_folder_assignment')
+          .where('tenant_id', '=', input.tenant_id)
+          .where('created_by', '=', input.created_by)
+          .where('space_id', '=', input.space_id)
+          .execute();
+        return;
+      }
+      const folder = await trx
+        .selectFrom('space_folder')
+        .select('id')
+        .where('tenant_id', '=', input.tenant_id)
+        .where('created_by', '=', input.created_by)
+        .where('id', '=', folder_id)
+        // Blocks a concurrent folder delete until this placement commits.
+        .forKeyShare()
+        .executeTakeFirst();
+      if (folder === undefined) {
+        throw new SpaceFolderNotFoundError({ id: folder_id });
+      }
+      await trx
+        .insertInto('space_folder_assignment')
+        .values({
+          tenant_id: input.tenant_id,
+          created_by: input.created_by,
+          space_id: input.space_id,
+          folder_id,
+        })
+        .onConflict(oc => oc.columns(['tenant_id', 'created_by', 'space_id']).doUpdateSet({ folder_id }))
+        .execute();
+    });
+  }
+
+  async listSpaceFolderAssignments(
+    input: ListSpaceFolderAssignmentsInput,
+    transaction?: Transaction<Database>,
+  ): Promise<SpaceFolderAssignment[]> {
+    if (input.space_ids?.length === 0) {
+      return [];
+    }
+    const db = transaction ?? this.#db;
+    let query = db
+      .selectFrom('space_folder_assignment')
+      .select(['space_id', 'folder_id'])
+      .where('tenant_id', '=', input.tenant_id)
+      .where('created_by', '=', input.created_by);
+    if (input.space_ids !== undefined) {
+      query = query.where('space_id', 'in', input.space_ids);
+    }
+    return await query.orderBy('space_id').execute();
+  }
+
+  async readSpaceFolderSnapshot(
+    input: OwnerScopedInput,
+    transaction?: Transaction<Database>,
+  ): Promise<SpaceFolderSnapshot> {
+    return await this.#read(transaction, async trx => ({
+      folders: await this.listSpaceFolders(input, trx),
+      assignments: await this.listSpaceFolderAssignments(input, trx),
+    }));
   }
 
   async #throwSpaceMutationFailure(

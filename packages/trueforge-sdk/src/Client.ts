@@ -23,6 +23,7 @@ import { SessionRepositoryClient } from "./api/resources/sessionRepository/clien
 import { SessionsClient } from "./api/resources/sessions/client/Client.js";
 import { SettingsClient } from "./api/resources/settings/client/Client.js";
 import { SkillsClient } from "./api/resources/skills/client/Client.js";
+import { SpaceFoldersClient } from "./api/resources/spaceFolders/client/Client.js";
 import { SpacesClient } from "./api/resources/spaces/client/Client.js";
 import { VoiceClient } from "./api/resources/voice/client/Client.js";
 import type { BaseClientOptions, BaseRequestOptions } from "./BaseClient.js";
@@ -57,6 +58,7 @@ export class TrueForge {
     protected _sessionPersonas: SessionPersonasClient | undefined;
     protected _sessionRepository: SessionRepositoryClient | undefined;
     protected _skills: SkillsClient | undefined;
+    protected _spaceFolders: SpaceFoldersClient | undefined;
     protected _spaces: SpacesClient | undefined;
     protected _voice: VoiceClient | undefined;
     protected _catalogs: CatalogsClient | undefined;
@@ -145,6 +147,10 @@ export class TrueForge {
 
     public get skills(): SkillsClient {
         return (this._skills ??= new SkillsClient(this._options));
+    }
+
+    public get spaceFolders(): SpaceFoldersClient {
+        return (this._spaceFolders ??= new SpaceFoldersClient(this._options));
     }
 
     public get spaces(): SpacesClient {

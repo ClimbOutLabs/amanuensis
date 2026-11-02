@@ -178,7 +178,14 @@ instance_render() {
   local calendar_on=0
   if [ -n "${REL_CALENDAR_TAG:-}" ]; then
     calendar_on=1
-    calendar_secret_backfill "$name"
+    env_secret_backfill "$name" CALENDAR_ACCOUNT_SECRET
+  fi
+  # Aman's browser is on in every instance once its images are known. Its seccomp profile is copied beside the compose
+  # file, because the compose file reads it from this folder.
+  local browser_on=0
+  if [ -n "${REL_BROWSER_TAG:-}" ] && [ -n "${REL_BROWSER_GATEWAY_TAG:-}" ]; then
+    browser_on=1
+    env_secret_backfill "$name" BROWSER_SECRET
   fi
   # The email connector is part of the compose file only once its image is known. Its wrapper script is copied beside the
   # compose file, because the compose file mounts it from this folder.
@@ -192,6 +199,9 @@ instance_render() {
     # No account file is written here: the account lives in the connector's volume, and the
     # installer writes it through the connector's account agent (see email_agent_write).
   fi
+  if [ "$browser_on" = 1 ]; then
+    write_if_changed "$dir/browser-seccomp.json" 644 <"$REPO_ROOT/ops/browser-sidecar/seccomp_profile.json" || true
+  fi
   # The https folders are mounted from the home folder itself, except when the home is the state volume
   # (Windows): then the compose file mounts them from inside the volume, because a host folder the
   # daemon could read does not exist there.
@@ -199,7 +209,8 @@ instance_render() {
     if tls_home_in_volume; then tls_volume=1; else tls_host=1; fi
   fi
   render_template "$TEMPLATES_DIR/instance/compose.yaml.tpl" \
-    "NAME=$name" "IF_CALENDAR=$calendar_on" "CALENDAR_IMAGE=${REL_CALENDAR_TAG:-}" "IF_EMAIL=$email_on" "MAIL_EMAIL_IMAGE=${REL_MAIL_EMAIL_IMAGE:-}" "STT_NETWORK=$(stt_network "$name")" "APP_IMAGE=$app_image" "DEX_IMAGE=$dex_image" "APP_PORT=$app_port" "IF_SANDBOX=$sandbox_on" \
+    "NAME=$name" "IF_CALENDAR=$calendar_on" "CALENDAR_IMAGE=${REL_CALENDAR_TAG:-}" "IF_EMAIL=$email_on" "MAIL_EMAIL_IMAGE=${REL_MAIL_EMAIL_IMAGE:-}" \
+    "IF_BROWSER=$browser_on" "BROWSER_IMAGE=${REL_BROWSER_TAG:-}" "BROWSER_GATEWAY_IMAGE=${REL_BROWSER_GATEWAY_TAG:-}" "STT_NETWORK=$(stt_network "$name")" "APP_IMAGE=$app_image" "DEX_IMAGE=$dex_image" "APP_PORT=$app_port" "IF_SANDBOX=$sandbox_on" \
     "IF_EDGE=$edge_on" "LOGIN_HOST=$login_host" \
     "LOGIN_PORT=$login_port" "DEX_TELEMETRY_PORT=$DEX_TELEMETRY_PORT" "APP_PORTS=$app_ports" \
     "IF_TLS=$tls_on" "IF_TLS_HOST=$tls_host" "IF_TLS_VOLUME=$tls_volume" "CADDY_IMAGE=$(tls_image)" "TLS_USER=$(id -u):$(id -g)" "TLS_LEAF_DIR=$(tls_leaf_dir "$name")" \
@@ -237,22 +248,29 @@ owner_name_backfill() { # name
   fi
 }
 
-# The secret the app and the calendar connector share, so only the app can use the connector's account port. It is made
-# once, in the settings file, and an existing value is never changed. A file without the installer's managed part (an
-# older or hand-made one) gets the line at its end, so Compose never stops for the missing value. A missing file gets
-# nothing: the instance has no settings to run from, and the instance commands say so.
-calendar_secret_backfill() { # name
-  local env
+# A secret the app shares with one of its connectors (CALENDAR_ACCOUNT_SECRET, BROWSER_SECRET), so only the app can
+# use that connector. It is made once, in the settings file, and a usable value (32 or more characters) is never
+# changed. Compose reads the last line for a key, so that line is the one that counts: a short or second line is
+# dropped, the managed part keeps the value, and a file without the managed part (an older or hand-made one) gets it
+# as its last line. A missing file gets nothing: the instance has no settings to run from, and the instance commands
+# say so.
+env_secret_backfill() { # name key
+  local env key=$2 value
   env="$(instance_dir "$1")/.env"
   [ -f "$env" ] || return 0
-  grep -q '^CALENDAR_ACCOUNT_SECRET=.\{32,\}' "$env" && return 0
+  value=$(sed -n "s/^$key=//p" "$env" | tail -n 1)
+  if [ "${#value}" -lt 32 ]; then
+    value=$(sed -n "s/^$key=\(.\{32,\}\)\$/\1/p" "$env" | tail -n 1)
+    [ -n "$value" ] || value=$(rand_hex 32)
+  fi
   if grep -q '^# >>> managed by the installer' "$env"; then
-    env_managed_set "$env" CALENDAR_ACCOUNT_SECRET "$(rand_hex 32)"
+    env_managed_set "$env" "$key" "$value"
+    env_drop_outside_block "$env" "$key"
     return 0
   fi
   {
-    grep -v '^CALENDAR_ACCOUNT_SECRET=' "$env" || true
-    printf 'CALENDAR_ACCOUNT_SECRET=%s\n' "$(rand_hex 32)"
+    grep -v "^$key=" "$env" || true
+    printf '%s=%s\n' "$key" "$value"
   } | write_if_changed "$env" 600 || true
 }
 
@@ -807,6 +825,8 @@ load_installed_release() {
   REL_APP_TAG=$CUR_APP_TAG
   REL_STT_TAG=$CUR_STT_TAG
   REL_CALENDAR_TAG=$CUR_CALENDAR_TAG
+  REL_BROWSER_TAG=$CUR_BROWSER_TAG
+  REL_BROWSER_GATEWAY_TAG=$CUR_BROWSER_GATEWAY_TAG
   REL_DEX_IMAGE=$CUR_DEX_IMAGE
   REL_MAIL_EMAIL_IMAGE=$CUR_MAIL_EMAIL_IMAGE
   docker_image_exists "$REL_APP_TAG" || die "Part of Aman ($REL_APP_TAG) is missing. Run install.sh to build it again."
@@ -1287,7 +1307,16 @@ cmd_instance_remove() {
   fi
   [ -n "$(reg_names)" ] || last_one=1
   if [ "${OPT_PURGE:-0}" != 1 ]; then
-    say "Removed instance $name. Its data is kept (aman_${name}_data and aman_${name}_dex)."
+    volumes=$(instance_volumes "$name" | tr '\n' ' ')
+    volumes=${volumes% }
+    if [ -n "$volumes" ]; then
+      say "Removed instance $name. Its data is kept: $volumes."
+    else
+      say "Removed instance $name."
+    fi
+    case " $volumes " in
+      *" aman_${name}_browser_profiles "*) say "That includes the sites Aman's browser is signed in to." ;;
+    esac
     if [ "$last_one" = 1 ]; then
       say "The shared speech-to-text service and its downloaded model are kept too."
     fi
