@@ -145,21 +145,29 @@ describe('PersonaKnowledgeIndexer', () => {
     await indexer.close();
   });
 
-  it('closing waits for the document being indexed, so its writes land before close resolves', async () => {
+  it('closing waits for the batch being embedded, then leaves the document to resume on the next start', async () => {
     mockModel.ready = true;
     const knowledgeDir = mkdtempSync(path.join(tmpdir(), 'pk-indexer-'));
     const indexer = new PersonaKnowledgeIndexer({ knowledgeDir, modelDir: path.join(knowledgeDir, 'm'), logger });
     const embedPassages = mockModel.embedPassages;
+    let embedCalls = 0;
     let releaseEmbedding = (): void => undefined;
     const embeddingReleased = new Promise<void>(resolve => {
       releaseEmbedding = resolve;
     });
     mockModel.embedPassages = async texts => {
+      embedCalls += 1;
       await embeddingReleased;
       return embedPassages(texts);
     };
     try {
-      const documentId = await addTextDocument(knowledgeDir, indexer, 'yara', 'Notes about the harbour ferry.');
+      // Long enough for several micro-batches.
+      const documentId = await addTextDocument(
+        knowledgeDir,
+        indexer,
+        'yara',
+        'The harbour ferry leaves at nine and returns at noon. '.repeat(200),
+      );
       await waitForStatus(knowledgeDir, 'yara', documentId, 'indexing');
 
       let closed = false;
@@ -171,13 +179,25 @@ describe('PersonaKnowledgeIndexer', () => {
 
       releaseEmbedding();
       await closing;
+      expect(embedCalls).toBe(1);
       const { dbPath } = personaKnowledgeLocation({ knowledgeDir, tenantId: 'default', personaId: 'yara' });
       const repo = openPersonaKnowledgeRepository({ dbPath, dimensions: 384 });
       try {
-        expect(repo.getDocument({ documentId })?.status).toBe('ready');
+        expect(repo.getDocument({ documentId })?.status).toBe('indexing');
       } finally {
         repo.close();
       }
+      expect(existsSync(blobPath(knowledgeDir, 'yara', documentId))).toBe(true);
+
+      // The next start picks the document up again and finishes it.
+      const restarted = new PersonaKnowledgeIndexer({
+        knowledgeDir,
+        modelDir: path.join(knowledgeDir, 'm'),
+        logger,
+      });
+      await restarted.recover();
+      await waitForStatus(knowledgeDir, 'yara', documentId, 'ready');
+      await restarted.close();
     } finally {
       mockModel.embedPassages = embedPassages;
     }
