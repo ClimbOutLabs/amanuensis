@@ -26,9 +26,11 @@ function fixtureClone(): string {
   git(dir, ['init', '-q']);
   mkdirSync(join(dir, 'ops', 'aman-stt'), { recursive: true });
   mkdirSync(join(dir, 'ops', 'calendar-sidecar'), { recursive: true });
+  mkdirSync(join(dir, 'ops', 'browser-sidecar'), { recursive: true });
   writeFileSync(join(dir, 'Dockerfile.dev'), 'FROM node\n');
   writeFileSync(join(dir, 'ops', 'aman-stt', 'Dockerfile'), 'FROM python\n');
   writeFileSync(join(dir, 'ops', 'calendar-sidecar', 'Dockerfile'), 'FROM node\n');
+  writeFileSync(join(dir, 'ops', 'browser-sidecar', 'Dockerfile'), 'FROM playwright\n');
   git(dir, ['add', '.']);
   git(dir, ['-c', 'user.email=test@example.com', '-c', 'user.name=Test', 'commit', '-q', '-m', 'fixture']);
   return dir;
@@ -45,10 +47,12 @@ test('the manifest source ids equal the shell source_id of the same clone', asyn
   const head = git(clone, ['rev-parse', 'HEAD']).slice(0, 12);
   const stt = git(clone, ['rev-parse', 'HEAD:ops/aman-stt']).slice(0, 12);
   const calendar = git(clone, ['rev-parse', 'HEAD:ops/calendar-sidecar']).slice(0, 12);
+  const browser = git(clone, ['rev-parse', 'HEAD:ops/browser-sidecar']).slice(0, 12);
   assert.deepEqual(ids, {
     'aman-app': `aman-app:${head}`,
     'aman-stt': `aman-stt:${stt}`,
     'aman-calendar-caldav': `aman-calendar-caldav:${calendar}`,
+    'aman-browser': `aman-browser:${browser}`,
   });
   const manifest = buildManifest({ release: 'v1.2.3', files: [], sourceIds: ids });
   assert.equal(checkSourceIds({ manifest, expected: ids }), null);

@@ -8,6 +8,7 @@ import { isMailReadToolName } from '../email/mailConnector/toolContract';
 import { DEFAULT_ASSISTANT_NAME } from '../personas/assistantName';
 import { REPLACE_TASK_CHECKLIST_TOOL_NAME, TASK_STATE_TOOL_NAME } from '../runtime/taskState';
 import { isPageReaderTool, isSearchResultTool } from '../search/fetchedPages';
+import { BROWSER_OPEN_SILENT_REASON, BROWSER_OPEN_TOOL_NAME, isBrowserToolName } from './browserToolNames';
 import {
   emptyChatProvenance,
   namesUrl,
@@ -29,6 +30,17 @@ export const SILENT_SEARCH_LIMIT = 20;
 
 /** Reason code for a search or page read the designated provider ran without asking. */
 export const SEARCH_SILENT_REASON = 'mcp_search_provider';
+
+/**
+ * Whether a call that ran without asking counts toward the turn's silent lookup limit: a search or page read of the
+ * designated provider, or a page the browser opened.
+ */
+export function countsAsSilentLookup(input: { tool_name: string; reason: string }): boolean {
+  return (
+    isSilentSearchReason(input.reason) ||
+    (baseToolName(input.tool_name) === BROWSER_OPEN_TOOL_NAME && input.reason === BROWSER_OPEN_SILENT_REASON)
+  );
+}
 
 /** Whether a decision reason is a search that ran without asking. */
 export function isSilentSearchReason(reason: string): boolean {
@@ -218,6 +230,9 @@ export function toolReturnsOutsideContent(toolName: string): boolean {
 /** The kind of content a tool's result is, so a card or a memory note can say where something was read. */
 export function readSourceOf(toolName: string): ReadSource {
   const baseName = baseToolName(toolName);
+  if (isBrowserToolName(baseName)) {
+    return 'browser_page';
+  }
   if (isSearchResultTool(baseName) || isPageReaderTool(baseName)) {
     return 'page';
   }

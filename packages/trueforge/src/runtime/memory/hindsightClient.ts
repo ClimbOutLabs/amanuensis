@@ -804,8 +804,8 @@ export class HindsightClient implements MemoryClient {
    * `send` plus bounded 503/Retry-After retries for the read-only lanes (recall, reflect).
    * The refusal body is drained on each attempt so the socket can be reused, and every attempt
    * and wait shares the caller's timeout through a deadline: an overloaded provider cannot hold
-   * a turn open past `timeoutMs`, and an exhausted budget reports the provider's own refusal
-   * rather than a synthetic timeout.
+   * a turn open past `timeoutMs`, a wait that would reach the deadline is skipped, and an
+   * exhausted budget reports the provider's own refusal rather than a synthetic timeout.
    */
   private async sendWithOverloadRetry(input: {
     path: string;
@@ -835,11 +835,12 @@ export class HindsightClient implements MemoryClient {
         break;
       }
       const waitMs = parseRetryAfterMs(sent.response.headers.get('retry-after')) ?? DEFAULT_OVERLOAD_RETRY_WAIT_MS;
-      const budgetMs = deadline - Date.now();
-      if (budgetMs <= 0) {
+      // A retry the provider asks us to delay past the deadline could never run, so report the
+      // refusal now instead of holding the turn until the budget runs out.
+      if (waitMs >= deadline - Date.now()) {
         break;
       }
-      await sleep(Math.min(waitMs, budgetMs));
+      await sleep(waitMs);
     }
     return lastRefusal ?? timeoutFailure(input.timeoutMs);
   }

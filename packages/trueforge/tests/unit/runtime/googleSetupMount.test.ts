@@ -175,6 +175,7 @@ describe('the guided Google setup mount', () => {
         budget: uncappedTokenFactoryBudget,
         authority: { tenantId: OWNER.tenant_id, userRef: OWNER.created_by },
       },
+      undefined,
     );
   }
 

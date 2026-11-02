@@ -5,10 +5,14 @@
  *     {}
  */
 export interface UpdateSentinelUserSettingsRequest {
+    /** New past-chat search setting; omitted keeps the current value. */
+    chatSearchEnabled?: boolean;
     /** New maps setting; omitted keeps the current value. */
     mapsWithoutAsking?: boolean;
     /** New offline mode value; omitted keeps the current value. */
     offlineMode?: boolean;
+    /** New package download setting for chats without a project; omitted keeps the current value. */
+    packageDownloadsWithoutProjectAllowed?: boolean;
     /** New sandbox setting; omitted keeps the current value. */
     sandboxWithoutAsking?: boolean;
     /** New search setting; omitted keeps the current value. */

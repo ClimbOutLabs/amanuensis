@@ -447,6 +447,8 @@ describe('Data export route', () => {
       search_without_asking: undefined,
       maps_without_asking: undefined,
       sandbox_without_asking: undefined,
+      chat_search_enabled: undefined,
+      package_downloads_without_project_allowed: undefined,
     });
 
     // Uploaded files: a text artifact quoting the OAuth token, a binary, and a path that tries to escape.
