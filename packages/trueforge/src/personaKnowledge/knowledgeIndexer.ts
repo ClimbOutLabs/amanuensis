@@ -118,6 +118,7 @@ export class PersonaKnowledgeIndexer {
   readonly #queuedKeys = new Set<string>();
   readonly #modelRetries = new Map<string, number>();
   #processing = false;
+  #pumping: Promise<void> = Promise.resolve();
   #closed = false;
   #recovered = false;
 
@@ -137,7 +138,7 @@ export class PersonaKnowledgeIndexer {
     }
     this.#queuedKeys.add(key);
     this.#queue.push({ tenantId: input.tenantId, personaId: input.personaId, documentId: input.documentId });
-    void this.#pump();
+    this.#pump();
   }
 
   /**
@@ -179,14 +180,20 @@ export class PersonaKnowledgeIndexer {
     }
   }
 
-  close(): void {
+  /** Stops taking jobs and resolves once the document being indexed, if any, is finished. */
+  async close(): Promise<void> {
     this.#closed = true;
+    await this.#pumping;
   }
 
-  async #pump(): Promise<void> {
+  #pump(): void {
     if (this.#processing) {
       return;
     }
+    this.#pumping = this.#drain();
+  }
+
+  async #drain(): Promise<void> {
     this.#processing = true;
     try {
       while (!this.#closed) {
@@ -436,6 +443,13 @@ export function getPersonaKnowledgeIndexer(options: PersonaKnowledgeIndexerOptio
   const indexer = new PersonaKnowledgeIndexer(options);
   indexers.set(options.knowledgeDir, indexer);
   return indexer;
+}
+
+/** Stops every process-wide indexer and waits for their current documents, so shutdown never cuts a write. */
+export async function closePersonaKnowledgeIndexers(): Promise<void> {
+  const open = [...indexers.values()];
+  indexers.clear();
+  await Promise.all(open.map(indexer => indexer.close()));
 }
 
 /** Bytes one persona's library uses: its live database data and any blobs still waiting to be indexed. */
