@@ -19,6 +19,9 @@ describe('safeReturnTo', () => {
 
   it.each([
     ['backslash after the slash', '/\\evil.example'],
+    ['leading backslash', '\\evil.example'],
+    ['raw carriage return', '/\r/evil.example'],
+    ['raw newline', '/\n/evil.example'],
     ['slash then tab then slash', '/\t/evil.example'],
     ['encoded tab between slashes', '/%09/evil.example'],
     ['encoded newline', '/%0a/evil.example'],

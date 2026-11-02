@@ -765,7 +765,7 @@ test_slots_come_back_after_a_restart() {
   install_machine
   local compose slots
   compose=$(cat "$AMAN_HOME/instances/main/compose.yaml")
-  assert_eq "$(printf '%s\n' "$compose" | grep -c 'restart: unless-stopped')" 6 "loopback, speech relay, app, dex, the calendar connector and the email connector"
+  assert_eq "$(printf '%s\n' "$compose" | grep -c 'restart: unless-stopped')" 8 "loopback, speech relay, app, dex, the calendar connector, the email connector, the browser and its gateway"
   slots=$(cat "$INSTALLER_DIR/../docker-compose.slots.yml")
   assert_contains "$slots" "restart: unless-stopped"
   sandbox_drop

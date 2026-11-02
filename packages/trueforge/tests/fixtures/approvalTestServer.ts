@@ -56,9 +56,11 @@ import { SqliteSkillStore } from '../../src/db/sqlite/skill-store/SqliteSkillSto
 import { SqliteSpaceStore } from '../../src/db/sqlite/space-store/SqliteSpaceStore';
 import { SqliteOAuthTokenStore } from '../../src/db/sqlite/token-store/SqliteOAuthTokenStore';
 import { SqliteTurnArtifactStore } from '../../src/db/sqlite/turn-artifact-store/SqliteTurnArtifactStore';
+import { closePersonaKnowledgeIndexers } from '../../src/personaKnowledge/knowledgeIndexer';
 import { ActiveTurnRegistry } from '../../src/runtime/activeTurns';
 import { createChatImageService } from '../../src/runtime/chatImages/chatImageService';
 import { createImageReencoder } from '../../src/runtime/chatImages/reencodeInSandbox';
+import { ChatSearchIndexer } from '../../src/runtime/chatSearchIndexing';
 import { EventSubscriptionRegistry } from '../../src/runtime/event-subscription';
 import { createOutboundSecretSource } from '../../src/runtime/outboundSecrets';
 import { createSentinelServices } from '../../src/runtime/sentinelServices';
@@ -137,7 +139,15 @@ function buildApp(input: {
     toolGrants: mcpToolGrantStore,
     outboundSecrets,
   });
+  const personaStore = new SqlitePersonaStore(db);
   return createServerApp({
+    chatSearchIndexer: new ChatSearchIndexer({
+      sessionStore,
+      globalSettingsStore,
+      sentinelSettingsStore,
+      personaStore,
+      logger: createLogger({ silent: true }),
+    }),
     modelCatalog: ModelCatalog.load(),
     mcpCatalog: McpCatalog.loadShipped(),
     skillCatalog: SkillCatalog.load(),
@@ -151,7 +161,7 @@ function buildApp(input: {
     sandboxProviderResolver: sandboxProvider === undefined ? undefined : () => Promise.resolve(sandboxProvider),
     agentStore,
     personalizationStore: new SqlitePersonalizationStore(db),
-    personaStore: new SqlitePersonaStore(db),
+    personaStore,
     modelProviderStore,
     spaceStore: new SqliteSpaceStore(db),
     repositoryStore: new SqliteRepositoryStore(db),
@@ -314,8 +324,9 @@ export async function startApprovalTestServer(options?: {
     },
     close: async () => {
       configuration.FIRST_PARTY_MCP_ORIGINS = originalFirstPartyOrigins;
-      // The guide installs write into the temp directory removed below, so they finish first.
+      // The guide installs, and the indexing they queue, write into directories removed below, so they finish first.
       await app.guidesSettled();
+      await closePersonaKnowledgeIndexers();
       // Like main.ts shutdown: a finished turn's drain still writes events and memory (a scheduled
       // run saves to the vault), so it settles before the database and the caller's directories go.
       await turnDrains.shutdownAndWait({ timeoutMs: configuration.TURN_DRAIN_SHUTDOWN_TIMEOUT_MS });

@@ -70,6 +70,8 @@ release_resolve() {
   REL_APP_TAG=$(checkout_app_tag)
   REL_STT_TAG=aman-stt:$(source_id ops/aman-stt)
   REL_CALENDAR_TAG=aman-calendar-caldav:$(source_id ops/calendar-sidecar)
+  REL_BROWSER_TAG=aman-browser:$(source_id ops/browser-sidecar)
+  REL_BROWSER_GATEWAY_TAG=aman-browser-gateway:$(source_id ops/browser-sidecar)
   REL_DEX_IMAGE=$(json_get "$PINS_FILE" dex_image)
   REL_MAIL_EMAIL_IMAGE=$(json_get "$PINS_FILE" mail_email_image)
 }
@@ -89,6 +91,8 @@ release_write() {
     printf '  "app_image": "%s",\n' "$REL_APP_TAG"
     printf '  "stt_image": "%s",\n' "$REL_STT_TAG"
     printf '  "calendar_image": "%s",\n' "$REL_CALENDAR_TAG"
+    printf '  "browser_image": "%s",\n' "$REL_BROWSER_TAG"
+    printf '  "browser_gateway_image": "%s",\n' "$REL_BROWSER_GATEWAY_TAG"
     printf '  "dex_image": "%s",\n' "$REL_DEX_IMAGE"
     printf '  "mail_email_image": "%s"\n' "$REL_MAIL_EMAIL_IMAGE"
     printf '}\n'
@@ -111,6 +115,8 @@ release_load() {
   CUR_APP_TAG=$(json_get "$file" app_image)
   CUR_STT_TAG=$(json_get "$file" stt_image)
   CUR_CALENDAR_TAG=$(json_get "$file" calendar_image)
+  CUR_BROWSER_TAG=$(json_get "$file" browser_image)
+  CUR_BROWSER_GATEWAY_TAG=$(json_get "$file" browser_gateway_image)
   CUR_DEX_IMAGE=$(json_get "$file" dex_image)
   CUR_MAIL_EMAIL_IMAGE=$(json_get "$file" mail_email_image)
   [ -n "$CUR_APP_TAG" ] && [ -n "$CUR_STT_TAG" ] && [ -n "$CUR_DEX_IMAGE" ]
@@ -138,6 +144,17 @@ build_calendar_image() {
   step_ok "Built the calendar connector"
 }
 
+# Aman's own browser and the gateway that walls it off, built from the same folder.
+build_browser_images() {
+  [ -f "$REPO_ROOT/ops/browser-sidecar/Dockerfile" ] || die "The file ops/browser-sidecar/Dockerfile is missing from $REPO_ROOT. Run the installer from a complete copy of the Aman code."
+  step_begin build-browser "Building Aman's browser (this might take a while)"
+  {
+    D build -t "$REL_BROWSER_TAG" "$REPO_ROOT/ops/browser-sidecar" &&
+      D build -f "$REPO_ROOT/ops/browser-sidecar/Dockerfile.gateway" -t "$REL_BROWSER_GATEWAY_TAG" "$REPO_ROOT/ops/browser-sidecar"
+  } >"$STEP_LOG" 2>&1 || step_fail "Building Aman's browser failed" "Fix what the log says, then run install.sh again."
+  step_ok "Built Aman's browser"
+}
+
 build_stt_image() {
   [ -f "$REPO_ROOT/ops/aman-stt/Dockerfile" ] || die "The file ops/aman-stt/Dockerfile is missing from $REPO_ROOT. Run the installer from a complete copy of the Aman code."
   step_begin build-stt "Building the speech-to-text service"
@@ -161,6 +178,11 @@ images_ensure() {
     ui_skip "The calendar connector is already built"
   else
     build_calendar_image
+  fi
+  if docker_image_exists "$REL_BROWSER_TAG" && docker_image_exists "$REL_BROWSER_GATEWAY_TAG"; then
+    ui_skip "Aman's browser is already built"
+  else
+    build_browser_images
   fi
   if docker_image_exists "$REL_DEX_IMAGE"; then
     ui_skip "The sign-in service is already downloaded"

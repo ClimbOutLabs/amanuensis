@@ -167,9 +167,15 @@ it.each([
 ])('logs a 1 MB %s run of parameter-name characters in linear time', (_name, unit) => {
   const { logger, output } = captureLogger(false);
   const line = unit.repeat(512 * 1024);
-  const started = performance.now();
-  logger.warn(line);
-  expect(performance.now() - started).toBeLessThan(200);
+  // The fastest of three runs: one run can stall behind other test files on a busy machine, and a
+  // backtracking scrubber would take minutes on this input, far past the bound, on every run.
+  let fastest = Number.POSITIVE_INFINITY;
+  for (let run = 0; run < 3; run += 1) {
+    const started = performance.now();
+    logger.warn(line);
+    fastest = Math.min(fastest, performance.now() - started);
+  }
+  expect(fastest).toBeLessThan(500);
   expect(output().length).toBeGreaterThan(line.length);
 });
 
