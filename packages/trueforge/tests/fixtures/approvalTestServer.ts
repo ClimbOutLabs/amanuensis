@@ -56,6 +56,7 @@ import { SqliteSkillStore } from '../../src/db/sqlite/skill-store/SqliteSkillSto
 import { SqliteSpaceStore } from '../../src/db/sqlite/space-store/SqliteSpaceStore';
 import { SqliteOAuthTokenStore } from '../../src/db/sqlite/token-store/SqliteOAuthTokenStore';
 import { SqliteTurnArtifactStore } from '../../src/db/sqlite/turn-artifact-store/SqliteTurnArtifactStore';
+import { closePersonaKnowledgeIndexers } from '../../src/personaKnowledge/knowledgeIndexer';
 import { ActiveTurnRegistry } from '../../src/runtime/activeTurns';
 import { createChatImageService } from '../../src/runtime/chatImages/chatImageService';
 import { createImageReencoder } from '../../src/runtime/chatImages/reencodeInSandbox';
@@ -323,8 +324,9 @@ export async function startApprovalTestServer(options?: {
     },
     close: async () => {
       configuration.FIRST_PARTY_MCP_ORIGINS = originalFirstPartyOrigins;
-      // The guide installs write into the temp directory removed below, so they finish first.
+      // The guide installs, and the indexing they queue, write into directories removed below, so they finish first.
       await app.guidesSettled();
+      await closePersonaKnowledgeIndexers();
       // Like main.ts shutdown: a finished turn's drain still writes events and memory (a scheduled
       // run saves to the vault), so it settles before the database and the caller's directories go.
       await turnDrains.shutdownAndWait({ timeoutMs: configuration.TURN_DRAIN_SHUTDOWN_TIMEOUT_MS });

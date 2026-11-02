@@ -172,7 +172,7 @@ function searchFor(query: string): SearchChatHistoryInput {
     query,
     created_by_subject_id: PERSON.created_by,
     exclude_session_id: null,
-    persona_ids: ['p-work'],
+    personas: { kind: 'only', persona_ids: ['p-work'] },
     from: null,
     to: null,
     limit: 8,
@@ -314,8 +314,12 @@ describe('ChatSearchIndexer', () => {
     await indexer().indexFinishedTurn({ ...PERSON, session_id: 'chat-1', turn_id: 'chat-1-turn-1' });
 
     expect((await store.searchChatHistory(searchFor('ferry'))).map(hit => hit.session_id)).toEqual(['chat-1']);
-    expect(await store.searchChatHistory({ ...searchFor('ferry'), persona_ids: ['p-home'] })).toEqual([]);
-    expect(await store.searchChatHistory({ ...searchFor('ferry'), persona_ids: [] })).toEqual([]);
+    expect(
+      await store.searchChatHistory({ ...searchFor('ferry'), personas: { kind: 'only', persona_ids: ['p-home'] } }),
+    ).toEqual([]);
+    expect(
+      await store.searchChatHistory({ ...searchFor('ferry'), personas: { kind: 'only', persona_ids: [] } }),
+    ).toEqual([]);
   });
 
   it('inherits the persona from the earlier turn a turn follows', async () => {
@@ -329,7 +333,9 @@ describe('ChatSearchIndexer', () => {
     await indexer().indexFinishedTurn({ ...PERSON, session_id: 'chat-1', turn_id: 'chat-1-turn-2' });
 
     expect((await store.searchChatHistory(searchFor('ferry'))).map(hit => hit.session_id)).toEqual(['chat-1']);
-    expect(await store.searchChatHistory({ ...searchFor('ferry'), persona_ids: [] })).toEqual([]);
+    expect(
+      await store.searchChatHistory({ ...searchFor('ferry'), personas: { kind: 'only', persona_ids: [] } }),
+    ).toEqual([]);
   });
 
   it('leaves out a turn whose persona cannot be decided', async () => {
@@ -351,7 +357,9 @@ describe('ChatSearchIndexer', () => {
     await indexer().indexFinishedTurn({ ...PERSON, session_id: 'chat-1', turn_id: 'chat-1-turn-1' });
 
     expect(await store.searchChatHistory(searchFor('ferry'))).toEqual([]);
-    expect(await store.searchChatHistory({ ...searchFor('ferry'), persona_ids: [] })).toEqual([]);
+    expect(
+      await store.searchChatHistory({ ...searchFor('ferry'), personas: { kind: 'only', persona_ids: [] } }),
+    ).toEqual([]);
   });
 
   it('still fills in every chat when the switch is turned off and on again while a pass is running', async () => {
@@ -423,7 +431,9 @@ describe('ChatSearchIndexer', () => {
     });
     await indexer().indexFinishedTurn({ ...PERSON, session_id: 'chat-1', turn_id: 'chat-1-turn-1' });
     expect((await store.searchChatHistory(searchFor('ferry'))).map(hit => hit.session_id)).toEqual(['chat-1']);
-    expect(await store.searchChatHistory({ ...searchFor('ferry'), persona_ids: [] })).toEqual([]);
+    expect(
+      await store.searchChatHistory({ ...searchFor('ferry'), personas: { kind: 'only', persona_ids: [] } }),
+    ).toEqual([]);
   });
 
   it('fills in earlier chats when the search is turned on, then forgets them when it is turned off', async () => {

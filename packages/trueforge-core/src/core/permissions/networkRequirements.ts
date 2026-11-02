@@ -42,6 +42,12 @@ const FIRST_PARTY_REQUIRES_NETWORK: Record<string, boolean> = {
   render_map: true,
   render_route: true,
   render_places: true,
+  // Aman's own browser: every tool reaches the browser sidecar, which goes on to the open internet.
+  browser_open: true,
+  browser_read: true,
+  browser_scroll: true,
+  browser_back: true,
+  browser_screenshot: true,
 };
 
 /**

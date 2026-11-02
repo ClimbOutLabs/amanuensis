@@ -708,7 +708,11 @@ describe('MemorySettings (past-chat search)', () => {
       setChatSearchEnabled,
       server: {
         ...capabilitiesWith({ memoryDefaults: MARKDOWN_DEFAULTS }),
-        chatSearch: { getChatSearch: async () => ({ enabled: state.enabled }), setChatSearchEnabled },
+        chatSearch: {
+          getChatSearch: async () => ({ enabled: state.enabled }),
+          setChatSearchEnabled,
+          searchOwnChats: async () => ({ searchEnabled: state.enabled, hits: [] }),
+        },
       },
     };
   }

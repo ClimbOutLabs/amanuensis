@@ -4,21 +4,10 @@ import { useCallback, useEffect, useState } from 'react';
 
 import {
   chatSearchErrorMessage,
-  type ChatSearchCatalog,
+  hasChatSearchPort,
   type ChatSearchSetting,
 } from '../../plugins/trueforge-agent-server-adapter/catalogs/chatSearchCatalog.js';
 import { useOptionalServer } from '../../server/ServerContext.js';
-
-/** Read-only shape probe: other servers carry no `chatSearch` port and report "not supported". */
-function hasChatSearchPort(server: object): server is { chatSearch: ChatSearchCatalog } {
-  const port: unknown = Reflect.get(server, 'chatSearch');
-  return (
-    typeof port === 'object' &&
-    port !== null &&
-    typeof Reflect.get(port, 'getChatSearch') === 'function' &&
-    typeof Reflect.get(port, 'setChatSearchEnabled') === 'function'
-  );
-}
 
 export interface ChatSearchSettingState {
   supported: boolean;
