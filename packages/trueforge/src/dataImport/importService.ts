@@ -46,6 +46,7 @@ import { isHostOwnConnector } from '../mcp/hostConnectors';
 import { personaKnowledgeLocation } from '../personaKnowledge/knowledgePaths';
 import { amanGuidePersonaId, isAmanGuidePersona, isAnyAmanGuideId } from '../personas/amanGuide/identity';
 import { PERSISTED_ARTIFACT_MIME } from '../runtime/artifacts/persistTurnArtifacts';
+import { requestChatSearchBackfill } from '../runtime/chatSearchIndexing';
 import type { RetainItem } from '../runtime/memory/hindsightClient';
 import {
   applyVaultTombstones,
@@ -1881,6 +1882,13 @@ async function importArchive<TTransaction>(
       await lock.removeIn(tx);
     });
     lock.committed();
+    // The restored chats join the past-chat search through one pass, which runs only if the person turns the search on.
+    if (sessions.ids.length > 0) {
+      await requestChatSearchBackfill({
+        globalSettingsStore: deps.globalSettingsStore,
+        person: { tenant_id: tenantId, created_by: subjectId },
+      });
+    }
 
     const result: Omit<ImportDataResult, 'summary'> = {
       chats: sessions.ids.length,

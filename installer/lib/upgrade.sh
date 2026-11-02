@@ -21,6 +21,10 @@ upgrade_rollback() {
     lock_release
     exit 2
   fi
+  # The instances are drawn again with the connectors of the version put back, not the failed one.
+  REL_CALENDAR_TAG=$CUR_CALENDAR_TAG
+  REL_BROWSER_TAG=$CUR_BROWSER_TAG
+  REL_BROWSER_GATEWAY_TAG=$CUR_BROWSER_GATEWAY_TAG
   (machine_up "$CUR_STT_TAG") || failed=1
   for name in $(reg_names); do
     # An instance that never became healthy has no data to restore and nothing worth bringing back.
@@ -222,8 +226,8 @@ cmd_upgrade() {
   fi
   # The aman command and its helper files come from this checkout too, so an upgrade brings them along.
   if [ "$OPT_CHECK" != 1 ] && [ "$DRY_RUN" != 1 ]; then install_doctor_shim; fi
-  if [ "$CUR_APP_TAG" = "$REL_APP_TAG" ] && [ "$CUR_STT_TAG" = "$REL_STT_TAG" ] && [ "$CUR_CALENDAR_TAG" = "$REL_CALENDAR_TAG" ] && [ "$CUR_DEX_IMAGE" = "$REL_DEX_IMAGE" ]; then
-    if docker_image_exists "$REL_APP_TAG" && docker_image_exists "$REL_STT_TAG" && docker_image_exists "$REL_CALENDAR_TAG" && docker_image_exists "$REL_DEX_IMAGE"; then
+  if [ "$CUR_APP_TAG" = "$REL_APP_TAG" ] && [ "$CUR_STT_TAG" = "$REL_STT_TAG" ] && [ "$CUR_CALENDAR_TAG" = "$REL_CALENDAR_TAG" ] && [ "$CUR_BROWSER_TAG" = "$REL_BROWSER_TAG" ] && [ "$CUR_BROWSER_GATEWAY_TAG" = "$REL_BROWSER_GATEWAY_TAG" ] && [ "$CUR_DEX_IMAGE" = "$REL_DEX_IMAGE" ]; then
+    if docker_image_exists "$REL_APP_TAG" && docker_image_exists "$REL_STT_TAG" && docker_image_exists "$REL_CALENDAR_TAG" && docker_image_exists "$REL_BROWSER_TAG" && docker_image_exists "$REL_BROWSER_GATEWAY_TAG" && docker_image_exists "$REL_DEX_IMAGE"; then
       say "Already up to date ($REL_APP_TAG). Nothing to do."
       upgrade_old_account_notices
       upgrade_report
@@ -252,6 +256,7 @@ cmd_upgrade() {
   [ "$CUR_APP_TAG" = "$REL_APP_TAG" ] || say "  app     $CUR_APP_TAG -> $REL_APP_TAG"
   [ "$CUR_STT_TAG" = "$REL_STT_TAG" ] || say "  speech  $CUR_STT_TAG -> $REL_STT_TAG"
   [ "$CUR_CALENDAR_TAG" = "$REL_CALENDAR_TAG" ] || say "  calendar $CUR_CALENDAR_TAG -> $REL_CALENDAR_TAG"
+  [ "$CUR_BROWSER_TAG" = "$REL_BROWSER_TAG" ] || say "  browser ${CUR_BROWSER_TAG:-(new)} -> $REL_BROWSER_TAG"
   [ "$CUR_DEX_IMAGE" = "$REL_DEX_IMAGE" ] || say "  login   $CUR_DEX_IMAGE -> $REL_DEX_IMAGE"
   if upgrade_any_sandbox; then say "  sandbox PDF and image reading (builds the sandbox again)"; fi
   if [ "$OPT_CHECK" = 1 ]; then
