@@ -98,6 +98,10 @@ jobs:
               - 'ops/sandbox-slot/agent/**'
               - 'package.json'
               - '.github/workflows/ci.yml'
+            browser-sidecar:
+              - 'ops/browser-sidecar/**'
+              - 'package.json'
+              - '.github/workflows/ci.yml'
             store:
               - 'packages/trueforge/src/db/**'
               - 'packages/trueforge/tests/db/**'
@@ -131,6 +135,7 @@ jobs:
           TRUEFORGE_UI: ${{ steps.filter.outputs['trueforge-ui'] }}
           AMAN_INSTALLER: ${{ steps.filter.outputs['aman-installer'] }}
           SANDBOX_SLOT_AGENT: ${{ steps.filter.outputs['sandbox-slot-agent'] }}
+          BROWSER_SIDECAR: ${{ steps.filter.outputs['browser-sidecar'] }}
         run: |
           node <<'EOF' >> "$GITHUB_OUTPUT"
           const changedPackages = [];
@@ -141,6 +146,7 @@ jobs:
           if (process.env.TRUEFORGE_UI === 'true') changedPackages.push('trueforge-ui');
           if (process.env.AMAN_INSTALLER === 'true') changedPackages.push('aman-installer');
           if (process.env.SANDBOX_SLOT_AGENT === 'true') changedPackages.push('sandbox-slot-agent');
+          if (process.env.BROWSER_SIDECAR === 'true') changedPackages.push('browser-sidecar');
           console.log(`list=${JSON.stringify(changedPackages)}`);
           EOF
 
