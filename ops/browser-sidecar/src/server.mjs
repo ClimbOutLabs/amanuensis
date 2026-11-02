@@ -520,6 +520,80 @@ export class BrowserSidecar {
     return { status: 'ok', png_base64: buffer.toString('base64') };
   }
 
+  /**
+   * The person's open tabs for the live view, most recently used first. Listing never launches a
+   * browser: a person who has not opened anything has no tabs to show.
+   */
+  async liveTabs({ owner }) {
+    const starting = this.#profiles.get(owner);
+    if (starting === undefined) {
+      return { status: 'ok', tabs: [] };
+    }
+    const profile = await starting.catch(() => undefined);
+    if (profile === undefined) {
+      return { status: 'ok', tabs: [] };
+    }
+    const tabs = [];
+    for (const [tabId, tab] of [...profile.tabs.entries()].reverse()) {
+      tabs.push({ tab: tabId, title: await tab.page.title().catch(() => ''), url: tab.page.url() });
+    }
+    return { status: 'ok', tabs };
+  }
+
+  /**
+   * One frame of the chat's tab for the live view. The live view is the person's own look at their
+   * own browser, so unlike `#read` it is not held to the opened site: the tab itself still cannot
+   * leave that site (see `guardNavigation`), and only the app server may ask, for the signed-in
+   * person's own profile.
+   */
+  async liveFrame({ owner, tab: tabId }) {
+    const tab = await this.#tabFor({ owner, tab: tabId, create: false });
+    if (tab === undefined) {
+      return NO_TAB;
+    }
+    const buffer = await tab.page.screenshot({ type: 'jpeg', quality: 60 });
+    const viewport = tab.page.viewportSize();
+    return {
+      status: 'ok',
+      jpeg_base64: buffer.toString('base64'),
+      ...(viewport === null ? {} : { width: viewport.width, height: viewport.height }),
+    };
+  }
+
+  /**
+   * One pointer or keyboard act in the chat's tab, from the live view. Clicks go through the real
+   * mouse, so a click that would take the page off the opened site is refused by the same route
+   * guard as every other navigation.
+   */
+  async liveInput({ owner, tab: tabId, input }) {
+    const tab = await this.#tabFor({ owner, tab: tabId, create: false });
+    if (tab === undefined) {
+      return NO_TAB;
+    }
+    const page = tab.page;
+    switch (input.kind) {
+      case 'click': {
+        const viewport = page.viewportSize();
+        const scale =
+          viewport !== null && input.imageWidth !== undefined && input.imageHeight !== undefined
+            ? { x: viewport.width / input.imageWidth, y: viewport.height / input.imageHeight }
+            : { x: 1, y: 1 };
+        await page.mouse.click(input.x * scale.x, input.y * scale.y);
+        break;
+      }
+      case 'type':
+        await page.keyboard.type(input.text);
+        break;
+      case 'key':
+        await page.keyboard.press(input.key);
+        break;
+      case 'wheel':
+        await page.mouse.wheel(0, input.dy);
+        break;
+    }
+    return { status: 'ok' };
+  }
+
   async close() {
     for (const starting of this.#profiles.values()) {
       const profile = await starting.catch(() => undefined);
@@ -587,6 +661,47 @@ async function readJsonBody(req) {
   return text === '' ? {} : JSON.parse(text);
 }
 
+/** The most text one live-view input may type at once: a pasted code or a short form answer, not a document. */
+const MAX_LIVE_TEXT_LENGTH = 10000;
+
+const isFiniteNumber = value => typeof value === 'number' && Number.isFinite(value);
+
+/**
+ * A live-view input from the request body, or undefined when it is not one the page can be given:
+ * a click with its point (and the frame size the point was read from, when the caller measured one),
+ * typed text, one named key, or a scroll step.
+ */
+function parseLiveInput(body) {
+  switch (body.kind) {
+    case 'click': {
+      if (!isFiniteNumber(body.x) || !isFiniteNumber(body.y)) {
+        return undefined;
+      }
+      const imageWidth = isFiniteNumber(body.image_width) && body.image_width > 0 ? body.image_width : undefined;
+      const imageHeight = isFiniteNumber(body.image_height) && body.image_height > 0 ? body.image_height : undefined;
+      return {
+        kind: 'click',
+        x: body.x,
+        y: body.y,
+        ...(imageWidth === undefined ? {} : { imageWidth }),
+        ...(imageHeight === undefined ? {} : { imageHeight }),
+      };
+    }
+    case 'type':
+      return typeof body.text === 'string' && body.text !== '' && body.text.length <= MAX_LIVE_TEXT_LENGTH
+        ? { kind: 'type', text: body.text }
+        : undefined;
+    case 'key':
+      return typeof body.key === 'string' && body.key !== '' && body.key.length <= 64
+        ? { kind: 'key', key: body.key }
+        : undefined;
+    case 'wheel':
+      return isFiniteNumber(body.dy) ? { kind: 'wheel', dy: body.dy } : undefined;
+    default:
+      return undefined;
+  }
+}
+
 const ROUTES = {
   'POST /open': (sidecar, where, body) => sidecar.open({ ...where, url: body.url }),
   'POST /read': (sidecar, where) => sidecar.read(where),
@@ -602,6 +717,12 @@ const ROUTES = {
     typeof body.origin === 'string' && typeof body.username === 'string' && typeof body.password === 'string'
       ? sidecar.signIn({ ...where, origin: body.origin, username: body.username, password: body.password })
       : { status: 'no_form' },
+  'POST /live/frame': (sidecar, where) => sidecar.liveFrame(where),
+  'POST /live/tabs': (sidecar, where) => sidecar.liveTabs(where),
+  'POST /live/input': (sidecar, where, body) => {
+    const input = parseLiveInput(body);
+    return input === undefined ? { status: 'bad_input' } : sidecar.liveInput({ ...where, input });
+  },
 };
 
 const MAX_ID_LENGTH = 256;
@@ -646,8 +767,9 @@ async function handleRequest({ req, res, sidecar }) {
   }
   try {
     const body = await readJsonBody(req);
-    // `owner` picks the person's browser profile; `tab` picks the chat's tab inside it.
-    if (!isId(body.owner) || !isId(body.tab)) {
+    // `owner` picks the person's browser profile; `tab` picks the chat's tab inside it. Listing the
+    // tabs is the one call that names no tab: the list is how the tabs are found in the first place.
+    if (!isId(body.owner) || (req.url !== '/live/tabs' && !isId(body.tab))) {
       res.writeHead(400).end(JSON.stringify({ status: 'error', message: 'owner and tab are required' }));
       return;
     }

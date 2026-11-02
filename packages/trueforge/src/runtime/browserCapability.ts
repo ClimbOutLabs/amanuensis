@@ -78,19 +78,45 @@ const SignInReplySchema = z.discriminatedUnion('status', [
 
 type BrowserPageReply = z.infer<typeof PageReplySchema>;
 
+/** One open tab of the person's browser, as the live view lists it: the chat it belongs to, its title and address. */
+export const LiveTabSchema = z.object({ tab: z.string(), title: z.string(), url: z.string() });
+export const LiveTabsReplySchema = z.object({ status: z.literal('ok'), tabs: z.array(LiveTabSchema) });
+export const LiveFrameReplySchema = z.discriminatedUnion('status', [
+  z.object({
+    status: z.literal('ok'),
+    jpeg_base64: z.string().min(1),
+    width: z.number().optional(),
+    height: z.number().optional(),
+  }),
+  ClosedReplySchema,
+]);
+export const LiveInputReplySchema = z.discriminatedUnion('status', [
+  z.object({ status: z.literal('ok') }),
+  z.object({ status: z.literal('bad_input') }),
+  ClosedReplySchema,
+]);
+
+export type LiveTabsReply = z.infer<typeof LiveTabsReplySchema>;
+export type LiveFrameReply = z.infer<typeof LiveFrameReplySchema>;
+export type LiveInputReply = z.infer<typeof LiveInputReplySchema>;
+
 /** What the sidecar answered to a request, or why there is no usable answer. */
 export type SidecarResult<T> = { ok: true; body: T } | { ok: false; message: string };
 
-/** Whose browser and which tab: one profile per person, one tab per chat inside it. */
-export interface BrowserTabRef {
+/** Whose browser: one profile per person. */
+export interface BrowserProfileRef {
   tenant_id: string;
   created_by: string;
+}
+
+/** Whose browser and which tab: one profile per person, one tab per chat inside it. */
+export interface BrowserTabRef extends BrowserProfileRef {
   chat_id: string;
 }
 
 /** The sidecar's profile key: the same person in another tenant is a different person. */
-function profileOwner(tab: BrowserTabRef): string {
-  return `${tab.tenant_id}:${tab.created_by}`;
+function profileOwner(profile: BrowserProfileRef): string {
+  return `${profile.tenant_id}:${profile.created_by}`;
 }
 
 const REFUSAL_MESSAGES: Record<string, string> = {
@@ -104,12 +130,11 @@ function refusalMessage(reason: string): string {
   return REFUSAL_MESSAGES[reason] ?? 'Aman will not open that address. Try a different address.';
 }
 
-/** Calls one route of the browser sidecar, with the shared secret and the configured navigation timeout. */
-export async function callBrowserSidecar<Schema extends z.ZodType>(input: {
+/** Posts one call to the browser sidecar, with the shared secret and the configured navigation timeout. */
+async function postSidecar<Schema extends z.ZodType>(input: {
   path: string;
-  tab: BrowserTabRef;
   schema: Schema;
-  body?: Record<string, unknown>;
+  payload: Record<string, unknown>;
 }): Promise<SidecarResult<z.infer<Schema>>> {
   const baseUrl = configuration.BROWSER_URL;
   const secret = configuration.BROWSER_SECRET;
@@ -124,7 +149,7 @@ export async function callBrowserSidecar<Schema extends z.ZodType>(input: {
     const response = await fetch(`${baseUrl}${input.path}`, {
       method: 'POST',
       headers: { 'content-type': 'application/json', 'x-browser-secret': secret },
-      body: JSON.stringify({ ...input.body, owner: profileOwner(input.tab), tab: input.tab.chat_id }),
+      body: JSON.stringify(input.payload),
       signal: controller.signal,
     });
     const json: unknown = await response.json();
@@ -144,6 +169,34 @@ export async function callBrowserSidecar<Schema extends z.ZodType>(input: {
   } finally {
     clearTimeout(timeout);
   }
+}
+
+/** Calls one route of the browser sidecar for one chat's tab. */
+export async function callBrowserSidecar<Schema extends z.ZodType>(input: {
+  path: string;
+  tab: BrowserTabRef;
+  schema: Schema;
+  body?: Record<string, unknown>;
+}): Promise<SidecarResult<z.infer<Schema>>> {
+  return postSidecar({
+    path: input.path,
+    schema: input.schema,
+    payload: { ...input.body, owner: profileOwner(input.tab), tab: input.tab.chat_id },
+  });
+}
+
+/** Calls one route of the browser sidecar for a person's whole profile, naming no tab (the live view's tab list). */
+export async function callBrowserSidecarForOwner<Schema extends z.ZodType>(input: {
+  path: string;
+  profile: BrowserProfileRef;
+  schema: Schema;
+  body?: Record<string, unknown>;
+}): Promise<SidecarResult<z.infer<Schema>>> {
+  return postSidecar({
+    path: input.path,
+    schema: input.schema,
+    payload: { ...input.body, owner: profileOwner(input.profile) },
+  });
 }
 
 /**
@@ -264,7 +317,7 @@ class BrowserTool extends LocalToolMCP {
       name: 'browser_sign_in',
       annotations: { readOnlyHint: false, openWorldHint: true },
       description:
-        "Sign in to the site open in the browser with the person's saved login for that site, then read the page. Use when a page asks to sign in or a session has expired. You never see the password.",
+        "Sign in to the site open in the browser with the person's saved login for that site, then read the page. Use when a page asks to sign in or a session has expired. You never see the password. If signing in then asks for a step only the person can do, like a code sent to their phone or a picture check, ask them to open Aman's live browser at /browser-live and finish there; what they do stays in the browser for your next read.",
       schema: EMPTY_INPUT_SCHEMA,
       handler: async () => this.signIn(),
     }),
