@@ -101,3 +101,26 @@ test('refuses documentation, benchmarking and relay ranges, which are never a re
     assert.equal(isPrivateAddress(address), true, address);
   }
 });
+
+test("refuses the IPv4-translated form and Azure's host service address", () => {
+  for (const address of ['::ffff:0:7f00:1', '::ffff:0:a00:1', '168.63.129.16']) {
+    assert.equal(isPrivateAddress(address), true, address);
+  }
+});
+
+test('treats IPv6 outside global unicast, and protocol ranges inside it, as private', () => {
+  for (const address of [
+    'fe80::1',
+    'fd00::1',
+    '5f00::1',
+    '64:ff9b::a00:1',
+    '2001:2::1',
+    '2001:20::1',
+    '2001:4:112::1',
+  ]) {
+    assert.equal(isPrivateAddress(address), true, address);
+  }
+  for (const address of ['2606:4700:4700::1111', '2a00:1450:4001:80b::200e']) {
+    assert.equal(isPrivateAddress(address), false, address);
+  }
+});

@@ -12,9 +12,6 @@ async function addressesOf(host) {
 }
 
 if (process.argv[1] !== undefined && fileURLToPath(import.meta.url) === process.argv[1]) {
-  const secret = process.env.BROWSER_SECRET;
-  // Read once, then dropped from this process's environment so Chromium never inherits it.
-  delete process.env.BROWSER_SECRET;
   const peer = process.env.BROWSER_API_PEER;
   let server;
   let sidecar;
@@ -26,7 +23,6 @@ if (process.argv[1] !== undefined && fileURLToPath(import.meta.url) === process.
     });
     server = createHttpServer({
       sidecar,
-      secret,
       allowedPeers: peer === undefined || peer === '' ? undefined : () => addressesOf(peer),
     });
   } catch (error) {

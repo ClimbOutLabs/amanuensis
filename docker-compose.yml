@@ -136,8 +136,8 @@ services:
       CALENDAR_ACCOUNT_SECRET: ${CALENDAR_ACCOUNT_SECRET:?set CALENDAR_ACCOUNT_SECRET to a random value of 32 or more characters, for example from openssl rand -hex 32}
       # Aman's browser, reached through its gateway (see browser-gateway). Used only when BROWSER_ENABLED is true in
       # packages/trueforge/.env and the stack runs with the browser profile.
-      BROWSER_URL: http://browser-gateway:8792
-      # Guards the browser's API; the same value goes to the browser. Made like the calendar secret above:
+      BROWSER_URL: http://browser-relay:8792
+      # Guards the browser's API; the same value goes to browser-gateway. Made like the calendar secret above:
       # `pnpm smoke` makes a random one, and plain `docker compose` needs it set in the shell.
       BROWSER_SECRET: ${BROWSER_SECRET:?set BROWSER_SECRET to a random value of 32 or more characters, for example from openssl rand -hex 32}
     # Secrets and Postgres credentials (POSTGRES_USER, …).
@@ -300,10 +300,8 @@ services:
     # runs first.
     init: true
     environment:
-      # The same value the server sends (see the server's BROWSER_SECRET). The sidecar keeps it out of Chromium's
-      # environment, and answers only calls that come through the gateway, so nothing inside this container can use it.
-      BROWSER_SECRET: ${BROWSER_SECRET:?set BROWSER_SECRET to a random value of 32 or more characters, for example from openssl rand -hex 32}
-      BROWSER_PROXY: http://browser-gateway:3128
+      BROWSER_PROXY: http://browser-proxy:3128
+      # The sidecar answers only the gateway, which checks the server's secret first; this container never holds it.
       BROWSER_API_PEER: browser-gateway
     networks:
       - browser-internal
@@ -332,8 +330,8 @@ services:
 
   # The browser's only way out, and the server's only way in (ops/browser-sidecar/src/egressProxy.mjs).
   # An egress proxy on 3128 that resolves each request's host once, refuses private addresses, and
-  # connects to the address it checked; and a relay on 8792 that passes the server's calls through
-  # to the sidecar's API. The server reaches the browser as http://browser-gateway:8792.
+  # connects to the address it checked; and a relay on 8792 that checks the server's secret and passes its
+  # calls through to the sidecar's API. The server reaches the browser as http://browser-relay:8792.
   browser-gateway:
     build:
       context: ./ops/browser-sidecar
@@ -341,10 +339,17 @@ services:
     profiles: ['browser']
     environment:
       BROWSER_SIDECAR_HOST: browser
+      # The same value the server sends (see the server's BROWSER_SECRET), checked on every relayed call.
+      BROWSER_SECRET: ${BROWSER_SECRET:?set BROWSER_SECRET to a random value of 32 or more characters, for example from openssl rand -hex 32}
+      # The proxy listens only on the browser's network, and the relay only on the server's.
+      BROWSER_PROXY_BIND: browser-proxy
+      BROWSER_RELAY_BIND: browser-relay
     networks:
-      - browser-internal
-      - browser-control
-      - browser-egress
+      browser-internal:
+        aliases: [browser-proxy]
+      browser-control:
+        aliases: [browser-relay]
+      browser-egress: {}
     expose:
       - '3128'
       - '8792'

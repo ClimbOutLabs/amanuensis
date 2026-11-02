@@ -8,9 +8,11 @@
 // its answer between the check and the connect (DNS rebinding) cannot reach a private address.
 //
 // The gateway also relays the app server's calls to the sidecar's API, so the server and the
-// browser never share a network.
+// browser never share a network, and it checks the server's shared secret, so the browser's
+// container never holds it.
+import { createHash, timingSafeEqual } from 'node:crypto';
 import { createServer as createHttpServer, request as httpRequest } from 'node:http';
-import { createServer as createNetServer, connect as netConnect } from 'node:net';
+import { connect as netConnect } from 'node:net';
 import { URL } from 'node:url';
 
 import { resolvePublic, safeNavigationTarget } from './urlSafety.mjs';
@@ -172,13 +174,46 @@ export function createEgressProxy({ resolve, dial = defaultDial, log = () => und
   return server;
 }
 
-/** A plain TCP relay from the app server's network to the sidecar's API on the browser's network. */
-export function createApiRelay({ host, port }) {
-  return createNetServer(client => {
-    const upstream = netConnect({ host, port });
-    client.on('error', () => upstream.destroy());
-    upstream.on('error', () => client.destroy());
-    client.pipe(upstream);
-    upstream.pipe(client);
+/** The shortest shared secret the relay accepts, the same floor the app server enforces. */
+const MIN_SECRET_LENGTH = 32;
+
+function secretMatches({ given, secret }) {
+  if (typeof given !== 'string') {
+    return false;
+  }
+  const digest = value => createHash('sha256').update(value).digest();
+  return timingSafeEqual(digest(given), digest(secret));
+}
+
+/**
+ * The app server's way to the sidecar's API: each call must carry the shared secret in the
+ * `X-Browser-Secret` header, which is checked here and not passed on.
+ */
+export function createApiRelay({ host, port, secret }) {
+  if (typeof secret !== 'string' || secret.length < MIN_SECRET_LENGTH) {
+    throw new Error(`BROWSER_SECRET must be at least ${String(MIN_SECRET_LENGTH)} characters`);
+  }
+  return createHttpServer((req, res) => {
+    if (!secretMatches({ given: req.headers['x-browser-secret'], secret })) {
+      res.writeHead(401, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ status: 'error', message: 'wrong or missing secret' }));
+      return;
+    }
+    const headers = forwardedHeaders(req.headers);
+    delete headers['x-browser-secret'];
+    const upstream = httpRequest({ host, port, method: req.method, path: req.url, headers });
+    upstream.on('response', upstreamRes => {
+      res.writeHead(upstreamRes.statusCode ?? 502, forwardedHeaders(upstreamRes.headers));
+      upstreamRes.pipe(res);
+    });
+    upstream.on('error', () => {
+      if (!res.headersSent) {
+        res.writeHead(502, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({ status: 'error', message: 'the browser could not be reached' }));
+      } else {
+        res.destroy();
+      }
+    });
+    req.pipe(upstream);
   });
 }

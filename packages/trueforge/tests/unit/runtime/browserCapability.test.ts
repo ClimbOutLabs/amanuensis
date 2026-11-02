@@ -59,7 +59,7 @@ const original = {
 };
 
 beforeEach(() => {
-  Object.assign(configuration, { BROWSER_URL: 'http://browser-gateway:8792', BROWSER_SECRET: SECRET });
+  Object.assign(configuration, { BROWSER_URL: 'http://browser-relay:8792', BROWSER_SECRET: SECRET });
 });
 
 afterEach(() => {
@@ -75,7 +75,7 @@ describe('browser capability', () => {
     expect(textOf(result)).toContain('# Account');
     expect(sent).toEqual([
       {
-        url: 'http://browser-gateway:8792/open',
+        url: 'http://browser-relay:8792/open',
         headers: expect.objectContaining({ 'x-browser-secret': SECRET }),
         body: { url: 'https://hulu.com/account', owner: 'tenant-1:person-1', tab: 'chat-1' },
       },
@@ -102,6 +102,13 @@ describe('browser capability', () => {
     expect(result.isError).toBe(true);
     expect(textOf(result)).toContain('https://mail.example/inbox');
     expect(textOf(result)).toContain('browser_open');
+  });
+
+  it('tells the chat to open the page again when its tab was closed to make room', async () => {
+    const { call } = mount(() => ({ json: { status: 'closed' } }));
+    const result = await call('browser_read');
+    expect(result.isError).toBe(true);
+    expect(textOf(result)).toContain('Open the page again with browser_open');
   });
 
   it.each([

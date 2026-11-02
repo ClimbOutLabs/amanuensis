@@ -316,7 +316,11 @@ describe('installer/templates/instance/compose.yaml.tpl calendar connector', () 
   });
 
   test("the dev stack walls the browser off: its only network is internal and holds nothing of the app's", () => {
-    const Service = z.object({ networks: z.array(z.string()).optional() }).loose();
+    // A service lists its networks by name, or maps each name to its settings (such as aliases).
+    const Networks = z.union([z.array(z.string()), z.record(z.string(), z.unknown())]);
+    const Service = z
+      .object({ networks: Networks.optional(), environment: z.record(z.string(), z.unknown()).optional() })
+      .loose();
     const dev = z
       .object({
         services: z.record(z.string(), Service),
@@ -324,17 +328,29 @@ describe('installer/templates/instance/compose.yaml.tpl calendar connector', () 
       })
       .loose()
       .parse(load('docker-compose.yml'));
+    const networksOf = (service: z.infer<typeof Service> | undefined): string[] => {
+      const networks = service?.networks;
+      if (networks === undefined) {
+        return [];
+      }
+      return Array.isArray(networks) ? networks : Object.keys(networks);
+    };
     const on = (network: string): string[] =>
       Object.entries(dev.services)
-        .filter(([, service]) => service.networks?.includes(network) === true)
+        .filter(([, service]) => networksOf(service).includes(network))
         .map(([name]) => name)
         .sort();
-    expect(dev.services['browser']?.networks).toEqual(['browser-internal']);
+    expect(networksOf(dev.services['browser'])).toEqual(['browser-internal']);
     expect(dev.networks['browser-internal']?.internal).toBe(true);
     expect(dev.networks['browser-control']?.internal).toBe(true);
     expect(on('browser-internal')).toEqual(['browser', 'browser-gateway']);
     expect(on('browser-control')).toEqual(['browser-gateway', 'loopback']);
     expect(on('browser-egress')).toEqual(['browser-gateway']);
+    // The gateway holds the secret and checks it; the browser's container never gets it.
+    expect(Object.keys(dev.services['browser']?.environment ?? {})).not.toContain('BROWSER_SECRET');
+    expect(dev.services['browser-gateway']?.environment?.['BROWSER_SECRET']).toBe(
+      dev.services['server']?.environment?.['BROWSER_SECRET'],
+    );
   });
 
   test('the app is told nothing about a calendar agent when the connector is left out', () => {

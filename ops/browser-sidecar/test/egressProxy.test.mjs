@@ -3,7 +3,7 @@ import { createServer, request } from 'node:http';
 import { connect } from 'node:net';
 import { test } from 'node:test';
 
-import { createEgressProxy } from '../src/egressProxy.mjs';
+import { createApiRelay, createEgressProxy } from '../src/egressProxy.mjs';
 
 /** A plain upstream web server standing in for a public site. */
 async function upstream() {
@@ -167,4 +167,36 @@ test('the address check answers by the same rules, and never connects anywhere',
     assert.deepEqual(await check('not a url'), { ok: false, reason: 'not_a_url' });
     assert.deepEqual(dials, []);
   });
+});
+
+test('the relay passes on only calls with the right secret, and never passes the secret on', async () => {
+  const secret = 'k'.repeat(40);
+  assert.throws(() => createApiRelay({ host: '127.0.0.1', port: 9, secret: 'short' }), /at least 32/);
+  const api = await upstream();
+  const relay = createApiRelay({ host: '127.0.0.1', port: api.port, secret });
+  await new Promise(resolve => relay.listen(0, '127.0.0.1', resolve));
+  const seenSecrets = [];
+  api.server.prependListener('request', req => seenSecrets.push(req.headers['x-browser-secret']));
+  try {
+    const post = given =>
+      fetch(`http://127.0.0.1:${String(relay.address().port)}/read`, {
+        method: 'POST',
+        headers: given === undefined ? {} : { 'x-browser-secret': given },
+        body: '{}',
+      });
+    assert.equal((await post(undefined)).status, 401);
+    assert.equal((await post('k'.repeat(39))).status, 401);
+    assert.equal(api.seen.length, 0);
+    const ok = await post(secret);
+    assert.equal(ok.status, 200);
+    assert.equal(await ok.text(), 'hello from upstream');
+    assert.deepEqual(
+      api.seen.map(hit => hit.url),
+      ['/read'],
+    );
+    assert.deepEqual(seenSecrets, [undefined]);
+  } finally {
+    relay.close();
+    api.server.close();
+  }
 });

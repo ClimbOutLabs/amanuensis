@@ -1,8 +1,8 @@
 // Private HTTP API in front of a headed Chromium: one persistent profile per person and one tab per
-// chat, reached only through the browser gateway. Every request must carry the shared secret in the
-// `X-Browser-Secret` header; nothing here is published to the host or to any other service.
+// chat, reached only through the browser gateway, which checks the app server's shared secret before
+// it relays a call. Nothing here is published to the host or to any other service.
 import { Buffer } from 'node:buffer';
-import { createHash, timingSafeEqual } from 'node:crypto';
+import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { rm } from 'node:fs/promises';
 import { createServer } from 'node:http';
@@ -23,73 +23,108 @@ const EXTRACT_SCRIPT = `(() => {\n${readFileSync(new URL('./extract.mjs', import
   '',
 )}\nreturn extractSnapshotNodes();\n})()`;
 
-/** The shortest shared secret the sidecar accepts, the same floor the app server enforces. */
-export const MIN_SECRET_LENGTH = 32;
-
-/** The origin of a URL, or undefined for one that has none (about:blank, data:). */
-function originOf(url) {
+/** A URL's scheme, host without a leading `www.`, and port, or undefined for one with no host (about:blank, data:). */
+function siteOf(url) {
   try {
-    const { origin } = new URL(url);
-    return origin === 'null' ? undefined : origin;
+    const parsed = new URL(url);
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+      return undefined;
+    }
+    return {
+      secure: parsed.protocol === 'https:',
+      host: parsed.hostname.replace(/^www\./, ''),
+      port: parsed.port,
+    };
   } catch {
     return undefined;
   }
 }
 
+/**
+ * Whether `url` is on the site that was opened (`opened`, an address). A site's own `www.` name and a move
+ * from http up to https count as the same site, since common sites redirect that way on every visit; a
+ * move from https down to http, another host or another port does not.
+ */
+export function onSameSite({ url, opened }) {
+  const target = siteOf(url);
+  const site = opened === undefined ? undefined : siteOf(opened);
+  if (target === undefined || site === undefined) {
+    return false;
+  }
+  return target.host === site.host && target.port === site.port && (target.secure || !site.secure);
+}
+
 /** The most chats one person may have open at once; opening another closes the one used longest ago. */
 export const MAX_TABS_PER_PERSON = 8;
+
+/** How many times a read is tried while the page keeps moving to a new page of its site. */
+const READ_ATTEMPTS = 3;
+
+/** How many closed chats a person's browser remembers, so a chat whose tab was closed is told so. */
+const MAX_REMEMBERED_CLOSED_TABS = 100;
 
 /** Answered by the sidecar itself instead of the network: a browser does not navigate to No Content. */
 const STAY_PUT = { status: 204 };
 
 /**
- * One tab per chat. `allowedOrigin` is the site of the last address the model opened in this chat,
- * which the app server checked and classified. Content from any other site is never returned (see
- * `#checkedPage`), and the page cannot move its own tab to another site (see `guardNavigation`): the
- * person's logins live in this profile, so a page that could send the tab to their mail would
- * otherwise get the mail read back. `goingBack` marks the one history step the model asked for.
+ * One tab per chat. `opened` is the last address the model opened in this chat, which the app server
+ * checked and classified. Content from any other site is never returned (see `#checkedPage`), and the
+ * page cannot move its own tab to another site (see `guardNavigation` and `guardRedirects`): the
+ * person's logins live in this profile, so a page that could send the tab to their mail would otherwise
+ * get the mail read back. `goingBack` marks the one history step the model asked for.
  * `refusedRedirect` is where the last navigation tried to redirect to, off the opened site, and
  * `movedTo` is set when the model's own open was refused that way, until the next open.
+ * `closedBefore` marks a tab opened again after the cap closed this chat's earlier one.
  */
-function createTab(page) {
+function createTab({ page, closedBefore }) {
   return {
     page,
     refs: new RefAssigner(),
-    allowedOrigin: undefined,
+    opened: undefined,
     goingBack: false,
     refusedRedirect: undefined,
     movedTo: undefined,
+    closedBefore,
   };
 }
 
 /**
- * Where a same-site navigation really goes. The browser follows redirects without asking the route
- * handler, so the sidecar fetches each hop itself (through the same proxy and cookie jar) and hands the
- * browser only a hop that stays on the opened site; a hop to another site is recorded and refused.
+ * Redirects of a tab's own page, checked as each response arrives and before the browser follows it:
+ * the browser follows redirects without asking the route handler, so this is where a hop to another
+ * site is refused. The page's body is never touched here; it streams to the browser as usual.
  */
-async function followOnSite(tab, route) {
-  let response;
-  try {
-    response = await route.fetch({ maxRedirects: 0 });
-  } catch {
-    return route.abort('failed');
-  }
-  const location = response.headers().location;
-  if (response.status() >= 300 && response.status() < 400 && location !== undefined) {
-    const next = new URL(location, route.request().url()).href;
-    if (originOf(next) !== tab.allowedOrigin) {
-      tab.refusedRedirect = next;
-      return route.fulfill(STAY_PUT);
-    }
-  }
-  return route.fulfill({ response });
+async function guardRedirects({ tab, cdp }) {
+  const { frameTree } = await cdp.send('Page.getFrameTree');
+  const mainFrameId = frameTree.frame.id;
+  cdp.on('Fetch.requestPaused', event => {
+    void (async () => {
+      const status = event.responseStatusCode ?? 0;
+      const location = (event.responseHeaders ?? []).find(header => header.name.toLowerCase() === 'location');
+      if (event.frameId === mainFrameId && status >= 300 && status < 400 && location !== undefined) {
+        const next = new URL(location.value, event.request.url).href;
+        if (!onSameSite({ url: next, opened: tab.opened })) {
+          tab.refusedRedirect = next;
+          // The redirect's own headers must be replaced, or the browser still follows its Location.
+          await cdp.send('Fetch.fulfillRequest', {
+            requestId: event.requestId,
+            responseCode: STAY_PUT.status,
+            responseHeaders: [{ name: 'content-length', value: '0' }],
+            body: '',
+          });
+          return;
+        }
+      }
+      await cdp.send('Fetch.continueRequest', { requestId: event.requestId });
+    })().catch(() => undefined);
+  });
+  await cdp.send('Fetch.enable', { patterns: [{ resourceType: 'Document', requestStage: 'Response' }] });
 }
 
 /**
  * The route handler every request in a person's browser passes through. Top-level navigations of a
- * chat's tab may stay on the site that chat opened, hop by hop, and are refused when they would leave
- * it. Pages that are not a chat's tab (a popup) get nothing. Everything else continues to the egress
- * proxy, which checks where it goes.
+ * chat's tab may stay on the site that chat opened, and are refused when they would leave it. Pages
+ * that are not a chat's tab (a popup) get nothing. Everything else continues to the egress proxy,
+ * which checks where it goes.
  */
 async function guardNavigation(profile, route) {
   const request = route.request();
@@ -114,8 +149,8 @@ async function guardNavigation(profile, route) {
     tab.goingBack = false;
     return route.continue();
   }
-  if (tab.allowedOrigin !== undefined && originOf(request.url()) === tab.allowedOrigin) {
-    return followOnSite(tab, route);
+  if (onSameSite({ url: request.url(), opened: tab.opened })) {
+    return route.continue();
   }
   return route.fulfill(STAY_PUT);
 }
@@ -171,7 +206,14 @@ export class BrowserSidecar {
       userDataDir: path.join(this.#profilesDir, ownerDirName(owner)),
       proxyServer: this.#proxyServer,
     });
-    const profile = { context, spare: page, tabs: new Map(), tabsByPage: new Map(), opening: Promise.resolve() };
+    const profile = {
+      context,
+      spare: page,
+      tabs: new Map(),
+      tabsByPage: new Map(),
+      closedTabs: new Set(),
+      opening: Promise.resolve(),
+    };
     // A page may not open windows of its own. Tabs are opened only inside `opening`, so a page that
     // is still not a tab once that settles is a popup: it is closed, and its requests are refused.
     context.on('page', other => {
@@ -197,17 +239,23 @@ export class BrowserSidecar {
       }
       const page = profile.spare ?? (await profile.context.newPage());
       profile.spare = undefined;
+      const closedBefore = profile.closedTabs.delete(tabId);
       // A download never opens in the browser; refusing it keeps the tab from navigating to a file.
       page.on('download', download => {
         download.cancel().catch(() => undefined);
       });
-      const tab = createTab(page);
+      const tab = createTab({ page, closedBefore });
+      await guardRedirects({ tab, cdp: await profile.context.newCDPSession(page) });
       profile.tabs.set(tabId, tab);
       profile.tabsByPage.set(page, tab);
       if (profile.tabs.size > MAX_TABS_PER_PERSON) {
         const [oldestId, oldest] = profile.tabs.entries().next().value;
         profile.tabs.delete(oldestId);
         profile.tabsByPage.delete(oldest.page);
+        profile.closedTabs.add(oldestId);
+        if (profile.closedTabs.size > MAX_REMEMBERED_CLOSED_TABS) {
+          profile.closedTabs.delete(profile.closedTabs.values().next().value);
+        }
         await oldest.page.close().catch(() => undefined);
       }
       return tab;
@@ -225,6 +273,9 @@ export class BrowserSidecar {
    * address, and opening it is a new `browser_open` that the app server classifies on its own.
    */
   #checkedPage(tab) {
+    if (tab.closedBefore && tab.opened === undefined) {
+      return { ok: false, result: { status: 'closed' } };
+    }
     if (tab.movedTo !== undefined) {
       return { ok: false, result: { status: 'moved', url: tab.movedTo } };
     }
@@ -232,8 +283,7 @@ export class BrowserSidecar {
     if (url === 'about:blank') {
       return { ok: true };
     }
-    const origin = originOf(url);
-    if (origin === undefined || origin !== tab.allowedOrigin) {
+    if (!onSameSite({ url, opened: tab.opened })) {
       return { ok: false, result: { status: 'moved', url } };
     }
     return { ok: true };
@@ -246,7 +296,8 @@ export class BrowserSidecar {
     }
     const tab = await this.tabFor({ owner, tab: tabId });
     tab.refs.reset();
-    tab.allowedOrigin = target.url.origin;
+    tab.opened = target.url.href;
+    tab.closedBefore = false;
     tab.refusedRedirect = undefined;
     tab.movedTo = undefined;
     try {
@@ -259,7 +310,7 @@ export class BrowserSidecar {
     }
     if (tab.refusedRedirect !== undefined) {
       tab.movedTo = tab.refusedRedirect;
-      tab.allowedOrigin = undefined;
+      tab.opened = undefined;
     }
     return this.#read(tab);
   }
@@ -268,15 +319,28 @@ export class BrowserSidecar {
     return this.#read(await this.tabFor({ owner, tab: tabId }));
   }
 
+  /**
+   * Reads the tab's page. A page that is moving to another page of its site while it is read is read
+   * again once the new page has loaded, and checked again first, since where it went may have changed.
+   */
   async #read(tab) {
-    const checked = this.#checkedPage(tab);
-    if (!checked.ok) {
-      return checked.result;
+    for (let attempt = 1; ; attempt += 1) {
+      const checked = this.#checkedPage(tab);
+      if (!checked.ok) {
+        return checked.result;
+      }
+      try {
+        const nodes = await tab.page.evaluate(EXTRACT_SCRIPT);
+        const refs = tab.refs.refsFor(nodes);
+        const text = renderSnapshot({ title: await tab.page.title(), url: tab.page.url(), nodes, refs });
+        return { status: 'ok', text };
+      } catch (error) {
+        if (attempt >= READ_ATTEMPTS || !String(error).includes('Execution context was destroyed')) {
+          throw error;
+        }
+        await tab.page.waitForLoadState('domcontentloaded', { timeout: this.#navTimeoutMs }).catch(() => undefined);
+      }
     }
-    const nodes = await tab.page.evaluate(EXTRACT_SCRIPT);
-    const refs = tab.refs.refsFor(nodes);
-    const text = renderSnapshot({ title: await tab.page.title(), url: tab.page.url(), nodes, refs });
-    return { status: 'ok', text };
   }
 
   async scroll({ owner, tab: tabId, direction }) {
@@ -316,7 +380,7 @@ export class BrowserSidecar {
   }
 }
 
-/** Environment variables Chromium may see. Everything else, the shared secret first, stays in this process. */
+/** Environment variables Chromium may see; nothing else of this process's environment reaches it. */
 const BROWSER_ENV_KEYS = ['DISPLAY', 'XAUTHORITY', 'HOME', 'PATH', 'LANG', 'TZ', 'XDG_RUNTIME_DIR', 'FONTCONFIG_PATH'];
 
 export function browserEnv(env = process.env) {
@@ -391,13 +455,11 @@ function plainAddress(address) {
 }
 
 /**
- * `allowedPeers` returns the addresses calls may come from: the gateway's. Chromium runs in this container, so a
- * call from anywhere in it (loopback, or this container's own address) is refused even with the right secret.
+ * `allowedPeers` returns the addresses calls may come from: the gateway's, which has checked the app
+ * server's secret. Chromium runs in this container, so a call from anywhere in it (loopback, or this
+ * container's own address) is refused.
  */
-export function createHttpServer({ sidecar, secret, allowedPeers }) {
-  if (typeof secret !== 'string' || secret.length < MIN_SECRET_LENGTH) {
-    throw new Error(`BROWSER_SECRET must be at least ${String(MIN_SECRET_LENGTH)} characters`);
-  }
+export function createHttpServer({ sidecar, allowedPeers }) {
   if (typeof allowedPeers !== 'function') {
     throw new Error('the browser API needs the gateway it answers (BROWSER_API_PEER)');
   }
@@ -413,24 +475,12 @@ export function createHttpServer({ sidecar, secret, allowedPeers }) {
         res.writeHead(403).end(JSON.stringify({ status: 'error', message: 'calls come through the gateway only' }));
         return;
       }
-      await handleRequest({ req, res, sidecar, secret });
+      await handleRequest({ req, res, sidecar });
     })();
   });
 }
 
-function secretMatches(given, secret) {
-  if (typeof given !== 'string') {
-    return false;
-  }
-  const digest = value => createHash('sha256').update(value).digest();
-  return timingSafeEqual(digest(given), digest(secret));
-}
-
-async function handleRequest({ req, res, sidecar, secret }) {
-  if (!secretMatches(req.headers['x-browser-secret'], secret)) {
-    res.writeHead(401).end(JSON.stringify({ status: 'error', message: 'wrong or missing secret' }));
-    return;
-  }
+async function handleRequest({ req, res, sidecar }) {
   const route = ROUTES[`${req.method} ${req.url}`];
   if (route === undefined) {
     res.writeHead(404).end(JSON.stringify({ status: 'error', message: 'no such route' }));

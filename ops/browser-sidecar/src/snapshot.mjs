@@ -87,15 +87,6 @@ export class RefAssigner {
     return refs;
   }
 
-  resolve(ref) {
-    for (const [id, value] of this.#byPath) {
-      if (value === ref) {
-        return id;
-      }
-    }
-    return undefined;
-  }
-
   reset() {
     this.#byPath.clear();
     this.#next = 1;

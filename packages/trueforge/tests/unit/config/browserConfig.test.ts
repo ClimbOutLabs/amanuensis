@@ -7,11 +7,11 @@ describe('parseBrowserUrl', () => {
   });
 
   it('accepts the gateway address, trimmed', () => {
-    expect(parseBrowserUrl(' http://browser-gateway:8792 ')).toBe('http://browser-gateway:8792');
+    expect(parseBrowserUrl(' http://browser-relay:8792 ')).toBe('http://browser-relay:8792');
   });
 
   it('refuses anything that is not an http address', () => {
-    expect(() => parseBrowserUrl('browser-gateway:8792')).toThrow(/BROWSER_URL must be an http\(s\) URL/);
+    expect(() => parseBrowserUrl('browser-relay:8792')).toThrow(/BROWSER_URL must be an http\(s\) URL/);
     expect(() => parseBrowserUrl('file:///run/browser.sock')).toThrow(/BROWSER_URL/);
   });
 });

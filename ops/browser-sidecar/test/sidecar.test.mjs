@@ -8,12 +8,14 @@
 // `npm test` on a plain checkout still runs the rest of the suite; `pnpm test:browser-sidecar` runs them
 // in the image and requires them. Set BROWSER_CHROMIUM_PATH to use a Chromium installed somewhere else.
 import assert from 'node:assert/strict';
+import { Buffer } from 'node:buffer';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { connect } from 'node:net';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
+import { gzipSync } from 'node:zlib';
 
 import { createEgressProxy } from '../src/egressProxy.mjs';
 
@@ -49,6 +51,12 @@ async function fixture(routes) {
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   return { server, hits, port: server.address().port };
 }
+
+/** A small compressed page that is 128 MB once unpacked: the size the browser, not the sidecar, must hold. */
+const BOMB_BYTES = 128 * 1024 * 1024;
+const BOMB = gzipSync(
+  Buffer.concat([Buffer.from('<!doctype html><h1>Big</h1><!--'), Buffer.alloc(BOMB_BYTES, 'a'), Buffer.from('-->')]),
+);
 
 const html = body => (_req, res) => {
   res.writeHead(200, { 'content-type': 'text/html' }).end(`<!doctype html><html><body>${body}</body></html>`);
@@ -91,11 +99,29 @@ async function withWorld(run) {
     '/same-site-nav': html(`<h1>First</h1><script>setTimeout(() => { location = '/'; }, 50);</script>`),
     '/hop-away': html(`<h1>Hopper</h1><script>setTimeout(() => { location = '/redirect-site-b'; }, 50);</script>`),
     '/hop-home': (_req, res) => res.writeHead(302, { location: '/' }).end(),
+    '/to-www': (_req, res) => res.writeHead(302, { location: 'http://www.site-a.test/' }).end(),
+    '/bomb': (_req, res) => {
+      res.writeHead(200, { 'content-type': 'text/html', 'content-encoding': 'gzip' }).end(BOMB);
+    },
+    // A page that is ordinary on the first visit and redirects to another site on any later one.
+    '/turns-later': (() => {
+      let visits = 0;
+      return (req, res) => {
+        visits += 1;
+        if (visits === 1) {
+          res.writeHead(200, { 'content-type': 'text/html', 'cache-control': 'no-store' });
+          res.end('<!doctype html><h1>First visit</h1>');
+          return;
+        }
+        res.writeHead(302, { location: 'http://site-b.test/inbox', 'cache-control': 'no-store' }).end();
+      };
+    })(),
     '*': html('<h1>Other page</h1>'),
   });
 
   const names = {
     'site-a.test': [SITE_A],
+    'www.site-a.test': [SITE_A],
     'site-b.test': [SITE_B],
     'rebind.test': ['10.0.0.8'],
     'internal.test': ['10.0.0.9'],
@@ -175,22 +201,6 @@ test(
       const first = await sidecar.read({ owner: 'owner-1', tab: 'chat-1' });
       assert.equal(first.status, 'ok');
       assert.match(first.text, /Mail inbox/);
-    });
-  },
-);
-
-test(
-  'a person keeps a limited number of tabs; the one used longest ago closes',
-  { skip: !browsersAvailable },
-  async () => {
-    const { MAX_TABS_PER_PERSON } = await import('../src/server.mjs');
-    await withWorld(async ({ sidecar }) => {
-      await sidecar.open({ owner: 'owner-1', tab: 'chat-0', url: 'http://site-b.test/inbox' });
-      for (let index = 1; index <= MAX_TABS_PER_PERSON; index += 1) {
-        await sidecar.read({ owner: 'owner-1', tab: `chat-${String(index)}` });
-      }
-      const reopened = await sidecar.read({ owner: 'owner-1', tab: 'chat-0' });
-      assert.doesNotMatch(reopened.text, /Mail inbox/);
     });
   },
 );
@@ -314,51 +324,104 @@ test('Chromium does not get the shared secret', { skip: BrowserSidecar === undef
   assert.deepEqual(env, { DISPLAY: ':99', HOME: '/home/pwuser', PATH: '/usr/bin' });
 });
 
-test('the API refuses a short secret and a wrong one', { skip: BrowserSidecar === undefined }, async () => {
-  const sidecar = { read: async () => ({ status: 'ok', text: '' }) };
-  const allowedPeers = async () => ['127.0.0.1'];
-  assert.throws(() => createHttpServer({ sidecar, secret: 'short', allowedPeers }), /at least 32/);
-  const server = createHttpServer({ sidecar, secret: 'k'.repeat(40), allowedPeers });
-  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+test('the API answers only the gateway, and needs a person and a chat', async () => {
+  if (BrowserSidecar === undefined) {
+    return;
+  }
+  let reads = 0;
+  const sidecar = {
+    read: async () => {
+      reads += 1;
+      return { status: 'ok', text: '' };
+    },
+  };
+  assert.throws(() => createHttpServer({ sidecar }), /gateway/);
+  const listen = async peers => {
+    const server = createHttpServer({ sidecar, allowedPeers: async () => peers });
+    await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+    return server;
+  };
+  const post = (server, body) =>
+    fetch(`http://127.0.0.1:${String(server.address().port)}/read`, { method: 'POST', body: JSON.stringify(body) });
+  // The gateway is somewhere else; this call, like Chromium inside the container, comes from loopback.
+  const elsewhere = await listen(['172.30.0.2']);
   try {
-    const url = `http://127.0.0.1:${String(server.address().port)}/read`;
-    const post = (secret, body = { owner: 'o', tab: 't' }) =>
-      fetch(url, { method: 'POST', headers: { 'x-browser-secret': secret }, body: JSON.stringify(body) });
-    assert.equal((await post('k'.repeat(39))).status, 401);
-    assert.equal((await post('k'.repeat(40))).status, 200);
-    assert.equal((await post('k'.repeat(40), { owner: 'o' })).status, 400);
+    assert.equal((await post(elsewhere, { owner: 'o', tab: 't' })).status, 403);
+    assert.equal(reads, 0);
   } finally {
-    server.close();
+    elsewhere.close();
+  }
+  const here = await listen(['127.0.0.1']);
+  try {
+    assert.equal((await post(here, { owner: 'o', tab: 't' })).status, 200);
+    assert.equal((await post(here, { owner: 'o' })).status, 400);
+    assert.equal(reads, 1);
+  } finally {
+    here.close();
   }
 });
 
+test('the same site, its www name and a move up to https count as one site', async () => {
+  if (BrowserSidecar === undefined) {
+    return;
+  }
+  const { onSameSite } = await import('../src/server.mjs');
+  const opened = 'http://site-a.test/start';
+  assert.equal(onSameSite({ url: 'http://site-a.test/other', opened }), true);
+  assert.equal(onSameSite({ url: 'https://www.site-a.test/', opened }), true);
+  assert.equal(onSameSite({ url: 'https://site-a.test/', opened: 'https://www.site-a.test/' }), true);
+  assert.equal(onSameSite({ url: 'http://site-a.test/', opened: 'https://site-a.test/' }), false);
+  assert.equal(onSameSite({ url: 'http://site-a.test:8080/', opened }), false);
+  assert.equal(onSameSite({ url: 'http://evil-site-a.test/', opened }), false);
+  assert.equal(onSameSite({ url: 'http://site-a.test.evil.test/', opened }), false);
+  assert.equal(onSameSite({ url: 'about:blank', opened }), false);
+  assert.equal(onSameSite({ url: 'http://site-a.test/', opened: undefined }), false);
+});
+
+test('a redirect to the www name of the same site is followed', { skip: !browsersAvailable }, async () => {
+  await withWorld(async ({ sidecar }) => {
+    const result = await sidecar.open({ owner: 'owner-1', tab: 'chat-1', url: 'http://site-a.test/to-www' });
+    assert.equal(result.status, 'ok');
+    assert.match(result.text, /www\.site-a\.test/);
+  });
+});
+
+test('going back cannot follow a redirect to another site', { skip: !browsersAvailable }, async () => {
+  await withWorld(async ({ sidecar, siteB }) => {
+    await sidecar.open({ owner: 'owner-1', tab: 'chat-1', url: 'http://site-a.test/turns-later' });
+    await sidecar.open({ owner: 'owner-1', tab: 'chat-1', url: 'http://site-a.test/' });
+    await sidecar.back({ owner: 'owner-1', tab: 'chat-1' }).catch(() => undefined);
+    await settle();
+    assert.deepEqual(siteB.hits, []);
+  });
+});
+
+test('a big compressed page is not held in the sidecar', { skip: !browsersAvailable }, async () => {
+  await withWorld(async ({ sidecar }) => {
+    await sidecar.open({ owner: 'owner-1', tab: 'chat-1', url: 'http://site-a.test/' });
+    const before = process.memoryUsage().rss;
+    const result = await sidecar.open({ owner: 'owner-1', tab: 'chat-1', url: 'http://site-a.test/bomb' });
+    assert.equal(result.status, 'ok');
+    assert.match(result.text, /Big/);
+    const grew = process.memoryUsage().rss - before;
+    assert.ok(grew < BOMB_BYTES / 3, `the sidecar grew by ${String(Math.round(grew / 1024 / 1024))} MB`);
+  });
+});
+
 test(
-  'the API answers only the gateway, even with the right secret',
-  { skip: BrowserSidecar === undefined },
+  'a chat whose tab was closed to make room is told so, and can open its page again',
+  { skip: !browsersAvailable },
   async () => {
-    let reads = 0;
-    const sidecar = {
-      read: async () => {
-        reads += 1;
-        return { status: 'ok', text: '' };
-      },
-    };
-    const secret = 'k'.repeat(40);
-    assert.throws(() => createHttpServer({ sidecar, secret }), /gateway/);
-    // The gateway is somewhere else; this test, like Chromium inside the container, calls from loopback.
-    const server = createHttpServer({ sidecar, secret, allowedPeers: async () => ['172.30.0.2'] });
-    await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
-    try {
-      const response = await fetch(`http://127.0.0.1:${String(server.address().port)}/read`, {
-        method: 'POST',
-        headers: { 'x-browser-secret': secret },
-        body: JSON.stringify({ owner: 'o', tab: 't' }),
-      });
-      assert.equal(response.status, 403);
-      assert.equal(reads, 0);
-    } finally {
-      server.close();
-    }
+    const { MAX_TABS_PER_PERSON } = await import('../src/server.mjs');
+    await withWorld(async ({ sidecar }) => {
+      await sidecar.open({ owner: 'owner-1', tab: 'chat-0', url: 'http://site-a.test/' });
+      for (let index = 1; index <= MAX_TABS_PER_PERSON; index += 1) {
+        await sidecar.read({ owner: 'owner-1', tab: `chat-${String(index)}` });
+      }
+      assert.deepEqual(await sidecar.read({ owner: 'owner-1', tab: 'chat-0' }), { status: 'closed' });
+      const again = await sidecar.open({ owner: 'owner-1', tab: 'chat-0', url: 'http://site-a.test/' });
+      assert.equal(again.status, 'ok');
+    });
   },
 );
 

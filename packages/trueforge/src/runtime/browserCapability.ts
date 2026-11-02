@@ -32,18 +32,21 @@ export type BrowserScrollInput = z.infer<typeof SCROLL_INPUT_SCHEMA>;
 const RefusedReplySchema = z.object({ status: z.literal('refused'), reason: z.string() });
 /** The tab is on a site other than the one opened, so the sidecar returned nothing of it. */
 const MovedReplySchema = z.object({ status: z.literal('moved'), url: z.string() });
+/** This chat's tab was closed to make room for the person's other chats. */
+const ClosedReplySchema = z.object({ status: z.literal('closed') });
 const PageReplySchema = z.discriminatedUnion('status', [
   z.object({ status: z.literal('ok'), text: z.string() }),
   MovedReplySchema,
+  ClosedReplySchema,
   RefusedReplySchema,
 ]);
 const ScreenshotReplySchema = z.discriminatedUnion('status', [
   z.object({ status: z.literal('ok'), png_base64: z.string().min(1) }),
   MovedReplySchema,
+  ClosedReplySchema,
 ]);
 
-export type BrowserPageReply = z.infer<typeof PageReplySchema>;
-export type BrowserScreenshotReply = z.infer<typeof ScreenshotReplySchema>;
+type BrowserPageReply = z.infer<typeof PageReplySchema>;
 
 /** What the sidecar answered to a request, or why there is no usable answer. */
 export type SidecarResult<T> = { ok: true; body: T } | { ok: false; message: string };
@@ -122,6 +125,9 @@ function movedMessage(url: string): string {
   return `The page went to ${shown}, a different site from the one that was opened, so it was not read. To read it, open that address with browser_open.`;
 }
 
+const CLOSED_MESSAGE =
+  "Aman's browser closed this chat's page to make room for other chats. Open the page again with browser_open.";
+
 function errorResponse(message: string): ReturnType<typeof toolResultResponse> {
   return toolResultResponse({ text: JSON.stringify({ status: 'error', message }), isError: true });
 }
@@ -142,6 +148,8 @@ function pageResult({
       return errorResponse(refusalMessage(result.body.reason));
     case 'moved':
       return errorResponse(movedMessage(result.body.url));
+    case 'closed':
+      return errorResponse(CLOSED_MESSAGE);
     case 'ok':
       return toolResultResponse({ text: result.body.text });
   }
@@ -212,6 +220,9 @@ class BrowserTool extends LocalToolMCP {
         }
         if (result.body.status === 'moved') {
           return errorResponse(movedMessage(result.body.url));
+        }
+        if (result.body.status === 'closed') {
+          return errorResponse(CLOSED_MESSAGE);
         }
         // The image block goes to the chat for the person; the model reads only the text beside it.
         const response = toolResultResponse({ text: JSON.stringify({ status: 'ok', shown_to_person: true }) });
