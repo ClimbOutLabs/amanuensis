@@ -21,6 +21,13 @@ import { fileURLToPath } from 'node:url';
 import envPaths from 'env-paths';
 
 import {
+  DEFAULT_MCP_HTTP_BODY_TIMEOUT_MS,
+  DEFAULT_MCP_HTTP_CONNECT_TIMEOUT_MS,
+  DEFAULT_MCP_HTTP_MAX_RETRIES,
+  DEFAULT_MODEL_HTTP_BODY_TIMEOUT_MS,
+  DEFAULT_MODEL_HTTP_CONNECT_TIMEOUT_MS,
+  DEFAULT_MODEL_HTTP_HEADERS_TIMEOUT_MS,
+  DEFAULT_MODEL_HTTP_MAX_RETRIES,
   DEFAULT_OCR_LANGUAGES,
   DEFAULT_SESSION_DISK_MB,
   GIT_NETWORK_ENV_NAMES,
@@ -1245,6 +1252,48 @@ export interface SharedServerConfiguration {
   /** Max bytes for one remote MCP tool-call HTTP response body (not GET SSE). Env: `MCP_TOOL_CALL_MAX_RESPONSE_BYTES`. Default 50 MB. */
   MCP_TOOL_CALL_MAX_RESPONSE_BYTES: number;
   /**
+   * undici connect timeout for model-provider outbound fetch.
+   * Env: `MODEL_HTTP_CONNECT_TIMEOUT_MS`. Default 5000.
+   */
+  MODEL_HTTP_CONNECT_TIMEOUT_MS: number;
+  /**
+   * undici headersTimeout for model-provider outbound fetch.
+   * Env: `MODEL_HTTP_HEADERS_TIMEOUT_MS`. Default 120000.
+   */
+  MODEL_HTTP_HEADERS_TIMEOUT_MS: number;
+  /**
+   * undici bodyTimeout for model-provider outbound fetch (idle between body chunks).
+   * Env: `MODEL_HTTP_BODY_TIMEOUT_MS`. Default 120000.
+   */
+  MODEL_HTTP_BODY_TIMEOUT_MS: number;
+  /**
+   * Retries after the first model fetch for connect/headers timeouts and 408/409/429/520-524/530
+   * (honors Retry-After up to 5s, else backoff). Env: `MODEL_HTTP_MAX_RETRIES`. Default 2.
+   */
+  MODEL_HTTP_MAX_RETRIES: number;
+  /**
+   * undici connect timeout for MCP outbound fetch.
+   * Env: `MCP_HTTP_CONNECT_TIMEOUT_MS`. Default 5000.
+   */
+  MCP_HTTP_CONNECT_TIMEOUT_MS: number;
+  /**
+   * undici headersTimeout for MCP outbound fetch. A JSON-response MCP server sends headers only
+   * after the tool finishes, so this should not be below `MCP_REQUEST_TIMEOUT_MS`.
+   * Env: `MCP_HTTP_HEADERS_TIMEOUT_MS`. Default `MCP_REQUEST_TIMEOUT_MS`.
+   */
+  MCP_HTTP_HEADERS_TIMEOUT_MS: number;
+  /**
+   * undici bodyTimeout for MCP outbound fetch (idle between body chunks). Default 30m so an idle
+   * event stream is not killed at undici's 300s. Env: `MCP_HTTP_BODY_TIMEOUT_MS`.
+   */
+  MCP_HTTP_BODY_TIMEOUT_MS: number;
+  /**
+   * Retries after the first MCP fetch for connect timeouts and 408/429/521-523/530 only (not
+   * headers timeouts or 409/520/524: upstream may already have started the tool; honors
+   * Retry-After up to 5s, else backoff). Env: `MCP_HTTP_MAX_RETRIES`. Default 2.
+   */
+  MCP_HTTP_MAX_RETRIES: number;
+  /**
    * Origins of the operator's own memory provider, as normalized `scheme://host[:port]` strings.
    * A connector saved as the memory provider on one of these origins is first-party: its tools that
    * declare `readOnlyHint` true and `openWorldHint` false run without an approval card. Empty means
@@ -1573,6 +1622,11 @@ export interface SharedServerConfiguration {
    * Env: `TURN_SUBSCRIBE_TIMEOUT_MS`. Default 600000.
    */
   TURN_SUBSCRIBE_TIMEOUT_MS: number;
+  /**
+   * Max ms to wait for one create-turn SSE write before dropping that client
+   * and keeping the turn drain running. Env: `TURN_SSE_STREAM_WRITE_TIMEOUT_MS`. Default 60000.
+   */
+  TURN_SSE_STREAM_WRITE_TIMEOUT_MS: number;
   /**
    * Max ms to wait for a peer executor's reply before failing with 424.
    * Env: `REDIS_REQUEST_REPLY_TIMEOUT_MS`. Default 60000.
@@ -2134,6 +2188,12 @@ const serverExecutionTimeoutSeconds = parsePositiveInt({
   defaultValue: 1380,
 });
 
+const mcpRequestTimeoutMs = parsePositiveInt({
+  envKey: 'MCP_REQUEST_TIMEOUT_MS',
+  raw: getEnv('MCP_REQUEST_TIMEOUT_MS'),
+  defaultValue: 4 * 60 * 1000,
+});
+
 const standalone = parseBoolean({
   envKey: 'STANDALONE',
   raw: getEnv('STANDALONE'),
@@ -2197,11 +2257,7 @@ const shared: SharedServerConfiguration = {
   SANDBOX_CATALOG_PATH: resolveOptionalPathEnv('SANDBOX_CATALOG_PATH'),
   FRONTEND_DIR: resolveFrontendDir(),
 
-  MCP_REQUEST_TIMEOUT_MS: parsePositiveInt({
-    envKey: 'MCP_REQUEST_TIMEOUT_MS',
-    raw: getEnv('MCP_REQUEST_TIMEOUT_MS'),
-    defaultValue: 4 * 60 * 1000,
-  }),
+  MCP_REQUEST_TIMEOUT_MS: mcpRequestTimeoutMs,
   MCP_CONNECT_TIMEOUT_MS: parsePositiveInt({
     envKey: 'MCP_CONNECT_TIMEOUT_MS',
     raw: getEnv('MCP_CONNECT_TIMEOUT_MS'),
@@ -2211,6 +2267,48 @@ const shared: SharedServerConfiguration = {
     envKey: 'MCP_TOOL_CALL_MAX_RESPONSE_BYTES',
     raw: getEnv('MCP_TOOL_CALL_MAX_RESPONSE_BYTES'),
     defaultValue: 50 * 1024 * 1024,
+  }),
+  MODEL_HTTP_CONNECT_TIMEOUT_MS: parsePositiveInt({
+    envKey: 'MODEL_HTTP_CONNECT_TIMEOUT_MS',
+    raw: getEnv('MODEL_HTTP_CONNECT_TIMEOUT_MS'),
+    defaultValue: DEFAULT_MODEL_HTTP_CONNECT_TIMEOUT_MS,
+  }),
+  MODEL_HTTP_HEADERS_TIMEOUT_MS: parsePositiveInt({
+    envKey: 'MODEL_HTTP_HEADERS_TIMEOUT_MS',
+    raw: getEnv('MODEL_HTTP_HEADERS_TIMEOUT_MS'),
+    defaultValue: DEFAULT_MODEL_HTTP_HEADERS_TIMEOUT_MS,
+  }),
+  MODEL_HTTP_BODY_TIMEOUT_MS: parsePositiveInt({
+    envKey: 'MODEL_HTTP_BODY_TIMEOUT_MS',
+    raw: getEnv('MODEL_HTTP_BODY_TIMEOUT_MS'),
+    defaultValue: DEFAULT_MODEL_HTTP_BODY_TIMEOUT_MS,
+  }),
+  MODEL_HTTP_MAX_RETRIES: parsePositiveInt({
+    envKey: 'MODEL_HTTP_MAX_RETRIES',
+    raw: getEnv('MODEL_HTTP_MAX_RETRIES'),
+    defaultValue: DEFAULT_MODEL_HTTP_MAX_RETRIES,
+    minValue: 0,
+  }),
+  MCP_HTTP_CONNECT_TIMEOUT_MS: parsePositiveInt({
+    envKey: 'MCP_HTTP_CONNECT_TIMEOUT_MS',
+    raw: getEnv('MCP_HTTP_CONNECT_TIMEOUT_MS'),
+    defaultValue: DEFAULT_MCP_HTTP_CONNECT_TIMEOUT_MS,
+  }),
+  MCP_HTTP_HEADERS_TIMEOUT_MS: parsePositiveInt({
+    envKey: 'MCP_HTTP_HEADERS_TIMEOUT_MS',
+    raw: getEnv('MCP_HTTP_HEADERS_TIMEOUT_MS'),
+    defaultValue: mcpRequestTimeoutMs,
+  }),
+  MCP_HTTP_BODY_TIMEOUT_MS: parsePositiveInt({
+    envKey: 'MCP_HTTP_BODY_TIMEOUT_MS',
+    raw: getEnv('MCP_HTTP_BODY_TIMEOUT_MS'),
+    defaultValue: DEFAULT_MCP_HTTP_BODY_TIMEOUT_MS,
+  }),
+  MCP_HTTP_MAX_RETRIES: parsePositiveInt({
+    envKey: 'MCP_HTTP_MAX_RETRIES',
+    raw: getEnv('MCP_HTTP_MAX_RETRIES'),
+    defaultValue: DEFAULT_MCP_HTTP_MAX_RETRIES,
+    minValue: 0,
   }),
   FIRST_PARTY_MCP_ORIGINS: withMailSidecarOrigin({
     origins: firstPartyOriginsFor({
@@ -2426,6 +2524,11 @@ const shared: SharedServerConfiguration = {
     envKey: 'TURN_SUBSCRIBE_TIMEOUT_MS',
     raw: getEnv('TURN_SUBSCRIBE_TIMEOUT_MS'),
     defaultValue: 600_000,
+  }),
+  TURN_SSE_STREAM_WRITE_TIMEOUT_MS: parsePositiveInt({
+    envKey: 'TURN_SSE_STREAM_WRITE_TIMEOUT_MS',
+    raw: getEnv('TURN_SSE_STREAM_WRITE_TIMEOUT_MS'),
+    defaultValue: 60_000,
   }),
   REDIS_REQUEST_REPLY_TIMEOUT_MS: parsePositiveInt({
     envKey: 'REDIS_REQUEST_REPLY_TIMEOUT_MS',
