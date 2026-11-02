@@ -445,6 +445,62 @@ export interface ListSessionEventsInput {
   after_event_id: string | undefined;
 }
 
+/** One searchable piece of a finished turn: words the person typed, or the assistant's final reply. */
+export interface ChatSearchDocument {
+  /** Stable within the turn; the caller keys it to the message it came from, so a re-index replaces it. */
+  message_id: string;
+  role: 'user' | 'assistant';
+  text: string;
+  /** When the message was written: the turn's start for the person's words, its end for the reply. */
+  created_at: Date;
+}
+
+export interface IndexChatMessagesInput {
+  tenant_id: string;
+  session_id: string;
+  turn_id: string;
+  /** The persona the turn ran under, or `null` for the main assistant. Search scopes by it. */
+  persona_id: string | null;
+  /** The turn's complete document set; the rows stored for the turn are replaced by it. */
+  documents: readonly ChatSearchDocument[];
+}
+
+export interface SearchChatHistoryInput {
+  tenant_id: string;
+  /** Free text; a chat matches when one of its indexed messages holds every query word (see chatSearchText). */
+  query: string;
+  /** Only chats this subject created are searched. */
+  created_by_subject_id: string;
+  /**
+   * The personas whose messages may be returned. Messages written with no persona are always
+   * searchable; a message written under a persona only when that persona's id is listed.
+   */
+  persona_ids: readonly string[];
+  /** The chat the search runs from; never among the hits. `null` excludes nothing. */
+  exclude_session_id: string | null;
+  /** Inclusive lower bound on the matched message's time; `null` is unbounded. */
+  from: Date | null;
+  /** Exclusive upper bound on the matched message's time; `null` is unbounded. */
+  to: Date | null;
+  /** Most hits to return; at most one hit per chat. */
+  limit: number;
+}
+
+export interface ClearChatSearchIndexInput {
+  tenant_id: string;
+  /** Every indexed message of the chats this subject created is removed. */
+  created_by_subject_id: string;
+}
+
+export interface ChatSearchHit {
+  session_id: string;
+  title: string | null;
+  /** When the chat was created. */
+  created_at: Date;
+  /** Excerpt of the chat's best-matching message, at most 300 characters. */
+  snippet: string;
+}
+
 /**
  * Session/turn persistence contract. Pure durability: no streaming, SSE, or
  * subscription members. Callers authorize the parent session before using
@@ -478,6 +534,25 @@ export interface ISessionStore<
 
   /** Permanently removes a session and all related data; missing sessions are a no-op. */
   deleteSession(input: DeleteSessionInput): Promise<void>;
+
+  /**
+   * Replaces one turn's rows in the past-chat search index with `documents`. The index is
+   * derived data: it is never exported, and after an import it is rebuilt by indexing the
+   * restored turns again. Indexing a session that does not exist is a no-op, so a chat
+   * deleted while its turn was finishing leaves nothing behind.
+   */
+  indexChatMessages(input: IndexChatMessagesInput): Promise<void>;
+
+  /**
+   * Word search over the indexed messages of the chats `created_by_subject_id` created in the
+   * tenant, limited to the personas `persona_ids` allows. At most one hit per chat, its newest
+   * matching message; chats with the newest match come first, ties by session id. `from` / `to`
+   * bound the matched message's time. A query with no searchable words matches nothing.
+   */
+  searchChatHistory(input: SearchChatHistoryInput): Promise<ChatSearchHit[]>;
+
+  /** Removes every indexed message of the chats the subject created in the tenant. */
+  clearChatSearchIndex(input: ClearChatSearchIndexInput): Promise<void>;
 
   /** Lists active grants for the owner-scoped session and its current repository binding, including between turns. */
   listImplementationPlanGrants(input: ListImplementationPlanGrantsInput): Promise<ImplementationPlanGrant[]>;

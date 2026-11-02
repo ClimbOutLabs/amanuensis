@@ -87,7 +87,7 @@ async function discoverBuiltInTools(): Promise<Array<{ name: string; inputSchema
     new AskUserQuestion(),
     new OpenUIInstructions(NOOP_AGENT_TRACING),
     new DynamicSubAgents({ tracing: NOOP_AGENT_TRACING }),
-    new DocumentTools(sandbox, NOOP_AGENT_TRACING),
+    new DocumentTools({ sandbox, tracing: NOOP_AGENT_TRACING, logger: makeSilentLogger() }),
   ];
 
   // TaskChecklist exposes its tool set through the capability factory.

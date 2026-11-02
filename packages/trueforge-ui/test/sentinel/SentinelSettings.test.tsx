@@ -13,6 +13,8 @@ function stubApi(): { api: SentinelApi; updateUserSettings: ReturnType<typeof vi
     search_without_asking: true,
     maps_without_asking: false,
     sandbox_without_asking: true,
+    chat_search_enabled: false,
+    package_downloads_without_project_allowed: false,
     ...patch,
   }));
   const api: SentinelApi = {
@@ -27,6 +29,8 @@ function stubApi(): { api: SentinelApi; updateUserSettings: ReturnType<typeof vi
       search_without_asking: true,
       maps_without_asking: false,
       sandbox_without_asking: true,
+      chat_search_enabled: false,
+      package_downloads_without_project_allowed: false,
     })),
     updateUserSettings,
     listSentinelSessionContext: vi.fn(async () => ({ approvals: [] })),
@@ -67,6 +71,8 @@ describe('SentinelSettings Always allow', () => {
       search_without_asking: true,
       maps_without_asking: false,
       sandbox_without_asking: true,
+      chat_search_enabled: false,
+      package_downloads_without_project_allowed: false,
     }));
     render(
       <SentinelApiProvider api={api}>
@@ -91,6 +97,8 @@ describe('SentinelSettings Always allow', () => {
       search_without_asking: true,
       maps_without_asking: false,
       sandbox_without_asking: true,
+      chat_search_enabled: false,
+      package_downloads_without_project_allowed: false,
     }));
     render(
       <SentinelApiProvider api={api}>
