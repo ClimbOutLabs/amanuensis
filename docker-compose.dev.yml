@@ -60,6 +60,22 @@ services:
       - stt-model-cache:/data/stt-cache
     restart: unless-stopped
 
+  # Local text-to-speech sidecar for host `pnpm dev`; same build, image tag,
+  # memory limit and thread count as docker-compose.yml. The host-run server
+  # reaches it through the published port via TTS_URL in
+  # packages/trueforge/.env. No cpuset pin, for the same reason as aman-stt.
+  aman-tts:
+    build:
+      context: ops/aman-tts
+    image: amanuensis-aman-tts:latest
+    # Loopback-only: the sidecar has no authentication.
+    ports:
+      - '127.0.0.1:8002:8002'
+    mem_limit: 1g
+    environment:
+      AMAN_TTS_CPU_THREADS: '4'
+    restart: unless-stopped
+
 volumes:
   # Persistent Whisper model weights for the aman-stt sidecar.
   stt-model-cache:
