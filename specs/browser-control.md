@@ -33,7 +33,7 @@ The work lands in phases, each its own PR that links this spec:
   - in scheduled runs, these cases are skipped instead of asked
 - **Browser pages are the person's.** A page read in the signed-in browser is treated like the person's mail: their details in it count as private.
 - **Screenshots go to the person.** The model never sees the picture.
-- **Off by default.** The browser runs only when the server turns it on and the stack runs with the browser profile.
+- **On in every installed Aman.** Installing or upgrading with the installer builds the browser, makes the secret the server and the gateway share, and starts both with the instance. Nobody edits a settings file or exports a secret. Running the code directly (development) keeps it off unless the server turns it on and Compose runs the `browser` profile.
 
 ## Scope
 

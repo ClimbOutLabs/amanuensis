@@ -26,6 +26,7 @@ services:
       - default
       - link
 @@IF_CALENDAR@@      - calendar
+@@IF_BROWSER@@      - browser-control
     restart: unless-stopped
 
   # Carries the app's speech requests to the shared speech services and nothing else: speech-to-text on 8001, the voice
@@ -68,7 +69,7 @@ services:
       INSTALLER_INSTANCE: '@@NAME@@'
 @@IF_SANDBOX@@      # Run code, shell and files go to the gVisor sandbox slots (project @@NAME@@-slots), never to Docker.
 @@IF_SANDBOX@@      SANDBOX_BACKEND: slots
-@@IF_SANDBOX@@      SANDBOX_SLOTS: '4'
+@@IF_SANDBOX@@      SANDBOX_SLOTS: '2'
 @@IF_SANDBOX@@      SANDBOX_SLOTS_DIR: /run/aman-slots
 @@IF_EMAIL@@      # The Email send list the server writes, and the connector's status file it reads (see mail-email).
 @@IF_EMAIL@@      MAIL_POLICY_FILE: /data/mail-policy/allowed_recipients.toml
@@ -77,18 +78,17 @@ services:
 @@IF_EMAIL@@      MAIL_EMAIL_ACCOUNT_URL: http://mail-email:9559
 @@IF_CALENDAR@@      # The calendar sidecar's account agent, which the Settings Calendar card talks to. Fixed inside the private network.
 @@IF_CALENDAR@@      CALENDAR_ACCOUNT_URL: http://calendar-caldav:9560
+@@IF_BROWSER@@      # Aman's own browser, reached only through its gateway's relay. BROWSER_SECRET comes from .env.
+@@IF_BROWSER@@      BROWSER_ENABLED: 'true'
+@@IF_BROWSER@@      BROWSER_URL: http://browser-relay:8792
     volumes:
       - data:/data
 @@IF_SANDBOX@@      # Read-only views of each slot's control socket. No Docker socket, no workspace volume.
 @@IF_SANDBOX@@      - slot_ctl_1:/run/aman-slots/1:ro
 @@IF_SANDBOX@@      - slot_ctl_2:/run/aman-slots/2:ro
-@@IF_SANDBOX@@      - slot_ctl_3:/run/aman-slots/3:ro
-@@IF_SANDBOX@@      - slot_ctl_4:/run/aman-slots/4:ro
 @@IF_SANDBOX@@      # One small writable volume per slot, only so the app can run the package mirrors the slot reaches there.
 @@IF_SANDBOX@@      - slot_mirror_1:/run/aman-slots/1/mirror
 @@IF_SANDBOX@@      - slot_mirror_2:/run/aman-slots/2/mirror
-@@IF_SANDBOX@@      - slot_mirror_3:/run/aman-slots/3/mirror
-@@IF_SANDBOX@@      - slot_mirror_4:/run/aman-slots/4/mirror
 @@IF_EMAIL@@      # The Email send list. The server is its only writer; the connector mounts it read-only.
 @@IF_EMAIL@@      - mail-policy:/data/mail-policy
 @@IF_EMAIL@@      - mail-policy-status:/data/mail-policy-status:ro
@@ -229,6 +229,66 @@ services:
 @@IF_EMAIL@@      - no-new-privileges:true
 @@IF_EMAIL@@    restart: unless-stopped
 
+@@IF_BROWSER@@# Aman's own browser: a real Chromium on a virtual screen, with one profile per person in its own volume. It reads
+@@IF_BROWSER@@# hostile pages, so its only network is an internal one shared with its gateway alone. Every request it makes goes
+@@IF_BROWSER@@# through the gateway's proxy, which refuses this computer and private networks, and the app reaches it only through
+@@IF_BROWSER@@# the gateway's relay, which checks the secret the app and the gateway share. This container never holds that secret.
+@@IF_BROWSER@@  browser:
+@@IF_BROWSER@@    image: @@BROWSER_IMAGE@@
+@@IF_BROWSER@@    pull_policy: never
+@@IF_BROWSER@@    init: true
+@@IF_BROWSER@@    environment:
+@@IF_BROWSER@@      BROWSER_PROXY: http://browser-proxy:3128
+@@IF_BROWSER@@      BROWSER_API_PEER: browser-gateway
+@@IF_BROWSER@@    networks:
+@@IF_BROWSER@@      - browser-internal
+@@IF_BROWSER@@    volumes:
+@@IF_BROWSER@@      - browser-profiles:/profiles
+@@IF_BROWSER@@    expose:
+@@IF_BROWSER@@      - '8792'
+@@IF_BROWSER@@    # Chromium keeps its own sandbox on, which needs the namespace calls this profile adds to Docker's default.
+@@IF_BROWSER@@    security_opt:
+@@IF_BROWSER@@      - no-new-privileges:true
+@@IF_BROWSER@@      - seccomp=./browser-seccomp.json
+@@IF_BROWSER@@    cap_drop:
+@@IF_BROWSER@@      - ALL
+@@IF_BROWSER@@    read_only: true
+@@IF_BROWSER@@    tmpfs:
+@@IF_BROWSER@@      - /tmp:size=256m
+@@IF_BROWSER@@      - /home/pwuser:size=256m,uid=1001,gid=1001
+@@IF_BROWSER@@    shm_size: 512m
+@@IF_BROWSER@@    pids_limit: 512
+@@IF_BROWSER@@    mem_limit: 2g
+@@IF_BROWSER@@    restart: unless-stopped
+
+@@IF_BROWSER@@  browser-gateway:
+@@IF_BROWSER@@    image: @@BROWSER_GATEWAY_IMAGE@@
+@@IF_BROWSER@@    pull_policy: never
+@@IF_BROWSER@@    environment:
+@@IF_BROWSER@@      BROWSER_SIDECAR_HOST: browser
+@@IF_BROWSER@@      # Shared with the app through .env, which the installer fills in once.
+@@IF_BROWSER@@      BROWSER_SECRET: ${BROWSER_SECRET:?missing from .env}
+@@IF_BROWSER@@      # The proxy listens only on the browser's network, and the relay only on the app's.
+@@IF_BROWSER@@      BROWSER_PROXY_BIND: browser-proxy
+@@IF_BROWSER@@      BROWSER_RELAY_BIND: browser-relay
+@@IF_BROWSER@@    networks:
+@@IF_BROWSER@@      browser-internal:
+@@IF_BROWSER@@        aliases: [browser-proxy]
+@@IF_BROWSER@@      browser-control:
+@@IF_BROWSER@@        aliases: [browser-relay]
+@@IF_BROWSER@@      browser-egress: {}
+@@IF_BROWSER@@    expose:
+@@IF_BROWSER@@      - '3128'
+@@IF_BROWSER@@      - '8792'
+@@IF_BROWSER@@    security_opt:
+@@IF_BROWSER@@      - no-new-privileges:true
+@@IF_BROWSER@@    cap_drop:
+@@IF_BROWSER@@      - ALL
+@@IF_BROWSER@@    read_only: true
+@@IF_BROWSER@@    pids_limit: 128
+@@IF_BROWSER@@    mem_limit: 256m
+@@IF_BROWSER@@    restart: unless-stopped
+
   dex:
     image: @@DEX_IMAGE@@
     network_mode: 'service:loopback'
@@ -297,6 +357,11 @@ volumes:
 @@IF_CALENDAR@@    name: aman_@@NAME@@_calendar_account
 @@IF_CALENDAR@@    labels:
 @@IF_CALENDAR@@      com.amanuensis.instance: @@NAME@@
+@@IF_BROWSER@@  # The browser's profiles: each person's cookies and site logins. Only the browser mounts it.
+@@IF_BROWSER@@  browser-profiles:
+@@IF_BROWSER@@    name: aman_@@NAME@@_browser_profiles
+@@IF_BROWSER@@    labels:
+@@IF_BROWSER@@      com.amanuensis.instance: @@NAME@@
 @@IF_SANDBOX@@  # Created by the slots project, which the installer starts before this one.
 @@IF_SANDBOX@@  slot_ctl_1:
 @@IF_SANDBOX@@    name: @@NAME@@_slot_ctl_1
@@ -304,24 +369,12 @@ volumes:
 @@IF_SANDBOX@@  slot_ctl_2:
 @@IF_SANDBOX@@    name: @@NAME@@_slot_ctl_2
 @@IF_SANDBOX@@    external: true
-@@IF_SANDBOX@@  slot_ctl_3:
-@@IF_SANDBOX@@    name: @@NAME@@_slot_ctl_3
-@@IF_SANDBOX@@    external: true
-@@IF_SANDBOX@@  slot_ctl_4:
-@@IF_SANDBOX@@    name: @@NAME@@_slot_ctl_4
-@@IF_SANDBOX@@    external: true
 
 @@IF_SANDBOX@@  slot_mirror_1:
 @@IF_SANDBOX@@    name: @@NAME@@_slot_mirror_1
 @@IF_SANDBOX@@    external: true
 @@IF_SANDBOX@@  slot_mirror_2:
 @@IF_SANDBOX@@    name: @@NAME@@_slot_mirror_2
-@@IF_SANDBOX@@    external: true
-@@IF_SANDBOX@@  slot_mirror_3:
-@@IF_SANDBOX@@    name: @@NAME@@_slot_mirror_3
-@@IF_SANDBOX@@    external: true
-@@IF_SANDBOX@@  slot_mirror_4:
-@@IF_SANDBOX@@    name: @@NAME@@_slot_mirror_4
 @@IF_SANDBOX@@    external: true
 
 networks:
@@ -335,3 +388,11 @@ networks:
   # Between the app's network holder and the calendar connector only. Not internal: the connector reaches the
   # calendar server on the internet.
 @@IF_CALENDAR@@  calendar: {}
+@@IF_BROWSER@@  # The browser and its gateway only. Internal: the browser has no way out but the gateway.
+@@IF_BROWSER@@  browser-internal:
+@@IF_BROWSER@@    internal: true
+@@IF_BROWSER@@  # The app's network holder and the browser gateway only, for the app's calls to the browser.
+@@IF_BROWSER@@  browser-control:
+@@IF_BROWSER@@    internal: true
+@@IF_BROWSER@@  # The gateway's own way out to the internet. Nothing else is on it.
+@@IF_BROWSER@@  browser-egress: {}

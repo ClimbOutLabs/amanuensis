@@ -18,6 +18,7 @@ const IDS: SourceIds = {
   'aman-stt': 'aman-stt:0123456789cd',
   'aman-tts': 'aman-tts:0123456789cd',
   'aman-calendar-caldav': 'aman-calendar-caldav:0123456789ef',
+  'aman-browser': 'aman-browser:0123456789ef',
 };
 const BASE = 'https://github.com/ClimbOutLabs/amanuensis/releases';
 const EXE_BYTES = new TextEncoder().encode('the windows build');

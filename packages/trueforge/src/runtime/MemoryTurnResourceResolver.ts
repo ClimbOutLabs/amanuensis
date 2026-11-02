@@ -193,7 +193,21 @@ export class MemoryTurnResourceResolver extends PersonaTurnResourceResolver {
     personaKnowledgeHits?: readonly PersonaKnowledgeHit[],
     switchNotice?: PersonaSwitchNotice,
   ) {
-    super(deps, profile, persona, personaKnowledgeBlock, personaKnowledgeHits, switchNotice);
+    super(deps, profile, persona, personaKnowledgeBlock, personaKnowledgeHits, switchNotice, {
+      // A chat that turned the search provider off keeps it off for the guide too:
+      // the lookup the guide's tool is built from answers as if nothing were designated.
+      searchProviderServerName:
+        memory.searchProviderServerName === undefined
+          ? undefined
+          : async () => {
+              const designated = await memory.searchProviderServerName?.();
+              if (designated === undefined) {
+                return undefined;
+              }
+              const turnedOff = new Set(memory.turnedOffConnectorKeys ?? []);
+              return turnedOff.has(connectorOffKey(designated)) ? undefined : designated;
+            },
+    });
     this.#memory = memory;
     this.#toolOutputScreen = toolOutputScreen;
   }

@@ -62,6 +62,7 @@ const IDS: SourceIds = {
   'aman-stt': 'aman-stt:0123456789cd',
   'aman-tts': 'aman-tts:0123456789cd',
   'aman-calendar-caldav': 'aman-calendar-caldav:0123456789ef',
+  'aman-browser': 'aman-browser:0123456789ef',
 };
 const RELEASE_BASE = 'https://github.com/ClimbOutLabs/amanuensis/releases';
 const MANIFEST_URL = `${RELEASE_BASE}/latest/download/manifest.json`;
@@ -77,6 +78,8 @@ const RELEASE: ReleaseRecord = {
   sttImage: 'aman-stt:test1',
   ttsImage: null,
   calendarImage: 'aman-calendar-caldav:test1',
+  browserImage: 'aman-browser:test1',
+  browserGatewayImage: 'aman-browser-gateway:test1',
   dexImage: 'aman-dex:test1',
   mailEmailImage: null,
 };
@@ -160,6 +163,18 @@ function readyAnswers(): Map<string, ProcessResult> {
     ],
     [
       commandLine('docker', ['image', 'inspect', '--format', '{{.Architecture}}', 'aman-dex:test1']),
+      okResult('amd64\n'),
+    ],
+    [
+      commandLine('docker', ['image', 'inspect', '--format', '{{.Architecture}}', 'aman-calendar-caldav:test1']),
+      okResult('amd64\n'),
+    ],
+    [
+      commandLine('docker', ['image', 'inspect', '--format', '{{.Architecture}}', 'aman-browser:test1']),
+      okResult('amd64\n'),
+    ],
+    [
+      commandLine('docker', ['image', 'inspect', '--format', '{{.Architecture}}', 'aman-browser-gateway:test1']),
       okResult('amd64\n'),
     ],
     [
