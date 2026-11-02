@@ -4,7 +4,7 @@ One small Ubuntu VM, one shared judge account, an invented demo world, and the m
 
 ## 1. The VM
 
-- **Size:** 4 vCPU, 16 GB RAM, 100 GB disk. The first build needs at least 6 GB of memory and the installer asks for 10 GB free for Docker plus 20 GB free under `/var/lib/aman-slots` for the sandbox disks, so 100 GB leaves room for image builds. 8 GB RAM is the floor; below it the build can be killed.
+- **Size:** 4 vCPU, 16 GB RAM, 100 GB disk. The first build needs at least 6 GB of memory and the installer asks for 10 GB free for Docker plus 32 GB free under `/var/lib/aman-slots` for the sandbox disks, so 100 GB leaves room for image builds. 8 GB RAM is the floor; below it the build can be killed.
 - **Image:** Ubuntu 24.04 LTS. The installer's Docker and Caddy steps target Ubuntu. 22.04 was not checked.
 - **Network:** allow inbound TCP 443 and 80, plus SSH (22) from your own address only. Nothing else. The installer only needs 443; port 80 is for the redirect.
 - Note the VM's public IPv4 address (example below: `203.0.113.10`).

@@ -87,9 +87,13 @@ jobs:
               - '.github/workflows/ci.yml'
             aman-installer:
               - 'packages/aman-installer/**'
-              # The executable bundles the pinned setup image, and tests run the shell lock code.
+              # The executable bundles the pinned setup image, and its tests run the shell installer, its
+              # library and doctor, and check records against the release schema.
               - 'installer/release.json'
-              - 'installer/lib/common.sh'
+              - 'installer/release.schema.json'
+              - 'installer/install.sh'
+              - 'installer/lib/**'
+              - 'installer/doctor/aman'
               - 'package.json'
               - 'pnpm-workspace.yaml'
               - 'tsconfig.base.json'

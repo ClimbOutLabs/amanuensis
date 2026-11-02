@@ -38,6 +38,10 @@ sandbox_new() {
   stage_installer
   STUB_REAL_DF=$(command -v df)
   export STUB_LOG=$SB/stub.log STUB_STATE=$SB_STATE STUB_BIN=$SB_BIN STUB_USER=testuser
+  # The fixtures' git never reads this computer's git settings (signing, hooks, push options, default branch), so
+  # every commit and push a test makes behaves the same everywhere.
+  export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1
+  export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@example.invalid GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@example.invalid
   export STUB_DOCKER_SRC=$TESTS_DIR/stubs/docker STUB_REAL_DF
   : >"$STUB_LOG"
   AMAN_HOME=$SB/home
@@ -162,17 +166,20 @@ sandbox_drop() {
 
 # A tiny git checkout standing in for the repository: the build contexts and the slots compose file the doctor looks for.
 fixture_repo() {
-  mkdir -p "$1/ops/aman-stt" "$1/ops/calendar-sidecar" "$1/ops/compose/mail-email"
+  mkdir -p "$1/ops/aman-stt" "$1/ops/calendar-sidecar" "$1/ops/browser-sidecar" "$1/ops/compose/mail-email"
   printf 'FROM scratch\n' >"$1/Dockerfile.dev"
   printf 'name: slots\n' >"$1/docker-compose.slots.yml"
   printf 'FROM scratch\n' >"$1/ops/aman-stt/Dockerfile"
   printf 'FROM scratch\n' >"$1/ops/calendar-sidecar/Dockerfile"
+  printf 'FROM scratch\n' >"$1/ops/browser-sidecar/Dockerfile"
+  printf 'FROM scratch\n' >"$1/ops/browser-sidecar/Dockerfile.gateway"
+  printf '{"defaultAction": "SCMP_ACT_ERRNO"}\n' >"$1/ops/browser-sidecar/seccomp_profile.json"
   printf '#!/bin/sh\n' >"$1/ops/compose/mail-email/entrypoint.sh"
   printf '# account agent fixture\n' >"$1/ops/compose/mail-email/account_agent.py"
   printf '# sign-in check fixture\n' >"$1/ops/compose/mail-email/email_check.py"
   (
     cd "$1"
-    git init -q .
+    git -c init.defaultBranch=main init -q .
     git add -A
     git -c user.name=t -c user.email=t@example.invalid commit -q -m fixture
   )
@@ -189,7 +196,7 @@ repo_commit_change() {
 
 # The environment every installer run gets: nothing from the caller except the stub switches.
 build_run_env() {
-  RUN_ENV=(PATH="$SB_BIN" HOME="$SB/user" AMAN_HOME="$AMAN_HOME" AMAN_REPO_ROOT="$REPO"
+  RUN_ENV=(PATH="$SB_BIN" HOME="$SB/user" AMAN_HOME="$AMAN_HOME" AMAN_REPO_ROOT="$REPO" GIT_CONFIG_NOSYSTEM=1
     AMAN_OS_RELEASE="${AMAN_OS_RELEASE:-$SB/os-release}" AMAN_DMI_DIR="${AMAN_DMI_DIR:-$SB/no-dmi}"
     STUB_LOG="$STUB_LOG" STUB_STATE="$STUB_STATE" STUB_BIN="$STUB_BIN" STUB_USER="$STUB_USER"
     STUB_DOCKER_SRC="$STUB_DOCKER_SRC" STUB_REAL_DF="$STUB_REAL_DF"
