@@ -22,6 +22,7 @@ import { createSqliteTestDatabase, type SqliteTestDatabase } from '../../db/sqli
 import { FakeSandboxProvider } from '../../fixtures/fakeSandboxProvider';
 import { FakeTurnArtifactStore } from '../../fixtures/fakeTurnArtifactStore';
 import { uncappedTokenFactoryBudget } from '../../fixtures/uncappedTokenFactoryBudget';
+import { noSpaceFolders } from './spaceFolderStoreFake';
 
 const READ = 'https://www.googleapis.com/auth/gmail.readonly';
 const OWNER = { tenant_id: 't1', created_by: 'u1' };
@@ -58,6 +59,7 @@ const STORE: SpaceToolStore = {
   revertSpace: jest.fn(),
   listSpacesWithAggregate: jest.fn(),
   getSpace: jest.fn(),
+  ...noSpaceFolders,
   getSpaceRevision: jest.fn(),
 };
 
@@ -170,6 +172,7 @@ describe('download_attachment follows the chat sandbox', () => {
         budget: uncappedTokenFactoryBudget,
         authority: { tenantId: OWNER.tenant_id, userRef: OWNER.created_by },
       },
+      undefined,
     );
   }
 

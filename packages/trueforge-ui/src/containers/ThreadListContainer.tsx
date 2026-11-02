@@ -18,6 +18,7 @@ import {
   threadListIndicesByRecency,
   threadListItemIsMutable,
 } from '../atoms/lib/threadListMeta.js';
+import { useOpenChatById } from '../hooks/useOpenChatById.js';
 import { useResourcePermissions } from '../hooks/useResourcePermissions.js';
 import { Icon } from '../icons/Icon.js';
 import { useOptionalReminders } from '../reminders/RemindersContext.js';
@@ -26,6 +27,7 @@ import { useOptionalServer } from '../server/ServerContext.js';
 import { useOptionalShellMode } from '../server/ShellModeContext.js';
 import { useSlot } from '../theme/SlotsProvider.js';
 import { ChatFolderSection, NewFolderButton, ThreadListItemActions } from './ChatFolderControls.js';
+import { ChatMessageMatches } from './ChatMessageMatches.js';
 import { RecentChatsGroups, type RecentChat } from './RecentChatsGroups.js';
 
 /**
@@ -554,6 +556,7 @@ export function ThreadListContainer({ onThreadOpen, variant = 'default' }: Threa
   const indices = useThreadListIndicesByRecency(variant);
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const openChatById = useOpenChatById();
   const viewportRef = useRef<HTMLDivElement>(null);
   const hasMoreRef = useRef(hasMore);
   const auiRef = useRef(aui);
@@ -675,6 +678,18 @@ export function ThreadListContainer({ onThreadOpen, variant = 'default' }: Threa
     ? filterChatsByTitle({ chats: entries, query: searchOpen ? searchQuery : '' })
     : entries;
   const openKey = activeRemoteId == null ? undefined : entries.find(entry => entry.remoteId === activeRemoteId)?.key;
+  const messageSearchActive = isRecentHistory && searchOpen && searchQuery.trim().length > 0;
+  const titleMatchSessionIds = new Set(
+    shownEntries.flatMap(entry => (entry.remoteId === undefined ? [] : [entry.remoteId])),
+  );
+  const openMessageMatch = (sessionId: string) => {
+    onThreadOpen?.();
+    shell?.setSettingsOpen(false);
+    shell?.setLibraryOpen(false);
+    shell?.setSessionsOpen(false);
+    shell?.setSchedulesOpen(false);
+    openChatById(sessionId);
+  };
 
   let listBody: ReactNode;
   if (isIdle) {
@@ -684,7 +699,11 @@ export function ThreadListContainer({ onThreadOpen, variant = 'default' }: Threa
   } else if (entries.length === 0 && !hasFolders) {
     listBody = <ThreadListEmptyState message={emptyMessage} />;
   } else if (shownEntries.length === 0 && !hasFolders) {
-    listBody = <ThreadListEmptyState message="No chats match that search." />;
+    listBody = messageSearchActive ? (
+      <p className="px-2.5 py-1 text-xs text-text-secondary">No chat titles match that search.</p>
+    ) : (
+      <ThreadListEmptyState message="No chats match that search." />
+    );
   } else {
     listBody = (
       <ThreadListPrimitive.Root className="flex min-h-0 flex-col gap-0.5">
@@ -743,6 +762,13 @@ export function ThreadListContainer({ onThreadOpen, variant = 'default' }: Threa
           </p>
         ) : null}
         {listBody}
+        {messageSearchActive && !isIdle ? (
+          <ChatMessageMatches
+            query={searchQuery}
+            titleMatchSessionIds={titleMatchSessionIds}
+            onOpen={openMessageMatch}
+          />
+        ) : null}
         {!isIdle && hasMore ? <div className="h-4 shrink-0" aria-hidden /> : null}
       </RecentChatsSection>
     </ThreadListShell>

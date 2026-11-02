@@ -133,6 +133,40 @@ describe('SlotSandboxProvider', () => {
     expect(plain).not.toHaveProperty('skill_network_token');
   });
 
+  test('ids of the retired slots 3 and 4 resolve to slots 1 and 2 with the same session', async () => {
+    const { provider, agents: started } = await providerFor([healthy, healthy]);
+    const fromSlot3 = await provider.exec({ sandboxId: `s3-${'a'.repeat(32)}`, command: 'echo ok' });
+    expect(fromSlot3.success).toBe(true);
+    expect(started[0]?.requests).toHaveLength(1);
+    expect(started[0]?.requests[0]?.body).toMatchObject({ session_id: 'a'.repeat(32) });
+    expect(started[1]?.requests).toHaveLength(0);
+    const fromSlot4 = await provider.exec({ sandboxId: `s4-${'b'.repeat(32)}`, command: 'echo ok' });
+    expect(fromSlot4.success).toBe(true);
+    expect(started[1]?.requests).toHaveLength(1);
+    expect(started[1]?.requests[0]?.body).toMatchObject({ session_id: 'b'.repeat(32) });
+    // Slots past the four an install ever had do not resolve.
+    await expect(provider.exec({ sandboxId: `s5-${'c'.repeat(32)}`, command: 'x' })).rejects.toBeInstanceOf(
+      SandboxNotAvailableError,
+    );
+  });
+
+  test('with one slot in use, only slot 3 ids resolve, to slot 1; slot 2 and slot 4 ids do not', async () => {
+    const { provider, agents: started } = await providerFor([healthy]);
+    const fromSlot3 = await provider.exec({ sandboxId: `s3-${'a'.repeat(32)}`, command: 'echo ok' });
+    expect(fromSlot3.success).toBe(true);
+    expect(started[0]?.requests).toHaveLength(1);
+    expect(started[0]?.requests[0]?.body).toMatchObject({ session_id: 'a'.repeat(32) });
+    // Slot 2 was a working slot, not a retired one, and slot 4's chats were moved to slot 2, which is
+    // not in use here: neither id's files are on slot 1, so neither resolves to it.
+    await expect(provider.exec({ sandboxId: `s2-${'b'.repeat(32)}`, command: 'x' })).rejects.toBeInstanceOf(
+      SandboxNotAvailableError,
+    );
+    await expect(provider.exec({ sandboxId: `s4-${'c'.repeat(32)}`, command: 'x' })).rejects.toBeInstanceOf(
+      SandboxNotAvailableError,
+    );
+    expect(started[0]?.requests).toHaveLength(1);
+  });
+
   test('a non-zero exit is still a successful call', async () => {
     const { provider } = await providerFor([
       () => ({ status: 200, body: execResponse({ exit_code: 3, output: 'bad' }) }),

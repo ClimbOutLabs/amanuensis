@@ -1,4 +1,4 @@
-import type { Space, SpaceStore } from '@truefoundry/trueforge-ui';
+import type { Space, SpaceFolder, SpaceStore } from '@truefoundry/trueforge-ui';
 
 const SPACE_STATUSES = new Set(['active', 'archived']);
 const SPACE_FORMATS = new Set(['markdown', 'html']);
@@ -37,6 +37,7 @@ function readSpace(value: unknown): Space {
     !SPACE_STATUSES.has(value.status) ||
     typeof value.body !== 'string' ||
     (value.format !== undefined && (typeof value.format !== 'string' || !SPACE_FORMATS.has(value.format))) ||
+    (value.folder_id !== null && typeof value.folder_id !== 'string') ||
     typeof value.revision !== 'number' ||
     typeof value.created_at !== 'string' ||
     typeof value.updated_at !== 'string'
@@ -50,6 +51,7 @@ function readSpace(value: unknown): Space {
     status: value.status === 'archived' ? 'archived' : 'active',
     body: value.body,
     format: value.format === 'html' ? 'html' : 'markdown',
+    folder_id: value.folder_id,
     revision: value.revision,
     created_at: value.created_at,
     updated_at: value.updated_at,
@@ -69,6 +71,29 @@ function readSpaceEnvelope(value: unknown): Space {
   }
   return readSpace(value.data);
 }
+
+function readFolder(value: unknown): SpaceFolder {
+  if (!isRecord(value) || typeof value.id !== 'string' || typeof value.name !== 'string') {
+    throw new Error('Server returned an invalid space folder');
+  }
+  return { id: value.id, name: value.name };
+}
+
+function readFolderList(value: unknown): SpaceFolder[] {
+  if (!isRecord(value) || !Array.isArray(value.data)) {
+    throw new Error('Server returned an invalid space folder list');
+  }
+  return value.data.map(readFolder);
+}
+
+function readFolderEnvelope(value: unknown): SpaceFolder {
+  if (!isRecord(value) || !('data' in value)) {
+    throw new Error('Server returned an invalid space folder response');
+  }
+  return readFolder(value.data);
+}
+
+const JSON_HEADERS = { 'content-type': 'application/json' };
 
 export function createSpaceStore(fetcher: typeof fetch): SpaceStore {
   return {
@@ -91,6 +116,49 @@ export function createSpaceStore(fetcher: typeof fetch): SpaceStore {
       // with it before surfacing the conflict; a second 409 (or any other failure) surfaces as-is.
       const fresh = readSpaceEnvelope(await readJson(await fetcher(`/api/v1/spaces/${encodeURIComponent(spaceId)}`)));
       await readEmpty(await fetcher(deleteUrl({ spaceId, expectedRevision: fresh.revision }), { method: 'DELETE' }));
+    },
+
+    async listFolders() {
+      return readFolderList(await readJson(await fetcher('/api/v1/space-folders')));
+    },
+
+    async createFolder({ name }) {
+      return readFolderEnvelope(
+        await readJson(
+          await fetcher('/api/v1/space-folders', {
+            method: 'POST',
+            headers: JSON_HEADERS,
+            body: JSON.stringify({ name }),
+          }),
+        ),
+      );
+    },
+
+    async renameFolder({ folderId, name }) {
+      return readFolderEnvelope(
+        await readJson(
+          await fetcher(`/api/v1/space-folders/${encodeURIComponent(folderId)}`, {
+            method: 'PUT',
+            headers: JSON_HEADERS,
+            body: JSON.stringify({ name }),
+          }),
+        ),
+      );
+    },
+
+    async deleteFolder({ folderId }) {
+      await readEmpty(await fetcher(`/api/v1/space-folders/${encodeURIComponent(folderId)}`, { method: 'DELETE' }));
+    },
+
+    async setSpaceFolder({ spaceId, folderId }) {
+      const path = `/api/v1/spaces/${encodeURIComponent(spaceId)}/folder`;
+      if (folderId === null) {
+        await readEmpty(await fetcher(path, { method: 'DELETE' }));
+        return;
+      }
+      await readEmpty(
+        await fetcher(path, { method: 'PUT', headers: JSON_HEADERS, body: JSON.stringify({ folder_id: folderId }) }),
+      );
     },
   };
 }

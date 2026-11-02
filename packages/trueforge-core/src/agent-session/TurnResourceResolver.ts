@@ -169,6 +169,7 @@ export class TurnResourceResolver<
       }>;
       mcpRequestTimeoutMs: number;
       mcpConnectTimeoutMs: number;
+      mcpMaxResponseBytes?: number | undefined;
       /** One sandbox type per runtime. Omit = no sandbox support. */
       sandboxProvider?: TurnSandboxFactory | undefined;
       /**
@@ -486,6 +487,9 @@ export class TurnResourceResolver<
               sessionId: previousTurn?.snapshot.mcp_servers?.[entry.name]?.session_id,
               requestTimeoutMs: this.deps.mcpRequestTimeoutMs,
               connectTimeoutMs: this.deps.mcpConnectTimeoutMs,
+              ...(this.deps.mcpMaxResponseBytes !== undefined
+                ? { maxResponseBytes: this.deps.mcpMaxResponseBytes }
+                : {}),
               // A vouched-for or designated connector must not hand its trust to wherever it redirects.
               refuseRedirects: first_party === true || search_provider !== undefined,
               logger: this.deps.logger,

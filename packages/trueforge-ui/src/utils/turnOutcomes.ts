@@ -222,3 +222,37 @@ export function turnOutcomeLines(parts: readonly TurnOutcomePart[]): string[] {
   }
   return lines;
 }
+
+type ThreadMessages = readonly { readonly id: string; readonly content: readonly TurnOutcomePart[] }[];
+
+/**
+ * One answer per thread messages list, so every message on the page asking costs one scan, not one each.
+ * Keyed on the list itself: this relies on assistant-ui replacing the list whenever a message changes.
+ */
+const lastReminderByThread = new WeakMap<ThreadMessages, string | null>();
+
+/** The id of the last message in the thread that set a reminder, if any. */
+export function lastReminderMessageId(messages: ThreadMessages): string | undefined {
+  const known = lastReminderByThread.get(messages);
+  if (known !== undefined) return known ?? undefined;
+  let found: string | null = null;
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (message !== undefined && turnSetReminder(message.content)) {
+      found = message.id;
+      break;
+    }
+  }
+  lastReminderByThread.set(messages, found);
+  return found ?? undefined;
+}
+
+/** Whether a finished turn set a reminder: the same check that writes its outcome line. */
+function turnSetReminder(parts: readonly TurnOutcomePart[]): boolean {
+  return parts.some(
+    part =>
+      part.type === 'tool-call' &&
+      effectiveCall(part).name === SET_REMINDER_TOOL_NAME &&
+      outcomeLine(part) !== undefined,
+  );
+}

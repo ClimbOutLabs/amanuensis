@@ -144,7 +144,7 @@ function LayoutFallback({ className }: { className?: string }) {
   );
 }
 
-/** Shown while `type: "truefoundry"` resolves the agent UI server. */
+/** Shown while `type: "trueforge"` resolves the agent UI server. */
 export function ServerInitLoader({ className }: { className?: string }) {
   // Outside ThemeProvider (Suspense), useThemeMode falls back to light.
   const themeMode = useThemeMode();

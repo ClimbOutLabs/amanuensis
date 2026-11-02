@@ -112,7 +112,16 @@ describe('the document staging bridge', () => {
       logger: makeSilentLogger(),
       tracing: NOOP_AGENT_TRACING,
     });
-    return { tools: new DocumentTools(sandbox, NOOP_AGENT_TRACING, BOUND_REPOSITORY), sandbox, files: workspace.files };
+    return {
+      tools: new DocumentTools({
+        sandbox,
+        tracing: NOOP_AGENT_TRACING,
+        logger: makeSilentLogger(),
+        boundRepository: BOUND_REPOSITORY,
+      }),
+      sandbox,
+      files: workspace.files,
+    };
   }
 
   function stagedCopies(files: Map<string, Buffer>): string[] {
@@ -200,15 +209,15 @@ describe('the document staging bridge', () => {
 
   it('refuses an unsupported type in plain words, without reading or staging it', async () => {
     const { tools, files } = await makeTools();
-    files.set('/workspace/notes.docx', Buffer.from('not a real document'));
+    files.set('/workspace/deck.ppt', Buffer.from('not a real document'));
 
     const response = await tools.callTool({
       name: EXTRACT_DOCUMENT_TEXT_TOOL_NAME,
-      arguments: { file_paths: ['/workspace/notes.docx'] },
+      arguments: { file_paths: ['/workspace/deck.ppt'] },
     });
     const document = extractionOf(response).documents[0];
-    expect(document?.issue).toContain('not supported');
-    expect(document?.issue).toContain('Convert it to PDF');
+    expect(document?.issue).toContain('.ppt is an old format');
+    expect(document?.issue).toContain('Save it as .pptx or as a PDF');
     expect(stagedCopies(files)).toHaveLength(0);
   });
 
@@ -222,6 +231,70 @@ describe('the document staging bridge', () => {
     const document = extractionOf(response).documents[0];
     expect(document?.issue).toContain('the file could not be found');
     expect(stagedCopies(files)).toHaveLength(0);
+  });
+
+  it('does not call a provider failure that says not found a missing file, and never shows it', async () => {
+    const { tools, sandbox, files } = await makeTools();
+    files.set('/workspace/report.pdf', syntheticPdf());
+    jest.spyOn(sandbox, 'downloadDocumentSourceFile').mockRejectedValue(new Error('slot 3 not found: /srv/slots/3'));
+
+    const response = await tools.callTool({
+      name: EXTRACT_DOCUMENT_TEXT_TOOL_NAME,
+      arguments: { file_paths: ['/workspace/report.pdf'] },
+    });
+    const issue = extractionOf(response).documents[0]?.issue ?? '';
+    expect(issue).toBe(
+      'Could not read report.pdf. Try again; if it keeps failing, check that the sandbox is ready under Settings, Sandbox.',
+    );
+    expect(issue).not.toContain('/srv');
+  });
+
+  it('shows a fixed sentence, never the raw error, when a project file cannot be staged', async () => {
+    const { tools, sandbox, files } = await makeTools();
+    files.set('/workspace/report.pdf', syntheticPdf());
+    jest.spyOn(sandbox, 'uploadUserFile').mockRejectedValue(new Error('disk full at /srv/slots/3/uploads'));
+
+    const response = await tools.callTool({
+      name: EXTRACT_DOCUMENT_TEXT_TOOL_NAME,
+      arguments: { file_paths: ['/workspace/report.pdf'] },
+    });
+    const issue = extractionOf(response).documents[0]?.issue ?? '';
+    expect(issue).toBe(
+      'Could not read report.pdf. Try again; if it keeps failing, check that the sandbox is ready under Settings, Sandbox.',
+    );
+    expect(issue).not.toContain('/srv');
+  });
+
+  it('names an empty project file as empty', async () => {
+    const { tools, files } = await makeTools();
+    files.set('/workspace/blank.pdf', Buffer.alloc(0));
+
+    const response = await tools.callTool({
+      name: EXTRACT_DOCUMENT_TEXT_TOOL_NAME,
+      arguments: { file_paths: ['/workspace/blank.pdf'] },
+    });
+    expect(extractionOf(response).documents[0]?.issue).toBe(
+      'Could not read blank.pdf: the file is empty. Check that it is the right file.',
+    );
+    expect(stagedCopies(files)).toHaveLength(0);
+  });
+
+  it('shows a fixed sentence, never the raw error, when the whole read fails', async () => {
+    const { tools, sandbox, files } = await makeTools();
+    files.set('/workspace/report.pdf', syntheticPdf());
+    jest.spyOn(sandbox, 'documentReadScope').mockImplementation(() => {
+      throw new Error('provider lost: /srv/slots/3');
+    });
+
+    const response = await tools.callTool({
+      name: EXTRACT_DOCUMENT_TEXT_TOOL_NAME,
+      arguments: { file_paths: ['/workspace/report.pdf'] },
+    });
+    expect(resultError(response)).toBe(true);
+    expect(JSON.parse(resultText(response))).toEqual({
+      error:
+        'Nothing was read. Try again; if it keeps failing, check that the sandbox is ready under Settings, Sandbox.',
+    });
   });
 
   it('still reads a staged upload by its staged path, unchanged', async () => {

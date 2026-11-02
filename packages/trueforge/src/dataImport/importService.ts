@@ -46,6 +46,7 @@ import { isHostOwnConnector } from '../mcp/hostConnectors';
 import { personaKnowledgeLocation } from '../personaKnowledge/knowledgePaths';
 import { amanGuidePersonaId, isAmanGuidePersona, isAnyAmanGuideId } from '../personas/amanGuide/identity';
 import { PERSISTED_ARTIFACT_MIME } from '../runtime/artifacts/persistTurnArtifacts';
+import { requestChatSearchBackfill } from '../runtime/chatSearchIndexing';
 import type { RetainItem } from '../runtime/memory/hindsightClient';
 import {
   applyVaultTombstones,
@@ -482,6 +483,7 @@ interface ArchiveContents {
   manifest: ImportManifest;
   sessions: ArchiveSessions;
   folders: ImportFolderRecord[];
+  spaceFolders: ImportFolderRecord[];
   agents: ImportAgentRecord[];
   personas: ImportPersonasFile;
   personalization: ImportPersonalizationFile;
@@ -706,6 +708,8 @@ function loadArchive(input: {
     manifest,
     sessions: { ...checkSessions(sessionEntries(), folders), entries: sessionEntries },
     folders,
+    // Absent from exports made before spaces had folders.
+    spaceFolders: files.has('space_folders.json') ? section('space_folders.json', ImportFoldersFileSchema) : [],
     agents: section('agents.json', ImportAgentsFileSchema),
     personas: section('personas.json', ImportPersonasFileSchema, json => {
       const repaired = repairPersonaNames(json);
@@ -779,7 +783,7 @@ function checkSessions(
 }
 
 function validateCrossReferences(contents: ArchiveContents): void {
-  const { agents, personas, spaces, schedules, connectors } = contents;
+  const { agents, personas, spaces, spaceFolders, schedules, connectors } = contents;
 
   const agentIds = new Set<string>();
   const agentNames = new Set<string>();
@@ -799,7 +803,18 @@ function validateCrossReferences(contents: ArchiveContents): void {
     personaIds.add(persona.id);
   }
 
-  for (const { space, revisions } of spaces) {
+  const spaceFolderIds = new Set<string>();
+  for (const folder of spaceFolders) {
+    if (spaceFolderIds.has(folder.folder_id)) {
+      throw damagedExportError(`space folder ${folder.folder_id} appears twice.`);
+    }
+    spaceFolderIds.add(folder.folder_id);
+  }
+
+  for (const { space, revisions, folder_id } of spaces) {
+    if (folder_id !== null && !spaceFolderIds.has(folder_id)) {
+      throw damagedExportError(`space ${space.id} points at a folder that is not in the export.`);
+    }
     // Older versions pruned a space's early revisions, so the run may start late; it must still be unbroken.
     const numbers = revisions.map(revision => revision.revision).sort((a, b) => a - b);
     const first = numbers[0] ?? 0;
@@ -1378,6 +1393,7 @@ async function importArchive<TTransaction>(
     personas: archivedPersonas,
     personalization,
     spaces,
+    spaceFolders,
     schedules,
     settings,
     audit,
@@ -1420,6 +1436,7 @@ async function importArchive<TTransaction>(
       folderIds: folders.map(folder => folder.folder_id),
       personas: personas.map(entry => entry.persona),
       spaceIds: spaces.map(entry => entry.space.id),
+      spaceFolderIds: spaceFolders.map(folder => folder.folder_id),
       scheduleIds: schedules.map(schedule => schedule.id),
       agents: [...agentPlan.archived, ...agentPlan.placeholders],
     },
@@ -1705,7 +1722,14 @@ async function importArchive<TTransaction>(
         );
       }
 
-      for (const { space, revisions } of spaces) {
+      for (const folder of spaceFolders) {
+        await deps.spaceStore.createSpaceFolder(
+          { tenant_id: tenantId, created_by: subjectId, id: folder.folder_id, name: folder.name },
+          tx,
+        );
+      }
+
+      for (const { space, revisions, folder_id } of spaces) {
         const sorted = [...revisions].sort((a, b) => a.revision - b.revision);
         const first = sorted[0];
         if (first === undefined) {
@@ -1729,6 +1753,12 @@ async function importArchive<TTransaction>(
           },
           tx,
         );
+        if (folder_id !== null) {
+          await deps.spaceStore.setSpaceFolder(
+            { tenant_id: tenantId, created_by: subjectId, space_id: space.id, folder_id },
+            tx,
+          );
+        }
         // A run that starts after revision 1 lands renumbered from 1, since a new space starts there.
         for (const [index, revision] of sorted.slice(1).entries()) {
           aggregate = await deps.spaceStore.getAggregate({ tenant_id: tenantId, created_by: subjectId }, tx);
@@ -1852,6 +1882,13 @@ async function importArchive<TTransaction>(
       await lock.removeIn(tx);
     });
     lock.committed();
+    // The restored chats join the past-chat search through one pass, which runs only if the person turns the search on.
+    if (sessions.ids.length > 0) {
+      await requestChatSearchBackfill({
+        globalSettingsStore: deps.globalSettingsStore,
+        person: { tenant_id: tenantId, created_by: subjectId },
+      });
+    }
 
     const result: Omit<ImportDataResult, 'summary'> = {
       chats: sessions.ids.length,
