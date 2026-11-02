@@ -190,7 +190,9 @@ export class PersonaKnowledgeIndexer {
     if (this.#processing) {
       return;
     }
-    this.#pumping = this.#drain();
+    this.#pumping = this.#drain().catch((error: unknown) => {
+      this.#logger.error(`Knowledge indexing stopped unexpectedly: ${describeFailure(error)}`);
+    });
   }
 
   async #drain(): Promise<void> {
@@ -294,6 +296,18 @@ export class PersonaKnowledgeIndexer {
         const vectors = await model.embedPassages(batch);
         for (const vector of vectors) {
           embeddings.push(Float32Array.from(vector));
+        }
+        if (this.#closed && offset + MICRO_BATCH_SIZE < chunks.length) {
+          // Shutdown waits for at most one batch. The document stays retryable and keeps its blob,
+          // so recovery indexes it again on the next start.
+          deleteBlob = false;
+          repo.updateDocumentStatus({
+            documentId: queued.documentId,
+            status: 'indexing',
+            statusMessage: 'Paused while the app restarts. Indexing resumes automatically.',
+          });
+          this.#logger.info(`Knowledge indexing for ${key} paused for shutdown.`);
+          return;
         }
         // Yield so a long document can't monopolize the event loop or CPU.
         await sleep(BATCH_COOLDOWN_MS);
