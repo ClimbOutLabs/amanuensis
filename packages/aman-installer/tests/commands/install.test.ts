@@ -68,6 +68,7 @@ const KEY = 'tf-key-1234567890';
 const IDS: SourceIds = {
   'aman-app': 'aman-app:0123456789ab',
   'aman-stt': 'aman-stt:0123456789cd',
+  'aman-tts': 'aman-tts:0123456789cd',
   'aman-calendar-caldav': 'aman-calendar-caldav:0123456789ef',
 };
 const RELEASE_BASE = 'https://github.com/ClimbOutLabs/amanuensis/releases';
@@ -484,6 +485,7 @@ class FreshVolumeRunner implements ProcessRunner {
         sourceRef: RELEASE_TAG,
         appImage: IDS['aman-app'],
         sttImage: IDS['aman-stt'],
+        ttsImage: IDS['aman-tts'],
         calendarImage: IDS['aman-calendar-caldav'],
         dexImage: 'ghcr.io/example/dex@sha256:aaaa',
         mailEmailImage: 'ghcr.io/example/mail@sha256:bbbb',

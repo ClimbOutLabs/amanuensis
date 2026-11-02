@@ -258,9 +258,15 @@ export function createVoiceRouter(deps: VoiceRouterDeps) {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify(voice === undefined ? { text } : { text, voice }),
-          signal: AbortSignal.timeout(TTS_SPEAK_TIMEOUT_MS),
+          // A caller who stops listening stops the work too, so abandoned replies do not queue up.
+          signal: AbortSignal.any([c.req.raw.signal, AbortSignal.timeout(TTS_SPEAK_TIMEOUT_MS)]),
         });
       } catch (error) {
+        // Nobody reads this answer; only the log line matters.
+        if (c.req.raw.signal.aborted) {
+          deps.logger.info('voice speak cancelled by the caller');
+          return errorJson(c, TTS_UNAVAILABLE);
+        }
         deps.logger.warn('voice speak failed: sidecar unreachable', extractErrorLogFields(error));
         return errorJson(c, TTS_UNAVAILABLE);
       }
@@ -268,7 +274,24 @@ export function createVoiceRouter(deps: VoiceRouterDeps) {
         deps.logger.info('voice speak failed', { reason: 'tts_not_warm' });
         return errorJson(c, TTS_UNAVAILABLE);
       }
-      if (upstream.status === 400 || upstream.status === 413) {
+      if (upstream.status === 429) {
+        deps.logger.info('voice speak rejected', { reason: 'tts_busy' });
+        c.header('Retry-After', upstream.headers.get('retry-after') ?? '2');
+        return errorJson(c, {
+          status: 429,
+          message: 'The voice is busy reading something else. Wait a few seconds, then try again.',
+          code: 'tts_busy',
+        });
+      }
+      if (upstream.status === 413) {
+        deps.logger.info('voice speak rejected', { reason: 'sidecar_too_long' });
+        return errorJson(c, {
+          status: 413,
+          message: 'This text is too long to read aloud at once. Send a shorter piece.',
+          code: 'text_too_long',
+        });
+      }
+      if (upstream.status === 400) {
         deps.logger.info('voice speak rejected', { reason: 'sidecar_rejected', tts_status: upstream.status });
         return errorJson(c, {
           status: 400,

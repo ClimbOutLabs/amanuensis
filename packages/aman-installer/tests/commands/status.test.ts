@@ -19,6 +19,7 @@ const RELEASE: ReleaseRecord = {
   sourceRef: 'abc123',
   appImage: 'aman-app:abc123',
   sttImage: 'aman-stt:abc123',
+  ttsImage: null,
   calendarImage: 'aman-calendar-caldav:abc123',
   dexImage: 'ghcr.io/example/dex@sha256:aaaa',
   mailEmailImage: 'ghcr.io/example/mail@sha256:bbbb',
