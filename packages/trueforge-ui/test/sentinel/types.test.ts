@@ -96,6 +96,25 @@ describe('extractSentinelFromEvent', () => {
     expect(send?.card.mail_draft).toBe(false);
   });
 
+  it("reads a browser click card's screenshot, and nothing for a card without one", () => {
+    const [click, other] = extractSentinelFromEvent({
+      type: 'tool.approval_required',
+      tool_calls: [
+        {
+          tool_call_id: 'call-click',
+          tier: 3,
+          tier3_card: {
+            plain_what: 'Click "Place order" on shop.example?',
+            browser_screenshot: 'data:image/png;base64,aGVsbG8=',
+          },
+        },
+        { tool_call_id: 'call-other', tier: 3, tier3_card: { plain_what: 'Send.' } },
+      ],
+    });
+    expect(click?.card.browser_screenshot).toBe('data:image/png;base64,aGVsbG8=');
+    expect(other?.card.browser_screenshot).toBeNull();
+  });
+
   it('parses per-tool-call approval cards with the backend field names', () => {
     const approvals = extractSentinelFromEvent(approvalEvent);
     expect(approvals).toHaveLength(2);

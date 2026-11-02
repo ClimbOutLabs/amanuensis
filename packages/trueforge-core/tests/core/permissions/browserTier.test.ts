@@ -1,7 +1,8 @@
-import type { BrowserClickReview } from '../../../src/core/llm/LLMTypes';
+import type { BrowserClickReview, InternalToolCallInfo } from '../../../src/core/llm/LLMTypes';
 import {
   BROWSER_CANCEL_QUALIFIERS,
   BROWSER_COMMIT_WORDS,
+  classifyBrowserActionTool,
   classifyBrowserClickKind,
   matchesCommitWord,
 } from '../../../src/core/permissions/browserTier';
@@ -11,8 +12,11 @@ import {
   BROWSER_TYPE_TOOL_NAME,
 } from '../../../src/core/permissions/browserToolNames';
 import { classifyTier, type ClassifyContext, type SentinelAction } from '../../../src/core/permissions/classifier';
-import { defaultSentinelServices } from '../../../src/core/permissions/context';
+import { createSentinelHostContext, defaultSentinelServices } from '../../../src/core/permissions/context';
 import { createWebSearchTurnState } from '../../../src/core/permissions/webSearch';
+import { classifyUnstampedToolCall } from '../../../src/core/runtime/AgentThread';
+
+const CLICK_SCREENSHOT = 'data:image/png;base64,aGVsbG8=';
 
 function makeCtx(): ClassifyContext {
   return {
@@ -247,5 +251,84 @@ describe('classifyTier: browser_click', () => {
   it('fails closed to the generic Tier 3 path when the host could not read the click context', async () => {
     const decision = await classifyTier(browserAction(BROWSER_CLICK_TOOL_NAME), makeCtx());
     expect(decision.tier).toBe(3);
+  });
+
+  it('puts the screenshot the host read on the commit card', async () => {
+    const decision = await classifyTier(
+      browserAction(BROWSER_CLICK_TOOL_NAME, {
+        canonical_params: { ref: 'e3' },
+        browser_click: clickReview({ accessible_name: 'Place order', is_form_submit: true }),
+        browser_click_screenshot: CLICK_SCREENSHOT,
+      }),
+      makeCtx(),
+    );
+    expect(decision.tier).toBe(3);
+    expect(decision.reason).toBe('browser_commit');
+    expect(decision.card?.browser_screenshot).toBe(CLICK_SCREENSHOT);
+  });
+
+  it('leaves the commit card screenshot null when the host read no screenshot', async () => {
+    const decision = await classifyTier(
+      browserAction(BROWSER_CLICK_TOOL_NAME, {
+        canonical_params: { ref: 'e3' },
+        browser_click: clickReview({ accessible_name: 'Place order', is_form_submit: true }),
+      }),
+      makeCtx(),
+    );
+    expect(decision.tier).toBe(3);
+    expect(decision.card?.browser_screenshot).toBeNull();
+  });
+});
+
+describe('classifyBrowserActionTool: a commit click screenshot and what the approval binds', () => {
+  it('shows the screenshot on the card and mints the token over exactly the ref and the review', async () => {
+    const review = clickReview({
+      accessible_name: 'Place order',
+      is_form_submit: true,
+      form_values: { card_last4: '4242' },
+    });
+    const minted: unknown[] = [];
+    const decision = await classifyBrowserActionTool({
+      action: {
+        tool_name: BROWSER_CLICK_TOOL_NAME,
+        canonical_params: { ref: 'e3' },
+        tool_type: 'truefoundry-system',
+        browser_click: review,
+        browser_click_screenshot: CLICK_SCREENSHOT,
+      },
+      mintToken: (params: unknown) => {
+        minted.push(params);
+        return Promise.resolve('token-1');
+      },
+    });
+    expect(decision?.tier).toBe(3);
+    expect(decision?.card?.browser_screenshot).toBe(CLICK_SCREENSHOT);
+    expect(decision?.approval_token_id).toBe('token-1');
+    // The screenshot is for the card only: what the approval binds is exactly the ref and the review.
+    expect(minted).toEqual([{ ref: 'e3', review }]);
+  });
+});
+
+describe('classifyUnstampedToolCall: a browser_click', () => {
+  it('carries the screenshot from the tool call info onto the stamped card', async () => {
+    const review = clickReview({ accessible_name: 'Place order', is_form_submit: true });
+    const info: InternalToolCallInfo = {
+      type: 'truefoundry-system',
+      mcp_server_id: '',
+      mcp_server_name: '',
+      original_tool_name: BROWSER_CLICK_TOOL_NAME,
+      browser_click: review,
+      browser_click_screenshot: CLICK_SCREENSHOT,
+    };
+    const sentinel = createSentinelHostContext({
+      tenant_id: 't1',
+      created_by: 'u1',
+      conversation_id: 'c1',
+      services: defaultSentinelServices({ pinned_path: '/usr/bin:/bin' }),
+    });
+    const stamped = await classifyUnstampedToolCall({ sentinel, canonical_params: { ref: 'e3' }, info });
+    expect(stamped.tier).toBe(3);
+    expect(stamped.is_approval_required).toBe(true);
+    expect(stamped.tier3_card?.browser_screenshot).toBe(CLICK_SCREENSHOT);
   });
 });

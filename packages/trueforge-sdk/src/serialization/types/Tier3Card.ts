@@ -11,6 +11,10 @@ import { Tier3Schedule } from "./Tier3Schedule.js";
 export const Tier3Card: core.serialization.ObjectSchema<serializers.Tier3Card.Raw, TrueForge.Tier3Card> =
     core.serialization.object({
         amount: core.serialization.string().nullable(),
+        browserScreenshot: core.serialization.property(
+            "browser_screenshot",
+            core.serialization.string().optionalNullable(),
+        ),
         calendarEvent: core.serialization.property("calendar_event", Tier3CalendarEvent.optionalNullable()),
         cannotBeUndone: core.serialization.property("cannot_be_undone", core.serialization.string().nullable()),
         destination: core.serialization.string().nullable(),
@@ -39,6 +43,7 @@ export const Tier3Card: core.serialization.ObjectSchema<serializers.Tier3Card.Ra
 export declare namespace Tier3Card {
     export interface Raw {
         amount?: string | null;
+        browser_screenshot?: (string | null | undefined) | null;
         calendar_event?: (Tier3CalendarEvent.Raw | null | undefined) | null;
         cannot_be_undone?: string | null;
         destination?: string | null;

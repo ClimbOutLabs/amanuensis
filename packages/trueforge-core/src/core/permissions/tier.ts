@@ -229,6 +229,13 @@ export const Tier3CardSchema = z
       .boolean()
       .optional()
       .describe('True when a card carrying mail_new_recipients approves saving a draft rather than sending.'),
+    browser_screenshot: z
+      .string()
+      .nullable()
+      .optional()
+      .describe(
+        'A picture of the page just before a browser click, as a data URL, for the person to check against. Null or absent for every other card.',
+      ),
   })
   .openapi('Tier3Card');
 
