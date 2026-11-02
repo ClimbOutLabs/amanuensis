@@ -9,11 +9,10 @@ import { startApprovalTestServer } from '../../trueforge/tests/fixtures/approval
 import { FINAL_TEXT } from '../../trueforge/tests/fixtures/scriptedModelServer.ts';
 import { inProcessApi } from './support/approvalChat.ts';
 import { findChromiumExecutable } from './support/findChromiumExecutable.ts';
+import { FIRST_LOAD_TIMEOUT_MS } from './support/firstLoad.ts';
 import { privateViteCache } from './support/viteCache.ts';
 
 const RENDER_TIMEOUT_MS = 45_000;
-/** The first page waits for the dev server's cold compile, which is slow while other suites run. */
-const FIRST_LOAD_TIMEOUT_MS = 120_000;
 
 type ColumnBox = { width: number; leftGap: number; rightGap: number; transition: string };
 
