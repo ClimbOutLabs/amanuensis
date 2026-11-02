@@ -13,6 +13,7 @@ export const BROWSER_CLICK_TOOL_NAME = 'browser_click';
 export const BROWSER_TYPE_TOOL_NAME = 'browser_type';
 export const BROWSER_SELECT_TOOL_NAME = 'browser_select';
 export const BROWSER_MOUSE_TOOL_NAME = 'browser_mouse';
+export const BROWSER_CLICK_TEXT_TOOL_NAME = 'browser_click_text';
 
 export const BROWSER_TOOL_NAMES = [
   BROWSER_OPEN_TOOL_NAME,
@@ -25,6 +26,7 @@ export const BROWSER_TOOL_NAMES = [
   BROWSER_TYPE_TOOL_NAME,
   BROWSER_SELECT_TOOL_NAME,
   BROWSER_MOUSE_TOOL_NAME,
+  BROWSER_CLICK_TEXT_TOOL_NAME,
 ] as const;
 
 export type BrowserToolName = (typeof BROWSER_TOOL_NAMES)[number];

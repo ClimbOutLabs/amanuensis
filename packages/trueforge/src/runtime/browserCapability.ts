@@ -54,7 +54,16 @@ const MouseReplySchema = z.discriminatedUnion('status', [
   z.object({ status: z.literal('closed') }),
 ]);
 
+const CLICK_TEXT_INPUT_SCHEMA = z
+  .object({
+    text: z.string().min(1).max(200).optional(),
+    sequence: z.array(z.string().min(1).max(200)).min(1).max(40).optional(),
+    nth: z.number().int().min(0).max(100).optional(),
+  })
+  .strict();
+
 type BrowserMouseInput = z.infer<typeof MOUSE_INPUT_SCHEMA>;
+type BrowserClickTextInput = z.infer<typeof CLICK_TEXT_INPUT_SCHEMA>;
 type BrowserClickInput = z.infer<typeof CLICK_INPUT_SCHEMA>;
 type BrowserSelectInput = z.infer<typeof SELECT_INPUT_SCHEMA>;
 type BrowserTypeInput = z.infer<typeof TYPE_INPUT_SCHEMA>;
@@ -238,7 +247,7 @@ function movedMessage(url: string): string {
 
 /** How the model reads its labelled screenshots. */
 const MARKED_NOTE =
-  'The picture follows as an image. Red boxes are controls, each labelled with its ref: click those with browser_click and the ref, not by position. Blue numbers are pixel positions every 100 px, for browser_mouse on spots with no ref.';
+  'The picture follows as an image. Red boxes are controls, each labelled with its ref: click those with browser_click and the ref, not by position. Blue numbers are pixel positions every 100 px (dotted lines every 50). For things with no ref, prefer browser_click_text with their visible text; use browser_mouse only when there is no text either.';
 
 const CLOSED_MESSAGE =
   "This chat's page is no longer open in Aman's browser: pages close when Aman restarts or to make room for other chats. Sign-ins are kept. Open the same address again with browser_open now, then try this step again, without asking the person.";
@@ -321,6 +330,14 @@ class BrowserTool extends LocalToolMCP {
       description: 'Go back to the previous page in the browser, then read it.',
       schema: EMPTY_INPUT_SCHEMA,
       handler: async () => this.page('/back'),
+    }),
+    defineTool({
+      name: 'browser_click_text',
+      annotations: { readOnlyHint: false, openWorldHint: true },
+      description:
+        'Click the visible thing whose own text is exactly `text`, for controls with no ref: a keypad digit ("7"), a day in a calendar ("14"), a tile. To enter a number on an on-screen keypad, pass `sequence` with one digit per item, like ["5","5","5","1","2","3"], and they are clicked in order. nth picks among several matches, 0 first in page order. You get the page text and a new screenshot back.',
+      schema: CLICK_TEXT_INPUT_SCHEMA,
+      handler: async (input: BrowserClickTextInput) => this.pointer('/click_text', input),
     }),
     defineTool({
       name: 'browser_mouse',
@@ -469,14 +486,20 @@ class BrowserTool extends LocalToolMCP {
 
   /** Moves the mouse on the page, then shows the model the page text and a fresh screenshot. */
   private async mouse(input: BrowserMouseInput): Promise<ReturnType<typeof toolResultResponse>> {
-    const result = await callBrowserSidecar({ path: '/mouse', tab: this.tab, schema: MouseReplySchema, body: input });
+    return this.pointer('/mouse', input);
+  }
+
+  private async pointer(path: string, input: Record<string, unknown>): Promise<ReturnType<typeof toolResultResponse>> {
+    const result = await callBrowserSidecar({ path, tab: this.tab, schema: MouseReplySchema, body: input });
     if (!result.ok) {
       this.logger.warn('browser sidecar call failed', { message: result.message });
       return errorResponse(result.message);
     }
     switch (result.body.status) {
       case 'no_element':
-        return errorResponse('That mouse action was not understood. A drag needs to_x and to_y.');
+        return errorResponse(
+          'Nothing to act on: no visible element has exactly that text, or the mouse action was not understood (a drag needs to_x and to_y).',
+        );
       case 'moved':
         return errorResponse(movedMessage(result.body.url));
       case 'closed':

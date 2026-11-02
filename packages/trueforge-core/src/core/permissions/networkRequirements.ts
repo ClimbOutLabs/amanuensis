@@ -53,6 +53,7 @@ const FIRST_PARTY_REQUIRES_NETWORK: Record<string, boolean> = {
   browser_type: true,
   browser_select: true,
   browser_mouse: true,
+  browser_click_text: true,
 };
 
 /**

@@ -59,6 +59,10 @@ export function changesState(info: InternalToolCallInfo, input: { countsTowardCa
   if (input.countsTowardCap) {
     return true;
   }
+  // Aman's browser: any step may change the page, so the same look or click can sensibly run again.
+  if (info.mcp_server_name === 'browser') {
+    return true;
+  }
   return (
     info.mcp_server_name === SANDBOX_MCP_SERVER_ID &&
     (info.effect === 'edit' || info.effect === 'commit' || info.effect === 'push')

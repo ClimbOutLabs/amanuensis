@@ -70,13 +70,27 @@ const MARK_SCRIPT = marks => {
   layer.style.cssText = 'position:fixed;inset:0;pointer-events:none;z-index:2147483647;font:bold 11px sans-serif';
   const width = window.innerWidth;
   const height = window.innerHeight;
-  for (let x = 100; x < width; x += 100) {
+  for (let x = 50; x < width; x += 50) {
+    if (x % 100 !== 0) {
+      layer.insertAdjacentHTML(
+        'beforeend',
+        `<div style="position:absolute;left:${x}px;top:0;bottom:0;border-left:1px dotted rgba(0,120,255,.2)"></div>`,
+      );
+      continue;
+    }
     layer.insertAdjacentHTML(
       'beforeend',
       `<div style="position:absolute;left:${x}px;top:0;bottom:0;border-left:1px dashed rgba(0,120,255,.35)"></div><div style="position:absolute;left:${x + 2}px;top:0;color:#0078ff;background:#fff">${x}</div>`,
     );
   }
-  for (let y = 100; y < height; y += 100) {
+  for (let y = 50; y < height; y += 50) {
+    if (y % 100 !== 0) {
+      layer.insertAdjacentHTML(
+        'beforeend',
+        `<div style="position:absolute;top:${y}px;left:0;right:0;border-top:1px dotted rgba(0,120,255,.2)"></div>`,
+      );
+      continue;
+    }
     layer.insertAdjacentHTML(
       'beforeend',
       `<div style="position:absolute;top:${y}px;left:0;right:0;border-top:1px dashed rgba(0,120,255,.35)"></div><div style="position:absolute;top:${y + 2}px;left:0;color:#0078ff;background:#fff">${y}</div>`,
@@ -616,6 +630,42 @@ export class BrowserSidecar {
     return { status: 'ok', text: read.text, png_base64: png };
   }
 
+  /**
+   * Clicks the `nth` visible element whose own text is exactly `text` (a keypad digit, a day in a date
+   * grid), for controls with no ref. Answers like a mouse action, with a fresh labelled screenshot.
+   */
+  async clickText({ owner, tab: tabId, texts, nth }) {
+    const tab = await this.#tabFor({ owner, tab: tabId, create: false });
+    const checked = this.#checkedPage(tab);
+    if (!checked.ok) {
+      return checked.result;
+    }
+    const page = tab.page;
+    let count = 0;
+    for (const text of texts) {
+      const matches = page.getByText(text, { exact: true }).filter({ visible: true });
+      count = await matches.count();
+      if (count === 0) {
+        return { status: 'no_element' };
+      }
+      await matches.nth(Math.min(nth, count - 1)).click({ timeout: 5000 });
+      await page.waitForTimeout(150);
+    }
+    await page.waitForLoadState('domcontentloaded', { timeout: this.#navTimeoutMs }).catch(() => undefined);
+    await page.waitForTimeout(300);
+    const read = await this.#read(tab);
+    if (read.status !== 'ok') {
+      return read;
+    }
+    const marked = await this.#markedShot(tab);
+    const png = marked ?? (await page.screenshot({ type: 'png' })).toString('base64');
+    return {
+      status: 'ok',
+      text: `${read.text}\n\n(clicked ${String(texts.length)} item(s) in order: ${texts.join(' ')})`,
+      png_base64: png,
+    };
+  }
+
   async screenshot({ owner, tab: tabId }) {
     const tab = await this.#tabFor({ owner, tab: tabId, create: false });
     const checked = this.#checkedPage(tab);
@@ -865,6 +915,17 @@ const ROUTES = {
   'POST /back': (sidecar, where) => sidecar.back(where),
   'POST /screenshot': (sidecar, where) => sidecar.screenshot(where),
   'POST /where': (sidecar, where) => sidecar.where(where),
+  'POST /click_text': (sidecar, where, body) => {
+    const texts = Array.isArray(body.sequence) ? body.sequence : [body.text];
+    if (
+      texts.length === 0 ||
+      texts.length > 40 ||
+      !texts.every(t => typeof t === 'string' && t !== '' && t.length <= 200)
+    ) {
+      return { status: 'no_element' };
+    }
+    return sidecar.clickText({ ...where, texts, nth: Number.isInteger(body.nth) && body.nth >= 0 ? body.nth : 0 });
+  },
   'POST /mouse': (sidecar, where, body) => {
     const n = value => typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 4000;
     if (!n(body.x) || !n(body.y) || (body.action === 'drag' && (!n(body.to_x) || !n(body.to_y)))) {
