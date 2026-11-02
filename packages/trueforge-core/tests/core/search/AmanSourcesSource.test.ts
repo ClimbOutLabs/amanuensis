@@ -198,6 +198,53 @@ describe('isAmanSourceUrl', () => {
     expect(isAmanSourceUrl(`${REPO}/%69ssues/12`, prefixes)).toBe(false);
   });
 
+  it('accepts the exact configured origins for the repo and a configured docs site', () => {
+    const withDocs = amanSourcePrefixes({ docsSiteUrl: 'https://docs.example.org' });
+    expect(isAmanSourceUrl(FILE_URL, withDocs)).toBe(true);
+    expect(isAmanSourceUrl('https://docs.example.org/install', withDocs)).toBe(true);
+  });
+
+  it('rejects the repo and docs hosts when the link carries a non-default port', () => {
+    const withDocs = amanSourcePrefixes({ docsSiteUrl: 'https://docs.example.org' });
+    expect(
+      isAmanSourceUrl('https://github.com:8443/ClimbOutLabs/amanuensis/blob/main/docs/install.mdx', withDocs),
+    ).toBe(false);
+    expect(isAmanSourceUrl('https://docs.example.org:8443/install', withDocs)).toBe(false);
+  });
+
+  it('rejects the repo and docs hosts when the link carries userinfo', () => {
+    const withDocs = amanSourcePrefixes({ docsSiteUrl: 'https://docs.example.org' });
+    expect(
+      isAmanSourceUrl('https://someone@github.com/ClimbOutLabs/amanuensis/blob/main/docs/install.mdx', withDocs),
+    ).toBe(false);
+    expect(
+      isAmanSourceUrl('https://someone:secret@github.com/ClimbOutLabs/amanuensis/blob/main/docs/install.mdx', withDocs),
+    ).toBe(false);
+    expect(isAmanSourceUrl('https://someone@docs.example.org/install', withDocs)).toBe(false);
+    expect(isAmanSourceUrl('https://someone:secret@docs.example.org/install', withDocs)).toBe(false);
+  });
+
+  it('accepts a configured docs site on its configured port and rejects other ports on that host', () => {
+    const withDocsPort = amanSourcePrefixes({ docsSiteUrl: 'https://docs.example.org:8443/docs' });
+    expect(isAmanSourceUrl('https://docs.example.org:8443/docs/install', withDocsPort)).toBe(true);
+    expect(isAmanSourceUrl('https://docs.example.org/docs/install', withDocsPort)).toBe(false);
+    expect(isAmanSourceUrl('https://docs.example.org:9443/docs/install', withDocsPort)).toBe(false);
+    expect(isAmanSourceUrl('https://someone@docs.example.org:8443/docs/install', withDocsPort)).toBe(false);
+  });
+
+  it('rejects a place anyone can write in however it is capitalised', () => {
+    expect(isAmanSourceUrl(`${REPO}/Issues/42`, prefixes)).toBe(false);
+    expect(isAmanSourceUrl(`${REPO}/PULL/43`, prefixes)).toBe(false);
+    expect(isAmanSourceUrl(`${REPO}/Pulls`, prefixes)).toBe(false);
+    expect(isAmanSourceUrl(`${REPO}/DISCUSSIONS/44`, prefixes)).toBe(false);
+  });
+
+  it('rejects a path step whose decoding contains a slash', () => {
+    expect(isAmanSourceUrl(`${REPO}/issues%2F42`, prefixes)).toBe(false);
+    expect(isAmanSourceUrl(`${REPO}/%69ssues%2F42`, prefixes)).toBe(false);
+    expect(isAmanSourceUrl(`${REPO}/blob%2Fmain/docs/install.mdx`, prefixes)).toBe(false);
+  });
+
   it('rejects a path step that is not valid percent-encoding', () => {
     expect(isAmanSourceUrl(`${REPO}/tree/%zz`, prefixes)).toBe(false);
   });

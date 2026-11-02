@@ -78,6 +78,12 @@ export function isAmanSourceUrl(url: string, prefixes: readonly string[]): boole
     if (parsed.hostname !== allowed.hostname) {
       continue;
     }
+    // The origin must match exactly too: the prefixes carry no port and no
+    // userinfo, so a link with either is not the configured source, even on
+    // the right host.
+    if (parsed.port !== allowed.port || parsed.username !== '' || parsed.password !== '') {
+      continue;
+    }
     // Membership is decided on the parsed path alone: the path equals the prefix
     // path, or sits under it. Parsing has already folded dot steps, plain and
     // percent-encoded, into the path, so the parsed path is the one a host
@@ -99,10 +105,15 @@ export function isAmanSourceUrl(url: string, prefixes: readonly string[]): boole
         } catch {
           return false;
         }
+        // A decoded step that holds a slash would split into further steps
+        // on the host, so it is not the single step it looks like here.
+        if (decoded.includes('/')) {
+          return false;
+        }
         segments.push(decoded);
       }
       const firstSegment = segments[0];
-      if (firstSegment !== undefined && REPO_WRITE_SEGMENTS.has(firstSegment)) {
+      if (firstSegment !== undefined && REPO_WRITE_SEGMENTS.has(firstSegment.toLowerCase())) {
         return false;
       }
     }
