@@ -519,6 +519,50 @@ export class BrowserSidecar {
     return this.#read(tab);
   }
 
+  /**
+   * Moves the mouse at a spot of the page as the screenshot shows it (CSS pixels of the 1280x800 view):
+   * a move, a hover, a click, a double click or a drag. Answers with the page text and a fresh screenshot.
+   */
+  async mouse({ owner, tab: tabId, action, x, y, toX, toY }) {
+    const tab = await this.#tabFor({ owner, tab: tabId, create: false });
+    const checked = this.#checkedPage(tab);
+    if (!checked.ok) {
+      return checked.result;
+    }
+    const page = tab.page;
+    switch (action) {
+      case 'move':
+      case 'hover':
+        await page.mouse.move(x, y, { steps: 5 });
+        break;
+      case 'click':
+        await page.mouse.click(x, y);
+        break;
+      case 'double_click':
+        await page.mouse.dblclick(x, y);
+        break;
+      case 'right_click':
+        await page.mouse.click(x, y, { button: 'right' });
+        break;
+      case 'drag':
+        await page.mouse.move(x, y);
+        await page.mouse.down();
+        await page.mouse.move(toX, toY, { steps: 15 });
+        await page.mouse.up();
+        break;
+      default:
+        return { status: 'no_element' };
+    }
+    await page.waitForLoadState('domcontentloaded', { timeout: this.#navTimeoutMs }).catch(() => undefined);
+    await page.waitForTimeout(400);
+    const read = await this.#read(tab);
+    if (read.status !== 'ok') {
+      return read;
+    }
+    const png = await page.screenshot({ type: 'png' });
+    return { status: 'ok', text: read.text, png_base64: png.toString('base64') };
+  }
+
   async screenshot({ owner, tab: tabId }) {
     const tab = await this.#tabFor({ owner, tab: tabId, create: false });
     const checked = this.#checkedPage(tab);
@@ -746,6 +790,13 @@ const ROUTES = {
   'POST /back': (sidecar, where) => sidecar.back(where),
   'POST /screenshot': (sidecar, where) => sidecar.screenshot(where),
   'POST /where': (sidecar, where) => sidecar.where(where),
+  'POST /mouse': (sidecar, where, body) => {
+    const n = value => typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 4000;
+    if (!n(body.x) || !n(body.y) || (body.action === 'drag' && (!n(body.to_x) || !n(body.to_y)))) {
+      return { status: 'no_element' };
+    }
+    return sidecar.mouse({ ...where, action: body.action, x: body.x, y: body.y, toX: body.to_x, toY: body.to_y });
+  },
   'POST /click': (sidecar, where, body) => sidecar.click({ ...where, ref: body.ref }),
   'POST /select': (sidecar, where, body) => sidecar.select({ ...where, ref: body.ref, option: body.option }),
   'POST /type': (sidecar, where, body) =>

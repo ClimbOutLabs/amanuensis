@@ -38,6 +38,23 @@ const TYPE_INPUT_SCHEMA = z
 
 const SELECT_INPUT_SCHEMA = z.object({ ref: z.string().min(1).max(32), option: z.string().min(1).max(500) }).strict();
 
+const MOUSE_INPUT_SCHEMA = z
+  .object({
+    action: z.enum(['move', 'hover', 'click', 'double_click', 'right_click', 'drag']),
+    x: z.number().min(0).max(4000),
+    y: z.number().min(0).max(4000),
+    to_x: z.number().min(0).max(4000).optional(),
+    to_y: z.number().min(0).max(4000).optional(),
+  })
+  .strict();
+const MouseReplySchema = z.discriminatedUnion('status', [
+  z.object({ status: z.literal('ok'), text: z.string(), png_base64: z.string().min(1) }),
+  z.object({ status: z.literal('no_element') }),
+  z.object({ status: z.literal('moved'), url: z.string() }),
+  z.object({ status: z.literal('closed') }),
+]);
+
+type BrowserMouseInput = z.infer<typeof MOUSE_INPUT_SCHEMA>;
 type BrowserClickInput = z.infer<typeof CLICK_INPUT_SCHEMA>;
 type BrowserSelectInput = z.infer<typeof SELECT_INPUT_SCHEMA>;
 type BrowserTypeInput = z.infer<typeof TYPE_INPUT_SCHEMA>;
@@ -302,6 +319,14 @@ class BrowserTool extends LocalToolMCP {
       handler: async () => this.page('/back'),
     }),
     defineTool({
+      name: 'browser_mouse',
+      annotations: { readOnlyHint: false, openWorldHint: true },
+      description:
+        'Use the mouse at a spot on the open page, in pixels of the latest screenshot (the view is 1280x800): move, hover, click, double_click, right_click, or drag from x,y to to_x,to_y. For hover menus, sliders, charts and maps. Prefer browser_click with a ref when the thing has one. You get the page text and a new screenshot back.',
+      schema: MOUSE_INPUT_SCHEMA,
+      handler: async (input: BrowserMouseInput) => this.mouse(input),
+    }),
+    defineTool({
       name: 'browser_click',
       annotations: { readOnlyHint: false, openWorldHint: true },
       description:
@@ -440,6 +465,30 @@ class BrowserTool extends LocalToolMCP {
         return errorResponse(CLOSED_MESSAGE);
       case 'ok':
         return toolResultResponse({ text: result.body.text });
+    }
+  }
+
+  /** Moves the mouse on the page, then shows the model the page text and a fresh screenshot. */
+  private async mouse(input: BrowserMouseInput): Promise<ReturnType<typeof toolResultResponse>> {
+    const result = await callBrowserSidecar({ path: '/mouse', tab: this.tab, schema: MouseReplySchema, body: input });
+    if (!result.ok) {
+      this.logger.warn('browser sidecar call failed', { message: result.message });
+      return errorResponse(result.message);
+    }
+    switch (result.body.status) {
+      case 'no_element':
+        return errorResponse('That mouse action was not understood. A drag needs to_x and to_y.');
+      case 'moved':
+        return errorResponse(movedMessage(result.body.url));
+      case 'closed':
+        return errorResponse(CLOSED_MESSAGE);
+      case 'ok': {
+        const picture = randomUUID();
+        this.screenshots.set(picture, result.body.png_base64);
+        return toolResultResponse({
+          text: `${result.body.text}\n\n(picture ${picture}: a screenshot after the mouse action follows as an image)`,
+        });
+      }
     }
   }
 
