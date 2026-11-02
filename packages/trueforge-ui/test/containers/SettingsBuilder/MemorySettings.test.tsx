@@ -695,3 +695,71 @@ describe('MemorySettings (use memories in replies)', () => {
     expect(screen.queryByRole('switch', { name: 'Use memories in replies' })).not.toBeInTheDocument();
   });
 });
+
+describe('MemorySettings (past-chat search)', () => {
+  /** A chat-search port backed by one stored value, as the server keeps it. */
+  function chatSearchPort(initial: boolean) {
+    const state = { enabled: initial };
+    const setChatSearchEnabled = vi.fn(async (next: boolean) => {
+      state.enabled = next;
+      return { enabled: state.enabled };
+    });
+    return {
+      setChatSearchEnabled,
+      server: {
+        ...capabilitiesWith({ memoryDefaults: MARKDOWN_DEFAULTS }),
+        chatSearch: { getChatSearch: async () => ({ enabled: state.enabled }), setChatSearchEnabled },
+      },
+    };
+  }
+
+  it('is off until the person turns it on, and saves each flip', async () => {
+    const { server, setChatSearchEnabled } = chatSearchPort(false);
+    renderMemory(server);
+
+    const toggle = await screen.findByRole('switch', { name: 'Let Aman search your past chats when you ask' });
+    expect(toggle).not.toBeChecked();
+
+    fireEvent.click(toggle);
+    await waitFor(() => {
+      expect(setChatSearchEnabled).toHaveBeenLastCalledWith(true);
+    });
+    await waitFor(() => {
+      expect(screen.getByRole('switch', { name: 'Let Aman search your past chats when you ask' })).toBeChecked();
+    });
+
+    fireEvent.click(screen.getByRole('switch', { name: 'Let Aman search your past chats when you ask' }));
+    await waitFor(() => {
+      expect(setChatSearchEnabled).toHaveBeenLastCalledWith(false);
+    });
+    await waitFor(() => {
+      expect(screen.getByRole('switch', { name: 'Let Aman search your past chats when you ask' })).not.toBeChecked();
+    });
+  });
+
+  it('shows the stored on value', async () => {
+    renderMemory(chatSearchPort(true).server);
+
+    await waitFor(() => {
+      expect(screen.getByRole('switch', { name: 'Let Aman search your past chats when you ask' })).toBeChecked();
+    });
+  });
+
+  it('shows a plain message and keeps the old value when the save fails', async () => {
+    const { server } = chatSearchPort(false);
+    const failingServer = {
+      ...server,
+      chatSearch: {
+        ...server.chatSearch,
+        setChatSearchEnabled: async () => {
+          throw new Error('The past-chat search switch failed with HTTP 500. Try again in a moment.');
+        },
+      },
+    };
+    renderMemory(failingServer);
+
+    fireEvent.click(await screen.findByRole('switch', { name: 'Let Aman search your past chats when you ask' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('Try again in a moment');
+    expect(screen.getByRole('switch', { name: 'Let Aman search your past chats when you ask' })).not.toBeChecked();
+  });
+});

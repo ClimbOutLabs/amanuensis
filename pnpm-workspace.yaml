@@ -36,6 +36,10 @@ overrides:
   # mcp/gmail needs ^10.9.0; one 10.x keeps OAuth2Client types unified so the
   # vendored Gmail MCP server typechecks.
   google-auth-library: '^10.9.0'
+  # Optional peer of @truefoundry/assistant-ui-runtime that ships no license.
+  # The runtime patch drops its only import, so it is never installed.
+  truefoundry-gateway-sdk: '-'
 
 patchedDependencies:
+  '@openuidev/react-lang@0.2.15': patches/@openuidev__react-lang@0.2.15.patch
   '@truefoundry/assistant-ui-runtime@0.1.37': patches/@truefoundry__assistant-ui-runtime@0.1.37.patch

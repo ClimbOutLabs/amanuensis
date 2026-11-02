@@ -11,9 +11,8 @@ Amanuensis (Aman) is licensed under the Mozilla Public License 2.0 (see `LICENSE
 5. Vendored Apache-2.0 code
 6. mcp/gmail (MIT)
 7. Llama Prompt Guard 2 (Llama 4 Community License)
-8. Dependencies with no declared license
-9. Mail and calendar connector sidecars (BSD-3-Clause, MIT)
-10. Local voice for spoken replies (Apache-2.0, MIT, BSD)
+8. Mail and calendar connector sidecars (BSD-3-Clause, MIT)
+9. Local voice for spoken replies (Apache-2.0, MIT, BSD)
 
 ## 1. sharp and libvips (LGPL-3.0-or-later)
 
@@ -683,16 +682,7 @@ Llama 4 is licensed under the Llama 4 Community License, Copyright © Meta Platf
 
 The license text is available at https://github.com/meta-llama/llama-models/blob/main/models/llama4/LICENSE, and its Acceptable Use Policy at https://www.llama.com/llama4/use-policy. Section 1.b.iii of the license requires the attribution notice above, quoted verbatim, to be retained in a `Notice` text file distributed with copies of the Llama Materials; section 1.b.i requires a copy of the license to accompany any distributed Llama Materials and "Built with Llama" to be displayed on related documentation. If you redistribute the model weights, for example by baking them into an image, include the license text and this notice with them.
 
-## 8. Dependencies with no declared license
-
-The following transitive dependencies (via `bash-parser`, which is MIT) ship no license file and declare no license in their package metadata. No license is granted by their authors, so they are listed here rather than relicensed:
-
-| Package         | Version | Status                            |
-| --------------- | ------- | --------------------------------- |
-| curry           | 1.2.0   | no license declared by the author |
-| filter-iterator | 0.0.1   | no license declared by the author |
-
-## 9. Mail and calendar connector sidecars (BSD-3-Clause, MIT)
+## 8. Mail and calendar connector sidecars (BSD-3-Clause, MIT)
 
 The built-in Email and Calendar connectors run these components in their own private containers. Aman does not copy their code.
 
@@ -767,7 +757,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-## 10. Local voice for spoken replies (Apache-2.0, MIT, BSD)
+## 9. Local voice for spoken replies (Apache-2.0, MIT, BSD)
 
 The `ops/aman-tts` image reads replies aloud on the person's own computer. Its build downloads these files, pinned by SHA-256 in `ops/aman-tts/pins.py`, and the image contains them unmodified except that only six American English voices are kept.
 

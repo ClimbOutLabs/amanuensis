@@ -39,6 +39,7 @@ import {
   type UpdateSpaceInput,
 } from '../../../src/db/spaceStore';
 import { spaceCapability, type SpaceToolStore } from '../../../src/runtime/spaceCapability';
+import { noSpaceFolders } from './spaceFolderStoreFake';
 
 const NOOP_EXECUTION_TRACE: AgentExecutionTrace = {
   runInContext: operation => operation(),
@@ -69,6 +70,10 @@ const SPACE_REVISION_HISTORY_LIMIT = 20;
 
 /** Same in-memory store as the delta journey test: real persistence, fencing, history. */
 class InMemorySpaceStore implements SpaceToolStore {
+  listSpaceFolders = noSpaceFolders.listSpaceFolders;
+  createSpaceFolder = noSpaceFolders.createSpaceFolder;
+  setSpaceFolder = noSpaceFolders.setSpaceFolder;
+  listSpaceFolderAssignments = noSpaceFolders.listSpaceFolderAssignments;
   private spaces = new Map<string, SpaceRecord>();
   private history = new Map<string, SpaceRecord[]>();
   private aggregateRevision = 0;

@@ -1,8 +1,10 @@
 // @vitest-environment jsdom
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { useEffect } from 'react';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { ExternalUrlConfirmProvider, MarkdownExternalLink } from '@/atoms/externalUrlConfirm.js';
+import { EXTERNAL_URL_TRUST_STORAGE_KEY, clearSessionImageTrust } from '@/atoms/externalUrlTrust.js';
 import { LARGE_STREAMING_FENCE_CHARS, Markdown, getActiveStreamingFenceCode } from '@/atoms/Markdown.js';
 import type { SyntaxHighlighterProps } from '@/atoms/SyntaxHighlighter.js';
 import { SlotsProvider } from '@/theme/SlotsProvider.js';
@@ -30,6 +32,16 @@ vi.mock('katex', async importOriginal => {
 
 // @openuidev mocks are in testSetup.ts; they make OpenUiFenceBlock render
 // a simple div with data-testid="aui-openui-renderer" synchronously.
+// The <dialog> showModal/close mocks the external URL confirm dialog needs
+// are also in testSetup.ts.
+
+afterEach(() => {
+  cleanup();
+  window.localStorage.removeItem(EXTERNAL_URL_TRUST_STORAGE_KEY);
+  window.localStorage.removeItem('aui-trusted-external-hosts');
+  clearSessionImageTrust();
+  vi.restoreAllMocks();
+});
 
 describe('getActiveStreamingFenceCode', () => {
   it('returns null when every fence is closed', () => {
@@ -50,13 +62,127 @@ describe('Markdown', () => {
     expect(strong.closest('.markdown-body')).toBeTruthy();
   });
 
-  it('opens links in a new tab', () => {
+  it('marks external links for a new tab and confirms before opening', () => {
+    const openSpy = vi.spyOn(window, 'open').mockReturnValue(null);
     render(<Markdown content="See [docs](https://example.com/docs) for details." />);
     const link = screen.getByRole('link', { name: 'docs' });
-    expect(link).toHaveAttribute('href', 'https://example.com/docs');
+    // Unapproved external destinations stay off href so middle-click / context-menu cannot bypass.
+    expect(link).toHaveAttribute('href', '#');
     expect(link).toHaveAttribute('target', '_blank');
     expect(link).toHaveAttribute('rel', 'noopener noreferrer');
     expect(link).not.toHaveAttribute('node');
+
+    fireEvent.click(link);
+    expect(openSpy).not.toHaveBeenCalled();
+    expect(screen.getByRole('dialog', { name: 'Open external link' })).toBeInTheDocument();
+    expect(screen.getByTestId('aui-external-url-confirm-url')).toHaveTextContent('https://example.com/docs');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(screen.queryByRole('dialog', { name: 'Open external link' })).not.toBeInTheDocument();
+    expect(openSpy).not.toHaveBeenCalled();
+
+    fireEvent.click(link);
+    fireEvent.click(screen.getByRole('button', { name: 'Open link' }));
+    expect(openSpy).toHaveBeenCalledWith('https://example.com/docs', '_blank', 'noopener,noreferrer');
+  });
+
+  it('confirms protocol-relative external links and blocks middle-click bypass', () => {
+    const openSpy = vi.spyOn(window, 'open').mockReturnValue(null);
+    render(<Markdown content="See [cdn](//cdn.example.com/a) for details." />);
+    const link = screen.getByRole('link', { name: 'cdn' });
+    expect(link).toHaveAttribute('href', '#');
+
+    fireEvent(link, new MouseEvent('auxclick', { bubbles: true, cancelable: true, button: 1 }));
+    expect(openSpy).not.toHaveBeenCalled();
+    expect(screen.getByRole('dialog', { name: 'Open external link' })).toBeInTheDocument();
+    expect(screen.getByTestId('aui-external-url-confirm-url')).toHaveTextContent('//cdn.example.com/a');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open link' }));
+    const expected = new URL('//cdn.example.com/a', window.location.href).href;
+    expect(openSpy).toHaveBeenCalledWith(expected, '_blank', 'noopener,noreferrer');
+  });
+
+  it('blocks javascript, data, and vbscript href activation', () => {
+    const openSpy = vi.spyOn(window, 'open').mockReturnValue(null);
+    render(
+      <ExternalUrlConfirmProvider>
+        <MarkdownExternalLink href="javascript:alert(1)">js</MarkdownExternalLink>
+        <MarkdownExternalLink href="data:text/html,hi">data</MarkdownExternalLink>
+        <MarkdownExternalLink href="vbscript:msgbox(1)">vb</MarkdownExternalLink>
+      </ExternalUrlConfirmProvider>,
+    );
+
+    for (const name of ['js', 'data', 'vb'] as const) {
+      const el = screen.getByText(name);
+      expect(el).not.toHaveAttribute('href');
+      fireEvent.click(el);
+      fireEvent(el, new MouseEvent('auxclick', { bubbles: true, cancelable: true, button: 1 }));
+    }
+
+    expect(screen.queryByRole('dialog', { name: 'Open external link' })).not.toBeInTheDocument();
+    expect(openSpy).not.toHaveBeenCalled();
+  });
+
+  it('skips the link dialog after trusting an origin', () => {
+    const openSpy = vi.spyOn(window, 'open').mockReturnValue(null);
+    render(<Markdown content="See [docs](https://example.com/docs) for details." />);
+    const link = screen.getByRole('link', { name: 'docs' });
+
+    fireEvent.click(link);
+    expect(screen.getByRole('checkbox')).toHaveTextContent("Don't ask again for links to https://example.com");
+    fireEvent.click(screen.getByRole('checkbox'));
+    fireEvent.click(screen.getByRole('button', { name: 'Open link' }));
+    expect(openSpy).toHaveBeenCalledTimes(1);
+    expect(link).toHaveAttribute('href', '#');
+
+    fireEvent.click(link);
+    expect(screen.queryByRole('dialog', { name: 'Open external link' })).not.toBeInTheDocument();
+    expect(openSpy).toHaveBeenCalledTimes(2);
+  });
+
+  it('still confirms a link to the same host on another scheme or port after trusting an origin', () => {
+    const openSpy = vi.spyOn(window, 'open').mockReturnValue(null);
+    render(
+      <Markdown
+        content={'See [secure](https://example.com/docs) and [other](http://example.com:8080/docs) for details.'}
+      />,
+    );
+    const secureLink = screen.getByRole('link', { name: 'secure' });
+    const otherLink = screen.getByRole('link', { name: 'other' });
+
+    fireEvent.click(secureLink);
+    fireEvent.click(screen.getByRole('checkbox'));
+    fireEvent.click(screen.getByRole('button', { name: 'Open link' }));
+    expect(openSpy).toHaveBeenCalledTimes(1);
+
+    // Trusting https://example.com must not also trust http://example.com:8080.
+    fireEvent.click(otherLink);
+    expect(openSpy).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole('dialog', { name: 'Open external link' })).toBeInTheDocument();
+    expect(screen.getByTestId('aui-external-url-confirm-url')).toHaveTextContent('http://example.com:8080/docs');
+  });
+
+  it('does not confirm same-origin links', () => {
+    const openSpy = vi.spyOn(window, 'open').mockReturnValue(null);
+    const href = `${window.location.origin}/local-docs`;
+    render(<Markdown content={`See [local](${href}) for details.`} />);
+    fireEvent.click(screen.getByRole('link', { name: 'local' }));
+    expect(screen.queryByRole('dialog', { name: 'Open external link' })).not.toBeInTheDocument();
+    expect(openSpy).not.toHaveBeenCalled();
+  });
+
+  it('confirms a link to the same host on a different port', () => {
+    const openSpy = vi.spyOn(window, 'open').mockReturnValue(null);
+    const origin = new URL(window.location.origin);
+    const otherPort = origin.port === '9000' ? '9001' : '9000';
+    const href = `${origin.protocol}//${origin.hostname}:${otherPort}/local-docs`;
+    render(<Markdown content={`See [other port](${href}) for details.`} />);
+    const link = screen.getByRole('link', { name: 'other port' });
+    expect(link).toHaveAttribute('href', '#');
+    fireEvent.click(link);
+    expect(openSpy).not.toHaveBeenCalled();
+    expect(screen.getByRole('dialog', { name: 'Open external link' })).toBeInTheDocument();
+    expect(screen.getByTestId('aui-external-url-confirm-url')).toHaveTextContent(href);
   });
 
   it('renders openui fenced blocks via OpenUiFenceBlock', async () => {
@@ -250,7 +376,8 @@ describe('Markdown', () => {
       />,
     );
     const link = screen.getByRole('link', { name: 'link' });
-    expect(link).toHaveAttribute('href', 'https://example.com/page');
+    // External destinations stay off href until the person confirms (see the link tests above).
+    expect(link).toHaveAttribute('href', '#');
     expect(link).toHaveAttribute('title', 'a title');
     const img = screen.getByRole('img', { name: 'alt' });
     expect(img).toHaveAttribute('src', 'data:image/png;base64,AAAA');
@@ -417,19 +544,98 @@ describe('Markdown remote images', () => {
     expect(link).toHaveAttribute('rel', 'noopener noreferrer');
   });
 
-  it('keeps the remote image off the page until the person asks for it', () => {
+  it('keeps the remote image off the page until the person confirms it', () => {
     render(<Markdown content="![sales chart](https://evil.example/p.png)" />);
     expect(document.querySelector('img[src="https://evil.example/p.png"]')).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: 'Show image: sales chart' }));
+    // The confirm dialog stands between the ask and any request to the host.
+    expect(screen.getByRole('dialog', { name: 'Show external image' })).toBeInTheDocument();
+    expect(screen.getByTestId('aui-external-url-confirm-url')).toHaveTextContent('https://evil.example/p.png');
+    expect(document.querySelector('img[src="https://evil.example/p.png"]')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Show image' }));
     const img = screen.getByRole('img', { name: 'sales chart' });
     expect(img).toHaveAttribute('src', 'https://evil.example/p.png');
     expect(img).toHaveAttribute('referrerpolicy', 'no-referrer');
     expect(img).toHaveAttribute('loading', 'lazy');
   });
 
+  it('keeps the remote image off the page when the person cancels the confirm', () => {
+    render(<Markdown content="![sales chart](https://evil.example/p.png)" />);
+    fireEvent.click(screen.getByRole('button', { name: 'Show image: sales chart' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(screen.queryByRole('dialog', { name: 'Show external image' })).not.toBeInTheDocument();
+    expect(document.querySelector('img[src="https://evil.example/p.png"]')).toBeNull();
+    expect(screen.getByTestId('aui-remote-image-placeholder')).toBeInTheDocument();
+  });
+
+  it('loads a remote image without asking when that exact image is remembered on this device', () => {
+    window.localStorage.setItem(
+      EXTERNAL_URL_TRUST_STORAGE_KEY,
+      JSON.stringify({ version: 2, links: [], images: ['https://evil.example/p.png'] }),
+    );
+    render(<Markdown content="![sales chart](https://evil.example/p.png)" />);
+    expect(screen.queryByRole('button', { name: 'Show image: sales chart' })).toBeNull();
+    const img = screen.getByRole('img', { name: 'sales chart' });
+    expect(img).toHaveAttribute('src', 'https://evil.example/p.png');
+  });
+
+  it('does not load an image from a host-wide entry left by the old store', () => {
+    window.localStorage.setItem(
+      EXTERNAL_URL_TRUST_STORAGE_KEY,
+      JSON.stringify({ version: 1, links: [], images: ['evil.example'] }),
+    );
+    render(<Markdown content="![sales chart](https://evil.example/p.png)" />);
+    expect(screen.getByRole('button', { name: 'Show image: sales chart' })).toBeInTheDocument();
+    expect(document.querySelector('img')).toBeNull();
+  });
+
+  it('labels the image remember choice for this image only', () => {
+    render(<Markdown content="![sales chart](https://evil.example/p.png)" />);
+    fireEvent.click(screen.getByRole('button', { name: 'Show image: sales chart' }));
+    expect(screen.getByRole('checkbox')).toHaveTextContent("Don't ask again for this image");
+  });
+
+  it('remembering one image does not load another image from the same host', () => {
+    const first = render(<Markdown content="![first](https://evil.example/first.png)" />);
+    fireEvent.click(screen.getByRole('button', { name: 'Show image: first' }));
+    fireEvent.click(screen.getByRole('checkbox'));
+    fireEvent.click(screen.getByRole('button', { name: 'Show image' }));
+    expect(screen.getByRole('img', { name: 'first' })).toHaveAttribute('src', 'https://evil.example/first.png');
+    first.unmount();
+    render(<Markdown content="![second](https://evil.example/second.png)" />);
+    expect(screen.getByRole('button', { name: 'Show image: second' })).toBeInTheDocument();
+    expect(document.querySelector('img[src="https://evil.example/second.png"]')).toBeNull();
+  });
+
+  it('keeps a session image choice for the same image in a later message', () => {
+    const first = render(<Markdown content="![sales chart](https://evil.example/p.png)" />);
+    fireEvent.click(screen.getByRole('button', { name: 'Show image: sales chart' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Show image' }));
+    expect(screen.getByRole('img', { name: 'sales chart' })).toBeInTheDocument();
+    first.unmount();
+    // A later message is a new Markdown block with its own provider; the
+    // session choice must still count there, without being remembered for good.
+    render(<Markdown content="![sales chart](https://evil.example/p.png)" />);
+    expect(screen.queryByRole('button', { name: 'Show image: sales chart' })).toBeNull();
+    expect(screen.getByRole('img', { name: 'sales chart' })).toHaveAttribute('src', 'https://evil.example/p.png');
+    expect(window.localStorage.getItem(EXTERNAL_URL_TRUST_STORAGE_KEY)).toBeNull();
+  });
+
+  it('does not spread a session image choice to another image from the same host', () => {
+    render(
+      <Markdown content={'![first](https://evil.example/first.png)\n\n![second](https://evil.example/second.png)'} />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Show image: first' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Show image' }));
+    expect(screen.getByRole('img', { name: 'first' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Show image: second' })).toBeInTheDocument();
+    expect(document.querySelector('img[src="https://evil.example/second.png"]')).toBeNull();
+  });
+
   it('shows the alt text, not an empty box, when a requested remote image fails', () => {
     render(<Markdown content="![sales chart](https://evil.example/p.png)" />);
     fireEvent.click(screen.getByRole('button', { name: 'Show image: sales chart' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Show image' }));
     fireEvent.error(screen.getByRole('img', { name: 'sales chart' }));
     expect(screen.queryByRole('img')).toBeNull();
     expect(screen.getByTestId('aui-remote-image-placeholder')).toHaveTextContent('Image unavailable: sales chart');

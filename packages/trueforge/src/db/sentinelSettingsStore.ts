@@ -17,6 +17,9 @@ export interface PatchSentinelSettingsInput extends SentinelSettingsOwner {
   maps_without_asking: boolean | undefined;
   /** Undefined keeps the stored value. */
   sandbox_without_asking: boolean | undefined;
+  /** Undefined keeps the stored value. */
+  chat_search_enabled: boolean | undefined;
+  package_downloads_without_project_allowed: boolean | undefined;
 }
 
 /**
@@ -35,6 +38,8 @@ export const DEFAULT_SENTINEL_USER_SETTINGS: SentinelUserSettings = {
   search_without_asking: true,
   maps_without_asking: true,
   sandbox_without_asking: true,
+  chat_search_enabled: false,
+  package_downloads_without_project_allowed: false,
 };
 
 /** Deduplicated kinds in the canonical kind order, so equal sets always store and read identically. */

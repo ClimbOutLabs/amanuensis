@@ -10,14 +10,14 @@
 </p>
 
 <p align="center">
-  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MPL_2.0-c9a95a.svg" alt="License: MPL 2.0"></a>
-  <img src="https://img.shields.io/badge/runs_on-NVIDIA_Nemotron-7d5f15.svg" alt="Runs on NVIDIA Nemotron">
-  <img src="https://img.shields.io/badge/your_data-stays_on_your_disk-c9a95a.svg" alt="Your data stays on your disk">
+  <img src="https://img.shields.io/badge/runs_on-your_own_computer-c9a95a.svg" alt="Runs on your own computer">
+  <img src="https://img.shields.io/badge/works_with-a_fully_local_model-7d5f15.svg" alt="Works with a fully local model">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/free_and-open_source-c9a95a.svg" alt="Free and open source"></a>
 </p>
 
 <p align="center">
   <a href="#get-started"><strong>Get started</strong></a> &nbsp;·&nbsp;
-  <a href="docs/AMANUENSIS_ATTRIBUTION.md">What we built</a> &nbsp;·&nbsp;
+  <a href="#what-it-does">What it does</a> &nbsp;·&nbsp;
   <a href="docs/privacy.md">Privacy</a>
 </p>
 
@@ -29,107 +29,11 @@
 
 ## Why
 
-Most AI assistants are built for people who already live in software: a keyboard, a prompt, patience for a wall of text, and a willingness to send their life to someone else's server.
+Most AI assistants are built for people who already live in software: a keyboard, a prompt, patience for a wall of text, and the energy to explain everything from scratch every time.
 
 Most people run a household, not a terminal. They carry the flyer, the bill, the form, the appointment and the thing they promised someone, and they carry it in their head, because nothing was built to carry it for them.
 
 Amanuensis is built for them. You give it a name (ours is Mannie). It wakes up before you do and has the day sorted. It drafts the email, then waits for you to say send. You never write a prompt: you say what's going on, the way you'd say it to a friend, and it takes it from there.
-
-## Get started
-
-You need Docker, `git`, about 10 GB of free disk space, and Linux or macOS. On Windows, use [WSL2](https://learn.microsoft.com/en-us/windows/wsl/install). Setup takes about 15 minutes.
-
-### Installing on Mac and Linux
-
-```bash
-git clone https://github.com/ClimbOutLabs/amanuensis && cd amanuensis
-./installer/install.sh
-```
-
-The installer checks your computer first and tells you in plain words if something is missing. It shows its plan and asks before it changes anything. At the end it prints the address to open in your browser. It also sets up sign-in, backups and phone access, and leaves an `aman` command for health checks (`aman doctor`) and upgrades.
-
-### Installing on Windows
-
-On Windows, Amanuensis installs inside [WSL 2](https://learn.microsoft.com/en-us/windows/wsl/install), the Windows Subsystem for Linux, with Docker Desktop, by running the project's install script. Follow these steps in order.
-
-**1. Install WSL 2 with Ubuntu.** Open PowerShell as an administrator and run:
-
-```powershell
-wsl --install -d Ubuntu
-```
-
-Restart when it asks. Then open **Ubuntu** from the Start menu once, and set the Linux username and password it asks for. [Microsoft's WSL guide](https://learn.microsoft.com/en-us/windows/wsl/install) has the details.
-
-**2. Install Docker Desktop.** Get it from [Docker's Windows install page](https://docs.docker.com/desktop/setup/install/windows-install/) and install it. Start Docker Desktop and wait until it reports it is running. Then open its **Settings**, go to **Resources, WSL Integration**, turn on Ubuntu under **Enable integration with additional distros**, and choose **Apply & Restart**. If that page shows only one switch, for the default distro, follow the **Go to classic Settings** link at the top of the Settings page instead: the classic page has the same WSL Integration page, with the list of distros.
-
-**3. Get the code.** In the Ubuntu window:
-
-```bash
-sudo apt update && sudo apt install -y git
-git clone https://github.com/ClimbOutLabs/amanuensis.git
-cd amanuensis
-```
-
-**4. Run the install.** Still in the Ubuntu window:
-
-```bash
-./installer/install.sh
-```
-
-The script checks the computer first, then shows its plan and asks before it changes anything. It asks its questions one at a time: the email address you will sign in with, what Aman should call you, a password to choose, and a few setup choices. It does not ask for a model key. You add the key after the install, under **Settings, Models**, which the steps after this section walk through.
-
-**5. Open Aman.** The script checks Docker, builds and installs everything, and prints the address to open in your browser. Sign in with the email and password from step 4.
-
-**Upgrading.** In the Ubuntu window, in the same `amanuensis` folder, run `git pull`, then run `./installer/install.sh` again. It keeps your data and carries on.
-
-**If something looks missing.** Commands like `apt` only exist inside the Ubuntu window. If a terminal says a distro or a package tool is missing, you are in PowerShell or in Docker Desktop's own system, not Ubuntu. Open **Ubuntu** from the Start menu.
-
-**If Docker is not connected to Ubuntu.** The install script may say Docker did not answer, or Ubuntu itself may say the docker command could not be found in this WSL 2 distro. Both mean the same thing: Docker Desktop is running, but its integration with Ubuntu is off. Open Docker Desktop, go to **Settings, Resources, WSL Integration**, turn on Ubuntu under **Enable integration with additional distros**, and choose **Apply & Restart**. Then, in the Ubuntu window, `docker version` must print a Server section. Once it does, run `./installer/install.sh` again.
-
-**1. Get a Together AI key.** Aman needs a model to think with. [Together AI](https://www.together.ai) hosts open models and is the quickest way to start.
-
-- Sign up free at [api.together.ai](https://api.together.ai).
-- Open **Settings, API keys** ([direct link](https://api.together.ai/settings/projects/~current/api-keys)) and create a key.
-- Copy it. It is shown only once.
-
-**2. Add it to Aman.** Open Aman and go to **Settings**, then **Models**. Together AI is built in: under **Available**, find **together** and click **Configure**. Paste the key you copied into the **API key** field and click **Create**. Nothing else to fill in: the address and the models come with it.
-
-Its models are now on your list. Pick the one you want in the menu under the message box.
-
-**3. Give your chief of staff a name and a personality.** Go to **Settings, Personalization**, and find **Assistant profile**. It has three fields:
-
-- **Name**: what you'll call it. Ours is Mannie.
-- **Voice guidance**: one line on how it talks, such as "Warm, direct, concise".
-- **Identity**: a few sentences on how it sees its job.
-
-While you're there, add your own name and a line about yourself at the top of the page, so it knows who it works for. Save, and the new name shows up everywhere straight away.
-
-Not sure what to write? Start from one of these and copy its two fields in. Change anything you like.
-
-| Personality                                                    | Good for                                                                                 |
-| -------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
-| [The steady hand](docs/personalities/steady-hand.md)           | Calm and organised. For when your days feel like too much.                               |
-| [The straight shooter](docs/personalities/straight-shooter.md) | No padding, no pep talk. For when you want the answer and nothing else.                  |
-| [The warm friend](docs/personalities/warm-friend.md)           | Kind and encouraging. For the reply you've been avoiding.                                |
-| [The coach](docs/personalities/coach.md)                       | Keeps you moving. For when you're behind or keep meaning to do things.                   |
-| [The planner](docs/personalities/planner.md)                   | Thinks ahead. For busy households, trips, moves and anything with a lot of moving parts. |
-
-None of these change what it's allowed to do. Sending, deleting and installing still wait for your OK, whatever personality you pick.
-
-**4. Go say hello.** Open the home screen and tap **I'm behind**, or just say what's on your mind. Your chief of staff asks one question at a time and takes it from there.
-
-**5. Connect your email and calendar.** This is where it starts carrying things for you. Go to **Settings, Connectors**:
-
-- **Gmail and Google Calendar.** Choose **Google**, then **Connect**. The panel walks you through making your own Google sign-in in about ten minutes, so your mail goes from Google straight to your computer and nobody else is in between. Connect mail first, then **Connect Calendar**. [Step-by-step guide](docs/google.mdx).
-- **Any other mailbox or calendar.** Choose **Email** for an IMAP mailbox (Outlook, iCloud, Fastmail and most others), and **Calendar** for a CalDAV calendar.
-
-Reading is quiet. Every draft, send and calendar change shows you a card first and waits for your OK.
-
-Once your mail and calendar are connected, tap **Run my daily brief** on the home screen to see what tomorrow morning will look like.
-
-Prefer another provider? Any service with an OpenAI-compatible API goes in the same way. Fully local models, such as Ollama or an NVIDIA DGX Spark, work too.
-
-More help: [full install guide](docs/install.mdx) · [first steps](docs/try-aman.md) · [Docker Compose or Kubernetes](docs/quickstart.mdx#other-ways-to-run-it) · [deployment security](docs/deployment-security.mdx)
 
 ## What it does
 
@@ -186,6 +90,74 @@ Each persona has its own name, model, role and knowledge library.
   <img src="./docs/screenshots/readme/personas.jpg" alt="Settings, Roles and Personas: the persona Iris open for editing, with name, other names it answers to, its model Nemotron 3 Super, and its role text" width="850">
 </p>
 
+## Get started
+
+Setup takes about 15 minutes. Here is what you need:
+
+- **A Mac or a Linux computer** with about 10 GB of free space. Windows works too, through a free Microsoft add-on called WSL 2: see the [Windows guide](docs/install-windows.md). Windows support is still new, so expect a few more bumps than on a Mac or Linux. If you get stuck, [tell us](https://github.com/ClimbOutLabs/amanuensis/issues) and we'll help.
+- **Docker**, the free program Aman runs inside. On a Mac, [download Docker Desktop](https://www.docker.com/products/docker-desktop/), install it and start it. On Linux, the installer can set Docker up for you.
+- **A Together AI account**, which gives Aman a model to think with. Signing up is free, and you pay Together for what you use. You can sign up now or after the install.
+
+### Install
+
+Open the **Terminal** app, paste these two lines, and press Enter. If your Mac offers to install developer tools the first time, accept, then paste the lines again.
+
+```bash
+git clone https://github.com/ClimbOutLabs/amanuensis && cd amanuensis
+./installer/install.sh
+```
+
+The installer checks your computer first and tells you in plain words if something is missing. It shows its plan and asks before it changes anything. It asks a few questions one at a time: the email you will sign in with, what Aman should call you, and a password. At the end it prints the address to open in your browser.
+
+It also sets up sign-in, backups and phone access, and leaves an `aman` command behind. Run `aman doctor` if something seems wrong, and `aman upgrade` to get the newest version.
+
+### After you install
+
+**1. Get a Together AI key.** Aman needs a model to think with. [Together AI](https://www.together.ai) hosts open models and is the quickest way to start.
+
+- Sign up free at [api.together.ai](https://api.together.ai).
+- Open **Settings, API keys** ([direct link](https://api.together.ai/settings/projects/~current/api-keys)) and create a key.
+- Copy it. It is shown only once.
+
+**2. Add it to Aman.** Open Aman and go to **Settings**, then **Models**. Together AI is built in: under **Available**, find **together** and click **Configure**. Paste the key you copied into the **API key** field and click **Create**. Nothing else to fill in: the address and the models come with it.
+
+Its models are now on your list. Pick the one you want in the menu under the message box.
+
+**3. Give your chief of staff a name and a personality.** Go to **Settings, Personalization**, and find **Assistant profile**. It has three fields:
+
+- **Name**: what you'll call it. Ours is Mannie.
+- **Voice guidance**: one line on how it talks, such as "Warm, direct, concise".
+- **Identity**: a few sentences on how it sees its job.
+
+While you're there, add your own name and a line about yourself at the top of the page, so it knows who it works for. Save, and the new name shows up everywhere straight away.
+
+Not sure what to write? Start from one of these and copy its two fields in. Change anything you like.
+
+| Personality                                                    | Good for                                                                                 |
+| -------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| [The steady hand](docs/personalities/steady-hand.md)           | Calm and organised. For when your days feel like too much.                               |
+| [The straight shooter](docs/personalities/straight-shooter.md) | No padding, no pep talk. For when you want the answer and nothing else.                  |
+| [The warm friend](docs/personalities/warm-friend.md)           | Kind and encouraging. For the reply you've been avoiding.                                |
+| [The coach](docs/personalities/coach.md)                       | Keeps you moving. For when you're behind or keep meaning to do things.                   |
+| [The planner](docs/personalities/planner.md)                   | Thinks ahead. For busy households, trips, moves and anything with a lot of moving parts. |
+
+None of these change what it's allowed to do. Sending, deleting and installing still wait for your OK, whatever personality you pick.
+
+**4. Go say hello.** Open the home screen and tap **I'm behind**, or just say what's on your mind. Your chief of staff asks one question at a time and takes it from there.
+
+**5. Connect your email and calendar.** This is where it starts carrying things for you. Go to **Settings, Connectors**:
+
+- **Gmail and Google Calendar.** Choose **Google**, then **Connect**. The panel walks you through making your own Google sign-in in about ten minutes, so your mail goes from Google straight to your computer and nobody else is in between. Connect mail first, then **Connect Calendar**. [Step-by-step guide](docs/google.mdx).
+- **Any other mailbox or calendar.** Choose **Email** for an IMAP mailbox (Outlook, iCloud, Fastmail and most others), and **Calendar** for a CalDAV calendar.
+
+Reading is quiet. Every draft, send and calendar change shows you a card first and waits for your OK.
+
+Once your mail and calendar are connected, tap **Run my daily brief** on the home screen to see what tomorrow morning will look like.
+
+Prefer another provider? Any service with an OpenAI-compatible API goes in the same way. Fully local models, such as Ollama or an NVIDIA DGX Spark, work too.
+
+More help: [full install guide](docs/install.mdx) · [Windows guide](docs/install-windows.md) · [first steps](docs/try-aman.md)
+
 ## Your data, your rules
 
 Your memory, chats, personas and settings live on your computer. Memory is plain Markdown files you can open in any text editor; [docs/memory.md](docs/memory.md) explains how it works.
@@ -194,17 +166,9 @@ Be clear about one thing: **the model sees what you send it.** If you use a host
 
 Sending a message, deleting anything and installing anything always wait for your OK. That rule is enforced in code, on the tool itself, not left to the model's good behaviour.
 
-## What we built
+## For developers and the curious
 
-Aman began as a fork of [TrueForge](https://github.com/truefoundry/trueforge), an open-source agent harness from TrueFoundry, on 24 August 2026. Since then: **796 merged pull requests of our own, about 783,000 lines added, and test files up from 820 to 1,769.** Fewer than half of TrueForge's files are untouched.
-
-From TrueForge came the agent runtime, tool calling, the approvals framework, sessions, the HTTP server, storage, model providers, MCP support and the UI toolkit. Everything that makes it Amanuensis was built on top: memory, personas, spaces, the morning brief, mail and calendar, the approval cards, the security guards, the installer, the demo world and the look.
-
-The full accounting, area by area with pull request numbers and the git commands to check it, is in [docs/AMANUENSIS_ATTRIBUTION.md](docs/AMANUENSIS_ATTRIBUTION.md).
-
-Amanuensis was built for the Nebius × NVIDIA Global AI Hackathon and runs on NVIDIA Nemotron through Nebius Token Factory. [docs/token-factory.md](docs/token-factory.md) explains which model does which job, what it costs, and how the cost shows under each answer.
-
-## How it works
+### How it works
 
 ```mermaid
 flowchart LR
@@ -240,7 +204,17 @@ flowchart LR
 
 Every tool call passes the approval gate first. Reading and searching run on their own; sending, deleting and installing wait for your OK. Mail (Gmail or any IMAP mailbox) and calendars (Google or CalDAV) each run in their own container, and web search uses Tavily. Memory, spaces and maps are built into the server. Speech-to-text and memory search run on small local models. What reaches outside services is the model you chose, web searches, map lookups and the mail and calendar calls you approve; [docs/privacy.md](docs/privacy.md) has the full list.
 
-## For developers
+### What we built
+
+Aman began as a fork of [TrueForge](https://github.com/truefoundry/trueforge), an open-source agent harness from TrueFoundry, on 24 August 2026. Since then: **796 merged pull requests of our own, about 783,000 lines added, and test files up from 820 to 1,769.** Fewer than half of TrueForge's files are untouched.
+
+From TrueForge came the agent runtime, tool calling, the approvals framework, sessions, the HTTP server, storage, model providers, MCP support and the UI toolkit. Everything that makes it Amanuensis was built on top: memory, personas, spaces, the morning brief, mail and calendar, the approval cards, the security guards, the installer, the demo world and the look.
+
+The full accounting, area by area with pull request numbers and the git commands to check it, is in [docs/AMANUENSIS_ATTRIBUTION.md](docs/AMANUENSIS_ATTRIBUTION.md).
+
+Amanuensis was built for the Nebius × NVIDIA Global AI Hackathon and runs on NVIDIA Nemotron through Nebius Token Factory. [docs/token-factory.md](docs/token-factory.md) explains which model does which job, what it costs, and how the cost shows under each answer.
+
+### Running from source
 
 > `main` is active development. Tagged builds are under [Releases](https://github.com/ClimbOutLabs/amanuensis/releases).
 
@@ -299,6 +273,8 @@ Read [AGENTS.md](AGENTS.md) and any package-level `AGENTS.md` before changing co
 - [Upstream sync runbook](docs/UPSTREAM_SYNC.md) and [divergence policy](DIVERGENCE.md)
 
 </details>
+
+Other ways to run it: [Docker Compose or Kubernetes](docs/quickstart.mdx#other-ways-to-run-it) · [deployment security](docs/deployment-security.mdx)
 
 ## License and attribution
 

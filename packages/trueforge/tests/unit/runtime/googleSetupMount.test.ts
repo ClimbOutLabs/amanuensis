@@ -17,6 +17,7 @@ import { FakeTurnArtifactStore } from '../../fixtures/fakeTurnArtifactStore';
 import { startInertMcpServer, type InertMcpServer } from '../../fixtures/inertMcpServer';
 import { installRecordedMail } from '../../fixtures/recordedMail';
 import { uncappedTokenFactoryBudget } from '../../fixtures/uncappedTokenFactoryBudget';
+import { noSpaceFolders } from './spaceFolderStoreFake';
 
 const READ = 'https://www.googleapis.com/auth/gmail.readonly';
 const COMPOSE = 'https://www.googleapis.com/auth/gmail.compose';
@@ -55,6 +56,7 @@ const STORE: SpaceToolStore = {
   revertSpace: jest.fn(),
   listSpacesWithAggregate: jest.fn(),
   getSpace: jest.fn(),
+  ...noSpaceFolders,
   getSpaceRevision: jest.fn(),
 };
 
@@ -173,6 +175,7 @@ describe('the guided Google setup mount', () => {
         budget: uncappedTokenFactoryBudget,
         authority: { tenantId: OWNER.tenant_id, userRef: OWNER.created_by },
       },
+      undefined,
     );
   }
 

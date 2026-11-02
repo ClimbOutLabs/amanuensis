@@ -5,7 +5,10 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { cn } from '@/atoms/lib/cn.js';
 import { Button } from '@/atoms/primitives/Button.js';
 import { Spinner } from '@/atoms/primitives/Spinner.js';
+import { Switch } from '@/atoms/primitives/Switch.js';
+import { useOptionalRepositoryWork, type RepositorySummary } from '@/components/RepositoryWorkContext.js';
 import { useOptionalRunCodeStatus, type RunCodeStatus } from '@/components/RunCodeStatusContext.js';
+import { useOptionalSentinelApiState } from '@/sentinel/SentinelApiContext.js';
 import { useServerCapabilities } from '@/server/ServerContext.js';
 import { getErrorMessage } from '@/utils/getErrorMessage.js';
 
@@ -197,6 +200,122 @@ function StatusCard({
   );
 }
 
+/**
+ * Settings > Sandbox > Package downloads: one switch per repository, and one for chats that are
+ * not working on a project. Downloads come only through the download-only mirrors; nothing can be
+ * published or uploaded. Turning a switch off stops its downloads at once, including in chats
+ * already running. The list shows only where the host provides the repository and settings APIs.
+ */
+function PackageDownloadsCard() {
+  const repositoryWork = useOptionalRepositoryWork();
+  const sentinel = useOptionalSentinelApiState();
+  const [repositories, setRepositories] = useState<RepositorySummary[] | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (repositoryWork === null) return;
+    let current = true;
+    repositoryWork
+      .listRepositories()
+      .then(list => {
+        if (current) setRepositories(list);
+      })
+      .catch((err: unknown) => {
+        if (current) setError(getErrorMessage(err, 'unknown error'));
+      });
+    return () => {
+      current = false;
+    };
+  }, [repositoryWork]);
+
+  if (repositoryWork === null && sentinel === null) return null;
+
+  const downloadsWithoutProject = sentinel?.settings?.package_downloads_without_project_allowed ?? false;
+
+  const handleRepositoryChange = async (repository: RepositorySummary, next: boolean) => {
+    if (repositoryWork === null) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const saved = await repositoryWork.setRepositoryPackageDownloads({ repositoryId: repository.id, allowed: next });
+      setRepositories(current =>
+        current === null ? current : current.map(item => (item.id === saved.id ? saved : item)),
+      );
+    } catch (err) {
+      setError(getErrorMessage(err, 'unknown error'));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleWithoutProjectChange = async (next: boolean) => {
+    if (sentinel === null) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await sentinel.updateSettings({ package_downloads_without_project_allowed: next });
+    } catch (err) {
+      setError(getErrorMessage(err, 'unknown error'));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Card headingId="sandbox-package-downloads-heading" title="Package downloads">
+      <p className="mt-2 text-sm text-text-secondary">
+        Packages come only through the download-only mirrors, so nothing can be published or uploaded. The first
+        download in a place asks you first. Turning a switch off stops its downloads at once, including in chats already
+        running.
+      </p>
+      {error !== null && (
+        <p className="mt-2 text-xs text-failure-bg" role="alert">
+          {error}
+        </p>
+      )}
+      <ul className="mt-3 space-y-2">
+        {(repositories ?? []).map(repository => (
+          <li key={repository.id} className="flex items-center justify-between gap-2 text-sm">
+            <span className="min-w-0 text-text-primary">{repository.name}</span>
+            <Switch
+              size="md"
+              checked={repository.package_downloads_allowed}
+              disabled={busy}
+              onCheckedChange={next => {
+                void handleRepositoryChange(repository, next);
+              }}
+              aria-label={`Package downloads for ${repository.name}`}
+            />
+          </li>
+        ))}
+        {sentinel !== null && (
+          <li className="flex items-start justify-between gap-4 text-sm">
+            <div>
+              <p className="font-medium text-text-primary">Chats without a project</p>
+              <p className="mt-1 text-text-secondary">
+                Downloads in chats that are not working on a project. This allowance also covers scheduled runs.
+              </p>
+            </div>
+            <Switch
+              size="md"
+              checked={downloadsWithoutProject}
+              disabled={busy || sentinel.settings === null}
+              onCheckedChange={next => {
+                void handleWithoutProjectChange(next);
+              }}
+              aria-label="Package downloads in chats without a project"
+            />
+          </li>
+        )}
+      </ul>
+      {repositoryWork !== null && repositories === null && error === null && (
+        <p className="mt-2 text-sm text-text-secondary">Reading your projects…</p>
+      )}
+    </Card>
+  );
+}
+
 /** Wall-clock time that re-renders every half minute so "Last checked" stays honest. */
 function useNow(): number {
   const [now, setNow] = useState(() => Date.now());
@@ -321,6 +440,7 @@ const SandboxSettings = () => {
       )}
 
       <LimitsCard limits={limits} />
+      <PackageDownloadsCard />
     </div>
   );
 };

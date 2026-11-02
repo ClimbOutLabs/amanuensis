@@ -50,6 +50,7 @@ import { SqliteTurnArtifactStore } from '../src/db/sqlite/turn-artifact-store/Sq
 import { ActiveTurnRegistry } from '../src/runtime/activeTurns';
 import { createChatImageService } from '../src/runtime/chatImages/chatImageService';
 import { createImageReencoder } from '../src/runtime/chatImages/reencodeInSandbox';
+import { ChatSearchIndexer } from '../src/runtime/chatSearchIndexing';
 import { EventSubscriptionRegistry } from '../src/runtime/event-subscription';
 import { createTokenFactoryBudget } from '../src/runtime/tokenFactoryBudget';
 import { TurnDrainRegistry } from '../src/runtime/turnDrains';
@@ -86,7 +87,18 @@ const skillStore = new SqliteSkillStore(db);
 const sandboxProviderStore = new SqliteSandboxProviderStore(db);
 const modelProviderStore = new SqliteModelProviderStore(db);
 const turnArtifactStore = new SqliteTurnArtifactStore(db);
+const personaStore = new SqlitePersonaStore(db);
+const globalSettingsStore = new SqliteGlobalSettingsStore(db);
+const sentinelSettingsStore = new SqliteSentinelSettingsStore(db);
+const logger = winston.createLogger({ silent: true });
 const app = createServerApp({
+  chatSearchIndexer: new ChatSearchIndexer({
+    sessionStore,
+    globalSettingsStore,
+    sentinelSettingsStore,
+    personaStore,
+    logger,
+  }),
   modelCatalog: ModelCatalog.load(),
   mcpCatalog: McpCatalog.load(configuration.MCP_CATALOG_PATH),
   skillCatalog: SkillCatalog.load(),
@@ -97,7 +109,7 @@ const app = createServerApp({
   mcpToolGrantStore: new SqliteMcpToolGrantStore(db),
   googleConnectionStore: new SqliteGoogleConnectionStore(db),
   personalizationStore: new SqlitePersonalizationStore(db),
-  personaStore: new SqlitePersonaStore(db),
+  personaStore,
   modelProviderStore,
   spaceStore: new SqliteSpaceStore(db),
   repositoryStore: new SqliteRepositoryStore(db),
@@ -115,13 +127,13 @@ const app = createServerApp({
   withTransaction: callback => db.transaction().execute(callback),
   scheduleStore: new SqliteScheduleStore(db),
   turnArtifactStore,
-  globalSettingsStore: new SqliteGlobalSettingsStore(db),
+  globalSettingsStore,
   tokenFactoryBudget: createTokenFactoryBudget({ store: new SqliteTokenFactoryUsageStore(db), cap: undefined }),
   tokenStore,
   sessionStore,
   sessionMetricsStore: new SqliteSessionMetricsStore(db),
   sentinelAuditStore: new SentinelAuditStore(db as Kysely<SentinelAuditDatabase>),
-  sentinelSettingsStore: new SqliteSentinelSettingsStore(db),
+  sentinelSettingsStore,
   briefItemStore: new BriefItemCompletionStore(db),
   sessions: new Sessions({ sessionStore }),
   chatImages: createChatImageService({
@@ -136,7 +148,7 @@ const app = createServerApp({
   turnDrains: new TurnDrainRegistry(),
   requestReplyRouter: new RequestReplyRouter(),
   eventSubscriptions: new EventSubscriptionRegistry<TurnStreamingEvent>(undefined),
-  logger: winston.createLogger({ silent: true }),
+  logger,
   oidcDiscovery: undefined,
   authenticator: new StandaloneAuthenticator(),
   authorizer: new TrueForgeAuthorizer(),

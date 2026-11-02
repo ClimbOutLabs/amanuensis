@@ -4,8 +4,8 @@ import { useAssistantDisplayName } from '../components/PersonalizationContext.js
 import { useOptionalReminders } from './RemindersContext.js';
 
 /**
- * Asked once, under the first reminder that is set: whether the browser may show a notice when a reminder
- * is due. Nothing is asked again after the person answers, and the unread mark works either way.
+ * Asks whether the browser may show a notice when a reminder is due. It shows under the latest reply that
+ * set a reminder until the person answers, and never again after; the unread mark works either way.
  */
 export function ReminderNotificationPrompt() {
   const reminders = useOptionalReminders();

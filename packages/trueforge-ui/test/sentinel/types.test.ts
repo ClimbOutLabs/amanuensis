@@ -707,6 +707,8 @@ describe('parseUserSettings', () => {
       search_without_asking: true,
       maps_without_asking: true,
       sandbox_without_asking: true,
+      chat_search_enabled: false,
+      package_downloads_without_project_allowed: false,
     };
     expect(parseUserSettings(null)).toEqual(defaults);
     expect(parseUserSettings({})).toEqual(defaults);
@@ -727,6 +729,8 @@ describe('parseUserSettings', () => {
       search_without_asking: true,
       maps_without_asking: true,
       sandbox_without_asking: true,
+      chat_search_enabled: false,
+      package_downloads_without_project_allowed: false,
     });
   });
 
@@ -746,6 +750,18 @@ describe('parseUserSettings', () => {
     expect(parseUserSettings({ data: { sandbox_without_asking: 'no' } }).sandbox_without_asking).toBe(true);
   });
 
+  it('reads the download allowance for chats without a project, and falls back to off when it is not a boolean', () => {
+    expect(
+      parseUserSettings({ data: { package_downloads_without_project_allowed: true } })
+        .package_downloads_without_project_allowed,
+    ).toBe(true);
+    expect(parseUserSettings({ data: {} }).package_downloads_without_project_allowed).toBe(false);
+    expect(
+      parseUserSettings({ data: { package_downloads_without_project_allowed: 'yes' } })
+        .package_downloads_without_project_allowed,
+    ).toBe(false);
+  });
+
   it('does not read a bare settings object', () => {
     expect(parseUserSettings({ offline_mode: true, tier2_auto_allow: ['file_write'] })).toEqual({
       offline_mode: false,
@@ -753,6 +769,8 @@ describe('parseUserSettings', () => {
       search_without_asking: true,
       maps_without_asking: true,
       sandbox_without_asking: true,
+      chat_search_enabled: false,
+      package_downloads_without_project_allowed: false,
     });
   });
 });

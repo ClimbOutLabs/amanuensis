@@ -1,6 +1,6 @@
 /**
  * A space is a persistent, named, structured page the model creates through
- * `create_space`, changes through `edit_space`, reads through `list_spaces` / `get_space`
+ * `create_space`, changes through `edit_space`, files into a folder through `move_space`, reads through `list_spaces` / `get_space`
  * (which can also read a retained historical revision), restores through `revert_space`, and
  * the UI renders (see `packages/frontend/src/spaceStore.ts`). Unlike a sandbox file, a space
  * survives the turn and session that created it and is visible in the Spaces view without the
@@ -33,6 +33,7 @@ import {
   GET_SPACE_TOOL_NAME,
   LIST_BLOCKS_TOOL_NAME,
   LIST_SPACES_TOOL_NAME,
+  MOVE_SPACE_TOOL_NAME,
   REVERT_SPACE_TOOL_NAME,
   SPACE_SERVER_ID,
   SPACE_WRITE_NOTHING_SAVED_FIELD,
@@ -45,6 +46,7 @@ import { z } from 'zod';
 import configuration from '../config';
 import {
   SpaceAggregateRevisionConflictError,
+  SpaceFolderNotFoundError,
   SpaceNotFoundError,
   SpaceRevisionConflictError,
   SpaceRevisionNotFoundError,
@@ -53,6 +55,7 @@ import {
   type SpaceRecord,
 } from '../db/spaceStore';
 import { evalSources } from '../eval/fixtures';
+import { FolderNameSchema } from '../schemas/folder';
 import {
   SPACE_BODY_MAX_LENGTH,
   SPACE_LIST_LIMIT,
@@ -68,6 +71,7 @@ import { googleCapability, sandboxAttachmentStager } from './googleCapability';
 import { googleSetupCapability } from './googleSetupCapability';
 import { mapsCapability } from './mapsCapability';
 import { MemoryTurnResourceResolver } from './MemoryTurnResourceResolver';
+import { pastChatsCapability, type PastChatsTurnContext } from './pastChatsCapability';
 import { personaCapability, type PersonaTurnContext } from './personaCapability';
 import { scheduleCapability, type ScheduleTurnContext } from './scheduleCapability';
 import { maskDocumentationRegions } from './spaceDocumentationMask';
@@ -464,6 +468,8 @@ If the web-artifacts-builder skill is mounted, follow its SKILL.md design guidan
 
 Pictures: use only a picture link a search result or a page you opened in this chat returned; a plain link only from a search result. Never make one up; if you have none, leave pictures out and say so.
 
+When the person asks you to file or move a space into a folder, call move_space. list_spaces shows each space's folder and the folders there are: reuse one of those names. You cannot rename or delete folders; the person does that in the Spaces view.
+
 For a tracker (houses, tasks, candidates, or anything with several items), put one row per item in a table, with columns for what the user cares about.
 
 There is no whole-body replacement tool: every change to an existing space goes through edit_space, which changes part of a body without resending it. Read before you edit: get_space shows the body and its revision, and list_blocks shows just the blocks, each with its anchor and a preview of its first line. Note the revision your read showed and send it as expected_revision: every edit_space call must name it, and all entries in the call apply to the blocks of that one revision. A call naming an older revision is still applied only when every block up to the one it names, and the block after it, is unchanged since your read; otherwise it is refused with the current revision and blocks, so send the change again from those. A call whose only entry is an append entry and that changes no title, purpose, status, or format is applied to the current end even when it names an older revision, because it overwrites nothing. A block entry {type: 'block', anchor, fingerprint, new_content} replaces one block's content, and empty new_content deletes the block; an insert entry {type: 'insert', after, fingerprint, new_content} adds new content right after the named block, which is how you extend a table or a list in the middle; an append entry {type: 'append', new_content} adds content at the end with no anchor or fingerprint, which is how you add rows or sections at the end. Send at most one append entry per call, and put it last. Send only rows that are not there yet: a row the table already holds is skipped, and the result names it. When a result says part of the content was not saved, continue from the line it names, without resending saved lines. End every reply that changed a space with one line saying what was saved. Every read shows each block's fingerprint: a short code hashed from the block's exact current content. An entry names the fingerprint its read showed for that block. If the block at the anchor no longer carries that fingerprint, the edit is refused and nothing is saved: when exactly one other block now carries it, the refusal names that block's anchor, because the content you meant has moved; otherwise re-read and take the anchor and fingerprint from the fresh read. Identical blocks share a fingerprint, and that is fine: the anchor still says which block you mean, and the fingerprint only checks the content. A successful edit returns the new revision and the fresh block outline: chain the next edit from those instead of re-reading. One block can be named by only one entry per call. Blocks come from the body's own structure: in a space with section markers, the anchors are the marker names; in any other space the body is split into blocks by its headings, paragraphs, list groups, and table row groups, and the anchors are b1, b2, and so on in order. Text before the first marker in a marked space is a preamble with no anchor: keep it short, and never put anything there that needs changing. An unknown or duplicate anchor fails the whole edit and the error lists the valid anchors, so re-read and address a real block instead of guessing. A marker inside a fenced code block or a <pre> or <code> element is text, not a block. edit_space can also change the space's purpose, status, or format, and rename it: pass new_title for the new name. After ${String(DELTA_BREAKER_TRIP_AFTER_FAILURES)} consecutive failed edit_space calls on one space, edit_space is refused until it is unlocked: revert_space with the space's current revision unlocks it without changing the body. Every change keeps the previous revision: to undo a bad change, call revert_space rather than rebuilding the content from memory. expected_aggregate_revision is optional: leave it out; if it is stale, the error names the current value, so retry once with it.
@@ -635,6 +641,12 @@ const REVERT_SPACE_INPUT_SCHEMA = z
     expected_aggregate_revision: z.number().int().nonnegative().optional(),
   })
   .strict();
+const MOVE_SPACE_INPUT_SCHEMA = z
+  .object({
+    space_name: SPACE_NAME_FIELD,
+    folder_name: FolderNameSchema.nullable(),
+  })
+  .strict();
 const LIST_BLOCKS_INPUT_SCHEMA = z
   .object({
     space_name: SPACE_NAME_FIELD,
@@ -740,7 +752,16 @@ export interface SpaceTurnAuthority {
 /** The narrow store surface used by the host-owned space tool set. */
 export type SpaceToolStore = Pick<
   ISpaceStore,
-  'createSpace' | 'updateSpace' | 'revertSpace' | 'listSpacesWithAggregate' | 'getSpace' | 'getSpaceRevision'
+  | 'createSpace'
+  | 'updateSpace'
+  | 'revertSpace'
+  | 'listSpacesWithAggregate'
+  | 'getSpace'
+  | 'getSpaceRevision'
+  | 'listSpaceFolders'
+  | 'createSpaceFolder'
+  | 'setSpaceFolder'
+  | 'listSpaceFolderAssignments'
 >;
 
 export interface SpaceCapabilityOptions {
@@ -764,10 +785,32 @@ export interface SpaceCapabilityOptions {
  * The store record carries `tenant_id` and `created_by`, host-owned scope that is never a wire
  * field (see `SpaceRecord` in `../db/spaceStore`). Parse through the wire `SpaceSchema`, relaxed
  * to strip rather than reject those extra keys, so the model only ever sees the same shape the
- * `/api/v1/spaces` routes and the UI do.
+ * `/api/v1/spaces` routes and the UI do. The model never sees `folder_id`: it reads a folder by its
+ * name (see `folder`) and files a space by that name.
  */
-const SPACE_RESULT_SCHEMA = SpaceSchema.strip();
-const SPACE_SUMMARY_SCHEMA = SpaceSchema.omit({ body: true }).strip();
+const SPACE_RESULT_SCHEMA = SpaceSchema.omit({ folder_id: true }).strip();
+const SPACE_SUMMARY_SCHEMA = SpaceSchema.omit({ body: true, folder_id: true }).strip();
+
+interface FolderPlacement {
+  /** Every folder name the person has. */
+  folders: string[];
+  /** Folder name by space id, for the spaces that are filed. */
+  folderBySpace: ReadonlyMap<string, string>;
+}
+
+interface SpaceListToolResult {
+  spaces: SpaceRecord[];
+  aggregate_revision: number;
+  has_more: boolean;
+  placement: FolderPlacement;
+}
+
+interface SpaceGetToolResult {
+  space: SpaceRecord;
+  aggregate_revision: number;
+  include_body: boolean;
+  placement: FolderPlacement;
+}
 
 /**
  * The store mutation plus tool-layer annotations for the result payload. Only the
@@ -904,11 +947,12 @@ function mutationResultText(result: SpaceMutationResult, outcome: Omit<WriteOutc
  * The list_spaces wire shape for one space: the name and its link, never the id. A model
  * that never sees an id addresses every space by its exact name, which is unique.
  */
-function spaceSummaryWire(record: SpaceRecord) {
+function spaceSummaryWire({ record, folder }: { record: SpaceRecord; folder: string | null }) {
   const summary = SPACE_SUMMARY_SCHEMA.parse(record);
   return {
     name: summary.name,
     link: spaceLink(summary.id),
+    folder,
     purpose: summary.purpose,
     status: summary.status,
     format: summary.format,
@@ -1771,7 +1815,7 @@ class SpaceTool extends LocalToolMCP {
     defineTool({
       name: LIST_SPACES_TOOL_NAME,
       description:
-        "List the user's spaces without bodies: name, link, purpose, status, revision, and updated_at, plus the aggregate_revision. A space is addressed by its exact name, and names are unique. Call before create_space to check for an existing space on the same subject.",
+        "List the user's spaces without bodies: name, link, folder (null when not in one), purpose, status, revision, and updated_at, plus the names of all folders and the aggregate_revision. A space is addressed by its exact name, and names are unique. Call before create_space to check for an existing space on the same subject.",
       schema: LIST_SPACES_INPUT_SCHEMA,
       annotations: { readOnlyHint: true },
       invalidInput: spaceInvalidInput,
@@ -1780,7 +1824,7 @@ class SpaceTool extends LocalToolMCP {
     defineTool({
       name: GET_SPACE_TOOL_NAME,
       description:
-        "Read one space by its exact space_name. Returns metadata, the aggregate_revision, the block outline (each block's anchor, fingerprint, and a preview of its first line), and the body unless include_body is false. Call before edit_space to get the current body, revision, and fingerprints.",
+        "Read one space by its exact space_name. Returns metadata (including its folder), the aggregate_revision, the block outline (each block's anchor, fingerprint, and a preview of its first line), and the body unless include_body is false. Call before edit_space to get the current body, revision, and fingerprints.",
       schema: GET_SPACE_INPUT_SCHEMA,
       annotations: { readOnlyHint: true },
       invalidInput: spaceInvalidInput,
@@ -1826,6 +1870,14 @@ class SpaceTool extends LocalToolMCP {
       handler: async input => this.write(() => this.revert(input)),
     }),
     defineTool({
+      name: MOVE_SPACE_TOOL_NAME,
+      description:
+        "File a space in a folder, by its exact space_name and the folder's name. A folder with no match is made. A folder_name of null takes the space out of its folder. Moving changes neither the space nor its revision.",
+      schema: MOVE_SPACE_INPUT_SCHEMA,
+      invalidInput: spaceInvalidInput,
+      handler: async input => this.writeText(() => this.move(input)),
+    }),
+    defineTool({
       name: LIST_BLOCKS_TOOL_NAME,
       description:
         "List one space's blocks with an 80-character preview of each, without the body. Address the space by its exact space_name. Every block has an anchor edit_space can name: the name of its <!-- @block:name --> marker, or b1, b2, and so on for the blocks a body without markers is split into (its headings, paragraphs, list groups, and table row groups). Every block also carries a fingerprint: a short code hashed from its exact current content, which an edit entry names back so the host can check the block still holds what you read. The result names the revision the anchors and fingerprints belong to: send it as expected_revision when you edit. Use it after a context compaction or before edit_space. In a marked space, the text before the first marker is the preamble: it is reported separately and has no anchor, so keep it short and stable.",
@@ -1840,19 +1892,40 @@ class SpaceTool extends LocalToolMCP {
     return this.tools;
   }
 
-  private async list(): Promise<{ spaces: SpaceRecord[]; aggregate_revision: number; has_more: boolean }> {
+  /** The person's folders, and the name of the folder each filed space sits in (keyed by space id). */
+  private async folderPlacement(): Promise<FolderPlacement> {
+    const owner = { tenant_id: this.options.authority.tenantId, created_by: this.options.authority.userRef };
+    const [folders, assignments] = await Promise.all([
+      this.options.store.listSpaceFolders(owner),
+      this.options.store.listSpaceFolderAssignments(owner),
+    ]);
+    const nameById = new Map(folders.map(folder => [folder.id, folder.name]));
+    const folderBySpace = new Map<string, string>();
+    for (const assignment of assignments) {
+      const name = nameById.get(assignment.folder_id);
+      if (name !== undefined) {
+        folderBySpace.set(assignment.space_id, name);
+      }
+    }
+    return { folders: folders.map(folder => folder.name), folderBySpace };
+  }
+
+  private async list(): Promise<SpaceListToolResult> {
     const result = await this.options.store.listSpacesWithAggregate({
       tenant_id: this.options.authority.tenantId,
       created_by: this.options.authority.userRef,
       status: undefined,
       limit: SPACE_LIST_LIMIT,
     });
-    return { spaces: result.records, aggregate_revision: result.aggregate_revision, has_more: result.has_more };
+    return {
+      spaces: result.records,
+      aggregate_revision: result.aggregate_revision,
+      has_more: result.has_more,
+      placement: await this.folderPlacement(),
+    };
   }
 
-  private async get(
-    input: z.infer<typeof GET_SPACE_INPUT_SCHEMA>,
-  ): Promise<{ space: SpaceRecord; aggregate_revision: number; include_body: boolean }> {
+  private async get(input: z.infer<typeof GET_SPACE_INPUT_SCHEMA>): Promise<SpaceGetToolResult> {
     const space_id = await this.resolveSpaceId(input.space_name);
     const identity = {
       tenant_id: this.options.authority.tenantId,
@@ -1870,7 +1943,7 @@ class SpaceTool extends LocalToolMCP {
       throw new SpaceRevisionNotFoundError({ id: space_id, revision: input.revision });
     }
     const aggregate_revision = await resolveAggregateRevision(this.options.store, this.options.authority, undefined);
-    return { space, aggregate_revision, include_body: input.include_body };
+    return { space, aggregate_revision, include_body: input.include_body, placement: await this.folderPlacement() };
   }
 
   private async create(input: z.infer<typeof CREATE_SPACE_INPUT_SCHEMA>): Promise<WriteOutcome> {
@@ -2397,6 +2470,42 @@ class SpaceTool extends LocalToolMCP {
     return { mutation, action: 'Restored' };
   }
 
+  /**
+   * Filing is not a content edit: it goes through the folder store, so the space's revision, its
+   * history and the aggregate revision stay as they were, and it never feeds the edit breaker.
+   */
+  private async move(input: z.infer<typeof MOVE_SPACE_INPUT_SCHEMA>): Promise<string> {
+    const space_id = await this.resolveSpaceId(input.space_name);
+    const owner = { tenant_id: this.options.authority.tenantId, created_by: this.options.authority.userRef };
+    const space = await this.requireCurrentSpace(space_id);
+    const folder = input.folder_name === null ? null : await this.folderForName(input.folder_name);
+    await this.options.store.setSpaceFolder({ ...owner, space_id, folder_id: folder?.id ?? null });
+    const summary =
+      folder === null
+        ? `Took the space "${space.name}" out of its folder.`
+        : `Moved the space "${space.name}" into the folder "${folder.name}".`;
+    return JSON.stringify({
+      summary,
+      space: { name: space.name, link: spaceLink(space_id) },
+      folder: folder?.name ?? null,
+    });
+  }
+
+  /** The folder with this name, made when the person has none. */
+  private async folderForName(name: string): Promise<{ id: string; name: string }> {
+    const owner = { tenant_id: this.options.authority.tenantId, created_by: this.options.authority.userRef };
+    const existing = await this.options.store.listSpaceFolders(owner);
+    // Capitals are ignored so "work" files into "Work" instead of making a near copy beside it.
+    const wanted = name.toLocaleLowerCase();
+    const match =
+      existing.find(folder => folder.name === name) ??
+      existing.find(folder => folder.name.toLocaleLowerCase() === wanted);
+    if (match !== undefined) {
+      return match;
+    }
+    return this.options.store.createSpaceFolder({ ...owner, id: ulid().toLowerCase(), name });
+  }
+
   private async requireCurrentSpace(space_id: string): Promise<SpaceRecord> {
     const space = await this.options.store.getSpace({
       tenant_id: this.options.authority.tenantId,
@@ -2439,13 +2548,7 @@ class SpaceTool extends LocalToolMCP {
    * its exception and stack reach the tracing wrapper instead of being collapsed into an ordinary
    * nonzero tool result.
    */
-  private async read(
-    run: () => Promise<
-      | { spaces: SpaceRecord[]; aggregate_revision: number; has_more: boolean }
-      | { space: SpaceRecord; aggregate_revision: number; include_body: boolean }
-      | ListBlocksResult
-    >,
-  ) {
+  private async read(run: () => Promise<SpaceListToolResult | SpaceGetToolResult | ListBlocksResult>) {
     try {
       return toolResultResponse({ text: JSON.stringify(this.toWire(await run())) });
     } catch (error) {
@@ -2469,15 +2572,13 @@ class SpaceTool extends LocalToolMCP {
     }
   }
 
-  private toWire(
-    result:
-      | { spaces: SpaceRecord[]; aggregate_revision: number; has_more: boolean }
-      | { space: SpaceRecord; aggregate_revision: number; include_body: boolean }
-      | ListBlocksResult,
-  ) {
+  private toWire(result: SpaceListToolResult | SpaceGetToolResult | ListBlocksResult) {
     if ('spaces' in result) {
       return {
-        spaces: result.spaces.map(record => spaceSummaryWire(record)),
+        spaces: result.spaces.map(record =>
+          spaceSummaryWire({ record, folder: result.placement.folderBySpace.get(record.id) ?? null }),
+        ),
+        folders: result.placement.folders,
         aggregate_revision: result.aggregate_revision,
         has_more: result.has_more,
       };
@@ -2493,6 +2594,7 @@ class SpaceTool extends LocalToolMCP {
       space: {
         name: parsed.name,
         link: spaceLink(parsed.id),
+        folder: result.placement.folderBySpace.get(parsed.id) ?? null,
         purpose: parsed.purpose,
         status: parsed.status,
         ...('body' in parsed ? { body: parsed.body } : {}),
@@ -2520,9 +2622,16 @@ class SpaceTool extends LocalToolMCP {
    * collapsed into an ordinary nonzero tool result.
    */
   private async write(run: () => Promise<WriteOutcome>) {
-    try {
+    return this.writeText(async () => {
       const { mutation, ...annotations } = await run();
-      return toolResultResponse({ text: mutationResultText(mutation, annotations) });
+      return mutationResultText(mutation, annotations);
+    });
+  }
+
+  /** Runs a space write that returns its result text, turning the expected refusals into tool errors. */
+  private async writeText(run: () => Promise<string>) {
+    try {
+      return toolResultResponse({ text: await run() });
     } catch (error) {
       if (error instanceof SpaceNotFoundError) {
         return toolResultResponse({ text: JSON.stringify({ error: this.notFoundMessage(error) }), isError: true });
@@ -2539,6 +2648,14 @@ class SpaceTool extends LocalToolMCP {
       }
       if (error instanceof SpaceNameLookupError) {
         return toolResultResponse({ text: JSON.stringify({ error: error.message }), isError: true });
+      }
+      if (error instanceof SpaceFolderNotFoundError) {
+        return toolResultResponse({
+          text: JSON.stringify({
+            error: 'That folder was removed while the space was being moved. Send the move_space call again.',
+          }),
+          isError: true,
+        });
       }
       if (error instanceof SpaceShrinkRefusedError || error instanceof SpaceTableRowsRefusedError) {
         return toolResultResponse({ text: JSON.stringify({ error: error.message }), isError: true });
@@ -2627,7 +2744,7 @@ class SpaceTool extends LocalToolMCP {
   }
 }
 
-/** Attaches `list_spaces` / `get_space` / `create_space` / `edit_space` / `revert_space` / `list_blocks` to one turn's root thread. */
+/** Attaches `list_spaces` / `get_space` / `create_space` / `edit_space` / `revert_space` / `move_space` / `list_blocks` to one turn's root thread. */
 export function spaceCapability(options: SpaceCapabilityOptions): AgentCapability {
   return {
     systemToolSets: [new SpaceTool(options)],
@@ -2665,6 +2782,7 @@ export class SpaceTurnResourceResolver extends MemoryTurnResourceResolver {
       space: SpaceTurnContext,
       toolImages: ToolImagesOptions,
       usage: UsageSummaryTurnContext,
+      pastChats: PastChatsTurnContext | undefined,
     ]
   ) {
     const [
@@ -2679,16 +2797,19 @@ export class SpaceTurnResourceResolver extends MemoryTurnResourceResolver {
       space,
       toolImages,
       usage,
+      pastChats,
     ] = args;
     super(deps, profile, persona, memory, toolOutputScreen, personaKnowledgeBlock, personaKnowledgeHits, switchNotice);
     this.#space = space;
     this.#toolImages = toolImages;
     this.#usage = usage;
+    this.#pastChats = pastChats;
   }
 
   readonly #space: SpaceTurnContext;
   readonly #toolImages: ToolImagesOptions;
   readonly #usage: UsageSummaryTurnContext;
+  readonly #pastChats: PastChatsTurnContext | undefined;
   /** The run's sandbox, resolved before any thread is built; mail attachments are placed in it. */
   private runSandbox: Sandbox | undefined;
 
@@ -2720,6 +2841,15 @@ export class SpaceTurnResourceResolver extends MemoryTurnResourceResolver {
           starts_answer: this.#space.startsAnswer,
         }),
         usageSummaryCapability({ ...this.#usage, tracing: input.tracing, timeZone: this.clientTimezone }),
+        ...(this.#pastChats === undefined
+          ? []
+          : [
+              pastChatsCapability({
+                ...this.#pastChats,
+                authority: { ...this.#pastChats.authority, currentSessionId: input.session_id },
+                tracing: input.tracing,
+              }),
+            ]),
         toolImagesCapability(this.#toolImages),
         ...google,
         ...(personas === undefined

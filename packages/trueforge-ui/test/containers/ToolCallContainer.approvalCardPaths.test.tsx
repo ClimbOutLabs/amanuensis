@@ -133,6 +133,8 @@ function sentinelApi(saved: SentinelApprovalInfo[]): SentinelApi {
     search_without_asking: false,
     maps_without_asking: false,
     sandbox_without_asking: true,
+    chat_search_enabled: false,
+    package_downloads_without_project_allowed: false,
   };
   return {
     listAuditEntries: vi.fn(async () => []),
