@@ -66,6 +66,7 @@ import {
   SpaceSchema,
   SpaceStatusSchema,
 } from '../schemas/space';
+import { browserCapability } from './browserCapability';
 import { toolImagesCapability, type ToolImagesOptions } from './chatImages/toolImagesCapability';
 import { googleCapability, sandboxAttachmentStager } from './googleCapability';
 import { googleSetupCapability } from './googleSetupCapability';
@@ -2851,6 +2852,15 @@ export class SpaceTurnResourceResolver extends MemoryTurnResourceResolver {
               }),
             ]),
         toolImagesCapability(this.#toolImages),
+        ...(configuration.BROWSER_ENABLED
+          ? [
+              browserCapability({
+                tracing: input.tracing,
+                logger: this.#space.logger,
+                tab: { tenant_id: input.tenant_id, created_by: input.created_by, chat_id: input.session_id },
+              }),
+            ]
+          : []),
         ...google,
         ...(personas === undefined
           ? []
