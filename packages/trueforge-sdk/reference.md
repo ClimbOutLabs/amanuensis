@@ -6684,6 +6684,71 @@ await client.spaces.revert("space_id", {
 </details>
 
 ## Voice
+<details><summary><code>client.voice.<a href="/src/api/resources/voice/client/Client.ts">speak</a>({ ...params }) -> core.BinaryResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+Turns reply text into speech with the voice running on this computer and returns WAV audio. Text over 4000 characters is refused. Each person may make a limited number of requests per minute.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.voice.speak({
+    text: "x"
+});
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**request:** `TrueForge.SpeakVoiceRequest`
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**requestOptions:** `VoiceClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
 <details><summary><code>client.voice.<a href="/src/api/resources/voice/client/Client.ts">getStatus</a>() -> TrueForge.VoiceStatusResponse</code></summary>
 <dl>
 <dd>

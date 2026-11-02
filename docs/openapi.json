@@ -10454,6 +10454,25 @@
         ],
         "type": "string"
       },
+      "SpeakVoiceRequest": {
+        "properties": {
+          "text": {
+            "description": "Reply text to read aloud, up to 4000 characters.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "voice": {
+            "description": "Voice id, e.g. `af_heart`. Omit for the default voice.",
+            "maxLength": 64,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "text"
+        ],
+        "type": "object"
+      },
       "StartRepositoryWorkData": {
         "additionalProperties": false,
         "properties": {
@@ -25561,6 +25580,102 @@
           "personalization"
         ],
         "x-fern-sdk-method-name": "update_sentinel_settings"
+      }
+    },
+    "/api/v1/voice/speak": {
+      "post": {
+        "description": "Turns reply text into speech with the voice running on this computer and returns WAV audio. Text over 4000 characters is refused. Each person may make a limited number of requests per minute.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SpeakVoiceRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "audio/wav": {
+                "schema": {
+                  "format": "binary",
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Spoken audio, 24 kHz mono 16-bit WAV."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The text is empty, has nothing to read aloud, or names an unknown voice."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication required."
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The text is over the 4000 character limit."
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Too many requests; wait for the Retry-After seconds."
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The voice service returned an unexpected response."
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The voice on this computer is off or still starting."
+          }
+        },
+        "summary": "Read reply text aloud",
+        "tags": [
+          "Agent Sessions"
+        ],
+        "x-fern-sdk-group-name": [
+          "voice"
+        ],
+        "x-fern-sdk-method-name": "speak"
       }
     },
     "/api/v1/voice/status": {
