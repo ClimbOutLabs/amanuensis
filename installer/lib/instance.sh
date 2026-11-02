@@ -249,21 +249,28 @@ owner_name_backfill() { # name
 }
 
 # A secret the app shares with one of its connectors (CALENDAR_ACCOUNT_SECRET, BROWSER_SECRET), so only the app can
-# use that connector. It is made once, in the settings file, and an existing value is never changed. A file without the
-# installer's managed part (an older or hand-made one) gets the line at its end, so Compose never stops for the missing
-# value. A missing file gets nothing: the instance has no settings to run from, and the instance commands say so.
+# use that connector. It is made once, in the settings file, and a usable value (32 or more characters) is never
+# changed. Compose reads the last line for a key, so that line is the one that counts: a short or second line is
+# dropped, the managed part keeps the value, and a file without the managed part (an older or hand-made one) gets it
+# as its last line. A missing file gets nothing: the instance has no settings to run from, and the instance commands
+# say so.
 env_secret_backfill() { # name key
-  local env key=$2
+  local env key=$2 value
   env="$(instance_dir "$1")/.env"
   [ -f "$env" ] || return 0
-  grep -q "^$key=.\{32,\}" "$env" && return 0
+  value=$(sed -n "s/^$key=//p" "$env" | tail -n 1)
+  if [ "${#value}" -lt 32 ]; then
+    value=$(sed -n "s/^$key=\(.\{32,\}\)\$/\1/p" "$env" | tail -n 1)
+    [ -n "$value" ] || value=$(rand_hex 32)
+  fi
   if grep -q '^# >>> managed by the installer' "$env"; then
-    env_managed_set "$env" "$key" "$(rand_hex 32)"
+    env_managed_set "$env" "$key" "$value"
+    env_drop_outside_block "$env" "$key"
     return 0
   fi
   {
     grep -v "^$key=" "$env" || true
-    printf '%s=%s\n' "$key" "$(rand_hex 32)"
+    printf '%s=%s\n' "$key" "$value"
   } | write_if_changed "$env" 600 || true
 }
 
@@ -1300,7 +1307,16 @@ cmd_instance_remove() {
   fi
   [ -n "$(reg_names)" ] || last_one=1
   if [ "${OPT_PURGE:-0}" != 1 ]; then
-    say "Removed instance $name. Its data is kept (aman_${name}_data and aman_${name}_dex)."
+    volumes=$(instance_volumes "$name" | tr '\n' ' ')
+    volumes=${volumes% }
+    if [ -n "$volumes" ]; then
+      say "Removed instance $name. Its data is kept: $volumes."
+    else
+      say "Removed instance $name."
+    fi
+    case " $volumes " in
+      *" aman_${name}_browser_profiles "*) say "That includes the sites Aman's browser is signed in to." ;;
+    esac
     if [ "$last_one" = 1 ]; then
       say "The shared speech-to-text service and its downloaded model are kept too."
     fi

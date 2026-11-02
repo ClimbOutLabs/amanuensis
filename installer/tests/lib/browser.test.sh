@@ -60,7 +60,55 @@ test_the_browser_is_walled_off() {
   sandbox_drop
 }
 
+test_removing_an_instance_says_the_browser_sign_ins_are_kept_and_purging_deletes_them() {
+  t_begin "removing an instance names every volume it keeps, the browser's sign-ins too, and purging deletes them"
+  sandbox_new
+  install_machine
+  assert_contains "$(cat "$SB_STATE/volumes")" "aman_main_browser_profiles"
+  run_install instance remove main
+  assert_rc 0
+  assert_flat_contains "$OUT" "aman_main_browser_profiles"
+  assert_flat_contains "$OUT" "aman_main_data"
+  assert_flat_contains "$OUT" "That includes the sites Aman's browser is signed in to."
+  assert_contains "$(cat "$SB_STATE/volumes")" "aman_main_browser_profiles" "a plain removal keeps them"
+  run_install instance remove main --purge-data --confirm-name main
+  assert_rc 0
+  assert_not_contains "$(cat "$SB_STATE/volumes")" "aman_main_browser_profiles"
+  assert_contains "$(cat "$SB_STATE/volumes_removed")" "aman_main_browser_profiles"
+  sandbox_drop
+}
+
+test_a_short_secret_below_the_managed_part_is_dropped() {
+  t_begin "a short browser secret someone added below the managed part is dropped, so the app can start"
+  sandbox_new
+  install_machine
+  local env=$AMAN_HOME/instances/main/.env first
+  first=$(browser_secret)
+  printf 'BROWSER_SECRET=short\n' >>"$env"
+  run_install instance refresh main
+  assert_rc 0
+  assert_eq "$(grep -c '^BROWSER_SECRET=' "$env")" 1 "one line is left"
+  assert_eq "$(browser_secret)" "$first" "the managed value is kept"
+  assert_mode "$env" 600
+  sandbox_drop
+}
+
+test_the_plan_has_one_row_for_the_browser() {
+  t_begin "the plan shows the browser as one build step, and as done once both images are built"
+  sandbox_new
+  run_install --dry-run --email owner@example.invalid
+  assert_eq "$(printf '%s\n' "$OUT" | grep -c "Build Aman's browser" || true)" 1 "one row to build it"
+  assert_eq "$(printf '%s\n' "$OUT" | grep -c "gateway" || true)" 0 "no row of its own for the gateway"
+  install_machine
+  run_install --dry-run
+  assert_flat_contains "$OUT" "done Aman's browser is built"
+  sandbox_drop
+}
+
 test_a_new_instance_has_the_browser_on
+test_the_plan_has_one_row_for_the_browser
+test_a_short_secret_below_the_managed_part_is_dropped
+test_removing_an_instance_says_the_browser_sign_ins_are_kept_and_purging_deletes_them
 test_the_secret_is_made_once_and_kept_out_of_the_compose_file
 test_the_browser_is_walled_off
 tests_finish

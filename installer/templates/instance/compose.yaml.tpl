@@ -231,10 +231,10 @@ services:
 @@IF_EMAIL@@      - no-new-privileges:true
 @@IF_EMAIL@@    restart: unless-stopped
 
-# Aman's own browser: a real Chromium on a virtual screen, with one profile per person in its own volume. It reads
-# hostile pages, so its only network is an internal one shared with its gateway alone. Every request it makes goes
-# through the gateway's proxy, which refuses this computer and private networks, and the app reaches it only through
-# the gateway's relay, which checks the secret the app and the gateway share. This container never holds that secret.
+@@IF_BROWSER@@# Aman's own browser: a real Chromium on a virtual screen, with one profile per person in its own volume. It reads
+@@IF_BROWSER@@# hostile pages, so its only network is an internal one shared with its gateway alone. Every request it makes goes
+@@IF_BROWSER@@# through the gateway's proxy, which refuses this computer and private networks, and the app reaches it only through
+@@IF_BROWSER@@# the gateway's relay, which checks the secret the app and the gateway share. This container never holds that secret.
 @@IF_BROWSER@@  browser:
 @@IF_BROWSER@@    image: @@BROWSER_IMAGE@@
 @@IF_BROWSER@@    pull_policy: never
@@ -402,11 +402,11 @@ networks:
   # Between the app's network holder and the calendar connector only. Not internal: the connector reaches the
   # calendar server on the internet.
 @@IF_CALENDAR@@  calendar: {}
-  # The browser and its gateway only. Internal: the browser has no way out but the gateway.
+@@IF_BROWSER@@  # The browser and its gateway only. Internal: the browser has no way out but the gateway.
 @@IF_BROWSER@@  browser-internal:
 @@IF_BROWSER@@    internal: true
-  # The app's network holder and the browser gateway only, for the app's calls to the browser.
+@@IF_BROWSER@@  # The app's network holder and the browser gateway only, for the app's calls to the browser.
 @@IF_BROWSER@@  browser-control:
 @@IF_BROWSER@@    internal: true
-  # The gateway's own way out to the internet. Nothing else is on it.
+@@IF_BROWSER@@  # The gateway's own way out to the internet. Nothing else is on it.
 @@IF_BROWSER@@  browser-egress: {}
