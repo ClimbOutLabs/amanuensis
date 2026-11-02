@@ -154,6 +154,7 @@ const expectedRuntimeExports: Array<keyof typeof sdk> = [
   'SentinelAuditFeed',
   'SentinelSettings',
   'ServerProvider',
+  'ServerVoiceRefusal',
   'SessionsBrowserButton',
   'SessionsPage',
   'ShellActionsActionSlot',

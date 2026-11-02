@@ -302,7 +302,7 @@ describe('installer/templates/instance/compose.yaml.tpl calendar connector', () 
       })
       .loose()
       .parse(load('docker-compose.yml'));
-    expect(dev.services.loopback.networks).toEqual(['default', 'calendar', 'browser-control']);
+    expect(dev.services.loopback.networks).toEqual(['default', 'calendar', 'browser-control', 'voice']);
     expect(dev.services['calendar-caldav'].environment.CALENDAR_ACCOUNT_SECRET).toBe(
       dev.services.server.environment.CALENDAR_ACCOUNT_SECRET,
     );
@@ -346,6 +346,10 @@ describe('installer/templates/instance/compose.yaml.tpl calendar connector', () 
     expect(on('browser-internal')).toEqual(['browser', 'browser-gateway']);
     expect(on('browser-control')).toEqual(['browser-gateway', 'loopback']);
     expect(on('browser-egress')).toEqual(['browser-gateway']);
+    // The speech service reaches nothing but the app's holder on its own internal network.
+    expect(networksOf(dev.services['aman-tts'])).toEqual(['voice']);
+    expect(dev.networks['voice']?.internal).toBe(true);
+    expect(on('voice')).toEqual(['aman-tts', 'loopback']);
     // The gateway holds the secret and checks it; the browser's container never gets it.
     expect(Object.keys(dev.services['browser']?.environment ?? {})).not.toContain('BROWSER_SECRET');
     expect(dev.services['browser-gateway']?.environment?.['BROWSER_SECRET']).toBe(
