@@ -402,11 +402,21 @@ networks:
   # Between the app's network holder and the calendar connector only. Not internal: the connector reaches the
   # calendar server on the internet.
 @@IF_CALENDAR@@  calendar: {}
-@@IF_BROWSER@@  # The browser and its gateway only. Internal: the browser has no way out but the gateway.
+@@IF_BROWSER@@  # The browser and its gateway only. Internal: the browser has no way out but the gateway. The installer picks each
+@@IF_BROWSER@@  # browser network's small block of addresses, so a computer whose Docker ranges are used up can still run it.
 @@IF_BROWSER@@  browser-internal:
 @@IF_BROWSER@@    internal: true
+@@IF_BROWSER@@    ipam:
+@@IF_BROWSER@@      config:
+@@IF_BROWSER@@        - subnet: @@BROWSER_INTERNAL_SUBNET@@
 @@IF_BROWSER@@  # The app's network holder and the browser gateway only, for the app's calls to the browser.
 @@IF_BROWSER@@  browser-control:
 @@IF_BROWSER@@    internal: true
+@@IF_BROWSER@@    ipam:
+@@IF_BROWSER@@      config:
+@@IF_BROWSER@@        - subnet: @@BROWSER_CONTROL_SUBNET@@
 @@IF_BROWSER@@  # The gateway's own way out to the internet. Nothing else is on it.
-@@IF_BROWSER@@  browser-egress: {}
+@@IF_BROWSER@@  browser-egress:
+@@IF_BROWSER@@    ipam:
+@@IF_BROWSER@@      config:
+@@IF_BROWSER@@        - subnet: @@BROWSER_EGRESS_SUBNET@@

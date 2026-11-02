@@ -15,6 +15,8 @@ container_failure_cause_stdin() {
     echo "The app could not start: it was not allowed to create a folder ($path). This is a bug in Aman, not a problem on your computer."
   elif printf '%s\n' "$text" | grep -Eqi "$PERMISSION_ERROR_PATTERN"; then
     echo "The app could not start: a permission error stopped it. This is a bug in Aman, not a problem on your computer."
+  elif printf '%s\n' "$text" | grep -Eqi 'address pools have been fully subnetted'; then
+    echo "Docker has no network addresses left for this instance. Networks nothing uses can be removed with: docker network prune"
   elif printf '%s\n' "$text" | grep -Eqi 'port is already allocated|address already in use|EADDRINUSE'; then
     echo "A port the app needs is already in use on this computer."
   elif printf '%s\n' "$text" | grep -Eqi 'no space left on device|ENOSPC'; then
@@ -24,9 +26,7 @@ container_failure_cause_stdin() {
   fi
 }
 
-container_failure_cause() { container_failure_cause_stdin <"$1"; }
-
-# bug when the log shows a failure only an update of Aman can fix, fixable when the person can act on it.
-container_failure_kind() {
-  if grep -Eqi "$PERMISSION_ERROR_PATTERN" "$1"; then echo bug; else echo fixable; fi
+# bug when the log text on stdin shows a failure only an update of Aman can fix, fixable when the person can act on it.
+container_failure_kind_stdin() {
+  if grep -Eqi "$PERMISSION_ERROR_PATTERN"; then echo bug; else echo fixable; fi
 }

@@ -128,6 +128,64 @@ stt_forget_old_network() {
   warn "An old network of the speech-to-text service ($old) could not be removed: $out"
 }
 
+# Docker gives each new network a /16 from a short list of ranges, and a computer with many projects runs out of them.
+# The browser's networks hold two or three containers each, so each gets a /28 the installer picks from 172.16.0.0/16,
+# which Docker's own list leaves out. A network that already exists keeps its addresses, so Compose never has to move it.
+BROWSER_NETWORKS="browser-internal browser-control browser-egress"
+
+ipv4_number() { # a.b.c.d
+  local a b c d
+  IFS=. read -r a b c d <<<"$1"
+  echo $(((a << 24) + (b << 16) + (c << 8) + d))
+}
+
+# "first last" for each IPv4 block that Docker's networks or this computer's routes already use.
+ipv4_blocks_in_use() {
+  local ids cidr base bits first
+  ids=$(D network ls -q 2>/dev/null || true)
+  {
+    # shellcheck disable=SC2086 # one id per word
+    if [ -n "$ids" ]; then D network inspect --format '{{range .IPAM.Config}}{{.Subnet}} {{end}}' $ids 2>/dev/null || true; fi
+    ip -4 route show 2>/dev/null | awk '$1 != "default" { print $1 }' || true
+  } | tr ' ' '\n' | while read -r cidr; do
+    base=${cidr%/*}
+    valid_ipv4 "$base" || continue
+    bits=32
+    [ "$cidr" = "$base" ] || bits=${cidr#*/}
+    case "$bits" in '' | *[![:digit:]]*) continue ;; esac
+    # A VPN that sends all traffic through itself adds routes as wide as /1, which are not networks on this computer.
+    if [ "$bits" -gt 32 ] || [ "$bits" -lt 8 ]; then continue; fi
+    first=$(ipv4_number "$base")
+    first=$((first & ~((1 << (32 - bits)) - 1) & 0xFFFFFFFF))
+    echo "$first $((first + (1 << (32 - bits)) - 1))"
+  done
+}
+
+# The subnet of each browser network, one per line in BROWSER_NETWORKS order. Fails when 172.16.0.0/16 has no room.
+browser_subnets() { # name
+  local name=$1 net subnet used first last start end
+  used=$(ipv4_blocks_in_use)
+  start=$(ipv4_number 172.16.0.0)
+  end=$(ipv4_number 172.16.255.255)
+  for net in $BROWSER_NETWORKS; do
+    subnet=$(D network inspect "aman-${name}_$net" --format '{{range .IPAM.Config}}{{.Subnet}} {{end}}' 2>/dev/null | tr ' ' '\n' | grep -m 1 '^[0-9.]*/[0-9]*$' || true)
+    if [ -z "$subnet" ]; then
+      subnet=$(printf '%s\n' "$used" | awk -v s="$start" -v e="$end" '
+        NF == 2 { lo[n] = $1; hi[n] = $2; n++ }
+        END {
+          for (c = s; c + 15 <= e; ) {
+            moved = 0
+            for (i = 0; i < n; i++) if (lo[i] <= c + 15 && hi[i] >= c) { c = hi[i] + 1; c += (16 - c % 16) % 16; moved = 1 }
+            if (!moved) { printf "%d.%d.%d.%d/28\n", int(c / 16777216), int(c / 65536) % 256, int(c / 256) % 256, c % 256; exit }
+          }
+        }')
+      [ -n "$subnet" ] || return 1
+    fi
+    echo "$subnet"
+    used="$used"$'\n'"$(ipv4_number "${subnet%/*}") $(($(ipv4_number "${subnet%/*}") + (1 << (32 - ${subnet#*/})) - 1))"
+  done
+}
+
 machine_running() {
   [ -n "$(D ps -q --filter label=com.docker.compose.project=aman-machine --filter status=running 2>/dev/null || true)" ]
 }
@@ -182,10 +240,12 @@ instance_render() {
   fi
   # Aman's browser is on in every instance once its images are known. Its seccomp profile is copied beside the compose
   # file, because the compose file reads it from this folder.
-  local browser_on=0
+  local browser_on=0 browser_nets=''
   if [ -n "${REL_BROWSER_TAG:-}" ] && [ -n "${REL_BROWSER_GATEWAY_TAG:-}" ]; then
     browser_on=1
     env_secret_backfill "$name" BROWSER_SECRET
+    browser_nets=$(browser_subnets "$name") ||
+      die "Aman found no free network addresses for its browser. Remove networks nothing uses with: docker network prune. Then run aman upgrade again."
   fi
   # The email connector is part of the compose file only once its image is known. Its wrapper script is copied beside the
   # compose file, because the compose file mounts it from this folder.
@@ -210,7 +270,7 @@ instance_render() {
   fi
   render_template "$TEMPLATES_DIR/instance/compose.yaml.tpl" \
     "NAME=$name" "IF_CALENDAR=$calendar_on" "CALENDAR_IMAGE=${REL_CALENDAR_TAG:-}" "IF_EMAIL=$email_on" "MAIL_EMAIL_IMAGE=${REL_MAIL_EMAIL_IMAGE:-}" \
-    "IF_BROWSER=$browser_on" "BROWSER_IMAGE=${REL_BROWSER_TAG:-}" "BROWSER_GATEWAY_IMAGE=${REL_BROWSER_GATEWAY_TAG:-}" "STT_NETWORK=$(stt_network "$name")" "APP_IMAGE=$app_image" "DEX_IMAGE=$dex_image" "APP_PORT=$app_port" "IF_SANDBOX=$sandbox_on" \
+    "IF_BROWSER=$browser_on" "BROWSER_INTERNAL_SUBNET=$(sed -n 1p <<<"$browser_nets")" "BROWSER_CONTROL_SUBNET=$(sed -n 2p <<<"$browser_nets")" "BROWSER_EGRESS_SUBNET=$(sed -n 3p <<<"$browser_nets")" "BROWSER_IMAGE=${REL_BROWSER_TAG:-}" "BROWSER_GATEWAY_IMAGE=${REL_BROWSER_GATEWAY_TAG:-}" "STT_NETWORK=$(stt_network "$name")" "APP_IMAGE=$app_image" "DEX_IMAGE=$dex_image" "APP_PORT=$app_port" "IF_SANDBOX=$sandbox_on" \
     "IF_EDGE=$edge_on" "LOGIN_HOST=$login_host" \
     "LOGIN_PORT=$login_port" "DEX_TELEMETRY_PORT=$DEX_TELEMETRY_PORT" "APP_PORTS=$app_ports" \
     "IF_TLS=$tls_on" "IF_TLS_HOST=$tls_host" "IF_TLS_VOLUME=$tls_volume" "CADDY_IMAGE=$(tls_image)" "TLS_USER=$(id -u):$(id -g)" "TLS_LEAF_DIR=$(tls_leaf_dir "$name")" \
@@ -331,18 +391,29 @@ instance_ever_healthy() { [ "$(reg_get "$1" healthy)" != 0 ]; }
 
 # Saves the last 200 lines of every container of an instance and prints the cause in one plain sentence. The person
 # is never sent to read container logs; a cause the installer does not know is called a bug and the saved log named.
+# The cause is read only from Docker's own output and the containers that failed, so a running service's harmless
+# warnings are never blamed.
 instance_unhealthy() {
-  local name=$1 log id cause fix=
+  local name=$1 log id state section failed cause fix=
   log="$STATE_DIR/logs/instance-$name.log"
+  failed=$(cat "$STEP_LOG" 2>/dev/null || true)
   {
-    cat "$STEP_LOG"
+    printf '%s\n' "$failed"
     for id in $(D ps -a -q --filter "label=com.docker.compose.project=aman-$name" 2>/dev/null || true); do
-      printf '\n== container %s (%s)\n' "$(D inspect --format '{{.Name}}' "$id" 2>/dev/null || true)" "$(D inspect --format '{{.State.Status}} exit {{.State.ExitCode}} oom {{.State.OOMKilled}}' "$id" 2>/dev/null || true)"
-      D logs --tail 200 "$id" 2>&1 || true
+      state=$(D inspect --format '{{.State.Status}} exit {{.State.ExitCode}} oom {{.State.OOMKilled}} {{if .State.Health}}{{.State.Health.Status}}{{end}}' "$id" 2>/dev/null || true)
+      section=$(
+        printf '\n== container %s (%s)\n' "$(D inspect --format '{{.Name}}' "$id" 2>/dev/null || true)" "$state"
+        D logs --tail 200 "$id" 2>&1 || true
+      )
+      printf '%s\n' "$section"
+      case "$state" in
+        'running '*' healthy' | 'running '*' false ') ;;
+        *) failed="$failed"$'\n'"$section" ;;
+      esac
     done
   } >"$log" 2>&1
-  cause=$(container_failure_cause "$log")
-  if [ -n "$cause" ] && [ "$(container_failure_kind "$log")" = bug ]; then
+  cause=$(printf '%s\n' "$failed" | container_failure_cause_stdin)
+  if [ -n "$cause" ] && [ "$(printf '%s\n' "$failed" | container_failure_kind_stdin)" = bug ]; then
     UI_FD=2 ui_step_end fail "Instance $name did not start. $cause" "Update Aman and run install.sh again. If it fails the same way, share the saved log below."
   elif [ -n "$cause" ]; then
     UI_FD=2 ui_step_end fail "Instance $name did not start. $cause" "Fix that, then run install.sh again."

@@ -93,6 +93,30 @@ test_a_short_secret_below_the_managed_part_is_dropped() {
   sandbox_drop
 }
 
+# The subnet of one network in the instance's compose file.
+network_subnet() { # network
+  awk -v net="  $1:" '$0==net{f=1;next} /^  [a-z]/{f=0} f && /subnet:/{print $NF}' "$(compose_file)"
+}
+
+test_the_browser_networks_take_small_free_blocks() {
+  t_begin "the browser's networks take small blocks clear of Docker's networks and this computer's routes"
+  sandbox_new
+  mkdir -p "$SB_STATE"
+  printf 'bridge 172.17.0.0/16\nother_net 172.16.0.0/28\n' >"$SB_STATE/network_subnets"
+  cp "$TESTS_DIR/stubs/ip" "$SB_BIN/ip"
+  STUB_ROUTES="172.16.0.16/28 10.0.0.0/8 0.0.0.0/1"
+  install_machine
+  STUB_ROUTES=
+  assert_eq "$(network_subnet browser-internal)" 172.16.0.32/28 "past a Docker network and a route"
+  assert_eq "$(network_subnet browser-control)" 172.16.0.48/28
+  assert_eq "$(network_subnet browser-egress)" 172.16.0.64/28
+  printf 'aman-main_browser-internal 172.20.0.0/16\n' >>"$SB_STATE/network_subnets"
+  run_install instance refresh main
+  assert_rc 0
+  assert_eq "$(network_subnet browser-internal)" 172.20.0.0/16 "a network that exists keeps its addresses"
+  sandbox_drop
+}
+
 test_the_plan_has_one_row_for_the_browser() {
   t_begin "the plan shows the browser as one build step, and as done once both images are built"
   sandbox_new
@@ -111,4 +135,5 @@ test_a_short_secret_below_the_managed_part_is_dropped
 test_removing_an_instance_says_the_browser_sign_ins_are_kept_and_purging_deletes_them
 test_the_secret_is_made_once_and_kept_out_of_the_compose_file
 test_the_browser_is_walled_off
+test_the_browser_networks_take_small_free_blocks
 tests_finish

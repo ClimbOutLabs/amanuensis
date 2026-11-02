@@ -366,6 +366,24 @@ test_any_permission_error_is_a_bug_not_a_user_fix() {
   sandbox_drop
 }
 
+test_a_running_service_s_warnings_are_not_the_cause() {
+  t_begin "a permission warning from a service that kept running is not blamed for the app failing"
+  sandbox_new
+  STUB_UP_FAIL_LOG="Error response from daemon: all predefined address pools have been fully subnetted"
+  STUB_HEALTHY_LOG="unable to create folder for config autosave: mkdir /config/caddy: permission denied"
+  with_input "$SENTINEL_PASSWORD
+"
+  run_install --yes --password-stdin --email owner@example.invalid
+  clear_input
+  STUB_HEALTHY_LOG=
+  assert_rc 1
+  assert_flat_contains "$ERR" "Instance main did not start. Docker has no network addresses left for this instance. Networks nothing uses can be removed with: docker network prune"
+  assert_flat_contains "$ERR" "Fix that, then run install.sh again."
+  assert_not_contains "$ERR" "permission error"
+  assert_contains "$(cat "$AMAN_HOME/state/logs/instance-main.log")" "mkdir /config/caddy" "the saved log still has every container"
+  sandbox_drop
+}
+
 test_an_unknown_failure_is_called_a_bug_with_the_log() {
   t_begin "a failure the installer cannot name is called a bug in Aman and the saved log is named"
   sandbox_new
@@ -413,6 +431,7 @@ test_docker_output_stays_in_a_log
 test_a_failed_build_shows_the_log_tail_and_its_path
 test_an_unhealthy_instance_gets_a_plain_cause_and_a_saved_log
 test_any_permission_error_is_a_bug_not_a_user_fix
+test_a_running_service_s_warnings_are_not_the_cause
 test_an_unknown_failure_is_called_a_bug_with_the_log
 test_the_closing_block_and_warnings
 tests_finish
