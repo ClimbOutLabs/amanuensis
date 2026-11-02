@@ -32,7 +32,9 @@ const LiveClickInputSchema = z
 const LiveTypeInputSchema = z
   .object({ tab: TabIdSchema, kind: z.literal('type'), text: z.string().min(1).max(10000) })
   .strict();
-const LiveKeyInputSchema = z.object({ tab: TabIdSchema, kind: z.literal('key'), key: z.string().min(1).max(64) }).strict();
+const LiveKeyInputSchema = z
+  .object({ tab: TabIdSchema, kind: z.literal('key'), key: z.string().min(1).max(64) })
+  .strict();
 const LiveWheelInputSchema = z.object({ tab: TabIdSchema, kind: z.literal('wheel'), dy: z.number().finite() }).strict();
 
 /** One act the person does in the live view: a click, typed text, one named key, or a scroll step. */
@@ -41,6 +43,23 @@ const LiveInputRequestSchema = z.discriminatedUnion('kind', [
   LiveTypeInputSchema,
   LiveKeyInputSchema,
   LiveWheelInputSchema,
+]);
+
+/** A file the person uploads into the page, as base64; at most 10 MiB once decoded. */
+const UploadRequestSchema = z
+  .object({
+    tab: TabIdSchema,
+    name: z.string().min(1).max(255),
+    mime: z.string().max(255),
+    data: z.string().min(1).max(14_000_000),
+  })
+  .strict();
+
+const LiveUploadReplySchema = z.discriminatedUnion('status', [
+  z.object({ status: z.literal('ok') }),
+  z.object({ status: z.literal('no_file_field') }),
+  z.object({ status: z.literal('bad_input') }),
+  z.object({ status: z.literal('closed') }),
 ]);
 
 export interface BrowserLiveRouterDeps {
@@ -107,6 +126,34 @@ export function createBrowserLiveRouter(deps: BrowserLiveRouterDeps) {
       return c.json({ error: { message: 'That input was not understood. Try again.' } }, 400);
     }
     return c.json({ data: result.body }, 200);
+  });
+
+  app.post('/upload', async c => {
+    const body: unknown = await c.req.json().catch(() => undefined);
+    const request = UploadRequestSchema.safeParse(body);
+    if (!request.success) {
+      return c.json({ error: { message: 'That file could not be sent. Files up to 10 MB work.' } }, 400);
+    }
+    const { tab: tabId, ...file } = request.data;
+    const tab: BrowserTabRef = { ...profileOf(c), chat_id: tabId };
+    const result = await callBrowserSidecar({ path: '/live/upload', tab, schema: LiveUploadReplySchema, body: file });
+    if (!result.ok) {
+      deps.logger.warn('browser live upload failed', { message: result.message });
+      return c.json({ error: { message: result.message } }, 502);
+    }
+    switch (result.body.status) {
+      case 'ok':
+        return c.json({ data: result.body }, 200);
+      case 'no_file_field':
+        return c.json(
+          { error: { message: 'This page has no place to upload a file. Click its upload button first.' } },
+          409,
+        );
+      case 'closed':
+        return c.json({ error: { message: 'That tab has closed. Ask Aman to open the page again.' } }, 409);
+      case 'bad_input':
+        return c.json({ error: { message: 'That file could not be sent. Files up to 10 MB work.' } }, 400);
+    }
   });
 
   return app;

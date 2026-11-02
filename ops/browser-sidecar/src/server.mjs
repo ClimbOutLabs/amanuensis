@@ -14,6 +14,9 @@ import { elementAtPath } from './extract.mjs';
 import { RefAssigner, renderSnapshot, sensitivityOf } from './snapshot.mjs';
 
 const MAX_BODY_BYTES = 256 * 1024;
+/** The largest file the live view may upload into a page: 10 MiB, sent as base64. */
+const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
+const MAX_UPLOAD_BODY_BYTES = Math.ceil((MAX_UPLOAD_BYTES * 4) / 3) + 64 * 1024;
 
 /**
  * extract.mjs as one script for the page. `page.evaluate(fn)` sends only the function's own source, so
@@ -88,6 +91,8 @@ function createTab({ page }) {
     goingBack: false,
     refusedRedirect: undefined,
     movedTo: undefined,
+    // The page's last open file picker, waiting for the person to upload a file from the live view.
+    fileChooser: undefined,
   };
 }
 
@@ -252,6 +257,10 @@ export class BrowserSidecar {
         download.cancel().catch(() => undefined);
       });
       const tab = createTab({ page });
+      // A file picker never opens on the virtual screen; the live view fills it with the person's file.
+      page.on('filechooser', chooser => {
+        tab.fileChooser = chooser;
+      });
       await guardRedirects({ tab, cdp: await profile.context.newCDPSession(page) });
       profile.tabs.set(tabId, tab);
       profile.tabsByPage.set(page, tab);
@@ -545,6 +554,33 @@ export class BrowserSidecar {
     return { status: 'ok' };
   }
 
+  /**
+   * Puts a file the person chose in the live view into the page: into the file picker the page just
+   * opened, or else the page's first file field. Nothing is uploaded until the page itself sends it.
+   */
+  async liveUpload({ owner, tab: tabId, name, mime, data }) {
+    const tab = await this.#tabFor({ owner, tab: tabId, create: false });
+    if (tab === undefined) {
+      return NO_TAB;
+    }
+    const file = { name, mimeType: mime, buffer: Buffer.from(data, 'base64') };
+    if (file.buffer.length > MAX_UPLOAD_BYTES) {
+      return { status: 'bad_input' };
+    }
+    const chooser = tab.fileChooser;
+    tab.fileChooser = undefined;
+    if (chooser !== undefined && !chooser.page().isClosed()) {
+      await chooser.setFiles(file);
+      return { status: 'ok' };
+    }
+    const field = tab.page.locator('input[type="file"]').first();
+    if ((await field.count()) === 0) {
+      return { status: 'no_file_field' };
+    }
+    await field.setInputFiles(file);
+    return { status: 'ok' };
+  }
+
   async close() {
     for (const starting of this.#profiles.values()) {
       const profile = await starting.catch(() => undefined);
@@ -601,9 +637,10 @@ function ownerDirName(owner) {
 async function readJsonBody(req) {
   const chunks = [];
   let size = 0;
+  const limit = req.url === '/live/upload' ? MAX_UPLOAD_BODY_BYTES : MAX_BODY_BYTES;
   for await (const chunk of req) {
     size += chunk.length;
-    if (size > MAX_BODY_BYTES) {
+    if (size > limit) {
       throw new Error('request body too large');
     }
     chunks.push(chunk);
@@ -665,6 +702,15 @@ const ROUTES = {
   'POST /select': (sidecar, where, body) => sidecar.select({ ...where, ref: body.ref, option: body.option }),
   'POST /live/frame': (sidecar, where) => sidecar.liveFrame(where),
   'POST /live/tabs': (sidecar, where) => sidecar.liveTabs(where),
+  'POST /live/upload': (sidecar, where, body) =>
+    typeof body.name === 'string' &&
+    body.name !== '' &&
+    body.name.length <= 255 &&
+    typeof body.mime === 'string' &&
+    body.mime.length <= 255 &&
+    typeof body.data === 'string'
+      ? sidecar.liveUpload({ ...where, name: body.name, mime: body.mime, data: body.data })
+      : { status: 'bad_input' },
   'POST /live/input': (sidecar, where, body) => {
     const input = parseLiveInput(body);
     return input === undefined ? { status: 'bad_input' } : sidecar.liveInput({ ...where, input });

@@ -181,6 +181,30 @@ export function BrowserLivePage() {
     }
   };
 
+  const onUpload = (file: File | undefined) => {
+    if (file === undefined || selected === undefined) {
+      return;
+    }
+    if (file.size > 10 * 1024 * 1024) {
+      setNote('That file is too big. Files up to 10 MB work.');
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = typeof reader.result === 'string' ? reader.result : '';
+      const data = result.slice(result.indexOf(',') + 1);
+      setNote(`Sending ${file.name}...`);
+      liveCall('/api/browser/live/upload', { tab: selected, name: file.name, mime: file.type, data })
+        .then(() => {
+          setNote(`${file.name} is in the page. Press the page's own upload or send button to finish.`);
+        })
+        .catch(() => {
+          setNote("The file could not be put in the page. Click the page's upload button first, then try again.");
+        });
+    };
+    reader.readAsDataURL(file);
+  };
+
   const onTypeSubmit = () => {
     if (typeText === '') {
       return;
@@ -202,8 +226,8 @@ export function BrowserLivePage() {
     <div style={{ maxWidth: '60rem', margin: '0 auto', padding: '1rem' }}>
       <h1>Aman&apos;s browser, live</h1>
       <p>
-        This is the page Aman has open. Click, scroll and type to use it yourself, for example to finish a sign-in.
-        When you are done, press Done and Aman carries on from here.
+        This is the page Aman has open. Click, scroll and type to use it yourself, for example to finish a sign-in. When
+        you are done, press Done and Aman carries on from here.
       </p>
       <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', marginBottom: '0.75rem' }}>
         {tabs.map(tab => (
@@ -260,6 +284,18 @@ export function BrowserLivePage() {
         <button type="button" onClick={onTypeSubmit}>
           Type it
         </button>
+      </div>
+      <div style={{ marginBottom: '0.75rem' }}>
+        <label>
+          Upload a file into the page:{' '}
+          <input
+            type="file"
+            onChange={event => {
+              onUpload(event.target.files?.[0]);
+              event.target.value = '';
+            }}
+          />
+        </label>
       </div>
       <button type="button" onClick={() => setDone(true)}>
         Done
