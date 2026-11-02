@@ -22,6 +22,7 @@ import { createAuthRouter } from './apis/auth';
 import { createBriefItemsRouter } from './apis/briefItems';
 import { createBugReportRouter } from './apis/bugReport';
 import { createAppBugReportRouter } from './apis/bugReportApp';
+import { createBrowserLiveRouter } from './apis/browserLive';
 import { CALENDAR_SETTINGS_BASE_PATH, createCalendarAccountRouter } from './apis/calendarAccount';
 import { createCapabilitiesRouter } from './apis/capabilities';
 import { createCatalogRouter } from './apis/catalog';
@@ -993,6 +994,18 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
       createChatImagesRouter({
         sessions: deps.sessions,
         chatImages: deps.chatImages,
+        resolveRequestContext,
+        logger: deps.logger,
+      }),
+      createUiSessionAuthMiddleware(deps.authenticator),
+    ),
+  );
+  // Live view of Aman's browser, browser session only: the signed-in person watches and drives the
+  // tabs of their own browser profile, and no agent or API token can see or steer it for them.
+  app.route(
+    '/api/browser/live',
+    withAuth(
+      createBrowserLiveRouter({
         resolveRequestContext,
         logger: deps.logger,
       }),

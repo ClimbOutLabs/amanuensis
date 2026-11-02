@@ -787,3 +787,153 @@ test('type with a ref whose element can no longer be read is refused as a stale 
     assert.deepEqual(typed, { status: 'refused', reason: 'stale_ref' });
   });
 });
+
+/** A sidecar whose browser is a stand-in page, so the live view can be tested with no Chromium. */
+async function fakeSidecar() {
+  const acts = [];
+  let launches = 0;
+  const page = {
+    url: () => 'https://site-a.test/account',
+    title: async () => 'Account',
+    goto: async () => undefined,
+    evaluate: async () => [],
+    screenshot: async options => {
+      acts.push({ screenshot: options });
+      return Buffer.from('frame-bytes');
+    },
+    viewportSize: () => ({ width: 1280, height: 800 }),
+    mouse: {
+      click: async (x, y) => {
+        acts.push({ click: [x, y] });
+      },
+      wheel: async (dx, dy) => {
+        acts.push({ wheel: [dx, dy] });
+      },
+    },
+    keyboard: {
+      type: async text => {
+        acts.push({ type: text });
+      },
+      press: async key => {
+        acts.push({ key });
+      },
+    },
+    on: () => undefined,
+    close: async () => undefined,
+  };
+  const cdp = {
+    send: async method => (method === 'Page.getFrameTree' ? { frameTree: { frame: { id: 'main' } } } : {}),
+    on: () => undefined,
+  };
+  const context = {
+    on: () => undefined,
+    route: async () => undefined,
+    newPage: async () => page,
+    newCDPSession: async () => cdp,
+    close: async () => undefined,
+  };
+  // The gateway the sidecar asks before opening: every address is fine, and stays the address it was.
+  const gateway = createServer((req, res) => {
+    const asked = new URL(req.url, 'http://gateway.test');
+    res.writeHead(200, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({ ok: true, url: asked.searchParams.get('url') }));
+  });
+  await new Promise(resolve => gateway.listen(0, '127.0.0.1', resolve));
+  const sidecar = new BrowserSidecar({
+    profilesDir: '/tmp',
+    navTimeoutMs: 1000,
+    proxyServer: `http://127.0.0.1:${gateway.address().port}`,
+    launch: async () => {
+      launches += 1;
+      return { context, page };
+    },
+  });
+  return { sidecar, acts, gateway, launches: () => launches };
+}
+
+test('the live view lists, frames and drives a tab through a stand-in page', async () => {
+  if (BrowserSidecar === undefined) {
+    return;
+  }
+  const { sidecar, acts, gateway, launches } = await fakeSidecar();
+  try {
+    // No profile yet: an empty list, and nothing was launched to get it.
+    assert.deepEqual(await sidecar.liveTabs({ owner: 'owner-1' }), { status: 'ok', tabs: [] });
+    assert.equal(launches(), 0);
+
+    await sidecar.open({ owner: 'owner-1', tab: 'chat-1', url: 'https://site-a.test/account' });
+    assert.deepEqual(await sidecar.liveTabs({ owner: 'owner-1' }), {
+      status: 'ok',
+      tabs: [{ tab: 'chat-1', title: 'Account', url: 'https://site-a.test/account' }],
+    });
+
+    const frame = await sidecar.liveFrame({ owner: 'owner-1', tab: 'chat-1' });
+    assert.deepEqual(frame, {
+      status: 'ok',
+      jpeg_base64: Buffer.from('frame-bytes').toString('base64'),
+      width: 1280,
+      height: 800,
+    });
+    assert.deepEqual(acts.at(-1), { screenshot: { type: 'jpeg', quality: 60 } });
+
+    // A click read from a frame half the viewport's size lands at twice the point on the page.
+    assert.deepEqual(
+      await sidecar.liveInput({
+        owner: 'owner-1',
+        tab: 'chat-1',
+        input: { kind: 'click', x: 100, y: 50, imageWidth: 640, imageHeight: 400 },
+      }),
+      { status: 'ok' },
+    );
+    assert.deepEqual(acts.at(-1), { click: [200, 100] });
+
+    await sidecar.liveInput({ owner: 'owner-1', tab: 'chat-1', input: { kind: 'type', text: '123456' } });
+    assert.deepEqual(acts.at(-1), { type: '123456' });
+    await sidecar.liveInput({ owner: 'owner-1', tab: 'chat-1', input: { kind: 'key', key: 'Enter' } });
+    assert.deepEqual(acts.at(-1), { key: 'Enter' });
+    await sidecar.liveInput({ owner: 'owner-1', tab: 'chat-1', input: { kind: 'wheel', dy: 240 } });
+    assert.deepEqual(acts.at(-1), { wheel: [0, 240] });
+
+    // A chat with no tab is closed to the live view, like it is to a read.
+    assert.deepEqual(await sidecar.liveFrame({ owner: 'owner-1', tab: 'chat-9' }), { status: 'closed' });
+    assert.deepEqual(
+      await sidecar.liveInput({ owner: 'owner-1', tab: 'chat-9', input: { kind: 'key', key: 'Enter' } }),
+      { status: 'closed' },
+    );
+  } finally {
+    gateway.close();
+    await sidecar.close();
+  }
+});
+
+test('the live routes answer over HTTP, and listing them needs no tab', async () => {
+  if (BrowserSidecar === undefined || createHttpServer === undefined) {
+    return;
+  }
+  const { sidecar, gateway } = await fakeSidecar();
+  const server = createHttpServer({ sidecar, allowedPeers: async () => ['127.0.0.1'] });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  try {
+    const base = `http://127.0.0.1:${server.address().port}`;
+    const post = async (route, body) =>
+      fetch(`${base}${route}`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+    const tabs = await post('/live/tabs', { owner: 'owner-1' });
+    assert.equal(tabs.status, 200);
+    assert.deepEqual(await tabs.json(), { status: 'ok', tabs: [] });
+
+    const frameWithNoTab = await post('/live/frame', { owner: 'owner-1' });
+    assert.equal(frameWithNoTab.status, 400);
+
+    const badInput = await post('/live/input', { owner: 'owner-1', tab: 'chat-1', kind: 'dance' });
+    assert.equal(badInput.status, 200);
+    assert.deepEqual(await badInput.json(), { status: 'bad_input' });
+  } finally {
+    server.close();
+    gateway.close();
+    await sidecar.close();
+  }
+});
