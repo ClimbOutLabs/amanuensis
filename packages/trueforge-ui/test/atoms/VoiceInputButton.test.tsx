@@ -1,5 +1,5 @@
-import { act, fireEvent, render, screen } from '@testing-library/react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { act, fireEvent, render, renderHook, screen } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const { mockSetText, mockStartVoiceRecording } = vi.hoisted(() => ({
   mockSetText: vi.fn(),
@@ -16,14 +16,17 @@ vi.mock('@/atoms/lib/voiceRecorder.js', () => ({
   startVoiceRecording: mockStartVoiceRecording,
 }));
 
-import { VoiceInputButton } from '@/atoms/VoiceInputButton.js';
 import type { StartVoiceRecordingOptions } from '@/atoms/lib/voiceRecorder.js';
+import { VoiceInputButton } from '@/atoms/VoiceInputButton.js';
+import { useSpokenReply } from '@/components/SpokenReplyContext.js';
 import {
   VoiceInputProvider,
   type VoiceAvailability,
   type VoiceInputApi,
   type VoiceTranscription,
 } from '@/components/VoiceInputContext.js';
+import { clearDraftFromVoice, takeDraftFromVoice } from '@/utils/voiceTurn.js';
+import { installSpeechSynthesis, removeSpeechSynthesis, stopSpokenReply } from '../utils/speechSynthesisFake.js';
 
 const DEFAULT_TRANSCRIPTION: VoiceTranscription = {
   text: 'hello world',
@@ -330,5 +333,48 @@ describe('VoiceInputButton', () => {
 
     expect(await screen.findByRole('alert')).toHaveTextContent('Microphone unavailable');
     expect(transcribeMock).not.toHaveBeenCalled();
+  });
+});
+
+describe('VoiceInputButton and read-aloud replies', () => {
+  beforeEach(() => {
+    clearDraftFromVoice();
+  });
+
+  afterEach(() => {
+    stopSpokenReply();
+    removeSpeechSynthesis();
+  });
+
+  it('starting to record stops any reply that is being read aloud', async () => {
+    const synthesis = installSpeechSynthesis();
+    void renderHook(() => useSpokenReply()).result.current.speak('A long reply.', { key: 'msg-1' });
+    const { api } = makeApi();
+    render(
+      <VoiceInputProvider api={api}>
+        <VoiceInputButton disabled={false} />
+      </VoiceInputProvider>,
+    );
+    const cancelsBefore = synthesis.cancel.mock.calls.length;
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Record voice message' }));
+
+    expect(synthesis.cancel.mock.calls.length).toBeGreaterThan(cancelsBefore);
+  });
+
+  it('marks the draft as spoken once a transcript is added to it', async () => {
+    installSpeechSynthesis();
+    const { api } = makeApi();
+    render(
+      <VoiceInputProvider api={api}>
+        <VoiceInputButton disabled={false} />
+      </VoiceInputProvider>,
+    );
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Record voice message' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Stop and transcribe' }));
+    await screen.findByRole('button', { name: 'Record voice message' });
+
+    expect(takeDraftFromVoice()).toBe(true);
   });
 });

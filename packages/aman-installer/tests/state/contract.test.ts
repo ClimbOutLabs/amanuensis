@@ -277,13 +277,14 @@ test('the pins, a record the shell writes and a record this program writes all m
   ]);
   const written: unknown = JSON.parse(await readFile(join(releaseDir, 'release.json'), 'utf8'));
   assert.deepEqual(schemaProblems({ record: written, schema }), [], 'the record release.sh writes');
-  assert.ok(typeof written === 'object' && written !== null && 'browser_image' in written);
+  assert.ok(typeof written === 'object' && written !== null && 'browser_image' in written && 'tts_image' in written);
   const rendered: unknown = JSON.parse(
     renderRelease({
       schema: '1',
       sourceRef: 'abc123',
       appImage: 'aman-app:abc123',
       sttImage: 'aman-stt:abc123',
+      ttsImage: 'aman-tts:abc123',
       calendarImage: 'aman-calendar-caldav:abc123',
       browserImage: 'aman-browser:abc123',
       browserGatewayImage: 'aman-browser-gateway:abc123',

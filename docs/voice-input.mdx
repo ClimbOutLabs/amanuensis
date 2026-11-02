@@ -37,3 +37,21 @@ Point the server at the published port by setting `STT_URL=http://localhost:8001
 **Memory.** The default 2 GB limit covers the `small` int8 model with headroom. If the container is OOM-killed during warmup, raise `mem_limit` before changing anything else.
 
 **Request limits.** The sidecar caps audio bodies at 30 MB (`AMAN_STT_MAX_BODY_BYTES`); the server caps them at 6.4 MB, which is 200 seconds of 16 kHz mono 16-bit audio, enforcing the 3 minute recording cap server-side. The browser also caps recordings at 3 minutes client-side. Transcription requests time out after 120 seconds server-side.
+
+## Spoken replies: the voice on your computer
+
+Replies can be read aloud. When the voice container is running, replies are read by a voice that runs on your own computer. When it is not, your browser's built-in voice reads them instead.
+
+**What it is.** A small container called `aman-tts`. It runs the Kokoro voice model (Apache-2.0) on the computer's processor and turns reply text into audio. The model and its voices are built into the container, so it never goes online.
+
+**Nothing leaves your computer.** The browser sends the reply text to the server, which passes it to `aman-tts` and sends the audio back. The text and the audio stay on your computer, and neither is saved or written to the logs.
+
+**Limits.** One request reads at most 4,000 characters, and each person can ask for 30 readings a minute. Longer replies are read in parts.
+
+**How to turn it off.** Stop the container, and replies are read by your browser's voice instead:
+
+- Installed with the installer: run `docker stop aman-tts`. It starts again the next time the installer or `aman upgrade` runs.
+- With `docker-compose.yml`: run `docker compose stop aman-tts`.
+- With `pnpm dev:infra`: remove the `aman-tts` service from `docker-compose.dev.yml`, or stop it with `docker compose -f docker-compose.dev.yml stop aman-tts`.
+
+For host development, set `TTS_URL=http://localhost:8002` in `packages/trueforge/.env` (already in `packages/trueforge/.env.example`). The server reads the address from `TTS_URL`, which defaults to `http://aman-tts:8002`.

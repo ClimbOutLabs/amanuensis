@@ -1,7 +1,7 @@
 /**
- * Wire schemas for the voice input endpoints (`POST /api/v1/voice/transcribe`,
- * `GET /api/v1/voice/status`). The transcription itself runs in the `aman-stt`
- * sidecar; these shapes are the agent backend's proxy contract with the browser.
+ * Wire schemas for the voice endpoints (`POST /api/v1/voice/transcribe`, `POST /api/v1/voice/speak`,
+ * `GET /api/v1/voice/status`). Transcription runs in the `aman-stt` sidecar and
+ * speech in `aman-tts`; these shapes are the agent backend's proxy contract with the browser.
  */
 import { z } from '@hono/zod-openapi';
 
@@ -40,3 +40,18 @@ export const VoiceStatusResponseSchema = z
   .openapi('VoiceStatusResponse');
 
 export type VoiceStatusResponse = z.infer<typeof VoiceStatusResponseSchema>;
+
+/** Longest reply text one `POST /api/v1/voice/speak` call reads aloud; longer text gets 413. */
+export const MAX_SPEAK_TEXT_CHARS = 4000;
+
+export const SpeakVoiceRequestSchema = z
+  .object({
+    text: z
+      .string()
+      .min(1)
+      .describe(`Reply text to read aloud, up to ${String(MAX_SPEAK_TEXT_CHARS)} characters.`),
+    voice: z.string().min(1).max(64).optional().describe('Voice id, e.g. `af_heart`. Omit for the default voice.'),
+  })
+  .openapi('SpeakVoiceRequest');
+
+export type SpeakVoiceRequest = z.infer<typeof SpeakVoiceRequestSchema>;

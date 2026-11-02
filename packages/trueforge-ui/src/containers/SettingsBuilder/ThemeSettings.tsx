@@ -2,6 +2,7 @@
 
 import { cn } from '@/atoms/lib/cn.js';
 import { Switch } from '@/atoms/primitives/Switch.js';
+import { VoiceReplySettings } from '@/components/VoiceReplySettings.js';
 import { useTheme } from '@/theme/ThemeProvider.js';
 import { PRESETS } from '@/theme/presets/index.js';
 import { THEME_PRESET_IDS, type ThemePreset } from '@/theme/types.js';
@@ -83,6 +84,7 @@ const ThemeSettings = () => {
             aria-describedby="model-usage-display-hint"
           />
         </div>
+        <VoiceReplySettings />
       </div>
 
       <div>

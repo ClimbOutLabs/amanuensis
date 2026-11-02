@@ -2,7 +2,7 @@
 
 **Status:** implemented
 
-**Scope note:** v1 ships local speech-to-text input only: a tap-to-record mic button in the chat composer, transcribed by the local `aman-stt` sidecar. Text-to-speech playback, hands-free mode, the push-to-talk hotkey, and the clipboard bridge are future work; the sections below describe the full target.
+**Scope note:** v1 ships local speech-to-text input only: a tap-to-record mic button in the chat composer, transcribed by the local `aman-stt` sidecar. A local text-to-speech voice, the `aman-tts` sidecar, now backs spoken replies (see `docs/voice-input.mdx`). Hands-free mode, the push-to-talk hotkey, and the clipboard bridge are future work; the sections below describe the full target.
 
 ## Problem
 

@@ -15,6 +15,7 @@ const SCRIPT = [
   '. "$2/release.sh"',
   'checkout_app_tag',
   'printf \'aman-stt:%s\\n\' "$(source_id ops/aman-stt)"',
+  'printf \'aman-tts:%s\\n\' "$(source_id ops/aman-tts)"',
   'printf \'aman-calendar-caldav:%s\\n\' "$(source_id ops/calendar-sidecar)"',
   'printf \'aman-browser:%s\\n\' "$(source_id ops/browser-sidecar)"',
 ].join('\n');
@@ -43,12 +44,19 @@ export async function sourceIdsFromCheckout({
   }
   const app = found['aman-app'];
   const stt = found['aman-stt'];
+  const tts = found['aman-tts'];
   const calendar = found['aman-calendar-caldav'];
   const browser = found['aman-browser'];
-  if (app === undefined || stt === undefined || calendar === undefined || browser === undefined) {
+  if (app === undefined || stt === undefined || tts === undefined || calendar === undefined || browser === undefined) {
     return null;
   }
-  return { 'aman-app': app, 'aman-stt': stt, 'aman-calendar-caldav': calendar, 'aman-browser': browser };
+  return {
+    'aman-app': app,
+    'aman-stt': stt,
+    'aman-tts': tts,
+    'aman-calendar-caldav': calendar,
+    'aman-browser': browser,
+  };
 }
 
 export function installerLibDir(checkoutDir: string): string {

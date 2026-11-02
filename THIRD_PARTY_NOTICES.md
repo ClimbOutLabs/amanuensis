@@ -12,6 +12,7 @@ Amanuensis (Aman) is licensed under the Mozilla Public License 2.0 (see `LICENSE
 6. mcp/gmail (MIT)
 7. Llama Prompt Guard 2 (Llama 4 Community License)
 8. Mail and calendar connector sidecars (BSD-3-Clause, MIT)
+9. Local voice for spoken replies (Apache-2.0, MIT, BSD)
 
 ## 1. sharp and libvips (LGPL-3.0-or-later)
 
@@ -755,3 +756,17 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
+
+## 9. Local voice for spoken replies (Apache-2.0, MIT, BSD)
+
+The `ops/aman-tts` image reads replies aloud on the person's own computer. Its build downloads these files, pinned by SHA-256 in `ops/aman-tts/pins.py`, and the image contains them unmodified except that only three voices are kept.
+
+| Component                                   | License      | Copyright                                            | Source                                                                 |
+| ------------------------------------------- | ------------ | ---------------------------------------------------- | ---------------------------------------------------------------------- |
+| Kokoro-82M v1.0 model and voices            | Apache-2.0   | hexgrad                                              | https://huggingface.co/hexgrad/Kokoro-82M                              |
+| Kokoro int8 ONNX export and voice archive   | Apache-2.0   | hexgrad, exported by thewh1teagle (kokoro-onnx, MIT) | https://github.com/thewh1teagle/kokoro-onnx (release model-files-v1.0) |
+| misaki 0.9.4 English word lists (data only) | Apache-2.0   | hexgrad                                              | https://github.com/hexgrad/misaki                                      |
+| onnxruntime                                 | MIT          | Microsoft Corporation                                | https://github.com/microsoft/onnxruntime                               |
+| numpy                                       | BSD-3-Clause | NumPy Developers                                     | https://github.com/numpy/numpy                                         |
+
+`ops/aman-tts/kokoro_vocab.json` is the phoneme table from the Kokoro-82M model configuration (Apache-2.0). The Apache-2.0 license text is in `ops/aman-tts/LICENSE.Apache-2.0`, and the image carries misaki's copy at `/opt/aman-tts/assets/LICENSE.misaki`. The image installs no GPL or LGPL text-to-speech component: espeak-ng, phonemizer and num2words are deliberately not used. The numpy wheel bundles OpenBLAS (BSD-3-Clause) and the GCC runtime libraries (GPL-3.0 with the GCC Runtime Library Exception).
