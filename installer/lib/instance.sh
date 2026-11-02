@@ -137,7 +137,7 @@ instance_render() {
   local name=$1 app_image=$2 dex_image=$3 dir login_bind=0.0.0.0 app_port login_port public_url login_url email client_id sandbox_on edge_on login_host origins redirects app_ports tls_on=0 tls_host=0 tls_volume=0 tls_port address
   dir=$(instance_dir "$name")
   owner_name_backfill "$name"
-  web_push_backfill "$name"
+  web_push_backfill "$name" "$app_image"
   app_port=$(reg_get "$name" app_port)
   login_port=$(reg_get "$name" login_port)
   public_url=$(reg_get "$name" public_url)
@@ -257,35 +257,27 @@ calendar_secret_backfill() { # name
   } | write_if_changed "$env" 600 || true
 }
 
-# Hex text to URL-safe base64 without padding, the form push keys are written in.
-hex_to_base64url() { # hex
-  # shellcheck disable=SC2059
-  printf "$(printf '%s' "$1" | sed 's/../\\x&/g')" | openssl base64 -A | tr '+/' '-_' | tr -d '='
-}
-
-# Makes one push key pair (an ECDSA P-256 key, as web push signing needs) and prints the public key, a space, then
-# the private key. Fails, printing nothing, when the machine's openssl does not give a key of the expected shape.
-vapid_keypair() {
-  local der priv pub
-  der=$(openssl ecparam -name prime256v1 -genkey -noout -outform DER 2>/dev/null | od -An -v -tx1 | tr -d ' \n') || return 1
-  # The key file holds a short header, the 32-byte private key, a fixed curve label, and the 65-byte public key last.
-  priv=${der:14:64}
-  pub=${der: -130}
-  [ "${#priv}" -eq 64 ] && [ "${#pub}" -eq 130 ] && [ "${pub:0:2}" = 04 ] || return 1
-  printf '%s %s\n' "$(hex_to_base64url "$pub")" "$(hex_to_base64url "$priv")"
+# Makes one push key pair with the app image's Node.js, so the computer needs no key tools of its own. Prints the
+# public key, a space, then the private key, and fails, printing nothing, on any other output.
+push_keypair() { # app_image
+  local out
+  out=$(D run --rm --network none --user "$(id -u):$(id -g)" -v "$INSTALLER_DIR/lib/push-keys.mjs:/push-keys.mjs:ro" \
+    --entrypoint node "$1" /push-keys.mjs 2>/dev/null) || return 1
+  matches_whole "$out" '^[A-Za-z0-9_-]{87} [A-Za-z0-9_-]{43}$' || return 1
+  printf '%s\n' "$out"
 }
 
 # The key pair and contact the app signs push notices with, so a closed page still hears about a due reminder. They are
 # made once, in the settings file, and an existing pair is never changed. An older instance gets them on its next
 # refresh or upgrade. A file without the installer's managed part gets the lines at its end. A missing file gets nothing.
 # When no key can be made, push stays off and the rest works as before.
-web_push_backfill() { # name
+web_push_backfill() { # name app_image
   local name=$1 env keys public private
   env="$(instance_dir "$name")/.env"
   [ -f "$env" ] || return 0
   if ! grep -q '^WEB_PUSH_PUBLIC_KEY=..*' "$env" || ! grep -q '^WEB_PUSH_PRIVATE_KEY=..*' "$env"; then
-    keys=$(vapid_keypair) || {
-      warn "Push notices could not be set up because this computer could not make a key. Install openssl, then run the installer again."
+    keys=$(push_keypair "$2") || {
+      warn "Push notices could not be set up this time. Run the installer again to try once more."
       return 0
     }
     public=${keys% *}

@@ -92,7 +92,30 @@ test_a_missing_contact_is_added_beside_existing_keys() {
   sandbox_drop
 }
 
+test_keys_come_from_the_app_image() {
+  t_begin "the keys are made by the app image's Node.js with no network, so the computer needs no key tools"
+  sandbox_new
+  install_machine
+  local runs
+  runs=$(cat "$STUB_STATE/push_keys_runs")
+  assert_contains "$runs" "--network none"
+  assert_contains "$runs" "--entrypoint node"
+  sandbox_drop
+}
+
+test_a_failed_key_leaves_push_off() {
+  t_begin "when no key can be made, the install still finishes, says what to do, and push stays off"
+  sandbox_new
+  STUB_PUSH_KEYS_FAIL=1 install_machine
+  assert_contains "$OUT$ERR" "Run the installer again"
+  assert_eq "$(env_value WEB_PUSH_PUBLIC_KEY)" "" "no public key"
+  assert_eq "$(env_value WEB_PUSH_PRIVATE_KEY)" "" "no private key"
+  sandbox_drop
+}
+
 test_install_makes_the_keys
+test_keys_come_from_the_app_image
+test_a_failed_key_leaves_push_off
 test_a_later_run_keeps_the_keys
 test_an_older_instance_gets_keys
 test_a_file_without_a_managed_part_gets_the_lines
