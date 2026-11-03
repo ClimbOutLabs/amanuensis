@@ -13,16 +13,15 @@ import {
   type PushBlocker,
 } from './pushDevice.js';
 
-const BLOCKER_WORDS: Record<PushBlocker, string> = {
-  needs_https:
-    'Notices need a secure address. Open Aman at an address that starts with https, or on this computer at localhost, then come back here.',
-  unsupported:
-    'This browser cannot show notices when Aman is closed. Try a recent version of Chrome, Edge, Firefox or Safari.',
-  iphone_needs_home_screen:
-    'On an iPhone, notices only work once Aman is on your Home Screen. Tap the Share button, choose Add to Home Screen, then open Aman from there and come back to this page.',
-  denied:
-    'This browser is blocking notices for this site. Allow them in the browser settings for this site, then come back here.',
-};
+function blockerWords(assistant: string): Record<PushBlocker, string> {
+  return {
+    needs_https: `Notices need a secure address. Open ${assistant} at an address that starts with https, or on this computer at localhost, then come back here.`,
+    unsupported: `This browser cannot show notices when ${assistant} is closed. Try a recent version of Chrome, Edge, Firefox or Safari.`,
+    iphone_needs_home_screen: `On an iPhone, notices only work once ${assistant} is on your Home Screen. Tap the Share button, choose Add to Home Screen, then open ${assistant} from there and come back to this page.`,
+    denied:
+      'This browser is blocking notices for this site. Allow them in the browser settings for this site, then come back here.',
+  };
+}
 
 type DeviceState = 'checking' | 'on' | 'off';
 
@@ -60,28 +59,30 @@ export function ReachMeSettings() {
     setBusy(true);
     setError(null);
     try {
-      await enablePush({ api, label: 'This device' });
+      await enablePush({ api, label: 'This device', assistant });
       setState('on');
     } catch (caught) {
+      console.error(caught);
       setError(caught instanceof Error ? caught.message : 'Notices could not be turned on. Try again.');
     } finally {
       setBusy(false);
     }
-  }, [api]);
+  }, [api, assistant]);
 
   const turnOff = useCallback(async () => {
     if (api === undefined) return;
     setBusy(true);
     setError(null);
     try {
-      await disablePush({ api });
+      await disablePush({ api, assistant });
       setState('off');
     } catch (caught) {
+      console.error(caught);
       setError(caught instanceof Error ? caught.message : 'Notices could not be turned off. Try again.');
     } finally {
       setBusy(false);
     }
-  }, [api]);
+  }, [api, assistant]);
 
   if (api === undefined) return null;
 
@@ -97,11 +98,12 @@ export function ReachMeSettings() {
       <div className="border-border rounded-xl border p-4">
         <h3 className="text-text-primary text-sm font-semibold">Notices on this device</h3>
         <p className="text-text-secondary mt-1 text-sm">
-          A notice shows even when Aman is closed. It says only that something is there. The details open in Aman.
+          A notice shows even when {assistant} is closed. It says only that something is there. The details open in{' '}
+          {assistant}.
         </p>
         {support.blocker !== null ? (
           <p data-role="reach-me-blocker" className="text-text-primary mt-3 text-sm">
-            {BLOCKER_WORDS[support.blocker]}
+            {blockerWords(assistant)[support.blocker]}
           </p>
         ) : serverReady === false ? (
           <p className="text-text-primary mt-3 text-sm">
@@ -134,7 +136,10 @@ export function ReachMeSettings() {
           </div>
         )}
         {error === null ? null : (
-          <p role="alert" className="text-failure-text mt-3 text-sm">
+          <p
+            role="alert"
+            className="border-failure-bg/30 bg-failure-bg/10 text-failure-bg mt-3 rounded-md border px-3 py-2 text-sm"
+          >
             {error}
           </p>
         )}

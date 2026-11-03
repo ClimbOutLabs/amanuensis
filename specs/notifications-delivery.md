@@ -28,6 +28,8 @@ One server-side feed of things Aman wants a person to see, called deliveries. Ea
 
 **Push is opt-in per device.** A person turns notices on from a click in Settings. Push is off unless the server has a key pair. The installer creates the key pair at install, and on upgrade for instances that have none.
 
+**The Reach me words name the assistant, and a failure says its kind.** The settings page speaks of the assistant by the name the person chose, not the product name. When turning notices on or off fails, the page says what kind of failure it was in plain words, with the one next step; the raw browser error stays in the console and on the error's cause. A certificate failure (the browser does not trust the secure connection at this address, which a page can be opened past but the notice program cannot) names the two remedies the product already has: `aman doctor network --fix` on the computer that runs the assistant, and the trust page on the device.
+
 **The service worker stays inert.** It shows notices and opens items. It has no fetch handler and stores nothing, so it cannot touch API calls or streams.
 
 **Outbound pushes use the public-address guard.** A registered push address cannot point the server at an internal host. A device the push service reports gone is removed.
@@ -40,7 +42,7 @@ One server-side feed of things Aman wants a person to see, called deliveries. Ea
 - Routes under `/api/v1/user/deliveries`: list (newest first, paged), unread count, mark seen, get one
 - Reminders create a delivery after writing their line into the Reminders chat; the old browser polling and per-browser storage are removed
 - A bell with the unread count in the main headers and a panel that lists deliveries; opening an item marks it seen
-- Web Push with a service worker, per-device opt-in in Settings, and plain words for iPhone (Home Screen needed), unsupported and blocked browsers
+- Web Push with a service worker, per-device opt-in in Settings, and plain words for iPhone (Home Screen needed), unsupported and blocked browsers, and for each kind of failure while turning notices on or off
 - Every delivery and every channel attempt is written to the Activity log in plain words
 - Deliveries are included in data export and import, with an upgrade step and an older-shape fixture; push subscriptions are not exported
 

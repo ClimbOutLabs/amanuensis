@@ -2,6 +2,7 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { EMPTY_PERSONALIZATION_PROFILE, PersonalizationProvider } from '@/components/PersonalizationContext.js';
 import { DeliveriesProvider } from '@/deliveries/DeliveriesContext.js';
 import { ReachMeSettings } from '@/deliveries/ReachMeSettings.js';
 
@@ -27,8 +28,11 @@ type StubSubscription = {
   unsubscribe: () => Promise<boolean>;
 };
 
-/** A browser that can take push. `existingKey` makes it start with a subscription made with that key. */
-function stubPushBrowser({ existingKey }: { existingKey?: string } = {}) {
+/**
+ * A browser that can take push. `existingKey` makes it start with a subscription made with that key.
+ * `registerError` makes registering the notice program fail the way the browser reports it.
+ */
+function stubPushBrowser({ existingKey, registerError }: { existingKey?: string; registerError?: Error } = {}) {
   let made = 0;
   const unsubscribed: string[] = [];
   const makeSubscription = (key: ArrayBuffer | null): StubSubscription => {
@@ -58,7 +62,10 @@ function stubPushBrowser({ existingKey }: { existingKey?: string } = {}) {
   Object.defineProperty(navigator, 'serviceWorker', {
     configurable: true,
     value: {
-      register: vi.fn(() => Promise.resolve(registration)),
+      register:
+        registerError === undefined
+          ? vi.fn(() => Promise.resolve(registration))
+          : vi.fn(() => Promise.reject(registerError)),
       ready: Promise.resolve(registration),
       getRegistration: vi.fn(() => Promise.resolve(current === null ? undefined : registration)),
       addEventListener: vi.fn(),
@@ -207,5 +214,65 @@ describe('Settings, Reach me', () => {
     stubPushBrowser();
     renderSettings();
     expect(screen.getByText(/Texts and phone calls are off\./)).toBeTruthy();
+  });
+
+  it('names the assistant the person chose in the notice words, not the product', async () => {
+    stubPushBrowser();
+    const server = fakeServer([]);
+    const personalizationApi = {
+      getProfile: async () => ({ ...EMPTY_PERSONALIZATION_PROFILE, assistant_name: 'Testname' }),
+      updateProfile: async () => ({ ...EMPTY_PERSONALIZATION_PROFILE }),
+      deleteProfile: async () => {},
+    };
+    render(
+      <PersonalizationProvider api={personalizationApi}>
+        <DeliveriesProvider api={server.api}>
+          <ReachMeSettings />
+        </DeliveriesProvider>
+      </PersonalizationProvider>,
+    );
+    expect(await screen.findByText(/A notice shows even when Testname is closed/)).toBeTruthy();
+    expect(screen.getByText(/The details open in Testname\./)).toBeTruthy();
+    expect(screen.queryByText(/even when Aman is closed/)).toBeNull();
+  });
+
+  it('explains a certificate failure as a trust problem, in readable styling, and keeps the raw error off the page', async () => {
+    stubPushBrowser({
+      registerError: new Error(
+        "Failed to register a ServiceWorker for scope ('https://box.example.ts.net:8444/') with script ('https://box.example.ts.net:8444/sw.js'): An SSL certificate error occurred when fetching the script.",
+      ),
+    });
+    const { api } = renderSettings();
+    const on = await screen.findByRole('button', { name: 'Turn on for this device' });
+    await waitFor(() => expect(on).toHaveProperty('disabled', false));
+
+    fireEvent.click(on);
+
+    const alert = await screen.findByRole('alert');
+    expect(alert.textContent).toContain('does not trust the secure connection at this address');
+    expect(alert.textContent).toContain('aman doctor network --fix');
+    expect(alert.textContent).toContain('/trust');
+    expect(alert.textContent).not.toContain('Failed to register a ServiceWorker');
+    expect(alert.textContent).not.toContain('SSL');
+    expect(alert.className).toContain('text-failure-bg');
+    expect(alert.className).not.toContain('text-failure-text');
+    expect(api.savePushDevice).not.toHaveBeenCalled();
+  });
+
+  it('says to reload when the notice program fails to load for another reason', async () => {
+    stubPushBrowser({
+      registerError: new Error(
+        "Failed to register a ServiceWorker for scope ('https://box.example.test/') with script ('https://box.example.test/sw.js'): A bad HTTP response code (404) was received when fetching the script.",
+      ),
+    });
+    renderSettings();
+    const on = await screen.findByRole('button', { name: 'Turn on for this device' });
+    await waitFor(() => expect(on).toHaveProperty('disabled', false));
+
+    fireEvent.click(on);
+
+    const alert = await screen.findByRole('alert');
+    expect(alert.textContent).toContain('could not load the small program notices need');
+    expect(alert.textContent).not.toContain('does not trust the secure connection');
   });
 });

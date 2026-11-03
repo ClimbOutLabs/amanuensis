@@ -50,11 +50,12 @@ export function ReminderNotificationPrompt() {
           type="button"
           onClick={() => {
             setError(null);
-            void enablePush({ api, label: 'This device' })
+            void enablePush({ api, label: 'This device', assistant })
               .then(() => setOffer('none'))
-              .catch((caught: unknown) =>
-                setError(caught instanceof Error ? caught.message : 'Notices could not be turned on. Try again.'),
-              );
+              .catch((caught: unknown) => {
+                console.error(caught);
+                setError(caught instanceof Error ? caught.message : 'Notices could not be turned on. Try again.');
+              });
           }}
           className="bg-primary-button-bg text-primary-button-text rounded-lg px-3 py-1 text-sm font-medium"
         >
