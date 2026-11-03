@@ -2,26 +2,20 @@ import {
   EventType,
   MAIN_THREAD_ID,
   type ISessionStore,
-  type Sessions,
+  type SessionRecord,
   type TerminalTurnState,
   type TurnCreatedEvent,
   type TurnDoneEvent,
 } from '@truefoundry/trueforge-core/agent-session';
 import { newEventId } from '@truefoundry/trueforge-core/core';
 import type { ModelMessageEvent } from '@truefoundry/trueforge-core/core/events/schema';
-import { REMINDERS_CHAT_TITLE, REMINDERS_METADATA_KEY } from '@truefoundry/trueforge-core/core/schedules/toolContract';
 import { ulid } from 'ulid';
-import type { IAgentStore } from '../db/agentStore';
 import type { ScheduleDispatchItem } from '../db/scheduleStore';
 import type { SessionCustom, TurnCustom } from '../db/sessionCustom';
 import type { DeliveryService } from './delivery/deliveryService';
 import { formatRunTime } from './scheduleCapability';
 
-function remindersExternalId(subjectId: string): string {
-  return `reminders:${subjectId}`;
-}
-
-/** The line the person reads in the Reminders chat. */
+/** The line the person reads in the chat the reminder was set in. */
 export function reminderLineText(input: { what: string; due: Date; timezone: string }): string {
   return `Reminder: ${input.what}\n\nDue ${formatRunTime({ at: input.due, timezone: input.timezone })}.`;
 }
@@ -33,58 +27,76 @@ function feedText(what: string): string {
   return what.length <= REMINDER_FEED_TEXT_MAX ? what : `${what.slice(0, REMINDER_FEED_TEXT_MAX - 1).trimEnd()}…`;
 }
 
-export class ReminderAgentNotFoundError extends Error {
-  constructor(options?: ErrorOptions) {
-    super('The assistant that set this reminder was deleted. Set the reminder again in a chat.', options);
-    this.name = 'ReminderAgentNotFoundError';
-  }
+/** Where a fired reminder's line landed: the chat it was set in, or no chat at all. */
+export interface ReminderDeliveryResult {
+  session_id: string | null;
+  turn_id: string | null;
 }
 
 /**
- * Writes one due reminder into the owner's Reminders chat as a finished assistant line, then puts it in the
- * owner's feed, which also pushes it to their devices and records it in the activity log. The host writes it
- * itself: no model is called, so it lands at once and costs nothing. The chat is made on the first reminder
- * and reused after. Returns the chat and the turn it wrote.
+ * Writes one due reminder as a finished assistant line in the chat the reminder was set in, then puts it in the
+ * owner's feed, which also pushes it to their devices and records it in the activity log. The host writes the
+ * line itself: no model is called, so it lands at once and costs nothing.
+ *
+ * A reminder set outside a chat, one saved before the origin chat was recorded, and one whose chat has since
+ * been deleted still fires on time: the feed item carries it with no chat line and no link, and no chat is made.
  */
 export async function deliverReminder(params: {
   item: ScheduleDispatchItem;
-  sessions: Pick<Sessions<SessionCustom, TurnCustom>, 'getOrCreateByExternalId'>;
   sessionStore: ISessionStore<SessionCustom, TurnCustom>;
-  agentStore: Pick<IAgentStore, 'getAgent'>;
   now: Date;
   /** The feed the reminder is also delivered through; it writes the reason to Activity. */
   deliveries: Pick<DeliveryService, 'deliver'>;
-}): Promise<{ session_id: string; turn_id: string }> {
-  const { item, sessions, sessionStore, agentStore, now } = params;
+}): Promise<ReminderDeliveryResult> {
+  const { item, sessionStore, now } = params;
   const { schedule, run } = item;
   const owner = schedule.created_by_subject;
-  const agent = await agentStore.getAgent({ tenant_id: schedule.tenant_id, name: schedule.agent_name });
-  if (agent === undefined) {
-    throw new ReminderAgentNotFoundError();
+  const what = schedule.manifest.task;
+  const due = new Date(run.scheduled_for);
+  const reason = `You asked to be reminded on ${formatRunTime({ at: due, timezone: schedule.manifest.timezone })}.`;
+
+  const originSessionId = schedule.manifest.origin_session_id;
+  const origin: SessionRecord<SessionCustom> | undefined =
+    originSessionId === null
+      ? undefined
+      : await sessionStore.getSession({ tenant_id: schedule.tenant_id, session_id: originSessionId });
+
+  let landed: ReminderDeliveryResult = { session_id: null, turn_id: null };
+  if (origin !== undefined) {
+    const text = reminderLineText({ what, due, timezone: schedule.manifest.timezone });
+    const turnId = await writeReminderLine({ sessionStore, record: origin, text, now });
+    landed = { session_id: origin.session_id, turn_id: turnId };
   }
-  const { session: handle } = await sessions.getOrCreateByExternalId({
+
+  await params.deliveries.deliver({
     tenant_id: schedule.tenant_id,
-    external_id: remindersExternalId(owner.subject_id),
-    created_by_subject: owner,
-    agent: { type: 'reference', id: agent.id, name: agent.name },
-    metadata: { [REMINDERS_METADATA_KEY]: 'true' },
+    created_by: owner.subject_id,
+    kind: 'reminder',
+    level: 'nudge',
+    text: feedText(what),
+    reason,
+    link: landed.session_id === null ? null : { type: 'chat', session_id: landed.session_id },
   });
-  const sessionId = handle.session_id;
-  const record = await sessionStore.getSession({ tenant_id: schedule.tenant_id, session_id: sessionId });
-  if (record === undefined) {
-    throw new Error(`The Reminders chat could not be read: ${sessionId}`);
-  }
+  return landed;
+}
+
+/**
+ * Appends the reminder line to a chat as a finished turn with no message of its own: in the chat view it joins
+ * the answer above it, which is the turn where the reminder was set. Returns the turn it wrote.
+ */
+async function writeReminderLine(params: {
+  sessionStore: ISessionStore<SessionCustom, TurnCustom>;
+  record: SessionRecord<SessionCustom>;
+  text: string;
+  now: Date;
+}): Promise<string> {
+  const { sessionStore, record, text, now } = params;
+  const sessionId = record.session_id;
   const previous =
     record.last_turn_id === null
       ? undefined
       : await sessionStore.getTurn({ session_id: sessionId, turn_id: record.last_turn_id });
 
-  const what = schedule.manifest.task;
-  const text = reminderLineText({
-    what,
-    due: new Date(run.scheduled_for),
-    timezone: schedule.manifest.timezone,
-  });
   const turnId = ulid().toLowerCase();
   const createdAt = now.toISOString();
   await sessionStore.createTurn({
@@ -127,7 +139,7 @@ export async function deliverReminder(params: {
     ],
     tool_call_memos: [],
     task_states: [],
-    update_session_title_if_not_exist: REMINDERS_CHAT_TITLE,
+    update_session_title_if_not_exist: null,
   });
 
   const created: TurnCreatedEvent = {
@@ -157,24 +169,5 @@ export async function deliverReminder(params: {
     thread_id: null,
   };
   await sessionStore.updateTurnState({ session_id: sessionId, turn_id: turnId, state, turn_done_event: done });
-
-  // The chat list learns of a new reminder from the chat's marker; the feed carries what is unread.
-  await sessionStore.updateSession({
-    tenant_id: schedule.tenant_id,
-    session_id: sessionId,
-    agent: undefined,
-    title: undefined,
-    metadata: { ...record.metadata, [REMINDERS_METADATA_KEY]: 'true' },
-  });
-
-  await params.deliveries.deliver({
-    tenant_id: schedule.tenant_id,
-    created_by: owner.subject_id,
-    kind: 'reminder',
-    level: 'nudge',
-    text: feedText(what),
-    reason: `You asked to be reminded on ${formatRunTime({ at: new Date(run.scheduled_for), timezone: schedule.manifest.timezone })}.`,
-    link: { type: 'chat', session_id: sessionId },
-  });
-  return { session_id: sessionId, turn_id: turnId };
+  return turnId;
 }

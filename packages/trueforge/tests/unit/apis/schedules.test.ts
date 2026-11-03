@@ -322,6 +322,7 @@ describe('who a schedule runs as', () => {
         status: 'active',
         run_at: null,
         kind: 'task',
+        origin_session_id: null,
       },
       created_by_subject: alice,
       runFrom: new Date(),
@@ -544,7 +545,15 @@ describe('internal schedule execution', () => {
       agent_name: agent.name,
       persona_id: null,
       name: 'daily-report',
-      manifest: { task: 'Say hi', cron: '0 13 * * *', timezone, status: 'active', run_at: null, kind: 'task' },
+      manifest: {
+        task: 'Say hi',
+        cron: '0 13 * * *',
+        timezone,
+        status: 'active',
+        run_at: null,
+        kind: 'task',
+        origin_session_id: null,
+      },
       created_by_subject: alice,
       runFrom: new Date(),
     });
@@ -1025,12 +1034,23 @@ describe('audit rows for schedule firings', () => {
     ]);
   });
 
-  it('writes the delivery row and the firing row for a reminder, both keyed on the Reminders chat', async () => {
+  it('writes the delivery row and the firing row for a reminder, both keyed on the chat it was set in', async () => {
     const built = await setup();
     const agent = await built.agentStore.getAgent({ tenant_id: 'default', name: 'reporter' });
     if (agent === undefined) {
       throw new Error('The reporter agent was not created.');
     }
+    const originStore = new SqliteSessionStore(built.db);
+    await originStore.createSession({
+      tenant_id: 'default',
+      session_id: 'origin-chat',
+      created_by_subject: ALICE_SUBJECT,
+      agent: { type: 'reference', id: agent.id, name: agent.name },
+      custom: null,
+      metadata: {},
+      external_id: null,
+      source: null,
+    });
     const { schedule, pendingRun } = await built.scheduleStore.createScheduleAndRun({
       tenant_id: 'default',
       agent_id: agent.id,
@@ -1042,6 +1062,7 @@ describe('audit rows for schedule firings', () => {
         run_at: '2026-10-19T18:00:00-04:00',
         timezone: 'America/New_York',
         kind: 'reminder',
+        origin_session_id: 'origin-chat',
       }),
       created_by_subject: ALICE_SUBJECT,
       runFrom: new Date('2026-10-18T12:00:00.000Z'),
@@ -1084,7 +1105,70 @@ describe('audit rows for schedule firings', () => {
       description: 'The reminder ran: Take the medicine',
       outcome: 'logged',
     });
+    expect(records[0]?.conversation_id).toBe('origin-chat');
     expect(records[1]?.conversation_id).toBe(records[0]?.conversation_id);
+  });
+
+  it('still runs a reminder whose origin chat was deleted, and leaves a feed item with no link', async () => {
+    const built = await setup();
+    const agent = await built.agentStore.getAgent({ tenant_id: 'default', name: 'reporter' });
+    if (agent === undefined) {
+      throw new Error('The reporter agent was not created.');
+    }
+    const originStore = new SqliteSessionStore(built.db);
+    await originStore.createSession({
+      tenant_id: 'default',
+      session_id: 'origin-chat',
+      created_by_subject: ALICE_SUBJECT,
+      agent: { type: 'reference', id: agent.id, name: agent.name },
+      custom: null,
+      metadata: {},
+      external_id: null,
+      source: null,
+    });
+    const { pendingRun } = await built.scheduleStore.createScheduleAndRun({
+      tenant_id: 'default',
+      agent_id: agent.id,
+      agent_name: agent.name,
+      name: 'reminder-medicine',
+      persona_id: null,
+      manifest: ScheduleManifestSchema.parse({
+        task: 'Take the medicine',
+        run_at: '2026-10-19T18:00:00-04:00',
+        timezone: 'America/New_York',
+        kind: 'reminder',
+        origin_session_id: 'origin-chat',
+      }),
+      created_by_subject: ALICE_SUBJECT,
+      runFrom: new Date('2026-10-18T12:00:00.000Z'),
+    });
+    if (pendingRun === undefined) {
+      throw new Error('Expected the reminder to queue a run');
+    }
+    await originStore.deleteSession({ tenant_id: 'default', session_id: 'origin-chat' });
+    const { records, audit } = auditRecorder();
+    const deps = deliveryDeps(built.db, audit);
+    const execution = createScheduleExecutionRouter({
+      ...stubTurnExecutionDeps(built.agentStore, built.scheduleStore, built.db),
+      sessions: new Sessions<SessionCustom, TurnCustom>({ sessionStore: originStore }),
+      sessionStore: originStore,
+      audit,
+      deliveryService: deps.deliveryService,
+    });
+
+    const response = await execution.request('/runs/execute', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ schedule_run_id: pendingRun.id }),
+    });
+
+    expect(response.status).toBe(204);
+    const page = await deps.deliveryStore.list({ tenant_id: 'default', created_by: 'alice', limit: 10 });
+    expect(page.deliveries).toHaveLength(1);
+    expect(page.deliveries[0]).toMatchObject({ kind: 'reminder', text: 'Take the medicine', link: null });
+    expect(records.map(record => record.tool_name)).toEqual(['delivery.created', 'set_reminder']);
+    expect(records[1]?.conversation_id).toBe('');
+    await expect(originStore.getSession({ tenant_id: 'default', session_id: 'origin-chat' })).resolves.toBeUndefined();
   });
 
   it('adds a delivered reminder to the past-chat search as soon as it is written', async () => {
@@ -1104,6 +1188,7 @@ describe('audit rows for schedule firings', () => {
         run_at: '2026-10-19T18:00:00-04:00',
         timezone: 'America/New_York',
         kind: 'reminder',
+        origin_session_id: 'origin-chat',
       }),
       created_by_subject: ALICE_SUBJECT,
       runFrom: new Date('2026-10-18T12:00:00.000Z'),
@@ -1112,6 +1197,16 @@ describe('audit rows for schedule firings', () => {
       throw new Error('Expected the reminder to queue a run');
     }
     const sessionStore = new SqliteSessionStore(built.db);
+    await sessionStore.createSession({
+      tenant_id: 'default',
+      session_id: 'origin-chat',
+      created_by_subject: ALICE_SUBJECT,
+      agent: { type: 'reference', id: agent.id, name: agent.name },
+      custom: null,
+      metadata: {},
+      external_id: null,
+      source: null,
+    });
     const sentinelSettingsStore = new SqliteSentinelSettingsStore(built.db);
     await sentinelSettingsStore.patch({
       tenant_id: 'default',

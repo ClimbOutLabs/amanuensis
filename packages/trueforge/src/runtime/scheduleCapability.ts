@@ -122,6 +122,8 @@ export interface ScheduleTurnContext {
   /** Who a saved schedule runs as, in plain words. */
   runsAs: (schedule: ScheduleRecord) => Promise<string>;
   logger: Logger;
+  /** The chat this turn happens in; a reminder set here fires back into it. Null when there is no chat. */
+  session_id: string | null;
 }
 
 /** The store a host hands to chat turns where schedules run. */
@@ -729,6 +731,7 @@ export class ScheduleToolSet extends LocalToolMCP {
       timezone,
       status: 'active',
       kind: 'reminder',
+      origin_session_id: this.#options.session_id,
     });
     try {
       validateManifest(manifest, now);

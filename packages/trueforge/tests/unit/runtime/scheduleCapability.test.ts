@@ -138,6 +138,7 @@ async function setup(
     }),
     runsAs: scheduleRunsAs({ tenant_id: 'default', agentStore, personaStore, personalizationStore }),
     logger: winston.createLogger({ silent: true }),
+    session_id: 'chat-1',
     timeZone: 'timeZone' in input ? input.timeZone : 'America/New_York',
     sentinel,
     now: () => NOW,
@@ -643,6 +644,7 @@ describe('reminder tools', () => {
         run_at: '2026-10-19T18:00:00-04:00',
         kind: 'reminder',
         timezone: 'America/New_York',
+        origin_session_id: 'chat-1',
       },
     });
     const pending = await built.store.getScheduledRunFor({ tenant_id: 'default', schedule_id: saved?.id ?? '' });
@@ -650,6 +652,14 @@ describe('reminder tools', () => {
     expect(built.audit.map(row => [row.tool_name, row.description, row.outcome])).toEqual([
       ['set_reminder', 'Set a reminder for Monday, October 19 at 6:00 PM: Take the medicine', 'ran'],
     ]);
+  });
+
+  it('records no origin chat when a reminder is set outside a chat', async () => {
+    const built = await setup();
+    const outsideChat = { ...built, tools: new ScheduleToolSet({ ...built.options, session_id: null }) };
+    await dispatch({ built: outsideChat, name: 'set_reminder', args: MEDICINE });
+    const [saved] = await built.listAll();
+    expect(saved?.manifest).toMatchObject({ kind: 'reminder', origin_session_id: null });
   });
 
   it('refuses a time in the past with a message that says what to do next', async () => {

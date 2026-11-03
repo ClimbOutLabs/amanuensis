@@ -75,7 +75,7 @@ export const ScheduleTaskSchema = z
 /** `done`: a one-time schedule that has run and will never run again. */
 export const ScheduleStatusSchema = z.enum(['active', 'paused', 'done']).openapi('ScheduleStatus');
 
-/** `reminder`: the host writes the text into the Reminders chat itself, with no model call. */
+/** `reminder`: the host writes the text into the chat the reminder was set in itself, with no model call. */
 export const ScheduleKindSchema = z.enum(['task', 'reminder']).openapi('ScheduleKind');
 
 export const RunAtSchema = z.iso
@@ -96,6 +96,13 @@ export const ScheduleManifestObjectSchema = z
     timezone: TimezoneSchema.default('UTC'),
     status: ScheduleStatusSchema.default('active'),
     kind: ScheduleKindSchema.default('task'),
+    origin_session_id: z
+      .string()
+      .nullable()
+      .default(null)
+      .describe(
+        'The chat a reminder was set in, so its line lands in that chat when it fires. Null for tasks, for reminders set outside a chat, and for reminders saved before this was recorded.',
+      ),
   })
   .strict();
 
