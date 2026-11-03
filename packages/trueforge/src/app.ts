@@ -43,6 +43,7 @@ import { createPermissionsRouter } from './apis/permissions';
 import { createPersonaKnowledgeRouter } from './apis/personaKnowledge';
 import { createPersonalizationRouter } from './apis/personalization';
 import { createPersonasRouter, createSessionPersonasRouter } from './apis/personas';
+import { createRemindersRouter } from './apis/reminders';
 import { createRepositoriesRouter, createSessionRepositoryRouter } from './apis/repositories';
 import { createScheduleExecutionRouter, createSchedulesRouter } from './apis/schedules';
 import { createSentinelSettingsRouter } from './apis/sentinelSettings';
@@ -880,6 +881,20 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
   app.route(
     '/api/v1/user/deliveries',
     withAuth(createDeliveriesRouter({ deliveryStore: deps.deliveryStore, resolveRequestContext }), authMiddleware),
+  );
+  app.route(
+    '/api/v1/user/reminders',
+    withAuth(
+      createRemindersRouter({
+        scheduleStore: deps.scheduleStore,
+        sessionStore: deps.sessionStore,
+        agentStore: deps.agentStore,
+        personaStore: deps.personaStore,
+        personalizationStore: deps.personalizationStore,
+        resolveRequestContext,
+      }),
+      authMiddleware,
+    ),
   );
   app.route(
     '/api/v1/user/push',
