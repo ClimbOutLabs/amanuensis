@@ -4,6 +4,10 @@ import { REFLECT_BUDGETS } from '@truefoundry/trueforge-core/core/memory/memoryS
 const SandboxCapabilitySchema = z
   .object({
     enabled: z.boolean().describe('Whether a sandbox provider is configured for this tenant.'),
+    reason: z
+      .string()
+      .optional()
+      .describe('Present when the sandbox is disabled and the provider reported why. Explains why.'),
   })
   .openapi('SandboxCapability');
 

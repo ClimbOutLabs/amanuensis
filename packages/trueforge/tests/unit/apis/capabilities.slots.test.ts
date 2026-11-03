@@ -23,10 +23,15 @@ const mockSlotStatus = jest.mocked(slotSandboxBuildStatus);
 
 const CapabilitiesBodySchema = z.object({
   data: z.object({
-    sandbox: z.object({ enabled: z.boolean() }),
+    sandbox: z.object({ enabled: z.boolean(), reason: z.string().optional() }),
     skill: z.object({ enabled: z.boolean(), reason: z.string().optional() }),
   }),
 });
+
+const FULL_REASON =
+  'The sandbox is full: every slot already holds as many chats as its disk fits (slot 1 holds 7 chats; slot 2 holds 7 chats). Delete old chats, then try again.';
+const NOT_READY_REASON =
+  "Code can't run on this computer yet. To turn it on, run `aman doctor sandbox --fix` on the computer where Aman is installed, then try again.";
 type CapabilitiesBody = z.infer<typeof CapabilitiesBodySchema>;
 
 async function capabilities(): Promise<CapabilitiesBody['data']> {
@@ -56,8 +61,18 @@ describe('sandbox capability on the slot backend', () => {
     expect((await capabilities()).sandbox).toEqual({ enabled: true });
   });
 
-  it('is off while no slot is usable', async () => {
-    mockSlotStatus.mockResolvedValue({ status: 'failed', reason: 'no slots', metadata: null });
+  it('is off while no slot is usable, with the reason the provider reported', async () => {
+    mockSlotStatus.mockResolvedValue({ status: 'failed', reason: NOT_READY_REASON, metadata: null });
+    expect((await capabilities()).sandbox).toEqual({ enabled: false, reason: NOT_READY_REASON });
+  });
+
+  it('is off with the full reason when every slot holds as many chats as its disk fits', async () => {
+    mockSlotStatus.mockResolvedValue({ status: 'failed', reason: FULL_REASON, metadata: null });
+    expect((await capabilities()).sandbox).toEqual({ enabled: false, reason: FULL_REASON });
+  });
+
+  it('is off with no reason when the failed build reported none', async () => {
+    mockSlotStatus.mockResolvedValue({ status: 'failed', reason: null, metadata: null });
     expect((await capabilities()).sandbox).toEqual({ enabled: false });
   });
 });
@@ -70,8 +85,18 @@ describe('skill capability on the slot backend', () => {
     expect((await capabilities()).skill).toEqual({ enabled: true });
   });
 
-  it('is off with the sandbox reason while no slot is usable', async () => {
-    mockSlotStatus.mockResolvedValue({ status: 'failed', reason: 'no slots', metadata: null });
+  it('is off with the not-ready reason while no slot is usable', async () => {
+    mockSlotStatus.mockResolvedValue({ status: 'failed', reason: NOT_READY_REASON, metadata: null });
+    expect((await capabilities()).skill).toEqual({ enabled: false, reason: NOT_READY_REASON });
+  });
+
+  it('is off with the full reason when every slot is full, so a person learns deleting chats is the way out', async () => {
+    mockSlotStatus.mockResolvedValue({ status: 'failed', reason: FULL_REASON, metadata: null });
+    expect((await capabilities()).skill).toEqual({ enabled: false, reason: FULL_REASON });
+  });
+
+  it('keeps the not configured reason when the failed build reported none', async () => {
+    mockSlotStatus.mockResolvedValue({ status: 'failed', reason: null, metadata: null });
     expect((await capabilities()).skill).toEqual({
       enabled: false,
       reason: 'Skills run in a sandbox, which is not configured.',

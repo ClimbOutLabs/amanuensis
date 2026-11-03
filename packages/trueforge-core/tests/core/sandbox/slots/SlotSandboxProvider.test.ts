@@ -321,6 +321,31 @@ describe('SlotSandboxProvider', () => {
       await expect(provider.createSandbox()).rejects.toThrow(/sandbox is full.*Delete old chats/);
     });
 
+    test('when every slot is at capacity the full state is logged once with each slot count', async () => {
+      const logger = makeSilentLogger();
+      const warn = jest.spyOn(logger, 'warn');
+      const started = [new FakeAgent(hard(2)), new FakeAgent(hard(2))];
+      agents.push(...started);
+      const socketPaths = await Promise.all(started.map(agent => agent.start()));
+      const provider = new SlotSandboxProvider({
+        socketPaths,
+        defaultExecTimeoutSeconds: 60,
+        treeDiskMb: 2048,
+        fileMaxBytesForDownload: 1024,
+        logger,
+        sleepMs: () => Promise.resolve(),
+        gitBridge: undefined,
+      });
+      await expect(provider.createSandbox()).rejects.toThrow(/sandbox is full.*Delete old chats/);
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(warn).toHaveBeenCalledWith('every sandbox slot is full', {
+        slots: [
+          { slot: 1, sessions: 2, capacity: 2 },
+          { slot: 2, sessions: 2, capacity: 2 },
+        ],
+      });
+    });
+
     test('a shared disk (Docker VM or none) is not capped by chats', async () => {
       const shared =
         (diskMode: 'vm' | 'none'): FakeHandler =>

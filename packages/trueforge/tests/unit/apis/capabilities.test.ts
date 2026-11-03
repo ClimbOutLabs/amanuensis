@@ -258,9 +258,24 @@ describe('capabilities routers', () => {
     });
   });
 
-  it('reports "not configured" skill reason when the image build failed', async () => {
+  it('reports the stored build reason on the sandbox and skill entries when the image build failed', async () => {
     disableOidcAuth();
     mockStatus.mockResolvedValue(buildWithStatus('failed'));
+    const { router } = await makeRouter();
+
+    const response = await router.request('/');
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      data: {
+        sandbox: { enabled: false, reason: 'Sandbox image build failed (build_failed).' },
+        skill: { enabled: false, reason: 'Sandbox image build failed (build_failed).' },
+      },
+    });
+  });
+
+  it('reports no sandbox reason and the "not configured" skill reason when the failed build stored none', async () => {
+    disableOidcAuth();
+    mockStatus.mockResolvedValue({ status: 'failed', status_reason: null, build_metadata: null });
     const { router } = await makeRouter();
 
     const response = await router.request('/');

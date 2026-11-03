@@ -451,7 +451,7 @@ export class SlotSandboxProvider implements SandboxProvider {
       })),
     );
     const problems: string[] = [];
-    const full: string[] = [];
+    const full: { index: number; sessions: number; capacity: number }[] = [];
     const usable: { index: number; sessions: number }[] = [];
     for (const { index, health } of probes) {
       if (!health.ok) {
@@ -463,7 +463,7 @@ export class SlotSandboxProvider implements SandboxProvider {
         // On a slot with its own fixed disk the chats' quotas must fit, or one slot filling up fails for all its chats.
         const capacity = chatCapacity({ facts: health.value.attestation.facts, treeDiskMb: this.treeDiskMb });
         if (capacity !== undefined && health.value.sessions >= capacity) {
-          full.push(`slot ${String(index + 1)} holds ${String(capacity)} chats`);
+          full.push({ index, sessions: health.value.sessions, capacity });
         } else {
           usable.push({ index, sessions: health.value.sessions });
         }
@@ -478,9 +478,14 @@ export class SlotSandboxProvider implements SandboxProvider {
       return { ok: true, index: chosen.index };
     }
     if (problems.length === 0 && full.length > 0) {
+      this.logger.warn('every sandbox slot is full', {
+        slots: full.map(slot => ({ slot: slot.index + 1, sessions: slot.sessions, capacity: slot.capacity })),
+      });
       return {
         ok: false,
-        reason: `The sandbox is full: every slot already holds as many chats as its disk fits (${full.join('; ')}). Delete old chats, then try again.`,
+        reason: `The sandbox is full: every slot already holds as many chats as its disk fits (${full
+          .map(slot => `slot ${String(slot.index + 1)} holds ${String(slot.capacity)} chats`)
+          .join('; ')}). Delete old chats, then try again.`,
       };
     }
     this.logger.warn('no sandbox slot is usable', { problems });
