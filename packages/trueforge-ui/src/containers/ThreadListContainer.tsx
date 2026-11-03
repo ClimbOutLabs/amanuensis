@@ -18,6 +18,7 @@ import {
   threadListIndicesByRecency,
   threadListItemIsMutable,
 } from '../atoms/lib/threadListMeta.js';
+import { useOptionalChatAnswerMarks } from '../chatAnswers/ChatAnswerMarksContext.js';
 import { useOptionalDeliveries } from '../deliveries/DeliveriesContext.js';
 import { useOpenChatById } from '../hooks/useOpenChatById.js';
 import { useResourcePermissions } from '../hooks/useResourcePermissions.js';
@@ -68,14 +69,22 @@ function ThreadListItemRow({
   const agentName = readThreadAgentName(custom);
   const sidebarNavOpen = shell?.libraryOpen === true || shell?.sessionsOpen === true || shell?.schedulesOpen === true;
   const deliveries = useOptionalDeliveries();
+  const answerMarks = useOptionalChatAnswerMarks();
   // A chat with an unread item in the feed (a reminder, say) is marked until it is opened.
-  const unread = remoteId != null && deliveries?.unreadChatIds.has(remoteId) === true;
+  const feedUnread = remoteId != null && deliveries?.unreadChatIds.has(remoteId) === true;
+  // A chat whose latest answer landed after the person last opened it is marked the same way.
+  const answerUnseen = remoteId != null && answerMarks?.unseenAnswerChatIds.has(remoteId) === true;
+  const unread = feedUnread || answerUnseen;
   const isOpen = id === mainThreadId && !sidebarNavOpen;
   const markChatSeen = deliveries?.markChatSeen;
-  // The mark clears once the chat is open, however it was opened.
+  const markAnswerSeen = answerMarks?.markAnswerSeen;
+  // The marks clear once the chat is open, however it was opened.
   useEffect(() => {
-    if (remoteId != null && isOpen && unread) void markChatSeen?.(remoteId);
-  }, [remoteId, isOpen, unread, markChatSeen]);
+    if (remoteId != null && isOpen && feedUnread) void markChatSeen?.(remoteId);
+  }, [remoteId, isOpen, feedUnread, markChatSeen]);
+  useEffect(() => {
+    if (remoteId != null && isOpen && answerUnseen) markAnswerSeen?.(remoteId);
+  }, [remoteId, isOpen, answerUnseen, markAnswerSeen]);
   const canDelete = canDeleteSession && remoteId != null && canDeleteResource(remoteId);
   const canRename = canRenameSession && remoteId != null;
   // The "..." actions menu holds Rename, Delete, and/or Move to folder (the "Show agent

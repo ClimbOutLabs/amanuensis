@@ -3,6 +3,7 @@ import {
   AmanSetupProvider,
   AmanWelcome,
   BugReportProvider,
+  ChatAnswerMarksProvider,
   ComposerDraftScopeProvider,
   DEFAULT_AGENT_SPEC_SKILLS,
   DeliveriesProvider,
@@ -47,6 +48,7 @@ import { createAuthAwareFetch } from './authFetch';
 import { probeSession, type SessionState } from './authSession';
 import { parseAuthErrorReason, shouldShowAuthErrorScreen, stripAuthErrorSearch } from './authStatusSearch';
 import { createBugReportApi } from './bugReportApi';
+import { createChatAnswerMarksApi } from './chatAnswerMarksApi';
 import { createChatFolderStore } from './chatFolderStore';
 import { createDeliveriesApi } from './deliveriesApi';
 import { createFirstRunGuideApi } from './firstRunGuideApi';
@@ -459,6 +461,7 @@ export function App() {
   const personalizationApi = useMemo(() => createPersonalizationApi(authAwareFetch), []);
   const personaApi = useMemo(() => createPersonaApi(authAwareFetch), []);
   const deliveriesApi = useMemo(() => createDeliveriesApi(authAwareFetch), []);
+  const chatAnswerMarksApi = useMemo(() => createChatAnswerMarksApi(authAwareFetch), []);
   const helpApi = useMemo(
     () => createHelpApi({ fetcher: authAwareFetch, listPersonas: () => personaApi.listPersonas() }),
     [personaApi],
@@ -535,7 +538,8 @@ export function App() {
       <ThemeProvider theme={AMAN_THEME}>
         <SentinelApiProvider api={sentinelApi}>
           <DeliveriesProvider api={deliveriesApi}>
-            <PersonalizationProvider api={personalizationApi}>
+            <ChatAnswerMarksProvider api={chatAnswerMarksApi}>
+              <PersonalizationProvider api={personalizationApi}>
               <ImplementationPlanGrantProvider api={implementationPlanGrantApi}>
                 <RepositoryWorkProvider api={repositoryWorkApi}>
                   <BugReportProvider api={bugReportApi}>
@@ -578,7 +582,8 @@ export function App() {
                   </BugReportProvider>
                 </RepositoryWorkProvider>
               </ImplementationPlanGrantProvider>
-            </PersonalizationProvider>
+              </PersonalizationProvider>
+            </ChatAnswerMarksProvider>
           </DeliveriesProvider>
         </SentinelApiProvider>
       </ThemeProvider>
