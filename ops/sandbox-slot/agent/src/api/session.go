@@ -264,6 +264,11 @@ type fsWriteRequest struct {
 	Mode          int    `json:"mode"`
 }
 
+type createRequest struct {
+	SessionID string `json:"session_id"`
+	DiskMB    int    `json:"disk_mb"`
+}
+
 type destroyRequest struct {
 	SessionID string `json:"session_id"`
 }
@@ -321,6 +326,49 @@ func (s *Server) fsWrite(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := tree.Write(root, req.Path, content, os.FileMode(req.Mode)); err != nil {
 		fsError(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// createSession answers POST /v1/create_session: it makes the session's empty tree, after checking
+// the volume has room for the tree's whole quota plus the free-space reserve. A tree that already
+// exists is a success without a new room check, so a caller retrying a lost answer is never refused
+// for room its tree already holds.
+func (s *Server) createSession(w http.ResponseWriter, r *http.Request) {
+	var req createRequest
+	if err := decodeStrict(r, w, &req, smallBodyBytes); err != nil {
+		writeError(w, http.StatusBadRequest, ErrInvalidRequest, err.Error())
+		return
+	}
+	if !tree.ValidSessionID(req.SessionID) {
+		writeError(w, http.StatusBadRequest, ErrInvalidRequest, "session_id must be 32 lowercase hex characters")
+		return
+	}
+	if req.DiskMB < 1 || req.DiskMB > MaxDiskMB {
+		writeError(w, http.StatusBadRequest, ErrInvalidRequest, fmt.Sprintf("disk_mb must be 1 to %d", MaxDiskMB))
+		return
+	}
+	// A running lease holds the semaphore, so a tree is never made or refused under a running call.
+	if !s.acquire(w) {
+		return
+	}
+	defer func() { <-s.sem }()
+	if !s.lockSession(w, req.SessionID) {
+		return
+	}
+	defer s.sessions.unlock(req.SessionID)
+	if _, err := os.Lstat(tree.Root(s.TreeDir, req.SessionID)); errors.Is(err, os.ErrNotExist) {
+		if err := checkCreateRoom(s.VolumeDir, s.MinFreeBytes, int64(req.DiskMB)<<20); err != nil {
+			writeStorageError(w, err)
+			return
+		}
+	} else if err != nil {
+		writeError(w, http.StatusInternalServerError, ErrInternal, "the session tree could not be checked")
+		return
+	}
+	if _, err := tree.Ensure(s.TreeDir, req.SessionID); err != nil {
+		writeError(w, http.StatusInternalServerError, ErrInternal, "the session tree could not be created")
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
