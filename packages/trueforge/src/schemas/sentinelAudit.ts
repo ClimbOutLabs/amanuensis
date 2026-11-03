@@ -32,6 +32,14 @@ export const ListUserAuditLogRequestQuerySchema = z
     limit: z.coerce.number().int().min(1).max(100).optional().default(50),
     page_token: z.string().optional().describe('Token from the previous page; omit for the newest entries.'),
     outcome: SentinelAuditRecordSchema.shape.outcome.optional().describe('Only entries with this outcome.'),
+    from: z.iso
+      .datetime({ offset: true })
+      .optional()
+      .describe('Only entries at or after this time. The caller sends the start of a day in its own timezone.'),
+    to: z.iso
+      .datetime({ offset: true })
+      .optional()
+      .describe('Only entries before this time. The caller sends the start of the day after its last shown day.'),
   })
   .openapi('ListUserAuditLogRequestQuery');
 

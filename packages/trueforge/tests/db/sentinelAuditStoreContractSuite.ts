@@ -156,6 +156,22 @@ export function runSentinelAuditStoreContractSuite(getEnv: () => SentinelAuditSt
     expect(seen).toEqual(['e', 'd', 'c', 'b', 'a']);
   });
 
+  it('listForUser filters by a from and to time', async () => {
+    const { store } = getEnv();
+    await recordInOrder(store, [entry({ tool_name: 'tool_0' }), entry({ tool_name: 'tool_1' })]);
+    const past = new Date(Date.now() - 60_000).toISOString();
+    const future = new Date(Date.now() + 60_000).toISOString();
+
+    const inRange = await store.listForUser({ ...forUser, from: past, to: future, limit: 10 });
+    expect(inRange.entries.map(row => row.tool_name)).toEqual(['tool_1', 'tool_0']);
+
+    const afterAll = await store.listForUser({ ...forUser, from: future, limit: 10 });
+    expect(afterAll.entries).toEqual([]);
+
+    const beforeAll = await store.listForUser({ ...forUser, to: past, limit: 10 });
+    expect(beforeAll.entries).toEqual([]);
+  });
+
   it('listForUser filters by outcome', async () => {
     const { store } = getEnv();
     await recordInOrder(store, [

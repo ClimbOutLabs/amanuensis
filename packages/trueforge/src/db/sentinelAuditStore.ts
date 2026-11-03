@@ -62,6 +62,10 @@ export interface ListUserSentinelAuditInput {
   created_by: string;
   /** Only entries with this outcome; every outcome when undefined. */
   outcome: AuditOutcome | undefined;
+  /** Only entries at or after this ISO 8601 instant; no start bound when undefined. */
+  from?: string | undefined;
+  /** Only entries before this ISO 8601 instant; no end bound when undefined. */
+  to?: string | undefined;
   limit: number;
   /** Opaque token from a previous page; first page when undefined. */
   page_token: string | undefined;
@@ -167,6 +171,12 @@ export class SentinelAuditStore implements ISentinelAuditStore {
       .where('sentinel_audit.created_by', '=', input.created_by);
     if (input.outcome !== undefined) {
       query = query.where('sentinel_audit.outcome', '=', input.outcome);
+    }
+    if (input.from !== undefined) {
+      query = query.where('sentinel_audit.created_at', '>=', input.from);
+    }
+    if (input.to !== undefined) {
+      query = query.where('sentinel_audit.created_at', '<', input.to);
     }
     if (cursor !== undefined) {
       query = query.where(eb =>

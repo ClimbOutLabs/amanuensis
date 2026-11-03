@@ -131,4 +131,43 @@ describe('per-user audit log route', () => {
     expect((await server.request(`${AUDIT_PATH}?page_token=not-a-token`, asUser(ALICE))).status).toBe(400);
     expect((await server.request(`${AUDIT_PATH}?outcome=held`, asUser(ALICE))).status).toBe(400);
   });
+
+  it('filters by a from and to time, keeping the entries on both covered boundary instants', async () => {
+    const CAROL = 'carol@audit.example';
+    const row = (tool_name: string, created_at: string) => ({
+      id: `carol-${tool_name}`,
+      conversation_id: 'carol-chat',
+      tier: 3,
+      tool_name,
+      description: `Entry ${tool_name}`,
+      outcome: 'approved' as const,
+      auto_deny_reason: null,
+      created_at,
+    });
+    await new SentinelAuditStore(server.db()).importRecords({
+      tenant_id: 'default',
+      created_by: CAROL,
+      records: [
+        row('just_before', '2026-09-30T23:59:59.999Z'),
+        row('at_from', '2026-10-01T00:00:00.000Z'),
+        row('middle', '2026-10-02T12:00:00.000Z'),
+        row('last_covered', '2026-10-03T23:59:59.999Z'),
+        row('at_to', '2026-10-04T00:00:00.000Z'),
+      ],
+    });
+
+    const from = encodeURIComponent('2026-10-01T00:00:00.000Z');
+    const to = encodeURIComponent('2026-10-04T00:00:00.000Z');
+    const ranged = await list(CAROL, `?from=${from}&to=${to}`);
+    expect(ranged.data.map(entry => entry.tool_name)).toEqual(['last_covered', 'middle', 'at_from']);
+
+    const fromOnly = await list(CAROL, `?from=${from}`);
+    expect(fromOnly.data.map(entry => entry.tool_name)).toEqual(['at_to', 'last_covered', 'middle', 'at_from']);
+
+    const toOnly = await list(CAROL, `?to=${to}`);
+    expect(toOnly.data.map(entry => entry.tool_name)).toEqual(['last_covered', 'middle', 'at_from', 'just_before']);
+
+    expect((await server.request(`${AUDIT_PATH}?from=not-a-time`, asUser(CAROL))).status).toBe(400);
+    expect((await server.request(`${AUDIT_PATH}?to=2026-10-04`, asUser(CAROL))).status).toBe(400);
+  });
 });
