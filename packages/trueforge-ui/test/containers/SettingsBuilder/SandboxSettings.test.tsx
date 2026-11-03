@@ -4,6 +4,7 @@ import type { ReactNode } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { RunCodeStatusProvider, type RunCodeStatus } from '@/components/RunCodeStatusContext.js';
+import { SandboxWorkspacesProvider, type SandboxWorkspaceListing } from '@/components/SandboxWorkspacesContext.js';
 import SandboxSettings from '@/containers/SettingsBuilder/SandboxSettings.js';
 import { ServerProvider } from '@/server/ServerContext.js';
 import type { AgentUIServer } from '@/server/types.js';
@@ -42,13 +43,21 @@ function serverWith(sandboxIsolation: unknown): AgentUIServer {
 function renderPage({
   getRunCodeStatus,
   sandboxIsolation = limits,
+  listSandboxWorkspaces,
 }: {
   getRunCodeStatus: () => Promise<RunCodeStatus>;
   sandboxIsolation?: unknown;
+  listSandboxWorkspaces?: () => Promise<SandboxWorkspaceListing>;
 }) {
   const wrapper = ({ children }: { children: ReactNode }) => (
     <ServerProvider server={serverWith(sandboxIsolation)}>
-      <RunCodeStatusProvider api={{ getRunCodeStatus }}>{children}</RunCodeStatusProvider>
+      <RunCodeStatusProvider api={{ getRunCodeStatus }}>
+        {listSandboxWorkspaces === undefined ? (
+          children
+        ) : (
+          <SandboxWorkspacesProvider api={{ listSandboxWorkspaces }}>{children}</SandboxWorkspacesProvider>
+        )}
+      </RunCodeStatusProvider>
     </ServerProvider>
   );
   return render(<SandboxSettings />, { wrapper });
@@ -336,5 +345,110 @@ describe('SandboxSettings', () => {
 
     expect(screen.queryByText(/provider/i)).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /upgrade/i })).not.toBeInTheDocument();
+  });
+});
+
+describe('Chat workspaces card', () => {
+  const slotsReady = async (): Promise<RunCodeStatus> => ({ state: 'ready', backend: 'slots' });
+
+  it('lists the chats holding workspaces, with their slot, size and last use, and is honest about an orphan', async () => {
+    renderPage({
+      getRunCodeStatus: slotsReady,
+      listSandboxWorkspaces: async () => ({
+        slots: [{ slot: 1, workspace_count: 2, total_bytes: 6144, store_free_bytes: 1024 }],
+        workspaces: [
+          {
+            chat_id: 'chat-1',
+            chat_title: 'Trip planning',
+            sandbox_id: `s1-${'a'.repeat(32)}`,
+            slot: 1,
+            bytes: 4096,
+            entries: 12,
+            last_used: '2026-11-01T10:00:00.000Z',
+          },
+          {
+            chat_id: null,
+            chat_title: null,
+            sandbox_id: `s1-${'c'.repeat(32)}`,
+            slot: 1,
+            bytes: 2048,
+            entries: 3,
+            last_used: '2026-10-20T09:00:00.000Z',
+          },
+        ],
+      }),
+    });
+
+    await screen.findByRole('heading', { name: 'Chat workspaces' });
+    const card = cardOf('Chat workspaces');
+    expect(await card.findByText('2 chat workspaces, 6 KB used, 1 KB of room left')).toBeInTheDocument();
+    expect(card.getByText('Trip planning')).toBeInTheDocument();
+    expect(card.getByText(/Slot 1 · 4 KB · Last used/)).toBeInTheDocument();
+    expect(card.getByText('A workspace with no chat')).toBeInTheDocument();
+    expect(card.getByText(/Its chat is gone; the workspace was left behind/)).toBeInTheDocument();
+  });
+
+  it('shows an untitled chat as untitled', async () => {
+    renderPage({
+      getRunCodeStatus: slotsReady,
+      listSandboxWorkspaces: async () => ({
+        slots: [{ slot: 2, workspace_count: 1, total_bytes: 1024, store_free_bytes: 2048 }],
+        workspaces: [
+          {
+            chat_id: 'chat-9',
+            chat_title: null,
+            sandbox_id: `s2-${'b'.repeat(32)}`,
+            slot: 2,
+            bytes: 1024,
+            entries: 1,
+            last_used: '2026-11-02T08:00:00.000Z',
+          },
+        ],
+      }),
+    });
+
+    await screen.findByRole('heading', { name: 'Chat workspaces' });
+    const card = cardOf('Chat workspaces');
+    expect(await card.findByText('1 chat workspace, 1 KB used, 2 KB of room left')).toBeInTheDocument();
+    expect(card.getByText('Untitled chat')).toBeInTheDocument();
+    expect(card.getByText(/Slot 2 · 1 KB · Last used/)).toBeInTheDocument();
+  });
+
+  it('has an honest empty state when no chat holds a workspace', async () => {
+    renderPage({
+      getRunCodeStatus: slotsReady,
+      listSandboxWorkspaces: async () => ({
+        slots: [{ slot: 1, workspace_count: 0, total_bytes: 0, store_free_bytes: 16 * 1024 ** 3 }],
+        workspaces: [],
+      }),
+    });
+
+    await screen.findByRole('heading', { name: 'Chat workspaces' });
+    const card = cardOf('Chat workspaces');
+    expect(await card.findByText('No chat workspaces, 16 GB of room left')).toBeInTheDocument();
+    expect(card.getByText(/No chat holds a workspace right now/)).toBeInTheDocument();
+  });
+
+  it('says so, in the card, when the workspaces cannot be listed', async () => {
+    renderPage({
+      getRunCodeStatus: slotsReady,
+      listSandboxWorkspaces: async () => {
+        throw new Error('Request failed (500).');
+      },
+    });
+
+    await screen.findByRole('heading', { name: 'Chat workspaces' });
+    const card = cardOf('Chat workspaces');
+    expect(await card.findByRole('alert')).toHaveTextContent('The chat workspaces could not be listed.');
+  });
+
+  it('stays hidden on the Docker backend', async () => {
+    renderPage({
+      getRunCodeStatus: async () => ({ state: 'ready' }),
+      listSandboxWorkspaces: async () => ({ slots: [], workspaces: [] }),
+    });
+
+    await screen.findByText('Code execution is on');
+    expect(screen.queryByRole('heading', { name: 'Chat workspaces' })).not.toBeInTheDocument();
   });
 });
