@@ -2,6 +2,7 @@ import { statfs } from 'node:fs/promises';
 
 import {
   probeSlotAttachments,
+  SlotClient,
   SlotDriver,
   type DriverReadiness,
   type SlotAttachmentProbeResult,
@@ -16,6 +17,14 @@ import { processEnv, type CliEnv } from '../env';
 export interface HttpResponse {
   status: number;
   json: unknown;
+}
+
+/** What one slot's workspaces add up to, for the doctor's workspace listing. */
+export interface SlotWorkspaceRoom {
+  /** Chat workspaces the slot holds. */
+  sessions: number;
+  /** Free bytes on the filesystem the slot's workspaces live on. */
+  storeFreeBytes: number;
 }
 
 /** Everything doctor touches outside the process, so tests can replace it. */
@@ -38,6 +47,8 @@ export interface DoctorDeps {
     treeDiskMb: number;
     ocrLanguages: string[];
   }): Promise<SlotAttachmentProbeResult>;
+  /** Each slot's workspace count and free store room, in socket order; null for a slot that could not be asked. */
+  slotsWorkspaces(options: { socketPaths: string[]; timeoutMs: number }): Promise<(SlotWorkspaceRoom | null)[]>;
   /** The live Token Factory checks for one model; the key never appears in the results. */
   tokenFactoryChecks(options: {
     apiKey: string;
@@ -104,6 +115,25 @@ async function slotsReadiness({
   }
 }
 
+async function slotsWorkspaces({
+  socketPaths,
+  timeoutMs,
+}: {
+  socketPaths: string[];
+  timeoutMs: number;
+}): Promise<(SlotWorkspaceRoom | null)[]> {
+  return Promise.all(
+    socketPaths.map(async path => {
+      const client = new SlotClient(path);
+      const health = await client.health({ signal: AbortSignal.timeout(timeoutMs), timeoutMs });
+      if (!health.ok) {
+        return null;
+      }
+      return { sessions: health.value.sessions, storeFreeBytes: health.value.attestation.facts.store_free_bytes };
+    }),
+  );
+}
+
 function slotsAttachments({
   socketPaths,
   timeoutMs,
@@ -148,6 +178,7 @@ export function processDeps(): DoctorDeps {
     countModelProviders,
     slotsReadiness,
     slotsAttachments,
+    slotsWorkspaces,
     tokenFactoryChecks,
   };
 }
