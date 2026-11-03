@@ -2,9 +2,7 @@
 
 import { useEffect, useRef, useState, type FC, type FormEvent } from 'react';
 
-import { Markdown } from '../atoms/Markdown.js';
 import { Button } from '../atoms/primitives/Button.js';
-import { Switch } from '../atoms/primitives/Switch.js';
 import { assistantDisplayName } from '../utils/assistantName.js';
 import {
   EMPTY_PERSONALIZATION_PROFILE,
@@ -29,7 +27,6 @@ const PersonalizationPanelContent: FC<Pick<PersonalizationPanelProps, 'onProfile
   const { profile, loading, loadError, updateProfile, deleteProfile } = usePersonalization();
   const [draft, setDraft] = useState<PersonalizationProfile>(profile ?? EMPTY_PERSONALIZATION_PROFILE);
   const [saving, setSaving] = useState(false);
-  const [editingLearned, setEditingLearned] = useState(false);
   const [feedback, setFeedback] = useState<{ tone: 'error' | 'success'; message: string } | null>(null);
 
   // Pinned preferences are plain strings on the wire, with no id of their own. React needs a key
@@ -301,77 +298,6 @@ const PersonalizationPanelContent: FC<Pick<PersonalizationPanelProps, 'onProfile
                   placeholder="How should it understand its role?"
                 />
               </div>
-            </section>
-
-            <section
-              className="rounded-xl border border-border bg-card-bg p-4"
-              aria-labelledby="learned-profile-heading"
-            >
-              <h4 id="learned-profile-heading" className="text-sm font-semibold text-text-primary">
-                Learned profile
-              </h4>
-              <p className="mt-1 text-sm text-text-secondary">
-                {assistant} updates this from your conversations. Edit or clear it any time.
-              </p>
-
-              <div className="mt-3 flex items-start gap-3 rounded-lg border border-border/70 bg-input-box-bg px-3 py-3">
-                <div className="min-w-0 flex-1">
-                  <p className="text-sm font-medium text-text-primary">Learn from conversations</p>
-                  <p className="mt-0.5 text-xs leading-snug text-text-secondary">
-                    After a conversation, a local model updates this document from it, at most once an hour. You can
-                    edit or clear it any time.
-                  </p>
-                </div>
-                <Switch
-                  // A host that never sent the switch renders as off; it stays absent on the
-                  // wire until the user touches it, which is a choice worth sending.
-                  checked={draft.learning_enabled ?? false}
-                  aria-label="Learn from conversations"
-                  disabled={saving}
-                  className="mt-0.5"
-                  onCheckedChange={checked => setDraft(current => ({ ...current, learning_enabled: checked }))}
-                />
-              </div>
-
-              {draft.learned_profile === null ? (
-                <p className="mt-3 text-sm text-text-secondary">Nothing learned yet.</p>
-              ) : editingLearned ? (
-                <textarea
-                  id="personalization-learned-profile"
-                  aria-label="Learned profile document"
-                  className={`${inputClassName} mt-3 min-h-40 resize-y font-mono`}
-                  value={draft.learned_profile}
-                  onChange={event => setDraft(current => ({ ...current, learned_profile: event.target.value }))}
-                />
-              ) : (
-                <div className="mt-3 rounded-md border border-border/70 bg-input-box-bg px-3 py-2.5 text-sm">
-                  <Markdown content={draft.learned_profile} readOnly />
-                </div>
-              )}
-
-              {draft.learned_profile !== null ? (
-                <div className="mt-3 flex gap-2">
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    size="small"
-                    onClick={() => setEditingLearned(current => !current)}
-                  >
-                    {editingLearned ? 'Preview' : 'Edit'}
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="small"
-                    onClick={() => {
-                      setEditingLearned(false);
-                      setDraft(current => ({ ...current, learned_profile: null }));
-                    }}
-                  >
-                    Clear learned profile
-                  </Button>
-                </div>
-              ) : null}
             </section>
 
             {feedback ? (
