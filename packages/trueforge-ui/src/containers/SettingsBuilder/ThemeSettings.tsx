@@ -6,6 +6,7 @@ import { VoiceInputSettings, VoiceReplySettings } from '@/components/VoiceReplyS
 import { useTheme } from '@/theme/ThemeProvider.js';
 import { PRESETS } from '@/theme/presets/index.js';
 import { THEME_PRESET_IDS, type ThemePreset } from '@/theme/types.js';
+import { CHAT_FONT_SIZES, useChatFontSize } from '@/utils/chatFontSizePreference.js';
 import { useModelUsageVisible } from '@/utils/modelUsageDisplayPreference.js';
 
 /** Display metadata for each theme preset. The picker order comes from THEME_PRESET_IDS. */
@@ -32,6 +33,7 @@ function PresetSwatches({ preset, mode }: { preset: ThemePreset; mode: 'light' |
 const ThemeSettings = () => {
   const { preset, setPreset, mode, preference, setTheme, isDark } = useTheme();
   const { visible: modelUsageVisible, setVisible: setModelUsageVisible } = useModelUsageVisible();
+  const { size: chatFontSize, setSize: setChatFontSize } = useChatFontSize();
 
   return (
     <div className="flex flex-col gap-6">
@@ -63,6 +65,32 @@ const ThemeSettings = () => {
             </button>
           ))}
         </div>
+      </div>
+
+      <div>
+        <h3 className="mb-2 text-sm font-medium text-text-primary">Chat text size</h3>
+        <div className="flex gap-2">
+          {CHAT_FONT_SIZES.map(option => (
+            <button
+              key={option.id}
+              type="button"
+              onClick={() => setChatFontSize(option.id)}
+              aria-pressed={chatFontSize === option.id}
+              className={cn(
+                'rounded-md border px-3 py-1.5 text-sm font-medium transition-colors',
+                'focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-focus-ring',
+                chatFontSize === option.id
+                  ? 'border-primary-button-bg bg-primary-button-bg text-primary-button-text'
+                  : 'border-border bg-secondary-bg text-text-secondary hover:text-text-primary',
+              )}
+            >
+              {option.label}
+            </button>
+          ))}
+        </div>
+        <p className="mt-2 text-xs text-text-secondary">
+          How big the words are in your chats, including the box where you write. The rest of the app keeps its size.
+        </p>
       </div>
 
       <div>
