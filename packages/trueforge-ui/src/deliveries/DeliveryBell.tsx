@@ -5,6 +5,7 @@ import { useEffect, useRef } from 'react';
 import { auiButtonClass } from '../atoms/lib/buttonClasses.js';
 import { cn } from '../atoms/lib/cn.js';
 import { Icon } from '../icons/Icon.js';
+import { useOptionalServer } from '../server/ServerContext.js';
 import { useOptionalShellMode } from '../server/ShellModeContext.js';
 import { useOptionalDeliveries } from './DeliveriesContext.js';
 import { openDeliveryLink } from './openDelivery.js';
@@ -64,6 +65,7 @@ function DeliveryRow({ item, onOpen }: { item: DeliveryItem; onOpen: (item: Deli
 export function DeliveryBell() {
   const deliveries = useOptionalDeliveries();
   const shell = useOptionalShellMode();
+  const server = useOptionalServer();
   const rootRef = useRef<HTMLDivElement>(null);
   const open = deliveries?.panelOpen === true;
   const setPanelOpen = deliveries?.setPanelOpen;
@@ -91,7 +93,7 @@ export function DeliveryBell() {
     void markSeen([item.id]);
     if (item.link !== null && shell !== null) {
       deliveries.setPanelOpen(false);
-      openDeliveryLink({ shell, link: item.link });
+      void openDeliveryLink({ shell, server, link: item.link });
     }
   };
 

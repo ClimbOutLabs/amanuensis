@@ -1,10 +1,11 @@
 import { OpenAPIHono, type RouteHandler } from '@hono/zod-openapi';
 
-import { InvalidPageTokenError } from '@truefoundry/trueforge-core/agent-session';
+import { InvalidPageTokenError, type ISessionStore } from '@truefoundry/trueforge-core/agent-session';
 
 import type { ResolveRequestContext } from '../auth/identity';
 import type { IDeliveryStore } from '../db/deliveryStore';
 import type { IPushSubscriptionStore } from '../db/pushSubscriptionStore';
+import type { SessionCustom, TurnCustom } from '../db/sessionCustom';
 import {
   createPushSubscriptionRoute,
   deletePushSubscriptionRoute,
@@ -15,9 +16,11 @@ import {
   markAllDeliveriesSeenRoute,
   markDeliveriesSeenRoute,
 } from '../routes/deliveryRoutes';
+import type { Delivery } from '../schemas/deliveries';
 
 export interface DeliveriesRouterDeps {
   deliveryStore: IDeliveryStore;
+  sessionStore: Pick<ISessionStore<SessionCustom, TurnCustom>, 'getSession'>;
   resolveRequestContext: ResolveRequestContext;
 }
 
@@ -35,11 +38,28 @@ export function createDeliveriesRouter(deps: DeliveriesRouterDeps) {
     return { tenant_id: context.tenant_id, created_by: context.subject.id };
   };
 
+  // A link to a chat that has since been deleted leads nowhere, so the item is served without its
+  // link: the words stay in the feed, and no Open is offered for a chat that is gone. Space links
+  // name no chat, so they are served as stored. An approval-waiting item keeps its link, because
+  // its wire shape requires one; the app opens nothing for a chat it cannot load.
+  const withoutDeadChatLink = async (delivery: Delivery, tenant_id: string): Promise<Delivery> => {
+    const link = delivery.link;
+    if (link === null || link.type === 'space' || delivery.kind === 'approval_waiting') {
+      return delivery;
+    }
+    const session = await deps.sessionStore.getSession({ tenant_id, session_id: link.session_id });
+    return session === undefined ? { ...delivery, link: null } : delivery;
+  };
+
   const listHandler: RouteHandler<typeof listDeliveriesRoute> = async c => {
     const query = c.req.valid('query');
+    const owner = ownerOf(c);
     try {
-      const page = await deps.deliveryStore.list({ ...ownerOf(c), limit: query.limit, page_token: query.page_token });
-      return c.json({ data: page.deliveries, next_page_token: page.next_page_token }, 200);
+      const page = await deps.deliveryStore.list({ ...owner, limit: query.limit, page_token: query.page_token });
+      const deliveries = await Promise.all(
+        page.deliveries.map(delivery => withoutDeadChatLink(delivery, owner.tenant_id)),
+      );
+      return c.json({ data: deliveries, next_page_token: page.next_page_token }, 200);
     } catch (error) {
       if (error instanceof InvalidPageTokenError) {
         return c.json(
@@ -73,12 +93,13 @@ export function createDeliveriesRouter(deps: DeliveriesRouterDeps) {
 
   const getHandler: RouteHandler<typeof getDeliveryRoute> = async c => {
     const { delivery_id: id } = c.req.valid('param');
-    const delivery = await deps.deliveryStore.get({ ...ownerOf(c), id });
+    const owner = ownerOf(c);
+    const delivery = await deps.deliveryStore.get({ ...owner, id });
     // Another person's delivery reads as missing, so its existence is not revealed.
     if (delivery === undefined) {
       return c.json({ error: { message: 'That item was not found. Open your feed to see what is there.' } }, 404);
     }
-    return c.json({ data: delivery }, 200);
+    return c.json({ data: await withoutDeadChatLink(delivery, owner.tenant_id) }, 200);
   };
 
   const router = new OpenAPIHono();
