@@ -2,6 +2,7 @@
 import { BugReportDialog } from '@/atoms/BugReportButton.js';
 import { AgentConfigInstructionsProvider } from '@/atoms/draft/AgentConfigInstructionsContext.js';
 import { BugReportProvider, type BugReportApi } from '@/components/BugReportContext.js';
+import { DeliveriesProvider } from '@/deliveries/DeliveriesContext.js';
 import { SidebarLayout } from '@/layouts/SidebarLayout.js';
 import { ServerProvider } from '@/server/ServerContext.js';
 import { ShellModeProvider, useShellMode } from '@/server/ShellModeContext.js';
@@ -12,6 +13,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { noSpaceFolders } from '../server/noSpaceFolders.js';
 
 import { RuntimeHarness } from '../containers/RuntimeHarness.js';
+import { fakeServer, item } from '../deliveries/fakeDeliveriesApi.js';
 import { createMockAgentUIServer, createMockCatalog, createMockScheduleServer } from '../server/mockServer.js';
 
 const HISTORY_COLLAPSED_STORAGE_KEY = 'aui-history-collapsed';
@@ -416,5 +418,59 @@ describe('SidebarLayout More menu', () => {
     fireEvent.click(within(dialog).getByRole('button', { name: 'Close' }));
 
     await waitFor(() => expect(more).toHaveFocus());
+  });
+});
+
+describe('SidebarLayout notifications bell', () => {
+  beforeEach(() => {
+    localStorage.clear();
+  });
+
+  function renderSidebarLayoutWithBell() {
+    const { api } = fakeServer([item({ id: 'a' })]);
+    return render(
+      <SlotsProvider>
+        <ServerProvider server={mockServer()}>
+          <ShellModeProvider>
+            <AgentConfigInstructionsProvider>
+              <RuntimeHarness messages={[]}>
+                <DeliveriesProvider api={api} pollMs={60_000}>
+                  <div className="h-96">
+                    <SidebarLayout />
+                  </div>
+                </DeliveriesProvider>
+              </RuntimeHarness>
+            </AgentConfigInstructionsProvider>
+          </ShellModeProvider>
+        </ServerProvider>
+      </SlotsProvider>,
+    );
+  }
+
+  it('shows the bell once, in the rail under the brand and not in a header, and opens its panel from there', async () => {
+    renderSidebarLayoutWithBell();
+
+    const bell = await screen.findByRole('button', { name: 'Notifications, 1 unread' });
+    expect(screen.getAllByRole('button', { name: /Notifications/ })).toHaveLength(1);
+
+    const nav = screen.getByRole('navigation', { name: 'Sidebar' });
+    const rail = nav.closest('aside');
+    expect(rail?.contains(bell)).toBe(true);
+    for (const header of Array.from(document.querySelectorAll('header'))) {
+      expect(header.contains(bell)).toBe(false);
+    }
+    // The bell sits above the rail's first destination.
+    const chats = within(nav).getByRole('button', { name: 'Chats' });
+    expect(bell.compareDocumentPosition(chats) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+
+    fireEvent.click(bell);
+    const panel = await screen.findByRole('dialog', { name: 'Notifications' });
+    expect(panel).toHaveClass('left-0');
+    expect(panel).not.toHaveClass('right-0');
+    expect(within(panel).getByRole('button', { name: /Call the dentist/ })).toBeInTheDocument();
+    expect(within(panel).getByRole('button', { name: 'Mark all seen' })).toBeInTheDocument();
+
+    fireEvent.keyDown(window, { key: 'Escape' });
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Notifications' })).not.toBeInTheDocument());
   });
 });

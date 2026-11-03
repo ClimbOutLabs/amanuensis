@@ -39,7 +39,7 @@ One server-side feed of things Aman wants a person to see, called deliveries. Ea
 - `delivery` and `delivery_attempt` tables on SQLite and Postgres, bound by shared store contract tests
 - Routes under `/api/v1/user/deliveries`: list (newest first, paged), unread count, mark seen, get one
 - Reminders create a delivery after writing their line into the Reminders chat; the old browser polling and per-browser storage are removed
-- A bell with the unread count in the main headers and a panel that lists deliveries; opening an item marks it seen
+- A bell with the unread count in the left panel and a panel that lists deliveries; opening an item marks it seen
 - Web Push with a service worker, per-device opt-in in Settings, and plain words for iPhone (Home Screen needed), unsupported and blocked browsers
 - Every delivery and every channel attempt is written to the Activity log in plain words
 - Deliveries are included in data export and import, with an upgrade step and an older-shape fixture; push subscriptions are not exported

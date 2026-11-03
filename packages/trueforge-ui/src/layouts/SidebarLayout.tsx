@@ -32,6 +32,7 @@ import { AgentConfigDrawerContainer } from '../containers/AgentConfigDrawerConta
 import { Thread } from '../containers/Thread.js';
 import { ThreadListContainer } from '../containers/ThreadListContainer.js';
 import { useOpenMostRecentChat } from '../containers/useOpenMostRecentChat.js';
+import { DeliveryBell } from '../deliveries/DeliveryBell.js';
 import { HelpNewChatBridge } from '../help/HelpStuckButton.js';
 import { Icon } from '../icons/Icon.js';
 import { shellIsCreateAgent, useOptionalShellMode, type ShellMode } from '../server/ShellModeContext.js';
@@ -148,6 +149,12 @@ function SidebarRail({
     >
       <div className="flex h-14 w-full shrink-0 items-center justify-center text-text-primary">
         <BrandLogo variant={chrome.collapsedVariant} className={brandLogoClassName} />
+      </div>
+      {/* The bell sits under the brand, outside the scrolling nav, so its panel is not clipped by the
+          nav's scroll area. Opening it is not a navigation: like Chats, its clicks must not dismiss
+          the mobile drawer, since the panel shows inside it. */}
+      <div className="flex w-full shrink-0 items-center justify-center pb-1" onClick={event => event.stopPropagation()}>
+        <DeliveryBell />
       </div>
       {/* One scrolling flex column: on a short viewport it scrolls (min-h-0 + overflow-y-auto) instead
           of the footer painting over the nav. The footer sits at the bottom when there is room. */}

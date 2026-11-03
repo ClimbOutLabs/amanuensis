@@ -60,7 +60,7 @@ function DeliveryRow({ item, onOpen }: { item: DeliveryItem; onOpen: (item: Deli
   );
 }
 
-/** The bell in the top bar, with the unread count and the panel of recent items. Absent a feed, it draws nothing. */
+/** The bell in the left panel, with the unread count and the panel of recent items. Absent a feed, it draws nothing. */
 export function DeliveryBell() {
   const deliveries = useOptionalDeliveries();
   const shell = useOptionalShellMode();
@@ -120,7 +120,7 @@ export function DeliveryBell() {
         <div
           role="dialog"
           aria-label="Notifications"
-          className="border-border bg-paper absolute top-full right-0 z-50 mt-2 flex max-h-[28rem] w-[22rem] max-w-[calc(100vw-2rem)] flex-col rounded-xl border shadow-xl"
+          className="border-border bg-paper absolute top-full left-0 z-50 mt-2 flex max-h-[28rem] w-[22rem] max-w-[calc(100vw-2rem)] flex-col rounded-xl border shadow-xl"
         >
           <div className="border-border flex items-center justify-between border-b px-3 py-2">
             <h2 className="text-text-primary text-sm font-semibold">Notifications</h2>
