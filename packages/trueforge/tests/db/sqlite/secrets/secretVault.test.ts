@@ -5,8 +5,9 @@ import { sql } from 'kysely';
 import { migrateSqliteToLatest } from '../../../../src/db/migrateSqlite';
 import { createSqliteDb } from '../../../../src/db/sqlite/client';
 import { SqliteGlobalSettingsStore } from '../../../../src/db/sqlite/global-settings-store/SqliteGlobalSettingsStore';
+import { createMasterKey, recordKeyCheck } from '../../../../src/secrets/keyCheck';
 import type { SecretContext } from '../../../../src/secrets/secretCipher';
-import { SecretVault, createMasterKey, recordKeyCheck } from '../../../../src/secrets/secretVault';
+import { SecretVault } from '../../../../src/secrets/secretVault';
 import { TestKeyProvider, runSecretVaultContractSuite } from '../../secretVaultContractSuite';
 import { createSqliteTestDatabase, type SqliteTestDatabase } from '../testDatabase';
 
