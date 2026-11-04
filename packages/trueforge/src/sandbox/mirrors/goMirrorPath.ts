@@ -50,6 +50,8 @@ export const DEFAULT_GO_MODULE_HOSTS: readonly string[] = [
   'nhooyr.io',
   'storj.io',
   'dario.cat',
+  'go.yaml.in',
+  'cel.dev',
 ];
 
 /** The only checksum database the mirror reaches. */
@@ -63,15 +65,20 @@ const ESCAPED_NAME = /^(?:[a-z0-9]|![a-z])(?:[a-z0-9._~+-]|![a-z])*$/;
 const TILE_PATH = /^\/tile\/[0-9]+\/(?:[0-9]+|data)\/(?:x[0-9]{3}\/)*[0-9]{3}(?:\.p\/[0-9]+)?$/;
 const PROXY_FILE = /^(.+)\.(?:info|mod|zip)$/;
 
-/** Whether a name is a lower-case DNS name with at least one dot: no port, path, wildcard or upper case. */
+/** The last label starts with a letter, so `1.2.3.4`, `0x7f.0.0.1` and other number forms are never names. */
+const TOP_LABEL = /^[a-z][a-z0-9-]*$/;
+
+/** Whether a name is a lower-case DNS name with at least one dot: no IP address, port, path, wildcard or upper case. */
 export function isGoModuleHostName(name: string): boolean {
-  return HOST_NAME.test(name);
+  return HOST_NAME.test(name) && TOP_LABEL.test(name.slice(name.lastIndexOf('.') + 1));
 }
 
-export type GoMirrorPathCheck = { allowed: true; path: string } | { allowed: false; reason: 'shape' | 'host' };
+export type GoMirrorPathCheck =
+  | { allowed: true; path: string }
+  | { allowed: false; reason: 'shape' }
+  | { allowed: false; reason: 'host'; host: string };
 
 const SHAPE: GoMirrorPathCheck = { allowed: false, reason: 'shape' };
-const HOST: GoMirrorPathCheck = { allowed: false, reason: 'host' };
 
 /** Whether a module path is well formed and starts with a listed host. */
 function checkModule({ modulePath, hosts }: { modulePath: string; hosts: ReadonlySet<string> }): GoMirrorPathCheck {
@@ -80,7 +87,7 @@ function checkModule({ modulePath, hosts }: { modulePath: string; hosts: Readonl
   if (!isGoModuleHostName(host) || !elements.every(element => ESCAPED_NAME.test(element) && !element.endsWith('.'))) {
     return SHAPE;
   }
-  return hosts.has(host) ? { allowed: true, path: modulePath } : HOST;
+  return hosts.has(host) ? { allowed: true, path: modulePath } : { allowed: false, reason: 'host', host };
 }
 
 /** `<module>/@v/list`, `<module>/@v/<version>.info|.mod|.zip` and `<module>/@latest`, in decoded form. */

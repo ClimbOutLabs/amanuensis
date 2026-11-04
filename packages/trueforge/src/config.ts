@@ -742,7 +742,7 @@ export function parsePublicBaseUrl(raw: string | undefined, options: { allowPath
 }
 
 /**
- * Parses `SANDBOX_MIRROR_GO_EXTRA_HOSTS`: comma-separated lower-case host names such as `modules.example.com`.
+ * Parses `SANDBOX_MIRROR_GO_EXTRA_HOSTS`: comma-separated lower-case host names such as `modules.example.com` (never IP addresses).
  * A port, path, wildcard or upper-case letter fails the boot, since a dropped typo would quietly leave a
  * module host blocked and a loose entry would suggest a wider match than the mirror makes.
  */
@@ -755,7 +755,7 @@ export function parseGoModuleHosts(raw: string | undefined): string[] {
     }
     if (!isGoModuleHostName(text)) {
       throw new Error(
-        `SANDBOX_MIRROR_GO_EXTRA_HOSTS entries must be lower-case host names such as modules.example.com, with no port, path or wildcard, got: ${text}`,
+        `SANDBOX_MIRROR_GO_EXTRA_HOSTS has an entry that is not a valid host name: "${text}". Each entry must be a lower-case host name with a dot, like example.com: no port, path, wildcard, IP address or single word such as localhost. Fix or remove that entry in the .env file, then restart the server.`,
       );
     }
     hosts.add(text);

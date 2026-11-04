@@ -170,6 +170,11 @@ async function setup(options?: {
       res.end(body);
       return;
     }
+    if (url.endsWith('/supported')) {
+      res.writeHead(404, { 'content-type': 'text/plain' });
+      res.end('not found');
+      return;
+    }
     if (url.startsWith('/crates/') || url.startsWith('/@scope') || url.startsWith('/sumdb/')) {
       res.writeHead(200, { 'content-type': 'application/octet-stream' });
       res.end(`upstream saw ${url}`);
@@ -522,7 +527,7 @@ describe('PackageMirrorGateway', () => {
         token: harness.token,
       });
       expect(reply.status).toBe(403);
-      expect(reply.body).toContain('well-known code host');
+      expect(reply.body).toContain('SANDBOX_MIRROR_GO_EXTRA_HOSTS');
       expect(harness.upstreamHits).toEqual([]);
     } finally {
       await harness.close();
@@ -537,7 +542,7 @@ describe('PackageMirrorGateway', () => {
         token: harness.token,
       });
       expect(reply.status).toBe(403);
-      expect(reply.body).toContain('well-known code host');
+      expect(reply.body).toContain('SANDBOX_MIRROR_GO_EXTRA_HOSTS');
       expect(harness.upstreamHits).toEqual([]);
     } finally {
       await harness.close();
@@ -640,7 +645,6 @@ describe('PackageMirrorGateway', () => {
     '/go/github.com/example/lib/@latest',
     '/go/github.com/example/lib/v2/@v/v2.0.0.info',
     '/go/github.com/example/lib/@v/master.info',
-    '/go/sumdb/sum.golang.org/supported',
     '/go/sumdb/sum.golang.org/latest',
     '/go/sumdb/sum.golang.org/tile/8/0/x001/234.p/2',
     '/go/sumdb/sum.golang.org/tile/8/data/001',
@@ -653,6 +657,35 @@ describe('PackageMirrorGateway', () => {
       const reply = await call(harness.port, { path, token: harness.token });
       expect(reply.status).toBe(200);
       expect(harness.upstreamHits).toHaveLength(1);
+    } finally {
+      await harness.close();
+    }
+  });
+
+  it.each(['/go/sumdb/sum.golang.org/supported', '/go/via/sum.golang.org/supported'])(
+    'answers %s itself with 200, since the real one answers 404',
+    async path => {
+      const harness = await setup();
+      try {
+        for (const method of ['GET', 'HEAD']) {
+          const reply = await call(harness.port, { path, token: harness.token, method });
+          expect(reply.status).toBe(200);
+          expect(reply.body).toBe('');
+        }
+        expect(harness.upstreamHits).toEqual([]);
+      } finally {
+        await harness.close();
+      }
+    },
+  );
+
+  it('names the blocked host and the setting that adds it', async () => {
+    const harness = await setup();
+    try {
+      const reply = await call(harness.port, { path: '/go/modules.evil.net/b/@v/list', token: harness.token });
+      expect(reply.status).toBe(403);
+      expect(reply.body).toContain('modules.evil.net');
+      expect(reply.body).toContain('SANDBOX_MIRROR_GO_EXTRA_HOSTS');
     } finally {
       await harness.close();
     }

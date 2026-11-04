@@ -30,6 +30,7 @@ describe('checkGoMirrorPath', () => {
     expect(checkGoMirrorPath({ rawRest: '/via/proxy.golang.org/modules.evil.net/b/@latest', hosts })).toEqual({
       allowed: false,
       reason: 'host',
+      host: 'modules.evil.net',
     });
     expect(checkGoMirrorPath({ rawRest: '/via/proxy.golang.org/anything', hosts })).toEqual({
       allowed: false,
@@ -41,6 +42,7 @@ describe('checkGoMirrorPath', () => {
     expect(checkGoMirrorPath({ rawRest: '/modules.evil.net/b/@v/list', hosts })).toEqual({
       allowed: false,
       reason: 'host',
+      host: 'modules.evil.net',
     });
     expect(checkGoMirrorPath({ rawRest: '/modules.example.net/b/@v/list', hosts }).allowed).toBe(true);
     expect(checkGoMirrorPath({ rawRest: '/github.com/a/b', hosts })).toEqual({ allowed: false, reason: 'shape' });
@@ -52,6 +54,22 @@ describe('checkGoMirrorPath', () => {
       expect(checkGoMirrorPath({ rawRest, hosts }).allowed).toBe(false);
     },
   );
+});
+
+describe('IP addresses', () => {
+  it.each(['1.2.3.4', '0x7f.0.0.1', '0x7f.0x0.0x0.0x1', '127.1', '[::1]', '::1', '2130706433.0'])(
+    'is not a host name or module host: %s',
+    name => {
+      expect(isGoModuleHostName(name)).toBe(false);
+      expect(checkGoMirrorPath({ rawRest: `/${name}/b/@v/list`, hosts: new Set([name]) }).allowed).toBe(false);
+    },
+  );
+});
+
+describe('default hosts', () => {
+  it.each(['go.yaml.in', 'cel.dev'])('lists %s', name => {
+    expect(checkGoMirrorPath({ rawRest: `/${name}/x/@v/list`, hosts }).allowed).toBe(true);
+  });
 });
 
 describe('isGoModuleHostName', () => {

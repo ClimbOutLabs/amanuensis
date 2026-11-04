@@ -239,6 +239,9 @@ function headerValue(headers: Record<string, string | string[] | undefined>, nam
   return Array.isArray(value) ? value[0] : value;
 }
 
+/** The checksum database's support probe, which the mirror answers itself. */
+const GO_SUMDB_SUPPORTED = /^\/(?:sumdb\/sum\.golang\.org|via\/[^/]+)\/supported$/;
+
 /**
  * The host-side package mirrors: one caching, download-only gateway that speaks the four standard
  * read protocols (PEP 503 for Python, the npm registry read interface, the Go module proxy
@@ -397,19 +400,26 @@ export class PackageMirrorGateway {
           ? checkGoMirrorPath({ rawRest: rest, hosts: this.#goModuleHosts })
           : { allowed: false, reason: 'shape' };
       if (!checked.allowed) {
-        const unlisted = checked.reason === 'host';
-        const status = unlisted ? 403 : 404;
+        const status = checked.reason === 'host' ? 403 : 404;
         this.#plain(
           res,
           status,
-          unlisted
-            ? 'That Go module comes from a code host this mirror does not fetch from. Use a module from a well-known code host such as github.com, or ask the server owner to add the host.'
+          checked.reason === 'host'
+            ? `This mirror does not fetch Go modules from ${checked.host}. Ask the server owner to add ${checked.host} to SANDBOX_MIRROR_GO_EXTRA_HOSTS.`
             : 'The Go mirror does not serve that address. Let the go command ask for modules itself, for example with go mod download.',
         );
         this.#log({ grant, ecosystem, path: rest, status, bytes: 0, cached: false, at: startedAt });
         return;
       }
       rest = checked.path;
+      // The real checksum database answers /supported with 404, which makes go contact it directly and
+      // fail in the sandbox. Answering 200 here keeps every checksum lookup going through the mirror.
+      if (GO_SUMDB_SUPPORTED.test(rest)) {
+        res.writeHead(200, { 'content-type': 'text/plain', 'content-length': 0 });
+        res.end();
+        this.#log({ grant, ecosystem, path: rest, status: 200, bytes: 0, cached: false, at: startedAt });
+        return;
+      }
     }
     const publicBase = `http://127.0.0.1:${String(SLOT_MIRROR_GUEST_PORT)}/m/${token}`;
     if (ecosystem === 'cargo' && rest === '/config.json') {
