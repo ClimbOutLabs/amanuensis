@@ -5,16 +5,23 @@
 import { randomBytes } from 'node:crypto';
 
 import type { IGlobalSettingsStore } from '../../src/db/globalSettingsStore';
-import type { KeyLoadResult, KeyProvider } from '../../src/secrets/keyProvider';
-import type { SecretContext } from '../../src/secrets/secretCipher';
 import {
   KEY_CHECK_SETTING,
-  SecretVault,
   SecretsAlreadySetUpError,
-  SecretsLockedError,
   createMasterKey,
   recordKeyCheck,
-} from '../../src/secrets/secretVault';
+} from '../../src/secrets/keyCheck';
+import type { KeyLoadResult, KeyProvider } from '../../src/secrets/keyProvider';
+import {
+  RECOVERY_COPY_SETTING,
+  RecoveryCopyMissingError,
+  RecoveryKeyRejectedError,
+  generateRecoveryKey,
+  recoverMasterKey,
+  saveRecoveryCopy,
+} from '../../src/secrets/recoveryKey';
+import type { SecretContext } from '../../src/secrets/secretCipher';
+import { SecretVault, SecretsLockedError } from '../../src/secrets/secretVault';
 
 const context: SecretContext = { table: 'global_settings', primary_key: 'test_secret', field: 'value' };
 
@@ -102,5 +109,72 @@ export function runSecretVaultContractSuite(getSettings: () => IGlobalSettingsSt
     const row = await settings.getSetting({ key: 'test_secret' });
     expect(row?.value).not.toContain('stored-canary');
     expect(vault.decrypt({ value: row?.value ?? '', context })).toBe('stored-canary');
+  });
+
+  it('restores with the recovery key alone on a machine with no key', async () => {
+    const settings = getSettings();
+    const key = createMasterKey();
+    await recordKeyCheck({ settings, key });
+    const recoveryKey = generateRecoveryKey();
+    await saveRecoveryCopy({ settings, masterKey: key, recoveryKey });
+    const vault = new SecretVault({ provider: new TestKeyProvider(), settings });
+    expect(await vault.refresh()).toMatchObject({ status: 'locked', reason: 'no_key' });
+    // Typed with spaces instead of dashes, as a person reading it off paper might.
+    const recovered = await vault.unlockWithRecoveryKey(recoveryKey.replace(/-/g, ' '));
+    expect(recovered.equals(key)).toBe(true);
+    expect(vault.state).toEqual({ status: 'unlocked' });
+    const value = vault.encrypt({ plaintext: 'after-restore', context });
+    expect(vault.decrypt({ value, context })).toBe('after-restore');
+  });
+
+  it('rejects a wrong recovery key and stays locked', async () => {
+    const settings = getSettings();
+    const key = createMasterKey();
+    await recordKeyCheck({ settings, key });
+    await saveRecoveryCopy({ settings, masterKey: key, recoveryKey: generateRecoveryKey() });
+    const vault = new SecretVault({ provider: new TestKeyProvider(), settings });
+    await vault.refresh();
+    await expect(vault.unlockWithRecoveryKey(generateRecoveryKey())).rejects.toBeInstanceOf(RecoveryKeyRejectedError);
+    expect(vault.state).toMatchObject({ status: 'locked' });
+  });
+
+  it('makes the old recovery key stop working when a new one is saved', async () => {
+    const settings = getSettings();
+    const key = createMasterKey();
+    await recordKeyCheck({ settings, key });
+    const oldKey = generateRecoveryKey();
+    const newKey = generateRecoveryKey();
+    await saveRecoveryCopy({ settings, masterKey: key, recoveryKey: oldKey });
+    await saveRecoveryCopy({ settings, masterKey: key, recoveryKey: newKey });
+    await expect(recoverMasterKey({ settings, recoveryKey: oldKey })).rejects.toBeInstanceOf(RecoveryKeyRejectedError);
+    expect((await recoverMasterKey({ settings, recoveryKey: newKey })).equals(key)).toBe(true);
+  });
+
+  it('refuses to save a recovery copy for a key this database was not set up with', async () => {
+    const settings = getSettings();
+    await recordKeyCheck({ settings, key: createMasterKey() });
+    await expect(
+      saveRecoveryCopy({ settings, masterKey: createMasterKey(), recoveryKey: generateRecoveryKey() }),
+    ).rejects.toThrow('Set up secrets');
+    expect(await settings.getSetting({ key: RECOVERY_COPY_SETTING })).toBeUndefined();
+  });
+
+  it('says plainly when there is no recovery copy to restore from', async () => {
+    const settings = getSettings();
+    await recordKeyCheck({ settings, key: createMasterKey() });
+    await expect(recoverMasterKey({ settings, recoveryKey: generateRecoveryKey() })).rejects.toBeInstanceOf(
+      RecoveryCopyMissingError,
+    );
+  });
+
+  it('keeps the master key and recovery key out of the stored copy', async () => {
+    const settings = getSettings();
+    const key = createMasterKey();
+    await recordKeyCheck({ settings, key });
+    const recoveryKey = generateRecoveryKey();
+    await saveRecoveryCopy({ settings, masterKey: key, recoveryKey });
+    const stored = (await settings.getSetting({ key: RECOVERY_COPY_SETTING }))?.value ?? '';
+    expect(stored).not.toContain(key.toString('base64'));
+    expect(stored).not.toContain(recoveryKey.replace(/-/g, ''));
   });
 }
