@@ -122,8 +122,12 @@ nothing does it yet. No memory-write tool is exposed to the model, and pages do 
     matters/<slug>.md     one page per matter (a trip, a purchase, a project)
     .memory-state/        notes Aman keeps for itself
 
-The slug comes from the title: lowercase, accents dropped, other characters turned into dashes, cut
-at 64 characters. `José` and `Jose` share one page. A page's file name must be exactly that
+The slug comes from the title: lowercase, accents dropped from Latin letters, other characters that
+are not letters or digits turned into dashes, cut at 64 characters (and at 200 bytes, so the file name
+stays valid). Only Latin accents are dropped. In Korean, Japanese, Thai, Hindi and other scripts the
+marks are part of the letter and stay, so `김민수` is `people/김민수.md`, `ジョン` is not `ション`, and
+`ハル` is not `バル`. Text is compared in its composed form, so a name typed in either form is the same
+name. `José` and `Jose` share one page. A page's file name must be exactly that
 lowercase slug, such as `people/wendy.md`. A file with any other name, such as `people/Wendy.md` or
 `people/my notes.md`, is not a page: it is never loaded. Each turn that skips such a file writes one
 warning to the server log with the number of files skipped. It does not name them, since file names can be people's names. To use a file, rename it to the lowercase slug.
@@ -198,11 +202,12 @@ as the person's own words. A bullet with no hidden comment at all is the person'
 ### How pages are loaded before each turn
 
 Before recall, the host looks at the person's message for names. It compares each page's title and
-other names with the message as whole words. Case, accents and punctuation around a name are ignored,
+other names with the message as whole words. Case, Latin accents and punctuation around a name are ignored,
 so `(Wendy)` and `Wendy,` both match. An email address counts as one word, so putting an address in
 `aliases` finds the page when the person pastes that address. A trailing dot is ignored, so `W.`
 matches `W`. Names in Chinese, Japanese, Korean or Thai are written without spaces, so those match
-anywhere in the message: `田中` is found in `田中さんに会った`. Every other name still needs whole words,
+anywhere in the message: `田中` is found in `田中さんに会った`. A name never matches part of a
+letter, so `민수` does not match `민숙` and `ハル` does not match `バル`. Every other name still needs whole words,
 so `Sam` does not match `Samantha`.
 
 A name followed by `'s` (`Wendy's flight`) is a possessive match. It loads the page, but ranks below

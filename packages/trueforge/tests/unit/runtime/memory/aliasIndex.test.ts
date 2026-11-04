@@ -1,3 +1,4 @@
+import fc from 'fast-check';
 import { mkdir, mkdtemp, readdir, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -135,6 +136,56 @@ describe('aliasIndex', () => {
       expect(found('김민수씨를 만났어요')).toEqual(['kim']);
       expect(found('วันนี้เจอสมชายที่ตลาด')).toEqual(['somchai']);
       expect(found('山田さんに会った')).toEqual([]);
+    });
+
+    it('does not mix up names that differ only by a letter or a mark outside Latin', () => {
+      const names: AliasIndexFile = {
+        version: 1,
+        pages: [
+          { kind: 'person', slug: 'min-su', title: '민수', content_hash: 'a', aliases: [] },
+          { kind: 'person', slug: 'haru', title: 'ハル', content_hash: 'b', aliases: [] },
+          { kind: 'person', slug: 'jon', title: 'ジョン', content_hash: 'c', aliases: [] },
+          { kind: 'person', slug: 'ka', title: 'ก', content_hash: 'd', aliases: [] },
+        ],
+      };
+      const found = (text: string) => matchAliases({ index: names, text }).map(match => match.slug);
+      expect(found('민숙 씨를 만났어요')).toEqual([]);
+      expect(found('민수 씨를 만났어요')).toEqual(['min-su']);
+      expect(found('バルに会った')).toEqual([]);
+      expect(found('ハルに会った')).toEqual(['haru']);
+      expect(found('ションに会った')).toEqual([]);
+      expect(found('ジョンに会った')).toEqual(['jon']);
+      expect(found('กขค')).toEqual(['ka']);
+      expect(found('ก็ได้')).toEqual([]);
+    });
+
+    it('matches a name typed in decomposed form against its composed form', () => {
+      const names: AliasIndexFile = {
+        version: 1,
+        pages: [{ kind: 'person', slug: 'kim', title: '김민수', content_hash: 'a', aliases: [] }],
+      };
+      expect(matchAliases({ index: names, text: '김민수씨'.normalize('NFD') }).map(match => match.slug)).toEqual([
+        'kim',
+      ]);
+    });
+
+    it('keeps the letters of Devanagari words so each name is one whole word', () => {
+      const names: AliasIndexFile = {
+        version: 1,
+        pages: [{ kind: 'person', slug: 'priya', title: 'प्रिया', content_hash: 'a', aliases: [] }],
+      };
+      expect(matchAliases({ index: names, text: 'आज प्रिया आई' }).map(match => match.slug)).toEqual(['priya']);
+      expect(matchAliases({ index: names, text: 'आज प्रियांका आई' })).toEqual([]);
+    });
+
+    it('never throws and always returns text that normalises to itself', () => {
+      fc.assert(
+        fc.property(fc.string({ unit: 'binary' }), text => {
+          const once = normalizeAliasText(text);
+          expect(normalizeAliasText(once)).toBe(once);
+        }),
+        { numRuns: 300 },
+      );
     });
 
     it('folds accents both ways', () => {

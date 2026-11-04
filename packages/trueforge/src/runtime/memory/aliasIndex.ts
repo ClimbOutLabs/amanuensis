@@ -17,6 +17,7 @@ import {
   type PageKind,
   type PageListing,
 } from './memoryPages';
+import { foldName } from './pageSlug';
 
 /** The cache file. Keys are stored, so snake_case. */
 export const ALIAS_INDEX_FILE = path.join('.memory-state', 'aliases.json');
@@ -50,18 +51,16 @@ export interface AliasMatch {
 }
 
 /**
- * Text as compared: lowercase, accents folded away, curly apostrophes made straight, every
- * character other than letters, digits, `@`, `.`, and `'` turned into one space, surrounding
+ * Text as compared: folded as `foldName` does (lowercase, Latin accents dropped, other scripts kept
+ * whole), curly apostrophes made straight, every character other than letters, marks, digits,
+ * `@`, `.`, and `'` turned into one space, surrounding
  * space trimmed. Keeps an email address one token. Apostrophes survive only inside a word and
  * as a possessive ending (`'s`, or a bare `'` after an `s`), so quotes around a word fall away.
  */
 export function normalizeAliasText(text: string): string {
-  return text
-    .normalize('NFKD')
-    .replace(/\p{M}+/gu, '')
-    .toLowerCase()
+  return foldName(text)
     .replace(/[\u2018\u2019\u02BC]/g, "'")
-    .replace(/[^\p{L}\p{N}@.']+/gu, ' ')
+    .replace(/[^\p{L}\p{M}\p{N}@.']+/gu, ' ')
     .split(' ')
     .map(trimApostrophes)
     .filter(token => token !== '')
@@ -167,7 +166,10 @@ function substringHits({
     at !== -1;
     at = normalizedText.indexOf(normalizedCandidate, at + 1)
   ) {
-    hits.push({ position: at, possessive: false, alias });
+    // A mark right after the hit belongs to the last letter of the hit, so the text names someone else.
+    if (!/^\p{M}/u.test(normalizedText.slice(at + normalizedCandidate.length))) {
+      hits.push({ position: at, possessive: false, alias });
+    }
   }
   return hits;
 }
