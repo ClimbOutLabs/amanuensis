@@ -162,7 +162,6 @@ page name. The log gives a count, not names. Look for such files and rename them
 
 - `aliases.json` is a cache of page names. Deleting it is safe. It is rebuilt on the next turn that
   needs it.
-- `timezone` holds the vault's time zone. It is written again from the next chat.
 
 ## Evaluation-only Prompt Guard sidecar
 

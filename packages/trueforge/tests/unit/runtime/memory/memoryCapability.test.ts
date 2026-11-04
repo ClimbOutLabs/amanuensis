@@ -541,43 +541,6 @@ describe('HindsightMemoryProcessor.processPreLLM', () => {
     expect(passthroughEvent(events)['injected_block']).toContain('[2026-09-20] fact');
   });
 
-  it('records the time zone of an attended turn on the vault', async () => {
-    const noteTimeZone = jest.fn().mockResolvedValue(undefined);
-    const capability = hindsightMemoryCapability({
-      client: Object.assign(makeClient({}), { noteTimeZone }),
-      config: DEFAULT_CONFIG,
-      logger: makeLogger(),
-      sessionId: 's1',
-      previousTurnId: null,
-      timeZone: 'Asia/Tokyo',
-    });
-    const processor = capability.preLLMProcessors?.[0];
-    if (!processor) {
-      throw new Error('expected a preLLM processor');
-    }
-    await collect(processor.processPreLLM(makeExecution([{ role: 'user', content: 'hi' }])));
-    expect(noteTimeZone).toHaveBeenCalledWith('Asia/Tokyo');
-  });
-
-  it('does not record a time zone on a turn that runs with memory off, such as a scheduled run', async () => {
-    const noteTimeZone = jest.fn().mockResolvedValue(undefined);
-    const capability = hindsightMemoryCapability({
-      client: Object.assign(makeClient({}), { noteTimeZone }),
-      config: DEFAULT_CONFIG,
-      logger: makeLogger(),
-      sessionId: 's1',
-      previousTurnId: null,
-      recallEnabled: false,
-      timeZone: 'Asia/Tokyo',
-    });
-    const processor = capability.preLLMProcessors?.[0];
-    if (!processor) {
-      throw new Error('expected a preLLM processor');
-    }
-    await collect(processor.processPreLLM(makeExecution([{ role: 'user', content: 'hi' }])));
-    expect(noteTimeZone).not.toHaveBeenCalled();
-  });
-
   it.each(['2026-09-20', '2026-09-20T00:00:00.000Z', '2026-09-20T00:00:00Z'])(
     'leaves the date-valued day %s as it is west of UTC',
     async day => {

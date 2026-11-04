@@ -45,7 +45,7 @@ const MatterFrontMatterSchema = z.object({
 });
 
 /** The YAML block at the top of a page. Keys outside this schema are ignored. */
-export const PageFrontMatterSchema = z.discriminatedUnion('kind', [PersonFrontMatterSchema, MatterFrontMatterSchema]);
+const PageFrontMatterSchema = z.discriminatedUnion('kind', [PersonFrontMatterSchema, MatterFrontMatterSchema]);
 export type PageFrontMatter = z.infer<typeof PageFrontMatterSchema>;
 
 /** Characters that would end a line in a viewer, so fact text may not hold them. */
@@ -58,9 +58,9 @@ const LINE_BREAK_PATTERN = /[\n\r\v\f\u0085\u2028\u2029]/;
 const PageFactTextSchema = z
   .string()
   .trim()
-  .min(1, 'A fact cannot be empty. Write a few words and try again.')
-  .refine(text => !LINE_BREAK_PATTERN.test(text), 'A fact must be one line. Remove the line breaks and try again.')
-  .refine(text => !text.includes('<!--'), 'A fact cannot contain "<!--". Remove it and try again.');
+  .min(1)
+  .refine(text => !LINE_BREAK_PATTERN.test(text))
+  .refine(text => !text.includes('<!--'));
 
 /** One fact bullet: its text without the leading `- ` and without the marker, plus the marker. */
 const PageFactSchema = z.object({ text: PageFactTextSchema, marker: FactMarkerSchema });

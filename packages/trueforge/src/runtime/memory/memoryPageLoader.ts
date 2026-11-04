@@ -16,7 +16,7 @@ import {
 } from './memoryPages';
 
 /** Why a page was loaded, recorded on the turn's memory event. */
-export type PageLoadReason = 'direct' | 'possessive';
+type PageLoadReason = 'direct' | 'possessive';
 
 export interface LoadedPage {
   vaultDir: string;

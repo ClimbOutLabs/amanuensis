@@ -86,7 +86,6 @@ import type {
   UpdateMemoryVaultEntryOutcome,
 } from './memoryClient';
 import { loadPagesForMessage } from './memoryPageLoader';
-import { recordVaultTimeZone } from './memoryState';
 import { rankNamedPeopleFirst } from './recallNameBoost';
 
 export interface MarkdownMemoryClientConfig {
@@ -554,10 +553,6 @@ export class MarkdownMemoryClient implements MemoryClient {
       };
     }
     return loadPagesForMessage({ vaultDirs, writeVaultDir: this.namespaceDir(), ...params });
-  }
-
-  async noteTimeZone(timeZone: string): Promise<void> {
-    await recordVaultTimeZone({ vaultDir: this.namespaceDir(), timeZone });
   }
 
   async listEntries(params: { namespace: string; timeoutMs: number }): Promise<ListMemoryVaultEntriesOutcome> {

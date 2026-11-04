@@ -115,8 +115,6 @@ Markdown memory backend only. Hindsight does not use them.
 
 Pages are written by hand for now. Aman only reads them. Tidying them automatically is planned, but
 nothing does it yet. No memory-write tool is exposed to the model, and pages do not change that.
-A private history of page changes, a lock so only one writer works at a time, and handling of hand
-edits come with the change that lets Aman write pages.
 
 ### Files in a vault
 
@@ -130,13 +128,10 @@ lowercase slug, such as `people/wendy.md`. A file with any other name, such as `
 `people/my notes.md`, is not a page: it is never loaded. Each turn that skips such a file writes one
 warning to the server log with the number of files skipped. It does not name them, since file names can be people's names. To use a file, rename it to the lowercase slug.
 
-`.memory-state/` is never exported. It holds:
+`.memory-state/` is never exported. It holds one file:
 
-- `timezone`: the time zone the vault counts "today" in, taken from the newest chat made in a
-  browser. Scheduled and other unattended runs never change it. This is state.
 - `aliases.json`: a cache of every page's title and other names. It is rebuilt whenever a page
   changes, so it is safe to delete.
-- `README`: a short note saying what the folder is. The file text lives in `memoryState.ts`.
 
 ### The page format
 

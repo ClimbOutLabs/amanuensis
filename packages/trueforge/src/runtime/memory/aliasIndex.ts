@@ -21,7 +21,7 @@ import {
 /** The cache file. Keys are stored, so snake_case. */
 export const ALIAS_INDEX_FILE = path.join('.memory-state', 'aliases.json');
 
-export const AliasIndexPageSchema = z.object({
+const AliasIndexPageSchema = z.object({
   kind: PageKindSchema,
   slug: z.string(),
   title: z.string(),
@@ -29,7 +29,7 @@ export const AliasIndexPageSchema = z.object({
   content_hash: z.string(),
   aliases: z.array(z.string()),
 });
-export type AliasIndexPage = z.infer<typeof AliasIndexPageSchema>;
+type AliasIndexPage = z.infer<typeof AliasIndexPageSchema>;
 
 export const AliasIndexFileSchema = z.object({
   version: z.literal(1),
@@ -229,7 +229,7 @@ export function matchAliases({ index, text }: { index: AliasIndexFile; text: str
 }
 
 /** An index entry for one page, from its parsed content and the hash of its bytes. */
-export function aliasIndexPage(input: {
+function aliasIndexPage(input: {
   kind: PageKind;
   slug: string;
   page: MemoryPage;
@@ -249,8 +249,8 @@ export function aliasIndexPage(input: {
  * changed since it was written (a page added, removed, or edited by anyone). A rebuild reads
  * every page. With `persist` it also writes the file back by temp file plus rename; callers pass
  * it only for vaults the scope can write, so a read never creates or changes a vault. A vault with
- * no `people/` or `matters/` folder gives an empty index and writes nothing. The caller need not
- * hold the vault lock: a stale read only costs a rebuild on the next call.
+ * no `people/` or `matters/` folder gives an empty index and writes nothing. A stale read only costs a
+ * rebuild on the next call.
  */
 export async function loadAliasIndex({
   vaultDir,

@@ -1413,12 +1413,6 @@ export class HindsightMemoryProcessor implements PreLLMProcessor, PreLLMEphemera
 
     const hydratedSnapshot = this.durableStateSnapshot();
 
-    // Only an attended turn carries the browser's zone: an unattended run has recall off and reports
-    // the schedule's zone, which must not overwrite where the person is.
-    if (this.recallEnabled && this.timeZone !== undefined && this.client.noteTimeZone !== undefined) {
-      await this.client.noteTimeZone(this.timeZone);
-    }
-
     // Skip recall when the user has disabled memory for this session. This
     // is the only thing the recallEnabled flag decides: pending-retain sweeping (for previous turns),
     // capability-state emission and the sweep summary below all run regardless, whether or not

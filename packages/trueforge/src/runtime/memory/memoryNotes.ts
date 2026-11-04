@@ -165,9 +165,7 @@ export function isNoteTooOld({
 }
 
 /**
- * Where a fact on a page came from. The host sets this from the log entry's origin and note source;
- * the model never chooses it. `you_said` and `you_edited` are the person's own words and are never
- * rewritten by the nightly pass.
+ * Where a fact on a page came from. The model never chooses it. `you_said` and `you_edited` are the person's own words.
  */
 export const FACT_SOURCES = [
   'you_said',
@@ -179,16 +177,14 @@ export const FACT_SOURCES = [
   'inferred',
 ] as const;
 
-export const FactSourceSchema = z.enum(FACT_SOURCES);
+const FactSourceSchema = z.enum(FACT_SOURCES);
 export type FactSource = z.infer<typeof FactSourceSchema>;
 
 /** A fact's day at year, month, or day precision. */
-export const FactDateSchema = z.string().regex(/^\d{4}(?:-(?:0[1-9]|1[0-2])(?:-(?:0[1-9]|[12]\d|3[01]))?)?$/);
-export type FactDate = z.infer<typeof FactDateSchema>;
+const FactDateSchema = z.string().regex(/^\d{4}(?:-(?:0[1-9]|1[0-2])(?:-(?:0[1-9]|[12]\d|3[01]))?)?$/);
 
 /** Fact ids are `f_` and a short lowercase token, unique within a vault for the life of the fact. */
-export const FactIdSchema = z.string().regex(/^f_[a-z0-9]{1,16}$/);
-export type FactId = z.infer<typeof FactIdSchema>;
+const FactIdSchema = z.string().regex(/^f_[a-z0-9]{1,16}$/);
 
 const NoteMarkerSchema = z.strictObject({
   kind: z.literal('note'),
@@ -214,7 +210,7 @@ export type FactMarker = z.infer<typeof FactMarkerSchema>;
  * Every hidden `<!-- kind: ... -->` marker. A note marker rides at the end of a daily-log entry and carries
  * its source and day; a fact marker rides at the end of a page bullet. This is the one owner of both grammars.
  */
-export const MarkerSchema = z.discriminatedUnion('kind', [NoteMarkerSchema, FactMarkerSchema]);
+const MarkerSchema = z.discriminatedUnion('kind', [NoteMarkerSchema, FactMarkerSchema]);
 export type Marker = z.infer<typeof MarkerSchema>;
 
 const FACT_MARKER_KEYS = ['id', 'src', 'since', 'until', 'seen'] as const;
