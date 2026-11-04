@@ -29,19 +29,20 @@ export interface LoadedPage {
   text: string;
   /** This contact's lines for the one drafting block (see `draftingLines`); empty when it has none. */
   drafting: string[];
+  /** Tokens for the page and its drafting lines, plus the drafting heading and end line when this is the first page with drafting lines. */
   estimatedTokens: number;
 }
 
 /** Counts for the turn's memory event; `withheld` is the recall screen's and is added later. */
 export type PageLoadStats = Omit<MemoryPagesStats, 'withheld'>;
 
-/** How the model is told where a fact came from. */
+/** How the model is told where a fact came from; every source other than the person carries "not confirmed". */
 const SOURCE_LABELS: Readonly<Record<FactSource, string>> = {
   you_said: 'you said',
   you_edited: 'you wrote',
   sent_mail: 'from mail you sent',
-  mail: 'from mail',
-  calendar: 'from calendar',
+  mail: 'from mail, not confirmed',
+  calendar: 'from calendar, not confirmed',
   read_content: 'read content, not confirmed',
   inferred: 'inferred, not confirmed',
 };
@@ -50,8 +51,17 @@ const WRITING_SECTION = 'How you write to them';
 const UNCONFIRMED_LABEL = 'Unconfirmed (not confirmed by you)';
 const NOT_CONFIRMED_TRAILER = 'not confirmed';
 
+/** The words that name the drafting section; reserved, so no page or recalled text may carry them. */
+export const DRAFTING_HEADING_NAME = 'How the person writes to these contacts';
+
 /** The one heading the memory block puts the person's drafting instructions under. */
-export const DRAFTING_HEADING = 'How the person writes to these contacts (follow when drafting to them):';
+export const DRAFTING_HEADING = `${DRAFTING_HEADING_NAME} (follow when drafting to them):`;
+
+/** The fixed line that closes the drafting section; reserved like the heading. The block carries nothing after it but the closing tag. */
+export const DRAFTING_END = 'End of the writing instructions.';
+
+/** What the heading and the end line add to a block that has a drafting section. */
+export const DRAFTING_FRAME_TOKENS = estimateTokens(`${DRAFTING_HEADING}\n${DRAFTING_END}`);
 
 /** What a household page adds under the drafting heading. */
 export const HOUSEHOLD_LINE = 'Bookings and plans from this person are shared plans, not mail to answer.';
@@ -62,9 +72,25 @@ export const HOUSEHOLD_LINE = 'Bookings and plans from this person are shared pl
  */
 const INSTRUCTION_SOURCES: ReadonlySet<FactSource> = new Set<FactSource>(['you_said', 'you_edited', 'sent_mail']);
 
-/** A bullet with no hidden comment is the person's own hand edit; one with a broken marker is not. */
+/**
+ * Whether a line under "How you write to them" may stand as the person's instruction: a fact from
+ * their own words or mail they sent, or a line with no hidden comment, which is their hand edit.
+ * A line whose marker could not be read is not.
+ */
 function isInstructionLine(line: PageLine): boolean {
   return line.kind === 'other' || (line.kind === 'fact' && INSTRUCTION_SOURCES.has(line.fact.marker.src));
+}
+
+/** The instruction a line carries: a bullet's text or a hand-written prose line; headings and blanks carry none. */
+function instructionText(line: PageLine): string | undefined {
+  if (line.kind === 'fact') {
+    return INSTRUCTION_SOURCES.has(line.fact.marker.src) ? line.fact.text : undefined;
+  }
+  if (line.kind === 'other') {
+    const text = unmarkedBulletText(line.raw) ?? line.raw.trim();
+    return text === '' || text.startsWith('#') ? undefined : text;
+  }
+  return undefined;
 }
 
 const COMMENT_PATTERN = /<!--[\s\S]*?(?:-->|$)/g;
@@ -190,7 +216,7 @@ function compareCandidates(a: Candidate, b: Candidate): number {
 /**
  * The pages a message names across the vaults the scope may read, in priority order, capped
  * by count and by estimated tokens. `vaultDirs` is in read-priority order (own vault first).
- * The same slug in a later vault is skipped. A page that would overflow the token budget, and
+ * A later vault's copy of a page is used only when no earlier vault has a readable one. A page that would overflow the token budget, and
  * every page after it, is dropped so the order the model sees stays the priority order.
  * `skippedFiles` names page files left out because their name is not a page slug.
  * Never throws: a vault whose index or page cannot be read contributes nothing.
@@ -222,23 +248,28 @@ export async function loadPagesForMessage(input: {
   }
   candidates.sort(compareCandidates);
 
-  const seen = new Set<string>();
+  // A page name is settled once a vault supplies a readable page or the limits drop it, so an
+  // unreadable copy in an earlier vault never hides a good one in a later vault.
+  const settled = new Set<string>();
   const pages: LoadedPage[] = [];
   const stats: PageLoadStats = { candidates: 0, loaded: 0, dropped_over_count: 0, dropped_over_budget: 0 };
   let usedTokens = 0;
   let overBudget = false;
+  let hasDraftingFrame = false;
   for (const candidate of candidates) {
     const key = `${candidate.match.kind}/${candidate.match.slug}`;
-    if (seen.has(key)) {
+    if (settled.has(key)) {
       continue;
     }
-    seen.add(key);
-    stats.candidates += 1;
     if (pages.length >= input.maxPages) {
+      settled.add(key);
+      stats.candidates += 1;
       stats.dropped_over_count += 1;
       continue;
     }
     if (overBudget) {
+      settled.add(key);
+      stats.candidates += 1;
       stats.dropped_over_budget += 1;
       continue;
     }
@@ -256,15 +287,19 @@ export async function loadPagesForMessage(input: {
     if (page === undefined) {
       continue;
     }
+    settled.add(key);
+    stats.candidates += 1;
     const text = renderPageForModel({ title: candidate.match.title, page });
     const drafting = draftingLines({ title: candidate.match.title, page });
-    const estimatedTokens = estimateTokens([text, ...drafting].join('\n'));
+    const frameTokens = drafting.length > 0 && !hasDraftingFrame ? DRAFTING_FRAME_TOKENS : 0;
+    const estimatedTokens = estimateTokens([text, ...drafting].join('\n')) + frameTokens;
     if (usedTokens + estimatedTokens > input.maxTokens) {
       overBudget = true;
       stats.dropped_over_budget += 1;
       continue;
     }
     usedTokens += estimatedTokens;
+    hasDraftingFrame ||= drafting.length > 0;
     pages.push({
       vaultDir: candidate.vaultDir,
       kind: candidate.match.kind,
@@ -285,11 +320,7 @@ export async function loadPagesForMessage(input: {
 export function writingInstructions(page: MemoryPage): string[] {
   return page.sections
     .filter(section => section.name === WRITING_SECTION)
-    .flatMap(section => section.lines.filter(isInstructionLine))
-    .flatMap(line => {
-      const text = line.kind === 'fact' ? line.fact.text : unmarkedBulletText(line.raw);
-      return text === undefined ? [] : [text];
-    });
+    .flatMap(section => section.lines.flatMap(line => instructionText(line) ?? []));
 }
 
 /**

@@ -4,6 +4,7 @@
  * that is rebuilt whenever any page's content hash differs from the one recorded.
  */
 import { createHash, randomUUID } from 'node:crypto';
+import type { BigIntStats } from 'node:fs';
 import { mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { z } from 'zod';
@@ -248,7 +249,8 @@ function aliasIndexPage(input: {
 
 /**
  * The vault's alias index, rebuilt when it is missing, unreadable, or any page's bytes have
- * changed since it was written (a page added, removed, or edited by anyone). A rebuild reads
+ * changed since it was written (a page added, removed, or edited by anyone). A page whose size and
+ * modification time are unchanged since it was last hashed is not read again. A rebuild reads
  * every page. With `persist` it also writes the file back by temp file plus rename; callers pass
  * it only for vaults the scope can write, so a read never creates or changes a vault. A vault with
  * no `people/` or `matters/` folder gives an empty index and writes nothing. A stale read only costs a
@@ -307,19 +309,85 @@ function isMissingFile(error: unknown): boolean {
   return typeof error === 'object' && error !== null && 'code' in error && error.code === 'ENOENT';
 }
 
+/** A page file's hash, kept with the stat fields that were current when it was computed. */
+interface HashedFile {
+  mtimeNs: bigint;
+  size: bigint;
+  ino: bigint;
+  /** When the hash was computed, in milliseconds. */
+  hashedAtMs: number;
+  contentHash: string;
+}
+
+/**
+ * File timestamps can be coarse, so a file changed within this long of its last recorded change
+ * could change again without its stat differing. Such a file is hashed again each time until it
+ * has been quiet for longer than this.
+ */
+const STAT_QUIET_MS = 2000;
+
+const hashedFiles = new Map<string, HashedFile>();
+
+/** The hash of a page file, read again only when its stat differs from the one the hash was taken at. */
+async function fileHash(file: string): Promise<string | undefined> {
+  let info: BigIntStats;
+  try {
+    info = await stat(file, { bigint: true });
+  } catch (error) {
+    if (isMissingFile(error)) {
+      hashedFiles.delete(file);
+      return undefined;
+    }
+    throw error;
+  }
+  const known = hashedFiles.get(file);
+  if (
+    known !== undefined &&
+    known.mtimeNs === info.mtimeNs &&
+    known.size === info.size &&
+    known.ino === info.ino &&
+    known.hashedAtMs - Number(info.mtimeNs / 1_000_000n) > STAT_QUIET_MS
+  ) {
+    return known.contentHash;
+  }
+  let bytes: Buffer;
+  try {
+    bytes = await readFile(file);
+  } catch (error) {
+    if (isMissingFile(error)) {
+      hashedFiles.delete(file);
+      return undefined;
+    }
+    throw error;
+  }
+  const contentHash = createHash('sha256').update(bytes).digest('hex');
+  hashedFiles.set(file, {
+    mtimeNs: info.mtimeNs,
+    size: info.size,
+    ino: info.ino,
+    hashedAtMs: Date.now(),
+    contentHash,
+  });
+  return contentHash;
+}
+
 async function hashedListings({ vaultDir }: { vaultDir: string }): Promise<HashedListing[]> {
   const listings: HashedListing[] = [];
+  const present = new Set<string>();
+  const vaultPrefix = path.join(vaultDir, path.sep);
   for (const listing of await listMemoryPages(vaultDir)) {
-    let bytes: Buffer;
-    try {
-      bytes = await readFile(pagePath({ vaultDir, kind: listing.kind, slug: listing.slug }));
-    } catch (error) {
-      if (isMissingFile(error)) {
-        continue;
-      }
-      throw error;
+    const file = pagePath({ vaultDir, kind: listing.kind, slug: listing.slug });
+    const contentHash = await fileHash(file);
+    if (contentHash !== undefined) {
+      present.add(file);
+      listings.push({ ...listing, contentHash });
     }
-    listings.push({ ...listing, contentHash: createHash('sha256').update(bytes).digest('hex') });
+  }
+  // Pages removed from the vault must not stay in memory.
+  for (const file of hashedFiles.keys()) {
+    if (file.startsWith(vaultPrefix) && !present.has(file)) {
+      hashedFiles.delete(file);
+    }
   }
   return listings;
 }

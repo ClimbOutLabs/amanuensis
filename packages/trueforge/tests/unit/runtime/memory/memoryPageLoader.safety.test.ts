@@ -325,14 +325,12 @@ describe('2. read content is never rendered as a drafting instruction', () => {
     });
   });
 
-  it.each(UNTRUSTED)('keeps a %s line in Now carrying its source label', async src => {
+  it.each(UNTRUSTED)('keeps a %s line in Now labelled as not confirmed', async src => {
     const loaded = await loadSam(
       personPage(`## Now\n- Goes to Rome. <!-- fact: id=f_a1 src=${src} since=2026-10-01 -->\n`),
     );
     const [line] = linesUnder(loaded.text, 'Now');
-    expect(line).toMatch(
-      /^- Goes to Rome\. \((from mail|from calendar|read content, not confirmed|inferred, not confirmed), since 2026-10-01\)$/,
-    );
+    expect(line).toMatch(/^- Goes to Rome\. \(.*not confirmed, since 2026-10-01\)$/);
   });
 });
 

@@ -1,5 +1,5 @@
 import fc from 'fast-check';
-import { mkdir, mkdtemp, readdir, readFile, writeFile } from 'node:fs/promises';
+import fsPromises, { mkdir, mkdtemp, readdir, readFile, rm, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
@@ -276,6 +276,63 @@ describe('aliasIndex', () => {
         'sam',
         'wendy',
       ]);
+    });
+
+    describe('hashing pages', () => {
+      const front: PageFrontMatter = { kind: 'person', title: 'Wendy', aliases: ['my wife'], household: true };
+      const quiet = new Date(Date.now() - 60_000);
+
+      afterEach(() => {
+        jest.restoreAllMocks();
+      });
+
+      function pageReads(readFileSpy: jest.SpyInstance, file: string): number {
+        return readFileSpy.mock.calls.filter(call => call[0] === file).length;
+      }
+
+      it('does not read a page again while its size and modification time are unchanged', async () => {
+        const vaultDir = await makeVault();
+        const file = path.join(vaultDir, 'people', 'wendy.md');
+        await writePageFile({ vaultDir, kind: 'person', slug: 'wendy', content: pageText({ front }) });
+        await utimes(file, quiet, quiet);
+        await loadAliasIndex({ vaultDir, persist: true });
+        const readFileSpy = jest.spyOn(fsPromises, 'readFile');
+        await loadAliasIndex({ vaultDir, persist: true });
+        await loadAliasIndex({ vaultDir, persist: true });
+        expect(pageReads(readFileSpy, file)).toBe(0);
+      });
+
+      it('sees a page that changed, even to the same size', async () => {
+        const vaultDir = await makeVault();
+        const file = path.join(vaultDir, 'people', 'wendy.md');
+        await writePageFile({ vaultDir, kind: 'person', slug: 'wendy', content: pageText({ front }) });
+        await utimes(file, quiet, quiet);
+        await loadAliasIndex({ vaultDir, persist: true });
+        const original = await readFile(file, 'utf8');
+        await writeFile(file, original.replace('my wife', 'my mate'));
+        const edited = await loadAliasIndex({ vaultDir, persist: true });
+        expect(edited.pages[0]?.aliases).toEqual(['my mate']);
+      });
+
+      it('reads a page that was changed a moment ago every time, because its timestamp may be coarse', async () => {
+        const vaultDir = await makeVault();
+        const file = path.join(vaultDir, 'people', 'wendy.md');
+        await writePageFile({ vaultDir, kind: 'person', slug: 'wendy', content: pageText({ front }) });
+        await loadAliasIndex({ vaultDir, persist: true });
+        const readFileSpy = jest.spyOn(fsPromises, 'readFile');
+        await loadAliasIndex({ vaultDir, persist: true });
+        expect(pageReads(readFileSpy, file)).toBeGreaterThan(0);
+      });
+
+      it('drops a page that was deleted', async () => {
+        const vaultDir = await makeVault();
+        const file = path.join(vaultDir, 'people', 'wendy.md');
+        await writePageFile({ vaultDir, kind: 'person', slug: 'wendy', content: pageText({ front }) });
+        await utimes(file, quiet, quiet);
+        await loadAliasIndex({ vaultDir, persist: true });
+        await rm(file);
+        expect((await loadAliasIndex({ vaultDir, persist: true })).pages).toEqual([]);
+      });
     });
 
     it('rebuilds in memory without writing when persist is off', async () => {

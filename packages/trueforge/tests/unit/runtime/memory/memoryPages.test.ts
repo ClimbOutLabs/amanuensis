@@ -116,6 +116,19 @@ describe('memoryPages', () => {
       expect(page.preamble).toEqual(['---', 'kind: person', '# X']);
     });
 
+    it('takes the kind from the folder when the front matter names the other kind', () => {
+      const inPeople = parseMemoryPage({
+        content: '---\nkind: matter\ntitle: Sam\nstatus: done\nhousehold: true\n---\n',
+        fallback: { kind: 'person', title: 'x' },
+      });
+      expect(inPeople.frontMatter).toEqual({ kind: 'person', title: 'Sam', aliases: [], household: true });
+      const inMatters = parseMemoryPage({
+        content: '---\nkind: person\ntitle: Trip\nstatus: done\nhousehold: true\n---\n',
+        fallback: { kind: 'matter', title: 'x' },
+      });
+      expect(inMatters.frontMatter).toEqual({ kind: 'matter', title: 'Trip', aliases: [], status: 'done' });
+    });
+
     it('uses the fallback kind when the YAML names an unknown kind', () => {
       const page = parseMemoryPage({ content: '---\nkind: robot\ntitle: R\n---\n', fallback });
       expect(page.frontMatter.kind).toBe('person');
@@ -213,12 +226,12 @@ describe('memoryPages', () => {
       expect(page.sections[0]?.lines).toEqual([{ kind: 'unreadable', raw }]);
     });
 
-    it('reads a bullet with any other comment as unreadable, and only a bullet with none as a hand edit', () => {
+    it('reads any line with a comment that is not a fact marker as unreadable, and only one with none as a hand edit', () => {
       const page = parseMemoryPage({
         content: '## Now\n- plain\n- aside <!-- note -->\nprose <!-- note -->\n',
         fallback,
       });
-      expect(page.sections[0]?.lines.map(line => line.kind)).toEqual(['other', 'unreadable', 'other']);
+      expect(page.sections[0]?.lines.map(line => line.kind)).toEqual(['other', 'unreadable', 'unreadable']);
     });
   });
 

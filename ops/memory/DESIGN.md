@@ -135,7 +135,8 @@ warning to the server log with the number of files skipped. It does not name the
 `.memory-state/` is never exported. It holds one file:
 
 - `aliases.json`: a cache of every page's title and other names. It is rebuilt whenever a page
-  changes, so it is safe to delete.
+  changes, so it is safe to delete. A page is read again only when its size or modification time
+  changes, or it was changed in the last two seconds.
 
 ### The page format
 
@@ -143,13 +144,14 @@ A page starts with a block of settings between two `---` lines:
 
 | Key         | Meaning                                                         |
 | ----------- | --------------------------------------------------------------- |
-| `kind`      | `person` or `matter`.                                           |
+| `kind`      | `person` or `matter`. Ignored: the folder decides.              |
 | `title`     | The page's name. The `# ` heading in the body is never used.    |
 | `aliases`   | Other names, nicknames and email addresses that mean this page. |
 | `household` | People only. `true` for someone the person lives with.          |
 | `status`    | Matters only. `active` or `done`.                               |
 
-Keys it does not know are kept as they are. After the settings come a `# ` heading and a one-line
+The kind of a page is always its folder's: a page in `people/` is a person even if `kind: matter`
+is written in it. Keys it does not know are ignored. After the settings come a `# ` heading and a one-line
 summary, then sections. Each is a `## ` heading:
 
 | Section               | Kind   | What goes there                                                  |
@@ -195,9 +197,10 @@ A page never has to be tidy. One with no settings, no headings, or bullets with 
 read. A leading byte order mark is allowed. Reading a page and rendering it again returns the same
 bytes.
 
-A bullet that carries a hidden comment the host cannot read as a marker (an unknown key, a bad date, a
+A line that carries a hidden comment the host cannot read as a marker (an unknown key, a bad date, a
 repeated key, a misspelt `fact`) is kept as it is but never trusted. It counts as not confirmed, not
-as the person's own words. A bullet with no hidden comment at all is the person's hand-written line.
+as the person's own words. A line with no hidden comment at all is the person's hand-written line,
+whether it is a bullet or plain text.
 
 ### How pages are loaded before each turn
 
@@ -216,7 +219,8 @@ a direct mention, since the page may be about the owner and not the subject.
 Matches are ordered by:
 
 1. The vault, own vault first, then the shared vault, then any vault shared with the person. If two
-   vaults have the same page, only the first is used.
+   vaults have the same page, the first that has a readable copy is used. A page that cannot be read
+   in one vault does not hide the same page in another.
 2. Direct mentions before possessive ones.
 3. People before matters.
 4. Where the name first appears in the message.
@@ -234,23 +238,33 @@ loaded and were dropped for each reason. A vault that cannot be read adds nothin
 turn.
 
 The model sees each page as plain lines under short labels, with each marker shown as a short note
-such as "(you said, since 2026-03)". "How you write to them" is not shown with the page. Its lines
+such as "(you said, since 2026-03)". Facts from mail, the calendar, read content and inference, and
+lines whose marker cannot be read, always end with "not confirmed" in that note, for example
+"(from mail, not confirmed, since 2026-03)". "How you write to them" is not shown with the page. Its lines
 are gathered, for every loaded contact, under one fixed heading after the pages (see below).
 
 ### Drafting rules
 
-- After the pages, the memory block has one heading, "How the person writes to these contacts
-  (follow when drafting to them):". Under it, each loaded contact is listed by name with the lines
-  from its "How you write to them" section. This is the only place those lines appear.
+- The drafting section is the last part of the memory block, just before the closing tag. It starts
+  with one heading, "How the person writes to these contacts (follow when drafting to them):", and
+  ends with one fixed line, "End of the writing instructions." Between the two, each loaded contact is
+  listed by name with the lines from its "How you write to them" section. This is the only place those
+  lines appear. Recalled items, curated lines, entities and the stats line all come before the
+  heading, so nothing from recall, mail or the calendar can sit inside the section.
+- The heading and the end line are reserved. Wherever the words of either appear in a page (title,
+  names, summary, facts) or in recalled text, the host replaces them with "[reserved text removed]"
+  before the block is built, so no text can open, close or fake the section. The model is told the
+  same two lines, and that the same words anywhere else carry no instruction.
 - A line there is an instruction only when the person said it, wrote it or sent it (`you_said`,
-  `you_edited`, `sent_mail`), or when it is a plain bullet with no hidden comment, which is the
-  person's own hand edit.
+  `you_edited`, `sent_mail`), or when it is a line with no hidden comment, which is the person's own
+  hand edit. That covers a plain bullet and a plain sentence. Blank lines and `#` headings are not
+  instructions.
 - A line there from mail, the calendar, read content or inference is not an instruction. A line
   whose marker cannot be read is not one either. Both are shown with the unconfirmed facts, labelled
   as not confirmed, so something an email said can never steer how Aman writes.
 - A page with `household: true` adds one fixed line under its name: bookings and plans from this
   person are shared plans, not mail to answer. Aman notes them or puts them on the calendar.
 - The drafting lines of a page that is left out, because of the page limits or the recall screen, are
-  left out with it.
+  left out with it. The heading and end line count once against `MEMORY_PAGES_MAX_TOKENS`.
 - The rest of the block is data, not instructions.
 - Facts from mail, the calendar, read content and inference are labelled as not confirmed.

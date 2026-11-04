@@ -70,7 +70,8 @@ type PageFact = z.infer<typeof PageFactSchema>;
  * One line of a page body. A `fact` line is a bullet that ends with a readable fact marker. An
  * `unreadable` line is a bullet that carries a hidden comment (or text that cannot stand as a
  * fact) but no readable marker: it fails closed as unconfirmed, never as the person's own words.
- * Everything else (blank lines, prose, a bullet with no comment, an indented note) is `other`.
+ * A non-bullet line that carries a hidden comment is `unreadable` too. Everything else (blank lines,
+ * prose, a bullet with no comment, an indented note) is `other`.
  */
 export type PageLine =
   { kind: 'fact'; fact: PageFact } | { kind: 'other'; raw: string } | { kind: 'unreadable'; raw: string };
@@ -93,7 +94,7 @@ export interface MemoryPage {
   sections: PageSectionBlock[];
 }
 
-/** What a parser needs when the page carries no usable front matter: where it was found and what to call it. */
+/** Where a page was found, which fixes its kind, and what to call it when the front matter has no usable title. */
 interface PageParseFallback {
   kind: PageKind;
   title: string;
@@ -104,9 +105,10 @@ interface PageParseFallback {
  * no headings, or bullets with no marker is still a page. The front matter is the lines
  * between a first line `---` and the next line `---` (both exact); with no closing fence there is no front matter and every line is body. A block that
  * does not parse, or parses to something other than a map, is treated as
- * missing. A known key whose value does not fit the schema takes its fallback (`kind` and
- * `title` from `fallback`, the rest their defaults); unknown keys are ignored. The `# ` heading
- * line is never consulted for the title, so a hand-edited heading does not rename the page.
+ * missing. A known key whose value does not fit the schema takes its fallback (`title` from
+ * `fallback`, the rest their defaults); unknown keys are ignored. The `# ` heading
+ * line is never consulted for the title, so a hand-edited heading does not rename the page. The kind
+ * is `fallback.kind`, the folder the file was found in; a `kind` key that disagrees is ignored.
  */
 export function parseMemoryPage({ content, fallback }: { content: string; fallback: PageParseFallback }): MemoryPage {
   const text = content.startsWith(BOM) ? content.slice(BOM.length) : content;
@@ -240,8 +242,8 @@ function frontMatterFrom({
   values: Record<string, unknown>;
   fallback: PageParseFallback;
 }): PageFrontMatter {
-  const parsedKind = PageKindSchema.safeParse(values['kind']);
-  const kind = parsedKind.success ? parsedKind.data : fallback.kind;
+  // The folder decides the kind; a `kind` key that disagrees with it is ignored.
+  const { kind } = fallback;
   const parsedTitle = PersonFrontMatterSchema.shape.title.safeParse(values['title']);
   const title = parsedTitle.success ? parsedTitle.data : fallback.title;
   const parsedAliases = PersonFrontMatterSchema.shape.aliases.safeParse(values['aliases']);
@@ -278,7 +280,7 @@ function parseBody(lines: string[]): { preamble: string[]; sections: PageSection
 // fails to read as a fact marker (typo, unknown key, bad date) must never pass as their words.
 function parseSectionLine(raw: string): PageLine {
   if (!BULLET_PREFIX_PATTERN.test(raw)) {
-    return { kind: 'other', raw };
+    return raw.includes('<!--') ? { kind: 'unreadable', raw } : { kind: 'other', raw };
   }
   const { text, marker } = splitFactMarker(raw);
   // The space lets a bullet with nothing after the dash lose its prefix too.
