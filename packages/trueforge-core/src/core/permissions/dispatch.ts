@@ -16,9 +16,11 @@
  */
 import { realpathSync } from 'node:fs';
 import path from 'node:path';
+import type { BrowserClickReview } from '../llm/LLMTypes';
 import { absolutePatchTarget, applyPatchTargets } from './applyPatchTargets';
 import type { ConnectorBinding, ShellApprovalBinding } from './approvalTokens';
 import { actionIdFor, verifyApprovalToken, type ApprovalToken } from './approvalTokens';
+import { browserClickTokenParams } from './browserTier';
 import { canonicalShellFormFor } from './classifier';
 import type { SentinelCallIdentity, SentinelServices } from './context';
 import { extractCardFields } from './extractorRegistry';
@@ -56,6 +58,8 @@ export interface VerifiableCall {
   approval_token_id: string | null;
   approval_binding: TrackedExecutionBinding | null;
   shell_binding: ShellApprovalBinding | null;
+  /** Host-read context for a browser_click call, read from the live page at classification; absent for other calls. */
+  browser_click?: BrowserClickReview | null | undefined;
   /** The connector as it is now, rebuilt at dispatch; absent when the call has no connector binding. */
   connector?: ConnectorBinding | undefined;
 }
@@ -386,14 +390,21 @@ export async function verifyPreDispatch(input: {
     return undefined;
   }
 
+  // A click's token was minted over the element its card named as well as the call's own
+  // params, so the same binding is rebuilt here from the review classification stamped.
+  const clickReview = call.browser_click ?? null;
+  const tokenParams =
+    clickReview === null
+      ? call.canonical_params
+      : browserClickTokenParams({ params: call.canonical_params, review: clickReview });
   const verification = verifyApprovalToken({
     token,
     action_id: actionIdFor({
       tool_name: call.tool_name,
-      canonical_params: call.canonical_params,
+      canonical_params: tokenParams,
       connector: call.connector,
     }),
-    canonical_params: call.canonical_params,
+    canonical_params: tokenParams,
   });
   return verification.valid ? undefined : `Approval invalid: ${verification.reason}; request approval again.`;
 }

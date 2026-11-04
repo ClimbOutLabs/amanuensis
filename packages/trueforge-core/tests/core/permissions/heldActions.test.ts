@@ -1,5 +1,11 @@
-import type { InternalEnrichedAssistantMessage, InternalToolCallInfo } from '../../../src/core/llm/LLMTypes';
-import { InMemoryApprovalTokenStore } from '../../../src/core/permissions/approvalTokens';
+import type {
+  BrowserClickReview,
+  InternalEnrichedAssistantMessage,
+  InternalToolCallInfo,
+} from '../../../src/core/llm/LLMTypes';
+import { actionIdFor, InMemoryApprovalTokenStore } from '../../../src/core/permissions/approvalTokens';
+import { browserClickTokenParams } from '../../../src/core/permissions/browserTier';
+import { BROWSER_CLICK_TOOL_NAME } from '../../../src/core/permissions/browserToolNames';
 import { checkHeldReplay, HELD_ACTION_CAP, holdApprovalCalls } from '../../../src/core/permissions/heldActions';
 import type { Tier3Card } from '../../../src/core/permissions/tier';
 
@@ -260,6 +266,124 @@ describe('checkHeldReplay', () => {
     await expect(checkHeldReplay({ held: heldInfo, fresh, tokens, scope: SCOPE })).resolves.toEqual({
       ok: true,
       approval_token_id: null,
+    });
+  });
+
+  describe('a browser click is bound to the element its card named', () => {
+    const shown: BrowserClickReview = {
+      site: 'shop.example',
+      accessible_name: 'Pay now',
+      is_form_submit: true,
+      form_values: { card_last4: '4242' },
+    };
+    // The card a commit click shows: its compared fields stay the same in every case below,
+    // so a refusal can only come from the click target itself having changed.
+    const clickCard = card({
+      plain_what: 'Click "Pay now" on shop.example?',
+      destination: 'shop.example',
+      recipient: null,
+      outbound_text: 'card_last4: 4242',
+      destination_host: 'shop.example',
+    });
+
+    function clickInfo(overrides: Partial<InternalToolCallInfo> = {}): InternalToolCallInfo {
+      return info({
+        type: 'truefoundry-system',
+        mcp_server_id: '',
+        mcp_server_name: '',
+        original_tool_name: BROWSER_CLICK_TOOL_NAME,
+        tier3_card: clickCard,
+        browser_click: shown,
+        ...overrides,
+      });
+    }
+
+    async function heldClick() {
+      const tokens = new InMemoryApprovalTokenStore();
+      const mint = (action_id: string) =>
+        tokens.mint({
+          ...SCOPE,
+          action_id,
+          canonical_params: { ref: 'e5' },
+          expires_at: new Date(Date.now() + 60_000).toISOString(),
+        });
+      const heldToken = await mint('action-a');
+      const freshToken = await mint('action-a');
+      return {
+        tokens,
+        heldToken,
+        freshToken,
+        heldInfo: clickInfo({
+          approval_token_id: heldToken.token_id,
+          held_for_owner: { expires_at: new Date(Date.now() + 60_000).toISOString() },
+        }),
+      };
+    }
+
+    it('runs when the element found again is the one that was shown', async () => {
+      const { tokens, heldToken, freshToken, heldInfo } = await heldClick();
+      const fresh = clickInfo({ approval_token_id: freshToken.token_id });
+      await expect(checkHeldReplay({ held: heldInfo, fresh, tokens, scope: SCOPE })).resolves.toEqual({
+        ok: true,
+        approval_token_id: heldToken.token_id,
+      });
+    });
+
+    it.each([
+      ['a different label', { accessible_name: 'Delete account' }],
+      ['no longer a form submit', { is_form_submit: false }],
+      ['a different site', { site: 'evil.example' }],
+      ['different form values', { form_values: { card_last4: '9999' } }],
+    ] as const)('refuses when the element now has %s', async (_name, change) => {
+      const { tokens, freshToken, heldInfo } = await heldClick();
+      const fresh = clickInfo({ approval_token_id: freshToken.token_id, browser_click: { ...shown, ...change } });
+      await expect(checkHeldReplay({ held: heldInfo, fresh, tokens, scope: SCOPE })).resolves.toEqual({
+        ok: false,
+        reason: 'changed',
+      });
+    });
+
+    it('refuses when the element could not be read again at all', async () => {
+      const { tokens, freshToken, heldInfo } = await heldClick();
+      const fresh = clickInfo({ approval_token_id: freshToken.token_id, browser_click: undefined });
+      await expect(checkHeldReplay({ held: heldInfo, fresh, tokens, scope: SCOPE })).resolves.toEqual({
+        ok: false,
+        reason: 'changed',
+      });
+    });
+
+    it('refuses when the fresh token was minted for a different element than the held one', async () => {
+      const tokens = new InMemoryApprovalTokenStore();
+      const params = { ref: 'e5' };
+      const heldToken = await tokens.mint({
+        ...SCOPE,
+        action_id: actionIdFor({
+          tool_name: BROWSER_CLICK_TOOL_NAME,
+          canonical_params: browserClickTokenParams({ params, review: shown }),
+        }),
+        canonical_params: browserClickTokenParams({ params, review: shown }),
+        expires_at: new Date(Date.now() + 60_000).toISOString(),
+      });
+      const swapped: BrowserClickReview = { ...shown, accessible_name: 'Delete account' };
+      const freshToken = await tokens.mint({
+        ...SCOPE,
+        action_id: actionIdFor({
+          tool_name: BROWSER_CLICK_TOOL_NAME,
+          canonical_params: browserClickTokenParams({ params, review: swapped }),
+        }),
+        canonical_params: browserClickTokenParams({ params, review: swapped }),
+        expires_at: new Date(Date.now() + 60_000).toISOString(),
+      });
+      const heldInfo = clickInfo({
+        approval_token_id: heldToken.token_id,
+        held_for_owner: { expires_at: new Date(Date.now() + 60_000).toISOString() },
+      });
+      // The reviews on the two calls agree, so only the token binding can refuse this.
+      const fresh = clickInfo({ approval_token_id: freshToken.token_id });
+      await expect(checkHeldReplay({ held: heldInfo, fresh, tokens, scope: SCOPE })).resolves.toEqual({
+        ok: false,
+        reason: 'changed',
+      });
     });
   });
 });

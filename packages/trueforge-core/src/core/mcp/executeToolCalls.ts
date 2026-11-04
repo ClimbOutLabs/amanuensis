@@ -935,6 +935,7 @@ async function verifySentinelPreDispatch(input: {
       approval_token_id: info.approval_token_id ?? null,
       approval_binding: info.approval_binding ?? null,
       shell_binding: info.shell_binding ?? null,
+      browser_click: info.browser_click ?? null,
     },
     ctx: {
       ...sentinel.identity,
