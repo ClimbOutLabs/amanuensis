@@ -2444,6 +2444,10 @@
           "previous_turn_id": {
             "$ref": "#/components/schemas/PreviousTurnIdInput"
           },
+          "spoken_reply": {
+            "description": "True when the person spoke this message and the client reads the reply aloud. The reply is then kept short and plain.",
+            "type": "boolean"
+          },
           "stream": {
             "default": true,
             "description": "When true (default), stream turn events as SSE. When false, return the running turn immediately.",
