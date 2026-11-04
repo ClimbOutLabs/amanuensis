@@ -90,8 +90,17 @@ describe('OpenUiFenceBlock', () => {
     const library = lastRenderedLibrary();
     expect(library.root).toBe('Stack');
     expect(library.components['Card']).toBe(openUiMocks.definitions.Card);
-    for (const name of ['Image', 'ImageBlock', 'ImageGallery', 'MarkDownRenderer', 'TextContent', 'Callout', 'Steps']) {
-      const original = openUiMocks.definitions[name as keyof typeof openUiMocks.definitions];
+    const gatedNames: Array<keyof typeof openUiMocks.definitions> = [
+      'Image',
+      'ImageBlock',
+      'ImageGallery',
+      'MarkDownRenderer',
+      'TextContent',
+      'Callout',
+      'Steps',
+    ];
+    for (const name of gatedNames) {
+      const original = openUiMocks.definitions[name];
       const gated = library.components[name];
       expect(gated?.name).toBe(original.name);
       expect(gated?.props).toBe(original.props);
