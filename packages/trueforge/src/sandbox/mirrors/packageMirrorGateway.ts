@@ -16,6 +16,7 @@ import path from 'node:path';
 import { Transform, type Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import type { Logger } from 'winston';
+import { checkGoMirrorPath, DEFAULT_GO_MODULE_HOSTS, type GoMirrorPathCheck } from './goMirrorPath';
 import type { PackageMirrorAllowanceCheck } from './packageMirrorAllowance';
 import type { PackageMirrorGrant, PackageMirrorTokenRegistry } from './packageMirrorTokens';
 
@@ -33,25 +34,6 @@ export const MIRROR_UPSTREAM_BASES: Record<MirrorEcosystem, readonly string[]> =
   go: ['https://proxy.golang.org', 'https://sum.golang.org'],
   cargo: ['https://index.crates.io', 'https://static.crates.io'],
 };
-
-/**
- * The code hosts the Go mirror serves modules from, named by the first part of a module path.
- * A Go path that names a module from any other host is refused.
- */
-const GO_MODULE_HOSTS: readonly string[] = [
-  'github.com',
-  'gitlab.com',
-  'bitbucket.org',
-  'codeberg.org',
-  'git.sr.ht',
-  'golang.org',
-  'google.golang.org',
-  'go.googlesource.com',
-  'gopkg.in',
-  'go.uber.org',
-  'k8s.io',
-  'sigs.k8s.io',
-];
 
 /** One download may be at most this large by default; the server setting of the same name overrides it. */
 export const DEFAULT_MIRROR_DOWNLOAD_MAX_BYTES = 1024 * 1024 * 1024;
@@ -71,6 +53,8 @@ export interface PackageMirrorGatewayOptions {
   logger: Logger;
   maxDownloadBytes?: number;
   maxCacheBytes?: number;
+  /** Further code hosts the Go mirror serves modules from, besides its built-in list. */
+  extraGoModuleHosts?: readonly string[];
   /**
    * Test seam only: replaces the fixed upstream addresses with local stand-ins, and with them the
    * public-address check that only makes sense for the real ones. The server never sets this; its
@@ -250,51 +234,6 @@ export function isSafeMirrorPath(rawPath: string): boolean {
   return true;
 }
 
-/**
- * The module a Go mirror path names, or undefined when the path names no module. Module proxy
- * paths carry the module before the /@ marker, checksum database lookups carry it after
- * /lookup/ and before the version's @, and the via route is unwrapped first. Checksum tile
- * paths name no module, so they return undefined.
- */
-function goModulePath(rest: string): string | undefined {
-  let tail = rest;
-  if (tail.startsWith('/via/')) {
-    const after = tail.slice('/via/'.length);
-    const slash = after.indexOf('/');
-    if (slash === -1) {
-      return undefined;
-    }
-    tail = after.slice(slash);
-  }
-  if (tail.startsWith('/sumdb/')) {
-    const after = tail.slice('/sumdb/'.length);
-    const slash = after.indexOf('/');
-    if (slash === -1) {
-      return undefined;
-    }
-    tail = after.slice(slash);
-  }
-  if (tail.startsWith('/lookup/')) {
-    const named = tail.slice('/lookup/'.length);
-    const at = named.indexOf('@');
-    return at === -1 ? named : named.slice(0, at);
-  }
-  const marker = tail.indexOf('/@');
-  if (marker === -1) {
-    return undefined;
-  }
-  return tail.slice(1, marker);
-}
-
-/**
- * The host a module path starts with, with the module proxy escaping undone: an upper-case
- * letter in a module path travels as a ! followed by its lower-case form.
- */
-function goModuleHost(modulePath: string): string {
-  const first = modulePath.split('/')[0] ?? '';
-  return first.replace(/!([a-z])/g, (_match, letter: string) => letter.toUpperCase()).toLowerCase();
-}
-
 function headerValue(headers: Record<string, string | string[] | undefined>, name: string): string | undefined {
   const value = headers[name];
   return Array.isArray(value) ? value[0] : value;
@@ -314,6 +253,7 @@ export class PackageMirrorGateway {
   readonly #maxDownloadBytes: number;
   readonly #maxCacheBytes: number;
   readonly #bases: Record<MirrorEcosystem, readonly string[]>;
+  readonly #goModuleHosts: ReadonlySet<string>;
   readonly #testMode: boolean;
   readonly #servers: Server[] = [];
 
@@ -324,6 +264,7 @@ export class PackageMirrorGateway {
     this.#logger = options.logger;
     this.#maxDownloadBytes = options.maxDownloadBytes ?? DEFAULT_MIRROR_DOWNLOAD_MAX_BYTES;
     this.#maxCacheBytes = options.maxCacheBytes ?? DEFAULT_MIRROR_CACHE_MAX_BYTES;
+    this.#goModuleHosts = new Set([...DEFAULT_GO_MODULE_HOSTS, ...(options.extraGoModuleHosts ?? [])]);
     this.#testMode = options.upstreamBases !== undefined;
     this.#bases = {
       pypi: options.upstreamBases?.pypi ?? MIRROR_UPSTREAM_BASES.pypi,
@@ -441,24 +382,34 @@ export class PackageMirrorGateway {
       this.#log({ grant, ecosystem, path: rawPath, status: 403, bytes: 0, cached: false, at: startedAt });
       return;
     }
-    // The rest of the path goes upstream exactly as written, trailing slash and all.
-    const rest = rawPath.length > ecosystem.length + 1 ? rawPath.slice(ecosystem.length + 1) : '/';
+    // The rest of the path goes upstream exactly as written, trailing slash and all, except on the Go
+    // mirror, which sends only the decoded form it has just checked.
+    let rest = rawPath.length > ecosystem.length + 1 ? rawPath.slice(ecosystem.length + 1) : '/';
     if (segments[1] === 'off-list' && segments.length >= 3) {
       this.#plain(res, 403, "That package file is not on this mirror's own list, so it was not fetched.");
       this.#log({ grant, ecosystem, path: rest, status: 403, bytes: 0, cached: false, at: startedAt });
       return;
     }
     if (ecosystem === 'go') {
-      const modulePath = goModulePath(rest);
-      if (modulePath !== undefined && !GO_MODULE_HOSTS.includes(goModuleHost(modulePath))) {
+      // Go clients never send a query string, so one is refused rather than passed along unchecked.
+      const checked: GoMirrorPathCheck =
+        query === ''
+          ? checkGoMirrorPath({ rawRest: rest, hosts: this.#goModuleHosts })
+          : { allowed: false, reason: 'shape' };
+      if (!checked.allowed) {
+        const unlisted = checked.reason === 'host';
+        const status = unlisted ? 403 : 404;
         this.#plain(
           res,
-          403,
-          'That Go module comes from a code host this mirror does not fetch from. Use a module from a well-known code host, such as github.com.',
+          status,
+          unlisted
+            ? 'That Go module comes from a code host this mirror does not fetch from. Use a module from a well-known code host such as github.com, or ask the server owner to add the host.'
+            : 'The Go mirror does not serve that address. Let the go command ask for modules itself, for example with go mod download.',
         );
-        this.#log({ grant, ecosystem, path: rest, status: 403, bytes: 0, cached: false, at: startedAt });
+        this.#log({ grant, ecosystem, path: rest, status, bytes: 0, cached: false, at: startedAt });
         return;
       }
+      rest = checked.path;
     }
     const publicBase = `http://127.0.0.1:${String(SLOT_MIRROR_GUEST_PORT)}/m/${token}`;
     if (ecosystem === 'cargo' && rest === '/config.json') {
