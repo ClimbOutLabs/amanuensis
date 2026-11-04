@@ -712,6 +712,7 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
   if (configuration.MAIL_EMAIL_MCP_URL === undefined) {
     registerMailConnectorFromSavedAccountInBackground({
       accountUrl: configuration.MAIL_EMAIL_ACCOUNT_URL,
+      secret: configuration.MAIL_EMAIL_ACCOUNT_SECRET,
       mcpUrl: configuration.MAIL_SIDECAR_MCP_URL,
       policyPath: configuration.MAIL_POLICY_FILE,
       fetchImpl: undefined,

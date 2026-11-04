@@ -635,7 +635,7 @@ test_refresh_puts_back_lost_settings() {
       assert_eq "$(printf '%s\n' "$after" | grep "^$other=")" "$(printf '%s\n' "$before" | grep "^$other=")" "$other is unchanged"
     done
     case "$key" in
-      OIDC_CLIENT_SECRET | TRUEFORGE_API_KEY | CALENDAR_ACCOUNT_SECRET | BROWSER_SECRET | WEB_PUSH_PUBLIC_KEY | WEB_PUSH_PRIVATE_KEY) ;;
+      OIDC_CLIENT_SECRET | TRUEFORGE_API_KEY | CALENDAR_ACCOUNT_SECRET | MAIL_EMAIL_ACCOUNT_SECRET | BROWSER_SECRET | WEB_PUSH_PUBLIC_KEY | WEB_PUSH_PRIVATE_KEY) ;;
       *) assert_eq "$(printf '%s\n' "$after" | grep "^$key=")" "$(printf '%s\n' "$before" | grep "^$key=")" "$key comes back as it was" ;;
     esac
   done

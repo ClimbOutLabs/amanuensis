@@ -19,21 +19,24 @@ import {
 const BASE = EMAIL_SETTINGS_BASE_PATH;
 const CANARY = 'CANARY-APP-PASSWORD-7f3d9';
 const ACCOUNT_URL = 'http://mail-email:9559';
+const SECRET = 'test-account-secret-0123456789abcdef0123';
 
 type AgentReply = { status: number; body: unknown };
 
 /** One recorded call to the fake account agent. */
-type AgentCall = { method: string; url: string; body: string | undefined };
+type AgentCall = { method: string; url: string; body: string | undefined; authorization: string | undefined };
 
 /** The agent the server proxies to: answers from a script and records every call. */
 function makeFakeAgent() {
   const calls: AgentCall[] = [];
   let replies: AgentReply[] = [];
   const fetchImpl = async (input: string | Request | URL, init?: RequestInit): Promise<Response> => {
+    const authorization = new Headers(init?.headers).get('authorization') ?? undefined;
     calls.push({
       method: init?.method ?? 'GET',
       url: String(input),
       body: typeof init?.body === 'string' ? init.body : undefined,
+      authorization,
     });
     const reply = replies.shift();
     if (reply === undefined) {
@@ -96,6 +99,7 @@ function makeFakeStore() {
 describe('the email settings endpoints', () => {
   const originalAccountUrl = configuration.MAIL_EMAIL_ACCOUNT_URL;
   const originalMcpUrl = configuration.MAIL_SIDECAR_MCP_URL;
+  const originalSecret = configuration.MAIL_EMAIL_ACCOUNT_SECRET;
   let agent: ReturnType<typeof makeFakeAgent>;
   let fakeStore: ReturnType<typeof makeFakeStore>;
   let app: Hono;
@@ -104,6 +108,7 @@ describe('the email settings endpoints', () => {
     agent = makeFakeAgent();
     fakeStore = makeFakeStore();
     configuration.MAIL_EMAIL_ACCOUNT_URL = ACCOUNT_URL;
+    configuration.MAIL_EMAIL_ACCOUNT_SECRET = SECRET;
     // An instantly refused address: the registration sync also tries a first send-list fill
     // against it, and a real sidecar name would hang the test on DNS and retries.
     configuration.MAIL_SIDECAR_MCP_URL = 'http://127.0.0.1:1/mcp';
@@ -119,6 +124,7 @@ describe('the email settings endpoints', () => {
   afterEach(() => {
     configuration.MAIL_EMAIL_ACCOUNT_URL = originalAccountUrl;
     configuration.MAIL_SIDECAR_MCP_URL = originalMcpUrl;
+    configuration.MAIL_EMAIL_ACCOUNT_SECRET = originalSecret;
   });
 
   async function call(input: {
@@ -215,6 +221,30 @@ describe('the email settings endpoints', () => {
 
   it('hides the card when the instance has no email connector to configure', async () => {
     configuration.MAIL_EMAIL_ACCOUNT_URL = undefined;
+    const { text } = await call({ method: 'GET', path: '/status' });
+    expect(JSON.parse(text).data.available).toBe(false);
+    expect(agent.calls).toHaveLength(0);
+  });
+
+  it('presents the instance secret to the agent on every call, and nothing else as a credential', async () => {
+    agent.script([
+      { status: 200, body: NOT_CONNECTED },
+      { status: 200, body: CONNECTED },
+      { status: 200, body: NOT_CONNECTED },
+    ]);
+    await call({ method: 'GET', path: '/status' });
+    await call({
+      method: 'POST',
+      path: '/',
+      body: { provider_key: 'gmail', address: 'person@gmail.com', password: CANARY },
+    });
+    await call({ method: 'DELETE', path: '/', body: {} });
+    expect(agent.calls.map(sent => sent.authorization)).toEqual(Array(3).fill(`Bearer ${SECRET}`));
+    expect(agent.calls.map(sent => sent.url).join(' ')).not.toContain(SECRET);
+  });
+
+  it('leaves the card off while the agent has no secret to answer to', async () => {
+    configuration.MAIL_EMAIL_ACCOUNT_SECRET = undefined;
     const { text } = await call({ method: 'GET', path: '/status' });
     expect(JSON.parse(text).data.available).toBe(false);
     expect(agent.calls).toHaveLength(0);
