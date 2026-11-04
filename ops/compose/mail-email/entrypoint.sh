@@ -1,7 +1,8 @@
 #!/bin/sh
 # Starts the Email sidecar on the send list the Aman server writes, and restarts it when that list changes.
 # The sidecar reads its list when it first uses its settings, so a new list needs a restart. After each start
-# this records the hash of the list it started with. The server waits for that hash before it sends.
+# this records the hash of the list it started with, once the started server answers on its port. The server
+# waits for that hash before it sends, so the record must not appear while the server is still starting.
 # A stale hash only makes the server wait or refuse, never let a send through.
 # The mail account comes from the account file in this sidecar's own volume. The installer writes it
 # through the account agent's command line and the Settings Email card changes it through the account
@@ -39,6 +40,12 @@ account_hash() {
   sha256sum "$account" 2>/dev/null | cut -d' ' -f1 || true
 }
 
+# True once the mail server answers on its port. A started process is not an answering server:
+# it can still be loading its account and index, and a connection in that window is refused.
+port_answers() {
+  python3 -c 'import socket, sys; probe = socket.socket(); probe.settimeout(1); answered = probe.connect_ex(("127.0.0.1", 9557)) == 0; probe.close(); sys.exit(0 if answered else 1)'
+}
+
 child=
 agent_pid=
 loaded=
@@ -53,6 +60,10 @@ start_server() {
   loaded=$(list_hash)
   loaded_account=$(account_hash)
   load_account
+  # A start begins here, so the loaded record goes first: while this server is still coming up,
+  # nothing may read the previous start's record as this start's list. On an account change the
+  # list hash is the same, so a leftover record would otherwise pass for the new server's own.
+  rm -f "$status"
   # Its own process group, so a stop reaches a launcher's workers too: forcing down only the first
   # process would leave a worker holding the port, and the restarted server could not bind it.
   if command -v setsid >/dev/null 2>&1; then
@@ -61,8 +72,22 @@ start_server() {
     mcp-email-server "$@" &
   fi
   child=$!
-  printf '%s\n' "$loaded" >"$status.tmp"
-  mv "$status.tmp" "$status"
+  # The list is recorded as loaded only once the server answers on its port. The wait is bounded
+  # well inside the server's own wait for the record: a server that never answers simply never
+  # gets a record, and the loop below keeps watching the one that was started.
+  waited=0
+  while [ "$waited" -lt 100 ]; do
+    if ! kill -0 "$child" 2>/dev/null; then
+      break
+    fi
+    if port_answers; then
+      printf '%s\n' "$loaded" >"$status.tmp"
+      mv "$status.tmp" "$status"
+      break
+    fi
+    sleep 0.2
+    waited=$((waited + 1))
+  done
   echo "mail server started (send list $loaded, account $loaded_account)"
   # A start that does not hold must be plain in the log, not a silent service: give the server a
   # moment, then say if it already stopped or if the loaded-list record is not what was written.
@@ -71,7 +96,7 @@ start_server() {
   if ! kill -0 "$child" 2>/dev/null; then
     echo "the mail server stopped again right after it started; it will be started again"
   elif [ "$(cat "$status" 2>/dev/null || true)" != "$loaded" ]; then
-    echo "the mail server started but the loaded send list was not recorded; it will be started again"
+    echo "the mail server started but the loaded send list was not recorded"
   fi
 }
 

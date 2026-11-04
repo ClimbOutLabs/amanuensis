@@ -61,6 +61,76 @@ assert_no_mail_account() {
   fi
 }
 
+# Runs the real wrapper (the file the installer copies beside an instance) against a mail server
+# stand-in that binds its port late, and an account agent stand-in. The wrapper must not record the
+# send list as loaded until the server answers, and must clear the record while a restart comes up.
+test_entrypoint_records_the_list_once_the_server_answers() {
+  t_begin "the mail wrapper records the send list only once the server answers, and clears the record at a restart"
+  sandbox_new
+  local wrap=$SB/wrap
+  mkdir -p "$wrap/bin" "$wrap/status"
+  cat >"$wrap/agent.py" <<'PYEOF'
+import sys
+import time
+
+if "--print-child-env" in sys.argv:
+    print("")
+else:
+    time.sleep(3600)
+PYEOF
+  cat >"$wrap/bin/mcp-email-server" <<'SHEOF'
+#!/bin/sh
+sleep "$(cat "$WRAP_DELAY")"
+exec python3 -c '
+import socket, time
+sock = socket.socket()
+sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+sock.bind(("0.0.0.0", 9557))
+sock.listen(1)
+time.sleep(3600)
+'
+SHEOF
+  chmod 755 "$wrap/bin/mcp-email-server"
+  printf '4\n' >"$wrap/delay"
+  printf 'db_location = "/data/db.sqlite3"\nallowed_recipients = []\n' >"$wrap/policy.toml"
+  printf 'account one\n' >"$wrap/account.toml"
+  local hash
+  hash=$(sha256sum "$wrap/policy.toml" | cut -d' ' -f1)
+  WRAP_DELAY="$wrap/delay" PATH="$wrap/bin:$SB_BIN" \
+    MCP_EMAIL_SERVER_CONFIG_PATH="$wrap/policy.toml" \
+    AMAN_MAIL_STATUS_FILE="$wrap/status/loaded.sha256" \
+    AMAN_MAIL_ACCOUNT_FILE="$wrap/account.toml" \
+    AMAN_MAIL_ACCOUNT_AGENT="$wrap/agent.py" \
+    sh "$INSTALLER_DIR/../ops/compose/mail-email/entrypoint.sh" streamable-http --host 0.0.0.0 --port 9557 >"$wrap/log" 2>&1 &
+  local ep=$!
+  # The stand-in binds at 4 seconds; at 2 seconds the record must not yet name the list.
+  sleep 2
+  assert_eq "$(cat "$wrap/status/loaded.sha256" 2>/dev/null || true)" "" "no loaded record before the server answers"
+  local tries=0
+  while [ "$(cat "$wrap/status/loaded.sha256" 2>/dev/null || true)" != "$hash" ] && [ "$tries" -lt 100 ]; do
+    sleep 0.2
+    tries=$((tries + 1))
+  done
+  assert_eq "$(cat "$wrap/status/loaded.sha256" 2>/dev/null || true)" "$hash" "loaded record names the list once the server answers"
+  # An account change restarts the server on the same list: the record clears while it comes up.
+  printf 'account two\n' >"$wrap/account.toml"
+  tries=0
+  while [ -f "$wrap/status/loaded.sha256" ] && [ "$tries" -lt 100 ]; do
+    sleep 0.2
+    tries=$((tries + 1))
+  done
+  assert_no_path "$wrap/status/loaded.sha256"
+  tries=0
+  while [ "$(cat "$wrap/status/loaded.sha256" 2>/dev/null || true)" != "$hash" ] && [ "$tries" -lt 100 ]; do
+    sleep 0.2
+    tries=$((tries + 1))
+  done
+  assert_eq "$(cat "$wrap/status/loaded.sha256" 2>/dev/null || true)" "$hash" "loaded record names the same list again after the restart"
+  kill -TERM "$ep" 2>/dev/null || true
+  wait "$ep" 2>/dev/null || true
+  sandbox_drop
+}
+
 test_presets_write_their_servers() {
   t_begin "each preset writes its servers, encryption and certificate check"
   sandbox_new
@@ -394,6 +464,7 @@ test_instance_email_needs_the_connector_installed() {
   sandbox_drop
 }
 
+test_entrypoint_records_the_list_once_the_server_answers
 test_presets_write_their_servers
 test_instance_commands_keep_the_connector
 test_instance_email_needs_the_connector_installed
