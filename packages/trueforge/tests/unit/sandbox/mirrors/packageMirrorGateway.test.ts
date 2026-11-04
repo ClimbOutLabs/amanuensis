@@ -662,6 +662,20 @@ describe('PackageMirrorGateway', () => {
     }
   });
 
+  it('answers /supported itself only for sum.golang.org, not for another host behind /via/', async () => {
+    const harness = await setup();
+    try {
+      const reply = await call(harness.port, {
+        path: '/go/via/github.com/supported',
+        token: harness.token,
+        method: 'GET',
+      });
+      expect(reply.status).not.toBe(200);
+    } finally {
+      await harness.close();
+    }
+  });
+
   it.each(['/go/sumdb/sum.golang.org/supported', '/go/via/sum.golang.org/supported'])(
     'answers %s itself with 200, since the real one answers 404',
     async path => {

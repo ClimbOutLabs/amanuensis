@@ -240,7 +240,7 @@ function headerValue(headers: Record<string, string | string[] | undefined>, nam
 }
 
 /** The checksum database's support probe, which the mirror answers itself. */
-const GO_SUMDB_SUPPORTED = /^\/(?:sumdb\/sum\.golang\.org|via\/[^/]+)\/supported$/;
+const GO_SUMDB_SUPPORTED = /^\/(?:sumdb|via)\/sum\.golang\.org\/supported$/;
 
 /**
  * The host-side package mirrors: one caching, download-only gateway that speaks the four standard
