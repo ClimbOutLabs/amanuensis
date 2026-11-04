@@ -5,9 +5,11 @@ import path from 'node:path';
 
 import { FACT_SOURCES, formatMarker, type FactMarker } from '../../../../src/runtime/memory/memoryNotes';
 import {
+  isInPageFolder,
   listMemoryPages,
   pagePath,
   parseMemoryPage,
+  parsePageFilePath,
   readMemoryPage,
   type PageFrontMatter,
 } from '../../../../src/runtime/memory/memoryPages';
@@ -436,5 +438,45 @@ describe('memoryPages', () => {
         { numRuns: 500 },
       );
     });
+  });
+});
+
+describe('page file paths', () => {
+  it.each([
+    ['people/wendy.md', { kind: 'person', slug: 'wendy' }],
+    ['matters/lisbon-trip.md', { kind: 'matter', slug: 'lisbon-trip' }],
+    ['people/김민수.md', { kind: 'person', slug: '김민수' }],
+    [`people/${'김민수'.normalize('NFD')}.md`, { kind: 'person', slug: '김민수' }],
+  ])('reads %s as a page', (relativePath, expected) => {
+    expect(parsePageFilePath(relativePath)).toEqual(expected);
+  });
+
+  it.each([
+    '../x.md',
+    'people/../x.md',
+    'people/../../x.md',
+    'people/a/../b.md',
+    'people/.md',
+    'people/..md',
+    'people/Wendy.md',
+    'people/my notes.md',
+    'people/wendy.txt',
+    'people/wendy',
+    'people/deeper/wendy.md',
+    'people\\wendy.md',
+    '/people/wendy.md',
+    'notes/wendy.md',
+    'MEMORY.md',
+    '.memory-state/aliases.json',
+    `people/${'a'.repeat(300)}.md`,
+  ])('does not read %s as a page', relativePath => {
+    expect(parsePageFilePath(relativePath)).toBeUndefined();
+  });
+
+  it('knows which paths sit in a page folder', () => {
+    expect(isInPageFolder('people/Wendy.md')).toBe(true);
+    expect(isInPageFolder('matters/x/y.md')).toBe(true);
+    expect(isInPageFolder('people')).toBe(false);
+    expect(isInPageFolder('memory/2026-10-01.md')).toBe(false);
   });
 });

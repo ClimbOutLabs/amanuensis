@@ -132,6 +132,18 @@ lowercase slug, such as `people/wendy.md`. A file with any other name, such as `
 `people/my notes.md`, is not a page: it is never loaded. Each turn that skips such a file writes one
 warning to the server log with the number of files skipped. It does not name them, since file names can be people's names. To use a file, rename it to the lowercase slug.
 
+Export and import move pages with the rest of memory. An export (format version 3) holds each vault's
+`people/` and `matters/` page files as `memory/<vault>/people/<slug>.md` and
+`memory/<vault>/matters/<slug>.md`, byte for byte apart from the usual removal of keys and passwords.
+Only regular files with a lowercase slug name are exported, and a folder that is a link is skipped.
+Import puts each page into the matching vault of the new instance under the same name. A file in a
+page folder whose name is not a lowercase page name, or a second spelling of the same name, is never
+written; the summary says how many were left out, or the import is refused for a repeated name. A name
+saved in decomposed form is read in its composed form, so it lands under the name the loader looks for.
+An older export has no pages and imports as before. An instance that already holds pages counts as
+holding memories, so the import refuses it like any instance with data. A memory backend that is not
+Markdown files cannot hold pages, and the summary says how many were left out.
+
 `.memory-state/` is never exported. It holds one file:
 
 - `aliases.json`: a cache of every page's title and other names. It is rebuilt whenever a page

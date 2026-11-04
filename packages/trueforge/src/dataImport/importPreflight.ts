@@ -20,6 +20,7 @@ import {
   vaultFilesystemNamespace,
 } from '../runtime/memory/markdownMemoryFiles';
 import type { MemoryClient } from '../runtime/memory/memoryClient';
+import { listMemoryPages, pagePath } from '../runtime/memory/memoryPages';
 import { DataImportError } from './importError';
 import { emptyLedger, type ImportLedger } from './importLedger';
 
@@ -144,6 +145,12 @@ async function markdownMemoryHasContent(input: {
     }
     const tombstones = path.join(dirPath, VAULT_TOMBSTONES_FILE);
     if (!ignored.has(tombstones) && existsSync(tombstones)) {
+      return true;
+    }
+    const pages = (await listMemoryPages(dirPath)).filter(
+      page => !ignored.has(pagePath({ vaultDir: dirPath, kind: page.kind, slug: page.slug })),
+    );
+    if (pages.length > 0) {
       return true;
     }
     const dailyDir = path.join(dirPath, 'memory');

@@ -140,6 +140,34 @@ export function pagePath({ vaultDir, kind, slug }: { vaultDir: string; kind: Pag
   return path.join(vaultDir, PAGE_FOLDERS[kind], `${slug}.md`);
 }
 
+/** The vault folder a kind of page lives in, such as `people`. */
+export function pageFolder(kind: PageKind): string {
+  return PAGE_FOLDERS[kind];
+}
+
+/**
+ * The page a vault-relative path such as `people/wendy.md` names: its folder and a lowercase slug
+ * with `.md` and nothing else. Any other path, including one with more folders or a name that is
+ * not a slug, is not a page. A name typed in decomposed form (as some archive tools write it) is
+ * read in its composed form, so the file lands under the name the loader looks for.
+ */
+export function parsePageFilePath(relativePath: string): { kind: PageKind; slug: string } | undefined {
+  const parts = relativePath.normalize('NFC').split('/');
+  const [folder, file, ...rest] = parts;
+  const kind = PAGE_KINDS.find(candidate => PAGE_FOLDERS[candidate] === folder);
+  if (kind === undefined || file === undefined || rest.length > 0 || !file.endsWith('.md')) {
+    return undefined;
+  }
+  const slug = file.slice(0, -'.md'.length);
+  return isPageSlug(slug) ? { kind, slug } : undefined;
+}
+
+/** Whether a vault-relative path sits in one of the page folders, whether or not its name is a page name. */
+export function isInPageFolder(relativePath: string): boolean {
+  const [folder, ...rest] = relativePath.split('/');
+  return rest.length > 0 && PAGE_KINDS.some(kind => PAGE_FOLDERS[kind] === folder);
+}
+
 /** One page's place in a vault listing. */
 export interface PageListing {
   kind: PageKind;
@@ -211,7 +239,8 @@ async function listFolderMarkdownNames(folder: string): Promise<string[]> {
   try {
     entries = await readdir(folder, { withFileTypes: true });
   } catch (error) {
-    if (isErrnoCode(error, 'ENOENT')) {
+    // A file where the folder should be holds no pages.
+    if (isErrnoCode(error, 'ENOENT') || isErrnoCode(error, 'ENOTDIR')) {
       return [];
     }
     throw error;

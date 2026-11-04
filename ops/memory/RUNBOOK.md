@@ -158,6 +158,15 @@ If the server log warns that page files were skipped, some files in `people/` or
 page name. The log gives a count, not names. Look for such files and rename them, for example
 `people/Wendy.md` to `people/wendy.md`. Aman picks it up on the next turn.
 
+### Moving pages to a new server
+
+`aman export-data` and `aman import-data` carry each vault's `people/` and `matters/` pages. Run them
+as usual; there is nothing extra to copy. After an import, the summary lists the pages that came
+along. If it says files were left out because their name is not a lowercase page name, fix the names
+in the export file and import again. If it says pages were left out because memory is kept in a
+different way, pages only work with the Markdown memory backend. `.memory-state/` is not exported and
+is rebuilt on the new server.
+
 ### Files in `.memory-state/`
 
 - `aliases.json` is a cache of page names. Deleting it is safe. It is rebuilt on the next turn that
