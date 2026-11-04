@@ -342,8 +342,7 @@ async function fileHash(file: string): Promise<string | undefined> {
   }
   const known = hashedFiles.get(file);
   if (
-    known !== undefined &&
-    known.mtimeNs === info.mtimeNs &&
+    known?.mtimeNs === info.mtimeNs &&
     known.size === info.size &&
     known.ino === info.ino &&
     known.hashedAtMs - Number(info.mtimeNs / 1_000_000n) > STAT_QUIET_MS

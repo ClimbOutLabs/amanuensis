@@ -4739,7 +4739,7 @@ describe('runDataImport memory pages', () => {
   it('imports an export made before pages existed, with no pages to bring', async () => {
     const { source, archive } = await seededArchive();
     const older = await repack(archive, entries => {
-      const manifest = parseJson(entries.get('manifest.json')?.toString('utf8') ?? '{}');
+      const manifest = parseJson(entries.get('manifest.json'), 'manifest.json');
       if (!isRecord(manifest)) {
         throw new Error('expected a manifest');
       }

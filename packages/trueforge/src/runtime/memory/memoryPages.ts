@@ -45,7 +45,7 @@ const MatterFrontMatterSchema = z.object({
 });
 
 /** The YAML block at the top of a page. Keys outside this schema are ignored. */
-const PageFrontMatterSchema = z.discriminatedUnion('kind', [PersonFrontMatterSchema, MatterFrontMatterSchema]);
+export const PageFrontMatterSchema = z.discriminatedUnion('kind', [PersonFrontMatterSchema, MatterFrontMatterSchema]);
 export type PageFrontMatter = z.infer<typeof PageFrontMatterSchema>;
 
 /** Characters that would end a line in a viewer, so fact text may not hold them. */
