@@ -114,13 +114,19 @@ export function ChatMessageMatches({
                   ),
                 })}
               >
-                <span className="flex w-full min-w-0 items-center gap-2">
-                  <span className="min-w-0 flex-1 truncate text-sm text-text-primary">{hit.title ?? 'New Chat'}</span>
-                  <span className="shrink-0 text-xs text-text-muted">
-                    {formatRelativeShort(new Date(hit.matchedAt))}
+                {/* The title and snippet stack in a plain block: as a direct flex item the snippet's
+                    box display is blockified, which silently disables its two-line clamp. */}
+                <span className="block w-full min-w-0">
+                  <span className="flex w-full min-w-0 items-center gap-2">
+                    <span className="min-w-0 flex-1 truncate text-sm text-text-primary">{hit.title ?? 'New Chat'}</span>
+                    <span className="shrink-0 text-xs text-text-muted">
+                      {formatRelativeShort(new Date(hit.matchedAt))}
+                    </span>
+                  </span>
+                  <span className="line-clamp-2 mt-0.5 w-full text-xs whitespace-normal text-text-secondary">
+                    {hit.snippet}
                   </span>
                 </span>
-                <span className="line-clamp-2 w-full text-xs whitespace-normal text-text-secondary">{hit.snippet}</span>
               </button>
             </li>
           ))}
@@ -129,7 +135,7 @@ export function ChatMessageMatches({
   }
 
   return (
-    <section aria-label="Matches inside chats" className="mt-1 flex flex-col gap-0.5">
+    <section aria-label="Matches inside chats" className="mt-1 flex shrink-0 flex-col gap-0.5">
       <h3 className="m-0 px-2.5 pt-1 pb-0.5 text-xs font-normal text-text-secondary">In messages</h3>
       {body}
     </section>
