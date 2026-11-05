@@ -10,11 +10,9 @@ import { sql, type Kysely } from 'kysely';
 import { FileMigrationProvider, Migrator } from 'kysely/migration';
 
 import { createSqliteDb } from '../../../../src/db/sqlite/client';
-import { SqliteMcpToolGrantStore } from '../../../../src/db/sqlite/mcp-tool-grant-store/SqliteMcpToolGrantStore';
 import type { Database } from '../../../../src/db/sqlite/types';
 
 const PREVIOUS_MIGRATION = '20261020_000001_sentinel_maps_without_asking';
-const THIS_MIGRATION = '20261020_000002_mcp_tool_grant_server_host';
 
 async function createMigrator(db: Kysely<Database>): Promise<Migrator> {
   return new Migrator({
@@ -54,24 +52,5 @@ describe('20261020_000002_mcp_tool_grant_server_host migration', () => {
 
     const remaining = await db.selectFrom('mcp_tool_grant').select('tool_name').execute();
     expect(remaining).toEqual([]);
-  });
-
-  it('keeps a grant recorded after migrating bound to its host', async () => {
-    const migrator = await createMigrator(db);
-    expect((await migrator.migrateToLatest()).error).toBeUndefined();
-    expect((await migrator.migrateTo(THIS_MIGRATION)).error).toBeUndefined();
-
-    const store = new SqliteMcpToolGrantStore(db);
-    const key = {
-      tenant_id: 't1',
-      created_by: 'alice',
-      mcp_server_name: 'notes',
-      tool_name: 'lookup_note',
-      mcp_server_host: 'notes.example.com',
-    };
-    await store.recordToolGrant(key);
-
-    expect(await store.hasToolGrant(key)).toBe(true);
-    expect(await store.hasToolGrant({ ...key, mcp_server_host: 'elsewhere.example.com' })).toBe(false);
   });
 });

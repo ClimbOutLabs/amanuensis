@@ -366,7 +366,7 @@ export class CalendarToolSet extends LocalToolMCP {
       created_by: sentinel.created_by,
       mcp_server_name: CALENDAR_SERVER_ID,
       tool_name: toolName,
-      mcp_server_host: null,
+      connector_binding: null,
     });
   }
 
