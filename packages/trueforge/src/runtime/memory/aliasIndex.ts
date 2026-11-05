@@ -33,7 +33,7 @@ const AliasIndexPageSchema = z.object({
 });
 type AliasIndexPage = z.infer<typeof AliasIndexPageSchema>;
 
-export const AliasIndexFileSchema = z.object({
+const AliasIndexFileSchema = z.object({
   version: z.literal(1),
   pages: z.array(AliasIndexPageSchema),
 });
@@ -152,6 +152,10 @@ function hitAt({
 // Scripts written without spaces between words: a name in them sits inside a longer run of text.
 const UNSPACED_SCRIPT = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}\p{Script=Thai}]/u;
 
+interface SpanHit extends AliasHit {
+  end: number;
+}
+
 function substringHits({
   normalizedText,
   normalizedCandidate,
@@ -160,8 +164,8 @@ function substringHits({
   normalizedText: string;
   normalizedCandidate: string;
   alias: string;
-}): AliasHit[] {
-  const hits: AliasHit[] = [];
+}): SpanHit[] {
+  const hits: SpanHit[] = [];
   for (
     let at = normalizedText.indexOf(normalizedCandidate);
     at !== -1;
@@ -169,7 +173,7 @@ function substringHits({
   ) {
     // A mark right after the hit belongs to the last letter of the hit, so the text names someone else.
     if (!/^\p{M}/u.test(normalizedText.slice(at + normalizedCandidate.length))) {
-      hits.push({ position: at, possessive: false, alias });
+      hits.push({ position: at, end: at + normalizedCandidate.length, possessive: false, alias });
     }
   }
   return hits;
@@ -184,7 +188,8 @@ function earliestHit(hits: AliasHit[]): AliasHit | undefined {
 
 /**
  * Pages whose title or an alias appears in `text` as whole words (anywhere in the text for a
- * name in a script written without spaces, such as Chinese, Japanese, Korean or Thai), case- and accent-
+ * name in a script written without spaces, such as Chinese, Japanese, Korean or Thai, where the longest
+ * name in the index wins a span), case- and accent-
  * insensitive, with punctuation around a hit ignored (`(Wendy)`, `Wendy,`, `Wendy!`) and a
  * trailing `.` on an alias or a word ignored (`W.` finds `W.` and `W`). A hit followed by
  * `'s` (or a bare `'` after an `s`, as in `James' car`) is possessive. One match per page: the earliest hit, and a direct hit anywhere wins
@@ -193,9 +198,11 @@ function earliestHit(hits: AliasHit[]): AliasHit | undefined {
 export function matchAliases({ index, text }: { index: AliasIndexFile; text: string }): AliasMatch[] {
   const normalizedText = normalizeAliasText(text);
   const messages = tokenize(normalizedText);
-  const matches: AliasMatch[] = [];
+  const hitsByPage = new Map<AliasIndexPage, AliasHit[]>();
+  const spans: { page: AliasIndexPage; hit: SpanHit }[] = [];
   for (const page of index.pages) {
     const hits: AliasHit[] = [];
+    hitsByPage.set(page, hits);
     for (const candidate of [page.title, ...page.aliases]) {
       const normalizedCandidate = normalizeAliasText(candidate);
       const candidateTokens = tokenize(normalizedCandidate).map(entry => entry.token);
@@ -203,7 +210,9 @@ export function matchAliases({ index, text }: { index: AliasIndexFile; text: str
         continue;
       }
       if (UNSPACED_SCRIPT.test(normalizedCandidate)) {
-        hits.push(...substringHits({ normalizedText, normalizedCandidate, alias: candidate }));
+        spans.push(
+          ...substringHits({ normalizedText, normalizedCandidate, alias: candidate }).map(hit => ({ page, hit })),
+        );
         continue;
       }
       for (let start = 0; start + candidateTokens.length <= messages.length; start++) {
@@ -214,6 +223,21 @@ export function matchAliases({ index, text }: { index: AliasIndexFile; text: str
         }
       }
     }
+  }
+  // Without spaces a short name can sit inside a longer one (นิด in นิดา): the longest name in the index takes the span.
+  for (const { page, hit } of spans) {
+    const length = hit.end - hit.position;
+    const swallowed = spans.some(
+      other =>
+        other.hit.position <= hit.position && other.hit.end >= hit.end && other.hit.end - other.hit.position > length,
+    );
+    if (!swallowed) {
+      hitsByPage.get(page)?.push(hit);
+    }
+  }
+  const matches: AliasMatch[] = [];
+  for (const page of index.pages) {
+    const hits = hitsByPage.get(page) ?? [];
     const earliest = earliestHit(hits);
     if (earliest === undefined) {
       continue;
@@ -312,6 +336,8 @@ function isMissingFile(error: unknown): boolean {
 /** A page file's hash, kept with the stat fields that were current when it was computed. */
 interface HashedFile {
   mtimeNs: bigint;
+  /** Change time, which a program cannot set back, so an edit that restores `mtime` still shows. */
+  ctimeNs: bigint;
   size: bigint;
   ino: bigint;
   /** When the hash was computed, in milliseconds. */
@@ -326,26 +352,51 @@ interface HashedFile {
  */
 const STAT_QUIET_MS = 2000;
 
-const hashedFiles = new Map<string, HashedFile>();
+/** Vaults whose hashes are kept; the least recently read vault is dropped past this. */
+const MAX_CACHED_VAULTS = 64;
+
+/** Hashes by vault, then by page file, so a turn only touches the vaults it reads. */
+const hashedVaults = new Map<string, Map<string, HashedFile>>();
+
+function vaultHashes(vaultDir: string): Map<string, HashedFile> {
+  const known = hashedVaults.get(vaultDir);
+  const files = known ?? new Map<string, HashedFile>();
+  // Re-inserting keeps the map in least-recently-read order.
+  hashedVaults.delete(vaultDir);
+  hashedVaults.set(vaultDir, files);
+  for (const oldest of hashedVaults.keys()) {
+    if (hashedVaults.size <= MAX_CACHED_VAULTS) {
+      break;
+    }
+    hashedVaults.delete(oldest);
+  }
+  return files;
+}
 
 /** The hash of a page file, read again only when its stat differs from the one the hash was taken at. */
-async function fileHash(file: string): Promise<string | undefined> {
+async function fileHash({
+  files,
+  file,
+}: {
+  files: Map<string, HashedFile>;
+  file: string;
+}): Promise<string | undefined> {
   let info: BigIntStats;
   try {
     info = await stat(file, { bigint: true });
   } catch (error) {
     if (isMissingFile(error)) {
-      hashedFiles.delete(file);
       return undefined;
     }
     throw error;
   }
-  const known = hashedFiles.get(file);
+  const known = files.get(file);
   if (
     known?.mtimeNs === info.mtimeNs &&
+    known.ctimeNs === info.ctimeNs &&
     known.size === info.size &&
     known.ino === info.ino &&
-    known.hashedAtMs - Number(info.mtimeNs / 1_000_000n) > STAT_QUIET_MS
+    known.hashedAtMs - Number(info.ctimeNs / 1_000_000n) > STAT_QUIET_MS
   ) {
     return known.contentHash;
   }
@@ -354,14 +405,14 @@ async function fileHash(file: string): Promise<string | undefined> {
     bytes = await readFile(file);
   } catch (error) {
     if (isMissingFile(error)) {
-      hashedFiles.delete(file);
       return undefined;
     }
     throw error;
   }
   const contentHash = createHash('sha256').update(bytes).digest('hex');
-  hashedFiles.set(file, {
+  files.set(file, {
     mtimeNs: info.mtimeNs,
+    ctimeNs: info.ctimeNs,
     size: info.size,
     ino: info.ino,
     hashedAtMs: Date.now(),
@@ -372,20 +423,20 @@ async function fileHash(file: string): Promise<string | undefined> {
 
 async function hashedListings({ vaultDir }: { vaultDir: string }): Promise<HashedListing[]> {
   const listings: HashedListing[] = [];
+  const files = vaultHashes(vaultDir);
   const present = new Set<string>();
-  const vaultPrefix = path.join(vaultDir, path.sep);
   for (const listing of await listMemoryPages(vaultDir)) {
     const file = pagePath({ vaultDir, kind: listing.kind, slug: listing.slug });
-    const contentHash = await fileHash(file);
+    const contentHash = await fileHash({ files, file });
     if (contentHash !== undefined) {
       present.add(file);
       listings.push({ ...listing, contentHash });
     }
   }
-  // Pages removed from the vault must not stay in memory.
-  for (const file of hashedFiles.keys()) {
-    if (file.startsWith(vaultPrefix) && !present.has(file)) {
-      hashedFiles.delete(file);
+  // Pages removed from this vault must not stay in memory.
+  for (const file of files.keys()) {
+    if (!present.has(file)) {
+      files.delete(file);
     }
   }
   return listings;

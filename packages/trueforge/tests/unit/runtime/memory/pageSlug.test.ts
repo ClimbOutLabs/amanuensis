@@ -39,6 +39,18 @@ describe('pageSlug', () => {
     expect(isPageSlug('')).toBe(false);
   });
 
+  it('folds Greek accents and the final sigma, and Cyrillic ё, but keeps й and the other Cyrillic letters', () => {
+    expect(pageSlug('Ελένη')).toBe(pageSlug('ΕΛΕΝΗ'));
+    expect(pageSlug('Ελένη')).toBe(pageSlug('Ελενη'));
+    expect(pageSlug('Γιώργος')).toBe(pageSlug('ΓΙΩΡΓΟΣ'));
+    expect(pageSlug('Ϊάσων')).toBe(pageSlug('Ιασων'));
+    expect(pageSlug('Фёдор')).toBe(pageSlug('Федор'));
+    expect(pageSlug('Фёдор')).toBe('федор');
+    expect(pageSlug('Йорик')).not.toBe(pageSlug('Иорик'));
+    expect(pageSlug('Їжак')).not.toBe(pageSlug('Ижак'));
+    expect(foldName('Ελένη')).toBe(foldName('ΕΛΕΝΗ'));
+  });
+
   it('keeps the marks that are part of a letter outside Latin', () => {
     expect(pageSlug('김민수')).toBe('김민수');
     expect(pageSlug('ジョン')).toBe('ジョン');

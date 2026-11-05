@@ -14,16 +14,20 @@ function foldOnce(text: string): string {
     text
       .normalize('NFD')
       .toLowerCase()
-      // Accents are dropped on Latin letters only; the same marks are part of the letter in Hangul, kana, Thai and Indic scripts.
-      .replace(/(\p{Script=Latin})\p{M}+/gu, '$1')
+      // Accents are dropped on Latin and Greek letters, and the dots on Cyrillic е (ё is е); the same marks
+      // are part of the letter in Hangul, kana, Thai and Indic scripts, and й, ї and і stay their own letters.
+      .replace(/([\p{Script=Latin}\p{Script=Greek}])\p{M}+/gu, '$1')
+      .replace(/е\u0308/gu, 'е')
+      // A Greek sigma written at the end of a word is the same letter as the one inside it.
+      .replace(/ς/gu, 'σ')
       // Composing again turns Hangul, kana with voicing marks and Indic clusters back into the letters people typed.
       .normalize('NFKC')
   );
 }
 
 /**
- * Text as names are compared and filed: lowercase, accents dropped from Latin letters only, and
- * every other script kept in its composed form, so `José` equals `Jose` while `민수` stays apart
+ * Text as names are compared and filed: lowercase, accents dropped from Latin and Greek letters
+ * (and Cyrillic ё written as е), and every other script kept in its composed form, so `José` equals `Jose` while `민수` stays apart
  * from `민숙` and `ハル` from `バル`. Repeated until stable so the result folds to itself.
  */
 export function foldName(text: string): string {

@@ -5,7 +5,6 @@ import path from 'node:path';
 
 import {
   ALIAS_INDEX_FILE,
-  AliasIndexFileSchema,
   loadAliasIndex,
   matchAliases,
   normalizeAliasText,
@@ -159,6 +158,24 @@ describe('aliasIndex', () => {
       expect(found('ก็ได้')).toEqual([]);
     });
 
+    it('lets the longest name in the index take a span in a script written without spaces', () => {
+      const names: AliasIndexFile = {
+        version: 1,
+        pages: [
+          { kind: 'person', slug: 'nid', title: 'นิด', content_hash: 'a', aliases: [] },
+          { kind: 'person', slug: 'nida', title: 'นิดา', content_hash: 'b', aliases: [] },
+          { kind: 'person', slug: 'tanaka', title: '田中', content_hash: 'c', aliases: [] },
+          { kind: 'person', slug: 'tanaka-ko', title: '田中子', content_hash: 'd', aliases: [] },
+        ],
+      };
+      const found = (text: string) => matchAliases({ index: names, text }).map(match => match.slug);
+      expect(found('วันนี้เจอนิดาที่ตลาด')).toEqual(['nida']);
+      expect(found('วันนี้เจอนิดที่ตลาด')).toEqual(['nid']);
+      expect(found('นิด และ นิดา')).toEqual(['nid', 'nida']);
+      expect(found('田中子さんに会った')).toEqual(['tanaka-ko']);
+      expect(found('田中さんに会った')).toEqual(['tanaka']);
+    });
+
     it('matches a name typed in decomposed form against its composed form', () => {
       const names: AliasIndexFile = {
         version: 1,
@@ -242,7 +259,7 @@ describe('aliasIndex', () => {
         ['matter', 'madrid', 'Madrid', ['the move']],
       ]);
       const cached: unknown = JSON.parse(await readFile(path.join(vaultDir, ALIAS_INDEX_FILE), 'utf8'));
-      expect(AliasIndexFileSchema.parse(cached)).toEqual(loaded);
+      expect(cached).toEqual(loaded);
     });
 
     it('reuses the cache while pages are unchanged, and rebuilds when any page changes', async () => {
@@ -280,7 +297,6 @@ describe('aliasIndex', () => {
 
     describe('hashing pages', () => {
       const front: PageFrontMatter = { kind: 'person', title: 'Wendy', aliases: ['my wife'], household: true };
-      const quiet = new Date(Date.now() - 60_000);
 
       afterEach(() => {
         jest.restoreAllMocks();
@@ -290,12 +306,22 @@ describe('aliasIndex', () => {
         return readFileSpy.mock.calls.filter(call => call[0] === file).length;
       }
 
-      it('does not read a page again while its size and modification time are unchanged', async () => {
+      /** Loads the index as if a minute had passed since the files were last changed, so their hashes may be reused. */
+      async function loadSettled(vaultDir: string): Promise<AliasIndexFile> {
+        const realNow = Date.now();
+        const now = jest.spyOn(Date, 'now').mockReturnValue(realNow + 60_000);
+        try {
+          return await loadAliasIndex({ vaultDir, persist: true });
+        } finally {
+          now.mockRestore();
+        }
+      }
+
+      it('does not read a page again while its size and timestamps are unchanged', async () => {
         const vaultDir = await makeVault();
         const file = path.join(vaultDir, 'people', 'wendy.md');
         await writePageFile({ vaultDir, kind: 'person', slug: 'wendy', content: pageText({ front }) });
-        await utimes(file, quiet, quiet);
-        await loadAliasIndex({ vaultDir, persist: true });
+        await loadSettled(vaultDir);
         const readFileSpy = jest.spyOn(fsPromises, 'readFile');
         await loadAliasIndex({ vaultDir, persist: true });
         await loadAliasIndex({ vaultDir, persist: true });
@@ -306,10 +332,23 @@ describe('aliasIndex', () => {
         const vaultDir = await makeVault();
         const file = path.join(vaultDir, 'people', 'wendy.md');
         await writePageFile({ vaultDir, kind: 'person', slug: 'wendy', content: pageText({ front }) });
-        await utimes(file, quiet, quiet);
-        await loadAliasIndex({ vaultDir, persist: true });
+        await loadSettled(vaultDir);
         const original = await readFile(file, 'utf8');
         await writeFile(file, original.replace('my wife', 'my mate'));
+        const edited = await loadAliasIndex({ vaultDir, persist: true });
+        expect(edited.pages[0]?.aliases).toEqual(['my mate']);
+      });
+
+      it('sees a same-size edit whose modification time was set back', async () => {
+        const vaultDir = await makeVault();
+        const file = path.join(vaultDir, 'people', 'wendy.md');
+        await writePageFile({ vaultDir, kind: 'person', slug: 'wendy', content: pageText({ front }) });
+        const old = new Date(Date.now() - 60_000);
+        await utimes(file, old, old);
+        await loadSettled(vaultDir);
+        const original = await readFile(file, 'utf8');
+        await writeFile(file, original.replace('my wife', 'my mate'));
+        await utimes(file, old, old);
         const edited = await loadAliasIndex({ vaultDir, persist: true });
         expect(edited.pages[0]?.aliases).toEqual(['my mate']);
       });
@@ -328,10 +367,24 @@ describe('aliasIndex', () => {
         const vaultDir = await makeVault();
         const file = path.join(vaultDir, 'people', 'wendy.md');
         await writePageFile({ vaultDir, kind: 'person', slug: 'wendy', content: pageText({ front }) });
-        await utimes(file, quiet, quiet);
-        await loadAliasIndex({ vaultDir, persist: true });
+        await loadSettled(vaultDir);
         await rm(file);
         expect((await loadAliasIndex({ vaultDir, persist: true })).pages).toEqual([]);
+      });
+
+      it('keeps hashes for a bounded number of vaults, and a turn only touches the vaults it reads', async () => {
+        const first = await makeVault();
+        const file = path.join(first, 'people', 'wendy.md');
+        await writePageFile({ vaultDir: first, kind: 'person', slug: 'wendy', content: pageText({ front }) });
+        await loadSettled(first);
+        for (let count = 0; count < 70; count++) {
+          const other = await makeVault();
+          await writePageFile({ vaultDir: other, kind: 'person', slug: 'wendy', content: pageText({ front }) });
+          await loadSettled(other);
+        }
+        const readFileSpy = jest.spyOn(fsPromises, 'readFile');
+        await loadAliasIndex({ vaultDir: first, persist: true });
+        expect(pageReads(readFileSpy, file)).toBeGreaterThan(0);
       });
     });
 
