@@ -718,7 +718,9 @@ describe('instance settings file', () => {
       const file = path.join(world.instanceDir('main'), 'dex.env');
       writeFileSync(file, ["DEX_USER_PASSWORD_HASH='SENTINEL-owner-hash'", ...hashes, ''].join('\n'));
       chmodSync(file, 0o600);
-      if (dex) writeFileSync(path.join(world.instanceDir('main'), 'dex.yaml'), dex);
+      if (dex) {
+        writeFileSync(path.join(world.instanceDir('main'), 'dex.yaml'), dex);
+      }
       world.writeEnv('main', 0o600, envText ?? (allowed === undefined ? '' : `OIDC_ALLOWED_EMAILS=${allowed}\n`));
       if (registered) {
         const dir = path.join(world.home, 'state', 'instances');
