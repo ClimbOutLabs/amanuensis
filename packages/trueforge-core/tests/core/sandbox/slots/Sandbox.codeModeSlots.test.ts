@@ -17,10 +17,12 @@ describe('a session with connectors on the sandbox slots', () => {
     const handler: FakeHandler = request =>
       request.path === '/v1/health'
         ? { status: 200, body: { busy: false, sessions: 0, attestation: attestation() } }
-        : {
-            status: 200,
-            body: { exit_code: 0, output: 'hi\n', terminated_by: 'completed', internal_error: '', duration_ms: 1 },
-          };
+        : request.path === '/v1/create_session'
+          ? { status: 204, body: undefined }
+          : {
+              status: 200,
+              body: { exit_code: 0, output: 'hi\n', terminated_by: 'completed', internal_error: '', duration_ms: 1 },
+            };
     agent = new FakeAgent(handler);
     const socketPath = await agent.start();
     const provider = new SlotSandboxProvider({

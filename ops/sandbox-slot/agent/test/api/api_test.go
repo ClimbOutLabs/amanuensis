@@ -413,6 +413,63 @@ func TestDestroySessionRemovesTheTree(t *testing.T) {
 	}
 }
 
+func TestCreateSessionMakesTheEmptyTree(t *testing.T) {
+	e := newEnv(t, true)
+	if rec := e.do("POST", "/v1/create_session", map[string]any{"session_id": sessionID, "disk_mb": 10}); rec.Code != 204 {
+		t.Fatalf("%d %s", rec.Code, rec.Body.String())
+	}
+	if info, err := os.Stat(filepath.Join(e.srv.TreeDir, sessionID)); err != nil || !info.IsDir() {
+		t.Fatalf("the tree must exist: %v", err)
+	}
+	// Creating the same session again is a success: the caller may be retrying a lost answer.
+	if rec := e.do("POST", "/v1/create_session", map[string]any{"session_id": sessionID, "disk_mb": 10}); rec.Code != 204 {
+		t.Fatalf("again: %d %s", rec.Code, rec.Body.String())
+	}
+	if body := sessionsOf(t, e.do("GET", "/v1/sessions", nil)); len(body.Sessions) != 1 || body.Sessions[0].SessionID != sessionID {
+		t.Fatalf("the new tree must be listed: %+v", body.Sessions)
+	}
+}
+
+func TestCreateSessionIsRefusedWhenTheVolumeCannotFitTheQuota(t *testing.T) {
+	e := newEnv(t, true)
+	e.srv.MinFreeBytes = 1 << 60
+	rec := e.do("POST", "/v1/create_session", map[string]any{"session_id": sessionID, "disk_mb": 10})
+	if rec.Code != 507 || errCode(t, rec) != "storage_full" {
+		t.Fatalf("%d %s", rec.Code, rec.Body.String())
+	}
+	if _, err := os.Stat(filepath.Join(e.srv.TreeDir, sessionID)); !os.IsNotExist(err) {
+		t.Fatal("a refused creation must leave no tree")
+	}
+}
+
+func TestCreateSessionForAnExistingTreeNeedsNoNewRoom(t *testing.T) {
+	e := newEnv(t, true)
+	if rec := e.do("POST", "/v1/create_session", map[string]any{"session_id": sessionID, "disk_mb": 10}); rec.Code != 204 {
+		t.Fatalf("%d %s", rec.Code, rec.Body.String())
+	}
+	e.srv.MinFreeBytes = 1 << 60
+	if rec := e.do("POST", "/v1/create_session", map[string]any{"session_id": sessionID, "disk_mb": 10}); rec.Code != 204 {
+		t.Fatalf("an existing tree must not be refused for room: %d %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestCreateSessionValidatesItsRequest(t *testing.T) {
+	e := newEnv(t, true)
+	for _, body := range []map[string]any{
+		{"session_id": "not-a-session", "disk_mb": 10},
+		{"session_id": sessionID, "disk_mb": 0},
+		{"session_id": sessionID, "disk_mb": 8193},
+		{"session_id": sessionID},
+	} {
+		if rec := e.do("POST", "/v1/create_session", body); rec.Code != 400 || errCode(t, rec) != "invalid_request" {
+			t.Errorf("%v: %d %s", body, rec.Code, rec.Body.String())
+		}
+	}
+	if _, err := os.Stat(filepath.Join(e.srv.TreeDir, sessionID)); !os.IsNotExist(err) {
+		t.Fatal("a refused request must leave no tree")
+	}
+}
+
 func TestOOMKillsCountOnlyWhenTheCounterRisesAndTheGuestDied(t *testing.T) {
 	e := newEnv(t, true)
 	var kills int64
@@ -509,7 +566,7 @@ func TestOversizedBodiesAreRefusedPerEndpoint(t *testing.T) {
 	}
 }
 
-func TestSessionInUseAnswersBusyForFilesAndDestroy(t *testing.T) {
+func TestSessionInUseAnswersBusyForFilesDestroyAndCreate(t *testing.T) {
 	e := newEnv(t, true)
 	e.runner.hold = make(chan struct{})
 	done := make(chan struct{})
@@ -526,6 +583,7 @@ func TestSessionInUseAnswersBusyForFilesAndDestroy(t *testing.T) {
 	calls := map[string]map[string]any{
 		"/v1/fs_read":         {"session_id": sessionID, "path": "/workspace/a"},
 		"/v1/fs_write":        {"session_id": sessionID, "path": "/workspace/a", "content_base64": content, "mode": 0o644},
+		"/v1/create_session":  {"session_id": sessionID, "disk_mb": 10},
 		"/v1/destroy_session": {"session_id": sessionID},
 	}
 	for path, body := range calls {
