@@ -97,7 +97,20 @@ async function withWorld(run) {
   // Stands in for everything private: if any test's request reaches it, the wall has a hole.
   const internal = await fixture({ '*': html('<h1>Admin API</h1>') });
   const internalUrl = `http://127.0.0.1:${String(internal.port)}`;
-  const siteB = await fixture({ '*': html('<h1>Mail inbox</h1><p>Your private messages</p>') });
+  const siteB = await fixture({
+    // Another site's widget that a page can put in a frame: a button that sends, and a field that sends what is typed.
+    '/widget':
+      html(`<button style="width: 100%; height: 2.5rem" onclick="fetch('/allowed', { method: 'POST' })">Allow</button>
+      <input id="w" oninput="fetch('/typed', { method: 'POST', body: this.value })">
+      <script>
+        window.addEventListener('focus', () => document.getElementById('w').focus());
+        // Any key or press that reaches this frame at all is sent home.
+        for (const type of ['keydown', 'pointerup', 'mouseup']) {
+          window.addEventListener(type, () => fetch('/reached', { method: 'POST', body: type }));
+        }
+      </script>`),
+    '*': html('<h1>Mail inbox</h1><p>Your private messages</p>'),
+  });
   const siteA = await fixture({
     '/': ACCOUNT_PAGE,
     '/checkout': (_req, res) => res.writeHead(200, { 'content-type': 'text/html' }).end(CHECKOUT_FIXTURE_HTML),
@@ -216,6 +229,38 @@ async function withWorld(run) {
       <button id="swap" onpointerdown="document.getElementById('trap').hidden = false">Swap on press</button>
       <div id="trap" hidden style="position: fixed; inset: 0; background: red"
         onclick="fetch('/stray', { method: 'POST' })"></div>`),
+    // A page that moves another site's frame under the pointer, or the focus into it.
+    '/frames': html(`<h1>Frames</h1>
+      <div style="position: relative; width: 12rem; height: 2.5rem">
+        <button style="width: 12rem; height: 2.5rem"
+          onmouseover="document.getElementById('over').style.visibility = 'visible'">Show details</button>
+        <iframe id="over" src="http://site-b.test/widget"
+          style="visibility: hidden; position: absolute; inset: 0; width: 12rem; height: 2.5rem; border: 0"></iframe>
+      </div>
+      <div style="position: relative; width: 12rem; height: 2.5rem">
+        <button style="width: 12rem; height: 2.5rem"
+          onpointerdown="document.getElementById('under').style.visibility = 'visible'">Show more</button>
+        <iframe id="under" src="http://site-b.test/widget"
+          style="visibility: hidden; position: absolute; inset: 0; width: 12rem; height: 2.5rem; border: 0"></iframe>
+      </div>
+      <label for="q">Search</label>
+      <input id="q" onkeydown="document.getElementById('side').focus()">
+      <iframe id="side" src="http://site-b.test/widget" style="width: 12rem; height: 5rem"></iframe>`),
+    // Fields whose page sends on Enter, Tab or an emptied value.
+    '/text-fields': html(`<h1>Text fields</h1>
+      <form method="POST" action="/searched">
+        <label for="s">Search</label>
+        <input id="s" name="s">
+      </form>
+      <form id="notes-form">
+        <label for="n">Notes</label>
+        <textarea id="n" name="n"
+          onkeydown="if (event.key === 'Enter' || event.key === 'Tab') fetch('/pressed', { method: 'POST' })"></textarea>
+        <label for="city">City</label>
+        <input id="city" name="city" value="Paris"
+          oninput="if (this.value === '') fetch('/emptied', { method: 'POST' })">
+        <button type="submit">Save notes</button>
+      </form>`),
     '*': html('<h1>Other page</h1>'),
   });
 
@@ -1000,6 +1045,103 @@ test(
 );
 
 test(
+  'a line break or tab in text for a one-line field is refused, so it never presses Enter',
+  { skip: !browsersAvailable },
+  async () => {
+    await withWorld(async ({ sidecar, siteA }) => {
+      const opened = await sidecar.open({ owner: 'owner-1', tab: 'chat-1', url: 'http://site-a.test/text-fields' });
+      const ref = refFor(opened.text, 'Search');
+      for (const text of ['shoes\n', 'shoes\r', 'shoes\tnext']) {
+        assert.deepEqual(
+          await sidecar.type({ owner: 'owner-1', tab: 'chat-1', ref, expect: await checked(sidecar, ref), text }),
+          { status: 'refused', reason: 'line_break' },
+        );
+      }
+      await settle();
+      assert.deepEqual(posts(siteA.hits), []);
+    });
+  },
+);
+
+test(
+  'line breaks and tabs in a multi-line field are typed as text, and typing replaces what was there',
+  { skip: !browsersAvailable },
+  async () => {
+    await withWorld(async ({ sidecar, siteA }) => {
+      const opened = await sidecar.open({ owner: 'owner-1', tab: 'chat-1', url: 'http://site-a.test/text-fields' });
+      const notes = refFor(opened.text, 'Notes');
+      const typed = await sidecar.type({
+        owner: 'owner-1',
+        tab: 'chat-1',
+        ref: notes,
+        expect: await checked(sidecar, notes),
+        text: 'one\ntwo\tthree',
+      });
+      assert.equal(typed.status, 'ok');
+      const city = refFor(typed.text, 'City');
+      const retyped = await sidecar.type({
+        owner: 'owner-1',
+        tab: 'chat-1',
+        ref: city,
+        expect: await checked(sidecar, city),
+        text: 'Rome',
+      });
+      assert.equal(retyped.status, 'ok');
+      const save = refFor(retyped.text, 'Save notes');
+      const values = (await checked(sidecar, save)).form_values;
+      assert.equal(values.n, 'one\ntwo\tthree');
+      assert.equal(values.city, 'Rome');
+      await settle();
+      assert.deepEqual(posts(siteA.hits), []);
+    });
+  },
+);
+
+test(
+  "a press that would land in another site's frame slid under the pointer is refused, and the frame gets nothing",
+  { skip: !browsersAvailable },
+  async () => {
+    await withWorld(async ({ sidecar, siteB }) => {
+      // One frame appears when the pointer arrives, the other once the button is pressed down.
+      for (const label of ['Show details', 'Show more']) {
+        const opened = await sidecar.open({ owner: 'owner-1', tab: 'chat-1', url: 'http://site-a.test/frames' });
+        const ref = refFor(opened.text, label);
+        assert.deepEqual(
+          await sidecar.click({ owner: 'owner-1', tab: 'chat-1', ref, expect: await checked(sidecar, ref) }),
+          { status: 'refused', reason: 'changed' },
+          label,
+        );
+      }
+      await settle();
+      assert.deepEqual(posts(siteB.hits), []);
+    });
+  },
+);
+
+test(
+  "typing that the page moves into another site's frame is stopped there and refused",
+  { skip: !browsersAvailable },
+  async () => {
+    await withWorld(async ({ sidecar, siteB }) => {
+      const opened = await sidecar.open({ owner: 'owner-1', tab: 'chat-1', url: 'http://site-a.test/frames' });
+      const ref = refFor(opened.text, 'Search');
+      assert.deepEqual(
+        await sidecar.type({
+          owner: 'owner-1',
+          tab: 'chat-1',
+          ref,
+          expect: await checked(sidecar, ref),
+          text: 'hello',
+        }),
+        { status: 'refused', reason: 'changed' },
+      );
+      await settle();
+      assert.deepEqual(posts(siteB.hits), []);
+    });
+  },
+);
+
+test(
   'typing into a field that changed since it was checked is refused, and nothing is typed',
   { skip: !browsersAvailable },
   async () => {
@@ -1056,6 +1198,8 @@ async function withFakeSidecar(run) {
     on: () => undefined,
     goto: async () => undefined,
     mainFrame: () => undefined,
+    exposeBinding: async () => undefined,
+    addInitScript: async () => undefined,
     waitForEvent: async () => {
       throw new Error('timed out');
     },

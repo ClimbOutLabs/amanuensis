@@ -219,13 +219,17 @@ describe('browser capability', () => {
     });
   });
 
-  it('a disabled, read-only or covered element is refused with a plain reason', async () => {
+  it('a disabled, read-only or covered element, or a line break for a one-line field, is refused with a plain reason', async () => {
     for (const [reason, message] of [
       [
         'disabled',
         'That part of the page is switched off right now, so it was not touched. Read the page again, then try again.',
       ],
       ['read_only', 'That field cannot be changed, so nothing was typed. Read the page again to find the right field.'],
+      [
+        'line_break',
+        'That field holds one line, and the text has a line break or tab, which would press Enter or Tab. Nothing was typed. Type it as one line.',
+      ],
       [
         'covered',
         'Something else on the page is covering that part, so it was not touched. Read the page again, then try again.',

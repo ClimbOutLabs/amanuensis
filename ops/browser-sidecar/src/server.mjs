@@ -62,7 +62,7 @@ const GUARDED_EVENTS = [
  * checked element is stopped and cancelled, and noted, so the action reports it as changed.
  */
 const GUARD_SCRIPT = `(() => {
-  const guard = { element: null, strayed: false };
+  const guard = { element: null, mode: null, strayed: false, landed: false, late: false };
   globalThis.amanGuard = guard;
   const check = event => {
     // Only real input is guarded: an event the page's own code makes follows from input that already
@@ -72,6 +72,7 @@ const GUARD_SCRIPT = `(() => {
     }
     const target = event.composedPath()[0];
     if (target instanceof Node && guard.element.contains(target)) {
+      guard.landed ||= event.type === 'pointerdown';
       return;
     }
     guard.strayed = true;
@@ -104,6 +105,8 @@ async function prepareReadWorld(tab) {
     tab.readWorld = undefined;
   });
   await tab.cdp.send('Runtime.enable');
+  // Scripts for new documents run only for a session with the Page domain on.
+  await tab.cdp.send('Page.enable');
   await tab.cdp.send('Page.addScriptToEvaluateOnNewDocument', { source: GUARD_SCRIPT, worldName: READ_WORLD });
   tab.mainFrameId = mainFrameId;
 }
@@ -117,7 +120,12 @@ async function inReadWorld({ tab, expression }) {
       worldName: READ_WORLD,
     });
     tab.readWorld = executionContextId;
-    await tab.cdp.send('Runtime.evaluate', { expression: GUARD_SCRIPT, contextId: executionContextId });
+    // The world is the one the guard script made at the start of the document, when there was one. A
+    // guard set up now comes after the page's scripts, so it may not see input first: actions refuse it.
+    await tab.cdp.send('Runtime.evaluate', {
+      expression: `if (globalThis.amanGuard === undefined) {\n${GUARD_SCRIPT}\nglobalThis.amanGuard.late = true;\n}`,
+      contextId: executionContextId,
+    });
   }
   const reply = await tab.cdp.send('Runtime.evaluate', { expression, contextId: tab.readWorld, returnByValue: true });
   if (reply.exceptionDetails !== undefined) {
@@ -126,14 +134,99 @@ async function inReadWorld({ tab, expression }) {
   return reply.result.value;
 }
 
-/** Ends the guard of a press or of typing, and says whether any of its input landed outside the checked element. */
+/**
+ * Ends the guard of a press or of typing, and says whether its input went anywhere but the checked
+ * element: some landed outside it, a press never reached it, or typing ended with the focus elsewhere.
+ */
 const DISARM_SCRIPT = `(() => {
   const guard = globalThis.amanGuard;
-  const strayed = guard.strayed;
+  let focused = document.activeElement;
+  while (focused?.shadowRoot?.activeElement) {
+    focused = focused.shadowRoot.activeElement;
+  }
+  const missed = guard.mode === 'press' ? !guard.landed : focused !== guard.element;
+  const strayed = guard.strayed || missed;
   guard.element = null;
+  guard.mode = null;
   guard.strayed = false;
+  guard.landed = false;
   return strayed;
 })()`;
+
+/** True while the point a press is about to land on is still the checked element, and nothing has strayed. */
+function stillOnElementScript({ x, y }) {
+  return `(() => {
+  const guard = globalThis.amanGuard;
+  const hit = document.elementFromPoint(${JSON.stringify(x)}, ${JSON.stringify(y)});
+  return guard.element !== null && !guard.strayed && hit !== null && guard.element.contains(hit);
+})()`;
+}
+
+/**
+ * Sends the real input of an armed action. A press moves the pointer first and checks the point
+ * again, since a page can move things when the pointer arrives: false, and nothing pressed, when it did.
+ * Typing selects what is in the field with a real key press, so the keystrokes replace it. In a
+ * multi-line field a line break or tab is inserted as text, so it never presses Enter or Tab.
+ */
+async function realInput({ tab, result, text }) {
+  const { mouse, keyboard } = tab.page;
+  if (result.status === 'press') {
+    await mouse.move(result.x, result.y);
+    if ((await inReadWorld({ tab, expression: stillOnElementScript(result) })) !== true) {
+      return false;
+    }
+    await mouse.down();
+    await mouse.up();
+    return true;
+  }
+  if (result.clear) {
+    await keyboard.press('ControlOrMeta+A');
+    if (text === '') {
+      await keyboard.press('Backspace');
+    }
+  }
+  for (const part of result.multiline ? text.split(/(\r\n|\r|\n|\t)/) : [text]) {
+    if (part === '\t') {
+      await keyboard.insertText('\t');
+    } else if (part === '\r\n' || part === '\r' || part === '\n') {
+      await keyboard.insertText('\n');
+    } else if (part !== '') {
+      await keyboard.type(part);
+    }
+  }
+  return true;
+}
+
+/** The binding a frame's guard calls when it stops input, so the action that sent it is refused. */
+const FRAME_INPUT_BINDING = 'amanFrameInput';
+
+/**
+ * Runs before any script in every frame but the top one. Aman only ever acts on the top page, so any
+ * real input that reaches a frame inside it (a frame the page slid under the pointer, or moved the
+ * focus into) is stopped and cancelled before that frame's own code sees it, and reported.
+ */
+const FRAME_GUARD_SCRIPT = `(() => {
+  if (window === window.top) {
+    return;
+  }
+  const apply = Reflect.apply;
+  const stop = Event.prototype.stopImmediatePropagation;
+  const cancel = Event.prototype.preventDefault;
+  const report = window.${FRAME_INPUT_BINDING};
+  const block = event => {
+    if (!event.isTrusted) {
+      return;
+    }
+    apply(stop, event, []);
+    apply(cancel, event, []);
+    if (typeof report === 'function') {
+      apply(report, window, []);
+    }
+  };
+  for (const type of ${JSON.stringify([...GUARDED_EVENTS, 'input'])}) {
+    window.addEventListener(type, block, true);
+  }
+})();`;
 
 const isStringRecord = value =>
   typeof value === 'object' &&
@@ -227,6 +320,7 @@ function createTab({ page, cdp }) {
     goingBack: false,
     refusedRedirect: undefined,
     movedTo: undefined,
+    frameInput: false,
   };
 }
 
@@ -393,6 +487,10 @@ export class BrowserSidecar {
       const tab = createTab({ page, cdp: await profile.context.newCDPSession(page) });
       await guardRedirects({ tab, cdp: tab.cdp });
       await prepareReadWorld(tab);
+      await page.exposeBinding(FRAME_INPUT_BINDING, () => {
+        tab.frameInput = true;
+      });
+      await page.addInitScript(FRAME_GUARD_SCRIPT);
       profile.tabs.set(tabId, tab);
       profile.tabsByPage.set(page, tab);
       if (profile.tabs.size > MAX_TABS_PER_PERSON) {
@@ -595,20 +693,19 @@ export class BrowserSidecar {
         : { status: 'moved', url: result.url };
     }
     if (result.status === 'press' || result.status === 'keys') {
-      // Real input, so the page's controls react as they do to a person. The read world's guard stops
-      // any of it that lands outside the checked element before the page sees it.
-      const input =
-        result.status === 'press' ? tab.page.mouse.click(result.x, result.y) : tab.page.keyboard.type(rest.text);
-      const pressed = await input.then(
-        () => undefined,
-        error => error,
+      // Real input, so the page's controls react as they do to a person. The guards stop any of it
+      // that lands outside the checked element, in this page or a frame inside it, before the page sees it.
+      tab.frameInput = false;
+      const sent = await realInput({ tab, result, text: rest.text }).then(
+        done => ({ done }),
+        error => ({ error }),
       );
       // A page that moved on took the guard with it; a fresh document has none armed.
       const strayed = await inReadWorld({ tab, expression: DISARM_SCRIPT }).catch(() => false);
-      if (pressed !== undefined) {
-        throw pressed;
+      if (sent.error !== undefined) {
+        throw sent.error;
       }
-      if (strayed === true) {
+      if (!sent.done || strayed === true || tab.frameInput) {
         tab.refs.reset();
         return { status: 'refused', reason: 'changed' };
       }
@@ -617,6 +714,10 @@ export class BrowserSidecar {
     }
     await settled;
     tab.refs.reset();
+    // A frame's report of stopped input can arrive just after the input itself.
+    if (tab.frameInput) {
+      return { status: 'refused', reason: 'changed' };
+    }
     return this.#read(tab);
   }
 

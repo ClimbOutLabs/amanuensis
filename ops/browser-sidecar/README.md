@@ -66,12 +66,25 @@ change what the DOM's functions and properties return in their world, but not in
 sidecar reads is what the browser holds. Every read of an element and every action on it runs there.
 
 An action checks its element against `expect` and acts on it in the same step, with no gap in which
-the page could swap the element. A click on a button is a real mouse press at the element's middle,
-after a check that the point lands on it. Typing is real keystrokes into the field, focused in the
-same step. Picking sets the option the way a person's choice does, so the page's own code sees the
-change. While a press or typing runs, a guard in the sidecar's world, set up before any of the page's
-scripts, stops any real input that lands outside the checked element. If the page moves something
-under the pointer between the check and the press, the press is stopped and refused as `changed`. The fields an action checks are the ones that decide what it does: a click checks them all,
+the page could swap the element. A click on a button is a real mouse press at the element's middle.
+The point is checked to land on the element, then checked again once the pointer is there, because a
+page can move things when the pointer arrives. Typing is real keystrokes into the field, focused in
+the same step. What was in the field is selected with a real key press first, so the keystrokes
+replace it. A one-line field refuses text with a line break or tab as `line_break`, because those keys
+would press Enter or Tab and could send the form. In a multi-line field, line breaks and tabs are
+inserted as text, so no key is pressed for them. Any other character that is not plain text is refused as
+`control_character`. Picking sets the option the way a person's choice
+does, so the page's own code sees the change.
+
+While a press or typing runs, two guards watch the input. One is in the sidecar's world in the page,
+set up at the start of every document, before any of the page's scripts. It stops any real input that
+lands outside the checked element, and it notices when a press never reached the element or typing
+ended with the focus somewhere else. The other runs first in every frame inside the page, including
+frames from other sites. Aman never acts inside a frame, so it stops all real input that reaches one.
+Either way the action is refused as `changed`. A guard that could only be set up after the page's
+scripts ran is not trusted, so the action is refused as `unchecked`.
+
+The fields an action checks are the ones that decide what it does: a click checks them all,
 and typing or picking checks the site, the name and the role, since earlier typing changes the form.
 
 ## Which actions ask first
@@ -94,6 +107,11 @@ icon-only button is named by its image's alt text or label, and characters that 
 Typing and picking an option always ask first, with the exact text or option, the field and the site
 on the card. A page can send what is typed the moment it changes, by any route, so the sidecar does
 not try to hold it back afterwards.
+
+In a scheduled run nobody is there to answer, so actions that ask are saved for the person to approve
+later. A click that comes after typing or picking that is still waiting is not saved: its card would
+show the form as it is now, not as the approved typing leaves it. The model is told to click again
+once the person approves.
 
 ## Running it
 

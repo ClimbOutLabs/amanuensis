@@ -153,9 +153,25 @@ function shown(text: string): string {
   return escapeDisplayText(text).replace(/"/g, '\\"');
 }
 
+/** Longest page label or typed text a card's headline holds; the card's detail shows all of it. */
+const HEADLINE_TEXT_MAX = 60;
+
+/** `text` for a card headline: shown, and cut short with an ellipsis past the headline's room. */
+function headlineText(text: string): string {
+  const characters = Array.from(text);
+  return characters.length <= HEADLINE_TEXT_MAX
+    ? shown(text)
+    : `${shown(characters.slice(0, HEADLINE_TEXT_MAX).join(''))}…`;
+}
+
+/** A page label for a card headline, or a plain stand-in when the element has none. */
+function headlineLabel(label: string): string {
+  return label.trim() === '' ? '(no label)' : headlineText(label);
+}
+
 /** The approval card for a commit click: the button's label, the site, and the form's values. */
 function commitClickCard(review: BrowserElementReview): Tier3Card {
-  const label = review.accessible_name.trim() === '' ? '(no label)' : shown(review.accessible_name);
+  const label = headlineLabel(review.accessible_name);
   const outbound = renderOutboundArguments(review.form_values);
   return {
     plain_what: `Click "${label}" on ${shown(review.site)}?`,
@@ -174,10 +190,10 @@ function commitClickCard(review: BrowserElementReview): Tier3Card {
 
 /** The card for typing or picking: the exact text, the field it goes into, and the site. */
 function prepareCard(input: { review: BrowserElementReview; verb: 'Type' | 'Pick'; text: string }): Tier3Card {
-  const field = input.review.accessible_name.trim() === '' ? '(no label)' : shown(input.review.accessible_name);
+  const field = headlineLabel(input.review.accessible_name);
   const outbound = renderOutboundArguments({ [input.review.accessible_name.trim() || 'field']: input.text });
   return {
-    plain_what: `${input.verb} "${shown(input.text)}" ${input.verb === 'Type' ? 'into' : 'in'} "${field}" on ${shown(input.review.site)}?`,
+    plain_what: `${input.verb} "${headlineText(input.text)}" ${input.verb === 'Type' ? 'into' : 'in'} "${field}" on ${shown(input.review.site)}?`,
     plain_why: null,
     cannot_be_undone: null,
     why_asked_again: null,

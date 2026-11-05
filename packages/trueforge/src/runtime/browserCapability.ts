@@ -116,6 +116,10 @@ const REFUSAL_MESSAGES: Record<string, string> = {
   read_only: 'That field cannot be changed, so nothing was typed. Read the page again to find the right field.',
   covered:
     'Something else on the page is covering that part, so it was not touched. Read the page again, then try again.',
+  line_break:
+    'That field holds one line, and the text has a line break or tab, which would press Enter or Tab. Nothing was typed. Type it as one line.',
+  control_character:
+    'The text has a character that is not plain text, so nothing was typed. Type it again without that character.',
 };
 
 function refusalMessage(reason: string): string {
@@ -351,7 +355,7 @@ class BrowserTool extends LocalToolMCP {
       name: 'browser_type',
       annotations: BROWSER_PREPARE_ANNOTATIONS,
       description:
-        'Type text into a field on the open page, by its ref from browser_read. Refused for a password, card or one-time-code field: ask the person to type those themselves. The person sees the exact text on an approval card first, because a page can send what is typed as soon as it is typed. Refused for a field that is read-only or covered by something else.',
+        'Type text into a field on the open page, by its ref from browser_read. Refused for a password, card or one-time-code field: ask the person to type those themselves. The person sees the exact text on an approval card first, because a page can send what is typed as soon as it is typed. Refused for a field that is read-only or covered by something else. A one-line field refuses text with a line break or tab; only a multi-line field takes them.',
       schema: TYPE_INPUT_SCHEMA,
       handler: async (input: BrowserTypeInput, _approval, context) =>
         this.act({ path: '/type', body: { ref: input.ref, text: input.text }, context }),

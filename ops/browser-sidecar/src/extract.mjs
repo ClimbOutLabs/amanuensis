@@ -331,16 +331,10 @@ const TEXT_INPUT_TYPES = new Set([
   'week',
 ]);
 
-/** Sets a field's value the way a person's typing does, so the page's own code sees the change. */
-function setFieldValue(element, value) {
-  const prototype =
-    element.tagName === 'TEXTAREA'
-      ? window.HTMLTextAreaElement.prototype
-      : element.tagName === 'SELECT'
-        ? window.HTMLSelectElement.prototype
-        : window.HTMLInputElement.prototype;
+/** Picks a `<select>` option the way a person's choice does, so the page's own code sees the change. */
+function pickOption(element, value) {
   // The platform's own setter: a page framework that wraps the element's `value` still sees the change.
-  Object.getOwnPropertyDescriptor(prototype, 'value').set.call(element, value);
+  Object.getOwnPropertyDescriptor(window.HTMLSelectElement.prototype, 'value').set.call(element, value);
   element.dispatchEvent(new window.Event('input', { bubbles: true }));
   element.dispatchEvent(new window.Event('change', { bubbles: true }));
 }
@@ -350,15 +344,24 @@ function setFieldValue(element, value) {
  * element: until the sidecar disarms it, input that lands anywhere else is stopped before the page
  * sees it. False when the guard is missing, so the action is refused rather than run unguarded.
  */
-function armGuard(element) {
+function armGuard({ element, mode }) {
   const guard = globalThis.amanGuard;
-  if (guard === undefined) {
+  // A guard set up after the page's own scripts may not be the first to see input, so it is not used.
+  if (guard === undefined || guard.late === true) {
     return false;
   }
   guard.element = element;
+  guard.mode = mode;
   guard.strayed = false;
+  guard.landed = false;
   return true;
 }
+
+/** Characters that are not text: a line break or tab would press Enter or Tab, which can send a form. */
+const CONTROL_CHARACTERS = /\p{Cc}/u;
+
+/** In a multi-line field, the line breaks and tabs that the caller inserts as text rather than pressing as keys. */
+const TYPED_BREAKS = new Set(['\n', '\r', '\t']);
 
 /**
  * Reads the element at a snapshot id and, unless the action is only a read (`info`), checks it and
@@ -370,7 +373,7 @@ function armGuard(element) {
  * was just checked to land on the element; typing is done by the caller with real keystrokes into the
  * field focused here. Both run under the input guard. Picking an option sets it here.
  */
-export function actOnElement({ path, action, expect, option }) {
+export function actOnElement({ path, action, expect, option, text }) {
   const element = elementAtPath(path);
   const review = element === null ? null : elementReviewOf(element);
   if (review === null) {
@@ -397,7 +400,9 @@ export function actOnElement({ path, action, expect, option }) {
     if (hit === null || !element.contains(hit)) {
       return { status: 'refused', reason: 'covered' };
     }
-    return armGuard(element) ? { status: 'press', x, y } : { status: 'refused', reason: 'unchecked' };
+    return armGuard({ element, mode: 'press' })
+      ? { status: 'press', x, y }
+      : { status: 'refused', reason: 'unchecked' };
   }
   if (action === 'type') {
     if (fieldKind(element) !== null) {
@@ -409,14 +414,21 @@ export function actOnElement({ path, action, expect, option }) {
     if (element.readOnly) {
       return { status: 'refused', reason: 'read_only' };
     }
+    const multiline = element.tagName === 'TEXTAREA';
+    const characters = Array.from(text);
+    const refused = character => CONTROL_CHARACTERS.test(character) && !(multiline && TYPED_BREAKS.has(character));
+    if (characters.some(refused)) {
+      return { status: 'refused', reason: multiline ? 'control_character' : 'line_break' };
+    }
     element.scrollIntoView({ block: 'center', inline: 'center', behavior: 'instant' });
     element.focus();
     if (document.activeElement !== element) {
       return { status: 'refused', reason: 'changed' };
     }
-    // What was in the field goes first, so the keystrokes that follow are the whole new value.
-    setFieldValue(element, '');
-    return armGuard(element) ? { status: 'keys' } : { status: 'refused', reason: 'unchecked' };
+    // What is in the field is replaced by the keystrokes: the caller selects it all with a real key press first.
+    return armGuard({ element, mode: 'keys' })
+      ? { status: 'keys', multiline, clear: element.value !== '' }
+      : { status: 'refused', reason: 'unchecked' };
   }
   if (element.tagName !== 'SELECT') {
     return { status: 'refused', reason: 'no_such_option' };
@@ -427,7 +439,7 @@ export function actOnElement({ path, action, expect, option }) {
   if (picked === undefined || picked.disabled) {
     return { status: 'refused', reason: 'no_such_option' };
   }
-  setFieldValue(element, picked.value);
+  pickOption(element, picked.value);
   return { status: 'done' };
 }
 

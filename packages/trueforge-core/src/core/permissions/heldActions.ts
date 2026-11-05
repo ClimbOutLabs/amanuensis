@@ -10,6 +10,7 @@ import type { InternalEnrichedAssistantMessage, InternalEnrichedToolCall, Intern
 import { gitRemotesMatch } from '../sandbox/gitRemoteObservation';
 import { approvalTokenExpiry, type ApprovalTokenScope, type ApprovalTokenStore } from './approvalTokens';
 import { sameBrowserElementReview } from './browserTier';
+import { BROWSER_CLICK_TOOL_NAME, BROWSER_SELECT_TOOL_NAME, BROWSER_TYPE_TOOL_NAME } from './browserToolNames';
 import type { Tier3Card } from './tier';
 
 /** Most actions one chat holds; past this a call is refused instead of queued. */
@@ -30,6 +31,18 @@ const NOT_SAVED_MESSAGES: Record<NotSavedReason, string> = {
   helper_agent: "This action needs the owner's OK, but a helper agent cannot save it for later. Continue without it.",
   too_many: "Too many actions are already waiting for the owner's OK, so this one was not saved. Continue without it.",
 };
+
+/**
+ * What the model reads for a click held after held typing or picking: its card would show the form
+ * as it is now, not as the owner's approved typing leaves it, and the click would be refused on replay.
+ */
+export const CLICK_AFTER_HELD_EDIT_MESSAGE =
+  "This click comes after typing or picking that is still waiting for the owner's OK, so it was not saved. The page will look different once that runs. Continue without it, and click again after the owner approves.";
+
+/** Whether a call types into or picks on a browser page. */
+export function isBrowserEdit(info: InternalToolCallInfo): boolean {
+  return info.original_tool_name === BROWSER_TYPE_TOOL_NAME || info.original_tool_name === BROWSER_SELECT_TOOL_NAME;
+}
 
 /** The line the chat shows when the owner turns a held action down. */
 export const HELD_DENIED_NOTE = 'Denied. Nothing was done.';
@@ -93,6 +106,8 @@ export function holdApprovalCalls(input: {
   message: InternalEnrichedAssistantMessage;
   /** Calls this chat already holds, counted toward the cap. */
   alreadyHeld: number;
+  /** Whether this chat holds browser typing or picking its owner has not answered yet. */
+  browserEditWaiting: boolean;
   /** A helper agent's call cannot be replayed from the main chat, so it is refused. */
   isSubAgent: boolean;
 }): { message: InternalEnrichedAssistantMessage; refused: { id: string; reason: NotSavedReason }[] } {
@@ -101,6 +116,7 @@ export function holdApprovalCalls(input: {
     return { message, refused: [] };
   }
   let held = input.alreadyHeld;
+  let browserEditWaiting = input.browserEditWaiting;
   const toolCalls: InternalEnrichedToolCall[] = [];
   const firstHeld: InternalEnrichedToolCall[] = [];
   const refused: { id: string; reason: NotSavedReason }[] = [];
@@ -116,7 +132,20 @@ export function holdApprovalCalls(input: {
       continue;
     }
     const expires_at = approvalTokenExpiry();
-    if (firstHeld.some(earlier => sameCall(earlier, call))) {
+    if (browserEditWaiting && info.original_tool_name === BROWSER_CLICK_TOOL_NAME) {
+      toolCalls.push({
+        ...call,
+        tool_info: {
+          ...info,
+          is_approval_required: false,
+          pre_dispatch_failure: {
+            kind: 'policy_blocked',
+            message: CLICK_AFTER_HELD_EDIT_MESSAGE,
+            owner_message: CLICK_AFTER_HELD_EDIT_MESSAGE,
+          },
+        },
+      });
+    } else if (firstHeld.some(earlier => sameCall(earlier, call))) {
       toolCalls.push({
         ...call,
         tool_info: { ...info, is_approval_required: false, held_for_owner: { expires_at, duplicate: true } },
@@ -144,6 +173,7 @@ export function holdApprovalCalls(input: {
       };
       firstHeld.push(heldCall);
       toolCalls.push(heldCall);
+      browserEditWaiting ||= isBrowserEdit(info);
     }
   }
   const changed = toolCalls.some((call, index) => call !== message.tool_calls?.[index]);

@@ -214,6 +214,19 @@ describe('classifyTier: browser_type and browser_select ask first, showing the e
     expect(decision.approval_token_id).toEqual(expect.any(String));
   });
 
+  it('a long text or label is cut short in the headline and shown whole in the detail', async () => {
+    const long = 'x'.repeat(200);
+    const decision = await classifyTier(
+      browserAction(BROWSER_TYPE_TOOL_NAME, {
+        browser_element: { ...field, accessible_name: 'y'.repeat(200) },
+        canonical_params: { ref: 'e1', text: long },
+      }),
+      makeCtx(),
+    );
+    expect(decision.card?.plain_what).toBe(`Type "${'x'.repeat(60)}…" into "${'y'.repeat(60)}…" on shop.example?`);
+    expect(decision.card?.outbound_text).toContain(long);
+  });
+
   it('picking an option asks, with the option on the card', async () => {
     const decision = await classifyTier(
       browserAction(BROWSER_SELECT_TOOL_NAME, {
