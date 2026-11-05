@@ -112,26 +112,37 @@ never triggers it from a turn.
 When the person sends a message through the Email connector, Aman saves it as one note in the daily log, so
 the nightly pass can learn how the person writes to each contact.
 
-- **What counts.** A call to `send_email` or `forward_email` on the Email connector whose result is
-  `executed_ok`. The tool names come from `MAIL_SEND_TOOL_NAMES` in the core mail connector contract. A
-  call that was denied, blocked, never ran or failed writes nothing, and `save_draft` writes nothing, since
-  a draft was never sent. A send on any other connector writes nothing.
-- **One place decides.** The turn drain watches each tool result. When a send's result is `executed_ok`, the
-  drain writes the note. This holds for a send approved on a card, which runs in a later turn that never
-  sees the message that asked for it: that turn is handed the calls the person allowed from the turn that
-  paused, so the drain knows what ran. A send that is turned down is not saved.
-- **What the note holds.** The recipients, the subject and the composed body, written word for word by the
-  host. For `forward_email`, only the text the person added; the forwarded message is never saved. The body
-  is cut at the same length as any other tool result, and a message that holds something shaped like a
-  secret is not saved.
+- **What counts.** A call to `send_email` or `forward_email` on the Email connector (the names come from
+  `MAIL_SEND_TOOL_NAMES` in the core mail connector contract) whose result is `executed_ok` and whose text is
+  the sidecar's clean success sentence, "Email sent successfully to ..." or "Email forwarded successfully
+  to ...". The sidecar reports a failed, partial or uncertain delivery as a normal result that starts "Email
+  delivery [" or "Email forward [", so the host reads the sentence and not only the result status. A message
+  that went out but whose Sent copy could not be filed also reads as not clean, and is not saved. A denied,
+  blocked or failed call writes nothing, `save_draft` writes nothing, and a send on any other connector
+  writes nothing.
+- **One place decides.** The turn drain watches each tool result and writes the note when a send's result
+  qualifies. A send approved on a card runs in a later turn that never sees the message that asked for it,
+  so that turn is handed the calls the person allowed, read from the end of the paused turn before the turn
+  starts. Calls are matched by thread and call id together. If the paused turn cannot be read, the turn runs
+  as usual and the send is not saved; a warning is logged.
+- **What the note holds.** The recipients, any cc and bcc, the subject and the composed body, written word
+  for word by the host with no model call. A forward carries no subject of its own (the sidecar sets it), so
+  none is recorded, and only the text the person added is kept, never the forwarded message. The body is
+  cut, on a whole character and with a plain "(cut)" marker, at the same length as any other tool result.
+  A message that holds something shaped like a secret is checked in full before any cut, and is not saved.
+- **Its own write.** The note is saved as soon as the send is known to have gone through, in a write of its
+  own with its own operation id. It does not wait for the turn to finish and does not depend on the turn's
+  save, so it is kept whether or not turn summaries are on, whether or not the turn's own save succeeds, and
+  when the turn ends early. A later recovery of a lost turn neither drops it nor writes it twice.
 - **Source and label.** The note's source is `sent_mail` and its label reads "From a message you sent, Oct 31".
   The Memories page shows "Source: a message you sent". The note is stored with the same origin as other tool
   results (`tool_ingested`), so the recall screen holds it to the same strict posture: what a message says is
-  data, never an instruction. Recall is aged like other read content: a note older than two weeks stays in
+  data, never an instruction. Recall ages it like other read content: a note older than two weeks stays in
   the file but is not recalled.
-- **Summaries on or off.** The note is written by the host with no model call, so it is saved whether or not
-  turn summaries are on. With summaries off it sits beside the full exchange; with summaries on it is saved
-  even when the turn holds nothing else worth keeping.
+- **Not an instruction.** The model composed the text of a sent message, and it can echo text from mail it
+  read, so a `sent_mail` note is evidence of how the person writes, not something the person said as a
+  rule. No pass may promote a `sent_mail` note into a drafting instruction on a page, and so into a fact
+  with source `sent_mail`, unless the person confirms it. Nothing does today: pages are written by hand.
 - **Old files.** Notes already on disk keep their exact bytes. Only a new source word, `sent_mail`, can
   appear in the hidden note marker.
 
