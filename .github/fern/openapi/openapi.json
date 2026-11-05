@@ -7747,14 +7747,15 @@
         "type": "object"
       },
       "ModelUsageRole": {
-        "description": "Job the model did: chat answers, sub-agent work, compaction, turn summarization, profile learning, or the knowledge relevance check.",
+        "description": "Job the model did: chat answers, sub-agent work, compaction, turn summarization, profile learning, the knowledge relevance check, or deciding how loudly to tell the person about something noticed.",
         "enum": [
           "chat",
           "delegation",
           "compaction",
           "summarization",
           "profile_learning",
-          "relevance_judge"
+          "relevance_judge",
+          "noticing"
         ],
         "type": "string"
       },
@@ -9067,7 +9068,7 @@
             "type": "object"
           },
           "saved": {
-            "description": "False until the person saves once. Then the settings are the quiet defaults.",
+            "description": "False until the person saves once. While false, the settings are the quiet defaults.",
             "type": "boolean"
           },
           "settings": {
