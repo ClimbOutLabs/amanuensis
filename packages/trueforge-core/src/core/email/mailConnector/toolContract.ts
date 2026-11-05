@@ -24,6 +24,15 @@ export function isMailSendToolName(tool_name: string): boolean {
   return MAIL_SEND_TOOL_NAMES.some(name => name === tool_name);
 }
 
+/**
+ * Whether a send or forward result says every part went through. The sidecar answers a clean send with
+ * "Email sent successfully to ..." and a clean forward with "Email forwarded successfully to ...". A partial,
+ * failed or uncertain delivery is still a normal result, which starts "Email delivery [" or "Email forward [".
+ */
+export function isMailSendSuccessText(text: string): boolean {
+  return /^Email (?:sent|forwarded) successfully to /.test(text);
+}
+
 /** Saves a message as a draft. It sends nothing, but its recipients are checked against the Email list like a send's. */
 export const MAIL_DRAFT_TOOL_NAME = 'save_draft';
 

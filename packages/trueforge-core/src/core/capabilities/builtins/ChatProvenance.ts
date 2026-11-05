@@ -40,11 +40,8 @@ export function callReturnsOutsideContent(call: RawToolCall | undefined): boolea
   return call === undefined || toolReturnsOutsideContent(calledTool(call).tool_name);
 }
 
-/**
- * Where a tool result came from, as a person would say it: their mail, their calendar, the web, a file, or any other
- * tool. `sent_mail` is not a read: it marks a message the person sent, saved by the host from the send call.
- */
-export type ToolResultSource = 'email' | 'calendar' | 'web' | 'attachment' | 'other' | 'sent_mail';
+/** Where a tool result came from, as a person would say it: their mail, their calendar, the web, a file, or any other tool. */
+export type ToolResultSource = 'email' | 'calendar' | 'web' | 'attachment' | 'other';
 
 const TOOL_RESULT_SOURCE_OF_READ: Record<ReadSource, ToolResultSource> = {
   email_sender: 'email',
