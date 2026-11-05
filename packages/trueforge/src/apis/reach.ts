@@ -10,6 +10,7 @@ import {
   testReachChannelRoute,
   updateReachRoute,
 } from '../routes/reachRoutes';
+import type { PhoneCallService } from '../runtime/calls/phoneCalls';
 import type { DeliveryService } from '../runtime/delivery/deliveryService';
 import { KIND_MAX_LEVEL } from '../runtime/noticing/levels';
 import type { ReachChannels } from '../runtime/noticing/reachChannels';
@@ -20,7 +21,9 @@ import { defaultReachSettings, NOTICING_KINDS, type AlwaysImportantSender, type 
 export interface ReachRouterDeps {
   reachStore: IReachSettingsStore;
   textContacts: Pick<ITextContactStore, 'get'>;
-  deliveryService: Pick<DeliveryService, 'deliver'>;
+  deliveryService: Pick<DeliveryService, 'deliver' | 'recordAttempt'>;
+  /** Places a test call. */
+  calls: Pick<PhoneCallService, 'place'>;
   /** Which phone channels this server can use now. Read per request, since a later part may set one up while running. */
   channels: () => ReachChannels;
   /** The texts of the memories that may name a sender. Empty when this server keeps no readable memory. */
@@ -105,6 +108,20 @@ export function createReachRouter(deps: ReachRouterDeps) {
     if (settings.channels.calls && !channels.calls.available) {
       return c.json({ error: { message: `${channels.calls.note} Leave calls off for now.` } }, 400);
     }
+    if (settings.channels.calls) {
+      const contact = await deps.textContacts.get(owner);
+      if (!canText(contact)) {
+        return c.json(
+          {
+            error: {
+              message:
+                'Calls ring the number you confirm under Texts. Confirm your number first, then switch calls on.',
+            },
+          },
+          400,
+        );
+      }
+    }
     const blocked = settings.call_kinds.find(kind => KIND_MAX_LEVEL[kind] !== 'call');
     if (blocked !== undefined) {
       return c.json(
@@ -167,7 +184,30 @@ export function createReachRouter(deps: ReachRouterDeps) {
       if (!channels.calls.available) {
         return c.json({ error: { message: `${channels.calls.note} There is nothing to try yet.` } }, 409);
       }
-      return c.json({ error: { message: 'This channel cannot be tried from here yet.' } }, 409);
+      const settings = await deps.reachStore.get(owner);
+      const contact = await deps.textContacts.get(owner);
+      if (settings?.channels.calls !== true || !canText(contact)) {
+        return c.json({ error: { message: 'Confirm your number and switch calls on first, then try again.' } }, 409);
+      }
+      // Only the app gets the test item; the call itself is placed below, and a test call never falls back to a text.
+      const delivery = await deps.deliveryService.deliver({
+        ...owner,
+        kind: 'nudge',
+        level: 'call',
+        text: 'This is a test call. If you can hear this, calls work.',
+        reason: 'You pressed Try it in Reach me settings.',
+        link: null,
+        only_channels: [],
+      });
+      const rang = await deps.calls.place({ owner, delivery, fallback: false });
+      await deps.deliveryService.recordAttempt({ ...owner, delivery_id: delivery.id, attempt: rang });
+      if (rang.outcome !== 'sent') {
+        return c.json(
+          { error: { message: rang.detail ?? 'The call could not be started. Try again in a minute.' } },
+          502,
+        );
+      }
+      return c.json({ data: { delivery_id: delivery.id, devices_reached: 0 } }, 201);
     }
     const delivery = await deps.deliveryService.deliver({
       ...owner,

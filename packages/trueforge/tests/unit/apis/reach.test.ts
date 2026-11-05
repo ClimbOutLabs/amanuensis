@@ -25,6 +25,7 @@ async function build({ channels = NO_PHONE_CHANNELS, memories = [] as string[] }
   await migrateSqliteToLatest(db);
   const reachStore = new ReachSettingsStore(db);
   const deliveryStore = new DeliveryStore(db);
+  const textContacts = new TextContactStore(db);
   const deliveryService = createDeliveryService({
     store: deliveryStore,
     senders: [],
@@ -32,13 +33,15 @@ async function build({ channels = NO_PHONE_CHANNELS, memories = [] as string[] }
     logger: winston.createLogger({ silent: true }),
   });
   let current = person('alice');
+  const calls = { place: () => Promise.reject(new Error('No calls in this test.')) };
   const app = new OpenAPIHono();
   app.route(
     '/reach',
     createReachRouter({
       reachStore,
-      textContacts: new TextContactStore(db),
+      textContacts,
       deliveryService,
+      calls,
       channels: () => channels,
       memories: () => Promise.resolve(memories),
       resolveRequestContext: () => current,
@@ -58,6 +61,7 @@ async function build({ channels = NO_PHONE_CHANNELS, memories = [] as string[] }
     put,
     reachStore,
     deliveryStore,
+    textContacts,
     as: (id: string) => {
       current = person(id);
     },
@@ -73,7 +77,8 @@ describe('reach routes', () => {
     expect(data.saved).toBe(false);
     expect(data.settings.call_kinds).toEqual([]);
     expect(data.settings.channels).toEqual({ texts: false, calls: false });
-    expect(data.availability.calls).toEqual({ available: false, note: 'Phone calls are not set up yet.' });
+    expect(data.availability.calls).toEqual(NO_PHONE_CHANNELS.calls);
+    expect(data.availability.calls.available).toBe(false);
     expect(data.max_levels.bill_due).toBe('nudge');
     expect(data.max_levels.calendar_clash).toBe('call');
   });
@@ -97,9 +102,28 @@ describe('reach routes', () => {
     expect((await put({ ...base, channels: { texts: false, calls: true } })).status).toBe(400);
   });
 
-  it('allows calls once the channel is available', async () => {
+  it('allows calls once the channel is available and the number is confirmed, and says what to do before that', async () => {
     const channels: ReachChannels = { ...NO_PHONE_CHANNELS, calls: { available: true, note: 'On.' } };
-    const { put } = await build({ channels });
+    const { put, textContacts } = await build({ channels });
+    const early = await put({ ...defaultReachSettings('UTC'), channels: { texts: false, calls: true } });
+    expect(early.status).toBe(400);
+    expect(JSON.stringify(await early.json())).toContain('Confirm your number first, then switch calls on.');
+    await textContacts.put({
+      tenant_id: 'default',
+      created_by: 'alice',
+      contact: {
+        phone: '+15550111',
+        mode: 'private',
+        confirmed_at: NOW.toISOString(),
+        opted_out_at: null,
+        code_hash: null,
+        code_salt: null,
+        code_expires_at: null,
+        code_attempts: 0,
+        send_window_started_at: null,
+        sends_in_window: 0,
+      },
+    });
     expect((await put({ ...defaultReachSettings('UTC'), channels: { texts: false, calls: true } })).status).toBe(200);
   });
 

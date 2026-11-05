@@ -5,7 +5,7 @@
  */
 import type { RawData, WebSocket } from 'ws';
 
-import type { VoiceEvent, VoiceTransport } from './transport';
+import { socketBytes, type VoiceEvent, type VoiceTransport } from './transport';
 
 /** Sub-protocol name that the browser asks for and the server answers with. */
 export const VOICE_SOCKET_PROTOCOL = 'aman-voice.v1';
@@ -55,13 +55,6 @@ export class BrowserVoiceTransport implements VoiceTransport {
   }
 }
 
-function joined(data: RawData): Buffer {
-  if (Array.isArray(data)) {
-    return Buffer.concat(data);
-  }
-  return data instanceof ArrayBuffer ? Buffer.from(new Uint8Array(data)) : data;
-}
-
 /** What a frame from the browser is: audio bytes, or the request to end. */
 export function readClientFrame({
   data,
@@ -71,10 +64,10 @@ export function readClientFrame({
   isBinary: boolean;
 }): { kind: 'audio'; bytes: Uint8Array } | { kind: 'end' } | { kind: 'ignore' } {
   if (isBinary) {
-    return { kind: 'audio', bytes: new Uint8Array(joined(data)) };
+    return { kind: 'audio', bytes: new Uint8Array(socketBytes(data)) };
   }
   try {
-    const message: unknown = JSON.parse(joined(data).toString());
+    const message: unknown = JSON.parse(socketBytes(data).toString());
     const type = typeof message === 'object' && message !== null && 'type' in message ? message.type : undefined;
     return type === 'end' ? { kind: 'end' } : { kind: 'ignore' };
   } catch {

@@ -170,6 +170,7 @@ const app = createServerApp({
     audit: { record: () => Promise.resolve() },
     logger,
   }),
+  phoneCalls: { place: () => Promise.reject(new Error('No calls while writing the API document.')) },
   webPushPublicKey: undefined,
   sessions: new Sessions({ sessionStore }),
   chatImages: createChatImageService({

@@ -46,6 +46,8 @@ Pick one way to open it. Never publish the main Aman port.
 
 If you installed Aman with the installer, it opens the port on this computer only (127.0.0.1) once `REACH_SMS_PROVIDER=twilio` is in the settings file and you run the installer again. Tailscale or your web server then carries it from there.
 
+Phone calls use this same door and the same address. See [Phone calls](/phone-calls).
+
 ## Privacy
 
 Twilio and the phone company see your number and each text. In Private mode a text holds only the kind of thing. Your number is kept in your own database and is part of your data export. An import brings the number back unconfirmed and with texts off, so you confirm it again.

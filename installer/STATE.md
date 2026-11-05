@@ -51,9 +51,10 @@ Texts through Twilio are set up by the owner in the `.env`, below the managed bl
 `REACH_SMS_PROVIDER=twilio` is in the `.env`, `instance_render` also publishes
 that one port in the instance's compose file, on `127.0.0.1` only, for
 Tailscale Funnel or a web server on the same computer to carry on to Twilio.
-The listener behind it serves only Twilio's routes. The app port is never
-opened for it, and a `.env` without the provider line opens nothing. See
-`docs/text-messages.md`.
+The listener behind it serves only Twilio's routes, for texts and for phone
+calls (including the call's `wss://` media stream on the same port). The app
+port is never opened for it, and a `.env` without the provider line opens
+nothing. See `docs/text-messages.md` and `docs/phone-calls.md`.
 
 The `release.json` in a checkout's `installer/` folder is a different file:
 it is the pins manifest the installer ships (image digests, among them the

@@ -4,6 +4,8 @@
  * listening, turns, speaking, interrupting and approvals.
  */
 import type { Tier3Card } from '@truefoundry/trueforge-core/core';
+import type { RawData } from 'ws';
+
 import type { InputFormat, OutputFormat } from './audio';
 
 export type VoiceState = 'listening' | 'thinking' | 'speaking';
@@ -92,4 +94,12 @@ export interface VoiceTurnRunner {
   }): Promise<TurnOutcome>;
   /** Stops the turn that is running, if any. */
   cancel(): Promise<void>;
+}
+
+/** The bytes of one WebSocket message, however `ws` handed them over. */
+export function socketBytes(data: RawData): Buffer {
+  if (Array.isArray(data)) {
+    return Buffer.concat(data);
+  }
+  return data instanceof ArrayBuffer ? Buffer.from(new Uint8Array(data)) : data;
 }

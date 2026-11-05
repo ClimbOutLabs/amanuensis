@@ -122,6 +122,7 @@ import { createGuideSeeder, seedExistingGuides } from './personas/amanGuide/seed
 import { GOOGLE_ROUTES_BASE_PATH } from './routes/googleRoutes';
 import { OPENAPI_DOCUMENT_TAGS } from './routes/openapiTags';
 import type { ActiveTurnRegistry } from './runtime/activeTurns';
+import type { PhoneCallService } from './runtime/calls/phoneCalls';
 import type { ChatImageService } from './runtime/chatImages/chatImageService';
 import { createChatPictureService } from './runtime/chatPictures/chatPictureService';
 import type { ChatSearchIndexer } from './runtime/chatSearchIndexing';
@@ -328,6 +329,8 @@ export interface ServerDeps<TTransaction> {
   reachChannels: () => ReachChannels;
   /** The person's number for texts and its confirming. */
   textNumbers: TextNumberService;
+  /** Places the test call from Reach me settings. */
+  phoneCalls: Pick<PhoneCallService, 'place'>;
   textContactStore: ITextContactStore;
   /** The public key a browser needs to turn push on; undefined while push is off. */
   webPushPublicKey: string | undefined;
@@ -917,6 +920,7 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
         reachStore: deps.reachSettingsStore,
         textContacts: deps.textContactStore,
         deliveryService: deps.deliveryService,
+        calls: deps.phoneCalls,
         channels: deps.reachChannels,
         memories: async ({ tenant_id }) => {
           const outcome = await createVaultClient({ logger: deps.logger, tenantId: tenant_id })?.listEntries({

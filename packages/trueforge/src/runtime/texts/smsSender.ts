@@ -46,7 +46,8 @@ export function textBody({ name, delivery, mode }: { name: string; delivery: Del
   return `${name}: ${privatePhrase(delivery.kind)}. Open Aman to see it.`;
 }
 
-function maskedTarget(phone: string): string {
+/** How a number is named in Activity: by its last four digits only. */
+export function maskedTarget(phone: string): string {
   return `number ending ${phone.slice(-4)}`;
 }
 

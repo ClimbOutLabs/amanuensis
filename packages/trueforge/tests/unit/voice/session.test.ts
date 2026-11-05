@@ -101,6 +101,22 @@ describe('a spoken turn', () => {
   });
 });
 
+describe('a line no turn asked for', () => {
+  it('speaks it in the line’s own format, sends nothing to the model, and can be talked over', async () => {
+    const t = setup({ stt: ['hello?'], message: [{ text: ['Hi.'] }], outputFormat: 'mulaw8k' });
+    await t.session.say('Hi, it is your assistant. Is this a good time? Something needs you.');
+    expect(t.tts.sentences).toEqual(['Hi, it is your assistant.', 'Is this a good time?', 'Something needs you.']);
+    expect(t.turns.sent).toEqual([]);
+    expect(t.transport.states()).toContain('speaking');
+    const clearedBefore = t.transport.cleared;
+    await feed({ session: t.session, clock: t.clock, samples: hum(700, 0.3, 1.7) });
+    expect(t.transport.cleared).toBe(clearedBefore + 1);
+    await feed({ session: t.session, clock: t.clock, samples: quiet(900) });
+    await t.session.settled();
+    expect(t.turns.sent).toEqual(['hello?']);
+  });
+});
+
 describe('barge-in', () => {
   it('stops playback at once when the person talks over the assistant, and treats it as a new turn', async () => {
     const t = setup({

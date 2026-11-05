@@ -151,6 +151,32 @@ export class VoiceSession {
     this.#samples = joined.slice(offset);
   }
 
+  /**
+   * Speaks a line that no turn asked for, such as the opening of a phone call, after anything already queued. The
+   * person can interrupt it like any reply. Resolves once it has been handed to the line.
+   */
+  say(text: string): Promise<void> {
+    const spoken = this.#turnChain.then(async () => {
+      if (this.#ended) {
+        return;
+      }
+      const abort = new AbortController();
+      this.#turnAbort = abort;
+      const now = this.#clock.now();
+      const speech = this.#speechFor({ signal: abort.signal, marks: { speechEndedAtMs: now, utteranceAtMs: now } });
+      for (const sentence of splitSentences(text)) {
+        speech.say({ text: sentence, role: 'body' });
+      }
+      await speech.drain();
+      if (this.#turnAbort === abort) {
+        this.#turnAbort = undefined;
+      }
+      this.#refreshState();
+    });
+    this.#turnChain = spoken;
+    return spoken;
+  }
+
   /** Resolves once the audio pushed so far, and the turn it started, have been dealt with. */
   async settled(): Promise<void> {
     await this.#audioChain;

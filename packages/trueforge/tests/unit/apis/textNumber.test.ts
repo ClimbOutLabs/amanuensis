@@ -17,6 +17,7 @@ function person(id: string): RequestContext {
 async function build({ provider = true }: { provider?: boolean } = {}) {
   const h = await textsHarness({ provider });
   const channels = reachChannelsFor({ twilio: provider ? { accountSid: 'AC' } : undefined });
+  const calls = { place: () => Promise.reject(new Error('No calls in this test.')) };
   const app = new OpenAPIHono();
   app.route(
     '/texts',
@@ -32,6 +33,7 @@ async function build({ provider = true }: { provider?: boolean } = {}) {
       reachStore: h.reachSettings,
       textContacts: h.contacts,
       deliveryService: h.deliveries,
+      calls,
       channels: () => channels,
       memories: () => Promise.resolve([]),
       resolveRequestContext: () => person('alice'),

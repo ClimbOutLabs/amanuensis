@@ -2813,7 +2813,8 @@
         "enum": [
           "in_app",
           "web_push",
-          "sms"
+          "sms",
+          "call"
         ],
         "type": "string"
       },

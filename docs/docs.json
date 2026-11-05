@@ -44,7 +44,7 @@
           },
           {
             "group": "Your Data and Safety",
-            "pages": ["safety", "privacy", "text-messages", "schedules", "backup"]
+            "pages": ["safety", "privacy", "text-messages", "phone-calls", "schedules", "backup"]
           },
           {
             "group": "TrueForge Harness",

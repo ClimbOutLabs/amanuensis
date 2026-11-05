@@ -47,6 +47,7 @@ import type { ChatImageOrigin } from '../chatImageStore';
 import type { DeliveryAttemptTable, DeliveryTable } from '../deliveryStore';
 import type { OAuthClient, OAuthPendingAuthorizationData, OAuthServer, OAuthToken } from '../mcpServerStore';
 import type { NoticingCheckpointTable, NoticingEventTable } from '../noticingStore';
+import type { PhoneCallTable } from '../phoneCallStore';
 import type { PushSubscriptionTable } from '../pushSubscriptionStore';
 import type { ReachSettingsTable } from '../reachSettingsStore';
 import type { TextContactTable } from '../textContactStore';
@@ -815,6 +816,7 @@ export interface Database {
   delivery_attempt: DeliveryAttemptTable;
   reach_settings: ReachSettingsTable;
   text_contact: TextContactTable;
+  phone_call: PhoneCallTable;
   noticing_event: NoticingEventTable;
   noticing_checkpoint: NoticingCheckpointTable;
   push_subscription: PushSubscriptionTable;

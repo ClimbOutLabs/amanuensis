@@ -3,8 +3,8 @@ import type { ReachAvailability } from '../../schemas/reach';
 
 /**
  * Which of the person's phone channels can be used on this server. Each channel reports itself here when it is set
- * up, and nothing else about noticing changes. Until phone calls exist, a call that survives the rules is delivered
- * as a nudge.
+ * up, and nothing else about noticing changes. While calls are not set up, a call that survives the rules is
+ * delivered as a nudge.
  */
 export type ReachChannels = ReachAvailability;
 
@@ -13,10 +13,17 @@ export const NO_PHONE_CHANNELS: ReachChannels = {
     available: false,
     note: 'Texts are not set up. To set them up, add your Twilio details to the settings file and restart Aman.',
   },
-  calls: { available: false, note: 'Phone calls are not set up yet.' },
+  calls: {
+    available: false,
+    note: 'Calls are not set up. To set them up, add your Twilio details to the settings file and restart Aman.',
+  },
 };
 
-/** The channels this server offers: texts when Twilio is set up, and no calls until they exist. */
+/** Shown beside Calls in Reach me settings, word for word. */
+export const CALLS_PRIVACY_NOTE =
+  "Calls and texts travel through Twilio and the phone company. The assistant's voice and the transcript are made on your computer.";
+
+/** The channels this server offers: texts and calls once Twilio is set up. Calls ring the number confirmed for texts. */
 export function reachChannelsFor({
   twilio,
 }: {
@@ -26,7 +33,7 @@ export function reachChannelsFor({
     return NO_PHONE_CHANNELS;
   }
   return {
-    ...NO_PHONE_CHANNELS,
     texts: { available: true, note: 'Texts travel through Twilio and the phone company.' },
+    calls: { available: true, note: CALLS_PRIVACY_NOTE },
   };
 }

@@ -1,0 +1,308 @@
+import type { ServerType } from '@hono/node-server';
+import winston from 'winston';
+import WebSocket from 'ws';
+
+import { DeliveryStore } from '../../src/db/deliveryStore';
+import { migrateSqliteToLatest } from '../../src/db/migrateSqlite';
+import { PhoneCallStore } from '../../src/db/phoneCallStore';
+import { ReachSettingsStore } from '../../src/db/reachSettingsStore';
+import { createSqliteDb } from '../../src/db/sqlite/client';
+import { SqlitePersonalizationStore } from '../../src/db/sqlite/personalization-store/SqlitePersonalizationStore';
+import { TextContactStore } from '../../src/db/textContactStore';
+import type { CallChat } from '../../src/runtime/calls/callTurns';
+import { createPhoneCallService, type CallChats } from '../../src/runtime/calls/phoneCalls';
+import { MEDIA_STREAM_PATH, type CallProvider, type PlaceCallResult } from '../../src/runtime/calls/twilioCalls';
+import type { DeliveryChannelSender } from '../../src/runtime/delivery/deliveryChannel';
+import { createDeliveryService } from '../../src/runtime/delivery/deliveryService';
+import type { SmsProvider } from '../../src/runtime/texts/smsProvider';
+import { createSmsSender } from '../../src/runtime/texts/smsSender';
+import { createTextNumberService } from '../../src/runtime/texts/textNumber';
+import { defaultReachSettings } from '../../src/schemas/reach';
+import { startTwilioWebhookListener } from '../../src/twilioWebhook/listener';
+import { twilioSignature } from '../../src/twilioWebhook/signature';
+import { phoneCallRoutes } from '../../src/twilioWebhook/voiceCall';
+import { socketBytes } from '../../src/voice/transport';
+import { closeServer, listeningPort } from './listenPort';
+import { FakeStt, FakeTts, LoudnessVad } from './voice/fakes';
+
+export const ALICE = { tenant_id: 'default', created_by: 'alice' };
+export const PHONE = '+15550111';
+export const ACCOUNT_SID = `AC${'a'.repeat(32)}`;
+export const CALL_SID = `CA${'b'.repeat(32)}`;
+export const PUBLIC_URL = 'https://aman.example.invalid';
+export const AUTH_TOKEN = 'token-for-tests';
+
+/**
+ * Stores over one test database, a fake Twilio for texts and calls, a push channel that only records, and the call
+ * service on a real Twilio listener. The clock only moves when a test moves it.
+ */
+export async function callsHarness({ chat }: { chat?: CallChat } = {}) {
+  const db = createSqliteDb(':memory:');
+  await migrateSqliteToLatest(db);
+  const logger = winston.createLogger({ silent: true });
+  const contacts = new TextContactStore(db);
+  const reachSettings = new ReachSettingsStore(db);
+  const deliveryStore = new DeliveryStore(db);
+  const calls = new PhoneCallStore(db);
+  const personalization = new SqlitePersonalizationStore(db);
+  await personalization.upsertProfile({
+    ...ALICE,
+    updated_by: 'alice',
+    assistant_name: 'Mannie',
+    assistant_identity: null,
+    voice_guidance: null,
+    user_name: 'Dana Reyes',
+    address_as: 'Dana',
+    user_profile: null,
+    pinned_preferences: [],
+    help_areas: [],
+    learned_profile: null,
+    learning_enabled: false,
+  });
+  const clock = { now: new Date('2026-11-06T15:00:00.000Z') };
+  const texts: { to: string; body: string }[] = [];
+  const smsProvider: SmsProvider = {
+    send: input => {
+      texts.push(input);
+      return Promise.resolve({ outcome: 'sent' });
+    },
+  };
+  const pushes: string[] = [];
+  const push: DeliveryChannelSender = {
+    channel: 'web_push',
+    send: ({ delivery }) => {
+      if (delivery.level !== 'nudge') {
+        return Promise.resolve([]);
+      }
+      pushes.push(delivery.id);
+      return Promise.resolve([
+        { channel: 'web_push', outcome: 'sent', detail: null, target: 'phone', attempted_at: clock.now.toISOString() },
+      ]);
+    },
+  };
+  const placed: string[] = [];
+  const nextCall: { result: PlaceCallResult } = { result: { outcome: 'started', call_sid: CALL_SID } };
+  const provider: CallProvider = {
+    place: ({ to }) => {
+      placed.push(to);
+      return Promise.resolve(nextCall.result);
+    },
+  };
+  const opened: { opening: string; call_id: string }[] = [];
+  const chats: CallChats = {
+    open: ({ opening, call_id }) => {
+      opened.push({ opening, call_id });
+      return Promise.resolve(chat);
+    },
+  };
+  const tts = new FakeTts();
+  const numbers = createTextNumberService({
+    store: contacts,
+    reachSettings,
+    personalization,
+    provider: smsProvider,
+    audit: { record: () => Promise.resolve() },
+    logger,
+    now: () => clock.now,
+  });
+  const activity: { tool_name: string; description: string; conversation_id: string }[] = [];
+  const service = createPhoneCallService({
+    store: calls,
+    deliveryStore,
+    contacts,
+    reachSettings,
+    personalization,
+    twilio: { provider, accountSid: ACCOUNT_SID, publicUrl: PUBLIC_URL },
+    deliveries: () => deliveries,
+    chats,
+    parts: () => Promise.resolve({ vad: new LoudnessVad(), stt: new FakeStt(), tts }),
+    logger,
+    now: () => clock.now,
+  });
+  const deliveries = createDeliveryService({
+    store: deliveryStore,
+    senders: [
+      push,
+      createSmsSender({
+        contacts,
+        reachSettings,
+        personalization,
+        provider: smsProvider,
+        textNumbers: numbers,
+        now: () => clock.now,
+      }),
+      service.sender,
+    ],
+    audit: {
+      record: input => {
+        activity.push({
+          tool_name: input.tool_name,
+          description: input.description,
+          conversation_id: input.conversation_id,
+        });
+        return Promise.resolve();
+      },
+    },
+    logger,
+    now: () => clock.now,
+  });
+
+  /** A person whose number is confirmed, with texts and calls switched on, the way the Settings page leaves them. */
+  async function readyToCall({ texts: textsOn = true }: { texts?: boolean } = {}) {
+    await contacts.put({
+      ...ALICE,
+      contact: {
+        phone: PHONE,
+        mode: 'private',
+        confirmed_at: '2026-11-06T09:00:00.000Z',
+        opted_out_at: null,
+        code_hash: null,
+        code_salt: null,
+        code_expires_at: null,
+        code_attempts: 0,
+        send_window_started_at: null,
+        sends_in_window: 0,
+      },
+    });
+    const settings = defaultReachSettings('UTC');
+    await reachSettings.put({ ...ALICE, settings: { ...settings, channels: { texts: textsOn, calls: true } } });
+  }
+
+  function callDelivery(text = 'Your 3pm with Dana Reyes clashes with the school pickup.') {
+    return deliveries.deliver({
+      ...ALICE,
+      kind: 'nudge',
+      level: 'call',
+      text,
+      reason: 'Two things on your calendar at the same time.',
+      link: null,
+    });
+  }
+
+  const { routes, sockets } = phoneCallRoutes({ calls: service });
+  const server: ServerType = startTwilioWebhookListener({
+    settings: { authToken: AUTH_TOKEN, webhookPublicUrl: PUBLIC_URL, webhookPort: 0 },
+    hostname: '127.0.0.1',
+    routes,
+    sockets,
+    logger,
+  });
+  const port = await listeningPort(server);
+  const base = `http://127.0.0.1:${String(port)}`;
+
+  /** Posts a form to the listener the way Twilio does, signed with the account's token. */
+  function twilioPost({ path, fields, sign = true }: { path: string; fields: Record<string, string>; sign?: boolean }) {
+    const params = new URLSearchParams(fields);
+    return fetch(`${base}${path}`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/x-www-form-urlencoded',
+        ...(sign
+          ? { 'x-twilio-signature': twilioSignature({ authToken: AUTH_TOKEN, url: `${PUBLIC_URL}${path}`, params }) }
+          : {}),
+      },
+      body: params.toString(),
+    });
+  }
+
+  /** Opens the media stream the way Twilio does, echoing every mark back as played, and sends `start`. */
+  async function openMedia({
+    token,
+    callSid = CALL_SID,
+    sign = true,
+  }: {
+    token: string | undefined;
+    callSid?: string;
+    sign?: boolean;
+  }) {
+    const wssUrl = `${PUBLIC_URL.replace(/^https:/, 'wss:')}${MEDIA_STREAM_PATH}`;
+    const socket = new WebSocket(`ws://127.0.0.1:${String(port)}${MEDIA_STREAM_PATH}`, {
+      headers: sign
+        ? {
+            'x-twilio-signature': twilioSignature({
+              authToken: AUTH_TOKEN,
+              url: wssUrl,
+              params: new URLSearchParams(),
+            }),
+          }
+        : {},
+    });
+    const frames: { event: string; media?: { payload: string }; mark?: { name: string } }[] = [];
+    const closed = new Promise<number>(resolve => {
+      socket.on('close', code => {
+        resolve(code);
+      });
+    });
+    const failed = new Promise<number | undefined>(resolve => {
+      socket.on('unexpected-response', (_request, response) => {
+        resolve(response.statusCode);
+      });
+      socket.on('open', () => {
+        resolve(undefined);
+      });
+      socket.on('error', () => {
+        resolve(undefined);
+      });
+    });
+    socket.on('message', data => {
+      const frame: unknown = JSON.parse(socketBytes(data).toString('utf8'));
+      if (typeof frame !== 'object' || frame === null || !('event' in frame) || typeof frame.event !== 'string') {
+        return;
+      }
+      const name =
+        'mark' in frame && typeof frame.mark === 'object' && frame.mark !== null && 'name' in frame.mark
+          ? String(frame.mark.name)
+          : undefined;
+      frames.push({ event: frame.event, ...(name === undefined ? {} : { mark: { name } }) });
+      if (frame.event === 'mark' && name !== undefined) {
+        socket.send(JSON.stringify({ event: 'mark', streamSid: 'MZ1', mark: { name } }));
+      }
+    });
+    const refusedWith = await failed;
+    if (refusedWith === undefined && socket.readyState === socket.OPEN) {
+      socket.send(JSON.stringify({ event: 'connected', protocol: 'Call', version: '1.0.0' }));
+      socket.send(
+        JSON.stringify({
+          event: 'start',
+          start: { streamSid: 'MZ1', callSid, customParameters: token === undefined ? {} : { token } },
+        }),
+      );
+    }
+    return { socket, frames, closed, refusedWith };
+  }
+
+  /** The one-time token the voice webhook put in its TwiML, or undefined when it hung up. */
+  async function answer(answeredBy = 'human'): Promise<{ twiml: string; token: string | undefined }> {
+    const response = await twilioPost({
+      path: '/twilio/voice',
+      fields: { AccountSid: ACCOUNT_SID, CallSid: CALL_SID, AnsweredBy: answeredBy, From: '+15550100', To: PHONE },
+    });
+    const twiml = await response.text();
+    return { twiml, token: /<Parameter name="token" value="([^"]+)"/.exec(twiml)?.[1] };
+  }
+
+  return {
+    db,
+    contacts,
+    reachSettings,
+    deliveryStore,
+    calls,
+    deliveries,
+    service,
+    texts,
+    pushes,
+    placed,
+    nextCall,
+    opened,
+    tts,
+    activity,
+    clock,
+    base,
+    readyToCall,
+    callDelivery,
+    twilioPost,
+    openMedia,
+    answer,
+    close: () => closeServer(server),
+  };
+}

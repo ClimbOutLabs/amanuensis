@@ -66,7 +66,12 @@ import type { Logger } from 'winston';
 import { createServerApp } from './app';
 import { TrueForgeAuthorizer, type Authorizer } from './auth/authorizer';
 import { createAuthenticator } from './auth/createAuthenticator';
-import { resolveRequestContext, STANDALONE_REQUEST_CONTEXT, type RequestContext } from './auth/identity';
+import {
+  requestContextFromCreatedBySubject,
+  resolveRequestContext,
+  STANDALONE_REQUEST_CONTEXT,
+  type RequestContext,
+} from './auth/identity';
 import { startOidcDiscovery } from './auth/oidc';
 import { McpCatalog } from './catalog/McpCatalog';
 import { ModelCatalog } from './catalog/ModelCatalog';
@@ -88,6 +93,7 @@ import type { IModelProviderStore } from './db/modelProviderStore';
 import { NoticingStore, type INoticingStore } from './db/noticingStore';
 import type { IPersonalizationStore } from './db/personalizationStore';
 import type { IPersonaStore } from './db/personaStore';
+import { PhoneCallStore, type IPhoneCallStore } from './db/phoneCallStore';
 import type { PostgresAgentStore } from './db/postgres/agent-store/PostgresAgentStore';
 import type { Database as PostgresDatabase } from './db/postgres/types';
 import { PushSubscriptionStore, type IPushSubscriptionStore } from './db/pushSubscriptionStore';
@@ -114,13 +120,16 @@ import { PACKAGE_VERSION } from './packageVersion';
 import { closePersonaKnowledgeIndexers } from './personaKnowledge/knowledgeIndexer';
 import { ActiveTurnRegistry } from './runtime/activeTurns';
 import { registerCalendarConnectorForBoot } from './runtime/calendarAccount';
+import { createCallChats } from './runtime/calls/callChats';
+import { createPhoneCallService } from './runtime/calls/phoneCalls';
+import { createTwilioCallProvider } from './runtime/calls/twilioCalls';
 import { createChatImageService } from './runtime/chatImages/chatImageService';
 import { CHAT_IMAGE_RETENTION_DAYS } from './runtime/chatImages/limits';
 import { createImageReencoder } from './runtime/chatImages/reencodeInSandbox';
 import { ChatSearchIndexer } from './runtime/chatSearchIndexing';
 import { recoverAbandonedCommandExecutions } from './runtime/commandExecutionRecovery';
 import { designateTavilyAtBoot, seedDefaultSearchProviderAtBoot } from './runtime/defaultSearchProvider';
-import { createDeliveryService } from './runtime/delivery/deliveryService';
+import { createDeliveryService, type DeliveryService } from './runtime/delivery/deliveryService';
 import { createWebPushSender } from './runtime/delivery/webPushSender';
 import { EventSubscriptionRegistry } from './runtime/event-subscription';
 import { instanceOwnerSubjectId } from './runtime/instanceOwner';
@@ -162,9 +171,13 @@ import { TrueFoundryServiceFoundryServerClient } from './truefoundry/TrueFoundry
 import { TrueFoundrySkillStore } from './truefoundry/TrueFoundrySkillStore';
 import { inboundSmsRoute } from './twilioWebhook/inboundSms';
 import { startTwilioWebhookListener } from './twilioWebhook/listener';
+import { phoneCallRoutes } from './twilioWebhook/voiceCall';
 import { ensureWritableDataDir } from './utils/dataDir';
 import { startSttAvailabilityWatcher } from './voice/sttAvailability';
-import { attachVoiceSocket } from './voice/voiceSocket';
+import { SidecarSpeechToText } from './voice/sttClient';
+import { SidecarSpeechSynthesizer } from './voice/ttsClient';
+import { SileroSpeechProbability } from './voice/vad/sileroVad';
+import { attachVoiceSocket, readyVadModel } from './voice/voiceSocket';
 
 /** Persistence + optional Redis wired for the selected topology. */
 interface ServerPersistence<TTransaction> {
@@ -211,6 +224,7 @@ interface ServerPersistence<TTransaction> {
   deliveryStore: IDeliveryStore;
   reachSettingsStore: IReachSettingsStore;
   textContactStore: ITextContactStore;
+  phoneCallStore: IPhoneCallStore;
   noticingStore: INoticingStore;
   pushSubscriptionStore: IPushSubscriptionStore;
   approvalTokenStore: ApprovalTokenStore;
@@ -450,6 +464,7 @@ async function createStandalonePersistence(options: {
     deliveryStore: new DeliveryStore(db),
     reachSettingsStore: new ReachSettingsStore(db),
     textContactStore: new TextContactStore(db),
+    phoneCallStore: new PhoneCallStore(db),
     noticingStore: new NoticingStore(db),
     pushSubscriptionStore: new PushSubscriptionStore(db),
     approvalTokenStore: new SqliteApprovalTokenStore(db),
@@ -625,6 +640,7 @@ async function createDistributedPersistence(options: {
     deliveryStore: new DeliveryStore(db),
     reachSettingsStore: new ReachSettingsStore(db),
     textContactStore: new TextContactStore(db),
+    phoneCallStore: new PhoneCallStore(db),
     noticingStore: new NoticingStore(db),
     pushSubscriptionStore: new PushSubscriptionStore(db),
     approvalTokenStore: new PostgresApprovalTokenStore(db),
@@ -671,6 +687,7 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     deliveryStore,
     reachSettingsStore,
     textContactStore,
+    phoneCallStore,
     noticingStore,
     pushSubscriptionStore,
     approvalTokenStore,
@@ -809,7 +826,61 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     logger,
   });
   const reachChannels = () => reachChannelsFor({ twilio: configuration.TWILIO });
-  const deliveryService = createDeliveryService({
+  // Made below; the call channel reaches them only once a call is under way.
+  const callDeps: {
+    deliveries?: DeliveryService;
+    sessions?: Sessions<SessionCustom, TurnCustom>;
+    app?: { fetch: (request: Request) => Response | Promise<Response> };
+  } = {};
+  const phoneCalls = createPhoneCallService({
+    store: phoneCallStore,
+    deliveryStore,
+    contacts: textContactStore,
+    reachSettings: reachSettingsStore,
+    personalization: personalizationStore,
+    twilio:
+      configuration.TWILIO === undefined
+        ? undefined
+        : {
+            provider: createTwilioCallProvider({ settings: configuration.TWILIO }),
+            accountSid: configuration.TWILIO.accountSid,
+            publicUrl: configuration.TWILIO.webhookPublicUrl,
+          },
+    deliveries: () => {
+      if (callDeps.deliveries === undefined) {
+        throw new Error('The delivery service is not ready yet.');
+      }
+      return callDeps.deliveries;
+    },
+    chats: createCallChats({
+      sessionStore,
+      sessions: () => {
+        if (callDeps.sessions === undefined) {
+          throw new Error('Chats are not ready yet.');
+        }
+        return callDeps.sessions;
+      },
+      reachSettings: reachSettingsStore,
+      selfFetch: () => request => {
+        if (callDeps.app === undefined) {
+          throw new Error('The app is not ready yet.');
+        }
+        return callDeps.app.fetch(request);
+      },
+      contextFor: ({ tenant_id, subject }) =>
+        getTrueForgeAuthMode(configuration) === TrueForgeAuthMode.Standalone
+          ? STANDALONE_REQUEST_CONTEXT
+          : requestContextFromCreatedBySubject({ tenant_id, created_by_subject: subject }),
+      port: configuration.PORT,
+    }),
+    parts: async () => ({
+      vad: await SileroSpeechProbability.load({ modelPath: await readyVadModel() }),
+      stt: new SidecarSpeechToText(),
+      tts: new SidecarSpeechSynthesizer(),
+    }),
+    logger,
+  });
+  const deliveries = createDeliveryService({
     store: deliveryStore,
     senders: [
       createWebPushSender({ subscriptions: pushSubscriptionStore, settings: configuration.WEB_PUSH }),
@@ -820,10 +891,12 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
         provider: smsProvider,
         textNumbers,
       }),
+      phoneCalls.sender,
     ],
     audit: sentinelAuditStore,
     logger,
   });
+  callDeps.deliveries = deliveries;
   const noticingOwnerId = instanceOwnerSubjectId({
     signInOff: getTrueForgeAuthMode(configuration) === TrueForgeAuthMode.Standalone,
     defaultSubjectId: STANDALONE_REQUEST_CONTEXT.subject.id,
@@ -842,7 +915,7 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     approvals: sessionApprovalSource({ sessionStore }),
     reachSettings: reachSettingsStore,
     store: noticingStore,
-    deliveries: deliveryService,
+    deliveries,
     judgeFor: createNoticingJudgeResolver({
       resolveModelProviderStore: context => persistence.resolveModelProviderStore(context),
       personalizationStore,
@@ -866,6 +939,7 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     mailPolicyStatusPath: configuration.MAIL_POLICY_STATUS_FILE,
   });
   const sessions = new Sessions({ sessionStore, sentinelServices });
+  callDeps.sessions = sessions;
   const chatImages = createChatImageService({
     store: chatImageStore,
     sessionStore,
@@ -946,6 +1020,7 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     personaStore,
     logger,
   });
+  const callRoutes = phoneCallRoutes({ calls: phoneCalls });
   const app = createServerApp({
     chatSearchIndexer,
     modelCatalog,
@@ -981,7 +1056,8 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     briefItemStore,
     deliveryStore,
     pushSubscriptionStore,
-    deliveryService,
+    deliveryService: deliveries,
+    phoneCalls,
     reachSettingsStore,
     noticingService,
     reminderReach: createReminderReach({
@@ -1012,6 +1088,7 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
       return controller.isRunning() ? 'running' : 'stopped';
     },
   });
+  callDeps.app = app;
 
   return {
     activeTurns,
@@ -1032,7 +1109,8 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     twilioWebhookRoutes:
       configuration.TWILIO === undefined
         ? []
-        : [inboundSmsRoute({ settings: configuration.TWILIO, textNumbers, logger })],
+        : [inboundSmsRoute({ settings: configuration.TWILIO, textNumbers, logger }), ...callRoutes.routes],
+    twilioSocketRoutes: configuration.TWILIO === undefined ? [] : callRoutes.sockets,
   };
 }
 
@@ -1114,6 +1192,7 @@ try {
     chatSearchIndexer,
     packageMirrorAllowanceHolds,
     twilioWebhookRoutes,
+    twilioSocketRoutes,
   } = configuration.STANDALONE
     ? await createServerRuntime(
         await createStandalonePersistence({ sqlitePath: configuration.SQLITE_PATH, logger }),
@@ -1339,6 +1418,7 @@ try {
           settings: configuration.TWILIO,
           hostname: configuration.HOST,
           routes: twilioWebhookRoutes,
+          sockets: twilioSocketRoutes,
           logger,
         });
 
