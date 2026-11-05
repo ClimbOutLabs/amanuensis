@@ -22,6 +22,7 @@ import type { IAgentStore } from '../../src/db/agentStore';
 import type { IDeliveryStore } from '../../src/db/deliveryStore';
 import type { IGlobalSettingsStore } from '../../src/db/globalSettingsStore';
 import type { IMcpServerStore } from '../../src/db/mcpServerStore';
+import type { IModelProviderStore } from '../../src/db/modelProviderStore';
 import type { IPersonaStore } from '../../src/db/personaStore';
 import type { IPersonalizationStore } from '../../src/db/personalizationStore';
 import type { IScheduleStore } from '../../src/db/scheduleStore';
@@ -164,6 +165,7 @@ export interface DataTransferSeedStores<TTransaction> {
   deliveryStore: IDeliveryStore;
   turnArtifactStore: ITurnArtifactStore<TTransaction>;
   mcpServerStore: IMcpServerStore<TTransaction>;
+  modelProviderStore: IModelProviderStore<TTransaction>;
 }
 
 export interface SeedRichInstanceInput<TTransaction> {

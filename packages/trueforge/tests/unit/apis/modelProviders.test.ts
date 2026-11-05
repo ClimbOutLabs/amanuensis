@@ -360,7 +360,9 @@ describe('model-provider secret redaction and strict PUT', () => {
       }),
     );
     expect(response.status).toBe(400);
-    expect(await response.json()).toEqual({ error: { message: 'API key is required' } });
+    expect(await response.json()).toEqual({
+      error: { message: 'API key is required. Add an API key for this provider, then save again.' },
+    });
   });
 
   it('POST create with a redacted api_key returns 400', async () => {
@@ -373,13 +375,57 @@ describe('model-provider secret redaction and strict PUT', () => {
       }),
     );
     expect(response.status).toBe(400);
-    expect(await response.json()).toEqual({ error: { message: 'API key is required' } });
+    expect(await response.json()).toEqual({
+      error: { message: 'API key is required. Add an API key for this provider, then save again.' },
+    });
   });
 
   it('PUT rejects a missing api_key at the Zod layer', async () => {
     const { settingsRouter } = await createRouters();
     const response = await settingsRouter.request('/model-providers', putInit({ ...anthropicBody, auth: {} }));
     expect(response.status).toBe(400);
+  });
+
+  it('POST create without a key returns 400 for a provider that needs one', async () => {
+    const { settingsRouter } = await createRouters();
+    const { auth: _auth, ...keyless } = anthropicBody;
+    const response = await settingsRouter.request('/model-providers', postInit(keyless));
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({
+      error: { message: 'API key is required. Add an API key for this provider, then save again.' },
+    });
+  });
+
+  it('PUT create without a key returns 400 for a provider that needs one', async () => {
+    const { settingsRouter } = await createRouters();
+    const { auth: _auth, ...keyless } = anthropicBody;
+    const response = await settingsRouter.request('/model-providers', putInit(keyless));
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({
+      error: { message: 'API key is required. Add an API key for this provider, then save again.' },
+    });
+  });
+
+  it('PUT without a key keeps the stored key', async () => {
+    const { settingsRouter, modelProviderStore } = await createRouters();
+    expect((await settingsRouter.request('/model-providers', putInit(anthropicBody))).status).toBe(200);
+
+    const { auth: _auth, ...keyless } = anthropicBody;
+    const update = await settingsRouter.request(
+      '/model-providers',
+      putInit({
+        ...keyless,
+        models: [model, { model_id: 'claude-opus-4', name: 'claude-opus-4', properties: model.properties }],
+      }),
+    );
+    expect(update.status).toBe(200);
+    const stored = await modelProviderStore.getProvider({
+      tenant_id: 'default',
+      name: 'anthropic',
+      model_name: 'claude-sonnet-4-6',
+    });
+    expect(stored?.manifest.auth?.api_key).toBe('sk-ant-secret');
+    expect(stored?.manifest.models).toHaveLength(2);
   });
 
   it('PUT with a redacted api_key keeps the stored secret', async () => {
