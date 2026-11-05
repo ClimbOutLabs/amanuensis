@@ -10,6 +10,7 @@ import { createServer, defaultClientConditions, type Plugin } from 'vite';
 
 import { DEV_OPTIMIZE_DEPS } from '../src/devPrebundle.ts';
 import { findChromiumExecutable } from './support/findChromiumExecutable.ts';
+import { FIRST_LOAD_TIMEOUT_MS } from './support/firstLoad.ts';
 import { privateViteCache } from './support/viteCache.ts';
 
 const RENDER_TIMEOUT_MS = 45_000;
@@ -122,12 +123,6 @@ test('chat images: no remote image request ever leaves the page', { timeout: 180
     // Same resolution as the app: workspace packages load from source, one React instance.
     resolve: {
       conditions: ['trueforge-dev', ...defaultClientConditions],
-      alias: [
-        {
-          find: /^truefoundry-gateway-sdk(\/.*)?$/,
-          replacement: fileURLToPath(new URL('../src/gatewaySdkStub.ts', import.meta.url)),
-        },
-      ],
       dedupe: ['react', 'react-dom', '@assistant-ui/core', '@assistant-ui/store', '@assistant-ui/react'],
     },
     plugins: [chatImageRoute(gradientPng())],
@@ -177,7 +172,7 @@ test('chat images: no remote image request ever leaves the page', { timeout: 180
 
       await page.goto(`${origin}/tests/fixtures/chat-images.fixture.html`, {
         waitUntil: 'domcontentloaded',
-        timeout: RENDER_TIMEOUT_MS,
+        timeout: FIRST_LOAD_TIMEOUT_MS,
       });
 
       // Only the sandbox chart shows before anyone asks; every web picture waits behind a line.

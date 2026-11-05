@@ -10,6 +10,7 @@ import { createServer, defaultClientConditions, type Plugin } from 'vite';
 
 import { DEV_OPTIMIZE_DEPS } from '../src/devPrebundle.ts';
 import { findChromiumExecutable } from './support/findChromiumExecutable.js';
+import { FIRST_LOAD_TIMEOUT_MS } from './support/firstLoad.ts';
 import { privateViteCache } from './support/viteCache.ts';
 
 const RENDER_TIMEOUT_MS = 45_000;
@@ -95,12 +96,6 @@ test(
       server: { host: '127.0.0.1', port: 0 },
       resolve: {
         conditions: ['trueforge-dev', ...defaultClientConditions],
-        alias: [
-          {
-            find: /^truefoundry-gateway-sdk(\/.*)?$/,
-            replacement: fileURLToPath(new URL('../src/gatewaySdkStub.ts', import.meta.url)),
-          },
-        ],
         dedupe: ['react', 'react-dom', '@assistant-ui/core', '@assistant-ui/store', '@assistant-ui/react'],
       },
       plugins: [spacePictureRoute(gradientPng(), seen)],
@@ -134,7 +129,7 @@ test(
 
       await page.goto(`${origin}/tests/fixtures/space-pictures.fixture.html`, {
         waitUntil: 'domcontentloaded',
-        timeout: RENDER_TIMEOUT_MS,
+        timeout: FIRST_LOAD_TIMEOUT_MS,
       });
 
       const states = await page.waitForFunction(

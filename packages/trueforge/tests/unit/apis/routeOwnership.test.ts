@@ -93,6 +93,7 @@ interface Seeded {
   documentId: string;
   spaceId: string;
   folderId: string;
+  spaceFolderId: string;
   repositoryId: string;
   vaultEntryId: string;
 }
@@ -294,6 +295,22 @@ function describeRouteOwnership(engine: OwnershipEngine): void {
         json: { folder_id: folderId },
         status: 200,
       });
+      const spaceFolderId = IdSchema.parse(
+        await callOk({
+          user: ALICE,
+          path: '/api/v1/space-folders',
+          method: 'POST',
+          json: { name: 'Alice space folder' },
+          status: 201,
+        }),
+      ).data.id;
+      await callOk({
+        user: ALICE,
+        path: `/api/v1/spaces/${spaceId}/folder`,
+        method: 'PUT',
+        json: { folder_id: spaceFolderId },
+        status: 200,
+      });
       const repositoryId = IdSchema.parse(
         await callOk({
           user: ALICE,
@@ -343,6 +360,7 @@ function describeRouteOwnership(engine: OwnershipEngine): void {
         documentId,
         spaceId,
         folderId,
+        spaceFolderId,
         repositoryId,
         vaultEntryId,
       };
@@ -545,6 +563,25 @@ function describeRouteOwnership(engine: OwnershipEngine): void {
           json: { name: 'pwned' },
         },
         { name: 'delete folder', path: `/api/v1/session-folders/${s.folderId}`, method: 'DELETE', idempotent: true },
+        {
+          name: 'rename space folder',
+          path: `/api/v1/space-folders/${s.spaceFolderId}`,
+          method: 'PUT',
+          json: { name: 'pwned' },
+        },
+        {
+          name: 'delete space folder',
+          path: `/api/v1/space-folders/${s.spaceFolderId}`,
+          method: 'DELETE',
+          idempotent: true,
+        },
+        {
+          name: 'move her space',
+          path: `/api/v1/spaces/${s.spaceId}/folder`,
+          method: 'PUT',
+          json: { folder_id: s.spaceFolderId },
+        },
+        { name: 'unfile her space', path: `/api/v1/spaces/${s.spaceId}/folder`, method: 'DELETE' },
         { name: 'get repository', path: `/api/v1/repositories/${s.repositoryId}` },
         { name: 'repository commands', path: `/api/v1/repositories/${s.repositoryId}/commands` },
         {
@@ -672,6 +709,9 @@ function describeRouteOwnership(engine: OwnershipEngine): void {
       const list = await bodyOf(await call({ user: ALICE, path: '/api/v1/session-folders' }));
       expect(list.text).toContain(s.folderId);
       expect(list.text).not.toContain('pwned');
+      const spaceFolders = await bodyOf(await call({ user: ALICE, path: '/api/v1/space-folders' }));
+      expect(spaceFolders.text).toContain(s.spaceFolderId);
+      expect(spaceFolders.text).not.toContain('pwned');
       const personas = await bodyOf(await call({ user: ALICE, path: '/api/v1/personas' }));
       expect(personas.text).toContain(s.personaId);
       expect(personas.text).not.toContain('pwned');
@@ -694,6 +734,7 @@ function describeRouteOwnership(engine: OwnershipEngine): void {
         '/api/v1/personas',
         '/api/v1/spaces',
         '/api/v1/session-folders',
+        '/api/v1/space-folders',
         '/api/v1/repositories',
         '/api/v1/personalization/profile',
         '/api/v1/personalization/context',
@@ -707,7 +748,14 @@ function describeRouteOwnership(engine: OwnershipEngine): void {
           listing,
           leaked: false,
         });
-        for (const id of [seeded.scheduleId, seeded.personaId, seeded.spaceId, seeded.folderId, seeded.repositoryId]) {
+        for (const id of [
+          seeded.scheduleId,
+          seeded.personaId,
+          seeded.spaceId,
+          seeded.folderId,
+          seeded.spaceFolderId,
+          seeded.repositoryId,
+        ]) {
           expect({ listing, leaked: body.text.includes(id) }).toEqual({ listing, leaked: false });
         }
       }

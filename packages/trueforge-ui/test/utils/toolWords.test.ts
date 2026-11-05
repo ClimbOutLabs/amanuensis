@@ -6,6 +6,8 @@ describe('toolWords', () => {
   it('reads a known tool in plain words while it runs and once it is done', () => {
     expect(toolDoingWords('edit_space')).toBe('Updating the space');
     expect(toolDoneWords('edit_space')).toBe('Changed a space');
+    expect(toolDoingWords('move_space')).toBe('Moving a space to a folder');
+    expect(toolDoneWords('move_space')).toBe('Moved a space to a folder');
     // update_space is retired: it has no wording of its own any more.
     expect(toolDoingWords('update_space')).toBeUndefined();
     expect(toolDoneWords('update_space')).toBe(TOOL_DONE_FALLBACK);
@@ -18,6 +20,11 @@ describe('toolWords', () => {
     expect(toolDoingWords('google_setup_status')).toBe('Checking your Google connection');
     expect(toolDoneWords('google_setup_status')).toBe('Checked your Google connection');
     expect(toolDoneWords('google_setup_read')).toBe('Checked your Google connection');
+  });
+
+  it('reads the feed’s activity rows in plain words', () => {
+    expect(toolDoneWords('delivery.created')).toBe('Sent you a notice');
+    expect(toolDoneWords('delivery.web_push')).toBe('Sent a notice to your device');
   });
 
   it('never shows a raw tool name for a tool it does not know', () => {

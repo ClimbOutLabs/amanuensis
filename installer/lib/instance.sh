@@ -38,7 +38,7 @@ dcm() {
   D compose --project-name aman-machine --project-directory "$MACHINE_DIR" -f "$MACHINE_DIR/compose.yaml" --env-file "$MACHINE_DIR/.env" "$@"
 }
 
-stt_threads() {
+voice_threads() {
   local n
   n=$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)
   case "$n" in '' | *[![:digit:]]*) n=4 ;; esac
@@ -47,24 +47,27 @@ stt_threads() {
   printf '%s' "$n"
 }
 
-machine_render() {
+# The voice service runs only when a release recorded its image; a release from before it has none.
+machine_render() { # stt image, tts image (may be empty)
+  local tts_on=0
+  if [ -n "${2:-}" ]; then tts_on=1; fi
   ensure_private_dir "$MACHINE_DIR"
-  render_template "$TEMPLATES_DIR/machine/compose.yaml.tpl" "STT_IMAGE=$1" | write_if_changed "$MACHINE_DIR/compose.yaml" 644 || true
+  render_template "$TEMPLATES_DIR/machine/compose.yaml.tpl" "STT_IMAGE=$1" "IF_TTS=$tts_on" "TTS_IMAGE=${2:-}" | write_if_changed "$MACHINE_DIR/compose.yaml" 644 || true
   if [ ! -f "$MACHINE_DIR/.env" ]; then
-    render_template "$TEMPLATES_DIR/machine/env.tpl" "STT_THREADS=$(stt_threads)" | write_if_changed "$MACHINE_DIR/.env" 600 || true
+    render_template "$TEMPLATES_DIR/machine/env.tpl" "VOICE_THREADS=$(voice_threads)" | write_if_changed "$MACHINE_DIR/.env" 600 || true
   fi
 }
 
-# up -d is a no-op when nothing changed. The speech model loads in the background, so this does not wait on it.
-machine_up() {
+# up -d is a no-op when nothing changed. The speech models load in the background, so this does not wait on them.
+machine_up() { # stt image, tts image (may be empty)
   local name rc=0
-  machine_render "$1"
-  step_begin start-machine "Starting the speech-to-text service"
+  machine_render "$1" "${2:-}"
+  step_begin start-machine "Starting the speech services"
   dcm up -d --remove-orphans >"$STEP_LOG" 2>&1 || rc=$?
   if [ "$rc" != 0 ]; then
-    step_fail "The speech-to-text service could not start" "Fix what the log says, then run install.sh again."
+    step_fail "The speech services could not start" "Fix what the log says, then run install.sh again."
   fi
-  step_ok "The speech-to-text service is running"
+  step_ok "The speech services are running"
   # A recreated speech container loses the extra networks it was connected to, so reconnect them all.
   for name in $(reg_names); do
     if D network inspect "$(stt_network "$name")" >/dev/null 2>&1; then
@@ -73,33 +76,47 @@ machine_up() {
   done
 }
 
-# Each instance has its own internal network with only its speech relay on it besides the speech service. The shared
-# service is connected to every one of those networks, so no instance has a route to another, and the service has no
+# Each instance has its own internal network with only its speech relay on it besides the shared speech services. Each
+# service is connected to every one of those networks, so no instance has a route to another, and the services have no
 # route into any instance except that relay.
 stt_network() { printf 'aman_%s_speech' "$1"; }
 
+# The shared speech services the machine project runs: speech-to-text always, the voice when its image was recorded.
+speech_engines() {
+  printf '%s\n' aman-stt
+  if grep -q 'container_name: aman-tts' "$MACHINE_DIR/compose.yaml" 2>/dev/null; then printf '%s\n' aman-tts; fi
+}
+
 stt_attach() {
-  local net out
+  local engine rc=0
+  for engine in $(speech_engines); do
+    engine_attach "$1" "$engine" || rc=1
+  done
+  return "$rc"
+}
+
+engine_attach() { # instance, container
+  local net out alias=$2-engine
   net=$(stt_network "$1")
-  if out=$(D network connect --alias aman-stt-engine "$net" aman-stt 2>&1); then
+  if out=$(D network connect --alias "$alias" "$net" "$2" 2>&1); then
     return 0
   fi
   case "$out" in
     *"already exists"*)
       # Joined before, perhaps without the name the relay dials; then join again with it.
-      if stt_has_alias "$net"; then return 0; fi
-      D network disconnect -f "$net" aman-stt >/dev/null 2>&1 || true
-      if out=$(D network connect --alias aman-stt-engine "$net" aman-stt 2>&1); then return 0; fi
+      if engine_has_alias "$net" "$2"; then return 0; fi
+      D network disconnect -f "$net" "$2" >/dev/null 2>&1 || true
+      if out=$(D network connect --alias "$alias" "$net" "$2" 2>&1); then return 0; fi
       ;;
   esac
-  warn "The speech-to-text service could not be connected to instance $1: $out"
+  warn "The speech service $2 could not be connected to instance $1: $out"
   return 1
 }
 
-stt_has_alias() { # network
+engine_has_alias() { # network, container
   local alias
-  for alias in $(D inspect --format "{{with index .NetworkSettings.Networks \"$1\"}}{{join .Aliases \" \"}}{{end}}" aman-stt 2>/dev/null); do
-    if [ "$alias" = aman-stt-engine ]; then return 0; fi
+  for alias in $(D inspect --format "{{with index .NetworkSettings.Networks \"$1\"}}{{join .Aliases \" \"}}{{end}}" "$2" 2>/dev/null); do
+    if [ "$alias" = "$2-engine" ]; then return 0; fi
   done
   return 1
 }
@@ -110,6 +127,7 @@ stt_old_network() { printf 'aman_%s_stt' "$1"; }
 
 stt_detach() {
   D network disconnect -f "$(stt_network "$1")" aman-stt >/dev/null 2>&1 || true
+  D network disconnect -f "$(stt_network "$1")" aman-tts >/dev/null 2>&1 || true
   D network disconnect -f "$(stt_old_network "$1")" aman-stt >/dev/null 2>&1 || true
   stt_forget_old_network "$1"
 }
@@ -137,6 +155,7 @@ instance_render() {
   local name=$1 app_image=$2 dex_image=$3 dir login_bind=0.0.0.0 app_port login_port public_url login_url email client_id sandbox_on edge_on login_host origins redirects app_ports tls_on=0 tls_host=0 tls_volume=0 tls_port address
   dir=$(instance_dir "$name")
   owner_name_backfill "$name"
+  web_push_backfill "$name" "$app_image"
   app_port=$(reg_get "$name" app_port)
   login_port=$(reg_get "$name" login_port)
   public_url=$(reg_get "$name" public_url)
@@ -178,7 +197,14 @@ instance_render() {
   local calendar_on=0
   if [ -n "${REL_CALENDAR_TAG:-}" ]; then
     calendar_on=1
-    calendar_secret_backfill "$name"
+    env_secret_backfill "$name" CALENDAR_ACCOUNT_SECRET
+  fi
+  # Aman's browser is on in every instance once its images are known. Its seccomp profile is copied beside the compose
+  # file, because the compose file reads it from this folder.
+  local browser_on=0
+  if [ -n "${REL_BROWSER_TAG:-}" ] && [ -n "${REL_BROWSER_GATEWAY_TAG:-}" ]; then
+    browser_on=1
+    env_secret_backfill "$name" BROWSER_SECRET
   fi
   # The email connector is part of the compose file only once its image is known. Its wrapper script is copied beside the
   # compose file, because the compose file mounts it from this folder.
@@ -192,6 +218,9 @@ instance_render() {
     # No account file is written here: the account lives in the connector's volume, and the
     # installer writes it through the connector's account agent (see email_agent_write).
   fi
+  if [ "$browser_on" = 1 ]; then
+    write_if_changed "$dir/browser-seccomp.json" 644 <"$REPO_ROOT/ops/browser-sidecar/seccomp_profile.json" || true
+  fi
   # The https folders are mounted from the home folder itself, except when the home is the state volume
   # (Windows): then the compose file mounts them from inside the volume, because a host folder the
   # daemon could read does not exist there.
@@ -199,7 +228,8 @@ instance_render() {
     if tls_home_in_volume; then tls_volume=1; else tls_host=1; fi
   fi
   render_template "$TEMPLATES_DIR/instance/compose.yaml.tpl" \
-    "NAME=$name" "IF_CALENDAR=$calendar_on" "CALENDAR_IMAGE=${REL_CALENDAR_TAG:-}" "IF_EMAIL=$email_on" "MAIL_EMAIL_IMAGE=${REL_MAIL_EMAIL_IMAGE:-}" "STT_NETWORK=$(stt_network "$name")" "APP_IMAGE=$app_image" "DEX_IMAGE=$dex_image" "APP_PORT=$app_port" "IF_SANDBOX=$sandbox_on" \
+    "NAME=$name" "IF_CALENDAR=$calendar_on" "CALENDAR_IMAGE=${REL_CALENDAR_TAG:-}" "IF_EMAIL=$email_on" "MAIL_EMAIL_IMAGE=${REL_MAIL_EMAIL_IMAGE:-}" \
+    "IF_BROWSER=$browser_on" "BROWSER_IMAGE=${REL_BROWSER_TAG:-}" "BROWSER_GATEWAY_IMAGE=${REL_BROWSER_GATEWAY_TAG:-}" "STT_NETWORK=$(stt_network "$name")" "APP_IMAGE=$app_image" "DEX_IMAGE=$dex_image" "APP_PORT=$app_port" "IF_SANDBOX=$sandbox_on" \
     "IF_EDGE=$edge_on" "LOGIN_HOST=$login_host" \
     "LOGIN_PORT=$login_port" "DEX_TELEMETRY_PORT=$DEX_TELEMETRY_PORT" "APP_PORTS=$app_ports" \
     "IF_TLS=$tls_on" "IF_TLS_HOST=$tls_host" "IF_TLS_VOLUME=$tls_volume" "CADDY_IMAGE=$(tls_image)" "TLS_USER=$(id -u):$(id -g)" "TLS_LEAF_DIR=$(tls_leaf_dir "$name")" \
@@ -237,22 +267,72 @@ owner_name_backfill() { # name
   fi
 }
 
-# The secret the app and the calendar connector share, so only the app can use the connector's account port. It is made
-# once, in the settings file, and an existing value is never changed. A file without the installer's managed part (an
-# older or hand-made one) gets the line at its end, so Compose never stops for the missing value. A missing file gets
-# nothing: the instance has no settings to run from, and the instance commands say so.
-calendar_secret_backfill() { # name
-  local env
+# A secret the app shares with one of its connectors (CALENDAR_ACCOUNT_SECRET, BROWSER_SECRET), so only the app can
+# use that connector. It is made once, in the settings file, and a usable value (32 or more characters) is never
+# changed. Compose reads the last line for a key, so that line is the one that counts: a short or second line is
+# dropped, the managed part keeps the value, and a file without the managed part (an older or hand-made one) gets it
+# as its last line. A missing file gets nothing: the instance has no settings to run from, and the instance commands
+# say so.
+env_secret_backfill() { # name key
+  local env key=$2 value
   env="$(instance_dir "$1")/.env"
   [ -f "$env" ] || return 0
-  grep -q '^CALENDAR_ACCOUNT_SECRET=.\{32,\}' "$env" && return 0
+  value=$(sed -n "s/^$key=//p" "$env" | tail -n 1)
+  if [ "${#value}" -lt 32 ]; then
+    value=$(sed -n "s/^$key=\(.\{32,\}\)\$/\1/p" "$env" | tail -n 1)
+    [ -n "$value" ] || value=$(rand_hex 32)
+  fi
   if grep -q '^# >>> managed by the installer' "$env"; then
-    env_managed_set "$env" CALENDAR_ACCOUNT_SECRET "$(rand_hex 32)"
+    env_managed_set "$env" "$key" "$value"
+    env_drop_outside_block "$env" "$key"
     return 0
   fi
   {
-    grep -v '^CALENDAR_ACCOUNT_SECRET=' "$env" || true
-    printf 'CALENDAR_ACCOUNT_SECRET=%s\n' "$(rand_hex 32)"
+    grep -v "^$key=" "$env" || true
+    printf '%s=%s\n' "$key" "$value"
+  } | write_if_changed "$env" 600 || true
+}
+
+# Makes one push key pair with the app image's Node.js, so the computer needs no key tools of its own. Prints the
+# public key, a space, then the private key, and fails, printing nothing, on any other output.
+push_keypair() { # app_image
+  local out
+  out=$(D run --rm --network none --user "$(id -u):$(id -g)" -v "$INSTALLER_DIR/lib/push-keys.mjs:/push-keys.mjs:ro" \
+    --entrypoint node "$1" /push-keys.mjs 2>/dev/null) || return 1
+  matches_whole "$out" '^[A-Za-z0-9_-]{87} [A-Za-z0-9_-]{43}$' || return 1
+  printf '%s\n' "$out"
+}
+
+# The key pair the app signs push notices with, so a closed page still hears about a due reminder. They are
+# made once, in the settings file, and an existing pair is never changed. An older instance gets them on its next
+# refresh or upgrade. A file without the installer's managed part gets the lines at its end. A missing file gets nothing.
+# When no key can be made, push stays off and the rest works as before.
+web_push_backfill() { # name app_image
+  local env keys public private
+  env="$(instance_dir "$1")/.env"
+  [ -f "$env" ] || return 0
+  if ! grep -q '^WEB_PUSH_PUBLIC_KEY=..*' "$env" || ! grep -q '^WEB_PUSH_PRIVATE_KEY=..*' "$env"; then
+    keys=$(push_keypair "$2") || {
+      warn "Push notices could not be set up this time. Run the installer again to try once more."
+      return 0
+    }
+    public=${keys% *}
+    private=${keys#* }
+    web_push_env_set "$env" WEB_PUSH_PUBLIC_KEY "$public"
+    web_push_env_set "$env" WEB_PUSH_PRIVATE_KEY "$private"
+  fi
+}
+
+# Sets one line in the settings file: in the managed part when it has one, at the end when it does not.
+web_push_env_set() { # env key value
+  local env=$1 key=$2 value=$3
+  if grep -q '^# >>> managed by the installer' "$env"; then
+    env_managed_set "$env" "$key" "$value"
+    return 0
+  fi
+  {
+    grep -v "^$key=" "$env" || true
+    printf '%s=%s\n' "$key" "$value"
   } | write_if_changed "$env" 600 || true
 }
 
@@ -286,6 +366,7 @@ instance_up() {
     stt_attach "$name" || true
   fi
   stt_forget_old_network "$name"
+  sandbox_retired_volumes_remove "$name"
   # From now on the instance may hold data worth backing up; an instance that never got here holds none.
   if reg_exists "$name"; then reg_set "$name" healthy 1; fi
   step_ok "Instance $name is running and answering"
@@ -806,7 +887,10 @@ load_installed_release() {
   release_load "$RELEASE_DIR/release.json" || die "The record of the installed version cannot be read. Run install.sh again."
   REL_APP_TAG=$CUR_APP_TAG
   REL_STT_TAG=$CUR_STT_TAG
+  REL_TTS_TAG=$CUR_TTS_TAG
   REL_CALENDAR_TAG=$CUR_CALENDAR_TAG
+  REL_BROWSER_TAG=$CUR_BROWSER_TAG
+  REL_BROWSER_GATEWAY_TAG=$CUR_BROWSER_GATEWAY_TAG
   REL_DEX_IMAGE=$CUR_DEX_IMAGE
   REL_MAIL_EMAIL_IMAGE=$CUR_MAIL_EMAIL_IMAGE
   docker_image_exists "$REL_APP_TAG" || die "Part of Aman ($REL_APP_TAG) is missing. Run install.sh to build it again."
@@ -1041,7 +1125,7 @@ cmd_instance_add() {
     return 0
   fi
   [ -n "$AMAN_PASSWORD" ] || ask_password AMAN_PASSWORD
-  machine_running || machine_up "$REL_STT_TAG"
+  machine_running || machine_up "$REL_STT_TAG" "$REL_TTS_TAG"
   instance_create
   AMAN_PASSWORD=
   edge_ensure "$I_NAME"
@@ -1287,7 +1371,16 @@ cmd_instance_remove() {
   fi
   [ -n "$(reg_names)" ] || last_one=1
   if [ "${OPT_PURGE:-0}" != 1 ]; then
-    say "Removed instance $name. Its data is kept (aman_${name}_data and aman_${name}_dex)."
+    volumes=$(instance_volumes "$name" | tr '\n' ' ')
+    volumes=${volumes% }
+    if [ -n "$volumes" ]; then
+      say "Removed instance $name. Its data is kept: $volumes."
+    else
+      say "Removed instance $name."
+    fi
+    case " $volumes " in
+      *" aman_${name}_browser_profiles "*) say "That includes the sites Aman's browser is signed in to." ;;
+    esac
     if [ "$last_one" = 1 ]; then
       say "The shared speech-to-text service and its downloaded model are kept too."
     fi

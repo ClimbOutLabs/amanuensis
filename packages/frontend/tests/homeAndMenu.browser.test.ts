@@ -9,11 +9,10 @@ import { MODEL_FQN, startApprovalTestServer } from '../../trueforge/tests/fixtur
 import { FINAL_TEXT } from '../../trueforge/tests/fixtures/scriptedModelServer.ts';
 import { inProcessApi } from './support/approvalChat.ts';
 import { findChromiumExecutable } from './support/findChromiumExecutable.ts';
+import { FIRST_LOAD_TIMEOUT_MS } from './support/firstLoad.ts';
 import { privateViteCache } from './support/viteCache.ts';
 
 const RENDER_TIMEOUT_MS = 45_000;
-/** The first page waits for the dev server's cold compile, which is slow while other suites run. */
-const FIRST_LOAD_TIMEOUT_MS = 120_000;
 const THEMES = [
   { preset: 'paper', mode: 'light' },
   { preset: 'paper', mode: 'dark' },
@@ -96,7 +95,7 @@ test(
       // The first-run home, with its setup card.
       const fresh = await browser.newContext({ viewport: { width: 1440, height: 900 } });
       const freshPage = await fresh.newPage();
-      await freshPage.goto(`${origin}/`, { waitUntil: 'domcontentloaded', timeout: RENDER_TIMEOUT_MS });
+      await freshPage.goto(`${origin}/`, { waitUntil: 'domcontentloaded', timeout: FIRST_LOAD_TIMEOUT_MS });
       assertFits(await homeFit(freshPage), 'first run');
       await fresh.close();
 

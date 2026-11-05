@@ -12,9 +12,9 @@ import { cn } from '../atoms/lib/cn.js';
 import { CompactHostProvider } from '../atoms/lib/CompactLayoutContext.js';
 import { IS_CREATE_AGENT_METADATA_KEY, isCreateAgentMetadataValue } from '../atoms/lib/sessionCreateAgent.js';
 import { CurrentUserProvider, type CurrentUser } from '../contexts/CurrentUserContext.js';
+import { DeliveryPushLinks } from '../deliveries/DeliveryPushLinks.js';
 import type { AmanAvatarActivity } from '../hooks/useAvatarActivity.js';
 import { WidgetVisibilityProvider } from '../layouts/WidgetVisibilityContext.js';
-import { RemindersProvider } from '../reminders/RemindersContext.js';
 import { HistorySessionSwitchBridge } from '../routing/HistorySessionSwitchBridge.js';
 import { LibrarySessionShareBoot } from '../routing/LibrarySessionShareBoot.js';
 import { RemoteIdRouteBridge } from '../routing/RemoteIdRouteBridge.js';
@@ -144,7 +144,7 @@ function LayoutFallback({ className }: { className?: string }) {
   );
 }
 
-/** Shown while `type: "truefoundry"` resolves the agent UI server. */
+/** Shown while `type: "trueforge"` resolves the agent UI server. */
 export function ServerInitLoader({ className }: { className?: string }) {
   // Outside ThemeProvider (Suspense), useThemeMode falls back to light.
   const themeMode = useThemeMode();
@@ -410,6 +410,8 @@ export function TrueForgeUIShell(props: TrueForgeUIShellProps) {
           {layoutTree}
           {/* Once, outside any layout or menu, so every BugReportButton can open it. */}
           <BugReportDialog />
+          {/* Opens the item a tapped notice names. */}
+          <DeliveryPushLinks />
         </CompactHostProvider>
       </ChatProviderFromShell>
     </ShellModeProvider>
@@ -427,13 +429,11 @@ export function TrueForgeUIShell(props: TrueForgeUIShellProps) {
               <ChatConnectorChoiceProvider store={connectorChoice}>
                 <ChatFolderProvider store={chatFolders}>
                   <SpaceProvider store={spaces}>
-                    <RemindersProvider>
-                      {resolvedRoutes != null ? (
-                        <ResolvedRoutesProvider routes={resolvedRoutes}>{visibilityTree}</ResolvedRoutesProvider>
-                      ) : (
-                        visibilityTree
-                      )}
-                    </RemindersProvider>
+                    {resolvedRoutes != null ? (
+                      <ResolvedRoutesProvider routes={resolvedRoutes}>{visibilityTree}</ResolvedRoutesProvider>
+                    ) : (
+                      visibilityTree
+                    )}
                   </SpaceProvider>
                 </ChatFolderProvider>
               </ChatConnectorChoiceProvider>

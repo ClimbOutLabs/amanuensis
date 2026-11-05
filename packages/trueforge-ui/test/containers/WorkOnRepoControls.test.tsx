@@ -36,6 +36,7 @@ const repository: RepositorySummary = {
   clone_url: option.clone_url,
   default_branch: 'main',
   revision: 1,
+  package_downloads_allowed: false,
 };
 
 const testProposal: RepositoryCommandProposal = {
@@ -81,6 +82,12 @@ function fakeApi(state: FakeState): RepositoryWorkApi {
       }),
     ),
     getRepository: vi.fn().mockResolvedValue(repository),
+    listRepositories: vi.fn().mockResolvedValue([repository]),
+    setRepositoryPackageDownloads: vi
+      .fn()
+      .mockImplementation((input: { allowed: boolean }) =>
+        Promise.resolve({ ...repository, package_downloads_allowed: input.allowed }),
+      ),
     listCommandProposals: vi.fn().mockImplementation(() => Promise.resolve([...state.proposals])),
     confirmCommandProposal: vi.fn().mockImplementation((input: { proposalId: string }) => {
       state.proposals = state.proposals.filter(proposal => proposal.id !== input.proposalId);

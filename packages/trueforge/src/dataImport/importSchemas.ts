@@ -44,6 +44,7 @@ import { z } from 'zod';
 
 import { parseTurnCustom } from '../db/sessionCustom';
 import { NameSchema } from '../schemas/common';
+import { DeliverySchema } from '../schemas/deliveries';
 import { SessionEventWithPassthroughSchema } from '../schemas/events';
 import { McpServerManifestSchema } from '../schemas/mcpServer';
 import { PersonaActivationSchema, PersonaSchema, validatePersonaContentNames } from '../schemas/persona';
@@ -89,6 +90,7 @@ export const LEFT_OUT = {
   chatDetail: 'chat detail',
   checklistDetail: 'checklist detail',
   permissionSetting: 'permission setting',
+  deliveryAttempt: 'delivery attempt',
 } as const;
 
 export const LEFT_OUT_PLURALS: Readonly<Record<string, string>> = {
@@ -100,6 +102,7 @@ export const LEFT_OUT_PLURALS: Readonly<Record<string, string>> = {
   [LEFT_OUT.chatDetail]: 'chat details',
   [LEFT_OUT.checklistDetail]: 'checklist details',
   [LEFT_OUT.permissionSetting]: 'permission settings',
+  [LEFT_OUT.deliveryAttempt]: 'delivery attempts',
 };
 
 /** Host-owned turn data; one this version does not store is left out. */
@@ -522,7 +525,12 @@ export const ImportSpaceRecordSchema = z.object({
 export type ImportSpaceRecord = z.infer<typeof ImportSpaceRecordSchema>;
 
 export const ImportSpacesFileSchema = z.array(
-  z.object({ space: ImportSpaceRecordSchema, revisions: z.array(ImportSpaceRecordSchema) }),
+  z.object({
+    space: ImportSpaceRecordSchema,
+    revisions: z.array(ImportSpaceRecordSchema),
+    /** Absent from exports made before spaces had folders. */
+    folder_id: z.string().min(1).nullable().default(null),
+  }),
 );
 export type ImportSpacesFile = z.infer<typeof ImportSpacesFileSchema>;
 
@@ -560,6 +568,11 @@ const ImportPermissionSettingsSchema = z.object({
   ...SentinelUserSettingsSchema.shape,
   maps_without_asking: SentinelUserSettingsSchema.shape.maps_without_asking.default(true),
   sandbox_without_asking: SentinelUserSettingsSchema.shape.sandbox_without_asking.default(true),
+  chat_search_enabled: SentinelUserSettingsSchema.shape.chat_search_enabled.default(false),
+  // Permission settings are never applied on import, so an imported allowance can never arrive on;
+  // the field is read only so an export that carries it still parses, and a missing one reads as off.
+  package_downloads_without_project_allowed:
+    SentinelUserSettingsSchema.shape.package_downloads_without_project_allowed.default(false),
 });
 
 export const ImportSettingsFileSchema = z.object({
@@ -577,3 +590,7 @@ export const ImportAuditRecordSchema = z.object({
 });
 export type ImportAuditRecord = z.infer<typeof ImportAuditRecordSchema>;
 export const ImportAuditFileSchema = z.array(ImportAuditRecordSchema);
+
+/** The feed an export carries. Push devices belong to a device, so they are never in an export. */
+export const ImportDeliveriesFileSchema = z.array(DeliverySchema);
+export type ImportDelivery = z.infer<typeof DeliverySchema>;

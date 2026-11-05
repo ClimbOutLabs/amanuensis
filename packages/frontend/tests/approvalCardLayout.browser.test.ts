@@ -9,6 +9,7 @@ import { createServer } from 'vite';
 import { startApprovalTestServer } from '../../trueforge/tests/fixtures/approvalTestServer.ts';
 import { inProcessApi, pausedSession } from './support/approvalChat.ts';
 import { findChromiumExecutable } from './support/findChromiumExecutable.ts';
+import { FIRST_LOAD_TIMEOUT_MS } from './support/firstLoad.ts';
 import { screenshotDir } from './support/screenshotDir.ts';
 import { privateViteCache } from './support/viteCache.ts';
 
@@ -77,7 +78,10 @@ test(
       browser = await chromium.launch({ executablePath: findChromiumExecutable(chromium.executablePath()) });
       const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
 
-      await page.goto(`${origin}/sessions/${sessionId}`, { waitUntil: 'domcontentloaded', timeout: RENDER_TIMEOUT_MS });
+      await page.goto(`${origin}/sessions/${sessionId}`, {
+        waitUntil: 'domcontentloaded',
+        timeout: FIRST_LOAD_TIMEOUT_MS,
+      });
       const allow = page.getByRole('button', { name: ALLOW }).first();
       await allow.waitFor({ timeout: RENDER_TIMEOUT_MS });
       await page.screenshot({ path: join(outDir, 'layout-1-waiting-card-at-rest.png') });

@@ -2295,4 +2295,85 @@ describe("SessionsClient", () => {
             return await client.sessions.subscribeToTurn("session_id", "turn_id");
         }).rejects.toThrow(TrueForgeTypes.PreconditionFailedError);
     });
+
+    test("search_own_chats (1)", async () => {
+        const server = mockServerPool.createServer();
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
+
+        const rawResponseBody = {
+            data: {
+                hits: [
+                    { matched_at: "2024-01-15T09:30:00Z", session_id: "session_id", snippet: "snippet", title: null },
+                ],
+                search_enabled: true,
+            },
+        };
+
+        server
+            .mockEndpoint()
+            .get("/api/v1/user/chat-search")
+            .respondWith()
+            .statusCode(200)
+            .jsonBody(rawResponseBody)
+            .build();
+
+        const response = await client.sessions.searchOwnChats({
+            query: "query",
+        });
+        expect(response).toEqual({
+            data: {
+                hits: [
+                    {
+                        matchedAt: new Date("2024-01-15T09:30:00.000Z"),
+                        sessionId: "session_id",
+                        snippet: "snippet",
+                        title: null,
+                    },
+                ],
+                searchEnabled: true,
+            },
+        });
+    });
+
+    test("search_own_chats (2)", async () => {
+        const server = mockServerPool.createServer();
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
+
+        const rawResponseBody = { error: { message: "message" } };
+
+        server
+            .mockEndpoint()
+            .get("/api/v1/user/chat-search")
+            .respondWith()
+            .statusCode(400)
+            .jsonBody(rawResponseBody)
+            .build();
+
+        await expect(async () => {
+            return await client.sessions.searchOwnChats({
+                query: "x",
+            });
+        }).rejects.toThrow(TrueForgeTypes.BadRequestError);
+    });
+
+    test("search_own_chats (3)", async () => {
+        const server = mockServerPool.createServer();
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
+
+        const rawResponseBody = { error: { message: "message" } };
+
+        server
+            .mockEndpoint()
+            .get("/api/v1/user/chat-search")
+            .respondWith()
+            .statusCode(401)
+            .jsonBody(rawResponseBody)
+            .build();
+
+        await expect(async () => {
+            return await client.sessions.searchOwnChats({
+                query: "x",
+            });
+        }).rejects.toThrow(TrueForgeTypes.UnauthorizedError);
+    });
 });

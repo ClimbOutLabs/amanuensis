@@ -16,6 +16,7 @@ import type { SpaceRecord } from '../../../src/db/spaceStore';
 import { SpaceAggregateRevisionConflictError, SpaceRevisionConflictError } from '../../../src/db/spaceStore';
 import { spaceCapability, type SpaceToolStore } from '../../../src/runtime/spaceCapability';
 import { isRecord } from '../../fixtures/jsonGuards';
+import { noSpaceFolders } from './spaceFolderStoreFake';
 
 /**
  * The simplified contract: body is one string everywhere, partial changes go through
@@ -147,6 +148,7 @@ function makeStore(): SpaceToolStore {
       throw new Error('not used in these tests');
     },
     getSpace: async input => rows.get(input.space_id),
+    ...noSpaceFolders,
     getSpaceRevision: async input => {
       const current = rows.get(input.space_id);
       return current !== undefined && current.revision === input.revision ? current : undefined;

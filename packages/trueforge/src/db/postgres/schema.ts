@@ -21,6 +21,8 @@ export const TABLES_TO_MOVE = [
   'space_aggregate',
   'space',
   'space_revision',
+  'space_folder',
+  'space_folder_assignment',
   'implementation_plan_grant',
   'implementation_plan_dispatch',
   'turn',
@@ -54,6 +56,7 @@ export const TABLES_TO_MOVE = [
   'chat_image',
   'chat_image_turn_allowance',
   'approval_dismissal',
+  'chat_search_document',
   'global_settings',
   'token_factory_usage',
   'token_factory_model_usage',
@@ -61,6 +64,9 @@ export const TABLES_TO_MOVE = [
   'sentinel_user_settings',
   'approval_token',
   'brief_item_completion',
+  'delivery',
+  'delivery_attempt',
+  'push_subscription',
 ] as const;
 
 /**

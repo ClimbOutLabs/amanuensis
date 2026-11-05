@@ -39,7 +39,5 @@ export function isReminderToolName(tool_name: string): boolean {
 /** The Reminders chat's fixed name. */
 export const REMINDERS_CHAT_TITLE = 'Reminders';
 
-/** Session metadata that marks the Reminders chat and says what came in last and when, so the chat list can show it. */
+/** Session metadata that marks the Reminders chat, so the chat list can tell it from the others. */
 export const REMINDERS_METADATA_KEY = 'is_reminders';
-export const LATEST_REMINDER_METADATA_KEY = 'latest_reminder';
-export const LATEST_REMINDER_AT_METADATA_KEY = 'latest_reminder_at';

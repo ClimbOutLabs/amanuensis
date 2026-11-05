@@ -192,6 +192,54 @@ test_upgrade_starts_the_calendar_connector_without_a_profile() {
   sandbox_drop
 }
 
+test_upgrade_turns_the_browser_on_for_an_install_from_before_it() {
+  t_begin "upgrading an install from before the browser builds it, makes its secret and starts it with the instance"
+  sandbox_new
+  install_machine
+  local release=$AMAN_HOME/release/release.json env=$AMAN_HOME/instances/main/.env compose=$AMAN_HOME/instances/main/compose.yaml
+  # The install as an older installer left it: no browser in the record, the settings or the compose file.
+  grep -v '"browser_image"\|"browser_gateway_image"' "$release" >"$release.new" && mv "$release.new" "$release"
+  grep -v '^BROWSER_SECRET=' "$env" >"$env.new" && mv "$env.new" "$env"
+  chmod 600 "$release" "$env"
+  sed -i '/BROWSER\|browser/d' "$compose"
+  run_install upgrade --check
+  assert_rc 0
+  assert_contains "$OUT" "browser (new) -> aman-browser:"
+  run_install upgrade
+  assert_rc 0
+  assert_contains "$(cat "$release")" '"browser_image": "aman-browser:'
+  assert_eq "$(sed -n 's/^BROWSER_SECRET=//p' "$env" | wc -c | tr -d ' ')" 65 "64 characters and a newline"
+  assert_mode "$env" 600
+  assert_contains "$(cat "$compose")" "BROWSER_ENABLED: 'true'"
+  assert_contains "$(cat "$compose")" "image: aman-browser-gateway:"
+  assert_log_has "docker build -t aman-browser:"
+  run_install upgrade
+  assert_rc 0
+  assert_contains "$OUT" "Already up to date"
+  sandbox_drop
+}
+
+test_a_failed_upgrade_from_before_the_browser_puts_back_a_version_without_it() {
+  t_begin "a failed upgrade of an install from before the browser puts back that version, with no browser in it"
+  sandbox_new
+  install_machine
+  local release=$AMAN_HOME/release/release.json compose=$AMAN_HOME/instances/main/compose.yaml old
+  grep -v '"browser_image"\|"browser_gateway_image"' "$release" >"$release.new" && mv "$release.new" "$release"
+  chmod 600 "$release"
+  sed -i '/BROWSER\|browser/d' "$compose"
+  old=$(app_tag "$release")
+  repo_commit_change "bad app change with the browser"
+  STUB_UP_FAIL_UNLESS_TAG=$old
+  run_install upgrade
+  assert_rc 1
+  assert_contains "$OUT" "The previous version is back"
+  assert_not_contains "$(cat "$release")" "browser_image" "the record put back has no browser"
+  assert_eq "$(compose_image main)" "$old" "the instance runs the previous app"
+  assert_not_contains "$(cat "$compose")" "aman-browser" "the compose file put back starts no browser"
+  assert_not_contains "$(cat "$compose")" "BROWSER_" "and does not turn it on in the app"
+  sandbox_drop
+}
+
 test_failed_upgrade_restores_database_and_images() {
   t_begin "a failed health check restores the database and the previous images"
   sandbox_new
@@ -438,7 +486,7 @@ test_a_record_from_before_the_flag_counts_as_having_data() {
 repo_remote_add() {
   local remote=${1:-origin} branch
   branch=$(git -C "$REPO" branch --show-current)
-  git init -q --bare "$SB/origin.git"
+  git -c init.defaultBranch=main init -q --bare "$SB/origin.git"
   git -C "$REPO" remote add "$remote" "$SB/origin.git"
   git -C "$REPO" push -q "$remote" "HEAD:refs/heads/$branch"
   git -C "$REPO" fetch -q "$remote" "+refs/heads/$branch:refs/remotes/$remote/$branch"
@@ -461,7 +509,7 @@ repo_remote_advance() {
 # not on it, and the checkout tracks nothing.
 repo_remote_without_own_branch() {
   local remote=${1:-origin}
-  git init -q --bare "$SB/origin.git"
+  git -c init.defaultBranch=main init -q --bare "$SB/origin.git"
   git -C "$REPO" remote add "$remote" "$SB/origin.git"
   git -C "$REPO" push -q "$remote" "HEAD:refs/heads/other-branch"
 }
@@ -729,6 +777,26 @@ test_upgrade_warns_that_the_branch_is_not_on_origin_when_it_is_missing_there() {
   sandbox_drop
 }
 
+test_upgrade_from_a_release_without_the_voice_adds_it() {
+  t_begin "upgrading an install from before the voice builds it, starts it and joins it to each instance"
+  sandbox_new
+  install_machine
+  local release=$AMAN_HOME/release/release.json
+  grep -v '"tts_image"' "$release" >"$release.new"
+  mv "$release.new" "$release"
+  : >"$SB_STATE/network_aliases"
+  run_install upgrade --check
+  assert_rc 0
+  assert_contains "$OUT" "voice   (not installed) -> aman-tts:"
+  run_install upgrade
+  assert_rc 0
+  assert_contains "$(cat "$release")" '"tts_image": "aman-tts:'
+  assert_contains "$(cat "$AMAN_HOME/machine/compose.yaml")" "container_name: aman-tts"
+  assert_contains "$(cat "$SB_STATE/network_aliases")" "aman_main_speech aman-tts aman-tts-engine"
+  sandbox_drop
+}
+
+
 test_noop_when_current
 test_upgrade_reports_a_newer_version_when_the_checkout_is_behind_origin
 test_upgrade_stays_up_to_date_when_the_checkout_matches_origin
@@ -758,11 +826,14 @@ test_upgrade_keeps_a_calendar_account_connected_again
 test_upgrade_keeps_the_old_calendar_file_when_the_check_says_nothing
 test_upgrade_without_an_old_calendar_account_file_stays_quiet
 test_upgrade_starts_the_calendar_connector_without_a_profile
+test_upgrade_turns_the_browser_on_for_an_install_from_before_it
+test_a_failed_upgrade_from_before_the_browser_puts_back_a_version_without_it
 test_failed_upgrade_restores_database_and_images
 test_restore_goes_only_into_the_right_volume
 test_restore_does_not_wait_for_a_migration_marker
 test_failed_build_changes_nothing
 test_doctor_failure_blocks_unless_forced
+test_upgrade_from_a_release_without_the_voice_adds_it
 test_gate_passes_when_the_doctor_reports_only_warnings
 test_gate_blocks_when_the_doctor_cannot_be_checked
 tests_finish

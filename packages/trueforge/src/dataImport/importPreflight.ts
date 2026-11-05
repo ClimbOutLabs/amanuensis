@@ -229,6 +229,9 @@ export async function findInstanceData<TTransaction>(
   if (spaceList.length > 0) {
     found.push('spaces');
   }
+  if ((await deps.spaceStore.listSpaceFolders({ tenant_id: tenantId, created_by: subjectId })).length > 0) {
+    found.push('space folders');
+  }
   const schedulePage = await deps.scheduleStore.listSchedules({
     tenant_id: tenantId,
     limit: 1,
@@ -299,6 +302,7 @@ export interface ArchiveIds {
   folderIds: readonly string[];
   personas: readonly { id: string }[];
   spaceIds: readonly string[];
+  spaceFolderIds: readonly string[];
   scheduleIds: readonly string[];
   agents: readonly { id: string; name: string }[];
 }
@@ -342,6 +346,14 @@ export async function assertNoIdCollisions<TTransaction>(
       (await deps.spaceStore.getSpace({ tenant_id: tenantId, created_by: subjectId, space_id: spaceId })) !== undefined
     ) {
       collisions.push(`space ${spaceId}`);
+    }
+  }
+  const existingSpaceFolderIds = new Set(
+    (await deps.spaceStore.listSpaceFolders({ tenant_id: tenantId, created_by: subjectId })).map(folder => folder.id),
+  );
+  for (const folderId of ids.spaceFolderIds) {
+    if (existingSpaceFolderIds.has(folderId)) {
+      collisions.push(`space folder ${folderId}`);
     }
   }
   for (const scheduleId of ids.scheduleIds) {

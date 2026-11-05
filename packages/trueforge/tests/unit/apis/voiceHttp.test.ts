@@ -1,6 +1,7 @@
 import { createLogger, transports } from 'winston';
 
 import { createVoiceRouter } from '../../../src/apis/voice';
+import { resolveRequestContext } from '../../../src/auth/identity';
 
 jest.mock('../../../src/config', () => {
   const actual = jest.requireActual<typeof import('../../../src/config')>('../../../src/config');
@@ -40,7 +41,7 @@ describe('voice HTTP endpoints', () => {
   const logger = createLogger({ transports: [new transports.Console({ silent: true })] });
   const infoSpy = jest.spyOn(logger, 'info');
   const warnSpy = jest.spyOn(logger, 'warn');
-  const router = createVoiceRouter({ logger });
+  const router = createVoiceRouter({ logger, resolveRequestContext });
 
   beforeEach(() => {
     fetchMock.mockReset();

@@ -160,22 +160,19 @@ describe('processAgentUserInput document ingestion', () => {
     const msg = messageFor([
       { type: 'file', name: 'first.pdf', data: dataUri('application/pdf', 'pdf-bytes-1') },
       { type: 'file', name: 'second.pdf', data: dataUri('application/pdf', 'pdf-bytes-2') },
-      { type: 'file', name: 'notes.txt', data: dataUri('text/plain', 'irrelevant') },
+      { type: 'file', name: 'notes.txt', data: dataUri('text/plain', 'meeting at 9') },
+      { type: 'file', name: 'archive.zip', data: dataUri('application/zip', 'irrelevant') },
     ]);
     const result = await processAgentUserInput(msg, sandbox);
 
     const staged = result.stagedDocuments;
     if (!staged) throw new Error('Expected stagedDocuments to be defined');
-    expect(staged).toHaveLength(2);
-    const [firstStaged, secondStaged] = staged;
-    if (!firstStaged || !secondStaged) throw new Error('Expected two staged documents');
-    expect(firstStaged.filename).toBe('first.pdf');
-    expect(secondStaged.filename).toBe('second.pdf');
+    expect(staged.map(file => file.filename)).toEqual(['first.pdf', 'second.pdf', 'notes.txt']);
 
     const texts = serializedTextParts(result.message.content);
     const announcement = texts.find(text => text.includes('Uploaded files'));
     expect(announcement).toBeDefined();
-    expect(announcement).toContain('notes.txt');
+    expect(announcement).toContain('archive.zip');
   });
 
   it('stages all supported files for extraction with shared budget', async () => {
