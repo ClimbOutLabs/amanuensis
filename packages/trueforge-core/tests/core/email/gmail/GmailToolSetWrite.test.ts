@@ -213,7 +213,7 @@ describe('draft_email', () => {
         arguments: { subject: 'x', body: 'ok', in_reply_to: 'orig' },
       });
       expect(text(response)).toContain('no recipient');
-      expect(text(response)).toContain('its sender address could not be read');
+      expect(text(response)).toContain('the sender address of the message being answered could not be read');
       expect(google.urls).not.toContain('POST /gmail/v1/users/me/drafts');
     });
 
@@ -257,6 +257,69 @@ describe('draft_email', () => {
       expect(sentDraft(google.bodies[0]).mime).toContain('To: lin@example.com');
     });
 
+    const withReplyTo = (replyTo: string) =>
+      message({
+        id: 'orig',
+        threadId: 't5',
+        from: 'Grace <grace@example.com>',
+        extraHeaders: [
+          { name: 'Message-ID', value: '<orig@mail.example.com>' },
+          { name: 'Reply-To', value: replyTo },
+        ],
+      });
+
+    it('refuses a reply with no "to" when the message asks for replies to go to another address, naming both', async () => {
+      const { tools, google } = await build({
+        features: [...COMPOSE],
+        routes: [route('/messages/orig', withReplyTo('Lists <lists@example.org>')), created],
+      });
+      const response = await tools.callTool({
+        name: 'draft_email',
+        arguments: { subject: 'x', body: 'ok', in_reply_to: 'orig' },
+      });
+      expect(text(response)).toContain('no recipient');
+      expect(text(response)).toContain('is from grace@example.com but asks for replies to go to lists@example.org');
+      expect(google.urls).not.toContain('POST /gmail/v1/users/me/drafts');
+    });
+
+    it('refuses a reply with no "to" when the Reply-To address cannot be read', async () => {
+      const { tools, google } = await build({
+        features: [...COMPOSE],
+        routes: [route('/messages/orig', withReplyTo('a@example.org, b@example.org')), created],
+      });
+      const response = await tools.callTool({
+        name: 'draft_email',
+        arguments: { subject: 'x', body: 'ok', in_reply_to: 'orig' },
+      });
+      expect(text(response)).toContain('asks for replies to go to an address Aman cannot read');
+      expect(text(response)).not.toContain('a@example.org');
+      expect(google.urls).not.toContain('POST /gmail/v1/users/me/drafts');
+    });
+
+    it('addresses the sender when the Reply-To names the same address', async () => {
+      const { tools, google } = await build({
+        features: [...COMPOSE],
+        routes: [route('/messages/orig', withReplyTo('GRACE@example.com')), created],
+      });
+      await tools.callTool({
+        name: 'draft_email',
+        arguments: { subject: 'x', body: 'ok', in_reply_to: 'orig' },
+      });
+      expect(sentDraft(google.bodies[0]).mime).toContain('To: grace@example.com');
+    });
+
+    it('keeps the "to" the model gave when the message has a different Reply-To', async () => {
+      const { tools, google } = await build({
+        features: [...COMPOSE],
+        routes: [route('/messages/orig', withReplyTo('lists@example.org')), created],
+      });
+      await tools.callTool({
+        name: 'draft_email',
+        arguments: { to: ['lists@example.org'], subject: 'x', body: 'ok', in_reply_to: 'orig' },
+      });
+      expect(sentDraft(google.bodies[0]).mime).toContain('To: lists@example.org');
+    });
+
     const unusableSenders: { name: string; from: string }[] = [
       { name: 'a domain with no dot in it', from: 'a@b' },
       { name: 'a domain that is only a dot', from: 'a@.' },
@@ -281,7 +344,7 @@ describe('draft_email', () => {
         arguments: { subject: 'x', body: 'ok', in_reply_to: 'orig' },
       });
       expect(text(response)).toContain('no recipient');
-      expect(text(response)).toContain('its sender address could not be read');
+      expect(text(response)).toContain('the sender address of the message being answered could not be read');
       expect(google.urls).not.toContain('POST /gmail/v1/users/me/drafts');
     });
   });

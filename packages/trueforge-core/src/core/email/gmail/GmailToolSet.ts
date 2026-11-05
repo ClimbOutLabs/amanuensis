@@ -457,12 +457,10 @@ export class GmailToolSet extends LocalToolMCP {
       answered = answeredMessageOf(original);
       if (recipients.length === 0) {
         const recipient = replyRecipientOf(original);
-        if (recipient === null) {
-          throw new RangeError(
-            'The reply draft has no recipient: the message being answered was sent from this account, or its sender address could not be read. Add the recipient in "to" and save the reply again.',
-          );
+        if (!recipient.ok) {
+          throw new RangeError(recipient.reason);
         }
-        recipients = [recipient];
+        recipients = [recipient.address];
       }
     } else if (existing?.payload !== undefined) {
       reply = {

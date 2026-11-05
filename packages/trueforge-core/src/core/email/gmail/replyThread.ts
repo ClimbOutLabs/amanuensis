@@ -48,14 +48,50 @@ function senderAddress(from: string): string {
   return readableAddress(from) ?? UNREADABLE_SENDER;
 }
 
-/** The address a reply to this message goes to: its sender's, or null when that cannot be read for certain. */
-export function replyRecipientOf(message: GmailMessage): string | null {
+/** The address a reply to a message goes to, or why Aman cannot pick it for certain. */
+export type ReplyRecipient = { ok: true; address: string } | { ok: false; reason: string };
+
+const ADD_RECIPIENT = 'Add the recipient in "to" and save the reply again.';
+
+/**
+ * The address a reply to this message goes to: its sender's, when that can be read for certain and nothing in
+ * the message asks for replies to go anywhere else. A Reply-To that names another address is a choice between
+ * two people, so the model makes it in "to" and the refusal names both.
+ */
+export function replyRecipientOf(message: GmailMessage): ReplyRecipient {
   // A message the person sent themselves has their own address as its sender, and a reply to it is meant for
   // the people it went to, not for them. Which of those people is a choice the model makes in "to".
   if ((message.labelIds ?? []).includes('SENT')) {
-    return null;
+    return {
+      ok: false,
+      reason: `The reply draft has no recipient: the message being answered was sent from this account. ${ADD_RECIPIENT}`,
+    };
   }
-  return readableAddress(headerOf({ message, name: 'From' }));
+  const from = readableAddress(headerOf({ message, name: 'From' }));
+  if (from === null) {
+    return {
+      ok: false,
+      reason: `The reply draft has no recipient: the sender address of the message being answered could not be read. ${ADD_RECIPIENT}`,
+    };
+  }
+  const replyToHeader = headerOf({ message, name: 'Reply-To' });
+  if (replyToHeader.trim() === '') {
+    return { ok: true, address: from };
+  }
+  const replyTo = readableAddress(replyToHeader);
+  if (replyTo === null) {
+    return {
+      ok: false,
+      reason: `The reply draft has no recipient: the message being answered is from ${from} but asks for replies to go to an address Aman cannot read. ${ADD_RECIPIENT}`,
+    };
+  }
+  if (replyTo !== from) {
+    return {
+      ok: false,
+      reason: `The reply draft has no recipient: the message being answered is from ${from} but asks for replies to go to ${replyTo}. Choose one, add it in "to" and save the reply again.`,
+    };
+  }
+  return { ok: true, address: from };
 }
 
 type ReplyCheck = { ok: true; answered: AnsweredMessage | null } | { ok: false; reason: string };

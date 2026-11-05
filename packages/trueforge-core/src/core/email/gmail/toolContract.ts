@@ -86,7 +86,8 @@ export const visible = <T extends z.ZodType<string>>(schema: T) =>
 
 const DraftContentShape = {
   // A recipient may be left out only on a reply, which is then addressed to the sender of the message it
-  // answers; the check below holds that line for both draft shapes.
+  // answers (refused when that message asks for replies to go elsewhere); the check below holds that line
+  // for both draft shapes.
   to: z.array(visible(z.email())).max(20).optional(),
   subject: visible(z.string().min(1).max(300)),
   body: visible(z.string().max(20_000)),
