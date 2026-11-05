@@ -38,8 +38,9 @@ interface OutboundFetch {
 export const DEFAULT_MODEL_HTTP_CONNECT_TIMEOUT_MS = 5_000;
 /**
  * Model outbound undici headersTimeout. Env: `MODEL_HTTP_HEADERS_TIMEOUT_MS`.
- * 5 minutes, undici's own default that model calls ran on before. The first-chunk wait only
- * starts once headers arrive, so this is the only limit on a local model that is still loading.
+ * 5 minutes, undici's own default that model calls ran on before. A backstop only: the model's
+ * first-chunk wait starts when the request is sent, covers the wait for headers too, and is
+ * the limit a slow local model actually meets.
  */
 export const DEFAULT_MODEL_HTTP_HEADERS_TIMEOUT_MS = 5 * 60 * 1000;
 /**

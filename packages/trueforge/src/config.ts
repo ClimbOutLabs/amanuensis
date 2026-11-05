@@ -2294,6 +2294,47 @@ const serverExecutionTimeoutSeconds = parsePositiveInt({
   defaultValue: 1380,
 });
 
+/**
+ * The MCP headers wait must outlast the MCP request timeout, so a slow tool is reported as a slow
+ * tool and not as a dropped connection.
+ */
+function parseMcpHttpHeadersTimeoutMs(options: { raw: string | undefined; mcpRequestTimeoutMs: number }): number {
+  const minimum = options.mcpRequestTimeoutMs + MCP_HTTP_HEADERS_TIMEOUT_MARGIN_MS;
+  const value = parsePositiveInt({ envKey: 'MCP_HTTP_HEADERS_TIMEOUT_MS', raw: options.raw, defaultValue: minimum });
+  if (value < minimum) {
+    throw new Error(
+      `MCP_HTTP_HEADERS_TIMEOUT_MS is ${String(value)}, but it must be at least ${String(minimum)}: MCP_REQUEST_TIMEOUT_MS plus 5000, so a slow tool is reported as slow. Raise it, or remove it to use ${String(minimum)}.`,
+    );
+  }
+  return value;
+}
+
+/** Distributed mode's Postgres session limits; the connection wait defaults from the statement timeout. */
+function parsePostgresTimeouts(): {
+  POSTGRES_STATEMENT_TIMEOUT_MS: number;
+  POSTGRES_IDLE_IN_TRANSACTION_SESSION_TIMEOUT_MS: number;
+  POSTGRES_CONNECT_TIMEOUT_MS: number;
+} {
+  const statementTimeoutMs = parsePositiveInt({
+    envKey: 'POSTGRES_STATEMENT_TIMEOUT_MS',
+    raw: getEnv('POSTGRES_STATEMENT_TIMEOUT_MS'),
+    defaultValue: 60_000,
+  });
+  return {
+    POSTGRES_STATEMENT_TIMEOUT_MS: statementTimeoutMs,
+    POSTGRES_IDLE_IN_TRANSACTION_SESSION_TIMEOUT_MS: parsePositiveInt({
+      envKey: 'POSTGRES_IDLE_IN_TRANSACTION_SESSION_TIMEOUT_MS',
+      raw: getEnv('POSTGRES_IDLE_IN_TRANSACTION_SESSION_TIMEOUT_MS'),
+      defaultValue: 60_000,
+    }),
+    POSTGRES_CONNECT_TIMEOUT_MS: parsePositiveInt({
+      envKey: 'POSTGRES_CONNECT_TIMEOUT_MS',
+      raw: getEnv('POSTGRES_CONNECT_TIMEOUT_MS'),
+      defaultValue: statementTimeoutMs + 10_000,
+    }),
+  };
+}
+
 const mcpRequestTimeoutMs = parsePositiveInt({
   envKey: 'MCP_REQUEST_TIMEOUT_MS',
   raw: getEnv('MCP_REQUEST_TIMEOUT_MS'),
@@ -2342,15 +2383,6 @@ const browserSecret = parseBrowserSecret(getEnv('BROWSER_SECRET'));
 if (browserEnabled && (browserUrl === undefined || browserSecret === undefined)) {
   throw new Error('BROWSER_ENABLED is true, so BROWSER_URL and BROWSER_SECRET must both be set.');
 }
-
-// Read only in distributed mode, where the pool exists; the connect timeout defaults from it.
-const postgresStatementTimeoutMs = standalone
-  ? 60_000
-  : parsePositiveInt({
-      envKey: 'POSTGRES_STATEMENT_TIMEOUT_MS',
-      raw: getEnv('POSTGRES_STATEMENT_TIMEOUT_MS'),
-      defaultValue: 60_000,
-    });
 
 const shared: SharedServerConfiguration = {
   LOG_LEVEL: getEnv('LOG_LEVEL', { defaultValue: 'info' }) ?? 'info',
@@ -2409,11 +2441,9 @@ const shared: SharedServerConfiguration = {
     raw: getEnv('MCP_HTTP_CONNECT_TIMEOUT_MS'),
     defaultValue: DEFAULT_MCP_HTTP_CONNECT_TIMEOUT_MS,
   }),
-  MCP_HTTP_HEADERS_TIMEOUT_MS: parsePositiveInt({
-    envKey: 'MCP_HTTP_HEADERS_TIMEOUT_MS',
+  MCP_HTTP_HEADERS_TIMEOUT_MS: parseMcpHttpHeadersTimeoutMs({
     raw: getEnv('MCP_HTTP_HEADERS_TIMEOUT_MS'),
-    defaultValue: mcpRequestTimeoutMs + MCP_HTTP_HEADERS_TIMEOUT_MARGIN_MS,
-    minValue: mcpRequestTimeoutMs + MCP_HTTP_HEADERS_TIMEOUT_MARGIN_MS,
+    mcpRequestTimeoutMs,
   }),
   MCP_HTTP_BODY_TIMEOUT_MS: parsePositiveInt({
     envKey: 'MCP_HTTP_BODY_TIMEOUT_MS',
@@ -2944,17 +2974,7 @@ const configuration: ServerConfiguration = standalone
         raw: getEnv('DATABASE_POOL_MAX'),
         defaultValue: 10,
       }),
-      POSTGRES_STATEMENT_TIMEOUT_MS: postgresStatementTimeoutMs,
-      POSTGRES_IDLE_IN_TRANSACTION_SESSION_TIMEOUT_MS: parsePositiveInt({
-        envKey: 'POSTGRES_IDLE_IN_TRANSACTION_SESSION_TIMEOUT_MS',
-        raw: getEnv('POSTGRES_IDLE_IN_TRANSACTION_SESSION_TIMEOUT_MS'),
-        defaultValue: 60_000,
-      }),
-      POSTGRES_CONNECT_TIMEOUT_MS: parsePositiveInt({
-        envKey: 'POSTGRES_CONNECT_TIMEOUT_MS',
-        raw: getEnv('POSTGRES_CONNECT_TIMEOUT_MS'),
-        defaultValue: postgresStatementTimeoutMs + 10_000,
-      }),
+      ...parsePostgresTimeouts(),
       REDIS_URL: resolveRedisUrl(),
       TRUEFOUNDRY_SERVICEFOUNDRY_SERVER_URL: getEnv('TRUEFOUNDRY_SERVICEFOUNDRY_SERVER_URL', { required: false }),
       TRUEFOUNDRY_API_KEY: getEnv('TRUEFOUNDRY_API_KEY', { required: false }),

@@ -106,7 +106,9 @@ describe('outbound timeout settings', () => {
   it('refuses an MCP headers wait that would end before the MCP request timeout reports a slow tool', async () => {
     await expect(
       loadConfig({ MCP_REQUEST_TIMEOUT_MS: '240000', MCP_HTTP_HEADERS_TIMEOUT_MS: '240000' }),
-    ).rejects.toThrow('MCP_HTTP_HEADERS_TIMEOUT_MS must be an integer of at least 245000');
+    ).rejects.toThrow(
+      'MCP_HTTP_HEADERS_TIMEOUT_MS is 240000, but it must be at least 245000: MCP_REQUEST_TIMEOUT_MS plus 5000, so a slow tool is reported as slow. Raise it, or remove it to use 245000.',
+    );
   });
 });
 
