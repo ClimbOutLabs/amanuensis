@@ -473,4 +473,42 @@ describe('SidebarLayout notifications bell', () => {
     fireEvent.keyDown(window, { key: 'Escape' });
     await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Notifications' })).not.toBeInTheDocument());
   });
+
+  it('shows the unread count on the Navigation button, so a phone sees it before opening the drawer', async () => {
+    renderSidebarLayoutWithBell();
+
+    const menuButton = await screen.findByRole('button', { name: 'Navigation, 1 unread notification' });
+    expect(menuButton.querySelector('[data-role="navigation-unread-count"]')?.textContent).toBe('1');
+    expect(screen.queryByRole('dialog', { name: 'Navigation' })).not.toBeInTheDocument();
+  });
+
+  it('keeps the drawer open while the bell panel is used inside it', async () => {
+    renderSidebarLayoutWithBell();
+
+    fireEvent.click(await screen.findByRole('button', { name: /Navigation/ }));
+    const drawer = await screen.findByRole('dialog', { name: 'Navigation' });
+
+    fireEvent.click(within(drawer).getByRole('button', { name: 'Notifications, 1 unread' }));
+    const panel = await within(drawer).findByRole('dialog', { name: 'Notifications' });
+    expect(screen.getByRole('dialog', { name: 'Navigation' })).toBeInTheDocument();
+
+    // Marking everything seen is not a navigation either: the drawer stays open.
+    fireEvent.click(within(panel).getByRole('button', { name: 'Mark all seen' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Navigation' })).toBeInTheDocument());
+    expect(screen.getByRole('dialog', { name: 'Navigation' })).toBeInTheDocument();
+  });
+
+  it('closes the drawer when a bell item opens its chat', async () => {
+    renderSidebarLayoutWithBell();
+
+    fireEvent.click(await screen.findByRole('button', { name: /Navigation/ }));
+    const drawer = await screen.findByRole('dialog', { name: 'Navigation' });
+
+    fireEvent.click(within(drawer).getByRole('button', { name: 'Notifications, 1 unread' }));
+    const panel = await within(drawer).findByRole('dialog', { name: 'Notifications' });
+    fireEvent.click(within(panel).getByRole('button', { name: /Call the dentist/ }));
+
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Navigation' })).not.toBeInTheDocument());
+    expect(screen.queryByRole('dialog', { name: 'Notifications' })).not.toBeInTheDocument();
+  });
 });

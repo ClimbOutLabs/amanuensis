@@ -60,8 +60,13 @@ function DeliveryRow({ item, onOpen }: { item: DeliveryItem; onOpen: (item: Deli
   );
 }
 
-/** The bell in the left panel, with the unread count and the panel of recent items. Absent a feed, it draws nothing. */
-export function DeliveryBell() {
+/**
+ * The bell in the left panel, with the unread count and the panel of recent items. Absent a feed, it draws nothing.
+ * `onNavigate` runs when an item opens what it leads to, so a container that must react to a navigation
+ * (the mobile drawer, which would otherwise stay open over the chat) can do so; opening the panel and
+ * marking items seen are not navigations and never call it.
+ */
+export function DeliveryBell({ onNavigate }: { onNavigate?: () => void }) {
   const deliveries = useOptionalDeliveries();
   const shell = useOptionalShellMode();
   const rootRef = useRef<HTMLDivElement>(null);
@@ -92,6 +97,7 @@ export function DeliveryBell() {
     if (item.link !== null && shell !== null) {
       deliveries.setPanelOpen(false);
       openDeliveryLink({ shell, link: item.link });
+      onNavigate?.();
     }
   };
 
