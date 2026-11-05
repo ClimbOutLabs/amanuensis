@@ -48,7 +48,7 @@ calendar_provider_name() { # key -> the name a person sees
 # its address typed. iCloud and Zoho have no verified address here, so they go under Other.
 # The Settings Calendar card reads the same table from packages/trueforge-core (CALDAV_PROVIDER_PRESETS); a test there
 # fails if the two differ.
-CALENDAR_PRESETS='google https://calendar.google.com/calendar/dav/{email}/user/
+CALENDAR_PRESETS='google https://apidata.googleusercontent.com/caldav/v2/{email}/user/
 fastmail https://caldav.fastmail.com/dav/
 yahoo https://caldav.calendar.yahoo.com
 gmx:gmx.com https://caldav.gmx.com/

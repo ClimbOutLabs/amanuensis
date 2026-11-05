@@ -42,7 +42,7 @@ export const CALDAV_PROVIDER_PRESETS: readonly CaldavProviderPreset[] = [
     name: 'Google',
     server_url: null,
     domain_urls: [],
-    account_url_template: 'https://calendar.google.com/calendar/dav/{email}/user/',
+    account_url_template: 'https://apidata.googleusercontent.com/caldav/v2/{email}/user/',
     help_url: 'https://support.google.com/accounts/answer/185833',
     help_hint: 'Google: turn on 2-Step Verification, then make an app password at myaccount.google.com/apppasswords.',
     setup_steps: [

@@ -42,7 +42,7 @@ export const CALENDAR_SERVER_UNREACHABLE_MESSAGE =
 export const CALENDAR_CERTIFICATE_MESSAGE =
   "That calendar server's security certificate was not accepted. Use the address your provider gives you and try again.";
 export const CALENDAR_REDIRECT_MESSAGE =
-  'That calendar address sends you to a different server. Use the address your provider gives you and try again.';
+  'That calendar address sends you on to another address. Use the exact address your provider gives you and try again.';
 export const CALENDAR_ADDRESS_NOT_ALLOWED_MESSAGE =
   'That calendar address cannot be used here. Use the address your provider gives you.';
 export const CALENDAR_DETAILS_UNUSABLE_MESSAGE =

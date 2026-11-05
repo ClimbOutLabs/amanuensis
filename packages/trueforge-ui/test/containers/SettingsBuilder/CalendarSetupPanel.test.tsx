@@ -38,7 +38,7 @@ const GOOGLE: CalendarProviderInfo = {
   key: 'google',
   name: 'Google',
   serverUrl: null,
-  accountUrlTemplate: 'https://calendar.google.com/calendar/dav/{email}/user/',
+  accountUrlTemplate: 'https://apidata.googleusercontent.com/caldav/v2/{email}/user/',
   helpUrl: 'https://support.google.com/accounts/answer/185833',
   helpHint: 'Google: turn on 2-Step Verification, then make an app password at myaccount.google.com/apppasswords.',
   setupSteps: [

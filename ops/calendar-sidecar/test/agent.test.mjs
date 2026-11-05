@@ -83,13 +83,18 @@ describe('the calendar account agent', () => {
         res.end();
         return;
       }
+      if (behavior === 'unslash' && req.url.endsWith('/')) {
+        res.writeHead(301, { Location: req.url.replace(/\/+$/, '') });
+        res.end();
+        return;
+      }
       if (behavior === 'redirect') {
         res.writeHead(302, { Location: 'https://other.example.invalid/' });
         res.end('redirect echoing ' + (req.headers.authorization ?? ''));
         return;
       }
       if (behavior === 'google') {
-        // Google's calendar address redirects to its CalDAV service host, which then answers with
+        // Google's old calendar address only redirects to its CalDAV service host, which answers with
         // the discovery body above. The fake server stands in for both hosts on the checked address.
         const googleExpected = `Basic ${Buffer.from(`${GOOGLE_USER}:${CANARY}`).toString('base64')}`;
         if (req.headers.authorization !== googleExpected) {
@@ -211,12 +216,12 @@ describe('the calendar account agent', () => {
     assert.equal(existsSync(file), false);
   });
 
-  it('signs in to Google through its redirect to the CalDAV service host and its discovery answer', async () => {
+  it("signs in to Google on its CalDAV service host, at the address the tool server asks first", async () => {
     behavior = 'google';
     const saved = await call(
       'POST',
       payload({
-        url: `https://calendar.google.com:${calendarPort}/calendar/dav/${GOOGLE_USER}/user/`,
+        url: `https://apidata.googleusercontent.com:${calendarPort}/caldav/v2/${GOOGLE_USER}/user/`,
         username: GOOGLE_USER,
         email: GOOGLE_USER,
       }),
@@ -224,19 +229,42 @@ describe('the calendar account agent', () => {
     assert.equal(saved.status, 200);
     assert.deepEqual(
       seen.map(request => request.url),
-      [`/calendar/dav/${GOOGLE_USER}/user/`, `/caldav/v2/${GOOGLE_USER}/user`],
+      [`/caldav/v2/${GOOGLE_USER}/user/`],
     );
     assert.ok(!saved.text.includes(CANARY));
   });
 
-  it('follows one redirect to another path on the same server, such as a trailing slash', async () => {
+  it("refuses Google's old calendar address, which only redirects, so it never shows connected", async () => {
+    behavior = 'google';
+    const refused = await call(
+      'POST',
+      payload({
+        url: `https://calendar.google.com:${calendarPort}/calendar/dav/${GOOGLE_USER}/user/`,
+        username: GOOGLE_USER,
+        email: GOOGLE_USER,
+      }),
+    );
+    assert.deepEqual(JSON.parse(refused.text), { error: 'redirected' });
+    assert.equal(seen.length, 1);
+    assert.equal(existsSync(file), false);
+  });
+
+  it('asks the address with one trailing slash, the way the tool server does', async () => {
     behavior = 'slash';
-    const saved = await call('POST', payload({ url: `https://${HOST}:${calendarPort}/dav` }));
+    const saved = await call('POST', payload({ url: `https://${HOST}:${calendarPort}/dav//` }));
     assert.equal(saved.status, 200);
     assert.deepEqual(
       seen.map(request => request.url),
-      ['/dav', '/dav/'],
+      ['/dav/'],
     );
+  });
+
+  it('refuses a redirect to another path on the same server, since the tool server would refuse it too', async () => {
+    behavior = 'unslash';
+    const refused = await call('POST', payload({ url: `https://${HOST}:${calendarPort}/dav/` }));
+    assert.deepEqual(JSON.parse(refused.text), { error: 'redirected' });
+    assert.equal(seen.length, 1);
+    assert.equal(existsSync(file), false);
   });
 
   it('names a certificate it does not trust, and sends nothing after the handshake fails', async () => {

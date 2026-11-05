@@ -24,60 +24,24 @@ const CERTIFICATE_ERRORS = new Set([
   'ERR_TLS_CERT_ALTNAME_INVALID',
 ]);
 
-const REDIRECT_STATUSES = new Set([301, 302, 307, 308]);
+const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
 
-/** The address a redirect points to when it stays on the same server and port over https, else null. */
-function sameServerRedirect({ response, target }) {
-  const location = response.headers?.location;
-  if (typeof location !== 'string') {
-    return null;
-  }
-  try {
-    const next = new URL(location, target);
-    return next.protocol === 'https:' && next.origin === target.origin ? next : null;
-  } catch {
-    return null;
-  }
-}
-
-// Google's one cross-server move: the calendar address on calendar.google.com sends the client to
-// Google's CalDAV service host, apidata.googleusercontent.com, under /caldav/v2/. That move, and no
-// other cross-server redirect, may be followed, and only after the new host passes the same address
-// checks as the first one (see checkSignIn).
-const GOOGLE_CALENDAR_HOST = 'calendar.google.com';
-const GOOGLE_CALDAV_HOST = 'apidata.googleusercontent.com';
-const GOOGLE_CALDAV_PATH = '/caldav/v2/';
-
-/** The Google CalDAV address a redirect points to, when the target is Google's calendar address, else null. */
-function googleCaldavRedirect({ response, target }) {
-  if (target.hostname !== GOOGLE_CALENDAR_HOST) {
-    return null;
-  }
-  const location = response.headers?.location;
-  if (typeof location !== 'string') {
-    return null;
-  }
-  try {
-    const next = new URL(location, target);
-    return next.protocol === 'https:' &&
-      next.hostname === GOOGLE_CALDAV_HOST &&
-      next.pathname.startsWith(GOOGLE_CALDAV_PATH)
-      ? next
-      : null;
-  } catch {
-    return null;
-  }
+/**
+ * The address the tool server sends its first request to: the saved address without its query and with one
+ * trailing slash. The check asks that same address so a pass here means the tool server's first step passes.
+ */
+export function firstRequestUrl(url) {
+  const parsed = new URL(url);
+  return new URL(`${parsed.origin}${parsed.pathname.replace(/\/+$/, '')}/`);
 }
 
 /**
  * Words: ok (signed in), login (the server refused the login), server (the address could not be reached,
  * or answered something else), certificate (its security certificate was not accepted), redirect (it sent
- * the login to another server), blocked (not an address this service may use).
- * The connection goes only to an address that passed the address rules. One redirect to another path on the
- * same server is followed, since providers often add a trailing slash. Google's calendar address may also
- * redirect once to Google's CalDAV service host; that host is checked the same way before the login is
- * sent to it. Any other redirect is refused, so neither a changing DNS answer nor a redirect can lead the
- * login somewhere else.
+ * the login to another address), blocked (not an address this service may use).
+ * The connection goes only to an address that passed the address rules. No redirect is followed: the tool
+ * server refuses every redirect, so an address that redirects would pass here and then fail on every
+ * calendar call.
  */
 export async function checkSignIn(account, deps = {}) {
   const host = hostOf(account.url);
@@ -85,26 +49,7 @@ export async function checkSignIn(account, deps = {}) {
   if (!allowed.ok) {
     return allowed.reason === 'blocked' ? 'blocked' : 'server';
   }
-  const first = new URL(account.url);
-  const answer = await attempt({ account, target: first, allowed, deps });
-  if (answer.word !== 'redirect') {
-    return answer.word;
-  }
-  if (answer.next === null) {
-    return 'redirect';
-  }
-  let secondAllowed = allowed;
-  if (answer.next.origin !== first.origin) {
-    // The only cross-server target attempt() returns is Google's CalDAV host. Check it like the first host.
-    const checked = await allowedAddresses(hostOf(answer.next.toString()), deps);
-    if (!checked.ok) {
-      return 'redirect';
-    }
-    secondAllowed = checked;
-  }
-  const second = await attempt({ account, target: answer.next, allowed: secondAllowed, deps });
-  // A second redirect is not followed either.
-  return second.word;
+  return attempt({ account, target: firstRequestUrl(account.url), allowed, deps });
 }
 
 function attempt({ account, target, allowed, deps }) {
@@ -113,10 +58,10 @@ function attempt({ account, target, allowed, deps }) {
   const basic = Buffer.from(`${account.username}:${account.password}`, 'utf8').toString('base64');
   return new Promise(done => {
     let finished = false;
-    const finish = (word, next = null) => {
+    const finish = word => {
       if (!finished) {
         finished = true;
-        done({ word, next });
+        done(word);
       }
     };
     const options = {
@@ -150,7 +95,7 @@ function attempt({ account, target, allowed, deps }) {
       } else if (status === 401 || status === 403) {
         finish('login');
       } else if (REDIRECT_STATUSES.has(status)) {
-        finish('redirect', sameServerRedirect({ response, target }) ?? googleCaldavRedirect({ response, target }));
+        finish('redirect');
       } else {
         finish('server');
       }

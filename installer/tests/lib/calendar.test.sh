@@ -29,8 +29,8 @@ assert_secret_only_in_volume() {
 test_presets() {
   t_begin "each preset maps to its provider's address; other providers have none built in"
   sandbox_new
-  assert_eq "$(in_lib 'calendar_preset_url google person@gmail.com')" "https://calendar.google.com/calendar/dav/person@gmail.com/user/" "google"
-  assert_eq "$(in_lib 'calendar_preset_url google a#b@gmail.com')" "https://calendar.google.com/calendar/dav/a%23b@gmail.com/user/" "google encodes characters a calendar address cannot hold"
+  assert_eq "$(in_lib 'calendar_preset_url google person@gmail.com')" "https://apidata.googleusercontent.com/caldav/v2/person@gmail.com/user/" "google"
+  assert_eq "$(in_lib 'calendar_preset_url google a#b@gmail.com')" "https://apidata.googleusercontent.com/caldav/v2/a%23b@gmail.com/user/" "google encodes characters a calendar address cannot hold"
   assert_eq "$(in_lib 'calendar_preset_url fastmail owner@fastmail.com')" "https://caldav.fastmail.com/dav/" "fastmail"
   assert_eq "$(in_lib 'calendar_preset_url yahoo owner@yahoo.com')" "https://caldav.calendar.yahoo.com" "yahoo"
   assert_eq "$(in_lib 'calendar_preset_url gmx owner@gmx.com')" "https://caldav.gmx.com/" "gmx.com"
@@ -339,7 +339,7 @@ test_google_calendar_flags_save() {
   run_install instance calendar main --yes --calendar-provider google --calendar-email person@gmail.com --calendar-password-stdin
   clear_input
   assert_rc 0
-  assert_eq "$(cal_value CALDAV_URL)" "https://calendar.google.com/calendar/dav/person@gmail.com/user/"
+  assert_eq "$(cal_value CALDAV_URL)" "https://apidata.googleusercontent.com/caldav/v2/person@gmail.com/user/"
   assert_eq "$(cal_value CALDAV_USERNAME)" "person@gmail.com"
   assert_eq "$(cal_value CALDAV_PASSWORD)" "$CAL_SECRET"
   assert_secret_only_in_volume
@@ -362,7 +362,7 @@ $CAL_SECRET
   assert_eq "$(printf '%s' "$OUT" | grep -o 'Which calendar provider is yours?' | wc -l | tr -d ' ')" "2" "the provider menu is shown again after the Gmail refusal"
   assert_flat_contains "$OUT" "Turn on 2-Step Verification for your Google account, if it is not on yet."
   assert_flat_contains "$OUT" "When you are asked, type your Gmail address and paste the app password."
-  assert_eq "$(cal_value CALDAV_URL)" "https://calendar.google.com/calendar/dav/person@gmail.com/user/"
+  assert_eq "$(cal_value CALDAV_URL)" "https://apidata.googleusercontent.com/caldav/v2/person@gmail.com/user/"
   assert_eq "$(cal_value CALDAV_USERNAME)" "person@gmail.com"
   assert_secret_only_in_volume
   sandbox_drop
