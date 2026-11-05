@@ -203,7 +203,7 @@ function outcomeOf({
   done: z.infer<typeof TurnDoneEventSchema> | undefined;
   turnId: string | undefined;
 }): TurnOutcome {
-  if (done === undefined || done.state.status !== 'done' || turnId === undefined) {
+  if (done?.state.status !== 'done' || turnId === undefined) {
     return { kind: 'failed' };
   }
   const approvals: PendingApproval[] = done.state.required_actions.flatMap(action =>

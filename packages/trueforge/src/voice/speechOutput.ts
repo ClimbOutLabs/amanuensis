@@ -40,13 +40,14 @@ export class SpeechOutput {
 
   async #speak({ text, role }: { text: string; role: SentenceRole }): Promise<void> {
     const { tts, format, transport, timeline, spoken, signal } = this.#deps;
-    if (signal.aborted) {
+    const stopped = (): boolean => signal.aborted;
+    if (stopped()) {
       return;
     }
     try {
       let counted = false;
       for await (const chunk of tts.stream({ text, format, signal })) {
-        if (signal.aborted) {
+        if (stopped()) {
           return;
         }
         if (!counted && role === 'body') {
@@ -59,7 +60,7 @@ export class SpeechOutput {
         this.#deps.onAudio();
       }
     } catch (error) {
-      if (!signal.aborted) {
+      if (!stopped()) {
         this.#deps.onFailure(error);
       }
     }

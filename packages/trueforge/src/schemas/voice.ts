@@ -55,3 +55,14 @@ export const SpeakVoiceRequestSchema = z
   .openapi('SpeakVoiceRequest');
 
 export type SpeakVoiceRequest = z.infer<typeof SpeakVoiceRequestSchema>;
+
+/** What the browser sends to ask for a voice connection. Not part of the public API description. */
+export const ConnectVoiceRequestSchema = z.object({
+  session_id: z.string().min(1).max(200),
+  voice: z
+    .string()
+    .regex(/^[a-z]{2}_[a-z]+$/)
+    .optional(),
+  client_timezone: z.string().min(1).max(100).optional(),
+});
+export type ConnectVoiceRequest = z.infer<typeof ConnectVoiceRequestSchema>;

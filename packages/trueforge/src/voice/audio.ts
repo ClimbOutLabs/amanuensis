@@ -132,3 +132,13 @@ export function wavFromSamples(samples: Int16Array): Uint8Array {
   }
   return out;
 }
+
+/** 16-bit little-endian bytes for samples, the way a browser sends them. */
+export function pcmBytesOf(samples: Int16Array): Uint8Array {
+  const out = new Uint8Array(samples.length * 2);
+  const view = new DataView(out.buffer);
+  for (let i = 0; i < samples.length; i += 1) {
+    view.setInt16(i * 2, samples[i] ?? 0, true);
+  }
+  return out;
+}

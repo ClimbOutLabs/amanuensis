@@ -2,6 +2,8 @@
  * Backend-to-sidecar text-to-speech, streaming: one sentence in, audio out as it is made.
  * Text is never logged.
  */
+import type { ReadableStreamReadResult } from 'node:stream/web';
+
 import configuration from '../config';
 import type { OutputFormat } from './audio';
 import type { SpeechSynthesizer } from './transport';
@@ -49,11 +51,11 @@ export class SidecarSpeechSynthesizer implements SpeechSynthesizer {
     const reader = response.body.getReader();
     try {
       for (;;) {
-        const { done, value } = await reader.read();
-        if (done) {
+        const piece: ReadableStreamReadResult<Uint8Array> = await reader.read();
+        if (piece.done) {
           return;
         }
-        yield value;
+        yield piece.value;
       }
     } finally {
       await reader.cancel().catch(() => undefined);

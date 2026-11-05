@@ -1,5 +1,5 @@
 /**
- * @jest-environment <rootDir>/tests/unit/voice/nativeArrays.environment.cjs
+ * @jest-environment <rootDir>/tests/unit/voice/nativeArrays.environment.mjs
  */
 import { createHash } from 'node:crypto';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';

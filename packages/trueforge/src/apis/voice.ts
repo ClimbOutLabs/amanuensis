@@ -16,18 +16,25 @@ import type { ResolveRequestContext } from '../auth/identity';
 import configuration from '../config';
 import { getVoiceStatusRoute, speakVoiceRoute, transcribeVoiceRoute } from '../routes/voiceRoutes';
 import {
+  ConnectVoiceRequestSchema,
   MAX_SPEAK_TEXT_CHARS,
   VoiceTranscriptionSchema,
   type VoiceStatus,
   type VoiceTranscription,
 } from '../schemas/voice';
+import { VOICE_SOCKET_PROTOCOL, VOICE_STREAM_PATH } from '../voice/browserTransport';
 import { SpeechRateLimiter } from '../voice/speechRateLimit';
-import { probeSttHealth } from '../voice/sttAvailability';
+import { isVoiceAvailable, probeSttHealth } from '../voice/sttAvailability';
 import { forwardToSidecar } from '../voice/sttClient';
+import { VadModelUnavailableError } from '../voice/vad/sileroVad';
+import { FORWARDED_HEADERS, readyVadModel, requestAs, type SelfFetch } from '../voice/voiceSocket';
+import { voiceTickets } from '../voice/voiceTickets';
 
 export interface VoiceRouterDeps {
   logger: Logger;
   resolveRequestContext: ResolveRequestContext;
+  /** Runs a request against this server's own app; voice mode uses it to check the chat is the person's. */
+  selfFetch: SelfFetch;
   /** Defaults to a fresh per-process limiter; tests inject one with a small budget. */
   speechLimiter?: SpeechRateLimiter;
 }
@@ -53,7 +60,7 @@ class AudioTooLargeError extends Error {
   }
 }
 
-function errorJson<S extends 400 | 413 | 429 | 502 | 503>(
+function errorJson<S extends 400 | 404 | 413 | 429 | 502 | 503>(
   c: Context,
   { status, message, code }: { status: S; message: string; code: string },
 ) {
@@ -286,7 +293,92 @@ export function createVoiceRouter(deps: VoiceRouterDeps) {
     }
   };
 
+  /**
+   * Asks to talk: checks voice mode can run and that the chat is the caller's, then hands out a ticket for
+   * the WebSocket. A plain route: the socket itself cannot be described in the API document.
+   */
+  const connectHandler = async (c: Context) => {
+    if (!configuration.TTS_ENABLED) {
+      return errorJson(c, {
+        status: 503,
+        message:
+          'Voice mode is turned off on this computer. Turn the local voice on in the server settings, then try again.',
+        code: 'voice_mode_off',
+      });
+    }
+    if (!isVoiceAvailable()) {
+      return errorJson(c, {
+        status: 503,
+        message: 'Speech to text is not ready yet. Try again in a minute.',
+        code: 'stt_unavailable',
+      });
+    }
+    const parsed = ConnectVoiceRequestSchema.safeParse(await c.req.json().catch(() => undefined));
+    if (!parsed.success) {
+      return errorJson(c, {
+        status: 400,
+        message: 'Send the chat to talk in. Reload the page, then try again.',
+        code: 'bad_request',
+      });
+    }
+    const { tenant_id, subject } = deps.resolveRequestContext(c);
+    const headers: Record<string, string> = {};
+    for (const name of FORWARDED_HEADERS) {
+      const value = c.req.header(name);
+      if (value !== undefined) {
+        headers[name] = value;
+      }
+    }
+    const ticket = {
+      tenantId: tenant_id,
+      subjectId: subject.id,
+      sessionId: parsed.data.session_id,
+      headers,
+      timezone: parsed.data.client_timezone,
+      voice: parsed.data.voice,
+    };
+    // The chat's own route says whether this person may use it, so there is one rule for that.
+    const owned = await requestAs({ ticket, selfFetch: deps.selfFetch })(
+      `/api/v1/sessions/${encodeURIComponent(parsed.data.session_id)}`,
+      { method: 'GET' },
+    );
+    if (!owned.ok) {
+      return errorJson(c, {
+        status: 404,
+        message: 'That chat could not be found. Reload the page, then try again.',
+        code: 'chat_not_found',
+      });
+    }
+    try {
+      await readyVadModel();
+    } catch (error) {
+      deps.logger.warn('voice model unavailable', extractErrorLogFields(error));
+      return errorJson(c, {
+        status: 503,
+        message:
+          error instanceof VadModelUnavailableError
+            ? error.message
+            : 'Voice mode could not load its listening model. Restart Aman, then try again.',
+        code: 'vad_unavailable',
+      });
+    }
+    const issued = voiceTickets.issue(ticket);
+    return c.json(
+      {
+        data: {
+          ticket: issued.id,
+          expires_in_seconds: issued.expiresInSeconds,
+          protocol: VOICE_SOCKET_PROTOCOL,
+          path: VOICE_STREAM_PATH,
+        },
+      },
+      200,
+      { 'Cache-Control': 'private, no-store' },
+    );
+  };
+
   const router = new OpenAPIHono();
+  router.post('/connect', connectHandler);
   router.openapi(transcribeVoiceRoute, transcribeVoiceHandler);
   router.openapi(speakVoiceRoute, speakVoiceHandler);
   router.openapi(getVoiceStatusRoute, getVoiceStatusHandler);

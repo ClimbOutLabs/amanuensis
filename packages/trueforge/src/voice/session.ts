@@ -13,10 +13,10 @@ import {
   type ApprovalVerb,
   type VoiceApprovalPlan,
 } from './approvalVoice';
-import { INPUT_SAMPLE_RATE, InputDecoder, rms } from './audio';
+import { InputDecoder, rms } from './audio';
 import { PlaybackTimeline, SpokenTextLog, systemClock, type Clock } from './echoGuard';
 import { SentenceSplitter } from './sentences';
-import { SpeechOutput, type SentenceRole } from './speechOutput';
+import { SpeechOutput } from './speechOutput';
 import type {
   PendingApproval,
   SpeechSynthesizer,
@@ -317,7 +317,7 @@ export class VoiceSession {
       },
     });
     splitter.flush().forEach(say);
-    await this.#afterTurn({ outcome, speech, signal, spokeText: spokenChars > 0, verb: undefined });
+    this.#afterTurn({ outcome, speech, signal });
     await speech.drain();
   }
 
@@ -374,21 +374,11 @@ export class VoiceSession {
         role: 'instruction',
       });
     }
-    await this.#afterTurn({ outcome, speech, signal, spokeText: true, verb: awaiting.verb });
+    this.#afterTurn({ outcome, speech, signal });
     await speech.drain();
   }
 
-  async #afterTurn({
-    outcome,
-    speech,
-    signal,
-  }: {
-    outcome: TurnOutcome;
-    speech: SpeechOutput;
-    signal: AbortSignal;
-    spokeText: boolean;
-    verb: ApprovalVerb | undefined;
-  }): Promise<void> {
+  #afterTurn({ outcome, speech, signal }: { outcome: TurnOutcome; speech: SpeechOutput; signal: AbortSignal }): void {
     if (signal.aborted) {
       return;
     }
@@ -427,7 +417,7 @@ export class VoiceSession {
     }
     for (const segment of plan.segments) {
       for (const sentence of splitSentences(segment.text)) {
-        speech.say({ text: sentence, role: segment.role satisfies SentenceRole });
+        speech.say({ text: sentence, role: segment.role });
       }
     }
     this.#awaiting = { approval: only, verb: plan.verb, reminded: false };
@@ -505,5 +495,3 @@ function splitSentences(text: string): string[] {
   const splitter = new SentenceSplitter();
   return [...splitter.push(`${text}\n`), ...splitter.flush()];
 }
-
-export { INPUT_SAMPLE_RATE };
