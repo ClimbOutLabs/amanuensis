@@ -49,9 +49,10 @@ See [Roles and Personas](/model-roles).
 Aman waits 90 seconds for a model's first output, then 60 seconds between
 chunks, and 3 minutes between chunks while the model is writing out a tool call.
 Set `MODEL_FIRST_RESPONSE_TIMEOUT_MS`, `MODEL_STREAM_IDLE_TIMEOUT_MS` and
-`MODEL_STREAM_TOOL_CALL_IDLE_TIMEOUT_MS` to change them, or a provider's
-`stream_timeout` for one provider. A local model that takes long to load needs a
-longer first-output wait. The first-output wait starts when the request is sent,
+`MODEL_STREAM_TOOL_CALL_IDLE_TIMEOUT_MS` to change them. A provider's
+`stream_timeout` can only shorten them for that provider. To give a local model
+that takes long to load more time, raise `MODEL_FIRST_RESPONSE_TIMEOUT_MS`.
+The first-output wait starts when the request is sent,
 so it also covers the wait for the provider to start answering. Nonempty
 reasoning and tool-argument chunks count as progress; empty transport heartbeats
 do not. There is no overall answer-duration ceiling, and thinking remains
