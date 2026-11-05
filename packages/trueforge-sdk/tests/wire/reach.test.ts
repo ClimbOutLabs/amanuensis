@@ -507,4 +507,26 @@ describe("ReachClient", () => {
             });
         }).rejects.toThrow(TrueForgeTypes.ConflictError);
     });
+
+    test("test_channel (5)", async () => {
+        const server = mockServerPool.createServer();
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
+        const rawRequestBody = { channel: "in_app" };
+        const rawResponseBody = { error: { message: "message" } };
+
+        server
+            .mockEndpoint()
+            .post("/api/v1/user/reach/test")
+            .jsonBody(rawRequestBody)
+            .respondWith()
+            .statusCode(502)
+            .jsonBody(rawResponseBody)
+            .build();
+
+        await expect(async () => {
+            return await client.reach.testChannel({
+                channel: "in_app",
+            });
+        }).rejects.toThrow(TrueForgeTypes.BadGatewayError);
+    });
 });

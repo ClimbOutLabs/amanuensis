@@ -749,6 +749,9 @@ export type {
   ReachApi,
   ReachSettings,
   ReachView,
+  TextMode,
+  TextStatus,
+  TextsApi,
 } from './deliveries/types.js';
 export { SpaceProvider, useOptionalSpaces } from './server/SpaceContext.js';
 export type { Space, SpaceFolder, SpaceFormat, SpaceStatus, SpaceStore } from './server/SpaceContext.js';

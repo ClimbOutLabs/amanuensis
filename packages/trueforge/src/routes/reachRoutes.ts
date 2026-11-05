@@ -87,6 +87,10 @@ export const testReachChannelRoute = createRoute({
       content: { 'application/json': { schema: RequestErrorResponseSchema } },
       description: 'That channel is not set up yet.',
     },
+    502: {
+      content: { 'application/json': { schema: RequestErrorResponseSchema } },
+      description: 'The test text could not be sent.',
+    },
   },
 });
 

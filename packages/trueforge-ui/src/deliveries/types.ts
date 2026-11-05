@@ -65,6 +65,32 @@ export type ReachSuggestion = { address: string; memory: string };
 
 export type ReachTestChannel = 'in_app' | 'push' | 'text' | 'call';
 
+/** How much a text says. Private names only the kind of thing; full carries the one-sentence message. */
+export type TextMode = 'private' | 'full';
+
+/** The person's number for texts and where confirming it stands. */
+export type TextStatus = {
+  /** The number as entered, or null before one is. */
+  phone: string | null;
+  /** Nothing is sent to the number until the person has proved it with a code. */
+  confirmed: boolean;
+  mode: TextMode;
+  /** The person replied STOP. They confirm the number again to use texts. */
+  optedOut: boolean;
+  codePending: boolean;
+};
+
+/** The number for texts, served by the host. Each call rejects with a message fit to show. */
+export type TextsApi = {
+  status(): Promise<TextStatus>;
+  /** Texts a one-time code to the number. */
+  sendCode(phone: string): Promise<TextStatus>;
+  confirm(code: string): Promise<TextStatus>;
+  setMode(mode: TextMode): Promise<TextStatus>;
+  /** Forgets the number and switches texts off. */
+  remove(): Promise<void>;
+};
+
 /** The person's Reach me settings, served by the host. Each call rejects with a message fit to show. */
 export type ReachApi = {
   get(): Promise<ReachView>;
@@ -73,6 +99,7 @@ export type ReachApi = {
   suggestions(): Promise<ReachSuggestion[]>;
   /** Sends a test through one channel. Resolves to how many devices a push notice reached. */
   test(channel: ReachTestChannel): Promise<{ devicesReached: number }>;
+  texts: TextsApi;
 };
 
 /** The feed, the push devices and Reach me settings, served by the host. */

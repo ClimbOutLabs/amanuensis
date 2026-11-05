@@ -2,12 +2,13 @@ import type { AuditLogWriter } from '@truefoundry/trueforge-core/core';
 import type { Logger } from 'winston';
 
 import type { CreateDeliveryInput, IDeliveryStore } from '../../db/deliveryStore';
-import type { Delivery, DeliveryAttempt } from '../../schemas/deliveries';
+import type { Delivery, DeliveryAttempt, DeliveryChannel } from '../../schemas/deliveries';
 import type { DeliveryChannelSender } from './deliveryChannel';
 
 /** The one door into the feed: makes the delivery, tries each channel, and writes every step to Activity. */
 export interface DeliveryService {
-  deliver(input: CreateDeliveryInput): Promise<Delivery>;
+  /** `only_channels` limits which senders are tried, such as a test of one channel. The app itself always gets it. */
+  deliver(input: CreateDeliveryInput & { only_channels?: readonly DeliveryChannel[] }): Promise<Delivery>;
 }
 
 export const DELIVERY_CREATED_TOOL_NAME = 'delivery.created';
@@ -16,13 +17,19 @@ function channelToolName(attempt: DeliveryAttempt): string {
   return `delivery.${attempt.channel}`;
 }
 
+const CHANNEL_WORDS: Record<DeliveryChannel, string> = {
+  in_app: 'the app',
+  web_push: 'a push notice',
+  sms: 'a text message',
+};
+
 function conversationOf(delivery: Delivery): string {
   const link = delivery.link;
   return link !== null && 'session_id' in link ? link.session_id : '';
 }
 
 function outcomeWords(attempt: DeliveryAttempt): string {
-  const base = `Tried ${attempt.channel === 'web_push' ? 'a push notice' : 'the app'}: ${attempt.outcome}.`;
+  const base = `Tried ${CHANNEL_WORDS[attempt.channel]}: ${attempt.outcome}.`;
   return attempt.detail === null ? base : `${base} ${attempt.detail}`;
 }
 
@@ -70,7 +77,7 @@ export function createDeliveryService({
   }
 
   return {
-    async deliver(input) {
+    async deliver({ only_channels, ...input }) {
       const owner = { tenant_id: input.tenant_id, created_by: input.created_by };
       const created = await store.create(input);
       await record({
@@ -88,6 +95,9 @@ export function createDeliveryService({
       };
       const attempts: DeliveryAttempt[] = [inApp];
       for (const sender of senders) {
+        if (only_channels !== undefined && !only_channels.includes(sender.channel)) {
+          continue;
+        }
         try {
           attempts.push(...(await sender.send({ delivery: created, ...owner })));
         } catch (error) {
@@ -96,7 +106,7 @@ export function createDeliveryService({
             error: error instanceof Error ? error.message : String(error),
           });
           attempts.push({
-            channel: 'web_push',
+            channel: sender.channel,
             outcome: 'failed',
             detail: 'The notice could not be sent. It is still in your feed.',
             target: null,

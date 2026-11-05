@@ -1,6 +1,6 @@
 import { vi } from 'vitest';
 
-import type { DeliveriesApi, DeliveryItem, ReachSettings, ReachView } from '@/deliveries/types.js';
+import type { DeliveriesApi, DeliveryItem, ReachSettings, ReachView, TextStatus } from '@/deliveries/types.js';
 
 export function item(overrides: Partial<DeliveryItem> & { id: string }): DeliveryItem {
   return {
@@ -41,7 +41,10 @@ export function fakeServer(initial: DeliveryItem[]) {
       settings: QUIET_SETTINGS,
       saved: false,
       availability: {
-        texts: { available: false, note: 'Texts are not set up yet.' },
+        texts: {
+          available: false,
+          note: 'Texts are not set up. To set them up, add your Twilio details to the settings file and restart Aman.',
+        },
         calls: { available: false, note: 'Phone calls are not set up yet.' },
       },
       maxLevels: {
@@ -53,6 +56,7 @@ export function fakeServer(initial: DeliveryItem[]) {
       },
     } as ReachView,
     suggestions: [] as { address: string; memory: string }[],
+    texts: { phone: null, confirmed: false, mode: 'private', optedOut: false, codePending: false } as TextStatus,
   };
   const unread = () => state.items.filter(row => row.seenAt === null).length;
   const api: DeliveriesApi = {
@@ -83,6 +87,26 @@ export function fakeServer(initial: DeliveryItem[]) {
       }),
       suggestions: vi.fn(() => Promise.resolve(state.suggestions)),
       test: vi.fn(() => Promise.resolve({ devicesReached: 1 })),
+      texts: {
+        status: vi.fn(() => Promise.resolve(state.texts)),
+        sendCode: vi.fn((phone: string) => {
+          state.texts = { ...state.texts, phone, confirmed: false, codePending: true };
+          return Promise.resolve(state.texts);
+        }),
+        confirm: vi.fn((code: string) => {
+          if (code !== '123456') return Promise.reject(new Error('That code is not right. You have 4 tries left.'));
+          state.texts = { ...state.texts, confirmed: true, codePending: false };
+          return Promise.resolve(state.texts);
+        }),
+        setMode: vi.fn((mode: TextStatus['mode']) => {
+          state.texts = { ...state.texts, mode };
+          return Promise.resolve(state.texts);
+        }),
+        remove: vi.fn(() => {
+          state.texts = { phone: null, confirmed: false, mode: 'private', optedOut: false, codePending: false };
+          return Promise.resolve();
+        }),
+      },
     },
   };
   return { api, state };

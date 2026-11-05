@@ -80,6 +80,7 @@ async function setup(channels: ReachChannels = NO_PHONE_CHANNELS) {
     store: deliveryStore,
     senders: [
       {
+        channel: 'web_push',
         send: ({ delivery }) => {
           pushed.push(delivery);
           return Promise.resolve([

@@ -3,6 +3,7 @@ import type { Logger } from 'winston';
 
 import type { ResolveRequestContext } from '../auth/identity';
 import type { IReachSettingsStore } from '../db/reachSettingsStore';
+import type { ITextContactStore } from '../db/textContactStore';
 import {
   getReachRoute,
   listReachSuggestionsRoute,
@@ -13,10 +14,12 @@ import type { DeliveryService } from '../runtime/delivery/deliveryService';
 import { KIND_MAX_LEVEL } from '../runtime/noticing/levels';
 import type { ReachChannels } from '../runtime/noticing/reachChannels';
 import { suggestAlwaysImportant } from '../runtime/noticing/suggestions';
+import { canText } from '../runtime/texts/textNumber';
 import { defaultReachSettings, NOTICING_KINDS, type AlwaysImportantSender, type ReachSettings } from '../schemas/reach';
 
 export interface ReachRouterDeps {
   reachStore: IReachSettingsStore;
+  textContacts: Pick<ITextContactStore, 'get'>;
   deliveryService: Pick<DeliveryService, 'deliver'>;
   /** Which phone channels this server can use now. Read per request, since a later part may set one up while running. */
   channels: () => ReachChannels;
@@ -90,6 +93,15 @@ export function createReachRouter(deps: ReachRouterDeps) {
     if (settings.channels.texts && !channels.texts.available) {
       return c.json({ error: { message: `${channels.texts.note} Leave texts off for now.` } }, 400);
     }
+    if (settings.channels.texts) {
+      const contact = await deps.textContacts.get(owner);
+      if (!canText(contact)) {
+        return c.json(
+          { error: { message: 'Confirm your number first. Enter it and the code we text you, then switch texts on.' } },
+          400,
+        );
+      }
+    }
     if (settings.channels.calls && !channels.calls.available) {
       return c.json({ error: { message: `${channels.calls.note} Leave calls off for now.` } }, 400);
     }
@@ -124,10 +136,36 @@ export function createReachRouter(deps: ReachRouterDeps) {
     const owner = ownerOf(c);
     const { channel } = c.req.valid('json');
     const channels = deps.channels();
-    if (channel === 'text' || channel === 'call') {
-      const status = channel === 'text' ? channels.texts : channels.calls;
-      if (!status.available) {
-        return c.json({ error: { message: `${status.note} There is nothing to try yet.` } }, 409);
+    if (channel === 'text') {
+      if (!channels.texts.available) {
+        return c.json({ error: { message: `${channels.texts.note} There is nothing to try yet.` } }, 409);
+      }
+      const settings = await deps.reachStore.get(owner);
+      const contact = await deps.textContacts.get(owner);
+      if (settings?.channels.texts !== true || !canText(contact)) {
+        return c.json({ error: { message: 'Confirm your number and switch texts on first, then try again.' } }, 409);
+      }
+      const delivery = await deps.deliveryService.deliver({
+        ...owner,
+        kind: 'nudge',
+        level: 'nudge',
+        text: 'This is a test. If you can read this, it works.',
+        reason: 'You pressed Try it in Reach me settings.',
+        link: null,
+        only_channels: ['sms'],
+      });
+      const sent = delivery.attempts.find(attempt => attempt.channel === 'sms');
+      if (sent?.outcome !== 'sent') {
+        return c.json(
+          { error: { message: sent?.detail ?? 'The text could not be sent. Try again in a minute.' } },
+          502,
+        );
+      }
+      return c.json({ data: { delivery_id: delivery.id, devices_reached: 0 } }, 201);
+    }
+    if (channel === 'call') {
+      if (!channels.calls.available) {
+        return c.json({ error: { message: `${channels.calls.note} There is nothing to try yet.` } }, 409);
       }
       return c.json({ error: { message: 'This channel cannot be tried from here yet.' } }, 409);
     }

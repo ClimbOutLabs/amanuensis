@@ -56,6 +56,7 @@ import { createAvailableSkillsRouter, type ResolveSkillStore } from './apis/skil
 import { createSpaceFolderAssignmentsRouter, createSpaceFoldersRouter } from './apis/spaceFolders';
 import { createSpacePicturesRouter } from './apis/spacePictures';
 import { createSpacesRouter } from './apis/spaces';
+import { createTextNumberRouter } from './apis/textNumber';
 import { createTurnsRouter } from './apis/turns';
 import { createVoiceRouter } from './apis/voice';
 import type { Authenticator } from './auth/authenticator';
@@ -107,6 +108,7 @@ import type { SessionCustom, TurnCustom } from './db/sessionCustom';
 import type { ISessionMetricsStore } from './db/sessionMetricsStore';
 import type { ISkillStore } from './db/skillStore';
 import type { ISpaceStore } from './db/spaceStore';
+import type { ITextContactStore } from './db/textContactStore';
 import type { WithTransaction } from './db/transaction';
 import type { ITurnArtifactStore } from './db/turnArtifactStore';
 import type { SchedulerProbe } from './help/healthCheck';
@@ -132,6 +134,7 @@ import type { ReachChannels } from './runtime/noticing/reachChannels';
 import type { ReminderReach } from './runtime/noticing/reminderReach';
 import { resolveSandboxProvider } from './runtime/sessionResources';
 import { createSpacePictureService } from './runtime/spacePictures/spacePictureService';
+import type { TextNumberService } from './runtime/texts/textNumber';
 import { TokenFactoryDailyCapError, type TokenFactoryBudget } from './runtime/tokenFactoryBudget';
 import { envManagedModelProviderNames } from './runtime/tokenFactoryProvider';
 import type { TurnDrainRegistry } from './runtime/turnDrains';
@@ -321,8 +324,11 @@ export interface ServerDeps<TTransaction> {
   noticingService: NoticingService;
   /** Settles how loud a due reminder is. */
   reminderReach: ReminderReach;
-  /** Which phone channels this server can use. Texts and calls are set up by later parts. */
+  /** Which phone channels this server can use. */
   reachChannels: () => ReachChannels;
+  /** The person's number for texts and its confirming. */
+  textNumbers: TextNumberService;
+  textContactStore: ITextContactStore;
   /** The public key a browser needs to turn push on; undefined while push is off. */
   webPushPublicKey: string | undefined;
   turnArtifactStore: ITurnArtifactStore<TTransaction>;
@@ -769,6 +775,7 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
         sentinelAuditStore: deps.sentinelAuditStore,
         deliveryStore: deps.deliveryStore,
         reachSettingsStore: deps.reachSettingsStore,
+        textContactStore: deps.textContactStore,
         turnArtifactStore: deps.turnArtifactStore,
         tokenStore: deps.tokenStore,
         resolveMcpServerStore: deps.resolveMcpServerStore,
@@ -794,6 +801,7 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
       sentinelAuditStore: deps.sentinelAuditStore,
       deliveryStore: deps.deliveryStore,
       reachSettingsStore: deps.reachSettingsStore,
+      textContactStore: deps.textContactStore,
       turnArtifactStore: deps.turnArtifactStore,
       chatSearchIndexer: deps.chatSearchIndexer,
       tokenStore: deps.tokenStore,
@@ -907,6 +915,7 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
     withAuth(
       createReachRouter({
         reachStore: deps.reachSettingsStore,
+        textContacts: deps.textContactStore,
         deliveryService: deps.deliveryService,
         channels: deps.reachChannels,
         memories: async ({ tenant_id }) => {
@@ -918,6 +927,17 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
         },
         resolveRequestContext,
         logger: deps.logger,
+      }),
+      authMiddleware,
+    ),
+  );
+  app.route(
+    '/api/v1/user/reach/texts',
+    withAuth(
+      createTextNumberRouter({
+        textNumbers: deps.textNumbers,
+        available: () => deps.reachChannels().texts.available,
+        resolveRequestContext,
       }),
       authMiddleware,
     ),

@@ -102,6 +102,7 @@ import type { ISessionMetricsStore } from './db/sessionMetricsStore';
 import type { ISkillStore } from './db/skillStore';
 import type { ISpaceStore } from './db/spaceStore';
 import type { Database as SqliteDatabase } from './db/sqlite/types';
+import { TextContactStore, type ITextContactStore } from './db/textContactStore';
 import type { ITokenFactoryUsageStore } from './db/tokenFactoryUsageStore';
 import type { WithTransaction } from './db/transaction';
 import type { ITurnArtifactStore } from './db/turnArtifactStore';
@@ -130,13 +131,16 @@ import { sessionApprovalSource } from './runtime/noticing/approvalSource';
 import { createGoogleNoticingSources } from './runtime/noticing/googleSources';
 import { createNoticingJudgeResolver } from './runtime/noticing/judgeFactory';
 import { createNoticingService } from './runtime/noticing/noticingService';
-import { NO_PHONE_CHANNELS } from './runtime/noticing/reachChannels';
+import { reachChannelsFor } from './runtime/noticing/reachChannels';
 import { createReminderReach } from './runtime/noticing/reminderReach';
 import { createSidecarNoticingSources } from './runtime/noticing/sidecarSources';
 import { createOutboundSecretSource } from './runtime/outboundSecrets';
 import { seedOwnerNameAtBoot } from './runtime/ownerName';
 import { createSentinelServices } from './runtime/sentinelServices';
 import { getSharedRunCodeService } from './runtime/sessionResources';
+import { createTwilioSmsProvider } from './runtime/texts/smsProvider';
+import { createSmsSender } from './runtime/texts/smsSender';
+import { createTextNumberService } from './runtime/texts/textNumber';
 import { createTokenFactoryBudget } from './runtime/tokenFactoryBudget';
 import { ensureEnvManagedTokenFactoryProvider, seedEnvManagedDefaultChatModel } from './runtime/tokenFactoryProvider';
 import { TurnDrainRegistry } from './runtime/turnDrains';
@@ -156,6 +160,8 @@ import { TrueFoundryModelProviderStore } from './truefoundry/TrueFoundryModelPro
 import { TrueFoundrySandboxProviderStore } from './truefoundry/TrueFoundrySandboxProviderStore';
 import { TrueFoundryServiceFoundryServerClient } from './truefoundry/TrueFoundryServiceFoundryServerClient';
 import { TrueFoundrySkillStore } from './truefoundry/TrueFoundrySkillStore';
+import { inboundSmsRoute } from './twilioWebhook/inboundSms';
+import { startTwilioWebhookListener } from './twilioWebhook/listener';
 import { ensureWritableDataDir } from './utils/dataDir';
 import { startSttAvailabilityWatcher } from './voice/sttAvailability';
 
@@ -203,6 +209,7 @@ interface ServerPersistence<TTransaction> {
   briefItemStore: IBriefItemCompletionStore;
   deliveryStore: IDeliveryStore;
   reachSettingsStore: IReachSettingsStore;
+  textContactStore: ITextContactStore;
   noticingStore: INoticingStore;
   pushSubscriptionStore: IPushSubscriptionStore;
   approvalTokenStore: ApprovalTokenStore;
@@ -441,6 +448,7 @@ async function createStandalonePersistence(options: {
     briefItemStore: new BriefItemCompletionStore(db),
     deliveryStore: new DeliveryStore(db),
     reachSettingsStore: new ReachSettingsStore(db),
+    textContactStore: new TextContactStore(db),
     noticingStore: new NoticingStore(db),
     pushSubscriptionStore: new PushSubscriptionStore(db),
     approvalTokenStore: new SqliteApprovalTokenStore(db),
@@ -615,6 +623,7 @@ async function createDistributedPersistence(options: {
     briefItemStore: new BriefItemCompletionStore(db),
     deliveryStore: new DeliveryStore(db),
     reachSettingsStore: new ReachSettingsStore(db),
+    textContactStore: new TextContactStore(db),
     noticingStore: new NoticingStore(db),
     pushSubscriptionStore: new PushSubscriptionStore(db),
     approvalTokenStore: new PostgresApprovalTokenStore(db),
@@ -660,6 +669,7 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     briefItemStore,
     deliveryStore,
     reachSettingsStore,
+    textContactStore,
     noticingStore,
     pushSubscriptionStore,
     approvalTokenStore,
@@ -787,9 +797,29 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     tokens: tokenStore,
     googleConnections: googleConnectionStore,
   });
+  const smsProvider =
+    configuration.TWILIO === undefined ? undefined : createTwilioSmsProvider({ settings: configuration.TWILIO });
+  const textNumbers = createTextNumberService({
+    store: textContactStore,
+    reachSettings: reachSettingsStore,
+    personalization: personalizationStore,
+    provider: smsProvider,
+    audit: sentinelAuditStore,
+    logger,
+  });
+  const reachChannels = () => reachChannelsFor({ twilio: configuration.TWILIO });
   const deliveryService = createDeliveryService({
     store: deliveryStore,
-    senders: [createWebPushSender({ subscriptions: pushSubscriptionStore, settings: configuration.WEB_PUSH })],
+    senders: [
+      createWebPushSender({ subscriptions: pushSubscriptionStore, settings: configuration.WEB_PUSH }),
+      createSmsSender({
+        contacts: textContactStore,
+        reachSettings: reachSettingsStore,
+        personalization: personalizationStore,
+        provider: smsProvider,
+        textNumbers,
+      }),
+    ],
     audit: sentinelAuditStore,
     logger,
   });
@@ -820,7 +850,7 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
       logger,
     }),
     budget: tokenFactoryBudget,
-    channels: () => NO_PHONE_CHANNELS,
+    channels: reachChannels,
     logger,
   });
   const sentinelServices = createSentinelServices({
@@ -956,9 +986,11 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     reminderReach: createReminderReach({
       reachSettings: reachSettingsStore,
       store: noticingStore,
-      channels: () => NO_PHONE_CHANNELS,
+      channels: reachChannels,
     }),
-    reachChannels: () => NO_PHONE_CHANNELS,
+    reachChannels,
+    textNumbers,
+    textContactStore,
     webPushPublicKey: configuration.WEB_PUSH?.publicKey,
     sessions,
     chatImages,
@@ -996,6 +1028,10 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     sentinelAuditStore,
     chatSearchIndexer,
     packageMirrorAllowanceHolds,
+    twilioWebhookRoutes:
+      configuration.TWILIO === undefined
+        ? []
+        : [inboundSmsRoute({ settings: configuration.TWILIO, textNumbers, logger })],
   };
 }
 
@@ -1076,6 +1112,7 @@ try {
     sentinelAuditStore,
     chatSearchIndexer,
     packageMirrorAllowanceHolds,
+    twilioWebhookRoutes,
   } = configuration.STANDALONE
     ? await createServerRuntime(
         await createStandalonePersistence({ sqlitePath: configuration.SQLITE_PATH, logger }),
@@ -1293,6 +1330,17 @@ try {
     },
   );
 
+  // The Twilio listener has its own port and serves only Twilio's routes. It is off unless texts are set up.
+  const twilioServer =
+    configuration.TWILIO === undefined
+      ? undefined
+      : startTwilioWebhookListener({
+          settings: configuration.TWILIO,
+          hostname: configuration.HOST,
+          routes: twilioWebhookRoutes,
+          logger,
+        });
+
   server.on('error', (error: unknown) => {
     console.error('Failed to start server:', error instanceof Error ? error.message : error);
     process.exit(1);
@@ -1324,6 +1372,7 @@ try {
       // Stop the control loops before draining; anything they already started drains
       // with every other turn below.
       await controller?.stop();
+      twilioServer?.close();
 
       // Sets the registry's shutdown reason immediately so late track() (in-flight create-turn still
       // inside session.createTurn) aborts as Abandoned; then drains the registry. await

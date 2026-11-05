@@ -132,6 +132,7 @@ async function buildSession<TTransaction>({
           auditStore: stores.auditStore,
           deliveryStore: stores.deliveryStore,
           reachSettingsStore: stores.reachSettingsStore,
+          textContactStore: stores.textContactStore,
           turnArtifactStore: stores.turnArtifactStore,
           mcpServerStore: stores.mcpServerStore,
           listAgents: () => listUserAgents(userId),

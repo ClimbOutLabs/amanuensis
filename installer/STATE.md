@@ -33,7 +33,7 @@ Paths below are relative to the home.
 | `release/release.json`                 | The record of what is installed. Written by `release.sh` on install and upgrade.                                     |
 | `release/previous.release.json`        | The release record from before the last upgrade, kept so an upgrade can roll back.                                   |
 | `instances/<name>/compose.yaml`        | The instance's Compose file, rendered by `instance.sh`.                                                              |
-| `instances/<name>/.env`                | The instance's settings for the app. Holds secrets (the model key among them). Mode 600.                             |
+| `instances/<name>/.env`                | The instance's settings for the app. Holds secrets (the model key and any Twilio auth token). Mode 600.              |
 | `instances/<name>/dex.env`             | The instance's settings for the sign-in service. Holds the password hash. Mode 600.                                  |
 | `machine/compose.yaml`, `machine/.env` | The shared speech service's Compose file and settings, rendered by `instance.sh`.                                    |
 | `tls/ca/`                              | The local certificate authority: `root.crt` and `root.key`. The key is mode 600. Written by `tls.sh` with `pki.mjs`. |
@@ -43,6 +43,17 @@ Paths below are relative to the home.
 | `bin/aman`                             | The doctor shim, copied in by the installer on install and upgrade. Mode 755.                                        |
 | `bin/aman-sandbox.mjs`                 | The sandbox setup copy the doctor runs.                                                                              |
 | `runtime/`                             | What the installer downloads to run itself, including `runtime/node/` (the pinned Node).                             |
+
+Texts through Twilio are set up by the owner in the `.env`, below the managed block:
+`REACH_SMS_PROVIDER=twilio`, `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`,
+`TWILIO_FROM_NUMBER` and `TWILIO_WEBHOOK_PUBLIC_URL`, with `TWILIO_WEBHOOK_PORT`
+(default 8793) if the default is taken. The installer never writes these. When
+`REACH_SMS_PROVIDER=twilio` is in the `.env`, `instance_render` also publishes
+that one port in the instance's compose file, on `127.0.0.1` only, for
+Tailscale Funnel or a web server on the same computer to carry on to Twilio.
+The listener behind it serves only Twilio's routes. The app port is never
+opened for it, and a `.env` without the provider line opens nothing. See
+`docs/text-messages.md`.
 
 The `release.json` in a checkout's `installer/` folder is a different file:
 it is the pins manifest the installer ships (image digests, among them the

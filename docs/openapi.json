@@ -1959,6 +1959,20 @@
         ],
         "type": "object"
       },
+      "ConfirmTextCodeRequest": {
+        "properties": {
+          "code": {
+            "description": "The code that was texted.",
+            "maxLength": 12,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "code"
+        ],
+        "type": "object"
+      },
       "ConfirmVerifyCommandProposalRequest": {
         "additionalProperties": false,
         "properties": {
@@ -2664,6 +2678,10 @@
         "properties": {},
         "type": "object"
       },
+      "DeleteTextNumberResponse": {
+        "properties": {},
+        "type": "object"
+      },
       "DeleteVerifyCommandProposalResponse": {
         "properties": {},
         "type": "object"
@@ -2769,7 +2787,8 @@
       "DeliveryChannel": {
         "enum": [
           "in_app",
-          "web_push"
+          "web_push",
+          "sms"
         ],
         "type": "string"
       },
@@ -3884,6 +3903,17 @@
         "properties": {
           "data": {
             "$ref": "#/components/schemas/Space"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
+      "GetTextStatusResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/TextStatus"
           }
         },
         "required": [
@@ -10193,6 +10223,20 @@
         ],
         "type": "object"
       },
+      "SendTextCodeRequest": {
+        "properties": {
+          "phone": {
+            "description": "The number to send a code to, with the country code, such as +15550100.",
+            "maxLength": 40,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "phone"
+        ],
+        "type": "object"
+      },
       "SentinelAuditRecord": {
         "properties": {
           "auto_deny_reason": {
@@ -11678,6 +11722,48 @@
         "required": [
           "type",
           "text"
+        ],
+        "type": "object"
+      },
+      "TextMode": {
+        "description": "Private texts say only the kind of thing. Full texts carry the one-sentence message.",
+        "enum": [
+          "private",
+          "full"
+        ],
+        "type": "string"
+      },
+      "TextStatus": {
+        "properties": {
+          "code_pending": {
+            "description": "Whether a code was sent and can still be entered.",
+            "type": "boolean"
+          },
+          "confirmed": {
+            "description": "Whether the person proved the number with a code. Nothing is sent before then.",
+            "type": "boolean"
+          },
+          "mode": {
+            "$ref": "#/components/schemas/TextMode"
+          },
+          "opted_out": {
+            "description": "Whether the person replied STOP. They confirm the number again to use texts.",
+            "type": "boolean"
+          },
+          "phone": {
+            "description": "The number the person entered, or null before one is entered.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "phone",
+          "confirmed",
+          "mode",
+          "opted_out",
+          "code_pending"
         ],
         "type": "object"
       },
@@ -14654,6 +14740,17 @@
         },
         "required": [
           "data"
+        ],
+        "type": "object"
+      },
+      "UpdateTextModeRequest": {
+        "properties": {
+          "mode": {
+            "$ref": "#/components/schemas/TextMode"
+          }
+        },
+        "required": [
+          "mode"
         ],
         "type": "object"
       },
@@ -26524,6 +26621,16 @@
               }
             },
             "description": "That channel is not set up yet."
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The test text could not be sent."
           }
         },
         "summary": "Try a channel",
@@ -26534,6 +26641,282 @@
           "reach"
         ],
         "x-fern-sdk-method-name": "test_channel"
+      }
+    },
+    "/api/v1/user/reach/texts": {
+      "delete": {
+        "description": "Forgets the number and switches texts off.",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeleteTextNumberResponse"
+                }
+              }
+            },
+            "description": "The number is gone."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "OIDC is configured and the request has no valid session cookie."
+          }
+        },
+        "summary": "Remove the number",
+        "tags": [
+          "Deliveries"
+        ],
+        "x-fern-sdk-group-name": [
+          "reach",
+          "texts"
+        ],
+        "x-fern-sdk-method-name": "delete"
+      },
+      "get": {
+        "description": "Reads the signed-in person’s number for texts and whether it is confirmed.",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetTextStatusResponse"
+                }
+              }
+            },
+            "description": "The status."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "OIDC is configured and the request has no valid session cookie."
+          }
+        },
+        "summary": "Get text number status",
+        "tags": [
+          "Deliveries"
+        ],
+        "x-fern-sdk-group-name": [
+          "reach",
+          "texts"
+        ],
+        "x-fern-sdk-method-name": "get"
+      },
+      "put": {
+        "description": "Chooses Private (only the kind of thing) or Full (the one-sentence message).",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateTextModeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetTextStatusResponse"
+                }
+              }
+            },
+            "description": "The saved choice."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "OIDC is configured and the request has no valid session cookie."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Texts are not set up on this server, or there is no number yet."
+          }
+        },
+        "summary": "Choose what texts say",
+        "tags": [
+          "Deliveries"
+        ],
+        "x-fern-sdk-group-name": [
+          "reach",
+          "texts"
+        ],
+        "x-fern-sdk-method-name": "update"
+      }
+    },
+    "/api/v1/user/reach/texts/code": {
+      "post": {
+        "description": "Texts a one-time code to a number. Nothing else is sent to a number until it is confirmed.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SendTextCodeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetTextStatusResponse"
+                }
+              }
+            },
+            "description": "The code was sent."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "OIDC is configured and the request has no valid session cookie."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Texts are not set up on this server, or there is no number yet."
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Too many codes were sent. Try again later."
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The code could not be sent."
+          }
+        },
+        "summary": "Send a confirmation code",
+        "tags": [
+          "Deliveries"
+        ],
+        "x-fern-sdk-group-name": [
+          "reach",
+          "texts"
+        ],
+        "x-fern-sdk-method-name": "send_code"
+      }
+    },
+    "/api/v1/user/reach/texts/confirm": {
+      "post": {
+        "description": "Checks the one-time code. A right code confirms the number. Too many wrong tries void the code.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConfirmTextCodeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetTextStatusResponse"
+                }
+              }
+            },
+            "description": "The number is confirmed."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "OIDC is configured and the request has no valid session cookie."
+          }
+        },
+        "summary": "Confirm a number",
+        "tags": [
+          "Deliveries"
+        ],
+        "x-fern-sdk-group-name": [
+          "reach",
+          "texts"
+        ],
+        "x-fern-sdk-method-name": "confirm"
       }
     },
     "/api/v1/user/settings/calendar": {

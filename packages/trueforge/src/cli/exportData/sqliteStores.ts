@@ -21,6 +21,7 @@ import { SqliteSpaceStore } from '../../db/sqlite/space-store/SqliteSpaceStore';
 import { SqliteOAuthTokenStore } from '../../db/sqlite/token-store/SqliteOAuthTokenStore';
 import { SqliteTurnArtifactStore } from '../../db/sqlite/turn-artifact-store/SqliteTurnArtifactStore';
 import type { Database as SqliteDatabase } from '../../db/sqlite/types';
+import { TextContactStore } from '../../db/textContactStore';
 import type { ExportStores } from './stores';
 
 /** Opens an existing SQLite database; a missing file is an error, never an empty export. */
@@ -58,6 +59,7 @@ export async function openSqliteStores(options: {
     auditStore: new SentinelAuditStore(db),
     deliveryStore: new DeliveryStore(db),
     reachSettingsStore: new ReachSettingsStore(db),
+    textContactStore: new TextContactStore(db),
     close: () => db.destroy(),
   };
 }

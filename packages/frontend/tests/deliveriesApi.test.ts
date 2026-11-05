@@ -190,3 +190,37 @@ test('tries a channel and reads how many devices a push notice reached', async (
   assert.deepEqual(result, { devicesReached: 2 });
   assert.deepEqual(calls[0]?.body, { channel: 'push' });
 });
+
+test('walks the text number flow over the texts routes and reads the status in plain fields', async () => {
+  const wire = { phone: '+15550111', confirmed: false, mode: 'private', opted_out: false, code_pending: true };
+  const { fetcher, calls } = recordingFetch(() => Response.json({ data: wire }));
+  const texts = createDeliveriesApi(fetcher).reach.texts;
+  assert.deepEqual(await texts.status(), {
+    phone: '+15550111',
+    confirmed: false,
+    mode: 'private',
+    optedOut: false,
+    codePending: true,
+  });
+  await texts.sendCode('+15550111');
+  await texts.confirm('123456');
+  await texts.setMode('full');
+  await texts.remove();
+  assert.deepEqual(
+    calls.map(call => [call.method, new URL(call.url).pathname, call.body]),
+    [
+      ['GET', '/api/v1/user/reach/texts', undefined],
+      ['POST', '/api/v1/user/reach/texts/code', { phone: '+15550111' }],
+      ['POST', '/api/v1/user/reach/texts/confirm', { code: '123456' }],
+      ['PUT', '/api/v1/user/reach/texts', { mode: 'full' }],
+      ['DELETE', '/api/v1/user/reach/texts', {}],
+    ],
+  );
+});
+
+test('a wrong code reads as the server’s own plain sentence', async () => {
+  const api = createDeliveriesApi(async () =>
+    Response.json({ error: { message: 'That code is not right. You have 4 tries left.' } }, { status: 400 }),
+  );
+  await assert.rejects(api.reach.texts.confirm('000000'), /You have 4 tries left/);
+});

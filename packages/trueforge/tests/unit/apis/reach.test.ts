@@ -8,6 +8,7 @@ import { DeliveryStore } from '../../../src/db/deliveryStore';
 import { migrateSqliteToLatest } from '../../../src/db/migrateSqlite';
 import { ReachSettingsStore } from '../../../src/db/reachSettingsStore';
 import { createSqliteDb } from '../../../src/db/sqlite/client';
+import { TextContactStore } from '../../../src/db/textContactStore';
 import { createDeliveryService } from '../../../src/runtime/delivery/deliveryService';
 import type { ReachChannels } from '../../../src/runtime/noticing/reachChannels';
 import { NO_PHONE_CHANNELS } from '../../../src/runtime/noticing/reachChannels';
@@ -36,6 +37,7 @@ async function build({ channels = NO_PHONE_CHANNELS, memories = [] as string[] }
     '/reach',
     createReachRouter({
       reachStore,
+      textContacts: new TextContactStore(db),
       deliveryService,
       channels: () => channels,
       memories: () => Promise.resolve(memories),
@@ -144,7 +146,7 @@ describe('reach routes', () => {
     const text = await call('/test', { method: 'POST', body: { channel: 'text' } });
     expect(text.status).toBe(409);
     await expect(text.json()).resolves.toEqual({
-      error: { message: 'Texts are not set up yet. There is nothing to try yet.' },
+      error: { message: `${NO_PHONE_CHANNELS.texts.note} There is nothing to try yet.` },
     });
   });
 });

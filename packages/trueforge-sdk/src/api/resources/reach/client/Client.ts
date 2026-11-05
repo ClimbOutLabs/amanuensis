@@ -9,6 +9,7 @@ import { handleNonStatusCodeError } from "../../../../errors/handleNonStatusCode
 import * as errors from "../../../../errors/index.js";
 import * as serializers from "../../../../serialization/index.js";
 import * as TrueForge from "../../../index.js";
+import { TextsClient } from "../resources/texts/client/Client.js";
 
 export declare namespace ReachClient {
     export type Options = BaseClientOptions;
@@ -18,9 +19,14 @@ export declare namespace ReachClient {
 
 export class ReachClient {
     protected readonly _options: NormalizedClientOptionsWithAuth<ReachClient.Options>;
+    protected _texts: TextsClient | undefined;
 
     constructor(options: ReachClient.Options) {
         this._options = normalizeClientOptionsWithAuth(options);
+    }
+
+    public get texts(): TextsClient {
+        return (this._texts ??= new TextsClient(this._options));
     }
 
     /**
@@ -326,6 +332,7 @@ export class ReachClient {
      * @throws {@link TrueForge.BadRequestError}
      * @throws {@link TrueForge.UnauthorizedError}
      * @throws {@link TrueForge.ConflictError}
+     * @throws {@link TrueForge.BadGatewayError}
      * @throws {@link errors.TrueForgeError}
      * @throws {@link errors.TrueForgeTimeoutError}
      *
@@ -416,6 +423,17 @@ export class ReachClient {
                     );
                 case 409:
                     throw new TrueForge.ConflictError(
+                        serializers.RequestErrorResponse.parseOrThrow(_response.error.body, {
+                            unrecognizedObjectKeys: "passthrough",
+                            allowUnrecognizedUnionMembers: true,
+                            allowUnrecognizedEnumValues: true,
+                            skipValidation: true,
+                            breadcrumbsPrefix: ["response"],
+                        }),
+                        _response.rawResponse,
+                    );
+                case 502:
+                    throw new TrueForge.BadGatewayError(
                         serializers.RequestErrorResponse.parseOrThrow(_response.error.body, {
                             unrecognizedObjectKeys: "passthrough",
                             allowUnrecognizedUnionMembers: true,

@@ -30,6 +30,7 @@ import type { ISentinelAuditStore } from '../../src/db/sentinelAuditStore';
 import type { ISentinelSettingsStore } from '../../src/db/sentinelSettingsStore';
 import type { SessionCustom, TurnCustom } from '../../src/db/sessionCustom';
 import type { ISpaceStore } from '../../src/db/spaceStore';
+import type { ITextContactStore } from '../../src/db/textContactStore';
 import type { ITurnArtifactStore } from '../../src/db/turnArtifactStore';
 import { personaKnowledgeLocation } from '../../src/personaKnowledge/knowledgePaths';
 import { openPersonaKnowledgeRepository } from '../../src/personaKnowledge/sqliteKnowledgeRepository';
@@ -165,6 +166,7 @@ export interface DataTransferSeedStores<TTransaction> {
   auditStore: ISentinelAuditStore;
   deliveryStore: IDeliveryStore;
   reachSettingsStore: IReachSettingsStore;
+  textContactStore: ITextContactStore;
   turnArtifactStore: ITurnArtifactStore<TTransaction>;
   mcpServerStore: IMcpServerStore<TTransaction>;
 }
@@ -514,9 +516,26 @@ export async function seedRichInstance<TTransaction>(input: SeedRichInstanceInpu
     created_by: userId,
     settings: {
       ...defaultReachSettings('Europe/Paris'),
-      channels: { texts: false, calls: true },
+      channels: { texts: true, calls: true },
       call_kinds: ['travel'],
       max_nudges_per_day: 3,
+    },
+  });
+
+  await stores.textContactStore.put({
+    tenant_id: tenantId,
+    created_by: userId,
+    contact: {
+      phone: '+15550111',
+      mode: 'full',
+      confirmed_at: '2026-11-05T09:00:00.000Z',
+      opted_out_at: null,
+      code_hash: 'a'.repeat(64),
+      code_salt: 'b'.repeat(32),
+      code_expires_at: '2026-11-05T09:10:00.000Z',
+      code_attempts: 2,
+      send_window_started_at: '2026-11-05T08:55:00.000Z',
+      sends_in_window: 1,
     },
   });
 

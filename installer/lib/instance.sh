@@ -184,6 +184,13 @@ instance_render() {
       done < <(network_bind_addresses "$origins")
     fi
   fi
+  # Texts through Twilio get a listener of their own beside the app. Its port is published on 127.0.0.1 only, for
+  # Tailscale Funnel or a web server on this computer to carry on to Twilio. The app port is never opened for it.
+  local sms_port
+  sms_port=$(sms_webhook_port "$name")
+  if [ -n "$sms_port" ]; then
+    app_ports="${app_ports:+$app_ports$'\n'}      - '127.0.0.1:$sms_port:$sms_port'"
+  fi
   # Only the app reaches the sign-in service when it passes the sign-in pages through; a browser that goes to the
   # published sign-in port directly needs the service on every address of the namespace.
   if [ -n "$origins" ] || [ "$(gateway_flag "$origins" "$public_url")" = 1 ]; then login_bind=127.0.0.1; fi
@@ -240,6 +247,22 @@ instance_render() {
     "ISSUER=$login_url/dex" "LOGIN_BIND=$login_bind" "LOGIN_PORT=$login_port" "DEX_TELEMETRY_PORT=$DEX_TELEMETRY_PORT" \
     "OWNER_EMAIL=$email" "OWNER_NAME=$(reg_get "$name" owner_name)" "CLIENT_ID=$client_id" "REDIRECT_URIS=$redirects" |
     write_if_changed "$dir/dex.yaml" 644 || true
+}
+
+# The port of the Twilio listener when the instance's settings file turns texts on, otherwise nothing. The default is
+# the app's own default, 8793. A value that is not a port is ignored, and the app then says so when it starts.
+sms_webhook_port() { # name
+  local env port provider
+  env="$(instance_dir "$1")/.env"
+  [ -f "$env" ] || return 0
+  provider=$(env_get "$env" REACH_SMS_PROVIDER)
+  [ "$provider" = twilio ] || return 0
+  port=$(env_get "$env" TWILIO_WEBHOOK_PORT)
+  port=${port:-8793}
+  case $port in
+    '' | *[!0-9]*) return 0 ;;
+  esac
+  if [ "$port" -ge 1 ] && [ "$port" -le 65535 ]; then printf '%s' "$port"; fi
 }
 
 # What Aman calls a person who has not said: the start of their email, cut to the longest name allowed.

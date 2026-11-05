@@ -7,6 +7,8 @@ import type {
   ReachApi,
   ReachSettings,
   ReachView,
+  TextsApi,
+  TextStatus,
 } from '@truefoundry/trueforge-ui';
 
 import { apiPath, UI_BASE_PATH } from './publicPath';
@@ -187,6 +189,46 @@ function settingsBody(settings: ReachSettings): unknown {
   };
 }
 
+function parseTextStatus(body: unknown): TextStatus {
+  const data = isRecord(body) ? body.data : undefined;
+  if (!isRecord(data)) {
+    throw new Error('Your number for texts could not be read. Reload the page.');
+  }
+  return {
+    phone: typeof data.phone === 'string' ? data.phone : null,
+    confirmed: data.confirmed === true,
+    mode: data.mode === 'full' ? 'full' : 'private',
+    optedOut: data.opted_out === true,
+    codePending: data.code_pending === true,
+  };
+}
+
+function createTextsApi(fetcher: typeof fetch): TextsApi {
+  const url = () => apiPath(`${REACH_URL}/texts`);
+  return {
+    async status() {
+      return parseTextStatus(await readBody(await fetcher(url())));
+    },
+    async sendCode(phone) {
+      return parseTextStatus(await readBody(await fetcher(`${url()}/code`, json({ phone }))));
+    },
+    async confirm(code) {
+      return parseTextStatus(await readBody(await fetcher(`${url()}/confirm`, json({ code }))));
+    },
+    async setMode(mode) {
+      const response = await fetcher(url(), {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mode }),
+      });
+      return parseTextStatus(await readBody(response));
+    },
+    async remove() {
+      await readBody(await fetcher(url(), json({}, 'DELETE')));
+    },
+  };
+}
+
 function createReachApi(fetcher: typeof fetch): ReachApi {
   return {
     async get() {
@@ -216,6 +258,7 @@ function createReachApi(fetcher: typeof fetch): ReachApi {
       const data = isRecord(body) ? body.data : undefined;
       return { devicesReached: isRecord(data) && typeof data.devices_reached === 'number' ? data.devices_reached : 0 };
     },
+    texts: createTextsApi(fetcher),
   };
 }
 

@@ -1,0 +1,101 @@
+import winston from 'winston';
+
+import { INBOUND_SMS_PATH, inboundSmsRoute } from '../../../src/twilioWebhook/inboundSms';
+import { startTwilioWebhookListener } from '../../../src/twilioWebhook/listener';
+import { twilioSignature } from '../../../src/twilioWebhook/signature';
+import { closeServer, listeningPort } from '../../fixtures/listenPort';
+import { ALICE, PHONE, textsHarness } from '../../fixtures/textsHarness';
+
+const settings = {
+  accountSid: `AC${'2'.repeat(32)}`,
+  authToken: 'token-for-tests',
+  webhookPublicUrl: 'https://aman.example.invalid',
+  webhookPort: 0,
+};
+
+async function serve() {
+  const h = await textsHarness();
+  await h.readyToText();
+  const logger = winston.createLogger({ silent: true });
+  const server = startTwilioWebhookListener({
+    settings,
+    hostname: '127.0.0.1',
+    routes: [inboundSmsRoute({ settings, textNumbers: h.numbers, logger })],
+    logger,
+  });
+  const port = await listeningPort(server);
+  const post = async ({ fields, sign = true }: { fields: Record<string, string>; sign?: boolean }) => {
+    const params = new URLSearchParams(fields);
+    return fetch(`http://127.0.0.1:${String(port)}${INBOUND_SMS_PATH}`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/x-www-form-urlencoded',
+        ...(sign
+          ? {
+              'x-twilio-signature': twilioSignature({
+                authToken: settings.authToken,
+                url: `${settings.webhookPublicUrl}${INBOUND_SMS_PATH}`,
+                params,
+              }),
+            }
+          : {}),
+      },
+      body: params.toString(),
+    });
+  };
+  return {
+    h,
+    post,
+    close: () => closeServer(server),
+  };
+}
+
+describe('inbound texts', () => {
+  let s: Awaited<ReturnType<typeof serve>>;
+  beforeEach(async () => {
+    s = await serve();
+  });
+  afterEach(async () => {
+    await s.close();
+  });
+
+  it.each(['STOP', 'stop', 'Unsubscribe', 'QUIT', 'CANCEL', 'END', 'STOPALL'])(
+    'a signed %s turns texts off for that number and is recorded in Activity',
+    async word => {
+      const response = await s.post({ fields: { From: PHONE, Body: word, AccountSid: settings.accountSid } });
+      expect(response.status).toBe(200);
+      await expect(response.text()).resolves.toBe('<?xml version="1.0" encoding="UTF-8"?><Response></Response>');
+      expect((await s.h.reachSettings.get(ALICE))?.channels.texts).toBe(false);
+      expect(s.h.activity.map(row => row.tool_name)).toContain('delivery.sms_stop');
+    },
+  );
+
+  it('ignores every other reply: no change, and no answer written back', async () => {
+    for (const body of ['yes', 'START', 'what is this', 'please stop', 'HELP']) {
+      const response = await s.post({ fields: { From: PHONE, Body: body } });
+      expect(response.status).toBe(200);
+      await expect(response.text()).resolves.toBe('<?xml version="1.0" encoding="UTF-8"?><Response></Response>');
+    }
+    expect((await s.h.reachSettings.get(ALICE))?.channels.texts).toBe(true);
+    expect(s.h.sent).toEqual([]);
+  });
+
+  it('an unsigned STOP does nothing', async () => {
+    const response = await s.post({ fields: { From: PHONE, Body: 'STOP' }, sign: false });
+    expect(response.status).toBe(403);
+    expect((await s.h.reachSettings.get(ALICE))?.channels.texts).toBe(true);
+    expect(s.h.activity).toEqual([]);
+  });
+
+  it('a signed request for another Twilio account does nothing', async () => {
+    const response = await s.post({ fields: { From: PHONE, Body: 'STOP', AccountSid: `AC${'3'.repeat(32)}` } });
+    expect(response.status).toBe(403);
+    expect((await s.h.reachSettings.get(ALICE))?.channels.texts).toBe(true);
+  });
+
+  it('a STOP from a number nobody has changes nothing', async () => {
+    const response = await s.post({ fields: { From: '+15550177', Body: 'STOP' } });
+    expect(response.status).toBe(200);
+    expect((await s.h.reachSettings.get(ALICE))?.channels.texts).toBe(true);
+  });
+});
