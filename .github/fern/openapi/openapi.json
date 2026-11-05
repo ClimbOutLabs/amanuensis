@@ -1998,6 +1998,31 @@
         ],
         "type": "object"
       },
+      "ConnectVoiceRequest": {
+        "properties": {
+          "client_timezone": {
+            "description": "IANA time zone of the person talking.",
+            "maxLength": 100,
+            "minLength": 1,
+            "type": "string"
+          },
+          "session_id": {
+            "description": "The chat to talk in.",
+            "maxLength": 200,
+            "minLength": 1,
+            "type": "string"
+          },
+          "voice": {
+            "description": "Voice id for spoken replies. Defaults to the server voice.",
+            "pattern": "^[a-z]{2}_[a-z]+$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "session_id"
+        ],
+        "type": "object"
+      },
       "ContextCompactionEvent": {
         "properties": {
           "created_at": {
@@ -15197,6 +15222,44 @@
         ],
         "type": "object"
       },
+      "VoiceTicket": {
+        "properties": {
+          "expires_in_seconds": {
+            "description": "Seconds the ticket stays valid.",
+            "type": "integer"
+          },
+          "path": {
+            "description": "WebSocket path to open on this server.",
+            "type": "string"
+          },
+          "protocol": {
+            "description": "Sub-protocol name to ask for on the WebSocket.",
+            "type": "string"
+          },
+          "ticket": {
+            "description": "Single-use ticket to open the voice line. Send it as the `ticket.<id>` sub-protocol.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "ticket",
+          "expires_in_seconds",
+          "protocol",
+          "path"
+        ],
+        "type": "object"
+      },
+      "VoiceTicketResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/VoiceTicket"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
       "VoiceTranscription": {
         "properties": {
           "duration_ms": {
@@ -27758,6 +27821,81 @@
           "personalization"
         ],
         "x-fern-sdk-method-name": "update_sentinel_settings"
+      }
+    },
+    "/api/v1/voice/connect": {
+      "post": {
+        "description": "Checks that the chat belongs to the caller and voice mode is ready, then returns a single-use ticket for the voice WebSocket. The WebSocket itself is not described here.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConnectVoiceRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VoiceTicketResponse"
+                }
+              }
+            },
+            "description": "A ticket and the path of the voice WebSocket."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The request is missing the chat."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication required."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The chat was not found."
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Voice mode is off, or speech to text or the listening model is not ready."
+          }
+        },
+        "summary": "Open a live voice conversation",
+        "tags": [
+          "Agent Sessions"
+        ],
+        "x-fern-sdk-group-name": [
+          "voice"
+        ],
+        "x-fern-sdk-method-name": "connect"
       }
     },
     "/api/v1/voice/speak": {

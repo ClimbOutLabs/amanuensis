@@ -14,19 +14,26 @@ import type { Logger } from 'winston';
 
 import type { ResolveRequestContext } from '../auth/identity';
 import configuration from '../config';
-import { getVoiceStatusRoute, speakVoiceRoute, transcribeVoiceRoute } from '../routes/voiceRoutes';
+import { connectVoiceRoute, getVoiceStatusRoute, speakVoiceRoute, transcribeVoiceRoute } from '../routes/voiceRoutes';
 import {
   MAX_SPEAK_TEXT_CHARS,
   VoiceTranscriptionSchema,
   type VoiceStatus,
   type VoiceTranscription,
 } from '../schemas/voice';
+import { VOICE_SOCKET_PROTOCOL, VOICE_STREAM_PATH } from '../voice/browserTransport';
 import { SpeechRateLimiter } from '../voice/speechRateLimit';
-import { probeSttHealth, sttBaseUrl } from '../voice/sttAvailability';
+import { isVoiceAvailable, probeSttHealth } from '../voice/sttAvailability';
+import { forwardToSidecar } from '../voice/sttClient';
+import { VadModelUnavailableError } from '../voice/vad/sileroVad';
+import { FORWARDED_HEADERS, readyVadModel, requestAs, type SelfFetch } from '../voice/voiceSocket';
+import { voiceTickets } from '../voice/voiceTickets';
 
 export interface VoiceRouterDeps {
   logger: Logger;
   resolveRequestContext: ResolveRequestContext;
+  /** Runs a request against this server's own app; voice mode uses it to check the chat is the person's. */
+  selfFetch: SelfFetch;
   /** Defaults to a fresh per-process limiter; tests inject one with a small budget. */
   speechLimiter?: SpeechRateLimiter;
 }
@@ -38,16 +45,6 @@ export interface VoiceRouterDeps {
  * while streaming the body, before the full upload is buffered.
  */
 const MAX_AUDIO_BYTES = 30 * 1024 * 1024;
-/** Backend-to-sidecar forward timeout; the browser-side timeout is 65s. */
-const STT_TRANSCRIBE_TIMEOUT_MS = 60_000;
-/**
- * An immediate 503 (sidecar up but the model not warm yet) is retried this many
- * times, spaced STT_RETRY_DELAY_MS apart, for a retry budget under 10s, well
- * inside the 65s client timeout. Every other outcome, including a forward
- * timeout, fails immediately with no retry.
- */
-const STT_TRANSCRIBE_MAX_ATTEMPTS = 3;
-const STT_RETRY_DELAY_MS = 2_000;
 /** Model label the sidecar serves; reported by /status while the probe succeeds. */
 const STT_MODEL_LABEL = 'whisper-small-int8';
 /**
@@ -62,7 +59,7 @@ class AudioTooLargeError extends Error {
   }
 }
 
-function errorJson<S extends 400 | 413 | 429 | 502 | 503>(
+function errorJson<S extends 400 | 404 | 413 | 429 | 502 | 503>(
   c: Context,
   { status, message, code }: { status: S; message: string; code: string },
 ) {
@@ -125,34 +122,6 @@ async function readBoundedAudio(c: Context): Promise<Uint8Array> {
 async function probeStt(logger: Logger): Promise<VoiceStatus> {
   const healthy = await probeSttHealth({ logger });
   return healthy ? { stt_available: true, model: STT_MODEL_LABEL } : { stt_available: false, model: '' };
-}
-
-/** Resolves after the given delay; backs the bounded 503 retry backoff. */
-function delay(ms: number): Promise<void> {
-  return new Promise(resolve => {
-    setTimeout(resolve, ms);
-  });
-}
-
-/**
- * POSTs buffered audio to the sidecar's transcribe endpoint. Only immediate 503
- * responses are retried; a forward timeout or connection failure rejects and
- * the caller fails immediately with no retry.
- */
-async function forwardToSidecar(audio: Uint8Array): Promise<Response> {
-  const url = `${sttBaseUrl()}/v1/transcribe`;
-  for (let attempt = 1; ; attempt += 1) {
-    const upstream = await fetch(url, {
-      method: 'POST',
-      headers: { 'content-type': 'audio/wav', 'content-length': String(audio.byteLength) },
-      body: audio,
-      signal: AbortSignal.timeout(STT_TRANSCRIBE_TIMEOUT_MS),
-    });
-    if (upstream.status !== 503 || attempt >= STT_TRANSCRIBE_MAX_ATTEMPTS) {
-      return upstream;
-    }
-    await delay(STT_RETRY_DELAY_MS);
-  }
 }
 
 /** Voice router (mounted at `/api/v1/voice`). */
@@ -323,7 +292,85 @@ export function createVoiceRouter(deps: VoiceRouterDeps) {
     }
   };
 
+  /**
+   * Asks to talk: checks voice mode can run and that the chat is the caller's, then hands out a ticket for
+   * the WebSocket. The socket itself is not described in the API document.
+   */
+  const connectHandler: RouteHandler<typeof connectVoiceRoute> = async c => {
+    if (!configuration.TTS_ENABLED) {
+      return errorJson(c, {
+        status: 503,
+        message:
+          'Voice mode is turned off on this computer. Turn the local voice on in the server settings, then try again.',
+        code: 'voice_mode_off',
+      });
+    }
+    if (!isVoiceAvailable()) {
+      return errorJson(c, {
+        status: 503,
+        message: 'Speech to text is not ready yet. Try again in a minute.',
+        code: 'stt_unavailable',
+      });
+    }
+    const request = c.req.valid('json');
+    const { tenant_id, subject } = deps.resolveRequestContext(c);
+    const headers: Record<string, string> = {};
+    for (const name of FORWARDED_HEADERS) {
+      const value = c.req.header(name);
+      if (value !== undefined) {
+        headers[name] = value;
+      }
+    }
+    const ticket = {
+      tenantId: tenant_id,
+      subjectId: subject.id,
+      sessionId: request.session_id,
+      headers,
+      timezone: request.client_timezone,
+      voice: request.voice,
+    };
+    // The chat's own route says whether this person may use it, so there is one rule for that.
+    const owned = await requestAs({ ticket, selfFetch: deps.selfFetch })(
+      `/api/v1/sessions/${encodeURIComponent(request.session_id)}`,
+      { method: 'GET' },
+    );
+    if (!owned.ok) {
+      return errorJson(c, {
+        status: 404,
+        message: 'That chat could not be found. Reload the page, then try again.',
+        code: 'chat_not_found',
+      });
+    }
+    try {
+      await readyVadModel();
+    } catch (error) {
+      deps.logger.warn('voice model unavailable', extractErrorLogFields(error));
+      return errorJson(c, {
+        status: 503,
+        message:
+          error instanceof VadModelUnavailableError
+            ? error.message
+            : 'Voice mode could not load its listening model. Restart Aman, then try again.',
+        code: 'vad_unavailable',
+      });
+    }
+    const issued = voiceTickets.issue(ticket);
+    return c.json(
+      {
+        data: {
+          ticket: issued.id,
+          expires_in_seconds: issued.expiresInSeconds,
+          protocol: VOICE_SOCKET_PROTOCOL,
+          path: VOICE_STREAM_PATH,
+        },
+      },
+      200,
+      { 'Cache-Control': 'private, no-store' },
+    );
+  };
+
   const router = new OpenAPIHono();
+  router.openapi(connectVoiceRoute, connectHandler);
   router.openapi(transcribeVoiceRoute, transcribeVoiceHandler);
   router.openapi(speakVoiceRoute, speakVoiceHandler);
   router.openapi(getVoiceStatusRoute, getVoiceStatusHandler);

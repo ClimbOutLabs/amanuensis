@@ -164,6 +164,7 @@ import { inboundSmsRoute } from './twilioWebhook/inboundSms';
 import { startTwilioWebhookListener } from './twilioWebhook/listener';
 import { ensureWritableDataDir } from './utils/dataDir';
 import { startSttAvailabilityWatcher } from './voice/sttAvailability';
+import { attachVoiceSocket } from './voice/voiceSocket';
 
 /** Persistence + optional Redis wired for the selected topology. */
 interface ServerPersistence<TTransaction> {
@@ -1340,6 +1341,9 @@ try {
           routes: twilioWebhookRoutes,
           logger,
         });
+
+  // Voice mode's WebSocket: the upgrade is handled here because the app's own router cannot take one.
+  attachVoiceSocket({ server, selfFetch: request => app.fetch(request), logger });
 
   server.on('error', (error: unknown) => {
     console.error('Failed to start server:', error instanceof Error ? error.message : error);

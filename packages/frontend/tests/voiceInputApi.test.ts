@@ -248,3 +248,35 @@ test('server voice rejects an answer that is not audio', async () => {
 
   await assert.rejects(createServerVoiceApi(fetcher).speak({ text: 'Hi.', voice: 'af_heart' }), /not audio/);
 });
+
+test('connect asks for a voice line for the chat and builds the secure address with the ticket as a protocol', async () => {
+  const capture: { url?: string; init?: RequestInit } = {};
+  const answer = {
+    data: { ticket: 'abc', expires_in_seconds: 30, protocol: 'aman-voice.v1', path: '/api/v1/voice/stream' },
+  };
+  const api = createVoiceInputApi(transcribeFetcher(jsonResponse(answer, 200), capture));
+  const original = Object.getOwnPropertyDescriptor(globalThis, 'window');
+  Object.defineProperty(globalThis, 'window', {
+    value: { location: { href: 'https://aman.test/chat/1' } },
+    configurable: true,
+  });
+  try {
+    const connection = await api.connect({ sessionId: 'chat-1' });
+    assert.equal(connection.url, 'wss://aman.test/api/v1/voice/stream');
+    assert.deepEqual(connection.protocols, ['aman-voice.v1', 'ticket.abc']);
+  } finally {
+    if (original === undefined) Reflect.deleteProperty(globalThis, 'window');
+    else Object.defineProperty(globalThis, 'window', original);
+  }
+  assert.ok(capture.url?.endsWith('/api/v1/voice/connect'));
+  assert.equal(capture.init?.method, 'POST');
+  const sent: unknown = JSON.parse(String(capture.init?.body));
+  assert.ok(typeof sent === 'object' && sent !== null && 'session_id' in sent && sent.session_id === 'chat-1');
+});
+
+test('connect passes the server message on when the line is refused', async () => {
+  const api = createVoiceInputApi(
+    transcribeFetcher(jsonResponse({ error: { message: 'Voice mode is turned off on this computer.' } }, 503), {}),
+  );
+  await assert.rejects(api.connect({ sessionId: 'chat-1' }), /turned off on this computer/);
+});

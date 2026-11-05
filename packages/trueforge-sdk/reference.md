@@ -7315,6 +7315,71 @@ await client.reach.testChannel({
 </details>
 
 ## Voice
+<details><summary><code>client.voice.<a href="/src/api/resources/voice/client/Client.ts">connect</a>({ ...params }) -> TrueForge.VoiceTicketResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+Checks that the chat belongs to the caller and voice mode is ready, then returns a single-use ticket for the voice WebSocket. The WebSocket itself is not described here.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.voice.connect({
+    sessionId: "session_id"
+});
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**request:** `TrueForge.ConnectVoiceRequest`
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**requestOptions:** `VoiceClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
 <details><summary><code>client.voice.<a href="/src/api/resources/voice/client/Client.ts">speak</a>({ ...params }) -> core.BinaryResponse</code></summary>
 <dl>
 <dd>

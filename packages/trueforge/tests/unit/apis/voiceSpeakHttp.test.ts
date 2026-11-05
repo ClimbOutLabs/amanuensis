@@ -88,7 +88,10 @@ describe('POST /speak', () => {
   function appWith(speechLimiter = new SpeechRateLimiter()): OpenAPIHono {
     const app = new OpenAPIHono();
     app.use('*', createAuthMiddleware(headerAuthenticator));
-    app.route('/', createVoiceRouter({ logger, resolveRequestContext, speechLimiter }));
+    app.route(
+      '/',
+      createVoiceRouter({ logger, resolveRequestContext, speechLimiter, selfFetch: () => new Response('{}') }),
+    );
     return app;
   }
 

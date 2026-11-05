@@ -335,6 +335,11 @@ def to_phonemes(text: str, lexicon: Lexicon) -> str:
 _SENTENCE_END = re.compile(r"(?<=[.!?\u2026])\s+")
 
 
+def split_sentences(phonemes: str, limit: int = MAX_CHUNK_CHARS) -> list[str]:
+    """One piece per sentence, so a streamed reply can start after the first one; overlong sentences split between words."""
+    return [piece for sentence in _SENTENCE_END.split(phonemes) for piece in _split_long(sentence, limit) if piece]
+
+
 def split_chunks(phonemes: str, limit: int = MAX_CHUNK_CHARS) -> list[str]:
     """Split at sentence ends, packing sentences up to the limit; overlong sentences split between words."""
     chunks: list[str] = []

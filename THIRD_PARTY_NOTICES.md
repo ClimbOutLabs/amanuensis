@@ -13,6 +13,7 @@ Amanuensis (Aman) is licensed under the Mozilla Public License 2.0 (see `LICENSE
 7. Llama Prompt Guard 2 (Llama 4 Community License)
 8. Mail and calendar connector sidecars (BSD-3-Clause, MIT)
 9. Local voice for spoken replies (Apache-2.0, MIT, BSD)
+10. Voice mode: speech detection (MIT)
 
 ## 1. sharp and libvips (LGPL-3.0-or-later)
 
@@ -759,6 +760,8 @@ SOFTWARE.
 
 ## 9. Local voice for spoken replies (Apache-2.0, MIT, BSD)
 
+10. Voice mode: speech detection (MIT)
+
 The `ops/aman-tts` image reads replies aloud on the person's own computer. Its build downloads these files, pinned by SHA-256 in `ops/aman-tts/pins.py`, and the image contains them unmodified except that only six American English voices are kept.
 
 | Component                                   | License      | Copyright                                            | Source                                                                 |
@@ -770,3 +773,31 @@ The `ops/aman-tts` image reads replies aloud on the person's own computer. Its b
 | numpy                                       | BSD-3-Clause | NumPy Developers                                     | https://github.com/numpy/numpy                                         |
 
 `ops/aman-tts/kokoro_vocab.json` is the phoneme table from the Kokoro-82M model configuration (Apache-2.0). The Apache-2.0 license text is in `ops/aman-tts/LICENSE.Apache-2.0`, and the image carries misaki's copy at `/opt/aman-tts/assets/LICENSE.misaki`. The image installs no GPL or LGPL text-to-speech component: espeak-ng, phonemizer and num2words are deliberately not used. The numpy wheel bundles OpenBLAS (BSD-3-Clause) and the GCC runtime libraries (GPL-3.0 with the GCC Runtime Library Exception).
+
+## 10. Voice mode: speech detection (MIT)
+
+Voice mode finds where speech starts and ends with the Silero VAD model, version 5.1.2 (MIT, Copyright (c) 2020-present Silero Team). The image build fetches `silero_vad.onnx` from https://github.com/snakers4/silero-vad (tag v5.1.2), fails unless its SHA-256 matches, and the server loads it only if its size (2,327,524 bytes) and SHA-256 (`2623a2953f6ff3d2c1e61740c6cdb7168133479b267dfef114a4a3cc5bdd788f`) match the pin in `packages/trueforge/src/voice/vad/sileroVad.ts`. It runs in the server process through onnxruntime (MIT). The browser connection uses `ws` (MIT, Copyright (c) Einar Otto Stangvik and contributors).
+
+```text
+MIT License
+
+Copyright (c) 2020-present Silero Team
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
