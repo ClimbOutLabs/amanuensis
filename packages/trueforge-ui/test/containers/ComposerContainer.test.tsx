@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { useAui, type AppendMessage, type ThreadMessageLike } from '@assistant-ui/react';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { VoiceInputProvider, type VoiceAvailability, type VoiceInputApi } from '@/components/VoiceInputContext.js';
 import { canSubmitComposer, ComposerContainer } from '@/containers/ComposerContainer.js';
@@ -17,8 +17,10 @@ import {
 import { ServerProvider } from '@/server/ServerContext.js';
 import { ShellModeProvider, type AgentConfig } from '@/server/ShellModeContext.js';
 import { SlotsProvider } from '@/theme/SlotsProvider.js';
+import { SPEAK_VOICE_REPLIES_STORAGE_KEY } from '@/utils/speechReplyPreferences.js';
 import { markDraftFromVoice, noteUserMessage, takeSpokenReply } from '@/utils/voiceTurn.js';
 import { createMockAgentUIServer } from '../server/mockServer.js';
+import { installSpeechSynthesis, removeSpeechSynthesis } from '../utils/speechSynthesisFake.js';
 import { RuntimeHarness } from './RuntimeHarness.js';
 
 /** Stands in for the chat runtime's own restore (`onPreTurnFailure` in
@@ -1185,6 +1187,16 @@ describe('ComposerContainer voice input', () => {
 });
 
 describe('spoken replies from the composer', () => {
+  // A reply is only spoken when this browser can read it aloud.
+  beforeEach(() => {
+    installSpeechSynthesis();
+  });
+
+  afterEach(() => {
+    removeSpeechSynthesis();
+    window.localStorage.removeItem(SPEAK_VOICE_REPLIES_STORAGE_KEY);
+  });
+
   it('arms the reply when the sent draft came from voice input', async () => {
     const onNew = vi.fn(async () => {});
     renderComposer(onNew);
@@ -1197,6 +1209,21 @@ describe('spoken replies from the composer', () => {
     await waitFor(() => expect(onNew).toHaveBeenCalledTimes(1));
     noteUserMessage({ id: 'sent', text: 'spoken words' });
     expect(takeSpokenReply('sent')).toBe(true);
+  });
+
+  it('does not arm the reply of a voice send when voice replies are switched off', async () => {
+    window.localStorage.setItem(SPEAK_VOICE_REPLIES_STORAGE_KEY, 'false');
+    const onNew = vi.fn(async () => {});
+    renderComposer(onNew);
+    const input = screen.getByRole<HTMLTextAreaElement>('textbox', { name: 'Message input' });
+    markDraftFromVoice();
+    fireEvent.change(input, { target: { value: 'dictated words' } });
+
+    fireEvent.keyDown(input, { key: 'Enter' });
+
+    await waitFor(() => expect(onNew).toHaveBeenCalledTimes(1));
+    noteUserMessage({ id: 'dictated', text: 'dictated words' });
+    expect(takeSpokenReply('dictated')).toBe(false);
   });
 
   it('does not arm the reply for a typed message', async () => {
