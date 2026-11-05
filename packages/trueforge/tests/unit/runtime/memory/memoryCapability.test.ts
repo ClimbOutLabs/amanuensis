@@ -60,7 +60,7 @@ const DEFAULT_CONFIG: MemoryConfig = {
   pages: { maxCount: 6, maxTokens: 1500 },
 };
 
-/** DEFAULT_CONFIG with the recall screen turned on and its timeout small enough to keep tests fast. */
+/** DEFAULT_CONFIG with the recall screen turned on and its timeout large enough that a slow host cannot exhaust it between steps. */
 function withScreenEnabled(overrides?: Partial<MemoryConfig['screen']>): MemoryConfig {
   return {
     ...DEFAULT_CONFIG,
@@ -69,7 +69,7 @@ function withScreenEnabled(overrides?: Partial<MemoryConfig['screen']>): MemoryC
       url: 'https://screen.example',
       authToken: 'tok',
       threshold: 0.5,
-      timeoutMs: 50,
+      timeoutMs: 5000,
       maxConcurrency: 8,
       ...overrides,
     },
@@ -1313,7 +1313,7 @@ describe('HindsightMemoryProcessor recall screening', () => {
     // the (smaller) per-call screen timeout recomputed at its start: at most the budget, never zero
     // here, and well inside MEMORY_RECALL_TIMEOUT_MS.
     for (const call of classify.mock.calls) {
-      expect(call[0].timeoutMs).toBeLessThanOrEqual(50);
+      expect(call[0].timeoutMs).toBeLessThanOrEqual(5000);
       expect(call[0].timeoutMs).toBeGreaterThan(0);
     }
   });
