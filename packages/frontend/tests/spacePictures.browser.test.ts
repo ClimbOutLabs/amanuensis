@@ -10,6 +10,7 @@ import { createServer, defaultClientConditions, type Plugin } from 'vite';
 
 import { DEV_OPTIMIZE_DEPS } from '../src/devPrebundle.ts';
 import { findChromiumExecutable } from './support/findChromiumExecutable.js';
+import { FIRST_LOAD_TIMEOUT_MS } from './support/firstLoad.ts';
 import { privateViteCache } from './support/viteCache.ts';
 
 const RENDER_TIMEOUT_MS = 45_000;
@@ -128,7 +129,7 @@ test(
 
       await page.goto(`${origin}/tests/fixtures/space-pictures.fixture.html`, {
         waitUntil: 'domcontentloaded',
-        timeout: RENDER_TIMEOUT_MS,
+        timeout: FIRST_LOAD_TIMEOUT_MS,
       });
 
       const states = await page.waitForFunction(

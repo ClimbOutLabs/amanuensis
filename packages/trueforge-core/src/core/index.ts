@@ -160,6 +160,7 @@ export type {
 } from './mcp/implementationPlanGrant';
 export { RemoteMCP } from './mcp/RemoteMCP';
 export type { RemoteMcpHeaders, ResolveHeadersResult } from './mcp/RemoteMCP';
+export { DEFAULT_MAX_MCP_RESPONSE_BYTES } from './mcp/remoteMcpClient';
 export type { RemoteMcpConnection, RemoteMcpTransportType } from './mcp/remoteMcpClient';
 export type { ToolSelectorConfig } from './mcp/ToolSelectorPolicy';
 export {
@@ -456,13 +457,24 @@ export type {
 export { recordClassificationAudit, recordHeldActionAudit } from './permissions/audit';
 export type { AuditLogWriter, AuditOutcome, AuditRecordInput } from './permissions/audit';
 export {
+  BROWSER_CANCEL_QUALIFIERS,
+  BROWSER_COMMIT_WORDS,
+  classifyBrowserClickKind,
+  matchesCommitWord,
+} from './permissions/browserTier';
+export {
   BROWSER_BACK_TOOL_NAME,
+  BROWSER_CLICK_TOOL_NAME,
+  BROWSER_COMMIT_REASON,
   BROWSER_EXPLORE_REASON,
   BROWSER_OPEN_TOOL_NAME,
+  BROWSER_PREPARE_REASON,
   BROWSER_READ_TOOL_NAME,
   BROWSER_SCREENSHOT_TOOL_NAME,
   BROWSER_SCROLL_TOOL_NAME,
+  BROWSER_SELECT_TOOL_NAME,
   BROWSER_TOOL_NAMES,
+  BROWSER_TYPE_TOOL_NAME,
   isBrowserToolName,
 } from './permissions/browserToolNames';
 export type { BrowserToolName } from './permissions/browserToolNames';

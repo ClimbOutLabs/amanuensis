@@ -60,6 +60,7 @@ const ARCHIVE_BYTES = new TextEncoder().encode('the source archive bytes');
 const IDS: SourceIds = {
   'aman-app': 'aman-app:0123456789ab',
   'aman-stt': 'aman-stt:0123456789cd',
+  'aman-tts': 'aman-tts:0123456789cd',
   'aman-calendar-caldav': 'aman-calendar-caldav:0123456789ef',
   'aman-browser': 'aman-browser:0123456789ef',
 };
@@ -75,6 +76,7 @@ const RELEASE: ReleaseRecord = {
   sourceRef: 'abc123',
   appImage: 'aman-app:test1',
   sttImage: 'aman-stt:test1',
+  ttsImage: null,
   calendarImage: 'aman-calendar-caldav:test1',
   browserImage: 'aman-browser:test1',
   browserGatewayImage: 'aman-browser-gateway:test1',

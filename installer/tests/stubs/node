@@ -58,21 +58,22 @@ case "$mode" in
       exit 0
     fi
     step=attest
-    case "$state" in needs_apparmor) step=apparmor ;; needs_disk) step=disk ;; esac
+    case "$state" in needs_apparmor) step=apparmor ;; needs_disk) step=disk ;; needs_retire) step=retire ;; esac
     [ "$json" = 1 ] && echo "{\"ok\":false,\"checks\":[],\"step\":\"$step\",\"error\":\"stub\",\"fix\":\"stub\"}"
     exit 1
     ;;
   up)
-    if [ "$state" != ready ] && [ "$fix" != 1 ]; then
+    # Retiring the extra sandboxes is cleanup: without --fix the slots still start and the state stays.
+    if [ "$state" != ready ] && [ "$fix" != 1 ] && [ "$state" != needs_retire ]; then
       echo "x $state: needs --fix" >&2
       exit 1
     fi
-    say_ok "Started 4 slots"
+    say_ok "Started 2 slots"
     mkdir -p "$S/up"
     echo slots >"$S/up/$instance-slots"
-    for n in 1 2 3 4; do grep -Fxq "${instance}_slot_ctl_$n" "$S/volumes" || echo "${instance}_slot_ctl_$n" >>"$S/volumes"; done
-    for n in 1 2 3 4; do grep -Fxq "${instance}_slot_mirror_$n" "$S/volumes" || echo "${instance}_slot_mirror_$n" >>"$S/volumes"; done
-    echo ready >"$S/slots_state"
+    for n in 1 2; do grep -Fxq "${instance}_slot_ctl_$n" "$S/volumes" || echo "${instance}_slot_ctl_$n" >>"$S/volumes"; done
+    for n in 1 2; do grep -Fxq "${instance}_slot_mirror_$n" "$S/volumes" || echo "${instance}_slot_mirror_$n" >>"$S/volumes"; done
+    if [ "$state" != needs_retire ] || [ "$fix" = 1 ]; then echo ready >"$S/slots_state"; fi
     # The slots now run the image as it is.
     { cat "$S/image_id" 2>/dev/null || echo first; } >"$S/slots_run_image_id"
     exit 0

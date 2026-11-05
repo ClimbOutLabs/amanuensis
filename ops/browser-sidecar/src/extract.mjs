@@ -53,6 +53,23 @@ function accessibleName(element) {
       return label.textContent.trim();
     }
   }
+  if (element.tagName === 'INPUT') {
+    // A button-like input carries its label in its own value, and an image input in its alt text:
+    // neither has text content, so without this step such a control reads as having no name at all.
+    const inputType = (element.getAttribute('type') ?? '').toLowerCase();
+    if (inputType === 'image') {
+      const alt = element.getAttribute('alt');
+      if (alt !== null && alt.trim() !== '') {
+        return alt.trim();
+      }
+    }
+    if (inputType === 'submit' || inputType === 'button' || inputType === 'reset' || inputType === 'image') {
+      const value = element.getAttribute('value');
+      if (value !== null && value.trim() !== '') {
+        return value.trim();
+      }
+    }
+  }
   const placeholder = element.getAttribute('placeholder');
   if (placeholder !== null && placeholder.trim() !== '') {
     return placeholder.trim();
@@ -127,6 +144,81 @@ function blockText(element) {
   }
   const text = (element.innerText ?? '').replace(/\s+/g, ' ').trim();
   return text.length > MAX_TEXT_CHARS ? `${text.slice(0, MAX_TEXT_CHARS)}…` : text;
+}
+
+/**
+ * The form this control belongs to: the form around it, or the one its `form` attribute names when
+ * it sits outside that form. The platform's own `form` property covers both, so it goes first.
+ */
+function formOf(element) {
+  if (element.form !== undefined && element.form !== null) {
+    return element.form;
+  }
+  return element.closest('form');
+}
+
+/** True when this element submits its form: a submit input/button, an image input, or a plain button in a form. */
+function isFormSubmit(element) {
+  const form = formOf(element);
+  if (form === null) {
+    return false;
+  }
+  const type = (element.getAttribute('type') ?? '').toLowerCase();
+  if (element.tagName === 'BUTTON') {
+    return type === '' || type === 'submit';
+  }
+  return element.tagName === 'INPUT' && (type === 'submit' || type === 'image');
+}
+
+/** Values of every named field on the clicked button's form, for the approval card. Sensitive values are masked. */
+export function formValuesOf(element) {
+  const form = formOf(element);
+  if (form === null) {
+    return {};
+  }
+  const values = {};
+  for (const field of form.elements) {
+    const name = field.name || field.id;
+    if (name === '' || name === undefined) {
+      continue;
+    }
+    const kind = fieldKind(field);
+    values[name] = kind === null ? (field.value ?? '') : `[hidden: ${kind} field]`;
+  }
+  return values;
+}
+
+/** The element a snapshot id (`domPath`'s output) names, or null when the page no longer has it. */
+export function elementAtPath(path) {
+  if (path === '') {
+    return document.body;
+  }
+  let node = document.body;
+  for (const part of path.split('/')) {
+    const [tag, indexText] = part.split(':');
+    const index = Number(indexText);
+    const match = Array.from(node.children).filter(child => child.tagName === tag)[index];
+    if (match === undefined) {
+      return null;
+    }
+    node = match;
+  }
+  return node;
+}
+
+/** Field, click and form context for one element, read without changing the page. */
+export function elementInfo(path) {
+  const element = elementAtPath(path);
+  if (element === null) {
+    return null;
+  }
+  return {
+    field_kind: fieldKind(element),
+    is_form_submit: isFormSubmit(element),
+    accessible_name: accessibleName(element),
+    form_values: formValuesOf(element),
+    tag: element.tagName,
+  };
 }
 
 /** Visible page content in reading order: headings, text, and the controls, each with a stable id. */

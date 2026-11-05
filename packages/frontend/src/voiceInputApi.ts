@@ -1,4 +1,11 @@
-import type { VoiceAvailability, VoiceInputApi, VoiceTranscription } from '@truefoundry/trueforge-ui';
+import {
+  ServerVoiceRefusal,
+  type ServerVoiceApi,
+  type ServerVoiceRefusalReason,
+  type VoiceAvailability,
+  type VoiceInputApi,
+  type VoiceTranscription,
+} from '@truefoundry/trueforge-ui';
 
 import { apiPath } from './publicPath';
 
@@ -240,6 +247,44 @@ export function createVoiceInputApi(fetcher: typeof fetch, options: CreateVoiceI
         clearTimeout(timeout);
         signal?.removeEventListener('abort', forwardAbort);
       }
+    },
+  };
+}
+
+/**
+ * Host implementation of the trueforge-ui server voice port: posts reply text to
+ * `/api/v1/voice/speak` and resolves with the WAV audio. Any failure rejects, and
+ * the spoken reply player falls back to the browser's own voice.
+ */
+/** Answers that mean the voice works but will not read this piece. */
+const REFUSAL_BY_STATUS: ReadonlyMap<number, ServerVoiceRefusalReason> = new Map([
+  [400, 'nothing_to_say'],
+  [413, 'too_long'],
+  [429, 'busy'],
+]);
+
+export function createServerVoiceApi(fetcher: typeof fetch): ServerVoiceApi {
+  return {
+    async speak({ text, voice, signal }: { text: string; voice: string; signal?: AbortSignal }): Promise<Blob> {
+      const response = await fetcher(apiPath('/api/v1/voice/speak'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text, voice }),
+        signal: signal ?? null,
+      });
+      if (!response.ok) {
+        const error = await readError(response);
+        const reason = REFUSAL_BY_STATUS.get(response.status);
+        if (reason !== undefined) {
+          throw new ServerVoiceRefusal({ reason, message: error.message, cause: error });
+        }
+        throw error;
+      }
+      const contentType = (response.headers.get('content-type') ?? '').split(';')[0]?.trim().toLowerCase();
+      if (contentType !== 'audio/wav') {
+        throw new Error('The voice on this computer sent something that is not audio.');
+      }
+      return response.blob();
     },
   };
 }

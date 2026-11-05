@@ -87,6 +87,16 @@ export class RefAssigner {
     return refs;
   }
 
+  /** The DOM path a ref was given to on this page, or undefined when the ref is unknown. */
+  resolve(ref) {
+    for (const [path, given] of this.#byPath) {
+      if (given === ref) {
+        return path;
+      }
+    }
+    return undefined;
+  }
+
   reset() {
     this.#byPath.clear();
     this.#next = 1;

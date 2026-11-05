@@ -73,6 +73,7 @@
   },
   "dependencies": {
     "@anthropic-ai/sandbox-runtime": "0.0.76",
+    "@block65/webcrypto-web-push": "2.0.0",
     "@daytona/sdk": "^0.211.2",
     "@hono/node-server": "^2.1.1",
     "@hono/swagger-ui": "^0.6.1",

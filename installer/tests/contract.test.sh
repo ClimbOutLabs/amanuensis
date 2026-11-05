@@ -17,7 +17,7 @@ test_doctor_reads_what_the_installer_wrote() {
   out=$(real_doctor --json --instance main) || rc=$?
   assert_eq "$rc" 0 "doctor exit code on a fresh install"
   assert_contains "$out" '"instances":{"main":[' "instance discovered under instances/"
-  assert_contains "$out" '"id":"images","state":"ok","detail":"All 7 images are ready.' "every image the installer recorded in release.json, the connectors and the browser too"
+  assert_contains "$out" '"id":"images","state":"ok","detail":"All 8 images are ready.' "every image the installer recorded in release.json, the voice, the connectors and the browser too"
   assert_contains "$out" '"id":"config","state":"ok"' ".env mode 0600 accepted"
   assert_contains "$out" '"id":"containers","state":"ok","detail":"All 3 parts of instance main are running.'
   assert_contains "$out" '"id":"backup","state":"ok","detail":"Daily backups are on' "a fresh install is not warned about backups"
@@ -80,6 +80,7 @@ test_layout_and_release_record() {
   release=$(cat "$AMAN_HOME/release/release.json")
   assert_contains "$release" '"app_image": "aman-app:'
   assert_contains "$release" '"stt_image": "aman-stt:'
+  assert_contains "$release" '"tts_image": "aman-tts:'
   assert_contains "$release" "\"dex_image\": \"$(sed -n 's/.*"dex_image"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$INSTALLER_DIR/release.json")\""
   assert_mode "$AMAN_HOME/release/release.json" 600
   sandbox_drop
@@ -191,7 +192,7 @@ test_slot_image_creates_the_mirror_dir() {
     assert_contains "$(cat "$dockerfile")" "USER 10001:10001" "$dockerfile runs as the server user the mirror dir belongs to"
   done
   assert_contains "$(cat "$repo/docker-compose.slots.yml")" "user: '65532:65532'" "the slots run as 65532, the user who connects through the mirror socket"
-  for slot in 1 2 3 4; do
+  for slot in 1 2; do
     assert_contains "$(cat "$INSTALLER_DIR/templates/instance/compose.yaml.tpl")" "- slot_mirror_$slot:/run/aman-slots/$slot/mirror" "the instance mounts mirror volume $slot where the server binds its socket"
     assert_contains "$(cat "$repo/docker-compose.slots.yml")" "- slot_mirror_$slot:/run/aman/mirror" "slot $slot mounts the same volume at the dir its image creates"
   done

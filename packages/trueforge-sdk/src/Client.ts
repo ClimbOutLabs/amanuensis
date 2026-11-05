@@ -5,6 +5,7 @@ import { AuthClient } from "./api/resources/auth/client/Client.js";
 import { BugReportsClient } from "./api/resources/bugReports/client/Client.js";
 import { CatalogsClient } from "./api/resources/catalogs/client/Client.js";
 import { DataClient } from "./api/resources/data/client/Client.js";
+import { DeliveriesClient } from "./api/resources/deliveries/client/Client.js";
 import { HelpClient } from "./api/resources/help/client/Client.js";
 import { InternalClient } from "./api/resources/internal/client/Client.js";
 import { McpServersClient } from "./api/resources/mcpServers/client/Client.js";
@@ -60,6 +61,7 @@ export class TrueForge {
     protected _skills: SkillsClient | undefined;
     protected _spaceFolders: SpaceFoldersClient | undefined;
     protected _spaces: SpacesClient | undefined;
+    protected _deliveries: DeliveriesClient | undefined;
     protected _voice: VoiceClient | undefined;
     protected _catalogs: CatalogsClient | undefined;
     protected _memory: MemoryClient | undefined;
@@ -155,6 +157,10 @@ export class TrueForge {
 
     public get spaces(): SpacesClient {
         return (this._spaces ??= new SpacesClient(this._options));
+    }
+
+    public get deliveries(): DeliveriesClient {
+        return (this._deliveries ??= new DeliveriesClient(this._options));
     }
 
     public get voice(): VoiceClient {
