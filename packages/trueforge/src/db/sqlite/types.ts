@@ -49,7 +49,7 @@ import type { OAuthClient, OAuthPendingAuthorizationData, OAuthServer, OAuthToke
 import type { NoticingCheckpointTable, NoticingEventTable } from '../noticingStore';
 import type { PushSubscriptionTable } from '../pushSubscriptionStore';
 import type { ReachSettingsTable } from '../reachSettingsStore';
-import type { TextContactTable } from '../textContactStore';
+import type { TextCodeSendTable, TextContactTable } from '../textContactStore';
 
 /**
  * Trace-level state for one thread at one turn (`turn_thread.checkpoint`).
@@ -815,6 +815,7 @@ export interface Database {
   delivery_attempt: DeliveryAttemptTable;
   reach_settings: ReachSettingsTable;
   text_contact: TextContactTable;
+  text_code_send: TextCodeSendTable;
   noticing_event: NoticingEventTable;
   noticing_checkpoint: NoticingCheckpointTable;
   push_subscription: PushSubscriptionTable;

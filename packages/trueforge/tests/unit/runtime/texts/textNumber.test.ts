@@ -3,9 +3,10 @@ import {
   isOptOutWord,
   MAX_CODE_ATTEMPTS,
   MAX_CODES_PER_HOUR,
+  MAX_CODES_PER_NUMBER_PER_DAY,
+  MAX_CODES_PER_NUMBER_PER_HOUR,
   normalizePhoneNumber,
 } from '../../../../src/runtime/texts/textNumber';
-import { defaultReachSettings } from '../../../../src/schemas/reach';
 import { ALICE, PHONE, textsHarness } from '../../../fixtures/textsHarness';
 
 describe('phone numbers and opt-out words', () => {
@@ -28,17 +29,48 @@ describe('phone numbers and opt-out words', () => {
 });
 
 describe('confirming a number with a one-time code', () => {
-  it('texts the code in the assistant’s name and keeps only a hash of it', async () => {
-    const h = await textsHarness({ assistantName: 'Mannie' });
+  it('texts the code in fixed words, without the assistant’s name, and keeps only a hash of it', async () => {
+    const h = await textsHarness({ assistantName: 'Call +15550999 about your bank' });
     await expect(h.numbers.sendCode({ owner: ALICE, phone: PHONE })).resolves.toEqual({ ok: true });
-    expect(h.sent).toHaveLength(1);
-    expect(h.sent[0]?.to).toBe(PHONE);
-    expect(h.sent[0]?.body).toContain('Mannie: your confirmation code is 111111');
+    expect(h.sent).toEqual([
+      {
+        to: PHONE,
+        body: 'Your confirmation code is 111111. It works for 10 minutes. If you did not ask for it, ignore this text.',
+      },
+    ]);
     const stored = await h.contacts.get(ALICE);
     expect(JSON.stringify(stored)).not.toContain('111111');
     expect(stored?.code_hash).toMatch(/^[0-9a-f]{64}$/);
     expect(stored?.confirmed_at).toBeNull();
     await expect(h.numbers.status(ALICE)).resolves.toMatchObject({ confirmed: false, code_pending: true });
+  });
+
+  it('keys the code with the server’s secret, so the database alone cannot check it', async () => {
+    const h = await textsHarness({ codeKey: 'first-secret' });
+    await h.numbers.sendCode({ owner: ALICE, phone: PHONE });
+    const other = h.serviceWith({ codeKey: 'second-secret' });
+    await expect(other.confirm({ owner: ALICE, code: '111111' })).resolves.toMatchObject({
+      ok: false,
+      reason: 'wrong',
+    });
+    await expect(h.numbers.confirm({ owner: ALICE, code: '111111' })).resolves.toEqual({ ok: true });
+  });
+
+  it('a STOP while a code is being checked is not undone by the check', async () => {
+    const h = await textsHarness();
+    await h.readyToText();
+    await h.numbers.sendCode({ owner: ALICE, phone: PHONE });
+    const count = h.contacts.countCodeAttempt.bind(h.contacts);
+    jest.spyOn(h.contacts, 'countCodeAttempt').mockImplementation(async owner => {
+      const attempts = await count(owner);
+      await h.numbers.stopNumber(PHONE);
+      return attempts;
+    });
+    await expect(h.numbers.confirm({ owner: ALICE, code: '111111' })).resolves.toEqual({
+      ok: false,
+      reason: 'no_code',
+    });
+    await expect(h.numbers.status(ALICE)).resolves.toMatchObject({ confirmed: false, opted_out: true });
   });
 
   it('confirms on the right code, once, and records it in Activity', async () => {
@@ -119,6 +151,58 @@ describe('confirming a number with a one-time code', () => {
     await expect(h.numbers.sendCode({ owner: ALICE, phone: '+15550199' })).resolves.toEqual({ ok: true });
   });
 
+  it('removing the number does not start the hour over', async () => {
+    const h = await textsHarness();
+    for (let sent = 0; sent < MAX_CODES_PER_HOUR; sent += 1) {
+      await h.numbers.sendCode({ owner: ALICE, phone: PHONE });
+    }
+    await h.numbers.remove(ALICE);
+    await expect(h.numbers.sendCode({ owner: ALICE, phone: PHONE })).resolves.toMatchObject({
+      ok: false,
+      reason: 'rate_limited',
+    });
+    expect(h.sent).toHaveLength(MAX_CODES_PER_HOUR);
+  });
+
+  it('codes asked for at the same moment cannot pass the hourly limit together', async () => {
+    const h = await textsHarness();
+    const results = await Promise.all(
+      Array.from({ length: 6 }, (_, index) => h.numbers.sendCode({ owner: ALICE, phone: `+1555012${String(index)}` })),
+    );
+    expect(results.filter(result => result.ok)).toHaveLength(MAX_CODES_PER_HOUR);
+    expect(h.sent).toHaveLength(MAX_CODES_PER_HOUR);
+  });
+
+  it('limits codes to one number however many people ask, by the hour and by the day', async () => {
+    const h = await textsHarness();
+    const person = (index: number) => ({ tenant_id: 'default', created_by: `person-${String(index)}` });
+    for (let index = 0; index < MAX_CODES_PER_NUMBER_PER_HOUR; index += 1) {
+      await expect(h.numbers.sendCode({ owner: person(index), phone: PHONE })).resolves.toEqual({ ok: true });
+    }
+    await expect(h.numbers.sendCode({ owner: person(99), phone: PHONE })).resolves.toMatchObject({
+      ok: false,
+      reason: 'rate_limited',
+    });
+    let asked = MAX_CODES_PER_NUMBER_PER_HOUR;
+    let sent = MAX_CODES_PER_NUMBER_PER_HOUR;
+    while (sent < MAX_CODES_PER_NUMBER_PER_DAY) {
+      h.clock.now = new Date(h.clock.now.getTime() + 61 * 60_000);
+      const result = await h.numbers.sendCode({ owner: person(asked), phone: PHONE });
+      asked += 1;
+      if (result.ok) {
+        sent += 1;
+      }
+    }
+    h.clock.now = new Date(h.clock.now.getTime() + 61 * 60_000);
+    await expect(h.numbers.sendCode({ owner: person(asked), phone: PHONE })).resolves.toMatchObject({
+      ok: false,
+      reason: 'rate_limited',
+    });
+    expect(h.sent).toHaveLength(MAX_CODES_PER_NUMBER_PER_DAY);
+    h.clock.now = new Date(h.clock.now.getTime() + 24 * 60 * 60_000);
+    await expect(h.numbers.sendCode({ owner: person(asked + 1), phone: PHONE })).resolves.toEqual({ ok: true });
+  });
+
   it('a new code voids the old one', async () => {
     const h = await textsHarness();
     await h.numbers.sendCode({ owner: ALICE, phone: PHONE });
@@ -153,16 +237,66 @@ describe('confirming a number with a one-time code', () => {
     await expect(h.numbers.sendCode({ owner: ALICE, phone: PHONE })).resolves.toEqual({
       ok: false,
       reason: 'send_failed',
+      failure: 'invalid_number',
     });
     await expect(h.numbers.status(ALICE)).resolves.toMatchObject({ code_pending: false });
   });
 
-  it('a different number starts unconfirmed and switches texts off', async () => {
+  it('says when the number replied STOP before, so the code could not go to it', async () => {
+    const h = await textsHarness();
+    h.next.result = { outcome: 'failed', failure: 'opted_out' };
+    await expect(h.numbers.sendCode({ owner: ALICE, phone: PHONE })).resolves.toEqual({
+      ok: false,
+      reason: 'send_failed',
+      failure: 'opted_out',
+    });
+  });
+
+  it('a different number replaces one that was never confirmed', async () => {
+    const h = await textsHarness();
+    await h.numbers.sendCode({ owner: ALICE, phone: PHONE });
+    await h.numbers.sendCode({ owner: ALICE, phone: '+15550122' });
+    await expect(h.numbers.status(ALICE)).resolves.toMatchObject({
+      phone: '+15550122',
+      pending_phone: null,
+      confirmed: false,
+      code_pending: true,
+    });
+  });
+
+  it('a new number waits beside the confirmed one until its code is confirmed', async () => {
     const h = await textsHarness();
     await h.readyToText();
     await h.numbers.sendCode({ owner: ALICE, phone: '+15550122' });
-    await expect(h.numbers.status(ALICE)).resolves.toMatchObject({ phone: '+15550122', confirmed: false });
-    expect((await h.reachSettings.get(ALICE))?.channels.texts).toBe(false);
+    await expect(h.numbers.status(ALICE)).resolves.toMatchObject({
+      phone: PHONE,
+      pending_phone: '+15550122',
+      confirmed: true,
+      code_pending: true,
+    });
+    expect((await h.reachSettings.get(ALICE))?.channels.texts).toBe(true);
+    await expect(h.numbers.confirm({ owner: ALICE, code: '111111' })).resolves.toEqual({ ok: true });
+    await expect(h.numbers.status(ALICE)).resolves.toMatchObject({
+      phone: '+15550122',
+      pending_phone: null,
+      confirmed: true,
+      code_pending: false,
+    });
+    expect((await h.reachSettings.get(ALICE))?.channels.texts).toBe(true);
+  });
+
+  it('keeps the confirmed number when the code to a new one could not be sent', async () => {
+    const h = await textsHarness();
+    await h.readyToText();
+    h.next.result = { outcome: 'failed', failure: 'invalid_number' };
+    await h.numbers.sendCode({ owner: ALICE, phone: '+15550122' });
+    await expect(h.numbers.status(ALICE)).resolves.toMatchObject({
+      phone: PHONE,
+      pending_phone: null,
+      confirmed: true,
+      code_pending: false,
+    });
+    expect((await h.reachSettings.get(ALICE))?.channels.texts).toBe(true);
   });
 
   it('asking for a fresh code for the same number does not unconfirm it', async () => {
@@ -211,18 +345,32 @@ describe('STOP', () => {
     const h = await textsHarness();
     await h.readyToText();
     const bob = { tenant_id: 'default', created_by: 'bob' };
-    const ownContact = await h.contacts.get(ALICE);
-    if (ownContact === undefined) {
-      throw new Error('The contact was not saved.');
-    }
-    await h.contacts.put({ ...bob, contact: { ...ownContact, phone: '+15550133' } });
-    await h.reachSettings.put({
-      ...bob,
-      settings: { ...defaultReachSettings('UTC'), channels: { texts: true, calls: false } },
-    });
-    await h.numbers.stopNumber(PHONE);
+    const carol = { tenant_id: 'other', created_by: 'carol' };
+    await h.readyToText({ owner: bob, phone: '+15550133' });
+    await h.readyToText({ owner: carol });
+    await expect(h.numbers.stopNumber(PHONE)).resolves.toBe(2);
     expect((await h.reachSettings.get(bob))?.channels.texts).toBe(true);
     await expect(h.numbers.status(bob)).resolves.toMatchObject({ confirmed: true, opted_out: false });
+    expect((await h.reachSettings.get(carol))?.channels.texts).toBe(false);
+    await expect(h.numbers.status(carol)).resolves.toMatchObject({ confirmed: false, opted_out: true });
+  });
+
+  it('a STOP from a new number drops it and keeps the confirmed one', async () => {
+    const h = await textsHarness();
+    await h.readyToText();
+    await h.numbers.sendCode({ owner: ALICE, phone: '+15550122' });
+    await expect(h.numbers.stopNumber('+15550122')).resolves.toBe(1);
+    await expect(h.numbers.status(ALICE)).resolves.toMatchObject({
+      phone: PHONE,
+      pending_phone: null,
+      confirmed: true,
+      code_pending: false,
+    });
+    expect((await h.reachSettings.get(ALICE))?.channels.texts).toBe(true);
+    await expect(h.numbers.confirm({ owner: ALICE, code: '111111' })).resolves.toEqual({
+      ok: false,
+      reason: 'no_code',
+    });
   });
 
   it('a number nobody has changes nothing', async () => {

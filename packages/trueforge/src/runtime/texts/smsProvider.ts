@@ -118,6 +118,6 @@ export function smsFailureWords(failure: SmsFailure): string {
     case 'not_accepted':
       return 'Twilio did not accept the sign-in details. Check the account id and auth token in the settings file.';
     case 'unreachable':
-      return 'The text could not be sent. The item is still in your feed.';
+      return 'Twilio could not be reached, so no text was sent. Open the app to see the item.';
   }
 }

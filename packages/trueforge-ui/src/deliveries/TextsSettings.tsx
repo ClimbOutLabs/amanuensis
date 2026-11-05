@@ -13,14 +13,12 @@ type Note = { tone: 'ok' | 'error'; text: string };
  */
 export function TextsSettings({
   texts,
-  assistant,
   textsOn,
   savedOn,
   onTextsOn,
   tryButton,
 }: {
   texts: TextsApi;
-  assistant: string;
   textsOn: boolean;
   /** Whether texts are on as last saved. */
   savedOn: boolean;
@@ -32,6 +30,8 @@ export function TextsSettings({
   const [phone, setPhone] = useState('');
   const [code, setCode] = useState('');
   const [changing, setChanging] = useState(false);
+  // Set when the person keeps their number after a code went to a new one, so the code entry is put away.
+  const [kept, setKept] = useState(false);
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<Note | null>(null);
 
@@ -81,7 +81,10 @@ export function TextsSettings({
 
   const sendCode = async () => {
     const sent = await run(() => texts.sendCode(phone), 'A code was sent. Type it below within 10 minutes.');
-    if (sent) setCode('');
+    if (sent) {
+      setCode('');
+      setKept(false);
+    }
   };
 
   const confirm = async () => {
@@ -105,7 +108,8 @@ export function TextsSettings({
     if (removed) onTextsOn(false);
   };
 
-  const entering = status.phone === null || !status.confirmed || changing;
+  const waiting = status.pendingPhone !== null && status.codePending && !kept;
+  const entering = status.phone === null || !status.confirmed || changing || waiting;
 
   return (
     <div data-role="texts-settings" className="flex w-full flex-col gap-3">
@@ -145,6 +149,11 @@ export function TextsSettings({
           <p className="text-text-secondary text-sm">
             Type it with the country code. We text it a code to prove it is yours. Nothing else is sent until then.
           </p>
+          {status.confirmed && status.pendingPhone !== null ? (
+            <p role="status" className="text-text-secondary text-sm">
+              Texts keep going to {status.phone} until you confirm {status.pendingPhone}.
+            </p>
+          ) : null}
           {status.codePending ? (
             <label className="text-text-primary flex flex-wrap items-center gap-2 text-sm">
               <span className="w-40 max-w-full">Code from the text</span>
@@ -167,9 +176,16 @@ export function TextsSettings({
               </button>
             </label>
           ) : null}
-          {changing ? (
+          {status.confirmed && (changing || waiting) ? (
             <div>
-              <button type="button" className={BUTTON} onClick={() => setChanging(false)}>
+              <button
+                type="button"
+                className={BUTTON}
+                onClick={() => {
+                  setChanging(false);
+                  setKept(true);
+                }}
+              >
                 Keep my number
               </button>
             </div>
@@ -202,8 +218,7 @@ export function TextsSettings({
               <span className="text-text-primary">
                 Private (recommended)
                 <span className="text-text-secondary block">
-                  Only the kind of thing, such as “{assistant}: a reminder is due. Open Aman to see it.” No names,
-                  amounts or message content.
+                  Only the kind of thing, such as “{status.privatePreview}” No names, amounts or message content.
                 </span>
               </span>
             </label>

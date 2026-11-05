@@ -10,6 +10,10 @@ export interface TextStatus {
     mode: TrueForge.TextMode;
     /** Whether the person replied STOP. They confirm the number again to use texts. */
     optedOut: boolean;
+    /** A new number waiting for its code. Texts keep going to the confirmed number until then. */
+    pendingPhone: string | null;
     /** The number the person entered, or null before one is entered. */
     phone: string | null;
+    /** What a Private text says, word for word, for a reminder. */
+    privatePreview: string;
 }

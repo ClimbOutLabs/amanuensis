@@ -50,6 +50,7 @@ export function deliveryDeps(
       provider: undefined,
       audit,
       logger: winston.createLogger({ silent: true }),
+      codeKey: 'test-code-key',
     }),
     webPushPublicKey: undefined,
   };

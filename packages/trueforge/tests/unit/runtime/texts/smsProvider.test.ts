@@ -53,5 +53,8 @@ describe('Twilio text provider', () => {
       expect(words).not.toContain('—');
       expect(words.length).toBeGreaterThan(20);
     }
+    expect(smsFailureWords('unreachable')).toBe(
+      'Twilio could not be reached, so no text was sent. Open the app to see the item.',
+    );
   });
 });

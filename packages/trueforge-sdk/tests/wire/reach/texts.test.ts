@@ -10,7 +10,15 @@ describe("TextsClient", () => {
         const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
 
         const rawResponseBody = {
-            data: { code_pending: true, confirmed: true, mode: "private", opted_out: true, phone: "phone" },
+            data: {
+                code_pending: true,
+                confirmed: true,
+                mode: "private",
+                opted_out: true,
+                pending_phone: "pending_phone",
+                phone: "phone",
+                private_preview: "private_preview",
+            },
         };
 
         server
@@ -28,7 +36,9 @@ describe("TextsClient", () => {
                 confirmed: true,
                 mode: "private",
                 optedOut: true,
+                pendingPhone: "pending_phone",
                 phone: "phone",
+                privatePreview: "private_preview",
             },
         });
     });
@@ -57,7 +67,15 @@ describe("TextsClient", () => {
         const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
         const rawRequestBody = { mode: "private" };
         const rawResponseBody = {
-            data: { code_pending: true, confirmed: true, mode: "private", opted_out: true, phone: "phone" },
+            data: {
+                code_pending: true,
+                confirmed: true,
+                mode: "private",
+                opted_out: true,
+                pending_phone: "pending_phone",
+                phone: "phone",
+                private_preview: "private_preview",
+            },
         };
 
         server
@@ -78,7 +96,9 @@ describe("TextsClient", () => {
                 confirmed: true,
                 mode: "private",
                 optedOut: true,
+                pendingPhone: "pending_phone",
                 phone: "phone",
+                privatePreview: "private_preview",
             },
         });
     });
@@ -191,7 +211,15 @@ describe("TextsClient", () => {
         const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
         const rawRequestBody = { phone: "phone" };
         const rawResponseBody = {
-            data: { code_pending: true, confirmed: true, mode: "private", opted_out: true, phone: "phone" },
+            data: {
+                code_pending: true,
+                confirmed: true,
+                mode: "private",
+                opted_out: true,
+                pending_phone: "pending_phone",
+                phone: "phone",
+                private_preview: "private_preview",
+            },
         };
 
         server
@@ -212,7 +240,9 @@ describe("TextsClient", () => {
                 confirmed: true,
                 mode: "private",
                 optedOut: true,
+                pendingPhone: "pending_phone",
                 phone: "phone",
+                privatePreview: "private_preview",
             },
         });
     });
@@ -332,7 +362,15 @@ describe("TextsClient", () => {
         const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
         const rawRequestBody = { code: "code" };
         const rawResponseBody = {
-            data: { code_pending: true, confirmed: true, mode: "private", opted_out: true, phone: "phone" },
+            data: {
+                code_pending: true,
+                confirmed: true,
+                mode: "private",
+                opted_out: true,
+                pending_phone: "pending_phone",
+                phone: "phone",
+                private_preview: "private_preview",
+            },
         };
 
         server
@@ -353,7 +391,9 @@ describe("TextsClient", () => {
                 confirmed: true,
                 mode: "private",
                 optedOut: true,
+                pendingPhone: "pending_phone",
                 phone: "phone",
+                privatePreview: "private_preview",
             },
         });
     });

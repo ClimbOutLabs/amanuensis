@@ -11750,12 +11750,23 @@
             "description": "Whether the person replied STOP. They confirm the number again to use texts.",
             "type": "boolean"
           },
+          "pending_phone": {
+            "description": "A new number waiting for its code. Texts keep going to the confirmed number until then.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "phone": {
             "description": "The number the person entered, or null before one is entered.",
             "type": [
               "string",
               "null"
             ]
+          },
+          "private_preview": {
+            "description": "What a Private text says, word for word, for a reminder.",
+            "type": "string"
           }
         },
         "required": [
@@ -11763,7 +11774,9 @@
           "confirmed",
           "mode",
           "opted_out",
-          "code_pending"
+          "pending_phone",
+          "code_pending",
+          "private_preview"
         ],
         "type": "object"
       },

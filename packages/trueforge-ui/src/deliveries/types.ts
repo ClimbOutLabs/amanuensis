@@ -78,6 +78,10 @@ export type TextStatus = {
   /** The person replied STOP. They confirm the number again to use texts. */
   optedOut: boolean;
   codePending: boolean;
+  /** A new number waiting for its code. Texts keep going to the confirmed number until then. */
+  pendingPhone: string | null;
+  /** What a Private text says, word for word, as the server writes it. */
+  privatePreview: string;
 };
 
 /** The number for texts, served by the host. Each call rejects with a message fit to show. */

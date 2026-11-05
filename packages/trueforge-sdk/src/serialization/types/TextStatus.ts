@@ -11,7 +11,9 @@ export const TextStatus: core.serialization.ObjectSchema<serializers.TextStatus.
         confirmed: core.serialization.boolean(),
         mode: TextMode,
         optedOut: core.serialization.property("opted_out", core.serialization.boolean()),
+        pendingPhone: core.serialization.property("pending_phone", core.serialization.string().nullable()),
         phone: core.serialization.string().nullable(),
+        privatePreview: core.serialization.property("private_preview", core.serialization.string()),
     });
 
 export declare namespace TextStatus {
@@ -20,6 +22,8 @@ export declare namespace TextStatus {
         confirmed: boolean;
         mode: TextMode.Raw;
         opted_out: boolean;
+        pending_phone?: string | null;
         phone?: string | null;
+        private_preview: string;
     }
 }

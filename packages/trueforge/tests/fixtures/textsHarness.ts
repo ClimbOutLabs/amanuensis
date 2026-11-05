@@ -5,13 +5,13 @@ import { migrateSqliteToLatest } from '../../src/db/migrateSqlite';
 import { ReachSettingsStore } from '../../src/db/reachSettingsStore';
 import { createSqliteDb } from '../../src/db/sqlite/client';
 import { SqlitePersonalizationStore } from '../../src/db/sqlite/personalization-store/SqlitePersonalizationStore';
-import { TextContactStore } from '../../src/db/textContactStore';
+import { TextContactStore, type TextContactOwner } from '../../src/db/textContactStore';
 import { createDeliveryService } from '../../src/runtime/delivery/deliveryService';
 import type { SmsProvider, SmsSendResult } from '../../src/runtime/texts/smsProvider';
 import { createSmsSender } from '../../src/runtime/texts/smsSender';
 import { createTextNumberService } from '../../src/runtime/texts/textNumber';
 import { defaultReachSettings } from '../../src/schemas/reach';
-import type { TextContact } from '../../src/schemas/textMessages';
+import type { TextMode } from '../../src/schemas/textMessages';
 
 export const ALICE = { tenant_id: 'default', created_by: 'alice' };
 export const PHONE = '+15550111';
@@ -28,7 +28,8 @@ export interface SentText {
 export async function textsHarness({
   assistantName = 'Mannie',
   provider = true,
-}: { assistantName?: string | null; provider?: boolean } = {}) {
+  codeKey = 'test-code-key',
+}: { assistantName?: string | null; provider?: boolean; codeKey?: string } = {}) {
   const db = createSqliteDb(':memory:');
   await migrateSqliteToLatest(db);
   const logger = winston.createLogger({ silent: true });
@@ -71,16 +72,19 @@ export async function textsHarness({
   }
   const clock = { now: new Date('2026-11-06T10:00:00.000Z') };
   const codes = ['111111', '222222', '333333', '444444', '555555'];
-  const numbers = createTextNumberService({
-    store: contacts,
-    reachSettings,
-    personalization,
-    provider: smsProvider,
-    audit,
-    logger,
-    now: () => clock.now,
-    newCode: () => codes.shift() ?? '999999',
-  });
+  const serviceWith = (overrides: { codeKey: string }) =>
+    createTextNumberService({
+      store: contacts,
+      reachSettings,
+      personalization,
+      provider: smsProvider,
+      audit,
+      logger,
+      codeKey: overrides.codeKey,
+      now: () => clock.now,
+      newCode: () => codes.shift() ?? '999999',
+    });
+  const numbers = serviceWith({ codeKey });
   const deliveries = createDeliveryService({
     store: deliveryStore,
     senders: [
@@ -99,25 +103,32 @@ export async function textsHarness({
   });
 
   /** A person whose number is confirmed, with texts switched on, the way the Settings page leaves them. */
-  async function readyToText({ mode = 'private' }: { mode?: TextContact['mode'] } = {}) {
-    await contacts.put({
-      ...ALICE,
-      contact: {
-        phone: PHONE,
-        mode,
-        confirmed_at: '2026-11-06T09:00:00.000Z',
-        opted_out_at: null,
-        code_hash: null,
-        code_salt: null,
-        code_expires_at: null,
-        code_attempts: 0,
-        send_window_started_at: null,
-        sends_in_window: 0,
-      },
-    });
+  async function readyToText({
+    mode = 'private',
+    owner = ALICE,
+    phone = PHONE,
+  }: { mode?: TextMode; owner?: TextContactOwner; phone?: string } = {}) {
+    const code = { hash: 'seeded', salt: 'seeded', expires_at: '2026-11-06T09:10:00.000Z' };
+    const at = new Date('2026-11-06T09:00:00.000Z');
+    await contacts.startCode({ ...owner, phone, as: 'number', code, now: at });
+    await contacts.confirmCode({ ...owner, code_hash: code.hash, now: at });
+    await contacts.setMode({ ...owner, mode, now: at });
     const settings = defaultReachSettings('UTC');
-    await reachSettings.put({ ...ALICE, settings: { ...settings, channels: { ...settings.channels, texts: true } } });
+    await reachSettings.put({ ...owner, settings: { ...settings, channels: { ...settings.channels, texts: true } } });
   }
 
-  return { db, contacts, reachSettings, deliveryStore, numbers, deliveries, sent, next, activity, clock, readyToText };
+  return {
+    db,
+    contacts,
+    reachSettings,
+    deliveryStore,
+    numbers,
+    serviceWith,
+    deliveries,
+    sent,
+    next,
+    activity,
+    clock,
+    readyToText,
+  };
 }

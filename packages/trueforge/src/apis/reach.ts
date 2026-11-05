@@ -164,11 +164,9 @@ export function createReachRouter(deps: ReachRouterDeps) {
       return c.json({ data: { delivery_id: delivery.id, devices_reached: 0 } }, 201);
     }
     if (channel === 'call') {
-      if (!channels.calls.available) {
-        return c.json({ error: { message: `${channels.calls.note} There is nothing to try yet.` } }, 409);
-      }
-      return c.json({ error: { message: 'This channel cannot be tried from here yet.' } }, 409);
+      return c.json({ error: { message: `${channels.calls.note} There is nothing to try yet.` } }, 409);
     }
+    // A push test reaches only the person's devices, and an in-app test only the app, so neither sends a paid text.
     const delivery = await deps.deliveryService.deliver({
       ...owner,
       kind: channel === 'push' ? 'nudge' : 'note',
@@ -176,6 +174,7 @@ export function createReachRouter(deps: ReachRouterDeps) {
       text: 'This is a test. If you can read this, it works.',
       reason: 'You pressed Try it in Reach me settings.',
       link: null,
+      only_channels: channel === 'push' ? ['web_push'] : [],
     });
     const devices_reached = delivery.attempts.filter(
       attempt => attempt.channel === 'web_push' && attempt.outcome === 'sent',

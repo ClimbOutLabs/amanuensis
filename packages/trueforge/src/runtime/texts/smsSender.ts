@@ -1,50 +1,12 @@
 import type { IPersonalizationStore } from '../../db/personalizationStore';
 import type { IReachSettingsStore } from '../../db/reachSettingsStore';
 import type { ITextContactStore } from '../../db/textContactStore';
-import type { Delivery, DeliveryAttempt, DeliveryKind } from '../../schemas/deliveries';
-import type { TextMode } from '../../schemas/textMessages';
+import type { DeliveryAttempt } from '../../schemas/deliveries';
 import type { DeliveryChannelSender } from '../delivery/deliveryChannel';
 import { assistantNameFor } from './assistantName';
 import { smsFailureWords, type SmsProvider } from './smsProvider';
 import { canText, type TextNumberService } from './textNumber';
-
-/** About two text segments. A longer message is cut at a word and ends with an ellipsis. */
-const FULL_TEXT_MAX = 300;
-
-/**
- * What a Private text says: only the kind of thing. It never carries a name, an amount or any content, because a
- * text can show on a locked screen and travels through the phone company.
- */
-export function privatePhrase(kind: DeliveryKind): string {
-  switch (kind) {
-    case 'reminder':
-      return 'a reminder is due';
-    case 'note':
-      return 'a note is waiting';
-    case 'nudge':
-      return 'something needs you';
-    case 'approval_waiting':
-      return 'something is waiting for your ok';
-  }
-}
-
-function cut(text: string): string {
-  const flat = text.replace(/\s+/g, ' ').trim();
-  if (flat.length <= FULL_TEXT_MAX) {
-    return flat;
-  }
-  const head = flat.slice(0, FULL_TEXT_MAX - 1);
-  const space = head.lastIndexOf(' ');
-  return `${(space > FULL_TEXT_MAX / 2 ? head.slice(0, space) : head).trimEnd()}…`;
-}
-
-/** The text that goes out for a delivery. The assistant's name comes from the person's own settings. */
-export function textBody({ name, delivery, mode }: { name: string; delivery: Delivery; mode: TextMode }): string {
-  if (mode === 'full') {
-    return `${name}: ${cut(delivery.text)}`;
-  }
-  return `${name}: ${privatePhrase(delivery.kind)}. Open Aman to see it.`;
-}
+import { TEXTS_NOT_SET_UP, textBody } from './textWords';
 
 function maskedTarget(phone: string): string {
   return `number ending ${phone.slice(-4)}`;
@@ -111,7 +73,7 @@ export function createSmsSender({
         return [
           attempt({
             outcome: 'skipped',
-            detail: 'Texts are not set up on this server. Add the Twilio settings and restart Aman.',
+            detail: TEXTS_NOT_SET_UP,
             target,
             at: now(),
           }),

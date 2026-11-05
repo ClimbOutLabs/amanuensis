@@ -200,6 +200,8 @@ function parseTextStatus(body: unknown): TextStatus {
     mode: data.mode === 'full' ? 'full' : 'private',
     optedOut: data.opted_out === true,
     codePending: data.code_pending === true,
+    pendingPhone: typeof data.pending_phone === 'string' ? data.pending_phone : null,
+    privatePreview: typeof data.private_preview === 'string' ? data.private_preview : '',
   };
 }
 

@@ -11,6 +11,7 @@
  */
 import { extractErrorLogFields } from '@truefoundry/trueforge-core/core';
 import type { Context } from 'hono';
+import { randomBytes } from 'node:crypto';
 import { mkdir } from 'node:fs/promises';
 import path from 'node:path';
 import {
@@ -161,7 +162,7 @@ import { TrueFoundrySandboxProviderStore } from './truefoundry/TrueFoundrySandbo
 import { TrueFoundryServiceFoundryServerClient } from './truefoundry/TrueFoundryServiceFoundryServerClient';
 import { TrueFoundrySkillStore } from './truefoundry/TrueFoundrySkillStore';
 import { inboundSmsRoute } from './twilioWebhook/inboundSms';
-import { startTwilioWebhookListener } from './twilioWebhook/listener';
+import { twilioListenerFor } from './twilioWebhook/listener';
 import { ensureWritableDataDir } from './utils/dataDir';
 import { startSttAvailabilityWatcher } from './voice/sttAvailability';
 
@@ -806,6 +807,8 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     provider: smsProvider,
     audit: sentinelAuditStore,
     logger,
+    // Codes are keyed by a secret that is not in the database. With no Twilio details no code is ever sent.
+    codeKey: configuration.TWILIO?.authToken ?? randomBytes(32).toString('hex'),
   });
   const reachChannels = () => reachChannelsFor({ twilio: configuration.TWILIO });
   const deliveryService = createDeliveryService({
@@ -1330,16 +1333,17 @@ try {
     },
   );
 
-  // The Twilio listener has its own port and serves only Twilio's routes. It is off unless texts are set up.
-  const twilioServer =
-    configuration.TWILIO === undefined
-      ? undefined
-      : startTwilioWebhookListener({
-          settings: configuration.TWILIO,
-          hostname: configuration.HOST,
-          routes: twilioWebhookRoutes,
-          logger,
-        });
+  // The Twilio listener has its own port and serves only Twilio's routes. It is off unless texts are set up, and a
+  // port it cannot open stops the server, because texts must never go out while a STOP cannot be heard.
+  const twilioServer = await twilioListenerFor({
+    twilio: configuration.TWILIO,
+    hostname: configuration.HOST,
+    routes: twilioWebhookRoutes,
+    logger,
+  }).catch((error: unknown) => {
+    console.error(error instanceof Error ? error.message : error);
+    process.exit(1);
+  });
 
   server.on('error', (error: unknown) => {
     console.error('Failed to start server:', error instanceof Error ? error.message : error);

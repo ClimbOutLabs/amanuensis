@@ -14,32 +14,34 @@ One text provider, Twilio, behind a small interface. The person enters a number,
 
 ## What a text says
 
-- **Private (default):** `<assistant name>: a reminder is due. Open Aman to see it.` The words by kind are "a reminder is due", "something needs you", "something is waiting for your ok" and "a note is waiting". No names, amounts, message content or reasons.
-- **Full:** `<assistant name>: <the one-sentence message>`, cut at a word near 300 characters.
-- The assistant's name is the one in the person's own Personalization settings. When they have not named it, the text says "Your assistant". No name is written into the code.
-- The confirmation code text reads `<assistant name>: your confirmation code is 123456. It works for 10 minutes. If you did not ask for it, ignore this text.`
+- **Private (default):** `<assistant name>: a reminder is due. Open the app to see it.` The words by kind are "a reminder is due", "something needs you", "something is waiting for your ok" and "a note is waiting". No names, amounts, message content or reasons.
+- **Full:** `<assistant name>: <the one-sentence message>`, in plain characters (accents dropped, curly quotes and dashes made plain, emoji left out) so the phone company never switches to its costlier long form, and cut at a word so the whole text fits two segments (306 characters), ending with `...`.
+- The assistant's name is the one in the person's own Personalization settings, kept to letters, spaces, apostrophes and dashes and at most 20 of them, so a name cannot carry a link, a number to call or a message of its own. When nothing is left, or they have not named it, the text says "Your assistant". No name is written into the code.
+- The confirmation code text reads `Your confirmation code is 123456. It works for 10 minutes. If you did not ask for it, ignore this text.` It names no assistant, because it goes to a number nobody has proved yet.
+- The server sends the Private words for a reminder with the number's status, so the Settings page shows exactly what a text says.
 
 ## Confirming a number
 
 - A number is entered with its country code (`+15550100`). Spaces, dashes and brackets are ignored.
 - Nothing but the code is ever sent to a number before it is confirmed. An unconfirmed number receives nothing from the delivery layer, and the attempt is recorded as skipped.
-- The code is six digits, kept only as a salted HMAC-SHA256 hash, compared in constant time, and valid for 10 minutes.
+- The code is six digits, kept only as a salted HMAC-SHA256 hash keyed with a server secret that is not in the database (the Twilio auth token), compared in constant time, and valid for 10 minutes.
 - At most 5 tries per code. The fifth wrong try voids the code. The right code on the fifth try still works.
-- At most 3 codes an hour per person, whatever number they ask for, so the page cannot be used to text strangers. The count is kept when a send fails.
-- A new code voids the one before. A different number starts unconfirmed and switches texts off. A fresh code for the same number leaves it confirmed.
+- At most 3 codes an hour per person, whatever number they ask for, and at most 3 an hour and 10 a day to one number, whoever asks, so the page cannot be used to text strangers. Each send is counted in one database statement before Twilio is called, so requests at the same moment cannot pass a limit together, and a failed send still counts. The counts live in their own table, `text_code_send`, keyed by person and by a keyed hash of the number, so removing a number never resets them.
+- A new code voids the one before. A fresh code for the same number leaves it confirmed. A new number for a person with a confirmed number waits beside it: texts keep going to the confirmed number until the new one's code is confirmed, and a failed send or a STOP from the new number drops only the new one. A different number for a person with no confirmed number replaces it.
+- Every change after a read is conditional on the code that was read, so a STOP or a newer code in between is never undone.
 - Texts cannot be switched on in Reach me settings until the number is confirmed.
 
 ## STOP
 
 - Texts are one way. Replies are ignored, and Aman never writes back.
 - STOP, STOPALL, UNSUBSCRIBE, CANCEL, END and QUIT (the words Twilio treats as STOP, in any case) turn texts off for that number, for everyone on the instance who has it, mark it unconfirmed and record "You replied STOP" in Activity. Texts come back only after the person replies START from that phone and confirms the number again.
-- When Twilio refuses to send because the number replied STOP (error 21610), the same thing happens.
+- When Twilio refuses to send because the number replied STOP (error 21610), the same thing happens. When that happens to a code, the page says to reply START from that phone, then try again.
 
 ## The Twilio listener
 
-- Twilio posts incoming texts to a **separate listener** on its own port, `TWILIO_WEBHOOK_PORT` (default 8793). It is only started when `REACH_SMS_PROVIDER` is `twilio`. It serves only Twilio's routes and shares no routes with the main app, so sign-in and the rest of Aman are never reachable through it. Any other address answers 404 with an empty body.
+- Twilio posts incoming texts to a **separate listener** on its own port, `TWILIO_WEBHOOK_PORT` (default 9201, outside the ranges the installer picks other ports from). It is only started when `REACH_SMS_PROVIDER` is `twilio`, and a port it cannot open stops the server, so texts never go out while a STOP cannot be heard. It serves only Twilio's routes and shares no routes with the main app, so sign-in and the rest of Aman are never reachable through it. Any other address answers 404 with an empty body.
 - Every request is checked with Twilio's `X-Twilio-Signature` (HMAC-SHA1 of the public address plus the sorted form fields, signed with the auth token, compared in constant time). An unsigned or badly signed request is refused with 403 before any route runs. The address is built from `TWILIO_WEBHOOK_PUBLIC_URL`, never from a header the caller sent.
-- Only form posts up to 64 KB are read. A request from another Twilio account is refused.
+- Only form posts up to 64 KB are read. A request from another Twilio account is refused. A message id seen in the last day is answered and not acted on again, so a copied request cannot be replayed soon after. A route that fails answers 500 with empty TwiML, and only the address and the kind of error are logged.
 - The route is `POST /twilio/sms`. Routes are listed in one place, so the voice webhook and the media WebSocket of phone calls plug into the same listener, behind the same signature check.
 - The person exposes the port in one of two ways, written in plain words in the Text messages page of the docs: Tailscale Funnel on that port only, or their own domain with HTTPS in front of that port. The main app port is never published.
 
@@ -48,12 +50,12 @@ One text provider, Twilio, behind a small interface. The person enters a number,
 - Texts are a delivery channel sender (`channel: 'sms'`). It texts a delivery of level nudge when the person has texts on and a confirmed number. A note stays in the app. A new install has no settings, so it texts no one.
 - Each text is a channel attempt on its delivery (sent, failed or skipped), with a plain-words detail and a target that names the number only by its last four digits. It is also written to Activity as `delivery.sms`.
 - A failure never loses the delivery: it stays in the app.
-- A test of one channel can ask the delivery service to try only that channel.
+- A test of one channel asks the delivery service to try only that channel, so a push or in-app test never sends a paid text.
 
 ## Reach me settings
 
 - When the server has no provider, the Texts row stays off and says the one thing to do: add the Twilio details to the settings file and restart Aman.
-- With a provider: enter the number, send the code, confirm, choose Private or Full, switch texts on, save, and press Try it. Remove number forgets it and switches texts off.
+- With a provider: enter the number, send the code, confirm, choose Private or Full, switch texts on, save, and press Try it. Remove number forgets it and switches texts off. Change number keeps the confirmed number, and its texts, until the new one is confirmed.
 - The page says in plain words that texts travel through Twilio and the phone company.
 
 ## Design Decisions
@@ -67,9 +69,9 @@ One text provider, Twilio, behind a small interface. The person enters a number,
 
 ## Scope
 
-- `text_contact` table on SQLite and Postgres, with a shared store contract suite
+- `text_contact` and `text_code_send` tables on SQLite and Postgres, with a shared store contract suite
 - Config in `config.ts`: `REACH_SMS_PROVIDER` (default `none`), `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_FROM_NUMBER`, `TWILIO_WEBHOOK_PORT`, `TWILIO_WEBHOOK_PUBLIC_URL`
-- Routes under `/api/v1/user/reach/texts` (get, send code, confirm, choose words, remove) and `sms` as a test channel in `/api/v1/user/reach/test`
+- Routes under `/api/v1/user/reach/texts` (get, send code, confirm, choose words, remove) and `text` as a test channel in `/api/v1/user/reach/test`
 - The listener, the signature check and the inbound text route
 - Settings, Reach me: the texts flow
 - Data export and import: the number and the choice of words are exported as `texts.json`; an import brings the number in unconfirmed and texts off
@@ -87,7 +89,11 @@ All tests use synthetic data, never a person's real data.
 - An unconfirmed number receives nothing, and a new install sends no texts
 - Private texts contain no names, amounts or mail text, and Full texts carry the message
 - The assistant's name comes from the person's settings
-- Code expiry, wrong tries, the hourly limit, and codes kept only as hashes
+- Code expiry, wrong tries, the limits per person and per number, removing a number and sending at the same moment, and codes kept only as hashes keyed outside the database
+- A new number waits beside the confirmed one, and a failed send keeps the confirmed one
+- A long or unusual assistant name, and Full texts in plain characters within two segments
+- A push test with texts on sends no text
+- The listener fails the boot when its port is taken, starts only when Twilio is set up, answers a failing route with empty TwiML, and acts on a repeated message id once
 - STOP and the other opt-out words turn texts off and are recorded in Activity; other replies are ignored
 - Unsigned, badly signed and wrong-address requests are refused; the listener serves nothing but its own routes
 - Twilio's own worked signature example

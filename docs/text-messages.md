@@ -9,8 +9,10 @@ Texts go through Twilio, a service you sign up for. You pay Twilio for each text
 
 ## What a text says
 
-- **Private (the default).** The text says only the kind of thing, such as "Mannie: a reminder is due. Open Aman to see it." It holds no names, amounts or message content. Your assistant's name is the one you chose in Personalization.
-- **Full.** The text holds the one-sentence message. It can show on a locked screen, and Twilio and the phone company can read it.
+- **Private (the default).** The text says only the kind of thing, such as "Mannie: a reminder is due. Open the app to see it." It holds no names, amounts or message content. Your assistant's name is the one you chose in Personalization. A text uses at most 20 letters of it.
+- **Full.** The text holds the one-sentence message, cut to fit two texts. It can show on a locked screen, and Twilio and the phone company can read it.
+
+The text with your confirmation code holds only the code. It does not name your assistant.
 
 Texts only go one way. If you reply STOP (or UNSUBSCRIBE, CANCEL, END or QUIT), Aman turns texts off and records it in Activity. Any other reply is ignored. To use texts again, reply START from that phone and confirm your number again in Settings.
 
@@ -18,7 +20,7 @@ Texts only go one way. If you reply STOP (or UNSUBSCRIBE, CANCEL, END or QUIT), 
 
 1. Make a Twilio account and get a phone number that can send texts. Copy your account id, your auth token and the number.
 2. Choose how Twilio will reach Aman. See "Let Twilio reach Aman" below. You need one https address for this.
-3. Add these lines to the settings file of your Aman (under the line that says to add your own settings), then restart Aman.
+3. Open the settings file of your Aman. If you installed Aman with the installer, it is `~/.amanuensis/instances/<name>/.env`, where `<name>` is your instance, such as `main`. If you run Aman from a copy of the code, it is `packages/trueforge/.env`. Add these lines under the line that says to add your own settings.
 
 ```
 REACH_SMS_PROVIDER=twilio
@@ -26,14 +28,21 @@ TWILIO_ACCOUNT_SID=ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 TWILIO_AUTH_TOKEN=your-auth-token
 TWILIO_FROM_NUMBER=+15550100
 TWILIO_WEBHOOK_PUBLIC_URL=https://your-address.example
-# Optional. The port Twilio's messages arrive on. The default is 8793.
-# TWILIO_WEBHOOK_PORT=8793
+# Optional. The port Twilio's messages arrive on. The default is 9201.
+# TWILIO_WEBHOOK_PORT=9201
 ```
 
+Then start Aman again with the new settings. If you installed Aman with the installer, run `./installer/install.sh` again from your `amanuensis` folder. If you run Aman from a copy of the code, stop it and start it again.
+
 4. In the Twilio console, open your number and set "A message comes in" to a webhook, method POST, at `https://your-address.example/twilio/sms`.
-5. In Aman, open Settings, then Reach me. Enter your number with the country code, type the code that arrives, choose Private or Full, switch texts on, save, and press Try it.
+5. In the Twilio console, open Messaging, then Settings, then Geo permissions. Allow only the countries you text. Aman sends codes only to numbers a person types in, but this keeps any mistake from costing you texts to far-away numbers.
+6. In Aman, open Settings, then Reach me. Enter your number with the country code, type the code that arrives, choose Private or Full, switch texts on, save, and press Try it.
 
 Keep the auth token secret. Aman never writes it to its logs.
+
+To keep codes from being used to send many texts, Aman sends at most 3 codes an hour for each person. It also sends at most 3 codes an hour, and 10 a day, to any one number, whoever asks. Removing a number does not reset these limits.
+
+To change your number, type the new one and confirm its code. Texts keep going to your old number until you do.
 
 ## Let Twilio reach Aman
 
@@ -41,10 +50,10 @@ Twilio sends your replies (STOP) to a small separate door on your computer. This
 
 Pick one way to open it. Never publish the main Aman port.
 
-- **Tailscale Funnel, on that port only.** If you use Tailscale, run `tailscale funnel 8793` (use your own port if you changed it). Tailscale gives you an https address. Use it as `TWILIO_WEBHOOK_PUBLIC_URL`.
-- **Your own domain with https.** Put a web server such as Caddy in front of the Twilio port, with a certificate for your domain. Send only the path `/twilio/` to port 8793. Use your domain as `TWILIO_WEBHOOK_PUBLIC_URL`.
+- **Tailscale Funnel, on that port only.** If you use Tailscale, run `tailscale funnel 9201` (use your own port if you changed it). Tailscale gives you an https address. Use it as `TWILIO_WEBHOOK_PUBLIC_URL`.
+- **Your own domain with https.** Put a web server such as Caddy in front of the Twilio port, with a certificate for your domain. Send only the path `/twilio/` to port 9201. Use your domain as `TWILIO_WEBHOOK_PUBLIC_URL`.
 
-If you installed Aman with the installer, it opens the port on this computer only (127.0.0.1) once `REACH_SMS_PROVIDER=twilio` is in the settings file and you run the installer again. Tailscale or your web server then carries it from there.
+If you installed Aman with the installer, running `./installer/install.sh` again opens the port on this computer only (127.0.0.1) once `REACH_SMS_PROVIDER=twilio` is in the settings file. Tailscale or your web server then carries it from there. Each instance with texts needs its own port. If the port is already used by another instance, the installer says so and names the line to change.
 
 ## Privacy
 

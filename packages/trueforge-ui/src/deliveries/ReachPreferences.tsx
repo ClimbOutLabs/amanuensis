@@ -205,7 +205,6 @@ export function ReachPreferences({ reach }: { reach: ReachApi }) {
         {availability.texts.available ? (
           <TextsSettings
             texts={reach.texts}
-            assistant={assistant}
             textsOn={draft.textsOn}
             savedOn={view.settings.textsOn}
             onTextsOn={next => change({ textsOn: next })}

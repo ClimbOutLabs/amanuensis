@@ -169,6 +169,7 @@ const app = createServerApp({
     provider: undefined,
     audit: { record: () => Promise.resolve() },
     logger,
+    codeKey: 'openapi',
   }),
   webPushPublicKey: undefined,
   sessions: new Sessions({ sessionStore }),

@@ -192,15 +192,25 @@ test('tries a channel and reads how many devices a push notice reached', async (
 });
 
 test('walks the text number flow over the texts routes and reads the status in plain fields', async () => {
-  const wire = { phone: '+15550111', confirmed: false, mode: 'private', opted_out: false, code_pending: true };
+  const wire = {
+    phone: '+15550111',
+    confirmed: true,
+    mode: 'private',
+    opted_out: false,
+    code_pending: true,
+    pending_phone: '+15550122',
+    private_preview: 'Mannie: a reminder is due. Open the app to see it.',
+  };
   const { fetcher, calls } = recordingFetch(() => Response.json({ data: wire }));
   const texts = createDeliveriesApi(fetcher).reach.texts;
   assert.deepEqual(await texts.status(), {
     phone: '+15550111',
-    confirmed: false,
+    confirmed: true,
     mode: 'private',
     optedOut: false,
     codePending: true,
+    pendingPhone: '+15550122',
+    privatePreview: 'Mannie: a reminder is due. Open the app to see it.',
   });
   await texts.sendCode('+15550111');
   await texts.confirm('123456');
