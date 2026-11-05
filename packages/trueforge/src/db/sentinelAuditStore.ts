@@ -237,7 +237,8 @@ export class SentinelAuditStore implements ISentinelAuditStore {
             description: record.description,
             outcome: record.outcome,
             auto_deny_reason: record.auto_deny_reason,
-            created_at: record.created_at,
+            // Saved in the same form as live rows, so time filters and paging compare them correctly.
+            created_at: new Date(record.created_at).toISOString(),
           })),
         )
         .execute();

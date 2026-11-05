@@ -172,6 +172,39 @@ export function runSentinelAuditStoreContractSuite(getEnv: () => SentinelAuditSt
     expect(beforeAll.entries).toEqual([]);
   });
 
+  it('listForUser places an imported row saved with an offset at its real instant', async () => {
+    const { store } = getEnv();
+    const imported = (tool_name: string, created_at: string) => ({
+      id: tool_name,
+      conversation_id: 's1',
+      tier: 1,
+      tool_name,
+      description: 'Read a file',
+      outcome: 'logged' as const,
+      auto_deny_reason: null,
+      created_at,
+    });
+    await store.importRecords({
+      tenant_id: 't1',
+      created_by: 'u1',
+      records: [
+        imported('before', '2026-10-01T03:29:59.999Z'),
+        imported('with_offset', '2026-10-01T09:00:00+05:30'),
+        imported('after', '2026-10-01T03:30:00.001Z'),
+      ],
+    });
+
+    const exact = await store.listForUser({
+      ...forUser,
+      from: '2026-10-01T03:30:00.000Z',
+      to: '2026-10-01T03:30:00.001Z',
+      limit: 10,
+    });
+    expect(exact.entries.map(row => [row.tool_name, row.created_at])).toEqual([
+      ['with_offset', '2026-10-01T03:30:00.000Z'],
+    ]);
+  });
+
   it('listForUser filters by outcome', async () => {
     const { store } = getEnv();
     await recordInOrder(store, [
