@@ -9351,6 +9351,10 @@
           "enabled": {
             "description": "Whether a sandbox provider is configured for this tenant.",
             "type": "boolean"
+          },
+          "reason": {
+            "description": "Why the sandbox is off, in plain words; present only when it is off and a reason is known.",
+            "type": "string"
           }
         },
         "required": [
