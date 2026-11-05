@@ -54,7 +54,7 @@ import {
   withHiddenContext,
 } from '../runtime/memory/markdownMemoryFiles';
 import type { MemoryClient } from '../runtime/memory/memoryClient';
-import { listMemoryPages, pageFolder, pagePath } from '../runtime/memory/memoryPages';
+import { listPageFiles, pageFolder, parsePageFilePath } from '../runtime/memory/memoryPages';
 import { MEMORY_RECALL_ENABLED_SETTING_KEY } from '../runtime/memoryRecallSettings';
 import { MEMORY_SCREEN_ENABLED_SETTING_KEY } from '../runtime/memoryScreenSettings';
 import { MEMORY_SUMMARIZE_SETTING_KEY } from '../runtime/memorySummarizeSettings';
@@ -772,7 +772,8 @@ async function regularFileText(filePath: string): Promise<string | undefined> {
 }
 
 /**
- * The vault's hand-written pages, `people/<slug>.md` and `matters/<slug>.md`, as regular files only.
+ * The vault's hand-written pages, every `.md` file directly in `people/` and `matters/` under its own
+ * name (a file Aman cannot read by name still travels, so a move loses nothing), as regular files only.
  * A page folder that is a link is skipped, so nothing outside the vault is read. `.memory-state/`
  * is a cache and stays behind.
  */
@@ -781,16 +782,20 @@ async function writeMarkdownPages<TTransaction>(
   { dirName, dirPath }: { dirName: string; dirPath: string },
 ): Promise<void> {
   const realFolders = new Map<string, boolean>();
-  for (const { kind, slug } of await listMemoryPages(dirPath)) {
+  for (const { kind, stem } of await listPageFiles(dirPath)) {
     const folder = pageFolder(kind);
+    // A name that cannot travel (control characters, a hidden file) is left in place.
+    if (parsePageFilePath(`${folder}/${stem}.md`) === undefined) {
+      continue;
+    }
     let isReal = realFolders.get(folder);
     if (isReal === undefined) {
       isReal = (await lstat(path.join(dirPath, folder))).isDirectory();
       realFolders.set(folder, isReal);
     }
-    const text = isReal ? await regularFileText(pagePath({ vaultDir: dirPath, kind, slug })) : undefined;
+    const text = isReal ? await regularFileText(path.join(dirPath, folder, `${stem}.md`)) : undefined;
     if (text !== undefined) {
-      await context.zip.addTextEntry(`memory/${dirName}/${folder}/${slug}.md`, context.scrub.text(text));
+      await context.zip.addTextEntry(`memory/${dirName}/${folder}/${stem}.md`, context.scrub.text(text));
     }
   }
 }

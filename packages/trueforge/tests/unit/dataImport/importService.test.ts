@@ -4759,25 +4759,47 @@ describe('runDataImport memory pages', () => {
     }
   });
 
-  it('writes only files named like a page, and says how many it left out', async () => {
+  it('writes every .md page under its own name and says which ones Aman cannot read yet', async () => {
     const { source, archive } = await seededArchive();
     const edited = await repack(archive, entries => {
       entries.set(`memory/${TENANT}/people/wendy.md`, Buffer.from(WENDY, 'utf8'));
       entries.set(`memory/${TENANT}/people/Wendy2.md`, Buffer.from('x', 'utf8'));
-      entries.set(`memory/${TENANT}/people/my notes.md`, Buffer.from('x', 'utf8'));
+      entries.set(`memory/${TENANT}/people/my notes.md`, Buffer.from('y', 'utf8'));
+    });
+    const target = await makeInstance('target-bad-names');
+    try {
+      const result = await runDataImport(importDeps(target), importRequest(edited));
+      expect((await readdir(join(target.memoryDir, TENANT, 'people'))).sort()).toEqual([
+        'Wendy2.md',
+        'my notes.md',
+        'wendy.md',
+      ]);
+      expect(await readFile(join(target.memoryDir, TENANT, 'people', 'my notes.md'), 'utf8')).toBe('y');
+      expect(result.summary).toContain('3 memory pages came along.');
+      expect(result.summary).toContain('2 memory pages have a name that is not all lowercase');
+      expect(result.summary).toContain('Rename each one to its lowercase name in the memory folder.');
+    } finally {
+      await source.close();
+      await target.close();
+    }
+  });
+
+  it('does not copy files that are not .md pages, and says how many were left out', async () => {
+    const { source, archive } = await seededArchive();
+    const edited = await repack(archive, entries => {
       entries.set(`memory/${TENANT}/people/photo.png`, Buffer.from('x', 'utf8'));
       entries.set(`memory/${TENANT}/people/deeper/sam.md`, Buffer.from('x', 'utf8'));
       entries.set(`memory/${TENANT}/matters/.hidden.md`, Buffer.from('x', 'utf8'));
       entries.set(`memory/${TENANT}/notes/sam.md`, Buffer.from('x', 'utf8'));
     });
-    const target = await makeInstance('target-bad-names');
+    const target = await makeInstance('target-not-pages');
     try {
       const result = await runDataImport(importDeps(target), importRequest(edited));
-      expect(await readdir(join(target.memoryDir, TENANT, 'people'))).toEqual(['wendy.md']);
+      expect(existsSync(join(target.memoryDir, TENANT, 'people'))).toBe(false);
       expect(existsSync(join(target.memoryDir, TENANT, 'matters'))).toBe(false);
       expect(existsSync(join(target.memoryDir, TENANT, 'notes'))).toBe(false);
-      expect(result.summary).toContain('1 memory page came along.');
-      expect(result.summary).toContain('5 files in the memory page folders were left out');
+      expect(result.summary).toContain('3 other files were in the memory page folders and were not copied');
+      expect(result.summary).toContain('Copy them into the memory folder by hand if you need them.');
     } finally {
       await source.close();
       await target.close();

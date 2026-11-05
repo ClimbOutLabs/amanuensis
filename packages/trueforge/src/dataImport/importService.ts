@@ -1075,9 +1075,14 @@ function buildSummary({
       `${pluralize(memoryPages.leftOut, 'memory page was', 'memory pages were')} left out because this computer keeps memory in a different way, and pages only work with memory kept as files.`,
     );
   }
+  if (memoryPages.unreadableNames > 0) {
+    notes.push(
+      `${pluralize(memoryPages.unreadableNames, 'memory page has', 'memory pages have')} a name that is not all lowercase, so Aman will not read ${memoryPages.unreadableNames === 1 ? 'it' : 'them'} yet. Rename ${memoryPages.unreadableNames === 1 ? 'it' : 'each one'} to its lowercase name in the memory folder.`,
+    );
+  }
   if (memoryPages.unusable > 0) {
     notes.push(
-      `${pluralize(memoryPages.unusable, 'file in a memory page folder was', 'files in the memory page folders were')} left out because ${memoryPages.unusable === 1 ? 'its name is' : 'their names are'} not a lowercase page name. Fix ${memoryPages.unusable === 1 ? 'the name' : 'the names'} in the export file, then import again.`,
+      `${pluralize(memoryPages.unusable, 'other file was', 'other files were')} in the memory page folders and ${memoryPages.unusable === 1 ? 'was' : 'were'} not copied, because only .md pages are. Copy ${memoryPages.unusable === 1 ? 'it' : 'them'} into the memory folder by hand if you need ${memoryPages.unusable === 1 ? 'it' : 'them'}.`,
     );
   }
   notes.push('Chats keep their dates and totals. Personas, spaces, folders and schedules show the time of the import.');
@@ -1174,7 +1179,9 @@ interface PlannedMemoryFile {
 /** What the import did with the archive's memory pages, for the summary. */
 interface MemoryPageCounts {
   imported: number;
-  /** Files in a page folder whose name is not a lowercase page name; they are not written. */
+  /** Pages written under a name that is not a lowercase page name, which Aman will not read until it is renamed. */
+  unreadableNames: number;
+  /** Files in a page folder that are not page files (not `.md`, deeper folders, hidden or unsafe names); they are not written. */
   unusable: number;
   /** Pages not written because the memory here is not kept as Markdown files. */
   leftOut: number;
@@ -1192,17 +1199,19 @@ function memoryFileAt(name: string): { sourceSeg: string; inner: string } | unde
 
 /**
  * Maps the archive's memory/ files onto the target tenant's vault paths. Nothing is written here.
- * A page keeps its folder and its slug; a file in a page folder with any other name is not written,
- * and nothing can land outside the vault because the archive reader refuses unsafe paths first.
+ * A page keeps its folder and its file name, even one Aman will not read by name; any other file in a
+ * page folder is not written. Nothing can land outside the vault: the archive reader refuses unsafe paths
+ * first and a page name is one plain segment.
  */
 function planMarkdownMemory(
   markdownDir: string,
   contents: ArchiveContents,
   input: { targetTenantId: string; personaSegBySource: ReadonlyMap<string, string> },
-): { files: PlannedMemoryFile[]; unusablePages: number } {
+): { files: PlannedMemoryFile[]; unusablePages: number; unreadableNames: number } {
   const planned: PlannedMemoryFile[] = [];
   const targets = new Set<string>();
   let unusablePages = 0;
+  let unreadableNames = 0;
   const knownFiles = new Set([CURATED_MEMORY_FILE, VAULT_TOMBSTONES_FILE]);
   for (const [name, data] of contents.files) {
     const file = memoryFileAt(name);
@@ -1214,6 +1223,9 @@ function planMarkdownMemory(
     if (page === undefined && isInPageFolder(inner)) {
       unusablePages += 1;
       continue;
+    }
+    if (page !== undefined && !page.isSlug) {
+      unreadableNames += 1;
     }
     if (page === undefined && !knownFiles.has(inner) && dailyLogFileAt(inner) === undefined) {
       continue;
@@ -1241,7 +1253,7 @@ function planMarkdownMemory(
     const targetPath =
       page === undefined
         ? path.join(markdownDir, targetSeg, inner)
-        : path.join(markdownDir, targetSeg, pageFolder(page.kind), `${page.slug}.md`);
+        : path.join(markdownDir, targetSeg, pageFolder(page.kind), `${page.stem}.md`);
     if (targets.has(targetPath)) {
       throw new DataImportError(
         'This export lists the same memory file twice, so the import was refused and nothing was changed. Export again, then import the new file.',
@@ -1251,7 +1263,7 @@ function planMarkdownMemory(
     targets.add(targetPath);
     planned.push({ targetPath, bytes, isPage: page !== undefined });
   }
-  return { files: planned, unusablePages };
+  return { files: planned, unusablePages, unreadableNames };
 }
 
 /** How many page files the archive holds, for a memory backend that keeps no page files. */
@@ -1551,10 +1563,11 @@ async function importArchive<TTransaction>(
   const memoryPlan =
     deps.memoryTarget.kind === 'markdown'
       ? planMarkdownMemory(deps.memoryTarget.markdownDir, contents, { targetTenantId: tenantId, personaSegBySource })
-      : { files: [], unusablePages: 0 };
+      : { files: [], unusablePages: 0, unreadableNames: 0 };
   const plannedMemoryFiles = memoryPlan.files;
   const memoryPages: MemoryPageCounts = {
     imported: plannedMemoryFiles.filter(file => file.isPage).length,
+    unreadableNames: memoryPlan.unreadableNames,
     unusable: memoryPlan.unusablePages,
     leftOut: deps.memoryTarget.kind === 'markdown' ? 0 : countArchivePages(contents),
   };

@@ -338,16 +338,23 @@ describe('runDataExport memory backends', () => {
         }
       });
 
-      it('leaves out files in a page folder that are not lowercase page names or not .md files', async () => {
+      it('takes a page whose name is not a lowercase slug as it is, and leaves out files that are not .md pages', async () => {
         await vault(TENANT_ID, {});
         await writePages(TENANT_ID, {
           'people/Wendy.md': 'x',
           'people/my notes.md': 'x',
           'people/photo.png': 'x',
+          'people/.hidden.md': 'x',
           'people/ok.md': 'ok',
         });
         const names = await exportedNames({});
-        expect(names.filter(name => name.startsWith('memory/'))).toEqual([`memory/${TENANT_ID}/people/ok.md`]);
+        expect(names.filter(name => name.startsWith('memory/')).sort()).toEqual(
+          [
+            `memory/${TENANT_ID}/people/Wendy.md`,
+            `memory/${TENANT_ID}/people/my notes.md`,
+            `memory/${TENANT_ID}/people/ok.md`,
+          ].sort(),
+        );
       });
 
       it('never follows a link from a page folder or a page out of the vault', async () => {
