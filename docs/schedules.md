@@ -19,7 +19,7 @@ A schedule asks Aman to do the same job again and again, for example every weekd
 
 ## Aman does not interrupt you
 
-Aman has no alerts or notifications. A scheduled run's results wait in its chat until you open it.
+A scheduled run's results wait in its chat until you open it. Reminders are the exception: a reminder you set reaches you the way you chose in Settings, Reach me, and always shows under the bell with the reason you got it. A reminder you mark urgent can call you once phone calls are set up and you allow it.
 
 ## Nothing is sent or changed without you
 

@@ -100,6 +100,11 @@ export interface IDeliveryStore {
   /** Marks every unread delivery of the owner seen, loaded on a page or not. Resolves to how many changed. */
   markAllSeen(input: DeliveryOwner & { now?: Date }): Promise<number>;
   countUnread(input: DeliveryOwner): Promise<number>;
+  /**
+   * Notes the owner has not seen that were made at or after `since`, newest first. A note never pushes: it waits in
+   * the bell as a quiet item.
+   */
+  listUnseenNotes(input: DeliveryOwner & { since: Date; limit: number }): Promise<Delivery[]>;
   /** The owner's newest deliveries for a data export. */
   listForExport(input: DeliveryOwner): Promise<Delivery[]>;
   /** Adds exported deliveries under the owner; pass the import transaction. One already there keeps its row. Resolves to how many were added. */
@@ -312,6 +317,22 @@ export class DeliveryStore implements IDeliveryStore {
       .where('seen_at', 'is', null)
       .executeTakeFirst();
     return Number(row?.unread ?? 0);
+  }
+
+  async listUnseenNotes(input: DeliveryOwner & { since: Date; limit: number }): Promise<Delivery[]> {
+    const rows = await this.#db
+      .selectFrom('delivery')
+      .selectAll()
+      .where('tenant_id', '=', input.tenant_id)
+      .where('created_by', '=', input.created_by)
+      .where('kind', '=', 'note')
+      .where('seen_at', 'is', null)
+      .where('created_at', '>=', input.since.toISOString())
+      .orderBy('created_at', 'desc')
+      .orderBy('id', 'desc')
+      .limit(input.limit)
+      .execute();
+    return this.#hydrate(rows);
   }
 
   async listForExport(input: DeliveryOwner): Promise<Delivery[]> {

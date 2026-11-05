@@ -739,6 +739,16 @@ export type { SessionsBrowserButtonProps } from './atoms/SessionsBrowserButton.j
 export { SpacesButton } from './atoms/SpacesButton.js';
 export type { SpacesButtonProps } from './atoms/SpacesButton.js';
 export { DeliveriesProvider, useOptionalDeliveries } from './deliveries/DeliveriesContext.js';
-export type { DeliveriesApi, DeliveryItem, DeliveryLink, DeliveryPage, PushDevice } from './deliveries/types.js';
+export type {
+  DeliveriesApi,
+  DeliveryItem,
+  DeliveryLink,
+  DeliveryPage,
+  NoticingKind,
+  PushDevice,
+  ReachApi,
+  ReachSettings,
+  ReachView,
+} from './deliveries/types.js';
 export { SpaceProvider, useOptionalSpaces } from './server/SpaceContext.js';
 export type { Space, SpaceFolder, SpaceFormat, SpaceStatus, SpaceStore } from './server/SpaceContext.js';

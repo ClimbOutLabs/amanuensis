@@ -85,11 +85,13 @@ import type { IMcpServerStore, IMcpServerWithAuthStore } from './db/mcpServerSto
 import { McpServerWithAuthStore } from './db/McpServerWithAuthStore';
 import type { IMcpToolGrantStore } from './db/mcpToolGrantStore';
 import type { IModelProviderStore } from './db/modelProviderStore';
+import { NoticingStore, type INoticingStore } from './db/noticingStore';
 import type { IPersonalizationStore } from './db/personalizationStore';
 import type { IPersonaStore } from './db/personaStore';
 import type { PostgresAgentStore } from './db/postgres/agent-store/PostgresAgentStore';
 import type { Database as PostgresDatabase } from './db/postgres/types';
 import { PushSubscriptionStore, type IPushSubscriptionStore } from './db/pushSubscriptionStore';
+import { ReachSettingsStore, type IReachSettingsStore } from './db/reachSettingsStore';
 import type { IRepositoryStore } from './db/repositoryStore';
 import type { ISandboxProviderStore } from './db/sandboxProviderStore';
 import type { IScheduleStore } from './db/scheduleStore';
@@ -123,6 +125,12 @@ import { EventSubscriptionRegistry } from './runtime/event-subscription';
 import { registerMailConnectorFromSavedAccountInBackground } from './runtime/mailAccount';
 import { prepareMailPolicyAtBoot, registerMailConnectorAtBoot } from './runtime/mailConnector';
 import { warmEmbeddingsAtBoot } from './runtime/memory/embeddingRetrieval';
+import { sessionApprovalSource } from './runtime/noticing/approvalSource';
+import { createGoogleNoticingSources } from './runtime/noticing/googleSources';
+import { createNoticingJudgeResolver } from './runtime/noticing/judgeFactory';
+import { createNoticingService } from './runtime/noticing/noticingService';
+import { NO_PHONE_CHANNELS } from './runtime/noticing/reachChannels';
+import { createReminderReach } from './runtime/noticing/reminderReach';
 import { createOutboundSecretSource } from './runtime/outboundSecrets';
 import { seedOwnerNameAtBoot } from './runtime/ownerName';
 import { createSentinelServices } from './runtime/sentinelServices';
@@ -192,6 +200,8 @@ interface ServerPersistence<TTransaction> {
   sentinelSettingsStore: ISentinelSettingsStore<TTransaction>;
   briefItemStore: IBriefItemCompletionStore;
   deliveryStore: IDeliveryStore;
+  reachSettingsStore: IReachSettingsStore;
+  noticingStore: INoticingStore;
   pushSubscriptionStore: IPushSubscriptionStore;
   approvalTokenStore: ApprovalTokenStore;
   destroyDb: () => Promise<void>;
@@ -428,6 +438,8 @@ async function createStandalonePersistence(options: {
     sentinelSettingsStore: new SqliteSentinelSettingsStore(db),
     briefItemStore: new BriefItemCompletionStore(db),
     deliveryStore: new DeliveryStore(db),
+    reachSettingsStore: new ReachSettingsStore(db),
+    noticingStore: new NoticingStore(db),
     pushSubscriptionStore: new PushSubscriptionStore(db),
     approvalTokenStore: new SqliteApprovalTokenStore(db),
     modelProviderStore,
@@ -600,6 +612,8 @@ async function createDistributedPersistence(options: {
     sentinelSettingsStore: new PostgresSentinelSettingsStore(db),
     briefItemStore: new BriefItemCompletionStore(db),
     deliveryStore: new DeliveryStore(db),
+    reachSettingsStore: new ReachSettingsStore(db),
+    noticingStore: new NoticingStore(db),
     pushSubscriptionStore: new PushSubscriptionStore(db),
     approvalTokenStore: new PostgresApprovalTokenStore(db),
     modelProviderStore,
@@ -643,6 +657,8 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     sentinelSettingsStore,
     briefItemStore,
     deliveryStore,
+    reachSettingsStore,
+    noticingStore,
     pushSubscriptionStore,
     approvalTokenStore,
     destroyDb,
@@ -775,6 +791,23 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     audit: sentinelAuditStore,
     logger,
   });
+  const noticingService = createNoticingService({
+    sources: createGoogleNoticingSources({ connections: googleConnectionStore, fetchImpl: undefined, logger }),
+    approvals: sessionApprovalSource({ sessionStore }),
+    reachSettings: reachSettingsStore,
+    store: noticingStore,
+    deliveries: deliveryService,
+    judgeFor: createNoticingJudgeResolver({
+      resolveModelProviderStore: context => persistence.resolveModelProviderStore(context),
+      personalizationStore,
+      globalSettingsStore,
+      tokenFactoryBudget,
+      logger,
+    }),
+    budget: tokenFactoryBudget,
+    channels: () => NO_PHONE_CHANNELS,
+    logger,
+  });
   const sentinelServices = createSentinelServices({
     demoMode: configuration.DEMO_MODE,
     demoSendAllowlist: configuration.DEMO_SEND_ALLOWLIST,
@@ -903,6 +936,14 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     deliveryStore,
     pushSubscriptionStore,
     deliveryService,
+    reachSettingsStore,
+    noticingService,
+    reminderReach: createReminderReach({
+      reachSettings: reachSettingsStore,
+      store: noticingStore,
+      channels: () => NO_PHONE_CHANNELS,
+    }),
+    reachChannels: () => NO_PHONE_CHANNELS,
     webPushPublicKey: configuration.WEB_PUSH?.publicKey,
     sessions,
     chatImages,

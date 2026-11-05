@@ -206,6 +206,6 @@ describe('Settings, Reach me', () => {
   it('never names the assistant in its own words, and keeps texts and calls off', () => {
     stubPushBrowser();
     renderSettings();
-    expect(screen.getByText(/Texts and phone calls are off\./)).toBeTruthy();
+    expect(screen.getByText(/Texts and phone calls stay off until they are set up\./)).toBeTruthy();
   });
 });

@@ -9,20 +9,25 @@ import { REMINDERS_CHAT_TITLE, REMINDERS_METADATA_KEY } from '@truefoundry/truef
 import winston from 'winston';
 import { DeliveryStore } from '../../../src/db/deliveryStore';
 import { migrateSqliteToLatest } from '../../../src/db/migrateSqlite';
+import { NoticingStore } from '../../../src/db/noticingStore';
+import { ReachSettingsStore } from '../../../src/db/reachSettingsStore';
 import type { ScheduleDispatchItem } from '../../../src/db/scheduleStore';
 import { SqliteAgentStore } from '../../../src/db/sqlite/agent-store/SqliteAgentStore';
 import { createSqliteDb } from '../../../src/db/sqlite/client';
 import { SqliteScheduleStore } from '../../../src/db/sqlite/schedule-store/SqliteScheduleStore';
 import { SqliteSessionStore } from '../../../src/db/sqlite/session-store/SqliteSessionStore';
 import { createDeliveryService } from '../../../src/runtime/delivery/deliveryService';
+import { NO_PHONE_CHANNELS, type ReachChannels } from '../../../src/runtime/noticing/reachChannels';
+import { createReminderReach } from '../../../src/runtime/noticing/reminderReach';
 import { REMINDER_FEED_TEXT_MAX, deliverReminder } from '../../../src/runtime/reminderDelivery';
 import type { Delivery } from '../../../src/schemas/deliveries';
+import { defaultReachSettings } from '../../../src/schemas/reach';
 import { ScheduleManifestSchema } from '../../../src/schemas/schedule';
 
 const TENANT = 'default';
 const OWNER: CreatedBySubject = { subject_id: 'owner-1', subject_type: 'user', subject_display_name: 'Owner' };
 
-async function setup() {
+async function setup(channels: ReachChannels = NO_PHONE_CHANNELS) {
   const db = createSqliteDb(':memory:');
   await migrateSqliteToLatest(db);
   const agentStore = new SqliteAgentStore(db);
@@ -40,7 +45,12 @@ async function setup() {
   });
 
   /** Makes a one-time reminder and returns the item the dispatch loop would hand over when it is due. */
-  async function dueReminder(input: { what: string; runAt: string; name: string }): Promise<ScheduleDispatchItem> {
+  async function dueReminder(input: {
+    what: string;
+    runAt: string;
+    name: string;
+    urgent?: boolean;
+  }): Promise<ScheduleDispatchItem> {
     const { schedule, pendingRun } = await scheduleStore.createScheduleAndRun({
       tenant_id: TENANT,
       agent_id: agent.id,
@@ -52,6 +62,7 @@ async function setup() {
         run_at: input.runAt,
         timezone: 'America/New_York',
         kind: 'reminder',
+        urgent: input.urgent ?? false,
       }),
       created_by_subject: OWNER,
       runFrom: new Date('2026-10-18T12:00:00.000Z'),
@@ -91,13 +102,90 @@ async function setup() {
     },
     logger: winston.createLogger({ silent: true }),
   });
+  const reachSettings = new ReachSettingsStore(db);
+  const reach = createReminderReach({ reachSettings, store: new NoticingStore(db), channels: () => channels });
   const deliver = (item: ScheduleDispatchItem, now: Date) =>
-    deliverReminder({ item, sessions, sessionStore, agentStore, now, deliveries }).then(
+    deliverReminder({ item, sessions, sessionStore, agentStore, now, deliveries, reach }).then(
       delivered => delivered.session_id,
     );
 
-  return { sessionStore, dueReminder, deliver, auditRecords, deliveryStore, pushed };
+  return { sessionStore, dueReminder, deliver, auditRecords, deliveryStore, pushed, reachSettings, db };
 }
+
+describe('deliverReminder and Reach me', () => {
+  const owner = { tenant_id: TENANT, created_by: OWNER.subject_id };
+  const READY: ReachChannels = { ...NO_PHONE_CHANNELS, calls: { available: true, note: 'Calls are on.' } };
+  const calling = {
+    ...defaultReachSettings('America/New_York'),
+    channels: { texts: false, calls: true },
+    call_for_urgent_reminders: true,
+    quiet_hours: { enabled: false, start: '21:00', end: '08:00' },
+  };
+
+  it('delivers an urgent reminder as a nudge with the reason while no phone channel is set up, and counts it as a call', async () => {
+    const { dueReminder, deliver, deliveryStore, reachSettings } = await setup(NO_PHONE_CHANNELS);
+    await reachSettings.put({ ...owner, settings: calling });
+    const item = await dueReminder({
+      what: 'Pick up the keys',
+      runAt: '2026-10-19T18:00:00-04:00',
+      name: 'r-urgent',
+      urgent: true,
+    });
+
+    await deliver(item, new Date('2026-10-19T22:00:05.000Z'));
+
+    const [delivered] = (await deliveryStore.list({ ...owner, limit: 10 })).deliveries;
+    expect(delivered).toMatchObject({ kind: 'reminder', level: 'nudge' });
+    expect(delivered?.reason).toContain('Phone calls are not set up yet, so it came as a nudge.');
+  });
+
+  it('calls for an urgent reminder once a phone channel is on', async () => {
+    const { dueReminder, deliver, deliveryStore, reachSettings } = await setup(READY);
+    await reachSettings.put({ ...owner, settings: calling });
+    const item = await dueReminder({
+      what: 'Pick up the keys',
+      runAt: '2026-10-19T18:00:00-04:00',
+      name: 'r-call',
+      urgent: true,
+    });
+
+    await deliver(item, new Date('2026-10-19T22:00:05.000Z'));
+
+    const [delivered] = (await deliveryStore.list({ ...owner, limit: 10 })).deliveries;
+    expect(delivered).toMatchObject({ kind: 'reminder', level: 'call' });
+  });
+
+  it('never calls for a reminder that is not marked urgent, or when the tick is off', async () => {
+    const { dueReminder, deliver, deliveryStore, reachSettings } = await setup(READY);
+    await reachSettings.put({ ...owner, settings: calling });
+    await deliver(
+      await dueReminder({ what: 'Water plants', runAt: '2026-10-19T18:00:00-04:00', name: 'r-plain' }),
+      new Date('2026-10-19T22:00:05.000Z'),
+    );
+    await reachSettings.put({ ...owner, settings: { ...calling, call_for_urgent_reminders: false } });
+    await deliver(
+      await dueReminder({ what: 'Pay rent', runAt: '2026-10-19T19:00:00-04:00', name: 'r-off', urgent: true }),
+      new Date('2026-10-19T23:00:05.000Z'),
+    );
+    const levels = (await deliveryStore.list({ ...owner, limit: 10 })).deliveries.map(item => item.level);
+    expect(levels).toEqual(['nudge', 'nudge']);
+  });
+
+  it('keeps a call from repeating inside the minimum gap', async () => {
+    const { dueReminder, deliver, deliveryStore, reachSettings } = await setup(READY);
+    await reachSettings.put({ ...owner, settings: calling });
+    await deliver(
+      await dueReminder({ what: 'First', runAt: '2026-10-19T18:00:00-04:00', name: 'r-1', urgent: true }),
+      new Date('2026-10-19T22:00:05.000Z'),
+    );
+    await deliver(
+      await dueReminder({ what: 'Second', runAt: '2026-10-19T18:30:00-04:00', name: 'r-2', urgent: true }),
+      new Date('2026-10-19T22:30:05.000Z'),
+    );
+    const levels = (await deliveryStore.list({ ...owner, limit: 10 })).deliveries.map(item => item.level);
+    expect(levels).toEqual(['nudge', 'call']);
+  });
+});
 
 describe('deliverReminder', () => {
   it('makes a reminder delivery for the owner and pushes it, with no tab open', async () => {

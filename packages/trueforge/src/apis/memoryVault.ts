@@ -23,7 +23,6 @@ import {
   putMemoryVaultSharingRoute,
   updateMemoryVaultEntryRoute,
 } from '../routes/memoryVaultRoutes';
-import { getEmbeddingSubsystem } from '../runtime/memory/embeddingRetrieval';
 import { MarkdownMemoryClient } from '../runtime/memory/markdownMemoryClient';
 import {
   readVaultSharing,
@@ -34,6 +33,7 @@ import {
   type VaultSharing,
 } from '../runtime/memory/markdownMemoryFiles';
 import type { MemoryVaultEntry as VaultEntry } from '../runtime/memory/memoryClient';
+import { createVaultClient } from '../runtime/memory/vaultClient';
 import type { MemoryVaultEntry } from '../schemas/memoryVault';
 
 export interface MemoryVaultRouterDeps {
@@ -58,23 +58,7 @@ function exportedEntry({ id, text, timestamp, persona, context }: VaultEntry): M
 }
 
 function vaultClient(deps: MemoryVaultRouterDeps, tenantId: string): MarkdownMemoryClient | undefined {
-  if (configuration.MEMORY_BACKEND !== 'markdown') {
-    return undefined;
-  }
-  return new MarkdownMemoryClient({
-    baseDir: configuration.MEMORY_MARKDOWN_DIR,
-    namespace: tenantId,
-    embeddings: configuration.MEMORY_EMBEDDINGS_ENABLED
-      ? namespace =>
-          getEmbeddingSubsystem({
-            baseDir: configuration.MEMORY_MARKDOWN_DIR,
-            namespace,
-            modelDir: configuration.MEMORY_EMBEDDINGS_MODEL_DIR,
-            batchSize: configuration.MEMORY_EMBEDDINGS_BACKFILL_BATCH_SIZE,
-            log: (message: string) => deps.logger.info(message),
-          })
-      : undefined,
-  });
+  return createVaultClient({ logger: deps.logger, tenantId });
 }
 
 function markdownBackendRequired(c: Context) {

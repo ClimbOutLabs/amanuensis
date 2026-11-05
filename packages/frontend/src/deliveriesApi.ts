@@ -1,4 +1,13 @@
-import type { DeliveriesApi, DeliveryItem, DeliveryLink, PushDevice } from '@truefoundry/trueforge-ui';
+import type {
+  DeliveriesApi,
+  DeliveryItem,
+  DeliveryLink,
+  NoticingKind,
+  PushDevice,
+  ReachApi,
+  ReachSettings,
+  ReachView,
+} from '@truefoundry/trueforge-ui';
 
 import { apiPath, UI_BASE_PATH } from './publicPath';
 
@@ -6,6 +15,7 @@ import { apiPath, UI_BASE_PATH } from './publicPath';
 // link this version does not recognise is dropped rather than drawn wrong.
 const DELIVERIES_URL = '/api/v1/user/deliveries';
 const PUSH_URL = '/api/v1/user/push';
+const REACH_URL = '/api/v1/user/reach';
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -72,9 +82,147 @@ function json(body: unknown, method: 'POST' | 'DELETE' = 'POST'): RequestInit {
   return { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) };
 }
 
+const KINDS: readonly NoticingKind[] = ['mail_always', 'calendar_clash', 'travel', 'bill_due', 'approval_waiting'];
+
+function kindOf(value: unknown): NoticingKind | null {
+  return KINDS.find(kind => kind === value) ?? null;
+}
+
+function stringOr(value: unknown, fallback: string): string {
+  return typeof value === 'string' ? value : fallback;
+}
+
+function numberOr(value: unknown, fallback: number): number {
+  return typeof value === 'number' ? value : fallback;
+}
+
+function boolOr(value: unknown, fallback: boolean): boolean {
+  return typeof value === 'boolean' ? value : fallback;
+}
+
+function parseChannel(value: unknown): { available: boolean; note: string } {
+  return isRecord(value)
+    ? { available: value.available === true, note: stringOr(value.note, '') }
+    : { available: false, note: '' };
+}
+
+function parseSettings(value: unknown): ReachSettings {
+  const raw = isRecord(value) ? value : {};
+  const channels = isRecord(raw.channels) ? raw.channels : {};
+  const quiet = isRecord(raw.quiet_hours) ? raw.quiet_hours : {};
+  const senders = Array.isArray(raw.always_important) ? raw.always_important : [];
+  const callKinds = Array.isArray(raw.call_kinds) ? raw.call_kinds : [];
+  const dismissed = Array.isArray(raw.dismissed_suggestions) ? raw.dismissed_suggestions : [];
+  return {
+    textsOn: channels.texts === true,
+    callsOn: channels.calls === true,
+    alwaysImportant: senders.flatMap(sender =>
+      isRecord(sender) && typeof sender.address === 'string' && typeof sender.added_at === 'string'
+        ? [
+            {
+              address: sender.address,
+              name: typeof sender.name === 'string' ? sender.name : null,
+              source: sender.source === 'memory' ? ('memory' as const) : ('settings' as const),
+              addedAt: sender.added_at,
+            },
+          ]
+        : [],
+    ),
+    dismissedSuggestions: dismissed.filter(item => typeof item === 'string'),
+    callKinds: callKinds.map(kindOf).filter(kind => kind !== null),
+    callForUrgentReminders: raw.call_for_urgent_reminders === true,
+    quietHours: {
+      enabled: boolOr(quiet.enabled, true),
+      start: stringOr(quiet.start, '21:00'),
+      end: stringOr(quiet.end, '08:00'),
+    },
+    timezone: stringOr(raw.timezone, 'UTC'),
+    maxNudgesPerDay: numberOr(raw.max_nudges_per_day, 5),
+    minHoursBetweenCalls: numberOr(raw.min_hours_between_calls, 6),
+    travelLeadMinutes: numberOr(raw.travel_lead_minutes, 90),
+    approvalWaitMinutes: numberOr(raw.approval_wait_minutes, 120),
+  };
+}
+
+function parseView(body: unknown): ReachView {
+  const data = isRecord(body) ? body.data : undefined;
+  if (!isRecord(data) || !isRecord(data.settings)) {
+    throw new Error('Your Reach me settings could not be read. Reload the page.');
+  }
+  const availability = isRecord(data.availability) ? data.availability : {};
+  const levels = isRecord(data.max_levels) ? data.max_levels : {};
+  const maxLevels: ReachView['maxLevels'] = {};
+  for (const kind of KINDS) {
+    const level = levels[kind];
+    if (level === 'note' || level === 'nudge' || level === 'call') {
+      maxLevels[kind] = level;
+    }
+  }
+  return {
+    settings: parseSettings(data.settings),
+    saved: data.saved === true,
+    availability: { texts: parseChannel(availability.texts), calls: parseChannel(availability.calls) },
+    maxLevels,
+  };
+}
+
+function settingsBody(settings: ReachSettings): unknown {
+  return {
+    channels: { texts: settings.textsOn, calls: settings.callsOn },
+    always_important: settings.alwaysImportant.map(sender => ({
+      address: sender.address,
+      name: sender.name,
+      source: sender.source,
+      added_at: sender.addedAt,
+    })),
+    dismissed_suggestions: settings.dismissedSuggestions,
+    call_kinds: settings.callKinds,
+    call_for_urgent_reminders: settings.callForUrgentReminders,
+    quiet_hours: settings.quietHours,
+    timezone: settings.timezone,
+    max_nudges_per_day: settings.maxNudgesPerDay,
+    min_hours_between_calls: settings.minHoursBetweenCalls,
+    travel_lead_minutes: settings.travelLeadMinutes,
+    approval_wait_minutes: settings.approvalWaitMinutes,
+  };
+}
+
+function createReachApi(fetcher: typeof fetch): ReachApi {
+  return {
+    async get() {
+      return parseView(await readBody(await fetcher(apiPath(REACH_URL))));
+    },
+    async save(settings) {
+      const response = await fetcher(apiPath(REACH_URL), {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ settings: settingsBody(settings) }),
+      });
+      return parseView(await readBody(response));
+    },
+    async suggestions() {
+      const body = await readBody(await fetcher(apiPath(`${REACH_URL}/suggestions`)));
+      const rows: unknown = isRecord(body) ? body.data : undefined;
+      return Array.isArray(rows)
+        ? rows.flatMap(row =>
+            isRecord(row) && typeof row.address === 'string' && typeof row.memory === 'string'
+              ? [{ address: row.address, memory: row.memory }]
+              : [],
+          )
+        : [];
+    },
+    async test(channel) {
+      const body = await readBody(await fetcher(apiPath(`${REACH_URL}/test`), json({ channel })));
+      const data = isRecord(body) ? body.data : undefined;
+      return { devicesReached: isRecord(data) && typeof data.devices_reached === 'number' ? data.devices_reached : 0 };
+    },
+  };
+}
+
 /** Backs `DeliveriesProvider`: the signed-in person's feed and push devices. */
 export function createDeliveriesApi(fetcher: typeof fetch): DeliveriesApi {
   return {
+    reach: createReachApi(fetcher),
     pushWorker: { url: `${UI_BASE_PATH}sw.js`, scope: UI_BASE_PATH },
     async list({ limit, pageToken }) {
       const query = new URLSearchParams({ limit: String(limit) });

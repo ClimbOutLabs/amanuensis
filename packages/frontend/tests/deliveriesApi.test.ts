@@ -120,3 +120,73 @@ test('push is off when the server sends no key, and a server error says what it 
     /Ask the person who runs it/,
   );
 });
+
+const WIRE_REACH = {
+  data: {
+    settings: {
+      channels: { texts: false, calls: false },
+      always_important: [
+        { address: 'dana@example.com', name: 'Dana', source: 'memory', added_at: '2026-11-01T00:00:00.000Z' },
+      ],
+      dismissed_suggestions: ['sam@example.com'],
+      call_kinds: ['travel', 'unknown_kind'],
+      call_for_urgent_reminders: true,
+      quiet_hours: { enabled: true, start: '21:00', end: '08:00' },
+      timezone: 'Europe/Paris',
+      max_nudges_per_day: 4,
+      min_hours_between_calls: 6,
+      travel_lead_minutes: 90,
+      approval_wait_minutes: 120,
+    },
+    saved: true,
+    availability: {
+      texts: { available: false, note: 'Texts are not set up yet.' },
+      calls: { available: false, note: 'Phone calls are not set up yet.' },
+    },
+    max_levels: { travel: 'call', bill_due: 'nudge', other: 'call' },
+  },
+};
+
+test('reads Reach me settings into the app shape, dropping what it does not know', async () => {
+  const { fetcher, calls } = recordingFetch(() => Response.json(WIRE_REACH));
+  const view = await createDeliveriesApi(fetcher).reach.get();
+
+  assert.equal(new URL(calls[0]?.url ?? '').pathname, '/api/v1/user/reach');
+  assert.equal(view.saved, true);
+  assert.deepEqual(view.settings.callKinds, ['travel']);
+  assert.deepEqual(view.settings.alwaysImportant, [
+    { address: 'dana@example.com', name: 'Dana', source: 'memory', addedAt: '2026-11-01T00:00:00.000Z' },
+  ]);
+  assert.equal(view.settings.timezone, 'Europe/Paris');
+  assert.deepEqual(view.maxLevels, { travel: 'call', bill_due: 'nudge' });
+  assert.equal(view.availability.calls.note, 'Phone calls are not set up yet.');
+});
+
+test('saves Reach me settings in the wire shape and shows the server message when it refuses', async () => {
+  const { fetcher, calls } = recordingFetch(() => Response.json(WIRE_REACH));
+  const api = createDeliveriesApi(fetcher);
+  const view = await api.reach.get();
+  await api.reach.save(view.settings);
+
+  assert.equal(calls[1]?.method, 'PUT');
+  const sent = calls[1]?.body as { settings: { channels: unknown; call_kinds: unknown; always_important: unknown } };
+  assert.deepEqual(sent.settings.channels, { texts: false, calls: false });
+  assert.deepEqual(sent.settings.call_kinds, ['travel']);
+  assert.deepEqual(sent.settings.always_important, [
+    { address: 'dana@example.com', name: 'Dana', source: 'memory', added_at: '2026-11-01T00:00:00.000Z' },
+  ]);
+
+  const refusing = createDeliveriesApi(async () =>
+    Response.json({ error: { message: 'Phone calls are not set up yet. Leave calls off for now.' } }, { status: 400 }),
+  );
+  await assert.rejects(refusing.reach.save(view.settings), /Leave calls off for now/);
+});
+
+test('tries a channel and reads how many devices a push notice reached', async () => {
+  const { fetcher, calls } = recordingFetch(() =>
+    Response.json({ data: { delivery_id: 'd9', devices_reached: 2 } }, { status: 201 }),
+  );
+  const result = await createDeliveriesApi(fetcher).reach.test('push');
+  assert.deepEqual(result, { devicesReached: 2 });
+  assert.deepEqual(calls[0]?.body, { channel: 'push' });
+});

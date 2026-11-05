@@ -23,7 +23,59 @@ export type DeliveryPage = { items: DeliveryItem[]; nextPageToken: string | unde
 /** What a browser hands over when it turns notices on. */
 export type PushDevice = { endpoint: string; p256dh: string; auth: string; label: string };
 
-/** The feed and the push devices, served by the host. */
+/** The kinds of event the assistant watches for. A kind added on the server later shows with its own words. */
+export type NoticingKind = 'mail_always' | 'calendar_clash' | 'travel' | 'bill_due' | 'approval_waiting';
+
+export type ReachSender = {
+  address: string;
+  name: string | null;
+  /** Whether the person typed this sender or accepted it from a memory suggestion. */
+  source: 'settings' | 'memory';
+  /** Kept as the server wrote it, so saving the list does not change when a sender was added. */
+  addedAt: string;
+};
+
+export type ReachSettings = {
+  textsOn: boolean;
+  callsOn: boolean;
+  alwaysImportant: ReachSender[];
+  dismissedSuggestions: string[];
+  callKinds: NoticingKind[];
+  callForUrgentReminders: boolean;
+  quietHours: { enabled: boolean; start: string; end: string };
+  timezone: string;
+  maxNudgesPerDay: number;
+  minHoursBetweenCalls: number;
+  travelLeadMinutes: number;
+  approvalWaitMinutes: number;
+};
+
+export type ReachChannelState = { available: boolean; note: string };
+
+export type ReachView = {
+  settings: ReachSettings;
+  /** False until the person saves once. The settings are then the quiet defaults. */
+  saved: boolean;
+  availability: { texts: ReachChannelState; calls: ReachChannelState };
+  /** The highest level each kind of event can ever reach, so only kinds that can call offer the tick. */
+  maxLevels: Partial<Record<NoticingKind, 'note' | 'nudge' | 'call'>>;
+};
+
+export type ReachSuggestion = { address: string; memory: string };
+
+export type ReachTestChannel = 'in_app' | 'push' | 'text' | 'call';
+
+/** The person's Reach me settings, served by the host. Each call rejects with a message fit to show. */
+export type ReachApi = {
+  get(): Promise<ReachView>;
+  /** Saves and resolves to what the server now holds. */
+  save(settings: ReachSettings): Promise<ReachView>;
+  suggestions(): Promise<ReachSuggestion[]>;
+  /** Sends a test through one channel. Resolves to how many devices a push notice reached. */
+  test(channel: ReachTestChannel): Promise<{ devicesReached: number }>;
+};
+
+/** The feed, the push devices and Reach me settings, served by the host. */
 export type DeliveriesApi = {
   /** Where the service worker lives under the app's public path, and the part of the app it covers. */
   pushWorker: { url: string; scope: string };
@@ -40,4 +92,5 @@ export type DeliveriesApi = {
   /** Resolves to `taken` when this address already gets another account's notices; a fresh subscription is needed. */
   savePushDevice(device: PushDevice): Promise<'saved' | 'taken'>;
   removePushDevice(endpoint: string): Promise<void>;
+  reach: ReachApi;
 };

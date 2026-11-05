@@ -1,0 +1,173 @@
+import { OpenAPIHono } from '@hono/zod-openapi';
+import winston from 'winston';
+
+import { createNoticingRouter } from '../../../src/apis/noticing';
+import { createReachRouter } from '../../../src/apis/reach';
+import type { RequestContext } from '../../../src/auth/identity';
+import { DeliveryStore } from '../../../src/db/deliveryStore';
+import { migrateSqliteToLatest } from '../../../src/db/migrateSqlite';
+import { ReachSettingsStore } from '../../../src/db/reachSettingsStore';
+import { createSqliteDb } from '../../../src/db/sqlite/client';
+import { createDeliveryService } from '../../../src/runtime/delivery/deliveryService';
+import type { ReachChannels } from '../../../src/runtime/noticing/reachChannels';
+import { NO_PHONE_CHANNELS } from '../../../src/runtime/noticing/reachChannels';
+import { defaultReachSettings, GetReachResponseSchema, type ReachSettings } from '../../../src/schemas/reach';
+
+const NOW = new Date('2026-11-05T15:00:00.000Z');
+
+function person(id: string): RequestContext {
+  return { tenant_id: 'default', subject: { id, type: 'user', display_name: id }, roles: [], user_credential: null };
+}
+
+async function build({ channels = NO_PHONE_CHANNELS, memories = [] as string[] } = {}) {
+  const db = createSqliteDb(':memory:');
+  await migrateSqliteToLatest(db);
+  const reachStore = new ReachSettingsStore(db);
+  const deliveryStore = new DeliveryStore(db);
+  const deliveryService = createDeliveryService({
+    store: deliveryStore,
+    senders: [],
+    audit: { record: () => Promise.resolve() },
+    logger: winston.createLogger({ silent: true }),
+  });
+  let current = person('alice');
+  const app = new OpenAPIHono();
+  app.route(
+    '/reach',
+    createReachRouter({
+      reachStore,
+      deliveryService,
+      channels: () => channels,
+      memories: () => Promise.resolve(memories),
+      resolveRequestContext: () => current,
+      logger: winston.createLogger({ silent: true }),
+      now: () => NOW,
+    }),
+  );
+  const call = (path: string, init?: { method: string; body: unknown }) =>
+    app.request(`/reach${path}`, {
+      method: init?.method ?? 'GET',
+      headers: { 'content-type': 'application/json' },
+      ...(init === undefined ? {} : { body: JSON.stringify(init.body) }),
+    });
+  const put = (settings: ReachSettings) => call('', { method: 'PUT', body: { settings } });
+  return {
+    call,
+    put,
+    reachStore,
+    deliveryStore,
+    as: (id: string) => {
+      current = person(id);
+    },
+  };
+}
+
+describe('reach routes', () => {
+  it('starts quiet and unsaved, with phone channels shown as not set up', async () => {
+    const { call } = await build();
+    const response = await call('');
+    expect(response.status).toBe(200);
+    const { data } = GetReachResponseSchema.parse(await response.json());
+    expect(data.saved).toBe(false);
+    expect(data.settings.call_kinds).toEqual([]);
+    expect(data.settings.channels).toEqual({ texts: false, calls: false });
+    expect(data.availability.calls).toEqual({ available: false, note: 'Phone calls are not set up yet.' });
+    expect(data.max_levels.bill_due).toBe('nudge');
+    expect(data.max_levels.calendar_clash).toBe('call');
+  });
+
+  it('saves settings per person and reads them back', async () => {
+    const { put, call, as } = await build();
+    const settings = { ...defaultReachSettings('Europe/Paris'), max_nudges_per_day: 3 };
+    expect((await put(settings)).status).toBe(200);
+    const mine = GetReachResponseSchema.parse(await (await call('')).json()).data;
+    expect(mine.saved).toBe(true);
+    expect(mine.settings.max_nudges_per_day).toBe(3);
+    as('bob');
+    const his = GetReachResponseSchema.parse(await (await call('')).json()).data;
+    expect(his.saved).toBe(false);
+  });
+
+  it('refuses to switch on texts or calls that are not set up', async () => {
+    const { put } = await build();
+    const base = defaultReachSettings('UTC');
+    expect((await put({ ...base, channels: { texts: true, calls: false } })).status).toBe(400);
+    expect((await put({ ...base, channels: { texts: false, calls: true } })).status).toBe(400);
+  });
+
+  it('allows calls once the channel is available', async () => {
+    const channels: ReachChannels = { ...NO_PHONE_CHANNELS, calls: { available: true, note: 'On.' } };
+    const { put } = await build({ channels });
+    expect((await put({ ...defaultReachSettings('UTC'), channels: { texts: false, calls: true } })).status).toBe(200);
+  });
+
+  it('refuses a call tick for a kind that can never call', async () => {
+    const { put } = await build();
+    expect((await put({ ...defaultReachSettings('UTC'), call_kinds: ['bill_due'] })).status).toBe(400);
+    expect((await put({ ...defaultReachSettings('UTC'), call_kinds: ['travel'] })).status).toBe(200);
+  });
+
+  it('stamps a new always-important sender on the server and keeps the first time after that', async () => {
+    const { put, reachStore } = await build();
+    const sender = {
+      address: 'dana@example.com',
+      name: null,
+      source: 'settings' as const,
+      added_at: '1999-01-01T00:00:00.000Z',
+    };
+    await put({ ...defaultReachSettings('UTC'), always_important: [sender, sender] });
+    const saved = await reachStore.get({ tenant_id: 'default', created_by: 'alice' });
+    expect(saved?.always_important).toEqual([{ ...sender, added_at: NOW.toISOString() }]);
+    await put({ ...defaultReachSettings('UTC'), always_important: [{ ...sender, name: 'Dana' }] });
+    const again = await reachStore.get({ tenant_id: 'default', created_by: 'alice' });
+    expect(again?.always_important).toEqual([{ ...sender, name: 'Dana', added_at: NOW.toISOString() }]);
+  });
+
+  it('suggests addresses from memory and leaves out turned-down ones', async () => {
+    const { call, put } = await build({ memories: ['Dana is dana@example.com', 'Sam is sam@example.com'] });
+    await put({ ...defaultReachSettings('UTC'), dismissed_suggestions: ['sam@example.com'] });
+    const response = await call('/suggestions');
+    await expect(response.json()).resolves.toEqual({
+      data: [{ address: 'dana@example.com', memory: 'Dana is dana@example.com' }],
+    });
+  });
+
+  it('tries in-app as a note and push as a nudge, and says plainly that texts and calls are not set up', async () => {
+    const { call, deliveryStore } = await build();
+    const inApp = await call('/test', { method: 'POST', body: { channel: 'in_app' } });
+    expect(inApp.status).toBe(201);
+    const push = await call('/test', { method: 'POST', body: { channel: 'push' } });
+    expect(push.status).toBe(201);
+    const levels = (await deliveryStore.list({ tenant_id: 'default', created_by: 'alice', limit: 10 })).deliveries
+      .map(item => item.level)
+      .sort();
+    expect(levels).toEqual(['note', 'nudge']);
+    const text = await call('/test', { method: 'POST', body: { channel: 'text' } });
+    expect(text.status).toBe(409);
+    await expect(text.json()).resolves.toEqual({
+      error: { message: 'Texts are not set up yet. There is nothing to try yet.' },
+    });
+  });
+});
+
+describe('internal noticing route', () => {
+  it('runs the named watcher and returns its counts', async () => {
+    const run = jest.fn().mockResolvedValue({ owners: 2, raised: 1 });
+    const app = new OpenAPIHono();
+    app.route('/n', createNoticingRouter({ noticing: { run } }));
+    const response = await app.request('/n/run', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ watcher: 'calendar' }),
+    });
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ data: { owners: 2, raised: 1 } });
+    expect(run).toHaveBeenCalledWith({ watcher: 'calendar' });
+    const bad = await app.request('/n/run', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ watcher: 'sms' }),
+    });
+    expect(bad.status).toBe(400);
+  });
+});

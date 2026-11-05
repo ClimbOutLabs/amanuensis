@@ -173,6 +173,43 @@ export function runDeliveryStoreContractSuite(getStore: () => IDeliveryStore): v
     const page = await store.list({ ...BOB, limit: 1 });
     expect(page.deliveries[0]?.attempts).toHaveLength(12);
   }, 60_000);
+
+  describe('listUnseenNotes', () => {
+    const note = (owner: { tenant_id: string; created_by: string }, text: string, at: Date) => ({
+      ...owner,
+      kind: 'note' as const,
+      level: 'note' as const,
+      text,
+      reason: 'It can wait.',
+      link: null,
+      created_at: at,
+    });
+
+    it('lists unseen notes since a time, newest first, for the owner only', async () => {
+      const store = getStore();
+      await store.create(note(ALICE, 'too old', new Date('2026-11-01T08:00:00.000Z')));
+      const first = await store.create(note(ALICE, 'first', new Date('2026-11-02T08:00:00.000Z')));
+      const second = await store.create(note(ALICE, 'second', new Date('2026-11-02T09:00:00.000Z')));
+      await store.create(note(BOB, 'not hers', new Date('2026-11-02T09:00:00.000Z')));
+      await store.create(note(OTHER_TENANT, 'other tenant', new Date('2026-11-02T09:00:00.000Z')));
+      await store.create(reminder(ALICE, 'a reminder', new Date('2026-11-02T09:30:00.000Z')));
+
+      const listed = await store.listUnseenNotes({ ...ALICE, since: new Date('2026-11-02T00:00:00.000Z'), limit: 10 });
+
+      expect(listed.map(item => item.id)).toEqual([second.id, first.id]);
+    });
+
+    it('leaves out notes that were seen and honours the limit', async () => {
+      const store = getStore();
+      const one = await store.create(note(ALICE, 'one', new Date('2026-11-02T08:00:00.000Z')));
+      await store.create(note(ALICE, 'two', new Date('2026-11-02T09:00:00.000Z')));
+      await store.markSeen({ ...ALICE, ids: [one.id] });
+
+      const since = new Date('2026-11-02T00:00:00.000Z');
+      expect((await store.listUnseenNotes({ ...ALICE, since, limit: 10 })).map(item => item.text)).toEqual(['two']);
+      expect(await store.listUnseenNotes({ ...ALICE, since, limit: 0 })).toEqual([]);
+    });
+  });
 }
 
 function attempt() {

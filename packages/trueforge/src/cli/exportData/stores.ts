@@ -7,6 +7,7 @@ import type { IMcpServerStore } from '../../db/mcpServerStore';
 import type { IModelProviderStore } from '../../db/modelProviderStore';
 import type { IPersonalizationStore } from '../../db/personalizationStore';
 import type { IPersonaStore } from '../../db/personaStore';
+import type { IReachSettingsStore } from '../../db/reachSettingsStore';
 import type { ISandboxProviderStore } from '../../db/sandboxProviderStore';
 import type { IScheduleStore } from '../../db/scheduleStore';
 import type { ISentinelAuditStore } from '../../db/sentinelAuditStore';
@@ -34,6 +35,7 @@ export interface ExportStores<TTransaction> {
   googleConnectionStore: IGoogleConnectionStore;
   auditStore: ISentinelAuditStore;
   deliveryStore: IDeliveryStore;
+  reachSettingsStore: IReachSettingsStore;
   close(): Promise<void>;
 }
 
