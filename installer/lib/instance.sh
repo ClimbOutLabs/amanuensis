@@ -147,9 +147,25 @@ stt_forget_old_network() {
 }
 
 # Docker gives each new network a /16 from a short list of ranges, and a computer with many projects runs out of them.
-# The browser's networks hold two or three containers each, so each gets a /28 the installer picks from 172.16.0.0/16,
-# which Docker's own list leaves out. A network that already exists keeps its addresses, so Compose never has to move it.
-BROWSER_NETWORKS="browser-internal browser-control browser-egress"
+# The networks of an instance hold a few containers each, so each gets a small block the installer picks from
+# 172.16.0.0/16, which Docker's own list leaves out. A network that already exists keeps its addresses, so Compose never
+# has to move it.
+#
+# The speech network is left to Docker: the shared speech services join it from outside the instance's project, and
+# Compose cannot change a network that holds a container it does not own.
+
+# "network prefix-length" for each network Compose makes for an instance: the default one holds the most containers.
+instance_networks() { # calendar on, browser on
+  printf 'default 27
+link 28
+'
+  if [ "$1" = 1 ]; then printf 'calendar 28
+'; fi
+  if [ "$2" = 1 ]; then printf 'browser-internal 28
+browser-control 28
+browser-egress 28
+'; fi
+}
 
 ipv4_number() { # a.b.c.d
   local a b c d
@@ -179,29 +195,35 @@ ipv4_blocks_in_use() {
   done
 }
 
-# The subnet of each browser network, one per line in BROWSER_NETWORKS order. Fails when 172.16.0.0/16 has no room.
-browser_subnets() { # name
-  local name=$1 net subnet used first last start end
+# "network subnet" for each network instance_networks lists, in that order. Fails when 172.16.0.0/16 has no room.
+instance_subnets() { # name, calendar on, browser on
+  local name=$1 net bits subnet used start end
   used=$(ipv4_blocks_in_use)
   start=$(ipv4_number 172.16.0.0)
   end=$(ipv4_number 172.16.255.255)
-  for net in $BROWSER_NETWORKS; do
+  while read -r net bits; do
     subnet=$(D network inspect "aman-${name}_$net" --format '{{range .IPAM.Config}}{{.Subnet}} {{end}}' 2>/dev/null | tr ' ' '\n' | grep -m 1 '^[0-9.]*/[0-9]*$' || true)
     if [ -z "$subnet" ]; then
-      subnet=$(printf '%s\n' "$used" | awk -v s="$start" -v e="$end" '
+      subnet=$(printf '%s\n' "$used" | awk -v s="$start" -v e="$end" -v size=$((1 << (32 - bits))) -v bits="$bits" '
+        BEGIN { n = 0 }
         NF == 2 { lo[n] = $1; hi[n] = $2; n++ }
         END {
-          for (c = s; c + 15 <= e; ) {
+          for (c = s; c + size - 1 <= e; ) {
             moved = 0
-            for (i = 0; i < n; i++) if (lo[i] <= c + 15 && hi[i] >= c) { c = hi[i] + 1; c += (16 - c % 16) % 16; moved = 1 }
-            if (!moved) { printf "%d.%d.%d.%d/28\n", int(c / 16777216), int(c / 65536) % 256, int(c / 256) % 256, c % 256; exit }
+            for (i = 0; i < n; i++) if (lo[i] <= c + size - 1 && hi[i] >= c) { c = hi[i] + 1; c += (size - c % size) % size; moved = 1 }
+            if (!moved) { printf "%d.%d.%d.%d/%d\n", int(c / 16777216), int(c / 65536) % 256, int(c / 256) % 256, c % 256, bits; exit }
           }
         }')
       [ -n "$subnet" ] || return 1
     fi
-    echo "$subnet"
+    echo "$net $subnet"
     used="$used"$'\n'"$(ipv4_number "${subnet%/*}") $(($(ipv4_number "${subnet%/*}") + (1 << (32 - ${subnet#*/})) - 1))"
-  done
+  done < <(instance_networks "$2" "$3")
+}
+
+# The subnet instance_subnets picked for one network.
+subnet_of() { # network, instance_subnets output
+  awk -v n="$1" '$1 == n { print $2; exit }' <<<"$2"
 }
 
 machine_running() {
@@ -259,13 +281,13 @@ instance_render() {
   fi
   # Aman's browser is on in every instance once its images are known. Its seccomp profile is copied beside the compose
   # file, because the compose file reads it from this folder.
-  local browser_on=0 browser_nets=''
+  local browser_on=0 subnets
   if [ -n "${REL_BROWSER_TAG:-}" ] && [ -n "${REL_BROWSER_GATEWAY_TAG:-}" ]; then
     browser_on=1
     env_secret_backfill "$name" BROWSER_SECRET
-    browser_nets=$(browser_subnets "$name") ||
-      die "Aman found no free network addresses for its browser. Remove networks nothing uses with: docker network prune. Then run aman upgrade again."
   fi
+  subnets=$(instance_subnets "$name" "$calendar_on" "$browser_on") ||
+    die "Aman found no free network addresses for instance $name. Remove networks nothing uses with: docker network prune. Then run the same command again."
   # The email connector is part of the compose file only once its image is known. Its wrapper script is copied beside the
   # compose file, because the compose file mounts it from this folder.
   local email_on=0
@@ -289,7 +311,8 @@ instance_render() {
   fi
   render_template "$TEMPLATES_DIR/instance/compose.yaml.tpl" \
     "NAME=$name" "IF_CALENDAR=$calendar_on" "CALENDAR_IMAGE=${REL_CALENDAR_TAG:-}" "IF_EMAIL=$email_on" "MAIL_EMAIL_IMAGE=${REL_MAIL_EMAIL_IMAGE:-}" \
-    "IF_BROWSER=$browser_on" "BROWSER_INTERNAL_SUBNET=$(sed -n 1p <<<"$browser_nets")" "BROWSER_CONTROL_SUBNET=$(sed -n 2p <<<"$browser_nets")" "BROWSER_EGRESS_SUBNET=$(sed -n 3p <<<"$browser_nets")" "BROWSER_IMAGE=${REL_BROWSER_TAG:-}" "BROWSER_GATEWAY_IMAGE=${REL_BROWSER_GATEWAY_TAG:-}" "STT_NETWORK=$(stt_network "$name")" "APP_IMAGE=$app_image" "DEX_IMAGE=$dex_image" "APP_PORT=$app_port" "IF_SANDBOX=$sandbox_on" \
+    "IF_BROWSER=$browser_on" "DEFAULT_SUBNET=$(subnet_of default "$subnets")" "LINK_SUBNET=$(subnet_of link "$subnets")" "CALENDAR_SUBNET=$(subnet_of calendar "$subnets")" \
+    "BROWSER_INTERNAL_SUBNET=$(subnet_of browser-internal "$subnets")" "BROWSER_CONTROL_SUBNET=$(subnet_of browser-control "$subnets")" "BROWSER_EGRESS_SUBNET=$(subnet_of browser-egress "$subnets")" "BROWSER_IMAGE=${REL_BROWSER_TAG:-}" "BROWSER_GATEWAY_IMAGE=${REL_BROWSER_GATEWAY_TAG:-}" "STT_NETWORK=$(stt_network "$name")" "APP_IMAGE=$app_image" "DEX_IMAGE=$dex_image" "APP_PORT=$app_port" "IF_SANDBOX=$sandbox_on" \
     "IF_EDGE=$edge_on" "LOGIN_HOST=$login_host" \
     "LOGIN_PORT=$login_port" "DEX_TELEMETRY_PORT=$DEX_TELEMETRY_PORT" "APP_PORTS=$app_ports" \
     "IF_TLS=$tls_on" "IF_TLS_HOST=$tls_host" "IF_TLS_VOLUME=$tls_volume" "CADDY_IMAGE=$(tls_image)" "TLS_USER=$(id -u):$(id -g)" "TLS_LEAF_DIR=$(tls_leaf_dir "$name")" \
