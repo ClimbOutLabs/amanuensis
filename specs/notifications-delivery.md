@@ -22,7 +22,7 @@ One server-side feed of things Aman wants a person to see, called deliveries. Ea
 
 **Push names no one.** The contact every push carries defaults to the project's public page, not the owner's email. The owner can set their own with `WEB_PUSH_SUBJECT`.
 
-**A bounded number of devices.** A person keeps notices on for at most 10 devices. Turning on another drops the one turned on longest ago. A notice goes to at most 4 devices at a time.
+**A bounded number of devices.** A person keeps notices on for at most 10 devices. Turning on another drops the one turned on longest ago. A notice goes to at most 4 devices at a time. Settings asks the server whether this device is still saved, so a device that was dropped, or that its push service reported gone, reads as off and can be turned on again.
 
 **New keys mean new subscriptions.** Each device records the key it was turned on with. After the keys change, a device on the old key is removed instead of sent to, and turning notices on again makes a fresh subscription with the new key.
 
@@ -66,7 +66,7 @@ All tests use synthetic data, never a person's real data.
 - The push payload holds no reminder text
 - A dead push subscription is removed
 - A device on an old key is removed, and turning notices on again re-subscribes
-- An 11th device drops the oldest
+- An 11th device drops the oldest, and the dropped device reads as off in Settings
 - A full export with many devices per item imports
 - An upgraded install gets push keys
 - The service worker takes no fetch events

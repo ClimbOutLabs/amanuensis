@@ -2096,6 +2096,12 @@ export class AgentThread {
       'current-date',
       `Today's date is ${dateUtc} (UTC).${localDateClause} Reason about past and future relative to this date, not to your training data.`,
     );
+    if (!this.parent && this.definition.spokenReply === true) {
+      builder.addSection(
+        'spoken-reply',
+        'The person spoke this message, and the app reads your reply aloud in a voice. Answer in a few short, plain sentences, with no lists, tables, headings, links or code. Never say you cannot speak or have no voice.',
+      );
+    }
     const personName = this.parent ? undefined : this.definition.identity?.personName?.trim();
     if (personName) {
       // Escaped: the name is user-authored text, so it cannot close the wrapping tag.
