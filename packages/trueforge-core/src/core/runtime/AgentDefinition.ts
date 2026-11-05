@@ -76,6 +76,8 @@ export interface AgentDefinition {
    * to UTC.
    */
   clientTimezone?: string | undefined;
+  /** True when the person spoke the message and the client reads the reply aloud. */
+  spokenReply?: boolean | undefined;
   /**
    * Names for the root assistant's identity section. Omitted or empty values use the default assistant name and
    * the neutral "person you work for" wording. Sub-agent threads ignore it.
