@@ -57,6 +57,7 @@ function makeLogger() {
 
 function summarizeContext(): SummarizeTurnContext {
   const store: IModelProviderStore = {
+    managedElsewhere: false,
     listProviders: jest.fn(),
     getProvider: jest.fn(),
     getProviderForUpdate: jest.fn(),

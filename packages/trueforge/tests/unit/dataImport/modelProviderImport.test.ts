@@ -98,6 +98,7 @@ describe('mergeImportedProvider', () => {
         { tenant_id: 'default', name: 'tokenfactory', manifest: keyedExisting, created_at: '', updated_at: '' },
       ],
       defaultModel: undefined,
+      managedElsewhere: false,
     });
     expect(plan.writes).toHaveLength(1);
     expect(plan.writes[0]?.manifest.base_url).toBe('https://tokenfactory.example.com/v1');

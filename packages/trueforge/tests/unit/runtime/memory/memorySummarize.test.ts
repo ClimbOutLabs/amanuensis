@@ -60,6 +60,7 @@ function fakeSummarizerThrowing(error: Error): ILLM {
 
 function fakeModelProviderStore(): IModelProviderStore {
   return {
+    managedElsewhere: false,
     listProviders: jest.fn(),
     getProvider: jest.fn(),
     getProviderForUpdate: jest.fn(),

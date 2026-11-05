@@ -44,7 +44,13 @@ describe('exportableModelProvider', () => {
             {
               model_id: 'gpt-test',
               name: 'gpt-test',
-              properties: { context_length: 128000, max_output_tokens: 4096, reasoning_efforts: ['low'], vision: true },
+              properties: {
+                context_length: 128000,
+                max_output_tokens: 4096,
+                reasoning_efforts: ['low'],
+                vision: true,
+                max_concurrent_requests: 2,
+              },
             },
           ],
           stream_timeout: { first_chunk_ms: 1000, chunk_ms: 2000 },
@@ -62,7 +68,13 @@ describe('exportableModelProvider', () => {
           {
             model_id: 'gpt-test',
             name: 'gpt-test',
-            properties: { context_length: 128000, max_output_tokens: 4096, reasoning_efforts: ['low'], vision: true },
+            properties: {
+              context_length: 128000,
+              max_output_tokens: 4096,
+              reasoning_efforts: ['low'],
+              vision: true,
+              max_concurrent_requests: 2,
+            },
           },
         ],
         stream_timeout: { first_chunk_ms: 1000, chunk_ms: 2000 },

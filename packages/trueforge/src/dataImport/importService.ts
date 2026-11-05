@@ -1053,6 +1053,28 @@ function pluralize(count: number, singular: string, plural: string): string {
   return `${String(count)} ${count === 1 ? singular : plural}`;
 }
 
+/** A name that holds something besides spaces, else null. */
+function presentName(value: string | null): string | null {
+  return value !== null && value.trim() !== '' ? value : null;
+}
+
+/**
+ * The names an imported profile is saved with. The installer's name stays
+ * where the archive has none, since the app offers it only once. The summary
+ * reads the same values, so what it says Aman will call the person is what
+ * the saved profile holds.
+ */
+function importedProfileNames(
+  personalization: { user_name: string | null; address_as: string | null },
+  installerName: string,
+): { user_name: string | null; address_as: string | null } {
+  const ownerName = presentName(installerName);
+  return {
+    user_name: presentName(personalization.user_name) ?? ownerName,
+    address_as: presentName(personalization.address_as) ?? ownerName,
+  };
+}
+
 /** What the summary reports about model providers: how many setups came over, and what still needs doing. */
 interface ModelProviderSummary {
   /** Provider setups restored (or, on a dry run, that would be). */
@@ -1061,6 +1083,8 @@ interface ModelProviderSummary {
   needsKeyNames: string[];
   /** False for exports made before provider setups travelled. */
   sectionPresent: boolean;
+  /** Provider setups in the export that were not written because this instance's providers are managed elsewhere. */
+  notWrittenManaged: number;
   /** Personas moved to a model that is here because their own did not come over. */
   personaSwitches: readonly PersonaModelSwitch[];
 }
@@ -1165,6 +1189,10 @@ function buildSummary({
     for (const name of modelProviders.needsKeyNames) {
       notes.push(`Add the key for ${name} in Settings under Models, so its models can answer.`);
     }
+  } else if (modelProviders.notWrittenManaged > 0) {
+    notes.push(
+      `Model settings did not come over, because this Aman's models are managed by TrueFoundry. Personas use the models it already has.`,
+    );
   } else if (!modelProviders.sectionPresent) {
     notes.push(
       'Model settings are not in this export, because it was made by an older Aman. Add your model in Settings under Models.',
@@ -1649,11 +1677,13 @@ async function importArchive<TTransaction>(
     });
   }
   const trimmedSpaces = spaces.filter(({ revisions }) => revisions.every(revision => revision.revision > 1)).length;
-  // How Aman will address the person once the imported profile lands: the
-  // preferred form when there is one, else their name; null when the export
-  // carried neither, which the summary says plainly instead of guessing.
+  // The names the imported profile is saved with, and from them how Aman
+  // will address the person: the preferred form when there is one, else
+  // their name; null when neither the export nor the installer gave one,
+  // which the summary says plainly instead of guessing.
+  const profileNames = personalization === null ? null : importedProfileNames(personalization, deps.ownerName);
   const callYouName =
-    [personalization?.address_as, personalization?.user_name]
+    [profileNames?.address_as, profileNames?.user_name]
       .map(value => value?.trim())
       .find(value => value !== undefined && value !== '') ?? null;
   const providerSummaryOf = (
@@ -1663,6 +1693,7 @@ async function importArchive<TTransaction>(
     restored: plan.writes.length,
     needsKeyNames: plan.writes.filter(write => write.needsKey).map(write => write.name),
     sectionPresent: contents.modelProvidersSectionPresent,
+    notWrittenManaged: deps.modelProviderStore.managedElsewhere ? modelProviders.length : 0,
     personaSwitches,
   });
   if (lock === undefined) {
@@ -1673,6 +1704,7 @@ async function importArchive<TTransaction>(
       imported: modelProviders,
       existing: existingProviders,
       defaultModel: currentDefault?.value ?? importedDefault,
+      managedElsewhere: deps.modelProviderStore.managedElsewhere,
     });
     const personaSwitches = planPersonaModelSwitches({ personas: personas.map(entry => entry.persona), plan });
     const result: Omit<ImportDataResult, 'summary'> = {
@@ -1804,6 +1836,7 @@ async function importArchive<TTransaction>(
       restored: 0,
       needsKeyNames: [],
       sectionPresent: contents.modelProvidersSectionPresent,
+      notWrittenManaged: 0,
       personaSwitches: [],
     };
     await lock.pauseRenewal();
@@ -1830,10 +1863,8 @@ async function importArchive<TTransaction>(
       await deps.auditStore.importRecords({ tenant_id: tenantId, created_by: subjectId, records: audit }, tx);
       await deps.deliveryStore.importDeliveries({ tenant_id: tenantId, created_by: subjectId, deliveries }, tx);
 
-      if (personalization !== null) {
+      if (personalization !== null && profileNames !== null) {
         // Replaces the empty profile the app creates on first sign-in; the emptiness check ruled out a filled one.
-        // The installer's name stays where the archive has none, since the app offers it only once.
-        const ownerName = deps.ownerName === '' ? null : deps.ownerName;
         await deps.personalizationStore.upsertProfile(
           {
             tenant_id: tenantId,
@@ -1841,8 +1872,8 @@ async function importArchive<TTransaction>(
             assistant_name: personalization.assistant_name,
             assistant_identity: personalization.assistant_identity,
             voice_guidance: personalization.voice_guidance,
-            user_name: personalization.user_name ?? ownerName,
-            address_as: personalization.address_as ?? ownerName,
+            user_name: profileNames.user_name,
+            address_as: profileNames.address_as,
             user_profile: personalization.user_profile,
             pinned_preferences: personalization.pinned_preferences,
             help_areas: personalization.help_areas,
@@ -1965,6 +1996,7 @@ async function importArchive<TTransaction>(
         imported: modelProviders,
         existing: existingProviders,
         defaultModel: defaultModel?.value,
+        managedElsewhere: deps.modelProviderStore.managedElsewhere,
       });
       for (const write of providerPlan.writes) {
         await deps.modelProviderStore.upsertProvider(

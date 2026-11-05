@@ -224,7 +224,7 @@ Only that person's data should be there. If the old stack held more than one per
 
 ## 7. What to redo by hand
 
-- Model keys: Settings, Models. Keys are never exported. The provider, its address and its models come over, and the import summary names each provider that needs its key. An export from an older Aman has no model settings, so add your model there too.
+- Model keys: Settings, Models. Keys are never exported. The provider, its address and its models come over, and the import summary names each provider that needs its key. An export from an older Aman has no model settings, so add your model there too. On an instance whose models TrueFoundry manages, model settings do not come over, and personas use the models already there.
 - Connector sign-ins: a connector that signs in through its own website arrives with a "sign in" button; click it. A connector that used a header token or a fixed client id and secret arrives without those values: open it in Settings, Connectors, and enter them again.
 - Imported connectors: each one arrives unused, with no agent attached. Attach the ones you want to your agents again. If you ran a web search or memory connector, set that role again too.
 - Permission settings: in Settings, open Permissions and set offline mode and web search again if you want them. The recall and tool-output checks came along.

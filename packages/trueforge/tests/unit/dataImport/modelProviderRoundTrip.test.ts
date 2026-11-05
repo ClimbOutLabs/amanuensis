@@ -15,6 +15,7 @@ import { McpCatalog } from '../../../src/catalog/McpCatalog';
 import { runDataImport, type DataImportDeps } from '../../../src/dataImport/importService';
 import { DeliveryStore } from '../../../src/db/deliveryStore';
 import { migrateSqliteToLatest } from '../../../src/db/migrateSqlite';
+import type { IModelProviderStore } from '../../../src/db/modelProviderStore';
 import { SentinelAuditStore } from '../../../src/db/sentinelAuditStore';
 import { SqliteAgentStore } from '../../../src/db/sqlite/agent-store/SqliteAgentStore';
 import { createSqliteDb } from '../../../src/db/sqlite/client';
@@ -30,6 +31,7 @@ import { SqliteSpaceStore } from '../../../src/db/sqlite/space-store/SqliteSpace
 import { SqliteTurnArtifactStore } from '../../../src/db/sqlite/turn-artifact-store/SqliteTurnArtifactStore';
 import type { Database } from '../../../src/db/sqlite/types';
 import { EMBEDDING_DIMENSIONS } from '../../../src/runtime/memory/embeddingModel';
+import { trueFoundryManaged } from '../../../src/truefoundry/errors';
 import { exportInstanceArchive } from '../../fixtures/dataTransferExport';
 import type { DataTransferSeedStores } from '../../fixtures/dataTransferSeed';
 import { readZipEntries } from '../../fixtures/zipReader';
@@ -105,58 +107,62 @@ function importDeps(instance: Instance): DataImportDeps<Tx> {
   };
 }
 
+async function seedSource(source: Instance): Promise<void> {
+  await source.stores.modelProviderStore.upsertProvider({
+    tenant_id: TENANT,
+    name: 'openai',
+    manifest: {
+      type: 'openai',
+      base_url: 'https://api.openai.com/v1',
+      auth: { api_key: PLANTED_KEY },
+      models: [{ model_id: 'gpt-test', name: 'gpt-test', properties: { context_length: 128000 } }],
+    },
+  });
+  await source.stores.modelProviderStore.upsertProvider({
+    tenant_id: TENANT,
+    name: 'lab-box',
+    manifest: {
+      type: 'custom',
+      name: 'lab-box',
+      base_url: `https://user:${PLANTED_PASSWORD}@llm.example.com/v1`,
+      auth: { api_key: PLANTED_KEY },
+      models: [{ model_id: 'local-1', name: 'local-1', properties: {} }],
+    },
+  });
+  await source.stores.personaStore.createPersona({
+    tenant_id: TENANT,
+    created_by: 'alice',
+    id: 'persona-helper',
+    display_name: 'Helper',
+    aliases: [],
+    instructions: 'Help carefully.',
+    model_name: 'openai/gpt-test',
+    updated_by: 'alice',
+  });
+  await source.stores.personalizationStore.upsertProfile({
+    tenant_id: TENANT,
+    created_by: 'alice',
+    assistant_name: null,
+    assistant_identity: null,
+    voice_guidance: null,
+    user_name: 'Test Person',
+    address_as: 'Tester',
+    user_profile: null,
+    pinned_preferences: [],
+    help_areas: [],
+    learned_profile: null,
+    learning_enabled: true,
+    updated_by: 'alice',
+    expected_revision: null,
+  });
+}
+
 describe('model provider export and import round trip', () => {
   it('restores the setup without the secret planted in it', async () => {
     const source = await makeInstance('source');
     const target = await makeInstance('target');
     try {
-      await source.stores.modelProviderStore.upsertProvider({
-        tenant_id: TENANT,
-        name: 'openai',
-        manifest: {
-          type: 'openai',
-          base_url: 'https://api.openai.com/v1',
-          auth: { api_key: PLANTED_KEY },
-          models: [{ model_id: 'gpt-test', name: 'gpt-test', properties: { context_length: 128000 } }],
-        },
-      });
-      await source.stores.modelProviderStore.upsertProvider({
-        tenant_id: TENANT,
-        name: 'lab-box',
-        manifest: {
-          type: 'custom',
-          name: 'lab-box',
-          base_url: `https://user:${PLANTED_PASSWORD}@llm.example.com/v1`,
-          auth: { api_key: PLANTED_KEY },
-          models: [{ model_id: 'local-1', name: 'local-1', properties: {} }],
-        },
-      });
-      await source.stores.personaStore.createPersona({
-        tenant_id: TENANT,
-        created_by: 'alice',
-        id: 'persona-helper',
-        display_name: 'Helper',
-        aliases: [],
-        instructions: 'Help carefully.',
-        model_name: 'openai/gpt-test',
-        updated_by: 'alice',
-      });
-      await source.stores.personalizationStore.upsertProfile({
-        tenant_id: TENANT,
-        created_by: 'alice',
-        assistant_name: null,
-        assistant_identity: null,
-        voice_guidance: null,
-        user_name: 'Test Person',
-        address_as: 'Tester',
-        user_profile: null,
-        pinned_preferences: [],
-        help_areas: [],
-        learned_profile: null,
-        learning_enabled: true,
-        updated_by: 'alice',
-        expected_revision: null,
-      });
+      await seedSource(source);
 
       const archive = await exportInstanceArchive({
         instance: source,
@@ -206,6 +212,66 @@ describe('model provider export and import round trip', () => {
       expect(result.summary).toContain('Your model settings came over, but their keys never travel in an export.');
       expect(result.summary).toContain('Add the key for openai in Settings under Models, so its models can answer.');
       expect(result.summary).toContain('Add the key for lab-box in Settings under Models, so its models can answer.');
+    } finally {
+      await source.close();
+      await target.close();
+    }
+  });
+
+  it('imports everything else onto an instance whose models TrueFoundry manages', async () => {
+    const source = await makeInstance('source');
+    const target = await makeInstance('target');
+    try {
+      await seedSource(source);
+      await target.stores.modelProviderStore.upsertProvider({
+        tenant_id: TENANT,
+        name: 'gateway',
+        manifest: {
+          type: 'openai',
+          base_url: 'https://gateway.example.com/v1',
+          models: [{ model_id: 'gw-1', name: 'gw-1', properties: {} }],
+        },
+      });
+      const archive = await exportInstanceArchive({
+        instance: source,
+        tenantId: TENANT,
+        subjectId: 'alice',
+        secrets: [PLANTED_KEY],
+      });
+
+      // Reads come from what the instance has; every write is refused, as the TrueFoundry store does.
+      const sqlite = target.stores.modelProviderStore;
+      const managed: IModelProviderStore<Tx> = {
+        managedElsewhere: true,
+        listProviders: (input, tx) => sqlite.listProviders(input, tx),
+        getProvider: (input, tx) => sqlite.getProvider(input, tx),
+        getProviderForUpdate: () => trueFoundryManaged(),
+        createProvider: () => trueFoundryManaged(),
+        upsertProvider: () => trueFoundryManaged(),
+        deleteProvider: () => trueFoundryManaged(),
+        listModels: (input, tx) => sqlite.listModels(input, tx),
+      };
+      const deps = { ...importDeps(target), modelProviderStore: managed };
+      const request = {
+        archive,
+        subject: { tenantId: TENANT, subjectId: 'bob', subjectDisplayName: 'bob', agentIds: [] },
+        maxBytes: 1024 * 1024 * 1024,
+      };
+
+      const dryRun = await runDataImport(deps, { ...request, dryRun: true });
+      const result = await runDataImport(deps, request);
+
+      const providers = await sqlite.listProviders({ tenant_id: TENANT });
+      expect(providers.map(provider => provider.name)).toEqual(['gateway']);
+      const personas = await target.stores.personaStore.listPersonas({ tenant_id: TENANT, created_by: 'bob' });
+      expect(personas.map(persona => persona.model_name)).toEqual(['gateway/gw-1']);
+      for (const summary of [dryRun.summary, result.summary]) {
+        expect(summary).toContain(
+          "Model settings did not come over, because this Aman's models are managed by TrueFoundry. Personas use the models it already has.",
+        );
+        expect(summary).toContain('Helper was set to a model that is not on this Aman, so it now uses gateway/gw-1.');
+        expect(summary).not.toContain('model provider');
+      }
     } finally {
       await source.close();
       await target.close();

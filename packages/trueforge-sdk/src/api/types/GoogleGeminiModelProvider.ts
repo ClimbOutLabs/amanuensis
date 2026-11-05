@@ -3,7 +3,7 @@
 import type * as TrueForge from "../index.js";
 
 export interface GoogleGeminiModelProvider {
-    auth: TrueForge.ModelProviderAuth;
+    auth?: TrueForge.ModelProviderAuth;
     /** Override of the provider's default API base URL. */
     baseUrl?: string;
     /** Models exposed by this provider (at least one). */

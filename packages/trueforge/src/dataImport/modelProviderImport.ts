@@ -71,9 +71,16 @@ export function planModelProviderImport(input: {
   existing: readonly ModelProviderRecord[];
   /** The instance's default model once the import's settings land; the instance's own value wins. */
   defaultModel: string | undefined;
+  /**
+   * True when this instance's providers are managed elsewhere (TrueFoundry),
+   * so none can be written here. Nothing is planned for writing, and personas
+   * are checked against the models the instance already has.
+   */
+  managedElsewhere: boolean;
 }): ModelProviderImportPlan {
   const existingByName = new Map(input.existing.map(record => [record.name, record.manifest]));
-  const writes: PlannedModelProvider[] = input.imported.map(entry => {
+  const imported = input.managedElsewhere ? [] : input.imported;
+  const writes: PlannedModelProvider[] = imported.map(entry => {
     const manifest = mergeImportedProvider({ imported: entry.manifest, existing: existingByName.get(entry.name) });
     return { name: entry.name, manifest, needsKey: manifest.auth?.api_key === undefined };
   });

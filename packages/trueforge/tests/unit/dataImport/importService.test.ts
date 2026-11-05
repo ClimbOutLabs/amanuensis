@@ -1682,9 +1682,16 @@ describe('runDataImport refuses an instance that is not fresh', () => {
         owner_subject_id: 'bob',
         owner_name: 'Sam',
       });
-      await runDataImport({ ...importDeps(target), ownerName: 'Sam' }, importRequest(archive));
+      const deps = { ...importDeps(target), ownerName: 'Sam' };
+      const dryRun = await runDataImport(deps, { ...importRequest(archive), dryRun: true });
+      const result = await runDataImport(deps, importRequest(archive));
       const profile = await target.stores.personalizationStore.getProfile({ tenant_id: TENANT, created_by: 'bob' });
       expect(profile).toMatchObject({ assistant_name: 'Aman', user_name: 'Sam', address_as: 'Sam' });
+      // The summary names what the saved profile holds, before and after the import.
+      for (const summary of [dryRun.summary, result.summary]) {
+        expect(summary).toContain('Aman will call you: Sam.');
+        expect(summary).not.toContain('did not include your name');
+      }
     } finally {
       await source.close();
       await target.close();

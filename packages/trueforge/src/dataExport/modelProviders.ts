@@ -20,6 +20,9 @@ function exportableProperties(properties: ModelProperties): ModelProperties {
     ...(properties.max_output_tokens === undefined ? {} : { max_output_tokens: properties.max_output_tokens }),
     ...(properties.reasoning_efforts === undefined ? {} : { reasoning_efforts: [...properties.reasoning_efforts] }),
     ...(properties.vision === undefined ? {} : { vision: properties.vision }),
+    ...(properties.max_concurrent_requests === undefined
+      ? {}
+      : { max_concurrent_requests: properties.max_concurrent_requests }),
   };
 }
 
