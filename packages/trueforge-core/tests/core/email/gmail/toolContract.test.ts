@@ -84,4 +84,11 @@ describe('draft parameters', () => {
   it('require the draft id to update one', () => {
     expect(UpdateDraftSchema.safeParse(DRAFT).success).toBe(false);
   });
+
+  it('accept a reply with no recipient named, and refuse a draft with neither a recipient nor a reply', () => {
+    expect(DraftEmailSchema.safeParse({ subject: 'Lease', body: 'ok', in_reply_to: 'm1' }).success).toBe(true);
+    expect(DraftEmailSchema.safeParse({ subject: 'Lease', body: 'ok', to: ['grace@example.com'] }).success).toBe(true);
+    expect(DraftEmailSchema.safeParse({ subject: 'Lease', body: 'ok' }).success).toBe(false);
+    expect(DraftEmailSchema.safeParse({ subject: 'Lease', body: 'ok', to: [] }).success).toBe(false);
+  });
 });

@@ -79,6 +79,20 @@ describe('the thread line on the card', () => {
     expect(card?.email?.reply_in_thread?.from).toBe('an address Aman cannot read');
   });
 
+  it('names a sender whose domain has no dot in it with the unreadable words', async () => {
+    const dotless = message({
+      id: 'orig',
+      threadId: 't9',
+      from: 'a@b',
+      subject: 'Invitation to the lease signing',
+      extraHeaders: [header('Message-ID', '<orig@mail.example.com>'), header('References', '<first@mail.example.com>')],
+    });
+    const card = await cardFor(dotless);
+    expect(card?.plain_what).toContain('from an address Aman cannot read.');
+    expect(card?.plain_what).not.toContain('a@b');
+    expect(card?.email?.reply_in_thread?.from).toBe('an address Aman cannot read');
+  });
+
   it('shows the address inside the brackets, never the name before it', async () => {
     const named = message({
       id: 'orig',
