@@ -50,6 +50,14 @@ describe('ModelRoleSettings', () => {
     expect(screen.getByRole('heading', { name: 'Summarization model' })).toBeInTheDocument();
   });
 
+  it('shows no sub-tab strip when the host has no personas', async () => {
+    renderPage();
+
+    expect(await screen.findByRole('heading', { name: 'Roles and Personas' })).toBeInTheDocument();
+    expect(screen.queryByRole('tablist', { name: 'Roles and Personas sections' })).not.toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Main chat model' })).toBeInTheDocument();
+  });
+
   it('does not claim a small Nemotron model handles memory summaries or library checks', async () => {
     renderPage();
 
