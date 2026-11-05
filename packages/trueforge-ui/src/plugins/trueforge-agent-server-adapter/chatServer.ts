@@ -34,6 +34,7 @@ import type {
 import { publishContextCompaction } from '../../utils/contextCompactionLive.js';
 import { LiveConnectionLostError, ReplyStoppedByRestartError } from '../../utils/liveConnection.js';
 import type { ModelUsageEvent } from '../../utils/modelUsage.js';
+import { isSpokenSend } from '../../utils/voiceTurn.js';
 import { createTrueForgeClient, type CreateTrueForgeClientOptions } from './client.js';
 import { createSessionResyncExtensions, type HarnessChatServerExtensions } from './sessionResync.js';
 import {
@@ -679,6 +680,17 @@ function toHarnessContent(content: UserMessageContent): TrueForgeApi.UserMessage
   });
 }
 
+/** The text the person typed or spoke in this turn's messages. */
+function userMessageText(input: TurnInputItem[] | undefined): string {
+  return (input ?? [])
+    .map(item => {
+      if (item.type !== 'user.message') return '';
+      if (typeof item.content === 'string') return item.content;
+      return item.content.map(part => (part.type === 'text' ? part.text : '')).join('');
+    })
+    .join('');
+}
+
 function toHarnessInput(input: TurnInputItem[]): TrueForgeApi.TurnInputItem[] {
   return input.map(item =>
     item.type === 'user.message' ? { ...item, content: toHarnessContent(item.content) } : item,
@@ -769,12 +781,15 @@ export function createHarnessChatServer(
       let turnId: string | undefined;
       try {
         const clientTimezone = resolveClientTimezone();
+        // The reply to a voice message is read aloud, so the model is told to keep it speakable.
+        const spokenReply = isSpokenSend(userMessageText(input));
         const stream = await client.sessions.createTurnStream(
           sessionId,
           {
             ...(input === undefined ? {} : { input: toHarnessInput(input) }),
             ...(previousTurnId === undefined ? {} : { previousTurnId }),
             ...(clientTimezone === undefined ? {} : { clientTimezone }),
+            ...(spokenReply ? { spokenReply } : {}),
           },
           abortSignal === undefined ? undefined : { abortSignal },
         );
