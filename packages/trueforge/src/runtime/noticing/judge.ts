@@ -1,13 +1,13 @@
-import { VercelAILLM, type LLMCreateParams } from '@truefoundry/trueforge-core/core';
+import type { LLMCreateParams } from '@truefoundry/trueforge-core/core';
 import type { Logger } from 'winston';
 import { z } from 'zod';
 
 import type { IModelProviderStore } from '../../db/modelProviderStore';
 import { DeliveryLevelSchema, type DeliveryLevel } from '../../schemas/deliveries';
 import type { NoticingEvent } from '../../schemas/reach';
-import { modelIdentity, type TurnModelUsage } from '../modelUsage';
-import { getModelDetails } from '../sessionResources';
-import { meterHelperLlm, type TokenFactoryBudget } from '../tokenFactoryBudget';
+import type { TurnModelUsage } from '../modelUsage';
+import { askModelOnce } from '../oneShotModelCall';
+import type { TokenFactoryBudget } from '../tokenFactoryBudget';
 import { ceilingOf } from './levels';
 
 const JUDGE_TIMEOUT_MS = 20_000;
@@ -64,13 +64,6 @@ export function buildJudgeMessages({
   ];
 }
 
-function contentText(content: string | { type: string; text?: string; refusal?: string }[] | null): string {
-  if (typeof content === 'string') {
-    return content;
-  }
-  return content === null ? '' : content.map(part => part.text ?? part.refusal ?? '').join('');
-}
-
 /** Reads the model's JSON, allowing a fenced block. Undefined when it is not a usable verdict. */
 export function parseJudgeVerdict(raw: string): JudgeVerdict | undefined {
   const unfenced = raw
@@ -110,35 +103,19 @@ export function createNoticingJudge({
   logger: Logger;
 }): NoticingJudge {
   return async ({ event }) => {
-    const { providerConfig, modelProperties, streamTimeout } = await getModelDetails({
-      tenant_id: tenantId,
-      name: modelName,
-      store: modelProviderStore,
-    });
-    const request: LLMCreateParams = {
-      messages: buildJudgeMessages({ event, assistantName }),
-      max_completion_tokens: JUDGE_MAX_TOKENS,
-      temperature: 0,
-      top_p: 1,
-    };
-    if (modelProperties.reasoning_efforts?.includes('none') === true) {
-      Object.assign(request, { enable_thinking: false, reasoning_effort: 'none' });
-    }
-    const llm = meterHelperLlm({
-      llm: new VercelAILLM({
-        providerConfig,
-        logger,
-        signal: AbortSignal.timeout(JUDGE_TIMEOUT_MS),
-        streamTimeout,
-      }),
-      identity: modelIdentity({ name: modelName, providerConfig }),
-      role: 'relevance_judge',
-      budget: tokenFactoryBudget,
+    const answer = await askModelOnce({
+      tenantId,
+      modelName,
+      modelProviderStore,
+      tokenFactoryBudget,
       usage: NO_TURN_USAGE,
       logger,
+      role: 'noticing',
+      messages: buildJudgeMessages({ event, assistantName }),
+      maxTokens: JUDGE_MAX_TOKENS,
+      timeoutMs: JUDGE_TIMEOUT_MS,
     });
-    const result = await llm.createNonStream(request);
-    const verdict = parseJudgeVerdict(contentText(result.output.content ?? null));
+    const verdict = parseJudgeVerdict(answer);
     if (verdict === undefined) {
       throw new Error('The noticing model returned an answer that could not be read.');
     }

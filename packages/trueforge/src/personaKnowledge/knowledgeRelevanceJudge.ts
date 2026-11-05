@@ -1,11 +1,11 @@
-import { VercelAILLM, type LLMCreateParams } from '@truefoundry/trueforge-core/core';
+import type { LLMCreateParams } from '@truefoundry/trueforge-core/core';
 import type { Logger } from 'winston';
 import { z } from 'zod';
 
 import type { IModelProviderStore } from '../db/modelProviderStore';
-import { modelIdentity, type TurnModelUsage } from '../runtime/modelUsage';
-import { getModelDetails } from '../runtime/sessionResources';
-import { meterHelperLlm, type TokenFactoryBudget } from '../runtime/tokenFactoryBudget';
+import type { TurnModelUsage } from '../runtime/modelUsage';
+import { askModelOnce } from '../runtime/oneShotModelCall';
+import type { TokenFactoryBudget } from '../runtime/tokenFactoryBudget';
 import type { PersonaKnowledgeHit } from './knowledgeRetrieval';
 
 export const KNOWLEDGE_RELEVANCE_JUDGE_VERSION = 'knowledge-relevance/v1';
@@ -87,16 +87,6 @@ export function parseRelevanceJudgeResponse(raw: string, candidateCount: number)
   return [...seen].sort((left, right) => left - right);
 }
 
-function assistantContentText(content: string | { type: string; text?: string; refusal?: string }[] | null): string {
-  if (typeof content === 'string') {
-    return content;
-  }
-  if (content === null) {
-    return '';
-  }
-  return content.map(part => part.text ?? part.refusal ?? '').join('');
-}
-
 /**
  * Builds the judge against the persona's own chat model — the same model that
  * will consume the knowledge block, so "helps answer" is judged by the
@@ -115,37 +105,19 @@ export function createKnowledgeRelevanceJudge(input: {
   logger: Logger;
 }): KnowledgeRelevanceJudge {
   return async (question, candidates) => {
-    const { providerConfig, modelProperties, streamTimeout } = await getModelDetails({
-      tenant_id: input.tenantId,
-      name: input.modelName,
-      store: input.modelProviderStore,
-    });
-    const request: LLMCreateParams = {
-      messages: buildRelevanceJudgeMessages(question, candidates),
-      max_completion_tokens: RELEVANCE_JUDGE_MAX_TOKENS,
-      temperature: 0,
-      top_p: 1,
-    };
-    // Same provider-extension discipline as the persona-intent preflight:
-    // extensions only when the configured model explicitly advertises `none`.
-    if (modelProperties.reasoning_efforts?.includes('none') === true) {
-      Object.assign(request, { enable_thinking: false, reasoning_effort: 'none' });
-    }
-    const llm = meterHelperLlm({
-      llm: new VercelAILLM({
-        providerConfig,
-        logger: input.logger,
-        signal: AbortSignal.timeout(RELEVANCE_JUDGE_TIMEOUT_MS),
-        streamTimeout,
-      }),
-      identity: modelIdentity({ name: input.modelName, providerConfig }),
-      role: 'relevance_judge',
-      budget: input.tokenFactoryBudget,
+    const answer = await askModelOnce({
+      tenantId: input.tenantId,
+      modelName: input.modelName,
+      modelProviderStore: input.modelProviderStore,
+      tokenFactoryBudget: input.tokenFactoryBudget,
       usage: input.modelUsage,
       logger: input.logger,
+      role: 'relevance_judge',
+      messages: buildRelevanceJudgeMessages(question, candidates),
+      maxTokens: RELEVANCE_JUDGE_MAX_TOKENS,
+      timeoutMs: RELEVANCE_JUDGE_TIMEOUT_MS,
     });
-    const result = await llm.createNonStream(request);
-    const verdict = parseRelevanceJudgeResponse(assistantContentText(result.output.content ?? null), candidates.length);
+    const verdict = parseRelevanceJudgeResponse(answer, candidates.length);
     if (verdict === undefined) {
       throw new Error('knowledge relevance judge returned an unusable verdict');
     }

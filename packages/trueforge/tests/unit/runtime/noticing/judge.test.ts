@@ -1,5 +1,14 @@
-import { buildJudgeMessages, parseJudgeVerdict } from '../../../../src/runtime/noticing/judge';
+import winston from 'winston';
+
+import { createSqliteDb } from '../../../../src/db/sqlite/client';
+import { SqliteModelProviderStore } from '../../../../src/db/sqlite/model-provider-store/SqliteModelProviderStore';
+import { SqliteTokenFactoryUsageStore } from '../../../../src/db/sqlite/token-factory-usage-store/SqliteTokenFactoryUsageStore';
+import { buildJudgeMessages, createNoticingJudge, parseJudgeVerdict } from '../../../../src/runtime/noticing/judge';
+import { askModelOnce } from '../../../../src/runtime/oneShotModelCall';
+import { createTokenFactoryBudget } from '../../../../src/runtime/tokenFactoryBudget';
 import type { NoticingEvent } from '../../../../src/schemas/reach';
+
+jest.mock('../../../../src/runtime/oneShotModelCall');
 
 const EVENT: NoticingEvent = {
   id: 'travel:x',
@@ -43,5 +52,31 @@ describe('buildJudgeMessages', () => {
     });
     expect(system?.content).toContain('a personal assistant.');
     expect(system?.content).toContain('- call:');
+  });
+});
+
+describe('createNoticingJudge', () => {
+  it('asks the model once under its own noticing role and reads the verdict', async () => {
+    jest
+      .mocked(askModelOnce)
+      .mockResolvedValueOnce('{"level":"nudge","reason":"It is today.","message":"Two things overlap."}');
+    // The stores are never read: the model call itself is replaced.
+    const db = createSqliteDb(':memory:');
+    const judge = createNoticingJudge({
+      tenantId: 'default',
+      modelName: 'provider/model',
+      assistantName: 'Pip',
+      modelProviderStore: new SqliteModelProviderStore(db),
+      tokenFactoryBudget: createTokenFactoryBudget({ store: new SqliteTokenFactoryUsageStore(db), cap: undefined }),
+      logger: winston.createLogger({ silent: true }),
+    });
+    await expect(judge({ event: { ...EVENT, kind: 'calendar_clash', evidence: 'own' } })).resolves.toEqual({
+      level: 'nudge',
+      reason: 'It is today.',
+      message: 'Two things overlap.',
+    });
+    expect(jest.mocked(askModelOnce)).toHaveBeenCalledWith(
+      expect.objectContaining({ role: 'noticing', modelName: 'provider/model' }),
+    );
   });
 });
