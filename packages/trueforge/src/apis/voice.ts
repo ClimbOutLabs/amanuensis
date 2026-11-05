@@ -14,9 +14,8 @@ import type { Logger } from 'winston';
 
 import type { ResolveRequestContext } from '../auth/identity';
 import configuration from '../config';
-import { getVoiceStatusRoute, speakVoiceRoute, transcribeVoiceRoute } from '../routes/voiceRoutes';
+import { connectVoiceRoute, getVoiceStatusRoute, speakVoiceRoute, transcribeVoiceRoute } from '../routes/voiceRoutes';
 import {
-  ConnectVoiceRequestSchema,
   MAX_SPEAK_TEXT_CHARS,
   VoiceTranscriptionSchema,
   type VoiceStatus,
@@ -295,9 +294,9 @@ export function createVoiceRouter(deps: VoiceRouterDeps) {
 
   /**
    * Asks to talk: checks voice mode can run and that the chat is the caller's, then hands out a ticket for
-   * the WebSocket. A plain route: the socket itself cannot be described in the API document.
+   * the WebSocket. The socket itself is not described in the API document.
    */
-  const connectHandler = async (c: Context) => {
+  const connectHandler: RouteHandler<typeof connectVoiceRoute> = async c => {
     if (!configuration.TTS_ENABLED) {
       return errorJson(c, {
         status: 503,
@@ -313,14 +312,7 @@ export function createVoiceRouter(deps: VoiceRouterDeps) {
         code: 'stt_unavailable',
       });
     }
-    const parsed = ConnectVoiceRequestSchema.safeParse(await c.req.json().catch(() => undefined));
-    if (!parsed.success) {
-      return errorJson(c, {
-        status: 400,
-        message: 'Send the chat to talk in. Reload the page, then try again.',
-        code: 'bad_request',
-      });
-    }
+    const request = c.req.valid('json');
     const { tenant_id, subject } = deps.resolveRequestContext(c);
     const headers: Record<string, string> = {};
     for (const name of FORWARDED_HEADERS) {
@@ -332,14 +324,14 @@ export function createVoiceRouter(deps: VoiceRouterDeps) {
     const ticket = {
       tenantId: tenant_id,
       subjectId: subject.id,
-      sessionId: parsed.data.session_id,
+      sessionId: request.session_id,
       headers,
-      timezone: parsed.data.client_timezone,
-      voice: parsed.data.voice,
+      timezone: request.client_timezone,
+      voice: request.voice,
     };
     // The chat's own route says whether this person may use it, so there is one rule for that.
     const owned = await requestAs({ ticket, selfFetch: deps.selfFetch })(
-      `/api/v1/sessions/${encodeURIComponent(parsed.data.session_id)}`,
+      `/api/v1/sessions/${encodeURIComponent(request.session_id)}`,
       { method: 'GET' },
     );
     if (!owned.ok) {
@@ -378,7 +370,7 @@ export function createVoiceRouter(deps: VoiceRouterDeps) {
   };
 
   const router = new OpenAPIHono();
-  router.post('/connect', connectHandler);
+  router.openapi(connectVoiceRoute, connectHandler);
   router.openapi(transcribeVoiceRoute, transcribeVoiceHandler);
   router.openapi(speakVoiceRoute, speakVoiceHandler);
   router.openapi(getVoiceStatusRoute, getVoiceStatusHandler);

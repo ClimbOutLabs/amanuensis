@@ -44,8 +44,31 @@ function matchesPin({ bytes, pin }: { bytes: Uint8Array; pin: PinnedModel }): bo
   return bytes.length === pin.size && sha256Of(bytes) === pin.sha256;
 }
 
-/** The verified model path under `dir`, fetching the pinned file first when it is missing or changed. */
-export async function ensureVadModel({
+/** The model path under `dir` once its size and hash match the pin; the server never fetches it. */
+export async function verifiedVadModel({
+  dir,
+  pin = SILERO_VAD_MODEL,
+}: {
+  dir: string;
+  pin?: PinnedModel;
+}): Promise<string> {
+  const target = path.join(dir, pin.fileName);
+  const bytes = await readFile(target).catch((cause: unknown) => {
+    throw new VadModelUnavailableError(
+      'Voice mode is missing its listening model. Update Aman to the latest version, then try again.',
+      { cause },
+    );
+  });
+  if (!matchesPin({ bytes, pin })) {
+    throw new VadModelUnavailableError(
+      'Voice mode found a listening model that is not the one Aman expects, so it was not used. Update Aman to the latest version, then try again.',
+    );
+  }
+  return target;
+}
+
+/** Fetches the pinned file into `dir` for host development and tests; images carry it from their build. */
+export async function downloadVadModel({
   dir,
   pin = SILERO_VAD_MODEL,
   fetchFile = fetch,

@@ -1,16 +1,21 @@
 import { act, fireEvent, render, renderHook, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { mockSetText, mockStartVoiceRecording, mockStartLiveVoice, mockReload, mockSession } = vi.hoisted(() => ({
-  mockSetText: vi.fn(),
-  mockStartVoiceRecording: vi.fn(),
-  mockStartLiveVoice: vi.fn(),
-  mockReload: vi.fn(),
-  mockSession: { remoteId: 'chat-1' as string | null },
-}));
+const { mockSetText, mockStartVoiceRecording, mockStartLiveVoice, mockReload, mockSession, mockInitialize } =
+  vi.hoisted(() => ({
+    mockInitialize: vi.fn(),
+    mockSetText: vi.fn(),
+    mockStartVoiceRecording: vi.fn(),
+    mockStartLiveVoice: vi.fn(),
+    mockReload: vi.fn(),
+    mockSession: { remoteId: 'chat-1' as string | null },
+  }));
 
 vi.mock('@assistant-ui/react', () => ({
-  useAui: () => ({ composer: () => ({ setText: mockSetText }) }),
+  useAui: () => ({
+    composer: () => ({ setText: mockSetText }),
+    threadListItem: () => ({ initialize: mockInitialize }),
+  }),
   useAuiState: (selector: (state: unknown) => unknown) =>
     selector({ composer: { text: 'existing draft' }, threadListItem: { remoteId: mockSession.remoteId } }),
 }));
@@ -535,6 +540,7 @@ describe('VoiceInputButton voice mode', () => {
   beforeEach(() => {
     setVoiceMode('off');
     mockReload.mockClear();
+    mockInitialize.mockReset();
     mockSession.remoteId = 'chat-1';
     events = undefined;
     line = { stop: vi.fn() };
@@ -607,13 +613,32 @@ describe('VoiceInputButton voice mode', () => {
     expect(getVoiceMode()).toBe('off');
   });
 
-  it('asks for a first message when the chat does not exist yet', async () => {
+  it('creates the chat first when it is new, the way the first send does, and talks in it', async () => {
     mockSession.remoteId = null;
+    mockInitialize.mockResolvedValue({ remoteId: 'fresh-chat', externalId: undefined });
     const { api, connectMock } = makeVoiceApi();
     render(composer(api));
     fireEvent.click(await screen.findByRole('button', { name: 'Start voice mode' }));
-    expect(await screen.findByText(/Send a first message/)).toBeInTheDocument();
+    await screen.findByText('Listening');
+    expect(mockInitialize).toHaveBeenCalledTimes(1);
+    expect(connectMock).toHaveBeenCalledWith(expect.objectContaining({ sessionId: 'fresh-chat' }));
+    expect(screen.queryByText(/Send a first message/)).toBeNull();
+  });
+
+  it('does not create another chat when one is already open', async () => {
+    await startVoiceMode();
+    expect(mockInitialize).not.toHaveBeenCalled();
+  });
+
+  it('shows an error and stays off when the new chat cannot be created', async () => {
+    mockSession.remoteId = null;
+    mockInitialize.mockRejectedValue(new Error('Could not start a chat. Try again.'));
+    const { api, connectMock } = makeVoiceApi();
+    render(composer(api));
+    fireEvent.click(await screen.findByRole('button', { name: 'Start voice mode' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('Could not start a chat. Try again.');
     expect(connectMock).not.toHaveBeenCalled();
+    expect(getVoiceMode()).toBe('off');
   });
 
   it('shows the server message when the line is refused', async () => {

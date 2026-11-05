@@ -18,7 +18,6 @@ import { isVoiceCaptureSupported, startVoiceRecording, type VoiceRecorder } from
 const TRANSCRIBE_ERROR_MESSAGE = 'Transcription failed, try again or type instead.';
 const MIC_UNAVAILABLE_MESSAGE = 'Microphone unavailable. Check your microphone and try again.';
 const RECORD_LIMIT_MESSAGE = 'Recording stopped at the 3-minute limit. Tap the mic to record another segment.';
-const VOICE_MODE_NEEDS_CHAT_MESSAGE = 'Send a first message to start this chat, then turn on voice mode.';
 const VOICE_MODE_FAILED_MESSAGE = 'Voice mode could not start. Check your microphone, then try again.';
 const VOICE_MODE_ENDED_MESSAGE = 'Voice mode ended because the connection closed. Tap it to start again.';
 const VOICE_MODE_MIC_LOST_MESSAGE =
@@ -263,10 +262,6 @@ function VoiceInputButtonInner({
       return;
     }
     if (acquiring || phase !== 'idle' || disabled) return;
-    if (sessionId == null) {
-      setNotice(VOICE_MODE_NEEDS_CHAT_MESSAGE);
-      return;
-    }
     setNotice(null);
     setError(null);
     // Reading a reply aloud by hand and listening at once would have the mic hear the reply.
@@ -276,7 +271,9 @@ function VoiceInputButtonInner({
     abortRef.current = controller;
     void (async () => {
       try {
-        const connection = await api.connect({ sessionId, signal: controller.signal });
+        // A new chat has no session yet; it is created the same way the first typed send creates one.
+        const chatId = sessionId ?? (await aui.threadListItem().initialize()).remoteId;
+        const connection = await api.connect({ sessionId: chatId, signal: controller.signal });
         const live = await startLiveVoice({
           connection,
           events: {
@@ -297,7 +294,7 @@ function VoiceInputButtonInner({
           return;
         }
         liveRef.current = live;
-        liveSessionRef.current = sessionId;
+        liveSessionRef.current = chatId;
         setVoiceMode('listening');
       } catch (failure) {
         if (controller.signal.aborted || !mountedRef.current) return;

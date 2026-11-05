@@ -1812,7 +1812,8 @@ export interface SharedServerConfiguration {
   TTS_ENABLED: boolean;
   /**
    * Folder that holds the small listening model voice mode uses to find where speech starts and
-   * ends. It is downloaded once, checked against a pinned hash, and kept here.
+   * ends. The image carries it, and it is checked against a pinned hash before use. Host
+   * development fetches it with `pnpm voice:model`.
    * Env: `VOICE_VAD_MODEL_DIR`. Default `<MEMORY_MARKDOWN_DIR>/.voice-model`.
    */
   VOICE_VAD_MODEL_DIR: string;

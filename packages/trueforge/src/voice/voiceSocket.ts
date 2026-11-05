@@ -23,7 +23,7 @@ import { VoiceSession, type VoiceSessionDeps } from './session';
 import { SidecarSpeechToText } from './sttClient';
 import { SidecarSpeechSynthesizer } from './ttsClient';
 import { HttpVoiceTurnRunner } from './turnRunner';
-import { ensureVadModel, SileroSpeechProbability } from './vad/sileroVad';
+import { SileroSpeechProbability, verifiedVadModel } from './vad/sileroVad';
 import { voiceTickets, type VoiceTicket } from './voiceTickets';
 
 /** A connection with no audio for this long is closed; the browser sends frames all the time while the mic is on. */
@@ -64,9 +64,9 @@ function refuse(socket: Duplex, status: string): void {
 
 let modelPath: Promise<string> | undefined;
 
-/** The verified listening model, downloaded once per process. A failure is not remembered, so a retry can work. */
+/** The verified listening model, checked once per process. A failure is not remembered, so a retry can work. */
 export function readyVadModel(): Promise<string> {
-  modelPath ??= ensureVadModel({ dir: configuration.VOICE_VAD_MODEL_DIR }).catch((error: unknown) => {
+  modelPath ??= verifiedVadModel({ dir: configuration.VOICE_VAD_MODEL_DIR }).catch((error: unknown) => {
     modelPath = undefined;
     throw error;
   });

@@ -12,7 +12,7 @@ import configuration from '../src/config';
 import { measureTurnLatency } from '../src/voice/latencyHarness';
 import type { SpeechToText, VoiceTurnRunner } from '../src/voice/transport';
 import { SidecarSpeechSynthesizer } from '../src/voice/ttsClient';
-import { ensureVadModel, SileroSpeechProbability } from '../src/voice/vad/sileroVad';
+import { downloadVadModel, SileroSpeechProbability } from '../src/voice/vad/sileroVad';
 import { syntheticRecording } from '../tests/fixtures/voice/syntheticSpeech';
 
 const { values } = parseArgs({
@@ -60,7 +60,7 @@ const recording = syntheticRecording([
   { kind: 'quiet', seconds: 1.6 },
 ]);
 
-const modelPath = await ensureVadModel({ dir: configuration.VOICE_VAD_MODEL_DIR });
+const modelPath = await downloadVadModel({ dir: configuration.VOICE_VAD_MODEL_DIR });
 const tts = new SidecarSpeechSynthesizer();
 
 const totals: number[] = [];

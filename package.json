@@ -91,6 +91,7 @@
     "test:browser-sidecar": "docker build -q -t trueforge-browser-sidecar-test ops/browser-sidecar && docker run --rm --init -e BROWSER_TESTS_REQUIRED=1 --security-opt seccomp=ops/browser-sidecar/seccomp_profile.json --cap-drop ALL --security-opt no-new-privileges:true -v \"$PWD/ops/browser-sidecar/test:/app/test:ro\" trueforge-browser-sidecar-test xvfb-run --auto-servernum node --test --test-concurrency=1 \"test/*.test.mjs\"",
     "smoke:local-sandbox": "pnpm --filter @truefoundry/trueforge smoke:local-sandbox",
     "smoke:local-sandbox:lima": "pnpm --filter @truefoundry/trueforge smoke:local-sandbox:lima",
+    "voice:model": "pnpm --filter @truefoundry/trueforge voice:model",
     "voice:latency": "pnpm --filter @truefoundry/trueforge voice:latency",
     "smoke:tokenfactory": "pnpm --filter @truefoundry/trueforge smoke:tokenfactory",
     "test:store:local": "bash scripts/test-store-local.sh",

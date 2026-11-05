@@ -7,9 +7,11 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 
 import {
-  ensureVadModel,
+  downloadVadModel,
+  SILERO_VAD_MODEL,
   SileroSpeechProbability,
   VadModelUnavailableError,
+  verifiedVadModel,
   type PinnedModel,
 } from '../../../src/voice/vad/sileroVad';
 import {
@@ -88,7 +90,7 @@ describe('UtteranceDetector', () => {
   });
 });
 
-describe('ensureVadModel', () => {
+describe('downloadVadModel', () => {
   let dir: string;
   beforeEach(async () => {
     dir = await mkdtemp(path.join(tmpdir(), 'vad-pin-'));
@@ -113,16 +115,16 @@ describe('ensureVadModel', () => {
   it('saves the pinned file and reuses it without asking again', async () => {
     const bytes = new TextEncoder().encode('model bytes');
     const pin = pinFor(bytes);
-    const target = await ensureVadModel({ dir, pin, fetchFile: answer(bytes) });
+    const target = await downloadVadModel({ dir, pin, fetchFile: answer(bytes) });
     expect(new Uint8Array(await readFile(target))).toEqual(bytes);
     const never: typeof fetch = () => Promise.reject(new Error('should not download again'));
-    await expect(ensureVadModel({ dir, pin, fetchFile: never })).resolves.toBe(target);
+    await expect(downloadVadModel({ dir, pin, fetchFile: never })).resolves.toBe(target);
   });
 
   it('refuses a download that is not the pinned file, and saves nothing', async () => {
     const pin = pinFor(new TextEncoder().encode('model bytes'));
     const other = new TextEncoder().encode('model bytez');
-    await expect(ensureVadModel({ dir, pin, fetchFile: answer(other) })).rejects.toBeInstanceOf(
+    await expect(downloadVadModel({ dir, pin, fetchFile: answer(other) })).rejects.toBeInstanceOf(
       VadModelUnavailableError,
     );
     await expect(readFile(path.join(dir, 'model.onnx'))).rejects.toThrow();
@@ -131,21 +133,60 @@ describe('ensureVadModel', () => {
   it('replaces a saved file that no longer matches the pin', async () => {
     const bytes = new TextEncoder().encode('model bytes');
     await writeFile(path.join(dir, 'model.onnx'), 'tampered');
-    const target = await ensureVadModel({ dir, pin: pinFor(bytes), fetchFile: answer(bytes) });
+    const target = await downloadVadModel({ dir, pin: pinFor(bytes), fetchFile: answer(bytes) });
     expect(new Uint8Array(await readFile(target))).toEqual(bytes);
   });
 
   it('says what to do when the download fails', async () => {
     const pin = pinFor(new TextEncoder().encode('x'));
     const down: typeof fetch = () => Promise.reject(new Error('offline'));
-    await expect(ensureVadModel({ dir, pin, fetchFile: down })).rejects.toThrow(/internet connection/);
+    await expect(downloadVadModel({ dir, pin, fetchFile: down })).rejects.toThrow(/internet connection/);
+  });
+});
+
+describe('verifiedVadModel', () => {
+  let dir: string;
+  beforeEach(async () => {
+    dir = await mkdtemp(path.join(tmpdir(), 'vad-verify-'));
+  });
+  afterEach(async () => {
+    await rm(dir, { recursive: true, force: true });
+  });
+  const bytes = new TextEncoder().encode('model bytes');
+  const pin: PinnedModel = {
+    fileName: 'model.onnx',
+    url: 'https://example.invalid/model.onnx',
+    size: bytes.length,
+    sha256: createHash('sha256').update(bytes).digest('hex'),
+  };
+
+  it('returns the path of a file that matches the pin', async () => {
+    await writeFile(path.join(dir, 'model.onnx'), bytes);
+    await expect(verifiedVadModel({ dir, pin })).resolves.toBe(path.join(dir, 'model.onnx'));
+  });
+
+  it('never downloads: a missing file says to update Aman', async () => {
+    await expect(verifiedVadModel({ dir, pin })).rejects.toThrow(/Update Aman/);
+  });
+
+  it('refuses a file that is not the pinned one', async () => {
+    await writeFile(path.join(dir, 'model.onnx'), 'model bytez');
+    await expect(verifiedVadModel({ dir, pin })).rejects.toBeInstanceOf(VadModelUnavailableError);
+  });
+});
+
+describe('the image build', () => {
+  it.each(['Dockerfile', 'Dockerfile.dev'])('%s bakes in the same listening model the server pins', async name => {
+    const text = await readFile(path.join(__dirname, '../../../../..', name), 'utf8');
+    expect(text).toContain(`--checksum=sha256:${SILERO_VAD_MODEL.sha256} ${SILERO_VAD_MODEL.url}`);
+    expect(text).toMatch(/VOICE_VAD_MODEL_DIR=\/opt\/aman-voice/);
   });
 });
 
 describe('Silero VAD on a fixture recording', () => {
   it('finds each utterance in a recording with two sentences and pauses between', async () => {
     const cacheDir = path.join(tmpdir(), 'aman-silero-vad-test');
-    const model = await SileroSpeechProbability.load({ modelPath: await ensureVadModel({ dir: cacheDir }) });
+    const model = await SileroSpeechProbability.load({ modelPath: await downloadVadModel({ dir: cacheDir }) });
     const recording = syntheticRecording([
       { kind: 'quiet', seconds: 1.0 },
       { kind: 'speech', seconds: 1.5, pitch: 120 },
