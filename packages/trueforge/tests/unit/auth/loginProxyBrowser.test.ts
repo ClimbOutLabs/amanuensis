@@ -57,18 +57,12 @@ describe('signing in through the proxied page in a real browser', () => {
   let passwordPosts: string[];
 
   beforeAll(async () => {
-    // TEMP diagnostics for slow CI launches; removed before merge.
-    const t0 = Date.now();
+    // Under the hook's 30 seconds, so a browser that stalls while starting fails with its own log
+    // (what it was waiting on) instead of a bare hook timeout.
     browser = await chromium.launch({
       executablePath: findChromiumExecutable(chromium.executablePath()),
-      logger: {
-        isEnabled: () => true,
-        log: (name, _severity, message) => {
-          process.stderr.write(`[launch +${String(Date.now() - t0)}ms] ${name}: ${String(message)}\n`);
-        },
-      },
+      timeout: 20_000,
     });
-    process.stderr.write(`[launch done +${String(Date.now() - t0)}ms]\n`);
     passwordPosts = [];
     upstream = signInService(passwordPosts);
     const upstreamPort = await listen(upstream);
