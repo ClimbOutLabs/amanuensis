@@ -2,6 +2,7 @@
 
 import type { ReactNode } from 'react';
 
+import { useComposerInputActions } from '../hooks/useComposerInputActions.js';
 import { Icon } from '../icons/Icon.js';
 import { useSlot } from '../theme/SlotsProvider.js';
 import { cn } from './lib/cn.js';
@@ -35,16 +36,14 @@ export type ComposerSendButtonSlot = (props: ComposerSendButtonProps) => ReactNo
 /** The round `+` that opens the composer's menu; the plain composer offers only attaching. */
 export function ComposerLeftSection({ disabled, isRunning, onAttach }: ComposerLeftSectionProps) {
   const DraftComposerActionsMenu = useSlot('DraftComposerActionsMenu');
-  const actions =
-    onAttach === undefined ? [] : [{ id: 'attach', label: 'Attach files', icon: 'paperclip', onSelect: onAttach }];
+  const actions = useComposerInputActions(onAttach);
 
   return <DraftComposerActionsMenu actions={actions} disabled={disabled || isRunning} />;
 }
 
-/** Hidden while a turn runs, so Stop is the only control at the end of the bar. */
+/** The mic. While a turn runs it shows only a hands-free conversation that is on, so Stop stays the main control. */
 export function ComposerRightSection({ disabled, isRunning }: ComposerRightSectionProps): ReactNode {
-  if (isRunning) return null;
-  return <VoiceInputButton disabled={disabled} />;
+  return <VoiceInputButton disabled={disabled} isRunning={isRunning} />;
 }
 
 /**

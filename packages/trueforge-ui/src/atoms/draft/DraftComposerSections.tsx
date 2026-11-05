@@ -1,5 +1,6 @@
 'use client';
 
+import { useComposerInputActions } from '../../hooks/useComposerInputActions.js';
 import { shellIsCreateAgent, useOptionalShellMode } from '../../server/ShellModeContext.js';
 import { useSlot } from '../../theme/SlotsProvider.js';
 import { ActivePersonaIndicator } from '../ActivePersonaIndicator.js';
@@ -20,6 +21,7 @@ export function DraftComposerLeftSection({ disabled, isRunning, onAttach }: Comp
   const isMobile = useIsMobile();
   const isBuilder = shell != null && shellIsCreateAgent(shell.mode);
   // The builder has no add-ons picker; its one `+` menu holds the agent settings on small screens.
+  const inputActions = useComposerInputActions(onAttach);
   const builderActions = [
     ...(isBuilder && compact
       ? [
@@ -31,7 +33,7 @@ export function DraftComposerLeftSection({ disabled, isRunning, onAttach }: Comp
           },
         ]
       : []),
-    ...(onAttach === undefined ? [] : [{ id: 'attach', label: 'Attach files', icon: 'paperclip', onSelect: onAttach }]),
+    ...inputActions,
   ];
 
   return (
@@ -54,11 +56,10 @@ export function DraftComposerRightSection({ disabled, isRunning }: ComposerRight
   const shell = useOptionalShellMode();
   const DraftModelSelector = useSlot('DraftModelSelector');
   const isBuilder = shell != null && shellIsCreateAgent(shell.mode);
-  if (isRunning) return null;
 
   return (
     <div className="flex min-w-0 items-center gap-1">
-      {!isBuilder ? <DraftModelSelector disabled={disabled} isRunning={isRunning} /> : null}
+      {!isBuilder && !isRunning ? <DraftModelSelector disabled={disabled} isRunning={isRunning} /> : null}
       <ComposerRightSection disabled={disabled} isRunning={isRunning} />
     </div>
   );

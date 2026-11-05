@@ -1,6 +1,7 @@
 import type { Transaction } from 'kysely';
 import { existsSync } from 'node:fs';
 
+import { DeliveryStore } from '../../db/deliveryStore';
 import { migrateSqliteToLatest } from '../../db/migrateSqlite';
 import { SentinelAuditStore } from '../../db/sentinelAuditStore';
 import { SqliteAgentStore } from '../../db/sqlite/agent-store/SqliteAgentStore';
@@ -54,6 +55,7 @@ export async function openSqliteStores(options: {
     tokenStore: new SqliteOAuthTokenStore(db),
     googleConnectionStore: new SqliteGoogleConnectionStore(db),
     auditStore: new SentinelAuditStore(db),
+    deliveryStore: new DeliveryStore(db),
     close: () => db.destroy(),
   };
 }

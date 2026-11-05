@@ -442,6 +442,21 @@ case "$cmd" in
         script=$(printf '%s' "$last" | sed "s#/tls#$tls_dir#g; s#/pki.mjs#$pki#g")
         PATH="$(dirname "$STUB_REAL_NODE"):/usr/bin:/bin" exec sh -c "$script"
         ;;
+      *"/push-keys.mjs"*)
+        # The push key script, run for real with the host's Node.js.
+        echo "$*" >>"$S/push_keys_runs"
+        [ -n "${STUB_PUSH_KEYS_FAIL:-}" ] && { echo "key failed" >&2; exit 1; }
+        [ -n "${STUB_REAL_NODE:-}" ] || { echo "the test host has no Node.js" >&2; exit 1; }
+        script=
+        prev=
+        for a in "$@"; do
+          if [ "$prev" = -v ]; then
+            case "$a" in *:/push-keys.mjs:ro) script=${a%:/push-keys.mjs:ro} ;; esac
+          fi
+          prev=$a
+        done
+        exec "$STUB_REAL_NODE" "$script"
+        ;;
       *"/qr.mjs"*)
         echo "$*" >>"$S/qr_runs"
         [ -n "${STUB_REAL_NODE:-}" ] || exit 1

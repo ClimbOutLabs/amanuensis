@@ -8,6 +8,7 @@ import { createServer } from 'vite';
 import { startApprovalTestServer } from '../../trueforge/tests/fixtures/approvalTestServer.ts';
 import { inProcessApi, pausedSession } from './support/approvalChat.ts';
 import { findChromiumExecutable } from './support/findChromiumExecutable.ts';
+import { FIRST_LOAD_TIMEOUT_MS } from './support/firstLoad.ts';
 import { privateViteCache } from './support/viteCache.ts';
 
 const RENDER_TIMEOUT_MS = 45_000;
@@ -86,7 +87,7 @@ test('the chat reconnects on its own after the page was in the background', { ti
     await page.addInitScript({ content: PAGE_VISIBILITY_CONTROL });
     await page.goto(`${origin}/sessions/${ids.sessionId}`, {
       waitUntil: 'domcontentloaded',
-      timeout: RENDER_TIMEOUT_MS,
+      timeout: FIRST_LOAD_TIMEOUT_MS,
     });
     await page.getByRole('button', { name: ALLOW }).first().waitFor({ timeout: RENDER_TIMEOUT_MS });
     // Let the opening load settle so the baseline is what the chat keeps showing.

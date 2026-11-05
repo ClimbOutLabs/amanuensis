@@ -1584,6 +1584,7 @@ export async function classifyUnstampedToolCall(input: {
       },
       maps_hosts: info.maps_hosts,
       document_scope: info.document_scope,
+      browser_click: info.browser_click,
     },
   });
   return { ...info, ...stampSentinelDecision({ decision }) };
@@ -2095,6 +2096,12 @@ export class AgentThread {
       'current-date',
       `Today's date is ${dateUtc} (UTC).${localDateClause} Reason about past and future relative to this date, not to your training data.`,
     );
+    if (!this.parent && this.definition.spokenReply === true) {
+      builder.addSection(
+        'spoken-reply',
+        'The person spoke this message, and the app reads your reply aloud in a voice. Answer in a few short, plain sentences, with no lists, tables, headings, links or code. Never say you cannot speak or have no voice.',
+      );
+    }
     const personName = this.parent ? undefined : this.definition.identity?.personName?.trim();
     if (personName) {
       // Escaped: the name is user-authored text, so it cannot close the wrapping tag.
@@ -3272,6 +3279,12 @@ export class AgentThread {
         bankedCount: () => this.taskState.findings.length,
       });
       tfyManagedServers.push(this.taskStateToolSet);
+    }
+    // The guide's one live tool: a host-owned exception to readOnly, set only by the
+    // host for the guide persona. It joins the managed servers so the model is
+    // offered exactly this tool set and no other.
+    if (this.definition.guideSearchToolSet !== undefined) {
+      tfyManagedServers.push(this.definition.guideSearchToolSet);
     }
     if (this.sandbox) {
       tfyManagedServers.push(this.sandbox);

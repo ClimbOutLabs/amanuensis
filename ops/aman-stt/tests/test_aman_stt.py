@@ -198,6 +198,28 @@ class TranscribeTest(unittest.TestCase):
         self.assertEqual(response.status_code, 503)
 
 
+class FasterWhisperVadTest(unittest.TestCase):
+    def test_speech_detection_runs_before_decoding(self):
+        calls = []
+
+        class Segment:
+            text = " hello"
+
+        class Info:
+            language = "en"
+
+        class Model:
+            def transcribe(self, audio, **kwargs):
+                calls.append(kwargs)
+                return iter([Segment()]), Info()
+
+        transcriber = FasterWhisperTranscriber.__new__(FasterWhisperTranscriber)
+        transcriber._model = Model()
+        text, language = transcriber.transcribe(np.zeros(16000, dtype=np.float32), None)
+        self.assertEqual((text, language), ("hello", "en"))
+        self.assertEqual(calls, [{"language": None, "vad_filter": True}])
+
+
 class DecodeUnitTest(unittest.TestCase):
     def test_decode_wav_rejects_empty_frames(self):
         buf = io.BytesIO()

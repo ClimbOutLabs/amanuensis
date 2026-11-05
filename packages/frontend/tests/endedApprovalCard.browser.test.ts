@@ -10,6 +10,7 @@ import { createServer } from 'vite';
 import { startApprovalTestServer, type ApprovalTestServer } from '../../trueforge/tests/fixtures/approvalTestServer.ts';
 import { inProcessApi, pausedSession, waitingCallIds } from './support/approvalChat.ts';
 import { findChromiumExecutable } from './support/findChromiumExecutable.ts';
+import { FIRST_LOAD_TIMEOUT_MS } from './support/firstLoad.ts';
 import { screenshotDir } from './support/screenshotDir.ts';
 import { privateViteCache } from './support/viteCache.ts';
 
@@ -66,7 +67,7 @@ async function endRequest(api: ApprovalTestServer, ids: { sessionId: string; pau
 }
 
 async function openChat(page: Page, origin: string, sessionId: string): Promise<void> {
-  await page.goto(`${origin}/sessions/${sessionId}`, { waitUntil: 'domcontentloaded', timeout: RENDER_TIMEOUT_MS });
+  await page.goto(`${origin}/sessions/${sessionId}`, { waitUntil: 'domcontentloaded', timeout: FIRST_LOAD_TIMEOUT_MS });
   await page.getByText('run:inert_write please').first().waitFor({ timeout: RENDER_TIMEOUT_MS });
 }
 

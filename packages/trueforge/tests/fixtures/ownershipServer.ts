@@ -75,6 +75,7 @@ import { createSentinelServices } from '../../src/runtime/sentinelServices';
 import { TurnDrainRegistry } from '../../src/runtime/turnDrains';
 import { TENANT_ID } from '../../src/tenancy';
 import { createPostgresTestDatabase } from '../db/postgres/testDatabase';
+import { deliveryDeps } from './deliveryDeps';
 import { INERT_SERVER_NAME, startInertMcpServer, type InertMcpServer } from './inertMcpServer';
 import { startScriptedModelServer, type ScriptedModelServer } from './scriptedModelServer';
 import { uncappedTokenFactoryBudget } from './uncappedTokenFactoryBudget';
@@ -301,6 +302,7 @@ async function startSqlite(): Promise<OwnershipServer> {
     sentinelAuditStore,
     sentinelSettingsStore,
     briefItemStore: new BriefItemCompletionStore(db),
+    ...deliveryDeps(db),
     sessions: new Sessions({ sessionStore, sentinelServices }),
     resolveModelProviderStore: () => modelProviderStore,
     resolveMcpServerStore: () => mcpServerStore,
@@ -405,6 +407,7 @@ async function startPostgres(): Promise<OwnershipServer | undefined> {
     sentinelAuditStore,
     sentinelSettingsStore,
     briefItemStore: new BriefItemCompletionStore(db),
+    ...deliveryDeps(db),
     sessions: new Sessions({ sessionStore, sentinelServices }),
     resolveModelProviderStore: () => modelProviderStore,
     resolveMcpServerStore: () => mcpServerStore,
