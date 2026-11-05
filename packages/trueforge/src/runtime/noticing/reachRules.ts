@@ -5,9 +5,9 @@ import { isQuietNow } from './quietHours';
 
 /** What the person's recent days say about how much has already reached them. */
 export interface ReachHistory {
-  /** Nudges delivered since their day began. */
+  /** Nudges about what the assistant noticed, delivered since the person's day began. Reminders are not counted. */
   nudges_today: number;
-  /** When a call was last decided, or undefined when none was. */
+  /** When something last went out as a call, or undefined when nothing has. */
   last_call_at: Date | undefined;
 }
 
@@ -84,7 +84,7 @@ export function applyReachRules({
       now.getTime() - history.last_call_at.getTime() < settings.min_hours_between_calls * 3_600_000
     ) {
       level = 'nudge';
-      steps.push(`A call was already due in the last ${String(settings.min_hours_between_calls)} hours.`);
+      steps.push(`You already had a call in the last ${String(settings.min_hours_between_calls)} hours.`);
     }
   }
 

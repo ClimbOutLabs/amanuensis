@@ -71,6 +71,7 @@ async function setup({
   exhausted = false,
   judgeDelay,
   mailPage = 100,
+  saved = true,
 }: {
   settings?: Partial<ReachSettings>;
   messages?: MailMessage[];
@@ -85,20 +86,24 @@ async function setup({
   judgeDelay?: Promise<void>;
   /** Most messages the mail source hands over in one read; past it, it says there is more. */
   mailPage?: number;
+  /** False for a person who never saved Reach me. */
+  saved?: boolean;
 } = {}) {
   const clock = { now: NOW };
   const channelState = { current: channels };
   const db = createSqliteDb(':memory:');
   await migrateSqliteToLatest(db);
   const reachSettings = new ReachSettingsStore(db);
-  await reachSettings.put({
-    ...OWNER,
-    settings: {
-      ...defaultReachSettings('UTC'),
-      quiet_hours: { enabled: false, start: '21:00', end: '08:00' },
-      ...settings,
-    },
-  });
+  if (saved) {
+    await reachSettings.put({
+      ...OWNER,
+      settings: {
+        ...defaultReachSettings('UTC'),
+        quiet_hours: { enabled: false, start: '21:00', end: '08:00' },
+        ...settings,
+      },
+    });
+  }
   const store = new NoticingStore(db);
   const deliveryStore = new DeliveryStore(db);
   const pushed: Delivery[] = [];
@@ -159,6 +164,7 @@ async function setup({
       logger: winston.createLogger({ silent: true }),
       now: () => clock.now,
       sleep: () => new Promise(resolve => setTimeout(resolve, 5)),
+      timezoneFor: () => Promise.resolve('Pacific/Auckland'),
     });
   const service = makeService();
   const feed = async () => (await deliveryStore.list({ ...OWNER, limit: 50 })).deliveries;
@@ -792,6 +798,29 @@ describe('passes that fail, stop or overlap', () => {
     await service.run({ watcher: 'calendar' });
     const [newest] = await feed();
     expect(newest).toMatchObject({ level: 'nudge' });
+  });
+
+  it('reads the day in the person’s own time zone when they never saved Reach me', async () => {
+    const { service, deliveryStore, feed } = await setup({
+      saved: false,
+      events: clash,
+      verdict: { level: 'nudge', reason: 'Today matters.', message: 'This matters today.' },
+    });
+    // Five nudges on the evening of 5 November in Auckland, which in UTC is the same day as the pass.
+    for (let index = 0; index < 5; index += 1) {
+      await deliveryStore.create({
+        ...OWNER,
+        kind: 'nudge',
+        level: 'nudge',
+        text: `Earlier ${String(index)}`,
+        reason: 'Earlier.',
+        link: null,
+        created_at: new Date('2026-11-05T10:00:00.000Z'),
+      });
+    }
+    await service.run({ watcher: 'calendar' });
+    const [newest] = await feed();
+    expect(newest).toMatchObject({ text: 'This matters today.', level: 'nudge' });
   });
 
   it('lets a call through after a call that only went out as a nudge', async () => {

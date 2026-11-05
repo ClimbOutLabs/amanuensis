@@ -5,6 +5,7 @@ import type { OIDCConfig } from '../config';
 import type { IGlobalSettingsStore } from '../db/globalSettingsStore';
 import type { IPersonalizationStore } from '../db/personalizationStore';
 import type { PersonalizationProfileContent } from '../personalization/profile';
+import { oidcOwnerSubjectId } from './instanceOwner';
 
 /** Global-settings key whose presence means the installer's name for the owner was already offered once. */
 export const OWNER_NAME_SEEDED_KEY = 'owner_name_seeded';
@@ -99,9 +100,8 @@ export async function seedOwnerNameAtBoot({
   personalizationStore: IPersonalizationStore;
   tenant_id: string;
 }): Promise<void> {
-  const owner = oidc?.OIDC_USER_REFERENCE_CLAIM === 'email' ? oidc.OIDC_ALLOWED_EMAILS : [];
-  const ownerSubjectId = owner.length === 1 ? owner[0] : undefined;
-  if (owner_name === '' || ownerSubjectId === undefined || ownerSubjectId.includes('*')) {
+  const ownerSubjectId = oidcOwnerSubjectId(oidc);
+  if (owner_name === '' || ownerSubjectId === undefined) {
     return;
   }
   try {

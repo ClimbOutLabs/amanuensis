@@ -141,7 +141,7 @@ export type ReachAvailability = z.infer<typeof ReachAvailabilitySchema>;
 export const ReachViewSchema = z
   .object({
     settings: ReachSettingsSchema,
-    saved: z.boolean().describe('False until the person saves once. Then the settings are the quiet defaults.'),
+    saved: z.boolean().describe('False until the person saves once. While false, the settings are the quiet defaults.'),
     availability: ReachAvailabilitySchema,
     max_levels: z
       .record(NoticingKindSchema, DeliveryLevelSchema)

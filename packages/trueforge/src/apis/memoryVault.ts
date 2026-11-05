@@ -57,10 +57,6 @@ function exportedEntry({ id, text, timestamp, persona, context }: VaultEntry): M
   return { id, text: withHiddenContext({ text, context }), timestamp, persona };
 }
 
-function vaultClient(deps: MemoryVaultRouterDeps, tenantId: string): MarkdownMemoryClient | undefined {
-  return createVaultClient({ logger: deps.logger, tenantId });
-}
-
 function markdownBackendRequired(c: Context) {
   return c.json(
     {
@@ -117,7 +113,7 @@ export function createMemoryVaultRouter(deps: MemoryVaultRouterDeps) {
   const listHandler: RouteHandler<typeof listMemoryVaultEntriesRoute> = async c => {
     const { namespace } = c.req.valid('query');
     const requestContext = deps.resolveRequestContext(c);
-    const client = vaultClient(deps, requestContext.tenant_id);
+    const client = createVaultClient({ logger: deps.logger, tenantId: requestContext.tenant_id });
     if (client === undefined) {
       return markdownBackendRequired(c);
     }
@@ -132,7 +128,7 @@ export function createMemoryVaultRouter(deps: MemoryVaultRouterDeps) {
     const { entry_id: entryId } = c.req.valid('param');
     const body = c.req.valid('json');
     const requestContext = deps.resolveRequestContext(c);
-    const client = vaultClient(deps, requestContext.tenant_id);
+    const client = createVaultClient({ logger: deps.logger, tenantId: requestContext.tenant_id });
     if (client === undefined) {
       return markdownBackendRequired(c);
     }
@@ -149,7 +145,7 @@ export function createMemoryVaultRouter(deps: MemoryVaultRouterDeps) {
   const deleteHandler: RouteHandler<typeof deleteMemoryVaultEntryRoute> = async c => {
     const { entry_id: entryId } = c.req.valid('param');
     const requestContext = deps.resolveRequestContext(c);
-    const client = vaultClient(deps, requestContext.tenant_id);
+    const client = createVaultClient({ logger: deps.logger, tenantId: requestContext.tenant_id });
     if (client === undefined) {
       return markdownBackendRequired(c);
     }
@@ -166,7 +162,7 @@ export function createMemoryVaultRouter(deps: MemoryVaultRouterDeps) {
   const exportHandler: RouteHandler<typeof exportMemoryVaultRoute> = async c => {
     const { namespace } = c.req.valid('query');
     const requestContext = deps.resolveRequestContext(c);
-    const client = vaultClient(deps, requestContext.tenant_id);
+    const client = createVaultClient({ logger: deps.logger, tenantId: requestContext.tenant_id });
     if (client === undefined) {
       return markdownBackendRequired(c);
     }
@@ -255,7 +251,7 @@ export function createMemoryVaultRouter(deps: MemoryVaultRouterDeps) {
   const summaryStatusHandler: RouteHandler<typeof getMemoryVaultSummaryStatusRoute> = async c => {
     const { namespace } = c.req.valid('query');
     const requestContext = deps.resolveRequestContext(c);
-    const client = vaultClient(deps, requestContext.tenant_id);
+    const client = createVaultClient({ logger: deps.logger, tenantId: requestContext.tenant_id });
     if (client === undefined) {
       return markdownBackendRequired(c);
     }

@@ -3,14 +3,15 @@
 import { useCallback, useEffect, useState, type ReactNode } from 'react';
 
 import { useAssistantDisplayName } from '../components/PersonalizationContext.js';
-import type {
-  NoticingKind,
-  ReachApi,
-  ReachSender,
-  ReachSettings,
-  ReachSuggestion,
-  ReachTestChannel,
-  ReachView,
+import {
+  NOTICING_KINDS,
+  type NoticingKind,
+  type ReachApi,
+  type ReachSender,
+  type ReachSettings,
+  type ReachSuggestion,
+  type ReachTestChannel,
+  type ReachView,
 } from './types.js';
 
 const KIND_WORDS: Record<NoticingKind, string> = {
@@ -20,9 +21,6 @@ const KIND_WORDS: Record<NoticingKind, string> = {
   bill_due: 'A bill or deadline coming up',
   approval_waiting: 'An approval waiting for you',
 };
-
-/** The order kinds are listed in. */
-const KINDS: readonly NoticingKind[] = ['mail_always', 'calendar_clash', 'travel', 'bill_due', 'approval_waiting'];
 
 const CARD = 'border-border rounded-xl border p-4';
 const INPUT = 'border-border bg-transparent text-text-primary rounded-lg border px-2 py-1 text-sm';
@@ -133,7 +131,9 @@ export function ReachPreferences({ reach }: { reach: ReachApi }) {
       setLoadError(null);
       setSuggestions(await reach.suggestions().catch((): ReachSuggestion[] => []));
     } catch (caught) {
-      setLoadError(caught instanceof Error ? caught.message : 'Your Reach me settings could not be loaded.');
+      setLoadError(
+        caught instanceof Error ? caught.message : 'Your Reach me settings could not be loaded. Reload the page.',
+      );
     }
   }, [reach]);
 
@@ -193,7 +193,7 @@ export function ReachPreferences({ reach }: { reach: ReachApi }) {
     } catch (caught) {
       setTrial(current => ({
         ...current,
-        [channel]: caught instanceof Error ? caught.message : 'That test did not go through.',
+        [channel]: caught instanceof Error ? caught.message : 'That test did not go through. Try again in a minute.',
       }));
     }
   };
@@ -216,7 +216,9 @@ export function ReachPreferences({ reach }: { reach: ReachApi }) {
   );
 
   const { availability } = view;
-  const callable = KINDS.filter(kind => view.maxLevels[kind] === 'call');
+  // Call kinds, quiet hours and the gap between calls only matter once calls exist, so they wait until then.
+  const callsReady = availability.calls.available;
+  const callable = NOTICING_KINDS.filter(kind => view.maxLevels[kind] === 'call');
   const pending = suggestions.filter(
     suggestion =>
       !draft.alwaysImportant.some(sender => sender.address === suggestion.address) &&
@@ -351,67 +353,64 @@ export function ReachPreferences({ reach }: { reach: ReachApi }) {
         )}
       </Card>
 
-      <Card
-        title="What may call you"
-        intro="Nothing calls unless you tick it here, and only when phone calls are set up. Bills and waiting approvals can nudge you but never call."
-      >
-        {callable.map(kind => (
-          <Check
-            key={kind}
-            label={KIND_WORDS[kind]}
-            checked={draft.callKinds.includes(kind)}
-            onChange={next =>
-              change({
-                callKinds: next ? [...draft.callKinds, kind] : draft.callKinds.filter(item => item !== kind),
-              })
-            }
-          />
-        ))}
-        <Check
-          label="Call me for reminders I mark urgent"
-          checked={draft.callForUrgentReminders}
-          onChange={next => change({ callForUrgentReminders: next })}
-        />
-      </Card>
-
-      <Card title="Quiet hours" intro="No calls during these hours. Nudges and notes still wait for you.">
-        <Check
-          label="Hold calls back during quiet hours"
-          checked={draft.quietHours.enabled}
-          onChange={next => change({ quietHours: { ...draft.quietHours, enabled: next } })}
-        />
-        <div className="flex flex-wrap items-center gap-2 text-sm">
-          <label className="text-text-primary flex items-center gap-2">
-            From
-            <input
-              type="time"
-              className={INPUT}
-              value={draft.quietHours.start}
-              onChange={event => change({ quietHours: { ...draft.quietHours, start: event.target.value } })}
+      {callsReady ? (
+        <>
+          <Card
+            title="What may call you"
+            intro="Nothing calls unless you tick it here. Bills and waiting approvals can nudge you but never call."
+          >
+            {callable.map(kind => (
+              <Check
+                key={kind}
+                label={KIND_WORDS[kind]}
+                checked={draft.callKinds.includes(kind)}
+                onChange={next =>
+                  change({
+                    callKinds: next ? [...draft.callKinds, kind] : draft.callKinds.filter(item => item !== kind),
+                  })
+                }
+              />
+            ))}
+            <Check
+              label="Call me for reminders I mark urgent"
+              checked={draft.callForUrgentReminders}
+              onChange={next => change({ callForUrgentReminders: next })}
             />
-          </label>
-          <label className="text-text-primary flex items-center gap-2">
-            to
-            <input
-              type="time"
-              className={INPUT}
-              value={draft.quietHours.end}
-              onChange={event => change({ quietHours: { ...draft.quietHours, end: event.target.value } })}
-            />
-          </label>
-        </div>
-        <label className="text-text-primary flex flex-wrap items-center gap-2 text-sm">
-          Time zone
-          <input
-            type="text"
-            className={`${INPUT} w-60 max-w-full`}
-            value={draft.timezone}
-            onChange={event => change({ timezone: event.target.value })}
-          />
-        </label>
-      </Card>
+          </Card>
 
-      <Card title="How often and how early">
+          <Card title="Quiet hours" intro="No calls during these hours. Nudges and notes still wait for you.">
+            <Check
+              label="Hold calls back during quiet hours"
+              checked={draft.quietHours.enabled}
+              onChange={next => change({ quietHours: { ...draft.quietHours, enabled: next } })}
+            />
+            <div className="flex flex-wrap items-center gap-2 text-sm">
+              <label className="text-text-primary flex items-center gap-2">
+                From
+                <input
+                  type="time"
+                  className={INPUT}
+                  value={draft.quietHours.start}
+                  onChange={event => change({ quietHours: { ...draft.quietHours, start: event.target.value } })}
+                />
+              </label>
+              <label className="text-text-primary flex items-center gap-2">
+                to
+                <input
+                  type="time"
+                  className={INPUT}
+                  value={draft.quietHours.end}
+                  onChange={event => change({ quietHours: { ...draft.quietHours, end: event.target.value } })}
+                />
+              </label>
+            </div>
+          </Card>
+        </>
+      ) : (
+        <p className="text-text-secondary text-sm">Call settings appear here once phone calls are set up.</p>
+      )}
+
+      <Card title="How often and how early" intro="The day starts at midnight in your time zone.">
         <NumberField
           label="Most nudges in one day"
           value={draft.maxNudgesPerDay}
@@ -420,14 +419,16 @@ export function ReachPreferences({ reach }: { reach: ReachApi }) {
           unit="nudges. After that, it waits as a note."
           onChange={next => change({ maxNudgesPerDay: next })}
         />
-        <NumberField
-          label="Fewest hours between two calls"
-          value={draft.minHoursBetweenCalls}
-          min={1}
-          max={72}
-          unit="hours"
-          onChange={next => change({ minHoursBetweenCalls: next })}
-        />
+        {callsReady ? (
+          <NumberField
+            label="Fewest hours between two calls"
+            value={draft.minHoursBetweenCalls}
+            min={1}
+            max={72}
+            unit="hours"
+            onChange={next => change({ minHoursBetweenCalls: next })}
+          />
+        ) : null}
         <NumberField
           label="Tell me about leaving"
           value={draft.travelLeadMinutes}
@@ -436,6 +437,16 @@ export function ReachPreferences({ reach }: { reach: ReachApi }) {
           unit="minutes before an event with a place"
           onChange={next => change({ travelLeadMinutes: next })}
         />
+        <label className="text-text-primary flex flex-wrap items-center gap-2 text-sm">
+          <span className="w-60 max-w-full">Time zone</span>
+          <input
+            type="text"
+            aria-label="Time zone"
+            className={`${INPUT} w-60 max-w-full`}
+            value={draft.timezone}
+            onChange={event => change({ timezone: event.target.value })}
+          />
+        </label>
         <NumberField
           label="Say so when an approval waits"
           value={draft.approvalWaitMinutes}

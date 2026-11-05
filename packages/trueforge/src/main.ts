@@ -130,6 +130,7 @@ import { sessionApprovalSource } from './runtime/noticing/approvalSource';
 import { createGoogleNoticingSources } from './runtime/noticing/googleSources';
 import { createNoticingJudgeResolver } from './runtime/noticing/judgeFactory';
 import { createNoticingService } from './runtime/noticing/noticingService';
+import { scheduleTimezoneFor } from './runtime/noticing/personTimezone';
 import { NO_PHONE_CHANNELS } from './runtime/noticing/reachChannels';
 import { createReminderReach } from './runtime/noticing/reminderReach';
 import { createSidecarNoticingSources } from './runtime/noticing/sidecarSources';
@@ -823,6 +824,7 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     budget: tokenFactoryBudget,
     channels: () => NO_PHONE_CHANNELS,
     logger,
+    timezoneFor: scheduleTimezoneFor({ scheduleStore }),
   });
   const sentinelServices = createSentinelServices({
     demoMode: configuration.DEMO_MODE,

@@ -68,6 +68,8 @@ export interface NoticingDeps {
   budget: Pick<TokenFactoryBudget, 'isExhausted'>;
   channels: () => ReachChannels;
   logger: Logger;
+  /** The time zone to read the day in for someone who never saved Reach me. */
+  timezoneFor: (owner: NoticingOwner) => Promise<string>;
   now?: () => Date;
   sleep?: (ms: number) => Promise<void>;
 }
@@ -478,7 +480,7 @@ export function createNoticingService(deps: NoticingDeps): NoticingService {
       let raised = 0;
       for (const owner of owners) {
         try {
-          const settings = (await deps.reachSettings.get(owner)) ?? defaultReachSettings('UTC');
+          const settings = (await deps.reachSettings.get(owner)) ?? defaultReachSettings(await deps.timezoneFor(owner));
           try {
             await look({ owner, watcher, settings, waiting: approvals.get(ownerKey(owner)) ?? [] });
           } catch (error) {

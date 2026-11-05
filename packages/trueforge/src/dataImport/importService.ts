@@ -80,6 +80,7 @@ import { MEMORY_SUMMARIZE_SETTING_KEY } from '../runtime/memorySummarizeSettings
 import { DEFAULT_CHAT_MODEL_SETTING_KEY } from '../runtime/tokenFactoryProvider';
 import { TOOL_OUTPUT_SCREEN_ENABLED_SETTING_KEY } from '../runtime/toolOutputScreenSettings';
 import type { ImportDataResult } from '../schemas/dataImport';
+import type { ReachSettings } from '../schemas/reach';
 import { newId } from '../utils/id';
 import { detachConnectors, normalizeImportedConnectors, withoutKeptConnector } from './connectorImport';
 import { upgradeArchivedDeliveries } from './deliveryUpgrade';
@@ -131,7 +132,6 @@ import {
   type ImportManifest,
   type ImportPersonalizationFile,
   type ImportPersonasFile,
-  type ImportReachSettings,
   type ImportScheduleRecord,
   type ImportSessionEntry,
   type ImportSessionPartRecord,
@@ -505,7 +505,7 @@ interface ArchiveContents {
   settings: ImportSettingsFile;
   audit: ImportAuditRecord[];
   deliveries: ImportDelivery[];
-  reach: ImportReachSettings[];
+  reach: ReachSettings[];
   files: ReadonlyMap<string, Buffer>;
   sourceTenantId: string;
   /** Internal details from an older version that were repaired or left out, filled in as sections are read. */
