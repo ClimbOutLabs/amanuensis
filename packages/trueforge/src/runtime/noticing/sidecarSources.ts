@@ -113,7 +113,7 @@ export function sidecarMailSource({ call, account }: { call: CallSidecarTool; ac
     });
   };
   return {
-    trustedAuthenticationServers: undefined,
+    trustedAuthenticationServers: [],
     async listNewMessages({ since, limit }) {
       const result = await call(MAIL_LIST_TOOL_NAME, {
         account_name: account,

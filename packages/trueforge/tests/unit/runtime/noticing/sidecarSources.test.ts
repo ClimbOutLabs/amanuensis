@@ -57,7 +57,7 @@ describe('sidecar mail source (IMAP)', () => {
     });
     expect(await source.readText(messages[0] ?? EMAIL_MESSAGE)).toBe('Amount due by November 7');
     expect(calls.at(-1)?.[1]).toMatchObject({ mark_as_read: false });
-    expect(source.trustedAuthenticationServers).toBeUndefined();
+    expect(source.trustedAuthenticationServers).toEqual([]);
   });
 
   it('treats an always-important sender as ordinary mail, so only a bill note can come of it', async () => {

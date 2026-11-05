@@ -310,6 +310,9 @@ importers:
       sqlite-vec:
         specifier: ^0.1.6
         version: 0.1.9
+      tldts:
+        specifier: 7.4.10
+        version: 7.4.10
       ulid:
         specifier: ^3.0.2
         version: 3.0.2
@@ -513,6 +516,9 @@ importers:
       sqlite-vec:
         specifier: ^0.1.6
         version: 0.1.9
+      tldts:
+        specifier: 7.4.10
+        version: 7.4.10
       ulid:
         specifier: ^3.0.2
         version: 3.0.2

@@ -33,8 +33,8 @@ export interface MailSource {
   readText(message: MailMessage): Promise<string>;
   /** The text of messages that came after this one in its thread, oldest first. */
   laterInThread(message: MailRef): Promise<string[]>;
-  /** The receiving servers whose Authentication-Results can be believed, or undefined when any is accepted. */
-  trustedAuthenticationServers: readonly string[] | undefined;
+  /** The receiving servers whose Authentication-Results can be believed. Empty when this source passes on none. */
+  trustedAuthenticationServers: readonly string[];
 }
 
 export interface CalendarEventInfo {
