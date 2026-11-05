@@ -388,3 +388,70 @@ describe('createHarnessChatServer turn stream reconnect', () => {
     );
   });
 });
+
+const FAILURE = 'The model service could not answer. Try again, or use a different model if it keeps happening.';
+
+function failedTurnDone(id: string): FakeStreamItem {
+  return {
+    id,
+    data: {
+      type: 'turn.done',
+      id: `evt_${id}`,
+      threadId: null,
+      createdAt: '2026-09-12T00:00:01.000Z',
+      state: { status: 'error', message: FAILURE, completedAt: '2026-09-12T00:00:01.000Z' },
+    },
+  };
+}
+
+describe('a failed turn on the live stream', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  function failure(items: { event: { type: string; state?: unknown } }[]) {
+    const done = items.find(item => item.event.type === 'turn.done');
+    assert.ok(done, 'the failed turn.done reaches the runtime');
+    return done.event.state;
+  }
+
+  it('hands the failure to the runtime as it happens, so the chat shows it without a reload', async () => {
+    const { client } = createFakeClient({
+      createTurn: () => fakeSdkStream([turnCreated('1', 'trn_1'), messageDelta('2', 'Let me'), failedTurnDone('3')]),
+      subscribeToTurn: () => fakeSdkStream([]),
+    });
+    const items = await collect(createHarnessChatServer({ client }).createTurn({ sessionId: 'ses_1', input: [] }));
+    assert.deepEqual(failure(items), { status: 'error', message: FAILURE, completedAt: '2026-09-12T00:00:01.000Z' });
+  });
+
+  it('hands the failure over after the stream reconnects', async () => {
+    const { client } = createFakeClient({
+      createTurn: () =>
+        fakeSdkStream([turnCreated('1', 'trn_1'), messageDelta('2', 'Let me')], () => new TypeError('network error')),
+      subscribeToTurn: () => fakeSdkStream([failedTurnDone('3')]),
+    });
+    const runPromise = collect(createHarnessChatServer({ client }).createTurn({ sessionId: 'ses_1', input: [] }));
+    await vi.advanceTimersByTimeAsync(60_000);
+    assert.deepEqual(failure(await runPromise), {
+      status: 'error',
+      message: FAILURE,
+      completedAt: '2026-09-12T00:00:01.000Z',
+    });
+  });
+
+  it('still ends a finished turn without a closing event', async () => {
+    const { client } = createFakeClient({
+      createTurn: () => fakeSdkStream([turnCreated('1', 'trn_1'), messageDelta('2', 'Done.'), turnDone('3')]),
+      subscribeToTurn: () => fakeSdkStream([]),
+    });
+    const items = await collect(createHarnessChatServer({ client }).createTurn({ sessionId: 'ses_1', input: [] }));
+    assert.equal(
+      items.some(item => item.event.type === 'turn.done'),
+      false,
+    );
+  });
+});
