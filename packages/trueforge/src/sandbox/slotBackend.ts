@@ -96,6 +96,7 @@ export async function startPackageMirrorGateway({
       logger: logger.child({ module: 'package-mirrors' }),
       maxDownloadBytes: configuration.SANDBOX_MIRROR_DOWNLOAD_MAX_BYTES,
       maxCacheBytes: configuration.SANDBOX_MIRROR_CACHE_MAX_BYTES,
+      extraGoModuleHosts: configuration.SANDBOX_MIRROR_GO_EXTRA_HOSTS,
     });
     await gateway.listenOnSockets(slotMirrorSocketPaths());
     logger.info('Package mirrors are listening for the sandbox slots');
