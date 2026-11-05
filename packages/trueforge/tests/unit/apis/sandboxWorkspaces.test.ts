@@ -15,11 +15,19 @@ const SLOT_ONE_SESSION = 'a'.repeat(32);
 const SLOT_ONE_ORPHAN = 'c'.repeat(32);
 const SLOT_TWO_SESSION = 'b'.repeat(32);
 
-function chatRecord(sessionId: string, title: string | null, lastTurnId: string | null): SessionRecord<SessionCustom> {
+/** The person the standalone sign-in makes every request as. */
+const YOU = 'trueforge-default';
+
+function chatRecord(
+  sessionId: string,
+  title: string | null,
+  lastTurnId: string | null,
+  owner: string = YOU,
+): SessionRecord<SessionCustom> {
   return {
     tenant_id: 'default',
     session_id: sessionId,
-    created_by_subject: { subject_id: 'user-1', subject_type: 'user', subject_display_name: 'user-1' },
+    created_by_subject: { subject_id: owner, subject_type: 'user', subject_display_name: owner },
     agent: { type: 'reference', id: 'agent-1', name: 'test-agent' },
     title,
     folder_id: null,
@@ -55,13 +63,39 @@ function turnRecord(sessionId: string, turnId: string, sandboxId: string | null)
   };
 }
 
-type WorkspacesStore = Pick<ISessionStore<SessionCustom, TurnCustom>, 'listSessions' | 'getTurn'>;
+type WorkspacesStore = Pick<ISessionStore<SessionCustom, TurnCustom>, 'findChatsBySandboxIds'>;
 
-function fakeStore(chats: SessionRecord<SessionCustom>[], turns: TurnRecord<TurnCustom>[]): WorkspacesStore {
+/** Answers the one store read the route makes, from chats and the latest turn each recorded. */
+function fakeStore(
+  chats: SessionRecord<SessionCustom>[],
+  turns: TurnRecord<TurnCustom>[],
+): WorkspacesStore & {
+  reads: string[][];
+} {
   const turnById = new Map(turns.map(turn => [turn.turn_id, turn]));
+  const reads: string[][] = [];
   return {
-    listSessions: () => Promise.resolve({ data: chats, pagination: { limit: chats.length } }),
-    getTurn: ({ turn_id }) => Promise.resolve(turnById.get(turn_id)),
+    reads,
+    findChatsBySandboxIds: ({ sandbox_ids }) => {
+      reads.push([...sandbox_ids]);
+      const wanted = new Set(sandbox_ids);
+      return Promise.resolve(
+        chats.flatMap(chat => {
+          const sandboxId =
+            chat.last_turn_id === null ? undefined : turnById.get(chat.last_turn_id)?.snapshot.sandbox_info?.sandbox_id;
+          return sandboxId !== undefined && wanted.has(sandboxId)
+            ? [
+                {
+                  session_id: chat.session_id,
+                  title: chat.title,
+                  created_by_subject_id: chat.created_by_subject.subject_id,
+                  sandbox_id: sandboxId,
+                },
+              ]
+            : [];
+        }),
+      );
+    },
   };
 }
 
@@ -132,6 +166,7 @@ describe('sandbox workspaces listing', () => {
     ]);
     expect(listing.workspaces).toEqual([
       {
+        holder: 'you',
         chat_id: 'chat-1',
         chat_title: 'Trip planning',
         sandbox_id: `s1-${SLOT_ONE_SESSION}`,
@@ -142,6 +177,7 @@ describe('sandbox workspaces listing', () => {
       },
       {
         // No chat holds this workspace: it is listed honestly, with no chat attached.
+        holder: 'none',
         chat_id: null,
         chat_title: null,
         sandbox_id: `s1-${SLOT_ONE_ORPHAN}`,
@@ -151,6 +187,7 @@ describe('sandbox workspaces listing', () => {
         last_used: '2026-10-20T09:00:00.000Z',
       },
       {
+        holder: 'you',
         chat_id: 'chat-2',
         chat_title: null,
         sandbox_id: `s2-${SLOT_TWO_SESSION}`,
@@ -159,6 +196,68 @@ describe('sandbox workspaces listing', () => {
         entries: 30,
         last_used: '2026-11-02T08:00:00.000Z',
       },
+    ]);
+  });
+
+  it("names only your own chats, and shows another person's workspace as theirs with no title", async () => {
+    const store = fakeStore(
+      [
+        chatRecord('chat-mine', 'My plans', 'turn-mine'),
+        chatRecord('chat-theirs', 'Their private chat', 'turn-theirs', 'someone-else'),
+      ],
+      [
+        turnRecord('chat-mine', 'turn-mine', `s1-${SLOT_ONE_SESSION}`),
+        turnRecord('chat-theirs', 'turn-theirs', `s2-${SLOT_TWO_SESSION}`),
+      ],
+    );
+    const { listing } = await listWorkspaces({
+      sessionStore: store,
+      listSlotWorkspaces: () =>
+        Promise.resolve([
+          {
+            slot: 1,
+            storeFreeBytes: 1000,
+            sessions: [{ session_id: SLOT_ONE_SESSION, bytes: 1, entries: 1, last_used: '2026-11-01T10:00:00.000Z' }],
+          },
+          {
+            slot: 2,
+            storeFreeBytes: 1000,
+            sessions: [{ session_id: SLOT_TWO_SESSION, bytes: 1, entries: 1, last_used: '2026-11-01T10:00:00.000Z' }],
+          },
+        ]),
+    });
+
+    expect(listing.workspaces.map(w => [w.holder, w.chat_id, w.chat_title])).toEqual([
+      ['you', 'chat-mine', 'My plans'],
+      ['someone_else', null, null],
+    ]);
+    expect(JSON.stringify(listing)).not.toContain('Their private chat');
+  });
+
+  it('looks up every reported workspace in one read, in both forms a chat may have stored', async () => {
+    const store = fakeStore([], []);
+    await listWorkspaces({
+      sessionStore: store,
+      listSlotWorkspaces: () =>
+        Promise.resolve([
+          {
+            slot: 1,
+            storeFreeBytes: 1000,
+            sessions: [
+              { session_id: SLOT_ONE_SESSION, bytes: 1, entries: 1, last_used: '2026-11-01T10:00:00.000Z' },
+              { session_id: SLOT_ONE_ORPHAN, bytes: 1, entries: 1, last_used: '2026-11-01T10:00:00.000Z' },
+            ],
+          },
+        ]),
+    });
+
+    expect(store.reads).toEqual([
+      [
+        `s1-${SLOT_ONE_SESSION}`,
+        `v1:slots:s1-${SLOT_ONE_SESSION}`,
+        `s1-${SLOT_ONE_ORPHAN}`,
+        `v1:slots:s1-${SLOT_ONE_ORPHAN}`,
+      ],
     ]);
   });
 

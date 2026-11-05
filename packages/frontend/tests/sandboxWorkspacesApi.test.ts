@@ -6,6 +6,7 @@ const LISTING = {
   slots: [{ slot: 1, workspace_count: 1, total_bytes: 4096, store_free_bytes: 1024 }],
   workspaces: [
     {
+      holder: 'you',
       chat_id: 'chat-1',
       chat_title: 'Trip planning',
       sandbox_id: `s1-${'a'.repeat(32)}`,

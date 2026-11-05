@@ -399,12 +399,14 @@ export { SANDBOX_IMAGE_URI } from './sandbox/sandboxImage';
 export { existingSandboxIdForProvider, formatSandboxId, parseSandboxId, rawSandboxId } from './sandbox/sandboxRef';
 export type { SandboxRefParts } from './sandbox/sandboxRef';
 export {
+  SandboxWorkspaceHolderSchema,
   SandboxWorkspaceListingSchema,
   SandboxWorkspaceSchema,
   SandboxWorkspaceSlotSchema,
 } from './sandbox/sandboxWorkspaceSchemas';
 export type {
   SandboxWorkspace,
+  SandboxWorkspaceHolder,
   SandboxWorkspaceListing,
   SandboxWorkspaceSlot,
 } from './sandbox/sandboxWorkspaceSchemas';

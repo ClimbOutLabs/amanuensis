@@ -13,6 +13,7 @@ import { MemorySummarizeClient } from "../resources/memorySummarize/client/Clien
 import { ModelProvidersClient } from "../resources/modelProviders/client/Client.js";
 import { RunCodeClient } from "../resources/runCode/client/Client.js";
 import { SandboxProvidersClient } from "../resources/sandboxProviders/client/Client.js";
+import { SandboxWorkspacesClient } from "../resources/sandboxWorkspaces/client/Client.js";
 import { SkillsClient } from "../resources/skills/client/Client.js";
 import { TokenFactoryUsageClient } from "../resources/tokenFactoryUsage/client/Client.js";
 import { ToolOutputScreensClient } from "../resources/toolOutputScreens/client/Client.js";
@@ -31,6 +32,7 @@ export class SettingsClient {
     protected _modelProviders: ModelProvidersClient | undefined;
     protected _runCode: RunCodeClient | undefined;
     protected _sandboxProviders: SandboxProvidersClient | undefined;
+    protected _sandboxWorkspaces: SandboxWorkspacesClient | undefined;
     protected _skills: SkillsClient | undefined;
     protected _tokenFactoryUsage: TokenFactoryUsageClient | undefined;
     protected _toolOutputScreens: ToolOutputScreensClient | undefined;
@@ -72,6 +74,10 @@ export class SettingsClient {
 
     public get sandboxProviders(): SandboxProvidersClient {
         return (this._sandboxProviders ??= new SandboxProvidersClient(this._options));
+    }
+
+    public get sandboxWorkspaces(): SandboxWorkspacesClient {
+        return (this._sandboxWorkspaces ??= new SandboxWorkspacesClient(this._options));
     }
 
     public get skills(): SkillsClient {
