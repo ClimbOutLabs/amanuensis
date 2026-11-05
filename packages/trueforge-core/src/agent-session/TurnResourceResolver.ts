@@ -227,6 +227,8 @@ export class TurnResourceResolver<
       serverSandboxAvailable?: boolean | undefined;
       /** IANA timezone name the client sent with this turn. See ITurnResourceResolver.clientTimezone. */
       clientTimezone?: string | undefined;
+      /** See ITurnResourceResolver.spokenReply. */
+      spokenReply?: boolean | undefined;
       /**
        * Host-configured model catalog for the model-identity section's
        * host-owned-facts list (e.g. IModelProviderStore.listModels, mapped and
@@ -338,6 +340,10 @@ export class TurnResourceResolver<
 
   get clientTimezone(): string | undefined {
     return this.deps.clientTimezone;
+  }
+
+  get spokenReply(): boolean | undefined {
+    return this.deps.spokenReply;
   }
 
   /** Default: no-op tracing. Override to plug in a real tracer. */
@@ -595,6 +601,7 @@ export class TurnResourceResolver<
         configuredModels,
         modelProperties: resolvedModel.modelProperties,
         clientTimezone: this.deps.clientTimezone,
+        spokenReply: this.deps.spokenReply,
         // Sub-agents receive the delegated task as a user message; their system
         // prompt is SUB_AGENT_IDENTITY (added by AgentThread), not user instructions.
         instruction: agentInfo ? undefined : spec.instructions,
