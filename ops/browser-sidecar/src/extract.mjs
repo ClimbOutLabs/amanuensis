@@ -31,7 +31,12 @@ function isVisible(element) {
   return rect.width > 0 && rect.height > 0;
 }
 
+/** An element's name as a person reads it, with characters that show nothing taken out. */
 function accessibleName(element) {
+  return visibleCharacters(rawAccessibleName(element)).trim();
+}
+
+function rawAccessibleName(element) {
   const ariaLabel = element.getAttribute('aria-label');
   if (ariaLabel !== null && ariaLabel.trim() !== '') {
     return ariaLabel.trim();
@@ -78,8 +83,35 @@ function accessibleName(element) {
   if (title !== null && title.trim() !== '') {
     return title.trim();
   }
-  const text = element.textContent?.trim() ?? '';
+  const text = visibleCharacters(element.textContent ?? '').trim();
+  if (text === '') {
+    return innerImageName(element);
+  }
   return text.length > 200 ? `${text.slice(0, 200)}…` : text;
+}
+
+/**
+ * Characters that show nothing (zero-width spaces and joiners, soft hyphens, direction marks) are taken
+ * out of a name, so a label spelled with them in the middle reads as the word a person sees.
+ */
+function visibleCharacters(text) {
+  return text.replace(/\p{Cf}/gu, '');
+}
+
+/** The name of an icon-only control: the alt text or label of the images and icons inside it. */
+function innerImageName(element) {
+  const parts = [];
+  for (const inner of element.querySelectorAll('img[alt], [aria-label], svg title')) {
+    const part = visibleCharacters(
+      inner.tagName.toLowerCase() === 'title'
+        ? (inner.textContent ?? '')
+        : (inner.getAttribute('alt') ?? inner.getAttribute('aria-label') ?? ''),
+    ).trim();
+    if (part !== '') {
+      parts.push(part);
+    }
+  }
+  return parts.join(' ');
 }
 
 function roleOf(element) {
@@ -163,11 +195,48 @@ function isFormSubmit(element) {
   if (form === null) {
     return false;
   }
-  const type = (element.getAttribute('type') ?? '').toLowerCase();
+  // The element's own `type` property, not the attribute: a button with a type the browser does not
+  // know (`type="primary"`) still submits, and the property says so where the raw attribute does not.
   if (element.tagName === 'BUTTON') {
-    return type === '' || type === 'submit';
+    return element.type === 'submit';
   }
-  return element.tagName === 'INPUT' && (type === 'submit' || type === 'image');
+  return element.tagName === 'INPUT' && (element.type === 'submit' || element.type === 'image');
+}
+
+/**
+ * The address a plain link goes to, or null for anything else. A plain link is an `<a>` or `<area>`
+ * with an http or https address of another page: the browser itself follows it with an ordinary page
+ * load. A link to a spot on the same page (`href="#"`), one that runs script (`javascript:`), one that
+ * downloads, and one that says it is a button are not plain links, because what they do is up to the
+ * page's own script.
+ */
+function linkUrlOf(element) {
+  if (element.tagName !== 'A' && element.tagName !== 'AREA') {
+    return null;
+  }
+  if (!element.hasAttribute('href') || element.hasAttribute('download')) {
+    return null;
+  }
+  const role = (element.getAttribute('role') ?? '').trim().toLowerCase();
+  if (role !== '' && role !== 'link') {
+    return null;
+  }
+  let target;
+  try {
+    target = new URL(element.href);
+  } catch {
+    return null;
+  }
+  if (target.protocol !== 'http:' && target.protocol !== 'https:') {
+    return null;
+  }
+  const here = new URL(window.location.href);
+  target.hash = '';
+  here.hash = '';
+  if (target.href === here.href) {
+    return null;
+  }
+  return element.href;
 }
 
 /** Values of every named field on the clicked button's form, for the approval card. Sensitive values are masked. */
@@ -207,9 +276,8 @@ export function elementAtPath(path) {
 }
 
 /** Field, click and form context for one element, read without changing the page. */
-export function elementInfo(path) {
-  const element = elementAtPath(path);
-  if (element === null) {
+export function elementInfoOf(element) {
+  if (!element.isConnected) {
     return null;
   }
   return {
@@ -217,6 +285,7 @@ export function elementInfo(path) {
     is_form_submit: isFormSubmit(element),
     accessible_name: accessibleName(element),
     form_values: formValuesOf(element),
+    link_url: linkUrlOf(element),
     tag: element.tagName,
   };
 }

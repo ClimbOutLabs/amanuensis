@@ -8,9 +8,12 @@
  * with the request. `browser_open` is classified in classifier.ts (`classifyBrowserOpen`) with the
  * same outbound checks a search provider's page read gets, and this module only supplies its card.
  *
- * A click is the one call that may submit something. It is Tier 3 (a card first) when it submits a
- * form, or when its accessible name matches a commit word (pay, buy, cancel a membership, and so
- * on); otherwise it is Tier 1, the same as following a link or opening a tab.
+ * A click is the one call that may submit something, and asks first (Tier 3) unless it is plainly
+ * safe. A button, a menu item, a tab, or anything else that runs the page's own script may submit
+ * whatever that script likes, whatever its label says and in whatever language, so every one of them
+ * asks. Only a plain link to another page runs without asking (Tier 1), the same as following a
+ * link, and even a link asks when it submits a form or its label is a commit word (pay, buy, cancel
+ * a membership, and so on). The word list only ever makes a click ask; it never lets one through.
  */
 import type { BrowserClickReview } from '../llm/LLMTypes';
 import {
@@ -84,8 +87,19 @@ const BROWSER_COMMIT_PHRASES: readonly string[] = ['sign up', 'check out'];
  */
 export const BROWSER_CANCEL_QUALIFIERS: readonly string[] = ['membership', 'subscription', 'plan', 'order', 'account'];
 
+/**
+ * A name as a person reads it: compatibility forms folded (a full-width letter reads as the letter),
+ * characters that show nothing taken out (a zero-width space or a soft hyphen in the middle of "pay"
+ * still reads as "pay"), lower case, and runs of spaces, hyphens and underscores as one space.
+ */
 function normalizedName(name: string): string {
-  return name.toLowerCase().replace(/[-_]/g, ' ').replace(/\s+/g, ' ').trim();
+  return name
+    .normalize('NFKC')
+    .replace(/\p{Cf}/gu, '')
+    .toLowerCase()
+    .replace(/[-_]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
 function hasWord(text: string, word: string): boolean {
@@ -108,19 +122,32 @@ export function matchesCommitWord(accessibleName: string): boolean {
   return hasWord(text, 'cancel') && BROWSER_CANCEL_QUALIFIERS.some(qualifier => hasWord(text, qualifier));
 }
 
+/** Why a click asks first, or that it does not: the one place the click rules are decided. */
+export type BrowserClickKind = 'form_submit' | 'not_a_link' | 'commit_word' | 'explore';
+
 /**
- * Whether a click is a commit (Tier 3) or an explore (Tier 1): a form submit, or a commit word on
- * the element's accessible name. Links, tabs, menus and "show more" fall through as explore.
+ * Whether a click asks first, and why. A form submit asks. Anything that is not a plain link asks,
+ * because the page's own script decides what it does. A plain link asks when its label is a commit
+ * word. Only a plain link with an ordinary label is an explore (Tier 1).
  */
-export function classifyBrowserClickKind(input: {
-  accessible_name: string;
-  is_form_submit: boolean;
-}): 'commit' | 'explore' {
-  if (input.is_form_submit) {
-    return 'commit';
+export function classifyBrowserClickKind(
+  review: Pick<BrowserClickReview, 'accessible_name' | 'is_form_submit' | 'link_url'>,
+): BrowserClickKind {
+  if (review.is_form_submit) {
+    return 'form_submit';
   }
-  return matchesCommitWord(input.accessible_name) ? 'commit' : 'explore';
+  if (review.link_url === null) {
+    return 'not_a_link';
+  }
+  return matchesCommitWord(review.accessible_name) ? 'commit_word' : 'explore';
 }
+
+const COMMIT_REASON_DETAIL: Record<Exclude<BrowserClickKind, 'explore'>, string> = {
+  form_submit: 'Submits a form, so Aman always asks first.',
+  not_a_link:
+    'A button or other control can send something to the site, whatever its label says, so Aman always asks first.',
+  commit_word: 'Its label is a word Aman always asks about first: a pay, buy, send, delete, cancel or similar action.',
+};
 
 function shown(text: string): string {
   return escapeDisplayText(text).replace(/"/g, '\\"');
@@ -173,7 +200,7 @@ export function classifyBrowserViewTool(
 
 /**
  * Tier rules for the browser's tools that act on the open page: typing and picking an option run
- * without asking, and a click asks first only when it is a commit. Returns undefined for any
+ * without asking, and a click asks first unless it is a plain link (see `classifyBrowserClickKind`). Returns undefined for any
  * other tool, and for a click the host could not read context for, so the generic path
  * classifies it (fail closed).
  */
@@ -199,23 +226,18 @@ export async function classifyBrowserActionTool({
     if (review === undefined) {
       return undefined;
     }
-    const kind = classifyBrowserClickKind({
-      accessible_name: review.accessible_name,
-      is_form_submit: review.is_form_submit,
-    });
+    const kind = classifyBrowserClickKind(review);
     if (kind === 'explore') {
       return tier1Decision({
         reason: BROWSER_EXPLORE_REASON,
-        reason_detail: 'Follows a link, opens a tab, or another click that submits nothing.',
+        reason_detail: 'Follows a plain link to another page. Nothing is submitted.',
         sensitive_read: false,
       });
     }
     return tier3Decision({
       card: commitClickCard(review),
       reason: BROWSER_COMMIT_REASON,
-      reason_detail: review.is_form_submit
-        ? 'Submits a form, so Aman always asks first.'
-        : 'Its label is a word Aman always asks about first: a pay, buy, send, delete, cancel or similar action.',
+      reason_detail: COMMIT_REASON_DETAIL[kind],
       sensitive_read: false,
       approval_token_id: await mintToken(),
     });

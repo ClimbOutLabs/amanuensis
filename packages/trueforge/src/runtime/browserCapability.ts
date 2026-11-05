@@ -76,6 +76,7 @@ const ClickInfoReplySchema = z.discriminatedUnion('status', [
     accessible_name: z.string(),
     is_form_submit: z.boolean(),
     form_values: z.record(z.string(), z.string()),
+    link_url: z.string().nullable(),
   }),
   RefusedReplySchema,
   MovedReplySchema,
@@ -109,6 +110,9 @@ const REFUSAL_MESSAGES: Record<string, string> = {
   unknown_ref: 'That part of the page is gone. Read the page again to get a fresh ref, then try again.',
   stale_ref: 'That part of the page is gone. Read the page again to get a fresh ref, then try again.',
   no_such_option: 'That option is not on the list. Read the page again to see the choices, then try again.',
+  changed:
+    'That part of the page changed after Aman checked the click, so it was not clicked. Read the page again, then try again.',
+  unchecked: 'Aman could not check this click first, so it was not clicked. Read the page again, then try again.',
 };
 
 function refusalMessage(reason: string): string {
@@ -246,6 +250,7 @@ class BrowserTool extends LocalToolMCP {
       accessible_name: result.body.accessible_name,
       is_form_submit: result.body.is_form_submit,
       form_values: result.body.form_values,
+      link_url: result.body.link_url,
     };
     return { ...info, browser_click: review };
   }
@@ -339,9 +344,17 @@ class BrowserTool extends LocalToolMCP {
       name: BROWSER_CLICK_TOOL_NAME,
       annotations: BROWSER_CLICK_ANNOTATIONS,
       description:
-        'Click a link, button, tab or other element on the open page, by its ref from browser_read. A click that submits a form, or whose label is a word like pay, buy, send, delete, cancel a membership and similar, shows the person an approval card first; everything else runs right away.',
+        'Click a link, button, tab or other element on the open page, by its ref from browser_read. A plain link to another page runs right away. A button, tab, menu or any other control shows the person an approval card first, and so does a link that submits a form or whose label is a word like pay, buy, send, delete or cancel a membership. If the page changed since it was read, the click is refused: read the page again, then click.',
       schema: CLICK_INPUT_SCHEMA,
-      handler: async (input: BrowserClickInput) => this.page('/click', input),
+      // The click carries the read it was classified from, and the browser presses the element only
+      // while it still reads that way: an earlier click in the same reply may have changed the page.
+      handler: async (input: BrowserClickInput, _approval, context) => {
+        const expect = context?.browser_click_precondition;
+        if (expect === undefined) {
+          return errorResponse(refusalMessage('unchecked'));
+        }
+        return this.page('/click', { ref: input.ref, expect });
+      },
     }),
   ];
 

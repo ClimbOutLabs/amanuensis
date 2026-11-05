@@ -169,6 +169,20 @@ async function withWorld(run) {
         res.writeHead(302, { location: 'http://site-b.test/inbox', 'cache-control': 'no-store' }).end();
       };
     })(),
+    // Two pages whose first control both get ref e1: a link on the first, an order button on the second.
+    '/two-step': html(`<h1>Item</h1><a href="/two-step-order">Show details</a>`),
+    '/two-step-order': html(`<h1>Your order</h1>
+      <form method="POST" action="/order"><button>Place order for $500</button></form>`),
+    // Labels and links the click check must read the way a person sees them.
+    '/labels': html(`<h1>Labels</h1>
+      <button type="button">Jetzt bezahlen</button>
+      <button type="button" style="width: 40px; height: 24px"><img alt="Delete" src="data:image/gif;base64,R0lGODlhAQABAAAAACw="></button>
+      <button type="button">Pa&#8203;y&shy;ment</button>
+      <form><input name="q" value="shoes"><button type="primary">Go</button></form>
+      <a href="/help">Help center</a>
+      <a href="#">Hash link</a>
+      <a href="javascript:void 0">Script link</a>
+      <a href="/menu" role="button">Button link</a>`),
     '*': html('<h1>Other page</h1>'),
   });
 
@@ -686,12 +700,108 @@ test('click performs a real click and reads the result', { skip: !browsersAvaila
   await withWorld(async ({ sidecar }) => {
     const opened = await sidecar.open({ owner: 'owner-1', tab: 'chat-1', url: 'http://site-a.test/checkout' });
     const ref = refFor(opened.text, 'Cancel');
-    const clicked = await sidecar.click({ owner: 'owner-1', tab: 'chat-1', ref });
+    const { status, ...expect } = await sidecar.clickInfo({ owner: 'owner-1', tab: 'chat-1', ref });
+    assert.equal(status, 'ok');
+    const clicked = await sidecar.click({ owner: 'owner-1', tab: 'chat-1', ref, expect });
     assert.equal(clicked.status, 'ok');
     // The dialog's own script closed it; the page is otherwise unchanged.
     assert.match(clicked.text, /Checkout/);
   });
 });
+
+test(
+  'a second click checked against the first page is refused once the first click moved to another page',
+  { skip: !browsersAvailable },
+  async () => {
+    await withWorld(async ({ sidecar, siteA }) => {
+      const opened = await sidecar.open({ owner: 'owner-1', tab: 'chat-1', url: 'http://site-a.test/two-step' });
+      const ref = refFor(opened.text, 'Show details');
+      assert.equal(ref, 'e1');
+      // Both calls of one reply are checked before either runs, so both carry the first page's read.
+      const { status, ...expect } = await sidecar.clickInfo({ owner: 'owner-1', tab: 'chat-1', ref });
+      assert.equal(status, 'ok');
+      assert.equal(expect.link_url, 'http://site-a.test/two-step-order');
+      const first = await sidecar.click({ owner: 'owner-1', tab: 'chat-1', ref, expect });
+      assert.equal(first.status, 'ok');
+      assert.match(first.text, /\[e1\][^\n]*Place order for \$500/);
+      const second = await sidecar.click({ owner: 'owner-1', tab: 'chat-1', ref, expect });
+      assert.deepEqual(second, { status: 'refused', reason: 'changed' });
+      await settle();
+      assert.equal(
+        siteA.hits.some(hit => hit.method === 'POST'),
+        false,
+      );
+      // The order button is still there, unclicked, for a fresh check of its own.
+      const read = await sidecar.read({ owner: 'owner-1', tab: 'chat-1' });
+      assert.match(read.text, /Place order for \$500/);
+    });
+  },
+);
+
+test('a click with no checked read is refused before the page is touched', { skip: !browsersAvailable }, async () => {
+  await withWorld(async ({ sidecar, siteA }) => {
+    const opened = await sidecar.open({ owner: 'owner-1', tab: 'chat-1', url: 'http://site-a.test/checkout' });
+    const ref = refFor(opened.text, 'Place order');
+    for (const expect of [undefined, null, {}, { site: 'site-a.test' }]) {
+      const clicked = await sidecar.click({ owner: 'owner-1', tab: 'chat-1', ref, expect });
+      assert.deepEqual(clicked, { status: 'refused', reason: 'unchecked' });
+    }
+    await settle();
+    assert.equal(
+      siteA.hits.some(hit => hit.method === 'POST'),
+      false,
+    );
+  });
+});
+
+test('a click whose element now reads differently is refused as changed', { skip: !browsersAvailable }, async () => {
+  await withWorld(async ({ sidecar, siteA }) => {
+    const opened = await sidecar.open({ owner: 'owner-1', tab: 'chat-1', url: 'http://site-a.test/checkout' });
+    const ref = refFor(opened.text, 'Place order');
+    const { status, ...checked } = await sidecar.clickInfo({ owner: 'owner-1', tab: 'chat-1', ref });
+    assert.equal(status, 'ok');
+    const changes = [
+      { accessible_name: 'Show details' },
+      { is_form_submit: false },
+      { site: 'site-b.test' },
+      { form_values: { ...checked.form_values, name: 'Someone else' } },
+      { form_values: { ...checked.form_values, extra: 'x' } },
+      { link_url: 'http://site-a.test/' },
+    ];
+    for (const change of changes) {
+      const clicked = await sidecar.click({ owner: 'owner-1', tab: 'chat-1', ref, expect: { ...checked, ...change } });
+      assert.deepEqual(clicked, { status: 'refused', reason: 'changed' }, JSON.stringify(change));
+    }
+    await settle();
+    assert.equal(
+      siteA.hits.some(hit => hit.method === 'POST'),
+      false,
+    );
+  });
+});
+
+test(
+  'click-info reads names as a person sees them, and tells a plain link apart',
+  { skip: !browsersAvailable },
+  async () => {
+    await withWorld(async ({ sidecar }) => {
+      const opened = await sidecar.open({ owner: 'owner-1', tab: 'chat-1', url: 'http://site-a.test/labels' });
+      const read = async label => {
+        const ref = refFor(opened.text, label);
+        assert.notEqual(ref, undefined, label);
+        return sidecar.clickInfo({ owner: 'owner-1', tab: 'chat-1', ref });
+      };
+      assert.equal((await read('Jetzt bezahlen')).link_url, null);
+      assert.equal((await read('Delete')).accessible_name, 'Delete');
+      assert.equal((await read('Payment')).accessible_name, 'Payment');
+      assert.equal((await read('Go')).is_form_submit, true);
+      assert.equal((await read('Help center')).link_url, 'http://site-a.test/help');
+      for (const label of ['Hash link', 'Script link', 'Button link']) {
+        assert.equal((await read(label)).link_url, null, label);
+      }
+    });
+  },
+);
 
 test('a ref resolves back to the DOM path it was given to, and an unknown ref resolves to nothing', async () => {
   const { RefAssigner } = await import('../src/snapshot.mjs');
@@ -722,8 +832,24 @@ async function withFakeSidecar(run) {
       .end(JSON.stringify({ ok: true, url: 'http://site-a.test/' }));
   });
   await new Promise(resolve => gateway.listen(0, '127.0.0.1', resolve));
-  const state = { elementGone: false, infoReadable: true };
-  const element = { fill: async () => undefined, click: async () => undefined };
+  const state = { elementGone: false, infoReadable: true, clicks: 0 };
+  const element = {
+    fill: async () => undefined,
+    click: async () => {
+      state.clicks += 1;
+    },
+    evaluate: async () =>
+      state.infoReadable
+        ? {
+            field_kind: null,
+            is_form_submit: false,
+            accessible_name: 'Name',
+            form_values: {},
+            link_url: null,
+            tag: 'INPUT',
+          }
+        : null,
+  };
   const page = {
     url: () => 'http://site-a.test/',
     title: async () => 'Fake page',
@@ -733,10 +859,7 @@ async function withFakeSidecar(run) {
       if (typeof script === 'string' && script.includes('return extractSnapshotNodes()')) {
         return [{ id: 'HTML:0/INPUT:0', role: 'textbox', name: 'Name', value: '', field_kind: null, actionable: true }];
       }
-      if (!state.infoReadable) {
-        return null;
-      }
-      return { field_kind: null, is_form_submit: false, accessible_name: 'Name', form_values: {}, tag: 'INPUT' };
+      throw new Error(`the fake page has no script for ${String(script).slice(0, 40)}`);
     },
     evaluateHandle: async () => ({ asElement: () => (state.elementGone ? null : element) }),
   };
@@ -777,6 +900,22 @@ test('type with a ref whose element is gone from the page is refused as a stale 
     state.elementGone = true;
     const typed = await sidecar.type({ owner: 'owner-1', tab: 'chat-1', ref: 'e1', text: 'hello' });
     assert.deepEqual(typed, { status: 'refused', reason: 'stale_ref' });
+  });
+});
+
+test('a click whose element can no longer be read is refused as a stale ref, and nothing is pressed', async () => {
+  await withFakeSidecar(async ({ sidecar, state }) => {
+    state.infoReadable = false;
+    const expect = {
+      site: 'site-a.test',
+      accessible_name: 'Name',
+      is_form_submit: false,
+      form_values: {},
+      link_url: null,
+    };
+    const clicked = await sidecar.click({ owner: 'owner-1', tab: 'chat-1', ref: 'e1', expect });
+    assert.deepEqual(clicked, { status: 'refused', reason: 'stale_ref' });
+    assert.equal(state.clicks, 0);
   });
 });
 

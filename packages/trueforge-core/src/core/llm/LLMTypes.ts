@@ -116,6 +116,12 @@ export const BrowserClickReviewSchema = z
     form_values: z
       .record(z.string(), z.string())
       .describe("Named field values on the clicked element's form, sensitive ones already masked."),
+    // A read stored before this field existed counts as not a plain link, so it asks first.
+    link_url: z
+      .string()
+      .nullable()
+      .default(null)
+      .describe('The http or https address the element is a plain link to, or null for anything else.'),
   })
   .describe('Host-read context for a browser click, used to classify it and to build its approval card.');
 

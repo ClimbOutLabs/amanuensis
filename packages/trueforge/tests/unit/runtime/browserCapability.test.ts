@@ -1,3 +1,5 @@
+import type { BrowserClickReview } from '@truefoundry/trueforge-core/core/llm/LLMTypes';
+import type { ToolInvocationContext } from '@truefoundry/trueforge-core/core/mcp/IMCPServer';
 import { NOOP_AGENT_TRACING } from '@truefoundry/trueforge-core/core/tracing/NoopAgentTracing';
 import { createLogger } from 'winston';
 
@@ -38,8 +40,8 @@ function mount(reply: (path: string) => { status?: number; json: unknown }) {
   if (toolSet === undefined) {
     throw new Error('the browser capability has no tool set');
   }
-  const call = async (name: string, args: Record<string, unknown> = {}) => {
-    const response = await toolSet.callTool({ name, arguments: args });
+  const call = async (name: string, args: Record<string, unknown> = {}, context?: ToolInvocationContext) => {
+    const response = await toolSet.callTool({ name, arguments: args }, undefined, context);
     if (!('result' in response)) {
       throw new Error('expected a tool result');
     }
@@ -169,13 +171,44 @@ describe('browser capability', () => {
     expect(sent[0]?.body).toEqual({ ref: 'e1', text: 'hunter2', owner: 'tenant-1:person-1', tab: 'chat-1' });
   });
 
-  it('browser_click sends the ref and returns the page it lands on', async () => {
+  const CHECKED: BrowserClickReview = {
+    site: 'shop.example',
+    accessible_name: 'Help center',
+    is_form_submit: false,
+    form_values: {},
+    link_url: 'https://shop.example/help',
+  };
+  const clickContext = (review: BrowserClickReview): ToolInvocationContext => ({
+    admission_provenance: { source: 'automatic' },
+    browser_click_precondition: review,
+  });
+
+  it('browser_click sends the ref with the read it was checked against, and returns the page it lands on', async () => {
     const { sent, call } = mount(() => ({ json: { status: 'ok', text: '# Done' } }));
-    const result = await call('browser_click', { ref: 'e3' });
+    const result = await call('browser_click', { ref: 'e3' }, clickContext(CHECKED));
     expect(result.isError).toBeUndefined();
     expect(textOf(result)).toContain('# Done');
     expect(sent[0]?.url).toBe('http://browser-relay:8792/click');
-    expect(sent[0]?.body).toEqual({ ref: 'e3', owner: 'tenant-1:person-1', tab: 'chat-1' });
+    expect(sent[0]?.body).toEqual({ ref: 'e3', expect: CHECKED, owner: 'tenant-1:person-1', tab: 'chat-1' });
+  });
+
+  it('browser_click with no checked read is refused without calling the browser', async () => {
+    const { sent, call } = mount(() => ({ json: { status: 'ok', text: '# Done' } }));
+    const result = await call('browser_click', { ref: 'e3' });
+    expect(result.isError).toBe(true);
+    expect(JSON.parse(textOf(result)).message).toBe(
+      'Aman could not check this click first, so it was not clicked. Read the page again, then try again.',
+    );
+    expect(sent).toEqual([]);
+  });
+
+  it('browser_click tells the model to read again when the page changed since the click was checked', async () => {
+    const { call } = mount(() => ({ json: { status: 'refused', reason: 'changed' } }));
+    const result = await call('browser_click', { ref: 'e3' }, clickContext(CHECKED));
+    expect(result.isError).toBe(true);
+    expect(JSON.parse(textOf(result)).message).toBe(
+      'That part of the page changed after Aman checked the click, so it was not clicked. Read the page again, then try again.',
+    );
   });
 
   it("toolCallInfo stamps browser_click with the sidecar's dry-run read, not from model text", async () => {
@@ -188,6 +221,7 @@ describe('browser capability', () => {
               accessible_name: 'Place order',
               is_form_submit: true,
               form_values: { card_last4: '4242' },
+              link_url: null,
             },
           }
         : { json: { status: 'ok', text: '' } },
@@ -198,6 +232,7 @@ describe('browser capability', () => {
       accessible_name: 'Place order',
       is_form_submit: true,
       form_values: { card_last4: '4242' },
+      link_url: null,
     });
     expect(sent).toEqual([
       {

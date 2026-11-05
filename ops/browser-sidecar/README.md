@@ -45,9 +45,32 @@ and names the person's profile (`owner`) and the chat's tab (`tab`).
 - `POST /scroll { owner, tab, direction }`, `POST /back { owner, tab }` — move around, then return a
   read.
 - `POST /screenshot { owner, tab }` — a PNG of the page, which the app shows to the person in the chat.
+- `POST /type { owner, tab, ref, text }` — types into a field, then returns a read. A password, payment
+  or one-time-code field is refused; the person types those themselves.
+- `POST /select { owner, tab, ref, option }` — picks an option on a dropdown, then returns a read.
+- `POST /click-info { owner, tab, ref }` — reads one element without touching it: the site, the name a
+  person sees on it, whether it submits a form, the form's values (sensitive ones masked), and the
+  address when it is a plain link. The app decides from this read whether the click asks first.
+- `POST /click { owner, tab, ref, expect }` — clicks, then returns a read. `expect` is the
+  `/click-info` read the click was checked against. The click goes ahead only while the element at the
+  ref still reads exactly that way; otherwise it is refused as `changed`, and nothing is pressed.
 
-Clicking, typing and the approval gate for actions that submit something are a later change (Phase 2
-of the browser control feature).
+## Clicks
+
+A click asks the person first unless it is a plain link to another page: an `<a>` or `<area>` with an
+`http` or `https` address the browser follows with an ordinary page load. A button, a tab, a menu, a
+link to a spot on the same page, a `javascript:` link and a link marked as a button all run the page's
+own script, which can send anything whatever the label says, so every one of them asks. A link asks
+too when it submits a form or its label is a word like pay, buy, send or delete. That word list only
+ever makes a click ask; it never lets one through.
+
+A name is read the way a person sees it: an icon-only button is named by its image's alt text or
+label, and characters that show nothing (zero-width spaces, soft hyphens) are left out.
+
+All the calls of one reply are checked before the first one runs, and refs restart on every new page.
+So a later click in a reply may find a different element at its ref than the one it was checked
+against. The `expect` read is how the sidecar catches that: it reads the very element it is about to
+press and compares it with `expect`, field by field, in one place (`sameClickReview`).
 
 ## Running it
 

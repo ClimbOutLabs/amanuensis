@@ -1,4 +1,4 @@
-import type { BrowserClickReview } from '../../../src/core/llm/LLMTypes';
+import { BrowserClickReviewSchema, type BrowserClickReview } from '../../../src/core/llm/LLMTypes';
 import {
   BROWSER_CANCEL_QUALIFIERS,
   BROWSER_COMMIT_WORDS,
@@ -43,6 +43,7 @@ function clickReview(overrides: Partial<BrowserClickReview> = {}): BrowserClickR
     accessible_name: 'Cancel',
     is_form_submit: false,
     form_values: {},
+    link_url: null,
     ...overrides,
   };
 }
@@ -144,29 +145,55 @@ describe('matchesCommitWord: "cancel" needs what it cancels', () => {
   });
 });
 
+const LINK = 'https://shop.example/help';
+
 describe('classifyBrowserClickKind', () => {
-  it('any form submit is a commit, whatever its label', () => {
-    expect(classifyBrowserClickKind({ accessible_name: 'Go', is_form_submit: true })).toBe('commit');
+  it('any form submit asks, whatever its label, even when it is a link', () => {
+    expect(classifyBrowserClickKind({ accessible_name: 'Go', is_form_submit: true, link_url: null })).toBe(
+      'form_submit',
+    );
+    expect(classifyBrowserClickKind({ accessible_name: 'Go', is_form_submit: true, link_url: LINK })).toBe(
+      'form_submit',
+    );
   });
 
-  it('a commit word is a commit even outside a form', () => {
-    expect(classifyBrowserClickKind({ accessible_name: 'Buy now', is_form_submit: false })).toBe('commit');
-  });
-
-  it('a spaced, hyphenated or underscored check out label is a commit even outside a form', () => {
-    for (const label of ['Check out', 'Check-out', 'check_out']) {
-      expect(classifyBrowserClickKind({ accessible_name: label, is_form_submit: false })).toBe('commit');
+  it('a button asks whatever its label, in any language, or with no label at all', () => {
+    for (const label of ['Show details', 'Next page', 'Cancel', 'Jetzt bezahlen', 'Comprar', '支付', 'OK', 'Yes', '']) {
+      expect(classifyBrowserClickKind({ accessible_name: label, is_form_submit: false, link_url: null })).toBe(
+        'not_a_link',
+      );
     }
   });
 
-  it('a link, a tab or "show more" is explore', () => {
+  it('a plain link with a commit word asks', () => {
+    for (const label of ['Buy now', 'Check out', 'Check-out', 'check_out', 'Cancel membership']) {
+      expect(classifyBrowserClickKind({ accessible_name: label, is_form_submit: false, link_url: LINK })).toBe(
+        'commit_word',
+      );
+    }
+  });
+
+  it('a commit word hidden with characters that show nothing still asks', () => {
+    for (const label of ['Pa\u200By now', 'De\u00ADlete', 'Sub\u200Dmit', '\uFF30ay now', 'Se\u2060nd']) {
+      expect(classifyBrowserClickKind({ accessible_name: label, is_form_submit: false, link_url: LINK })).toBe(
+        'commit_word',
+      );
+    }
+  });
+
+  it('only a plain link with an ordinary label runs without asking', () => {
     for (const label of ['Help center', 'Pricing', 'Show more', 'Next page']) {
-      expect(classifyBrowserClickKind({ accessible_name: label, is_form_submit: false })).toBe('explore');
+      expect(classifyBrowserClickKind({ accessible_name: label, is_form_submit: false, link_url: LINK })).toBe(
+        'explore',
+      );
     }
   });
 
-  it("a dialog's plain Cancel button, which closes without a request, is explore", () => {
-    expect(classifyBrowserClickKind({ accessible_name: 'Cancel', is_form_submit: false })).toBe('explore');
+  it('the commit word list never lets a button through', () => {
+    // Labels with no commit word: a button still asks, because the list only ever adds asking.
+    expect(classifyBrowserClickKind({ accessible_name: 'Pricing', is_form_submit: false, link_url: null })).not.toBe(
+      'explore',
+    );
   });
 });
 
@@ -202,10 +229,10 @@ describe('classifyTier: browser_click', () => {
     expect(decision.approval_token_id).toEqual(expect.any(String));
   });
 
-  it('a commit word outside a form also asks first', async () => {
+  it('a link with a commit word also asks first', async () => {
     const decision = await classifyTier(
       browserAction(BROWSER_CLICK_TOOL_NAME, {
-        browser_click: clickReview({ accessible_name: 'Unsubscribe', is_form_submit: false }),
+        browser_click: clickReview({ accessible_name: 'Unsubscribe', is_form_submit: false, link_url: LINK }),
       }),
       makeCtx(),
     );
@@ -213,30 +240,57 @@ describe('classifyTier: browser_click', () => {
     expect(decision.reason).toBe('browser_commit');
   });
 
-  it('a link or a tab runs without asking', async () => {
+  it('a plain link runs without asking', async () => {
     const decision = await classifyTier(
       browserAction(BROWSER_CLICK_TOOL_NAME, {
-        browser_click: clickReview({ accessible_name: 'Help center', is_form_submit: false }),
+        browser_click: clickReview({ accessible_name: 'Help center', is_form_submit: false, link_url: LINK }),
       }),
       makeCtx(),
     );
     expect(decision).toMatchObject({ tier: 1, card: null, reason: 'browser_explore' });
   });
 
-  it("a dialog's plain Cancel button runs without asking", async () => {
+  it('a button that is not in a form asks first, with a card, whatever its label', async () => {
+    for (const label of ['Show details', 'Jetzt bezahlen', '']) {
+      const decision = await classifyTier(
+        browserAction(BROWSER_CLICK_TOOL_NAME, {
+          browser_click: clickReview({ accessible_name: label, is_form_submit: false }),
+        }),
+        makeCtx(),
+      );
+      expect(decision.tier).toBe(3);
+      expect(decision.reason).toBe('browser_commit');
+      expect(decision.reason_detail).toMatch(/whatever its label says/);
+      expect(decision.approval_token_id).toEqual(expect.any(String));
+    }
+  });
+
+  it('an unlabelled button names itself as having no label on the card', async () => {
     const decision = await classifyTier(
       browserAction(BROWSER_CLICK_TOOL_NAME, {
-        browser_click: clickReview({ accessible_name: 'Cancel', is_form_submit: false }),
+        browser_click: clickReview({ accessible_name: '', is_form_submit: false }),
       }),
       makeCtx(),
     );
-    expect(decision).toMatchObject({ tier: 1, card: null, reason: 'browser_explore' });
+    expect(decision.card?.plain_what).toBe('Click "(no label)" on shop.example?');
   });
 
-  it('"Cancel membership" always asks, unlike a plain Cancel', async () => {
+  it('a stored read from before links were told apart counts as not a link, so it asks', async () => {
+    const stored = BrowserClickReviewSchema.parse({
+      site: 'shop.example',
+      accessible_name: 'Help center',
+      is_form_submit: false,
+      form_values: {},
+    });
+    expect(stored.link_url).toBeNull();
+    const decision = await classifyTier(browserAction(BROWSER_CLICK_TOOL_NAME, { browser_click: stored }), makeCtx());
+    expect(decision.tier).toBe(3);
+  });
+
+  it('"Cancel membership" on a link always asks', async () => {
     const decision = await classifyTier(
       browserAction(BROWSER_CLICK_TOOL_NAME, {
-        browser_click: clickReview({ accessible_name: 'Cancel membership', is_form_submit: false }),
+        browser_click: clickReview({ accessible_name: 'Cancel membership', is_form_submit: false, link_url: LINK }),
       }),
       makeCtx(),
     );

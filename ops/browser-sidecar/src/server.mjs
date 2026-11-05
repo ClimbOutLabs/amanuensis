@@ -23,9 +23,68 @@ const EXTRACT_MODULE = readFileSync(new URL('./extract.mjs', import.meta.url), '
 
 const EXTRACT_SCRIPT = `(() => {\n${EXTRACT_MODULE}\nreturn extractSnapshotNodes();\n})()`;
 
-/** The same bundled module, ending in a read of one element's field, submit and form context. */
-function elementInfoScript(domPath) {
-  return `(() => {\n${EXTRACT_MODULE}\nreturn elementInfo(${JSON.stringify(domPath)});\n})()`;
+/**
+ * The same bundled module as a function of one element, so a read names exactly the element a handle
+ * holds. Built with `Function` because `evaluate` passes an argument only to a function, never to a
+ * script string, and the function's source must carry the whole module with it.
+ */
+const ELEMENT_INFO_OF_HANDLE = new Function('element', `${EXTRACT_MODULE}\nreturn elementInfoOf(element);`);
+
+/**
+ * What a click is checked against: the site, the element's name, whether it submits a form, the
+ * form's values, and the address when it is a plain link. Read from the very element the click would
+ * press, or null when the page no longer has it.
+ */
+async function clickReviewOf({ tab, element }) {
+  const info = await element.evaluate(ELEMENT_INFO_OF_HANDLE);
+  if (info === null) {
+    return null;
+  }
+  return {
+    site: new URL(tab.page.url()).hostname,
+    accessible_name: info.accessible_name,
+    is_form_submit: info.is_form_submit,
+    form_values: info.form_values,
+    link_url: info.link_url,
+  };
+}
+
+const isStringRecord = value =>
+  typeof value === 'object' &&
+  value !== null &&
+  !Array.isArray(value) &&
+  Object.values(value).every(entry => typeof entry === 'string');
+
+/** A click's checked read as the app sent it, or null when it is missing or not that shape. */
+export function parseClickReview(value) {
+  if (typeof value !== 'object' || value === null) {
+    return null;
+  }
+  const { site, accessible_name, is_form_submit, form_values, link_url } = value;
+  if (
+    typeof site !== 'string' ||
+    typeof accessible_name !== 'string' ||
+    typeof is_form_submit !== 'boolean' ||
+    !isStringRecord(form_values) ||
+    (link_url !== null && typeof link_url !== 'string')
+  ) {
+    return null;
+  }
+  return { site, accessible_name, is_form_submit, form_values, link_url };
+}
+
+/** True when two reads of a click target agree on every field: the one place the comparison is made. */
+export function sameClickReview({ a, b }) {
+  const aFields = Object.keys(a.form_values).sort();
+  const bFields = Object.keys(b.form_values).sort();
+  return (
+    a.site === b.site &&
+    a.accessible_name === b.accessible_name &&
+    a.is_form_submit === b.is_form_submit &&
+    a.link_url === b.link_url &&
+    aFields.length === bFields.length &&
+    aFields.every((field, index) => field === bFields[index] && a.form_values[field] === b.form_values[field])
+  );
 }
 
 /** A URL's scheme, host without a leading `www.`, and port, or undefined for one with no host (about:blank, data:). */
@@ -405,30 +464,41 @@ export class BrowserSidecar {
     return { ok: true, tab, path, element };
   }
 
-  /** Field, submit and form context for a ref, without changing the page: the click gate's dry run. */
+  /** Field, submit, link and form context for a ref, without changing the page: the click gate's dry run. */
   async clickInfo({ owner, tab: tabId, ref }) {
     const found = await this.#elementFor({ owner, tab: tabId, ref });
     if (!found.ok) {
       return found.result;
     }
-    const info = await found.tab.page.evaluate(elementInfoScript(found.path));
-    if (info === null) {
+    const review = await clickReviewOf(found);
+    if (review === null) {
       return { status: 'refused', reason: 'stale_ref' };
     }
-    return {
-      status: 'ok',
-      site: new URL(found.tab.page.url()).hostname,
-      accessible_name: info.accessible_name,
-      is_form_submit: info.is_form_submit,
-      form_values: info.form_values,
-    };
+    return { status: 'ok', ...review };
   }
 
-  /** Performs a click already approved (or found Tier 1), then reads the page it lands on. */
-  async click({ owner, tab: tabId, ref }) {
+  /**
+   * Clicks the element at a ref, then reads the page it lands on. `expect` is the read the click was
+   * checked against (by `clickInfo`, before anything in the reply ran): the click goes ahead only while
+   * the element at the ref still reads exactly that way. An earlier click in the same reply may have
+   * changed the page, and refs restart on every new page, so the same ref can name a different element
+   * by now; that click is refused as changed, and never lands on something nobody checked.
+   */
+  async click({ owner, tab: tabId, ref, expect }) {
+    const expected = parseClickReview(expect);
+    if (expected === null) {
+      return { status: 'refused', reason: 'unchecked' };
+    }
     const found = await this.#elementFor({ owner, tab: tabId, ref });
     if (!found.ok) {
       return found.result;
+    }
+    const current = await clickReviewOf(found);
+    if (current === null) {
+      return { status: 'refused', reason: 'stale_ref' };
+    }
+    if (!sameClickReview({ a: current, b: expected })) {
+      return { status: 'refused', reason: 'changed' };
     }
     found.tab.refs.reset();
     await found.element.click({ timeout: this.#navTimeoutMs });
@@ -441,7 +511,7 @@ export class BrowserSidecar {
     if (!found.ok) {
       return found.result;
     }
-    const info = await found.tab.page.evaluate(elementInfoScript(found.path));
+    const info = await found.element.evaluate(ELEMENT_INFO_OF_HANDLE);
     if (info === null) {
       return { status: 'refused', reason: 'stale_ref' };
     }
@@ -545,7 +615,7 @@ const ROUTES = {
   'POST /back': (sidecar, where) => sidecar.back(where),
   'POST /screenshot': (sidecar, where) => sidecar.screenshot(where),
   'POST /click-info': (sidecar, where, body) => sidecar.clickInfo({ ...where, ref: body.ref }),
-  'POST /click': (sidecar, where, body) => sidecar.click({ ...where, ref: body.ref }),
+  'POST /click': (sidecar, where, body) => sidecar.click({ ...where, ref: body.ref, expect: body.expect }),
   'POST /type': (sidecar, where, body) => sidecar.type({ ...where, ref: body.ref, text: body.text }),
   'POST /select': (sidecar, where, body) => sidecar.select({ ...where, ref: body.ref, option: body.option }),
 };
