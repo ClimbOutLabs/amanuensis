@@ -7,7 +7,11 @@ import {
   SandboxPathIsDirectoryError,
 } from '../../../../src/core/sandbox/SandboxErrors';
 import { SLOT_NOT_READY_MESSAGE } from '../../../../src/core/sandbox/slots/SlotDriver';
-import { chatCapacity, SlotSandboxProvider } from '../../../../src/core/sandbox/slots/SlotSandboxProvider';
+import {
+  chatCapacity,
+  SlotFullStateLog,
+  SlotSandboxProvider,
+} from '../../../../src/core/sandbox/slots/SlotSandboxProvider';
 import { makeSilentLogger } from '../../harnessMocks';
 import { attestation, bodyOf, errorBody, FakeAgent, type FakeHandler } from './fakeAgent';
 
@@ -344,6 +348,37 @@ describe('SlotSandboxProvider', () => {
           { slot: 2, sessions: 2, capacity: 2 },
         ],
       });
+    });
+
+    test('a shared full-state log warns once while the slots stay full, across providers, and again after room came back', async () => {
+      const logger = makeSilentLogger();
+      const warn = jest.spyOn(logger, 'warn');
+      const fullStateLog = new SlotFullStateLog();
+      const started = [new FakeAgent(hard(2)), new FakeAgent(hard(2))];
+      agents.push(...started);
+      const socketPaths = await Promise.all(started.map(agent => agent.start()));
+      const makeProvider = () =>
+        new SlotSandboxProvider({
+          socketPaths,
+          defaultExecTimeoutSeconds: 60,
+          treeDiskMb: 2048,
+          fileMaxBytesForDownload: 1024,
+          logger,
+          sleepMs: () => Promise.resolve(),
+          gitBridge: undefined,
+          fullStateLog,
+        });
+
+      await makeProvider().getImageBuildStatus();
+      await makeProvider().getImageBuildStatus();
+      await expect(makeProvider().createSandbox()).rejects.toThrow(/sandbox is full/);
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(warn).toHaveBeenLastCalledWith('every sandbox slot is full', expect.anything());
+
+      fullStateLog.report({ logger, full: null });
+      await makeProvider().getImageBuildStatus();
+      expect(warn).toHaveBeenCalledTimes(2);
+      expect(warn).toHaveBeenLastCalledWith('every sandbox slot is full', expect.anything());
     });
 
     test('a shared disk (Docker VM or none) is not capped by chats', async () => {

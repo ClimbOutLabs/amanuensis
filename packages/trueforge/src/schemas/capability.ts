@@ -7,7 +7,7 @@ const SandboxCapabilitySchema = z
     reason: z
       .string()
       .optional()
-      .describe('Present when the sandbox is disabled and the provider reported why. Explains why.'),
+      .describe('Why the sandbox is off, in plain words; present only when it is off and a reason is known.'),
   })
   .openapi('SandboxCapability');
 

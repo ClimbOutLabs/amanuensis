@@ -7,7 +7,8 @@ jest.mock('../../../src/sandbox/slotBackend', () => ({
 import { OpenAPIHono } from '@hono/zod-openapi';
 import { createLogger } from 'winston';
 import { z } from 'zod';
-import { createCapabilitiesRouter } from '../../../src/apis/capabilities';
+import { createCapabilitiesRouter, SANDBOX_UNAVAILABLE_FOR_MEMBER } from '../../../src/apis/capabilities';
+import type { Authenticator } from '../../../src/auth/authenticator';
 import { resolveRequestContext } from '../../../src/auth/identity';
 import { createAuthMiddleware } from '../../../src/auth/middleware';
 import { disableOidcAuth } from '../../../src/auth/oidc';
@@ -34,12 +35,25 @@ const NOT_READY_REASON =
   "Code can't run on this computer yet. To turn it on, run `aman doctor sandbox --fix` on the computer where Aman is installed, then try again.";
 type CapabilitiesBody = z.infer<typeof CapabilitiesBodySchema>;
 
-async function capabilities(): Promise<CapabilitiesBody['data']> {
+/** Signs everyone in as a person who does not run the server. */
+const memberAuthenticator: Authenticator = {
+  authenticate: () =>
+    Promise.resolve({
+      tenant_id: 'default',
+      subject: { id: 'member', type: 'user', display_name: 'member' },
+      roles: [],
+      user_credential: null,
+    }),
+};
+
+async function capabilities(
+  authenticator: Authenticator = new StandaloneAuthenticator(),
+): Promise<CapabilitiesBody['data']> {
   disableOidcAuth();
   const db = createSqliteDb(':memory:');
   await migrateSqliteToLatest(db);
   const shell = new OpenAPIHono();
-  shell.use('*', createAuthMiddleware(new StandaloneAuthenticator()));
+  shell.use('*', createAuthMiddleware(authenticator));
   shell.route(
     '/',
     createCapabilitiesRouter({
@@ -79,6 +93,20 @@ describe('sandbox capability on the slot backend', () => {
 
 // Skills are served host-side on slots: the host copies the skill files in, and approved sites go
 // through the skill network gateway. So the skill flag follows the sandbox flag.
+describe('sandbox reason for a person who does not run the server', () => {
+  it('still says the sandbox is full, since deleting old chats is something they can do', async () => {
+    mockSlotStatus.mockResolvedValue({ status: 'failed', reason: FULL_REASON, metadata: null });
+    expect((await capabilities(memberAuthenticator)).sandbox).toEqual({ enabled: false, reason: FULL_REASON });
+  });
+
+  it('points to the person who runs Aman instead of a command only they can run', async () => {
+    mockSlotStatus.mockResolvedValue({ status: 'failed', reason: NOT_READY_REASON, metadata: null });
+    const data = await capabilities(memberAuthenticator);
+    expect(data.sandbox).toEqual({ enabled: false, reason: SANDBOX_UNAVAILABLE_FOR_MEMBER });
+    expect(data.skill).toEqual({ enabled: false, reason: SANDBOX_UNAVAILABLE_FOR_MEMBER });
+  });
+});
+
 describe('skill capability on the slot backend', () => {
   it('is on when the sandbox is on, with no offline reason', async () => {
     mockSlotStatus.mockResolvedValue({ status: 'ready', reason: null, metadata: null });

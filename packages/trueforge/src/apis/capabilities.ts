@@ -1,5 +1,5 @@
 import { OpenAPIHono, type z } from '@hono/zod-openapi';
-import { extractErrorLogFields } from '@truefoundry/trueforge-core/core';
+import { extractErrorLogFields, SLOT_NOT_READY_MESSAGE } from '@truefoundry/trueforge-core/core';
 import type { Context } from 'hono';
 import type { Logger } from 'winston';
 import { hasAdminRole, type ResolveRequestContext } from '../auth/identity';
@@ -38,6 +38,36 @@ export type CapabilitiesData = z.infer<typeof GetCapabilitiesResponseSchema>['da
 type MemoryScreenCapabilityData = z.infer<typeof MemoryScreenCapabilitySchema>;
 type ToolOutputScreenCapabilityData = NonNullable<CapabilitiesData['tool_output_screen']>;
 type MemoryEmbeddingsCapabilityData = z.infer<typeof MemoryEmbeddingsCapabilitySchema>;
+
+/**
+ * What a person who does not run the server reads when the sandbox is off for a reason only the server's admin
+ * can fix. A hosted provider's own detail can name its internals, so it goes to admins only.
+ */
+export const SANDBOX_UNAVAILABLE_FOR_MEMBER =
+  'The sandbox is not working on this server right now. Ask the person who runs Aman to check it.';
+
+/**
+ * The reason a person is shown for a failed sandbox. The slot backend's reasons are written for people: a full
+ * sandbox tells anyone to delete old chats, which they can do, while "not set up yet" needs the admin. A hosted
+ * provider's stored reason is its raw build error, so only an admin sees it.
+ */
+function personFacingSandboxReason({
+  reason,
+  isAdmin,
+  backend,
+}: {
+  reason: string | null | undefined;
+  isAdmin: boolean;
+  backend: 'slots' | 'provider';
+}): string | null | undefined {
+  if (reason == null || reason === '' || isAdmin) {
+    return reason;
+  }
+  if (backend === 'slots' && reason !== SLOT_NOT_READY_MESSAGE) {
+    return reason;
+  }
+  return SANDBOX_UNAVAILABLE_FOR_MEMBER;
+}
 
 /**
  * Why skills are unavailable, keyed off the sandbox build status.
@@ -294,7 +324,7 @@ async function capabilitiesFromSandboxStatus({
   logger,
 }: {
   status: SandboxBuildStatus | undefined;
-  /** The build's own detail for its status; carried to the person only when the build failed. */
+  /** The detail for a failed build that this caller may read; see personFacingSandboxReason. */
   reason: string | null | undefined;
   isAdmin: boolean;
   tenantId: string;
@@ -346,7 +376,7 @@ export async function computeCapabilitiesData<TTransaction>(
   if (slotsBackendEnabled()) {
     const build = await slotSandboxBuildStatus({ logger: deps.logger });
     status = build.status;
-    reason = build.reason;
+    reason = personFacingSandboxReason({ reason: build.reason, isAdmin: deps.isAdmin, backend: 'slots' });
     return capabilitiesFromSandboxStatus({
       status,
       reason,
@@ -364,7 +394,11 @@ export async function computeCapabilitiesData<TTransaction>(
       logger: deps.logger,
     });
     status = refreshed?.status;
-    reason = refreshed?.status_reason;
+    reason = personFacingSandboxReason({
+      reason: refreshed?.status_reason,
+      isAdmin: deps.isAdmin,
+      backend: 'provider',
+    });
   } catch (error) {
     deps.logger.warn('Sandbox image status check failed; reporting sandbox disabled', extractErrorLogFields(error));
   }
@@ -394,7 +428,7 @@ export async function readLocalCapabilitiesData<TTransaction>(
   if (slotsBackendEnabled()) {
     const build = await slotSandboxBuildStatus({ logger: deps.logger });
     status = build.status;
-    reason = build.reason;
+    reason = personFacingSandboxReason({ reason: build.reason, isAdmin: deps.isAdmin, backend: 'slots' });
     return capabilitiesFromSandboxStatus({
       status,
       reason,
@@ -411,7 +445,11 @@ export async function readLocalCapabilitiesData<TTransaction>(
       tenant_id: deps.tenantId ?? TENANT_ID,
     });
     status = persisted?.status;
-    reason = persisted?.status_reason;
+    reason = personFacingSandboxReason({
+      reason: persisted?.status_reason,
+      isAdmin: deps.isAdmin,
+      backend: 'provider',
+    });
   } catch (error) {
     deps.logger.warn('Sandbox status read failed; reporting sandbox disabled', extractErrorLogFields(error));
   }

@@ -53,6 +53,33 @@ export interface SlotSandboxProviderOptions {
   sleepMs: ((ms: number) => Promise<void>) | undefined;
   /** Carries out network git on the host; without it, git commands that need the network simply fail offline. */
   gitBridge: GitBridge | undefined;
+  /**
+   * Remembers whether the slots were last seen full, so the warning is logged when that changes rather than on
+   * every check. A host that makes a provider per call passes one shared log; without it each provider keeps its own.
+   */
+  fullStateLog?: SlotFullStateLog | undefined;
+}
+
+/** Logs "every sandbox slot is full" once when the slots fill up, and again only after room came back. */
+export class SlotFullStateLog {
+  #full = false;
+
+  report(input: {
+    logger: Logger;
+    full: readonly { index: number; sessions: number; capacity: number }[] | null;
+  }): void {
+    if (input.full === null) {
+      this.#full = false;
+      return;
+    }
+    if (this.#full) {
+      return;
+    }
+    this.#full = true;
+    input.logger.warn('every sandbox slot is full', {
+      slots: input.full.map(slot => ({ slot: slot.index + 1, sessions: slot.sessions, capacity: slot.capacity })),
+    });
+  }
 }
 
 function parseSandboxId(sandboxId: string): { slot: number; sessionId: string } | undefined {
@@ -117,6 +144,7 @@ export class SlotSandboxProvider implements SandboxProvider {
   private readonly logger: Logger;
   private readonly sleepMs: (ms: number) => Promise<void>;
   private readonly gitBridge: GitBridge | undefined;
+  private readonly fullStateLog: SlotFullStateLog;
   private gitToken: string | null = null;
   readonly hostGit: HostGitCapability | undefined;
 
@@ -128,6 +156,7 @@ export class SlotSandboxProvider implements SandboxProvider {
     this.logger = options.logger.child({ module: 'SlotSandboxProvider' });
     this.sleepMs = options.sleepMs ?? (ms => new Promise(resolve => setTimeout(resolve, ms)));
     this.gitBridge = options.gitBridge;
+    this.fullStateLog = options.fullStateLog ?? new SlotFullStateLog();
     this.hostGit = options.gitBridge === undefined ? undefined : this.createHostGit(options.gitBridge);
   }
 
@@ -475,12 +504,11 @@ export class SlotSandboxProvider implements SandboxProvider {
     const emptiest = usable.filter(slot => slot.sessions === fewest);
     const chosen = emptiest[Math.floor(Math.random() * emptiest.length)];
     if (chosen !== undefined) {
+      this.fullStateLog.report({ logger: this.logger, full: null });
       return { ok: true, index: chosen.index };
     }
     if (problems.length === 0 && full.length > 0) {
-      this.logger.warn('every sandbox slot is full', {
-        slots: full.map(slot => ({ slot: slot.index + 1, sessions: slot.sessions, capacity: slot.capacity })),
-      });
+      this.fullStateLog.report({ logger: this.logger, full });
       return {
         ok: false,
         reason: `The sandbox is full: every slot already holds as many chats as its disk fits (${full
