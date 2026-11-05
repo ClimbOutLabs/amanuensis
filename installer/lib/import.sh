@@ -135,7 +135,7 @@ import_run() {
   fi
   if [ "$rc" != 0 ]; then
     rm -f "$layout"
-    warn "Import failed: $(cli_reason "$log" "The import stopped without giving a reason. Run: aman doctor instance --fix")"
+    warn "Import failed: $(cli_reason "$log" "The import stopped without giving a reason. Run: aman doctor instance --fix" "$rc")"
     UI_FD=2 ui_hint "Full log: $(ui_path "$log")"
     return 1
   fi

@@ -265,8 +265,24 @@ describe('toolCallParsing', () => {
       }),
     );
     expect(buildOutcomeText(disposition, undefined)).toBe('Execution failed');
-    expect(buildOutcomeText(disposition, 'the tool timed out')).toBe('Execution failed: the tool timed out');
     expect(buildOutcomeText(undefined, 'x')).toBeUndefined();
+  });
+
+  it('shows a failed step its reason in full, with no label in front and nothing cut off', () => {
+    const disposition = parseToolResultDisposition(
+      JSON.stringify({
+        schema_version: 'tool.response.v2',
+        outcome: { disposition: 'executed_nonzero' },
+        result: 'irrelevant here',
+      }),
+    );
+    const google =
+      "The Gmail API isn't turned on in your Google project. Turn it on in the Google Cloud console under APIs and services, then try again. " +
+      'It can take a few minutes to start working after you turn it on.';
+    expect(google.length).toBeGreaterThan(140);
+    expect(buildOutcomeText(disposition, google)).toBe(google);
+    expect(buildOutcomeText(disposition, '  the tool timed out  ')).toBe('the tool timed out');
+    expect(buildOutcomeText(disposition, '   ')).toBe('Execution failed');
   });
 
   it('reads the plain note for a space write refused for its size, from its code alone', () => {

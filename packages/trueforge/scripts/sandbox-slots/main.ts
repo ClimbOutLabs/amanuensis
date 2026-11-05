@@ -23,7 +23,7 @@ import { createInterface } from 'node:readline/promises';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 
-import { createUi, type Ui, type UiStream } from '../lib/ui.js';
+import { createUi, type UiStream } from '../lib/ui.js';
 import { createPacksPort, parsePackList, type Download } from './packs.js';
 import { SlotsReporter } from './report.js';
 import {
@@ -96,15 +96,12 @@ async function readTerminalLine(): Promise<string | undefined> {
   }
 }
 
-/** Asks sudo for the password once, with our own prompt, and says whether later sudo calls will not ask again. */
-function prepareSudo(ui: Ui): Promise<boolean> {
+/** Asks sudo for the password once, with sudo's own standard prompt, and says whether later sudo calls will not ask again. */
+function prepareSudo(): Promise<boolean> {
   if (!process.stdin.isTTY) {
     return Promise.resolve(false);
   }
-  ui.hint('The next steps need your password once.');
-  const asked = spawnSync('sudo', ['-v', '-p', ui.promptText({ label: 'Your password, for sudo (not shown):' })], {
-    stdio: 'inherit',
-  });
+  const asked = spawnSync('sudo', ['-v'], { stdio: 'inherit' });
   return Promise.resolve(asked.status === 0 && spawnSync('sudo', ['-n', 'true'], { stdio: 'ignore' }).status === 0);
 }
 
@@ -312,7 +309,7 @@ async function main(): Promise<number> {
       : stage => {
           reporter.onStage(stage);
         },
-    prepareRoot: json ? undefined : () => prepareSudo(ui),
+    prepareRoot: json ? undefined : () => prepareSudo(),
   });
   if (json) {
     process.stdout.write(`${JSON.stringify(wireResult(result))}\n`);

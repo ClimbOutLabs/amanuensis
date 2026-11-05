@@ -9,7 +9,7 @@ describe('Tier2RelaxationToggle', () => {
   it('is off by default and reports the flip to the API', () => {
     const onChange = vi.fn(async (_input: { actionType: Tier2ActionKind; relaxed: boolean }) => {});
     render(<Tier2RelaxationToggle actionType="file_write" relaxed={false} onChange={onChange} />);
-    const toggle = screen.getByRole('switch', { name: 'Always allow: file_write' });
+    const toggle = screen.getByRole('switch', { name: 'Always allow: Write files' });
     expect(toggle).not.toBeChecked();
     fireEvent.click(toggle);
     expect(onChange).toHaveBeenCalledWith({ actionType: 'file_write', relaxed: true });
@@ -18,7 +18,7 @@ describe('Tier2RelaxationToggle', () => {
   it('is on when the server relaxes the kind, and flipping off reports it', () => {
     const onChange = vi.fn(async (_input: { actionType: Tier2ActionKind; relaxed: boolean }) => {});
     render(<Tier2RelaxationToggle actionType="file_write" relaxed={true} onChange={onChange} />);
-    const toggle = screen.getByRole('switch', { name: 'Always allow: file_write' });
+    const toggle = screen.getByRole('switch', { name: 'Always allow: Write files' });
     expect(toggle).toBeChecked();
     fireEvent.click(toggle);
     expect(onChange).toHaveBeenCalledWith({ actionType: 'file_write', relaxed: false });
