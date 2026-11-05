@@ -1,10 +1,11 @@
 'use client';
 
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 import { auiButtonClass } from '../atoms/lib/buttonClasses.js';
 import { cn } from '../atoms/lib/cn.js';
 import { Icon } from '../icons/Icon.js';
+import { useOptionalServer } from '../server/ServerContext.js';
 import { useOptionalShellMode } from '../server/ShellModeContext.js';
 import { useOptionalDeliveries } from './DeliveriesContext.js';
 import { openDeliveryLink } from './openDelivery.js';
@@ -64,9 +65,16 @@ function DeliveryRow({ item, onOpen }: { item: DeliveryItem; onOpen: (item: Deli
 export function DeliveryBell() {
   const deliveries = useOptionalDeliveries();
   const shell = useOptionalShellMode();
+  const server = useOptionalServer();
   const rootRef = useRef<HTMLDivElement>(null);
+  const [openError, setOpenError] = useState<string | null>(null);
   const open = deliveries?.panelOpen === true;
   const setPanelOpen = deliveries?.setPanelOpen;
+
+  // A message about an item that would not open belongs to the open panel; it goes with it.
+  useEffect(() => {
+    if (!open) setOpenError(null);
+  }, [open]);
 
   useEffect(() => {
     if (!open || setPanelOpen === undefined) return;
@@ -89,10 +97,17 @@ export function DeliveryBell() {
 
   const onOpen = (item: DeliveryItem) => {
     void markSeen([item.id]);
-    if (item.link !== null && shell !== null) {
-      deliveries.setPanelOpen(false);
-      openDeliveryLink({ shell, link: item.link });
-    }
+    if (item.link === null || shell === null) return;
+    // The panel stays open until the chat is really open; when it cannot open, the panel
+    // stays and says why, in plain words.
+    void openDeliveryLink({ shell, server, link: item.link }).then(outcome => {
+      if (outcome.opened) {
+        setOpenError(null);
+        deliveries.setPanelOpen(false);
+      } else {
+        setOpenError(outcome.message);
+      }
+    });
   };
 
   return (
@@ -134,6 +149,11 @@ export function DeliveryBell() {
               </button>
             ) : null}
           </div>
+          {openError !== null ? (
+            <p role="alert" className="border-border text-text-secondary border-b px-3 py-2 text-xs">
+              {openError}
+            </p>
+          ) : null}
           {items.length === 0 ? (
             <p className="text-text-secondary px-3 py-6 text-center text-sm">
               Nothing yet. Reminders and notes show up here.

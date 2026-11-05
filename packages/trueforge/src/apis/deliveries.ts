@@ -1,10 +1,11 @@
 import { OpenAPIHono, type RouteHandler } from '@hono/zod-openapi';
 
-import { InvalidPageTokenError } from '@truefoundry/trueforge-core/agent-session';
+import { InvalidPageTokenError, type ISessionStore } from '@truefoundry/trueforge-core/agent-session';
 
 import type { ResolveRequestContext } from '../auth/identity';
 import type { IDeliveryStore } from '../db/deliveryStore';
 import type { IPushSubscriptionStore } from '../db/pushSubscriptionStore';
+import type { SessionCustom, TurnCustom } from '../db/sessionCustom';
 import {
   createPushSubscriptionRoute,
   deletePushSubscriptionRoute,
@@ -16,9 +17,11 @@ import {
   markAllDeliveriesSeenRoute,
   markDeliveriesSeenRoute,
 } from '../routes/deliveryRoutes';
+import type { Delivery } from '../schemas/deliveries';
 
 export interface DeliveriesRouterDeps {
   deliveryStore: IDeliveryStore;
+  sessionStore: Pick<ISessionStore<SessionCustom, TurnCustom>, 'getOwnedIds'>;
   resolveRequestContext: ResolveRequestContext;
 }
 
@@ -36,11 +39,51 @@ export function createDeliveriesRouter(deps: DeliveriesRouterDeps) {
     return { tenant_id: context.tenant_id, created_by: context.subject.id };
   };
 
+  // A link to a chat that has since been deleted leads nowhere, and a link to someone else's chat
+  // is not the viewer's to open, so the item is served without its link: the words stay in the
+  // feed, and no Open is offered. Space links name no chat, so they are served as stored. An item
+  // waiting on an approval in a chat that is gone can never be answered, so it is resolved and
+  // leaves the feed. One ownership lookup covers the whole page.
+  const resolveChatLinks = async (
+    deliveries: readonly Delivery[],
+    owner: { tenant_id: string; created_by: string },
+  ): Promise<Delivery[]> => {
+    const sessionIds = [
+      ...new Set(
+        deliveries.flatMap(delivery =>
+          delivery.link !== null && delivery.link.type !== 'space' ? [delivery.link.session_id] : [],
+        ),
+      ),
+    ];
+    if (sessionIds.length === 0) {
+      return [...deliveries];
+    }
+    const owned = new Set(
+      await deps.sessionStore.getOwnedIds({
+        tenant_id: owner.tenant_id,
+        subject_id: owner.created_by,
+        ids: sessionIds,
+      }),
+    );
+    const resolved: Delivery[] = [];
+    for (const delivery of deliveries) {
+      const link = delivery.link;
+      if (link === null || link.type === 'space' || owned.has(link.session_id)) {
+        resolved.push(delivery);
+      } else if (delivery.kind !== 'approval_waiting') {
+        resolved.push({ ...delivery, link: null });
+      }
+    }
+    return resolved;
+  };
+
   const listHandler: RouteHandler<typeof listDeliveriesRoute> = async c => {
     const query = c.req.valid('query');
+    const owner = ownerOf(c);
     try {
-      const page = await deps.deliveryStore.list({ ...ownerOf(c), limit: query.limit, page_token: query.page_token });
-      return c.json({ data: page.deliveries, next_page_token: page.next_page_token }, 200);
+      const page = await deps.deliveryStore.list({ ...owner, limit: query.limit, page_token: query.page_token });
+      const deliveries = await resolveChatLinks(page.deliveries, owner);
+      return c.json({ data: deliveries, next_page_token: page.next_page_token }, 200);
     } catch (error) {
       if (error instanceof InvalidPageTokenError) {
         return c.json(
@@ -74,8 +117,11 @@ export function createDeliveriesRouter(deps: DeliveriesRouterDeps) {
 
   const getHandler: RouteHandler<typeof getDeliveryRoute> = async c => {
     const { delivery_id: id } = c.req.valid('param');
-    const delivery = await deps.deliveryStore.get({ ...ownerOf(c), id });
-    // Another person's delivery reads as missing, so its existence is not revealed.
+    const owner = ownerOf(c);
+    const stored = await deps.deliveryStore.get({ ...owner, id });
+    // Another person's delivery reads as missing, so its existence is not revealed. So does an
+    // approval item resolved because its chat is gone.
+    const [delivery] = stored === undefined ? [] : await resolveChatLinks([stored], owner);
     if (delivery === undefined) {
       return c.json({ error: { message: 'That item was not found. Open your feed to see what is there.' } }, 404);
     }
