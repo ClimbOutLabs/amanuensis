@@ -47,7 +47,11 @@ describe('sidecar mail source (IMAP)', () => {
       '7': 'Amount due by November 7',
     });
     const source = sidecarMailSource({ call, account: 'default' });
-    const messages = await source.listNewMessages({ since: new Date('2026-11-05T14:00:00.000Z'), limit: 50 });
+    const { messages, truncated } = await source.listNewMessages({
+      since: new Date('2026-11-05T14:00:00.000Z'),
+      limit: 50,
+    });
+    expect(truncated).toBe(false);
     expect(messages).toHaveLength(1);
     expect(messages[0]).toMatchObject({
       id: '7',
@@ -58,6 +62,17 @@ describe('sidecar mail source (IMAP)', () => {
     expect(await source.readText(messages[0] ?? EMAIL_MESSAGE)).toBe('Amount due by November 7');
     expect(calls.at(-1)?.[1]).toMatchObject({ mark_as_read: false });
     expect(source.trustedAuthenticationServers).toEqual([]);
+  });
+
+  it('reads the oldest mail first and says when a full page may have more behind it', async () => {
+    const { call, calls } = mailTool([EMAIL, { ...EMAIL, email_id: '8', date: '2026-11-05T14:56:00+00:00' }], {});
+    const { messages, truncated } = await sidecarMailSource({ call, account: 'default' }).listNewMessages({
+      since: new Date('2026-11-05T14:00:00.000Z'),
+      limit: 2,
+    });
+    expect(messages.map(message => message.id)).toEqual(['7', '8']);
+    expect(truncated).toBe(true);
+    expect(calls.at(-1)?.[1]).toMatchObject({ order: 'asc', page_size: 2 });
   });
 
   it('treats an always-important sender as ordinary mail, so only a bill note can come of it', async () => {

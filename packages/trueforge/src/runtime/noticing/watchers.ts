@@ -48,10 +48,14 @@ function localDate({ at, timezone }: { at: Date; timezone: string }): string {
   }
 }
 
-/** What one pass over new mail found. `tracking` are bills due later than the window, kept until they come near. */
+/**
+ * What one pass over new mail found. `track` are bills due later than the window, kept until they come near. When
+ * `read_until` is set, there was more mail than one pass reads, and the next pass carries on from that time.
+ */
 export interface MailFindings {
   raise: NoticingEvent[];
   track: NoticingEvent[];
+  read_until: Date | undefined;
 }
 
 /**
@@ -70,9 +74,10 @@ export async function watchMail({
   since: Date;
   now: Date;
 }): Promise<MailFindings> {
-  const messages = await source.listNewMessages({ since, limit: MAIL_PASS_LIMIT });
+  const { messages, truncated } = await source.listNewMessages({ since, limit: MAIL_PASS_LIMIT });
   const always = new Map(settings.always_important.map(sender => [sender.address, sender]));
-  const findings: MailFindings = { raise: [], track: [] };
+  const newest = messages.at(-1)?.received_at;
+  const findings: MailFindings = { raise: [], track: [], read_until: truncated ? newest : undefined };
   for (const message of messages) {
     const listed = always.get(message.from_address.toLowerCase());
     const check =

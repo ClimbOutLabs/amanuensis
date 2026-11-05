@@ -70,6 +70,7 @@ async function setup({
   channels = NO_PHONE,
   exhausted = false,
   judgeDelay,
+  mailPage = 100,
 }: {
   settings?: Partial<ReachSettings>;
   messages?: MailMessage[];
@@ -82,6 +83,8 @@ async function setup({
   exhausted?: boolean;
   /** Holds every model answer until this resolves, so two passes can be made to overlap. */
   judgeDelay?: Promise<void>;
+  /** Most messages the mail source hands over in one read; past it, it says there is more. */
+  mailPage?: number;
 } = {}) {
   const clock = { now: NOW };
   const channelState = { current: channels };
@@ -121,9 +124,12 @@ async function setup({
     logger: winston.createLogger({ silent: true }),
   });
   const mailSource: MailSource = {
-    listNewMessages: jest.fn(({ since }: { since: Date }) =>
-      Promise.resolve(messages.filter(message => message.received_at.getTime() >= since.getTime())),
-    ),
+    listNewMessages: jest.fn(({ since }: { since: Date }) => {
+      const found = messages
+        .filter(message => message.received_at.getTime() >= since.getTime())
+        .sort((a, b) => a.received_at.getTime() - b.received_at.getTime());
+      return Promise.resolve({ messages: found.slice(0, mailPage), truncated: found.length > mailPage });
+    }),
     readText: message => Promise.resolve(texts[message.id] ?? message.snippet),
     laterInThread: jest.fn(() => Promise.resolve(later)),
     trustedAuthenticationServers: ['mx.example.net'],
@@ -204,6 +210,35 @@ describe('mail from an always-important sender', () => {
 
     expect(judge).not.toHaveBeenCalled();
     expect(await feed()).toEqual([]);
+  });
+
+  it('moves the checkpoint only as far as the mail it read when there was more than one read holds', async () => {
+    const at = (minute: string) => new Date(`2026-11-05T14:${minute}:00.000Z`);
+    const { service, feed, store, clock } = await setup({
+      settings: { always_important: [ALWAYS] },
+      messages: [
+        mail({ id: 'm1', received_at: at('51') }),
+        mail({ id: 'm2', received_at: at('53') }),
+        mail({ id: 'm3', received_at: at('55') }),
+      ],
+      mailPage: 2,
+    });
+    await service.run({ watcher: 'mail' });
+    // The next pass starts at 14:53, the newest message read, instead of after everything.
+    await expect(store.getCheckpoint({ ...OWNER, watcher: 'mail' })).resolves.toEqual(at('55'));
+    clock.now = new Date('2026-11-05T15:10:00.000Z');
+    await service.run({ watcher: 'mail' });
+    expect(await feed()).toHaveLength(3);
+    await expect(store.getCheckpoint({ ...OWNER, watcher: 'mail' })).resolves.toEqual(clock.now);
+  });
+
+  it('never reads back further than a day, however long the server was down', async () => {
+    const { service, store, mailSource } = await setup({ settings: { always_important: [ALWAYS] } });
+    await store.setCheckpoint({ ...OWNER, watcher: 'mail', checked_at: new Date('2026-11-01T09:00:00.000Z') });
+    await service.run({ watcher: 'mail' });
+    expect(mailSource.listNewMessages).toHaveBeenCalledWith(
+      expect.objectContaining({ since: new Date('2026-11-04T15:00:00.000Z') }),
+    );
   });
 
   it('ignores a sender who is not on the list', async () => {

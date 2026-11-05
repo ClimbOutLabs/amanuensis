@@ -115,18 +115,22 @@ export function sidecarMailSource({ call, account }: { call: CallSidecarTool; ac
   return {
     trustedAuthenticationServers: [],
     async listNewMessages({ since, limit }) {
+      const pageSize = Math.min(limit, PAGE_SIZE);
       const result = await call(MAIL_LIST_TOOL_NAME, {
         account_name: account,
         mailbox: 'INBOX',
         since: since.toISOString(),
         page: 1,
-        page_size: Math.min(limit, PAGE_SIZE),
-        order: 'desc',
+        page_size: pageSize,
+        order: 'asc',
       });
-      return emailsOfResult(result)
+      const listed = emailsOfResult(result);
+      const messages = listed
         .map(toMailMessage)
         .filter((message): message is MailMessage => message !== undefined && message.received_at >= since)
         .sort((a, b) => a.received_at.getTime() - b.received_at.getTime());
+      // A full page may have more behind it, so the next pass carries on from the newest message read.
+      return { messages, truncated: listed.length >= pageSize };
     },
     async readText(message) {
       return (await bodiesOf([message.id]))[0] ?? '';

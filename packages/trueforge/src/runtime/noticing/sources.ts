@@ -27,8 +27,11 @@ export interface MailMessage {
 export type MailRef = Pick<MailMessage, 'id' | 'thread_id' | 'received_at'>;
 
 export interface MailSource {
-  /** Messages that reached the inbox at or after `since`, oldest first. Mail the person sent is left out. */
-  listNewMessages(input: { since: Date; limit: number }): Promise<MailMessage[]>;
+  /**
+   * Up to `limit` messages that reached the inbox at or after `since`, oldest first. Mail the person sent is left
+   * out. `truncated` is true when newer messages were left for the next read.
+   */
+  listNewMessages(input: { since: Date; limit: number }): Promise<{ messages: MailMessage[]; truncated: boolean }>;
   /** The start of one message's text, for a watcher that needs more than the snippet. */
   readText(message: MailMessage): Promise<string>;
   /** The text of messages that came after this one in its thread, oldest first. */

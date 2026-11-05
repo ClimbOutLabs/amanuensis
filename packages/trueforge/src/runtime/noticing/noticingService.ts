@@ -36,6 +36,8 @@ import { BILL_WINDOW_MS, billIsPaid, watchApprovals, watchCalendar, watchMail } 
 const FIRST_LOOKBACK_MS = 10 * 60_000;
 /** Each pass looks a little before the last check, so mail that arrived while it ran is not missed. Stable ids absorb the repeat. */
 const CHECK_OVERLAP_MS = 2 * 60_000;
+/** After a long outage, mail older than this is not news any more, so a pass never reads back further. */
+const MAX_LOOKBACK_MS = 24 * 3_600_000;
 const TRACKING_LIMIT = 50;
 const PENDING_LIMIT = 50;
 /** A claim this old belongs to a pass that stopped part way, so another pass may take the event over. */
@@ -325,12 +327,27 @@ export function createNoticingService(deps: NoticingDeps): NoticingService {
   }): Promise<void> {
     const at = now();
     const checked = await store.getCheckpoint({ ...owner, watcher: 'mail' });
-    const since = new Date((checked?.getTime() ?? at.getTime() - FIRST_LOOKBACK_MS) - CHECK_OVERLAP_MS);
+    const since = new Date(
+      Math.max(
+        (checked?.getTime() ?? at.getTime() - FIRST_LOOKBACK_MS) - CHECK_OVERLAP_MS,
+        at.getTime() - MAX_LOOKBACK_MS,
+      ),
+    );
     const findings = await watchMail({ source: mail, settings, since, now: at });
     await recordAll({ owner, events: findings.raise, status: 'pending' });
     await recordAll({ owner, events: findings.track, status: 'tracking' });
     // Everything found is written down before the checkpoint moves, so a failed delivery is retried from the store.
-    await store.setCheckpoint({ ...owner, watcher: 'mail', checked_at: at });
+    // When there was more mail than one pass reads, the next pass starts at the newest message read, past the
+    // usual overlap, so a full page of mail already read can never hold it in place.
+    const readUntil = findings.read_until;
+    await store.setCheckpoint({
+      ...owner,
+      watcher: 'mail',
+      checked_at:
+        readUntil !== undefined && readUntil.getTime() > since.getTime()
+          ? new Date(Math.min(readUntil.getTime() + CHECK_OVERLAP_MS, at.getTime()))
+          : at,
+    });
     await promoteDueBills({ owner, mail, now: at });
   }
 
