@@ -1,6 +1,7 @@
 import { APPROVAL_EXPIRY_MINUTES } from '@truefoundry/trueforge-core/core/permissions/approvalExpiry';
 import {
   emptyChatProvenance,
+  namesPhoneNumber,
   namesUrl,
   recordPersonText,
   recordUntrustedText,
@@ -80,29 +81,46 @@ const READ_SOURCE: Record<NoticingKind, ReadSource> = {
 const ONLY_WORDS = 'Only the words in a message said this mattered, so it stays a note.';
 
 /**
- * A message that may reach the person: the model's sentence, unless it carries a link or an address that only
- * read content named. Read content steers nothing, so such a message is replaced by the plain sentence the watcher
- * wrote itself. The always-important addresses are the person's own words.
+ * Whether the model's words may reach the person as they are. Read content steers nothing, so words that carry a link,
+ * a phone number, or an address only read content named are never shown. The always-important addresses are the
+ * person's own words.
  */
-function usableMessage({
+function usableWords({
   event,
-  message,
+  words,
   settings,
 }: {
   event: NoticingEvent;
-  message: string;
+  words: string;
   settings: ReachSettings;
-}): { text: string; replaced: boolean } {
+}): boolean {
   const provenance = emptyChatProvenance();
   for (const sender of settings.always_important) {
     recordPersonText({ provenance, text: sender.address });
   }
   recordUntrustedText({ provenance, text: event.facts, source: READ_SOURCE[event.kind] });
-  const steered = steeredDestinations({ provenance, addresses: [], values: [message], reply_sender: null });
-  if (namesUrl([message]) || steered.length > 0) {
-    return { text: event.summary, replaced: true };
-  }
-  return { text: message, replaced: false };
+  const steered = steeredDestinations({ provenance, addresses: [], values: [words], reply_sender: null });
+  return !namesUrl([words]) && !namesPhoneNumber([words]) && steered.length === 0;
+}
+
+/** The model's message and reason as they may be shown, each replaced by plain words when it cannot be. */
+function shownWords({
+  event,
+  verdict,
+  settings,
+}: {
+  event: NoticingEvent;
+  verdict: JudgeVerdict;
+  settings: ReachSettings;
+}): { text: string; reason: string; replaced: boolean } {
+  const messageOk = usableWords({ event, words: verdict.message, settings });
+  return {
+    text: messageOk ? verdict.message : event.summary,
+    reason: usableWords({ event, words: verdict.reason, settings })
+      ? verdict.reason
+      : `The model asked for a ${verdict.level}.`,
+    replaced: !messageOk,
+  };
 }
 
 /** Whether an event is still worth saying: a clash or a trip that already started, or a closed request, is not. */
@@ -179,10 +197,10 @@ export function createNoticingService(deps: NoticingDeps): NoticingService {
     claim_id: string;
   }): Promise<'raised' | 'busy'> {
     const { verdict, why } = await ask({ owner, event });
-    const message =
+    const shown =
       verdict === undefined
-        ? { text: event.summary, replaced: false }
-        : usableMessage({ event, message: verdict.message, settings });
+        ? { text: event.summary, reason: why, replaced: false }
+        : shownWords({ event, verdict, settings });
     const outcome = await withReachLease({
       deps: gate,
       owner,
@@ -198,9 +216,9 @@ export function createNoticingService(deps: NoticingDeps): NoticingService {
         });
         const reason = joinReasons([
           event.matched,
-          verdict?.reason ?? why,
-          message.replaced
-            ? 'The model’s wording carried a link or address from the message, so the plain sentence is used.'
+          shown.reason,
+          shown.replaced
+            ? 'The model’s wording carried a link, a number or an address, so the plain sentence is used.'
             : '',
           ...decision.steps,
         ]);
@@ -208,7 +226,7 @@ export function createNoticingService(deps: NoticingDeps): NoticingService {
           ...owner,
           kind: deliveryKindOf(decision.delivered),
           level: decision.delivered,
-          text: message.text,
+          text: shown.text,
           reason,
           link: event.link,
           created_at: at,

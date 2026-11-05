@@ -43,6 +43,11 @@ export interface CalendarEventInfo {
   start: Date;
   end: Date;
   location: string | null;
+  /**
+   * Whether the event is the person's own: they organised it, accepted it, or it has no one else on it. An invite
+   * they have not accepted is someone else's words, so it can only ever raise a note.
+   */
+  own: boolean;
 }
 
 export interface CalendarSource {

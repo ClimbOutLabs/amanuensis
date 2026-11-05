@@ -175,17 +175,28 @@ function toEventInfo(event: unknown): CalendarEventInfo | undefined {
   const id = text(event['id']);
   const start = instantOf(event['start']);
   const end = instantOf(event['end']);
-  const attendees = Array.isArray(event['attendees']) ? event['attendees'] : [];
-  const declined = attendees.some(
-    guest => isRecord(guest) && guest['is_self'] === true && String(guest['status']).toUpperCase() === 'DECLINED',
-  );
+  const attendees: unknown[] = Array.isArray(event['attendees']) ? event['attendees'] : [];
+  const self = attendees.find(guest => isRecord(guest) && guest['is_self'] === true);
+  const answer = isRecord(self) ? String(self['status']).toUpperCase() : undefined;
+  const declined = answer === 'DECLINED';
+  const organizer = event['organizer'];
   if (id === undefined || start === undefined || end === undefined || declined) {
     return undefined;
   }
   if (String(event['status']).toUpperCase() === 'CANCELLED') {
     return undefined;
   }
-  return { id, title: text(event['summary']) ?? 'An event', start, end, location: text(event['location']) ?? null };
+  return {
+    id,
+    title: text(event['summary']) ?? 'An event',
+    start,
+    end,
+    location: text(event['location']) ?? null,
+    own:
+      (isRecord(organizer) && organizer['is_self'] === true) ||
+      answer === 'ACCEPTED' ||
+      ((organizer === undefined || organizer === null) && attendees.length === 0),
+  };
 }
 
 /** The Calendar sidecar (CalDAV) as a calendar source: timed events that are still on. */

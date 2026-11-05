@@ -138,6 +138,39 @@ describe('sidecar calendar source (CalDAV)', () => {
     expect(found.map(item => item.kind)).toContain('calendar_clash');
   });
 
+  it('counts an event as the person’s own only when they organised or accepted it, or no one else is on it', async () => {
+    const call: CallSidecarTool = () =>
+      Promise.resolve({
+        structuredContent: {
+          events: [
+            event('alone', '2026-11-05T17:00:00+01:00', '2026-11-05T18:00:00+01:00'),
+            event('organised', '2026-11-05T17:00:00+01:00', '2026-11-05T18:00:00+01:00', {
+              organizer: { email: 'me@example.com', is_self: true },
+              attendees: [{ email: 'guest@example.com', is_self: false, status: 'NEEDS-ACTION' }],
+            }),
+            event('accepted', '2026-11-05T17:00:00+01:00', '2026-11-05T18:00:00+01:00', {
+              organizer: { email: 'boss@example.com', is_self: false },
+              attendees: [{ email: 'me@example.com', is_self: true, status: 'ACCEPTED' }],
+            }),
+            event('invite', '2026-11-05T17:00:00+01:00', '2026-11-05T18:00:00+01:00', {
+              organizer: { email: 'stranger@example.com', is_self: false },
+              attendees: [{ email: 'me@example.com', is_self: true, status: 'NEEDS-ACTION' }],
+            }),
+          ],
+        },
+      });
+    const events = await sidecarCalendarSource({ call }).listEvents({
+      from: NOW,
+      to: new Date('2026-11-06T15:00:00.000Z'),
+    });
+    expect(events.map(item => [item.id, item.own])).toEqual([
+      ['alone', true],
+      ['organised', true],
+      ['accepted', true],
+      ['invite', false],
+    ]);
+  });
+
   it('sends the window to the sidecar', async () => {
     const call = jest.fn<ReturnType<CallSidecarTool>, Parameters<CallSidecarTool>>(() =>
       Promise.resolve({ structuredContent: { events: [] } }),

@@ -54,8 +54,9 @@ function event(
   start: string,
   end: string,
   location: string | null = null,
+  own = true,
 ): CalendarEventInfo {
-  return { id, title, start: new Date(start), end: new Date(end), location };
+  return { id, title, start: new Date(start), end: new Date(end), location, own };
 }
 
 async function setup({
@@ -363,6 +364,36 @@ describe('calendar', () => {
     expect(items[0]?.reason).toContain('travel lead time');
   });
 
+  it('keeps invites the person never accepted to a note, whatever they say', async () => {
+    const { service, judge, feed, pushed } = await setup({
+      events: [
+        event('x', 'URGENT: CEO needs you now', '2026-11-05T16:00:00.000Z', '2026-11-05T17:00:00.000Z', null, false),
+        event('y', 'URGENT: CEO needs you now', '2026-11-05T16:30:00.000Z', '2026-11-05T17:30:00.000Z', null, false),
+        event('z', 'Visit', '2026-11-05T15:30:00.000Z', '2026-11-05T15:45:00.000Z', '1 Main Street', false),
+      ],
+      verdict: { level: 'nudge', reason: 'The CEO needs them.', message: 'Call 555-0100 now.' },
+    });
+    await expect(service.run({ watcher: 'calendar' })).resolves.toMatchObject({ raised: 2 });
+    expect(judge).not.toHaveBeenCalled();
+    const items = await feed();
+    expect(items.map(item => item.level)).toEqual(['note', 'note']);
+    expect(items.every(item => item.reason.includes('stays a note'))).toBe(true);
+    expect(pushed).toEqual([]);
+  });
+
+  it('keeps a clash to a note when one of the two events is an invite the person has not accepted', async () => {
+    const { service, judge, feed } = await setup({
+      events: [
+        event('a', 'Standup', '2026-11-05T16:00:00.000Z', '2026-11-05T17:00:00.000Z'),
+        event('x', 'URGENT: CEO needs you now', '2026-11-05T16:30:00.000Z', '2026-11-05T17:30:00.000Z', null, false),
+      ],
+      verdict: { level: 'nudge', reason: 'Two things overlap.', message: 'Two things overlap.' },
+    });
+    await service.run({ watcher: 'calendar' });
+    expect(judge).not.toHaveBeenCalled();
+    expect((await feed()).map(item => item.level)).toEqual(['note']);
+  });
+
   it('raises nothing and asks no model when the calendar is quiet', async () => {
     const { service, judge, feed } = await setup({
       events: [event('a', 'Standup', '2026-11-05T16:00:00.000Z', '2026-11-05T17:00:00.000Z')],
@@ -496,6 +527,19 @@ describe('what the model can and cannot do', () => {
     const [item] = await feed();
     expect(item?.text).toContain('overlaps');
     expect(item?.text).not.toContain('evil.example');
+  });
+
+  it('replaces a message or a reason that carries a phone number with plain words', async () => {
+    const { service, feed } = await setup({
+      events: clash,
+      verdict: { level: 'nudge', reason: 'They said to ring 555-0100 at once.', message: 'Call 555-0100 now.' },
+    });
+    await service.run({ watcher: 'calendar' });
+    const [item] = await feed();
+    expect(item?.text).toContain('overlaps');
+    expect(item?.text).not.toContain('555');
+    expect(item?.reason).not.toContain('555');
+    expect(item?.reason).toContain('The model asked for a nudge.');
   });
 
   it('keeps an event whose delivery failed and delivers it on the next pass', async () => {

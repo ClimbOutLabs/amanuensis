@@ -224,7 +224,7 @@ function clashEvent({
   return {
     id: `calendar_clash:${left.id}@${left.start.toISOString()}:${right.id}@${right.start.toISOString()}`,
     kind: 'calendar_clash',
-    evidence: 'own',
+    evidence: first.own && second.own ? 'own' : 'content',
     summary: clip(
       `"${clip(first.title, 60)}" at ${localTime({ at: first.start, timezone })} overlaps "${clip(second.title, 60)}" at ${localTime({ at: second.start, timezone })}.`,
       300,
@@ -255,7 +255,7 @@ function travelEvent({ event, timezone }: { event: CalendarEventInfo; timezone: 
   return {
     id: `travel:${event.id}@${event.start.toISOString()}`,
     kind: 'travel',
-    evidence: 'own',
+    evidence: event.own ? 'own' : 'content',
     summary: clip(
       `"${clip(event.title, 80)}" starts at ${localTime({ at: event.start, timezone })}. Time to head out.`,
       300,

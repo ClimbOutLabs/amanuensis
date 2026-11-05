@@ -65,7 +65,7 @@ function toMailMessage(message: GmailMessage, thread_id: string): MailMessage | 
 }
 
 /** Gmail as a mail source, read with the person's own Google login and read-only calls. */
-function gmailMailSource(api: GmailApiPort): MailSource {
+export function gmailMailSource(api: Pick<GmailApiPort, 'listThreads' | 'getThread' | 'getMessage'>): MailSource {
   return {
     trustedAuthenticationServers: GMAIL_AUTHENTICATION_SERVERS,
     async listNewMessages({ since, limit }) {
@@ -104,7 +104,13 @@ function gmailMailSource(api: GmailApiPort): MailSource {
 }
 
 /** Google Calendar as a calendar source: the primary calendar's timed events that are still on. */
-function googleCalendarSource({ api, timeZone }: { api: CalendarApiPort; timeZone: string }): CalendarSource {
+export function googleCalendarSource({
+  api,
+  timeZone,
+}: {
+  api: Pick<CalendarApiPort, 'listEvents'>;
+  timeZone: string;
+}): CalendarSource {
   return {
     async listEvents({ from, to }) {
       const page = await api.listEvents({
@@ -119,9 +125,9 @@ function googleCalendarSource({ api, timeZone }: { api: CalendarApiPort; timeZon
       for (const event of page.events) {
         const start = event.start?.dateTime;
         const end = event.end?.dateTime;
-        const declined = (event.attendees ?? []).some(
-          guest => guest.self === true && guest.responseStatus === 'declined',
-        );
+        const attendees = event.attendees ?? [];
+        const answer = attendees.find(guest => guest.self === true)?.responseStatus;
+        const declined = answer === 'declined';
         if (event.status === 'cancelled' || declined || start === undefined || end === undefined) {
           continue;
         }
@@ -131,6 +137,10 @@ function googleCalendarSource({ api, timeZone }: { api: CalendarApiPort; timeZon
           start: new Date(start),
           end: new Date(end),
           location: event.location ?? null,
+          own:
+            event.organizer?.self === true ||
+            answer === 'accepted' ||
+            (event.organizer === undefined && attendees.length === 0),
         });
       }
       return events;
