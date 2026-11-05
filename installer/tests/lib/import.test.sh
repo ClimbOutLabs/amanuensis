@@ -111,6 +111,21 @@ test_an_import_that_runs_out_of_memory_says_so() {
   sandbox_drop
 }
 
+test_an_import_killed_for_memory_says_so() {
+  t_begin "an import killed for memory (exit 137) says it ran out of memory and what to do, though the log has no reason"
+  sandbox_new
+  install_with_owner
+  make_export
+  export STUB_IMPORT_FAIL=killed
+  run_install instance import main "$EXPORT_FILE"
+  unset STUB_IMPORT_FAIL
+  assert_rc 1
+  assert_flat_contains "$ERR" "Import failed: Aman ran out of memory. Give Docker more memory, then run this again."
+  assert_not_contains "$ERR" "stopped without giving a reason"
+  assert_file "$SB_STATE/up/aman-main"
+  sandbox_drop
+}
+
 test_a_dry_run_checks_the_file_and_imports_nothing() {
   t_begin "instance import --dry-run passes --dry-run to the CLI, takes no backup and says nothing was imported"
   sandbox_new
@@ -316,6 +331,7 @@ test_import_gives_up_when_the_model_never_arrives
 test_a_failed_import_still_starts_the_app_and_fails
 test_a_refused_import_names_the_file_and_its_size_on_its_failure_line
 test_an_import_that_runs_out_of_memory_says_so
+test_an_import_killed_for_memory_says_so
 test_a_dry_run_checks_the_file_and_imports_nothing
 test_an_interrupted_import_still_starts_the_app
 test_import_needs_a_name_and_a_file

@@ -14,7 +14,7 @@ function makeEntry(overrides: Partial<SentinelUserAuditEntry>): SentinelUserAudi
     session_id: 'chat-1',
     created_at: '2026-10-01T09:30:00.000Z',
     tier: 3,
-    action_type: 'send_email',
+    action_type: 'gmail_send',
     description: 'Sent an email to the plumber',
     outcome: 'approved',
     chat_exists: true,
@@ -83,7 +83,8 @@ describe('AuditLogSettings', () => {
     if (live === null || gone === null) throw new Error('audit rows did not render as list items');
 
     expect(within(live).getByText('Approved')).toBeInTheDocument();
-    expect(within(live).getByText('send_email')).toBeInTheDocument();
+    expect(within(live).getByText('Sent an email')).toBeInTheDocument();
+    expect(within(live).queryByText('gmail_send')).not.toBeInTheDocument();
     expect(within(live).getByRole('link', { name: 'Open chat' }).getAttribute('href')).toContain('chat-live');
     expect(within(live).getByText(/2026/)).toBeInTheDocument();
 

@@ -142,6 +142,19 @@ describe('why Google said 403', () => {
     expect(sleeps).toEqual([]);
   });
 
+  it('tells the two 403 kinds apart, each with its own fix', async () => {
+    const apiOff = (await call(googleError({ status: 403, reason: 'accessNotConfigured' }))).said;
+    const noPermission = (await call(INSUFFICIENT_SCOPE_BODY)).said;
+    expect(apiOff).not.toBe(noPermission);
+    // The API is off: the fix is turning it on in the Google project, not reconnecting.
+    expect(apiOff).toContain("isn't turned on in your Google project");
+    expect(apiOff).not.toContain('permission');
+    // The permission is missing: the fix is reconnecting and allowing every box.
+    expect(noPermission).toContain("hasn't given Aman permission");
+    expect(noPermission).toContain('Reconnect');
+    expect(noPermission).not.toContain("isn't turned on");
+  });
+
   it('never repeats text from Google beyond its reason', async () => {
     const { said } = await call(googleError({ status: 403, reason: 'other', message: 'secret internal detail' }));
     expect(said).not.toContain('secret internal detail');
