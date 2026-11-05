@@ -69,6 +69,7 @@ export const TABLES_TO_MOVE = [
   'reach_settings',
   'noticing_event',
   'noticing_checkpoint',
+  'reach_lease',
   'push_subscription',
 ] as const;
 

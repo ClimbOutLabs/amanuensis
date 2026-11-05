@@ -812,6 +812,7 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     reachSettings: reachSettingsStore,
     store: noticingStore,
     deliveries: deliveryService,
+    history: deliveryStore,
     judgeFor: createNoticingJudgeResolver({
       resolveModelProviderStore: context => persistence.resolveModelProviderStore(context),
       personalizationStore,
@@ -956,7 +957,9 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     reminderReach: createReminderReach({
       reachSettings: reachSettingsStore,
       store: noticingStore,
+      history: deliveryStore,
       channels: () => NO_PHONE_CHANNELS,
+      logger,
     }),
     reachChannels: () => NO_PHONE_CHANNELS,
     webPushPublicKey: configuration.WEB_PUSH?.publicKey,

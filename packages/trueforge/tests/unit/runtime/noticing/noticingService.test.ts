@@ -20,7 +20,7 @@ import type {
 } from '../../../../src/runtime/noticing/sources';
 import { TokenFactoryDailyCapError } from '../../../../src/runtime/tokenFactoryBudget';
 import type { Delivery } from '../../../../src/schemas/deliveries';
-import { defaultReachSettings, type ReachSettings } from '../../../../src/schemas/reach';
+import { defaultReachSettings, type NoticingEvent, type ReachSettings } from '../../../../src/schemas/reach';
 
 const OWNER = { tenant_id: 'default', created_by: 'owner-1' };
 const NOW = new Date('2026-11-05T15:00:00.000Z');
@@ -68,6 +68,7 @@ async function setup({
   verdict = { level: 'note', reason: 'It can wait.', message: 'Something happened.' },
   channels = NO_PHONE,
   exhausted = false,
+  judgeDelay,
 }: {
   settings?: Partial<ReachSettings>;
   messages?: MailMessage[];
@@ -78,7 +79,11 @@ async function setup({
   verdict?: JudgeVerdict | Error;
   channels?: ReachChannels;
   exhausted?: boolean;
+  /** Holds every model answer until this resolves, so two passes can be made to overlap. */
+  judgeDelay?: Promise<void>;
 } = {}) {
+  const clock = { now: NOW };
+  const channelState = { current: channels };
   const db = createSqliteDb(':memory:');
   await migrateSqliteToLatest(db);
   const reachSettings = new ReachSettingsStore(db);
@@ -115,7 +120,9 @@ async function setup({
     logger: winston.createLogger({ silent: true }),
   });
   const mailSource: MailSource = {
-    listNewMessages: jest.fn(() => Promise.resolve(messages)),
+    listNewMessages: jest.fn(({ since }: { since: Date }) =>
+      Promise.resolve(messages.filter(message => message.received_at.getTime() >= since.getTime())),
+    ),
     readText: message => Promise.resolve(texts[message.id] ?? message.snippet),
     laterInThread: jest.fn(() => Promise.resolve(later)),
     trustedAuthenticationServers: ['mx.example.net'],
@@ -123,23 +130,44 @@ async function setup({
   const calendarSource: CalendarSource = { listEvents: jest.fn(() => Promise.resolve(events)) };
   const sources: NoticingSources = { mail: mailSource, calendar: calendarSource };
   const approvals: ApprovalSource = { listWaiting: () => Promise.resolve(waiting) };
-  const judge = jest.fn<ReturnType<NoticingJudge>, Parameters<NoticingJudge>>(() =>
-    verdict instanceof Error ? Promise.reject(verdict) : Promise.resolve(verdict),
-  );
-  const service = createNoticingService({
-    sources: { listOwners: () => Promise.resolve([OWNER]), sourcesFor: () => Promise.resolve(sources) },
-    approvals,
-    reachSettings,
-    store,
-    deliveries,
-    judgeFor: () => Promise.resolve(judge),
-    budget: { isExhausted: () => Promise.resolve(exhausted) },
-    channels: () => channels,
-    logger: winston.createLogger({ silent: true }),
-    now: () => NOW,
+  const judge = jest.fn<ReturnType<NoticingJudge>, Parameters<NoticingJudge>>(async () => {
+    await judgeDelay;
+    if (verdict instanceof Error) {
+      throw verdict;
+    }
+    return verdict;
   });
+  const makeService = () =>
+    createNoticingService({
+      sources: { listOwners: () => Promise.resolve([OWNER]), sourcesFor: () => Promise.resolve(sources) },
+      approvals,
+      reachSettings,
+      store,
+      deliveries,
+      history: deliveryStore,
+      judgeFor: () => Promise.resolve(judge),
+      budget: { isExhausted: () => Promise.resolve(exhausted) },
+      channels: () => channelState.current,
+      logger: winston.createLogger({ silent: true }),
+      now: () => clock.now,
+      sleep: () => new Promise(resolve => setTimeout(resolve, 5)),
+    });
+  const service = makeService();
   const feed = async () => (await deliveryStore.list({ ...OWNER, limit: 50 })).deliveries;
-  return { service, judge, feed, pushed, auditTexts, store, mailSource, calendarSource, deliveryStore };
+  return {
+    service,
+    makeService,
+    clock,
+    channelState,
+    judge,
+    feed,
+    pushed,
+    auditTexts,
+    store,
+    mailSource,
+    calendarSource,
+    deliveryStore,
+  };
 }
 
 const ALWAYS = {
@@ -239,17 +267,18 @@ describe('bills and deadlines', () => {
     const first = await setup({ messages: [far] });
     await expect(first.service.run({ watcher: 'mail' })).resolves.toMatchObject({ raised: 0 });
     expect(first.judge).not.toHaveBeenCalled();
-    const tracked = await first.store.get({ ...OWNER, event_id: 'bill_due:bill1' });
-    expect(tracked?.status).toBe('tracking');
+    const tracked = await first.store.listTracking({ ...OWNER, due_before: new Date('2027-01-01'), limit: 5 });
+    expect(tracked.map(item => item.id)).toEqual(['bill_due:bill1']);
     // Nothing is due within three days of NOW yet, so a second pass still raises nothing.
     await expect(first.service.run({ watcher: 'mail' })).resolves.toMatchObject({ raised: 0 });
   });
 
   it('raises a tracked bill when it falls inside the window', async () => {
     const { service, store, judge, feed } = await setup({});
-    await store.claim({
+    await store.record({
       ...OWNER,
       status: 'tracking',
+      now: NOW,
       event: {
         id: 'bill_due:b9',
         kind: 'bill_due',
@@ -266,15 +295,20 @@ describe('bills and deadlines', () => {
 
     await expect(service.run({ watcher: 'mail' })).resolves.toMatchObject({ raised: 1 });
     await expect(service.run({ watcher: 'mail' })).resolves.toMatchObject({ raised: 0 });
-    expect(judge).toHaveBeenCalledTimes(1);
-    expect(await feed()).toHaveLength(1);
+    // Only the words of a message said it was due, so it can only be a note and no model is asked.
+    expect(judge).not.toHaveBeenCalled();
+    const items = await feed();
+    expect(items).toHaveLength(1);
+    expect(items[0]).toMatchObject({ level: 'note' });
+    expect(items[0]?.reason).toContain('stays a note');
   });
 
   it('drops a tracked bill that was paid', async () => {
     const { service, store, judge } = await setup({ later: ['Payment received'] });
-    await store.claim({
+    await store.record({
       ...OWNER,
       status: 'tracking',
+      now: NOW,
       event: {
         id: 'bill_due:b9',
         kind: 'bill_due',
@@ -371,7 +405,7 @@ describe('what the model can and cannot do', () => {
   };
 
   it('delivers a surviving call as a nudge, with the reason, until a phone channel exists', async () => {
-    const { service, feed, pushed, store } = await setup({
+    const { service, feed, pushed } = await setup({
       settings: { call_kinds: ['calendar_clash'], channels: { texts: false, calls: true } },
       events: clash,
       verdict: callVerdict,
@@ -382,8 +416,6 @@ describe('what the model can and cannot do', () => {
     expect(item).toMatchObject({ kind: 'nudge', level: 'nudge' });
     expect(item?.reason).toContain('Phone calls are not set up yet, so it came as a nudge.');
     expect(pushed).toHaveLength(1);
-    const records = await store.lastCallDecidedAt(OWNER);
-    expect(records).toEqual(NOW);
   });
 
   it('lowers a call when the kind is not ticked for calls', async () => {
@@ -466,11 +498,178 @@ describe('what the model can and cannot do', () => {
     expect(item?.text).not.toContain('evil.example');
   });
 
-  it('releases the claim when delivery fails so the next pass tries again', async () => {
+  it('keeps an event whose delivery failed and delivers it on the next pass', async () => {
     const setupResult = await setup({ events: clash });
     const spy = jest.spyOn(setupResult.deliveryStore, 'create').mockRejectedValueOnce(new Error('disk full'));
     await expect(setupResult.service.run({ watcher: 'calendar' })).resolves.toMatchObject({ raised: 0 });
     spy.mockRestore();
     await expect(setupResult.service.run({ watcher: 'calendar' })).resolves.toMatchObject({ raised: 1 });
+  });
+});
+
+describe('passes that fail, stop or overlap', () => {
+  const clash = [
+    event('a', 'Standup', '2026-11-05T16:00:00.000Z', '2026-11-05T17:00:00.000Z'),
+    event('b', 'Dentist', '2026-11-05T16:30:00.000Z', '2026-11-05T17:30:00.000Z'),
+  ];
+  const trackedBill = {
+    id: 'bill_due:b9',
+    kind: 'bill_due' as const,
+    evidence: 'verified_sender' as const,
+    summary: 'A bill is due.',
+    facts: 'Due soon',
+    matched: 'A message names a due date.',
+    link: null,
+    mail_ref: { message_id: 'b9', thread_id: 't9' },
+    occurred_at: '2026-10-30T10:00:00.000Z',
+    due_at: '2026-11-07T23:59:00.000Z',
+  };
+
+  it('delivers mail on a later pass when its first delivery failed, though the checkpoint moved past it', async () => {
+    const message = mail({ received_at: new Date('2026-11-05T14:52:00.000Z') });
+    const { service, clock, deliveryStore, feed, mailSource } = await setup({
+      settings: { always_important: [ALWAYS] },
+      messages: [message],
+    });
+    const spy = jest.spyOn(deliveryStore, 'create').mockRejectedValueOnce(new Error('disk full'));
+    await expect(service.run({ watcher: 'mail' })).resolves.toMatchObject({ raised: 0 });
+    spy.mockRestore();
+
+    // The next pass reads from 14:58, so the mail itself is no longer listed.
+    clock.now = new Date('2026-11-05T15:10:00.000Z');
+    await expect(service.run({ watcher: 'mail' })).resolves.toMatchObject({ raised: 1 });
+    expect(mailSource.listNewMessages).toHaveBeenLastCalledWith(
+      expect.objectContaining({ since: new Date('2026-11-05T14:58:00.000Z') }),
+    );
+    expect(await feed()).toHaveLength(1);
+  });
+
+  it('takes over an event a stopped pass claimed and never finished', async () => {
+    const { service, store, clock, feed } = await setup({});
+    const clashEvent: NoticingEvent = {
+      id: 'calendar_clash:x',
+      kind: 'calendar_clash',
+      evidence: 'own',
+      summary: 'Two things overlap.',
+      facts: 'Overlap.',
+      matched: 'Two events on your calendar overlap in the next 24 hours.',
+      link: null,
+      mail_ref: null,
+      occurred_at: '2026-11-05T16:30:00.000Z',
+      due_at: null,
+    };
+    // A pass recorded the clash and claimed it, then the server stopped before it delivered.
+    await store.record({ ...OWNER, event: clashEvent, status: 'pending', now: NOW });
+    await store.claim({ ...OWNER, event_id: clashEvent.id, claim_id: 'stopped', now: NOW, stale_before: NOW });
+
+    // Inside ten minutes the claim still counts; after that the next pass delivers the event.
+    clock.now = new Date('2026-11-05T15:05:00.000Z');
+    await expect(service.run({ watcher: 'calendar' })).resolves.toMatchObject({ raised: 0 });
+    clock.now = new Date('2026-11-05T15:11:00.000Z');
+    await expect(service.run({ watcher: 'calendar' })).resolves.toMatchObject({ raised: 1 });
+    expect(await feed()).toHaveLength(1);
+  });
+
+  it('delivers a tracked bill once when two passes overlap', async () => {
+    let answer: () => void = () => undefined;
+    const judgeDelay = new Promise<void>(resolve => {
+      answer = resolve;
+    });
+    const { service, makeService, store, feed } = await setup({
+      verdict: { level: 'nudge', reason: 'It is due soon.', message: 'A bill is due soon.' },
+      judgeDelay,
+    });
+    await store.record({ ...OWNER, status: 'tracking', now: NOW, event: trackedBill });
+
+    const first = service.run({ watcher: 'mail' });
+    const second = makeService().run({ watcher: 'mail' });
+    setTimeout(answer, 20);
+    const results = await Promise.all([first, second]);
+
+    expect(results.map(result => result.raised).sort()).toEqual([0, 1]);
+    expect(await feed()).toHaveLength(1);
+  });
+
+  it('keeps to the daily nudge limit when two passes decide at the same time', async () => {
+    let answer: () => void = () => undefined;
+    const judgeDelay = new Promise<void>(resolve => {
+      answer = resolve;
+    });
+    const { service, makeService, feed, pushed } = await setup({
+      settings: { max_nudges_per_day: 1, approval_wait_minutes: 10 },
+      events: clash,
+      waiting: [{ session_id: 's1', turn_id: 'u1', waiting_since: new Date('2026-11-05T14:40:00.000Z') }],
+      verdict: { level: 'nudge', reason: 'Today matters.', message: 'This matters today.' },
+      judgeDelay,
+    });
+
+    const calendar = service.run({ watcher: 'calendar' });
+    const approvals = makeService().run({ watcher: 'approvals' });
+    setTimeout(answer, 20);
+    await Promise.all([calendar, approvals]);
+
+    expect((await feed()).map(item => item.level).sort()).toEqual(['note', 'nudge']);
+    expect(pushed).toHaveLength(1);
+  });
+
+  it('does not count reminders the person set toward the daily nudges', async () => {
+    const { service, deliveryStore, feed } = await setup({
+      settings: { max_nudges_per_day: 1 },
+      events: clash,
+      verdict: { level: 'nudge', reason: 'Today matters.', message: 'This matters today.' },
+    });
+    await deliveryStore.create({
+      ...OWNER,
+      kind: 'reminder',
+      level: 'nudge',
+      text: 'Water the plants',
+      reason: 'You asked to be reminded.',
+      link: null,
+      created_at: new Date('2026-11-05T09:00:00.000Z'),
+    });
+    await service.run({ watcher: 'calendar' });
+    const [newest] = await feed();
+    expect(newest).toMatchObject({ kind: 'nudge', level: 'nudge' });
+  });
+
+  it('does not count a test from Reach me toward the daily nudges', async () => {
+    const { service, deliveryStore, feed } = await setup({
+      settings: { max_nudges_per_day: 1 },
+      events: clash,
+      verdict: { level: 'nudge', reason: 'Today matters.', message: 'This matters today.' },
+    });
+    await deliveryStore.create({
+      ...OWNER,
+      kind: 'note',
+      level: 'nudge',
+      text: 'This is a test.',
+      reason: 'You pressed Try it in Reach me settings.',
+      link: null,
+      created_at: new Date('2026-11-05T09:00:00.000Z'),
+    });
+    await service.run({ watcher: 'calendar' });
+    const [newest] = await feed();
+    expect(newest).toMatchObject({ level: 'nudge' });
+  });
+
+  it('lets a call through after a call that only went out as a nudge', async () => {
+    const events = [...clash];
+    const { service, feed, channelState } = await setup({
+      settings: { call_kinds: ['calendar_clash'], channels: { texts: false, calls: true } },
+      events,
+      verdict: { level: 'call', reason: 'Waiting would cost them.', message: 'Two things overlap.' },
+      channels: NO_PHONE,
+    });
+    await service.run({ watcher: 'calendar' });
+    expect((await feed()).map(item => item.level)).toEqual(['nudge']);
+
+    // Calls are set up later the same day, and a second clash comes up.
+    channelState.current = PHONE_READY;
+    events.push(
+      event('c', 'Gym', '2026-11-05T18:00:00.000Z', '2026-11-05T19:00:00.000Z'),
+      event('d', 'Class', '2026-11-05T18:30:00.000Z', '2026-11-05T19:30:00.000Z'),
+    );
+    await service.run({ watcher: 'calendar' });
+    expect((await feed()).map(item => item.level)).toEqual(['call', 'nudge']);
   });
 });

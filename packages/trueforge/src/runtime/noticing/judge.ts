@@ -8,7 +8,7 @@ import type { NoticingEvent } from '../../schemas/reach';
 import { modelIdentity, type TurnModelUsage } from '../modelUsage';
 import { getModelDetails } from '../sessionResources';
 import { meterHelperLlm, type TokenFactoryBudget } from '../tokenFactoryBudget';
-import { maxLevelOf } from './levels';
+import { ceilingOf } from './levels';
 
 const JUDGE_TIMEOUT_MS = 20_000;
 const JUDGE_MAX_TOKENS = 300;
@@ -45,7 +45,7 @@ export function buildJudgeMessages({
   event: NoticingEvent;
   assistantName: string | undefined;
 }): LLMCreateParams['messages'] {
-  const max = maxLevelOf(event.kind);
+  const max = ceilingOf(event);
   const who = assistantName === undefined ? 'a personal assistant' : `a personal assistant called ${assistantName}`;
   const system = [
     `<noticing-judge version="${NOTICING_JUDGE_VERSION}">`,

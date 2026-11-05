@@ -34,7 +34,9 @@ export function deliveryDeps(
     reminderReach: createReminderReach({
       reachSettings: reachSettingsStore,
       store: new NoticingStore(db),
+      history: deliveryStore,
       channels: () => NO_PHONE_CHANNELS,
+      logger: winston.createLogger({ silent: true }),
     }),
     reachChannels: () => NO_PHONE_CHANNELS,
     webPushPublicKey: undefined,

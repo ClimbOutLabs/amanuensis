@@ -124,16 +124,15 @@ export function createReachRouter(deps: ReachRouterDeps) {
     const owner = ownerOf(c);
     const { channel } = c.req.valid('json');
     const channels = deps.channels();
+    // Texts and calls have no test of their own yet; the part that sets one up adds it here.
     if (channel === 'text' || channel === 'call') {
       const status = channel === 'text' ? channels.texts : channels.calls;
-      if (!status.available) {
-        return c.json({ error: { message: `${status.note} There is nothing to try yet.` } }, 409);
-      }
-      return c.json({ error: { message: 'This channel cannot be tried from here yet.' } }, 409);
+      return c.json({ error: { message: `${status.note} There is nothing to try yet.` } }, 409);
     }
+    // A test is a note in the feed, so a push test never uses up one of the day's nudges.
     const delivery = await deps.deliveryService.deliver({
       ...owner,
-      kind: channel === 'push' ? 'nudge' : 'note',
+      kind: 'note',
       level: channel === 'push' ? 'nudge' : 'note',
       text: 'This is a test. If you can read this, it works.',
       reason: 'You pressed Try it in Reach me settings.',

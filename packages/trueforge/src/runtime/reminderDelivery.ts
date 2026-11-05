@@ -172,19 +172,24 @@ export async function deliverReminder(params: {
   });
 
   const person = { tenant_id: schedule.tenant_id, created_by: owner.subject_id };
-  const decision = await params.reach.decide({ owner: person, urgent: schedule.manifest.urgent });
-  const reason = joinReasons([
-    `You asked to be reminded on ${formatRunTime({ at: new Date(run.scheduled_for), timezone: schedule.manifest.timezone })}.`,
-    ...decision.steps,
-  ]);
-  const delivery = await params.deliveries.deliver({
-    ...person,
-    kind: 'reminder',
-    level: decision.delivered,
-    text: feedText(what),
-    reason,
-    link: { type: 'chat', session_id: sessionId },
+  await params.reach.deliver({
+    owner: person,
+    urgent: schedule.manifest.urgent,
+    timezone: schedule.manifest.timezone,
+    at: params.now,
+    send: decision =>
+      params.deliveries.deliver({
+        ...person,
+        kind: 'reminder',
+        level: decision.delivered,
+        text: feedText(what),
+        reason: joinReasons([
+          `You asked to be reminded on ${formatRunTime({ at: new Date(run.scheduled_for), timezone: schedule.manifest.timezone })}.`,
+          ...decision.steps,
+        ]),
+        link: { type: 'chat', session_id: sessionId },
+        created_at: params.now,
+      }),
   });
-  await params.reach.record({ owner: person, reminder_run_id: run.id, decision, reason, delivery_id: delivery.id });
   return { session_id: sessionId, turn_id: turnId };
 }

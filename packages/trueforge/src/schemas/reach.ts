@@ -1,6 +1,6 @@
 import { z } from '@hono/zod-openapi';
 
-import { DeliveryLevelSchema } from './deliveries';
+import { DeliveryLevelSchema, DeliveryLinkSchema } from './deliveries';
 import { TimezoneSchema } from './schedule';
 
 /**
@@ -213,13 +213,16 @@ export const NoticingEvidenceSchema = z.enum(['own', 'verified_sender', 'content
 
 export type NoticingEvidence = z.infer<typeof NoticingEvidenceSchema>;
 
-/** What an event record can be: a watched kind, or a reminder, which is recorded so its calls count against the limits. */
-export const NoticingEventKindSchema = z.enum([...NOTICING_KINDS, 'reminder']);
+/** Enough to find a mail event's message again, so a tracked bill can be checked later for a "paid". */
+export const NoticingMailRefSchema = z.object({
+  message_id: z.string().min(1),
+  thread_id: z.string().min(1).nullable(),
+});
 
 /** One thing a watcher found. The id is stable, so the same thing found twice is raised once. */
 export const NoticingEventSchema = z.object({
   id: z.string().min(1).max(512),
-  kind: NoticingEventKindSchema,
+  kind: NoticingKindSchema,
   evidence: NoticingEvidenceSchema,
   /** The plain sentence used when no model is called, and the fallback when the model's message cannot be used. */
   summary: z.string().min(1).max(500),
@@ -227,14 +230,9 @@ export const NoticingEventSchema = z.object({
   facts: z.string().max(4000),
   /** Why this event matched, in plain words. */
   matched: z.string().min(1).max(300),
-  link: z
-    .discriminatedUnion('type', [
-      z.object({ type: z.literal('chat'), session_id: z.string().min(1) }),
-      z.object({ type: z.literal('space'), space_id: z.string().min(1) }),
-    ])
-    .nullable(),
-  /** The message a mail event came from, so a bill that is tracked can be checked again for a later "paid". */
-  mail_ref: z.object({ message_id: z.string().min(1), thread_id: z.string().min(1).nullable() }).nullable(),
+  /** Where the delivery leads. */
+  link: DeliveryLinkSchema.nullable(),
+  mail_ref: NoticingMailRefSchema.nullable(),
   occurred_at: z.string(),
   due_at: z.string().nullable(),
 });

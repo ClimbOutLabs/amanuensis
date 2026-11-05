@@ -131,16 +131,16 @@ describe('reach routes', () => {
     });
   });
 
-  it('tries in-app as a note and push as a nudge, and says plainly that texts and calls are not set up', async () => {
+  it('tries in-app quietly and push loudly, both as notes in the feed, and says plainly that texts and calls are not set up', async () => {
     const { call, deliveryStore } = await build();
     const inApp = await call('/test', { method: 'POST', body: { channel: 'in_app' } });
     expect(inApp.status).toBe(201);
     const push = await call('/test', { method: 'POST', body: { channel: 'push' } });
     expect(push.status).toBe(201);
-    const levels = (await deliveryStore.list({ tenant_id: 'default', created_by: 'alice', limit: 10 })).deliveries
-      .map(item => item.level)
-      .sort();
-    expect(levels).toEqual(['note', 'nudge']);
+    const tried = (await deliveryStore.list({ tenant_id: 'default', created_by: 'alice', limit: 10 })).deliveries;
+    expect(tried.map(item => item.level).sort()).toEqual(['note', 'nudge']);
+    // A test never counts toward the day's nudges, which count only nudges the assistant noticed.
+    expect(tried.map(item => item.kind)).toEqual(['note', 'note']);
     const text = await call('/test', { method: 'POST', body: { channel: 'text' } });
     expect(text.status).toBe(409);
     await expect(text.json()).resolves.toEqual({
