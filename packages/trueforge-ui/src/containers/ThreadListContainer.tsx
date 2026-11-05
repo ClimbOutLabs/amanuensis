@@ -74,6 +74,7 @@ function ThreadListItemRow({
   const feedUnread = remoteId != null && deliveries?.unreadChatIds.has(remoteId) === true;
   // A chat whose latest answer landed after the person last opened it is marked the same way.
   const answerUnseen = remoteId != null && answerMarks?.unseenAnswerChatIds.has(remoteId) === true;
+  const answerStamp = remoteId == null ? undefined : answerMarks?.answerStampsByChatId.get(remoteId);
   const unread = feedUnread || answerUnseen;
   const isOpen = id === mainThreadId && !sidebarNavOpen;
   const markChatSeen = deliveries?.markChatSeen;
@@ -82,9 +83,12 @@ function ThreadListItemRow({
   useEffect(() => {
     if (remoteId != null && isOpen && feedUnread) void markChatSeen?.(remoteId);
   }, [remoteId, isOpen, feedUnread, markChatSeen]);
+  // An open chat is read as far as its newest stamp: mark it seen when it opens and
+  // again on every stamp update while it stays open, so an answer the person watched
+  // land never dots the chat once they switch away.
   useEffect(() => {
-    if (remoteId != null && isOpen && answerUnseen) markAnswerSeen?.(remoteId);
-  }, [remoteId, isOpen, answerUnseen, markAnswerSeen]);
+    if (remoteId != null && isOpen && answerStamp !== undefined) markAnswerSeen?.(remoteId);
+  }, [remoteId, isOpen, answerStamp, markAnswerSeen]);
   const canDelete = canDeleteSession && remoteId != null && canDeleteResource(remoteId);
   const canRename = canRenameSession && remoteId != null;
   // The "..." actions menu holds Rename, Delete, and/or Move to folder (the "Show agent

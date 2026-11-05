@@ -40,6 +40,7 @@ import type {
   ListSessionsInput,
   ListTurnEventsInput,
   ListTurnsInput,
+  MergeSessionMetadataInput,
   OverwriteThreadContextInput,
   PatchMCPServersInput,
   PatchSandboxInfoInput,
@@ -115,6 +116,7 @@ import {
   getSessionByExternalId as getSessionByExternalIdQuery,
   getSession as getSessionQuery,
   listSessions as listSessionsQuery,
+  mergeSessionMetadata as mergeSessionMetadataQuery,
   stampImportedSession as stampImportedSessionQuery,
   updateSession as updateSessionQuery,
 } from './queries/sessions';
@@ -223,6 +225,10 @@ export class SqliteSessionStore implements ISessionStore<SessionCustom, TurnCust
 
   updateSession(input: UpdateSessionInput<SessionCustom>): Promise<void> {
     return updateSessionQuery(this.db, input);
+  }
+
+  mergeSessionMetadata(input: MergeSessionMetadataInput): Promise<void> {
+    return mergeSessionMetadataQuery(this.db, input);
   }
 
   createSessionFolder(input: CreateSessionFolderInput): Promise<SessionFolderRecord> {

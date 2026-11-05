@@ -86,4 +86,53 @@ describe('the unseen-answer marks', () => {
 
     await waitFor(() => expect(screen.getByTestId('unseen').textContent).toBe('chat-a'));
   });
+
+  it('records nothing for a chat opened before any stamp for it is known', async () => {
+    vi.useFakeTimers();
+    const { api, state } = fakeApi([]);
+    renderMarks(api);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(api.listAnswerMarks).toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open chat a' }));
+    expect(window.localStorage.getItem(CHAT_ANSWERS_SEEN_STORAGE_KEY)).toBe(JSON.stringify({}));
+
+    // The stamp arrives on a later check, and the earlier open does not hide it.
+    state.marks = [{ sessionId: 'chat-a', answeredAt: T1 }];
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(POLL_MS);
+    });
+    expect(screen.getByTestId('unseen').textContent).toBe('chat-a');
+  });
+
+  it('keeps another tab’s marks when writing its own', async () => {
+    window.localStorage.setItem(CHAT_ANSWERS_SEEN_STORAGE_KEY, JSON.stringify({ 'chat-a': T1 }));
+    const { api } = fakeApi([{ sessionId: 'chat-a', answeredAt: T2 }]);
+    renderMarks(api);
+    await waitFor(() => expect(screen.getByTestId('unseen').textContent).toBe('chat-a'));
+
+    // Another tab records a different chat after this tab loaded its record.
+    window.localStorage.setItem(CHAT_ANSWERS_SEEN_STORAGE_KEY, JSON.stringify({ 'chat-a': T1, 'chat-b': T2 }));
+    fireEvent.click(screen.getByRole('button', { name: 'Open chat a' }));
+
+    expect(window.localStorage.getItem(CHAT_ANSWERS_SEEN_STORAGE_KEY)).toBe(
+      JSON.stringify({ 'chat-a': T2, 'chat-b': T2 }),
+    );
+  });
+
+  it('takes in marks another tab records, through the storage event', async () => {
+    window.localStorage.setItem(CHAT_ANSWERS_SEEN_STORAGE_KEY, JSON.stringify({ 'chat-a': T1 }));
+    const { api } = fakeApi([{ sessionId: 'chat-a', answeredAt: T2 }]);
+    renderMarks(api);
+    await waitFor(() => expect(screen.getByTestId('unseen').textContent).toBe('chat-a'));
+
+    act(() => {
+      window.localStorage.setItem(CHAT_ANSWERS_SEEN_STORAGE_KEY, JSON.stringify({ 'chat-a': T2 }));
+      window.dispatchEvent(new StorageEvent('storage', { key: CHAT_ANSWERS_SEEN_STORAGE_KEY }));
+    });
+
+    expect(screen.getByTestId('unseen').textContent).toBe('');
+  });
 });

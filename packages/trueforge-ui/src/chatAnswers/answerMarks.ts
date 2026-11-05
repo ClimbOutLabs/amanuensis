@@ -36,6 +36,22 @@ export function unseenAnswerChatIds(input: {
 }
 
 /**
+ * Merges two seen records key by key, keeping the later time for each chat. Tabs of the
+ * same browser share the stored record, so a write must fold in what another tab recorded
+ * instead of replacing the whole record with this tab's older copy.
+ */
+export function mergeSeenAnswerMarks(first: SeenAnswerMarks, second: SeenAnswerMarks): Record<string, string> {
+  const merged: Record<string, string> = { ...first };
+  for (const [sessionId, seenAt] of Object.entries(second)) {
+    const current = merged[sessionId];
+    if (current === undefined || Date.parse(seenAt) > Date.parse(current)) {
+      merged[sessionId] = seenAt;
+    }
+  }
+  return merged;
+}
+
+/**
  * The first record this browser keeps: every answer that already exists counts as seen, so
  * a person opening the app for the first time does not find every old chat dotted. A chat
  * the person opened before the first check keeps whichever mark is later, so an answer
@@ -45,17 +61,11 @@ export function baselineSeenAnswerMarks(input: {
   marks: readonly ChatAnswerMark[];
   opened: SeenAnswerMarks;
 }): Record<string, string> {
-  const baseline: Record<string, string> = {};
+  const fromMarks: Record<string, string> = {};
   for (const mark of input.marks) {
-    baseline[mark.sessionId] = mark.answeredAt;
+    fromMarks[mark.sessionId] = mark.answeredAt;
   }
-  for (const [sessionId, seenAt] of Object.entries(input.opened)) {
-    const current = baseline[sessionId];
-    if (current === undefined || Date.parse(seenAt) > Date.parse(current)) {
-      baseline[sessionId] = seenAt;
-    }
-  }
-  return baseline;
+  return mergeSeenAnswerMarks(fromMarks, input.opened);
 }
 
 /**

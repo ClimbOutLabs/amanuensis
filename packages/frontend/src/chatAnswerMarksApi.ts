@@ -1,10 +1,8 @@
+import { LATEST_ANSWER_AT_METADATA_KEY } from '@truefoundry/trueforge-core/agent-session/schemas/session';
 import type { ChatAnswerMark, ChatAnswerMarksApi } from '@truefoundry/trueforge-ui';
 
 import { apiPath } from './publicPath';
 
-// The chat's session metadata key holding when its latest answer landed. The server stamps
-// it (LATEST_ANSWER_AT_METADATA_KEY in trueforge-core); the wire name is what matters here.
-const LATEST_ANSWER_AT_KEY = 'latest_answer_at';
 const SESSIONS_URL = '/api/v1/sessions';
 // The server caps one page of chats at 25. Answers are recent activity, and the list is
 // newest first, so a few pages cover every chat that could plausibly carry a fresh dot;
@@ -20,7 +18,7 @@ function parseMark(value: unknown): ChatAnswerMark | null {
   if (!isRecord(value) || typeof value.id !== 'string' || !isRecord(value.metadata)) {
     return null;
   }
-  const answeredAt = value.metadata[LATEST_ANSWER_AT_KEY];
+  const answeredAt = value.metadata[LATEST_ANSWER_AT_METADATA_KEY];
   return typeof answeredAt === 'string' ? { sessionId: value.id, answeredAt } : null;
 }
 

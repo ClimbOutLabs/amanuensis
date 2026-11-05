@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   CHAT_ANSWERS_SEEN_STORAGE_KEY,
   baselineSeenAnswerMarks,
+  mergeSeenAnswerMarks,
   readSeenAnswerMarks,
   unseenAnswerChatIds,
   writeSeenAnswerMarks,
@@ -60,6 +61,25 @@ describe('baselineSeenAnswerMarks', () => {
     expect(
       baselineSeenAnswerMarks({ marks: [{ sessionId: 'chat-a', answeredAt: T2 }], opened: { 'chat-a': T1 } }),
     ).toEqual({ 'chat-a': T2 });
+  });
+});
+
+describe('mergeSeenAnswerMarks', () => {
+  it('keeps the later time per chat and the union of both records', () => {
+    expect(mergeSeenAnswerMarks({ 'chat-a': T2, 'chat-b': T1 }, { 'chat-a': T1, 'chat-c': T2 })).toEqual({
+      'chat-a': T2,
+      'chat-b': T1,
+      'chat-c': T2,
+    });
+    expect(mergeSeenAnswerMarks({ 'chat-a': T1 }, { 'chat-a': T2 })).toEqual({ 'chat-a': T2 });
+  });
+
+  it('does not mutate either record', () => {
+    const first = { 'chat-a': T1 };
+    const second = { 'chat-a': T2 };
+    mergeSeenAnswerMarks(first, second);
+    expect(first).toEqual({ 'chat-a': T1 });
+    expect(second).toEqual({ 'chat-a': T2 });
   });
 });
 

@@ -14,6 +14,8 @@ import {
 
 import {
   baselineSeenAnswerMarks,
+  CHAT_ANSWERS_SEEN_STORAGE_KEY,
+  mergeSeenAnswerMarks,
   readSeenAnswerMarks,
   unseenAnswerChatIds,
   writeSeenAnswerMarks,
@@ -27,6 +29,8 @@ export const CHAT_ANSWER_MARKS_POLL_MS = 30_000;
 type ChatAnswerMarksValue = {
   /** Chats whose latest answer this browser has not seen the person open yet. */
   unseenAnswerChatIds: ReadonlySet<string>;
+  /** Each chat's latest answer stamp as last fetched, keyed by chat id. */
+  answerStampsByChatId: ReadonlyMap<string, string>;
   /** Records that the person opened this chat, so its dot clears. */
   markAnswerSeen: (sessionId: string) => void;
 };
@@ -73,12 +77,41 @@ export const ChatAnswerMarksProvider: FC<{ api: ChatAnswerMarksApi; pollMs?: num
   const baselinedRef = useRef(seen !== null);
 
   const applySeen = useCallback((next: SeenAnswerMarks) => {
-    seenRef.current = next;
-    setSeen(next);
     const storage = browserStorage();
+    // Tabs of this browser share the stored record: re-read it and merge per key
+    // before writing, so this write cannot erase a chat another tab just recorded.
+    const stored = storage === null ? null : readSeenAnswerMarks(storage);
+    const merged = stored === null ? { ...next } : mergeSeenAnswerMarks(stored, next);
+    seenRef.current = merged;
+    setSeen(merged);
     if (storage !== null) {
-      writeSeenAnswerMarks(storage, next);
+      writeSeenAnswerMarks(storage, merged);
     }
+  }, []);
+
+  // The same merge in the other direction: when another tab writes the record, take
+  // its marks in so this tab's dots agree with what the person already read there.
+  useEffect(() => {
+    const onStorage = (event: StorageEvent) => {
+      if (event.key !== CHAT_ANSWERS_SEEN_STORAGE_KEY || seenRef.current === null) {
+        return;
+      }
+      const storage = browserStorage();
+      if (storage === null) {
+        return;
+      }
+      const stored = readSeenAnswerMarks(storage);
+      if (stored === null) {
+        return;
+      }
+      const merged = mergeSeenAnswerMarks(seenRef.current, stored);
+      seenRef.current = merged;
+      setSeen(merged);
+    };
+    window.addEventListener('storage', onStorage);
+    return () => {
+      window.removeEventListener('storage', onStorage);
+    };
   }, []);
 
   const refresh = useCallback(async () => {
@@ -113,16 +146,20 @@ export const ChatAnswerMarksProvider: FC<{ api: ChatAnswerMarksApi; pollMs?: num
 
   const markAnswerSeen = useCallback(
     (sessionId: string) => {
-      // The newest answer this browser knows for the chat; when none is known yet (the
-      // chat was opened before the first check came back), the open time itself, so only
-      // an answer that lands after the open can mark the chat again.
+      // Seen is always a stamp, the turn's own completion time, never this browser's
+      // clock: a clock-written time can sit after a stamp the person has not actually
+      // read (hiding its dot for good) or before one they have (dotting a chat they
+      // just read). With no stamp known yet there is nothing to record; the next check
+      // brings the stamp, and the list marks a still-open chat seen when it arrives.
       const known = marksRef.current.find(mark => mark.sessionId === sessionId);
-      const seenAt = known?.answeredAt ?? new Date().toISOString();
-      const current = seenRef.current ?? {};
-      if (current[sessionId] === seenAt) {
+      if (known === undefined) {
         return;
       }
-      applySeen({ ...current, [sessionId]: seenAt });
+      const current = seenRef.current ?? {};
+      if (current[sessionId] === known.answeredAt) {
+        return;
+      }
+      applySeen({ ...current, [sessionId]: known.answeredAt });
     },
     [applySeen],
   );
@@ -132,9 +169,11 @@ export const ChatAnswerMarksProvider: FC<{ api: ChatAnswerMarksApi; pollMs?: num
     [marks, seen],
   );
 
+  const answerStampsByChatId = useMemo(() => new Map(marks.map(mark => [mark.sessionId, mark.answeredAt])), [marks]);
+
   const value = useMemo<ChatAnswerMarksValue>(
-    () => ({ unseenAnswerChatIds: unseen, markAnswerSeen }),
-    [unseen, markAnswerSeen],
+    () => ({ unseenAnswerChatIds: unseen, answerStampsByChatId, markAnswerSeen }),
+    [unseen, answerStampsByChatId, markAnswerSeen],
   );
 
   return <ChatAnswerMarksContext.Provider value={value}>{children}</ChatAnswerMarksContext.Provider>;

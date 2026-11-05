@@ -51,31 +51,38 @@ describe('stampLatestAnswer', () => {
     expect(record?.metadata[LATEST_ANSWER_AT_METADATA_KEY]).toBe(ANSWERED_AT);
   });
 
-  it('writes nothing when the stamp already says the same time', async () => {
-    const sessionStore = await storeWithChat({ [LATEST_ANSWER_AT_METADATA_KEY]: ANSWERED_AT });
-    const update = jest.spyOn(sessionStore, 'updateSession');
+  it('stamps through the atomic one-key merge, with no read or full metadata rewrite', async () => {
+    const merges: { tenant_id: string; session_id: string; key: string; value: string }[] = [];
+    const sessionStore: LatestAnswerSessionStore = {
+      mergeSessionMetadata: input => {
+        merges.push(input);
+        return Promise.resolve();
+      },
+    };
     const logger = winston.createLogger({ silent: true });
 
     await stampLatestAnswer({ sessionStore, tenantId: TENANT, sessionId: SESSION_ID, answeredAt: ANSWERED_AT, logger });
 
-    expect(update).not.toHaveBeenCalled();
+    expect(merges).toEqual([
+      { tenant_id: TENANT, session_id: SESSION_ID, key: LATEST_ANSWER_AT_METADATA_KEY, value: ANSWERED_AT },
+    ]);
   });
 
   it('does nothing for a chat that is gone', async () => {
     const sessionStore = new InMemorySessionStore<SessionCustom, TurnCustom>();
-    const update = jest.spyOn(sessionStore, 'updateSession');
+    const merge = jest.spyOn(sessionStore, 'mergeSessionMetadata');
     const logger = winston.createLogger({ silent: true });
 
     await expect(
       stampLatestAnswer({ sessionStore, tenantId: TENANT, sessionId: 'no-such-chat', answeredAt: ANSWERED_AT, logger }),
     ).resolves.toBeUndefined();
-    expect(update).not.toHaveBeenCalled();
+    expect(merge).toHaveBeenCalledTimes(1);
+    await expect(sessionStore.getSession({ tenant_id: TENANT, session_id: 'no-such-chat' })).resolves.toBeUndefined();
   });
 
   it('logs and swallows a store failure, since the answer itself already landed', async () => {
     const failing: LatestAnswerSessionStore = {
-      getSession: () => Promise.reject(new Error('store is down')),
-      updateSession: () => Promise.resolve(),
+      mergeSessionMetadata: () => Promise.reject(new Error('store is down')),
     };
     const logger = winston.createLogger({ silent: true });
     const warn = jest.spyOn(logger, 'warn');
