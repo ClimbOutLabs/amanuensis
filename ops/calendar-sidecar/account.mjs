@@ -55,10 +55,12 @@ export function accountIsWellFormed(account) {
   return accountProblem(account) === null;
 }
 
-// The host must read the same after the URL parser normalizes it. A host written as a number in a
-// disguised form (such as 0x7f.1 for 127.0.0.1) changes in the parser, so it is refused here instead of
-// being judged by one reader and used by another.
-function addressIsWellFormed(address) {
+/**
+ * True for an https address with no name or password whose host reads the same after the URL parser
+ * normalizes it. A host written as a number in a disguised form (such as 0x7f.1 for 127.0.0.1) changes in
+ * the parser, so it is refused here instead of being judged by one reader and used by another.
+ */
+export function addressIsWellFormed(address) {
   if (!URL_PATTERN.test(address)) {
     return false;
   }
