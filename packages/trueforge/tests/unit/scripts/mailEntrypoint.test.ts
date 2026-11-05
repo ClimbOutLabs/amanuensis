@@ -240,12 +240,15 @@ describe('mail-email entrypoint bounded stop', () => {
     await rm(dir, { recursive: true, force: true });
   });
 
-  /** Writes the stand-in server. A stubborn one ignores the stop signal; only a forced stop ends it. */
+  /**
+   * Writes the stand-in server. A stubborn one ignores the stop signal; only a forced stop ends it.
+   * It records its pid only once it ignores the signal, so a recorded pid means it is ready to be stopped.
+   */
   async function writeStub(stubborn: boolean): Promise<void> {
     const bin = join(dir, 'bin');
     await mkdir(bin);
     const body = stubborn
-      ? `#!/bin/sh\necho start >> "${starts}"\necho $$ >> "${pidsFile}"\ntrap '' TERM\nwhile :; do sleep 1; done\n`
+      ? `#!/bin/sh\necho start >> "${starts}"\ntrap '' TERM\necho $$ >> "${pidsFile}"\nwhile :; do sleep 1; done\n`
       : `#!/bin/sh\necho start >> "${starts}"\necho $$ >> "${pidsFile}"\nexec sleep 1000\n`;
     await writeFile(join(bin, 'mcp-email-server'), body);
     await chmod(join(bin, 'mcp-email-server'), 0o755);
@@ -317,6 +320,8 @@ describe('mail-email entrypoint bounded stop', () => {
     await writeStub(true);
     startWrapperCaptured({ AMAN_MAIL_STOP_GRACE_SECONDS: '2' });
     await eventually(async () => (await readOrEmpty(status)) === allowedRecipientsFileHash(LIST_V1));
+    // The status is written as soon as the server is launched, which can be before the server has run at all.
+    await eventually(async () => (await serverPids()).length > 0);
     const firstPid = (await serverPids())[0];
     if (firstPid === undefined) throw new Error('the stand-in server never recorded its pid');
 

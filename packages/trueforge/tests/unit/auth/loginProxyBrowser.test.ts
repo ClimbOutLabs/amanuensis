@@ -57,7 +57,18 @@ describe('signing in through the proxied page in a real browser', () => {
   let passwordPosts: string[];
 
   beforeAll(async () => {
-    browser = await chromium.launch({ executablePath: findChromiumExecutable(chromium.executablePath()) });
+    // TEMP diagnostics for slow CI launches; removed before merge.
+    const t0 = Date.now();
+    browser = await chromium.launch({
+      executablePath: findChromiumExecutable(chromium.executablePath()),
+      logger: {
+        isEnabled: () => true,
+        log: (name, _severity, message) => {
+          process.stderr.write(`[launch +${String(Date.now() - t0)}ms] ${name}: ${String(message)}\n`);
+        },
+      },
+    });
+    process.stderr.write(`[launch done +${String(Date.now() - t0)}ms]\n`);
     passwordPosts = [];
     upstream = signInService(passwordPosts);
     const upstreamPort = await listen(upstream);
