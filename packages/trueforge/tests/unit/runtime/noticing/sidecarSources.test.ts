@@ -158,6 +158,7 @@ describe('createSidecarNoticingSources', () => {
       mailUrl: undefined,
       calendarUrl: undefined,
       primary: none,
+      instanceOwner: OWNER,
       logger: winston.createLogger({ silent: true }),
     });
     await expect(provider.listOwners()).resolves.toEqual([OWNER]);
@@ -170,8 +171,46 @@ describe('createSidecarNoticingSources', () => {
       mailUrl: 'http://mail.invalid/mcp',
       calendarUrl: undefined,
       primary: { ...none, sourcesFor: () => Promise.resolve(own) },
+      instanceOwner: OWNER,
       logger: winston.createLogger({ silent: true }),
     });
     expect((await provider.sourcesFor(OWNER)).mail).toBe(own.mail);
+  });
+
+  it('gives the shared connectors to the instance owner only', async () => {
+    const provider = createSidecarNoticingSources({
+      mailUrl: undefined,
+      calendarUrl: 'http://calendar.invalid/mcp',
+      primary: none,
+      instanceOwner: OWNER,
+      logger: winston.createLogger({ silent: true }),
+    });
+    const second = { tenant_id: 'default', created_by: 'owner-2' };
+    expect((await provider.sourcesFor(OWNER)).calendar).toBeDefined();
+    await expect(provider.sourcesFor(second)).resolves.toEqual({ mail: undefined, calendar: undefined });
+  });
+
+  it('lists the instance owner so the shared connectors are watched, and no one else', async () => {
+    const second = { tenant_id: 'default', created_by: 'owner-2' };
+    const provider = createSidecarNoticingSources({
+      mailUrl: 'http://mail.invalid/mcp',
+      calendarUrl: undefined,
+      primary: { ...none, listOwners: () => Promise.resolve([second]) },
+      instanceOwner: OWNER,
+      logger: winston.createLogger({ silent: true }),
+    });
+    await expect(provider.listOwners()).resolves.toEqual([second, OWNER]);
+  });
+
+  it('gives the shared connectors to no one when the instance names no owner', async () => {
+    const provider = createSidecarNoticingSources({
+      mailUrl: 'http://mail.invalid/mcp',
+      calendarUrl: 'http://calendar.invalid/mcp',
+      primary: none,
+      instanceOwner: undefined,
+      logger: winston.createLogger({ silent: true }),
+    });
+    await expect(provider.sourcesFor(OWNER)).resolves.toEqual({ mail: undefined, calendar: undefined });
+    await expect(provider.listOwners()).resolves.toEqual([OWNER]);
   });
 });

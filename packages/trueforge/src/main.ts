@@ -66,7 +66,7 @@ import type { Logger } from 'winston';
 import { createServerApp } from './app';
 import { TrueForgeAuthorizer, type Authorizer } from './auth/authorizer';
 import { createAuthenticator } from './auth/createAuthenticator';
-import { resolveRequestContext, type RequestContext } from './auth/identity';
+import { resolveRequestContext, STANDALONE_REQUEST_CONTEXT, type RequestContext } from './auth/identity';
 import { startOidcDiscovery } from './auth/oidc';
 import { McpCatalog } from './catalog/McpCatalog';
 import { ModelCatalog } from './catalog/ModelCatalog';
@@ -122,6 +122,7 @@ import { designateTavilyAtBoot, seedDefaultSearchProviderAtBoot } from './runtim
 import { createDeliveryService } from './runtime/delivery/deliveryService';
 import { createWebPushSender } from './runtime/delivery/webPushSender';
 import { EventSubscriptionRegistry } from './runtime/event-subscription';
+import { instanceOwnerSubjectId } from './runtime/instanceOwner';
 import { registerMailConnectorFromSavedAccountInBackground } from './runtime/mailAccount';
 import { prepareMailPolicyAtBoot, registerMailConnectorAtBoot } from './runtime/mailConnector';
 import { warmEmbeddingsAtBoot } from './runtime/memory/embeddingRetrieval';
@@ -792,11 +793,19 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     audit: sentinelAuditStore,
     logger,
   });
+  const noticingOwnerId = instanceOwnerSubjectId({
+    signInOff: getTrueForgeAuthMode(configuration) === TrueForgeAuthMode.Standalone,
+    defaultSubjectId: STANDALONE_REQUEST_CONTEXT.subject.id,
+    oidc: configuration.OIDC,
+  });
+  const noticingInstanceOwner =
+    noticingOwnerId === undefined ? undefined : { tenant_id: TENANT_ID, created_by: noticingOwnerId };
   const noticingService = createNoticingService({
     sources: createSidecarNoticingSources({
       mailUrl: configuration.MAIL_SIDECAR_MCP_URL,
       calendarUrl: configuration.CALENDAR_SIDECAR_MCP_URL,
       primary: createGoogleNoticingSources({ connections: googleConnectionStore, fetchImpl: undefined, logger }),
+      instanceOwner: noticingInstanceOwner,
       logger,
     }),
     approvals: sessionApprovalSource({ sessionStore }),

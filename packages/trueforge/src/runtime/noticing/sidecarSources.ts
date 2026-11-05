@@ -205,18 +205,22 @@ export function sidecarCalendarSource({ call }: { call: CallSidecarTool }): Cale
 }
 
 /**
- * The instance's own mail and calendar sidecars, for people with no Google login for that part. They hold one
- * mailbox and one calendar for the whole instance, so they are watched for everyone who saved Reach me settings.
+ * The instance's own mail and calendar sidecars. They hold one mailbox and one calendar for the whole instance, so
+ * they belong to the instance owner only. Anyone else gets mail and calendar noticing only from their own Google
+ * connection. The owner's own Google connection is used first where there is one.
  */
 export function createSidecarNoticingSources({
   mailUrl,
   calendarUrl,
   primary,
+  instanceOwner,
   logger,
 }: {
   mailUrl: string | undefined;
   calendarUrl: string | undefined;
   primary: NoticingSourceProvider;
+  /** Who the shared connectors belong to, or undefined when the instance names no owner. */
+  instanceOwner: NoticingOwner | undefined;
   logger: Logger;
 }): NoticingSourceProvider {
   async function mailFromSidecar(url: string): Promise<MailSource | undefined> {
@@ -230,9 +234,17 @@ export function createSidecarNoticingSources({
     }
   }
   return {
-    listOwners: () => primary.listOwners(),
+    async listOwners() {
+      const listed = await primary.listOwners();
+      return instanceOwner === undefined || (mailUrl === undefined && calendarUrl === undefined)
+        ? listed
+        : [...listed, instanceOwner];
+    },
     async sourcesFor(owner: NoticingOwner): Promise<NoticingSources> {
       const own = await primary.sourcesFor(owner);
+      if (owner.tenant_id !== instanceOwner?.tenant_id || owner.created_by !== instanceOwner.created_by) {
+        return own;
+      }
       return {
         mail: own.mail ?? (mailUrl === undefined ? undefined : await mailFromSidecar(mailUrl)),
         calendar:
