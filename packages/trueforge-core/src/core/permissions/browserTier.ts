@@ -1,8 +1,8 @@
 /**
  * Tier rules for Aman's own browser. Reading, scrolling, going back and taking a screenshot only
  * look at the page already open and never submit anything, so they run without asking (Tier 1), the
- * same way a mail read does. Typing into a field and picking an option are Tier 1 too: the browser
- * holds back anything the page then tries to send until the person approves a click.
+ * same way a mail read does. Typing into a field and picking an option ask first (Tier 3), with the
+ * exact text on the card: a page's own script can send a field's value the moment it changes.
  *
  * Opening a page is different: the address itself goes to the site, so whatever is in it leaves
  * with the request. `browser_open` is classified in classifier.ts (`classifyBrowserOpen`) with the
@@ -15,7 +15,7 @@
  * address instead of clicking it, so no script of the page runs. Even a link asks when it submits a form or its label is a commit word (pay, buy, cancel
  * a membership, and so on). The word list only ever makes a click ask; it never lets one through.
  */
-import type { BrowserElementReview } from '../llm/LLMTypes';
+import { BrowserElementReviewSchema, type BrowserElementReview } from '../llm/LLMTypes';
 import {
   BROWSER_CLICK_TOOL_NAME,
   BROWSER_COMMIT_REASON,
@@ -172,6 +172,31 @@ function commitClickCard(review: BrowserElementReview): Tier3Card {
   };
 }
 
+/** The card for typing or picking: the exact text, the field it goes into, and the site. */
+function prepareCard(input: { review: BrowserElementReview; verb: 'Type' | 'Pick'; text: string }): Tier3Card {
+  const field = input.review.accessible_name.trim() === '' ? '(no label)' : shown(input.review.accessible_name);
+  const outbound = renderOutboundArguments({ [input.review.accessible_name.trim() || 'field']: input.text });
+  return {
+    plain_what: `${input.verb} "${shown(input.text)}" ${input.verb === 'Type' ? 'into' : 'in'} "${field}" on ${shown(input.review.site)}?`,
+    plain_why: null,
+    cannot_be_undone: null,
+    why_asked_again: null,
+    destination: input.review.site,
+    recipient: null,
+    amount: null,
+    parsed_command: null,
+    outbound_text: outbound.text,
+    destination_host: input.review.site,
+    outbound_truncated: outbound.truncated,
+  };
+}
+
+/** The `text` or `option` argument of a type or select call, or '' when it is missing. */
+function preparedText(params: Record<string, unknown>, key: 'text' | 'option'): string {
+  const value = params[key];
+  return typeof value === 'string' ? value : '';
+}
+
 /**
  * Tier rules for the browser's tools that only look at the open page. Returns undefined for
  * `browser_open` (classified on its own), for the tools that act on the page (classified by
@@ -203,9 +228,9 @@ const UNREAD_ELEMENT_DETAIL =
   'Aman could not read that part of the page first, so it was not touched. Read the page again, then try again.';
 
 /**
- * Tier rules for the browser's tools that act on one element of the open page. Typing and picking
- * an option run without asking: the browser holds back anything the page then tries to send until the
- * person approves a click. A click asks first unless it is a plain link (see `classifyBrowserClickKind`).
+ * Tier rules for the browser's tools that act on one element of the open page. Typing and picking an
+ * option ask first, with the exact text on the card, because the page's own script may send a value
+ * the moment it changes. A click asks first unless it is a plain link (see `classifyBrowserClickKind`).
  * An action whose element the host could not read is refused before any card, because it could never
  * run: the browser acts only on an element that still matches its read. Returns undefined for any
  * other tool, so the generic path classifies it (fail closed).
@@ -214,7 +239,7 @@ export async function classifyBrowserActionTool({
   action,
   mintToken,
 }: {
-  action: Pick<SentinelAction, 'tool_name' | 'tool_type' | 'browser_element'>;
+  action: Pick<SentinelAction, 'tool_name' | 'tool_type' | 'browser_element' | 'canonical_params'>;
   mintToken: () => Promise<string>;
 }): Promise<TierDecision | undefined> {
   if (action.tool_type !== 'truefoundry-system' || !isBrowserToolName(action.tool_name)) {
@@ -237,11 +262,17 @@ export async function classifyBrowserActionTool({
     });
   }
   if (action.tool_name !== BROWSER_CLICK_TOOL_NAME) {
-    return tier1Decision({
+    const typing = action.tool_name === BROWSER_TYPE_TOOL_NAME;
+    return tier3Decision({
+      card: prepareCard({
+        review,
+        verb: typing ? 'Type' : 'Pick',
+        text: preparedText(action.canonical_params, typing ? 'text' : 'option'),
+      }),
       reason: BROWSER_PREPARE_REASON,
-      reason_detail:
-        'Types into a field or picks an option. Anything the page then tries to send is held back until you approve a click.',
+      reason_detail: 'A page can send what is typed or picked the moment it changes, so Aman always asks first.',
       sensitive_read: false,
+      approval_token_id: await mintToken(),
     });
   }
   const kind = classifyBrowserClickKind(review);
@@ -261,20 +292,23 @@ export async function classifyBrowserActionTool({
   });
 }
 
+/** Every field of a read, taken from its schema so a field added there is always compared. */
+const ELEMENT_REVIEW_FIELDS = BrowserElementReviewSchema.keyof().options;
+
+function sameValues({ a, b }: { a: Record<string, string>; b: Record<string, string> }): boolean {
+  const aNames = Object.keys(a).sort();
+  const bNames = Object.keys(b).sort();
+  return (
+    aNames.length === bNames.length && aNames.every((name, index) => name === bNames[index] && a[name] === b[name])
+  );
+}
+
 /**
  * True when two reads of the element a browser action acts on agree on every field: a held action
  * runs only while the live element still reads the way it did when the person was asked.
  */
 export function sameBrowserElementReview({ a, b }: { a: BrowserElementReview; b: BrowserElementReview }): boolean {
-  const aFields = Object.keys(a.form_values).sort();
-  const bFields = Object.keys(b.form_values).sort();
-  return (
-    a.site === b.site &&
-    a.accessible_name === b.accessible_name &&
-    a.role === b.role &&
-    a.is_form_submit === b.is_form_submit &&
-    a.link_url === b.link_url &&
-    aFields.length === bFields.length &&
-    aFields.every((field, index) => field === bFields[index] && a.form_values[field] === b.form_values[field])
+  return ELEMENT_REVIEW_FIELDS.every(field =>
+    field === 'form_values' ? sameValues({ a: a.form_values, b: b.form_values }) : a[field] === b[field],
   );
 }

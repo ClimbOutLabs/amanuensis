@@ -199,17 +199,32 @@ describe('classifyBrowserClickKind', () => {
   });
 });
 
-describe('classifyTier: browser_type and browser_select are Tier 1', () => {
-  const field = clickReview({ accessible_name: 'Name', role: 'textbox' });
+describe('classifyTier: browser_type and browser_select ask first, showing the exact text', () => {
+  const field = clickReview({ accessible_name: 'Name', role: 'textbox', site: 'shop.example' });
 
-  it('typing into a field asks nothing', async () => {
-    const decision = await classifyTier(browserAction(BROWSER_TYPE_TOOL_NAME, { browser_element: field }), makeCtx());
-    expect(decision).toMatchObject({ tier: 1, card: null, reason: 'browser_prepare' });
+  it('typing into a field asks, with the text, the field and the site on the card', async () => {
+    const decision = await classifyTier(
+      browserAction(BROWSER_TYPE_TOOL_NAME, { browser_element: field, canonical_params: { ref: 'e1', text: 'Grace' } }),
+      makeCtx(),
+    );
+    expect(decision).toMatchObject({ tier: 3, reason: 'browser_prepare' });
+    expect(decision.card?.plain_what).toBe('Type "Grace" into "Name" on shop.example?');
+    expect(decision.card?.destination_host).toBe('shop.example');
+    expect(decision.card?.outbound_text).toContain('Grace');
+    expect(decision.approval_token_id).toEqual(expect.any(String));
   });
 
-  it('picking an option asks nothing', async () => {
-    const decision = await classifyTier(browserAction(BROWSER_SELECT_TOOL_NAME, { browser_element: field }), makeCtx());
-    expect(decision).toMatchObject({ tier: 1, card: null, reason: 'browser_prepare' });
+  it('picking an option asks, with the option on the card', async () => {
+    const decision = await classifyTier(
+      browserAction(BROWSER_SELECT_TOOL_NAME, {
+        browser_element: field,
+        canonical_params: { ref: 'e2', option: 'Premium' },
+      }),
+      makeCtx(),
+    );
+    expect(decision).toMatchObject({ tier: 3, reason: 'browser_prepare' });
+    expect(decision.card?.plain_what).toBe('Pick "Premium" in "Name" on shop.example?');
+    expect(decision.card?.outbound_text).toContain('Premium');
   });
 });
 

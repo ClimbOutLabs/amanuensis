@@ -199,18 +199,23 @@ async function withWorld(run) {
         Object.defineProperty(HTMLButtonElement.prototype, 'type', { get() { return 'button'; } });
         Object.defineProperty(HTMLElement.prototype, 'href', { get() { return 'http://site-a.test/help'; } });
       </script>`),
-    // Fields whose page script sends as soon as a value changes.
-    '/eager-form': html(`<h1>Eager form</h1>
-      <form id="plan" method="POST" action="/plan">
-        <label for="plan-size">Plan</label>
-        <select id="plan-size" name="size" onchange="this.form.submit()">
-          <option value="basic">Basic</option>
-          <option value="premium">Premium</option>
-        </select>
-        <label for="note">Note</label>
-        <input id="note" name="note" oninput="fetch('/autosave', { method: 'POST', body: this.value })">
-        <button>Save plan</button>
-      </form>`),
+    // Controls that only work with real input, and ones Aman must refuse.
+    '/controls': html(`<h1>Controls</h1>
+      <button id="menu" onpointerdown="document.getElementById('menu-list').hidden = false">Open menu</button>
+      <ul id="menu-list" hidden><li>Menu item one</li></ul>
+      <label for="code">Code</label>
+      <input id="code" onkeydown="document.getElementById('keys').textContent = 'Keys: ' + (this.value + event.key)">
+      <p id="keys">Keys: none</p>
+      <button disabled>Disabled button</button>
+      <label for="fixed">Fixed</label>
+      <input id="fixed" readonly value="locked">
+      <div style="position: relative">
+        <button>Covered button</button>
+        <div style="position: absolute; inset: 0; background: white"></div>
+      </div>
+      <button id="swap" onpointerdown="document.getElementById('trap').hidden = false">Swap on press</button>
+      <div id="trap" hidden style="position: fixed; inset: 0; background: red"
+        onclick="fetch('/stray', { method: 'POST' })"></div>`),
     '*': html('<h1>Other page</h1>'),
   });
 
@@ -915,55 +920,81 @@ test(
   },
 );
 
+test('a press reaches controls that only answer real input', { skip: !browsersAvailable }, async () => {
+  await withWorld(async ({ sidecar }) => {
+    const opened = await sidecar.open({ owner: 'owner-1', tab: 'chat-1', url: 'http://site-a.test/controls' });
+    const ref = refFor(opened.text, 'Open menu');
+    const pressed = await sidecar.click({ owner: 'owner-1', tab: 'chat-1', ref, expect: await checked(sidecar, ref) });
+    assert.equal(pressed.status, 'ok');
+    assert.match(pressed.text, /Menu item one/);
+  });
+});
+
+test('typing sends real keystrokes to the field', { skip: !browsersAvailable }, async () => {
+  await withWorld(async ({ sidecar }) => {
+    const opened = await sidecar.open({ owner: 'owner-1', tab: 'chat-1', url: 'http://site-a.test/controls' });
+    const ref = refFor(opened.text, 'Code');
+    const typed = await sidecar.type({
+      owner: 'owner-1',
+      tab: 'chat-1',
+      ref,
+      expect: await checked(sidecar, ref),
+      text: '42',
+    });
+    assert.equal(typed.status, 'ok');
+    assert.match(typed.text, /Keys: 42/);
+  });
+});
+
 test(
-  'what the page tries to send after Aman picks an option is held back, and said so',
+  'a disabled button, a read-only field and a covered button are refused',
   { skip: !browsersAvailable },
   async () => {
-    await withWorld(async ({ sidecar, siteA }) => {
-      const opened = await sidecar.open({ owner: 'owner-1', tab: 'chat-1', url: 'http://site-a.test/eager-form' });
-      const ref = refFor(opened.text, 'Plan');
-      const expect = await checked(sidecar, ref);
-      const picked = await sidecar.select({ owner: 'owner-1', tab: 'chat-1', ref, expect, option: 'Premium' });
-      assert.equal(picked.status, 'ok');
-      assert.match(picked.text, /held it back, so nothing was sent/);
-      await settle();
-      assert.deepEqual(posts(siteA.hits), []);
+    await withWorld(async ({ sidecar }) => {
+      const opened = await sidecar.open({ owner: 'owner-1', tab: 'chat-1', url: 'http://site-a.test/controls' });
+      const disabled = refFor(opened.text, 'Disabled button');
+      assert.deepEqual(
+        await sidecar.click({
+          owner: 'owner-1',
+          tab: 'chat-1',
+          ref: disabled,
+          expect: await checked(sidecar, disabled),
+        }),
+        { status: 'refused', reason: 'disabled' },
+      );
+      const fixed = refFor(opened.text, 'Fixed');
+      assert.deepEqual(
+        await sidecar.type({
+          owner: 'owner-1',
+          tab: 'chat-1',
+          ref: fixed,
+          expect: await checked(sidecar, fixed),
+          text: 'x',
+        }),
+        { status: 'refused', reason: 'read_only' },
+      );
+      const covered = refFor(opened.text, 'Covered button');
+      assert.deepEqual(
+        await sidecar.click({ owner: 'owner-1', tab: 'chat-1', ref: covered, expect: await checked(sidecar, covered) }),
+        { status: 'refused', reason: 'covered' },
+      );
     });
   },
 );
 
 test(
-  'what the page tries to send after Aman types is held back until the person approves a click',
+  'a press that the page moves onto something else is stopped and refused as changed',
   { skip: !browsersAvailable },
   async () => {
     await withWorld(async ({ sidecar, siteA }) => {
-      const opened = await sidecar.open({ owner: 'owner-1', tab: 'chat-1', url: 'http://site-a.test/eager-form' });
-      const note = refFor(opened.text, 'Note');
-      const typed = await sidecar.type({
-        owner: 'owner-1',
-        tab: 'chat-1',
-        ref: note,
-        expect: await checked(sidecar, note),
-        text: 'call me',
-      });
-      assert.equal(typed.status, 'ok');
+      const opened = await sidecar.open({ owner: 'owner-1', tab: 'chat-1', url: 'http://site-a.test/controls' });
+      const ref = refFor(opened.text, 'Swap on press');
+      assert.deepEqual(
+        await sidecar.click({ owner: 'owner-1', tab: 'chat-1', ref, expect: await checked(sidecar, ref) }),
+        { status: 'refused', reason: 'changed' },
+      );
       await settle();
       assert.deepEqual(posts(siteA.hits), []);
-      // The person approves the save on a card: now the form goes.
-      const save = refFor(typed.text, 'Save plan');
-      const saved = await sidecar.click({
-        owner: 'owner-1',
-        tab: 'chat-1',
-        ref: save,
-        expect: await checked(sidecar, save),
-        approved: true,
-      });
-      assert.equal(saved.status, 'ok');
-      await settle();
-      assert.deepEqual(
-        posts(siteA.hits).map(hit => hit.url),
-        ['/plan'],
-      );
     });
   },
 );
@@ -1030,6 +1061,9 @@ async function withFakeSidecar(run) {
     },
   };
   const evaluate = expression => {
+    if (expression.includes('amanGuard = guard')) {
+      return undefined;
+    }
     if (expression.includes('return extractSnapshotNodes()')) {
       return [{ id: 'HTML:0/INPUT:0', role: 'textbox', name: 'Name', value: '', field_kind: null, actionable: true }];
     }

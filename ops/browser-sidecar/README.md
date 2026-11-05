@@ -52,11 +52,11 @@ and names the person's profile (`owner`) and the chat's tab (`tab`).
 - `POST /type { owner, tab, ref, expect, text }` — types into a field, then returns a read. A password,
   payment or one-time-code field is refused; the person types those themselves.
 - `POST /select { owner, tab, ref, expect, option }` — picks an option on a dropdown, then returns a read.
-- `POST /click { owner, tab, ref, expect, approved }` — clicks, then returns a read. `approved` is true
-  when the person approved this click on a card.
+- `POST /click { owner, tab, ref, expect }` — clicks, then returns a read.
 
 An action whose element no longer reads the way `expect` says is refused as `changed`, and the element
-is not touched. One without `expect` is refused as `unchecked`. The app and the sidecar are built and
+is not touched. One without `expect` is refused as `unchecked`. A disabled element is refused as
+`disabled`, a read-only field as `read_only`, and an element that something else covers as `covered`. The app and the sidecar are built and
 upgraded together, so the app always sends it.
 
 ## Reading and acting on a page
@@ -66,9 +66,12 @@ change what the DOM's functions and properties return in their world, but not in
 sidecar reads is what the browser holds. Every read of an element and every action on it runs there.
 
 An action checks its element against `expect` and acts on it in the same step, with no gap in which
-the page could swap the element. A click on a button presses it there. Typing sets the field's value,
-and picking sets the option, the same way a person's input does, so the page's own code sees the
-change. The fields an action checks are the ones that decide what it does: a click checks them all,
+the page could swap the element. A click on a button is a real mouse press at the element's middle,
+after a check that the point lands on it. Typing is real keystrokes into the field, focused in the
+same step. Picking sets the option the way a person's choice does, so the page's own code sees the
+change. While a press or typing runs, a guard in the sidecar's world, set up before any of the page's
+scripts, stops any real input that lands outside the checked element. If the page moves something
+under the pointer between the check and the press, the press is stopped and refused as `changed`. The fields an action checks are the ones that decide what it does: a click checks them all,
 and typing or picking checks the site, the name and the role, since earlier typing changes the form.
 
 ## Which actions ask first
@@ -88,11 +91,9 @@ only ever makes a click ask; it never lets one through. A name is read the way a
 icon-only button is named by its image's alt text or label, and characters that show nothing
 (zero-width spaces, soft hyphens) are left out.
 
-Typing and picking an option do not ask, but they send nothing either. From the moment Aman types or
-picks on a page, the sidecar refuses every request of that tab that is not a plain read (anything but
-`GET` and `HEAD`), until the person approves a click on a card or the model opens a page. A refused
-page load leaves the tab where it is. The next read of the page tells the model that something was
-held back, and that the way to send it is to click the page's own send button, which asks first.
+Typing and picking an option always ask first, with the exact text or option, the field and the site
+on the card. A page can send what is typed the moment it changes, by any route, so the sidecar does
+not try to hold it back afterwards.
 
 ## Running it
 

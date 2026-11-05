@@ -346,14 +346,31 @@ function setFieldValue(element, value) {
 }
 
 /**
- * Reads the element at a snapshot id and, unless the action is only a read (`info`), acts on it in
- * the same step, so nothing the page does can come between the check and the action. Runs in a
- * script world of its own, where the page's scripts cannot change what the read sees.
+ * Arms the read world's input guard (set up by the sidecar at the start of every document) for one
+ * element: until the sidecar disarms it, input that lands anywhere else is stopped before the page
+ * sees it. False when the guard is missing, so the action is refused rather than run unguarded.
+ */
+function armGuard(element) {
+  const guard = globalThis.amanGuard;
+  if (guard === undefined) {
+    return false;
+  }
+  guard.element = element;
+  guard.strayed = false;
+  return true;
+}
+
+/**
+ * Reads the element at a snapshot id and, unless the action is only a read (`info`), checks it and
+ * starts the action in the same step, so nothing the page does can come between the check and the
+ * action. Runs in a script world of its own, where the page's scripts cannot change what the read sees.
  *
  * A click on a plain link is not pressed: the caller opens its address, so no script of the page
- * runs. Any other click is pressed here. Typing sets the field's value; picking sets the option.
+ * runs. Any other click is pressed by the caller with real input at the point returned here, which
+ * was just checked to land on the element; typing is done by the caller with real keystrokes into the
+ * field focused here. Both run under the input guard. Picking an option sets it here.
  */
-export function actOnElement({ path, action, expect, text, option }) {
+export function actOnElement({ path, action, expect, option }) {
   const element = elementAtPath(path);
   const review = element === null ? null : elementReviewOf(element);
   if (review === null) {
@@ -365,12 +382,22 @@ export function actOnElement({ path, action, expect, text, option }) {
   if (!sameElementReview({ a: review, b: expect, action })) {
     return { status: 'refused', reason: 'changed' };
   }
+  if (action === 'click' && review.link_url !== null) {
+    return { status: 'navigate', url: review.link_url };
+  }
+  if (element.disabled === true || element.getAttribute('aria-disabled') === 'true') {
+    return { status: 'refused', reason: 'disabled' };
+  }
   if (action === 'click') {
-    if (review.link_url !== null) {
-      return { status: 'navigate', url: review.link_url };
+    element.scrollIntoView({ block: 'center', inline: 'center', behavior: 'instant' });
+    const box = element.getBoundingClientRect();
+    const x = box.left + box.width / 2;
+    const y = box.top + box.height / 2;
+    const hit = document.elementFromPoint(x, y);
+    if (hit === null || !element.contains(hit)) {
+      return { status: 'refused', reason: 'covered' };
     }
-    element.click();
-    return { status: 'done' };
+    return armGuard(element) ? { status: 'press', x, y } : { status: 'refused', reason: 'unchecked' };
   }
   if (action === 'type') {
     if (fieldKind(element) !== null) {
@@ -379,9 +406,17 @@ export function actOnElement({ path, action, expect, text, option }) {
     if (element.tagName !== 'TEXTAREA' && !(element.tagName === 'INPUT' && TEXT_INPUT_TYPES.has(element.type))) {
       return { status: 'refused', reason: 'not_a_field' };
     }
+    if (element.readOnly) {
+      return { status: 'refused', reason: 'read_only' };
+    }
+    element.scrollIntoView({ block: 'center', inline: 'center', behavior: 'instant' });
     element.focus();
-    setFieldValue(element, text);
-    return { status: 'done' };
+    if (document.activeElement !== element) {
+      return { status: 'refused', reason: 'changed' };
+    }
+    // What was in the field goes first, so the keystrokes that follow are the whole new value.
+    setFieldValue(element, '');
+    return armGuard(element) ? { status: 'keys' } : { status: 'refused', reason: 'unchecked' };
   }
   if (element.tagName !== 'SELECT') {
     return { status: 'refused', reason: 'no_such_option' };
@@ -389,7 +424,7 @@ export function actOnElement({ path, action, expect, text, option }) {
   const picked = Array.from(element.options).find(
     candidate => candidate.value === option || candidate.label.trim() === option || candidate.text.trim() === option,
   );
-  if (picked === undefined) {
+  if (picked === undefined || picked.disabled) {
     return { status: 'refused', reason: 'no_such_option' };
   }
   setFieldValue(element, picked.value);

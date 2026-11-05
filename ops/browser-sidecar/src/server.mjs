@@ -30,30 +30,110 @@ function actScript(request) {
 /**
  * The name of the script world the sidecar reads pages in. A page's scripts run in their own world
  * and can replace what the DOM's functions and properties return there; in this world they cannot,
- * so what the sidecar reads is what the browser itself holds.
+ * so what the sidecar reads is what the browser holds.
  */
 const READ_WORLD = 'aman-read';
 
 /** Errors that mean the page moved on while it was read, so the read is tried again on the new page. */
 const PAGE_MOVED_ERRORS = ['Execution context was destroyed', 'Cannot find context with specified id'];
 
-/** Runs an expression in the tab's main frame, in a script world the page's own scripts cannot reach. */
-async function inReadWorld({ tab, expression }) {
+/**
+ * Input events the sidecar's own press or typing makes. While one is in progress, the read world
+ * stops any of these that land outside the element it checked, before the page's own listeners see it.
+ */
+const GUARDED_EVENTS = [
+  'pointerdown',
+  'pointerup',
+  'mousedown',
+  'mouseup',
+  'click',
+  'auxclick',
+  'dblclick',
+  'contextmenu',
+  'keydown',
+  'keypress',
+  'keyup',
+  'beforeinput',
+];
+
+/**
+ * Runs in the read world at the start of every document, before any of the page's scripts, so its
+ * listener on the window comes first. While armed, a real input event whose target is not inside the
+ * checked element is stopped and cancelled, and noted, so the action reports it as changed.
+ */
+const GUARD_SCRIPT = `(() => {
+  const guard = { element: null, strayed: false };
+  globalThis.amanGuard = guard;
+  const check = event => {
+    // Only real input is guarded: an event the page's own code makes follows from input that already
+    // landed on the checked element.
+    if (guard.element === null || !event.isTrusted) {
+      return;
+    }
+    const target = event.composedPath()[0];
+    if (target instanceof Node && guard.element.contains(target)) {
+      return;
+    }
+    guard.strayed = true;
+    event.stopImmediatePropagation();
+    event.preventDefault();
+  };
+  for (const type of ${JSON.stringify(GUARDED_EVENTS)}) {
+    window.addEventListener(type, check, true);
+  }
+})();`;
+
+/**
+ * Sets up the tab's read world: made again with the guard at the start of every document, and
+ * tracked by its context id, so every read and action of one page uses the same world.
+ */
+async function prepareReadWorld(tab) {
   const { frameTree } = await tab.cdp.send('Page.getFrameTree');
-  const { executionContextId } = await tab.cdp.send('Page.createIsolatedWorld', {
-    frameId: frameTree.frame.id,
-    worldName: READ_WORLD,
+  const mainFrameId = frameTree.frame.id;
+  tab.cdp.on('Runtime.executionContextCreated', ({ context }) => {
+    if (context.name === READ_WORLD && context.auxData?.frameId === mainFrameId) {
+      tab.readWorld = context.id;
+    }
   });
-  const reply = await tab.cdp.send('Runtime.evaluate', {
-    expression,
-    contextId: executionContextId,
-    returnByValue: true,
+  tab.cdp.on('Runtime.executionContextDestroyed', ({ executionContextId }) => {
+    if (executionContextId === tab.readWorld) {
+      tab.readWorld = undefined;
+    }
   });
+  tab.cdp.on('Runtime.executionContextsCleared', () => {
+    tab.readWorld = undefined;
+  });
+  await tab.cdp.send('Runtime.enable');
+  await tab.cdp.send('Page.addScriptToEvaluateOnNewDocument', { source: GUARD_SCRIPT, worldName: READ_WORLD });
+  tab.mainFrameId = mainFrameId;
+}
+
+/** Runs an expression in the tab's main frame, in the read world, which the page's own scripts cannot reach. */
+async function inReadWorld({ tab, expression }) {
+  if (tab.readWorld === undefined) {
+    // The tab's first, empty document predates the guard script; it has no page scripts to stay ahead of.
+    const { executionContextId } = await tab.cdp.send('Page.createIsolatedWorld', {
+      frameId: tab.mainFrameId,
+      worldName: READ_WORLD,
+    });
+    tab.readWorld = executionContextId;
+    await tab.cdp.send('Runtime.evaluate', { expression: GUARD_SCRIPT, contextId: executionContextId });
+  }
+  const reply = await tab.cdp.send('Runtime.evaluate', { expression, contextId: tab.readWorld, returnByValue: true });
   if (reply.exceptionDetails !== undefined) {
     throw new Error(`the page could not be read: ${reply.exceptionDetails.text}`);
   }
   return reply.result.value;
 }
+
+/** Ends the guard of a press or of typing, and says whether any of its input landed outside the checked element. */
+const DISARM_SCRIPT = `(() => {
+  const guard = globalThis.amanGuard;
+  const strayed = guard.strayed;
+  guard.element = null;
+  guard.strayed = false;
+  return strayed;
+})()`;
 
 const isStringRecord = value =>
   typeof value === 'object' &&
@@ -82,10 +162,6 @@ export function parseElementReview(value) {
 
 /** How long the sidecar waits after an action for the page to start whatever the action set off. */
 const SETTLE_MS = 500;
-
-/** The note on a read after the page tried to send something while sends were held back. */
-const HELD_SEND_NOTE =
-  "Note: the page tried to send something after Aman typed or picked an option, and Aman's browser held it back, so nothing was sent. To send it, click the page's own send or save button: the person is asked first.";
 
 /** A URL's scheme, host without a leading `www.`, and port, or undefined for one with no host (about:blank, data:). */
 function siteOf(url) {
@@ -138,16 +214,14 @@ const STAY_PUT = { status: 204 };
  * get the mail read back. `goingBack` marks the one history step the model asked for.
  * `refusedRedirect` is where the last navigation tried to redirect to, off the opened site, and
  * `movedTo` is set when the model's own open was refused that way, until the next open.
- * `cdp` is the tab's DevTools session, which reads the page in a script world of its own.
+ * `cdp` is the tab's DevTools session, which reads the page in a script world of its own (`readWorld`).
  */
 function createTab({ page, cdp }) {
   return {
     page,
     cdp,
-    // Set after Aman types or picks without asking: until the person approves a click, or the model
-    // opens a page, anything the page tries to send (any request but a plain read) is refused.
-    holdSends: false,
-    heldSends: 0,
+    mainFrameId: undefined,
+    readWorld: undefined,
     refs: new RefAssigner(),
     opened: undefined,
     goingBack: false,
@@ -188,33 +262,24 @@ async function guardRedirects({ tab, cdp }) {
   await cdp.send('Fetch.enable', { patterns: [{ resourceType: 'Document', requestStage: 'Response' }] });
 }
 
-/** Request methods that only read: the ones a page may still use while its sends are held back. */
-const READ_METHODS = new Set(['GET', 'HEAD']);
-
 /**
- * The route handler every request in a person's browser passes through. While a tab's sends are
- * held back (see `createTab`), any request of that tab's page that is not a plain read is refused. Top-level navigations of a
+ * The route handler every request in a person's browser passes through. Top-level navigations of a
  * chat's tab may stay on the site that chat opened, and are refused when they would leave it. Pages
  * that are not a chat's tab (a popup) get nothing. Everything else continues to the egress proxy,
  * which checks where it goes.
  */
 async function guardNavigation(profile, route) {
   const request = route.request();
+  if (!request.isNavigationRequest()) {
+    return route.continue();
+  }
   let frame;
   try {
     frame = request.frame();
   } catch {
-    return request.isNavigationRequest() ? route.abort('blockedbyclient') : route.continue();
+    return route.abort('blockedbyclient');
   }
   const tab = profile.tabsByPage.get(frame.page());
-  if (tab?.holdSends === true && !READ_METHODS.has(request.method())) {
-    tab.heldSends += 1;
-    // A refused page load is answered with No Content, so the tab stays on its page instead of an error page.
-    return request.isNavigationRequest() ? route.fulfill(STAY_PUT) : route.abort('blockedbyclient');
-  }
-  if (!request.isNavigationRequest()) {
-    return route.continue();
-  }
   if (tab === undefined) {
     return route.abort('blockedbyclient');
   }
@@ -327,6 +392,7 @@ export class BrowserSidecar {
       });
       const tab = createTab({ page, cdp: await profile.context.newCDPSession(page) });
       await guardRedirects({ tab, cdp: tab.cdp });
+      await prepareReadWorld(tab);
       profile.tabs.set(tabId, tab);
       profile.tabsByPage.set(page, tab);
       if (profile.tabs.size > MAX_TABS_PER_PERSON) {
@@ -373,8 +439,6 @@ export class BrowserSidecar {
     }
     const tab = await this.#tabFor({ owner, tab: tabId, create: true });
     tab.opened = target.url.href;
-    // The model's own open was checked by the app server like any outbound address.
-    tab.holdSends = false;
     return this.#navigate({ tab, url: target.url.href });
   }
 
@@ -419,9 +483,7 @@ export class BrowserSidecar {
       try {
         const nodes = await inReadWorld({ tab, expression: EXTRACT_SCRIPT });
         const refs = tab.refs.refsFor(nodes);
-        const snapshot = renderSnapshot({ title: await tab.page.title(), url: tab.page.url(), nodes, refs });
-        const text = tab.heldSends > 0 ? `${HELD_SEND_NOTE}\n\n${snapshot}` : snapshot;
-        tab.heldSends = 0;
+        const text = renderSnapshot({ title: await tab.page.title(), url: tab.page.url(), nodes, refs });
         return { status: 'ok', text };
       } catch (error) {
         if (attempt >= READ_ATTEMPTS || !PAGE_MOVED_ERRORS.some(message => String(error).includes(message))) {
@@ -532,7 +594,25 @@ export class BrowserSidecar {
         ? this.#navigate({ tab, url: result.url, referer: tab.page.url() })
         : { status: 'moved', url: result.url };
     }
-    if (result.status !== 'done') {
+    if (result.status === 'press' || result.status === 'keys') {
+      // Real input, so the page's controls react as they do to a person. The read world's guard stops
+      // any of it that lands outside the checked element before the page sees it.
+      const input =
+        result.status === 'press' ? tab.page.mouse.click(result.x, result.y) : tab.page.keyboard.type(rest.text);
+      const pressed = await input.then(
+        () => undefined,
+        error => error,
+      );
+      // A page that moved on took the guard with it; a fresh document has none armed.
+      const strayed = await inReadWorld({ tab, expression: DISARM_SCRIPT }).catch(() => false);
+      if (pressed !== undefined) {
+        throw pressed;
+      }
+      if (strayed === true) {
+        tab.refs.reset();
+        return { status: 'refused', reason: 'changed' };
+      }
+    } else if (result.status !== 'done') {
       return result;
     }
     await settled;
@@ -540,41 +620,22 @@ export class BrowserSidecar {
     return this.#read(tab);
   }
 
-  /**
-   * Clicks the element at a ref. A plain link is not pressed: its address is opened, so no script of
-   * the page runs. `approved` says the person approved this click on a card: what the page then sends
-   * is theirs to send, so sends held back since Aman last typed are let through again.
-   */
-  async click({ owner, tab: tabId, ref, expect, approved }) {
-    if (approved === true) {
-      const tab = await this.#tabFor({ owner, tab: tabId, create: false });
-      if (tab !== undefined) {
-        tab.holdSends = false;
-      }
-    }
+  /** Clicks the element at a ref. A plain link is not pressed: its address is opened, so no script of the page runs. */
+  async click({ owner, tab: tabId, ref, expect }) {
     return this.#act({ owner, tab: tabId, ref, action: 'click', expect });
   }
 
-  /**
-   * Types into a field; refuses a password, card or one-time-code field instead. From here on the
-   * page's sends are held back until the person approves a click, so nothing Aman typed leaves unasked.
-   */
+  /** Types into a field; refuses a password, card or one-time-code field, and a disabled or read-only one. */
   async type({ owner, tab: tabId, ref, expect, text }) {
-    await this.#holdSends({ owner, tab: tabId });
+    if (typeof text !== 'string') {
+      return { status: 'refused', reason: 'unchecked' };
+    }
     return this.#act({ owner, tab: tabId, ref, action: 'type', expect, text });
   }
 
-  /** Picks an option on a `<select>`, by its value or its visible label, holding back sends as `type` does. */
+  /** Picks an option on a `<select>`, by its value or its visible label. */
   async select({ owner, tab: tabId, ref, expect, option }) {
-    await this.#holdSends({ owner, tab: tabId });
     return this.#act({ owner, tab: tabId, ref, action: 'select', expect, option });
-  }
-
-  async #holdSends({ owner, tab: tabId }) {
-    const tab = await this.#tabFor({ owner, tab: tabId, create: false });
-    if (tab !== undefined) {
-      tab.holdSends = true;
-    }
   }
 
   async close() {
@@ -651,8 +712,7 @@ const ROUTES = {
   'POST /back': (sidecar, where) => sidecar.back(where),
   'POST /screenshot': (sidecar, where) => sidecar.screenshot(where),
   'POST /element-info': (sidecar, where, body) => sidecar.elementInfo({ ...where, ref: body.ref }),
-  'POST /click': (sidecar, where, body) =>
-    sidecar.click({ ...where, ref: body.ref, expect: body.expect, approved: body.approved }),
+  'POST /click': (sidecar, where, body) => sidecar.click({ ...where, ref: body.ref, expect: body.expect }),
   'POST /type': (sidecar, where, body) =>
     sidecar.type({ ...where, ref: body.ref, expect: body.expect, text: body.text }),
   'POST /select': (sidecar, where, body) =>

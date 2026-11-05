@@ -34,8 +34,8 @@ export const BROWSER_SERVER_ID = 'browser';
 
 /** Browser tools read a page and move around it; nothing here submits anything. */
 const BROWSER_READ_ANNOTATIONS = { readOnlyHint: true, openWorldHint: true } as const;
-/** Typing and selecting change a field on the page, but nothing has left the computer yet. */
-const BROWSER_PREPARE_ANNOTATIONS = { readOnlyHint: false, openWorldHint: false } as const;
+/** Typing and selecting change a field, and the page may send it at once; the real tier comes from browserTier.ts. */
+const BROWSER_PREPARE_ANNOTATIONS = { readOnlyHint: false, openWorldHint: true } as const;
 /** A click may submit something; the real tier comes from browserTier.ts, never from these hints. */
 const BROWSER_CLICK_ANNOTATIONS = { readOnlyHint: false, openWorldHint: true } as const;
 
@@ -111,6 +111,11 @@ const REFUSAL_MESSAGES: Record<string, string> = {
   unchecked:
     'Aman could not check that part of the page first, so it was not touched. Read the page again, then try again.',
   not_a_field: 'That is not a field Aman can type into. Read the page again to find the right field, then try again.',
+  disabled:
+    'That part of the page is switched off right now, so it was not touched. Read the page again, then try again.',
+  read_only: 'That field cannot be changed, so nothing was typed. Read the page again to find the right field.',
+  covered:
+    'Something else on the page is covering that part, so it was not touched. Read the page again, then try again.',
 };
 
 function refusalMessage(reason: string): string {
@@ -346,7 +351,7 @@ class BrowserTool extends LocalToolMCP {
       name: 'browser_type',
       annotations: BROWSER_PREPARE_ANNOTATIONS,
       description:
-        "Type text into a field on the open page, by its ref from browser_read. Refused for a password, card or one-time-code field: ask the person to type those themselves. Nothing is sent: if the page tries to send what was typed, Aman's browser holds it back until the person approves a click on the page's own submit button. Submit in a later reply, after typing, so the person's card shows what was typed.",
+        'Type text into a field on the open page, by its ref from browser_read. Refused for a password, card or one-time-code field: ask the person to type those themselves. The person sees the exact text on an approval card first, because a page can send what is typed as soon as it is typed. Refused for a field that is read-only or covered by something else.',
       schema: TYPE_INPUT_SCHEMA,
       handler: async (input: BrowserTypeInput, _approval, context) =>
         this.act({ path: '/type', body: { ref: input.ref, text: input.text }, context }),
@@ -355,7 +360,7 @@ class BrowserTool extends LocalToolMCP {
       name: 'browser_select',
       annotations: BROWSER_PREPARE_ANNOTATIONS,
       description:
-        "Pick an option on a dropdown field, by its ref from browser_read and the option text. Nothing is sent: if the page tries to send the choice, Aman's browser holds it back until the person approves a click.",
+        'Pick an option on a dropdown field, by its ref from browser_read and the option text. The person sees the option on an approval card first, because a page can send a choice as soon as it is made.',
       schema: SELECT_INPUT_SCHEMA,
       handler: async (input: BrowserSelectInput, _approval, context) =>
         this.act({ path: '/select', body: { ref: input.ref, option: input.option }, context }),
@@ -364,11 +369,10 @@ class BrowserTool extends LocalToolMCP {
       name: BROWSER_CLICK_TOOL_NAME,
       annotations: BROWSER_CLICK_ANNOTATIONS,
       description:
-        'Click a link, button, tab or other element on the open page, by its ref from browser_read. A plain link to another page opens right away. A button, tab, menu or any other control shows the person an approval card first, and so does a link whose label is a word like pay, buy, send, delete or cancel a membership. If the page changed since it was read, the click is refused: read the page again, then click. Type and pick first, then click submit in a later reply, so the card shows what will be sent.',
+        'Click a link, button, tab or other element on the open page, by its ref from browser_read. A plain link to another page opens right away. A button, tab, menu or any other control shows the person an approval card first, and so does a link whose label is a word like pay, buy, send, delete or cancel a membership. If the page changed since it was read, the click is refused: read the page again, then click. A disabled or covered element is refused.',
       schema: CLICK_INPUT_SCHEMA,
-      // `approved` tells the browser the person said yes on a card, so what the page sends next is theirs to send.
-      handler: async (input: BrowserClickInput, approval, context) =>
-        this.act({ path: '/click', body: { ref: input.ref, approved: approval?.status === 'allow' }, context }),
+      handler: async (input: BrowserClickInput, _approval, context) =>
+        this.act({ path: '/click', body: { ref: input.ref }, context }),
     }),
   ];
 

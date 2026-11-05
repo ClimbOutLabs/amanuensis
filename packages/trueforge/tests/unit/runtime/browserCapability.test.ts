@@ -213,21 +213,29 @@ describe('browser capability', () => {
     expect(sent[0]?.url).toBe('http://browser-relay:8792/click');
     expect(sent[0]?.body).toEqual({
       ref: 'e3',
-      approved: false,
       expect: CHECKED,
       owner: 'tenant-1:person-1',
       tab: 'chat-1',
     });
   });
 
-  it('browser_click tells the browser when the person approved the click on a card', async () => {
-    const { sent, toolSet } = mount(() => ({ json: { status: 'ok', text: '# Done' } }));
-    await toolSet.callTool(
-      { name: 'browser_click', arguments: { ref: 'e3' } },
-      { status: 'allow', scope: 'once' },
-      checkedContext(CHECKED),
-    );
-    expect(sent[0]?.body).toMatchObject({ ref: 'e3', approved: true });
+  it('a disabled, read-only or covered element is refused with a plain reason', async () => {
+    for (const [reason, message] of [
+      [
+        'disabled',
+        'That part of the page is switched off right now, so it was not touched. Read the page again, then try again.',
+      ],
+      ['read_only', 'That field cannot be changed, so nothing was typed. Read the page again to find the right field.'],
+      [
+        'covered',
+        'Something else on the page is covering that part, so it was not touched. Read the page again, then try again.',
+      ],
+    ] as const) {
+      const { call } = mount(() => ({ json: { status: 'refused', reason } }));
+      const result = await call('browser_click', { ref: 'e3' }, checkedContext(CHECKED));
+      expect(result.isError).toBe(true);
+      expect(JSON.parse(textOf(result)).message).toBe(message);
+    }
   });
 
   it('an action with no checked read is refused without calling the browser', async () => {
