@@ -13,17 +13,29 @@ Transcription runs fully on your own hardware. The browser encodes the recording
 - **Tap to record.** Tap the mic, talk, and tap it again. Your words go into the message box so you can check them before you send.
 - **Hold to talk.** Hold the mic, talk, and let go. Your words are sent as soon as they are written down.
 - **Hold-to-talk keys.** On a computer, hold Ctrl + Shift + Space while you talk, and let go to send. You can pick other keys, or turn them off, in Settings, Themes, under "Talking to Aman". The choice is saved in this browser only.
-- **Hands-free.** Tap the hands-free button beside the mic. Aman listens, sends what you said when you pause, reads the answer aloud, and then listens again. Tap the button again to stop. Hands-free also stops when you switch chats, leave the page, take the mic by hand, stay quiet for 30 seconds, or after 30 minutes. While a reply is being read aloud, it stops listening, so it never hears Aman. Background noise is not sent as words: the speech service skips sounds that are not speech. It is never on unless you turn it on, and it only listens in the chat where you turned it on.
+- **Voice mode.** Tap the voice mode button beside the mic, then just talk. Aman writes down what you say when you pause, answers by voice, and keeps listening. Talk while it is answering and it stops to listen. Say "yes, send it", "yes, approve" or "yes, cancel it" to answer an approval card after Aman reads it back; see "Approving by voice" below. The button shows Listening, Thinking or Speaking, and the avatar follows. Tap the button again to end it. It also ends when you switch chats, leave the page, hide the tab, take the mic by hand, or when the connection closes. It is never on unless you turn it on, and it only listens in the chat where you turned it on. Open a chat first: voice mode needs a chat that already has a first message.
 - **Paste.** Choose "Paste from clipboard" in the `+` menu to add copied text to your message. To copy an answer, use the copy button under it.
 
 ## Where your voice goes
 
 This section is the voice feature's data-flow record.
 
-- **Your voice.** The browser records only while the mic is on: while you record, hold, or have hands-free on. The recording goes to the Aman server on your computer, which passes it to `aman-stt` and gets the words back. The recording is not saved.
+- **Your voice.** The browser records only while the mic is on: while you record, hold, or have voice mode on. The recording goes to the Aman server on your computer, which passes it to `aman-stt` and gets the words back. The recording is not saved.
+- **Voice mode.** The browser sends your microphone sound to the Aman server over one private connection, which only works for the person who opened it and lasts at most 30 seconds before it is used. The server finds where each sentence starts and ends with a small speech model running on your computer, passes each sentence to `aman-stt`, and sends the answer's audio back as it is made. Nothing is saved: not the sound, and not the words except as the normal message in your chat. The microphone is asked to cancel echo and noise, so it does not hear the answer coming out of your speakers.
 - **The answer read aloud.** The answer's text goes to the Aman server, which passes it to `aman-tts` and sends the audio back. When `aman-tts` is not running, your browser's built-in voice reads it instead, and the text stays in the browser.
 - **What never leaves your computer.** Your recordings, the words written down from them, and the audio of the answers. No speech service on the internet is called.
 - **What is kept.** Only the messages themselves, like any typed message. The server logs sizes, timings and status codes, never what was said.
+
+## Approving by voice
+
+When Aman needs your approval to do something, such as send an email, it reads the card back in one short sentence and waits. Say exactly "yes, send it" (for an email), "yes, approve", or "yes, cancel it" (for deleting a scheduled task). Anything else, a different wording, or silence, leaves the card waiting in the app. Aman never listens for the answer while it is talking, or in the second and a half after, and it ignores sound that matches what it just said. The approval is the same one the app's card gives: if the card changed or timed out, voice refuses and tells you. After it acts, it says what it did.
+
+Some cards are only ever answered on screen: anything that asks you to type a confirmation, shell commands, spending money, a new email recipient, a long email, or when more than one card is waiting. For these, Aman says it left the card in the app.
+
+## Voice mode settings
+
+- `TTS_ENABLED` (default `true`). Set `false` to turn voice mode off. Spoken replies read by hand fall back to your browser.
+- `VOICE_VAD_MODEL_DIR` (default `<memory folder>/.voice-model`). Where the speech-detection model is kept. The first time voice mode starts, Aman downloads this 2 MB file from its public source (the only network call voice mode makes, and no audio is sent), checks its size and fingerprint, and reuses it afterwards. For a computer with no internet, copy `silero_vad.onnx` here by hand; it must match the pinned fingerprint.
 
 ## Deployment
 
