@@ -22,6 +22,7 @@ import type { Logger } from 'winston';
 import configuration from '../../config';
 import { redactSecretShapes } from '../../dataExport/secretScrub';
 import { localDay } from './localDay';
+import { REPLACE_DOCUMENT_METADATA_KEY } from './markdownMemoryFiles';
 import type { MemoryClient } from './memoryClient';
 import { labeledNoteText, noteLabel, SENT_MAIL_SOURCE } from './memoryNotes';
 import { noteRetainItem, retainOperationId } from './memoryRetain';
@@ -130,6 +131,12 @@ export function sentMailWentThrough(eventContent: string): boolean {
   return text !== undefined && mailSendOutcome(text.trim()) === 'sent';
 }
 
+/**
+ * Longest body kept, in characters: the same bound as the facts a turn summary may store, so a sent note is
+ * no bigger than any other memory note. A longer body is cut and says so.
+ */
+export const SENT_MAIL_BODY_MAX_CHARACTERS = 2_000;
+
 const CUT_MARKER = ' (cut)';
 
 /**
@@ -139,10 +146,10 @@ const CUT_MARKER = ' (cut)';
  */
 export function sentMailNoteText({
   mail,
-  maxBodyCharacters,
+  maxBodyCharacters = SENT_MAIL_BODY_MAX_CHARACTERS,
 }: {
   mail: SentMail;
-  maxBodyCharacters: number;
+  maxBodyCharacters?: number;
 }): string | undefined {
   const addressed = [
     ...(mail.recipients.length === 0 ? [] : [mail.recipients.join(', ')]),
@@ -175,7 +182,6 @@ export async function saveSentMail({
   mail,
   sentAt,
   timeZone,
-  maxBodyCharacters,
   logger,
 }: {
   client: MemoryClient;
@@ -186,18 +192,17 @@ export async function saveSentMail({
   mail: SentMail;
   sentAt: string;
   timeZone: string | undefined;
-  maxBodyCharacters: number;
   logger: Logger;
 }): Promise<void> {
   try {
-    const text = sentMailNoteText({ mail, maxBodyCharacters });
+    const text = sentMailNoteText({ mail });
     if (text === undefined) {
       logger.debug('A sent message holds a secret and was not saved as a note', { sessionId, turnId });
       return;
     }
     const instant = new Date(sentAt);
     const date = localDay({ instant: Number.isNaN(instant.getTime()) ? new Date() : instant, timeZone }).date;
-    const item = noteRetainItem({
+    const noteItem = noteRetainItem({
       sessionId,
       turnId,
       completedAt: sentAt,
@@ -208,9 +213,12 @@ export async function saveSentMail({
       },
       documentId: `aman-${sessionId}-${turnId}-sent-${threadId}-${callId}`,
     });
+    // A retry after a half-finished save replaces the copy that attempt wrote, so the note is never doubled.
+    const item = { ...noteItem, metadata: { ...noteItem.metadata, [REPLACE_DOCUMENT_METADATA_KEY]: 'true' } };
     const request = {
       items: [item],
-      operationId: retainOperationId({ sessionId, turnId: `sent/${threadId}/${callId}` }),
+      // Names the turn too: a model may reuse a call id in a later turn, and that send is a different message.
+      operationId: retainOperationId({ sessionId, turnId: `sent/${turnId}/${threadId}/${callId}` }),
       timeoutMs: configuration.MEMORY_RETAIN_TIMEOUT_MS,
     };
     // One retry, since nothing else will save this note if the first attempt does not land.

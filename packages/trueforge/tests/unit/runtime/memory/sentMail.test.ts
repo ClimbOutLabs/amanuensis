@@ -7,12 +7,15 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import winston from 'winston';
+import { EmbeddingModel } from '../../../../src/runtime/memory/embeddingModel';
+import { EmbeddingSubsystem } from '../../../../src/runtime/memory/embeddingRetrieval';
 import { MarkdownMemoryClient } from '../../../../src/runtime/memory/markdownMemoryClient';
 import { entryMetadata, withoutHiddenMarkers } from '../../../../src/runtime/memory/markdownMemoryFiles';
 import { formatMemoryBlock } from '../../../../src/runtime/memory/memoryCapability';
 import { noteLabel, noteProvenance } from '../../../../src/runtime/memory/memoryNotes';
 import { MEMORY_ORIGIN_METADATA_KEY } from '../../../../src/runtime/memory/memoryOrigin';
 import {
+  SENT_MAIL_BODY_MAX_CHARACTERS,
   saveSentMail,
   sentMailFromCall,
   sentMailNoteText,
@@ -223,17 +226,16 @@ describe('a sent message in memory', () => {
     await rm(dir, { recursive: true, force: true });
   });
 
-  function save(mail: SentMail, callId = 'c1') {
+  function save(mail: SentMail, callId = 'c1', turnId = 't1', target: MarkdownMemoryClient = client) {
     return saveSentMail({
-      client,
+      client: target,
       sessionId: 'chat-1',
-      turnId: 't1',
+      turnId,
       threadId: 'main',
       callId,
       mail,
       sentAt: '2026-10-31T12:00:00.000Z',
       timeZone: 'Europe/Madrid',
-      maxBodyCharacters: CAP,
       logger,
     });
   }
@@ -314,6 +316,115 @@ describe('a sent message in memory', () => {
     const note = (await entries()).find(entry => entry.text.includes('subject "Saturday"'));
     // The copy in the body is escaped, so only the real trailer reads as the source line.
     expect(note?.text.split('\n').filter(line => line === '> Source: a message you sent')).toHaveLength(1);
+  });
+});
+
+describe('saving sent messages safely', () => {
+  let dir: string;
+  let client: MarkdownMemoryClient;
+  const logger = winston.createLogger({ silent: true });
+  const mail: SentMail = {
+    kind: 'send',
+    recipients: ['wendy@example.com'],
+    cc: [],
+    bcc: [],
+    subject: 'Saturday',
+    body: 'See you at 7.',
+  };
+
+  beforeEach(async () => {
+    dir = await mkdtemp(path.join(tmpdir(), 'sent-mail-safe-'));
+    client = new MarkdownMemoryClient({ baseDir: dir, namespace: 'tenant' });
+  });
+  afterEach(async () => {
+    jest.restoreAllMocks();
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  function save({
+    target = client,
+    turnId = 't1',
+    callId = 'c1',
+    body = mail.body,
+  }: {
+    target?: MarkdownMemoryClient;
+    turnId?: string;
+    callId?: string;
+    body?: string;
+  } = {}) {
+    return saveSentMail({
+      client: target,
+      sessionId: 'chat-1',
+      turnId,
+      threadId: 'main',
+      callId,
+      mail: { ...mail, body },
+      sentAt: '2026-10-31T12:00:00.000Z',
+      timeZone: undefined,
+      logger,
+    });
+  }
+
+  async function entryTexts(): Promise<string[]> {
+    const listed = await client.listEntries({ namespace: '', timeoutMs: 1_000 });
+    if (!listed.ok) {
+      throw new Error('expected a listing');
+    }
+    return listed.entries.map(entry => entry.text);
+  }
+
+  it('saves a later send that reuses a call id from an earlier turn', async () => {
+    await save({ turnId: 't1', callId: 'call_1', body: 'First.' });
+    await save({ turnId: 't2', callId: 'call_1', body: 'Second.' });
+    expect(await entryTexts()).toHaveLength(2);
+  });
+
+  it('keeps one copy when a retry follows a save that wrote the note but did not finish', async () => {
+    const original = client.retain.bind(client);
+    jest.spyOn(client, 'retain').mockImplementationOnce(async request => {
+      await original(request);
+      // The save died after the append and before the operation was recorded.
+      await rm(path.join(dir, 'tenant', '.operations.json'), { force: true });
+      return { ok: false, reason: 'crashed' };
+    });
+    await save();
+    const texts = await entryTexts();
+    expect(texts).toHaveLength(1);
+    expect(texts[0]).toContain('See you at 7.');
+  });
+
+  it('gives two sends written at the same instant different entry ids', async () => {
+    const subsystem = new EmbeddingSubsystem({
+      baseDir: dir,
+      namespace: 'tenant',
+      modelDir: path.join(dir, 'model'),
+      batchSize: 2,
+      model: new EmbeddingModel({ modelDir: path.join(dir, 'model') }),
+    });
+    jest.spyOn(subsystem, 'ensureWarmed').mockImplementation(() => undefined);
+    const indexed = jest.spyOn(subsystem, 'indexNewEntries').mockImplementation(() => undefined);
+    const target = new MarkdownMemoryClient({ baseDir: dir, namespace: 'tenant', embeddings: () => subsystem });
+    await Promise.all([
+      save({ target, callId: 'a', body: 'First.' }),
+      save({ target, callId: 'b', body: 'Second.' }),
+      save({ target, callId: 'c', body: 'Third.' }),
+    ]);
+    const ids = indexed.mock.calls.flatMap(([entries]) => entries.map(entry => entry.id));
+    expect(ids).toHaveLength(3);
+    expect(new Set(ids).size).toBe(3);
+  });
+
+  it('cuts a long body to the note limit and says so', async () => {
+    await save({ body: 'x'.repeat(SENT_MAIL_BODY_MAX_CHARACTERS * 3) });
+    const [text] = await entryTexts();
+    expect(text).toContain(`${'x'.repeat(SENT_MAIL_BODY_MAX_CHARACTERS)} (cut)`);
+    expect(text).not.toContain('x'.repeat(SENT_MAIL_BODY_MAX_CHARACTERS + 1));
+  });
+
+  it('keeps a body at the limit whole', async () => {
+    await save({ body: 'x'.repeat(SENT_MAIL_BODY_MAX_CHARACTERS) });
+    const [text] = await entryTexts();
+    expect(text).not.toContain('(cut)');
   });
 });
 

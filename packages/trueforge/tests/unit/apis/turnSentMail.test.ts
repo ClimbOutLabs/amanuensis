@@ -105,10 +105,12 @@ function callMessage({
   name,
   args,
   threadId = 'main',
+  callId = 'c1',
 }: {
   name: string;
   args: string;
   threadId?: string;
+  callId?: string;
 }): TurnStreamingEvent {
   return {
     type: EventType.MODEL_MESSAGE,
@@ -118,7 +120,7 @@ function callMessage({
     content: null,
     tool_calls: [
       {
-        id: 'c1',
+        id: callId,
         type: 'function',
         function: { name, arguments: args },
         tool_info: { type: 'truefoundry-system', name },
@@ -131,17 +133,19 @@ function toolResponse({
   disposition,
   content,
   threadId = 'main',
+  callId = 'c1',
 }: {
   disposition: Disposition;
   content: string;
   threadId?: string;
+  callId?: string;
 }): TurnStreamingEvent {
   const base = {
     type: EventType.TOOL_RESPONSE_V2,
     id: 'evt_response',
     thread_id: threadId,
     created_at: NOW,
-    tool_call_id: 'c1',
+    tool_call_id: callId,
     content,
     admission_provenance: { source: 'internal' as const },
   };
@@ -308,6 +312,16 @@ describe('a sent message in the drain of a turn', () => {
       ]),
     });
     expect(sentNotes(retain)).toHaveLength(0);
+  });
+
+  it('saves at most 20 sent messages from one turn', async () => {
+    const { client, retain } = memoryClient();
+    const rounds = Array.from({ length: 25 }, (_unused, index) => [
+      callMessage({ name: 'Email__send_email', args: SEND_ARGS, callId: `c${String(index)}` }),
+      toolResponse({ disposition: 'executed_ok', content: resultContent(CLEAN), callId: `c${String(index)}` }),
+    ]).flat();
+    await drain({ client, stream: streamOf(rounds) });
+    expect(sentNotes(retain)).toHaveLength(20);
   });
 
   it('does nothing when memory is off', async () => {

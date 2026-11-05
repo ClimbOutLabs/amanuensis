@@ -124,15 +124,21 @@ the nightly pass can learn how the person writes to each contact.
 - **One place decides.** The turn drain watches each tool result and writes the note when a send's result
   qualifies. A send approved on a card runs in a later turn that never sees the message that asked for it,
   so that turn is handed the calls the person allowed, read from the end of the paused turn before the turn
-  starts. Calls are matched by thread and call id together. If the paused turn cannot be read, the turn runs
-  as usual and the send is not saved; a warning is logged.
+  starts. Calls are matched by thread and call id together. The paused turn is read newest first until every
+  allowed call is found, so a long turn is read in full if it must be. If the turn cannot be read, or an
+  allowed call is not in it, the turn runs as usual, the send is not saved, and a warning is logged.
 - **What the note holds.** The recipients, any cc and bcc, the subject and the composed body, written word
   for word by the host with no model call. A forward carries no subject of its own (the sidecar sets it), so
   none is recorded, and only the text the person added is kept, never the forwarded message. The body is
-  cut, on a whole character and with a plain "(cut)" marker, at the same length as any other tool result.
+  cut, on a whole character and with a plain "(cut)" marker, at 2,000 characters, the same bound as the
+  facts a turn summary may store, so a sent note is no bigger than any other memory note. At most 20 sent
+  messages are saved from one turn.
   A message that holds something shaped like a secret is checked in full before any cut, and is not saved.
 - **Its own write.** The note is saved as soon as the send is known to have gone through, in a write of its
-  own with its own operation id. It does not wait for the turn to finish and does not depend on the turn's
+  own with its own operation id, which names the turn, the thread and the call, so a model that reuses a call id
+  in a later turn does not hide that later send. A retry after a half-finished save replaces the copy the
+  first attempt wrote, so the note is never doubled. Saves to one vault run one at a time, so notes written at the
+  same instant get different entry ids. It does not wait for the turn to finish and does not depend on the turn's
   save, so it is kept whether or not turn summaries are on, whether or not the turn's own save succeeds, and
   when the turn ends early. A later recovery of a lost turn neither drops it nor writes it twice.
 - **Source and label.** The note's source is `sent_mail` and its label reads "From a message you sent, Oct 31".
