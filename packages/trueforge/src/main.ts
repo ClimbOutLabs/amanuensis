@@ -56,15 +56,12 @@ configureOutboundFetches({
     headersTimeoutMs: configuration.MODEL_HTTP_HEADERS_TIMEOUT_MS,
     bodyTimeoutMs: configuration.MODEL_HTTP_BODY_TIMEOUT_MS,
     maxRetries: configuration.MODEL_HTTP_MAX_RETRIES,
-    idempotent: true,
   },
   mcp: {
     connectTimeoutMs: configuration.MCP_HTTP_CONNECT_TIMEOUT_MS,
     headersTimeoutMs: configuration.MCP_HTTP_HEADERS_TIMEOUT_MS,
     bodyTimeoutMs: configuration.MCP_HTTP_BODY_TIMEOUT_MS,
     maxRetries: configuration.MCP_HTTP_MAX_RETRIES,
-    // Tool calls are not safe to replay once upstream may have received them.
-    idempotent: false,
   },
 });
 
@@ -472,6 +469,7 @@ async function createDistributedPersistence(options: {
     DATABASE_POOL_MAX: databasePoolMax,
     POSTGRES_STATEMENT_TIMEOUT_MS: statementTimeoutMs,
     POSTGRES_IDLE_IN_TRANSACTION_SESSION_TIMEOUT_MS: idleInTransactionSessionTimeoutMs,
+    POSTGRES_CONNECT_TIMEOUT_MS: connectionTimeoutMs,
     REDIS_URL: redisUrl,
     EXECUTOR_ID: executorId,
   } = configuration;
@@ -533,6 +531,13 @@ async function createDistributedPersistence(options: {
     poolMax: databasePoolMax,
     statementTimeoutMs,
     idleInTransactionSessionTimeoutMs,
+    connectionTimeoutMs,
+    onIdleClientError: error => {
+      logger.error(
+        'A Postgres connection in the pool broke; the next query opens a new one',
+        extractErrorLogFields(error),
+      );
+    },
   });
   await migrateToLatest(db);
   logger.info('Distributed mode: postgres');

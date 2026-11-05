@@ -1,4 +1,5 @@
 import {
+  isOutboundBodyTimeout,
   isRetryableOutboundTransportError,
   withOutboundHttpRetries,
   type OutboundFetchOptions,
@@ -47,25 +48,38 @@ function scriptedFetch(outcomes: Array<Response | Error>): { fetchFn: jest.Mock;
 }
 
 describe('isRetryableOutboundTransportError', () => {
-  it('retries a connect timeout for any caller', () => {
-    expect(isRetryableOutboundTransportError(codedError('UND_ERR_CONNECT_TIMEOUT'), { idempotent: false })).toBe(true);
-    expect(isRetryableOutboundTransportError(codedError('UND_ERR_CONNECT_TIMEOUT'), { idempotent: true })).toBe(true);
+  it('retries a connect timeout', () => {
+    expect(isRetryableOutboundTransportError(codedError('UND_ERR_CONNECT_TIMEOUT'))).toBe(true);
   });
 
   it('finds the timeout code nested under a fetch failure', () => {
-    expect(isRetryableOutboundTransportError(fetchFailedWith('UND_ERR_CONNECT_TIMEOUT'), { idempotent: false })).toBe(
+    expect(isRetryableOutboundTransportError(fetchFailedWith('UND_ERR_CONNECT_TIMEOUT'))).toBe(true);
+  });
+
+  it('does not retry a headers timeout: the server has the request and is only slow', () => {
+    expect(isRetryableOutboundTransportError(codedError('UND_ERR_HEADERS_TIMEOUT'))).toBe(false);
+  });
+
+  it('does not retry other transport failures', () => {
+    expect(isRetryableOutboundTransportError(codedError('UND_ERR_BODY_TIMEOUT'))).toBe(false);
+    expect(isRetryableOutboundTransportError(new Error('boom'))).toBe(false);
+  });
+});
+
+describe('isOutboundBodyTimeout', () => {
+  it('reads the undici code through a fetch failure', () => {
+    expect(isOutboundBodyTimeout(fetchFailedWith('UND_ERR_BODY_TIMEOUT'))).toBe(true);
+  });
+
+  it('reads the undici text when the MCP SDK has dropped the cause', () => {
+    expect(isOutboundBodyTimeout(new Error('SSE stream disconnected: BodyTimeoutError: Body Timeout Error'))).toBe(
       true,
     );
   });
 
-  it('retries a headers timeout only when the request is safe to replay', () => {
-    expect(isRetryableOutboundTransportError(codedError('UND_ERR_HEADERS_TIMEOUT'), { idempotent: true })).toBe(true);
-    expect(isRetryableOutboundTransportError(codedError('UND_ERR_HEADERS_TIMEOUT'), { idempotent: false })).toBe(false);
-  });
-
-  it('does not retry other transport failures', () => {
-    expect(isRetryableOutboundTransportError(codedError('UND_ERR_BODY_TIMEOUT'), { idempotent: true })).toBe(false);
-    expect(isRetryableOutboundTransportError(new Error('boom'), { idempotent: true })).toBe(false);
+  it('does not match another failure', () => {
+    expect(isOutboundBodyTimeout(fetchFailedWith('UND_ERR_HEADERS_TIMEOUT'))).toBe(false);
+    expect(isOutboundBodyTimeout(new Error('SSE stream disconnected: socket hang up'))).toBe(false);
   });
 });
 
@@ -140,15 +154,71 @@ describe('withOutboundHttpRetries', () => {
     expect(calls()).toBe(1);
   });
 
-  it('retries a headers timeout for a replayable model request', async () => {
+  it('does not retry a headers timeout for a model request either, so a slow model is not asked twice', async () => {
     const { fetchFn, calls } = scriptedFetch([fetchFailedWith('UND_ERR_HEADERS_TIMEOUT'), response(200)]);
-    const result = await withOutboundHttpRetries(fetchFn, { ...MODEL_OPTIONS, maxRetries: 1 })(
-      'https://model.example/v1',
-      {},
+    await expect(withOutboundHttpRetries(fetchFn, MODEL_OPTIONS)('https://model.example/v1', {})).rejects.toThrow(
+      'fetch failed',
     );
+    expect(calls()).toBe(1);
+  });
+
+  it('returns the answer at once when Retry-After asks for a longer wait than the cap', async () => {
+    const { fetchFn, calls } = scriptedFetch([response(429, { 'retry-after': '30' }), response(200)]);
+    const started = Date.now();
+    const result = await withOutboundHttpRetries(fetchFn, MODEL_OPTIONS)('https://model.example/v1', {});
+    expect(result.status).toBe(429);
+    expect(calls()).toBe(1);
+    expect(Date.now() - started).toBeLessThan(500);
+  });
+
+  it('stops waiting and rejects when the caller aborts during the backoff', async () => {
+    const { fetchFn, calls } = scriptedFetch([response(429), response(200)]);
+    const controller = new AbortController();
+    const pending = withOutboundHttpRetries(fetchFn, MODEL_OPTIONS)('https://model.example/v1', {
+      signal: controller.signal,
+    });
+    // The backoff after the 429 is about a second; abort well inside it.
+    setTimeout(() => {
+      controller.abort();
+    }, 50);
+    const started = Date.now();
+    await expect(pending).rejects.toMatchObject({ name: 'AbortError' });
+    expect(Date.now() - started).toBeLessThan(500);
+    expect(calls()).toBe(1);
+  });
+
+  it('buffers a streamed request body once so the retry sends the same bytes', async () => {
+    const bodies: string[] = [];
+    let calls = 0;
+    const fetchFn = jest.fn(async (_input: string | URL, init?: RequestInit): Promise<Response> => {
+      calls += 1;
+      bodies.push(await new Response(init?.body ?? null).text());
+      return calls === 1 ? response(429, { 'retry-after-ms': '0' }) : response(200);
+    });
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode('{"prompt":'));
+        controller.enqueue(new TextEncoder().encode('"hello"}'));
+        controller.close();
+      },
+    });
+    const result = await withOutboundHttpRetries(fetchFn, MODEL_OPTIONS)('https://model.example/v1', {
+      method: 'POST',
+      body: stream,
+    });
     expect(result.status).toBe(200);
-    expect(calls()).toBe(2);
-  }, 10_000);
+    expect(bodies).toEqual(['{"prompt":"hello"}', '{"prompt":"hello"}']);
+  });
+
+  it('leaves a string body as it is', async () => {
+    const seen: Array<RequestInit['body']> = [];
+    const fetchFn = jest.fn(async (_input: string | URL, init?: RequestInit): Promise<Response> => {
+      seen.push(init?.body);
+      return response(200);
+    });
+    await withOutboundHttpRetries(fetchFn, MODEL_OPTIONS)('https://model.example/v1', { method: 'POST', body: 'x' });
+    expect(seen).toEqual(['x']);
+  });
 
   it('throws at once when the caller has already aborted', async () => {
     const { fetchFn, calls } = scriptedFetch([response(200)]);

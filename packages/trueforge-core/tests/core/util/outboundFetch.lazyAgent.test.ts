@@ -25,8 +25,8 @@ describe('outbound fetch Agents', () => {
 
   it('builds each Agent once, on first use, with the configured timeouts', async () => {
     const outbound = await import('../../../src/core/util/outboundFetch');
-    const model = { connectTimeoutMs: 1, headersTimeoutMs: 2, bodyTimeoutMs: 3, maxRetries: 0, idempotent: true };
-    const mcp = { connectTimeoutMs: 4, headersTimeoutMs: 5, bodyTimeoutMs: 6, maxRetries: 0, idempotent: false };
+    const model = { connectTimeoutMs: 1, headersTimeoutMs: 2, bodyTimeoutMs: 3, maxRetries: 0 };
+    const mcp = { connectTimeoutMs: 4, headersTimeoutMs: 5, bodyTimeoutMs: 6, maxRetries: 0 };
     outbound.configureOutboundFetches({ model, mcp });
     expect(agentConstructed).not.toHaveBeenCalled();
 

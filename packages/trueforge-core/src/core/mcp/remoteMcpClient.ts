@@ -200,6 +200,33 @@ const TRANSPORT_ERROR_CODES: ReadonlySet<string> = new Set([
   'EPIPE',
 ]);
 
+/**
+ * Failures that mean the host itself cannot be reached. Another transport at the same address
+ * would fail the same way, so the probe stops instead of doubling the wait.
+ */
+const HOST_UNREACHABLE_CODES: ReadonlySet<string> = new Set([
+  'ECONNREFUSED',
+  'ENOTFOUND',
+  'EAI_AGAIN',
+  'EHOSTUNREACH',
+  'ENETUNREACH',
+  'UND_ERR_CONNECT_TIMEOUT',
+]);
+
+function isHostUnreachable(error: unknown): boolean {
+  const seen = new Set<unknown>();
+  let current: unknown = error;
+  while (current instanceof Error && !seen.has(current)) {
+    seen.add(current);
+    const code: unknown = Reflect.get(current, 'code');
+    if (typeof code === 'string' && HOST_UNREACHABLE_CODES.has(code)) {
+      return true;
+    }
+    current = current.cause;
+  }
+  return false;
+}
+
 /** The SDK's JSON-RPC code for a transport that closed under a request. */
 const CONNECTION_CLOSED_CODE: number = ErrorCode.ConnectionClosed;
 
@@ -430,6 +457,9 @@ export async function connectRemoteMcp(params: {
         transportCause = error;
       }
       failures.push({ transport: transportType, error: describeTransportError(error) });
+      if (isHostUnreachable(error)) {
+        break;
+      }
       continue;
     }
 
@@ -441,7 +471,7 @@ export async function connectRemoteMcp(params: {
   }
 
   throw new McpConnectionError(
-    `failed to connect (tried ${candidates.join(', ')}): ${JSON.stringify(failures)}`,
+    `failed to connect (tried ${failures.map(failure => failure.transport).join(', ')}): ${JSON.stringify(failures)}`,
     502,
     transportCause === undefined ? undefined : { cause: transportCause },
   );

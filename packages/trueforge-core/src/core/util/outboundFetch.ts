@@ -13,19 +13,23 @@ import { Agent, fetch as undiciFetch } from 'undici';
  * default 300s bodyTimeout kills it, so the connection drops and reconnects every few minutes.
  */
 
-export interface OutboundFetchOptions {
+/** The timeouts and retry count one audience (model calls or MCP calls) runs with. */
+export interface OutboundTimeouts {
   connectTimeoutMs: number;
   headersTimeoutMs: number;
   bodyTimeoutMs: number;
   maxRetries: number;
+}
+
+export interface OutboundFetchOptions extends OutboundTimeouts {
   /**
    * Whether requests are safe to replay after upstream may have received them. When false,
-   * headers timeouts and 409/520/524 are not retried.
+   * 409/520/524 are not retried. Fixed per audience: model requests are, tool calls are not.
    */
   idempotent: boolean;
 }
 
-export interface OutboundFetch {
+interface OutboundFetch {
   fetch: (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
   close: () => Promise<void>;
 }
@@ -34,9 +38,8 @@ export interface OutboundFetch {
 export const DEFAULT_MODEL_HTTP_CONNECT_TIMEOUT_MS = 5_000;
 /**
  * Model outbound undici headersTimeout. Env: `MODEL_HTTP_HEADERS_TIMEOUT_MS`.
- * 5 minutes, the same as the model's default first-chunk wait (VercelAILLM `firstChunkMs`) and
- * undici's own default that model calls ran on before: a local model that is still loading sends
- * no headers until its first token, and must not be cut off sooner than the first-chunk wait.
+ * 5 minutes, undici's own default that model calls ran on before. The first-chunk wait only
+ * starts once headers arrive, so this is the only limit on a local model that is still loading.
  */
 export const DEFAULT_MODEL_HTTP_HEADERS_TIMEOUT_MS = 5 * 60 * 1000;
 /**
@@ -50,11 +53,13 @@ export const DEFAULT_MODEL_HTTP_MAX_RETRIES = 2;
 /** MCP outbound undici connect timeout. Env: `MCP_HTTP_CONNECT_TIMEOUT_MS`. */
 export const DEFAULT_MCP_HTTP_CONNECT_TIMEOUT_MS = 5_000;
 /**
- * MCP outbound undici headersTimeout. Env: `MCP_HTTP_HEADERS_TIMEOUT_MS`.
- * Matches the default MCP request timeout: a JSON-response server sends headers only after
- * the tool finishes.
+ * How much longer the MCP headers timeout waits than the MCP request timeout. A JSON-response
+ * server sends headers only after the tool finishes, so the request timeout must fire first and
+ * report a slow tool, not a dropped connection.
  */
-export const DEFAULT_MCP_HTTP_HEADERS_TIMEOUT_MS = 4 * 60 * 1000;
+export const MCP_HTTP_HEADERS_TIMEOUT_MARGIN_MS = 5_000;
+/** MCP outbound undici headersTimeout with the default 4 minute MCP request timeout. */
+const DEFAULT_MCP_HTTP_HEADERS_TIMEOUT_MS = 4 * 60 * 1000 + MCP_HTTP_HEADERS_TIMEOUT_MARGIN_MS;
 /**
  * MCP outbound undici bodyTimeout. Env: `MCP_HTTP_BODY_TIMEOUT_MS`.
  * Default 30m so an idle event stream is not killed at undici's 300s.
@@ -63,7 +68,7 @@ export const DEFAULT_MCP_HTTP_BODY_TIMEOUT_MS = 30 * 60 * 1000;
 /** MCP outbound fetch retries. Env: `MCP_HTTP_MAX_RETRIES`. */
 export const DEFAULT_MCP_HTTP_MAX_RETRIES = 2;
 
-export function defaultModelOutboundFetchOptions(): OutboundFetchOptions {
+function defaultModelOutboundFetchOptions(): OutboundFetchOptions {
   return {
     connectTimeoutMs: DEFAULT_MODEL_HTTP_CONNECT_TIMEOUT_MS,
     headersTimeoutMs: DEFAULT_MODEL_HTTP_HEADERS_TIMEOUT_MS,
@@ -73,7 +78,7 @@ export function defaultModelOutboundFetchOptions(): OutboundFetchOptions {
   };
 }
 
-export function defaultMcpOutboundFetchOptions(): OutboundFetchOptions {
+function defaultMcpOutboundFetchOptions(): OutboundFetchOptions {
   return {
     connectTimeoutMs: DEFAULT_MCP_HTTP_CONNECT_TIMEOUT_MS,
     headersTimeoutMs: DEFAULT_MCP_HTTP_HEADERS_TIMEOUT_MS,
@@ -88,10 +93,12 @@ export function defaultMcpOutboundFetchOptions(): OutboundFetchOptions {
 const UNPROCESSED_RETRY_STATUSES = new Set([408, 429, 521, 522, 523, 530]);
 // Upstream may have processed the request (409 conflict, 520 bad origin response, 524 origin timeout).
 const MAYBE_PROCESSED_RETRY_STATUSES = new Set([409, 520, 524]);
+// undici's BodyTimeoutError message.
+const UNDICI_BODY_TIMEOUT_MESSAGE = 'Body Timeout Error';
 const RETRY_INITIAL_DELAY_MS = 1_000;
 const RETRY_BACKOFF_FACTOR = 2;
 const RETRY_JITTER_FACTOR = 0.2;
-// Longer server-requested waits fall back to backoff rather than stalling the caller.
+// A longer server-requested wait returns the answer rather than stalling the caller.
 const MAX_RETRY_AFTER_MS = 5_000;
 
 function getErrorCode(error: unknown): string | undefined {
@@ -108,21 +115,38 @@ function getErrorCode(error: unknown): string | undefined {
   return undefined;
 }
 
-/** Connect / headers-read timeouts from undici (including nested under TypeError: fetch failed). */
-export function isRetryableOutboundTransportError(error: unknown, options: { idempotent: boolean }): boolean {
-  const code = getErrorCode(error);
-  if (code === 'UND_ERR_CONNECT_TIMEOUT') {
+/**
+ * A connect timeout from undici (including nested under TypeError: fetch failed): the request
+ * never reached the server. A headers timeout is not retried: the server already has the
+ * request and is slow, and sending it again only multiplies the wait.
+ */
+export function isRetryableOutboundTransportError(error: unknown): boolean {
+  return getErrorCode(error) === 'UND_ERR_CONNECT_TIMEOUT';
+}
+
+/**
+ * An undici body timeout: the server went quiet mid-response, such as an idle event stream.
+ * The MCP SDK reports a dropped event stream as a new Error carrying only the original's text,
+ * with no cause, so undici's own message is the signal when the code is gone.
+ */
+export function isOutboundBodyTimeout(error: unknown): boolean {
+  if (getErrorCode(error) === 'UND_ERR_BODY_TIMEOUT') {
     return true;
   }
-  return options.idempotent && code === 'UND_ERR_HEADERS_TIMEOUT';
+  return error instanceof Error && error.message.includes(UNDICI_BODY_TIMEOUT_MESSAGE);
 }
 
 function isRetryableOutboundStatus(status: number, options: { idempotent: boolean }): boolean {
   return UNPROCESSED_RETRY_STATUSES.has(status) || (options.idempotent && MAYBE_PROCESSED_RETRY_STATUSES.has(status));
 }
 
-/** Server-requested delay from `retry-after-ms` or `retry-after` (seconds or HTTP date), if usable. */
-function retryAfterMs(headers: { get(name: string): string | null }): number | undefined {
+type RetryAfter = { kind: 'none' } | { kind: 'wait'; delayMs: number } | { kind: 'too_long' };
+
+/**
+ * Server-requested delay from `retry-after-ms` or `retry-after` (seconds or HTTP date). A wait
+ * longer than the cap means the server will refuse an early retry, so the caller gets the answer.
+ */
+function readRetryAfter(headers: { get(name: string): string | null }): RetryAfter {
   let delayMs: number | undefined;
   const retryAfterMsHeader = headers.get('retry-after-ms');
   if (retryAfterMsHeader !== null) {
@@ -134,10 +158,13 @@ function retryAfterMs(headers: { get(name: string): string | null }): number | u
       delayMs = Number.isFinite(seconds) ? seconds * 1000 : Date.parse(retryAfter) - Date.now();
     }
   }
-  if (delayMs === undefined || !Number.isFinite(delayMs) || delayMs < 0 || delayMs > MAX_RETRY_AFTER_MS) {
-    return undefined;
+  if (delayMs === undefined || !Number.isFinite(delayMs)) {
+    return { kind: 'none' };
   }
-  return delayMs;
+  if (delayMs > MAX_RETRY_AFTER_MS) {
+    return { kind: 'too_long' };
+  }
+  return { kind: 'wait', delayMs: Math.max(0, delayMs) };
 }
 
 function abortError(signal: AbortSignal): Error {
@@ -235,10 +262,10 @@ type FetchFn = (input: string | URL, init?: RequestInit) => Promise<Response>;
 
 /**
  * Retry `fetchFn` on the failures that mean the request never got an answer: connect timeouts,
- * retryable gateway statuses, and (for idempotent callers only) headers timeouts and statuses
- * where upstream may already have processed the request. Honors Retry-After up to 5s, else
- * backs off. A retry replays the request from the start; response bodies are never consumed
- * before the decision, so nothing already streaming is ever replayed.
+ * retryable gateway statuses, and (for idempotent callers only) statuses where upstream may
+ * already have processed the request. Honors Retry-After up to 5s; a longer one returns the
+ * answer as is; without one, backs off. A retry replays the request from the start; response
+ * bodies are never consumed before the decision, so nothing already streaming is ever replayed.
  */
 export function withOutboundHttpRetries(fetchFn: FetchFn, options: OutboundFetchOptions): FetchFn {
   const { maxRetries, idempotent } = options;
@@ -261,10 +288,16 @@ export function withOutboundHttpRetries(fetchFn: FetchFn, options: OutboundFetch
         if (!isRetryableOutboundStatus(response.status, { idempotent }) || attempt >= maxRetries) {
           return response;
         }
-        delayMs = retryAfterMs(response.headers) ?? delayMs;
+        const retryAfter = readRetryAfter(response.headers);
+        if (retryAfter.kind === 'too_long') {
+          return response;
+        }
+        if (retryAfter.kind === 'wait') {
+          delayMs = retryAfter.delayMs;
+        }
         void response.body?.cancel().catch(() => undefined);
       } catch (error) {
-        if (!isRetryableOutboundTransportError(error, { idempotent }) || attempt >= maxRetries || signal?.aborted) {
+        if (!isRetryableOutboundTransportError(error) || attempt >= maxRetries || signal?.aborted) {
           throw error;
         }
       }
@@ -301,7 +334,7 @@ function agentFetch(agent: Agent): FetchFn {
 }
 
 /** Builds a pooled undici Agent + fetch with the given timeouts and retries. */
-export function createOutboundFetch(options: OutboundFetchOptions): OutboundFetch {
+function createOutboundFetch(options: OutboundFetchOptions): OutboundFetch {
   const agent = createOutboundAgent(options);
   const retried = withOutboundHttpRetries(agentFetch(agent), options);
   return {
@@ -326,12 +359,13 @@ let mcpOptions: OutboundFetchOptions = defaultMcpOutboundFetchOptions();
 let mcpAgent: Agent | undefined;
 
 /** Replace the outbound Agents (timeouts and retries) from server configuration. */
-export function configureOutboundFetches(config: { model: OutboundFetchOptions; mcp: OutboundFetchOptions }): void {
+export function configureOutboundFetches(config: { model: OutboundTimeouts; mcp: OutboundTimeouts }): void {
   const previousModel = modelOutbound;
   const previousMcpAgent = mcpAgent;
-  modelOptions = config.model;
+  modelOptions = { ...config.model, idempotent: true };
   modelOutbound = undefined;
-  mcpOptions = config.mcp;
+  // Tool calls are not safe to replay once upstream may have received them.
+  mcpOptions = { ...config.mcp, idempotent: false };
   mcpAgent = undefined;
   void previousModel?.close();
   void previousMcpAgent?.close().catch(() => undefined);

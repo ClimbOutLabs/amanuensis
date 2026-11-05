@@ -7,6 +7,7 @@ import { hostFromUrl } from '../permissions/extractorRegistry';
 import type { AgentTracing } from '../tracing/AgentTracing';
 import { NOOP_AGENT_TRACING } from '../tracing/NoopAgentTracing';
 import { extractErrorLogFields } from '../util/errorLogFields';
+import { isOutboundBodyTimeout } from '../util/outboundFetch';
 import {
   type AgentToolSchema,
   type AuthRequiredResponse,
@@ -369,7 +370,8 @@ export class RemoteMCP implements ToolSource {
               onError: error => {
                 const fields = extractErrorLogFields(error);
                 const msg = `Error on remote MCP transport ${this.name}`;
-                if (fields.error.includes('Body Timeout')) {
+                // An idle event stream timing out is expected; the transport reconnects on its own.
+                if (isOutboundBodyTimeout(error)) {
                   this.logger.warn(msg, fields);
                 } else {
                   this.logger.error(msg, fields);

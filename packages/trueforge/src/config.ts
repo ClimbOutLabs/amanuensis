@@ -31,6 +31,7 @@ import {
   DEFAULT_OCR_LANGUAGES,
   DEFAULT_SESSION_DISK_MB,
   GIT_NETWORK_ENV_NAMES,
+  MCP_HTTP_HEADERS_TIMEOUT_MARGIN_MS,
   pickGitNetworkEnv,
   TOKEN_FACTORY_DEFAULT_BASE_URL,
   validateRunCodeStartupConfig,
@@ -1347,8 +1348,9 @@ export interface SharedServerConfiguration {
    */
   MODEL_HTTP_BODY_TIMEOUT_MS: number;
   /**
-   * Retries after the first model fetch for connect/headers timeouts and 408/409/429/520-524/530
-   * (honors Retry-After up to 5s, else backoff). Env: `MODEL_HTTP_MAX_RETRIES`. Default 2.
+   * Retries after the first model fetch for connect timeouts and 408/409/429/520-524/530
+   * (honors Retry-After up to 5s; a longer one is not retried). 0 turns retries off.
+   * Env: `MODEL_HTTP_MAX_RETRIES`. Default 2.
    */
   MODEL_HTTP_MAX_RETRIES: number;
   /**
@@ -1358,8 +1360,9 @@ export interface SharedServerConfiguration {
   MCP_HTTP_CONNECT_TIMEOUT_MS: number;
   /**
    * undici headersTimeout for MCP outbound fetch. A JSON-response MCP server sends headers only
-   * after the tool finishes, so this should not be below `MCP_REQUEST_TIMEOUT_MS`.
-   * Env: `MCP_HTTP_HEADERS_TIMEOUT_MS`. Default `MCP_REQUEST_TIMEOUT_MS`.
+   * after the tool finishes, so this must outlast `MCP_REQUEST_TIMEOUT_MS` and a slow tool is
+   * reported as a slow tool. Env: `MCP_HTTP_HEADERS_TIMEOUT_MS`. Default and minimum
+   * `MCP_REQUEST_TIMEOUT_MS` plus 5 seconds.
    */
   MCP_HTTP_HEADERS_TIMEOUT_MS: number;
   /**
@@ -1369,8 +1372,8 @@ export interface SharedServerConfiguration {
   MCP_HTTP_BODY_TIMEOUT_MS: number;
   /**
    * Retries after the first MCP fetch for connect timeouts and 408/429/521-523/530 only (not
-   * headers timeouts or 409/520/524: upstream may already have started the tool; honors
-   * Retry-After up to 5s, else backoff). Env: `MCP_HTTP_MAX_RETRIES`. Default 2.
+   * 409/520/524: upstream may already have started the tool; honors Retry-After up to 5s, a
+   * longer one is not retried). 0 turns retries off. Env: `MCP_HTTP_MAX_RETRIES`. Default 2.
    */
   MCP_HTTP_MAX_RETRIES: number;
   /**
@@ -2214,6 +2217,13 @@ export type DistributedServerConfiguration = SharedServerConfiguration & {
    * Env: `POSTGRES_IDLE_IN_TRANSACTION_SESSION_TIMEOUT_MS`. Default 60000.
    */
   POSTGRES_IDLE_IN_TRANSACTION_SESSION_TIMEOUT_MS: number;
+  /**
+   * How long a query waits for a Postgres connection: to open a new one, or for a busy pool to
+   * free one (pg uses one limit for both). Default `POSTGRES_STATEMENT_TIMEOUT_MS` plus 10 seconds,
+   * so a full pool of slow queries is waited out instead of failing the queries queued behind it.
+   * Env: `POSTGRES_CONNECT_TIMEOUT_MS`.
+   */
+  POSTGRES_CONNECT_TIMEOUT_MS: number;
   /** Peering URL shared by all replicas. Env: `REDIS_URL`. Default `redis://localhost:6379`. */
   REDIS_URL: string;
   /**
@@ -2333,6 +2343,15 @@ if (browserEnabled && (browserUrl === undefined || browserSecret === undefined))
   throw new Error('BROWSER_ENABLED is true, so BROWSER_URL and BROWSER_SECRET must both be set.');
 }
 
+// Read only in distributed mode, where the pool exists; the connect timeout defaults from it.
+const postgresStatementTimeoutMs = standalone
+  ? 60_000
+  : parsePositiveInt({
+      envKey: 'POSTGRES_STATEMENT_TIMEOUT_MS',
+      raw: getEnv('POSTGRES_STATEMENT_TIMEOUT_MS'),
+      defaultValue: 60_000,
+    });
+
 const shared: SharedServerConfiguration = {
   LOG_LEVEL: getEnv('LOG_LEVEL', { defaultValue: 'info' }) ?? 'info',
   ACCESS_LOGS: parseBoolean({ envKey: 'ACCESS_LOGS', raw: getEnv('ACCESS_LOGS'), defaultValue: true }),
@@ -2393,7 +2412,8 @@ const shared: SharedServerConfiguration = {
   MCP_HTTP_HEADERS_TIMEOUT_MS: parsePositiveInt({
     envKey: 'MCP_HTTP_HEADERS_TIMEOUT_MS',
     raw: getEnv('MCP_HTTP_HEADERS_TIMEOUT_MS'),
-    defaultValue: mcpRequestTimeoutMs,
+    defaultValue: mcpRequestTimeoutMs + MCP_HTTP_HEADERS_TIMEOUT_MARGIN_MS,
+    minValue: mcpRequestTimeoutMs + MCP_HTTP_HEADERS_TIMEOUT_MARGIN_MS,
   }),
   MCP_HTTP_BODY_TIMEOUT_MS: parsePositiveInt({
     envKey: 'MCP_HTTP_BODY_TIMEOUT_MS',
@@ -2924,15 +2944,16 @@ const configuration: ServerConfiguration = standalone
         raw: getEnv('DATABASE_POOL_MAX'),
         defaultValue: 10,
       }),
-      POSTGRES_STATEMENT_TIMEOUT_MS: parsePositiveInt({
-        envKey: 'POSTGRES_STATEMENT_TIMEOUT_MS',
-        raw: getEnv('POSTGRES_STATEMENT_TIMEOUT_MS'),
-        defaultValue: 60_000,
-      }),
+      POSTGRES_STATEMENT_TIMEOUT_MS: postgresStatementTimeoutMs,
       POSTGRES_IDLE_IN_TRANSACTION_SESSION_TIMEOUT_MS: parsePositiveInt({
         envKey: 'POSTGRES_IDLE_IN_TRANSACTION_SESSION_TIMEOUT_MS',
         raw: getEnv('POSTGRES_IDLE_IN_TRANSACTION_SESSION_TIMEOUT_MS'),
         defaultValue: 60_000,
+      }),
+      POSTGRES_CONNECT_TIMEOUT_MS: parsePositiveInt({
+        envKey: 'POSTGRES_CONNECT_TIMEOUT_MS',
+        raw: getEnv('POSTGRES_CONNECT_TIMEOUT_MS'),
+        defaultValue: postgresStatementTimeoutMs + 10_000,
       }),
       REDIS_URL: resolveRedisUrl(),
       TRUEFOUNDRY_SERVICEFOUNDRY_SERVER_URL: getEnv('TRUEFOUNDRY_SERVICEFOUNDRY_SERVER_URL', { required: false }),
