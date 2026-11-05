@@ -26,6 +26,9 @@ import { ScheduleManifestSchema } from '../../../src/schemas/schedule';
 
 const TENANT = 'default';
 const OWNER: CreatedBySubject = { subject_id: 'owner-1', subject_type: 'user', subject_display_name: 'Owner' };
+const OTHER: CreatedBySubject = { subject_id: 'other-1', subject_type: 'user', subject_display_name: 'Other' };
+/** Short enough that a test waits a moment, long enough that a reply ended between checks is seen. */
+const LINE_WAIT = { interval_ms: 10, max_ms: 2_000 };
 const COLLECTOR_EXTERNAL_ID = 'reminders:owner-1';
 
 async function setup() {
@@ -49,11 +52,11 @@ async function setup() {
    * Makes a chat holding one finished turn, the way a chat looks after the person asked for a reminder in it:
    * their message and the assistant's answer are both in its history.
    */
-  async function originChat(input: { sessionId: string; title: string }): Promise<string> {
+  async function originChat(input: { sessionId: string; title: string; owner?: CreatedBySubject }): Promise<string> {
     await sessionStore.createSession({
       tenant_id: TENANT,
       session_id: input.sessionId,
-      created_by_subject: OWNER,
+      created_by_subject: input.owner ?? OWNER,
       agent: { type: 'reference', id: agent.id, name: agent.name },
       custom: null,
       metadata: {},
@@ -188,7 +191,71 @@ async function setup() {
     },
     logger: winston.createLogger({ silent: true }),
   });
-  const deliver = (item: ScheduleDispatchItem, now: Date) => deliverReminder({ item, sessionStore, now, deliveries });
+  const logger = winston.createLogger({ silent: true });
+  const fire = (item: ScheduleDispatchItem, now: Date, lineWait = LINE_WAIT) =>
+    deliverReminder({ item, sessionStore, now, deliveries, logger, lineWait });
+  /** Fires a reminder and waits for its chat line, the way the person sees it once everything has landed. */
+  async function deliver(item: ScheduleDispatchItem, now: Date) {
+    const delivered = await fire(item, now);
+    return { session_id: delivered.session_id, turn_id: await delivered.line };
+  }
+
+  /** Starts a reply in a chat that is still running, as when the person is mid-conversation. Returns its end. */
+  async function runningReply(sessionId: string): Promise<() => Promise<void>> {
+    const session = await sessionStore.getSession({ tenant_id: TENANT, session_id: sessionId });
+    const previous =
+      session?.last_turn_id == null
+        ? undefined
+        : await sessionStore.getTurn({ session_id: sessionId, turn_id: session.last_turn_id });
+    if (previous === undefined) {
+      throw new Error('Expected the chat to hold a turn');
+    }
+    const turnId = `${sessionId}-running`;
+    const at = new Date('2026-10-19T22:00:00.000Z');
+    await sessionStore.createTurn({
+      turn: {
+        turn_id: turnId,
+        session_id: sessionId,
+        first_turn_id: previous.first_turn_id,
+        ancestor_ids: [...previous.ancestor_ids, previous.turn_id],
+        previous_turn_id: previous.turn_id,
+        state: { status: 'running' },
+        input: [{ type: 'user.message', content: 'Another question.' }],
+        custom: null,
+        created_at: at,
+        updated_at: at,
+      },
+      sandbox_info: null,
+      approval_grants: [],
+      require_previous_turn_is_tip: false,
+      retained_previous_thread_ids: [MAIN_THREAD_ID],
+      new_threads: [],
+      new_context_appends: [],
+      capability_states: [{ thread_id: MAIN_THREAD_ID, capability_state: null }],
+      tool_call_memos: [],
+      task_states: [],
+      update_session_title_if_not_exist: null,
+    });
+    return async () => {
+      const output: ModelMessageEvent = {
+        type: EventType.MODEL_MESSAGE,
+        id: newEventId(),
+        created_at: at.toISOString(),
+        thread_id: MAIN_THREAD_ID,
+        content: 'An answer.',
+        finish_reason: 'stop',
+      };
+      const state: TerminalTurnState = { status: 'done', output, required_actions: [], completed_at: at.toISOString() };
+      const done: TurnDoneEvent = {
+        type: EventType.TURN_DONE,
+        id: newEventId(),
+        created_at: at.toISOString(),
+        state,
+        thread_id: null,
+      };
+      await sessionStore.updateTurnState({ session_id: sessionId, turn_id: turnId, state, turn_done_event: done });
+    };
+  }
 
   async function listAllSessions() {
     const all = await sessionStore.listSessions({
@@ -216,6 +283,8 @@ async function setup() {
     originChat,
     dueReminder,
     deliver,
+    fire,
+    runningReply,
     auditRecords,
     deliveryStore,
     pushed,
@@ -433,5 +502,97 @@ describe('deliverReminder', () => {
     expect(page.deliveries[0]).toMatchObject({ kind: 'reminder', text: 'Take the medicine', link: null });
     expect(await listAllSessions()).toHaveLength(0);
     await expect(collectorSession()).resolves.toBeUndefined();
+  });
+
+  it('never writes into a chat someone else started, even when the reminder names it', async () => {
+    const { sessionStore, originChat, dueReminder, deliver, deliveryStore } = await setup();
+    const othersChat = await originChat({ sessionId: 'chat-other', title: 'Not yours', owner: OTHER });
+    const item = await dueReminder({
+      what: 'Take the medicine',
+      runAt: '2026-10-19T18:00:00-04:00',
+      name: 'r-foreign',
+      originSessionId: othersChat,
+    });
+
+    const delivered = await deliver(item, new Date('2026-10-19T22:00:05.000Z'));
+
+    expect(delivered).toEqual({ session_id: null, turn_id: null });
+    const turns = await sessionStore.listTurns({ session_id: othersChat, limit: 10, page_token: undefined });
+    expect(turns.data).toHaveLength(1);
+    const page = await deliveryStore.list({ tenant_id: TENANT, created_by: OWNER.subject_id, limit: 10 });
+    expect(page.deliveries).toHaveLength(1);
+    expect(page.deliveries[0]).toMatchObject({ kind: 'reminder', text: 'Take the medicine', link: null });
+    const othersFeed = await deliveryStore.list({ tenant_id: TENANT, created_by: OTHER.subject_id, limit: 10 });
+    expect(othersFeed.deliveries).toHaveLength(0);
+  });
+
+  it('puts the reminder in the feed at once while a reply runs in its chat, and writes the line when it ends', async () => {
+    const { sessionStore, originChat, dueReminder, fire, runningReply, deliveryStore } = await setup();
+    const originId = await originChat({ sessionId: 'chat-busy', title: 'Busy chat' });
+    const endReply = await runningReply(originId);
+    const item = await dueReminder({
+      what: 'Take the medicine',
+      runAt: '2026-10-19T18:00:00-04:00',
+      name: 'r-busy',
+      originSessionId: originId,
+    });
+
+    const delivered = await fire(item, new Date());
+
+    expect(delivered.session_id).toBe(originId);
+    const page = await deliveryStore.list({ tenant_id: TENANT, created_by: OWNER.subject_id, limit: 10 });
+    expect(page.deliveries).toHaveLength(1);
+    expect(page.deliveries[0]).toMatchObject({ link: { type: 'chat', session_id: originId } });
+    const before = await sessionStore.listTurns({ session_id: originId, limit: 10, page_token: undefined });
+    expect(before.data).toHaveLength(2);
+
+    await endReply();
+    const lineTurnId = await delivered.line;
+
+    expect(lineTurnId).not.toBeNull();
+    const session = await sessionStore.getSession({ tenant_id: TENANT, session_id: originId });
+    expect(session?.last_turn_id).toBe(lineTurnId);
+    const turn = await sessionStore.getTurn({ session_id: originId, turn_id: lineTurnId ?? '' });
+    expect(turn?.previous_turn_id).toBe(`${originId}-running`);
+    expect(turn?.state.status === 'done' ? turn.state.output?.content : undefined).toContain('Take the medicine');
+  });
+
+  it('keeps the reminder in the feed when a reply in its chat never ends, and gives up on the line', async () => {
+    const { sessionStore, originChat, dueReminder, fire, runningReply, deliveryStore } = await setup();
+    const originId = await originChat({ sessionId: 'chat-stuck', title: 'Stuck chat' });
+    await runningReply(originId);
+    const item = await dueReminder({
+      what: 'Take the medicine',
+      runAt: '2026-10-19T18:00:00-04:00',
+      name: 'r-stuck',
+      originSessionId: originId,
+    });
+
+    const delivered = await fire(item, new Date(), { interval_ms: 5, max_ms: 30 });
+
+    await expect(delivered.line).resolves.toBeNull();
+    const page = await deliveryStore.list({ tenant_id: TENANT, created_by: OWNER.subject_id, limit: 10 });
+    expect(page.deliveries).toHaveLength(1);
+    const turns = await sessionStore.listTurns({ session_id: originId, limit: 10, page_token: undefined });
+    expect(turns.data).toHaveLength(2);
+  });
+
+  it('drops the line, not the reminder, when its chat is deleted while a reply runs there', async () => {
+    const { sessionStore, originChat, dueReminder, fire, runningReply, deliveryStore } = await setup();
+    const originId = await originChat({ sessionId: 'chat-deleted-busy', title: 'Busy then gone' });
+    await runningReply(originId);
+    const item = await dueReminder({
+      what: 'Take the medicine',
+      runAt: '2026-10-19T18:00:00-04:00',
+      name: 'r-deleted-busy',
+      originSessionId: originId,
+    });
+
+    const delivered = await fire(item, new Date());
+    await sessionStore.deleteSession({ tenant_id: TENANT, session_id: originId });
+
+    await expect(delivered.line).resolves.toBeNull();
+    const page = await deliveryStore.list({ tenant_id: TENANT, created_by: OWNER.subject_id, limit: 10 });
+    expect(page.deliveries).toHaveLength(1);
   });
 });

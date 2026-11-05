@@ -106,10 +106,20 @@ export const ScheduleManifestObjectSchema = z
   })
   .strict();
 
+const ONE_OF_CRON_OR_RUN_AT = 'set either cron (repeats) or run_at (runs once), not both and not neither';
+
 export const ScheduleManifestSchema = ScheduleManifestObjectSchema.refine(
   manifest => (manifest.cron === null) !== (manifest.run_at === null),
-  { message: 'set either cron (repeats) or run_at (runs once), not both and not neither' },
+  { message: ONE_OF_CRON_OR_RUN_AT },
 ).openapi('ScheduleManifest');
+
+/**
+ * The manifest a caller sends. The chat a reminder lands in is recorded by the server when the reminder is set in
+ * that chat, so callers cannot name it.
+ */
+export const ScheduleManifestInputSchema = ScheduleManifestObjectSchema.omit({ origin_session_id: true })
+  .refine(manifest => (manifest.cron === null) !== (manifest.run_at === null), { message: ONE_OF_CRON_OR_RUN_AT })
+  .openapi('ScheduleManifestInput');
 
 /** List/get/create/update response item. */
 export const ScheduleSchema = z
@@ -130,7 +140,7 @@ export const CreateScheduleRequestSchema = z
   .object({
     agent_name: NameSchema,
     name: NameSchema,
-    manifest: ScheduleManifestSchema,
+    manifest: ScheduleManifestInputSchema,
   })
   .strict()
   .openapi('CreateScheduleRequest');
@@ -138,7 +148,7 @@ export const CreateScheduleRequestSchema = z
 export const UpdateScheduleRequestSchema = z
   .object({
     name: NameSchema,
-    manifest: ScheduleManifestSchema,
+    manifest: ScheduleManifestInputSchema,
   })
   .strict()
   .openapi('UpdateScheduleRequest');
@@ -240,6 +250,7 @@ export type ScheduleKind = z.infer<typeof ScheduleKindSchema>;
 export type ScheduleStatus = z.infer<typeof ScheduleStatusSchema>;
 export type ScheduleRunStatus = z.infer<typeof ScheduleRunStatusSchema>;
 export type ScheduleManifest = z.infer<typeof ScheduleManifestSchema>;
+export type ScheduleManifestInput = z.infer<typeof ScheduleManifestInputSchema>;
 export type Schedule = z.infer<typeof ScheduleSchema>;
 export type ScheduleTools = z.infer<typeof ScheduleToolsSchema>;
 export type UpdateScheduleToolsRequest = z.infer<typeof UpdateScheduleToolsRequestSchema>;

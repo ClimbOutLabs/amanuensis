@@ -203,23 +203,23 @@ export async function startScheduleRunOnRequest<TTransaction>(params: {
 }): Promise<void> {
   const { c, item, deps } = params;
   if (item.schedule.manifest.kind === 'reminder') {
-    // A reminder needs no model: the host writes its line into the chat the reminder was set in itself.
+    // A reminder needs no model: the host puts it in the feed and writes its line into the chat it was set in.
     const delivered = await deliverReminder({
       item,
       sessionStore: deps.sessionStore,
       now: new Date(),
       deliveries: deps.deliveryService,
+      logger: deps.logger,
+      // A reminder line is a finished turn like any other, so it joins the past-chat search once it is written.
+      onLineWritten: async line => {
+        await deps.chatSearchIndexer?.indexFinishedTurn({
+          tenant_id: item.schedule.tenant_id,
+          created_by: item.schedule.created_by_subject.subject_id,
+          session_id: line.session_id,
+          turn_id: line.turn_id,
+        });
+      },
     });
-    // A reminder line is a finished turn like any other, so it joins the past-chat search now.
-    // A reminder with no chat to land in has no line to index; its feed item still carries it.
-    if (delivered.session_id !== null && delivered.turn_id !== null) {
-      await deps.chatSearchIndexer?.indexFinishedTurn({
-        tenant_id: item.schedule.tenant_id,
-        created_by: item.schedule.created_by_subject.subject_id,
-        session_id: delivered.session_id,
-        turn_id: delivered.turn_id,
-      });
-    }
     await recordScheduleFiring({
       audit: deps.audit,
       logger: deps.logger,
@@ -602,7 +602,8 @@ export function createSchedulesRouter<TTransaction>(deps: SchedulesRouterDeps<TT
             agent_name: agent.name,
             name: body.name,
             persona_id: null,
-            manifest: body.manifest,
+            // Only a reminder set in a chat records the chat it lands in; see ScheduleToolSet.
+            manifest: { ...body.manifest, origin_session_id: null },
             created_by_subject: createdBySubjectFromRequestContext(requestContext),
             runFrom: new Date(),
           },
@@ -683,7 +684,8 @@ export function createSchedulesRouter<TTransaction>(deps: SchedulesRouterDeps<TT
             tenant_id: requestContext.tenant_id,
             id: scheduleId,
             name: body.name,
-            manifest: body.manifest,
+            // An edit keeps the chat the reminder was set in; callers cannot move it to another chat.
+            manifest: { ...body.manifest, origin_session_id: existing.manifest.origin_session_id },
             runFrom: new Date(),
           },
           transaction,

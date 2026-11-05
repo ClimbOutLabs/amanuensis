@@ -38,7 +38,7 @@ One server-side feed of things Aman wants a person to see, called deliveries. Ea
 
 - `delivery` and `delivery_attempt` tables on SQLite and Postgres, bound by shared store contract tests
 - Routes under `/api/v1/user/deliveries`: list (newest first, paged), unread count, mark seen, get one
-- Reminders create a delivery after writing their line into the chat the reminder was set in, and the delivery links to that chat; the old browser polling and per-browser storage are removed
+- Reminders create a delivery, then write their line into the chat the reminder was set in, and the delivery links to that chat; a reply running in that chat holds the line, never the delivery; the old browser polling and per-browser storage are removed
 - A reminder set outside a chat, one saved before the origin chat was recorded, and one whose origin chat has been deleted create a delivery with no link and no chat line; no chat is made for them, and there is no shared Reminders chat anymore
 - A bell with the unread count in the main headers and a panel that lists deliveries; opening an item marks it seen
 - Web Push with a service worker, per-device opt-in in Settings, and plain words for iPhone (Home Screen needed), unsupported and blocked browsers
@@ -60,6 +60,8 @@ All tests use synthetic data, never a person's real data.
 - A due reminder with no open tab creates a delivery and a push
 - A due reminder lands in the chat it was set in, and its delivery links there
 - A due reminder with no origin chat, or whose origin chat was deleted, creates a delivery with no link and makes no chat
+- A due reminder that names a chat someone else started creates a delivery with no link and writes nothing in that chat
+- A due reminder whose chat has a reply running creates its delivery at once and writes its line when the reply ends
 - A tab that set nothing shows the unread count
 - Seen on one device is seen on another
 - One person never sees or marks another person's deliveries

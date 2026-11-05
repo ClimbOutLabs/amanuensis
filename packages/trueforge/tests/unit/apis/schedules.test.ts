@@ -292,6 +292,56 @@ describe('schedule RBAC', () => {
   });
 });
 
+describe('the chat a reminder lands in', () => {
+  const reminderManifest = {
+    task: 'Take the medicine',
+    run_at: '2099-01-01T09:00:00.000Z',
+    timezone: 'UTC',
+    kind: 'reminder',
+  };
+
+  it('refuses a caller that names the chat on create or edit', async () => {
+    const { asUser, postJson } = await setup();
+    asUser(ALICE);
+    const named = { ...reminderManifest, origin_session_id: 'someone-elses-chat' };
+
+    expect((await postJson('/', 'POST', { ...scheduleBody, name: 'r-named', manifest: named })).status).toBe(400);
+    const created = await postJson('/', 'POST', { ...scheduleBody, name: 'r-plain', manifest: reminderManifest });
+    expect(created.status).toBe(201);
+    const { id, manifest } = GetScheduleResponseSchema.parse(await created.json()).data;
+    expect(manifest.origin_session_id).toBeNull();
+    expect((await postJson(`/${id}`, 'PUT', { name: 'r-plain', manifest: named })).status).toBe(400);
+  });
+
+  it('keeps the chat a reminder was set in when the reminder is edited', async () => {
+    const { asUser, postJson, agentStore, scheduleStore } = await setup();
+    asUser(ALICE);
+    const agent = await agentStore.getAgent({ tenant_id: 'default', name: 'reporter' });
+    if (agent === undefined) {
+      throw new Error('Expected the test agent');
+    }
+    const { schedule } = await scheduleStore.createScheduleAndRun({
+      tenant_id: 'default',
+      agent_id: agent.id,
+      agent_name: agent.name,
+      persona_id: null,
+      name: 'r-set-in-chat',
+      manifest: ScheduleManifestSchema.parse({ ...reminderManifest, origin_session_id: 'alice-chat' }),
+      created_by_subject: { subject_id: 'alice', subject_type: 'user', subject_display_name: 'alice' },
+      runFrom: new Date(),
+    });
+
+    const edited = await postJson(`/${schedule.id}`, 'PUT', {
+      name: 'r-set-in-chat',
+      manifest: { ...reminderManifest, task: 'Take the blue pill' },
+    });
+
+    expect(edited.status).toBe(200);
+    const stored = await scheduleStore.getSchedule({ tenant_id: 'default', id: schedule.id });
+    expect(stored?.manifest).toMatchObject({ task: 'Take the blue pill', origin_session_id: 'alice-chat' });
+  });
+});
+
 describe('who a schedule runs as', () => {
   it('names a saved agent by its name and a chat-made schedule by its assistant, never the stored agent name', async () => {
     const { app, asUser, postJson, agentStore, scheduleStore } = await setup();
