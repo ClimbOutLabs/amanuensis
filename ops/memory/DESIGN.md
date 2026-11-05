@@ -113,13 +113,14 @@ When the person sends a message through the Email connector, Aman saves it as on
 the nightly pass can learn how the person writes to each contact.
 
 - **What counts.** A call to `send_email` or `forward_email` on the Email connector (the names come from
-  `MAIL_SEND_TOOL_NAMES` in the core mail connector contract) whose result is `executed_ok` and whose text is
-  the sidecar's clean success sentence, "Email sent successfully to ..." or "Email forwarded successfully
-  to ...". The sidecar reports a failed, partial or uncertain delivery as a normal result that starts "Email
-  delivery [" or "Email forward [", so the host reads the sentence and not only the result status. A message
-  that went out but whose Sent copy could not be filed also reads as not clean, and is not saved. A denied,
-  blocked or failed call writes nothing, `save_draft` writes nothing, and a send on any other connector
-  writes nothing.
+  `MAIL_SEND_TOOL_NAMES` in the core mail connector contract) whose result is `executed_ok` and whose text says the message went out. The sidecar reports a failed or
+  uncertain delivery as a normal result, so the host reads the text and not only the result status. Clean
+  results read "Email sent successfully to ..." or "Email forwarded successfully to ...". A result that
+  starts "Email delivery [" or "Email forward [" lists each recipient as `succeeded`, `failed` or
+  `unknown`, and counts as sent only when every recipient is `succeeded`. That includes a message that
+  went out but whose copy in the Sent folder could not be filed (`sent-copy: failed` or `unknown`): the
+  recipients have it, so it is saved. A failed or uncertain recipient is not saved. A denied, blocked or
+  failed call writes nothing, `save_draft` writes nothing, and a send on any other connector writes nothing.
 - **One place decides.** The turn drain watches each tool result and writes the note when a send's result
   qualifies. A send approved on a card runs in a later turn that never sees the message that asked for it,
   so that turn is handed the calls the person allowed, read from the end of the paused turn before the turn

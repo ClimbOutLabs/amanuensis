@@ -273,16 +273,29 @@ describe('a sent message in the drain of a turn', () => {
   );
 
   it.each([
-    ['a failed delivery', 'Email delivery [wendy@example.com: failed (rejected); sent-copy: skipped]'],
+    ['a failed delivery', 'Email delivery [failed: wendy@example.com (rejected); sent-copy: skipped]'],
     [
       'an uncertain delivery',
-      'Email delivery [wendy@example.com: unknown; sent-copy: unknown; warning: reconciliation needed]',
+      'Email delivery [unknown: wendy@example.com; sent-copy: unknown; warning: reconciliation needed]',
     ],
-    ['a forward that failed', 'Email forward [wendy@example.com: failed (rejected); sent-copy: skipped]'],
+    ['a forward that failed', 'Email forward [failed: wendy@example.com (rejected); sent-copy: skipped]'],
   ])('writes nothing for %s that the sidecar reports as a normal result', async (_name, text) => {
     const { client, retain } = memoryClient();
     await drain({ client, stream: streamOf(sendRound({ text })) });
     expect(sentNotes(retain)).toHaveLength(0);
+  });
+
+  it('saves a send that went out even though its Sent copy could not be filed', async () => {
+    const { client, retain } = memoryClient();
+    await drain({
+      client,
+      stream: streamOf(
+        sendRound({
+          text: 'Email delivery [succeeded: wendy@example.com; message-id: <a@b.example>; sent-copy: failed (Sent); warning: reconciliation needed]',
+        }),
+      ),
+    });
+    expect(sentNotes(retain)).toHaveLength(1);
   });
 
   it('does not match a result to a call made on another thread', async () => {
@@ -521,7 +534,7 @@ describe('a send approved on a card', () => {
   it('is not saved when the sidecar says the delivery failed', async () => {
     const chat = await chatWithSendCard({
       approve: true,
-      sidecarText: 'Email delivery [wendy@example.com: failed (rejected); sent-copy: skipped]',
+      sidecarText: 'Email delivery [failed: wendy@example.com (rejected); sent-copy: skipped]',
     });
     expect(chat.sendEmail).toHaveBeenCalledTimes(1);
     expect(sentNotes(chat.retain)).toHaveLength(0);

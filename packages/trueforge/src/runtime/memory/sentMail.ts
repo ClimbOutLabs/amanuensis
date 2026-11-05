@@ -10,9 +10,9 @@ import {
   namedMailRecipients,
 } from '@truefoundry/trueforge-core/core/email/mailConnector/recipientList';
 import {
-  isMailSendSuccessText,
   isMailSendToolName,
   MAIL_CONNECTOR_NAME,
+  mailSendOutcome,
 } from '@truefoundry/trueforge-core/core/email/mailConnector/toolContract';
 import type { RawToolCall } from '@truefoundry/trueforge-core/core/llm/LLMTypes';
 import { parseToolCallArguments } from '@truefoundry/trueforge-core/core/mcp/toolArgumentCheck';
@@ -116,9 +116,8 @@ function resultText(value: unknown, depth = 0): string | undefined {
 }
 
 /**
- * Whether a send's tool result (the `content` of its terminal event) says the message went through.
- * The sidecar reports a partial, failed or uncertain delivery as a normal result, so only its clean
- * success sentence counts.
+ * Whether a send's tool result (the `content` of its terminal event) says the message went out. The
+ * sidecar reports a failed or uncertain delivery as a normal result, so its text is read, not only its status.
  */
 export function sentMailWentThrough(eventContent: string): boolean {
   let parsed: unknown;
@@ -128,7 +127,7 @@ export function sentMailWentThrough(eventContent: string): boolean {
     return false;
   }
   const text = resultText(parsed);
-  return text !== undefined && isMailSendSuccessText(text.trim());
+  return text !== undefined && mailSendOutcome(text.trim()) === 'sent';
 }
 
 const CUT_MARKER = ' (cut)';

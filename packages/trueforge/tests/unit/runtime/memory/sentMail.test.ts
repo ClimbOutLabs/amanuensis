@@ -136,21 +136,27 @@ describe('sentMailWentThrough', () => {
     expect(sentMailWentThrough(content)).toBe(true);
   });
 
+  it('accepts a message that went out but whose Sent copy could not be filed', () => {
+    expect(
+      sentMailWentThrough(
+        resultEvent(
+          'Email delivery [succeeded: wendy@example.com; message-id: <a@b.example>; sent-copy: failed (Sent); warning: reconciliation needed]',
+        ),
+      ),
+    ).toBe(true);
+  });
+
   it.each([
-    ['a failed delivery', resultEvent('Email delivery [wendy@example.com: failed (rejected); sent-copy: skipped]')],
+    ['a failed delivery', resultEvent('Email delivery [failed: wendy@example.com (rejected); sent-copy: skipped]')],
     [
       'an uncertain delivery',
       resultEvent({
-        result: 'Email delivery [wendy@example.com: unknown; sent-copy: unknown; warning: reconciliation needed]',
+        result: 'Email delivery [unknown: wendy@example.com; sent-copy: unknown; warning: reconciliation needed]',
       }),
     ],
     [
       'a partial forward',
-      resultEvent('Email forward [a@example.com: succeeded; b@example.com: failed; sent-copy: succeeded]'),
-    ],
-    [
-      'a sent message whose copy was not filed',
-      resultEvent('Email delivery [wendy@example.com: succeeded; sent-copy: failed; warning: reconciliation needed]'),
+      resultEvent('Email forward [succeeded: a@example.com; failed: b@example.com; sent-copy: succeeded]'),
     ],
     ['an error text', resultEvent({ error: 'Recipient(s) not in allowlist' })],
     ['an answer with no text', resultEvent(null)],
