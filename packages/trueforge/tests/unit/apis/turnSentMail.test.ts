@@ -39,7 +39,17 @@ const SEND_ARGS = JSON.stringify({
   subject: 'Saturday',
   body: 'See you at 7.',
 });
-const SAVED = 'From a message you sent, Oct 31: To wendy@example.com, subject "Saturday": See you at 7.';
+const SENT_TEXT = 'To wendy@example.com, subject "Saturday": See you at 7.';
+const CLEAN = 'Email sent successfully to wendy@example.com. Message-Id: <abc@mail.example>';
+
+/** A result as the sidecar's answer reaches the turn: structured content wrapped by the host's envelope. */
+function resultContent(text: string): string {
+  return JSON.stringify({
+    schema_version: 'tool.response.v2',
+    outcome: { disposition: 'executed_ok' },
+    result: { result: text },
+  });
+}
 
 function memoryClient() {
   const client = new HindsightClient({
@@ -65,7 +75,7 @@ async function drain({
   stream,
   approvedCalls,
 }: {
-  client: HindsightClient;
+  client: HindsightClient | undefined;
   stream: AsyncIterable<TurnStreamingEvent>;
   approvedCalls?: Awaited<ReturnType<typeof approvedToolCalls>>;
 }): Promise<void> {
@@ -84,42 +94,55 @@ async function drain({
     logger: winston.createLogger({ silent: true }),
     turnDrains: new TurnDrainRegistry(),
     approvedCalls,
-    memory: { client, userText: 'Tell Wendy I will be there at 7.', attachedFiles: false },
+    memory:
+      client === undefined ? undefined : { client, userText: 'Tell Wendy I will be there at 7.', attachedFiles: false },
   });
 }
 
 type Disposition = 'executed_ok' | 'executed_nonzero' | 'denied' | 'policy_blocked' | 'never_ran';
 
-function sendRound({ name, args = SEND_ARGS, disposition }: { name: string; args?: string; disposition: Disposition }) {
-  const events: TurnStreamingEvent[] = [
-    {
-      type: EventType.MODEL_MESSAGE,
-      id: 'evt_call',
-      thread_id: 'main',
-      created_at: NOW,
-      content: null,
-      tool_calls: [
-        {
-          id: 'c1',
-          type: 'function',
-          function: { name, arguments: args },
-          tool_info: { type: 'truefoundry-system', name },
-        },
-      ],
-    },
-    toolResponse(disposition),
-  ];
-  return events;
+function callMessage({
+  name,
+  args,
+  threadId = 'main',
+}: {
+  name: string;
+  args: string;
+  threadId?: string;
+}): TurnStreamingEvent {
+  return {
+    type: EventType.MODEL_MESSAGE,
+    id: 'evt_call',
+    thread_id: threadId,
+    created_at: NOW,
+    content: null,
+    tool_calls: [
+      {
+        id: 'c1',
+        type: 'function',
+        function: { name, arguments: args },
+        tool_info: { type: 'truefoundry-system', name },
+      },
+    ],
+  };
 }
 
-function toolResponse(disposition: Disposition): TurnStreamingEvent {
+function toolResponse({
+  disposition,
+  content,
+  threadId = 'main',
+}: {
+  disposition: Disposition;
+  content: string;
+  threadId?: string;
+}): TurnStreamingEvent {
   const base = {
     type: EventType.TOOL_RESPONSE_V2,
     id: 'evt_response',
-    thread_id: 'main',
+    thread_id: threadId,
     created_at: NOW,
     tool_call_id: 'c1',
-    content: '{"ok": true}',
+    content,
     admission_provenance: { source: 'internal' as const },
   };
   return disposition === 'policy_blocked' || disposition === 'never_ran'
@@ -131,9 +154,29 @@ function toolResponse(disposition: Disposition): TurnStreamingEvent {
     : { ...base, disposition };
 }
 
+function sendRound({
+  name = 'Email__send_email',
+  args = SEND_ARGS,
+  disposition = 'executed_ok',
+  text = CLEAN,
+}: {
+  name?: string;
+  args?: string;
+  disposition?: Disposition;
+  text?: string;
+}): TurnStreamingEvent[] {
+  return [callMessage({ name, args }), toolResponse({ disposition, content: resultContent(text) })];
+}
+
 // eslint-disable-next-line @typescript-eslint/require-await -- async generator fixture, not awaiting I/O
-async function* streamOf(earlier: TurnStreamingEvent[]): AsyncGenerator<TurnStreamingEvent> {
+async function* streamOf(
+  earlier: TurnStreamingEvent[],
+  { done = true }: { done?: boolean } = {},
+): AsyncGenerator<TurnStreamingEvent> {
   yield* earlier;
+  if (!done) {
+    return;
+  }
   yield {
     type: EventType.TURN_DONE,
     id: 'evt_done',
@@ -149,36 +192,74 @@ async function* streamOf(earlier: TurnStreamingEvent[]): AsyncGenerator<TurnStre
 }
 
 describe('a sent message in the drain of a turn', () => {
-  it('writes exactly one note for a send that ran, marked as tool output', async () => {
+  it('writes exactly one note for a send that went through, marked as tool output', async () => {
     const { client, retain } = memoryClient();
-    await drain({ client, stream: streamOf(sendRound({ name: 'Email__send_email', disposition: 'executed_ok' })) });
+    await drain({ client, stream: streamOf(sendRound({})) });
     const notes = sentNotes(retain);
     expect(notes).toHaveLength(1);
-    expect(notes[0]?.content).toContain(SAVED);
+    expect(notes[0]?.content).toContain(SENT_TEXT);
     expect(notes[0]?.metadata?.[MEMORY_ORIGIN_METADATA_KEY]).toBe('tool_ingested');
   });
 
-  it('keeps only the text the person added to a forward', async () => {
+  it('saves the note as its own write, apart from the turn exchange', async () => {
+    const { client, retain } = memoryClient();
+    await drain({ client, stream: streamOf(sendRound({})) });
+    const writes = retain.mock.calls.map(([request]: [{ items: RetainItem[] }]) => request.items);
+    expect(writes).toHaveLength(2);
+    expect(
+      writes.filter(items => items.some(item => item.metadata?.[NOTE_SOURCE_METADATA_KEY] === 'sent_mail')),
+    ).toHaveLength(1);
+  });
+
+  it('still saves the note when the turn exchange cannot be saved', async () => {
+    const { client, retain } = memoryClient();
+    retain.mockImplementation(({ items }: { items: RetainItem[] }) =>
+      Promise.resolve(
+        items.some(item => item.metadata?.[NOTE_SOURCE_METADATA_KEY] === 'sent_mail')
+          ? { ok: true }
+          : { ok: false, reason: 'down' },
+      ),
+    );
+    await drain({ client, stream: streamOf(sendRound({})) });
+    expect(sentNotes(retain)).toHaveLength(1);
+  });
+
+  it('saves the note even when the turn never finishes', async () => {
+    const { client, retain } = memoryClient();
+    await drain({ client, stream: streamOf(sendRound({}), { done: false }) });
+    expect(sentNotes(retain)).toHaveLength(1);
+  });
+
+  it('keeps only the text the person added to a forward, and no subject', async () => {
     const { client, retain } = memoryClient();
     const args = JSON.stringify({
       email_id: '7',
       recipients: ['wendy@example.com'],
-      subject: 'Fwd: Saturday',
       body: 'Look at this.',
-      forwarded_message: 'SECRET ORIGINAL TEXT',
     });
     await drain({
       client,
-      stream: streamOf(sendRound({ name: 'Email__forward_email', args, disposition: 'executed_ok' })),
+      stream: streamOf(
+        sendRound({ name: 'Email__forward_email', args, text: 'Email forwarded successfully to wendy@example.com' }),
+      ),
     });
     const [note] = sentNotes(retain);
-    expect(note?.content).toContain('To wendy@example.com, subject "Fwd: Saturday": Look at this.');
-    expect(note?.content).not.toContain('SECRET ORIGINAL TEXT');
+    expect(note?.content).toContain('Forwarded to wendy@example.com: Look at this.');
+    expect(note?.content).not.toContain('subject');
+  });
+
+  it('saves a send that only has a cc', async () => {
+    const { client, retain } = memoryClient();
+    await drain({
+      client,
+      stream: streamOf(sendRound({ args: JSON.stringify({ cc: ['sam@example.com'], subject: 'Hi', body: 'x' }) })),
+    });
+    expect(sentNotes(retain)[0]?.content).toContain('To cc sam@example.com, subject "Hi": x');
   });
 
   it('writes nothing for a draft', async () => {
     const { client, retain } = memoryClient();
-    await drain({ client, stream: streamOf(sendRound({ name: 'Email__save_draft', disposition: 'executed_ok' })) });
+    await drain({ client, stream: streamOf(sendRound({ name: 'Email__save_draft' })) });
     expect(sentNotes(retain)).toHaveLength(0);
   });
 
@@ -186,10 +267,39 @@ describe('a sent message in the drain of a turn', () => {
     'writes nothing for a send that ended %s',
     async disposition => {
       const { client, retain } = memoryClient();
-      await drain({ client, stream: streamOf(sendRound({ name: 'Email__send_email', disposition })) });
+      await drain({ client, stream: streamOf(sendRound({ disposition })) });
       expect(sentNotes(retain)).toHaveLength(0);
     },
   );
+
+  it.each([
+    ['a failed delivery', 'Email delivery [wendy@example.com: failed (rejected); sent-copy: skipped]'],
+    [
+      'an uncertain delivery',
+      'Email delivery [wendy@example.com: unknown; sent-copy: unknown; warning: reconciliation needed]',
+    ],
+    ['a forward that failed', 'Email forward [wendy@example.com: failed (rejected); sent-copy: skipped]'],
+  ])('writes nothing for %s that the sidecar reports as a normal result', async (_name, text) => {
+    const { client, retain } = memoryClient();
+    await drain({ client, stream: streamOf(sendRound({ text })) });
+    expect(sentNotes(retain)).toHaveLength(0);
+  });
+
+  it('does not match a result to a call made on another thread', async () => {
+    const { client, retain } = memoryClient();
+    await drain({
+      client,
+      stream: streamOf([
+        callMessage({ name: 'Email__send_email', args: SEND_ARGS, threadId: 'sub' }),
+        toolResponse({ disposition: 'executed_ok', content: resultContent(CLEAN), threadId: 'main' }),
+      ]),
+    });
+    expect(sentNotes(retain)).toHaveLength(0);
+  });
+
+  it('does nothing when memory is off', async () => {
+    await expect(drain({ client: undefined, stream: streamOf(sendRound({})) })).resolves.toBeUndefined();
+  });
 });
 
 function toolCallStream(call: {
@@ -237,8 +347,8 @@ function textStream(text: string): AsyncGenerator<ExtendedChatCompletionChunk, R
  * A real chat in which the model asks to send mail through the Email connector. The send needs a
  * card, so it pauses; the person's approval runs it in the next turn.
  */
-async function chatWithSendCard({ approve }: { approve: boolean }) {
-  const sendEmail = jest.fn(() => Promise.resolve(toolResultResponse({ text: 'sent' })));
+async function chatWithSendCard({ approve, sidecarText = CLEAN }: { approve: boolean; sidecarText?: string }) {
+  const sendEmail = jest.fn(() => Promise.resolve(toolResultResponse({ text: sidecarText })));
   const source: ToolSource = {
     name: 'Email',
     id: 'Email',
@@ -367,6 +477,7 @@ async function chatWithSendCard({ approve }: { approve: boolean }) {
     const approvedCalls = await approvedToolCalls({
       pausedTurn: previousTurnId === 'none' ? undefined : await session.getTurn(previousTurnId),
       input,
+      logger: silent,
     });
     await drain({ client, stream: turn.stream(), approvedCalls });
     return turn;
@@ -404,7 +515,16 @@ describe('a send approved on a card', () => {
     expect(chat.sendEmail).toHaveBeenCalledTimes(1);
     const notes = sentNotes(chat.retain);
     expect(notes).toHaveLength(1);
-    expect(notes[0]?.content).toContain('To wendy@example.com, subject "Saturday": See you at 7.');
+    expect(notes[0]?.content).toContain(SENT_TEXT);
+  });
+
+  it('is not saved when the sidecar says the delivery failed', async () => {
+    const chat = await chatWithSendCard({
+      approve: true,
+      sidecarText: 'Email delivery [wendy@example.com: failed (rejected); sent-copy: skipped]',
+    });
+    expect(chat.sendEmail).toHaveBeenCalledTimes(1);
+    expect(sentNotes(chat.retain)).toHaveLength(0);
   });
 
   it('is not saved when the person turns it down', async () => {

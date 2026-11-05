@@ -9,6 +9,7 @@ import {
   Sessions,
   StaleApprovalContinuationError,
   TurnAlreadyExistsError,
+  TurnHandle,
 } from '@truefoundry/trueforge-core/agent-session';
 import { AgentHarnessError, HeldActionRefusedError } from '@truefoundry/trueforge-core/core';
 import { createHash } from 'node:crypto';
@@ -18,6 +19,7 @@ import { createTurnsRouter } from '../../../src/apis/turns';
 import { TrueForgeAuthorizer } from '../../../src/auth/authorizer';
 import { STANDALONE_REQUEST_CONTEXT, type RequestContext } from '../../../src/auth/identity';
 import { McpCatalog } from '../../../src/catalog/McpCatalog';
+import configuration from '../../../src/config';
 import { McpServerWithAuthStore } from '../../../src/db/McpServerWithAuthStore';
 import { migrateSqliteToLatest } from '../../../src/db/migrateSqlite';
 import { SqliteAgentStore } from '../../../src/db/sqlite/agent-store/SqliteAgentStore';
@@ -685,5 +687,39 @@ describe('POST /{session_id}/turns for a card whose request ended', () => {
     expect(response.status).toBe(409);
     const tip = await app.request(`/${SESSION_ID}/turns/${TIP_TURN_ID}`, { method: 'GET' });
     expect(await tip.json()).toMatchObject({ data: { state: { required_actions: CHILD_CARD } } });
+  });
+});
+
+describe('the calls read for a turn that answers a card', () => {
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
+  async function answerAllow(): Promise<{ read: jest.SpyInstance; createTurn: jest.SpyInstance }> {
+    const app = await buildApp({ status: 'allow' }, { pausedFirstTurn: true });
+    const read = jest
+      .spyOn(TurnHandle.prototype, 'listEvents')
+      .mockRejectedValue(new Error('the event store is unreachable'));
+    const createTurn = jest.spyOn(SessionHandle.prototype, 'createTurn').mockRejectedValue(new Error('stop here'));
+    await postTurn(app, approvalInput({ status: 'allow' }), FIRST_TURN_ID);
+    return { read, createTurn };
+  }
+
+  it('are read from the end of the paused turn before the turn is created, when memory will save a send', async () => {
+    const { read, createTurn } = await answerAllow();
+    expect(read).toHaveBeenCalledWith(expect.objectContaining({ order: 'desc' }));
+    expect(read.mock.invocationCallOrder[0]).toBeLessThan(createTurn.mock.invocationCallOrder[0] ?? 0);
+  });
+
+  it('never stop the turn when the paused turn cannot be read', async () => {
+    const { createTurn } = await answerAllow();
+    expect(createTurn).toHaveBeenCalledTimes(1);
+  });
+
+  it('are not read at all when memory is off', async () => {
+    jest.replaceProperty(configuration, 'MEMORY_BACKEND', 'hindsight');
+    const { read, createTurn } = await answerAllow();
+    expect(read).not.toHaveBeenCalled();
+    expect(createTurn).toHaveBeenCalledTimes(1);
   });
 });

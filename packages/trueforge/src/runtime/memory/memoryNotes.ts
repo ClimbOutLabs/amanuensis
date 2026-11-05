@@ -12,10 +12,10 @@ export const NOTE_DATE_METADATA_KEY = 'note_date';
 export const ASSISTANT_RESPONSE_SOURCE = 'assistant_response';
 
 /** Stored source of a note that records a message the person sent through the assistant. */
-export const SENT_MAIL_SOURCE = 'sent_mail' satisfies ToolResultSource;
+export const SENT_MAIL_SOURCE = 'sent_mail';
 
-/** Where a saved note came from: a kind of tool result (a message the person sent included), or the assistant's own reply. */
-export type MemoryNoteSource = ToolResultSource | typeof ASSISTANT_RESPONSE_SOURCE;
+/** Where a saved note came from: a kind of tool result, the assistant's own reply, or a message the person sent. */
+export type MemoryNoteSource = ToolResultSource | typeof ASSISTANT_RESPONSE_SOURCE | typeof SENT_MAIL_SOURCE;
 
 const NOTE_SOURCES = [
   'email',
@@ -109,7 +109,7 @@ function monthAndDay(date: string): string | undefined {
     : `${month} ${String(Number(match[3]))}`;
 }
 
-const FINDING_SOURCE_PHRASES: Record<ToolResultSource, string> = {
+const FINDING_SOURCE_PHRASES: Record<ToolResultSource | typeof SENT_MAIL_SOURCE, string> = {
   email: 'an email',
   calendar: 'the calendar',
   web: 'the web',

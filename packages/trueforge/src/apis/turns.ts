@@ -105,7 +105,7 @@ import {
   type SummarizeTurnContext,
 } from '../runtime/memory/memoryRetain';
 import { applyMemorySettings } from '../runtime/memory/memorySettings';
-import { sentMailFromCall, type SentMail } from '../runtime/memory/sentMail';
+import { saveSentMail, sentMailFromCall, sentMailWentThrough } from '../runtime/memory/sentMail';
 import { readMemoryRecallSetting } from '../runtime/memoryRecallSettings';
 import { applyMemoryScreenOverride, readMemoryScreenSetting } from '../runtime/memoryScreenSettings';
 import { resolveTurnSummarizeContext } from '../runtime/memorySummarizeSettings';
@@ -166,7 +166,7 @@ import { resolveSkillNetworkGrant } from '../sandbox/skillnet/skillNetworkGrant'
 import { skillNetworkTokens } from '../sandbox/skillnet/skillNetworkTokens';
 import type { MemoryProviderSettings } from '../schemas/mcpServer';
 import { canReadAgentBoundResource } from './agentAccess';
-import { approvedToolCalls } from './approvedToolCalls';
+import { approvedToolCalls, toolCallKey } from './approvedToolCalls';
 import { readServerSandboxAvailable } from './capabilities';
 
 export function toWireTurn<TCustom extends object>(record: TurnRecordWithoutSnapshot<TCustom>): Turn {
@@ -1273,9 +1273,9 @@ async function runTurnEventDrain(params: {
   const callReturnsOutside = new Map<string, boolean>();
   const callSources = new Map<string, ToolResultSource>();
   const toolResults: TurnToolResult[] = [];
-  // A send is read from its call and kept only once its result is executed_ok: a refused send was never sent.
-  const callsById = new Map<string, RawToolCall>(approvedCalls);
-  const sentMail: SentMail[] = [];
+  // A send is read from its call and saved as soon as its result says it went through, whichever turn ran it.
+  const callsByKey = new Map<string, RawToolCall>(approvedCalls);
+  const sentMailWrites: Promise<void>[] = [];
   let followUp: Promise<void> | undefined;
   try {
     for await (const event of trackedStream) {
@@ -1286,17 +1286,27 @@ async function runTurnEventDrain(params: {
         for (const call of event.tool_calls ?? []) {
           callReturnsOutside.set(call.id, callReturnsOutsideContent(call));
           callSources.set(call.id, callResultSource(call));
-          callsById.set(call.id, call);
+          callsByKey.set(toolCallKey({ threadId: event.thread_id, callId: call.id }), call);
         }
       }
-      if (event.type === EventType.TOOL_RESPONSE_V2 && event.disposition === 'executed_ok') {
-        const call = callsById.get(event.tool_call_id);
-        const mail =
-          call === undefined || sentMail.length >= TURN_TOOL_RESULTS_KEPT
-            ? undefined
-            : sentMailFromCall({ call, maxBodyCharacters: TURN_TOOL_RESULT_CHARACTERS_KEPT });
-        if (mail !== undefined) {
-          sentMail.push(mail);
+      if (memory !== undefined && event.type === EventType.TOOL_RESPONSE_V2 && event.disposition === 'executed_ok') {
+        const call = callsByKey.get(toolCallKey({ threadId: event.thread_id, callId: event.tool_call_id }));
+        const mail = call === undefined || !sentMailWentThrough(event.content) ? undefined : sentMailFromCall(call);
+        if (mail !== undefined && sentMailWrites.length < TURN_TOOL_RESULTS_KEPT) {
+          sentMailWrites.push(
+            saveSentMail({
+              client: memory.client,
+              sessionId,
+              turnId,
+              threadId: event.thread_id,
+              callId: event.tool_call_id,
+              mail,
+              sentAt: event.created_at,
+              timeZone: memory.timeZone,
+              maxBodyCharacters: TURN_TOOL_RESULT_CHARACTERS_KEPT,
+              logger,
+            }),
+          );
         }
       }
       if (
@@ -1329,7 +1339,6 @@ async function runTurnEventDrain(params: {
           state: event.state,
           ingestedToolOutput,
           toolResults,
-          sentMail,
           markArtifactsCaptured,
         });
       }
@@ -1355,6 +1364,8 @@ async function runTurnEventDrain(params: {
     if (followUp === undefined) {
       markArtifactsCaptured();
     }
+    // Each write never throws; the drain waits so a shutdown does not drop a note.
+    await Promise.allSettled(sentMailWrites);
     executionDeadline.dispose();
     startBound?.dispose();
   }
@@ -1369,10 +1380,9 @@ async function runTurnFollowUp(params: {
   state: Extract<TerminalTurnState, { status: 'done' }>;
   ingestedToolOutput: boolean;
   toolResults: readonly TurnToolResult[];
-  sentMail: readonly SentMail[];
   markArtifactsCaptured: () => void;
 }): Promise<void> {
-  const { input, state, ingestedToolOutput, toolResults, sentMail, markArtifactsCaptured } = params;
+  const { input, state, ingestedToolOutput, toolResults, markArtifactsCaptured } = params;
   const { turnEventStream, sessionId, turnId, logger, memory, artifacts, profileLearning, modelUsage } = input;
   try {
     // First, and never behind a model call: the chat's next turn reuses the sandbox and waits
@@ -1410,7 +1420,6 @@ async function runTurnFollowUp(params: {
         origin: ingestedToolOutput ? 'tool_ingested' : 'user_stated',
         logger,
         toolResults,
-        sentMail,
         summarize: memory.summarize,
         outcomeLog: memory.outcomeLog,
       });
@@ -2656,6 +2665,12 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
     // never overwrites an existing title.
     const title = session.record.last_turn_id ? undefined : deriveSessionTitle(body.input);
 
+    // Read before the turn exists and only when memory will save the send; a read failure falls back to none.
+    const approvedCalls =
+      memoryClient === undefined
+        ? undefined
+        : await approvedToolCalls({ pausedTurn: previousTurn, input: body.input, logger: deps.logger });
+
     // Turning down held actions ends the turn with no model call. Approving one runs the call,
     // and the model continues with its result.
     const stopAfterToolResponse = await session.answersOnlyDeniedHeldActions({
@@ -2976,7 +2991,7 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
                   },
                 },
           profileLearning,
-          approvedCalls: await approvedToolCalls({ pausedTurn: previousTurn, input: body.input }),
+          approvedCalls,
           artifacts: {
             turnArtifactStore: deps.turnArtifactStore,
             sandboxProviderStore,

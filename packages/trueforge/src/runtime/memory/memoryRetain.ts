@@ -8,7 +8,6 @@
  */
 import type { Logger } from 'winston';
 import configuration from '../../config';
-import { redactSecretShapes } from '../../dataExport/secretScrub';
 import type { IModelProviderStore } from '../../db/modelProviderStore';
 import type { TurnModelUsage } from '../modelUsage';
 import type { TokenFactoryBudget } from '../tokenFactoryBudget';
@@ -24,7 +23,6 @@ import {
   NOTE_SOURCE_METADATA_KEY,
   noteLabel,
   noteRetainContent,
-  SENT_MAIL_SOURCE,
   type MemoryNoteSource,
 } from './memoryNotes';
 import { summarizeTurnNotes, type TurnToolResult } from './memoryNotesSummarize';
@@ -35,7 +33,6 @@ import {
   type AmanMemoryOrigin,
 } from './memoryOrigin';
 import { summarizeTurnContent, usablePersonName, type SummaryFallbackReason } from './memorySummarize';
-import { sentMailNoteText, type SentMail } from './sentMail';
 import { uuidv5 } from './uuidv5';
 
 /** Fixed namespace for every operation id this host mints, in the style of RFC 4122's example namespaces. */
@@ -173,8 +170,6 @@ export interface SubmitRetainParams {
   outcomeLog?: RetainOutcomeLog | undefined;
   /** What the turn's tools returned, so concrete findings can be saved as labeled notes. */
   toolResults?: readonly TurnToolResult[] | undefined;
-  /** Messages the person sent through the assistant this turn, each saved as its own note with no model call. */
-  sentMail?: readonly SentMail[] | undefined;
   /**
    * Context for LLM summarization of the turn. Present only when turn summarization was
    * enabled for the turn (the Settings toggle's persisted override, else the
@@ -202,11 +197,11 @@ type RetainSubmissionResult = 'submitted' | 'failed' | 'skipped';
 type TurnMemory =
   | { kind: 'text'; text: string; notes: readonly LabeledNote[] }
   | { kind: 'notes'; notes: readonly LabeledNote[] }
-  | { kind: 'exchange'; notes: readonly LabeledNote[] }
+  | { kind: 'exchange' }
   | { kind: 'nothing' };
 
 /** A finding or reply note ready to store: its source, its day, and its text with the label in front. */
-interface LabeledNote {
+export interface LabeledNote {
   source: MemoryNoteSource;
   date: string;
   text: string;
@@ -231,49 +226,14 @@ function formatFacts(facts: readonly string[]): string {
  */
 async function decideTurnMemory(params: SubmitRetainParams): Promise<TurnMemory> {
   const summarize = params.summarize;
-  // Written by the host from the send call, so they are kept whether or not turn summaries are on.
-  const sent = sentMailNotes(params);
   if (summarize === undefined) {
-    const person = await decidePersonFacts(params);
-    return person.kind === 'exchange' ? { kind: 'exchange', notes: sent } : person;
+    return decidePersonFacts(params);
   }
-  const [person, found] = await Promise.all([decidePersonFacts(params), decideNotes({ params, summarize })]);
-  const notes = [...sent, ...found];
+  const [person, notes] = await Promise.all([decidePersonFacts(params), decideNotes({ params, summarize })]);
   if (notes.length === 0) {
     return person;
   }
   return person.kind === 'text' ? { ...person, notes } : { kind: 'notes', notes };
-}
-
-/** The day the turn finished, as the person lived it. */
-function turnDay(params: SubmitRetainParams): string {
-  const instant = new Date(params.completedAt);
-  return localDay({ instant: Number.isNaN(instant.getTime()) ? new Date() : instant, timeZone: params.timeZone }).date;
-}
-
-/**
- * One note per message the person sent this turn, word for word. A message that holds something shaped like
- * a secret is not saved, the same rule as for any other note.
- */
-function sentMailNotes(params: SubmitRetainParams): LabeledNote[] {
-  const date = turnDay(params);
-  return (params.sentMail ?? []).flatMap(mail => {
-    const text = sentMailNoteText(mail);
-    if (redactSecretShapes(text) !== text) {
-      params.logger.debug('A sent message holds a secret and was not saved as a note', {
-        sessionId: params.sessionId,
-        turnId: params.turnId,
-      });
-      return [];
-    }
-    return [
-      {
-        source: SENT_MAIL_SOURCE,
-        date,
-        text: labeledNoteText({ label: noteLabel({ source: SENT_MAIL_SOURCE, date, assistantName: undefined }), text }),
-      },
-    ];
-  });
 }
 
 /** The findings and reply notes of the turn, labeled with where they came from and the day. Never throws. */
@@ -298,7 +258,11 @@ async function decideNotes({
     modelUsage: summarize.modelUsage,
     logger: params.logger,
   });
-  const date = turnDay(params);
+  const instant = new Date(params.completedAt);
+  const date = localDay({
+    instant: Number.isNaN(instant.getTime()) ? new Date() : instant,
+    timeZone: params.timeZone,
+  }).date;
   const assistantName = usablePersonName(summarize.assistantName);
   return notes
     .filter(note => withoutAbilityNotes([note.text]).length > 0)
@@ -317,7 +281,7 @@ async function decidePersonFacts(params: SubmitRetainParams): Promise<TurnMemory
       sessionId: params.sessionId,
       turnId: params.turnId,
     });
-    return { kind: 'exchange', notes: [] };
+    return { kind: 'exchange' };
   }
   try {
     const result = await summarizeTurnContent({
@@ -432,19 +396,44 @@ function noteRetainItems({
   params: SubmitRetainParams;
   notes: readonly LabeledNote[];
 }): RetainItem[] {
-  return notes.map((note, index) => ({
+  return notes.map((note, index) =>
+    noteRetainItem({
+      sessionId: params.sessionId,
+      turnId: params.turnId,
+      completedAt: params.completedAt,
+      note,
+      documentId: `aman-${params.sessionId}-${params.turnId}-note-${String(index)}`,
+    }),
+  );
+}
+
+/** One note ready for the provider, carrying the untrusted origin like every note. */
+export function noteRetainItem({
+  sessionId,
+  turnId,
+  completedAt,
+  note,
+  documentId,
+}: {
+  sessionId: string;
+  turnId: string;
+  completedAt: string;
+  note: LabeledNote;
+  documentId: string;
+}): RetainItem {
+  return {
     content: noteRetainContent({ text: note.text, source: note.source, date: note.date }),
-    timestamp: params.completedAt,
-    document_id: `aman-${params.sessionId}-${params.turnId}-note-${String(index)}`,
+    timestamp: completedAt,
+    document_id: documentId,
     metadata: {
-      [SESSION_ID_METADATA_KEY]: params.sessionId,
-      turn_id: params.turnId,
+      [SESSION_ID_METADATA_KEY]: sessionId,
+      turn_id: turnId,
       source: 'aman-chat',
       [MEMORY_ORIGIN_METADATA_KEY]: TOOL_INGESTED_ORIGIN,
       [NOTE_SOURCE_METADATA_KEY]: note.source,
       [NOTE_DATE_METADATA_KEY]: note.date,
     },
-  }));
+  };
 }
 
 /** Newest daily files compared before a retain: the same window recall reads, so the check stays cheap. */
@@ -509,7 +498,8 @@ async function attemptRetainSubmission(
     await params.client.completeOperation?.(retainOperationId({ sessionId: params.sessionId, turnId: params.turnId }));
     return 'skipped';
   }
-  const noteItems = noteRetainItems({ params, notes: memory.notes });
+  const noteItems =
+    memory.kind === 'text' || memory.kind === 'notes' ? noteRetainItems({ params, notes: memory.notes }) : [];
   const personItem =
     memory.kind === 'notes'
       ? undefined
@@ -520,10 +510,8 @@ async function attemptRetainSubmission(
   }
   // Decided here, before any backend call, so every backend behaves the same. Returning
   // 'skipped' also ends the verification pass, so this info line is logged once per turn.
-  // Summarized facts were already filtered, so only a kept exchange needs this check. A sent
-  // message is still saved when the exchange around it is dropped.
-  const exchangeIsAbilityNotes = memory.kind === 'exchange' && stripAssistantAbilityNotes(item.content) === '';
-  if (exchangeIsAbilityNotes && noteItems.length === 0) {
+  // Summarized facts were already filtered, so only a kept exchange needs this check.
+  if (memory.kind === 'exchange' && stripAssistantAbilityNotes(item.content) === '') {
     logTurnMemoryNotSaved(params, {
       message: 'it only described what the assistant could not do',
       reason: 'ability_notes_only',
@@ -532,7 +520,7 @@ async function attemptRetainSubmission(
   }
   const items = await withoutStoredCopies({
     params,
-    items: [...(personItem === undefined || exchangeIsAbilityNotes ? [] : [personItem]), ...noteItems],
+    items: [...(personItem === undefined ? [] : [personItem]), ...noteItems],
   });
   if (items.length === 0) {
     logTurnMemoryNotSaved(params, { message: 'the same note is already in memory', reason: 'already_stored' });
