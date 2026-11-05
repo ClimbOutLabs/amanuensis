@@ -1,6 +1,7 @@
 import type { Kysely } from 'kysely';
 
 import { ReachSettingsSchema, type ReachSettings } from '../schemas/reach';
+import type { NoticingOwner } from './noticingStore';
 
 /** One row of `reach_settings`: a person's whole Reach me document as JSON. */
 export interface ReachSettingsTable {
@@ -14,22 +15,17 @@ export interface ReachSettingsDatabase {
   reach_settings: ReachSettingsTable;
 }
 
-export interface ReachOwner {
-  tenant_id: string;
-  created_by: string;
-}
-
 /** A person's Reach me settings. Owner-scoped: no read or write reaches another person's row. */
 export interface IReachSettingsStore {
   /** The saved settings, or undefined while the person has never saved any. */
-  get(owner: ReachOwner): Promise<ReachSettings | undefined>;
+  get(owner: NoticingOwner): Promise<ReachSettings | undefined>;
   /** Everyone who has saved settings, so the watchers also look after people with no Google login. */
-  listOwners(): Promise<ReachOwner[]>;
+  listOwners(): Promise<NoticingOwner[]>;
   /** Replaces the person's settings. */
-  put(input: ReachOwner & { settings: ReachSettings; now?: Date }): Promise<ReachSettings>;
+  put(input: NoticingOwner & { settings: ReachSettings; now?: Date }): Promise<ReachSettings>;
   /** Adds exported settings when the person has none; settings already there are kept. Resolves to whether they were added. */
   importSettings(
-    input: ReachOwner & { settings: ReachSettings; now?: Date },
+    input: NoticingOwner & { settings: ReachSettings; now?: Date },
     transaction?: Kysely<ReachSettingsDatabase>,
   ): Promise<boolean>;
 }
@@ -41,7 +37,7 @@ export class ReachSettingsStore implements IReachSettingsStore {
     this.#db = db;
   }
 
-  async get(owner: ReachOwner): Promise<ReachSettings | undefined> {
+  async get(owner: NoticingOwner): Promise<ReachSettings | undefined> {
     const row = await this.#db
       .selectFrom('reach_settings')
       .select('settings')
@@ -51,7 +47,7 @@ export class ReachSettingsStore implements IReachSettingsStore {
     return row === undefined ? undefined : ReachSettingsSchema.parse(JSON.parse(row.settings));
   }
 
-  async listOwners(): Promise<ReachOwner[]> {
+  async listOwners(): Promise<NoticingOwner[]> {
     return await this.#db
       .selectFrom('reach_settings')
       .select(['tenant_id', 'created_by'])
@@ -60,7 +56,7 @@ export class ReachSettingsStore implements IReachSettingsStore {
       .execute();
   }
 
-  async put(input: ReachOwner & { settings: ReachSettings; now?: Date }): Promise<ReachSettings> {
+  async put(input: NoticingOwner & { settings: ReachSettings; now?: Date }): Promise<ReachSettings> {
     // Parsed before the write, so a document that could not be read back is never stored.
     const settings = ReachSettingsSchema.parse(input.settings);
     const updated_at = (input.now ?? new Date()).toISOString();
@@ -76,7 +72,7 @@ export class ReachSettingsStore implements IReachSettingsStore {
   }
 
   async importSettings(
-    input: ReachOwner & { settings: ReachSettings; now?: Date },
+    input: NoticingOwner & { settings: ReachSettings; now?: Date },
     transaction?: Kysely<ReachSettingsDatabase>,
   ): Promise<boolean> {
     const db = transaction ?? this.#db;

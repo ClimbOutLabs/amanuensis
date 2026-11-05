@@ -808,7 +808,7 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
       instanceOwner: noticingInstanceOwner,
       logger,
     }),
-    approvals: sessionApprovalSource({ sessionStore }),
+    approvals: sessionApprovalSource({ sessionStore, tenant_id: TENANT_ID }),
     reachSettings: reachSettingsStore,
     store: noticingStore,
     deliveries: deliveryService,

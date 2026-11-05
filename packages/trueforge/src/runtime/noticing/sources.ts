@@ -1,13 +1,9 @@
+import type { NoticingOwner } from '../../db/noticingStore';
+
 /**
  * What the watchers read. Each port answers a narrow question, so a mail or calendar source other than Google can be
  * added without touching the watchers. Everything they return is the person's own data, read with read-only calls.
  */
-
-/** Whose data a watcher is looking at. */
-export interface NoticingOwner {
-  tenant_id: string;
-  created_by: string;
-}
 
 export interface MailMessage {
   /** The mail server's id for the message, stable across reads. */
@@ -70,12 +66,16 @@ export interface NoticingSourceProvider {
 }
 
 export interface WaitingApproval {
+  /** Who the request is waiting on: the person whose chat asked for their ok. */
+  owner: NoticingOwner;
   session_id: string;
-  turn_id: string;
+  /** The request's own id, so the delivery can lead straight to it. */
+  approval_id: string;
   /** When the request for the person's ok was made. */
   waiting_since: Date;
 }
 
 export interface ApprovalSource {
-  listWaiting(owner: NoticingOwner): Promise<WaitingApproval[]>;
+  /** Requests for someone's ok that are still open, for everyone at once. */
+  listWaiting(): Promise<WaitingApproval[]>;
 }

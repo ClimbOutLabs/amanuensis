@@ -14,13 +14,13 @@ import {
 import { isRecord } from '@truefoundry/trueforge-core/core/util/records';
 import type { Logger } from 'winston';
 
+import type { NoticingOwner } from '../../db/noticingStore';
 import type {
   CalendarEventInfo,
   CalendarSource,
   MailMessage,
   MailRef,
   MailSource,
-  NoticingOwner,
   NoticingSourceProvider,
   NoticingSources,
 } from './sources';

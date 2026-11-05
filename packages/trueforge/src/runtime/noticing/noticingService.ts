@@ -29,7 +29,7 @@ import { ceilingOf } from './levels';
 import type { ReachChannels } from './reachChannels';
 import { readReachHistory, waitFor, withReachLease, type ReachGateDeps } from './reachGate';
 import { applyReachRules, joinReasons } from './reachRules';
-import type { ApprovalSource, CalendarSource, MailSource, NoticingSourceProvider } from './sources';
+import type { ApprovalSource, CalendarSource, MailSource, NoticingSourceProvider, WaitingApproval } from './sources';
 import { BILL_WINDOW_MS, billIsPaid, watchApprovals, watchCalendar, watchMail } from './watchers';
 
 /** How far back the first pass of a mail watcher looks, so a newly connected inbox is not flooded with old mail. */
@@ -141,8 +141,16 @@ function stillTimely({ event, now }: { event: NoticingEvent; now: Date }): boole
   }
 }
 
-function deliveryKindOf(level: DeliveryLevel): Delivery['kind'] {
+/** A waiting approval keeps its own kind, which leads straight to the request; anything else is a note or a nudge. */
+function deliveryKindOf({ event, level }: { event: NoticingEvent; level: DeliveryLevel }): Delivery['kind'] {
+  if (event.link?.type === 'approval') {
+    return 'approval_waiting';
+  }
   return level === 'note' ? 'note' : 'nudge';
+}
+
+function ownerKey(owner: NoticingOwner): string {
+  return `${owner.tenant_id}\u0000${owner.created_by}`;
 }
 
 function errorText(error: unknown): string {
@@ -226,7 +234,7 @@ export function createNoticingService(deps: NoticingDeps): NoticingService {
         ]);
         const delivery = await deps.deliveries.deliver({
           ...owner,
-          kind: deliveryKindOf(decision.delivered),
+          kind: deliveryKindOf({ event, level: decision.delivered }),
           level: decision.delivered,
           text: shown.text,
           reason,
@@ -384,35 +392,75 @@ export function createNoticingService(deps: NoticingDeps): NoticingService {
     });
   }
 
-  async function runApprovals({ owner, settings }: { owner: NoticingOwner; settings: ReachSettings }): Promise<void> {
-    const events = await watchApprovals({ source: deps.approvals, owner, settings, now: now() });
+  /**
+   * Records one person's open requests that waited long enough, and drops any recorded request that is no longer
+   * open, so a request answered in the meantime is never raised.
+   */
+  async function runApprovals({
+    owner,
+    waiting,
+    settings,
+  }: {
+    owner: NoticingOwner;
+    waiting: readonly WaitingApproval[];
+    settings: ReachSettings;
+  }): Promise<void> {
+    const events = watchApprovals({ waiting, settings, now: now() });
     await recordAll({ owner, events, status: 'pending' });
+    const open = new Set(waiting.map(item => `approval_waiting:${item.session_id}:${item.approval_id}`));
+    const recorded = await store.listPending({
+      ...owner,
+      kinds: WATCHER_KINDS.approvals,
+      stale_before: new Date(now().getTime() - CLAIM_STALE_MS),
+      limit: PENDING_LIMIT,
+    });
+    for (const event of recorded.filter(item => !open.has(item.id))) {
+      await store.drop({ ...owner, event_id: event.id });
+    }
   }
 
-  async function ownersToWatch(): Promise<NoticingOwner[]> {
+  /**
+   * Who a pass looks at. Mail and calendar: everyone with a source or saved settings. Approvals: everyone with an
+   * open request, whether or not they ever connected anything, with their requests.
+   */
+  async function ownersToWatch(
+    watcher: NoticingWatcher,
+  ): Promise<{ owners: NoticingOwner[]; approvals: Map<string, WaitingApproval[]> }> {
+    const approvals = new Map<string, WaitingApproval[]>();
+    if (watcher === 'approvals') {
+      for (const item of await deps.approvals.listWaiting()) {
+        const key = ownerKey(item.owner);
+        approvals.set(key, [...(approvals.get(key) ?? []), item]);
+      }
+      const owners = [...approvals.values()].flatMap(items => (items[0] === undefined ? [] : [items[0].owner]));
+      return { owners, approvals };
+    }
     const listed = [...(await deps.sources.listOwners()), ...(await deps.reachSettings.listOwners())];
     const seen = new Set<string>();
-    return listed.filter(owner => {
-      const key = `${owner.tenant_id}\u0000${owner.created_by}`;
+    const owners = listed.filter(owner => {
+      const key = ownerKey(owner);
       if (seen.has(key)) {
         return false;
       }
       seen.add(key);
       return true;
     });
+    return { owners, approvals };
   }
 
   async function look({
     owner,
     watcher,
     settings,
+    waiting,
   }: {
     owner: NoticingOwner;
     watcher: NoticingWatcher;
     settings: ReachSettings;
+    waiting: readonly WaitingApproval[];
   }): Promise<void> {
     if (watcher === 'approvals') {
-      await runApprovals({ owner, settings });
+      await runApprovals({ owner, waiting, settings });
       return;
     }
     const sources = await deps.sources.sourcesFor(owner);
@@ -426,13 +474,13 @@ export function createNoticingService(deps: NoticingDeps): NoticingService {
 
   return {
     async run({ watcher }) {
-      const owners = await ownersToWatch();
+      const { owners, approvals } = await ownersToWatch(watcher);
       let raised = 0;
       for (const owner of owners) {
         try {
           const settings = (await deps.reachSettings.get(owner)) ?? defaultReachSettings('UTC');
           try {
-            await look({ owner, watcher, settings });
+            await look({ owner, watcher, settings, waiting: approvals.get(ownerKey(owner)) ?? [] });
           } catch (error) {
             // What earlier passes found is still raised below.
             logger.error('A watcher could not look for one person; the others go on', {

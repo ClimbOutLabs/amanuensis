@@ -13,13 +13,13 @@ import { grantedFeatures } from '@truefoundry/trueforge-core/core/google/scopes'
 import type { Logger } from 'winston';
 
 import type { IGoogleConnectionStore } from '../../db/googleConnectionStore';
+import type { NoticingOwner } from '../../db/noticingStore';
 import type {
   CalendarEventInfo,
   CalendarSource,
   MailMessage,
   MailRef,
   MailSource,
-  NoticingOwner,
   NoticingSourceProvider,
 } from './sources';
 

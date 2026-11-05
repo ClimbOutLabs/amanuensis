@@ -137,6 +137,7 @@ async function setup({
   const calendarSource: CalendarSource = { listEvents: jest.fn(() => Promise.resolve(events)) };
   const sources: NoticingSources = { mail: mailSource, calendar: calendarSource };
   const approvals: ApprovalSource = { listWaiting: () => Promise.resolve(waiting) };
+  const listOwners = jest.fn(() => Promise.resolve([OWNER]));
   const judge = jest.fn<ReturnType<NoticingJudge>, Parameters<NoticingJudge>>(async () => {
     await judgeDelay;
     if (verdict instanceof Error) {
@@ -146,7 +147,7 @@ async function setup({
   });
   const makeService = () =>
     createNoticingService({
-      sources: { listOwners: () => Promise.resolve([OWNER]), sourcesFor: () => Promise.resolve(sources) },
+      sources: { listOwners, sourcesFor: () => Promise.resolve(sources) },
       approvals,
       reachSettings,
       store,
@@ -164,6 +165,7 @@ async function setup({
   return {
     service,
     makeService,
+    listOwners,
     clock,
     channelState,
     judge,
@@ -440,22 +442,81 @@ describe('calendar', () => {
 });
 
 describe('approvals', () => {
-  it('raises one event for an approval that waited longer than the chosen time', async () => {
+  const waitingFor = ({
+    owner,
+    approval_id,
+    since,
+  }: {
+    owner: typeof OWNER;
+    approval_id: string;
+    since: string;
+  }): WaitingApproval => ({
+    owner,
+    session_id: `s-${approval_id}`,
+    approval_id,
+    waiting_since: new Date(since),
+  });
+
+  it('raises one event for an approval that waited longer than the chosen time, leading to the request', async () => {
     const { service, feed } = await setup({
       settings: { approval_wait_minutes: 10 },
       waiting: [
-        { session_id: 's1', turn_id: 'u1', waiting_since: new Date('2026-11-05T14:40:00.000Z') },
+        waitingFor({ owner: OWNER, approval_id: 'a1', since: '2026-11-05T14:40:00.000Z' }),
         // Not waited long enough yet.
-        { session_id: 's2', turn_id: 'u2', waiting_since: new Date('2026-11-05T14:55:00.000Z') },
+        waitingFor({ owner: OWNER, approval_id: 'a2', since: '2026-11-05T14:55:00.000Z' }),
         // Past the 30 minutes after which the request is closed, so there is nothing left to ask.
-        { session_id: 's3', turn_id: 'u3', waiting_since: new Date('2026-11-05T14:20:00.000Z') },
+        waitingFor({ owner: OWNER, approval_id: 'a3', since: '2026-11-05T14:20:00.000Z' }),
       ],
     });
     await expect(service.run({ watcher: 'approvals' })).resolves.toMatchObject({ raised: 1 });
     await expect(service.run({ watcher: 'approvals' })).resolves.toMatchObject({ raised: 0 });
     const items = await feed();
     expect(items).toHaveLength(1);
-    expect(items[0]?.link).toEqual({ type: 'chat', session_id: 's1' });
+    expect(items[0]).toMatchObject({
+      kind: 'approval_waiting',
+      link: { type: 'approval', session_id: 's-a1', approval_id: 'a1' },
+    });
+  });
+
+  it('reaches someone with an open request who connected nothing and never saved Reach me', async () => {
+    const newcomer = { tenant_id: 'default', created_by: 'newcomer' };
+    const { service, deliveryStore, listOwners } = await setup({
+      waiting: [waitingFor({ owner: newcomer, approval_id: 'a9', since: '2026-11-05T14:40:00.000Z' })],
+    });
+    await expect(service.run({ watcher: 'approvals' })).resolves.toEqual({ owners: 1, raised: 1 });
+    expect(listOwners).not.toHaveBeenCalled();
+    const { deliveries } = await deliveryStore.list({ ...newcomer, limit: 5 });
+    expect(deliveries).toHaveLength(1);
+    expect(deliveries[0]).toMatchObject({ kind: 'approval_waiting', link: { approval_id: 'a9' } });
+  });
+
+  it('drops a recorded request that was answered before it could be raised', async () => {
+    // The person still has another request open, too new to mention, so their pass runs.
+    const { service, store, feed } = await setup({
+      waiting: [waitingFor({ owner: OWNER, approval_id: 'a2', since: '2026-11-05T14:58:00.000Z' })],
+    });
+    await store.record({
+      ...OWNER,
+      status: 'pending',
+      now: NOW,
+      event: {
+        id: 'approval_waiting:s-a1:a1',
+        kind: 'approval_waiting',
+        evidence: 'own',
+        summary: 'Something is waiting for your ok.',
+        facts: 'A request waited.',
+        matched: 'An approval waited.',
+        link: { type: 'approval', session_id: 's-a1', approval_id: 'a1' },
+        mail_ref: null,
+        occurred_at: '2026-11-05T14:40:00.000Z',
+        due_at: null,
+      },
+    });
+    await expect(service.run({ watcher: 'approvals' })).resolves.toMatchObject({ raised: 0 });
+    expect(await feed()).toEqual([]);
+    await expect(
+      store.listPending({ ...OWNER, kinds: ['approval_waiting'], stale_before: NOW, limit: 5 }),
+    ).resolves.toEqual([]);
   });
 });
 
@@ -677,7 +738,9 @@ describe('passes that fail, stop or overlap', () => {
     const { service, makeService, feed, pushed } = await setup({
       settings: { max_nudges_per_day: 1, approval_wait_minutes: 10 },
       events: clash,
-      waiting: [{ session_id: 's1', turn_id: 'u1', waiting_since: new Date('2026-11-05T14:40:00.000Z') }],
+      waiting: [
+        { owner: OWNER, session_id: 's1', approval_id: 'a1', waiting_since: new Date('2026-11-05T14:40:00.000Z') },
+      ],
       verdict: { level: 'nudge', reason: 'Today matters.', message: 'This matters today.' },
       judgeDelay,
     });
