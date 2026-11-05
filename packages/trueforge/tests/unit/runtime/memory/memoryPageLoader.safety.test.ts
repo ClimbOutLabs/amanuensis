@@ -12,9 +12,9 @@ import {
   type VaultScope,
 } from '../../../../src/runtime/memory/markdownMemoryFiles';
 import type { FactSource } from '../../../../src/runtime/memory/memoryNotes';
-import { loadPagesForMessage, writingInstructions } from '../../../../src/runtime/memory/memoryPageLoader';
+import { loadPagesForMessage } from '../../../../src/runtime/memory/memoryPageLoader';
 import type { PageFrontMatter, PageKind } from '../../../../src/runtime/memory/memoryPages';
-import { pageOf, pageText, writePageFile } from './pageFixtures';
+import { pageOf, pageText, writePageFile, writingInstructionsOf } from './pageFixtures';
 
 const TENANT = 'tenant-1';
 const ALPHA: VaultScope = { personaName: 'Alpha', personaId: 'persona-alpha-id' };
@@ -261,7 +261,7 @@ describe('2. read content is never rendered as a drafting instruction', () => {
     const loaded = await loadSam(
       personPage(`## How you write to them\n- Keep it short. <!-- fact: id=f_a1 src=${src} since=2026-10-01 -->\n`),
     );
-    expect(writingInstructions(loaded.page)).toEqual(['Keep it short.']);
+    expect(writingInstructionsOf(loaded.page)).toEqual(['Keep it short.']);
   });
 
   // Only the person's own words and the messages they sent are drafting instructions. Any other line
@@ -273,7 +273,7 @@ describe('2. read content is never rendered as a drafting instruction', () => {
 
     it('is not returned by writingInstructions', async () => {
       const loaded = await loadSam(content);
-      expect(writingInstructions(loaded.page)).toEqual([]);
+      expect(writingInstructionsOf(loaded.page)).toEqual([]);
     });
 
     it('is shown to the model as unconfirmed, not under the "How you write to them" label', async () => {
@@ -298,7 +298,7 @@ describe('2. read content is never rendered as a drafting instruction', () => {
     ]);
     expect(loaded.text).not.toContain('How you write to them');
     expect(loaded.drafting).toEqual(['Sam:', '- Keep it short.']);
-    expect(writingInstructions(loaded.page)).toEqual(['Keep it short.']);
+    expect(writingInstructionsOf(loaded.page)).toEqual(['Keep it short.']);
     // The only place the text appears is under the Unconfirmed label.
     expect(loaded.text.split(injection)).toHaveLength(2);
   });
@@ -316,7 +316,7 @@ describe('2. read content is never rendered as a drafting instruction', () => {
 
     it('is not an instruction, is shown as not confirmed, and is not in the drafting block', async () => {
       const loaded = await loadSam(content);
-      expect(writingInstructions(loaded.page)).toEqual(['Keep it short.']);
+      expect(writingInstructionsOf(loaded.page)).toEqual(['Keep it short.']);
       expect(loaded.drafting).toEqual(['Sam:', '- Keep it short.']);
       expect(loaded.text).not.toContain('<!--');
       expect(linesUnder(loaded.text, 'Unconfirmed (not confirmed by you)')).toEqual([
@@ -358,6 +358,6 @@ describe('3. odd pages load without error', () => {
       expect(loaded?.text).toContain(bullet.replace(/^[-*] /, ''));
     }
     expect(loaded?.page.frontMatter.kind).toBe('person');
-    expect(writingInstructions(loaded?.page ?? emptyPage)).toEqual([]);
+    expect(writingInstructionsOf(loaded?.page ?? emptyPage)).toEqual([]);
   });
 });

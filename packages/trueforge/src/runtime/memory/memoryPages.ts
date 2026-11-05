@@ -5,13 +5,13 @@
  * Canonical owner of the page format. Reading never fails: any text is a page, however oddly shaped.
  */
 import type { Dirent } from 'node:fs';
-import { readFile, readdir } from 'node:fs/promises';
+import { readdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { parse } from 'yaml';
 import { z } from 'zod';
 
 import { FactMarkerSchema, splitFactMarker } from './memoryNotes';
-import { isPageSlug } from './pageSlug';
+import { isPageSlug, UNTITLED_PAGE_SLUG } from './pageSlug';
 
 const PAGE_KINDS = ['person', 'matter'] as const;
 export const PageKindSchema = z.enum(PAGE_KINDS);
@@ -45,7 +45,7 @@ const MatterFrontMatterSchema = z.object({
 });
 
 /** The YAML block at the top of a page. Keys outside this schema are ignored. */
-export const PageFrontMatterSchema = z.discriminatedUnion('kind', [PersonFrontMatterSchema, MatterFrontMatterSchema]);
+const PageFrontMatterSchema = z.discriminatedUnion('kind', [PersonFrontMatterSchema, MatterFrontMatterSchema]);
 export type PageFrontMatter = z.infer<typeof PageFrontMatterSchema>;
 
 /** Characters that would end a line in a viewer, so fact text may not hold them. */
@@ -145,21 +145,35 @@ export function pageFolder(kind: PageKind): string {
   return PAGE_FOLDERS[kind];
 }
 
+/** Whether a file name stem can travel in an export as it is: one plain name that cannot climb out of its folder. */
+function isCarryableStem(stem: string): boolean {
+  return (
+    stem.length > 0 &&
+    !stem.startsWith('.') &&
+    !/[\p{Cc}/\\]/u.test(stem) &&
+    Buffer.byteLength(`${stem}.md`, 'utf8') <= MAX_FILE_NAME_BYTES
+  );
+}
+
 /**
- * The page a vault-relative path such as `people/wendy.md` names: its folder and a lowercase slug
- * with `.md` and nothing else. Any other path, including one with more folders or a name that is
- * not a slug, is not a page. A name typed in decomposed form (as some archive tools write it) is
- * read in its composed form, so the file lands under the name the loader looks for.
+ * The page file a vault-relative path such as `people/wendy.md` names: its folder and the file name
+ * without `.md`. `isSlug` says whether the name is a lowercase slug, the only kind Aman reads; any other
+ * plain name is still carried as it is, so a move loses nothing. A path with more folders, no `.md`, a
+ * hidden name or control characters is not a page file. A slug typed in decomposed form (as some archive
+ * tools write it) is read in its composed form, so it lands under the name the loader looks for.
  */
-export function parsePageFilePath(relativePath: string): { kind: PageKind; slug: string } | undefined {
-  const parts = relativePath.normalize('NFC').split('/');
-  const [folder, file, ...rest] = parts;
+export function parsePageFilePath(relativePath: string): { kind: PageKind; stem: string; isSlug: boolean } | undefined {
+  const [folder, file, ...rest] = relativePath.split('/');
   const kind = PAGE_KINDS.find(candidate => PAGE_FOLDERS[candidate] === folder);
   if (kind === undefined || file === undefined || rest.length > 0 || !file.endsWith('.md')) {
     return undefined;
   }
-  const slug = file.slice(0, -'.md'.length);
-  return isPageSlug(slug) ? { kind, slug } : undefined;
+  const stem = file.slice(0, -'.md'.length);
+  const composed = stem.normalize('NFC');
+  if (isPageSlug(composed)) {
+    return { kind, stem: composed, isSlug: true };
+  }
+  return isCarryableStem(stem) ? { kind, stem, isSlug: false } : undefined;
 }
 
 /** Whether a vault-relative path sits in one of the page folders, whether or not its name is a page name. */
@@ -174,26 +188,35 @@ export interface PageListing {
   slug: string;
 }
 
-/** Every page in a vault, people first then matters, each folder sorted by slug. A file whose name is not a page slug is not a page. */
-export async function listMemoryPages(vaultDir: string): Promise<PageListing[]> {
-  const listings: PageListing[] = [];
+/** One `.md` file in a vault's page folder, by folder and file name without `.md`. */
+interface PageFile {
+  kind: PageKind;
+  stem: string;
+}
+
+/** Every `.md` file directly in a vault's page folders, whatever its name: people first then matters, each folder sorted. */
+export async function listPageFiles(vaultDir: string): Promise<PageFile[]> {
+  const files: PageFile[] = [];
   for (const kind of PAGE_KINDS) {
-    const slugs = await listFolderSlugs(path.join(vaultDir, PAGE_FOLDERS[kind]));
-    for (const slug of slugs) {
-      listings.push({ kind, slug });
+    for (const stem of await listFolderMarkdownNames(path.join(vaultDir, PAGE_FOLDERS[kind]))) {
+      files.push({ kind, stem });
     }
   }
-  return listings;
+  return files;
+}
+
+/** Every page in a vault, people first then matters, each folder sorted by slug. A file whose name is not a page slug is not a page. */
+export async function listMemoryPages(vaultDir: string): Promise<PageListing[]> {
+  return (await listPageFiles(vaultDir))
+    .filter(file => isPageSlug(file.stem))
+    .map(file => ({ kind: file.kind, slug: file.stem }));
 }
 
 /** The `.md` files in a vault's page folders that `listMemoryPages` skips because the name is not a page slug, as `folder/file.md`. */
 export async function listSkippedPageFiles(vaultDir: string): Promise<string[]> {
-  const skipped: string[] = [];
-  for (const kind of PAGE_KINDS) {
-    const names = await listFolderMarkdownNames(path.join(vaultDir, PAGE_FOLDERS[kind]));
-    skipped.push(...names.filter(name => !isPageSlug(name)).map(name => `${PAGE_FOLDERS[kind]}/${name}.md`));
-  }
-  return skipped;
+  return (await listPageFiles(vaultDir))
+    .filter(file => !isPageSlug(file.stem))
+    .map(file => `${PAGE_FOLDERS[file.kind]}/${file.stem}.md`);
 }
 
 /** The page at this path, or undefined when the file does not exist. Read errors other than ENOENT throw. */
@@ -216,6 +239,9 @@ export async function readMemoryPage(input: {
   return parseMemoryPage({ content, fallback: { kind: input.kind, title: input.title ?? input.slug } });
 }
 
+/** Longest file name in bytes that common file systems accept. */
+const MAX_FILE_NAME_BYTES = 255;
+
 const FENCE = '---';
 const BOM = '\uFEFF';
 const BULLET_PREFIX_PATTERN = /^\s*[-*]\s+/;
@@ -224,6 +250,10 @@ const UNMARKED_BULLET_PATTERN = /^\s*[-*]\s+\S/;
 /** The text of a bullet the person typed by hand, or undefined for any other line. */
 export function unmarkedBulletText(raw: string): string | undefined {
   return UNMARKED_BULLET_PATTERN.test(raw) ? raw.replace(BULLET_PREFIX_PATTERN, '').trimEnd() : undefined;
+}
+
+function hasCommentMark(raw: string): boolean {
+  return raw.includes('<!--') || raw.includes('-->');
 }
 
 function isFenceLine(line: string): boolean {
@@ -251,10 +281,6 @@ async function listFolderMarkdownNames(folder: string): Promise<string[]> {
     .sort((a, b) => (a < b ? -1 : 1));
 }
 
-async function listFolderSlugs(folder: string): Promise<string[]> {
-  return (await listFolderMarkdownNames(folder)).filter(isPageSlug);
-}
-
 function readFrontMatterMap(block: string[]): Record<string, unknown> {
   try {
     const parsed = z.record(z.string(), z.unknown()).safeParse(parse(block.join('\n')));
@@ -274,42 +300,57 @@ function frontMatterFrom({
   // The folder decides the kind; a `kind` key that disagrees with it is ignored.
   const { kind } = fallback;
   const parsedTitle = PersonFrontMatterSchema.shape.title.safeParse(values['title']);
-  const title = parsedTitle.success ? parsedTitle.data : fallback.title;
+  const title = parsedTitle.success ? parsedTitle.data : fallback.title || UNTITLED_PAGE_SLUG;
   const parsedAliases = PersonFrontMatterSchema.shape.aliases.safeParse(values['aliases']);
   const aliases = parsedAliases.success ? parsedAliases.data : [];
 
+  // Each kind-specific key that does not fit takes its default, so the schema always accepts the result.
   if (kind === 'person') {
-    const parsedHousehold = PersonFrontMatterSchema.shape.household.safeParse(values['household']);
-    return { kind, title, aliases, household: parsedHousehold.success ? parsedHousehold.data : false };
+    const household = PersonFrontMatterSchema.shape.household.catch(false).parse(values['household']);
+    return PageFrontMatterSchema.parse({ kind, title, aliases, household });
   }
-  const parsedStatus = MatterFrontMatterSchema.shape.status.safeParse(values['status']);
-  return { kind, title, aliases, status: parsedStatus.success ? parsedStatus.data : 'active' };
+  const status = MatterFrontMatterSchema.shape.status.catch('active').parse(values['status']);
+  return PageFrontMatterSchema.parse({ kind, title, aliases, status });
 }
 
 function parseBody(lines: string[]): { preamble: string[]; sections: PageSectionBlock[] } {
   const preamble: string[] = [];
   const sections: PageSectionBlock[] = [];
   let current: PageSectionBlock | undefined;
+  // True while a hidden comment opened on an earlier line has not closed yet.
+  let inComment = false;
   for (const line of lines) {
     if (line.startsWith('## ')) {
       const heading = line.slice('## '.length).trim();
       const parsedName = PageSectionSchema.safeParse(heading);
       current = { name: parsedName.success ? parsedName.data : undefined, heading, lines: [] };
       sections.push(current);
+      inComment = false;
     } else if (current === undefined) {
       preamble.push(line);
     } else {
-      current.lines.push(parseSectionLine(line));
+      // A marker wrapped onto the next line leaves the bullet above it looking unmarked, so that bullet is not trusted.
+      const previous = current.lines.at(-1);
+      if (
+        !inComment &&
+        line.trimStart().startsWith('<!--') &&
+        previous?.kind === 'other' &&
+        unmarkedBulletText(previous.raw) !== undefined
+      ) {
+        current.lines[current.lines.length - 1] = { kind: 'unreadable', raw: previous.raw };
+      }
+      current.lines.push(inComment ? { kind: 'unreadable', raw: line } : parseSectionLine(line));
+      inComment = line.lastIndexOf('<!--') > line.lastIndexOf('-->') || (inComment && !line.includes('-->'));
     }
   }
   return { preamble, sections };
 }
 
-// A bullet with a hidden comment is the person's own hand edit only when it has none: a comment that
-// fails to read as a fact marker (typo, unknown key, bad date) must never pass as their words.
+// A line is the person's own hand edit only when it has no hidden comment, opening or closing: a comment
+// that fails to read as a fact marker (typo, unknown key, bad date, wrapped onto another line) must never pass as their words.
 function parseSectionLine(raw: string): PageLine {
   if (!BULLET_PREFIX_PATTERN.test(raw)) {
-    return raw.includes('<!--') ? { kind: 'unreadable', raw } : { kind: 'other', raw };
+    return hasCommentMark(raw) ? { kind: 'unreadable', raw } : { kind: 'other', raw };
   }
   const { text, marker } = splitFactMarker(raw);
   // The space lets a bullet with nothing after the dash lose its prefix too.
@@ -318,6 +359,6 @@ function parseSectionLine(raw: string): PageLine {
   if (fact?.success) {
     return { kind: 'fact', fact: fact.data };
   }
-  const handWritten = !raw.includes('<!--') && (body === '' || PageFactTextSchema.safeParse(body).success);
+  const handWritten = !hasCommentMark(raw) && (body === '' || PageFactTextSchema.safeParse(body).success);
   return handWritten ? { kind: 'other', raw } : { kind: 'unreadable', raw };
 }

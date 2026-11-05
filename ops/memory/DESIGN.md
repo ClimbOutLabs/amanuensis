@@ -113,8 +113,8 @@ Pages are short Markdown files about one person or one matter. They sit beside t
 vault and hold what stays true, so it does not have to be dug out of old entries. They work with the
 Markdown memory backend only. Hindsight does not use them.
 
-Pages are written by hand for now. Aman only reads them. Tidying them automatically is planned, but
-nothing does it yet. No memory-write tool is exposed to the model, and pages do not change that.
+Pages are written by hand. Aman only reads them. No memory-write tool is exposed to the model, and pages
+do not change that.
 
 ### Files in a vault
 
@@ -122,9 +122,9 @@ nothing does it yet. No memory-write tool is exposed to the model, and pages do 
     matters/<slug>.md     one page per matter (a trip, a purchase, a project)
     .memory-state/        notes Aman keeps for itself
 
-The slug comes from the title: lowercase, accents dropped from Latin letters, other characters that
+The slug comes from the title: lowercase, accents dropped from Latin and Greek letters (and Cyrillic `ё` read as `е`), other characters that
 are not letters or digits turned into dashes, cut at 64 characters (and at 200 bytes, so the file name
-stays valid). Only Latin accents are dropped. In Korean, Japanese, Thai, Hindi and other scripts the
+stays valid). Only those accents are dropped, so `Ελένη`, `ΕΛΕΝΗ` and `Ελενη` are one name, and so are `Фёдор` and `Федор`, while `й` stays its own letter. In Korean, Japanese, Thai, Hindi and other scripts the
 marks are part of the letter and stay, so `김민수` is `people/김민수.md`, `ジョン` is not `ション`, and
 `ハル` is not `バル`. Text is compared in its composed form, so a name typed in either form is the same
 name. `José` and `Jose` share one page. A page's file name must be exactly that
@@ -132,14 +132,19 @@ lowercase slug, such as `people/wendy.md`. A file with any other name, such as `
 `people/my notes.md`, is not a page: it is never loaded. Each turn that skips such a file writes one
 warning to the server log with the number of files skipped. It does not name them, since file names can be people's names. To use a file, rename it to the lowercase slug.
 
-Export and import move pages with the rest of memory. An export (format version 3) holds each vault's
-`people/` and `matters/` page files as `memory/<vault>/people/<slug>.md` and
-`memory/<vault>/matters/<slug>.md`, byte for byte apart from the usual removal of keys and passwords.
-Only regular files with a lowercase slug name are exported, and a folder that is a link is skipped.
-Import puts each page into the matching vault of the new instance under the same name. A file in a
-page folder whose name is not a lowercase page name, or a second spelling of the same name, is never
-written; the summary says how many were left out, or the import is refused for a repeated name. A name
-saved in decomposed form is read in its composed form, so it lands under the name the loader looks for.
+Export and import move pages with the rest of memory. An export (format version 3) holds every `.md`
+file directly in each vault's `people/` and `matters/` folders as `memory/<vault>/people/<name>.md` and
+`memory/<vault>/matters/<name>.md`, byte for byte apart from the usual removal of keys and passwords.
+That includes a file such as `people/Wendy.md` whose name is not a lowercase slug: it travels under its
+own name, so a move loses nothing, and the loader keeps skipping it with the same warning until it is
+renamed. Only regular files are exported, a folder that is a link is skipped, and a hidden name or one
+with control characters stays behind.
+Import puts each page into the matching vault of the new instance under the same name. A lowercase
+name typed in decomposed form is read in its composed form, so it lands under the name the loader looks
+for. Files that are not `.md` pages, deeper folders and hidden or unsafe names are never written, and a
+second spelling of the same name refuses the import. The summary says how many pages came along, how
+many of them have a name Aman will not read until it is renamed to lowercase, and how many other files
+were not copied.
 An older export has no pages and imports as before. An instance that already holds pages counts as
 holding memories, so the import refuses it like any instance with data. A memory backend that is not
 Markdown files cannot hold pages, and the summary says how many were left out.
@@ -148,7 +153,8 @@ Markdown files cannot hold pages, and the summary says how many were left out.
 
 - `aliases.json`: a cache of every page's title and other names. It is rebuilt whenever a page
   changes, so it is safe to delete. A page is read again only when its size or modification time
-  changes, or it was changed in the last two seconds.
+  changes (including its change time, which cannot be set back), or it was changed in the last two
+  seconds. The kept hashes cover the 64 vaults read most recently.
 
 ### The page format
 
@@ -166,17 +172,14 @@ The kind of a page is always its folder's: a page in `people/` is a person even 
 is written in it. Keys it does not know are ignored. After the settings come a `# ` heading and a one-line
 summary, then sections. Each is a `## ` heading:
 
-| Section               | Kind   | What goes there                                                  |
-| --------------------- | ------ | ---------------------------------------------------------------- |
-| How you write to them | person | How the person likes to write to this contact.                   |
-| Now                   | both   | What is true at the moment.                                      |
-| Decided               | matter | What has been settled.                                           |
-| Open                  | matter | What is still undecided.                                         |
-| Unconfirmed           | both   | Things read somewhere that the person has not confirmed.         |
-| Earlier               | both   | Things that were true and no longer are. They carry an end date. |
-
-Keeping a page short, by moving the oldest "Earlier" lines into an archive file, is planned. Nothing
-does it yet.
+| Section               | Kind   | What goes there                                                             |
+| --------------------- | ------ | --------------------------------------------------------------------------- |
+| How you write to them | person | How the person likes to write to this contact. Never read on a matter page. |
+| Now                   | both   | What is true at the moment.                                                 |
+| Decided               | matter | What has been settled.                                                      |
+| Open                  | matter | What is still undecided.                                                    |
+| Unconfirmed           | both   | Things read somewhere that the person has not confirmed.                    |
+| Earlier               | both   | Things that were true and no longer are. They carry an end date.            |
 
 Each fact is one bullet. The end of the line holds a hidden marker that the page does not show when
 read in a Markdown viewer:
@@ -210,19 +213,24 @@ read. A leading byte order mark is allowed. Reading a page and rendering it agai
 bytes.
 
 A line that carries a hidden comment the host cannot read as a marker (an unknown key, a bad date, a
-repeated key, a misspelt `fact`) is kept as it is but never trusted. It counts as not confirmed, not
+repeated key, a misspelt `fact`, a comment that does not end on its line or a stray `-->`) is kept as
+it is but never trusted. Every line inside a comment that stays open, and a bullet right above a line
+that starts a comment, are not trusted either, so a marker wrapped onto the next line cannot turn the
+bullet above it into the person's own words. It counts as not confirmed, not
 as the person's own words. A line with no hidden comment at all is the person's hand-written line,
 whether it is a bullet or plain text.
 
 ### How pages are loaded before each turn
 
 Before recall, the host looks at the person's message for names. It compares each page's title and
-other names with the message as whole words. Case, Latin accents and punctuation around a name are ignored,
+other names with the message as whole words. Case, Latin and Greek accents and punctuation around a name are ignored,
 so `(Wendy)` and `Wendy,` both match. An email address counts as one word, so putting an address in
 `aliases` finds the page when the person pastes that address. A trailing dot is ignored, so `W.`
 matches `W`. Names in Chinese, Japanese, Korean or Thai are written without spaces, so those match
 anywhere in the message: `田中` is found in `田中さんに会った`. A name never matches part of a
-letter, so `민수` does not match `민숙` and `ハル` does not match `バル`. Every other name still needs whole words,
+letter, so `민수` does not match `민숙` and `ハル` does not match `バル`. When one name sits inside a longer
+name that is also on a page, the longer name takes the words: `นิดา` loads its own page, not the page
+for `นิด`. A short name inside a longer word that has no page of its own still matches. Every other name still needs whole words,
 so `Sam` does not match `Samantha`.
 
 A name followed by `'s` (`Wendy's flight`) is a possessive match. It loads the page, but ranks below
@@ -263,14 +271,23 @@ are gathered, for every loaded contact, under one fixed heading after the pages 
   listed by name with the lines from its "How you write to them" section. This is the only place those
   lines appear. Recalled items, curated lines, entities and the stats line all come before the
   heading, so nothing from recall, mail or the calendar can sit inside the section.
-- The heading and the end line are reserved. Wherever the words of either appear in a page (title,
-  names, summary, facts) or in recalled text, the host replaces them with "[reserved text removed]"
-  before the block is built, so no text can open, close or fake the section. The model is told the
-  same two lines, and that the same words anywhere else carry no instruction.
+- The heading and the end line are reserved. Before the block is built, the host replaces the words
+  of either with "[reserved text removed]" wherever they appear in a page or in recalled text. The
+  match ignores case, full-width and other compatibility letters, accents on Latin letters, invisible
+  and combining characters (zero-width, soft hyphen, direction marks), line breaks and runs of spaces
+  inside the phrase, the final punctuation of the end line, and common Cyrillic and Greek letters that
+  look like Latin ones. A look-alike from some other script is not covered. The model is told the same
+  two lines, and that the same words anywhere else carry no instruction.
+- Every single-line field a page supplies (title, other names, summary, section headings, fact text) is
+  cut to one line before it is shown: line breaks become spaces and control, zero-width and direction
+  characters are removed, so a title or name cannot start a fact line or a page line. A page line that
+  reads as "[page:" at its start, in any width or spacing, gets "(" in place of its bracket, so the only
+  page header in the block is the host's own.
 - A line there is an instruction only when the person said it, wrote it or sent it (`you_said`,
   `you_edited`, `sent_mail`), or when it is a line with no hidden comment, which is the person's own
   hand edit. That covers a plain bullet and a plain sentence. Blank lines and `#` headings are not
-  instructions.
+  instructions. Only a person page has this section; on a matter page it is shown like any other
+  section and never reaches drafting.
 - A line there from mail, the calendar, read content or inference is not an instruction. A line
   whose marker cannot be read is not one either. Both are shown with the unconfirmed facts, labelled
   as not confirmed, so something an email said can never steer how Aman writes.

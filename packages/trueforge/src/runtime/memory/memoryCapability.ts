@@ -60,7 +60,7 @@ import type {
 } from './memoryEvents';
 import { ASSISTANT_RESPONSE_SOURCE, isNoteTooOld, noteProvenance, withoutNoteTrailer } from './memoryNotes';
 import { MEMORY_ORIGIN_METADATA_KEY, USER_STATED_ORIGIN, type AmanMemoryOrigin } from './memoryOrigin';
-import { DRAFTING_END, DRAFTING_FRAME_TOKENS, DRAFTING_HEADING, DRAFTING_HEADING_NAME } from './memoryPageLoader';
+import { DRAFTING_END, DRAFTING_FRAME_TOKENS, DRAFTING_HEADING, neutralizeReservedText } from './memoryPageLoader';
 import { retainOperationId, submitRetain } from './memoryRetain';
 import { decideMemoryRoute } from './memoryRouting';
 import { rankNamedPeopleFirst } from './recallNameBoost';
@@ -482,12 +482,6 @@ function estimateTokens(text: string): number {
 // Matches `<aman-memory` and `</aman-memory`, case-insensitively, so a recalled memory cannot
 // break out of the `<aman-memory>` wrapper by injecting its own closing (or opening) delimiter.
 const MEMORY_DELIMITER_PATTERN = /<\/?aman-memory/gi;
-// The drafting section's heading and end line are the host's alone; the same words inside any
-// text are made inert so nothing untrusted can open, close, or fake that section.
-const RESERVED_DRAFTING_PATTERN = new RegExp(
-  [DRAFTING_HEADING_NAME, DRAFTING_END].map(phrase => phrase.replace(/\./g, '\\.').replace(/ /g, '\\s+')).join('|'),
-  'gi',
-);
 // ASCII control characters other than tab (0x09) and newline (0x0A).
 // eslint-disable-next-line no-control-regex -- deliberately matching control characters to strip them.
 const CONTROL_CHAR_PATTERN = /[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g;
@@ -496,14 +490,12 @@ const CONTROL_CHAR_PATTERN = /[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g;
  * Neutralizes provider-controlled text before it is interpolated into the `<aman-memory>` block:
  * strips ASCII control characters (other than tab/newline) and replaces any delimiter-escape
  * attempt with an inert bracketed form, so a recalled memory can never close the wrapper early or
- * forge a new one, and removes the reserved drafting heading and end line. Applied to every recalled item's text, every entity's label, and every
- * observation's text before formatting (finding 14).
+ * forge a new one, and removes the reserved drafting heading and end line in any disguise. Applied to
+ * every recalled item's text, every entity's label, and every observation's text before formatting (finding 14).
  */
 function sanitizeMemoryText(text: string): string {
-  return text
-    .replace(CONTROL_CHAR_PATTERN, '')
-    .replace(MEMORY_DELIMITER_PATTERN, '[aman-memory]')
-    .replace(RESERVED_DRAFTING_PATTERN, '[reserved text removed]');
+  const delimited = text.replace(CONTROL_CHAR_PATTERN, '').replace(MEMORY_DELIMITER_PATTERN, '[aman-memory]');
+  return neutralizeReservedText(delimited);
 }
 
 /** As {@link sanitizeMemoryText}, and also collapses newlines so a memory stays on one line. */

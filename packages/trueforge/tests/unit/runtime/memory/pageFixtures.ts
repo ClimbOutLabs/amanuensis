@@ -3,7 +3,7 @@ import path from 'node:path';
 import { stringify } from 'yaml';
 
 import type { FactMarker } from '../../../../src/runtime/memory/memoryNotes';
-import { formatMarker } from '../../../../src/runtime/memory/memoryNotes';
+import { draftingLines, HOUSEHOLD_LINE } from '../../../../src/runtime/memory/memoryPageLoader';
 import {
   pagePath,
   parseMemoryPage,
@@ -68,7 +68,7 @@ export function pageText({
     }
     lines.push(`## ${name}`);
     for (const fact of own) {
-      lines.push(`- ${fact.text} ${formatMarker(fact.marker)}`);
+      lines.push(`- ${fact.text} ${formatFactMarker(fact.marker)}`);
     }
     lines.push('');
   }
@@ -100,4 +100,19 @@ export function factsOf(page: MemoryPage): { section: PageSectionBlock; fact: { 
   return page.sections.flatMap(section =>
     section.lines.flatMap(line => (line.kind === 'fact' ? [{ section, fact: line.fact }] : [])),
   );
+}
+
+/** A fact marker as a hand-written page carries it, keys in the order the format lists them. */
+export function formatFactMarker(marker: FactMarker): string {
+  const keys = ['id', 'src', 'since', 'until', 'seen'] as const;
+  const parts = keys.flatMap(key => (marker[key] === undefined ? [] : [`${key}=${marker[key]}`]));
+  return `<!-- fact: ${parts.join(' ')} -->`;
+}
+
+/** The "How you write to them" instructions a person page hands to drafting, without the household line. */
+export function writingInstructionsOf(page: MemoryPage): string[] {
+  return draftingLines({ title: 'x', page })
+    .slice(1)
+    .map(line => line.replace(/^- /, ''))
+    .filter(line => line !== HOUSEHOLD_LINE);
 }

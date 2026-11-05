@@ -13,7 +13,9 @@ import {
   type MemoryPage,
   type PageKind,
   type PageLine,
+  type PageSectionBlock,
 } from './memoryPages';
+import { foldName } from './pageSlug';
 
 /** Why a page was loaded, recorded on the turn's memory event. */
 type PageLoadReason = 'direct' | 'possessive';
@@ -48,11 +50,16 @@ const SOURCE_LABELS: Readonly<Record<FactSource, string>> = {
 };
 
 const WRITING_SECTION = 'How you write to them';
+
+/** Only a person page has a "How you write to them" section; on a matter page it is a section like any other. */
+function isWritingSection({ page, section }: { page: MemoryPage; section: PageSectionBlock }): boolean {
+  return page.frontMatter.kind === 'person' && section.name === WRITING_SECTION;
+}
 const UNCONFIRMED_LABEL = 'Unconfirmed (not confirmed by you)';
 const NOT_CONFIRMED_TRAILER = 'not confirmed';
 
 /** The words that name the drafting section; reserved, so no page or recalled text may carry them. */
-export const DRAFTING_HEADING_NAME = 'How the person writes to these contacts';
+const DRAFTING_HEADING_NAME = 'How the person writes to these contacts';
 
 /** The one heading the memory block puts the person's drafting instructions under. */
 export const DRAFTING_HEADING = `${DRAFTING_HEADING_NAME} (follow when drafting to them):`;
@@ -62,6 +69,109 @@ export const DRAFTING_END = 'End of the writing instructions.';
 
 /** What the heading and the end line add to a block that has a drafting section. */
 export const DRAFTING_FRAME_TOKENS = estimateTokens(`${DRAFTING_HEADING}\n${DRAFTING_END}`);
+
+const LINE_BREAKS = /[\n\r\v\f\u0085\u2028\u2029]/g;
+const INVISIBLE = /[\p{Cc}\p{Cf}]/gu;
+
+/** One line: line breaks become spaces and control and invisible format characters (zero-width, bidi) are removed. */
+export function singleLine(text: string): string {
+  return text.replace(LINE_BREAKS, ' ').replace(INVISIBLE, '').trim();
+}
+
+/** A page line that cannot pass for the start of a page: one that reads as "[page:" gets a bracket that opens nothing. */
+function pageSafeLine(text: string): string {
+  const line = singleLine(text);
+  return /^\[\s*page\s*:/i.test(foldName(line)) ? line.replace(/^\S/u, '(') : line;
+}
+
+// Letters from Cyrillic and Greek that look like the Latin letters of the reserved lines.
+const LOOK_ALIKES: Readonly<Record<string, string>> = {
+  а: 'a',
+  с: 'c',
+  ԁ: 'd',
+  е: 'e',
+  һ: 'h',
+  і: 'i',
+  ј: 'j',
+  ӏ: 'l',
+  о: 'o',
+  ο: 'o',
+  р: 'p',
+  ѕ: 's',
+  ս: 'u',
+  ν: 'v',
+  ԝ: 'w',
+  х: 'x',
+  у: 'y',
+  ɡ: 'g',
+  ι: 'i',
+  ρ: 'p',
+  υ: 'u',
+  τ: 't',
+  ո: 'n',
+  ꜰ: 'f',
+  ʜ: 'h',
+  ʀ: 'r',
+  ᴛ: 't',
+  ɴ: 'n',
+};
+
+/** A phrase as a pattern that accepts any run of spaces between its words. */
+function spaced(phrase: string): string {
+  return phrase
+    .split(' ')
+    .map(word => word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+    .join(' +');
+}
+
+const HEADING_TAIL = DRAFTING_HEADING.slice(DRAFTING_HEADING_NAME.length).trim().replace(/:$/, '');
+
+const RESERVED_PATTERN = new RegExp(
+  [
+    `${spaced(DRAFTING_HEADING_NAME.toLowerCase())}(?: *${spaced(HEADING_TAIL)}:?)?`,
+    `${spaced(DRAFTING_END.toLowerCase().replace(/\.$/, ''))}[.!?]*`,
+  ].join('|'),
+  'g',
+);
+
+/**
+ * The text with the drafting heading and end line made inert wherever they appear, however they are
+ * disguised: compared after composing, case folding, dropping accents on Latin letters and every
+ * invisible, combining or format character, mapping common look-alike letters, and ignoring the
+ * closing punctuation. Each match is replaced as a whole, so no part of it is left to read.
+ */
+export function neutralizeReservedText(text: string): string {
+  const letters: string[] = [];
+  const starts: number[] = [];
+  const ends: number[] = [];
+  let offset = 0;
+  for (const char of text) {
+    const next = offset + char.length;
+    const folded = /\s/u.test(char) ? ' ' : char < '\u0080' ? char.toLowerCase() : foldName(char);
+    for (const part of folded) {
+      if (!/[\p{Cf}\p{Cc}\p{M}]/u.test(part)) {
+        letters.push(LOOK_ALIKES[part] ?? part);
+        starts.push(offset);
+        ends.push(next);
+      }
+    }
+    offset = next;
+  }
+  const flat = letters.join('');
+  const ranges: { start: number; end: number }[] = [];
+  for (const match of flat.matchAll(RESERVED_PATTERN)) {
+    const first = starts[match.index];
+    const last = ends[match.index + match[0].length - 1];
+    if (first !== undefined && last !== undefined) {
+      ranges.push({ start: first, end: last });
+    }
+  }
+  let result = text;
+  for (const range of ranges.reverse()) {
+    result = `${result.slice(0, range.start)}[reserved text removed]${result.slice(range.end)}`;
+  }
+  return result;
+}
 
 /** What a household page adds under the drafting heading. */
 export const HOUSEHOLD_LINE = 'Bookings and plans from this person are shared plans, not mail to answer.';
@@ -117,25 +227,22 @@ function dateSpan(marker: FactMarker): string | undefined {
 
 function renderLine(line: PageLine): string | undefined {
   if (line.kind === 'unreadable') {
-    const text = line.raw
-      .replace(COMMENT_PATTERN, '')
-      .replace(/^\s*[-*]\s+/, '')
-      .trim();
+    const text = singleLine(line.raw.replace(COMMENT_PATTERN, '').replace(/^\s*[-*]\s+/, ''));
     return text === '' ? undefined : `- ${text} (${NOT_CONFIRMED_TRAILER})`;
   }
   if (line.kind === 'other') {
     // A bullet with no marker is one the person typed by hand, so it reads as their own words.
     const bullet = unmarkedBulletText(line.raw);
     if (bullet !== undefined) {
-      return `- ${bullet} (${SOURCE_LABELS.you_edited})`;
+      return `- ${singleLine(bullet)} (${SOURCE_LABELS.you_edited})`;
     }
-    const text = line.raw.trim();
+    const text = pageSafeLine(line.raw);
     return text === '' ? undefined : text;
   }
   const span = dateSpan(line.fact.marker);
   const trailer =
     span === undefined ? SOURCE_LABELS[line.fact.marker.src] : `${SOURCE_LABELS[line.fact.marker.src]}, ${span}`;
-  return `- ${line.fact.text} (${trailer})`;
+  return `- ${singleLine(line.fact.text)} (${trailer})`;
 }
 
 /**
@@ -156,22 +263,23 @@ export function renderPageForModel(input: { title: string; page: MemoryPage }): 
   if (front.kind === 'matter') {
     flags.push(front.status);
   }
-  const names = front.aliases.filter(alias => alias !== input.title);
-  const header = `[page: ${input.title} — ${flags.join(', ')}${names.length > 0 ? `; also called: ${names.join(', ')}` : ''}]`;
-  const summary = page.preamble.map(line => line.trim()).filter(line => line !== '' && !line.startsWith('# '));
+  const title = singleLine(input.title);
+  const names = front.aliases.map(singleLine).filter(alias => alias !== '' && alias !== title);
+  const header = `[page: ${title} — ${flags.join(', ')}${names.length > 0 ? `; also called: ${names.join(', ')}` : ''}]`;
+  const summary = page.preamble.map(pageSafeLine).filter(line => line !== '' && !line.startsWith('# '));
   const lines: string[] = [header, ...summary];
   const demoted = renderLines(
     page.sections.flatMap(section =>
       section.name === 'Unconfirmed'
         ? []
         : section.lines.filter(
-            line => line.kind === 'unreadable' || (section.name === WRITING_SECTION && !isInstructionLine(line)),
+            line => line.kind === 'unreadable' || (isWritingSection({ page, section }) && !isInstructionLine(line)),
           ),
     ),
   );
   let demotedShown = demoted.length === 0;
   for (const section of page.sections) {
-    if (section.name === WRITING_SECTION) {
+    if (isWritingSection({ page, section })) {
       continue;
     }
     const unconfirmed = section.name === 'Unconfirmed';
@@ -181,7 +289,7 @@ export function renderPageForModel(input: { title: string; page: MemoryPage }): 
       demotedShown = true;
     }
     if (body.length > 0) {
-      lines.push(`${unconfirmed ? UNCONFIRMED_LABEL : section.heading.trim()}:`, ...body);
+      lines.push(`${unconfirmed ? UNCONFIRMED_LABEL : pageSafeLine(section.heading)}:`, ...body);
     }
   }
   if (!demotedShown) {
@@ -304,7 +412,7 @@ export async function loadPagesForMessage(input: {
       vaultDir: candidate.vaultDir,
       kind: candidate.match.kind,
       slug: candidate.match.slug,
-      title: candidate.match.title,
+      title: singleLine(candidate.match.title),
       reason: candidate.match.possessive ? 'possessive' : 'direct',
       page,
       text,
@@ -316,11 +424,16 @@ export async function loadPagesForMessage(input: {
   return { pages, stats, skippedFiles };
 }
 
-/** The "How you write to them" lines of a loaded person page, as instructions for drafting. */
-export function writingInstructions(page: MemoryPage): string[] {
+/** The person's own "How you write to them" lines of a person page, for drafting. A matter page has none. */
+function writingInstructions(page: MemoryPage): string[] {
+  if (page.frontMatter.kind !== 'person') {
+    return [];
+  }
   return page.sections
     .filter(section => section.name === WRITING_SECTION)
-    .flatMap(section => section.lines.flatMap(line => instructionText(line) ?? []));
+    .flatMap(section => section.lines.flatMap(line => instructionText(line) ?? []))
+    .map(singleLine)
+    .filter(text => text !== '');
 }
 
 /**
@@ -333,5 +446,5 @@ export function draftingLines(input: { title: string; page: MemoryPage }): strin
   if (frontMatter.kind === 'person' && frontMatter.household) {
     entries.push(`- ${HOUSEHOLD_LINE}`);
   }
-  return entries.length === 0 ? [] : [`${input.title}:`, ...entries];
+  return entries.length === 0 ? [] : [`${singleLine(input.title)}:`, ...entries];
 }

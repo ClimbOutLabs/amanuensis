@@ -183,7 +183,7 @@ export type FactSource = z.infer<typeof FactSourceSchema>;
 /** A fact's day at year, month, or day precision. */
 const FactDateSchema = z.string().regex(/^\d{4}(?:-(?:0[1-9]|1[0-2])(?:-(?:0[1-9]|[12]\d|3[01]))?)?$/);
 
-/** Fact ids are `f_` and a short lowercase token, unique within a vault for the life of the fact. */
+/** Fact ids are `f_` and a short lowercase token. */
 const FactIdSchema = z.string().regex(/^f_[a-z0-9]{1,16}$/);
 
 const NoteMarkerSchema = z.strictObject({
@@ -191,10 +191,11 @@ const NoteMarkerSchema = z.strictObject({
   source: z.enum(NOTE_SOURCES),
   date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
 });
+type NoteMarker = z.infer<typeof NoteMarkerSchema>;
 
 /**
  * The fact variant of the hidden marker at the end of one page bullet. `seen` is for facts on probation
- * (Unconfirmed); `since` and `until` are for facts that are or were true. Keys render in this order.
+ * (Unconfirmed); `since` and `until` are for facts that are or were true.
  */
 export const FactMarkerSchema = z.strictObject({
   kind: z.literal('fact'),
@@ -212,8 +213,6 @@ export type FactMarker = z.infer<typeof FactMarkerSchema>;
  */
 const MarkerSchema = z.discriminatedUnion('kind', [NoteMarkerSchema, FactMarkerSchema]);
 export type Marker = z.infer<typeof MarkerSchema>;
-
-const FACT_MARKER_KEYS = ['id', 'src', 'since', 'until', 'seen'] as const;
 
 const MARKER_PATTERN = /^<!--\s*([a-z]+):\s*(.*?)\s*-->$/;
 
@@ -243,18 +242,9 @@ function markerFields({ kind, tokens }: { kind: string; tokens: string[] }): Rec
   return fields;
 }
 
-export function formatMarker(marker: Marker): string {
-  if (marker.kind === 'note') {
-    return `<!-- note: ${marker.source} ${marker.date} -->`;
-  }
-  const parts: string[] = [];
-  for (const key of FACT_MARKER_KEYS) {
-    const value = marker[key];
-    if (value !== undefined) {
-      parts.push(`${key}=${value}`);
-    }
-  }
-  return `<!-- fact: ${parts.join(' ')} -->`;
+/** A note marker as a daily-log entry carries it. Fact markers are only read, never written, by Aman here. */
+export function formatMarker(marker: NoteMarker): string {
+  return `<!-- note: ${marker.source} ${marker.date} -->`;
 }
 
 /**

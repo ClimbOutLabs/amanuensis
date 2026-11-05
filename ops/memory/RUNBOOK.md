@@ -149,8 +149,7 @@ values for a turn are what the `aman.memory.recall` event reflects.
 ## Memory pages
 
 These notes apply to the Markdown memory backend. A vault is one folder under `MEMORY_MARKDOWN_DIR`.
-The pages and their format are described in [the design](DESIGN.md#pages). Pages are edited by hand
-for now.
+The pages and their format are described in [the design](DESIGN.md#pages). Pages are edited by hand.
 
 ### A page is not loaded
 
@@ -162,9 +161,11 @@ page name. The log gives a count, not names. Look for such files and rename them
 
 `aman export-data` and `aman import-data` carry each vault's `people/` and `matters/` pages. Run them
 as usual; there is nothing extra to copy. After an import, the summary lists the pages that came
-along. If it says files were left out because their name is not a lowercase page name, fix the names
-in the export file and import again. If it says pages were left out because memory is kept in a
-different way, pages only work with the Markdown memory backend. `.memory-state/` is not exported and
+along. If it says some pages have a name that is not all lowercase, rename each one to its lowercase
+name in the memory folder, for example `people/Wendy.md` to `people/wendy.md`; Aman reads it on the next
+turn. If it says other files were not copied, they were not `.md` pages; copy them by hand if you need
+them. If it says pages were left out because memory is kept in a different way, pages only work with the
+Markdown memory backend. `.memory-state/` is not exported and
 is rebuilt on the new server.
 
 ### Files in `.memory-state/`
