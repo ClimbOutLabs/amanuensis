@@ -2,38 +2,35 @@
 
 import { useRef, useState, type FC } from 'react';
 
-import { cn } from '../atoms/lib/cn.js';
-import { Button } from '../atoms/primitives/Button.js';
-import { StubTear } from '../atoms/Reward.js';
+import { GoldTick } from '../atoms/Reward.js';
 import { useAssistantDisplayName } from '../components/PersonalizationContext.js';
 import { useRewardLedger } from '../hooks/useRewardLedger.js';
 import { Icon } from '../icons/Icon.js';
 import { AlwaysAllowToolControl } from './AlwaysAllowToolControl.js';
+import { ApprovalActions, ApprovalButton, ApprovalCardShell, ApprovalFacts, FoldedText } from './ApprovalCardParts.js';
 import { APPROVAL_CHOICES, isNewRecipientCard } from './approvalChoices.js';
 import {
+  approvalFacts,
   approvalQuestion,
   approvalSentLine,
-  approvalStub,
   approvalTime,
   approveVerb,
   declineVerb,
+  outboundRepeatsFacts,
 } from './approvalCopy.js';
 import { CalendarEventDetails } from './CalendarEventDetails.js';
 import { ChangeRequestBox } from './ChangeRequestBox.js';
 import { PersonaDetails } from './PersonaDetails.js';
 import { ScheduleDetails } from './ScheduleDetails.js';
-import { WAITING_FOR_YOU_LABEL, type SentinelApprovalCard } from './types.js';
-
-/** Characters shown before a long value is folded behind "Show all". */
-const FOLD_PREVIEW_CHARS = 500;
+import type { SentinelApprovalCard } from './types.js';
 
 export type PermissionApprovalCardProps = {
   /** Id of the approval this card answers; the composer banner finds the card by it. */
   approvalId: string;
   card: SentinelApprovalCard;
-  /** True for the one card per screen that takes the gold fill and edge. Set by the container. */
+  /** True for the one card per screen that takes the gold edge. Set by the container. */
   highlighted?: boolean;
-  /** How many other approvals wait on the person. A stub never tears while any do. */
+  /** How many other approvals wait on the person. The approval tick never plays while any do. */
   othersWaiting: number;
   onApprove: () => void;
   /** Only passed when the server declared a chat-scoped allow for this call. */
@@ -60,46 +57,6 @@ export type PermissionApprovalCardProps = {
    */
   outboundOpen?: boolean;
 };
-
-/** Text folded after a preview, cut on code points so a surrogate pair is never split. */
-function FoldedText({ text, as: Tag, className }: { text: string; as: 'pre' | 'span'; className: string }) {
-  const [expanded, setExpanded] = useState(false);
-  const points = Array.from(text);
-  const isLong = points.length > FOLD_PREVIEW_CHARS;
-  const shown = isLong && !expanded ? `${points.slice(0, FOLD_PREVIEW_CHARS).join('')}...` : text;
-  return (
-    <>
-      <Tag className={className}>{shown}</Tag>
-      {isLong && (
-        <button
-          type="button"
-          onClick={() => {
-            setExpanded(!expanded);
-          }}
-          aria-expanded={expanded}
-          className="mt-1 block font-medium text-text-secondary underline hover:text-text-primary"
-        >
-          {expanded ? 'Show less' : `Show all (${String(points.length - FOLD_PREVIEW_CHARS)} more characters)`}
-        </button>
-      )}
-    </>
-  );
-}
-
-function DetailRow({ label, value, mono = false }: { label: string; value: string; mono?: boolean }) {
-  return (
-    <div className="flex items-baseline gap-2">
-      <dt className="shrink-0 font-medium text-text-secondary">{label}</dt>
-      <dd className="min-w-0">
-        <FoldedText
-          text={value}
-          as="span"
-          className={`text-text-primary ${mono ? 'break-all font-mono text-xs' : 'break-words'}`}
-        />
-      </dd>
-    </div>
-  );
-}
 
 /** The search service's own fields: kept out of the way, but still listed, behind a closed disclosure. */
 function PlumbingDetails({ text }: { text: string }) {
@@ -144,10 +101,10 @@ function OutboundBlock({ text, truncated }: { text: string; truncated: boolean }
 }
 
 /**
- * Approval ticket for calendar, schedule, persona and other non-mail actions. The question is the
- * title, the rows show only what the server sent, and the stub says what it is. The header pill is the
- * one status line. The raw request and the connector's arguments fold into Details unless `outboundOpen`
- * is set. Mail uses EmailApprovalCard instead.
+ * Approval card for browser, calendar, schedule, persona, command and connector actions. The question is the
+ * title under its status line, the server's reason sits under it, each fact shows once, and the choices
+ * share one row. The raw request and the standing grant fold into Details, which shows only when it holds
+ * something the card does not already say. Mail uses EmailApprovalCard instead.
  */
 export const PermissionApprovalCard: FC<PermissionApprovalCardProps> = ({
   approvalId,
@@ -167,28 +124,28 @@ export const PermissionApprovalCard: FC<PermissionApprovalCardProps> = ({
   const assistant = useAssistantDisplayName();
   const [changing, setChanging] = useState(false);
   const [sentAt, setSentAt] = useState<string | null>(null);
-  const [tearing, setTearing] = useState(false);
+  const [ticking, setTicking] = useState(false);
   const changeButtonRef = useRef<HTMLButtonElement>(null);
   const { tryPlay } = useRewardLedger();
-  const hasDetails =
-    card.destination !== null ||
-    card.recipient !== null ||
-    card.amount !== null ||
-    card.parsed_command !== null ||
-    card.destination_host !== null;
 
   const { calendar_event: calendarEvent, schedule, persona } = card;
   // A new-recipient send never offers a standing grant or a chat-wide allow: approving it adds addresses.
   const newRecipients = isNewRecipientCard(card);
-  const stub = approvalStub(card);
   const plumbingText = card.outbound_plumbing_text ?? null;
-  const outboundShown =
+  const visibleOutbound =
     card.outbound_text === null ? null : visibleOutboundText(card.outbound_text, plumbingText) || null;
+  // A page's own address is already the Address row, so its request is not shown a second time.
+  const outboundShown =
+    visibleOutbound !== null && plumbingText === null && outboundRepeatsFacts(card, visibleOutbound)
+      ? null
+      : visibleOutbound;
+  const alwaysOffered = onApproveAlways !== undefined && !newRecipients;
+  const hasDetails = (!outboundOpen && outboundShown !== null) || plumbingText !== null || alwaysOffered;
 
-  // The stub tears only for an approval the ledger allows; otherwise it simply goes.
+  // The tick plays only for an approval the ledger allows; otherwise the card simply says it is done.
   const markSent = (send: () => void) => () => {
     const now = new Date();
-    setTearing(
+    setTicking(
       tryPlay({
         request: { kind: 'tear' },
         context: { busy: false, waitingOnPerson: othersWaiting > 0, hasError: false, scheduleFailedToday: false },
@@ -199,145 +156,113 @@ export const PermissionApprovalCard: FC<PermissionApprovalCardProps> = ({
     send();
   };
 
-  const stubContent = (
-    <>
-      <p className="aui-ticket__label text-text-secondary">{stub.what}</p>
-      <p className="aui-ticket__detail text-text-primary">{stub.detail}</p>
-    </>
-  );
+  const answered = sentAt !== null;
+  const busy = disabled || answered;
 
   return (
-    <article
+    <ApprovalCardShell
       data-role="approval-ticket"
       data-approval-id={approvalId}
-      className={cn(
-        'aui-approval-card aui-ticket aui-ticket--stub aui-ticket--punch aui-settle',
-        highlighted && 'aui-ticket--selected',
-      )}
+      question={approvalQuestion(card)}
+      reason={card.plain_reason}
+      highlighted={highlighted}
+      status={
+        answered
+          ? {
+              kind: 'answered',
+              text: approvalSentLine(card, sentAt),
+              tick: <GoldTick play={ticking} className="size-4 text-gold-ink" />,
+            }
+          : { kind: 'waiting' }
+      }
     >
-      <div className="min-w-0 space-y-3 p-4">
-        <div className="flex flex-wrap items-start justify-between gap-2">
-          <h3 className="aui-approval-card__title min-w-0 text-text-primary">{approvalQuestion(card)}</h3>
-          {sentAt === null ? (
-            <span className="aui-ticket__label shrink-0 rounded-full border border-gold-line px-2 py-0.5 text-gold-ink">
-              {WAITING_FOR_YOU_LABEL}
-            </span>
-          ) : (
-            <span className="aui-ticket__label shrink-0 rounded-full border border-gold-line px-2 py-0.5 text-gold-ink">
-              {approvalSentLine(card, sentAt)}
-            </span>
-          )}
-        </div>
-        {card.plain_why !== null && <p className="text-text-secondary">Why: {card.plain_why}</p>}
+      {card.cannot_be_undone !== null && (
+        <p className="flex items-start gap-2 text-text-secondary">
+          <Icon name="info" className="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
+          <span>{card.cannot_be_undone}</span>
+        </p>
+      )}
 
-        {card.cannot_be_undone !== null && (
-          <p className="flex items-start gap-2 text-text-secondary">
-            <Icon name="info" className="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
-            <span>{card.cannot_be_undone}</span>
-          </p>
-        )}
+      {card.why_asked_again !== null && (
+        <p className="text-text-secondary">You have seen this before: {card.why_asked_again}</p>
+      )}
 
-        {card.why_asked_again !== null && (
-          <p className="text-text-secondary">You have seen this before: {card.why_asked_again}</p>
-        )}
+      <ApprovalFacts facts={approvalFacts(card)} />
 
-        {hasDetails && (
-          <dl className="space-y-1.5 rounded border border-border bg-primary-bg px-3 py-2">
-            {card.destination !== null && <DetailRow label="Destination" value={card.destination} />}
-            {card.recipient !== null && <DetailRow label="Recipient" value={card.recipient} />}
-            {card.amount !== null && <DetailRow label="Amount" value={card.amount} />}
-            {card.parsed_command !== null && <DetailRow label="Command" value={card.parsed_command} mono />}
-            {card.destination_host !== null && <DetailRow label="Sends to" value={card.destination_host} />}
-          </dl>
-        )}
+      {calendarEvent !== null && <CalendarEventDetails event={calendarEvent} />}
 
-        {calendarEvent !== null && <CalendarEventDetails event={calendarEvent} />}
+      {schedule !== null && <ScheduleDetails schedule={schedule} />}
 
-        {schedule !== null && <ScheduleDetails schedule={schedule} />}
+      {persona !== null && <PersonaDetails persona={persona} />}
 
-        {persona !== null && <PersonaDetails persona={persona} />}
+      {outboundOpen && outboundShown !== null && (
+        <OutboundBlock text={outboundShown} truncated={card.outbound_truncated} />
+      )}
 
-        {outboundOpen && outboundShown !== null && (
-          <OutboundBlock text={outboundShown} truncated={card.outbound_truncated} />
-        )}
+      {card.plain_why !== null && (
+        <p className="text-text-secondary" data-role="approval-intent">
+          {assistant} says: {card.plain_why}
+        </p>
+      )}
 
-        <div
-          className={cn(
-            'flex flex-wrap gap-2 transition-opacity duration-150 motion-reduce:transition-none',
-            sentAt !== null && 'pointer-events-none opacity-0',
-          )}
-          aria-hidden={sentAt !== null}
+      <ApprovalActions>
+        <ApprovalButton
+          main
+          data-approval-primary
+          title={APPROVAL_CHOICES.approve.hint}
+          onClick={markSent(onApprove)}
+          disabled={busy}
         >
-          <Button
-            variant="primary"
-            size="small"
-            data-approval-primary
-            title={APPROVAL_CHOICES.approve.hint}
-            onClick={markSent(onApprove)}
-            disabled={disabled || sentAt !== null}
-            className="flex-1"
-          >
-            {approveVerb(card)}
-          </Button>
-          {onChangeRequest !== undefined && (
-            <Button
-              ref={changeButtonRef}
-              variant="secondary"
-              size="small"
-              title={APPROVAL_CHOICES.changeIt.hint}
-              aria-expanded={changing}
-              onClick={() => {
-                setChanging(true);
-              }}
-              disabled={disabled || sentAt !== null}
-              className="flex-1"
-            >
-              {APPROVAL_CHOICES.changeIt.label}
-            </Button>
-          )}
-          <Button
-            variant="ghost"
-            size="small"
-            title={APPROVAL_CHOICES.deny.hint}
-            onClick={onDeny}
-            disabled={disabled || sentAt !== null}
-            className="flex-1 text-gold-ink"
-          >
-            {declineVerb(card)}
-          </Button>
-        </div>
+          {approveVerb(card)}
+        </ApprovalButton>
         {/* The server offers a chat-wide grant only where it is safe, so the card shows it, never folds it away. */}
         {onApproveForChat !== undefined && !newRecipients && (
-          <Button
-            variant="secondary"
-            size="small"
+          <ApprovalButton
             title={APPROVAL_CHOICES.approveForChat.hint}
             onClick={markSent(onApproveForChat)}
-            disabled={disabled || sentAt !== null}
-            className={cn('w-full', sentAt !== null && 'pointer-events-none opacity-0')}
+            disabled={busy}
           >
             {APPROVAL_CHOICES.approveForChat.label}
-          </Button>
-        )}
-        {changing && onChangeRequest !== undefined && (
-          <ChangeRequestBox
-            disabled={disabled}
-            onSend={text => {
-              setChanging(false);
-              onChangeRequest(text);
-            }}
-            onCancel={() => {
-              setChanging(false);
-              changeButtonRef.current?.focus();
-            }}
-          />
+          </ApprovalButton>
         )}
         {onApproveAll !== undefined && (
-          <Button variant="secondary" size="small" onClick={onApproveAll} disabled={disabled} className="w-full">
+          <ApprovalButton onClick={onApproveAll} disabled={disabled}>
             {batchSize === undefined ? 'Approve all' : `Approve all (${String(batchSize)})`}
-          </Button>
+          </ApprovalButton>
         )}
+        {onChangeRequest !== undefined && (
+          <ApprovalButton
+            ref={changeButtonRef}
+            title={APPROVAL_CHOICES.changeIt.hint}
+            aria-expanded={changing}
+            onClick={() => {
+              setChanging(true);
+            }}
+            disabled={busy}
+          >
+            {APPROVAL_CHOICES.changeIt.label}
+          </ApprovalButton>
+        )}
+        <ApprovalButton title={APPROVAL_CHOICES.deny.hint} onClick={onDeny} disabled={busy}>
+          {declineVerb(card)}
+        </ApprovalButton>
+      </ApprovalActions>
 
+      {changing && onChangeRequest !== undefined && (
+        <ChangeRequestBox
+          disabled={disabled}
+          onSend={text => {
+            setChanging(false);
+            onChangeRequest(text);
+          }}
+          onCancel={() => {
+            setChanging(false);
+            changeButtonRef.current?.focus();
+          }}
+        />
+      )}
+
+      {hasDetails && (
         <details>
           <summary className="cursor-pointer text-text-secondary underline">Details</summary>
           <div className="mt-2 space-y-3">
@@ -348,18 +273,14 @@ export const PermissionApprovalCard: FC<PermissionApprovalCardProps> = ({
             {onApproveAlways !== undefined && !newRecipients && (
               <AlwaysAllowToolControl
                 size="small"
-                disabled={disabled || sentAt !== null}
+                disabled={busy}
                 description={`${assistant} will run this kind of action on this connector without asking, in every chat.`}
                 onConfirm={markSent(onApproveAlways)}
               />
             )}
           </div>
         </details>
-      </div>
-      {sentAt === null && <div className="aui-ticket__stub">{stubContent}</div>}
-      <StubTear play={tearing} onDone={() => setTearing(false)} className="aui-ticket__stub">
-        {stubContent}
-      </StubTear>
-    </article>
+      )}
+    </ApprovalCardShell>
   );
 };

@@ -127,9 +127,8 @@ describe('extractSentinelFromEvent', () => {
         outbound_text: 'query: debug synthetic-key-000111',
         why_asked_again: 'Held for approval: it contains a secret this server holds.',
       });
-      expect(card?.plain_what).toBe(
-        'Search the web through finder. This sends something that looks like a password or key.',
-      );
+      expect(card?.plain_what).toBe('Search the web through finder');
+      expect(card?.plain_reason).toBe('This sends something that looks like a password or key.');
       expect(card?.outbound_text).toBeNull();
       expect(card?.why_asked_again).toBeNull();
     });
@@ -140,8 +139,9 @@ describe('extractSentinelFromEvent', () => {
         outbound_text: 'query: oslo weather',
         why_asked_again: 'Held for approval: this turn already ran 8 searches without asking.',
       });
-      // A card saved before the wording changed gets the plain reason after its sentence.
-      expect(card?.plain_what).toBe('Search the web through finder for: oslo weather. It checked with you first.');
+      // A card saved before the wording changed gets the plain reason on its own line.
+      expect(card?.plain_what).toBe('Search the web through finder for: oslo weather');
+      expect(card?.plain_reason).toBe('It checked with you first.');
       expect(card?.outbound_text).toBe('query: oslo weather');
       expect(card?.why_asked_again).toBeNull();
     });
@@ -151,6 +151,19 @@ describe('extractSentinelFromEvent', () => {
         'the earlier approval expired',
       );
     });
+  });
+
+  it('reads the reason line from the card, raw or camel-cased', () => {
+    const reasonOf = (card: Record<string, unknown>) =>
+      extractSentinelFromEvent({
+        type: 'tool.approval_required',
+        tool_calls: [
+          { tool_call_id: 'call-9', tier: 3, tier3_card: { plain_what: 'Open a page on example.org?', ...card } },
+        ],
+      })[0]?.card.plain_reason;
+    expect(reasonOf({ plain_reason: 'Searches are set to ask.' })).toBe('Searches are set to ask.');
+    expect(reasonOf({ plainReason: 'Searches are set to ask.' })).toBe('Searches are set to ask.');
+    expect(reasonOf({})).toBeNull();
   });
 
   it('parses outbound_text and destination_host from the card', () => {

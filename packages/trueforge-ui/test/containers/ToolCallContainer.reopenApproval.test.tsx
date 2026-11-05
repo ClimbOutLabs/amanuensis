@@ -66,7 +66,8 @@ function approvalEvent(search: HeldSearch): Record<string, unknown> {
         source_event_id: 'evt-model',
         tier: 3,
         tier3_card: {
-          plain_what: searchHoldCardText({ summary: 'oslo weather', say: search.say, page: false }),
+          plain_what: searchHoldCardText({ summary: 'oslo weather', page: false }),
+          plain_reason: search.say,
           destination: 'search',
           outbound_text: 'query: "oslo weather"',
         },

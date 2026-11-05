@@ -66,8 +66,9 @@ describe('browser open and content steering', () => {
     );
     expect(decision.tier).toBe(3);
     expect(decision.reason).toBe('content_steered');
-    expect(decision.card?.plain_what).toMatch(/^Open https:\/\/evil\.example\/claim-prize\?/);
-    expect(decision.card?.plain_what).toMatch(/page Aman read/);
+    expect(decision.card?.plain_what).toBe('Open a page on evil.example?');
+    expect(decision.card?.destination).toBe('https://evil.example/claim-prize');
+    expect(decision.card?.plain_reason).toBe('Aman found this link in a page it read, not from you.');
     expect(decision.approval_token_id).toEqual(expect.any(String));
   });
 

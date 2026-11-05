@@ -15,8 +15,8 @@ createRoot(rootElement).render(
         <PermissionApprovalCard
           approvalId="approval-phone"
           card={{
-            plain_what:
-              'Web search: Find quiet coffee shops near the Ferry Building in San Francisco. Searches are set to ask, so Aman is checking with you first.',
+            plain_what: 'Search the web for Find quiet coffee shops near the Ferry Building in San Francisco?',
+            plain_reason: 'Searches are set to ask, so Aman is checking with you first.',
             plain_why: null,
             cannot_be_undone: null,
             why_asked_again: null,

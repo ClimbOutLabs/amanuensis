@@ -71,8 +71,8 @@ export type {
   TableRowProps,
   TableTokenPaginationProps,
 } from './atoms/primitives/Table.js';
-export { AllClear, GoldTick, HandNote, Highlight, StubTear } from './atoms/Reward.js';
-export type { AllClearProps, HandNoteProps, RewardPlayProps, StubTearProps } from './atoms/Reward.js';
+export { AllClear, GoldTick, HandNote, Highlight } from './atoms/Reward.js';
+export type { AllClearProps, HandNoteProps, RewardPlayProps } from './atoms/Reward.js';
 export { ScheduleFormDrawer } from './atoms/schedules/ScheduleFormDrawer.js';
 export type { ScheduleFormDrawerProps } from './atoms/schedules/ScheduleFormDrawer.js';
 export { ScheduleFormFields } from './atoms/schedules/ScheduleFormFields.js';

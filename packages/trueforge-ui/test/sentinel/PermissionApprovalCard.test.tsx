@@ -52,10 +52,10 @@ describe('PermissionApprovalCard', () => {
       why_asked_again: 'the earlier approval expired',
     });
     expect(screen.getByText('Send $250 to Acme Corp')).toBeInTheDocument();
-    expect(screen.getByText('Why: You asked the assistant to pay the invoice.')).toBeInTheDocument();
-    expect(screen.getByText('Destination')).toBeInTheDocument();
+    expect(screen.getByText(/says: You asked the assistant to pay the invoice\.$/)).toBeInTheDocument();
+    expect(screen.getByText('Where')).toBeInTheDocument();
     expect(screen.getAllByText('acme-corp')[0]).toBeInTheDocument();
-    expect(screen.getByText('Recipient')).toBeInTheDocument();
+    expect(screen.getByText('To')).toBeInTheDocument();
     expect(screen.getByText('Acme Corp')).toBeInTheDocument();
     expect(screen.getByText('Amount')).toBeInTheDocument();
     expect(screen.getByText('$250')).toBeInTheDocument();
@@ -136,7 +136,7 @@ describe('PermissionApprovalCard', () => {
 
   it("labels the reason as the agent's own words", () => {
     renderCard({ plain_why: 'Looking up a listing.' });
-    expect(screen.getByText('Why: Looking up a listing.')).toBeInTheDocument();
+    expect(screen.getByText(/says: Looking up a listing\.$/)).toBeInTheDocument();
   });
 
   it('shows one plain line above the payload when part of it is cut', () => {

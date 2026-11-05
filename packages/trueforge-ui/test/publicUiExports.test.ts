@@ -167,7 +167,6 @@ const expectedRuntimeExports: Array<keyof typeof sdk> = [
   'SpokenReplyProvider',
   'SubAgentCard',
   'Switch',
-  'StubTear',
   'AllClear',
   'GoldTick',
   'HandNote',

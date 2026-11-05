@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { render, screen } from '@testing-library/react';
-import { holdSay, searchHoldCardText } from '@truefoundry/trueforge-core/core/permissions/searchHoldText';
+import { searchHoldCardText } from '@truefoundry/trueforge-core/core/permissions/searchHoldText';
 import { describe, expect, it, vi } from 'vitest';
 
 import { APPROVAL_CHOICES, EMAIL_CHOICES, offersChangeIt } from '@/sentinel/approvalChoices.js';
@@ -42,7 +42,7 @@ describe('approval choices', () => {
         onDeny={vi.fn()}
       />,
     );
-    expect(buttonNames()).toEqual(['Allow', 'Not now', 'Always allow this here']);
+    expect(buttonNames()).toEqual(['Allow', 'Always allow this here', 'Not now']);
     // A choice the server offers is never folded into the closed Details block.
     expect(screen.getByRole('button', { name: 'Always allow this here' }).closest('details')).toBeNull();
     expect(screen.getByRole('button', { name: 'Allow' })).toHaveAttribute('title', 'Allow this one call only.');
@@ -174,12 +174,11 @@ describe('offersChangeIt', () => {
   });
 
   it('offers Change it for a held web search or page read, so its words can be edited before it is sent', () => {
-    const say = holdSay('Aman').search_setting;
+    expect(offersChangeIt({ ...card, plain_what: searchHoldCardText({ summary: 'clinic hours', page: false }) })).toBe(
+      true,
+    );
     expect(
-      offersChangeIt({ ...card, plain_what: searchHoldCardText({ summary: 'clinic hours', say, page: false }) }),
-    ).toBe(true);
-    expect(
-      offersChangeIt({ ...card, plain_what: searchHoldCardText({ summary: 'https://example.org', say, page: true }) }),
+      offersChangeIt({ ...card, plain_what: searchHoldCardText({ summary: 'https://example.org', page: true }) }),
     ).toBe(true);
   });
 

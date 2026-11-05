@@ -96,11 +96,10 @@ describe('EmailApprovalCard title and verb', () => {
     expect(screen.getByRole('button', { name: 'Allow' })).toBeInTheDocument();
   });
 
-  it('shows the Gmail label, one waiting line, and no all-caps', () => {
+  it('shows one waiting line and no all-caps', () => {
     const { container } = render(
       <EmailApprovalCard approvalId="approval-1" card={cardWith()} onApprove={vi.fn()} onDeny={vi.fn()} />,
     );
-    expect(screen.getByText('Gmail')).toBeInTheDocument();
     expect(screen.getAllByText('Waiting for you')).toHaveLength(1);
     expect(container.querySelector('.uppercase')).toBeNull();
   });
@@ -132,22 +131,21 @@ describe('EmailApprovalCard fields', () => {
     const { unmount } = render(
       <EmailApprovalCard approvalId="approval-1" card={cardWith()} onApprove={vi.fn()} onDeny={vi.fn()} />,
     );
-    expect(screen.queryByText('Reply in existing thread')).not.toBeInTheDocument();
     expect(screen.queryByText('Reply in the thread, subject')).not.toBeInTheDocument();
     expect(screen.queryByText('Reply in the thread, from')).not.toBeInTheDocument();
     unmount();
 
     renderEmail({ reply_in_thread: { subject: 'Lease', from: 'Grace' }, subject: 'Re: Lease' });
-    expect(screen.getByText('Reply in existing thread')).toBeInTheDocument();
     expect(screen.getByText('Reply in the thread, subject')).toBeInTheDocument();
-    expect(screen.getByText('Lease', { selector: 'dd' })).toBeInTheDocument();
+    expect(screen.getByText('Lease', { selector: 'dd span' })).toBeInTheDocument();
     expect(screen.getByText('Reply in the thread, from')).toBeInTheDocument();
-    expect(screen.getByText('Grace', { selector: 'dd' })).toBeInTheDocument();
+    expect(screen.getByText('Grace', { selector: 'dd span' })).toBeInTheDocument();
   });
 
-  it('shows an address replies go to, on its own line, before the person approves', () => {
+  it('shows an address replies go to, on its own row, before the person approves', () => {
     renderEmail({ reply_to: 'mallory@example.com' });
-    expect(screen.getByText('Replies go to: mallory@example.com')).toBeInTheDocument();
+    expect(screen.getByText('Replies go to', { selector: 'dt' })).toBeInTheDocument();
+    expect(screen.getByText('mallory@example.com', { selector: 'dd span' })).toBeInTheDocument();
   });
 
   it('shows no reply line when replies go to the sender', () => {
@@ -157,8 +155,9 @@ describe('EmailApprovalCard fields', () => {
 
   it('labels the metadata and the message body', () => {
     renderEmail();
-    expect(screen.getByText('What will be sent')).toBeInTheDocument();
-    expect(screen.getByText('Message body')).toBeInTheDocument();
+    expect(screen.getByText('To', { selector: 'dt' })).toBeInTheDocument();
+    expect(screen.getByText('Subject', { selector: 'dt' })).toBeInTheDocument();
+    expect(screen.getByRole('region', { name: 'Message body' })).toBeInTheDocument();
   });
 
   it('shows the full recipient list, not a count', () => {
@@ -207,7 +206,7 @@ describe('EmailApprovalCard body', () => {
   it('keeps the action bar visible under a 3000-word body', () => {
     renderEmail({ body: longBody(300, 10) });
     const send = screen.getByRole('button', { name: 'Allow' });
-    const bar = send.parentElement;
+    const bar = send.parentElement?.parentElement ?? null;
     if (bar === null) throw new Error('the allow button has no action bar');
     expect(bar).toHaveClass('sticky', 'bottom-0');
     expect(within(bar).getByRole('button', { name: 'Not now' })).toBeInTheDocument();
@@ -332,7 +331,7 @@ describe('EmailApprovalCard server sentences', () => {
         onDeny={vi.fn()}
       />,
     );
-    expect(screen.getByText('Why: You asked for the lease reply.')).toBeInTheDocument();
+    expect(screen.getByText(/says: You asked for the lease reply\.$/)).toBeInTheDocument();
     expect(screen.getByText("Once this is sent, it can't be unsent.")).toBeInTheDocument();
   });
 });

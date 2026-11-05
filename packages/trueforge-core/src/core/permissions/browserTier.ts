@@ -33,10 +33,12 @@ export function browserOpenCard(input: {
   url: string;
   host: string | null;
   plain_what: string;
+  plain_reason: string;
   plain_why: string | null;
 }): Tier3Card {
   return {
     plain_what: input.plain_what,
+    plain_reason: input.plain_reason,
     plain_why: input.plain_why,
     cannot_be_undone: null,
     why_asked_again: null,

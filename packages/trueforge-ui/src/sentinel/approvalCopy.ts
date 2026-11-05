@@ -1,3 +1,4 @@
+import type { ApprovalFact } from './ApprovalCardParts.js';
 import {
   isNewRecipientCard,
   isNewRecipientDraftCard,
@@ -59,9 +60,9 @@ export function declineVerb(card: SentinelApprovalCard): string {
   return 'Not now';
 }
 
-/** Word for a finished approval, shown in the stub and the badge. */
+/** Word for a finished approval, shown on the answered card. */
 function doneWord(card: SentinelApprovalCard): string {
-  if (card.email === null) return 'Done';
+  if (card.email === null) return 'Allowed';
   if (card.email.action === 'send') return 'Sent';
   return 'Saved';
 }
@@ -71,7 +72,7 @@ export function approvalTime(now: Date): string {
   return now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
 
-/** The badge after an approval: "Sent to Rui · 09:14", or "Done · 09:14" for other kinds. */
+/** The line on an answered card: "Sent to Rui · 09:14", or "Allowed · 09:14" for other kinds. */
 export function approvalSentLine(card: SentinelApprovalCard, time: string): string {
   if (card.email !== null && card.email.action === 'send') {
     return `Sent to ${recipientsText(card.email.to)} · ${time}`;
@@ -79,33 +80,40 @@ export function approvalSentLine(card: SentinelApprovalCard, time: string): stri
   return `${doneWord(card)} · ${time}`;
 }
 
-export type ApprovalStub = {
-  /** What the ticket is, in a few words: "New schedule", "Changed event". */
-  what: string;
-  /** What it holds: the event or the schedule name. */
-  detail: string;
-};
-
-function stubWhat(card: SentinelApprovalCard): string {
-  const { calendar_event: event, schedule, persona } = card;
-  if (event !== null) return event.action === 'create' ? 'New event' : 'Changed event';
-  if (schedule !== null) return schedule.action === 'create' ? 'New schedule' : 'Delete schedule';
-  if (persona !== null) return 'New persona';
-  return 'Action';
+/** The site an address goes to, or undefined when it is not a web address. */
+function addressHost(value: string): string | undefined {
+  if (!/^https?:\/\//i.test(value) || !URL.canParse(value)) return undefined;
+  return new URL(value).hostname;
 }
 
-function stubDetail(card: SentinelApprovalCard): string {
-  const { calendar_event: event, schedule, persona } = card;
-  if (event !== null) return event.title;
-  if (schedule !== null) return schedule.name;
-  if (persona !== null) return persona.name;
-  return card.destination ?? card.recipient ?? 'Open Details to see what it does';
+/** True when the question names this site or address as a whole word, so a row would only repeat it. */
+function questionNames(question: string, value: string): boolean {
+  return [' ', '?', '.', ','].some(end => question.includes(` ${value}${end}`));
 }
 
-/** The stub of a ticket that is not a mail: what it is and what it holds. The header pill is the one status line, so the stub carries no state. */
-export function approvalStub(card: SentinelApprovalCard): ApprovalStub {
-  return {
-    what: stubWhat(card),
-    detail: stubDetail(card),
-  };
+/**
+ * The facts a non-mail card lists, each once. A site or address the question already names is not listed again,
+ * and the site an address goes to is not listed beside that address. Who it goes to, an amount and a command are
+ * always listed.
+ */
+export function approvalFacts(card: SentinelApprovalCard): ApprovalFact[] {
+  const question = approvalQuestion(card);
+  const { destination, destination_host: host } = card;
+  const destinationHost = destination === null ? undefined : addressHost(destination);
+  const facts: ApprovalFact[] = [];
+  if (destination !== null && !questionNames(question, destination)) {
+    facts.push({ label: destinationHost === undefined ? 'Where' : 'Address', value: destination });
+  }
+  if (card.recipient !== null) facts.push({ label: 'To', value: card.recipient });
+  if (card.amount !== null) facts.push({ label: 'Amount', value: card.amount });
+  if (card.parsed_command !== null) facts.push({ label: 'Command', value: card.parsed_command, mono: true });
+  if (host !== null && host !== destination && host !== destinationHost && !questionNames(question, host)) {
+    facts.push({ label: 'Sends to', value: host });
+  }
+  return facts;
+}
+
+/** True when the exact request adds nothing the facts do not already show, such as a page's own address. */
+export function outboundRepeatsFacts(card: SentinelApprovalCard, outbound: string): boolean {
+  return card.destination !== null && (outbound === card.destination || outbound === `url: ${card.destination}`);
 }

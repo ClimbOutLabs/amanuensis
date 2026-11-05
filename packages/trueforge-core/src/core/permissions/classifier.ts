@@ -116,6 +116,7 @@ import {
   hasReadContent,
   isPersonVouchedUrl,
   namesUrl,
+  siteName,
   steeredDestinations,
   steeredLinks,
   steeredUrl,
@@ -852,7 +853,15 @@ function withInternetNote({ decision, action }: { decision: TierDecision; action
   if (action.mcp_hints.open_world_hint !== true || decision.card === null) {
     return decision;
   }
-  return { ...decision, card: { ...decision.card, plain_what: `${decision.card.plain_what} ${EXEC_INTERNET_NOTE}` } };
+  const reason = decision.card.plain_reason;
+  return {
+    ...decision,
+    card: {
+      ...decision.card,
+      plain_reason:
+        reason === undefined || reason === null ? EXEC_INTERNET_NOTE : withHoldSay(reason, EXEC_INTERNET_NOTE),
+    },
+  };
 }
 
 /** Package managers whose installs go through the sandbox package gateway. */
@@ -1931,10 +1940,8 @@ async function holdSearchCall(input: {
   const tavily = tavilyText === null ? null : escapeDisplayText(tavilyText);
   const decision = tier3Decision({
     card: {
-      plain_what:
-        tavily === null
-          ? searchHoldCardText({ summary: escapeDisplayText(shown), say: input.say, page: input.page })
-          : withHoldSay(tavily, input.say),
+      plain_what: tavily ?? searchHoldCardText({ summary: escapeDisplayText(shown), page: input.page }),
+      plain_reason: input.say,
       plain_why: plainWhy(ctx.agent_intent),
       cannot_be_undone: null,
       why_asked_again: null,
@@ -2107,7 +2114,9 @@ async function classifyBrowserOpen(input: { action: SentinelAction; ctx: Classif
       card: browserOpenCard({
         url: shown,
         host: parsed === undefined ? null : escapeDisplayText(parsed.hostname),
-        plain_what: withHoldSay(`Open ${shown}?`, reasonSay),
+        plain_what:
+          parsed === undefined ? 'Open this page?' : `Open a page on ${escapeDisplayText(siteName(parsed.hostname))}?`,
+        plain_reason: reasonSay,
         plain_why: plainWhy(ctx.agent_intent),
       }),
       reason,
@@ -2142,10 +2151,7 @@ async function classifyBrowserOpen(input: { action: SentinelAction; ctx: Classif
     return ctx.services.unattended
       ? steeredSkipped(ctx)
       : steeringChecked({
-          decision: await ask(
-            CONTENT_STEERED_REASON,
-            `${assistant} would only open this because a page it read named it, not you.`,
-          ),
+          decision: await ask(CONTENT_STEERED_REASON, `${assistant} found this link in a page it read, not from you.`),
           ctx,
           guests: [],
         });
@@ -2254,7 +2260,14 @@ function steeringChecked(input: {
     ...decision,
     reason: CONTENT_STEERED_REASON,
     reason_detail: say,
-    card: { ...card, plain_what: withHoldSay(card.plain_what, say) },
+    // A card that already asks because read content steered it says so once, in the sentence that names where.
+    card: {
+      ...card,
+      plain_reason:
+        card.plain_reason === undefined || card.plain_reason === null || decision.reason === CONTENT_STEERED_REASON
+          ? say
+          : withHoldSay(card.plain_reason, say),
+    },
   };
 }
 
@@ -2587,23 +2600,25 @@ function calendarWriteCard(input: {
         : ` Guests: ${guests}. Google does not email them.`;
   // An event that runs over more than one day is often a broken end date, so the card asks.
   const spanWarning =
-    review.span_days > 1 ? ` This event runs over ${String(review.span_days)} days. Is that right?` : '';
+    review.span_days > 1 ? `This event runs over ${String(review.span_days)} days. Is that right?` : '';
   // The same event was already created in this chat in the last few minutes: ask before adding another.
   const duplicateLead =
     review.action === 'create' && review.already_created ? 'You already have this event. Add another? ' : '';
   const plainWhat =
     review.action === 'create'
-      ? `${duplicateLead}Add ${title} to your Google Calendar on ${show(review.short_when)} (${show(review.time_zone)})?${guestLine}${spanWarning}`
-      : `Change ${review.before === null ? 'an event' : cardSubject(review.before.title)}${review.one_of_repeating ? ' (this one event of a repeating series)' : ''} in your Google Calendar to ${title} on ${show(review.short_when)} (${show(review.time_zone)})?${guestLine}${spanWarning}`;
+      ? `${duplicateLead}Add ${title} to your Google Calendar on ${show(review.short_when)} (${show(review.time_zone)})?${guestLine}`
+      : `Change ${review.before === null ? 'an event' : cardSubject(review.before.title)}${review.one_of_repeating ? ' (this one event of a repeating series)' : ''} in your Google Calendar to ${title} on ${show(review.short_when)} (${show(review.time_zone)})?${guestLine}`;
   // Says why a guest change asks every time: neither a standing nor a chat-wide answer covers it.
   const alwaysAsks =
     review.attendees.length === 0
       ? ''
       : review.action === 'create'
-        ? ` This change sends an invitation to other people, so ${assistant} always asks.`
-        : ` This change reaches the other people invited to this event, so ${assistant} always asks.`;
+        ? `This change sends an invitation to other people, so ${assistant} always asks.`
+        : `This change reaches the other people invited to this event, so ${assistant} always asks.`;
+  const reason = [spanWarning, alwaysAsks].filter(sentence => sentence !== '').join(' ');
   return {
-    plain_what: `${plainWhat}${alwaysAsks}`,
+    plain_what: plainWhat,
+    plain_reason: reason === '' ? null : reason,
     plain_why: plainWhy(input.agent_intent),
     cannot_be_undone: review.guests_emailed ? "Google emails the guests right away. That email can't be unsent." : null,
     why_asked_again: null,

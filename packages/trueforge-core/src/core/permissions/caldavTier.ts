@@ -72,7 +72,7 @@ export async function classifyCaldavTool({
     });
   }
   return tier3Decision({
-    card: reach.sentence === null ? card : { ...card, plain_what: `${card.plain_what}${reach.sentence}` },
+    card: reach.sentence === null ? card : { ...card, plain_reason: reach.sentence },
     reason: reach.reason,
     reason_detail: reach.reason_detail,
     sensitive_read: true,
@@ -96,7 +96,7 @@ function reachFor({ tool, assistant }: { tool: CaldavToolName; assistant: string
       reason: 'caldav_invitation_reply',
       reason_detail: 'Calendar change that reaches guests always asks.',
       own: false,
-      sentence: ` This reply goes to the event organizer, so ${assistant} always asks.`,
+      sentence: `This reply goes to the event organizer, so ${assistant} always asks.`,
     };
   }
   if (tool === 'create_event') {
@@ -112,7 +112,7 @@ function reachFor({ tool, assistant }: { tool: CaldavToolName; assistant: string
     reason: 'caldav_calendar_guests',
     reason_detail: 'Change to an existing calendar event always asks.',
     own: false,
-    sentence: ` ${assistant} always asks before ${verb} an event in this calendar, because it cannot check who else is on it.`,
+    sentence: `${assistant} always asks before ${verb} an event in this calendar, because it cannot check who else is on it.`,
   };
 }
 
