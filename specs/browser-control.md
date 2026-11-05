@@ -13,7 +13,7 @@ Aman gets its own real browser, separate from the person's own Chrome. It runs i
 The work lands in phases, each its own PR that links this spec:
 
 1. **Read-only browser.** Open a page, read it as text, scroll, go back, and take a screenshot for the person. Nothing is typed or submitted.
-2. **Acting on a page.** Typing and clicking. Any click that submits something asks the person first, with an approval card that shows what will be sent.
+2. **Acting on a page.** Typing and clicking. Any click that could send something asks the person first, with an approval card that shows what will be sent. Only a plain link to another page runs without asking, and Aman opens its address instead of pressing it, so the page's own scripts do not run; like any open, that only loads a page. A button, tab or menu runs the page's own script, which can send anything whatever its label says, so it always asks. Typing and picking an option ask first too, with the exact text on the card, because a page can send what is typed the moment it changes. Typing never presses Enter or Tab, and input that would land anywhere but the checked element, including a frame inside the page, is stopped. Every action runs only on the element that was checked, read where the page's scripts cannot change what Aman sees: if the page changed in between, the action is refused and Aman reads the page again.
 3. **Receipts.** A record of what Aman did in the browser, with a screenshot, that the person can look back at.
 
 ## Key design decisions

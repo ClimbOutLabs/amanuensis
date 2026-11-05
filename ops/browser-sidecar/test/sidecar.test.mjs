@@ -97,7 +97,20 @@ async function withWorld(run) {
   // Stands in for everything private: if any test's request reaches it, the wall has a hole.
   const internal = await fixture({ '*': html('<h1>Admin API</h1>') });
   const internalUrl = `http://127.0.0.1:${String(internal.port)}`;
-  const siteB = await fixture({ '*': html('<h1>Mail inbox</h1><p>Your private messages</p>') });
+  const siteB = await fixture({
+    // Another site's widget that a page can put in a frame: a button that sends, and a field that sends what is typed.
+    '/widget':
+      html(`<button style="width: 100%; height: 2.5rem" onclick="fetch('/allowed', { method: 'POST' })">Allow</button>
+      <input id="w" oninput="fetch('/typed', { method: 'POST', body: this.value })">
+      <script>
+        window.addEventListener('focus', () => document.getElementById('w').focus());
+        // Any key or press that reaches this frame at all is sent home.
+        for (const type of ['keydown', 'pointerup', 'mouseup']) {
+          window.addEventListener(type, () => fetch('/reached', { method: 'POST', body: type }));
+        }
+      </script>`),
+    '*': html('<h1>Mail inbox</h1><p>Your private messages</p>'),
+  });
   const siteA = await fixture({
     '/': ACCOUNT_PAGE,
     '/checkout': (_req, res) => res.writeHead(200, { 'content-type': 'text/html' }).end(CHECKOUT_FIXTURE_HTML),
@@ -169,6 +182,85 @@ async function withWorld(run) {
         res.writeHead(302, { location: 'http://site-b.test/inbox', 'cache-control': 'no-store' }).end();
       };
     })(),
+    // Two pages whose first control both get ref e1: a link on the first, an order button on the second.
+    '/two-step': html(`<h1>Item</h1><a href="/two-step-order">Show details</a>`),
+    '/two-step-order': html(`<h1>Your order</h1>
+      <form method="POST" action="/order"><button>Place order for $500</button></form>`),
+    // Labels and links the click check must read the way a person sees them.
+    '/labels': html(`<h1>Labels</h1>
+      <button type="button">Jetzt bezahlen</button>
+      <button type="button" style="width: 40px; height: 24px"><img alt="Delete" src="data:image/gif;base64,R0lGODlhAQABAAAAACw="></button>
+      <button type="button">Pa&#8203;y&shy;ment</button>
+      <form><input name="q" value="shoes"><button type="primary">Go</button></form>
+      <a href="/help">Help center</a>
+      <a href="#">Hash link</a>
+      <a href="javascript:void 0">Script link</a>
+      <a href="/menu" role="button">Button link</a>`),
+    // Links whose page script would send something if the link were pressed instead of opened.
+    '/scripted-links': html(`<h1>Scripted links</h1>
+      <a href="/landing-1" onclick="fetch('/beacon', { method: 'POST', body: 'x' })">Fetching link</a>
+      <a href="/landing-2" ping="/ping">Pinging link</a>
+      <form id="hidden-order" method="POST" action="/order"><input name="item" value="tv"></form>
+      <a href="/landing-3" onclick="document.getElementById('hidden-order').submit(); return false">Submitting link</a>
+      <div onclick="fetch('/beacon', { method: 'POST', body: 'y' })"><a href="/landing-4">Wrapped link</a></div>`),
+    // A page whose own scripts make a submit button read as a plain link to anything that asks the page.
+    '/disguised': html(`<h1>Disguised</h1>
+      <form method="POST" action="/order"><button id="buy">Place order</button></form>
+      <script>
+        Object.defineProperty(Node.prototype, 'textContent', { get() { return 'Help center'; } });
+        Object.defineProperty(Element.prototype, 'tagName', { get() { return 'A'; } });
+        Object.defineProperty(HTMLButtonElement.prototype, 'type', { get() { return 'button'; } });
+        Object.defineProperty(HTMLElement.prototype, 'href', { get() { return 'http://site-a.test/help'; } });
+      </script>`),
+    // Controls that only work with real input, and ones Aman must refuse.
+    '/controls': html(`<h1>Controls</h1>
+      <button id="menu" onpointerdown="document.getElementById('menu-list').hidden = false">Open menu</button>
+      <ul id="menu-list" hidden><li>Menu item one</li></ul>
+      <label for="code">Code</label>
+      <input id="code" onkeydown="document.getElementById('keys').textContent = 'Keys: ' + (this.value + event.key)">
+      <p id="keys">Keys: none</p>
+      <button disabled>Disabled button</button>
+      <label for="fixed">Fixed</label>
+      <input id="fixed" readonly value="locked">
+      <div style="position: relative">
+        <button>Covered button</button>
+        <div style="position: absolute; inset: 0; background: white"></div>
+      </div>
+      <button id="swap" onpointerdown="document.getElementById('trap').hidden = false">Swap on press</button>
+      <div id="trap" hidden style="position: fixed; inset: 0; background: red"
+        onclick="fetch('/stray', { method: 'POST' })"></div>`),
+    // A page that moves another site's frame under the pointer, or the focus into it.
+    '/frames': html(`<h1>Frames</h1>
+      <div style="position: relative; width: 12rem; height: 2.5rem">
+        <button style="width: 12rem; height: 2.5rem"
+          onmouseover="document.getElementById('over').style.visibility = 'visible'">Show details</button>
+        <iframe id="over" src="http://site-b.test/widget"
+          style="visibility: hidden; position: absolute; inset: 0; width: 12rem; height: 2.5rem; border: 0"></iframe>
+      </div>
+      <div style="position: relative; width: 12rem; height: 2.5rem">
+        <button style="width: 12rem; height: 2.5rem"
+          onpointerdown="document.getElementById('under').style.visibility = 'visible'">Show more</button>
+        <iframe id="under" src="http://site-b.test/widget"
+          style="visibility: hidden; position: absolute; inset: 0; width: 12rem; height: 2.5rem; border: 0"></iframe>
+      </div>
+      <label for="q">Search</label>
+      <input id="q" onkeydown="document.getElementById('side').focus()">
+      <iframe id="side" src="http://site-b.test/widget" style="width: 12rem; height: 5rem"></iframe>`),
+    // Fields whose page sends on Enter, Tab or an emptied value.
+    '/text-fields': html(`<h1>Text fields</h1>
+      <form method="POST" action="/searched">
+        <label for="s">Search</label>
+        <input id="s" name="s">
+      </form>
+      <form id="notes-form">
+        <label for="n">Notes</label>
+        <textarea id="n" name="n"
+          onkeydown="if (event.key === 'Enter' || event.key === 'Tab') fetch('/pressed', { method: 'POST' })"></textarea>
+        <label for="city">City</label>
+        <input id="city" name="city" value="Paris"
+          oninput="if (this.value === '') fetch('/emptied', { method: 'POST' })">
+        <button type="submit">Save notes</button>
+      </form>`),
     '*': html('<h1>Other page</h1>'),
   });
 
@@ -583,11 +675,21 @@ function refFor(text, label) {
   return /^\[(e\d+)\]/.exec(line ?? '')?.[1];
 }
 
+/** The read the app checks an action against before it runs, as `elementInfo` gives it. */
+async function checked(sidecar, ref) {
+  const { status, ...review } = await sidecar.elementInfo({ owner: 'owner-1', tab: 'chat-1', ref });
+  assert.equal(status, 'ok', `no read for ${String(ref)}`);
+  return review;
+}
+
+const posts = hits => hits.filter(hit => hit.method !== 'GET' && hit.method !== 'HEAD');
+
 test('types into a field, then fills it', { skip: !browsersAvailable }, async () => {
   await withWorld(async ({ sidecar }) => {
     const opened = await sidecar.open({ owner: 'owner-1', tab: 'chat-1', url: 'http://site-a.test/checkout' });
     const ref = refFor(opened.text, 'Name on card');
-    const typed = await sidecar.type({ owner: 'owner-1', tab: 'chat-1', ref, text: 'Grace Hopper' });
+    const expect = await checked(sidecar, ref);
+    const typed = await sidecar.type({ owner: 'owner-1', tab: 'chat-1', ref, expect, text: 'Grace Hopper' });
     assert.equal(typed.status, 'ok');
     assert.match(typed.text, /Grace Hopper/);
   });
@@ -597,7 +699,8 @@ test('refuses to type into a password field', { skip: !browsersAvailable }, asyn
   await withWorld(async ({ sidecar }) => {
     const opened = await sidecar.open({ owner: 'owner-1', tab: 'chat-1', url: 'http://site-a.test/' });
     const ref = refFor(opened.text, 'Password');
-    const typed = await sidecar.type({ owner: 'owner-1', tab: 'chat-1', ref, text: 'hunter2' });
+    const expect = await checked(sidecar, ref);
+    const typed = await sidecar.type({ owner: 'owner-1', tab: 'chat-1', ref, expect, text: 'hunter2' });
     assert.deepEqual(typed, { status: 'refused', reason: 'sensitive_field' });
   });
 });
@@ -606,16 +709,19 @@ test('selects an option', { skip: !browsersAvailable }, async () => {
   await withWorld(async ({ sidecar }) => {
     const opened = await sidecar.open({ owner: 'owner-1', tab: 'chat-1', url: 'http://site-a.test/checkout' });
     const ref = refFor(opened.text, 'Country');
-    const selected = await sidecar.select({ owner: 'owner-1', tab: 'chat-1', ref, option: 'United Kingdom' });
+    const expect = await checked(sidecar, ref);
+    const selected = await sidecar.select({ owner: 'owner-1', tab: 'chat-1', ref, expect, option: 'United Kingdom' });
     assert.equal(selected.status, 'ok');
+    const order = await checked(sidecar, refFor(selected.text, 'Place order'));
+    assert.equal(order.form_values.country, 'uk');
   });
 });
 
-test('click-info reads a submit button without clicking it', { skip: !browsersAvailable }, async () => {
+test('element-info reads a submit button without clicking it', { skip: !browsersAvailable }, async () => {
   await withWorld(async ({ sidecar }) => {
     const opened = await sidecar.open({ owner: 'owner-1', tab: 'chat-1', url: 'http://site-a.test/checkout' });
     const ref = refFor(opened.text, 'Place order');
-    const info = await sidecar.clickInfo({ owner: 'owner-1', tab: 'chat-1', ref });
+    const info = await sidecar.elementInfo({ owner: 'owner-1', tab: 'chat-1', ref });
     assert.equal(info.status, 'ok');
     assert.equal(info.is_form_submit, true);
     assert.equal(info.accessible_name, 'Place order');
@@ -626,21 +732,21 @@ test('click-info reads a submit button without clicking it', { skip: !browsersAv
   });
 });
 
-test("click-info on a dialog's plain Cancel button is not a form submit", { skip: !browsersAvailable }, async () => {
+test("element-info on a dialog's plain Cancel button is not a form submit", { skip: !browsersAvailable }, async () => {
   await withWorld(async ({ sidecar }) => {
     const opened = await sidecar.open({ owner: 'owner-1', tab: 'chat-1', url: 'http://site-a.test/checkout' });
     const ref = refFor(opened.text, 'Cancel');
-    const info = await sidecar.clickInfo({ owner: 'owner-1', tab: 'chat-1', ref });
+    const info = await sidecar.elementInfo({ owner: 'owner-1', tab: 'chat-1', ref });
     assert.equal(info.status, 'ok');
     assert.equal(info.is_form_submit, false);
   });
 });
 
-test('click-info reads a submit input from its value, which is its label', { skip: !browsersAvailable }, async () => {
+test('element-info reads a submit input from its value, which is its label', { skip: !browsersAvailable }, async () => {
   await withWorld(async ({ sidecar }) => {
     const opened = await sidecar.open({ owner: 'owner-1', tab: 'chat-1', url: 'http://site-a.test/linked-controls' });
     const ref = refFor(opened.text, 'Pay now');
-    const info = await sidecar.clickInfo({ owner: 'owner-1', tab: 'chat-1', ref });
+    const info = await sidecar.elementInfo({ owner: 'owner-1', tab: 'chat-1', ref });
     assert.equal(info.status, 'ok');
     assert.equal(info.accessible_name, 'Pay now');
     assert.equal(info.is_form_submit, true);
@@ -649,13 +755,13 @@ test('click-info reads a submit input from its value, which is its label', { ski
 });
 
 test(
-  'click-info reads an image input as a form submit, named by its alt text',
+  'element-info reads an image input as a form submit, named by its alt text',
   { skip: !browsersAvailable },
   async () => {
     await withWorld(async ({ sidecar }) => {
       const opened = await sidecar.open({ owner: 'owner-1', tab: 'chat-1', url: 'http://site-a.test/linked-controls' });
       const ref = refFor(opened.text, 'Buy with image');
-      const info = await sidecar.clickInfo({ owner: 'owner-1', tab: 'chat-1', ref });
+      const info = await sidecar.elementInfo({ owner: 'owner-1', tab: 'chat-1', ref });
       assert.equal(info.status, 'ok');
       assert.equal(info.accessible_name, 'Buy with image');
       assert.equal(info.is_form_submit, true);
@@ -665,14 +771,14 @@ test(
 );
 
 test(
-  "click-info reads a submit control outside its form, linked by the form attribute, with that form's values",
+  "element-info reads a submit control outside its form, linked by the form attribute, with that form's values",
   { skip: !browsersAvailable },
   async () => {
     await withWorld(async ({ sidecar }) => {
       const opened = await sidecar.open({ owner: 'owner-1', tab: 'chat-1', url: 'http://site-a.test/linked-controls' });
       for (const label of ['Send order', 'Subscribe outside']) {
         const ref = refFor(opened.text, label);
-        const info = await sidecar.clickInfo({ owner: 'owner-1', tab: 'chat-1', ref });
+        const info = await sidecar.elementInfo({ owner: 'owner-1', tab: 'chat-1', ref });
         assert.equal(info.status, 'ok', label);
         assert.equal(info.accessible_name, label, label);
         assert.equal(info.is_form_submit, true, label);
@@ -686,12 +792,376 @@ test('click performs a real click and reads the result', { skip: !browsersAvaila
   await withWorld(async ({ sidecar }) => {
     const opened = await sidecar.open({ owner: 'owner-1', tab: 'chat-1', url: 'http://site-a.test/checkout' });
     const ref = refFor(opened.text, 'Cancel');
-    const clicked = await sidecar.click({ owner: 'owner-1', tab: 'chat-1', ref });
+    const { status, ...expect } = await sidecar.elementInfo({ owner: 'owner-1', tab: 'chat-1', ref });
+    assert.equal(status, 'ok');
+    const clicked = await sidecar.click({ owner: 'owner-1', tab: 'chat-1', ref, expect });
     assert.equal(clicked.status, 'ok');
     // The dialog's own script closed it; the page is otherwise unchanged.
     assert.match(clicked.text, /Checkout/);
   });
 });
+
+test(
+  'a second click checked against the first page is refused once the first click moved to another page',
+  { skip: !browsersAvailable },
+  async () => {
+    await withWorld(async ({ sidecar, siteA }) => {
+      const opened = await sidecar.open({ owner: 'owner-1', tab: 'chat-1', url: 'http://site-a.test/two-step' });
+      const ref = refFor(opened.text, 'Show details');
+      assert.equal(ref, 'e1');
+      // Both calls of one reply are checked before either runs, so both carry the first page's read.
+      const { status, ...expect } = await sidecar.elementInfo({ owner: 'owner-1', tab: 'chat-1', ref });
+      assert.equal(status, 'ok');
+      assert.equal(expect.link_url, 'http://site-a.test/two-step-order');
+      const first = await sidecar.click({ owner: 'owner-1', tab: 'chat-1', ref, expect });
+      assert.equal(first.status, 'ok');
+      assert.match(first.text, /\[e1\][^\n]*Place order for \$500/);
+      const second = await sidecar.click({ owner: 'owner-1', tab: 'chat-1', ref, expect });
+      assert.deepEqual(second, { status: 'refused', reason: 'changed' });
+      await settle();
+      assert.equal(
+        siteA.hits.some(hit => hit.method === 'POST'),
+        false,
+      );
+      // The order button is still there, unclicked, for a fresh check of its own.
+      const read = await sidecar.read({ owner: 'owner-1', tab: 'chat-1' });
+      assert.match(read.text, /Place order for \$500/);
+    });
+  },
+);
+
+test('a click with no checked read is refused before the page is touched', { skip: !browsersAvailable }, async () => {
+  await withWorld(async ({ sidecar, siteA }) => {
+    const opened = await sidecar.open({ owner: 'owner-1', tab: 'chat-1', url: 'http://site-a.test/checkout' });
+    const ref = refFor(opened.text, 'Place order');
+    for (const expect of [undefined, null, {}, { site: 'site-a.test' }]) {
+      const clicked = await sidecar.click({ owner: 'owner-1', tab: 'chat-1', ref, expect });
+      assert.deepEqual(clicked, { status: 'refused', reason: 'unchecked' });
+    }
+    await settle();
+    assert.equal(
+      siteA.hits.some(hit => hit.method === 'POST'),
+      false,
+    );
+  });
+});
+
+test('a click whose element now reads differently is refused as changed', { skip: !browsersAvailable }, async () => {
+  await withWorld(async ({ sidecar, siteA }) => {
+    const opened = await sidecar.open({ owner: 'owner-1', tab: 'chat-1', url: 'http://site-a.test/checkout' });
+    const ref = refFor(opened.text, 'Place order');
+    const { status, ...checked } = await sidecar.elementInfo({ owner: 'owner-1', tab: 'chat-1', ref });
+    assert.equal(status, 'ok');
+    const changes = [
+      { accessible_name: 'Show details' },
+      { is_form_submit: false },
+      { site: 'site-b.test' },
+      { form_values: { ...checked.form_values, name: 'Someone else' } },
+      { form_values: { ...checked.form_values, extra: 'x' } },
+      { link_url: 'http://site-a.test/' },
+      { role: 'link' },
+    ];
+    for (const change of changes) {
+      const clicked = await sidecar.click({ owner: 'owner-1', tab: 'chat-1', ref, expect: { ...checked, ...change } });
+      assert.deepEqual(clicked, { status: 'refused', reason: 'changed' }, JSON.stringify(change));
+    }
+    await settle();
+    assert.equal(
+      siteA.hits.some(hit => hit.method === 'POST'),
+      false,
+    );
+  });
+});
+
+test(
+  'element-info reads names as a person sees them, and tells a plain link apart',
+  { skip: !browsersAvailable },
+  async () => {
+    await withWorld(async ({ sidecar }) => {
+      const opened = await sidecar.open({ owner: 'owner-1', tab: 'chat-1', url: 'http://site-a.test/labels' });
+      const read = async label => {
+        const ref = refFor(opened.text, label);
+        assert.notEqual(ref, undefined, label);
+        return sidecar.elementInfo({ owner: 'owner-1', tab: 'chat-1', ref });
+      };
+      assert.equal((await read('Jetzt bezahlen')).link_url, null);
+      assert.equal((await read('Delete')).accessible_name, 'Delete');
+      assert.equal((await read('Payment')).accessible_name, 'Payment');
+      assert.equal((await read('Go')).is_form_submit, true);
+      assert.equal((await read('Help center')).link_url, 'http://site-a.test/help');
+      for (const label of ['Hash link', 'Script link', 'Button link']) {
+        assert.equal((await read(label)).link_url, null, label);
+      }
+    });
+  },
+);
+
+test(
+  'a plain link is opened by its address, so none of its page script runs',
+  { skip: !browsersAvailable },
+  async () => {
+    await withWorld(async ({ sidecar, siteA }) => {
+      for (const [label, landing] of [
+        ['Fetching link', '/landing-1'],
+        ['Pinging link', '/landing-2'],
+        ['Submitting link', '/landing-3'],
+        ['Wrapped link', '/landing-4'],
+      ]) {
+        const opened = await sidecar.open({
+          owner: 'owner-1',
+          tab: 'chat-1',
+          url: 'http://site-a.test/scripted-links',
+        });
+        const ref = refFor(opened.text, label);
+        const expect = await checked(sidecar, ref);
+        assert.equal(expect.link_url, `http://site-a.test${landing}`, label);
+        const clicked = await sidecar.click({ owner: 'owner-1', tab: 'chat-1', ref, expect });
+        assert.equal(clicked.status, 'ok', label);
+        assert.ok(
+          siteA.hits.some(hit => hit.method === 'GET' && hit.url === landing),
+          label,
+        );
+      }
+      await settle();
+      assert.deepEqual(posts(siteA.hits), []);
+    });
+  },
+);
+
+test(
+  'a link to another site is not followed, and the model is told where it goes',
+  { skip: !browsersAvailable },
+  async () => {
+    await withWorld(async ({ sidecar }) => {
+      await sidecar.open({ owner: 'owner-1', tab: 'chat-1', url: 'http://site-a.test/two-step' });
+      const ref = 'e1';
+      const expect = await checked(sidecar, ref);
+      const away = { ...expect, link_url: 'http://site-b.test/inbox' };
+      // The live read names the same-site address, so a doctored read is refused as changed.
+      assert.deepEqual(await sidecar.click({ owner: 'owner-1', tab: 'chat-1', ref, expect: away }), {
+        status: 'refused',
+        reason: 'changed',
+      });
+    });
+  },
+);
+
+test(
+  "the page's own scripts cannot change what Aman reads about an element",
+  { skip: !browsersAvailable },
+  async () => {
+    await withWorld(async ({ sidecar, siteA }) => {
+      const opened = await sidecar.open({ owner: 'owner-1', tab: 'chat-1', url: 'http://site-a.test/disguised' });
+      const ref = refFor(opened.text, 'Place order');
+      assert.notEqual(ref, undefined, opened.text);
+      const review = await checked(sidecar, ref);
+      assert.equal(review.accessible_name, 'Place order');
+      assert.equal(review.role, 'button');
+      assert.equal(review.is_form_submit, true);
+      assert.equal(review.link_url, null);
+      await settle();
+      assert.deepEqual(posts(siteA.hits), []);
+    });
+  },
+);
+
+test('a press reaches controls that only answer real input', { skip: !browsersAvailable }, async () => {
+  await withWorld(async ({ sidecar }) => {
+    const opened = await sidecar.open({ owner: 'owner-1', tab: 'chat-1', url: 'http://site-a.test/controls' });
+    const ref = refFor(opened.text, 'Open menu');
+    const pressed = await sidecar.click({ owner: 'owner-1', tab: 'chat-1', ref, expect: await checked(sidecar, ref) });
+    assert.equal(pressed.status, 'ok');
+    assert.match(pressed.text, /Menu item one/);
+  });
+});
+
+test('typing sends real keystrokes to the field', { skip: !browsersAvailable }, async () => {
+  await withWorld(async ({ sidecar }) => {
+    const opened = await sidecar.open({ owner: 'owner-1', tab: 'chat-1', url: 'http://site-a.test/controls' });
+    const ref = refFor(opened.text, 'Code');
+    const typed = await sidecar.type({
+      owner: 'owner-1',
+      tab: 'chat-1',
+      ref,
+      expect: await checked(sidecar, ref),
+      text: '42',
+    });
+    assert.equal(typed.status, 'ok');
+    assert.match(typed.text, /Keys: 42/);
+  });
+});
+
+test(
+  'a disabled button, a read-only field and a covered button are refused',
+  { skip: !browsersAvailable },
+  async () => {
+    await withWorld(async ({ sidecar }) => {
+      const opened = await sidecar.open({ owner: 'owner-1', tab: 'chat-1', url: 'http://site-a.test/controls' });
+      const disabled = refFor(opened.text, 'Disabled button');
+      assert.deepEqual(
+        await sidecar.click({
+          owner: 'owner-1',
+          tab: 'chat-1',
+          ref: disabled,
+          expect: await checked(sidecar, disabled),
+        }),
+        { status: 'refused', reason: 'disabled' },
+      );
+      const fixed = refFor(opened.text, 'Fixed');
+      assert.deepEqual(
+        await sidecar.type({
+          owner: 'owner-1',
+          tab: 'chat-1',
+          ref: fixed,
+          expect: await checked(sidecar, fixed),
+          text: 'x',
+        }),
+        { status: 'refused', reason: 'read_only' },
+      );
+      const covered = refFor(opened.text, 'Covered button');
+      assert.deepEqual(
+        await sidecar.click({ owner: 'owner-1', tab: 'chat-1', ref: covered, expect: await checked(sidecar, covered) }),
+        { status: 'refused', reason: 'covered' },
+      );
+    });
+  },
+);
+
+test(
+  'a press that the page moves onto something else is stopped and refused as changed',
+  { skip: !browsersAvailable },
+  async () => {
+    await withWorld(async ({ sidecar, siteA }) => {
+      const opened = await sidecar.open({ owner: 'owner-1', tab: 'chat-1', url: 'http://site-a.test/controls' });
+      const ref = refFor(opened.text, 'Swap on press');
+      assert.deepEqual(
+        await sidecar.click({ owner: 'owner-1', tab: 'chat-1', ref, expect: await checked(sidecar, ref) }),
+        { status: 'refused', reason: 'changed' },
+      );
+      await settle();
+      assert.deepEqual(posts(siteA.hits), []);
+    });
+  },
+);
+
+test(
+  'a line break or tab in text for a one-line field is refused, so it never presses Enter',
+  { skip: !browsersAvailable },
+  async () => {
+    await withWorld(async ({ sidecar, siteA }) => {
+      const opened = await sidecar.open({ owner: 'owner-1', tab: 'chat-1', url: 'http://site-a.test/text-fields' });
+      const ref = refFor(opened.text, 'Search');
+      for (const text of ['shoes\n', 'shoes\r', 'shoes\tnext']) {
+        assert.deepEqual(
+          await sidecar.type({ owner: 'owner-1', tab: 'chat-1', ref, expect: await checked(sidecar, ref), text }),
+          { status: 'refused', reason: 'line_break' },
+        );
+      }
+      await settle();
+      assert.deepEqual(posts(siteA.hits), []);
+    });
+  },
+);
+
+test(
+  'line breaks and tabs in a multi-line field are typed as text, and typing replaces what was there',
+  { skip: !browsersAvailable },
+  async () => {
+    await withWorld(async ({ sidecar, siteA }) => {
+      const opened = await sidecar.open({ owner: 'owner-1', tab: 'chat-1', url: 'http://site-a.test/text-fields' });
+      const notes = refFor(opened.text, 'Notes');
+      const typed = await sidecar.type({
+        owner: 'owner-1',
+        tab: 'chat-1',
+        ref: notes,
+        expect: await checked(sidecar, notes),
+        text: 'one\ntwo\tthree',
+      });
+      assert.equal(typed.status, 'ok');
+      const city = refFor(typed.text, 'City');
+      const retyped = await sidecar.type({
+        owner: 'owner-1',
+        tab: 'chat-1',
+        ref: city,
+        expect: await checked(sidecar, city),
+        text: 'Rome',
+      });
+      assert.equal(retyped.status, 'ok');
+      const save = refFor(retyped.text, 'Save notes');
+      const values = (await checked(sidecar, save)).form_values;
+      assert.equal(values.n, 'one\ntwo\tthree');
+      assert.equal(values.city, 'Rome');
+      await settle();
+      assert.deepEqual(posts(siteA.hits), []);
+    });
+  },
+);
+
+test(
+  "a press that would land in another site's frame slid under the pointer is refused, and the frame gets nothing",
+  { skip: !browsersAvailable },
+  async () => {
+    await withWorld(async ({ sidecar, siteB }) => {
+      // One frame appears when the pointer arrives, the other once the button is pressed down.
+      for (const label of ['Show details', 'Show more']) {
+        const opened = await sidecar.open({ owner: 'owner-1', tab: 'chat-1', url: 'http://site-a.test/frames' });
+        const ref = refFor(opened.text, label);
+        assert.deepEqual(
+          await sidecar.click({ owner: 'owner-1', tab: 'chat-1', ref, expect: await checked(sidecar, ref) }),
+          { status: 'refused', reason: 'changed' },
+          label,
+        );
+      }
+      await settle();
+      assert.deepEqual(posts(siteB.hits), []);
+    });
+  },
+);
+
+test(
+  "typing that the page moves into another site's frame is stopped there and refused",
+  { skip: !browsersAvailable },
+  async () => {
+    await withWorld(async ({ sidecar, siteB }) => {
+      const opened = await sidecar.open({ owner: 'owner-1', tab: 'chat-1', url: 'http://site-a.test/frames' });
+      const ref = refFor(opened.text, 'Search');
+      assert.deepEqual(
+        await sidecar.type({
+          owner: 'owner-1',
+          tab: 'chat-1',
+          ref,
+          expect: await checked(sidecar, ref),
+          text: 'hello',
+        }),
+        { status: 'refused', reason: 'changed' },
+      );
+      await settle();
+      assert.deepEqual(posts(siteB.hits), []);
+    });
+  },
+);
+
+test(
+  'typing into a field that changed since it was checked is refused, and nothing is typed',
+  { skip: !browsersAvailable },
+  async () => {
+    await withWorld(async ({ sidecar }) => {
+      const opened = await sidecar.open({ owner: 'owner-1', tab: 'chat-1', url: 'http://site-a.test/checkout' });
+      const ref = refFor(opened.text, 'Name on card');
+      const expect = { ...(await checked(sidecar, ref)), accessible_name: 'Country' };
+      assert.deepEqual(await sidecar.type({ owner: 'owner-1', tab: 'chat-1', ref, expect, text: 'Grace' }), {
+        status: 'refused',
+        reason: 'changed',
+      });
+      assert.deepEqual(await sidecar.type({ owner: 'owner-1', tab: 'chat-1', ref, text: 'Grace' }), {
+        status: 'refused',
+        reason: 'unchecked',
+      });
+      const read = await sidecar.read({ owner: 'owner-1', tab: 'chat-1' });
+      assert.doesNotMatch(read.text, /Grace/);
+    });
+  },
+);
 
 test('a ref resolves back to the DOM path it was given to, and an unknown ref resolves to nothing', async () => {
   const { RefAssigner } = await import('../src/snapshot.mjs');
@@ -708,9 +1178,8 @@ test('a ref resolves back to the DOM path it was given to, and an unknown ref re
 
 /**
  * A sidecar on a fake page and a fake gateway check, with no Chromium: the one page has a single
- * field, given ref e1 by the opening read. `state` lets a test make that field vanish from the
- * page (`elementGone`, so its handle is gone) or unreadable once found (`infoReadable` false, so
- * the read of it comes back empty), which are the two different stale cases the actions refuse.
+ * field, given ref e1 by the opening read. `state.elementGone` makes that field vanish from the page,
+ * and `state.actions` counts every read or action that reached the page.
  */
 async function withFakeSidecar(run) {
   if (BrowserSidecar === undefined) {
@@ -722,30 +1191,49 @@ async function withFakeSidecar(run) {
       .end(JSON.stringify({ ok: true, url: 'http://site-a.test/' }));
   });
   await new Promise(resolve => gateway.listen(0, '127.0.0.1', resolve));
-  const state = { elementGone: false, infoReadable: true };
-  const element = { fill: async () => undefined, click: async () => undefined };
+  const state = { elementGone: false, actions: 0 };
   const page = {
     url: () => 'http://site-a.test/',
     title: async () => 'Fake page',
     on: () => undefined,
     goto: async () => undefined,
-    evaluate: async script => {
-      if (typeof script === 'string' && script.includes('return extractSnapshotNodes()')) {
-        return [{ id: 'HTML:0/INPUT:0', role: 'textbox', name: 'Name', value: '', field_kind: null, actionable: true }];
-      }
-      if (!state.infoReadable) {
-        return null;
-      }
-      return { field_kind: null, is_form_submit: false, accessible_name: 'Name', form_values: {}, tag: 'INPUT' };
+    mainFrame: () => undefined,
+    exposeBinding: async () => undefined,
+    addInitScript: async () => undefined,
+    waitForEvent: async () => {
+      throw new Error('timed out');
     },
-    evaluateHandle: async () => ({ asElement: () => (state.elementGone ? null : element) }),
+  };
+  const evaluate = expression => {
+    if (expression.includes('amanGuard = guard')) {
+      return undefined;
+    }
+    if (expression.includes('return extractSnapshotNodes()')) {
+      return [{ id: 'HTML:0/INPUT:0', role: 'textbox', name: 'Name', value: '', field_kind: null, actionable: true }];
+    }
+    if (expression.includes('return actOnElement(')) {
+      state.actions += 1;
+      return state.elementGone ? { status: 'refused', reason: 'stale_ref' } : { status: 'done' };
+    }
+    throw new Error(`the fake page has no script for ${expression.slice(0, 40)}`);
   };
   const context = {
     on: () => undefined,
     route: async () => undefined,
     newCDPSession: async () => ({
       on: () => undefined,
-      send: async method => (method === 'Page.getFrameTree' ? { frameTree: { frame: { id: 'main' } } } : {}),
+      send: async (method, params) => {
+        if (method === 'Page.getFrameTree') {
+          return { frameTree: { frame: { id: 'main' } } };
+        }
+        if (method === 'Page.createIsolatedWorld') {
+          return { executionContextId: 7 };
+        }
+        if (method === 'Runtime.evaluate') {
+          return { result: { value: evaluate(params.expression) } };
+        }
+        return {};
+      },
     }),
     close: async () => undefined,
   };
@@ -765,25 +1253,52 @@ async function withFakeSidecar(run) {
   }
 }
 
+const FAKE_FIELD = {
+  site: 'site-a.test',
+  accessible_name: 'Name',
+  role: 'textbox',
+  is_form_submit: false,
+  form_values: {},
+  link_url: null,
+};
+
 test('type with a ref the page never gave is refused as an unknown ref, with no browser', async () => {
-  await withFakeSidecar(async ({ sidecar }) => {
-    const typed = await sidecar.type({ owner: 'owner-1', tab: 'chat-1', ref: 'e99', text: 'hello' });
+  await withFakeSidecar(async ({ sidecar, state }) => {
+    const typed = await sidecar.type({
+      owner: 'owner-1',
+      tab: 'chat-1',
+      ref: 'e99',
+      expect: FAKE_FIELD,
+      text: 'hello',
+    });
     assert.deepEqual(typed, { status: 'refused', reason: 'unknown_ref' });
+    assert.equal(state.actions, 0);
   });
 });
 
-test('type with a ref whose element is gone from the page is refused as a stale ref, with no browser', async () => {
+test('an action whose element is gone from the page is refused as a stale ref, with no browser', async () => {
   await withFakeSidecar(async ({ sidecar, state }) => {
     state.elementGone = true;
-    const typed = await sidecar.type({ owner: 'owner-1', tab: 'chat-1', ref: 'e1', text: 'hello' });
-    assert.deepEqual(typed, { status: 'refused', reason: 'stale_ref' });
+    for (const act of [
+      () => sidecar.type({ owner: 'owner-1', tab: 'chat-1', ref: 'e1', expect: FAKE_FIELD, text: 'hello' }),
+      () => sidecar.select({ owner: 'owner-1', tab: 'chat-1', ref: 'e1', expect: FAKE_FIELD, option: 'x' }),
+      () => sidecar.click({ owner: 'owner-1', tab: 'chat-1', ref: 'e1', expect: FAKE_FIELD }),
+    ]) {
+      assert.deepEqual(await act(), { status: 'refused', reason: 'stale_ref' });
+    }
   });
 });
 
-test('type with a ref whose element can no longer be read is refused as a stale ref, with no browser', async () => {
+test('an action with no checked read never reaches the page, with no browser', async () => {
   await withFakeSidecar(async ({ sidecar, state }) => {
-    state.infoReadable = false;
-    const typed = await sidecar.type({ owner: 'owner-1', tab: 'chat-1', ref: 'e1', text: 'hello' });
-    assert.deepEqual(typed, { status: 'refused', reason: 'stale_ref' });
+    const { role, ...withoutRole } = FAKE_FIELD;
+    void role;
+    for (const expect of [undefined, null, {}, withoutRole, { ...FAKE_FIELD, form_values: { a: 1 } }]) {
+      assert.deepEqual(await sidecar.type({ owner: 'owner-1', tab: 'chat-1', ref: 'e1', expect, text: 'x' }), {
+        status: 'refused',
+        reason: 'unchecked',
+      });
+    }
+    assert.equal(state.actions, 0);
   });
 });

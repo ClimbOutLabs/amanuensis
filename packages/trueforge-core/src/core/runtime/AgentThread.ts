@@ -152,6 +152,7 @@ import {
   HeldActionRefusedError,
   heldActionsNote,
   holdApprovalCalls,
+  isBrowserEdit,
   type NotSavedReason,
 } from '../permissions/heldActions';
 import type { Tier, Tier3Card } from '../permissions/tier';
@@ -1584,7 +1585,7 @@ export async function classifyUnstampedToolCall(input: {
       },
       maps_hosts: info.maps_hosts,
       document_scope: info.document_scope,
-      browser_click: info.browser_click,
+      browser_element: info.browser_element,
     },
   });
   return { ...info, ...stampSentinelDecision({ decision }) };
@@ -4343,6 +4344,7 @@ export class AgentThread {
       const held = holdApprovalCalls({
         message: assistantMessage,
         alreadyHeld: findHeldToolCalls(this.context).length,
+        browserEditWaiting: findUndecidedHeldToolCalls(this.context).some(call => isBrowserEdit(call.tool_info)),
         isSubAgent: this.parent !== undefined,
       });
       assistantMessage = held.message;

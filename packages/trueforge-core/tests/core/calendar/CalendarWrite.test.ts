@@ -369,6 +369,7 @@ describe('a scheduled run', () => {
         ],
       },
       alreadyHeld: 0,
+      browserEditWaiting: false,
       isSubAgent: false,
     });
     expect(held.refused).toEqual([]);
@@ -520,6 +521,7 @@ describe('a held event the owner approves later', () => {
         ],
       },
       alreadyHeld: 0,
+      browserEditWaiting: false,
       isSubAgent: false,
     }).message.tool_calls?.[0];
     if (heldCall === undefined) {

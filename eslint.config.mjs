@@ -275,6 +275,7 @@ export default defineConfig(
         document: 'readonly',
         window: 'readonly',
         CSS: 'readonly',
+        URL: 'readonly',
       },
     },
   },
