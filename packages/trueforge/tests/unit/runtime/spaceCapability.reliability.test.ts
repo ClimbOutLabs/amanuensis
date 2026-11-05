@@ -998,10 +998,11 @@ describe('fix-pass: reliability hardening', () => {
     expect(isErrorResponse(created)).toBe(false);
     const spaceName = await expectSpaceName(created);
 
-    // The fenced sample is neither listed nor addressable; the real marker is.
+    // The fenced sample is neither listed nor addressable; the real marker is. The
+    // text before it is the preamble, listed under its own anchor.
     const listed = await callTool(LIST_BLOCKS_TOOL_NAME, { space_name: spaceName });
     expect(isErrorResponse(listed)).toBe(false);
-    expect(expectBlocks(listed).map(b => b.anchor)).toEqual(['real']);
+    expect(expectBlocks(listed).map(b => b.anchor)).toEqual(['preamble', 'real']);
 
     const failed = await callTool(EDIT_SPACE_TOOL_NAME, {
       space_name: spaceName,
@@ -1040,7 +1041,7 @@ describe('fix-pass: reliability hardening', () => {
     const spaceName = await expectSpaceName(created);
 
     const listed = await callTool(LIST_BLOCKS_TOOL_NAME, { space_name: spaceName });
-    expect(expectBlocks(listed).map(b => b.anchor)).toEqual(['real']);
+    expect(expectBlocks(listed).map(b => b.anchor)).toEqual(['preamble', 'real']);
 
     const failed = await callTool(EDIT_SPACE_TOOL_NAME, {
       space_name: spaceName,
@@ -1052,7 +1053,7 @@ describe('fix-pass: reliability hardening', () => {
     expect(await readBody(callTool, spaceName)).toBe(body);
   });
 
-  it('list_blocks surfaces the preamble; it is not anchor-addressable and block edits leave it untouched', async () => {
+  it('list_blocks surfaces the preamble separately and as the addressable "preamble" block; other block edits leave it untouched', async () => {
     const { callTool } = makeHarness();
     const preambleText = '<p>Intro paragraph before any marker.</p>\n';
     const body = `${preambleText}<!-- @block:main -->\n<p>Body</p>`;
@@ -1066,20 +1067,20 @@ describe('fix-pass: reliability hardening', () => {
       preview: expect.stringContaining('Intro paragraph before any marker.'),
       char_count: preambleText.length,
     });
-    expect(parsed.blocks?.map(b => b.anchor)).toEqual(['main']);
+    expect(parsed.blocks?.map(b => b.anchor)).toEqual(['preamble', 'main']);
 
-    // No anchor addresses the preamble — not even a "preamble" anchor.
+    // The "preamble" anchor is real now: the refusal for a wrong fingerprint is the
+    // fingerprint refusal every block gets, not an unknown-anchor refusal.
     const failed = await callTool(EDIT_SPACE_TOOL_NAME, {
       space_name: spaceName,
       expected_revision: 1,
       edits: [{ type: 'block', anchor: 'preamble', fingerprint: '00000000', new_content: '<p>x</p>' }],
     });
     expect(isErrorResponse(failed)).toBe(true);
-    expect(resultJson(failed).error).toContain('Unknown block anchor "preamble"');
+    expect(resultJson(failed).error).toContain('does not hold the content fingerprint');
+    expect(await readBody(callTool, spaceName)).toBe(body);
 
-    // A block edit touches only its block: the preamble survives byte-identical. It is
-    // model-authored fixed framing; changing it means rebuilding the space's head,
-    // which is deliberate, and the instruction says to keep it short and stable.
+    // A block edit touches only its block: the preamble survives byte-identical.
     const edited = await callTool(EDIT_SPACE_TOOL_NAME, {
       space_name: spaceName,
       expected_revision: 1,
@@ -1422,7 +1423,7 @@ describe('fix-pass: documentation masking edge cases', () => {
     // The <pre> inside the fence is sample text, not an element: it must not mask the
     // real marker after the fence closes.
     const listed = await callTool(LIST_BLOCKS_TOOL_NAME, { space_name: spaceName });
-    expect(expectBlocks(listed).map(b => b.anchor)).toEqual(['real']);
+    expect(expectBlocks(listed).map(b => b.anchor)).toEqual(['preamble', 'real']);
 
     const updated = await callTool(EDIT_SPACE_TOOL_NAME, {
       space_name: spaceName,
@@ -1447,7 +1448,7 @@ describe('fix-pass: documentation masking edge cases', () => {
     const spaceName = await expectSpaceName(created);
 
     const listed = await callTool(LIST_BLOCKS_TOOL_NAME, { space_name: spaceName });
-    expect(expectBlocks(listed).map(b => b.anchor)).toEqual(['real']);
+    expect(expectBlocks(listed).map(b => b.anchor)).toEqual(['preamble', 'real']);
   });
 });
 
@@ -1495,7 +1496,10 @@ describe('fix-pass: large-body end-to-end journey', () => {
     const listed = await callTool(LIST_BLOCKS_TOOL_NAME, { space_name: spaceName });
     expect(isErrorResponse(listed)).toBe(false);
     const parsed = expectBlocks(listed);
-    expect(parsed.map(b => b.anchor)).toEqual(Array.from({ length: sectionCount }, (_, i) => `sec-${i}`));
+    expect(parsed.map(b => b.anchor)).toEqual([
+      'preamble',
+      ...Array.from({ length: sectionCount }, (_, i) => `sec-${i}`),
+    ]);
     expect(parsed.some(b => b.anchor === 'example')).toBe(false);
     expect(expectPreamble(listed)).not.toBeNull();
 
