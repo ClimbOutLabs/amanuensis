@@ -285,7 +285,7 @@ class WaitForSlotTest(unittest.TestCase):
         async def is_disconnected(self) -> bool:
             return self.gone
 
-    def test_a_slot_handed_over_as_the_caller_leaves_is_used_or_passed_on(self):
+    def test_a_release_and_a_hang_up_together_never_leave_the_slot_held(self):
         async def scenario() -> tuple[bool, bool]:
             slot = asyncio.Semaphore(1)
             await slot.acquire()
@@ -300,7 +300,8 @@ class WaitForSlotTest(unittest.TestCase):
             return got, slot.locked()
 
         got, locked = asyncio.run(scenario())
-        # Held only by a waiter that went on to use it; never left held by one that left.
+        # Held only by a waiter that went on to use it; never left held by one that left. The exact hand-over
+        # race is covered by the cancel test below.
         self.assertEqual(locked, got)
 
     def test_a_cancelled_wait_reaches_the_caller_and_frees_its_place(self):
