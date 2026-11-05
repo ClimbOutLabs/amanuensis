@@ -102,6 +102,11 @@ export interface ITurnResourceResolver<TTurnCustom extends object = Record<strin
    * to UTC.
    */
   readonly clientTimezone?: string | undefined;
+  /**
+   * True when the person spoke this turn's message and the client reads the reply aloud
+   * (CreateTurnRequest.spoken_reply), forwarded to AgentDefinition.spokenReply.
+   */
+  readonly spokenReply?: boolean | undefined;
   /** Forwarded to AgentThread / orchestrator / RemoteMCP. */
   readonly logger: Logger;
   /** Called exactly once per run, before any other method. */
