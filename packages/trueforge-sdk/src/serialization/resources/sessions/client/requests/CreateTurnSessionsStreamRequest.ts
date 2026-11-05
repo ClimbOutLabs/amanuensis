@@ -14,6 +14,7 @@ export const CreateTurnSessionsStreamRequest: core.serialization.Schema<
     clientTimezone: core.serialization.property("client_timezone", ClientTimezoneInput.optional()),
     input: core.serialization.list(TurnInputItem).optional(),
     previousTurnId: core.serialization.property("previous_turn_id", PreviousTurnIdInput.optional()),
+    spokenReply: core.serialization.property("spoken_reply", core.serialization.boolean().optional()),
 });
 
 export declare namespace CreateTurnSessionsStreamRequest {
@@ -21,5 +22,6 @@ export declare namespace CreateTurnSessionsStreamRequest {
         client_timezone?: ClientTimezoneInput.Raw | null;
         input?: TurnInputItem.Raw[] | null;
         previous_turn_id?: PreviousTurnIdInput.Raw | null;
+        spoken_reply?: boolean | null;
     }
 }
