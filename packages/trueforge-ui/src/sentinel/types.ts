@@ -716,17 +716,46 @@ function changeRequestsFromEvent(event: unknown): [string, string][] {
   return requests;
 }
 
+/**
+ * The call ids a model message asked for, with that message's event id: the same source event id the runtime
+ * gives the chat part of each call.
+ */
+function toolCallsAskedBy(event: unknown): { eventId: string; toolCallIds: string[] } | undefined {
+  if (!isRecord(event) || event.type !== 'model.message') return undefined;
+  const eventId = optionalString(event, 'id');
+  const calls = event.tool_calls ?? event.toolCalls;
+  if (eventId === undefined || !Array.isArray(calls)) return undefined;
+  const toolCallIds = calls.filter(isRecord).flatMap(call => {
+    const id = optionalString(call, 'id');
+    return id === undefined ? [] : [id];
+  });
+  return { eventId, toolCallIds };
+}
+
 /** Folds raw session events into per-tool-call Sentinel state (later events win). */
 export function extractSentinelSessionContext(events: unknown[]): SentinelSessionContext {
   const approvals = new Map<string, SentinelApprovalInfo>();
   const answers: Record<string, ApprovalAnswer> = {};
   const changeRequests: Record<string, string> = {};
-  // An answer names only the call id. It answers the newest card for that id asked before it, so it is filed
-  // under that card's key and never marks a later call that reuses the id as answered.
+  // The model message that last asked for each call id. A card that does not name its source event takes this
+  // one, so every card and every answer is filed under the full key of the call it belongs to, and a later call
+  // that reuses the id never matches it.
+  const askedBy = new Map<string, string>();
+  // An answer names only the call id. It answers the newest call for that id asked before it, so it is filed
+  // under that call's key and never marks a later call that reuses the id as answered.
   const latestKey = new Map<string, string>();
   const keyFor = (toolCallId: string) => latestKey.get(toolCallId) ?? toolCallId;
   for (const event of events) {
-    for (const approval of extractSentinelFromEvent(event)) {
+    const asked = toolCallsAskedBy(event);
+    if (asked !== undefined) {
+      for (const toolCallId of asked.toolCallIds) {
+        askedBy.set(toolCallId, asked.eventId);
+        latestKey.set(toolCallId, toolInvocationKey({ sourceEventId: asked.eventId, toolCallId }));
+      }
+    }
+    for (const parsed of extractSentinelFromEvent(event)) {
+      const sourceEventId = parsed.sourceEventId ?? askedBy.get(parsed.toolCallId);
+      const approval = sourceEventId === undefined ? parsed : { ...parsed, sourceEventId };
       const key = approvalKey(approval);
       approvals.set(key, approval);
       latestKey.set(approval.toolCallId, key);

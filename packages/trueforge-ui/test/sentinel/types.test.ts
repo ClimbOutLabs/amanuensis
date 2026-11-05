@@ -541,6 +541,45 @@ describe('extractSentinelSessionContext', () => {
     expect(entryForPart(answers, first)).toBe('approved');
     expect(entryForPart(answers, second)).toBeUndefined();
   });
+
+  it('learns the source event of a card that does not name it from the model message that asked for the call', () => {
+    const card = (what: string) => ({
+      type: 'tool.approval_required',
+      tool_calls: [{ id: 'call-1', tier: 3, tier3_card: { plain_what: what } }],
+    });
+    const context = extractSentinelSessionContext([
+      { type: 'model.message', id: 'evt-1', tool_calls: [{ id: 'call-1', name: 'send' }] },
+      card('First'),
+      {
+        type: 'turn.created',
+        input: [{ type: 'user.tool_approval', tool_call_id: 'call-1', approval: { status: 'allow' } }],
+      },
+      { type: 'model.message', id: 'evt-2', tool_calls: [{ id: 'call-1', name: 'send' }] },
+      card('Second'),
+    ]);
+    const first = toolInvocationKey({ sourceEventId: 'evt-1', toolCallId: 'call-1' });
+    const second = toolInvocationKey({ sourceEventId: 'evt-2', toolCallId: 'call-1' });
+    expect(context.approvals.map(info => [info.card.plain_what, info.sourceEventId])).toEqual([
+      ['First', 'evt-1'],
+      ['Second', 'evt-2'],
+    ]);
+    expect(context.answers).toEqual({ [first]: 'approved' });
+    const answers = new Map(Object.entries(context.answers ?? {}));
+    expect(entryForPart(answers, second)).toBeUndefined();
+  });
+
+  it('files an answer whose card is not among the events under the call the model asked for', () => {
+    const context = extractSentinelSessionContext([
+      { type: 'model.message', id: 'evt-1', tool_calls: [{ id: 'call-1', name: 'send' }] },
+      {
+        type: 'turn.created',
+        input: [{ type: 'user.tool_approval', tool_call_id: 'call-1', approval: { status: 'deny' } }],
+      },
+    ]);
+    expect(context.answers).toEqual({
+      [toolInvocationKey({ sourceEventId: 'evt-1', toolCallId: 'call-1' })]: 'denied',
+    });
+  });
 });
 
 describe('held actions', () => {
