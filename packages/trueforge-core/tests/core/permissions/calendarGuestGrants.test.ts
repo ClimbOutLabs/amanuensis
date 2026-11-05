@@ -126,7 +126,7 @@ describe('Google Calendar changes and standing grants', () => {
       await ctxWithGrants([[GOOGLE, 'create_event']]),
     );
     expect(decision).toMatchObject({ tier: 3, reason: 'calendar_write_guests' });
-    expect(decision.card?.plain_what).toContain(
+    expect(decision.card?.plain_reason).toContain(
       'This change sends an invitation to other people, so Aman always asks.',
     );
   });
@@ -143,7 +143,7 @@ describe('Google Calendar changes and standing grants', () => {
       await ctxWithGrants([[GOOGLE, 'update_event']]),
     );
     expect(decision).toMatchObject({ tier: 3, reason: 'calendar_write_guests' });
-    expect(decision.card?.plain_what).toContain('reaches the other people invited to this event');
+    expect(decision.card?.plain_reason).toContain('reaches the other people invited to this event');
   });
 });
 
@@ -166,7 +166,7 @@ describe('CalDAV changes and standing grants', () => {
     });
     const decision = await classifyTier(update, await ctxWithGrants([[CALDAV, 'update_event']]));
     expect(decision).toMatchObject({ tier: 3, reason: 'caldav_calendar_guests' });
-    expect(decision.card?.plain_what).toContain(
+    expect(decision.card?.plain_reason).toContain(
       'Aman always asks before changing an event in this calendar, because it cannot check who else is on it.',
     );
   });
@@ -301,7 +301,7 @@ describe('a fetched CalDAV event decides whether guests are reached', () => {
     const update = { ...caldavAction('update_event', UPDATE_ARGS), caldav_event: review };
     const decision = await classifyTier(update, await ctxWithGrants([[CALDAV, 'update_event']]));
     expect(decision).toMatchObject({ tier: 3, reason: 'caldav_calendar_guests' });
-    expect(decision.card?.plain_what).toContain(
+    expect(decision.card?.plain_reason).toContain(
       'Aman always asks before changing an event in this calendar, because it cannot check who else is on it.',
     );
   });

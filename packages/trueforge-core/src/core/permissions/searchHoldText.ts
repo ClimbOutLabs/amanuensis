@@ -88,9 +88,11 @@ export function steeredDestinationSay(input: {
   destinations: readonly { who: string; kind: 'address' | 'link'; source: ReadSource }[];
 }): string {
   const { assistant } = input;
+  // The card already shows every link it sends to, so one link is not named again; several are, to say which.
+  const oneLink = input.destinations.filter(({ kind }) => kind === 'link').length === 1;
   const sentences = input.destinations.map(({ who, kind, source }) => {
     if (kind === 'link') {
-      return `This goes to ${who}, which was in ${READ_PLACE[source]} ${assistant} read.`;
+      return `${assistant} found ${oneLink ? 'this link' : who} in ${READ_PLACE[source]} it read, not from you.`;
     }
     return source === 'email_sender'
       ? `This goes to ${who}, who sent the email ${assistant} just read.`
@@ -124,12 +126,15 @@ export function withHoldSay(text: string, say: string): string {
   return `${text}${/[.!?]$/.test(text) ? '' : '.'} ${say}`;
 }
 
-/** Card question for a held lookup; the summary is already masked where it must be. A page read says it opens a page. */
-export function searchHoldCardText({ summary, say, page }: { summary: string; say: string; page: boolean }): string {
+/**
+ * Card question for a held lookup; the summary is already masked where it must be. A page read says it opens a page.
+ * The reason it asks goes in the card's own reason line, not here.
+ */
+export function searchHoldCardText({ summary, page }: { summary: string; page: boolean }): string {
   if (page) {
-    return withHoldSay(summary === '' ? 'Open this web page?' : `Open ${summary}?`, say);
+    return summary === '' ? 'Open this web page?' : `Open ${summary}?`;
   }
-  return withHoldSay(summary === '' ? 'Search the web?' : `Search the web for ${summary}?`, say);
+  return summary === '' ? 'Search the web?' : `Search the web for ${summary}?`;
 }
 
 /** Audit row text for a held lookup: the rule that fired, never the query. */

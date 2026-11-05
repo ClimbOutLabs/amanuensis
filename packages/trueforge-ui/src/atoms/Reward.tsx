@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, type ReactNode } from 'react';
+import type { ReactNode } from 'react';
 
 import { cn } from './lib/cn.js';
 
@@ -10,9 +10,6 @@ import { cn } from './lib/cn.js';
  * the motion is switched off and the end state is what remains. Every piece
  * is decoration; the state change it marks is announced elsewhere.
  */
-
-/** How long a tear layer lives before `onDone` fires. Matches `aui-tear` in styles.css. */
-export const STUB_TEAR_MS = 450;
 
 const FLECK_COUNT = 6;
 
@@ -47,41 +44,6 @@ export function Highlight({ play = false, className, children }: RewardPlayProps
     <span data-play={play ? 'true' : 'false'} className={cn('aui-reward-highlight', className)}>
       {children}
     </span>
-  );
-}
-
-export type StubTearProps = {
-  /** True renders the tear layer and starts the 450 ms tear. */
-  play: boolean;
-  /** Called once the tear finishes. The consumer then removes the layer and hides the real stub. */
-  onDone?: () => void;
-  /** The stub's content, cloned into the layer. */
-  children: ReactNode;
-  className?: string;
-};
-
-/**
- * A clone of the stub that tears off and drops away. Nothing renders unless
- * `play` is true. Under reduced motion the layer is hidden by CSS; the
- * consumer should show the stub as gone at the same point.
- */
-export function StubTear({ play, onDone, children, className }: StubTearProps) {
-  const onDoneRef = useRef(onDone);
-  useEffect(() => {
-    onDoneRef.current = onDone;
-  }, [onDone]);
-
-  useEffect(() => {
-    if (!play) return;
-    const timer = window.setTimeout(() => onDoneRef.current?.(), STUB_TEAR_MS);
-    return () => window.clearTimeout(timer);
-  }, [play]);
-
-  if (!play) return null;
-  return (
-    <div aria-hidden="true" className={cn('aui-reward-tear', className)}>
-      {children}
-    </div>
   );
 }
 

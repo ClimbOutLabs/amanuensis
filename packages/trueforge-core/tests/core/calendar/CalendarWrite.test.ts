@@ -148,8 +148,9 @@ describe('the approval card', () => {
       before: null,
     });
     expect(info.tier3_card?.plain_what).toBe(
-      'Add "Dentist" to your Google Calendar on Mon Oct 19, 9:00 to 10:00 am (America/New_York)? Google emails lin@example.com and sam@example.com about it. This change sends an invitation to other people, so Aman always asks.',
+      'Add "Dentist" to your Google Calendar on Mon Oct 19, 9:00 to 10:00 am (America/New_York)? Google emails lin@example.com and sam@example.com about it.',
     );
+    expect(info.tier3_card?.plain_reason).toBe('This change sends an invitation to other people, so Aman always asks.');
     expect(info.tier3_card?.cannot_be_undone).toContain("can't be unsent");
   });
 
@@ -717,7 +718,7 @@ describe('card date wording and duplicate creates', () => {
       arguments: { title: 'Retreat', start: '2026-10-27T14:30', end: '2026-10-28T15:00' },
     });
     expect(info.tier3_card?.calendar_event?.when).toBe('Tue Oct 27, 2:30 pm to Wed Oct 28, 3:00 pm');
-    expect(info.tier3_card?.plain_what).toContain('This event runs over 2 days. Is that right?');
+    expect(info.tier3_card?.plain_reason).toBe('This event runs over 2 days. Is that right?');
   });
 
   it('shows a same-day event in the short form, with no warning', async () => {

@@ -111,7 +111,7 @@ function parsedUrl(value: string): URL | undefined {
 }
 
 /** A site as the person thinks of it: lower case, without a leading `www.`. */
-function hostKey(host: string): string {
+export function siteName(host: string): string {
   return host.toLowerCase().replace(/^www\./, '');
 }
 
@@ -123,7 +123,7 @@ function urlKey(value: string): string | undefined {
   }
   const path = url.pathname.length > 1 && url.pathname.endsWith('/') ? url.pathname.slice(0, -1) : url.pathname;
   const port = url.port === '' ? '' : `:${url.port}`;
-  return `${hostKey(url.hostname)}${port}${path === '/' ? '' : path}${url.search}`;
+  return `${siteName(url.hostname)}${port}${path === '/' ? '' : path}${url.search}`;
 }
 
 function add(input: { side: ProvenanceValues; kind: 'urls' | 'hosts' | 'addresses'; value: string }): void {
@@ -152,8 +152,8 @@ function recordUrl(side: ProvenanceValues, value: string): string | undefined {
     return undefined;
   }
   add({ side, kind: 'urls', value: key });
-  add({ side, kind: 'hosts', value: hostKey(host) });
-  return hostKey(host);
+  add({ side, kind: 'hosts', value: siteName(host) });
+  return siteName(host);
 }
 
 /** Records the links, sites and addresses in a text; returns the `site:` and `address:` keys it found. */
@@ -166,8 +166,8 @@ function recordText(side: ProvenanceValues, text: string): string[] {
     }
   }
   for (const match of text.matchAll(BARE_HOST)) {
-    add({ side, kind: 'hosts', value: hostKey(match[0]) });
-    found.push(`site:${hostKey(match[0])}`);
+    add({ side, kind: 'hosts', value: siteName(match[0]) });
+    found.push(`site:${siteName(match[0])}`);
   }
   for (const match of text.matchAll(EMAIL)) {
     add({ side, kind: 'addresses', value: match[0].toLowerCase() });
@@ -490,7 +490,7 @@ export function steeredUrl(input: { provenance: ChatProvenance; url: string }): 
   if (key === undefined || host === undefined) {
     return false;
   }
-  const site = hostKey(host);
+  const site = siteName(host);
   if (!untrustedHas({ provenance, kind: 'hosts', value: site })) {
     return false;
   }
@@ -560,7 +560,7 @@ export function steeredDestinations(input: {
     for (const url of urlsOf(value.replace(EMAIL, ' '))) {
       const host = parsedUrl(url)?.hostname;
       if (host !== undefined && steeredUrl({ provenance, url })) {
-        steered.push({ value: url, kind: 'link', origin: originOf({ provenance, key: `site:${hostKey(host)}` }) });
+        steered.push({ value: url, kind: 'link', origin: originOf({ provenance, key: `site:${siteName(host)}` }) });
       }
     }
   }
@@ -582,7 +582,7 @@ export function isPersonVouchedUrl(input: { provenance: ChatProvenance; url: str
     return true;
   }
   const host = parsedUrl(input.url)?.hostname;
-  return host !== undefined && isBareSite(input.url) && input.provenance.trusted.hosts.has(hostKey(host));
+  return host !== undefined && isBareSite(input.url) && input.provenance.trusted.hosts.has(siteName(host));
 }
 
 /** Whether a picture may be shown: a trusted link, or exactly a picture an opened page or a search result listed. */

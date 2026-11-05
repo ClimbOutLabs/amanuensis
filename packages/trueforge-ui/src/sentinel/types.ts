@@ -14,7 +14,7 @@
  * server sent an explicit `tier`.
  */
 import { changeRequestText } from '@truefoundry/trueforge-core/core/permissions/changeRequest';
-import { savedSearchHold, withHoldSay } from '@truefoundry/trueforge-core/core/permissions/searchHoldText';
+import { savedSearchHold } from '@truefoundry/trueforge-core/core/permissions/searchHoldText';
 import { readStoredMailbox, type Tier3Mailbox } from '@truefoundry/trueforge-core/core/permissions/tierMailbox';
 import type { BriefSection } from '@truefoundry/trueforge-core/core/schedules/morningBrief';
 
@@ -123,6 +123,8 @@ export type SentinelApprovalSchedule = {
 export type SentinelApprovalCard = {
   /** One plain-language sentence describing what will happen. No jargon. Always present. */
   plain_what: string;
+  /** One plain sentence on why the assistant is checking first, shown under the question; null or absent when none. */
+  plain_reason?: string | null | undefined;
   /** One sentence on why the agent wants this, from agent intent when available. */
   plain_why: string | null;
   /** What cannot be undone, or null when fully reversible. */
@@ -383,7 +385,7 @@ function cardFlag(record: Record<string, unknown>, { snake, camel }: { snake: st
 
 const SEARCH_QUERY_MARKER = ' for: ';
 
-// Search cards saved before the hold reason moved into plain_what: the reason was filed as
+// Search cards saved before the hold reason had its own line: the reason was filed as
 // "seen before", and a held key was written out in full. The key is not recoverable here, so the
 // whole query is dropped for that case.
 function readSavedHoldReason(card: SentinelApprovalCard): SentinelApprovalCard {
@@ -394,12 +396,13 @@ function readSavedHoldReason(card: SentinelApprovalCard): SentinelApprovalCard {
     const heading = marker === -1 ? card.plain_what : card.plain_what.slice(0, marker);
     return {
       ...card,
-      plain_what: withHoldSay(heading, saved.say),
+      plain_what: heading,
+      plain_reason: saved.say,
       why_asked_again: null,
       outbound_text: null,
     };
   }
-  return { ...card, plain_what: withHoldSay(card.plain_what, saved.say), why_asked_again: null };
+  return { ...card, plain_reason: saved.say, why_asked_again: null };
 }
 
 function stringList(value: unknown): string[] | undefined {
@@ -559,6 +562,7 @@ function parseApprovalCard(value: unknown): SentinelApprovalCard | undefined {
   if (plain_what === undefined) return undefined;
   return readSavedHoldReason({
     plain_what,
+    plain_reason: cardString(value, { snake: 'plain_reason', camel: 'plainReason' }),
     plain_why: cardString(value, { snake: 'plain_why', camel: 'plainWhy' }),
     cannot_be_undone: cardString(value, { snake: 'cannot_be_undone', camel: 'cannotBeUndone' }),
     why_asked_again: cardString(value, { snake: 'why_asked_again', camel: 'whyAskedAgain' }),

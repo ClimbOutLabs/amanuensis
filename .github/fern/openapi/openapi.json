@@ -11648,6 +11648,13 @@
           "persona": {
             "$ref": "#/components/schemas/Tier3Persona"
           },
+          "plain_reason": {
+            "description": "One plain sentence on why the assistant is checking first, shown under the question, or null.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "plain_what": {
             "description": "One plain-language sentence describing what will happen. No jargon.",
             "type": "string"

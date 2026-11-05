@@ -18,7 +18,7 @@ function Line({ label, value }: { label: string; value: string }) {
  * so the person can read them before approving.
  */
 export const PersonaDetails: FC<{ persona: SentinelApprovalPersona }> = ({ persona }) => (
-  <div className="space-y-3 rounded border border-border bg-primary-bg px-3 py-2" data-role="persona">
+  <div className="space-y-3 rounded-lg bg-primary-bg px-3 py-2.5" data-role="persona">
     <div>
       <Line label="Name" value={persona.name} />
       <Line label="For" value={persona.description} />

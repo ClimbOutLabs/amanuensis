@@ -26,6 +26,8 @@ export interface Tier3Card {
     /** Server-parsed command structure for shell actions, or null. */
     parsedCommand: string | null;
     persona?: TrueForge.Tier3Persona | null;
+    /** One plain sentence on why the assistant is checking first, shown under the question, or null. */
+    plainReason?: string | null;
     /** One plain-language sentence describing what will happen. No jargon. */
     plainWhat: string;
     /** One sentence on why the agent wants this, from agent intent when available. */

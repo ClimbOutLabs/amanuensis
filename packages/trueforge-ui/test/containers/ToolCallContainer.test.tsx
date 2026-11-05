@@ -1157,11 +1157,8 @@ describe('ToolCallContainer: held search request', () => {
 
   function renderHeldSearch(call: Record<string, unknown>, status?: ThreadMessageLike['status']) {
     const card: SentinelApprovalInfo['card'] = {
-      plain_what: searchHoldCardText({
-        summary: 'how do I rotate ws••••••3x safely',
-        say: 'This sends something that looks like a password or key.',
-        page: false,
-      }),
+      plain_what: searchHoldCardText({ summary: 'how do I rotate ws••••••3x safely', page: false }),
+      plain_reason: 'This sends something that looks like a password or key.',
       plain_why: null,
       cannot_be_undone: null,
       why_asked_again: null,

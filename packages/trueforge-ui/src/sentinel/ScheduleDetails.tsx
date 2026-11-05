@@ -19,7 +19,7 @@ function Line({ label, value }: { label: string; value: string }) {
 
 /** The whole schedule a chat call creates or deletes, in plain words; every row comes from the server. */
 export const ScheduleDetails: FC<{ schedule: SentinelApprovalSchedule }> = ({ schedule }) => (
-  <div className="space-y-3 rounded border border-border bg-primary-bg px-3 py-2" data-role="schedule">
+  <div className="space-y-3 rounded-lg bg-primary-bg px-3 py-2.5" data-role="schedule">
     <div>
       <Line label="Name" value={schedule.name} />
       <Line label="When it runs" value={`${schedule.when} (${schedule.time_zone})`} />

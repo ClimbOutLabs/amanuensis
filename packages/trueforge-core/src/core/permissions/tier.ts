@@ -190,6 +190,11 @@ export const Tier3PersonaSchema = z
 export const Tier3CardSchema = z
   .object({
     plain_what: z.string().describe('One plain-language sentence describing what will happen. No jargon.'),
+    plain_reason: z
+      .string()
+      .nullable()
+      .optional()
+      .describe('One plain sentence on why the assistant is checking first, shown under the question, or null.'),
     plain_why: z
       .string()
       .nullable()

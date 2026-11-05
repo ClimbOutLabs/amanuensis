@@ -7,11 +7,8 @@ import { PermissionApprovalCard } from '@/sentinel/PermissionApprovalCard.js';
 import type { SentinelApprovalCard } from '@/sentinel/types.js';
 
 const SEARCH_CARD: SentinelApprovalCard = {
-  plain_what: searchHoldCardText({
-    summary: 'Find quiet coffee shops in San Francisco',
-    say: holdSay('Aman').search_setting,
-    page: false,
-  }),
+  plain_what: searchHoldCardText({ summary: 'Find quiet coffee shops in San Francisco', page: false }),
+  plain_reason: holdSay('Aman').search_setting,
   plain_why: null,
   cannot_be_undone: null,
   why_asked_again: null,

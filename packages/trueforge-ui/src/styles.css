@@ -1505,63 +1505,45 @@
   border-radius: 0.125rem;
 }
 
-/* Ticket: a card with a punch hole and a dashed tear line. */
-.aui-ticket {
-  position: relative;
-  background-color: var(--card-bg);
-  background-image: var(--grain);
-  border: 0.0625rem solid var(--border);
-  border-radius: 0.5rem;
-  box-shadow: 0 0.0625rem 0.125rem rgb(70 50 20 / 0.1);
-  color: var(--text-primary);
-}
-
-.aui-theme-root.dark .aui-ticket {
-  box-shadow: 0 0.0625rem 0.125rem rgb(0 0 0 / 0.35);
-}
-
-/* The right-hand stub, split from the body by a dashed line. Stacks under the face on a phone. */
-.aui-ticket--stub {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 9rem;
-}
-
-.aui-ticket__stub {
-  display: flex;
-  flex-direction: column;
-  gap: 0.25rem;
-  padding: 0.75rem;
-  border-left: 0.125rem dashed var(--border);
-}
-
-.aui-ticket--punch::before {
-  content: '';
-  position: absolute;
-  top: 0.6rem;
-  right: 0.6rem;
-  width: 0.7rem;
-  height: 0.7rem;
-  border-radius: 999rem;
-  background: var(--primary-bg);
-  box-shadow: inset 0 0 0 0.0625rem var(--border);
-}
-
-/* Only one card per screen takes the selected look; useHighlightedCard picks it. */
-.aui-ticket--selected {
-  border-color: var(--gold-ink);
-  background-color: var(--gold-soft);
-}
-
 /*
- * Every approval card (email, calendar, shell, space, connector) reads like the chat around it: body
- * font at the chat's body size, the question at that same size in semibold, and only a command or a
- * message's own content in its own font. A card must never look louder than the chat.
+ * Every approval card (browser, email, calendar, shell, space, connector) is one layout: one status line, the
+ * question, one quiet line on why it asks, each fact once in a quiet box, then one even row of choices.
+ * It reads like the chat around it: body font at the chat's body size, the question at that size in semibold,
+ * and only a command or a message's own content in its own font. A card must never look louder than the chat.
  */
 .aui-approval-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  padding: 1rem 1.125rem;
+  background-color: var(--card-bg);
+  border: 0.0625rem solid var(--border);
+  border-radius: 0.625rem;
+  box-shadow: 0 0.0625rem 0.125rem rgb(70 50 20 / 0.08);
+  color: var(--text-primary);
   font-family: var(--font-sans);
   font-size: var(--text-base);
   line-height: 1.5;
   letter-spacing: normal;
+}
+
+/* The card's own spacing comes from its gap, not from the margins a host page gives headings and paragraphs. */
+.aui-approval-card :where(h3, p, dl, dd) {
+  margin: 0;
+}
+
+.aui-theme-root.dark .aui-approval-card {
+  box-shadow: 0 0.0625rem 0.125rem rgb(0 0 0 / 0.35);
+}
+
+/* Only one card per screen takes the selected look; useHighlightedCard picks it. */
+.aui-approval-card--selected {
+  border-color: var(--gold-ink);
+}
+
+/* An answered card shrinks to its one line: the question and what became of it. */
+.aui-approval-card--answered {
+  padding-block: 0.75rem;
 }
 
 .aui-approval-card__title {
@@ -1572,29 +1554,51 @@
   letter-spacing: normal;
 }
 
-/* The badge and the stub's lines: plain body text, no capitals or spacing. */
-.aui-ticket__label {
-  font-family: var(--font-sans);
+.aui-approval-card--answered .aui-approval-card__title {
+  font-weight: 500;
 }
 
-/* A stub holds a short line: a long recipient list is cut to three lines, the full text stays in Details. */
-.aui-ticket__detail {
-  display: -webkit-box;
-  -webkit-line-clamp: 3;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-  overflow-wrap: anywhere;
+/* Each fact once: label and value in two columns. */
+.aui-approval-card__facts {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 0.375rem 1rem;
+  margin: 0;
+  padding: 0.625rem 0.75rem;
+  border-radius: 0.5rem;
+  background-color: var(--primary-bg);
+}
+
+.aui-approval-card__facts dd {
+  margin: 0;
+}
+
+/* The choices: even buttons side by side, one row; the quiet extra choice sits at the far end. */
+.aui-approval-card__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.aui-approval-card__choice {
+  min-width: 5.5rem;
+  padding-inline: 1rem;
+}
+
+.aui-approval-card__actions-end {
+  margin-left: auto;
+}
+
+/* Keyboard focus on a card is a solid ring in --focus-ring, not a faded one: it keeps 3:1 on the card. */
+.aui-theme-root .aui-approval-card :focus-visible {
+  outline: 0.125rem solid var(--focus-ring);
+  outline-offset: 0.125rem;
 }
 
 /* Memory sharing boxes draw as native checkboxes; in the dark theme they take the dark form colours. */
 .aui-theme-root.dark .aui-sharing-box {
   color-scheme: dark;
-}
-
-/* Keyboard focus on a ticket is a solid ring in --focus-ring, not a faded one: it keeps 3:1 on the card and the gold fill. */
-.aui-theme-root .aui-ticket :focus-visible {
-  outline: 0.125rem solid var(--focus-ring);
-  outline-offset: 0.125rem;
 }
 
 /* Home greeting: the first name carries a hand-drawn stroke. Fraunces is not bundled, so the serif is Newsreader. */
@@ -1790,13 +1794,22 @@
     row-gap: 0.4rem;
   }
 
-  .aui-ticket--stub {
+  /* A phone stacks each fact's label over its value, and the choices share the row evenly. */
+  .aui-approval-card__facts {
     grid-template-columns: minmax(0, 1fr);
+    gap: 0.125rem;
   }
 
-  .aui-ticket__stub {
-    border-left: 0;
-    border-top: 0.125rem dashed var(--border);
+  .aui-approval-card__facts dd {
+    margin-bottom: 0.375rem;
+  }
+
+  .aui-approval-card__choice {
+    flex: 1 1 auto;
+    min-width: 0;
+    min-height: 2.75rem;
+    height: auto;
+    white-space: normal;
   }
 }
 
@@ -1862,14 +1875,6 @@
 
 .aui-reward-highlight[data-play='true'] {
   animation: aui-highlight-sweep 350ms ease-out both;
-}
-
-/* Tear layer: a clone of the stub, removed by the consumer after onDone. */
-.aui-reward-tear {
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  animation: aui-tear 450ms ease-in both;
 }
 
 .aui-reward-sweep {
@@ -1952,13 +1957,6 @@
   }
 }
 
-@keyframes aui-tear {
-  to {
-    opacity: 0;
-    transform: translate(3.5rem, 9rem) rotate(-14deg);
-  }
-}
-
 @keyframes aui-sweep {
   from {
     transform: translateX(-100%);
@@ -2002,7 +2000,6 @@
     animation: none;
   }
 
-  .aui-reward-tear,
   .aui-reward-sweep,
   .aui-reward-fleck {
     display: none;

@@ -2,10 +2,10 @@
 
 import { useRef, useState, type FC, type ReactNode } from 'react';
 
-import { Button } from '../atoms/primitives/Button.js';
 import { useAssistantDisplayName } from '../components/PersonalizationContext.js';
 import { Icon } from '../icons/Icon.js';
 import { AlwaysAllowToolControl } from './AlwaysAllowToolControl.js';
+import { ApprovalActions, ApprovalButton, ApprovalCardShell, ApprovalFacts } from './ApprovalCardParts.js';
 import {
   APPROVAL_CHOICES,
   isNewRecipientCard,
@@ -13,6 +13,7 @@ import {
   NEW_RECIPIENT_CHOICES,
   NEW_RECIPIENT_DRAFT_CHOICES,
 } from './approvalChoices.js';
+import { approvalFacts, approvalQuestion, outboundRepeatsFacts } from './approvalCopy.js';
 import { CalendarEventDetails } from './CalendarEventDetails.js';
 import { ChangeRequestBox } from './ChangeRequestBox.js';
 import { APPROVED_OUTCOME_TEXT, HELD_EXPIRED_TEXT, type HeldActionOutcome } from './heldActionErrors.js';
@@ -49,49 +50,36 @@ export type HeldActionCardProps = {
   changeRequestNote?: ReactNode;
 };
 
-function DetailRow({ label, value, mono = false }: { label: string; value: string; mono?: boolean }) {
-  return (
-    <div className="flex flex-col gap-0.5 text-sm sm:flex-row sm:items-baseline sm:gap-2">
-      <dt className="shrink-0 text-xs font-medium uppercase tracking-wide text-text-secondary sm:w-20">{label}</dt>
-      <dd className={`min-w-0 break-words text-text-primary ${mono ? 'font-mono text-xs' : ''}`}>{value}</dd>
-    </div>
-  );
-}
-
-function StatusLine({ status }: { status: Exclude<HeldActionStatus, { kind: 'waiting' }> }) {
+/** What became of an answered held action, in the words of the card's status line. */
+function answeredStatus(status: Exclude<HeldActionStatus, { kind: 'waiting' } | { kind: 'failed' }>): {
+  text: string;
+  tick?: ReactNode;
+} {
   switch (status.kind) {
     case 'working':
-      return <p className="text-sm text-text-secondary">Working on it...</p>;
+      return { text: 'Working on it...' };
     case 'approved':
-      return (
-        <p className="flex items-center gap-2 text-sm font-medium text-text-primary">
+      return {
+        text: APPROVED_OUTCOME_TEXT[status.outcome],
+        tick: (
           <Icon
             name={status.outcome === 'done' ? 'circle-check' : 'info'}
             className={`shrink-0 ${status.outcome === 'done' ? 'text-success-bg' : 'text-text-secondary'}`}
             aria-hidden="true"
           />
-          {APPROVED_OUTCOME_TEXT[status.outcome]}
-        </p>
-      );
+        ),
+      };
     case 'approved_earlier':
-      return <p className="text-sm font-medium text-text-primary">Approved. See the result in the chat.</p>;
+      return { text: 'Approved. See the result in the chat.' };
     case 'refused':
-      return <p className="text-sm text-text-secondary">{status.message}</p>;
+      return { text: status.message };
     case 'denied':
-      return (
-        <p className="flex items-center gap-2 text-sm font-medium text-text-primary">
-          <Icon name="circle-xmark" className="shrink-0 text-failure-bg" aria-hidden="true" />
-          Denied. Nothing was done.
-        </p>
-      );
+      return {
+        text: 'Denied. Nothing was done.',
+        tick: <Icon name="circle-xmark" className="shrink-0 text-failure-bg" aria-hidden="true" />,
+      };
     case 'expired':
-      return <p className="text-sm text-text-secondary">{HELD_EXPIRED_TEXT}</p>;
-    case 'failed':
-      return (
-        <p role="alert" className="text-sm text-failure-bg">
-          {status.message}
-        </p>
-      );
+      return { text: HELD_EXPIRED_TEXT };
   }
 }
 
@@ -112,12 +100,6 @@ export const HeldActionCard: FC<HeldActionCardProps> = ({
   changeRequestNote,
 }) => {
   const assistant = useAssistantDisplayName();
-  const hasDetails =
-    card.recipient !== null ||
-    card.destination !== null ||
-    card.destination_host !== null ||
-    card.amount !== null ||
-    card.parsed_command !== null;
   const canAnswer = status.kind === 'waiting' || status.kind === 'failed';
   const [changing, setChanging] = useState(false);
   const changeButtonRef = useRef<HTMLButtonElement>(null);
@@ -137,32 +119,27 @@ export const HeldActionCard: FC<HeldActionCardProps> = ({
       : APPROVAL_CHOICES.deny;
 
   return (
-    <li className="list-none rounded-lg border border-border bg-primary-bg" data-role="held-action">
-      <div className="space-y-3 px-4 py-3">
-        <p className="text-sm font-medium text-text-primary">{card.plain_what}</p>
+    <li className="list-none" data-role="held-action">
+      <ApprovalCardShell
+        question={approvalQuestion(card)}
+        reason={card.plain_reason}
+        status={canAnswer ? { kind: 'waiting' } : { kind: 'answered', ...answeredStatus(status) }}
+      >
         {card.why_asked_again !== null && (
           <p className="text-sm text-text-secondary" data-role="held-action-why-held">
             {card.why_asked_again}
           </p>
         )}
 
-        {hasDetails && (
-          <dl className="space-y-1.5 rounded border border-border bg-secondary-bg px-3 py-2">
-            {card.recipient !== null && <DetailRow label="To" value={card.recipient} />}
-            {card.destination !== null && <DetailRow label="Where" value={card.destination} mono />}
-            {card.destination_host !== null && <DetailRow label="Sends to" value={card.destination_host} mono />}
-            {card.amount !== null && <DetailRow label="Amount" value={card.amount} mono />}
-            {card.parsed_command !== null && <DetailRow label="Command" value={card.parsed_command} mono />}
-          </dl>
-        )}
+        <ApprovalFacts facts={approvalFacts(card)} />
 
         {card.calendar_event !== null && <CalendarEventDetails event={card.calendar_event} />}
 
         {card.schedule !== null && <ScheduleDetails schedule={card.schedule} />}
 
-        {card.outbound_text !== null && (
-          <div className="rounded border border-border bg-secondary-bg px-3 py-2">
-            <p className="mb-1 text-xs font-medium text-text-secondary">Full request</p>
+        {card.outbound_text !== null && !outboundRepeatsFacts(card, card.outbound_text) && (
+          <div className="rounded border border-border bg-primary-bg px-3 py-2">
+            <p className="mb-1 text-sm font-medium text-text-secondary">Full request</p>
             {card.outbound_truncated && (
               <p className="mb-1 text-sm font-medium text-text-primary" data-role="held-action-truncated">
                 Part of this is not shown in full. Check it before you approve.
@@ -187,56 +164,43 @@ export const HeldActionCard: FC<HeldActionCardProps> = ({
           </p>
         )}
 
-        {status.kind !== 'waiting' && <StatusLine status={status} />}
-
-        {canAnswer && (
-          <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
-            <Button
-              variant="primary"
-              size="large"
-              title={approveChoice.hint}
-              onClick={onApprove}
-              disabled={disabled}
-              className="sm:min-w-24"
-            >
-              {approveChoice.label}
-            </Button>
-            {alwaysAllowOffered && !newRecipients && (
-              <AlwaysAllowToolControl
-                size="large"
-                disabled={disabled}
-                description={`${assistant} will run this tool on this connector without asking, in every chat.`}
-                onConfirm={onAlwaysAllow}
-              />
-            )}
-            {onChangeRequest !== undefined && (
-              <Button
-                ref={changeButtonRef}
-                variant="secondary"
-                size="large"
-                title={APPROVAL_CHOICES.changeIt.hint}
-                aria-expanded={changing}
-                onClick={() => {
-                  setChanging(true);
-                }}
-                disabled={disabled}
-              >
-                {APPROVAL_CHOICES.changeIt.label}
-              </Button>
-            )}
-            <Button
-              variant="secondary"
-              size="large"
-              title={denyChoice.hint}
-              onClick={onDeny}
-              disabled={disabled}
-              className="sm:min-w-24"
-            >
-              {denyChoice.label}
-            </Button>
-          </div>
+        {status.kind === 'failed' && (
+          <p role="alert" className="text-sm text-failure-bg">
+            {status.message}
+          </p>
         )}
-        {canAnswer && changing && onChangeRequest !== undefined && (
+
+        <ApprovalActions>
+          <ApprovalButton main title={approveChoice.hint} onClick={onApprove} disabled={disabled}>
+            {approveChoice.label}
+          </ApprovalButton>
+          {alwaysAllowOffered && !newRecipients && (
+            <AlwaysAllowToolControl
+              size="large"
+              disabled={disabled}
+              description={`${assistant} will run this tool on this connector without asking, in every chat.`}
+              onConfirm={onAlwaysAllow}
+              className="aui-approval-card__choice"
+            />
+          )}
+          {onChangeRequest !== undefined && (
+            <ApprovalButton
+              ref={changeButtonRef}
+              title={APPROVAL_CHOICES.changeIt.hint}
+              aria-expanded={changing}
+              onClick={() => {
+                setChanging(true);
+              }}
+              disabled={disabled}
+            >
+              {APPROVAL_CHOICES.changeIt.label}
+            </ApprovalButton>
+          )}
+          <ApprovalButton title={denyChoice.hint} onClick={onDeny} disabled={disabled}>
+            {denyChoice.label}
+          </ApprovalButton>
+        </ApprovalActions>
+        {changing && onChangeRequest !== undefined && (
           <ChangeRequestBox
             disabled={disabled}
             onSend={text => {
@@ -249,8 +213,8 @@ export const HeldActionCard: FC<HeldActionCardProps> = ({
             }}
           />
         )}
-        {changeRequestNote}
-      </div>
+      </ApprovalCardShell>
+      {changeRequestNote}
     </li>
   );
 };
