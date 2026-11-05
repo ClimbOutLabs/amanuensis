@@ -439,9 +439,9 @@ export function ReachPreferences({ reach }: { reach: ReachApi }) {
         <NumberField
           label="Say so when an approval waits"
           value={draft.approvalWaitMinutes}
-          min={15}
-          max={10080}
-          unit="minutes"
+          min={5}
+          max={20}
+          unit="minutes (a request closes after 30)"
           onChange={next => change({ approvalWaitMinutes: next })}
         />
       </Card>

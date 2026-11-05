@@ -342,10 +342,13 @@ describe('calendar', () => {
 describe('approvals', () => {
   it('raises one event for an approval that waited longer than the chosen time', async () => {
     const { service, feed } = await setup({
-      settings: { approval_wait_minutes: 60 },
+      settings: { approval_wait_minutes: 10 },
       waiting: [
-        { session_id: 's1', turn_id: 'u1', waiting_since: new Date('2026-11-05T13:00:00.000Z') },
-        { session_id: 's2', turn_id: 'u2', waiting_since: new Date('2026-11-05T14:30:00.000Z') },
+        { session_id: 's1', turn_id: 'u1', waiting_since: new Date('2026-11-05T14:40:00.000Z') },
+        // Not waited long enough yet.
+        { session_id: 's2', turn_id: 'u2', waiting_since: new Date('2026-11-05T14:55:00.000Z') },
+        // Past the 30 minutes after which the request is closed, so there is nothing left to ask.
+        { session_id: 's3', turn_id: 'u3', waiting_since: new Date('2026-11-05T14:20:00.000Z') },
       ],
     });
     await expect(service.run({ watcher: 'approvals' })).resolves.toMatchObject({ raised: 1 });

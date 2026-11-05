@@ -13,10 +13,10 @@ import { maxLevelOf } from './levels';
 const JUDGE_TIMEOUT_MS = 20_000;
 const JUDGE_MAX_TOKENS = 300;
 
-export const NOTICING_JUDGE_VERSION = 'noticing/v1';
+const NOTICING_JUDGE_VERSION = 'noticing/v1';
 
 /** The model's answer for one event. The level is only a request: the person's rules decide what happens. */
-export const JudgeVerdictSchema = z.object({
+const JudgeVerdictSchema = z.object({
   level: DeliveryLevelSchema,
   reason: z.string().trim().min(1).max(300),
   message: z.string().trim().min(1).max(300),

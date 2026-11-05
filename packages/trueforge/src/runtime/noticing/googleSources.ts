@@ -65,7 +65,7 @@ function toMailMessage(message: GmailMessage, thread_id: string): MailMessage | 
 }
 
 /** Gmail as a mail source, read with the person's own Google login and read-only calls. */
-export function gmailMailSource(api: GmailApiPort): MailSource {
+function gmailMailSource(api: GmailApiPort): MailSource {
   return {
     trustedAuthenticationServers: GMAIL_AUTHENTICATION_SERVERS,
     async listNewMessages({ since, limit }) {
@@ -104,7 +104,7 @@ export function gmailMailSource(api: GmailApiPort): MailSource {
 }
 
 /** Google Calendar as a calendar source: the primary calendar's timed events that are still on. */
-export function googleCalendarSource({ api, timeZone }: { api: CalendarApiPort; timeZone: string }): CalendarSource {
+function googleCalendarSource({ api, timeZone }: { api: CalendarApiPort; timeZone: string }): CalendarSource {
   return {
     async listEvents({ from, to }) {
       const page = await api.listEvents({

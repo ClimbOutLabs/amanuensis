@@ -270,13 +270,10 @@
             "type": "string"
           },
           "name": {
-            "description": "What the person calls them, or null.",
+            "description": "What the person calls them. Left out when they gave no name.",
             "maxLength": 120,
             "minLength": 1,
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": "string"
           },
           "source": {
             "description": "Whether the person typed this sender or accepted it from a memory suggestion.",
@@ -289,7 +286,6 @@
         },
         "required": [
           "address",
-          "name",
           "source",
           "added_at"
         ],
@@ -8923,9 +8919,9 @@
             "type": "array"
           },
           "approval_wait_minutes": {
-            "description": "How long an approval may wait before the assistant says so.",
-            "maximum": 10080,
-            "minimum": 15,
+            "description": "How long an approval may wait before the assistant says so. A request expires after 30 minutes.",
+            "maximum": 20,
+            "minimum": 5,
             "type": "integer"
           },
           "call_for_urgent_reminders": {

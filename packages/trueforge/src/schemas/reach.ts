@@ -17,6 +17,10 @@ export type NoticingKind = z.infer<typeof NoticingKindSchema>;
 /** Every kind, in the order the Settings page lists them. */
 export const NOTICING_KINDS: readonly NoticingKind[] = NoticingKindSchema.options;
 
+/** A request for the person's ok closes itself after 30 minutes, so the wait to speak up stays well inside that. */
+export const APPROVAL_WAIT_MIN_MINUTES = 5;
+export const APPROVAL_WAIT_MAX_MINUTES = 20;
+
 const ClockTimeSchema = z
   .string()
   .regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'Use a 24-hour time like 21:00.')
@@ -31,7 +35,13 @@ export const AlwaysImportantSenderSchema = z
       .max(254)
       .regex(/^[^\s@]+@[^\s@]+\.[^\s@]+$/, 'Use a full email address like dana@example.com.')
       .describe('The sender address, lower case.'),
-    name: z.string().trim().min(1).max(120).nullable().describe('What the person calls them, or null.'),
+    name: z
+      .string()
+      .trim()
+      .min(1)
+      .max(120)
+      .optional()
+      .describe('What the person calls them. Left out when they gave no name.'),
     source: z
       .enum(['settings', 'memory'])
       .describe('Whether the person typed this sender or accepted it from a memory suggestion.'),
@@ -89,9 +99,9 @@ export const ReachSettingsSchema = z
     approval_wait_minutes: z
       .number()
       .int()
-      .min(15)
-      .max(7 * 24 * 60)
-      .describe('How long an approval may wait before the assistant says so.'),
+      .min(APPROVAL_WAIT_MIN_MINUTES)
+      .max(APPROVAL_WAIT_MAX_MINUTES)
+      .describe('How long an approval may wait before the assistant says so. A request expires after 30 minutes.'),
   })
   .openapi('ReachSettings');
 
@@ -111,7 +121,7 @@ export function defaultReachSettings(timezone: string): ReachSettings {
     max_nudges_per_day: 5,
     min_hours_between_calls: 6,
     travel_lead_minutes: 90,
-    approval_wait_minutes: 120,
+    approval_wait_minutes: 15,
   };
 }
 

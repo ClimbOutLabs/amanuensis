@@ -5,7 +5,7 @@
  */
 
 /** The domain of an address, lower case, or undefined when it has none. */
-export function domainOfAddress(address: string): string | undefined {
+function domainOfAddress(address: string): string | undefined {
   const at = address.lastIndexOf('@');
   const domain =
     at === -1

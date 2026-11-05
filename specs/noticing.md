@@ -23,7 +23,7 @@ Watchers look for a few kinds of event. Each new event is judged once by the hel
 - **Mail** every 10 minutes, only mail that arrived since the last check. Mail from an always-important sender counts only when the mail server confirms the sender (DKIM or SPF passes and matches the From domain, read from the topmost Authentication-Results header of the receiving server). Otherwise it is ordinary mail.
 - **Bills and deadlines** in new mail: a due date within 3 days with nothing later in the thread saying it was paid. A bill due later is tracked and checked again as it comes near.
 - **Calendar** every 30 minutes: two events overlapping in the next 24 hours, and an event with a place starting within the person's travel lead time (default 90 minutes).
-- **Approvals** that have waited longer than the person's chosen time (default 2 hours), checked alongside mail.
+- **Approvals** that have waited longer than the person's chosen time (5 to 20 minutes, default 15), checked every 5 minutes. A request for the person's ok closes itself after 30 minutes when they open the chat, so an approval is only raised while it can still be answered, and the setting cannot go past 20 minutes.
 
 Each finding has a stable id, so the same thing is never raised twice. When nothing new is found, no model is called.
 
@@ -64,7 +64,8 @@ Reminders follow the same channels. A reminder is never quieter than a nudge. A 
 
 - `reach_settings`, `noticing_event` and `noticing_checkpoint` tables on SQLite and Postgres, with shared store contract tests
 - Routes under `/api/v1/user/reach` (get, save, suggestions, test) and the internal `/api/internal/noticing/run`
-- Google mail and Google Calendar as sources. Other mail and calendar connections are not watched yet.
+- Mail and calendar sources: Google mail and Google Calendar for a person who connected them, and otherwise the instance's own Email (IMAP) and Calendar (CalDAV) connectors, read with their read-only tools. Those connectors hold one mailbox and one calendar for the instance, so they are watched for everyone who saved Reach me settings.
+- The Email (IMAP) connector does not pass on the receiving server's Authentication-Results, so no sender can be confirmed there. An always-important sender on IMAP mail is read as ordinary mail: it can still raise a bill note, never a nudge or call for the sender. The connector gives no thread, so "paid" is looked for in later mail with the same subject.
 - Settings, Reach me page
 
 ## Privacy
@@ -90,5 +91,4 @@ All tests use synthetic data, never a person's real data.
 ## Out of Scope
 
 - Text messages and phone calls
-- Watching mail or calendars that are not Google
 - A summary of notes in the morning brief. Notes stay in the bell.

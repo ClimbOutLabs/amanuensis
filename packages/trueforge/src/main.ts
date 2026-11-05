@@ -131,6 +131,7 @@ import { createNoticingJudgeResolver } from './runtime/noticing/judgeFactory';
 import { createNoticingService } from './runtime/noticing/noticingService';
 import { NO_PHONE_CHANNELS } from './runtime/noticing/reachChannels';
 import { createReminderReach } from './runtime/noticing/reminderReach';
+import { createSidecarNoticingSources } from './runtime/noticing/sidecarSources';
 import { createOutboundSecretSource } from './runtime/outboundSecrets';
 import { seedOwnerNameAtBoot } from './runtime/ownerName';
 import { createSentinelServices } from './runtime/sentinelServices';
@@ -792,7 +793,12 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     logger,
   });
   const noticingService = createNoticingService({
-    sources: createGoogleNoticingSources({ connections: googleConnectionStore, fetchImpl: undefined, logger }),
+    sources: createSidecarNoticingSources({
+      mailUrl: configuration.MAIL_SIDECAR_MCP_URL,
+      calendarUrl: configuration.CALENDAR_SIDECAR_MCP_URL,
+      primary: createGoogleNoticingSources({ connections: googleConnectionStore, fetchImpl: undefined, logger }),
+      logger,
+    }),
     approvals: sessionApprovalSource({ sessionStore }),
     reachSettings: reachSettingsStore,
     store: noticingStore,

@@ -111,7 +111,6 @@ describe('reach routes', () => {
     const { put, reachStore } = await build();
     const sender = {
       address: 'dana@example.com',
-      name: null,
       source: 'settings' as const,
       added_at: '1999-01-01T00:00:00.000Z',
     };

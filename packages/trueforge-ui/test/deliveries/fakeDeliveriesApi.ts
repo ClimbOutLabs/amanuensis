@@ -29,7 +29,7 @@ export const QUIET_SETTINGS: ReachSettings = {
   maxNudgesPerDay: 5,
   minHoursBetweenCalls: 6,
   travelLeadMinutes: 90,
-  approvalWaitMinutes: 120,
+  approvalWaitMinutes: 15,
 };
 
 /** A server that holds the feed once, the way the real one does, so two "devices" can share it. */

@@ -136,7 +136,7 @@ const WIRE_REACH = {
       max_nudges_per_day: 4,
       min_hours_between_calls: 6,
       travel_lead_minutes: 90,
-      approval_wait_minutes: 120,
+      approval_wait_minutes: 15,
     },
     saved: true,
     availability: {

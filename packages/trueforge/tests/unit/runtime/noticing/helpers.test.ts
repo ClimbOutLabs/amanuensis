@@ -60,9 +60,7 @@ describe('suggestAlwaysImportant', () => {
         'Sam is at sam@example.com',
       ],
       settings: {
-        always_important: [
-          { address: 'alex@example.com', name: null, source: 'settings', added_at: '2026-11-01T00:00:00.000Z' },
-        ],
+        always_important: [{ address: 'alex@example.com', source: 'settings', added_at: '2026-11-01T00:00:00.000Z' }],
         dismissed_suggestions: ['SAM@example.com'],
       },
     });

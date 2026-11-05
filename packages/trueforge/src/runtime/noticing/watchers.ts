@@ -1,3 +1,5 @@
+import { APPROVAL_EXPIRY_MINUTES } from '@truefoundry/trueforge-core/core/permissions/approvalExpiry';
+
 import type { NoticingEvent, ReachSettings } from '../../schemas/reach';
 import { checkSender } from './authenticationResults';
 import { findDeadline, looksLikeBill, saysPaid } from './deadlines';
@@ -17,7 +19,7 @@ const BILL_TRACK_LIMIT_MS = 62 * 86_400_000;
 /** The part of a message the watchers and the model read. */
 const READ_CHARACTERS = 1500;
 /** Calendar clashes are looked for this far ahead. */
-export const CLASH_WINDOW_MS = 24 * 3_600_000;
+const CLASH_WINDOW_MS = 24 * 3_600_000;
 /** Most new messages one pass reads. */
 const MAIL_PASS_LIMIT = 100;
 
@@ -284,17 +286,22 @@ export async function watchApprovals({
   now: Date;
 }): Promise<NoticingEvent[]> {
   const limitMs = settings.approval_wait_minutes * 60_000;
+  const expiryMs = APPROVAL_EXPIRY_MINUTES * 60_000;
   const waiting = await source.listWaiting(owner);
+  // A request that has waited past its expiry is closed when the person opens the chat, so there is nothing to ask.
   return waiting
-    .filter(item => now.getTime() - item.waiting_since.getTime() >= limitMs)
+    .filter(item => {
+      const waited = now.getTime() - item.waiting_since.getTime();
+      return waited >= limitMs && waited < expiryMs;
+    })
     .map(item => {
-      const hours = Math.max(1, Math.round((now.getTime() - item.waiting_since.getTime()) / 3_600_000));
+      const minutes = Math.max(1, Math.round((now.getTime() - item.waiting_since.getTime()) / 60_000));
       return {
         id: `approval_waiting:${item.session_id}:${item.turn_id}`,
         kind: 'approval_waiting',
         evidence: 'own',
-        summary: `Something has been waiting for your ok for about ${String(hours)} ${hours === 1 ? 'hour' : 'hours'}.`,
-        facts: `A request for the person's ok has waited about ${String(hours)} hours.`,
+        summary: `Something has been waiting for your ok for about ${String(minutes)} minutes. It closes after ${String(APPROVAL_EXPIRY_MINUTES)}.`,
+        facts: `A request for the person's ok has waited about ${String(minutes)} minutes.`,
         matched: `An approval has waited longer than the ${String(settings.approval_wait_minutes)} minutes you chose.`,
         link: { type: 'chat', session_id: item.session_id },
         mail_ref: null,

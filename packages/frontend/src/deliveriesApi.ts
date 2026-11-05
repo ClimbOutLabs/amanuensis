@@ -140,7 +140,7 @@ function parseSettings(value: unknown): ReachSettings {
     maxNudgesPerDay: numberOr(raw.max_nudges_per_day, 5),
     minHoursBetweenCalls: numberOr(raw.min_hours_between_calls, 6),
     travelLeadMinutes: numberOr(raw.travel_lead_minutes, 90),
-    approvalWaitMinutes: numberOr(raw.approval_wait_minutes, 120),
+    approvalWaitMinutes: numberOr(raw.approval_wait_minutes, 15),
   };
 }
 
@@ -171,7 +171,7 @@ function settingsBody(settings: ReachSettings): unknown {
     channels: { texts: settings.textsOn, calls: settings.callsOn },
     always_important: settings.alwaysImportant.map(sender => ({
       address: sender.address,
-      name: sender.name,
+      ...(sender.name === null ? {} : { name: sender.name }),
       source: sender.source,
       added_at: sender.addedAt,
     })),
