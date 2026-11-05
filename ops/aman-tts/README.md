@@ -2,7 +2,8 @@
 
 Dedicated CPU-only container that reads reply text aloud with Kokoro-82M
 (82M parameters, int8 ONNX, ~92 MB) through onnxruntime. It takes plain or
-Markdown text and returns a WAV file. Nothing is written to disk and no text is
+Markdown text and returns audio: a WAV file, raw samples, or telephone audio, all
+or one sentence at a time. Nothing is written to disk and no text is
 logged (only character counts, durations and error codes).
 
 ## API contract
@@ -11,20 +12,31 @@ Base URL (container-internal): `http://aman-tts:8002`
 
 ### `POST /v1/speak`
 
-- Request: `Content-Type: application/json`, body `{"text": "...", "voice": "af_heart"}`.
-  `voice` is optional; the default is `af_heart`.
+- Request: `Content-Type: application/json`, body
+  `{"text": "...", "voice": "af_heart", "format": "wav", "stream": false}`.
+  `voice`, `format` and `stream` are optional; the default voice is `af_heart`.
+- `format`: `wav` (default), `pcm16` (24 kHz mono 16-bit little-endian samples, no
+  header, `audio/L16`) or `mulaw8k` (8 kHz G.711 mu-law for phone lines, `audio/basic`).
+  The `x-sample-rate` header says which rate the bytes are at. The mu-law path
+  filters to the phone band, then drops to 8 kHz; only numpy does this.
+- `stream`: `true` (with `pcm16` or `mulaw8k`) sends the audio one sentence at a
+  time over a chunked response, so the first bytes arrive after the first sentence
+  is made, not the whole reply. Sentences are separated by a short pause. A text
+  that is too long or has nothing to read still gets its error status before any
+  audio. A caller that hangs up stops the work. `wav` cannot stream, because its
+  header holds the length.
 - Text cap: 5000 characters (`AMAN_TTS_MAX_TEXT_CHARS`); longer text is
   refused with 413. The body is also capped while it streams in.
 - Sound cap: 3000 sounds after numbers and symbols are spelled out
   (`AMAN_TTS_MAX_PHONEMES`, about two minutes of speech); more is refused with 413.
   This is the cap that keeps memory in bounds: measured at the cap, a run peaks near
   500 MB, under the 1 GB the container gets.
-- 200 response: `audio/wav`, 24 kHz mono 16-bit PCM, with `x-voice` and
-  `x-model` headers.
-- Errors: `400` bad JSON, empty text, unknown voice, or nothing to read aloud;
+- 200 response: `audio/wav` by default (24 kHz mono 16-bit PCM), with `x-voice`,
+  `x-model` and `x-sample-rate` headers.
+- Errors: `400` bad JSON, empty text, unknown voice or format, `stream` without a streamable format, or nothing to read aloud;
   `413` text too long; `429` busy (with `Retry-After`); `503` model not loaded.
 
-One synthesis runs at a time; a single run already uses every configured thread.
+One synthesis runs at a time, a stream included; a single run already uses every configured thread.
 At most two more requests wait (`AMAN_TTS_MAX_WAITING`); more get 429. A request
 whose caller hangs up stops between pieces of text and is never finished.
 
