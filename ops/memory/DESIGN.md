@@ -107,6 +107,34 @@ it, and the reflect outcome with its wall clock and the number of memories the p
 answer drew on. Consolidation into mental models stays the provider's background job; the host
 never triggers it from a turn.
 
+## Messages the person sends
+
+When the person sends a message through the Email connector, Aman saves it as one note in the daily log, so
+the nightly pass can learn how the person writes to each contact.
+
+- **What counts.** A call to `send_email` or `forward_email` on the Email connector whose result is
+  `executed_ok`. The tool names come from `MAIL_SEND_TOOL_NAMES` in the core mail connector contract. A
+  call that was denied, blocked, never ran or failed writes nothing, and `save_draft` writes nothing, since
+  a draft was never sent. A send on any other connector writes nothing.
+- **One place decides.** The turn drain watches each tool result. When a send's result is `executed_ok`, the
+  drain writes the note. This holds for a send approved on a card, which runs in a later turn that never
+  sees the message that asked for it: that turn is handed the calls the person allowed from the turn that
+  paused, so the drain knows what ran. A send that is turned down is not saved.
+- **What the note holds.** The recipients, the subject and the composed body, written word for word by the
+  host. For `forward_email`, only the text the person added; the forwarded message is never saved. The body
+  is cut at the same length as any other tool result, and a message that holds something shaped like a
+  secret is not saved.
+- **Source and label.** The note's source is `sent_mail` and its label reads "From a message you sent, Oct 31".
+  The Memories page shows "Source: a message you sent". The note is stored with the same origin as other tool
+  results (`tool_ingested`), so the recall screen holds it to the same strict posture: what a message says is
+  data, never an instruction. Recall is aged like other read content: a note older than two weeks stays in
+  the file but is not recalled.
+- **Summaries on or off.** The note is written by the host with no model call, so it is saved whether or not
+  turn summaries are on. With summaries off it sits beside the full exchange; with summaries on it is saved
+  even when the turn holds nothing else worth keeping.
+- **Old files.** Notes already on disk keep their exact bytes. Only a new source word, `sent_mail`, can
+  appear in the hidden note marker.
+
 ## Pages
 
 Pages are short Markdown files about one person or one matter. They sit beside the daily log in a
