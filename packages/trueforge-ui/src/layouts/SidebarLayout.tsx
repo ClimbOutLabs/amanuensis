@@ -32,6 +32,8 @@ import { AgentConfigDrawerContainer } from '../containers/AgentConfigDrawerConta
 import { Thread } from '../containers/Thread.js';
 import { ThreadListContainer } from '../containers/ThreadListContainer.js';
 import { useOpenMostRecentChat } from '../containers/useOpenMostRecentChat.js';
+import { useOptionalDeliveries } from '../deliveries/DeliveriesContext.js';
+import { DeliveryBell } from '../deliveries/DeliveryBell.js';
 import { HelpNewChatBridge } from '../help/HelpStuckButton.js';
 import { Icon } from '../icons/Icon.js';
 import { shellIsCreateAgent, useOptionalShellMode, type ShellMode } from '../server/ShellModeContext.js';
@@ -149,6 +151,14 @@ function SidebarRail({
       <div className="flex h-14 w-full shrink-0 items-center justify-center text-text-primary">
         <BrandLogo variant={chrome.collapsedVariant} className={brandLogoClassName} />
       </div>
+      {/* The bell sits under the brand, outside the scrolling nav, so its panel is not clipped by the
+          nav's scroll area. Using it is not a navigation: like Chats, its clicks must not dismiss
+          the mobile drawer, since the panel shows inside it. The one exception is opening an item,
+          which does navigate; the bell reports that through onNavigate so the drawer closes over
+          the chat it opened instead of staying in front of it. */}
+      <div className="flex w-full shrink-0 items-center justify-center pb-1" onClick={event => event.stopPropagation()}>
+        <DeliveryBell onNavigate={onNavigate} />
+      </div>
       {/* One scrolling flex column: on a short viewport it scrolls (min-h-0 + overflow-y-auto) instead
           of the footer painting over the nav. The footer sits at the bottom when there is room. */}
       <nav className="flex min-h-0 flex-1 flex-col items-center gap-1 overflow-y-auto p-1" aria-label="Sidebar">
@@ -238,6 +248,10 @@ export function SidebarLayout({ className }: { className?: string }) {
   const historyCollapsed = shell?.historyCollapsed === true;
   const showRecentHistory = recentHistoryAvailable && !historyCollapsed;
   const railEntry = railEntryFor(shell);
+  // On a phone the rail is inside the drawer, so the bell's badge is out of sight until the drawer
+  // opens; the Navigation button carries the same unread count so it can be seen at a glance.
+  const deliveries = useOptionalDeliveries();
+  const unreadCount = deliveries?.unreadCount ?? 0;
   const openMostRecentChat = useOpenMostRecentChat();
   const chatListRef = useRef<HTMLElement>(null);
   // Opened from the rail, the docked chat list behaves like a menu: it closes on a press outside,
@@ -348,12 +362,25 @@ export function SidebarLayout({ className }: { className?: string }) {
                 <button
                   ref={menuBtnRef}
                   type="button"
-                  aria-label="Navigation"
+                  aria-label={
+                    unreadCount > 0
+                      ? `Navigation, ${String(unreadCount)} unread ${unreadCount === 1 ? 'notification' : 'notifications'}`
+                      : 'Navigation'
+                  }
                   aria-expanded={mobileNavOpen}
-                  className={auiButtonClass({ variant: 'ghost', size: 'icon' })}
+                  className={cn(auiButtonClass({ variant: 'ghost', size: 'icon' }), 'relative')}
                   onClick={() => setMobileNavOpen(true)}
                 >
                   <Icon name="bars" />
+                  {unreadCount > 0 ? (
+                    <span
+                      data-role="navigation-unread-count"
+                      aria-hidden
+                      className="bg-gold text-text-primary absolute -top-0.5 -right-0.5 min-w-4 rounded-full px-1 text-center text-[0.625rem] leading-4 font-semibold"
+                    >
+                      {unreadCount > 99 ? '99+' : unreadCount}
+                    </span>
+                  ) : null}
                 </button>
               </div>
             ) : null

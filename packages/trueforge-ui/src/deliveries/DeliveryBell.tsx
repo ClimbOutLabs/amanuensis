@@ -60,8 +60,13 @@ function DeliveryRow({ item, onOpen }: { item: DeliveryItem; onOpen: (item: Deli
   );
 }
 
-/** The bell in the top bar, with the unread count and the panel of recent items. Absent a feed, it draws nothing. */
-export function DeliveryBell() {
+/**
+ * The bell in the left panel, with the unread count and the panel of recent items. Absent a feed, it draws nothing.
+ * `onNavigate` runs when an item opens what it leads to, so a container that must react to a navigation
+ * (the mobile drawer, which would otherwise stay open over the chat) can do so; opening the panel and
+ * marking items seen are not navigations and never call it.
+ */
+export function DeliveryBell({ onNavigate }: { onNavigate?: () => void }) {
   const deliveries = useOptionalDeliveries();
   const shell = useOptionalShellMode();
   const rootRef = useRef<HTMLDivElement>(null);
@@ -92,6 +97,7 @@ export function DeliveryBell() {
     if (item.link !== null && shell !== null) {
       deliveries.setPanelOpen(false);
       openDeliveryLink({ shell, link: item.link });
+      onNavigate?.();
     }
   };
 
@@ -120,7 +126,7 @@ export function DeliveryBell() {
         <div
           role="dialog"
           aria-label="Notifications"
-          className="border-border bg-paper absolute top-full right-0 z-50 mt-2 flex max-h-[28rem] w-[22rem] max-w-[calc(100vw-2rem)] flex-col rounded-xl border shadow-xl"
+          className="border-border bg-paper absolute top-full left-0 z-50 mt-2 flex max-h-[28rem] w-[22rem] max-w-[calc(100vw-2rem)] flex-col rounded-xl border shadow-xl"
         >
           <div className="border-border flex items-center justify-between border-b px-3 py-2">
             <h2 className="text-text-primary text-sm font-semibold">Notifications</h2>
