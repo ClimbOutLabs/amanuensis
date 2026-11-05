@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState, type FC, type FormEvent } from 'react';
 
+import { auiSettingsInputClass } from '../atoms/lib/inputClasses.js';
 import { Button } from '../atoms/primitives/Button.js';
 import { assistantDisplayName } from '../utils/assistantName.js';
 import {
@@ -12,9 +13,6 @@ import {
   type PersonalizationApi,
   type PersonalizationProfile,
 } from './PersonalizationContext.js';
-
-const inputClassName =
-  'w-full rounded-md border border-border/70 bg-input-box-bg px-3 py-2.5 text-sm text-text-primary outline-none transition-colors placeholder:text-text-muted focus-visible:border-focus-ring focus-visible:ring-2 focus-visible:ring-focus-ring/50';
 
 export type PersonalizationPanelProps = {
   /** Optional for standalone use; Settings inherits the host provider. */
@@ -142,7 +140,7 @@ const PersonalizationPanelContent: FC<Pick<PersonalizationPanelProps, 'onProfile
                   </label>
                   <input
                     id="personalization-user-name"
-                    className={inputClassName}
+                    className={auiSettingsInputClass()}
                     autoComplete="name"
                     value={draft.user_name ?? ''}
                     onChange={event => updateDraft('user_name', event.target.value)}
@@ -159,7 +157,7 @@ const PersonalizationPanelContent: FC<Pick<PersonalizationPanelProps, 'onProfile
                   </label>
                   <input
                     id="personalization-address-as"
-                    className={inputClassName}
+                    className={auiSettingsInputClass()}
                     value={draft.address_as ?? ''}
                     onChange={event => updateDraft('address_as', event.target.value)}
                     placeholder="For example, Sam, or Dr. Rivera"
@@ -179,7 +177,7 @@ const PersonalizationPanelContent: FC<Pick<PersonalizationPanelProps, 'onProfile
                 </label>
                 <textarea
                   id="personalization-user-profile"
-                  className={`${inputClassName} min-h-24 resize-y`}
+                  className={auiSettingsInputClass('min-h-24 resize-y')}
                   value={draft.user_profile ?? ''}
                   onChange={event => updateDraft('user_profile', event.target.value)}
                   placeholder="Where you live, what you work on, what you care about"
@@ -193,7 +191,7 @@ const PersonalizationPanelContent: FC<Pick<PersonalizationPanelProps, 'onProfile
                   {draft.pinned_preferences.map((preference, index) => (
                     <div className="flex flex-col gap-2 sm:flex-row" key={preferenceIds[index] ?? index}>
                       <input
-                        className={inputClassName}
+                        className={auiSettingsInputClass()}
                         aria-label={`Pinned preference ${index + 1}`}
                         value={preference}
                         onChange={event => {
@@ -263,7 +261,7 @@ const PersonalizationPanelContent: FC<Pick<PersonalizationPanelProps, 'onProfile
                   </label>
                   <input
                     id="personalization-assistant-name"
-                    className={inputClassName}
+                    className={auiSettingsInputClass()}
                     value={draft.assistant_name ?? ''}
                     onChange={event => updateDraft('assistant_name', event.target.value)}
                     placeholder={assistantDisplayName(null)}
@@ -275,7 +273,7 @@ const PersonalizationPanelContent: FC<Pick<PersonalizationPanelProps, 'onProfile
                   </label>
                   <input
                     id="personalization-voice"
-                    className={inputClassName}
+                    className={auiSettingsInputClass()}
                     value={draft.voice_guidance ?? ''}
                     onChange={event => updateDraft('voice_guidance', event.target.value)}
                     placeholder="Warm, direct, concise…"
@@ -292,7 +290,7 @@ const PersonalizationPanelContent: FC<Pick<PersonalizationPanelProps, 'onProfile
                 </label>
                 <textarea
                   id="personalization-identity"
-                  className={`${inputClassName} min-h-24 resize-y`}
+                  className={auiSettingsInputClass('min-h-24 resize-y')}
                   value={draft.assistant_identity ?? ''}
                   onChange={event => updateDraft('assistant_identity', event.target.value)}
                   placeholder="How should it understand its role?"

@@ -10,6 +10,7 @@ import {
 } from '@/atoms/memory/MemoryVaultPanels.js';
 import { useMemoryVaultState } from '@/atoms/memory/useMemoryVaultState.js';
 import { Spinner } from '@/atoms/primitives/Spinner.js';
+import { useOptionalPersonalization } from '@/components/PersonalizationContext.js';
 import { readMemoryBackend } from '@/plugins/trueforge-agent-server-adapter/lists.js';
 import { useServerCapabilities, useServerCapabilitiesSettled } from '@/server/ServerContext.js';
 
@@ -45,14 +46,21 @@ const MEMORY_TABS: ReadonlyArray<{ id: MemoryTab; label: string }> = [
  * Opens on Memories. When the server reports no memory backend once capabilities settle,
  * memory is not set up yet, so it opens on Settings instead, where setup lives. Any tab the
  * user picks while the section is open wins.
+ *
+ * The Learned profile tab edits fields on the personalization profile, so it is only
+ * offered when the host provides personalization; without a provider the panel has
+ * nothing to read or save through and must not mount.
  */
 export default function MemorySection() {
   const capabilities = useServerCapabilities();
   const settled = useServerCapabilitiesSettled();
   const backend = readMemoryBackend(capabilities);
   const state = useMemoryVaultState();
+  const personalization = useOptionalPersonalization();
   const [tab, setTab] = useState<MemoryTab>('memories');
   const userPickedRef = useRef(false);
+
+  const tabs = personalization === null ? MEMORY_TABS.filter(item => item.id !== 'learned') : MEMORY_TABS;
 
   useEffect(() => {
     if (userPickedRef.current) return;
@@ -68,7 +76,7 @@ export default function MemorySection() {
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-4">
-      <MemoryTabs ariaLabel="Memory sections" tabs={MEMORY_TABS} activeTab={tab} onTabChange={selectTab} />
+      <MemoryTabs ariaLabel="Memory sections" tabs={tabs} activeTab={tab} onTabChange={selectTab} />
 
       {tab === 'memories' ? (
         <MemoryVaultFactsPanel
@@ -78,7 +86,7 @@ export default function MemorySection() {
         />
       ) : null}
       {tab === 'sharing' ? <MemoryVaultSharingPanel state={state} /> : null}
-      {tab === 'learned' ? (
+      {tab === 'learned' && personalization !== null ? (
         <Suspense fallback={<MemoryPanelFallback />}>
           <LearnedProfilePanel />
         </Suspense>

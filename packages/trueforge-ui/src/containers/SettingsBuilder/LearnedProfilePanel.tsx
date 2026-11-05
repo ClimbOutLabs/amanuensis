@@ -3,6 +3,7 @@
 import { useEffect, useState, type FormEvent } from 'react';
 
 import { Markdown } from '../../atoms/Markdown.js';
+import { auiSettingsInputClass } from '../../atoms/lib/inputClasses.js';
 import { Button } from '../../atoms/primitives/Button.js';
 import { Switch } from '../../atoms/primitives/Switch.js';
 import {
@@ -10,9 +11,6 @@ import {
   useAssistantDisplayName,
   usePersonalization,
 } from '../../components/PersonalizationContext.js';
-
-const inputClassName =
-  'w-full rounded-md border border-border/70 bg-input-box-bg px-3 py-2.5 text-sm text-text-primary outline-none transition-colors placeholder:text-text-muted focus-visible:border-focus-ring focus-visible:ring-2 focus-visible:ring-focus-ring/50';
 
 /**
  * Settings > Memory > Learned profile: the document the host learns from conversations,
@@ -109,7 +107,7 @@ export default function LearnedProfilePanel() {
               <textarea
                 id="personalization-learned-profile"
                 aria-label="Learned profile document"
-                className={`${inputClassName} mt-3 min-h-40 resize-y font-mono`}
+                className={auiSettingsInputClass('mt-3 min-h-40 resize-y font-mono')}
                 value={learnedProfile}
                 onChange={event => setLearnedProfile(event.target.value)}
               />

@@ -107,22 +107,39 @@ function OpenSettingsButton() {
   );
 }
 
-function TestShell({ server, children }: { server: AgentUIServer; children?: ReactNode }) {
+function TestShell({
+  server,
+  children,
+  withPersonalization = true,
+}: {
+  server: AgentUIServer;
+  children?: ReactNode;
+  withPersonalization?: boolean;
+}) {
+  const content = (
+    <>
+      <OpenSettingsButton />
+      <TruefoundrySettingsBuilder />
+      {children}
+    </>
+  );
   return (
     <ServerProvider server={server}>
       <DraftCatalogProvider>
         <ShellModeProvider>
-          <PersonalizationProvider
-            api={{
-              getProfile: async () => null,
-              updateProfile: async profile => profile,
-              deleteProfile: async () => {},
-            }}
-          >
-            <OpenSettingsButton />
-            <TruefoundrySettingsBuilder />
-            {children}
-          </PersonalizationProvider>
+          {withPersonalization ? (
+            <PersonalizationProvider
+              api={{
+                getProfile: async () => null,
+                updateProfile: async profile => profile,
+                deleteProfile: async () => {},
+              }}
+            >
+              {content}
+            </PersonalizationProvider>
+          ) : (
+            content
+          )}
         </ShellModeProvider>
       </DraftCatalogProvider>
     </ServerProvider>
@@ -201,6 +218,19 @@ describe('Settings Memory section', () => {
     expect(await screen.findByRole('heading', { name: 'Learned profile' })).toBeInTheDocument();
     expect(screen.getByText(/updates this from your conversations/)).toBeInTheDocument();
     expect(screen.getByRole('switch', { name: 'Learn from conversations' })).toBeInTheDocument();
+  });
+
+  it('hides the Learned profile tab when the host has no personalization provider', async () => {
+    render(<TestShell server={createServer({ memorySetUp: true })} withPersonalization={false} />);
+    await openMemorySection();
+
+    const memoryTabs = screen.getByRole('tablist', { name: 'Memory sections' });
+    expect(
+      within(memoryTabs)
+        .getAllByRole('tab')
+        .map(tab => tab.textContent),
+    ).toEqual(['Memories', 'Sharing', 'Import and export', 'Settings']);
+    expect(await screen.findByText('The user drinks tea in the morning.')).toBeInTheDocument();
   });
 
   it('shows export and import on their own sub-tab, not below the list', async () => {
