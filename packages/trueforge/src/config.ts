@@ -1805,6 +1805,18 @@ export interface SharedServerConfiguration {
    */
   TTS_URL: string;
   /**
+   * Whether spoken replies and voice mode may use the `aman-tts` sidecar. Off, voice mode does not start
+   * and replies are read by the browser's own voice.
+   * Env: `TTS_ENABLED`. Default true.
+   */
+  TTS_ENABLED: boolean;
+  /**
+   * Folder that holds the small listening model voice mode uses to find where speech starts and
+   * ends. It is downloaded once, checked against a pinned hash, and kept here.
+   * Env: `VOICE_VAD_MODEL_DIR`. Default `<MEMORY_MARKDOWN_DIR>/.voice-model`.
+   */
+  VOICE_VAD_MODEL_DIR: string;
+  /**
    * Base URL of the Nominatim-compatible geocoder used by the embedded maps tools.
    * Env: `MAPS_GEOCODER_URL`. Default `https://nominatim.openstreetmap.org`.
    */
@@ -2616,6 +2628,10 @@ const shared: SharedServerConfiguration = {
   MEMORY_SCREEN_URL: getEnv('MEMORY_SCREEN_URL', { defaultValue: '' }) ?? '',
   STT_URL: getEnv('STT_URL', { defaultValue: 'http://aman-stt:8001' }) ?? 'http://aman-stt:8001',
   TTS_URL: getEnv('TTS_URL', { defaultValue: 'http://aman-tts:8002' }) ?? 'http://aman-tts:8002',
+  TTS_ENABLED: parseBoolean({ envKey: 'TTS_ENABLED', raw: getEnv('TTS_ENABLED'), defaultValue: true }),
+  VOICE_VAD_MODEL_DIR:
+    getEnv('VOICE_VAD_MODEL_DIR') ??
+    path.join(getEnv('MEMORY_MARKDOWN_DIR', { defaultValue: './data/memory' }) ?? './data/memory', '.voice-model'),
   MAPS_GEOCODER_URL: parseMapsUrl({
     envKey: 'MAPS_GEOCODER_URL',
     raw: getEnv('MAPS_GEOCODER_URL'),

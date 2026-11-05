@@ -22,7 +22,8 @@ import {
   type VoiceTranscription,
 } from '../schemas/voice';
 import { SpeechRateLimiter } from '../voice/speechRateLimit';
-import { probeSttHealth, sttBaseUrl } from '../voice/sttAvailability';
+import { probeSttHealth } from '../voice/sttAvailability';
+import { forwardToSidecar } from '../voice/sttClient';
 
 export interface VoiceRouterDeps {
   logger: Logger;
@@ -38,16 +39,6 @@ export interface VoiceRouterDeps {
  * while streaming the body, before the full upload is buffered.
  */
 const MAX_AUDIO_BYTES = 30 * 1024 * 1024;
-/** Backend-to-sidecar forward timeout; the browser-side timeout is 65s. */
-const STT_TRANSCRIBE_TIMEOUT_MS = 60_000;
-/**
- * An immediate 503 (sidecar up but the model not warm yet) is retried this many
- * times, spaced STT_RETRY_DELAY_MS apart, for a retry budget under 10s, well
- * inside the 65s client timeout. Every other outcome, including a forward
- * timeout, fails immediately with no retry.
- */
-const STT_TRANSCRIBE_MAX_ATTEMPTS = 3;
-const STT_RETRY_DELAY_MS = 2_000;
 /** Model label the sidecar serves; reported by /status while the probe succeeds. */
 const STT_MODEL_LABEL = 'whisper-small-int8';
 /**
@@ -125,34 +116,6 @@ async function readBoundedAudio(c: Context): Promise<Uint8Array> {
 async function probeStt(logger: Logger): Promise<VoiceStatus> {
   const healthy = await probeSttHealth({ logger });
   return healthy ? { stt_available: true, model: STT_MODEL_LABEL } : { stt_available: false, model: '' };
-}
-
-/** Resolves after the given delay; backs the bounded 503 retry backoff. */
-function delay(ms: number): Promise<void> {
-  return new Promise(resolve => {
-    setTimeout(resolve, ms);
-  });
-}
-
-/**
- * POSTs buffered audio to the sidecar's transcribe endpoint. Only immediate 503
- * responses are retried; a forward timeout or connection failure rejects and
- * the caller fails immediately with no retry.
- */
-async function forwardToSidecar(audio: Uint8Array): Promise<Response> {
-  const url = `${sttBaseUrl()}/v1/transcribe`;
-  for (let attempt = 1; ; attempt += 1) {
-    const upstream = await fetch(url, {
-      method: 'POST',
-      headers: { 'content-type': 'audio/wav', 'content-length': String(audio.byteLength) },
-      body: audio,
-      signal: AbortSignal.timeout(STT_TRANSCRIBE_TIMEOUT_MS),
-    });
-    if (upstream.status !== 503 || attempt >= STT_TRANSCRIBE_MAX_ATTEMPTS) {
-      return upstream;
-    }
-    await delay(STT_RETRY_DELAY_MS);
-  }
 }
 
 /** Voice router (mounted at `/api/v1/voice`). */
