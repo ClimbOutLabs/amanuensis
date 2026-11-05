@@ -49,6 +49,7 @@ import type { ReflectBudget } from './runtime/memory/hindsightClient';
 import { parseModelPrices, type ModelPrices } from './runtime/modelPricing';
 import { DEFAULT_TOKEN_FACTORY_MODEL } from './runtime/tokenFactoryDefaults';
 import { MAX_CODE_MODE_SOCKET_PARENT_BYTES } from './sandbox/local/core/CodeModeUdsTransport';
+import { isGoModuleHostName } from './sandbox/mirrors/goMirrorPath';
 
 const DEFAULT_PORT = 8790;
 /** Loopback default; container images set HOST=0.0.0.0 so probes and Service traffic reach the process. */
@@ -392,6 +393,63 @@ export function parseCalendarAccountSecret(raw: string | undefined): string | un
   return trimmed;
 }
 
+/** A web push (VAPID) key pair and contact, or none. Push stays off unless all three settings are set. */
+export interface WebPushSettings {
+  publicKey: string;
+  privateKey: string;
+  subject: string;
+}
+
+const VAPID_PUBLIC_KEY_BYTES = 65;
+const VAPID_PRIVATE_KEY_BYTES = 32;
+
+function base64UrlByteLength(value: string): number | undefined {
+  if (!/^[A-Za-z0-9_-]+$/.test(value)) {
+    return undefined;
+  }
+  return Buffer.from(value, 'base64url').length;
+}
+
+/**
+ * The contact every push names when WEB_PUSH_SUBJECT is unset. Push services see it on each notice, so it is the
+ * project's public page rather than anything about the person.
+ */
+export const DEFAULT_WEB_PUSH_SUBJECT = 'https://github.com/ClimbOutLabs/amanuensis';
+
+/**
+ * Parses `WEB_PUSH_PUBLIC_KEY`, `WEB_PUSH_PRIVATE_KEY` and the optional `WEB_PUSH_SUBJECT`. No keys means push is off.
+ * One key without the other, or a value that is not a key, fails the boot with the one thing to do next.
+ */
+export function parseWebPushSettings(raw: {
+  publicKey: string | undefined;
+  privateKey: string | undefined;
+  subject: string | undefined;
+}): WebPushSettings | undefined {
+  const publicKey = blankToUndefined(raw.publicKey?.trim());
+  const privateKey = blankToUndefined(raw.privateKey?.trim());
+  const subject = blankToUndefined(raw.subject?.trim()) ?? DEFAULT_WEB_PUSH_SUBJECT;
+  if (publicKey === undefined && privateKey === undefined) {
+    return undefined;
+  }
+  if (publicKey === undefined || privateKey === undefined) {
+    throw new Error(
+      'WEB_PUSH_PUBLIC_KEY and WEB_PUSH_PRIVATE_KEY must both be set, or both left out. Run the installer again to make a new pair.',
+    );
+  }
+  if (base64UrlByteLength(publicKey) !== VAPID_PUBLIC_KEY_BYTES) {
+    throw new Error('WEB_PUSH_PUBLIC_KEY is not a push key. Run the installer again to make a new pair.');
+  }
+  if (base64UrlByteLength(privateKey) !== VAPID_PRIVATE_KEY_BYTES) {
+    throw new Error('WEB_PUSH_PRIVATE_KEY is not a push key. Run the installer again to make a new pair.');
+  }
+  if (!/^(mailto:[^\s@]+@[^\s@]+|https:\/\/\S+)$/.test(subject)) {
+    throw new Error(
+      'WEB_PUSH_SUBJECT must start with mailto: or https://. Fix it, or remove the line to use the default.',
+    );
+  }
+  return { publicKey, privateKey, subject };
+}
+
 /**
  * Parses `BROWSER_URL`: the browser sidecar's private HTTP address, such as the compose sidecar's
  * `http://browser-relay:8792`. Unset or blank means no browser sidecar is configured. Anything else that is not
@@ -688,6 +746,28 @@ export function parsePublicBaseUrl(raw: string | undefined, options: { allowPath
   }
   const path = segments.length === 0 ? '' : `/${segments.join('/')}`;
   return `${parsed.origin}${path}`;
+}
+
+/**
+ * Parses `SANDBOX_MIRROR_GO_EXTRA_HOSTS`: comma-separated lower-case host names such as `modules.example.com` (never IP addresses).
+ * A port, path, wildcard or upper-case letter fails the boot, since a dropped typo would quietly leave a
+ * module host blocked and a loose entry would suggest a wider match than the mirror makes.
+ */
+export function parseGoModuleHosts(raw: string | undefined): string[] {
+  const hosts = new Set<string>();
+  for (const entry of (raw ?? '').split(',')) {
+    const text = entry.trim();
+    if (text === '') {
+      continue;
+    }
+    if (!isGoModuleHostName(text)) {
+      throw new Error(
+        `SANDBOX_MIRROR_GO_EXTRA_HOSTS has an entry that is not a valid host name: "${text}". Each entry must be a lower-case host name with a dot, like example.com: no port, path, wildcard, IP address or single word such as localhost. Fix or remove that entry in the .env file, then restart the server.`,
+      );
+    }
+    hosts.add(text);
+  }
+  return [...hosts];
 }
 
 /** The addresses of proxies believed about visitor addresses: plain IP addresses only, so a name cannot widen it. */
@@ -1341,6 +1421,11 @@ export interface SharedServerConfiguration {
    */
   CALENDAR_ACCOUNT_SECRET: string | undefined;
   /**
+   * The VAPID key pair the server signs web push with, and the contact push services see. Push is off when the keys
+   * are unset. Env: `WEB_PUSH_PUBLIC_KEY`, `WEB_PUSH_PRIVATE_KEY`, `WEB_PUSH_SUBJECT` (defaults to the project page).
+   */
+  WEB_PUSH: WebPushSettings | undefined;
+  /**
    * Turns on Aman's own browser. Off by default: with it off, the browser_* tools do not exist, whatever
    * BROWSER_URL and BROWSER_SECRET are set to. Env: `BROWSER_ENABLED`. Default false.
    */
@@ -1458,6 +1543,11 @@ export interface SharedServerConfiguration {
   SANDBOX_MIRROR_DOWNLOAD_MAX_BYTES: number;
   /** Largest total mirror cache, bytes. Env: `SANDBOX_MIRROR_CACHE_MAX_BYTES`. Default 10 GiB. */
   SANDBOX_MIRROR_CACHE_MAX_BYTES: number;
+  /**
+   * Further code hosts the Go mirror serves modules from, besides its built-in list: lower-case host names,
+   * comma-separated. Env: `SANDBOX_MIRROR_GO_EXTRA_HOSTS`. Default none.
+   */
+  SANDBOX_MIRROR_GO_EXTRA_HOSTS: string[];
   /**
    * Expected sandbox image as `<tag>@sha256:<64 hex chars>`. Never a bare
    * tag: the digest pin is enforced before any pull. Env: `SANDBOX_IMAGE`.
@@ -2326,6 +2416,11 @@ const shared: SharedServerConfiguration = {
   MAIL_EMAIL_MCP_URL: mailEmailMcpUrl,
   MAIL_SIDECAR_MCP_URL: mailSidecarMcpUrl,
   MAIL_EMAIL_ACCOUNT_URL: mailEmailAccountUrl,
+  WEB_PUSH: parseWebPushSettings({
+    publicKey: getEnv('WEB_PUSH_PUBLIC_KEY'),
+    privateKey: getEnv('WEB_PUSH_PRIVATE_KEY'),
+    subject: getEnv('WEB_PUSH_SUBJECT'),
+  }),
   MAIL_POLICY_FILE: parseOptionalPath(getEnv('MAIL_POLICY_FILE')),
   MAIL_POLICY_STATUS_FILE: parseOptionalPath(getEnv('MAIL_POLICY_STATUS_FILE')),
   CALENDAR_CONNECTOR_URL: calendarConnectorUrl,
@@ -2418,6 +2513,7 @@ const shared: SharedServerConfiguration = {
     raw: getEnv('SANDBOX_MIRROR_CACHE_MAX_BYTES'),
     defaultValue: 10 * 1024 * 1024 * 1024,
   }),
+  SANDBOX_MIRROR_GO_EXTRA_HOSTS: parseGoModuleHosts(getEnv('SANDBOX_MIRROR_GO_EXTRA_HOSTS')),
   SANDBOX_IMAGE: getEnv('SANDBOX_IMAGE', { defaultValue: '' }) ?? '',
   SANDBOX_RUNS_DIR: path.join(appDataDir, 'sandbox-runs'),
   SANDBOX_STATE_DIR: path.join(appDataDir, 'sandbox-state'),
@@ -2880,6 +2976,7 @@ export const SECRET_SETTING_NAMES = [
   'TRUEFOUNDRY_API_KEY',
   'TRUEFOUNDRY_SANDBOX_API_KEY',
   'POSTGRES_PASSWORD',
+  'WEB_PUSH_PRIVATE_KEY',
 ] as const;
 
 /** Connection URL settings: secret as a whole, and for the password inside. */
@@ -2912,6 +3009,7 @@ export type ConfiguredSecretSettings = Pick<
   SharedServerConfiguration,
   'TRUEFORGE_API_KEY' | 'NEBIUS_API_KEY' | 'MEMORY_SCREEN_AUTH_TOKEN' | 'OIDC'
 > &
+  Partial<Pick<SharedServerConfiguration, 'WEB_PUSH'>> &
   (
     | { STANDALONE: true }
     | ({ STANDALONE: false } & Pick<
@@ -2932,6 +3030,7 @@ export function getConfiguredSecretValues(config: ConfiguredSecretSettings = con
     NEBIUS_API_KEY: config.NEBIUS_API_KEY,
     MEMORY_SCREEN_AUTH_TOKEN: config.MEMORY_SCREEN_AUTH_TOKEN,
     OIDC_CLIENT_SECRET: config.OIDC?.OIDC_CLIENT_SECRET,
+    WEB_PUSH_PRIVATE_KEY: config.WEB_PUSH?.privateKey,
     ...(config.STANDALONE
       ? {}
       : {

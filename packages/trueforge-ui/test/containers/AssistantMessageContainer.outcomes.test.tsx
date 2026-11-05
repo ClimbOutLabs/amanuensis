@@ -1,15 +1,23 @@
 // @vitest-environment jsdom
 import { ThreadPrimitive, type ThreadMessageLike } from '@assistant-ui/react';
-import { render, screen } from '@testing-library/react';
+import { act, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { AssistantMessageContainer } from '@/containers/AssistantMessageContainer.js';
-import { RemindersProvider } from '@/reminders/RemindersContext.js';
+import { DeliveriesProvider } from '@/deliveries/DeliveriesContext.js';
+import { fakeServer } from '../deliveries/fakeDeliveriesApi.js';
 import { AgentDetailsHarness, settleAgentDetails } from './agentDetailsHarness.js';
 import { RuntimeHarness } from './RuntimeHarness.js';
 
 // The orb draws on a 2d canvas context, which jsdom does not implement; stub it like the
 // AssistantMessageContainer suite does.
+// This device could take notices but has not turned them on, so the offer is due.
+vi.mock('@/deliveries/pushDevice.js', () => ({
+  pushSupport: () => ({ blocker: null, permission: 'default' }),
+  currentPushSubscription: () => Promise.resolve(null),
+  enablePush: () => Promise.resolve(),
+}));
+
 vi.mock('thinking-orbs', () => ({
   ThinkingOrb: ({ state }: { state: string }) => <div data-testid="thinking-orb" data-state={state} />,
 }));
@@ -160,14 +168,11 @@ describe('AssistantMessageContainer browser notices offer', () => {
     window.localStorage.clear();
   });
 
-  /** The browser has not been asked yet, so the offer is due. */
-  function notificationsNotAsked() {
-    vi.stubGlobal(
-      'Notification',
-      class {
-        static permission: NotificationPermission = 'default';
-      },
-    );
+  /** The offer is decided after this device's push state is read. */
+  async function settleOffer() {
+    await act(async () => {
+      await new Promise(resolve => setTimeout(resolve, 0));
+    });
   }
 
   const fourReminders: ThreadMessageLike = {
@@ -187,53 +192,52 @@ describe('AssistantMessageContainer browser notices offer', () => {
     );
   }
 
-  it('offers notices once under the reply, not once per reminder, while details are off', () => {
-    notificationsNotAsked();
+  it('offers notices once under the reply, not once per reminder, while details are off', async () => {
     const { container } = render(
       <RuntimeHarness messages={[fourReminders]}>
-        <RemindersProvider>
+        <DeliveriesProvider api={fakeServer([]).api}>
           <ThreadPrimitive.Messages>{() => <AssistantMessageContainer />}</ThreadPrimitive.Messages>
-        </RemindersProvider>
+        </DeliveriesProvider>
       </RuntimeHarness>,
     );
+    await settleOffer();
     expect(container.querySelectorAll('[data-role="reminder-notification-prompt"]')).toHaveLength(1);
     expect(visiblePrompts(container)).toHaveLength(1);
   });
 
   it('offers notices once outside the step rows while details are on', async () => {
-    notificationsNotAsked();
     const { container } = render(
       <AgentDetailsHarness agentDetails="expanded" messages={[fourReminders]}>
-        <RemindersProvider>
+        <DeliveriesProvider api={fakeServer([]).api}>
           <ThreadPrimitive.Messages>{() => <AssistantMessageContainer />}</ThreadPrimitive.Messages>
-        </RemindersProvider>
+        </DeliveriesProvider>
       </AgentDetailsHarness>,
     );
+    await settleOffer();
     await settleAgentDetails();
     const prompts = container.querySelectorAll('[data-role="reminder-notification-prompt"]');
     expect(prompts).toHaveLength(1);
     expect(prompts[0]?.closest('[data-testid="assistant-message-agent-internals"]')).toBeNull();
   });
 
-  it('offers notices only under the latest reply that set a reminder', () => {
-    notificationsNotAsked();
+  it('offers notices only under the latest reply that set a reminder', async () => {
     const { container } = render(
       <RuntimeHarness
         messages={[reminderTurn('rem-1'), { role: 'user', content: 'and another' }, reminderTurn('rem-2')]}
       >
-        <RemindersProvider>
+        <DeliveriesProvider api={fakeServer([]).api}>
           <ThreadPrimitive.Messages>{() => <AssistantMessageContainer />}</ThreadPrimitive.Messages>
-        </RemindersProvider>
+        </DeliveriesProvider>
       </RuntimeHarness>,
     );
+    await settleOffer();
     const prompts = container.querySelectorAll('[data-role="reminder-notification-prompt"]');
     expect(prompts).toHaveLength(1);
     const roots = container.querySelectorAll('[data-role="assistant"]');
     expect(prompts[0] !== undefined && roots[roots.length - 1]?.contains(prompts[0])).toBe(true);
   });
 
-  it('does not offer notices when the reminder was declined', () => {
-    notificationsNotAsked();
+  it('does not offer notices when the reminder was declined', async () => {
     const declined: ThreadMessageLike = {
       role: 'assistant',
       content: [
@@ -243,16 +247,16 @@ describe('AssistantMessageContainer browser notices offer', () => {
     };
     const { container } = render(
       <RuntimeHarness messages={[declined]}>
-        <RemindersProvider>
+        <DeliveriesProvider api={fakeServer([]).api}>
           <ThreadPrimitive.Messages>{() => <AssistantMessageContainer />}</ThreadPrimitive.Messages>
-        </RemindersProvider>
+        </DeliveriesProvider>
       </RuntimeHarness>,
     );
+    await settleOffer();
     expect(container.querySelectorAll('[data-role="reminder-notification-prompt"]')).toHaveLength(0);
   });
 
-  it('does not offer notices while the reminder turn is still running', () => {
-    notificationsNotAsked();
+  it('does not offer notices while the reminder turn is still running', async () => {
     const running: ThreadMessageLike = {
       role: 'assistant',
       status: { type: 'running' },
@@ -260,11 +264,12 @@ describe('AssistantMessageContainer browser notices offer', () => {
     };
     const { container } = render(
       <RuntimeHarness messages={[running]} isRunning>
-        <RemindersProvider>
+        <DeliveriesProvider api={fakeServer([]).api}>
           <ThreadPrimitive.Messages>{() => <AssistantMessageContainer />}</ThreadPrimitive.Messages>
-        </RemindersProvider>
+        </DeliveriesProvider>
       </RuntimeHarness>,
     );
+    await settleOffer();
     expect(container.querySelectorAll('[data-role="reminder-notification-prompt"]')).toHaveLength(0);
   });
 });

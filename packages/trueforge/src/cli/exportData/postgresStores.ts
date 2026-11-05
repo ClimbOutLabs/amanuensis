@@ -1,5 +1,6 @@
 import type { Transaction } from 'kysely';
 
+import { DeliveryStore } from '../../db/deliveryStore';
 import { migrateToLatest } from '../../db/migratePostgres';
 import { PostgresAgentStore } from '../../db/postgres/agent-store/PostgresAgentStore';
 import { createDb } from '../../db/postgres/client';
@@ -57,6 +58,7 @@ export async function openPostgresStores(options: {
     tokenStore: new PostgresOAuthTokenStore(db),
     googleConnectionStore: new PostgresGoogleConnectionStore(db),
     auditStore: new SentinelAuditStore(db),
+    deliveryStore: new DeliveryStore(db),
     close: () => db.destroy(),
   };
 }

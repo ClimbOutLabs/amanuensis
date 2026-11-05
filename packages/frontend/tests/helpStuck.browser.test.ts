@@ -12,6 +12,7 @@ import { createServer, defaultClientConditions } from 'vite';
 import { HELP_COMPOSER_PLACEHOLDER } from '../../trueforge-ui/src/help/helpModel.ts';
 import { DEV_OPTIMIZE_DEPS } from '../src/devPrebundle.ts';
 import { findChromiumExecutable } from './support/findChromiumExecutable.ts';
+import { FIRST_LOAD_TIMEOUT_MS } from './support/firstLoad.ts';
 import { privateViteCache } from './support/viteCache.ts';
 
 const RENDER_TIMEOUT_MS = 45_000;
@@ -92,7 +93,7 @@ test("Help, I'm stuck opens the help chat in every case, never a blank page", { 
       try {
         await page.goto(`${fixtureUrl}?${testCase.query}`, {
           waitUntil: 'domcontentloaded',
-          timeout: RENDER_TIMEOUT_MS,
+          timeout: FIRST_LOAD_TIMEOUT_MS,
         });
         const button = page.getByRole('button', { name: HELP_BUTTON }).first();
         await button.waitFor({ state: 'visible', timeout: RENDER_TIMEOUT_MS });

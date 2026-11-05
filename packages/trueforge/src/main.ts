@@ -96,6 +96,7 @@ import type { AgentRecord, IAgentStore } from './db/agentStore';
 import { BriefItemCompletionStore, type IBriefItemCompletionStore } from './db/briefItemCompletionStore';
 import type { IChatImageStore } from './db/chatImageStore';
 import type { ICompletedTurnEventStore } from './db/completedTurnEvents';
+import { DeliveryStore, type IDeliveryStore } from './db/deliveryStore';
 import type { IGlobalSettingsStore } from './db/globalSettingsStore';
 import type { IGoogleConnectionStore } from './db/googleConnectionStore';
 import type { IMcpServerStore, IMcpServerWithAuthStore } from './db/mcpServerStore';
@@ -106,6 +107,7 @@ import type { IPersonalizationStore } from './db/personalizationStore';
 import type { IPersonaStore } from './db/personaStore';
 import type { PostgresAgentStore } from './db/postgres/agent-store/PostgresAgentStore';
 import type { Database as PostgresDatabase } from './db/postgres/types';
+import { PushSubscriptionStore, type IPushSubscriptionStore } from './db/pushSubscriptionStore';
 import type { IRepositoryStore } from './db/repositoryStore';
 import type { ISandboxProviderStore } from './db/sandboxProviderStore';
 import type { IScheduleStore } from './db/scheduleStore';
@@ -133,6 +135,8 @@ import { createImageReencoder } from './runtime/chatImages/reencodeInSandbox';
 import { ChatSearchIndexer } from './runtime/chatSearchIndexing';
 import { recoverAbandonedCommandExecutions } from './runtime/commandExecutionRecovery';
 import { designateTavilyAtBoot, seedDefaultSearchProviderAtBoot } from './runtime/defaultSearchProvider';
+import { createDeliveryService } from './runtime/delivery/deliveryService';
+import { createWebPushSender } from './runtime/delivery/webPushSender';
 import { EventSubscriptionRegistry } from './runtime/event-subscription';
 import { registerMailConnectorFromSavedAccountInBackground } from './runtime/mailAccount';
 import { prepareMailPolicyAtBoot, registerMailConnectorAtBoot } from './runtime/mailConnector';
@@ -205,6 +209,8 @@ interface ServerPersistence<TTransaction> {
   sentinelAuditStore: ISentinelAuditStore;
   sentinelSettingsStore: ISentinelSettingsStore<TTransaction>;
   briefItemStore: IBriefItemCompletionStore;
+  deliveryStore: IDeliveryStore;
+  pushSubscriptionStore: IPushSubscriptionStore;
   approvalTokenStore: ApprovalTokenStore;
   destroyDb: () => Promise<void>;
   redis: RedisClientType | undefined;
@@ -439,6 +445,8 @@ async function createStandalonePersistence(options: {
     sentinelAuditStore: new SentinelAuditStore(db as Kysely<SentinelAuditDatabase>),
     sentinelSettingsStore: new SqliteSentinelSettingsStore(db),
     briefItemStore: new BriefItemCompletionStore(db),
+    deliveryStore: new DeliveryStore(db),
+    pushSubscriptionStore: new PushSubscriptionStore(db),
     approvalTokenStore: new SqliteApprovalTokenStore(db),
     modelProviderStore,
     resolveModelProviderStore: () => modelProviderStore,
@@ -609,6 +617,8 @@ async function createDistributedPersistence(options: {
     sentinelAuditStore: new SentinelAuditStore(db as Kysely<SentinelAuditDatabase>),
     sentinelSettingsStore: new PostgresSentinelSettingsStore(db),
     briefItemStore: new BriefItemCompletionStore(db),
+    deliveryStore: new DeliveryStore(db),
+    pushSubscriptionStore: new PushSubscriptionStore(db),
     approvalTokenStore: new PostgresApprovalTokenStore(db),
     modelProviderStore,
     resolveModelProviderStore,
@@ -650,6 +660,8 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     sentinelAuditStore,
     sentinelSettingsStore,
     briefItemStore,
+    deliveryStore,
+    pushSubscriptionStore,
     approvalTokenStore,
     destroyDb,
     redis,
@@ -774,6 +786,12 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     mcpServers: mcpOAuthStore,
     tokens: tokenStore,
     googleConnections: googleConnectionStore,
+  });
+  const deliveryService = createDeliveryService({
+    store: deliveryStore,
+    senders: [createWebPushSender({ subscriptions: pushSubscriptionStore, settings: configuration.WEB_PUSH })],
+    audit: sentinelAuditStore,
+    logger,
   });
   const sentinelServices = createSentinelServices({
     demoMode: configuration.DEMO_MODE,
@@ -900,6 +918,10 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     sentinelAuditStore,
     sentinelSettingsStore,
     briefItemStore,
+    deliveryStore,
+    pushSubscriptionStore,
+    deliveryService,
+    webPushPublicKey: configuration.WEB_PUSH?.publicKey,
     sessions,
     chatImages,
     activeTurns,

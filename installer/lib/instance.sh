@@ -155,6 +155,7 @@ instance_render() {
   local name=$1 app_image=$2 dex_image=$3 dir login_bind=0.0.0.0 app_port login_port public_url login_url email client_id sandbox_on edge_on login_host origins redirects app_ports tls_on=0 tls_host=0 tls_volume=0 tls_port address
   dir=$(instance_dir "$name")
   owner_name_backfill "$name"
+  web_push_backfill "$name" "$app_image"
   app_port=$(reg_get "$name" app_port)
   login_port=$(reg_get "$name" login_port)
   public_url=$(reg_get "$name" public_url)
@@ -284,6 +285,49 @@ env_secret_backfill() { # name key
   if grep -q '^# >>> managed by the installer' "$env"; then
     env_managed_set "$env" "$key" "$value"
     env_drop_outside_block "$env" "$key"
+    return 0
+  fi
+  {
+    grep -v "^$key=" "$env" || true
+    printf '%s=%s\n' "$key" "$value"
+  } | write_if_changed "$env" 600 || true
+}
+
+# Makes one push key pair with the app image's Node.js, so the computer needs no key tools of its own. Prints the
+# public key, a space, then the private key, and fails, printing nothing, on any other output.
+push_keypair() { # app_image
+  local out
+  out=$(D run --rm --network none --user "$(id -u):$(id -g)" -v "$INSTALLER_DIR/lib/push-keys.mjs:/push-keys.mjs:ro" \
+    --entrypoint node "$1" /push-keys.mjs 2>/dev/null) || return 1
+  matches_whole "$out" '^[A-Za-z0-9_-]{87} [A-Za-z0-9_-]{43}$' || return 1
+  printf '%s\n' "$out"
+}
+
+# The key pair the app signs push notices with, so a closed page still hears about a due reminder. They are
+# made once, in the settings file, and an existing pair is never changed. An older instance gets them on its next
+# refresh or upgrade. A file without the installer's managed part gets the lines at its end. A missing file gets nothing.
+# When no key can be made, push stays off and the rest works as before.
+web_push_backfill() { # name app_image
+  local env keys public private
+  env="$(instance_dir "$1")/.env"
+  [ -f "$env" ] || return 0
+  if ! grep -q '^WEB_PUSH_PUBLIC_KEY=..*' "$env" || ! grep -q '^WEB_PUSH_PRIVATE_KEY=..*' "$env"; then
+    keys=$(push_keypair "$2") || {
+      warn "Push notices could not be set up this time. Run the installer again to try once more."
+      return 0
+    }
+    public=${keys% *}
+    private=${keys#* }
+    web_push_env_set "$env" WEB_PUSH_PUBLIC_KEY "$public"
+    web_push_env_set "$env" WEB_PUSH_PRIVATE_KEY "$private"
+  fi
+}
+
+# Sets one line in the settings file: in the managed part when it has one, at the end when it does not.
+web_push_env_set() { # env key value
+  local env=$1 key=$2 value=$3
+  if grep -q '^# >>> managed by the installer' "$env"; then
+    env_managed_set "$env" "$key" "$value"
     return 0
   fi
   {

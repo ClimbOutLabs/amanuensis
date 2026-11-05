@@ -7,6 +7,7 @@ import { createServer, defaultClientConditions } from 'vite';
 
 import { DEV_OPTIMIZE_DEPS } from '../src/devPrebundle.ts';
 import { findChromiumExecutable } from './support/findChromiumExecutable.ts';
+import { FIRST_LOAD_TIMEOUT_MS } from './support/firstLoad.ts';
 import { privateViteCache } from './support/viteCache.ts';
 
 const RENDER_TIMEOUT_MS = 45_000;
@@ -37,7 +38,7 @@ test('answer details open and close from the keyboard', { timeout: 180_000 }, as
     const page = await browser.newPage({ viewport: { width: 1024, height: 768 } });
     await page.goto(`http://127.0.0.1:${address.port}/tests/fixtures/answer-details.fixture.html`, {
       waitUntil: 'domcontentloaded',
-      timeout: RENDER_TIMEOUT_MS,
+      timeout: FIRST_LOAD_TIMEOUT_MS,
     });
 
     const toggle = page.getByRole('button', { name: 'Details' });
