@@ -220,7 +220,7 @@ describe('the calendar settings endpoints', () => {
         status: 200,
         body: {
           ...CONNECTED,
-          url: 'https://apidata.googleusercontent.com/caldav/v2/person@gmail.com/user/',
+          url: 'https://calendar.google.com/calendar/dav/person%40gmail.com/',
           username: 'person@gmail.com',
           email: 'person@gmail.com',
         },
@@ -236,7 +236,7 @@ describe('the calendar settings endpoints', () => {
         status: 200,
         body: {
           ...CONNECTED,
-          url: 'https://apidata.googleusercontent.com/caldav/v2/person@gmail.com/user/',
+          url: 'https://calendar.google.com/calendar/dav/person%40gmail.com/',
           username: 'person@gmail.com',
           email: 'person@gmail.com',
         },
@@ -249,7 +249,7 @@ describe('the calendar settings endpoints', () => {
     });
     expect(status).toBe(201);
     expect(JSON.parse(agent.calls[0]?.body ?? '{}')).toEqual({
-      url: 'https://apidata.googleusercontent.com/caldav/v2/person@gmail.com/user/',
+      url: 'https://calendar.google.com/calendar/dav/person%40gmail.com/',
       username: 'person@gmail.com',
       password: 'abcd efgh ijkl mnop',
       email: 'person@gmail.com',

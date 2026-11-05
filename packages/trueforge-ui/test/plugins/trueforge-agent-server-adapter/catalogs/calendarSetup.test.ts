@@ -17,7 +17,7 @@ const STATUS_BODY = {
         key: 'google',
         name: 'Google',
         server_url: null,
-        account_url_template: 'https://apidata.googleusercontent.com/caldav/v2/{email}/user/',
+        account_url_template: 'https://calendar.google.com/calendar/dav/{email}/',
         help_url: 'https://support.google.com/accounts/answer/185833',
         help_hint: 'Google: make an app password.',
         setup_steps: ['Turn on 2-Step Verification.', 'Make an app password.'],
@@ -84,9 +84,7 @@ describe('createCalendarSetupApi', () => {
     expect(status.email).toBe('owner@example.invalid');
     expect(status.username).toBe('owner-login');
     expect(status.calendarUrl).toBe('https://caldav.fastmail.com/dav/');
-    expect(status.providers[0]?.accountUrlTemplate).toBe(
-      'https://apidata.googleusercontent.com/caldav/v2/{email}/user/',
-    );
+    expect(status.providers[0]?.accountUrlTemplate).toBe('https://calendar.google.com/calendar/dav/{email}/');
     expect(status.providers[0]?.setupSteps).toEqual(['Turn on 2-Step Verification.', 'Make an app password.']);
     expect(status.providers[1]?.serverUrl).toBe('https://caldav.fastmail.com/dav/');
     expect(status.providers[1]?.helpUrl).toContain('fastmail.help');

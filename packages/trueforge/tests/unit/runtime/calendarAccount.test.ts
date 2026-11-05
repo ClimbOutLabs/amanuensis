@@ -203,7 +203,7 @@ describe('saving a calendar account', () => {
       return new Response(
         JSON.stringify({
           connected: true,
-          url: 'https://apidata.googleusercontent.com/caldav/v2/person@gmail.com/user/',
+          url: 'https://calendar.google.com/calendar/dav/person%40gmail.com/',
           username: 'person@gmail.com',
           email: 'person@gmail.com',
           sign_in: 'ok',
@@ -221,13 +221,13 @@ describe('saving a calendar account', () => {
       },
     );
     expect(JSON.parse(bodies[0] ?? '{}')).toEqual({
-      url: 'https://apidata.googleusercontent.com/caldav/v2/person@gmail.com/user/',
+      url: 'https://calendar.google.com/calendar/dav/person%40gmail.com/',
       username: 'person@gmail.com',
       password: 'abcd efgh ijkl mnop',
       email: 'person@gmail.com',
     });
     expect(state.account).toEqual({
-      url: 'https://apidata.googleusercontent.com/caldav/v2/person@gmail.com/user/',
+      url: 'https://calendar.google.com/calendar/dav/person%40gmail.com/',
       username: 'person@gmail.com',
       email: 'person@gmail.com',
     });

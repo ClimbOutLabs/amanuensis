@@ -42,7 +42,7 @@ export const CALDAV_PROVIDER_PRESETS: readonly CaldavProviderPreset[] = [
     name: 'Google',
     server_url: null,
     domain_urls: [],
-    account_url_template: 'https://apidata.googleusercontent.com/caldav/v2/{email}/user/',
+    account_url_template: 'https://calendar.google.com/calendar/dav/{email}/',
     help_url: 'https://support.google.com/accounts/answer/185833',
     help_hint: 'Google: turn on 2-Step Verification, then make an app password at myaccount.google.com/apppasswords.',
     setup_steps: [
@@ -121,8 +121,10 @@ function emailDomain(email: string): string {
 
 // Characters that can go into a calendar address path as they are. Anything else in the email address
 // is written as %XX, so an address such as o'brien@ still builds a usable calendar address instead of
-// one the address rules refuse. The installer does the same in calendar_encode_email.
-const URL_SAFE_CHARACTER = /^[A-Za-z0-9._~@+,:=-]$/;
+// one the address rules refuse. The @ is written as %40 because Google lists every calendar path that
+// way, and the calendar tool server only uses calendars whose path starts with the saved address's path.
+// The installer does the same in calendar_encode_email.
+const URL_SAFE_CHARACTER = /^[A-Za-z0-9._~+,:=-]$/;
 
 function encodeEmailForUrl(email: string): string {
   let encoded = '';

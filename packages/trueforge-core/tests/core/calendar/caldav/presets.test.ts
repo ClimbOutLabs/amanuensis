@@ -100,9 +100,7 @@ describe('calendar provider presets', () => {
   it('works the provider out from a saved address', () => {
     expect(caldavProviderKeyForUrl('https://caldav.fastmail.com/dav/')).toBe('fastmail');
     expect(caldavProviderKeyForUrl('https://caldav.gmx.net/')).toBe('gmx');
-    expect(caldavProviderKeyForUrl('https://apidata.googleusercontent.com/caldav/v2/person@gmail.com/user/')).toBe(
-      'google',
-    );
+    expect(caldavProviderKeyForUrl('https://calendar.google.com/calendar/dav/person%40gmail.com/')).toBe('google');
     expect(caldavProviderKeyForUrl('https://calendar.google.com/calendar/')).toBe('other');
     expect(caldavProviderKeyForUrl('https://nas.example.invalid/dav/')).toBe('other');
   });
@@ -131,7 +129,7 @@ describe('calendar provider presets', () => {
 
   it('builds the Google address from the email address', () => {
     const url = caldavPresetUrl({ provider_key: 'google', email: 'person@gmail.com' });
-    expect(url).toBe('https://apidata.googleusercontent.com/caldav/v2/person@gmail.com/user/');
+    expect(url).toBe('https://calendar.google.com/calendar/dav/person%40gmail.com/');
     expect(url === null ? 'missing' : caldavUrlProblem(url)).toBeNull();
   });
 
@@ -150,7 +148,7 @@ describe('calendar provider presets', () => {
   it('encodes the email address into the Google address, the same way the installer does', () => {
     const email = "o'brien@gmail.com";
     const url = caldavPresetUrl({ provider_key: CALDAV_GOOGLE_PROVIDER_KEY, email });
-    expect(url).toBe('https://apidata.googleusercontent.com/caldav/v2/o%27brien@gmail.com/user/');
+    expect(url).toBe('https://calendar.google.com/calendar/dav/o%27brien%40gmail.com/');
     expect(url === null ? 'missing' : caldavUrlProblem(url)).toBeNull();
     expect(url === null ? 'missing' : caldavProviderKeyForUrl(url)).toBe(CALDAV_GOOGLE_PROVIDER_KEY);
     expect(installerSays('calendar_preset_url', CALDAV_GOOGLE_PROVIDER_KEY, email)).toBe(url);

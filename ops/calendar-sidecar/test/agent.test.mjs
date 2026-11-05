@@ -18,16 +18,14 @@ const HOST = 'caldav.example.invalid';
 const USERNAME = 'owner@example.invalid';
 const PUBLIC_ADDRESS = '93.184.216.34';
 const GOOGLE_USER = 'person@gmail.com';
-// Shaped like Google's real discovery answer: the principal and the calendar home are on Google's
-// CalDAV service host, apidata.googleusercontent.com, under /caldav/v2/, not on calendar.google.com.
-const GOOGLE_DISCOVERY_BODY =
+const GOOGLE_HOME = `/calendar/dav/${GOOGLE_USER.replace('@', '%40')}/`;
+// Shaped like Google's real answer on its calendar home: it answers there directly, with no redirect.
+const GOOGLE_HOME_BODY =
   '<?xml version="1.0" encoding="UTF-8"?>' +
-  '<d:multistatus xmlns:d="DAV:" xmlns:cal="urn:ietf:params:xml:ns:caldav"><d:response>' +
-  `<d:href>https://apidata.googleusercontent.com/caldav/v2/${GOOGLE_USER}/user</d:href>` +
-  '<d:propstat><d:status>HTTP/1.1 200 OK</d:status><d:prop>' +
-  `<d:current-user-principal><d:href>https://apidata.googleusercontent.com/caldav/v2/${GOOGLE_USER}/user</d:href></d:current-user-principal>` +
-  `<cal:calendar-home-set><d:href>https://apidata.googleusercontent.com/caldav/v2/${GOOGLE_USER}/</d:href></cal:calendar-home-set>` +
-  '</d:prop></d:propstat></d:response></d:multistatus>';
+  '<D:multistatus xmlns:D="DAV:"><D:response>' +
+  `<D:href>${GOOGLE_HOME}</D:href>` +
+  '<D:propstat><D:status>HTTP/1.1 200 OK</D:status><D:prop><D:resourcetype><D:collection/></D:resourcetype></D:prop></D:propstat>' +
+  '</D:response></D:multistatus>';
 
 describe('the calendar account agent', () => {
   let folder;
@@ -67,7 +65,7 @@ describe('the calendar account agent', () => {
         '-subj',
         `/CN=${HOST}`,
         '-addext',
-        `subjectAltName=DNS:${HOST},DNS:calendar.google.com,DNS:apidata.googleusercontent.com`,
+        `subjectAltName=DNS:${HOST},DNS:calendar.google.com`,
         '-keyout',
         key,
         '-out',
@@ -94,24 +92,15 @@ describe('the calendar account agent', () => {
         return;
       }
       if (behavior === 'google') {
-        // Google's old calendar address only redirects to its CalDAV service host, which answers with
-        // the discovery body above. The fake server stands in for both hosts on the checked address.
         const googleExpected = `Basic ${Buffer.from(`${GOOGLE_USER}:${CANARY}`).toString('base64')}`;
         if (req.headers.authorization !== googleExpected) {
           res.writeHead(401, { 'WWW-Authenticate': 'Basic realm="x"' });
           res.end();
           return;
         }
-        if (req.url.startsWith('/calendar/dav/')) {
-          res.writeHead(301, {
-            Location: `https://apidata.googleusercontent.com:${calendarPort}/caldav/v2/${GOOGLE_USER}/user`,
-          });
-          res.end();
-          return;
-        }
-        if (req.url.startsWith('/caldav/v2/')) {
-          res.writeHead(207, { 'Content-Type': 'application/xml' });
-          res.end(GOOGLE_DISCOVERY_BODY);
+        if (req.url === GOOGLE_HOME) {
+          res.writeHead(207, { 'Content-Type': 'text/xml; charset=UTF-8' });
+          res.end(GOOGLE_HOME_BODY);
           return;
         }
         res.writeHead(404);
@@ -216,12 +205,12 @@ describe('the calendar account agent', () => {
     assert.equal(existsSync(file), false);
   });
 
-  it("signs in to Google on its CalDAV service host, at the address the tool server asks first", async () => {
+  it('signs in to Google on its calendar home, the address the tool server asks first', async () => {
     behavior = 'google';
     const saved = await call(
       'POST',
       payload({
-        url: `https://apidata.googleusercontent.com:${calendarPort}/caldav/v2/${GOOGLE_USER}/user/`,
+        url: `https://calendar.google.com:${calendarPort}${GOOGLE_HOME}`,
         username: GOOGLE_USER,
         email: GOOGLE_USER,
       }),
@@ -229,24 +218,9 @@ describe('the calendar account agent', () => {
     assert.equal(saved.status, 200);
     assert.deepEqual(
       seen.map(request => request.url),
-      [`/caldav/v2/${GOOGLE_USER}/user/`],
+      [GOOGLE_HOME],
     );
     assert.ok(!saved.text.includes(CANARY));
-  });
-
-  it("refuses Google's old calendar address, which only redirects, so it never shows connected", async () => {
-    behavior = 'google';
-    const refused = await call(
-      'POST',
-      payload({
-        url: `https://calendar.google.com:${calendarPort}/calendar/dav/${GOOGLE_USER}/user/`,
-        username: GOOGLE_USER,
-        email: GOOGLE_USER,
-      }),
-    );
-    assert.deepEqual(JSON.parse(refused.text), { error: 'redirected' });
-    assert.equal(seen.length, 1);
-    assert.equal(existsSync(file), false);
   });
 
   it('asks the address with one trailing slash, the way the tool server does', async () => {
