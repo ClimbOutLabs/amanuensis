@@ -21,6 +21,7 @@ import type {
   GetSessionByExternalIdInput,
   GetSessionInput,
   ListSessionsInput,
+  MergeSessionMetadataInput,
   StampImportedSessionInput,
   UpdateSessionInput,
 } from '@truefoundry/trueforge-core/agent-session/store/ISessionStore';
@@ -316,6 +317,24 @@ export async function updateSession(db: Kysely<Database>, input: UpdateSessionIn
   }
 
   const result = await qb.executeTakeFirst();
+
+  const numUpdatedRows = Number(result.numUpdatedRows);
+  if (numUpdatedRows === 0) {
+    throw new SessionNotFoundError(input.session_id);
+  }
+}
+
+export async function mergeSessionMetadata(db: Kysely<Database>, input: MergeSessionMetadataInput): Promise<void> {
+  const result = await db
+    .updateTable('session')
+    .set({
+      updated_at: nowIso(),
+      last_activity_timestamp_ms: Date.now(),
+      metadata: sql<string>`jsonb_patch(metadata, ${jsonbBind({ [input.key]: input.value })})`,
+    })
+    .where('tenant_id', '=', input.tenant_id)
+    .where('session_id', '=', input.session_id)
+    .executeTakeFirst();
 
   const numUpdatedRows = Number(result.numUpdatedRows);
   if (numUpdatedRows === 0) {

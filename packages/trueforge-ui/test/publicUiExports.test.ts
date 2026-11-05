@@ -92,6 +92,8 @@ const expectedRuntimeExports: Array<keyof typeof sdk> = [
   'DocumentIngestionProvider',
   'useOptionalDocumentIngestion',
   'DeliveriesProvider',
+  'ChatAnswerMarksProvider',
+  'useOptionalChatAnswerMarks',
   'DraftCatalogProvider',
   'DraftComposerActionsMenu',
   'DraftComposerLeftSection',

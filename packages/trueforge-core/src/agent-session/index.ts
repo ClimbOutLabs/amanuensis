@@ -24,6 +24,7 @@ export {
 export type { TerminalTurnState, Turn, TurnInputItem, TurnMetrics, TurnState } from './schemas/turn';
 
 export {
+  LATEST_ANSWER_AT_METADATA_KEY,
   SessionAgentInlineSchema,
   SessionAgentSchema,
   SessionMetadataSchema,

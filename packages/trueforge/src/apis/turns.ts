@@ -96,6 +96,7 @@ import type { ChatSearchIndexer } from '../runtime/chatSearchIndexing';
 import { readChatSearchEnabled } from '../runtime/chatSearchSettings';
 import { StreamGoneError, type EventSubscription, type EventSubscriptionRegistry } from '../runtime/event-subscription';
 import { buildInternalSourceToolPolicy, type InternalSourceState } from '../runtime/internalSourceGuard';
+import { stampLatestAnswer, type LatestAnswerSessionStore } from '../runtime/latestAnswer';
 import { mailAccountDirectory } from '../runtime/mailConnector';
 import { createMemoryClient } from '../runtime/memory/createMemoryClient';
 import type { MemoryClient } from '../runtime/memory/memoryClient';
@@ -1285,6 +1286,16 @@ export interface DrainTurnEventsInput {
         createdBy: string;
       }
     | undefined;
+  /**
+   * Present on every turn: where the finished turn's answer time is stamped, so the chat
+   * list can mark a chat whose latest answer the person has not opened yet.
+   */
+  answerMark?:
+    | {
+        sessionStore: LatestAnswerSessionStore;
+        tenantId: string;
+      }
+    | undefined;
 }
 
 /** Events that show a turn reached the model. Connector startup, memory recall and a new sandbox are still setup. */
@@ -1426,8 +1437,18 @@ async function runTurnFollowUp(params: {
   markArtifactsCaptured: () => void;
 }): Promise<void> {
   const { input, state, ingestedToolOutput, toolResults, markArtifactsCaptured } = params;
-  const { turnEventStream, sessionId, turnId, logger, memory, artifacts, profileLearning, modelUsage, chatSearch } =
-    input;
+  const {
+    turnEventStream,
+    sessionId,
+    turnId,
+    logger,
+    memory,
+    artifacts,
+    profileLearning,
+    modelUsage,
+    chatSearch,
+    answerMark,
+  } = input;
   try {
     // First, and never behind a model call: the chat's next turn reuses the sandbox and waits
     // on this step, so its tools cannot change a file before this turn has saved it.
@@ -1443,6 +1464,19 @@ async function runTurnFollowUp(params: {
       }
     } finally {
       markArtifactsCaptured();
+    }
+    if (answerMark !== undefined && state.output !== null) {
+      // The answer is in the chat now. Stamp when it landed so the chat list can show the
+      // unseen-answer dot until the person opens the chat. A turn that ended paused with no
+      // final message added no answer, so it earns no stamp. The stamp swallows its own
+      // failures, so this cannot fail the follow-up.
+      await stampLatestAnswer({
+        sessionStore: answerMark.sessionStore,
+        tenantId: answerMark.tenantId,
+        sessionId,
+        answeredAt: state.completed_at,
+        logger,
+      });
     }
     // Before the model calls below, so the answer's usage is visible before that slower work.
     const flushUsage = async () => {
@@ -1670,6 +1704,7 @@ export interface TurnEventDrainInput {
   modelUsage: ModelUsageDrainMember;
   memory?: DrainTurnEventsInput['memory'];
   chatSearch?: DrainTurnEventsInput['chatSearch'];
+  answerMark?: DrainTurnEventsInput['answerMark'];
 }
 
 /**
@@ -1883,6 +1918,7 @@ async function beginAcceptedTurnExecution(
       logger: deps.logger,
       turnDrains: deps.turnDrains,
       modelUsage: { ledger: modelUsage, eventStore: deps.sessionStore },
+      answerMark: { sessionStore: deps.sessionStore, tenantId: tenant_id },
       chatSearch:
         deps.chatSearchIndexer === undefined
           ? undefined
@@ -3052,6 +3088,7 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
           logger: deps.logger,
           turnDrains: deps.turnDrains,
           modelUsage: { ledger: modelUsage, eventStore: deps.sessionStore },
+          answerMark: { sessionStore: deps.sessionStore, tenantId: requestContext.tenant_id },
           memory:
             memoryClient === undefined
               ? undefined

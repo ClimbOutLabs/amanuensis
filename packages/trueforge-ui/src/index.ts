@@ -738,6 +738,8 @@ export { SessionsBrowserButton } from './atoms/SessionsBrowserButton.js';
 export type { SessionsBrowserButtonProps } from './atoms/SessionsBrowserButton.js';
 export { SpacesButton } from './atoms/SpacesButton.js';
 export type { SpacesButtonProps } from './atoms/SpacesButton.js';
+export { ChatAnswerMarksProvider, useOptionalChatAnswerMarks } from './chatAnswers/ChatAnswerMarksContext.js';
+export type { ChatAnswerMark, ChatAnswerMarksApi } from './chatAnswers/types.js';
 export { DeliveriesProvider, useOptionalDeliveries } from './deliveries/DeliveriesContext.js';
 export type { DeliveriesApi, DeliveryItem, DeliveryLink, DeliveryPage, PushDevice } from './deliveries/types.js';
 export { SpaceProvider, useOptionalSpaces } from './server/SpaceContext.js';
