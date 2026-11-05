@@ -7,6 +7,7 @@ import asyncio
 import sys
 import tempfile
 import threading
+import time
 import unittest
 import wave
 import zipfile
@@ -169,6 +170,69 @@ class SpeakTest(unittest.TestCase):
         self.assertEqual(busy.status_code, 429)
         self.assertEqual(busy.headers["retry-after"], "2")
         self.assertEqual(first, [200])
+
+    def test_a_caller_who_hangs_up_while_waiting_gives_up_its_place(self):
+        BlockingSynthesizer.started.clear()
+        BlockingSynthesizer.release.clear()
+        with client_for(BlockingSynthesizer, max_waiting=1) as client:
+            statuses: list[int] = []
+
+            def post(text: str) -> None:
+                statuses.append(client.post("/v1/speak", json={"text": text}).status_code)
+
+            holder = threading.Thread(target=post, args=("One.",))
+            holder.start()
+            self.assertTrue(BlockingSynthesizer.started.wait(5))
+
+            async def hang_up_while_waiting() -> None:
+                body = json.dumps({"text": "Two."}).encode()
+                sent = False
+                hang_up_at = time.monotonic() + 0.3
+
+                # Like a real server: the disconnect is ready at once after the caller has gone.
+                async def receive() -> dict:
+                    nonlocal sent
+                    if not sent:
+                        sent = True
+                        return {"type": "http.request", "body": body, "more_body": False}
+                    if time.monotonic() < hang_up_at:
+                        await asyncio.sleep(hang_up_at - time.monotonic())
+                    return {"type": "http.disconnect"}
+
+                async def send(message: dict) -> None:
+                    pass
+
+                scope = {
+                    "type": "http",
+                    "asgi": {"version": "3.0"},
+                    "http_version": "1.1",
+                    "method": "POST",
+                    "scheme": "http",
+                    "path": "/v1/speak",
+                    "raw_path": b"/v1/speak",
+                    "query_string": b"",
+                    "root_path": "",
+                    "headers": [(b"content-type", b"application/json"), (b"host", b"testserver")],
+                    "client": ("testclient", 50000),
+                    "server": ("testserver", 80),
+                }
+                await client.app(scope, receive, send)
+
+            gone = threading.Thread(target=client.portal.call, args=(hang_up_while_waiting,), daemon=True)
+            gone.start()
+            gone.join(3)
+            # Before the holder finishes, the gone caller has already left the line.
+            left_the_line = not gone.is_alive()
+            if left_the_line:
+                third = threading.Thread(target=post, args=("Three.",))
+                third.start()
+                third.join(0.5)
+            BlockingSynthesizer.release.set()
+            holder.join(5)
+            if left_the_line:
+                third.join(5)
+        self.assertTrue(left_the_line)
+        self.assertEqual(sorted(statuses), [200, 200])
 
     def test_nothing_to_say_is_a_bad_request(self):
         with client_for(SilentSynthesizer) as client:

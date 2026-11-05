@@ -67,6 +67,26 @@ export function subscribedWithKey({
   return current !== null && bufferToBase64Url(current) === publicKey.replace(/=+$/, '');
 }
 
+/** Whether push works on the server, and whether this device gets notices now. */
+export type PushStatus = { serverReady: boolean; on: boolean };
+
+/**
+ * Notices are on only when this browser has a subscription made with the server's current key and the server still
+ * has it: a device the server dropped, for a newer one or because its push service said it is gone, reads as off.
+ */
+export async function pushStatus({ api }: { api: DeliveriesApi }): Promise<PushStatus> {
+  const [subscription, key] = await Promise.all([
+    currentPushSubscription().catch(() => null),
+    api.pushPublicKey().catch(() => null),
+  ]);
+  if (key === null) return { serverReady: false, on: false };
+  if (subscription === null || !subscribedWithKey({ subscription, publicKey: key })) {
+    return { serverReady: true, on: false };
+  }
+  const saved = await api.pushDeviceSaved(subscription.endpoint).catch(() => false);
+  return { serverReady: true, on: saved };
+}
+
 function deviceOf({ subscription, label }: { subscription: PushSubscription; label: string }) {
   return {
     endpoint: subscription.endpoint,
