@@ -32,10 +32,18 @@ export interface OutboundFetch {
 
 /** Model outbound undici connect timeout. Env: `MODEL_HTTP_CONNECT_TIMEOUT_MS`. */
 export const DEFAULT_MODEL_HTTP_CONNECT_TIMEOUT_MS = 5_000;
-/** Model outbound undici headersTimeout. Env: `MODEL_HTTP_HEADERS_TIMEOUT_MS`. */
-export const DEFAULT_MODEL_HTTP_HEADERS_TIMEOUT_MS = 2 * 60 * 1000;
-/** Model outbound undici bodyTimeout (idle between body chunks). Env: `MODEL_HTTP_BODY_TIMEOUT_MS`. */
-export const DEFAULT_MODEL_HTTP_BODY_TIMEOUT_MS = 2 * 60 * 1000;
+/**
+ * Model outbound undici headersTimeout. Env: `MODEL_HTTP_HEADERS_TIMEOUT_MS`.
+ * 5 minutes, the same as the model's default first-chunk wait (VercelAILLM `firstChunkMs`) and
+ * undici's own default that model calls ran on before: a local model that is still loading sends
+ * no headers until its first token, and must not be cut off sooner than the first-chunk wait.
+ */
+export const DEFAULT_MODEL_HTTP_HEADERS_TIMEOUT_MS = 5 * 60 * 1000;
+/**
+ * Model outbound undici bodyTimeout (idle between body chunks). Env: `MODEL_HTTP_BODY_TIMEOUT_MS`.
+ * 5 minutes, undici's own default; the stream's own chunk wait (`chunkMs`) is the tighter limit.
+ */
+export const DEFAULT_MODEL_HTTP_BODY_TIMEOUT_MS = 5 * 60 * 1000;
 /** Model outbound fetch retries. Env: `MODEL_HTTP_MAX_RETRIES`. */
 export const DEFAULT_MODEL_HTTP_MAX_RETRIES = 2;
 
@@ -310,23 +318,28 @@ export function createOutboundFetch(options: OutboundFetchOptions): OutboundFetc
   };
 }
 
-let modelOutbound: OutboundFetch = createOutboundFetch(defaultModelOutboundFetchOptions());
+// The Agents are built on first use, not at import: importing this module (directly or via
+// the core index) must not open a connection pool or depend on undici being constructible.
+let modelOptions: OutboundFetchOptions = defaultModelOutboundFetchOptions();
+let modelOutbound: OutboundFetch | undefined;
 let mcpOptions: OutboundFetchOptions = defaultMcpOutboundFetchOptions();
-let mcpAgent: Agent = createOutboundAgent(mcpOptions);
+let mcpAgent: Agent | undefined;
 
 /** Replace the outbound Agents (timeouts and retries) from server configuration. */
 export function configureOutboundFetches(config: { model: OutboundFetchOptions; mcp: OutboundFetchOptions }): void {
   const previousModel = modelOutbound;
   const previousMcpAgent = mcpAgent;
-  modelOutbound = createOutboundFetch(config.model);
+  modelOptions = config.model;
+  modelOutbound = undefined;
   mcpOptions = config.mcp;
-  mcpAgent = createOutboundAgent(config.mcp);
-  void previousModel.close();
-  void previousMcpAgent.close().catch(() => undefined);
+  mcpAgent = undefined;
+  void previousModel?.close();
+  void previousMcpAgent?.close().catch(() => undefined);
 }
 
 /** Drop-in fetch for model-provider HTTP, with the model timeouts and retries. */
 export async function modelOutboundFetch(input: string | URL | Request, init?: RequestInit): Promise<Response> {
+  modelOutbound ??= createOutboundFetch(modelOptions);
   return modelOutbound.fetch(input, init);
 }
 
@@ -336,6 +349,7 @@ export async function modelOutboundFetch(input: string | URL | Request, init?: R
  * caller wraps it with its redirect guard, response size cap and `withOutboundHttpRetries`.
  */
 export async function mcpOutboundBaseFetch(input: string | URL, init?: RequestInit): Promise<Response> {
+  mcpAgent ??= createOutboundAgent(mcpOptions);
   return agentFetch(mcpAgent)(input, init);
 }
 

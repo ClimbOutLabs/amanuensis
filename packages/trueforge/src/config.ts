@@ -1338,12 +1338,12 @@ export interface SharedServerConfiguration {
   MODEL_HTTP_CONNECT_TIMEOUT_MS: number;
   /**
    * undici headersTimeout for model-provider outbound fetch.
-   * Env: `MODEL_HTTP_HEADERS_TIMEOUT_MS`. Default 120000.
+   * Env: `MODEL_HTTP_HEADERS_TIMEOUT_MS`. Default 300000, the same as the model's first-chunk wait.
    */
   MODEL_HTTP_HEADERS_TIMEOUT_MS: number;
   /**
    * undici bodyTimeout for model-provider outbound fetch (idle between body chunks).
-   * Env: `MODEL_HTTP_BODY_TIMEOUT_MS`. Default 120000.
+   * Env: `MODEL_HTTP_BODY_TIMEOUT_MS`. Default 300000.
    */
   MODEL_HTTP_BODY_TIMEOUT_MS: number;
   /**

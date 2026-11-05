@@ -16,11 +16,9 @@
  *   2. ABSTENTION    — an empty result arrives as an honest, non-error empty.
  *   3. PAUSE         — a fully-deferred (preload:false) connector contributes nothing and
  *      is never dialed at turn init; a later call against it while down never reaches the
- *      mock server and never corrupts the session, and never fails the turn either — the
- *      unreachable classification call degrades to an approval-gated pending call (with a
- *      model/user-visible "Tool metadata unavailable" description), and approving it retries
- *      the same dead connection, whose failure then lands as a canonical tool.response.v2 error
- *      (see the test itself for the full mechanics).
+ *      mock server, raises no approval card, never fails the turn and never corrupts the
+ *      session: it lands as a never_ran tool.response.v2 that tells the model the connector
+ *      is unreachable.
  *   4. RESUME        — the connector coming back needs no re-registration.
  *   5. RESTART/ROTATION — a header reference persists verbatim; resolving it into the
  *      live request is pinned only once the resolver (owned by a concurrent change to
@@ -386,74 +384,37 @@ describe('LKOS-shaped memory retrieval over the inert connector', () => {
   );
 
   it(
-    'PAUSE: a mid-session call against a stopped connector pauses for approval instead of failing the turn, and the retried dispatch failure surfaces as a model-visible tool error',
+    'PAUSE: a mid-session call against a stopped connector raises no approval card, never runs, and tells the model the connector is unreachable',
     async () => {
-      // Empirically, both preload settings resolve a tool call's approval classification
-      // (readOnlyHint etc. — for a deferred call, via DeferredTool.toolCallInfo delegating to
-      // the underlying server) by connecting live, every turn. AgentThread's
-      // enrichAssistantMessage now catches that failure instead of letting it end the turn: the
-      // call is synthesized fail-closed (approval-gated, carrying a "Tool metadata unavailable"
-      // description) and the turn pauses for approval rather than erroring. Approving retries
-      // the same dead connection; the retried callTool failure is caught inside
-      // executeToolCalls' own catch and surfaces as a canonical tool.response.v2 error result, so
-      // the turn still completes rather than erroring a second time.
+      // Classifying a tool call connects to the server live, every turn. When that connect
+      // fails at the transport (the server is down), the call is marked never_ran with a
+      // connector_unreachable remediation: a server that cannot be reached cannot run
+      // anything, so there is nothing for the person to approve.
       const sessionId = await createSession(server, agentSpec({ preload: false }));
       await runTurn({ server, sessionId, input: plainMessage('opening the session, no tools yet') });
       expect(server.mcp.askMemoryInvocations()).toBe(0);
 
       await server.mcp.stop();
-      const paused = await runTurn({ server, sessionId, input: userMessage('call_tool') });
-
-      // The call never reached the fixture's handler, and the turn survived as a pending
-      // approval, not a turn-level error.
-      expect(server.mcp.askMemoryInvocations()).toBe(0);
-      expect(paused.state.status).toBe('done');
-      const pending = pendingApproval(paused);
-      if (paused.state.status !== 'done' || !pending) {
-        const events = await listSessionEvents(server, sessionId);
-        throw new Error(
-          `expected a pending approval, got state ${JSON.stringify(paused.state)} and events ${JSON.stringify(events)}`,
-        );
-      }
-      // The turn's own `output` stays null while it is paused (it only carries a genuinely
-      // final message) — the assistant message that requested this call, tool_info included,
-      // is the persisted `model.message` session event the approval's source_event_id names.
-      const sessionEvents = await listSessionEvents(server, sessionId);
-      const modelMessageItem = sessionEvents.find(
-        item =>
-          item.event.type === 'model.message' && item.event.tool_calls?.some(call => call.id === pending.tool_call_id),
-      );
-      if (modelMessageItem?.event.type !== 'model.message') {
-        throw new Error('expected a model.message event carrying the pending tool call');
-      }
-      const pausedCall = modelMessageItem.event.tool_calls?.find(call => call.id === pending.tool_call_id);
-      if (pausedCall === undefined) {
-        throw new Error('expected the pending tool call on the model.message event');
-      }
-      expect(pausedCall.tool_info).toMatchObject({ description: expect.stringContaining('Tool metadata unavailable') });
-      expect(pausedCall.tool_info.description).toMatch(/inert/i);
-      expect(pausedCall.tool_info.description).toMatch(/connect|fetch/i);
-
-      // Approve; dispatch retries the same dead connection (still down — it comes back only
-      // after this call), so the retried call fails again. This time the failure is an honest,
-      // model-visible tool.response.v2 error, and the turn completes rather than erroring.
-      const resumed = await runTurn({
-        server,
-        sessionId,
-        input: approvalInput({ ...pending, approval: { status: 'allow', scope: 'once' } }),
-      });
+      const down = await runTurn({ server, sessionId, input: userMessage('call_tool') });
       await server.mcp.start();
 
+      // The call never reached the fixture's handler, and the turn finished without a card.
       expect(server.mcp.askMemoryInvocations()).toBe(0);
-      expect(resumed.state.status).toBe('done');
-      expect(requiredActions(resumed)).toEqual([]);
+      expect(down.state.status).toBe('done');
+      expect(requiredActions(down)).toEqual([]);
+
       const responses = await toolResponses(server, sessionId);
-      const failedResponse = responses.find(response => response.tool_call_id === pending.tool_call_id);
-      expect(failedResponse).toBeDefined();
-      expect(failedResponse?.disposition).toBe('executed_nonzero');
-      const failedContent = JSON.stringify(failedResponse?.result);
-      expect(failedContent).toMatch(/inert/i);
-      expect(failedContent).toMatch(/connect|fetch/i);
+      expect(responses).toHaveLength(1);
+      expect(responses[0]?.disposition).toBe('never_ran');
+      const failedContent = JSON.stringify(responses[0]?.result);
+      expect(failedContent).toMatch(/inert-memory/);
+      expect(failedContent).toMatch(/not reachable/i);
+
+      const sessionEvents = await listSessionEvents(server, sessionId);
+      const remediation = sessionEvents.flatMap(item =>
+        item.event.type === 'tool.response.v2' && item.event.remediation !== undefined ? [item.event.remediation] : [],
+      );
+      expect(remediation).toEqual([expect.objectContaining({ reason_code: 'connector_unreachable' })]);
 
       // The session survives: a fresh turn succeeds once reachable again.
       const recovered = await runTurn({ server, sessionId, input: userMessage('call_tool') });
