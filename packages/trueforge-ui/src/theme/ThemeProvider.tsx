@@ -97,7 +97,7 @@ function initialPreset(hostPreset: ThemePreset | undefined): ThemePreset {
   return resolveThemePreset(hostPreset) ?? DEFAULT_THEME_PRESET;
 }
 
-function tokensToStyle(tokens: Partial<SemanticTokens> | undefined): CSSProperties {
+export function tokensToStyle(tokens: Partial<SemanticTokens> | undefined): CSSProperties {
   if (!tokens) return {};
   const style: Record<string, string> = {};
   for (const [key, value] of Object.entries(tokens) as [keyof SemanticTokens, string | undefined][]) {
@@ -209,14 +209,12 @@ export function ThemeProvider({ theme, children }: { theme?: ThemeConfig; childr
     [preset, mode, preference, setTheme, setPreset, theme?.brand, theme?.icons, theme?.classNames, hostTokens],
   );
 
-  const rootStyle = useMemo(
-    () =>
-      tokensToStyle({
-        ...resolvePresetTokens(preset, mode),
-        ...hostTokens,
-      }),
+  const resolvedTokens = useMemo(
+    () => ({ ...resolvePresetTokens(preset, mode), ...hostTokens }),
     [preset, hostTokens, mode],
   );
+
+  const rootStyle = useMemo(() => tokensToStyle(resolvedTokens), [resolvedTokens]);
 
   return (
     <ThemeContext.Provider value={value}>
@@ -275,4 +273,17 @@ export function useOptionalThemePreset(): ThemePreset {
 /** Safe for trees that may sit outside ThemeProvider (falls back to {}). */
 export function useOptionalContentClassNames(): ContentClassNames {
   return useContext(ThemeContext)?.classNames ?? {};
+}
+
+/**
+ * The tokens components render with: the preset's, with the host's applied over them.
+ * Safe for trees that may sit outside ThemeProvider (falls back to the default preset's
+ * light tokens).
+ */
+export function useOptionalResolvedThemeTokens(): Partial<SemanticTokens> {
+  const ctx = useContext(ThemeContext);
+  const preset = ctx?.preset ?? DEFAULT_THEME_PRESET;
+  const mode = ctx?.mode ?? 'light';
+  const hostTokens = ctx?.tokens;
+  return useMemo(() => ({ ...resolvePresetTokens(preset, mode), ...hostTokens }), [preset, mode, hostTokens]);
 }

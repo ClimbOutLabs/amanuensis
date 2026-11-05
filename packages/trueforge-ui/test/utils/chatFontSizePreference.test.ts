@@ -8,6 +8,16 @@ import {
   setChatFontSize,
 } from '@/utils/chatFontSizePreference.js';
 
+/** The built-in themes' shared type scale, as the theme tokens resolve for them. */
+const BUILT_IN_TEXT_SCALE = {
+  textXs: '0.75rem',
+  textSm: '0.8125rem',
+  textBase: '0.9375rem',
+  textLg: '1.0625rem',
+  textXl: '1.25rem',
+  text2xl: '1.5rem',
+};
+
 describe('chatFontSizePreference', () => {
   beforeEach(() => {
     window.localStorage.clear();
@@ -37,33 +47,45 @@ describe('chatFontSizePreference', () => {
   });
 
   it('gives the default size no style, so the chat renders as it does today', () => {
-    expect(chatFontSizeStyle('default')).toEqual({});
+    expect(chatFontSizeStyle('default', BUILT_IN_TEXT_SCALE)).toEqual({});
   });
 
-  it('gives each other size the whole chat type scale, one notch per step', () => {
-    expect(chatFontSizeStyle('smaller')).toEqual({
-      '--text-xs': '0.6875rem',
-      '--text-sm': '0.75rem',
+  it('derives each other size from the theme tokens, one factor per step', () => {
+    expect(chatFontSizeStyle('smaller', BUILT_IN_TEXT_SCALE)).toEqual({
+      '--text-xs': '0.7rem',
+      '--text-sm': '0.7583rem',
       '--text-base': '0.875rem',
-      '--text-lg': '1rem',
-      '--text-xl': '1.125rem',
-      '--text-2xl': '1.375rem',
+      '--text-lg': '0.9917rem',
+      '--text-xl': '1.1667rem',
+      '--text-2xl': '1.4rem',
     });
-    expect(chatFontSizeStyle('larger')).toEqual({
-      '--text-xs': '0.8125rem',
-      '--text-sm': '0.9375rem',
+    expect(chatFontSizeStyle('larger', BUILT_IN_TEXT_SCALE)).toEqual({
+      '--text-xs': '0.85rem',
+      '--text-sm': '0.9208rem',
       '--text-base': '1.0625rem',
-      '--text-lg': '1.1875rem',
-      '--text-xl': '1.375rem',
-      '--text-2xl': '1.625rem',
+      '--text-lg': '1.2042rem',
+      '--text-xl': '1.4167rem',
+      '--text-2xl': '1.7rem',
     });
-    expect(chatFontSizeStyle('largest')).toEqual({
-      '--text-xs': '0.875rem',
-      '--text-sm': '1rem',
+    expect(chatFontSizeStyle('largest', BUILT_IN_TEXT_SCALE)).toEqual({
+      '--text-xs': '0.95rem',
+      '--text-sm': '1.0292rem',
       '--text-base': '1.1875rem',
-      '--text-lg': '1.3125rem',
-      '--text-xl': '1.5rem',
-      '--text-2xl': '1.75rem',
+      '--text-lg': '1.3458rem',
+      '--text-xl': '1.5833rem',
+      '--text-2xl': '1.9rem',
     });
+  });
+
+  it('scales a host theme text size instead of replacing it', () => {
+    expect(chatFontSizeStyle('larger', { textBase: '1.25rem', textSm: '1rem' })).toEqual({
+      '--text-base': '1.4167rem',
+      '--text-sm': '1.1333rem',
+    });
+  });
+
+  it('leaves a text size that is not a plain rem value to the theme', () => {
+    expect(chatFontSizeStyle('larger', { textBase: '16px' })).toEqual({});
+    expect(chatFontSizeStyle('larger', {})).toEqual({});
   });
 });

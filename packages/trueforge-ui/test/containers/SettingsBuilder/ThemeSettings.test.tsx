@@ -96,6 +96,14 @@ describe('ThemeSettings chat text size', () => {
 
     expect(screen.getByText(/The rest of the app keeps its size/)).toBeInTheDocument();
   });
+
+  it('labels the size buttons as one group', () => {
+    renderSettings();
+
+    const group = screen.getByRole('group', { name: 'Chat text size' });
+    expect(within(group).getByRole('button', { name: 'Smaller' })).toBeInTheDocument();
+    expect(within(group).getByRole('button', { name: 'Largest' })).toBeInTheDocument();
+  });
 });
 
 describe('ThemeSettings model and cost switch', () => {

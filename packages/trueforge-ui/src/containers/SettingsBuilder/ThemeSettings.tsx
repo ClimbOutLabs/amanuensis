@@ -69,7 +69,7 @@ const ThemeSettings = () => {
 
       <div>
         <h3 className="mb-2 text-sm font-medium text-text-primary">Chat text size</h3>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2" role="group" aria-label="Chat text size">
           {CHAT_FONT_SIZES.map(option => (
             <button
               key={option.id}
