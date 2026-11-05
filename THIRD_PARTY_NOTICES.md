@@ -776,7 +776,7 @@ The `ops/aman-tts` image reads replies aloud on the person's own computer. Its b
 
 ## 10. Voice mode: speech detection (MIT)
 
-Voice mode finds where speech starts and ends with the Silero VAD model, version 5.1.2 (MIT, Copyright (c) 2020-present Silero Team). Aman downloads `silero_vad.onnx` once from https://github.com/snakers4/silero-vad (tag v5.1.2) on first use, and loads it only if its size (2,327,524 bytes) and SHA-256 (`2623a2953f6ff3d2c1e61740c6cdb7168133479b267dfef114a4a3cc5bdd788f`) match the pin in `packages/trueforge/src/voice/vad/sileroVad.ts`. It runs in the server process through onnxruntime (MIT). The browser connection uses `ws` (MIT, Copyright (c) Einar Otto Stangvik and contributors).
+Voice mode finds where speech starts and ends with the Silero VAD model, version 5.1.2 (MIT, Copyright (c) 2020-present Silero Team). The image build fetches `silero_vad.onnx` from https://github.com/snakers4/silero-vad (tag v5.1.2), fails unless its SHA-256 matches, and the server loads it only if its size (2,327,524 bytes) and SHA-256 (`2623a2953f6ff3d2c1e61740c6cdb7168133479b267dfef114a4a3cc5bdd788f`) match the pin in `packages/trueforge/src/voice/vad/sileroVad.ts`. It runs in the server process through onnxruntime (MIT). The browser connection uses `ws` (MIT, Copyright (c) Einar Otto Stangvik and contributors).
 
 ```text
 MIT License

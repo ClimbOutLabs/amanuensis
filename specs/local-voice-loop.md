@@ -38,7 +38,7 @@ A voice loop with three parts: speech input (push-to-talk and hotkey), local tex
 
 **The loop.** Audio, then speech detection, then `/v1/transcribe` on `aman-stt` (contract unchanged), then a normal agent turn exactly as for a typed message (the app's own turn route, with the person's own session, so auth, tenant scoping and approvals are the same), then sentence splitting, then streaming `aman-tts`, then audio out. Turns are saved as normal chat text.
 
-**Speech detection.** Silero VAD v5.1.2 (MIT, 2.3 MB ONNX), run in the server through onnxruntime, which the server already ships. It sits in the server because a window is 32 ms and a separate service would add a network hop to each one. The file is downloaded on first use and loaded only after its size and SHA-256 match the pin. Open choice: bake it into the image instead.
+**Speech detection.** Silero VAD v5.1.2 (MIT, 2.3 MB ONNX), run in the server through onnxruntime, which the server already ships. It sits in the server because a window is 32 ms and a separate service would add a network hop to each one. The file is baked into both images at build time (`ADD --checksum`, so the build fails on any other file) and the server loads it only after its size and SHA-256 match the same pin; a test keeps the Dockerfile hashes and the server pin equal. The server never downloads it. Host development fetches it with `pnpm voice:model`.
 
 **Interrupting.** Speech that starts while the voice is talking must be stronger and longer than normal speech start (probability 0.7 for 400 ms) before the voice stops and playback is cleared. An echo guard drops mic sound that matches what was just sent to the speakers (loudness correlation with up to 800 ms delay) or that repeats the spoken words.
 
@@ -51,7 +51,7 @@ A voice loop with three parts: speech input (push-to-talk and hotkey), local tex
 ## Privacy
 
 - Audio never leaves the device; voice mode keeps no audio and no transcript beyond the saved chat message
-- The one network call voice mode adds is the first-use download of the pinned speech-detection model
+- Voice mode adds no network call: the speech-detection model is baked into the image
 - No wake-word listening when the feature is off (no always-on microphone)
 - Document the audio data flow in the privacy dashboard
 
