@@ -1346,6 +1346,7 @@ export class HindsightMemoryProcessor implements PreLLMProcessor, PreLLMEphemera
   private readonly keepsFullExchange: boolean;
   /** The person's time zone, so a recalled memory's day reads as they lived it. */
   private readonly timeZone: string | undefined;
+  private readonly now: () => number;
 
   // A thread is per-turn, so instance state (never persisted itself) is naturally per-turn.
   private ranForThisTurn = false;
@@ -1369,6 +1370,7 @@ export class HindsightMemoryProcessor implements PreLLMProcessor, PreLLMEphemera
     webSearch?: WebSearchTurnState | undefined;
     keepsFullExchange?: boolean | undefined;
     timeZone?: string | undefined;
+    now?: (() => number) | undefined;
   }) {
     this.client = input.client;
     this.config = input.config;
@@ -1381,6 +1383,7 @@ export class HindsightMemoryProcessor implements PreLLMProcessor, PreLLMEphemera
     this.webSearch = input.webSearch;
     this.keepsFullExchange = input.keepsFullExchange ?? false;
     this.timeZone = input.timeZone;
+    this.now = input.now ?? Date.now;
   }
 
   /** Hydrates durable pending-retain and post-compaction-damping state from the previous turn's capability_state. */
@@ -1805,7 +1808,7 @@ export class HindsightMemoryProcessor implements PreLLMProcessor, PreLLMEphemera
     maxTokens: number,
     entityTokens: number,
   ): Promise<{ outcome: RecallOutcome; recallMs: number }> {
-    const startedAt = Date.now();
+    const startedAt = this.now();
     const outcome = await this.guarded('recall', () =>
       this.client.recall({
         query,
@@ -1816,7 +1819,7 @@ export class HindsightMemoryProcessor implements PreLLMProcessor, PreLLMEphemera
         currentSessionId: this.sessionId,
       }),
     );
-    return { outcome, recallMs: Date.now() - startedAt };
+    return { outcome, recallMs: this.now() - startedAt };
   }
 
   /**
@@ -1870,7 +1873,7 @@ export class HindsightMemoryProcessor implements PreLLMProcessor, PreLLMEphemera
       route: 'reflect' as const,
       ...(decision.matched !== undefined ? { matched: decision.matched } : {}),
     };
-    const startedAt = Date.now();
+    const startedAt = this.now();
     const outcome = await this.guarded('reflect', () =>
       this.client.reflect({
         query,
@@ -1879,7 +1882,7 @@ export class HindsightMemoryProcessor implements PreLLMProcessor, PreLLMEphemera
         timeoutMs: this.config.reflect.timeoutMs,
       }),
     );
-    const reflectMs = Date.now() - startedAt;
+    const reflectMs = this.now() - startedAt;
     if (!outcome.ok) {
       this.logger.warn('Memory reflect failed; continuing turn without a reflection', { reason: outcome.reason });
       return {
@@ -1966,7 +1969,7 @@ export class HindsightMemoryProcessor implements PreLLMProcessor, PreLLMEphemera
       };
     }
     const budgetMs = Math.min(this.config.screen.timeoutMs, Math.max(0, this.config.recallTimeoutMs - recallMs));
-    const screenDeadline = Date.now() + budgetMs;
+    const screenDeadline = this.now() + budgetMs;
 
     // Items first, then entities: input order is preserved through the pool, so per-kind indices and
     // the injected order both stay stable.
@@ -2009,7 +2012,7 @@ export class HindsightMemoryProcessor implements PreLLMProcessor, PreLLMEphemera
 
     const outcomes = await mapWithConcurrency(targets, this.config.screen.maxConcurrency, async target => ({
       target,
-      result: await this.safeClassify(target.text, Math.max(0, screenDeadline - Date.now())),
+      result: await this.safeClassify(target.text, Math.max(0, screenDeadline - this.now())),
     }));
 
     const injectedItems: RecallItem[] = [];
@@ -2316,6 +2319,8 @@ export function hindsightMemoryCapability(input: {
   keepsFullExchange?: boolean | undefined;
   /** The person's IANA time zone; a recalled memory's instant is shown as a day in it. */
   timeZone?: string | undefined;
+  /** Milliseconds clock for the recall and screen time budgets; tests supply their own. Default: `Date.now`. */
+  now?: (() => number) | undefined;
 }): AgentCapability {
   const processor = new HindsightMemoryProcessor({ ...input, screenClient: resolveScreenClient(input) });
   return {
