@@ -146,6 +146,33 @@ values for a turn are what the `aman.memory.recall` event reflects.
 | `http_error`               | A non-2xx answer; `http_status` and `detail` carry what the provider said.                                    |
 | `invalid_response`         | The answer was unreadable, unparseable, or over `MEMORY_MAX_RESPONSE_BYTES`.                                  |
 
+## Memory pages
+
+These notes apply to the Markdown memory backend. A vault is one folder under `MEMORY_MARKDOWN_DIR`.
+The pages and their format are described in [the design](DESIGN.md#pages). Pages are edited by hand.
+
+### A page is not loaded
+
+If the server log warns that page files were skipped, some files in `people/` or `matters/` do not have a lowercase
+page name. The log gives a count, not names. Look for such files and rename them, for example
+`people/Wendy.md` to `people/wendy.md`. Aman picks it up on the next turn.
+
+### Moving pages to a new server
+
+`aman export-data` and `aman import-data` carry each vault's `people/` and `matters/` pages. Run them
+as usual; there is nothing extra to copy. After an import, the summary lists the pages that came
+along. If it says some pages have a name that is not all lowercase, rename each one to its lowercase
+name in the memory folder, for example `people/Wendy.md` to `people/wendy.md`; Aman reads it on the next
+turn. If it says other files were not copied, they were not `.md` pages; copy them by hand if you need
+them. If it says pages were left out because memory is kept in a different way, pages only work with the
+Markdown memory backend. `.memory-state/` is not exported and
+is rebuilt on the new server.
+
+### Files in `.memory-state/`
+
+- `aliases.json` is a cache of page names. Deleting it is safe. It is rebuilt on the next turn that
+  needs it.
+
 ## Evaluation-only Prompt Guard sidecar
 
 The classifier assets and reproducible container build live in

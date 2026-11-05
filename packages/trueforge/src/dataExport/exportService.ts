@@ -54,6 +54,7 @@ import {
   withHiddenContext,
 } from '../runtime/memory/markdownMemoryFiles';
 import type { MemoryClient } from '../runtime/memory/memoryClient';
+import { listPageFiles, pageFolder, parsePageFilePath } from '../runtime/memory/memoryPages';
 import { MEMORY_RECALL_ENABLED_SETTING_KEY } from '../runtime/memoryRecallSettings';
 import { MEMORY_SCREEN_ENABLED_SETTING_KEY } from '../runtime/memoryScreenSettings';
 import { MEMORY_SUMMARIZE_SETTING_KEY } from '../runtime/memorySummarizeSettings';
@@ -66,8 +67,11 @@ import { exportableEvents, exportedThreads, sessionPartName, withoutDeploymentBo
 import { ZipEntrySizeCapExceededError, ZipStreamWriter } from './zipStreamWriter';
 
 export const EXPORT_FORMAT = 'aman-export';
-/** 2: chats moved from one sessions.json to numbered sessions/ files of chat and turn records. */
-export const EXPORT_SCHEMA_VERSION = 2;
+/**
+ * 2: chats moved from one sessions.json to numbered sessions/ files of chat and turn records.
+ * 3: memory vaults carry their `people/` and `matters/` pages.
+ */
+export const EXPORT_SCHEMA_VERSION = 3;
 
 const PAGE_LIMIT = 200;
 
@@ -767,7 +771,36 @@ async function regularFileText(filePath: string): Promise<string | undefined> {
   }
 }
 
-/** Verbatim Markdown-backend files: MEMORY.md, daily logs, tombstones. Derived caches and sharing config stay behind. */
+/**
+ * The vault's hand-written pages, every `.md` file directly in `people/` and `matters/` under its own
+ * name (a file Aman cannot read by name still travels, so a move loses nothing), as regular files only.
+ * A page folder that is a link is skipped, so nothing outside the vault is read. `.memory-state/`
+ * is a cache and stays behind.
+ */
+async function writeMarkdownPages<TTransaction>(
+  context: ExportContext<TTransaction>,
+  { dirName, dirPath }: { dirName: string; dirPath: string },
+): Promise<void> {
+  const realFolders = new Map<string, boolean>();
+  for (const { kind, stem } of await listPageFiles(dirPath)) {
+    const folder = pageFolder(kind);
+    // A name that cannot travel (control characters, a hidden file) is left in place.
+    if (parsePageFilePath(`${folder}/${stem}.md`) === undefined) {
+      continue;
+    }
+    let isReal = realFolders.get(folder);
+    if (isReal === undefined) {
+      isReal = (await lstat(path.join(dirPath, folder))).isDirectory();
+      realFolders.set(folder, isReal);
+    }
+    const text = isReal ? await regularFileText(path.join(dirPath, folder, `${stem}.md`)) : undefined;
+    if (text !== undefined) {
+      await context.zip.addTextEntry(`memory/${dirName}/${folder}/${stem}.md`, context.scrub.text(text));
+    }
+  }
+}
+
+/** Verbatim Markdown-backend files: MEMORY.md, daily logs, tombstones, pages. Derived caches and sharing config stay behind. */
 async function writeMarkdownMemoryFiles<TTransaction>(
   context: ExportContext<TTransaction>,
   input: { markdownDir: string; personas: readonly Persona[] },
@@ -792,6 +825,7 @@ async function writeMarkdownMemoryFiles<TTransaction>(
         await context.zip.addTextEntry(`memory/${dirName}/${fileName}`, context.scrub.text(text));
       }
     }
+    await writeMarkdownPages(context, { dirName, dirPath });
     const dailyDir = path.join(dirPath, 'memory');
     if (!existsSync(dailyDir)) {
       continue;

@@ -20,12 +20,12 @@ import {
 import type { RetainItem } from './hindsightClient';
 import {
   ASSISTANT_RESPONSE_SOURCE,
-  formatNoteMarker,
+  formatMarker,
   isMemoryNoteSource,
   NOTE_DATE_METADATA_KEY,
   NOTE_SOURCE_METADATA_KEY,
   noteProvenanceFromMetadata,
-  parseNoteMarker,
+  parseMarker,
   withoutNoteTrailer,
 } from './memoryNotes';
 import { MEMORY_ORIGIN_METADATA_KEY, TOOL_INGESTED_ORIGIN, USER_STATED_ORIGIN } from './memoryOrigin';
@@ -152,7 +152,7 @@ export function formatRetainEntry(item: RetainItem): string {
   // Only the metadata says what is a note. Its marker, when the content also ends with it, is written once,
   // as a trailer; any other marker-looking last line is body text and is escaped like every other.
   const note = noteProvenanceFromMetadata(item.metadata);
-  const marker = note === undefined ? undefined : formatNoteMarker(note);
+  const marker = note === undefined ? undefined : formatMarker({ kind: 'note', ...note });
   const content =
     marker !== undefined && item.content.trimEnd().endsWith(`\n${marker}`)
       ? withoutNoteTrailer(item.content)
@@ -172,7 +172,7 @@ export function formatRetainEntry(item: RetainItem): string {
       parts.push(marker);
     }
   }
-  if (marker !== undefined && parseNoteMarker(marker) !== undefined) {
+  if (marker !== undefined && parseMarker(marker)?.kind === 'note') {
     parts.push(marker);
   }
   const origin = item.metadata?.[MEMORY_ORIGIN_METADATA_KEY];
@@ -197,7 +197,7 @@ function escapeEntryStructure(text: string): string {
         trimmed === ASSISTANT_REPLY_SOURCE_LINE ||
         SESSION_MARKER_PATTERN.test(trimmed) ||
         DOCUMENT_MARKER_PATTERN.test(trimmed) ||
-        parseNoteMarker(trimmed) !== undefined
+        parseMarker(trimmed)?.kind === 'note'
         ? `\\${line}`
         : line;
     })
@@ -212,7 +212,8 @@ function splitEntryTrailers(text: string): { body: string; metadata: Record<stri
     const line = (lines[lines.length - 1] ?? '').trimEnd();
     const sessionId = SESSION_MARKER_PATTERN.exec(line)?.[1];
     const documentId = DOCUMENT_MARKER_PATTERN.exec(line)?.[1];
-    const note = parseNoteMarker(line);
+    const parsedMarker = parseMarker(line);
+    const note = parsedMarker?.kind === 'note' ? parsedMarker : undefined;
     if (line === '') {
       lines.pop();
     } else if (line === READ_CONTENT_SOURCE_LINE || line === ASSISTANT_REPLY_SOURCE_LINE) {
@@ -348,7 +349,7 @@ export function withOriginalHiddenMarkers({ original, edited }: { original: stri
   const noteSource = note[NOTE_SOURCE_METADATA_KEY];
   const noteDate = note[NOTE_DATE_METADATA_KEY];
   if (noteSource !== undefined && isMemoryNoteSource(noteSource) && noteDate !== undefined) {
-    trailers.push(formatNoteMarker({ source: noteSource, date: noteDate }));
+    trailers.push(formatMarker({ kind: 'note', source: noteSource, date: noteDate }));
   }
   if (metadata[MEMORY_ORIGIN_METADATA_KEY] !== undefined) {
     trailers.push(READ_CONTENT_SOURCE_LINE);

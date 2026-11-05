@@ -296,6 +296,90 @@ describe('runDataExport memory backends', () => {
       expect(names.filter(name => name.startsWith('memory/'))).toEqual(['memory/acme_corp/MEMORY.md']);
     });
 
+    describe('pages', () => {
+      async function writePages(dir: string, files: Record<string, string>): Promise<void> {
+        for (const [name, text] of Object.entries(files)) {
+          await mkdir(join(memoryDir, dir, name.split('/').slice(0, -1).join('/')), { recursive: true });
+          await writeFile(join(memoryDir, dir, name), text);
+        }
+      }
+
+      it('takes each vault’s people and matters pages byte for byte, and never .memory-state', async () => {
+        const mine = vaultFilesystemNamespace(TENANT_ID, personaVaultNamespace('Researcher'));
+        await vault(TENANT_ID, { 'MEMORY.md': '# Shared\n' });
+        await vault(mine, {});
+        await writePages(TENANT_ID, {
+          'people/wendy.md': '---\ntitle: Wendy\n---\n',
+          'people/김민수.md': '---\ntitle: 김민수\n---\n',
+          'matters/lisbon-trip.md': '---\ntitle: Lisbon trip\n---\n',
+          '.memory-state/aliases.json': '{}',
+          '.memory-state/README': 'x',
+        });
+        await writePages(mine, { 'people/sam.md': 'Sam\n' });
+        const { deps, close } = await makeDeps({ kind: 'markdown', markdownDir: memoryDir });
+        try {
+          await createPersona(deps, { id: 'persona-0', name: 'Researcher', owner: 'alice' });
+          const sink = new CollectingWritable();
+          await runDataExport(deps, exportRequest({}), sink);
+          const entries = readZipEntries(sink.buffer());
+          const names = entries.map(entry => entry.name).filter(name => name.startsWith('memory/'));
+          expect(names.sort()).toEqual(
+            [
+              `memory/${TENANT_ID}/MEMORY.md`,
+              `memory/${TENANT_ID}/people/wendy.md`,
+              `memory/${TENANT_ID}/people/김민수.md`,
+              `memory/${TENANT_ID}/matters/lisbon-trip.md`,
+              `memory/${mine}/people/sam.md`,
+            ].sort(),
+          );
+          expect(zipEntryText(entries, `memory/${TENANT_ID}/people/김민수.md`)).toBe('---\ntitle: 김민수\n---\n');
+        } finally {
+          await close();
+        }
+      });
+
+      it('takes a page whose name is not a lowercase slug as it is, and leaves out files that are not .md pages', async () => {
+        await vault(TENANT_ID, {});
+        await writePages(TENANT_ID, {
+          'people/Wendy.md': 'x',
+          'people/my notes.md': 'x',
+          'people/photo.png': 'x',
+          'people/.hidden.md': 'x',
+          'people/ok.md': 'ok',
+        });
+        const names = await exportedNames({});
+        expect(names.filter(name => name.startsWith('memory/')).sort()).toEqual(
+          [
+            `memory/${TENANT_ID}/people/Wendy.md`,
+            `memory/${TENANT_ID}/people/my notes.md`,
+            `memory/${TENANT_ID}/people/ok.md`,
+          ].sort(),
+        );
+      });
+
+      it('never follows a link from a page folder or a page out of the vault', async () => {
+        await vault(TENANT_ID, {});
+        await mkdir(join(scratch, 'outside'), { recursive: true });
+        await writeFile(join(scratch, 'outside', 'secret.md'), 'outside the vault\n');
+        await symlink(join(scratch, 'outside'), join(memoryDir, TENANT_ID, 'people'));
+        await mkdir(join(memoryDir, TENANT_ID, 'matters'), { recursive: true });
+        await symlink(join(scratch, 'outside', 'secret.md'), join(memoryDir, TENANT_ID, 'matters', 'trip.md'));
+        const names = await exportedNames({});
+        expect(names.filter(name => name.startsWith('memory/'))).toEqual([]);
+      });
+
+      it('does not take another tenant’s or another person’s pages', async () => {
+        const theirs = vaultFilesystemNamespace(TENANT_ID, personaVaultNamespace('Bob Persona'));
+        await vault(TENANT_ID, {});
+        await vault('other-tenant', {});
+        await vault(theirs, {});
+        await writePages('other-tenant', { 'people/wendy.md': 'x' });
+        await writePages(theirs, { 'people/wendy.md': 'x' });
+        const names = await exportedNames({});
+        expect(names.filter(name => name.startsWith('memory/'))).toEqual([]);
+      });
+    });
+
     it('never follows a link out of the vault', async () => {
       await vault(TENANT_ID, {});
       await writeFile(join(scratch, 'outside.md'), 'outside the vault\n');

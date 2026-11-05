@@ -35,6 +35,7 @@ const mockConfig: MemoryConfig = {
     maxTokens: 500,
     timeoutMs: 5000,
   },
+  pages: { maxCount: 6, maxTokens: 1500 },
 };
 
 describe('Memory sweep retain operations', () => {

@@ -71,6 +71,7 @@ import {
   NOTE_SOURCE_METADATA_KEY,
   noteRetainContent,
 } from '../runtime/memory/memoryNotes';
+import { isInPageFolder, pageFolder, parsePageFilePath } from '../runtime/memory/memoryPages';
 import { MEMORY_RECALL_ENABLED_SETTING_KEY } from '../runtime/memoryRecallSettings';
 import { MEMORY_SCREEN_ENABLED_SETTING_KEY } from '../runtime/memoryScreenSettings';
 import { MEMORY_SUMMARIZE_SETTING_KEY } from '../runtime/memorySummarizeSettings';
@@ -1004,6 +1005,7 @@ function buildSummary({
   auditEntries,
   standInAgentNames,
   filesLeftBehind,
+  memoryPages,
   leftOut,
   personaChanges,
   trimmedSpaces,
@@ -1023,6 +1025,7 @@ function buildSummary({
   /** Spaces whose history starts after revision 1 in the archive. */
   trimmedSpaces: number;
   filesLeftBehind: number;
+  memoryPages: MemoryPageCounts;
 }): string {
   const counts = [
     `  ${pluralize(result.chats, 'chat', 'chats')}`,
@@ -1062,6 +1065,24 @@ function buildSummary({
   if (filesLeftBehind > 0) {
     notes.push(
       `${pluralize(filesLeftBehind, 'uploaded file was', 'uploaded files were')} left behind because the export did not include ${filesLeftBehind === 1 ? 'it' : 'them'}; the chats still show ${filesLeftBehind === 1 ? 'its name' : 'their names'}.`,
+    );
+  }
+  if (memoryPages.imported > 0) {
+    notes.push(`${pluralize(memoryPages.imported, 'memory page', 'memory pages')} came along.`);
+  }
+  if (memoryPages.leftOut > 0) {
+    notes.push(
+      `${pluralize(memoryPages.leftOut, 'memory page was', 'memory pages were')} left out because this computer keeps memory in a different way, and pages only work with memory kept as files.`,
+    );
+  }
+  if (memoryPages.unreadableNames > 0) {
+    notes.push(
+      `${pluralize(memoryPages.unreadableNames, 'memory page has', 'memory pages have')} a name that is not all lowercase, so Aman will not read ${memoryPages.unreadableNames === 1 ? 'it' : 'them'} yet. Rename ${memoryPages.unreadableNames === 1 ? 'it' : 'each one'} to its lowercase name in the memory folder.`,
+    );
+  }
+  if (memoryPages.unusable > 0) {
+    notes.push(
+      `${pluralize(memoryPages.unusable, 'other file was', 'other files were')} in the memory page folders and ${memoryPages.unusable === 1 ? 'was' : 'were'} not copied, because only .md pages are. Copy ${memoryPages.unusable === 1 ? 'it' : 'them'} into the memory folder by hand if you need ${memoryPages.unusable === 1 ? 'it' : 'them'}.`,
     );
   }
   notes.push('Chats keep their dates and totals. Personas, spaces, folders and schedules show the time of the import.');
@@ -1151,28 +1172,62 @@ function planAgents(contents: ArchiveContents): AgentPlan {
 interface PlannedMemoryFile {
   targetPath: string;
   bytes: Buffer;
+  /** True for a `people/` or `matters/` page. */
+  isPage: boolean;
 }
 
-/** Maps the archive's memory/ files onto the target tenant's vault paths. Nothing is written here. */
+/** What the import did with the archive's memory pages, for the summary. */
+interface MemoryPageCounts {
+  imported: number;
+  /** Pages written under a name that is not a lowercase page name, which Aman will not read until it is renamed. */
+  unreadableNames: number;
+  /** Files in a page folder that are not page files (not `.md`, deeper folders, hidden or unsafe names); they are not written. */
+  unusable: number;
+  /** Pages not written because the memory here is not kept as Markdown files. */
+  leftOut: number;
+}
+
+/** The vault-relative part of a `memory/<vault>/<file>` archive path, or undefined for any other path. */
+function memoryFileAt(name: string): { sourceSeg: string; inner: string } | undefined {
+  if (!name.startsWith('memory/')) {
+    return undefined;
+  }
+  const rest = name.slice('memory/'.length);
+  const slash = rest.indexOf('/');
+  return slash < 0 ? undefined : { sourceSeg: rest.slice(0, slash), inner: rest.slice(slash + 1) };
+}
+
+/**
+ * Maps the archive's memory/ files onto the target tenant's vault paths. Nothing is written here.
+ * A page keeps its folder and its file name, even one Aman will not read by name; any other file in a
+ * page folder is not written. Nothing can land outside the vault: the archive reader refuses unsafe paths
+ * first and a page name is one plain segment.
+ */
 function planMarkdownMemory(
   markdownDir: string,
   contents: ArchiveContents,
   input: { targetTenantId: string; personaSegBySource: ReadonlyMap<string, string> },
-): PlannedMemoryFile[] {
+): { files: PlannedMemoryFile[]; unusablePages: number; unreadableNames: number } {
   const planned: PlannedMemoryFile[] = [];
+  const targets = new Set<string>();
+  let unusablePages = 0;
+  let unreadableNames = 0;
   const knownFiles = new Set([CURATED_MEMORY_FILE, VAULT_TOMBSTONES_FILE]);
   for (const [name, data] of contents.files) {
-    if (!name.startsWith('memory/')) {
+    const file = memoryFileAt(name);
+    if (file === undefined) {
       continue;
     }
-    const rest = name.slice('memory/'.length);
-    const slash = rest.indexOf('/');
-    if (slash < 0) {
+    const { sourceSeg, inner } = file;
+    const page = parsePageFilePath(inner);
+    if (page === undefined && isInPageFolder(inner)) {
+      unusablePages += 1;
       continue;
     }
-    const sourceSeg = rest.slice(0, slash);
-    const inner = rest.slice(slash + 1);
-    if (!knownFiles.has(inner) && dailyLogFileAt(inner) === undefined) {
+    if (page !== undefined && !page.isSlug) {
+      unreadableNames += 1;
+    }
+    if (page === undefined && !knownFiles.has(inner) && dailyLogFileAt(inner) === undefined) {
       continue;
     }
     const targetSeg = targetMemorySegment({
@@ -1195,9 +1250,32 @@ function planMarkdownMemory(
       // Entries written before facts-only memory carried a "Turn summary:" prefix and a chat title line.
       bytes = Buffer.from(upgradeLegacyEntries(data.toString('utf8')), 'utf8');
     }
-    planned.push({ targetPath: path.join(markdownDir, targetSeg, inner), bytes });
+    const targetPath =
+      page === undefined
+        ? path.join(markdownDir, targetSeg, inner)
+        : path.join(markdownDir, targetSeg, pageFolder(page.kind), `${page.stem}.md`);
+    if (targets.has(targetPath)) {
+      throw new DataImportError(
+        'This export lists the same memory file twice, so the import was refused and nothing was changed. Export again, then import the new file.',
+        400,
+      );
+    }
+    targets.add(targetPath);
+    planned.push({ targetPath, bytes, isPage: page !== undefined });
   }
-  return planned;
+  return { files: planned, unusablePages, unreadableNames };
+}
+
+/** How many page files the archive holds, for a memory backend that keeps no page files. */
+function countArchivePages(contents: ArchiveContents): number {
+  let count = 0;
+  for (const name of contents.files.keys()) {
+    const inner = memoryFileAt(name)?.inner;
+    if (inner !== undefined && isInPageFolder(inner)) {
+      count += 1;
+    }
+  }
+  return count;
 }
 
 /** Writes planned files, each created exclusively so an existing file is never replaced. */
@@ -1482,10 +1560,17 @@ async function importArchive<TTransaction>(
     }
   }
   const memoryCount = countMemories(memoryNamespaces);
-  const plannedMemoryFiles =
+  const memoryPlan =
     deps.memoryTarget.kind === 'markdown'
       ? planMarkdownMemory(deps.memoryTarget.markdownDir, contents, { targetTenantId: tenantId, personaSegBySource })
-      : [];
+      : { files: [], unusablePages: 0, unreadableNames: 0 };
+  const plannedMemoryFiles = memoryPlan.files;
+  const memoryPages: MemoryPageCounts = {
+    imported: plannedMemoryFiles.filter(file => file.isPage).length,
+    unreadableNames: memoryPlan.unreadableNames,
+    unusable: memoryPlan.unusablePages,
+    leftOut: deps.memoryTarget.kind === 'markdown' ? 0 : countArchivePages(contents),
+  };
   for (const file of plannedMemoryFiles) {
     if (existsSync(file.targetPath)) {
       throw new DataImportError(
@@ -1557,6 +1642,7 @@ async function importArchive<TTransaction>(
         auditEntries: audit.length,
         standInAgentNames: agentPlan.placeholders.map(placeholder => placeholder.name),
         filesLeftBehind: 0,
+        memoryPages,
         leftOut,
         personaChanges: contents.personaRepairLines,
         trimmedSpaces,
@@ -1873,6 +1959,7 @@ async function importArchive<TTransaction>(
         auditEntries: audit.length,
         standInAgentNames: agentPlan.placeholders.map(placeholder => placeholder.name),
         filesLeftBehind,
+        memoryPages,
         leftOut,
         personaChanges: contents.personaRepairLines,
         trimmedSpaces,

@@ -3,7 +3,7 @@ import {
   noteLabel,
   noteProvenance,
   noteRetainContent,
-  parseNoteMarker,
+  parseMarker,
   READ_CONTENT_NOTE_MAX_AGE_DAYS,
   withoutNoteTrailer,
 } from '../../../../src/runtime/memory/memoryNotes';
@@ -46,8 +46,12 @@ describe('note markers in the stored text', () => {
 
   it('writes the marker as the last line and reads it back', () => {
     expect(content).toBe('From an email, found Oct 29: Priya asked.\n\n<!-- note: email 2026-10-29 -->');
-    expect(parseNoteMarker('<!-- note: email 2026-10-29 -->')).toEqual({ source: 'email', date: '2026-10-29' });
-    expect(parseNoteMarker('<!-- note: made_up 2026-10-29 -->')).toBeUndefined();
+    expect(parseMarker('<!-- note: email 2026-10-29 -->')).toEqual({
+      kind: 'note',
+      source: 'email',
+      date: '2026-10-29',
+    });
+    expect(parseMarker('<!-- note: made_up 2026-10-29 -->')).toBeUndefined();
     expect(withoutNoteTrailer(content)).toBe('From an email, found Oct 29: Priya asked.');
     expect(withoutNoteTrailer('Plain text')).toBe('Plain text');
   });
