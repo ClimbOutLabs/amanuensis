@@ -23,6 +23,7 @@ import { migrateSqliteToLatest } from '../../../src/db/migrateSqlite';
 import { PostgresAgentStore } from '../../../src/db/postgres/agent-store/PostgresAgentStore';
 import { PostgresGlobalSettingsStore } from '../../../src/db/postgres/global-settings-store/PostgresGlobalSettingsStore';
 import { PostgresMcpServerStore } from '../../../src/db/postgres/mcp-server-store/PostgresMcpServerStore';
+import { PostgresModelProviderStore } from '../../../src/db/postgres/model-provider-store/PostgresModelProviderStore';
 import { PostgresPersonaStore } from '../../../src/db/postgres/persona-store/PostgresPersonaStore';
 import { PostgresPersonalizationStore } from '../../../src/db/postgres/personalization-store/PostgresPersonalizationStore';
 import { PostgresScheduleStore } from '../../../src/db/postgres/schedule-store/PostgresScheduleStore';
@@ -36,6 +37,7 @@ import { SqliteAgentStore } from '../../../src/db/sqlite/agent-store/SqliteAgent
 import { createSqliteDb } from '../../../src/db/sqlite/client';
 import { SqliteGlobalSettingsStore } from '../../../src/db/sqlite/global-settings-store/SqliteGlobalSettingsStore';
 import { SqliteMcpServerStore } from '../../../src/db/sqlite/mcp-server-store/SqliteMcpServerStore';
+import { SqliteModelProviderStore } from '../../../src/db/sqlite/model-provider-store/SqliteModelProviderStore';
 import { SqlitePersonaStore } from '../../../src/db/sqlite/persona-store/SqlitePersonaStore';
 import { SqlitePersonalizationStore } from '../../../src/db/sqlite/personalization-store/SqlitePersonalizationStore';
 import { SqliteScheduleStore } from '../../../src/db/sqlite/schedule-store/SqliteScheduleStore';
@@ -84,6 +86,7 @@ async function makeSqliteInstance(label: string): Promise<Instance<SqliteTx>> {
     deliveryStore: new DeliveryStore(db),
     turnArtifactStore: new SqliteTurnArtifactStore(db),
     mcpServerStore: new SqliteMcpServerStore(db),
+    modelProviderStore: new SqliteModelProviderStore(db),
   };
   const withTransaction: WithTransaction<SqliteTx> = callback => db.transaction().execute(callback);
   return {
@@ -118,6 +121,7 @@ async function makePostgresInstance(label: string): Promise<Instance<PgTx> | und
     deliveryStore: new DeliveryStore(db),
     turnArtifactStore: new PostgresTurnArtifactStore(db),
     mcpServerStore: new PostgresMcpServerStore(db),
+    modelProviderStore: new PostgresModelProviderStore(db),
   };
   const withTransaction: WithTransaction<PgTx> = callback => db.transaction().execute(callback);
   return {
@@ -148,6 +152,7 @@ async function importArchive<Tx>(instance: Instance<Tx>, archive: Buffer, userId
     deliveryStore: instance.stores.deliveryStore,
     turnArtifactStore: instance.stores.turnArtifactStore,
     mcpServerStore: instance.stores.mcpServerStore,
+    modelProviderStore: instance.stores.modelProviderStore,
     agentStore: instance.stores.agentStore,
     mcpCatalog: McpCatalog.loadShipped(),
     withTransaction: instance.withTransaction,

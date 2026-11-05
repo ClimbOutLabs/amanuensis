@@ -13,11 +13,7 @@ describe("ModelProvidersClient", () => {
             data: [
                 {
                     env_managed: true,
-                    manifest: {
-                        auth: { api_key: "api_key" },
-                        models: [{ model_id: "model_id", name: "name", properties: {} }],
-                        type: "alibaba",
-                    },
+                    manifest: { models: [{ model_id: "model_id", name: "name", properties: {} }], type: "alibaba" },
                     name: "name",
                 },
             ],
@@ -37,9 +33,6 @@ describe("ModelProvidersClient", () => {
                 {
                     envManaged: true,
                     manifest: {
-                        auth: {
-                            apiKey: "api_key",
-                        },
                         models: [
                             {
                                 modelId: "model_id",
@@ -97,11 +90,7 @@ describe("ModelProvidersClient", () => {
         const server = mockServerPool.createServer();
         const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
         const rawRequestBody = {
-            manifest: {
-                auth: { api_key: "api_key" },
-                models: [{ model_id: "model_id", name: "name", properties: {} }],
-                type: "alibaba",
-            },
+            manifest: { models: [{ model_id: "model_id", name: "name", properties: {} }], type: "alibaba" },
         };
         const rawResponseBody = {
             data: {
@@ -127,9 +116,6 @@ describe("ModelProvidersClient", () => {
 
         const response = await client.settings.modelProviders.create({
             manifest: {
-                auth: {
-                    apiKey: "api_key",
-                },
                 models: [
                     {
                         modelId: "model_id",
@@ -167,7 +153,6 @@ describe("ModelProvidersClient", () => {
         const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
         const rawRequestBody = {
             manifest: {
-                auth: { api_key: "x" },
                 models: [
                     { model_id: "x", name: "xy", properties: {} },
                     { model_id: "x", name: "xy", properties: {} },
@@ -189,9 +174,6 @@ describe("ModelProvidersClient", () => {
         await expect(async () => {
             return await client.settings.modelProviders.create({
                 manifest: {
-                    auth: {
-                        apiKey: "x",
-                    },
                     models: [
                         {
                             modelId: "x",
@@ -215,7 +197,6 @@ describe("ModelProvidersClient", () => {
         const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
         const rawRequestBody = {
             manifest: {
-                auth: { api_key: "x" },
                 models: [
                     { model_id: "x", name: "xy", properties: {} },
                     { model_id: "x", name: "xy", properties: {} },
@@ -237,9 +218,6 @@ describe("ModelProvidersClient", () => {
         await expect(async () => {
             return await client.settings.modelProviders.create({
                 manifest: {
-                    auth: {
-                        apiKey: "x",
-                    },
                     models: [
                         {
                             modelId: "x",
@@ -263,7 +241,6 @@ describe("ModelProvidersClient", () => {
         const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
         const rawRequestBody = {
             manifest: {
-                auth: { api_key: "x" },
                 models: [
                     { model_id: "x", name: "xy", properties: {} },
                     { model_id: "x", name: "xy", properties: {} },
@@ -285,9 +262,6 @@ describe("ModelProvidersClient", () => {
         await expect(async () => {
             return await client.settings.modelProviders.create({
                 manifest: {
-                    auth: {
-                        apiKey: "x",
-                    },
                     models: [
                         {
                             modelId: "x",
@@ -310,11 +284,7 @@ describe("ModelProvidersClient", () => {
         const server = mockServerPool.createServer();
         const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
         const rawRequestBody = {
-            manifest: {
-                auth: { api_key: "api_key" },
-                models: [{ model_id: "model_id", name: "name", properties: {} }],
-                type: "alibaba",
-            },
+            manifest: { models: [{ model_id: "model_id", name: "name", properties: {} }], type: "alibaba" },
         };
         const rawResponseBody = {
             data: {
@@ -340,9 +310,6 @@ describe("ModelProvidersClient", () => {
 
         const response = await client.settings.modelProviders.createOrUpdate({
             manifest: {
-                auth: {
-                    apiKey: "api_key",
-                },
                 models: [
                     {
                         modelId: "model_id",
@@ -380,7 +347,6 @@ describe("ModelProvidersClient", () => {
         const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
         const rawRequestBody = {
             manifest: {
-                auth: { api_key: "x" },
                 models: [
                     { model_id: "x", name: "xy", properties: {} },
                     { model_id: "x", name: "xy", properties: {} },
@@ -402,9 +368,6 @@ describe("ModelProvidersClient", () => {
         await expect(async () => {
             return await client.settings.modelProviders.createOrUpdate({
                 manifest: {
-                    auth: {
-                        apiKey: "x",
-                    },
                     models: [
                         {
                             modelId: "x",
@@ -428,7 +391,6 @@ describe("ModelProvidersClient", () => {
         const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
         const rawRequestBody = {
             manifest: {
-                auth: { api_key: "x" },
                 models: [
                     { model_id: "x", name: "xy", properties: {} },
                     { model_id: "x", name: "xy", properties: {} },
@@ -450,9 +412,6 @@ describe("ModelProvidersClient", () => {
         await expect(async () => {
             return await client.settings.modelProviders.createOrUpdate({
                 manifest: {
-                    auth: {
-                        apiKey: "x",
-                    },
                     models: [
                         {
                             modelId: "x",
@@ -476,7 +435,6 @@ describe("ModelProvidersClient", () => {
         const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
         const rawRequestBody = {
             manifest: {
-                auth: { api_key: "x" },
                 models: [
                     { model_id: "x", name: "xy", properties: {} },
                     { model_id: "x", name: "xy", properties: {} },
@@ -498,9 +456,6 @@ describe("ModelProvidersClient", () => {
         await expect(async () => {
             return await client.settings.modelProviders.createOrUpdate({
                 manifest: {
-                    auth: {
-                        apiKey: "x",
-                    },
                     models: [
                         {
                             modelId: "x",

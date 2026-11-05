@@ -18,6 +18,8 @@ import { mapEnabledModels, resolveDefaultGatewayUrl, type TrueFoundryEnabledMode
 import { TrueFoundryServiceFoundryServerClient } from './TrueFoundryServiceFoundryServerClient';
 
 export class TrueFoundryModelProviderStore<TTransaction = never> implements IModelProviderStore<TTransaction> {
+  readonly managedElsewhere = true;
+
   readonly #client: TrueFoundryServiceFoundryServerClient;
   readonly #asAgent: ResolveAccessToken;
   readonly #asUser: ResolveAccessToken;
