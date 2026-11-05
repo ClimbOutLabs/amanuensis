@@ -65,3 +65,45 @@ describe('PermissionApprovalCard for a held search', () => {
     expect(screen.getByText(/session_id: "sess-123"/)).toBeInTheDocument();
   });
 });
+
+describe('PermissionApprovalCard for a held search with a long query', () => {
+  const longQuery = Array.from({ length: 30 }, (_, index) => `word${String(index)}`)
+    .join(' ')
+    .repeat(2);
+  const longCard: SentinelApprovalCard = {
+    ...SEARCH_CARD,
+    plain_what: searchHoldCardText({ summary: longQuery, say: holdSay('Aman').search_setting, page: false }),
+    outbound_text: `query: "${longQuery}"`,
+    outbound_plumbing_text: null,
+  };
+
+  function renderLong() {
+    render(
+      <PermissionApprovalCard
+        approvalId="approval-long-search"
+        card={longCard}
+        othersWaiting={0}
+        onApprove={vi.fn()}
+        onDeny={vi.fn()}
+      />,
+    );
+  }
+
+  it('folds the question so the buttons stay close, and shows all of it on request', () => {
+    renderLong();
+    const title = screen.getByRole('heading', { level: 3 });
+    expect(Array.from(title.textContent ?? '')).toHaveLength(163);
+    expect(title.textContent?.endsWith('...')).toBe(true);
+    expect(screen.getByRole('button', { name: 'Allow' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Not now' })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /^Show all \(\d+ more characters\)$/ }));
+    expect(screen.getByRole('heading', { level: 3 }).textContent).toBe(longCard.plain_what);
+  });
+
+  it('keeps a short question whole, with nothing to unfold', () => {
+    renderSearch();
+    expect(screen.getByRole('heading', { level: 3 }).textContent).toBe(SEARCH_CARD.plain_what);
+    expect(screen.queryByRole('button', { name: /^Show all/ })).toBeNull();
+  });
+});
