@@ -88,7 +88,7 @@ import type { DeliveryService } from '../runtime/delivery/deliveryService';
 import type { EventSubscriptionRegistry } from '../runtime/event-subscription';
 import { createMemoryClient } from '../runtime/memory/createMemoryClient';
 import { resolveMemoryProvider } from '../runtime/memory/memoryProvider';
-import { deliverReminder, ReminderAgentNotFoundError } from '../runtime/reminderDelivery';
+import { deliverReminder } from '../runtime/reminderDelivery';
 import { scheduleToolsOf, specWithTools } from '../runtime/scheduleTools';
 import { resolveSandboxProvider, validateAgentSpec } from '../runtime/sessionResources';
 import type { TokenFactoryBudget } from '../runtime/tokenFactoryBudget';
@@ -203,27 +203,28 @@ export async function startScheduleRunOnRequest<TTransaction>(params: {
 }): Promise<void> {
   const { c, item, deps } = params;
   if (item.schedule.manifest.kind === 'reminder') {
-    // A reminder needs no model: the host writes its line into the Reminders chat itself.
+    // A reminder needs no model: the host puts it in the feed and writes its line into the chat it was set in.
     const delivered = await deliverReminder({
       item,
-      sessions: deps.sessions,
       sessionStore: deps.sessionStore,
-      agentStore: deps.agentStore,
       now: new Date(),
       deliveries: deps.deliveryService,
-    });
-    // A reminder line is a finished turn like any other, so it joins the past-chat search now.
-    await deps.chatSearchIndexer?.indexFinishedTurn({
-      tenant_id: item.schedule.tenant_id,
-      created_by: item.schedule.created_by_subject.subject_id,
-      session_id: delivered.session_id,
-      turn_id: delivered.turn_id,
+      logger: deps.logger,
+      // A reminder line is a finished turn like any other, so it joins the past-chat search once it is written.
+      onLineWritten: async line => {
+        await deps.chatSearchIndexer?.indexFinishedTurn({
+          tenant_id: item.schedule.tenant_id,
+          created_by: item.schedule.created_by_subject.subject_id,
+          session_id: line.session_id,
+          turn_id: line.turn_id,
+        });
+      },
     });
     await recordScheduleFiring({
       audit: deps.audit,
       logger: deps.logger,
       item,
-      session_id: delivered.session_id,
+      session_id: delivered.session_id ?? '',
       tool_name: SET_REMINDER_TOOL_NAME,
       description: `The reminder ran: ${item.schedule.manifest.task}`,
     });
@@ -411,8 +412,7 @@ export function createScheduleExecutionRouter<TTransaction>(deps: ScheduleTurnEx
         error instanceof ScheduleRunNotFoundError ||
         error instanceof ScheduleNotFoundError ||
         error instanceof ScheduleAgentNotFoundError ||
-        error instanceof SchedulePersonaNotFoundError ||
-        error instanceof ReminderAgentNotFoundError
+        error instanceof SchedulePersonaNotFoundError
       ) {
         return c.json({ error: { message: error.message } }, 404);
       }
@@ -558,8 +558,7 @@ export function createSchedulesRouter<TTransaction>(deps: SchedulesRouterDeps<TT
         error instanceof ScheduleRunNotFoundError ||
         error instanceof ScheduleNotFoundError ||
         error instanceof ScheduleAgentNotFoundError ||
-        error instanceof SchedulePersonaNotFoundError ||
-        error instanceof ReminderAgentNotFoundError
+        error instanceof SchedulePersonaNotFoundError
       ) {
         return c.json({ error: { message: error.message } }, 404);
       }
@@ -603,7 +602,8 @@ export function createSchedulesRouter<TTransaction>(deps: SchedulesRouterDeps<TT
             agent_name: agent.name,
             name: body.name,
             persona_id: null,
-            manifest: body.manifest,
+            // Only a reminder set in a chat records the chat it lands in; see ScheduleToolSet.
+            manifest: { ...body.manifest, origin_session_id: null },
             created_by_subject: createdBySubjectFromRequestContext(requestContext),
             runFrom: new Date(),
           },
@@ -684,7 +684,8 @@ export function createSchedulesRouter<TTransaction>(deps: SchedulesRouterDeps<TT
             tenant_id: requestContext.tenant_id,
             id: scheduleId,
             name: body.name,
-            manifest: body.manifest,
+            // An edit keeps the chat the reminder was set in; callers cannot move it to another chat.
+            manifest: { ...body.manifest, origin_session_id: existing.manifest.origin_session_id },
             runFrom: new Date(),
           },
           transaction,
