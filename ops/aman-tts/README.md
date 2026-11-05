@@ -26,7 +26,9 @@ Base URL (container-internal): `http://aman-tts:8002`
 
 One synthesis runs at a time; a single run already uses every configured thread.
 At most two more requests wait (`AMAN_TTS_MAX_WAITING`); more get 429. A request
-whose caller hangs up stops between pieces of text and is never finished.
+whose caller hangs up stops between pieces of text and is never finished. A
+request whose caller hangs up while it waits leaves the line at once, so it
+does not count toward the two.
 
 ### `GET /healthz`
 

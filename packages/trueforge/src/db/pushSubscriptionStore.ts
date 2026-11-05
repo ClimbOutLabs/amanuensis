@@ -58,6 +58,8 @@ export interface IPushSubscriptionStore {
   save(input: SavePushSubscriptionInput): Promise<SavePushSubscriptionResult>;
   /** The owner's devices, at most MAX_PUSH_DEVICES. */
   listTargets(input: PushOwner): Promise<PushTarget[]>;
+  /** Whether the owner still has a device with this address. */
+  hasEndpoint(input: PushOwner & { endpoint: string }): Promise<boolean>;
   /** Removes the owner's device with this address. Resolves to whether one was removed. */
   removeByEndpoint(input: PushOwner & { endpoint: string }): Promise<boolean>;
   /** Removes a device the push service said is gone. */
@@ -142,6 +144,17 @@ export class PushSubscriptionStore implements IPushSubscriptionStore {
       .orderBy('id', 'desc')
       .limit(MAX_PUSH_DEVICES)
       .execute();
+  }
+
+  async hasEndpoint(input: PushOwner & { endpoint: string }): Promise<boolean> {
+    const row = await this.#db
+      .selectFrom('push_subscription')
+      .select('id')
+      .where('tenant_id', '=', input.tenant_id)
+      .where('created_by', '=', input.created_by)
+      .where('endpoint', '=', input.endpoint)
+      .executeTakeFirst();
+    return row !== undefined;
   }
 
   async removeByEndpoint(input: PushOwner & { endpoint: string }): Promise<boolean> {

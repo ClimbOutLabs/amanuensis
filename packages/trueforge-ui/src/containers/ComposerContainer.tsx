@@ -15,6 +15,7 @@ import { useComposerPlaceholder } from '../hooks/useComposerPlaceholder.js';
 import { useActiveSessionCanManage } from '../hooks/useResourcePermissions.js';
 import { useOptionalShellMode } from '../server/ShellModeContext.js';
 import { SlotsProvider, useSlot, useSlotIsDefault } from '../theme/SlotsProvider.js';
+import { useSpeakVoiceReplies } from '../utils/speechReplyPreferences.js';
 import { armSpokenReply, clearDraftFromVoice, disarmSpokenReply, takeDraftFromVoice } from '../utils/voiceTurn.js';
 import { ApprovalNavContainer } from './ApprovalNavContainer.js';
 import { AskUserContainer } from './AskUserContainer.js';
@@ -56,6 +57,7 @@ function ComposerBody({
   const ComposerShell = useSlot('ComposerShell');
   const aui = useAui();
   const spokenReply = useSpokenReply();
+  const { enabled: speakVoiceReplies } = useSpeakVoiceReplies();
   const shell = useOptionalShellMode();
   const text = useAuiState(s => s.composer.text);
   const hasText = text.trim().length > 0;
@@ -93,7 +95,8 @@ function ComposerBody({
     // A new send ends any reply still being read; a voice send's reply is armed below.
     spokenReply.stop();
     send(() => {
-      armSpokenReply({ fromVoice, text });
+      // Only a reply that will be read aloud counts as spoken, so dictation alone keeps full answers.
+      armSpokenReply({ fromVoice: fromVoice && speakVoiceReplies && spokenReply.canSpeak(), text });
       return aui.composer().send();
     });
   };

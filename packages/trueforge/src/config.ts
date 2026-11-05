@@ -42,6 +42,7 @@ import type { ReflectBudget } from './runtime/memory/hindsightClient';
 import { parseModelPrices, type ModelPrices } from './runtime/modelPricing';
 import { DEFAULT_TOKEN_FACTORY_MODEL } from './runtime/tokenFactoryDefaults';
 import { MAX_CODE_MODE_SOCKET_PARENT_BYTES } from './sandbox/local/core/CodeModeUdsTransport';
+import { isGoModuleHostName } from './sandbox/mirrors/goMirrorPath';
 
 const DEFAULT_PORT = 8790;
 /** Loopback default; container images set HOST=0.0.0.0 so probes and Service traffic reach the process. */
@@ -738,6 +739,28 @@ export function parsePublicBaseUrl(raw: string | undefined, options: { allowPath
   }
   const path = segments.length === 0 ? '' : `/${segments.join('/')}`;
   return `${parsed.origin}${path}`;
+}
+
+/**
+ * Parses `SANDBOX_MIRROR_GO_EXTRA_HOSTS`: comma-separated lower-case host names such as `modules.example.com` (never IP addresses).
+ * A port, path, wildcard or upper-case letter fails the boot, since a dropped typo would quietly leave a
+ * module host blocked and a loose entry would suggest a wider match than the mirror makes.
+ */
+export function parseGoModuleHosts(raw: string | undefined): string[] {
+  const hosts = new Set<string>();
+  for (const entry of (raw ?? '').split(',')) {
+    const text = entry.trim();
+    if (text === '') {
+      continue;
+    }
+    if (!isGoModuleHostName(text)) {
+      throw new Error(
+        `SANDBOX_MIRROR_GO_EXTRA_HOSTS has an entry that is not a valid host name: "${text}". Each entry must be a lower-case host name with a dot, like example.com: no port, path, wildcard, IP address or single word such as localhost. Fix or remove that entry in the .env file, then restart the server.`,
+      );
+    }
+    hosts.add(text);
+  }
+  return [...hosts];
 }
 
 /** The addresses of proxies believed about visitor addresses: plain IP addresses only, so a name cannot widen it. */
@@ -1471,6 +1494,11 @@ export interface SharedServerConfiguration {
   SANDBOX_MIRROR_DOWNLOAD_MAX_BYTES: number;
   /** Largest total mirror cache, bytes. Env: `SANDBOX_MIRROR_CACHE_MAX_BYTES`. Default 10 GiB. */
   SANDBOX_MIRROR_CACHE_MAX_BYTES: number;
+  /**
+   * Further code hosts the Go mirror serves modules from, besides its built-in list: lower-case host names,
+   * comma-separated. Env: `SANDBOX_MIRROR_GO_EXTRA_HOSTS`. Default none.
+   */
+  SANDBOX_MIRROR_GO_EXTRA_HOSTS: string[];
   /**
    * Expected sandbox image as `<tag>@sha256:<64 hex chars>`. Never a bare
    * tag: the digest pin is enforced before any pull. Env: `SANDBOX_IMAGE`.
@@ -2387,6 +2415,7 @@ const shared: SharedServerConfiguration = {
     raw: getEnv('SANDBOX_MIRROR_CACHE_MAX_BYTES'),
     defaultValue: 10 * 1024 * 1024 * 1024,
   }),
+  SANDBOX_MIRROR_GO_EXTRA_HOSTS: parseGoModuleHosts(getEnv('SANDBOX_MIRROR_GO_EXTRA_HOSTS')),
   SANDBOX_IMAGE: getEnv('SANDBOX_IMAGE', { defaultValue: '' }) ?? '',
   SANDBOX_RUNS_DIR: path.join(appDataDir, 'sandbox-runs'),
   SANDBOX_STATE_DIR: path.join(appDataDir, 'sandbox-state'),
