@@ -39,6 +39,10 @@ export const UserAuditRecordSchema = z
   .object({
     ...SentinelAuditRecordSchema.shape,
     chat_exists: z.boolean().describe('False once the chat the entry came from has been deleted.'),
+    session_title: z
+      .string()
+      .nullable()
+      .describe('Title of the chat the entry came from; null when the chat is deleted or has no title yet.'),
   })
   .openapi('UserAuditRecord');
 

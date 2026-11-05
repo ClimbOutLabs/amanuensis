@@ -16,6 +16,7 @@ export const UserAuditRecord: core.serialization.ObjectSchema<
     description: core.serialization.string(),
     id: core.serialization.string(),
     outcome: UserAuditRecordOutcome,
+    sessionTitle: core.serialization.property("session_title", core.serialization.string().nullable()),
     tier: core.serialization.number(),
     toolName: core.serialization.property("tool_name", core.serialization.string()),
 });
@@ -29,6 +30,7 @@ export declare namespace UserAuditRecord {
         description: string;
         id: string;
         outcome: UserAuditRecordOutcome.Raw;
+        session_title?: string | null;
         tier: number;
         tool_name: string;
     }

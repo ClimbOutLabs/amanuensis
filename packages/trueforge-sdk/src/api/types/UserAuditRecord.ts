@@ -11,6 +11,8 @@ export interface UserAuditRecord {
     description: string;
     id: string;
     outcome: TrueForge.UserAuditRecordOutcome;
+    /** Title of the chat the entry came from; null when the chat is deleted or has no title yet. */
+    sessionTitle: string | null;
     tier: number;
     toolName: string;
 }
