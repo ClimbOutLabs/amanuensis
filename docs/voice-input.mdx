@@ -12,8 +12,8 @@ Transcription runs fully on your own hardware. The browser encodes the recording
 
 - **Tap to record.** Tap the mic, talk, and tap it again. Your words go into the message box so you can check them before you send.
 - **Hold to talk.** Hold the mic, talk, and let go. Your words are sent as soon as they are written down.
-- **Hold-to-talk keys.** On a computer, hold Ctrl + Shift + Space while you talk, and let go to send. You can pick other keys, or turn them off, in Personalization under "Talking to Aman". The choice is saved in this browser only.
-- **Hands-free.** Tap the hands-free button beside the mic. Aman listens, sends what you said when you pause, reads the answer aloud, and then listens again. Tap the button again to stop. Hands-free also stops when you switch chats, leave the page, take the mic by hand, stay quiet for 30 seconds, or after 30 minutes. While a reply is being read aloud, it stops listening, so it never hears Aman. Background noise is not sent as words: the speech service skips sounds that are not speech. It is never on unless you turn it on, and it only listens in the chat where you turned it on.
+- **Hold-to-talk keys.** On a computer, hold Ctrl + Shift + Space while you talk, and let go to send. You can pick other keys, or turn them off, in Settings, Themes, under "Talking to Aman". The choice is saved in this browser only.
+- **Hands-free.** Tap the hands-free button beside the mic. The hands-free button shows sound waves, and the mic shows a microphone. Point at either button, or move to it with the Tab key, to see what it does. Aman listens, sends what you said when you pause, reads the answer aloud, and then listens again. Tap the button again to stop. Hands-free also stops when you switch chats, leave the page, take the mic by hand, stay quiet for 30 seconds, or after 30 minutes. While a reply is being read aloud, it stops listening, so it never hears Aman. Background noise is not sent as words: the speech service skips sounds that are not speech. It is never on unless you turn it on, and it only listens in the chat where you turned it on.
 - **Paste.** Choose "Paste from clipboard" in the `+` menu to add copied text to your message. To copy an answer, use the copy button under it.
 
 ## Where your voice goes
@@ -59,7 +59,9 @@ Point the server at the published port by setting `STT_URL=http://localhost:8001
 
 Replies can be read aloud. When the voice container is running, replies are read by a voice that runs on your own computer. When it is not, your browser's built-in voice reads them instead.
 
-**Choosing the voice.** Pick one of six voices in Personalization under "Voice replies". Heart is the default. Picking a voice plays a short sample. The choice is saved in this browser only.
+The reply to a message you spoke is read aloud by itself when it is done, unless you turned off "Speak replies when I use my voice". When it will be read aloud, Aman is told, so it answers in a few short, plain sentences without lists or tables. To hear any other reply, tap the speaker button under it.
+
+**Choosing the voice.** Pick one of six voices in Settings, Themes, under "Voice replies". Heart is the default. Picking a voice plays a short sample. The choice is saved in this browser only.
 
 **What it is.** A small container called `aman-tts`. It runs the Kokoro voice model (Apache-2.0) on the computer's processor and turns reply text into audio. The model and its voices are built into the container, so it never goes online.
 
