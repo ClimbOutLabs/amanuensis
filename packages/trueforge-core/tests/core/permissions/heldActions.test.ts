@@ -141,6 +141,54 @@ describe('checkHeldReplay', () => {
     });
   });
 
+  describe('the page element a held browser action was shown with', () => {
+    const element = (accessible_name: string) => ({
+      site: 'stream.example',
+      accessible_name,
+      role: 'button',
+      is_form_submit: false,
+      form_values: {},
+      link_url: null,
+    });
+
+    it('runs when the element reads the same as when it was held', async () => {
+      const { tokens, heldToken, freshToken, heldInfo } = await held();
+      const fresh = info({
+        approval_token_id: freshToken.token_id,
+        tier3_card: card(),
+        browser_element: element('Keep my plan'),
+      });
+      await expect(
+        checkHeldReplay({
+          held: { ...heldInfo, browser_element: element('Keep my plan') },
+          fresh,
+          tokens,
+          scope: SCOPE,
+        }),
+      ).resolves.toEqual({ ok: true, approval_token_id: heldToken.token_id });
+    });
+
+    it.each([
+      ['now carries another label', element('Cancel membership')],
+      ['can no longer be read', undefined],
+    ])('refuses the replay when the element %s', async (_name, now) => {
+      const { tokens, freshToken, heldInfo } = await held();
+      const fresh = info({
+        approval_token_id: freshToken.token_id,
+        tier3_card: card(),
+        ...(now === undefined ? {} : { browser_element: now }),
+      });
+      await expect(
+        checkHeldReplay({
+          held: { ...heldInfo, browser_element: element('Keep my plan') },
+          fresh,
+          tokens,
+          scope: SCOPE,
+        }),
+      ).resolves.toEqual({ ok: false, reason: 'changed' });
+    });
+  });
+
   describe('git remotes seen when the call was held', () => {
     const remotes = (url: string) => ({
       remotes: [{ name: 'origin', url }],

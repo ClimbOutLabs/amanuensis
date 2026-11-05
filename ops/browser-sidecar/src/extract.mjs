@@ -275,19 +275,125 @@ export function elementAtPath(path) {
   return node;
 }
 
-/** Field, click and form context for one element, read without changing the page. */
-export function elementInfoOf(element) {
+/**
+ * What an action on one element is checked against: the site, the element's name and role, whether
+ * it submits a form, the form's values, and the address when it is a plain link. Read without changing
+ * the page, or null when the element is no longer on it.
+ */
+export function elementReviewOf(element) {
   if (!element.isConnected) {
     return null;
   }
   return {
-    field_kind: fieldKind(element),
-    is_form_submit: isFormSubmit(element),
+    site: window.location.hostname,
     accessible_name: accessibleName(element),
+    role: roleOf(element),
+    is_form_submit: isFormSubmit(element),
     form_values: formValuesOf(element),
     link_url: linkUrlOf(element),
-    tag: element.tagName,
   };
+}
+
+/** Which fields of a read an action must find unchanged: typing changes a form's values, so only a click checks them. */
+const CHECKED_FIELDS = {
+  click: ['site', 'accessible_name', 'role', 'is_form_submit', 'form_values', 'link_url'],
+  type: ['site', 'accessible_name', 'role'],
+  select: ['site', 'accessible_name', 'role'],
+};
+
+/** True when two reads agree on every field the action checks: the one place that comparison is made. */
+export function sameElementReview({ a, b, action }) {
+  return CHECKED_FIELDS[action].every(field => {
+    if (field !== 'form_values') {
+      return a[field] === b[field];
+    }
+    const aNames = Object.keys(a.form_values).sort();
+    const bNames = Object.keys(b.form_values).sort();
+    return (
+      aNames.length === bNames.length &&
+      aNames.every((name, index) => name === bNames[index] && a.form_values[name] === b.form_values[name])
+    );
+  });
+}
+
+/** Input types that hold typed text; a checkbox, a button or a file picker is not typed into. */
+const TEXT_INPUT_TYPES = new Set([
+  'text',
+  'search',
+  'email',
+  'url',
+  'tel',
+  'number',
+  'date',
+  'time',
+  'datetime-local',
+  'month',
+  'week',
+]);
+
+/** Sets a field's value the way a person's typing does, so the page's own code sees the change. */
+function setFieldValue(element, value) {
+  const prototype =
+    element.tagName === 'TEXTAREA'
+      ? window.HTMLTextAreaElement.prototype
+      : element.tagName === 'SELECT'
+        ? window.HTMLSelectElement.prototype
+        : window.HTMLInputElement.prototype;
+  // The platform's own setter: a page framework that wraps the element's `value` still sees the change.
+  Object.getOwnPropertyDescriptor(prototype, 'value').set.call(element, value);
+  element.dispatchEvent(new window.Event('input', { bubbles: true }));
+  element.dispatchEvent(new window.Event('change', { bubbles: true }));
+}
+
+/**
+ * Reads the element at a snapshot id and, unless the action is only a read (`info`), acts on it in
+ * the same step, so nothing the page does can come between the check and the action. Runs in a
+ * script world of its own, where the page's scripts cannot change what the read sees.
+ *
+ * A click on a plain link is not pressed: the caller opens its address, so no script of the page
+ * runs. Any other click is pressed here. Typing sets the field's value; picking sets the option.
+ */
+export function actOnElement({ path, action, expect, text, option }) {
+  const element = elementAtPath(path);
+  const review = element === null ? null : elementReviewOf(element);
+  if (review === null) {
+    return { status: 'refused', reason: 'stale_ref' };
+  }
+  if (action === 'info') {
+    return { status: 'ok', review };
+  }
+  if (!sameElementReview({ a: review, b: expect, action })) {
+    return { status: 'refused', reason: 'changed' };
+  }
+  if (action === 'click') {
+    if (review.link_url !== null) {
+      return { status: 'navigate', url: review.link_url };
+    }
+    element.click();
+    return { status: 'done' };
+  }
+  if (action === 'type') {
+    if (fieldKind(element) !== null) {
+      return { status: 'refused', reason: 'sensitive_field' };
+    }
+    if (element.tagName !== 'TEXTAREA' && !(element.tagName === 'INPUT' && TEXT_INPUT_TYPES.has(element.type))) {
+      return { status: 'refused', reason: 'not_a_field' };
+    }
+    element.focus();
+    setFieldValue(element, text);
+    return { status: 'done' };
+  }
+  if (element.tagName !== 'SELECT') {
+    return { status: 'refused', reason: 'no_such_option' };
+  }
+  const picked = Array.from(element.options).find(
+    candidate => candidate.value === option || candidate.label.trim() === option || candidate.text.trim() === option,
+  );
+  if (picked === undefined) {
+    return { status: 'refused', reason: 'no_such_option' };
+  }
+  setFieldValue(element, picked.value);
+  return { status: 'done' };
 }
 
 /** Visible page content in reading order: headings, text, and the controls, each with a stable id. */

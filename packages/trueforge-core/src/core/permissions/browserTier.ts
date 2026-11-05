@@ -1,8 +1,8 @@
 /**
  * Tier rules for Aman's own browser. Reading, scrolling, going back and taking a screenshot only
  * look at the page already open and never submit anything, so they run without asking (Tier 1), the
- * same way a mail read does. Typing into a field and picking an option are Tier 1 too: nothing has
- * left the computer yet.
+ * same way a mail read does. Typing into a field and picking an option are Tier 1 too: the browser
+ * holds back anything the page then tries to send until the person approves a click.
  *
  * Opening a page is different: the address itself goes to the site, so whatever is in it leaves
  * with the request. `browser_open` is classified in classifier.ts (`classifyBrowserOpen`) with the
@@ -11,11 +11,11 @@
  * A click is the one call that may submit something, and asks first (Tier 3) unless it is plainly
  * safe. A button, a menu item, a tab, or anything else that runs the page's own script may submit
  * whatever that script likes, whatever its label says and in whatever language, so every one of them
- * asks. Only a plain link to another page runs without asking (Tier 1), the same as following a
- * link, and even a link asks when it submits a form or its label is a commit word (pay, buy, cancel
+ * asks. Only a plain link to another page runs without asking (Tier 1): the browser opens its
+ * address instead of clicking it, so no script of the page runs. Even a link asks when it submits a form or its label is a commit word (pay, buy, cancel
  * a membership, and so on). The word list only ever makes a click ask; it never lets one through.
  */
-import type { BrowserClickReview } from '../llm/LLMTypes';
+import type { BrowserElementReview } from '../llm/LLMTypes';
 import {
   BROWSER_CLICK_TOOL_NAME,
   BROWSER_COMMIT_REASON,
@@ -29,7 +29,7 @@ import {
 import type { SentinelAction } from './classifier';
 import { escapeDisplayText } from './displayText';
 import { renderOutboundArguments } from './extractorRegistry';
-import { tier1Decision, tier3Decision, type Tier3Card, type TierDecision } from './tier';
+import { autoDenyDecision, tier1Decision, tier3Decision, type Tier3Card, type TierDecision } from './tier';
 
 /** The card for an open that asks: the exact address, which is everything the open sends, and the site it goes to. */
 export function browserOpenCard(input: {
@@ -131,7 +131,7 @@ export type BrowserClickKind = 'form_submit' | 'not_a_link' | 'commit_word' | 'e
  * word. Only a plain link with an ordinary label is an explore (Tier 1).
  */
 export function classifyBrowserClickKind(
-  review: Pick<BrowserClickReview, 'accessible_name' | 'is_form_submit' | 'link_url'>,
+  review: Pick<BrowserElementReview, 'accessible_name' | 'is_form_submit' | 'link_url'>,
 ): BrowserClickKind {
   if (review.is_form_submit) {
     return 'form_submit';
@@ -154,7 +154,7 @@ function shown(text: string): string {
 }
 
 /** The approval card for a commit click: the button's label, the site, and the form's values. */
-function commitClickCard(review: BrowserClickReview): Tier3Card {
+function commitClickCard(review: BrowserElementReview): Tier3Card {
   const label = review.accessible_name.trim() === '' ? '(no label)' : shown(review.accessible_name);
   const outbound = renderOutboundArguments(review.form_values);
   return {
@@ -198,49 +198,83 @@ export function classifyBrowserViewTool(
   });
 }
 
+/** Why an action on a page element is refused before any card: the element could not be read first. */
+const UNREAD_ELEMENT_DETAIL =
+  'Aman could not read that part of the page first, so it was not touched. Read the page again, then try again.';
+
 /**
- * Tier rules for the browser's tools that act on the open page: typing and picking an option run
- * without asking, and a click asks first unless it is a plain link (see `classifyBrowserClickKind`). Returns undefined for any
- * other tool, and for a click the host could not read context for, so the generic path
- * classifies it (fail closed).
+ * Tier rules for the browser's tools that act on one element of the open page. Typing and picking
+ * an option run without asking: the browser holds back anything the page then tries to send until the
+ * person approves a click. A click asks first unless it is a plain link (see `classifyBrowserClickKind`).
+ * An action whose element the host could not read is refused before any card, because it could never
+ * run: the browser acts only on an element that still matches its read. Returns undefined for any
+ * other tool, so the generic path classifies it (fail closed).
  */
 export async function classifyBrowserActionTool({
   action,
   mintToken,
 }: {
-  action: Pick<SentinelAction, 'tool_name' | 'tool_type' | 'browser_click'>;
+  action: Pick<SentinelAction, 'tool_name' | 'tool_type' | 'browser_element'>;
   mintToken: () => Promise<string>;
 }): Promise<TierDecision | undefined> {
   if (action.tool_type !== 'truefoundry-system' || !isBrowserToolName(action.tool_name)) {
     return undefined;
   }
-  if (action.tool_name === BROWSER_TYPE_TOOL_NAME || action.tool_name === BROWSER_SELECT_TOOL_NAME) {
+  const acts =
+    action.tool_name === BROWSER_TYPE_TOOL_NAME ||
+    action.tool_name === BROWSER_SELECT_TOOL_NAME ||
+    action.tool_name === BROWSER_CLICK_TOOL_NAME;
+  if (!acts) {
+    return undefined;
+  }
+  const review = action.browser_element;
+  if (review === undefined) {
+    return autoDenyDecision({
+      reason: 'tool_not_prepared',
+      reason_detail: UNREAD_ELEMENT_DETAIL,
+      owner_message: UNREAD_ELEMENT_DETAIL,
+      sensitive_read: false,
+    });
+  }
+  if (action.tool_name !== BROWSER_CLICK_TOOL_NAME) {
     return tier1Decision({
       reason: BROWSER_PREPARE_REASON,
-      reason_detail: 'Types into a field or picks an option. Nothing has left the computer yet.',
+      reason_detail:
+        'Types into a field or picks an option. Anything the page then tries to send is held back until you approve a click.',
       sensitive_read: false,
     });
   }
-  if (action.tool_name === BROWSER_CLICK_TOOL_NAME) {
-    const review = action.browser_click;
-    if (review === undefined) {
-      return undefined;
-    }
-    const kind = classifyBrowserClickKind(review);
-    if (kind === 'explore') {
-      return tier1Decision({
-        reason: BROWSER_EXPLORE_REASON,
-        reason_detail: 'Follows a plain link to another page. Nothing is submitted.',
-        sensitive_read: false,
-      });
-    }
-    return tier3Decision({
-      card: commitClickCard(review),
-      reason: BROWSER_COMMIT_REASON,
-      reason_detail: COMMIT_REASON_DETAIL[kind],
+  const kind = classifyBrowserClickKind(review);
+  if (kind === 'explore') {
+    return tier1Decision({
+      reason: BROWSER_EXPLORE_REASON,
+      reason_detail: 'Opens the address of a plain link. Nothing is submitted.',
       sensitive_read: false,
-      approval_token_id: await mintToken(),
     });
   }
-  return undefined;
+  return tier3Decision({
+    card: commitClickCard(review),
+    reason: BROWSER_COMMIT_REASON,
+    reason_detail: COMMIT_REASON_DETAIL[kind],
+    sensitive_read: false,
+    approval_token_id: await mintToken(),
+  });
+}
+
+/**
+ * True when two reads of the element a browser action acts on agree on every field: a held action
+ * runs only while the live element still reads the way it did when the person was asked.
+ */
+export function sameBrowserElementReview({ a, b }: { a: BrowserElementReview; b: BrowserElementReview }): boolean {
+  const aFields = Object.keys(a.form_values).sort();
+  const bFields = Object.keys(b.form_values).sort();
+  return (
+    a.site === b.site &&
+    a.accessible_name === b.accessible_name &&
+    a.role === b.role &&
+    a.is_form_submit === b.is_form_submit &&
+    a.link_url === b.link_url &&
+    aFields.length === bFields.length &&
+    aFields.every((field, index) => field === bFields[index] && a.form_values[field] === b.form_values[field])
+  );
 }

@@ -45,32 +45,54 @@ and names the person's profile (`owner`) and the chat's tab (`tab`).
 - `POST /scroll { owner, tab, direction }`, `POST /back { owner, tab }` — move around, then return a
   read.
 - `POST /screenshot { owner, tab }` — a PNG of the page, which the app shows to the person in the chat.
-- `POST /type { owner, tab, ref, text }` — types into a field, then returns a read. A password, payment
-  or one-time-code field is refused; the person types those themselves.
-- `POST /select { owner, tab, ref, option }` — picks an option on a dropdown, then returns a read.
-- `POST /click-info { owner, tab, ref }` — reads one element without touching it: the site, the name a
-  person sees on it, whether it submits a form, the form's values (sensitive ones masked), and the
-  address when it is a plain link. The app decides from this read whether the click asks first.
-- `POST /click { owner, tab, ref, expect }` — clicks, then returns a read. `expect` is the
-  `/click-info` read the click was checked against. The click goes ahead only while the element at the
-  ref still reads exactly that way; otherwise it is refused as `changed`, and nothing is pressed.
+- `POST /element-info { owner, tab, ref }` — reads one element without touching it: the site, the
+  name a person sees on it, its role, whether it submits a form, the form's values (sensitive ones
+  masked), and the address when it is a plain link. The app decides from this read whether an action
+  asks first, and sends it back as `expect` with the action.
+- `POST /type { owner, tab, ref, expect, text }` — types into a field, then returns a read. A password,
+  payment or one-time-code field is refused; the person types those themselves.
+- `POST /select { owner, tab, ref, expect, option }` — picks an option on a dropdown, then returns a read.
+- `POST /click { owner, tab, ref, expect, approved }` — clicks, then returns a read. `approved` is true
+  when the person approved this click on a card.
 
-## Clicks
+An action whose element no longer reads the way `expect` says is refused as `changed`, and the element
+is not touched. One without `expect` is refused as `unchecked`. The app and the sidecar are built and
+upgraded together, so the app always sends it.
+
+## Reading and acting on a page
+
+The sidecar reads pages in a script world of its own, beside the page's. The page's own scripts can
+change what the DOM's functions and properties return in their world, but not in this one, so what the
+sidecar reads is what the browser holds. Every read of an element and every action on it runs there.
+
+An action checks its element against `expect` and acts on it in the same step, with no gap in which
+the page could swap the element. A click on a button presses it there. Typing sets the field's value,
+and picking sets the option, the same way a person's input does, so the page's own code sees the
+change. The fields an action checks are the ones that decide what it does: a click checks them all,
+and typing or picking checks the site, the name and the role, since earlier typing changes the form.
+
+## Which actions ask first
 
 A click asks the person first unless it is a plain link to another page: an `<a>` or `<area>` with an
-`http` or `https` address the browser follows with an ordinary page load. A button, a tab, a menu, a
-link to a spot on the same page, a `javascript:` link and a link marked as a button all run the page's
-own script, which can send anything whatever the label says, so every one of them asks. A link asks
-too when it submits a form or its label is a word like pay, buy, send or delete. That word list only
-ever makes a click ask; it never lets one through.
+`http` or `https` address the browser would follow with an ordinary page load. The sidecar does not
+press such a link. It opens the link's address, so none of the page's scripts run for it, the same as
+opening the address directly. A link to another site is not followed; the app is told its address,
+and opening it is checked like any other open. Like an open, a link only reads a page, so a site that
+changes something on a plain page load (for example, cancelling an order at a link's address) does it
+without a card, as it would for an open.
 
-A name is read the way a person sees it: an icon-only button is named by its image's alt text or
-label, and characters that show nothing (zero-width spaces, soft hyphens) are left out.
+A button, a tab, a menu, a link to a spot on the same page, a `javascript:` link and a link marked as a
+button all run the page's own script, which decides what is sent whatever the label says, so every one
+of them asks. A link asks too when its label is a word like pay, buy, send or delete. That word list
+only ever makes a click ask; it never lets one through. A name is read the way a person sees it: an
+icon-only button is named by its image's alt text or label, and characters that show nothing
+(zero-width spaces, soft hyphens) are left out.
 
-All the calls of one reply are checked before the first one runs, and refs restart on every new page.
-So a later click in a reply may find a different element at its ref than the one it was checked
-against. The `expect` read is how the sidecar catches that: it reads the very element it is about to
-press and compares it with `expect`, field by field, in one place (`sameClickReview`).
+Typing and picking an option do not ask, but they send nothing either. From the moment Aman types or
+picks on a page, the sidecar refuses every request of that tab that is not a plain read (anything but
+`GET` and `HEAD`), until the person approves a click on a card or the model opens a page. A refused
+page load leaves the tab where it is. The next read of the page tells the model that something was
+held back, and that the way to send it is to click the page's own send button, which asks first.
 
 ## Running it
 

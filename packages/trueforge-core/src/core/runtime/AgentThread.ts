@@ -1584,7 +1584,7 @@ export async function classifyUnstampedToolCall(input: {
       },
       maps_hosts: info.maps_hosts,
       document_scope: info.document_scope,
-      browser_click: info.browser_click,
+      browser_element: info.browser_element,
     },
   });
   return { ...info, ...stampSentinelDecision({ decision }) };

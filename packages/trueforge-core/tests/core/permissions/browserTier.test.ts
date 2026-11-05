@@ -1,9 +1,10 @@
-import { BrowserClickReviewSchema, type BrowserClickReview } from '../../../src/core/llm/LLMTypes';
+import { BrowserElementReviewSchema, type BrowserElementReview } from '../../../src/core/llm/LLMTypes';
 import {
   BROWSER_CANCEL_QUALIFIERS,
   BROWSER_COMMIT_WORDS,
   classifyBrowserClickKind,
   matchesCommitWord,
+  sameBrowserElementReview,
 } from '../../../src/core/permissions/browserTier';
 import {
   BROWSER_CLICK_TOOL_NAME,
@@ -37,10 +38,11 @@ function browserAction(tool_name: string, extra: Partial<SentinelAction> = {}): 
   };
 }
 
-function clickReview(overrides: Partial<BrowserClickReview> = {}): BrowserClickReview {
+function clickReview(overrides: Partial<BrowserElementReview> = {}): BrowserElementReview {
   return {
     site: 'shop.example',
     accessible_name: 'Cancel',
+    role: 'button',
     is_form_submit: false,
     form_values: {},
     link_url: null,
@@ -198,14 +200,50 @@ describe('classifyBrowserClickKind', () => {
 });
 
 describe('classifyTier: browser_type and browser_select are Tier 1', () => {
+  const field = clickReview({ accessible_name: 'Name', role: 'textbox' });
+
   it('typing into a field asks nothing', async () => {
-    const decision = await classifyTier(browserAction(BROWSER_TYPE_TOOL_NAME), makeCtx());
+    const decision = await classifyTier(browserAction(BROWSER_TYPE_TOOL_NAME, { browser_element: field }), makeCtx());
     expect(decision).toMatchObject({ tier: 1, card: null, reason: 'browser_prepare' });
   });
 
   it('picking an option asks nothing', async () => {
-    const decision = await classifyTier(browserAction(BROWSER_SELECT_TOOL_NAME), makeCtx());
+    const decision = await classifyTier(browserAction(BROWSER_SELECT_TOOL_NAME, { browser_element: field }), makeCtx());
     expect(decision).toMatchObject({ tier: 1, card: null, reason: 'browser_prepare' });
+  });
+});
+
+describe('classifyTier: an action whose element could not be read is refused before any card', () => {
+  for (const tool of [BROWSER_TYPE_TOOL_NAME, BROWSER_SELECT_TOOL_NAME, BROWSER_CLICK_TOOL_NAME]) {
+    it(`${tool} with no read of its element`, async () => {
+      const decision = await classifyTier(browserAction(tool), makeCtx());
+      expect(decision).toMatchObject({ tier: 3, card: null, reason: 'auto_denied', auto_deny: 'tool_not_prepared' });
+      expect(decision.reason_detail).toMatch(/could not read that part of the page first/);
+    });
+  }
+});
+
+describe('sameBrowserElementReview', () => {
+  const read = clickReview({ accessible_name: 'Keep my plan', form_values: { plan: 'basic', seats: '2' } });
+
+  it('the same read in any field order matches', () => {
+    expect(sameBrowserElementReview({ a: read, b: { ...read, form_values: { seats: '2', plan: 'basic' } } })).toBe(
+      true,
+    );
+  });
+
+  it('a difference in any one field does not', () => {
+    for (const change of [
+      { site: 'other.example' },
+      { accessible_name: 'Cancel membership' },
+      { role: 'link' },
+      { is_form_submit: true },
+      { link_url: 'https://shop.example/x' },
+      { form_values: { plan: 'basic' } },
+      { form_values: { plan: 'premium', seats: '2' } },
+    ]) {
+      expect(sameBrowserElementReview({ a: read, b: { ...read, ...change } })).toBe(false);
+    }
   });
 });
 
@@ -213,7 +251,7 @@ describe('classifyTier: browser_click', () => {
   it('a form submit asks first, with a card naming the site, the button and the form values', async () => {
     const decision = await classifyTier(
       browserAction(BROWSER_CLICK_TOOL_NAME, {
-        browser_click: clickReview({
+        browser_element: clickReview({
           accessible_name: 'Place order',
           is_form_submit: true,
           site: 'shop.example',
@@ -232,7 +270,7 @@ describe('classifyTier: browser_click', () => {
   it('a link with a commit word also asks first', async () => {
     const decision = await classifyTier(
       browserAction(BROWSER_CLICK_TOOL_NAME, {
-        browser_click: clickReview({ accessible_name: 'Unsubscribe', is_form_submit: false, link_url: LINK }),
+        browser_element: clickReview({ accessible_name: 'Unsubscribe', is_form_submit: false, link_url: LINK }),
       }),
       makeCtx(),
     );
@@ -243,7 +281,7 @@ describe('classifyTier: browser_click', () => {
   it('a plain link runs without asking', async () => {
     const decision = await classifyTier(
       browserAction(BROWSER_CLICK_TOOL_NAME, {
-        browser_click: clickReview({ accessible_name: 'Help center', is_form_submit: false, link_url: LINK }),
+        browser_element: clickReview({ accessible_name: 'Help center', is_form_submit: false, link_url: LINK }),
       }),
       makeCtx(),
     );
@@ -254,7 +292,7 @@ describe('classifyTier: browser_click', () => {
     for (const label of ['Show details', 'Jetzt bezahlen', '']) {
       const decision = await classifyTier(
         browserAction(BROWSER_CLICK_TOOL_NAME, {
-          browser_click: clickReview({ accessible_name: label, is_form_submit: false }),
+          browser_element: clickReview({ accessible_name: label, is_form_submit: false }),
         }),
         makeCtx(),
       );
@@ -268,7 +306,7 @@ describe('classifyTier: browser_click', () => {
   it('an unlabelled button names itself as having no label on the card', async () => {
     const decision = await classifyTier(
       browserAction(BROWSER_CLICK_TOOL_NAME, {
-        browser_click: clickReview({ accessible_name: '', is_form_submit: false }),
+        browser_element: clickReview({ accessible_name: '', is_form_submit: false }),
       }),
       makeCtx(),
     );
@@ -276,30 +314,26 @@ describe('classifyTier: browser_click', () => {
   });
 
   it('a stored read from before links were told apart counts as not a link, so it asks', async () => {
-    const stored = BrowserClickReviewSchema.parse({
+    const stored = BrowserElementReviewSchema.parse({
+      role: 'link',
       site: 'shop.example',
       accessible_name: 'Help center',
       is_form_submit: false,
       form_values: {},
     });
     expect(stored.link_url).toBeNull();
-    const decision = await classifyTier(browserAction(BROWSER_CLICK_TOOL_NAME, { browser_click: stored }), makeCtx());
+    const decision = await classifyTier(browserAction(BROWSER_CLICK_TOOL_NAME, { browser_element: stored }), makeCtx());
     expect(decision.tier).toBe(3);
   });
 
   it('"Cancel membership" on a link always asks', async () => {
     const decision = await classifyTier(
       browserAction(BROWSER_CLICK_TOOL_NAME, {
-        browser_click: clickReview({ accessible_name: 'Cancel membership', is_form_submit: false, link_url: LINK }),
+        browser_element: clickReview({ accessible_name: 'Cancel membership', is_form_submit: false, link_url: LINK }),
       }),
       makeCtx(),
     );
     expect(decision.tier).toBe(3);
     expect(decision.reason).toBe('browser_commit');
-  });
-
-  it('fails closed to the generic Tier 3 path when the host could not read the click context', async () => {
-    const decision = await classifyTier(browserAction(BROWSER_CLICK_TOOL_NAME), makeCtx());
-    expect(decision.tier).toBe(3);
   });
 });

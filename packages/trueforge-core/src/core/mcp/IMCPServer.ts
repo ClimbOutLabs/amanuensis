@@ -7,7 +7,7 @@ import type {
   MCPServerInitInfo,
   ToolAdmissionProvenance,
 } from '../events/schema';
-import type { BrowserClickReview, InternalToolCallInfo } from '../llm/LLMTypes';
+import type { BrowserElementReview, InternalToolCallInfo } from '../llm/LLMTypes';
 import type { ConnectorBinding } from '../permissions/approvalTokens';
 import type { SandboxInfo, WorkspaceVerificationReceiptCandidate } from '../sandbox/Sandbox';
 import type { StructuredEditPrecondition } from '../sandbox/structuredEditPrecondition';
@@ -30,7 +30,7 @@ export interface ToolInvocationContext {
    * What the live page said about a browser click's element when the call was classified. The click
    * runs only while the element still reads exactly this way, so it never lands on an element nobody checked.
    */
-  browser_click_precondition?: BrowserClickReview | undefined;
+  browser_element_precondition?: BrowserElementReview | undefined;
   /** Host-observed git remotes captured before approval; the call runs authenticated only against these. */
   git_remote_precondition?: GitRemotePrecondition | undefined;
   /**

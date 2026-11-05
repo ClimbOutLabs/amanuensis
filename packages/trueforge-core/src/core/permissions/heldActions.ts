@@ -9,6 +9,7 @@ import { InvalidAgentSendInputError } from '../errors';
 import type { InternalEnrichedAssistantMessage, InternalEnrichedToolCall, InternalToolCallInfo } from '../llm/LLMTypes';
 import { gitRemotesMatch } from '../sandbox/gitRemoteObservation';
 import { approvalTokenExpiry, type ApprovalTokenScope, type ApprovalTokenStore } from './approvalTokens';
+import { sameBrowserElementReview } from './browserTier';
 import type { Tier3Card } from './tier';
 
 /** Most actions one chat holds; past this a call is refused instead of queued. */
@@ -160,6 +161,18 @@ function heldRemotesUnchanged(input: { held: InternalToolCallInfo; fresh: Intern
     : gitRemotesMatch({ approved, current });
 }
 
+/**
+ * A held browser action acts on the element its owner was shown: the element read again must read
+ * the same way, label included, or the action is refused as changed.
+ */
+function heldElementUnchanged(input: { held: InternalToolCallInfo; fresh: InternalToolCallInfo }): boolean {
+  const approved = input.held.browser_element;
+  const current = input.fresh.browser_element;
+  return approved === undefined || current === undefined
+    ? approved === current
+    : sameBrowserElementReview({ a: approved, b: current });
+}
+
 /** The card fields a person reads before approving; free text such as the reason is not compared. */
 function sameCardTargets(held: Tier3Card, fresh: Tier3Card): boolean {
   return (
@@ -202,7 +215,7 @@ export async function checkHeldReplay(input: {
       return { ok: false, reason: 'changed' };
     }
   }
-  if (!heldRemotesUnchanged({ held, fresh })) {
+  if (!heldRemotesUnchanged({ held, fresh }) || !heldElementUnchanged({ held, fresh })) {
     return { ok: false, reason: 'changed' };
   }
   const heldCard = held.tier3_card ?? undefined;
