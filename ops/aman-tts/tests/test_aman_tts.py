@@ -4,6 +4,7 @@ import json
 import logging
 import os
 import asyncio
+import contextlib
 import sys
 import tempfile
 import threading
@@ -274,6 +275,68 @@ class CancelTest(unittest.TestCase):
         result = asyncio.run(aman_tts._speak_until_disconnect(Gone(), FakeSynthesizer(Settings()), "Hi.", "af_heart"))
         self.assertIsNone(result)
         self.assertEqual(FakeSynthesizer.calls, [])
+
+
+class WaitForSlotTest(unittest.TestCase):
+    class Caller:
+        def __init__(self) -> None:
+            self.gone = False
+
+        async def is_disconnected(self) -> bool:
+            return self.gone
+
+    def test_a_slot_handed_over_as_the_caller_leaves_is_used_or_passed_on(self):
+        async def scenario() -> tuple[bool, bool]:
+            slot = asyncio.Semaphore(1)
+            await slot.acquire()
+            caller = self.Caller()
+            waiter = asyncio.create_task(aman_tts._wait_for_slot(caller, slot))
+            await asyncio.sleep(0)
+            # Both happen before the waiter looks again.
+            slot.release()
+            caller.gone = True
+            got = await waiter
+            await asyncio.sleep(0)
+            return got, slot.locked()
+
+        got, locked = asyncio.run(scenario())
+        # Held only by a waiter that went on to use it; never left held by one that left.
+        self.assertEqual(locked, got)
+
+    def test_a_cancelled_wait_reaches_the_caller_and_frees_its_place(self):
+        async def scenario() -> tuple[bool, bool]:
+            slot = asyncio.Semaphore(1)
+            await slot.acquire()
+            waiter = asyncio.create_task(aman_tts._wait_for_slot(self.Caller(), slot))
+            await asyncio.sleep(0.05)
+            waiter.cancel()
+            cancelled = False
+            try:
+                await waiter
+            except asyncio.CancelledError:
+                cancelled = True
+            slot.release()
+            await asyncio.sleep(0)
+            return cancelled, slot.locked()
+
+        cancelled, locked = asyncio.run(scenario())
+        self.assertTrue(cancelled)
+        self.assertFalse(locked)
+
+    def test_a_cancel_as_the_slot_is_handed_over_does_not_keep_it(self):
+        async def scenario() -> bool:
+            slot = asyncio.Semaphore(1)
+            await slot.acquire()
+            waiter = asyncio.create_task(aman_tts._wait_for_slot(self.Caller(), slot))
+            await asyncio.sleep(0.05)
+            slot.release()
+            waiter.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await waiter
+            await asyncio.sleep(0)
+            return slot.locked()
+
+        self.assertFalse(asyncio.run(scenario()))
 
 
 class PrivacyTest(unittest.TestCase):

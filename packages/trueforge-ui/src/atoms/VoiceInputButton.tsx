@@ -462,9 +462,9 @@ function VoiceInputButtonInner({
         : 'Record voice message';
   // The mic and the hands-free switch sit side by side, so each hint says what it is before how to use it.
   const micHint =
-    phase === 'idle'
-      ? 'Voice message: tap to record and check the words, or hold to talk and let go to send.'
-      : micTitle;
+    phase === 'denied'
+      ? micTitle
+      : 'Voice message: tap to record and check the words, or hold to talk and let go to send.';
   const handsFreeHint =
     handsFree === 'off'
       ? 'Hands-free conversation: just talk, pause to send, and hear the answer read aloud.'
@@ -489,7 +489,8 @@ function VoiceInputButtonInner({
               </button>
             </span>
           ) : (
-            <Tooltip content={micHint} className={VOICE_HINT_CLASS}>
+            // No hint while recording: a tap stops it, but letting go of a hold sends, and one hint cannot say both.
+            <Tooltip content={phase === 'recording' ? null : micHint} className={VOICE_HINT_CLASS}>
               <button
                 type="button"
                 onPointerDown={event => {

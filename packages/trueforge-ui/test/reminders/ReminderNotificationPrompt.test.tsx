@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { DeliveriesProvider } from '@/deliveries/DeliveriesContext.js';
@@ -12,6 +12,13 @@ afterEach(() => {
   vi.unstubAllGlobals();
   removePushBrowser();
 });
+
+/** Lets the status check finish and its state land, so a missing prompt means it decided not to show. */
+async function settle() {
+  await act(async () => {
+    await new Promise(resolve => setTimeout(resolve, 0));
+  });
+}
 
 function renderPrompt({ savedEndpoints }: { savedEndpoints: string[] }) {
   const server = fakeServer([]);
@@ -35,7 +42,7 @@ describe('ReminderNotificationPrompt', () => {
     stubPushBrowser({ existingKey: SERVER_KEY });
     const { api } = renderPrompt({ savedEndpoints: ['https://push.example.test/device-1'] });
     await waitFor(() => expect(api.pushDeviceSaved).toHaveBeenCalled());
-    await Promise.resolve();
+    await settle();
     expect(screen.queryByRole('button', { name: 'Turn on notices' })).toBeNull();
   });
 });

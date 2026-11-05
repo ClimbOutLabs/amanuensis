@@ -80,6 +80,18 @@ describe('Settings, Reach me', () => {
     expect(await screen.findByText('On for this device.')).toBeTruthy();
   });
 
+  it('keeps showing on when the server cannot be asked about this device', async () => {
+    stubPushBrowser({ existingKey: SERVER_KEY });
+    const server = fakeServer([]);
+    vi.mocked(server.api.pushDeviceSaved).mockRejectedValueOnce(new Error('offline'));
+    render(
+      <DeliveriesProvider api={server.api}>
+        <ReachMeSettings />
+      </DeliveriesProvider>,
+    );
+    expect(await screen.findByText('On for this device.')).toBeTruthy();
+  });
+
   it('reads as off once the server dropped this device, and turning on saves it again', async () => {
     stubPushBrowser({ existingKey: SERVER_KEY });
     const { api } = renderSettings();

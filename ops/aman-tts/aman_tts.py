@@ -312,15 +312,20 @@ async def _wait_for_slot(request: Request, slot: asyncio.Semaphore) -> bool:
                 break
     finally:
         if not acquired:
+            # Not awaited, so a cancel of this request still reaches its caller.
             acquire.cancel()
-            try:
-                await acquire
-            except asyncio.CancelledError:
-                pass
-            else:
-                # The slot was handed over just as the wait ended; pass it on.
-                slot.release()
+            acquire.add_done_callback(_pass_on_slot(slot))
     return acquired
+
+
+def _pass_on_slot(slot: asyncio.Semaphore) -> Callable[[asyncio.Future], None]:
+    """Gives the slot back when it was handed over just as the wait ended."""
+
+    def done(acquire: asyncio.Future) -> None:
+        if not acquire.cancelled() and acquire.exception() is None:
+            slot.release()
+
+    return done
 
 
 async def _speak_until_disconnect(

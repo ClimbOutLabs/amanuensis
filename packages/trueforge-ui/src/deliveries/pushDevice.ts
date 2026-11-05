@@ -73,6 +73,7 @@ export type PushStatus = { serverReady: boolean; on: boolean };
 /**
  * Notices are on only when this browser has a subscription made with the server's current key and the server still
  * has it: a device the server dropped, for a newer one or because its push service said it is gone, reads as off.
+ * When the server cannot be asked, the browser's own answer stands, so a failed check never flips a working device off.
  */
 export async function pushStatus({ api }: { api: DeliveriesApi }): Promise<PushStatus> {
   const [subscription, key] = await Promise.all([
@@ -83,7 +84,7 @@ export async function pushStatus({ api }: { api: DeliveriesApi }): Promise<PushS
   if (subscription === null || !subscribedWithKey({ subscription, publicKey: key })) {
     return { serverReady: true, on: false };
   }
-  const saved = await api.pushDeviceSaved(subscription.endpoint).catch(() => false);
+  const saved = await api.pushDeviceSaved(subscription.endpoint).catch(() => true);
   return { serverReady: true, on: saved };
 }
 
