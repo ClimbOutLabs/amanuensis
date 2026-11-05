@@ -1303,7 +1303,6 @@ async function runTurnEventDrain(params: {
               mail,
               sentAt: event.created_at,
               timeZone: memory.timeZone,
-              maxBodyCharacters: TURN_TOOL_RESULT_CHARACTERS_KEPT,
               logger,
             }),
           );

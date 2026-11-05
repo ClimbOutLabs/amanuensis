@@ -51,6 +51,10 @@ function turnWith(pages: PersistedTurnEvent[][]) {
 const logger = winston.createLogger({ silent: true });
 
 describe('approvedToolCalls', () => {
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
   it('names a call by its thread as well as its id', async () => {
     const { turn } = turnWith([
       [
@@ -73,6 +77,39 @@ describe('approvedToolCalls', () => {
     ]);
     await approvedToolCalls({ pausedTurn: turn, input: [allow({ threadId: 'main', callId: 'c1' })], logger });
     expect(listEvents).toHaveBeenCalledTimes(1);
+  });
+
+  it('finds a call far back in a long paused turn, with no page limit but the turn itself', async () => {
+    const filler = (page: number) =>
+      Array.from({ length: 100 }, (_unused, index) =>
+        modelMessage({ id: `f${String(page)}-${String(index)}`, threadId: 'main', callIds: [] }),
+      );
+    const { turn, listEvents } = turnWith([
+      filler(0),
+      filler(1),
+      filler(2),
+      filler(3),
+      [modelMessage({ id: 'first', threadId: 'main', callIds: ['c1'] })],
+    ]);
+    const calls = await approvedToolCalls({
+      pausedTurn: turn,
+      input: [allow({ threadId: 'main', callId: 'c1' })],
+      logger,
+    });
+    expect(calls.size).toBe(1);
+    expect(listEvents).toHaveBeenCalledTimes(5);
+  });
+
+  it('warns plainly when an allowed call is not in the paused turn at all', async () => {
+    const warn = jest.spyOn(logger, 'warn');
+    const { turn } = turnWith([[modelMessage({ id: 'e1', threadId: 'main', callIds: ['other'] })]]);
+    const calls = await approvedToolCalls({
+      pausedTurn: turn,
+      input: [allow({ threadId: 'main', callId: 'c1' })],
+      logger,
+    });
+    expect(calls.size).toBe(0);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('not found in the paused turn'), { missing: 1 });
   });
 
   it('reads nothing when the person allowed nothing', async () => {

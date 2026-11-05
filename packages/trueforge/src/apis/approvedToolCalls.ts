@@ -9,9 +9,8 @@ export function toolCallKey({ threadId, callId }: { threadId: string; callId: st
   return `${threadId}\u0000${callId}`;
 }
 
-/** Newest events read from the paused turn, a page at a time. The model message behind a card is near the end. */
+/** Events read from the paused turn per page, newest first. The model message behind a card is usually near the end. */
 const EVENTS_PAGE_LIMIT = 100;
-const EVENTS_MAX_PAGES = 3;
 
 /**
  * The calls the person allowed on a card, as the paused turn's model asked for them. An approved call runs
@@ -42,7 +41,8 @@ export async function approvedToolCalls({
   }
   try {
     let pageToken: string | undefined;
-    for (let page = 0; page < EVENTS_MAX_PAGES && calls.size < wanted.size; page += 1) {
+    // Bounded by the paused turn's own events: read until every allowed call is found or the turn runs out.
+    while (calls.size < wanted.size) {
       const events = await pausedTurn.listEvents({ limit: EVENTS_PAGE_LIMIT, order: 'desc', page_token: pageToken });
       for (const event of events.data) {
         if (event.type !== EventType.MODEL_MESSAGE) {
@@ -59,6 +59,11 @@ export async function approvedToolCalls({
       if (pageToken === undefined) {
         break;
       }
+    }
+    if (calls.size < wanted.size) {
+      logger.warn('An allowed call was not found in the paused turn; its sent message will not be saved to memory', {
+        missing: wanted.size - calls.size,
+      });
     }
   } catch (error) {
     logger.warn('Could not read the paused turn for approved calls; a sent message may not be saved to memory', {
