@@ -58,15 +58,26 @@ function installerSays(fn: string, ...args: string[]): string {
 }
 
 describe('calendar provider presets', () => {
-  it('lists the providers in the card order, Google first and Other last', () => {
+  it('lists the providers alphabetically by the name a person sees, with Other last', () => {
     expect(CALDAV_PROVIDER_PRESETS.map(preset => preset.key)).toEqual([
-      'google',
       'fastmail',
-      'yahoo',
       'gmx',
+      'google',
+      'icloud',
       'webde',
+      'yahoo',
       'other',
     ]);
+    const named = CALDAV_PROVIDER_PRESETS.slice(0, -1).map(preset => preset.name);
+    expect(named).toEqual([...named].sort((left, right) => left.localeCompare(right, 'en', { sensitivity: 'base' })));
+    expect(CALDAV_PROVIDER_PRESETS.at(-1)?.key).toBe('other');
+  });
+
+  it('numbers the installer menu in the card order', () => {
+    CALDAV_PROVIDER_PRESETS.forEach((preset, index) => {
+      expect(installerSays('calendar_provider_key', String(index + 1))).toBe(preset.key);
+    });
+    expect(installerSays('calendar_provider_key', String(CALDAV_PROVIDER_PRESETS.length + 1))).toBe('');
   });
 
   it('matches the installer preset table row for row', () => {
@@ -87,6 +98,7 @@ describe('calendar provider presets', () => {
       ['gmx', 'owner@GMX.NET'],
       ['gmx', 'owner@gmx.de'],
       ['webde', 'owner@web.de'],
+      ['icloud', 'owner@icloud.com'],
       ['other', 'owner@example.invalid'],
     ];
     for (const [provider_key, email] of cases) {
@@ -101,6 +113,9 @@ describe('calendar provider presets', () => {
     expect(caldavProviderKeyForUrl('https://caldav.fastmail.com/dav/')).toBe('fastmail');
     expect(caldavProviderKeyForUrl('https://caldav.gmx.net/')).toBe('gmx');
     expect(caldavProviderKeyForUrl('https://calendar.google.com/calendar/dav/person%40gmail.com/')).toBe('google');
+    expect(caldavProviderKeyForUrl('https://caldav.icloud.com/')).toBe('icloud');
+    // The calendars may live on another iCloud server, but the saved address stays the preset's.
+    expect(caldavProviderKeyForUrl('https://p42-caldav.icloud.com/1234567/calendars/')).toBe('other');
     expect(caldavProviderKeyForUrl('https://calendar.google.com/calendar/')).toBe('other');
     expect(caldavProviderKeyForUrl('https://nas.example.invalid/dav/')).toBe('other');
   });

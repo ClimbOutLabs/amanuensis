@@ -37,7 +37,8 @@ test_presets() {
   assert_eq "$(in_lib 'calendar_preset_url gmx owner@gmx.net')" "https://caldav.gmx.net/" "gmx.net"
   assert_eq "$(in_lib 'calendar_preset_url gmx owner@gmx.de')" "" "gmx.de has no preset"
   assert_eq "$(in_lib 'calendar_preset_url webde owner@web.de')" "https://caldav.web.de" "web.de"
-  assert_eq "$(in_lib 'calendar_preset_url other owner@icloud.com')" "" "other has no preset"
+  assert_eq "$(in_lib 'calendar_preset_url icloud owner@icloud.com')" "https://caldav.icloud.com/" "icloud"
+  assert_eq "$(in_lib 'calendar_preset_url other owner@zoho.com')" "" "other has no preset"
   assert_eq "$(in_lib 'calendar_preset_url gmx OWNER@GMX.NET')" "https://caldav.gmx.net/" "the domain is matched in lower case"
   sandbox_drop
 }
@@ -167,7 +168,7 @@ test_connect_prompt_yes_asks_the_calendar_questions() {
 Your email=>owner@example.invalid
 What should Aman call you?=>
 Connect a calendar?=>y
-Your provider (type a number)=>2
+Your provider (type a number)=>1
 Email address of the calendar account=>owner@example.invalid
 Login name=>
 App password for the calendar=>$CAL_SECRET
@@ -187,7 +188,7 @@ test_second_run_replaces_the_account() {
   t_begin "running the calendar command twice keeps one account, the later one"
   sandbox_new
   install_for_calendar
-  with_input "2
+  with_input "1
 owner@example.invalid
 
 $CAL_SECRET
@@ -195,7 +196,7 @@ $CAL_SECRET
   run_install instance calendar main
   clear_input
   assert_rc 0
-  with_input "2
+  with_input "1
 second@example.invalid
 
 $CAL_SECRET
@@ -214,7 +215,7 @@ test_app_restarts_to_learn_of_the_calendar() {
   sandbox_new
   install_for_calendar
   : >"$STUB_LOG"
-  with_input "2
+  with_input "1
 owner@example.invalid
 
 $CAL_SECRET
@@ -233,7 +234,7 @@ test_piped_input_and_remove() {
   t_begin "piped answers connect the calendar; --remove empties the volume and says so"
   sandbox_new
   install_for_calendar
-  with_input "2
+  with_input "1
 owner@example.invalid
 
 $CAL_SECRET
@@ -350,9 +351,9 @@ test_gmail_reask_shows_menu_and_google_steps() {
   t_begin "a Gmail address with another provider shows the menu again; picking Google shows its steps and saves"
   sandbox_new
   install_for_calendar
-  with_input "2
+  with_input "1
 person@gmail.com
-1
+3
 
 $CAL_SECRET
 "
@@ -379,6 +380,57 @@ test_gmail_with_fastmail_stops() {
   sandbox_drop
 }
 
+test_menu_numbers_follow_the_menu() {
+  t_begin "the menu is alphabetical with Other last, and each number picks the provider shown beside it"
+  sandbox_new
+  local menu line number name
+  menu=$(in_lib ". '$INSTALLER_DIR/lib/ui.sh'; calendar_provider_menu" 2>&1)
+  assert_eq "$(printf '%s\n' "$menu" | sed -n 's/^ *[0-9] //p' | sed 's/ (.*//; s/,.*//' | tr '\n' '|')" \
+    "Fastmail|GMX|Google|iCloud|web.de|Yahoo|Other provider|" "the menu order"
+  while IFS= read -r line; do
+    number=$(printf '%s\n' "$line" | sed -n 's/^ *\([0-9]\) .*/\1/p')
+    [ -n "$number" ] || continue
+    name=$(printf '%s\n' "$line" | sed 's/^ *[0-9] //; s/ (.*//; s/,.*//')
+    assert_eq "$(in_lib "calendar_provider_name \$(calendar_provider_key $number)")" "$name" "number $number"
+  done <<<"$menu"
+  assert_eq "$(in_lib 'calendar_provider_key 8')" "" "no number past Other"
+  assert_contains "$(in_lib 'calendar_provider_problem 8')" "Type a number from 1 to 7"
+  sandbox_drop
+}
+
+test_icloud_flags_save() {
+  t_begin "iCloud calendar flags save the account at iCloud's own address"
+  sandbox_new
+  install_for_calendar
+  with_input "$CAL_SECRET
+"
+  run_install instance calendar main --yes --calendar-provider icloud --calendar-email person@icloud.com --calendar-password-stdin
+  clear_input
+  assert_rc 0
+  assert_eq "$(cal_value CALDAV_URL)" "https://caldav.icloud.com/"
+  assert_eq "$(cal_value CALDAV_USERNAME)" "person@icloud.com"
+  assert_secret_only_in_volume
+  sandbox_drop
+}
+
+test_icloud_picked_by_number() {
+  t_begin "picking iCloud by its number saves iCloud's own address"
+  sandbox_new
+  install_for_calendar
+  with_input "4
+person@icloud.com
+
+$CAL_SECRET
+"
+  run_install instance calendar main
+  clear_input
+  assert_rc 0
+  assert_flat_contains "$OUT" "Calendar: iCloud at https://caldav.icloud.com/, signed in as person@icloud.com."
+  assert_eq "$(cal_value CALDAV_URL)" "https://caldav.icloud.com/"
+  assert_secret_only_in_volume
+  sandbox_drop
+}
+
 test_presets
 test_url_refusals
 test_secret_rules
@@ -399,4 +451,7 @@ test_refusals_at_install
 test_google_calendar_flags_save
 test_gmail_reask_shows_menu_and_google_steps
 test_gmail_with_fastmail_stops
+test_menu_numbers_follow_the_menu
+test_icloud_flags_save
+test_icloud_picked_by_number
 tests_finish

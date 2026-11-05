@@ -18,16 +18,17 @@ EM_PASSWORD=
 EM_TARGET=
 EM_SKIP=
 
-# One preset per line: key, incoming host, port, mode, outgoing host, port, mode.
+# One preset per line: key, incoming host, port, mode, outgoing host, port, mode. The rows are in the menu's order:
+# alphabetical by the name a person sees, with Other after them.
 # A mode is ssl (encrypted from the start) or starttls (upgraded after connecting). The certificate is always checked.
-EMAIL_PRESETS='gmail imap.gmail.com 993 ssl smtp.gmail.com 465 ssl
-yahoo imap.mail.yahoo.com 993 ssl smtp.mail.yahoo.com 465 ssl
-aol imap.aol.com 993 ssl smtp.aol.com 465 ssl
-icloud imap.mail.me.com 993 ssl smtp.mail.me.com 587 starttls
+EMAIL_PRESETS='aol imap.aol.com 993 ssl smtp.aol.com 465 ssl
 fastmail imap.fastmail.com 993 ssl smtp.fastmail.com 465 ssl
-zoho imap.zoho.com 993 ssl smtp.zoho.com 465 ssl
+gmail imap.gmail.com 993 ssl smtp.gmail.com 465 ssl
 gmx imap.gmx.net 993 ssl mail.gmx.net 465 ssl
-webde imap.web.de 993 ssl smtp.web.de 587 starttls'
+icloud imap.mail.me.com 993 ssl smtp.mail.me.com 587 starttls
+webde imap.web.de 993 ssl smtp.web.de 587 starttls
+yahoo imap.mail.yahoo.com 993 ssl smtp.mail.yahoo.com 465 ssl
+zoho imap.zoho.com 993 ssl smtp.zoho.com 465 ssl'
 
 # The one sign-in check after saving. It runs from this computer, so the Email connector does not have to be running.
 # Its five input lines (server, port, mode, address, password) come on stdin, never on the command line.
@@ -65,35 +66,49 @@ email_flags_given() {
 
 email_provider_key() { # number or name -> key, nothing when unknown
   case "$1" in
-    1 | gmail) echo gmail ;;
-    2 | yahoo) echo yahoo ;;
-    3 | aol) echo aol ;;
-    4 | icloud) echo icloud ;;
-    5 | fastmail) echo fastmail ;;
-    6 | zoho) echo zoho ;;
-    7 | gmx) echo gmx ;;
-    8 | webde) echo webde ;;
+    1 | aol) echo aol ;;
+    2 | fastmail) echo fastmail ;;
+    3 | gmail) echo gmail ;;
+    4 | gmx) echo gmx ;;
+    5 | icloud) echo icloud ;;
+    6 | webde) echo webde ;;
+    7 | yahoo) echo yahoo ;;
+    8 | zoho) echo zoho ;;
     9 | other) echo other ;;
   esac
 }
 
 email_provider_name() { # key -> the name a person sees
   case "$1" in
-    gmail) echo Gmail ;;
-    yahoo) echo Yahoo ;;
     aol) echo AOL ;;
-    icloud) echo iCloud ;;
     fastmail) echo Fastmail ;;
-    zoho) echo Zoho ;;
+    gmail) echo Gmail ;;
     gmx) echo GMX ;;
+    icloud) echo iCloud ;;
     webde) echo web.de ;;
+    yahoo) echo Yahoo ;;
+    zoho) echo Zoho ;;
     *) echo "Other provider" ;;
   esac
 }
 
+# The provider menu, in the order of EMAIL_PRESETS, printed before the provider question.
+email_provider_menu() {
+  ui_line "Which email provider is yours?"
+  ui_line "  1 AOL"
+  ui_line "  2 Fastmail"
+  ui_line "  3 Gmail"
+  ui_line "  4 GMX"
+  ui_line "  5 iCloud"
+  ui_line "  6 web.de"
+  ui_line "  7 Yahoo"
+  ui_line "  8 Zoho"
+  ui_line "  9 Other provider: you type its servers"
+}
+
 email_provider_problem() {
   if [ -z "$(email_provider_key "$1")" ]; then
-    echo "Type a number from 1 to 9, or one of gmail, yahoo, aol, icloud, fastmail, zoho, gmx, webde, other."
+    echo "Type a number from 1 to 9, or one of aol, fastmail, gmail, gmx, icloud, webde, yahoo, zoho, other."
   fi
 }
 
@@ -178,7 +193,7 @@ email_password_hint() { # key
 
 # With --yes nobody can answer, so the provider, the address and, for Other, the servers must come from flags.
 email_require_flags() {
-  [ -n "$OPT_EMAIL_PROVIDER" ] || usage_die "With --yes the email account needs --email-provider: gmail, yahoo, aol, icloud, fastmail, zoho, gmx, webde or other."
+  [ -n "$OPT_EMAIL_PROVIDER" ] || usage_die "With --yes the email account needs --email-provider: aol, fastmail, gmail, gmx, icloud, webde, yahoo, zoho or other."
   [ -n "$OPT_EMAIL_ADDRESS" ] || usage_die "With --yes the email account needs --email-address ADDRESS, the address to connect."
   if [ "$(email_provider_key "$OPT_EMAIL_PROVIDER")" = other ]; then
     [ -n "$OPT_EMAIL_IMAP_HOST" ] || usage_die "With --yes, --email-provider other needs --email-imap-host, the incoming mail server."
@@ -254,16 +269,7 @@ email_collect() { # install|instance
   fi
   if [ "$ASSUME_YES" = 1 ]; then email_require_flags; fi
   if [ -z "$EM_PROVIDER" ] && [ "$ASSUME_YES" != 1 ] && [ "$DRY_RUN" != 1 ]; then
-    ui_line "Which email provider is yours?"
-    ui_line "  1 Gmail"
-    ui_line "  2 Yahoo"
-    ui_line "  3 AOL"
-    ui_line "  4 iCloud"
-    ui_line "  5 Fastmail"
-    ui_line "  6 Zoho"
-    ui_line "  7 GMX"
-    ui_line "  8 web.de"
-    ui_line "  9 Other provider: you type its servers"
+    email_provider_menu
   fi
   ask_valid EM_PROVIDER "Your provider (type a number)" "" "" email_provider_problem
   EM_PROVIDER=$(email_provider_key "$EM_PROVIDER")

@@ -27,17 +27,19 @@ function installerPresetRows(): string[][] {
 }
 
 describe('email provider presets', () => {
-  it('lists the providers in the card order, Gmail first and web.de last', () => {
+  it('lists the providers alphabetically by the name a person sees', () => {
     expect(EMAIL_PROVIDER_PRESETS.map(preset => preset.key)).toEqual([
-      'gmail',
-      'yahoo',
       'aol',
-      'icloud',
       'fastmail',
-      'zoho',
+      'gmail',
       'gmx',
+      'icloud',
       'webde',
+      'yahoo',
+      'zoho',
     ]);
+    const named = EMAIL_PROVIDER_PRESETS.map(preset => preset.name);
+    expect(named).toEqual([...named].sort((left, right) => left.localeCompare(right, 'en', { sensitivity: 'base' })));
   });
 
   it('matches the installer preset table row for row', () => {

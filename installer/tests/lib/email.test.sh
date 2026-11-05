@@ -18,6 +18,10 @@ zoho imap.zoho.com 993 true smtp.zoho.com 465 true
 gmx imap.gmx.net 993 true mail.gmx.net 465 true
 webde imap.web.de 993 true smtp.web.de 587 false'
 
+in_lib() {
+  PATH=$SB_BIN "$SB_BIN/bash" -c ". '$INSTALLER_DIR/lib/common.sh'; . '$INSTALLER_DIR/lib/shared.sh'; . '$INSTALLER_DIR/lib/ui.sh'; . '$INSTALLER_DIR/lib/email.sh'; $1"
+}
+
 # The account as the connector's account agent saved it, in the named volume the stub models for the
 # instance's compose project. Tests read the volume, never a host file: the installer writes no host file.
 env_mail() { sed -n "s/^$2=//p" "$STUB_STATE/mail-account-aman-$1" | head -n 1; }
@@ -59,6 +63,24 @@ assert_no_mail_account() {
   if [ -f "$file" ]; then
     assert_not_contains "$(cat "$file")" "MCP_EMAIL_SERVER_EMAIL_ADDRESS" "no account is saved"
   fi
+}
+
+test_menu_numbers_follow_the_menu() {
+  t_begin "the menu is alphabetical with Other last, and each number picks the provider shown beside it"
+  sandbox_new
+  local menu line number name
+  menu=$(in_lib 'email_provider_menu' 2>&1)
+  assert_eq "$(printf '%s\n' "$menu" | sed -n 's/^ *[0-9] //p' | sed 's/:.*//' | tr '\n' '|')" \
+    "AOL|Fastmail|Gmail|GMX|iCloud|web.de|Yahoo|Zoho|Other provider|" "the menu order"
+  while IFS= read -r line; do
+    number=$(printf '%s\n' "$line" | sed -n 's/^ *\([0-9]\) .*/\1/p')
+    [ -n "$number" ] || continue
+    name=$(printf '%s\n' "$line" | sed 's/^ *[0-9] //; s/:.*//')
+    assert_eq "$(in_lib "email_provider_name \$(email_provider_key $number)")" "$name" "number $number"
+  done <<<"$menu"
+  assert_eq "$(in_lib "printf '%s\\n' \"\$EMAIL_PRESETS\" | cut -d' ' -f1 | tr '\\n' '|'")" \
+    "aol|fastmail|gmail|gmx|icloud|webde|yahoo|zoho|" "the preset rows are in the menu order"
+  sandbox_drop
 }
 
 test_presets_write_their_servers() {
@@ -408,4 +430,5 @@ test_instance_command_adds_changes_and_removes
 test_sign_in_check_answers_are_plain
 test_password_is_read_from_stdin_without_spaces
 test_email_options_follow_their_commands
+test_menu_numbers_follow_the_menu
 tests_finish
