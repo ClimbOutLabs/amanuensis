@@ -70,6 +70,7 @@ vi.mock('@truefoundry/assistant-ui-runtime', () => ({
   useTrueFoundryApprovals: () => approvalsState,
   useTrueFoundryAgentSpec: () => ({ agentSpec: agentSpecState.agentSpec }),
   useTrueFoundryUpdateAgentSpec: () => updateAgentSpec,
+  useTrueFoundryReload: () => () => undefined,
 }));
 
 vi.mock('@/atoms/lib/voiceRecorder.js', () => ({
