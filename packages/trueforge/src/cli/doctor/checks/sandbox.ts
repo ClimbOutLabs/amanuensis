@@ -8,6 +8,7 @@ import {
 import type { DoctorDeps } from '../deps';
 import { describeNetworkError } from '../redact';
 import { failCheck, offCheck, okCheck, warnCheck, type Check } from '../schemas';
+import { formatGib } from './disk';
 
 const DEFAULT_SLOTS = 4;
 const REPAIR = `Run ${SLOT_FIX_COMMAND}`;
@@ -61,6 +62,62 @@ export async function checkRunCode({ deps, timeoutMs }: { deps: DoctorDeps; time
       fix: REPAIR,
     });
   }
+}
+
+/**
+ * The chat workspaces each slot holds, and the room left for more. A listing, not a readiness
+ * gate: a slot that cannot be asked warns, because run_code already carries the failure.
+ */
+export async function checkWorkspaces({ deps, timeoutMs }: { deps: DoctorDeps; timeoutMs: number }): Promise<Check> {
+  const id = 'workspaces';
+  if (deps.env['SANDBOX_BACKEND'] !== 'slots') {
+    return offCheck({
+      id,
+      detail:
+        'Chat workspaces are off: this instance was installed without the sandbox, so no chat has a sandbox workspace.',
+    });
+  }
+  const settings = slotSettings({ deps, id });
+  if (!settings.ok) {
+    return settings.check;
+  }
+  let rooms: Awaited<ReturnType<DoctorDeps['slotsWorkspaces']>>;
+  try {
+    rooms = await deps.slotsWorkspaces({ socketPaths: settings.socketPaths, timeoutMs });
+  } catch (error) {
+    return warnCheck({
+      id,
+      detail: `The chat workspaces could not be listed (${describeNetworkError(error)}).`,
+      fix: REPAIR,
+    });
+  }
+  const lines: string[] = [];
+  let unanswered = 0;
+  rooms.forEach((room, index) => {
+    const slot = String(index + 1);
+    if (room === null) {
+      unanswered += 1;
+      lines.push(`Slot ${slot} did not answer, so its workspaces are not listed.`);
+      return;
+    }
+    const roomLeft = `has ${formatGib(room.storeFreeBytes)} of room left`;
+    if (room.sessions === 0) {
+      lines.push(`Slot ${slot} holds no chat workspaces and ${roomLeft}.`);
+    } else if (room.sessions === 1) {
+      lines.push(`Slot ${slot} holds 1 chat workspace and ${roomLeft}.`);
+    } else {
+      lines.push(`Slot ${slot} holds ${String(room.sessions)} chat workspaces and ${roomLeft}.`);
+    }
+  });
+  if (rooms.length > 0 && unanswered === rooms.length) {
+    return warnCheck({
+      id,
+      detail: 'The chat workspaces could not be listed: the sandbox slots did not answer.',
+      fix: REPAIR,
+    });
+  }
+  const detail = lines.join(' ');
+  return unanswered > 0 ? warnCheck({ id, detail, fix: REPAIR }) : okCheck({ id, detail });
 }
 
 /** The per-chat quota the server runs with, which decides when a slot counts as full. */

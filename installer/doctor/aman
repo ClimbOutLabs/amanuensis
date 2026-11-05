@@ -54,8 +54,8 @@ ONLY=""
 ONLY_INSTANCE=""
 
 MACHINE_IDS="docker runtime credentials images disk docker_memory clock backup sandbox checkout tls"
-INSTANCE_IDS="config containers ports service login database disk clock run_code attachments demo model public_url public_login network"
-IN_IMAGE_IDS="service login database disk clock run_code attachments demo model"
+INSTANCE_IDS="config containers ports service login database disk clock run_code attachments workspaces demo model public_url public_login network"
+IN_IMAGE_IDS="service login database disk clock run_code attachments workspaces demo model"
 
 BACKUP_WARN_DAYS=7
 GIB=$((1024 * 1024 * 1024))
@@ -1803,6 +1803,7 @@ check_name() { # machine|instance id
     instance:clock) CHECK_NAME="App clock" ;;
     instance:run_code) CHECK_NAME="Running code" ;;
     instance:attachments) CHECK_NAME="Reading files" ;;
+    instance:workspaces) CHECK_NAME="Chat workspaces" ;;
     instance:demo) CHECK_NAME="Example data" ;;
     instance:model) CHECK_NAME="Search model" ;;
     instance:public_url) CHECK_NAME="Public address" ;;

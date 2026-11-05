@@ -5510,6 +5510,109 @@
         ],
         "type": "object"
       },
+      "ListSandboxWorkspacesResponse": {
+        "properties": {
+          "data": {
+            "properties": {
+              "slots": {
+                "items": {
+                  "properties": {
+                    "slot": {
+                      "exclusiveMinimum": 0,
+                      "type": "integer"
+                    },
+                    "store_free_bytes": {
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "total_bytes": {
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "workspace_count": {
+                      "minimum": 0,
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "slot",
+                    "workspace_count",
+                    "total_bytes",
+                    "store_free_bytes"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "workspaces": {
+                "items": {
+                  "properties": {
+                    "bytes": {
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "chat_id": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "chat_title": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "entries": {
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "holder": {
+                      "enum": [
+                        "you",
+                        "someone_else",
+                        "none"
+                      ],
+                      "type": "string"
+                    },
+                    "last_used": {
+                      "type": "string"
+                    },
+                    "sandbox_id": {
+                      "type": "string"
+                    },
+                    "slot": {
+                      "exclusiveMinimum": 0,
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "holder",
+                    "chat_id",
+                    "chat_title",
+                    "sandbox_id",
+                    "slot",
+                    "bytes",
+                    "entries",
+                    "last_used"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              }
+            },
+            "required": [
+              "slots",
+              "workspaces"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
       "ListScheduleRunsResponse": {
         "properties": {
           "data": {
@@ -23781,6 +23884,42 @@
           "sandboxProviders"
         ],
         "x-fern-sdk-method-name": "upgrade_image"
+      }
+    },
+    "/api/v1/settings/sandbox-workspaces": {
+      "get": {
+        "description": "Asks every sandbox slot which chat workspaces it holds and joins them to their chats, with the space each takes and the room left on each slot. Read-only: nothing is created, moved or removed.",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListSandboxWorkspacesResponse"
+                }
+              }
+            },
+            "description": "The chat workspaces on every slot, with one summary per slot."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "A sandbox slot could not be asked, so no list was returned."
+          }
+        },
+        "summary": "List the chat workspaces on the sandbox slots",
+        "tags": [
+          "Sandboxes"
+        ],
+        "x-fern-sdk-group-name": [
+          "settings",
+          "sandboxWorkspaces"
+        ],
+        "x-fern-sdk-method-name": "list"
       }
     },
     "/api/v1/settings/skills": {

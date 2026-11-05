@@ -15,8 +15,10 @@ import {
   type TaskChecklist,
 } from '@truefoundry/trueforge-core/agent-session/schemas/taskChecklist';
 import type {
+  ChatBySandboxId,
   CreateSessionInput,
   DeleteSessionInput,
+  FindChatsBySandboxIdsInput,
   GetOwnedIdsInput,
   GetSessionByExternalIdInput,
   GetSessionInput,
@@ -247,6 +249,31 @@ export async function getSession(
   }
 
   return mapRowToSessionRecord(row);
+}
+
+export async function findChatsBySandboxIds(
+  db: Kysely<Database>,
+  input: FindChatsBySandboxIdsInput,
+): Promise<readonly ChatBySandboxId[]> {
+  if (input.sandbox_ids.length === 0) {
+    return [];
+  }
+  const sandboxId = sql<string>`json_extract(turn.checkpoint, '$.sandbox_info.sandbox_id')`;
+  const rows = await db
+    .selectFrom('session')
+    .innerJoin('turn', join =>
+      join.onRef('turn.session_id', '=', 'session.session_id').onRef('turn.turn_id', '=', 'session.last_turn_id'),
+    )
+    .select([
+      'session.session_id as session_id',
+      'session.title as title',
+      sql<string>`json_extract(session.created_by_subject, '$.subject_id')`.as('created_by_subject_id'),
+      sandboxId.as('sandbox_id'),
+    ])
+    .where('session.tenant_id', '=', input.tenant_id)
+    .where(sandboxId, 'in', [...input.sandbox_ids])
+    .execute();
+  return rows;
 }
 
 export async function getOwnedIds(db: Kysely<Database>, input: GetOwnedIdsInput): Promise<readonly string[]> {

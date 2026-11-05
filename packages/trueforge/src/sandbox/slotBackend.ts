@@ -4,6 +4,8 @@ import {
   forgetShownSkillNotices,
   GitBridge,
   rawSandboxId,
+  SLOT_HEALTH_TIMEOUT_MS,
+  SlotClient,
   slotMirrorSocketPathsIn,
   SlotSandboxProvider,
   slotSkillNetworkSocketPathsIn,
@@ -11,6 +13,7 @@ import {
   type AuditLogWriter,
   type SandboxBuild,
 } from '@truefoundry/trueforge-core/core';
+import type { SlotSession } from '@truefoundry/trueforge-core/core/sandbox/slots/slotContract';
 import type { Logger } from 'winston';
 import configuration from '../config';
 import type { PackageMirrorAllowanceCheck } from './mirrors/packageMirrorAllowance';
@@ -157,6 +160,50 @@ export async function slotSandboxBuildStatus({ logger }: { logger: Logger }): Pr
   const build = await createSlotSandboxProvider({ logger }).getImageBuildStatus();
   cached = { at: Date.now(), build };
   return build;
+}
+
+/** One slot's workspace sessions, with the free room on the filesystem they live on. */
+export interface SlotWorkspaceSessions {
+  /** 1-based slot number, the number in the `s<slot>-` prefix of its workspaces' sandbox ids. */
+  slot: number;
+  sessions: SlotSession[];
+  storeFreeBytes: number;
+}
+
+/**
+ * Every slot's workspace sessions, asked of the agents directly. Empty when the slots backend is
+ * off. Throws when a slot cannot be asked, so a caller never shows a partial list as the whole.
+ */
+export async function slotWorkspaceSessions(): Promise<SlotWorkspaceSessions[]> {
+  if (!slotsBackendEnabled()) {
+    return [];
+  }
+  const paths = slotSocketPaths();
+  return Promise.all(
+    paths.map(async (path, index) => {
+      const slot = index + 1;
+      const client = new SlotClient(path);
+      const [health, sessions] = await Promise.all([
+        client.health({ signal: undefined, timeoutMs: SLOT_HEALTH_TIMEOUT_MS }),
+        client.sessions({ signal: undefined, timeoutMs: SLOT_HEALTH_TIMEOUT_MS }),
+      ]);
+      if (!health.ok) {
+        throw new Error(`Slot ${String(slot)} could not report its health: ${health.error.message}`, {
+          cause: health.error,
+        });
+      }
+      if (!sessions.ok) {
+        throw new Error(`Slot ${String(slot)} could not list its workspaces: ${sessions.error.message}`, {
+          cause: sessions.error,
+        });
+      }
+      return {
+        slot,
+        sessions: sessions.value.sessions,
+        storeFreeBytes: health.value.attestation.facts.store_free_bytes,
+      };
+    }),
+  );
 }
 
 /** Removes a deleted chat's workspace from its slot; if that fails the agent's idle sweep removes it later. */

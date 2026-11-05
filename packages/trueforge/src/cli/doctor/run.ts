@@ -4,7 +4,7 @@ import { checkDemo } from './checks/demo';
 import { checkDisk } from './checks/disk';
 import { checkLogin, probeLogin } from './checks/login';
 import { checkModel } from './checks/model';
-import { checkAttachments, checkRunCode } from './checks/sandbox';
+import { checkAttachments, checkRunCode, checkWorkspaces } from './checks/sandbox';
 import { checkService } from './checks/service';
 import type { DoctorDeps } from './deps';
 import { offCheck, type Check } from './schemas';
@@ -17,6 +17,7 @@ export const INSTANCE_CHECK_IDS = [
   'clock',
   'run_code',
   'attachments',
+  'workspaces',
   'demo',
   'model',
 ] as const;
@@ -51,6 +52,7 @@ export async function runInstanceChecks({
     local
       ? offCheck({ id: 'attachments', detail: 'Skipped: the live sandbox test only runs in a full check.' })
       : await checkAttachments({ deps, timeoutMs: DEEP_PROBE_TIMEOUT_MS }),
+    await checkWorkspaces({ deps, timeoutMs }),
     checkDemo({ deps }),
   ];
   // The model check spends a few tokens, so it only runs when asked for or when nothing is filtered.

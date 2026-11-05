@@ -29,9 +29,18 @@ The work lands in stages, each its own pull request against this spec:
    bytes, entry count, last used) and a health fact for the free space on
    the filesystem the workspaces are on. The server contract and client
    learn the new answers. Nothing reads them yet.
-2. Later stages make the holders visible in Settings and the doctor, move
-   workspace creation to a question the agent answers from real free
-   space, move the trees into the store, and retire the fixed seat count.
+2. The holders become visible. A read-only settings route asks every slot
+   for its sessions and joins each one to the chat whose last turn used
+   it, answering per workspace the chat and its title, the slot, the size,
+   the entry count and the last use, plus one summary per slot with its
+   free room. The Settings sandbox page gains a read-only "Chat
+   workspaces" card with the same list, and the doctor gains one line per
+   slot: how many workspaces it holds and how much room is left. A
+   workspace no chat holds is listed honestly, with no chat attached.
+   Nothing is created, moved or removed.
+3. Later stages move workspace creation to a question the agent answers
+   from real free space, move the trees into the store, and retire the
+   fixed seat count.
 
 ## Key design decisions
 
@@ -56,6 +65,12 @@ agent on the same machine, like every other slot answer. It names no chats
 and carries no file names or contents. The free-space fact is a number
 about the machine's disk. Nothing leaves the device.
 
+From stage 2, the server joins that listing to chat titles to show who
+holds each workspace. The join happens on the server, and the joined list
+is served only on the instance's own admin settings surface, to the
+signed-in owner of the same instance. No title or workspace detail leaves
+the device.
+
 ## Testing
 
 Tests use synthetic data only: agent tests build throwaway session trees in
@@ -64,8 +79,14 @@ against a fake agent on a local socket. Stage 1 is proved by the agent's Go
 tests and the core contract and client tests, with a live health read on a
 running slot as a manual check at the gate.
 
-## Out of scope for stage 1
+Stage 2 is proved by server tests with a stubbed slot listing and a fake
+session store (sessions joined to the right chat titles, a session with no
+matching chat shown with no chat attached, several slots, and the empty
+case), by doctor tests for the new per-slot line, and by Settings page
+tests for the card: the holders list, an untitled chat, the orphan, the
+empty state, and the card staying hidden on the Docker backend.
 
-Any change to capacity, creation, deletion, the idle sweep, Settings, the
-doctor or the capabilities answers. Those arrive in later stages against
-this same spec.
+## Out of scope so far
+
+Any change to capacity, creation, deletion, the idle sweep or the
+capabilities answers. Those arrive in later stages against this same spec.

@@ -10,7 +10,8 @@ const DISK_FAIL_BYTES = 2 * GIB;
 const FIX =
   'Free space by removing unused Docker data ("docker system prune" removes stopped containers and unused images) or old backups, then run doctor again.';
 
-function formatGib(bytes: number): string {
+/** Bytes as GB with one decimal, the doctor's one way of wording a disk size. */
+export function formatGib(bytes: number): string {
   return `${(bytes / GIB).toFixed(1)} GB`;
 }
 
