@@ -15,6 +15,7 @@ import {
   GetDeliveryResponseSchema,
   GetPushSubscriptionResponseSchema,
   ListDeliveriesResponseSchema,
+  LookupPushSubscriptionResponseSchema,
   type DeliveryLink,
 } from '../../../src/schemas/deliveries';
 
@@ -46,11 +47,12 @@ async function build({ pushOn = true }: { pushOn?: boolean } = {}) {
     external_id: null,
   });
   const sessions = new Sessions({ sessionStore });
-  const makeChat = async (session_id: string) => {
+  const makeChat = async (session_id: string, owner = 'alice') => {
     await sessions.create({
       tenant_id: 'default',
       session_id,
-      created_by_subject: agentSubject,
+      created_by_subject:
+        owner === 'alice' ? agentSubject : { subject_id: owner, subject_type: 'user', subject_display_name: owner },
       agent: { type: 'reference', id: agent.id, name: agent.name },
       external_id: null,
     });
@@ -81,7 +83,17 @@ async function build({ pushOn = true }: { pushOn?: boolean } = {}) {
     });
   const give = (created_by: string, text: string) =>
     giveLinked({ created_by, text, link: { type: 'chat', session_id: 's1' } });
-  return { as, json, give, giveLinked, makeChat, deliveryStore };
+  const giveApproval = (input: { created_by: string; text: string; session_id: string }) =>
+    deliveryStore.create({
+      tenant_id: 'default',
+      created_by: input.created_by,
+      kind: 'approval_waiting',
+      level: 'call',
+      text: input.text,
+      reason: 'A card is waiting.',
+      link: { type: 'approval', session_id: input.session_id, approval_id: 'appr-1' },
+    });
+  return { as, json, give, giveLinked, giveApproval, makeChat, deliveryStore, sessionStore };
 }
 
 describe('deliveries routes', () => {
@@ -208,6 +220,68 @@ describe('links to chats that are gone', () => {
     expect(list.data[0]?.link).toBeNull();
   });
 
+  it('serves an item without its link when the chat belongs to someone else', async () => {
+    const { json, giveLinked, makeChat } = await build();
+    await makeChat('bobs-chat', 'bob');
+    const made = await giveLinked({
+      created_by: 'alice',
+      text: 'not her chat',
+      link: { type: 'chat', session_id: 'bobs-chat' },
+    });
+
+    const list = ListDeliveriesResponseSchema.parse(await (await json('/deliveries')).json());
+    expect(list.data[0]?.text).toBe('not her chat');
+    expect(list.data[0]?.link).toBeNull();
+    const one = GetDeliveryResponseSchema.parse(await (await json(`/deliveries/${made.id}`)).json());
+    expect(one.data.link).toBeNull();
+  });
+
+  it('keeps an approval item with its link while its chat is there', async () => {
+    const { json, giveApproval, makeChat } = await build();
+    await makeChat('card-chat');
+    await giveApproval({ created_by: 'alice', text: 'waiting on you', session_id: 'card-chat' });
+
+    const list = ListDeliveriesResponseSchema.parse(await (await json('/deliveries')).json());
+    expect(list.data[0]?.kind).toBe('approval_waiting');
+    expect(list.data[0]?.link).toEqual({ type: 'approval', session_id: 'card-chat', approval_id: 'appr-1' });
+  });
+
+  it('resolves an approval item when its chat was deleted', async () => {
+    const { json, giveApproval } = await build();
+    const made = await giveApproval({ created_by: 'alice', text: 'the card chat is gone', session_id: 'deleted-chat' });
+
+    const list = ListDeliveriesResponseSchema.parse(await (await json('/deliveries')).json());
+    expect(list.data).toEqual([]);
+    expect((await json(`/deliveries/${made.id}`)).status).toBe(404);
+  });
+
+  it('resolves an approval item when its chat belongs to someone else', async () => {
+    const { json, giveApproval, makeChat } = await build();
+    await makeChat('bobs-card-chat', 'bob');
+    await giveApproval({ created_by: 'alice', text: 'not her card', session_id: 'bobs-card-chat' });
+
+    const list = ListDeliveriesResponseSchema.parse(await (await json('/deliveries')).json());
+    expect(list.data).toEqual([]);
+  });
+
+  it('looks up chat ownership once for a whole page', async () => {
+    const { json, giveLinked, makeChat, sessionStore } = await build();
+    await makeChat('live-chat');
+    await giveLinked({ created_by: 'alice', text: 'one', link: { type: 'chat', session_id: 'live-chat' } });
+    await giveLinked({ created_by: 'alice', text: 'two', link: { type: 'chat', session_id: 'deleted-chat' } });
+    await giveLinked({ created_by: 'alice', text: 'three', link: { type: 'space', space_id: 'space-1' } });
+    const spy = jest.spyOn(sessionStore, 'getOwnedIds');
+
+    const list = ListDeliveriesResponseSchema.parse(await (await json('/deliveries')).json());
+    expect(list.data).toHaveLength(3);
+    expect(spy).toHaveBeenCalledTimes(1);
+    expect(spy).toHaveBeenCalledWith({
+      tenant_id: 'default',
+      subject_id: 'alice',
+      ids: expect.arrayContaining(['live-chat', 'deleted-chat']),
+    });
+  });
+
   it('never checks a space link against the chats', async () => {
     const { json, giveLinked } = await build();
     await giveLinked({
@@ -252,6 +326,24 @@ describe('push routes', () => {
 
     const removed = await json('/push/subscriptions', { method: 'DELETE', body: { endpoint: subscription.endpoint } });
     expect(removed.status).toBe(200);
+  });
+
+  it('says whether a device still gets notices, only to its owner', async () => {
+    const { json, as } = await build();
+    const lookup = async () =>
+      LookupPushSubscriptionResponseSchema.parse(
+        await (
+          await json('/push/subscriptions/lookup', { method: 'POST', body: { endpoint: subscription.endpoint } })
+        ).json(),
+      ).data.saved;
+    expect(await lookup()).toBe(false);
+    expect((await json('/push/subscriptions', { method: 'POST', body: subscription })).status).toBe(201);
+    expect(await lookup()).toBe(true);
+    as('bob');
+    expect(await lookup()).toBe(false);
+    as('alice');
+    await json('/push/subscriptions', { method: 'DELETE', body: { endpoint: subscription.endpoint } });
+    expect(await lookup()).toBe(false);
   });
 
   it('refuses device keys that are not real push keys', async () => {

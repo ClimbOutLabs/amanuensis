@@ -16,7 +16,7 @@ One server-side feed of things Aman wants a person to see, called deliveries. Ea
 
 **Server owns seen state.** Seen on one device is seen on every device. Every read and write is scoped to the tenant and the person who owns the delivery.
 
-**A deleted chat takes its Open away, not the words.** When the feed is read, an item whose link names a chat that no longer exists is served without the link. The item's text and reason stay in the feed, and there is no Open to fail. Opening an item looks its chat up first, and a chat that cannot be loaded opens nothing and shows no raw error. Items already in the feed heal on their own, because the check happens when the feed is read, not when the item is written.
+**A deleted chat takes its Open away, not the words.** When the feed is read, the chats a page of items links to are checked in one ownership lookup. An item whose chat no longer exists, or belongs to someone else, is served without the link; its text and reason stay in the feed, and there is no Open to fail. An item waiting on an approval in such a chat can never be answered, so it is resolved and leaves the feed. Opening an item looks its chat up first, and the panel stays open until the chat opens; when it cannot open, the panel says so in plain words instead of showing a raw error. Items already in the feed heal on their own, because the check happens when the feed is read, not when the item is written.
 
 **Kinds and channels grow without migrations.** Kind, level and channel are plain text columns. The API validates kind with a discriminated union, so later parts add kinds and channels in code only.
 
@@ -24,7 +24,7 @@ One server-side feed of things Aman wants a person to see, called deliveries. Ea
 
 **Push names no one.** The contact every push carries defaults to the project's public page, not the owner's email. The owner can set their own with `WEB_PUSH_SUBJECT`.
 
-**A bounded number of devices.** A person keeps notices on for at most 10 devices. Turning on another drops the one turned on longest ago. A notice goes to at most 4 devices at a time.
+**A bounded number of devices.** A person keeps notices on for at most 10 devices. Turning on another drops the one turned on longest ago. A notice goes to at most 4 devices at a time. Settings asks the server whether this device is still saved, so a device that was dropped, or that its push service reported gone, reads as off and can be turned on again.
 
 **New keys mean new subscriptions.** Each device records the key it was turned on with. After the keys change, a device on the old key is removed instead of sent to, and turning notices on again makes a fresh subscription with the new key.
 
@@ -65,7 +65,7 @@ All tests use synthetic data, never a person's real data.
 - The push payload holds no reminder text
 - A dead push subscription is removed
 - A device on an old key is removed, and turning notices on again re-subscribes
-- An 11th device drops the oldest
+- An 11th device drops the oldest, and the dropped device reads as off in Settings
 - A full export with many devices per item imports
 - An upgraded install gets push keys
 - The service worker takes no fetch events

@@ -36,10 +36,12 @@ describe('opening what a bell item leads to', () => {
     const getSession = vi.fn(loadedSession);
     const { server, result } = setup(getSession);
 
+    let outcome: Awaited<ReturnType<typeof openDeliveryLink>> | undefined;
     await act(async () => {
-      await openDeliveryLink({ shell: result.current, server, link: { type: 'chat', sessionId: 'sess-1' } });
+      outcome = await openDeliveryLink({ shell: result.current, server, link: { type: 'chat', sessionId: 'sess-1' } });
     });
 
+    expect(outcome).toEqual({ opened: true });
     expect(getSession).toHaveBeenCalledWith({ sessionId: 'sess-1' });
     expect(result.current.pendingSessionId).toBe('sess-1');
     expect(result.current.mode).toMatchObject({ isMutable: false, agentName: 'helper' });
@@ -81,19 +83,42 @@ describe('opening what a bell item leads to', () => {
     expect(result.current.mode).toMatchObject({ isMutable: true });
   });
 
-  it('opens nothing when the chat cannot be loaded, and shows no error', async () => {
+  it('says the chat was deleted when the server has forgotten it, and opens nothing', async () => {
+    const gone = new Error('Session not found: sess-gone');
+    gone.name = 'NotFoundError';
     const getSession = vi.fn(async (): Promise<never> => {
-      throw new Error('Session not found: sess-gone');
+      throw gone;
     });
     const { server, result } = setup(getSession);
 
+    let outcome: Awaited<ReturnType<typeof openDeliveryLink>> | undefined;
     await act(async () => {
-      await openDeliveryLink({ shell: result.current, server, link: { type: 'chat', sessionId: 'sess-gone' } });
+      outcome = await openDeliveryLink({
+        shell: result.current,
+        server,
+        link: { type: 'chat', sessionId: 'sess-gone' },
+      });
     });
 
     expect(getSession).toHaveBeenCalledWith({ sessionId: 'sess-gone' });
+    expect(outcome).toEqual({ opened: false, message: 'This chat was deleted' });
     expect(result.current.pendingSessionId).toBeUndefined();
     expect(result.current.mode).toMatchObject({ isMutable: true });
+  });
+
+  it('says to try again when the chat cannot be loaded for another reason', async () => {
+    const getSession = vi.fn(async (): Promise<never> => {
+      throw new Error('network down');
+    });
+    const { server, result } = setup(getSession);
+
+    let outcome: Awaited<ReturnType<typeof openDeliveryLink>> | undefined;
+    await act(async () => {
+      outcome = await openDeliveryLink({ shell: result.current, server, link: { type: 'chat', sessionId: 'sess-1' } });
+    });
+
+    expect(outcome).toEqual({ opened: false, message: 'Could not open the chat. Try again' });
+    expect(result.current.pendingSessionId).toBeUndefined();
   });
 
   it('opens a space without looking up any chat', async () => {
