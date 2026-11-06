@@ -67,13 +67,13 @@ The app does not ship with a model configured — a fresh checkout has no defaul
     Fastest to try. Open **Settings → Models**, pick a provider from the catalog (OpenAI, Anthropic, Google Gemini, and others), click **Configure**, paste an API key from that provider's own dashboard, and click **Create**. The provider's models become available immediately in the model selector. See [Setup Models](/models) for the full provider list.
   </Tab>
   <Tab title="A local model with Ollama">
-    Runs entirely on your machine — no API key, no data leaves it. Requires [Ollama](https://ollama.com/download) installed on the same machine.
+    Runs entirely on your machine — no API key, no data leaves it. Requires [Ollama](https://ollama.com/download) installed on the same machine. [Run Aman on a local model](/local-model) covers hardware, speed and what works less well; the short version is below.
 
     ```bash
-    ollama pull qwen2.5:0.5b
+    ollama pull qwen3:8b
     ```
 
-    (Any Ollama model works; this one is small and fast to try with. Larger models such as `llama3.1:8b` give better answers.)
+    Give Ollama a context window of at least 32K tokens before you start: Aman's instructions and tool definitions take about 10K on every turn, and Ollama's default is smaller, so it would silently cut them. In the Ollama app, set **Settings → Context length** to 32k; for `ollama serve`, start it with `OLLAMA_CONTEXT_LENGTH=32768`.
 
     Because the app runs directly on your machine in standalone mode, it reaches Ollama at plain `localhost` — no container networking involved. Confirm Ollama is up:
 
@@ -81,13 +81,13 @@ The app does not ship with a model configured — a fresh checkout has no defaul
     curl -s http://localhost:11434 && echo " (Ollama is running)"
     ```
 
-    In **Settings → Models**, click **Add Custom Provider** and fill in:
+    In **Settings → Models**, click **Add custom provider** and fill in:
 
     - **Name** — anything, e.g. `ollama-local`.
     - **Base URL** — `http://localhost:11434/v1`.
     - **API key** — leave blank.
-    - Under **Models**, **Model ID** — `qwen2.5:0.5b` (or whatever you pulled), matching the name exactly. **Model name** here is actually a machine slug, not a display label: lowercase letters, digits, and hyphens only, starting with a letter — `qwen2-5-0-5b` works.
-    - Under **Advanced**, set **Context length** and **Max output tokens** — check the model's page on [ollama.com/library](https://ollama.com/library) for its real limits; `32000` and `4096` are safe placeholders for small models.
+    - Under **Models**, **Model ID** — `qwen3:8b` (or whatever you pulled), matching the name exactly. **Model name** fills itself in as `qwen-3-8b`; it is a machine slug, not a display label: lowercase letters, digits, and hyphens only, starting with a letter.
+    - Under **Advanced**, set **Context length** to `32768` (the window you gave Ollama) and **Max output tokens** to `8192`.
 
     Click **Add provider**.
   </Tab>
@@ -207,7 +207,7 @@ None of these are required to chat with a model. Each is one sentence plus where
     next start mints new ones. The account itself is only the `.env` lines, so changing the password means
     generating a new hash and restarting the `dex` service.
 
-    **Ollama from Compose.** The app runs inside a container here, so `localhost` means the container itself. Point the custom provider at `http://host.docker.internal:11434/v1` instead of `http://localhost:11434/v1`. Docker Desktop provides that mapping automatically; plain Docker Engine needs the `extra_hosts` entry this repo's `docker-compose.yml` already ships. Ollama itself listens on `127.0.0.1` only by default — open it to the Docker network with `OLLAMA_HOST=0.0.0.0:11434` (systemd override on Linux/WSL, or the desktop app's Settings on macOS/Windows) and restart it.
+    **Ollama from Compose.** The app runs inside a container here, so `localhost` means the container itself. Point the custom provider at `http://host.docker.internal:11434/v1` instead of `http://localhost:11434/v1`. Docker Desktop provides that mapping automatically; plain Docker Engine needs the `extra_hosts` entry this repo's `docker-compose.yml` already ships. On Docker Desktop (macOS, Windows) that address reaches Ollama as it is. On Linux, Ollama listens on `127.0.0.1` only by default, which the containers cannot reach: open it with `OLLAMA_HOST=0.0.0.0:11434` in a systemd override and restart it. [Run Aman on a local model](/local-model#linux-two-extra-settings) has the exact lines.
 
     **Docker prerequisite gotchas** (fresh machines hit these):
     - `docker compose up --build` fails with `unknown flag: --build` — the Compose plugin isn't installed. On macOS/Windows, install [Docker Desktop](https://docs.docker.com/get-started/get-docker/) (it bundles Compose v2) and wait for it to report running.
@@ -294,7 +294,7 @@ None of these are required to chat with a model. Each is one sentence plus where
 
 ## Build your first agent
 
-With the app open in your browser and a model connected (above), this walkthrough takes you from an empty workspace to a saved, reusable agent. The example builds a **web research briefer** — an agent that searches the web, fans out to parallel subagents, and turns its findings into an interactive one-page brief. This part needs a hosted model that can call tools well; the Ollama tiny model above is fine for confirming the install works, but swap in a stronger model here if you have one connected.
+With the app open in your browser and a model connected (above), this walkthrough takes you from an empty workspace to a saved, reusable agent. The example builds a **web research briefer** — an agent that searches the web, fans out to parallel subagents, and turns its findings into an interactive one-page brief. This part needs a hosted model that can call tools well; Qwen3 8B can call tools, but a hosted model does this multi-step work faster and more reliably; swap one in here if you have one connected.
 
 <Steps>
   <Step title="Confirm a model is connected">

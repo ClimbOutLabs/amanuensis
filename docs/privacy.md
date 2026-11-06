@@ -23,4 +23,4 @@ If you use a hosted model, the company running it sees each chat: your messages,
 
 ## Choosing a model
 
-You can use a hosted model or a local one, and switch any time in Settings. You can also give helper jobs, such as memory summaries, their own model.
+You can use a hosted model or a local one, and switch any time in Settings. [Run Aman on a local model](/local-model) sets one up. You can also give helper jobs, such as memory summaries, their own model.

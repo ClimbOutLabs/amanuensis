@@ -96,7 +96,9 @@ Setup takes about 15 minutes. Here is what you need:
 
 - **A Mac or a Linux computer** with 16 GB of memory (8 GB is the bare minimum, and the first install is slow there) and free disk space: about 20 GB on a Mac, about 45 GB on Linux. Aman itself takes about 10 GB; on Linux it also keeps room for the two sandbox disks where it runs code. Windows works too, through a free Microsoft add-on called WSL 2: see the [Windows guide](docs/install-windows.md). Windows support is still new, so expect a few more bumps than on a Mac or Linux. If you get stuck, [tell us](https://github.com/ClimbOutLabs/amanuensis/issues) and we'll help.
 - **Docker**, the free program Aman runs inside. On a Mac, [download Docker Desktop](https://www.docker.com/products/docker-desktop/), install it and start it. On Linux, the installer can set Docker up for you.
-- **A Together AI account**, which gives Aman a model to think with. Signing up is free, and you pay Together for what you use. You can sign up now or after the install.
+- **A model for Aman to think with.** Pick one; you set it up after the install.
+  - **Hosted: a Together AI account.** The quickest start. Signing up is free, and you pay Together for what you use.
+  - **Local: Ollama on your own computer.** Free, and your chats never leave the machine. It needs a Mac with Apple silicon and 16 GB of memory or more, a PC with an NVIDIA graphics card, or a DGX Spark. It is slower, and weaker at long jobs.
 
 ### Install
 
@@ -113,17 +115,47 @@ It also sets up sign-in, backups and phone access, and leaves an `aman` command 
 
 ### After you install
 
-**1. Get a Together AI key.** Aman needs a model to think with. [Together AI](https://www.together.ai) hosts open models and is the quickest way to start.
+**1. Connect a model.** Aman needs a model to think with. Choose hosted or local; you can add the other later and switch any time.
+
+<details open>
+<summary><strong>Hosted: Together AI</strong> (quickest, pay for what you use)</summary>
+
+[Together AI](https://www.together.ai) hosts open models.
 
 - Sign up free at [api.together.ai](https://api.together.ai).
 - Open **Settings, API keys** ([direct link](https://api.together.ai/settings/projects/~current/api-keys)) and create a key.
 - Copy it. It is shown only once.
 
-**2. Add it to Aman.** Open Aman and go to **Settings**, then **Models**. Together AI is built in: under **Available**, find **together** and click **Configure**. Paste the key you copied into the **API key** field and click **Create**. Nothing else to fill in: the address and the models come with it.
+Open Aman and go to **Settings**, then **Models**. Together AI is built in: under **Available**, find **together** and click **Configure**. Paste the key you copied into the **API key** field and click **Create**. Nothing else to fill in: the address and the models come with it.
 
 Its models are now on your list. Pick the one you want in the menu under the message box.
 
-**3. Give your chief of staff a name and a personality.** Go to **Settings, Personalization**, and find **Assistant profile**. It has three fields:
+</details>
+
+<details open>
+<summary><strong>Local: Qwen3 8B with Ollama</strong> (free, nothing leaves your computer)</summary>
+
+1. Install [Ollama](https://ollama.com/download) and open it.
+2. In Ollama's **Settings**, set **Context length** to **32k**. Aman's own instructions are longer than Ollama's default allows, and Ollama would quietly cut them. On Linux this step is different, and Ollama needs one more setting: see the [local model guide](docs/local-model.mdx#linux-two-extra-settings).
+3. In the Terminal, run `ollama pull qwen3:8b` (about 5 GB).
+4. In Aman, go to **Settings**, then **Models**, and click **Add custom provider**. Fill in:
+
+   | Field             | What to type                           |
+   | ----------------- | -------------------------------------- |
+   | Name              | `ollama`                               |
+   | Base URL          | `http://host.docker.internal:11434/v1` |
+   | API key           | leave it empty                         |
+   | Model ID          | `qwen3:8b`                             |
+   | Context length    | `32768`                                |
+   | Max output tokens | `8192`                                 |
+
+   Click **Add provider**, then pick **qwen-3-8b** in the menu under the message box.
+
+What to expect: on a 16 GB Mac with Apple silicon, a new chat takes roughly half a minute to start answering, and later replies come sooner. A PC with a 12 GB NVIDIA graphics card, or a DGX Spark, answers within seconds. A PC with no graphics card is too slow: use a hosted model there. Qwen3 8B cannot read pictures, and it is less reliable than a hosted model at long jobs such as the daily brief. The [local model guide](docs/local-model.mdx) has the details.
+
+</details>
+
+**2. Give your chief of staff a name and a personality.** Go to **Settings, Personalization**, and find **Assistant profile**. It has three fields:
 
 - **Name**: what you'll call it. Ours is Mannie.
 - **Voice guidance**: one line on how it talks, such as "Warm, direct, concise".
@@ -143,9 +175,9 @@ Not sure what to write? Start from one of these and copy its two fields in. Chan
 
 None of these change what it's allowed to do. Sending, deleting and installing still wait for your OK, whatever personality you pick.
 
-**4. Go say hello.** Open the home screen and tap **I'm behind**, or just say what's on your mind. Your chief of staff asks one question at a time and takes it from there.
+**3. Go say hello.** Open the home screen and tap **I'm behind**, or just say what's on your mind. Your chief of staff asks one question at a time and takes it from there.
 
-**5. Connect your email and calendar.** This is where it starts carrying things for you. Go to **Settings, Connectors**:
+**4. Connect your email and calendar.** This is where it starts carrying things for you. Go to **Settings, Connectors**:
 
 - **Gmail and Google Calendar.** Choose **Google**, then **Connect**. The panel walks you through making your own Google sign-in in about ten minutes, so your mail goes from Google straight to your computer and nobody else is in between. Connect mail first, then **Connect Calendar**. [Step-by-step guide](docs/google.mdx).
 - **Any other mailbox or calendar.** Choose **Email** for an IMAP mailbox (Outlook, iCloud, Fastmail and most others), and **Calendar** for a CalDAV calendar.
@@ -154,15 +186,15 @@ Reading is quiet. Every draft, send and calendar change shows you a card first a
 
 Once your mail and calendar are connected, tap **Run my daily brief** on the home screen to see what tomorrow morning will look like.
 
-Prefer another provider? Any service with an OpenAI-compatible API goes in the same way. Fully local models, such as Ollama or an NVIDIA DGX Spark, work too.
+Prefer another provider? Any service with an OpenAI-compatible API goes in the same way, with **Add custom provider**.
 
-More help: [full install guide](docs/install.mdx) · [Windows guide](docs/install-windows.md) · [first steps](docs/try-aman.md)
+More help: [full install guide](docs/install.mdx) · [Windows guide](docs/install-windows.md) · [local model guide](docs/local-model.mdx) · [first steps](docs/try-aman.md)
 
 ## Your data, your rules
 
 Your memory, chats, personas and settings live on your computer. Memory is plain Markdown files you can open in any text editor; [docs/memory.md](docs/memory.md) explains how it works.
 
-Be clear about one thing: **the model sees what you send it.** If you use a hosted model, the company running it sees each chat, including what Aman knows about you and anything it reads for you. To keep everything on your computer, use a local model. Web searches, maps and connectors still reach their own services. [docs/privacy.md](docs/privacy.md) lists exactly what goes where.
+Be clear about one thing: **the model sees what you send it.** If you use a hosted model, the company running it sees each chat, including what Aman knows about you and anything it reads for you. To keep everything on your computer, use a [local model](docs/local-model.mdx). Web searches, maps and connectors still reach their own services. [docs/privacy.md](docs/privacy.md) lists exactly what goes where.
 
 Sending a message, deleting anything and installing anything always wait for your OK. That rule is enforced in code, on the tool itself, not left to the model's good behaviour.
 
