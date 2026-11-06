@@ -8,10 +8,10 @@ import { rm } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import path from 'node:path';
 import { URL } from 'node:url';
+import { Worker } from 'node:worker_threads';
 import { chromium } from 'playwright-core';
 
 import { elementAtPath } from './extract.mjs';
-import { markPicture } from './pictureMarks.mjs';
 import { RefAssigner, renderSnapshot, sensitivityOf } from './snapshot.mjs';
 
 const MAX_BODY_BYTES = 256 * 1024;
@@ -30,6 +30,74 @@ const EXTRACT_SCRIPT = `(() => {\n${EXTRACT_MODULE}\nreturn extractSnapshotNodes
 /** The same bundled module, ending in a read-only look at where the elements at `paths` sit in view. */
 function boxesInViewScript(paths) {
   return `(() => {\n${EXTRACT_MODULE}\nreturn boxesInView(${JSON.stringify(paths)});\n})()`;
+}
+
+/** The same bundled module, ending in the boxes the model's copy of a screenshot must cover. */
+const MASK_BOXES_SCRIPT = `(() => {\n${EXTRACT_MODULE}\nreturn maskBoxes();\n})()`;
+
+/**
+ * Runs a read-only script in a world of its own on the tab's main frame. The page's scripts share
+ * the DOM but not this world's JavaScript, so a page that hooks getBoundingClientRect or watches
+ * its own functions being called cannot bend the result or tell that the shot is being taken.
+ */
+async function inIsolatedWorld(cdp, expression) {
+  const { frameTree } = await cdp.send('Page.getFrameTree');
+  const { executionContextId } = await cdp.send('Page.createIsolatedWorld', {
+    frameId: frameTree.frame.id,
+    worldName: 'aman-picture',
+  });
+  const { result, exceptionDetails } = await cdp.send('Runtime.evaluate', {
+    expression,
+    contextId: executionContextId,
+    returnByValue: true,
+  });
+  if (exceptionDetails !== undefined) {
+    throw new Error('the layout read failed');
+  }
+  return result.value;
+}
+
+/** Whether a node of a DOM.getDocument tree holds a form field anywhere below it, shadow roots included. */
+function holdsField(node) {
+  if (['INPUT', 'TEXTAREA', 'SELECT'].includes(node.nodeName)) {
+    return true;
+  }
+  return [...(node.children ?? []), ...(node.shadowRoots ?? [])].some(holdsField);
+}
+
+/**
+ * The boxes of elements whose closed shadow root holds a form field. The page's own DOM cannot reach
+ * a closed root, so the browser's DOM view is asked instead, and the whole element is covered.
+ */
+async function closedShadowFieldBoxes(cdp) {
+  const { root } = await cdp.send('DOM.getDocument', { depth: -1, pierce: true });
+  const hosts = [];
+  const visit = node => {
+    for (const shadow of node.shadowRoots ?? []) {
+      if (shadow.shadowRootType === 'closed' && holdsField(shadow)) {
+        hosts.push(node.backendNodeId);
+      }
+      visit(shadow);
+    }
+    // A frame's own document is covered whole already; its tree is not walked here.
+    for (const child of node.children ?? []) {
+      visit(child);
+    }
+  };
+  visit(root);
+  const boxes = [];
+  for (const backendNodeId of hosts) {
+    const model = await cdp.send('DOM.getBoxModel', { backendNodeId }).catch(() => undefined);
+    if (model === undefined) {
+      continue;
+    }
+    const xs = [0, 2, 4, 6].map(at => model.model.border[at]);
+    const ys = [1, 3, 5, 7].map(at => model.model.border[at]);
+    const left = Math.min(...xs);
+    const top = Math.min(...ys);
+    boxes.push({ left, top, width: Math.max(...xs) - left, height: Math.max(...ys) - top });
+  }
+  return boxes;
 }
 
 /** The same bundled module, ending in a read of one element's field, submit and form context. */
@@ -488,28 +556,32 @@ export class BrowserSidecar {
   }
 
   /**
-   * The page as the model's copy of a screenshot needs it, read without changing the page: its text
-   * snapshot, each control's ref and box, and the box of every password, card or one-time-code field.
+   * The page as the model's copy of a screenshot needs it: its text snapshot, each control's ref and
+   * box, and every box to cover (hidden fields, frames, and closed shadow roots that hold a field).
+   * The layout is read in an isolated world, and nothing on the page is changed.
    */
   async #pictureLayout(tab) {
     const nodes = await tab.page.evaluate(EXTRACT_SCRIPT);
     const refs = tab.refs.refsFor(nodes);
-    const sensitive = nodes.filter(node => sensitivityOf(node) !== null).map(node => node.id);
-    const layout = await tab.page.evaluate(boxesInViewScript([...new Set([...refs.keys(), ...sensitive])]));
     const text = renderSnapshot({ title: await tab.page.title(), url: tab.page.url(), nodes, refs });
-    const boxOf = new Map(layout.boxes.map(({ path, ...box }) => [path, box]));
-    return {
-      text,
-      width: layout.width,
-      controls: [...refs].flatMap(([path, ref]) => {
-        const box = boxOf.get(path);
-        return box === undefined ? [] : [{ ref, box }];
-      }),
-      masks: sensitive.flatMap(path => {
-        const box = boxOf.get(path);
-        return box === undefined ? [] : [box];
-      }),
-    };
+    const cdp = await tab.page.context().newCDPSession(tab.page);
+    try {
+      const layout = await inIsolatedWorld(cdp, boxesInViewScript([...refs.keys()]));
+      const covered = await inIsolatedWorld(cdp, MASK_BOXES_SCRIPT);
+      const closed = await closedShadowFieldBoxes(cdp);
+      const boxOf = new Map(layout.boxes.map(({ path, ...box }) => [path, box]));
+      return {
+        text,
+        width: covered.width,
+        controls: [...refs].flatMap(([path, ref]) => {
+          const box = boxOf.get(path);
+          return box === undefined ? [] : [{ ref, box }];
+        }),
+        masks: [...covered.boxes, ...closed],
+      };
+    } finally {
+      await cdp.detach().catch(() => undefined);
+    }
   }
 
   /**
@@ -524,7 +596,7 @@ export class BrowserSidecar {
       if (JSON.stringify(after.masks) !== JSON.stringify(seen.masks) || after.width !== seen.width) {
         return undefined;
       }
-      const png = markPicture({ png: buffer, scale: pngWidth(buffer) / seen.width, ...seen });
+      const png = await markInWorker({ png: buffer, scale: pngWidth(buffer) / seen.width, ...seen });
       return { png, text: seen.text };
     } catch {
       return undefined;
@@ -859,6 +931,25 @@ export function createHttpServer({ sidecar, allowedPeers }) {
       }
       await handleRequest({ req, res, sidecar });
     })();
+  });
+}
+
+/** Draws the model's copy in a worker of its own (see pictureWorker.mjs) and answers it as a PNG. */
+function markInWorker({ png, scale, controls, masks }) {
+  return new Promise((resolve, reject) => {
+    const worker = new Worker(new URL('./pictureWorker.mjs', import.meta.url), {
+      workerData: { png, scale, controls, masks },
+    });
+    worker.once('message', marked => {
+      resolve(Buffer.from(marked));
+      void worker.terminate();
+    });
+    worker.once('error', reject);
+    worker.once('exit', code => {
+      if (code !== 0) {
+        reject(new Error('the picture worker stopped'));
+      }
+    });
   });
 }
 

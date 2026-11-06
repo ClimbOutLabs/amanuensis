@@ -10,10 +10,19 @@ function fieldKind(element) {
   if (type === 'password') {
     return 'password';
   }
-  if (autocomplete.startsWith('cc-') || /\b(card.?number|cvv|cvc|security.?code)\b/.test(name)) {
+  if (autocomplete.startsWith('cc-') || /\b(card.?number|card.?no|cc.?num(ber)?|cvv|cvc|security.?code)\b/.test(name)) {
     return 'card';
   }
-  if (autocomplete === 'one-time-code' || /\b(otp|one.?time.?code|verification.?code)\b/.test(name)) {
+  if (
+    autocomplete === 'one-time-code' ||
+    /\b(otp|totp|pin|passcode|one.?time.?code|verification.?code|mfa.?code|2fa.?code)\b/.test(name)
+  ) {
+    return 'otp';
+  }
+  // A code typed one digit per box: only the first box often says what it is.
+  const maxLength = element.getAttribute('maxlength');
+  const inputMode = (element.getAttribute('inputmode') ?? '').toLowerCase();
+  if (maxLength === '1' && (inputMode === 'numeric' || type === 'tel' || type === 'number')) {
     return 'otp';
   }
   return null;
@@ -276,5 +285,44 @@ export function boxesInView(paths) {
     }
     boxes.push({ path, left: rect.left, top: rect.top, width: rect.width, height: rect.height });
   }
+  return { width, height, boxes };
+}
+
+/** Elements that show another document, whose fields this page cannot read. */
+const EMBED_TAGS = new Set(['IFRAME', 'FRAME', 'EMBED', 'OBJECT']);
+const FIELD_TAGS = new Set(['INPUT', 'TEXTAREA', 'SELECT']);
+
+/**
+ * What the model's copy of a screenshot must cover, read without changing the page: every password,
+ * card or one-time-code field in view, including those inside open shadow roots, and every frame or
+ * embed in view whole, since a frame's own fields (a hosted card form) cannot be read from here.
+ */
+export function maskBoxes() {
+  const width = window.innerWidth;
+  const height = window.innerHeight;
+  const boxes = [];
+  const visit = root => {
+    for (const element of root.querySelectorAll('*')) {
+      const covered =
+        EMBED_TAGS.has(element.tagName) || (FIELD_TAGS.has(element.tagName) && fieldKind(element) !== null);
+      if (covered) {
+        const rect = element.getBoundingClientRect();
+        const inView =
+          rect.width > 0 &&
+          rect.height > 0 &&
+          rect.bottom >= 0 &&
+          rect.top <= height &&
+          rect.right >= 0 &&
+          rect.left <= width;
+        if (inView) {
+          boxes.push({ left: rect.left, top: rect.top, width: rect.width, height: rect.height });
+        }
+      }
+      if (element.shadowRoot !== null) {
+        visit(element.shadowRoot);
+      }
+    }
+  };
+  visit(document);
   return { width, height, boxes };
 }

@@ -63,6 +63,10 @@ const CHECKOUT_FIXTURE_HTML = `<!doctype html>
   </body>
 </html>`;
 
+/** A card number field painted a green no other part of a fixture page uses. */
+const CARD_FIELD =
+  '<input autocomplete="cc-number" value="4242 4242 4242 4242" style="display:block;width:300px;height:60px;background:#00ff00;color:#00ff00;border:0" />';
+
 /** A fixture web server that records every request it gets. */
 async function fixture(routes) {
   const hits = [];
@@ -110,6 +114,21 @@ async function withWorld(run) {
       <input id="cc" autocomplete="cc-number" value="4242 4242 4242 4242"
         style="display:block;width:300px;height:60px;background:#00ff00;color:#00ff00;border:0" />
       <button type="button">Pay now</button>`),
+    // The same green card field where a page's own DOM cannot easily see it: in a frame, in open and
+    // closed shadow roots, and on a page that lies about where its elements are.
+    '/card-frame': html(`<h1>Pay</h1>
+      <iframe style="width:320px;height:80px;border:0" srcdoc="${CARD_FIELD.replaceAll('"', '&quot;')}"></iframe>`),
+    '/card-shadow': html(`<h1>Pay</h1><div id="open"></div><div id="closed"></div>
+      <script>
+        document.getElementById('open').attachShadow({ mode: 'open' }).innerHTML = ${JSON.stringify(CARD_FIELD)};
+        document.getElementById('closed').attachShadow({ mode: 'closed' }).innerHTML = ${JSON.stringify(CARD_FIELD)};
+      </script>`),
+    '/card-lies': html(`<h1>Pay</h1>${CARD_FIELD}
+      <script>
+        Element.prototype.getBoundingClientRect = () => new DOMRect(0, 0, 0, 0);
+      </script>`),
+    '/code-boxes': html(`<h1>Enter the code</h1>
+      ${[1, 2, 3].map(() => '<input maxlength="1" inputmode="numeric" value="7" style="width:60px;height:60px;background:#00ff00;color:#00ff00;border:0" />').join('')}`),
     // A page that watches for anything added to it and says so in its title.
     '/watching': html(`<h1>Watching</h1><button type="button">Continue</button>
       <script>
@@ -643,6 +662,21 @@ test(
       assert.ok(pixelsOf(shot.png_base64, [0, 0xff, 0]) > 1000, "the person's picture shows the field");
       assert.equal(pixelsOf(shot.model_png_base64, [0, 0xff, 0]), 0, "none of the field shows in the model's copy");
       assert.doesNotMatch(shot.text, /4242/);
+    });
+  },
+);
+
+test(
+  "the model's copy covers card and code fields in frames, shadow roots and on a page that lies about its layout",
+  { skip: !browsersAvailable },
+  async () => {
+    await withWorld(async ({ sidecar }) => {
+      for (const page of ['/card-frame', '/card-shadow', '/card-lies', '/code-boxes']) {
+        await sidecar.open({ owner: 'owner-1', tab: 'chat-1', url: `http://site-a.test${page}` });
+        const shot = await sidecar.screenshot({ owner: 'owner-1', tab: 'chat-1' });
+        assert.ok(pixelsOf(shot.png_base64, [0, 0xff, 0]) > 1000, `${page}: the person's picture shows the field`);
+        assert.equal(pixelsOf(shot.model_png_base64, [0, 0xff, 0]), 0, `${page}: none of it shows in the model's copy`);
+      }
     });
   },
 );

@@ -115,8 +115,15 @@ export function encodePng({ width, height, pixels }) {
   header[9] = 6;
   const stride = width * 4;
   const raw = Buffer.alloc(height * (stride + 1));
+  // Each row stored as its difference from the row above (PNG filter "Up"): flat page areas then
+  // compress to almost nothing, as in the browser's own PNG.
   for (let y = 0; y < height; y += 1) {
-    pixels.copy(raw, y * (stride + 1) + 1, y * stride, (y + 1) * stride);
+    const out = y * (stride + 1);
+    raw[out] = y === 0 ? 0 : 2;
+    for (let x = 0; x < stride; x += 1) {
+      const up = y === 0 ? 0 : pixels[(y - 1) * stride + x];
+      raw[out + 1 + x] = (pixels[y * stride + x] - up) & 0xff;
+    }
   }
   return Buffer.concat([
     PNG_SIGNATURE,
