@@ -23,7 +23,7 @@ If you use a hosted model, the company running it sees each chat: your messages,
 
 ## Incognito chats
 
-An incognito chat is a chat Aman forgets. Choose **Incognito chat** on a new chat, before you send the first message. A chat cannot become incognito later, and an incognito chat cannot become a normal one.
+An incognito chat is a chat Aman forgets. Choose **Start incognito chat** on a new chat, before you send the first message. A chat cannot become incognito later, and an incognito chat cannot become a normal one.
 
 While an incognito chat is open:
 

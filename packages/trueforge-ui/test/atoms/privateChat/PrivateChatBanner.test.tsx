@@ -35,7 +35,7 @@ describe('PrivateChatToggle and PrivateChatBanner', () => {
         <PrivateChatToggle />
       </RuntimeHarness>,
     );
-    const toggle = screen.getByRole('button', { name: 'Incognito chat' });
+    const toggle = screen.getByRole('button', { name: 'Start incognito chat' });
     expect(toggle).toHaveAttribute('aria-pressed', 'false');
     expect(screen.queryByText(PRIVATE_CHAT_CHOICE_LINE)).not.toBeInTheDocument();
 
@@ -53,7 +53,7 @@ describe('PrivateChatToggle and PrivateChatBanner', () => {
         <PrivateChatBanner />
       </RuntimeHarness>,
     );
-    expect(screen.queryByRole('button', { name: 'Incognito chat' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Start incognito chat' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Close and delete' })).not.toBeInTheDocument();
   });
 
@@ -106,13 +106,13 @@ describe('PrivateChatToggle and PrivateChatBanner', () => {
     expect(readPrivateChatState().openSessionId).toBe('ses_private');
   });
 
-  it('says what the Incognito chat button does on hover', async () => {
+  it('says what the Start incognito chat button does on hover', async () => {
     render(
       <RuntimeHarness messages={[]}>
         <PrivateChatToggle />
       </RuntimeHarness>,
     );
-    fireEvent.mouseEnter(screen.getByRole('button', { name: 'Incognito chat' }));
+    fireEvent.mouseEnter(screen.getByRole('button', { name: 'Start incognito chat' }));
     expect(await screen.findByRole('tooltip')).toHaveTextContent(PRIVATE_CHAT_HOVER_LINE);
   });
 });

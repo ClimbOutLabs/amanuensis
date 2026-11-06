@@ -34,7 +34,7 @@ export function PrivateChatToggle({ disabled }: { disabled?: boolean | undefined
         onClick={() => setPendingPrivateChat(!pending)}
       >
         <Icon name="lock" className="size-3.5 shrink-0" />
-        Incognito chat
+        Start incognito chat
       </button>
     </Tooltip>
   );

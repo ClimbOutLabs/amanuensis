@@ -60,7 +60,7 @@ A model counts as local only when its address is this machine (loopback, `localh
 
 ## 6. UI
 
-- **New chat:** an "Incognito chat" choice on the new chat's composer, before the first message, with the line "Aman forgets this chat when it closes. It can still read what it already knows." Its hover text reads "Start a chat Aman forgets. Nothing from it is saved, and it is deleted when you close it."
+- **New chat:** a "Start incognito chat" choice on the new chat's composer, before the first message, with the line "Aman forgets this chat when it closes. It can still read what it already knows." Its hover text reads "Start a chat Aman forgets. Nothing from it is saved, and it is deleted when you close it."
 - **Open incognito chat:** an ink frame instead of the accent frame, the banner above the composer, the Close and delete control (it asks once first: "Everything in this chat is deleted for good: every message, picture and file. It cannot be brought back."), and no status line for the assistant. Existing theme tokens and `rem` only.
 - **Chat list:** a small "Incognito" label while the chat is open in that tab. It is never in search or recents.
 - **Personas:** an incognito chat with a persona reads that persona's vault, writes nothing, and shows the same banner.

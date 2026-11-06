@@ -6,7 +6,7 @@ import { providerLabel } from '../../utils/modelUsage.js';
 export const PRIVATE_CHAT_CHOICE_LINE =
   'Aman forgets this chat when it closes. It can still read what it already knows.';
 
-/** The Incognito chat button's hover text. */
+/** The Start incognito chat button's hover text. */
 export const PRIVATE_CHAT_HOVER_LINE =
   'Start a chat Aman forgets. Nothing from it is saved, and it is deleted when you close it.';
 

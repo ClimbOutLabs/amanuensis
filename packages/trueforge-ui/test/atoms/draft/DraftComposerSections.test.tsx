@@ -85,7 +85,7 @@ describe('draft composer sections', () => {
   it('offers Incognito chat on a new chat, and pressing it chooses Incognito for that chat', () => {
     render(<DraftSections />);
 
-    const choice = screen.getByRole('button', { name: 'Incognito chat' });
+    const choice = screen.getByRole('button', { name: 'Start incognito chat' });
     expect(choice).toHaveAttribute('aria-pressed', 'false');
     fireEvent.click(choice);
     expect(choice).toHaveAttribute('aria-pressed', 'true');
@@ -95,7 +95,7 @@ describe('draft composer sections', () => {
   it('does not offer Incognito chat once the chat has started', () => {
     render(<DraftSections remoteId="ses_started" />);
 
-    expect(screen.queryByRole('button', { name: 'Incognito chat' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Start incognito chat' })).not.toBeInTheDocument();
   });
 
   it('leaves Incognito chat out of the builder composer', () => {
@@ -107,7 +107,7 @@ describe('draft composer sections', () => {
       </ShellModeProvider>,
     );
 
-    expect(screen.queryByRole('button', { name: 'Incognito chat' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Start incognito chat' })).not.toBeInTheDocument();
   });
 
   it('puts attaching and add-ons in one plus menu, with no standalone attach or add-ons control', async () => {
