@@ -28,11 +28,9 @@ export async function probeTtsHealth(): Promise<boolean> {
   }
 }
 
-/** The service's own reason for a 400 that is not a fault: the sentence has nothing to read aloud. */
-async function saysNothingToSay(response: Response): Promise<boolean> {
-  const body: unknown = await response.json().catch(() => undefined);
-  const detail = typeof body === 'object' && body !== null && 'detail' in body ? body.detail : undefined;
-  return typeof detail === 'string' && detail.includes('nothing to say');
+/** The service marks a 400 that is no fault (nothing to read aloud) with a header, not wording. */
+function saysNothingToSay(response: Response): boolean {
+  return response.headers.get('x-aman-reason') === 'nothing_to_say';
 }
 
 /** Hands on only whole 16-bit samples, holding a trailing odd byte until the next piece arrives. */
@@ -58,31 +56,6 @@ export class WholeSamples {
 
 /** How long a conversation waits for a free place before giving up on one sentence. */
 const SHARE_WAIT_MS = 10_000;
-const SHARE_POLL_MS = 100;
-
-/** Waits for the person's share of the voice service, so a conversation and their read-aloud requests take turns. */
-async function takeShare({
-  limiter,
-  person,
-  signal,
-}: {
-  limiter: SpeechRateLimiter;
-  person: string;
-  signal: AbortSignal;
-}): Promise<() => void> {
-  const deadline = Date.now() + SHARE_WAIT_MS;
-  for (;;) {
-    const permit = limiter.acquireInFlight(person);
-    if (permit.allowed) {
-      return permit.release;
-    }
-    signal.throwIfAborted();
-    if (Date.now() >= deadline) {
-      throw new Error('the voice service is busy with other requests');
-    }
-    await new Promise(resolve => setTimeout(resolve, SHARE_POLL_MS));
-  }
-}
 
 export class SidecarSpeechSynthesizer implements SpeechSynthesizer {
   readonly #voice: string | undefined;
@@ -94,7 +67,14 @@ export class SidecarSpeechSynthesizer implements SpeechSynthesizer {
   }
 
   async *stream(args: { text: string; format: OutputFormat; signal: AbortSignal }): AsyncIterable<Uint8Array> {
-    const release = this.#share === undefined ? undefined : await takeShare({ ...this.#share, signal: args.signal });
+    const release =
+      this.#share === undefined
+        ? undefined
+        : await this.#share.limiter.acquireInFlightWaiting({
+            key: this.#share.person,
+            signal: args.signal,
+            timeoutMs: SHARE_WAIT_MS,
+          });
     try {
       yield* this.#stream(args);
     } finally {
@@ -123,7 +103,7 @@ export class SidecarSpeechSynthesizer implements SpeechSynthesizer {
       signal: AbortSignal.any([signal, AbortSignal.timeout(TTS_STREAM_TIMEOUT_MS)]),
     });
     // A sentence with nothing to say aloud (a lone symbol) is skipped; any other refusal is a real failure.
-    if (response.status === 400 && (await saysNothingToSay(response))) {
+    if (response.status === 400 && saysNothingToSay(response)) {
       return;
     }
     if (!response.ok || response.body === null) {

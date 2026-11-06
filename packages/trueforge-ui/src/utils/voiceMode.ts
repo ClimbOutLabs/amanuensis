@@ -30,24 +30,24 @@ export function useVoiceMode(): VoiceModeState {
   return useSyncExternalStore(subscribe, getVoiceMode, () => 'off');
 }
 
-/** What the page does with what the live line reports. Set by whichever voice button is on screen now. */
+/** What the page does with what the live line reports. Set once by the chat's bridge, which outlives the composer. */
 export type LiveLineHandlers = {
   onTurnSaved: () => void;
-  onNotice: (text: string) => void;
   /** The line closed or the mic was lost, after the line was already cleaned up. */
   onEnded: (reason: 'closed' | 'mic_lost') => void;
 };
 
 type LiveLine = { stop: () => void; sessionId: string };
+type LiveStart = { controller: AbortController; sessionId: string | null };
 
 let line: LiveLine | null = null;
 let handlers: LiveLineHandlers | null = null;
-let buttonsOnScreen = 0;
-let starting: AbortController | null = null;
+let starting: LiveStart | null = null;
 
 /**
- * The open voice line lives here, not in the button, because the composer is rebuilt in another
- * place when an approval card appears and the conversation has to carry on through it.
+ * The open voice line lives here, not in the button, because the composer is rebuilt in another place
+ * (an approval card) or goes away for a moment (the chat reloads after a spoken turn) and the
+ * conversation has to carry on through it. The chat's bridge ends it when the chat does.
  */
 export function getLiveLineSession(): string | null {
   return line?.sessionId ?? null;
@@ -62,24 +62,45 @@ export function setLiveLine(next: LiveLine): void {
 }
 
 /** A new start replaces one still opening; the replaced one sees its signal aborted and lets go of what it opened. */
-export function beginLiveStart(): AbortController {
-  starting?.abort();
-  starting = new AbortController();
-  return starting;
+export function beginLiveStart(sessionId: string | null): AbortController {
+  starting?.controller.abort();
+  const controller = new AbortController();
+  starting = { controller, sessionId };
+  return controller;
+}
+
+/** A new chat gets its id while its line is opening; the start now belongs to that chat. */
+export function nameLiveStartSession({
+  controller,
+  sessionId,
+}: {
+  controller: AbortController;
+  sessionId: string;
+}): void {
+  if (starting?.controller === controller) starting.sessionId = sessionId;
 }
 
 export function finishLiveStart(controller: AbortController): void {
-  if (starting === controller) starting = null;
+  if (starting?.controller === controller) starting = null;
 }
 
 /** Ends the line if there is one, or a start still opening, and returns voice mode to off. */
 export function endLiveLine(): void {
-  starting?.abort();
+  starting?.controller.abort();
   starting = null;
   const ending = line;
   line = null;
   ending?.stop();
   setVoiceMode('off');
+}
+
+/**
+ * The chat shows another chat: a line or a start for the old one ends. A start that has no chat yet
+ * (a new chat getting its id) stays.
+ */
+export function chatChanged(sessionId: string | null): void {
+  if (line !== null && line.sessionId !== sessionId) endLiveLine();
+  if (starting !== null && starting.sessionId !== null && starting.sessionId !== sessionId) endLiveLine();
 }
 
 /** The line closed by itself: forget it and tell the page why. */
@@ -89,23 +110,43 @@ export function liveLineEnded(reason: 'closed' | 'mic_lost'): void {
   handlers?.onEnded(reason);
 }
 
+/** A plain-words message from the voice line or the voice buttons, shown by the button when it is on screen. */
+let notice: string | null = null;
+const noticeListeners = new Set<() => void>();
+
+export function setLiveNotice(next: string | null): void {
+  if (notice === next) return;
+  notice = next;
+  for (const listener of noticeListeners) listener();
+}
+
+export function useLiveNotice(): string | null {
+  return useSyncExternalStore(
+    listener => {
+      noticeListeners.add(listener);
+      return () => {
+        noticeListeners.delete(listener);
+      };
+    },
+    () => notice,
+    () => null,
+  );
+}
+
 export const liveLineEvents = {
   onTurnSaved: () => handlers?.onTurnSaved(),
-  onNotice: (text: string) => handlers?.onNotice(text),
+  onNotice: setLiveNotice,
 };
 
 /**
- * A voice button is on screen and takes the line's reports. When the last one goes and none comes
- * back in the same moment (a rebuild), the line ends: nobody is left to show or stop it.
+ * The chat's bridge takes the line's reports for as long as the chat is on screen, and ends the line
+ * when the chat goes. It does not depend on any button being on screen.
  */
-export function mountVoiceButton(next: LiveLineHandlers): () => void {
-  buttonsOnScreen += 1;
+export function mountLiveLineBridge(next: LiveLineHandlers): () => void {
   handlers = next;
   return () => {
-    buttonsOnScreen -= 1;
     if (handlers === next) handlers = null;
-    setTimeout(() => {
-      if (buttonsOnScreen === 0) endLiveLine();
-    }, 0);
+    endLiveLine();
+    setLiveNotice(null);
   };
 }

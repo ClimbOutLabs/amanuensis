@@ -1,5 +1,6 @@
 import type { OutputFormat } from '../../../src/voice/audio';
-import { VoiceSession, type TurnLatency } from '../../../src/voice/session';
+import { IDLE_END_MS, VoiceSession, type TurnLatency } from '../../../src/voice/session';
+import type { SpeechProbability } from '../../../src/voice/vad/sileroVad';
 import {
   approval,
   calendarCard,
@@ -30,35 +31,49 @@ const says = (ms = 900, after = 900): Int16Array => Int16Array.from([...hum(ms),
 
 function setup({
   voiceApprovals = true,
-  stt = [],
+  stt: sttAnswers = [],
   message = [],
   approval: approvalReplies = [],
   outputFormat = 'pcm16',
+  speechFailsOn,
+  speechSilentOn,
+  gate,
+  vad = new LoudnessVad(),
+  onNote,
 }: {
   voiceApprovals?: boolean;
   stt?: string[];
   message?: ScriptedReply[];
   approval?: ScriptedReply[];
   outputFormat?: OutputFormat;
+  speechFailsOn?: (text: string) => boolean;
+  speechSilentOn?: (text: string) => boolean;
+  gate?: () => Promise<void>;
+  vad?: SpeechProbability;
+  onNote?: (note: string) => void;
 }) {
   const clock = new ManualClock();
   const transport = new FakeTransport({ clock, voiceApprovals, outputFormat });
-  const tts = new FakeTts();
-  const turns = new FakeTurns({ message, approval: approvalReplies });
+  const stt = new FakeStt(...sttAnswers);
+  const tts = new FakeTts({ failOn: speechFailsOn, silentOn: speechSilentOn });
+  const turns = new FakeTurns({ message, approval: approvalReplies }, { gate });
   const notes: string[] = [];
   const latencies: TurnLatency[] = [];
   const session = new VoiceSession({
     transport,
-    vad: new LoudnessVad(),
-    stt: new FakeStt(...stt),
+    vad,
+    stt,
     tts,
     turns,
     clock,
-    onNote: note => notes.push(note),
+    onNote: note => {
+      notes.push(note);
+      onNote?.(note);
+    },
     onLatency: latency => latencies.push(latency),
   });
   session.start();
-  return { session, transport, tts, turns, clock, notes, latencies };
+  return { session, transport, tts, stt, turns, clock, notes, latencies };
 }
 
 describe('a spoken turn', () => {
@@ -295,7 +310,7 @@ describe('approval by voice', () => {
     const t = await readBack({ message: withCard() });
     expect(t.tts.sentences).toEqual([
       'I have a draft.',
-      "I'll send this reply to Victor.",
+      "I'll send this reply to Victor at victor@example.com.",
       'The subject is: Re: Thursday',
       'It says: Thursday at three works for me.',
       'See you then.',
@@ -423,6 +438,55 @@ describe('approval by voice', () => {
     expect(t.turns.answers).toEqual([]);
   });
 
+  it('leaves a file-write card (tier 2) for the screen', async () => {
+    const t = await readBack({
+      message: [{ text: ['I will write the file.'], approvals: [approval(calendarCard, 2)] }],
+      stt: ['yes approve'],
+    });
+    expect(t.tts.sentences.at(-1)).toBe("I've left it in the app for you to approve.");
+    await feed({ session: t.session, clock: t.clock, samples: says() });
+    await t.session.settled();
+    expect(t.turns.answers).toEqual([]);
+  });
+
+  it.each([
+    ['fails to be spoken', { speechFailsOn: (text: string) => text.startsWith('It says') }],
+    ['makes no sound', { speechSilentOn: (text: string) => text.startsWith('It says') }],
+  ])('does not take a "yes" when a body sentence of the read-back %s', async (_name, broken) => {
+    const t = setup({ stt: ['send the reply', 'yes send it'], message: withCard(), ...broken });
+    await feed({ session: t.session, clock: t.clock, samples: says() });
+    await t.session.settled();
+    await feed({ session: t.session, clock: t.clock, samples: quiet(9000) });
+    await t.session.settled();
+    expect(t.tts.sentences.at(-1)).toBe("I've left it in the app for you to approve.");
+    await feed({ session: t.session, clock: t.clock, samples: says() });
+    await t.session.settled();
+    expect(t.turns.answers).toEqual([]);
+  });
+
+  it('says on the screen that it could not read the card when even the spoken line fails', async () => {
+    const t = setup({
+      stt: ['send the reply'],
+      message: withCard(),
+      speechFailsOn: () => true,
+    });
+    await feed({ session: t.session, clock: t.clock, samples: says() });
+    await t.session.settled();
+    expect(t.transport.events).toContainEqual({
+      type: 'notice',
+      text: 'I could not read all of that out loud, so it is waiting on the screen. Answer it there.',
+    });
+  });
+
+  it('does not take a "yes" for a card that was already answered on the screen, and treats it as a new turn', async () => {
+    const t = await readBack({ message: withCard(), stt: ['yes send it'], approval: [] });
+    t.turns.settledElsewhere.add('call-1');
+    await feed({ session: t.session, clock: t.clock, samples: says() });
+    await t.session.settled();
+    expect(t.turns.answers).toEqual([]);
+    expect(t.turns.sent).toEqual(['send the reply', 'yes send it']);
+  });
+
   it('takes the exact phrase once: saying it again does nothing', async () => {
     const t = await readBack({
       message: withCard(),
@@ -506,7 +570,7 @@ describe('answering a waiting card', () => {
     }
     await feed({ session: t.session, clock: t.clock, samples: Int16Array.from([...quiet(500), ...says(900, 900)]) });
     await t.session.settled();
-    expect(t.tts.sentences.at(-1)).toBe('Say that again.');
+    expect(t.tts.sentences.at(-1)).toBe('Wait a moment, then say that again.');
     expect(t.turns.answers).toEqual([]);
   });
 
@@ -647,13 +711,161 @@ describe('ending a conversation', () => {
     expect(t.transport.events).toContainEqual({ type: 'notice', text: expect.stringContaining('long conversation') });
   });
 
-  it('closes a line whose audio arrives faster than it can be listened to', async () => {
-    const t = setup({});
-    for (let n = 0; n < 200; n += 1) {
+  it('closes a line when listening cannot keep up with the microphone', async () => {
+    const stuck: SpeechProbability = {
+      probability: () => new Promise<number>(() => undefined),
+      reset: () => undefined,
+    };
+    const t = setup({ vad: stuck });
+    for (let n = 0; n < 200 && !t.transport.closed; n += 1) {
       t.session.pushAudio(pcmBytes(hum(32)));
+      t.clock.advance(32);
     }
-    await t.session.settled();
     expect(t.notes).toContain('backlog');
     expect(t.transport.closed).toBe(true);
+  });
+
+  it('listens to one whole 64 KB frame without giving up', async () => {
+    const t = setup({});
+    t.session.pushAudio(pcmBytes(quiet(2048)));
+    await t.session.settled();
+    expect(t.transport.closed).toBe(false);
+    expect(t.notes).not.toContain('backlog');
+  });
+
+  it('closes a line that sends audio faster than real time, even when each piece is listened to in time', async () => {
+    const t = setup({});
+    for (let n = 0; n < 400; n += 1) {
+      t.session.pushAudio(pcmBytes(quiet(32)));
+      await t.session.settled();
+    }
+    expect(t.notes).toContain('faster_than_real_time');
+    expect(t.transport.closed).toBe(true);
+    expect(t.transport.events).toContainEqual({ type: 'notice', text: expect.stringContaining('keep up') });
+  });
+
+  it('allows a short burst, as a slow network delivers', async () => {
+    const t = setup({});
+    for (let n = 0; n < 60; n += 1) {
+      t.session.pushAudio(pcmBytes(quiet(32)));
+      await t.session.settled();
+    }
+    expect(t.transport.closed).toBe(false);
+  });
+
+  it('listens to a few utterances at once at most and ignores the rest', async () => {
+    const t = setup({ stt: [] });
+    t.stt.hold = true;
+    for (let n = 0; n < 5; n += 1) {
+      await feed({ session: t.session, clock: t.clock, samples: says() });
+    }
+    expect(t.stt.calls).toBe(2);
+    expect(t.notes).toContain('stt_busy');
+    await t.session.end();
+  });
+});
+
+describe('a long turn, noises and order', () => {
+  function heldTurn() {
+    let release: () => void = () => undefined;
+    const held = new Promise<void>(resolve => {
+      release = resolve;
+    });
+    return { gate: () => held, release: () => release() };
+  }
+
+  it('does not end the conversation while a turn runs for longer than the quiet time', async () => {
+    const turn = heldTurn();
+    const t = setup({ stt: ['a big question'], message: [{ text: ['Here you go.'] }], gate: turn.gate });
+    await feed({ session: t.session, clock: t.clock, samples: says() });
+    t.clock.advance(IDLE_END_MS + 5000);
+    expect(t.transport.closed).toBe(false);
+    turn.release();
+    await t.session.settled();
+    expect(t.tts.sentences).toEqual(['Here you go.']);
+    expect(t.transport.closed).toBe(false);
+    // Quiet is counted again once the reply has been heard.
+    t.clock.advance(3000);
+    t.clock.advance(IDLE_END_MS + 5000);
+    expect(t.transport.closed).toBe(true);
+  });
+
+  it('keeps speaking the reply when a noise while it was being worked on turns out to be nothing', async () => {
+    const turn = heldTurn();
+    const t = setup({ stt: ['what time is it', ''], message: [{ text: ['It is nine.'] }], gate: turn.gate });
+    await feed({ session: t.session, clock: t.clock, samples: says() });
+    await feed({
+      session: t.session,
+      clock: t.clock,
+      samples: Int16Array.from([...hum(400, 0.3, 3.1), ...quiet(900)]),
+    });
+    turn.release();
+    await t.session.settled();
+    expect(t.tts.sentences).toEqual(['It is nine.']);
+    expect(t.turns.cancels).toBe(0);
+  });
+
+  it('takes words in the order they were spoken when a short one is understood before a long one', async () => {
+    let finishFirst: (text: string) => void = () => undefined;
+    let calls = 0;
+    const slowThenFast = {
+      transcribe: (): Promise<string> => {
+        calls += 1;
+        if (calls === 1) {
+          return new Promise<string>(resolve => {
+            finishFirst = resolve;
+          });
+        }
+        return Promise.resolve('second thing');
+      },
+    };
+    const t = setup({ message: [{ text: ['One.'] }, { text: ['Two.'] }] });
+    const session = new VoiceSession({
+      transport: t.transport,
+      vad: new LoudnessVad(),
+      stt: slowThenFast,
+      tts: t.tts,
+      turns: t.turns,
+      clock: t.clock,
+    });
+    session.start();
+    await feed({ session, clock: t.clock, samples: says() });
+    await feed({ session, clock: t.clock, samples: says() });
+    expect(t.turns.sent).toEqual([]);
+    finishFirst('first thing');
+    await session.settled();
+    expect(t.turns.sent).toEqual(['first thing', 'second thing']);
+  });
+
+  it('does not wake up again after the conversation ended while a window was being listened to', async () => {
+    let release: (probability: number) => void = () => undefined;
+    const pending = new Promise<number>(resolve => {
+      release = resolve;
+    });
+    const slowVad: SpeechProbability = { probability: () => pending, reset: () => undefined };
+    const t = setup({ vad: slowVad });
+    for (let n = 0; n < 12; n += 1) {
+      t.session.pushAudio(pcmBytes(hum(32)));
+    }
+    await t.session.end();
+    release(0.95);
+    await t.session.settled();
+    const before = t.transport.events.length;
+    t.clock.advance(IDLE_END_MS * 2);
+    expect(t.transport.events.length).toBe(before);
+  });
+
+  it('keeps going when handling one transcript throws', async () => {
+    const t = setup({
+      stt: ['hmm'],
+      onNote: note => {
+        if (note === 'filler_ignored') {
+          throw new Error('boom');
+        }
+      },
+    });
+    await feed({ session: t.session, clock: t.clock, samples: says() });
+    await expect(t.session.settled()).resolves.toBeUndefined();
+    expect(t.notes.some(note => note.startsWith('accept_failed'))).toBe(true);
   });
 });

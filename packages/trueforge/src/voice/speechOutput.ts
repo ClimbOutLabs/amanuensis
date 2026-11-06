@@ -24,6 +24,8 @@ export interface SpeechOutputDeps {
 export class SpeechOutput {
   readonly #deps: SpeechOutputDeps;
   #tail: Promise<void> = Promise.resolve();
+  /** False once a sentence was lost: it failed, was skipped as empty, or made no sound. */
+  #complete = true;
 
   constructor(deps: SpeechOutputDeps) {
     this.#deps = deps;
@@ -33,9 +35,13 @@ export class SpeechOutput {
     this.#tail = this.#tail.then(() => this.#speak({ text, role }));
   }
 
-  /** Resolves when every queued sentence has been made and handed over (not when it has been heard). */
-  drain(): Promise<void> {
-    return this.#tail;
+  /**
+   * Resolves when every queued sentence has been made and handed over (not when it has been heard). The
+   * value is true only if each of them produced sound, so a caller can tell a card was read in full.
+   */
+  async drain(): Promise<boolean> {
+    await this.#tail;
+    return this.#complete;
   }
 
   async #speak({ text, role }: { text: string; role: SentenceRole }): Promise<void> {
@@ -44,6 +50,7 @@ export class SpeechOutput {
     if (stopped()) {
       return;
     }
+    let madeSound = false;
     try {
       let counted = false;
       for await (const chunk of tts.stream({ text, format, signal })) {
@@ -55,14 +62,20 @@ export class SpeechOutput {
           spoken.add(text);
           counted = true;
         }
+        madeSound = true;
         timeline.schedule(chunk);
         transport.sendAudio(chunk);
         this.#deps.onAudio();
       }
     } catch (error) {
       if (!stopped()) {
+        this.#complete = false;
         this.#deps.onFailure(error);
       }
+      return;
+    }
+    if (!madeSound && !stopped()) {
+      this.#complete = false;
     }
   }
 }

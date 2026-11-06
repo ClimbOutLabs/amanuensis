@@ -107,11 +107,24 @@ export class FakeTransport implements VoiceTransport {
 export class FakeStt implements SpeechToText {
   readonly #answers: string[];
   calls = 0;
+  /** While true, a call waits (until its signal aborts) instead of answering. */
+  hold = false;
   constructor(...answers: string[]) {
     this.#answers = answers;
   }
-  transcribe(): Promise<string> {
+  transcribe({ signal }: { signal: AbortSignal }): Promise<string> {
     this.calls += 1;
+    if (this.hold) {
+      return new Promise((_resolve, reject) => {
+        signal.addEventListener(
+          'abort',
+          () => {
+            reject(new Error('stopped'));
+          },
+          { once: true },
+        );
+      });
+    }
     return Promise.resolve(this.#answers.shift() ?? '');
   }
 }
@@ -119,7 +132,13 @@ export class FakeStt implements SpeechToText {
 /** Each sentence is half a second of a pulsing tone, handed over in four pieces. */
 export class FakeTts implements SpeechSynthesizer {
   readonly sentences: string[] = [];
-  constructor(private readonly options: { delay?: () => Promise<void> } = {}) {}
+  constructor(
+    private readonly options: {
+      delay?: () => Promise<void>;
+      failOn?: ((text: string) => boolean) | undefined;
+      silentOn?: ((text: string) => boolean) | undefined;
+    } = {},
+  ) {}
 
   async *stream({
     text,
@@ -132,6 +151,12 @@ export class FakeTts implements SpeechSynthesizer {
   }): AsyncIterable<Uint8Array> {
     this.sentences.push(text);
     await this.options.delay?.();
+    if (this.options.failOn?.(text) === true) {
+      throw new Error('the voice stopped');
+    }
+    if (this.options.silentOn?.(text) === true) {
+      return;
+    }
     const rate = OUTPUT_SAMPLE_RATE[format];
     const total = Math.round(rate * 0.5);
     const piece = Math.round(total / 4);
@@ -189,10 +214,12 @@ export class FakeTurns implements VoiceTurnRunner {
   readonly spokenOver: boolean[] = [];
   readonly answers: { decision: 'allow' | 'deny'; toolCallId: string }[] = [];
   cancels = 0;
+  /** Cards answered somewhere else, such as on the screen. */
+  readonly settledElsewhere = new Set<string>();
   #count = 0;
   constructor(
     private readonly replies: { message?: ScriptedReply[]; approval?: ScriptedReply[] } = {},
-    private readonly options: { gate?: () => Promise<void> } = {},
+    private readonly options: { gate?: (() => Promise<void>) | undefined } = {},
   ) {}
 
   async sendMessage({
@@ -224,6 +251,10 @@ export class FakeTurns implements VoiceTurnRunner {
   }) {
     this.answers.push({ decision, toolCallId: approval.toolCallId });
     return this.#run({ reply: this.replies.approval?.shift(), signal, onText });
+  }
+
+  stillWaiting({ approval }: { approval: PendingApproval }): Promise<boolean> {
+    return Promise.resolve(!this.settledElsewhere.has(approval.toolCallId));
   }
 
   cancel(): Promise<void> {

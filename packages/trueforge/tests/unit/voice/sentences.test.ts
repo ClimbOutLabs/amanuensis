@@ -36,4 +36,14 @@ describe('SentenceSplitter', () => {
     expect(sentences.every(sentence => sentence.length <= 300)).toBe(true);
     expect(sentences.join(' ')).toBe(words);
   });
+
+  it('waits to see whether a number follows "No." when the number arrives in the next piece', () => {
+    const splitter = new SentenceSplitter();
+    expect(splitter.push('Yes and No. ')).toEqual([]);
+    expect(splitter.push('5 is the answer.')).toEqual([]);
+    expect(splitter.flush()).toEqual(['Yes and No. 5 is the answer.']);
+    const answer = new SentenceSplitter();
+    expect(answer.push('No. ')).toEqual([]);
+    expect(answer.flush()).toEqual(['No.']);
+  });
 });

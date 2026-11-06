@@ -25,6 +25,7 @@ from aman_tts import AssetVerificationError, Settings, create_app, verify_model_
 from audio_formats import MULAW8K, PCM16, Encoder, encode_wav, mulaw_encode  # noqa: E402
 from phonemes import (  # noqa: E402
     Lexicon,
+    _tokens,
     normalize,
     number_words,
     ordinal_words,
@@ -97,6 +98,28 @@ class BrokenSynthesizer:
 
 def client_for(factory, **settings) -> TestClient:
     return TestClient(create_app(Settings(**settings), synthesizer_factory=factory))
+
+
+class ReadBackFidelityTest(unittest.TestCase):
+    """Cases shared with the server's read-back check (approvalVoice.ts), which may only read aloud what normalize() keeps."""
+
+    CASES = json.loads((__import__("pathlib").Path(__file__).parent / "read_back_cases.json").read_text())
+
+    @staticmethod
+    def written(text: str) -> list[str]:
+        import re
+
+        return re.findall(r"[^\W_]+(?:'[^\W_]+)*", text.lower())
+
+    @staticmethod
+    def spoken(text: str) -> list[str]:
+        return [word.lower() for kind, word in _tokens(normalize(text)) if kind == "word"]
+
+    def test_the_voice_says_exactly_what_the_server_expects(self) -> None:
+        for case in self.CASES:
+            text = case["text"]
+            said_in_full = self.spoken(text) == self.written(text)
+            self.assertEqual(said_in_full, case["cleaning_keeps_words"], text)
 
 
 class HealthTest(unittest.TestCase):
@@ -324,6 +347,7 @@ class SpeakTest(unittest.TestCase):
         with client_for(SilentSynthesizer) as client:
             res = client.post("/v1/speak", json={"text": "```code only```"})
         self.assertEqual(res.status_code, 400)
+        self.assertEqual(res.headers["x-aman-reason"], "nothing_to_say")
 
 
 class FormatTest(unittest.TestCase):
@@ -491,6 +515,7 @@ class StreamingTest(unittest.TestCase):
         with client_for(SilentSynthesizer) as client:
             res = client.post("/v1/speak", json={"text": "```x```", "format": "pcm16", "stream": True})
         self.assertEqual(res.status_code, 400)
+        self.assertEqual(res.headers["x-aman-reason"], "nothing_to_say")
 
     def test_the_slot_comes_back_after_a_stream_so_the_next_request_is_served(self):
         with client_for(FakeSynthesizer, max_waiting=0) as client:

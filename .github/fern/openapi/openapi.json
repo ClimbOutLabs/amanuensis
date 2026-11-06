@@ -1353,8 +1353,13 @@
         "type": "object"
       },
       "CancelSessionRequest": {
-        "description": "Empty request body. Cancel identifies the session via the path only.",
-        "properties": {},
+        "description": "Optional request body. The session comes from the path.",
+        "properties": {
+          "turn_id": {
+            "description": "Cancel only this turn, and nothing else running in the session. Omit to cancel the last turn.",
+            "type": "string"
+          }
+        },
         "type": "object"
       },
       "CancelSessionResponse": {

@@ -5,6 +5,12 @@
  * 24 kHz samples that come back. The server decides when speech starts and ends, when to answer
  * and when to stop talking; this file only moves audio and reports what the server says.
  */
+import {
+  VoiceServerEventSchema,
+  type VoiceLineState,
+  type VoiceServerEvent,
+} from '@truefoundry/trueforge-core/schemas/voiceLine';
+
 import type { VoiceConnection } from '../../components/VoiceInputContext.js';
 import { audioContextCtor, floatToPcm16, resampleLinear, VOICE_SAMPLE_RATE } from './voiceRecorder.js';
 
@@ -13,10 +19,8 @@ export const LIVE_PLAYBACK_RATE = 24_000;
 /** Samples per captured frame: 64 ms, so the server hears the end of a sentence promptly. */
 const CAPTURE_FRAME_SAMPLES = 1024;
 
-export type LiveVoiceState = 'listening' | 'thinking' | 'speaking';
-
 export type LiveVoiceEvents = {
-  onState: (state: LiveVoiceState) => void;
+  onState: (state: VoiceLineState) => void;
   /** A turn was saved in the chat, so the chat should refresh. */
   onTurnSaved: () => void;
   /** A plain-words message for the person. */
@@ -38,40 +42,16 @@ export function pcm16ToFloat(bytes: ArrayBuffer): Float32Array {
   return out;
 }
 
-/** A text message from the server, as the server sends it (the server owns the shapes). */
-export type ServerEvent =
-  | { type: 'ready'; sample_rate: number }
-  | { type: 'clear' }
-  | { type: 'state'; state: LiveVoiceState }
-  | { type: 'turn_saved' }
-  | { type: 'notice'; text: string };
-
-function isLiveState(value: unknown): value is LiveVoiceState {
-  return value === 'listening' || value === 'thinking' || value === 'speaking';
-}
-
-/** Reads one JSON message from the server; anything it does not recognise is dropped. */
-export function readServerEvent(text: string): ServerEvent | null {
+/** Reads one JSON message from the server; anything the shared schema does not describe is dropped. */
+export function readServerEvent(text: string): VoiceServerEvent | null {
   let parsed: unknown;
   try {
     parsed = JSON.parse(text);
   } catch {
     return null;
   }
-  if (typeof parsed !== 'object' || parsed === null || !('type' in parsed)) return null;
-  if (parsed.type === 'clear' || parsed.type === 'turn_saved') {
-    return { type: parsed.type };
-  }
-  if (parsed.type === 'ready' && 'sample_rate' in parsed && typeof parsed.sample_rate === 'number') {
-    return parsed.sample_rate > 0 ? { type: 'ready', sample_rate: parsed.sample_rate } : null;
-  }
-  if (parsed.type === 'state' && 'state' in parsed && isLiveState(parsed.state)) {
-    return { type: 'state', state: parsed.state };
-  }
-  if (parsed.type === 'notice' && 'text' in parsed && typeof parsed.text === 'string') {
-    return { type: 'notice', text: parsed.text };
-  }
-  return null;
+  const event = VoiceServerEventSchema.safeParse(parsed);
+  return event.success ? event.data : null;
 }
 
 /** Plays queued chunks back to back, and drops them all at once on `clear`. */
@@ -213,6 +193,8 @@ export async function startLiveVoice({
         break;
       case 'ready':
         player.setRate(event.sample_rate);
+        break;
+      case 'heard':
         break;
     }
   };

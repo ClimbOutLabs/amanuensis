@@ -1,4 +1,5 @@
 import { act, fireEvent, render, renderHook, screen, waitFor } from '@testing-library/react';
+import type { ReactNode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const { mockSetText, mockStartVoiceRecording, mockStartLiveVoice, mockReload, mockSession, mockInitialize } =
@@ -42,6 +43,7 @@ import {
   type VoiceInputApi,
   type VoiceTranscription,
 } from '@/components/VoiceInputContext.js';
+import { LiveVoiceBridge } from '@/containers/LiveVoiceBridge.js';
 import { PUSH_TO_TALK_HOTKEY_STORAGE_KEY } from '@/utils/pushToTalkHotkey.js';
 import { getVoiceMode, setVoiceMode } from '@/utils/voiceMode.js';
 import { clearDraftFromVoice, takeDraftFromVoice } from '@/utils/voiceTurn.js';
@@ -560,7 +562,7 @@ describe('VoiceInputButton voice mode', () => {
     return { api: { ...api, connect: connectMock }, connectMock };
   }
 
-  function composer(api: VoiceInputApi, { isRunning = false }: { isRunning?: boolean } = {}) {
+  function composerOnly(api: VoiceInputApi, { isRunning = false }: { isRunning?: boolean } = {}) {
     return (
       <form>
         <VoiceInputProvider api={api}>
@@ -568,6 +570,20 @@ describe('VoiceInputButton voice mode', () => {
         </VoiceInputProvider>
       </form>
     );
+  }
+
+  /** The chat as it stands: the bridge holds the line, and the composer comes and goes under it. */
+  function chat(inner: ReactNode) {
+    return (
+      <>
+        <LiveVoiceBridge />
+        {inner}
+      </>
+    );
+  }
+
+  function composer(api: VoiceInputApi, options: { isRunning?: boolean } = {}) {
+    return chat(composerOnly(api, options));
   }
 
   async function startVoiceMode() {
@@ -717,7 +733,7 @@ describe('VoiceInputButton voice mode', () => {
     const view = render(composer(api));
     fireEvent.click(await screen.findByRole('button', { name: 'Start voice mode' }));
     await screen.findByText('Listening');
-    view.rerender(<div data-testid="approval-view">{composer(api)}</div>);
+    view.rerender(chat(<div data-testid="approval-view">{composerOnly(api)}</div>));
     await act(async () => {
       await new Promise(resolve => setTimeout(resolve, 20));
     });
@@ -731,14 +747,83 @@ describe('VoiceInputButton voice mode', () => {
     expect(line.stop).toHaveBeenCalledTimes(1);
   });
 
-  it('ends when the composer goes away and no other one takes its place', async () => {
+  it('keeps going while the composer is gone for longer than a moment, as it is while the chat reloads', async () => {
+    const { api } = makeVoiceApi();
+    const view = render(composer(api));
+    fireEvent.click(await screen.findByRole('button', { name: 'Start voice mode' }));
+    await screen.findByText('Listening');
+    view.rerender(chat(<div data-testid="loading" />));
+    for (let task = 0; task < 3; task += 1) {
+      await act(async () => {
+        await new Promise(resolve => setTimeout(resolve, 30));
+      });
+    }
+    expect(line.stop).not.toHaveBeenCalled();
+    // The reload that follows a spoken turn happens while there is no composer.
+    act(() => events?.onTurnSaved());
+    expect(mockReload).toHaveBeenCalledTimes(1);
+    view.rerender(composer(api));
+    expect(screen.getByRole('button', { name: 'End voice mode' })).toBeInTheDocument();
+    expect(getVoiceMode()).toBe('listening');
+  });
+
+  it('shows what the line says even when it said it while the composer was gone', async () => {
+    const { api } = makeVoiceApi();
+    const view = render(composer(api));
+    fireEvent.click(await screen.findByRole('button', { name: 'Start voice mode' }));
+    await screen.findByText('Listening');
+    view.rerender(chat(<div />));
+    act(() => events?.onNotice('I could not hear that.'));
+    view.rerender(composer(api));
+    expect(await screen.findByText('I could not hear that.')).toBeInTheDocument();
+  });
+
+  it('ends when the chat itself goes away', async () => {
     const { api } = makeVoiceApi();
     const view = render(composer(api));
     fireEvent.click(await screen.findByRole('button', { name: 'Start voice mode' }));
     await screen.findByText('Listening');
     view.unmount();
-    await waitFor(() => expect(line.stop).toHaveBeenCalledTimes(1));
+    expect(line.stop).toHaveBeenCalledTimes(1);
     expect(getVoiceMode()).toBe('off');
+  });
+
+  it('is set back to off, and says why, when the line fails to open after the composer was rebuilt', async () => {
+    let fail: (error: Error) => void = () => undefined;
+    const { api } = makeVoiceApi(
+      () =>
+        new Promise((_resolve, reject) => {
+          fail = reject;
+        }),
+    );
+    const view = render(composer(api));
+    fireEvent.click(await screen.findByRole('button', { name: 'Start voice mode' }));
+    view.rerender(chat(<div data-testid="approval-view">{composerOnly(api)}</div>));
+    await act(async () => {
+      fail(new Error('Voice mode is turned off on this computer.'));
+      await Promise.resolve();
+    });
+    expect(getVoiceMode()).toBe('off');
+    expect(await screen.findByRole('button', { name: 'Start voice mode' })).toBeInTheDocument();
+  });
+
+  it('does not open a line for the old chat when another chat is shown while it is connecting', async () => {
+    let open: () => void = () => undefined;
+    const { api } = makeVoiceApi(
+      () =>
+        new Promise(resolve => {
+          open = () => resolve(connection);
+        }),
+    );
+    const view = render(composer(api));
+    fireEvent.click(await screen.findByRole('button', { name: 'Start voice mode' }));
+    mockSession.remoteId = 'chat-2';
+    view.rerender(composer(api));
+    await act(async () => {
+      open();
+      await Promise.resolve();
+    });
+    await waitFor(() => expect(getVoiceMode()).toBe('off'));
   });
 
   it('a quick off and on again leaves one line, not two', async () => {

@@ -1,7 +1,6 @@
 'use client';
 
 import { useAui, useAuiState } from '@assistant-ui/react';
-import { useTrueFoundryReload } from '@truefoundry/assistant-ui-runtime';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { useSpokenReply } from '../components/SpokenReplyContext.js';
@@ -12,14 +11,14 @@ import {
   beginLiveStart,
   endLiveLine,
   finishLiveStart,
-  getLiveLineSession,
   getVoiceMode,
-  hasLiveLine,
   liveLineEnded,
   liveLineEvents,
-  mountVoiceButton,
+  nameLiveStartSession,
   setLiveLine,
+  setLiveNotice,
   setVoiceMode,
+  useLiveNotice,
   useVoiceMode,
 } from '../utils/voiceMode.js';
 import { markDraftFromVoice } from '../utils/voiceTurn.js';
@@ -33,9 +32,6 @@ const TRANSCRIBE_ERROR_MESSAGE = 'Transcription failed, try again or type instea
 const MIC_UNAVAILABLE_MESSAGE = 'Microphone unavailable. Check your microphone and try again.';
 const RECORD_LIMIT_MESSAGE = 'Recording stopped at the 3-minute limit. Tap the mic to record another segment.';
 const VOICE_MODE_FAILED_MESSAGE = 'Voice mode could not start. Check your microphone, then try again.';
-const VOICE_MODE_ENDED_MESSAGE = 'Voice mode ended because the connection closed. Tap it to start again.';
-const VOICE_MODE_MIC_LOST_MESSAGE =
-  'Voice mode ended because the microphone stopped. Check it, then tap to start again.';
 
 /** The hints are a sentence long, so they wrap instead of running off a narrow screen. */
 const VOICE_HINT_CLASS = 'w-max max-w-64 whitespace-normal text-center';
@@ -78,18 +74,16 @@ function VoiceInputButtonInner({
   isRunning: boolean;
 }) {
   const aui = useAui();
-  const reload = useTrueFoundryReload();
   const sessionId = useAuiState(s => s.threadListItem.remoteId);
   const voiceMode = useVoiceMode();
-  const reloadRef = useRef(reload);
-  reloadRef.current = reload;
   const composerText = useAuiState(s => s.composer.text);
   const [available, setAvailable] = useState<VoiceAvailability>(null);
   const spokenReply = useSpokenReply();
   const [phase, setPhase] = useState<VoicePhase>('idle');
   const [acquiring, setAcquiring] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
+  // Kept outside the button, so a message for the person survives the composer being rebuilt.
+  const notice = useLiveNotice();
   const [popoverOpen, setPopoverOpen] = useState(false);
   const recorderRef = useRef<VoiceRecorder | null>(null);
   // Each start takes the next number; a stop bumps it, so a start still waiting on the mic is dropped.
@@ -138,18 +132,14 @@ function VoiceInputButtonInner({
     endLiveLine();
   }, []);
 
-  // Fail-closed on tab backgrounding: the voice session ends and tracks stop.
+  // Fail-closed on tab backgrounding: a recording ends and tracks stop. The chat's bridge ends voice mode.
   useEffect(() => {
     const onVisibilityChange = () => {
-      if (document.visibilityState !== 'hidden') {
-        return;
-      }
-      cancelVoice();
-      endVoiceMode();
+      if (document.visibilityState === 'hidden') cancelVoice();
     };
     document.addEventListener('visibilitychange', onVisibilityChange);
     return () => document.removeEventListener('visibilitychange', onVisibilityChange);
-  }, [cancelVoice, endVoiceMode]);
+  }, [cancelVoice]);
 
   // Fail-closed on SPA route changes: the recording ends and tracks stop, even if the composer
   // stays mounted across navigation. Voice mode stays: a new chat changes its address when it gets
@@ -162,26 +152,6 @@ function VoiceInputButtonInner({
     window.addEventListener('trueforge:routechange', onRouteChange);
     return () => window.removeEventListener('trueforge:routechange', onRouteChange);
   }, [cancelVoice]);
-
-  // Voice mode belongs to the chat it started in: another chat ends it.
-  useEffect(() => {
-    if (hasLiveLine() && getLiveLineSession() !== (sessionId ?? null)) endVoiceMode();
-  }, [sessionId, endVoiceMode]);
-
-  // The line outlives this button when the composer is rebuilt; whichever button is on screen takes its reports.
-  useEffect(
-    () =>
-      mountVoiceButton({
-        onTurnSaved: () => reloadRef.current(),
-        onNotice: setNotice,
-        onEnded: reason => {
-          if (mountedRef.current) {
-            setNotice(reason === 'mic_lost' ? VOICE_MODE_MIC_LOST_MESSAGE : VOICE_MODE_ENDED_MESSAGE);
-          }
-        },
-      }),
-    [],
-  );
 
   const stopAndTranscribe = useCallback(
     async ({ autoStopped, send }: { autoStopped: boolean; send: boolean }): Promise<void> => {
@@ -211,7 +181,7 @@ function VoiceInputButtonInner({
           setSendPending(true);
         }
         if (autoStopped) {
-          setNotice(RECORD_LIMIT_MESSAGE);
+          setLiveNotice(RECORD_LIMIT_MESSAGE);
         }
       } catch {
         // Abort (cancel, unmount, route change, backgrounding) discards silently.
@@ -220,7 +190,7 @@ function VoiceInputButtonInner({
         }
         setError(TRANSCRIBE_ERROR_MESSAGE);
         if (autoStopped) {
-          setNotice(RECORD_LIMIT_MESSAGE);
+          setLiveNotice(RECORD_LIMIT_MESSAGE);
         }
       } finally {
         if (abortRef.current === controller) {
@@ -238,7 +208,7 @@ function VoiceInputButtonInner({
     // Speaking a reply and recording a new message at once would have the mic hear the reply.
     spokenReply.stop();
     setError(null);
-    setNotice(null);
+    setLiveNotice(null);
     setAcquiring(true);
     const token = ++startTokenRef.current;
     try {
@@ -286,16 +256,17 @@ function VoiceInputButtonInner({
       return;
     }
     if (acquiring || phase !== 'idle' || disabled) return;
-    setNotice(null);
+    setLiveNotice(null);
     setError(null);
     // Reading a reply aloud by hand and listening at once would have the mic hear the reply.
     spokenReply.stop();
     setVoiceMode('connecting');
-    const controller = beginLiveStart();
+    const controller = beginLiveStart(sessionId ?? null);
     void (async () => {
       try {
         // A new chat has no session yet; it is created the same way the first typed send creates one.
         const chatId = sessionId ?? (await aui.threadListItem().initialize()).remoteId;
+        nameLiveStartSession({ controller, sessionId: chatId });
         const connection = await api.connect({ sessionId: chatId, signal: controller.signal });
         const live = await startLiveVoice({
           connection,
@@ -309,17 +280,24 @@ function VoiceInputButtonInner({
           },
         });
         // Ended (a tap, another chat, leaving) while the line was opening.
-        if (controller.signal.aborted || !mountedRef.current || getVoiceMode() === 'off') {
+        if (controller.signal.aborted || getVoiceMode() === 'off') {
           live.stop();
           return;
         }
         setLiveLine({ stop: live.stop, sessionId: chatId });
         setVoiceMode('listening');
       } catch (failure) {
-        if (controller.signal.aborted || !mountedRef.current) return;
+        if (controller.signal.aborted) return;
+        // Whichever way the button is placed now, voice mode is off again and the person hears why.
         setVoiceMode('off');
         if (isPermissionDenial(failure)) setPhase('denied');
-        else setError(failure instanceof Error && failure.message !== '' ? failure.message : VOICE_MODE_FAILED_MESSAGE);
+        else {
+          const message =
+            failure instanceof Error && failure.message !== '' ? failure.message : VOICE_MODE_FAILED_MESSAGE;
+          // A button that was rebuilt meanwhile cannot show an error of its own, so the person hears it as a notice.
+          if (mountedRef.current) setError(message);
+          else setLiveNotice(message);
+        }
       } finally {
         finishLiveStart(controller);
       }
@@ -583,7 +561,7 @@ function VoiceInputButtonInner({
           <span>{notice}</span>
           <button
             type="button"
-            onClick={() => setNotice(null)}
+            onClick={() => setLiveNotice(null)}
             aria-label="Dismiss recording limit notice"
             title="Dismiss"
             className="hover:text-text-primary shrink-0"

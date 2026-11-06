@@ -31,12 +31,23 @@ type TurnInput =
       approval: { status: 'allow'; scope: 'once' } | { status: 'deny' };
     };
 
+/** The part of a finished turn that says which cards are still waiting; answered ones are left out by the route. */
+const WaitingTurnSchema = z.object({
+  data: z.object({
+    state: z.object({
+      required_actions: z
+        .array(z.object({ tool_calls: z.array(z.object({ id: z.string() })).default([]) }).loose())
+        .default([]),
+    }),
+  }),
+});
+
 export class HttpVoiceTurnRunner implements VoiceTurnRunner {
   readonly #request: SessionRequest;
   readonly #sessionId: string;
   readonly #timezone: string | undefined;
-  /** True from the moment the server accepted this runner's turn until it ended. */
-  #running = false;
+  /** The turn this runner started, from the moment the server accepted it until it ended. */
+  #runningTurnId: string | undefined;
 
   constructor({
     request,
@@ -88,15 +99,33 @@ export class HttpVoiceTurnRunner implements VoiceTurnRunner {
     });
   }
 
+  async stillWaiting({ turnId, approval }: { turnId: string; approval: PendingApproval }): Promise<boolean> {
+    try {
+      const response = await this.#request(
+        `/api/v1/sessions/${encodeURIComponent(this.#sessionId)}/turns/${encodeURIComponent(turnId)}`,
+        { method: 'GET' },
+      );
+      const parsed = WaitingTurnSchema.safeParse(await response.json());
+      if (!parsed.success) {
+        return true;
+      }
+      const { state } = parsed.data.data;
+      return state.required_actions.some(action => action.tool_calls.some(call => call.id === approval.toolCallId));
+    } catch {
+      return true;
+    }
+  }
+
   /** Cancels this runner's own turn. Nothing else running in the chat, such as a typed message, is touched. */
   async cancel(): Promise<void> {
-    if (!this.#running) {
+    const turnId = this.#runningTurnId;
+    if (turnId === undefined) {
       return;
     }
     await this.#request(`/api/v1/sessions/${encodeURIComponent(this.#sessionId)}/cancel`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: '{}',
+      body: JSON.stringify({ turn_id: turnId }),
     });
   }
 
@@ -144,14 +173,14 @@ export class HttpVoiceTurnRunner implements VoiceTurnRunner {
       return await readTurnStream({
         body: response.body,
         onText,
-        onCreated: () => {
-          this.#running = true;
+        onCreated: turnId => {
+          this.#runningTurnId = turnId;
         },
       });
     } catch {
       return { kind: 'failed' };
     } finally {
-      this.#running = false;
+      this.#runningTurnId = undefined;
     }
   }
 }
@@ -163,7 +192,7 @@ async function readTurnStream({
 }: {
   body: ReadableStream<Uint8Array>;
   onText: (delta: string) => void;
-  onCreated: () => void;
+  onCreated: (turnId: string | undefined) => void;
 }): Promise<TurnOutcome> {
   let turnId: string | undefined;
   const decoder = new TextDecoder();
@@ -182,7 +211,7 @@ async function readTurnStream({
     }
     if (type.data.type === EventType.TURN_CREATED) {
       turnId = TurnCreatedEventSchema.safeParse(event).data?.turn_id ?? turnId;
-      onCreated();
+      onCreated(turnId);
     } else if (type.data.type === EventType.MODEL_MESSAGE_DELTA) {
       const delta = ModelMessageDeltaEventSchema.safeParse(event).data?.content;
       if (typeof delta === 'string' && delta !== '') {

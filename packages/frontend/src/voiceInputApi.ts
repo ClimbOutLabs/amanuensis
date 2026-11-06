@@ -66,6 +66,10 @@ function installRouteChangeDispatch(): void {
   window.addEventListener('hashchange', dispatch);
 }
 
+function failedWithStatus(status: number): string {
+  return `The voice request failed with status ${String(status)}. Reload the page, then try again.`;
+}
+
 async function readError(response: Response): Promise<Error> {
   try {
     const body: unknown = await response.json();
@@ -79,9 +83,9 @@ async function readError(response: Response): Promise<Error> {
       return new Error(detail.message);
     }
   } catch (error) {
-    return new Error(`The voice request failed with status ${String(response.status)}.`, { cause: error });
+    return new Error(failedWithStatus(response.status), { cause: error });
   }
-  return new Error(`The voice request failed with status ${String(response.status)}.`);
+  return new Error(failedWithStatus(response.status));
 }
 
 /** Reads the voice line's address from the connect answer: `{ data: { ticket, protocol, path } }`. */

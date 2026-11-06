@@ -72,8 +72,8 @@ export class PlaybackTimeline {
     this.#lastSpokeAtMs = now;
   }
 
-  isPlaying(): boolean {
-    return this.#clock.now() < this.#endsAtMs;
+  isPlaying(atMs: number = this.#clock.now()): boolean {
+    return atMs < this.#endsAtMs;
   }
 
   /** When the last queued audio finishes; already past when nothing is playing. */
@@ -87,15 +87,15 @@ export class PlaybackTimeline {
   }
 
   /**
-   * True when the recent microphone loudness (one reading per frame, newest last) follows the
-   * loudness of what was sent, at some small delay.
+   * True when the recent microphone loudness (one reading per frame, newest last, the newest heard at
+   * `atMs`) follows the loudness of what was sent, at some small delay.
    */
-  followsPlayback(recentInputRms: readonly number[]): boolean {
+  followsPlayback({ recentInputRms, atMs }: { recentInputRms: readonly number[]; atMs: number }): boolean {
     if (recentInputRms.length < CORRELATION_WINDOW_FRAMES) {
       return false;
     }
     const input = recentInputRms.slice(-CORRELATION_WINDOW_FRAMES);
-    const nowFrame = Math.floor(this.#clock.now() / ENVELOPE_FRAME_MS);
+    const nowFrame = Math.floor(atMs / ENVELOPE_FRAME_MS);
     const maxLagFrames = Math.ceil(MAX_ECHO_DELAY_MS / ENVELOPE_FRAME_MS);
     for (let lag = 0; lag <= maxLagFrames; lag += 1) {
       const reference = input.map((_, index) => {

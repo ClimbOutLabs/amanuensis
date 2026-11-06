@@ -17,6 +17,7 @@ function parts(clock: Clock): { stt: SpeechToText; turns: VoiceTurnRunner; tts: 
       return { kind: 'done', turnId: 't1', approvals: [] };
     },
     answerApproval: () => Promise.resolve({ kind: 'failed' }),
+    stillWaiting: () => Promise.resolve(true),
     cancel: () => Promise.resolve(),
   };
   const tts: SpeechSynthesizer = {

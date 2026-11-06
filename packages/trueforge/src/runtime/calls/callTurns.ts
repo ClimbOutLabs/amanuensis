@@ -186,6 +186,11 @@ export class CallTurns implements VoiceTurnRunner {
     return Promise.resolve({ kind: 'refused', reason: 'not_allowed' });
   }
 
+  /** No card is ever waited on during a call, since none can be answered on one. */
+  stillWaiting(): Promise<boolean> {
+    return Promise.resolve(false);
+  }
+
   async cancel(): Promise<void> {
     await this.#chat?.turns.cancel();
   }

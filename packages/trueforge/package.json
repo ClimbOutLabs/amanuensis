@@ -65,6 +65,8 @@
     "smoke:local-sandbox": "pnpm run build:gen && cross-env NODE_OPTIONS=--conditions=trueforge-dev jest --config jest.local-sandbox.smoke.config.cjs --runInBand --forceExit tests/sandbox/local/smoke.test.ts",
     "smoke:local-sandbox:lima": "bash scripts/local-sandbox/smoke-lima.sh",
     "sandbox:slots": "tsx scripts/sandbox-slots/main.ts",
+    "voice:model:test": "cross-env NODE_OPTIONS=--conditions=trueforge-dev tsx --env-file=.env.test scripts/fetch-voice-model.ts",
+    "pretest": "pnpm run voice:model:test --optional",
     "voice:model": "cross-env NODE_OPTIONS=--conditions=trueforge-dev tsx --env-file-if-exists=.env scripts/fetch-voice-model.ts",
     "voice:latency": "cross-env NODE_OPTIONS=--conditions=trueforge-dev tsx scripts/voice-latency.ts",
     "smoke:tokenfactory": "cross-env NODE_OPTIONS=--conditions=trueforge-dev tsx --env-file=.env.test scripts/smoke-tokenfactory.ts",

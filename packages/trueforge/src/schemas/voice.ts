@@ -81,18 +81,3 @@ export const VoiceTicketSchema = z
 export type VoiceTicket = z.infer<typeof VoiceTicketSchema>;
 
 export const VoiceTicketResponseSchema = z.object({ data: VoiceTicketSchema }).openapi('VoiceTicketResponse');
-
-/** What the voice WebSocket sends to the browser as text frames. Audio goes as binary frames. */
-export const VoiceServerEventSchema = z.discriminatedUnion('type', [
-  z.object({ type: z.literal('ready'), sample_rate: z.number().int().positive() }),
-  z.object({ type: z.literal('clear') }),
-  z.object({ type: z.literal('state'), state: z.enum(['listening', 'thinking', 'speaking']) }),
-  z.object({ type: z.literal('heard'), text: z.string() }),
-  z.object({ type: z.literal('turn_saved'), turn_id: z.string() }),
-  z.object({ type: z.literal('notice'), text: z.string() }),
-]);
-export type VoiceServerEvent = z.infer<typeof VoiceServerEventSchema>;
-
-/** What the browser sends as text frames. Audio goes as binary frames. */
-export const VoiceClientMessageSchema = z.discriminatedUnion('type', [z.object({ type: z.literal('end') })]);
-export type VoiceClientMessage = z.infer<typeof VoiceClientMessageSchema>;

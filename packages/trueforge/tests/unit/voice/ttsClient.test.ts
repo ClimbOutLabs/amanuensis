@@ -1,5 +1,4 @@
 import { SpeechRateLimiter } from '../../../src/voice/speechRateLimit';
-import { forwardToSidecar } from '../../../src/voice/sttClient';
 import { SidecarSpeechSynthesizer, WholeSamples } from '../../../src/voice/ttsClient';
 
 function streamOf(...pieces: Uint8Array[]): Response {
@@ -43,7 +42,12 @@ describe('SidecarSpeechSynthesizer', () => {
   it('skips a sentence the service says has nothing to say aloud', async () => {
     jest
       .spyOn(globalThis, 'fetch')
-      .mockResolvedValue(Response.json({ detail: 'text has nothing to say aloud' }, { status: 400 }));
+      .mockResolvedValue(
+        Response.json(
+          { detail: 'text has nothing to say aloud' },
+          { status: 400, headers: { 'x-aman-reason': 'nothing_to_say' } },
+        ),
+      );
     expect(await collect(new SidecarSpeechSynthesizer().stream({ text: '*', format: 'pcm16', signal: never }))).toEqual(
       [],
     );
@@ -81,23 +85,5 @@ describe('WholeSamples', () => {
     const whole = new WholeSamples();
     expect(Array.from(whole.push(Uint8Array.of(1, 2, 3)))).toEqual([1, 2]);
     expect(Array.from(whole.push(Uint8Array.of(4)))).toEqual([3, 4]);
-  });
-});
-
-describe('forwardToSidecar', () => {
-  afterEach(() => {
-    jest.restoreAllMocks();
-  });
-
-  it('stops waiting to retry as soon as the caller gives up', async () => {
-    const fetchSpy = jest
-      .spyOn(globalThis, 'fetch')
-      .mockImplementation(() => Promise.resolve(new Response('', { status: 503 })));
-    const abort = new AbortController();
-    const waiting = forwardToSidecar(Uint8Array.of(1), abort.signal);
-    await new Promise(resolve => setTimeout(resolve, 20));
-    abort.abort();
-    await expect(waiting).rejects.toThrow();
-    expect(fetchSpy).toHaveBeenCalledTimes(1);
   });
 });

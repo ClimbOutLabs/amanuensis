@@ -2,8 +2,8 @@ import { createServer, type Server } from 'node:http';
 import WebSocket from 'ws';
 import { winstonSilent } from '../../fixtures/voice/silentLogger';
 
+import { VoiceServerEventSchema, type VoiceServerEvent } from '@truefoundry/trueforge-core/schemas/voiceLine';
 import { pageOrigins } from '../../../src/auth/requestGuard';
-import { VoiceServerEventSchema, type VoiceServerEvent } from '../../../src/schemas/voice';
 import { VOICE_SOCKET_PROTOCOL, VOICE_STREAM_PATH } from '../../../src/voice/browserTransport';
 import { attachVoiceSocket, originAllowed, turnRunnerFor } from '../../../src/voice/voiceSocket';
 import {
@@ -60,6 +60,8 @@ describe('VoiceTicketStore', () => {
   });
 });
 
+const PAGE = 'http://app.test';
+
 describe('the voice WebSocket', () => {
   let server: Server;
   let port: number;
@@ -76,6 +78,7 @@ describe('the voice WebSocket', () => {
     server = createServer();
     attachVoiceSocket({
       server,
+      pages: new Set([PAGE]),
       logger: winstonSilent(),
       selfFetch: request => {
         sentToApp.push(request.url);
@@ -122,7 +125,7 @@ describe('the voice WebSocket', () => {
   function open(ticket: string | undefined, extraHeaders: Record<string, string> = {}): WebSocket {
     const protocols = ticket === undefined ? [VOICE_SOCKET_PROTOCOL] : [VOICE_SOCKET_PROTOCOL, `ticket.${ticket}`];
     return new WebSocket(`ws://127.0.0.1:${String(port)}${VOICE_STREAM_PATH}`, protocols, {
-      headers: { origin: `http://127.0.0.1:${String(port)}`, ...extraHeaders },
+      headers: { origin: PAGE, ...extraHeaders },
     });
   }
 
@@ -162,13 +165,23 @@ describe('the voice WebSocket', () => {
     await new Promise(resolve => setTimeout(resolve, 800));
     const stillOpen = sockets.filter(socket => socket.readyState === WebSocket.OPEN);
     expect(stillOpen).toHaveLength(1);
+    // The two that were replaced while their model was loading let it go.
+    expect(disposed).toBe(2);
     stillOpen.forEach(socket => socket.close());
+  });
+
+  it('does not let one person in several tenants take all the places', async () => {
+    const sockets = [1, 2, 3].map(n => open(voiceTickets.issue({ ...TICKET, tenantId: `tenant-${String(n)}` }).id));
+    await Promise.all(sockets.map(socket => new Promise(resolve => socket.on('open', resolve))));
+    expect(await refused(open(voiceTickets.issue({ ...TICKET, tenantId: 'tenant-4' }).id))).toBe('503');
+    sockets.forEach(socket => socket.close());
   });
 
   it('turns away a new person when the server is full', async () => {
     const full = createServer();
     attachVoiceSocket({
       server: full,
+      pages: new Set([PAGE]),
       logger: winstonSilent(),
       selfFetch: () => new Response('{}'),
       maxSessions: 1,
@@ -186,7 +199,7 @@ describe('the voice WebSocket', () => {
         url,
         [VOICE_SOCKET_PROTOCOL, `ticket.${voiceTickets.issue({ ...TICKET, subjectId: subject }).id}`],
         {
-          headers: { origin: `http://127.0.0.1:${String(address.port)}` },
+          headers: { origin: PAGE },
         },
       );
     const first = connect('a');
@@ -212,6 +225,7 @@ describe('the voice WebSocket', () => {
     }
     const logServer = createServer();
     attachVoiceSocket({
+      pages: new Set([PAGE]),
       server: logServer,
       logger,
       selfFetch: () => new Response('{}'),
@@ -232,7 +246,7 @@ describe('the voice WebSocket', () => {
     const socket = new WebSocket(
       `ws://127.0.0.1:${String(address.port)}${VOICE_STREAM_PATH}`,
       [VOICE_SOCKET_PROTOCOL, `ticket.${id}`],
-      { headers: { origin: `http://127.0.0.1:${String(address.port)}` } },
+      { headers: { origin: PAGE } },
     );
     await new Promise(resolve => socket.on('open', resolve));
     const all = Int16Array.from([...hum(900), ...quiet(1200)]);
@@ -305,15 +319,16 @@ describe('the voice WebSocket', () => {
 
 describe('which page may open a voice line', () => {
   it.each([
-    ['its own page', 'http://app.test:3000', 'app.test:3000', [], true],
-    ['a page behind a dev proxy that rewrites the host', 'http://localhost:3000', 'localhost:8790', [], true],
-    ['a listed page', 'https://other.test', 'app.test:3000', ['https://other.test'], true],
-    ['another site', 'https://evil.test', 'app.test:3000', [], false],
-    ['no page at all', undefined, 'app.test:3000', [], false],
-    ['an unreadable page', 'not a url', 'app.test:3000', [], false],
-  ])('%s', (_name, origin, host, listed, expected) => {
+    ['the public page', 'http://localhost:3000', [], true],
+    ['a page behind a dev proxy', 'http://127.0.0.1:8790', [], true],
+    ['a listed page', 'https://other.test', ['https://other.test'], true],
+    ['another site', 'https://evil.test', [], false],
+    ['a name that points at this computer (DNS rebinding)', 'http://evil.test:8790', [], false],
+    ['no page at all', undefined, [], false],
+    ['an unreadable page', 'not a url', [], false],
+  ])('%s', (_name, origin, listed, expected) => {
     const pages = pageOrigins({ port: 8790, publicBaseUrl: 'http://localhost:3000', allowedOrigins: listed });
-    expect(originAllowed({ origin, host, pages })).toBe(expected);
+    expect(originAllowed({ origin, pages })).toBe(expected);
   });
 });
 
