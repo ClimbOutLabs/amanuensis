@@ -76,6 +76,17 @@ What it can do today:
   reads the ages of the backups from the folder they land in.
 - `aman backups`, on Windows, lists the backups kept on the PC,
   newest first. The Start menu's Backups entry opens the folder.
+- `aman restore`, on Windows, puts an instance back the way one of
+  those backups had it. It lists the backups newest first and asks
+  which number to use; a backup's name or `--latest` picks one without
+  the list, and an instance name picks the instance when there is more
+  than one. It asks once before anything changes, and says so when the
+  instance is running and will be stopped. Then it runs the shell's own
+  restore in the setup container with the Backups folder on the PC
+  mounted where the shell reads backups. The shell checks the backup,
+  saves a copy of how the instance is now, puts the backup back, and
+  puts the copy back if anything fails. Opening the backup happens in
+  there too, so no tool it needs has to be on Windows.
 
 Every sentence a person can read lives in `src/messages.ts`. A test checks
 each one for plain words and compares them all to the golden file in
