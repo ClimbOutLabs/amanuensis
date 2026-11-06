@@ -10,6 +10,7 @@ import {
   type ISkillStore,
   type ListSkillsInput,
   type SetSkillNetworkApprovalInput,
+  type SetSkillNetworkCodePinInput,
   type SetSkillNetworkHostDecisionInput,
   type SkillRecord,
   type UpsertSkillInput,
@@ -110,11 +111,36 @@ export class PostgresSkillStore implements ISkillStore<Transaction<Database>> {
     transaction?: Transaction<Database>,
   ): Promise<SkillRecord | undefined> {
     const db = transaction ?? this.#db;
+    if (input.hosts !== null) {
+      const row = await db
+        .updateTable('skill')
+        .set({
+          network_approval: json([...input.hosts]),
+          network_approval_code_sha: input.code_sha,
+          updated_at: now(),
+        })
+        .where('tenant_id', '=', input.tenant_id)
+        .where('name', '=', input.name)
+        .returningAll()
+        .executeTakeFirst();
+      return row === undefined ? undefined : toRecord(row);
+    }
+    // Removing the approval does not unbind the grants that remain: the pin stays while
+    // per-site allowances stand, and clears when none do.
+    const current = await db
+      .selectFrom('skill')
+      .selectAll()
+      .where('tenant_id', '=', input.tenant_id)
+      .where('name', '=', input.name)
+      .executeTakeFirst();
+    if (current === undefined) {
+      return undefined;
+    }
     const row = await db
       .updateTable('skill')
       .set({
-        network_approval: input.hosts === null ? null : json([...input.hosts]),
-        network_approval_code_sha: input.hosts === null ? null : input.code_sha,
+        network_approval: null,
+        network_approval_code_sha: current.network_allowed_hosts.length > 0 ? current.network_approval_code_sha : null,
         updated_at: now(),
       })
       .where('tenant_id', '=', input.tenant_id)
@@ -150,11 +176,32 @@ export class PostgresSkillStore implements ISkillStore<Transaction<Database>> {
       allowed.delete(input.host);
       denied.delete(input.host);
     }
+    // With no approval and no allowance left, nothing remains for the pin to bind.
+    const clearPin = current.network_approval === null && allowed.size === 0;
     const row = await db
       .updateTable('skill')
       .set({
         network_allowed_hosts: json([...allowed].sort()),
         network_denied_hosts: json([...denied].sort()),
+        network_approval_code_sha: clearPin ? null : current.network_approval_code_sha,
+        updated_at: now(),
+      })
+      .where('tenant_id', '=', input.tenant_id)
+      .where('name', '=', input.name)
+      .returningAll()
+      .executeTakeFirst();
+    return row === undefined ? undefined : toRecord(row);
+  }
+
+  async setSkillNetworkCodePin(
+    input: SetSkillNetworkCodePinInput,
+    transaction?: Transaction<Database>,
+  ): Promise<SkillRecord | undefined> {
+    const db = transaction ?? this.#db;
+    const row = await db
+      .updateTable('skill')
+      .set({
+        network_approval_code_sha: input.code_sha,
         updated_at: now(),
       })
       .where('tenant_id', '=', input.tenant_id)

@@ -44,10 +44,15 @@ interface SessionSkillHosts {
   expires_at_ms: number;
 }
 
+/** One chat, one skill, one code version: allow-once sites are kept apart per version. */
+function sessionHostsKey(input: { session_id: string; skill_name: string; code_sha: string | null }): string {
+  return `${input.session_id}\n${input.skill_name}\n${input.code_sha ?? ''}`;
+}
+
 export class SkillNetworkTokenRegistry {
   readonly #byToken = new Map<string, SkillNetworkGrant>();
   readonly #byKey = new Map<string, string>();
-  /** Allow-once sites per chat and skill, keyed by session, skill. */
+  /** Allow-once sites per chat, skill and code version, keyed by all three. */
   readonly #sessionHosts = new Map<string, SessionSkillHosts>();
   /** Sites the gateway refused for a chat, waiting to be read by the runtime, keyed by session. */
   readonly #refusals = new Map<string, { hosts: Set<string>; expires_at_ms: number }>();
@@ -55,10 +60,11 @@ export class SkillNetworkTokenRegistry {
   readonly #cardsRaised = new Set<string>();
   /**
    * Skills whose code moved off the pin in one chat, keyed by session, skill, holding the
-   * commit the code moved to. The runtime reads it to raise the code-changed card; it waits
-   * until the card is handed out or an answer lands.
+   * version the code moved to and the per-site allowances the move cleared. The runtime
+   * reads it to raise the code-changed card naming those sites; it waits until the card is
+   * handed out or an answer lands.
    */
-  readonly #codeChanged = new Map<string, string>();
+  readonly #codeChanged = new Map<string, { code_sha: string; hosts: readonly string[] }>();
 
   /**
    * The token for a chat's approved sites, minting one when needed. A chat holds one grant at a
@@ -130,8 +136,11 @@ export class SkillNetworkTokenRegistry {
   }
 
   /**
-   * Adds sites the person allowed once for one skill in this chat. They join the chat's grant
-   * until the chat's grants are revoked or they age out with the same lifetime as a grant.
+   * Adds sites the person allowed once for one skill in this chat, under the code version
+   * named with them. Sites allowed under different versions are kept apart: a later answer
+   * never re-stamps sites an earlier answer allowed, so each group counts only while the
+   * skill is at its own version. They join the chat's grant until the chat's grants are
+   * revoked or they age out with the same lifetime as a grant.
    */
   addSessionHosts(input: {
     tenant_id: string;
@@ -139,19 +148,18 @@ export class SkillNetworkTokenRegistry {
     session_id: string;
     skill_name: string;
     hosts: readonly string[];
-    /** The code version the skill is at as these sites are allowed; the newest answer wins. */
+    /** The code version the skill is at as these sites are allowed. */
     code_sha: string | null;
   }): void {
     if (input.hosts.length === 0) {
       return;
     }
-    const key = `${input.session_id}\n${input.skill_name}`;
+    const key = sessionHostsKey(input);
     const existing = this.#sessionHosts.get(key);
     if (existing !== undefined && existing.expires_at_ms > Date.now()) {
       for (const host of input.hosts) {
         existing.hosts.add(host);
       }
-      existing.code_sha = input.code_sha;
       existing.expires_at_ms = Date.now() + GRANT_TTL_MS;
       return;
     }
@@ -166,21 +174,28 @@ export class SkillNetworkTokenRegistry {
     });
   }
 
-  /** The allow-once sites for one skill in one chat, or an empty list when there are none. */
+  /** The allow-once sites for one skill in one chat, across every code version. */
   sessionHosts(input: { session_id: string; skill_name: string }): readonly string[] {
-    return this.sessionHostsWithPin(input)?.hosts ?? [];
+    const hosts = new Set<string>();
+    for (const entry of this.sessionHostEntries(input)) {
+      for (const host of entry.hosts) {
+        hosts.add(host);
+      }
+    }
+    return [...hosts].sort();
   }
 
   /**
-   * The allow-once sites for one skill in one chat with the code version they were allowed
-   * under, or undefined when there are none live. The grant compares the version against the
-   * skill's code now, so sites allowed for code that has since changed are left out.
+   * The allow-once sites for one skill in one chat that were allowed under one code
+   * version, or undefined when there are none live under it. The grant asks per version,
+   * so sites allowed for code that has since changed are left out.
    */
   sessionHostsWithPin(input: {
     session_id: string;
     skill_name: string;
+    code_sha: string | null;
   }): { hosts: readonly string[]; code_sha: string | null } | undefined {
-    const key = `${input.session_id}\n${input.skill_name}`;
+    const key = sessionHostsKey(input);
     const entry = this.#sessionHosts.get(key);
     if (entry === undefined) {
       return undefined;
@@ -192,9 +207,32 @@ export class SkillNetworkTokenRegistry {
     return { hosts: [...entry.hosts].sort(), code_sha: entry.code_sha };
   }
 
-  /** Drops one skill's allow-once sites in one chat, when its code changed under them. */
+  /** Every live group of allow-once sites for one skill in one chat, one per code version. */
+  sessionHostEntries(input: {
+    session_id: string;
+    skill_name: string;
+  }): readonly { hosts: readonly string[]; code_sha: string | null }[] {
+    const entries: { hosts: readonly string[]; code_sha: string | null }[] = [];
+    for (const [key, entry] of this.#sessionHosts) {
+      if (entry.session_id !== input.session_id || entry.skill_name !== input.skill_name) {
+        continue;
+      }
+      if (entry.expires_at_ms <= Date.now()) {
+        this.#sessionHosts.delete(key);
+        continue;
+      }
+      entries.push({ hosts: [...entry.hosts].sort(), code_sha: entry.code_sha });
+    }
+    return entries;
+  }
+
+  /** Drops one skill's allow-once sites in one chat, under every code version. */
   clearSessionHosts(input: { session_id: string; skill_name: string }): void {
-    this.#sessionHosts.delete(`${input.session_id}\n${input.skill_name}`);
+    for (const [key, entry] of this.#sessionHosts) {
+      if (entry.session_id === input.session_id && entry.skill_name === input.skill_name) {
+        this.#sessionHosts.delete(key);
+      }
+    }
   }
 
   /** Every live allow-once site for one skill, across the person's open chats; Settings shows these. */
@@ -256,13 +294,22 @@ export class SkillNetworkTokenRegistry {
     this.#cardsRaised.delete(`${input.session_id}\n${input.skill_name}`);
   }
 
-  /** Notes that a skill's code moved off its pin in this chat, and the commit it moved to. */
-  noteCodeChanged(input: { session_id: string; skill_name: string; code_sha: string }): void {
-    this.#codeChanged.set(`${input.session_id}\n${input.skill_name}`, input.code_sha);
+  /**
+   * Notes that a skill's code moved off its pin in this chat: the version it moved to, and
+   * the per-site allowances the move cleared, so the card can name them.
+   */
+  noteCodeChanged(input: { session_id: string; skill_name: string; code_sha: string; hosts: readonly string[] }): void {
+    this.#codeChanged.set(`${input.session_id}\n${input.skill_name}`, {
+      code_sha: input.code_sha,
+      hosts: [...input.hosts],
+    });
   }
 
-  /** The commit a skill's code moved to in this chat, or undefined when it has not moved. */
-  codeChangedPin(input: { session_id: string; skill_name: string }): string | undefined {
+  /** The code-changed note for one skill in this chat, or undefined when its code has not moved. */
+  codeChangedNote(input: {
+    session_id: string;
+    skill_name: string;
+  }): { code_sha: string; hosts: readonly string[] } | undefined {
     return this.#codeChanged.get(`${input.session_id}\n${input.skill_name}`);
   }
 

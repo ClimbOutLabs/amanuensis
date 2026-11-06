@@ -1,9 +1,9 @@
 import { sql, type Kysely } from 'kysely';
 
 /**
- * The code version a skill's network approval is pinned to, beside the approved list.
- * Existing skills keep NULL: approvals saved before pinning stay in force and gain a pin
- * the next time they are checked. Mirrors
+ * The code version a skill's network grants are pinned to, beside the approved list.
+ * Existing skills keep NULL: approvals saved before pinning stay in force unpinned and
+ * gain a pin only when they are approved again; a check never writes one. Mirrors
  * db/postgres/migrations/20261106_000001_skill_network_approval_code_sha.ts.
  */
 export async function up(db: Kysely<unknown>): Promise<void> {

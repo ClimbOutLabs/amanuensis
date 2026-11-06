@@ -150,6 +150,7 @@ describe('skills routers', () => {
       resolveTurnSkills: jest.fn(),
       setSkillNetworkApproval: jest.fn(),
       setSkillNetworkHostDecision: jest.fn(),
+      setSkillNetworkCodePin: jest.fn(),
     };
     const router = createAvailableSkillsRouter({
       resolveSkillStore: () => skillStore,
@@ -201,6 +202,7 @@ describe('skills routers', () => {
       resolveTurnSkills: jest.fn(),
       setSkillNetworkApproval: jest.fn(),
       setSkillNetworkHostDecision: jest.fn(),
+      setSkillNetworkCodePin: jest.fn(),
     };
     const router = createSkillsRouter({
       resolveSkillStore: () => managedStore,
@@ -243,6 +245,7 @@ describe('skills routers', () => {
       resolveTurnSkills: jest.fn(),
       setSkillNetworkApproval: jest.fn(),
       setSkillNetworkHostDecision: jest.fn(),
+      setSkillNetworkCodePin: jest.fn(),
     };
     const router = createSkillsRouter({
       resolveSkillStore: () => managedStore,
@@ -573,6 +576,81 @@ describe('skills routers', () => {
         method: 'DELETE',
       });
       expect(clearDenied.status).toBe(404);
+    });
+
+    it('PUT allowed-host binds the allowance to the code pin, and removing the approval leaves both standing', async () => {
+      const db = createSqliteDb(':memory:');
+      await migrateSqliteToLatest(db);
+      const store = new SqliteSkillStore(db);
+      const router = createSkillsRouter({
+        resolveSkillStore: () => store,
+        withTransaction: callback => db.transaction().execute(callback),
+        resolveRequestContext: () => STANDALONE_REQUEST_CONTEXT,
+        resolveSkillCodeSha: async () => 'a'.repeat(40),
+      });
+      const pinBound = { ...tenX, name: 'pin-bound' };
+      const created = await router.request('/', putInit(wrapManifest(pinBound)));
+      expect(created.status).toBe(200);
+
+      const allowed = await router.request(
+        '/pin-bound/network-approval/allowed-host',
+        putInit({ host: 'uploads.example.com' }),
+      );
+      expect(allowed.status).toBe(200);
+      const [afterAllow] = await store.listSkills({ tenant_id: 'default', names: ['pin-bound'] });
+      expect(afterAllow?.network_approval).toBeNull();
+      expect(afterAllow?.network_allowed_hosts).toEqual(['uploads.example.com']);
+      expect(afterAllow?.network_approval_code_sha).toBe('a'.repeat(40));
+
+      const approved = await router.request(
+        '/pin-bound/network-approval',
+        putInit({ hosts: ['github.com', 'api.github.com'] }),
+      );
+      expect(approved.status).toBe(200);
+      const removed = await router.request('/pin-bound/network-approval', { method: 'DELETE' });
+      expect(removed.status).toBe(200);
+      const [afterRemove] = await store.listSkills({ tenant_id: 'default', names: ['pin-bound'] });
+      expect(afterRemove?.network_approval).toBeNull();
+      expect(afterRemove?.network_allowed_hosts).toEqual(['uploads.example.com']);
+      expect(afterRemove?.network_approval_code_sha).toBe('a'.repeat(40));
+
+      const cleared = await router.request('/pin-bound/network-approval/allowed-host?host=uploads.example.com', {
+        method: 'DELETE',
+      });
+      expect(cleared.status).toBe(200);
+      const [afterClear] = await store.listSkills({ tenant_id: 'default', names: ['pin-bound'] });
+      expect(afterClear?.network_allowed_hosts).toEqual([]);
+      expect(afterClear?.network_approval_code_sha).toBeNull();
+    });
+
+    it('PUT allowed-host refuses when the code version cannot be read, storing nothing', async () => {
+      const db = createSqliteDb(':memory:');
+      await migrateSqliteToLatest(db);
+      const store = new SqliteSkillStore(db);
+      const failingRouter = createSkillsRouter({
+        resolveSkillStore: () => store,
+        withTransaction: callback => db.transaction().execute(callback),
+        resolveRequestContext: () => STANDALONE_REQUEST_CONTEXT,
+        resolveSkillCodeSha: async () => {
+          throw new Error('repository unreachable');
+        },
+      });
+      const pinRefused = { ...tenX, name: 'pin-refused' };
+      const created = await failingRouter.request('/', putInit(wrapManifest(pinRefused)));
+      expect(created.status).toBe(200);
+      const response = await failingRouter.request(
+        '/pin-refused/network-approval/allowed-host',
+        putInit({ host: 'uploads.example.com' }),
+      );
+      expect(response.status).toBe(422);
+      expect(await response.json()).toEqual({
+        error: {
+          message: "Aman could not read this skill's code version. Check the skill's address and try again.",
+        },
+      });
+      const [record] = await store.listSkills({ tenant_id: 'default', names: ['pin-refused'] });
+      expect(record?.network_allowed_hosts).toEqual([]);
+      expect(record?.network_approval_code_sha).toBeNull();
     });
   });
 });

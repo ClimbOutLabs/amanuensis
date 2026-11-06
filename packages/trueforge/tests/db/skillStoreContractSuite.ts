@@ -260,6 +260,84 @@ export function runSkillStoreContractSuite(getStore: () => ISkillStore): void {
     ).resolves.toBeUndefined();
   });
 
+  it('removing the approval keeps the pin while an allowance stands, and the pin clears with the last grant', async () => {
+    const store = getStore();
+    await store.upsertSkill({
+      tenant_id: TENANT,
+      name: 'algorithmic-art',
+      manifest: manifest({ network_hosts: ['github.com', 'api.github.com'] }),
+    });
+    await store.setSkillNetworkApproval({
+      tenant_id: TENANT,
+      name: 'algorithmic-art',
+      hosts: ['github.com', 'api.github.com'],
+      code_sha: 'a'.repeat(40),
+    });
+    await store.setSkillNetworkHostDecision({
+      tenant_id: TENANT,
+      name: 'algorithmic-art',
+      host: 'uploads.github.com',
+      decision: 'allowed',
+    });
+
+    const removed = await store.setSkillNetworkApproval({
+      tenant_id: TENANT,
+      name: 'algorithmic-art',
+      hosts: null,
+      code_sha: null,
+    });
+    expect(removed?.network_approval).toBeNull();
+    expect(removed?.network_allowed_hosts).toEqual(['uploads.github.com']);
+    expect(removed?.network_approval_code_sha).toBe('a'.repeat(40));
+    const [listed] = await store.listSkills({ tenant_id: TENANT, names: ['algorithmic-art'] });
+    expect(listed?.network_approval_code_sha).toBe('a'.repeat(40));
+
+    const lastGone = await store.setSkillNetworkHostDecision({
+      tenant_id: TENANT,
+      name: 'algorithmic-art',
+      host: 'uploads.github.com',
+      decision: 'none',
+    });
+    expect(lastGone?.network_allowed_hosts).toEqual([]);
+    expect(lastGone?.network_approval_code_sha).toBeNull();
+  });
+
+  it('setSkillNetworkCodePin stores the pin beside the grants and overwrites it', async () => {
+    const store = getStore();
+    await store.upsertSkill({
+      tenant_id: TENANT,
+      name: 'algorithmic-art',
+      manifest: manifest({ network_hosts: ['github.com', 'api.github.com'] }),
+    });
+    await store.setSkillNetworkHostDecision({
+      tenant_id: TENANT,
+      name: 'algorithmic-art',
+      host: 'uploads.github.com',
+      decision: 'allowed',
+    });
+    const pinned = await store.setSkillNetworkCodePin({
+      tenant_id: TENANT,
+      name: 'algorithmic-art',
+      code_sha: 'a'.repeat(40),
+    });
+    expect(pinned?.network_approval).toBeNull();
+    expect(pinned?.network_allowed_hosts).toEqual(['uploads.github.com']);
+    expect(pinned?.network_approval_code_sha).toBe('a'.repeat(40));
+
+    const moved = await store.setSkillNetworkCodePin({
+      tenant_id: TENANT,
+      name: 'algorithmic-art',
+      code_sha: 'b'.repeat(40),
+    });
+    expect(moved?.network_approval_code_sha).toBe('b'.repeat(40));
+    const [listed] = await store.listSkills({ tenant_id: TENANT, names: ['algorithmic-art'] });
+    expect(listed?.network_approval_code_sha).toBe('b'.repeat(40));
+
+    await expect(
+      store.setSkillNetworkCodePin({ tenant_id: TENANT, name: 'nope', code_sha: 'a'.repeat(40) }),
+    ).resolves.toBeUndefined();
+  });
+
   it('a new skill has no per-site network decisions', async () => {
     const store = getStore();
     const created = await store.createSkill({

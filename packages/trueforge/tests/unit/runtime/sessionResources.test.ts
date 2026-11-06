@@ -678,6 +678,9 @@ describe('validateAgentSpec', () => {
       setSkillNetworkHostDecision: async () => {
         throw new Error('unused');
       },
+      setSkillNetworkCodePin: async () => {
+        throw new Error('unused');
+      },
       listSkillVersions: async () => [],
       async validateAgentSkills(input) {
         return validateGitAgentSkills(this, input);

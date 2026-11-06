@@ -7,7 +7,7 @@ import {
   resolveSkillNetworkGrant,
 } from '../../../../src/sandbox/skillnet/skillNetworkGrant';
 import { SkillNetworkTokenRegistry } from '../../../../src/sandbox/skillnet/skillNetworkTokens';
-import type { GitSkill } from '../../../../src/schemas/skill';
+import type { GitSkill, TrueFoundryRegistrySkill } from '../../../../src/schemas/skill';
 
 /** The worked example from the design: the ten-x skill's two GitHub hosts. */
 const TEN_X_HOSTS = ['github.com', 'api.github.com'];
@@ -24,7 +24,7 @@ function gitManifest(overrides: Partial<GitSkill> = {}): GitSkill {
 }
 
 function record(input: {
-  manifest: GitSkill;
+  manifest: GitSkill | TrueFoundryRegistrySkill;
   network_approval: readonly string[] | null;
   network_approval_code_sha?: string | null;
   network_allowed_hosts?: readonly string[];
@@ -55,6 +55,7 @@ function storeWith(records: SkillRecord[]): ISkillStore {
     deleteSkill: unused,
     setSkillNetworkApproval: unused,
     setSkillNetworkHostDecision: unused,
+    setSkillNetworkCodePin: unused,
     listSkillVersions: async () => [],
     validateAgentSkills: async () => undefined,
     resolveTurnSkills: async () => [],
@@ -76,10 +77,17 @@ function mutableStore(initial: SkillRecord[]): { store: ISkillStore; records: Ma
     setSkillNetworkApproval: async input => {
       const current = records.get(input.name);
       if (current === undefined) return undefined;
+      // The pin follows the grants, like the real stores: removing the approval keeps the
+      // pin while allowances remain and clears it when none do.
       const next = {
         ...current,
         network_approval: input.hosts === null ? null : [...input.hosts],
-        network_approval_code_sha: input.hosts === null ? null : input.code_sha,
+        network_approval_code_sha:
+          input.hosts !== null
+            ? input.code_sha
+            : current.network_allowed_hosts.length > 0
+              ? current.network_approval_code_sha
+              : null,
       };
       records.set(input.name, next);
       return next;
@@ -103,7 +111,16 @@ function mutableStore(initial: SkillRecord[]): { store: ISkillStore; records: Ma
         ...current,
         network_allowed_hosts: [...allowed].sort(),
         network_denied_hosts: [...denied].sort(),
+        network_approval_code_sha:
+          current.network_approval === null && allowed.size === 0 ? null : current.network_approval_code_sha,
       };
+      records.set(input.name, next);
+      return next;
+    },
+    setSkillNetworkCodePin: async input => {
+      const current = records.get(input.name);
+      if (current === undefined) return undefined;
+      const next = { ...current, network_approval_code_sha: input.code_sha };
       records.set(input.name, next);
       return next;
     },
@@ -568,7 +585,14 @@ describe('the code pin on the approval', () => {
     expect(records.get('ten-x')?.network_approval_code_sha).toBeNull();
     expect(records.get('ten-x')?.network_allowed_hosts).toEqual([]);
     const cards = await drainSkillNetworkCards({ store, registry, ...call, skillNames: ['ten-x'] });
-    expect(cards).toEqual([{ skill_name: 'ten-x', hosts: TEN_X_HOSTS, reason: 'code_changed', code_pin: PIN_B }]);
+    expect(cards).toEqual([
+      {
+        skill_name: 'ten-x',
+        hosts: [...TEN_X_HOSTS, 'uploads.example.com'],
+        reason: 'code_changed',
+        code_pin: PIN_B,
+      },
+    ]);
   });
 
   it('an unreadable code version grants nothing this time and keeps the approval and its card state', async () => {
@@ -662,5 +686,274 @@ describe('the code pin on the approval', () => {
     await expect(attempt).rejects.toThrow(SKILL_CODE_PIN_REFUSAL);
     expect(records.get('ten-x')?.network_approval).toBeNull();
     expect(records.get('ten-x')?.network_approval_code_sha).toBeNull();
+  });
+
+  it('the code-changed round trip: approve, the branch moves, the card answers, grants resume at the new commit', async () => {
+    const registry = new SkillNetworkTokenRegistry();
+    const { store, records } = mutableStore([
+      record({ manifest: gitManifest({ network_hosts: TEN_X_HOSTS }), network_approval: null }),
+    ]);
+    const approveCall = { ...CALL, session_id: 'pin-round-trip-approve' };
+    await recordSkillNetworkAnswer({
+      store,
+      registry,
+      ...approveCall,
+      skill_name: 'ten-x',
+      hosts: TEN_X_HOSTS,
+      reason: 'first_use',
+      answer: 'always_allow',
+      resolveCodeSha: async () => PIN_A,
+    });
+    expect(records.get('ten-x')?.network_approval).toEqual(TEN_X_HOSTS);
+    expect(records.get('ten-x')?.network_approval_code_sha).toBe(PIN_A);
+    const before = await resolveSkillNetworkGrant({
+      store,
+      registry,
+      ...approveCall,
+      skillNames: ['ten-x'],
+      resolveCodeSha: async () => PIN_A,
+    });
+    expect(before?.hosts).toEqual(['api.github.com', 'github.com']);
+
+    // The branch moves: the next chat's check cancels the approval and raises the card.
+    const movedCall = { ...CALL, session_id: 'pin-round-trip-moved' };
+    await expect(
+      resolveSkillNetworkGrant({
+        store,
+        registry,
+        ...movedCall,
+        skillNames: ['ten-x'],
+        resolveCodeSha: async () => PIN_B,
+      }),
+    ).resolves.toBeUndefined();
+    expect(records.get('ten-x')?.network_approval).toBeNull();
+    expect(records.get('ten-x')?.network_approval_code_sha).toBeNull();
+    const cards = await drainSkillNetworkCards({ store, registry, ...movedCall, skillNames: ['ten-x'] });
+    expect(cards).toEqual([{ skill_name: 'ten-x', hosts: TEN_X_HOSTS, reason: 'code_changed', code_pin: PIN_B }]);
+
+    // Answering the card stores the approval again, pinned to the new commit.
+    await recordSkillNetworkAnswer({
+      store,
+      registry,
+      ...movedCall,
+      skill_name: 'ten-x',
+      hosts: TEN_X_HOSTS,
+      reason: 'code_changed',
+      answer: 'always_allow',
+      resolveCodeSha: async () => PIN_B,
+    });
+    expect(records.get('ten-x')?.network_approval).toEqual(TEN_X_HOSTS);
+    expect(records.get('ten-x')?.network_approval_code_sha).toBe(PIN_B);
+    const resumed = await resolveSkillNetworkGrant({
+      store,
+      registry,
+      ...CALL,
+      session_id: 'pin-round-trip-resumed',
+      skillNames: ['ten-x'],
+      resolveCodeSha: async () => PIN_B,
+    });
+    expect(resumed?.hosts).toEqual(['api.github.com', 'github.com']);
+    await expect(drainSkillNetworkCards({ store, registry, ...movedCall, skillNames: ['ten-x'] })).resolves.toEqual([]);
+  });
+
+  it('allowances alone are bound to the pin, cleared when the code moves, and named on the code-changed card', async () => {
+    const registry = new SkillNetworkTokenRegistry();
+    const { store, records } = mutableStore([
+      record({ manifest: gitManifest({ network_hosts: TEN_X_HOSTS }), network_approval: null }),
+    ]);
+    const call = { ...CALL, session_id: 'pin-allowances' };
+    registry.recordRefusal({ session_id: call.session_id, host: 'uploads.example.com' });
+    const firstCards = await drainSkillNetworkCards({ store, registry, ...call, skillNames: ['ten-x'] });
+    expect(firstCards).toEqual([
+      { skill_name: 'ten-x', hosts: TEN_X_HOSTS, reason: 'first_use', code_pin: null },
+      { skill_name: 'ten-x', hosts: ['uploads.example.com'], reason: 'undeclared_host', code_pin: null },
+    ]);
+    await recordSkillNetworkAnswer({
+      store,
+      registry,
+      ...call,
+      skill_name: 'ten-x',
+      hosts: ['uploads.example.com'],
+      reason: 'undeclared_host',
+      answer: 'always_allow',
+      resolveCodeSha: async () => PIN_A,
+    });
+    expect(records.get('ten-x')?.network_approval).toBeNull();
+    expect(records.get('ten-x')?.network_allowed_hosts).toEqual(['uploads.example.com']);
+    expect(records.get('ten-x')?.network_approval_code_sha).toBe(PIN_A);
+    const granted = await resolveSkillNetworkGrant({
+      store,
+      registry,
+      ...call,
+      skillNames: ['ten-x'],
+      resolveCodeSha: async () => PIN_A,
+    });
+    expect(granted?.hosts).toEqual(['uploads.example.com']);
+
+    // The branch moves: the allowance is cleared, nothing is granted, and the card names it.
+    const movedCall = { ...CALL, session_id: 'pin-allowances-moved' };
+    await expect(
+      resolveSkillNetworkGrant({
+        store,
+        registry,
+        ...movedCall,
+        skillNames: ['ten-x'],
+        resolveCodeSha: async () => PIN_B,
+      }),
+    ).resolves.toBeUndefined();
+    expect(records.get('ten-x')?.network_allowed_hosts).toEqual([]);
+    expect(records.get('ten-x')?.network_approval_code_sha).toBeNull();
+    const cards = await drainSkillNetworkCards({ store, registry, ...movedCall, skillNames: ['ten-x'] });
+    expect(cards).toEqual([
+      {
+        skill_name: 'ten-x',
+        hosts: [...TEN_X_HOSTS, 'uploads.example.com'],
+        reason: 'code_changed',
+        code_pin: PIN_B,
+      },
+    ]);
+
+    // Answering restores each grant as the kind it was, under the new pin.
+    await recordSkillNetworkAnswer({
+      store,
+      registry,
+      ...movedCall,
+      skill_name: 'ten-x',
+      hosts: [...TEN_X_HOSTS, 'uploads.example.com'],
+      reason: 'code_changed',
+      answer: 'always_allow',
+      resolveCodeSha: async () => PIN_B,
+    });
+    expect(records.get('ten-x')?.network_approval).toEqual(TEN_X_HOSTS);
+    expect(records.get('ten-x')?.network_allowed_hosts).toEqual(['uploads.example.com']);
+    expect(records.get('ten-x')?.network_approval_code_sha).toBe(PIN_B);
+    const restored = await resolveSkillNetworkGrant({
+      store,
+      registry,
+      ...movedCall,
+      skillNames: ['ten-x'],
+      resolveCodeSha: async () => PIN_B,
+    });
+    expect(restored?.hosts).toEqual(['api.github.com', 'github.com', 'uploads.example.com']);
+  });
+
+  it('allowing a site is refused in plain words, storing nothing, when the code version cannot be read', async () => {
+    const registry = new SkillNetworkTokenRegistry();
+    const { store, records } = mutableStore([
+      record({ manifest: gitManifest({ network_hosts: TEN_X_HOSTS }), network_approval: null }),
+    ]);
+    const attempt = recordSkillNetworkAnswer({
+      store,
+      registry,
+      ...CALL,
+      session_id: 'pin-allowance-refused',
+      skill_name: 'ten-x',
+      hosts: ['uploads.example.com'],
+      reason: 'undeclared_host',
+      answer: 'always_allow',
+      resolveCodeSha: async (): Promise<string> => {
+        throw new Error('repository unreachable');
+      },
+    });
+    await expect(attempt).rejects.toBeInstanceOf(SkillCodePinRefusedError);
+    await expect(attempt).rejects.toThrow(SKILL_CODE_PIN_REFUSAL);
+    expect(records.get('ten-x')?.network_allowed_hosts).toEqual([]);
+    expect(records.get('ten-x')?.network_approval_code_sha).toBeNull();
+  });
+
+  it('allow-once sites keep the stamp of the answer that allowed them when a later answer allows more', async () => {
+    const registry = new SkillNetworkTokenRegistry();
+    const { store } = mutableStore([
+      record({ manifest: gitManifest({ network_hosts: TEN_X_HOSTS }), network_approval: null }),
+    ]);
+    const call = { ...CALL, session_id: 'pin-stamps-split' };
+    await recordSkillNetworkAnswer({
+      store,
+      registry,
+      ...call,
+      skill_name: 'ten-x',
+      hosts: ['one.example.com'],
+      reason: 'undeclared_host',
+      answer: 'allow_once',
+      resolveCodeSha: async () => PIN_A,
+    });
+    await recordSkillNetworkAnswer({
+      store,
+      registry,
+      ...call,
+      skill_name: 'ten-x',
+      hosts: ['two.example.com'],
+      reason: 'undeclared_host',
+      answer: 'allow_once',
+      resolveCodeSha: async () => PIN_B,
+    });
+    expect(
+      registry.sessionHostsWithPin({ session_id: call.session_id, skill_name: 'ten-x', code_sha: PIN_A })?.hosts,
+    ).toEqual(['one.example.com']);
+    expect(
+      registry.sessionHostsWithPin({ session_id: call.session_id, skill_name: 'ten-x', code_sha: PIN_B })?.hosts,
+    ).toEqual(['two.example.com']);
+    // At the new code only the sites allowed under it count; the earlier stamp is not re-based.
+    const grant = await resolveSkillNetworkGrant({
+      store,
+      registry,
+      ...call,
+      skillNames: ['ten-x'],
+      resolveCodeSha: async () => PIN_B,
+    });
+    expect(grant?.hosts).toEqual(['two.example.com']);
+  });
+
+  it('a registry skill whose version changes loses its allowances and raises the code-changed card', async () => {
+    const registry = new SkillNetworkTokenRegistry();
+    const oldFqn = 'agent-skill:acme/team-a/echo:3';
+    const newFqn = 'agent-skill:acme/team-a/echo:4';
+    const registryManifest = (name: string, version: number): TrueFoundryRegistrySkill => ({
+      type: 'truefoundry',
+      name,
+      display_name: 'echo',
+      description: 'Echo skill',
+      repository_name: 'team-a',
+      version,
+    });
+    const { store, records } = mutableStore([
+      record({
+        manifest: registryManifest(oldFqn, 3),
+        network_approval: null,
+        network_approval_code_sha: oldFqn,
+        network_allowed_hosts: ['uploads.example.com'],
+      }),
+    ]);
+    const call = { ...CALL, session_id: 'pin-registry-moved' };
+    const before = await resolveSkillNetworkGrant({ store, registry, ...call, skillNames: [oldFqn] });
+    expect(before?.hosts).toEqual(['uploads.example.com']);
+
+    // A version-changing upsert replaces the manifest and keeps the grants beside it.
+    const current = records.get(oldFqn);
+    if (current === undefined) throw new Error('expected the registry record');
+    records.set(oldFqn, { ...current, manifest: registryManifest(newFqn, 4) });
+    await expect(resolveSkillNetworkGrant({ store, registry, ...call, skillNames: [oldFqn] })).resolves.toBeUndefined();
+    expect(records.get(oldFqn)?.network_allowed_hosts).toEqual([]);
+    expect(records.get(oldFqn)?.network_approval_code_sha).toBeNull();
+    const cards = await drainSkillNetworkCards({ store, registry, ...call, skillNames: [oldFqn] });
+    expect(cards).toEqual([
+      { skill_name: oldFqn, hosts: ['uploads.example.com'], reason: 'code_changed', code_pin: newFqn },
+    ]);
+
+    // Answering the card restores the allowance under the new version.
+    await recordSkillNetworkAnswer({
+      store,
+      registry,
+      ...call,
+      skill_name: oldFqn,
+      hosts: ['uploads.example.com'],
+      reason: 'code_changed',
+      answer: 'always_allow',
+    });
+    expect(records.get(oldFqn)?.network_approval).toBeNull();
+    expect(records.get(oldFqn)?.network_allowed_hosts).toEqual(['uploads.example.com']);
+    expect(records.get(oldFqn)?.network_approval_code_sha).toBe(newFqn);
+    const restored = await resolveSkillNetworkGrant({ store, registry, ...call, skillNames: [oldFqn] });
+    expect(restored?.hosts).toEqual(['uploads.example.com']);
   });
 });

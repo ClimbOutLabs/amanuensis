@@ -8,6 +8,7 @@ import type {
   ISkillStore,
   ListSkillsInput,
   SetSkillNetworkApprovalInput,
+  SetSkillNetworkCodePinInput,
   SetSkillNetworkHostDecisionInput,
   SkillRecord,
   UpsertSkillInput,
@@ -167,6 +168,15 @@ export class TrueFoundrySkillStore<TTransaction = never>
 
   setSkillNetworkHostDecision(
     input: SetSkillNetworkHostDecisionInput,
+    transaction?: TTransaction,
+  ): Promise<SkillRecord | undefined> {
+    void input;
+    void transaction;
+    return trueFoundryManaged();
+  }
+
+  setSkillNetworkCodePin(
+    input: SetSkillNetworkCodePinInput,
     transaction?: TTransaction,
   ): Promise<SkillRecord | undefined> {
     void input;
