@@ -133,6 +133,22 @@ docker image prune -a
 
 Your backups stay in `~/.amanuensis/backups`; delete that folder too if you do not want them. You can also uninstall Docker Desktop (Mac, Windows) if you do not use it for anything else.
 
+## Go back to an earlier backup
+
+If chats or settings were lost or changed by mistake, run:
+
+```
+aman restore
+```
+
+It shows your backups, newest first, and asks:
+
+```
+Restore which backup (number):
+```
+
+Type a number. It tells you what will be replaced and asks you to type `yes`. Before it changes anything it saves a copy of what you have now and shows you where that copy is. If something goes wrong it puts everything back and says so. To use the newest backup without the list, run `aman restore --latest`.
+
 ## Good to know
 
 - Nothing is sent anywhere except to the model company you chose, and to Parallel (the search service Aman uses by default) when Aman searches the web. Parallel sees the search words and your internet address. To stop it, remove the `parallel-web` connector in Settings, or turn on Offline mode.
