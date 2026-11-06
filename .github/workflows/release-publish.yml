@@ -1,0 +1,105 @@
+name: Publish release
+
+# The last step of a release. The Release workflow leaves a draft with
+# every file and an unsigned record; the owner signs the record on
+# their own machine and adds manifest.json.minisig to the draft. This
+# workflow then checks every file against the signed record with the
+# release key compiled into Aman, both with the release's own Linux
+# program (aman verify) and with the release tool from the tagged
+# source, writes SHA256SUMS again with the signature in it, and makes
+# the release public.
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: The version tag of the draft release to publish, for example v1.2.3
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ inputs.tag }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Check and publish ${{ inputs.tag }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: release
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RELEASE: ${{ inputs.tag }}
+
+    steps:
+      - name: Check out the tagged source
+        uses: actions/checkout@v7
+        with:
+          ref: refs/tags/${{ inputs.tag }}
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Download the draft's files
+        run: |
+          mkdir -p "$RUNNER_TEMP/release"
+          release_json=$(gh api "repos/$GITHUB_REPOSITORY/releases?per_page=100" \
+            --jq "[.[] | select(.tag_name == \"$RELEASE\" and .draft == true)] | first")
+          if [ -z "$release_json" ] || [ "$release_json" = null ]; then
+            echo "::error::There is no draft release for $RELEASE. Push the tag first and let the Release workflow finish."
+            exit 1
+          fi
+          printf '%s' "$release_json" | jq -r '.assets[] | "\(.id) \(.name)"' | while read -r id name; do
+            gh api -H 'Accept: application/octet-stream' "repos/$GITHUB_REPOSITORY/releases/assets/$id" \
+              > "$RUNNER_TEMP/release/$name"
+          done
+          ls -l "$RUNNER_TEMP/release"
+
+      - name: Check the record is signed and names this release
+        run: |
+          cd "$RUNNER_TEMP/release"
+          if [ ! -f manifest.json.minisig ]; then
+            echo "::error::The draft has no manifest.json.minisig. Sign manifest.json and add the signature to the draft. RELEASING.md has the steps."
+            exit 1
+          fi
+          named=$(jq -r .release manifest.json)
+          if [ "$named" != "$RELEASE" ]; then
+            echo "::error::manifest.json is the record for $named, not $RELEASE. Sign the record from this draft."
+            exit 1
+          fi
+
+      - name: Check every file with aman verify
+        run: |
+          cd "$RUNNER_TEMP/release"
+          chmod +x aman-linux-x64
+          for name in $(jq -r '.files | keys[]' manifest.json); do
+            ./aman-linux-x64 verify "$name"
+            pnpm -s release:aman-installer verify --file "$RUNNER_TEMP/release/$name"
+          done
+
+      - name: Write SHA256SUMS with the signature in it
+        run: |
+          rm -f "$RUNNER_TEMP/release/SHA256SUMS"
+          pnpm -s release:aman-installer checksums --dir "$RUNNER_TEMP/release"
+          cd "$RUNNER_TEMP/release"
+          sha256sum --check --strict SHA256SUMS
+          gh release upload "$RELEASE" --repo "$GITHUB_REPOSITORY" --clobber SHA256SUMS
+
+      - name: Publish the release
+        run: |
+          gh release edit "$RELEASE" --repo "$GITHUB_REPOSITORY" --draft=false --latest
+          echo "::notice::Release $RELEASE is public."
