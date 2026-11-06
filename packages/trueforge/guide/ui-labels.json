@@ -106,5 +106,6 @@
   "Cancel": "packages/trueforge-ui/src/containers/SettingsBuilder/AccountSetupPanel.tsx",
   "Reach me": "packages/trueforge-ui/src/containers/SettingsBuilder/index.tsx",
   "Try it": "packages/trueforge-ui/src/deliveries/ReachPreferences.tsx",
+  "Phone calls": "packages/trueforge-ui/src/deliveries/ReachPreferences.tsx",
   "Call me for reminders I mark urgent": "packages/trueforge-ui/src/deliveries/ReachPreferences.tsx"
 }
