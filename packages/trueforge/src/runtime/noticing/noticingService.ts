@@ -337,26 +337,19 @@ export function createNoticingService(deps: NoticingDeps): NoticingService {
   }): Promise<void> {
     const at = now();
     const checked = await store.getCheckpoint({ ...owner, watcher: 'mail' });
+    // The checkpoint is where the next read starts. Mail is never read further back than a day.
     const since = new Date(
-      Math.max(
-        (checked?.getTime() ?? at.getTime() - FIRST_LOOKBACK_MS) - CHECK_OVERLAP_MS,
-        at.getTime() - MAX_LOOKBACK_MS,
-      ),
+      Math.max(checked?.getTime() ?? at.getTime() - FIRST_LOOKBACK_MS, at.getTime() - MAX_LOOKBACK_MS),
     );
-    const findings = await watchMail({ source: mail, settings, since, now: at });
+    const findings = await watchMail({ source: mail, settings, since, now: at, logger });
     await recordAll({ owner, events: findings.raise, status: 'pending' });
     await recordAll({ owner, events: findings.track, status: 'tracking' });
     // Everything found is written down before the checkpoint moves, so a failed delivery is retried from the store.
-    // When there was more mail than one pass reads, the next pass starts at the newest message read, past the
-    // usual overlap, so a full page of mail already read can never hold it in place.
-    const readUntil = findings.read_until;
+    // A pass that read all mail up to now starts the next one a little earlier, for mail the server lists late.
     await store.setCheckpoint({
       ...owner,
       watcher: 'mail',
-      checked_at:
-        readUntil !== undefined && readUntil.getTime() > since.getTime()
-          ? new Date(Math.min(readUntil.getTime() + CHECK_OVERLAP_MS, at.getTime()))
-          : at,
+      checked_at: findings.resume_from ?? new Date(at.getTime() - CHECK_OVERLAP_MS),
     });
     await promoteDueBills({ owner, mail, now: at });
   }

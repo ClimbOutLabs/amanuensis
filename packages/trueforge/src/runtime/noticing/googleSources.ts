@@ -26,10 +26,7 @@ import type {
 /** The server whose Authentication-Results Gmail writes into every message it receives. */
 const GMAIL_AUTHENTICATION_SERVERS = ['mx.google.com'];
 const TEXT_CHARACTERS = 3000;
-const THREADS_PER_PASS = 50;
-const THREAD_IDS_PER_PAGE = 100;
-/** Most thread ids one pass lists. A pass reads back a day at most, so this is rarely reached. */
-const MAX_THREAD_IDS = 500;
+const MESSAGE_IDS_PER_PAGE = 100;
 const EVENTS_PER_PASS = 100;
 
 function headerValues({ message, name }: { message: GmailMessage; name: string }): string[] {
@@ -45,7 +42,7 @@ function isIncoming(message: GmailMessage): boolean {
   return labels.includes('INBOX') && !labels.includes('SENT') && !labels.includes('DRAFT');
 }
 
-function toMailMessage(message: GmailMessage, thread_id: string): MailMessage | undefined {
+function toMailMessage(message: GmailMessage): MailMessage | undefined {
   const payload = message.payload;
   const internal = Number(message.internalDate);
   if (payload === undefined || !Number.isFinite(internal)) {
@@ -57,7 +54,7 @@ function toMailMessage(message: GmailMessage, thread_id: string): MailMessage | 
   }
   return {
     id: message.id,
-    thread_id,
+    thread_id: message.threadId,
     from_address: from.address.toLowerCase(),
     from_name: from.name === '' ? null : from.name,
     subject: headerOf({ message, name: 'Subject', maxChars: 300 }),
@@ -68,37 +65,44 @@ function toMailMessage(message: GmailMessage, thread_id: string): MailMessage | 
 }
 
 /** Gmail as a mail source, read with the person's own Google login and read-only calls. */
-export function gmailMailSource(api: Pick<GmailApiPort, 'listThreads' | 'getThread' | 'getMessage'>): MailSource {
+export function gmailMailSource(
+  api: Pick<GmailApiPort, 'listMessages' | 'getMessageHeaders' | 'getMessage' | 'getThread'>,
+): MailSource {
   return {
     trustedAuthenticationServers: GMAIL_AUTHENTICATION_SERVERS,
-    async listNewMessages({ since, limit }) {
-      const query = `in:inbox after:${String(Math.floor(since.getTime() / 1000))}`;
-      const threadIds: string[] = [];
+    async listNewMessages({ since, before, limit }) {
+      // Gmail's search takes whole seconds, so it is asked for a little more and the window is cut exactly here.
+      const after = Math.floor(since.getTime() / 1000) - 1;
+      const until = Math.ceil(before.getTime() / 1000) + 1;
+      const query = `in:inbox after:${String(after)} before:${String(until)}`;
+      const ids: string[] = [];
       let pageToken: string | undefined;
       do {
-        const list = await api.listThreads({ query, maxResults: THREAD_IDS_PER_PAGE, pageToken });
-        threadIds.push(...list.threadIds);
+        const list = await api.listMessages({ query, maxResults: MESSAGE_IDS_PER_PAGE, pageToken });
+        ids.push(...list.messageIds);
         pageToken = list.nextPageToken;
-      } while (pageToken !== undefined && threadIds.length < MAX_THREAD_IDS);
-      // Gmail lists the newest threads first. The oldest are read first, so a pass that cannot read everything
-      // leaves only newer mail for the next one.
-      const oldest = threadIds.slice(-THREADS_PER_PASS);
-      const { results } = await mapSkippingMissing({
-        items: oldest,
-        work: threadId => api.getThread({ threadId, format: 'metadata' }),
+        if (ids.length > limit) {
+          return { read: 'too_many' };
+        }
+      } while (pageToken !== undefined);
+      // Gmail lists the newest first. Reading the oldest first means a read that runs out of time has every
+      // message up to where it stopped.
+      const { results, notReached } = await mapSkippingMissing({
+        items: ids.reverse(),
+        work: id => api.getMessageHeaders(id),
         deadlineMs: LIST_DEADLINE_MS,
       });
       const messages = results
-        .flatMap(thread => (thread.messages ?? []).filter(isIncoming).map(message => toMailMessage(message, thread.id)))
+        .filter(isIncoming)
+        .map(toMailMessage)
         .filter(
           (message): message is MailMessage =>
-            message !== undefined && message.received_at.getTime() >= since.getTime(),
+            message !== undefined &&
+            message.received_at.getTime() >= since.getTime() &&
+            message.received_at.getTime() < before.getTime(),
         )
         .sort((a, b) => a.received_at.getTime() - b.received_at.getTime());
-      return {
-        messages: messages.slice(0, limit),
-        truncated: pageToken !== undefined || threadIds.length > oldest.length || messages.length > limit,
-      };
+      return notReached > 0 ? { read: 'oldest', messages } : { read: 'all', messages };
     },
     async readText(message) {
       return readBody({ message: await api.getMessage(message.id), maxChars: TEXT_CHARACTERS }).body;

@@ -22,12 +22,17 @@ export interface MailMessage {
 /** Enough to find a message again: its id, its thread and when it came. */
 export type MailRef = Pick<MailMessage, 'id' | 'thread_id' | 'received_at'>;
 
+/**
+ * One read of the mail that reached the inbox in a window, by the mail server's own arrival time. `all` holds every
+ * message in it, oldest first. `too_many` says the window holds more than was asked for, so a shorter one is needed.
+ * `oldest` holds only the oldest part, because the source ran out of time.
+ */
+export type MailWindowRead =
+  { read: 'all'; messages: MailMessage[] } | { read: 'too_many' } | { read: 'oldest'; messages: MailMessage[] };
+
 export interface MailSource {
-  /**
-   * Up to `limit` messages that reached the inbox at or after `since`, oldest first. Mail the person sent is left
-   * out. `truncated` is true when newer messages were left for the next read.
-   */
-  listNewMessages(input: { since: Date; limit: number }): Promise<{ messages: MailMessage[]; truncated: boolean }>;
+  /** Mail that reached the inbox at or after `since` and before `before`. Mail the person sent is left out. */
+  listNewMessages(input: { since: Date; before: Date; limit: number }): Promise<MailWindowRead>;
   /** The start of one message's text, for a watcher that needs more than the snippet. */
   readText(message: MailMessage): Promise<string>;
   /** The text of messages that came after this one in its thread, oldest first. */

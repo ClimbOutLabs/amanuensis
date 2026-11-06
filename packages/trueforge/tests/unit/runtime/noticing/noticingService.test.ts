@@ -15,6 +15,7 @@ import type {
   CalendarSource,
   MailMessage,
   MailSource,
+  MailWindowRead,
   NoticingSources,
   WaitingApproval,
 } from '../../../../src/runtime/noticing/sources';
@@ -71,6 +72,7 @@ async function setup({
   exhausted = false,
   judgeDelay,
   mailPage = 100,
+  mailReadsInTime,
   saved = true,
 }: {
   settings?: Partial<ReachSettings>;
@@ -86,6 +88,8 @@ async function setup({
   judgeDelay?: Promise<void>;
   /** Most messages the mail source hands over in one read; past it, it says there is more. */
   mailPage?: number;
+  /** How many messages the source reads before it runs out of time. */
+  mailReadsInTime?: number;
   /** False for a person who never saved Reach me. */
   saved?: boolean;
 } = {}) {
@@ -129,11 +133,19 @@ async function setup({
     logger: winston.createLogger({ silent: true }),
   });
   const mailSource: MailSource = {
-    listNewMessages: jest.fn(({ since }: { since: Date }) => {
+    listNewMessages: jest.fn(({ since, before, limit }: { since: Date; before: Date; limit: number }) => {
       const found = messages
-        .filter(message => message.received_at.getTime() >= since.getTime())
+        .filter(
+          message =>
+            message.received_at.getTime() >= since.getTime() && message.received_at.getTime() < before.getTime(),
+        )
         .sort((a, b) => a.received_at.getTime() - b.received_at.getTime());
-      return Promise.resolve({ messages: found.slice(0, mailPage), truncated: found.length > mailPage });
+      if (mailReadsInTime !== undefined && found.length > mailReadsInTime) {
+        return Promise.resolve<MailWindowRead>({ read: 'oldest', messages: found.slice(0, mailReadsInTime) });
+      }
+      return Promise.resolve<MailWindowRead>(
+        found.length > Math.min(limit, mailPage) ? { read: 'too_many' } : { read: 'all', messages: found },
+      );
     }),
     readText: message => Promise.resolve(texts[message.id] ?? message.snippet),
     laterInThread: jest.fn(() => Promise.resolve(later)),
@@ -232,12 +244,41 @@ describe('mail from an always-important sender', () => {
       mailPage: 2,
     });
     await service.run({ watcher: 'mail' });
-    // The next pass starts at 14:53, the newest message read, instead of after everything.
+    // The window was halved to fit, so everything before 14:55 was read and the next pass starts there.
     await expect(store.getCheckpoint({ ...OWNER, watcher: 'mail' })).resolves.toEqual(at('55'));
+    expect(await feed()).toHaveLength(2);
     clock.now = new Date('2026-11-05T15:10:00.000Z');
     await service.run({ watcher: 'mail' });
     expect(await feed()).toHaveLength(3);
-    await expect(store.getCheckpoint({ ...OWNER, watcher: 'mail' })).resolves.toEqual(clock.now);
+    await expect(store.getCheckpoint({ ...OWNER, watcher: 'mail' })).resolves.toEqual(
+      new Date('2026-11-05T15:08:00.000Z'),
+    );
+  });
+
+  it('never jumps to now when a full window held nothing worth saying', async () => {
+    const at = (minute: string) => new Date(`2026-11-05T14:${minute}:00.000Z`);
+    const { service, store } = await setup({
+      messages: [
+        mail({ id: 'm1', received_at: at('51') }),
+        mail({ id: 'm2', received_at: at('53') }),
+        mail({ id: 'm3', received_at: at('55') }),
+      ],
+      mailPage: 2,
+    });
+    await service.run({ watcher: 'mail' });
+    await expect(store.getCheckpoint({ ...OWNER, watcher: 'mail' })).resolves.toEqual(at('55'));
+  });
+
+  it('starts the next pass where a slow read stopped, or where it started when it read nothing', async () => {
+    const at = (minute: string) => new Date(`2026-11-05T14:${minute}:00.000Z`);
+    const messages = [mail({ id: 'm1', received_at: at('51') }), mail({ id: 'm2', received_at: at('53') })];
+    const slow = await setup({ settings: { always_important: [ALWAYS] }, messages, mailReadsInTime: 1 });
+    await slow.service.run({ watcher: 'mail' });
+    await expect(slow.store.getCheckpoint({ ...OWNER, watcher: 'mail' })).resolves.toEqual(at('51'));
+
+    const stuck = await setup({ settings: { always_important: [ALWAYS] }, messages, mailReadsInTime: 0 });
+    await stuck.service.run({ watcher: 'mail' });
+    await expect(stuck.store.getCheckpoint({ ...OWNER, watcher: 'mail' })).resolves.toEqual(at('50'));
   });
 
   it('never reads back further than a day, however long the server was down', async () => {
