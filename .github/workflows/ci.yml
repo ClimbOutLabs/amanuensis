@@ -57,6 +57,9 @@ jobs:
               - '.github/workflows/ci.yml'
             trueforge:
               - 'packages/trueforge/**'
+              # The voice tests read these to check the image carries the model the server pins.
+              - 'Dockerfile'
+              - 'Dockerfile.dev'
               - 'package.json'
               - 'pnpm-workspace.yaml'
               - 'tsconfig.base.json'
@@ -278,7 +281,7 @@ jobs:
         uses: actions/cache@v6.1.0
         with:
           path: packages/trueforge/.cache/voice-model
-          key: silero-vad-${{ hashFiles('packages/trueforge/src/voice/vad/sileroVad.ts') }}
+          key: silero-vad-${{ hashFiles('packages/trueforge/src/voice/vad/sileroVad.ts', 'packages/trueforge/scripts/lib/vadModelDownload.ts') }}
 
       - name: Fetch the listening model
         if: matrix.package == 'trueforge'

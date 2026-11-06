@@ -43,6 +43,8 @@ type LiveStart = { controller: AbortController; sessionId: string | null };
 let line: LiveLine | null = null;
 let handlers: LiveLineHandlers | null = null;
 let starting: LiveStart | null = null;
+/** The chat on screen, as the bridge last reported it; null for a new chat that has no id yet. */
+let displayedChat: string | null = null;
 
 /**
  * The open voice line lives here, not in the button, because the composer is rebuilt in another place
@@ -69,7 +71,10 @@ export function beginLiveStart(sessionId: string | null): AbortController {
   return controller;
 }
 
-/** A new chat gets its id while its line is opening; the start now belongs to that chat. */
+/**
+ * A new chat gets its id while its line is opening; the start now belongs to that chat. If the person moved to
+ * another chat meanwhile, the start ends instead of opening a line on a chat that is no longer shown.
+ */
 export function nameLiveStartSession({
   controller,
   sessionId,
@@ -77,7 +82,12 @@ export function nameLiveStartSession({
   controller: AbortController;
   sessionId: string;
 }): void {
-  if (starting?.controller === controller) starting.sessionId = sessionId;
+  if (starting?.controller !== controller) return;
+  if (displayedChat !== null && displayedChat !== sessionId) {
+    endLiveLine();
+    return;
+  }
+  starting.sessionId = sessionId;
 }
 
 export function finishLiveStart(controller: AbortController): void {
@@ -99,6 +109,7 @@ export function endLiveLine(): void {
  * (a new chat getting its id) stays.
  */
 export function chatChanged(sessionId: string | null): void {
+  displayedChat = sessionId;
   if (line !== null && line.sessionId !== sessionId) endLiveLine();
   if (starting !== null && starting.sessionId !== null && starting.sessionId !== sessionId) endLiveLine();
 }
@@ -146,6 +157,7 @@ export function mountLiveLineBridge(next: LiveLineHandlers): () => void {
   handlers = next;
   return () => {
     if (handlers === next) handlers = null;
+    displayedChat = null;
     endLiveLine();
     setLiveNotice(null);
   };

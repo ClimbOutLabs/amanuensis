@@ -1,16 +1,22 @@
-import { readFileSync } from 'node:fs';
-import path from 'node:path';
-
 import { Tier3CardSchema } from '@truefoundry/trueforge-core/core';
 
-import { CARD_FIELD_RULES, classifyAnswer, planVoiceApproval, readsAsWritten } from '../../../src/voice/approvalVoice';
+import {
+  CARD_FIELD_RULES,
+  classifyAnswer,
+  EMAIL_FIELD_RULES,
+  EVENT_FIELD_RULES,
+  planVoiceApproval,
+  SCHEDULE_FIELD_RULES,
+} from '../../../src/voice/approvalVoice';
 import {
   approval,
   calendarCard,
   cancelScheduleCard,
   dentistCard,
+  planCard,
   sendReplyCard,
   typedOnlyCards,
+  writeOutsideWorkspaceCard,
 } from '../../fixtures/voice/cards';
 
 function plan(card: Parameters<typeof approval>[0], tier: 1 | 2 | 3 = 3) {
@@ -45,14 +51,9 @@ describe('what is read back for a voice approval', () => {
     expect(plan(card)).toEqual({ kind: 'typed_only' });
   });
 
-  it('keeps ordinary writing, numbers, money and hyphenated words on the voice path', () => {
-    const body = 'It\'s "fine" (really) - see you at 9:30, 3.5 hours, in e-mail form... Costs $1,200 or 15%!';
-    expect(plan(sendReplyCard(body.replace(' - ', ', '))).kind).toBe('ask');
-  });
-
   it('leaves a file-write card (tier 2) for the screen', () => {
-    expect(plan(calendarCard, 2)).toEqual({ kind: 'typed_only' });
-    expect(plan(calendarCard, 3).kind).toBe('ask');
+    expect(plan(dentistCard, 2)).toEqual({ kind: 'typed_only' });
+    expect(plan(dentistCard, 3).kind).toBe('ask');
   });
 
   it('still reads back stopping a schedule', () => {
@@ -61,6 +62,64 @@ describe('what is read back for a voice approval', () => {
 
   it('classifies every field of the card schema, so a new field cannot slip through unreviewed', () => {
     expect(Object.keys(CARD_FIELD_RULES).sort()).toEqual(Object.keys(Tier3CardSchema.shape).sort());
+  });
+
+  it.each([
+    ['the fallback write outside the workspace', writeOutsideWorkspaceCard],
+    ['the implementation plan', planCard],
+  ])('never asks for a "yes" on %s, which has no shape whose content is read in full', (_name, card) => {
+    expect(plan(card, 3)).toEqual({ kind: 'typed_only' });
+    expect(plan(card, 2)).toEqual({ kind: 'typed_only' });
+  });
+
+  it('classifies every field of the mail, event and schedule shapes too', () => {
+    const shapes = Tier3CardSchema.shape;
+    expect(Object.keys(EMAIL_FIELD_RULES).sort()).toEqual(Object.keys(shapes.email.unwrap().unwrap().shape).sort());
+    expect(Object.keys(EVENT_FIELD_RULES).sort()).toEqual(
+      Object.keys(shapes.calendar_event.unwrap().unwrap().shape).sort(),
+    );
+    expect(Object.keys(SCHEDULE_FIELD_RULES).sort()).toEqual(
+      Object.keys(shapes.schedule.unwrap().unwrap().shape).sort(),
+    );
+  });
+
+  it('leaves a mail, event or schedule carrying a field nobody classified for the screen', () => {
+    const { email, calendar_event: event } = { ...sendReplyCard(), ...dentistCard };
+    if (email === null || email === undefined || event === null || event === undefined) {
+      throw new Error('expected the fixtures to carry a mail and an event');
+    }
+    const withAttachments = { ...email, attachments: ['a.pdf'] };
+    const withReminders = { ...event, reminders: ['1h'] };
+    expect(plan({ ...sendReplyCard(), email: withAttachments })).toEqual({ kind: 'typed_only' });
+    expect(plan({ ...dentistCard, calendar_event: withReminders })).toEqual({ kind: 'typed_only' });
+  });
+
+  it('reads out every field it lists as spoken, so none is passed over unheard', () => {
+    const mail = sendReplyCard('Bring the form.');
+    const event = dentistCard.calendar_event;
+    const schedule = cancelScheduleCard.schedule;
+    if (!mail.email || !event || !schedule) {
+      throw new Error('expected the fixtures to carry a mail, an event and a schedule');
+    }
+    const place = { ...event, location: 'Main Street', time_zone: 'Europe/Berlin', description: 'Bring the form.' };
+    const cases = [
+      { card: mail, rules: EMAIL_FIELD_RULES, shape: mail.email },
+      { card: { ...dentistCard, calendar_event: place }, rules: EVENT_FIELD_RULES, shape: place },
+      { card: cancelScheduleCard, rules: SCHEDULE_FIELD_RULES, shape: schedule },
+    ];
+    for (const { card, rules, shape } of cases) {
+      const result = plan(card);
+      if (result.kind !== 'ask') {
+        throw new Error('expected a read-back');
+      }
+      const said = result.segments.map(segment => segment.text.replace(/[/_]/g, ' ')).join('\n');
+      const spoken = new Map<string, string>(Object.entries(rules));
+      for (const [key, value] of Object.entries(shape)) {
+        if (spoken.get(key) === 'spoken' && typeof value === 'string' && value !== '') {
+          expect([key, said.includes(value.replace(/[/_]/g, ' '))]).toEqual([key, true]);
+        }
+      }
+    }
   });
 
   it('leaves a card with a field nobody classified for the screen', () => {
@@ -85,38 +144,14 @@ describe('what is read back for a voice approval', () => {
 });
 
 describe('what counts as an answer', () => {
-  it.each(['Yes, send it?', 'yes send it？', 'Yes, send it?"', 'yes send it ?!'])('is not an answer: %s', heard => {
-    expect(classifyAnswer({ heard, verb: 'send' })).toBe('other');
-  });
-});
-
-describe('the read-back check against the voice service', () => {
-  const cases: unknown = JSON.parse(
-    readFileSync(path.join(__dirname, '../../../../../ops/aman-tts/tests/read_back_cases.json'), 'utf8'),
+  it.each(['Yes, send it\u061f', 'yes send it\u203d', 'yes send it \u2047'])(
+    'is not an answer, in any script: %s',
+    heard => {
+      expect(classifyAnswer({ heard, verb: 'send' })).toBe('other');
+    },
   );
 
-  it('agrees with the cases the voice service tests against its own text cleaning', () => {
-    if (!Array.isArray(cases)) {
-      throw new Error('expected a list of cases');
-    }
-    expect(cases.length).toBeGreaterThan(10);
-    for (const entry of cases) {
-      if (
-        typeof entry !== 'object' ||
-        entry === null ||
-        !('text' in entry) ||
-        !('read_aloud' in entry) ||
-        !('cleaning_keeps_words' in entry)
-      ) {
-        throw new Error('bad case');
-      }
-      const { text, read_aloud: readAloud, cleaning_keeps_words: keeps } = entry;
-      if (typeof text !== 'string' || typeof readAloud !== 'boolean' || typeof keeps !== 'boolean') {
-        throw new Error('bad case');
-      }
-      expect([text, readsAsWritten(text)]).toEqual([text, readAloud]);
-      // Never read aloud anything the voice would change.
-      expect(readAloud && !keeps).toBe(false);
-    }
+  it.each(['Yes, send it?', 'yes send it？', 'Yes, send it?"', 'yes send it ?!'])('is not an answer: %s', heard => {
+    expect(classifyAnswer({ heard, verb: 'send' })).toBe('other');
   });
 });

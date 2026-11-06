@@ -44,7 +44,8 @@ function sha256Of(bytes: Uint8Array): string {
   return createHash('sha256').update(bytes).digest('hex');
 }
 
-function matchesPin({ bytes, pin }: { bytes: Uint8Array; pin: PinnedModel }): boolean {
+/** True when the bytes are the pinned file: its size and SHA-256 both match. */
+export function matchesPin({ bytes, pin }: { bytes: Uint8Array; pin: PinnedModel }): boolean {
   return bytes.length === pin.size && sha256Of(bytes) === pin.sha256;
 }
 

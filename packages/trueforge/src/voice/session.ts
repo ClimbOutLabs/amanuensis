@@ -44,10 +44,12 @@ const MAX_SPOKEN_CHARS = 1500;
 const INPUT_LEVELS_KEPT = 40;
 /** Audio waiting to be listened to beyond this many windows (about 5 s, more than any one frame) means listening cannot keep up. */
 const MAX_BACKLOG_WINDOWS = 160;
-/** Audio may run this far ahead of the clock (a stalled network delivers late pieces in a burst), never more. */
+/** Audio may run this far ahead of the clock (a stalled network delivers late pieces in a burst), never more, and the allowance cannot be saved up. */
 const REALTIME_SLACK_MS = 5_000;
 /** Utterances being turned into words at once; a microphone cannot make more than a couple in the time one takes. */
 const MAX_PARALLEL_TRANSCRIPTIONS = 2;
+/** Said when a third utterance arrives while two are still being turned into words. */
+const MISSED_THAT_NOTICE = 'I missed that. Please say it again.';
 /** A conversation with no speech from the person for this long ends, so an open mic cannot run on unseen. */
 export const IDLE_END_MS = 2 * 60_000;
 /** No conversation runs longer than this, whatever is said. */
@@ -137,8 +139,9 @@ export class VoiceSession {
   #turnAbort: AbortController | undefined;
   /** Stops only the speaking of the current reply, so the person can talk over it while the turn still saves. */
   #speechAbort: AbortController | undefined;
-  #startedAtMs = 0;
-  #receivedMs = 0;
+  /** Sound that may still arrive early: it refills as time passes, but never past the slack. */
+  #creditMs = REALTIME_SLACK_MS;
+  #lastArrivalAtMs = 0;
   #cancelIdle: (() => void) | undefined;
   #cancelMax: (() => void) | undefined;
   #cancelling: Promise<void> = Promise.resolve();
@@ -159,7 +162,7 @@ export class VoiceSession {
 
   start(): void {
     this.#deps.transport.sendEvent({ type: 'state', state: 'listening' });
-    this.#startedAtMs = this.#clock.now();
+    this.#lastArrivalAtMs = this.#clock.now();
     this.#resetIdle();
     this.#cancelMax = this.#clock.after(MAX_CONVERSATION_MS, () => {
       void this.#finish('That was a long conversation, so voice mode has ended. Tap voice mode to start again.');
@@ -186,8 +189,11 @@ export class VoiceSession {
     }
     const arrivedAtMs = this.#clock.now();
     const incoming = this.#decoder.push(bytes);
-    this.#receivedMs += (incoming.length / INPUT_SAMPLE_RATE) * 1000;
-    if (this.#receivedMs > arrivedAtMs - this.#startedAtMs + REALTIME_SLACK_MS) {
+    // Quiet time cannot be saved up and spent in a burst: credit refills with the clock, up to the slack.
+    this.#creditMs = Math.min(REALTIME_SLACK_MS, this.#creditMs + arrivedAtMs - this.#lastArrivalAtMs);
+    this.#lastArrivalAtMs = arrivedAtMs;
+    this.#creditMs -= (incoming.length / INPUT_SAMPLE_RATE) * 1000;
+    if (this.#creditMs < 0) {
       // A microphone delivers one second of sound per second; more than that is not a microphone.
       this.#deps.onNote?.('faster_than_real_time');
       void this.#finish('Voice mode could not keep up with your microphone. Tap voice mode to start again.');
@@ -292,7 +298,7 @@ export class VoiceSession {
       if (this.#state === 'listening') {
         this.#resetIdle();
       }
-      this.#talkedOver();
+      this.#talkedOver(event.startedAtMs);
       return;
     }
     if (event.type !== 'utterance') {
@@ -305,7 +311,9 @@ export class VoiceSession {
       startedInGuard: this.#guardAtSpeechStart,
     };
     if (this.#sttAborts.size >= MAX_PARALLEL_TRANSCRIPTIONS) {
+      // Said out loud, never dropped silently: it may have been the answer to a waiting card.
       this.#deps.onNote?.('stt_busy');
+      this.#deps.transport.sendEvent({ type: 'notice', text: MISSED_THAT_NOTICE });
       return;
     }
     const marks: Marks = { speechEndedAtMs: heard.speechEndedAtMs, utteranceAtMs: this.#clock.now() };
@@ -314,14 +322,16 @@ export class VoiceSession {
     const stt = new AbortController();
     this.#sttAborts.add(stt);
     // Words are taken in the order they were spoken, even when a short utterance comes back before a long one.
-    const work = Promise.all([this.#inOrder, this.#transcribe({ heard, signal: stt.signal })])
+    // Only a call that is really transcribing holds a place; one that is done and waiting its turn does not.
+    const transcription = this.#transcribe({ heard, signal: stt.signal }).finally(() => {
+      this.#sttAborts.delete(stt);
+    });
+    const work = Promise.all([this.#inOrder, transcription])
       .then(([, text]) => {
-        this.#sttAborts.delete(stt);
         marks.transcribedAtMs = this.#clock.now();
         this.#accept({ heard, text, marks });
       })
       .catch((error: unknown) => {
-        this.#sttAborts.delete(stt);
         this.#deps.onNote?.(`accept_failed:${error instanceof Error ? error.name : 'unknown'}`);
       })
       .finally(() => {
@@ -351,7 +361,7 @@ export class VoiceSession {
       return;
     }
     // A reply that began while the person was already talking must not play on after they finish.
-    if (this.#timeline.isPlaying()) {
+    if (this.#timeline.isPlaying(heard.speechEndedAtMs)) {
       this.#stopSound();
     }
     this.#abortTurn();
@@ -368,15 +378,16 @@ export class VoiceSession {
    * The person began to speak while the assistant was talking: stop the sound, keep the turn. While it is
    * only working nothing is cut, since the sound may be a cough; real words decide later.
    */
-  #talkedOver(): void {
-    if (!this.#timeline.isPlaying()) {
+  #talkedOver(atMs: number): void {
+    if (!this.#timeline.isPlaying(atMs)) {
       return;
     }
     this.#deps.onNote?.('barge_in');
     // A read-back that was cut off was not heard through, so it cannot be answered.
     this.#awaiting = undefined;
     this.#stopSound();
-    this.#setState('listening');
+    // A turn that is still working is not quiet, so the quiet clock must not start.
+    this.#refreshState();
   }
 
   #stopSound(): void {
@@ -490,7 +501,12 @@ export class VoiceSession {
       },
     });
     splitter.flush().forEach(say);
-    await this.#armAfterTurn({ asking: this.#afterTurn({ outcome, speech, signal }), speech, speechSignal, marks });
+    await this.#armAfterTurn({
+      asking: await this.#afterTurn({ outcome, speech, signal }),
+      speech,
+      speechSignal,
+      marks,
+    });
   }
 
   /** A card is waited on only when its whole read-back was made; otherwise it is left for the screen. */
@@ -592,12 +608,17 @@ export class VoiceSession {
         role: 'instruction',
       });
     }
-    await this.#armAfterTurn({ asking: this.#afterTurn({ outcome, speech, signal }), speech, speechSignal, marks });
+    await this.#armAfterTurn({
+      asking: await this.#afterTurn({ outcome, speech, signal }),
+      speech,
+      speechSignal,
+      marks,
+    });
     return false;
   }
 
   /** Says what happened and returns the card to wait on, if the turn ended asking for one. */
-  #afterTurn({
+  async #afterTurn({
     outcome,
     speech,
     signal,
@@ -605,7 +626,7 @@ export class VoiceSession {
     outcome: TurnOutcome;
     speech: SpeechOutput;
     signal: AbortSignal;
-  }): Awaiting | undefined {
+  }): Promise<Awaiting | undefined> {
     if (signal.aborted) {
       return undefined;
     }
@@ -625,31 +646,54 @@ export class VoiceSession {
       pending: outcome.approvals,
       voiceApprovalsAllowed: this.#deps.transport.voiceApprovals,
     });
-    return this.#readBack({ plan, approvals: outcome.approvals, speech, turnId: outcome.turnId });
+    return this.#readBack({ plan, approvals: outcome.approvals, speech, turnId: outcome.turnId, signal });
   }
 
-  #readBack({
+  async #readBack({
     plan,
     approvals,
     speech,
     turnId,
+    signal,
   }: {
     plan: VoiceApprovalPlan;
     approvals: PendingApproval[];
     speech: SpeechOutput;
     turnId: string;
-  }): Awaiting | undefined {
+    signal: AbortSignal;
+  }): Promise<Awaiting | undefined> {
     const only = approvals.length === 1 ? approvals[0] : undefined;
     if (plan.kind === 'typed_only' || only === undefined) {
       speech.say({ text: APPROVAL_LINES.leftForTheApp, role: 'instruction' });
       return undefined;
     }
-    for (const segment of plan.segments) {
-      for (const sentence of splitSentences(segment.text)) {
-        speech.say({ text: sentence, role: segment.role });
+    const sentences = plan.segments.flatMap(segment =>
+      splitSentences(segment.text).map(text => ({ text, role: segment.role })),
+    );
+    // Nothing of the card is spoken unless the voice would say all of it as written; the voice service decides.
+    if (!(await this.#voiceSaysAsWritten({ texts: sentences.filter(({ role }) => role === 'body'), signal }))) {
+      if (!signal.aborted) {
+        speech.say({ text: APPROVAL_LINES.leftForTheApp, role: 'instruction' });
       }
+      return undefined;
+    }
+    for (const sentence of sentences) {
+      speech.say(sentence);
     }
     return { approval: only, turnId, verb: plan.verb, reminded: false, expiresAtMs: this.#clock.now() + AWAITING_MS };
+  }
+
+  /** False when the voice would change a word of any of the texts, or cannot be asked. */
+  async #voiceSaysAsWritten({ texts, signal }: { texts: { text: string }[]; signal: AbortSignal }): Promise<boolean> {
+    try {
+      const answers = await Promise.all(texts.map(({ text }) => this.#deps.tts.saysAsWritten({ text, signal })));
+      return answers.every(Boolean);
+    } catch (error) {
+      if (!signal.aborted) {
+        this.#deps.onNote?.(`read_back_check_failed:${error instanceof Error ? error.name : 'unknown'}`);
+      }
+      return false;
+    }
   }
 
   #speechFor({ signal, marks }: { signal: AbortSignal; marks: Marks }): SpeechOutput {
@@ -728,6 +772,6 @@ export class VoiceSession {
 
 /** The sentences of a card's text, so the first is spoken before the rest is made. */
 function splitSentences(text: string): string[] {
-  const splitter = new SentenceSplitter();
+  const splitter = new SentenceSplitter({ keepLineMarks: true });
   return [...splitter.push(`${text}\n`), ...splitter.flush()];
 }

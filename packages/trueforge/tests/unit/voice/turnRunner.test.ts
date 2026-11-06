@@ -97,25 +97,48 @@ describe('HttpVoiceTurnRunner', () => {
     ).toEqual([{ threadId: 'main', toolCallId: 'call-7', tier: 3 }]);
   });
 
-  it('knows whether a card is still waiting, and that it is not once it was answered on the screen', async () => {
+  it('knows whether a card is still waiting, and that it is not once a newer turn exists or it was cleared', async () => {
     const turn = (calls: string[]) => ({
       data: {
+        id: 'turn-9',
+        session_id: 'chat 1',
+        previous_turn_id: null,
         state: {
           status: 'done',
+          output: null,
+          completed_at: 'x',
           required_actions:
-            calls.length === 0 ? [] : [{ type: 'tool.approval_required', tool_calls: calls.map(id => ({ id })) }],
+            calls.length === 0
+              ? []
+              : [
+                  {
+                    type: 'tool.approval_required',
+                    id: 'a1',
+                    thread_id: 'main',
+                    tool_calls: calls.map(id => ({ id })),
+                  },
+                ],
         },
+        created_at: 'x',
       },
+    });
+    const events = (newestTurnId: string) => ({
+      data: [{ turn_id: newestTurnId, event: { type: 'turn.created' } }],
+      pagination: { next_page_token: null },
     });
     const paths: string[] = [];
     let calls: string[] = ['call-7'];
+    let newest = 'turn-9';
     const runner = runnerFor(path => {
       paths.push(path);
-      return Promise.resolve(Response.json(turn(calls)));
+      return Promise.resolve(Response.json(path.includes('/events') ? events(newest) : turn(calls)));
     });
     const approval = { threadId: 'main', toolCallId: 'call-7', card: null, tier: 3 } as const;
     expect(await runner.stillWaiting({ turnId: 'turn-9', approval })).toBe(true);
-    expect(paths).toEqual(['/api/v1/sessions/chat%201/turns/turn-9']);
+    expect(paths).toEqual(['/api/v1/sessions/chat%201/events?limit=1', '/api/v1/sessions/chat%201/turns/turn-9']);
+    newest = 'turn-10';
+    expect(await runner.stillWaiting({ turnId: 'turn-9', approval })).toBe(false);
+    newest = 'turn-9';
     calls = [];
     expect(await runner.stillWaiting({ turnId: 'turn-9', approval })).toBe(false);
     const broken = runnerFor(() => Promise.reject(new Error('offline')));
@@ -174,6 +197,38 @@ describe('HttpVoiceTurnRunner', () => {
       Promise.resolve(Response.json({ error: { code: 'previous_turn_running' } }, { status: 409 })),
     );
     expect(await busy.sendMessage({ text: 'x', signal: never, onText: () => undefined })).toEqual({ kind: 'failed' });
+  });
+
+  it('still cancels a turn that was abandoned before the server named it, as soon as it is named', async () => {
+    const cancelBodies: unknown[] = [];
+    let open: ReadableStreamDefaultController<Uint8Array> | undefined;
+    const encoder = new TextEncoder();
+    const runner = runnerFor((path, init) => {
+      if (path.endsWith('/cancel')) {
+        cancelBodies.push(JSON.parse(String(init.body)));
+        return Promise.resolve(Response.json({}));
+      }
+      return Promise.resolve(
+        new Response(
+          new ReadableStream<Uint8Array>({
+            start(controller) {
+              open = controller;
+            },
+          }),
+          { headers: { 'content-type': 'text/event-stream' } },
+        ),
+      );
+    });
+    const abort = new AbortController();
+    const sending = runner.sendMessage({ text: 'x', signal: abort.signal, onText: () => undefined });
+    await new Promise(resolve => setTimeout(resolve, 10));
+    abort.abort();
+    // The caller is released at once, before the turn has a name.
+    expect(await sending).toEqual({ kind: 'failed' });
+    expect(cancelBodies).toEqual([]);
+    open?.enqueue(encoder.encode(`id: 1\ndata: ${JSON.stringify(created)}\n\n`));
+    await new Promise(resolve => setTimeout(resolve, 20));
+    expect(cancelBodies).toEqual([{ turn_id: 'turn-9' }]);
   });
 
   it('cancels through the chat cancel route only while a turn it started is running', async () => {

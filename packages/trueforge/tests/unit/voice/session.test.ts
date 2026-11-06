@@ -38,6 +38,9 @@ function setup({
   speechFailsOn,
   speechSilentOn,
   gate,
+  holdAfterText,
+  speechChanges,
+  speechCannotCheck,
   vad = new LoudnessVad(),
   onNote,
 }: {
@@ -49,14 +52,22 @@ function setup({
   speechFailsOn?: (text: string) => boolean;
   speechSilentOn?: (text: string) => boolean;
   gate?: () => Promise<void>;
+  holdAfterText?: () => Promise<void>;
+  speechChanges?: (text: string) => boolean;
+  speechCannotCheck?: boolean;
   vad?: SpeechProbability;
   onNote?: (note: string) => void;
 }) {
   const clock = new ManualClock();
   const transport = new FakeTransport({ clock, voiceApprovals, outputFormat });
   const stt = new FakeStt(...sttAnswers);
-  const tts = new FakeTts({ failOn: speechFailsOn, silentOn: speechSilentOn });
-  const turns = new FakeTurns({ message, approval: approvalReplies }, { gate });
+  const tts = new FakeTts({
+    failOn: speechFailsOn,
+    silentOn: speechSilentOn,
+    changes: speechChanges,
+    cannotCheck: speechCannotCheck,
+  });
+  const turns = new FakeTurns({ message, approval: approvalReplies }, { gate, holdAfterText });
   const notes: string[] = [];
   const latencies: TurnLatency[] = [];
   const session = new VoiceSession({
@@ -278,7 +289,8 @@ describe('approval by voice', () => {
   it('reads a calendar event with its time and description, and a schedule with its task', async () => {
     const event = await readBack({ message: withCard(dentistCard) });
     const eventSpeech = event.tts.sentences.join(' ');
-    expect(eventSpeech).toContain('Dentist on Friday at 9 for 1 hour');
+    expect(eventSpeech).toContain('Dentist on Friday at 9, UTC time, for 1 hour');
+    expect(eventSpeech).toContain('the calendar of me@example.com');
     expect(eventSpeech).toContain('Bring the form.');
     const schedule = await readBack({ message: withCard(cancelScheduleCard) });
     expect(schedule.tts.sentences.join(' ')).toContain('Summarize the week');
@@ -356,7 +368,7 @@ describe('approval by voice', () => {
     await cancel.session.settled();
     expect(cancel.turns.answers).toEqual([{ decision: 'allow', toolCallId: 'call-1' }]);
 
-    const plain = await readBack({ message: withCard(calendarCard), stt: ['yes, approve'], approval: [{}] });
+    const plain = await readBack({ message: withCard(dentistCard), stt: ['yes, approve'], approval: [{}] });
     await feed({ session: plain.session, clock: plain.clock, samples: says() });
     await plain.session.settled();
     expect(plain.turns.answers).toEqual([{ decision: 'allow', toolCallId: 'call-1' }]);
@@ -419,6 +431,43 @@ describe('approval by voice', () => {
     await feed({ session: t.session, clock: t.clock, samples: says() });
     await t.session.settled();
     expect(t.turns.answers).toEqual([]);
+  });
+
+  it.each([
+    ['would say a word differently', { speechChanges: (text: string) => text.startsWith('It says') }],
+    ['cannot be asked', { speechCannotCheck: true }],
+  ])('speaks none of the card and takes no "yes" when the voice %s', async (_name, check) => {
+    const t = setup({ stt: ['send the reply', 'yes send it'], message: withCard(), ...check });
+    await feed({ session: t.session, clock: t.clock, samples: says() });
+    await t.session.settled();
+    await feed({ session: t.session, clock: t.clock, samples: quiet(9000) });
+    await t.session.settled();
+    expect(t.tts.sentences).toEqual(['I have a draft.', "I've left it in the app for you to approve."]);
+    await feed({ session: t.session, clock: t.clock, samples: says() });
+    await t.session.settled();
+    expect(t.turns.answers).toEqual([]);
+  });
+
+  it('asks the voice about each sentence of the card itself, and not about the line telling how to answer', async () => {
+    const t = await readBack({ message: withCard() });
+    expect(t.tts.asked).toEqual([
+      "I'll send this reply to Victor at victor@example.com.",
+      'The subject is: Re: Thursday',
+      'It says: Thursday at three works for me.',
+      'See you then.',
+    ]);
+  });
+
+  it('puts a number the voice would say differently on the screen, so a sum is only approved when heard as written', async () => {
+    const t = setup({
+      stt: ['send the reply'],
+      message: withCard(sendReplyCard('Confirmed. 5000. Dollars is fine, wire $1,5 today.')),
+      speechChanges: text => text.includes('$1,5'),
+    });
+    await feed({ session: t.session, clock: t.clock, samples: says() });
+    await t.session.settled();
+    expect(t.tts.sentences.join(' ')).not.toContain('5000');
+    expect(t.tts.sentences.at(-1)).toBe("I've left it in the app for you to approve.");
   });
 
   it('says on the screen that it could not read the card when even the spoken line fails', async () => {
@@ -720,6 +769,62 @@ describe('ending a conversation', () => {
     expect(t.notes).toContain('stt_busy');
     await t.session.end();
   });
+
+  it('says so out loud when it has to drop an utterance, never silently', async () => {
+    const t = setup({ stt: [] });
+    t.stt.hold = true;
+    for (let n = 0; n < 3; n += 1) {
+      await feed({ session: t.session, clock: t.clock, samples: says() });
+    }
+    expect(t.transport.events).toContainEqual({ type: 'notice', text: 'I missed that. Please say it again.' });
+    await t.session.end();
+  });
+
+  it('does not count an utterance that is understood and only waits its turn, so a quick "no" is still heard', async () => {
+    const finish: ((text: string) => void)[] = [];
+    let calls = 0;
+    const stt = {
+      transcribe: (): Promise<string> => {
+        calls += 1;
+        if (calls === 1) {
+          return new Promise<string>(resolve => {
+            finish.push(resolve);
+          });
+        }
+        return Promise.resolve(calls === 2 ? 'second thing' : 'no');
+      },
+    };
+    const t = setup({ message: [{ text: ['One.'] }, { text: ['Two.'] }, { text: ['Three.'] }] });
+    const session = new VoiceSession({
+      transport: t.transport,
+      vad: new LoudnessVad(),
+      stt,
+      tts: t.tts,
+      turns: t.turns,
+      clock: t.clock,
+    });
+    session.start();
+    // The first is slow, the second is understood at once but must wait for it, and a third follows.
+    await feed({ session, clock: t.clock, samples: says() });
+    await feed({ session, clock: t.clock, samples: says() });
+    await feed({ session, clock: t.clock, samples: says() });
+    expect(calls).toBe(3);
+    expect(t.notes).not.toContain('stt_busy');
+    finish[0]?.('first thing');
+    await session.settled();
+    expect(t.turns.sent).toEqual(['first thing', 'second thing', 'no']);
+  });
+
+  it('cannot be fed quiet time to spend later: a burst after a long pause is refused', async () => {
+    const t = setup({});
+    t.clock.advance(60_000);
+    for (let n = 0; n < 400 && !t.transport.closed; n += 1) {
+      t.session.pushAudio(pcmBytes(quiet(32)));
+      await t.session.settled();
+    }
+    expect(t.notes).toContain('faster_than_real_time');
+    expect(t.transport.closed).toBe(true);
+  });
 });
 
 describe('a long turn, noises and order', () => {
@@ -745,6 +850,23 @@ describe('a long turn, noises and order', () => {
     t.clock.advance(3000);
     t.clock.advance(IDLE_END_MS + 5000);
     expect(t.transport.closed).toBe(true);
+  });
+
+  it('does not start the quiet clock when the person cuts a reply short while its turn is still running', async () => {
+    const turn = heldTurn();
+    const t = setup({
+      stt: ['tell me a story', ''],
+      message: [{ text: ['Once upon a time. ', 'There was a fox. ', 'It was clever.'] }],
+      holdAfterText: turn.gate,
+    });
+    await feed({ session: t.session, clock: t.clock, samples: says() });
+    await feed({ session: t.session, clock: t.clock, samples: hum(700, 0.3, 1.7) });
+    expect(t.notes).toContain('barge_in');
+    expect(t.transport.states().at(-1)).toBe('thinking');
+    t.clock.advance(IDLE_END_MS + 5000);
+    expect(t.transport.closed).toBe(false);
+    turn.release();
+    await t.session.settled();
   });
 
   it('keeps speaking the reply when a noise while it was being worked on turns out to be nothing', async () => {

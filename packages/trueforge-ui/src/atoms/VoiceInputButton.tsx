@@ -267,6 +267,8 @@ function VoiceInputButtonInner({
         // A new chat has no session yet; it is created the same way the first typed send creates one.
         const chatId = sessionId ?? (await aui.threadListItem().initialize()).remoteId;
         nameLiveStartSession({ controller, sessionId: chatId });
+        // The person moved to another chat while this one was being created.
+        if (controller.signal.aborted) return;
         const connection = await api.connect({ sessionId: chatId, signal: controller.signal });
         const live = await startLiveVoice({
           connection,

@@ -27,5 +27,5 @@ export function appDataDirFromEnv(env: CliEnv): string {
  */
 export function voiceModelDirFromEnv(env: CliEnv): string {
   const set = env['VOICE_VAD_MODEL_DIR'];
-  return set !== undefined && set.trim() !== '' ? set : path.join(appDataDirFromEnv(env), 'voice-model');
+  return set !== undefined && set.trim() !== '' ? path.resolve(set) : path.join(appDataDirFromEnv(env), 'voice-model');
 }
