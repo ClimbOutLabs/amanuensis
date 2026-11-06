@@ -1,4 +1,4 @@
-import type { NoticingOwner } from '../../db/noticingStore';
+import type { PersonOwner } from '../../db/personOwner';
 
 /**
  * What the watchers read. Each port answers a narrow question, so a mail or calendar source other than Google can be
@@ -66,13 +66,13 @@ export interface NoticingSources {
 
 /** A place that knows whose mail and calendar can be watched, and opens them. */
 export interface NoticingSourceProvider {
-  listOwners(): Promise<NoticingOwner[]>;
-  sourcesFor(owner: NoticingOwner): Promise<NoticingSources>;
+  listOwners(): Promise<PersonOwner[]>;
+  sourcesFor(owner: PersonOwner): Promise<NoticingSources>;
 }
 
 export interface WaitingApproval {
   /** Who the request is waiting on: the person whose chat asked for their ok. */
-  owner: NoticingOwner;
+  owner: PersonOwner;
   session_id: string;
   /** The request's own id, so the delivery can lead straight to it. */
   approval_id: string;

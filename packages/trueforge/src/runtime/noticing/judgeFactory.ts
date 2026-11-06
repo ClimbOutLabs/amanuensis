@@ -3,7 +3,7 @@ import type { Logger } from 'winston';
 import { requestContextFromCreatedBySubject, type RequestContext } from '../../auth/identity';
 import type { IGlobalSettingsStore } from '../../db/globalSettingsStore';
 import type { IModelProviderStore } from '../../db/modelProviderStore';
-import type { NoticingOwner } from '../../db/noticingStore';
+import type { PersonOwner } from '../../db/personOwner';
 import type { IPersonalizationStore } from '../../db/personalizationStore';
 import { resolveDefaultChatModel } from '../defaultChatModel';
 import type { TokenFactoryBudget } from '../tokenFactoryBudget';
@@ -33,7 +33,7 @@ export function createNoticingJudgeResolver({
   globalSettingsStore: IGlobalSettingsStore;
   tokenFactoryBudget: TokenFactoryBudget;
   logger: Logger;
-}): (owner: NoticingOwner) => Promise<NoticingJudge> {
+}): (owner: PersonOwner) => Promise<NoticingJudge> {
   return async owner => {
     const context = requestContextFromCreatedBySubject({
       tenant_id: owner.tenant_id,

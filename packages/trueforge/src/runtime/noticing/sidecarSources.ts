@@ -14,7 +14,7 @@ import {
 import { isRecord } from '@truefoundry/trueforge-core/core/util/records';
 import type { Logger } from 'winston';
 
-import type { NoticingOwner } from '../../db/noticingStore';
+import type { PersonOwner } from '../../db/personOwner';
 import type {
   CalendarEventInfo,
   CalendarSource,
@@ -248,7 +248,7 @@ export function createSidecarNoticingSources({
   calendarUrl: string | undefined;
   primary: NoticingSourceProvider;
   /** Who the shared connectors belong to, or undefined when the instance names no owner. */
-  instanceOwner: NoticingOwner | undefined;
+  instanceOwner: PersonOwner | undefined;
   logger: Logger;
 }): NoticingSourceProvider {
   async function mailFromSidecar(url: string): Promise<MailSource | undefined> {
@@ -268,7 +268,7 @@ export function createSidecarNoticingSources({
         ? listed
         : [...listed, instanceOwner];
     },
-    async sourcesFor(owner: NoticingOwner): Promise<NoticingSources> {
+    async sourcesFor(owner: PersonOwner): Promise<NoticingSources> {
       const own = await primary.sourcesFor(owner);
       if (owner.tenant_id !== instanceOwner?.tenant_id || owner.created_by !== instanceOwner.created_by) {
         return own;

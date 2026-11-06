@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto';
+
 import { APPROVAL_EXPIRY_MINUTES } from '@truefoundry/trueforge-core/core/permissions/approvalExpiry';
 import {
   emptyChatProvenance,
@@ -11,20 +13,22 @@ import {
 import type { Logger } from 'winston';
 
 import type { IDeliveryStore } from '../../db/deliveryStore';
-import type { INoticingStore, NoticingOwner } from '../../db/noticingStore';
+import type { INoticingStore, NoticingClaim } from '../../db/noticingStore';
+import type { PersonOwner } from '../../db/personOwner';
 import type { IReachSettingsStore } from '../../db/reachSettingsStore';
 import type { Delivery, DeliveryLevel } from '../../schemas/deliveries';
 import {
   defaultReachSettings,
   type NoticingEvent,
   type NoticingKind,
+  type NoticingVerdict,
   type NoticingWatcher,
   type ReachSettings,
 } from '../../schemas/reach';
 import { newId } from '../../utils/id';
 import type { DeliveryService } from '../delivery/deliveryService';
 import { TokenFactoryDailyCapError, type TokenFactoryBudget } from '../tokenFactoryBudget';
-import type { JudgeVerdict, NoticingJudge } from './judge';
+import type { NoticingJudge } from './judge';
 import { ceilingOf } from './levels';
 import type { ReachChannels } from './reachChannels';
 import { readReachHistory, waitFor, withReachLease, type ReachGateDeps } from './reachGate';
@@ -60,16 +64,16 @@ export interface NoticingDeps {
   approvals: ApprovalSource;
   reachSettings: IReachSettingsStore;
   store: INoticingStore;
-  deliveries: Pick<DeliveryService, 'deliver'>;
+  deliveries: Pick<DeliveryService, 'deliverOnce'>;
   /** The feed, read for how many nudges and calls already went out. */
   history: Pick<IDeliveryStore, 'countSince' | 'lastCreatedAt'>;
   /** The model call for "does this matter", made once per event. It throws when no model can answer. */
-  judgeFor: (owner: NoticingOwner) => Promise<NoticingJudge>;
+  judgeFor: (owner: PersonOwner) => Promise<NoticingJudge>;
   budget: Pick<TokenFactoryBudget, 'isExhausted'>;
   channels: () => ReachChannels;
   logger: Logger;
   /** The time zone to read the day in for someone who never saved Reach me. */
-  timezoneFor: (owner: NoticingOwner) => Promise<string>;
+  timezoneFor: (owner: PersonOwner) => Promise<string>;
   now?: () => Date;
   sleep?: (ms: number) => Promise<void>;
 }
@@ -114,7 +118,7 @@ function shownWords({
   settings,
 }: {
   event: NoticingEvent;
-  verdict: JudgeVerdict;
+  verdict: NoticingVerdict;
   settings: ReachSettings;
 }): { text: string; reason: string; replaced: boolean } {
   const messageOk = usableWords({ event, words: verdict.message, settings });
@@ -151,7 +155,15 @@ function deliveryKindOf({ event, level }: { event: NoticingEvent; level: Deliver
   return level === 'note' ? 'note' : 'nudge';
 }
 
-function ownerKey(owner: NoticingOwner): string {
+/** The same event always makes the same delivery, so a retry after a delivery went out makes nothing new. */
+function deliveryIdOf({ owner, event }: { owner: PersonOwner; event: NoticingEvent }): string {
+  return createHash('sha256')
+    .update(['noticing', owner.tenant_id, owner.created_by, event.id].join('\u0000'))
+    .digest('hex')
+    .slice(0, 32);
+}
+
+function ownerKey(owner: PersonOwner): string {
   return `${owner.tenant_id}\u0000${owner.created_by}`;
 }
 
@@ -172,9 +184,9 @@ export function createNoticingService(deps: NoticingDeps): NoticingService {
     owner,
     event,
   }: {
-    owner: NoticingOwner;
+    owner: PersonOwner;
     event: NoticingEvent;
-  }): Promise<{ verdict: JudgeVerdict | undefined; why: string }> {
+  }): Promise<{ verdict: NoticingVerdict | undefined; why: string }> {
     if (ceilingOf(event) === 'note') {
       return { verdict: undefined, why: ONLY_WORDS };
     }
@@ -193,22 +205,29 @@ export function createNoticingService(deps: NoticingDeps): NoticingService {
   }
 
   /**
-   * Decides and delivers one event this pass has claimed. The model is asked first; the person's limits are read and
-   * applied while holding their reach lease, right before delivering, so two passes cannot both spend the last nudge.
-   * Resolves to `busy` when another pass kept the lease, and the event waits for the next pass.
+   * Decides and delivers one event this pass has claimed. The model is asked once per event; the person's limits are
+   * read and applied while holding their reach lease, right before delivering, so two passes cannot both spend the
+   * last nudge. The delivery's id comes from the event, so a retry after a delivery went out makes nothing new.
+   * Resolves to `busy` when another pass kept the lease, and to `lost` when another pass took the event over.
    */
   async function raise({
     owner,
     event,
     settings,
     claim_id,
+    claim,
   }: {
-    owner: NoticingOwner;
+    owner: PersonOwner;
     event: NoticingEvent;
     settings: ReachSettings;
     claim_id: string;
-  }): Promise<'raised' | 'busy'> {
-    const { verdict, why } = await ask({ owner, event });
+    claim: NoticingClaim;
+  }): Promise<'raised' | 'busy' | 'lost'> {
+    const asked = claim.verdict === null ? await ask({ owner, event }) : { verdict: claim.verdict, why: '' };
+    const { verdict, why } = asked;
+    if (claim.verdict === null && verdict !== undefined) {
+      await store.saveVerdict({ ...owner, event_id: event.id, claim_id, verdict });
+    }
     const shown =
       verdict === undefined
         ? { text: event.summary, reason: why, replaced: false }
@@ -216,8 +235,11 @@ export function createNoticingService(deps: NoticingDeps): NoticingService {
     const outcome = await withReachLease({
       deps: gate,
       owner,
-      work: async () => {
+      work: async (): Promise<'raised' | 'lost'> => {
         const at = now();
+        if (!(await store.startDelivering({ ...owner, event_id: event.id, claim_id, now: at }))) {
+          return 'lost';
+        }
         const decision = applyReachRules({
           subject: { kind: event.kind, evidence: event.evidence },
           asked: verdict?.level ?? 'note',
@@ -234,8 +256,9 @@ export function createNoticingService(deps: NoticingDeps): NoticingService {
             : '',
           ...decision.steps,
         ]);
-        const delivery = await deps.deliveries.deliver({
+        const delivery = await deps.deliveries.deliverOnce({
           ...owner,
+          id: deliveryIdOf({ owner, event }),
           kind: deliveryKindOf({ event, level: decision.delivered }),
           level: decision.delivered,
           text: shown.text,
@@ -243,25 +266,20 @@ export function createNoticingService(deps: NoticingDeps): NoticingService {
           link: event.link,
           created_at: at,
         });
-        const kept = await store.decide({
-          ...owner,
-          event_id: event.id,
-          claim_id,
-          decision: {
-            model_level: verdict?.level ?? null,
-            decided_level: decision.decided,
-            delivered_level: decision.delivered,
-            reason,
-            delivery_id: delivery.id,
-          },
-          now: at,
-        });
-        if (!kept) {
-          logger.warn('A noticed event was delivered after its claim had gone stale', { event_id: event.id });
-        }
+        // The delivery went out, so a failure to write that down is not a failed try: a later pass that takes the
+        // event over finds the delivery already made and only finishes it.
+        await store
+          .finish({ ...owner, event_id: event.id, claim_id, delivery_id: delivery.id })
+          .catch((error: unknown) => {
+            logger.warn('A noticed event was delivered but could not be marked done', {
+              event_id: event.id,
+              error: errorText(error),
+            });
+          });
+        return 'raised';
       },
     });
-    return outcome.held ? 'raised' : 'busy';
+    return outcome.held ? outcome.value : 'busy';
   }
 
   /** Raises every pending event of this watcher's kinds that no other pass is working on. */
@@ -270,7 +288,7 @@ export function createNoticingService(deps: NoticingDeps): NoticingService {
     watcher,
     settings,
   }: {
-    owner: NoticingOwner;
+    owner: PersonOwner;
     watcher: NoticingWatcher;
     settings: ReachSettings;
   }): Promise<number> {
@@ -288,13 +306,15 @@ export function createNoticingService(deps: NoticingDeps): NoticingService {
         continue;
       }
       const claim_id = newId();
-      if (!(await store.claim({ ...owner, event_id: event.id, claim_id, now: now(), stale_before }))) {
+      const claim = await store.claim({ ...owner, event_id: event.id, claim_id, now: now(), stale_before });
+      if (claim === undefined) {
         continue;
       }
       try {
-        if ((await raise({ owner, event, settings, claim_id })) === 'raised') {
+        const outcome = await raise({ owner, event, settings, claim_id, claim });
+        if (outcome === 'raised') {
           raised += 1;
-        } else {
+        } else if (outcome === 'busy') {
           await store.release({ ...owner, event_id: event.id, claim_id, failed: false });
         }
       } catch (error) {
@@ -312,26 +332,12 @@ export function createNoticingService(deps: NoticingDeps): NoticingService {
     return raised;
   }
 
-  async function recordAll({
-    owner,
-    events,
-    status,
-  }: {
-    owner: NoticingOwner;
-    events: readonly NoticingEvent[];
-    status: 'pending' | 'tracking';
-  }): Promise<void> {
-    for (const event of events) {
-      await store.record({ ...owner, event, status, now: now() });
-    }
-  }
-
   async function runMail({
     owner,
     mail,
     settings,
   }: {
-    owner: NoticingOwner;
+    owner: PersonOwner;
     mail: MailSource;
     settings: ReachSettings;
   }): Promise<void> {
@@ -342,8 +348,8 @@ export function createNoticingService(deps: NoticingDeps): NoticingService {
       Math.max(checked?.getTime() ?? at.getTime() - FIRST_LOOKBACK_MS, at.getTime() - MAX_LOOKBACK_MS),
     );
     const findings = await watchMail({ source: mail, settings, since, now: at, logger });
-    await recordAll({ owner, events: findings.raise, status: 'pending' });
-    await recordAll({ owner, events: findings.track, status: 'tracking' });
+    await store.recordAll({ ...owner, events: findings.raise, status: 'pending', now: at });
+    await store.recordAll({ ...owner, events: findings.track, status: 'tracking', now: at });
     // Everything found is written down before the checkpoint moves, so a failed delivery is retried from the store.
     // A pass that read all mail up to now starts the next one a little earlier, for mail the server lists late.
     await store.setCheckpoint({
@@ -355,7 +361,7 @@ export function createNoticingService(deps: NoticingDeps): NoticingService {
   }
 
   /** Bills seen earlier that now fall due within three days become pending, unless something since says they were paid. */
-  async function promoteDueBills({ owner, mail, now: at }: { owner: NoticingOwner; mail: MailSource; now: Date }) {
+  async function promoteDueBills({ owner, mail, now: at }: { owner: PersonOwner; mail: MailSource; now: Date }) {
     const due = await store.listTracking({
       ...owner,
       due_before: new Date(at.getTime() + BILL_WINDOW_MS),
@@ -363,11 +369,16 @@ export function createNoticingService(deps: NoticingDeps): NoticingService {
     });
     for (const event of due) {
       const deadline = event.due_at === null ? undefined : new Date(event.due_at);
-      if (deadline === undefined || deadline.getTime() < at.getTime() || (await billIsPaid({ source: mail, event }))) {
+      // One bill whose mail can no longer be read (deleted, say) waits for the next pass without holding up the rest.
+      const paid = await billIsPaid({ source: mail, event }).catch((error: unknown) => {
+        logger.warn('Could not check whether a tracked bill was paid', { event_id: event.id, error: errorText(error) });
+        return undefined;
+      });
+      if (deadline === undefined || deadline.getTime() < at.getTime() || paid === true) {
         await store.drop({ ...owner, event_id: event.id });
-        continue;
+      } else if (paid === false) {
+        await store.promote({ ...owner, event_id: event.id });
       }
-      await store.promote({ ...owner, event_id: event.id });
     }
   }
 
@@ -376,15 +387,12 @@ export function createNoticingService(deps: NoticingDeps): NoticingService {
     calendar,
     settings,
   }: {
-    owner: NoticingOwner;
+    owner: PersonOwner;
     calendar: CalendarSource;
     settings: ReachSettings;
   }): Promise<void> {
-    await recordAll({
-      owner,
-      events: await watchCalendar({ source: calendar, settings, now: now() }),
-      status: 'pending',
-    });
+    const events = await watchCalendar({ source: calendar, settings, now: now() });
+    await store.recordAll({ ...owner, events, status: 'pending', now: now() });
   }
 
   /**
@@ -396,12 +404,12 @@ export function createNoticingService(deps: NoticingDeps): NoticingService {
     waiting,
     settings,
   }: {
-    owner: NoticingOwner;
+    owner: PersonOwner;
     waiting: readonly WaitingApproval[];
     settings: ReachSettings;
   }): Promise<void> {
     const events = watchApprovals({ waiting, settings, now: now() });
-    await recordAll({ owner, events, status: 'pending' });
+    await store.recordAll({ ...owner, events, status: 'pending', now: now() });
     const open = new Set(waiting.map(item => `approval_waiting:${item.session_id}:${item.approval_id}`));
     const recorded = await store.listPending({
       ...owner,
@@ -420,7 +428,7 @@ export function createNoticingService(deps: NoticingDeps): NoticingService {
    */
   async function ownersToWatch(
     watcher: NoticingWatcher,
-  ): Promise<{ owners: NoticingOwner[]; approvals: Map<string, WaitingApproval[]> }> {
+  ): Promise<{ owners: PersonOwner[]; approvals: Map<string, WaitingApproval[]> }> {
     const approvals = new Map<string, WaitingApproval[]>();
     if (watcher === 'approvals') {
       for (const item of await deps.approvals.listWaiting()) {
@@ -449,7 +457,7 @@ export function createNoticingService(deps: NoticingDeps): NoticingService {
     settings,
     waiting,
   }: {
-    owner: NoticingOwner;
+    owner: PersonOwner;
     watcher: NoticingWatcher;
     settings: ReachSettings;
     waiting: readonly WaitingApproval[];
@@ -469,6 +477,14 @@ export function createNoticingService(deps: NoticingDeps): NoticingService {
 
   return {
     async run({ watcher }) {
+      if (watcher === 'approvals') {
+        // A request closes itself once it expires, so a waiting one recorded before then is dropped for everyone,
+        // including people with no open request left for a pass to look at.
+        await store.dropStale({
+          kinds: WATCHER_KINDS.approvals,
+          created_before: new Date(now().getTime() - APPROVAL_EXPIRY_MINUTES * 60_000),
+        });
+      }
       const { owners, approvals } = await ownersToWatch(watcher);
       let raised = 0;
       for (const owner of owners) {

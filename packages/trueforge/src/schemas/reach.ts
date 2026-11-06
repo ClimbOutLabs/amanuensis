@@ -238,3 +238,12 @@ export const NoticingEventSchema = z.object({
 });
 
 export type NoticingEvent = z.infer<typeof NoticingEventSchema>;
+
+/** The model's answer for one event. The level is only a request: the person's rules decide what happens. */
+export const NoticingVerdictSchema = z.object({
+  level: DeliveryLevelSchema,
+  reason: z.string().trim().min(1).max(300),
+  message: z.string().trim().min(1).max(300),
+});
+
+export type NoticingVerdict = z.infer<typeof NoticingVerdictSchema>;

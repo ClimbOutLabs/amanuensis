@@ -1,4 +1,4 @@
-import type { NoticingOwner } from '../../db/noticingStore';
+import type { PersonOwner } from '../../db/personOwner';
 import type { IScheduleStore } from '../../db/scheduleStore';
 
 /**
@@ -9,7 +9,7 @@ export function scheduleTimezoneFor({
   scheduleStore,
 }: {
   scheduleStore: Pick<IScheduleStore<unknown>, 'listSchedules'>;
-}): (owner: NoticingOwner) => Promise<string> {
+}): (owner: PersonOwner) => Promise<string> {
   return async owner => {
     const { data } = await scheduleStore.listSchedules({
       tenant_id: owner.tenant_id,

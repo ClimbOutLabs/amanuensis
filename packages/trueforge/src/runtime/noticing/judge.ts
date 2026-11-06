@@ -1,10 +1,9 @@
 import type { LLMCreateParams } from '@truefoundry/trueforge-core/core';
 import type { Logger } from 'winston';
-import { z } from 'zod';
 
 import type { IModelProviderStore } from '../../db/modelProviderStore';
-import { DeliveryLevelSchema, type DeliveryLevel } from '../../schemas/deliveries';
-import type { NoticingEvent } from '../../schemas/reach';
+import type { DeliveryLevel } from '../../schemas/deliveries';
+import { NoticingVerdictSchema, type NoticingEvent, type NoticingVerdict } from '../../schemas/reach';
 import type { TurnModelUsage } from '../modelUsage';
 import { askModelOnce } from '../oneShotModelCall';
 import type { TokenFactoryBudget } from '../tokenFactoryBudget';
@@ -15,17 +14,8 @@ const JUDGE_MAX_TOKENS = 300;
 
 const NOTICING_JUDGE_VERSION = 'noticing/v1';
 
-/** The model's answer for one event. The level is only a request: the person's rules decide what happens. */
-const JudgeVerdictSchema = z.object({
-  level: DeliveryLevelSchema,
-  reason: z.string().trim().min(1).max(300),
-  message: z.string().trim().min(1).max(300),
-});
-
-export type JudgeVerdict = z.infer<typeof JudgeVerdictSchema>;
-
 /** Asks "does this matter" for one event. Throws when the model cannot answer, so the caller can fall back to a note. */
-export type NoticingJudge = (input: { event: NoticingEvent }) => Promise<JudgeVerdict>;
+export type NoticingJudge = (input: { event: NoticingEvent }) => Promise<NoticingVerdict>;
 
 /** `note`, `nudge` or `call` as the system prompt describes them, so the model knows what each costs the person. */
 function describeLevels(max: DeliveryLevel): string[] {
@@ -65,7 +55,7 @@ export function buildJudgeMessages({
 }
 
 /** Reads the model's JSON, allowing a fenced block. Undefined when it is not a usable verdict. */
-export function parseJudgeVerdict(raw: string): JudgeVerdict | undefined {
+export function parseJudgeVerdict(raw: string): NoticingVerdict | undefined {
   const unfenced = raw
     .trim()
     .replace(/^```(?:json)?\s*/i, '')
@@ -76,7 +66,7 @@ export function parseJudgeVerdict(raw: string): JudgeVerdict | undefined {
   } catch {
     return undefined;
   }
-  const parsed = JudgeVerdictSchema.safeParse(decoded);
+  const parsed = NoticingVerdictSchema.safeParse(decoded);
   return parsed.success ? parsed.data : undefined;
 }
 

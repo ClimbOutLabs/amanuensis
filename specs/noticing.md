@@ -30,11 +30,14 @@ Each finding has a stable id, so the same thing is never raised twice. When noth
 
 ## From finding to delivery
 
-- A finding is recorded as pending (or, for a bill due later, tracking) before anything is decided, and the watcher's checkpoint moves only after that. A pass that stops halfway leaves pending events for the next pass, never lost ones.
-- A pass claims a pending event with one atomic update that stores its claim id and time. Only the holder of the claim can record the decision. A claim older than 10 minutes counts as left behind, and another pass may take it.
-- A failed delivery puts the event back as pending. After five failed attempts it is marked failed and not tried again. Waiting for another pass is not a failure.
-- An event that is no longer worth saying when its turn comes (an event that has started, a bill past its due date, an approval past its 30 minutes) is dropped.
-- How loudly to reach a person is decided under a short per-person lease (60 seconds, taken again on a later try when busy). So two passes never both read "no nudges yet" and both nudge, or both call inside the gap.
+- Findings are written in one insert as pending (or, for a bill due later, tracking) before anything is decided, and the watcher's checkpoint moves only after that. A pass that stops halfway leaves pending events for the next pass, never lost ones.
+- A pass claims a pending event with one atomic update that stores its claim id and time, and counts the try. A claim older than 10 minutes counts as left behind, and another pass may take it. A pass that stopped without handing the event back used up a try too, so after five tries the event is marked failed and not tried again. A pass that only waited for another one hands the try back.
+- The model's answer is kept with the event, so a retry never asks the model again.
+- Right before delivering, still inside the person's lease, the pass marks the event as being delivered, but only if its claim is still its own. A pass that stalled while another took the event over delivers nothing.
+- The delivery's id is made from the person and the event, and a delivery with that id is made at most once. A pass that takes over an event left halfway through delivery finds the delivery already made, sends nothing and only marks the event done. A failure to mark an event done after its delivery went out is not a failed try.
+- An event that is no longer worth saying when its turn comes (an event that has started, a bill past its due date, an approval past its 30 minutes) is dropped. A tracked bill whose mail can no longer be read waits for the next pass and does not hold up the others.
+- Waiting approvals recorded more than 30 minutes ago are dropped for everyone, including people no pass looks at any more.
+- How loudly to reach a person is decided under a short per-person lease (60 seconds, held longer every 20 seconds while a delivery is going out, and taken again on a later try when busy). So two passes never both read "no nudges yet" and both nudge, or both call inside the gap.
 - How much has already reached the person is read from the delivery feed itself. Only what the assistant noticed counts toward the daily nudges. Reminders and Try it never do. Any delivery that went out as a call counts toward the time between calls.
 
 ## Deciding how loudly
@@ -74,7 +77,7 @@ Reminders follow the same channels. A reminder is never quieter than a nudge. A 
 
 ## Scope
 
-- `reach_settings`, `noticing_event` (with claim id, claim time and attempts), `noticing_checkpoint` and `reach_lease` tables on SQLite and Postgres, with shared store contract tests
+- `reach_settings`, `noticing_event` (with its status, the model's answer, the delivery made, the claim and the tries), `noticing_checkpoint` and `reach_lease` tables, in one migration on SQLite and Postgres, with shared store contract tests
 - Routes under `/api/v1/user/reach` (get, save, suggestions, test) and the internal `/api/internal/noticing/run`
 - Mail and calendar sources: Google mail and Google Calendar for a person who connected them, and, for the instance owner only, the instance's own Email (IMAP) and Calendar (CalDAV) connectors, read with their read-only tools. Those connectors hold one mailbox and one calendar for the whole instance, so they belong to the owner. The owner is the default person when sign-in is off, and otherwise the single address the owner signs in with when people are told apart by email (the same rule the installer's name for the owner follows). With several addresses or another sign-in claim the instance names no owner and no one gets the shared connectors. Everyone else gets mail and calendar noticing only from their own Google connection.
 - The Email (IMAP) connector does not pass on the receiving server's Authentication-Results, so no sender can be confirmed there. An always-important sender on IMAP mail is read as ordinary mail: it can still raise a bill note, never a nudge or call for the sender. The connector gives no thread, so "paid" is looked for in later mail with the same subject.

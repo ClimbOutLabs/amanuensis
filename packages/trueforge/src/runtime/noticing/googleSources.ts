@@ -13,7 +13,7 @@ import { grantedFeatures } from '@truefoundry/trueforge-core/core/google/scopes'
 import type { Logger } from 'winston';
 
 import type { IGoogleConnectionStore } from '../../db/googleConnectionStore';
-import type { NoticingOwner } from '../../db/noticingStore';
+import type { PersonOwner } from '../../db/personOwner';
 import type {
   CalendarEventInfo,
   CalendarSource,
@@ -178,7 +178,7 @@ export function createGoogleNoticingSources({
     async listOwners() {
       return await connections.listConnectedOwners();
     },
-    async sourcesFor(owner: NoticingOwner) {
+    async sourcesFor(owner: PersonOwner) {
       const record = await connections.get(owner);
       if (record?.status !== 'connected') {
         return { mail: undefined, calendar: undefined };

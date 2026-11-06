@@ -1,4 +1,4 @@
-import type { NoticingOwner } from '../../db/noticingStore';
+import type { PersonOwner } from '../../db/personOwner';
 import type { IReachSettingsStore } from '../../db/reachSettingsStore';
 import type { Delivery } from '../../schemas/deliveries';
 import { defaultReachSettings } from '../../schemas/reach';
@@ -13,7 +13,7 @@ import { applyReachRules, type ReachDecision } from './reachRules';
  */
 export interface ReminderReach {
   deliver(input: {
-    owner: NoticingOwner;
+    owner: PersonOwner;
     urgent: boolean;
     /** The reminder's own time zone, used for quiet hours when the person never saved Reach me. */
     timezone: string;
