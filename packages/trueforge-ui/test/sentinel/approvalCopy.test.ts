@@ -5,7 +5,11 @@ import {
   approvalSentLine,
   approvalStub,
   approveVerb,
+  cardConsequence,
+  cardHeadline,
+  cardReason,
   declineVerb,
+  safeVerb,
 } from '../../src/sentinel/approvalCopy.js';
 import type { SentinelApprovalCard } from '../../src/sentinel/types.js';
 
@@ -60,7 +64,7 @@ describe('approval copy', () => {
     });
     const stub = approvalStub(card);
     expect(stub.detail).not.toMatch(/tavily-|mcp\./i);
-    expect(stub.detail).toBe('Open Details to see what it does');
+    expect(stub.detail).toBe('Search the web with Tavily for harbour tides?');
   });
 
   it('asks "Send this email to a@x.com and 1 more?" for a new message, whatever the number of recipients', () => {
@@ -151,7 +155,36 @@ describe('approval copy', () => {
     expect(approvalSentLine(card, '09:14')).toBe('Done · 09:14');
     expect(approvalSentLine(cardWith({ email: reply }), '09:14')).toBe('Sent to Rui · 09:14');
     const stub = approvalStub(card);
-    expect(stub).toEqual({ what: 'Action', detail: 'Open Details to see what it does' });
+    expect(stub).toEqual({ what: 'Approval', detail: 'Run the report.' });
     expect('state' in stub).toBe(false);
+  });
+
+  it('reads the headline, consequence and reason from the server copy when the card carries it', () => {
+    const card = cardWith({
+      copy: {
+        headline: 'Delete "Dentist", Fri 7 Nov, 3:00 PM?',
+        consequence: "This removes the event from the calendar. It can't be restored from here.",
+        reason: 'Aman always asks before deleting an event in this calendar.',
+      },
+      cannot_be_undone: 'A different, older note.',
+    });
+    expect(cardHeadline(card)).toBe('Delete "Dentist", Fri 7 Nov, 3:00 PM?');
+    expect(cardConsequence(card)).toBe("This removes the event from the calendar. It can't be restored from here.");
+    expect(cardReason(card)).toBe('Aman always asks before deleting an event in this calendar.');
+  });
+
+  it('falls back to the older fields on a card saved before copy existed', () => {
+    const card = cardWith({ cannot_be_undone: "Once this is sent, it can't be unsent." });
+    expect(cardHeadline(card)).toBe('Run the report.');
+    expect(cardConsequence(card)).toBe("Once this is sent, it can't be unsent.");
+    expect(cardReason(card)).toBeNull();
+  });
+
+  it('names the safe choice for the card kind', () => {
+    expect(safeVerb(cardWith({ email: reply }))).toBe("Don't send");
+    expect(safeVerb(cardWith({ email: { ...reply, action: 'save' } }))).toBe("Don't save");
+    expect(safeVerb(cardWith({ destructive: true }))).toBe('Keep it');
+    expect(safeVerb(cardWith({}))).toBe('Not now');
+    expect(safeVerb(cardWith({ email: reply, mail_new_recipients: ['a@x.com'] }))).toBe("Don't send");
   });
 });

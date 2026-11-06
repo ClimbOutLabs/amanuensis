@@ -126,9 +126,8 @@ describe('Google Calendar changes and standing grants', () => {
       await ctxWithGrants([[GOOGLE, 'create_event']]),
     );
     expect(decision).toMatchObject({ tier: 3, reason: 'calendar_write_guests' });
-    expect(decision.card?.plain_what).toContain(
-      'This change sends an invitation to other people, so Aman always asks.',
-    );
+    expect(decision.card?.copy?.reason).toBe('This change sends an invitation to other people, so Aman always asks.');
+    expect(decision.card?.safe_choice).toBe(true);
   });
 
   it('shows a card for a change to an event that already has guests, even with an Always grant', async () => {
@@ -143,7 +142,7 @@ describe('Google Calendar changes and standing grants', () => {
       await ctxWithGrants([[GOOGLE, 'update_event']]),
     );
     expect(decision).toMatchObject({ tier: 3, reason: 'calendar_write_guests' });
-    expect(decision.card?.plain_what).toContain('reaches the other people invited to this event');
+    expect(decision.card?.copy?.reason).toContain('reaches the other people invited to this event');
   });
 });
 
@@ -166,7 +165,7 @@ describe('CalDAV changes and standing grants', () => {
     });
     const decision = await classifyTier(update, await ctxWithGrants([[CALDAV, 'update_event']]));
     expect(decision).toMatchObject({ tier: 3, reason: 'caldav_calendar_guests' });
-    expect(decision.card?.plain_what).toContain(
+    expect(decision.card?.copy?.reason).toBe(
       'Aman always asks before changing an event in this calendar, because it cannot check who else is on it.',
     );
   });
@@ -188,10 +187,12 @@ describe('CalDAV changes and standing grants', () => {
 });
 
 describe('unknown guests always ask', () => {
-  it('shows a card for a CalDAV delete whose guest list cannot be read, even with an Always grant', async () => {
+  it('refuses a CalDAV delete whose event cannot be read at all, even with an Always grant', async () => {
     const delete_action = caldavAction('delete_event', { id: 'ev1', scope: 'this' });
     const withGrant = await ctxWithGrants([[CALDAV, 'delete_event']]);
-    expect(await classifyTier(delete_action, withGrant)).toMatchObject({ tier: 3, reason: 'caldav_calendar_guests' });
+    const decision = await classifyTier(delete_action, withGrant);
+    expect(decision).toMatchObject({ tier: 3, reason: 'auto_denied', auto_deny: 'cannot_describe' });
+    expect(decision.card).toBeNull();
   });
 
   it('shows a card for a CalDAV update whose guest list is unknown, even with an Always grant', async () => {
@@ -208,9 +209,21 @@ describe('unknown guests always ask', () => {
 });
 
 describe('invitation replies and connector calendar tools', () => {
-  it('shows a card for a CalDAV invitation reply, even with an Always grant', async () => {
+  it('refuses a CalDAV invitation reply whose event cannot be read, even with an Always grant', async () => {
     const decision = await classifyTier(
       caldavAction('respond_to_event', { id: 'ev1', response: 'accept', confirm_token: 'tok' }),
+      await ctxWithGrants([[CALDAV, 'respond_to_event']]),
+    );
+    expect(decision).toMatchObject({ tier: 3, reason: 'auto_denied', auto_deny: 'cannot_describe' });
+    expect(decision.card).toBeNull();
+  });
+
+  it('shows a card for a CalDAV invitation reply whose event was read, even with an Always grant', async () => {
+    const decision = await classifyTier(
+      {
+        ...caldavAction('respond_to_event', { id: 'ev1', response: 'accept', confirm_token: 'tok' }),
+        caldav_event: CALDAV_NO_GUESTS,
+      },
       await ctxWithGrants([[CALDAV, 'respond_to_event']]),
     );
     expect(decision).toMatchObject({ tier: 3, reason: 'caldav_invitation_reply' });
@@ -296,13 +309,14 @@ describe('a fetched CalDAV event decides whether guests are reached', () => {
     expect(await classifyTier(deletion, withGrant)).toMatchObject({ tier: 3, reason: 'caldav_calendar_guests' });
   });
 
-  it('shows a card for an event that could not be parsed, even with an Always grant', async () => {
+  it('refuses a change to an event that could not be parsed, even with an Always grant', async () => {
     const review = caldavEventReviewFrom({ id: 'ev1', result: { unexpected: true } });
     const update = { ...caldavAction('update_event', UPDATE_ARGS), caldav_event: review };
     const decision = await classifyTier(update, await ctxWithGrants([[CALDAV, 'update_event']]));
-    expect(decision).toMatchObject({ tier: 3, reason: 'caldav_calendar_guests' });
-    expect(decision.card?.plain_what).toContain(
-      'Aman always asks before changing an event in this calendar, because it cannot check who else is on it.',
+    expect(decision).toMatchObject({ tier: 3, reason: 'auto_denied', auto_deny: 'cannot_describe' });
+    expect(decision.card).toBeNull();
+    expect(decision.owner_message).toBe(
+      "I can't see which event this is or who's on it, so I won't change it. Open it in your calendar and tell me the title.",
     );
   });
 });

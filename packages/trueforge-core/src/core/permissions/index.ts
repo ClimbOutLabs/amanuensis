@@ -31,6 +31,14 @@ export {
 } from './browserToolNames';
 export type { BrowserToolName } from './browserToolNames';
 export {
+  calendarCardCopy,
+  emailCardCopy,
+  fileCardCopy,
+  paymentCardCopy,
+  sandboxCardCopy,
+  simpleCardCopy,
+} from './cardCopy';
+export {
   approvalCardForGatedCall,
   canonicalShellForm,
   classifyHostToolCall,
@@ -67,6 +75,7 @@ export type { RunnerWorkflow } from './runner';
 export { DEMO_CONNECTOR_REFUSAL, DEMO_SEND_REFUSAL, recipientsAllowed } from './sendAllowlist';
 export {
   AUTO_DENY_REASONS,
+  ApprovalCardCopySchema,
   TIER2_ACTION_KINDS,
   Tier3CardSchema,
   TierSchema,
@@ -76,7 +85,16 @@ export {
   tier2Decision,
   tier3Decision,
 } from './tier';
-export type { AutoDenyReason, Tier, Tier2ActionKind, Tier3Card, TierDecision, TrackedExecutionBinding } from './tier';
+export type {
+  ApprovalCardCopy,
+  AutoDenyReason,
+  Tier,
+  Tier2ActionKind,
+  Tier3Card,
+  Tier3Email,
+  TierDecision,
+  TrackedExecutionBinding,
+} from './tier';
 export type { ToolGrantIdentity, ToolGrantKey, ToolGrantStore } from './toolGrants';
 export {
   InMemoryTrackedExecutableStore,

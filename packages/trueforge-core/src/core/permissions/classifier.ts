@@ -156,8 +156,10 @@ import {
   tier1Decision,
   tier2Decision,
   tier3Decision,
+  type ApprovalCardCopy,
   type Tier2ActionKind,
   type Tier3Card,
+  type Tier3Email,
   type Tier3Persona,
   type Tier3Schedule,
   type TierDecision,
@@ -197,6 +199,14 @@ import {
 import type { CaldavEventReview } from '../calendar/caldav/eventReview';
 import { CALDAV_SERVER_NAME, isCaldavReadToolName } from '../calendar/caldav/toolContract';
 import { classifyCaldavTool } from './caldavTier';
+import {
+  calendarCardCopy,
+  emailCardCopy,
+  fileCardCopy,
+  paymentCardCopy,
+  sandboxCardCopy,
+  simpleCardCopy,
+} from './cardCopy';
 
 export interface SentinelAction {
   /** Original tool name (sandbox name or mcp server tool name). */
@@ -853,6 +863,27 @@ function withInternetNote({ decision, action }: { decision: TierDecision; action
     return decision;
   }
   return { ...decision, card: { ...decision.card, plain_what: `${decision.card.plain_what} ${EXEC_INTERNET_NOTE}` } };
+}
+
+/**
+ * Every card the shell and run-code paths raise gets its copy from the sandbox owner, applied here
+ * at the one choke point those paths return through, after the internet note has joined plain_what.
+ */
+function withSandboxCopy(decision: TierDecision): TierDecision {
+  if (decision.card === null || decision.card.copy != null) {
+    return decision;
+  }
+  return {
+    ...decision,
+    card: {
+      ...decision.card,
+      copy: sandboxCardCopy({
+        headline: decision.card.plain_what,
+        undo: decision.card.cannot_be_undone,
+        reason: null,
+      }),
+    },
+  };
 }
 
 /** Package managers whose installs go through the sandbox package gateway. */
@@ -1528,6 +1559,7 @@ function connectorBindingFor(action: SentinelAction): ConnectorBinding | undefin
 function writeCard(input: { plain_what: string; cannot_be_undone: string; ctx: ClassifyContext }): Tier3Card {
   return {
     plain_what: input.plain_what,
+    copy: fileCardCopy({ headline: input.plain_what, undo: input.cannot_be_undone }),
     plain_why: plainWhy(input.ctx.agent_intent),
     cannot_be_undone: input.cannot_be_undone,
     why_asked_again: null,
@@ -1726,6 +1758,11 @@ function classifyRunnerTool(action: SentinelAction, ctx: ClassifyContext): TierD
   return tier3Decision({
     card: {
       plain_what: `Run the ${workflowName} workflow?`,
+      copy: sandboxCardCopy({
+        headline: `Run the ${workflowName} workflow?`,
+        undo: `This workflow runs scripts ${ctx.web_search.assistantName} can edit.`,
+        reason: null,
+      }),
       plain_why: plainWhy(ctx.agent_intent),
       cannot_be_undone: `This workflow runs scripts ${ctx.web_search.assistantName} can edit.`,
       why_asked_again: null,
@@ -1761,6 +1798,7 @@ async function decideTier2(input: {
   const { ctx, action } = input;
   const card = {
     plain_what: input.plain_what,
+    copy: fileCardCopy({ headline: input.plain_what, undo: null }),
     plain_why: plainWhy(ctx.agent_intent),
     cannot_be_undone: null,
     why_asked_again: null,
@@ -1791,6 +1829,22 @@ async function decideTier2(input: {
       params: action.canonical_params,
     }),
   });
+}
+
+/**
+ * Copy for a card that sends something out of the machine: the payment owner's copy when an amount
+ * was extracted, the send sentence as the headline otherwise.
+ */
+function sendCardCopy(input: {
+  plain_what: string;
+  amount: string | null;
+  recipient: string | null;
+  destination: string | null;
+  undo: string | null;
+}): ApprovalCardCopy {
+  return input.amount !== null
+    ? paymentCardCopy({ amount: input.amount, recipient: input.recipient, destination: input.destination })
+    : simpleCardCopy({ headline: input.plain_what, undo: input.undo });
 }
 
 function externalServiceWhat(input: {
@@ -2369,8 +2423,32 @@ function gmailWriteCard(input: { action: SentinelAction; agent_intent: string | 
         : `Save a draft ${subject} in your Gmail ${recipientsLine}? It is not sent.`) +
     threadLine +
     (content.nameLeftOff || replaces?.nameLeftOff === true ? NAME_LEFT_OFF_LINE : '');
+  const email: Tier3Email = {
+    action: kind,
+    to: content.to.map(escapedMailbox),
+    cc: content.cc.map(escapedMailbox),
+    bcc: content.bcc.map(escapedMailbox),
+    subject: escapeDisplayText(content.subject),
+    body: escapeDisplayText(content.body, { keepNewlines: true }),
+    reply_to: content.replyTo === null ? null : escapeDisplayText(content.replyTo),
+    replaces:
+      replaces === undefined
+        ? null
+        : {
+            subject: escapeDisplayText(replaces.subject),
+            to: replaces.to.map(escapedMailbox),
+          },
+    reply_in_thread:
+      answered === undefined
+        ? null
+        : { subject: escapeDisplayText(answered.subject), from: escapeDisplayText(answered.from) },
+  };
   return {
     plain_what: plainWhat,
+    copy: emailCardCopy(email),
+    // A send reaches other people and cannot be unsent, so its safe choice comes first; a draft does not.
+    safe_choice: kind === 'send',
+    destructive: kind === 'send',
     plain_why: plainWhy(input.agent_intent),
     cannot_be_undone: kind === 'send' ? "Once this is sent, it can't be unsent." : null,
     why_asked_again: null,
@@ -2381,26 +2459,7 @@ function gmailWriteCard(input: { action: SentinelAction; agent_intent: string | 
     outbound_text: null,
     destination_host: null,
     outbound_truncated: false,
-    email: {
-      action: kind,
-      to: content.to.map(escapedMailbox),
-      cc: content.cc.map(escapedMailbox),
-      bcc: content.bcc.map(escapedMailbox),
-      subject: escapeDisplayText(content.subject),
-      body: escapeDisplayText(content.body, { keepNewlines: true }),
-      reply_to: content.replyTo === null ? null : escapeDisplayText(content.replyTo),
-      replaces:
-        replaces === undefined
-          ? null
-          : {
-              subject: escapeDisplayText(replaces.subject),
-              to: replaces.to.map(escapedMailbox),
-            },
-      reply_in_thread:
-        answered === undefined
-          ? null
-          : { subject: escapeDisplayText(answered.subject), from: escapeDisplayText(answered.from) },
-    },
+    email,
   };
 }
 
@@ -2462,6 +2521,7 @@ async function classifyMailRead(action: SentinelAction, ctx: ClassifyContext): P
     return tier3Decision({
       card: {
         plain_what: 'Allow marking these emails as read?',
+        copy: simpleCardCopy({ headline: 'Allow marking these emails as read?', undo: null }),
         plain_why: plainWhy(ctx.agent_intent),
         cannot_be_undone: null,
         why_asked_again: null,
@@ -2588,24 +2648,31 @@ function calendarWriteCard(input: {
   // An event that runs over more than one day is often a broken end date, so the card asks.
   const spanWarning =
     review.span_days > 1 ? ` This event runs over ${String(review.span_days)} days. Is that right?` : '';
-  // The same event was already created in this chat in the last few minutes: ask before adding another.
-  const duplicateLead =
-    review.action === 'create' && review.already_created ? 'You already have this event. Add another? ' : '';
-  const plainWhat =
+  // The same event was already created in this chat in the last few minutes: the card says so.
+  const duplicateLead = review.action === 'create' && review.already_created ? 'You already have this event.' : '';
+  const headline =
     review.action === 'create'
-      ? `${duplicateLead}Add ${title} to your Google Calendar on ${show(review.short_when)} (${show(review.time_zone)})?${guestLine}${spanWarning}`
-      : `Change ${review.before === null ? 'an event' : cardSubject(review.before.title)}${review.one_of_repeating ? ' (this one event of a repeating series)' : ''} in your Google Calendar to ${title} on ${show(review.short_when)} (${show(review.time_zone)})?${guestLine}${spanWarning}`;
+      ? `Add ${title} to your Google Calendar on ${show(review.short_when)} (${show(review.time_zone)})?`
+      : `Change ${review.before === null ? 'an event' : cardSubject(review.before.title)}${review.one_of_repeating ? ' (this one event of a repeating series)' : ''} in your Google Calendar to ${title} on ${show(review.short_when)} (${show(review.time_zone)})?`;
+  // The facts that follow from approving, in order: a duplicate warning, who gets emailed, a span warning.
+  const emailed =
+    [duplicateLead.trim(), guestLine.trim(), spanWarning.trim()].filter(part => part !== '').join(' ') || null;
   // Says why a guest change asks every time: neither a standing nor a chat-wide answer covers it.
   const alwaysAsks =
     review.attendees.length === 0
-      ? ''
+      ? null
       : review.action === 'create'
-        ? ` This change sends an invitation to other people, so ${assistant} always asks.`
-        : ` This change reaches the other people invited to this event, so ${assistant} always asks.`;
+        ? `This change sends an invitation to other people, so ${assistant} always asks.`
+        : `This change reaches the other people invited to this event, so ${assistant} always asks.`;
+  const undo = review.guests_emailed ? "Google emails the guests right away. That email can't be unsent." : null;
   return {
-    plain_what: `${plainWhat}${alwaysAsks}`,
+    plain_what: emailed === null ? headline : `${headline} ${emailed}`,
+    copy: calendarCardCopy({ headline, emailed, undo, reason: alwaysAsks }),
+    // A change that reaches guests puts the safe choice first; one on the person's own calendar does not.
+    safe_choice: review.attendees.length > 0,
+    destructive: false,
     plain_why: plainWhy(input.agent_intent),
-    cannot_be_undone: review.guests_emailed ? "Google emails the guests right away. That email can't be unsent." : null,
+    cannot_be_undone: undo,
     why_asked_again: null,
     destination: null,
     recipient: null,
@@ -2740,11 +2807,22 @@ function scheduleWriteCard(input: { review: Tier3Schedule; agent_intent: string 
   const show = (text: string) => escapeDisplayText(text);
   const name = cardSubject(review.name);
   const when = `${show(review.when)} (${show(review.time_zone)})`;
+  const headline =
+    review.action === 'create'
+      ? `Create the schedule ${name}?`
+      : `Delete the schedule ${name}, which runs ${when.charAt(0).toLowerCase()}${when.slice(1)}?`;
   return {
     plain_what:
       review.action === 'create'
-        ? `Create the schedule ${name}? It runs ${when.charAt(0).toLowerCase()}${when.slice(1)} and starts as soon as you approve.`
-        : `Delete the schedule ${name}, which runs ${when.charAt(0).toLowerCase()}${when.slice(1)}?`,
+        ? `${headline} It runs ${when.charAt(0).toLowerCase()}${when.slice(1)} and starts as soon as you approve.`
+        : headline,
+    copy: simpleCardCopy({
+      headline,
+      undo: review.action === 'delete' ? 'Once deleted, the schedule is gone for good.' : null,
+    }),
+    // Deleting a schedule is gone for good, so its safe choice comes first; creating one is reversible.
+    safe_choice: review.action === 'delete',
+    destructive: review.action === 'delete',
     plain_why: plainWhy(input.agent_intent),
     cannot_be_undone: review.action === 'delete' ? 'Once deleted, the schedule is gone for good.' : null,
     why_asked_again: null,
@@ -2775,6 +2853,7 @@ function personaWriteCard(input: { review: Tier3Persona; agent_intent: string | 
   const sentence = show(review.description).replace(/[.!?]+$/, '');
   return {
     plain_what: `Add a persona: ${show(review.name)}? ${sentence}.`,
+    copy: simpleCardCopy({ headline: `Add a persona: ${show(review.name)}?`, undo: null }),
     plain_why: plainWhy(input.agent_intent),
     cannot_be_undone: null,
     why_asked_again: null,
@@ -3162,6 +3241,16 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
         plain_what: draft
           ? `${newRecipientLine} Approving adds them to your send list and saves this draft. ${extraction.connector_what ?? sentence}`
           : `${newRecipientLine} Approving adds them to your send list and sends. ${sentence}`,
+        copy: sendCardCopy({
+          plain_what: sentence,
+          amount: fields.amount,
+          recipient: fields.recipient,
+          destination: fields.destination,
+          undo: draft ? null : "Once this is sent, it can't be unsent.",
+        }),
+        // A send to a new address reaches someone new and cannot be unsent: the safe choice comes first.
+        safe_choice: !draft,
+        destructive: !draft,
         plain_why: plainWhy(ctx.agent_intent),
         cannot_be_undone: draft ? null : "Once this is sent, it can't be unsent.",
         why_asked_again: null,
@@ -3194,14 +3283,24 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
   // the host later knows to check the Email list before the send; a connector that only shares the name never gets it.
   if (isHostMailSend(action)) {
     const { fields } = extraction;
+    const plain_what = externalServiceWhat({
+      tool_name: action.tool_name,
+      destination: fields.destination,
+      recipient: fields.recipient,
+      amount: fields.amount,
+    });
     return tier3Decision({
       card: {
-        plain_what: externalServiceWhat({
-          tool_name: action.tool_name,
-          destination: fields.destination,
-          recipient: fields.recipient,
+        plain_what,
+        copy: sendCardCopy({
+          plain_what,
           amount: fields.amount,
+          recipient: fields.recipient,
+          destination: fields.destination,
+          undo: "Once this is sent, it can't be unsent.",
         }),
+        safe_choice: true,
+        destructive: true,
         plain_why: plainWhy(ctx.agent_intent),
         cannot_be_undone: "Once this is sent, it can't be unsent.",
         why_asked_again: null,
@@ -3232,28 +3331,41 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
   const readOnlyHint = action.mcp_hints.read_only_hint === true;
   if (destructiveHint || (openWorldHint && !readOnlyHint)) {
     const { fields } = extraction;
+    // The external-service sentence wins: it is the more specific warning about where this goes.
+    const plain_what = namedSend
+      ? externalServiceWhat({
+          tool_name: action.tool_name,
+          destination: fields.destination,
+          recipient: fields.recipient,
+          amount: fields.amount,
+        })
+      : destructiveHint || extraction.connector_what === null
+        ? destructiveHint
+          ? 'Run this action, even though it might change or delete something for good?'
+          : 'Run this action, even though it reaches outside this machine?'
+        : extraction.connector_what;
+    // A call that only saves a draft sends nothing, so it carries no send warning.
+    const cannot_be_undone = destructiveHint
+      ? 'This might change or delete something for good.'
+      : extraction.staged_draft
+        ? null
+        : "Once this is sent, it can't be unsent.";
+    // A send or a destructive call puts the safe choice first; a staged draft stays reversible.
+    const reachesOut = extraction.sends || destructiveHint;
     return tier3Decision({
       card: {
-        // The external-service sentence wins: it is the more specific warning about where this goes.
-        plain_what: namedSend
-          ? externalServiceWhat({
-              tool_name: action.tool_name,
-              destination: fields.destination,
-              recipient: fields.recipient,
-              amount: fields.amount,
-            })
-          : destructiveHint || extraction.connector_what === null
-            ? destructiveHint
-              ? 'Run this action, even though it might change or delete something for good?'
-              : 'Run this action, even though it reaches outside this machine?'
-            : extraction.connector_what,
+        plain_what,
+        copy: sendCardCopy({
+          plain_what,
+          amount: fields.amount,
+          recipient: fields.recipient,
+          destination: fields.destination,
+          undo: cannot_be_undone,
+        }),
+        safe_choice: reachesOut,
+        destructive: reachesOut,
         plain_why: plainWhy(ctx.agent_intent),
-        // A call that only saves a draft sends nothing, so it carries no send warning.
-        cannot_be_undone: destructiveHint
-          ? 'This might change or delete something for good.'
-          : extraction.staged_draft
-            ? null
-            : "Once this is sent, it can't be unsent.",
+        cannot_be_undone,
         why_asked_again: null,
         destination: fields.destination,
         recipient: fields.recipient,
@@ -3295,6 +3407,16 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
     return tier3Decision({
       card: {
         plain_what: what,
+        copy: sendCardCopy({
+          plain_what: what,
+          amount: fields.amount,
+          recipient: fields.recipient,
+          destination: fields.destination,
+          undo: isDestructive ? "Once deleted, it's gone for good." : "Once this runs, it can't be undone.",
+        }),
+        // A send or a delete puts the safe choice first; an install keeps the action first.
+        safe_choice: namedSend || isDestructive,
+        destructive: namedSend || isDestructive,
         plain_why: plainWhy(ctx.agent_intent),
         cannot_be_undone: isDestructive ? "Once deleted, it's gone for good." : "Once this runs, it can't be undone.",
         why_asked_again: null,
@@ -3322,10 +3444,20 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
   // no first-party pass and no standing grant, because a grant would cover every later event.
   if (action.tool_type === 'mcp' && isCalendarChangeToolName(action.tool_name)) {
     const card = connectorApprovalCard({ action, extraction, agent_intent: ctx.agent_intent });
+    const plain_what = `Make this calendar change through ${escapeDisplayText(action.mcp_server_name ?? 'a connector you added')}?`;
     return tier3Decision({
       card: {
         ...card,
-        plain_what: `Make this calendar change through ${escapeDisplayText(action.mcp_server_name ?? 'a connector you added')}?`,
+        plain_what,
+        copy: calendarCardCopy({
+          headline: plain_what,
+          emailed: null,
+          undo: 'Guests may be told about this change.',
+          reason: null,
+        }),
+        // A calendar change from a connector may reach guests, so the safe choice comes first.
+        safe_choice: true,
+        destructive: false,
         cannot_be_undone: 'Guests may be told about this change.',
       },
       reason: 'connector_calendar_write',
@@ -3553,7 +3685,7 @@ export async function classifyTier(action: SentinelAction, ctx: ClassifyContext)
   // fail-closed Tier 3 default below.
   if (action.tool_type === 'truefoundry-system') {
     if (name === 'exec') {
-      return withInternetNote({ decision: await classifyExecShell(action, ctx), action });
+      return withSandboxCopy(withInternetNote({ decision: await classifyExecShell(action, ctx), action }));
     }
     if (name === 'write_file' || name === 'apply_patch' || name === 'replace_text') {
       return classifySandboxWrite(action, ctx);
@@ -3574,12 +3706,17 @@ export async function classifyTier(action: SentinelAction, ctx: ClassifyContext)
       }
     }
     if (name === 'run_code' || name === 'submit_implementation_plan') {
+      const plain_what =
+        name === 'run_code'
+          ? 'Run code the assistant wrote in the sandbox?'
+          : 'Submit this implementation plan for review?';
       return tier3Decision({
         card: {
-          plain_what:
+          plain_what,
+          copy:
             name === 'run_code'
-              ? 'Run code the assistant wrote in the sandbox?'
-              : 'Submit this implementation plan for review?',
+              ? sandboxCardCopy({ headline: plain_what, undo: "Once this runs, it can't be undone.", reason: null })
+              : simpleCardCopy({ headline: plain_what, undo: "Once this runs, it can't be undone." }),
           plain_why: plainWhy(ctx.agent_intent),
           cannot_be_undone: "Once this runs, it can't be undone.",
           why_asked_again: null,

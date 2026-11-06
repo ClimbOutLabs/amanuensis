@@ -51,7 +51,7 @@ describe('PermissionApprovalCard', () => {
       cannot_be_undone: "Once this is sent, it can't be unsent.",
       why_asked_again: 'the earlier approval expired',
     });
-    expect(screen.getByText('Send $250 to Acme Corp')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Send $250 to Acme Corp' })).toBeInTheDocument();
     expect(screen.getByText('Why: You asked the assistant to pay the invoice.')).toBeInTheDocument();
     expect(screen.getByText('Destination')).toBeInTheDocument();
     expect(screen.getAllByText('acme-corp')[0]).toBeInTheDocument();
@@ -115,7 +115,7 @@ describe('PermissionApprovalCard', () => {
   it('shows no reason line when the server sent none', () => {
     renderCard({ plain_why: null });
     expect(screen.queryByText(/did not state a reason/i)).not.toBeInTheDocument();
-    expect(screen.getByText('Send $250 to Acme Corp')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Send $250 to Acme Corp' })).toBeInTheDocument();
   });
 
   it('shows the cannot-be-undone note as a calm line with no warning box or prefix', () => {
@@ -128,10 +128,61 @@ describe('PermissionApprovalCard', () => {
 
   it('renders a card with a null cannot-be-undone note without an empty row or the word null', () => {
     renderCard({ cannot_be_undone: null });
-    expect(screen.getByText('Send $250 to Acme Corp')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Send $250 to Acme Corp' })).toBeInTheDocument();
     expect(screen.queryByText(/null/i)).not.toBeInTheDocument();
     expect(document.querySelector('p:empty')).toBeNull();
     expect(document.querySelectorAll('p > svg')).toHaveLength(0);
+  });
+
+  it('puts the safe choice first as the primary button on a destructive card, and hides the reason behind the (i)', () => {
+    const { onApprove, onDeny } = renderCard({
+      copy: {
+        headline: 'Delete "Dentist", Fri 7 Nov, 3:00 PM?',
+        consequence: "This removes the event from the calendar. It can't be restored from here.",
+        reason: 'Aman always asks before deleting an event in this calendar.',
+      },
+      safe_choice: true,
+      destructive: true,
+    });
+    expect(screen.getByRole('heading', { name: 'Delete "Dentist", Fri 7 Nov, 3:00 PM?' })).toBeInTheDocument();
+    expect(
+      screen.getByText("This removes the event from the calendar. It can't be restored from here."),
+    ).toBeInTheDocument();
+    expect(screen.queryByText('Aman always asks before deleting an event in this calendar.')).not.toBeInTheDocument();
+
+    const buttons = screen
+      .getAllByRole('button')
+      .filter(button => ['Keep it', 'Allow'].includes(button.textContent ?? ''));
+    expect(buttons.map(button => button.textContent)).toEqual(['Keep it', 'Allow']);
+    expect(buttons[0]?.hasAttribute('data-approval-primary')).toBe(true);
+    expect(buttons[1]?.hasAttribute('data-approval-primary')).toBe(false);
+    expect(buttons[1]?.className).toMatch(/text-failure-bg/);
+    expect(screen.queryByRole('button', { name: 'Not now' })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /Why I'm asking/ }));
+    expect(screen.getByText('Aman always asks before deleting an event in this calendar.')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Keep it' }));
+    expect(onDeny).toHaveBeenCalledTimes(1);
+    expect(onApprove).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Allow' }));
+    expect(onApprove).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps the action primary and the safe choice quiet on a reversible card', () => {
+    renderCard({
+      copy: {
+        headline: 'Write the summary into notes.md?',
+        consequence: null,
+        reason: 'This kind of write always asks.',
+      },
+    });
+    const allow = screen.getByRole('button', { name: 'Allow' });
+    expect(allow.hasAttribute('data-approval-primary')).toBe(true);
+    expect(screen.getByRole('button', { name: 'Not now' })).toBeInTheDocument();
+    expect(screen.queryByText('This kind of write always asks.')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /Why I'm asking/ }));
+    expect(screen.getByText('This kind of write always asks.')).toBeInTheDocument();
   });
 
   it("labels the reason as the agent's own words", () => {

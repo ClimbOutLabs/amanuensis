@@ -5,7 +5,7 @@ import type { ReactNode } from 'react';
 import { useOptionalPersonalization } from '../components/PersonalizationContext.js';
 import { useApprovalCardPlacement } from '../hooks/useApprovalCardPlacement.js';
 import { useApprovalNav } from '../hooks/useApprovalNav.js';
-import { approvalQuestion } from '../sentinel/approvalCopy.js';
+import { cardHeadline } from '../sentinel/approvalCopy.js';
 import { useOptionalSentinelState } from '../sentinel/SentinelStateProvider.js';
 import { useSlot } from '../theme/SlotsProvider.js';
 import { assistantDisplayName } from '../utils/assistantName.js';
@@ -24,7 +24,7 @@ export function ApprovalNavContainer({ children }: { children: (docked: boolean)
   const docked = count > 0 && placement === 'off-screen';
 
   const card = currentId === null ? undefined : sentinel?.approvalFor(currentId)?.card;
-  const title = card === undefined ? undefined : approvalQuestion(card);
+  const title = card === undefined ? undefined : cardHeadline(card);
 
   return (
     <>

@@ -146,7 +146,7 @@ afterEach(() => {
 describe('ToolCallContainer Sentinel approvals', () => {
   it('renders the plain-language card for a Tier 2 approval', () => {
     renderPending([{ id: 'a', tier: 2 }]);
-    expect(screen.getByText('Do a')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Do a' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Allow' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Not now' })).toBeInTheDocument();
   });
@@ -211,7 +211,7 @@ describe('ToolCallContainer Sentinel approvals', () => {
       { id: 'b', tier: 2 },
       { id: 'danger', tier: 3 },
     ]);
-    const tier3Card = screen.getByText('Do danger').closest('article');
+    const tier3Card = screen.getByRole('heading', { name: 'Do danger' }).closest('article');
     expect(tier3Card).not.toBeNull();
     if (tier3Card instanceof HTMLElement) {
       expect(within(tier3Card).queryByRole('button', { name: /Approve all/ })).not.toBeInTheDocument();
