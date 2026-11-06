@@ -359,6 +359,8 @@ export type BeginTurnExecutionDeps = Pick<
   previousTurnId?: string | null;
   /** From CreateTurnRequest.client_timezone, or a schedule's own time zone for its runs. */
   clientTimezone?: string | undefined;
+  /** From CreateTurnRequest.spoken_reply. */
+  spokenReply?: boolean | undefined;
 };
 
 /**
@@ -421,6 +423,8 @@ function createTurnResolver(deps: {
   googleConnectionStore?: IGoogleConnectionStore | undefined;
   /** From CreateTurnRequest.client_timezone. See ITurnResourceResolver.clientTimezone. */
   clientTimezone?: string | undefined;
+  /** From CreateTurnRequest.spoken_reply. See ITurnResourceResolver.spokenReply. */
+  spokenReply?: boolean | undefined;
   /** persists run_code's harvested result files as turn artifacts at harvest time. */
   turnArtifactStore: ITurnArtifactStore;
   /**
@@ -479,6 +483,7 @@ function createTurnResolver(deps: {
     googleConnectionStore,
     turnArtifactStore,
     clientTimezone,
+    spokenReply,
     toolOutputScreenEnabled,
     tokenFactoryBudget,
     modelUsage,
@@ -627,6 +632,7 @@ function createTurnResolver(deps: {
       mailAccounts: mailAccountDirectory,
       mcpRequestTimeoutMs: configuration.MCP_REQUEST_TIMEOUT_MS,
       mcpConnectTimeoutMs: configuration.MCP_CONNECT_TIMEOUT_MS,
+      mcpMaxResponseBytes: configuration.MCP_TOOL_CALL_MAX_RESPONSE_BYTES,
       pageFixtures: configuration.AMAN_EVAL_MODE ? evalPageFixtures() : undefined,
       sandboxProvider: async ({ spec, existingSandboxId, tracing, sentinel }) => {
         const provider = await sandboxProviderResolver({
@@ -855,6 +861,7 @@ function createTurnResolver(deps: {
       boundRepository,
       serverSandboxAvailable,
       clientTimezone,
+      spokenReply,
       compactionThresholdTokensDefault: configuration.CONTEXT_COMPACTION_THRESHOLD_TOKENS,
       toolDispatchMaxConcurrency: configuration.TOOL_DISPATCH_MAX_CONCURRENCY,
       toolCallTimeoutMs: configuration.TOOL_CALL_TIMEOUT_MS,
@@ -1810,6 +1817,7 @@ async function beginAcceptedTurnExecution(
         chatSearchEnabled,
         personaStore: deps.personaStore,
         clientTimezone: deps.clientTimezone,
+        spokenReply: deps.spokenReply,
         toolOutputScreenEnabled,
         turnArtifactStore: deps.turnArtifactStore,
         tokenFactoryBudget: deps.tokenFactoryBudget,
@@ -2699,6 +2707,7 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
       googleConnectionStore: deps.googleConnectionStore,
       globalSettingsStore: deps.globalSettingsStore,
       clientTimezone: body.client_timezone,
+      spokenReply: body.spoken_reply,
       toolOutputScreenEnabled,
       turnArtifactStore: deps.turnArtifactStore,
       tokenFactoryBudget: deps.tokenFactoryBudget,

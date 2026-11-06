@@ -334,7 +334,7 @@ plan_build() {
   INSTALL_UPGRADE=0
   PLAN_UPGRADE_NOTE=
   if [ "$have_release" = 1 ] && release_load "$RELEASE_DIR/release.json"; then
-    if [ "$CUR_APP_TAG" != "$REL_APP_TAG" ] || [ "$CUR_STT_TAG" != "$REL_STT_TAG" ] || [ "$CUR_CALENDAR_TAG" != "$REL_CALENDAR_TAG" ] || [ "$CUR_BROWSER_TAG" != "$REL_BROWSER_TAG" ] || [ "$CUR_BROWSER_GATEWAY_TAG" != "$REL_BROWSER_GATEWAY_TAG" ] || [ "$CUR_DEX_IMAGE" != "$REL_DEX_IMAGE" ] || [ "$CUR_MAIL_EMAIL_IMAGE" != "$REL_MAIL_EMAIL_IMAGE" ]; then
+    if [ "$CUR_APP_TAG" != "$REL_APP_TAG" ] || [ "$CUR_STT_TAG" != "$REL_STT_TAG" ] || [ "$CUR_TTS_TAG" != "$REL_TTS_TAG" ] || [ "$CUR_CALENDAR_TAG" != "$REL_CALENDAR_TAG" ] || [ "$CUR_BROWSER_TAG" != "$REL_BROWSER_TAG" ] || [ "$CUR_BROWSER_GATEWAY_TAG" != "$REL_BROWSER_GATEWAY_TAG" ] || [ "$CUR_DEX_IMAGE" != "$REL_DEX_IMAGE" ] || [ "$CUR_MAIL_EMAIL_IMAGE" != "$REL_MAIL_EMAIL_IMAGE" ]; then
       # A re-run never quietly reuses older images: this checkout is what gets installed.
       INSTALL_UPGRADE=1
       PLAN_UPGRADE_NOTE="This copy of Aman is newer than the installed one, so it will be updated."
@@ -346,6 +346,7 @@ plan_build() {
 
   plan_image "$REL_APP_TAG" "The Aman app is built" "Build the Aman app" app-base app-deps dockerfile-frontend
   plan_image "$REL_STT_TAG" "The speech-to-text service is built" "Build the speech-to-text service" stt-base stt-deps
+  plan_image "$REL_TTS_TAG" "The voice that reads replies aloud is built" "Build the voice that reads replies aloud" tts-deps tts-voice
   plan_image "$REL_CALENDAR_TAG" "The calendar connector is built" "Build the calendar connector"
   plan_image "$REL_BROWSER_TAG $REL_BROWSER_GATEWAY_TAG" "Aman's browser is built" "Build Aman's browser" browser-base browser-deps browser-gateway-base
   plan_image "$REL_DEX_IMAGE" "The sign-in service is downloaded" "Download the sign-in service" dex
@@ -511,6 +512,8 @@ docker_available_for_probes() {
 plan_image() { # tags (one, or several built by the same step, space separated), have text, todo text, download ids...
   local tags=$1 have=$2 text=$3 dl tag built=1
   shift 3
+  # A step with no image to look for would otherwise always read as done.
+  [ -n "${tags// /}" ] || die "The installer could not name the images for this step: $text. Run the installer from a complete copy of the Aman code."
   if docker_available_for_probes; then
     for tag in $tags; do
       docker_image_exists "$tag" || built=0
@@ -628,7 +631,7 @@ install_execute() {
   if [ "$INSTALL_UPGRADE" = 1 ]; then
     upgrade_switch
   else
-    machine_up "$REL_STT_TAG"
+    machine_up "$REL_STT_TAG" "$REL_TTS_TAG"
     for name in $(reg_names); do
       recreate=
       case "$ADDRESS_CHANGED" in *" $name "*) recreate=recreate ;; esac
@@ -647,7 +650,7 @@ install_execute() {
     instance_create
     AMAN_PASSWORD=
   fi
-  if [ -n "$CAL_TARGET" ] && [ -n "$CAL_EMAIL" ] && [ -z "$CAL_SKIP" ]; then calendar_apply "$CAL_TARGET"; fi
+  if [ -n "$CAL_TARGET" ] && [ -n "$CAL_EMAIL" ]; then calendar_apply "$CAL_TARGET"; fi
   if [ -n "$EM_TARGET" ] && [ -n "$EM_ADDRESS" ] && [ -z "$EM_SKIP" ]; then email_apply "$EM_TARGET"; fi
   tf_rotation_apply
   if tls_authority_needs_replacing && [ -n "$(tls_instances)" ]; then

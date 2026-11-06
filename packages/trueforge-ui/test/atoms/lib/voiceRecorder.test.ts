@@ -1,6 +1,14 @@
 import { describe, expect, it } from 'vitest';
 
-import { encodeWav, resampleLinear, VOICE_SAMPLE_RATE } from '@/atoms/lib/voiceRecorder.js';
+import {
+  createSilenceDetector,
+  encodeWav,
+  MIN_SPEECH_MS,
+  PAUSE_AFTER_SPEECH_MS,
+  QUIET_TIMEOUT_MS,
+  resampleLinear,
+  VOICE_SAMPLE_RATE,
+} from '@/atoms/lib/voiceRecorder.js';
 
 describe('encodeWav', () => {
   it('writes a 16-bit mono WAV with the sidecar sample rate', async () => {
@@ -45,5 +53,36 @@ describe('resampleLinear', () => {
     const samples = new Float32Array([0, 10]);
     const out = resampleLinear(samples, { fromRate: 1, toRate: 2 });
     expect(Array.from(out)).toEqual([0, 5, 10, 10]);
+  });
+});
+
+describe('createSilenceDetector', () => {
+  const RATE = 1000;
+  const loud = (ms: number) => new Float32Array(ms).fill(0.2);
+  const quiet = (ms: number) => new Float32Array(ms);
+
+  it('reports a pause once speech has been heard and then stops', () => {
+    const detect = createSilenceDetector(RATE);
+    expect(detect(loud(MIN_SPEECH_MS))).toBeNull();
+    expect(detect(quiet(PAUSE_AFTER_SPEECH_MS - 1))).toBeNull();
+    expect(detect(quiet(1))).toBe('pause');
+    // Reports once.
+    expect(detect(quiet(PAUSE_AFTER_SPEECH_MS))).toBeNull();
+  });
+
+  it('a short sound is not speech, and talking again resets the pause', () => {
+    const detect = createSilenceDetector(RATE);
+    expect(detect(loud(MIN_SPEECH_MS - 1))).toBeNull();
+    expect(detect(quiet(PAUSE_AFTER_SPEECH_MS))).toBeNull();
+    expect(detect(loud(10))).toBeNull();
+    expect(detect(quiet(PAUSE_AFTER_SPEECH_MS - 1))).toBeNull();
+    expect(detect(loud(10))).toBeNull();
+    expect(detect(quiet(PAUSE_AFTER_SPEECH_MS))).toBe('pause');
+  });
+
+  it('reports quiet when nobody speaks at all', () => {
+    const detect = createSilenceDetector(RATE);
+    expect(detect(quiet(QUIET_TIMEOUT_MS - 1))).toBeNull();
+    expect(detect(quiet(1))).toBe('quiet');
   });
 });

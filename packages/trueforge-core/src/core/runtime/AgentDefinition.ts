@@ -76,6 +76,8 @@ export interface AgentDefinition {
    * to UTC.
    */
   clientTimezone?: string | undefined;
+  /** True when the person spoke the message and the client reads the reply aloud. */
+  spokenReply?: boolean | undefined;
   /**
    * Names for the root assistant's identity section. Omitted or empty values use the default assistant name and
    * the neutral "person you work for" wording. Sub-agent threads ignore it.
@@ -122,4 +124,11 @@ export interface AgentDefinition {
    * schedules, files or checklists. For an agent that may only answer from what it already knows.
    */
   readOnly?: boolean | undefined;
+  /**
+   * The one exception to `readOnly`: the host-owned tool set holding the guide's search
+   * over Aman's public sources, and nothing else. Set by the host only, and only for the
+   * guide persona; it is not a general tool list, and no other tool set joins it. A
+   * read-only definition without it offers no tools at all.
+   */
+  guideSearchToolSet?: IToolSet | undefined;
 }

@@ -20,6 +20,7 @@ import { createAgentsRouter } from './apis/agents';
 import { createAuditLogRouter } from './apis/auditLog';
 import { createAuthRouter } from './apis/auth';
 import { createBriefItemsRouter } from './apis/briefItems';
+import { createBrowserLiveRouter } from './apis/browserLive';
 import { createBugReportRouter } from './apis/bugReport';
 import { createAppBugReportRouter } from './apis/bugReportApp';
 import { CALENDAR_SETTINGS_BASE_PATH, createCalendarAccountRouter } from './apis/calendarAccount';
@@ -30,6 +31,7 @@ import { createChatPicturesRouter } from './apis/chatPictures';
 import { createChatSearchRouter } from './apis/chatSearch';
 import { createDataExportRouter } from './apis/dataExport';
 import { createDataImportRouter } from './apis/dataImport';
+import { createDeliveriesRouter, createPushRouter } from './apis/deliveries';
 import { createEmailAccountRouter, EMAIL_SETTINGS_BASE_PATH } from './apis/emailAccount';
 import { createGoogleRouter } from './apis/google';
 import { createHelpRouter } from './apis/help';
@@ -85,6 +87,7 @@ import configuration, {
 import type { AgentRecord, IAgentStore } from './db/agentStore';
 import type { IBriefItemCompletionStore } from './db/briefItemCompletionStore';
 import type { ICompletedTurnEventStore } from './db/completedTurnEvents';
+import type { IDeliveryStore } from './db/deliveryStore';
 import type { IGlobalSettingsStore } from './db/globalSettingsStore';
 import type { IGoogleConnectionStore } from './db/googleConnectionStore';
 import type { IMcpServerWithAuthStore } from './db/mcpServerStore';
@@ -92,6 +95,7 @@ import type { IMcpToolGrantStore } from './db/mcpToolGrantStore';
 import type { IModelProviderStore } from './db/modelProviderStore';
 import type { IPersonalizationStore } from './db/personalizationStore';
 import type { IPersonaStore } from './db/personaStore';
+import type { IPushSubscriptionStore } from './db/pushSubscriptionStore';
 import type { IRepositoryStore } from './db/repositoryStore';
 import type { ISandboxProviderStore } from './db/sandboxProviderStore';
 import type { IScheduleStore } from './db/scheduleStore';
@@ -118,6 +122,7 @@ import type { ChatImageService } from './runtime/chatImages/chatImageService';
 import { createChatPictureService } from './runtime/chatPictures/chatPictureService';
 import type { ChatSearchIndexer } from './runtime/chatSearchIndexing';
 import { resolveDefaultChatModel } from './runtime/defaultChatModel';
+import type { DeliveryService } from './runtime/delivery/deliveryService';
 import type { EventSubscriptionRegistry } from './runtime/event-subscription';
 import { resolveSandboxProvider } from './runtime/sessionResources';
 import { createSpacePictureService } from './runtime/spacePictures/spacePictureService';
@@ -301,6 +306,12 @@ export interface ServerDeps<TTransaction> {
   /** Keeps the past-chat search index for people who turned the search on. */
   chatSearchIndexer: ChatSearchIndexer;
   briefItemStore: IBriefItemCompletionStore;
+  deliveryStore: IDeliveryStore;
+  pushSubscriptionStore: IPushSubscriptionStore;
+  /** The one door into the feed; due reminders go through it. */
+  deliveryService: DeliveryService;
+  /** The public key a browser needs to turn push on; undefined while push is off. */
+  webPushPublicKey: string | undefined;
   turnArtifactStore: ITurnArtifactStore<TTransaction>;
   /** Not tenant-scoped: the persisted live tool-output screen override is global. */
   globalSettingsStore: IGlobalSettingsStore<TTransaction>;
@@ -486,6 +497,7 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
     mcpCatalog: deps.mcpCatalog,
     scheduleStore: deps.scheduleStore,
     briefItemStore: deps.briefItemStore,
+    deliveryService: deps.deliveryService,
     sessions: deps.sessions,
     agentStore: deps.agentStore,
     personaStore: deps.personaStore,
@@ -737,6 +749,7 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
         globalSettingsStore: deps.globalSettingsStore,
         sentinelSettingsStore: deps.sentinelSettingsStore,
         sentinelAuditStore: deps.sentinelAuditStore,
+        deliveryStore: deps.deliveryStore,
         turnArtifactStore: deps.turnArtifactStore,
         tokenStore: deps.tokenStore,
         resolveMcpServerStore: deps.resolveMcpServerStore,
@@ -760,6 +773,7 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
       scheduleStore: deps.scheduleStore,
       globalSettingsStore: deps.globalSettingsStore,
       sentinelAuditStore: deps.sentinelAuditStore,
+      deliveryStore: deps.deliveryStore,
       turnArtifactStore: deps.turnArtifactStore,
       chatSearchIndexer: deps.chatSearchIndexer,
       tokenStore: deps.tokenStore,
@@ -859,6 +873,21 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
     withAuth(
       createAuditLogRouter({
         sentinelAuditStore: deps.sentinelAuditStore,
+        resolveRequestContext,
+      }),
+      authMiddleware,
+    ),
+  );
+  app.route(
+    '/api/v1/user/deliveries',
+    withAuth(createDeliveriesRouter({ deliveryStore: deps.deliveryStore, resolveRequestContext }), authMiddleware),
+  );
+  app.route(
+    '/api/v1/user/push',
+    withAuth(
+      createPushRouter({
+        pushSubscriptionStore: deps.pushSubscriptionStore,
+        publicKey: deps.webPushPublicKey,
         resolveRequestContext,
       }),
       authMiddleware,
@@ -966,6 +995,18 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
       createChatImagesRouter({
         sessions: deps.sessions,
         chatImages: deps.chatImages,
+        resolveRequestContext,
+        logger: deps.logger,
+      }),
+      createUiSessionAuthMiddleware(deps.authenticator),
+    ),
+  );
+  // Live view of Aman's browser, browser session only: the signed-in person watches and drives the
+  // tabs of their own browser profile, and no agent or API token can see or steer it for them.
+  app.route(
+    '/api/browser/live',
+    withAuth(
+      createBrowserLiveRouter({
         resolveRequestContext,
         logger: deps.logger,
       }),
@@ -1137,6 +1178,7 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
     withAuth(
       createVoiceRouter({
         logger: deps.logger,
+        resolveRequestContext,
       }),
       authMiddleware,
     ),

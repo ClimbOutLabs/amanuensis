@@ -106,6 +106,19 @@ export const DocumentScopeSchema = z
   })
   .describe('Host-derived folders the document reader may read without asking. Never model-authored.');
 
+export const BrowserClickReviewSchema = z
+  .object({
+    site: z.string().describe('Host of the page the click would happen on.'),
+    accessible_name: z.string().describe("The clicked element's accessible name, read from the live page."),
+    is_form_submit: z
+      .boolean()
+      .describe('True when the element submits a form: type=submit, or a plain button inside a form.'),
+    form_values: z
+      .record(z.string(), z.string())
+      .describe("Named field values on the clicked element's form, sensitive ones already masked."),
+  })
+  .describe('Host-read context for a browser click, used to classify it and to build its approval card.');
+
 export const InternalToolCallInfoSchema = z.object({
   type: z.enum(['truefoundry-system', 'mcp']).describe('Whether the tool is a system tool or MCP tool.'),
   mcp_server_id: z.string().describe('Internal MCP server id (empty for system tools).'),
@@ -175,6 +188,9 @@ export const InternalToolCallInfoSchema = z.object({
   ),
   document_scope: DocumentScopeSchema.optional().describe(
     'Host-derived folders the document reader may read without asking. Never model-authored or client supplied.',
+  ),
+  browser_click: BrowserClickReviewSchema.optional().describe(
+    'Host-read context for a browser_click call, read from the live page before the click. Never model-authored.',
   ),
   // Sentinel host-only classification. Populated by the classifier in
   // ToolSet/Sandbox; always present on classified calls, never wire-visible.
@@ -373,6 +389,7 @@ export type RedactedThinkingBlock = z.infer<typeof RedactedThinkingBlockSchema>;
 export type ToolEffectHints = z.infer<typeof ToolEffectHintsSchema>;
 export type MapsHosts = z.infer<typeof MapsHostsSchema>;
 export type DocumentScope = z.infer<typeof DocumentScopeSchema>;
+export type BrowserClickReview = z.infer<typeof BrowserClickReviewSchema>;
 export type InternalToolCallInfo = z.infer<typeof InternalToolCallInfoSchema>;
 export type RegisteredCommandExecution = z.infer<typeof RegisteredCommandExecutionSchema>;
 export type TrueFoundrySystemToolInfo = z.infer<typeof TrueFoundrySystemToolInfoSchema>;

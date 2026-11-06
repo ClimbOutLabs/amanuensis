@@ -9,6 +9,7 @@ import { startApprovalTestServer } from '../../trueforge/tests/fixtures/approval
 import { FINAL_TEXT } from '../../trueforge/tests/fixtures/scriptedModelServer.ts';
 import { inProcessApi } from './support/approvalChat.ts';
 import { findChromiumExecutable } from './support/findChromiumExecutable.ts';
+import { FIRST_LOAD_TIMEOUT_MS } from './support/firstLoad.ts';
 import { privateViteCache } from './support/viteCache.ts';
 
 const RENDER_TIMEOUT_MS = 45_000;
@@ -67,8 +68,8 @@ test(
 
       const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
       const page = await context.newPage();
-      await page.goto(`${origin}/`, { waitUntil: 'domcontentloaded', timeout: RENDER_TIMEOUT_MS });
-      await page.getByRole('complementary', { name: 'Recent chats' }).waitFor({ timeout: RENDER_TIMEOUT_MS });
+      await page.goto(`${origin}/`, { waitUntil: 'domcontentloaded', timeout: FIRST_LOAD_TIMEOUT_MS });
+      await page.getByRole('complementary', { name: 'Recent chats' }).waitFor({ timeout: FIRST_LOAD_TIMEOUT_MS });
       const composer = page.getByRole('textbox').first();
       await composer.waitFor({ timeout: RENDER_TIMEOUT_MS });
       await composer.fill('Hello');

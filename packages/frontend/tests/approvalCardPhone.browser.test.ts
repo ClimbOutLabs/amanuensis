@@ -10,6 +10,7 @@ import { createServer, defaultClientConditions } from 'vite';
 
 import { DEV_OPTIMIZE_DEPS } from '../src/devPrebundle.ts';
 import { findChromiumExecutable } from './support/findChromiumExecutable.ts';
+import { FIRST_LOAD_TIMEOUT_MS } from './support/firstLoad.ts';
 import { privateViteCache } from './support/viteCache.ts';
 
 const RENDER_TIMEOUT_MS = 45_000;
@@ -50,7 +51,7 @@ test('both approval cards fit a 390 px phone with every choice in reach', { time
     const page = await browser.newPage({ viewport: PHONE, isMobile: true, hasTouch: true });
     await page.goto(`http://127.0.0.1:${address.port}/tests/fixtures/approval-card-phone.fixture.html`, {
       waitUntil: 'domcontentloaded',
-      timeout: RENDER_TIMEOUT_MS,
+      timeout: FIRST_LOAD_TIMEOUT_MS,
     });
 
     const ticket = page.getByTestId('ticket-card');

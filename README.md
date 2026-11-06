@@ -94,7 +94,7 @@ Each persona has its own name, model, role and knowledge library.
 
 Setup takes about 15 minutes. Here is what you need:
 
-- **A Mac or a Linux computer** with about 10 GB of free space. Windows works too, through a free Microsoft add-on called WSL 2: see the [Windows guide](docs/install-windows.md). Windows support is still new, so expect a few more bumps than on a Mac or Linux. If you get stuck, [tell us](https://github.com/ClimbOutLabs/amanuensis/issues) and we'll help.
+- **A Mac or a Linux computer** with 16 GB of memory (8 GB is the bare minimum, and the first install is slow there) and free disk space: about 20 GB on a Mac, about 45 GB on Linux. Aman itself takes about 10 GB; on Linux it also keeps room for the two sandbox disks where it runs code. Windows works too, through a free Microsoft add-on called WSL 2: see the [Windows guide](docs/install-windows.md). Windows support is still new, so expect a few more bumps than on a Mac or Linux. If you get stuck, [tell us](https://github.com/ClimbOutLabs/amanuensis/issues) and we'll help.
 - **Docker**, the free program Aman runs inside. On a Mac, [download Docker Desktop](https://www.docker.com/products/docker-desktop/), install it and start it. On Linux, the installer can set Docker up for you.
 - **A Together AI account**, which gives Aman a model to think with. Signing up is free, and you pay Together for what you use. You can sign up now or after the install.
 
@@ -147,7 +147,7 @@ None of these change what it's allowed to do. Sending, deleting and installing s
 
 **5. Connect your email and calendar.** This is where it starts carrying things for you. Go to **Settings, Connectors**:
 
-- **Gmail and Google Calendar.** Choose **Google**, then **Connect**. The panel walks you through making your own Google sign-in in about ten minutes, so your mail goes from Google straight to your computer and nobody else is in between. Connect mail first, then **Connect Calendar**. [Step-by-step guide](docs/google.mdx).
+- **Gmail and Google Calendar.** Choose **Google**, then **Connect**. The panel walks you through making your own Google sign-in in about ten minutes, so your mail goes from Google straight to your computer and nobody else is in between. Connect mail first, then **Connect Calendar**. For Google Calendar only, the simpler way is the **Calendar** card with an app password. [Step-by-step guide](docs/google.mdx#connect-google-calendar-with-an-app-password).
 - **Any other mailbox or calendar.** Choose **Email** for an IMAP mailbox (Outlook, iCloud, Fastmail and most others), and **Calendar** for a CalDAV calendar.
 
 Maps use free public servers by default; you can point them at your own under Settings, Connectors, Maps.
@@ -271,7 +271,7 @@ Read [AGENTS.md](AGENTS.md) and any package-level `AGENTS.md` before changing co
 - [MCP connectors](docs/mcp-servers.mdx)
 - [Safety](docs/safety.md) and [privacy](docs/privacy.md)
 - [How memory works](docs/memory.md), the [memory design](ops/memory/DESIGN.md) and the [operations runbook](ops/memory/RUNBOOK.md)
-- [Sandbox](docs/sandbox.mdx), [schedules](docs/schedules.md), [backups](docs/backup.md), [voice input](docs/voice-input.mdx)
+- [Sandbox](docs/sandbox.mdx), [schedules](docs/schedules.md), [backups](docs/backup.md), [voice input](docs/voice-input.mdx), [Aman's browser](docs/browser.md)
 - [Upstream sync runbook](docs/UPSTREAM_SYNC.md) and [divergence policy](DIVERGENCE.md)
 
 </details>

@@ -467,6 +467,68 @@
         ],
         "type": "object"
       },
+      "ApprovalWaitingDelivery": {
+        "properties": {
+          "attempts": {
+            "description": "Each channel tried, oldest first.",
+            "items": {
+              "$ref": "#/components/schemas/DeliveryAttempt"
+            },
+            "type": "array"
+          },
+          "created_at": {
+            "description": "When the delivery was made, ISO 8601 UTC.",
+            "type": "string"
+          },
+          "id": {
+            "description": "Delivery id.",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "approval_waiting"
+            ],
+            "type": "string"
+          },
+          "level": {
+            "$ref": "#/components/schemas/DeliveryLevel"
+          },
+          "link": {
+            "$ref": "#/components/schemas/DeliveryApprovalLink"
+          },
+          "reason": {
+            "description": "Why this reached the person, in plain words.",
+            "maxLength": 500,
+            "minLength": 1,
+            "type": "string"
+          },
+          "seen_at": {
+            "description": "When the person first saw it on any device, or null while unread.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "text": {
+            "description": "What the person reads.",
+            "maxLength": 2000,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "link",
+          "id",
+          "level",
+          "text",
+          "reason",
+          "created_at",
+          "seen_at",
+          "attempts"
+        ],
+        "type": "object"
+      },
       "AskUserQuestionsConfig": {
         "default": {
           "enabled": true
@@ -1220,6 +1282,13 @@
       },
       "CalendarProvider": {
         "properties": {
+          "account_url_template": {
+            "description": "A built-in calendar address made from the email address; null when the provider does not use one.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "help_hint": {
             "description": "One plain sentence on how to get an app password.",
             "type": "string"
@@ -1232,7 +1301,7 @@
             ]
           },
           "key": {
-            "description": "Stable provider key, such as fastmail or other.",
+            "description": "Stable provider key, such as google or other.",
             "type": "string"
           },
           "name": {
@@ -1240,19 +1309,28 @@
             "type": "string"
           },
           "server_url": {
-            "description": "The built-in calendar address; null when it depends on the email domain or is typed.",
+            "description": "The built-in calendar address; null when it depends on the email domain, the email address or is typed.",
             "type": [
               "string",
               "null"
             ]
+          },
+          "setup_steps": {
+            "description": "Plain steps to show before the form; empty when the hint is enough.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
           }
         },
         "required": [
           "key",
           "name",
           "server_url",
+          "account_url_template",
           "help_url",
-          "help_hint"
+          "help_hint",
+          "setup_steps"
         ],
         "type": "object"
       },
@@ -2133,6 +2211,30 @@
         ],
         "type": "object"
       },
+      "CreatePushSubscriptionRequest": {
+        "properties": {
+          "endpoint": {
+            "description": "The push service address the browser gave this device. It must start with https.",
+            "format": "uri",
+            "maxLength": 2048,
+            "type": "string"
+          },
+          "keys": {
+            "$ref": "#/components/schemas/PushKeys"
+          },
+          "label": {
+            "description": "A short name for this device.",
+            "maxLength": 80,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "endpoint",
+          "keys"
+        ],
+        "type": "object"
+      },
       "CreateRepositoryPayload": {
         "additionalProperties": false,
         "properties": {
@@ -2358,6 +2460,10 @@
           "previous_turn_id": {
             "$ref": "#/components/schemas/PreviousTurnIdInput"
           },
+          "spoken_reply": {
+            "description": "True when the person spoke this message and the client reads the reply aloud. The reply is then kept short and plain.",
+            "type": "boolean"
+          },
           "stream": {
             "default": true,
             "description": "When true (default), stream turn events as SSE. When false, return the running turn immediately.",
@@ -2493,6 +2599,24 @@
         "properties": {},
         "type": "object"
       },
+      "DeletePushSubscriptionRequest": {
+        "properties": {
+          "endpoint": {
+            "description": "The push service address of the device to remove.",
+            "format": "uri",
+            "maxLength": 2048,
+            "type": "string"
+          }
+        },
+        "required": [
+          "endpoint"
+        ],
+        "type": "object"
+      },
+      "DeletePushSubscriptionResponse": {
+        "properties": {},
+        "type": "object"
+      },
       "DeleteScheduleResponse": {
         "properties": {},
         "type": "object"
@@ -2528,6 +2652,182 @@
       },
       "DeleteVerifyCommandResponse": {
         "properties": {},
+        "type": "object"
+      },
+      "Delivery": {
+        "discriminator": {
+          "mapping": {
+            "approval_waiting": "#/components/schemas/ApprovalWaitingDelivery",
+            "note": "#/components/schemas/NoteDelivery",
+            "nudge": "#/components/schemas/NudgeDelivery",
+            "reminder": "#/components/schemas/ReminderDelivery"
+          },
+          "propertyName": "kind"
+        },
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/ReminderDelivery"
+          },
+          {
+            "$ref": "#/components/schemas/NoteDelivery"
+          },
+          {
+            "$ref": "#/components/schemas/NudgeDelivery"
+          },
+          {
+            "$ref": "#/components/schemas/ApprovalWaitingDelivery"
+          }
+        ]
+      },
+      "DeliveryApprovalLink": {
+        "properties": {
+          "approval_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "session_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "type": {
+            "enum": [
+              "approval"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "session_id",
+          "approval_id"
+        ],
+        "type": "object"
+      },
+      "DeliveryAttempt": {
+        "properties": {
+          "attempted_at": {
+            "description": "When the attempt was made, ISO 8601 UTC.",
+            "type": "string"
+          },
+          "channel": {
+            "$ref": "#/components/schemas/DeliveryChannel"
+          },
+          "detail": {
+            "description": "A short plain-words note about the outcome, or null.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "outcome": {
+            "$ref": "#/components/schemas/DeliveryAttemptOutcome"
+          },
+          "target": {
+            "description": "The device or address tried, or null for the app itself.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "channel",
+          "outcome",
+          "detail",
+          "target",
+          "attempted_at"
+        ],
+        "type": "object"
+      },
+      "DeliveryAttemptOutcome": {
+        "enum": [
+          "sent",
+          "failed",
+          "gone",
+          "skipped"
+        ],
+        "type": "string"
+      },
+      "DeliveryChannel": {
+        "enum": [
+          "in_app",
+          "web_push"
+        ],
+        "type": "string"
+      },
+      "DeliveryChatLink": {
+        "properties": {
+          "session_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "type": {
+            "enum": [
+              "chat"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "session_id"
+        ],
+        "type": "object"
+      },
+      "DeliveryLevel": {
+        "enum": [
+          "note",
+          "nudge",
+          "call"
+        ],
+        "type": "string"
+      },
+      "DeliveryLink": {
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/DeliveryChatLink"
+          },
+          {
+            "$ref": "#/components/schemas/DeliveryApprovalLink"
+          },
+          {
+            "$ref": "#/components/schemas/DeliverySpaceLink"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "DeliverySpaceLink": {
+        "properties": {
+          "space_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "type": {
+            "enum": [
+              "space"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "space_id"
+        ],
+        "type": "object"
+      },
+      "DeliveryUnreadCount": {
+        "properties": {
+          "unread_count": {
+            "description": "Deliveries not yet seen on any device.",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "unread_count"
+        ],
         "type": "object"
       },
       "DisconnectGoogleResponse": {
@@ -2968,6 +3268,28 @@
         ],
         "type": "object"
       },
+      "GetDeliveryResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/Delivery"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
+      "GetDeliveryUnreadCountResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/DeliveryUnreadCount"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
       "GetEmailAccountResponse": {
         "properties": {
           "data": {
@@ -3254,6 +3576,28 @@
         "properties": {
           "data": {
             "$ref": "#/components/schemas/PersonalizationProfile"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
+      "GetPushConfigResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/PushConfig"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
+      "GetPushSubscriptionResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/PushSubscription"
           }
         },
         "required": [
@@ -4969,6 +5313,25 @@
         ],
         "type": "object"
       },
+      "ListDeliveriesResponse": {
+        "properties": {
+          "data": {
+            "description": "Deliveries for the signed-in person, newest first.",
+            "items": {
+              "$ref": "#/components/schemas/Delivery"
+            },
+            "type": "array"
+          },
+          "next_page_token": {
+            "description": "Pass as page_token to get older items; absent on the last page.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
       "ListGithubRepositoriesResponse": {
         "additionalProperties": false,
         "properties": {
@@ -5447,6 +5810,31 @@
         "properties": {
           "data": {
             "$ref": "#/components/schemas/VerifyCommandsData"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
+      "LookupPushSubscriptionRequest": {
+        "properties": {
+          "endpoint": {
+            "description": "The push service address this browser has for notices.",
+            "format": "uri",
+            "maxLength": 2048,
+            "type": "string"
+          }
+        },
+        "required": [
+          "endpoint"
+        ],
+        "type": "object"
+      },
+      "LookupPushSubscriptionResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/PushSubscriptionLookup"
           }
         },
         "required": [
@@ -5978,6 +6366,24 @@
         },
         "required": [
           "data"
+        ],
+        "type": "object"
+      },
+      "MarkDeliveriesSeenRequest": {
+        "properties": {
+          "ids": {
+            "description": "Deliveries to mark seen.",
+            "items": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 100,
+            "minItems": 1,
+            "type": "array"
+          }
+        },
+        "required": [
+          "ids"
         ],
         "type": "object"
       },
@@ -7400,6 +7806,130 @@
         ],
         "type": "object"
       },
+      "NoteDelivery": {
+        "properties": {
+          "attempts": {
+            "description": "Each channel tried, oldest first.",
+            "items": {
+              "$ref": "#/components/schemas/DeliveryAttempt"
+            },
+            "type": "array"
+          },
+          "created_at": {
+            "description": "When the delivery was made, ISO 8601 UTC.",
+            "type": "string"
+          },
+          "id": {
+            "description": "Delivery id.",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "note"
+            ],
+            "type": "string"
+          },
+          "level": {
+            "$ref": "#/components/schemas/DeliveryLevel"
+          },
+          "link": {
+            "$ref": "#/components/schemas/DeliveryLink"
+          },
+          "reason": {
+            "description": "Why this reached the person, in plain words.",
+            "maxLength": 500,
+            "minLength": 1,
+            "type": "string"
+          },
+          "seen_at": {
+            "description": "When the person first saw it on any device, or null while unread.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "text": {
+            "description": "What the person reads.",
+            "maxLength": 2000,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "link",
+          "id",
+          "level",
+          "text",
+          "reason",
+          "created_at",
+          "seen_at",
+          "attempts"
+        ],
+        "type": "object"
+      },
+      "NudgeDelivery": {
+        "properties": {
+          "attempts": {
+            "description": "Each channel tried, oldest first.",
+            "items": {
+              "$ref": "#/components/schemas/DeliveryAttempt"
+            },
+            "type": "array"
+          },
+          "created_at": {
+            "description": "When the delivery was made, ISO 8601 UTC.",
+            "type": "string"
+          },
+          "id": {
+            "description": "Delivery id.",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "nudge"
+            ],
+            "type": "string"
+          },
+          "level": {
+            "$ref": "#/components/schemas/DeliveryLevel"
+          },
+          "link": {
+            "$ref": "#/components/schemas/DeliveryLink"
+          },
+          "reason": {
+            "description": "Why this reached the person, in plain words.",
+            "maxLength": 500,
+            "minLength": 1,
+            "type": "string"
+          },
+          "seen_at": {
+            "description": "When the person first saw it on any device, or null while unread.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "text": {
+            "description": "What the person reads.",
+            "maxLength": 2000,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "link",
+          "id",
+          "level",
+          "text",
+          "reason",
+          "created_at",
+          "seen_at",
+          "attempts"
+        ],
+        "type": "object"
+      },
       "OpenAIModelProvider": {
         "additionalProperties": false,
         "properties": {
@@ -8194,6 +8724,75 @@
         ],
         "type": "object"
       },
+      "PushConfig": {
+        "properties": {
+          "public_key": {
+            "description": "The key a browser needs to turn notices on, or null when push is off.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "public_key"
+        ],
+        "type": "object"
+      },
+      "PushKeys": {
+        "properties": {
+          "auth": {
+            "description": "The device auth secret: 16 bytes, base64url.",
+            "maxLength": 256,
+            "type": "string"
+          },
+          "p256dh": {
+            "description": "The device public key: a P-256 point, base64url.",
+            "maxLength": 256,
+            "type": "string"
+          }
+        },
+        "required": [
+          "p256dh",
+          "auth"
+        ],
+        "type": "object"
+      },
+      "PushSubscription": {
+        "properties": {
+          "created_at": {
+            "description": "When this device turned notices on, ISO 8601 UTC.",
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "label": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "label",
+          "created_at"
+        ],
+        "type": "object"
+      },
+      "PushSubscriptionLookup": {
+        "properties": {
+          "saved": {
+            "description": "Whether this device still gets notices. False once it was turned off, replaced or went away.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "saved"
+        ],
+        "type": "object"
+      },
       "RawToolCall": {
         "allOf": [
           {
@@ -8258,6 +8857,68 @@
           "command",
           "cwd",
           "timeout_ms"
+        ],
+        "type": "object"
+      },
+      "ReminderDelivery": {
+        "properties": {
+          "attempts": {
+            "description": "Each channel tried, oldest first.",
+            "items": {
+              "$ref": "#/components/schemas/DeliveryAttempt"
+            },
+            "type": "array"
+          },
+          "created_at": {
+            "description": "When the delivery was made, ISO 8601 UTC.",
+            "type": "string"
+          },
+          "id": {
+            "description": "Delivery id.",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "reminder"
+            ],
+            "type": "string"
+          },
+          "level": {
+            "$ref": "#/components/schemas/DeliveryLevel"
+          },
+          "link": {
+            "$ref": "#/components/schemas/DeliveryLink"
+          },
+          "reason": {
+            "description": "Why this reached the person, in plain words.",
+            "maxLength": 500,
+            "minLength": 1,
+            "type": "string"
+          },
+          "seen_at": {
+            "description": "When the person first saw it on any device, or null while unread.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "text": {
+            "description": "What the person reads.",
+            "maxLength": 2000,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "link",
+          "id",
+          "level",
+          "text",
+          "reason",
+          "created_at",
+          "seen_at",
+          "attempts"
         ],
         "type": "object"
       },
@@ -10510,6 +11171,25 @@
           "archived"
         ],
         "type": "string"
+      },
+      "SpeakVoiceRequest": {
+        "properties": {
+          "text": {
+            "description": "Reply text to read aloud, up to 4000 characters.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "voice": {
+            "description": "Voice id, e.g. `af_heart`. Omit for the default voice.",
+            "maxLength": 64,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "text"
+        ],
+        "type": "object"
       },
       "StartRepositoryWorkData": {
         "additionalProperties": false,
@@ -24851,6 +25531,471 @@
         "x-fern-sdk-method-name": "search_own_chats"
       }
     },
+    "/api/v1/user/deliveries": {
+      "get": {
+        "description": "Lists what was sent to the signed-in person, newest first, a page at a time.",
+        "parameters": [
+          {
+            "description": "Most items to return.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 25,
+              "description": "Most items to return.",
+              "maximum": 100,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Token from the previous page; omit for the newest items.",
+            "in": "query",
+            "name": "page_token",
+            "required": false,
+            "schema": {
+              "description": "Token from the previous page; omit for the newest items.",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListDeliveriesResponse"
+                }
+              }
+            },
+            "description": "One page of deliveries."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "OIDC is configured and the request has no valid session cookie."
+          }
+        },
+        "summary": "List deliveries",
+        "tags": [
+          "Deliveries"
+        ],
+        "x-fern-sdk-group-name": [
+          "deliveries"
+        ],
+        "x-fern-sdk-method-name": "list"
+      }
+    },
+    "/api/v1/user/deliveries/seen": {
+      "post": {
+        "description": "Marks deliveries seen for the signed-in person on every device. Ids that are not theirs are ignored.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MarkDeliveriesSeenRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetDeliveryUnreadCountResponse"
+                }
+              }
+            },
+            "description": "The unread count after marking."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "OIDC is configured and the request has no valid session cookie."
+          }
+        },
+        "summary": "Mark deliveries seen",
+        "tags": [
+          "Deliveries"
+        ],
+        "x-fern-sdk-group-name": [
+          "deliveries"
+        ],
+        "x-fern-sdk-method-name": "mark_seen"
+      }
+    },
+    "/api/v1/user/deliveries/seen-all": {
+      "post": {
+        "description": "Marks every unread delivery of the signed-in person seen on every device.",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetDeliveryUnreadCountResponse"
+                }
+              }
+            },
+            "description": "The unread count after marking."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "OIDC is configured and the request has no valid session cookie."
+          }
+        },
+        "summary": "Mark every delivery seen",
+        "tags": [
+          "Deliveries"
+        ],
+        "x-fern-sdk-group-name": [
+          "deliveries"
+        ],
+        "x-fern-sdk-method-name": "mark_all_seen"
+      }
+    },
+    "/api/v1/user/deliveries/unread-count": {
+      "get": {
+        "description": "Counts deliveries the signed-in person has not seen on any device.",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetDeliveryUnreadCountResponse"
+                }
+              }
+            },
+            "description": "The unread count."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "OIDC is configured and the request has no valid session cookie."
+          }
+        },
+        "summary": "Count unread deliveries",
+        "tags": [
+          "Deliveries"
+        ],
+        "x-fern-sdk-group-name": [
+          "deliveries"
+        ],
+        "x-fern-sdk-method-name": "get_unread_count"
+      }
+    },
+    "/api/v1/user/deliveries/{delivery_id}": {
+      "get": {
+        "description": "Reads one delivery of the signed-in person.",
+        "parameters": [
+          {
+            "description": "Delivery id.",
+            "in": "path",
+            "name": "delivery_id",
+            "required": true,
+            "schema": {
+              "description": "Delivery id.",
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetDeliveryResponse"
+                }
+              }
+            },
+            "description": "The delivery."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "OIDC is configured and the request has no valid session cookie."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The delivery was not found."
+          }
+        },
+        "summary": "Get a delivery",
+        "tags": [
+          "Deliveries"
+        ],
+        "x-fern-sdk-group-name": [
+          "deliveries"
+        ],
+        "x-fern-sdk-method-name": "get"
+      }
+    },
+    "/api/v1/user/push/config": {
+      "get": {
+        "description": "Returns the public key a browser needs to turn notices on, or null when push is off.",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetPushConfigResponse"
+                }
+              }
+            },
+            "description": "The push settings."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "OIDC is configured and the request has no valid session cookie."
+          }
+        },
+        "summary": "Get the push settings",
+        "tags": [
+          "Deliveries"
+        ],
+        "x-fern-sdk-group-name": [
+          "deliveries",
+          "push"
+        ],
+        "x-fern-sdk-method-name": "get_config"
+      }
+    },
+    "/api/v1/user/push/subscriptions": {
+      "delete": {
+        "description": "Removes a device. Removing one that is not saved is not an error.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeletePushSubscriptionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeletePushSubscriptionResponse"
+                }
+              }
+            },
+            "description": "The device no longer gets notices."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "OIDC is configured and the request has no valid session cookie."
+          }
+        },
+        "summary": "Turn notices off for a device",
+        "tags": [
+          "Deliveries"
+        ],
+        "x-fern-sdk-group-name": [
+          "deliveries",
+          "push"
+        ],
+        "x-fern-sdk-method-name": "delete_subscription"
+      },
+      "post": {
+        "description": "Saves a device so due reminders and nudges reach it. A person keeps up to 10 devices; another drops the oldest.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreatePushSubscriptionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetPushSubscriptionResponse"
+                }
+              }
+            },
+            "description": "The saved device."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "OIDC is configured and the request has no valid session cookie."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "This device address belongs to another person. Subscribe again for a new address."
+          }
+        },
+        "summary": "Turn notices on for a device",
+        "tags": [
+          "Deliveries"
+        ],
+        "x-fern-sdk-group-name": [
+          "deliveries",
+          "push"
+        ],
+        "x-fern-sdk-method-name": "create_subscription"
+      }
+    },
+    "/api/v1/user/push/subscriptions/lookup": {
+      "post": {
+        "description": "Says whether this device is still saved for the signed-in person. A device drops off when 10 newer ones are saved or its push service says it is gone.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LookupPushSubscriptionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LookupPushSubscriptionResponse"
+                }
+              }
+            },
+            "description": "Whether the device is saved."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "OIDC is configured and the request has no valid session cookie."
+          }
+        },
+        "summary": "Check whether a device gets notices",
+        "tags": [
+          "Deliveries"
+        ],
+        "x-fern-sdk-group-name": [
+          "deliveries",
+          "push"
+        ],
+        "x-fern-sdk-method-name": "lookup_subscription"
+      }
+    },
     "/api/v1/user/settings/calendar": {
       "delete": {
         "description": "Deletes the saved account and its app password from the sidecar for good.",
@@ -25692,6 +26837,102 @@
         "x-fern-sdk-method-name": "update_sentinel_settings"
       }
     },
+    "/api/v1/voice/speak": {
+      "post": {
+        "description": "Turns reply text into speech with the voice running on this computer and returns WAV audio. Text over 4000 characters is refused. Each person may make a limited number of requests per minute.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SpeakVoiceRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "audio/wav": {
+                "schema": {
+                  "format": "binary",
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Spoken audio, 24 kHz mono 16-bit WAV."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The text is empty, has nothing to read aloud, or names an unknown voice."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication required."
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The text is over the 4000 character limit."
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Too many requests; wait for the Retry-After seconds."
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The voice service returned an unexpected response."
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The voice on this computer is off or still starting."
+          }
+        },
+        "summary": "Read reply text aloud",
+        "tags": [
+          "Agent Sessions"
+        ],
+        "x-fern-sdk-group-name": [
+          "voice"
+        ],
+        "x-fern-sdk-method-name": "speak"
+      }
+    },
     "/api/v1/voice/status": {
       "get": {
         "description": "Probes the local STT sidecar; the chat composer hides voice input when it is unavailable.",
@@ -25829,6 +27070,9 @@
     },
     {
       "name": "Personalization"
+    },
+    {
+      "name": "Deliveries"
     },
     {
       "name": "Personas"
