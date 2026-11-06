@@ -22,6 +22,7 @@ export interface HelpScreenState {
   libraryOpen: boolean;
   sessionsOpen: boolean;
   schedulesOpen: boolean;
+  remindersOpen: boolean;
   spacesOpen: boolean;
 }
 
@@ -35,6 +36,9 @@ export function describeHelpScreen(state: HelpScreenState | null): string {
   }
   if (state.schedulesOpen) {
     return 'Schedules';
+  }
+  if (state.remindersOpen) {
+    return 'Reminders';
   }
   if (state.spacesOpen) {
     return 'Spaces';
