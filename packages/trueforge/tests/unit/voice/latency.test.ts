@@ -1,22 +1,18 @@
+import type { Clock } from '../../../src/voice/echoGuard';
 import { measureTurnLatency } from '../../../src/voice/latencyHarness';
 import type { SpeechSynthesizer, SpeechToText, VoiceTurnRunner } from '../../../src/voice/transport';
-import { LoudnessVad, hum, quiet } from '../../fixtures/voice/fakes';
+import { LoudnessVad, delay, hum, quiet, virtualDriver } from '../../fixtures/voice/fakes';
 
-const pause = (ms: number): Promise<void> =>
-  new Promise(resolve => {
-    setTimeout(resolve, ms);
-  });
-
-function parts(): { stt: SpeechToText; turns: VoiceTurnRunner; tts: SpeechSynthesizer } {
+function parts(clock: Clock): { stt: SpeechToText; turns: VoiceTurnRunner; tts: SpeechSynthesizer } {
   const stt: SpeechToText = {
     transcribe: async () => {
-      await pause(120);
+      await delay({ clock, ms: 120 });
       return 'what time is it';
     },
   };
   const turns: VoiceTurnRunner = {
     sendMessage: async ({ onText }) => {
-      await pause(80);
+      await delay({ clock, ms: 80 });
       onText('It is nine o clock. ');
       return { kind: 'done', turnId: 't1', approvals: [] };
     },
@@ -25,7 +21,7 @@ function parts(): { stt: SpeechToText; turns: VoiceTurnRunner; tts: SpeechSynthe
   };
   const tts: SpeechSynthesizer = {
     stream: async function* () {
-      await pause(60);
+      await delay({ clock, ms: 60 });
       yield new Uint8Array(960);
     },
   };
@@ -34,34 +30,39 @@ function parts(): { stt: SpeechToText; turns: VoiceTurnRunner; tts: SpeechSynthe
 
 const recording = (): Int16Array => Int16Array.from([...quiet(300), ...hum(900), ...quiet(1300)]);
 
-describe('the latency harness', () => {
-  it('measures end of speech to first audio, split into where the time went', async () => {
-    const latency = await measureTurnLatency({ parts: { vad: new LoudnessVad(), ...parts() }, recording: recording() });
-    // The closing silence is 600 ms, then 120 + 80 + 60 ms of work, give or take a listening window.
-    expect(latency.endpointing_ms).toBeGreaterThanOrEqual(560);
-    expect(latency.endpointing_ms).toBeLessThan(760);
-    expect(latency.speech_to_text_ms).toBeGreaterThanOrEqual(110);
-    expect(latency.reply_first_sentence_ms).toBeGreaterThanOrEqual(70);
-    expect(latency.voice_first_audio_ms).toBeGreaterThanOrEqual(50);
-    expect(latency.total_ms).toBe(
-      latency.endpointing_ms +
-        latency.speech_to_text_ms +
-        latency.reply_first_sentence_ms +
-        latency.voice_first_audio_ms,
-    );
-    expect(latency.total_ms).toBeLessThan(1500);
-  }, 15_000);
+describe('the latency harness on a virtual clock', () => {
+  it('splits end of speech to first audio into exactly where the time went', async () => {
+    const driver = virtualDriver();
+    const latency = await measureTurnLatency({
+      parts: { vad: new LoudnessVad(), ...parts(driver.clock) },
+      recording: recording(),
+      driver,
+    });
+    // The closing silence is 600 ms, heard one 32 ms window late. The virtual clock moves in 32 ms windows, so the
+    // 120, 80 and 60 ms of work are each seen at the next window: 128, 96 and 64.
+    expect(latency).toEqual({
+      endpointing_ms: 608,
+      speech_to_text_ms: 128,
+      reply_first_sentence_ms: 96,
+      voice_first_audio_ms: 64,
+      total_ms: 896,
+    });
+  });
 
-  it('keeps playing in real time after the process stalls, instead of rushing the rest of the recording', async () => {
-    // Another test in the same process can hold the event loop for a moment, as a slow CI machine does.
-    setTimeout(() => {
-      const until = Date.now() + 1500;
-      while (Date.now() < until) {
-        // Busy, on purpose.
-      }
-    }, 100);
-    const latency = await measureTurnLatency({ parts: { vad: new LoudnessVad(), ...parts() }, recording: recording() });
-    expect(latency.endpointing_ms).toBeGreaterThanOrEqual(560);
-    expect(latency.endpointing_ms).toBeLessThan(760);
-  }, 15_000);
+  it('is not changed by a process stall while the person is still speaking', async () => {
+    const steady = virtualDriver();
+    const expected = await measureTurnLatency({
+      parts: { vad: new LoudnessVad(), ...parts(steady.clock) },
+      recording: recording(),
+      driver: steady,
+    });
+    // 20 windows is well inside the 900 ms of speech; the clock jumps 1.5 s, as a busy CI machine does.
+    const stalled = virtualDriver({ stall: { afterPauses: 20, ms: 1500 } });
+    const latency = await measureTurnLatency({
+      parts: { vad: new LoudnessVad(), ...parts(stalled.clock) },
+      recording: recording(),
+      driver: stalled,
+    });
+    expect(latency).toEqual(expected);
+  });
 });

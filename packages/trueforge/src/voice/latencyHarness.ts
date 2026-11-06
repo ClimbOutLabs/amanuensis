@@ -1,10 +1,11 @@
 /**
  * Measures one spoken turn from the end of the person's speech to the first sound, on whatever parts
  * it is given: real ones on a real machine, or stand-ins in a test. The recording is played in real
- * time, because the wait for the speech model to decide the person has finished is part of the answer.
+ * time by default, because the wait for the speech model to decide the person has finished is part of
+ * the answer; a test passes a driver with a virtual clock so its split does not depend on the machine.
  */
 import { pcmBytesOf } from './audio';
-import { systemClock } from './echoGuard';
+import { systemClock, type Clock } from './echoGuard';
 import { VoiceSession, type TurnLatency } from './session';
 import type { SpeechSynthesizer, SpeechToText, VoiceTransport, VoiceTurnRunner } from './transport';
 import type { SpeechProbability } from './vad/sileroVad';
@@ -37,46 +38,66 @@ export interface LatencyTrialParts {
   turns: VoiceTurnRunner;
 }
 
+/**
+ * What drives time in a trial: the clock the engine reads and a way to let some of it pass. Real time sleeps;
+ * a test's driver moves a virtual clock instead, so the split depends on the audio and not on the machine.
+ */
+export interface LatencyDriver {
+  clock: Clock;
+  pause(ms: number): Promise<void>;
+}
+
+export const realTimeDriver: LatencyDriver = {
+  clock: systemClock,
+  pause: ms =>
+    new Promise<void>(resolve => {
+      setTimeout(resolve, ms);
+    }),
+};
+
 /** Plays the recording (16 kHz samples that end in quiet) and resolves with the first turn's timings. */
 export async function measureTurnLatency({
   parts,
   recording,
   timeoutMs = 30_000,
+  driver = realTimeDriver,
 }: {
   parts: LatencyTrialParts;
   recording: Int16Array;
   timeoutMs?: number;
+  driver?: LatencyDriver;
 }): Promise<TurnLatency> {
-  const clock = systemClock;
-  let report: (latency: TurnLatency) => void = () => undefined;
-  const measured = new Promise<TurnLatency>(resolve => {
-    report = resolve;
+  const { clock } = driver;
+  let latency: TurnLatency | undefined;
+  const session = new VoiceSession({
+    ...parts,
+    transport: new RecordingTransport(),
+    clock,
+    onLatency: measured => {
+      latency = measured;
+    },
   });
-  const session = new VoiceSession({ ...parts, transport: new RecordingTransport(), clock, onLatency: report });
   session.start();
-  const timeout = new Promise<never>((_, reject) => {
-    setTimeout(() => {
-      reject(new Error('No sound came back before the time ran out'));
-    }, timeoutMs).unref();
-  });
-  const play = async (): Promise<void> => {
+  const startedAt = clock.now();
+  try {
     // Each window follows the one before by a window's length. After a stall the rest of the recording is still
     // played in real time, never rushed to catch up, since a rushed silence would look like an instant endpoint.
-    let due = clock.now();
+    let due = startedAt;
     for (let offset = 0; offset + VAD_WINDOW_SAMPLES <= recording.length; offset += VAD_WINDOW_SAMPLES) {
       session.pushAudio(pcmBytesOf(recording.subarray(offset, offset + VAD_WINDOW_SAMPLES)));
       due = Math.max(due, clock.now()) + WINDOW_MS;
       const wait = due - clock.now();
       if (wait > 0) {
-        await new Promise<void>(resolve => {
-          setTimeout(resolve, wait);
-        });
+        await driver.pause(wait);
       }
     }
-  };
-  try {
-    await Promise.race([play(), measured, timeout]);
-    return await Promise.race([measured, timeout]);
+    while (latency === undefined) {
+      if (clock.now() - startedAt > timeoutMs) {
+        throw new Error('No sound came back before the time ran out');
+      }
+      await driver.pause(WINDOW_MS);
+    }
+    return latency;
   } finally {
     await session.end();
   }
