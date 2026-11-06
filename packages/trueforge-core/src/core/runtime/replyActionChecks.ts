@@ -5,6 +5,7 @@ import {
   MAX_WRITE_CALLS_PER_TURN,
   type TurnStepKind,
 } from '../mcp/executeToolCalls';
+import { movesBrowserPage } from '../permissions/browserToolNames';
 import {
   SANDBOX_APPLY_PATCH_TOOL_NAME,
   SANDBOX_EXEC_TOOL_NAME,
@@ -52,11 +53,15 @@ export function countsTowardWriteCap(info: InternalToolCallInfo, input: { staysI
 
 /**
  * Whether a call that ran changed something, so a different call made the same way may sensibly run
- * again (tests run again after a file edit, for example): any action the cap counts, and a sandbox
- * step whose effect is an edit, a commit or a push.
+ * again (tests run again after a file edit, for example): any action the cap counts, a sandbox step
+ * whose effect is an edit, a commit or a push, and a browser step that moves the page (a read of the
+ * page runs again after a scroll or a click).
  */
 export function changesState(info: InternalToolCallInfo, input: { countsTowardCap: boolean }): boolean {
   if (input.countsTowardCap) {
+    return true;
+  }
+  if (movesBrowserPage(info)) {
     return true;
   }
   return (

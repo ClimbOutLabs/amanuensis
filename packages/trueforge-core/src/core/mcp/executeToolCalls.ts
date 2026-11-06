@@ -23,6 +23,7 @@ import type {
   LLMToolMessage,
 } from '../llm/LLMTypes';
 import type { CallToolResponse, MCPAuthRequired } from '../mcp/IMCPServer';
+import { movesBrowserPage } from '../permissions/browserToolNames';
 import type { AgentThreadCreateSubAgent } from '../runtime/AgentThread.types';
 import { InternalEventType } from '../runtime/AgentThread.types';
 import { awaitWithAbort, signalAbortError, throwIfSignalAborted } from '../util/abort';
@@ -1781,8 +1782,11 @@ export async function executeToolCalls({
           admissionProvenance: admission,
         };
       }
+      // A browser step that moves the page is read-only to the world but not to the page: the same
+      // scroll lands somewhere new, so it is never answered from an earlier result.
       const shouldMemoize =
-        isReadOnlyCall(toolCall.tool_info) || isGithubFileRead(toolInfo.toolSet.name, toolInfo.originalToolName);
+        (isReadOnlyCall(toolCall.tool_info) && !movesBrowserPage(toolCall.tool_info)) ||
+        isGithubFileRead(toolInfo.toolSet.name, toolInfo.originalToolName);
       const shouldReplayCompleted = shouldMemoize || toolCall.tool_info.effect === 'verify';
       const key = memoKey(
         toolInfo,
@@ -2119,12 +2123,15 @@ export async function executeToolCalls({
       if (sideEffectAttemptKey !== undefined && (isCallToolResponseResult(response) || isAuthRequired(response))) {
         memoState.sideEffectAttempts.delete(sideEffectAttemptKey);
       }
+      // A browser step that moved the page counts as a change too, so a read of the page after it is
+      // read fresh instead of replayed from before the move.
       if (
         isCallToolResponseResult(response) &&
         ((response.result.isError !== true &&
           (toolCall.tool_info.effect === 'edit' ||
             toolCall.tool_info.effect === 'commit' ||
-            toolCall.tool_info.effect === 'push')) ||
+            toolCall.tool_info.effect === 'push' ||
+            movesBrowserPage(toolCall.tool_info))) ||
           toolCall.tool_info.effect === 'execute')
       ) {
         memoState.workspaceMutationEpoch += 1;

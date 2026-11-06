@@ -143,6 +143,7 @@ import {
 import { isExpiredApproval } from '../permissions/approvalExpiry';
 import type { ConnectorBinding } from '../permissions/approvalTokens';
 import { recordHeldActionAudit, recordNotPreparedRefusals } from '../permissions/audit';
+import { movesBrowserPage } from '../permissions/browserToolNames';
 import { isChangeRequestReason } from '../permissions/changeRequest';
 import { isHostVouchedReadReason } from '../permissions/connectorTrust';
 import {
@@ -5039,6 +5040,8 @@ export class AgentThread {
     if (approvalRequiredToolCalls.length > 0) {
       throw new Error('Unreachable');
     }
+    // The calls whose run changed something, so a call that changed only itself can tell (see below).
+    const changedByCallId = new Set<string>();
     for (const result of toolCallResults) {
       const toolCall = openCalls.find(call => call.id === result.message.tool_call_id);
       recordToolCallResult(this.metrics, {
@@ -5065,6 +5068,7 @@ export class AgentThread {
         }
         if (toolCall !== undefined && changesState(toolCall.tool_info, { countsTowardCap })) {
           nextToolCallMemo.turn.changesThisTurn += 1;
+          changedByCallId.add(toolCall.id);
         }
         if (result.toolCallInfo !== undefined) {
           for (const kind of stepKindsOf(result.toolCallInfo)) {
@@ -5500,9 +5504,12 @@ export class AgentThread {
       // snapshot, but not used for the stop/nudge decisions below (see callSignatureCountsThisTurn).
       const previousRecord = nextToolCallMemo.turn.callSignatures.get(signature);
       const settled = settledByCallId.get(callId);
+      // A browser step that moves the page starts from where the last one left it, so its own move
+      // does not count against it: the same scroll may run again, a read after it may not.
+      const ownMove = movesBrowserPage(call.tool_info) && changedByCallId.has(callId) ? 1 : 0;
       nextToolCallMemo.turn.callSignatures.set(signature, {
         count: (previousRecord?.count ?? 0) + 1,
-        writesAtLastRun: nextToolCallMemo.turn.changesThisTurn,
+        writesAtLastRun: nextToolCallMemo.turn.changesThisTurn - ownMove,
         lastKind: settled?.kind ?? previousRecord?.lastKind ?? null,
         retried: settled?.retried ?? previousRecord?.retried ?? false,
       });

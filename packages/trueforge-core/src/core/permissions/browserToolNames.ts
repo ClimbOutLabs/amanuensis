@@ -53,3 +53,22 @@ export const BROWSER_COMMIT_REASON = 'browser_commit';
 export function isBrowserToolName(tool_name: string): tool_name is BrowserToolName {
   return BROWSER_TOOL_NAMES.some(name => name === tool_name);
 }
+
+/** Browser steps that move or change the open page; reading it and taking its picture do not. */
+const BROWSER_PAGE_MOVING_TOOL_NAMES: ReadonlySet<string> = new Set([
+  BROWSER_OPEN_TOOL_NAME,
+  BROWSER_SCROLL_TOOL_NAME,
+  BROWSER_BACK_TOOL_NAME,
+  BROWSER_TYPE_TOOL_NAME,
+  BROWSER_SELECT_TOOL_NAME,
+  BROWSER_CLICK_TOOL_NAME,
+]);
+
+/**
+ * Whether a call is a step of Aman's own browser (a system tool) that moves or changes the open
+ * page. Such a step is never replayed from an earlier result, a read of the page after it runs
+ * fresh, and the same step may run again from where it left the page (scrolling a long page).
+ */
+export function movesBrowserPage(info: { type: string; original_tool_name: string }): boolean {
+  return info.type === 'truefoundry-system' && BROWSER_PAGE_MOVING_TOOL_NAMES.has(info.original_tool_name);
+}

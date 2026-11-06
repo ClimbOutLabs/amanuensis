@@ -1225,6 +1225,38 @@ describe('turn-wide counts across threads', () => {
  * A stand-in for an offline sandbox: every call asks (tier 3), like an unrelaxed sandbox, and every
  * call but a push stays in its workspace. `failing` tools return an error.
  */
+/** Aman's browser as the runtime sees it: reads and scrolls are read-only, typing is a prepare step. */
+function makeBrowserToolSet() {
+  const toolSet = makeMockIMCPServer({
+    name: 'browser',
+    preload: true,
+    tools: ['browser_read', 'browser_scroll', 'browser_type'].map(name => ({
+      name,
+      description: name,
+      inputSchema: { type: 'object' as const, properties: {} },
+      preload: true,
+    })),
+  });
+  jest.mocked(toolSet.toolCallInfo).mockImplementation((params: CallToolRequest['params']) =>
+    Promise.resolve({
+      type: 'truefoundry-system' as const,
+      mcp_server_id: toolSet.id,
+      mcp_server_name: 'browser',
+      original_tool_name: params.name,
+      is_approval_required: false,
+      tier: 1 as const,
+      tier_reason: params.name === 'browser_type' ? 'browser_prepare' : 'browser_explore',
+      read_only_hint: params.name !== 'browser_type',
+      open_world_hint: params.name !== 'browser_type',
+    }),
+  );
+  toolSet.staysInWorkspace = () => true;
+  jest
+    .mocked(toolSet.callTool)
+    .mockImplementation(() => Promise.resolve(toolResultResponse({ text: '# Page\n[e3] textbox Name' })));
+  return toolSet;
+}
+
 function makeSandboxToolSet(input: { failing?: readonly string[]; networked?: boolean } = {}) {
   const toolSet = makeMockIMCPServer({
     name: 'sandbox',
@@ -1314,6 +1346,47 @@ describe('write cap leaves work inside the sandbox workspace alone', () => {
     await drain(thread);
 
     expect(callToolNames(toolSet)).toEqual(['exec', 'write_file', 'exec']);
+    expect(toolResults(thread).at(-1)?.content).toContain(REPEATED_ACTION_RESULT);
+  });
+
+  it('scrolls a long page again and again, and reads it again after the page moved', async () => {
+    const toolSet = makeBrowserToolSet();
+    const scroll = { name: 'browser_scroll', args: { direction: 'down' } };
+    const read = { name: 'browser_read', args: {} };
+    const thread = makeThread({
+      toolSet,
+      create: scriptedArgs([
+        [read],
+        [scroll],
+        [scroll],
+        [scroll],
+        [read],
+        [{ name: 'browser_type', args: { ref: 'e3', text: 'Ada' } }],
+        [read],
+      ]),
+    });
+    const events = await drain(thread);
+
+    expect(callToolNames(toolSet)).toEqual([
+      'browser_read',
+      'browser_scroll',
+      'browser_scroll',
+      'browser_scroll',
+      'browser_read',
+      'browser_type',
+      'browser_read',
+    ]);
+    expect(toolResults(thread).some(result => result.content.includes(REPEATED_ACTION_RESULT))).toBe(false);
+    expect(events.at(-1)).toMatchObject({ type: InternalEventType.AGENT_DONE, status: 'done' });
+  });
+
+  it('still refuses to read an unchanged page twice in a row', async () => {
+    const toolSet = makeBrowserToolSet();
+    const read = { name: 'browser_read', args: {} };
+    const thread = makeThread({ toolSet, create: scriptedArgs([[read], [read]]) });
+    await drain(thread);
+
+    expect(callToolNames(toolSet)).toEqual(['browser_read']);
     expect(toolResults(thread).at(-1)?.content).toContain(REPEATED_ACTION_RESULT);
   });
 
