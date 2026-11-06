@@ -8,11 +8,11 @@
 #
 #   1. The installer itself, executed the way the Windows installer
 #      executes it: the file installer/install.sh as the container's
-#      command, from a mounted copy of the installer folder, asking for
+#      command, from the checkout mounted where a release is unpacked, asking for
 #      its help text. That is the run that died with "env: can't
 #      execute 'bash'" before this image existed, so it is the run this
 #      check exists to prove. --help changes nothing, and the mount is
-#      a throwaway copy, so the check writes nowhere.
+#      read-only, so the check writes nowhere.
 #
 #   2. Every outside tool installer/install.sh and installer/lib/*.sh
 #      call, looked up inside the image by name, plus "docker compose
@@ -46,10 +46,10 @@ docker image inspect "$IMAGE" >/dev/null 2>&1 ||
     "Build it first with pnpm build:setup-image, or pull it, then run this check again."
 
 # Check 1: the installer runs in the image, through its own first line.
-SCRATCH=$(mktemp -d)
-trap 'rm -rf "$SCRATCH"' EXIT
-cp -a "$INSTALLER_DIR/." "$SCRATCH/"
-HELP_OUT=$(docker run --rm -v "$SCRATCH:/src" -w /src "$IMAGE" installer/install.sh --help 2>&1) ||
+# The checkout is mounted at /src read-only, the layout the Windows
+# installer unpacks a release into, so the run can write nowhere.
+REPO_ROOT=$(dirname "$INSTALLER_DIR")
+HELP_OUT=$(docker run --rm -v "$REPO_ROOT:/src:ro" -w /src "$IMAGE" installer/install.sh --help 2>&1) ||
   fail "installer/install.sh did not run in $IMAGE. Its output was: $HELP_OUT" \
     "Read the output above; the usual cause is a tool the base image does not carry. Add its Alpine package to the Dockerfile, rebuild, and check again."
 case "$HELP_OUT" in
