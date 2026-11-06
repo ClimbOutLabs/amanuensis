@@ -268,6 +268,8 @@ import {
 import {
   BLOCKED_CALLS_PARENT_MESSAGE,
   blockedCallsStopMessage,
+  browserPageSeen,
+  changesSeenBy,
   changesState,
   countsTowardWriteCap,
   findUnbackedClaim,
@@ -4652,8 +4654,10 @@ export class AgentThread {
     calls: InternalEnrichedToolCall[];
     writeCapHit: boolean;
     repeatStop: boolean;
+    repeatedCallIds: ReadonlySet<string>;
   } {
     const seenInBatch = new Set<string>();
+    const repeatedCallIds = new Set<string>();
     let previous = turn.lastCallSignature;
     let writeCapBlocked = 0;
     let admittedCappedInBatch = 0;
@@ -4695,11 +4699,12 @@ export class AgentThread {
         (lastRun !== undefined &&
           (countsTowardCap ||
             (!retryIsDue({ lastKind: lastRun.lastKind, retried: lastRun.retried }) &&
-              lastRun.writesAtLastRun >= turn.changesThisTurn)));
+              lastRun.writesAtLastRun >= changesSeenBy(call.tool_info, turn))));
       const duplicateInStep = seenInBatch.has(signature);
       seenInBatch.add(signature);
       if (alreadySeen) {
         repeatedBlocked += 1;
+        repeatedCallIds.add(call.id);
         // A read gets a few identical calls in a row; a duplicate in one step is skipped and never counts.
         const readOnly = isReadOnlyCall(call.tool_info);
         const limit = readOnly ? REPEAT_LIMIT_READ_TOOLS : REPEAT_LIMIT_OTHER_TOOLS;
@@ -4734,7 +4739,7 @@ export class AgentThread {
         repeatStop,
       });
     }
-    return { calls: guarded, writeCapHit, repeatStop };
+    return { calls: guarded, writeCapHit, repeatStop, repeatedCallIds };
   }
 
   /**
@@ -5068,7 +5073,19 @@ export class AgentThread {
         }
         if (toolCall !== undefined && changesState(toolCall.tool_info, { countsTowardCap })) {
           nextToolCallMemo.turn.changesThisTurn += 1;
-          changedByCallId.add(toolCall.id);
+        }
+        // The browser's page has a count of its own: a step counts only when it reaches a page not
+        // seen before in this turn, so a scroll at the bottom of a page, or back and forth between
+        // two pages, moved nothing new.
+        if (toolCall !== undefined) {
+          const page = browserPageSeen({ info: toolCall.tool_info, text: result.message.content });
+          if (page !== undefined && !nextToolCallMemo.turn.browserPagesSeen.includes(page.digest)) {
+            nextToolCallMemo.turn.browserPagesSeen.push(page.digest);
+            if (page.moves) {
+              nextToolCallMemo.turn.browserPageChangesThisTurn += 1;
+              changedByCallId.add(toolCall.id);
+            }
+          }
         }
         if (result.toolCallInfo !== undefined) {
           for (const kind of stepKindsOf(result.toolCallInfo)) {
@@ -5422,7 +5439,7 @@ export class AgentThread {
         }
       }
       const previous = replyTurn.callSignatures.get(toolCallSignature(call));
-      if (call.tool_info.pre_dispatch_failure?.message !== REPEATED_ACTION_RESULT) {
+      if (!loopGuard.repeatedCallIds.has(call.id)) {
         settledByCallId.set(
           call.id,
           settleRetry({ previousKind: previous?.lastKind ?? null, previousRetried: previous?.retried ?? false, kind }),
@@ -5504,15 +5521,18 @@ export class AgentThread {
       // snapshot, but not used for the stop/nudge decisions below (see callSignatureCountsThisTurn).
       const previousRecord = nextToolCallMemo.turn.callSignatures.get(signature);
       const settled = settledByCallId.get(callId);
-      // A browser step that moves the page starts from where the last one left it, so its own move
-      // does not count against it: the same scroll may run again, a read after it may not.
-      const ownMove = movesBrowserPage(call.tool_info) && changedByCallId.has(callId) ? 1 : 0;
+      // A browser step that moved the page starts from where it left it, so its own move does not
+      // count against it: the same scroll may run again, and is no loop. One that moved nothing is.
+      const movedPage = movesBrowserPage(call.tool_info) && changedByCallId.has(callId);
       nextToolCallMemo.turn.callSignatures.set(signature, {
         count: (previousRecord?.count ?? 0) + 1,
-        writesAtLastRun: nextToolCallMemo.turn.changesThisTurn - ownMove,
+        writesAtLastRun: changesSeenBy(call.tool_info, nextToolCallMemo.turn) - (movedPage ? 1 : 0),
         lastKind: settled?.kind ?? previousRecord?.lastKind ?? null,
         retried: settled?.retried ?? previousRecord?.retried ?? false,
       });
+      if (movedPage) {
+        continue;
+      }
       const thisTurnCount = (this.callSignatureCountsThisTurn.get(signature) ?? 0) + 1;
       this.callSignatureCountsThisTurn.set(signature, thisTurnCount);
       if (thisTurnCount >= IDENTICAL_CALL_STOP_AT && repeatedSignature === undefined) {

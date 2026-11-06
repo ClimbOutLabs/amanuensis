@@ -54,6 +54,25 @@ export function isBrowserToolName(tool_name: string): tool_name is BrowserToolNa
   return BROWSER_TOOL_NAMES.some(name => name === tool_name);
 }
 
+/** The name of Aman's own browser tool set, as its calls report it in `mcp_server_name`. */
+export const BROWSER_SERVER_ID = 'browser';
+
+/**
+ * Whether a call is one of Aman's own browser tools: a system tool of the browser tool set, so a
+ * connector or another tool set with a tool of the same name never counts.
+ */
+export function isAmanBrowserCall(info: {
+  type: string;
+  mcp_server_name: string;
+  original_tool_name: string;
+}): boolean {
+  return (
+    info.type === 'truefoundry-system' &&
+    info.mcp_server_name === BROWSER_SERVER_ID &&
+    isBrowserToolName(info.original_tool_name)
+  );
+}
+
 /** Browser steps that move or change the open page; reading it and taking its picture do not. */
 const BROWSER_PAGE_MOVING_TOOL_NAMES: ReadonlySet<string> = new Set([
   BROWSER_OPEN_TOOL_NAME,
@@ -65,10 +84,10 @@ const BROWSER_PAGE_MOVING_TOOL_NAMES: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * Whether a call is a step of Aman's own browser (a system tool) that moves or changes the open
- * page. Such a step is never replayed from an earlier result, a read of the page after it runs
- * fresh, and the same step may run again from where it left the page (scrolling a long page).
+ * Whether a call is a step of Aman's own browser that moves or changes the open page. When the page
+ * it returns differs from the one seen before, the same step may run again from there (scrolling a
+ * long page), and a read of the page may run again.
  */
-export function movesBrowserPage(info: { type: string; original_tool_name: string }): boolean {
-  return info.type === 'truefoundry-system' && BROWSER_PAGE_MOVING_TOOL_NAMES.has(info.original_tool_name);
+export function movesBrowserPage(info: { type: string; mcp_server_name: string; original_tool_name: string }): boolean {
+  return isAmanBrowserCall(info) && BROWSER_PAGE_MOVING_TOOL_NAMES.has(info.original_tool_name);
 }
