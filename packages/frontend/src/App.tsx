@@ -46,6 +46,8 @@ import { AuthErrorScreen } from './AuthErrorScreen';
 import { createAuthAwareFetch } from './authFetch';
 import { probeSession, type SessionState } from './authSession';
 import { parseAuthErrorReason, shouldShowAuthErrorScreen, stripAuthErrorSearch } from './authStatusSearch';
+import { BrowserLivePage } from './BrowserLivePage';
+import { isBrowserLivePath } from './browserLivePath';
 import { createBugReportApi } from './bugReportApi';
 import { createChatFolderStore } from './chatFolderStore';
 import { createDeliveriesApi } from './deliveriesApi';
@@ -508,6 +510,16 @@ export function App() {
     return (
       <ThemeProvider theme={appTheme}>
         <GetStartedScreen />
+      </ThemeProvider>
+    );
+  }
+
+  // The live browser view is a bare page of its own: it needs the session, but none of the app boot.
+  // It is answered here, before the app's router, which would send an address it does not know home.
+  if (isBrowserLivePath(window.location.pathname)) {
+    return (
+      <ThemeProvider theme={appTheme}>
+        <BrowserLivePage />
       </ThemeProvider>
     );
   }

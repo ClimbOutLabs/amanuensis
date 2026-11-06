@@ -14,6 +14,9 @@ import { elementAtPath } from './extract.mjs';
 import { RefAssigner, renderSnapshot, sensitivityOf } from './snapshot.mjs';
 
 const MAX_BODY_BYTES = 256 * 1024;
+/** The largest file the live view may upload into a page: 10 MiB, sent as base64. */
+const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
+const MAX_UPLOAD_BODY_BYTES = Math.ceil((MAX_UPLOAD_BYTES * 4) / 3) + 64 * 1024;
 
 /**
  * extract.mjs as one script for the page. `page.evaluate(fn)` sends only the function's own source, so
@@ -88,7 +91,73 @@ function createTab({ page }) {
     goingBack: false,
     refusedRedirect: undefined,
     movedTo: undefined,
+    // The page's last open file picker, waiting for the person to upload a file from the live view.
+    fileChooser: undefined,
+    // The live view's acts, run one at a time in the order they arrived, so typed keys never swap.
+    liveActs: Promise.resolve(),
   };
+}
+
+/** Runs one live-view act after every act sent before it has finished, whether or not that one worked. */
+function inLiveOrder(tab, act) {
+  const run = tab.liveActs.then(act);
+  tab.liveActs = run.then(
+    () => undefined,
+    () => undefined,
+  );
+  return run;
+}
+
+/**
+ * One pointer or keyboard act from the live view. A click read from a frame of another size is
+ * scaled to the viewport, so it lands where the person clicked on the picture.
+ */
+async function liveAct(page, input) {
+  switch (input.kind) {
+    case 'click': {
+      const viewport = page.viewportSize();
+      const scale =
+        viewport !== null && input.imageWidth !== undefined && input.imageHeight !== undefined
+          ? { x: viewport.width / input.imageWidth, y: viewport.height / input.imageHeight }
+          : { x: 1, y: 1 };
+      await page.mouse.click(input.x * scale.x, input.y * scale.y);
+      break;
+    }
+    case 'type':
+      await page.keyboard.type(input.text);
+      break;
+    case 'key':
+      await page.keyboard.press(input.key);
+      break;
+    case 'wheel':
+      await page.mouse.wheel(0, input.dy);
+      break;
+  }
+  return { status: 'ok' };
+}
+
+/**
+ * Fills the file picker the page opened, once. When there is none, or it can no longer take the
+ * file (its field went away), the page's first file field gets it instead.
+ */
+async function putFile(tab, file) {
+  const chooser = tab.fileChooser;
+  tab.fileChooser = undefined;
+  if (chooser !== undefined && !chooser.page().isClosed()) {
+    const filled = await chooser.setFiles(file).then(
+      () => true,
+      () => false,
+    );
+    if (filled) {
+      return { status: 'ok' };
+    }
+  }
+  const field = tab.page.locator('input[type="file"]').first();
+  if ((await field.count()) === 0) {
+    return { status: 'no_file_field' };
+  }
+  await field.setInputFiles(file);
+  return { status: 'ok' };
 }
 
 /**
@@ -252,6 +321,16 @@ export class BrowserSidecar {
         download.cancel().catch(() => undefined);
       });
       const tab = createTab({ page });
+      // A file picker never opens on the virtual screen; the live view fills it with the person's file.
+      page.on('filechooser', chooser => {
+        tab.fileChooser = chooser;
+      });
+      // A picker belongs to the page that opened it; once the page has moved on, its element is gone.
+      page.on('framenavigated', frame => {
+        if (frame === page.mainFrame()) {
+          tab.fileChooser = undefined;
+        }
+      });
       await guardRedirects({ tab, cdp: await profile.context.newCDPSession(page) });
       profile.tabs.set(tabId, tab);
       profile.tabsByPage.set(page, tab);
@@ -471,6 +550,75 @@ export class BrowserSidecar {
     return this.#read(found.tab);
   }
 
+  /**
+   * The person's open tabs for the live view, most recently used first. Listing never launches a
+   * browser: a person who has not opened anything has no tabs to show.
+   */
+  async liveTabs({ owner }) {
+    const starting = this.#profiles.get(owner);
+    if (starting === undefined) {
+      return { status: 'ok', tabs: [] };
+    }
+    const profile = await starting.catch(() => undefined);
+    if (profile === undefined) {
+      return { status: 'ok', tabs: [] };
+    }
+    const tabs = [];
+    for (const [tabId, tab] of [...profile.tabs.entries()].reverse()) {
+      tabs.push({ tab: tabId, title: await tab.page.title().catch(() => ''), url: tab.page.url() });
+    }
+    return { status: 'ok', tabs };
+  }
+
+  /**
+   * One frame of the chat's tab for the live view. The live view is the person's own look at their
+   * own browser, so unlike `#read` it is not held to the opened site: the tab itself still cannot
+   * leave that site (see `guardNavigation`), and only the app server may ask, for the signed-in
+   * person's own profile.
+   */
+  async liveFrame({ owner, tab: tabId }) {
+    const tab = await this.#tabFor({ owner, tab: tabId, create: false });
+    if (tab === undefined) {
+      return NO_TAB;
+    }
+    const buffer = await tab.page.screenshot({ type: 'jpeg', quality: 60 });
+    const viewport = tab.page.viewportSize();
+    return {
+      status: 'ok',
+      jpeg_base64: buffer.toString('base64'),
+      ...(viewport === null ? {} : { width: viewport.width, height: viewport.height }),
+    };
+  }
+
+  /**
+   * One pointer or keyboard act in the chat's tab, from the live view. Clicks go through the real
+   * mouse, so a click that would take the page off the opened site is refused by the same route
+   * guard as every other navigation.
+   */
+  async liveInput({ owner, tab: tabId, input }) {
+    const tab = await this.#tabFor({ owner, tab: tabId, create: false });
+    if (tab === undefined) {
+      return NO_TAB;
+    }
+    return inLiveOrder(tab, () => liveAct(tab.page, input));
+  }
+
+  /**
+   * Puts a file the person chose in the live view into the page: into the file picker the page just
+   * opened, or else the page's first file field. Nothing is uploaded until the page itself sends it.
+   */
+  async liveUpload({ owner, tab: tabId, name, mime, data }) {
+    const tab = await this.#tabFor({ owner, tab: tabId, create: false });
+    if (tab === undefined) {
+      return NO_TAB;
+    }
+    const file = { name, mimeType: mime, buffer: Buffer.from(data, 'base64') };
+    if (file.buffer.length > MAX_UPLOAD_BYTES) {
+      return { status: 'bad_input' };
+    }
+    return inLiveOrder(tab, () => putFile(tab, file));
+  }
+
   async close() {
     for (const starting of this.#profiles.values()) {
       const profile = await starting.catch(() => undefined);
@@ -527,15 +675,57 @@ function ownerDirName(owner) {
 async function readJsonBody(req) {
   const chunks = [];
   let size = 0;
+  const limit = req.url === '/live/upload' ? MAX_UPLOAD_BODY_BYTES : MAX_BODY_BYTES;
   for await (const chunk of req) {
     size += chunk.length;
-    if (size > MAX_BODY_BYTES) {
+    if (size > limit) {
       throw new Error('request body too large');
     }
     chunks.push(chunk);
   }
   const text = Buffer.concat(chunks).toString('utf8');
   return text === '' ? {} : JSON.parse(text);
+}
+
+/** The most text one live-view input may type at once: a pasted code or a short form answer, not a document. */
+const MAX_LIVE_TEXT_LENGTH = 10000;
+
+const isFiniteNumber = value => typeof value === 'number' && Number.isFinite(value);
+
+/**
+ * A live-view input from the request body, or undefined when it is not one the page can be given:
+ * a click with its point (and the frame size the point was read from, when the caller measured one),
+ * typed text, one named key, or a scroll step.
+ */
+function parseLiveInput(body) {
+  switch (body.kind) {
+    case 'click': {
+      if (!isFiniteNumber(body.x) || !isFiniteNumber(body.y)) {
+        return undefined;
+      }
+      const imageWidth = isFiniteNumber(body.image_width) && body.image_width > 0 ? body.image_width : undefined;
+      const imageHeight = isFiniteNumber(body.image_height) && body.image_height > 0 ? body.image_height : undefined;
+      return {
+        kind: 'click',
+        x: body.x,
+        y: body.y,
+        ...(imageWidth === undefined ? {} : { imageWidth }),
+        ...(imageHeight === undefined ? {} : { imageHeight }),
+      };
+    }
+    case 'type':
+      return typeof body.text === 'string' && body.text !== '' && body.text.length <= MAX_LIVE_TEXT_LENGTH
+        ? { kind: 'type', text: body.text }
+        : undefined;
+    case 'key':
+      return typeof body.key === 'string' && body.key !== '' && body.key.length <= 64
+        ? { kind: 'key', key: body.key }
+        : undefined;
+    case 'wheel':
+      return isFiniteNumber(body.dy) ? { kind: 'wheel', dy: body.dy } : undefined;
+    default:
+      return undefined;
+  }
 }
 
 const ROUTES = {
@@ -548,6 +738,21 @@ const ROUTES = {
   'POST /click': (sidecar, where, body) => sidecar.click({ ...where, ref: body.ref }),
   'POST /type': (sidecar, where, body) => sidecar.type({ ...where, ref: body.ref, text: body.text }),
   'POST /select': (sidecar, where, body) => sidecar.select({ ...where, ref: body.ref, option: body.option }),
+  'POST /live/frame': (sidecar, where) => sidecar.liveFrame(where),
+  'POST /live/tabs': (sidecar, where) => sidecar.liveTabs(where),
+  'POST /live/upload': (sidecar, where, body) =>
+    typeof body.name === 'string' &&
+    body.name !== '' &&
+    body.name.length <= 255 &&
+    typeof body.mime === 'string' &&
+    body.mime.length <= 255 &&
+    typeof body.data === 'string'
+      ? sidecar.liveUpload({ ...where, name: body.name, mime: body.mime, data: body.data })
+      : { status: 'bad_input' },
+  'POST /live/input': (sidecar, where, body) => {
+    const input = parseLiveInput(body);
+    return input === undefined ? { status: 'bad_input' } : sidecar.liveInput({ ...where, input });
+  },
 };
 
 const MAX_ID_LENGTH = 256;
@@ -592,8 +797,9 @@ async function handleRequest({ req, res, sidecar }) {
   }
   try {
     const body = await readJsonBody(req);
-    // `owner` picks the person's browser profile; `tab` picks the chat's tab inside it.
-    if (!isId(body.owner) || !isId(body.tab)) {
+    // `owner` picks the person's browser profile; `tab` picks the chat's tab inside it. Listing the
+    // tabs is the one call that names no tab: the list is how the tabs are found in the first place.
+    if (!isId(body.owner) || (req.url !== '/live/tabs' && !isId(body.tab))) {
       res.writeHead(400).end(JSON.stringify({ status: 'error', message: 'owner and tab are required' }));
       return;
     }

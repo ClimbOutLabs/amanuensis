@@ -56,6 +56,7 @@ function textOf(result: { content: readonly { type: string; text?: string }[] })
 const original = {
   BROWSER_URL: configuration.BROWSER_URL,
   BROWSER_SECRET: configuration.BROWSER_SECRET,
+  PUBLIC_BASE_URL: configuration.PUBLIC_BASE_URL,
 };
 
 beforeEach(() => {
@@ -138,6 +139,17 @@ describe('browser capability', () => {
     expect(textOf(result)).toContain('not set up');
     expect(sent).toEqual([]);
   });
+  it("points the person to the live view under the app's own base path", async () => {
+    Object.assign(configuration, { PUBLIC_BASE_URL: 'https://example.test/aman' });
+    const { toolSet } = mount(() => ({ json: { status: 'ok', text: '' } }));
+    const response = await toolSet.listTools();
+    if (!('result' in response)) {
+      throw new Error('expected a resolved listTools response');
+    }
+    const open = response.result.tools.find(tool => tool.name === 'browser_open');
+    expect(open?.description).toContain('/aman/browser-live');
+  });
+
   it('registers all eight browser tools', async () => {
     const { toolSet } = mount(() => ({ json: { status: 'ok', text: '' } }));
     const response = await toolSet.listTools();
