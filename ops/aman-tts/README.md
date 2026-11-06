@@ -51,11 +51,17 @@ text that was checked is the text that is heard. The check needs no model.
 - 400 with header `x-aman-reason: would_change_text`, before any sound: the voice would say something
   other than what is written. That covers numbers it would read another way (`1,5`, `10.0.0.1`,
   `11.06.2026`, `007`, `5 000`, more than two cents), two numbers with only blanks or silent signs
-  between them (`1000 (500)`, `1000; 500`, `1000 & 500`), times that are not real (`9:60`), digits
+  between them (`1000 (500)`, `1000; 500`, `1000...500`, `1000 & 500`), a number word next to a digit
+  the same way (`twenty (5)`, `5 (hundred)`), a dot inside a word (`my-bank.com` sounds like
+  `mybank.com`), times that are not real (`9:60`), digits
   written as superscripts or other forms, links, code, list marks, a minus sign or range, line breaks
   other than a plain one, and letters outside plain English. Only the common forms are kept: plain
   digits with no leading zero, groups of three with commas, up to two cents after a dollar sign, a
-  decimal, and a time like `9:30`.
+  decimal, and a time like `9:30`. Two numbers are fine when one sentence stop and a space separate
+  them (`Use 5. 3 more follow.`), and a comma and a space is fine between a small number and a year,
+  a time or another small number (`Fri Nov 6, 2:30`, `March 5, 2026`, `Items 1, 2 and 3`).
+- A `200` for an exact speak carries `x-aman-exact: checked`. A caller that asked for `exact` must treat
+  an answer without it as unchecked: an older service ignores `exact` and speaks anything.
 - Cents are said with their unit: `$1,000.10` is "one thousand dollars and ten cents".
 - Send the whole text in one request. A piece cut from a longer text can start with a list mark or a
   number-and-bracket that the voice drops from the start of a text, so it is judged on its own.

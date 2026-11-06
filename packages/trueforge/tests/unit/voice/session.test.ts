@@ -41,6 +41,7 @@ function setup({
   holdAfterText,
   speechChanges,
   speechCannotCheck,
+  speechDelay,
   vad = new LoudnessVad(),
   onNote,
 }: {
@@ -55,6 +56,7 @@ function setup({
   holdAfterText?: () => Promise<void>;
   speechChanges?: (text: string) => boolean;
   speechCannotCheck?: boolean;
+  speechDelay?: (text: string) => Promise<void>;
   vad?: SpeechProbability;
   onNote?: (note: string) => void;
 }) {
@@ -66,6 +68,7 @@ function setup({
     silentOn: speechSilentOn,
     changes: speechChanges,
     cannotCheck: speechCannotCheck,
+    delay: speechDelay,
   });
   const turns = new FakeTurns({ message, approval: approvalReplies }, { gate, holdAfterText });
   const notes: string[] = [];
@@ -341,9 +344,11 @@ describe('approval by voice', () => {
     const t = await readBack({ message: withCard() });
     expect(t.tts.sentences).toEqual([
       'I have a draft.',
-      "I'll send this reply to Victor at victor at example dot com.",
-      'The subject is: Re: Thursday',
-      'It says: Thursday at three works for me. See you then.',
+      [
+        "I'll send this reply to Victor at victor at example dot com.",
+        'The subject is: Re: Thursday',
+        'It says: Thursday at three works for me. See you then.',
+      ].join('\n'),
       "Say 'yes, send it' to send, or 'no'.",
     ]);
   });
@@ -415,15 +420,15 @@ describe('approval by voice', () => {
     expect(t.turns.answers).toEqual([{ decision: 'deny', toolCallId: 'call-1' }]);
   });
 
-  it('asks for the phrase that matches the card: cancel, and approve, are not interchangeable with send', async () => {
+  it('asks for the phrase that matches the card: delete, and approve, are not interchangeable with send', async () => {
     const cancel = await readBack({
       message: withCard(cancelScheduleCard),
-      stt: ['yes send it', 'yes, cancel it'],
+      stt: ['yes send it', 'yes, delete it'],
       approval: [{}],
     });
     await feed({ session: cancel.session, clock: cancel.clock, samples: says() });
     await cancel.session.settled();
-    expect(cancel.tts.sentences).toContain("Say 'yes, cancel it' to cancel it, or 'no'.");
+    expect(cancel.tts.sentences).toContain("Say 'yes, delete it' to delete it, or 'no'.");
     expect(cancel.turns.answers).toEqual([]);
     await feed({ session: cancel.session, clock: cancel.clock, samples: quiet(6000) });
     await feed({ session: cancel.session, clock: cancel.clock, samples: says() });
@@ -481,8 +486,8 @@ describe('approval by voice', () => {
   });
 
   it.each([
-    ['fails to be spoken', { speechFailsOn: (text: string) => text.startsWith('It says') }],
-    ['makes no sound', { speechSilentOn: (text: string) => text.startsWith('It says') }],
+    ['fails to be spoken', { speechFailsOn: (text: string) => text.includes('It says') }],
+    ['makes no sound', { speechSilentOn: (text: string) => text.includes('It says') }],
   ])('does not take a "yes" when a body sentence of the read-back %s', async (_name, broken) => {
     const t = setup({ stt: ['send the reply', 'yes send it'], message: withCard(), ...broken });
     await feed({ session: t.session, clock: t.clock, samples: says() });
@@ -496,26 +501,32 @@ describe('approval by voice', () => {
   });
 
   it.each([
-    ['would say a word differently', { speechChanges: (text: string) => text.startsWith('It says') }],
+    ['would say a word differently', { speechChanges: (text: string) => text.includes('It says') }],
     ['cannot be asked', { speechCannotCheck: true }],
-  ])('stops reading at the part the voice %s, says it is left in the app, and takes no "yes"', async (_name, check) => {
-    const t = setup({ stt: ['send the reply', 'yes send it'], message: withCard(), ...check });
-    await feed({ session: t.session, clock: t.clock, samples: says() });
-    await t.session.settled();
-    await feed({ session: t.session, clock: t.clock, samples: quiet(9000) });
-    await t.session.settled();
-    expect(t.tts.sentences.join('\n')).not.toContain('Say ');
-    expect(t.tts.sentences.at(-1)).toBe("I've left it in the app for you to approve.");
-    await feed({ session: t.session, clock: t.clock, samples: says() });
-    await t.session.settled();
-    expect(t.turns.answers).toEqual([]);
-  });
+  ])(
+    'reads none of the card when the voice %s, says it is left in the app, and takes no "yes"',
+    async (_name, check) => {
+      const t = setup({ stt: ['send the reply', 'yes send it'], message: withCard(), ...check });
+      await feed({ session: t.session, clock: t.clock, samples: says() });
+      await t.session.settled();
+      await feed({ session: t.session, clock: t.clock, samples: quiet(9000) });
+      await t.session.settled();
+      expect(t.tts.sentences.join('\n')).not.toContain('Say ');
+      // The opening line is part of the same text, so none of it is heard.
+      expect(t.tts.sentences.join('\n')).not.toContain("I'll send");
+      expect(t.tts.sentences).toEqual(['I have a draft.', "I've left it in the app for you to approve."]);
+      expect(t.tts.sentences.at(-1)).toBe("I've left it in the app for you to approve.");
+      await feed({ session: t.session, clock: t.clock, samples: says() });
+      await t.session.settled();
+      expect(t.turns.answers).toEqual([]);
+    },
+  );
 
   it('does not call a refusal of the words a broken voice', async () => {
     const t = setup({
       stt: ['send the reply'],
       message: withCard(),
-      speechChanges: text => text.startsWith('It says'),
+      speechChanges: text => text.includes('It says'),
     });
     await feed({ session: t.session, clock: t.clock, samples: says() });
     await t.session.settled();
@@ -555,8 +566,9 @@ describe('approval by voice', () => {
     'speaks the whole body in one piece, so nothing is cut at a mark the voice would drop: %s',
     async (_name, body) => {
       const t = await readBack({ message: withCard(sendReplyCard(body)), stt: ['yes send it'], approval: [{}] });
-      expect(t.tts.sentences).toContain(`It says: ${body}`);
-      expect(t.tts.asked).toContain(`It says: ${body}`);
+      expect(t.tts.asked).toHaveLength(1);
+      expect(t.tts.asked[0]).toContain(`It says: ${body}`);
+      expect(t.tts.sentences).toContain(t.tts.asked[0]);
       // No piece of the body is ever asked about or spoken on its own.
       expect(t.tts.sentences.filter(sentence => body.includes(sentence) && sentence !== body)).toEqual([]);
       await feed({ session: t.session, clock: t.clock, samples: says() });
@@ -565,12 +577,14 @@ describe('approval by voice', () => {
     },
   );
 
-  it('asks the voice about each whole text of the card, and not about the line telling how to answer', async () => {
+  it('asks the voice about the whole card in one text, and not about the line telling how to answer', async () => {
     const t = await readBack({ message: withCard() });
     expect(t.tts.asked).toEqual([
-      "I'll send this reply to Victor at victor at example dot com.",
-      'The subject is: Re: Thursday',
-      'It says: Thursday at three works for me. See you then.',
+      [
+        "I'll send this reply to Victor at victor at example dot com.",
+        'The subject is: Re: Thursday',
+        'It says: Thursday at three works for me. See you then.',
+      ].join('\n'),
     ]);
   });
 
@@ -616,11 +630,61 @@ describe('approval by voice', () => {
     const clearedBefore = t.transport.cleared;
     await feed({ session: t.session, clock: t.clock, samples: hum(700, 0.3, 1.7) });
     expect(t.transport.cleared).toBeGreaterThan(clearedBefore);
+    expect(t.tts.signals.get('I missed that. Please say it again.')?.aborted).toBe(true);
     // The card was not read over, so the answer still settles it.
     t.stt.hold = false;
     t.stt.release('yes send it');
     await t.session.settled();
     expect(t.turns.answers.length).toBe(1);
+    await t.session.end();
+  });
+
+  /** A held instruction line: the card's body is made and played out, and the card is not yet waiting. */
+  async function withInstructionHeld() {
+    let release: () => void = () => undefined;
+    const held = new Promise<void>(resolve => {
+      release = resolve;
+    });
+    const t = setup({
+      stt: ['send the reply'],
+      message: withCard(),
+      speechDelay: text => (text.startsWith("Say '") ? held : Promise.resolve()),
+    });
+    await feed({ session: t.session, clock: t.clock, samples: says() });
+    await feed({ session: t.session, clock: t.clock, samples: quiet(3000) });
+    return { t, release };
+  }
+
+  it('does not take as an answer what was said before the card was read out, even when it is written down late', async () => {
+    const { t, release } = await withInstructionHeld();
+    t.stt.hold = true;
+    await feed({ session: t.session, clock: t.clock, samples: says() });
+    release();
+    await feed({ session: t.session, clock: t.clock, samples: quiet(3000) });
+    t.stt.hold = false;
+    t.stt.release('yes send it');
+    await t.session.settled();
+    expect(t.turns.answers).toEqual([]);
+    expect(t.notes).toContain('speech_before_card');
+    expect(t.turns.sent).toEqual(['send the reply', 'yes send it']);
+  });
+
+  it('keeps a read-back that was cut off unanswerable when "I missed that" is queued among its lines', async () => {
+    const { t, release } = await withInstructionHeld();
+    t.stt.hold = true;
+    for (let n = 0; n < 2; n += 1) {
+      await feed({ session: t.session, clock: t.clock, samples: says() });
+    }
+    await feed({ session: t.session, clock: t.clock, samples: says(900, 700) });
+    expect(t.tts.sentences.at(-1)).toBe('I missed that. Please say it again.');
+    // The instruction is made after the missed line, so the card is waiting while its last line is still unheard.
+    release();
+    await feed({ session: t.session, clock: t.clock, samples: quiet(64) });
+    await feed({ session: t.session, clock: t.clock, samples: hum(700, 0.3, 1.7) });
+    t.stt.hold = false;
+    t.stt.release('yes send it');
+    await t.session.settled();
+    expect(t.turns.answers).toEqual([]);
     await t.session.end();
   });
 

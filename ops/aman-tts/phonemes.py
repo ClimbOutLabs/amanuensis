@@ -206,23 +206,50 @@ _PLAIN_NUMBER = re.compile(
     rf"|(?P<number>{_WHOLE}(?:\.\d+)?)"
     r")" + _NOT_MORE_DIGITS
 )
-# Two numbers with nothing between them but blanks or signs that make no sound or only a pause
-# ("1000 500", "1000 (500)", "1000; 500", "1000 & 500") run together when heard. A comma or colon straight
-# between digits ("1,000", "9:30") is a number's own and is left to the number rules.
-_ADJACENT_NUMBERS = re.compile(r"\d(?![,:]\d)[ \t\n\"'()\u2014;!?,:&]+\$?\d")
-# A number word beside a digit ("twenty 5") is heard as one number, like two digits side by side.
+# Number spellings: digits (with their own comma, point or colon) and number words. Two of them with only
+# blanks or signs that make no sound or only a pause between them ("1000 500", "1000 (500)", "1000; 500",
+# "1000...500", "twenty (5)") run together when heard. Two words are said as written, so one digit is needed.
 _NUMBER_WORDS = (
     r"(?:zero|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen"
     r"|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundred|thousand|million"
     r"|billion|trillion)"
 )
-_NUMBER_WORD_BESIDE_DIGIT = re.compile(
-    rf"(?i)\b{_NUMBER_WORDS}\b[ \t\n]*\$?\d|\d[ \t\n]*\b{_NUMBER_WORDS}\b"
-)
+_NUMBER_SPELLING = re.compile(rf"(?i)\$?\d+(?:[,.:]\d+)*|\b{_NUMBER_WORDS}\b")
+_SILENT_GAP = re.compile(r"[ \t\n\"'()\u2014\u2026;!?,:&.]+")
+_SENTENCE_STOP_GAP = re.compile(r"[.!?][ \t\n]+")
+_COMMA_GAP = re.compile(r", +")
+_SMALL_NUMBER = re.compile(r"\d{1,2}")
+_DATE_PART = re.compile(r"\d{1,2}:\d\d|(?:19|20)\d\d|\d{1,2}")
+
+
+def _runs_numbers_together(text: str) -> bool:
+    """True when two number spellings, at least one of them digits, are heard as one number or run on."""
+    spellings = list(_NUMBER_SPELLING.finditer(text))
+    for left, right in zip(spellings, spellings[1:]):
+        gap = text[left.end() : right.start()]
+        if (
+            _SILENT_GAP.fullmatch(gap) is None
+            or _SENTENCE_STOP_GAP.fullmatch(gap)
+            or not (left.group()[-1].isdigit() or right.group()[0] in "$0123456789")
+        ):
+            continue
+        # A comma is a plain pause between a day or list number and a year, a time or another small number.
+        if (
+            _COMMA_GAP.fullmatch(gap)
+            and _SMALL_NUMBER.fullmatch(left.group())
+            and _DATE_PART.fullmatch(right.group())
+        ):
+            continue
+        return True
+    return False
+
+
 _WRITTEN_WORD = re.compile(r"[^\W_]+(?:'[^\W_]+)*")
 # Characters the voice says as written: letters and digits, spaces, usual punctuation and a few symbols.
 _PLAIN_CHARS = re.compile(r"[A-Za-z0-9 \n\t.,!?;:'\"()%&+@=$\u2014\u2026-]*")
 _LONE_HYPHEN = re.compile(r"(?<![A-Za-z])-|-(?![A-Za-z])")
+# A dot inside a word ("my.bank.com", "mybank.com", "my-bank.com" all sound alike) is not heard as written.
+_DOTTED_WORD = re.compile(r"[A-Za-z]\.[A-Za-z]")
 
 
 def _spell_plain_number(match: re.Match[str]) -> str:
@@ -249,9 +276,9 @@ def reads_as_written(text: str) -> bool:
     if (
         _PLAIN_CHARS.fullmatch(written) is None
         or _LONE_HYPHEN.search(written)
+        or _DOTTED_WORD.search(written)
         or _URL.search(written)
-        or _ADJACENT_NUMBERS.search(written)
-        or _NUMBER_WORD_BESIDE_DIGIT.search(written)
+        or _runs_numbers_together(written)
     ):
         return False
     written = _PLAIN_NUMBER.sub(_spell_plain_number, written)

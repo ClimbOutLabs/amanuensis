@@ -59,6 +59,9 @@ VOCAB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "kokoro_vo
 
 
 REASON_HEADER = "x-aman-reason"
+# Set on an exact speak that passed the check, so a caller can tell a service that checked from one that
+# does not know `exact` and would speak anything.
+EXACT_HEADER = "x-aman-exact"
 
 
 def _nothing_to_say() -> HTTPException:
@@ -320,6 +323,8 @@ def create_app(
             raise HTTPException(status_code=429, detail="Busy reading other text", headers={"Retry-After": "2"})
         fmt = FORMATS[speak_request.format]
         headers = {"x-voice": voice_id, "x-model": synthesizer.model_label, "x-sample-rate": str(fmt.sample_rate)}
+        if speak_request.exact:
+            headers[EXACT_HEADER] = "checked"
         state.queued += 1
         if speak_request.stream:
             return await _stream_speech(

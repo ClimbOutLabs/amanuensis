@@ -5,22 +5,22 @@
  * What the card shows is the server's own text: this file only chooses the words around it. The answer
  * goes back as the chat's own approval input for the same thread and tool call, so the usual replay and
  * `changed` checks apply. Cards that hold more than a person can safely check by ear stay on the screen.
- * Whether the voice would say a read-back exactly as written is the voice service's call (`/v1/normalize`),
- * asked sentence by sentence before anything is spoken; this file holds no copy of those rules.
+ * Whether the voice would say a read-back exactly as written is the voice service's call, made in the same
+ * request that speaks it; this file holds no copy of those rules.
  */
 import type { Tier3Card } from '@truefoundry/trueforge-core/core';
 
 import { wordsOf } from './echoGuard';
 
-export type ApprovalVerb = 'send' | 'approve' | 'cancel';
+export type ApprovalVerb = 'send' | 'approve' | 'delete';
 
 const CONFIRM_PHRASES: Record<ApprovalVerb, { spoken: string; heard: string }> = {
   send: { spoken: 'yes, send it', heard: 'yes send it' },
   approve: { spoken: 'yes, approve', heard: 'yes approve' },
-  cancel: { spoken: 'yes, cancel it', heard: 'yes cancel it' },
+  delete: { spoken: 'yes, delete it', heard: 'yes delete it' },
 };
 
-const VERB_WORD: Record<ApprovalVerb, string> = { send: 'send', approve: 'go ahead', cancel: 'cancel it' };
+const VERB_WORD: Record<ApprovalVerb, string> = { send: 'send', approve: 'go ahead', delete: 'delete it' };
 
 /** Longest message read aloud. A longer one cannot be checked by ear, so it is left for the screen. */
 const MAX_SPOKEN_BODY_CHARS = 1200;
@@ -35,8 +35,10 @@ export type VoiceApprovalPlan =
   | {
       kind: 'ask';
       verb: ApprovalVerb;
-      /** What the person is told, in order. `body` is the card's own text; `instruction` tells how to answer. */
-      segments: { text: string; role: 'body' | 'instruction' }[];
+      /** The card's own text, one line per part. It goes to the voice as one text that must be said exactly. */
+      body: string;
+      /** How to answer. Said on its own, only once the body was made. */
+      instruction: string;
     }
   | { kind: 'typed_only' };
 
@@ -49,7 +51,7 @@ type FieldRule = 'context' | 'empty' | 'shape';
 
 /**
  * Every field of a card and what voice may do with it. A card is read aloud only when each field it
- * carries is listed here as read, harmless, empty or checked by its shape: a field added later is not
+ * carries is listed here as context, empty or checked by its shape: a field added later is not
  * on the list, so a card carrying it stays on the screen until someone decides how it is read.
  * What a person hears is the shape, word for word. The card's own wording is `context`: it repeats the
  * shape, so anything it adds must be in the shape too. `destination` and `recipient` are further held to
@@ -99,7 +101,7 @@ function verbFor(card: Tier3Card): ApprovalVerb {
     return 'send';
   }
   if (card.schedule?.action === 'delete') {
-    return 'cancel';
+    return 'delete';
   }
   return 'approve';
 }
@@ -114,6 +116,8 @@ type Schedule = NonNullable<Tier3Card['schedule']>;
  * Every field of the three card shapes, like `CARD_FIELD_RULES` one level down: `spoken` is read out,
  * `checked` is a choice that decides whether the card is readable at all, `empty` must carry nothing.
  * A field added to a shape is missing here, so the card stays on the screen until someone decides.
+ * `reply_in_thread` is deliberately not read: the reply's own recipients, subject and body are, and the
+ * message it answers stays on the screen.
  */
 export const EMAIL_FIELD_RULES: Record<keyof Email, NestedRule> = {
   action: 'checked',
@@ -175,28 +179,36 @@ function cardWordingMatchesShape(card: Tier3Card): boolean {
   return isEmpty(card.destination) && (isEmpty(card.recipient) || addresses.includes(card.recipient ?? ''));
 }
 
+/**
+ * The wording around the card's fields. A short field (a title, subject or name) that holds one of these, a
+ * sentence stop or a line break could pass for the fixed wording or start a new line, so it stays on the screen.
+ */
+const FIXED_WORDING =
+  /\b(?:it says|the subject is|it goes on|copying|replies will go|sent as|left off|you already have|runs over|description is|task is|i'll (?:send|save|add|delete)|for good|dot|dash)\b/i;
+const SENTENCE_BREAK = /[.!?\u2026]+(?:\s|$)|[\r\n\u2028\u2029\u0085]/u;
+
+/** True when the field can sit inside the fixed wording without changing what the sentence says. */
+const fitsInWording = (field: string): boolean => !SENTENCE_BREAK.test(field) && !FIXED_WORDING.test(field);
+
 /** A zone name like Europe/Berlin, as words. */
 const zoneWords = (zone: string): string => zone.replace(/[/_]/g, ' ');
 
 /** `Etc/GMT+5` is five hours behind UTC, the way round people do not say it, so it is left for the screen. */
 const isOffsetZone = (zone: string): boolean => /^Etc\/GMT[+-]/.test(zone);
 
+/** "Fri Nov 6, 2:30 to 3:00 pm" as "Fri Nov 6 at 2:30 to 3:00 pm": a comma between a day and a time reads as two numbers. */
+const spokenWhen = (when: string): string => when.replace(/(\d), (?=\d{1,2}:\d\d)/g, '$1 at ');
+
 /** An address said so that every dot and hyphen is heard: "victor at my dash bank dot com". */
 const spokenAddress = (address: string): string =>
   address.replace(/@/g, ' at ').replace(/\./g, ' dot ').replace(/-/g, ' dash ').replace(/ +/g, ' ').trim();
-
-interface BodySegment {
-  text: string;
-  role: 'body';
-}
 
 /**
  * What the card says, or undefined when voice may not answer it. A card with no mail, event or schedule
  * shape (a file write, a plan, anything generic) has nothing here that is read in full, so it is
  * left for the screen.
  */
-function readableBody(card: Tier3Card): BodySegment[] | undefined {
-  const say = (text: string): BodySegment => ({ text, role: 'body' });
+function readableBody(card: Tier3Card): string[] | undefined {
   const { email, calendar_event: event, schedule } = card;
   const shapes = [email, event, schedule].filter(shape => !isEmpty(shape));
   if (shapes.length !== 1) {
@@ -210,7 +222,10 @@ function readableBody(card: Tier3Card): BodySegment[] | undefined {
       email.name_left_off === undefined ||
       (email.action !== 'send' && email.action !== 'save') ||
       email.to.length === 0 ||
-      email.body.length > MAX_SPOKEN_BODY_CHARS
+      email.body.length > MAX_SPOKEN_BODY_CHARS ||
+      ![email.subject, email.from_name ?? '', ...[...email.to, ...email.cc].map(mailbox => mailbox.name)].every(
+        fitsInWording,
+      )
     ) {
       return undefined;
     }
@@ -220,13 +235,13 @@ function readableBody(card: Tier3Card): BodySegment[] | undefined {
         ? `I'll send this ${email.reply_in_thread === null ? 'email' : 'reply'} to ${to}.`
         : `I'll save this email to ${to} as a draft. It will not be sent.`;
     return [
-      say(opening),
-      ...(email.cc.length > 0 ? [say(`Copying ${mailboxNames(email.cc)}.`)] : []),
-      ...(email.reply_to === null ? [] : [say(`Replies will go to ${spokenAddress(email.reply_to)}.`)]),
-      ...(email.from_name === null ? [] : [say(`It will be sent as ${email.from_name}.`)]),
-      ...(email.name_left_off ? [say('The name was left off an address because it looked like an address.')] : []),
-      say(`The subject is: ${email.subject}`),
-      say(`It says: ${email.body}`),
+      opening,
+      ...(email.cc.length > 0 ? [`Copying ${mailboxNames(email.cc)}.`] : []),
+      ...(email.reply_to === null ? [] : [`Replies will go to ${spokenAddress(email.reply_to)}.`]),
+      ...(email.from_name === null ? [] : [`It will be sent as ${email.from_name}.`]),
+      ...(email.name_left_off ? ['The name was left off an address because it looked like an address.'] : []),
+      `The subject is: ${email.subject}`,
+      `It says: ${email.body}`,
     ];
   }
   if (event !== null && event !== undefined) {
@@ -235,33 +250,31 @@ function readableBody(card: Tier3Card): BodySegment[] | undefined {
       !fieldsAreListed({ shape: event, rules: EVENT_FIELD_RULES }) ||
       event.already_created === undefined ||
       event.span_days === undefined ||
-      event.action !== 'create'
+      event.action !== 'create' ||
+      ![event.title, event.location, event.duration].every(fitsInWording)
     ) {
       return undefined;
     }
     const place = event.location === '' ? '' : ` at ${event.location}`;
     return [
-      say(
-        `I'll add the event ${event.title} on ${event.when}, ${zoneWords(event.time_zone)} time, for ${event.duration}${place}.`,
-      ),
-      say(`It goes on the calendar of ${spokenAddress(event.calendar)}.`),
-      ...(event.already_created ? [say('You already have this event.')] : []),
-      ...(event.span_days > 1 ? [say(`This event runs over ${String(event.span_days)} days.`)] : []),
-      ...(event.description === '' ? [] : [say(`Its description is: ${event.description}`)]),
+      `I'll add the event ${event.title} on ${spokenWhen(event.when)}, ${zoneWords(event.time_zone)} time, for ${event.duration}${place}.`,
+      `It goes on the calendar of ${spokenAddress(event.calendar)}.`,
+      ...(event.already_created ? ['You already have this event.'] : []),
+      ...(event.span_days > 1 ? [`This event runs over ${String(event.span_days)} days.`] : []),
+      ...(event.description === '' ? [] : [`Its description is: ${event.description}`]),
     ];
   }
   if (schedule !== null && schedule !== undefined) {
     if (
       isOffsetZone(schedule.time_zone) ||
       !fieldsAreListed({ shape: schedule, rules: SCHEDULE_FIELD_RULES }) ||
-      schedule.action !== 'delete'
+      schedule.action !== 'delete' ||
+      ![schedule.name, schedule.when, schedule.runs_as].every(fitsInWording)
     ) {
       return undefined;
     }
     return [
-      say(
-        `I'll delete the schedule ${schedule.name} for good. It runs ${schedule.when}, ${zoneWords(schedule.time_zone)} time, as ${schedule.runs_as}. Its task is: ${schedule.task}`,
-      ),
+      `I'll delete the schedule ${schedule.name} for good. It runs ${schedule.when}, ${zoneWords(schedule.time_zone)} time, as ${schedule.runs_as}. Its task is: ${schedule.task}`,
     ];
   }
   return undefined;
@@ -296,34 +309,34 @@ export function planVoiceApproval({
     return { kind: 'typed_only' };
   }
   const verb = verbFor(card);
-  const instruction = {
-    text: `Say '${CONFIRM_PHRASES[verb].spoken}' to ${VERB_WORD[verb]}, or 'no'.`,
-    role: 'instruction' as const,
+  const lines = readableBody(card);
+  if (lines === undefined) {
+    return { kind: 'typed_only' };
+  }
+  const body = lines.join('\n');
+  if (body.length > MAX_SPOKEN_BODY_CHARS || holdsAnAnswerPhrase(body)) {
+    return { kind: 'typed_only' };
+  }
+  return {
+    kind: 'ask',
+    verb,
+    body,
+    instruction: `Say '${CONFIRM_PHRASES[verb].spoken}' to ${VERB_WORD[verb]}, or 'no'.`,
   };
-  const body = readableBody(card);
-  if (body === undefined) {
-    return { kind: 'typed_only' };
-  }
-  const spokenChars = body.reduce((sum, segment) => sum + segment.text.length, 0);
-  if (spokenChars > MAX_SPOKEN_BODY_CHARS || body.some(segment => holdsAnAnswerPhrase(segment.text))) {
-    return { kind: 'typed_only' };
-  }
-  return { kind: 'ask', verb, segments: [...body, instruction] };
 }
-
-/** A question mark in any script, and the Spanish opening mark. */
-const QUESTION_MARKS = /[?\u00bf\uff1f\u061f\u203d\u2047\u037e\u055e\u1367\u2e2e\ua60f\ufe16\ufe56]/u;
 
 export type SpokenAnswer = 'confirm' | 'deny' | 'other';
 
+/**
+ * What a plain spoken answer looks like when written down: letters, spaces and commas, one closing stop or
+ * "!", and closing quotes. Anything else (a question mark in any script, a trailing-off, a stop between
+ * the words) is not an answer, so no list of marks has to be kept.
+ */
+const PLAIN_ANSWER = /^[\p{L}\s,]*[.!]?["'\u2019\u201d)\]]*\s*$/u;
+
 /** Only the exact phrase for the card's verb confirms, and only a plain "no" turns it down. */
 export function classifyAnswer({ heard, verb }: { heard: string; verb: ApprovalVerb }): SpokenAnswer {
-  // A question is not an answer, even in the right words. Scripts write their question mark in many ways, so
-  // none may appear anywhere, only a plain stop or "!" (and closing quotes) may end a confirmation, and a
-  // trailing ellipsis is a trailing-off, not a yes.
-  const ending = /[^\p{L}\p{N}\s]+(?=\s*$)/u.exec(heard.normalize('NFKC'))?.[0] ?? '';
-  const trailsOff = /(?:\u2026|\.{2,})\s*$/u.test(heard);
-  if (/[^.!"'\u2019\u201d)\]]/u.test(ending) || trailsOff || QUESTION_MARKS.test(heard)) {
+  if (!PLAIN_ANSWER.test(heard)) {
     return 'other';
   }
   const words = wordsOf(heard).join(' ');
@@ -339,7 +352,7 @@ export const APPROVAL_LINES = {
   leftForTheApp: "I've left it in the app for you to approve.",
   turnedDown: 'Okay. I did not do it.',
   done: (verb: ApprovalVerb): string =>
-    verb === 'send' ? 'Done. I sent it.' : verb === 'cancel' ? 'Done. It is cancelled.' : 'Done.',
+    verb === 'send' ? 'Done. I sent it.' : verb === 'delete' ? 'Done. It is deleted.' : 'Done.',
   changed: 'What was waiting no longer matches what I read to you, so I did nothing. Open the chat to look at it.',
   notAllowed: 'That is not allowed any more, so I did nothing. Open the chat to look at it.',
   expired: 'That ran out of time, so I did nothing. Ask me again.',

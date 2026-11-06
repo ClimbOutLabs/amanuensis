@@ -89,13 +89,20 @@ describe('WholeSamples', () => {
   });
 });
 
+/** What an aman-tts that checked an exact speak answers with. */
+const CHECKED_HEADERS = { 'x-aman-exact': 'checked', 'content-type': 'audio/L16' };
+
+function checkedStream(...pieces: Uint8Array[]): Response {
+  return new Response(streamOf(...pieces).body, { status: 200, headers: CHECKED_HEADERS });
+}
+
 describe('SidecarSpeechSynthesizer with exact', () => {
   afterEach(() => {
     jest.restoreAllMocks();
   });
 
   it('sends the whole text once, marked exact, and streams what comes back', async () => {
-    const fetchSpy = jest.spyOn(globalThis, 'fetch').mockResolvedValue(streamOf(Uint8Array.of(1, 2)));
+    const fetchSpy = jest.spyOn(globalThis, 'fetch').mockResolvedValue(checkedStream(Uint8Array.of(1, 2)));
     const pieces = await collect(
       new SidecarSpeechSynthesizer().stream({
         text: 'Total is 100. + 500 fee.',
@@ -141,6 +148,26 @@ describe('SidecarSpeechSynthesizer with exact', () => {
       new SidecarSpeechSynthesizer().stream({ text: 'Hi.', format: 'pcm16', signal: never, exact: true }),
     );
     await expect(read).rejects.toThrow(/text to speech answered/);
+    await expect(read).rejects.not.toBeInstanceOf(WouldChangeTextError);
+  });
+
+  it.each([
+    ['an older voice service that ignores exact', () => streamOf(Uint8Array.of(1, 2))],
+    ['a 200 that is not the voice service', () => new Response('<html>welcome</html>', { status: 200 })],
+    [
+      'an answer that is not audio',
+      () =>
+        new Response('<html>welcome</html>', {
+          status: 200,
+          headers: { 'x-aman-exact': 'checked', 'content-type': 'text/html' },
+        }),
+    ],
+  ])('does not speak %s, since nothing checked the words', async (_name, answer) => {
+    jest.spyOn(globalThis, 'fetch').mockResolvedValue(answer());
+    const read = collect(
+      new SidecarSpeechSynthesizer().stream({ text: 'Hi.', format: 'pcm16', signal: never, exact: true }),
+    );
+    await expect(read).rejects.toThrow(/did not check/);
     await expect(read).rejects.not.toBeInstanceOf(WouldChangeTextError);
   });
 });

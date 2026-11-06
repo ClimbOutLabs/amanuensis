@@ -105,6 +105,10 @@ interface Awaiting {
   verb: ApprovalVerb;
   reminded: boolean;
   expiresAtMs: number;
+  /** Said once the body was made; the card is waited on only if this was made too. */
+  instruction: string;
+  /** Speech that began before this is no answer to the card: the person had not heard it yet. */
+  armedAtMs: number;
 }
 
 interface Heard {
@@ -148,8 +152,11 @@ export class VoiceSession {
   readonly #lifetime = new AbortController();
   /** The "I missed that" line being said, if any: talking over it stops it like any other sound. */
   #missedAbort: AbortController | undefined;
-  /** Where the latest audio came from, so talking over a short notice does not cancel a card's read-back. */
-  #lastSound: 'reply' | 'missed' = 'reply';
+  /**
+   * Where the audio of a reply made so far ends on the playback timeline. Talking before that point cuts a reply
+   * off; a short notice queued after it is not part of one, so talking over only that leaves a card waiting.
+   */
+  #replyEndsAtMs = 0;
   /** Sound that may still arrive early: it refills as time passes, but never past the slack. */
   #creditMs = REALTIME_SLACK_MS;
   #lastArrivalAtMs = 0;
@@ -469,7 +476,7 @@ export class VoiceSession {
     this.#deps.onNote?.('barge_in');
     // A read-back that was cut off was not heard through, so it cannot be answered. A short notice was
     // never part of one, so talking over it leaves a waiting card as it is.
-    if (this.#lastSound === 'reply') {
+    if (atMs < this.#replyEndsAtMs) {
       this.#awaiting = undefined;
     }
     this.#stopSound();
@@ -485,6 +492,7 @@ export class VoiceSession {
   #stopSound(): void {
     this.#speechAbort?.abort();
     this.#missedAbort?.abort();
+    this.#replyEndsAtMs = 0;
     this.#timeline.stop();
     this.#deps.transport.clearAudio();
   }
@@ -514,7 +522,11 @@ export class VoiceSession {
         this.#awaiting = undefined;
       }
       const waiting = await this.#stillWaitingCard();
-      if (
+      if (waiting !== undefined && heard.startedAtMs < waiting.armedAtMs) {
+        // Said before the card was read out, so it cannot be an answer to it; the card stays for the screen.
+        this.#deps.onNote?.('speech_before_card');
+        this.#awaiting = undefined;
+      } else if (
         waiting !== undefined &&
         !(await this.#answerWaitingCard({ text, heard, awaiting: waiting, signal, speechSignal, marks }))
       ) {
@@ -617,7 +629,12 @@ export class VoiceSession {
     speechSignal: AbortSignal;
     marks: Marks;
   }): Promise<void> {
-    const readInFull = await speech.drain();
+    let readInFull = await speech.drain();
+    if (asking !== undefined && readInFull && !speechSignal.aborted) {
+      // How to answer is said only once the card itself was read, so a refused card never asks for an answer.
+      speech.say({ text: asking.instruction, role: 'instruction' });
+      readInFull = await speech.drain();
+    }
     if (asking !== undefined && !readInFull && !speechSignal.aborted) {
       await this.#leaveCardForTheScreen({ signal: speechSignal, marks });
       return;
@@ -639,6 +656,7 @@ export class VoiceSession {
   /** The card is waited on only once its read-back was heard through; a person who cut it off sees it on screen. */
   #startAwaiting({ asking, signal }: { asking: Awaiting | undefined; signal: AbortSignal }): void {
     if (asking !== undefined && !signal.aborted && !this.#ended) {
+      asking.armedAtMs = this.#clock.now();
       this.#awaiting = asking;
     }
   }
@@ -761,12 +779,19 @@ export class VoiceSession {
       speech.say({ text: APPROVAL_LINES.leftForTheApp, role: 'instruction' });
       return undefined;
     }
-    // Each text goes to the voice whole and must be said exactly as written, or the voice says nothing of it
-    // and the rest is not read: what was judged is what is heard, so nothing is approved that was not heard.
-    for (const segment of plan.segments) {
-      speech.say({ text: segment.text, role: segment.role, exact: segment.role === 'body' });
-    }
-    return { approval: only, turnId, verb: plan.verb, reminded: false, expiresAtMs: this.#clock.now() + AWAITING_MS };
+    // The card goes to the voice as one text that must be said exactly as written, or the voice says nothing
+    // of it: what was judged is what is heard, so nothing is approved that was not heard.
+    speech.say({ text: plan.body, role: 'body', exact: true });
+    const now = this.#clock.now();
+    return {
+      approval: only,
+      turnId,
+      verb: plan.verb,
+      reminded: false,
+      expiresAtMs: now + AWAITING_MS,
+      instruction: plan.instruction,
+      armedAtMs: now,
+    };
   }
 
   #speechFor({
@@ -787,10 +812,14 @@ export class VoiceSession {
       spoken: this.#spoken,
       signal,
       onAudio: () => {
-        this.#lastSound = kind;
+        if (kind === 'reply') {
+          this.#replyEndsAtMs = this.#timeline.endsAtMs;
+        }
         if (marks.firstAudioAtMs === undefined) {
           marks.firstAudioAtMs = this.#clock.now();
-          this.#reportLatency(marks);
+          if (kind === 'reply') {
+            this.#reportLatency(marks);
+          }
         }
         this.#refreshState();
       },

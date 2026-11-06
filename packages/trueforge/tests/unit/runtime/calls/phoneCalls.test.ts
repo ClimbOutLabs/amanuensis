@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import { CALL_LINES } from '../../../../src/runtime/calls/callTurns';
 import { CALLS_NEED_VOICE } from '../../../../src/runtime/calls/phoneCalls';
 import { readReachHistory } from '../../../../src/runtime/noticing/reachGate';
+import { SidecarSpeechSynthesizer, ttsBaseUrl } from '../../../../src/voice/ttsClient';
 import { ACCOUNT_SID, ALICE, CALL_SID, PHONE, callsHarness } from '../../../fixtures/callsHarness';
 import { FakeStt, FakeTts, FakeTurns, LoudnessVad, hum, mulawBytes, quiet } from '../../../fixtures/voice/fakes';
 
@@ -354,6 +355,40 @@ describe('a call that ends while its line opens', () => {
       'You answered, but the message could not be read out as written. It was sent as a text and a notice instead.',
     );
   });
+
+  it.each([
+    ['human', 'The call was answered, but the line could not be opened. The call was not tried again.'],
+    ['machine_end_beep', 'A voicemail picked up, but no message could be left. The call was not tried again.'],
+  ])(
+    'when the voice service speaks without saying it checked the words (%s), says nothing and falls back',
+    async (answeredBy, detail) => {
+      const realFetch = globalThis.fetch;
+      const asked: unknown[] = [];
+      jest.spyOn(globalThis, 'fetch').mockImplementation((input, init) => {
+        const url = input instanceof Request ? input.url : String(input);
+        if (!url.startsWith(`${ttsBaseUrl()}/v1/speak`)) {
+          return realFetch(input, init);
+        }
+        asked.push(JSON.parse(String(init?.body)));
+        // An older voice service: it speaks anything and does not mark the words as checked.
+        return Promise.resolve(new Response(new Uint8Array(160), { headers: { 'content-type': 'audio/basic' } }));
+      });
+      try {
+        h = await callsHarness({ speaking: () => new SidecarSpeechSynthesizer() });
+        await h.readyToCall();
+        const delivery = await h.callDelivery();
+        const media = await h.openMedia({ token: (await h.answer(answeredBy)).token });
+        expect(await media.closed).toBe(1000);
+        await h.waitFor(() => h.texts.length === 1 && h.pushes.length === 1);
+        expect(asked).toEqual([expect.objectContaining({ exact: true, format: 'mulaw8k' })]);
+        expect(media.frames.some(frame => frame.event === 'media')).toBe(false);
+        const calls = (await h.attemptsOf(delivery.id)).filter(attempt => attempt.channel === 'call');
+        expect(calls.at(-1)?.detail).toBe(detail);
+      } finally {
+        jest.restoreAllMocks();
+      }
+    },
+  );
 
   it('when the line drops while its key is still being checked, still writes the call down and falls back', async () => {
     let reached: () => void = () => undefined;

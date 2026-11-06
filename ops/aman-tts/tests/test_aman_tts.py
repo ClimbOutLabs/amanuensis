@@ -109,7 +109,7 @@ class SpokenWordsTest(unittest.TestCase):
             "Thursday at three works for me, bring the form (really) \"now\".",
             "It is fine; see you in the e-mail thread... later!",
             "It's fine. Don't be late, it's noon.",
-            "Write to bob at example.com about it.",
+            "Write to bob at example dot com about it.",
             "Costs $1,200 or 15%, about 3.5 hours, at 9:30. Pay $40.50 & bring 2 photos.",
             "Use 500. Then wait.",
             "Don\u2019t be late.",
@@ -153,6 +153,9 @@ class SpokenWordsTest(unittest.TestCase):
             "Pay 10 000.",  # a space inside a number
             "Pay 5\u2009000",
             "Pay 5\u00a0000",
+            "Write to bob at example.com about it.",  # a dot between letters is silent: my.bank.com sounds like mybank.com
+            "Mail me at my-bank.com today.",
+            "Mail me at my.bank.com today.",
             "Pay 1000 500 dollars.",  # two numbers side by side
             "Wire 100 20 3.",
             "Wire $5\u2070\u2070\u2070",  # superscripts fold to digits
@@ -182,6 +185,22 @@ class SpokenWordsTest(unittest.TestCase):
             "Pay twenty 5 dollars.",  # a spelled number next to a digit
             "Pay 5 twenty dollars.",
             "Wire 5 hundred 3.",
+            "Wire 1000\u2026500",  # a pause-only mark between numbers
+            "Wire 1000 \u2026 500",
+            "Wire 1000.;500",
+            "Wire 1000.\u2014500",
+            "Wire 1000. (500)",
+            "Wire 1000... 500",
+            "Wire 1000 (five hundred) dollars.",  # a number word and a digit apart by a silent sign
+            "Pay twenty (5) dollars.",
+            "Pay twenty, 5 dollars.",
+            "Pay twenty;5 dollars.",
+            "Pay 5 (hundred) dollars.",
+            "Pay $5 (thousand) dollars.",
+            "Pay twenty\u20265 dollars.",
+            "Wire 10, 500 now.",  # a comma is a pause only between small numbers, a date or a time
+            "Wire $5, 20 now.",
+            "Wire 1000, 2026 now.",
         ):
             with self.subTest(text=text):
                 self.assertFalse(reads_as_written(text))
@@ -204,6 +223,14 @@ class SpokenWordsTest(unittest.TestCase):
             "Pay $1,000,000.",
             "It costs 5. Then 3 more.",
             "Call (that one) at 9:30.",
+            "I'll add the event Dentist on Fri Nov 6, 2:30 to 3:00 pm.",  # a day, a comma and a time
+            "I'll add the event Trip on Tue Oct 27, 9:00 am to Wed Oct 28, 2:30 pm.",
+            "I'll add the event Trip on Fri Nov 6 at 2:30 to 3:00 pm.",
+            "It was on March 5, 2026 in town.",
+            "Items 1, 2 and 3.",
+            "Use 5. 3 more follow.",  # one sentence stop and a space
+            "Twenty five and one hundred.",
+            "Pay one, two and three.",
         ):
             with self.subTest(text=text):
                 self.assertTrue(reads_as_written(text))
@@ -218,6 +245,19 @@ class SpeakExactTest(unittest.TestCase):
 
     def post(self, client, text, **extra):
         return client.post("/v1/speak", json={"text": text, "format": "pcm16", "stream": True, "exact": True, **extra})
+
+    def test_an_exact_speak_that_passed_says_so(self) -> None:
+        with client_for(FakeSynthesizer) as client:
+            for stream in (True, False):
+                with self.subTest(stream=stream):
+                    res = self.post(client, "Hello there.", stream=stream)
+                    self.assertEqual(res.status_code, 200)
+                    self.assertEqual(res.headers["x-aman-exact"], "checked")
+
+    def test_a_speak_that_was_not_exact_does_not_say_so(self) -> None:
+        with client_for(FakeSynthesizer) as client:
+            res = client.post("/v1/speak", json={"text": "Hello there.", "format": "pcm16", "stream": True})
+        self.assertNotIn("x-aman-exact", res.headers)
 
     def test_refuses_text_it_would_change_before_any_sound(self) -> None:
         with client_for(FakeSynthesizer) as client:

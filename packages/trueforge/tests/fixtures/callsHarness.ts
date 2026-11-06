@@ -26,7 +26,7 @@ import { defaultReachSettings } from '../../src/schemas/reach';
 import { startTwilioWebhookListener } from '../../src/twilioWebhook/listener';
 import { twilioSignature } from '../../src/twilioWebhook/signature';
 import { phoneCallRoutes } from '../../src/twilioWebhook/voiceCall';
-import { socketBytes } from '../../src/voice/transport';
+import { socketBytes, type SpeechSynthesizer } from '../../src/voice/transport';
 import { confirmNumber } from './confirmedNumber';
 import { closeServer, listeningPort } from './listenPort';
 import { FakeStt, FakeTts, LoudnessVad } from './voice/fakes';
@@ -49,6 +49,7 @@ export async function callsHarness({
   voiceReady = true,
   listening = () => Promise.resolve({ vad: new LoudnessVad(), stt: new FakeStt() }),
   tts = new FakeTts(),
+  speaking,
   redeemGate,
 }: {
   chat?: CallChat;
@@ -58,6 +59,8 @@ export async function callsHarness({
   /** What a conversation listens with; a test can make it slow or fail. */
   listening?: () => Promise<CallListening>;
   tts?: FakeTts;
+  /** Another voice in place of the fake one, such as the real client against a fake service. */
+  speaking?: () => SpeechSynthesizer;
   /** Holds each media key's redeem until it settles, so a test can drop the line meanwhile. */
   redeemGate?: { reached: () => void; open: Promise<void> };
 } = {}) {
@@ -148,7 +151,7 @@ export async function callsHarness({
     voiceReady: () => Promise.resolve(voiceReady),
     deliveries: () => deliveries,
     chats,
-    speaking: () => tts,
+    speaking: speaking ?? (() => tts),
     listening,
     logger,
     ...(limits === undefined ? {} : { limits }),
