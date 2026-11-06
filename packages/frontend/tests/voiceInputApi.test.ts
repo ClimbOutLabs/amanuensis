@@ -285,3 +285,10 @@ test('connect says what to do when the answer is not a voice line', async () => 
   const api = createVoiceInputApi(transcribeFetcher(jsonResponse({ data: {} }, 200), {}));
   await assert.rejects(api.connect({ sessionId: 'chat-1' }), /Reload the page, then try again\./);
 });
+
+test('connect says what to do when the refusal carries no message', async () => {
+  const api = createVoiceInputApi(transcribeFetcher(new Response('<html>bad gateway</html>', { status: 502 }), {}));
+  await assert.rejects(api.connect({ sessionId: 'chat-1' }), /status 502\. Reload the page, then try again\./);
+  const empty = createVoiceInputApi(transcribeFetcher(jsonResponse({}, 500), {}));
+  await assert.rejects(empty.connect({ sessionId: 'chat-1' }), /status 500\. Reload the page, then try again\./);
+});

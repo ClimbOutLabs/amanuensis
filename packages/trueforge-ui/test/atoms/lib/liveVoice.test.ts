@@ -27,7 +27,8 @@ describe('readServerEvent', () => {
   it('reads the messages the server sends', () => {
     expect(readServerEvent('{"type":"ready","sample_rate":24000}')).toEqual({ type: 'ready', sample_rate: 24000 });
     expect(readServerEvent('{"type":"clear"}')).toEqual({ type: 'clear' });
-    expect(readServerEvent('{"type":"turn_saved","turn_id":"t1"}')).toEqual({ type: 'turn_saved' });
+    expect(readServerEvent('{"type":"turn_saved","turn_id":"t1"}')).toEqual({ type: 'turn_saved', turn_id: 't1' });
+    expect(readServerEvent('{"type":"heard","text":"hello"}')).toEqual({ type: 'heard', text: 'hello' });
     expect(readServerEvent('{"type":"state","state":"thinking"}')).toEqual({ type: 'state', state: 'thinking' });
     expect(readServerEvent('{"type":"notice","text":"Hi"}')).toEqual({ type: 'notice', text: 'Hi' });
   });
