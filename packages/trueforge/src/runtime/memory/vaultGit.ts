@@ -27,6 +27,13 @@ const HISTORY_EXCLUDE = `${[
 
 const PAGE_FOLDER_NAMES = ['people', 'matters'] as const;
 
+/**
+ * The only paths ever staged: `.md` files directly in the two page folders. `--force` makes git skip the vault's own
+ * ignore files for them, and the glob pathspec keeps it from reaching anything else, so a `.gitignore` in the vault
+ * cannot hide a page from the history.
+ */
+const PAGE_PATHSPECS = PAGE_FOLDER_NAMES.map(folder => `:(glob)${folder}/*.md`);
+
 /** Commit identity for every commit in the history. */
 const HISTORY_IDENTITY = { name: 'Aman memory', email: 'memory@localhost' } as const;
 
@@ -168,6 +175,7 @@ export async function ensureHistory(options: VaultGitOptions): Promise<void> {
  * sorted. Empty when every page matches. A page that was deleted is listed too.
  */
 export async function changedPagePaths(options: VaultGitOptions): Promise<string[]> {
+  await stagePages(options);
   const { stdout } = await gitOrThrow({
     options,
     args: ['status', '--porcelain=v1', '-z', '--no-renames', '--untracked-files=all'],
@@ -186,11 +194,7 @@ export async function changedPagePaths(options: VaultGitOptions): Promise<string
 export async function commitPages(
   options: VaultGitOptions & { message: string },
 ): Promise<{ committed: true; sha: string } | { committed: false }> {
-  await clearStaleIndexLock(options);
-  const folders = await existingPageFolders(options.vaultDir);
-  if (folders.length > 0) {
-    await gitOrThrow({ options, args: ['add', '-A', '--', ...folders] });
-  }
+  await stagePages(options);
   const staged = await git({ options, args: ['diff', '--cached', '--quiet'] });
   if (staged.exitCode === 0) {
     return { committed: false };
@@ -211,14 +215,17 @@ export async function pageAtLastCommit(
   return result.exitCode === 0 ? result.stdout : undefined;
 }
 
-async function existingPageFolders(vaultDir: string): Promise<string[]> {
-  const found: string[] = [];
-  for (const folder of PAGE_FOLDER_NAMES) {
-    if (await isDirectory(path.join(vaultDir, folder))) {
-      found.push(folder);
+/** Stages every page change, including a deleted page, and nothing else. */
+async function stagePages(options: VaultGitOptions): Promise<void> {
+  await clearStaleIndexLock(options);
+  for (const pathspec of PAGE_PATHSPECS) {
+    const args = ['add', '-A', '--force', '--', pathspec];
+    const result = await git({ options, args });
+    // A folder with no pages yet matches nothing, which is not a failure.
+    if (result.exitCode !== 0 && !result.stderr.includes('did not match any files')) {
+      throw failure({ args, result });
     }
   }
-  return found;
 }
 
 /**

@@ -98,6 +98,42 @@ describe('vaultGit', () => {
     expect(history(vaultDir, 'log', '--format=%an <%ae> %s')).toBe('Aman memory <memory@localhost> Your edits\n');
   });
 
+  it("is not hidden by the vault's own ignore files, and still stages nothing outside the page folders", async () => {
+    const vaultDir = await makeVault();
+    await put(vaultDir, '.gitignore', 'people/\nmatters/*.md\n*.md\n');
+    await put(vaultDir, 'people/.gitignore', '*\n');
+    await put(vaultDir, 'people/wendy.md', 'a\n');
+    await put(vaultDir, 'matters/trip.md', 'b\n');
+    await put(vaultDir, 'people/photo.png', 'not a page');
+    await put(vaultDir, 'people/nested/deep.md', 'too deep');
+    await put(vaultDir, 'MEMORY.md', 'the long-term file');
+    await put(vaultDir, 'notes.md', 'outside');
+    await ensureHistory({ vaultDir, runner: execFileRunner });
+    expect(await changedPagePaths({ vaultDir, runner: execFileRunner })).toEqual([
+      'matters/trip.md',
+      'people/wendy.md',
+    ]);
+    await commitPages({ vaultDir, runner: execFileRunner, message: 'first' });
+    expect(history(vaultDir, 'ls-tree', '-r', '--name-only', 'HEAD').trim().split('\n')).toEqual([
+      'matters/trip.md',
+      'people/wendy.md',
+    ]);
+    await put(vaultDir, 'people/wendy.md', 'changed\n');
+    await (await import('node:fs/promises')).rm(path.join(vaultDir, 'matters', 'trip.md'));
+    expect(await changedPagePaths({ vaultDir, runner: execFileRunner })).toEqual([
+      'matters/trip.md',
+      'people/wendy.md',
+    ]);
+  });
+
+  it('works when a page folder is missing or empty', async () => {
+    const vaultDir = await makeVault();
+    await ensureHistory({ vaultDir, runner: execFileRunner });
+    expect(await changedPagePaths({ vaultDir, runner: execFileRunner })).toEqual([]);
+    await mkdir(path.join(vaultDir, 'matters'));
+    expect(await commitPages({ vaultDir, runner: execFileRunner, message: 'none' })).toEqual({ committed: false });
+  });
+
   it('commits nothing when no page changed, and notices edits, additions and deletions', async () => {
     const vaultDir = await makeVault();
     await put(vaultDir, 'people/a.md', '1\n');
