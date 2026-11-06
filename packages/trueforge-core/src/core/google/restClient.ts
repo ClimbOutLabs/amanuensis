@@ -234,6 +234,7 @@ export class GoogleRestClient {
       }
       throw new GoogleApiError({
         status: response.status,
+        busy: response.status === 429 || response.status >= 500 || BUSY_REASONS.has(reason),
         message:
           input.unknownOutcome !== undefined && response.status >= 500
             ? input.unknownOutcome

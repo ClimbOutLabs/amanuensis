@@ -31,9 +31,10 @@ export type MailWindowRead =
   { read: 'all'; messages: MailMessage[] } | { read: 'too_many' } | { read: 'oldest'; messages: MailMessage[] };
 
 /**
- * One message the source can never read however often it tries: it was deleted, it is too large, or it comes back in
- * a shape the source cannot parse. Anything else, such as a busy server or a dropped connection, is thrown as it is,
- * so the pass stops and the next one reads the same mail again.
+ * A read fails in one of three ways. This is the first: the message can never be read however often it is tried (it
+ * was deleted, it is too large, or it comes back in a shape the source cannot parse), so it is passed over at once.
+ * The second is `MailSourceBusyError`. Any other error is unclear: it may be about the message or about the
+ * server, and counts against the message only once a read of another message worked after it.
  */
 export class MessageUnreadableError extends Error {
   constructor({ cause }: { cause: unknown }) {
@@ -43,8 +44,8 @@ export class MessageUnreadableError extends Error {
 }
 
 /**
- * A read failed in a way that says nothing about the message: the server is busy, rate limiting, down or out of
- * reach. Such a failure stops the pass but never counts toward passing the message over.
+ * A read failed in a way that says nothing about the message: the server is busy, rate limiting, down, out of reach,
+ * or the read ran out of time. Such a failure stops the pass but never counts toward passing the message over.
  */
 export class MailSourceBusyError extends Error {
   constructor({ cause }: { cause: unknown }) {
@@ -75,7 +76,7 @@ export interface MailSource {
   }): Promise<MailWindowRead>;
   /** The start of one message's text, for a watcher that needs more than the snippet. Throws MessageUnreadableError for a message it can never read. */
   readText(message: MailMessage): Promise<string>;
-  /** The text of messages that came after this one in its thread, oldest first. Throws MessageUnreadableError like readText. */
+  /** The text of messages that came after this one in its thread, oldest first. A later reply it cannot read is left out. */
   laterInThread(message: MailRef): Promise<string[]>;
   /** The receiving servers whose Authentication-Results can be believed. Empty when this source passes on none. */
   trustedAuthenticationServers: readonly string[];
@@ -104,10 +105,12 @@ export interface CalendarSource {
   listEvents(input: { from: Date; to: Date }): Promise<CalendarEventInfo[]>;
 }
 
+/** Whether a person's mail can be watched: a source, none set up, or one that is set up but could not be opened now. */
+export type MailAccess =
+  { status: 'ready'; source: MailSource } | { status: 'none' } | { status: 'unreachable'; error: unknown };
+
 export interface NoticingSources {
-  mail: MailSource | undefined;
-  /** Set when a mail source is set up but could not be opened now, as opposed to there being none. */
-  mail_unreachable?: { error: unknown } | undefined;
+  mail: MailAccess;
   calendar: CalendarSource | undefined;
 }
 

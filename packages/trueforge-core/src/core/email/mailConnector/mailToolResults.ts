@@ -40,21 +40,6 @@ export function emailsOfResult(result: unknown): unknown[] {
 }
 
 /**
- * The ids the connector could not fetch, from the same result `emailsOfResult` reads. The connector answers a content
- * read with success even when some messages failed, and lists those ids here instead of raising an error.
- */
-export function failedIdsOfResult(result: unknown): string[] {
-  if (!isRecord(result)) {
-    return [];
-  }
-  const fromBlock = (value: unknown): string[] | undefined => {
-    const failed = isRecord(value) ? value['failed_ids'] : undefined;
-    return Array.isArray(failed) ? failed.map(String) : undefined;
-  };
-  return fromBlock(result['structuredContent']) ?? fromBlock(parsedTextBlocks(result)[0]) ?? [];
-}
-
-/**
  * The account names in the sidecar's account list. The list may come as a structured `result` array, or as
  * one JSON text block per account or for the whole list. Each name appears once, in the order given.
  */

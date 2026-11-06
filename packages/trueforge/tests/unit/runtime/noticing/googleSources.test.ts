@@ -3,14 +3,20 @@ import type { CalendarEvent } from '@truefoundry/trueforge-core/core/calendar/ca
 import { LIST_DEADLINE_MS, type GmailApiPort } from '@truefoundry/trueforge-core/core/email/gmail/gmailApi';
 import type { GmailMessage } from '@truefoundry/trueforge-core/core/email/gmail/gmailWire';
 
-import { GoogleApiError, GoogleUnusableReplyError } from '@truefoundry/trueforge-core/core/google/errors';
+import {
+  GoogleApiError,
+  GoogleOAuthError,
+  GoogleUnusableReplyError,
+} from '@truefoundry/trueforge-core/core/google/errors';
 import { GOOGLE_TOKEN_URL } from '@truefoundry/trueforge-core/core/google/oauth';
+import winston from 'winston';
 import { z } from 'zod';
 
 import { migrateSqliteToLatest } from '../../../../src/db/migrateSqlite';
 import { createSqliteDb } from '../../../../src/db/sqlite/client';
 import { SqliteGoogleConnectionStore } from '../../../../src/db/sqlite/google-connection-store/SqliteGoogleConnectionStore';
 import {
+  createGoogleNoticingSources,
   gmailMailSource,
   googleCalendarSource,
   googleCalendarTimezoneFor,
@@ -239,6 +245,7 @@ describe('Gmail source', () => {
         limit: 1,
         keep_from: [],
         logger: { warn: jest.fn() },
+        out_of_time: () => false,
       });
       seen.push(...read.messages.map(item => item.id));
       if (read.resume_from === undefined) break;
@@ -298,11 +305,29 @@ describe('Gmail source', () => {
         'a dropped connection',
         new GoogleApiError({ status: 503, message: 'Gmail is busy.', cause: new TypeError('fetch failed') }),
       ],
+      [
+        'a 403 that says the user is going too fast',
+        new GoogleApiError({ status: 403, message: 'Gmail is busy right now.', busy: true }),
+      ],
+      [
+        'a login that could not be refreshed in the middle of the read',
+        new GoogleOAuthError({
+          message: 'Google refused the token request.',
+          code: 'temporarily_unavailable',
+          status: 503,
+        }),
+      ],
+      ['a token request that never got an answer', new TypeError('fetch failed')],
     ])('is a busy server, which never counts against the message, for %s', async (_name, error) => {
       for (const failure of [failing(error).readText(asMail), failing(error).laterInThread(mailRef)]) {
         await expect(failure).rejects.toBeInstanceOf(MailSourceBusyError);
         await expect(failure).rejects.toHaveProperty('cause', error);
       }
+    });
+
+    it('passes on a 403 that is not about going too fast as it is, so it counts against the message', async () => {
+      const error = new GoogleApiError({ status: 403, message: 'Gmail needs more access.' });
+      await expect(failing(error).readText(asMail)).rejects.toBe(error);
     });
 
     it('passes on a request Gmail did not accept as it is, so it counts against the message', async () => {
@@ -415,5 +440,49 @@ describe('googleCalendarTimezoneFor', () => {
     await expect(zoneFor(OWNER)).resolves.toBeUndefined();
     await expect(zoneFor({ tenant_id: 'default', created_by: 'someone-else' })).resolves.toBeUndefined();
     expect(fetchImpl).not.toHaveBeenCalled();
+  });
+});
+
+describe('createGoogleNoticingSources', () => {
+  const OWNER = { tenant_id: 'default', created_by: 'owner-1' };
+
+  async function sourcesWith(status: 'connected' | 'needs_reconnect') {
+    const db = createSqliteDb(':memory:');
+    await migrateSqliteToLatest(db);
+    const store = new SqliteGoogleConnectionStore(db);
+    await store.save({
+      ...OWNER,
+      client_id: '123456-abcdefgh.apps.googleusercontent.com',
+      client_secret: 'synthetic-secret',
+      client_type: 'desktop',
+      refresh_token: 'synthetic-refresh',
+      granted_scopes: ['https://www.googleapis.com/auth/gmail.readonly'],
+      account_email: 'me@example.com',
+      status,
+      created_at: '2026-11-01T00:00:00.000Z',
+      updated_at: '2026-11-01T00:00:00.000Z',
+    });
+    return createGoogleNoticingSources({
+      connections: store,
+      fetchImpl: undefined,
+      logger: winston.createLogger({ silent: true }),
+    });
+  }
+
+  it('gives mail to a working login', async () => {
+    expect((await (await sourcesWith('connected')).sourcesFor(OWNER)).mail.status).toBe('ready');
+  });
+
+  it('says mail is out of reach, not missing, when the login has to be redone', async () => {
+    const mail = (await (await sourcesWith('needs_reconnect')).sourcesFor(OWNER)).mail;
+    expect(mail.status).toBe('unreachable');
+  });
+
+  it('says there is no mail for someone with no Google login', async () => {
+    const provider = await sourcesWith('connected');
+    await expect(provider.sourcesFor({ tenant_id: 'default', created_by: 'someone-else' })).resolves.toEqual({
+      mail: { status: 'none' },
+      calendar: undefined,
+    });
   });
 });
