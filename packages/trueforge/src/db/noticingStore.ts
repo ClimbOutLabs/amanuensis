@@ -42,8 +42,8 @@ export interface NoticingEventTable {
 
 /**
  * When a watcher last looked for one person, and how it is doing. `failing_since` and `failure_kind` are set while
- * passes keep failing and cleared by a pass that works. `stuck_*` name the one message a pass keeps failing on, how
- * many passes failed on it and since when, so a message that never reads can be passed over.
+ * passes keep failing and cleared by a pass that works. `stuck_*` name the one message a pass keeps failing on and how
+ * many passes failed on it, so a message that never reads can be passed over.
  */
 export interface NoticingCheckpointTable {
   tenant_id: string;
@@ -54,7 +54,6 @@ export interface NoticingCheckpointTable {
   failure_kind: string | null;
   stuck_message_id: string | null;
   stuck_passes: number;
-  stuck_since: string | Date | null;
 }
 
 /** Who is deciding how loudly to reach one person right now, and until when. */
@@ -95,11 +94,10 @@ const MAX_ATTEMPTS = 5;
 /** Events a pass may claim: waiting to be raised, or left halfway through delivery by a pass that stopped. */
 const WAITING = ['pending', 'delivering'];
 
-/** A message a watcher keeps failing on: how many passes failed on it and when the first one did. */
+/** A message a watcher keeps failing on, and how many passes in a row failed on it. */
 export interface StuckMessage {
   message_id: string;
   passes: number;
-  since: Date;
 }
 
 /** Where a watcher reads from next, and its trouble if passes keep failing. */
@@ -445,10 +443,7 @@ export class NoticingStore implements INoticingStore {
         row.failing_since === null || !kind.success
           ? undefined
           : { kind: kind.data, since: new Date(row.failing_since) },
-      stuck:
-        row.stuck_message_id === null || row.stuck_since === null
-          ? undefined
-          : { message_id: row.stuck_message_id, passes: row.stuck_passes, since: new Date(row.stuck_since) },
+      stuck: row.stuck_message_id === null ? undefined : { message_id: row.stuck_message_id, passes: row.stuck_passes },
     };
   }
 
@@ -459,7 +454,6 @@ export class NoticingStore implements INoticingStore {
       failure_kind: input.failure?.kind ?? null,
       stuck_message_id: input.stuck?.message_id ?? null,
       stuck_passes: input.stuck?.passes ?? 0,
-      stuck_since: input.stuck?.since.toISOString() ?? null,
     };
     await this.#db
       .insertInto('noticing_checkpoint')

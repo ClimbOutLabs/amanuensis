@@ -163,10 +163,11 @@ function parseMailProblem(value: unknown): ReachView['mailProblem'] {
   }
   const raw = required(value, isRecord);
   const kind = raw.kind;
-  return {
-    since: required(raw.since, isString),
-    kind: kind === 'too_slow' ? 'too_slow' : 'other',
-  };
+  const since = required(raw.since, isString);
+  if (Number.isNaN(new Date(since).getTime())) {
+    throw new Error(UNREADABLE);
+  }
+  return { since, kind: kind === 'too_slow' ? 'too_slow' : 'other' };
 }
 
 function parseView(body: unknown): ReachView {

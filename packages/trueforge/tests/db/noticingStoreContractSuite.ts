@@ -287,7 +287,7 @@ export function runNoticingStoreContractSuite(getStore: () => INoticingStore): v
     const trouble = {
       checked_at: new Date('2026-11-05T10:00:00.000Z'),
       failure: { kind: 'too_slow' as const, since: new Date('2026-11-05T09:00:00.000Z') },
-      stuck: { message_id: 'm7', passes: 2, since: new Date('2026-11-05T09:30:00.000Z') },
+      stuck: { message_id: 'm7', passes: 2 },
     };
     await store.setCheckpoint({ ...ALICE, watcher: 'mail', ...trouble });
     await expect(store.getCheckpoint({ ...ALICE, watcher: 'mail' })).resolves.toEqual(trouble);

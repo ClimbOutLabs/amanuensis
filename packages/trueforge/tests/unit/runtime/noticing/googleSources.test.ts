@@ -15,7 +15,7 @@ import {
   googleCalendarSource,
   googleCalendarTimezoneFor,
 } from '../../../../src/runtime/noticing/googleSources';
-import { MessageUnreadableError } from '../../../../src/runtime/noticing/sources';
+import { MailSourceBusyError, MessageUnreadableError } from '../../../../src/runtime/noticing/sources';
 import { readMailWindow } from '../../../../src/runtime/noticing/watchers';
 
 const NOW = new Date('2026-11-05T15:00:00.000Z');
@@ -86,36 +86,29 @@ describe('Google Calendar source', () => {
     ]);
   });
 
-  it('counts an event someone the person shares with made for them in Google Calendar, with no one else on it', async () => {
+  it('counts an event with no one else on it that names no organizer, and does not count one a delegate made', async () => {
     const assistant = { email: 'assistant@example.com' };
     const events = await sourceOf([
-      timed('made for me', { organizer: me, creator: assistant, iCalUID: 'abc123@google.com' }),
+      timed('made for me', { organizer: me, creator: assistant }),
       timed('just me', {}),
     ]).listEvents({ from: NOW, to: new Date('2026-11-06T15:00:00.000Z') });
     expect(events.map(item => [item.id, item.own])).toEqual([
-      ['made for me', true],
+      ['made for me', false],
       ['just me', true],
     ]);
   });
 
-  it('does not count an outside invite file that names the person as organizer and lists no guests', async () => {
-    // An imported invite keeps the id its sender gave it, so Google did not make it.
+  it('does not count an outside invite file that names the person as organizer, whatever id it carries', async () => {
+    // The sender writes the id of an invite file, so `@google.com` proves nothing about who made it.
     const events = await sourceOf([
-      timed('imported', { organizer: me, creator: stranger, iCalUID: 'uid-1@mail.stranger.example' }),
-      timed('no id', { organizer: me, creator: stranger }),
+      timed('imported', { organizer: me, creator: stranger }),
+      timed('no creator', { organizer: me }),
       timed('organizer self only', { organizer: me, creator: me }),
-      timed('made for me with guests', {
-        organizer: me,
-        creator: { email: 'assistant@example.com' },
-        iCalUID: 'abc123@google.com',
-        attendees: [{ ...stranger, responseStatus: 'accepted' }],
-      }),
     ]).listEvents({ from: NOW, to: new Date('2026-11-06T15:00:00.000Z') });
     expect(events.map(item => [item.id, item.own])).toEqual([
       ['imported', false],
-      ['no id', false],
+      ['no creator', false],
       ['organizer self only', true],
-      ['made for me with guests', false],
     ]);
   });
 
@@ -300,18 +293,43 @@ describe('Gmail source', () => {
 
     it.each([
       ['a rate limit', new GoogleApiError({ status: 429, message: 'Too many requests.' })],
-      [
-        'a request Gmail did not accept',
-        new GoogleApiError({ status: 400, message: 'Gmail did not accept that request.' }),
-      ],
       ['Gmail failing with a 502 of its own', new GoogleApiError({ status: 502, message: 'Gmail is busy right now.' })],
       [
         'a dropped connection',
         new GoogleApiError({ status: 503, message: 'Gmail is busy.', cause: new TypeError('fetch failed') }),
       ],
-    ])('is passed on as it is for %s, so the pass can try again later', async (_name, error) => {
+    ])('is a busy server, which never counts against the message, for %s', async (_name, error) => {
+      for (const failure of [failing(error).readText(asMail), failing(error).laterInThread(mailRef)]) {
+        await expect(failure).rejects.toBeInstanceOf(MailSourceBusyError);
+        await expect(failure).rejects.toHaveProperty('cause', error);
+      }
+    });
+
+    it('passes on a request Gmail did not accept as it is, so it counts against the message', async () => {
+      const error = new GoogleApiError({ status: 400, message: 'Gmail did not accept that request.' });
       await expect(failing(error).readText(asMail)).rejects.toBe(error);
       await expect(failing(error).laterInThread(mailRef)).rejects.toBe(error);
+    });
+
+    it('skips the text of one later reply that cannot be taken apart, and reads the rest of the thread', async () => {
+      let broken: NonNullable<GmailMessage['payload']> = { mimeType: 'text/plain', body: { data: 'aGk' } };
+      for (let level = 0; level < 100_000; level += 1) {
+        broken = { mimeType: 'multipart/mixed', parts: [broken] };
+      }
+      const good = { mimeType: 'text/plain', body: { data: 'cGFpZA' } };
+      const { api } = gmail({ messages: [], perPage: 100 });
+      const source = gmailMailSource({
+        ...api,
+        getThread: () =>
+          Promise.resolve({
+            id: 't',
+            messages: [
+              { id: 'x', threadId: 't', internalDate: String(minute(5).getTime()), payload: broken },
+              { id: 'y', threadId: 't', internalDate: String(minute(6).getTime()), payload: good },
+            ],
+          }),
+      });
+      await expect(source.laterInThread(mailRef)).resolves.toEqual(['paid']);
     });
 
     it('is unreadable when the message body itself cannot be taken apart', async () => {
@@ -331,7 +349,7 @@ describe('Gmail source', () => {
           }),
       });
       await expect(nested.readText(asMail)).rejects.toBeInstanceOf(MessageUnreadableError);
-      await expect(nested.laterInThread(mailRef)).rejects.toBeInstanceOf(MessageUnreadableError);
+      await expect(nested.laterInThread(mailRef)).resolves.toEqual([]);
     });
   });
 

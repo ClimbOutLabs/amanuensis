@@ -16,6 +16,7 @@ import type { Logger } from 'winston';
 import type { IGoogleConnectionStore } from '../../db/googleConnectionStore';
 import type { PersonOwner } from '../../db/personOwner';
 import {
+  MailSourceBusyError,
   MessageUnreadableError,
   type CalendarEventInfo,
   type CalendarSource,
@@ -32,18 +33,22 @@ const MESSAGE_IDS_PER_PAGE = 100;
 const EVENTS_PER_PASS = 100;
 
 /**
- * Runs one read of a message and what is made of its reply. A message Gmail no longer has (404), a reply Aman cannot
- * take in (too large, or not parsing), or a message whose body cannot be taken apart will fail the same way every
- * time, so it is marked as such. Anything else, such as a rate limit, a refused request or an outage, is thrown as is
- * so the pass stops and tries again later.
+ * Runs one read of a message and what is made of its reply. A message Gmail no longer has (404) or a reply Aman cannot
+ * take in (too large, or not parsing) will fail the same way every time, so it is marked unreadable. A rate limit, a
+ * server error or a dropped connection says nothing about the message, so it is marked as a busy server. Anything
+ * else, such as a refused request, is thrown as is.
  */
 async function readingMessage<T>({ read }: { read: () => Promise<T> }): Promise<T> {
   try {
     return await read();
   } catch (error) {
-    const never =
-      error instanceof GoogleUnusableReplyError || (error instanceof GoogleApiError && error.status === 404);
-    throw never ? new MessageUnreadableError({ cause: error }) : error;
+    if (error instanceof GoogleUnusableReplyError || (error instanceof GoogleApiError && error.status === 404)) {
+      throw new MessageUnreadableError({ cause: error });
+    }
+    if (error instanceof GoogleApiError && (error.status === 429 || error.status >= 500)) {
+      throw new MailSourceBusyError({ cause: error });
+    }
+    throw error;
   }
 }
 
@@ -116,6 +121,7 @@ export function gmailMailSource(
 ): MailSource {
   return {
     trustedAuthenticationServers: GMAIL_AUTHENTICATION_SERVERS,
+    datesAreArrival: true,
     async listNewMessages({ since, before, limit, from }) {
       // Gmail's search takes whole seconds, so it is asked for a little more and the window is cut exactly here.
       const after = Math.floor(since.getTime() / 1000) - 1;
@@ -165,9 +171,19 @@ export function gmailMailSource(
       }
       const threadId = ref.thread_id;
       const thread = await readingMessage({ read: () => api.getThread({ threadId, format: 'full' }) });
+      // One reply that cannot be taken apart is left out, so a stranger who joins a thread cannot hide a payment.
       return (thread.messages ?? [])
         .filter(message => Number(message.internalDate) > ref.received_at.getTime())
-        .map(textOf);
+        .flatMap(message => {
+          try {
+            return [textOf(message)];
+          } catch (error) {
+            if (error instanceof MessageUnreadableError) {
+              return [];
+            }
+            throw error;
+          }
+        });
     },
   };
 }
@@ -207,12 +223,11 @@ export function googleCalendarSource({
           end: new Date(end),
           location: event.location ?? null,
           // An invite from outside can name the person as its organizer and mark them accepted, so an event that
-          // names them as organizer counts only when they made it, or Google Calendar made it for them with no one
-          // else on it. Otherwise their own accept counts, or an event with no organizer and no guests.
+          // names them as organizer counts only when they made it. Otherwise their own accept counts, or an event
+          // with no organizer and no guests.
           own:
             event.organizer?.self === true
-              ? event.creator?.self === true ||
-                (attendees.length === 0 && event.iCalUID?.endsWith('@google.com') === true)
+              ? event.creator?.self === true
               : answer === 'accepted' || (event.organizer === undefined && attendees.length === 0),
         });
       }

@@ -6,6 +6,7 @@ import type { AlwaysImportantSender, NoticingEvent, ReachSettings } from '../../
 import { checkSender } from './authenticationResults';
 import { findDeadline, looksLikeBill, saysPaid } from './deadlines';
 import {
+  MailSourceBusyError,
   MessageUnreadableError,
   type CalendarEventInfo,
   type CalendarSource,
@@ -50,9 +51,8 @@ function localDate({ at, timezone }: { at: Date; timezone: string }): string {
   }
 }
 
-/** A message the mail server keeps failing on is passed over after this many failed passes, or this long. */
+/** A message the mail server keeps failing on is passed over after this many failed passes. */
 export const MAX_STUCK_PASSES = 3;
-export const MAX_STUCK_MS = 3_600_000;
 
 /**
  * What one pass over new mail found. `track` are bills due later than the window, kept until they come near. When
@@ -175,10 +175,27 @@ export async function watchMail({
     keep_from: [...always.keys()],
     logger,
   });
+  // A failure counts against a message only when it is about that message: the server answered other reads this
+  // pass, or the failure is not one of a busy or unreachable server.
+  let reads = 0;
+  const counted: MailSource = {
+    ...source,
+    readText: async item => {
+      const text = await source.readText(item);
+      reads += 1;
+      return text;
+    },
+    laterInThread: async ref => {
+      const later = await source.laterInThread(ref);
+      reads += 1;
+      return later;
+    },
+  };
   const findings: MailFindings = { raise: [], track: [], resume_from, stuck: undefined, stopped_by: undefined };
-  for (const message of messages) {
+  let passedOver = 0;
+  for (const [index, message] of messages.entries()) {
     try {
-      const found = await findInMessage({ source, message, settings, always, now });
+      const found = await findInMessage({ source: counted, message, settings, always, now });
       findings.raise.push(...found.raise);
       findings.track.push(...found.track);
     } catch (error) {
@@ -186,11 +203,17 @@ export async function watchMail({
         logger.warn('Passed over a mail that could not be read', { message_id: message.id, error: causeText(error) });
         continue;
       }
-      const failed: StuckMessage =
-        stuck?.message_id === message.id
+      const about = !(error instanceof MailSourceBusyError) || reads > 0;
+      const failed: StuckMessage | undefined = !about
+        ? stuck
+        : stuck?.message_id === message.id
           ? { ...stuck, passes: stuck.passes + 1 }
-          : { message_id: message.id, passes: 1, since: now };
-      if (failed.passes >= MAX_STUCK_PASSES || now.getTime() - failed.since.getTime() >= MAX_STUCK_MS) {
+          : { message_id: message.id, passes: 1 };
+      // After one message was passed over, the next to fail in the same run is passed over after a single pass, so
+      // many bad messages cannot hold up the rest for long.
+      const limit = passedOver > 0 ? 1 : MAX_STUCK_PASSES;
+      if (about && failed !== undefined && failed.passes >= limit) {
+        passedOver += 1;
         logger.warn('Passed over a mail the mail server kept failing on', {
           message_id: message.id,
           passes: failed.passes,
@@ -198,8 +221,13 @@ export async function watchMail({
         });
         continue;
       }
-      // Messages come oldest first, so this one is the earliest not read: the next pass starts at it.
-      return { ...findings, resume_from: message.received_at, stuck: failed, stopped_by: { error } };
+      // Messages come oldest first where dates are arrival times, so the failing one is the earliest not read. Where
+      // they are not, the sender's Date may sit later than the true arrival, so the earliest date among this message
+      // and the ones after it is as far back as the next list can safely start.
+      const resumeAt = source.datesAreArrival
+        ? Math.min(...messages.slice(index).map(item => item.received_at.getTime()))
+        : since.getTime();
+      return { ...findings, resume_from: new Date(resumeAt), stuck: failed, stopped_by: { error } };
     }
   }
   return findings;

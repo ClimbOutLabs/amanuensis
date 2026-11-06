@@ -359,24 +359,13 @@ export function createNoticingService(deps: NoticingDeps): NoticingService {
     const since = new Date(
       Math.max(checkpoint?.checked_at.getTime() ?? at.getTime() - FIRST_LOOKBACK_MS, at.getTime() - MAX_LOOKBACK_MS),
     );
-    // Trouble the person can be told about starts when passes first fail and ends with a pass that works.
-    const failure = (error: unknown): WatcherCheckpoint['failure'] => ({
-      kind: error instanceof MailTooSlowError ? 'too_slow' : 'other',
-      since: checkpoint?.failure?.since ?? at,
-    });
     try {
       let findings: MailFindings;
       try {
         findings = await watchMail({ source: mail, settings, since, now: at, logger, stuck: checkpoint?.stuck });
       } catch (error) {
         // Nothing was read, so the checkpoint stays where it was.
-        await store.setCheckpoint({
-          ...owner,
-          watcher: 'mail',
-          checked_at: checkpoint?.checked_at ?? since,
-          failure: failure(error),
-          stuck: checkpoint?.stuck,
-        });
+        await recordMailFailure({ owner, checkpoint, error, at, fallback: since });
         throw error;
       }
       await store.recordAll({ ...owner, events: findings.raise, status: 'pending', now: at });
@@ -387,7 +376,10 @@ export function createNoticingService(deps: NoticingDeps): NoticingService {
         ...owner,
         watcher: 'mail',
         checked_at: findings.resume_from ?? new Date(at.getTime() - CHECK_OVERLAP_MS),
-        failure: findings.stopped_by === undefined ? undefined : failure(findings.stopped_by.error),
+        failure:
+          findings.stopped_by === undefined
+            ? undefined
+            : mailFailure({ checkpoint, error: findings.stopped_by.error, at }),
         stuck: findings.stuck,
       });
       if (findings.stopped_by !== undefined) {
@@ -399,6 +391,45 @@ export function createNoticingService(deps: NoticingDeps): NoticingService {
         logger.warn('Could not look at tracked bills', { error: errorText(error) });
       });
     }
+  }
+
+  /** Trouble the person can be told about starts when passes first fail and ends with a pass that works. */
+  function mailFailure({
+    checkpoint,
+    error,
+    at,
+  }: {
+    checkpoint: WatcherCheckpoint | undefined;
+    error: unknown;
+    at: Date;
+  }): NonNullable<WatcherCheckpoint['failure']> {
+    return {
+      kind: error instanceof MailTooSlowError ? 'too_slow' : 'other',
+      since: checkpoint?.failure?.since ?? at,
+    };
+  }
+
+  /** Writes that mail could not be read, leaving where reading starts next, and the message it is stuck on, as they were. */
+  async function recordMailFailure({
+    owner,
+    checkpoint,
+    error,
+    at,
+    fallback,
+  }: {
+    owner: PersonOwner;
+    checkpoint: WatcherCheckpoint | undefined;
+    error: unknown;
+    at: Date;
+    fallback: Date;
+  }): Promise<void> {
+    await store.setCheckpoint({
+      ...owner,
+      watcher: 'mail',
+      checked_at: checkpoint?.checked_at ?? fallback,
+      failure: mailFailure({ checkpoint, error, at }),
+      stuck: checkpoint?.stuck,
+    });
   }
 
   /** Someone with no mail connected cannot have trouble checking it, so an old failure is not shown any more. */
@@ -523,7 +554,19 @@ export function createNoticingService(deps: NoticingDeps): NoticingService {
     const sources = await deps.sources.sourcesFor(owner);
     if (watcher === 'mail') {
       if (sources.mail === undefined) {
-        await clearMailTrouble(owner);
+        if (sources.mail_unreachable === undefined) {
+          await clearMailTrouble(owner);
+        } else {
+          // A mail connector that is set up but out of reach is trouble the person can see, not no mail at all.
+          const at = now();
+          await recordMailFailure({
+            owner,
+            checkpoint: await store.getCheckpoint({ ...owner, watcher: 'mail' }),
+            error: sources.mail_unreachable.error,
+            at,
+            fallback: new Date(at.getTime() - FIRST_LOOKBACK_MS),
+          });
+        }
       } else {
         await runMail({ owner, mail: sources.mail, settings });
       }

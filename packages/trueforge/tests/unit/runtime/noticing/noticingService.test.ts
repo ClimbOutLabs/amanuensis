@@ -10,6 +10,7 @@ import { createDeliveryService } from '../../../../src/runtime/delivery/delivery
 import type { NoticingJudge } from '../../../../src/runtime/noticing/judge';
 import { createNoticingService } from '../../../../src/runtime/noticing/noticingService';
 import {
+  MailSourceBusyError,
   MailTooSlowError,
   MessageUnreadableError,
   type ApprovalSource,
@@ -176,6 +177,7 @@ async function setup({
         : Promise.resolve(texts[message.id] ?? message.snippet),
     laterInThread: jest.fn(() => Promise.resolve(later)),
     trustedAuthenticationServers: ['mx.example.net'],
+    datesAreArrival: true,
   };
   const calendarSource: CalendarSource = { listEvents: jest.fn(() => Promise.resolve(events)) };
   const sources: NoticingSources = { mail: mailSource, calendar: calendarSource };
@@ -1306,7 +1308,7 @@ describe('mail passes that keep failing', () => {
     await service.run({ watcher: 'mail' });
     const stopped = await checkpoint(store);
     expect(stopped?.checked_at).toEqual(bills[1]?.received_at);
-    expect(stopped?.stuck).toEqual({ message_id: 'm2', passes: 1, since: NOW });
+    expect(stopped?.stuck).toEqual({ message_id: 'm2', passes: 1 });
     expect(await feed()).toHaveLength(1);
 
     readText.mockRestore();
@@ -1349,9 +1351,7 @@ describe('mail passes that keep failing', () => {
 
   it('says a mail server that answers too slowly is too slow', async () => {
     const { service, store, mailSource } = await setup({});
-    jest
-      .mocked(mailSource.listNewMessages)
-      .mockRejectedValue(new MailTooSlowError({ seconds: 90, cause: new Error('timed out') }));
+    jest.mocked(mailSource.listNewMessages).mockRejectedValue(new MailTooSlowError({ cause: new Error('timed out') }));
     await service.run({ watcher: 'mail' });
     expect((await checkpoint(store))?.failure).toEqual({ kind: 'too_slow', since: NOW });
   });
@@ -1361,6 +1361,53 @@ describe('mail passes that keep failing', () => {
     jest.mocked(mailSource.listNewMessages).mockRejectedValue(new Error('connection refused'));
     await service.run({ watcher: 'mail' });
     sources.mail = undefined;
+    await service.run({ watcher: 'mail' });
+    expect((await checkpoint(store))?.failure).toBeUndefined();
+  });
+
+  it('never passes a message over while the mail server is down, however many passes it takes', async () => {
+    const { service, store, clock, mailSource, feed } = await setup({ messages: bills });
+    const readText = jest
+      .spyOn(mailSource, 'readText')
+      .mockRejectedValue(new MailSourceBusyError({ cause: limited() }));
+    for (let pass = 0; pass < 5; pass += 1) {
+      clock.now = new Date(NOW.getTime() + pass * 10 * 60_000);
+      await service.run({ watcher: 'mail' });
+      const state = await checkpoint(store);
+      expect(state?.stuck).toBeUndefined();
+      expect(state?.checked_at).toEqual(bills[0]?.received_at);
+    }
+    readText.mockRestore();
+    clock.now = new Date(NOW.getTime() + 60 * 60_000);
+    await service.run({ watcher: 'mail' });
+    expect(await feed()).toHaveLength(3);
+  });
+
+  it('shows a connector that is set up but unreachable, and keeps the message it was stuck on', async () => {
+    const { service, store, sources } = await setup({});
+    await store.setCheckpoint({
+      ...OWNER,
+      watcher: 'mail',
+      checked_at: bills[0]?.received_at ?? NOW,
+      failure: undefined,
+      stuck: { message_id: 'm2', passes: 2 },
+    });
+    sources.mail = undefined;
+    sources.mail_unreachable = { error: new Error('connection refused') };
+    await service.run({ watcher: 'mail' });
+    const state = await checkpoint(store);
+    expect(state?.failure).toEqual({ kind: 'other', since: NOW });
+    expect(state?.stuck).toEqual({ message_id: 'm2', passes: 2 });
+    expect(state?.checked_at).toEqual(bills[0]?.received_at);
+  });
+
+  it('clears the trouble only once no mail is set up at all', async () => {
+    const { service, store, sources } = await setup({});
+    sources.mail = undefined;
+    sources.mail_unreachable = { error: new Error('connection refused') };
+    await service.run({ watcher: 'mail' });
+    expect((await checkpoint(store))?.failure).toBeDefined();
+    sources.mail_unreachable = undefined;
     await service.run({ watcher: 'mail' });
     expect((await checkpoint(store))?.failure).toBeUndefined();
   });

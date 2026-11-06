@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { PersonalizationProvider, type PersonalizationProfile } from '@/components/PersonalizationContext.js';
 import { ReachPreferences } from '@/deliveries/ReachPreferences.js';
+import type { ReachView } from '@/deliveries/types.js';
 
 import { fakeServer } from './fakeDeliveriesApi.js';
 
@@ -40,7 +41,7 @@ describe('Settings, Reach me mail trouble', () => {
     learning_enabled: false,
   };
 
-  function renderWithProblem(mailProblem: { since: string; kind: 'too_slow' | 'other' } | null) {
+  function renderWithProblem(mailProblem: ReachView['mailProblem']) {
     const server = fakeServer([]);
     server.state.reach = { ...server.state.reach, mailProblem };
     render(
@@ -60,15 +61,17 @@ describe('Settings, Reach me mail trouble', () => {
 
   it('says, with the assistant’s own name, since when mail was not checked and the one thing to do', async () => {
     renderWithProblem({ since: '2026-11-05T14:00:00.000Z', kind: 'other' });
-    const notice = await screen.findByText(/Mira could not check your mail since/);
-    expect(notice.textContent).toMatch(/^Mira could not check your mail since .+\.$/);
+    const notice = await screen.findByText(/Mira has not been able to check your mail since/);
+    expect(notice.textContent).toMatch(/^Mira has not been able to check your mail since .+\.$/);
     expect(screen.getByText('Open Settings, Connectors, and check that your mail is still connected.')).toBeTruthy();
   });
 
   it('tells a slow mail server apart from other trouble', async () => {
     renderWithProblem({ since: '2026-11-05T14:00:00.000Z', kind: 'too_slow' });
-    await screen.findByText(/could not check your mail since/);
-    expect(screen.getByText('Your mail server answers too slowly. Check that it is running well.')).toBeTruthy();
+    await screen.findByText(/has not been able to check your mail since/);
+    expect(
+      screen.getByText('Your mail server answers too slowly. Ask whoever runs your mail to check it.'),
+    ).toBeTruthy();
     expect(screen.queryByText(/still connected/)).toBeNull();
   });
 });
