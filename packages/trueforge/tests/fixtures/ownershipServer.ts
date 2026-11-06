@@ -131,6 +131,7 @@ type SharedDeps = Pick<
   | 'eventSubscriptions'
   | 'logger'
   | 'oidcDiscovery'
+  | 'localUserStore'
   | 'authenticator'
   | 'authorizer'
 >;
@@ -148,6 +149,7 @@ function sharedDeps(): SharedDeps {
     eventSubscriptions: new EventSubscriptionRegistry<TurnStreamingEvent>(undefined),
     logger: createLogger({ silent: true }),
     oidcDiscovery: undefined,
+    localUserStore: undefined,
     authenticator: headerAuthenticator,
     authorizer: new TrueForgeAuthorizer(),
   };

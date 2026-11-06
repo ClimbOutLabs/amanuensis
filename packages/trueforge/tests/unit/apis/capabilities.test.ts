@@ -183,6 +183,7 @@ describe('capabilities routers', () => {
         sandbox_isolation: expectedSandboxIsolation,
         voice: { enabled: false },
         memory_embeddings: memoryEmbeddingsStarting,
+        sign_in: { mode: 'standalone' },
         build: expectedBuild,
       },
     });
@@ -212,6 +213,7 @@ describe('capabilities routers', () => {
         sandbox_isolation: expectedSandboxIsolation,
         voice: { enabled: false },
         memory_embeddings: memoryEmbeddingsStarting,
+        sign_in: { mode: 'standalone' },
         build: expectedBuild,
       },
     });
@@ -235,6 +237,7 @@ describe('capabilities routers', () => {
         sandbox_isolation: expectedSandboxIsolation,
         voice: { enabled: false },
         memory_embeddings: memoryEmbeddingsStarting,
+        sign_in: { mode: 'standalone' },
         build: expectedBuild,
       },
     });
@@ -397,6 +400,7 @@ describe('capabilities routers', () => {
           sandbox_isolation: expectedSandboxIsolation,
           voice: { enabled: false },
           memory_embeddings: memoryEmbeddingsStarting,
+          sign_in: { mode: 'standalone' },
           build: expectedBuild,
         },
       });
@@ -435,6 +439,7 @@ describe('capabilities routers', () => {
           sandbox_isolation: expectedSandboxIsolation,
           voice: { enabled: false },
           memory_embeddings: memoryEmbeddingsStarting,
+          sign_in: { mode: 'standalone' },
           build: expectedBuild,
         },
       });

@@ -3,7 +3,7 @@ import { extractErrorLogFields } from '@truefoundry/trueforge-core/core';
 import type { Context } from 'hono';
 import type { Logger } from 'winston';
 import { hasAdminRole, type ResolveRequestContext } from '../auth/identity';
-import configuration, { UNSTAMPED_BUILD_REF } from '../config';
+import configuration, { TrueForgeAuthMode, UNSTAMPED_BUILD_REF, getTrueForgeAuthMode } from '../config';
 import type { IGlobalSettingsStore } from '../db/globalSettingsStore';
 import type { IMcpServerStore } from '../db/mcpServerStore';
 import type { ISandboxProviderStore } from '../db/sandboxProviderStore';
@@ -268,6 +268,20 @@ export async function readServerSandboxAvailable({
   }
 }
 
+/** The wire name for the running sign-in mode. */
+function signInModeName(): 'local' | 'oidc' | 'standalone' | 'truefoundry' {
+  switch (getTrueForgeAuthMode(configuration)) {
+    case TrueForgeAuthMode.Local:
+      return 'local';
+    case TrueForgeAuthMode.Oidc:
+      return 'oidc';
+    case TrueForgeAuthMode.TrueFoundry:
+      return 'truefoundry';
+    case TrueForgeAuthMode.Standalone:
+      return 'standalone';
+  }
+}
+
 /**
  * Maps a resolved sandbox build status plus a local (zero-egress) read of the memory-provider
  * settings to the capability flags. The memory-provider read is a local DB read only, so this
@@ -305,6 +319,7 @@ async function capabilitiesFromSandboxStatus({
     memory_defaults: memoryDefaultsCapability(isAdmin),
     memory_embeddings: memoryEmbeddingsCapability(tenantId),
     sandbox_isolation: sandboxIsolationCapability(),
+    sign_in: { mode: signInModeName() },
     build: toBuildIdentity({ version: PACKAGE_VERSION, buildRef: configuration.BUILD_REF }),
   };
 }

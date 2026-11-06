@@ -26,7 +26,7 @@ const SECURITY_HEADERS: Record<string, string> = {
   'cache-control': 'no-store',
 };
 
-function tooManyText(retryAfterSeconds: number, scope: 'address' | 'account'): string {
+export function tooManyText(retryAfterSeconds: number, scope: 'address' | 'account'): string {
   if (scope === 'address') {
     return `Too many sign-in attempts. Wait ${String(retryAfterSeconds)} seconds and try again.`;
   }
@@ -70,7 +70,7 @@ export function groupIpv6By64(address: string): string {
  * from the address of the proxy's network (a published port reaches the app from the Docker bridge); then the address
  * that proxy recorded last is taken instead. A header from any other connection is never read.
  */
-function clientKeyFor(trustedProxies: readonly string[]): (c: Context) => string {
+export function clientKeyFor(trustedProxies: readonly string[]): (c: Context) => string {
   return c => {
     let remote = 'unknown';
     try {

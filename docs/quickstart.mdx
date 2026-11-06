@@ -37,6 +37,8 @@ Login is mandatory in standalone mode, and the server refuses to start without i
 pnpm standalone:dev
 ```
 
+No Docker? Set `TRUEFORGE_AUTH_MODE=local` in `packages/trueforge/.env` instead and skip `pnpm dev:login`. Aman then keeps one sign-in itself, an email and a password it stores as a scrambled hash, and the first page you open asks you to create it. That is the sign-in the `npx amanuensis` install uses; see [Setup Login](/authentication/overview).
+
 The install takes a few minutes the first time. When it finishes, open [http://localhost:3000](http://localhost:3000) and sign in — that is the app.
 
 <Note>
