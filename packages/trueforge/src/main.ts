@@ -27,6 +27,7 @@ let getTrueForgeAuthMode: typeof import('./config').getTrueForgeAuthMode;
 let getConfiguredSecretValues: typeof import('./config').getConfiguredSecretValues;
 let assertNetworkAuthRequirement: typeof import('./config').assertNetworkAuthRequirement;
 let getPublicUiBasePath: typeof import('./config').getPublicUiBasePath;
+let getPublicBaseUrl: typeof import('./config').getPublicBaseUrl;
 let TrueForgeAuthMode: typeof import('./config').TrueForgeAuthMode;
 let isPlaceholderTrueForgeApiKey: typeof import('./config').isPlaceholderTrueForgeApiKey;
 
@@ -39,6 +40,7 @@ try {
     getConfiguredSecretValues,
     assertNetworkAuthRequirement,
     getPublicUiBasePath,
+    getPublicBaseUrl,
     TrueForgeAuthMode,
     isPlaceholderTrueForgeApiKey,
   } = await import('./config'));
@@ -100,6 +102,7 @@ import type { ISessionMetricsStore } from './db/sessionMetricsStore';
 import type { ISkillStore } from './db/skillStore';
 import type { ISpaceStore } from './db/spaceStore';
 import type { Database as SqliteDatabase } from './db/sqlite/types';
+import { TelegramStore, type ITelegramStore } from './db/telegramStore';
 import type { ITokenFactoryUsageStore } from './db/tokenFactoryUsageStore';
 import type { WithTransaction } from './db/transaction';
 import type { ITurnArtifactStore } from './db/turnArtifactStore';
@@ -118,6 +121,7 @@ import { ChatSearchIndexer } from './runtime/chatSearchIndexing';
 import { recoverAbandonedCommandExecutions } from './runtime/commandExecutionRecovery';
 import { designateTavilyAtBoot, seedDefaultSearchProviderAtBoot } from './runtime/defaultSearchProvider';
 import { createDeliveryService } from './runtime/delivery/deliveryService';
+import { createTelegramSender } from './runtime/delivery/telegramSender';
 import { createWebPushSender } from './runtime/delivery/webPushSender';
 import { EventSubscriptionRegistry } from './runtime/event-subscription';
 import { registerMailConnectorFromSavedAccountInBackground } from './runtime/mailAccount';
@@ -127,6 +131,8 @@ import { createOutboundSecretSource } from './runtime/outboundSecrets';
 import { seedOwnerNameAtBoot } from './runtime/ownerName';
 import { createSentinelServices } from './runtime/sentinelServices';
 import { getSharedRunCodeService } from './runtime/sessionResources';
+import { createTelegramSendQueue } from './runtime/telegram/telegramSendQueue';
+import { createTelegramService } from './runtime/telegram/telegramService';
 import { createTokenFactoryBudget } from './runtime/tokenFactoryBudget';
 import { ensureEnvManagedTokenFactoryProvider, seedEnvManagedDefaultChatModel } from './runtime/tokenFactoryProvider';
 import { TurnDrainRegistry } from './runtime/turnDrains';
@@ -193,6 +199,7 @@ interface ServerPersistence<TTransaction> {
   briefItemStore: IBriefItemCompletionStore;
   deliveryStore: IDeliveryStore;
   pushSubscriptionStore: IPushSubscriptionStore;
+  telegramStore: ITelegramStore;
   approvalTokenStore: ApprovalTokenStore;
   destroyDb: () => Promise<void>;
   redis: RedisClientType | undefined;
@@ -429,6 +436,7 @@ async function createStandalonePersistence(options: {
     briefItemStore: new BriefItemCompletionStore(db),
     deliveryStore: new DeliveryStore(db),
     pushSubscriptionStore: new PushSubscriptionStore(db),
+    telegramStore: new TelegramStore(db),
     approvalTokenStore: new SqliteApprovalTokenStore(db),
     modelProviderStore,
     resolveModelProviderStore: () => modelProviderStore,
@@ -601,6 +609,7 @@ async function createDistributedPersistence(options: {
     briefItemStore: new BriefItemCompletionStore(db),
     deliveryStore: new DeliveryStore(db),
     pushSubscriptionStore: new PushSubscriptionStore(db),
+    telegramStore: new TelegramStore(db),
     approvalTokenStore: new PostgresApprovalTokenStore(db),
     modelProviderStore,
     resolveModelProviderStore,
@@ -644,6 +653,7 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     briefItemStore,
     deliveryStore,
     pushSubscriptionStore,
+    telegramStore,
     approvalTokenStore,
     destroyDb,
     redis,
@@ -769,9 +779,14 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     tokens: tokenStore,
     googleConnections: googleConnectionStore,
   });
+  const telegramQueue = createTelegramSendQueue();
+  const telegramService = createTelegramService({ store: telegramStore, publicBaseUrl: getPublicBaseUrl() });
   const deliveryService = createDeliveryService({
     store: deliveryStore,
-    senders: [createWebPushSender({ subscriptions: pushSubscriptionStore, settings: configuration.WEB_PUSH })],
+    senders: [
+      createWebPushSender({ subscriptions: pushSubscriptionStore, settings: configuration.WEB_PUSH }),
+      createTelegramSender({ store: telegramStore, service: telegramService, queue: telegramQueue }),
+    ],
     audit: sentinelAuditStore,
     logger,
   });
@@ -833,6 +848,7 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
         scheduleStore,
         withTransaction,
         logger,
+        telegram: { store: telegramStore, sessionStore, service: telegramService },
       })
     : undefined;
 
@@ -902,6 +918,9 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     briefItemStore,
     deliveryStore,
     pushSubscriptionStore,
+    telegramStore,
+    telegramService,
+    telegramQueue,
     deliveryService,
     webPushPublicKey: configuration.WEB_PUSH?.publicKey,
     sessions,

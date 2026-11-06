@@ -69,6 +69,7 @@ async function setup() {
     store: deliveryStore,
     senders: [
       {
+        channel: 'web_push',
         send: ({ delivery }) => {
           pushed.push(delivery);
           return Promise.resolve([

@@ -20,6 +20,12 @@ type AccountConnectorCardProps = {
   notWorkingLine: string;
   /** The status pill text when the status could not be read. */
   failedLabel: string;
+  /** The status pill text, when the connector's own words fit better than the shared ones. */
+  pillLabel?: string | undefined;
+  /** The line under the title, when the connector's own words fit better than the shared ones. */
+  lineOverride?: string | undefined;
+  /** The button text, when the connector's own words fit better than the shared ones. */
+  actionLabel?: string | undefined;
   state: AccountConnectionState;
   /** True when the last status read failed; the button then retries instead of opening the panel. */
   failed: boolean;
@@ -40,6 +46,9 @@ export default function AccountConnectorCard({
   stoppedLine,
   notWorkingLine,
   failedLabel,
+  pillLabel,
+  lineOverride,
+  actionLabel,
   state,
   failed,
   onOpen,
@@ -50,21 +59,23 @@ export default function AccountConnectorCard({
   const notWorking = state === 'not_working';
   const label = failed
     ? failedLabel
-    : stopped
-      ? 'Sign-in stopped working'
-      : notWorking
-        ? 'Not working right now'
-        : connected
-          ? 'Connected'
-          : 'Available';
+    : (pillLabel ??
+      (stopped
+        ? 'Sign-in stopped working'
+        : notWorking
+          ? 'Not working right now'
+          : connected
+            ? 'Connected'
+            : 'Available'));
   const line =
-    connected && connectedLine !== null
+    lineOverride ??
+    (connected && connectedLine !== null
       ? connectedLine
       : stopped
         ? stoppedLine
         : notWorking
           ? notWorkingLine
-          : description;
+          : description);
   return (
     <section aria-labelledby={`${id}-connector-heading`}>
       <h4 id={`${id}-connector-heading`} className="mb-2 text-[0.8125rem] font-semibold uppercase text-text-secondary">
@@ -92,7 +103,7 @@ export default function AccountConnectorCard({
               {label}
             </span>
             <Button variant="secondary" size="small" type="button" onClick={failed ? onRetry : onOpen}>
-              {failed ? 'Try again' : connected || stopped || notWorking ? 'Manage' : 'Connect'}
+              {failed ? 'Try again' : (actionLabel ?? (connected || stopped || notWorking ? 'Manage' : 'Connect'))}
             </Button>
           </div>
         </article>
