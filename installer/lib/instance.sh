@@ -562,17 +562,17 @@ instance_collect_addresses() {
 }
 
 # --tls caddy serves the two public origins on 443 under DNS names Let's Encrypt can issue for. --tls local (the
-# default on a network) serves https with a certificate from this computer's own authority; --tls off keeps plain http.
+# default on a network) serves https with a certificate from this computer's own authority.
 instance_collect_tls() {
   case "$I_TLS" in
     '') return 0 ;;
-    local | off)
+    local)
       [ -z "$I_PUBLIC_URL" ] || usage_die "--tls $I_TLS is for an instance opened on your network. With --public-url, use --tls caddy."
       [ "$OPT_LOCAL_ONLY" != 1 ] || usage_die "--local-only keeps Aman on this computer, where plain http is fine, so --tls does not apply."
       return 0
       ;;
     caddy) ;;
-    *) usage_die "--tls takes local, off or caddy" ;;
+    *) usage_die "--tls takes local or caddy" ;;
   esac
   [ -n "$I_PUBLIC_URL" ] || usage_die "--tls caddy needs --public-url and --login-url (the two https addresses Caddy will serve)"
   [ -z "$OPT_PUBLIC_IP" ] || valid_ipv4 "$OPT_PUBLIC_IP" || usage_die "--public-ip must be an IPv4 address"
@@ -655,8 +655,12 @@ instance_address_change() { # name; prints open, close, refresh or nothing
 
 # Writes the list of addresses of an instance into its record and its settings: read again from this computer, plus
 # the names given with --address (kept from the first install unless new ones are given). Renders and restarts nothing.
-instance_apply_addresses() { # name open|close|refresh
-  local name=$1 mode=$2 origins='' extras env tls='' tls_port='' app_port
+# Moving an instance to https is the exception to writing first: the front end and the certificate are made before the
+# record says https, with the new addresses already in the record so the certificate carries them. If making them
+# fails, the record is put back as it was and the run stops, so the instance keeps serving plain http and the next
+# plain run tries the move again.
+instance_apply_addresses() { # name open|close|refresh app_image
+  local name=$1 mode=$2 app_image=$3 origins='' extras env tls='' tls_port='' app_port old_tls_port='' old_origins='' had_origins=0 fingerprint_before=''
   env="$(instance_dir "$name")/.env"
   app_port=$(reg_get "$name" app_port)
   extras=${OPT_ADDRESSES:-$(reg_get "$name" extra_hosts)}
@@ -674,6 +678,30 @@ instance_apply_addresses() { # name open|close|refresh
     fi
   else
     extras=
+  fi
+  if [ "$tls" = local ] && [ -n "$tls_port" ] && ! tls_active "$name"; then
+    old_tls_port=$(reg_get "$name" tls_port)
+    old_origins=$(reg_get "$name" origins)
+    # An instance from before the address list has no origins line at all; putting the record back must not
+    # invent one, or the next run would no longer see the instance as one to open on the network.
+    if grep -q '^origins=' "$(reg_file "$name")"; then had_origins=1; fi
+    fingerprint_before=$(tls_fingerprint)
+    reg_set "$name" tls_port "$tls_port"
+    reg_set "$name" origins "$origins"
+    # The certificate is made in a subshell so its failure stops only this step: the record is put back and the
+    # run stops with the one thing to do next, instead of leaving the record claiming https.
+    if ! ( tls_prepare "$name" "$app_image" ); then
+      reg_set "$name" tls_port "$old_tls_port"
+      if [ "$had_origins" = 1 ]; then
+        reg_set "$name" origins "$old_origins"
+      else
+        reg_unset "$name" origins
+      fi
+      die "Instance $name could not be moved to https, so it stays on plain http for now. Run the installer again to finish the move."
+    fi
+    # A new authority is made again only when there was one before and its fingerprint changed; the first
+    # authority is not "made again".
+    if [ -n "$fingerprint_before" ] && [ "$(tls_fingerprint)" != "$fingerprint_before" ]; then TLS_AUTHORITY_REPLACED=1; fi
   fi
   reg_set "$name" tls "$tls"
   reg_set "$name" tls_port "$tls_port"
@@ -812,7 +840,9 @@ print_instance_summary() {
   elif [ -n "$origins" ]; then
     if tls_active "$name"; then
       print_trust_lines "$name"
-    else
+    elif origins_reach_the_network "$origins"; then
+      # The warning is only for sign-in that crosses the network: an instance that only ever answers on this
+      # computer keeps sign-in on this computer, so there is nothing to warn about.
       ui_line "Sign-in on your home network is not encrypted. Use the Tailscale address to keep it private."
     fi
     if [ -n "$bookmark" ]; then ui_line "Bookmark $bookmark: it keeps working when this computer's address changes."; fi
@@ -1058,9 +1088,9 @@ cmd_instance_refresh() {
   warn_if_installed_older
   change=$(instance_address_change "$name")
   if [ -n "$change" ]; then
-    instance_apply_addresses "$name" "$change"
+    instance_apply_addresses "$name" "$change" "$REL_APP_TAG"
   elif [ -n "$(reg_get "$name" origins)" ]; then
-    instance_apply_addresses "$name" refresh
+    instance_apply_addresses "$name" refresh "$REL_APP_TAG"
   fi
   instance_env_repair "$name"
   instance_enforce_single_owner "$name" || true
