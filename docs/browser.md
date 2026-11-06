@@ -1,4 +1,7 @@
-# Aman's browser
+---
+title: "Aman's browser"
+description: "Aman's own web browser, and the live browser for steps only you can do."
+---
 
 Aman has a web browser of its own, separate from yours. It runs next to Aman on your computer, in its own walled-off box, and keeps one browser profile for you, so sites stay signed in between chats. Each chat gets its own tab. Installing or upgrading Aman turns it on; there is nothing to set up.
 
