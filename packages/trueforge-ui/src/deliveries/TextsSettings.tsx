@@ -16,6 +16,7 @@ export function TextsSettings({
   textsOn,
   savedOn,
   onTextsOn,
+  problem,
   tryButton,
 }: {
   texts: TextsApi;
@@ -23,6 +24,8 @@ export function TextsSettings({
   /** Whether texts are on as last saved. */
   savedOn: boolean;
   onTextsOn: (next: boolean) => void;
+  /** A problem with texts on this server, worded for this person, or null. */
+  problem: string | null;
   /** The Try it button, which the page draws the same way for every channel. */
   tryButton: ReactNode;
 }) {
@@ -117,6 +120,12 @@ export function TextsSettings({
         <span className="text-text-primary text-sm font-medium">Texts</span>
         <p className="text-text-secondary text-sm">Texts travel through Twilio and the phone company.</p>
       </div>
+
+      {problem === null ? null : (
+        <p role="alert" className="text-failure-text text-sm">
+          {problem}
+        </p>
+      )}
 
       {status.optedOut ? (
         <p role="status" className="text-text-secondary text-sm">

@@ -224,8 +224,9 @@ export function checkSender({
   if (/[[\]]/.test(topmost)) {
     return { verified: false, why: NOT_SAFE };
   }
-  // Echoed text repeats the envelope address, so it brings a second `header.from=`; the real result has one.
-  if ((topmost.match(/header\.from=/gi) ?? []).length > 1) {
+  // Echoed text repeats the envelope address, so it brings a second `header.from=`; the real result has one. Quotes
+  // and backslashes are dropped first, since the reader joins `header."from"=` into the same word.
+  if ((topmost.replace(/["\\]/g, '').match(/header\.from=/gi) ?? []).length > 1) {
     return { verified: false, why: NOT_SAFE };
   }
   const parsed = parseMethods(topmost);

@@ -10,7 +10,7 @@ Texts go through Twilio, a service you sign up for. You pay Twilio for each text
 ## What a text says
 
 - **Private (the default).** The text says only the kind of thing, such as "Mannie: a reminder is due. Open the app to see it." It holds no names, amounts or message content. Your assistant's name is the one you chose in Personalization. A text uses at most 20 letters of it.
-- **Full.** A reminder's text holds the reminder, cut to fit two texts. It can show on a locked screen, and Twilio and the phone company can read it. Something your assistant noticed still gets the Private words, because its wording comes from the model and stays in the app. Aman also looks for a link, a website, a phone number or an email address in a reminder, and sends that reminder in Private words, because a link or a number to call in a text is a common trick. It catches the usual spellings, but it cannot catch every one. Keep Private if that matters to you.
+- **Full.** A reminder's text holds the reminder, cut to fit two texts. It can show on a locked screen, and Twilio and the phone company can read it. Something your assistant noticed still gets the Private words, because its wording comes from the model and stays in the app. A link or a number to call in a text is a common trick, so a reminder goes out in Full only when it holds nothing that could be one. It can hold times and dates, but no other numbers. It cannot hold a slash, an at sign, a dot or dash inside a word, single letters in a row, or a website or number written out in words. Any other reminder goes out in Private words.
 
 The text with your confirmation code holds only the code. It does not name your assistant.
 
@@ -40,7 +40,7 @@ When Aman starts, it tells Twilio to send the texts that come in to your number 
 
 Use a number only for this Aman. Aman takes over its incoming texts. If another app or another Aman used the number, it stops getting them, and the log names the address that was replaced. A number in a Messaging Service needs the service set to use the number's own address.
 
-If Aman cannot point the number at itself, its log and Reach me say why and what to do. Texts still go out, but STOP replies do not reach Aman until it is set. To set it by hand, open the number in the Twilio console. Under "A message comes in", choose Webhook, enter your `TWILIO_WEBHOOK_PUBLIC_URL` followed by `/twilio/sms`, choose POST, and save.
+If Aman cannot point the number at itself, its log says why and which setting to check. Reach me says so beside texts, with what to do for the person who runs Aman, and whom to ask for everyone else. Texts still go out, but STOP replies do not reach Aman until it is set. If Twilio could not be reached, Aman keeps trying by itself, and the message goes away once it works. To set it by hand, open the number in the Twilio console. Under "A message comes in", choose Webhook, enter your `TWILIO_WEBHOOK_PUBLIC_URL` followed by `/twilio/sms`, choose POST, and save.
 
 4. In the Twilio console, open Messaging, then Settings, then Geo permissions. Allow only the countries you text. Aman sends codes only to numbers a person types in, but this keeps any mistake from costing you texts to far-away numbers.
 5. In Aman, open Settings, then Reach me. Enter your number with the country code, type the code that arrives, choose Private or Full, switch texts on, save, and press Try it.
@@ -53,7 +53,7 @@ Texts cost money, so Aman limits them:
 - One number gets at most 30 texts a day, however many people confirmed it.
 - The whole server sends at most 500 texts a day. To change this, set `REACH_SMS_MAX_TEXTS_PER_DAY` in the settings file, then start Aman again.
 - Try it sends at most 3 test texts an hour. When a day's limit is reached, Try it says so and does not count the test.
-- Aman sends at most 3 codes an hour, and 10 a day, for each person. It sends at most 50 codes a day in all.
+- Aman sends at most 3 codes an hour, and 10 a day, for each person. It sends at most 50 codes a day in all. A code to a number you already confirmed does not count toward the 50.
 - Aman sends at most 3 codes an hour, and 10 a day, to any one number, whoever asks. The person who confirmed the number can still get a code to it. Removing a number does not reset these limits.
 
 To change your number, type the new one and confirm its code. Texts keep going to your old number until you do.

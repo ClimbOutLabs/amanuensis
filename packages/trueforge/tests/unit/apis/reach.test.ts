@@ -11,7 +11,8 @@ import { ReachSettingsStore } from '../../../src/db/reachSettingsStore';
 import { createSqliteDb } from '../../../src/db/sqlite/client';
 import { TextContactStore } from '../../../src/db/textContactStore';
 import { createDeliveryService } from '../../../src/runtime/delivery/deliveryService';
-import { NO_PHONE_CHANNELS } from '../../../src/runtime/noticing/reachChannels';
+import { NO_PHONE_CHANNELS, reachChannelsFor } from '../../../src/runtime/noticing/reachChannels';
+import type { ChannelViewer } from '../../../src/runtime/texts/smsProvider';
 import type { ReachAvailability } from '../../../src/schemas/reach';
 import { defaultReachSettings, GetReachResponseSchema, type ReachSettings } from '../../../src/schemas/reach';
 import { confirmNumber } from '../../fixtures/confirmedNumber';
@@ -27,10 +28,14 @@ type PlaceCall = ReachRouterDeps['calls']['place'];
 const noCalls: PlaceCall = () => Promise.reject(new Error('No calls in this test.'));
 
 async function build({
-  channels = NO_PHONE_CHANNELS,
-  memories = [] as string[],
+  channels = () => NO_PHONE_CHANNELS,
+  memories = [],
   place = noCalls,
-}: { channels?: ReachAvailability; memories?: string[]; place?: PlaceCall } = {}) {
+}: {
+  channels?: (input?: { viewer: ChannelViewer }) => ReachAvailability;
+  memories?: string[];
+  place?: PlaceCall;
+} = {}) {
   const db = createSqliteDb(':memory:');
   await migrateSqliteToLatest(db);
   const reachStore = new ReachSettingsStore(db);
@@ -57,7 +62,8 @@ async function build({
       noticingStore,
       deliveryService,
       calls,
-      channels: () => offered,
+      channels: input => offered(input),
+      isInstanceOwner: owner => owner.created_by === 'alice',
       memories: () => Promise.resolve(memories),
       resolveRequestContext: () => current,
       logger: winston.createLogger({ silent: true }),
@@ -87,12 +93,31 @@ async function build({
     },
     /** The channels the server offers from now on, as when the voice parts stop. */
     offer: (next: ReachAvailability) => {
-      offered = next;
+      offered = () => next;
     },
   };
 }
 
 describe('reach routes', () => {
+  it('words a problem with texts for whoever runs Aman, and tells everyone else whom to ask', async () => {
+    const { call, as } = await build({
+      channels: input =>
+        reachChannelsFor({
+          twilio: { accountSid: 'AC' },
+          voiceReady: true,
+          numberProblem: 'not_accepted',
+          viewer: input?.viewer ?? 'person',
+        }),
+    });
+    const owner = GetReachResponseSchema.parse(await (await call('')).json()).data;
+    expect(owner.availability.texts.problem).toContain('Copy the account id and auth token');
+    as('bob');
+    const other = GetReachResponseSchema.parse(await (await call('')).json()).data;
+    expect(other.availability.texts.problem).toBe(
+      'STOP replies do not reach Aman yet. Ask the person who runs Aman to check the Twilio settings.',
+    );
+  });
+
   it('starts quiet and unsaved, with phone channels shown as not set up', async () => {
     const { call } = await build();
     const response = await call('');
@@ -103,6 +128,7 @@ describe('reach routes', () => {
     expect(data.settings.channels).toEqual({ texts: false, calls: false });
     expect(data.availability.calls).toEqual(NO_PHONE_CHANNELS.calls);
     expect(data.availability.calls.available).toBe(false);
+    expect(data.availability.calls.problem).toBeNull();
     expect(data.max_levels.bill_due).toBe('nudge');
     expect(data.max_levels.calendar_clash).toBe('call');
   });
@@ -153,8 +179,11 @@ describe('reach routes', () => {
   });
 
   it('allows calls once the channel is available and the number is confirmed, and says what to do before that', async () => {
-    const channels: ReachAvailability = { ...NO_PHONE_CHANNELS, calls: { available: true, note: 'On.' } };
-    const { put, textContacts } = await build({ channels });
+    const channels: ReachAvailability = {
+      ...NO_PHONE_CHANNELS,
+      calls: { available: true, note: 'On.', problem: null },
+    };
+    const { put, textContacts } = await build({ channels: () => channels });
     const early = await put({ ...defaultReachSettings('UTC'), channels: { texts: false, calls: true } });
     expect(early.status).toBe(400);
     expect(JSON.stringify(await early.json())).toContain('Confirm your number first, then switch calls on.');
@@ -168,8 +197,11 @@ describe('reach routes', () => {
   });
 
   it('keeps calls on, and saves other changes, while calls are briefly not available', async () => {
-    const channels: ReachAvailability = { ...NO_PHONE_CHANNELS, calls: { available: true, note: 'On.' } };
-    const { put, textContacts, offer } = await build({ channels });
+    const channels: ReachAvailability = {
+      ...NO_PHONE_CHANNELS,
+      calls: { available: true, note: 'On.', problem: null },
+    };
+    const { put, textContacts, offer } = await build({ channels: () => channels });
     await confirmNumber({
       store: textContacts,
       owner: { tenant_id: 'default', created_by: 'alice' },
@@ -178,15 +210,21 @@ describe('reach routes', () => {
     });
     const on = { ...defaultReachSettings('UTC'), channels: { texts: false, calls: true } };
     expect((await put(on)).status).toBe(200);
-    offer({ ...NO_PHONE_CHANNELS, calls: { available: false, note: 'Calls need the voice parts of Aman.' } });
+    offer({
+      ...NO_PHONE_CHANNELS,
+      calls: { available: false, note: 'Calls need the voice parts of Aman.', problem: null },
+    });
     expect((await put({ ...on, max_nudges_per_day: 2 })).status).toBe(200);
   });
 
   it('rings the phone on Try it for calls, without using up the time between calls', async () => {
-    const channels: ReachAvailability = { ...NO_PHONE_CHANNELS, calls: { available: true, note: 'On.' } };
+    const channels: ReachAvailability = {
+      ...NO_PHONE_CHANNELS,
+      calls: { available: true, note: 'On.', problem: null },
+    };
     const placed: string[] = [];
     const { call, put, textContacts, deliveryStore } = await build({
-      channels,
+      channels: () => channels,
       place: ({ delivery, fallback }) => {
         placed.push(`${delivery.kind}:${String(fallback)}`);
         return Promise.resolve({
@@ -216,10 +254,13 @@ describe('reach routes', () => {
   });
 
   it('rings on Try it at most once every 2 minutes and 5 times a day, and says when to try again', async () => {
-    const channels: ReachAvailability = { ...NO_PHONE_CHANNELS, calls: { available: true, note: 'On.' } };
+    const channels: ReachAvailability = {
+      ...NO_PHONE_CHANNELS,
+      calls: { available: true, note: 'On.', problem: null },
+    };
     let placed = 0;
     const { call, put, textContacts, later } = await build({
-      channels,
+      channels: () => channels,
       place: () => {
         placed += 1;
         return Promise.resolve({

@@ -33,6 +33,7 @@ describe('Settings, Reach me, texts', () => {
         textsOn={false}
         savedOn={false}
         onTextsOn={() => undefined}
+        problem={null}
         tryButton={null}
       />,
     );
@@ -41,5 +42,21 @@ describe('Settings, Reach me, texts', () => {
       'A reminder’s own words, cut to fit two texts. Anything your assistant noticed still says only its kind. It can show on a locked screen and is seen by Twilio and the phone company.',
     );
     expect(screen.queryByText(/one-sentence message/)).toBeNull();
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  it('says when STOP replies cannot reach Aman, in the words the server chose for this person', async () => {
+    const words = 'STOP replies do not reach Aman yet. Ask the person who runs Aman to check the Twilio settings.';
+    render(
+      <TextsSettings
+        texts={textsApi(CONFIRMED)}
+        textsOn={false}
+        savedOn={false}
+        onTextsOn={() => undefined}
+        problem={words}
+        tryButton={null}
+      />,
+    );
+    expect((await screen.findByRole('alert')).textContent).toBe(words);
   });
 });

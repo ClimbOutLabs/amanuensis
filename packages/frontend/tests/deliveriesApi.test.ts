@@ -153,8 +153,8 @@ const WIRE_REACH = {
     },
     saved: true,
     availability: {
-      texts: { available: false, note: 'Texts are not set up yet.' },
-      calls: { available: false, note: 'Phone calls are not set up yet.' },
+      texts: { available: false, note: 'Texts are not set up yet.', problem: null },
+      calls: { available: false, note: 'Phone calls are not set up yet.', problem: null },
     },
     max_levels: { travel: 'call', bill_due: 'nudge', other: 'call' },
     mail_problem: null,
@@ -177,6 +177,20 @@ test('reads Reach me settings into the app shape, dropping what it does not know
   assert.equal(view.mailProblem, null);
 });
 
+test('reads a problem with texts the server reports, and refuses a channel that leaves it out', async () => {
+  const words = 'STOP replies do not reach Aman yet. Ask the person who runs Aman to check the Twilio settings.';
+  const texts = { available: true, note: 'Texts travel through Twilio and the phone company.', problem: words };
+  const api = createDeliveriesApi(async () =>
+    Response.json({ data: { ...WIRE_REACH.data, availability: { ...WIRE_REACH.data.availability, texts } } }),
+  );
+  assert.deepEqual((await api.reach.get()).availability.texts, texts);
+  const { problem: _left, ...older } = texts;
+  const missing = createDeliveriesApi(async () =>
+    Response.json({ data: { ...WIRE_REACH.data, availability: { ...WIRE_REACH.data.availability, texts: older } } }),
+  );
+  await assert.rejects(missing.reach.get(), /could not be read\. Reload the page\./);
+});
+
 test('reads the mail trouble the server reports, and treats a kind it does not know as other trouble', async () => {
   const problem = { since: '2026-11-05T14:00:00.000Z', kind: 'too_slow' };
   const slow = createDeliveriesApi(async () => Response.json({ data: { ...WIRE_REACH.data, mail_problem: problem } }));
@@ -185,6 +199,10 @@ test('reads the mail trouble the server reports, and treats a kind it does not k
     Response.json({ data: { ...WIRE_REACH.data, mail_problem: { ...problem, kind: 'new_kind' } } }),
   );
   assert.deepEqual((await odd.reach.get()).mailProblem, { since: problem.since, kind: 'other' });
+  const garbled = createDeliveriesApi(async () =>
+    Response.json({ data: { ...WIRE_REACH.data, mail_problem: { ...problem, since: 'last Tuesday' } } }),
+  );
+  await assert.rejects(garbled.reach.get(), /could not be read\. Reload the page\./);
   const missing = createDeliveriesApi(async () => {
     const { mail_problem: _left, ...rest } = WIRE_REACH.data;
     return Response.json({ data: rest });

@@ -32,4 +32,4 @@ A model suggests how loudly to tell you, and your settings decide. The model's w
 
 ## If Aman could not check your mail
 
-If your mail has not been checked for about an hour, **Reach me** says so at the top, with the time it first failed. If your mail server answers slowly, check that it is running well. Otherwise, click **Settings**, then click **Connectors**, and check that your mail is still connected. The notice goes away after the next check that works.
+If your mail has not been checked for about an hour, **Reach me** says so at the top, with the time it first failed. If your mail server answers slowly, ask whoever runs your mail to check it. Otherwise, click **Settings**, then click **Connectors**, and check that your mail is still connected. If your Google login has to be redone, or the shared Email connector cannot be reached, the notice shows too. Sign in to Google again, or ask whoever runs Aman to check the Email connector. The notice goes away after the next check that works.

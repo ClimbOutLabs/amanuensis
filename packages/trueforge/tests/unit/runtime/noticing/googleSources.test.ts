@@ -3,19 +3,25 @@ import type { CalendarEvent } from '@truefoundry/trueforge-core/core/calendar/ca
 import { LIST_DEADLINE_MS, type GmailApiPort } from '@truefoundry/trueforge-core/core/email/gmail/gmailApi';
 import type { GmailMessage } from '@truefoundry/trueforge-core/core/email/gmail/gmailWire';
 
-import { GoogleApiError, GoogleUnusableReplyError } from '@truefoundry/trueforge-core/core/google/errors';
+import {
+  GoogleApiError,
+  GoogleOAuthError,
+  GoogleUnusableReplyError,
+} from '@truefoundry/trueforge-core/core/google/errors';
 import { GOOGLE_TOKEN_URL } from '@truefoundry/trueforge-core/core/google/oauth';
+import winston from 'winston';
 import { z } from 'zod';
 
 import { migrateSqliteToLatest } from '../../../../src/db/migrateSqlite';
 import { createSqliteDb } from '../../../../src/db/sqlite/client';
 import { SqliteGoogleConnectionStore } from '../../../../src/db/sqlite/google-connection-store/SqliteGoogleConnectionStore';
 import {
+  createGoogleNoticingSources,
   gmailMailSource,
   googleCalendarSource,
   googleCalendarTimezoneFor,
 } from '../../../../src/runtime/noticing/googleSources';
-import { MessageUnreadableError } from '../../../../src/runtime/noticing/sources';
+import { MailSourceBusyError, MessageUnreadableError } from '../../../../src/runtime/noticing/sources';
 import { readMailWindow } from '../../../../src/runtime/noticing/watchers';
 
 const NOW = new Date('2026-11-05T15:00:00.000Z');
@@ -86,36 +92,29 @@ describe('Google Calendar source', () => {
     ]);
   });
 
-  it('counts an event someone the person shares with made for them in Google Calendar, with no one else on it', async () => {
+  it('counts an event with no one else on it that names no organizer, and does not count one a delegate made', async () => {
     const assistant = { email: 'assistant@example.com' };
     const events = await sourceOf([
-      timed('made for me', { organizer: me, creator: assistant, iCalUID: 'abc123@google.com' }),
+      timed('made for me', { organizer: me, creator: assistant }),
       timed('just me', {}),
     ]).listEvents({ from: NOW, to: new Date('2026-11-06T15:00:00.000Z') });
     expect(events.map(item => [item.id, item.own])).toEqual([
-      ['made for me', true],
+      ['made for me', false],
       ['just me', true],
     ]);
   });
 
-  it('does not count an outside invite file that names the person as organizer and lists no guests', async () => {
-    // An imported invite keeps the id its sender gave it, so Google did not make it.
+  it('does not count an outside invite file that names the person as organizer, whatever id it carries', async () => {
+    // The sender writes the id of an invite file, so `@google.com` proves nothing about who made it.
     const events = await sourceOf([
-      timed('imported', { organizer: me, creator: stranger, iCalUID: 'uid-1@mail.stranger.example' }),
-      timed('no id', { organizer: me, creator: stranger }),
+      timed('imported', { organizer: me, creator: stranger }),
+      timed('no creator', { organizer: me }),
       timed('organizer self only', { organizer: me, creator: me }),
-      timed('made for me with guests', {
-        organizer: me,
-        creator: { email: 'assistant@example.com' },
-        iCalUID: 'abc123@google.com',
-        attendees: [{ ...stranger, responseStatus: 'accepted' }],
-      }),
     ]).listEvents({ from: NOW, to: new Date('2026-11-06T15:00:00.000Z') });
     expect(events.map(item => [item.id, item.own])).toEqual([
       ['imported', false],
-      ['no id', false],
+      ['no creator', false],
       ['organizer self only', true],
-      ['made for me with guests', false],
     ]);
   });
 
@@ -246,6 +245,7 @@ describe('Gmail source', () => {
         limit: 1,
         keep_from: [],
         logger: { warn: jest.fn() },
+        out_of_time: () => false,
       });
       seen.push(...read.messages.map(item => item.id));
       if (read.resume_from === undefined) break;
@@ -300,18 +300,61 @@ describe('Gmail source', () => {
 
     it.each([
       ['a rate limit', new GoogleApiError({ status: 429, message: 'Too many requests.' })],
-      [
-        'a request Gmail did not accept',
-        new GoogleApiError({ status: 400, message: 'Gmail did not accept that request.' }),
-      ],
       ['Gmail failing with a 502 of its own', new GoogleApiError({ status: 502, message: 'Gmail is busy right now.' })],
       [
         'a dropped connection',
         new GoogleApiError({ status: 503, message: 'Gmail is busy.', cause: new TypeError('fetch failed') }),
       ],
-    ])('is passed on as it is for %s, so the pass can try again later', async (_name, error) => {
+      [
+        'a 403 that says the user is going too fast',
+        new GoogleApiError({ status: 403, message: 'Gmail is busy right now.', busy: true }),
+      ],
+      [
+        'a login that could not be refreshed in the middle of the read',
+        new GoogleOAuthError({
+          message: 'Google refused the token request.',
+          code: 'temporarily_unavailable',
+          status: 503,
+        }),
+      ],
+      ['a token request that never got an answer', new TypeError('fetch failed')],
+    ])('is a busy server, which never counts against the message, for %s', async (_name, error) => {
+      for (const failure of [failing(error).readText(asMail), failing(error).laterInThread(mailRef)]) {
+        await expect(failure).rejects.toBeInstanceOf(MailSourceBusyError);
+        await expect(failure).rejects.toHaveProperty('cause', error);
+      }
+    });
+
+    it('passes on a 403 that is not about going too fast as it is, so it counts against the message', async () => {
+      const error = new GoogleApiError({ status: 403, message: 'Gmail needs more access.' });
+      await expect(failing(error).readText(asMail)).rejects.toBe(error);
+    });
+
+    it('passes on a request Gmail did not accept as it is, so it counts against the message', async () => {
+      const error = new GoogleApiError({ status: 400, message: 'Gmail did not accept that request.' });
       await expect(failing(error).readText(asMail)).rejects.toBe(error);
       await expect(failing(error).laterInThread(mailRef)).rejects.toBe(error);
+    });
+
+    it('skips the text of one later reply that cannot be taken apart, and reads the rest of the thread', async () => {
+      let broken: NonNullable<GmailMessage['payload']> = { mimeType: 'text/plain', body: { data: 'aGk' } };
+      for (let level = 0; level < 100_000; level += 1) {
+        broken = { mimeType: 'multipart/mixed', parts: [broken] };
+      }
+      const good = { mimeType: 'text/plain', body: { data: 'cGFpZA' } };
+      const { api } = gmail({ messages: [], perPage: 100 });
+      const source = gmailMailSource({
+        ...api,
+        getThread: () =>
+          Promise.resolve({
+            id: 't',
+            messages: [
+              { id: 'x', threadId: 't', internalDate: String(minute(5).getTime()), payload: broken },
+              { id: 'y', threadId: 't', internalDate: String(minute(6).getTime()), payload: good },
+            ],
+          }),
+      });
+      await expect(source.laterInThread(mailRef)).resolves.toEqual(['paid']);
     });
 
     it('is unreadable when the message body itself cannot be taken apart', async () => {
@@ -331,7 +374,7 @@ describe('Gmail source', () => {
           }),
       });
       await expect(nested.readText(asMail)).rejects.toBeInstanceOf(MessageUnreadableError);
-      await expect(nested.laterInThread(mailRef)).rejects.toBeInstanceOf(MessageUnreadableError);
+      await expect(nested.laterInThread(mailRef)).resolves.toEqual([]);
     });
   });
 
@@ -397,5 +440,49 @@ describe('googleCalendarTimezoneFor', () => {
     await expect(zoneFor(OWNER)).resolves.toBeUndefined();
     await expect(zoneFor({ tenant_id: 'default', created_by: 'someone-else' })).resolves.toBeUndefined();
     expect(fetchImpl).not.toHaveBeenCalled();
+  });
+});
+
+describe('createGoogleNoticingSources', () => {
+  const OWNER = { tenant_id: 'default', created_by: 'owner-1' };
+
+  async function sourcesWith(status: 'connected' | 'needs_reconnect') {
+    const db = createSqliteDb(':memory:');
+    await migrateSqliteToLatest(db);
+    const store = new SqliteGoogleConnectionStore(db);
+    await store.save({
+      ...OWNER,
+      client_id: '123456-abcdefgh.apps.googleusercontent.com',
+      client_secret: 'synthetic-secret',
+      client_type: 'desktop',
+      refresh_token: 'synthetic-refresh',
+      granted_scopes: ['https://www.googleapis.com/auth/gmail.readonly'],
+      account_email: 'me@example.com',
+      status,
+      created_at: '2026-11-01T00:00:00.000Z',
+      updated_at: '2026-11-01T00:00:00.000Z',
+    });
+    return createGoogleNoticingSources({
+      connections: store,
+      fetchImpl: undefined,
+      logger: winston.createLogger({ silent: true }),
+    });
+  }
+
+  it('gives mail to a working login', async () => {
+    expect((await (await sourcesWith('connected')).sourcesFor(OWNER)).mail.status).toBe('ready');
+  });
+
+  it('says mail is out of reach, not missing, when the login has to be redone', async () => {
+    const mail = (await (await sourcesWith('needs_reconnect')).sourcesFor(OWNER)).mail;
+    expect(mail.status).toBe('unreachable');
+  });
+
+  it('says there is no mail for someone with no Google login', async () => {
+    const provider = await sourcesWith('connected');
+    await expect(provider.sourcesFor({ tenant_id: 'default', created_by: 'someone-else' })).resolves.toEqual({
+      mail: { status: 'none' },
+      calendar: undefined,
+    });
   });
 });

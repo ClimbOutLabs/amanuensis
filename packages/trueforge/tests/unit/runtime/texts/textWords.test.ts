@@ -1,4 +1,4 @@
-import { privateText, textBody } from '../../../../src/runtime/texts/textWords';
+import { plainText, privateText, textBody } from '../../../../src/runtime/texts/textWords';
 import type { Delivery, DeliveryKind } from '../../../../src/schemas/deliveries';
 
 function delivery(text: string, kind: DeliveryKind = 'reminder'): Delivery {
@@ -33,13 +33,73 @@ describe('the words of a text', () => {
   });
 
   it('writes a Full message in plain characters, so it is not sent in the costlier long form', () => {
+    expect(plainText('Café “bill” — due… {soon} [ok] ~ |x| ^ `y` \\ 🎉 naïve')).toBe(
+      'Cafe "bill" - due... (soon) (ok) - /x/ \'y\' / naive',
+    );
     const { body } = textBody({
       name: 'Mannie',
-      delivery: delivery('Café “bill” — due… {soon} [ok] ~ |x| ^ `y` \\ 🎉 naïve'),
+      delivery: delivery('Café “bill” — due… {soon} 🎉 naïve'),
       mode: 'full',
     });
-    expect(body).toBe('Mannie: Cafe "bill" - due... (soon) (ok) - /x/ \'y\' / naive');
+    expect(body).toBe('Mannie: Cafe "bill" - due... (soon) naive');
     expect(body).toMatch(ONE_PLACE);
+  });
+
+  it('sends Full words only when they hold no number, link or spelled-out address of any kind', () => {
+    for (const text of [
+      // Digits that are not a time or a date, in any form.
+      'Call 1-800-FLOWERS',
+      'call 1-800-flowers',
+      'Pay 800 EUROS',
+      'Room 4021',
+      'Pay into GB82WEST12345698765432',
+      'Order 2 x 100-PACK filters',
+      // A slash, an at sign, or a dot or dash inside a word.
+      'go to bit ly/abc',
+      'Write to ceo@evil',
+      'Pay at evil.com',
+      'Pay at e-v-i-l.c-o-m',
+      'Ask about the e.g. list',
+      // Single letters in a row.
+      'Pay at e v i l . c o m',
+      'Pay at e v i l d o t c o m',
+      'Visit w w w evil com',
+      'I O U . M E',
+      // A site or a number read out in words.
+      'go to bit ly slash abc',
+      'go to bitly slash abc',
+      'Pay at evil dot com',
+      'Visit evilcom on google',
+      'call eight hundred flowers',
+      'call five five five oh one oh oh',
+    ]) {
+      expect([text, textBody({ name: 'Mannie', delivery: delivery(text), mode: 'full' }).withheld]).toEqual([
+        text,
+        'contact_detail',
+      ]);
+    }
+  });
+
+  it('keeps ordinary words, and times and dates written the usual ways, in Full', () => {
+    for (const text of [
+      'Water the plants',
+      'Call Mum about the trip',
+      'Team lunch at 12:30',
+      'Pick up the kids at 3:30 pm',
+      'Dentist at 9am tomorrow',
+      'Renew the passport by 2026-11-20',
+      'Bins go out on 11/06',
+      'Call Dana about the move on 7 November',
+      'Send the card before Nov 6, 2026',
+      'Text me or call me',
+      'Plan A or plan B',
+      'CALL THE BANK BACK',
+    ]) {
+      expect([text, textBody({ name: 'Mannie', delivery: delivery(text), mode: 'full' })]).toEqual([
+        text,
+        { body: `Mannie: ${text}`, withheld: null },
+      ]);
+    }
   });
 
   it('sends a Full message that names a link, a site, a phone number or an address in Private words', () => {

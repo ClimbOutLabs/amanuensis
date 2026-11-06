@@ -28,7 +28,7 @@ export interface SmsProvider {
 export type PointNumberFailure = 'number_not_found' | 'not_accepted' | 'unreachable';
 
 /** What happened when the server pointed its Twilio number's incoming texts at itself, and whose address it replaced. */
-type PointNumberResult =
+export type PointNumberResult =
   { result: 'updated'; replaced_host: string | null } | { result: 'already_set' } | { result: PointNumberFailure };
 
 /** What a failure to point the number means, ending with the one thing for whoever runs Aman to do. */
@@ -40,6 +40,70 @@ export function pointNumberWords(failure: PointNumberFailure): string {
       return 'Twilio did not accept the sign-in details, so STOP replies do not reach Aman. Copy TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN again.';
     case 'unreachable':
       return 'Twilio could not be reached, so STOP replies may not reach Aman. Start Aman again later.';
+  }
+}
+
+/** Who reads the words about a number that could not be pointed here: whoever runs Aman, or anyone else. */
+export type ChannelViewer = 'owner' | 'person';
+
+/**
+ * What Reach me says when the number could not be pointed here. Whoever runs Aman gets the one thing to do, in words
+ * the settings page can show; everyone else is told whom to ask. The setting names stay in the log.
+ */
+export function numberProblemWords({
+  failure,
+  viewer,
+}: {
+  failure: PointNumberFailure;
+  viewer: ChannelViewer;
+}): string {
+  const lead = 'STOP replies do not reach Aman yet.';
+  if (viewer === 'person') {
+    return `${lead} Ask the person who runs Aman to check the Twilio settings.`;
+  }
+  switch (failure) {
+    case 'number_not_found':
+      return `${lead} Aman could not find its number in your Twilio account. Put one of your Twilio numbers in the settings file, then start Aman again.`;
+    case 'not_accepted':
+      return `${lead} Twilio did not accept the sign-in details. Copy the account id and auth token from the Twilio console into the settings file again, then start Aman again.`;
+    case 'unreachable':
+      return `${lead} Twilio could not be reached. Aman keeps trying by itself, so check again in a few minutes.`;
+  }
+}
+
+/** Points the Twilio number at this server, and only it, at `smsUrl` for incoming texts. */
+export interface NumberPointer {
+  pointNumberAt(input: { smsUrl: string }): Promise<PointNumberResult>;
+}
+
+const FIRST_RETRY_MS = 30_000;
+const LONGEST_RETRY_MS = 60 * 60_000;
+
+/**
+ * Points the number, and while Twilio cannot be reached tries again with waits that double up to an hour, so a short
+ * outage at start does not leave STOP replies unheard until the next restart. A failure only the person who runs Aman
+ * can fix is not tried again. Each try is reported, so the problem shown in Reach me clears once one works.
+ */
+export async function pointNumberWithRetry({
+  provider,
+  smsUrl,
+  onResult,
+  wait,
+}: {
+  provider: NumberPointer;
+  smsUrl: string;
+  onResult: (pointed: PointNumberResult) => void;
+  wait: (ms: number) => Promise<void>;
+}): Promise<void> {
+  let delay = FIRST_RETRY_MS;
+  for (;;) {
+    const pointed = await provider.pointNumberAt({ smsUrl });
+    onResult(pointed);
+    if (pointed.result !== 'unreachable') {
+      return;
+    }
+    await wait(delay);
+    delay = Math.min(delay * 2, LONGEST_RETRY_MS);
   }
 }
 
@@ -102,15 +166,11 @@ export function createTwilioSmsProvider({
   /** DNS seam for tests. */
   resolveAddresses?: ResolveAddresses;
   fetchTwilio?: TwilioFetch;
-}): SmsProvider & {
-  /**
-   * Points this server's Twilio number, and only it, at `smsUrl` for incoming texts, so nobody has to set it by hand
-   * in the Twilio console. Leaves the number alone when it already points there or cannot be found in the account.
-   */
-  pointNumberAt(input: { smsUrl: string }): Promise<PointNumberResult>;
-} {
+}): SmsProvider & NumberPointer {
   const { url: account, headers } = twilioAccount(settings);
   return {
+    // So nobody has to set it by hand in the Twilio console. A number already pointed there, or not in the account,
+    // is left alone.
     async pointNumberAt({ smsUrl }) {
       try {
         const lookup = await fetchTwilio({

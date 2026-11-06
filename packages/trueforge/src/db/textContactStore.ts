@@ -41,6 +41,23 @@ interface StoredCode {
 }
 
 type TextSendClaim = { ok: true } | { ok: false; window_started_at: string };
+/** Refused, it names the limit that refused, by its place in the list, and when that limit's full window started. */
+type TextSendsClaim = { ok: true } | { ok: false; refused: number; window_started_at: string };
+interface TextSendLimit {
+  key: string;
+  window_ms: number;
+  max: number;
+}
+
+/** Thrown inside the claim transaction so a refusal undoes the limits already counted. */
+class TextSendRefused extends Error {
+  readonly refused: number;
+
+  constructor(refused: number) {
+    super('A text send limit refused the send.');
+    this.refused = refused;
+  }
+}
 
 /**
  * A person's number for texts. Owner-scoped: no read or write by owner reaches another person's row. Every change
@@ -68,11 +85,12 @@ export interface ITextContactStore {
   /** False when the person has no number. */
   setMode(input: PersonOwner & { mode: TextMode; now: Date }): Promise<boolean>;
   /**
-   * A STOP from this number, across tenants: where it is the person's number it is opted out and unconfirmed, and
-   * where it waits as a new number it is dropped.
+   * A STOP from this number, across tenants: where someone confirmed it, it is opted out and keeps its confirmation;
+   * where it only waits for its code, as someone's number or as a new one, it is dropped.
    */
   optOut(input: { phone: string; now: Date }): Promise<{
     opted_out: PersonOwner[];
+    unconfirmed_dropped: PersonOwner[];
     pending_dropped: PersonOwner[];
   }>;
   /** Removes the person's number. Codes already sent stay counted. Resolves to whether there was one. */
@@ -83,12 +101,15 @@ export interface ITextContactStore {
     transaction?: Kysely<TextContactDatabase>,
   ): Promise<boolean>;
   /**
-   * Counts one text send against `key` in one statement, so sends at the same moment cannot pass `max` together. A
-   * window ends `window_ms` after its first send. Refused, it resolves to when the full window started.
+   * Counts one text send against every limit in one transaction, or against none when any limit is full, so a send
+   * one limit refuses spends none of the others and sends at the same moment cannot pass `max` together. A window
+   * ends `window_ms` after its first send. Refused, it says which limit refused and when its full window started.
    */
-  claimTextSend(input: { key: string; window_ms: number; max: number; now: Date }): Promise<TextSendClaim>;
-  /** Whether `claimTextSend` would count a send now, without counting it. */
-  textSendRoom(input: { key: string; window_ms: number; max: number; now: Date }): Promise<TextSendClaim>;
+  claimTextSends(input: { limits: readonly TextSendLimit[]; now: Date }): Promise<TextSendsClaim>;
+  /** Takes back one counted send for each key, for a send that was counted and then not made. Never below none. */
+  giveBackTextSends(input: { keys: readonly string[] }): Promise<void>;
+  /** Whether `claimTextSends` would count a send against this limit now, without counting it. */
+  textSendRoom(input: TextSendLimit & { now: Date }): Promise<TextSendClaim>;
   /** Forgets counts whose window started before this time. */
   forgetTextSends(input: { before: Date }): Promise<void>;
 }
@@ -276,13 +297,23 @@ export class TextContactStore implements ITextContactStore {
 
   async optOut(input: { phone: string; now: Date }): Promise<{
     opted_out: PersonOwner[];
+    unconfirmed_dropped: PersonOwner[];
     pending_dropped: PersonOwner[];
   }> {
     const at = input.now.toISOString();
+    // A confirmed number keeps its confirmation, so it stays its owner's for the limits; texts stop on the STOP mark.
     const optedOut = await this.#db
       .updateTable('text_contact')
-      .set({ ...NO_CODE, pending_phone: null, confirmed_at: null, opted_out_at: at, updated_at: at })
+      .set({ ...NO_CODE, pending_phone: null, opted_out_at: at, updated_at: at })
       .where('phone', '=', input.phone)
+      .where('confirmed_at', 'is not', null)
+      .returning(['tenant_id', 'created_by'])
+      .execute();
+    // A number only waiting for its code was never proved, so it is dropped wherever it waits.
+    const unconfirmed = await this.#db
+      .deleteFrom('text_contact')
+      .where('phone', '=', input.phone)
+      .where('confirmed_at', 'is', null)
       .returning(['tenant_id', 'created_by'])
       .execute();
     const dropped = await this.#db
@@ -291,7 +322,11 @@ export class TextContactStore implements ITextContactStore {
       .where('pending_phone', '=', input.phone)
       .returning(['tenant_id', 'created_by'])
       .execute();
-    return { opted_out: optedOut.map(ownerOf), pending_dropped: dropped.map(ownerOf) };
+    return {
+      opted_out: optedOut.map(ownerOf),
+      unconfirmed_dropped: unconfirmed.map(ownerOf),
+      pending_dropped: dropped.map(ownerOf),
+    };
   }
 
   async remove(owner: PersonOwner): Promise<boolean> {
@@ -324,36 +359,64 @@ export class TextContactStore implements ITextContactStore {
     return inserted.length > 0;
   }
 
-  async claimTextSend(input: { key: string; window_ms: number; max: number; now: Date }): Promise<TextSendClaim> {
+  async claimTextSends(input: { limits: readonly TextSendLimit[]; now: Date }): Promise<TextSendsClaim> {
     const at = input.now.toISOString();
-    const over = new Date(input.now.getTime() - input.window_ms).toISOString();
-    const ended = sql<boolean>`text_send_count.window_started_at <= ${over}`;
-    const claimed = await this.#db
-      .insertInto('text_send_count')
-      .values({ scope_key: input.key, window_started_at: at, sends: 1 })
-      .onConflict(conflict =>
-        conflict
-          .column('scope_key')
-          .doUpdateSet({
-            window_started_at: sql`CASE WHEN ${ended} THEN ${at} ELSE text_send_count.window_started_at END`,
-            sends: sql`CASE WHEN ${ended} THEN 1 ELSE text_send_count.sends + 1 END`,
-          })
-          .where(sql<boolean>`${ended} OR text_send_count.sends < ${input.max}`),
-      )
-      .returning('sends')
-      .executeTakeFirst();
-    if (claimed !== undefined) {
+    try {
+      await this.#db.transaction().execute(async trx => {
+        for (const [index, limit] of input.limits.entries()) {
+          const over = new Date(input.now.getTime() - limit.window_ms).toISOString();
+          const ended = sql<boolean>`text_send_count.window_started_at <= ${over}`;
+          const claimed = await trx
+            .insertInto('text_send_count')
+            .values({ scope_key: limit.key, window_started_at: at, sends: 1 })
+            .onConflict(conflict =>
+              conflict
+                .column('scope_key')
+                .doUpdateSet({
+                  window_started_at: sql`CASE WHEN ${ended} THEN ${at} ELSE text_send_count.window_started_at END`,
+                  sends: sql`CASE WHEN ${ended} THEN 1 ELSE text_send_count.sends + 1 END`,
+                })
+                .where(sql<boolean>`${ended} OR text_send_count.sends < ${limit.max}`),
+            )
+            .returning('sends')
+            .executeTakeFirst();
+          if (claimed === undefined) {
+            throw new TextSendRefused(index);
+          }
+        }
+      });
       return { ok: true };
+    } catch (caught) {
+      if (!(caught instanceof TextSendRefused)) {
+        throw caught;
+      }
+      const key = input.limits[caught.refused]?.key ?? '';
+      const row = await this.#db
+        .selectFrom('text_send_count')
+        .select('window_started_at')
+        .where('scope_key', '=', key)
+        .executeTakeFirst();
+      return {
+        ok: false,
+        refused: caught.refused,
+        window_started_at: row === undefined ? at : isoTime(row.window_started_at),
+      };
     }
-    const row = await this.#db
-      .selectFrom('text_send_count')
-      .select('window_started_at')
-      .where('scope_key', '=', input.key)
-      .executeTakeFirst();
-    return { ok: false, window_started_at: row === undefined ? at : isoTime(row.window_started_at) };
   }
 
-  async textSendRoom(input: { key: string; window_ms: number; max: number; now: Date }): Promise<TextSendClaim> {
+  async giveBackTextSends(input: { keys: readonly string[] }): Promise<void> {
+    if (input.keys.length === 0) {
+      return;
+    }
+    await this.#db
+      .updateTable('text_send_count')
+      .set(eb => ({ sends: eb('sends', '-', 1) }))
+      .where('scope_key', 'in', [...input.keys])
+      .where('sends', '>', 0)
+      .execute();
+  }
+
+  async textSendRoom(input: TextSendLimit & { now: Date }): Promise<TextSendClaim> {
     const row = await this.#db
       .selectFrom('text_send_count')
       .select(['window_started_at', 'sends'])

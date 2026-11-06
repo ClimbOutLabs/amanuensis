@@ -1,7 +1,11 @@
 import winston from 'winston';
 
 import { createDeliveryService } from '../../../../src/runtime/delivery/deliveryService';
-import { MAX_TEXTS_PER_NUMBER_PER_DAY, MAX_TEXTS_PER_PERSON_PER_DAY } from '../../../../src/runtime/texts/textLimits';
+import {
+  deliveryTextLimits,
+  MAX_TEXTS_PER_NUMBER_PER_DAY,
+  MAX_TEXTS_PER_PERSON_PER_DAY,
+} from '../../../../src/runtime/texts/textLimits';
 import { defaultReachSettings } from '../../../../src/schemas/reach';
 import { ALICE, PHONE, textsHarness } from '../../../fixtures/textsHarness';
 
@@ -74,8 +78,11 @@ describe('texts as a channel of the delivery layer', () => {
   it('Full texts carry a reminder’s words', async () => {
     const h = await textsHarness({ assistantName: 'Mannie' });
     await h.readyToText({ mode: 'full' });
+    await h.deliveries.deliver(nudge('Pay the electric bill before Friday at 5pm.', 'reminder'));
+    expect(h.sent[0]?.body).toBe('Mannie: Pay the electric bill before Friday at 5pm.');
+    // An amount is a number that is not a time or a date, so it is never sent in Full.
     await h.deliveries.deliver(nudge(BILL_TEXT, 'reminder'));
-    expect(h.sent[0]?.body).toBe(`Mannie: ${BILL_TEXT}`);
+    expect(h.sent[1]?.body).toBe('Mannie: a reminder is due. Open the app to see it.');
   });
 
   it('Full texts never carry what the assistant noticed, which is worded by the model and stays in the app', async () => {
@@ -133,7 +140,7 @@ describe('texts as a channel of the delivery layer', () => {
     const over = await h.deliveries.deliver({ ...nudge(BILL_TEXT), ...bob });
     expect(over.attempts.find(row => row.channel === 'sms')).toMatchObject({
       outcome: 'skipped',
-      detail: `Your number had ${String(MAX_TEXTS_PER_NUMBER_PER_DAY)} texts today, the most for one number, so no text was sent. Texts start again in about 24 hours. Until then, see new items in the app.`,
+      detail: `This number had ${String(MAX_TEXTS_PER_NUMBER_PER_DAY)} texts today, the most for one number, so no text was sent. Texts start again in about 24 hours. Until then, see new items in the app.`,
     });
   });
 
@@ -153,6 +160,34 @@ describe('texts as a channel of the delivery layer', () => {
       detail:
         'This server sent the most texts it may send in one day, so no text was sent. Texts start again in about 24 hours. Until then, see new items in the app.',
     });
+  });
+
+  it('a text the server’s day refuses counts toward no one, so texts start again as soon as the server’s day does', async () => {
+    const h = await textsHarness({ maxTextsPerDay: 5 });
+    const bob = { tenant_id: 'default', created_by: 'bob' };
+    await h.readyToText({ owner: bob, phone: '+15550122' });
+    await h.readyToText();
+    for (let index = 0; index < 5; index += 1) {
+      await h.deliveries.deliver({ ...nudge(BILL_TEXT), ...bob });
+    }
+    h.clock.now = new Date(h.clock.now.getTime() + 12 * 60 * 60_000);
+    for (let index = 0; index < MAX_TEXTS_PER_PERSON_PER_DAY; index += 1) {
+      const refused = await h.deliveries.deliver(nudge(BILL_TEXT));
+      expect(refused.attempts.find(row => row.channel === 'sms')?.detail).toMatch(/^This server sent the most texts/);
+    }
+    expect(h.sent).toHaveLength(5);
+    // The number's day did not grow either, so nobody else who has it is held back.
+    await expect(
+      h.contacts.textSendRoom({
+        ...deliveryTextLimits({ owner: ALICE, phone: PHONE, settings: h.limits }).number,
+        max: 1,
+        now: h.clock.now,
+      }),
+    ).resolves.toEqual({ ok: true });
+    h.clock.now = new Date(h.clock.now.getTime() + 12 * 60 * 60_000 + 60_000);
+    const next = await h.deliveries.deliver(nudge(BILL_TEXT));
+    expect(next.attempts.find(row => row.channel === 'sms')?.outcome).toBe('sent');
+    expect(h.sent).toHaveLength(6);
   });
 
   it('counts a failed text toward the day, so a failing provider cannot be retried without end', async () => {

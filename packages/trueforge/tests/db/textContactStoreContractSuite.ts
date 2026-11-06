@@ -147,16 +147,25 @@ export function runTextContactStoreContractSuite(getStore: () => ITextContactSto
     await confirmed(store, OTHER_TENANT);
     await confirmed(store, BOB, '+15550133');
     await store.startCode({ ...BOB, phone: '+15550100', as: 'new_number', code: code('bob-new'), now: AT });
+    const mallory = { tenant_id: 't1', created_by: 'mallory' };
+    await store.startCode({ ...mallory, phone: '+15550100', as: 'number', code: code('mallory'), now: AT });
     const stopped = await store.optOut({ phone: '+15550100', now: later(5) });
     expect(stopped.opted_out.map(owner => `${owner.tenant_id}/${owner.created_by}`).sort()).toEqual([
       't1/alice',
       't2/alice',
     ]);
+    expect(stopped.unconfirmed_dropped).toEqual([mallory]);
     expect(stopped.pending_dropped).toEqual([BOB]);
-    await expect(store.get(ALICE)).resolves.toEqual(contact({ opted_out_at: later(5).toISOString() }));
+    // The person who confirmed it keeps that mark, so a STOP does not make the number anyone's to claim.
+    await expect(store.get(ALICE)).resolves.toEqual(
+      contact({ confirmed_at: AT.toISOString(), opted_out_at: later(5).toISOString() }),
+    );
+    // A number only waiting for its code is dropped, so a STOP never leaves it marked under someone who never proved it.
+    await expect(store.get(mallory)).resolves.toBeUndefined();
     await expect(store.get(BOB)).resolves.toEqual(contact({ phone: '+15550133', confirmed_at: AT.toISOString() }));
     await expect(store.optOut({ phone: '+15550177', now: AT })).resolves.toEqual({
       opted_out: [],
+      unconfirmed_dropped: [],
       pending_dropped: [],
     });
   });
@@ -180,54 +189,111 @@ export function runTextContactStoreContractSuite(getStore: () => ITextContactSto
 
   it('claims code sends up to the limit in a window, then frees up when the window is over', async () => {
     const store = getStore();
-    const claim = (now: Date) => store.claimTextSend({ key: 'k', window_ms: HOUR_MS, max: 2, now });
+    const claim = (now: Date) => store.claimTextSends({ limits: [{ key: 'k', window_ms: HOUR_MS, max: 2 }], now });
     await expect(claim(AT)).resolves.toEqual({ ok: true });
     await expect(claim(later(10))).resolves.toEqual({ ok: true });
-    await expect(claim(later(20))).resolves.toEqual({ ok: false, window_started_at: AT.toISOString() });
-    await expect(store.claimTextSend({ key: 'other', window_ms: HOUR_MS, max: 2, now: later(20) })).resolves.toEqual({
+    await expect(claim(later(20))).resolves.toEqual({ ok: false, refused: 0, window_started_at: AT.toISOString() });
+    await expect(
+      store.claimTextSends({ limits: [{ key: 'other', window_ms: HOUR_MS, max: 2 }], now: later(20) }),
+    ).resolves.toEqual({
       ok: true,
     });
     await expect(claim(later(60))).resolves.toEqual({ ok: true });
     await expect(claim(later(61))).resolves.toEqual({ ok: true });
-    await expect(claim(later(62))).resolves.toEqual({ ok: false, window_started_at: later(60).toISOString() });
+    await expect(claim(later(62))).resolves.toEqual({
+      ok: false,
+      refused: 0,
+      window_started_at: later(60).toISOString(),
+    });
+  });
+
+  it('counts a send against every limit or against none, so a refusal by one limit spends none of the others', async () => {
+    const store = getStore();
+    const person = { key: 'person', window_ms: HOUR_MS, max: 5 };
+    const number = { key: 'number', window_ms: HOUR_MS, max: 5 };
+    const server = { key: 'server', window_ms: HOUR_MS, max: 1 };
+    await expect(store.claimTextSends({ limits: [server], now: AT })).resolves.toEqual({ ok: true });
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      await expect(store.claimTextSends({ limits: [person, number, server], now: later(1) })).resolves.toEqual({
+        ok: false,
+        refused: 2,
+        window_started_at: AT.toISOString(),
+      });
+    }
+    await expect(store.textSendRoom({ ...person, max: 1, now: later(2) })).resolves.toEqual({ ok: true });
+    await expect(store.textSendRoom({ ...number, max: 1, now: later(2) })).resolves.toEqual({ ok: true });
+    await expect(store.claimTextSends({ limits: [person, number, server], now: later(61) })).resolves.toEqual({
+      ok: true,
+    });
+  });
+
+  it('gives back a send that was counted but not made, never below none', async () => {
+    const store = getStore();
+    const limit = { key: 'k', window_ms: HOUR_MS, max: 1 };
+    await store.claimTextSends({ limits: [limit], now: AT });
+    await store.giveBackTextSends({ keys: [limit.key] });
+    await store.giveBackTextSends({ keys: [limit.key] });
+    await expect(store.claimTextSends({ limits: [limit], now: later(1) })).resolves.toEqual({ ok: true });
+    await expect(store.claimTextSends({ limits: [limit], now: later(2) })).resolves.toMatchObject({ ok: false });
   });
 
   it('tells whether a send would be counted, without counting it', async () => {
     const store = getStore();
     const limit = { key: 'k', window_ms: HOUR_MS, max: 1 };
     await expect(store.textSendRoom({ ...limit, now: AT })).resolves.toEqual({ ok: true });
-    await expect(store.claimTextSend({ ...limit, now: AT })).resolves.toEqual({ ok: true });
+    await expect(store.claimTextSends({ limits: [{ ...limit }], now: AT })).resolves.toEqual({ ok: true });
     await expect(store.textSendRoom({ ...limit, now: later(10) })).resolves.toEqual({
       ok: false,
       window_started_at: AT.toISOString(),
     });
     await expect(store.textSendRoom({ ...limit, max: 2, now: later(10) })).resolves.toEqual({ ok: true });
-    await expect(store.claimTextSend({ ...limit, max: 2, now: later(10) })).resolves.toEqual({ ok: true });
+    await expect(store.claimTextSends({ limits: [{ ...limit, max: 2 }], now: later(10) })).resolves.toEqual({
+      ok: true,
+    });
     await expect(store.textSendRoom({ ...limit, now: later(60) })).resolves.toEqual({ ok: true });
   });
 
   it('claims at the same moment never pass the limit together', async () => {
     const store = getStore();
     const results = await Promise.all(
-      Array.from({ length: 8 }, () => store.claimTextSend({ key: 'k', window_ms: HOUR_MS, max: 3, now: AT })),
+      Array.from({ length: 8 }, () =>
+        store.claimTextSends({ limits: [{ key: 'k', window_ms: HOUR_MS, max: 3 }], now: AT }),
+      ),
     );
     expect(results.filter(result => result.ok)).toHaveLength(3);
+  });
+
+  it('claims of several limits at the same moment never pass a limit together, nor count a refused one', async () => {
+    const store = getStore();
+    const first = { key: 'first', window_ms: HOUR_MS, max: 5 };
+    const second = { key: 'second', window_ms: HOUR_MS, max: 3 };
+    const results = await Promise.all(
+      Array.from({ length: 8 }, () => store.claimTextSends({ limits: [first, second], now: AT })),
+    );
+    expect(results.filter(result => result.ok)).toHaveLength(3);
+    await expect(store.textSendRoom({ ...first, max: 4, now: AT })).resolves.toEqual({ ok: true });
   });
 
   it('claims outlive the number and are forgotten only once old', async () => {
     const store = getStore();
     await store.startCode({ ...ALICE, phone: '+15550100', as: 'number', code: code(), now: AT });
-    await store.claimTextSend({ key: 'k', window_ms: HOUR_MS, max: 1, now: AT });
+    await store.claimTextSends({ limits: [{ key: 'k', window_ms: HOUR_MS, max: 1 }], now: AT });
     await store.remove(ALICE);
-    await expect(store.claimTextSend({ key: 'k', window_ms: HOUR_MS, max: 1, now: later(1) })).resolves.toMatchObject({
+    await expect(
+      store.claimTextSends({ limits: [{ key: 'k', window_ms: HOUR_MS, max: 1 }], now: later(1) }),
+    ).resolves.toMatchObject({
       ok: false,
     });
     await store.forgetTextSends({ before: AT });
-    await expect(store.claimTextSend({ key: 'k', window_ms: HOUR_MS, max: 1, now: later(2) })).resolves.toMatchObject({
+    await expect(
+      store.claimTextSends({ limits: [{ key: 'k', window_ms: HOUR_MS, max: 1 }], now: later(2) }),
+    ).resolves.toMatchObject({
       ok: false,
     });
     await store.forgetTextSends({ before: later(1) });
-    await expect(store.claimTextSend({ key: 'k', window_ms: HOUR_MS, max: 1, now: later(3) })).resolves.toEqual({
+    await expect(
+      store.claimTextSends({ limits: [{ key: 'k', window_ms: HOUR_MS, max: 1 }], now: later(3) }),
+    ).resolves.toEqual({
       ok: true,
     });
   });

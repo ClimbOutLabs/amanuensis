@@ -54,7 +54,7 @@ export function createSmsSender({
   textNumbers,
   now = () => new Date(),
 }: {
-  contacts: Pick<ITextContactStore, 'get' | 'claimTextSend' | 'forgetTextSends'>;
+  contacts: Pick<ITextContactStore, 'get' | 'claimTextSends' | 'forgetTextSends'>;
   reachSettings: Pick<IReachSettingsStore, 'get'>;
   personalization: Pick<IPersonalizationStore, 'getProfile'>;
   /** Undefined when this server has no text provider. */

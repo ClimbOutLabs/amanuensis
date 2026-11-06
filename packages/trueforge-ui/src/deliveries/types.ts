@@ -52,7 +52,12 @@ export type ReachSettings = {
   approvalWaitMinutes: number;
 };
 
-export type ReachChannelState = { available: boolean; note: string };
+export type ReachChannelState = {
+  available: boolean;
+  note: string;
+  /** Set when the channel works but has a problem to fix, in plain words with what to do. */
+  problem: string | null;
+};
 
 export type ReachView = {
   settings: ReachSettings;

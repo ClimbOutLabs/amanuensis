@@ -1,12 +1,14 @@
 import {
-  CODE_TTL_MS,
-  isOptOutWord,
-  MAX_CODE_ATTEMPTS,
   MAX_CODES_PER_HOUR,
   MAX_CODES_PER_NUMBER_PER_DAY,
   MAX_CODES_PER_NUMBER_PER_HOUR,
   MAX_CODES_PER_PERSON_PER_DAY,
   MAX_CODES_PER_SERVER_PER_DAY,
+} from '../../../../src/runtime/texts/textLimits';
+import {
+  CODE_TTL_MS,
+  isOptOutWord,
+  MAX_CODE_ATTEMPTS,
   normalizePhoneNumber,
 } from '../../../../src/runtime/texts/textNumber';
 import { ALICE, PHONE, textsHarness } from '../../../fixtures/textsHarness';
@@ -214,6 +216,21 @@ describe('confirming a number with a one-time code', () => {
     await expect(h.numbers.sendCode({ owner: person(99), phone: PHONE })).resolves.toMatchObject({
       reason: 'rate_limited',
     });
+    await expect(h.numbers.sendCode({ owner: ALICE, phone: PHONE })).resolves.toEqual({ ok: true });
+  });
+
+  it('others filling a number’s limits do not lock out the person who confirmed it, after a STOP and START', async () => {
+    const h = await textsHarness();
+    await h.readyToText();
+    await h.numbers.stopNumber(PHONE);
+    const person = (index: number) => ({ tenant_id: 'default', created_by: `person-${String(index)}` });
+    for (let index = 0; index < MAX_CODES_PER_NUMBER_PER_HOUR; index += 1) {
+      await h.numbers.sendCode({ owner: person(index), phone: PHONE });
+    }
+    await expect(h.numbers.sendCode({ owner: person(99), phone: PHONE })).resolves.toMatchObject({
+      reason: 'rate_limited',
+    });
+    await expect(h.numbers.status(ALICE)).resolves.toMatchObject({ confirmed: false, opted_out: true });
     await expect(h.numbers.sendCode({ owner: ALICE, phone: PHONE })).resolves.toEqual({ ok: true });
   });
 

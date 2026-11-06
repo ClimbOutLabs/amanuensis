@@ -308,14 +308,6 @@ const SPELLED_AT = /[\p{L}\p{N}]\s*(?:\[\s*at\s*\]|\(\s*at\s*\)|\{\s*at\s*\})\s*
 /** A number read out word by word, such as `five five five oh one oh oh` or `five-five-five, zero-one-hundred`. */
 const SPELLED_DIGITS =
   /\b(?:(?:zero|oh|one|two|three|four|five|six|seven|eight|nine|hundred|thousand|double|triple|dash)\b[\s,-]*){6,}/i;
-/** A site with its dot read out as a space before a slash, such as `bit ly slash abc`. */
-const SPOKEN_PATH =
-  /[\p{L}\p{N}-]\s+(?:com|net|org|info|biz|io|ai|gg|dev|tv|cc|ly|co|gl|app|xyz|top|site|online|link|shop|me|us|uk|ru|cn)\s+slash\b/iu;
-/** A number with letters for its last digits, such as `1-800-FLOWERS`, `1 800 FLOWERS` or `555-PIZZA`. */
-const VANITY_NUMBER =
-  /(?<![\p{L}\p{N}])(?:(?:\+?1[\s.\p{Pd}]*)?\(?(?:8(?:00|33|44|55|66|77|88)|900)\)?[\s.\p{Pd}]*|(?:\+?1[\s.\p{Pd}]+)\(?\d{3}\)?[\s.\p{Pd}]*|\(?\d{3}\)?[.\p{Pd}]|\(?\d{3}\)\s*)(?:\d{3}[\s.\p{Pd}]?)?(?=(?:[.\p{Pd}]?[A-Z]){4})[A-Z]{2,}(?:[.\p{Pd}]?[A-Z]+)*(?!\p{L})/u;
-/** Single letters kept apart by spaces, such as `e v i l . c o m`, so the closed-up word can be read as well. */
-const SPACED_LETTERS = /(?<!\S)(?:[\p{L}\p{N}.]\s){2,}[\p{L}\p{N}.](?!\S)/gu;
 /** A bare IPv4 address, dotted or as one hex number such as `0x7f000001`, which opens a site as well as a name does. */
 const IPV4 = /(?<![\d.])\d{1,3}(?:\.\d{1,3}){3}(?![\d.])|\b0x[\da-f]{8}\b/i;
 
@@ -327,28 +319,20 @@ const IPV4 = /(?<![\d.])\d{1,3}(?:\.\d{1,3}){3}(?![\d.])|\b0x[\da-f]{8}\b/i;
  */
 export function namesContactDetail(values: readonly string[]): boolean {
   return values.some(value => {
-    const plain = contactSpelling(value);
+    const spelled = contactSpelling(value);
+    const numbers = KNOWN_NUMBER_SHAPES.reduce((text, shape) => text.replace(shape, ' '), spelled);
     return (
-      holdsContactDetail(plain) || holdsContactDetail(plain.replace(SPACED_LETTERS, run => run.replace(/\s/g, '')))
+      spelled.includes('@') ||
+      urlsInText(spelled).length > 0 ||
+      [...spelled.matchAll(BARE_HOST)].length > 0 ||
+      IPV4.test(spelled) ||
+      SPELLED_DOT.test(spelled) ||
+      SPACED_DOT.test(spelled) ||
+      SPELLED_AT.test(spelled) ||
+      SPELLED_DIGITS.test(spelled) ||
+      holdsPhoneDigits(numbers)
     );
   });
-}
-
-function holdsContactDetail(spelled: string): boolean {
-  const numbers = KNOWN_NUMBER_SHAPES.reduce((text, shape) => text.replace(shape, ' '), spelled);
-  return (
-    spelled.includes('@') ||
-    urlsInText(spelled).length > 0 ||
-    [...spelled.matchAll(BARE_HOST)].length > 0 ||
-    IPV4.test(spelled) ||
-    SPELLED_DOT.test(spelled) ||
-    SPACED_DOT.test(spelled) ||
-    SPELLED_AT.test(spelled) ||
-    SPELLED_DIGITS.test(spelled) ||
-    SPOKEN_PATH.test(spelled) ||
-    VANITY_NUMBER.test(spelled) ||
-    holdsPhoneDigits(numbers)
-  );
 }
 
 const MAX_DECODE_ROUNDS = 3;

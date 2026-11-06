@@ -17,10 +17,11 @@ import type { Logger } from 'winston';
 
 import type { PersonOwner } from '../../db/personOwner';
 import {
+  MailSourceBusyError,
   MailTooSlowError,
-  MessageUnreadableError,
   type CalendarEventInfo,
   type CalendarSource,
+  type MailAccess,
   type MailMessage,
   type MailRef,
   type MailSource,
@@ -31,7 +32,7 @@ import {
 /** Calls one tool on a sidecar and returns its result as the MCP client gives it. */
 export type CallSidecarTool = (name: string, args: Record<string, unknown>) => Promise<unknown>;
 
-/** Longest one watcher pass may keep a sidecar session open. */
+/** Longest one watcher pass may keep a sidecar session open; the client ends the session after this. */
 const SIDECAR_SESSION_MS = 4 * 60_000;
 const TEXT_CHARACTERS = 3000;
 /** The most the sidecar lists in one call. */
@@ -40,9 +41,15 @@ const PAGE_SIZE = 100;
 const CALENDAR_CALL_MS = 30_000;
 /**
  * Longest one mail call may take. Listing searches whole days of a mailbox, which a slow server can take a while
- * over, so mail has more time than the calendar. It still fits several times inside the session.
+ * over, so mail has more time than the calendar. The connector gives up on its own after about a minute.
  */
-const MAIL_CALL_MS = 90_000;
+const MAIL_CALL_MS = 75_000;
+/**
+ * How long a pass may start new work. The session opened with an account lookup that can take one call, and work
+ * begun just before this ends can take one more, so a pass stops cleanly instead of being cut off by the session.
+ * Calls at their limit do not fit a whole pass, so a pass reads what it can and the next one carries on.
+ */
+export const MAIL_PASS_MS = SIDECAR_SESSION_MS - 2 * MAIL_CALL_MS;
 
 /** The sidecar answered a tool call with an error. `reply` is its own words, for the log and for telling errors apart. */
 export class SidecarToolError extends Error {
@@ -68,12 +75,14 @@ export function toolResultOf({ server, tool, result }: { server: string; tool: s
   throw new SidecarToolError({ server, tool, reply });
 }
 
-/** Whether the sidecar said the message is not there, which no later try changes. */
-function saysMissing(error: unknown): boolean {
-  return (
-    error instanceof SidecarToolError &&
-    /not found|no such|does not exist|doesn't exist|unknown email/i.test(error.reply)
-  );
+/** Whether the connector gave up on a call by its own time limit, as the error itself or as its cause. */
+function saysTimedOut(error: unknown): boolean {
+  for (let current: unknown = error; current instanceof Error; current = current.cause) {
+    if (current instanceof SidecarToolError && /timed out|timeout/i.test(current.reply)) {
+      return true;
+    }
+  }
+  return false;
 }
 
 /** Whether an error, or one it was caused by, is the MCP client giving up on a call that took too long. */
@@ -177,29 +186,37 @@ function toMailMessage({
  * is never verified here and its mail is read as ordinary mail. Bills and deadlines still work.
  */
 export function sidecarMailSource({ call, account }: { call: CallSidecarTool; account: string }): MailSource {
-  /** Reads from the sidecar. A message it says is not there is unreadable; any other error is passed on. */
-  const readingMessage = async <T>(read: () => Promise<T>): Promise<T> => {
+  /**
+   * Calls a tool. A dropped or abandoned call, the session ending, and a call the connector gave up on by its own time
+   * limit say the server is busy. The connector's other errors pass on as they are, since they may be about the message.
+   */
+  const asked = async (tool: string, args: Record<string, unknown>): Promise<unknown> => {
     try {
-      return await read();
+      return await call(tool, args);
     } catch (error) {
-      throw saysMissing(error) ? new MessageUnreadableError({ cause: error }) : error;
+      throw error instanceof SidecarToolError && !saysTimedOut(error)
+        ? error
+        : new MailSourceBusyError({ cause: error });
     }
   };
-  const bodiesOf = async (ids: readonly string[]): Promise<string[]> => {
-    const result = await readingMessage(() =>
-      call(MAIL_CONTENT_TOOL_NAME, {
-        account_name: account,
-        email_ids: ids,
-        mailbox: 'INBOX',
-        mark_as_read: false,
-      }),
-    );
-    return emailsOfResult(result).flatMap(email =>
-      isRecord(email) ? [(text(email['body']) ?? '').slice(0, TEXT_CHARACTERS)] : [],
-    );
+  /** The bodies of the messages the connector could fetch. It reports the ones it could not as success, so they are just missing. */
+  const bodiesOf = async (ids: readonly string[]): Promise<{ id: string; body: string }[]> => {
+    const result = await asked(MAIL_CONTENT_TOOL_NAME, {
+      account_name: account,
+      email_ids: ids,
+      mailbox: 'INBOX',
+      mark_as_read: false,
+    });
+    return emailsOfResult(result).flatMap(email => {
+      const id = isRecord(email) ? text(email['email_id']) : undefined;
+      return isRecord(email) && id !== undefined
+        ? [{ id, body: (text(email['body']) ?? '').slice(0, TEXT_CHARACTERS) }]
+        : [];
+    });
   };
   return {
     trustedAuthenticationServers: [],
+    datesAreArrival: false,
     async listNewMessages({ since, before, limit, from }) {
       // The sidecar picks and orders mail by the server's arrival time, which is what the window means. The Date a
       // sender wrote can be late or early, so it is never used to pick or order. A window is read in one call, so
@@ -207,7 +224,7 @@ export function sidecarMailSource({ call, account }: { call: CallSidecarTool; ac
       const size = Math.min(limit + 1, PAGE_SIZE);
       const listed: unknown[] = [];
       for (const address of from ?? [undefined]) {
-        const result = await call(MAIL_LIST_TOOL_NAME, {
+        const result = await asked(MAIL_LIST_TOOL_NAME, {
           account_name: account,
           mailbox: 'INBOX',
           since: since.toISOString(),
@@ -217,7 +234,7 @@ export function sidecarMailSource({ call, account }: { call: CallSidecarTool; ac
           page_size: size,
           order: 'asc',
         }).catch((error: unknown) => {
-          throw isCallTimeout(error) ? new MailTooSlowError({ seconds: MAIL_CALL_MS / 1000, cause: error }) : error;
+          throw isCallTimeout(error) || saysTimedOut(error) ? new MailTooSlowError({ cause: error }) : error;
         });
         const emails = emailsOfResult(result);
         // A full list may have more behind it, so the window is too big to read in one call.
@@ -237,33 +254,33 @@ export function sidecarMailSource({ call, account }: { call: CallSidecarTool; ac
       };
     },
     async readText(message) {
-      const [body] = await bodiesOf([message.id]);
-      if (body === undefined) {
-        // The sidecar answered without the message, as it does for one that was deleted.
-        throw new MessageUnreadableError({ cause: new Error('The Email connector did not return the message.') });
+      const [found] = await bodiesOf([message.id]);
+      // A deleted message and a dropped connection both leave it missing, and which it was cannot be told, so this is
+      // a failure that may clear.
+      if (found === undefined) {
+        throw new Error('The Email connector could not fetch the message.');
       }
-      return body;
+      return found.body;
     },
     async laterInThread(ref: MailRef) {
       if (ref.thread_id === null) {
         return [];
       }
-      const result = await readingMessage(() =>
-        call(MAIL_LIST_TOOL_NAME, {
-          account_name: account,
-          mailbox: 'INBOX',
-          subject: ref.thread_id,
-          since: ref.received_at.toISOString(),
-          page: 1,
-          page_size: LATER_MESSAGES,
-          order: 'asc',
-        }),
-      );
+      const result = await asked(MAIL_LIST_TOOL_NAME, {
+        account_name: account,
+        mailbox: 'INBOX',
+        subject: ref.thread_id,
+        since: ref.received_at.toISOString(),
+        page: 1,
+        page_size: LATER_MESSAGES,
+        order: 'asc',
+      });
       const ids = emailsOfResult(result)
         .map(email => toMailMessage({ email, arrived: { from: ref.received_at, to: new Date() } }))
         .filter((message): message is MailMessage => message !== undefined && message.id !== ref.id)
         .map(message => message.id);
-      return ids.length === 0 ? [] : bodiesOf(ids);
+      // A reply the connector cannot fetch is left out, so a stranger who joins a thread cannot hide a payment.
+      return ids.length === 0 ? [] : (await bodiesOf(ids)).map(item => item.body);
     },
   };
 }
@@ -348,14 +365,17 @@ export function createSidecarNoticingSources({
   instanceOwner: PersonOwner | undefined;
   logger: Logger;
 }): NoticingSourceProvider {
-  async function mailFromSidecar(url: string): Promise<MailSource | undefined> {
+  /** The shared mail connector, told apart as not set up (no account) or set up but out of reach. */
+  async function mailFromSidecar(url: string): Promise<MailAccess> {
     try {
       const call = sidecarTools({ name: MAIL_CONNECTOR_NAME, url, logger, callMs: MAIL_CALL_MS });
       const [account] = accountNamesOfResult(await call(MAIL_ACCOUNT_LIST_TOOL_NAME, {}));
-      return account === undefined ? undefined : sidecarMailSource({ call, account });
+      return account === undefined
+        ? { status: 'none' }
+        : { status: 'ready', source: sidecarMailSource({ call, account }) };
     } catch (error) {
       logger.warn('The Email sidecar could not be reached for noticing', extractErrorLogFields(error));
-      return undefined;
+      return { status: 'unreachable', error };
     }
   }
   return {
@@ -370,8 +390,10 @@ export function createSidecarNoticingSources({
       if (owner.tenant_id !== instanceOwner?.tenant_id || owner.created_by !== instanceOwner.created_by) {
         return own;
       }
+      // The shared connector fills in only where the person's own Google login gives no working mail.
+      const shared = own.mail.status === 'ready' || mailUrl === undefined ? undefined : await mailFromSidecar(mailUrl);
       return {
-        mail: own.mail ?? (mailUrl === undefined ? undefined : await mailFromSidecar(mailUrl)),
+        mail: shared === undefined || shared.status === 'none' ? own.mail : shared,
         calendar:
           own.calendar ??
           (calendarUrl === undefined

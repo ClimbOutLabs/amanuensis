@@ -98,6 +98,7 @@ import type { IModelProviderStore } from './db/modelProviderStore';
 import type { INoticingStore } from './db/noticingStore';
 import type { IPersonalizationStore } from './db/personalizationStore';
 import type { IPersonaStore } from './db/personaStore';
+import type { PersonOwner } from './db/personOwner';
 import type { IPushSubscriptionStore } from './db/pushSubscriptionStore';
 import type { IReachSettingsStore } from './db/reachSettingsStore';
 import type { IRepositoryStore } from './db/repositoryStore';
@@ -136,6 +137,7 @@ import type { NoticingService } from './runtime/noticing/noticingService';
 import type { ReminderReach } from './runtime/noticing/reminderReach';
 import { resolveSandboxProvider } from './runtime/sessionResources';
 import { createSpacePictureService } from './runtime/spacePictures/spacePictureService';
+import type { ChannelViewer } from './runtime/texts/smsProvider';
 import type { DeliveryLimitSettings } from './runtime/texts/textLimits';
 import type { TextNumberService } from './runtime/texts/textNumber';
 import { TokenFactoryDailyCapError, type TokenFactoryBudget } from './runtime/tokenFactoryBudget';
@@ -330,7 +332,9 @@ export interface ServerDeps<TTransaction> {
   /** Settles how loud a due reminder is. */
   reminderReach: ReminderReach;
   /** Which phone channels this server can use. */
-  reachChannels: () => ReachAvailability;
+  reachChannels: (input?: { viewer: ChannelViewer }) => ReachAvailability;
+  /** Whether this person runs Aman, so a problem with the server's setup is worded for them. */
+  isInstanceOwner: (owner: PersonOwner) => boolean;
   /** What the day's text limits need; undefined while this server has no text provider. */
   textLimits: DeliveryLimitSettings | undefined;
   /** The person's number for texts and its confirming. */
@@ -931,6 +935,7 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
         deliveryService: deps.deliveryService,
         calls: deps.phoneCalls,
         channels: deps.reachChannels,
+        isInstanceOwner: deps.isInstanceOwner,
         memories: async ({ tenant_id }) => {
           const outcome = await createVaultClient({ logger: deps.logger, tenantId: tenant_id })?.listEntries({
             namespace: '',
