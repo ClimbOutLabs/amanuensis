@@ -10,7 +10,7 @@ Texts go through Twilio, a service you sign up for. You pay Twilio for each text
 ## What a text says
 
 - **Private (the default).** The text says only the kind of thing, such as "Mannie: a reminder is due. Open the app to see it." It holds no names, amounts or message content. Your assistant's name is the one you chose in Personalization. A text uses at most 20 letters of it.
-- **Full.** The text holds the one-sentence message, cut to fit two texts. It can show on a locked screen, and Twilio and the phone company can read it. A message that holds a link, a website, a phone number or an email address is sent in Private words instead. Such a message can come from mail someone else wrote, and a link or a number to call in a text is a common trick.
+- **Full.** A reminder's text holds the reminder, cut to fit two texts. It can show on a locked screen, and Twilio and the phone company can read it. Something your assistant noticed still gets the Private words, because its wording comes from the model and stays in the app. A reminder that holds a link, a website, a phone number or an email address is sent in Private words too, because a link or a number to call in a text is a common trick.
 
 The text with your confirmation code holds only the code. It does not name your assistant.
 

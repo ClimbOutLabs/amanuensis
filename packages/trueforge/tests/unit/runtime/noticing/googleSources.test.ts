@@ -3,7 +3,19 @@ import type { CalendarEvent } from '@truefoundry/trueforge-core/core/calendar/ca
 import { LIST_DEADLINE_MS, type GmailApiPort } from '@truefoundry/trueforge-core/core/email/gmail/gmailApi';
 import type { GmailMessage } from '@truefoundry/trueforge-core/core/email/gmail/gmailWire';
 
-import { gmailMailSource, googleCalendarSource } from '../../../../src/runtime/noticing/googleSources';
+import { GoogleApiError } from '@truefoundry/trueforge-core/core/google/errors';
+import { GOOGLE_TOKEN_URL } from '@truefoundry/trueforge-core/core/google/oauth';
+import { z } from 'zod';
+
+import { migrateSqliteToLatest } from '../../../../src/db/migrateSqlite';
+import { createSqliteDb } from '../../../../src/db/sqlite/client';
+import { SqliteGoogleConnectionStore } from '../../../../src/db/sqlite/google-connection-store/SqliteGoogleConnectionStore';
+import {
+  gmailMailSource,
+  googleCalendarSource,
+  googleCalendarTimezoneFor,
+} from '../../../../src/runtime/noticing/googleSources';
+import { MessageUnreadableError } from '../../../../src/runtime/noticing/sources';
 import { readMailWindow } from '../../../../src/runtime/noticing/watchers';
 
 const NOW = new Date('2026-11-05T15:00:00.000Z');
@@ -38,7 +50,11 @@ describe('Google Calendar source', () => {
 
   it('counts an event as the person’s own only when they organised or accepted it', async () => {
     const events = await sourceOf([
-      timed('organised', { organizer: me, attendees: [{ ...stranger, responseStatus: 'needsAction' }] }),
+      timed('organised', {
+        organizer: me,
+        creator: me,
+        attendees: [{ ...stranger, responseStatus: 'needsAction' }],
+      }),
       timed('accepted', { organizer: stranger, attendees: [{ ...me, responseStatus: 'accepted' }] }),
       timed('invite', { organizer: stranger, attendees: [{ ...me, responseStatus: 'needsAction' }] }),
       timed('maybe', { organizer: stranger, attendees: [{ ...me, responseStatus: 'tentative' }] }),
@@ -49,6 +65,52 @@ describe('Google Calendar source', () => {
       ['invite', false],
       ['maybe', false],
     ]);
+  });
+
+  it('does not count an invite from outside that names the person as its organizer', async () => {
+    // Google adds such an invite with the person as organizer and accepted, and the sender as its creator.
+    const events = await sourceOf([
+      timed('spoofed', {
+        organizer: me,
+        creator: stranger,
+        attendees: [
+          { ...me, organizer: true, responseStatus: 'accepted' },
+          { ...stranger, responseStatus: 'accepted' },
+        ],
+      }),
+      timed('no creator', { organizer: me, attendees: [{ ...me, organizer: true, responseStatus: 'accepted' }] }),
+    ]).listEvents({ from: NOW, to: new Date('2026-11-06T15:00:00.000Z') });
+    expect(events.map(item => [item.id, item.own])).toEqual([
+      ['spoofed', false],
+      ['no creator', false],
+    ]);
+  });
+
+  it('counts an event someone the person shares with made for them, with no one else on it', async () => {
+    const assistant = { email: 'assistant@example.com' };
+    const events = await sourceOf([
+      timed('made for me', { organizer: me, creator: assistant }),
+      timed('just me', {}),
+    ]).listEvents({ from: NOW, to: new Date('2026-11-06T15:00:00.000Z') });
+    expect(events.map(item => [item.id, item.own])).toEqual([
+      ['made for me', true],
+      ['just me', true],
+    ]);
+  });
+
+  it('takes an accept Google reports on an outside invite as the person’s own answer', async () => {
+    // Calendar does not say whether an accept came from the person or from the invite file, so it is believed.
+    const events = await sourceOf([
+      timed('outside', {
+        organizer: stranger,
+        creator: stranger,
+        attendees: [
+          { ...me, responseStatus: 'accepted' },
+          { ...stranger, organizer: true, responseStatus: 'accepted' },
+        ],
+      }),
+    ]).listEvents({ from: NOW, to: new Date('2026-11-06T15:00:00.000Z') });
+    expect(events.map(item => [item.id, item.own])).toEqual([['outside', true]]);
   });
 });
 
@@ -106,6 +168,24 @@ describe('Gmail source', () => {
     expect(read.read === 'all' ? read.messages.map(item => item.id) : read.read).toEqual(['1', '2', '3']);
   });
 
+  it('searches only the given senders, in groups, leaving out an address it cannot quote', async () => {
+    const messages = [message({ id: '1', thread: 't-1', at: minute(51) })];
+    const { api, listMessages } = gmail({ messages, perPage: 100 });
+    const senders = Array.from({ length: 30 }, (_, n) => `person${String(n)}@example.com`);
+    const read = await gmailMailSource(api).listNewMessages({
+      since: minute(0),
+      before: NOW,
+      limit: 10,
+      from: [...senders, 'odd"name@example.com'],
+    });
+    expect(read.read === 'all' ? read.messages.map(item => item.id) : read.read).toEqual(['1']);
+    const queries = listMessages.mock.calls.map(([input]) => input.query);
+    expect(queries).toHaveLength(2);
+    expect(queries[0]).toContain('{from:"person0@example.com" from:"person1@example.com"');
+    expect(queries[1]).toContain('from:"person29@example.com"}');
+    expect(queries.join(' ')).not.toContain('odd');
+  });
+
   it('says a window holds too much rather than reading part of it', async () => {
     const messages = [3, 2, 1].map(n => message({ id: String(n), thread: `t-${String(n)}`, at: minute(50 + n) }));
     const { api } = gmail({ messages, perPage: 100 });
@@ -138,12 +218,52 @@ describe('Gmail source', () => {
     const seen: string[] = [];
     let since = minute(0);
     for (let pass = 0; pass < 5; pass += 1) {
-      const read = await readMailWindow({ source, since, now: minute(30), limit: 1, logger: { warn: jest.fn() } });
+      const read = await readMailWindow({
+        source,
+        since,
+        now: minute(30),
+        limit: 1,
+        keep_from: [],
+        logger: { warn: jest.fn() },
+      });
       seen.push(...read.messages.map(item => item.id));
       if (read.resume_from === undefined) break;
       since = read.resume_from;
     }
     expect(seen).toEqual(['x1', 'y1', 'x2']);
+  });
+
+  it('marks a message Gmail can never give back as unreadable, and passes other failures on', async () => {
+    const { api } = gmail({ messages: [], perPage: 100 });
+    const failing = (error: Error) =>
+      gmailMailSource({
+        ...api,
+        getMessage: () => Promise.reject(error),
+        getThread: () => Promise.reject(error),
+      });
+    const mailRef = { id: 'm', thread_id: 't', received_at: minute(1) };
+    const gone = failing(new GoogleApiError({ status: 404, message: 'Gmail has no such message.' }));
+    const garbled = failing(
+      new GoogleApiError({
+        status: 502,
+        message: 'Gmail returned a response Aman could not read.',
+        cause: new z.ZodError([]),
+      }),
+    );
+    const limited = failing(new GoogleApiError({ status: 429, message: 'Too many requests.' }));
+    const asMail = {
+      ...mailRef,
+      from_address: 'dana@example.com',
+      from_name: null,
+      subject: '',
+      snippet: '',
+      authentication_results: [],
+    };
+    await expect(gone.readText(asMail)).rejects.toBeInstanceOf(MessageUnreadableError);
+    await expect(gone.laterInThread(mailRef)).rejects.toBeInstanceOf(MessageUnreadableError);
+    await expect(garbled.readText(asMail)).rejects.toBeInstanceOf(MessageUnreadableError);
+    await expect(limited.readText(asMail)).rejects.toThrow('Too many requests.');
+    await expect(limited.laterInThread(mailRef)).rejects.not.toBeInstanceOf(MessageUnreadableError);
   });
 
   it('hands back the oldest part when Gmail is too slow to read it all', async () => {
@@ -163,5 +283,50 @@ describe('Gmail source', () => {
     } finally {
       jest.useRealTimers();
     }
+  });
+});
+
+describe('googleCalendarTimezoneFor', () => {
+  const OWNER = { tenant_id: 'default', created_by: 'owner-1' };
+
+  async function connections(scopes: string[]) {
+    const db = createSqliteDb(':memory:');
+    await migrateSqliteToLatest(db);
+    const store = new SqliteGoogleConnectionStore(db);
+    await store.save({
+      ...OWNER,
+      client_id: '123456-abcdefgh.apps.googleusercontent.com',
+      client_secret: 'synthetic-secret',
+      client_type: 'desktop',
+      refresh_token: 'synthetic-refresh',
+      granted_scopes: scopes,
+      account_email: 'me@example.com',
+      status: 'connected',
+      created_at: '2026-11-01T00:00:00.000Z',
+      updated_at: '2026-11-01T00:00:00.000Z',
+    });
+    return store;
+  }
+
+  const fetchImpl = jest.fn((input: string | URL | Request) => {
+    const url = input instanceof Request ? input.url : String(input);
+    const body = url.startsWith(GOOGLE_TOKEN_URL)
+      ? { access_token: 'synthetic-access', expires_in: 3600 }
+      : { timeZone: 'Europe/Paris' };
+    return Promise.resolve(new Response(JSON.stringify(body), { status: 200 }));
+  });
+
+  it('reads the time zone the person’s own calendar is kept in', async () => {
+    const store = await connections(['https://www.googleapis.com/auth/calendar.events.readonly']);
+    await expect(googleCalendarTimezoneFor({ connections: store, fetchImpl })(OWNER)).resolves.toBe('Europe/Paris');
+  });
+
+  it('says nothing for someone who did not allow calendar reads, or has no Google login', async () => {
+    fetchImpl.mockClear();
+    const store = await connections(['https://www.googleapis.com/auth/gmail.readonly']);
+    const zoneFor = googleCalendarTimezoneFor({ connections: store, fetchImpl });
+    await expect(zoneFor(OWNER)).resolves.toBeUndefined();
+    await expect(zoneFor({ tenant_id: 'default', created_by: 'someone-else' })).resolves.toBeUndefined();
+    expect(fetchImpl).not.toHaveBeenCalled();
   });
 });

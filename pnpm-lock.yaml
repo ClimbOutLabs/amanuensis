@@ -519,9 +519,6 @@ importers:
       swagger-ui-dist:
         specifier: 5.34.0
         version: 5.34.0
-      tldts:
-        specifier: 7.4.10
-        version: 7.4.10
       ulid:
         specifier: ^3.0.2
         version: 3.0.2

@@ -30,7 +30,7 @@ export async function up(db: Kysely<unknown>): Promise<void> {
       .addColumn('event_json', 'text', col => col.notNull())
       .addColumn('due_at', 'timestamptz')
       .addColumn('verdict_json', 'text')
-      .addColumn('delivery_id', 'text')
+      .addColumn('delivery_id', 'text', col => col.notNull())
       .addColumn('created_at', 'timestamptz', col => col.notNull())
       .addColumn('claim_id', 'text')
       .addColumn('claimed_at', 'timestamptz')

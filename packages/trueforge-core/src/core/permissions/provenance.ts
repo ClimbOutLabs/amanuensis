@@ -207,33 +207,130 @@ function phoneDetails(text: string): string[] {
 
 /** Fewest digits a short local phone number has, such as `555-0100`. */
 const MIN_LOCAL_PHONE_DIGITS = 7;
-/** A date or time written as `2026-11-07` or `2026-11-07T10:00Z`, which is not a phone number. */
-const ISO_DATE = /\b\d{4}-\d{2}-\d{2}(?:T[\d:.]+(?:Z|[+-]\d{2}:?\d{2})?)?/g;
-
-/** A site with its dot written out or bracketed, such as `evil[.]com` or `evil dot com`. */
-const SPELLED_DOT =
-  /[\p{L}\p{N}]\s*(?:\[\s*(?:\.|dot)\s*\]|\(\s*(?:\.|dot)\s*\)|\{\s*(?:\.|dot)\s*\}|\s+dot\s+)\s*[\p{L}\p{N}]/iu;
-/** An address with its at sign bracketed, such as `ceo [at] evil`. */
-const SPELLED_AT = /[\p{L}\p{N}]\s*(?:\[\s*at\s*\]|\(\s*at\s*\)|\{\s*at\s*\})\s*[\p{L}\p{N}]/iu;
-/** A number read out digit by digit, such as `five five five oh one oh oh`. */
-const SPELLED_DIGITS = /\b(?:(?:zero|oh|one|two|three|four|five|six|seven|eight|nine)\b[\s,-]*){7,}/i;
 
 /**
- * Whether any value carries a phone number, a site or an address in any spelling: short local numbers, digits of
- * any script, bare sites, spelled-out dots and at signs. Far looser than the checks that tell whose detail something
- * is, for text that should carry no contact detail at all.
+ * Times, dates and amounts written the usual ways, which are not phone numbers: `14:00-15:00`, `3:30 pm`,
+ * `2026-11-07`, `11/06/2026`, `Nov 6, 2026`, `6 November` and `$1,250.00`.
+ */
+const MONTH = '(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\\.?';
+const KNOWN_NUMBER_SHAPES = [
+  /\b\d{4}-\d{2}-\d{2}(?:T[\d:.]+(?:Z|[+-]\d{2}:?\d{2})?)?/g,
+  /\b(?:[01]?\d|2[0-3]):[0-5]\d(?::[0-5]\d)?(?:\s?[ap]\.?m\b\.?)?/gi,
+  /\b[0-3]?\d[/.-][0-3]?\d[/.-](?:19|20)\d{2}\b/g,
+  new RegExp(`\\b${MONTH}\\s+[0-3]?\\d(?:st|nd|rd|th)?\\b(?:,?\\s+(?:19|20)\\d{2}\\b)?`, 'gi'),
+  new RegExp(`\\b[0-3]?\\d(?:st|nd|rd|th)?\\s+${MONTH}(?:,?\\s+(?:19|20)\\d{2}\\b)?`, 'gi'),
+  /[$\u20ac\u00a3\u00a5\u20b9]\s?(?:\d{1,3}(?:,\d{3})+|\d{1,6})(?:\.\d{2})?(?![\d,])/g,
+];
+
+/** A word made only of digits and the letters that pass for them in a number: `O` and `o`, `I` and `l`, `S` and `Z`. */
+const NUMBER_LIKE_WORD = /^[\dOoIlSZ]+$/;
+/** Words people write between the parts of a number instead of a mark. */
+const SPOKEN_SEPARATOR = /^(?:dash|hyphen|space|ext|extension)$/i;
+/** A digit read out as a word, which counts as one digit next to written ones, as in `five five five 0100`. */
+const SPOKEN_DIGIT = /^(?:zero|oh|one|two|three|four|five|six|seven|eight|nine)$/i;
+
+/**
+ * Whether a text holds a run of digits as long as a short phone number, however the parts are kept apart: any marks
+ * or spaces, a spoken `dash`, or letters that look like digits.
+ */
+function holdsPhoneDigits(text: string): boolean {
+  // Words are split at anything that is not a letter or a digit, so two words with only marks or spaces between
+  // them read as one number, and a word of other letters ends it.
+  let digits = 0;
+  let pendingLookalike = 0;
+  for (const [word] of text.matchAll(/[\p{L}\p{N}]+/gu)) {
+    if (SPOKEN_SEPARATOR.test(word)) {
+      continue;
+    }
+    if (SPOKEN_DIGIT.test(word)) {
+      digits += 1 + pendingLookalike;
+      pendingLookalike = 0;
+    } else if (!NUMBER_LIKE_WORD.test(word)) {
+      digits = 0;
+      pendingLookalike = 0;
+      continue;
+    } else if (/\d/.test(word)) {
+      digits += word.length + pendingLookalike;
+      pendingLookalike = 0;
+    } else if (digits > 0) {
+      digits += word.length;
+    } else {
+      // Letters alone, such as `OlOO`, count only once a real digit sits next to them.
+      pendingLookalike += word.length;
+    }
+    if (digits >= MIN_LOCAL_PHONE_DIGITS) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/** Letters from other scripts that look the same as Latin ones, as in a Cyrillic `.\u0441\u043em`. */
+const LATIN_LOOKALIKES: Record<string, string> = {
+  '\u0430': 'a',
+  '\u0435': 'e',
+  '\u043e': 'o',
+  '\u0440': 'p',
+  '\u0441': 'c',
+  '\u0443': 'y',
+  '\u0445': 'x',
+  '\u0456': 'i',
+  '\u0458': 'j',
+  '\u0455': 's',
+  '\u043c': 'm',
+  '\u03bf': 'o',
+  '\u03b1': 'a',
+};
+/** Dots that are not a full stop: middle dots, bullets, a one-dot leader, and the ideographic dot and its half-width form. */
+const OTHER_DOTS = /[\u00b7\u2022\u2024\u2027\u30fb\u3002\uff61]/g;
+/** Math minus signs and other dashes that are not in the dash class. */
+const OTHER_DASHES = /[\u2212\u2043\u2010\u2011\u2012\ufe63\uff0d]/g;
+/** The mark that turns a digit into a keycap picture, `5\ufe0f\u20e3`. */
+const KEYCAP = /\u20e3/g;
+
+/** A text as it reads to an eye for contact details: lookalike letters, dots and dashes folded to the plain ones. */
+function contactSpelling(text: string): string {
+  return foldSpelling(text)
+    .replace(KEYCAP, '')
+    .replace(OTHER_DOTS, '.')
+    .replace(OTHER_DASHES, '-')
+    .replace(/[\u0370-\u03ff\u0400-\u04ff]/g, char => LATIN_LOOKALIKES[char] ?? char);
+}
+
+/** A site with its dot written out or bracketed, such as `evil[.]com`, `evil dot com` or `evil d0t com`. */
+const SPELLED_DOT =
+  /[\p{L}\p{N}]\s*(?:\[\s*(?:\.|d[o0]t)\s*\]|\(\s*(?:\.|d[o0]t)\s*\)|\{\s*(?:\.|d[o0]t)\s*\}|\s+d[o0]t\s+)\s*[\p{L}\p{N}]/iu;
+/** A site with spaces around its dot, such as `evil-pay .com`, for the endings sites use most. */
+const SPACED_DOT =
+  /[\p{L}\p{N}-](?:\s+\.\s*|\s*\.\s+)(?:com|net|org|info|biz|io|ai|gg|dev|tv|cc|ly|co|app|xyz|top|site|online|link|shop|me|us|uk|ru|cn)\b/iu;
+/** An address with its at sign bracketed, such as `ceo [at] evil`. */
+const SPELLED_AT = /[\p{L}\p{N}]\s*(?:\[\s*at\s*\]|\(\s*at\s*\)|\{\s*at\s*\})\s*[\p{L}\p{N}]/iu;
+/** A number read out word by word, such as `five five five oh one oh oh` or `five-five-five, zero-one-hundred`. */
+const SPELLED_DIGITS =
+  /\b(?:(?:zero|oh|one|two|three|four|five|six|seven|eight|nine|hundred|thousand|double|triple|dash)\b[\s,-]*){6,}/i;
+/** A bare IPv4 address, dotted or as one hex number such as `0x7f000001`, which opens a site as well as a name does. */
+const IPV4 = /(?<![\d.])\d{1,3}(?:\.\d{1,3}){3}(?![\d.])|\b0x[\da-f]{8}\b/i;
+
+/**
+ * Whether any value carries a phone number, a site or an address in any spelling: short local numbers kept apart
+ * by any marks, digits of any script or as lookalike letters, bare sites and IP addresses, and spelled-out dots and at
+ * signs. Times, dates and amounts written the usual ways do not count. Far looser than the checks that tell whose
+ * detail something is, for text that should carry no contact detail at all.
  */
 export function namesContactDetail(values: readonly string[]): boolean {
   return values.some(value => {
-    const folded = foldSpelling(value).replace(ISO_DATE, ' ');
+    const spelled = contactSpelling(value);
+    const numbers = KNOWN_NUMBER_SHAPES.reduce((text, shape) => text.replace(shape, ' '), spelled);
     return (
-      folded.includes('@') ||
-      urlsInText(folded).length > 0 ||
-      [...folded.matchAll(BARE_HOST)].length > 0 ||
-      SPELLED_DOT.test(folded) ||
-      SPELLED_AT.test(folded) ||
-      SPELLED_DIGITS.test(folded) ||
-      [...folded.matchAll(PHONE_CANDIDATE)].some(match => match[0].replace(/\D/g, '').length >= MIN_LOCAL_PHONE_DIGITS)
+      spelled.includes('@') ||
+      urlsInText(spelled).length > 0 ||
+      [...spelled.matchAll(BARE_HOST)].length > 0 ||
+      IPV4.test(spelled) ||
+      SPELLED_DOT.test(spelled) ||
+      SPACED_DOT.test(spelled) ||
+      SPELLED_AT.test(spelled) ||
+      SPELLED_DIGITS.test(spelled) ||
+      holdsPhoneDigits(numbers)
     );
   });
 }

@@ -73,22 +73,38 @@ function cut({ text, room }: { text: string; room: number }): string {
   return `${(space > room / 2 ? head.slice(0, space) : head).trimEnd()}...`;
 }
 
+/** Why a Full text went out in Private words instead, or null when it carried the item's own words. */
+export type FullWithheld = 'noticed' | 'contact_detail' | null;
+
 /**
- * The text that goes out for a delivery, given the name already made fit for a text, and the words it was sent in.
- * A Full message that names a link, a site, a phone number or an address, in any spelling, goes out in Private words,
- * because the message can come from mail someone else wrote, and a text is where a link or a number to call does the
- * most harm.
+ * Kinds whose words a person or Aman itself wrote: a reminder the person asked for, and a test. What the assistant
+ * noticed is worded by the model, and those words stay in the app, so a text names only its kind.
+ */
+const OWN_WORDS_KINDS: ReadonlySet<DeliveryKind> = new Set(['reminder', 'note']);
+
+/**
+ * The text that goes out for a delivery, given the name already made fit for a text. Full carries the item's words
+ * only for a reminder or a test; anything noticed goes out in Private words. Words that name a link, a site, a phone
+ * number or an address, in any spelling, also go out in Private words, since a text is where a link or a number to
+ * call does the most harm.
  */
 export function textBody({ name, delivery, mode }: { name: string; delivery: Delivery; mode: TextMode }): {
   body: string;
-  sent_as: TextMode;
+  withheld: FullWithheld;
 } {
+  const privateBody = privateText({ name, kind: delivery.kind });
+  if (mode === 'private') {
+    return { body: privateBody, withheld: null };
+  }
+  if (!OWN_WORDS_KINDS.has(delivery.kind)) {
+    return { body: privateBody, withheld: 'noticed' };
+  }
   const plain = plainText(delivery.text);
-  if (mode === 'private' || namesContactDetail([delivery.text, plain])) {
-    return { body: privateText({ name, kind: delivery.kind }), sent_as: 'private' };
+  if (namesContactDetail([delivery.text, plain])) {
+    return { body: privateBody, withheld: 'contact_detail' };
   }
   const prefix = `${name}: `;
-  return { body: `${prefix}${cut({ text: plain, room: TEXT_MAX - prefix.length })}`, sent_as: 'full' };
+  return { body: `${prefix}${cut({ text: plain, room: TEXT_MAX - prefix.length })}`, withheld: null };
 }
 
 /** The code text. It carries no name the person chose, because it goes to a number nobody has proved yet. */

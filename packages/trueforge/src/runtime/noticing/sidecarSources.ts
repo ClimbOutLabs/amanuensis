@@ -1,3 +1,4 @@
+import { ErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js';
 import { extractErrorLogFields, RemoteMCP } from '@truefoundry/trueforge-core/core';
 import { CALDAV_SERVER_NAME } from '@truefoundry/trueforge-core/core/calendar/caldav/toolContract';
 import { deliveredMailboxOf } from '@truefoundry/trueforge-core/core/email/gmail/mailbox';
@@ -31,7 +32,28 @@ export type CallSidecarTool = (name: string, args: Record<string, unknown>) => P
 /** Longest one watcher pass may keep a sidecar session open. */
 const SIDECAR_SESSION_MS = 4 * 60_000;
 const TEXT_CHARACTERS = 3000;
+/** The most the sidecar lists in one call. */
 const PAGE_SIZE = 100;
+/** Longest one sidecar call may take. The client cancels a call that runs over, so none is left running. */
+const SIDECAR_CALL_MS = 30_000;
+
+/**
+ * Said when the Email connector took too long to list new mail. A shorter window would not help, since the connector
+ * searches whole days either way, so the pass stops and the next one tries the same mail again.
+ */
+export const MAIL_LIST_TOO_SLOW = `The Email connector took longer than ${String(SIDECAR_CALL_MS / 1000)} seconds to list new mail. New mail was not checked this time. If this keeps happening, check that the mail server answers quickly.`;
+
+/** Whether an error, or one it was caused by, is the MCP client giving up on a call that took too long. */
+function isCallTimeout(error: unknown): boolean {
+  const timedOut: number = ErrorCode.RequestTimeout;
+  for (let current: unknown = error; current instanceof Error; current = current.cause) {
+    if (current instanceof McpError && current.code === timedOut) {
+      return true;
+    }
+  }
+  return false;
+}
+
 const LATER_MESSAGES = 10;
 const EVENTS_PER_PASS = 100;
 
@@ -43,7 +65,7 @@ function sidecarTools({ name, url, logger }: { name: string; url: string; logger
     url,
     headers: {},
     logger,
-    requestTimeoutMs: 30_000,
+    requestTimeoutMs: SIDECAR_CALL_MS,
     connectTimeoutMs: 30_000,
     signal: AbortSignal.timeout(SIDECAR_SESSION_MS),
     refuseRedirects: true,
@@ -66,15 +88,25 @@ function text(value: unknown): string | undefined {
   return typeof value === 'string' && value !== '' ? value : undefined;
 }
 
-/** `listed_by` stands in for a Date the sender left out or garbled, since the server listed the mail before it. */
-function toMailMessage({ email, listed_by }: { email: unknown; listed_by: Date }): MailMessage | undefined {
+/**
+ * The sidecar gives the Date the sender wrote, not when the mail arrived. The server picked the mail by arrival, so
+ * it arrived inside `arrived`, and a written Date outside that span (late, early or garbled) is moved to its edge.
+ */
+function toMailMessage({
+  email,
+  arrived,
+}: {
+  email: unknown;
+  arrived: { from: Date; to: Date };
+}): MailMessage | undefined {
   if (!isRecord(email)) {
     return undefined;
   }
   const id = text(email['email_id']);
   const sender = text(email['sender']);
-  const written = new Date(text(email['date']) ?? '');
-  const date = Number.isNaN(written.getTime()) ? listed_by : written;
+  const written = new Date(text(email['date']) ?? '').getTime();
+  const latest = arrived.to.getTime() - 1;
+  const date = new Date(Number.isNaN(written) ? latest : Math.min(Math.max(written, arrived.from.getTime()), latest));
   if (id === undefined || sender === undefined) {
     return undefined;
   }
@@ -116,33 +148,39 @@ export function sidecarMailSource({ call, account }: { call: CallSidecarTool; ac
   };
   return {
     trustedAuthenticationServers: [],
-    async listNewMessages({ since, before, limit }) {
+    async listNewMessages({ since, before, limit, from }) {
       // The sidecar picks and orders mail by the server's arrival time, which is what the window means. The Date a
-      // sender wrote can be late or early, so it is never used to pick or order.
+      // sender wrote can be late or early, so it is never used to pick or order. A window is read in one call, so
+      // mail deleted while it is read can never shift a page and hide a message.
+      const size = Math.min(limit + 1, PAGE_SIZE);
       const listed: unknown[] = [];
-      for (let page = 1; ; page += 1) {
+      for (const address of from ?? [undefined]) {
         const result = await call(MAIL_LIST_TOOL_NAME, {
           account_name: account,
           mailbox: 'INBOX',
           since: since.toISOString(),
           before: before.toISOString(),
-          page,
-          page_size: PAGE_SIZE,
+          ...(address === undefined ? {} : { from_address: address }),
+          page: 1,
+          page_size: size,
           order: 'asc',
+        }).catch((error: unknown) => {
+          throw isCallTimeout(error) ? new Error(MAIL_LIST_TOO_SLOW, { cause: error }) : error;
         });
         const emails = emailsOfResult(result);
+        // A full list may have more behind it, so the window is too big to read in one call.
+        if (emails.length >= size) {
+          return { read: 'too_many' };
+        }
         listed.push(...emails);
         if (listed.length > limit) {
           return { read: 'too_many' };
-        }
-        if (emails.length < PAGE_SIZE) {
-          break;
         }
       }
       return {
         read: 'all',
         messages: listed
-          .map(email => toMailMessage({ email, listed_by: before }))
+          .map(email => toMailMessage({ email, arrived: { from: since, to: before } }))
           .filter((message): message is MailMessage => message !== undefined),
       };
     },
@@ -163,7 +201,7 @@ export function sidecarMailSource({ call, account }: { call: CallSidecarTool; ac
         order: 'asc',
       });
       const ids = emailsOfResult(result)
-        .map(email => toMailMessage({ email, listed_by: ref.received_at }))
+        .map(email => toMailMessage({ email, arrived: { from: ref.received_at, to: new Date() } }))
         .filter((message): message is MailMessage => message !== undefined && message.id !== ref.id)
         .map(message => message.id);
       return ids.length === 0 ? [] : bodiesOf(ids);

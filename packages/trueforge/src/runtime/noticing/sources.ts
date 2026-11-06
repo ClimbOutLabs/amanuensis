@@ -30,12 +30,35 @@ export type MailRef = Pick<MailMessage, 'id' | 'thread_id' | 'received_at'>;
 export type MailWindowRead =
   { read: 'all'; messages: MailMessage[] } | { read: 'too_many' } | { read: 'oldest'; messages: MailMessage[] };
 
+/**
+ * One message the source can never read however often it tries: it was deleted, or it comes back in a shape the
+ * source cannot parse. Anything else, such as a busy server or a dropped connection, is thrown as it is, so the pass
+ * stops and the next one reads the same mail again.
+ */
+export class MessageUnreadableError extends Error {
+  readonly message_id: string;
+
+  constructor({ message_id, cause }: { message_id: string; cause: unknown }) {
+    super('This message could not be read.', { cause });
+    this.name = 'MessageUnreadableError';
+    this.message_id = message_id;
+  }
+}
+
 export interface MailSource {
-  /** Mail that reached the inbox at or after `since` and before `before`. Mail the person sent is left out. */
-  listNewMessages(input: { since: Date; before: Date; limit: number }): Promise<MailWindowRead>;
-  /** The start of one message's text, for a watcher that needs more than the snippet. */
+  /**
+   * Mail that reached the inbox at or after `since` and before `before`, from the `from` addresses only when given.
+   * Mail the person sent is left out.
+   */
+  listNewMessages(input: {
+    since: Date;
+    before: Date;
+    limit: number;
+    from?: readonly string[];
+  }): Promise<MailWindowRead>;
+  /** The start of one message's text, for a watcher that needs more than the snippet. Throws MessageUnreadableError for a message it can never read. */
   readText(message: MailMessage): Promise<string>;
-  /** The text of messages that came after this one in its thread, oldest first. */
+  /** The text of messages that came after this one in its thread, oldest first. Throws MessageUnreadableError like readText. */
   laterInThread(message: MailRef): Promise<string[]>;
   /** The receiving servers whose Authentication-Results can be believed. Empty when this source passes on none. */
   trustedAuthenticationServers: readonly string[];

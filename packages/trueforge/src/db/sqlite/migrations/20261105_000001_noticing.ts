@@ -29,7 +29,7 @@ export async function up(db: Kysely<unknown>): Promise<void> {
         event_json TEXT NOT NULL,
         due_at TEXT,
         verdict_json TEXT,
-        delivery_id TEXT,
+        delivery_id TEXT NOT NULL,
         created_at TEXT NOT NULL,
         claim_id TEXT,
         claimed_at TEXT,

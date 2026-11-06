@@ -1,11 +1,9 @@
-import { createHash } from 'node:crypto';
-
 import { APPROVAL_EXPIRY_MINUTES } from '@truefoundry/trueforge-core/core/permissions/approvalExpiry';
 import { namesContactDetail } from '@truefoundry/trueforge-core/core/permissions/provenance';
 import type { Logger } from 'winston';
 
 import type { IDeliveryStore } from '../../db/deliveryStore';
-import type { INoticingStore, NoticingClaim } from '../../db/noticingStore';
+import type { INoticingStore, NoticingClaim, WaitingEvent } from '../../db/noticingStore';
 import type { PersonOwner } from '../../db/personOwner';
 import type { IReachSettingsStore } from '../../db/reachSettingsStore';
 import type { Delivery, DeliveryLevel } from '../../schemas/deliveries';
@@ -26,13 +24,23 @@ import type { NoticingJudge } from './judge';
 import { ceilingOf } from './levels';
 import { readReachHistory, waitFor, withReachLease, type ReachGateDeps } from './reachGate';
 import { applyReachRules, joinReasons } from './reachRules';
-import type { ApprovalSource, CalendarSource, MailSource, NoticingSourceProvider, WaitingApproval } from './sources';
+import {
+  MessageUnreadableError,
+  type ApprovalSource,
+  type CalendarSource,
+  type MailSource,
+  type NoticingSourceProvider,
+  type WaitingApproval,
+} from './sources';
 import { BILL_WINDOW_MS, billIsPaid, watchApprovals, watchCalendar, watchMail } from './watchers';
 
 /** How far back the first pass of a mail watcher looks, so a newly connected inbox is not flooded with old mail. */
 const FIRST_LOOKBACK_MS = 10 * 60_000;
-/** Each pass looks a little before the last check, so mail that arrived while it ran is not missed. Stable ids absorb the repeat. */
-const CHECK_OVERLAP_MS = 2 * 60_000;
+/**
+ * Each pass looks back a while before the last check, so mail the server lists late (an index that lags, or a clock
+ * that runs ahead) is not missed. Stable ids absorb the repeat.
+ */
+const CHECK_OVERLAP_MS = 10 * 60_000;
 /** After a long outage, mail older than this is not news any more, so a pass never reads back further. */
 const MAX_LOOKBACK_MS = 24 * 3_600_000;
 const TRACKING_LIMIT = 50;
@@ -58,8 +66,8 @@ export interface NoticingDeps {
   reachSettings: IReachSettingsStore;
   store: INoticingStore;
   deliveries: Pick<DeliveryService, 'deliverOnce'>;
-  /** The feed, read for how many nudges and calls already went out. */
-  history: Pick<IDeliveryStore, 'countSince' | 'lastCreatedAt'>;
+  /** The feed, read for how many nudges and calls already went out, and whether a delivery was made. */
+  history: Pick<IDeliveryStore, 'countSince' | 'lastCreatedAt' | 'get'>;
   /** The model call for "does this matter", made once per event. It throws when no model can answer. */
   judgeFor: (owner: PersonOwner) => Promise<NoticingJudge>;
   budget: Pick<TokenFactoryBudget, 'isExhausted'>;
@@ -112,14 +120,6 @@ function deliveryKindOf({ event, level }: { event: NoticingEvent; level: Deliver
   return level === 'note' ? 'note' : 'nudge';
 }
 
-/** The same event always makes the same delivery, so a retry after a delivery went out makes nothing new. */
-function deliveryIdOf({ owner, event }: { owner: PersonOwner; event: NoticingEvent }): string {
-  return createHash('sha256')
-    .update(['noticing', owner.tenant_id, owner.created_by, event.id].join('\u0000'))
-    .digest('hex')
-    .slice(0, 32);
-}
-
 function ownerKey(owner: PersonOwner): string {
   return `${owner.tenant_id}\u0000${owner.created_by}`;
 }
@@ -164,18 +164,18 @@ export function createNoticingService(deps: NoticingDeps): NoticingService {
   /**
    * Decides and delivers one event this pass has claimed. The model is asked once per event; the person's limits are
    * read and applied while holding their reach lease, right before delivering, so two passes cannot both spend the
-   * last nudge. The delivery's id comes from the event, so a retry after a delivery went out makes nothing new.
+   * last nudge. The delivery's id was drawn when the event was written, so a retry after it went out makes nothing new.
    * Resolves to `busy` when another pass kept the lease, and to `lost` when another pass took the event over.
    */
   async function raise({
     owner,
-    event,
+    waiting: { event, delivery_id },
     settings,
     claim_id,
     claim,
   }: {
     owner: PersonOwner;
-    event: NoticingEvent;
+    waiting: WaitingEvent;
     settings: ReachSettings;
     claim_id: string;
     claim: NoticingClaim;
@@ -185,6 +185,7 @@ export function createNoticingService(deps: NoticingDeps): NoticingService {
     if (claim.verdict === null && verdict !== undefined) {
       await store.saveVerdict({ ...owner, event_id: event.id, claim_id, verdict });
     }
+    // The fixed sentence is shown as it is: it comes from a confirmed sender, the person's own event, or a note.
     const shown =
       verdict === undefined ? { text: event.summary, reason: why, replaced: false } : shownWords({ event, verdict });
     const outcome = await withReachLease({
@@ -213,7 +214,7 @@ export function createNoticingService(deps: NoticingDeps): NoticingService {
         ]);
         const delivery = await deps.deliveries.deliverOnce({
           ...owner,
-          id: deliveryIdOf({ owner, event }),
+          id: delivery_id,
           kind: deliveryKindOf({ event, level: decision.delivered }),
           level: decision.delivered,
           text: shown.text,
@@ -237,6 +238,59 @@ export function createNoticingService(deps: NoticingDeps): NoticingService {
     return outcome.held ? outcome.value : 'busy';
   }
 
+  /**
+   * Stops a waiting event that will never be raised. One a pass left part way through delivering is closed as raised
+   * when its delivery was made, since that may have reached the person.
+   */
+  async function stop({
+    owner,
+    waiting,
+    stale_before,
+  }: {
+    owner: PersonOwner;
+    waiting: WaitingEvent;
+    stale_before: Date;
+  }): Promise<void> {
+    if (waiting.status === 'pending') {
+      await store.drop({ ...owner, event_id: waiting.event.id });
+      return;
+    }
+    const made = await deps.history.get({ ...owner, id: waiting.delivery_id });
+    await store.settle({
+      ...owner,
+      event_id: waiting.event.id,
+      stale_before,
+      status: made === undefined ? 'dropped' : 'raised',
+    });
+  }
+
+  /**
+   * Closes a waiting event with nothing left to send: it no longer matters, or a pass that stopped part way already
+   * sent its delivery. Resolves to false when it should be delivered.
+   */
+  async function settled({
+    owner,
+    waiting,
+    stale_before,
+  }: {
+    owner: PersonOwner;
+    waiting: WaitingEvent;
+    stale_before: Date;
+  }): Promise<boolean> {
+    if (!stillTimely({ event: waiting.event, now: now() })) {
+      await stop({ owner, waiting, stale_before });
+      return true;
+    }
+    if (waiting.status === 'delivering') {
+      const made = await deps.history.get({ ...owner, id: waiting.delivery_id });
+      if (made !== undefined && made.attempts.length > 0) {
+        await store.settle({ ...owner, event_id: waiting.event.id, stale_before, status: 'raised' });
+        return true;
+      }
+    }
+    return false;
+  }
+
   /** Raises every pending event of this watcher's kinds that no other pass is working on. */
   async function raisePending({
     owner,
@@ -255,9 +309,9 @@ export function createNoticingService(deps: NoticingDeps): NoticingService {
       limit: PENDING_LIMIT,
     });
     let raised = 0;
-    for (const event of pending) {
-      if (!stillTimely({ event, now: now() })) {
-        await store.drop({ ...owner, event_id: event.id });
+    for (const waiting of pending) {
+      const { event } = waiting;
+      if (await settled({ owner, waiting, stale_before })) {
         continue;
       }
       const claim_id = newId();
@@ -266,7 +320,7 @@ export function createNoticingService(deps: NoticingDeps): NoticingService {
         continue;
       }
       try {
-        const outcome = await raise({ owner, event, settings, claim_id, claim });
+        const outcome = await raise({ owner, waiting, settings, claim_id, claim });
         if (outcome === 'raised') {
           raised += 1;
         } else if (outcome === 'busy') {
@@ -302,17 +356,23 @@ export function createNoticingService(deps: NoticingDeps): NoticingService {
     const since = new Date(
       Math.max(checked?.getTime() ?? at.getTime() - FIRST_LOOKBACK_MS, at.getTime() - MAX_LOOKBACK_MS),
     );
-    const findings = await watchMail({ source: mail, settings, since, now: at, logger });
-    await store.recordAll({ ...owner, events: findings.raise, status: 'pending', now: at });
-    await store.recordAll({ ...owner, events: findings.track, status: 'tracking', now: at });
-    // Everything found is written down before the checkpoint moves, so a failed delivery is retried from the store.
-    // A pass that read all mail up to now starts the next one a little earlier, for mail the server lists late.
-    await store.setCheckpoint({
-      ...owner,
-      watcher: 'mail',
-      checked_at: findings.resume_from ?? new Date(at.getTime() - CHECK_OVERLAP_MS),
-    });
-    await promoteDueBills({ owner, mail, now: at });
+    try {
+      const findings = await watchMail({ source: mail, settings, since, now: at, logger });
+      await store.recordAll({ ...owner, events: findings.raise, status: 'pending', now: at });
+      await store.recordAll({ ...owner, events: findings.track, status: 'tracking', now: at });
+      // Everything found is written down before the checkpoint moves, so a failed delivery is retried from the store.
+      // A pass that read all mail up to now starts the next one a little earlier, for mail the server lists late.
+      await store.setCheckpoint({
+        ...owner,
+        watcher: 'mail',
+        checked_at: findings.resume_from ?? new Date(at.getTime() - CHECK_OVERLAP_MS),
+      });
+    } finally {
+      // Bills seen earlier still come due when new mail could not be read this time.
+      await promoteDueBills({ owner, mail, now: at }).catch((error: unknown) => {
+        logger.warn('Could not look at tracked bills', { error: errorText(error) });
+      });
+    }
   }
 
   /** Bills seen earlier that now fall due within three days become pending, unless something since says they were paid. */
@@ -324,8 +384,12 @@ export function createNoticingService(deps: NoticingDeps): NoticingService {
     });
     for (const event of due) {
       const deadline = event.due_at === null ? undefined : new Date(event.due_at);
-      // One bill whose mail can no longer be read (deleted, say) waits for the next pass without holding up the rest.
+      // A thread that can never be read cannot say the bill was paid, so the bill is raised. Any other failure
+      // leaves the bill for the next pass without holding up the rest.
       const paid = await billIsPaid({ source: mail, event }).catch((error: unknown) => {
+        if (error instanceof MessageUnreadableError) {
+          return false;
+        }
         logger.warn('Could not check whether a tracked bill was paid', { event_id: event.id, error: errorText(error) });
         return undefined;
       });
@@ -366,14 +430,15 @@ export function createNoticingService(deps: NoticingDeps): NoticingService {
     const events = watchApprovals({ waiting, settings, now: now() });
     await store.recordAll({ ...owner, events, status: 'pending', now: now() });
     const open = new Set(waiting.map(item => `approval_waiting:${item.session_id}:${item.approval_id}`));
+    const stale_before = new Date(now().getTime() - CLAIM_STALE_MS);
     const recorded = await store.listPending({
       ...owner,
       kinds: WATCHER_KINDS.approvals,
-      stale_before: new Date(now().getTime() - CLAIM_STALE_MS),
+      stale_before,
       limit: PENDING_LIMIT,
     });
-    for (const event of recorded.filter(item => !open.has(item.id))) {
-      await store.drop({ ...owner, event_id: event.id });
+    for (const item of recorded.filter(entry => !open.has(entry.event.id))) {
+      await stop({ owner, waiting: item, stale_before });
     }
   }
 

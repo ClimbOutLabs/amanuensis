@@ -88,8 +88,8 @@ export interface IDeliveryStore {
   /** Makes one delivery, unread. Throws when the fields do not make a valid delivery of that kind. */
   create(input: CreateDeliveryInput): Promise<Delivery>;
   /**
-   * Makes the delivery with this id unless it was made already. Resolves to the delivery and whether this call made
-   * it, so whatever goes out with a delivery goes out once.
+   * Makes the delivery with this id unless the owner made it already. Resolves to the delivery and whether this call
+   * made it, so whatever goes out with a delivery goes out once. Throws when the id is someone else's.
    */
   createOnce(input: CreateDeliveryInput & { id: string }): Promise<{ delivery: Delivery; created: boolean }>;
   /** Adds one channel attempt. A delivery that is not the owner's is left alone and reads as missing. */
@@ -159,7 +159,6 @@ function toDelivery({ row, attempts }: { row: DeliveryTable; attempts: DeliveryA
   });
 }
 
-/** The feed of things meant for a person. Owner-scoped: no read or write reaches another owner's rows. */
 function rowOf(input: CreateDeliveryInput & { id: string }): DeliveryTable {
   return {
     id: input.id,
@@ -175,6 +174,7 @@ function rowOf(input: CreateDeliveryInput & { id: string }): DeliveryTable {
   };
 }
 
+/** The feed of things meant for a person. Owner-scoped: no read or write reaches another owner's rows. */
 export class DeliveryStore implements IDeliveryStore {
   readonly #db: Kysely<DeliveryDatabase>;
 

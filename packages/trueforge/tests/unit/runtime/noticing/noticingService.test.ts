@@ -1,3 +1,4 @@
+import { GoogleApiError } from '@truefoundry/trueforge-core/core/google/errors';
 import winston from 'winston';
 
 import { DeliveryStore } from '../../../../src/db/deliveryStore';
@@ -8,15 +9,16 @@ import { createSqliteDb } from '../../../../src/db/sqlite/client';
 import { createDeliveryService } from '../../../../src/runtime/delivery/deliveryService';
 import type { NoticingJudge } from '../../../../src/runtime/noticing/judge';
 import { createNoticingService } from '../../../../src/runtime/noticing/noticingService';
-import type {
-  ApprovalSource,
-  CalendarEventInfo,
-  CalendarSource,
-  MailMessage,
-  MailSource,
-  MailWindowRead,
-  NoticingSources,
-  WaitingApproval,
+import {
+  MessageUnreadableError,
+  type ApprovalSource,
+  type CalendarEventInfo,
+  type CalendarSource,
+  type MailMessage,
+  type MailSource,
+  type MailWindowRead,
+  type NoticingSources,
+  type WaitingApproval,
 } from '../../../../src/runtime/noticing/sources';
 import { TokenFactoryDailyCapError } from '../../../../src/runtime/tokenFactoryBudget';
 import type { Delivery } from '../../../../src/schemas/deliveries';
@@ -86,6 +88,7 @@ async function setup({
   mailPage = 100,
   mailReadsInTime,
   saved = true,
+  unreadable = {},
 }: {
   settings?: Partial<ReachSettings>;
   messages?: MailMessage[];
@@ -104,6 +107,8 @@ async function setup({
   mailReadsInTime?: number;
   /** False for a person who never saved Reach me. */
   saved?: boolean;
+  /** Messages whose text the source fails to read every time. */
+  unreadable?: Record<string, true>;
 } = {}) {
   const clock = { now: NOW };
   const channelState = { current: channels };
@@ -146,21 +151,28 @@ async function setup({
     logger: winston.createLogger({ silent: true }),
   });
   const mailSource: MailSource = {
-    listNewMessages: jest.fn(({ since, before, limit }: { since: Date; before: Date; limit: number }) => {
-      const found = messages
-        .filter(
-          message =>
-            message.received_at.getTime() >= since.getTime() && message.received_at.getTime() < before.getTime(),
-        )
-        .sort((a, b) => a.received_at.getTime() - b.received_at.getTime());
-      if (mailReadsInTime !== undefined && found.length > mailReadsInTime) {
-        return Promise.resolve<MailWindowRead>({ read: 'oldest', messages: found.slice(0, mailReadsInTime) });
-      }
-      return Promise.resolve<MailWindowRead>(
-        found.length > Math.min(limit, mailPage) ? { read: 'too_many' } : { read: 'all', messages: found },
-      );
-    }),
-    readText: message => Promise.resolve(texts[message.id] ?? message.snippet),
+    listNewMessages: jest.fn(
+      ({ since, before, limit, from }: { since: Date; before: Date; limit: number; from?: readonly string[] }) => {
+        const found = messages
+          .filter(
+            message =>
+              message.received_at.getTime() >= since.getTime() &&
+              message.received_at.getTime() < before.getTime() &&
+              (from === undefined || from.includes(message.from_address)),
+          )
+          .sort((a, b) => a.received_at.getTime() - b.received_at.getTime());
+        if (mailReadsInTime !== undefined && found.length > mailReadsInTime) {
+          return Promise.resolve<MailWindowRead>({ read: 'oldest', messages: found.slice(0, mailReadsInTime) });
+        }
+        return Promise.resolve<MailWindowRead>(
+          found.length > Math.min(limit, mailPage) ? { read: 'too_many' } : { read: 'all', messages: found },
+        );
+      },
+    ),
+    readText: message =>
+      message.id in unreadable
+        ? Promise.reject(new MessageUnreadableError({ message_id: message.id, cause: new Error('no such message') }))
+        : Promise.resolve(texts[message.id] ?? message.snippet),
     laterInThread: jest.fn(() => Promise.resolve(later)),
     trustedAuthenticationServers: ['mx.example.net'],
   };
@@ -264,7 +276,7 @@ describe('mail from an always-important sender', () => {
     await service.run({ watcher: 'mail' });
     expect(await feed()).toHaveLength(3);
     await expect(store.getCheckpoint({ ...OWNER, watcher: 'mail' })).resolves.toEqual(
-      new Date('2026-11-05T15:08:00.000Z'),
+      new Date('2026-11-05T15:00:00.000Z'),
     );
   });
 
@@ -796,15 +808,20 @@ describe('passes that fail, stop or overlap', () => {
       settings: { always_important: [ALWAYS] },
       messages: [message],
     });
-    const spy = jest.spyOn(deliveryStore, 'createOnce').mockRejectedValueOnce(new Error('disk full'));
+    const spy = jest
+      .spyOn(deliveryStore, 'createOnce')
+      .mockRejectedValueOnce(new Error('disk full'))
+      .mockRejectedValueOnce(new Error('disk full'));
+    await expect(service.run({ watcher: 'mail' })).resolves.toMatchObject({ raised: 0 });
+    clock.now = new Date('2026-11-05T15:10:00.000Z');
     await expect(service.run({ watcher: 'mail' })).resolves.toMatchObject({ raised: 0 });
     spy.mockRestore();
 
-    // The next pass reads from 14:58, so the mail itself is no longer listed.
-    clock.now = new Date('2026-11-05T15:10:00.000Z');
+    // The next pass reads from 15:00, so the mail itself is no longer listed.
+    clock.now = new Date('2026-11-05T15:20:00.000Z');
     await expect(service.run({ watcher: 'mail' })).resolves.toMatchObject({ raised: 1 });
     expect(mailSource.listNewMessages).toHaveBeenLastCalledWith(
-      expect.objectContaining({ since: new Date('2026-11-05T14:58:00.000Z') }),
+      expect.objectContaining({ since: new Date('2026-11-05T15:00:00.000Z') }),
     );
     expect(await feed()).toHaveLength(1);
   });
@@ -893,9 +910,17 @@ describe('passes that fail, stop or overlap', () => {
     expect((await feed()).map(item => item.level)).toEqual(['nudge']);
   });
 
-  it('keeps raising tracked bills when one bill’s mail can no longer be read', async () => {
-    const { service, store, mailSource, feed } = await setup({});
-    const bill = (id: string, due: string): NoticingEvent => ({
+  /** Two tracked bills, due within three days, whose threads `laterInThread` answers. */
+  async function trackedBills({
+    store,
+    mailSource,
+    gone,
+  }: {
+    store: NoticingStore;
+    mailSource: MailSource;
+    gone: Error;
+  }): Promise<void> {
+    const bill = ({ id, due }: { id: string; due: string }): NoticingEvent => ({
       ...trackedBill,
       id: `bill_due:${id}`,
       mail_ref: { message_id: id, thread_id: `t-${id}` },
@@ -905,19 +930,58 @@ describe('passes that fail, stop or overlap', () => {
       ...OWNER,
       status: 'tracking',
       now: NOW,
-      events: [bill('gone', '2026-11-06T12:00:00.000Z'), bill('kept', '2026-11-07T12:00:00.000Z')],
+      events: [
+        bill({ id: 'gone', due: '2026-11-06T12:00:00.000Z' }),
+        bill({ id: 'kept', due: '2026-11-07T12:00:00.000Z' }),
+      ],
     });
     jest
       .mocked(mailSource.laterInThread)
-      .mockImplementation(ref =>
-        ref.id === 'gone'
-          ? Promise.reject(new Error('Gmail has no such message, thread or draft.'))
-          : Promise.resolve([]),
-      );
+      .mockImplementation(ref => (ref.id === 'gone' ? Promise.reject(gone) : Promise.resolve([])));
+  }
+
+  it('keeps a tracked bill for later when its thread fails to read, and raises the rest', async () => {
+    const { service, store, mailSource, feed } = await setup({});
+    await trackedBills({ store, mailSource, gone: new GoogleApiError({ status: 429, message: 'Too many requests.' }) });
     await expect(service.run({ watcher: 'mail' })).resolves.toMatchObject({ raised: 1 });
-    expect((await feed()).map(item => item.text)).toHaveLength(1);
+    expect(await feed()).toHaveLength(1);
     const left = await store.listTracking({ ...OWNER, due_before: new Date('2027-01-01'), limit: 10 });
     expect(left.map(item => item.id)).toEqual(['bill_due:gone']);
+  });
+
+  it('raises a tracked bill whose thread can never be read, since nothing can say it was paid', async () => {
+    const { service, store, mailSource, feed } = await setup({});
+    const gone = new MessageUnreadableError({ message_id: 'gone', cause: new Error('no such message') });
+    await trackedBills({ store, mailSource, gone });
+    await expect(service.run({ watcher: 'mail' })).resolves.toMatchObject({ raised: 2 });
+    expect(await feed()).toHaveLength(2);
+  });
+
+  it('stops the pass on a rate limit, keeps the checkpoint and reads the mail on the next pass', async () => {
+    const message = mail({ received_at: new Date('2026-11-05T14:52:00.000Z') });
+    const { service, clock, store, feed, mailSource } = await setup({
+      settings: { always_important: [ALWAYS] },
+      messages: [message],
+    });
+    jest
+      .spyOn(mailSource, 'readText')
+      .mockRejectedValueOnce(new GoogleApiError({ status: 429, message: 'Too many requests.' }));
+    await expect(service.run({ watcher: 'mail' })).resolves.toMatchObject({ raised: 0 });
+    await expect(store.getCheckpoint({ ...OWNER, watcher: 'mail' })).resolves.toBeUndefined();
+
+    // A first pass looks back ten minutes, so the mail from 14:52 is still in reach.
+    clock.now = new Date('2026-11-05T15:01:00.000Z');
+    await expect(service.run({ watcher: 'mail' })).resolves.toMatchObject({ raised: 1 });
+    expect(await feed()).toHaveLength(1);
+  });
+
+  it('still raises tracked bills when new mail could not be listed', async () => {
+    const { service, store, mailSource, feed } = await setup({});
+    await trackedBills({ store, mailSource, gone: new Error('unused') });
+    jest.mocked(mailSource.laterInThread).mockResolvedValue([]);
+    jest.mocked(mailSource.listNewMessages).mockRejectedValue(new Error('The Email connector took too long.'));
+    await expect(service.run({ watcher: 'mail' })).resolves.toMatchObject({ raised: 2 });
+    expect(await feed()).toHaveLength(2);
   });
 
   it('drops waiting approvals past their expiry for people no pass looks at any more', async () => {
@@ -1065,5 +1129,122 @@ describe('passes that fail, stop or overlap', () => {
     );
     await service.run({ watcher: 'calendar' });
     expect((await feed()).map(item => item.level)).toEqual(['call', 'nudge']);
+  });
+});
+
+describe('mail that cannot be read, and mail that is two things', () => {
+  it('passes over one mail it cannot read and goes on with the rest', async () => {
+    const { service, feed, store } = await setup({
+      settings: { always_important: [ALWAYS] },
+      messages: [
+        mail({ id: 'broken', received_at: new Date('2026-11-05T14:52:00.000Z') }),
+        mail({ id: 'fine', received_at: new Date('2026-11-05T14:54:00.000Z') }),
+      ],
+      unreadable: { broken: true },
+    });
+    await expect(service.run({ watcher: 'mail' })).resolves.toEqual({ owners: 1, raised: 1 });
+    expect(await feed()).toHaveLength(1);
+    await expect(store.getCheckpoint({ ...OWNER, watcher: 'mail' })).resolves.toEqual(
+      new Date('2026-11-05T14:50:00.000Z'),
+    );
+  });
+
+  it('raises a bill from an always-important sender once, not also as a bill', async () => {
+    const { service, feed, judge } = await setup({
+      settings: { always_important: [ALWAYS] },
+      messages: [mail({ subject: 'Your invoice', snippet: 'Amount due by November 7' })],
+    });
+    await expect(service.run({ watcher: 'mail' })).resolves.toMatchObject({ raised: 1 });
+    expect(await feed()).toHaveLength(1);
+    expect(judge).toHaveBeenCalledTimes(1);
+    expect(judge.mock.calls[0]?.[0].event.kind).toBe('mail_always');
+  });
+});
+
+describe('a pass that stopped part way through delivering', () => {
+  const clashEvent: NoticingEvent = {
+    id: 'calendar_clash:x',
+    kind: 'calendar_clash',
+    evidence: 'own',
+    summary: 'Two things overlap.',
+    facts: 'Overlap.',
+    matched: 'Two events on your calendar overlap in the next 24 hours.',
+    link: null,
+    mail_ref: null,
+    occurred_at: '2026-11-05T16:30:00.000Z',
+    due_at: null,
+  };
+
+  /** Records the event, claims it and starts delivering, as a pass does before it stops. */
+  async function stoppedPass(store: NoticingStore): Promise<string> {
+    await store.recordAll({ ...OWNER, events: [clashEvent], status: 'pending', now: NOW });
+    const [waiting] = await store.listPending({ ...OWNER, kinds: ['calendar_clash'], stale_before: NOW, limit: 1 });
+    await store.claim({ ...OWNER, event_id: clashEvent.id, claim_id: 'stopped', now: NOW, stale_before: NOW });
+    await store.startDelivering({ ...OWNER, event_id: clashEvent.id, claim_id: 'stopped', now: NOW });
+    return waiting?.delivery_id ?? '';
+  }
+
+  it('sends a delivery again when it was made but none of its sends were written down', async () => {
+    const { service, store, clock, feed, pushed, deliveryStore } = await setup({
+      verdict: { level: 'nudge', reason: 'Today matters.', message: 'This matters today.' },
+    });
+    const id = await stoppedPass(store);
+    await deliveryStore.createOnce({
+      ...OWNER,
+      id,
+      kind: 'nudge',
+      level: 'nudge',
+      text: 'Two things overlap.',
+      reason: 'Two events overlap.',
+      link: null,
+      created_at: NOW,
+    });
+
+    clock.now = new Date('2026-11-05T15:11:00.000Z');
+    await expect(service.run({ watcher: 'calendar' })).resolves.toMatchObject({ raised: 1 });
+    const items = await feed();
+    expect(items).toHaveLength(1);
+    expect(items[0]?.attempts.length).toBeGreaterThan(0);
+    expect(pushed).toHaveLength(1);
+  });
+
+  it('marks it raised, not dropped, when its delivery went out and it is no longer worth saying', async () => {
+    const { service, store, clock, pushed, deliveryStore, judge } = await setup({});
+    const id = await stoppedPass(store);
+    await deliveryStore.createOnce({
+      ...OWNER,
+      id,
+      kind: 'note',
+      level: 'note',
+      text: 'Two things overlap.',
+      reason: 'Two events overlap.',
+      link: null,
+      created_at: NOW,
+    });
+    await deliveryStore.recordAttempt({
+      ...OWNER,
+      delivery_id: id,
+      attempt: { channel: 'in_app', outcome: 'sent', detail: null, target: null, attempted_at: NOW.toISOString() },
+    });
+    const settle = jest.spyOn(store, 'settle');
+
+    // The clash already started by the time a pass looks again.
+    clock.now = new Date('2026-11-05T17:00:00.000Z');
+    await service.run({ watcher: 'calendar' });
+    expect(settle).toHaveBeenCalledWith(expect.objectContaining({ event_id: clashEvent.id, status: 'raised' }));
+    expect(pushed).toHaveLength(0);
+    expect(judge).not.toHaveBeenCalled();
+    await expect(
+      store.listPending({ ...OWNER, kinds: ['calendar_clash'], stale_before: new Date('2030-01-01'), limit: 10 }),
+    ).resolves.toEqual([]);
+  });
+
+  it('drops it when nothing was delivered and it is no longer worth saying', async () => {
+    const { service, store, clock } = await setup({});
+    await stoppedPass(store);
+    const settle = jest.spyOn(store, 'settle');
+    clock.now = new Date('2026-11-05T17:00:00.000Z');
+    await service.run({ watcher: 'calendar' });
+    expect(settle).toHaveBeenCalledWith(expect.objectContaining({ event_id: clashEvent.id, status: 'dropped' }));
   });
 });

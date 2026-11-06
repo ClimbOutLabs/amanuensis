@@ -1,7 +1,7 @@
 import { privateText, textBody } from '../../../../src/runtime/texts/textWords';
 import type { Delivery, DeliveryKind } from '../../../../src/schemas/deliveries';
 
-function delivery(text: string, kind: DeliveryKind = 'nudge'): Delivery {
+function delivery(text: string, kind: DeliveryKind = 'reminder'): Delivery {
   const shared = {
     id: 'd1',
     level: 'nudge' as const,
@@ -21,12 +21,12 @@ const ONE_PLACE = /^[A-Za-z0-9 !"#$%&'()*+,\-./:;<=>?@_]*$/;
 
 describe('the words of a text', () => {
   it('cuts a long Full message at a word, within two text segments, name included', () => {
-    const { body, sent_as } = textBody({
+    const { body, withheld } = textBody({
       name: 'Mannie',
       delivery: delivery(`${'word '.repeat(200)}end`),
       mode: 'full',
     });
-    expect(sent_as).toBe('full');
+    expect(withheld).toBeNull();
     expect(body.length).toBeLessThanOrEqual(306);
     expect(body.endsWith('word...')).toBe(true);
     expect(body).toMatch(ONE_PLACE);
@@ -54,10 +54,22 @@ describe('the words of a text', () => {
       'Your bank needs you. Call (555) 010-0199 right away.',
     ]) {
       expect(textBody({ name: 'Mannie', delivery: delivery(text), mode: 'full' })).toEqual({
-        body: 'Mannie: something needs you. Open the app to see it.',
-        sent_as: 'private',
+        body: 'Mannie: a reminder is due. Open the app to see it.',
+        withheld: 'contact_detail',
       });
     }
+  });
+
+  it('sends what the assistant noticed in Private words, even in Full', () => {
+    for (const kind of ['nudge', 'approval_waiting'] as const) {
+      expect(textBody({ name: 'Mannie', delivery: delivery('Bill due Friday.', kind), mode: 'full' })).toEqual({
+        body: privateText({ name: 'Mannie', kind }),
+        withheld: 'noticed',
+      });
+    }
+    expect(textBody({ name: 'Mannie', delivery: delivery('This is a test.', 'note'), mode: 'full' }).body).toBe(
+      'Mannie: This is a test.',
+    );
   });
 
   it('words every kind with no content', () => {

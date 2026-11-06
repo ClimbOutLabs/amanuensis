@@ -26,7 +26,10 @@ export interface DeliveryService {
       conversation_id?: string;
     },
   ): Promise<void>;
-  /** Delivers once per id: a later call with the same id sends nothing and resolves to the delivery made first. */
+  /**
+   * Delivers once per id: a later call with the same id resolves to the delivery made first. It sends again only when
+   * that delivery has no attempt written down, because the call that made it stopped before its sends were recorded.
+   */
   deliverOnce(input: CreateDeliveryInput & { id: string }): Promise<Delivery>;
 }
 
@@ -224,7 +227,10 @@ export function createDeliveryService({
     },
     async deliverOnce(input) {
       const { delivery, created } = await store.createOnce(input);
-      return created ? await send({ owner: ownerOf(input), created: delivery, only_channels: undefined }) : delivery;
+      // Sending again can repeat a notice that went out just before a crash, which is better than losing it.
+      return created || delivery.attempts.length === 0
+        ? await send({ owner: ownerOf(input), created: delivery, only_channels: undefined })
+        : delivery;
     },
     async fallBack({ delivery_id, channels, ...owner }) {
       const delivery = await store.get({ ...owner, id: delivery_id });

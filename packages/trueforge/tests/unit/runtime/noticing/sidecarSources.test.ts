@@ -1,8 +1,10 @@
+import { ErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js';
 import winston from 'winston';
 
 import {
   bareSubject,
   createSidecarNoticingSources,
+  MAIL_LIST_TOO_SLOW,
   sidecarCalendarSource,
   sidecarMailSource,
   type CallSidecarTool,
@@ -95,17 +97,99 @@ describe('sidecar mail source (IMAP)', () => {
     expect(read.read === 'all' ? read.messages.map(message => message.id) : read.read).toEqual(['7', '8', '9']);
   });
 
-  it('pages through the window and says when it holds more than one read takes', async () => {
+  it('reads a window in one call, and says when the window holds more than that call can list', async () => {
     const mail = Array.from({ length: 150 }, (_, n) => ({
       email: { ...EMAIL, email_id: String(n) },
       arrived: new Date(Date.UTC(2026, 10, 5, 12, 0, n)).toISOString(),
     }));
-    const source = sidecarMailSource({ call: inbox(mail), account: 'default' });
-    const all = await source.listNewMessages({ since: new Date('2026-11-05T12:00:00Z'), before: NOW, limit: 200 });
-    expect(all.read === 'all' ? all.messages.length : all.read).toBe(150);
+    const calls: Record<string, unknown>[] = [];
+    const listing = inbox(mail);
+    const source = sidecarMailSource({
+      call: (name, args) => {
+        calls.push(args);
+        return listing(name, args);
+      },
+      account: 'default',
+    });
+    const some = await source.listNewMessages({
+      since: new Date('2026-11-05T12:00:00Z'),
+      before: new Date('2026-11-05T12:00:50Z'),
+      limit: 100,
+    });
+    expect(some.read === 'all' ? some.messages.length : some.read).toBe(50);
     await expect(
-      source.listNewMessages({ since: new Date('2026-11-05T12:00:00Z'), before: NOW, limit: 120 }),
+      source.listNewMessages({ since: new Date('2026-11-05T12:00:00Z'), before: NOW, limit: 200 }),
     ).resolves.toEqual({ read: 'too_many' });
+    await expect(
+      source.listNewMessages({ since: new Date('2026-11-05T12:00:00Z'), before: NOW, limit: 20 }),
+    ).resolves.toEqual({ read: 'too_many' });
+    expect(calls.map(args => [args['page'], args['page_size']])).toEqual([
+      [1, 100],
+      [1, 100],
+      [1, 21],
+    ]);
+  });
+
+  it('moves a Date its sender wrote outside the window to the window’s edge', async () => {
+    const early = { ...EMAIL, email_id: '8', date: '2026-11-05T10:00:00+00:00' };
+    const late = { ...EMAIL, email_id: '9', date: '2026-11-09T10:00:00+00:00' };
+    const garbled = { ...EMAIL, email_id: '10', date: 'yesterday-ish' };
+    const call = inbox([
+      { email: EMAIL, arrived: '2026-11-05T14:55:00Z' },
+      { email: early, arrived: '2026-11-05T14:56:00Z' },
+      { email: late, arrived: '2026-11-05T14:57:00Z' },
+      { email: garbled, arrived: '2026-11-05T14:58:00Z' },
+    ]);
+    const since = new Date('2026-11-05T14:13:00.000Z');
+    const read = await sidecarMailSource({ call, account: 'default' }).listNewMessages({
+      since,
+      before: NOW,
+      limit: 50,
+    });
+    const latest = new Date(NOW.getTime() - 1);
+    expect(read.read === 'all' ? read.messages.map(message => [message.id, message.received_at]) : read.read).toEqual([
+      ['7', new Date('2026-11-05T14:55:00.000Z')],
+      ['8', since],
+      ['9', latest],
+      ['10', latest],
+    ]);
+  });
+
+  it('lists mail from given senders only, one call each', async () => {
+    const { call, calls } = mailTool([EMAIL]);
+    const read = await sidecarMailSource({ call, account: 'default' }).listNewMessages({
+      since: new Date('2026-11-05T14:00:00.000Z'),
+      before: NOW,
+      limit: 50,
+      from: ['dana@example.com', 'billing@power.test'],
+    });
+    expect(read.read === 'all' ? read.messages.length : read.read).toBe(2);
+    expect(calls.map(([, args]) => args['from_address'])).toEqual(['dana@example.com', 'billing@power.test']);
+  });
+
+  it('fails the list on the first call that runs out of time, without trying a shorter window', async () => {
+    const calls: unknown[] = [];
+    const call: CallSidecarTool = (_name, args) => {
+      calls.push(args);
+      return Promise.reject(new McpError(ErrorCode.RequestTimeout, 'Request timed out'));
+    };
+    const read = sidecarMailSource({ call, account: 'default' }).listNewMessages({
+      since: new Date('2026-11-05T14:00:00.000Z'),
+      before: NOW,
+      limit: 50,
+    });
+    await expect(read).rejects.toThrow(MAIL_LIST_TOO_SLOW);
+    expect(calls).toHaveLength(1);
+  });
+
+  it('passes on other failures as they are', async () => {
+    const call: CallSidecarTool = () => Promise.reject(new Error('connection refused'));
+    const read = sidecarMailSource({ call, account: 'default' }).listNewMessages({
+      since: new Date('2026-11-05T14:00:00.000Z'),
+      before: NOW,
+      limit: 50,
+    });
+    await expect(read).rejects.toThrow('connection refused');
   });
 
   it('reads a backlog bigger than one pass over several passes, skipping nothing', async () => {
@@ -117,7 +201,14 @@ describe('sidecar mail source (IMAP)', () => {
     const seen = new Set<string>();
     let since = new Date('2026-11-05T12:00:00Z');
     for (let pass = 0; pass < 20; pass += 1) {
-      const read = await readMailWindow({ source, since, now: NOW, limit: 100, logger: { warn: jest.fn() } });
+      const read = await readMailWindow({
+        source,
+        since,
+        now: NOW,
+        limit: 100,
+        keep_from: [],
+        logger: { warn: jest.fn() },
+      });
       read.messages.forEach(message => seen.add(message.id));
       if (read.resume_from === undefined) break;
       expect(read.resume_from.getTime()).toBeGreaterThan(since.getTime());

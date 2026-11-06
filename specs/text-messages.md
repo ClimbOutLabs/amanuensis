@@ -15,7 +15,7 @@ One text provider, Twilio, behind a small interface. The person enters a number,
 ## What a text says
 
 - **Private (default):** `<assistant name>: a reminder is due. Open the app to see it.` The words by kind are "a reminder is due", "something needs you", "something is waiting for your ok" and "a note is waiting". No names, amounts, message content or reasons.
-- **Full:** `<assistant name>: <the one-sentence message>`, in plain characters (accents dropped, curly quotes and dashes made plain, emoji left out) so the phone company never switches to its costlier long form, and cut at a word so the whole text fits two segments (306 characters), ending with `...`.
+- **Full:** for a reminder or a test, `<assistant name>: <its words>`; for anything noticed, the Private words, because the model's wording stays in the feed, in plain characters (accents dropped, curly quotes and dashes made plain, emoji left out) so the phone company never switches to its costlier long form, and cut at a word so the whole text fits two segments (306 characters), ending with `...`.
 - The assistant's name is the one in the person's own Personalization settings, kept to letters, spaces, apostrophes and dashes and at most 20 of them, so a name cannot carry a link, a number to call or a message of its own. A name that holds a phone number, a site or an address is not used. When nothing is left, or they have not named it, the text says "Your assistant". No name is written into the code.
 - The confirmation code text reads `Your confirmation code is 123456. It works for 10 minutes. If you did not ask for it, ignore this text.` It names no assistant, because it goes to a number nobody has proved yet.
 - The server sends the Private words for a reminder with the number's status, so the Settings page shows exactly what a text says.
@@ -56,7 +56,7 @@ One text provider, Twilio, behind a small interface. The person enters a number,
 - A test of one channel asks the delivery service to try only that channel, so a push or in-app test never sends a paid text.
 - Every text counts toward at most 30 a day for the person, nudges, reminders and tests alike, counted in `text_send_count` before Twilio is called. Over that, the attempt is recorded as skipped and says when texts start again, and the item stays in the app.
 - Try it for texts has its own limit of 3 an hour and answers 429 with the minutes to wait.
-- A Full message that names a link, a site, a phone number or an address, in any spelling, is sent in Private words, with the same check the noticing layer uses on the model’s words (`namesContactDetail`), since the message can come from mail someone else wrote.
+- A Full reminder or test that names a link, a site, a phone number or an address, in any spelling, is sent in Private words, with the same check the noticing layer uses on the model’s words (`namesContactDetail`).
 
 ## Reach me settings
 
@@ -97,7 +97,7 @@ All tests use synthetic data, never a person's real data.
 - The assistant's name comes from the person's settings
 - Code expiry, wrong tries, the limits per person, per number and per server, the owner of a number not locked out, a trunk 0, removing a number and sending at the same moment, and codes kept only as hashes keyed outside the database, with a code from another key reading as no code
 - The day's limit on texts, reminders included, and Try it in a loop
-- A Full message with a link, a site, a phone number or an address goes out in Private words
+- A Full reminder with a link, a site, a phone number or an address, and anything noticed, goes out in Private words
 - The server points the number's incoming texts at itself, and touches nothing when the number is not found
 - A new number waits beside the confirmed one, and a failed send keeps the confirmed one
 - A long or unusual assistant name, and Full texts in plain characters within two segments

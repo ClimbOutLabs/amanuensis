@@ -1,10 +1,17 @@
 import { APPROVAL_EXPIRY_MINUTES } from '@truefoundry/trueforge-core/core/permissions/approvalExpiry';
 import type { Logger } from 'winston';
 
-import type { NoticingEvent, ReachSettings } from '../../schemas/reach';
+import type { AlwaysImportantSender, NoticingEvent, ReachSettings } from '../../schemas/reach';
 import { checkSender } from './authenticationResults';
 import { findDeadline, looksLikeBill, saysPaid } from './deadlines';
-import type { CalendarEventInfo, CalendarSource, MailMessage, MailSource, WaitingApproval } from './sources';
+import {
+  MessageUnreadableError,
+  type CalendarEventInfo,
+  type CalendarSource,
+  type MailMessage,
+  type MailSource,
+  type WaitingApproval,
+} from './sources';
 
 /** A bill is raised when it falls due within this long. */
 export const BILL_WINDOW_MS = 3 * 86_400_000;
@@ -58,19 +65,22 @@ const MOST_IN_SHORTEST_WINDOW = 500;
 
 /**
  * The oldest mail since `since` that one pass can read, and where the next pass starts. The window is halved until
- * the mail in it fits, so every message before `resume_from` was read and none is skipped.
+ * the mail in it fits, so every message before `resume_from` was read and none is skipped. A flood too big to read
+ * even in the shortest window is passed over, except mail from `keep_from`, so a flood cannot hide that mail.
  */
 export async function readMailWindow({
   source,
   since,
   now,
   limit,
+  keep_from,
   logger,
 }: {
   source: MailSource;
   since: Date;
   now: Date;
   limit: number;
+  keep_from: readonly string[];
   logger: Pick<Logger, 'warn'>;
 }): Promise<{ messages: MailMessage[]; resume_from: Date | undefined }> {
   let before = now;
@@ -85,21 +95,50 @@ export async function readMailWindow({
       return { messages: read.messages, resume_from: read.messages.at(-1)?.received_at ?? since };
     }
     if (short) {
-      // Hundreds of messages within a few seconds are a flood, not mail to tell anyone about.
-      logger.warn('Passed over a flood of mail that arrived within a few seconds', {
-        since: since.toISOString(),
-        before: before.toISOString(),
-      });
-      return { messages: [], resume_from: before };
+      return await readFlood({ source, since, before, keep_from, logger });
     }
     before = new Date(since.getTime() + Math.floor((before.getTime() - since.getTime()) / 2));
   }
 }
 
+/** Hundreds of messages within a few seconds are a flood, not mail to tell anyone about. Only `keep_from` is read. */
+async function readFlood({
+  source,
+  since,
+  before,
+  keep_from,
+  logger,
+}: {
+  source: MailSource;
+  since: Date;
+  before: Date;
+  keep_from: readonly string[];
+  logger: Pick<Logger, 'warn'>;
+}): Promise<{ messages: MailMessage[]; resume_from: Date }> {
+  const window = { since: since.toISOString(), before: before.toISOString() };
+  // Where no sender can be confirmed, mail from those senders is ordinary mail, so reading it is not worth a call.
+  const kept =
+    keep_from.length === 0 || source.trustedAuthenticationServers.length === 0
+      ? undefined
+      : await source.listNewMessages({ since, before, limit: MOST_IN_SHORTEST_WINDOW, from: keep_from });
+  if (kept === undefined || kept.read === 'too_many') {
+    logger.warn('Passed over a flood of mail that arrived within a few seconds', window);
+    return { messages: [], resume_from: before };
+  }
+  // A flood is read once, so a read that ran out of time is not tried again: the rest of the flood is passed over too.
+  logger.warn('Read only mail from always-important senders in a flood of mail that arrived within a few seconds', {
+    ...window,
+    whole: kept.read === 'all',
+  });
+  return { messages: kept.messages, resume_from: before };
+}
+
 /**
  * Mail from someone the person marked always important, when the mail server vouched for the sender, and bills or
  * deadlines named in any new mail. A message from an always-important address that the server did not vouch for is
- * handled as ordinary mail: it can still be a bill, but only as a note.
+ * handled as ordinary mail: it can still be a bill, but only as a note. A message the source can never read is passed
+ * over, so one broken message never holds up the rest. Any other failure stops the pass, so no message is lost to a
+ * busy server or a dropped connection: the next pass reads the same mail again.
  */
 export async function watchMail({
   source,
@@ -114,47 +153,98 @@ export async function watchMail({
   now: Date;
   logger: Pick<Logger, 'warn'>;
 }): Promise<MailFindings> {
-  const { messages, resume_from } = await readMailWindow({ source, since, now, limit: MAIL_PASS_LIMIT, logger });
   const always = new Map(settings.always_important.map(sender => [sender.address, sender]));
+  const { messages, resume_from } = await readMailWindow({
+    source,
+    since,
+    now,
+    limit: MAIL_PASS_LIMIT,
+    keep_from: [...always.keys()],
+    logger,
+  });
   const findings: MailFindings = { raise: [], track: [], resume_from };
   for (const message of messages) {
-    const listed = always.get(message.from_address.toLowerCase());
-    const check =
-      listed === undefined
-        ? undefined
-        : checkSender({
-            from_address: message.from_address,
-            headers: message.authentication_results,
-            trusted_servers: source.trustedAuthenticationServers,
-          });
-    const verified = check?.verified === true;
-    if (listed !== undefined && verified) {
-      const text = clip(await source.readText(message), READ_CHARACTERS);
-      const who = listed.name ?? message.from_name ?? message.from_address;
-      findings.raise.push({
-        id: `mail_always:${message.id}`,
-        kind: 'mail_always',
-        evidence: 'verified_sender',
-        summary: clip(`New mail from ${who}: ${message.subject}`, 300),
-        facts: [`From: ${senderLabel(message)}`, `Subject: ${message.subject}`, `Start of the message: ${text}`].join(
-          '\n',
-        ),
-        matched: `${who} is on your always-important list and the mail server confirmed the sender.`,
-        link: null,
-        mail_ref: { message_id: message.id, thread_id: message.thread_id },
-        occurred_at: message.received_at.toISOString(),
-        due_at: null,
+    try {
+      const found = await findInMessage({ source, message, settings, always, now });
+      findings.raise.push(...found.raise);
+      findings.track.push(...found.track);
+    } catch (error) {
+      if (!(error instanceof MessageUnreadableError)) {
+        throw error;
+      }
+      logger.warn('Passed over a mail that could not be read', {
+        message_id: message.id,
+        error: error.cause instanceof Error ? error.cause.message : error.message,
       });
-    }
-    const bill = await billFrom({ source, message, settings, verified, now });
-    if (bill !== undefined && !(await billIsPaid({ source, event: bill }))) {
-      (bill.due_at !== null && new Date(bill.due_at).getTime() - now.getTime() > BILL_WINDOW_MS
-        ? findings.track
-        : findings.raise
-      ).push(bill);
     }
   }
   return findings;
+}
+
+async function findInMessage({
+  source,
+  message,
+  settings,
+  always,
+  now,
+}: {
+  source: MailSource;
+  message: MailMessage;
+  settings: ReachSettings;
+  always: ReadonlyMap<string, AlwaysImportantSender>;
+  now: Date;
+}): Promise<Pick<MailFindings, 'raise' | 'track'>> {
+  const found: Pick<MailFindings, 'raise' | 'track'> = { raise: [], track: [] };
+  const listed = always.get(message.from_address.toLowerCase());
+  const verified =
+    listed !== undefined &&
+    checkSender({
+      from_address: message.from_address,
+      headers: message.authentication_results,
+      trusted_servers: source.trustedAuthenticationServers,
+    }).verified;
+  if (listed !== undefined && verified) {
+    const text = clip(await source.readText(message), READ_CHARACTERS);
+    const who = listed.name ?? message.from_name ?? message.from_address;
+    found.raise.push({
+      id: `mail_always:${message.id}`,
+      kind: 'mail_always',
+      evidence: 'verified_sender',
+      summary: clip(`New mail from ${who}: ${message.subject}`, 300),
+      facts: [`From: ${senderLabel(message)}`, `Subject: ${message.subject}`, `Start of the message: ${text}`].join(
+        '\n',
+      ),
+      matched: `${who} is on your always-important list and the mail server confirmed the sender.`,
+      link: null,
+      mail_ref: { message_id: message.id, thread_id: message.thread_id },
+      occurred_at: message.received_at.toISOString(),
+      due_at: null,
+    });
+  }
+  const bill = await billFrom({ source, message, settings, verified, now });
+  if (bill === undefined) {
+    return found;
+  }
+  const paid = await billIsPaid({ source, event: bill }).catch((error: unknown) => {
+    if (error instanceof MessageUnreadableError) {
+      return undefined;
+    }
+    throw error;
+  });
+  if (paid === true) {
+    return found;
+  }
+  // A thread that could not be read is checked again with the tracked bills, before the bill is raised.
+  if (
+    paid === undefined ||
+    (bill.due_at !== null && new Date(bill.due_at).getTime() - now.getTime() > BILL_WINDOW_MS)
+  ) {
+    found.track.push(bill);
+  } else if (found.raise.length === 0) {
+    // Mail already raised for its sender is not raised a second time as a bill.
+    found.raise.push(bill);
+  }
+  return found;
 }
 
 async function billFrom({

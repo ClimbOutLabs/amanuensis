@@ -7,13 +7,13 @@ Aman can tell you about things without waiting for you to open a chat. You choos
 
 ## What Aman watches for
 
-- **Mail from people you marked always important.** It counts only when your mail server confirms the sender. Mail that only claims to be from them is treated as ordinary mail. A sender whose own mail domain does not ask servers to check it can never be confirmed.
+- **Mail from people you marked always important.** It counts only when your mail server confirms the sender. Mail that only claims to be from them is treated as ordinary mail. A sender whose own mail domain does not ask servers to check it can never be confirmed. This needs a Google account. With the shared Email connector, senders cannot be confirmed yet, so their mail is treated as ordinary mail.
 - **Bills and deadlines** named in new mail. Aman tells you when one is due within three days. It stays quiet when a later message in the same thread says it was paid.
 - **Two things on your calendar at the same time** in the next 24 hours.
 - **Time to leave** for an event with a place, inside the lead time you choose.
 - **An approval waiting for you** longer than the time you choose.
 
-Calendar events count only when they are your own. On a Google calendar, that means you organised them, you accepted them, or no one else is on them. On the shared Calendar connector, it means no one else is on them, because anyone who sends an invite can write that you accepted it. Anything else can only ever become a quiet note.
+Calendar events count only when they are your own. On a Google calendar, that means you made and organised them, you accepted them, or no one else is on them. An invite from someone else that names you as its organizer does not count. On the shared Calendar connector, it means no one else is on them, because anyone who sends an invite can write that you accepted it. Anything else can only ever become a quiet note.
 
 Mail is checked every 10 minutes, the calendar every 30 minutes, and approvals every 5 minutes.
 
@@ -26,6 +26,8 @@ Everything lands under the bell with the reason you got it.
 - **Call:** a phone call, if the owner set up Twilio, the voice parts of Aman are running, and you switched calls on. Until then, something that would call you comes as a nudge. See [Phone calls](/phone-calls).
 
 A model reads a short description of each new thing and suggests how loudly to tell you. It can only suggest. Your settings decide. A waiting approval can nudge you but never call. A bill can nudge you only when it came from someone you marked always important and your mail server confirmed the sender, and it never calls. Words in a message, such as "urgent", can never make it louder than a note.
+
+The model also suggests the words of the item. Those words show only under the bell in the app, and only when they hold no link, phone number or address. Otherwise Aman uses a plain sentence about what it found. A notice on your phone only names the kind of thing, such as a bill. It never carries the model's words. A [text](/text-messages) about something Aman noticed names only the kind of thing too, even in Full mode. Only a reminder's text can carry its own words, and only in Full mode.
 
 ## Your settings
 
@@ -43,6 +45,11 @@ Each way to reach you has a **Try it** button. It sends a test item under the be
 
 - If the model cannot be asked, or has used its limit for the day, things still arrive as quiet notes.
 - If a delivery fails, Aman tries again on the next check. After five tries it stops trying that item.
+- If Aman stopped in the middle of sending something, it sends it again on the next check. Rarely, a notice can then reach you twice.
+- If one message cannot be read, Aman skips it and reads the rest.
+- If Google is busy or the connection drops, Aman stops. It reads the same mail again on the next check.
+- If the shared Email connector takes longer than 30 seconds to list new mail, Aman skips that check. It tries the same mail again next time. If this keeps happening, check that your mail server answers quickly.
+- If hundreds of messages arrive within a few seconds, Aman reads only the ones from people you marked always important. With the shared Email connector it skips them all, because senders cannot be confirmed there.
 - If a page says your settings could not be read, reload the page.
 
 See [Privacy](privacy) for what is sent where.
