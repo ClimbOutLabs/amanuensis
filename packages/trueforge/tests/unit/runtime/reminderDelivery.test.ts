@@ -17,10 +17,11 @@ import { createSqliteDb } from '../../../src/db/sqlite/client';
 import { SqliteScheduleStore } from '../../../src/db/sqlite/schedule-store/SqliteScheduleStore';
 import { SqliteSessionStore } from '../../../src/db/sqlite/session-store/SqliteSessionStore';
 import { createDeliveryService } from '../../../src/runtime/delivery/deliveryService';
-import { NO_PHONE_CHANNELS, type ReachAvailability } from '../../../src/runtime/noticing/reachChannels';
+import { NO_PHONE_CHANNELS } from '../../../src/runtime/noticing/reachChannels';
 import { createReminderReach } from '../../../src/runtime/noticing/reminderReach';
 import { REMINDER_FEED_TEXT_MAX, deliverReminder } from '../../../src/runtime/reminderDelivery';
 import type { Delivery } from '../../../src/schemas/deliveries';
+import type { ReachAvailability } from '../../../src/schemas/reach';
 import { defaultReachSettings } from '../../../src/schemas/reach';
 import { ScheduleManifestSchema } from '../../../src/schemas/schedule';
 

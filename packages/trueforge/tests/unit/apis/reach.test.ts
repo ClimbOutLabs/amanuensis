@@ -9,8 +9,8 @@ import { migrateSqliteToLatest } from '../../../src/db/migrateSqlite';
 import { ReachSettingsStore } from '../../../src/db/reachSettingsStore';
 import { createSqliteDb } from '../../../src/db/sqlite/client';
 import { createDeliveryService } from '../../../src/runtime/delivery/deliveryService';
-import type { ReachAvailability } from '../../../src/runtime/noticing/reachChannels';
 import { NO_PHONE_CHANNELS } from '../../../src/runtime/noticing/reachChannels';
+import type { ReachAvailability } from '../../../src/schemas/reach';
 import { defaultReachSettings, GetReachResponseSchema, type ReachSettings } from '../../../src/schemas/reach';
 
 const NOW = new Date('2026-11-05T15:00:00.000Z');

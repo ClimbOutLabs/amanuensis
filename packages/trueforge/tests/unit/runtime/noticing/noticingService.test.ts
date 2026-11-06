@@ -8,7 +8,6 @@ import { createSqliteDb } from '../../../../src/db/sqlite/client';
 import { createDeliveryService } from '../../../../src/runtime/delivery/deliveryService';
 import type { NoticingJudge } from '../../../../src/runtime/noticing/judge';
 import { createNoticingService } from '../../../../src/runtime/noticing/noticingService';
-import type { ReachAvailability } from '../../../../src/runtime/noticing/reachChannels';
 import type {
   ApprovalSource,
   CalendarEventInfo,
@@ -21,6 +20,7 @@ import type {
 } from '../../../../src/runtime/noticing/sources';
 import { TokenFactoryDailyCapError } from '../../../../src/runtime/tokenFactoryBudget';
 import type { Delivery } from '../../../../src/schemas/deliveries';
+import type { ReachAvailability } from '../../../../src/schemas/reach';
 import {
   defaultReachSettings,
   type NoticingEvent,
