@@ -36,6 +36,7 @@ import type { CreateTrueForgeClientOptions } from '../client.js';
 import { createCalendarSetupApi } from './calendarSetup.js';
 import { createEmailSetupApi } from './emailSetup.js';
 import { createGoogleSetupApi } from './googleSetup.js';
+import { createTelegramSetupApi } from './telegramSetup.js';
 
 export type UiConnectorAuth = ConnectorAuth;
 export type UiConnectorAuthPublic = ConnectorAuthPublic;
@@ -378,6 +379,7 @@ export function createConnectorCatalog(
     ...createGoogleSetupApi(client),
     ...createEmailSetupApi(clientOptions),
     ...createCalendarSetupApi(clientOptions),
+    ...createTelegramSetupApi(clientOptions),
     getConnectorCatalog: async () => {
       const body = await client.catalogs.mcpServers.list();
       return body.data.map(server => toUiCatalogEntry(server, { baseUrl: clientOptions.baseUrl }));

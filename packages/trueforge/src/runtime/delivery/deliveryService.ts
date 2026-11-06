@@ -22,7 +22,9 @@ function conversationOf(delivery: Delivery): string {
 }
 
 function outcomeWords(attempt: DeliveryAttempt): string {
-  const base = `Tried ${attempt.channel === 'web_push' ? 'a push notice' : 'the app'}: ${attempt.outcome}.`;
+  const tried =
+    attempt.channel === 'web_push' ? 'a push notice' : attempt.channel === 'telegram' ? 'Telegram' : 'the app';
+  const base = `Tried ${tried}: ${attempt.outcome}.`;
   return attempt.detail === null ? base : `${base} ${attempt.detail}`;
 }
 
@@ -96,7 +98,7 @@ export function createDeliveryService({
             error: error instanceof Error ? error.message : String(error),
           });
           attempts.push({
-            channel: 'web_push',
+            channel: sender.channel,
             outcome: 'failed',
             detail: 'The notice could not be sent. It is still in your feed.',
             target: null,

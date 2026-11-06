@@ -14,6 +14,7 @@ import { ModelProvidersClient } from "../resources/modelProviders/client/Client.
 import { RunCodeClient } from "../resources/runCode/client/Client.js";
 import { SandboxProvidersClient } from "../resources/sandboxProviders/client/Client.js";
 import { SkillsClient } from "../resources/skills/client/Client.js";
+import { TelegramClient } from "../resources/telegram/client/Client.js";
 import { TokenFactoryUsageClient } from "../resources/tokenFactoryUsage/client/Client.js";
 import { ToolOutputScreensClient } from "../resources/toolOutputScreens/client/Client.js";
 
@@ -37,6 +38,7 @@ export class SettingsClient {
     protected _calendar: CalendarClient | undefined;
     protected _email: EmailClient | undefined;
     protected _google: GoogleClient | undefined;
+    protected _telegram: TelegramClient | undefined;
 
     constructor(options: SettingsClient.Options) {
         this._options = normalizeClientOptionsWithAuth(options);
@@ -96,5 +98,9 @@ export class SettingsClient {
 
     public get google(): GoogleClient {
         return (this._google ??= new GoogleClient(this._options));
+    }
+
+    public get telegram(): TelegramClient {
+        return (this._telegram ??= new TelegramClient(this._options));
     }
 }

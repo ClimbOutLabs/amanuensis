@@ -49,12 +49,15 @@ import { SqliteSpaceStore } from '../src/db/sqlite/space-store/SqliteSpaceStore'
 import { SqliteTokenFactoryUsageStore } from '../src/db/sqlite/token-factory-usage-store/SqliteTokenFactoryUsageStore';
 import { SqliteOAuthTokenStore } from '../src/db/sqlite/token-store/SqliteOAuthTokenStore';
 import { SqliteTurnArtifactStore } from '../src/db/sqlite/turn-artifact-store/SqliteTurnArtifactStore';
+import { TelegramStore } from '../src/db/telegramStore';
 import { ActiveTurnRegistry } from '../src/runtime/activeTurns';
 import { createChatImageService } from '../src/runtime/chatImages/chatImageService';
 import { createImageReencoder } from '../src/runtime/chatImages/reencodeInSandbox';
 import { ChatSearchIndexer } from '../src/runtime/chatSearchIndexing';
 import { createDeliveryService } from '../src/runtime/delivery/deliveryService';
 import { EventSubscriptionRegistry } from '../src/runtime/event-subscription';
+import { createTelegramSendQueue } from '../src/runtime/telegram/telegramSendQueue';
+import { createTelegramService } from '../src/runtime/telegram/telegramService';
 import { createTokenFactoryBudget } from '../src/runtime/tokenFactoryBudget';
 import { TurnDrainRegistry } from '../src/runtime/turnDrains';
 
@@ -91,6 +94,7 @@ const sandboxProviderStore = new SqliteSandboxProviderStore(db);
 const modelProviderStore = new SqliteModelProviderStore(db);
 const turnArtifactStore = new SqliteTurnArtifactStore(db);
 const deliveryStore = new DeliveryStore(db);
+const telegramStore = new TelegramStore(db);
 const personaStore = new SqlitePersonaStore(db);
 const globalSettingsStore = new SqliteGlobalSettingsStore(db);
 const sentinelSettingsStore = new SqliteSentinelSettingsStore(db);
@@ -148,6 +152,9 @@ const app = createServerApp({
     logger,
   }),
   webPushPublicKey: undefined,
+  telegramStore,
+  telegramService: createTelegramService({ store: telegramStore, publicBaseUrl: 'http://localhost' }),
+  telegramQueue: createTelegramSendQueue(),
   sessions: new Sessions({ sessionStore }),
   chatImages: createChatImageService({
     store: new SqliteChatImageStore(db),

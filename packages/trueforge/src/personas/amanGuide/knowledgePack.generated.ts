@@ -172,6 +172,12 @@ export const AMAN_GUIDE_TOPICS: readonly AmanGuideTopic[] = [
     body: 'Ask Aman to look through your email for subscriptions and renewals. It lists what you pay for, how much, and how often, and it flags anything you may have forgotten.\n\nAman only reads your mail for this. It does not cancel anything. If you want to cancel something, Aman can help you write the message, and you approve it before it is sent.\n\nThis needs Gmail connected. See "Connecting your email and calendar".',
   },
   {
+    id: 'telegram',
+    title: 'Using Aman from Telegram',
+    covers: ['route:telegram'],
+    body: 'You can talk to Aman from Telegram. You make a small bot of your own, connect it once in Settings, and pair it with you. After that, messages you send the bot are answered in a chat called Telegram, and replies, reminders and things that need your ok are sent back to Telegram.\n\n## Connect your bot\n\n1. Open Telegram and message @BotFather.\n2. Send /newbot and follow his steps. He gives you a token.\n3. In Aman, click **More** in the left bar, click **Settings**, then click **Connectors**.\n4. Find **Telegram** and click **Connect**.\n5. Paste the token and click **Connect**. Aman checks the token with Telegram before it saves anything.\n\n## Pair it with you\n\nThe bot answers only you. Pairing is how it learns who you are.\n\n1. Message your bot and send /start.\n2. The bot answers with a six-digit code. The same code shows in Settings, under **Telegram**.\n3. Open the Telegram panel in Settings and check the two codes match.\n4. Type the code and click **Pair**.\n\nIf the codes do not match, do not pair. Someone else may have messaged your bot first. Wait 15 minutes for the code to expire, then send /start yourself.\n\n## Using it\n\nSend the bot a message and it is answered in the Telegram chat, with the same memory and the same care as a chat here. Anything a chat would show you as a card first is asked as a message with **Approve** and **Deny** buttons, and nothing runs until you tap one.\n\nReminders and brief summaries are sent to Telegram as well. The whole brief always stays in the app, in its chat.\n\nThe bot does not answer anyone else, and it does not work in group chats. Forwarded messages and files are treated as things to read, never as instructions to follow.\n\nTo turn it off, open **Settings**, **Connectors**, **Telegram**, click **Manage**, then click **Disconnect**. The saved token is deleted for good.',
+  },
+  {
     id: 'web',
     title: 'Searching the web',
     covers: [],

@@ -18,6 +18,8 @@ import configuration, { isPlaceholderTrueForgeApiKey } from './config';
 import { runController } from './controller';
 import { createDb } from './db/postgres/client';
 import { PostgresScheduleStore } from './db/postgres/schedule-store/PostgresScheduleStore';
+import { PostgresSessionStore } from './db/postgres/session-store/PostgresSessionStore';
+import { TelegramStore } from './db/telegramStore';
 import { createControllerLogger } from './logger';
 import { PACKAGE_VERSION } from './packageVersion';
 
@@ -63,6 +65,7 @@ try {
     scheduleStore: new PostgresScheduleStore(db),
     withTransaction: callback => db.transaction().execute(callback),
     logger,
+    telegram: { store: new TelegramStore(db), sessionStore: new PostgresSessionStore(db) },
     gracefulTimeoutSeconds: configuration.GRACEFUL_TIMEOUT_SECONDS,
     onStopped: () => db.destroy(),
   });
