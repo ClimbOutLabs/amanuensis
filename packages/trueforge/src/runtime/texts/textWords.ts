@@ -1,6 +1,6 @@
 import { namesContactDetail } from '@truefoundry/trueforge-core/core/permissions/provenance';
 
-import type { Delivery, DeliveryKind } from '../../schemas/deliveries';
+import type { DeliveryKind } from '../../schemas/deliveries';
 import type { TextMode } from '../../schemas/textMessages';
 
 /** Said wherever texts are asked for on a server that has no Twilio details. */
@@ -75,17 +75,25 @@ function cut({ text, room }: { text: string; room: number }): string {
 
 /**
  * The text that goes out for a delivery, given the name already made fit for a text, and the words it was sent in.
- * A Full message that names a link, a site, a phone number or an address, in any spelling, goes out in Private words,
- * because the message can come from mail someone else wrote, and a text is where a link or a number to call does the
+ * Full carries the delivery's notice words, never the model's own wording, which only the feed shows. Those words can
+ * still quote mail someone else wrote, such as a subject, so a message that names a link, a site, a phone number or
+ * an address, in any spelling, goes out in Private words, since a text is where a link or a number to call does the
  * most harm.
  */
-export function textBody({ name, delivery, mode }: { name: string; delivery: Delivery; mode: TextMode }): {
-  body: string;
-  sent_as: TextMode;
-} {
-  const plain = plainText(delivery.text);
-  if (mode === 'private' || namesContactDetail([delivery.text, plain])) {
-    return { body: privateText({ name, kind: delivery.kind }), sent_as: 'private' };
+export function textBody({
+  name,
+  kind,
+  notice_text,
+  mode,
+}: {
+  name: string;
+  kind: DeliveryKind;
+  notice_text: string;
+  mode: TextMode;
+}): { body: string; sent_as: TextMode } {
+  const plain = plainText(notice_text);
+  if (mode === 'private' || namesContactDetail([notice_text, plain])) {
+    return { body: privateText({ name, kind }), sent_as: 'private' };
   }
   const prefix = `${name}: `;
   return { body: `${prefix}${cut({ text: plain, room: TEXT_MAX - prefix.length })}`, sent_as: 'full' };

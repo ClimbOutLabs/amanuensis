@@ -1,10 +1,8 @@
-import { getDomain } from 'tldts';
-
 /**
- * Whether the receiving mail server vouched for a message's sender. A message passes when DMARC passed for the From
- * domain and its DKIM signature or its SPF check passed for a domain that lines up with it. The header is read as the
- * receiving server wrote it, so only the topmost Authentication-Results header counts, and only the first result of
- * each method in it: anything below or after could have been written by the sender.
+ * Whether the receiving mail server vouched for a message's sender: DMARC passed for the From domain. DMARC only passes
+ * when a DKIM signature or the SPF check lined up with that domain, so nothing more is asked. The header is read as the
+ * receiving server wrote it, so only the topmost Authentication-Results header counts, and it must hold exactly one
+ * DMARC result: a second one could be text the sender got echoed into it.
  */
 
 /** The domain of an address, lower case, or undefined when it has none. */
@@ -18,15 +16,6 @@ function domainOfAddress(address: string): string | undefined {
           .trim()
           .toLowerCase();
   return domain === '' ? undefined : domain;
-}
-
-/**
- * Two domains line up when they share one registrable domain (relaxed alignment): `mail.example.com` and
- * `example.com` do, while two sites under one public suffix such as `github.io` or `co.uk` never do.
- */
-export function domainsAlign({ left, right }: { left: string; right: string }): boolean {
-  const leftSite = getDomain(left, { allowPrivateDomains: true });
-  return leftSite !== null && leftSite === getDomain(right, { allowPrivateDomains: true });
 }
 
 interface MethodResult {
@@ -92,8 +81,11 @@ function pairsOf(tokens: readonly Token[]): { name: string; value: string }[] | 
   return pairs;
 }
 
-/** The server that wrote the header, and the first result it gave for each method. */
-function parseMethods(header: string): { authserv: string; results: Map<string, MethodResult> } | undefined {
+/**
+ * The server that wrote the header and every result in it, or undefined when any part cannot be read: a part that
+ * does not parse may be where echoed text broke out, so the whole header is refused.
+ */
+function parseMethods(header: string): { authserv: string; results: MethodResult[] } | undefined {
   const tokens = tokenize(header);
   if (tokens === undefined) {
     return undefined;
@@ -109,16 +101,19 @@ function parseMethods(header: string): { authserv: string; results: Map<string, 
   const [head = [], ...rest] = parts;
   const first = head[0];
   const authserv = first?.kind === 'word' ? first.text.toLowerCase() : '';
-  const results = new Map<string, MethodResult>();
+  const results: MethodResult[] = [];
   for (const part of rest) {
-    const [method, ...properties] = pairsOf(part) ?? [];
-    const name = method?.name.split('/')[0] ?? '';
-    // A later result for the same method may be text the sender got echoed into the header, so only the first counts.
-    if (method === undefined || results.has(name)) {
+    // Servers often end the header with a `;`, which leaves an empty part.
+    if (part.length === 0) {
       continue;
     }
-    results.set(name, {
-      method: name,
+    const pairs = pairsOf(part);
+    const [method, ...properties] = pairs ?? [];
+    if (method === undefined) {
+      return undefined;
+    }
+    results.push({
+      method: method.name.split('/')[0] ?? '',
       result: method.value.toLowerCase(),
       properties: new Map(properties.map(item => [item.name, item.value.replace(/^<|>$/g, '').toLowerCase()])),
     });
@@ -126,17 +121,7 @@ function parseMethods(header: string): { authserv: string; results: Map<string, 
   return { authserv, results };
 }
 
-/** The domain a DKIM or SPF property names: `@example.com`, `user@example.com` or `example.com`. */
-function propertyDomain(value: string | undefined): string | undefined {
-  if (value === undefined || value === '') {
-    return undefined;
-  }
-  const at = value.lastIndexOf('@');
-  const domain = (at === -1 ? value : value.slice(at + 1)).trim();
-  return domain === '' ? undefined : domain;
-}
-
-export type SenderCheck = { verified: true; how: 'dkim' | 'spf' } | { verified: false; why: string };
+export type SenderCheck = { verified: true; how: 'dmarc' } | { verified: false; why: string };
 
 /** Said when a mail source cannot pass on the receiving server's checks, so no sender is vouched for. */
 const NOT_PASSED_ON = 'This mail source does not pass on sender checks.';
@@ -144,8 +129,8 @@ const NOT_PASSED_ON = 'This mail source does not pass on sender checks.';
 /**
  * Checks a message's sender against its Authentication-Results headers, given newest first (the topmost first).
  * `trusted_servers` names the receiving servers whose word counts: a header from another server is not read, and an
- * empty list verifies nothing. A message with no header, or whose checks failed or do not line up with the From
- * domain, is not verified.
+ * empty list verifies nothing. A message with no header, or whose DMARC check did not pass for the From domain, is
+ * not verified.
  */
 export function checkSender({
   from_address,
@@ -179,23 +164,13 @@ export function checkSender({
   if (!trusted_servers.includes(authserv)) {
     return { verified: false, why: 'The sender checks came from a server that is not the one receiving your mail.' };
   }
-  const dmarc = results.get('dmarc');
-  if (dmarc?.result !== 'pass' || dmarc.properties.get('header.from') !== fromDomain) {
+  const dmarc = results.filter(item => item.method === 'dmarc');
+  if (dmarc.length > 1) {
+    return { verified: false, why: 'The sender checks on this message could not be read safely.' };
+  }
+  const [only] = dmarc;
+  if (only?.result !== 'pass' || only.properties.get('header.from') !== fromDomain) {
     return { verified: false, why: 'The mail server did not confirm the From address with DMARC.' };
   }
-  const dkim = results.get('dkim');
-  if (dkim?.result === 'pass') {
-    const signer = propertyDomain(dkim.properties.get('header.d') ?? dkim.properties.get('header.i'));
-    if (signer !== undefined && domainsAlign({ left: signer, right: fromDomain })) {
-      return { verified: true, how: 'dkim' };
-    }
-  }
-  const spf = results.get('spf');
-  if (spf?.result === 'pass') {
-    const envelope = propertyDomain(spf.properties.get('smtp.mailfrom'));
-    if (envelope !== undefined && domainsAlign({ left: envelope, right: fromDomain })) {
-      return { verified: true, how: 'spf' };
-    }
-  }
-  return { verified: false, why: 'The sender checks failed or do not match the From address.' };
+  return { verified: true, how: 'dmarc' };
 }

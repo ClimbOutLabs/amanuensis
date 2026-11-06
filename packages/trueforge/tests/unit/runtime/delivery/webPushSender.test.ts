@@ -12,6 +12,8 @@ const mockedBuild = jest.mocked(buildPushPayload);
 
 const SETTINGS = { publicKey: 'pub', privateKey: 'priv', subject: 'mailto:owner@example.invalid' };
 const OWNER = { tenant_id: 't1', created_by: 'alice' };
+/** What a notice outside the app may say; a push still carries only the id and a title. */
+const NOTICE = 'New mail from Dana: Quick question';
 
 function delivery(overrides: Partial<Pick<Delivery, 'level'>> = {}): Delivery {
   return {
@@ -97,7 +99,7 @@ describe('push payload', () => {
       fetchPush: () => Promise.resolve({ status: 201 }),
     });
 
-    const attempts = await sender.send({ delivery: delivery(), ...OWNER });
+    const attempts = await sender.send({ delivery: delivery(), notice_text: NOTICE, ...OWNER });
 
     expect(attempts.map(a => [a.channel, a.outcome, a.target])).toEqual([
       ['web_push', 'sent', 'a'],
@@ -119,7 +121,7 @@ describe('web push sender', () => {
       fetchPush: url => Promise.resolve({ status: url.endsWith('/a') ? 410 : 201 }),
     });
 
-    const attempts = await sender.send({ delivery: delivery(), ...OWNER });
+    const attempts = await sender.send({ delivery: delivery(), notice_text: NOTICE, ...OWNER });
 
     expect(removed).toEqual(['a']);
     expect(attempts.map(a => [a.target, a.outcome])).toEqual([
@@ -136,7 +138,7 @@ describe('web push sender', () => {
       fetchPush: url => Promise.resolve({ status: url.endsWith('/a') ? 404 : 503 }),
     });
 
-    const attempts = await sender.send({ delivery: delivery(), ...OWNER });
+    const attempts = await sender.send({ delivery: delivery(), notice_text: NOTICE, ...OWNER });
 
     expect(removed).toEqual(['a']);
     expect(attempts.map(a => a.outcome)).toEqual(['gone', 'failed']);
@@ -150,7 +152,7 @@ describe('web push sender', () => {
       fetchPush: () => Promise.reject(new Error('offline')),
     });
 
-    const attempts = await sender.send({ delivery: delivery(), ...OWNER });
+    const attempts = await sender.send({ delivery: delivery(), notice_text: NOTICE, ...OWNER });
 
     expect(attempts).toHaveLength(1);
     expect(attempts[0]).toMatchObject({ outcome: 'failed' });
@@ -162,7 +164,9 @@ describe('web push sender', () => {
     const fetchPush = jest.fn(() => Promise.resolve({ status: 201 }));
     const sender = createWebPushSender({ subscriptions: store, settings: SETTINGS, fetchPush });
 
-    await expect(sender.send({ delivery: delivery({ level: 'note' }), ...OWNER })).resolves.toEqual([]);
+    await expect(
+      sender.send({ delivery: delivery({ level: 'note' }), notice_text: NOTICE, ...OWNER }),
+    ).resolves.toEqual([]);
     expect(fetchPush).not.toHaveBeenCalled();
   });
 
@@ -171,7 +175,7 @@ describe('web push sender', () => {
     const fetchPush = jest.fn(() => Promise.resolve({ status: 201 }));
     const sender = createWebPushSender({ subscriptions: store, settings: undefined, fetchPush });
 
-    const attempts = await sender.send({ delivery: delivery(), ...OWNER });
+    const attempts = await sender.send({ delivery: delivery(), notice_text: NOTICE, ...OWNER });
 
     expect(attempts).toMatchObject([{ outcome: 'skipped', detail: 'Push is not set up on this server.' }]);
     expect(fetchPush).not.toHaveBeenCalled();
@@ -182,7 +186,7 @@ describe('web push sender', () => {
     const fetchPush = jest.fn(() => Promise.resolve({ status: 201 }));
     const sender = createWebPushSender({ subscriptions: store, settings: SETTINGS, fetchPush });
 
-    const attempts = await sender.send({ delivery: delivery(), ...OWNER });
+    const attempts = await sender.send({ delivery: delivery(), notice_text: NOTICE, ...OWNER });
 
     expect(attempts.map(a => [a.target, a.outcome])).toEqual([
       ['a', 'gone'],
@@ -214,7 +218,7 @@ describe('web push sender', () => {
       },
     });
 
-    const attempts = await sender.send({ delivery: delivery(), ...OWNER });
+    const attempts = await sender.send({ delivery: delivery(), notice_text: NOTICE, ...OWNER });
 
     expect(attempts.map(a => a.target)).toEqual(targets.map(target => target.id));
     expect(most).toBeLessThanOrEqual(4);
@@ -223,7 +227,7 @@ describe('web push sender', () => {
   it('sends nothing when the person has no device', async () => {
     const { store } = subscriptions([]);
     const sender = createWebPushSender({ subscriptions: store, settings: SETTINGS });
-    await expect(sender.send({ delivery: delivery(), ...OWNER })).resolves.toEqual([]);
+    await expect(sender.send({ delivery: delivery(), notice_text: NOTICE, ...OWNER })).resolves.toEqual([]);
   });
 });
 
@@ -239,7 +243,7 @@ describe('web push sender, outside addresses', () => {
       resolveAddresses: () => Promise.resolve(['10.0.0.5']),
     });
 
-    const attempts = await sender.send({ delivery: delivery(), ...OWNER });
+    const attempts = await sender.send({ delivery: delivery(), notice_text: NOTICE, ...OWNER });
 
     expect(attempts.map(a => [a.target, a.outcome])).toEqual([
       ['lan', 'gone'],
@@ -255,7 +259,7 @@ describe('web push sender, outside addresses', () => {
       settings: SETTINGS,
       resolveAddresses: () => Promise.reject(new Error('dns down')),
     });
-    const attempts = await sender.send({ delivery: delivery(), ...OWNER });
+    const attempts = await sender.send({ delivery: delivery(), notice_text: NOTICE, ...OWNER });
     expect(attempts.map(a => a.outcome)).toEqual(['failed']);
     expect(removed).toEqual([]);
   });

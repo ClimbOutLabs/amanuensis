@@ -60,7 +60,7 @@ export function createSmsSender({
 }): DeliveryChannelSender {
   return {
     channel: 'sms',
-    async send({ delivery, tenant_id, created_by }) {
+    async send({ delivery, notice_text, tenant_id, created_by }) {
       if (delivery.level !== 'nudge') {
         return [];
       }
@@ -104,7 +104,7 @@ export function createSmsSender({
         ];
       }
       const name = await assistantNameFor({ personalization, owner });
-      const { body, sent_as } = textBody({ name, delivery, mode: contact.mode });
+      const { body, sent_as } = textBody({ name, kind: delivery.kind, notice_text, mode: contact.mode });
       const result = await provider.send({ to: contact.phone, body });
       if (result.outcome === 'sent') {
         return [attempt({ outcome: 'sent', detail: sentWords({ mode: contact.mode, sent_as }), target, at: now() })];

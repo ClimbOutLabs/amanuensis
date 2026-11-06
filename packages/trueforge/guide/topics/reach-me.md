@@ -8,7 +8,7 @@ Aman can tell you about something without waiting for you to open a chat. You ch
 
 ## What Aman watches for
 
-- Mail from people you marked always important. It counts only when your mail server confirms the sender.
+- Mail from people you marked always important. It counts only when your mail server confirms the sender. This needs a Google account. With the shared Email connector, senders cannot be confirmed yet, so their mail is treated as ordinary mail.
 - A bill or deadline in new mail that is due within three days.
 - Two things on your own calendar at the same time.
 - Time to leave for an event with a place.
@@ -22,7 +22,7 @@ Everything shows under the bell, with the reason you got it.
 - A nudge is a notice on the devices where you turned notices on.
 - A call is a phone call. Calls are not set up yet, so nothing calls you.
 
-A model suggests how loudly to tell you, and your settings decide. Words in a message, such as "urgent", can never make it louder than a note. Aman sends at most 5 nudges a day unless you change that. Reminders you set never count toward that limit.
+A model suggests how loudly to tell you, and your settings decide. The model's words show only under the bell, never in a notice on your phone. Words in a message, such as "urgent", can never make it louder than a note. Aman sends at most 5 nudges a day unless you change that. Reminders you set never count toward that limit.
 
 ## Check that it works
 

@@ -7,14 +7,17 @@ import { newId } from '../../utils/id';
 import { startOfLocalDay } from './quietHours';
 import type { ReachHistory } from './reachRules';
 
-/** Longest one holder keeps a person's reach decisions to itself before another may take over. */
-const LEASE_MS = 60_000;
+/**
+ * Longest one holder keeps a person's reach decisions to itself before another may take over. It is well past the
+ * longest a delivery's sends can take, so a holder never loses it mid-delivery. A holder that hangs past it only lets
+ * the next pass decide; that pass cannot send the same delivery twice, because each delivery is made once per id.
+ */
+const LEASE_MS = 120_000;
 const LEASE_TRIES = 10;
-const LEASE_RENEW_MS = LEASE_MS / 3;
 const LEASE_WAIT_MS = 250;
 
 export interface ReachGateDeps {
-  store: Pick<INoticingStore, 'acquireReachLease' | 'renewReachLease' | 'releaseReachLease'>;
+  store: Pick<INoticingStore, 'acquireReachLease' | 'releaseReachLease'>;
   history: Pick<IDeliveryStore, 'countSince' | 'lastCreatedAt'>;
   logger: Logger;
   now: () => Date;
@@ -42,19 +45,9 @@ export async function withReachLease<T>({
   for (let attempt = 0; attempt < LEASE_TRIES; attempt += 1) {
     const at = deps.now();
     if (await deps.store.acquireReachLease({ ...owner, holder, now: at, until: new Date(at.getTime() + LEASE_MS) })) {
-      // Sending to several devices can take longer than one lease, so the lease is held longer while work runs.
-      const renew = setInterval(() => {
-        const until = new Date(deps.now().getTime() + LEASE_MS);
-        deps.store.renewReachLease({ ...owner, holder, until }).catch((error: unknown) => {
-          deps.logger.warn('Could not hold the reach lease longer', {
-            error: error instanceof Error ? error.message : String(error),
-          });
-        });
-      }, LEASE_RENEW_MS);
       try {
         return { held: true, value: await work() };
       } finally {
-        clearInterval(renew);
         // What was delivered stays delivered; an unreleased lease only runs out on its own.
         await deps.store.releaseReachLease({ ...owner, holder }).catch((error: unknown) => {
           deps.logger.warn('Could not hand back the reach lease; it runs out by itself', {

@@ -18,6 +18,8 @@ import { canText } from '../runtime/texts/textNumber';
 import type { ReachAvailability } from '../schemas/reach';
 import { defaultReachSettings, NOTICING_KINDS, type AlwaysImportantSender, type ReachSettings } from '../schemas/reach';
 
+const TEST_WORDS = 'This is a test. If you can read this, it works.';
+
 export interface ReachRouterDeps {
   reachStore: IReachSettingsStore;
   textContacts: Pick<ITextContactStore, 'get' | 'claimTextSend' | 'forgetTextSends'>;
@@ -163,7 +165,8 @@ export function createReachRouter(deps: ReachRouterDeps) {
         // A note in the feed, so a test never uses up one of the day's nudges.
         kind: 'note',
         level: 'nudge',
-        text: 'This is a test. If you can read this, it works.',
+        text: TEST_WORDS,
+        notice_text: TEST_WORDS,
         reason: 'You pressed Try it in Reach me settings.',
         link: null,
         only_channels: ['sms'],
@@ -186,7 +189,8 @@ export function createReachRouter(deps: ReachRouterDeps) {
       ...owner,
       kind: 'note',
       level: channel === 'push' ? 'nudge' : 'note',
-      text: 'This is a test. If you can read this, it works.',
+      text: TEST_WORDS,
+      notice_text: TEST_WORDS,
       reason: 'You pressed Try it in Reach me settings.',
       link: null,
       only_channels: channel === 'push' ? ['web_push'] : [],

@@ -14,6 +14,7 @@ function nudge(text: string, kind: 'nudge' | 'reminder' = 'nudge') {
     kind,
     level: 'nudge' as const,
     text,
+    notice_text: text,
     reason: 'A bill is due soon.',
     link: null,
   };
@@ -76,6 +77,14 @@ describe('texts as a channel of the delivery layer', () => {
     await h.readyToText({ mode: 'full' });
     await h.deliveries.deliver(nudge(BILL_TEXT));
     expect(h.sent[0]?.body).toBe(`Mannie: ${BILL_TEXT}`);
+  });
+
+  it('Full texts carry the notice words, never the model’s own wording, which only the feed shows', async () => {
+    const h = await textsHarness({ assistantName: 'Mannie' });
+    await h.readyToText({ mode: 'full' });
+    const delivery = await h.deliveries.deliver({ ...nudge(BILL_TEXT), text: 'The model says: reply YES to pay now.' });
+    expect(h.sent[0]?.body).toBe(`Mannie: ${BILL_TEXT}`);
+    expect(delivery.text).toBe('The model says: reply YES to pay now.');
   });
 
   it('sends a Full message that names a link in Private words, and says so', async () => {
