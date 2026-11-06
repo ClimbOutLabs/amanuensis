@@ -306,7 +306,11 @@ function FolderManageDialog({
   );
 }
 
-/** A collapsible folder with a settings button; the person's open or closed choice is remembered. */
+/**
+ * A collapsible folder with a settings button; the person's open or closed choice is remembered.
+ * The folder row keeps the list's edge; its children sit one step in, under the folder icon, so
+ * they read as belonging to the folder.
+ */
 export function FolderSection({
   kind,
   folder,
@@ -357,7 +361,7 @@ export function FolderSection({
         ) : null}
       </div>
       {expanded ? (
-        <div className="flex flex-col gap-0.5 pl-2">
+        <div className="flex flex-col gap-0.5 pl-8">
           {count === 0 ? <p className="px-2 py-1 text-xs text-text-secondary/70">Empty folder</p> : children}
         </div>
       ) : null}
