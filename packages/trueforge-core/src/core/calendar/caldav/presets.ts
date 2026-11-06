@@ -9,7 +9,7 @@
 import { mailAddressProblem } from '../../email/mailConnector/presets.js';
 
 export interface CaldavProviderPreset {
-  /** Stable key, the same word the installer uses: google, fastmail, yahoo, gmx, webde, other. */
+  /** Stable key, the same word the installer uses: fastmail, gmx, google, icloud, webde, yahoo, other. */
   key: string;
   /** The name the person sees in the picker. */
   name: string;
@@ -36,22 +36,11 @@ export interface CaldavProviderPreset {
 export const CALDAV_GOOGLE_PROVIDER_KEY = 'google';
 export const CALDAV_OTHER_PROVIDER_KEY = 'other';
 
+/**
+ * In the order the pickers show them: alphabetical by the name a person sees, ignoring case, with Other last.
+ * The installer numbers its menu in the same order.
+ */
 export const CALDAV_PROVIDER_PRESETS: readonly CaldavProviderPreset[] = [
-  {
-    key: CALDAV_GOOGLE_PROVIDER_KEY,
-    name: 'Google',
-    server_url: null,
-    domain_urls: [],
-    account_url_template: 'https://calendar.google.com/calendar/dav/{email}/',
-    help_url: 'https://support.google.com/accounts/answer/185833',
-    help_hint: 'Google: turn on 2-Step Verification, then make an app password at myaccount.google.com/apppasswords.',
-    setup_steps: [
-      'Turn on 2-Step Verification for your Google account, if it is not on yet. Google only offers app passwords after that.',
-      'Open myaccount.google.com/apppasswords, type a name such as Aman, and select Create.',
-      'Copy the 16-letter password Google shows. Google shows it only once.',
-      'When you are asked, type your Gmail address and paste the app password. The login name can be left empty or kept the same as your email address.',
-    ],
-  },
   {
     key: 'fastmail',
     name: 'Fastmail',
@@ -61,16 +50,6 @@ export const CALDAV_PROVIDER_PRESETS: readonly CaldavProviderPreset[] = [
     help_url: 'https://www.fastmail.help/hc/en-us/articles/360058752854-App-passwords',
     help_hint:
       'Fastmail: make an app password under Settings, Privacy & Security, Manage app passwords, and allow calendar access.',
-    setup_steps: [],
-  },
-  {
-    key: 'yahoo',
-    name: 'Yahoo',
-    server_url: 'https://caldav.calendar.yahoo.com',
-    domain_urls: [],
-    account_url_template: null,
-    help_url: 'https://help.yahoo.com/kb/SLN15241.html',
-    help_hint: 'Yahoo: make an app password under Account Security, Generate app password.',
     setup_steps: [],
   },
   {
@@ -88,6 +67,32 @@ export const CALDAV_PROVIDER_PRESETS: readonly CaldavProviderPreset[] = [
     setup_steps: [],
   },
   {
+    key: CALDAV_GOOGLE_PROVIDER_KEY,
+    name: 'Google',
+    server_url: null,
+    domain_urls: [],
+    account_url_template: 'https://calendar.google.com/calendar/dav/{email}/',
+    help_url: 'https://support.google.com/accounts/answer/185833',
+    help_hint: 'Google: turn on 2-Step Verification, then make an app password at myaccount.google.com/apppasswords.',
+    setup_steps: [
+      'Turn on 2-Step Verification for your Google account, if it is not on yet. Google only offers app passwords after that.',
+      'Open myaccount.google.com/apppasswords, type a name such as Aman, and select Create.',
+      'Copy the 16-letter password Google shows. Google shows it only once.',
+      'When you are asked, type your Gmail address and paste the app password. The login name can be left empty or kept the same as your email address.',
+    ],
+  },
+  {
+    key: 'icloud',
+    name: 'iCloud',
+    server_url: 'https://caldav.icloud.com/',
+    domain_urls: [],
+    account_url_template: null,
+    help_url: 'https://support.apple.com/en-us/102654',
+    help_hint:
+      'iCloud: make an app-specific password at account.apple.com under Sign-In and Security, then sign in with your Apple Account email.',
+    setup_steps: [],
+  },
+  {
     key: 'webde',
     name: 'web.de',
     server_url: 'https://caldav.web.de',
@@ -96,6 +101,16 @@ export const CALDAV_PROVIDER_PRESETS: readonly CaldavProviderPreset[] = [
     help_url: null,
     help_hint:
       'web.de: turn on two-factor authentication, then make an application-specific password under Security Options.',
+    setup_steps: [],
+  },
+  {
+    key: 'yahoo',
+    name: 'Yahoo',
+    server_url: 'https://caldav.calendar.yahoo.com',
+    domain_urls: [],
+    account_url_template: null,
+    help_url: 'https://help.yahoo.com/kb/SLN15241.html',
+    help_hint: 'Yahoo: make an app password under Account Security, Generate app password.',
     setup_steps: [],
   },
   {

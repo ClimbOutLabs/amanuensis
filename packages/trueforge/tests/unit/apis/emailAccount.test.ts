@@ -156,16 +156,16 @@ describe('the email settings endpoints', () => {
     expect(data.state).toBe('not_connected');
     expect(data.address).toBeNull();
     expect(data.providers.map((provider: { key: string }) => provider.key)).toEqual([
-      'gmail',
-      'yahoo',
       'aol',
-      'icloud',
       'fastmail',
-      'zoho',
+      'gmail',
       'gmx',
+      'icloud',
       'webde',
+      'yahoo',
+      'zoho',
     ]);
-    expect(data.providers[0].help_url).toBe('https://support.google.com/accounts/answer/185833');
+    expect(data.providers[2].help_url).toBe('https://support.google.com/accounts/answer/185833');
   });
 
   it('reports Connected with the address, and never the password', async () => {

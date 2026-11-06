@@ -10,6 +10,7 @@ import { after, before, beforeEach, describe, it } from 'node:test';
 
 import { ownNetworks, renderAccount } from '../account.mjs';
 import { createAgent, createAgentServer, MIN_SECRET_LENGTH, runCommand } from '../agent.mjs';
+import { routedRequest } from './fake-caldav.mjs';
 
 const CANARY = 'CANARY-APP-PASSWORD-7f3d9';
 const SECRET = 'test-account-secret-0123456789abcdef0123';
@@ -144,13 +145,8 @@ describe('the calendar account agent', () => {
       resolve: async () => [PUBLIC_ADDRESS],
       ownNetworks: ownNetworks({}),
       // The fake server stands behind the checked address; only the trusted certificate and the route differ.
-      tls: {
-        ca: tlsCert,
-        lookup: (_name, options, callback) =>
-          options?.all === true
-            ? callback(null, [{ address: '127.0.0.1', family: 4 }])
-            : callback(null, '127.0.0.1', 4),
-      },
+      tls: { ca: tlsCert },
+      request: routedRequest(),
     };
     agent = createAgent({ file, deps });
     listener?.closeAllConnections();
@@ -266,7 +262,7 @@ describe('the calendar account agent', () => {
   });
 
   it('names a certificate it does not trust, and sends nothing after the handshake fails', async () => {
-    deps.tls = { lookup: deps.tls.lookup };
+    deps.tls = {};
     const refused = await call('POST', payload());
     assert.deepEqual(JSON.parse(refused.text), { error: 'certificate_refused' });
     assert.equal(seen.length, 0);

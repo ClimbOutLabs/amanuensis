@@ -218,12 +218,12 @@ Options
   --display-name NAME   with instance import, your name as imported chats show it (default: the name Aman calls you)
   --from-compose DIR    with migrate, the folder the old Aman runs from
   --user ID             with migrate, which person's chats to move when the old Aman has more than one
-  --email-provider NAME  with the email options: gmail, yahoo, aol, icloud, fastmail, zoho, gmx, webde or other
+  --email-provider NAME  with the email options: aol, fastmail, gmail, gmx, icloud, webde, yahoo, zoho or other
   --email-address ADDRESS  the email address to connect
   --email-password-stdin  read the email app password from the input (see the line order above)
   --email-imap-host HOST, --email-imap-port N, --email-smtp-host HOST, --email-smtp-port N
                         the incoming and outgoing servers, for --email-provider other only
-  --calendar-provider NAME  the calendar provider: google, fastmail, yahoo, gmx, webde or other (with --yes: required)
+  --calendar-provider NAME  the calendar provider: fastmail, gmx, google, icloud, webde, yahoo or other (with --yes: required)
   --calendar-email ADDRESS  the email address of the calendar account (with --yes: required)
   --calendar-url URL    the https address of the calendar, for the other provider (with --yes: required for other)
   --calendar-user NAME  the calendar login name (default: the email address)

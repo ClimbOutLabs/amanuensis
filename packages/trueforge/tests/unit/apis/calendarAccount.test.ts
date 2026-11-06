@@ -176,11 +176,12 @@ describe('the calendar settings endpoints', () => {
     expect(data.email).toBeNull();
     expect(data.provider_key).toBe('google');
     expect(data.providers.map((provider: { key: string }) => provider.key)).toEqual([
-      'google',
       'fastmail',
-      'yahoo',
       'gmx',
+      'google',
+      'icloud',
       'webde',
+      'yahoo',
       'other',
     ]);
     expect(data.providers).toEqual(
@@ -194,7 +195,7 @@ describe('the calendar settings endpoints', () => {
         setup_steps: preset.setup_steps,
       })),
     );
-    expect(data.providers[0]?.setup_steps).toHaveLength(4);
+    expect(data.providers.find((provider: { key: string }) => provider.key === 'google')?.setup_steps).toHaveLength(4);
   });
 
   it('reports Connected with the email, and never the password', async () => {
@@ -304,6 +305,32 @@ describe('the calendar settings endpoints', () => {
     expect(registered[0]?.name).toBe('Calendar');
     expect(registered[0]?.first_party).toBe(true);
     expect(registered[0]?.manifest).toMatchObject({ type: 'remote', url: MCP_URL });
+  });
+
+  it('saves an iCloud login at the iCloud address, and shows iCloud as the provider afterwards', async () => {
+    const icloud = {
+      ...CONNECTED,
+      url: 'https://caldav.icloud.com/',
+      username: 'person@icloud.com',
+      email: 'person@icloud.com',
+    };
+    agent.script([{ status: 200, body: icloud }]);
+    const { status, text } = await call({
+      method: 'POST',
+      path: '/',
+      body: { provider_key: 'icloud', email: 'person@icloud.com', password: 'abcd-efgh-ijkl-mnop' },
+    });
+    expect(status).toBe(201);
+    expect(JSON.parse(text).data.provider_key).toBe('icloud');
+    expect(JSON.parse(agent.calls[0]?.body ?? '{}')).toEqual({
+      url: 'https://caldav.icloud.com/',
+      username: 'person@icloud.com',
+      password: 'abcd-efgh-ijkl-mnop',
+      email: 'person@icloud.com',
+    });
+    agent.script([{ status: 200, body: icloud }]);
+    const status_read = await call({ method: 'GET', path: '/status' });
+    expect(JSON.parse(status_read.text).data.provider_key).toBe('icloud');
   });
 
   it('uses the GMX address for the email domain, and a typed login name when given', async () => {

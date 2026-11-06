@@ -8,7 +8,7 @@
 export type MailServerMode = 'ssl' | 'starttls';
 
 export interface EmailProviderPreset {
-  /** Stable key, the same word the installer uses: gmail, yahoo, aol, icloud, fastmail, zoho, gmx, webde. */
+  /** Stable key, the same word the installer uses: aol, fastmail, gmail, gmx, icloud, webde, yahoo, zoho. */
   key: string;
   /** The name the person sees in the picker. */
   name: string;
@@ -28,31 +28,11 @@ export interface EmailProviderPreset {
   help_hint: string;
 }
 
+/**
+ * In the order the picker shows them: alphabetical by the name a person sees, ignoring case. The picker puts
+ * Other after them, and the installer numbers its menu in the same order.
+ */
 export const EMAIL_PROVIDER_PRESETS: readonly EmailProviderPreset[] = [
-  {
-    key: 'gmail',
-    name: 'Gmail',
-    imap_host: 'imap.gmail.com',
-    imap_port: 993,
-    imap_mode: 'ssl',
-    smtp_host: 'smtp.gmail.com',
-    smtp_port: 465,
-    smtp_mode: 'ssl',
-    help_url: 'https://support.google.com/accounts/answer/185833',
-    help_hint: 'Gmail: turn on 2-Step Verification, then make an app password under Security, App passwords.',
-  },
-  {
-    key: 'yahoo',
-    name: 'Yahoo',
-    imap_host: 'imap.mail.yahoo.com',
-    imap_port: 993,
-    imap_mode: 'ssl',
-    smtp_host: 'smtp.mail.yahoo.com',
-    smtp_port: 465,
-    smtp_mode: 'ssl',
-    help_url: 'https://help.yahoo.com/kb/SLN15241.html',
-    help_hint: 'Yahoo: make an app password under Account Security, Generate app password.',
-  },
   {
     key: 'aol',
     name: 'AOL',
@@ -64,18 +44,6 @@ export const EMAIL_PROVIDER_PRESETS: readonly EmailProviderPreset[] = [
     smtp_mode: 'ssl',
     help_url: 'https://help.aol.com/articles/Create-and-manage-app-password',
     help_hint: 'AOL: make an app password under Account Security, Generate app password.',
-  },
-  {
-    key: 'icloud',
-    name: 'iCloud',
-    imap_host: 'imap.mail.me.com',
-    imap_port: 993,
-    imap_mode: 'ssl',
-    smtp_host: 'smtp.mail.me.com',
-    smtp_port: 587,
-    smtp_mode: 'starttls',
-    help_url: 'https://support.apple.com/en-us/102654',
-    help_hint: 'iCloud: make an app-specific password at account.apple.com under Sign-In and Security.',
   },
   {
     key: 'fastmail',
@@ -90,16 +58,16 @@ export const EMAIL_PROVIDER_PRESETS: readonly EmailProviderPreset[] = [
     help_hint: 'Fastmail: make an app password under Settings, Privacy & Security, Manage app passwords.',
   },
   {
-    key: 'zoho',
-    name: 'Zoho',
-    imap_host: 'imap.zoho.com',
+    key: 'gmail',
+    name: 'Gmail',
+    imap_host: 'imap.gmail.com',
     imap_port: 993,
     imap_mode: 'ssl',
-    smtp_host: 'smtp.zoho.com',
+    smtp_host: 'smtp.gmail.com',
     smtp_port: 465,
     smtp_mode: 'ssl',
-    help_url: 'https://www.zoho.com/mail/help/adminconsole/two-factor-authentication.html',
-    help_hint: 'Zoho: turn on two-factor authentication, then make an app password under Security, App passwords.',
+    help_url: 'https://support.google.com/accounts/answer/185833',
+    help_hint: 'Gmail: turn on 2-Step Verification, then make an app password under Security, App passwords.',
   },
   {
     key: 'gmx',
@@ -115,6 +83,18 @@ export const EMAIL_PROVIDER_PRESETS: readonly EmailProviderPreset[] = [
       'GMX: turn on two-factor authentication, then make an application-specific password under Security Options.',
   },
   {
+    key: 'icloud',
+    name: 'iCloud',
+    imap_host: 'imap.mail.me.com',
+    imap_port: 993,
+    imap_mode: 'ssl',
+    smtp_host: 'smtp.mail.me.com',
+    smtp_port: 587,
+    smtp_mode: 'starttls',
+    help_url: 'https://support.apple.com/en-us/102654',
+    help_hint: 'iCloud: make an app-specific password at account.apple.com under Sign-In and Security.',
+  },
+  {
     key: 'webde',
     name: 'web.de',
     imap_host: 'imap.web.de',
@@ -126,6 +106,30 @@ export const EMAIL_PROVIDER_PRESETS: readonly EmailProviderPreset[] = [
     help_url: null,
     help_hint:
       'web.de: turn on two-factor authentication, then make an application-specific password under Security Options.',
+  },
+  {
+    key: 'yahoo',
+    name: 'Yahoo',
+    imap_host: 'imap.mail.yahoo.com',
+    imap_port: 993,
+    imap_mode: 'ssl',
+    smtp_host: 'smtp.mail.yahoo.com',
+    smtp_port: 465,
+    smtp_mode: 'ssl',
+    help_url: 'https://help.yahoo.com/kb/SLN15241.html',
+    help_hint: 'Yahoo: make an app password under Account Security, Generate app password.',
+  },
+  {
+    key: 'zoho',
+    name: 'Zoho',
+    imap_host: 'imap.zoho.com',
+    imap_port: 993,
+    imap_mode: 'ssl',
+    smtp_host: 'smtp.zoho.com',
+    smtp_port: 465,
+    smtp_mode: 'ssl',
+    help_url: 'https://www.zoho.com/mail/help/adminconsole/two-factor-authentication.html',
+    help_hint: 'Zoho: turn on two-factor authentication, then make an app password under Security, App passwords.',
   },
 ];
 

@@ -57,6 +57,8 @@ jobs:
               - '.github/workflows/ci.yml'
             trueforge:
               - 'packages/trueforge/**'
+              # The server's tests run the calendar connector's account agent the way the installer does.
+              - 'ops/calendar-sidecar/**'
               - 'package.json'
               - 'pnpm-workspace.yaml'
               - 'tsconfig.base.json'
@@ -110,6 +112,10 @@ jobs:
               - 'ops/browser-sidecar/**'
               - 'package.json'
               - '.github/workflows/ci.yml'
+            calendar-sidecar:
+              - 'ops/calendar-sidecar/**'
+              - 'package.json'
+              - '.github/workflows/ci.yml'
             store:
               - 'packages/trueforge/src/db/**'
               - 'packages/trueforge/tests/db/**'
@@ -145,6 +151,7 @@ jobs:
           SANDBOX_SLOT_AGENT: ${{ steps.filter.outputs['sandbox-slot-agent'] }}
           AMAN_TTS: ${{ steps.filter.outputs['aman-tts'] }}
           BROWSER_SIDECAR: ${{ steps.filter.outputs['browser-sidecar'] }}
+          CALENDAR_SIDECAR: ${{ steps.filter.outputs['calendar-sidecar'] }}
         run: |
           node <<'EOF' >> "$GITHUB_OUTPUT"
           const changedPackages = [];
@@ -157,6 +164,7 @@ jobs:
           if (process.env.SANDBOX_SLOT_AGENT === 'true') changedPackages.push('sandbox-slot-agent');
           if (process.env.AMAN_TTS === 'true') changedPackages.push('aman-tts');
           if (process.env.BROWSER_SIDECAR === 'true') changedPackages.push('browser-sidecar');
+          if (process.env.CALENDAR_SIDECAR === 'true') changedPackages.push('calendar-sidecar');
           console.log(`list=${JSON.stringify(changedPackages)}`);
           EOF
 
@@ -277,6 +285,12 @@ jobs:
         run: |
           python -m pip install --require-hashes --requirement ops/aman-tts/requirements.txt
           python -m pip install httpx==0.28.1
+
+      # The server's tests run the calendar connector's account agent, which reads CalDAV answers with the
+      # connector's own locked packages.
+      - name: Install calendar connector packages
+        if: matrix.package == 'trueforge'
+        run: npm --prefix ops/calendar-sidecar ci --ignore-scripts --no-audit --no-fund
 
       - name: Test
         run: pnpm "test:${{ matrix.package }}"

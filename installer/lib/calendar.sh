@@ -22,22 +22,24 @@ calendar_flags_given() {
 
 calendar_provider_key() { # number or name -> key, nothing when unknown
   case "$1" in
-    1 | google) echo google ;;
-    2 | fastmail) echo fastmail ;;
-    3 | yahoo) echo yahoo ;;
-    4 | gmx) echo gmx ;;
+    1 | fastmail) echo fastmail ;;
+    2 | gmx) echo gmx ;;
+    3 | google) echo google ;;
+    4 | icloud) echo icloud ;;
     5 | webde) echo webde ;;
-    6 | other) echo other ;;
+    6 | yahoo) echo yahoo ;;
+    7 | other) echo other ;;
   esac
 }
 
 calendar_provider_name() { # key -> the name a person sees
   case "$1" in
-    google) echo Google ;;
     fastmail) echo Fastmail ;;
-    yahoo) echo Yahoo ;;
     gmx) echo GMX ;;
+    google) echo Google ;;
+    icloud) echo iCloud ;;
     webde) echo web.de ;;
+    yahoo) echo Yahoo ;;
     *) echo "Other provider" ;;
   esac
 }
@@ -45,15 +47,17 @@ calendar_provider_name() { # key -> the name a person sees
 # Built-in addresses, each from the provider's own help pages. One row per address: the provider key, or
 # gmx:DOMAIN for GMX because its address depends on the domain, then the address. Google's row holds {email},
 # which is replaced with the account's email address. A provider with no row, and GMX with another domain, has
-# its address typed. iCloud and Zoho have no verified address here, so they go under Other.
+# its address typed. Zoho has no verified address here, so it goes under Other. The rows are in the menu's order:
+# alphabetical by the name a person sees, with Other last.
 # The Settings Calendar card reads the same table from packages/trueforge-core (CALDAV_PROVIDER_PRESETS); a test there
 # fails if the two differ.
-CALENDAR_PRESETS='google https://calendar.google.com/calendar/dav/{email}/
-fastmail https://caldav.fastmail.com/dav/
-yahoo https://caldav.calendar.yahoo.com
+CALENDAR_PRESETS='fastmail https://caldav.fastmail.com/dav/
 gmx:gmx.com https://caldav.gmx.com/
 gmx:gmx.net https://caldav.gmx.net/
-webde https://caldav.web.de'
+google https://calendar.google.com/calendar/dav/{email}/
+icloud https://caldav.icloud.com/
+webde https://caldav.web.de
+yahoo https://caldav.calendar.yahoo.com'
 
 # The email address with every character a calendar address cannot hold written as %XX, so an address
 # such as o'brien@ still builds a usable calendar address. Mirrors encodeEmailForUrl in
@@ -88,12 +92,13 @@ calendar_preset_url() { # provider email
 # The provider menu, printed before the provider question and again when the question is asked again.
 calendar_provider_menu() {
   ui_line "Which calendar provider is yours?"
-  ui_line "  1 Google"
-  ui_line "  2 Fastmail"
-  ui_line "  3 Yahoo"
-  ui_line "  4 GMX (gmx.com or gmx.net)"
+  ui_line "  1 Fastmail"
+  ui_line "  2 GMX (gmx.com or gmx.net)"
+  ui_line "  3 Google"
+  ui_line "  4 iCloud"
   ui_line "  5 web.de"
-  ui_line "  6 Other provider, such as iCloud or Zoho: you type its address"
+  ui_line "  6 Yahoo"
+  ui_line "  7 Other provider, such as Zoho: you type its address"
 }
 
 # Google's app password steps, printed as soon as Google is picked, before the email and password are
@@ -115,7 +120,7 @@ calendar_is_gmail() { # email
 
 calendar_provider_problem() {
   if [ -z "$(calendar_provider_key "$1")" ]; then
-    echo "Type a number from 1 to 6, or one of google, fastmail, yahoo, gmx, webde, other."
+    echo "Type a number from 1 to 7, or one of fastmail, gmx, google, icloud, webde, yahoo, other."
   fi
 }
 
@@ -157,7 +162,7 @@ calendar_secret_problem() {
 
 # Checked before any question when --yes is used: nobody can answer, so each missing value is named.
 calendar_require_flags() {
-  [ -n "$CAL_PROVIDER" ] || usage_die "With --yes the calendar needs --calendar-provider: google, fastmail, yahoo, gmx, webde or other."
+  [ -n "$CAL_PROVIDER" ] || usage_die "With --yes the calendar needs --calendar-provider: fastmail, gmx, google, icloud, webde, yahoo or other."
   [ -n "$CAL_EMAIL" ] || usage_die "With --yes the calendar needs --calendar-email ADDRESS, the email address of the calendar account."
 }
 
@@ -193,6 +198,12 @@ calendar_ask_password() {
 # command passes CAL_EXPLICIT=1 and always asks the rest. Flags answer any question they cover.
 calendar_collect() { # install|instance
   local names count preset google_steps_shown=0
+  # The menu numbers follow the order on screen and can change, so a flag names its provider, and only one on the list.
+  case "$OPT_CAL_PROVIDER" in
+    '') ;;
+    *[!0-9]*) [ -n "$(calendar_provider_key "$OPT_CAL_PROVIDER")" ] ;;
+    *) false ;;
+  esac || usage_die "--calendar-provider takes the provider's name: fastmail, gmx, google, icloud, webde, yahoo or other."
   CAL_PROVIDER=$OPT_CAL_PROVIDER
   CAL_EMAIL=$OPT_CAL_EMAIL
   CAL_URL=$OPT_CAL_URL

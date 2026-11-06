@@ -1,7 +1,9 @@
 // Starts the calendar sidecar: the account agent, and the CalDAV tool server behind a plain HTTP address
 // while an account is saved. The tool server always starts from the account file, never from the
 // environment Docker loaded, and it restarts when that file changes. With no account saved it is not
-// started at all, so no calendar tools are offered.
+// started at all, so no calendar tools are offered. When the account's calendars live on another host
+// than the saved address (iCloud), the tool server is started on that host once the sign-in walk has
+// checked it.
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { fileURLToPath, URL } from 'node:url';
@@ -15,12 +17,16 @@ import {
   readAccountText,
   secretIsUsable,
 } from './agent.mjs';
+import { discoverCalendarServer } from './signin.mjs';
 
 const POLL_MS = 2000;
 
 function modulePath(relative) {
   return fileURLToPath(new URL(relative, import.meta.url));
 }
+
+// One argument for a POSIX shell, whatever the path holds.
+const shellQuoted = text => `'${text.replaceAll("'", "'\\''")}'`;
 
 /** The command line of the tool server, which serves the CalDAV tools over HTTP. */
 export function gatewayCommand({ host, port }) {
@@ -29,7 +35,9 @@ export function gatewayCommand({ host, port }) {
     [
       modulePath('./node_modules/supergateway/dist/index.js'),
       '--stdio',
-      `node ${modulePath('./node_modules/@ni-c/caldav-mcp/dist/index.js')}`,
+      // The guard applies the address rules to every lookup the tool server makes. supergateway runs this
+      // line through a shell, so each path is quoted.
+      `node --import ${shellQuoted(modulePath('./connect-guard.mjs'))} ${shellQuoted(modulePath('./node_modules/@ni-c/caldav-mcp/dist/index.js'))}`,
       '--outputTransport',
       'streamableHttp',
       '--host',
@@ -53,10 +61,19 @@ function withoutAgentSecret(environment) {
 
 const hashOf = text => createHash('sha256').update(text, 'utf8').digest('hex');
 
+// How soon the supervisor asks again which address the tool server belongs on: soon after a failed walk,
+// growing to the cap, and every half hour once it has an answer, in case the provider moved the account.
+export const DISCOVERY_RETRY_MS = { first: 15_000, cap: 600_000, settled: 1_800_000 };
+
 export function startSupervisor({ file, host, port, deps = {} }) {
+  const now = deps.now ?? Date.now;
+  const launch = deps.spawn ?? spawn;
   let child = null;
   let running = null;
-  let ticking = false;
+  let serverUrl = null;
+  let inFlight = null;
+  let walking = null;
+  let discovery = { hash: null, at: 0, wait: DISCOVERY_RETRY_MS.first, url: null };
 
   function stop() {
     if (child !== null) {
@@ -64,53 +81,119 @@ export function startSupervisor({ file, host, port, deps = {} }) {
       child = null;
     }
     running = null;
+    serverUrl = null;
   }
 
-  async function tick() {
-    if (ticking) {
+  function start({ account, hash, url }) {
+    const [command, args] = gatewayCommand({ host, port });
+    child = launch(command, args, {
+      stdio: ['ignore', 'inherit', 'inherit'],
+      env: {
+        ...withoutAgentSecret(process.env),
+        CALDAV_URL: url,
+        CALDAV_USERNAME: account.username,
+        CALDAV_PASSWORD: account.password,
+        CALDAV_USER_EMAIL: account.email,
+      },
+    });
+    running = hash;
+    serverUrl = url;
+  }
+
+  // Asks where the calendars are without holding up the rounds: a slow calendar server must not keep a
+  // removed account's tool server running. The answer is used by the next round, which reads the file again.
+  function discover({ account, hash }) {
+    if (discovery.hash !== hash) {
+      discovery = { hash, at: 0, wait: DISCOVERY_RETRY_MS.first, url: null };
+    }
+    if (walking?.hash === hash || now() < discovery.at) {
       return;
     }
-    ticking = true;
-    try {
-      const text = readAccountText(file);
-      const account = parseAccount(text);
-      const wanted = account === null ? null : hashOf(text);
-      const alive = child !== null && child.exitCode === null && child.signalCode === null;
-      if (wanted === running && (wanted === null || alive)) {
-        return;
-      }
-      stop();
-      if (account === null) {
-        return;
-      }
-      // An address that no longer passes the rules is not signed in to, whatever the file says.
-      const allowed = await allowedAddresses(hostOf(account.url), deps);
-      if (!allowed.ok) {
-        return;
-      }
-      const [command, args] = gatewayCommand({ host, port });
-      child = spawn(command, args, {
-        stdio: ['ignore', 'inherit', 'inherit'],
-        env: {
-          ...withoutAgentSecret(process.env),
-          CALDAV_URL: account.url,
-          CALDAV_USERNAME: account.username,
-          CALDAV_PASSWORD: account.password,
-          CALDAV_USER_EMAIL: account.email,
-        },
+    const promise = discoverCalendarServer(account, deps)
+      .catch(() => ({ result: 'server' }))
+      .then(found => {
+        if (discovery.hash !== hash) {
+          return;
+        }
+        discovery =
+          found.result === 'ok'
+            ? { hash, at: now() + DISCOVERY_RETRY_MS.settled, wait: DISCOVERY_RETRY_MS.first, url: found.server_url }
+            : {
+                hash,
+                at: now() + discovery.wait,
+                wait: Math.min(discovery.wait * 2, DISCOVERY_RETRY_MS.cap),
+                url: discovery.url,
+              };
+      })
+      .finally(() => {
+        if (walking?.promise === promise) {
+          walking = null;
+        }
+        void safeTick();
       });
-      running = wanted;
-    } finally {
-      ticking = false;
-    }
+    walking = { hash, promise };
+  }
+
+  // One round at a time: a call while a round runs waits for that round instead of starting another.
+  function tick() {
+    inFlight ??= round().finally(() => {
+      inFlight = null;
+    });
+    return inFlight;
   }
 
   // A failed round is tried again at the next one; it must never end the process.
-  const safeTick = () => tick().catch(() => undefined);
+  function safeTick() {
+    return tick().catch(() => undefined);
+  }
+
+  async function round() {
+    const text = readAccountText(file);
+    const account = parseAccount(text);
+    const hash = account === null ? null : hashOf(text);
+    const alive = child !== null && child.exitCode === null && child.signalCode === null;
+    if (hash !== running || !alive) {
+      stop();
+    }
+    if (account === null) {
+      return;
+    }
+    discover({ account, hash });
+    // The saved address serves until the walk says where the calendars are, so the tools are offered
+    // straight away and a calendar server that is down for now does not hide them.
+    const url = discovery.hash === hash && discovery.url !== null ? discovery.url : account.url;
+    if (child !== null && url === serverUrl) {
+      return;
+    }
+    // The address the tool server is started on passes the rules every time, whatever passed before.
+    const allowed = await allowedAddresses(hostOf(url), deps);
+    const latest = readAccountText(file);
+    if (parseAccount(latest) === null || hashOf(latest) !== hash) {
+      stop();
+      return;
+    }
+    stop();
+    if (allowed.ok) {
+      start({ account, hash, url });
+    }
+  }
+
+  /** Resolves once no round and no walk is running. */
+  async function settled() {
+    for (;;) {
+      const pending = inFlight ?? walking?.promise;
+      if (pending === undefined || pending === null) {
+        return;
+      }
+      await pending.catch(() => undefined);
+    }
+  }
+
   const timer = setInterval(safeTick, POLL_MS);
   void safeTick();
   return {
     tick,
+    settled,
     stop() {
       clearInterval(timer);
       stop();
