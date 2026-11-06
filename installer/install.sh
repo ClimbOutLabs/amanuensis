@@ -373,7 +373,7 @@ print_signout_note() {
 # An instance opened on the network is always served over https, so sign-in is never sent unprotected: --tls off is not
 # a choice anymore. An instance from before this change that still says plain http moves to https on the next run.
 check_tls_options() {
-  if [ "$OPT_TLS" = off ]; then
+  if [ "$(lowercase "$OPT_TLS")" = off ]; then
     usage_die "--tls off is not a choice anymore: an instance opened on your network is served over https with a certificate Aman makes on this computer, so sign-in stays protected. Run again without --tls off."
   fi
 }

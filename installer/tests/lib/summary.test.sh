@@ -75,8 +75,6 @@ Ready. Instance main is running.
   + Run code  on, in a sandbox, with PDF and image reading
   + Data      saved in Docker
   + Backups   daily, keeps the last 7
-  Sign-in on your home network is not encrypted. Use the Tailscale
-  address to keep it private.
   Open a new terminal window to use the aman command.
   Update later: aman upgrade
 ------------------------------------------------------------------------

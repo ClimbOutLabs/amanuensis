@@ -190,6 +190,10 @@ test_tls_off_is_refused() {
   assert_flat_contains "$ERR" "served over https with a certificate Aman makes on this computer"
   assert_no_path "$AMAN_HOME/instances/main"
   assert_no_path "$AMAN_HOME/tls"
+  run_install --yes --email owner@example.invalid --tls OFF
+  assert_rc 2
+  assert_flat_contains "$ERR" "--tls off is not a choice anymore"
+  assert_no_path "$AMAN_HOME/instances/main"
   sandbox_drop
 }
 
@@ -277,6 +281,51 @@ test_an_existing_instance_moves_to_https() {
   assert_eq "$(reg_value main tls)" local
   assert_eq "$(reg_value main tls_port)" 8443
   assert_eq "$(env_value main ALLOWED_ORIGINS)" "$HTTPS_ORIGINS"
+  local file
+  file=$(compose)
+  assert_contains "$file" "- '192.168.1.20:8443:8443'" "the moved instance is served over https"
+  assert_contains "$file" "- '192.168.1.20:8791:8081'" "the plain port reaches only the front end"
+  assert_contains "$file" "image: caddy:2.11.6-alpine@sha256:d44355d3c2149dc580ce2cac735955d1c08d3d00882c30489c241aa51a5c10d9" "the front end is part of the instance"
+  assert_not_contains "$file" "192.168.1.20:8791:8790" "the app itself is not reachable from the network"
+  run_install --yes
+  assert_flat_contains "$OUT" "Nothing to do." "https is kept"
+  sandbox_drop
+}
+
+test_a_failed_move_to_https_keeps_plain_http_and_is_tried_again() {
+  t_begin "when the certificate cannot be made during the move to https, the record still says plain http and the next run finishes the move"
+  sandbox_new
+  lan
+  install_machine
+  # An instance from before https, recorded the way it was then: plain http in the record and in its settings,
+  # with no https port.
+  local plain_origins="http://127.0.0.1:8791,http://localhost:8791,http://192.168.1.20:8791,http://host:8791,http://host.local:8791"
+  sed -i 's/^tls=.*/tls=off/' "$AMAN_HOME/state/instances/main.conf"
+  sed -i 's/^tls_port=.*/tls_port=/' "$AMAN_HOME/state/instances/main.conf"
+  sed -i "s|^origins=.*|origins=$plain_origins|" "$AMAN_HOME/state/instances/main.conf"
+  sed -i "s|^ALLOWED_ORIGINS=.*|ALLOWED_ORIGINS=$plain_origins|" "$AMAN_HOME/instances/main/.env"
+  STUB_PKI_FAIL=1
+  run_install --yes
+  assert_rc 1
+  assert_flat_contains "$ERR" "The certificate for instance main could not be made."
+  assert_flat_contains "$ERR" "could not be moved to https"
+  assert_flat_contains "$ERR" "stays on plain http for now"
+  assert_flat_contains "$ERR" "Run the installer again to finish the move."
+  assert_eq "$(reg_value main tls)" off "the record still says plain http"
+  assert_eq "$(reg_value main tls_port)" "" "and no https port was written"
+  assert_eq "$(reg_value main origins)" "$plain_origins" "and the recorded addresses are still the plain ones"
+  assert_eq "$(env_value main ALLOWED_ORIGINS)" "$plain_origins" "and the settings still list the plain addresses"
+  STUB_PKI_FAIL=
+  run_install --yes
+  assert_rc 0
+  assert_eq "$(reg_value main tls)" local
+  assert_eq "$(reg_value main tls_port)" 8443
+  assert_eq "$(env_value main ALLOWED_ORIGINS)" "$HTTPS_ORIGINS"
+  local file
+  file=$(compose)
+  assert_contains "$file" "- '192.168.1.20:8443:8443'" "the retried move serves the instance over https"
+  assert_contains "$file" "- '192.168.1.20:8791:8081'" "the plain port reaches only the front end"
+  assert_not_contains "$file" "192.168.1.20:8791:8790" "the app itself is not reachable from the network"
   run_install --yes
   assert_flat_contains "$OUT" "Nothing to do." "https is kept"
   sandbox_drop
@@ -540,6 +589,7 @@ test_the_flag_is_checked
 test_a_computer_with_no_network_has_nothing_to_serve
 test_a_busy_https_port_moves_the_instance
 test_an_existing_instance_moves_to_https
+test_a_failed_move_to_https_keeps_plain_http_and_is_tried_again
 test_a_new_address_gets_a_new_certificate
 test_backups_carry_the_certificate_but_not_the_key
 test_renewal_issues_what_is_due

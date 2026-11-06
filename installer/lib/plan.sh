@@ -618,7 +618,7 @@ install_execute() {
   for name in $(reg_names); do
     change=$(instance_address_change "$name")
     if [ -n "$change" ]; then
-      instance_apply_addresses "$name" "$change"
+      instance_apply_addresses "$name" "$change" "$REL_APP_TAG"
       ADDRESS_CHANGED="$ADDRESS_CHANGED $name "
     fi
   done

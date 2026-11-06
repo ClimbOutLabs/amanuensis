@@ -86,9 +86,15 @@ tls_issue() { # name app_image
   ensure_private_dir "$(tls_dir)"
   ensure_private_dir "$(tls_dir)/leaf"
   ensure_private_dir "$(tls_leaf_dir "$name")"
+  # An instance already served over https is fixed by the doctor. One still being moved to https is finished by
+  # running the installer again, which its caller says next, so no fix is named here for it.
   # shellcheck disable=SC2086 # the names are checked hosts without spaces
-  out=$(tls_node "$2" "node /pki.mjs ensure-ca /tls/ca $all && node /pki.mjs issue /tls/ca /tls/leaf/$name $names") ||
-    die "The certificate for instance $name could not be made. Run: aman doctor tls --fix"
+  if ! out=$(tls_node "$2" "node /pki.mjs ensure-ca /tls/ca $all && node /pki.mjs issue /tls/ca /tls/leaf/$name $names"); then
+    if tls_active "$name"; then
+      die "The certificate for instance $name could not be made. Run: aman doctor tls --fix"
+    fi
+    die "The certificate for instance $name could not be made."
+  fi
   case "$out" in
     *'"rotated":true'*)
       TLS_AUTHORITY_REPLACED=1
