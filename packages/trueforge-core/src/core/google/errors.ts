@@ -30,11 +30,14 @@ export class GoogleReconnectRequiredError extends Error {
 /** Google refused or failed a REST request. The message is safe to show; it never carries mail or event text. */
 export class GoogleApiError extends Error {
   readonly status: number;
+  /** Whether Google was only too busy or too slow, so asking again later can work. A 403 for going too fast is busy. */
+  readonly busy: boolean;
 
-  constructor(input: { status: number; message: string; cause?: unknown }) {
+  constructor(input: { status: number; message: string; cause?: unknown; busy?: boolean }) {
     super(input.message, input.cause === undefined ? undefined : { cause: input.cause });
     this.name = 'GoogleApiError';
     this.status = input.status;
+    this.busy = input.busy ?? (input.status === 429 || input.status >= 500);
   }
 }
 
@@ -44,7 +47,7 @@ export class GoogleApiError extends Error {
  */
 export class GoogleUnusableReplyError extends GoogleApiError {
   constructor(input: { message: string; cause?: unknown }) {
-    super({ status: 502, ...input });
+    super({ status: 502, busy: false, ...input });
     this.name = 'GoogleUnusableReplyError';
   }
 }

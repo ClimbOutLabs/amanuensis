@@ -53,7 +53,7 @@ describe('Settings, Reach me mail trouble', () => {
   it('says nothing while mail checks work', async () => {
     renderWithProblem(null);
     await screen.findByRole('checkbox', { name: /Texts/ });
-    expect(screen.queryByText(/could not check your mail/)).toBeNull();
+    expect(screen.queryByText(/has not been able to check your mail/)).toBeNull();
   });
 
   it('says, with the assistant’s own name, since when mail was not checked and the one thing to do', async () => {

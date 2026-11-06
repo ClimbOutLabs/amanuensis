@@ -9,7 +9,11 @@ import type { GmailMessage } from '@truefoundry/trueforge-core/core/email/gmail/
 import { deliveredMailboxOf } from '@truefoundry/trueforge-core/core/email/gmail/mailbox';
 import { headerOf, rawHeaderOf, readBody } from '@truefoundry/trueforge-core/core/email/gmail/message';
 import { GoogleAccessTokens } from '@truefoundry/trueforge-core/core/google/GoogleAccessTokens';
-import { GoogleApiError, GoogleUnusableReplyError } from '@truefoundry/trueforge-core/core/google/errors';
+import {
+  GoogleApiError,
+  GoogleReconnectRequiredError,
+  GoogleUnusableReplyError,
+} from '@truefoundry/trueforge-core/core/google/errors';
 import { grantedFeatures } from '@truefoundry/trueforge-core/core/google/scopes';
 import type { Logger } from 'winston';
 
@@ -23,6 +27,7 @@ import {
   type MailMessage,
   type MailRef,
   type MailSource,
+  type MailWindowRead,
   type NoticingSourceProvider,
 } from './sources';
 
@@ -34,9 +39,9 @@ const EVENTS_PER_PASS = 100;
 
 /**
  * Runs one read of a message and what is made of its reply. A message Gmail no longer has (404) or a reply Aman cannot
- * take in (too large, or not parsing) will fail the same way every time, so it is marked unreadable. A rate limit, a
- * server error or a dropped connection says nothing about the message, so it is marked as a busy server. Anything
- * else, such as a refused request, is thrown as is.
+ * take in (too large, or not parsing) will fail the same way every time, so it is marked unreadable. A busy Gmail (a
+ * rate limit, a server error), a dropped connection and a login that could not be refreshed say nothing about the
+ * message, so they are marked as a busy server. Any other refusal from Gmail is thrown as is.
  */
 async function readingMessage<T>({ read }: { read: () => Promise<T> }): Promise<T> {
   try {
@@ -45,11 +50,13 @@ async function readingMessage<T>({ read }: { read: () => Promise<T> }): Promise<
     if (error instanceof GoogleUnusableReplyError || (error instanceof GoogleApiError && error.status === 404)) {
       throw new MessageUnreadableError({ cause: error });
     }
-    if (error instanceof GoogleApiError && (error.status === 429 || error.status >= 500)) {
-      throw new MailSourceBusyError({ cause: error });
-    }
-    throw error;
+    throw classified(error);
   }
+}
+
+/** A busy Gmail, a dropped connection and a login that could not be refreshed become a busy server; the rest pass on. */
+function classified(error: unknown): unknown {
+  return !(error instanceof GoogleApiError) || error.busy ? new MailSourceBusyError({ cause: error }) : error;
 }
 
 /** Takes the text out of a message already received. Whatever goes wrong is in that message, so it is unreadable. */
@@ -115,6 +122,55 @@ function senderGroups(from: readonly string[] | undefined): (readonly string[] |
   return groups;
 }
 
+/** Lists the inbox mail in a window. Gmail's search takes whole seconds, so it is asked for a little more and the window is cut exactly here. */
+async function listNew({
+  api,
+  since,
+  before,
+  limit,
+  from,
+}: Parameters<MailSource['listNewMessages']>[0] & {
+  api: Pick<GmailApiPort, 'listMessages' | 'getMessageHeaders'>;
+}): Promise<MailWindowRead> {
+  const after = Math.floor(since.getTime() / 1000) - 1;
+  const until = Math.ceil(before.getTime() / 1000) + 1;
+  const window = `in:inbox after:${String(after)} before:${String(until)}`;
+  const ids = new Set<string>();
+  for (const senders of senderGroups(from)) {
+    const query =
+      senders === undefined ? window : `${window} {${senders.map(address => `from:"${address}"`).join(' ')}}`;
+    let pageToken: string | undefined;
+    do {
+      const list = await api.listMessages({ query, maxResults: MESSAGE_IDS_PER_PAGE, pageToken });
+      for (const id of list.messageIds) {
+        ids.add(id);
+      }
+      pageToken = list.nextPageToken;
+      if (ids.size > limit) {
+        return { read: 'too_many' };
+      }
+    } while (pageToken !== undefined);
+  }
+  // Gmail lists the newest first. Reading the oldest first means a read of the whole window that runs out of
+  // time has every message up to where it stopped.
+  const { results, notReached } = await mapSkippingMissing({
+    items: [...ids].reverse(),
+    work: id => api.getMessageHeaders(id),
+    deadlineMs: LIST_DEADLINE_MS,
+  });
+  const messages = results
+    .filter(isIncoming)
+    .map(toMailMessage)
+    .filter(
+      (message): message is MailMessage =>
+        message !== undefined &&
+        message.received_at.getTime() >= since.getTime() &&
+        message.received_at.getTime() < before.getTime(),
+    )
+    .sort((a, b) => a.received_at.getTime() - b.received_at.getTime());
+  return notReached > 0 ? { read: 'oldest', messages } : { read: 'all', messages };
+}
+
 /** Gmail as a mail source, read with the person's own Google login and read-only calls. */
 export function gmailMailSource(
   api: Pick<GmailApiPort, 'listMessages' | 'getMessageHeaders' | 'getMessage' | 'getThread'>,
@@ -122,45 +178,12 @@ export function gmailMailSource(
   return {
     trustedAuthenticationServers: GMAIL_AUTHENTICATION_SERVERS,
     datesAreArrival: true,
-    async listNewMessages({ since, before, limit, from }) {
-      // Gmail's search takes whole seconds, so it is asked for a little more and the window is cut exactly here.
-      const after = Math.floor(since.getTime() / 1000) - 1;
-      const until = Math.ceil(before.getTime() / 1000) + 1;
-      const window = `in:inbox after:${String(after)} before:${String(until)}`;
-      const ids = new Set<string>();
-      for (const senders of senderGroups(from)) {
-        const query =
-          senders === undefined ? window : `${window} {${senders.map(address => `from:"${address}"`).join(' ')}}`;
-        let pageToken: string | undefined;
-        do {
-          const list = await api.listMessages({ query, maxResults: MESSAGE_IDS_PER_PAGE, pageToken });
-          for (const id of list.messageIds) {
-            ids.add(id);
-          }
-          pageToken = list.nextPageToken;
-          if (ids.size > limit) {
-            return { read: 'too_many' };
-          }
-        } while (pageToken !== undefined);
+    async listNewMessages(input) {
+      try {
+        return await listNew({ api, ...input });
+      } catch (error) {
+        throw classified(error);
       }
-      // Gmail lists the newest first. Reading the oldest first means a read of the whole window that runs out of
-      // time has every message up to where it stopped.
-      const { results, notReached } = await mapSkippingMissing({
-        items: [...ids].reverse(),
-        work: id => api.getMessageHeaders(id),
-        deadlineMs: LIST_DEADLINE_MS,
-      });
-      const messages = results
-        .filter(isIncoming)
-        .map(toMailMessage)
-        .filter(
-          (message): message is MailMessage =>
-            message !== undefined &&
-            message.received_at.getTime() >= since.getTime() &&
-            message.received_at.getTime() < before.getTime(),
-        )
-        .sort((a, b) => a.received_at.getTime() - b.received_at.getTime());
-      return notReached > 0 ? { read: 'oldest', messages } : { read: 'all', messages };
     },
     async readText(message) {
       return textOf(await readingMessage({ read: () => api.getMessage(message.id) }));
@@ -270,8 +293,12 @@ export function createGoogleNoticingSources({
     },
     async sourcesFor(owner: PersonOwner) {
       const record = await connections.get(owner);
+      if (record?.status === 'needs_reconnect' && grantedFeatures(record.granted_scopes).includes('gmail_read')) {
+        // Mail is set up but cannot be read until the person signs in again, which is trouble to show, not no mail.
+        return { mail: { status: 'unreachable', error: new GoogleReconnectRequiredError() }, calendar: undefined };
+      }
       if (record?.status !== 'connected') {
-        return { mail: undefined, calendar: undefined };
+        return { mail: { status: 'none' }, calendar: undefined };
       }
       const features = grantedFeatures(record.granted_scopes);
       const tokens = new GoogleAccessTokens({ now: undefined, connections, owner, fetchImpl });
@@ -286,8 +313,8 @@ export function createGoogleNoticingSources({
       });
       return {
         mail: features.includes('gmail_read')
-          ? gmailMailSource(new GmailApi({ sleep: undefined, tokens, fetchImpl }))
-          : undefined,
+          ? { status: 'ready', source: gmailMailSource(new GmailApi({ sleep: undefined, tokens, fetchImpl })) }
+          : { status: 'none' },
         calendar: calendarApi === undefined ? undefined : googleCalendarSource({ api: calendarApi, timeZone }),
       };
     },
