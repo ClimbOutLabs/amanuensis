@@ -166,6 +166,8 @@ Be clear about one thing: **the model sees what you send it.** If you use a host
 
 Sending a message, deleting anything and installing anything always wait for your OK. That rule is enforced in code, on the tool itself, not left to the model's good behaviour.
 
+[docs/what-aman-can-do-to-you.md](docs/what-aman-can-do-to-you.md) says plainly what Aman can and cannot do on its own, and what keeps each limit in place.
+
 ## For developers and the curious
 
 ### How it works

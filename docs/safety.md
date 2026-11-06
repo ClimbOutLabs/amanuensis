@@ -51,4 +51,4 @@ A scheduled run has nobody watching it, so it never sends or changes anything by
 - Held actions expire after 24 hours. Up to 20 are kept per chat; if more were held, the list says how many were not saved so you can ask again in chat.
 - A helper job inside a scheduled run cannot hold actions. Its actions are refused.
 
-See [Schedules](/schedules) for how schedules work, and [Privacy](/privacy) for what leaves your machine.
+See [Schedules](/schedules) for how schedules work, [Privacy](/privacy) for what leaves your machine, and [What Aman can do to you](/what-aman-can-do-to-you) for the whole picture on one page.
