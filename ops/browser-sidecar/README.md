@@ -41,8 +41,9 @@ and names the person's profile (`owner`) and the chat's tab (`tab`).
   on this computer or a private network, then returns a read.
 - `POST /read { owner, tab }` — the page as text, in reading order: its title, its address, its
   headings and text, and its controls, each actionable one with a short ref (`e14`). A password,
-  payment or one-time-code field never shows its value. A page too long for one read starts where
-  the view is, and says that the part above it is left out.
+  payment or one-time-code field never shows its value. Each read says where the view is, in pixels
+  down the page (or the inner box that scrolls). A page too long for one read starts where the view
+  is, keeps its main heading and alerts, and says that the part above it is left out.
 - `POST /scroll { owner, tab, direction }`, `POST /back { owner, tab }` — move around, then return a
   read.
 - `POST /screenshot { owner, tab }` — a PNG of the page, which the app shows to the person in the chat.

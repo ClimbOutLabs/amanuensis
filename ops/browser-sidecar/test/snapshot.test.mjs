@@ -96,3 +96,23 @@ test('keeps the whole of a page that fits, wherever it is scrolled to', () => {
   const text = renderSnapshot({ title: 'Short', url: 'https://example.com', nodes, refs: new Map() });
   assert.match(text, /Top line\nLine in view$/);
 });
+
+test('says where the view is, and when it is at the end of the page', () => {
+  const nodes = [node({ id: 'a', role: 'text', name: 'Hello' })];
+  const middle = renderSnapshot({
+    title: 'T',
+    url: 'https://example.com',
+    nodes,
+    refs: new Map(),
+    view: { top: 800, bottom: 1600, height: 4000 },
+  });
+  const end = renderSnapshot({
+    title: 'T',
+    url: 'https://example.com',
+    nodes,
+    refs: new Map(),
+    view: { top: 3200, bottom: 4000, height: 4000 },
+  });
+  assert.match(middle, /^# T\nhttps:\/\/example\.com\nIn view: 800 to 1600 of 4000 pixels down\nHello$/);
+  assert.match(end, /In view: 3200 to 4000 of 4000 pixels down, the end of the page\n/);
+});

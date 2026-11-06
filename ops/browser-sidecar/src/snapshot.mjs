@@ -42,11 +42,20 @@ function oneLine({ node, ref }) {
 }
 
 /**
+ * Where the view is on the page, so a scroll that moved it reads differently from one that did not,
+ * and the model can tell when it has reached the end.
+ */
+function viewLine({ top, bottom, height }) {
+  const end = bottom >= height ? ', the end of the page' : '';
+  return `In view: ${String(top)} to ${String(Math.min(bottom, height))} of ${String(height)} pixels down${end}\n`;
+}
+
+/**
  * Builds the snapshot text. `nodes` is the extractor's flat list of visible content in reading order; `refs` maps each actionable node to the short id it keeps for this page (stable
  * across re-reads of the same page, assigned once by the caller that tracks them).
  */
-export function renderSnapshot({ title, url, nodes, refs }) {
-  const header = `# ${title === '' ? '(untitled)' : title}\n${url}\n`;
+export function renderSnapshot({ title, url, nodes, refs, view }) {
+  const header = `# ${title === '' ? '(untitled)' : title}\n${url}\n${view === undefined ? '' : viewLine(view)}`;
   const render = shown => shown.map(node => oneLine({ node, ref: refs.get(node.id) ?? null })).join('\n');
   let body = render(nodes);
   let truncated = false;
