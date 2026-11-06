@@ -18,6 +18,7 @@ import type { CallToolRequest } from '@modelcontextprotocol/sdk/types.js';
 import type { AgentCapability, AgentTracing } from '@truefoundry/trueforge-core/core';
 import {
   BROWSER_CLICK_TOOL_NAME,
+  BROWSER_SERVER_ID,
   defineTool,
   LocalToolMCP,
   toolResultResponse,
@@ -28,8 +29,6 @@ import type { ToolBundleName } from '@truefoundry/trueforge-core/core/runtime/to
 import type { Logger } from 'winston';
 import { z } from 'zod';
 import configuration, { getPublicUiBasePath } from '../config';
-
-export const BROWSER_SERVER_ID = 'browser';
 
 /** Browser tools read a page and move around it; nothing here submits anything. */
 const BROWSER_READ_ANNOTATIONS = { readOnlyHint: true, openWorldHint: true } as const;
