@@ -3,26 +3,41 @@
 // already tagged with the field kind that governs whether its value may be shown.
 
 /** Attribute and name patterns that mark a field as a password, a card number, or a one-time code. */
+/**
+ * A field's name and id as plain lowercase words: `otp_code`, `otpCode` and `otp-code` all read
+ * `otp code`, so the patterns below match whatever naming style a site uses.
+ */
+function nameWords(element) {
+  return `${element.getAttribute('name') ?? ''} ${element.id ?? ''}`
+    .replace(/([a-z])([A-Z])/g, '$1 $2')
+    .replace(/([a-zA-Z])([0-9])/g, '$1 $2')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
+}
+
+const CARD_WORDS = /\b(card ?(number|no|num)|cc ?(num|number|no)|cvv|cvc|csc|security ?code)\b/;
+const CODE_WORDS = /\b(otp|totp|pin|passcode|(one ?time|verification|mfa|2 ?fa|sms|otp|pin) ?code)\b/;
+
 function fieldKind(element) {
   const type = (element.getAttribute('type') ?? '').toLowerCase();
   const autocomplete = (element.getAttribute('autocomplete') ?? '').toLowerCase();
-  const name = `${element.getAttribute('name') ?? ''} ${element.id ?? ''}`.toLowerCase();
+  const words = nameWords(element);
   if (type === 'password') {
     return 'password';
   }
-  if (autocomplete.startsWith('cc-') || /\b(card.?number|card.?no|cc.?num(ber)?|cvv|cvc|security.?code)\b/.test(name)) {
+  if (autocomplete.startsWith('cc-') || CARD_WORDS.test(words)) {
     return 'card';
   }
-  if (
-    autocomplete === 'one-time-code' ||
-    /\b(otp|totp|pin|passcode|one.?time.?code|verification.?code|mfa.?code|2fa.?code)\b/.test(name)
-  ) {
+  if (autocomplete === 'one-time-code' || CODE_WORDS.test(words)) {
     return 'otp';
   }
   // A code typed one digit per box: only the first box often says what it is.
   const maxLength = element.getAttribute('maxlength');
   const inputMode = (element.getAttribute('inputmode') ?? '').toLowerCase();
-  if (maxLength === '1' && (inputMode === 'numeric' || type === 'tel' || type === 'number')) {
+  const pattern = element.getAttribute('pattern') ?? '';
+  const digitsOnly = pattern.includes('0-9') || pattern.includes('\\d');
+  if (maxLength === '1' && (inputMode === 'numeric' || type === 'tel' || type === 'number' || digitsOnly)) {
     return 'otp';
   }
   return null;

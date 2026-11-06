@@ -33,6 +33,9 @@ function boxesInViewScript(paths) {
 }
 
 /** The same bundled module, ending in the boxes the model's copy of a screenshot must cover. */
+/** How long the model's copy of a screenshot may take to draw. */
+const PICTURE_WORKER_MS = 5000;
+
 const MASK_BOXES_SCRIPT = `(() => {\n${EXTRACT_MODULE}\nreturn maskBoxes();\n})()`;
 
 /**
@@ -40,12 +43,16 @@ const MASK_BOXES_SCRIPT = `(() => {\n${EXTRACT_MODULE}\nreturn maskBoxes();\n})(
  * the DOM but not this world's JavaScript, so a page that hooks getBoundingClientRect or watches
  * its own functions being called cannot bend the result or tell that the shot is being taken.
  */
-async function inIsolatedWorld(cdp, expression) {
+async function isolatedWorld(cdp) {
   const { frameTree } = await cdp.send('Page.getFrameTree');
   const { executionContextId } = await cdp.send('Page.createIsolatedWorld', {
     frameId: frameTree.frame.id,
     worldName: 'aman-picture',
   });
+  return executionContextId;
+}
+
+async function inIsolatedWorld({ cdp, executionContextId, expression }) {
   const { result, exceptionDetails } = await cdp.send('Runtime.evaluate', {
     expression,
     contextId: executionContextId,
@@ -57,9 +64,12 @@ async function inIsolatedWorld(cdp, expression) {
   return result.value;
 }
 
-/** Whether a node of a DOM.getDocument tree holds a form field anywhere below it, shadow roots included. */
+/**
+ * Whether a node of a DOM.getDocument tree holds a form field anywhere below it, shadow roots
+ * included. A frame or embed counts too: what it shows cannot be read here, so it is covered whole.
+ */
 function holdsField(node) {
-  if (['INPUT', 'TEXTAREA', 'SELECT'].includes(node.nodeName)) {
+  if (['INPUT', 'TEXTAREA', 'SELECT', 'IFRAME', 'FRAME', 'EMBED', 'OBJECT'].includes(node.nodeName)) {
     return true;
   }
   return [...(node.children ?? []), ...(node.shadowRoots ?? [])].some(holdsField);
@@ -566,8 +576,13 @@ export class BrowserSidecar {
     const text = renderSnapshot({ title: await tab.page.title(), url: tab.page.url(), nodes, refs });
     const cdp = await tab.page.context().newCDPSession(tab.page);
     try {
-      const layout = await inIsolatedWorld(cdp, boxesInViewScript([...refs.keys()]));
-      const covered = await inIsolatedWorld(cdp, MASK_BOXES_SCRIPT);
+      const executionContextId = await isolatedWorld(cdp);
+      const layout = await inIsolatedWorld({
+        cdp,
+        executionContextId,
+        expression: boxesInViewScript([...refs.keys()]),
+      });
+      const covered = await inIsolatedWorld({ cdp, executionContextId, expression: MASK_BOXES_SCRIPT });
       const closed = await closedShadowFieldBoxes(cdp);
       const boxOf = new Map(layout.boxes.map(({ path, ...box }) => [path, box]));
       return {
@@ -940,12 +955,22 @@ function markInWorker({ png, scale, controls, masks }) {
     const worker = new Worker(new URL('./pictureWorker.mjs', import.meta.url), {
       workerData: { png, scale, controls, masks },
     });
+    // Drawing is bounded work; a worker that has not answered by now is stopped, and no copy is made.
+    const timer = setTimeout(() => {
+      reject(new Error('the picture worker took too long'));
+      void worker.terminate();
+    }, PICTURE_WORKER_MS);
     worker.once('message', marked => {
+      clearTimeout(timer);
       resolve(Buffer.from(marked));
       void worker.terminate();
     });
-    worker.once('error', reject);
+    worker.once('error', error => {
+      clearTimeout(timer);
+      reject(error);
+    });
     worker.once('exit', code => {
+      clearTimeout(timer);
       if (code !== 0) {
         reject(new Error('the picture worker stopped'));
       }

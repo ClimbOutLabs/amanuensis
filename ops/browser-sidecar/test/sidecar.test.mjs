@@ -127,6 +127,22 @@ async function withWorld(run) {
       <script>
         Element.prototype.getBoundingClientRect = () => new DOMRect(0, 0, 0, 0);
       </script>`),
+    // A frame with a card field in it, inside a closed shadow root.
+    '/card-shadow-frame': html(`<h1>Pay</h1><div id="closed"></div>
+      <script>
+        document.getElementById('closed').attachShadow({ mode: 'closed' }).innerHTML =
+          ${JSON.stringify(`<iframe style="width:320px;height:80px;border:0" srcdoc="${CARD_FIELD.replaceAll('"', '&quot;')}"></iframe>`)};
+      </script>`),
+    // Code and card fields named the ways sites name them, each holding a value that must not show.
+    '/code-names': html(`<h1>Verify</h1>
+      ${['otp_code', 'otpCode', 'pin_code', 'pincode', 'cvv_code', 'smsCode', 'cvc2', 'verificationCode']
+        .map(
+          name =>
+            `<input name="${name}" value="135790" style="display:block;width:300px;height:40px;background:#00ff00;color:#00ff00;border:0" />`,
+        )
+        .join('')}
+      <input maxlength="1" pattern="[0-9]" value="7" style="display:block;width:300px;height:40px;background:#00ff00;color:#00ff00;border:0" />
+      <input name="zip_code" value="94110" />`),
     '/code-boxes': html(`<h1>Enter the code</h1>
       ${[1, 2, 3].map(() => '<input maxlength="1" inputmode="numeric" value="7" style="width:60px;height:60px;background:#00ff00;color:#00ff00;border:0" />').join('')}`),
     // A page that watches for anything added to it and says so in its title.
@@ -671,7 +687,14 @@ test(
   { skip: !browsersAvailable },
   async () => {
     await withWorld(async ({ sidecar }) => {
-      for (const page of ['/card-frame', '/card-shadow', '/card-lies', '/code-boxes']) {
+      for (const page of [
+        '/card-frame',
+        '/card-shadow',
+        '/card-shadow-frame',
+        '/card-lies',
+        '/code-boxes',
+        '/code-names',
+      ]) {
         await sidecar.open({ owner: 'owner-1', tab: 'chat-1', url: `http://site-a.test${page}` });
         const shot = await sidecar.screenshot({ owner: 'owner-1', tab: 'chat-1' });
         assert.ok(pixelsOf(shot.png_base64, [0, 0xff, 0]) > 1000, `${page}: the person's picture shows the field`);
@@ -680,6 +703,15 @@ test(
     });
   },
 );
+
+test('code and card fields are found whatever naming style the site uses', { skip: !browsersAvailable }, async () => {
+  await withWorld(async ({ sidecar }) => {
+    const opened = await sidecar.open({ owner: 'owner-1', tab: 'chat-1', url: 'http://site-a.test/code-names' });
+    assert.doesNotMatch(opened.text, /135790/);
+    assert.doesNotMatch(opened.text, /: 7$/m);
+    assert.match(opened.text, /94110/, 'a zip code is not a secret');
+  });
+});
 
 test('taking a screenshot changes nothing a page can see', { skip: !browsersAvailable }, async () => {
   await withWorld(async ({ sidecar }) => {
