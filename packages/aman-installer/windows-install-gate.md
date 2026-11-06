@@ -88,6 +88,19 @@ Write down the clock time at step 1 and at step 12.
 12. **Check Aman** from the Start menu. Every check passes, or the ones
     that do not say what to do. Stop the clock.
 
+13. **Back up and restore.** This step runs once `aman restore` is in
+    the release under test.
+    - Run **Backups** from the Start menu, or `aman backup`, and note the
+      backup's name.
+    - Wipe the instance, the way `docs/backup.md` says to start over, so
+      the chats from step 8 are gone.
+    - Run `aman restore` and name that backup. It asks before it
+      replaces anything.
+    - Sign in again and check the chat from step 8 and the daily brief
+      from step 9 are back.
+    - Also try it once with the wrong backup key, and once while the
+      instance is running, and check what it says.
+
 Then, on each computer:
 
 - Restart the computer once more, sign in, and open Aman from the Start
@@ -108,10 +121,12 @@ Then, on each computer:
 ## Launch gate table
 
 Fill one row per computer. Time is from step 1 to step 12, restarts
-included. Result is Pass, or Fail with the bug links.
+included. Restore is step 13: Pass, Fail with the bug links, or Not yet
+when the release has no `aman restore`. Result is Pass, or Fail with
+the bug links, and a run passes only when Restore passes too.
 
-| Machine                   | Windows build | Release tag | Date | Who | Time | Docker Desktop before / after | Result | Bugs and doc fixes |
-| ------------------------- | ------------- | ----------- | ---- | --- | ---- | ----------------------------- | ------ | ------------------ |
-| A: Win 11 Home, clean     |               |             |      |     |      | none /                        |        |                    |
-| B: Win 10 22H2, clean     |               |             |      |     |      | none /                        |        |                    |
-| C: Docker Desktop running |               |             |      |     |      | /                             |        |                    |
+| Machine                   | Windows build | Release tag | Date | Who | Time | Docker Desktop before / after | Restore | Result | Bugs and doc fixes |
+| ------------------------- | ------------- | ----------- | ---- | --- | ---- | ----------------------------- | ------- | ------ | ------------------ |
+| A: Win 11 Home, clean     |               |             |      |     |      | none /                        |         |        |                    |
+| B: Win 10 22H2, clean     |               |             |      |     |      | none /                        |         |        |                    |
+| C: Docker Desktop running |               |             |      |     |      | /                             |         |        |                    |
