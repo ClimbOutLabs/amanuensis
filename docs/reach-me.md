@@ -27,7 +27,7 @@ Everything lands under the bell with the reason you got it.
 
 A model reads a short description of each new thing and suggests how loudly to tell you. It can only suggest. Your settings decide. A waiting approval can nudge you but never call. A bill can nudge you only when it came from someone you marked always important and your mail server confirmed the sender, and it never calls. Words in a message, such as "urgent", can never make it louder than a note.
 
-The model also suggests the words of the item. Those words show only under the bell in the app, and only when they hold no link, phone number or address. Otherwise Aman uses a plain sentence about what it found. A notice on your phone only names the kind of thing, such as a bill. It never carries the model's words.
+The model also suggests the words of the item. Those words show only under the bell in the app, and only when they hold no link, phone number or address. Otherwise Aman uses a plain sentence about what it found. A notice on your phone only names the kind of thing, such as a bill. It never carries the model's words. A [text](/text-messages) about something Aman noticed names only the kind of thing too, even in Full mode. Only a reminder's text can carry its own words, and only in Full mode.
 
 ## Your settings
 
