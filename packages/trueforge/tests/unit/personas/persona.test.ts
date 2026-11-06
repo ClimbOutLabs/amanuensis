@@ -16,6 +16,7 @@ function persona(overrides: Partial<Persona> & Pick<Persona, 'id' | 'display_nam
     aliases: [],
     instructions: 'Answer plainly.',
     model_name: 'scripted/model',
+    voice: null,
     created_at: '2026-08-27T00:00:00.000Z',
     updated_at: '2026-08-27T00:00:00.000Z',
     updated_by: 'user-a',
@@ -108,8 +109,6 @@ describe('name folding is locale-independent and Unicode-normalising', () => {
       personaNameKeys({
         display_name: 'Ｚara',
         aliases: [],
-        instructions: 'x',
-        model_name: 'scripted/model',
       }),
     ).toEqual(['zara']);
   });
@@ -122,12 +121,14 @@ describe('normalizePersonaContent', () => {
       aliases: ['Z', 'Zed'],
       instructions: '  Answer plainly.  ',
       model_name: ' scripted/model ',
+      voice: 'af_bella',
     };
     expect(normalizePersonaContent(content)).toEqual({
       display_name: 'Zara Quinn',
       aliases: ['Z', 'Zed'],
       instructions: 'Answer plainly.',
       model_name: 'scripted/model',
+      voice: 'af_bella',
     });
   });
 
@@ -141,6 +142,7 @@ describe('normalizePersonaContent', () => {
         aliases,
         instructions: 'Answer plainly.',
         model_name: 'scripted/model',
+        voice: null,
       }),
     ).toThrow(/duplicates .* after trimming and case-folding/);
   });
@@ -267,6 +269,7 @@ describe('invocation determiners', () => {
       aliases: [],
       instructions: 'Answer plainly.',
       model_name: 'scripted/model',
+      voice: null,
     };
     expect(findPersonaContentNameConflict(content)).toEqual({
       aliasIndex: -1,
@@ -283,6 +286,7 @@ describe('invocation determiners', () => {
       aliases: ['my'],
       instructions: 'Answer plainly.',
       model_name: 'scripted/model',
+      voice: null,
     };
     expect(findPersonaContentNameConflict(content)).toEqual({
       aliasIndex: 0,

@@ -475,6 +475,7 @@ export async function seedRichInstance<TTransaction>(input: SeedRichInstanceInpu
     aliases: ['Deep dive'],
     instructions: 'Research carefully and cite sources.',
     model_name: 'test-provider/test-model',
+    voice: 'af_bella',
     updated_by: userId,
   });
   await stores.personaStore.createPersona({
@@ -485,6 +486,7 @@ export async function seedRichInstance<TTransaction>(input: SeedRichInstanceInpu
     aliases: [],
     instructions: 'Cook simply.',
     model_name: 'test-provider/test-model',
+    voice: null,
     updated_by: userId,
   });
 

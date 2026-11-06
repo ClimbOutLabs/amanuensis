@@ -88,6 +88,7 @@ async function setup(
           aliases: [],
           instructions: 'Be brief.',
           model_name: 'test-provider/persona-model',
+          voice: null,
         })
       : undefined;
   const assistantName = 'assistantName' in input ? (input.assistantName ?? null) : 'Aman';

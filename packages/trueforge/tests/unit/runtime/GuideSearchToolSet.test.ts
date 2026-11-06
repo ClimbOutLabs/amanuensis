@@ -29,6 +29,7 @@ const GUIDE: Persona = {
   aliases: [],
   instructions: 'Explain Aman.',
   model_name: PERSONA_MODEL,
+  voice: null,
   created_at: '2026-08-27T00:00:00.000Z',
   updated_at: '2026-08-27T00:00:00.000Z',
   updated_by: 'u1',

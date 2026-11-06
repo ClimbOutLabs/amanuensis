@@ -16,7 +16,7 @@ vi.mock('@/assistant-ui.js', () => ({
 import { ActivePersonaIndicator } from '@/atoms/ActivePersonaIndicator.js';
 import { PersonaProvider, type PersonaApi, type SessionPersona } from '@/components/PersonaContext.js';
 import { applyHeldPersona, holdPersonaForNewChat } from '@/personaMutationGate.js';
-import { personaKnowledgeApiStubs } from '../personaApiStubs.js';
+import { personaApiStubs } from '../personaApiStubs.js';
 
 const ZARA: SessionPersona = {
   persona_id: 'p-zara',
@@ -43,8 +43,8 @@ const DEFAULT_SPEAKER: SessionPersona = {
 };
 
 const PERSONAS = [
-  { id: 'p-zara', display_name: 'Zara', aliases: [], instructions: '', model_name: 'anthropic/haiku' },
-  { id: 'p-nova', display_name: 'Nova', aliases: [], instructions: '', model_name: 'openai/gpt-4.1' },
+  { id: 'p-zara', display_name: 'Zara', aliases: [], instructions: '', model_name: 'anthropic/haiku', voice: null },
+  { id: 'p-nova', display_name: 'Nova', aliases: [], instructions: '', model_name: 'openai/gpt-4.1', voice: null },
 ];
 
 /** Goes back to the assistant through the control's menu, as a person does. */
@@ -59,7 +59,7 @@ async function unavailable(): Promise<never> {
 
 function renderIndicator(overrides: Partial<PersonaApi>) {
   const api: PersonaApi = {
-    ...personaKnowledgeApiStubs,
+    ...personaApiStubs,
     listPersonas: async () => PERSONAS,
     createPersona: unavailable,
     updatePersona: unavailable,

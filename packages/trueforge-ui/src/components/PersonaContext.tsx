@@ -1,6 +1,18 @@
 'use client';
 
-import { createContext, useCallback, useContext, useEffect, useMemo, useState, type FC, type ReactNode } from 'react';
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type FC,
+  type ReactNode,
+} from 'react';
+
+import { isServerVoiceId, type ServerVoiceId } from '../utils/speechReplyPreferences.js';
 
 /** Identity, role, and model binding for one configured persona. */
 export type Persona = {
@@ -9,6 +21,8 @@ export type Persona = {
   aliases: string[];
   instructions: string;
   model_name: string;
+  /** Voice that reads this persona's replies aloud; null uses the person's own voice choice. */
+  voice: string | null;
 };
 
 export type PersonaDraft = Omit<Persona, 'id'>;
@@ -25,6 +39,11 @@ export type SessionPersona = {
   turn_id: string | null;
 };
 
+/** Which persona answered one turn. `persona_id: null` = the default assistant. */
+export type TurnPersona = {
+  persona_id: string | null;
+};
+
 export type PersonaApi = {
   listPersonas: () => Promise<Persona[]>;
   createPersona: (draft: PersonaDraft) => Promise<Persona>;
@@ -32,6 +51,7 @@ export type PersonaApi = {
   deletePersona: (id: string) => Promise<void>;
   getSessionPersona: (sessionId: string) => Promise<SessionPersona | null>;
   setSessionPersona: (sessionId: string, personaId: string | null) => Promise<SessionPersona | null>;
+  getTurnPersona: (input: { sessionId: string; turnId: string }) => Promise<TurnPersona>;
   listPersonaKnowledge: (personaId: string) => Promise<PersonaKnowledgeDocument[]>;
   createPersonaKnowledge: (personaId: string, input: NewPersonaKnowledgeDocument) => Promise<PersonaKnowledgeDocument>;
   deletePersonaKnowledge: (personaId: string, documentId: string) => Promise<void>;
@@ -91,6 +111,7 @@ export const EMPTY_PERSONA_DRAFT: PersonaDraft = {
   aliases: [],
   instructions: '',
   model_name: '',
+  voice: null,
 };
 
 type PersonaContextValue = {
@@ -102,6 +123,11 @@ type PersonaContextValue = {
   deletePersona: (id: string) => Promise<void>;
   getSessionPersona: (sessionId: string) => Promise<SessionPersona | null>;
   setSessionPersona: (sessionId: string, personaId: string | null) => Promise<SessionPersona | null>;
+  /**
+   * The voice picked for the persona that answered this turn, or undefined when that persona has none
+   * (or the default assistant answered), so the person's own voice choice reads it.
+   */
+  voiceForTurn: (input: { sessionId: string; turnId: string }) => Promise<ServerVoiceId | undefined>;
   listPersonaKnowledge: (personaId: string) => Promise<PersonaKnowledgeDocument[]>;
   createPersonaKnowledge: (personaId: string, input: NewPersonaKnowledgeDocument) => Promise<PersonaKnowledgeDocument>;
   deletePersonaKnowledge: (personaId: string, documentId: string) => Promise<void>;
@@ -164,6 +190,28 @@ export const PersonaProvider: FC<{ api: PersonaApi; children: ReactNode }> = ({ 
 
   const { getSessionPersona, setSessionPersona } = api;
 
+  // Who answered a turn never changes, so each turn is asked about once. The voice is read from the
+  // current persona list, so a voice changed in Settings applies to the next reply read aloud.
+  const turnPersonaIds = useRef(new Map<string, Promise<string | null>>());
+  const personasRef = useRef(personas);
+  personasRef.current = personas;
+  const voiceForTurn = useCallback(
+    async ({ sessionId, turnId }: { sessionId: string; turnId: string }): Promise<ServerVoiceId | undefined> => {
+      const cacheKey = `${sessionId}/${turnId}`;
+      let personaId = turnPersonaIds.current.get(cacheKey);
+      if (personaId === undefined) {
+        personaId = api.getTurnPersona({ sessionId, turnId }).then(turn => turn.persona_id);
+        turnPersonaIds.current.set(cacheKey, personaId);
+        // A failed lookup is not remembered, so the next reply read aloud asks again.
+        personaId.catch(() => turnPersonaIds.current.delete(cacheKey));
+      }
+      const id = await personaId;
+      const voice = id === null ? null : (personasRef.current.find(persona => persona.id === id)?.voice ?? null);
+      return voice !== null && isServerVoiceId(voice) ? voice : undefined;
+    },
+    [api],
+  );
+
   const listPersonaKnowledge = useCallback((personaId: string) => api.listPersonaKnowledge(personaId), [api]);
   const createPersonaKnowledge = useCallback(
     (personaId: string, input: NewPersonaKnowledgeDocument) => api.createPersonaKnowledge(personaId, input),
@@ -188,6 +236,7 @@ export const PersonaProvider: FC<{ api: PersonaApi; children: ReactNode }> = ({ 
       deletePersona,
       getSessionPersona,
       setSessionPersona,
+      voiceForTurn,
       listPersonaKnowledge,
       createPersonaKnowledge,
       deletePersonaKnowledge,
@@ -203,6 +252,7 @@ export const PersonaProvider: FC<{ api: PersonaApi; children: ReactNode }> = ({ 
       deletePersona,
       getSessionPersona,
       setSessionPersona,
+      voiceForTurn,
       listPersonaKnowledge,
       createPersonaKnowledge,
       deletePersonaKnowledge,

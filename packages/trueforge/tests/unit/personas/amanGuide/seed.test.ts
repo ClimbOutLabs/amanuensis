@@ -89,6 +89,7 @@ describe('createGuideSeeder', () => {
       aliases: [],
       instructions: 'Imported copy.',
       model_name: MODEL,
+      voice: null,
     });
 
     await createGuideSeeder({ logger })('person-b', installFor('person-b'));
@@ -128,6 +129,7 @@ describe('seedExistingGuides', () => {
       aliases: [],
       instructions: 'Their own persona.',
       model_name: MODEL,
+      voice: null,
     });
     const seeder = createGuideSeeder({ logger });
     const seeded: string[] = [];

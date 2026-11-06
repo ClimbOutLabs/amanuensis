@@ -119,10 +119,11 @@ export class PersonasClient {
      * @example
      *     await client.personas.create({
      *         persona: {
-     *             aliases: ["aliases"],
+     *             aliases: ["Z"],
      *             displayName: "Zara",
-     *             instructions: "instructions",
-     *             modelName: "model_name"
+     *             instructions: "Answer as a careful archivist.",
+     *             modelName: "openai/gpt-4.1",
+     *             voice: "af_bella"
      *         }
      *     })
      */
@@ -258,10 +259,11 @@ export class PersonasClient {
      * @example
      *     await client.personas.update("persona_id", {
      *         persona: {
-     *             aliases: ["aliases"],
+     *             aliases: ["Z"],
      *             displayName: "Zara",
-     *             instructions: "instructions",
-     *             modelName: "model_name"
+     *             instructions: "Answer as a careful archivist.",
+     *             modelName: "openai/gpt-4.1",
+     *             voice: "af_bella"
      *         }
      *     })
      */

@@ -6,6 +6,7 @@ import type {
   PersonaKnowledgeDocument,
   PersonaKnowledgeEmbeddingModel,
   SessionPersona,
+  TurnPersona,
 } from '@truefoundry/trueforge-ui';
 
 const PERSONAS_URL = '/api/v1/personas';
@@ -28,6 +29,7 @@ function parsePersona(data: unknown): Persona {
     typeof persona.display_name !== 'string' ||
     typeof persona.instructions !== 'string' ||
     typeof persona.model_name !== 'string' ||
+    (persona.voice !== null && typeof persona.voice !== 'string') ||
     !isStringArray(persona.aliases)
   ) {
     throw new Error('The persona response was invalid.');
@@ -38,6 +40,7 @@ function parsePersona(data: unknown): Persona {
     aliases: persona.aliases,
     instructions: persona.instructions,
     model_name: persona.model_name,
+    voice: persona.voice,
   };
 }
 
@@ -60,6 +63,17 @@ function parseSessionPersona(data: unknown): SessionPersona | null {
     throw new Error('The session persona response was invalid.');
   }
   return { persona_id: personaId, persona_name: name, model_name: model, source, turn_id: turnId };
+}
+
+function parseTurnPersona(data: unknown): TurnPersona {
+  if (typeof data !== 'object' || data === null) {
+    throw new Error('The turn persona response was invalid.');
+  }
+  const turn: Record<string, unknown> = { ...data };
+  if (turn.persona_id !== null && typeof turn.persona_id !== 'string') {
+    throw new Error('The turn persona response was invalid.');
+  }
+  return { persona_id: turn.persona_id };
 }
 
 function parseKnowledgeDocument(data: unknown): PersonaKnowledgeDocument {
@@ -166,6 +180,10 @@ export function createPersonaApi(fetcher: typeof fetch): PersonaApi {
     async setSessionPersona(sessionId: string, personaId: string | null) {
       const response = await fetcher(sessionPersonaUrl(sessionId), jsonInit('PUT', { persona_id: personaId }));
       return parseSessionPersona(await readData(response));
+    },
+    async getTurnPersona({ sessionId, turnId }) {
+      const url = `/api/v1/sessions/${encodeURIComponent(sessionId)}/turns/${encodeURIComponent(turnId)}/persona`;
+      return parseTurnPersona(await readData(await fetcher(url)));
     },
     async listPersonaKnowledge(personaId: string) {
       const data = await readData(await fetcher(`${PERSONAS_URL}/${encodeURIComponent(personaId)}/knowledge`));

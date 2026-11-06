@@ -44,13 +44,16 @@ export type VoiceStatusResponse = z.infer<typeof VoiceStatusResponseSchema>;
 /** Longest reply text one `POST /api/v1/voice/speak` call reads aloud; longer text gets 413. */
 export const MAX_SPEAK_TEXT_CHARS = 4000;
 
+/** A reading-voice id, such as `af_heart`. The voices themselves belong to the voice sidecar. */
+export const VoiceIdSchema = z.string().min(1).max(64);
+
 export const SpeakVoiceRequestSchema = z
   .object({
     text: z
       .string()
       .min(1)
       .describe(`Reply text to read aloud, up to ${String(MAX_SPEAK_TEXT_CHARS)} characters.`),
-    voice: z.string().min(1).max(64).optional().describe('Voice id, e.g. `af_heart`. Omit for the default voice.'),
+    voice: VoiceIdSchema.optional().describe('Voice id, e.g. `af_heart`. Omit for the default voice.'),
   })
   .openapi('SpeakVoiceRequest');
 

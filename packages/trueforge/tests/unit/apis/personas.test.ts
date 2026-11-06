@@ -5,11 +5,13 @@ import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { createLogger } from 'winston';
+import { makeCreateTurnInput } from '../../../../trueforge-core/tests/agent-session/testHelpers';
 import { createPersonasRouter, createSessionPersonasRouter } from '../../../src/apis/personas';
 import { TENANT_ID } from '../../../src/apis/sessions';
 import { createAppErrorHandler } from '../../../src/app';
 import type { RequestContext } from '../../../src/auth/identity';
 import { migrateSqliteToLatest } from '../../../src/db/migrateSqlite';
+import type { TurnCustom } from '../../../src/db/sessionCustom';
 import { createSqliteDb } from '../../../src/db/sqlite/client';
 import { SqliteModelProviderStore } from '../../../src/db/sqlite/model-provider-store/SqliteModelProviderStore';
 import { SqlitePersonaStore } from '../../../src/db/sqlite/persona-store/SqlitePersonaStore';
@@ -42,6 +44,7 @@ function personaBody(overrides: Record<string, unknown> = {}) {
       aliases: ['Z'],
       instructions: 'Answer plainly.',
       model_name: MODEL_FQN,
+      voice: null,
       ...overrides,
     },
   };
@@ -107,10 +110,17 @@ async function setup() {
     });
   };
 
+  const createTurn = async (input: { sessionId: string; turnId: string; custom: TurnCustom | null }) => {
+    const createInput = makeCreateTurnInput<TurnCustom>({ sessionId: input.sessionId, turnId: input.turnId });
+    createInput.turn.custom = input.custom;
+    await sessionStore.createTurn(createInput);
+  };
+
   return {
     personas,
     sessionPersonas,
     createSession,
+    createTurn,
     personaStore,
     knowledgeDir,
     as: (next: RequestContext) => {
@@ -120,6 +130,27 @@ async function setup() {
 }
 
 describe('personas router', () => {
+  it('keeps the reading voice a persona was given, and clears it', async () => {
+    const { personas } = await setup();
+    const created = await personas.request('/', jsonInit('POST', personaBody({ voice: 'af_bella' })));
+    expect(created.status).toBe(201);
+    const { data: persona } = (await created.json()) as { data: { id: string; voice: string | null } };
+    expect(persona.voice).toBe('af_bella');
+
+    const listed = (await (await personas.request('/')).json()) as { data: { voice: string | null }[] };
+    expect(listed.data[0]?.voice).toBe('af_bella');
+
+    const cleared = await personas.request(`/${persona.id}`, jsonInit('PUT', personaBody({ voice: null })));
+    expect(((await cleared.json()) as { data: { voice: string | null } }).data.voice).toBeNull();
+  });
+
+  it('refuses a persona write that leaves the voice out or sends an empty one', async () => {
+    const { personas } = await setup();
+    const withoutVoice = { display_name: 'Zara', aliases: [], instructions: 'Answer plainly.', model_name: MODEL_FQN };
+    expect((await personas.request('/', jsonInit('POST', { persona: withoutVoice }))).status).toBe(400);
+    expect((await personas.request('/', jsonInit('POST', personaBody({ voice: '' })))).status).toBe(400);
+  });
+
   it('creates, lists, edits, and deletes a persona for its owner only', async () => {
     const { personas, as } = await setup();
 
@@ -343,6 +374,7 @@ describe('session persona router', () => {
       aliases: [],
       instructions: 'Answer plainly.',
       model_name: MODEL_FQN,
+      voice: null,
     });
     expect(await (await sessionPersonas.request('/s1/persona')).json()).toEqual({ data: null });
 
@@ -351,6 +383,66 @@ describe('session persona router', () => {
       data: { persona_id: string | null; persona_name: string | null }[];
     };
     expect(log.data[0]).toMatchObject({ persona_id: persona.id, persona_name: 'Zara' });
+  });
+
+  it('says which persona answered a turn, even after the chat switched to another', async () => {
+    const { personas, sessionPersonas, createSession, createTurn } = await setup();
+    await createSession('s1');
+    const { data: persona } = (await (await personas.request('/', jsonInit('POST', personaBody()))).json()) as {
+      data: { id: string };
+    };
+    await createTurn({
+      sessionId: 's1',
+      turnId: 't-zara',
+      custom: {
+        persona: { persona_id: persona.id, persona_name: 'Zara', model_name: MODEL_FQN, source: 'invocation' },
+        manual_persona_activation_id: null,
+      },
+    });
+    await sessionPersonas.request('/s1/persona', jsonInit('PUT', { persona_id: null }));
+    expect(await (await sessionPersonas.request('/s1/turns/t-zara/persona')).json()).toEqual({
+      data: { persona_id: persona.id },
+    });
+
+    await createSession('s2');
+    await createTurn({ sessionId: 's2', turnId: 't-default', custom: { persona: null } });
+    expect(await (await sessionPersonas.request('/s2/turns/t-default/persona')).json()).toEqual({
+      data: { persona_id: null },
+    });
+  });
+
+  it('reads an older turn without a persona snapshot from the decision recorded for it', async () => {
+    const { sessionPersonas, createSession, createTurn, personaStore } = await setup();
+    await createSession('s1');
+    await createTurn({ sessionId: 's1', turnId: 't-old', custom: null });
+    expect(await (await sessionPersonas.request('/s1/turns/t-old/persona')).json()).toEqual({
+      data: { persona_id: null },
+    });
+
+    await personaStore.recordPersonaActivation({
+      tenant_id: TENANT_ID,
+      id: 'a-old',
+      session_id: 's1',
+      turn_id: 't-old',
+      persona_id: 'p-zara',
+      persona_name: 'Zara',
+      model_name: MODEL_FQN,
+      source: 'invocation',
+    });
+    expect(await (await sessionPersonas.request('/s1/turns/t-old/persona')).json()).toEqual({
+      data: { persona_id: 'p-zara' },
+    });
+  });
+
+  it('refuses a turn that does not exist and a chat the caller does not own', async () => {
+    const { sessionPersonas, createSession, createTurn, as } = await setup();
+    await createSession('s1');
+    await createTurn({ sessionId: 's1', turnId: 't-1', custom: null });
+
+    expect((await sessionPersonas.request('/s1/turns/missing/persona')).status).toBe(404);
+    expect((await sessionPersonas.request('/missing/turns/t-1/persona')).status).toBe(404);
+    as(userB);
+    expect((await sessionPersonas.request('/s1/turns/t-1/persona')).status).toBe(403);
   });
 
   it('refuses a persona that does not exist and a chat the caller does not own', async () => {

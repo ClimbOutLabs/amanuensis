@@ -244,8 +244,8 @@ async function seedPersona<TTransaction>({
     }
     if (
       isSameJson({
-        left: [existing.display_name, existing.aliases, existing.instructions, existing.model_name],
-        right: [content.display_name, content.aliases, content.instructions, content.model_name],
+        left: [existing.display_name, existing.aliases, existing.instructions, existing.model_name, existing.voice],
+        right: [content.display_name, content.aliases, content.instructions, content.model_name, content.voice],
       })
     ) {
       return 'unchanged';

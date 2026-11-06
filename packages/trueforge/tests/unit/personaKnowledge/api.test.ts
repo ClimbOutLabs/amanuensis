@@ -87,6 +87,7 @@ async function setup(overrides?: { resolveAddresses?: (hostname: string) => Prom
     aliases: [],
     instructions: 'Answer plainly.',
     model_name: 'scripted/model',
+    voice: null,
   });
   await personaStore.createPersona({
     tenant_id: TENANT_ID,
@@ -97,6 +98,7 @@ async function setup(overrides?: { resolveAddresses?: (hostname: string) => Prom
     aliases: [],
     instructions: 'Answer plainly.',
     model_name: 'scripted/model',
+    voice: null,
   });
 
   let user = userA;

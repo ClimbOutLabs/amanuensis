@@ -1705,6 +1705,7 @@ async function importArchive<TTransaction>(
             aliases: persona.aliases,
             instructions: persona.instructions,
             model_name: persona.model_name,
+            voice: persona.voice,
             updated_by: subjectId,
           },
           tx,

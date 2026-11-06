@@ -94,7 +94,13 @@ async function createPersona(server: ApprovalTestServer, displayName: string): P
   const response = await server.request(
     '/api/v1/personas',
     jsonInit({
-      persona: { display_name: displayName, aliases: [], instructions: 'Answer plainly.', model_name: ALT_MODEL_FQN },
+      persona: {
+        display_name: displayName,
+        aliases: [],
+        instructions: 'Answer plainly.',
+        model_name: ALT_MODEL_FQN,
+        voice: null,
+      },
     }),
   );
   expect(response.status).toBe(201);

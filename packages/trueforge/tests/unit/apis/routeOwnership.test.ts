@@ -253,7 +253,7 @@ function describeRouteOwnership(engine: OwnershipEngine): void {
           path: '/api/v1/personas',
           method: 'POST',
           json: {
-            persona: { display_name: 'Zara', aliases: [], instructions: SECRET, model_name: MODEL_FQN },
+            persona: { display_name: 'Zara', aliases: [], instructions: SECRET, model_name: MODEL_FQN, voice: null },
           },
           status: 201,
         }),
@@ -468,6 +468,7 @@ function describeRouteOwnership(engine: OwnershipEngine): void {
         { name: 'unbind session repository', path: `${sessions}/repository`, method: 'DELETE' },
         { name: 'list turns', path: turns },
         { name: 'get turn', path: turn },
+        { name: 'get turn persona', path: `${turn}/persona` },
         { name: 'turn events', path: `${turn}/events` },
         { name: 'turn artifacts', path: `${turn}/artifacts` },
         { name: 'turn sandbox download', path: `${turn}/download-sandbox-file?path=/etc/passwd` },
@@ -521,7 +522,9 @@ function describeRouteOwnership(engine: OwnershipEngine): void {
           name: 'update persona',
           path: `/api/v1/personas/${s.personaId}`,
           method: 'PUT',
-          json: { persona: { display_name: 'pwned', aliases: [], instructions: 'pwned', model_name: MODEL_FQN } },
+          json: {
+            persona: { display_name: 'pwned', aliases: [], instructions: 'pwned', model_name: MODEL_FQN, voice: null },
+          },
         },
         { name: 'delete persona', path: `/api/v1/personas/${s.personaId}`, method: 'DELETE' },
         { name: 'persona context', path: `/api/v1/personas/${s.personaId}/context` },

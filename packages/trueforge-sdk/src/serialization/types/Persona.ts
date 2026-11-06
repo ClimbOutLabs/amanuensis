@@ -15,6 +15,7 @@ export const Persona: core.serialization.ObjectSchema<serializers.Persona.Raw, T
         modelName: core.serialization.property("model_name", core.serialization.string()),
         updatedAt: core.serialization.property("updated_at", core.serialization.date()),
         updatedBy: core.serialization.property("updated_by", core.serialization.string()),
+        voice: core.serialization.string().nullable(),
     });
 
 export declare namespace Persona {
@@ -28,5 +29,6 @@ export declare namespace Persona {
         model_name: string;
         updated_at: string;
         updated_by: string;
+        voice?: string | null;
     }
 }
