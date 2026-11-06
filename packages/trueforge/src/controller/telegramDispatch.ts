@@ -70,7 +70,8 @@ interface ConnectionPollState {
  * One polling pass over every polling connection. Per connection: ask Telegram for the updates
  * after the stored offset, hand each to the server in order, and store the new offset as they
  * are accepted. The first failure stops that connection for this pass and starts its backoff;
- * other connections are unaffected.
+ * other connections are unaffected. An update Telegram sent in a shape that cannot be read is
+ * not a failure: the client skips it, the pass logs the skip, and the offset moves past it.
  */
 export async function pollTelegramOnce(params: {
   store: ITelegramStore;
@@ -95,7 +96,16 @@ export async function pollTelegramOnce(params: {
     const owner = { tenant_id: connection.tenant_id, created_by: connection.created_by };
     try {
       const client = params.service.clientFor(connection);
-      const updates = await client.getUpdates({ offset: connection.poll_offset, signal: params.signal });
+      const updates = await client.getUpdates({
+        offset: connection.poll_offset,
+        signal: params.signal,
+        onSkippedUpdate: ({ update_id }) => {
+          params.logger.warn('A Telegram update could not be read and was skipped', {
+            connection_id: connection.id,
+            update_id,
+          });
+        },
+      });
       let offset = connection.poll_offset;
       for (const update of updates) {
         await params.executeUpdate({ connection_id: connection.id, update });

@@ -1,5 +1,9 @@
 import { TelegramApiError } from '../../../../src/runtime/telegram/telegramClient';
-import { createTelegramService, TelegramSettingsError } from '../../../../src/runtime/telegram/telegramService';
+import {
+  createTelegramService,
+  newPairingCode,
+  TelegramSettingsError,
+} from '../../../../src/runtime/telegram/telegramService';
 import { FakeTelegramClient, InMemoryTelegramStore, TELEGRAM_TEST_OWNER } from '../../../fixtures/telegramFakes';
 
 const SUBJECT = { subject_id: 'test-user', subject_type: 'owner', subject_display_name: 'Test User' };
@@ -127,5 +131,19 @@ describe('telegram connection service', () => {
     const status = await service.disconnect(TELEGRAM_TEST_OWNER);
     expect(status.state).toBe('not_connected');
     expect(store.connection).toBeNull();
+  });
+});
+
+describe('newPairingCode', () => {
+  it('maps the drawn fraction onto six digits, padding with zeros', () => {
+    expect(newPairingCode(() => 0)).toBe('000000');
+    expect(newPairingCode(() => 0.5)).toBe('500000');
+    expect(newPairingCode(() => 0.9999999)).toBe('999999');
+  });
+
+  it('always draws six digits from the default source', () => {
+    for (let i = 0; i < 200; i += 1) {
+      expect(newPairingCode()).toMatch(/^\d{6}$/);
+    }
   });
 });

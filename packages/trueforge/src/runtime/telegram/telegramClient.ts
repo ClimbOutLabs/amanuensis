@@ -66,6 +66,14 @@ const GetMeResultSchema = z.object({
 
 const SentMessageSchema = z.object({ message_id: z.number().int() });
 
+const RawUpdateIdSchema = z.object({ update_id: z.number().int() });
+
+/** The id of one raw update, read on its own; null when the raw value does not carry one. */
+function rawUpdateId(item: unknown): number | null {
+  const parsed = RawUpdateIdSchema.safeParse(item);
+  return parsed.success ? parsed.data.update_id : null;
+}
+
 /** The envelope every Bot API answer arrives in: ok, the result when it worked, and why not when it did not. */
 const TelegramEnvelopeSchema = z.object({
   ok: z.boolean(),
@@ -80,9 +88,16 @@ export interface TelegramClient {
   getMe(): Promise<TelegramBotInfo>;
   /**
    * Long polling: asks for updates after `offset` and waits up to the poll timeout for some.
-   * The caller advances its stored offset only for updates it has handed over.
+   * The caller advances its stored offset only for updates it has handed over. An update that
+   * arrives in a shape that cannot be read is skipped, never allowed to hold the rest of the
+   * batch hostage: `onSkippedUpdate` hears about each one, and when its id can still be read it
+   * comes back as a bare update, so the caller's offset moves past it like any other.
    */
-  getUpdates(input: { offset: string | null; signal?: AbortSignal }): Promise<TelegramUpdate[]>;
+  getUpdates(input: {
+    offset: string | null;
+    signal?: AbortSignal;
+    onSkippedUpdate?: (skipped: { update_id: number | null }) => void;
+  }): Promise<TelegramUpdate[]>;
   /** Sends one message. Throws a TelegramApiError on any failure; the caller decides what is safe to retry. */
   sendMessage(input: {
     chat_id: string;
@@ -169,18 +184,35 @@ export function createTelegramClient({
       return { id: String(me.id), name: me.first_name, username: me.username ?? null };
     },
 
-    async getUpdates({ offset, signal }) {
-      return call({
+    async getUpdates({ offset, signal, onSkippedUpdate }) {
+      const raw = await call({
         method: 'getUpdates',
         body: {
           ...(offset === null ? {} : { offset: Number(offset) }),
           timeout: TELEGRAM_POLL_TIMEOUT_SECONDS,
           allowed_updates: ['message', 'callback_query'],
         },
-        result: z.array(TelegramUpdateSchema),
+        result: z.array(z.unknown()),
         ...(signal === undefined ? {} : { signal }),
         timeoutMs: (TELEGRAM_POLL_TIMEOUT_SECONDS + 10) * 1000,
       });
+      const updates: TelegramUpdate[] = [];
+      for (const item of raw) {
+        const parsed = TelegramUpdateSchema.safeParse(item);
+        if (parsed.success) {
+          updates.push(parsed.data);
+          continue;
+        }
+        // Telegram adds message kinds over time, and one update in a shape this build cannot
+        // read must not stall the batch behind it: it is skipped, and when its id can still be
+        // read it travels as a bare update so the stored offset moves past it.
+        const skippedId = rawUpdateId(item);
+        onSkippedUpdate?.({ update_id: skippedId });
+        if (skippedId !== null) {
+          updates.push({ update_id: skippedId });
+        }
+      }
+      return updates;
     },
 
     async sendMessage({ chat_id, text, inline_buttons }) {

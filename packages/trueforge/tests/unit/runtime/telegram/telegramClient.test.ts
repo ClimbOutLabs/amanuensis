@@ -47,6 +47,65 @@ describe('telegram client', () => {
     expect(seen[0]?.body).toEqual({ offset: 9, timeout: 25, allowed_updates: ['message', 'callback_query'] });
   });
 
+  it('skips one update in a shape it cannot read and keeps the rest of the batch', async () => {
+    const good = (update_id: number) => ({
+      update_id,
+      message: {
+        message_id: update_id,
+        date: 1762000000,
+        chat: { id: 777, type: 'private' },
+        from: { id: 555, first_name: 'Person' },
+        text: 'hi',
+      },
+    });
+    // A message whose id arrives as words instead of a number: a shape this build cannot read.
+    const misfit = {
+      update_id: 10,
+      message: { message_id: 'ten', date: 1762000000, chat: { id: 777, type: 'private' }, text: 'hi' },
+    };
+    const { client } = clientWith(async () => ok([good(9), misfit, good(11)]));
+    const skipped: { update_id: number | null }[] = [];
+    const updates = await client.getUpdates({
+      offset: '9',
+      onSkippedUpdate: entry => {
+        skipped.push(entry);
+      },
+    });
+    expect(updates.map(entry => entry.update_id)).toEqual([9, 10, 11]);
+    // The skipped update travels bare, carrying only its id, so the stored offset moves past it.
+    expect(updates[1]).toEqual({ update_id: 10 });
+    expect(skipped).toEqual([{ update_id: 10 }]);
+  });
+
+  it('skips an update whose id cannot be read at all and still returns the ones after it', async () => {
+    const good = {
+      update_id: 11,
+      message: {
+        message_id: 11,
+        date: 1762000000,
+        chat: { id: 777, type: 'private' },
+        from: { id: 555, first_name: 'Person' },
+        text: 'hi',
+      },
+    };
+    const { client } = clientWith(async () => ok([{ something_else: true }, good]));
+    const skipped: { update_id: number | null }[] = [];
+    const updates = await client.getUpdates({
+      offset: null,
+      onSkippedUpdate: entry => {
+        skipped.push(entry);
+      },
+    });
+    expect(updates.map(entry => entry.update_id)).toEqual([11]);
+    expect(skipped).toEqual([{ update_id: null }]);
+  });
+
+  it('still fails the call when the answer itself is not a list of updates', async () => {
+    const { client } = clientWith(async () => ok({ not: 'a list' }));
+    const error: unknown = await client.getUpdates({ offset: null }).catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(TelegramApiError);
+  });
+
   it('sends a message with an inline keyboard when buttons are given', async () => {
     const { client, seen } = clientWith(async () => ok({ message_id: 7 }));
     const sent = await client.sendMessage({

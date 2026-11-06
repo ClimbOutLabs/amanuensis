@@ -198,7 +198,12 @@ export function createTelegramService({
   };
 }
 
-/** A fresh six-digit pairing code. */
-export function newPairingCode(random: () => number = Math.random): string {
+/** A fraction in [0, 1) from the crypto source, the same source the webhook secret is drawn from. */
+function secureRandomFraction(): number {
+  return randomBytes(4).readUInt32BE(0) / 2 ** 32;
+}
+
+/** A fresh six-digit pairing code. A code is a credential, so its digits come from the crypto source. */
+export function newPairingCode(random: () => number = secureRandomFraction): string {
   return String(Math.floor(random() * 1_000_000)).padStart(6, '0');
 }

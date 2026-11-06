@@ -214,7 +214,7 @@ export interface ITelegramStore {
   addPendingReply(input: AddTelegramPendingReplyInput): Promise<void>;
   /** Replies still owed, oldest first. */
   listPendingReplies(input: { limit: number }): Promise<TelegramPendingReply[]>;
-  /** Marks one reply sent by removing its row. */
+  /** Removes one reply's row: the reply pass clears it before sending, so a crash cannot send twice. */
   deletePendingReply(input: { id: string }): Promise<void>;
   /** Notes one held action offered as buttons. Resolves to the row, whose id the buttons carry. */
   addPendingApproval(input: AddTelegramPendingApprovalInput): Promise<TelegramPendingApproval>;

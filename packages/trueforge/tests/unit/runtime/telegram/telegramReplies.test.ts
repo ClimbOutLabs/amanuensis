@@ -188,4 +188,37 @@ describe('telegram pending replies', () => {
     expect(client.sent).toHaveLength(0);
     expect(store.pendingReplies).toHaveLength(0);
   });
+
+  it('clears the debt before the answer is sent, so a crash can never send it twice', async () => {
+    const { store, client, deps } = harness(
+      turnWith({
+        status: 'done',
+        output: {
+          type: 'model.message',
+          id: 'msg-1',
+          thread_id: 'main',
+          content: 'An answer.',
+          created_at: '2026-11-06T00:01:00.000Z',
+        },
+        required_actions: [],
+        completed_at: '2026-11-06T00:01:00.000Z',
+      }),
+    );
+    // What the pass still owed at the moment each send went out: by then the debt must
+    // already be cleared, so a crash after the send leaves nothing for a next pass to repeat.
+    const owedAtSendTime: number[] = [];
+    const send = client.sendMessage.bind(client);
+    client.sendMessage = input => {
+      owedAtSendTime.push(store.pendingReplies.length);
+      return send(input);
+    };
+    await deliverPendingTelegramReplies(deps);
+    expect(client.sent).toHaveLength(1);
+    expect(owedAtSendTime).toEqual([0]);
+    expect(store.pendingReplies).toHaveLength(0);
+
+    // A second pass, as after a restart, sends nothing again.
+    await deliverPendingTelegramReplies(deps);
+    expect(client.sent).toHaveLength(1);
+  });
 });

@@ -11,10 +11,13 @@ import type { TelegramService } from './telegramService';
 
 /**
  * Sends the answers Telegram is owed. A turn's answer always lands in the app first; this pass
- * reads the finished turn, sends its reply and any approval asks to the paired chat, and clears
- * the debt. Each send is attempted exactly once: Telegram gives a send no idempotency key, so a
- * send that may already have gone out is never repeated. A failed send is logged and the debt is
- * cleared anyway; the answer stays in the Telegram chat in the app.
+ * reads the finished turn and sends its reply and any approval asks to the paired chat. The debt
+ * is cleared before the first send goes out, the way the delivery layer records its work before
+ * it sends: Telegram gives a send no idempotency key, so a send that may already have gone out
+ * is never repeated, and a crash mid-pass must not let the next pass send the same answer twice.
+ * The trade is the other way round from a retry: a crash between clearing the debt and a send
+ * landing leaves that one copy unsent, and the answer stays in the Telegram chat in the app. A
+ * failed send is logged the same way; it is never repeated either.
  */
 
 const TURN_ERROR_LINE = 'Something went wrong with that answer. Open Aman to see the chat, or send the message again.';
@@ -104,6 +107,9 @@ async function deliverOne(deps: TelegramReplyDeps, reply: TelegramPendingReply):
   if (turn.state.status === 'running') {
     return;
   }
+  // The turn is finished, so this pass is committed to sending: clear the debt now, before any
+  // send goes out, so a crash from here on can never make the next pass send the answer again.
+  await deps.store.deletePendingReply({ id: reply.id });
   const client = deps.service.clientFor(connection);
   const owner = { tenant_id: reply.tenant_id, created_by: reply.created_by };
   const send = async (text: string, buttons?: readonly (readonly { text: string; callback_data: string }[])[]) => {
@@ -162,7 +168,6 @@ async function deliverOne(deps: TelegramReplyDeps, reply: TelegramPendingReply):
   } else {
     await send(TURN_CANCELLED_LINE);
   }
-  await deps.store.deletePendingReply({ id: reply.id });
 }
 
 /** One pass over the replies Telegram is owed. A failure on one never stops the rest. */
