@@ -154,6 +154,7 @@ const app = createServerApp({
     logger,
   }),
   reachSettingsStore: new ReachSettingsStore(db),
+  noticingStore: new NoticingStore(db),
   noticingService: { run: () => Promise.resolve({ owners: 0, raised: 0 }) },
   reminderReach: createReminderReach({
     reachSettings: new ReachSettingsStore(db),

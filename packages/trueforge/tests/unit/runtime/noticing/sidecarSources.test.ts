@@ -4,12 +4,17 @@ import winston from 'winston';
 import {
   bareSubject,
   createSidecarNoticingSources,
-  MAIL_LIST_TOO_SLOW,
   sidecarCalendarSource,
   sidecarMailSource,
+  SidecarToolError,
+  toolResultOf,
   type CallSidecarTool,
 } from '../../../../src/runtime/noticing/sidecarSources';
-import type { NoticingSourceProvider } from '../../../../src/runtime/noticing/sources';
+import {
+  MailTooSlowError,
+  MessageUnreadableError,
+  type NoticingSourceProvider,
+} from '../../../../src/runtime/noticing/sources';
 import { readMailWindow, watchCalendar, watchMail } from '../../../../src/runtime/noticing/watchers';
 import { defaultReachSettings } from '../../../../src/schemas/reach';
 
@@ -178,8 +183,53 @@ describe('sidecar mail source (IMAP)', () => {
       before: NOW,
       limit: 50,
     });
-    await expect(read).rejects.toThrow(MAIL_LIST_TOO_SLOW);
+    await expect(read).rejects.toBeInstanceOf(MailTooSlowError);
+    await expect(read).rejects.toThrow('longer than 90 seconds');
     expect(calls).toHaveLength(1);
+  });
+
+  describe('when the connector answers with an error', () => {
+    const MAIL_REF = { id: '7', thread_id: 'Your invoice', received_at: new Date('2026-11-05T14:55:00.000Z') };
+    const failing =
+      (reply: string): CallSidecarTool =>
+      () =>
+        Promise.reject(new SidecarToolError({ server: 'Email', tool: 'get_emails_content', reply }));
+    const asMail = {
+      ...MAIL_REF,
+      from_address: 'billing@power.test',
+      from_name: null,
+      subject: '',
+      snippet: '',
+      authentication_results: [],
+    };
+
+    it('reads an error result as an error, never as an empty list', () => {
+      const result = { isError: true, content: [{ type: 'text', text: 'Email 7 not found' }] };
+      expect(() => toolResultOf({ server: 'Email', tool: 'get_emails_content', result })).toThrow(SidecarToolError);
+      const ok = { structuredContent: { emails: [] } };
+      expect(toolResultOf({ server: 'Email', tool: 'list_emails_metadata', result: ok })).toBe(ok);
+    });
+
+    it('marks a message the connector says is not there as unreadable, in the text and the later-reply reads', async () => {
+      const source = sidecarMailSource({ call: failing('Email 7 not found in INBOX'), account: 'default' });
+      await expect(source.readText(asMail)).rejects.toBeInstanceOf(MessageUnreadableError);
+      await expect(source.laterInThread(MAIL_REF)).rejects.toBeInstanceOf(MessageUnreadableError);
+    });
+
+    it('marks a message the connector leaves out of its answer as unreadable', async () => {
+      const call: CallSidecarTool = () => Promise.resolve({ structuredContent: { emails: [] } });
+      await expect(sidecarMailSource({ call, account: 'default' }).readText(asMail)).rejects.toBeInstanceOf(
+        MessageUnreadableError,
+      );
+    });
+
+    it('passes on any other connector error, so a bill is neither missed nor wrongly raised', async () => {
+      const source = sidecarMailSource({ call: failing('IMAP connection timed out'), account: 'default' });
+      const text = source.readText(asMail);
+      await expect(text).rejects.toBeInstanceOf(SidecarToolError);
+      await expect(text).rejects.not.toBeInstanceOf(MessageUnreadableError);
+      await expect(source.laterInThread(MAIL_REF)).rejects.toBeInstanceOf(SidecarToolError);
+    });
   });
 
   it('passes on other failures as they are', async () => {
@@ -231,6 +281,7 @@ describe('sidecar mail source (IMAP)', () => {
       since: new Date('2026-11-05T14:00:00.000Z'),
       now: NOW,
       logger: { warn: jest.fn() },
+      stuck: undefined,
     });
     expect(found.raise.map(event => [event.kind, event.evidence])).toEqual([['bill_due', 'content']]);
   });

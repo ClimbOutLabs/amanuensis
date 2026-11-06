@@ -4,6 +4,7 @@ import winston from 'winston';
 import { createReachRouter } from '../../../src/apis/reach';
 import { createTextNumberRouter } from '../../../src/apis/textNumber';
 import type { RequestContext } from '../../../src/auth/identity';
+import { NoticingStore } from '../../../src/db/noticingStore';
 import { reachChannelsFor } from '../../../src/runtime/noticing/reachChannels';
 import { MAX_TEST_TEXTS_PER_HOUR, testTextLimit } from '../../../src/runtime/texts/textLimits';
 import { RequestErrorResponseSchema } from '../../../src/schemas/errors';
@@ -33,6 +34,7 @@ async function build({ provider = true, maxTextsPerDay }: { provider?: boolean; 
       reachStore: h.reachSettings,
       textContacts: h.contacts,
       textLimits: provider ? h.limits : undefined,
+      noticingStore: new NoticingStore(h.db),
       deliveryService: h.deliveries,
       channels: () => channels,
       memories: () => Promise.resolve([]),

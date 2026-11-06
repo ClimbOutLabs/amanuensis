@@ -89,6 +89,13 @@ describe('checkSender', () => {
     expect(check({ header: `mx.example.net; spf=pass smtp.mailfrom="never closed; ${DMARC}` }).verified).toBe(false);
   });
 
+  it('verifies mail whose tracking address merely looks like a check, such as one ending in .arc or -auth', () => {
+    for (const recipient of ['john.arc', 'john-auth', 'john_spf', 'john.dkim']) {
+      const header = `mx.google.com; spf=pass (google.com: domain of bounces+1-ab-${recipient}=gmail.com@em.bank.example designates 198.51.100.7 as permitted sender) smtp.mailfrom=bounces+1-ab-${recipient}=gmail.com@em.bank.example; dmarc=pass (p=REJECT sp=REJECT dis=NONE) header.from=bank.example`;
+      expect(gmail({ header, from_address: 'statements@bank.example' })).toEqual({ verified: true });
+    }
+  });
+
   it('reads a header that ends with a semicolon', () => {
     expect(check({ header: `mx.example.net; ${DMARC};` })).toEqual({ verified: true });
   });
@@ -148,6 +155,37 @@ describe('checkSender', () => {
 
     it('is refused when a value holds a check of its own', () => {
       expect(boss('mx.google.com; spf=pass smtp.mailfrom=a.header.from=boss.com@evil.example')).toBe(false);
+      expect(boss('mx.google.com; spf=pass smtp.mailfrom=a-dmarc=pass@evil.example')).toBe(false);
+    });
+
+    it('is refused when it came in both the comment and the unquoted value', () => {
+      // The `;` outside any quotes ends the result early, so the value's echo reads as a DMARC result of its own.
+      const echo = 'a;dmarc=pass()header.from=boss.com;y=@evil.example';
+      expect(
+        boss(
+          `mx.google.com; spf=softfail (google.com: domain of transitioning ${echo} does not designate 192.0.2.4 as permitted sender) smtp.mailfrom=${echo}`,
+        ),
+      ).toBe(false);
+    });
+
+    it('is refused when a raw quote inside the comment hides the echo from the reader', () => {
+      // A comment has no quoted strings in RFC 5322, but one is read here so that a `)` in a quoted address cannot
+      // close the comment. The quote pair then spans text a stricter reader would see, so `header.from=` showing up
+      // twice is what refuses it.
+      const echo = 'z"x);dmarc=pass()header.from=boss.com;y=@evil.example';
+      expect(
+        boss(
+          `mx.google.com; spf=pass (google.com: domain of ${echo} designates 192.0.2.4 as permitted sender) smtp.mailfrom=${echo}`,
+        ),
+      ).toBe(false);
+    });
+
+    it('is refused when header.from= appears more than once, whatever the header looks like', () => {
+      expect(
+        boss(
+          'mx.google.com; spf=pass (google.com: header.from=boss.com) smtp.mailfrom=a@x.example; dmarc=pass header.from=boss.com',
+        ),
+      ).toBe(false);
     });
 
     it('is refused when a backslash stands outside a quoted string or comment', () => {

@@ -37,3 +37,14 @@ export class GoogleApiError extends Error {
     this.status = input.status;
   }
 }
+
+/**
+ * Google answered, but with a reply Aman cannot take in: it is over the size Aman reads, or it does not parse. Asking
+ * again gets the same reply, unlike a busy or failing Google. The status stays 502.
+ */
+export class GoogleUnusableReplyError extends GoogleApiError {
+  constructor(input: { message: string; cause?: unknown }) {
+    super({ status: 502, ...input });
+    this.name = 'GoogleUnusableReplyError';
+  }
+}

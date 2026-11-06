@@ -61,6 +61,8 @@ export type ReachView = {
   availability: { texts: ReachChannelState; calls: ReachChannelState };
   /** The highest level each kind of event can ever reach, so only kinds that can call offer the tick. */
   maxLevels: Partial<Record<NoticingKind, 'note' | 'nudge' | 'call'>>;
+  /** Set once mail has gone unchecked for about an hour: since when, and whether the mail server was too slow. */
+  mailProblem: { since: string; kind: 'too_slow' | 'other' } | null;
 };
 
 export type ReachSuggestion = { address: string; memory: string };

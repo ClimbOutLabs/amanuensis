@@ -25,6 +25,7 @@ export function deliveryDeps(
   const deliveryStore = new DeliveryStore(db);
   const reachSettingsStore = new ReachSettingsStore(db);
   const textContactStore = new TextContactStore(db);
+  const noticingStore = new NoticingStore(db);
   return {
     deliveryStore,
     pushSubscriptionStore: new PushSubscriptionStore(db),
@@ -35,10 +36,11 @@ export function deliveryDeps(
       logger: winston.createLogger({ silent: true }),
     }),
     reachSettingsStore,
+    noticingStore,
     noticingService: { run: () => Promise.resolve({ owners: 0, raised: 0 }) },
     reminderReach: createReminderReach({
       reachSettings: reachSettingsStore,
-      store: new NoticingStore(db),
+      store: noticingStore,
       history: deliveryStore,
       channels: () => NO_PHONE_CHANNELS,
       logger: winston.createLogger({ silent: true }),

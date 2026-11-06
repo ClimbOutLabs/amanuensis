@@ -998,6 +998,7 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     pushSubscriptionStore,
     deliveryService,
     reachSettingsStore,
+    noticingStore,
     noticingService,
     reminderReach: createReminderReach({
       reachSettings: reachSettingsStore,

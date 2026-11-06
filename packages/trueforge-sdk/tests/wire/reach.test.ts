@@ -12,6 +12,7 @@ describe("ReachClient", () => {
         const rawResponseBody = {
             data: {
                 availability: { calls: { available: true, note: "note" }, texts: { available: true, note: "note" } },
+                mail_problem: { kind: "too_slow", since: "since" },
                 max_levels: {
                     approval_waiting: "note",
                     bill_due: "note",
@@ -50,6 +51,10 @@ describe("ReachClient", () => {
                         available: true,
                         note: "note",
                     },
+                },
+                mailProblem: {
+                    kind: "too_slow",
+                    since: "since",
                 },
                 maxLevels: {
                     approvalWaiting: "note",
@@ -123,6 +128,7 @@ describe("ReachClient", () => {
         const rawResponseBody = {
             data: {
                 availability: { calls: { available: true, note: "note" }, texts: { available: true, note: "note" } },
+                mail_problem: { kind: "too_slow", since: "since" },
                 max_levels: {
                     approval_waiting: "note",
                     bill_due: "note",
@@ -195,6 +201,10 @@ describe("ReachClient", () => {
                         available: true,
                         note: "note",
                     },
+                },
+                mailProblem: {
+                    kind: "too_slow",
+                    since: "since",
                 },
                 maxLevels: {
                     approvalWaiting: "note",

@@ -95,6 +95,7 @@ import type { IGoogleConnectionStore } from './db/googleConnectionStore';
 import type { IMcpServerWithAuthStore } from './db/mcpServerStore';
 import type { IMcpToolGrantStore } from './db/mcpToolGrantStore';
 import type { IModelProviderStore } from './db/modelProviderStore';
+import type { INoticingStore } from './db/noticingStore';
 import type { IPersonalizationStore } from './db/personalizationStore';
 import type { IPersonaStore } from './db/personaStore';
 import type { IPushSubscriptionStore } from './db/pushSubscriptionStore';
@@ -322,6 +323,7 @@ export interface ServerDeps<TTransaction> {
   /** The one door into the feed; due reminders go through it. */
   deliveryService: DeliveryService;
   reachSettingsStore: IReachSettingsStore;
+  noticingStore: Pick<INoticingStore, 'getCheckpoint'>;
   /** Runs the watcher passes the controller asks for. */
   noticingService: NoticingService;
   /** Settles how loud a due reminder is. */
@@ -922,6 +924,7 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
         reachStore: deps.reachSettingsStore,
         textContacts: deps.textContactStore,
         textLimits: deps.textLimits,
+        noticingStore: deps.noticingStore,
         deliveryService: deps.deliveryService,
         channels: deps.reachChannels,
         memories: async ({ tenant_id }) => {

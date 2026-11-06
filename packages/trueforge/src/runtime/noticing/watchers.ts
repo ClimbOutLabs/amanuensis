@@ -1,6 +1,7 @@
 import { APPROVAL_EXPIRY_MINUTES } from '@truefoundry/trueforge-core/core/permissions/approvalExpiry';
 import type { Logger } from 'winston';
 
+import type { StuckMessage } from '../../db/noticingStore';
 import type { AlwaysImportantSender, NoticingEvent, ReachSettings } from '../../schemas/reach';
 import { checkSender } from './authenticationResults';
 import { findDeadline, looksLikeBill, saysPaid } from './deadlines';
@@ -49,14 +50,21 @@ function localDate({ at, timezone }: { at: Date; timezone: string }): string {
   }
 }
 
+/** A message the mail server keeps failing on is passed over after this many failed passes, or this long. */
+export const MAX_STUCK_PASSES = 3;
+export const MAX_STUCK_MS = 3_600_000;
+
 /**
  * What one pass over new mail found. `track` are bills due later than the window, kept until they come near. When
- * `resume_from` is set, the pass read only the mail before it, and the next pass starts there.
+ * `resume_from` is set, the pass read only the mail before it, and the next pass starts there. `stopped_by` is the
+ * failure that ended the pass early, and `stuck` the message it failed on, to carry into the next pass.
  */
 export interface MailFindings {
   raise: NoticingEvent[];
   track: NoticingEvent[];
   resume_from: Date | undefined;
+  stuck: StuckMessage | undefined;
+  stopped_by: { error: unknown } | undefined;
 }
 
 /** A window this short that still holds more than one pass reads is read whole, up to this many messages. */
@@ -137,8 +145,10 @@ async function readFlood({
  * Mail from someone the person marked always important, when the mail server vouched for the sender, and bills or
  * deadlines named in any new mail. A message from an always-important address that the server did not vouch for is
  * handled as ordinary mail: it can still be a bill, but only as a note. A message the source can never read is passed
- * over, so one broken message never holds up the rest. Any other failure stops the pass, so no message is lost to a
- * busy server or a dropped connection: the next pass reads the same mail again.
+ * over, so one broken message never holds up the rest. Any other failure stops the pass at that message, keeping what
+ * the messages before it found, so none is lost to a busy server or a dropped connection: the next pass starts at the
+ * failing message. A message that fails too many passes in a row, or for too long, is passed over like an unreadable
+ * one, so no failure can hold up mail for good.
  */
 export async function watchMail({
   source,
@@ -146,12 +156,15 @@ export async function watchMail({
   since,
   now,
   logger,
+  stuck,
 }: {
   source: MailSource;
   settings: ReachSettings;
   since: Date;
   now: Date;
   logger: Pick<Logger, 'warn'>;
+  /** The message the last pass failed on, when it did. */
+  stuck: StuckMessage | undefined;
 }): Promise<MailFindings> {
   const always = new Map(settings.always_important.map(sender => [sender.address, sender]));
   const { messages, resume_from } = await readMailWindow({
@@ -162,23 +175,41 @@ export async function watchMail({
     keep_from: [...always.keys()],
     logger,
   });
-  const findings: MailFindings = { raise: [], track: [], resume_from };
+  const findings: MailFindings = { raise: [], track: [], resume_from, stuck: undefined, stopped_by: undefined };
   for (const message of messages) {
     try {
       const found = await findInMessage({ source, message, settings, always, now });
       findings.raise.push(...found.raise);
       findings.track.push(...found.track);
     } catch (error) {
-      if (!(error instanceof MessageUnreadableError)) {
-        throw error;
+      if (error instanceof MessageUnreadableError) {
+        logger.warn('Passed over a mail that could not be read', { message_id: message.id, error: causeText(error) });
+        continue;
       }
-      logger.warn('Passed over a mail that could not be read', {
-        message_id: message.id,
-        error: error.cause instanceof Error ? error.cause.message : error.message,
-      });
+      const failed: StuckMessage =
+        stuck?.message_id === message.id
+          ? { ...stuck, passes: stuck.passes + 1 }
+          : { message_id: message.id, passes: 1, since: now };
+      if (failed.passes >= MAX_STUCK_PASSES || now.getTime() - failed.since.getTime() >= MAX_STUCK_MS) {
+        logger.warn('Passed over a mail the mail server kept failing on', {
+          message_id: message.id,
+          passes: failed.passes,
+          error: causeText(error),
+        });
+        continue;
+      }
+      // Messages come oldest first, so this one is the earliest not read: the next pass starts at it.
+      return { ...findings, resume_from: message.received_at, stuck: failed, stopped_by: { error } };
     }
   }
   return findings;
+}
+
+function causeText(error: unknown): string {
+  if (!(error instanceof Error)) {
+    return String(error);
+  }
+  return error.cause instanceof Error ? error.cause.message : error.message;
 }
 
 async function findInMessage({

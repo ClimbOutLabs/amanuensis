@@ -1,6 +1,7 @@
 import { GmailApi, mapSkippingMissing } from '../../../../src/core/email/gmail/gmailApi';
 import { estimateTokens, MAX_TOKENS_PER_CALL } from '../../../../src/core/email/gmail/tokenBound';
 import { GoogleAccessTokens } from '../../../../src/core/google/GoogleAccessTokens';
+import { GoogleApiError, GoogleUnusableReplyError } from '../../../../src/core/google/errors';
 import { connectedRecord, FakeConnections, OWNER } from '../../google/fakes';
 import { message } from './fixtures';
 import { build, gmailThreadResponse, googleError, HANG, INSUFFICIENT_SCOPE_BODY, json, route, text } from './harness';
@@ -283,6 +284,7 @@ describe('the size of a response', () => {
     const parse = jest.spyOn(response, 'json');
     const { api } = await apiOver(() => response);
     await expect(api.getMessage('m1')).rejects.toThrow('more than Aman will read at once');
+    await expect(api.getMessage('m1')).rejects.toBeInstanceOf(GoogleUnusableReplyError);
     expect(parse).not.toHaveBeenCalled();
   });
 
@@ -316,6 +318,14 @@ describe('the size of a response', () => {
     const nested = `${'{"parts":['.repeat(depth)}${']}'.repeat(depth)}`;
     const { api } = await apiOver(() => new Response(`{"id":"m1","threadId":"t1","payload":${nested}}`));
     await expect(api.getMessage('m1')).rejects.toThrow('could not read');
+    await expect(api.getMessage('m1')).rejects.toBeInstanceOf(GoogleUnusableReplyError);
+  });
+
+  it('does not call a failing Gmail an unusable reply, since asking again can work', async () => {
+    const { api } = await apiOver(() => new Response('{}', { status: 502 }));
+    const failure: unknown = await api.getMessage('m1').catch((error: unknown) => error);
+    expect(failure).toBeInstanceOf(GoogleApiError);
+    expect(failure).not.toBeInstanceOf(GoogleUnusableReplyError);
   });
 
   it('reads a whole attachment even though it is larger than a thread may be', async () => {

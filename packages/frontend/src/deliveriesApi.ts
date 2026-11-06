@@ -150,6 +150,18 @@ function parseSettings(value: unknown): ReachSettings {
   };
 }
 
+function parseMailProblem(value: unknown): ReachView['mailProblem'] {
+  if (value === null) {
+    return null;
+  }
+  const raw = required(value, isRecord);
+  const kind = raw.kind;
+  return {
+    since: required(raw.since, isString),
+    kind: kind === 'too_slow' ? 'too_slow' : 'other',
+  };
+}
+
 function parseView(body: unknown): ReachView {
   const data = isRecord(body) ? body.data : undefined;
   if (!isRecord(data)) {
@@ -169,6 +181,7 @@ function parseView(body: unknown): ReachView {
     saved: required(data.saved, isBoolean),
     availability: { texts: parseChannel(availability.texts), calls: parseChannel(availability.calls) },
     maxLevels,
+    mailProblem: parseMailProblem(data.mail_problem),
   };
 }
 

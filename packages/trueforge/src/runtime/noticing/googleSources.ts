@@ -9,10 +9,9 @@ import type { GmailMessage } from '@truefoundry/trueforge-core/core/email/gmail/
 import { deliveredMailboxOf } from '@truefoundry/trueforge-core/core/email/gmail/mailbox';
 import { headerOf, rawHeaderOf, readBody } from '@truefoundry/trueforge-core/core/email/gmail/message';
 import { GoogleAccessTokens } from '@truefoundry/trueforge-core/core/google/GoogleAccessTokens';
-import { GoogleApiError } from '@truefoundry/trueforge-core/core/google/errors';
+import { GoogleApiError, GoogleUnusableReplyError } from '@truefoundry/trueforge-core/core/google/errors';
 import { grantedFeatures } from '@truefoundry/trueforge-core/core/google/scopes';
 import type { Logger } from 'winston';
-import { z } from 'zod';
 
 import type { IGoogleConnectionStore } from '../../db/googleConnectionStore';
 import type { PersonOwner } from '../../db/personOwner';
@@ -33,18 +32,27 @@ const MESSAGE_IDS_PER_PAGE = 100;
 const EVENTS_PER_PASS = 100;
 
 /**
- * Runs one read of a message. A gone message (404), one Gmail refuses as asked (400) or one whose reply does not
- * parse can never be read, so it is marked as such; anything else, such as a rate limit or an outage, is thrown as is
+ * Runs one read of a message and what is made of its reply. A message Gmail no longer has (404), a reply Aman cannot
+ * take in (too large, or not parsing), or a message whose body cannot be taken apart will fail the same way every
+ * time, so it is marked as such. Anything else, such as a rate limit, a refused request or an outage, is thrown as is
  * so the pass stops and tries again later.
  */
-async function readingMessage<T>({ message_id, read }: { message_id: string; read: () => Promise<T> }): Promise<T> {
+async function readingMessage<T>({ read }: { read: () => Promise<T> }): Promise<T> {
   try {
     return await read();
   } catch (error) {
-    const aboutTheMessage =
-      error instanceof GoogleApiError &&
-      (error.status === 404 || error.status === 400 || error.cause instanceof z.ZodError);
-    throw aboutTheMessage ? new MessageUnreadableError({ message_id, cause: error }) : error;
+    const never =
+      error instanceof GoogleUnusableReplyError || (error instanceof GoogleApiError && error.status === 404);
+    throw never ? new MessageUnreadableError({ cause: error }) : error;
+  }
+}
+
+/** Takes the text out of a message already received. Whatever goes wrong is in that message, so it is unreadable. */
+function textOf(message: GmailMessage): string {
+  try {
+    return readBody({ message, maxChars: TEXT_CHARACTERS }).body;
+  } catch (error) {
+    throw new MessageUnreadableError({ cause: error });
   }
 }
 
@@ -149,21 +157,17 @@ export function gmailMailSource(
       return notReached > 0 ? { read: 'oldest', messages } : { read: 'all', messages };
     },
     async readText(message) {
-      const full = await readingMessage({ message_id: message.id, read: () => api.getMessage(message.id) });
-      return readBody({ message: full, maxChars: TEXT_CHARACTERS }).body;
+      return textOf(await readingMessage({ read: () => api.getMessage(message.id) }));
     },
     async laterInThread(ref: MailRef) {
       if (ref.thread_id === null) {
         return [];
       }
       const threadId = ref.thread_id;
-      const thread = await readingMessage({
-        message_id: ref.id,
-        read: () => api.getThread({ threadId, format: 'full' }),
-      });
+      const thread = await readingMessage({ read: () => api.getThread({ threadId, format: 'full' }) });
       return (thread.messages ?? [])
         .filter(message => Number(message.internalDate) > ref.received_at.getTime())
-        .map(message => readBody({ message, maxChars: TEXT_CHARACTERS }).body);
+        .map(textOf);
     },
   };
 }
@@ -203,11 +207,12 @@ export function googleCalendarSource({
           end: new Date(end),
           location: event.location ?? null,
           // An invite from outside can name the person as its organizer and mark them accepted, so an event that
-          // names them as organizer counts only when they made it, or someone they share with made it with no one
+          // names them as organizer counts only when they made it, or Google Calendar made it for them with no one
           // else on it. Otherwise their own accept counts, or an event with no organizer and no guests.
           own:
             event.organizer?.self === true
-              ? event.creator?.self === true || (event.creator !== undefined && attendees.length === 0)
+              ? event.creator?.self === true ||
+                (attendees.length === 0 && event.iCalUID?.endsWith('@google.com') === true)
               : answer === 'accepted' || (event.organizer === undefined && attendees.length === 0),
         });
       }

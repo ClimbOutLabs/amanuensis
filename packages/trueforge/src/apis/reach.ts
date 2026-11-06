@@ -2,6 +2,7 @@ import { OpenAPIHono, type RouteHandler } from '@hono/zod-openapi';
 import type { Logger } from 'winston';
 
 import type { ResolveRequestContext } from '../auth/identity';
+import type { INoticingStore } from '../db/noticingStore';
 import type { IReachSettingsStore } from '../db/reachSettingsStore';
 import type { ITextContactStore } from '../db/textContactStore';
 import {
@@ -12,6 +13,7 @@ import {
 } from '../routes/reachRoutes';
 import type { DeliveryService } from '../runtime/delivery/deliveryService';
 import { KIND_MAX_LEVEL } from '../runtime/noticing/levels';
+import { MAIL_PROBLEM_SHOWN_AFTER_MS } from '../runtime/noticing/noticingService';
 import { suggestAlwaysImportant } from '../runtime/noticing/suggestions';
 import {
   claimTextLimits,
@@ -34,6 +36,8 @@ export interface ReachRouterDeps {
   textContacts: Pick<ITextContactStore, 'get' | 'claimTextSend' | 'forgetTextSends' | 'textSendRoom'>;
   /** Undefined when this server has no text provider. */
   textLimits: DeliveryLimitSettings | undefined;
+  /** Where each watcher's trouble is kept, so Reach me can say mail is not being checked. */
+  noticingStore: Pick<INoticingStore, 'getCheckpoint'>;
   deliveryService: Pick<DeliveryService, 'deliver'>;
   /** Which phone channels this server can use now. Read per request, since a later part may set one up while running. */
   channels: () => ReachAvailability;
@@ -90,11 +94,14 @@ export function createReachRouter(deps: ReachRouterDeps) {
 
   const view = async (owner: ReturnType<typeof ownerOf>) => {
     const stored = await deps.reachStore.get(owner);
+    const failure = (await deps.noticingStore.getCheckpoint({ ...owner, watcher: 'mail' }))?.failure;
+    const failing = failure !== undefined && now().getTime() - failure.since.getTime() >= MAIL_PROBLEM_SHOWN_AFTER_MS;
     return {
       settings: stored ?? defaultReachSettings('UTC'),
       saved: stored !== undefined,
       availability: deps.channels(),
       max_levels: KIND_MAX_LEVEL,
+      mail_problem: failing ? { since: failure.since.toISOString(), kind: failure.kind } : null,
     };
   };
 

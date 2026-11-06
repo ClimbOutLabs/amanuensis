@@ -6512,6 +6512,34 @@
         ],
         "type": "object"
       },
+      "MailProblem": {
+        "description": "Set when mail has not been checked for about an hour. Null when mail checks work.",
+        "properties": {
+          "kind": {
+            "$ref": "#/components/schemas/MailProblemKind"
+          },
+          "since": {
+            "description": "When mail checks first failed, with none succeeding since, ISO 8601 UTC.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "since",
+          "kind"
+        ],
+        "type": [
+          "object",
+          "null"
+        ]
+      },
+      "MailProblemKind": {
+        "description": "Why mail could not be checked: the mail server answered too slowly, or something else went wrong.",
+        "enum": [
+          "too_slow",
+          "other"
+        ],
+        "type": "string"
+      },
       "MarkBriefItemDoneRequest": {
         "properties": {
           "item_key": {
@@ -9223,6 +9251,9 @@
           "availability": {
             "$ref": "#/components/schemas/ReachAvailability"
           },
+          "mail_problem": {
+            "$ref": "#/components/schemas/MailProblem"
+          },
           "max_levels": {
             "description": "The highest level each kind of event can ever reach, whatever the model says.",
             "properties": {
@@ -9256,7 +9287,8 @@
           "settings",
           "saved",
           "availability",
-          "max_levels"
+          "max_levels",
+          "mail_problem"
         ],
         "type": "object"
       },

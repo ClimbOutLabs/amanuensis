@@ -6,7 +6,14 @@
  * The sender can get some of its own text into that header: its envelope address, its HELO name, and the comments
  * that repeat them. So the header is read as RFC 8601 lays it out (quoted strings and comments kept whole), and
  * refused when it holds anything that text could use to pass for a result: a part that does not parse, more than one
- * DMARC result, a HELO check, an address in brackets, or a value that holds a check of its own.
+ * DMARC result, a HELO check, an address in brackets, `header.from=` more than once, or a value that holds `dmarc=` or
+ * `header.from=`.
+ *
+ * A raw `"` inside a comment is read as the start of a quoted string. RFC 5322 comments have none, but reading it that
+ * way keeps a `)` inside a quoted address from closing the comment early. The cost is that an unpaired quote in a
+ * comment can hide text from this reader. That is covered by the `header.from=` count: Gmail writes the envelope
+ * address in the SPF comment and again in `smtp.mailfrom`, so any echo of it holds `header.from=` at least twice.
+ * Only `dmarc=` and `header.from=` are looked for inside values, since a real tracking address can end in `.arc`.
  */
 
 /** The domain of an address, lower case, or undefined when it has none. */
@@ -158,8 +165,8 @@ function parseMethods(header: string): { authserv: string; results: MethodResult
   return { authserv, results };
 }
 
-/** Text shaped like a check of its own, such as `dmarc=pass` or `header.from=`, inside one property's value. */
-const CHECK_INSIDE_VALUE = /(?:^|[^a-z0-9])(?:dmarc|dkim|spf|arc|iprev|auth|header\.[a-z]+|smtp\.[a-z]+)=/i;
+/** The two texts that could pass for the result this reader looks for, inside one property's value. */
+const CHECK_INSIDE_VALUE = /(?:^|[^a-z0-9])(?:dmarc|header\.from)=/i;
 
 /** Why a parsed header cannot be trusted, or undefined when nothing in it could be the sender's own text. */
 function echoIn(results: readonly MethodResult[]): string | undefined {
@@ -215,6 +222,10 @@ export function checkSender({
   }
   // An address in brackets can hold a `;` or a `(` outside any quotes, so a header with one is not read.
   if (/[[\]]/.test(topmost)) {
+    return { verified: false, why: NOT_SAFE };
+  }
+  // Echoed text repeats the envelope address, so it brings a second `header.from=`; the real result has one.
+  if ((topmost.match(/header\.from=/gi) ?? []).length > 1) {
     return { verified: false, why: NOT_SAFE };
   }
   const parsed = parseMethods(topmost);

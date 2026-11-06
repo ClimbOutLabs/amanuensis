@@ -2,6 +2,7 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { PersonalizationProvider, type PersonalizationProfile } from '@/components/PersonalizationContext.js';
 import { ReachPreferences } from '@/deliveries/ReachPreferences.js';
 
 import { fakeServer } from './fakeDeliveriesApi.js';
@@ -21,6 +22,53 @@ function renderPreferences({ callsReady = false }: { callsReady?: boolean } = {}
   render(<ReachPreferences reach={server.api.reach} />);
   return server;
 }
+
+describe('Settings, Reach me mail trouble', () => {
+  const profile: PersonalizationProfile = {
+    assistant_name: 'Mira',
+    assistant_identity: null,
+    voice_guidance: null,
+    user_name: null,
+    address_as: null,
+    user_profile: null,
+    pinned_preferences: [],
+    help_areas: [],
+    learned_profile: null,
+    learning_enabled: false,
+  };
+
+  function renderWithProblem(mailProblem: { since: string; kind: 'too_slow' | 'other' } | null) {
+    const server = fakeServer([]);
+    server.state.reach = { ...server.state.reach, mailProblem };
+    render(
+      <PersonalizationProvider
+        api={{ getProfile: async () => profile, updateProfile: async next => next, deleteProfile: async () => {} }}
+      >
+        <ReachPreferences reach={server.api.reach} />
+      </PersonalizationProvider>,
+    );
+  }
+
+  it('says nothing while mail checks work', async () => {
+    renderWithProblem(null);
+    await screen.findByRole('checkbox', { name: /Texts/ });
+    expect(screen.queryByText(/could not check your mail/)).toBeNull();
+  });
+
+  it('says, with the assistant’s own name, since when mail was not checked and the one thing to do', async () => {
+    renderWithProblem({ since: '2026-11-05T14:00:00.000Z', kind: 'other' });
+    const notice = await screen.findByText(/Mira could not check your mail since/);
+    expect(notice.textContent).toMatch(/^Mira could not check your mail since .+\.$/);
+    expect(screen.getByText('Open Settings, Connectors, and check that your mail is still connected.')).toBeTruthy();
+  });
+
+  it('tells a slow mail server apart from other trouble', async () => {
+    renderWithProblem({ since: '2026-11-05T14:00:00.000Z', kind: 'too_slow' });
+    await screen.findByText(/could not check your mail since/);
+    expect(screen.getByText('Your mail server answers too slowly. Check that it is running well.')).toBeTruthy();
+    expect(screen.queryByText(/still connected/)).toBeNull();
+  });
+});
 
 describe('Settings, Reach me preferences', () => {
   it('shows texts and calls as off and unavailable, with the plain-words note', async () => {
