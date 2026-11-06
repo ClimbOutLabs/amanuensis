@@ -359,11 +359,15 @@ export { ThreadWorkOnRepoControls, WorkOnRepoControls } from './containers/WorkO
 export type { WorkOnRepoControlsProps } from './containers/WorkOnRepoControls.js';
 export { HELP_BUTTON_LABEL, IRIS_HELP_CHOICES } from './help/helpModel.js';
 export type {
+  HelpConnectorState,
+  HelpGoogleLoginState,
   HelpHealthCheck,
   HelpHealthItem,
   HelpHealthStatus,
   HelpHostReport,
   HelpHostReportState,
+  HelpSetupStep,
+  HelpState,
 } from './help/helpModel.js';
 export { HelpProvider, useOptionalHelp } from './help/HelpProvider.js';
 export type { HelpApi, HelpPhase, HelpSession } from './help/HelpProvider.js';

@@ -58,10 +58,6 @@
       "AgentCodeSnippet": {
         "additionalProperties": false,
         "properties": {
-          "icon": {
-            "format": "uri",
-            "type": "string"
-          },
           "label_name": {
             "minLength": 1,
             "type": "string"
@@ -77,7 +73,6 @@
         "required": [
           "label_name",
           "language",
-          "icon",
           "sample_code"
         ],
         "type": "object"
@@ -1316,6 +1311,13 @@
       },
       "CalendarProvider": {
         "properties": {
+          "account_url_template": {
+            "description": "A built-in calendar address made from the email address; null when the provider does not use one.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "help_hint": {
             "description": "One plain sentence on how to get an app password.",
             "type": "string"
@@ -1328,7 +1330,7 @@
             ]
           },
           "key": {
-            "description": "Stable provider key, such as fastmail or other.",
+            "description": "Stable provider key, such as google or other.",
             "type": "string"
           },
           "name": {
@@ -1336,19 +1338,28 @@
             "type": "string"
           },
           "server_url": {
-            "description": "The built-in calendar address; null when it depends on the email domain or is typed.",
+            "description": "The built-in calendar address; null when it depends on the email domain, the email address or is typed.",
             "type": [
               "string",
               "null"
             ]
+          },
+          "setup_steps": {
+            "description": "Plain steps to show before the form; empty when the hint is enough.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
           }
         },
         "required": [
           "key",
           "name",
           "server_url",
+          "account_url_template",
           "help_url",
-          "help_hint"
+          "help_hint",
+          "setup_steps"
         ],
         "type": "object"
       },
@@ -4414,6 +4425,41 @@
         ],
         "type": "object"
       },
+      "HelpConnectorState": {
+        "properties": {
+          "connected": {
+            "description": "Whether the connector answered this check with its tools.",
+            "type": "boolean"
+          },
+          "last_error": {
+            "description": "One plain sentence on why it did not answer this check, or null.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "name": {
+            "description": "The connector name. Never a token or address.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "connected",
+          "last_error"
+        ],
+        "type": "object"
+      },
+      "HelpGoogleLoginState": {
+        "description": "The built-in Google login: answered, needs connecting again, did not answer, or not set up.",
+        "enum": [
+          "answered",
+          "needs_reconnect",
+          "no_answer",
+          "not_set_up"
+        ],
+        "type": "string"
+      },
       "HelpHealthCheck": {
         "properties": {
           "checked_at": {
@@ -4433,13 +4479,17 @@
           "model_ready": {
             "description": "Whether the default model answered the test call.",
             "type": "boolean"
+          },
+          "state": {
+            "$ref": "#/components/schemas/HelpState"
           }
         },
         "required": [
           "checked_at",
           "model_ready",
           "items",
-          "host_report"
+          "host_report",
+          "state"
         ],
         "type": "object"
       },
@@ -4531,6 +4581,72 @@
           "stale"
         ],
         "type": "string"
+      },
+      "HelpSetupStep": {
+        "properties": {
+          "done": {
+            "description": "Whether this setup step is done.",
+            "type": "boolean"
+          },
+          "id": {
+            "description": "model: a default model is chosen. about_you: your name is saved in Personalization.",
+            "enum": [
+              "model",
+              "about_you"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "done"
+        ],
+        "type": "object"
+      },
+      "HelpState": {
+        "properties": {
+          "app_version": {
+            "description": "The version of Aman this server runs.",
+            "type": "string"
+          },
+          "build_ref": {
+            "description": "The build this server runs, or null when the build was not stamped.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "connectors": {
+            "description": "Each connector, whether it answered, and why not.",
+            "items": {
+              "$ref": "#/components/schemas/HelpConnectorState"
+            },
+            "type": "array"
+          },
+          "google_login": {
+            "$ref": "#/components/schemas/HelpGoogleLoginState"
+          },
+          "sandbox_ready": {
+            "description": "Whether the sandbox that reads files and runs code is ready.",
+            "type": "boolean"
+          },
+          "setup_steps": {
+            "description": "The first-run setup steps and whether each is done.",
+            "items": {
+              "$ref": "#/components/schemas/HelpSetupStep"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "setup_steps",
+          "connectors",
+          "google_login",
+          "sandbox_ready",
+          "app_version",
+          "build_ref"
+        ],
+        "type": "object"
       },
       "ImplementationPlan": {
         "additionalProperties": false,
