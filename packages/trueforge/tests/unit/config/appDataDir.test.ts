@@ -1,6 +1,7 @@
 import envPaths from 'env-paths';
 import path from 'node:path';
-import configuration, { resolveAppDataDir } from '../../../src/config';
+import { defaultVoiceModelDir, resolveAppDataDir } from '../../../src/appDataDir';
+import configuration from '../../../src/config';
 
 describe('app data dir', () => {
   it('uses APP_DATA_DIR as the root when it is set, made absolute', () => {
@@ -19,5 +20,12 @@ describe('app data dir', () => {
     const root = path.dirname(configuration.SANDBOX_RUNS_DIR);
     expect(configuration.SANDBOX_STATE_DIR).toBe(path.join(root, 'sandbox-state'));
     expect(configuration.SANDBOX_GIT_BRIDGE_DIR).toBe(path.join(root, 'git-bridge'));
+  });
+
+  it('keeps the voice model folder under the data root so the setup script and the server agree', () => {
+    expect(defaultVoiceModelDir('/data/app')).toBe('/data/app/voice-model');
+    expect(configuration.VOICE_VAD_MODEL_DIR).toBe(
+      process.env.VOICE_VAD_MODEL_DIR ?? defaultVoiceModelDir(path.dirname(configuration.SANDBOX_RUNS_DIR)),
+    );
   });
 });
