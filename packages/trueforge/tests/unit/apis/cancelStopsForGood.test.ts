@@ -207,15 +207,6 @@ describe('Cancel of one named turn', () => {
   });
 
   it('stops only the turn it names, and leaves a turn it does not name running', async () => {
-    // A turn of another chat: naming it here must stop nothing in this chat.
-    const elsewhere = await createSession(server);
-    const said = await server.request(
-      `/api/v1/sessions/${elsewhere}/turns`,
-      jsonInit({ input: [{ type: 'user.message', content: 'hello' }], stream: true }),
-    );
-    await said.text();
-    const foreignTurnId = (await reloadTurns(server, elsewhere))[0]?.id;
-    expect(foreignTurnId).toBeDefined();
     const released = Promise.withResolvers<undefined>();
     const { sessionId, resumedStream } = await denyHeldWrite(server, released.promise);
     released.resolve(undefined);
@@ -227,15 +218,29 @@ describe('Cancel of one named turn', () => {
     const turnId = running.find(turn => turn.state.status === 'running')?.id;
     expect(turnId).toBeDefined();
 
+    // A turn of another chat that is still running: naming it here must stop nothing, in this chat or its own.
+    const foreignRelease = Promise.withResolvers<undefined>();
+    const foreignRun = await denyHeldWrite(server, foreignRelease.promise);
+    foreignRelease.resolve(undefined);
+    const foreignRunning = await waitFor({
+      read: () => reloadTurns(server, foreignRun.sessionId),
+      ready: turns => turns.some(turn => turn.state.status === 'running'),
+      budgetMs: CANCEL_BUDGET_MS,
+    });
+    const foreignTurnId = foreignRunning.find(turn => turn.state.status === 'running')?.id;
+    expect(foreignTurnId).toBeDefined();
+
     const other = await server.request(`/api/v1/sessions/${sessionId}/cancel`, jsonInit({ turn_id: 'turn_other' }));
     expect(other.status).toBe(200);
     const foreign = await server.request(`/api/v1/sessions/${sessionId}/cancel`, jsonInit({ turn_id: foreignTurnId }));
     expect(foreign.status).toBe(200);
     await new Promise(resolve => setTimeout(resolve, 300));
     expect((await reloadTurns(server, sessionId)).some(turn => turn.state.status === 'running')).toBe(true);
+    expect((await reloadTurns(server, foreignRun.sessionId)).some(turn => turn.state.status === 'running')).toBe(true);
     // No body at all still means "cancel the last turn".
-    const bare = await server.request(`/api/v1/sessions/${elsewhere}/cancel`, { method: 'POST' });
+    const bare = await server.request(`/api/v1/sessions/${foreignRun.sessionId}/cancel`, { method: 'POST' });
     expect(bare.status).toBe(200);
+    await foreignRun.resumedStream;
     // A body that is there but not valid is refused, never read as "cancel the last turn".
     const invalid = await server.request(`/api/v1/sessions/${sessionId}/cancel`, jsonInit({ turn_id: 5 }));
     expect(invalid.status).toBe(400);

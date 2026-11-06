@@ -4,6 +4,8 @@
  */
 import type { ReadableStreamReadResult } from 'node:stream/web';
 
+import { z } from 'zod';
+
 import configuration from '../config';
 import type { OutputFormat } from './audio';
 import type { SpeechRateLimiter } from './speechRateLimit';
@@ -40,6 +42,9 @@ function refusedFor({
 }
 
 const TTS_NORMALIZE_TIMEOUT_MS = 5_000;
+
+/** What the service answers when it would say the text as written; anything else is not the voice service. */
+const NormalizeAnswerSchema = z.object({ spoken: z.string() });
 
 /** Hands on only whole 16-bit samples, holding a trailing odd byte until the next piece arrives. */
 export class WholeSamples {
@@ -86,6 +91,11 @@ export class SidecarSpeechSynthesizer implements SpeechSynthesizer {
     }
     if (!response.ok) {
       throw new Error(`text to speech answered ${String(response.status)}`);
+    }
+    // A 200 from something else at this address must not pass for a yes.
+    const answer = NormalizeAnswerSchema.safeParse(await response.json().catch(() => undefined));
+    if (!answer.success) {
+      throw new Error('text to speech answered 200 with something other than its words', { cause: answer.error });
     }
     return true;
   }

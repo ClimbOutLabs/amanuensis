@@ -3,6 +3,8 @@ import { OpenAPIHono, z } from '@hono/zod-openapi';
 import { HTTPException } from 'hono/http-exception';
 import { createLogger, transports } from 'winston';
 
+import { Socket } from 'node:net';
+
 import { createVoiceRouter } from '../../../src/apis/voice';
 import type { Authenticator } from '../../../src/auth/authenticator';
 import { STANDALONE_REQUEST_CONTEXT, resolveRequestContext } from '../../../src/auth/identity';
@@ -10,6 +12,7 @@ import { createAuthMiddleware } from '../../../src/auth/middleware';
 import configuration from '../../../src/config';
 import { SpeechRateLimiter } from '../../../src/voice/speechRateLimit';
 import { voiceTickets } from '../../../src/voice/voiceTickets';
+import { authorizedSocket, mtlsApp } from '../../fixtures/voice/mtlsApp';
 
 let sttReady = true;
 jest.mock('../../../src/voice/sttAvailability', () => ({
@@ -156,5 +159,39 @@ describe('POST /connect', () => {
 
   it('refuses a request that names no chat', async () => {
     expect((await connect({})).status).toBe(400);
+  });
+});
+
+describe('POST /connect when mutual TLS is on', () => {
+  const logger = createLogger({ transports: [new transports.Console({ silent: true })] });
+  const request = {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', cookie: 'user=alice', host: 'aman.local' },
+    body: JSON.stringify({ session_id: 'chat-1' }),
+  };
+
+  function server() {
+    const app = mtlsApp();
+    app.route('/api/v1/voice', createVoiceRouter({ logger, resolveRequestContext, app }));
+    return app;
+  }
+
+  beforeEach(() => {
+    sttReady = true;
+    ttsReady = true;
+    modelError = undefined;
+    configuration.TTS_ENABLED = true;
+  });
+
+  it("checks the chat is the person's through the server itself, without a certificate on that inner call", async () => {
+    const response = await server().request('/api/v1/voice/connect', request, {
+      incoming: { socket: authorizedSocket() },
+    });
+    expect(response.status).toBe(200);
+  });
+
+  it('still turns away a person who has no certificate', async () => {
+    const response = await server().request('/api/v1/voice/connect', request, { incoming: { socket: new Socket() } });
+    expect(response.status).toBe(403);
   });
 });

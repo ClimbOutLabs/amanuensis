@@ -113,10 +113,12 @@ describe('SidecarSpeechSynthesizer.saysAsWritten', () => {
   it.each([
     ['a refusal for another reason', () => Response.json({ detail: 'bad' }, { status: 400 })],
     ['a server error', () => Response.json({ detail: 'down' }, { status: 503 })],
+    ['a 200 that is not the voice service', () => new Response('<html>welcome</html>', { status: 200 })],
+    ['a 200 with no spoken words', () => Response.json({ ok: true })],
   ])('throws on %s, so the caller cannot take it for a yes', async (_name, answer) => {
     jest.spyOn(globalThis, 'fetch').mockResolvedValue(answer());
     await expect(new SidecarSpeechSynthesizer().saysAsWritten({ text: 'Hi.', signal: never })).rejects.toThrow(
-      'text to speech answered',
+      /text to speech answered/,
     );
   });
 

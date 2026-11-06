@@ -231,6 +231,43 @@ describe('HttpVoiceTurnRunner', () => {
     expect(cancelBodies).toEqual([{ turn_id: 'turn-9' }]);
   });
 
+  it('cancels the turn now running, not an abandoned one that was named late', async () => {
+    const cancelBodies: unknown[] = [];
+    const opens: ReadableStreamDefaultController<Uint8Array>[] = [];
+    const encoder = new TextEncoder();
+    const named = (id: string) => `id: 1\ndata: ${JSON.stringify({ ...created, turn_id: id })}\n\n`;
+    const runner = runnerFor((path, init) => {
+      if (path.endsWith('/cancel')) {
+        cancelBodies.push(JSON.parse(String(init.body)));
+        return Promise.resolve(Response.json({}));
+      }
+      return Promise.resolve(
+        new Response(
+          new ReadableStream<Uint8Array>({
+            start(controller) {
+              opens.push(controller);
+            },
+          }),
+          { headers: { 'content-type': 'text/event-stream' } },
+        ),
+      );
+    });
+    const first = new AbortController();
+    const abandoned = runner.sendMessage({ text: 'one', signal: first.signal, onText: () => undefined });
+    await new Promise(resolve => setTimeout(resolve, 10));
+    first.abort();
+    await abandoned;
+    void runner.sendMessage({ text: 'two', signal: never, onText: () => undefined });
+    await new Promise(resolve => setTimeout(resolve, 10));
+    opens[1]?.enqueue(encoder.encode(named('turn-2')));
+    await new Promise(resolve => setTimeout(resolve, 10));
+    opens[0]?.enqueue(encoder.encode(named('turn-1')));
+    await new Promise(resolve => setTimeout(resolve, 10));
+    cancelBodies.length = 0;
+    await runner.cancel();
+    expect(cancelBodies).toEqual([{ turn_id: 'turn-2' }]);
+  });
+
   it('cancels through the chat cancel route only while a turn it started is running', async () => {
     const seen: string[] = [];
     const cancelBodies: unknown[] = [];

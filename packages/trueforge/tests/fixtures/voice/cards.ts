@@ -30,6 +30,8 @@ export function sendReplyCard(body = 'Thursday at three works for me. See you th
       replaces: null,
       reply_in_thread: { subject: 'Thursday', from: 'Victor' },
       reply_to: null,
+      from_name: null,
+      name_left_off: false,
     },
   };
 }
@@ -73,6 +75,8 @@ const dentist: NonNullable<Tier3Card['calendar_event']> = {
   attendees: [],
   guests_emailed: false,
   one_of_repeating: false,
+  already_created: false,
+  span_days: 1,
   before: null,
 };
 

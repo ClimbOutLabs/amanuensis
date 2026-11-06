@@ -117,6 +117,11 @@ describe('Calendar write classification', () => {
     expect(decision.approval_token_id).not.toBeNull();
   });
 
+  it('carries a duplicate and a multi-day warning in the event itself, so they can be read back', async () => {
+    const decision = await classifyTier(writeAction({ ...REVIEW, already_created: true, span_days: 3 }), makeCtx());
+    expect(decision.card?.calendar_event).toMatchObject({ already_created: true, span_days: 3 });
+  });
+
   it('asks in a scheduled run too, so the run holds it for the owner instead of dropping it', async () => {
     const decision = await classifyTier(
       writeAction(REVIEW),

@@ -1,7 +1,7 @@
 /**
  * Cuts a reply into sentences while it is still streaming in, so the first one can be spoken
  * before the model has finished. A sentence is complete once the character after its stop arrives.
- * Fenced code is never read aloud.
+ * Fenced code is never read aloud, except in `keepLineMarks` mode, which only cuts.
  */
 const ABBREVIATIONS = new Set(['mr', 'mrs', 'ms', 'dr', 'st', 'vs', 'etc', 'e.g', 'i.e']);
 /** A run of words this long with no stop is cut at a space, so one huge sentence cannot be refused by the voice. */
@@ -28,8 +28,8 @@ export class SentenceSplitter {
   readonly #dropLineMarks: boolean;
 
   /**
-   * By default a reply's list and heading marks are taken out. A text that must be said exactly as written
-   * passes `keepLineMarks`, so a mark is left for the voice service to refuse rather than lost here.
+   * By default a reply's list and heading marks and code fences are taken out. A text that must be said exactly
+   * as written passes `keepLineMarks`: the splitter then only cuts, and drops nothing but blank space.
    */
   constructor({ keepLineMarks = false }: { keepLineMarks?: boolean } = {}) {
     this.#dropLineMarks = !keepLineMarks;
@@ -98,9 +98,12 @@ export class SentenceSplitter {
     return final && text.trim() !== '' ? text.length : undefined;
   }
 
-  /** The words of one piece, with code fences and list or heading marks taken out. */
+  /** The words of one piece, with code fences and list or heading marks taken out unless the text is kept whole. */
   #spoken({ piece, atLineStart }: { piece: string; atLineStart: boolean }): string {
     const trimmed = piece.trim();
+    if (!this.#dropLineMarks) {
+      return trimmed;
+    }
     if (trimmed.startsWith('```')) {
       this.#inFence = !this.#inFence;
       return '';
@@ -108,8 +111,7 @@ export class SentenceSplitter {
     if (this.#inFence) {
       return '';
     }
-    const plain =
-      this.#dropLineMarks && atLineStart ? trimmed.replace(/^(?:[-*+>]\s+|#{1,6}\s+|\d+[.)]\s+)/, '').trim() : trimmed;
+    const plain = atLineStart ? trimmed.replace(/^(?:[-*+>]\s+|#{1,6}\s+|\d+[.)]\s+)/, '').trim() : trimmed;
     return /[\p{L}\p{N}]/u.test(plain) ? plain : '';
   }
 }

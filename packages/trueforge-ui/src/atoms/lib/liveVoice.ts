@@ -105,7 +105,7 @@ class Player {
 const CHECK_CONNECTION = 'Check your connection, then tap voice mode again.';
 /** Shown when the server could not turn a reply into sound; the reply itself is already in the chat. */
 const SPEECH_FAILED_NOTICE =
-  'I could not say that out loud. The reply is in the chat. If this keeps happening, turn voice mode off and on again.';
+  'I could not say that out loud. Check that the voice is running. The reply is in the chat.';
 
 function opened(socket: WebSocket): Promise<void> {
   return new Promise((resolve, reject) => {

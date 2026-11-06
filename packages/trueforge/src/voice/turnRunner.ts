@@ -192,7 +192,8 @@ export class HttpVoiceTurnRunner implements VoiceTurnRunner {
       },
       onCreated: turnId => {
         createdId = turnId;
-        if (turnId !== undefined) {
+        // An abandoned turn is already being stopped; it must not replace the id of the turn now running.
+        if (turnId !== undefined && !abandoned) {
           this.#runningTurnId = turnId;
         }
         if (abandoned && turnId !== undefined) {

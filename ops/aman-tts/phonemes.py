@@ -109,7 +109,8 @@ def _money_words(text: str) -> list[str]:
     if cents:
         cent_value = int((cents + "0")[:2])
         if cent_value:
-            words += number_words(cent_value)
+            # Said with their unit, so "$1,000.10" is not heard as a thousand dollars and a ten.
+            words += ["and", *number_words(cent_value), "cent" if cent_value == 1 else "cents"]
     return words
 
 
@@ -193,17 +194,20 @@ def spoken_words(text: str) -> list[str]:
     return [word.lower() for kind, word in _tokens(normalize(text)) if kind == "word"]
 
 
-# Numbers whose reading cannot be mistaken: plain digits, thousands in groups of three, at most
-# two cents, and a plain time. Anything else (1,5  10.0.0.1  11.06.2026  3rd) is said differently
-# from how it is written, so it is not one of these.
+# Numbers whose reading cannot be mistaken: plain digits with no leading zero, thousands in groups
+# of three, at most two cents, and a real time of day. Anything else (1,5  007  10.0.0.1  11.06.2026
+# 3rd  9:60) is said differently from how it is written, so it is not one of these.
 _NOT_MORE_DIGITS = r"(?![\w]|[.,:]\d)"
+_WHOLE = r"(?:0|[1-9]\d{0,2}(?:,\d{3})+|[1-9]\d*)"
 _PLAIN_NUMBER = re.compile(
     r"(?<![\w.,:$])(?:"
-    r"(?P<money>\$(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d{2})?)"
-    r"|(?P<time>\d{1,2}:\d{2})"
-    r"|(?P<number>(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?)"
+    rf"(?P<money>\${_WHOLE}(?:\.\d{{2}})?)"
+    r"|(?P<time>(?:[01]?\d|2[0-3]):[0-5]\d)"
+    rf"|(?P<number>{_WHOLE}(?:\.\d+)?)"
     r")" + _NOT_MORE_DIGITS
 )
+# Two numbers with only a space between are read as one run of words ("1000 500", "5 000").
+_ADJACENT_NUMBERS = re.compile(r"\d[ \t\n]+\$?\d")
 _WRITTEN_WORD = re.compile(r"[^\W_]+(?:'[^\W_]+)*")
 # Characters the voice says as written: letters and digits, spaces, usual punctuation and a few symbols.
 _PLAIN_CHARS = re.compile(r"[A-Za-z0-9 \n\t.,!?;:'\"()%&+@=$\u2014\u2026-]*")
@@ -229,8 +233,14 @@ def reads_as_written(text: str) -> bool:
     Used for text a person must be able to check by ear: a number said another way, a link, a list
     mark, a letter outside plain English or a sign that is dropped all make it False.
     """
-    written = unicodedata.normalize("NFKC", text.replace("\r\n", "\n")).replace("\u2019", "'").replace("\u2018", "'")
-    if _PLAIN_CHARS.fullmatch(written) is None or _LONE_HYPHEN.search(written) or _URL.search(written):
+    # The raw characters are checked, before any folding: a superscript or full-width digit is not plain.
+    written = text.replace("\r\n", "\n").replace("\u2019", "'").replace("\u2018", "'")
+    if (
+        _PLAIN_CHARS.fullmatch(written) is None
+        or _LONE_HYPHEN.search(written)
+        or _URL.search(written)
+        or _ADJACENT_NUMBERS.search(written)
+    ):
         return False
     written = _PLAIN_NUMBER.sub(_spell_plain_number, written)
     for symbol, words in _SYMBOL_WORDS.items():

@@ -123,6 +123,16 @@ export const Tier3EmailSchema = z
       .nullable()
       .default(null)
       .describe('The address replies go to when it is not the sender, or null when replies go to the sender.'),
+    // Absent on cards stored before these fields existed: a reader must treat absent as not known.
+    from_name: z
+      .string()
+      .nullable()
+      .optional()
+      .describe('The display name the message is sent as, or null when none is set.'),
+    name_left_off: z
+      .boolean()
+      .optional()
+      .describe('True when a name was left off an address because it looked like an address.'),
   })
   .describe('The message an email action sends or saves, shown in full.')
   .openapi('Tier3Email');
@@ -151,6 +161,12 @@ export const Tier3CalendarEventSchema = z
     guests_emailed: z.boolean().describe('True when Google emails the guests about this.'),
     one_of_repeating: z.boolean().describe('True when this changes one date of a repeating event.'),
     before: Tier3CalendarEventBeforeSchema.nullable(),
+    // Absent on cards stored before these fields existed: a reader must treat absent as not known.
+    already_created: z
+      .boolean()
+      .optional()
+      .describe('True when the same event was already created in this chat a few minutes ago.'),
+    span_days: z.number().int().optional().describe('How many days the event runs over; 1 for an ordinary event.'),
   })
   .describe('The calendar event a write adds or changes, shown in full.')
   .openapi('Tier3CalendarEvent');

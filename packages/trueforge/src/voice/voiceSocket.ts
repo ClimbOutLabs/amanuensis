@@ -153,7 +153,7 @@ export function attachVoiceSocket({
   server,
   app,
   logger,
-  requireClientCertificate = false,
+  requireClientCertificate,
   makeParts = productionParts,
   pages = pageOrigins({
     port: configuration.PORT,
@@ -165,8 +165,8 @@ export function attachVoiceSocket({
   server: UpgradeSource;
   app: VoiceApp;
   logger: Logger;
-  /** True when the server runs with mutual TLS: only connections with a verified certificate may open a line. */
-  requireClientCertificate?: boolean;
+  /** True when the server runs with mutual TLS: only connections with a verified certificate may open a line. Required, so a new caller cannot leave it out. */
+  requireClientCertificate: boolean;
   /** Tests give stand-ins; the server leaves this out. */
   makeParts?: typeof productionParts;
   pages?: ReadonlySet<string>;

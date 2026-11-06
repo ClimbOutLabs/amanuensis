@@ -1,11 +1,14 @@
-import { createServer, type Server } from 'node:http';
+import { IncomingMessage, createServer, type Server } from 'node:http';
+import { Socket } from 'node:net';
+import type { Duplex } from 'node:stream';
+import { TLSSocket } from 'node:tls';
 import WebSocket from 'ws';
 import { winstonSilent } from '../../fixtures/voice/silentLogger';
 
 import { VoiceServerEventSchema, type VoiceServerEvent } from '@truefoundry/trueforge-core/schemas/voiceLine';
 import { pageOrigins } from '../../../src/auth/requestGuard';
 import { VOICE_SOCKET_PROTOCOL, VOICE_STREAM_PATH } from '../../../src/voice/browserTransport';
-import { attachVoiceSocket, originAllowed, turnRunnerFor } from '../../../src/voice/voiceSocket';
+import { attachVoiceSocket, originAllowed, requestAs, turnRunnerFor } from '../../../src/voice/voiceSocket';
 import {
   VoiceTicketStore,
   VoiceTicketsFullError,
@@ -13,6 +16,7 @@ import {
   type VoiceTicketClaims,
 } from '../../../src/voice/voiceTickets';
 import { FakeStt, FakeTts, FakeTurns, LoudnessVad, hum, pcmBytes, quiet } from '../../fixtures/voice/fakes';
+import { authorizedSocket, mtlsApp } from '../../fixtures/voice/mtlsApp';
 
 const TICKET: VoiceTicketClaims = {
   tenantId: 't1',
@@ -86,6 +90,7 @@ describe('the voice WebSocket', () => {
           return new Response('{}');
         },
       },
+      requireClientCertificate: false,
       maxSessions,
       makeParts: async () => {
         await new Promise(resolve => setTimeout(resolve, setupMs));
@@ -186,6 +191,7 @@ describe('the voice WebSocket', () => {
       pages: new Set([PAGE]),
       logger: winstonSilent(),
       app: { fetch: () => new Response('{}') },
+      requireClientCertificate: false,
       maxSessions: 1,
       makeParts: () =>
         Promise.resolve({ vad: new LoudnessVad(), stt: new FakeStt(), tts: new FakeTts(), turns: new FakeTurns() }),
@@ -231,6 +237,7 @@ describe('the voice WebSocket', () => {
       server: logServer,
       logger,
       app: { fetch: () => new Response('{}') },
+      requireClientCertificate: false,
       makeParts: () =>
         Promise.resolve({
           vad: new LoudnessVad(),
@@ -346,5 +353,117 @@ describe('the turns a voice line runs', () => {
     });
     await runner.sendMessage({ text: 'hi', signal: new AbortController().signal, onText: () => undefined });
     expect(seen).toEqual([{ url: 'http://localhost/api/v1/sessions/chat-from-ticket/turns', cookie: 'session=abc' }]);
+  });
+});
+
+describe('the voice WebSocket when mutual TLS is on', () => {
+  let server: Server;
+  let port: number;
+  let inner: number[];
+
+  beforeEach(async () => {
+    inner = [];
+    server = createServer();
+    attachVoiceSocket({
+      server,
+      app: mtlsApp(),
+      pages: new Set([PAGE]),
+      logger: winstonSilent(),
+      requireClientCertificate: false,
+      makeParts: async ({ ticket, selfFetch }) => {
+        const response = await requestAs({ ticket, selfFetch })('/api/v1/sessions/chat-1', { method: 'GET' });
+        inner.push(response.status);
+        return {
+          vad: new LoudnessVad(),
+          stt: new FakeStt('hi'),
+          tts: new FakeTts(),
+          turns: new FakeTurns({ message: [{ text: ['Hello.'] }] }),
+        };
+      },
+    });
+    await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+    const address = server.address();
+    if (address === null || typeof address === 'string') {
+      throw new Error('the test server has no port');
+    }
+    port = address.port;
+  });
+
+  afterEach(async () => {
+    await new Promise(resolve => setTimeout(resolve, 100));
+    server.closeAllConnections();
+    await new Promise<void>(resolve => {
+      server.close(() => {
+        resolve();
+      });
+    });
+  });
+
+  it('runs the turns of a line through the server itself, past the certificate check', async () => {
+    const { id } = voiceTickets.issue({ ...TICKET, headers: { cookie: 'user=u1', host: 'localhost' } });
+    const socket = new WebSocket(
+      `ws://127.0.0.1:${String(port)}${VOICE_STREAM_PATH}`,
+      [VOICE_SOCKET_PROTOCOL, `ticket.${id}`],
+      { headers: { origin: PAGE } },
+    );
+    await new Promise(resolve => socket.on('open', resolve));
+    await new Promise(resolve => setTimeout(resolve, 100));
+    socket.close();
+    expect(inner).toEqual([200]);
+  });
+});
+
+/** Runs the server's upgrade handler by hand, so a test can choose what kind of connection it came from. */
+function upgradeAttempt({
+  requireClientCertificate,
+  connection,
+}: {
+  requireClientCertificate: boolean;
+  connection: Socket;
+}): string {
+  let listener: ((request: IncomingMessage, socket: Duplex, head: Buffer) => void) | undefined;
+  attachVoiceSocket({
+    server: {
+      on: (_event, handler) => {
+        listener = handler;
+      },
+    },
+    app: mtlsApp(),
+    pages: new Set([PAGE]),
+    logger: winstonSilent(),
+    requireClientCertificate,
+  });
+  const written: string[] = [];
+  const raw = new Socket();
+  raw.write = (chunk: string | Uint8Array) => {
+    written.push(String(chunk));
+    return true;
+  };
+  raw.destroy = () => raw;
+  const request = new IncomingMessage(connection);
+  request.url = VOICE_STREAM_PATH;
+  request.headers = { origin: PAGE, 'sec-websocket-protocol': VOICE_SOCKET_PROTOCOL };
+  listener?.(request, raw, Buffer.alloc(0));
+  return written.join('');
+}
+
+describe('who may open a voice WebSocket when mutual TLS is on', () => {
+  it('turns away a connection without a verified certificate, before it looks at the ticket', () => {
+    expect(upgradeAttempt({ requireClientCertificate: true, connection: new Socket() })).toContain('403 Forbidden');
+  });
+
+  it('turns away a connection whose certificate our authority did not vouch for', () => {
+    const connection = new TLSSocket(new Socket());
+    expect(upgradeAttempt({ requireClientCertificate: true, connection })).toContain('403 Forbidden');
+  });
+
+  it('lets a verified connection on to the ticket check', () => {
+    expect(upgradeAttempt({ requireClientCertificate: true, connection: authorizedSocket() })).toContain(
+      '401 Unauthorized',
+    );
+  });
+
+  it('does not ask for a certificate when mutual TLS is off', () => {
+    expect(upgradeAttempt({ requireClientCertificate: false, connection: new Socket() })).toContain('401 Unauthorized');
   });
 });
