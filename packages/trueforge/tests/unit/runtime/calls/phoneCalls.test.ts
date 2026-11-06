@@ -1,3 +1,4 @@
+import { readReachHistory } from '../../../../src/runtime/noticing/reachGate';
 import { applyReachRules } from '../../../../src/runtime/noticing/reachRules';
 import { defaultReachSettings } from '../../../../src/schemas/reach';
 import { ACCOUNT_SID, ALICE, CALL_SID, PHONE, callsHarness } from '../../../fixtures/callsHarness';
@@ -56,6 +57,31 @@ describe('phone calls as a channel of the delivery layer', () => {
     expect(h.pushes).toEqual([]);
     expect(h.texts).toEqual([]);
     expect(h.activity.map(row => row.tool_name)).toContain('delivery.call');
+  });
+
+  it('rings only the confirmed number, never a new number still waiting for its code', async () => {
+    h = await callsHarness();
+    await h.readyToCall({ pending: '+15550199' });
+    await h.callDelivery();
+    expect(h.placed).toEqual([PHONE]);
+  });
+
+  it('counts a call toward the time between calls even when no one answered', async () => {
+    h = await callsHarness();
+    await h.readyToCall();
+    const delivery = await h.callDelivery();
+    await h.twilioPost({
+      path: '/twilio/call-status',
+      fields: { AccountSid: ACCOUNT_SID, CallSid: CALL_SID, CallStatus: 'no-answer' },
+    });
+    await waitFor(() => h.pushes.length > 0);
+    const history = await readReachHistory({
+      history: h.deliveryStore,
+      owner: ALICE,
+      timezone: 'UTC',
+      now: h.clock.now,
+    });
+    expect(history.last_call_at?.toISOString()).toBe(delivery.created_at);
   });
 
   it('does not call a number that is not confirmed, and falls back to a push at once', async () => {
@@ -195,6 +221,22 @@ describe('the Twilio listener for calls', () => {
     expect(unsigned.status).toBe(403);
   });
 
+  it('does nothing twice for a repeated webhook: no second media key and no second text or push', async () => {
+    h = await callsHarness();
+    await h.readyToCall();
+    const delivery = await h.callDelivery();
+    const first = await h.answer();
+    expect(first.token).toBeDefined();
+    expect((await h.answer()).twiml).toContain('<Hangup/>');
+    const status = { AccountSid: ACCOUNT_SID, CallSid: CALL_SID, CallStatus: 'no-answer' };
+    for (let n = 0; n < 3; n += 1) {
+      expect((await h.twilioPost({ path: '/twilio/call-status', fields: status })).status).toBe(200);
+    }
+    await waitFor(() => h.pushes.length > 0);
+    expect(h.pushes).toEqual([delivery.id]);
+    expect(h.texts).toHaveLength(1);
+  });
+
   it('hangs up on a call Aman did not start, and on one from another account', async () => {
     h = await callsHarness();
     const unknown = await h.twilioPost({
@@ -242,6 +284,24 @@ describe('the Twilio listener for calls', () => {
     expect(await again.closed).toBe(1008);
     opened.socket.close();
     await opened.closed;
+  });
+
+  it('says the assistant name by the same rule as a text: never a phone number, and at most 20 plain letters', async () => {
+    for (const [name, spoken] of [
+      ['Call 555 0100 now', "Hi, it's your assistant."],
+      ['Mannie the very helpful assistant', "Hi, it's Mannie the very help."],
+    ] as const) {
+      h = await callsHarness({ assistantName: name });
+      await h.readyToCall();
+      await h.callDelivery();
+      const { token } = await h.answer();
+      const media = await h.openMedia({ token });
+      await waitFor(() => h.tts.sentences.length > 0);
+      expect(h.tts.sentences[0]).toBe(spoken);
+      media.socket.close();
+      await waitFor(async () => (await h.calls.getBySid(CALL_SID))?.status === 'ended');
+      await h.close();
+    }
   });
 
   it('opens a call in private mode: the assistant gives its own name and only the kind of thing, and asks first', async () => {

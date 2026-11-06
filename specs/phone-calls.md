@@ -19,7 +19,7 @@ When the rules allow a call, Aman asks Twilio to ring the person's confirmed num
 - **No:** the assistant says goodbye and hangs up. **Unclear twice:** it says it will leave it in the app and hangs up.
 - **No approvals.** A card a turn asks for is left waiting in the app, and the assistant says so once. A spoken "yes, send it" is sent to the chat as an ordinary message, never as an answer to a card.
 - A call lasts at most 10 minutes. The person can interrupt the assistant at any time.
-- The assistant's name comes from the person's own Personalization settings. No name is written into the code.
+- The assistant's name comes from the person's own Personalization settings, by the same rule as a text: at most 20 plain letters, and "Your assistant" when the name holds a phone number or nothing is left. No name is written into the code.
 
 ## A missed call
 
@@ -35,12 +35,13 @@ The rules are Noticing's, unchanged: the kind is ticked for calls (or the remind
 
 - Calls use the separate Twilio listener of texts, on the same port. Twilio is told the addresses each time Aman places a call, so there is nothing to set in the Twilio console.
 - `POST /twilio/voice` answers the pick-up, `POST /twilio/call-status` hears how the call ended, and `/twilio/media` is the media WebSocket (`wss://`). All three are behind the same signature check as `/twilio/sms`. A WebSocket upgrade is checked over its public address before the socket opens.
-- The media stream is accepted only for a call Aman placed. When the call is picked up, Aman makes a one-time key, keeps only its SHA-256 hash, and hands the key to Twilio in the stream's parameters. The stream must present that key with the same call SID within 30 seconds, and the key works once. A call record expires 5 minutes after it is placed. Anything else is closed before a sound is played.
+- The media stream is accepted only for a call Aman placed. When the call is picked up, Aman makes a one-time key, keeps only its SHA-256 hash, and hands the key to Twilio in the stream's parameters. The stream must present that key with the same call SID within 30 seconds, and the key works once. A call record expires 5 minutes after it is placed. Anything else is closed before a sound is played. A repeated voice or status webhook does nothing a second time: a call gives out its key once, and an ended call stays ended.
 - Calls to the Twilio number are not answered.
+- Calls ring only the confirmed number, never a new number still waiting for its code.
 
 ## Delivery
 
-- Calls are a delivery channel sender (`channel: 'call'`). It acts only on level call. Push notices skip level call, so a call and a push are never sent together.
+- Calls are a delivery channel sender (`channel: 'call'`). It acts only on level call. Any delivery at level call counts toward the time between calls, answered or not. Push notices skip level call, so a call and a push are never sent together.
 - Each call is a channel attempt on its delivery, written to Activity as `delivery.call`: ringing, then how it ended (talked, not now, voicemail, no answer, failed), with the chat when there was one. The target names the number only by its last four digits.
 - The delivery service gains two calls: record a later attempt on a delivery, and fall back to other channels once.
 
@@ -48,7 +49,8 @@ The rules are Noticing's, unchanged: the kind is ticked for calls (or the remind
 
 - With Twilio set up, the Calls row is available and shows the privacy note: "Calls and texts travel through Twilio and the phone company. The assistant's voice and the transcript are made on your computer."
 - Calls can be switched on only once the number under Texts is confirmed.
-- Try it rings the person's phone with a test call. A test call never sends a text or a push.
+- Try it rings the person's phone with a test call. A test call never sends a text or a push. Its item in the feed is a note, so it never counts toward the day's nudges or the time between calls.
+- The settings that only matter for calls (which kinds may call, quiet hours, the time between calls, calls for urgent reminders) show once calls are set up.
 
 ## Design Decisions
 
@@ -83,6 +85,8 @@ All tests use synthetic data, never a person's real data.
 - A person who has never chatted still gets the conversation, on the assistant a new chat starts on
 - An unknown call, a wrong or reused key, and an expired key or call cannot open a media stream
 - No answer leaves one voicemail, one text and one push, and no retry
+- A repeated webhook does nothing twice; a missed call still counts toward the time between calls, and a Try it call does not
+- Only the confirmed number rings; the spoken name follows the text name rule
 - An approval asked for on a call is left waiting, even when the person says the exact words
 - Private opening says only the kind until "yes"; "no" hangs up without opening a chat
 - Mu-law round trip and resampling to 16 kHz

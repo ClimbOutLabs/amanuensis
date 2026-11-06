@@ -38,7 +38,7 @@ Each call is recorded in Activity: when it was, how it ended, and anything left 
 
 1. Set up [Text messages](/text-messages) first. Calls use the same Twilio account, number and settings, and they ring the number you confirmed there. Your Twilio number must be able to make voice calls.
 2. Make sure the voice and speech parts of Aman are running. Calls use the same voice and speech-to-text as voice mode. See [Voice input](/voice-input).
-3. In Settings, Reach me, switch Phone calls on, tick what may call you, save, and press Try it next to Phone calls. Your phone rings with a test call. A test call never sends a text.
+3. In Settings, Reach me, switch Phone calls on, tick what may call you, save, and press Try it next to Phone calls. Your phone rings with a test call. A test call never sends a text, and it does not count toward the time between calls.
 
 There is nothing to set in the Twilio console for calls. Aman tells Twilio where to reach it each time it calls. Calls to your Twilio number are not answered by Aman.
 
