@@ -269,7 +269,7 @@ Read [AGENTS.md](AGENTS.md) and any package-level `AGENTS.md` before changing co
 - [MCP connectors](docs/mcp-servers.mdx)
 - [Safety](docs/safety.md) and [privacy](docs/privacy.md)
 - [How memory works](docs/memory.md), the [memory design](ops/memory/DESIGN.md) and the [operations runbook](ops/memory/RUNBOOK.md)
-- [Sandbox](docs/sandbox.mdx), [schedules](docs/schedules.md), [backups](docs/backup.md), [voice input](docs/voice-input.mdx)
+- [Sandbox](docs/sandbox.mdx), [schedules](docs/schedules.md), [backups](docs/backup.md), [voice input](docs/voice-input.mdx), [Aman's browser](docs/browser.md)
 - [Upstream sync runbook](docs/UPSTREAM_SYNC.md) and [divergence policy](DIVERGENCE.md)
 
 </details>
