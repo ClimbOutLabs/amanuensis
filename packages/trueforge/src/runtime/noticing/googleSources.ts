@@ -164,6 +164,24 @@ export function googleCalendarSource({
   };
 }
 
+/** The time zone a person's own Google Calendar is kept in, when they connected it. */
+export function googleCalendarTimezoneFor({
+  connections,
+  fetchImpl,
+}: {
+  connections: IGoogleConnectionStore;
+  fetchImpl: typeof fetch | undefined;
+}): (owner: PersonOwner) => Promise<string | undefined> {
+  return async owner => {
+    const record = await connections.get(owner);
+    if (record?.status !== 'connected' || !grantedFeatures(record.granted_scopes).includes('calendar_read')) {
+      return undefined;
+    }
+    const tokens = new GoogleAccessTokens({ now: undefined, connections, owner, fetchImpl });
+    return (await new CalendarApi({ sleep: undefined, tokens, fetchImpl }).calendarTimeZone()) ?? undefined;
+  };
+}
+
 /** The people with a working Google login, and their mail and calendar as far as they allowed. */
 export function createGoogleNoticingSources({
   connections,

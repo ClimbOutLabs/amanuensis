@@ -748,6 +748,7 @@ export type {
   NoticingKind,
   PushDevice,
   ReachApi,
+  ReachSender,
   ReachSettings,
   ReachView,
 } from './deliveries/types.js';

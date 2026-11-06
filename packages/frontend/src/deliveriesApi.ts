@@ -6,6 +6,7 @@ import {
   type NoticingKind,
   type PushDevice,
   type ReachApi,
+  type ReachSender,
   type ReachSettings,
   type ReachView,
 } from '@truefoundry/trueforge-ui';
@@ -107,12 +108,15 @@ function parseChannel(value: unknown): { available: boolean; note: string } {
   return { available: required(channel.available, isBoolean), note: required(channel.note, isString) };
 }
 
-function parseSender(value: unknown): ReachSettings['alwaysImportant'][number] {
+const isSenderSource = (value: unknown): value is ReachSender['source'] => value === 'settings' || value === 'memory';
+
+/** The server leaves `name` out when the person gave none; anything else it sends must be what it says it is. */
+function parseSender(value: unknown): ReachSender {
   const sender = required(value, isRecord);
   return {
     address: required(sender.address, isString),
-    name: typeof sender.name === 'string' ? sender.name : null,
-    source: sender.source === 'memory' ? 'memory' : 'settings',
+    name: sender.name === undefined ? null : required(sender.name, isString),
+    source: required(sender.source, isSenderSource),
     addedAt: required(sender.added_at, isString),
   };
 }

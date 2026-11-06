@@ -50,7 +50,7 @@ One model call per new event asks only for a level, a reason and a one-sentence 
 - At most 5 nudges a day (the person can change this). Past it, events become notes.
 - When the daily token cap is reached, or no model can answer, events become plain notes and no model is called.
 
-Quiet hours (default 21:00 to 08:00 in the person's time zone) hold back calls only. A person who never saved Reach me uses the time zone of their schedules, or UTC when they have none.
+Quiet hours (default 21:00 to 08:00 in the person's time zone) hold back calls only. A person who never saved Reach me uses the time zone of their schedules, else the one their own Google Calendar is kept in, and UTC only when neither says. The Reach me page offers the browser's time zone the first time it is opened.
 
 The model call uses the model a new chat starts on, with no tools. It is metered under the `noticing` usage role and counts toward the daily Token Factory cap.
 
