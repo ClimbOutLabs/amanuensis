@@ -25,10 +25,11 @@ from aman_tts import AssetVerificationError, Settings, create_app, verify_model_
 from audio_formats import MULAW8K, PCM16, Encoder, encode_wav, mulaw_encode  # noqa: E402
 from phonemes import (  # noqa: E402
     Lexicon,
-    _tokens,
     normalize,
     number_words,
     ordinal_words,
+    reads_as_written,
+    spoken_words,
     split_chunks,
     split_sentences,
     to_phonemes,
@@ -100,26 +101,87 @@ def client_for(factory, **settings) -> TestClient:
     return TestClient(create_app(Settings(**settings), synthesizer_factory=factory))
 
 
-class ReadBackFidelityTest(unittest.TestCase):
-    """Cases shared with the server's read-back check (approvalVoice.ts), which may only read aloud what normalize() keeps."""
+class SpokenWordsTest(unittest.TestCase):
+    """What the voice says is the one thing the server may read a card back by, so it is checked here, once."""
 
-    CASES = json.loads((__import__("pathlib").Path(__file__).parent / "read_back_cases.json").read_text())
+    def test_says_plain_writing_as_written(self) -> None:
+        for text in (
+            "Thursday at three works for me, bring the form (really) \"now\".",
+            "It is fine; see you in the e-mail thread... later!",
+            "It's fine. Don't be late, it's noon.",
+            "Write to bob at example.com about it.",
+            "Costs $1,200 or 15%, about 3.5 hours, at 9:30. Pay $40.50 & 2 photos.",
+            "Use 500. Then wait.",
+            "Don\u2019t be late.",
+        ):
+            with self.subTest(text=text):
+                self.assertTrue(reads_as_written(text))
 
-    @staticmethod
-    def written(text: str) -> list[str]:
-        import re
+    def test_refuses_what_it_would_say_differently(self) -> None:
+        for text in (
+            "Pay $1,5 now.",  # heard as fifteen dollars
+            "Codes 1,2,3",  # one hundred twenty three
+            "Pay 10,00",  # one thousand
+            "Pay $1.999",  # cents cut to two digits
+            "Pay $1.5",  # fifty cents
+            "Server 10.0.0.1",
+            "Due 11.06.2026",
+            "10:30:15",
+            "Take the 3rd",
+            "1. apples",
+            "- apples",
+            "Pay $ now.",
+            "The balance is -40 now.",
+            "Open 9-5 on weekdays.",
+            "The total is\v500) not 50.",
+            "The total is\f500) not 50.",
+            "The total is\x85500) not 50.",
+            "See you at the caf\u00e9.",
+            "\u041f\u0440\u0438\u0432\u0435\u0442",
+            "\u4f60\u597d",
+            "See https://example.com/pay today.",
+            "See www.example.com today.",
+            "Open [the form](https://example.com/form) please.",
+            "Run ```rm -rf data``` now.",
+            "The file is in /etc/hosts.",
+            "Great \U0001f44d",
+            "Use **bold** text.",
+            "Don't\u200b do it.",
+        ):
+            with self.subTest(text=text):
+                self.assertFalse(reads_as_written(text))
 
-        return re.findall(r"[^\W_]+(?:'[^\W_]+)*", text.lower())
+    def test_the_words_it_would_say(self) -> None:
+        self.assertEqual(spoken_words("Pay $40.50 at 9:30."), ["pay", "forty", "dollars", "fifty", "at", "nine", "thirty"])
+        self.assertEqual(spoken_words("It costs 1,200."), ["it", "costs", "one", "thousand", "two", "hundred"])
 
-    @staticmethod
-    def spoken(text: str) -> list[str]:
-        return [word.lower() for kind, word in _tokens(normalize(text)) if kind == "word"]
 
-    def test_the_voice_says_exactly_what_the_server_expects(self) -> None:
-        for case in self.CASES:
-            text = case["text"]
-            said_in_full = self.spoken(text) == self.written(text)
-            self.assertEqual(said_in_full, case["cleaning_keeps_words"], text)
+class NormalizeEndpointTest(unittest.TestCase):
+    def test_returns_the_words_as_they_would_be_spoken(self) -> None:
+        with client_for(FakeSynthesizer) as client:
+            res = client.post("/v1/normalize", json={"text": "It costs 1,200 & more."})
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.json(), {"spoken": "it costs one thousand two hundred and more"})
+        self.assertEqual(FakeSynthesizer.calls, [("Hello.", "af_heart")])
+
+    def test_refuses_text_it_would_change_with_a_reason_code(self) -> None:
+        with client_for(FakeSynthesizer) as client:
+            res = client.post("/v1/normalize", json={"text": "Pay $1,5 now."})
+        self.assertEqual(res.status_code, 400)
+        self.assertEqual(res.headers["x-aman-reason"], "would_change_text")
+        self.assertNotIn("1,5", res.text)
+
+    def test_needs_no_model(self) -> None:
+        with client_for(BrokenSynthesizer) as client:
+            res = client.post("/v1/normalize", json={"text": "Hello there."})
+        self.assertEqual(res.status_code, 200)
+
+    def test_rejects_a_bad_body(self) -> None:
+        with client_for(FakeSynthesizer) as client:
+            self.assertEqual(client.post("/v1/normalize", json={"text": 5}).status_code, 400)
+            self.assertEqual(client.post("/v1/normalize", content=b"x", headers={"content-type": "text/plain"}).status_code, 400)
+            big = client.post("/v1/normalize", json={"text": "a" * 6000})
+            self.assertEqual(big.status_code, 413)
 
 
 class HealthTest(unittest.TestCase):

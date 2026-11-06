@@ -31,6 +31,7 @@ describe('readServerEvent', () => {
     expect(readServerEvent('{"type":"heard","text":"hello"}')).toEqual({ type: 'heard', text: 'hello' });
     expect(readServerEvent('{"type":"state","state":"thinking"}')).toEqual({ type: 'state', state: 'thinking' });
     expect(readServerEvent('{"type":"notice","text":"Hi"}')).toEqual({ type: 'notice', text: 'Hi' });
+    expect(readServerEvent('{"type":"tts_failed"}')).toEqual({ type: 'tts_failed' });
   });
 
   it('drops what it does not know', () => {
@@ -205,6 +206,14 @@ describe('startLiveVoice', () => {
     expect(events.onState).toHaveBeenCalledWith('speaking');
     expect(events.onTurnSaved).toHaveBeenCalled();
     expect(events.onNotice).toHaveBeenCalledWith('Hello');
+  });
+
+  it('tells the person in plain words when a reply could not be spoken, and where to read it', async () => {
+    await start();
+    FakeSocket.last?.onmessage?.({ data: '{"type":"tts_failed"}' });
+    expect(events.onNotice).toHaveBeenCalledWith(
+      'I could not say that out loud. The reply is in the chat. If this keeps happening, turn voice mode off and on again.',
+    );
   });
 
   it('stop tells the server, releases the mic and every audio context, and reports nothing', async () => {

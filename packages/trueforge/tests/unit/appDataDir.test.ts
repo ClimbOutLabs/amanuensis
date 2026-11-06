@@ -1,6 +1,7 @@
 import envPaths from 'env-paths';
 import path from 'node:path';
 import { appDataDirFromEnv, resolveAppDataDir, voiceModelDirFromEnv } from '../../src/appDataDir';
+import { processEnv } from '../../src/cli/env';
 import configuration from '../../src/config';
 
 describe('app data dir', () => {
@@ -37,6 +38,14 @@ describe('app data dir', () => {
     );
     expect(voiceModelDirFromEnv({ APP_DATA_DIR: '/data/app', VOICE_VAD_MODEL_DIR: '  ' })).toBe(
       '/data/app/voice-model',
+    );
+  });
+
+  it('gives the server and the setup script the same model folder, and an absolute one', () => {
+    expect(configuration.VOICE_VAD_MODEL_DIR).toBe(voiceModelDirFromEnv(processEnv()));
+    expect(path.isAbsolute(configuration.VOICE_VAD_MODEL_DIR)).toBe(true);
+    expect(voiceModelDirFromEnv({ VOICE_VAD_MODEL_DIR: '.cache/voice-model' })).toBe(
+      path.resolve('.cache/voice-model'),
     );
   });
 });

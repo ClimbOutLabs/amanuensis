@@ -13,6 +13,7 @@ import { extractErrorLogFields } from '@truefoundry/trueforge-core/core';
 
 import { pageOrigins } from '../auth/requestGuard';
 import configuration, { getAllowedOrigins, getPublicBaseUrl } from '../config';
+import { hasAuthorizedClientCertificate, inProcessFetch } from '../http/tls';
 import {
   BrowserVoiceTransport,
   readClientFrame,
@@ -37,7 +38,10 @@ const MAX_FRAME_BYTES = 64 * 1024;
 export const FORWARDED_HEADERS = ['host', 'origin', 'cookie', 'authorization', 'sec-fetch-site', 'user-agent'] as const;
 
 /** Runs a request against this server's own app, in this process. */
-export type SelfFetch = (request: Request) => Response | Promise<Response>;
+export type SelfFetch = ReturnType<typeof inProcessFetch>;
+
+/** The server's own app. Voice always calls it through `inProcessFetch`, so the certificate check lets those calls in. */
+export type VoiceApp = Parameters<typeof inProcessFetch>[0];
 
 export function requestAs({ ticket, selfFetch }: { ticket: VoiceTicketClaims; selfFetch: SelfFetch }) {
   return (path: string, init: RequestInit): Promise<Response> => {
@@ -147,8 +151,9 @@ interface Slot {
 
 export function attachVoiceSocket({
   server,
-  selfFetch,
+  app,
   logger,
+  requireClientCertificate = false,
   makeParts = productionParts,
   pages = pageOrigins({
     port: configuration.PORT,
@@ -158,13 +163,16 @@ export function attachVoiceSocket({
   maxSessions = MAX_VOICE_SESSIONS,
 }: {
   server: UpgradeSource;
-  selfFetch: SelfFetch;
+  app: VoiceApp;
   logger: Logger;
+  /** True when the server runs with mutual TLS: only connections with a verified certificate may open a line. */
+  requireClientCertificate?: boolean;
   /** Tests give stand-ins; the server leaves this out. */
   makeParts?: typeof productionParts;
   pages?: ReadonlySet<string>;
   maxSessions?: number;
 }): void {
+  const selfFetch = inProcessFetch(app);
   const sockets = new WebSocketServer({
     noServer: true,
     maxPayload: MAX_FRAME_BYTES,
@@ -176,6 +184,10 @@ export function attachVoiceSocket({
   server.on('upgrade', (request: IncomingMessage, socket: Duplex, head: Buffer) => {
     const path = new URL(request.url ?? '/', 'http://localhost').pathname;
     if (path !== VOICE_STREAM_PATH) {
+      return;
+    }
+    if (requireClientCertificate && !hasAuthorizedClientCertificate(request.socket)) {
+      refuse(socket, '403 Forbidden');
       return;
     }
     if (!originAllowed({ origin: request.headers.origin, pages })) {

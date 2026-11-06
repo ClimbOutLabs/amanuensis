@@ -5,6 +5,8 @@
  * What the card shows is the server's own text: this file only chooses the words around it. The answer
  * goes back as the chat's own approval input for the same thread and tool call, so the usual replay and
  * `changed` checks apply. Cards that hold more than a person can safely check by ear stay on the screen.
+ * Whether the voice would say a read-back exactly as written is the voice service's call (`/v1/normalize`),
+ * asked sentence by sentence before anything is spoken; this file holds no copy of those rules.
  */
 import type { Tier3Card } from '@truefoundry/trueforge-core/core';
 
@@ -23,27 +25,10 @@ const VERB_WORD: Record<ApprovalVerb, string> = { send: 'send', approve: 'go ahe
 /** Longest message read aloud. A longer one cannot be checked by ear, so it is left for the screen. */
 const MAX_SPOKEN_BODY_CHARS = 1200;
 
-/**
- * Characters the speech engine says as written. Accents, other scripts, links, code and Markdown marks are
- * changed or dropped on the way to speech, so a card holding any of them is not read back by voice: a
- * "yes" must only ever approve what was heard in full.
- */
-const SAYS_AS_WRITTEN = /^[A-Za-z0-9\s.,!?;:'"()%&+@=\u2014\u2026\u2018\u2019\u201c\u201d]*$/;
-const LINK = /:\/\/|www\./i;
-const LIST_MARK = /^\s*(?:[-*+>]|\d+[.)])\s/m;
-/** A hyphen inside a word is spoken as a break; anywhere else (a minus, a range) it would be lost. */
-const WORD_HYPHEN = /(?<=[A-Za-z])-(?=[A-Za-z])/g;
-const DOLLAR_AMOUNT = /\$(?=\d)/g;
-
 /** Text that itself says an answer phrase could be echoed back as the answer, so the screen settles it. */
 function holdsAnAnswerPhrase(text: string): boolean {
   const said = ` ${wordsOf(text).join(' ')} `;
   return Object.values(CONFIRM_PHRASES).some(phrase => said.includes(` ${phrase.heard} `));
-}
-
-export function readsAsWritten(text: string): boolean {
-  const plain = text.replace(WORD_HYPHEN, ' ').replace(DOLLAR_AMOUNT, '');
-  return !LINK.test(text) && !LIST_MARK.test(text) && !plain.includes('-') && SAYS_AS_WRITTEN.test(plain);
 }
 
 export type VoiceApprovalPlan =
@@ -88,8 +73,6 @@ export const CARD_FIELD_RULES: Record<keyof Tier3Card, FieldRule> = {
   mail_draft: 'context',
 };
 
-const FIELD_RULES = new Map<string, FieldRule>(Object.entries(CARD_FIELD_RULES));
-
 function isEmpty(value: unknown): boolean {
   return value === null || value === undefined || value === false || (Array.isArray(value) && value.length === 0);
 }
@@ -116,50 +99,135 @@ function verbFor(card: Tier3Card): ApprovalVerb {
   return 'approve';
 }
 
-/** True when the card's one shape (mail, event or schedule) is a kind voice reads in full. */
-function shapeIsReadable(card: Tier3Card): boolean {
-  const shapes = [card.email, card.calendar_event, card.schedule].filter(shape => !isEmpty(shape));
-  if (shapes.length > 1) {
-    return false;
-  }
-  const { email, calendar_event: event, schedule } = card;
-  if (email !== null && email !== undefined) {
-    return (
-      (email.action === 'send' || email.action === 'save') &&
-      email.to.length > 0 &&
-      email.bcc.length === 0 &&
-      email.replaces === null &&
-      email.body.length <= MAX_SPOKEN_BODY_CHARS
-    );
-  }
-  if (event !== null && event !== undefined) {
-    return (
-      event.action === 'create' &&
-      event.attendees.length === 0 &&
-      !event.guests_emailed &&
-      !event.one_of_repeating &&
-      event.before === null
-    );
-  }
-  if (schedule !== null && schedule !== undefined) {
-    return schedule.action === 'delete';
-  }
-  return true;
+type NestedRule = 'spoken' | 'checked' | 'empty';
+type Email = NonNullable<Tier3Card['email']>;
+type CalendarEvent = NonNullable<Tier3Card['calendar_event']>;
+type Schedule = NonNullable<Tier3Card['schedule']>;
+
+/**
+ * Every field of the three card shapes, like `CARD_FIELD_RULES` one level down: `spoken` is read out,
+ * `checked` is a choice that decides whether the card is readable at all, `empty` must carry nothing.
+ * A field added to a shape is missing here, so the card stays on the screen until someone decides.
+ */
+export const EMAIL_FIELD_RULES: Record<keyof Email, NestedRule> = {
+  action: 'checked',
+  to: 'spoken',
+  cc: 'spoken',
+  bcc: 'empty',
+  subject: 'spoken',
+  body: 'spoken',
+  replaces: 'empty',
+  reply_in_thread: 'checked',
+  reply_to: 'spoken',
+};
+export const EVENT_FIELD_RULES: Record<keyof CalendarEvent, NestedRule> = {
+  action: 'checked',
+  calendar: 'spoken',
+  title: 'spoken',
+  when: 'spoken',
+  time_zone: 'spoken',
+  duration: 'spoken',
+  location: 'spoken',
+  description: 'spoken',
+  attendees: 'empty',
+  guests_emailed: 'empty',
+  one_of_repeating: 'empty',
+  before: 'empty',
+};
+export const SCHEDULE_FIELD_RULES: Record<keyof Schedule, NestedRule> = {
+  action: 'checked',
+  name: 'spoken',
+  when: 'spoken',
+  time_zone: 'spoken',
+  task: 'spoken',
+  runs_as: 'spoken',
+  next_runs: 'empty',
+};
+
+/** True when every field the value carries is listed, and each one listed as `empty` carries nothing. */
+function fieldsAreListed({ shape, rules }: { shape: object; rules: Record<string, string> }): boolean {
+  const listed = new Map(Object.entries(rules));
+  return Object.entries(shape).every(([key, value]) => {
+    const rule = listed.get(key);
+    return rule !== undefined && (rule !== 'empty' || isEmpty(value));
+  });
 }
 
-/** True only for a card whose every field is listed, empty where it must be, and read in full. */
+/** A zone name like Europe/Berlin, as words. */
+const zoneWords = (zone: string): string => zone.replace(/[/_]/g, ' ');
+
+interface BodySegment {
+  text: string;
+  role: 'body';
+}
+
+/**
+ * What the card says, or undefined when voice may not answer it. A card with no mail, event or schedule
+ * shape (a file write, a plan, anything generic) has nothing here that is read in full, so it is
+ * left for the screen.
+ */
+function readableBody(card: Tier3Card): BodySegment[] | undefined {
+  const say = (text: string): BodySegment => ({ text, role: 'body' });
+  const { email, calendar_event: event, schedule } = card;
+  const shapes = [email, event, schedule].filter(shape => !isEmpty(shape));
+  if (shapes.length !== 1) {
+    return undefined;
+  }
+  if (email !== null && email !== undefined) {
+    if (
+      !fieldsAreListed({ shape: email, rules: EMAIL_FIELD_RULES }) ||
+      (email.action !== 'send' && email.action !== 'save') ||
+      email.to.length === 0 ||
+      email.body.length > MAX_SPOKEN_BODY_CHARS
+    ) {
+      return undefined;
+    }
+    const to = mailboxNames(email.to);
+    const opening =
+      email.action === 'send'
+        ? `I'll send this ${email.reply_in_thread === null ? 'email' : 'reply'} to ${to}.`
+        : `I'll save this email to ${to} as a draft. It will not be sent.`;
+    return [
+      say(opening),
+      ...(email.cc.length > 0 ? [say(`Copying ${mailboxNames(email.cc)}.`)] : []),
+      ...(email.reply_to === null ? [] : [say(`Replies will go to ${email.reply_to}.`)]),
+      say(`The subject is: ${email.subject}`),
+      say(`It says: ${email.body}`),
+    ];
+  }
+  if (event !== null && event !== undefined) {
+    if (!fieldsAreListed({ shape: event, rules: EVENT_FIELD_RULES }) || event.action !== 'create') {
+      return undefined;
+    }
+    const place = event.location === '' ? '' : ` at ${event.location}`;
+    return [
+      say(
+        `I'll add the event ${event.title} on ${event.when}, ${zoneWords(event.time_zone)} time, for ${event.duration}${place}.`,
+      ),
+      say(`It goes on the calendar of ${event.calendar}.`),
+      ...(event.description === '' ? [] : [say(`Its description is: ${event.description}`)]),
+    ];
+  }
+  if (schedule !== null && schedule !== undefined) {
+    if (!fieldsAreListed({ shape: schedule, rules: SCHEDULE_FIELD_RULES }) || schedule.action !== 'delete') {
+      return undefined;
+    }
+    return [
+      say(
+        `I'll stop the schedule ${schedule.name}, which runs ${schedule.when}, ${zoneWords(schedule.time_zone)} time, as ${schedule.runs_as}. Its task is: ${schedule.task}`,
+      ),
+    ];
+  }
+  return undefined;
+}
+
+/** True only for a tier 3 card whose every field is listed and empty where it must be. */
 function canBeSettledByVoice({ card, tier }: { card: Tier3Card; tier: 1 | 2 | 3 | undefined }): boolean {
   // Tier 2 is a file write: its path and contents are more than a read-back can carry.
   if (tier !== 3) {
     return false;
   }
-  for (const [key, value] of Object.entries(card)) {
-    const rule = FIELD_RULES.get(key);
-    if (rule === undefined || (rule === 'empty' && !isEmpty(value))) {
-      return false;
-    }
-  }
-  return shapeIsReadable(card);
+  return fieldsAreListed({ shape: card, rules: CARD_FIELD_RULES });
 }
 
 /**
@@ -186,52 +254,15 @@ export function planVoiceApproval({
     text: `Say '${CONFIRM_PHRASES[verb].spoken}' to ${VERB_WORD[verb]}, or 'no'.`,
     role: 'instruction' as const,
   };
-  const body = bodySegments(card);
+  const body = readableBody(card);
+  if (body === undefined) {
+    return { kind: 'typed_only' };
+  }
   const spokenChars = body.reduce((sum, segment) => sum + segment.text.length, 0);
-  if (
-    spokenChars > MAX_SPOKEN_BODY_CHARS ||
-    !body.every(segment => readsAsWritten(segment.text) && !holdsAnAnswerPhrase(segment.text))
-  ) {
+  if (spokenChars > MAX_SPOKEN_BODY_CHARS || body.some(segment => holdsAnAnswerPhrase(segment.text))) {
     return { kind: 'typed_only' };
   }
   return { kind: 'ask', verb, segments: [...body, instruction] };
-}
-
-function bodySegments(card: Tier3Card): { text: string; role: 'body' }[] {
-  const say = (text: string): { text: string; role: 'body' } => ({ text, role: 'body' });
-  const email = card.email;
-  if (email !== null && email !== undefined) {
-    const to = mailboxNames(email.to);
-    const opening =
-      email.action === 'send'
-        ? `I'll send this ${email.reply_in_thread === null ? 'email' : 'reply'} to ${to}.`
-        : `I'll save this email to ${to} as a draft. It will not be sent.`;
-    return [
-      say(opening),
-      ...(email.cc.length > 0 ? [say(`Copying ${mailboxNames(email.cc)}.`)] : []),
-      ...(email.reply_to === null ? [] : [say(`Replies will go to ${email.reply_to}.`)]),
-      say(`The subject is: ${email.subject}`),
-      say(`It says: ${email.body}`),
-    ];
-  }
-  const event = card.calendar_event;
-  if (event !== null && event !== undefined) {
-    const place = event.location === '' ? '' : ` at ${event.location}`;
-    return [
-      say(`I'll add the event ${event.title} on ${event.when} for ${event.duration}${place}.`),
-      ...(event.description === '' ? [] : [say(`Its description is: ${event.description}`)]),
-    ];
-  }
-  const schedule = card.schedule;
-  if (schedule !== null && schedule !== undefined) {
-    return [say(`I'll stop the schedule ${schedule.name}, which runs ${schedule.when}. Its task is: ${schedule.task}`)];
-  }
-  const where = card.recipient ?? card.destination;
-  return [
-    say(card.plain_what),
-    ...(where === null ? [] : [say(`It goes to ${where}.`)]),
-    ...(card.cannot_be_undone === null ? [] : [say(card.cannot_be_undone)]),
-  ];
 }
 
 export type SpokenAnswer = 'confirm' | 'deny' | 'other';
@@ -239,7 +270,7 @@ export type SpokenAnswer = 'confirm' | 'deny' | 'other';
 /** Only the exact phrase for the card's verb confirms, and only a plain "no" turns it down. */
 export function classifyAnswer({ heard, verb }: { heard: string; verb: ApprovalVerb }): SpokenAnswer {
   // A question is not an answer, even in the right words.
-  if (/[?\uff1f]\W*$/u.test(heard)) {
+  if (/[?\uff1f\u061f\u203d\u2047]\W*$/u.test(heard.normalize('NFKC'))) {
     return 'other';
   }
   const words = wordsOf(heard).join(' ');

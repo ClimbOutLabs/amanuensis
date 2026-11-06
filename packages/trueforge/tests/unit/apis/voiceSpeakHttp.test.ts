@@ -90,7 +90,7 @@ describe('POST /speak', () => {
     app.use('*', createAuthMiddleware(headerAuthenticator));
     app.route(
       '/',
-      createVoiceRouter({ logger, resolveRequestContext, speechLimiter, selfFetch: () => new Response('{}') }),
+      createVoiceRouter({ logger, resolveRequestContext, speechLimiter, app: { fetch: () => new Response('{}') } }),
     );
     return app;
   }

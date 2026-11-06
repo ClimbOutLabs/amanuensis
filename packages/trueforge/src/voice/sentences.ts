@@ -23,6 +23,17 @@ function stopIsNotTheEnd({ text, next }: { text: string; next: string }): boolea
 export class SentenceSplitter {
   #pending = '';
   #inFence = false;
+  /** True while the next piece begins a line, the only place a list or heading mark is one. */
+  #atLineStart = true;
+  readonly #dropLineMarks: boolean;
+
+  /**
+   * By default a reply's list and heading marks are taken out. A text that must be said exactly as written
+   * passes `keepLineMarks`, so a mark is left for the voice service to refuse rather than lost here.
+   */
+  constructor({ keepLineMarks = false }: { keepLineMarks?: boolean } = {}) {
+    this.#dropLineMarks = !keepLineMarks;
+  }
 
   /** Adds streamed text and returns the sentences it completed. */
   push(text: string): string[] {
@@ -44,7 +55,8 @@ export class SentenceSplitter {
       }
       const piece = this.#pending.slice(0, cut);
       this.#pending = this.#pending.slice(cut);
-      const spoken = this.#spoken(piece);
+      const spoken = this.#spoken({ piece, atLineStart: this.#atLineStart });
+      this.#atLineStart = piece.endsWith('\n');
       if (spoken !== '') {
         sentences.push(spoken);
       }
@@ -87,7 +99,7 @@ export class SentenceSplitter {
   }
 
   /** The words of one piece, with code fences and list or heading marks taken out. */
-  #spoken(piece: string): string {
+  #spoken({ piece, atLineStart }: { piece: string; atLineStart: boolean }): string {
     const trimmed = piece.trim();
     if (trimmed.startsWith('```')) {
       this.#inFence = !this.#inFence;
@@ -96,7 +108,8 @@ export class SentenceSplitter {
     if (this.#inFence) {
       return '';
     }
-    const plain = trimmed.replace(/^(?:[-*+>]\s+|#{1,6}\s+|\d+[.)]\s+)/, '').trim();
+    const plain =
+      this.#dropLineMarks && atLineStart ? trimmed.replace(/^(?:[-*+>]\s+|#{1,6}\s+|\d+[.)]\s+)/, '').trim() : trimmed;
     return /[\p{L}\p{N}]/u.test(plain) ? plain : '';
   }
 }

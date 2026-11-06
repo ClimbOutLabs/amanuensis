@@ -57,7 +57,6 @@ import { packageMirrorTokens } from '../sandbox/mirrors/packageMirrorTokens';
 import { removeSlotWorkspace, slotsBackendEnabled } from '../sandbox/slotBackend';
 import { honoQueriesToRecord } from '../schemas/deepObjectQuery';
 import { isSessionAgentNameRef, parseListSessionsQuery, type Session } from '../schemas/session';
-import { CancelSessionRequestSchema } from '../schemas/turn';
 import { newId } from '../utils/id';
 import { agentIfAccessible, canReadAgentBoundResource, resolveManagedAgentIds } from './agentAccess';
 import type { ResolveSkillStore } from './skills';
@@ -623,10 +622,7 @@ export function createSessionsRouter(deps: SessionsRouterDeps) {
     ) {
       return c.json({ error: { message: FORBIDDEN_SESSION_ACCESS } }, 403);
     }
-    const requested = await c.req.json().then(
-      (body: unknown) => CancelSessionRequestSchema.safeParse(body).data?.turn_id,
-      () => undefined,
-    );
+    const requested = c.req.valid('json').turn_id;
     if (requested !== undefined) {
       // Only the named turn: a message typed meanwhile in the same chat keeps running.
       await cancelSessionTurn({ ...deps, session }, { turnId: requested });

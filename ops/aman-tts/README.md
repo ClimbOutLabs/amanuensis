@@ -42,6 +42,19 @@ whose caller hangs up stops between pieces of text and is never finished. A
 request whose caller hangs up while it waits leaves the line at once, so it
 does not count toward the two.
 
+### `POST /v1/normalize`
+
+Says what `/v1/speak` would say for a text, without making any audio, and needs no model.
+It is how a caller that must read text back exactly finds out whether it can.
+
+- Request: `{"text": "..."}`, with the same size limits as `/v1/speak`.
+- 200: `{"spoken": "..."}`, the words as they would be spoken, with numbers spelled out.
+- 400 with header `x-aman-reason: would_change_text`: the voice would say something other than
+  what is written. That covers numbers it would read another way (`1,5`, `10.0.0.1`, `11.06.2026`,
+  more than two cents), links, code, list marks, a minus sign or range, line breaks other than a
+  plain one, and letters outside plain English. Only the common forms are kept: plain digits, groups
+  of three with commas, up to two cents after a dollar sign, a decimal, and a time like `9:30`.
+
 ### `GET /healthz`
 
 Returns `{"status": "ok", "model_loaded": true, "model_error": null,

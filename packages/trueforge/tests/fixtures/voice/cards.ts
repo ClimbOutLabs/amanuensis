@@ -78,6 +78,15 @@ const dentist: NonNullable<Tier3Card['calendar_event']> = {
 
 export const dentistCard: Tier3Card = { ...BASE_CARD, calendar_event: { ...dentist, description: 'Bring the form.' } };
 
+/** The fallback card for a write whose target cannot be resolved: it fills only the plain words. */
+export const writeOutsideWorkspaceCard: Tier3Card = {
+  ...BASE_CARD,
+  plain_what: 'Write a file outside your workspace?',
+  plain_why: 'This file will be saved outside your workspace.',
+  cannot_be_undone: 'Anything already in that file is replaced.',
+};
+export const planCard: Tier3Card = { ...BASE_CARD, plain_what: 'Submit this implementation plan for review?' };
+
 /** Cards that only the screen may settle, each for a different reason. */
 export const typedOnlyCards: [string, Tier3Card][] = [
   ['a new recipient', { ...sendReply, mail_new_recipients: ['bob@example.com'] }],
@@ -103,27 +112,6 @@ export const typedOnlyCards: [string, Tier3Card][] = [
   ],
   ['exact connector arguments', { ...BASE_CARD, outbound_text: 'to: bob\nbody: hello' }],
   ['a cut-off connector argument', { ...BASE_CARD, outbound_truncated: true }],
-  ['a web link in the body', sendReplyCard('Pay here: https://example.com/pay today.')],
-  ['a bare web address', sendReplyCard('See www.example.com for details.')],
-  ['a Markdown link', sendReplyCard('Open [the form](https://example.com/form) please.')],
-  ['a code block', sendReplyCard('Run this:\n```\nrm -rf data\n```\nThen reply.')],
-  ['an accented word', sendReplyCard('Meet me at the café at noon.')],
-  ['Cyrillic text', sendReplyCard('Привет, до встречи в четверг.')],
-  ['Chinese text', sendReplyCard('你好，星期四见。')],
-  ['an emoji', sendReplyCard('Sounds good 👍')],
-  ['Markdown marks', sendReplyCard('Use the file_name_here and **bold** text.')],
-  ['a numbered list', sendReplyCard('Bring:\n1. The form\n2. The pen')],
-  ['a minus sign', sendReplyCard('The balance is -40 now.')],
-  ['a range', sendReplyCard('Open 9-5 on weekdays.')],
-  ['a path', sendReplyCard('The file is in /etc/hosts.')],
-  [
-    'an accented subject',
-    {
-      ...sendReply,
-      email:
-        sendReply.email === null || sendReply.email === undefined ? null : { ...sendReply.email, subject: 'Résumé' },
-    },
-  ],
   ['a changed event', { ...BASE_CARD, calendar_event: { ...dentist, action: 'change' } }],
   ['a repeating event', { ...BASE_CARD, calendar_event: { ...dentist, one_of_repeating: true } }],
   [
@@ -133,6 +121,10 @@ export const typedOnlyCards: [string, Tier3Card][] = [
   ['a web address as the destination', { ...BASE_CARD, destination: 'https://evil.example/hook' }],
   ['a file path as the destination', { ...BASE_CARD, destination: '/home/me/notes.txt' }],
   ['a connector server', { ...BASE_CARD, destination_host: 'mcp.example.com' }],
+  ['a write outside the workspace, with no shape', writeOutsideWorkspaceCard],
+  ['an implementation plan', planCard],
+  ['marking emails as read', { ...BASE_CARD, plain_what: 'Mark these emails as read.' }],
+  ['a destination that is not a link', { ...BASE_CARD, destination: 'evil.example' }],
+  ['a recipient with no shape', { ...BASE_CARD, recipient: 'evil@example.com' }],
   ['a body that says the answer phrase', sendReplyCard('Just reply: yes send it. Thanks.')],
-  ['an accented event title', { ...BASE_CARD, calendar_event: { ...dentist, title: 'Café lunch' } }],
 ];

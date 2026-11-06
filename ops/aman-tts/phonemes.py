@@ -188,6 +188,58 @@ def _tokens(text: str) -> Iterator[tuple[str, str]]:
                 yield "word", word
 
 
+def spoken_words(text: str) -> list[str]:
+    """The words the voice says for this text, lower case, after cleaning and spelling out numbers."""
+    return [word.lower() for kind, word in _tokens(normalize(text)) if kind == "word"]
+
+
+# Numbers whose reading cannot be mistaken: plain digits, thousands in groups of three, at most
+# two cents, and a plain time. Anything else (1,5  10.0.0.1  11.06.2026  3rd) is said differently
+# from how it is written, so it is not one of these.
+_NOT_MORE_DIGITS = r"(?![\w]|[.,:]\d)"
+_PLAIN_NUMBER = re.compile(
+    r"(?<![\w.,:$])(?:"
+    r"(?P<money>\$(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d{2})?)"
+    r"|(?P<time>\d{1,2}:\d{2})"
+    r"|(?P<number>(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?)"
+    r")" + _NOT_MORE_DIGITS
+)
+_WRITTEN_WORD = re.compile(r"[^\W_]+(?:'[^\W_]+)*")
+# Characters the voice says as written: letters and digits, spaces, usual punctuation and a few symbols.
+_PLAIN_CHARS = re.compile(r"[A-Za-z0-9 \n\t.,!?;:'\"()%&+@=$\u2014\u2026-]*")
+_LONE_HYPHEN = re.compile(r"(?<![A-Za-z])-|-(?![A-Za-z])")
+
+
+def _spell_plain_number(match: re.Match[str]) -> str:
+    kind = match.lastgroup
+    value = match.group()
+    if kind == "money":
+        words = _money_words(value[1:])
+    elif kind == "time":
+        hours, minutes = value.split(":")
+        words = _time_words(hours, minutes)
+    else:
+        words = _decimal_words(value)
+    return f" {' '.join(words)} "
+
+
+def reads_as_written(text: str) -> bool:
+    """True when the voice would say exactly the words that are written, none lost, added or changed.
+
+    Used for text a person must be able to check by ear: a number said another way, a link, a list
+    mark, a letter outside plain English or a sign that is dropped all make it False.
+    """
+    written = unicodedata.normalize("NFKC", text.replace("\r\n", "\n")).replace("\u2019", "'").replace("\u2018", "'")
+    if _PLAIN_CHARS.fullmatch(written) is None or _LONE_HYPHEN.search(written) or _URL.search(written):
+        return False
+    written = _PLAIN_NUMBER.sub(_spell_plain_number, written)
+    for symbol, words in _SYMBOL_WORDS.items():
+        written = written.replace(symbol, f" {' '.join(words)} ")
+    if re.search(r"[\d$]", written):
+        return False
+    return [word.lower() for word in _WRITTEN_WORD.findall(written)] == spoken_words(text)
+
+
 # Spelling rules for words in neither list: longest match first.
 _SPELLING_RULES: tuple[tuple[str, str], ...] = (
     ("tion", "ʃən"),

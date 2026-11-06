@@ -8,6 +8,8 @@ import { EventType, TurnCreatedEventSchema, TurnDoneEventSchema } from '@truefou
 import { ModelMessageDeltaEventSchema } from '@truefoundry/trueforge-core/core';
 import { z } from 'zod';
 
+import { ListSessionEventsResponseSchema } from '../schemas/events';
+import { GetTurnResponseSchema } from '../schemas/turn';
 import type { PendingApproval, TurnOutcome, TurnRefusal, VoiceTurnRunner } from './transport';
 
 export type SessionRequest = (path: string, init: RequestInit) => Promise<Response>;
@@ -20,6 +22,9 @@ const REFUSALS: Record<string, TurnRefusal> = {
   held_action_sign_in: 'sign_in',
 };
 
+/** How long an abandoned turn is listened to for its name, so it can still be cancelled. */
+const UNNAMED_TURN_WAIT_MS = 15_000;
+
 const ErrorBodySchema = z.object({ error: z.object({ code: z.string().nullable().optional() }).loose() }).loose();
 
 type TurnInput =
@@ -31,15 +36,9 @@ type TurnInput =
       approval: { status: 'allow'; scope: 'once' } | { status: 'deny' };
     };
 
-/** The part of a finished turn that says which cards are still waiting; answered ones are left out by the route. */
-const WaitingTurnSchema = z.object({
-  data: z.object({
-    state: z.object({
-      required_actions: z
-        .array(z.object({ tool_calls: z.array(z.object({ id: z.string() })).default([]) }).loose())
-        .default([]),
-    }),
-  }),
+/** The newest event of the chat, which names the chat's newest turn. */
+const NewestEventSchema = z.object({
+  data: z.array(ListSessionEventsResponseSchema.shape.data.element.pick({ turn_id: true })),
 });
 
 export class HttpVoiceTurnRunner implements VoiceTurnRunner {
@@ -99,18 +98,32 @@ export class HttpVoiceTurnRunner implements VoiceTurnRunner {
     });
   }
 
+  /**
+   * True while the card is still waiting for an answer in the chat. A card answered on the screen starts
+   * a newer turn and the turn it came from keeps listing it, so the chat's newest turn is checked as well.
+   * When this cannot be checked the card counts as waiting: the server validates the answer anyway.
+   */
   async stillWaiting({ turnId, approval }: { turnId: string; approval: PendingApproval }): Promise<boolean> {
+    const chat = `/api/v1/sessions/${encodeURIComponent(this.#sessionId)}`;
     try {
-      const response = await this.#request(
-        `/api/v1/sessions/${encodeURIComponent(this.#sessionId)}/turns/${encodeURIComponent(turnId)}`,
-        { method: 'GET' },
+      const newest = NewestEventSchema.safeParse(
+        await (await this.#request(`${chat}/events?limit=1`, { method: 'GET' })).json(),
       );
-      const parsed = WaitingTurnSchema.safeParse(await response.json());
-      if (!parsed.success) {
+      const newestTurnId = newest.success ? newest.data.data[0]?.turn_id : undefined;
+      if (newestTurnId !== undefined && newestTurnId !== turnId) {
+        return false;
+      }
+      const parsed = GetTurnResponseSchema.safeParse(
+        await (await this.#request(`${chat}/turns/${encodeURIComponent(turnId)}`, { method: 'GET' })).json(),
+      );
+      if (!parsed.success || parsed.data.data.state.status !== 'done') {
         return true;
       }
-      const { state } = parsed.data.data;
-      return state.required_actions.some(action => action.tool_calls.some(call => call.id === approval.toolCallId));
+      return parsed.data.data.state.required_actions.some(
+        action =>
+          action.type === EventType.TOOL_APPROVAL_REQUIRED &&
+          action.tool_calls.some(call => call.id === approval.toolCallId),
+      );
     } catch {
       return true;
     }
@@ -119,9 +132,12 @@ export class HttpVoiceTurnRunner implements VoiceTurnRunner {
   /** Cancels this runner's own turn. Nothing else running in the chat, such as a typed message, is touched. */
   async cancel(): Promise<void> {
     const turnId = this.#runningTurnId;
-    if (turnId === undefined) {
-      return;
+    if (turnId !== undefined) {
+      await this.#cancelTurn(turnId);
     }
+  }
+
+  async #cancelTurn(turnId: string): Promise<void> {
     await this.#request(`/api/v1/sessions/${encodeURIComponent(this.#sessionId)}/cancel`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -129,7 +145,11 @@ export class HttpVoiceTurnRunner implements VoiceTurnRunner {
     });
   }
 
-  async #run({
+  /**
+   * Starts the turn and returns its outcome. When `signal` aborts before the server has named the turn, the
+   * caller is released at once, but the stream is kept just long enough to learn the name and cancel that turn.
+   */
+  #run({
     input,
     spoken,
     signal,
@@ -139,6 +159,63 @@ export class HttpVoiceTurnRunner implements VoiceTurnRunner {
     spoken: boolean;
     signal: AbortSignal;
     onText: (delta: string) => void;
+  }): Promise<TurnOutcome> {
+    const own = new AbortController();
+    let createdId: string | undefined;
+    let abandoned = false;
+    const gone = new Promise<TurnOutcome>(resolve => {
+      const onAbort = (): void => {
+        abandoned = true;
+        if (createdId !== undefined) {
+          own.abort();
+        } else {
+          setTimeout(() => {
+            own.abort();
+          }, UNNAMED_TURN_WAIT_MS).unref();
+        }
+        resolve({ kind: 'failed' });
+      };
+      if (signal.aborted) {
+        onAbort();
+      } else {
+        signal.addEventListener('abort', onAbort, { once: true });
+      }
+    });
+    const outcome = this.#post({
+      input,
+      spoken,
+      fetchSignal: own.signal,
+      onText: delta => {
+        if (!abandoned) {
+          onText(delta);
+        }
+      },
+      onCreated: turnId => {
+        createdId = turnId;
+        if (turnId !== undefined) {
+          this.#runningTurnId = turnId;
+        }
+        if (abandoned && turnId !== undefined) {
+          void this.#cancelTurn(turnId).catch(() => undefined);
+          own.abort();
+        }
+      },
+    });
+    return Promise.race([outcome, gone]);
+  }
+
+  async #post({
+    input,
+    spoken,
+    fetchSignal,
+    onText,
+    onCreated,
+  }: {
+    input: TurnInput;
+    spoken: boolean;
+    fetchSignal: AbortSignal;
+    onText: (delta: string) => void;
+    onCreated: (turnId: string | undefined) => void;
   }): Promise<TurnOutcome> {
     let response: Response;
     try {
@@ -152,7 +229,7 @@ export class HttpVoiceTurnRunner implements VoiceTurnRunner {
           ...(spoken && input.type === 'user.message' ? { spoken_reply: true } : {}),
           ...(this.#timezone === undefined ? {} : { client_timezone: this.#timezone }),
         }),
-        signal,
+        signal: fetchSignal,
       });
     } catch {
       return { kind: 'failed' };
@@ -169,18 +246,23 @@ export class HttpVoiceTurnRunner implements VoiceTurnRunner {
     if (!response.ok || response.body === null) {
       return { kind: 'failed' };
     }
+    let createdTurnId: string | undefined;
     try {
       return await readTurnStream({
         body: response.body,
         onText,
         onCreated: turnId => {
-          this.#runningTurnId = turnId;
+          createdTurnId = turnId;
+          onCreated(turnId);
         },
       });
     } catch {
       return { kind: 'failed' };
     } finally {
-      this.#runningTurnId = undefined;
+      // Only this run's own turn: a newer turn may have started since it was abandoned.
+      if (createdTurnId !== undefined && this.#runningTurnId === createdTurnId) {
+        this.#runningTurnId = undefined;
+      }
     }
   }
 }

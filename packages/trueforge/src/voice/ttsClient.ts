@@ -28,10 +28,18 @@ export async function probeTtsHealth(): Promise<boolean> {
   }
 }
 
-/** The service marks a 400 that is no fault (nothing to read aloud) with a header, not wording. */
-function saysNothingToSay(response: Response): boolean {
-  return response.headers.get('x-aman-reason') === 'nothing_to_say';
+/** The service marks a 400 that is no fault with a header, not wording. */
+function refusedFor({
+  response,
+  reason,
+}: {
+  response: Response;
+  reason: 'nothing_to_say' | 'would_change_text';
+}): boolean {
+  return response.status === 400 && response.headers.get('x-aman-reason') === reason;
 }
+
+const TTS_NORMALIZE_TIMEOUT_MS = 5_000;
 
 /** Hands on only whole 16-bit samples, holding a trailing odd byte until the next piece arrives. */
 export class WholeSamples {
@@ -64,6 +72,22 @@ export class SidecarSpeechSynthesizer implements SpeechSynthesizer {
   constructor(options: { voice?: string | undefined; share?: { limiter: SpeechRateLimiter; person: string } } = {}) {
     this.#voice = options.voice;
     this.#share = options.share;
+  }
+
+  async saysAsWritten({ text, signal }: { text: string; signal: AbortSignal }): Promise<boolean> {
+    const response = await fetch(`${ttsBaseUrl()}/v1/normalize`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ text }),
+      signal: AbortSignal.any([signal, AbortSignal.timeout(TTS_NORMALIZE_TIMEOUT_MS)]),
+    });
+    if (refusedFor({ response, reason: 'would_change_text' })) {
+      return false;
+    }
+    if (!response.ok) {
+      throw new Error(`text to speech answered ${String(response.status)}`);
+    }
+    return true;
   }
 
   async *stream(args: { text: string; format: OutputFormat; signal: AbortSignal }): AsyncIterable<Uint8Array> {
@@ -103,7 +127,7 @@ export class SidecarSpeechSynthesizer implements SpeechSynthesizer {
       signal: AbortSignal.any([signal, AbortSignal.timeout(TTS_STREAM_TIMEOUT_MS)]),
     });
     // A sentence with nothing to say aloud (a lone symbol) is skipped; any other refusal is a real failure.
-    if (response.status === 400 && saysNothingToSay(response)) {
+    if (refusedFor({ response, reason: 'nothing_to_say' })) {
       return;
     }
     if (!response.ok || response.body === null) {

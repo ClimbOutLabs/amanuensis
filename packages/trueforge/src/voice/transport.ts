@@ -46,6 +46,11 @@ export interface SpeechToText {
 
 /** What the engine reads to speak (text to speech): audio in the transport's own format, as it is made. */
 export interface SpeechSynthesizer {
+  /**
+   * True when the voice would say this text exactly as written; false when it would change a word, so the
+   * text cannot be checked by ear. Throws when the voice cannot be asked, which is never a yes.
+   */
+  saysAsWritten({ text, signal }: { text: string; signal: AbortSignal }): Promise<boolean>;
   stream({
     text,
     format,

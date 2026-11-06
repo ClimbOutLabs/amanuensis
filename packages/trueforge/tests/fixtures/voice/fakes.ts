@@ -132,13 +132,27 @@ export class FakeStt implements SpeechToText {
 /** Each sentence is half a second of a pulsing tone, handed over in four pieces. */
 export class FakeTts implements SpeechSynthesizer {
   readonly sentences: string[] = [];
+  /** Every text the voice was asked about, in order. */
+  readonly asked: string[] = [];
   constructor(
     private readonly options: {
       delay?: () => Promise<void>;
       failOn?: ((text: string) => boolean) | undefined;
       silentOn?: ((text: string) => boolean) | undefined;
+      /** Texts the voice would say differently from how they are written. */
+      changes?: ((text: string) => boolean) | undefined;
+      /** The voice cannot be asked at all. */
+      cannotCheck?: boolean | undefined;
     } = {},
   ) {}
+
+  saysAsWritten({ text }: { text: string; signal: AbortSignal }): Promise<boolean> {
+    this.asked.push(text);
+    if (this.options.cannotCheck === true) {
+      return Promise.reject(new Error('the voice is not answering'));
+    }
+    return Promise.resolve(this.options.changes?.(text) !== true);
+  }
 
   async *stream({
     text,
@@ -219,7 +233,11 @@ export class FakeTurns implements VoiceTurnRunner {
   #count = 0;
   constructor(
     private readonly replies: { message?: ScriptedReply[]; approval?: ScriptedReply[] } = {},
-    private readonly options: { gate?: (() => Promise<void>) | undefined } = {},
+    private readonly options: {
+      gate?: (() => Promise<void>) | undefined;
+      /** Holds the turn open after its words came, as a long tool run does. */
+      holdAfterText?: (() => Promise<void>) | undefined;
+    } = {},
   ) {}
 
   async sendMessage({
@@ -279,6 +297,7 @@ export class FakeTurns implements VoiceTurnRunner {
       onText(piece);
       await Promise.resolve();
     }
+    await this.options.holdAfterText?.();
     if (reply?.outcome === 'refused' && reply.refusal !== undefined) {
       return { kind: 'refused', reason: reply.refusal };
     }

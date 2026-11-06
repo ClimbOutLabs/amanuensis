@@ -50,6 +50,25 @@ describe('the live voice line', () => {
     finishLiveStart(fresh);
   });
 
+  it("a new chat's start ends when another chat was shown while the new one was being created", () => {
+    chatChanged(null);
+    const fresh = beginLiveStart(null);
+    chatChanged('chat-9');
+    nameLiveStartSession({ controller: fresh, sessionId: 'chat-new' });
+    expect(fresh.signal.aborted).toBe(true);
+    expect(getVoiceMode()).toBe('off');
+  });
+
+  it.each(['before', 'after'])("a new chat's start survives its own id arriving %s it is named", order => {
+    chatChanged(null);
+    const fresh = beginLiveStart(null);
+    if (order === 'before') chatChanged('chat-new');
+    nameLiveStartSession({ controller: fresh, sessionId: 'chat-new' });
+    if (order === 'after') chatChanged('chat-new');
+    expect(fresh.signal.aborted).toBe(false);
+    finishLiveStart(fresh);
+  });
+
   it('a new start replaces one still opening', () => {
     const first = beginLiveStart('chat-1');
     const second = beginLiveStart('chat-1');

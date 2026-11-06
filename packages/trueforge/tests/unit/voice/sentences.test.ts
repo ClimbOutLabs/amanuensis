@@ -46,4 +46,22 @@ describe('SentenceSplitter', () => {
     expect(answer.push('No. ')).toEqual([]);
     expect(answer.flush()).toEqual(['No.']);
   });
+
+  it('takes list and heading marks out only where a line starts', () => {
+    expect(split('Plan:\n- apples\n2. pears\n## Done\n')).toEqual(['Plan:', 'apples', 'pears', 'Done']);
+  });
+
+  it('leaves a number or a sign inside a line alone, so nothing a person is told goes missing', () => {
+    expect(split('The amount is. 5000. Dollars. + 40 more. - 3 left.')).toEqual([
+      'The amount is.',
+      '5000. Dollars.',
+      '+ 40 more.',
+      '- 3 left.',
+    ]);
+  });
+
+  it('keeps line marks when a text must be said exactly as written', () => {
+    const exact = new SentenceSplitter({ keepLineMarks: true });
+    expect([...exact.push('- apples\n1. pears\n'), ...exact.flush()]).toEqual(['- apples', '1. pears']);
+  });
 });

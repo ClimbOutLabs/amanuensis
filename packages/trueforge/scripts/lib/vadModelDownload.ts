@@ -1,16 +1,16 @@
-import { createHash } from 'node:crypto';
 import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
-import { SILERO_VAD_MODEL, VadModelUnavailableError, type PinnedModel } from '../../src/voice/vad/sileroVad';
+import {
+  matchesPin,
+  SILERO_VAD_MODEL,
+  VadModelUnavailableError,
+  type PinnedModel,
+} from '../../src/voice/vad/sileroVad';
 
 /** Setup-time and build-time source of the pinned model; the server never downloads it. */
 export const SILERO_VAD_URL =
   'https://raw.githubusercontent.com/snakers4/silero-vad/v5.1.2/src/silero_vad/data/silero_vad.onnx';
-
-function matchesPin({ bytes, pin }: { bytes: Uint8Array; pin: PinnedModel }): boolean {
-  return bytes.length === pin.size && createHash('sha256').update(bytes).digest('hex') === pin.sha256;
-}
 
 /** Fetches the pinned file into `dir` for host development and tests; images carry it from their build. */
 export async function downloadVadModel({

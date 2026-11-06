@@ -114,7 +114,7 @@ import type { ITurnArtifactStore } from './db/turnArtifactStore';
 import type { SchedulerProbe } from './help/healthCheck';
 import { mountApiDocs } from './http/apiDocs';
 import { mountCatalogLogos } from './http/catalogLogos';
-import { createClientCertificateMiddleware, inProcessFetch } from './http/tls';
+import { createClientCertificateMiddleware } from './http/tls';
 import type { IOAuthTokenStore } from './mcp/auth/types';
 import { PACKAGE_VERSION } from './packageVersion';
 import { getPersonaKnowledgeIndexer } from './personaKnowledge/knowledgeIndexer';
@@ -1244,7 +1244,7 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
       createVoiceRouter({
         logger: deps.logger,
         resolveRequestContext,
-        selfFetch: inProcessFetch(app),
+        app,
       }),
       authMiddleware,
     ),

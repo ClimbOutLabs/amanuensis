@@ -87,3 +87,41 @@ describe('WholeSamples', () => {
     expect(Array.from(whole.push(Uint8Array.of(4)))).toEqual([3, 4]);
   });
 });
+
+describe('SidecarSpeechSynthesizer.saysAsWritten', () => {
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
+  it('is true when the service would say the text as written', async () => {
+    const fetchSpy = jest.spyOn(globalThis, 'fetch').mockResolvedValue(Response.json({ spoken: 'hello' }));
+    await expect(new SidecarSpeechSynthesizer().saysAsWritten({ text: 'Hello.', signal: never })).resolves.toBe(true);
+    expect(String(fetchSpy.mock.calls[0]?.[0])).toMatch(/\/v1\/normalize$/);
+  });
+
+  it('is false when the service says it would change the words', async () => {
+    jest
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValue(
+        Response.json({ detail: 'no' }, { status: 400, headers: { 'x-aman-reason': 'would_change_text' } }),
+      );
+    await expect(new SidecarSpeechSynthesizer().saysAsWritten({ text: 'Pay $1,5.', signal: never })).resolves.toBe(
+      false,
+    );
+  });
+
+  it.each([
+    ['a refusal for another reason', () => Response.json({ detail: 'bad' }, { status: 400 })],
+    ['a server error', () => Response.json({ detail: 'down' }, { status: 503 })],
+  ])('throws on %s, so the caller cannot take it for a yes', async (_name, answer) => {
+    jest.spyOn(globalThis, 'fetch').mockResolvedValue(answer());
+    await expect(new SidecarSpeechSynthesizer().saysAsWritten({ text: 'Hi.', signal: never })).rejects.toThrow(
+      'text to speech answered',
+    );
+  });
+
+  it('throws when the service cannot be reached', async () => {
+    jest.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('offline'));
+    await expect(new SidecarSpeechSynthesizer().saysAsWritten({ text: 'Hi.', signal: never })).rejects.toThrow();
+  });
+});

@@ -113,7 +113,7 @@ import type { ITokenFactoryUsageStore } from './db/tokenFactoryUsageStore';
 import type { WithTransaction } from './db/transaction';
 import type { ITurnArtifactStore } from './db/turnArtifactStore';
 import { mountFrontend } from './frontend';
-import { inProcessFetch, serverTlsServeOptions } from './http/tls';
+import { serverTlsServeOptions } from './http/tls';
 import { createServerLogger, shouldColorize } from './logger';
 import type { IOAuthTokenStore } from './mcp/auth/types';
 import { PACKAGE_VERSION } from './packageVersion';
@@ -1435,6 +1435,10 @@ try {
       controller?.start();
     },
   );
+
+  // Voice mode's WebSocket: the upgrade is handled here because the app's own router cannot take one.
+  attachVoiceSocket({ server, app, logger, requireClientCertificate: tlsServe !== undefined });
+
   server.on('error', (error: unknown) => {
     console.error('Failed to start server:', error instanceof Error ? error.message : error);
     process.exit(1);
@@ -1453,8 +1457,6 @@ try {
     process.exit(1);
   });
 
-  // Voice mode's WebSocket: the upgrade is handled here because the app's own router cannot take one.
-  attachVoiceSocket({ server, selfFetch: inProcessFetch(app), logger });
   if (smsProvider !== undefined && configuration.TWILIO !== undefined) {
     // So nobody has to set it in the Twilio console. Only this number's incoming-text address changes, only to the
     // configured one, and a failure leaves texts working as before.

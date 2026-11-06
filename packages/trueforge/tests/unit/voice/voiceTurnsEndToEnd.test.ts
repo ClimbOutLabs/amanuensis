@@ -127,6 +127,50 @@ describe('voice turns on the real server', () => {
   );
 
   it(
+    'sees a card answered on the screen as settled, and one nobody answered as still waiting',
+    async () => {
+      const sessionId = await newChat();
+      server.mcp.resetInvocations();
+      const v = voiceSession({ sessionId, words: [`${RUN_DIRECTIVE_PREFIX}${INERT_WRITE_TOOL} please`] });
+      await feed({ session: v.session, clock: v.clock, samples: says() });
+      await v.session.settled();
+      const [paused] = await savedTurns(sessionId);
+      const action = paused?.state.status === 'done' ? paused.state.required_actions[0] : undefined;
+      const call = action?.type === 'tool.approval_required' ? action.tool_calls[0] : undefined;
+      if (
+        paused === undefined ||
+        action === undefined ||
+        call === undefined ||
+        action.type !== 'tool.approval_required'
+      ) {
+        throw new Error('expected a card waiting on the first turn');
+      }
+      const runner = new HttpVoiceTurnRunner({ request: (path, init) => server.request(path, init), sessionId });
+      const approval = { threadId: action.thread_id, toolCallId: call.id, card: null, tier: 3 } as const;
+      expect(await runner.stillWaiting({ turnId: paused.id, approval })).toBe(true);
+      // The chat's own "Don't do it" button: a new turn, while the first one still lists the card.
+      await server.request(`/api/v1/sessions/${sessionId}/turns`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          previous_turn_id: paused.id,
+          stream: false,
+          input: [
+            {
+              type: 'user.tool_approval',
+              thread_id: action.thread_id,
+              tool_call_id: call.id,
+              approval: { status: 'deny' },
+            },
+          ],
+        }),
+      });
+      expect(await runner.stillWaiting({ turnId: paused.id, approval })).toBe(false);
+    },
+    TURN_TIMEOUT_MS,
+  );
+
+  it(
     'does not run it for "yeah"',
     async () => {
       const sessionId = await newChat();

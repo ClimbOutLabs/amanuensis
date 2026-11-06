@@ -9,6 +9,11 @@ HTTP contract:
   GET  /healthz   -> {"status": "ok", "model_loaded": bool, "model_error": str | None,
                       "voices": [str], "default_voice": str}
   POST /v1/speak  -> audio/wav (24 kHz mono 16-bit PCM) by default
+  POST /v1/normalize -> {"spoken": str}: the words /v1/speak would say for `{"text": str}`, without
+                      making any audio. It refuses with 400 and `x-aman-reason: would_change_text`
+                      when the voice would say anything other than what is written (numbers read
+                      another way, links, list marks, letters outside plain English), so a caller
+                      that must read text back exactly can tell. It needs no model.
 
 The speak body is JSON `{"text": str, "voice": str | null, "format": str | null,
 "stream": bool | null}`. `format` is `wav` (default), `pcm16` (24 kHz raw 16-bit
@@ -41,7 +46,7 @@ from fastapi.responses import StreamingResponse
 from starlette.background import BackgroundTask
 
 from audio_formats import FORMATS, STREAMABLE, WAV, Encoder, encode_wav
-from phonemes import Lexicon, split_chunks, split_sentences, to_phonemes
+from phonemes import Lexicon, reads_as_written, spoken_words, split_chunks, split_sentences, to_phonemes
 from pins import MODEL_ASSET, MODEL_FILE, VOICE_IDS, VOICES_FILE
 
 LOGGER = logging.getLogger("aman_tts")
@@ -54,13 +59,13 @@ DISCONNECT_POLL_SECONDS = 0.1
 VOCAB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "kokoro_vocab.json")
 
 
-NOTHING_TO_SAY_HEADER = "x-aman-reason"
+REASON_HEADER = "x-aman-reason"
 
 
 def _nothing_to_say() -> HTTPException:
     """A 400 that callers can tell from a real fault by its header rather than by its wording."""
     return HTTPException(
-        status_code=400, detail="text has nothing to say aloud", headers={NOTHING_TO_SAY_HEADER: "nothing_to_say"}
+        status_code=400, detail="text has nothing to say aloud", headers={REASON_HEADER: "nothing_to_say"}
     )
 
 
@@ -338,6 +343,24 @@ def create_app(
         else:
             content = Encoder(fmt).feed(audio)
         return Response(content=content, media_type=fmt.content_type, headers=headers)
+
+    @app.post("/v1/normalize")
+    async def normalize_text(request: Request) -> dict[str, str]:
+        content_type = (request.headers.get("content-type") or "").split(";")[0].strip().lower()
+        if content_type != "application/json":
+            raise HTTPException(status_code=400, detail="Content-Type must be application/json")
+        body = await _read_bounded_body(request, settings.max_body_bytes)
+        text = _parse_speak_body(body).text
+        if len(text) > settings.max_text_chars:
+            raise HTTPException(status_code=413, detail=f"Text exceeds {settings.max_text_chars} characters")
+        if not reads_as_written(text):
+            LOGGER.info("normalize refused: chars=%d", len(text))
+            raise HTTPException(
+                status_code=400,
+                detail="the voice would not say this text as it is written",
+                headers={REASON_HEADER: "would_change_text"},
+            )
+        return {"spoken": " ".join(spoken_words(text))}
 
     return app
 
