@@ -89,7 +89,8 @@ export function createReachRouter(deps: ReachRouterDeps) {
 
   const view = async (owner: ReturnType<typeof ownerOf>) => {
     const stored = await deps.reachStore.get(owner);
-    const failure = (await deps.noticingStore.getCheckpoint({ ...owner, watcher: 'mail' }))?.failure;
+    const checkpoint = await deps.noticingStore.getCheckpoint({ ...owner, watcher: 'mail' });
+    const failure = checkpoint?.failure;
     const failing = failure !== undefined && now().getTime() - failure.since.getTime() >= MAIL_PROBLEM_SHOWN_AFTER_MS;
     return {
       settings: stored ?? defaultReachSettings('UTC'),
@@ -97,6 +98,7 @@ export function createReachRouter(deps: ReachRouterDeps) {
       availability: deps.channels({ viewer: deps.isInstanceOwner(owner) ? 'owner' : 'person' }),
       max_levels: KIND_MAX_LEVEL,
       mail_problem: failing ? { since: failure.since.toISOString(), kind: failure.kind } : null,
+      mail_source: checkpoint?.source ?? null,
     };
   };
 

@@ -260,7 +260,7 @@ export function runNoticingStoreContractSuite(getStore: () => INoticingStore): v
 
   it('keeps a checkpoint per watcher and person', async () => {
     const store = getStore();
-    const clear = { failure: undefined, stuck: undefined };
+    const clear = { failure: undefined, stuck: undefined, window_ms: undefined, source: undefined };
     await expect(store.getCheckpoint({ ...ALICE, watcher: 'mail' })).resolves.toBeUndefined();
     await store.setCheckpoint({
       ...ALICE,
@@ -288,6 +288,8 @@ export function runNoticingStoreContractSuite(getStore: () => INoticingStore): v
       checked_at: new Date('2026-11-05T10:00:00.000Z'),
       failure: { kind: 'too_slow' as const, since: new Date('2026-11-05T09:00:00.000Z') },
       stuck: { message_id: 'm7', passes: 2 },
+      window_ms: 30_000,
+      source: 'email_connector' as const,
     };
     await store.setCheckpoint({ ...ALICE, watcher: 'mail', ...trouble });
     await expect(store.getCheckpoint({ ...ALICE, watcher: 'mail' })).resolves.toEqual(trouble);
@@ -298,11 +300,15 @@ export function runNoticingStoreContractSuite(getStore: () => INoticingStore): v
       checked_at: new Date('2026-11-05T10:10:00.000Z'),
       failure: undefined,
       stuck: undefined,
+      window_ms: undefined,
+      source: 'google',
     });
     await expect(store.getCheckpoint({ ...ALICE, watcher: 'mail' })).resolves.toEqual({
       checked_at: new Date('2026-11-05T10:10:00.000Z'),
       failure: undefined,
       stuck: undefined,
+      window_ms: undefined,
+      source: 'google',
     });
   });
 }

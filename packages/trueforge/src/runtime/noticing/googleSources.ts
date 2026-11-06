@@ -313,7 +313,11 @@ export function createGoogleNoticingSources({
       });
       return {
         mail: features.includes('gmail_read')
-          ? { status: 'ready', source: gmailMailSource(new GmailApi({ sleep: undefined, tokens, fetchImpl })) }
+          ? {
+              status: 'ready',
+              source: gmailMailSource(new GmailApi({ sleep: undefined, tokens, fetchImpl })),
+              kind: 'google',
+            }
           : { status: 'none' },
         calendar: calendarApi === undefined ? undefined : googleCalendarSource({ api: calendarApi, timeZone }),
       };

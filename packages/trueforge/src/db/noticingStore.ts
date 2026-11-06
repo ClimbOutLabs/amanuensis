@@ -2,9 +2,11 @@ import type { ExpressionBuilder, Kysely } from 'kysely';
 
 import {
   MailProblemKindSchema,
+  MailSourceKindSchema,
   NoticingEventSchema,
   NoticingVerdictSchema,
   type MailProblemKind,
+  type MailSourceKind,
   type NoticingEvent,
   type NoticingKind,
   type NoticingVerdict,
@@ -43,7 +45,8 @@ export interface NoticingEventTable {
 /**
  * When a watcher last looked for one person, and how it is doing. `failing_since` and `failure_kind` are set while
  * passes keep failing and cleared by a pass that works. `stuck_*` name the one message a pass keeps failing on and how
- * many passes failed on it, so a message that never reads can be passed over.
+ * many passes failed on it, so a message that never reads can be passed over. `window_ms` caps how wide a window the
+ * next pass lists, after a pass ran out of time. `source` is where mail was read from.
  */
 export interface NoticingCheckpointTable {
   tenant_id: string;
@@ -54,6 +57,8 @@ export interface NoticingCheckpointTable {
   failure_kind: string | null;
   stuck_message_id: string | null;
   stuck_passes: number;
+  window_ms: number | null;
+  source: string | null;
 }
 
 /** Who is deciding how loudly to reach one person right now, and until when. */
@@ -94,7 +99,10 @@ const MAX_ATTEMPTS = 5;
 /** Events a pass may claim: waiting to be raised, or left halfway through delivery by a pass that stopped. */
 const WAITING = ['pending', 'delivering'];
 
-/** A message a watcher keeps failing on, and how many passes in a row failed on it. */
+/**
+ * What a watcher keeps stopping at, and how many passes in a row failed on it. `message_id` is a message, or for a
+ * stretch of mail that cannot be listed `list:` and the time it starts at, so nothing may read it as a message id.
+ */
 export interface StuckMessage {
   message_id: string;
   passes: number;
@@ -105,6 +113,9 @@ export interface WatcherCheckpoint {
   checked_at: Date;
   failure: { kind: MailProblemKind; since: Date } | undefined;
   stuck: StuckMessage | undefined;
+  /** The widest window the next pass lists, in milliseconds, while a pass that ran out of time is being caught up on. */
+  window_ms: number | undefined;
+  source: MailSourceKind | undefined;
 }
 
 export interface INoticingStore {
@@ -437,6 +448,7 @@ export class NoticingStore implements INoticingStore {
       return undefined;
     }
     const kind = MailProblemKindSchema.safeParse(row.failure_kind);
+    const source = MailSourceKindSchema.safeParse(row.source);
     return {
       checked_at: new Date(row.checked_at),
       failure:
@@ -444,6 +456,8 @@ export class NoticingStore implements INoticingStore {
           ? undefined
           : { kind: kind.data, since: new Date(row.failing_since) },
       stuck: row.stuck_message_id === null ? undefined : { message_id: row.stuck_message_id, passes: row.stuck_passes },
+      window_ms: row.window_ms ?? undefined,
+      source: source.success ? source.data : undefined,
     };
   }
 
@@ -454,6 +468,8 @@ export class NoticingStore implements INoticingStore {
       failure_kind: input.failure?.kind ?? null,
       stuck_message_id: input.stuck?.message_id ?? null,
       stuck_passes: input.stuck?.passes ?? 0,
+      window_ms: input.window_ms ?? null,
+      source: input.source ?? null,
     };
     await this.#db
       .insertInto('noticing_checkpoint')

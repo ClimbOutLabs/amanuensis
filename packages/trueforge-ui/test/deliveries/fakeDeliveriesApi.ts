@@ -81,6 +81,7 @@ export function fakeServer(initial: DeliveryItem[]) {
         approval_waiting: 'nudge',
       },
       mailProblem: null,
+      mailSource: null,
     },
     suggestions: [],
     texts: NO_NUMBER,

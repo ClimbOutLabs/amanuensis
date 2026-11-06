@@ -116,6 +116,15 @@ describe('reach routes', () => {
       checked_at: minutesAgo(5),
       failure: { kind: 'too_slow' as const, since: minutesAgo(minutes) },
       stuck: undefined,
+      window_ms: undefined,
+      source: undefined,
+    });
+
+    it('says where mail is read from once it has been checked', async () => {
+      const { call, noticingStore } = await build();
+      expect(GetReachResponseSchema.parse(await (await call('')).json()).data.mail_source).toBeNull();
+      await noticingStore.setCheckpoint({ ...OWNER, watcher: 'mail', ...failingSince(5), source: 'email_connector' });
+      expect(GetReachResponseSchema.parse(await (await call('')).json()).data.mail_source).toBe('email_connector');
     });
 
     it('says nothing about mail that works, or that has failed for less than an hour', async () => {
