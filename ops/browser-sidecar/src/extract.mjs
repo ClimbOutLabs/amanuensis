@@ -31,6 +31,11 @@ function isVisible(element) {
   return rect.width > 0 && rect.height > 0;
 }
 
+/** Whether the element lies wholly above the view, so a long page can be read from where it is scrolled to. */
+function isAboveView(element) {
+  return element.getBoundingClientRect().bottom <= 0;
+}
+
 function accessibleName(element) {
   const ariaLabel = element.getAttribute('aria-label');
   if (ariaLabel !== null && ariaLabel.trim() !== '') {
@@ -232,7 +237,14 @@ export function extractSnapshotNodes() {
     if (TEXT_TAGS.has(element.tagName)) {
       const text = blockText(element);
       if (text !== '') {
-        nodes.push({ id: domPath(element), role: 'text', name: text, field_kind: null, actionable: false });
+        nodes.push({
+          id: domPath(element),
+          role: 'text',
+          name: text,
+          field_kind: null,
+          actionable: false,
+          above_view: isAboveView(element),
+        });
       }
       continue;
     }
@@ -244,6 +256,7 @@ export function extractSnapshotNodes() {
       value: element.tagName === 'INPUT' || element.tagName === 'TEXTAREA' ? element.value : undefined,
       field_kind: fieldKind(element),
       actionable,
+      above_view: isAboveView(element),
     });
   }
   return nodes;

@@ -71,3 +71,28 @@ test('cuts a very long page and says how to see more', () => {
   assert.ok(text.length < nodes.length * 60, 'the text was cut, not rendered in full');
   assert.match(text, /cut; this page has more/);
 });
+
+test('starts a page too long for one read where the view is', () => {
+  const nodes = Array.from({ length: 5000 }, (_v, i) =>
+    node({
+      id: `n${String(i)}`,
+      role: 'text',
+      name: `Line number ${String(i)} of filler text to pad this out`,
+      above_view: i < 100,
+    }),
+  );
+  const text = renderSnapshot({ title: 'Long page', url: 'https://example.com', nodes, refs: new Map() });
+  assert.match(text, /^# Long page\nhttps:\/\/example\.com\n…\(the part of the page above the view is left out/);
+  assert.doesNotMatch(text, /Line number 99 of/);
+  assert.match(text, /Line number 100 of/);
+  assert.match(text, /cut; this page has more/);
+});
+
+test('keeps the whole of a page that fits, wherever it is scrolled to', () => {
+  const nodes = [
+    node({ id: 'a', role: 'text', name: 'Top line', above_view: true }),
+    node({ id: 'b', role: 'text', name: 'Line in view', above_view: false }),
+  ];
+  const text = renderSnapshot({ title: 'Short', url: 'https://example.com', nodes, refs: new Map() });
+  assert.match(text, /Top line\nLine in view$/);
+});

@@ -27,6 +27,42 @@ const EXTRACT_MODULE = readFileSync(new URL('./extract.mjs', import.meta.url), '
 const EXTRACT_SCRIPT = `(() => {\n${EXTRACT_MODULE}\nreturn extractSnapshotNodes();\n})()`;
 
 /** The same bundled module, ending in a read of one element's field, submit and form context. */
+/** How long a scroll may take to come to rest before the page is read anyway. */
+const SCROLL_SETTLE_MS = 1000;
+
+/**
+ * Waits in the page until a scroll has come to rest: the position holds for a few frames, after it
+ * moved or after a short wait for a page that does not move (its end, or an inner scroll box).
+ */
+const SCROLL_SETTLE_SCRIPT = `(async () => {
+  const start = window.scrollY;
+  const began = performance.now();
+  let last = start;
+  let still = 0;
+  while (performance.now() - began < ${String(SCROLL_SETTLE_MS)}) {
+    await new Promise(resolve => requestAnimationFrame(resolve));
+    const y = window.scrollY;
+    still = y === last ? still + 1 : 0;
+    last = y;
+    if (still >= 3 && (y !== start || performance.now() - began > 200)) {
+      return;
+    }
+  }
+})()`;
+
+/** A scroll's settle wait, bounded here too, so a page that stalls its own frames cannot hold the read. */
+async function scrollSettled(page) {
+  let timer;
+  const cap = new Promise(resolve => {
+    timer = setTimeout(resolve, SCROLL_SETTLE_MS + 500);
+  });
+  try {
+    await Promise.race([page.evaluate(SCROLL_SETTLE_SCRIPT).catch(() => undefined), cap]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 function elementInfoScript(domPath) {
   return `(() => {\n${EXTRACT_MODULE}\nreturn elementInfo(${JSON.stringify(domPath)});\n})()`;
 }
@@ -430,6 +466,8 @@ export class BrowserSidecar {
       return NO_TAB;
     }
     await tab.page.mouse.wheel(0, direction === 'up' ? -800 : 800);
+    // The wheel only starts the scroll; reading before it ends would show where the page was.
+    await scrollSettled(tab.page);
     return this.#read(tab);
   }
 

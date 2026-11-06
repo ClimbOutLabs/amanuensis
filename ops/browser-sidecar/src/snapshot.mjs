@@ -9,6 +9,7 @@ const CHARS_PER_TOKEN = 4;
 const MAX_CHARS = TARGET_TOKENS * CHARS_PER_TOKEN;
 
 const CUT_NOTE = '\n…(cut; this page has more. Scroll, or ask a narrower question, to see the rest.)';
+const ABOVE_NOTE = '…(the part of the page above the view is left out; scroll up to see it.)\n';
 
 /** A sensitive field's value is never shown, however the page or the model asks for it. */
 export function sensitivityOf(node) {
@@ -46,9 +47,13 @@ function oneLine({ node, ref }) {
  */
 export function renderSnapshot({ title, url, nodes, refs }) {
   const header = `# ${title === '' ? '(untitled)' : title}\n${url}\n`;
-  const lines = nodes.map(node => oneLine({ node, ref: refs.get(node.id) ?? null }));
-  let body = lines.join('\n');
+  const render = shown => shown.map(node => oneLine({ node, ref: refs.get(node.id) ?? null })).join('\n');
+  let body = render(nodes);
   let truncated = false;
+  // A page too long for one read starts where the view is, so each scroll shows the next part.
+  if (header.length + body.length > MAX_CHARS && nodes.some(node => node.above_view === true)) {
+    body = `${ABOVE_NOTE}${render(nodes.filter(node => node.above_view !== true))}`;
+  }
   if (header.length + body.length > MAX_CHARS) {
     const budget = Math.max(0, MAX_CHARS - header.length - CUT_NOTE.length);
     body = body.slice(0, budget);

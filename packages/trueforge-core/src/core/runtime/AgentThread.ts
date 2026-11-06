@@ -109,6 +109,7 @@ import {
   FAILED_BATCH_STOP_AT,
   IDENTICAL_CALL_NUDGE_AT,
   IDENTICAL_CALL_STOP_AT,
+  IDENTICAL_MOVE_STOP_AT,
   isReadOnlyCall,
   MAX_TOOL_MARKUP_RETRIES_PER_TURN,
   MAX_WRITE_CALLS_PER_TURN,
@@ -5523,6 +5524,7 @@ export class AgentThread {
       const settled = settledByCallId.get(callId);
       // A browser step that moved the page starts from where it left it, so its own move does not
       // count against it: the same scroll may run again, and is no loop. One that moved nothing is.
+      // A step that keeps moving still has a higher stop of its own (IDENTICAL_MOVE_STOP_AT) and no nudge.
       const movedPage = movesBrowserPage(call.tool_info) && changedByCallId.has(callId);
       nextToolCallMemo.turn.callSignatures.set(signature, {
         count: (previousRecord?.count ?? 0) + 1,
@@ -5530,14 +5532,15 @@ export class AgentThread {
         lastKind: settled?.kind ?? previousRecord?.lastKind ?? null,
         retried: settled?.retried ?? previousRecord?.retried ?? false,
       });
-      if (movedPage) {
-        continue;
-      }
       const thisTurnCount = (this.callSignatureCountsThisTurn.get(signature) ?? 0) + 1;
       this.callSignatureCountsThisTurn.set(signature, thisTurnCount);
-      if (thisTurnCount >= IDENTICAL_CALL_STOP_AT && repeatedSignature === undefined) {
+      if (
+        thisTurnCount >= (movedPage ? IDENTICAL_MOVE_STOP_AT : IDENTICAL_CALL_STOP_AT) &&
+        repeatedSignature === undefined
+      ) {
         repeatedSignature = call;
       } else if (
+        !movedPage &&
         thisTurnCount >= IDENTICAL_CALL_NUDGE_AT &&
         !nudgedSignaturesThisBatch.has(signature) &&
         !hasSentHostNoteThisTurn(this.context, 'identical_call', signature)

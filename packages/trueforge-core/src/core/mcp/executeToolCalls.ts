@@ -1002,6 +1002,11 @@ export const POLICY_BLOCKED_STOP_AT = 3;
 /** Times the same call may be made in one turn before the host ends the turn. */
 export const IDENTICAL_CALL_STOP_AT = 4;
 /**
+ * The same limit for a browser step that reached a new page each time. Scrolling a long page is no
+ * loop, but a page whose text changes on every read (a clock, a rotating ad) still has an end.
+ */
+export const IDENTICAL_MOVE_STOP_AT = 8;
+/**
  * Identical calls in a row a reply may make before the next one ends it. A read leaves things as
  * they were, so a brief may list or search the same thing a few times.
  */

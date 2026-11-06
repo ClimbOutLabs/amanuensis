@@ -24,6 +24,7 @@ import { toolResultResponse, type IToolSet } from '../../../src/core/mcp/IMCPSer
 import {
   createToolCallMemoState,
   createTurnToolCallLedger,
+  IDENTICAL_MOVE_STOP_AT,
   MAX_TOOL_MARKUP_RETRIES_PER_TURN,
   MAX_WRITE_CALLS_PER_TURN,
   mergeTurnToolCallLedgers,
@@ -251,6 +252,8 @@ function makeThread(input: {
   turnToolCallLedger?: TurnToolCallLedger | undefined;
   /** Research budget charged to web_search calls; absent means no budget. */
   searchBudget?: number;
+  /** Steps the reply may take; absent means the default. */
+  stepBudget?: number;
 }) {
   return new AgentThread({
     threadId: 'main',
@@ -270,6 +273,7 @@ function makeThread(input: {
       ...(input.searchBudget === undefined
         ? {}
         : { toolCallBudget: input.searchBudget, budgetedTools: ['web_search'] }),
+      ...(input.stepBudget === undefined ? {} : { stepBudget: { main: input.stepBudget, sub: 4 } }),
     },
     context: input.context ?? [{ role: 'user', content: 'Please add the appointment.' }],
   });
@@ -1230,9 +1234,10 @@ describe('turn-wide counts across threads', () => {
  * A long page of `screens` screens: each scroll down shows the next one until the last, and typing
  * changes what the page shows. `page_notes` is a read of something else, in the same tool set.
  */
-function makeBrowserToolSet(input: { screens?: number; failingScroll?: boolean } = {}) {
+function makeBrowserToolSet(input: { screens?: number; failingScroll?: boolean; ticking?: boolean } = {}) {
   const screens = input.screens ?? 10;
   let at = 0;
+  let tick = 0;
   let typed = '';
   const toolSet = makeMockIMCPServer({
     name: 'browser',
@@ -1280,7 +1285,12 @@ function makeBrowserToolSet(input: { screens?: number; failingScroll?: boolean }
     if (params.name === 'browser_back') {
       at = 0;
     }
-    return Promise.resolve(toolResultResponse({ text: `# Page, screen ${String(at)}\n[e3] textbox Name: ${typed}` }));
+    // A page with a clock on it reads differently every time.
+    tick += 1;
+    const clock = input.ticking === true ? `\nUpdated ${String(tick)} seconds ago` : '';
+    return Promise.resolve(
+      toolResultResponse({ text: `# Page, screen ${String(at)}\n[e3] textbox Name: ${typed}${clock}` }),
+    );
   });
   return toolSet;
 }
@@ -1439,6 +1449,21 @@ describe('write cap leaves work inside the sandbox workspace alone', () => {
     // The guard ended the reply before the model's twelve steps ran out.
     expect(toolResults(thread).length).toBeLessThan(12);
     expect(events.at(-1)).not.toMatchObject({ output: { content: 'Done.' } });
+  });
+
+  it('still stops the same scroll on a page whose text changes on every read', async () => {
+    const toolSet = makeBrowserToolSet({ screens: 2, ticking: true });
+    const scroll = { name: 'browser_scroll', args: { direction: 'down' } };
+    const thread = makeThread({
+      toolSet,
+      stepBudget: 30,
+      create: scriptedArgs(Array.from({ length: 20 }, () => [scroll])),
+    });
+    const events = await drain(thread);
+
+    expect(callToolNames(toolSet).length).toBeLessThan(12);
+    expect(callToolNames(toolSet).length).toBeGreaterThanOrEqual(IDENTICAL_MOVE_STOP_AT);
+    expect(events.at(-1)).toMatchObject({ type: InternalEventType.AGENT_DONE, handoff_cause: 'loop_detected' });
   });
 
   it('stops going back and forth between two pages', async () => {

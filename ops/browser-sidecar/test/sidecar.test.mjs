@@ -102,6 +102,10 @@ async function withWorld(run) {
   const siteA = await fixture({
     '/': ACCOUNT_PAGE,
     '/checkout': (_req, res) => res.writeHead(200, { 'content-type': 'text/html' }).end(CHECKOUT_FIXTURE_HTML),
+    // A static page much longer than one read.
+    '/long': html(
+      Array.from({ length: 3000 }, (_v, i) => `<p>Paragraph ${String(i)} of a long and unchanging page.</p>`).join(''),
+    ),
     '/linked-controls': html(`<h1>Linked controls</h1>
       <form id="linked-form">
         <label for="item">Item</label>
@@ -583,6 +587,23 @@ function refFor(text, label) {
   const line = text.split('\n').find(candidate => candidate.includes(label));
   return /^\[(e\d+)\]/.exec(line ?? '')?.[1];
 }
+
+test('each scroll down a long page reads the next part of it', { skip: !browsersAvailable }, async () => {
+  await withWorld(async ({ sidecar }) => {
+    const where = { owner: 'owner-1', tab: 'chat-1' };
+    const opened = await sidecar.open({ ...where, url: 'http://site-a.test/long' });
+    const first = await sidecar.scroll({ ...where, direction: 'down' });
+    const second = await sidecar.scroll({ ...where, direction: 'down' });
+    assert.match(opened.text, /Paragraph 0 of/);
+    assert.doesNotMatch(opened.text, /left out; scroll up/);
+    assert.match(first.text, /left out; scroll up/);
+    assert.notEqual(first.text, opened.text);
+    assert.notEqual(second.text, first.text);
+    assert.doesNotMatch(second.text, /Paragraph 0 of/);
+    const back = await sidecar.scroll({ ...where, direction: 'up' });
+    assert.equal(back.text, first.text);
+  });
+});
 
 test('types into a field, then fills it', { skip: !browsersAvailable }, async () => {
   await withWorld(async ({ sidecar }) => {
