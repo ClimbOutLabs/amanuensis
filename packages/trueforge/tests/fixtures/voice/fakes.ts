@@ -2,6 +2,7 @@
 import type { InputFormat, OutputFormat } from '../../../src/voice/audio';
 import { OUTPUT_SAMPLE_RATE, outputToSamples } from '../../../src/voice/audio';
 import type { Clock } from '../../../src/voice/echoGuard';
+import type { LatencyDriver } from '../../../src/voice/latencyHarness';
 import type { VoiceSession } from '../../../src/voice/session';
 import type {
   PendingApproval,
@@ -342,4 +343,41 @@ export async function feed({
     await tick();
     await tick();
   }
+}
+
+/** Lets queued promise work finish, so a step of virtual time sees everything that step set off. */
+export async function settle(): Promise<void> {
+  for (let round = 0; round < 8; round += 1) {
+    await new Promise<void>(resolve => {
+      setImmediate(resolve);
+    });
+  }
+}
+
+/** A promise that is done after `ms` of the clock's time, not of the machine's. */
+export function delay({ clock, ms }: { clock: Clock; ms: number }): Promise<void> {
+  return new Promise(resolve => {
+    clock.after(ms, resolve);
+  });
+}
+
+/**
+ * Drives the latency harness on a virtual clock: a pause moves the clock and lets the work it wakes finish, so a
+ * trial takes no real time and its split depends only on the audio. `stall` jumps the clock once, after the given
+ * number of pauses, as a process stall would.
+ */
+export function virtualDriver({ stall }: { stall?: { afterPauses: number; ms: number } } = {}): LatencyDriver {
+  const clock = new ManualClock();
+  let pauses = 0;
+  return {
+    clock,
+    pause: async ms => {
+      pauses += 1;
+      clock.advance(ms);
+      if (pauses === stall?.afterPauses) {
+        clock.advance(stall.ms);
+      }
+      await settle();
+    },
+  };
 }
