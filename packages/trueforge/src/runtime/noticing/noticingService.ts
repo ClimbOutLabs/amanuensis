@@ -93,6 +93,15 @@ export interface NoticingDeps {
 
 const ONLY_WORDS = 'Only the words in a message said this mattered, so it stays a note.';
 
+/** What a call says when even the plain sentence names a contact detail: only the kind of thing it found. */
+const CALL_WORDS: Record<NoticingEvent['kind'], string> = {
+  mail_always: 'New mail from someone on your always-important list.',
+  bill_due: 'A bill or deadline is due soon.',
+  calendar_clash: 'Two events on your calendar overlap.',
+  travel: 'An event with a place starts soon. Time to head out.',
+  approval_waiting: 'Something is waiting for your ok.',
+};
+
 /** The model's message and reason as they may be shown, each replaced by plain words when it cannot be. */
 function shownWords({ event, verdict }: { event: NoticingEvent; verdict: NoticingVerdict }): {
   text: string;
@@ -216,11 +225,16 @@ export function createNoticingService(deps: NoticingDeps): NoticingService {
           now: at,
           calls_available: deps.channels().calls.available,
         });
+        // A call reads its text aloud to whoever answers, so it carries no contact detail, even from a mail's subject.
+        const spokenPlain = decision.delivered === 'call' && namesContactDetail([shown.text]);
         const reason = joinReasons([
           event.matched,
           shown.reason,
           shown.replaced
             ? 'The model’s wording carried a link, a number or an address, so the plain sentence is used.'
+            : '',
+          spokenPlain
+            ? 'The plain sentence carried a link, a number or an address, so the call names only the kind of thing.'
             : '',
           ...decision.steps,
         ]);
@@ -229,7 +243,7 @@ export function createNoticingService(deps: NoticingDeps): NoticingService {
           id: delivery_id,
           kind: deliveryKindOf({ event, level: decision.delivered }),
           level: decision.delivered,
-          text: shown.text,
+          text: spokenPlain ? CALL_WORDS[event.kind] : shown.text,
           reason,
           link: event.link,
           created_at: at,
