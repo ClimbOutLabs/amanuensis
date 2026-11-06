@@ -4,6 +4,7 @@ import type * as TrueForge from "../../api/index.js";
 import * as core from "../../core/index.js";
 import type * as serializers from "../index.js";
 import { MailProblem } from "./MailProblem.js";
+import { MailSourceKind } from "./MailSourceKind.js";
 import { ReachAvailability } from "./ReachAvailability.js";
 import { ReachSettings } from "./ReachSettings.js";
 import { ReachViewMaxLevels } from "./ReachViewMaxLevels.js";
@@ -12,6 +13,7 @@ export const ReachView: core.serialization.ObjectSchema<serializers.ReachView.Ra
     core.serialization.object({
         availability: ReachAvailability,
         mailProblem: core.serialization.property("mail_problem", MailProblem.nullable()),
+        mailSource: core.serialization.property("mail_source", MailSourceKind.nullable()),
         maxLevels: core.serialization.property("max_levels", ReachViewMaxLevels),
         saved: core.serialization.boolean(),
         settings: ReachSettings,
@@ -21,6 +23,7 @@ export declare namespace ReachView {
     export interface Raw {
         availability: ReachAvailability.Raw;
         mail_problem?: MailProblem.Raw | null;
+        mail_source?: MailSourceKind.Raw | null;
         max_levels: ReachViewMaxLevels.Raw;
         saved: boolean;
         settings: ReachSettings.Raw;

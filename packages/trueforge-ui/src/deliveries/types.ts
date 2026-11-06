@@ -63,6 +63,8 @@ export type ReachView = {
   maxLevels: Partial<Record<NoticingKind, 'note' | 'nudge' | 'call'>>;
   /** Set once mail has gone unchecked for about an hour: since when, and whether the mail server was too slow. */
   mailProblem: { since: string; kind: 'too_slow' | 'other' } | null;
+  /** Where mail is read from, or null until it has been checked once. */
+  mailSource: 'google' | 'email_connector' | null;
 };
 
 export type ReachSuggestion = { address: string; memory: string };

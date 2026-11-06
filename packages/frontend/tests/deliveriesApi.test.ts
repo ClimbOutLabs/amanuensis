@@ -175,6 +175,11 @@ test('reads Reach me settings into the app shape, dropping what it does not know
   assert.deepEqual(view.maxLevels, { travel: 'call', bill_due: 'nudge' });
   assert.equal(view.availability.calls.note, 'Phone calls are not set up yet.');
   assert.equal(view.mailProblem, null);
+  assert.equal(view.mailSource, null);
+  const watched = createDeliveriesApi(async () =>
+    Response.json({ data: { ...WIRE_REACH.data, mail_source: 'google' } }),
+  );
+  assert.equal((await watched.reach.get()).mailSource, 'google');
 });
 
 test('reads the mail trouble the server reports, and treats a kind it does not know as other trouble', async () => {

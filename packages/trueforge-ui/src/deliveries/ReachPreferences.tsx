@@ -116,6 +116,20 @@ function MailProblem({ problem }: { problem: NonNullable<ReachView['mailProblem'
   );
 }
 
+const MAIL_SOURCE_WORDS = {
+  google: 'your Google mail',
+  email_connector: 'the mail from the shared Email connector',
+} as const;
+
+function MailSource({ source }: { source: NonNullable<ReachView['mailSource']> }) {
+  const assistant = useAssistantDisplayName();
+  return (
+    <p className="text-text-secondary text-sm" data-role="mail-source">
+      {`${assistant} is watching ${MAIL_SOURCE_WORDS[source]}.`}
+    </p>
+  );
+}
+
 function Card({ title, children, intro }: { title: string; children: ReactNode; intro?: string }) {
   return (
     <div className={CARD}>
@@ -245,6 +259,7 @@ export function ReachPreferences({ reach }: { reach: ReachApi }) {
   return (
     <div data-role="reach-preferences" className="flex flex-col gap-4">
       {view.mailProblem === null ? null : <MailProblem problem={view.mailProblem} />}
+      {view.mailSource === null ? null : <MailSource source={view.mailSource} />}
       <Card title="Ways to reach you" intro="In the app is always on. Notices on this device are set up above.">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <span className="text-text-primary text-sm">In the app, under the bell</span>

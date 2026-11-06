@@ -1,4 +1,5 @@
 import type { PersonOwner } from '../../db/personOwner';
+import type { MailSourceKind } from '../../schemas/reach';
 
 /**
  * What the watchers read. Each port answers a narrow question, so a mail or calendar source other than Google can be
@@ -25,10 +26,13 @@ export type MailRef = Pick<MailMessage, 'id' | 'thread_id' | 'received_at'>;
 /**
  * One read of the mail that reached the inbox in a window, by the mail server's own arrival time. `all` holds every
  * message in it, oldest first. `too_many` says the window holds more than was asked for, so a shorter one is needed.
- * `oldest` holds only the oldest part, because the source ran out of time.
+ * `oldest` holds only the oldest part, because the source ran out of time. `skipped` counts messages in an `all` read that
+ * the source could not list one by one and left out.
  */
 export type MailWindowRead =
-  { read: 'all'; messages: MailMessage[] } | { read: 'too_many' } | { read: 'oldest'; messages: MailMessage[] };
+  | { read: 'all'; messages: MailMessage[]; skipped?: number }
+  | { read: 'too_many' }
+  | { read: 'oldest'; messages: MailMessage[] };
 
 /**
  * A read fails in one of three ways. This is the first: the message can never be read however often it is tried (it
@@ -54,11 +58,11 @@ export class MailSourceBusyError extends Error {
   }
 }
 
-/** Said when the mail server took too long to list new mail, so the person can be told why mail was not checked. */
+/** Said when mail took too long to read, so the person can be told why it was not checked. */
 export class MailTooSlowError extends MailSourceBusyError {
   constructor({ cause }: { cause: unknown }) {
     super({ cause });
-    this.message = 'The Email connector took too long to list new mail. New mail was not checked this time.';
+    this.message = 'Mail took too long to read. New mail was not fully checked this time.';
     this.name = 'MailTooSlowError';
   }
 }
@@ -107,7 +111,9 @@ export interface CalendarSource {
 
 /** Whether a person's mail can be watched: a source, none set up, or one that is set up but could not be opened now. */
 export type MailAccess =
-  { status: 'ready'; source: MailSource } | { status: 'none' } | { status: 'unreachable'; error: unknown };
+  | { status: 'ready'; source: MailSource; kind: MailSourceKind }
+  | { status: 'none' }
+  | { status: 'unreachable'; error: unknown };
 
 export interface NoticingSources {
   mail: MailAccess;

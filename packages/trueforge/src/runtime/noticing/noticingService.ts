@@ -7,7 +7,7 @@ import type { INoticingStore, NoticingClaim, WaitingEvent, WatcherCheckpoint } f
 import type { PersonOwner } from '../../db/personOwner';
 import type { IReachSettingsStore } from '../../db/reachSettingsStore';
 import type { Delivery, DeliveryLevel } from '../../schemas/deliveries';
-import type { ReachAvailability } from '../../schemas/reach';
+import type { MailSourceKind, ReachAvailability } from '../../schemas/reach';
 import {
   defaultReachSettings,
   type NoticingEvent,
@@ -24,7 +24,6 @@ import type { NoticingJudge } from './judge';
 import { ceilingOf } from './levels';
 import { readReachHistory, waitFor, withReachLease, type ReachGateDeps } from './reachGate';
 import { applyReachRules, joinReasons } from './reachRules';
-import { MAIL_PASS_MS } from './sidecarSources';
 import {
   MailTooSlowError,
   MessageUnreadableError,
@@ -49,6 +48,13 @@ const TRACKING_LIMIT = 50;
 const PENDING_LIMIT = 50;
 /** Reach me says mail is not being checked once passes have failed for this long with none working. */
 export const MAIL_PROBLEM_SHOWN_AFTER_MS = 3_600_000;
+/**
+ * How long a scan of new mail may start new work, and how long the look at tracked bills may. Each checks the time
+ * before every call, and a call may then take up to its own limit, so a slow pass can still be cut off by a
+ * connector session. That ends it as a busy failure, which never counts against a message.
+ */
+const MAIL_PASS_MS = 60_000;
+const TRACKED_BILLS_MS = 20_000;
 /** A tracked bill whose thread still cannot be checked is raised once it falls due within this long, since it may be unpaid. */
 const UNCHECKED_BILL_RAISED_WITHIN_MS = 24 * 3_600_000;
 /** A claim this old belongs to a pass that stopped part way, so another pass may take the event over. */
@@ -347,62 +353,76 @@ export function createNoticingService(deps: NoticingDeps): NoticingService {
     return raised;
   }
 
+  /** A check that says when `ms` have passed since it was made. */
+  function budgetOf(ms: number): () => boolean {
+    const started = now().getTime();
+    return () => now().getTime() - started > ms;
+  }
+
   async function runMail({
     owner,
     mail,
+    kind,
     settings,
   }: {
     owner: PersonOwner;
     mail: MailSource;
+    kind: MailSourceKind;
     settings: ReachSettings;
   }): Promise<void> {
+    // Bills seen earlier still come due when new mail cannot be read, and are looked at first so a slow scan never
+    // starves them.
+    await promoteDueBills({ owner, mail, now: now(), out_of_time: budgetOf(TRACKED_BILLS_MS) }).catch(
+      (error: unknown) => {
+        logger.warn('Could not look at tracked bills', { error: errorText(error) });
+      },
+    );
     const at = now();
-    // A pass starts no new work once it has used its time, so it ends before a connector session does.
-    const outOfTime = () => now().getTime() - at.getTime() > MAIL_PASS_MS;
+    const outOfTime = budgetOf(MAIL_PASS_MS);
     const checkpoint = await store.getCheckpoint({ ...owner, watcher: 'mail' });
     // The checkpoint is where the next read starts. Mail is never read further back than a day.
     const since = new Date(
       Math.max(checkpoint?.checked_at.getTime() ?? at.getTime() - FIRST_LOOKBACK_MS, at.getTime() - MAX_LOOKBACK_MS),
     );
+    let findings: MailFindings;
     try {
-      let findings: MailFindings;
-      try {
-        findings = await watchMail({
-          source: mail,
-          settings,
-          since,
-          now: at,
-          logger,
-          stuck: checkpoint?.stuck,
-          out_of_time: outOfTime,
-        });
-      } catch (error) {
-        // Nothing was read, so the checkpoint stays where it was.
-        await recordMailFailure({ owner, checkpoint, error, at, fallback: since });
-        throw error;
-      }
-      await store.recordAll({ ...owner, events: findings.raise, status: 'pending', now: at });
-      await store.recordAll({ ...owner, events: findings.track, status: 'tracking', now: at });
-      // Everything found is written down before the checkpoint moves, so a failed delivery is retried from the store.
-      // A pass that read all mail up to now starts the next one a little earlier, for mail the server lists late.
-      await store.setCheckpoint({
-        ...owner,
-        watcher: 'mail',
-        checked_at: findings.resume_from ?? new Date(at.getTime() - CHECK_OVERLAP_MS),
-        failure:
-          findings.stopped_by === undefined
-            ? undefined
+      findings = await watchMail({
+        source: mail,
+        settings,
+        since,
+        now: at,
+        logger,
+        stuck: checkpoint?.stuck,
+        out_of_time: outOfTime,
+        stalled_since: checkpoint?.failure?.since,
+        max_width: checkpoint?.window_ms,
+      });
+    } catch (error) {
+      // Nothing was read, so the checkpoint stays where it was.
+      await recordMailFailure({ owner, checkpoint, error, at, fallback: since, source: kind });
+      throw error;
+    }
+    await store.recordAll({ ...owner, events: findings.raise, status: 'pending', now: at });
+    await store.recordAll({ ...owner, events: findings.track, status: 'tracking', now: at });
+    // Everything found is written down before the checkpoint moves, so a failed delivery is retried from the store.
+    // A pass that read all mail up to now starts the next one a little earlier, for mail the server lists late. Only
+    // such a pass clears the trouble: a pass that stopped, passed something over or only got part way keeps it.
+    await store.setCheckpoint({
+      ...owner,
+      watcher: 'mail',
+      checked_at: findings.resume_from ?? new Date(at.getTime() - CHECK_OVERLAP_MS),
+      failure:
+        findings.resume_from === undefined && findings.stopped_by === undefined
+          ? undefined
+          : findings.stopped_by === undefined
+            ? checkpoint?.failure
             : mailFailure({ checkpoint, error: findings.stopped_by.error, at }),
-        stuck: findings.stuck,
-      });
-      if (findings.stopped_by !== undefined) {
-        throw findings.stopped_by.error;
-      }
-    } finally {
-      // Bills seen earlier still come due when new mail could not be read this time.
-      await promoteDueBills({ owner, mail, now: at, out_of_time: outOfTime }).catch((error: unknown) => {
-        logger.warn('Could not look at tracked bills', { error: errorText(error) });
-      });
+      stuck: findings.stuck,
+      window_ms: findings.window_ms,
+      source: kind,
+    });
+    if (findings.stopped_by !== undefined) {
+      throw findings.stopped_by.error;
     }
   }
 
@@ -429,12 +449,14 @@ export function createNoticingService(deps: NoticingDeps): NoticingService {
     error,
     at,
     fallback,
+    source,
   }: {
     owner: PersonOwner;
     checkpoint: WatcherCheckpoint | undefined;
     error: unknown;
     at: Date;
     fallback: Date;
+    source: MailSourceKind | undefined;
   }): Promise<void> {
     await store.setCheckpoint({
       ...owner,
@@ -442,14 +464,24 @@ export function createNoticingService(deps: NoticingDeps): NoticingService {
       checked_at: checkpoint?.checked_at ?? fallback,
       failure: mailFailure({ checkpoint, error, at }),
       stuck: checkpoint?.stuck,
+      window_ms: checkpoint?.window_ms,
+      source: source ?? checkpoint?.source,
     });
   }
 
   /** Someone with no mail connected cannot have trouble checking it, so an old failure is not shown any more. */
   async function clearMailTrouble(owner: PersonOwner): Promise<void> {
     const checkpoint = await store.getCheckpoint({ ...owner, watcher: 'mail' });
-    if (checkpoint?.failure !== undefined || checkpoint?.stuck !== undefined) {
-      await store.setCheckpoint({ ...owner, watcher: 'mail', ...checkpoint, failure: undefined, stuck: undefined });
+    if (checkpoint !== undefined) {
+      await store.setCheckpoint({
+        ...owner,
+        watcher: 'mail',
+        ...checkpoint,
+        failure: undefined,
+        stuck: undefined,
+        window_ms: undefined,
+        source: undefined,
+      });
     }
   }
 
@@ -474,18 +506,21 @@ export function createNoticingService(deps: NoticingDeps): NoticingService {
       limit: TRACKING_LIMIT,
     });
     for (const event of due) {
-      if (out_of_time()) {
-        return;
-      }
       const deadline = event.due_at === null ? undefined : new Date(event.due_at);
-      // A thread that can never be read cannot say the bill was paid, so the bill is raised.
-      const paid = await billIsPaid({ source: mail, event }).catch((error: unknown) => {
-        if (error instanceof MessageUnreadableError) {
-          return false;
-        }
-        logger.warn('Could not check whether a tracked bill was paid', { event_id: event.id, error: errorText(error) });
-        return undefined;
-      });
+      // A thread that can never be read cannot say the bill was paid, so the bill is raised. With no time left the
+      // thread is not read, so a bill close to due is still raised and the rest wait for the next pass.
+      const paid = out_of_time()
+        ? undefined
+        : await billIsPaid({ source: mail, event }).catch((error: unknown) => {
+            if (error instanceof MessageUnreadableError) {
+              return false;
+            }
+            logger.warn('Could not check whether a tracked bill was paid', {
+              event_id: event.id,
+              error: errorText(error),
+            });
+            return undefined;
+          });
       if (deadline === undefined || deadline.getTime() < at.getTime() || paid === true) {
         await store.drop({ ...owner, event_id: event.id });
       } else if (paid === false || deadline.getTime() - at.getTime() <= UNCHECKED_BILL_RAISED_WITHIN_MS) {
@@ -583,7 +618,7 @@ export function createNoticingService(deps: NoticingDeps): NoticingService {
     if (watcher === 'mail') {
       const { mail } = sources;
       if (mail.status === 'ready') {
-        await runMail({ owner, mail: mail.source, settings });
+        await runMail({ owner, mail: mail.source, kind: mail.kind, settings });
       } else if (mail.status === 'none') {
         await clearMailTrouble(owner);
       } else {
@@ -595,6 +630,7 @@ export function createNoticingService(deps: NoticingDeps): NoticingService {
           error: mail.error,
           at,
           fallback: new Date(at.getTime() - FIRST_LOOKBACK_MS),
+          source: undefined,
         });
       }
     }

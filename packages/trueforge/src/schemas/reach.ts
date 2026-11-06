@@ -146,6 +146,13 @@ export const MailProblemKindSchema = z
 
 export type MailProblemKind = z.infer<typeof MailProblemKindSchema>;
 
+export const MailSourceKindSchema = z
+  .enum(['google', 'email_connector'])
+  .describe('Where mail is read from: the person’s own Google login, or the shared Email connector.')
+  .openapi('MailSourceKind');
+
+export type MailSourceKind = z.infer<typeof MailSourceKindSchema>;
+
 export const MailProblemSchema = z
   .object({
     since: z.string().describe('When mail checks first failed, with none succeeding since, ISO 8601 UTC.'),
@@ -163,6 +170,9 @@ export const ReachViewSchema = z
       .describe('The highest level each kind of event can ever reach, whatever the model says.'),
     mail_problem: MailProblemSchema.nullable().describe(
       'Set when mail has not been checked for about an hour. Null when mail checks work.',
+    ),
+    mail_source: MailSourceKindSchema.nullable().describe(
+      'Where mail is read from. Null until mail has been checked once.',
     ),
   })
   .openapi('ReachView');

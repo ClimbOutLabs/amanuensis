@@ -269,6 +269,8 @@ describe('sidecar mail source (IMAP)', () => {
         logger: { warn: jest.fn() },
         stuck: undefined,
         out_of_time: () => false,
+        stalled_since: undefined,
+        max_width: undefined,
       });
       expect(found.track.map(event => event.id)).toEqual(['bill_due:7']);
       expect(found.stopped_by).toBeUndefined();
@@ -307,6 +309,24 @@ describe('sidecar mail source (IMAP)', () => {
       await expect(source.laterInThread(MAIL_REF)).rejects.toBeInstanceOf(MailSourceBusyError);
     });
 
+    it('marks a connector reply that names a lost connection, a missing connection or a failed login as a busy server', async () => {
+      for (const reply of ['Error: TRANSPORT failure', 'IMAP client is not connected', 'IMAP login failed (NO)']) {
+        const source = sidecarMailSource({ call: failing(reply), account: 'default' });
+        await expect(source.readText(asMail)).rejects.toBeInstanceOf(MailSourceBusyError);
+        await expect(
+          source.listNewMessages({ since: new Date('2026-11-05T14:00:00.000Z'), before: NOW, limit: 50 }),
+        ).rejects.toBeInstanceOf(MailSourceBusyError);
+      }
+    });
+
+    it('skips at once a message whose body is over the connector’s limit', async () => {
+      const source = sidecarMailSource({
+        call: failing('limit_exceeded: an email body exceeds the size limit'),
+        account: 'default',
+      });
+      await expect(source.readText(asMail)).rejects.toBeInstanceOf(MessageUnreadableError);
+    });
+
     it('says too slow when the connector gave up on a list by its own limit', async () => {
       const call = failing('Error calling tool: provider request timed out after 60 seconds');
       const read = sidecarMailSource({ call, account: 'default' }).listNewMessages({
@@ -327,6 +347,80 @@ describe('sidecar mail source (IMAP)', () => {
     });
     await expect(read).rejects.toBeInstanceOf(MailSourceBusyError);
     await expect(read).rejects.toHaveProperty('cause', expect.objectContaining({ message: 'connection refused' }));
+  });
+
+  describe('a crafted header next to a real bill', () => {
+    const BILL = { ...EMAIL, email_id: '7', subject: 'Invoice: amount due by November 7' };
+    const BAD = { ...EMAIL, email_id: '8', subject: 'Crafted', sender: 'x <x@example.com>' };
+    // The connector fetches headers only for the page it lists, and fails the whole page when one message does not parse.
+    const connector = (): { call: CallSidecarTool; pageSizes: number[] } => {
+      const pageSizes: number[] = [];
+      const mail = [
+        { email: BILL, arrived: '2026-11-05T14:55:00.000Z' },
+        { email: BAD, arrived: '2026-11-05T14:55:01.000Z' },
+      ];
+      const listing = inbox(mail);
+      const call: CallSidecarTool = (name, args) => {
+        if (name === 'get_emails_content') {
+          return Promise.resolve({
+            structuredContent: { emails: [{ email_id: '7', body: 'Amount due by November 7' }], failed_ids: [] },
+          });
+        }
+        pageSizes.push(Number(args['page_size']));
+        const page = Number(args['page']);
+        const size = Number(args['page_size']);
+        const since = new Date(String(args['since'])).getTime();
+        const before = new Date(String(args['before'])).getTime();
+        const inWindow = mail.filter(item => {
+          const arrived = new Date(item.arrived).getTime();
+          return arrived >= since && arrived < before;
+        });
+        if (inWindow.slice((page - 1) * size, page * size).some(item => item.email.email_id === '8')) {
+          return Promise.reject(
+            new SidecarToolError({ server: 'Email', tool: name, reply: 'Error: incomplete metadata page' }),
+          );
+        }
+        return listing(name, args);
+      };
+      return { call, pageSizes };
+    };
+
+    it('finds the one bad message by paging, and reads the bill beside it in the same pass', async () => {
+      const { call, pageSizes } = connector();
+      const warnings = { warn: jest.fn() };
+      const found = await watchMail({
+        source: sidecarMailSource({ call, account: 'default' }),
+        settings: defaultReachSettings('UTC'),
+        since: new Date('2026-11-05T14:00:00.000Z'),
+        now: NOW,
+        logger: warnings,
+        stuck: undefined,
+        out_of_time: () => false,
+        stalled_since: undefined,
+        max_width: undefined,
+      });
+      expect(found.raise.map(event => event.id)).toEqual(['bill_due:7']);
+      expect(found.resume_from).toBeUndefined();
+      expect(found.stopped_by).toBeUndefined();
+      expect(pageSizes).toContain(1);
+      expect(warnings.warn).toHaveBeenCalledWith(
+        'Left out mail the mail server could not list one by one',
+        expect.objectContaining({ skipped: 1 }),
+      );
+    });
+
+    it('leaves a list that fails for every page to the caller, since that is the account and not a message', async () => {
+      const call: CallSidecarTool = () =>
+        Promise.reject(
+          new SidecarToolError({ server: 'Email', tool: 'list_emails_metadata', reply: 'Account X was not found' }),
+        );
+      const read = sidecarMailSource({ call, account: 'default' }).listNewMessages({
+        since: new Date('2026-11-05T14:55:00.000Z'),
+        before: new Date('2026-11-05T14:55:02.000Z'),
+        limit: 50,
+      });
+      await expect(read).rejects.toBeInstanceOf(SidecarToolError);
+    });
   });
 
   it('reads a backlog bigger than one pass over several passes, skipping nothing', async () => {
@@ -371,6 +465,8 @@ describe('sidecar mail source (IMAP)', () => {
       logger: { warn: jest.fn() },
       stuck: undefined,
       out_of_time: () => false,
+      stalled_since: undefined,
+      max_width: undefined,
     });
     expect(found.raise.map(event => [event.kind, event.evidence])).toEqual([['bill_due', 'content']]);
   });
@@ -529,7 +625,11 @@ describe('createSidecarNoticingSources', () => {
 
   it('keeps a person’s own Google sources over the sidecar', async () => {
     const own: NoticingSources = {
-      mail: { status: 'ready', source: sidecarMailSource({ call: mailTool([]).call, account: 'a' }) },
+      mail: {
+        status: 'ready',
+        source: sidecarMailSource({ call: mailTool([]).call, account: 'a' }),
+        kind: 'google',
+      },
       calendar: undefined,
     };
     const provider = createSidecarNoticingSources({
@@ -577,6 +677,21 @@ describe('createSidecarNoticingSources', () => {
     });
     await expect(provider.sourcesFor(OWNER)).resolves.toEqual({ mail: { status: 'none' }, calendar: undefined });
     await expect(provider.listOwners()).resolves.toEqual([OWNER]);
+  });
+
+  it('uses the shared connector only when Google gives no mail, never in place of a Google login that must be redone', async () => {
+    const reconnect: NoticingSources = {
+      mail: { status: 'unreachable', error: new Error('Google needs to be connected again.') },
+      calendar: undefined,
+    };
+    const provider = createSidecarNoticingSources({
+      mailUrl: 'http://mail.invalid/mcp',
+      calendarUrl: undefined,
+      primary: { ...none, sourcesFor: () => Promise.resolve(reconnect) },
+      instanceOwner: OWNER,
+      logger: winston.createLogger({ silent: true }),
+    });
+    expect((await provider.sourcesFor(OWNER)).mail).toBe(reconnect.mail);
   });
 
   it('says a mail connector that is set up but cannot be reached is unreachable, not missing', async () => {

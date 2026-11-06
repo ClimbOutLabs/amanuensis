@@ -6510,6 +6510,18 @@
         ],
         "type": "string"
       },
+      "MailSourceKind": {
+        "description": "Where mail is read from. Null until mail has been checked once.",
+        "enum": [
+          "google",
+          "email_connector",
+          null
+        ],
+        "type": [
+          "string",
+          "null"
+        ]
+      },
       "MarkBriefItemDoneRequest": {
         "properties": {
           "item_key": {
@@ -9224,6 +9236,9 @@
           "mail_problem": {
             "$ref": "#/components/schemas/MailProblem"
           },
+          "mail_source": {
+            "$ref": "#/components/schemas/MailSourceKind"
+          },
           "max_levels": {
             "description": "The highest level each kind of event can ever reach, whatever the model says.",
             "properties": {
@@ -9258,7 +9273,8 @@
           "saved",
           "availability",
           "max_levels",
-          "mail_problem"
+          "mail_problem",
+          "mail_source"
         ],
         "type": "object"
       },
