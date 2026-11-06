@@ -1,8 +1,13 @@
 /**
- * The "Needs your OK" half of the right rail's Home view: actions a run held for the person,
- * still unanswered and still inside their day to answer. Read from the same stored session
- * events the chat's own held-action cards are rebuilt from, so the rail and the chat can never
- * disagree about what is waiting. Nothing here calls a model.
+ * The "Needs your OK" half of the right rail's Home view: actions still waiting for the
+ * person's answer, of both kinds the app raises. A scheduled run can hold an action and move
+ * on; a chat turn pauses on an approval until it is answered. Both are read from the same
+ * stored session events the chat's own cards are rebuilt from, so the rail and the chat can
+ * never disagree about what is waiting. Nothing here calls a model.
+ *
+ * The scan has caps, so it can stop before it has seen everything; when a cap cuts the scan
+ * or the list, the result says so (`more`), and the rail shows that rather than letting
+ * waiting actions vanish quietly.
  */
 import {
   EventType,
@@ -27,15 +32,22 @@ const EVENT_SCAN_LIMIT = 200;
 /** Most waiting actions the rail lists. */
 const ITEM_CAP = 20;
 
-export interface TodayHeldActionsDeps {
+export interface TodayNeedsOkDeps {
   sessions: Pick<Sessions<SessionCustom, TurnCustom>, 'get'>;
   sessionStore: Pick<ISessionStore<SessionCustom, TurnCustom>, 'listSessions'>;
   scheduleStore: Pick<IScheduleStore, 'getSchedule'>;
   logger: Logger;
 }
 
+/** The waiting actions the scan found, and whether a cap cut the scan or the list short. */
+export interface TodayNeedsOk {
+  items: TodayNeedsOkItem[];
+  /** True when more actions may be waiting than `items` shows. */
+  more: boolean;
+}
+
 async function originOf(
-  deps: TodayHeldActionsDeps,
+  deps: TodayNeedsOkDeps,
   input: { tenant_id: string; session: SessionRecord<SessionCustom> },
 ): Promise<string> {
   const { session } = input;
@@ -51,11 +63,11 @@ async function originOf(
   return session.title ?? 'A chat';
 }
 
-/** Every held action still waiting for the person, oldest first, across their recent chats. */
-export async function listWaitingHeldActions(
-  deps: TodayHeldActionsDeps,
+/** Every action still waiting for the person, oldest first, across their recent chats. */
+export async function listWaitingNeedsOk(
+  deps: TodayNeedsOkDeps,
   input: { tenant_id: string; created_by: string; now: Date },
-): Promise<TodayNeedsOkItem[]> {
+): Promise<TodayNeedsOk> {
   const cutoffMs = input.now.getTime() - HELD_SCAN_WINDOW_MS;
   const { data: sessions } = await deps.sessionStore.listSessions({
     tenant_id: input.tenant_id,
@@ -73,29 +85,40 @@ export async function listWaitingHeldActions(
     source_id: undefined,
   });
   const waiting: { item: TodayNeedsOkItem; held_at: string }[] = [];
+  let scanCut = false;
+  let reachedWindowEnd = false;
   for (const session of sessions) {
     if (session.updated_at.getTime() < cutoffMs) {
+      reachedWindowEnd = true;
       break;
     }
     try {
-      const items = await waitingInSession(deps, { tenant_id: input.tenant_id, session, now: input.now });
-      waiting.push(...items);
+      const found = await waitingInSession(deps, { tenant_id: input.tenant_id, session, now: input.now });
+      waiting.push(...found.items);
+      scanCut = scanCut || found.scanCut;
     } catch (error) {
       // One chat that cannot be read leaves the others listed; the failure is logged, never hidden.
       deps.logger.warn('A chat could not be read for held actions', extractErrorLogFields(error));
     }
   }
+  if (!reachedWindowEnd && sessions.length >= SESSION_SCAN_CAP) {
+    // The page of chats ran out while chats inside the window may still be unscanned.
+    scanCut = true;
+  }
   waiting.sort((left, right) => left.held_at.localeCompare(right.held_at));
-  return waiting.slice(0, ITEM_CAP).map(entry => entry.item);
+  return {
+    items: waiting.slice(0, ITEM_CAP).map(entry => entry.item),
+    more: scanCut || waiting.length > ITEM_CAP,
+  };
 }
 
 async function waitingInSession(
-  deps: TodayHeldActionsDeps,
+  deps: TodayNeedsOkDeps,
   input: { tenant_id: string; session: SessionRecord<SessionCustom>; now: Date },
-): Promise<{ item: TodayNeedsOkItem; held_at: string }[]> {
+): Promise<{ items: { item: TodayNeedsOkItem; held_at: string }[]; scanCut: boolean }> {
   const handle = await deps.sessions.get({ tenant_id: input.tenant_id, session_id: input.session.session_id });
   if (handle === undefined) {
-    return [];
+    return { items: [], scanCut: false };
   }
   const cleared = await handle.clearedApprovalKeys();
   const { data } = await handle.listEvents({
@@ -120,7 +143,8 @@ async function waitingInSession(
       continue;
     }
     for (const ref of visible.tool_calls) {
-      if (ref.held !== true || answered.has(ref.id)) {
+      // A call a run could not save will never run and cannot be answered; it is not waiting.
+      if (ref.not_saved !== undefined || answered.has(ref.id)) {
         continue;
       }
       if (ref.expires_at !== undefined && Date.parse(ref.expires_at) <= input.now.getTime()) {
@@ -138,8 +162,11 @@ async function waitingInSession(
     }
   }
   if (found.length === 0) {
-    return [];
+    return { items: [], scanCut: data.length >= EVENT_SCAN_LIMIT };
   }
   const origin = await originOf(deps, { tenant_id: input.tenant_id, session: input.session });
-  return found.map(entry => ({ ...entry, item: { ...entry.item, origin } }));
+  return {
+    items: found.map(entry => ({ ...entry, item: { ...entry.item, origin } })),
+    scanCut: data.length >= EVENT_SCAN_LIMIT,
+  };
 }

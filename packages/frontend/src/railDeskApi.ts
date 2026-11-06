@@ -38,8 +38,9 @@ function readEvent(value: unknown): RailTodayEvent | undefined {
   if (!isRecord(value)) {
     return undefined;
   }
-  const { start_at, end_at, title, location, all_day, source, calendar_account_id } = value;
+  const { day, start_at, end_at, title, location, all_day, source, calendar_account_id } = value;
   if (
+    (day !== 'today' && day !== 'tomorrow') ||
     typeof start_at !== 'string' ||
     !isStringOrNull(end_at) ||
     typeof title !== 'string' ||
@@ -50,7 +51,7 @@ function readEvent(value: unknown): RailTodayEvent | undefined {
   ) {
     return undefined;
   }
-  return { start_at, end_at, title, location, all_day, source, calendar_account_id };
+  return { day, start_at, end_at, title, location, all_day, source, calendar_account_id };
 }
 
 function readDueReminder(value: unknown): RailTodayDueReminder | undefined {
@@ -89,8 +90,13 @@ function readToday(value: unknown): RailToday | undefined {
   if (!isRecord(value)) {
     return undefined;
   }
-  const { calendar, free_after, due, needs_ok, carrying, as_of } = value;
-  if (!isStringOrNull(free_after) || typeof carrying !== 'number' || typeof as_of !== 'string') {
+  const { calendar, free_after, due, needs_ok, needs_ok_more, carrying, as_of } = value;
+  if (
+    !isStringOrNull(free_after) ||
+    typeof needs_ok_more !== 'boolean' ||
+    typeof carrying !== 'number' ||
+    typeof as_of !== 'string'
+  ) {
     return undefined;
   }
   if (calendar !== null && !Array.isArray(calendar)) {
@@ -114,6 +120,7 @@ function readToday(value: unknown): RailToday | undefined {
     free_after,
     due: reminders.filter(reminder => reminder !== undefined),
     needs_ok: held.filter(item => item !== undefined),
+    needs_ok_more,
     carrying,
     as_of,
   };

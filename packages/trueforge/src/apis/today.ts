@@ -9,7 +9,7 @@ import type { IScheduleStore } from '../db/scheduleStore';
 import type { SessionCustom, TurnCustom } from '../db/sessionCustom';
 import { getTodayRoute } from '../routes/todayRoutes';
 import { endOfLocalDay, readTodayCalendar, type TodayCalendarDeps } from '../runtime/todayCalendar';
-import { listWaitingHeldActions } from '../runtime/todayHeldActions';
+import { listWaitingNeedsOk } from '../runtime/todayNeedsOk';
 import type { Today, TodayDueReminder } from '../schemas/today';
 
 export interface TodayRouterDeps {
@@ -74,7 +74,7 @@ async function readDueAndCarrying(
 
 /**
  * The right rail's Home view (mounted at /api/v1/today). Every part is read from stored state:
- * the calendar connectors, the schedule store, and the chats' own held-action records. No code
+ * the calendar connectors, the schedule store, and the chats' own approval records. No code
  * path from here reaches the model runtime or the email connector.
  */
 export function createTodayRouter(deps: TodayRouterDeps) {
@@ -98,7 +98,7 @@ export function createTodayRouter(deps: TodayRouterDeps) {
     const [calendar, dueAndCarrying, needsOk] = await Promise.all([
       readTodayCalendar(calendarDeps, { owner, timeZone: query.client_timezone }),
       readDueAndCarrying(deps, { ...owner, timeZone: query.client_timezone, now }),
-      listWaitingHeldActions(
+      listWaitingNeedsOk(
         {
           sessions: deps.sessions,
           sessionStore: deps.sessionStore,
@@ -112,7 +112,8 @@ export function createTodayRouter(deps: TodayRouterDeps) {
       calendar: calendar.calendar,
       free_after: calendar.free_after,
       due: dueAndCarrying.due,
-      needs_ok: needsOk,
+      needs_ok: needsOk.items,
+      needs_ok_more: needsOk.more,
       carrying: dueAndCarrying.carrying,
       as_of: now.toISOString(),
     };

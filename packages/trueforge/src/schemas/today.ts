@@ -6,6 +6,9 @@ import { z } from '@hono/zod-openapi';
  */
 export const TodayCalendarEventSchema = z
   .object({
+    day: z
+      .enum(['today', 'tomorrow'])
+      .describe("Which day the event falls on: the person's local day, or the next morning's first event."),
     start_at: z.string().describe('When the event starts: an ISO 8601 instant, or a plain date for an all-day event.'),
     end_at: z
       .string()
@@ -32,10 +35,10 @@ export const TodayDueReminderSchema = z
   })
   .openapi('TodayDueReminder');
 
-/** One action a run held for the person's OK, still unanswered and still within its day to answer. */
+/** One action waiting for the person's OK: held by a run, or an approval a chat is paused on. */
 export const TodayNeedsOkItemSchema = z
   .object({
-    held_action_id: z.string().describe('The held tool call id.'),
+    held_action_id: z.string().describe('The waiting tool call id.'),
     title: z.string().describe('What the action would do, in the plain words of its card.'),
     origin: z.string().describe('Where the action came from: the chat title, or the schedule name for a run.'),
     session_id: z.string().describe('The chat that holds the action, where it is answered.'),
@@ -49,15 +52,19 @@ export const TodaySchema = z
       .array(TodayCalendarEventSchema)
       .nullable()
       .describe(
-        "The local day's events from every connected calendar account, plus the next morning's first " +
-          'event once the day is over. Null, not an empty list, when no calendar is connected.',
+        "The local day's events from every connected calendar account. Once every timed event on the " +
+          "day has finished, the next morning's first event is added, marked as tomorrow's. Null, not " +
+          'an empty list, when no calendar is connected.',
       ),
     free_after: z
       .string()
       .nullable()
       .describe('The first time after now with no event until the end of the day, or null when the day stays busy.'),
     due: z.array(TodayDueReminderSchema).describe('Reminders due today or overdue, earliest first.'),
-    needs_ok: z.array(TodayNeedsOkItemSchema).describe('Held actions waiting for the person, oldest first.'),
+    needs_ok: z.array(TodayNeedsOkItemSchema).describe('Actions waiting for the person, oldest first.'),
+    needs_ok_more: z
+      .boolean()
+      .describe('True when more actions are waiting than the list shows: the scan has caps, and it says so when one cuts.'),
     carrying: z.number().int().nonnegative().describe('How many schedules are switched on for the person.'),
     as_of: z.string().describe('The server time this view was read at, as an ISO 8601 instant.'),
   })

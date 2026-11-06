@@ -30,6 +30,12 @@ import { getCalendarAccountState } from './calendarAccount';
 
 /** How long one account's events are kept before the rail reads them again. */
 export const TODAY_CALENDAR_CACHE_MS = 3 * 60 * 1000;
+/**
+ * The oldest a cached read may be when it stands in for a provider that cannot be reached.
+ * Past this, the rail would be showing another day's news under today's date, so the account
+ * reads as unread instead.
+ */
+export const TODAY_CALENDAR_MAX_STALE_MS = 30 * 60 * 1000;
 
 const CALDAV_TIMEOUT_MS = 15_000;
 /** Most events read from one account for the two-day window. */
@@ -49,7 +55,8 @@ export interface TodayCalendarDeps {
 
 /** One event with the instants the day maths needs, beside the wire shape the rail shows. */
 interface DayEvent {
-  wire: TodayCalendarEvent;
+  /** The wire event without its day: which day it falls on is settled when the day is assembled. */
+  wire: Omit<TodayCalendarEvent, 'day'>;
   start_ms: number;
   end_ms: number;
 }
@@ -400,7 +407,13 @@ async function accountEvents(
   } catch (error) {
     // A calendar that cannot be read leaves the day as the other accounts give it; the failure is logged, never hidden.
     deps.logger.warn('Calendar could not be read for the rail', extractErrorLogFields(error));
-    return cached?.events ?? [];
+    // The last good read may stand in for a provider that is briefly unreachable, but only while
+    // it is still recent: an old read served as today's would mislead, so past the bound the
+    // account counts as unread, the same as having no cache at all.
+    if (cached !== undefined && deps.now().getTime() - cached.fetched_at_ms < TODAY_CALENDAR_MAX_STALE_MS) {
+      return cached.events;
+    }
+    return [];
   }
   cacheByAccount.set(key, { fetched_at_ms: nowMs, day_key: input.day_key, events });
   return events;
@@ -426,7 +439,7 @@ export function freeAfterMs(input: { events: readonly DayEvent[]; now_ms: number
 
 /**
  * The local day's events from every connected account, plus the next morning's first event once
- * nothing is left today, and the day's free-after time. `calendar` is null when no calendar
+ * the day is over, and the day's free-after time. `calendar` is null when no calendar
  * account is connected at all.
  */
 export async function readTodayCalendar(
@@ -456,19 +469,24 @@ export async function readTodayCalendar(
   const todays = all
     .filter(event => event.start_ms < dayEnd.getTime() && event.end_ms > dayStart.getTime())
     .sort((left, right) => left.start_ms - right.start_ms || left.wire.title.localeCompare(right.wire.title));
-  const shown = [...todays];
-  // The day is over when nothing in it is still to come; then the rail also shows what comes first tomorrow.
-  if (!todays.some(event => event.end_ms > nowMs)) {
+  const shown: TodayCalendarEvent[] = todays.map(event => ({ ...event.wire, day: 'today' }));
+  // The day counts as over once it has had a timed event and every timed event on it has
+  // finished; only then does the rail also show what comes first tomorrow, marked as
+  // tomorrow's. A day with nothing timed on it is never "over" this way, so an empty day
+  // stays empty and says so, and the extra event can never pass as one of today's.
+  const timed = todays.filter(event => !event.wire.all_day);
+  const dayOver = timed.length > 0 && timed.every(event => event.end_ms <= nowMs);
+  if (dayOver) {
     const nextMorning = all
       .filter(event => event.start_ms >= dayEnd.getTime() && event.start_ms < windowEnd.getTime())
       .sort((left, right) => left.start_ms - right.start_ms || left.wire.title.localeCompare(right.wire.title))[0];
     if (nextMorning !== undefined) {
-      shown.push(nextMorning);
+      shown.push({ ...nextMorning.wire, day: 'tomorrow' });
     }
   }
   const free = freeAfterMs({ events: todays, now_ms: nowMs, day_end_ms: dayEnd.getTime() });
   return {
-    calendar: shown.map(event => event.wire),
+    calendar: shown,
     free_after: free === null ? null : new Date(free).toISOString(),
   };
 }

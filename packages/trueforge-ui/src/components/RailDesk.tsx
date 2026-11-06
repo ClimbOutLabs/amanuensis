@@ -13,6 +13,8 @@ import { useOptionalMemoryRecall, type MemoryTurnContext } from './MemoryRecallC
  */
 
 export type RailTodayEvent = {
+  /** Which day the event falls on; tomorrow's first event is only listed once today is over. */
+  day: 'today' | 'tomorrow';
   start_at: string;
   end_at: string | null;
   title: string;
@@ -41,6 +43,8 @@ export type RailToday = {
   free_after: string | null;
   due: RailTodayDueReminder[];
   needs_ok: RailTodayNeedsOkItem[];
+  /** True when more actions are waiting than the Needs your OK list shows. */
+  needs_ok_more: boolean;
   carrying: number;
   as_of: string;
 };
@@ -242,11 +246,13 @@ export const RailHomeDesk: FC<{
               {today.calendar.map(event => {
                 const key = `${event.calendar_account_id}:${event.start_at}:${event.title}`;
                 const open = openEvent === key;
-                const when = event.all_day
+                const clock = event.all_day
                   ? 'All day'
                   : event.end_at === null
                     ? formatClock(event.start_at, timeZone)
                     : `${formatClock(event.start_at, timeZone)} to ${formatClock(event.end_at, timeZone)}`;
+                // Tomorrow's event names its day, so it can never read as one of today's.
+                const when = event.day === 'tomorrow' ? `Tomorrow, ${clock}` : clock;
                 return (
                   <li key={key}>
                     <button
@@ -340,6 +346,9 @@ export const RailHomeDesk: FC<{
               </li>
             ))}
           </ul>
+          {today.needs_ok_more && (
+            <p className="aman-runtime-rail__row-text">More are waiting in your chats.</p>
+          )}
         </DeskSection>
       )}
     </>

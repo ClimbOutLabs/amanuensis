@@ -78,6 +78,7 @@ describe('parseRecallFacts', () => {
 const TODAY: RailToday = {
   calendar: [
     {
+      day: 'today',
       start_at: '2026-11-06T18:00:00.000Z',
       end_at: '2026-11-06T19:00:00.000Z',
       title: 'Dentist',
@@ -99,6 +100,7 @@ const TODAY: RailToday = {
   needs_ok: [
     { held_action_id: 'call-1', title: 'Send the email to Ana', origin: 'Trip planning', session_id: 'chat-9' },
   ],
+  needs_ok_more: false,
   carrying: 3,
   as_of: new Date().toISOString(),
 };
@@ -140,6 +142,32 @@ describe('the rail desk on Home', () => {
     expect(await screen.findByText('Nothing on the calendar.')).toBeInTheDocument();
     expect(screen.queryByText('Due')).not.toBeInTheDocument();
     expect(screen.queryByText('Needs your OK')).not.toBeInTheDocument();
+  });
+
+  it("names tomorrow on tomorrow's event, so it never reads as one of today's", async () => {
+    const tomorrow: RailToday = {
+      ...TODAY,
+      calendar: [
+        {
+          day: 'tomorrow',
+          start_at: '2026-11-07T17:00:00.000Z',
+          end_at: '2026-11-07T18:00:00.000Z',
+          title: 'Dentist',
+          location: null,
+          all_day: false,
+          source: 'google',
+          calendar_account_id: 'ada@example.com',
+        },
+      ],
+    };
+    render(<AmanRuntimeRail status="ready" deskApi={deskApi(tomorrow)} />);
+    expect(await screen.findByText('Dentist')).toBeInTheDocument();
+    expect(screen.getByText(/^Tomorrow, /)).toBeInTheDocument();
+  });
+
+  it('says when more actions are waiting than the list shows', async () => {
+    render(<AmanRuntimeRail status="ready" deskApi={deskApi({ ...TODAY, needs_ok_more: true })} />);
+    expect(await screen.findByText('More are waiting in your chats.')).toBeInTheDocument();
   });
 });
 

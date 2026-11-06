@@ -70,13 +70,13 @@ function makeExecution(context: ContextMessage[]): Readonly<AgentThreadExecution
 
 /** One turn's recall block for a chat, through a fresh capability as a new turn builds. */
 async function recallBlockFor(sessionId: string): Promise<string | null> {
-  const capability = hindsightMemoryCapability({
-    client: makeClient(),
-    config: CONFIG,
-    logger: winston.createLogger({ silent: true }),
-    sessionId,
-    previousTurnId: null,
-  });
+  return recallBlockServing(sessionId, [FACT], makeClient());
+}
+
+/** The block one turn builds from the given memory client. */
+async function blockFrom(
+  capability: ReturnType<typeof hindsightMemoryCapability>,
+): Promise<string | null> {
   const processor = capability.preLLMProcessors?.[0];
   if (processor === undefined) {
     throw new Error('expected a preLLM processor');
@@ -107,5 +107,74 @@ describe('recall exclusions from the rail', () => {
     const afterPull = await recallBlockFor('chat-a');
     expect(afterPull === null || !afterPull.includes(FACT)).toBe(true);
     expect(await recallBlockFor('chat-b')).toContain(FACT);
+  });
+});
+
+const LONG_FACT = 'The gate code for the front door is 4417 and the spare key is under the mat';
+/** The same fact cut short for a token budget, the way the block's own fitting ends a line. */
+const SHORTENED_FACT = `${LONG_FACT.slice(0, 40)}...`;
+
+/** A memory client that recalls the given facts, in order. */
+function makeClientReturning(texts: string[]): MemoryClient {
+  return {
+    ...makeClient(),
+    recall: () =>
+      Promise.resolve({
+        ok: true,
+        results: texts.map((text, index) => ({ id: String(index), occurred_start: '2026-08-14', text })),
+        entities: [],
+      }),
+  };
+}
+
+/** One turn's recall block for a chat whose memory serves the given facts. */
+async function recallBlockServing(
+  sessionId: string,
+  texts: string[],
+  client: MemoryClient = makeClientReturning(texts),
+): Promise<string | null> {
+  return blockFrom(
+    hindsightMemoryCapability({
+      client,
+      config: CONFIG,
+      logger: winston.createLogger({ silent: true }),
+      sessionId,
+      previousTurnId: null,
+    }),
+  );
+}
+
+describe('recall exclusions for facts shown shortened', () => {
+  it('drops the full fact when the pull was recorded in its shortened form', async () => {
+    expect(await recallBlockServing('chat-short-pull', [LONG_FACT])).toContain(LONG_FACT);
+
+    excludeRecallFact({ sessionId: 'chat-short-pull', factText: SHORTENED_FACT });
+
+    const afterPull = await recallBlockServing('chat-short-pull', [LONG_FACT]);
+    expect(afterPull === null || !afterPull.includes('spare key')).toBe(true);
+  });
+
+  it('drops a shortened serving when the pull was recorded in full', async () => {
+    excludeRecallFact({ sessionId: 'chat-full-pull', factText: LONG_FACT });
+
+    const afterPull = await recallBlockServing('chat-full-pull', [SHORTENED_FACT]);
+    expect(afterPull === null || !afterPull.includes('gate code')).toBe(true);
+  });
+
+  it('leaves a different fact that merely opens with the same words', async () => {
+    const other = 'The gate code is 44179 for the back gate';
+    excludeRecallFact({ sessionId: 'chat-neighbour', factText: FACT });
+
+    const block = await recallBlockServing('chat-neighbour', [FACT, other]);
+    expect(block).toContain(other);
+    // The pulled fact's own line is gone; the other fact's line only shares its opening words.
+    expect(block?.split('\n')).not.toContain(`[2026-08-14] ${FACT}`);
+  });
+
+  it('does not trust a shortening cut too short to name the fact', async () => {
+    excludeRecallFact({ sessionId: 'chat-short-stem', factText: 'The gate...' });
+
+    const block = await recallBlockServing('chat-short-stem', [LONG_FACT]);
+    expect(block).toContain(LONG_FACT);
   });
 });

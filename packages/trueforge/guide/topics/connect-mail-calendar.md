@@ -1,7 +1,7 @@
 ---
 id: connect-mail-calendar
 title: Connecting your email and calendar
-covers:
+covers: settings:connectors, calendar-preset:google, calendar-preset:fastmail, calendar-preset:yahoo, calendar-preset:gmx, calendar-preset:webde, calendar-preset:other, route:google, route:calendarAccount, route:connectorAccount
 ---
 
 You connect email and calendar in one place, in Settings. You do not need the terminal.
