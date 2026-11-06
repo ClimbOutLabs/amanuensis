@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Https on the network: the authority and the certificate made on this computer, the front end in the instance's
-# project, the page and files that make a device trust it, and moving an instance between https and plain http.
+# project, the page and files that make a device trust it, and moving an instance recorded with plain http to https.
 set -euo pipefail
 # shellcheck source=../helpers.sh
 . "$(dirname "${BASH_SOURCE[0]}")/../helpers.sh"
@@ -180,35 +180,29 @@ test_no_code_without_colors() {
   sandbox_drop
 }
 
-test_tls_off_keeps_plain_http() {
-  t_begin "--tls off keeps plain http on each address: no front end, no authority, and the old warning"
+test_tls_off_is_refused() {
+  t_begin "--tls off is refused: an instance opened on the network is served over https, and nothing is installed"
   sandbox_new
   lan
-  INSTALL_EXTRA=(--tls off)
-  install_machine
-  assert_eq "$(reg_value main tls)" off
-  assert_eq "$(reg_value main tls_port)" ""
-  assert_contains "$(env_value main ALLOWED_ORIGINS)" "http://192.168.1.20:8791"
-  assert_not_contains "$(env_value main ALLOWED_ORIGINS)" "https://"
-  assert_contains "$(compose)" "- '192.168.1.20:8791:8790'"
-  assert_not_contains "$(compose)" "caddy"
+  run_install --yes --email owner@example.invalid --tls off
+  assert_rc 2
+  assert_flat_contains "$ERR" "--tls off is not a choice anymore"
+  assert_flat_contains "$ERR" "served over https with a certificate Aman makes on this computer"
+  assert_no_path "$AMAN_HOME/instances/main"
   assert_no_path "$AMAN_HOME/tls"
-  assert_no_path "$STUB_STATE/pki_runs"
-  assert_flat_contains "$OUT" "Sign-in on your home network is not encrypted."
-  assert_not_contains "$OUT" "follow its steps"
   sandbox_drop
 }
 
 test_the_flag_is_checked() {
-  t_begin "--tls takes local, off or caddy, and local or off belong to an instance opened on the network"
+  t_begin "--tls takes local or caddy, and local belongs to an instance opened on the network"
   sandbox_new
   run_install --dry-run --yes --email owner@example.invalid --tls bogus
   assert_rc 2
-  assert_flat_contains "$ERR" "--tls takes local, off or caddy"
+  assert_flat_contains "$ERR" "--tls takes local or caddy"
   run_install --dry-run --yes --email owner@example.invalid --tls local --local-only
   assert_rc 2
   assert_flat_contains "$ERR" "--local-only keeps Aman on this computer"
-  run_install --dry-run --yes --email owner@example.invalid --tls off --public-url https://aman.example.invalid --login-url https://login.example.invalid
+  run_install --dry-run --yes --email owner@example.invalid --tls local --public-url https://aman.example.invalid --login-url https://login.example.invalid
   assert_rc 2
   assert_flat_contains "$ERR" "use --tls caddy"
   sandbox_drop
@@ -251,11 +245,10 @@ sys.exit(0 if s.connect_ex(("127.0.0.1",8443))==0 else 1)' 2>/dev/null && [ "$wa
   sandbox_drop
 }
 
-test_an_existing_instance_moves_to_https_and_back() {
-  t_begin "a re-run moves an instance from before https to https, --tls off moves it back and stays, --tls local moves it on again"
+test_an_existing_instance_moves_to_https() {
+  t_begin "a re-run moves an instance from before https, or one recorded with plain http, to https and keeps it there"
   sandbox_new
   lan
-  INSTALL_EXTRA=(--tls off)
   install_machine
   # An instance opened on the network before https existed has no record of the choice.
   sed -i 's/^tls=.*/tls=/' "$AMAN_HOME/state/instances/main.conf"
@@ -275,18 +268,17 @@ test_an_existing_instance_moves_to_https_and_back() {
   assert_flat_contains "$OUT" "open this page once on that device"
   run_install --yes
   assert_flat_contains "$OUT" "Nothing to do."
-  run_install --yes --tls off
-  assert_rc 0
-  assert_eq "$(reg_value main tls)" off
-  assert_eq "$(reg_value main tls_port)" ""
-  assert_contains "$(env_value main ALLOWED_ORIGINS)" "http://192.168.1.20:8791"
-  assert_not_contains "$(compose)" "caddy"
+  # An instance recorded with plain http from before moves to https on the next plain re-run.
+  sed -i 's/^tls=.*/tls=off/' "$AMAN_HOME/state/instances/main.conf"
+  run_install --dry-run
+  assert_flat_contains "$OUT" "Serve instance main over https on your network"
   run_install --yes
-  assert_flat_contains "$OUT" "Nothing to do." "the choice of plain http is kept"
-  run_install --yes --tls local
   assert_rc 0
   assert_eq "$(reg_value main tls)" local
   assert_eq "$(reg_value main tls_port)" 8443
+  assert_eq "$(env_value main ALLOWED_ORIGINS)" "$HTTPS_ORIGINS"
+  run_install --yes
+  assert_flat_contains "$OUT" "Nothing to do." "https is kept"
   sandbox_drop
 }
 
@@ -543,11 +535,11 @@ test_a_second_instance_shares_the_authority
 test_the_trust_page_and_files
 test_the_plan_and_the_summary
 test_no_code_without_colors
-test_tls_off_keeps_plain_http
+test_tls_off_is_refused
 test_the_flag_is_checked
 test_a_computer_with_no_network_has_nothing_to_serve
 test_a_busy_https_port_moves_the_instance
-test_an_existing_instance_moves_to_https_and_back
+test_an_existing_instance_moves_to_https
 test_a_new_address_gets_a_new_certificate
 test_backups_carry_the_certificate_but_not_the_key
 test_renewal_issues_what_is_due

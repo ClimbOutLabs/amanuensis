@@ -38,17 +38,10 @@ tls_home_in_volume() {
 # form, reading the record with reg_get.
 tls_active() { serves_https "$(reg_get "$1" tls)" "$(reg_get "$1" tls_port)" "$(reg_get "$1" origins)"; }
 
-# What a re-run wants for an instance opened on the network: the flag, else what it has, else https.
-tls_target() { # name; prints local or off
-  case "${OPT_TLS:-}" in
-    local | off) printf '%s' "$OPT_TLS" ;;
-    *)
-      case "$(reg_get "$1" tls)" in
-        local | off) reg_get "$1" tls ;;
-        *) printf local ;;
-      esac
-      ;;
-  esac
+# What a re-run wants for an instance opened on the network: always https, so an instance recorded with plain http
+# from before moves to https on the next run and one already on https stays there.
+tls_target() { # name; prints local
+  printf local
 }
 
 # Every host of an origin list, one per line, each once: the names the certificate must carry.

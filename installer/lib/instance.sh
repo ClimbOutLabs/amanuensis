@@ -562,17 +562,17 @@ instance_collect_addresses() {
 }
 
 # --tls caddy serves the two public origins on 443 under DNS names Let's Encrypt can issue for. --tls local (the
-# default on a network) serves https with a certificate from this computer's own authority; --tls off keeps plain http.
+# default on a network) serves https with a certificate from this computer's own authority.
 instance_collect_tls() {
   case "$I_TLS" in
     '') return 0 ;;
-    local | off)
+    local)
       [ -z "$I_PUBLIC_URL" ] || usage_die "--tls $I_TLS is for an instance opened on your network. With --public-url, use --tls caddy."
       [ "$OPT_LOCAL_ONLY" != 1 ] || usage_die "--local-only keeps Aman on this computer, where plain http is fine, so --tls does not apply."
       return 0
       ;;
     caddy) ;;
-    *) usage_die "--tls takes local, off or caddy" ;;
+    *) usage_die "--tls takes local or caddy" ;;
   esac
   [ -n "$I_PUBLIC_URL" ] || usage_die "--tls caddy needs --public-url and --login-url (the two https addresses Caddy will serve)"
   [ -z "$OPT_PUBLIC_IP" ] || valid_ipv4 "$OPT_PUBLIC_IP" || usage_die "--public-ip must be an IPv4 address"
