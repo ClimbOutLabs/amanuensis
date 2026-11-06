@@ -637,6 +637,9 @@ importers:
       ulid:
         specifier: ^3.0.2
         version: 3.0.2
+      undici:
+        specifier: 7.29.1
+        version: 7.29.1
       winston:
         specifier: ^3.19.0
         version: 3.19.0
