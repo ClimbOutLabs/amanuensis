@@ -1,14 +1,7 @@
-import {
-  AgentSpecSchema,
-  DEFAULT_NEW_CHAT_SKILLS,
-  defaultReasoningEffort,
-  type AgentSpec,
-} from '@truefoundry/trueforge-core/agent-session';
 import type { Logger } from 'winston';
 
 import type { IGlobalSettingsStore } from '../db/globalSettingsStore';
 import type { IModelProviderStore } from '../db/modelProviderStore';
-import type { AvailableModel } from '../schemas/modelProvider';
 import { putDefaultModelFirst, readDefaultChatModel } from './tokenFactoryProvider';
 
 /**
@@ -17,7 +10,7 @@ import { putDefaultModelFirst, readDefaultChatModel } from './tokenFactoryProvid
  * the model list and the chat picker use. Custom providers and connector-supplied models are in the catalog
  * too, so they count without a stored default.
  */
-export async function resolveDefaultChatModelEntry({
+export async function resolveDefaultChatModel({
   tenantId,
   modelProviderStore,
   globalSettingsStore,
@@ -27,38 +20,8 @@ export async function resolveDefaultChatModelEntry({
   modelProviderStore: Pick<IModelProviderStore, 'listModels'>;
   globalSettingsStore: IGlobalSettingsStore;
   logger: Logger;
-}): Promise<AvailableModel | undefined> {
+}): Promise<string | undefined> {
   const models = await modelProviderStore.listModels({ tenant_id: tenantId });
   const defaultName = await readDefaultChatModel({ globalSettingsStore, logger });
-  return putDefaultModelFirst(models, defaultName)[0];
-}
-
-/** The name of the model a new chat starts on. */
-export async function resolveDefaultChatModel(
-  input: Parameters<typeof resolveDefaultChatModelEntry>[0],
-): Promise<string | undefined> {
-  return (await resolveDefaultChatModelEntry(input))?.name;
-}
-
-/**
- * The assistant a new chat in the app starts on, for a chat the server opens itself: the default model at the app's
- * default reasoning effort, with the sandbox on when the server has one and the app's default skills when it does.
- */
-export function newChatAgentSpec({
-  model,
-  sandbox,
-}: {
-  model: AvailableModel | undefined;
-  sandbox: boolean;
-}): AgentSpec | undefined {
-  if (model === undefined) {
-    return undefined;
-  }
-  const effort = defaultReasoningEffort(model.properties.reasoning_efforts);
-  return AgentSpecSchema.parse({
-    model: { name: model.name, ...(effort === undefined ? {} : { params: { reasoning_effort: effort } }) },
-    // Skills need the sandbox: a spec that lists them without it is refused.
-    ...(sandbox ? { skills: DEFAULT_NEW_CHAT_SKILLS.map(name => ({ name })) } : {}),
-    config: { sandbox: { enabled: sandbox } },
-  });
+  return putDefaultModelFirst(models, defaultName)[0]?.name;
 }

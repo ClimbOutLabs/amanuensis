@@ -512,7 +512,7 @@ export function createPhoneCallService(deps: PhoneCallDeps): PhoneCallService {
             call_id: call.id,
             opening: `Hi, this is ${name}. ${CALL_LINES.message(spokenMessage(delivery))}`,
           });
-          if (chat !== undefined) {
+          if (chat?.session_id !== undefined) {
             await store.setSession({ id: call.id, session_id: chat.session_id });
           }
           return chat;

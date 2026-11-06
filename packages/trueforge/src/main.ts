@@ -63,7 +63,6 @@ import type { Kysely, Transaction } from 'kysely';
 import type { RedisClientType } from 'redis';
 import type { Logger } from 'winston';
 
-import { readServerSandboxAvailable } from './apis/capabilities';
 import { createServerApp } from './app';
 import { TrueForgeAuthorizer, type Authorizer } from './auth/authorizer';
 import { createAuthenticator } from './auth/createAuthenticator';
@@ -130,7 +129,6 @@ import { CHAT_IMAGE_RETENTION_DAYS } from './runtime/chatImages/limits';
 import { createImageReencoder } from './runtime/chatImages/reencodeInSandbox';
 import { ChatSearchIndexer } from './runtime/chatSearchIndexing';
 import { recoverAbandonedCommandExecutions } from './runtime/commandExecutionRecovery';
-import { newChatAgentSpec, resolveDefaultChatModelEntry } from './runtime/defaultChatModel';
 import { designateTavilyAtBoot, seedDefaultSearchProviderAtBoot } from './runtime/defaultSearchProvider';
 import { createDeliveryService, type DeliveryService } from './runtime/delivery/deliveryService';
 import { createWebPushSender } from './runtime/delivery/webPushSender';
@@ -874,23 +872,6 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
           throw new Error('Chats are not ready yet.');
         }
         return callDeps.sessions;
-      },
-      newChatAgent: async owner => {
-        const context = ownerContext(owner);
-        const spec = newChatAgentSpec({
-          model: await resolveDefaultChatModelEntry({
-            tenantId: owner.tenant_id,
-            modelProviderStore: persistence.resolveModelProviderStore(context),
-            globalSettingsStore,
-            logger,
-          }),
-          sandbox: await readServerSandboxAvailable({
-            store: persistence.resolveSandboxProviderStore(context),
-            tenant_id: owner.tenant_id,
-            logger,
-          }),
-        });
-        return spec === undefined ? undefined : { type: 'inline', spec };
       },
       answerer: owner =>
         createCallAnswerer({

@@ -23,13 +23,15 @@ Aman calls only for the kinds of things you ticked, or for a reminder you marked
 
 The call starts with who is calling and who it is for. It names only the kind of thing, then asks if this is a good time. Nothing private is said until you answer with a short yes, such as "Yes" or "Sure".
 
+Whoever says yes hears the message, because the phone cannot tell if it is you. If a kind of thing is too private for that, untick it under "What may call you".
+
 After your yes, Aman tells you what it is about. You can ask about that one thing. It cannot see your mail, calendar or files on the call, and nothing is approved on a call. To do anything about it, open the app.
 
-A call lasts at most 10 minutes. What was said is written in a chat called "Phone call".
+A call lasts at most 10 minutes. What was said is written in a chat called "Phone call". The chat quotes what the person on the phone said, and your assistant never takes it as your own request.
 
 ## If you miss the call
 
-If a voicemail picks up, Aman leaves one short message that says only that something needs you. Then it sends one text and one notice to your devices. It never calls again about the same thing.
+If a voicemail picks up, Aman leaves one short message that says only that something needs you. If no one answers, it leaves no message. Either way it then sends one text and one notice to your devices. It never calls again about the same thing.
 
 ## If calls do not work
 

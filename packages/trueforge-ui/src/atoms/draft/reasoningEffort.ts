@@ -1,5 +1,3 @@
-import { defaultReasoningEffort } from '@truefoundry/trueforge-core/agent-session/newChatDefaults';
-
 import type { Model, ModelParams, ModelSelection } from '../../server/types.js';
 
 type ReasoningEfforts = ModelSelection['properties']['reasoningEfforts'];
@@ -9,13 +7,16 @@ export function hasReasoningEfforts(efforts: ReasoningEfforts): efforts is strin
 }
 
 /**
- * Keep current if still listed for this model; otherwise the effort a new chat
- * starts at. Undefined when the model has no efforts at all.
+ * Keep current if still listed for this model; otherwise the provider default:
+ * "medium" when the model offers it, else the lowest non-"none" effort
+ * (catalog lists are ordered ascending), else "none" if that is the only entry.
+ * Undefined when the model has no efforts at all.
  */
 export function resolveReasoningEffort(efforts: ReasoningEfforts, current: string | undefined): string | undefined {
   if (!hasReasoningEfforts(efforts)) return undefined;
   if (current && efforts.includes(current)) return current;
-  return defaultReasoningEffort(efforts);
+  if (efforts.includes('medium')) return 'medium';
+  return efforts.find(effort => effort !== 'none') ?? efforts[0];
 }
 
 /**

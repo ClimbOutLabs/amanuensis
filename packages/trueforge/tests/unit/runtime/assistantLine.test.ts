@@ -18,7 +18,7 @@ async function setup() {
     created_by_subject: { subject_id: 'dana', subject_type: 'user', subject_display_name: 'Dana' },
     agent: { type: 'reference', id: 'agent-1', name: 'assistant-0123456789abcdef' },
   });
-  const append = (line: { text: string; said?: string; title?: string }) =>
+  const append = (line: { text: string; title?: string }) =>
     appendAssistantLine({
       sessionStore,
       tenant_id: TENANT,
@@ -50,16 +50,15 @@ describe('a line written into a chat without a model call', () => {
     expect(record?.title).toBe('First title');
   });
 
-  it('chains each line after the last, and carries what the person said before it when there is one', async () => {
+  it('chains each line after the last, as the assistant’s words only', async () => {
     const t = await setup();
     const first = await t.append({ text: 'Hi.' });
-    const second = await t.append({ said: 'when is it?', text: 'At 3pm.' });
+    const second = await t.append({ text: 'At 3pm.' });
     const turn = await t.sessionStore.getTurn({ session_id: t.session_id, turn_id: second });
     expect(turn?.previous_turn_id).toBe(first);
-    expect(turn?.input).toEqual([{ type: EventType.USER_MESSAGE, content: 'when is it?' }]);
+    expect(turn?.input).toEqual([]);
     expect(turn?.snapshot.threads[MAIN_THREAD_ID]?.context).toEqual([
       { role: 'assistant', content: 'Hi.' },
-      { role: 'user', content: 'when is it?' },
       { role: 'assistant', content: 'At 3pm.' },
     ]);
   });

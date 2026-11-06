@@ -22,7 +22,8 @@ Otherwise the same thing reaches you as a nudge, and the bell says why.
 
 - The call uses your assistant's own voice, made on your computer. Its name is the one you chose in Personalization.
 - It starts by saying who is calling, who the call is for, and only the kind of thing: "Hi, this is Mannie, calling for Dana. Something needs you. Is this a good time?" The name it calls you by is the one you gave in Personalization. It plays this to the end, and anything said over it does not count as an answer.
-- It says more only after a short, plain yes, such as "Yes", "Yeah", "Sure" or "Okay". A longer reply, a question or someone saying "hold on" is not a yes, so it asks once more. Say no and it says goodbye. If no one answers the question, it asks once more, then says goodbye. The phone cannot tell who picked up, so nothing private is said first.
+- It says more only after a short, plain yes, such as "Yes", "Yeah", "Sure" or "Okay". A longer reply, a question or someone saying "hold on" is not a yes, and neither is a yes that sounds like a question, such as "Yeah?". Then it asks once more. Say no and it says goodbye. If no one answers the question, it asks once more, then says goodbye. The phone cannot tell who picked up, so nothing private is said first.
+- **Whoever says yes hears the message.** The phone cannot tell if it is you. If someone else answers and says yes, they hear what the call is about and can ask about it. If a kind of thing is too private for that, untick it under "What may call you".
 - After your yes it tells you what it is about. You can then ask about that one thing, and you can interrupt it. On the call it knows only that one thing. It cannot see your mail, calendar, memories or files, and it cannot do or change anything. For anything else, it asks you to open the app.
 - **Nothing is approved on a call.** To act on what it called about, open the app.
 - A call lasts at most 10 minutes. After that the assistant says goodbye and the line is closed, even if it was in the middle of something.
@@ -35,7 +36,9 @@ If the call cannot be made at all, for example because the voice parts of Aman a
 
 ## What you see afterwards
 
-Each call is recorded in Activity: when it was and how it ended. What was said on the call is written in a chat called "Phone call", starting from the moment you said yes. You can carry on in that chat in the app, with all your assistant's tools.
+Each call is recorded in Activity: when it was and how it ended. What was said on the call is written in a chat called "Phone call", starting from the moment you said yes. You can carry on in that chat in the app.
+
+The chat shows what the person on the phone said as a quote, marked as their words. Your assistant never takes those words as your own request, because it cannot know who was on the phone. If you have no chat in the app yet, the call still talks with you, but nothing is written to a chat.
 
 ## Set it up
 

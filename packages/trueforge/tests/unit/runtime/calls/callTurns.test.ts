@@ -180,6 +180,9 @@ describe('a phone call in private mode', () => {
     'OK',
     'Alright',
     'Yes yes yes yes',
+    'Yeah?',
+    'Okay?',
+    'Yes ?',
   ])('does not take "%s" as a yes', heard => {
     expect(goodTimeAnswer(heard)).toBe('unclear');
   });

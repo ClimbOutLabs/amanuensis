@@ -13,8 +13,8 @@ const MOST_YES_WORDS = 3;
 const NO_THAT_IS_NOT_NO = ['no problem', 'no worries', 'not busy', 'not bad', 'why not'];
 
 /**
- * A plain yes or no. Only a reply of one to three words that are all yes words is a yes, so a greeting, a question
- * or someone handing over the phone is never taken for one. A "no" word is a no, unless it is part of a phrase like
+ * A plain yes or no. Only a reply of one to three words that are all yes words, and not asked as a question, is a yes,
+ * so a greeting, a question or someone handing over the phone is never taken for one. A "no" word is a no, unless it is part of a phrase like
  * "no problem", which is asked again. This only decides whether the assistant may say more on the call; it never
  * approves anything.
  */
@@ -27,7 +27,9 @@ export function goodTimeAnswer(heard: string): GoodTimeAnswer {
   if (words.some(word => NO_WORDS.has(word))) {
     return 'no';
   }
-  const yes = words.length > 0 && words.length <= MOST_YES_WORDS && words.every(word => YES_WORDS.has(word));
+  // A puzzled "Yeah?" is someone asking who is there, not saying yes.
+  const asked = heard.trim().endsWith('?');
+  const yes = !asked && words.length > 0 && words.length <= MOST_YES_WORDS && words.every(word => YES_WORDS.has(word));
   return yes ? 'yes' : 'unclear';
 }
 
@@ -60,9 +62,9 @@ function withStop(text: string): string {
 /** Why a call ended before a conversation: the person said no, no yes was heard, or no chat could open. */
 export type CallEnding = 'said_no' | 'unclear' | 'no_chat';
 
-/** The chat a call talks in, once the person said yes. */
+/** The conversation a call has once the person said yes, and the chat it is written into when there is one. */
 export interface CallChat {
-  session_id: string;
+  session_id: string | undefined;
   turns: VoiceTurnRunner;
 }
 
