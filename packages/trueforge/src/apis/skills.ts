@@ -18,6 +18,11 @@ import {
   updateSkillNetworkApprovalRoute,
   updateSkillNetworkDeniedHostRoute,
 } from '../routes/skillRoutes';
+import {
+  SkillCodePinRefusedError,
+  resolveSkillCodePin,
+  type SkillCodeResolver,
+} from '../sandbox/skillnet/skillNetworkGrant';
 import { skillNetworkTokens } from '../sandbox/skillnet/skillNetworkTokens';
 import type {
   AvailableSkill,
@@ -41,6 +46,8 @@ export interface SkillsRouterDeps<TTransaction> {
   resolveSkillStore: ResolveSkillStore<TTransaction>;
   withTransaction: WithTransaction<TTransaction>;
   resolveRequestContext: ResolveRequestContext;
+  /** Reads the commit a git skill's ref names now, for pinning an approval to the code. */
+  resolveSkillCodeSha?: SkillCodeResolver | undefined;
 }
 
 function toConfiguredSkill(record: SkillRecord): ConfiguredSkill {
@@ -199,10 +206,22 @@ export function createSkillsRouter<TTransaction>(deps: SkillsRouterDeps<TTransac
         422,
       );
     }
+    // The approval is pinned to the skill's code as it stands now; code nobody could
+    // identify is never approved, so an unreadable code version refuses the approval.
+    let code_sha: string | null;
+    try {
+      code_sha = await resolveSkillCodePin({ manifest: record.manifest, resolve: deps.resolveSkillCodeSha });
+    } catch (error) {
+      if (error instanceof SkillCodePinRefusedError) {
+        return c.json({ error: { message: error.message } }, 422);
+      }
+      throw error;
+    }
     const updated = await deps.resolveSkillStore(c).setSkillNetworkApproval({
       tenant_id: requestContext.tenant_id,
       name,
       hosts: [...declared],
+      code_sha,
     });
     if (updated === undefined) {
       return c.json({ error: { message: `No skill with this name: ${name}` } }, 404);
@@ -305,6 +324,7 @@ export function createSkillsRouter<TTransaction>(deps: SkillsRouterDeps<TTransac
       tenant_id: requestContext.tenant_id,
       name,
       hosts: null,
+      code_sha: null,
     });
     if (updated === undefined) {
       return c.json({ error: { message: `No skill with this name: ${name}` } }, 404);

@@ -18,6 +18,8 @@ export interface SkillNetworkCardRequest {
   skill_name: string;
   hosts: readonly string[];
   reason: Tier3SkillNetwork['reason'];
+  /** The code version the asked approval would cover, or null when no pin is in force. */
+  code_pin: string | null;
 }
 
 /** The answer an approval decision means for a network card: scope picks once versus always. */
@@ -36,14 +38,32 @@ export function buildSkillNetworkCard(input: {
   skill_name: string;
   hosts: readonly string[];
   reason: Tier3SkillNetwork['reason'];
+  code_pin: string | null;
 }): Tier3Card {
   const sites = input.hosts.join(', ');
   const skill_network: Tier3SkillNetwork = {
     skill_name: input.skill_name,
     hosts: [...input.hosts],
     reason: input.reason,
-    code_pin: null,
+    code_pin: input.code_pin,
   };
+  if (input.reason === 'code_changed') {
+    return {
+      plain_what: `Let the ${input.skill_name} skill reach ${sites}?`,
+      plain_why:
+        'This skill\u2019s code changed since you approved it, so the approval was cancelled. Approving again covers the code as it is now.',
+      cannot_be_undone: null,
+      why_asked_again: null,
+      destination: sites,
+      recipient: null,
+      amount: null,
+      parsed_command: null,
+      outbound_text: null,
+      destination_host: input.hosts.length === 1 ? (input.hosts[0] ?? null) : null,
+      outbound_truncated: false,
+      skill_network,
+    };
+  }
   if (input.reason === 'first_use') {
     return {
       plain_what: `Let the ${input.skill_name} skill reach ${sites}?`,

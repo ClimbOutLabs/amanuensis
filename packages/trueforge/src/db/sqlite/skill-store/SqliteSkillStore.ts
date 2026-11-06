@@ -25,6 +25,7 @@ function recordColumns(eb: ExpressionBuilder<Database, 'skill'>) {
     'name' as const,
     jsonText<SkillManifest>(eb.ref('manifest')).as('manifest'),
     jsonText<readonly string[] | null>(eb.ref('network_approval')).as('network_approval'),
+    'network_approval_code_sha' as const,
     jsonText<readonly string[]>(eb.ref('network_allowed_hosts')).as('network_allowed_hosts'),
     jsonText<readonly string[]>(eb.ref('network_denied_hosts')).as('network_denied_hosts'),
     'created_at' as const,
@@ -62,6 +63,7 @@ export class SqliteSkillStore implements ISkillStore<Transaction<Database>> {
           name: input.name,
           manifest: jsonbBind(input.manifest),
           network_approval: null,
+          network_approval_code_sha: null,
           network_allowed_hosts: jsonbBind([]),
           network_denied_hosts: jsonbBind([]),
           created_at: timestamp,
@@ -87,6 +89,7 @@ export class SqliteSkillStore implements ISkillStore<Transaction<Database>> {
         name: input.name,
         manifest: jsonbBind(input.manifest),
         network_approval: null,
+        network_approval_code_sha: null,
         network_allowed_hosts: jsonbBind([]),
         network_denied_hosts: jsonbBind([]),
         created_at: timestamp,
@@ -111,6 +114,7 @@ export class SqliteSkillStore implements ISkillStore<Transaction<Database>> {
       .updateTable('skill')
       .set({
         network_approval: input.hosts === null ? null : jsonbBind([...input.hosts]),
+        network_approval_code_sha: input.hosts === null ? null : input.code_sha,
         updated_at: nowIso(),
       })
       .where('tenant_id', '=', input.tenant_id)

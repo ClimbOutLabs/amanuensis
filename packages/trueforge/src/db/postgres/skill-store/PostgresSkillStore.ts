@@ -24,6 +24,7 @@ function toRecord(row: Selectable<SkillTable>): SkillRecord {
     name: row.name,
     manifest: row.manifest,
     network_approval: row.network_approval,
+    network_approval_code_sha: row.network_approval_code_sha,
     network_allowed_hosts: row.network_allowed_hosts,
     network_denied_hosts: row.network_denied_hosts,
     created_at: row.created_at.toISOString(),
@@ -61,6 +62,7 @@ export class PostgresSkillStore implements ISkillStore<Transaction<Database>> {
           name: input.name,
           manifest: json(input.manifest),
           network_approval: null,
+          network_approval_code_sha: null,
           network_allowed_hosts: json([]),
           network_denied_hosts: json([]),
           created_at: now(),
@@ -86,6 +88,7 @@ export class PostgresSkillStore implements ISkillStore<Transaction<Database>> {
         name: input.name,
         manifest: json(input.manifest),
         network_approval: null,
+        network_approval_code_sha: null,
         network_allowed_hosts: json([]),
         network_denied_hosts: json([]),
         created_at: now(),
@@ -111,6 +114,7 @@ export class PostgresSkillStore implements ISkillStore<Transaction<Database>> {
       .updateTable('skill')
       .set({
         network_approval: input.hosts === null ? null : json([...input.hosts]),
+        network_approval_code_sha: input.hosts === null ? null : input.code_sha,
         updated_at: now(),
       })
       .where('tenant_id', '=', input.tenant_id)

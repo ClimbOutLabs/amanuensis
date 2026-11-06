@@ -98,7 +98,9 @@ async function setup() {
     result: { content: [{ type: 'text', text: REFUSAL_TEXT }], isError: true },
     wasInitialized: undefined,
     verificationReceiptCandidate: undefined,
-    skillNetworkCards: [{ skill_name: 'ten-x', hosts: ['uploads.example.com'], reason: 'undeclared_host' }],
+    skillNetworkCards: [
+      { skill_name: 'ten-x', hosts: ['uploads.example.com'], reason: 'undeclared_host', code_pin: null },
+    ],
   };
   const callTool = jest.fn(() =>
     Promise.resolve<CallToolResolvedResponse>({

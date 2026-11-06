@@ -12,6 +12,7 @@ describe('buildSkillNetworkCard', () => {
       skill_name: 'ten-x',
       hosts: ['github.com', 'api.github.com'],
       reason: 'first_use',
+      code_pin: null,
     });
     expect(card.plain_what).toBe('Let the ten-x skill reach github.com, api.github.com?');
     expect(card.plain_why).toContain('names these sites as the ones it needs');
@@ -30,6 +31,7 @@ describe('buildSkillNetworkCard', () => {
       skill_name: 'ten-x',
       hosts: ['uploads.example.com'],
       reason: 'undeclared_host',
+      code_pin: null,
     });
     expect(card.plain_what).toBe('Let the ten-x skill reach uploads.example.com?');
     expect(card.plain_why).toContain('did not name in advance');
@@ -40,6 +42,25 @@ describe('buildSkillNetworkCard', () => {
       hosts: ['uploads.example.com'],
       reason: 'undeclared_host',
       code_pin: null,
+    });
+  });
+
+  it('says the code changed since approval when the pin moved, and carries the new pin', () => {
+    const pin = 'a'.repeat(40);
+    const card = buildSkillNetworkCard({
+      skill_name: 'ten-x',
+      hosts: ['github.com', 'api.github.com'],
+      reason: 'code_changed',
+      code_pin: pin,
+    });
+    expect(card.plain_what).toBe('Let the ten-x skill reach github.com, api.github.com?');
+    expect(card.plain_why).toContain('code changed since you approved it');
+    expect(card.plain_why).toContain('approval was cancelled');
+    expect(card.skill_network).toEqual({
+      skill_name: 'ten-x',
+      hosts: ['github.com', 'api.github.com'],
+      reason: 'code_changed',
+      code_pin: pin,
     });
   });
 });
@@ -125,6 +146,7 @@ describe('checkHeldReplay for a skill network card', () => {
         skill_name: 'ten-x',
         hosts: ['uploads.example.com'],
         reason: 'undeclared_host',
+        code_pin: null,
       }),
     });
     const fresh = info({ approval_token_id: freshToken.token_id, tier3_card: card() });

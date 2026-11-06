@@ -182,15 +182,21 @@ export const Tier3PersonaSchema = z
   .describe('The persona a chat call adds, shown in full.')
   .openapi('Tier3Persona');
 
-/** Why a skill network card is asked: the skill's first use, or a site it reached for without declaring. */
+/**
+ * Why a skill network card is asked: the skill's first use, a site it reached for without
+ * declaring, or its code changed since the person approved it.
+ */
 export const Tier3SkillNetworkReasonSchema = z
-  .enum(['first_use', 'undeclared_host'])
-  .describe('Why the card is asked: the skill\u2019s first use, or a site it did not declare.')
+  .enum(['first_use', 'undeclared_host', 'code_changed'])
+  .describe(
+    'Why the card is asked: the skill\u2019s first use, a site it did not declare, or its code changed since it was approved.',
+  )
   .openapi('Tier3SkillNetworkReason');
 
 /**
  * The network question a skill network card asks, shown in full: the skill, the sites, and why.
- * `code_pin` names the exact code the approval covers once code pinning lands; until then null.
+ * `code_pin` names the exact code the approval covers: the commit a git skill's approval is
+ * pinned to, or null when no pin is in force.
  */
 export const Tier3SkillNetworkSchema = z
   .object({

@@ -221,6 +221,7 @@ export function runSkillStoreContractSuite(getStore: () => ISkillStore): void {
       manifest: manifest({ network_hosts: ['github.com', 'api.github.com'] }),
     });
     expect(created.network_approval).toBeNull();
+    expect(created.network_approval_code_sha).toBeNull();
   });
 
   it('setSkillNetworkApproval stores the exact list, and null takes it back', async () => {
@@ -234,23 +235,28 @@ export function runSkillStoreContractSuite(getStore: () => ISkillStore): void {
       tenant_id: TENANT,
       name: 'algorithmic-art',
       hosts: ['github.com', 'api.github.com'],
+      code_sha: 'a'.repeat(40),
     });
     expect(approved?.network_approval).toEqual(['github.com', 'api.github.com']);
+    expect(approved?.network_approval_code_sha).toBe('a'.repeat(40));
     const [listed] = await store.listSkills({ tenant_id: TENANT, names: ['algorithmic-art'] });
     expect(listed?.network_approval).toEqual(['github.com', 'api.github.com']);
+    expect(listed?.network_approval_code_sha).toBe('a'.repeat(40));
 
     const cleared = await store.setSkillNetworkApproval({
       tenant_id: TENANT,
       name: 'algorithmic-art',
       hosts: null,
+      code_sha: null,
     });
     expect(cleared?.network_approval).toBeNull();
+    expect(cleared?.network_approval_code_sha).toBeNull();
   });
 
   it('setSkillNetworkApproval on a missing skill returns undefined', async () => {
     const store = getStore();
     await expect(
-      store.setSkillNetworkApproval({ tenant_id: TENANT, name: 'nope', hosts: ['github.com'] }),
+      store.setSkillNetworkApproval({ tenant_id: TENANT, name: 'nope', hosts: ['github.com'], code_sha: null }),
     ).resolves.toBeUndefined();
   });
 
@@ -321,6 +327,7 @@ export function runSkillStoreContractSuite(getStore: () => ISkillStore): void {
       tenant_id: TENANT,
       name: 'algorithmic-art',
       hosts: ['github.com', 'api.github.com'],
+      code_sha: 'b'.repeat(40),
     });
     const replaced = await store.upsertSkill({
       tenant_id: TENANT,
@@ -328,5 +335,6 @@ export function runSkillStoreContractSuite(getStore: () => ISkillStore): void {
       manifest: manifest({ description: 'Updated description for algorithmic art.' }),
     });
     expect(replaced.network_approval).toEqual(['github.com', 'api.github.com']);
+    expect(replaced.network_approval_code_sha).toBe('b'.repeat(40));
   });
 }

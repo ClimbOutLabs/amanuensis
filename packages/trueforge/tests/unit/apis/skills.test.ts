@@ -57,6 +57,7 @@ describe('skills routers', () => {
       resolveSkillStore: () => skillStore,
       withTransaction: callback => db.transaction().execute(callback),
       resolveRequestContext: () => STANDALONE_REQUEST_CONTEXT,
+      resolveSkillCodeSha: async () => 'a'.repeat(40),
     });
     catalogRouter = createCatalogRouter({
       modelCatalog: ModelCatalog.load(),
@@ -356,6 +357,34 @@ describe('skills routers', () => {
           send_capable: false,
         },
       });
+    });
+
+    it('PUT refuses the approval when the code version cannot be read, with the refusal in plain words', async () => {
+      const db = createSqliteDb(':memory:');
+      await migrateSqliteToLatest(db);
+      const failingRouter = createSkillsRouter({
+        resolveSkillStore: () => new SqliteSkillStore(db),
+        withTransaction: callback => db.transaction().execute(callback),
+        resolveRequestContext: () => STANDALONE_REQUEST_CONTEXT,
+        resolveSkillCodeSha: async () => {
+          throw new Error('repository unreachable');
+        },
+      });
+      const created = await failingRouter.request('/', putInit(wrapManifest(tenX)));
+      expect(created.status).toBe(200);
+      const response = await failingRouter.request(
+        '/ten-x/network-approval',
+        putInit({ hosts: ['github.com', 'api.github.com'] }),
+      );
+      expect(response.status).toBe(422);
+      expect(await response.json()).toEqual({
+        error: {
+          message: "Aman could not read this skill's code version. Check the skill's address and try again.",
+        },
+      });
+      const state = await failingRouter.request('/ten-x/network-approval');
+      const body = (await state.json()) as { data: { approved_hosts: string[] | null } };
+      expect(body.data.approved_hosts).toBeNull();
     });
 
     it('PUT refuses a list that is not the declared list, with the next step in plain words', async () => {

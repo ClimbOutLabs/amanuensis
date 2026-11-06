@@ -35,6 +35,12 @@ interface SessionSkillHosts {
   session_id: string;
   skill_name: string;
   hosts: Set<string>;
+  /**
+   * The code version the skill was at when these sites were allowed once, or null when no
+   * pin was in force. The grant counts the sites only while the skill is still at that
+   * version, so an allow-once never outlives the code it was given for.
+   */
+  code_sha: string | null;
   expires_at_ms: number;
 }
 
@@ -47,6 +53,12 @@ export class SkillNetworkTokenRegistry {
   readonly #refusals = new Map<string, { hosts: Set<string>; expires_at_ms: number }>();
   /** First-use cards already handed to the runtime, keyed by session, skill, so one ask is raised once. */
   readonly #cardsRaised = new Set<string>();
+  /**
+   * Skills whose code moved off the pin in one chat, keyed by session, skill, holding the
+   * commit the code moved to. The runtime reads it to raise the code-changed card; it waits
+   * until the card is handed out or an answer lands.
+   */
+  readonly #codeChanged = new Map<string, string>();
 
   /**
    * The token for a chat's approved sites, minting one when needed. A chat holds one grant at a
@@ -106,6 +118,10 @@ export class SkillNetworkTokenRegistry {
         this.#cardsRaised.delete(key);
       }
     }
+    // Code-changed notes are not cleared here: the grant check revokes the session in
+    // the same call that leaves a note, and the note has to live until the runtime drains
+    // the card it explains. A note whose chat ends first is keyed by that chat's id and
+    // can never fire for another chat; an answer, or a drain with nothing owed, clears it.
   }
 
   #delete(grant: SkillNetworkGrant): void {
@@ -123,6 +139,8 @@ export class SkillNetworkTokenRegistry {
     session_id: string;
     skill_name: string;
     hosts: readonly string[];
+    /** The code version the skill is at as these sites are allowed; the newest answer wins. */
+    code_sha: string | null;
   }): void {
     if (input.hosts.length === 0) {
       return;
@@ -133,6 +151,7 @@ export class SkillNetworkTokenRegistry {
       for (const host of input.hosts) {
         existing.hosts.add(host);
       }
+      existing.code_sha = input.code_sha;
       existing.expires_at_ms = Date.now() + GRANT_TTL_MS;
       return;
     }
@@ -142,21 +161,40 @@ export class SkillNetworkTokenRegistry {
       session_id: input.session_id,
       skill_name: input.skill_name,
       hosts: new Set(input.hosts),
+      code_sha: input.code_sha,
       expires_at_ms: Date.now() + GRANT_TTL_MS,
     });
   }
 
   /** The allow-once sites for one skill in one chat, or an empty list when there are none. */
   sessionHosts(input: { session_id: string; skill_name: string }): readonly string[] {
-    const entry = this.#sessionHosts.get(`${input.session_id}\n${input.skill_name}`);
+    return this.sessionHostsWithPin(input)?.hosts ?? [];
+  }
+
+  /**
+   * The allow-once sites for one skill in one chat with the code version they were allowed
+   * under, or undefined when there are none live. The grant compares the version against the
+   * skill's code now, so sites allowed for code that has since changed are left out.
+   */
+  sessionHostsWithPin(input: {
+    session_id: string;
+    skill_name: string;
+  }): { hosts: readonly string[]; code_sha: string | null } | undefined {
+    const key = `${input.session_id}\n${input.skill_name}`;
+    const entry = this.#sessionHosts.get(key);
     if (entry === undefined) {
-      return [];
+      return undefined;
     }
     if (entry.expires_at_ms <= Date.now()) {
-      this.#sessionHosts.delete(`${input.session_id}\n${input.skill_name}`);
-      return [];
+      this.#sessionHosts.delete(key);
+      return undefined;
     }
-    return [...entry.hosts].sort();
+    return { hosts: [...entry.hosts].sort(), code_sha: entry.code_sha };
+  }
+
+  /** Drops one skill's allow-once sites in one chat, when its code changed under them. */
+  clearSessionHosts(input: { session_id: string; skill_name: string }): void {
+    this.#sessionHosts.delete(`${input.session_id}\n${input.skill_name}`);
   }
 
   /** Every live allow-once site for one skill, across the person's open chats; Settings shows these. */
@@ -216,6 +254,21 @@ export class SkillNetworkTokenRegistry {
   /** An answer landed for this skill in this chat, so a later change may raise a card again. */
   clearCardRaised(input: { session_id: string; skill_name: string }): void {
     this.#cardsRaised.delete(`${input.session_id}\n${input.skill_name}`);
+  }
+
+  /** Notes that a skill's code moved off its pin in this chat, and the commit it moved to. */
+  noteCodeChanged(input: { session_id: string; skill_name: string; code_sha: string }): void {
+    this.#codeChanged.set(`${input.session_id}\n${input.skill_name}`, input.code_sha);
+  }
+
+  /** The commit a skill's code moved to in this chat, or undefined when it has not moved. */
+  codeChangedPin(input: { session_id: string; skill_name: string }): string | undefined {
+    return this.#codeChanged.get(`${input.session_id}\n${input.skill_name}`);
+  }
+
+  /** The code-changed note has been answered or handed out, so it is done. */
+  clearCodeChanged(input: { session_id: string; skill_name: string }): void {
+    this.#codeChanged.delete(`${input.session_id}\n${input.skill_name}`);
   }
 }
 

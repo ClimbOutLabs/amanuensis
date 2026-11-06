@@ -22,6 +22,13 @@ export interface SkillRecord {
    */
   network_approval: readonly string[] | null;
   /**
+   * The code version the approval is pinned to: the commit a git skill's ref named when the
+   * approval was saved, or a registry skill's version name. Null when there is no approval, or
+   * for an approval saved before pinning existed. When the skill's code moves off the pin, the
+   * approval is cancelled and the network card asks again.
+   */
+  network_approval_code_sha: string | null;
+  /**
    * Sites the person allowed one by one for this skill, from a network card or Settings. Each
    * site stands on its own: allowing one never changes the declared list or its approval.
    */
@@ -62,6 +69,8 @@ export interface SetSkillNetworkApprovalInput {
   name: string;
   /** The approved site list, or null to remove the approval. */
   hosts: readonly string[] | null;
+  /** The code version the approval is pinned to; null when the approval is removed. */
+  code_sha: string | null;
 }
 
 export interface SetSkillNetworkHostDecisionInput {

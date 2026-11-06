@@ -2580,7 +2580,7 @@ export class AgentThread {
           skill_name: request.skill_name,
           hosts: [...request.hosts],
           reason: request.reason,
-          code_pin: null,
+          code_pin: request.code_pin,
         };
         const key = skillNetworkQuestionKey(question);
         if (alreadyAsked.has(key)) {

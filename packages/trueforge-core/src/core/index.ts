@@ -425,6 +425,7 @@ export {
   SkillPromptModeSchema,
   getSkillPath,
   renderSkillPromptBody,
+  resolveGitSkillObjectId,
 } from './sandbox/skills';
 export type { GitSkill, ISkillMounter, Skill, SkillMounterOptions, SkillPromptMode } from './sandbox/skills';
 
