@@ -115,7 +115,7 @@ import type { ITokenFactoryUsageStore } from './db/tokenFactoryUsageStore';
 import type { WithTransaction } from './db/transaction';
 import type { ITurnArtifactStore } from './db/turnArtifactStore';
 import { mountFrontend } from './frontend';
-import { serverTlsServeOptions } from './http/tls';
+import { inProcessFetch, serverTlsServeOptions } from './http/tls';
 import { createServerLogger, shouldColorize } from './logger';
 import type { IOAuthTokenStore } from './mcp/auth/types';
 import { PACKAGE_VERSION } from './packageVersion';
@@ -1464,7 +1464,7 @@ try {
   });
 
   // Voice mode's WebSocket: the upgrade is handled here because the app's own router cannot take one.
-  attachVoiceSocket({ server, selfFetch: request => app.fetch(request), logger });
+  attachVoiceSocket({ server, selfFetch: inProcessFetch(app), logger });
 
   server.on('error', (error: unknown) => {
     console.error('Failed to start server:', error instanceof Error ? error.message : error);
