@@ -114,6 +114,10 @@ describe('classifyExecCommand', () => {
       ['python3 -mpytest -q', '-m glued to pytest'],
       ['python3 -m unittest discover', '-m unittest'],
       ['cd proj && python3 -m pytest', '-m pytest after cd'],
+      // The project environment the sandbox instructions describe.
+      ['python3 -m venv --system-site-packages .venv', '-m venv with the system site-packages'],
+      ['.venv/bin/python -m pip install mcp ytmusicapi', "the project environment's pip"],
+      ['.venv/bin/python -m pytest -q', "the project environment's pytest"],
     ];
     for (const [command, label] of cases) {
       it(`allows: ${label}`, () => {

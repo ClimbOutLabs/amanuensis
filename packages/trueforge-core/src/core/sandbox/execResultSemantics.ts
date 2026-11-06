@@ -1,3 +1,4 @@
+import { PYTHON_PROJECT_ENVIRONMENT_RULE } from './packageMirrors';
 import { parseSimpleShellCommand, type SimpleShellCommand } from './simpleShellCommand';
 
 /**
@@ -31,7 +32,7 @@ export interface ExecResultShape {
   exit_code: number;
   error_summary: string | null;
   success: boolean;
-  /** Set only when status is "exited": explains why no "ok" verdict was made. */
+  /** Why no "ok" verdict was made, why exit 1 means no matches, or what to do after a known refusal. */
   note: string | null;
 }
 
@@ -43,6 +44,11 @@ export const EXITED_NOTE =
  * search commands in {@link SEARCH_COMMAND_NAMES}, not to `diff`, whose exit 1 means something
  * else (differences found) and is already unambiguous from its own output. */
 export const NO_MATCHES_NOTE = 'No matches found. Exit code 1 is normal for this command and is not a failure.';
+
+/** pip's refusal to install into a Python the operating system manages (PEP 668). */
+const EXTERNALLY_MANAGED_ERROR = 'externally-managed-environment';
+
+export const EXTERNALLY_MANAGED_NOTE = `pip refused to install into the system Python. ${PYTHON_PROJECT_ENVIRONMENT_RULE}`;
 
 /**
  * Table of bare command names where exit 1 means "no matches" or
@@ -171,7 +177,14 @@ export function buildExecResultShape(
 
   const status = classifyExecStatus(command, exitCode);
   const errorSummary = exitCode === 0 ? null : extractErrorSummary(output);
-  const note = status === 'exited' ? EXITED_NOTE : isSearchCommandNoMatches(command, exitCode) ? NO_MATCHES_NOTE : null;
+  const note =
+    exitCode !== 0 && output.includes(EXTERNALLY_MANAGED_ERROR)
+      ? EXTERNALLY_MANAGED_NOTE
+      : status === 'exited'
+        ? EXITED_NOTE
+        : isSearchCommandNoMatches(command, exitCode)
+          ? NO_MATCHES_NOTE
+          : null;
 
   return {
     status,

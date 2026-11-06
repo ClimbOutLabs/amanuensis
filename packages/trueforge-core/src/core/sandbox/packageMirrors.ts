@@ -498,6 +498,14 @@ export const PACKAGE_UNAVAILABLE_RULE =
   'say that plainly instead of retrying, and do not try another tool to get around it.';
 
 /**
+ * How a Python project gets packages the image lacks. The system Python refuses installs, and a
+ * venv that sees the system site-packages keeps the preinstalled tools while installing the rest.
+ * The interpreter runs pip and pytest as modules because exec refuses scripts with a python shebang.
+ */
+export const PYTHON_PROJECT_ENVIRONMENT_RULE =
+  'For a Python project, make an environment inside the project folder with exec: `python3 -m venv --system-site-packages .venv`, then install with `.venv/bin/python -m pip install <package>` and run tests with `.venv/bin/python -m pytest`. The system Python does not accept installs, so never use --break-system-packages or --user.';
+
+/**
  * Whether a command would make a package tool download packages: installs, and the build and test
  * commands that fetch dependencies first. Only these commands get the git-address check, because only
  * they would try to fetch the dependency.
