@@ -288,6 +288,7 @@ export function runNoticingStoreContractSuite(getStore: () => INoticingStore): v
       checked_at: new Date('2026-11-05T10:00:00.000Z'),
       failure: { kind: 'too_slow' as const, since: new Date('2026-11-05T09:00:00.000Z') },
       stuck: { message_id: 'm7', passes: 2, since: new Date('2026-11-05T09:00:00.000Z') },
+      handled: ['m1', 'm2'],
       window_ms: 30_000,
       source: 'email_connector' as const,
     };

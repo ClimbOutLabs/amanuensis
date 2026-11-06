@@ -85,7 +85,15 @@ export interface MailFindings {
   window_ms: number | undefined;
   /** The pass ran out of time or calls before it read to the end of its window. */
   timed_out: boolean;
+  /**
+   * Messages of the window the next pass starts at again that this pass read or passed over, for a source that cannot
+   * resume at a message. The next pass does not read them again.
+   */
+  handled: string[] | undefined;
 }
+
+/** Most handled messages remembered. Any left out are read again, which stable ids absorb. */
+const MOST_HANDLED_REMEMBERED = 300;
 
 /** A window this short that still holds more than one pass reads is read whole, up to this many messages. */
 export const SHORTEST_WINDOW_MS = 4000;
@@ -440,12 +448,15 @@ export async function watchMail({
   out_of_time,
   max_width,
   assistant,
+  handled,
 }: {
   source: MailSource;
   settings: ReachSettings;
   since: Date;
   now: Date;
   logger: Pick<Logger, 'warn'>;
+  /** Messages of this window an earlier pass already handled, when the source cannot resume at a message. */
+  handled: readonly string[] | undefined;
   /** The message or stretch of mail the last pass stopped at, when it did. */
   stuck: StuckMessage | undefined;
   /** Whether the pass has used the time or calls it has, so it stops cleanly before its connection ends. */
@@ -480,6 +491,7 @@ export async function watchMail({
       stopped_by: { error: window.list_failed.error },
       window_ms: max_width,
       timed_out: false,
+      handled: source.datesAreArrival ? undefined : handled?.slice(),
     };
   }
   const findings = {
@@ -495,6 +507,7 @@ export async function watchMail({
       stopped_by: undefined,
       window_ms: narrower(window.before) ?? max_width,
       timed_out: true,
+      handled: source.datesAreArrival ? undefined : handled?.slice(),
     };
   }
   const { messages } = window;
@@ -559,7 +572,13 @@ export async function watchMail({
     state.held = { failed: stuckFor({ message_id: message.id, passes }), error };
   };
 
+  const alreadyHandled = new Set(source.datesAreArrival ? [] : (handled ?? []));
+  const done = new Set<string>();
   for (const message of messages) {
+    if (alreadyHandled.has(message.id)) {
+      done.add(message.id);
+      continue;
+    }
     if (out_of_time()) {
       state.open ??= message;
       state.timedOut = true;
@@ -574,6 +593,7 @@ export async function watchMail({
     if ('found' in result) {
       findings.raise.push(...result.found.raise);
       findings.track.push(...result.found.track);
+      done.add(message.id);
       state.carried = state.carried?.message_id === message.id ? undefined : state.carried;
       if (result.found.served && state.unconfirmed !== undefined) {
         // A read worked after the failure, so the failing message is tried once more. Only a failure that
@@ -588,9 +608,11 @@ export async function watchMail({
         if ('found' in again) {
           findings.raise.push(...again.found.raise);
           findings.track.push(...again.found.track);
+          done.add(failed.message.id);
           state.carried = state.carried?.message_id === failed.message.id ? undefined : state.carried;
           state.open = state.open === failed.message ? undefined : state.open;
         } else if (again.error instanceof MessageUnreadableError) {
+          done.add(failed.message.id);
           logger.warn('Passed over a mail that could not be read', {
             message_id: failed.message.id,
             error: loggedError(again.error),
@@ -599,11 +621,15 @@ export async function watchMail({
           state.open = state.open === failed.message ? undefined : state.open;
         } else {
           settle({ message: failed.message, error: again.error });
+          if (state.held?.failed.message_id !== failed.message.id) {
+            done.add(failed.message.id);
+          }
         }
       }
       continue;
     }
     if (result.error instanceof MessageUnreadableError) {
+      done.add(message.id);
       logger.warn('Passed over a mail that could not be read', {
         message_id: message.id,
         error: loggedError(result.error),
@@ -669,6 +695,10 @@ export async function watchMail({
     stopped_by: stopped,
     window_ms,
     timed_out,
+    handled:
+      source.datesAreArrival || resume_from?.getTime() !== since.getTime() || done.size === 0
+        ? undefined
+        : [...done].slice(-MOST_HANDLED_REMEMBERED),
   };
 }
 

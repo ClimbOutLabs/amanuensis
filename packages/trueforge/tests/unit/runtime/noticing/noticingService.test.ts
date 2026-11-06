@@ -1570,6 +1570,34 @@ describe('mail trouble follows how far behind the checkpoint is', () => {
       },
     },
     {
+      name: 'IMAP reads that fail every other time',
+      hours: 30,
+      until: 1000,
+      loses_nothing: true,
+      arrange: ({ mailSource }) => {
+        mailSource.datesAreArrival = false;
+        let reads = 0;
+        jest.spyOn(mailSource, 'readText').mockImplementation(() => {
+          reads += 1;
+          return reads % 2 === 0 ? Promise.reject(plain()) : Promise.resolve('Amount due by November 7');
+        });
+      },
+    },
+    {
+      name: 'IMAP reads where two in three fail',
+      hours: 30,
+      until: 1000,
+      loses_nothing: false,
+      arrange: ({ mailSource }) => {
+        mailSource.datesAreArrival = false;
+        let reads = 0;
+        jest.spyOn(mailSource, 'readText').mockImplementation(() => {
+          reads += 1;
+          return reads % 3 === 0 ? Promise.resolve('Amount due by November 7') : Promise.reject(plain());
+        });
+      },
+    },
+    {
       name: 'one message that never reads',
       hours: 26,
       until: 1000,
@@ -1898,6 +1926,28 @@ describe('mail trouble follows how far behind the checkpoint is', () => {
     const notes = (await feed()).filter(item => item.text.includes('could not read some mail'));
     expect(notes).toHaveLength(1);
     expect((await checkpoint(store))?.stuck).toBeUndefined();
+  });
+
+  it('remembers on IMAP what a pass that ran out of time already read, so no pass reads it again', async () => {
+    const { service, store, mailSource, clock } = await setup({ messages: bills });
+    mailSource.datesAreArrival = false;
+    const reads: string[] = [];
+    jest.spyOn(mailSource, 'readText').mockImplementation(message => {
+      reads.push(message.id);
+      clock.now = new Date(clock.now.getTime() + 100_000);
+      return Promise.resolve('Amount due by November 7');
+    });
+    await service.run({ watcher: 'mail' });
+    const first = await checkpoint(store);
+    expect(first?.handled).toEqual(['m1']);
+    expect(first?.checked_at.getTime()).toBeLessThan(NOW.getTime());
+    for (let pass = 1; pass <= 6; pass += 1) {
+      clock.now = new Date(NOW.getTime() + pass * 10 * 60_000);
+      await service.run({ watcher: 'mail' });
+    }
+    expect(new Set(reads).size).toBe(reads.length);
+    expect(reads.sort()).toEqual(['m1', 'm2', 'm3', 'm4']);
+    expect((await checkpoint(store))?.handled).toBeUndefined();
   });
 
   it('records where mail is read from', async () => {

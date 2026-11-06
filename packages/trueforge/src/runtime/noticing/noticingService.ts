@@ -475,6 +475,7 @@ export function createNoticingService(deps: NoticingDeps): NoticingService {
         now: at,
         logger,
         stuck: checkpoint?.stuck,
+        handled: checkpoint?.handled,
         out_of_time: budget.spent,
         max_width: checkpoint?.window_ms,
         assistant,
@@ -510,6 +511,7 @@ export function createNoticingService(deps: NoticingDeps): NoticingService {
           ? undefined
           : mailFailure({ checkpoint, error: findings.stopped_by?.error, timed_out: findings.timed_out, at }),
       stuck: findings.stuck,
+      handled: findings.handled,
       window_ms: findings.window_ms === undefined ? undefined : Math.min(findings.window_ms, MAX_LOOKBACK_MS),
       source: kind,
     });
@@ -567,6 +569,7 @@ export function createNoticingService(deps: NoticingDeps): NoticingService {
       checked_at: checkpoint?.checked_at ?? fallback,
       failure: mailFailure({ checkpoint, error, timed_out: false, at }),
       stuck: checkpoint?.stuck,
+      handled: checkpoint?.handled,
       window_ms: checkpoint?.window_ms,
       source,
     });
@@ -583,6 +586,7 @@ export function createNoticingService(deps: NoticingDeps): NoticingService {
         checked_at: now(),
         failure: undefined,
         stuck: undefined,
+        handled: undefined,
         window_ms: undefined,
         source: undefined,
       });

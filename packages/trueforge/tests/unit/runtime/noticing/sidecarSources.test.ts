@@ -286,6 +286,7 @@ describe('sidecar mail source (IMAP)', () => {
         stuck: undefined,
         out_of_time: () => false,
         assistant: 'Mira',
+        handled: undefined,
         max_width: undefined,
       });
       expect(found.track.map(event => event.id)).toEqual(['bill_due:7']);
@@ -420,6 +421,7 @@ describe('sidecar mail source (IMAP)', () => {
         stuck: undefined,
         out_of_time: () => false,
         assistant: 'Mira',
+        handled: undefined,
         max_width: undefined,
       });
       // The one message the connector cannot list is told about in a fixed note.
@@ -480,6 +482,7 @@ describe('sidecar mail source (IMAP)', () => {
         stuck: undefined,
         out_of_time: () => false,
         assistant: 'Mira',
+        handled: undefined,
         max_width: undefined,
       });
       expect(found.raise.map(event => event.id)).toEqual([
@@ -618,6 +621,7 @@ describe('sidecar mail source (IMAP)', () => {
       stuck: undefined,
       out_of_time: () => false,
       assistant: 'Mira',
+      handled: undefined,
       max_width: undefined,
     });
     expect(found.raise.map(event => [event.kind, event.evidence])).toEqual([['bill_due', 'content']]);
