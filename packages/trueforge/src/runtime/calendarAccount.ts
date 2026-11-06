@@ -4,6 +4,7 @@
  * its plain lines, and how a save request is resolved against the presets.
  */
 import {
+  CALDAV_GOOGLE_PROVIDER_KEY,
   CALDAV_OTHER_NEEDS_ADDRESS_MESSAGE,
   CALDAV_OTHER_PROVIDER_KEY,
   caldavEmailProblem,
@@ -13,7 +14,7 @@ import {
   caldavProviderPreset,
   caldavUrlProblem,
   caldavUserProblem,
-  GOOGLE_ADDRESS_MESSAGE,
+  GMAIL_NEEDS_GOOGLE_PROVIDER_MESSAGE,
   isGoogleMailAddress,
 } from '@truefoundry/trueforge-core/core/calendar/caldav/presets';
 import type { Logger } from 'winston';
@@ -41,7 +42,7 @@ export const CALENDAR_SERVER_UNREACHABLE_MESSAGE =
 export const CALENDAR_CERTIFICATE_MESSAGE =
   "That calendar server's security certificate was not accepted. Use the address your provider gives you and try again.";
 export const CALENDAR_REDIRECT_MESSAGE =
-  'That calendar address sends you to a different server. Use the address your provider gives you and try again.';
+  'That calendar address sends you on to another address. Use the exact address your provider gives you and try again.';
 export const CALENDAR_ADDRESS_NOT_ALLOWED_MESSAGE =
   'That calendar address cannot be used here. Use the address your provider gives you.';
 export const CALENDAR_DETAILS_UNUSABLE_MESSAGE =
@@ -147,8 +148,8 @@ function resolveCalendarAccountSave(
   if (emailProblem !== null) {
     return { ok: false, message: emailProblem };
   }
-  if (isGoogleMailAddress(request.email)) {
-    return { ok: false, message: GOOGLE_ADDRESS_MESSAGE };
+  if (isGoogleMailAddress(request.email) && request.provider_key !== CALDAV_GOOGLE_PROVIDER_KEY) {
+    return { ok: false, message: GMAIL_NEEDS_GOOGLE_PROVIDER_MESSAGE };
   }
   if (caldavProviderPreset(request.provider_key) === undefined) {
     return { ok: false, message: 'That calendar provider is not on the list. Pick one and try again.' };

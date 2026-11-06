@@ -3,6 +3,6 @@
   // AgentPassthroughEventSchemaMap, which widens SessionEventItem and breaks the
   // route handler types of any server source pulled in alongside it.
   "extends": "../../tsconfig.json",
-  "include": ["**/*"],
+  "include": ["**/*", "../../src/swaggerUiDist.d.ts"],
   "exclude": ["**/*.contract.test.ts"]
 }

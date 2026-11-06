@@ -105,6 +105,8 @@ function toolCallMemoSnapshot(overrides: Partial<ToolCallMemoSnapshot> = {}): To
     write_calls_this_turn: 0,
     successful_writes_this_turn: 0,
     changes_this_turn: 0,
+    browser_page_changes_this_turn: 0,
+    browser_pages_seen: [],
     step_kinds_this_turn: [],
     step_texts_this_turn: [],
     last_call_signature: undefined,
