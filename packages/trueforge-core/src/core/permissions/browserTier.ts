@@ -13,6 +13,7 @@
  * on); otherwise it is Tier 1, the same as following a link or opening a tab.
  */
 import type { BrowserClickReview } from '../llm/LLMTypes';
+import { stableStringify } from './approvalTokens';
 import {
   BROWSER_CLICK_TOOL_NAME,
   BROWSER_COMMIT_REASON,
@@ -124,6 +125,53 @@ export function classifyBrowserClickKind(input: {
 
 function shown(text: string): string {
   return escapeDisplayText(text).replace(/"/g, '\\"');
+}
+
+/**
+ * The identity of the click an approval covers: the site, the element's label, whether it
+ * submits, and the form's values. That is everything the commit card shows about the target,
+ * and it is what the approval token binds and the held-replay check compares, so an approval
+ * given for one element cannot run a different one that later takes its place on the page.
+ */
+export interface BrowserClickBinding {
+  site: string;
+  accessible_name: string;
+  is_form_submit: boolean;
+  form_values: Record<string, string>;
+}
+
+export function browserClickBinding(review: BrowserClickReview): BrowserClickBinding {
+  return {
+    site: review.site,
+    accessible_name: review.accessible_name,
+    is_form_submit: review.is_form_submit,
+    form_values: review.form_values,
+  };
+}
+
+/** The params an approval token for a click is minted and verified over: the call's own params plus the click's binding. */
+export function browserClickTokenParams(input: {
+  params: Record<string, unknown>;
+  review: BrowserClickReview;
+}): Record<string, unknown> {
+  return { ...input.params, browser_click: browserClickBinding(input.review) };
+}
+
+/** Whether two page reads describe the same click target; a missing read never matches a present one. */
+export function sameBrowserClickTarget(input: {
+  held: BrowserClickReview | undefined;
+  fresh: BrowserClickReview | undefined;
+}): boolean {
+  const { held, fresh } = input;
+  if (held === undefined || fresh === undefined) {
+    return held === fresh;
+  }
+  return (
+    held.site === fresh.site &&
+    held.accessible_name === fresh.accessible_name &&
+    held.is_form_submit === fresh.is_form_submit &&
+    stableStringify(held.form_values) === stableStringify(fresh.form_values)
+  );
 }
 
 /** The approval card for a commit click: the button's label, the site, and the form's values. */

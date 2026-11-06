@@ -9,6 +9,7 @@ import { InvalidAgentSendInputError } from '../errors';
 import type { InternalEnrichedAssistantMessage, InternalEnrichedToolCall, InternalToolCallInfo } from '../llm/LLMTypes';
 import { gitRemotesMatch } from '../sandbox/gitRemoteObservation';
 import { approvalTokenExpiry, type ApprovalTokenScope, type ApprovalTokenStore } from './approvalTokens';
+import { sameBrowserClickTarget } from './browserTier';
 import type { Tier3Card } from './tier';
 
 /** Most actions one chat holds; past this a call is refused instead of queued. */
@@ -208,6 +209,12 @@ export async function checkHeldReplay(input: {
   const heldCard = held.tier3_card ?? undefined;
   const freshCard = fresh.tier3_card ?? undefined;
   if (heldCard !== undefined && freshCard !== undefined && !sameCardTargets(heldCard, freshCard)) {
+    return { ok: false, reason: 'changed' };
+  }
+  // A browser commit click runs only against the element its card named. The fresh call's
+  // review is read from the live page again, so a swapped element (a different label, or one
+  // that no longer submits) or a review that could not be read at all refuses the replay.
+  if (!sameBrowserClickTarget({ held: held.browser_click, fresh: fresh.browser_click })) {
     return { ok: false, reason: 'changed' };
   }
   // A fresh call that no longer asks (a standing grant was added meanwhile) runs without the token.

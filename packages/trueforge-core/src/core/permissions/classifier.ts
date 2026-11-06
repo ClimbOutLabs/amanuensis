@@ -65,7 +65,12 @@ import {
   type ShellApprovalBinding,
 } from './approvalTokens';
 import { recordClassificationAudit } from './audit';
-import { browserOpenCard, classifyBrowserActionTool, classifyBrowserViewTool } from './browserTier';
+import {
+  browserClickTokenParams,
+  browserOpenCard,
+  classifyBrowserActionTool,
+  classifyBrowserViewTool,
+} from './browserTier';
 import {
   BROWSER_OPEN_GUARD_REASON,
   BROWSER_OPEN_PRIVATE_DETAIL_REASON,
@@ -3668,7 +3673,17 @@ export async function classifyTier(action: SentinelAction, ctx: ClassifyContext)
     }
     const browserAction = await classifyBrowserActionTool({
       action,
-      mintToken: () => mintPlainToken({ ctx, tool_name: action.tool_name, params: action.canonical_params }),
+      // A click's token binds the element the card names, not just the click's ref: the page
+      // can put a different element at the same ref while the card waits for an answer.
+      mintToken: () =>
+        mintPlainToken({
+          ctx,
+          tool_name: action.tool_name,
+          params:
+            action.browser_click === undefined
+              ? action.canonical_params
+              : browserClickTokenParams({ params: action.canonical_params, review: action.browser_click }),
+        }),
     });
     if (browserAction !== undefined) {
       return steeringChecked({ decision: browserAction, ctx, guests: [] });

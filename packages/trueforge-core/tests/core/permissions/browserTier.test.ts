@@ -1,7 +1,9 @@
 import type { BrowserClickReview } from '../../../src/core/llm/LLMTypes';
+import { actionIdFor, verifyApprovalToken } from '../../../src/core/permissions/approvalTokens';
 import {
   BROWSER_CANCEL_QUALIFIERS,
   BROWSER_COMMIT_WORDS,
+  browserClickTokenParams,
   classifyBrowserClickKind,
   matchesCommitWord,
 } from '../../../src/core/permissions/browserTier';
@@ -12,6 +14,7 @@ import {
 } from '../../../src/core/permissions/browserToolNames';
 import { classifyTier, type ClassifyContext, type SentinelAction } from '../../../src/core/permissions/classifier';
 import { defaultSentinelServices } from '../../../src/core/permissions/context';
+import { verifyPreDispatch } from '../../../src/core/permissions/dispatch';
 import { createWebSearchTurnState } from '../../../src/core/permissions/webSearch';
 
 function makeCtx(): ClassifyContext {
@@ -247,5 +250,93 @@ describe('classifyTier: browser_click', () => {
   it('fails closed to the generic Tier 3 path when the host could not read the click context', async () => {
     const decision = await classifyTier(browserAction(BROWSER_CLICK_TOOL_NAME), makeCtx());
     expect(decision.tier).toBe(3);
+  });
+});
+
+describe('classifyTier: a commit click approval is bound to the element the card names', () => {
+  const shown = clickReview({
+    accessible_name: 'Pay now',
+    is_form_submit: true,
+    site: 'shop.example',
+    form_values: { card_last4: '4242' },
+  });
+  const params = { ref: 'e5' };
+
+  async function classifyShown(ctx: ClassifyContext) {
+    return classifyTier(
+      browserAction(BROWSER_CLICK_TOOL_NAME, { canonical_params: params, browser_click: shown }),
+      ctx,
+    );
+  }
+
+  it('mints a token that verifies only against the shown element, not the ref alone or another element', async () => {
+    const ctx = makeCtx();
+    const decision = await classifyShown(ctx);
+    expect(decision.tier).toBe(3);
+    const tokenId = decision.approval_token_id;
+    if (tokenId === null) {
+      throw new Error('expected an approval token');
+    }
+    const token = await ctx.services.token_store.peek({ tenant_id: 't1', created_by: 'u1', token_id: tokenId });
+    if (token === undefined) {
+      throw new Error('expected the minted token to be stored');
+    }
+    const boundParams = browserClickTokenParams({ params, review: shown });
+    expect(
+      verifyApprovalToken({
+        token,
+        action_id: actionIdFor({ tool_name: BROWSER_CLICK_TOOL_NAME, canonical_params: boundParams }),
+        canonical_params: boundParams,
+      }),
+    ).toEqual({ valid: true });
+
+    const otherLabel = browserClickTokenParams({ params, review: { ...shown, accessible_name: 'Delete account' } });
+    expect(
+      verifyApprovalToken({
+        token,
+        action_id: actionIdFor({ tool_name: BROWSER_CLICK_TOOL_NAME, canonical_params: otherLabel }),
+        canonical_params: otherLabel,
+      }).valid,
+    ).toBe(false);
+
+    const noLongerSubmits = browserClickTokenParams({ params, review: { ...shown, is_form_submit: false } });
+    expect(
+      verifyApprovalToken({
+        token,
+        action_id: actionIdFor({ tool_name: BROWSER_CLICK_TOOL_NAME, canonical_params: noLongerSubmits }),
+        canonical_params: noLongerSubmits,
+      }).valid,
+    ).toBe(false);
+
+    expect(
+      verifyApprovalToken({
+        token,
+        action_id: actionIdFor({ tool_name: BROWSER_CLICK_TOOL_NAME, canonical_params: params }),
+        canonical_params: params,
+      }).valid,
+    ).toBe(false);
+  });
+
+  it('dispatch runs the approved click only while the stamped review is the shown element', async () => {
+    const ctx = makeCtx();
+    async function dispatchWith(review: BrowserClickReview): Promise<string | undefined> {
+      const decision = await classifyShown(ctx);
+      return verifyPreDispatch({
+        call: {
+          tool_name: BROWSER_CLICK_TOOL_NAME,
+          tool_type: 'truefoundry-system',
+          canonical_params: params,
+          tier: 3,
+          approval_token_id: decision.approval_token_id,
+          approval_binding: null,
+          shell_binding: null,
+          browser_click: review,
+        },
+        ctx: { ...ctx, offline: false },
+      });
+    }
+    await expect(dispatchWith(shown)).resolves.toBeUndefined();
+    await expect(dispatchWith({ ...shown, accessible_name: 'Delete account' })).resolves.toContain('Approval invalid');
+    await expect(dispatchWith({ ...shown, is_form_submit: false })).resolves.toContain('Approval invalid');
   });
 });
