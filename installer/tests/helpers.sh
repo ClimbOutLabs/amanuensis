@@ -195,7 +195,8 @@ repo_commit_change() {
   )
 }
 
-# The environment every installer run gets: nothing from the caller except the stub switches.
+# The environment every installer run gets: nothing from the caller except the stub switches. The sandbox disks
+# live in the test sandbox, so this computer's own /var/lib/aman-slots never decides what a test sees.
 build_run_env() {
   RUN_ENV=(PATH="$SB_BIN" HOME="$SB/user" AMAN_HOME="$AMAN_HOME" AMAN_REPO_ROOT="$REPO" GIT_CONFIG_NOSYSTEM=1
     AMAN_OS_RELEASE="${AMAN_OS_RELEASE:-$SB/os-release}" AMAN_DMI_DIR="${AMAN_DMI_DIR:-$SB/no-dmi}"
@@ -216,7 +217,7 @@ build_run_env() {
     STUB_DOCTOR_EXIT="${STUB_DOCTOR_EXIT:-}" STUB_DOCTOR_JSON="${STUB_DOCTOR_JSON:-}" STUB_DOCKER_ROOT="${STUB_DOCKER_ROOT:-}" STUB_DOCKER_ROOT_KB="${STUB_DOCKER_ROOT_KB:-}"
     STUB_CALENDAR_REFUSES="${STUB_CALENDAR_REFUSES:-}" STUB_CALENDAR_CHECK="${STUB_CALENDAR_CHECK:-}"
     STUB_UI_SH="$INSTALLER_DIR/lib/ui.sh" STUB_REAL_NODE="$STUB_REAL_NODE" STUB_PKI_FAIL="${STUB_PKI_FAIL:-}" STUB_PUSH_KEYS_FAIL="${STUB_PUSH_KEYS_FAIL:-}"
-    AMAN_CADDY_ETC="$SB/etc-caddy" AMAN_SYS_NET="$SB/sysnet" AMAN_EDGE_WAIT_TRIES=1 ${RUN_ENV_EXTRA[@]+"${RUN_ENV_EXTRA[@]}"}
+    AMAN_SLOT_DISK_ROOT="$SB/aman-slots" AMAN_CADDY_ETC="$SB/etc-caddy" AMAN_SYS_NET="$SB/sysnet" AMAN_EDGE_WAIT_TRIES=1 ${RUN_ENV_EXTRA[@]+"${RUN_ENV_EXTRA[@]}"}
     ${AMAN_PASSWORD+AMAN_PASSWORD="$AMAN_PASSWORD"})
 }
 
