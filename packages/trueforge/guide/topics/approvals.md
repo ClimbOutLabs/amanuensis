@@ -32,3 +32,5 @@ If the mail goes to an address that is not on your Email list, the buttons are *
 To take back an always allowed tool, click **More**, then **Settings**, then **Connectors**. Open the connector and stop allowing the tool.
 
 Some cards say "Part of this is not shown in full. Check it before you approve." Open the card to read all of it.
+
+In voice mode, Aman reads an email, calendar or schedule card out loud and waits for you to say exactly "yes, send it", "yes, approve" or "yes, cancel it", or "no". Anything else leaves the card waiting. Cards for shell commands, payments, new addresses and similar are always left on the screen.

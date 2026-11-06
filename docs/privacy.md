@@ -17,7 +17,7 @@ If you use a hosted model, the company running it sees each chat: your messages,
 
 ## What stays on your machine
 
-- Voice input and voice mode. Speech is turned into text by a small model running on your computer, and replies are read aloud by a voice running on your computer. Nothing you say is saved except the message in your chat. The small speech-detection model it needs ships inside the Aman image. See [Voice input](/voice-input).
+- Voice input and voice mode. Speech is turned into text by a small model running on your computer, and replies are read aloud by a voice running on your computer. Nothing you say is saved except the message in your chat. The small speech-detection model it needs ships inside the Aman image. Voice mode ends by itself after 2 minutes without you speaking, and after 30 minutes in any case, so a forgotten tab does not keep the microphone open. See [Voice input](/voice-input).
 - Memory search. Aman finds related memories with a small model running on your computer.
 - Backups. They are written to a folder on your computer; see [Backups](/backup).
 
