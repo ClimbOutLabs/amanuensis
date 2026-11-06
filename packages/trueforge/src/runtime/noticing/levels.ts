@@ -1,5 +1,5 @@
 import type { DeliveryLevel } from '../../schemas/deliveries';
-import type { NoticingEvent, NoticingEvidence, NoticingKind } from '../../schemas/reach';
+import type { NoticingEvidence, NoticingKind } from '../../schemas/reach';
 
 const RANK: Record<DeliveryLevel, number> = { note: 0, nudge: 1, call: 2 };
 
@@ -25,6 +25,11 @@ export function evidenceCeiling(evidence: NoticingEvidence): DeliveryLevel {
   return evidence === 'content' ? 'note' : 'call';
 }
 
+/** The most an event can reach given its kind and its evidence, before the person's own rules. */
+export function ceilingOf({ kind, evidence }: { kind: NoticingKind; evidence: NoticingEvidence }): DeliveryLevel {
+  return lowerOf(KIND_MAX_LEVEL[kind], evidenceCeiling(evidence));
+}
+
 /** Each kind in plain words, for the sentences a person reads about it. */
 export const KIND_WORDS: Record<NoticingKind, string> = {
   mail_always: 'mail from someone you marked always important',
@@ -33,8 +38,3 @@ export const KIND_WORDS: Record<NoticingKind, string> = {
   bill_due: 'a bill or deadline coming up',
   approval_waiting: 'an approval waiting for you',
 };
-
-/** The highest level an event record can reach. A reminder is the person's own and may call when they allow it. */
-export function maxLevelOf(kind: NoticingEvent['kind']): DeliveryLevel {
-  return kind === 'reminder' ? 'call' : KIND_MAX_LEVEL[kind];
-}

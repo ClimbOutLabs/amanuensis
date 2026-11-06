@@ -1,4 +1,4 @@
-import { instanceOwnerSubjectId } from '../../../src/runtime/instanceOwner';
+import { instanceOwnerSubjectId, oidcOwnerSubjectId } from '../../../src/runtime/instanceOwner';
 
 const DEFAULT_ID = 'trueforge-default';
 
@@ -27,5 +27,17 @@ describe('instanceOwnerSubjectId', () => {
     expect(of('email', ['a@example.com', 'b@example.com'])).toBeUndefined();
     expect(of('email', ['*@example.com'])).toBeUndefined();
     expect(of('sub', ['a@example.com'])).toBeUndefined();
+  });
+});
+
+describe('oidcOwnerSubjectId', () => {
+  it('is the one allowed address when people are told apart by email, and no one otherwise', () => {
+    expect(oidcOwnerSubjectId({ OIDC_USER_REFERENCE_CLAIM: 'email', OIDC_ALLOWED_EMAILS: ['owner@example.com'] })).toBe(
+      'owner@example.com',
+    );
+    expect(oidcOwnerSubjectId({ OIDC_USER_REFERENCE_CLAIM: 'email', OIDC_ALLOWED_EMAILS: ['*@example.com'] })).toBe(
+      undefined,
+    );
+    expect(oidcOwnerSubjectId(undefined)).toBeUndefined();
   });
 });

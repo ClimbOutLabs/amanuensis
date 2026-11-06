@@ -10,8 +10,14 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-function renderPreferences() {
+function renderPreferences({ callsReady = false }: { callsReady?: boolean } = {}) {
   const server = fakeServer([]);
+  if (callsReady) {
+    server.state.reach = {
+      ...server.state.reach,
+      availability: { ...server.state.reach.availability, calls: { available: true, note: 'Calls are on.' } },
+    };
+  }
   render(<ReachPreferences reach={server.api.reach} />);
   return server;
 }
@@ -31,8 +37,20 @@ describe('Settings, Reach me preferences', () => {
     expect(screen.getByRole('button', { name: 'Try calls' })).toHaveProperty('disabled', true);
   });
 
-  it('starts with nothing ticked for calls, and offers the tick only for kinds that can call', async () => {
+  it('hides what only matters for calls until phone calls are set up, and says so', async () => {
     renderPreferences();
+    expect(await screen.findByText('Call settings appear here once phone calls are set up.')).toBeTruthy();
+    expect(screen.queryByRole('checkbox', { name: /Time to leave/ })).toBeNull();
+    expect(screen.queryByRole('checkbox', { name: 'Call me for reminders I mark urgent' })).toBeNull();
+    expect(screen.queryByRole('checkbox', { name: 'Hold calls back during quiet hours' })).toBeNull();
+    expect(screen.queryByLabelText('Fewest hours between two calls')).toBeNull();
+    // What applies to nudges and notes stays.
+    expect(screen.getByLabelText('Most nudges in one day')).toBeTruthy();
+    expect(screen.getByLabelText('Time zone')).toBeTruthy();
+  });
+
+  it('starts with nothing ticked for calls, and offers the tick only for kinds that can call', async () => {
+    renderPreferences({ callsReady: true });
     await screen.findByRole('checkbox', { name: /Texts/ });
     expect(screen.getByRole('checkbox', { name: /Mail from someone on your always-important list/ })).toHaveProperty(
       'checked',
@@ -49,7 +67,7 @@ describe('Settings, Reach me preferences', () => {
   });
 
   it('saves a ticked kind, an added sender and the urgent-reminder tick', async () => {
-    const { api } = renderPreferences();
+    const { api } = renderPreferences({ callsReady: true });
     fireEvent.click(await screen.findByRole('checkbox', { name: /Time to leave/ }));
     fireEvent.click(screen.getByRole('checkbox', { name: 'Call me for reminders I mark urgent' }));
     fireEvent.change(screen.getByLabelText('Email address'), { target: { value: 'Dana@Example.com' } });
@@ -112,7 +130,7 @@ describe('Settings, Reach me preferences', () => {
   });
 
   it('turns quiet hours and limits into saved values', async () => {
-    const { api } = renderPreferences();
+    const { api } = renderPreferences({ callsReady: true });
     fireEvent.click(await screen.findByRole('checkbox', { name: 'Hold calls back during quiet hours' }));
     fireEvent.change(screen.getByLabelText('Most nudges in one day'), { target: { value: '3' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
@@ -130,6 +148,22 @@ describe('Settings, Reach me preferences', () => {
     vi.mocked(server.api.reach.get).mockRejectedValueOnce(new Error('The server is away.'));
     render(<ReachPreferences reach={server.api.reach} />);
     expect((await screen.findByRole('alert')).textContent).toBe('The server is away.');
+  });
+
+  it('says what to do next when loading fails with no message of its own', async () => {
+    const server = fakeServer([]);
+    vi.mocked(server.api.reach.get).mockRejectedValueOnce('offline');
+    render(<ReachPreferences reach={server.api.reach} />);
+    expect((await screen.findByRole('alert')).textContent).toBe(
+      'Your Reach me settings could not be loaded. Reload the page.',
+    );
+  });
+
+  it('says to try again later when a test fails with no message of its own', async () => {
+    const { api } = renderPreferences();
+    vi.mocked(api.reach.test).mockRejectedValueOnce('offline');
+    fireEvent.click(await screen.findByRole('button', { name: 'Try push' }));
+    expect(await screen.findByText('That test did not go through. Try again in a minute.')).toBeTruthy();
   });
 
   describe('texts, once the server has a text provider', () => {

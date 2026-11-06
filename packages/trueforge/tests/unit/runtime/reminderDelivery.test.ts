@@ -104,13 +104,20 @@ async function setup(channels: ReachChannels = NO_PHONE_CHANNELS) {
     logger: winston.createLogger({ silent: true }),
   });
   const reachSettings = new ReachSettingsStore(db);
-  const reach = createReminderReach({ reachSettings, store: new NoticingStore(db), channels: () => channels });
+  const noticingStore = new NoticingStore(db);
+  const reach = createReminderReach({
+    reachSettings,
+    store: noticingStore,
+    history: deliveryStore,
+    channels: () => channels,
+    logger: winston.createLogger({ silent: true }),
+  });
   const deliver = (item: ScheduleDispatchItem, now: Date) =>
     deliverReminder({ item, sessions, sessionStore, agentStore, now, deliveries, reach }).then(
       delivered => delivered.session_id,
     );
 
-  return { sessionStore, dueReminder, deliver, auditRecords, deliveryStore, pushed, reachSettings, db };
+  return { sessionStore, dueReminder, deliver, auditRecords, deliveryStore, pushed, reachSettings, noticingStore, db };
 }
 
 describe('deliverReminder and Reach me', () => {
@@ -123,7 +130,7 @@ describe('deliverReminder and Reach me', () => {
     quiet_hours: { enabled: false, start: '21:00', end: '08:00' },
   };
 
-  it('delivers an urgent reminder as a nudge with the reason while no phone channel is set up, and counts it as a call', async () => {
+  it('delivers an urgent reminder as a nudge with the reason while no phone channel is set up', async () => {
     const { dueReminder, deliver, deliveryStore, reachSettings } = await setup(NO_PHONE_CHANNELS);
     await reachSettings.put({ ...owner, settings: calling });
     const item = await dueReminder({
@@ -185,6 +192,52 @@ describe('deliverReminder and Reach me', () => {
     );
     const levels = (await deliveryStore.list({ ...owner, limit: 10 })).deliveries.map(item => item.level);
     expect(levels).toEqual(['nudge', 'call']);
+  });
+
+  it('lets a call through after a call that only went out as a nudge', async () => {
+    const { dueReminder, deliver, deliveryStore, reachSettings } = await setup(READY);
+    await reachSettings.put({ ...owner, settings: calling });
+    // An urgent reminder from before calls were set up, which went out as a nudge.
+    await deliveryStore.create({
+      ...owner,
+      kind: 'reminder',
+      level: 'nudge',
+      text: 'First',
+      reason: 'Phone calls are not set up yet, so it came as a nudge.',
+      link: null,
+      created_at: new Date('2026-10-19T22:00:05.000Z'),
+    });
+    await deliver(
+      await dueReminder({ what: 'Second', runAt: '2026-10-19T18:30:00-04:00', name: 'r-2', urgent: true }),
+      new Date('2026-10-19T22:30:05.000Z'),
+    );
+    const [newest] = (await deliveryStore.list({ ...owner, limit: 10 })).deliveries;
+    expect(newest).toMatchObject({ text: expect.stringContaining('Second'), level: 'call' });
+  });
+
+  it('writes nothing to the noticing records, so reminders never use up the nudges for the day', async () => {
+    const { dueReminder, deliver, noticingStore } = await setup(NO_PHONE_CHANNELS);
+    await deliver(
+      await dueReminder({ what: 'Water plants', runAt: '2026-10-19T18:00:00-04:00', name: 'r-plain' }),
+      new Date('2026-10-19T22:00:05.000Z'),
+    );
+    const kinds = ['mail_always', 'calendar_clash', 'travel', 'bill_due', 'approval_waiting'] as const;
+    await expect(
+      noticingStore.listPending({ ...owner, kinds, stale_before: new Date('2030-01-01'), limit: 10 }),
+    ).resolves.toEqual([]);
+  });
+
+  it('still delivers an urgent reminder once when handing back the reach lease fails', async () => {
+    const { dueReminder, deliver, deliveryStore, reachSettings, noticingStore } = await setup(READY);
+    await reachSettings.put({ ...owner, settings: calling });
+    jest.spyOn(noticingStore, 'releaseReachLease').mockRejectedValueOnce(new Error('database went away'));
+    await deliver(
+      await dueReminder({ what: 'Pick up the keys', runAt: '2026-10-19T18:00:00-04:00', name: 'r-l8', urgent: true }),
+      new Date('2026-10-19T22:00:05.000Z'),
+    );
+    const delivered = (await deliveryStore.list({ ...owner, limit: 10 })).deliveries;
+    expect(delivered).toHaveLength(1);
+    expect(delivered[0]).toMatchObject({ level: 'call' });
   });
 });
 

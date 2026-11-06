@@ -1,3 +1,5 @@
+import { namesPhoneNumber } from '@truefoundry/trueforge-core/core/permissions/provenance';
+
 import type { IPersonalizationStore } from '../../db/personalizationStore';
 import { UNNAMED_ASSISTANT } from '../chatAssistant';
 import { plainText } from './textWords';
@@ -10,7 +12,12 @@ const TEXT_NAME_MAX = 20;
  * apostrophes and dashes, at most 20 of them, so it cannot carry a link or a number to call.
  */
 export function textName(name: string | null | undefined): string {
-  const letters = plainText(name ?? '')
+  const plain = plainText(name ?? '');
+  // A name that holds a phone number, even one spelled out in words, is not used at all.
+  if (namesPhoneNumber([plain])) {
+    return UNNAMED_ASSISTANT;
+  }
+  const letters = plain
     .replace(/[^A-Za-z '-]/g, ' ')
     .replace(/\s+/g, ' ')
     .trim()

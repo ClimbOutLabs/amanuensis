@@ -117,7 +117,11 @@ describe('texts as a channel of the delivery layer', () => {
     const h = await textsHarness({ assistantName: `Call 555 0199 now: your bank ${'x'.repeat(400)}` });
     await h.readyToText();
     await h.deliveries.deliver(nudge(BILL_TEXT));
-    expect(h.sent[0]?.body).toBe('Call now your bank x: something needs you. Open the app to see it.');
+    expect(h.sent[0]?.body).toBe('Your assistant: something needs you. Open the app to see it.');
+    const long = await textsHarness({ assistantName: `Juniper the ${'very '.repeat(80)}helpful` });
+    await long.readyToText();
+    await long.deliveries.deliver(nudge(BILL_TEXT));
+    expect(long.sent[0]?.body).toBe('Juniper the very ver: something needs you. Open the app to see it.');
     const plain = await textsHarness({ assistantName: '🎉🎉' });
     await plain.readyToText();
     await plain.deliveries.deliver(nudge(BILL_TEXT));

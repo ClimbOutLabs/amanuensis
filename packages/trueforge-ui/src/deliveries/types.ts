@@ -23,8 +23,10 @@ export type DeliveryPage = { items: DeliveryItem[]; nextPageToken: string | unde
 /** What a browser hands over when it turns notices on. */
 export type PushDevice = { endpoint: string; p256dh: string; auth: string; label: string };
 
-/** The kinds of event the assistant watches for. A kind added on the server later shows with its own words. */
-export type NoticingKind = 'mail_always' | 'calendar_clash' | 'travel' | 'bill_due' | 'approval_waiting';
+/** The kinds of event the assistant watches for, in the order Reach me lists them. */
+export const NOTICING_KINDS = ['mail_always', 'calendar_clash', 'travel', 'bill_due', 'approval_waiting'] as const;
+
+export type NoticingKind = (typeof NOTICING_KINDS)[number];
 
 export type ReachSender = {
   address: string;
@@ -54,7 +56,7 @@ export type ReachChannelState = { available: boolean; note: string };
 
 export type ReachView = {
   settings: ReachSettings;
-  /** False until the person saves once. The settings are then the quiet defaults. */
+  /** False until the person saves once. While false, the settings are the quiet defaults. */
   saved: boolean;
   availability: { texts: ReachChannelState; calls: ReachChannelState };
   /** The highest level each kind of event can ever reach, so only kinds that can call offer the tick. */

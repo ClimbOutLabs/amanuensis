@@ -132,6 +132,7 @@ import { sessionApprovalSource } from './runtime/noticing/approvalSource';
 import { createGoogleNoticingSources } from './runtime/noticing/googleSources';
 import { createNoticingJudgeResolver } from './runtime/noticing/judgeFactory';
 import { createNoticingService } from './runtime/noticing/noticingService';
+import { scheduleTimezoneFor } from './runtime/noticing/personTimezone';
 import { reachChannelsFor } from './runtime/noticing/reachChannels';
 import { createReminderReach } from './runtime/noticing/reminderReach';
 import { createSidecarNoticingSources } from './runtime/noticing/sidecarSources';
@@ -841,10 +842,11 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
       instanceOwner: noticingInstanceOwner,
       logger,
     }),
-    approvals: sessionApprovalSource({ sessionStore }),
+    approvals: sessionApprovalSource({ sessionStore, tenant_id: TENANT_ID }),
     reachSettings: reachSettingsStore,
     store: noticingStore,
     deliveries: deliveryService,
+    history: deliveryStore,
     judgeFor: createNoticingJudgeResolver({
       resolveModelProviderStore: context => persistence.resolveModelProviderStore(context),
       personalizationStore,
@@ -855,6 +857,7 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     budget: tokenFactoryBudget,
     channels: reachChannels,
     logger,
+    timezoneFor: scheduleTimezoneFor({ scheduleStore }),
   });
   const sentinelServices = createSentinelServices({
     demoMode: configuration.DEMO_MODE,
@@ -989,7 +992,9 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     reminderReach: createReminderReach({
       reachSettings: reachSettingsStore,
       store: noticingStore,
+      history: deliveryStore,
       channels: reachChannels,
+      logger,
     }),
     reachChannels,
     textNumbers,

@@ -1,6 +1,13 @@
 import { vi } from 'vitest';
 
-import type { DeliveriesApi, DeliveryItem, ReachSettings, ReachView, TextStatus } from '@/deliveries/types.js';
+import type {
+  DeliveriesApi,
+  DeliveryItem,
+  ReachSettings,
+  ReachSuggestion,
+  ReachView,
+  TextStatus,
+} from '@/deliveries/types.js';
 
 export function item(overrides: Partial<DeliveryItem> & { id: string }): DeliveryItem {
   return {
@@ -44,9 +51,15 @@ const NO_NUMBER: TextStatus = {
 
 /** A server that holds the feed once, the way the real one does, so two "devices" can share it. */
 export function fakeServer(initial: DeliveryItem[]) {
-  const state = {
+  const state: {
+    items: DeliveryItem[];
+    pushKey: string | null;
+    reach: ReachView;
+    suggestions: ReachSuggestion[];
+    texts: TextStatus;
+  } = {
     items: initial,
-    pushKey: SERVER_KEY as string | null,
+    pushKey: SERVER_KEY,
     reach: {
       settings: QUIET_SETTINGS,
       saved: false,
@@ -64,8 +77,8 @@ export function fakeServer(initial: DeliveryItem[]) {
         bill_due: 'nudge',
         approval_waiting: 'nudge',
       },
-    } as ReachView,
-    suggestions: [] as { address: string; memory: string }[],
+    },
+    suggestions: [],
     texts: NO_NUMBER,
   };
   const unread = () => state.items.filter(row => row.seenAt === null).length;

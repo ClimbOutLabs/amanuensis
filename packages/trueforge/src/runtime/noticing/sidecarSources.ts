@@ -14,13 +14,13 @@ import {
 import { isRecord } from '@truefoundry/trueforge-core/core/util/records';
 import type { Logger } from 'winston';
 
+import type { NoticingOwner } from '../../db/noticingStore';
 import type {
   CalendarEventInfo,
   CalendarSource,
   MailMessage,
   MailRef,
   MailSource,
-  NoticingOwner,
   NoticingSourceProvider,
   NoticingSources,
 } from './sources';
@@ -113,20 +113,24 @@ export function sidecarMailSource({ call, account }: { call: CallSidecarTool; ac
     });
   };
   return {
-    trustedAuthenticationServers: undefined,
+    trustedAuthenticationServers: [],
     async listNewMessages({ since, limit }) {
+      const pageSize = Math.min(limit, PAGE_SIZE);
       const result = await call(MAIL_LIST_TOOL_NAME, {
         account_name: account,
         mailbox: 'INBOX',
         since: since.toISOString(),
         page: 1,
-        page_size: Math.min(limit, PAGE_SIZE),
-        order: 'desc',
+        page_size: pageSize,
+        order: 'asc',
       });
-      return emailsOfResult(result)
+      const listed = emailsOfResult(result);
+      const messages = listed
         .map(toMailMessage)
         .filter((message): message is MailMessage => message !== undefined && message.received_at >= since)
         .sort((a, b) => a.received_at.getTime() - b.received_at.getTime());
+      // A full page may have more behind it, so the next pass carries on from the newest message read.
+      return { messages, truncated: listed.length >= pageSize };
     },
     async readText(message) {
       return (await bodiesOf([message.id]))[0] ?? '';
@@ -175,17 +179,28 @@ function toEventInfo(event: unknown): CalendarEventInfo | undefined {
   const id = text(event['id']);
   const start = instantOf(event['start']);
   const end = instantOf(event['end']);
-  const attendees = Array.isArray(event['attendees']) ? event['attendees'] : [];
-  const declined = attendees.some(
-    guest => isRecord(guest) && guest['is_self'] === true && String(guest['status']).toUpperCase() === 'DECLINED',
-  );
+  const attendees: unknown[] = Array.isArray(event['attendees']) ? event['attendees'] : [];
+  const self = attendees.find(guest => isRecord(guest) && guest['is_self'] === true);
+  const answer = isRecord(self) ? String(self['status']).toUpperCase() : undefined;
+  const declined = answer === 'DECLINED';
+  const organizer = event['organizer'];
   if (id === undefined || start === undefined || end === undefined || declined) {
     return undefined;
   }
   if (String(event['status']).toUpperCase() === 'CANCELLED') {
     return undefined;
   }
-  return { id, title: text(event['summary']) ?? 'An event', start, end, location: text(event['location']) ?? null };
+  return {
+    id,
+    title: text(event['summary']) ?? 'An event',
+    start,
+    end,
+    location: text(event['location']) ?? null,
+    own:
+      (isRecord(organizer) && organizer['is_self'] === true) ||
+      answer === 'ACCEPTED' ||
+      ((organizer === undefined || organizer === null) && attendees.length === 0),
+  };
 }
 
 /** The Calendar sidecar (CalDAV) as a calendar source: timed events that are still on. */

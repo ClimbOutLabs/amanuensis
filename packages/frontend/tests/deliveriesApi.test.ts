@@ -162,6 +162,16 @@ test('reads Reach me settings into the app shape, dropping what it does not know
   assert.equal(view.availability.calls.note, 'Phone calls are not set up yet.');
 });
 
+test('says the settings could not be read when the server leaves a field out, instead of filling in defaults', async () => {
+  const { max_nudges_per_day: _dropped, ...partial } = WIRE_REACH.data.settings;
+  const broken = createDeliveriesApi(async () => Response.json({ data: { ...WIRE_REACH.data, settings: partial } }));
+  await assert.rejects(broken.reach.get(), /could not be read\. Reload the page\./);
+  const noQuiet = createDeliveriesApi(async () =>
+    Response.json({ data: { ...WIRE_REACH.data, settings: { ...WIRE_REACH.data.settings, quiet_hours: {} } } }),
+  );
+  await assert.rejects(noQuiet.reach.get(), /could not be read\. Reload the page\./);
+});
+
 test('saves Reach me settings in the wire shape and shows the server message when it refuses', async () => {
   const { fetcher, calls } = recordingFetch(() => Response.json(WIRE_REACH));
   const api = createDeliveriesApi(fetcher);
@@ -169,10 +179,12 @@ test('saves Reach me settings in the wire shape and shows the server message whe
   await api.reach.save(view.settings);
 
   assert.equal(calls[1]?.method, 'PUT');
-  const sent = calls[1]?.body as { settings: { channels: unknown; call_kinds: unknown; always_important: unknown } };
-  assert.deepEqual(sent.settings.channels, { texts: false, calls: false });
-  assert.deepEqual(sent.settings.call_kinds, ['travel']);
-  assert.deepEqual(sent.settings.always_important, [
+  const body: unknown = calls[1]?.body;
+  const sent = typeof body === 'object' && body !== null && 'settings' in body ? body.settings : undefined;
+  assert.ok(typeof sent === 'object' && sent !== null);
+  assert.deepEqual('channels' in sent ? sent.channels : undefined, { texts: false, calls: false });
+  assert.deepEqual('call_kinds' in sent ? sent.call_kinds : undefined, ['travel']);
+  assert.deepEqual('always_important' in sent ? sent.always_important : undefined, [
     { address: 'dana@example.com', name: 'Dana', source: 'memory', added_at: '2026-11-01T00:00:00.000Z' },
   ]);
 

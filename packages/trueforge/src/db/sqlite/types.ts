@@ -46,7 +46,7 @@ import type { BriefItemCompletionTable } from '../briefItemCompletionStore';
 import type { ChatImageOrigin } from '../chatImageStore';
 import type { DeliveryAttemptTable, DeliveryTable } from '../deliveryStore';
 import type { OAuthClient, OAuthPendingAuthorizationData, OAuthServer, OAuthToken } from '../mcpServerStore';
-import type { NoticingCheckpointTable, NoticingEventTable } from '../noticingStore';
+import type { NoticingCheckpointTable, NoticingEventTable, ReachLeaseTable } from '../noticingStore';
 import type { PushSubscriptionTable } from '../pushSubscriptionStore';
 import type { ReachSettingsTable } from '../reachSettingsStore';
 import type { TextCodeSendTable, TextContactTable } from '../textContactStore';
@@ -818,6 +818,7 @@ export interface Database {
   text_code_send: TextCodeSendTable;
   noticing_event: NoticingEventTable;
   noticing_checkpoint: NoticingCheckpointTable;
+  reach_lease: ReachLeaseTable;
   push_subscription: PushSubscriptionTable;
   approval_token: ApprovalTokenTable;
   sentinel_user_settings: SentinelUserSettingsTable;

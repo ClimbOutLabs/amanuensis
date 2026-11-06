@@ -177,17 +177,24 @@ describe('request guard: Origin', () => {
     }
   });
 
-  it.each([
-    '/healthz',
-    '/api/internal/schedules/abc/execute',
-    '/api/internal/noticing/run',
-    '/api/v1/mcp-servers/oauth/callback',
-  ])('exempts %s from the Origin check but not the Host check', async path => {
+  it.each(['/healthz', '/api/internal/schedules/abc/execute', '/api/v1/mcp-servers/oauth/callback'])(
+    'exempts %s from the Origin check but not the Host check',
+    async path => {
+      const app = appFor(PUBLIC);
+      expect(await status({ app, path, method: 'POST', headers: { ...host, origin: 'https://evil.example' } })).toBe(
+        200,
+      );
+      expect(await status({ app, path, method: 'POST', headers: { host: 'evil.example' } })).toBe(
+        path === '/healthz' ? 200 : 421,
+      );
+    },
+  );
+
+  it('lets the controller run a noticing pass with its key, and checks the Origin like any other write', async () => {
     const app = appFor(PUBLIC);
-    expect(await status({ app, path, method: 'POST', headers: { ...host, origin: 'https://evil.example' } })).toBe(200);
-    expect(await status({ app, path, method: 'POST', headers: { host: 'evil.example' } })).toBe(
-      path === '/healthz' ? 200 : 421,
-    );
+    const path = '/api/internal/noticing/run';
+    expect(await status({ app, path, method: 'POST', headers: { ...host, authorization: 'Bearer abc' } })).toBe(200);
+    expect(await status({ app, path, method: 'POST', headers: { ...host, origin: 'https://evil.example' } })).toBe(403);
   });
 
   it('does not exempt look-alike paths', async () => {

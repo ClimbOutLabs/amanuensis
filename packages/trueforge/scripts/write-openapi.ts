@@ -158,7 +158,9 @@ const app = createServerApp({
   reminderReach: createReminderReach({
     reachSettings: new ReachSettingsStore(db),
     store: new NoticingStore(db),
+    history: deliveryStore,
     channels: () => NO_PHONE_CHANNELS,
+    logger,
   }),
   reachChannels: () => NO_PHONE_CHANNELS,
   textContactStore: new TextContactStore(db),

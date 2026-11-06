@@ -597,10 +597,8 @@ export const ImportAuditFileSchema = z.array(ImportAuditRecordSchema);
 export const ImportDeliveriesFileSchema = z.array(DeliverySchema);
 export type ImportDelivery = z.infer<typeof DeliverySchema>;
 
-/** The person's Reach me settings, as a list of none or one. Text and call switches never come along on. */
+/** The person's Reach me settings, as a list of none or one. The text and call switches are always off on import. */
 export const ImportReachFileSchema = z.array(ReachSettingsSchema);
-export type ImportReachSettings = z.infer<typeof ReachSettingsSchema>;
-
 /** The person's number for texts and their choice of words, as a list of none or one. It always comes in unconfirmed. */
 export const ImportTextsFileSchema = z.array(TextContactExportSchema);
 export type ImportTextContact = z.infer<typeof TextContactExportSchema>;

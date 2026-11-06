@@ -147,7 +147,8 @@ export function createReachRouter(deps: ReachRouterDeps) {
       }
       const delivery = await deps.deliveryService.deliver({
         ...owner,
-        kind: 'nudge',
+        // A note in the feed, so a test never uses up one of the day's nudges.
+        kind: 'note',
         level: 'nudge',
         text: 'This is a test. If you can read this, it works.',
         reason: 'You pressed Try it in Reach me settings.',
@@ -166,10 +167,11 @@ export function createReachRouter(deps: ReachRouterDeps) {
     if (channel === 'call') {
       return c.json({ error: { message: `${channels.calls.note} There is nothing to try yet.` } }, 409);
     }
-    // A push test reaches only the person's devices, and an in-app test only the app, so neither sends a paid text.
+    // A test is a note in the feed, so a push test never uses up one of the day's nudges, and it reaches only the
+    // person's devices, so it never sends a paid text.
     const delivery = await deps.deliveryService.deliver({
       ...owner,
-      kind: channel === 'push' ? 'nudge' : 'note',
+      kind: 'note',
       level: channel === 'push' ? 'nudge' : 'note',
       text: 'This is a test. If you can read this, it works.',
       reason: 'You pressed Try it in Reach me settings.',

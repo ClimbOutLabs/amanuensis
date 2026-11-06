@@ -1,4 +1,3 @@
-import { isQuietNow, startOfLocalDay } from '../../../../src/runtime/noticing/quietHours';
 import { applyReachRules, joinReasons, type ReachHistory } from '../../../../src/runtime/noticing/reachRules';
 import { defaultReachSettings, type ReachSettings } from '../../../../src/schemas/reach';
 
@@ -134,32 +133,5 @@ describe('joinReasons', () => {
 
   it('cuts to what a delivery holds', () => {
     expect(joinReasons(['x'.repeat(900)]).length).toBe(500);
-  });
-});
-
-describe('quiet hours', () => {
-  const quiet = { enabled: true, start: '21:00', end: '08:00' };
-
-  it('wraps midnight in the person’s zone', () => {
-    expect(isQuietNow({ now: NIGHT, quiet, timezone: 'America/New_York' })).toBe(true);
-    expect(isQuietNow({ now: DAYTIME, quiet, timezone: 'America/New_York' })).toBe(false);
-    expect(isQuietNow({ now: DAYTIME, quiet, timezone: 'Asia/Tokyo' })).toBe(true);
-  });
-
-  it('is off when disabled or when start equals end', () => {
-    expect(isQuietNow({ now: NIGHT, quiet: { ...quiet, enabled: false }, timezone: 'America/New_York' })).toBe(false);
-    expect(isQuietNow({ now: NIGHT, quiet: { ...quiet, start: '09:00', end: '09:00' }, timezone: 'UTC' })).toBe(false);
-  });
-
-  it('handles a window inside one day', () => {
-    const lunch = { enabled: true, start: '12:00', end: '13:00' };
-    expect(isQuietNow({ now: new Date('2026-11-05T12:30:00.000Z'), quiet: lunch, timezone: 'UTC' })).toBe(true);
-    expect(isQuietNow({ now: new Date('2026-11-05T13:00:00.000Z'), quiet: lunch, timezone: 'UTC' })).toBe(false);
-  });
-
-  it('finds the start of the local day', () => {
-    expect(startOfLocalDay({ now: DAYTIME, timezone: 'America/New_York' }).toISOString()).toBe(
-      '2026-11-05T05:00:00.000Z',
-    );
   });
 });

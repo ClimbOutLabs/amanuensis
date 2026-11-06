@@ -3,14 +3,7 @@ import { APPROVAL_EXPIRY_MINUTES } from '@truefoundry/trueforge-core/core/permis
 import type { NoticingEvent, ReachSettings } from '../../schemas/reach';
 import { checkSender } from './authenticationResults';
 import { findDeadline, looksLikeBill, saysPaid } from './deadlines';
-import type {
-  ApprovalSource,
-  CalendarEventInfo,
-  CalendarSource,
-  MailMessage,
-  MailSource,
-  NoticingOwner,
-} from './sources';
+import type { CalendarEventInfo, CalendarSource, MailMessage, MailSource, WaitingApproval } from './sources';
 
 /** A bill is raised when it falls due within this long. */
 export const BILL_WINDOW_MS = 3 * 86_400_000;
@@ -48,10 +41,14 @@ function localDate({ at, timezone }: { at: Date; timezone: string }): string {
   }
 }
 
-/** What one pass over new mail found. `tracking` are bills due later than the window, kept until they come near. */
+/**
+ * What one pass over new mail found. `track` are bills due later than the window, kept until they come near. When
+ * `read_until` is set, there was more mail than one pass reads, and the next pass carries on from that time.
+ */
 export interface MailFindings {
   raise: NoticingEvent[];
   track: NoticingEvent[];
+  read_until: Date | undefined;
 }
 
 /**
@@ -70,9 +67,10 @@ export async function watchMail({
   since: Date;
   now: Date;
 }): Promise<MailFindings> {
-  const messages = await source.listNewMessages({ since, limit: MAIL_PASS_LIMIT });
+  const { messages, truncated } = await source.listNewMessages({ since, limit: MAIL_PASS_LIMIT });
   const always = new Map(settings.always_important.map(sender => [sender.address, sender]));
-  const findings: MailFindings = { raise: [], track: [] };
+  const newest = messages.at(-1)?.received_at;
+  const findings: MailFindings = { raise: [], track: [], read_until: truncated ? newest : undefined };
   for (const message of messages) {
     const listed = always.get(message.from_address.toLowerCase());
     const check =
@@ -224,7 +222,7 @@ function clashEvent({
   return {
     id: `calendar_clash:${left.id}@${left.start.toISOString()}:${right.id}@${right.start.toISOString()}`,
     kind: 'calendar_clash',
-    evidence: 'own',
+    evidence: first.own && second.own ? 'own' : 'content',
     summary: clip(
       `"${clip(first.title, 60)}" at ${localTime({ at: first.start, timezone })} overlaps "${clip(second.title, 60)}" at ${localTime({ at: second.start, timezone })}.`,
       300,
@@ -255,7 +253,7 @@ function travelEvent({ event, timezone }: { event: CalendarEventInfo; timezone: 
   return {
     id: `travel:${event.id}@${event.start.toISOString()}`,
     kind: 'travel',
-    evidence: 'own',
+    evidence: event.own ? 'own' : 'content',
     summary: clip(
       `"${clip(event.title, 80)}" starts at ${localTime({ at: event.start, timezone })}. Time to head out.`,
       300,
@@ -273,21 +271,18 @@ function travelEvent({ event, timezone }: { event: CalendarEventInfo; timezone: 
   };
 }
 
-/** Approvals that have waited longer than the person's chosen time. */
-export async function watchApprovals({
-  source,
-  owner,
+/** One person's open requests that have waited longer than the time they chose. */
+export function watchApprovals({
+  waiting,
   settings,
   now,
 }: {
-  source: ApprovalSource;
-  owner: NoticingOwner;
+  waiting: readonly WaitingApproval[];
   settings: ReachSettings;
   now: Date;
-}): Promise<NoticingEvent[]> {
+}): NoticingEvent[] {
   const limitMs = settings.approval_wait_minutes * 60_000;
   const expiryMs = APPROVAL_EXPIRY_MINUTES * 60_000;
-  const waiting = await source.listWaiting(owner);
   // A request that has waited past its expiry is closed when the person opens the chat, so there is nothing to ask.
   return waiting
     .filter(item => {
@@ -297,13 +292,13 @@ export async function watchApprovals({
     .map(item => {
       const minutes = Math.max(1, Math.round((now.getTime() - item.waiting_since.getTime()) / 60_000));
       return {
-        id: `approval_waiting:${item.session_id}:${item.turn_id}`,
+        id: `approval_waiting:${item.session_id}:${item.approval_id}`,
         kind: 'approval_waiting',
         evidence: 'own',
         summary: `Something has been waiting for your ok for about ${String(minutes)} minutes. It closes after ${String(APPROVAL_EXPIRY_MINUTES)}.`,
         facts: `A request for the person's ok has waited about ${String(minutes)} minutes.`,
         matched: `An approval has waited longer than the ${String(settings.approval_wait_minutes)} minutes you chose.`,
-        link: { type: 'chat', session_id: item.session_id },
+        link: { type: 'approval', session_id: item.session_id, approval_id: item.approval_id },
         mail_ref: null,
         occurred_at: item.waiting_since.toISOString(),
         due_at: null,

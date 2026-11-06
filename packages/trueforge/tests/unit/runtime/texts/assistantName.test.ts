@@ -7,9 +7,10 @@ describe('the assistant name in a text', () => {
     expect(textName('Mannie.example.com')).toBe('Mannie example com');
   });
 
-  it('drops accents, digits, symbols and emoji, and keeps it to 20 characters', () => {
+  it('drops accents, digits, symbols and emoji, keeps it to 20 characters, and drops a name that holds a phone number', () => {
     expect(textName('José')).toBe('Jose');
-    expect(textName('Call 555-0199 or visit bank.example')).toBe('Call - or visit bank');
+    expect(textName('Call 4 or visit bank.example')).toBe('Call or visit bank e');
+    expect(textName('Call 555-0199 now')).toBe('Your assistant');
     expect(textName('🎉 Juniper 🎉')).toBe('Juniper');
     expect(textName('x'.repeat(400))).toHaveLength(20);
   });
