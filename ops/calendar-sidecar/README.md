@@ -18,6 +18,8 @@ The calendar login is kept in one file, `/account/.env.calendar`, in a volume th
 - `CALDAV_USERNAME` and `CALDAV_PASSWORD`: the login.
 - `CALDAV_USER_EMAIL`: your own email address, used to find your invitations.
 
+For a Google account, the Settings Calendar card and the installer fill in Google's CalDAV address from the email address.
+
 Two things write the file, and both go through the account agent, which checks the address first:
 
 - The Settings Calendar card, over the agent's HTTP port. The agent also checks the sign-in before it saves. The request must carry `Authorization: Bearer <CALENDAR_ACCOUNT_SECRET>` and a JSON body, or the agent refuses it (401 without the secret, 415 for another kind of body).
@@ -31,7 +33,7 @@ The tool server always starts from this file and restarts when it changes. Remov
 
 ## Which addresses are allowed
 
-The calendar address may be on the internet or on your home or office network. These are never allowed, however the name is written: this computer itself (127.x, ::1), link-local addresses (169.254.x, fe80::), the special addresses cloud hosts use for their private settings, multicast and reserved ranges, and any other address on this service's own Compose network. The check runs on the address the connection actually uses. One redirect to another path on the same server is followed, since providers often add a trailing slash. Any other redirect is refused, so the login is never sent anywhere else.
+The calendar address may be on the internet or on your home or office network. These are never allowed, however the name is written: this computer itself (127.x, ::1), link-local addresses (169.254.x, fe80::), the special addresses cloud hosts use for their private settings, multicast and reserved ranges, and any other address on this service's own Compose network. The check runs on the address the connection actually uses. The sign-in check takes the same steps the calendar tool server takes to find the account. It asks the saved address first, with one trailing slash. If that address redirects, it asks the server's /.well-known/caldav address and follows at most one redirect from there, and only on the same server. A redirect to another server is never followed, so the login is never sent anywhere else.
 
 ## What a saved value may hold
 

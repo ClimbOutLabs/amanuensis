@@ -10,6 +10,7 @@ If you use a hosted model, the company running it sees each chat: your messages,
 ## What leaves your machine
 
 - **To the model you chose:** your message, the chat so far, what Aman knows about you, the memories Aman recalls for that message, and the results of any tools Aman used. With a local model, this stays on your computer.
+- **To the model you chose, when Aman uses its browser:** the text of each page Aman reads. With a model that reads images, also the screenshots Aman takes, with password, card and one-time-code fields, and anything a page embeds from elsewhere, covered. The live browser's pictures never go to the model. What you leave on a page is in Aman's next read of it, apart from those fields; see [Aman's browser](/browser).
 - **To the web search service:** the search words, and the links Aman opens from the results, when Aman searches the web. The service also sees this computer's internet address.
 - **To the map service:** the places and routes Aman looks up, after you approve the card.
 - **To your browser's push service (Google, Apple or Mozilla), only for devices where you turned notices on:** a sealed notice holding an item number and a generic title such as "Reminder", never the reminder text. The service also sees this computer's internet address and the project's public page as the sender's contact.
