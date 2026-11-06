@@ -44,7 +44,9 @@ and names the person's profile (`owner`) and the chat's tab (`tab`).
   payment or one-time-code field never shows its value.
 - `POST /scroll { owner, tab, direction }`, `POST /back { owner, tab }` — move around, then return a
   read.
-- `POST /screenshot { owner, tab }` — a PNG of the page, which the app shows to the person in the chat.
+- `POST /screenshot { owner, tab }` — a PNG of the page, which the app shows to the person in the chat,
+  and `marked_png_base64`, the same view with a red box and its ref on each control in view, for the
+  model. The labels are drawn into the page only for that shot and taken off right after.
 
 - `POST /click-info`, `POST /click`, `POST /type`, `POST /select { owner, tab, ref, ... }` — act on a
   control by its ref. The app server asks the person first for a click that would submit something.

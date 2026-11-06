@@ -2,7 +2,7 @@
 // chat, reached only through the browser gateway, which checks the app server's shared secret before
 // it relays a call. Nothing here is published to the host or to any other service.
 import { Buffer } from 'node:buffer';
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { rm } from 'node:fs/promises';
 import { createServer } from 'node:http';
@@ -10,7 +10,7 @@ import path from 'node:path';
 import { URL } from 'node:url';
 import { chromium } from 'playwright-core';
 
-import { elementAtPath } from './extract.mjs';
+import { elementAtPath, removeRefMarks } from './extract.mjs';
 import { RefAssigner, renderSnapshot, sensitivityOf } from './snapshot.mjs';
 
 const MAX_BODY_BYTES = 256 * 1024;
@@ -25,6 +25,11 @@ const MAX_UPLOAD_BODY_BYTES = Math.ceil((MAX_UPLOAD_BYTES * 4) / 3) + 64 * 1024;
 const EXTRACT_MODULE = readFileSync(new URL('./extract.mjs', import.meta.url), 'utf8').replace(/^export /gm, '');
 
 const EXTRACT_SCRIPT = `(() => {\n${EXTRACT_MODULE}\nreturn extractSnapshotNodes();\n})()`;
+
+/** The same bundled module, drawing the model's ref labels over the page in a layer named `layerId`. */
+function drawRefMarksScript(marks, layerId) {
+  return `(() => {\n${EXTRACT_MODULE}\nreturn drawRefMarks(${JSON.stringify(marks)}, ${JSON.stringify(layerId)});\n})()`;
+}
 
 /** The same bundled module, ending in a read of one element's field, submit and form context. */
 function elementInfoScript(domPath) {
@@ -385,7 +390,35 @@ export class BrowserSidecar {
       return checked.result;
     }
     const buffer = await tab.page.screenshot({ type: 'png' });
-    return { status: 'ok', png_base64: buffer.toString('base64') };
+    const marked = await this.#markedShot(tab);
+    return {
+      status: 'ok',
+      png_base64: buffer.toString('base64'),
+      ...(marked === undefined ? {} : { marked_png_base64: marked }),
+    };
+  }
+
+  /**
+   * The picture the model sees: the same view with a red box and its ref on each control in view, so
+   * the model can act on what it sees by ref instead of guessing positions. The person's picture is
+   * taken before, without the labels. The labels are a layer the page could see while it is drawn,
+   * so it holds only refs, and it comes off right after the shot. Undefined when the page cannot be
+   * labelled: the model then sees the plain picture.
+   */
+  async #markedShot(tab) {
+    const layerId = `aman-marks-${randomUUID()}`;
+    try {
+      const nodes = await tab.page.evaluate(EXTRACT_SCRIPT);
+      const refs = tab.refs.refsFor(nodes);
+      const marks = [...refs].map(([path, ref]) => ({ path, ref }));
+      await tab.page.evaluate(drawRefMarksScript(marks, layerId));
+      const buffer = await tab.page.screenshot({ type: 'png' });
+      return buffer.toString('base64');
+    } catch {
+      return undefined;
+    } finally {
+      await tab.page.evaluate(removeRefMarks, layerId).catch(() => undefined);
+    }
   }
 
   /**

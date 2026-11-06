@@ -584,6 +584,28 @@ function refFor(text, label) {
   return /^\[(e\d+)\]/.exec(line ?? '')?.[1];
 }
 
+test(
+  'a screenshot gives the person the plain page and the model a copy with each control boxed by its ref',
+  { skip: !browsersAvailable },
+  async () => {
+    await withWorld(async ({ sidecar }) => {
+      const opened = await sidecar.open({ owner: 'owner-1', tab: 'chat-1', url: 'http://site-a.test/checkout' });
+      const shot = await sidecar.screenshot({ owner: 'owner-1', tab: 'chat-1' });
+      assert.equal(shot.status, 'ok');
+      assert.ok(shot.png_base64.length > 0);
+      assert.ok(shot.marked_png_base64.length > 0);
+      assert.notEqual(shot.marked_png_base64, shot.png_base64, 'the labels are drawn on the model copy');
+      // The labels come off the page right after: it reads the same, with the same refs, as before.
+      const after = await sidecar.read({ owner: 'owner-1', tab: 'chat-1' });
+      assert.equal(after.text, opened.text);
+      assert.equal(refFor(after.text, 'Place order'), refFor(opened.text, 'Place order'));
+      // A second picture of the unchanged page is the same picture: nothing was left behind.
+      const again = await sidecar.screenshot({ owner: 'owner-1', tab: 'chat-1' });
+      assert.equal(again.png_base64, shot.png_base64);
+    });
+  },
+);
+
 test('types into a field, then fills it', { skip: !browsersAvailable }, async () => {
   await withWorld(async ({ sidecar }) => {
     const opened = await sidecar.open({ owner: 'owner-1', tab: 'chat-1', url: 'http://site-a.test/checkout' });

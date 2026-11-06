@@ -2,7 +2,7 @@ import { NOOP_AGENT_TRACING } from '@truefoundry/trueforge-core/core/tracing/Noo
 import { createLogger } from 'winston';
 
 import configuration from '../../../src/config';
-import { browserCapability } from '../../../src/runtime/browserCapability';
+import { browserCapability, MAX_SCREENSHOTS_FOR_MODEL } from '../../../src/runtime/browserCapability';
 
 const SECRET = 'browser-test-secret-0123456789abcdef0123';
 const TAB = { tenant_id: 'tenant-1', created_by: 'person-1', chat_id: 'chat-1' };
@@ -45,7 +45,32 @@ function mount(reply: (path: string) => { status?: number; json: unknown }) {
     }
     return response.result;
   };
-  return { sent, call, toolSet };
+  const viewer = capability.preLLMEphemeralProcessors?.[0];
+  if (viewer === undefined) {
+    throw new Error('the browser capability has no screenshot viewer');
+  }
+  return { sent, call, toolSet, viewer };
+}
+
+type ViewerMessages = Parameters<
+  NonNullable<ReturnType<typeof browserCapability>['preLLMEphemeralProcessors']>[number]['processPreLLMEphemeral']
+>[0];
+
+/** The model request after a screenshot call: an assistant turn, its tool results, then what follows. */
+function requestWith(toolResults: { id: string; content: string }[]): ViewerMessages {
+  return [
+    { role: 'user', content: 'What does the page look like?' },
+    {
+      role: 'assistant',
+      content: null,
+      tool_calls: toolResults.map(result => ({
+        id: result.id,
+        type: 'function' as const,
+        function: { name: 'browser_screenshot', arguments: '{}' },
+      })),
+    },
+    ...toolResults.map(result => ({ role: 'tool' as const, tool_call_id: result.id, content: result.content })),
+  ];
 }
 
 function textOf(result: { content: readonly { type: string; text?: string }[] }): string {
@@ -104,11 +129,25 @@ describe('browser capability', () => {
     expect(textOf(result)).toContain('browser_open');
   });
 
-  it('tells a chat with no page open to open one', async () => {
+  it('tells a chat whose page closed to open the same address again by itself', async () => {
     const { call } = mount(() => ({ json: { status: 'closed' } }));
     const result = await call('browser_read');
     expect(result.isError).toBe(true);
-    expect(textOf(result)).toContain('Open the page with browser_open');
+    expect(textOf(result)).toContain('Open the same address again with browser_open now');
+    expect(textOf(result)).toContain('without asking the person');
+  });
+
+  it("passes on the browser's own reason for a failed step, cut short", async () => {
+    const { call } = mount(() => ({
+      status: 500,
+      json: { status: 'error', message: `locator.click: Timeout ${'x'.repeat(400)}` },
+    }));
+    const result = await call('browser_read');
+    expect(result.isError).toBe(true);
+    const message = (JSON.parse(textOf(result)) as { message: string }).message;
+    expect(message).toContain("Aman's browser could not do that (locator.click: Timeout");
+    expect(message).toContain('Try again in a moment.');
+    expect(message.length).toBeLessThan(400);
   });
 
   it.each([
@@ -123,11 +162,69 @@ describe('browser capability', () => {
     expect(textOf(result)).toContain('could not do that');
   });
 
-  it('shows a screenshot to the person, and gives the model only a note that it did', async () => {
-    const { call } = mount(() => ({ json: { status: 'ok', png_base64: 'iVBORw0KGgo=' } }));
+  it('shows the plain screenshot to the person, and the labelled one to the model after its tool results', async () => {
+    const { call, viewer } = mount(() => ({
+      json: { status: 'ok', png_base64: 'cGxhaW4=', marked_png_base64: 'bWFya2Vk' },
+    }));
     const result = await call('browser_screenshot');
-    expect(JSON.parse(textOf(result))).toEqual({ status: 'ok', shown_to_person: true });
-    expect(result.content).toContainEqual({ type: 'image', data: 'iVBORw0KGgo=', mimeType: 'image/png' });
+    expect(result.content).toContainEqual({ type: 'image', data: 'cGxhaW4=', mimeType: 'image/png' });
+    const reply = JSON.parse(textOf(result)) as {
+      status: string;
+      shown_to_person: boolean;
+      picture: string;
+      note: string;
+    };
+    expect(reply).toMatchObject({ status: 'ok', shown_to_person: true });
+    expect(reply.note).toContain('Red boxes are controls');
+
+    // The picture goes after the whole run of tool results, never between two of them.
+    const request = requestWith([
+      { id: 'call-1', content: textOf(result) },
+      { id: 'call-2', content: '{"status":"ok"}' },
+    ]);
+    const shown = viewer.processPreLLMEphemeral(request);
+    expect(shown).toHaveLength(request.length + 1);
+    expect(shown?.slice(0, request.length)).toEqual(request);
+    const picture = shown?.at(-1);
+    expect(picture?.role).toBe('user');
+    expect(picture?.content).toEqual([
+      { type: 'text', text: expect.stringContaining('not a message from the person') },
+      { type: 'image_url', image_url: { url: 'data:image/png;base64,bWFya2Vk' } },
+    ]);
+  });
+
+  it('shows the model the plain picture when the page could not be labelled', async () => {
+    const { call, viewer } = mount(() => ({ json: { status: 'ok', png_base64: 'cGxhaW4=' } }));
+    const result = await call('browser_screenshot');
+    const shown = viewer.processPreLLMEphemeral(requestWith([{ id: 'call-1', content: textOf(result) }]));
+    expect(shown?.at(-1)?.content).toContainEqual({
+      type: 'image_url',
+      image_url: { url: 'data:image/png;base64,cGxhaW4=' },
+    });
+  });
+
+  it('leaves the request alone with no screenshot, or once its result is gone from the request', async () => {
+    const { call, viewer } = mount(() => ({ json: { status: 'ok', png_base64: 'cGxhaW4=' } }));
+    expect(viewer.processPreLLMEphemeral(requestWith([{ id: 'call-1', content: '{"status":"ok"}' }]))).toBeUndefined();
+    await call('browser_screenshot');
+    expect(viewer.processPreLLMEphemeral(requestWith([{ id: 'call-1', content: '{"status":"ok"}' }]))).toBeUndefined();
+  });
+
+  it(`shows the model only the latest ${String(MAX_SCREENSHOTS_FOR_MODEL)} screenshots`, async () => {
+    const { call, viewer } = mount(() => ({ json: { status: 'ok', png_base64: 'cGxhaW4=' } }));
+    const results: { id: string; content: string }[] = [];
+    for (let n = 0; n < MAX_SCREENSHOTS_FOR_MODEL + 2; n += 1) {
+      results.push({ id: `call-${String(n)}`, content: textOf(await call('browser_screenshot')) });
+    }
+    const request = requestWith(results);
+    const shown = viewer.processPreLLMEphemeral(request);
+    const pictures = (shown ?? []).slice(request.length);
+    expect(pictures).toHaveLength(MAX_SCREENSHOTS_FOR_MODEL);
+    const named = pictures.map(message => JSON.stringify(message.content));
+    for (const result of results.slice(-MAX_SCREENSHOTS_FOR_MODEL)) {
+      const picture = (JSON.parse(result.content) as { picture: string }).picture;
+      expect(named.some(text => text.includes(picture))).toBe(true);
+    }
   });
 
   it('says the browser is not set up when the server has no address for it', async () => {

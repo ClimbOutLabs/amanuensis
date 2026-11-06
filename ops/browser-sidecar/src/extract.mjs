@@ -248,3 +248,48 @@ export function extractSnapshotNodes() {
   }
   return nodes;
 }
+
+/**
+ * Draws the model's labels over the page, in a layer of its own that clicks pass through: a red box
+ * and its ref on each control in view. `marks` are `{ path, ref }` pairs from the snapshot just read.
+ * Returns how many controls were marked.
+ */
+export function drawRefMarks(marks, layerId) {
+  const layer = document.createElement('div');
+  layer.id = layerId;
+  layer.style.cssText = 'position:fixed;inset:0;pointer-events:none;z-index:2147483647;font:bold 11px/14px sans-serif';
+  const width = window.innerWidth;
+  const height = window.innerHeight;
+  let marked = 0;
+  for (const { path, ref } of marks) {
+    const element = elementAtPath(path);
+    if (element === null) {
+      continue;
+    }
+    const rect = element.getBoundingClientRect();
+    if (
+      rect.width === 0 ||
+      rect.height === 0 ||
+      rect.bottom < 0 ||
+      rect.top > height ||
+      rect.right < 0 ||
+      rect.left > width
+    ) {
+      continue;
+    }
+    const box = document.createElement('div');
+    box.style.cssText = `position:absolute;left:${String(rect.left)}px;top:${String(rect.top)}px;width:${String(rect.width)}px;height:${String(rect.height)}px;outline:2px solid #e00`;
+    const label = document.createElement('div');
+    label.textContent = ref;
+    label.style.cssText = `position:absolute;left:${String(Math.max(0, rect.left))}px;top:${String(Math.max(0, rect.top - 14))}px;background:#e00;color:#fff;padding:0 2px`;
+    layer.append(box, label);
+    marked += 1;
+  }
+  document.documentElement.append(layer);
+  return marked;
+}
+
+/** Takes the labels layer `drawRefMarks` added back off the page. */
+export function removeRefMarks(layerId) {
+  document.getElementById(layerId)?.remove();
+}
