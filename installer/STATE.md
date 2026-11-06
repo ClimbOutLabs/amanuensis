@@ -75,7 +75,10 @@ nested:
   "source_ref": "<the checkout commit the images were built from>",
   "app_image": "aman-app:<source id>",
   "stt_image": "aman-stt:<source id>",
+  "tts_image": "aman-tts:<source id>",
   "calendar_image": "aman-calendar-caldav:<source id>",
+  "browser_image": "aman-browser:<source id>",
+  "browser_gateway_image": "aman-browser-gateway:<source id>",
   "dex_image": "<image pinned by digest>",
   "mail_email_image": "<image pinned by digest>"
 }
@@ -83,7 +86,8 @@ nested:
 
 On upgrade the old record is copied to `release/previous.release.json`
 before the new one is written. Readers treat the record as readable only
-when at least the app, speech and sign-in images are named.
+when at least the app, speech-to-text and sign-in images are named. A record
+from before the read-aloud voice has no `tts_image`; the next upgrade adds it.
 
 ## Backups
 

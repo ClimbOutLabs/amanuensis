@@ -41,7 +41,9 @@ import type { ScheduleManifest, ScheduleRunStatus, ScheduleStatus } from '../../
 import type { SkillManifest } from '../../schemas/skill';
 import type { BriefItemCompletionTable } from '../briefItemCompletionStore';
 import type { ChatImageOrigin } from '../chatImageStore';
+import type { DeliveryAttemptTable, DeliveryTable } from '../deliveryStore';
 import type { OAuthClient, OAuthPendingAuthorizationData, OAuthServer, OAuthToken } from '../mcpServerStore';
+import type { PushSubscriptionTable } from '../pushSubscriptionStore';
 
 /**
  * Trace-level state for one thread at one turn (`turn_thread.checkpoint`).
@@ -233,6 +235,8 @@ export interface SentinelUserSettingsTable {
   search_without_asking: boolean;
   maps_without_asking: boolean;
   sandbox_without_asking: boolean;
+  chat_search_enabled: boolean;
+  package_downloads_without_project_allowed: boolean;
   created_at: Date;
   updated_at: Date;
 }
@@ -291,6 +295,25 @@ export interface ApprovalDismissalTable {
   thread_id: string;
   tool_call_id: string;
   dismissed_at: Date;
+}
+
+/**
+ * One searchable message of a finished turn in the past-chat search index.
+ * PRIMARY KEY (tenant_id, session_id, turn_id, message_id). `search_vector` is generated
+ * from `body` by the database and never written by the app.
+ */
+export interface ChatSearchDocumentTable {
+  tenant_id: string;
+  session_id: string;
+  turn_id: string;
+  message_id: string;
+  role: string;
+  /** The persona the turn ran under; null for the main assistant. */
+  persona_id: string | null;
+  body: string;
+  /** The message's searchable words, built by the shared matching rule. */
+  search_words: string[];
+  created_at: Date;
 }
 
 /** Global key/value settings shared across tenants (e.g. persisted feature overrides). PRIMARY KEY (key). */
@@ -960,6 +983,9 @@ export interface Database {
   space_folder_assignment: SpaceFolderAssignmentTable;
   sentinel_audit: SentinelAuditTable;
   brief_item_completion: BriefItemCompletionTable;
+  delivery: DeliveryTable;
+  delivery_attempt: DeliveryAttemptTable;
+  push_subscription: PushSubscriptionTable;
   approval_token: ApprovalTokenTable;
   sentinel_user_settings: SentinelUserSettingsTable;
   implementation_plan_grant: ImplementationPlanGrantTable;
@@ -994,6 +1020,7 @@ export interface Database {
   turn_artifact: TurnArtifactTable;
   chat_image: ChatImageTable;
   approval_dismissal: ApprovalDismissalTable;
+  chat_search_document: ChatSearchDocumentTable;
   global_settings: GlobalSettingsTable;
   token_factory_usage: TokenFactoryUsageTable;
   token_factory_model_usage: TokenFactoryModelUsageTable;

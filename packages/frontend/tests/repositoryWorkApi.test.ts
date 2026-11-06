@@ -21,6 +21,7 @@ const repoData = {
   clone_url: 'https://github.com/octo-example/demo-repo.git',
   default_branch: 'main',
   revision: 3,
+  package_downloads_allowed: true,
   created_at: '2026-10-18T00:00:00.000Z',
   updated_at: '2026-10-18T00:00:00.000Z',
 };
@@ -126,7 +127,26 @@ test('start work posts the clone address and branch and parses the binding', asy
     clone_url: 'https://github.com/octo-example/demo-repo.git',
     default_branch: 'main',
     revision: 3,
+    package_downloads_allowed: true,
   });
+});
+
+test('lists repositories and sets package downloads for one', async () => {
+  const listCapture: Captured = {};
+  const listApi = createRepositoryWorkApi(fetcherReturning({ data: [repoData] }, listCapture));
+  const listed = await listApi.listRepositories();
+  assert.equal(listCapture.url, '/api/v1/repositories');
+  assert.equal(listed[0]?.package_downloads_allowed, true);
+
+  const setCapture: Captured = {};
+  const setApi = createRepositoryWorkApi(
+    fetcherReturning({ data: { ...repoData, package_downloads_allowed: false } }, setCapture),
+  );
+  const saved = await setApi.setRepositoryPackageDownloads({ repositoryId: 'repo-1', allowed: false });
+  assert.equal(setCapture.url, '/api/v1/repositories/repo-1/package-downloads');
+  assert.equal(setCapture.method, 'POST');
+  assert.deepEqual(JSON.parse(setCapture.body ?? '{}'), { allowed: false });
+  assert.equal(saved.package_downloads_allowed, false);
 });
 
 test('reads the binding, proposals, confirms with wire names, dismisses and unbinds', async () => {

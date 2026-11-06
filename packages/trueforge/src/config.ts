@@ -42,6 +42,7 @@ import type { ReflectBudget } from './runtime/memory/hindsightClient';
 import { parseModelPrices, type ModelPrices } from './runtime/modelPricing';
 import { DEFAULT_TOKEN_FACTORY_MODEL } from './runtime/tokenFactoryDefaults';
 import { MAX_CODE_MODE_SOCKET_PARENT_BYTES } from './sandbox/local/core/CodeModeUdsTransport';
+import { isGoModuleHostName } from './sandbox/mirrors/goMirrorPath';
 
 const DEFAULT_PORT = 8790;
 /** Loopback default; container images set HOST=0.0.0.0 so probes and Service traffic reach the process. */
@@ -385,6 +386,99 @@ export function parseCalendarAccountSecret(raw: string | undefined): string | un
   return trimmed;
 }
 
+/** A web push (VAPID) key pair and contact, or none. Push stays off unless all three settings are set. */
+export interface WebPushSettings {
+  publicKey: string;
+  privateKey: string;
+  subject: string;
+}
+
+const VAPID_PUBLIC_KEY_BYTES = 65;
+const VAPID_PRIVATE_KEY_BYTES = 32;
+
+function base64UrlByteLength(value: string): number | undefined {
+  if (!/^[A-Za-z0-9_-]+$/.test(value)) {
+    return undefined;
+  }
+  return Buffer.from(value, 'base64url').length;
+}
+
+/**
+ * The contact every push names when WEB_PUSH_SUBJECT is unset. Push services see it on each notice, so it is the
+ * project's public page rather than anything about the person.
+ */
+export const DEFAULT_WEB_PUSH_SUBJECT = 'https://github.com/ClimbOutLabs/amanuensis';
+
+/**
+ * Parses `WEB_PUSH_PUBLIC_KEY`, `WEB_PUSH_PRIVATE_KEY` and the optional `WEB_PUSH_SUBJECT`. No keys means push is off.
+ * One key without the other, or a value that is not a key, fails the boot with the one thing to do next.
+ */
+export function parseWebPushSettings(raw: {
+  publicKey: string | undefined;
+  privateKey: string | undefined;
+  subject: string | undefined;
+}): WebPushSettings | undefined {
+  const publicKey = blankToUndefined(raw.publicKey?.trim());
+  const privateKey = blankToUndefined(raw.privateKey?.trim());
+  const subject = blankToUndefined(raw.subject?.trim()) ?? DEFAULT_WEB_PUSH_SUBJECT;
+  if (publicKey === undefined && privateKey === undefined) {
+    return undefined;
+  }
+  if (publicKey === undefined || privateKey === undefined) {
+    throw new Error(
+      'WEB_PUSH_PUBLIC_KEY and WEB_PUSH_PRIVATE_KEY must both be set, or both left out. Run the installer again to make a new pair.',
+    );
+  }
+  if (base64UrlByteLength(publicKey) !== VAPID_PUBLIC_KEY_BYTES) {
+    throw new Error('WEB_PUSH_PUBLIC_KEY is not a push key. Run the installer again to make a new pair.');
+  }
+  if (base64UrlByteLength(privateKey) !== VAPID_PRIVATE_KEY_BYTES) {
+    throw new Error('WEB_PUSH_PRIVATE_KEY is not a push key. Run the installer again to make a new pair.');
+  }
+  if (!/^(mailto:[^\s@]+@[^\s@]+|https:\/\/\S+)$/.test(subject)) {
+    throw new Error(
+      'WEB_PUSH_SUBJECT must start with mailto: or https://. Fix it, or remove the line to use the default.',
+    );
+  }
+  return { publicKey, privateKey, subject };
+}
+
+/**
+ * Parses `BROWSER_URL`: the browser sidecar's private HTTP address, such as the compose sidecar's
+ * `http://browser-relay:8792`. Unset or blank means no browser sidecar is configured. Anything else that is not
+ * an http(s) URL fails the boot.
+ */
+export function parseBrowserUrl(raw: string | undefined): string | undefined {
+  if (raw === undefined || raw.trim() === '') {
+    return undefined;
+  }
+  const trimmed = raw.trim();
+  if (normalizedOrigin(trimmed) === undefined) {
+    throw new Error(`BROWSER_URL must be an http(s) URL such as http://browser-relay:8792, got: ${trimmed}`);
+  }
+  return trimmed;
+}
+
+/** The shortest secret the browser sidecar accepts; a shorter one keeps its port closed. */
+const BROWSER_SECRET_MIN_LENGTH = 32;
+
+/**
+ * Parses `BROWSER_SECRET`: the value every request to the browser sidecar must carry. Unset or blank means
+ * none. A value that is too short fails the boot, since the sidecar would refuse it.
+ */
+export function parseBrowserSecret(raw: string | undefined): string | undefined {
+  if (raw === undefined || raw.trim() === '') {
+    return undefined;
+  }
+  const trimmed = raw.trim();
+  if (trimmed.length < BROWSER_SECRET_MIN_LENGTH) {
+    throw new Error(
+      `BROWSER_SECRET must be at least ${String(BROWSER_SECRET_MIN_LENGTH)} characters. Set a longer random value, or remove the line to leave the browser off.`,
+    );
+  }
+  return trimmed;
+}
+
 /**
  * The first-party origins: the operator's list, plus the Calendar connector's origin when one is configured.
  */
@@ -535,7 +629,7 @@ function parseSandboxBackend(options: { envKey: string; raw: string | undefined 
 }
 
 /** Most slot services the compose files define. */
-export const SANDBOX_MAX_SLOTS = 4;
+export const SANDBOX_MAX_SLOTS = 2;
 
 /** Which long-term memory backend Aman uses. */
 export type MemoryBackend = 'markdown' | 'hindsight';
@@ -645,6 +739,28 @@ export function parsePublicBaseUrl(raw: string | undefined, options: { allowPath
   }
   const path = segments.length === 0 ? '' : `/${segments.join('/')}`;
   return `${parsed.origin}${path}`;
+}
+
+/**
+ * Parses `SANDBOX_MIRROR_GO_EXTRA_HOSTS`: comma-separated lower-case host names such as `modules.example.com` (never IP addresses).
+ * A port, path, wildcard or upper-case letter fails the boot, since a dropped typo would quietly leave a
+ * module host blocked and a loose entry would suggest a wider match than the mirror makes.
+ */
+export function parseGoModuleHosts(raw: string | undefined): string[] {
+  const hosts = new Set<string>();
+  for (const entry of (raw ?? '').split(',')) {
+    const text = entry.trim();
+    if (text === '') {
+      continue;
+    }
+    if (!isGoModuleHostName(text)) {
+      throw new Error(
+        `SANDBOX_MIRROR_GO_EXTRA_HOSTS has an entry that is not a valid host name: "${text}". Each entry must be a lower-case host name with a dot, like example.com: no port, path, wildcard, IP address or single word such as localhost. Fix or remove that entry in the .env file, then restart the server.`,
+      );
+    }
+    hosts.add(text);
+  }
+  return [...hosts];
 }
 
 /** The addresses of proxies believed about visitor addresses: plain IP addresses only, so a name cannot widen it. */
@@ -1206,6 +1322,8 @@ export interface SharedServerConfiguration {
   MCP_REQUEST_TIMEOUT_MS: number;
   /** Max milliseconds for an MCP transport connection. Env: `MCP_CONNECT_TIMEOUT_MS`. Default 30 seconds. */
   MCP_CONNECT_TIMEOUT_MS: number;
+  /** Max bytes for one remote MCP tool-call HTTP response body (not GET SSE). Env: `MCP_TOOL_CALL_MAX_RESPONSE_BYTES`. Default 50 MB. */
+  MCP_TOOL_CALL_MAX_RESPONSE_BYTES: number;
   /**
    * Origins of the operator's own memory provider, as normalized `scheme://host[:port]` strings.
    * A connector saved as the memory provider on one of these origins is first-party: its tools that
@@ -1253,6 +1371,31 @@ export interface SharedServerConfiguration {
    * Env: `CALENDAR_ACCOUNT_SECRET`. Default unset.
    */
   CALENDAR_ACCOUNT_SECRET: string | undefined;
+  /**
+   * The VAPID key pair the server signs web push with, and the contact push services see. Push is off when the keys
+   * are unset. Env: `WEB_PUSH_PUBLIC_KEY`, `WEB_PUSH_PRIVATE_KEY`, `WEB_PUSH_SUBJECT` (defaults to the project page).
+   */
+  WEB_PUSH: WebPushSettings | undefined;
+  /**
+   * Turns on Aman's own browser. Off by default: with it off, the browser_* tools do not exist, whatever
+   * BROWSER_URL and BROWSER_SECRET are set to. Env: `BROWSER_ENABLED`. Default false.
+   */
+  BROWSER_ENABLED: boolean;
+  /**
+   * The browser sidecar's private HTTP address, such as the compose sidecar's `http://browser-relay:8792`.
+   * Required when BROWSER_ENABLED is true. Env: `BROWSER_URL`. Default unset.
+   */
+  BROWSER_URL: string | undefined;
+  /**
+   * The shared secret every request to the browser sidecar must carry. Required when BROWSER_ENABLED is
+   * true; the same value is given to the sidecar. Env: `BROWSER_SECRET`. Default unset.
+   */
+  BROWSER_SECRET: string | undefined;
+  /**
+   * Max milliseconds the browser waits for a page to finish opening before giving up.
+   * Env: `BROWSER_NAV_TIMEOUT_MS`. Default 30000.
+   */
+  BROWSER_NAV_TIMEOUT_MS: number;
   /**
    * The Email send list the server writes (`allowed_recipients.toml`). Set with the sidecar; the sidecar reads it
    * read-only. Env: `MAIL_POLICY_FILE`. Default unset, which means no send list is written.
@@ -1332,7 +1475,7 @@ export interface SharedServerConfiguration {
   SANDBOX_BACKEND: SandboxBackend;
   /** Name of the installer instance this server runs as; empty outside the installer. Env: `INSTALLER_INSTANCE`. */
   INSTALLER_INSTANCE: string;
-  /** Number of slot agents to use, 1 to 4. Env: `SANDBOX_SLOTS`. Default 4. */
+  /** Number of slot agents to use, 1 to 2. Env: `SANDBOX_SLOTS`. Default 2. */
   SANDBOX_SLOTS: number;
   /**
    * Directory holding one control directory per slot (`<dir>/<n>/agent.sock`). Env: `SANDBOX_SLOTS_DIR`.
@@ -1351,6 +1494,11 @@ export interface SharedServerConfiguration {
   SANDBOX_MIRROR_DOWNLOAD_MAX_BYTES: number;
   /** Largest total mirror cache, bytes. Env: `SANDBOX_MIRROR_CACHE_MAX_BYTES`. Default 10 GiB. */
   SANDBOX_MIRROR_CACHE_MAX_BYTES: number;
+  /**
+   * Further code hosts the Go mirror serves modules from, besides its built-in list: lower-case host names,
+   * comma-separated. Env: `SANDBOX_MIRROR_GO_EXTRA_HOSTS`. Default none.
+   */
+  SANDBOX_MIRROR_GO_EXTRA_HOSTS: string[];
   /**
    * Expected sandbox image as `<tag>@sha256:<64 hex chars>`. Never a bare
    * tag: the digest pin is enforced before any pull. Env: `SANDBOX_IMAGE`.
@@ -1650,6 +1798,12 @@ export interface SharedServerConfiguration {
    * Env: `STT_URL`. Default `http://aman-stt:8001`.
    */
   STT_URL: string;
+  /**
+   * Base URL of the `aman-tts` text-to-speech sidecar (`POST {url}/v1/speak`).
+   * The browser never calls it directly; `POST /api/v1/voice/speak` proxies through this server.
+   * Env: `TTS_URL`. Default `http://aman-tts:8002`.
+   */
+  TTS_URL: string;
   /**
    * Base URL of the Nominatim-compatible geocoder used by the embedded maps tools.
    * Env: `MAPS_GEOCODER_URL`. Default `https://nominatim.openstreetmap.org`.
@@ -2112,6 +2266,13 @@ const calendarSidecarMcpUrl = hostCalendarMcpUrl({
 });
 const mailSidecarMcpUrl = hostMailMcpUrl({ mailMcpUrl: mailEmailMcpUrl, mailAccountUrl: mailEmailAccountUrl });
 
+const browserEnabled = parseBoolean({ envKey: 'BROWSER_ENABLED', raw: getEnv('BROWSER_ENABLED'), defaultValue: false });
+const browserUrl = parseBrowserUrl(getEnv('BROWSER_URL'));
+const browserSecret = parseBrowserSecret(getEnv('BROWSER_SECRET'));
+if (browserEnabled && (browserUrl === undefined || browserSecret === undefined)) {
+  throw new Error('BROWSER_ENABLED is true, so BROWSER_URL and BROWSER_SECRET must both be set.');
+}
+
 const shared: SharedServerConfiguration = {
   LOG_LEVEL: getEnv('LOG_LEVEL', { defaultValue: 'info' }) ?? 'info',
   ACCESS_LOGS: parseBoolean({ envKey: 'ACCESS_LOGS', raw: getEnv('ACCESS_LOGS'), defaultValue: true }),
@@ -2142,6 +2303,11 @@ const shared: SharedServerConfiguration = {
     raw: getEnv('MCP_CONNECT_TIMEOUT_MS'),
     defaultValue: 30 * 1000,
   }),
+  MCP_TOOL_CALL_MAX_RESPONSE_BYTES: parsePositiveInt({
+    envKey: 'MCP_TOOL_CALL_MAX_RESPONSE_BYTES',
+    raw: getEnv('MCP_TOOL_CALL_MAX_RESPONSE_BYTES'),
+    defaultValue: 50 * 1024 * 1024,
+  }),
   FIRST_PARTY_MCP_ORIGINS: withMailSidecarOrigin({
     origins: firstPartyOriginsFor({
       raw: getEnv('FIRST_PARTY_MCP_ORIGINS'),
@@ -2152,12 +2318,25 @@ const shared: SharedServerConfiguration = {
   MAIL_EMAIL_MCP_URL: mailEmailMcpUrl,
   MAIL_SIDECAR_MCP_URL: mailSidecarMcpUrl,
   MAIL_EMAIL_ACCOUNT_URL: mailEmailAccountUrl,
+  WEB_PUSH: parseWebPushSettings({
+    publicKey: getEnv('WEB_PUSH_PUBLIC_KEY'),
+    privateKey: getEnv('WEB_PUSH_PRIVATE_KEY'),
+    subject: getEnv('WEB_PUSH_SUBJECT'),
+  }),
   MAIL_POLICY_FILE: parseOptionalPath(getEnv('MAIL_POLICY_FILE')),
   MAIL_POLICY_STATUS_FILE: parseOptionalPath(getEnv('MAIL_POLICY_STATUS_FILE')),
   CALENDAR_CONNECTOR_URL: calendarConnectorUrl,
   CALENDAR_SIDECAR_MCP_URL: calendarSidecarMcpUrl,
   CALENDAR_ACCOUNT_URL: calendarAccountUrl,
   CALENDAR_ACCOUNT_SECRET: parseCalendarAccountSecret(getEnv('CALENDAR_ACCOUNT_SECRET')),
+  BROWSER_ENABLED: browserEnabled,
+  BROWSER_URL: browserUrl,
+  BROWSER_SECRET: browserSecret,
+  BROWSER_NAV_TIMEOUT_MS: parsePositiveInt({
+    envKey: 'BROWSER_NAV_TIMEOUT_MS',
+    raw: getEnv('BROWSER_NAV_TIMEOUT_MS'),
+    defaultValue: 30_000,
+  }),
   TOOL_DISPATCH_MAX_CONCURRENCY: parsePositiveInt({
     envKey: 'TOOL_DISPATCH_MAX_CONCURRENCY',
     raw: getEnv('TOOL_DISPATCH_MAX_CONCURRENCY'),
@@ -2236,6 +2415,7 @@ const shared: SharedServerConfiguration = {
     raw: getEnv('SANDBOX_MIRROR_CACHE_MAX_BYTES'),
     defaultValue: 10 * 1024 * 1024 * 1024,
   }),
+  SANDBOX_MIRROR_GO_EXTRA_HOSTS: parseGoModuleHosts(getEnv('SANDBOX_MIRROR_GO_EXTRA_HOSTS')),
   SANDBOX_IMAGE: getEnv('SANDBOX_IMAGE', { defaultValue: '' }) ?? '',
   SANDBOX_RUNS_DIR: path.join(appDataDir, 'sandbox-runs'),
   SANDBOX_STATE_DIR: path.join(appDataDir, 'sandbox-state'),
@@ -2435,6 +2615,7 @@ const shared: SharedServerConfiguration = {
   }),
   MEMORY_SCREEN_URL: getEnv('MEMORY_SCREEN_URL', { defaultValue: '' }) ?? '',
   STT_URL: getEnv('STT_URL', { defaultValue: 'http://aman-stt:8001' }) ?? 'http://aman-stt:8001',
+  TTS_URL: getEnv('TTS_URL', { defaultValue: 'http://aman-tts:8002' }) ?? 'http://aman-tts:8002',
   MAPS_GEOCODER_URL: parseMapsUrl({
     envKey: 'MAPS_GEOCODER_URL',
     raw: getEnv('MAPS_GEOCODER_URL'),
@@ -2692,6 +2873,7 @@ export const SECRET_SETTING_NAMES = [
   'TRUEFOUNDRY_API_KEY',
   'TRUEFOUNDRY_SANDBOX_API_KEY',
   'POSTGRES_PASSWORD',
+  'WEB_PUSH_PRIVATE_KEY',
 ] as const;
 
 /** Connection URL settings: secret as a whole, and for the password inside. */
@@ -2724,6 +2906,7 @@ export type ConfiguredSecretSettings = Pick<
   SharedServerConfiguration,
   'TRUEFORGE_API_KEY' | 'NEBIUS_API_KEY' | 'MEMORY_SCREEN_AUTH_TOKEN' | 'OIDC'
 > &
+  Partial<Pick<SharedServerConfiguration, 'WEB_PUSH'>> &
   (
     | { STANDALONE: true }
     | ({ STANDALONE: false } & Pick<
@@ -2744,6 +2927,7 @@ export function getConfiguredSecretValues(config: ConfiguredSecretSettings = con
     NEBIUS_API_KEY: config.NEBIUS_API_KEY,
     MEMORY_SCREEN_AUTH_TOKEN: config.MEMORY_SCREEN_AUTH_TOKEN,
     OIDC_CLIENT_SECRET: config.OIDC?.OIDC_CLIENT_SECRET,
+    WEB_PUSH_PRIVATE_KEY: config.WEB_PUSH?.privateKey,
     ...(config.STANDALONE
       ? {}
       : {

@@ -295,6 +295,7 @@ export type {
 } from './components/RepositoryWorkContext.js';
 export { RunCodeStatusProvider, useOptionalRunCodeStatus } from './components/RunCodeStatusContext.js';
 export type { RunCodeStatus, RunCodeStatusApi } from './components/RunCodeStatusContext.js';
+export { SpokenReplyProvider, useSpokenReply } from './components/SpokenReplyContext.js';
 export type { TourCapabilities } from './components/tourPrompts.js';
 export { VoiceInputProvider, useOptionalVoiceInput } from './components/VoiceInputContext.js';
 export type { VoiceAvailability, VoiceInputApi, VoiceTranscription } from './components/VoiceInputContext.js';
@@ -353,11 +354,15 @@ export { ThreadWorkOnRepoControls, WorkOnRepoControls } from './containers/WorkO
 export type { WorkOnRepoControlsProps } from './containers/WorkOnRepoControls.js';
 export { HELP_BUTTON_LABEL, IRIS_HELP_CHOICES } from './help/helpModel.js';
 export type {
+  HelpConnectorState,
+  HelpGoogleLoginState,
   HelpHealthCheck,
   HelpHealthItem,
   HelpHealthStatus,
   HelpHostReport,
   HelpHostReportState,
+  HelpSetupStep,
+  HelpState,
 } from './help/helpModel.js';
 export { HelpProvider, useOptionalHelp } from './help/HelpProvider.js';
 export type { HelpApi, HelpPhase, HelpSession } from './help/HelpProvider.js';
@@ -430,6 +435,13 @@ export {
   shouldDownscaleImage,
   withImageDownscaling,
 } from './server/imageAttachmentAdapter.js';
+export { ServerVoiceRefusal } from './utils/spokenReplyPlayer.js';
+export type {
+  ServerVoiceApi,
+  ServerVoiceRefusalReason,
+  SpokenReplyPlayer,
+  SpokenReplyVoice,
+} from './utils/spokenReplyPlayer.js';
 
 // Curated chrome hooks (same instance as the SDK runtime). Deep primitives: install @assistant-ui/react.
 export { useAui, useAuiState } from './assistant-ui.js';
@@ -730,5 +742,7 @@ export { SessionsBrowserButton } from './atoms/SessionsBrowserButton.js';
 export type { SessionsBrowserButtonProps } from './atoms/SessionsBrowserButton.js';
 export { SpacesButton } from './atoms/SpacesButton.js';
 export type { SpacesButtonProps } from './atoms/SpacesButton.js';
+export { DeliveriesProvider, useOptionalDeliveries } from './deliveries/DeliveriesContext.js';
+export type { DeliveriesApi, DeliveryItem, DeliveryLink, DeliveryPage, PushDevice } from './deliveries/types.js';
 export { SpaceProvider, useOptionalSpaces } from './server/SpaceContext.js';
 export type { Space, SpaceFolder, SpaceFormat, SpaceStatus, SpaceStore } from './server/SpaceContext.js';

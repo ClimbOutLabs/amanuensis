@@ -10,6 +10,7 @@ import { createServer, defaultClientConditions } from 'vite';
 
 import { DEV_OPTIMIZE_DEPS } from '../src/devPrebundle.ts';
 import { findChromiumExecutable } from './support/findChromiumExecutable.js';
+import { FIRST_LOAD_TIMEOUT_MS } from './support/firstLoad.ts';
 import { privateViteCache } from './support/viteCache.ts';
 
 const RENDER_TIMEOUT_MS = 45_000;
@@ -150,7 +151,10 @@ test(
             ...(viewport.name === 'phone' ? { hasTouch: true, isMobile: true } : {}),
           });
           const page = await context.newPage();
-          await page.goto(`${fixtureUrl}?mode=${theme}`, { waitUntil: 'domcontentloaded', timeout: RENDER_TIMEOUT_MS });
+          await page.goto(`${fixtureUrl}?mode=${theme}`, {
+            waitUntil: 'domcontentloaded',
+            timeout: FIRST_LOAD_TIMEOUT_MS,
+          });
           await openSharingTab(page);
 
           const { rowBottom, footerTop, viewport: viewportHeight } = await lastRowAboveFooter(page);

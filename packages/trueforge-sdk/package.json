@@ -275,6 +275,17 @@
             },
             "default": "./dist/cjs/api/resources/spaces/exports.js"
         },
+        "./deliveries": {
+            "import": {
+                "types": "./dist/esm/api/resources/deliveries/exports.d.mts",
+                "default": "./dist/esm/api/resources/deliveries/exports.mjs"
+            },
+            "require": {
+                "types": "./dist/cjs/api/resources/deliveries/exports.d.ts",
+                "default": "./dist/cjs/api/resources/deliveries/exports.js"
+            },
+            "default": "./dist/cjs/api/resources/deliveries/exports.js"
+        },
         "./voice": {
             "import": {
                 "types": "./dist/esm/api/resources/voice/exports.d.mts",
@@ -340,6 +351,17 @@
                 "default": "./dist/cjs/api/resources/catalogs/resources/skills/exports.js"
             },
             "default": "./dist/cjs/api/resources/catalogs/resources/skills/exports.js"
+        },
+        "./deliveries/push": {
+            "import": {
+                "types": "./dist/esm/api/resources/deliveries/resources/push/exports.d.mts",
+                "default": "./dist/esm/api/resources/deliveries/resources/push/exports.mjs"
+            },
+            "require": {
+                "types": "./dist/cjs/api/resources/deliveries/resources/push/exports.d.ts",
+                "default": "./dist/cjs/api/resources/deliveries/resources/push/exports.js"
+            },
+            "default": "./dist/cjs/api/resources/deliveries/resources/push/exports.js"
         },
         "./internal/metrics": {
             "import": {

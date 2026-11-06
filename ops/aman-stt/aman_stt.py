@@ -346,7 +346,9 @@ class FasterWhisperTranscriber:
         self.transcribe(silence, None)
 
     def transcribe(self, audio: np.ndarray, language: str | None) -> tuple[str, str]:
-        segments, info = self._model.transcribe(audio, language=language)
+        # The bundled voice-activity model cuts out stretches without speech before decoding, so
+        # background noise does not come back as invented words.
+        segments, info = self._model.transcribe(audio, language=language, vad_filter=True)
         text = "".join(segment.text for segment in segments).strip()
         return text, info.language
 

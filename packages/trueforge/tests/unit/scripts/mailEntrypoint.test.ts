@@ -107,7 +107,8 @@ describe('mail-email entrypoint wrapper', () => {
     await writeFile(replacement, LIST_V2);
     await rename(replacement, policy);
     await eventually(async () => (await readOrEmpty(status)) === allowedRecipientsFileHash(LIST_V2));
-    expect(await startCount()).toBeGreaterThanOrEqual(2);
+    // The wrapper writes the hash once it has launched the new server, which may not have logged its start yet.
+    await eventually(async () => (await startCount()) >= 2);
   }, 30_000);
 
   it('starts the server without an env recipient list, so the list file always decides', async () => {
@@ -316,6 +317,8 @@ describe('mail-email entrypoint bounded stop', () => {
     await writeStub(true);
     startWrapperCaptured({ AMAN_MAIL_STOP_GRACE_SECONDS: '2' });
     await eventually(async () => (await readOrEmpty(status)) === allowedRecipientsFileHash(LIST_V1));
+    // The wrapper records the list before the server it started has written its pid, so wait for both.
+    await eventually(async () => (await serverPids()).length > 0);
     const firstPid = (await serverPids())[0];
     if (firstPid === undefined) throw new Error('the stand-in server never recorded its pid');
 

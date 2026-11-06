@@ -47,8 +47,8 @@ function load(file: string): unknown {
 describe('docker-compose.slots.yml', () => {
   const compose = ComposeSchema.parse(load('docker-compose.slots.yml'));
 
-  test('defines four slots, each fully hardened and with nothing the guest design forbids', () => {
-    expect(Object.keys(compose.services).sort()).toEqual(['sandbox-1', 'sandbox-2', 'sandbox-3', 'sandbox-4']);
+  test('defines two slots, each fully hardened and with nothing the guest design forbids', () => {
+    expect(Object.keys(compose.services).sort()).toEqual(['sandbox-1', 'sandbox-2']);
     for (const raw of Object.values(compose.services)) {
       const service = ServiceSchema.parse(raw);
       expect(service.security_opt).toEqual(
@@ -63,7 +63,7 @@ describe('docker-compose.slots.yml', () => {
       expect(service.volumes).toHaveLength(3);
       expect(
         service.volumes.every(volume =>
-          /^slot_(ws|ctl|mirror)_[1-4]:\/(workspace|run\/aman|run\/aman\/mirror)$/.test(volume),
+          /^slot_(ws|ctl|mirror)_[1-2]:\/(workspace|run\/aman|run\/aman\/mirror)$/.test(volume),
         ),
       ).toBe(true);
       expect(
@@ -89,16 +89,10 @@ describe('docker-compose.slots.yml', () => {
     ).toEqual([
       '${AMAN_SLOTS_INSTANCE:-aman}_slot_ctl_1',
       '${AMAN_SLOTS_INSTANCE:-aman}_slot_ctl_2',
-      '${AMAN_SLOTS_INSTANCE:-aman}_slot_ctl_3',
-      '${AMAN_SLOTS_INSTANCE:-aman}_slot_ctl_4',
       '${AMAN_SLOTS_INSTANCE:-aman}_slot_mirror_1',
       '${AMAN_SLOTS_INSTANCE:-aman}_slot_mirror_2',
-      '${AMAN_SLOTS_INSTANCE:-aman}_slot_mirror_3',
-      '${AMAN_SLOTS_INSTANCE:-aman}_slot_mirror_4',
       '${AMAN_SLOTS_INSTANCE:-aman}_slot_ws_1',
       '${AMAN_SLOTS_INSTANCE:-aman}_slot_ws_2',
-      '${AMAN_SLOTS_INSTANCE:-aman}_slot_ws_3',
-      '${AMAN_SLOTS_INSTANCE:-aman}_slot_ws_4',
     ]);
   });
 });
@@ -165,11 +159,11 @@ describe('installer/templates/instance/compose.yaml.tpl sandbox wiring', () => {
   test('switches the app to the slot backend and mounts each control volume read-only, with no socket', () => {
     expect(app.services.app.environment).toMatchObject({
       SANDBOX_BACKEND: 'slots',
-      SANDBOX_SLOTS: '4',
+      SANDBOX_SLOTS: '2',
       SANDBOX_SLOTS_DIR: '/run/aman-slots',
     });
     const mounts = app.services.app.volumes.filter(volume => volume.startsWith('slot_ctl_'));
-    expect(mounts).toHaveLength(4);
+    expect(mounts).toHaveLength(2);
     for (const [index, volume] of mounts.entries()) {
       expect(volume).toBe(`slot_ctl_${String(index + 1)}:/run/aman-slots/${String(index + 1)}:ro`);
     }
@@ -181,19 +175,15 @@ describe('installer/templates/instance/compose.yaml.tpl sandbox wiring', () => {
     expect(external.map(([, volume]) => volume.name)).toEqual([
       'main_slot_ctl_1',
       'main_slot_ctl_2',
-      'main_slot_ctl_3',
-      'main_slot_ctl_4',
       'main_slot_mirror_1',
       'main_slot_mirror_2',
-      'main_slot_mirror_3',
-      'main_slot_mirror_4',
     ]);
     expect(JSON.stringify(app)).not.toContain('slot_ws_');
   });
 
   test('mounts each mirror volume writable, so the app can run the package mirrors there', () => {
     const mounts = app.services.app.volumes.filter(volume => volume.startsWith('slot_mirror_'));
-    expect(mounts).toHaveLength(4);
+    expect(mounts).toHaveLength(2);
     for (const [index, volume] of mounts.entries()) {
       expect(volume).toBe(`slot_mirror_${String(index + 1)}:/run/aman-slots/${String(index + 1)}/mirror`);
     }
@@ -302,7 +292,7 @@ describe('installer/templates/instance/compose.yaml.tpl calendar connector', () 
       })
       .loose()
       .parse(load('docker-compose.yml'));
-    expect(dev.services.loopback.networks).toEqual(['default', 'calendar']);
+    expect(dev.services.loopback.networks).toEqual(['default', 'calendar', 'browser-control', 'voice']);
     expect(dev.services['calendar-caldav'].environment.CALENDAR_ACCOUNT_SECRET).toBe(
       dev.services.server.environment.CALENDAR_ACCOUNT_SECRET,
     );
@@ -313,6 +303,48 @@ describe('installer/templates/instance/compose.yaml.tpl calendar connector', () 
       .filter(([name]) => name !== 'loopback' && name !== 'calendar-caldav')
       .filter(([, service]) => JSON.stringify(service).includes('"calendar"'));
     expect(others.map(([name]) => name)).toEqual([]);
+  });
+
+  test("the dev stack walls the browser off: its only network is internal and holds nothing of the app's", () => {
+    // A service lists its networks by name, or maps each name to its settings (such as aliases).
+    const Networks = z.union([z.array(z.string()), z.record(z.string(), z.unknown())]);
+    const Service = z
+      .object({ networks: Networks.optional(), environment: z.record(z.string(), z.unknown()).optional() })
+      .loose();
+    const dev = z
+      .object({
+        services: z.record(z.string(), Service),
+        networks: z.record(z.string(), z.object({ internal: z.boolean().optional() }).loose().nullable()),
+      })
+      .loose()
+      .parse(load('docker-compose.yml'));
+    const networksOf = (service: z.infer<typeof Service> | undefined): string[] => {
+      const networks = service?.networks;
+      if (networks === undefined) {
+        return [];
+      }
+      return Array.isArray(networks) ? networks : Object.keys(networks);
+    };
+    const on = (network: string): string[] =>
+      Object.entries(dev.services)
+        .filter(([, service]) => networksOf(service).includes(network))
+        .map(([name]) => name)
+        .sort();
+    expect(networksOf(dev.services['browser'])).toEqual(['browser-internal']);
+    expect(dev.networks['browser-internal']?.internal).toBe(true);
+    expect(dev.networks['browser-control']?.internal).toBe(true);
+    expect(on('browser-internal')).toEqual(['browser', 'browser-gateway']);
+    expect(on('browser-control')).toEqual(['browser-gateway', 'loopback']);
+    expect(on('browser-egress')).toEqual(['browser-gateway']);
+    // The speech service reaches nothing but the app's holder on its own internal network.
+    expect(networksOf(dev.services['aman-tts'])).toEqual(['voice']);
+    expect(dev.networks['voice']?.internal).toBe(true);
+    expect(on('voice')).toEqual(['aman-tts', 'loopback']);
+    // The gateway holds the secret and checks it; the browser's container never gets it.
+    expect(Object.keys(dev.services['browser']?.environment ?? {})).not.toContain('BROWSER_SECRET');
+    expect(dev.services['browser-gateway']?.environment?.['BROWSER_SECRET']).toBe(
+      dev.services['server']?.environment?.['BROWSER_SECRET'],
+    );
   });
 
   test('the app is told nothing about a calendar agent when the connector is left out', () => {

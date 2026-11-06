@@ -10,6 +10,7 @@ import { chromium, type Browser, type Page } from 'playwright-core';
 import { createServer, defaultClientConditions } from 'vite';
 
 import { DEV_OPTIMIZE_DEPS } from '../src/devPrebundle.ts';
+import { FIRST_LOAD_TIMEOUT_MS } from './support/firstLoad.ts';
 import { privateViteCache } from './support/viteCache.ts';
 
 function findChromiumExecutable(): string {
@@ -126,7 +127,7 @@ test('home screens render in light and dark at desktop and phone width', { timeo
         const open = async (state: string) => {
           await page.goto(`${fixtureUrl}?state=${state}&theme=${theme}`, {
             waitUntil: 'domcontentloaded',
-            timeout: RENDER_TIMEOUT_MS,
+            timeout: FIRST_LOAD_TIMEOUT_MS,
           });
           await page.locator(`[data-fixture-state="${state}"]`).waitFor({ timeout: RENDER_TIMEOUT_MS });
           await page.getByRole('heading', { level: 1, name: GREETING }).waitFor({ timeout: RENDER_TIMEOUT_MS });
