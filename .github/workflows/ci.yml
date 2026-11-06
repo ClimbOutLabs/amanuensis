@@ -451,6 +451,46 @@ jobs:
       - name: Regenerate and check committed contracts
         run: pnpm sdk:check
 
+  # `docker compose up` from source, the documented way to run the full stack, on both architectures:
+  # every image must build and every service must report healthy.
+  compose-smoke:
+    name: Compose smoke (${{ matrix.arch }})
+    runs-on: ${{ matrix.arch == 'arm64' && 'ubuntu-24.04-arm' || 'ubuntu-latest' }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [x64, arm64]
+
+    steps:
+      - name: Check out repository code
+        uses: actions/checkout@v7
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version-file: '.nvmrc'
+
+      - name: No core pins in the checked-in compose files
+        run: pnpm test:default-compose
+
+      - name: Use the example settings
+        run: cp packages/trueforge/.env.example packages/trueforge/.env
+
+      - name: Start the stack and check it answers
+        run: pnpm smoke
+
+      - name: Show the stack's logs
+        if: failure()
+        run: pnpm smoke:logs --tail 100
+
+      - name: Stop the stack
+        if: always()
+        run: pnpm smoke:down -v
+
   # https://github.com/marketplace/actions/alls-green#why
   check:
     if: always()
@@ -464,6 +504,7 @@ jobs:
       - store-tests
       - private-data-scan
       - generated-contract-drift
+      - compose-smoke
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -478,9 +519,10 @@ jobs:
           STORE_TESTS: ${{ needs.store-tests.result }}
           PRIVATE_DATA_SCAN: ${{ needs.private-data-scan.result }}
           GENERATED_CONTRACT_DRIFT: ${{ needs.generated-contract-drift.result }}
+          COMPOSE_SMOKE: ${{ needs.compose-smoke.result }}
         run: |
           ok() { [ "$1" = success ] || [ "$1" = skipped ]; }
-          echo "detect-changes=$DETECT_CHANGES migration-order=$MIGRATION_ORDER typecheck-and-build=$TYPECHECK_AND_BUILD package-checks=$PACKAGE_CHECKS chart-checks=$CHART_CHECKS store-tests=$STORE_TESTS private-data-scan=$PRIVATE_DATA_SCAN generated-contract-drift=$GENERATED_CONTRACT_DRIFT"
+          echo "detect-changes=$DETECT_CHANGES migration-order=$MIGRATION_ORDER typecheck-and-build=$TYPECHECK_AND_BUILD package-checks=$PACKAGE_CHECKS chart-checks=$CHART_CHECKS store-tests=$STORE_TESTS private-data-scan=$PRIVATE_DATA_SCAN generated-contract-drift=$GENERATED_CONTRACT_DRIFT compose-smoke=$COMPOSE_SMOKE"
           [ "$DETECT_CHANGES" = success ] || exit 1
           [ "$MIGRATION_ORDER" = success ] || exit 1
           [ "$TYPECHECK_AND_BUILD" = success ] || exit 1
@@ -490,3 +532,4 @@ jobs:
           ok "$STORE_TESTS" || exit 1
           [ "$PRIVATE_DATA_SCAN" = success ] || exit 1
           [ "$GENERATED_CONTRACT_DRIFT" = success ] || exit 1
+          [ "$COMPOSE_SMOKE" = success ] || exit 1
