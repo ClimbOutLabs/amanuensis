@@ -7,7 +7,19 @@ import type { ContextMessage } from '../../../../src/core/runtime/AgentThread.ty
 import { internalSystemTag, untrustedDocumentTag } from '../../../../src/core/runtime/contextUtils';
 
 function call(id: string, name: string, args: unknown = {}) {
-  return { id, type: 'function' as const, function: { name, arguments: JSON.stringify(args) } };
+  return {
+    id,
+    type: 'function' as const,
+    function: { name, arguments: JSON.stringify(args) },
+    tool_info: {
+      type: 'mcp' as const,
+      mcp_server_id: 'test',
+      mcp_server_name: 'test',
+      original_tool_name: name,
+      is_approval_required: false,
+      is_client_side: false,
+    },
+  };
 }
 
 const USER: ContextMessage = { role: 'user', content: 'Remember that Dr Okafor is my dentist.' };

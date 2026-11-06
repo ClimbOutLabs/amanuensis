@@ -91,6 +91,10 @@ function scripted(steps: Call[]): ILLM['create'] {
 
 /** A tool that reads outside text, as a mail or web tool does. */
 class MailReader extends LocalToolMCP {
+  constructor() {
+    super({ tracing: NOOP_AGENT_TRACING });
+  }
+
   readonly name = 'Email';
   readonly displayName = 'Email';
   protected getTools(): ToolDefinition[] {
@@ -133,7 +137,7 @@ async function runTurn(steps: Call[]) {
       modelParams: undefined,
       responseFormat: undefined,
       iterationLimit: undefined,
-      toolSets: [new MailReader({ tracing: NOOP_AGENT_TRACING })],
+      toolSets: [new MailReader()],
       modelId: undefined,
       configuredModels: undefined,
     },
