@@ -7,31 +7,36 @@ const pause = (ms: number): Promise<void> =>
     setTimeout(resolve, ms);
   });
 
+function parts(): { stt: SpeechToText; turns: VoiceTurnRunner; tts: SpeechSynthesizer } {
+  const stt: SpeechToText = {
+    transcribe: async () => {
+      await pause(120);
+      return 'what time is it';
+    },
+  };
+  const turns: VoiceTurnRunner = {
+    sendMessage: async ({ onText }) => {
+      await pause(80);
+      onText('It is nine o clock. ');
+      return { kind: 'done', turnId: 't1', approvals: [] };
+    },
+    answerApproval: () => Promise.resolve({ kind: 'failed' }),
+    cancel: () => Promise.resolve(),
+  };
+  const tts: SpeechSynthesizer = {
+    stream: async function* () {
+      await pause(60);
+      yield new Uint8Array(960);
+    },
+  };
+  return { stt, turns, tts };
+}
+
+const recording = (): Int16Array => Int16Array.from([...quiet(300), ...hum(900), ...quiet(1300)]);
+
 describe('the latency harness', () => {
   it('measures end of speech to first audio, split into where the time went', async () => {
-    const stt: SpeechToText = {
-      transcribe: async () => {
-        await pause(120);
-        return 'what time is it';
-      },
-    };
-    const turns: VoiceTurnRunner = {
-      sendMessage: async ({ onText }) => {
-        await pause(80);
-        onText('It is nine o clock. ');
-        return { kind: 'done', turnId: 't1', approvals: [] };
-      },
-      answerApproval: () => Promise.resolve({ kind: 'failed' }),
-      cancel: () => Promise.resolve(),
-    };
-    const tts: SpeechSynthesizer = {
-      stream: async function* () {
-        await pause(60);
-        yield new Uint8Array(960);
-      },
-    };
-    const recording = Int16Array.from([...quiet(300), ...hum(900), ...quiet(1300)]);
-    const latency = await measureTurnLatency({ parts: { vad: new LoudnessVad(), stt, tts, turns }, recording });
+    const latency = await measureTurnLatency({ parts: { vad: new LoudnessVad(), ...parts() }, recording: recording() });
     // The closing silence is 600 ms, then 120 + 80 + 60 ms of work, give or take a listening window.
     expect(latency.endpointing_ms).toBeGreaterThanOrEqual(560);
     expect(latency.endpointing_ms).toBeLessThan(760);
@@ -45,5 +50,18 @@ describe('the latency harness', () => {
         latency.voice_first_audio_ms,
     );
     expect(latency.total_ms).toBeLessThan(1500);
+  }, 15_000);
+
+  it('keeps playing in real time after the process stalls, instead of rushing the rest of the recording', async () => {
+    // Another test in the same process can hold the event loop for a moment, as a slow CI machine does.
+    setTimeout(() => {
+      const until = Date.now() + 1500;
+      while (Date.now() < until) {
+        // Busy, on purpose.
+      }
+    }, 100);
+    const latency = await measureTurnLatency({ parts: { vad: new LoudnessVad(), ...parts() }, recording: recording() });
+    expect(latency.endpointing_ms).toBeGreaterThanOrEqual(560);
+    expect(latency.endpointing_ms).toBeLessThan(760);
   }, 15_000);
 });
