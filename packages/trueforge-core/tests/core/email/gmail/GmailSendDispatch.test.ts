@@ -61,7 +61,11 @@ async function dispatchApproved(input: { built: Built; info: SendInfo; draftId: 
   if (outcome === undefined) {
     throw new Error('expected one tool call result');
   }
-  return { outcome, sends: google.urls.filter(entry => entry.includes('/drafts/send')).length - before };
+  return {
+    outcome,
+    events: result.events,
+    sends: google.urls.filter(entry => entry.includes('/drafts/send')).length - before,
+  };
 }
 
 describe('an approved send at dispatch', () => {
@@ -93,6 +97,28 @@ describe('an approved send at dispatch', () => {
     expect(outcome.failure).toBe(true);
     expect(outcome.rawContent).toContain('Approval invalid');
     expect(sends).toBe(0);
+  });
+
+  it('leaves a not-sent receipt for the card when it stops the send, never a sent one', async () => {
+    const { events } = await approveThenDispatch({ editAfterCard: 'Send me the keys.' });
+    expect(events).toEqual([
+      expect.objectContaining({
+        type: 'aman.email.send_receipt',
+        tool_call_id: 'call-1',
+        result: { outcome: 'not_sent', reason: 'needs_ok_again' },
+      }),
+    ]);
+  });
+
+  it('leaves the sent receipt when the send goes out', async () => {
+    const { events } = await approveThenDispatch({ editAfterCard: undefined });
+    expect(events).toEqual([
+      expect.objectContaining({
+        type: 'aman.email.send_receipt',
+        tool_call_id: 'call-1',
+        result: expect.objectContaining({ outcome: 'sent', sent_message_id: 'sent-1' }),
+      }),
+    ]);
   });
 });
 
