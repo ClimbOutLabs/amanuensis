@@ -3,7 +3,7 @@
  *
  * A card rides the held-action machinery as a held call whose card carries the question: the
  * skill, the sites, and why it is asked. The first time a skill with declared sites runs in a
- * chat with no approval in force, one card asks for the whole declared list; when the gateway
+ * chat with no approval in force, one card asks for the declared sites still missing; when the gateway
  * refuses a site the skill did not declare, one card asks for that site. The turn never waits
  * on a card: commands run without the grant meanwhile and the gateway refuses what is not
  * granted. Answering records the decision and re-runs the held command, like any held action.

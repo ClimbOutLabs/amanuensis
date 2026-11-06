@@ -259,7 +259,8 @@ export function createSkillsRouter<TTransaction>(deps: SkillsRouterDeps<TTransac
     if (record === undefined) {
       return c.json({ error: { message: `No skill with this name: ${name}` } }, 404);
     }
-    // Clearing the allowance leaves a denial of the same site standing, and the other way round.
+    // The store holds one decision per site, so clearing the site removes it from both the
+    // allowed and the turned-down lists.
     if (record.network_allowed_hosts.includes(host)) {
       await setHostDecision(c, name, host, 'none');
     }

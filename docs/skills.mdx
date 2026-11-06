@@ -45,7 +45,7 @@ At runtime:
 
 A skill can name the sites it needs in its manifest (`network_hosts`). The sandbox has no network of its own, so a skill can reach only the sites you allow for it, and only while it is switched on for the chat.
 
-The first time a skill with named sites runs in a chat, a card asks whether it may reach the whole list. The chat keeps working without the sites until you answer. If a skill tries a site it did not name, the connection is refused at once and a card asks about that one site. A card always names the skill, the site, and why it is asking.
+The first time a skill with named sites runs in a chat, a card asks whether it may reach the sites it still needs: the ones you have not already allowed, and not the ones you turned down. The chat keeps working without the sites until you answer. If a skill tries a site it did not name, the connection is refused at once and a card asks about that one site. A card always names the skill, the site, and why it is asking.
 
 Each card takes one of three answers:
 

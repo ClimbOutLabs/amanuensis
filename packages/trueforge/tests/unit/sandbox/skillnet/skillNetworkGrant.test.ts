@@ -356,6 +356,101 @@ describe('recordSkillNetworkAnswer', () => {
     expect(grant?.hosts).toEqual(['api.github.com', 'github.com']);
   });
 
+  it('always allow on a first-use card carries in the declared sites already allowed one by one', async () => {
+    const registry = new SkillNetworkTokenRegistry();
+    const { store, records } = mutableStore([
+      record({
+        manifest: gitManifest({ network_hosts: TEN_X_HOSTS }),
+        network_approval: null,
+        network_allowed_hosts: ['github.com'],
+      }),
+    ]);
+    const cards = await drainSkillNetworkCards({ store, registry, ...CALL, skillNames: ['ten-x'] });
+    expect(cards).toEqual([{ skill_name: 'ten-x', hosts: ['api.github.com'], reason: 'first_use' }]);
+    await recordSkillNetworkAnswer({
+      store,
+      registry,
+      ...CALL,
+      skill_name: 'ten-x',
+      hosts: ['api.github.com'],
+      reason: 'first_use',
+      answer: 'always_allow',
+    });
+    expect(records.get('ten-x')?.network_approval).toEqual(['api.github.com', 'github.com']);
+    const grant = await resolveSkillNetworkGrant({
+      store,
+      registry,
+      ...CALL,
+      session_id: 'another-chat',
+      skillNames: ['ten-x'],
+    });
+    expect(grant?.hosts).toEqual(['api.github.com', 'github.com']);
+  });
+
+  it('always allow on a first-use card never approves a turned-down site, which a card can ask about again once its denial is cleared', async () => {
+    const registry = new SkillNetworkTokenRegistry();
+    const { store, records } = mutableStore([
+      record({
+        manifest: gitManifest({ network_hosts: TEN_X_HOSTS }),
+        network_approval: null,
+        network_denied_hosts: ['api.github.com'],
+      }),
+    ]);
+    const cards = await drainSkillNetworkCards({ store, registry, ...CALL, skillNames: ['ten-x'] });
+    expect(cards).toEqual([{ skill_name: 'ten-x', hosts: ['github.com'], reason: 'first_use' }]);
+    await recordSkillNetworkAnswer({
+      store,
+      registry,
+      ...CALL,
+      skill_name: 'ten-x',
+      hosts: ['github.com'],
+      reason: 'first_use',
+      answer: 'always_allow',
+    });
+    expect(records.get('ten-x')?.network_approval).toEqual(['github.com']);
+    await expect(
+      resolveSkillNetworkGrant({ store, registry, ...CALL, skillNames: ['ten-x'] }),
+    ).resolves.toBeUndefined();
+
+    await store.setSkillNetworkHostDecision({
+      tenant_id: 'default',
+      name: 'ten-x',
+      host: 'api.github.com',
+      decision: 'none',
+    });
+    const cardsAfterClear = await drainSkillNetworkCards({ store, registry, ...CALL, skillNames: ['ten-x'] });
+    expect(cardsAfterClear).toEqual([{ skill_name: 'ten-x', hosts: TEN_X_HOSTS, reason: 'first_use' }]);
+  });
+
+  it('always allow on a first-use card does not approve a site the declaration gained after the card was raised', async () => {
+    const registry = new SkillNetworkTokenRegistry();
+    const { store, records } = mutableStore([
+      record({ manifest: gitManifest({ network_hosts: TEN_X_HOSTS }), network_approval: null }),
+    ]);
+    const cards = await drainSkillNetworkCards({ store, registry, ...CALL, skillNames: ['ten-x'] });
+    expect(cards).toEqual([{ skill_name: 'ten-x', hosts: TEN_X_HOSTS, reason: 'first_use' }]);
+    const current = records.get('ten-x');
+    if (current === undefined) throw new Error('expected the ten-x record');
+    records.set('ten-x', {
+      ...current,
+      manifest: gitManifest({ network_hosts: [...TEN_X_HOSTS, 'uploads.github.com'] }),
+    });
+    await recordSkillNetworkAnswer({
+      store,
+      registry,
+      ...CALL,
+      skill_name: 'ten-x',
+      hosts: TEN_X_HOSTS,
+      reason: 'first_use',
+      answer: 'always_allow',
+    });
+    expect(records.get('ten-x')?.network_approval).toEqual(TEN_X_HOSTS);
+    const cardsAfter = await drainSkillNetworkCards({ store, registry, ...CALL, skillNames: ['ten-x'] });
+    expect(cardsAfter).toEqual([
+      { skill_name: 'ten-x', hosts: [...TEN_X_HOSTS, 'uploads.github.com'], reason: 'first_use' },
+    ]);
+  });
+
   it('always allow on an undeclared site stores it beside the declared list, which stays unchanged', async () => {
     const registry = new SkillNetworkTokenRegistry();
     const { store, records } = mutableStore([
