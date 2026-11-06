@@ -26791,7 +26791,7 @@
                 }
               }
             },
-            "description": "That channel is not set up yet."
+            "description": "That channel is not set up yet, or the number is not confirmed."
           },
           "502": {
             "content": {
@@ -26801,7 +26801,7 @@
                 }
               }
             },
-            "description": "The test text could not be sent."
+            "description": "The test text could not be sent, or the test call could not be started."
           }
         },
         "summary": "Try a channel",
