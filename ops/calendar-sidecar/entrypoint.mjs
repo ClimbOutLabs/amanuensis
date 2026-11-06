@@ -32,7 +32,8 @@ export function gatewayCommand({ host, port }) {
     [
       modulePath('./node_modules/supergateway/dist/index.js'),
       '--stdio',
-      `node ${modulePath('./node_modules/@ni-c/caldav-mcp/dist/index.js')}`,
+      // The guard applies the address rules to every lookup the tool server makes.
+      `node --import ${modulePath('./connect-guard.mjs')} ${modulePath('./node_modules/@ni-c/caldav-mcp/dist/index.js')}`,
       '--outputTransport',
       'streamableHttp',
       '--host',
@@ -67,6 +68,7 @@ export function startSupervisor({ file, host, port, deps = {} }) {
   let running = null;
   let serverUrl = null;
   let inFlight = null;
+  let walking = null;
   let discovery = { hash: null, at: 0, wait: DISCOVERY_RETRY_MS.first, url: null };
 
   function stop() {
@@ -94,26 +96,38 @@ export function startSupervisor({ file, host, port, deps = {} }) {
     serverUrl = url;
   }
 
-  // Which address the tool server belongs on: the walk's answer when it passes, the saved address until then.
-  async function wantedUrl({ account, hash }) {
+  // Asks where the calendars are without holding up the rounds: a slow calendar server must not keep a
+  // removed account's tool server running. The answer is used by the next round, which reads the file again.
+  function discover({ account, hash }) {
     if (discovery.hash !== hash) {
       discovery = { hash, at: 0, wait: DISCOVERY_RETRY_MS.first, url: null };
     }
-    if (now() >= discovery.at) {
-      const found = await discoverCalendarServer(account, deps);
-      if (found.result === 'ok') {
-        discovery = {
-          hash,
-          at: now() + DISCOVERY_RETRY_MS.settled,
-          wait: DISCOVERY_RETRY_MS.first,
-          url: found.server_url,
-        };
-      } else {
-        const wait = Math.min(discovery.wait * 2, DISCOVERY_RETRY_MS.cap);
-        discovery = { hash, at: now() + discovery.wait, wait, url: discovery.url };
-      }
+    if (walking?.hash === hash || now() < discovery.at) {
+      return;
     }
-    return discovery.url ?? account.url;
+    const promise = discoverCalendarServer(account, deps)
+      .catch(() => ({ result: 'server' }))
+      .then(found => {
+        if (discovery.hash !== hash) {
+          return;
+        }
+        discovery =
+          found.result === 'ok'
+            ? { hash, at: now() + DISCOVERY_RETRY_MS.settled, wait: DISCOVERY_RETRY_MS.first, url: found.server_url }
+            : {
+                hash,
+                at: now() + discovery.wait,
+                wait: Math.min(discovery.wait * 2, DISCOVERY_RETRY_MS.cap),
+                url: discovery.url,
+              };
+      })
+      .finally(() => {
+        if (walking?.promise === promise) {
+          walking = null;
+        }
+        void safeTick();
+      });
+    walking = { hash, promise };
   }
 
   // One round at a time: a call while a round runs waits for that round instead of starting another.
@@ -124,6 +138,11 @@ export function startSupervisor({ file, host, port, deps = {} }) {
     return inFlight;
   }
 
+  // A failed round is tried again at the next one; it must never end the process.
+  function safeTick() {
+    return tick().catch(() => undefined);
+  }
+
   async function round() {
     const text = readAccountText(file);
     const account = parseAccount(text);
@@ -131,31 +150,46 @@ export function startSupervisor({ file, host, port, deps = {} }) {
     const alive = child !== null && child.exitCode === null && child.signalCode === null;
     if (hash !== running || !alive) {
       stop();
-      if (account === null) {
-        return;
-      }
-      // An address that no longer passes the rules is not signed in to, whatever the file says.
-      const allowed = await allowedAddresses(hostOf(account.url), deps);
-      if (!allowed.ok) {
-        return;
-      }
-      // The saved address serves until the walk says where the calendars are, so the tools are offered
-      // straight away and a calendar server that is down for now does not hide them.
-      start({ account, hash, url: discovery.hash === hash && discovery.url !== null ? discovery.url : account.url });
     }
-    const url = await wantedUrl({ account, hash });
-    if (url !== serverUrl && hash === running) {
+    if (account === null) {
+      return;
+    }
+    discover({ account, hash });
+    // The saved address serves until the walk says where the calendars are, so the tools are offered
+    // straight away and a calendar server that is down for now does not hide them.
+    const url = discovery.hash === hash && discovery.url !== null ? discovery.url : account.url;
+    if (child !== null && url === serverUrl) {
+      return;
+    }
+    // The address the tool server is started on passes the rules every time, whatever passed before.
+    const allowed = await allowedAddresses(hostOf(url), deps);
+    const latest = readAccountText(file);
+    if (parseAccount(latest) === null || hashOf(latest) !== hash) {
       stop();
+      return;
+    }
+    stop();
+    if (allowed.ok) {
       start({ account, hash, url });
     }
   }
 
-  // A failed round is tried again at the next one; it must never end the process.
-  const safeTick = () => tick().catch(() => undefined);
+  /** Resolves once no round and no walk is running. */
+  async function settled() {
+    for (;;) {
+      const pending = inFlight ?? walking?.promise;
+      if (pending === undefined || pending === null) {
+        return;
+      }
+      await pending.catch(() => undefined);
+    }
+  }
+
   const timer = setInterval(safeTick, POLL_MS);
   void safeTick();
   return {
     tick,
+    settled,
     stop() {
       clearInterval(timer);
       stop();

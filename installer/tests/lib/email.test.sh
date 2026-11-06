@@ -424,6 +424,17 @@ test_check_ignores_python_files_in_the_working_folder
 test_compose_runs_the_connector
 test_outlook_families_are_skipped
 test_scripted_flags_with_piped_input
+test_provider_flag_takes_a_name() {
+  t_begin "--email-provider takes a name, since the menu numbers can change"
+  sandbox_new
+  install_python_stub
+  install_machine
+  run_install instance email main --email-provider 5 --email-address person@icloud.com
+  assert_rc 2
+  assert_flat_contains "$ERR" "--email-provider takes the provider's name: aol, fastmail, gmail, gmx, icloud, webde, yahoo, zoho or other."
+  sandbox_drop
+}
+
 test_yes_without_email_flags_skips_the_step
 test_question_at_a_terminal_with_other_servers
 test_instance_command_adds_changes_and_removes
@@ -431,4 +442,5 @@ test_sign_in_check_answers_are_plain
 test_password_is_read_from_stdin_without_spaces
 test_email_options_follow_their_commands
 test_menu_numbers_follow_the_menu
+test_provider_flag_takes_a_name
 tests_finish

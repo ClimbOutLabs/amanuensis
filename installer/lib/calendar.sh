@@ -198,6 +198,11 @@ calendar_ask_password() {
 # command passes CAL_EXPLICIT=1 and always asks the rest. Flags answer any question they cover.
 calendar_collect() { # install|instance
   local names count preset google_steps_shown=0
+  # The menu numbers follow the order on screen and can change, so a flag names its provider.
+  case "$OPT_CAL_PROVIDER" in
+    '' | *[!0-9]*) ;;
+    *) usage_die "--calendar-provider takes the provider's name: fastmail, gmx, google, icloud, webde, yahoo or other." ;;
+  esac
   CAL_PROVIDER=$OPT_CAL_PROVIDER
   CAL_EMAIL=$OPT_CAL_EMAIL
   CAL_URL=$OPT_CAL_URL

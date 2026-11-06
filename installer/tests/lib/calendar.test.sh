@@ -431,6 +431,17 @@ $CAL_SECRET
   sandbox_drop
 }
 
+test_provider_flag_takes_a_name() {
+  t_begin "--calendar-provider takes a name, since the menu numbers can change"
+  sandbox_new
+  install_for_calendar
+  run_install instance calendar main --yes --calendar-provider 4 --calendar-email person@icloud.com
+  assert_rc 2
+  assert_flat_contains "$ERR" "--calendar-provider takes the provider's name: fastmail, gmx, google, icloud, webde, yahoo or other."
+  assert_eq "$(cal_value CALDAV_URL)" "" "nothing saved"
+  sandbox_drop
+}
+
 test_presets
 test_url_refusals
 test_secret_rules
@@ -454,4 +465,5 @@ test_gmail_with_fastmail_stops
 test_menu_numbers_follow_the_menu
 test_icloud_flags_save
 test_icloud_picked_by_number
+test_provider_flag_takes_a_name
 tests_finish

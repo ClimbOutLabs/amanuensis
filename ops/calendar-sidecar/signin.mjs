@@ -3,18 +3,27 @@
 // anything the server said, because a server's answer can echo the login.
 //
 // Every host this walk connects to passes the address rules first, and the connection uses the addresses
-// that were checked. A calendar home on another host (iCloud keeps it on pNN-caldav.icloud.com) is not
-// trusted because the server named it: it passes the same rules, and the walk is run again from it, since
+// that were checked. The principal must sit on the host the walk asked. A calendar home on another host
+// (iCloud keeps it on pNN-caldav.icloud.com) is not trusted because the server named it: it must belong to
+// the same provider as the saved address, pass the same rules, and the walk is run again from it, since
 // the tool server only ever talks to the one host it is started on.
+//
+// The tool server also falls back to /.well-known/caldav and the site root when an address names no
+// principal, and treats some refusals as soft. This walk does not copy those fallbacks: an address that
+// names no principal is left to the tool server on its own host, as before.
 import { Buffer } from 'node:buffer';
 import { request as httpsRequest } from 'node:https';
+import { isIP } from 'node:net';
 import { URL } from 'node:url';
 
 import { hrefsOf, parseMultiStatus, propfindBody, resourceTypeHas } from '@ni-c/caldav-mcp/dist/dav-xml.js';
 
 import { addressIsWellFormed, allowedAddresses, hostOf } from './account.mjs';
 
+// How long one request may sit silent, and how long the whole walk may take, so a slow server can never
+// hold the save check or the supervisor for long.
 export const CHECK_TIMEOUT_MS = 20_000;
+export const WALK_TIMEOUT_MS = 45_000;
 
 // The properties the tool server asks for at each step, so a server answers this walk as it answers the tools.
 const HOME_PROPS = ['D:resourcetype', 'D:current-user-principal', 'C:calendar-home-set'];
@@ -66,7 +75,7 @@ export async function checkSignIn(account, deps = {}) {
  * saved address when everything sits on its host, or the calendar home set when that lives on another host.
  */
 export async function discoverCalendarServer(account, deps = {}) {
-  const session = { account, deps, hosts: new Map() };
+  const session = { account, deps, hosts: new Map(), deadline: Date.now() + (deps.walkTimeoutMs ?? WALK_TIMEOUT_MS) };
   const first = await walk({ session, start: account.url });
   if (first.result !== 'elsewhere') {
     return first;
@@ -93,7 +102,8 @@ async function walk({ session, start }) {
     return { result: 'ok', server_url: start };
   }
   const principalUrl = resolveHref({ href: principalHref, base: root });
-  if (principalUrl === null) {
+  // The tool server never leaves the host it asked, so neither does the login on the way to the principal.
+  if (principalUrl === null || originOf(principalUrl) !== originOf(root)) {
     return { result: 'server' };
   }
   const onPrincipal = await propfind({ session, url: principalUrl, depth: 0, props: PRINCIPAL_PROPS });
@@ -107,19 +117,40 @@ async function walk({ session, start }) {
     return { result: 'server' };
   }
   const origin = originOf(root);
-  if ([principalUrl, ...homes].every(url => originOf(url) === origin)) {
+  if (homes.every(url => originOf(url) === origin)) {
     return { result: 'ok', server_url: start };
   }
-  // The tool server talks to one host only, so every home set must sit on the same other host.
+  // The tool server talks to one host only, so every home set must sit on the same other host, and that
+  // host must belong to the provider the person chose.
   if (homes.length === 0 || new Set(homes.map(originOf)).size !== 1) {
     return { result: 'server' };
   }
   const home = new URL(homes[0]);
+  if (!sameProvider({ saved: hostOf(session.account.url), other: home.hostname.toLowerCase() })) {
+    return { result: 'server' };
+  }
   return { result: 'elsewhere', next: `${home.origin}${home.pathname}` };
 }
 
 function originOf(url) {
   return new URL(url).origin;
+}
+
+/**
+ * True when `other` sits under the domain the saved host belongs to: the saved host without its first
+ * label, kept only when at least two labels remain. caldav.provider.example and p42-caldav.provider.example
+ * pass; a host somewhere else on the internet does not, whatever the saved server names. A saved address
+ * with only two labels has no parent of its own, so its calendars must stay on that one host.
+ */
+export function sameProvider({ saved, other }) {
+  if (other === saved) {
+    return true;
+  }
+  const labels = saved.split('.');
+  if (labels.length < 3 || isIP(saved) !== 0) {
+    return false;
+  }
+  return other.endsWith(`.${labels.slice(1).join('.')}`);
 }
 
 /** A server's link as an absolute https address with no name or password in it, or null. */
@@ -177,12 +208,18 @@ function send({ session, target, depth, body, addresses }) {
   const { account, deps } = session;
   const request = deps.request ?? httpsRequest;
   const timeoutMs = deps.timeoutMs ?? CHECK_TIMEOUT_MS;
+  const left = session.deadline - Date.now();
+  if (left <= 0) {
+    return Promise.resolve({ result: 'server' });
+  }
   const basic = Buffer.from(`${account.username}:${account.password}`, 'utf8').toString('base64');
   return new Promise(done => {
     let finished = false;
+    let walkTimer = null;
     const finish = answer => {
       if (!finished) {
         finished = true;
+        clearTimeout(walkTimer);
         done(answer);
       }
     };
@@ -199,7 +236,9 @@ function send({ session, target, depth, body, addresses }) {
         'Content-Type': 'application/xml; charset=utf-8',
         'Content-Length': Buffer.byteLength(body),
       },
-      // The connection uses the addresses just checked, not a second lookup.
+      ...(deps.tls ?? {}),
+      // The connection uses the addresses just checked, not a second lookup. It comes last so nothing
+      // passed in can replace it.
       lookup: (_name, lookupOptions, callback) => {
         const entries = addresses.map(address => ({ address, family: address.includes(':') ? 6 : 4 }));
         if (lookupOptions?.all === true) {
@@ -208,7 +247,6 @@ function send({ session, target, depth, body, addresses }) {
           callback(null, entries[0].address, entries[0].family);
         }
       },
-      ...(deps.tls ?? {}),
     };
     const req = request(options, response => {
       const status = response.statusCode ?? 0;
@@ -235,6 +273,11 @@ function send({ session, target, depth, body, addresses }) {
       req.destroy();
       finish({ result: 'server' });
     });
+    // A server that answers a trickle at a time never trips the silence timer, so the walk has its own end.
+    walkTimer = setTimeout(() => {
+      req.destroy();
+      finish({ result: 'server' });
+    }, left);
     req.on('error', error => finish({ result: CERTIFICATE_ERRORS.has(error?.code) ? 'certificate' : 'server' }));
     req.end(body);
   });
