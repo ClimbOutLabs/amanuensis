@@ -47,9 +47,16 @@ export function runLocalUserStoreContractSuite(getStore: () => ILocalUserStore):
       store.createUser(record({ id: 'user-2', email: 'other@example.com' })),
     ]);
     const landed = results.filter(result => result.status === 'fulfilled');
-    const refused = results.filter(result => result.status === 'rejected');
+    const reasons: unknown[] = [];
+    for (const result of results) {
+      if (result.status === 'rejected') {
+        reasons.push(result.reason);
+      }
+    }
     expect(landed).toHaveLength(1);
-    expect(refused).toHaveLength(1);
+    expect(reasons).toHaveLength(1);
+    // The refusal is the store's own error, never a raw database error leaking through.
+    expect(reasons[0]).toBeInstanceOf(LocalUserAlreadyExistsError);
     const user = await store.getUser();
     expect(user).toBeDefined();
   });

@@ -1,3 +1,5 @@
+import type { Generated, Selectable } from 'kysely';
+
 /**
  * The one person who signs in with a password Aman keeps itself (local sign-in,
  * `TRUEFORGE_AUTH_MODE=local`). There is never more than one row: creating a second
@@ -19,20 +21,26 @@ export interface LocalUserTable {
   email: string;
   password_hash: string;
   session_version: number;
+  /**
+   * Always the same value on every row (true on Postgres, 1 on SQLite), written by the
+   * database default and never by the app. A unique index over it lets the table hold
+   * exactly one row, so the one-owner rule holds by construction, not by timing.
+   */
+  singleton: Generated<boolean | number>;
   created_at: string | Date;
   updated_at: string | Date;
 }
 
 /** Thrown when a create is attempted while the one local user already exists. */
 export class LocalUserAlreadyExistsError extends Error {
-  constructor() {
-    super('This instance already has its sign-in. Only one person can be set up.');
+  constructor(options?: ErrorOptions) {
+    super('This instance already has its sign-in. Only one person can be set up.', options);
     this.name = 'LocalUserAlreadyExistsError';
   }
 }
 
 /** Row to record: Postgres hands timestamps back as Date, SQLite as the stored text. */
-export function localUserRecordFromRow(row: LocalUserTable): LocalUserRecord {
+export function localUserRecordFromRow(row: Selectable<LocalUserTable>): LocalUserRecord {
   return {
     id: row.id,
     email: row.email,
@@ -48,8 +56,8 @@ export interface ILocalUserStore {
   getUser(): Promise<LocalUserRecord | undefined>;
   /**
    * Stores the first local user. Refuses with {@link LocalUserAlreadyExistsError} when one
-   * already exists; the check and the insert happen together so two first-run creates
-   * racing each other cannot both land.
+   * already exists; the table itself holds only one row, so two first-run creates racing
+   * each other cannot both land.
    */
   createUser(record: LocalUserRecord): Promise<void>;
   /**
