@@ -13,6 +13,7 @@ import { AgentsClient } from "../resources/agents/client/Client.js";
 import { MetricsClient } from "../resources/metrics/client/Client.js";
 import { SchedulesClient } from "../resources/schedules/client/Client.js";
 import { SessionsClient } from "../resources/sessions/client/Client.js";
+import { TelegramClient } from "../resources/telegram/client/Client.js";
 
 export declare namespace InternalClient {
     export type Options = BaseClientOptions;
@@ -25,6 +26,7 @@ export class InternalClient {
     protected _metrics: MetricsClient | undefined;
     protected _schedules: SchedulesClient | undefined;
     protected _sessions: SessionsClient | undefined;
+    protected _telegram: TelegramClient | undefined;
     protected _agents: AgentsClient | undefined;
 
     constructor(options: InternalClient.Options) {
@@ -41,6 +43,10 @@ export class InternalClient {
 
     public get sessions(): SessionsClient {
         return (this._sessions ??= new SessionsClient(this._options));
+    }
+
+    public get telegram(): TelegramClient {
+        return (this._telegram ??= new TelegramClient(this._options));
     }
 
     public get agents(): AgentsClient {
