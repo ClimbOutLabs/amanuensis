@@ -419,6 +419,8 @@ function createTurnResolver(deps: {
   /** Lists the person's personas, so the search keeps to the chats this persona may recall; absent, the tool is not offered. */
   personaStore: Pick<IPersonaStore, 'listPersonas'> | undefined;
   spaceStore: ISpaceStore;
+  /** Instance settings store; the maps server addresses are resolved from it once per turn. */
+  globalSettingsStore: IGlobalSettingsStore;
   /** Per-user Google logins; absent, no Gmail tools mount. */
   googleConnectionStore?: IGoogleConnectionStore | undefined;
   /** From CreateTurnRequest.client_timezone. See ITurnResourceResolver.clientTimezone. */
@@ -479,6 +481,7 @@ function createTurnResolver(deps: {
     chatSearchEnabled,
     personaStore,
     spaceStore,
+    globalSettingsStore,
     googleConnectionStore,
     turnArtifactStore,
     clientTimezone,
@@ -957,6 +960,7 @@ function createTurnResolver(deps: {
     {
       store: spaceStore,
       googleConnections: googleConnectionStore,
+      globalSettingsStore,
       authority: { tenantId: tenant_id, userRef },
       sessionId,
       schedules,
@@ -1787,6 +1791,7 @@ async function beginAcceptedTurnExecution(
         sessionStore: deps.sessionStore,
         spaceStore: deps.spaceStore,
         googleConnectionStore: deps.googleConnectionStore,
+        globalSettingsStore: deps.globalSettingsStore,
         logger: deps.logger,
         signal: abortController.signal,
         userRef,
@@ -2702,6 +2707,7 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
       personaStore: deps.personaStore,
       spaceStore: deps.spaceStore,
       googleConnectionStore: deps.googleConnectionStore,
+      globalSettingsStore: deps.globalSettingsStore,
       clientTimezone: body.client_timezone,
       spokenReply: body.spoken_reply,
       toolOutputScreenEnabled,

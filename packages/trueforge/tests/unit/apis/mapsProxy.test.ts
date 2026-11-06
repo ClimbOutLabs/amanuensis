@@ -15,6 +15,7 @@ import type { Authenticator } from '../../../src/auth/authenticator';
 import { resolveRequestContext, type RequestContext } from '../../../src/auth/identity';
 import { createUiSessionAuthMiddleware } from '../../../src/auth/middleware';
 import configuration from '../../../src/config';
+import type { IGlobalSettingsStore } from '../../../src/db/globalSettingsStore';
 import { TENANT_ID } from '../../../src/tenancy';
 import { InMemorySentinelSettingsStore } from '../../fixtures/InMemorySentinelSettingsStore';
 
@@ -105,10 +106,23 @@ function pngResponse(init: ResponseInit = {}): Response {
 describe('tile proxy route', () => {
   const store = new InMemorySentinelSettingsStore();
   const logger = createLogger({ silent: true });
+  const savedSettings = new Map<string, string>();
+  const globalSettingsStore: IGlobalSettingsStore = {
+    getSetting: input => {
+      const value = savedSettings.get(input.key);
+      return Promise.resolve(
+        value === undefined ? undefined : { key: input.key, value, updated_at: '2026-01-01T00:00:00.000Z' },
+      );
+    },
+    setSetting: () => Promise.reject(new Error('not used by the tile proxy')),
+    deleteSetting: () => Promise.resolve(),
+    compareAndSetSetting: () => Promise.resolve(false),
+  };
   let app: Hono;
   let fetchSpy: jest.SpyInstance<Promise<Response>, Parameters<typeof fetch>>;
 
   beforeEach(async () => {
+    savedSettings.clear();
     await store.patch({
       tenant_id: TENANT_ID,
       created_by: USER.subject.id,
@@ -124,7 +138,13 @@ describe('tile proxy route', () => {
     app.use('*', createUiSessionAuthMiddleware(cookieAuthenticator));
     app.route(
       '/api/maps',
-      createMapsRouter({ sentinelSettingsStore: store, resolveRequestContext, logger, now: () => 1_000_000 }),
+      createMapsRouter({
+        sentinelSettingsStore: store,
+        globalSettingsStore,
+        resolveRequestContext,
+        logger,
+        now: () => 1_000_000,
+      }),
     );
     fetchSpy = jest.spyOn(globalThis, 'fetch');
   });
@@ -167,6 +187,22 @@ describe('tile proxy route', () => {
     expect(sent.has('Cookie')).toBe(false);
     expect(sent.has('Referer')).toBe(false);
     expect(init?.redirect).toBe('manual');
+  });
+
+  it('fetches tiles from the tile address saved in Settings, not the built-in default', async () => {
+    const fromEnv = configuration.MAPS_URL_FROM_ENV.MAPS_TILE_URL;
+    configuration.MAPS_URL_FROM_ENV.MAPS_TILE_URL = false;
+    try {
+      savedSettings.set('maps_tile_url', 'https://tiles.example.internal/{z}/{x}/{y}.png');
+      fetchSpy.mockImplementation(() => Promise.resolve(pngResponse()));
+      const response = await get('7/3/4.png');
+      expect(response.status).toBe(200);
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+      const [url] = fetchSpy.mock.calls[0] ?? [];
+      expect(String(url)).toBe('https://tiles.example.internal/7/3/4.png');
+    } finally {
+      configuration.MAPS_URL_FROM_ENV.MAPS_TILE_URL = fromEnv;
+    }
   });
 
   it('rejects bad coordinates with 400 before any upstream call', async () => {

@@ -40,6 +40,7 @@
     "route:dataImport": "No topic yet: importing data exported from another Aman.",
     "route:delivery": "No topic yet: the Reach me panel, see settings:reach-me.",
     "route:emailAccount": "No topic yet: connecting email with an app password, see the email-preset rows.",
+    "route:mapsSettings": "No topic yet: changing the maps servers in Settings, Connectors. The Maps card explains itself, with a problem under any address that cannot be used.",
     "route:mcpOAuth": "Not a screen: the sign-in step a connector's own login comes back through.",
     "route:repository": "No topic yet: letting a chat work on a code project.",
     "route:session": "The chat itself; every topic is about using it.",

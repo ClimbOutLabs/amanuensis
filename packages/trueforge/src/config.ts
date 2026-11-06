@@ -149,6 +149,12 @@ function getEnv(key: string, options?: GetEnvOptions): string | undefined {
   return undefined;
 }
 
+/** Whether an environment variable carries a real value: present and not blank. */
+function envIsSet(key: string): boolean {
+  const value = getEnv(key, { required: false });
+  return value !== undefined && value.trim() !== '';
+}
+
 function randomAlphanumeric(length: number): string {
   return Array.from({ length }, () => Math.floor(Math.random() * 36).toString(36)).join('');
 }
@@ -898,8 +904,88 @@ export function parseAllowedOrigins(raw: string | undefined): string[] {
   return origins;
 }
 
+/** Why a maps server address cannot be used, or null when it can: the kinds of the one maps address rule. */
+export type MapsUrlProblemKind = 'scheme' | 'userinfo' | 'query-or-hash' | 'link-local-or-metadata' | 'plain-http';
+
+/** The IPv4 address a host names, including one written as an IPv4-mapped IPv6 address; null for names and other IPv6 addresses. */
+function ipv4AddressOf(host: string): string | null {
+  const lowered = host.trim().toLowerCase();
+  const bare = lowered.startsWith('[') && lowered.endsWith(']') ? lowered.slice(1, -1) : lowered;
+  const withoutZone = bare.split('%')[0] ?? '';
+  if (isIP(withoutZone) === 4) {
+    return withoutZone;
+  }
+  if (isIP(withoutZone) !== 6) {
+    return null;
+  }
+  const normalised = normaliseIpv6(withoutZone);
+  const prefix = '0000:0000:0000:0000:0000:ffff:';
+  if (!normalised.startsWith(prefix)) {
+    return null;
+  }
+  const groups = normalised.slice(prefix.length).split(':');
+  const num1 = Number.parseInt(groups[0] ?? '', 16);
+  const num2 = Number.parseInt(groups[1] ?? '', 16);
+  if (Number.isNaN(num1) || Number.isNaN(num2)) {
+    return null;
+  }
+  return `${String(num1 >> 8)}.${String(num1 & 0xff)}.${String(num2 >> 8)}.${String(num2 & 0xff)}`;
+}
+
 /**
- * Parse a maps upstream URL: must be https (http only for loopback), no query or hash. Fails fast at
+ * Whether `host` is a link-local address or a cloud metadata address. Those belong to the network or
+ * to the cloud host itself, never to a maps server, so they are refused over https as well as http.
+ */
+function isLinkLocalOrMetadataHost(host: string): boolean {
+  const lowered = host.trim().toLowerCase();
+  const bare = lowered.startsWith('[') && lowered.endsWith(']') ? lowered.slice(1, -1) : lowered;
+  if (bare === 'metadata.google.internal') {
+    return true;
+  }
+  const ipv4 = ipv4AddressOf(bare);
+  if (ipv4 !== null) {
+    const [a, b] = ipv4.split('.').map(part => Number.parseInt(part, 10));
+    return a === 169 && b === 254;
+  }
+  const withoutZone = bare.split('%')[0] ?? '';
+  if (isIP(withoutZone) === 6) {
+    const firstGroup = Number.parseInt(normaliseIpv6(withoutZone).slice(0, 4), 16);
+    return firstGroup >= 0xfe80 && firstGroup <= 0xfebf;
+  }
+  return false;
+}
+
+/**
+ * The one rule for a maps server address, applied at boot to the environment variables and in
+ * Settings to a saved address: https anywhere; plain http only for this computer or a private
+ * network; no query or hash; no user name or password in the address; link-local and cloud
+ * metadata addresses always refused. Returns the problem, or null when the address is fine.
+ */
+export function mapsUrlProblem(parsed: URL): MapsUrlProblemKind | null {
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    return 'scheme';
+  }
+  if (parsed.username !== '' || parsed.password !== '') {
+    return 'userinfo';
+  }
+  if (parsed.search !== '' || parsed.hash !== '') {
+    return 'query-or-hash';
+  }
+  if (isLinkLocalOrMetadataHost(parsed.hostname)) {
+    return 'link-local-or-metadata';
+  }
+  if (parsed.protocol === 'http:') {
+    const ipv4 = ipv4AddressOf(parsed.hostname);
+    const privateHost = isPrivateNetworkHost(parsed.hostname) || (ipv4 !== null && isPrivateIpv4(ipv4));
+    if (!privateHost) {
+      return 'plain-http';
+    }
+  }
+  return null;
+}
+
+/**
+ * Parse a maps upstream URL with the one maps address rule (see mapsUrlProblem). Fails fast at
  * boot like PUBLIC_BASE_URL. Trailing slashes are trimmed; callers join paths.
  */
 function parseMapsUrl({
@@ -920,14 +1006,21 @@ function parseMapsUrl({
   } catch (error) {
     throw new Error(`${envKey} must be a valid URL`, { cause: error });
   }
-  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+  const problem = mapsUrlProblem(parsed);
+  if (problem === 'scheme') {
     throw new Error(`${envKey} must be an http(s) URL`);
   }
-  if (parsed.protocol === 'http:' && !isLoopbackHost(parsed.hostname)) {
-    throw new Error(`${envKey} must use https: plain http is only allowed for localhost, 127.0.0.0/8 or [::1]`);
+  if (problem === 'userinfo') {
+    throw new Error(`${envKey} must not include a user name or password`);
   }
-  if (parsed.search !== '' || parsed.hash !== '') {
+  if (problem === 'query-or-hash') {
     throw new Error(`${envKey} must not include a query or hash`);
+  }
+  if (problem === 'link-local-or-metadata') {
+    throw new Error(`${envKey} must not be a link-local or cloud metadata address`);
+  }
+  if (problem === 'plain-http') {
+    throw new Error(`${envKey} must use https: plain http is only allowed for this computer or a private network`);
   }
   for (const placeholder of requiredPlaceholders) {
     if (!value.includes(placeholder)) {
@@ -936,6 +1029,14 @@ function parseMapsUrl({
   }
   return value.endsWith('/') && value.length > 1 ? value.slice(0, -1) : value;
 }
+
+/** Built-in maps upstream defaults, used when neither the environment nor Settings sets a value. */
+export const MAPS_GEOCODER_DEFAULT_URL = 'https://nominatim.openstreetmap.org';
+export const MAPS_ROUTER_DEFAULT_URL = 'https://router.project-osrm.org';
+export const MAPS_WALKING_ROUTER_DEFAULT_URL = 'https://routing.openstreetmap.de/routed-foot';
+export const MAPS_CYCLING_ROUTER_DEFAULT_URL = 'https://routing.openstreetmap.de/routed-bike';
+export const MAPS_TRANSIT_DEFAULT_URL = 'https://api.transitous.org/api/v6';
+export const MAPS_TILE_DEFAULT_URL = 'https://tile.openstreetmap.org/{z}/{x}/{y}.png';
 
 /** Parses `MAPS_ROUTER_PROVIDER`. Unset/blank → `osrm`. Unknown values throw. */
 function parseMapsRouterProvider(raw: string | undefined): string {
@@ -1903,6 +2004,19 @@ export interface SharedServerConfiguration {
    */
   MAPS_USER_AGENT: string;
   /**
+   * Whether each maps URL above came from its environment variable (true) or fell back to
+   * the built-in default (false). The maps settings helper uses this to apply the rule that
+   * an environment value wins over a value saved in Settings.
+   */
+  MAPS_URL_FROM_ENV: {
+    MAPS_GEOCODER_URL: boolean;
+    MAPS_ROUTER_URL: boolean;
+    MAPS_WALKING_ROUTER_URL: boolean;
+    MAPS_CYCLING_ROUTER_URL: boolean;
+    MAPS_TRANSIT_URL: boolean;
+    MAPS_TILE_URL: boolean;
+  };
+  /**
    * Bearer token for the memory recall screen classifier. Distinct from any memory-provider
    * credential. Env: `MEMORY_SCREEN_AUTH_TOKEN`. Default empty.
    */
@@ -2772,38 +2886,46 @@ const shared: SharedServerConfiguration = {
   MAPS_GEOCODER_URL: parseMapsUrl({
     envKey: 'MAPS_GEOCODER_URL',
     raw: getEnv('MAPS_GEOCODER_URL'),
-    defaultValue: 'https://nominatim.openstreetmap.org',
+    defaultValue: MAPS_GEOCODER_DEFAULT_URL,
   }),
   MAPS_ROUTER_PROVIDER: parseMapsRouterProvider(getEnv('MAPS_ROUTER_PROVIDER', { required: false })),
   MAPS_ROUTER_URL: parseMapsUrl({
     envKey: 'MAPS_ROUTER_URL',
     raw: getEnv('MAPS_ROUTER_URL'),
-    defaultValue: 'https://router.project-osrm.org',
+    defaultValue: MAPS_ROUTER_DEFAULT_URL,
   }),
   MAPS_WALKING_ROUTER_URL: parseMapsUrl({
     envKey: 'MAPS_WALKING_ROUTER_URL',
     raw: getEnv('MAPS_WALKING_ROUTER_URL'),
-    defaultValue: 'https://routing.openstreetmap.de/routed-foot',
+    defaultValue: MAPS_WALKING_ROUTER_DEFAULT_URL,
   }),
   MAPS_CYCLING_ROUTER_URL: parseMapsUrl({
     envKey: 'MAPS_CYCLING_ROUTER_URL',
     raw: getEnv('MAPS_CYCLING_ROUTER_URL'),
-    defaultValue: 'https://routing.openstreetmap.de/routed-bike',
+    defaultValue: MAPS_CYCLING_ROUTER_DEFAULT_URL,
   }),
   MAPS_TRANSIT_URL: parseMapsUrl({
     envKey: 'MAPS_TRANSIT_URL',
     raw: getEnv('MAPS_TRANSIT_URL'),
-    defaultValue: 'https://api.transitous.org/api/v6',
+    defaultValue: MAPS_TRANSIT_DEFAULT_URL,
   }),
   MAPS_TILE_URL: parseMapsUrl({
     envKey: 'MAPS_TILE_URL',
     raw: getEnv('MAPS_TILE_URL'),
-    defaultValue: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+    defaultValue: MAPS_TILE_DEFAULT_URL,
     requiredPlaceholders: ['{z}', '{x}', '{y}'],
   }),
   MAPS_USER_AGENT:
     getEnv('MAPS_USER_AGENT', { required: false }) ??
     `Amanuensis/${PACKAGE_VERSION} (+https://github.com/ClimbOutLabs/amanuensis)`,
+  MAPS_URL_FROM_ENV: {
+    MAPS_GEOCODER_URL: envIsSet('MAPS_GEOCODER_URL'),
+    MAPS_ROUTER_URL: envIsSet('MAPS_ROUTER_URL'),
+    MAPS_WALKING_ROUTER_URL: envIsSet('MAPS_WALKING_ROUTER_URL'),
+    MAPS_CYCLING_ROUTER_URL: envIsSet('MAPS_CYCLING_ROUTER_URL'),
+    MAPS_TRANSIT_URL: envIsSet('MAPS_TRANSIT_URL'),
+    MAPS_TILE_URL: envIsSet('MAPS_TILE_URL'),
+  },
   MEMORY_SCREEN_AUTH_TOKEN: getEnv('MEMORY_SCREEN_AUTH_TOKEN', { defaultValue: '' }) ?? '',
   MEMORY_SCREEN_THRESHOLD: parseUnitInterval({
     envKey: 'MEMORY_SCREEN_THRESHOLD',
