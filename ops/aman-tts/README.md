@@ -85,8 +85,8 @@ and run the tests.
 | `AMAN_TTS_DEFAULT_VOICE`  | `af_heart`             | voice used when the request names none |
 | `AMAN_TTS_ASSET_DIR`      | `/opt/aman-tts/assets` | where the baked assets live            |
 
-The full stack pins the service to the same cores as `aman-stt` (`16-19`):
-people speak, then listen, so the two rarely run at once.
+When `AMAN_VOICE_CPUSET` is set, the full stack pins the service to the same
+cores as `aman-stt`: people speak, then listen, so the two rarely run at once.
 
 ## Tests
 
