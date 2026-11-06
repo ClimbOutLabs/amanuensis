@@ -15,6 +15,7 @@ import { connect } from 'node:net';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
+import { URL } from 'node:url';
 import { gzipSync } from 'node:zlib';
 
 import { createEgressProxy } from '../src/egressProxy.mjs';
@@ -786,4 +787,264 @@ test('type with a ref whose element can no longer be read is refused as a stale 
     const typed = await sidecar.type({ owner: 'owner-1', tab: 'chat-1', ref: 'e1', text: 'hello' });
     assert.deepEqual(typed, { status: 'refused', reason: 'stale_ref' });
   });
+});
+
+/** A sidecar whose browser is a stand-in page, so the live view can be tested with no Chromium. */
+async function fakeSidecar() {
+  const acts = [];
+  const handlers = {};
+  let fileFields = 0;
+  let launches = 0;
+  const mainFrame = { name: 'main' };
+  const page = {
+    mainFrame: () => mainFrame,
+    url: () => 'https://site-a.test/account',
+    title: async () => 'Account',
+    goto: async () => undefined,
+    evaluate: async () => [],
+    screenshot: async options => {
+      acts.push({ screenshot: options });
+      return Buffer.from('frame-bytes');
+    },
+    viewportSize: () => ({ width: 1280, height: 800 }),
+    mouse: {
+      click: async (x, y) => {
+        acts.push({ click: [x, y] });
+      },
+      wheel: async (dx, dy) => {
+        acts.push({ wheel: [dx, dy] });
+      },
+    },
+    keyboard: {
+      // Text that starts with "slow" takes a while, as a busy page can.
+      type: async text => {
+        if (text.startsWith('slow')) {
+          await new Promise(resolve => setTimeout(resolve, 50));
+        }
+        acts.push({ type: text });
+      },
+      press: async key => {
+        acts.push({ key });
+      },
+    },
+    on: (event, handler) => {
+      handlers[event] = handler;
+    },
+    isClosed: () => false,
+    // The page's file fields: none until a test gives it one.
+    locator: selector => {
+      assert.equal(selector, 'input[type="file"]');
+      return {
+        first: () => ({
+          count: async () => fileFields,
+          setInputFiles: async file => {
+            acts.push({ fileField: file });
+          },
+        }),
+      };
+    },
+    close: async () => undefined,
+  };
+  const cdp = {
+    send: async method => (method === 'Page.getFrameTree' ? { frameTree: { frame: { id: 'main' } } } : {}),
+    on: () => undefined,
+  };
+  const context = {
+    on: () => undefined,
+    route: async () => undefined,
+    newPage: async () => page,
+    newCDPSession: async () => cdp,
+    close: async () => undefined,
+  };
+  // The gateway the sidecar asks before opening: every address is fine, and stays the address it was.
+  const gateway = createServer((req, res) => {
+    const asked = new URL(req.url, 'http://gateway.test');
+    res.writeHead(200, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({ ok: true, url: asked.searchParams.get('url') }));
+  });
+  await new Promise(resolve => gateway.listen(0, '127.0.0.1', resolve));
+  const sidecar = new BrowserSidecar({
+    profilesDir: '/tmp',
+    navTimeoutMs: 1000,
+    proxyServer: `http://127.0.0.1:${gateway.address().port}`,
+    launch: async () => {
+      launches += 1;
+      return { context, page };
+    },
+  });
+  return {
+    sidecar,
+    acts,
+    gateway,
+    launches: () => launches,
+    /** The page opens its file picker, as when its upload button is clicked; a stale one cannot take a file. */
+    openFileChooser: ({ stale = false } = {}) => {
+      handlers.filechooser({
+        page: () => page,
+        setFiles: async file => {
+          if (stale) {
+            throw new Error('Element is not attached to the DOM');
+          }
+          acts.push({ chooser: file });
+        },
+      });
+    },
+    /** The tab's page moves to another address on its site. */
+    navigate: () => {
+      handlers.framenavigated(mainFrame);
+    },
+    giveFileField: () => {
+      fileFields = 1;
+    },
+  };
+}
+
+test('the live view lists, frames and drives a tab through a stand-in page', async () => {
+  if (BrowserSidecar === undefined) {
+    return;
+  }
+  const { sidecar, acts, gateway, launches } = await fakeSidecar();
+  try {
+    // No profile yet: an empty list, and nothing was launched to get it.
+    assert.deepEqual(await sidecar.liveTabs({ owner: 'owner-1' }), { status: 'ok', tabs: [] });
+    assert.equal(launches(), 0);
+
+    await sidecar.open({ owner: 'owner-1', tab: 'chat-1', url: 'https://site-a.test/account' });
+    assert.deepEqual(await sidecar.liveTabs({ owner: 'owner-1' }), {
+      status: 'ok',
+      tabs: [{ tab: 'chat-1', title: 'Account', url: 'https://site-a.test/account' }],
+    });
+
+    const frame = await sidecar.liveFrame({ owner: 'owner-1', tab: 'chat-1' });
+    assert.deepEqual(frame, {
+      status: 'ok',
+      jpeg_base64: Buffer.from('frame-bytes').toString('base64'),
+      width: 1280,
+      height: 800,
+    });
+    assert.deepEqual(acts.at(-1), { screenshot: { type: 'jpeg', quality: 60 } });
+
+    // A click read from a frame half the viewport's size lands at twice the point on the page.
+    assert.deepEqual(
+      await sidecar.liveInput({
+        owner: 'owner-1',
+        tab: 'chat-1',
+        input: { kind: 'click', x: 100, y: 50, imageWidth: 640, imageHeight: 400 },
+      }),
+      { status: 'ok' },
+    );
+    assert.deepEqual(acts.at(-1), { click: [200, 100] });
+
+    await sidecar.liveInput({ owner: 'owner-1', tab: 'chat-1', input: { kind: 'type', text: '123456' } });
+    assert.deepEqual(acts.at(-1), { type: '123456' });
+    await sidecar.liveInput({ owner: 'owner-1', tab: 'chat-1', input: { kind: 'key', key: 'Enter' } });
+    assert.deepEqual(acts.at(-1), { key: 'Enter' });
+    await sidecar.liveInput({ owner: 'owner-1', tab: 'chat-1', input: { kind: 'wheel', dy: 240 } });
+    assert.deepEqual(acts.at(-1), { wheel: [0, 240] });
+
+    // A chat with no tab is closed to the live view, like it is to a read.
+    assert.deepEqual(await sidecar.liveFrame({ owner: 'owner-1', tab: 'chat-9' }), { status: 'closed' });
+    assert.deepEqual(
+      await sidecar.liveInput({ owner: 'owner-1', tab: 'chat-9', input: { kind: 'key', key: 'Enter' } }),
+      { status: 'closed' },
+    );
+  } finally {
+    gateway.close();
+    await sidecar.close();
+  }
+});
+
+test('the live routes answer over HTTP, and listing them needs no tab', async () => {
+  if (BrowserSidecar === undefined || createHttpServer === undefined) {
+    return;
+  }
+  const { sidecar, gateway } = await fakeSidecar();
+  const server = createHttpServer({ sidecar, allowedPeers: async () => ['127.0.0.1'] });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  try {
+    const base = `http://127.0.0.1:${server.address().port}`;
+    const post = async (route, body) =>
+      fetch(`${base}${route}`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+    const tabs = await post('/live/tabs', { owner: 'owner-1' });
+    assert.equal(tabs.status, 200);
+    assert.deepEqual(await tabs.json(), { status: 'ok', tabs: [] });
+
+    const frameWithNoTab = await post('/live/frame', { owner: 'owner-1' });
+    assert.equal(frameWithNoTab.status, 400);
+
+    const badInput = await post('/live/input', { owner: 'owner-1', tab: 'chat-1', kind: 'dance' });
+    assert.equal(badInput.status, 200);
+    assert.deepEqual(await badInput.json(), { status: 'bad_input' });
+  } finally {
+    server.close();
+    gateway.close();
+    await sidecar.close();
+  }
+});
+
+test('the live view puts a file into the picker the page opened, else its file field, else says there is none', async () => {
+  if (BrowserSidecar === undefined) {
+    return;
+  }
+  const { sidecar, acts, gateway, openFileChooser, giveFileField, navigate } = await fakeSidecar();
+  const file = { owner: 'owner-1', tab: 'chat-1', name: 'id.pdf', mime: 'application/pdf', data: 'JVBERi0=' };
+  const expected = { name: 'id.pdf', mimeType: 'application/pdf', buffer: Buffer.from('JVBERi0=', 'base64') };
+  try {
+    assert.deepEqual(await sidecar.liveUpload(file), { status: 'closed' });
+    await sidecar.open({ owner: 'owner-1', tab: 'chat-1', url: 'https://site-a.test/account' });
+
+    assert.deepEqual(await sidecar.liveUpload(file), { status: 'no_file_field' });
+
+    openFileChooser();
+    assert.deepEqual(await sidecar.liveUpload(file), { status: 'ok' });
+    assert.deepEqual(acts.at(-1), { chooser: expected });
+    // A picker is filled once: the next upload goes to the page's file field, not the spent picker.
+    giveFileField();
+    assert.deepEqual(await sidecar.liveUpload(file), { status: 'ok' });
+    assert.deepEqual(acts.at(-1), { fileField: expected });
+
+    // A picker the page opened before it moved on is dropped; the file goes to the new page's field.
+    openFileChooser();
+    navigate();
+    assert.deepEqual(await sidecar.liveUpload(file), { status: 'ok' });
+    assert.deepEqual(acts.at(-1), { fileField: expected });
+    // A picker that can no longer take the file falls back to the field too.
+    openFileChooser({ stale: true });
+    assert.deepEqual(await sidecar.liveUpload(file), { status: 'ok' });
+    assert.deepEqual(acts.at(-1), { fileField: expected });
+
+    const tooBig = Buffer.alloc(10 * 1024 * 1024 + 1).toString('base64');
+    assert.deepEqual(await sidecar.liveUpload({ ...file, data: tooBig }), { status: 'bad_input' });
+  } finally {
+    gateway.close();
+    await sidecar.close();
+  }
+});
+
+test('the live view runs acts sent at once in the order they were sent', async () => {
+  if (BrowserSidecar === undefined) {
+    return;
+  }
+  const { sidecar, acts, gateway } = await fakeSidecar();
+  try {
+    await sidecar.open({ owner: 'owner-1', tab: 'chat-1', url: 'https://site-a.test/account' });
+    acts.length = 0;
+    const send = input => sidecar.liveInput({ owner: 'owner-1', tab: 'chat-1', input });
+    // The first key is slow to land; the ones after it still wait their turn.
+    const answers = await Promise.all([
+      send({ kind: 'click', x: 10, y: 10 }),
+      send({ kind: 'type', text: 'slow-h' }),
+      send({ kind: 'type', text: 'i' }),
+      send({ kind: 'key', key: 'Enter' }),
+    ]);
+    assert.deepEqual(answers, Array(4).fill({ status: 'ok' }));
+    assert.deepEqual(acts, [{ click: [10, 10] }, { type: 'slow-h' }, { type: 'i' }, { key: 'Enter' }]);
+  } finally {
+    gateway.close();
+    await sidecar.close();
+  }
 });
