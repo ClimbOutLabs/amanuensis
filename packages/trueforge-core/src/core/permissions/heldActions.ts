@@ -207,7 +207,15 @@ export async function checkHeldReplay(input: {
   }
   const heldCard = held.tier3_card ?? undefined;
   const freshCard = fresh.tier3_card ?? undefined;
-  if (heldCard !== undefined && freshCard !== undefined && !sameCardTargets(heldCard, freshCard)) {
+  // A skill network card asks about the skill's sites, not about this call, so its card targets
+  // are not compared with the fresh call's card: the fresh classification governs the call
+  // itself, and the network answer was recorded against the skill before the replay.
+  if (
+    held.skill_network == null &&
+    heldCard !== undefined &&
+    freshCard !== undefined &&
+    !sameCardTargets(heldCard, freshCard)
+  ) {
     return { ok: false, reason: 'changed' };
   }
   // A fresh call that no longer asks (a standing grant was added meanwhile) runs without the token.

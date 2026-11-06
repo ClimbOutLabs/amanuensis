@@ -9,6 +9,8 @@ import { RequestErrorResponseSchema } from '../schemas/errors';
 import {
   CreateSkillRequestSchema,
   DeleteSkillNetworkApprovalResponseSchema,
+  DeleteSkillNetworkHostRequestQuerySchema,
+  DeleteSkillNetworkHostResponseSchema,
   DeleteSkillResponseSchema,
   GetSkillNetworkApprovalResponseSchema,
   GetSkillResponseSchema,
@@ -19,6 +21,8 @@ import {
   SkillNameParamsSchema,
   UpdateSkillNetworkApprovalRequestSchema,
   UpdateSkillNetworkApprovalResponseSchema,
+  UpdateSkillNetworkHostRequestSchema,
+  UpdateSkillNetworkHostResponseSchema,
   UpdateSkillRequestSchema,
 } from '../schemas/skill';
 import { OpenApiTag } from './openapiTags';
@@ -256,6 +260,132 @@ export const deleteSkillNetworkApprovalRoute = createRoute({
     200: {
       content: { 'application/json': { schema: DeleteSkillNetworkApprovalResponseSchema } },
       description: 'Approval removed.',
+    },
+    404: {
+      content: { 'application/json': { schema: RequestErrorResponseSchema } },
+      description: 'No skill with this name',
+    },
+    424: {
+      content: { 'application/json': { schema: RequestErrorResponseSchema } },
+      description: 'Unsupported because skills are managed by an external system.',
+    },
+  },
+});
+
+export const updateSkillNetworkAllowedHostRoute = createRoute({
+  method: 'put',
+  path: '/{name}/network-approval/allowed-host',
+  tags: [OpenApiTag.SKILLS],
+  summary: 'Allow one site for a skill',
+  description: 'Allows one site for the skill on its own, apart from the declared list approval.',
+  'x-fern-sdk-group-name': ['settings', 'skills'],
+  'x-fern-sdk-method-name': 'create_or_update_network_allowed_host',
+  request: {
+    params: SkillNameParamsSchema,
+    body: {
+      content: { 'application/json': { schema: UpdateSkillNetworkHostRequestSchema } },
+      required: true,
+    },
+  },
+  responses: {
+    200: {
+      content: { 'application/json': { schema: UpdateSkillNetworkHostResponseSchema } },
+      description: 'The stored approval state.',
+    },
+    400: {
+      content: { 'application/json': { schema: RequestErrorResponseSchema } },
+      description: 'Invalid request body.',
+    },
+    404: {
+      content: { 'application/json': { schema: RequestErrorResponseSchema } },
+      description: 'No skill with this name',
+    },
+    424: {
+      content: { 'application/json': { schema: RequestErrorResponseSchema } },
+      description: 'Unsupported because skills are managed by an external system.',
+    },
+  },
+});
+
+export const deleteSkillNetworkAllowedHostRoute = createRoute({
+  method: 'delete',
+  path: '/{name}/network-approval/allowed-host',
+  tags: [OpenApiTag.SKILLS],
+  summary: 'Remove one allowed site for a skill',
+  description: 'Clears the one-site allowance. The skill cannot reach the site from the next run on.',
+  'x-fern-sdk-group-name': ['settings', 'skills'],
+  'x-fern-sdk-method-name': 'delete_network_allowed_host',
+  request: {
+    params: SkillNameParamsSchema,
+    query: DeleteSkillNetworkHostRequestQuerySchema,
+  },
+  responses: {
+    200: {
+      content: { 'application/json': { schema: DeleteSkillNetworkHostResponseSchema } },
+      description: 'Allowance removed.',
+    },
+    404: {
+      content: { 'application/json': { schema: RequestErrorResponseSchema } },
+      description: 'No skill with this name',
+    },
+    424: {
+      content: { 'application/json': { schema: RequestErrorResponseSchema } },
+      description: 'Unsupported because skills are managed by an external system.',
+    },
+  },
+});
+
+export const updateSkillNetworkDeniedHostRoute = createRoute({
+  method: 'put',
+  path: '/{name}/network-approval/denied-host',
+  tags: [OpenApiTag.SKILLS],
+  summary: 'Turn down one site for a skill',
+  description: 'Stores the site as turned down for the skill, so it is not granted and raises no card.',
+  'x-fern-sdk-group-name': ['settings', 'skills'],
+  'x-fern-sdk-method-name': 'create_or_update_network_denied_host',
+  request: {
+    params: SkillNameParamsSchema,
+    body: {
+      content: { 'application/json': { schema: UpdateSkillNetworkHostRequestSchema } },
+      required: true,
+    },
+  },
+  responses: {
+    200: {
+      content: { 'application/json': { schema: UpdateSkillNetworkHostResponseSchema } },
+      description: 'The stored approval state.',
+    },
+    400: {
+      content: { 'application/json': { schema: RequestErrorResponseSchema } },
+      description: 'Invalid request body.',
+    },
+    404: {
+      content: { 'application/json': { schema: RequestErrorResponseSchema } },
+      description: 'No skill with this name',
+    },
+    424: {
+      content: { 'application/json': { schema: RequestErrorResponseSchema } },
+      description: 'Unsupported because skills are managed by an external system.',
+    },
+  },
+});
+
+export const deleteSkillNetworkDeniedHostRoute = createRoute({
+  method: 'delete',
+  path: '/{name}/network-approval/denied-host',
+  tags: [OpenApiTag.SKILLS],
+  summary: 'Clear one turned-down site for a skill',
+  description: 'Clears the site being turned down, so a card can ask about it again.',
+  'x-fern-sdk-group-name': ['settings', 'skills'],
+  'x-fern-sdk-method-name': 'delete_network_denied_host',
+  request: {
+    params: SkillNameParamsSchema,
+    query: DeleteSkillNetworkHostRequestQuerySchema,
+  },
+  responses: {
+    200: {
+      content: { 'application/json': { schema: DeleteSkillNetworkHostResponseSchema } },
+      description: 'Decision cleared.',
     },
     404: {
       content: { 'application/json': { schema: RequestErrorResponseSchema } },

@@ -10,8 +10,10 @@ import {
   APPROVAL_CHOICES,
   isNewRecipientCard,
   isNewRecipientDraftCard,
+  isSkillNetworkCard,
   NEW_RECIPIENT_CHOICES,
   NEW_RECIPIENT_DRAFT_CHOICES,
+  SKILL_NETWORK_CHOICES,
 } from './approvalChoices.js';
 import { CalendarEventDetails } from './CalendarEventDetails.js';
 import { ChangeRequestBox } from './ChangeRequestBox.js';
@@ -125,16 +127,25 @@ export const HeldActionCard: FC<HeldActionCardProps> = ({
   // in draft words when the card saves a draft instead of sending.
   const newRecipients = isNewRecipientCard(card);
   const newRecipientDraft = isNewRecipientDraftCard(card);
-  const approveChoice = newRecipientDraft
-    ? NEW_RECIPIENT_DRAFT_CHOICES.approve
-    : newRecipients
-      ? NEW_RECIPIENT_CHOICES.approve
-      : APPROVAL_CHOICES.approve;
-  const denyChoice = newRecipientDraft
-    ? NEW_RECIPIENT_DRAFT_CHOICES.cancel
-    : newRecipients
-      ? NEW_RECIPIENT_CHOICES.cancel
-      : APPROVAL_CHOICES.deny;
+  // A skill network card answers a question about the skill's sites, not about this one call, so
+  // its choices name the skill and what each answer remembers.
+  const skillNetwork = isSkillNetworkCard(card) ? (card.skill_network ?? null) : null;
+  const approveChoice =
+    skillNetwork !== null
+      ? SKILL_NETWORK_CHOICES.approve
+      : newRecipientDraft
+        ? NEW_RECIPIENT_DRAFT_CHOICES.approve
+        : newRecipients
+          ? NEW_RECIPIENT_CHOICES.approve
+          : APPROVAL_CHOICES.approve;
+  const denyChoice =
+    skillNetwork !== null
+      ? SKILL_NETWORK_CHOICES.deny
+      : newRecipientDraft
+        ? NEW_RECIPIENT_DRAFT_CHOICES.cancel
+        : newRecipients
+          ? NEW_RECIPIENT_CHOICES.cancel
+          : APPROVAL_CHOICES.deny;
 
   return (
     <li className="list-none rounded-lg border border-border bg-primary-bg" data-role="held-action">
@@ -201,7 +212,19 @@ export const HeldActionCard: FC<HeldActionCardProps> = ({
             >
               {approveChoice.label}
             </Button>
-            {alwaysAllowOffered && !newRecipients && (
+            {alwaysAllowOffered && !newRecipients && skillNetwork !== null && (
+              <AlwaysAllowToolControl
+                size="large"
+                disabled={disabled}
+                label={SKILL_NETWORK_CHOICES.alwaysAllow.label}
+                hint={SKILL_NETWORK_CHOICES.alwaysAllow.hint}
+                title="Always allow for this skill?"
+                removeWhere="skill settings"
+                description={`${assistant} will let ${skillNetwork.skill_name} reach ${skillNetwork.hosts.join(', ')} without asking, in every chat.`}
+                onConfirm={onAlwaysAllow}
+              />
+            )}
+            {alwaysAllowOffered && !newRecipients && skillNetwork === null && (
               <AlwaysAllowToolControl
                 size="large"
                 disabled={disabled}

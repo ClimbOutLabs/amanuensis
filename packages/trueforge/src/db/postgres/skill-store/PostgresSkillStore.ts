@@ -10,6 +10,7 @@ import {
   type ISkillStore,
   type ListSkillsInput,
   type SetSkillNetworkApprovalInput,
+  type SetSkillNetworkHostDecisionInput,
   type SkillRecord,
   type UpsertSkillInput,
 } from '../../skillStore';
@@ -23,6 +24,8 @@ function toRecord(row: Selectable<SkillTable>): SkillRecord {
     name: row.name,
     manifest: row.manifest,
     network_approval: row.network_approval,
+    network_allowed_hosts: row.network_allowed_hosts,
+    network_denied_hosts: row.network_denied_hosts,
     created_at: row.created_at.toISOString(),
     updated_at: row.updated_at.toISOString(),
   };
@@ -58,6 +61,8 @@ export class PostgresSkillStore implements ISkillStore<Transaction<Database>> {
           name: input.name,
           manifest: json(input.manifest),
           network_approval: null,
+          network_allowed_hosts: json([]),
+          network_denied_hosts: json([]),
           created_at: now(),
           updated_at: now(),
         })
@@ -81,6 +86,8 @@ export class PostgresSkillStore implements ISkillStore<Transaction<Database>> {
         name: input.name,
         manifest: json(input.manifest),
         network_approval: null,
+        network_allowed_hosts: json([]),
+        network_denied_hosts: json([]),
         created_at: now(),
         updated_at: now(),
       })
@@ -104,6 +111,46 @@ export class PostgresSkillStore implements ISkillStore<Transaction<Database>> {
       .updateTable('skill')
       .set({
         network_approval: input.hosts === null ? null : json([...input.hosts]),
+        updated_at: now(),
+      })
+      .where('tenant_id', '=', input.tenant_id)
+      .where('name', '=', input.name)
+      .returningAll()
+      .executeTakeFirst();
+    return row === undefined ? undefined : toRecord(row);
+  }
+
+  async setSkillNetworkHostDecision(
+    input: SetSkillNetworkHostDecisionInput,
+    transaction?: Transaction<Database>,
+  ): Promise<SkillRecord | undefined> {
+    const db = transaction ?? this.#db;
+    const current = await db
+      .selectFrom('skill')
+      .selectAll()
+      .where('tenant_id', '=', input.tenant_id)
+      .where('name', '=', input.name)
+      .executeTakeFirst();
+    if (current === undefined) {
+      return undefined;
+    }
+    const allowed = new Set(current.network_allowed_hosts);
+    const denied = new Set(current.network_denied_hosts);
+    if (input.decision === 'allowed') {
+      allowed.add(input.host);
+      denied.delete(input.host);
+    } else if (input.decision === 'denied') {
+      denied.add(input.host);
+      allowed.delete(input.host);
+    } else {
+      allowed.delete(input.host);
+      denied.delete(input.host);
+    }
+    const row = await db
+      .updateTable('skill')
+      .set({
+        network_allowed_hosts: json([...allowed].sort()),
+        network_denied_hosts: json([...denied].sort()),
         updated_at: now(),
       })
       .where('tenant_id', '=', input.tenant_id)

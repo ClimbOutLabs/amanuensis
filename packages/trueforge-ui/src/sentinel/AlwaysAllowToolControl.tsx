@@ -14,6 +14,14 @@ export type AlwaysAllowToolControlProps = {
   disabled?: boolean;
   /** Runs only after the owner confirms; a cancel never calls it. */
   onConfirm: () => void;
+  /** Button label; the tool wording by default, a skill network card names the skill instead. */
+  label?: string;
+  /** Button hint; the tool wording by default. */
+  hint?: string;
+  /** Confirm step title; the tool wording by default. */
+  title?: string;
+  /** Where the standing grant can be removed; connector settings by default. */
+  removeWhere?: string;
 };
 
 /** "Always allow this tool" and its confirm step, shared by every approval card that offers it. */
@@ -23,6 +31,10 @@ export const AlwaysAllowToolControl: FC<AlwaysAllowToolControlProps> = ({
   className,
   disabled = false,
   onConfirm,
+  label = APPROVAL_CHOICES.alwaysAllowTool.label,
+  hint = APPROVAL_CHOICES.alwaysAllowTool.hint,
+  title = 'Always allow this tool?',
+  removeWhere = 'connector settings',
 }) => {
   const [confirming, setConfirming] = useState(false);
   return (
@@ -30,28 +42,28 @@ export const AlwaysAllowToolControl: FC<AlwaysAllowToolControlProps> = ({
       <Button
         variant="secondary"
         size={size}
-        title={APPROVAL_CHOICES.alwaysAllowTool.hint}
+        title={hint}
         onClick={() => {
           setConfirming(true);
         }}
         disabled={disabled}
         className={className}
       >
-        {APPROVAL_CHOICES.alwaysAllowTool.label}
+        {label}
       </Button>
       <CenteredModal
         open={confirming}
         onOpenChange={open => {
           if (!open) setConfirming(false);
         }}
-        title="Always allow this tool?"
+        title={title}
         description={description}
         contentSized
         aria-label="Confirm always allowing this tool"
       >
         <div className="flex flex-col gap-4 px-5 py-4">
           <p className="font-sans text-sm leading-relaxed text-text-primary">
-            You can remove this later in connector settings.
+            You can remove this later in {removeWhere}.
           </p>
           <div className="flex items-center justify-end gap-2">
             <Button

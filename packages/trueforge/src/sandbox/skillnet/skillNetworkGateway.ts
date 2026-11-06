@@ -143,6 +143,9 @@ export class SkillNetworkGateway {
       return;
     }
     if (!grant.hosts.includes(target.host)) {
+      // The refusal stands as it is; the site is also noted on the chat so the runtime can ask
+      // the person about it with a card instead of the attempt ending at this message.
+      this.#registry.recordRefusal({ session_id: grant.session_id, host: target.host });
       this.#refuse({
         socket,
         status: 403,
