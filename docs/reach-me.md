@@ -13,7 +13,7 @@ Aman can tell you about things without waiting for you to open a chat. You choos
 - **Time to leave** for an event with a place, inside the lead time you choose.
 - **An approval waiting for you** longer than the time you choose.
 
-Calendar events count only when they are your own. That means you organised them, you accepted them, or no one else is on them. An invite you have not accepted can only ever become a quiet note.
+Calendar events count only when they are your own. On a Google calendar, that means you organised them, you accepted them, or no one else is on them. On the shared Calendar connector, it means no one else is on them, because anyone who sends an invite can write that you accepted it. Anything else can only ever become a quiet note.
 
 Mail is checked every 10 minutes, the calendar every 30 minutes, and approvals every 5 minutes.
 

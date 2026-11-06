@@ -196,10 +196,9 @@ function toEventInfo(event: unknown): CalendarEventInfo | undefined {
     start,
     end,
     location: text(event['location']) ?? null,
-    own:
-      (isRecord(organizer) && organizer['is_self'] === true) ||
-      answer === 'ACCEPTED' ||
-      ((organizer === undefined || organizer === null) && attendees.length === 0),
+    // The stored invite says who organised it and who accepted, in words its sender wrote, so only an event with
+    // no one on it at all is surely the person's own.
+    own: (organizer === undefined || organizer === null) && attendees.length === 0,
   };
 }
 

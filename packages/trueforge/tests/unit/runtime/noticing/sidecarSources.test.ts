@@ -153,19 +153,25 @@ describe('sidecar calendar source (CalDAV)', () => {
     expect(found.map(item => item.kind)).toContain('calendar_clash');
   });
 
-  it('counts an event as the person’s own only when they organised or accepted it, or no one else is on it', async () => {
+  it('counts an event as the person’s own only when no one else is on it, since the invite writes who organised and who accepted', async () => {
     const call: CallSidecarTool = () =>
       Promise.resolve({
         structuredContent: {
           events: [
             event('alone', '2026-11-05T17:00:00+01:00', '2026-11-05T18:00:00+01:00'),
-            event('organised', '2026-11-05T17:00:00+01:00', '2026-11-05T18:00:00+01:00', {
+            event('forged-organizer', '2026-11-05T17:00:00+01:00', '2026-11-05T18:00:00+01:00', {
               organizer: { email: 'me@example.com', is_self: true },
               attendees: [{ email: 'guest@example.com', is_self: false, status: 'NEEDS-ACTION' }],
             }),
-            event('accepted', '2026-11-05T17:00:00+01:00', '2026-11-05T18:00:00+01:00', {
-              organizer: { email: 'boss@example.com', is_self: false },
-              attendees: [{ email: 'me@example.com', is_self: true, status: 'ACCEPTED' }],
+            event('forged-acceptance', '2026-11-05T17:00:00+01:00', '2026-11-05T18:00:00+01:00', {
+              organizer: { email: 'stranger@example.com', is_self: false },
+              attendees: [
+                { email: 'me@example.com', is_self: true, status: 'ACCEPTED' },
+                { email: 'me@example.com', is_self: true, status: 'NEEDS-ACTION' },
+              ],
+            }),
+            event('organizer-only', '2026-11-05T17:00:00+01:00', '2026-11-05T18:00:00+01:00', {
+              organizer: { email: 'me@example.com', is_self: true },
             }),
             event('invite', '2026-11-05T17:00:00+01:00', '2026-11-05T18:00:00+01:00', {
               organizer: { email: 'stranger@example.com', is_self: false },
@@ -180,8 +186,9 @@ describe('sidecar calendar source (CalDAV)', () => {
     });
     expect(events.map(item => [item.id, item.own])).toEqual([
       ['alone', true],
-      ['organised', true],
-      ['accepted', true],
+      ['forged-organizer', false],
+      ['forged-acceptance', false],
+      ['organizer-only', false],
       ['invite', false],
     ]);
   });
