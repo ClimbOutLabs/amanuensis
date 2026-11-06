@@ -114,10 +114,10 @@ describe('a line no turn asked for', () => {
     await feed({ session: t.session, clock: t.clock, samples: quiet(900) });
     await t.session.settled();
     expect(t.turns.sent).toEqual(['hello?']);
-    expect(t.turns.spokenOver).toEqual([true]);
+    expect(t.turns.spokenOver).toEqual([false]);
   });
 
-  it('can hold the floor: talking over it does not stop it, and the turn is told it was spoken over', async () => {
+  it('can hold the floor: talking over it does not stop it, and the turn is told it began over that line', async () => {
     const t = setup({
       stt: ['yeah?', 'yes'],
       message: [{ text: ['Okay.'] }, { text: ['Okay.'] }],

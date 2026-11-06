@@ -108,6 +108,22 @@ describe('a phone call in private mode', () => {
     expect(t.opened()).toBe(1);
   });
 
+  it('takes a yes said over the question asked again: only the opening cannot be answered over', async () => {
+    const t = call({ heard: ['hmm', 'yes'] });
+    await speak(t);
+    await t.session.settled();
+    expect(t.tts.sentences.join(' ')).toContain(CALL_LINES.askAgain);
+    // Said while the question is still playing, in a voice that does not follow it.
+    await feed({
+      session: t.session,
+      clock: t.clock,
+      samples: Int16Array.from([...hum(700, 0.3, 1.7), ...quiet(900)]),
+    });
+    await t.session.settled();
+    expect(t.transport.cleared).toBe(1);
+    expect(t.opened()).toBe(1);
+  });
+
   it('says goodbye and hangs up on a no, and never opens the chat', async () => {
     const t = call({ heard: ['no not now'] });
     await speak(t);
@@ -124,7 +140,7 @@ describe('a phone call in private mode', () => {
     t.clock.advance(5_000);
     await speak(t);
     await t.session.settled();
-    expect(t.tts.sentences.join(' ')).toContain('Please say yes or no.');
+    expect(t.tts.sentences.join(' ')).toContain(CALL_LINES.askAgain);
     expect(t.tts.sentences.join(' ')).toContain('I will leave it in the app for you.');
     expect(t.hungUp()).toBe(1);
   });

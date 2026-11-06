@@ -40,7 +40,8 @@ export const CALL_LINES = {
   message: (message: string): string =>
     `${withStop(message)} You can ask me about it. To do something about it, open the app.`,
   notNow: 'Okay. It is waiting in the app for you. Goodbye.',
-  askAgain: 'Sorry, I did not catch that. Is this a good time? Please say yes or no.',
+  /** Holds no yes or no word, so an answer said right after it is never taken for its echo. */
+  askAgain: 'Sorry, I did not catch that. Is this a good time? A one-word answer is best.',
   giveUp: 'I will leave it in the app for you. Goodbye.',
   noChat: 'I cannot talk it through on the phone right now. Please open the app to see it. Goodbye.',
   timeUp: 'I need to go now. Everything we said is in the chat in the app. Goodbye.',
@@ -140,19 +141,19 @@ export class CallTurns implements VoiceTurnRunner {
 
   async sendMessage({
     text,
-    startedWhileSpeaking = false,
+    startedOverHeldLine = false,
     signal,
     onText,
   }: {
     text: string;
-    startedWhileSpeaking?: boolean;
+    startedOverHeldLine?: boolean;
     signal: AbortSignal;
     onText: (delta: string) => void;
   }): Promise<TurnOutcome> {
     if (this.#phase === 'open' && this.#chat !== undefined) {
       return this.#chat.turns.sendMessage({ text, signal, onText });
     }
-    if (this.#phase === 'closing' || startedWhileSpeaking) {
+    if (this.#phase === 'closing' || startedOverHeldLine) {
       // A reply that began over the opening was not an answer to a question the person had heard.
       return { kind: 'done', turnId: '', approvals: [] };
     }
