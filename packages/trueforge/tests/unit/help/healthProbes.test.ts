@@ -8,7 +8,10 @@ import { SqliteMcpServerStore } from '../../../src/db/sqlite/mcp-server-store/Sq
 import { SqliteModelProviderStore } from '../../../src/db/sqlite/model-provider-store/SqliteModelProviderStore';
 import { SqliteOAuthTokenStore } from '../../../src/db/sqlite/token-store/SqliteOAuthTokenStore';
 
-import { probeConnectors, probeGoogleLogin, probeModel } from '../../../src/help/healthProbes';
+import type { IPersonalizationStore } from '../../../src/db/personalizationStore';
+import { probeConnectors, probeGoogleLogin, probeModel, probeProfileNamed } from '../../../src/help/healthProbes';
+import type { PersonalizationProfile } from '../../../src/personalization/profile';
+import { getMcpConnection } from '../../../src/runtime/sessionResources';
 import { DEFAULT_CHAT_MODEL_SETTING_KEY } from '../../../src/runtime/tokenFactoryProvider';
 import type { ModelProviderManifest } from '../../../src/schemas/modelProvider';
 
@@ -156,6 +159,107 @@ describe('probeConnectors', () => {
         logger: silentLogger,
       }),
     ).resolves.toEqual([]);
+  });
+});
+
+describe('probeConnectors problems', () => {
+  async function withServer() {
+    const stores = await setup();
+    await stores.mcpServerStore.upsertServer({
+      tenant_id: TENANT,
+      name: 'linear',
+      manifest: {
+        type: 'remote',
+        name: 'linear',
+        url: 'https://mcp.example.test/mcp',
+        description: 'Linear.',
+        auth: { type: 'dcr' },
+      },
+      first_party: false,
+    });
+    return stores;
+  }
+
+  it('says a connector whose saved settings cannot be read is unreadable', async () => {
+    const { mcpServerStore, tokenStore } = await withServer();
+    jest.mocked(getMcpConnection).mockResolvedValueOnce(undefined);
+
+    await expect(
+      probeConnectors({
+        tenantId: TENANT,
+        userRef: 'person-a',
+        mcpServerStore,
+        tokenStore,
+        clientName: undefined,
+        requestTimeoutMs: 1_000,
+        connectTimeoutMs: 1_000,
+        logger: silentLogger,
+      }),
+    ).resolves.toEqual([{ name: 'linear', problem: 'unreadable' }]);
+  });
+
+  it('says a connector that throws did not answer', async () => {
+    const { mcpServerStore, tokenStore } = await withServer();
+    jest.mocked(getMcpConnection).mockRejectedValueOnce(new Error('connect ECONNREFUSED'));
+
+    await expect(
+      probeConnectors({
+        tenantId: TENANT,
+        userRef: 'person-a',
+        mcpServerStore,
+        tokenStore,
+        clientName: undefined,
+        requestTimeoutMs: 1_000,
+        connectTimeoutMs: 1_000,
+        logger: silentLogger,
+      }),
+    ).resolves.toEqual([{ name: 'linear', problem: 'no_answer' }]);
+  });
+});
+
+describe('probeProfileNamed', () => {
+  function storeWith(getProfile: IPersonalizationStore['getProfile']): IPersonalizationStore {
+    return { getProfile, upsertProfile: jest.fn(), deleteProfile: jest.fn() };
+  }
+
+  function profile(userName: string | null): PersonalizationProfile {
+    return {
+      tenant_id: TENANT,
+      created_by: 'person-a',
+      revision: 1,
+      digest: 'digest',
+      created_at: '2026-11-01T00:00:00Z',
+      updated_at: '2026-11-01T00:00:00Z',
+      updated_by: 'person-a',
+      assistant_name: null,
+      assistant_identity: null,
+      voice_guidance: null,
+      user_name: userName,
+      address_as: null,
+      user_profile: null,
+      pinned_preferences: [],
+      help_areas: [],
+      learned_profile: null,
+      learning_enabled: false,
+    };
+  }
+
+  it('is done when a name is saved and not done with no profile or a blank name', async () => {
+    const input = { tenantId: TENANT, userId: 'person-a', logger: silentLogger };
+    const named = storeWith(jest.fn(async () => profile('Maya')));
+    await expect(probeProfileNamed({ ...input, personalizationStore: named })).resolves.toBe(true);
+    const blank = storeWith(jest.fn(async () => profile('  ')));
+    await expect(probeProfileNamed({ ...input, personalizationStore: blank })).resolves.toBe(false);
+    await expect(
+      probeProfileNamed({ ...input, personalizationStore: storeWith(jest.fn(async () => undefined)) }),
+    ).resolves.toBe(false);
+  });
+
+  it('counts a failed read as not done', async () => {
+    const failing = storeWith(jest.fn(async () => Promise.reject(new Error('database is locked'))));
+    await expect(
+      probeProfileNamed({ tenantId: TENANT, userId: 'person-a', logger: silentLogger, personalizationStore: failing }),
+    ).resolves.toBe(false);
   });
 });
 
