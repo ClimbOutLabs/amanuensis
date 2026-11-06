@@ -65,8 +65,10 @@ Write down the clock time at step 1 and at step 12.
      without adding it again in Settings.
    - "Also use Aman from your phone and other devices on your home
      Wi-Fi? (yes or no):" — answer **yes**.
-     Also try one short password and one mismatched pair on one machine,
-     and check the wording of what comes back.
+
+   Also try one short password and one mismatched pair on one machine,
+   and check the wording of what comes back.
+
 6. **Aman opens.** The install runs, Aman opens in the browser at its
    https address with no certificate warning, and the getting started
    page opens. The last line is "Aman is installed, and the getting
