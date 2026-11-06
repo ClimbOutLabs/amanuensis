@@ -20,7 +20,7 @@ export interface TextContactTable {
   updated_at: string | Date;
 }
 
-/** Codes sent in one window for one key, such as a person or a number. Kept apart from `text_contact`. */
+/** Texts sent in one window for one key, such as a person, a number or the server. Kept apart from `text_contact`. */
 export interface TextSendCountTable {
   scope_key: string;
   window_started_at: string | Date;
@@ -40,20 +40,21 @@ interface StoredCode {
   expires_at: string;
 }
 
-type TextSendClaim = { ok: true } | { ok: false; window_started_at: string };
-/** Refused, it names the limit that refused, by its place in the list, and when that limit's full window started. */
-type TextSendsClaim = { ok: true } | { ok: false; refused: number; window_started_at: string };
-interface TextSendLimit {
+/** At most `max` sends for `key` in a window that ends `window_ms` after its first send, at most a day. */
+export interface TextSendLimit {
   key: string;
   window_ms: number;
   max: number;
 }
 
+/** Refused, it names the limit that refused and when that limit's full window started. */
+type TextSendsClaim = { ok: true } | { ok: false; refused: TextSendLimit; window_started_at: string };
+
 /** Thrown inside the claim transaction so a refusal undoes the limits already counted. */
 class TextSendRefused extends Error {
-  readonly refused: number;
+  readonly refused: TextSendLimit;
 
-  constructor(refused: number) {
+  constructor(refused: TextSendLimit) {
     super('A text send limit refused the send.');
     this.refused = refused;
   }
@@ -106,10 +107,6 @@ export interface ITextContactStore {
    * ends `window_ms` after its first send. Refused, it says which limit refused and when its full window started.
    */
   claimTextSends(input: { limits: readonly TextSendLimit[]; now: Date }): Promise<TextSendsClaim>;
-  /** Takes back one counted send for each key, for a send that was counted and then not made. Never below none. */
-  giveBackTextSends(input: { keys: readonly string[] }): Promise<void>;
-  /** Whether `claimTextSends` would count a send against this limit now, without counting it. */
-  textSendRoom(input: TextSendLimit & { now: Date }): Promise<TextSendClaim>;
   /** Forgets counts whose window started before this time. */
   forgetTextSends(input: { before: Date }): Promise<void>;
 }
@@ -363,7 +360,7 @@ export class TextContactStore implements ITextContactStore {
     const at = input.now.toISOString();
     try {
       await this.#db.transaction().execute(async trx => {
-        for (const [index, limit] of input.limits.entries()) {
+        for (const limit of input.limits) {
           const over = new Date(input.now.getTime() - limit.window_ms).toISOString();
           const ended = sql<boolean>`text_send_count.window_started_at <= ${over}`;
           const claimed = await trx
@@ -381,7 +378,7 @@ export class TextContactStore implements ITextContactStore {
             .returning('sends')
             .executeTakeFirst();
           if (claimed === undefined) {
-            throw new TextSendRefused(index);
+            throw new TextSendRefused(limit);
           }
         }
       });
@@ -390,11 +387,10 @@ export class TextContactStore implements ITextContactStore {
       if (!(caught instanceof TextSendRefused)) {
         throw caught;
       }
-      const key = input.limits[caught.refused]?.key ?? '';
       const row = await this.#db
         .selectFrom('text_send_count')
         .select('window_started_at')
-        .where('scope_key', '=', key)
+        .where('scope_key', '=', caught.refused.key)
         .executeTakeFirst();
       return {
         ok: false,
@@ -402,32 +398,6 @@ export class TextContactStore implements ITextContactStore {
         window_started_at: row === undefined ? at : isoTime(row.window_started_at),
       };
     }
-  }
-
-  async giveBackTextSends(input: { keys: readonly string[] }): Promise<void> {
-    if (input.keys.length === 0) {
-      return;
-    }
-    await this.#db
-      .updateTable('text_send_count')
-      .set(eb => ({ sends: eb('sends', '-', 1) }))
-      .where('scope_key', 'in', [...input.keys])
-      .where('sends', '>', 0)
-      .execute();
-  }
-
-  async textSendRoom(input: TextSendLimit & { now: Date }): Promise<TextSendClaim> {
-    const row = await this.#db
-      .selectFrom('text_send_count')
-      .select(['window_started_at', 'sends'])
-      .where('scope_key', '=', input.key)
-      .executeTakeFirst();
-    if (row === undefined || row.sends < input.max) {
-      return { ok: true };
-    }
-    const started = isoTime(row.window_started_at);
-    const ended = new Date(started).getTime() <= input.now.getTime() - input.window_ms;
-    return ended ? { ok: true } : { ok: false, window_started_at: started };
   }
 
   async forgetTextSends(input: { before: Date }): Promise<void> {

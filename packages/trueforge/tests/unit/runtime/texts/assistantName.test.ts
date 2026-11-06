@@ -13,6 +13,8 @@ describe('the assistant name in a text', () => {
     expect(textName('Mannie.example.com')).toBe('Your assistant');
     expect(textName('Visit bank dot com')).toBe('Your assistant');
     expect(textName('Mail help@bank.example')).toBe('Your assistant');
+    expect(textName('www evil com')).toBe('Your assistant');
+    expect(textName('Juniper five five five')).toBe('Your assistant');
     expect(textName('🎉 Juniper 🎉')).toBe('Juniper');
     expect(textName('x'.repeat(400))).toHaveLength(20);
   });

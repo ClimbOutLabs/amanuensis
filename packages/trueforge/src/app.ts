@@ -133,11 +133,10 @@ import type { DeliveryService } from './runtime/delivery/deliveryService';
 import type { EventSubscriptionRegistry } from './runtime/event-subscription';
 import { createVaultClient } from './runtime/memory/vaultClient';
 import type { NoticingService } from './runtime/noticing/noticingService';
+import type { ChannelViewer } from './runtime/noticing/reachChannels';
 import type { ReminderReach } from './runtime/noticing/reminderReach';
 import { resolveSandboxProvider } from './runtime/sessionResources';
 import { createSpacePictureService } from './runtime/spacePictures/spacePictureService';
-import type { ChannelViewer } from './runtime/texts/smsProvider';
-import type { DeliveryLimitSettings } from './runtime/texts/textLimits';
 import type { TextNumberService } from './runtime/texts/textNumber';
 import { TokenFactoryDailyCapError, type TokenFactoryBudget } from './runtime/tokenFactoryBudget';
 import { envManagedModelProviderNames } from './runtime/tokenFactoryProvider';
@@ -334,8 +333,6 @@ export interface ServerDeps<TTransaction> {
   reachChannels: (input?: { viewer: ChannelViewer }) => ReachAvailability;
   /** Whether this person runs Aman, so a problem with the server's setup is worded for them. */
   isInstanceOwner: (owner: PersonOwner) => boolean;
-  /** What the day's text limits need; undefined while this server has no text provider. */
-  textLimits: DeliveryLimitSettings | undefined;
   /** The person's number for texts and its confirming. */
   textNumbers: TextNumberService;
   textContactStore: ITextContactStore;
@@ -927,7 +924,6 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
       createReachRouter({
         reachStore: deps.reachSettingsStore,
         textContacts: deps.textContactStore,
-        textLimits: deps.textLimits,
         noticingStore: deps.noticingStore,
         deliveryService: deps.deliveryService,
         channels: deps.reachChannels,

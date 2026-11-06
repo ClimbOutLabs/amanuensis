@@ -22,6 +22,7 @@ const ONE_PLACE = /^[A-Za-z0-9 !"#$%&'()*+,\-./:;<=>?@_]*$/;
 describe('the words of a text', () => {
   it('cuts a long Full message at a word, within two text segments, name included', () => {
     const { body, withheld } = textBody({
+      test: false,
       name: 'Mannie',
       delivery: delivery(`${'word '.repeat(200)}end`),
       mode: 'full',
@@ -37,6 +38,7 @@ describe('the words of a text', () => {
       'Cafe "bill" - due... (soon) (ok) - /x/ \'y\' / naive',
     );
     const { body } = textBody({
+      test: false,
       name: 'Mannie',
       delivery: delivery('Café “bill” — due… {soon} 🎉 naïve'),
       mode: 'full',
@@ -69,14 +71,35 @@ describe('the words of a text', () => {
       'go to bit ly slash abc',
       'go to bitly slash abc',
       'Pay at evil dot com',
-      'Visit evilcom on google',
       'call eight hundred flowers',
       'call five five five oh one oh oh',
+      // Numbers in the shape of a time or a date, but out of range, side by side, or too many of them.
+      'Ring 5551-23-45 then 67:00',
+      'Call 20:25 55:51 23:45',
+      'Dial 12:34 56:78',
+      'call Jan 18 0035 or Dec 55 1234',
+      'Call Marketing 18 2026',
+      'Call the Mayor 18, 2026',
+      'Call 5 5 5',
+      'Call at 8am, 9am or 10am',
+      'Back at 13pm',
+      'Due on the 32nd',
+      // A number read out with tens and teens, or with other joins.
+      'call five fifty five, twelve thirty four',
+      'call eighteen oh oh',
+      'call five; five; five',
+      'call five. five. five',
+      'call five and five and five',
+      // Signs inside a word, or an at sign in brackets.
+      'Visit evil,io',
+      'Visit evil:io',
+      'Visit evil#io',
+      'Write to ceo [at] evil',
     ]) {
-      expect([text, textBody({ name: 'Mannie', delivery: delivery(text), mode: 'full' }).withheld]).toEqual([
+      expect([
         text,
-        'contact_detail',
-      ]);
+        textBody({ test: false, name: 'Mannie', delivery: delivery(text), mode: 'full' }).withheld,
+      ]).toEqual([text, 'not_plain_words']);
     }
   });
 
@@ -94,8 +117,19 @@ describe('the words of a text', () => {
       'Text me or call me',
       'Plan A or plan B',
       'CALL THE BANK BACK',
+      'Doctor follow-up at 3pm',
+      "It's a big day",
+      'Rent is due on the 1st',
+      'Take 2 pills',
+      'Join the Google Meet',
+      'Coffee at 7.45 with Sam',
+      'Party on the 22nd of May',
+      'Pay the gas bill (it is due)',
+      'Bread & milk - and eggs!',
+      'Meet at 12:30, then call Dana at 6 pm.',
+      'Book the dentist for Jan 18, 2027',
     ]) {
-      expect([text, textBody({ name: 'Mannie', delivery: delivery(text), mode: 'full' })]).toEqual([
+      expect([text, textBody({ test: false, name: 'Mannie', delivery: delivery(text), mode: 'full' })]).toEqual([
         text,
         { body: `Mannie: ${text}`, withheld: null },
       ]);
@@ -113,32 +147,47 @@ describe('the words of a text', () => {
       'Your bank needs you. Call +1 555 010 0199 right away.',
       'Your bank needs you. Call (555) 010-0199 right away.',
     ]) {
-      expect(textBody({ name: 'Mannie', delivery: delivery(text), mode: 'full' })).toEqual({
+      expect(textBody({ test: false, name: 'Mannie', delivery: delivery(text), mode: 'full' })).toEqual({
         body: 'Mannie: a reminder is due. Open the app to see it.',
-        withheld: 'contact_detail',
+        withheld: 'not_plain_words',
       });
     }
   });
 
   it('sends what the assistant noticed in Private words, even in Full', () => {
     for (const kind of ['nudge', 'approval_waiting'] as const) {
-      expect(textBody({ name: 'Mannie', delivery: delivery('Bill due Friday.', kind), mode: 'full' })).toEqual({
+      expect(
+        textBody({ test: false, name: 'Mannie', delivery: delivery('Bill due Friday.', kind), mode: 'full' }),
+      ).toEqual({
         body: privateText({ name: 'Mannie', kind }),
         withheld: 'noticed',
       });
     }
-    expect(textBody({ name: 'Mannie', delivery: delivery('This is a test.', 'note'), mode: 'full' }).body).toBe(
-      'Mannie: This is a test.',
-    );
+    expect(
+      textBody({ test: false, name: 'Mannie', delivery: delivery('This is a test.', 'note'), mode: 'full' }),
+    ).toEqual({
+      body: privateText({ name: 'Mannie', kind: 'note' }),
+      withheld: 'noticed',
+    });
+  });
+
+  it('sends a Try it test in its own words in Full', () => {
+    expect(
+      textBody({ test: true, name: 'Mannie', delivery: delivery('This is a test.', 'note'), mode: 'full' }),
+    ).toEqual({
+      body: 'Mannie: This is a test.',
+      withheld: null,
+    });
   });
 
   it('words every kind with no content', () => {
     const kinds: DeliveryKind[] = ['reminder', 'note', 'nudge', 'approval_waiting'];
     for (const kind of kinds) {
       expect(privateText({ name: 'Mannie', kind })).toMatch(/^Mannie: [a-z ]+\. Open the app to see it\.$/);
-      expect(textBody({ name: 'Mannie', delivery: delivery('Pay $482.10 to Dana.', kind), mode: 'private' }).body).toBe(
-        privateText({ name: 'Mannie', kind }),
-      );
+      expect(
+        textBody({ test: false, name: 'Mannie', delivery: delivery('Pay $482.10 to Dana.', kind), mode: 'private' })
+          .body,
+      ).toBe(privateText({ name: 'Mannie', kind }));
     }
   });
 });

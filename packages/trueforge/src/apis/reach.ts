@@ -15,18 +15,8 @@ import {
 import type { DeliveryService } from '../runtime/delivery/deliveryService';
 import { KIND_MAX_LEVEL } from '../runtime/noticing/levels';
 import { MAIL_PROBLEM_SHOWN_AFTER_MS } from '../runtime/noticing/noticingService';
+import type { ChannelViewer } from '../runtime/noticing/reachChannels';
 import { suggestAlwaysImportant } from '../runtime/noticing/suggestions';
-import type { ChannelViewer } from '../runtime/texts/smsProvider';
-import {
-  claimTextLimits,
-  dayLimitWords,
-  deliveryTextLimits,
-  MAX_TEST_TEXTS_PER_HOUR,
-  testTextLimit,
-  textLimitsRoom,
-  waitWords,
-  type DeliveryLimitSettings,
-} from '../runtime/texts/textLimits';
 import { canText } from '../runtime/texts/textNumber';
 import type { ReachAvailability } from '../schemas/reach';
 import { defaultReachSettings, NOTICING_KINDS, type AlwaysImportantSender, type ReachSettings } from '../schemas/reach';
@@ -35,12 +25,7 @@ const TEST_WORDS = 'This is a test. If you can read this, it works.';
 
 export interface ReachRouterDeps {
   reachStore: IReachSettingsStore;
-  textContacts: Pick<
-    ITextContactStore,
-    'get' | 'claimTextSends' | 'forgetTextSends' | 'giveBackTextSends' | 'textSendRoom'
-  >;
-  /** Undefined when this server has no text provider. */
-  textLimits: DeliveryLimitSettings | undefined;
+  textContacts: Pick<ITextContactStore, 'get'>;
   /** Where each watcher's trouble is kept, so Reach me can say mail is not being checked. */
   noticingStore: Pick<INoticingStore, 'getCheckpoint'>;
   deliveryService: Pick<DeliveryService, 'deliver'>;
@@ -168,33 +153,15 @@ export function createReachRouter(deps: ReachRouterDeps) {
     const { channel } = c.req.valid('json');
     const channels = deps.channels();
     if (channel === 'text') {
-      if (!channels.texts.available || deps.textLimits === undefined) {
+      if (!channels.texts.available) {
         return c.json({ error: { message: `${channels.texts.note} Try the app or push notices for now.` } }, 409);
       }
+      const notOn = 'Confirm your number and switch texts on first, then try again.';
       const settings = await deps.reachStore.get(owner);
-      const contact = await deps.textContacts.get(owner);
-      if (settings?.channels.texts !== true || !canText(contact)) {
-        return c.json({ error: { message: 'Confirm your number and switch texts on first, then try again.' } }, 409);
+      if (settings?.channels.texts !== true || !canText(await deps.textContacts.get(owner))) {
+        return c.json({ error: { message: notOn } }, 409);
       }
-      const at = now();
-      // A day's limit that is already reached would refuse the text, so the test is not counted.
-      const day = deliveryTextLimits({ owner, phone: contact.phone, settings: deps.textLimits });
-      const room = await textLimitsRoom({ store: deps.textContacts, limits: [day.person, day.number, day.server], at });
-      if (!room.ok) {
-        return c.json({ error: { message: dayLimitWords({ limits: day, refused: room }) } }, 429);
-      }
-      // Each test is a paid text, so the button has a limit of its own on top of the day's limit for every text.
-      const claim = await claimTextLimits({ store: deps.textContacts, limits: [testTextLimit(owner)], at });
-      if (!claim.ok) {
-        return c.json(
-          {
-            error: {
-              message: `That was ${String(MAX_TEST_TEXTS_PER_HOUR)} test texts this hour. Wait ${waitWords(claim.retry_in_minutes)}, then try again.`,
-            },
-          },
-          429,
-        );
-      }
+      // The text sender claims the day's limits and the button's own limit together, so a refused test counts nowhere.
       const delivery = await deps.deliveryService.deliver({
         ...owner,
         // A note in the feed, so a test never uses up one of the day's nudges.
@@ -203,18 +170,23 @@ export function createReachRouter(deps: ReachRouterDeps) {
         text: TEST_WORDS,
         reason: 'You pressed Try it in Reach me settings.',
         link: null,
-        only_channels: ['sms'],
+        test: 'sms',
       });
       const sent = delivery.attempts.find(attempt => attempt.channel === 'sms');
-      if (sent?.outcome === 'skipped') {
-        // Only a day's limit reached since the check above skips a confirmed number with texts on. No text went out,
-        // so the test is given back.
-        await deps.textContacts.giveBackTextSends({ keys: [testTextLimit(owner).key] });
-        return c.json({ error: { message: sent.detail ?? 'No text was sent. Try again later.' } }, 429);
+      if (sent === undefined) {
+        // Texts were switched off after the check above.
+        return c.json({ error: { message: notOn } }, 409);
       }
-      if (sent?.outcome !== 'sent') {
+      if (sent.outcome === 'skipped') {
+        // A confirmed number with texts on is skipped only by a limit; otherwise the number stopped being confirmed.
+        const stillOn = canText(await deps.textContacts.get(owner));
+        return stillOn
+          ? c.json({ error: { message: sent.detail ?? 'No text was sent. Try again later.' } }, 429)
+          : c.json({ error: { message: notOn } }, 409);
+      }
+      if (sent.outcome !== 'sent') {
         return c.json(
-          { error: { message: sent?.detail ?? 'The test text could not be sent. Try again in a minute.' } },
+          { error: { message: sent.detail ?? 'The test text could not be sent. Try again in a minute.' } },
           502,
         );
       }
@@ -232,7 +204,7 @@ export function createReachRouter(deps: ReachRouterDeps) {
       text: TEST_WORDS,
       reason: 'You pressed Try it in Reach me settings.',
       link: null,
-      only_channels: channel === 'push' ? ['web_push'] : [],
+      test: channel === 'push' ? 'web_push' : 'in_app',
     });
     const devices_reached = delivery.attempts.filter(
       attempt => attempt.channel === 'web_push' && attempt.outcome === 'sent',

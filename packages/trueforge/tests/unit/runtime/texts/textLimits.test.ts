@@ -7,7 +7,6 @@ import {
   deliveryTextLimits,
   HOUR_MS,
   testTextLimit,
-  textLimitsRoom,
   waitWords,
 } from '../../../../src/runtime/texts/textLimits';
 
@@ -39,20 +38,9 @@ describe('text limits', () => {
       limit: full,
       retry_in_minutes: 45,
     });
-    await expect(contacts.textSendRoom({ ...first, max: 1, now: later })).resolves.toEqual({ ok: true });
-  });
-
-  it('tells whether every limit has room without counting a send', async () => {
-    const contacts = await store();
-    const limit = { key: 'k', window_ms: HOUR_MS, max: 1 };
-    for (let look = 0; look < 3; look += 1) {
-      await expect(textLimitsRoom({ store: contacts, limits: [limit], at: AT })).resolves.toEqual({ ok: true });
-    }
-    await claimTextLimits({ store: contacts, limits: [limit], at: AT });
-    await expect(textLimitsRoom({ store: contacts, limits: [limit], at: AT })).resolves.toEqual({
-      ok: false,
-      limit,
-      retry_in_minutes: 60,
+    // A limit of one still has room, so the refused send counted nothing against the first limit.
+    await expect(claimTextLimits({ store: contacts, limits: [{ ...first, max: 1 }], at: later })).resolves.toEqual({
+      ok: true,
     });
   });
 

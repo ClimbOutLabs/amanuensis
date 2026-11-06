@@ -1,8 +1,6 @@
-import { namesContactDetail } from '@truefoundry/trueforge-core/core/permissions/provenance';
-
 import type { IPersonalizationStore } from '../../db/personalizationStore';
 import { UNNAMED_ASSISTANT } from '../chatAssistant';
-import { plainText } from './textWords';
+import { mayCarryContactDetail, plainText } from './textWords';
 
 /** The most of the assistant's name a text carries, so a name cannot hold a message of its own. */
 const TEXT_NAME_MAX = 20;
@@ -13,8 +11,8 @@ const TEXT_NAME_MAX = 20;
  */
 export function textName(name: string | null | undefined): string {
   const plain = plainText(name ?? '');
-  // A name that holds a phone number, a site or an address, in any spelling, is not used at all.
-  if (namesContactDetail([name ?? '', plain])) {
+  // A name that is not plain words, such as one that holds a number, a site or an address, is not used at all.
+  if (mayCarryContactDetail(plain)) {
     return UNNAMED_ASSISTANT;
   }
   const letters = plain

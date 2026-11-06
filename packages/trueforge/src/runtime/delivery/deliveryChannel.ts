@@ -7,5 +7,6 @@ import type { Delivery, DeliveryAttempt, DeliveryChannel } from '../../schemas/d
 export interface DeliveryChannelSender {
   /** The channel its attempts are recorded under, including when it fails before it can say so itself. */
   readonly channel: DeliveryChannel;
-  send(input: { delivery: Delivery; tenant_id: string; created_by: string }): Promise<DeliveryAttempt[]>;
+  /** `test` is true for a Try it test of this channel. */
+  send(input: { delivery: Delivery; tenant_id: string; created_by: string; test: boolean }): Promise<DeliveryAttempt[]>;
 }

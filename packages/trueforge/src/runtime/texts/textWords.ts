@@ -1,5 +1,3 @@
-import { namesContactDetail } from '@truefoundry/trueforge-core/core/permissions/provenance';
-
 import type { Delivery, DeliveryKind } from '../../schemas/deliveries';
 import type { TextMode } from '../../schemas/textMessages';
 
@@ -73,53 +71,188 @@ function cut({ text, room }: { text: string; room: number }): string {
   return `${(space > room / 2 ? head.slice(0, space) : head).trimEnd()}...`;
 }
 
-const MONTH = '(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\\.?';
-/** Times and dates written the usual ways, the only places Full words may hold digits. */
-const TIME_AND_DATE_SHAPES = [
-  /\b\d{1,2}(?::\d{2})?\s?(?:a\.?m\.?|p\.?m\.?)(?![a-z])/gi,
-  /\b\d{1,2}:\d{2}\b/g,
-  /\b\d{4}-\d{2}-\d{2}\b/g,
-  /\b\d{1,2}\/\d{1,2}(?:\/(?:\d{4}|\d{2}))?\b/g,
-  new RegExp(`\\b\\d{1,2}(?:st|nd|rd|th)?\\s+(?:of\\s+)?${MONTH}(?:,?\\s+\\d{4})?\\b`, 'gi'),
-  new RegExp(`\\b${MONTH}\\s+\\d{1,2}(?:st|nd|rd|th)?(?:,?\\s+\\d{4})?\\b`, 'gi'),
-];
-/** Words that read out a site or a number: a spoken dot or slash, a web cue, or a number said in words. */
-const SPOKEN_DETAIL =
-  /\b(?:dot|slash|backslash|www|http|https|url|com|net|org|google|hundred|thousand|(?:zero|oh|one|two|three|four|five|six|seven|eight|nine)(?:[\s,-]+(?:zero|oh|one|two|three|four|five|six|seven|eight|nine)){2,})\b/i;
+// prettier-ignore
+const MONTHS = new Set([
+  'jan', 'january', 'feb', 'february', 'mar', 'march', 'apr', 'april', 'may', 'jun', 'june', 'jul', 'july', 'aug',
+  'august', 'sep', 'sept', 'september', 'oct', 'october', 'nov', 'november', 'dec', 'december',
+]);
+const MONTH = '([a-z]+)\\.?';
+const DAY = '(\\d{1,2})(?:st|nd|rd|th)?';
+const YEAR = '(?:,?\\s+(\\d{4}))?';
+/** Digits glued to a letter, a dot, a colon, a slash or a dash are part of something longer than a time or a date. */
+const BEFORE = '(?<![a-z0-9.:/-])';
+const AFTER = '(?![a-z0-9:/-]|\\.[a-z0-9])';
+
+function inRange({ value, low, high }: { value: string | undefined; low: number; high: number }): boolean {
+  const number = Number(value);
+  return value !== undefined && Number.isInteger(number) && number >= low && number <= high;
+}
+
+const isDay = (value: string | undefined) => inRange({ value, low: 1, high: 31 });
+const isMonth = (value: string | undefined) => inRange({ value, low: 1, high: 12 });
+const isMinute = (value: string | undefined) => value === undefined || inRange({ value, low: 0, high: 59 });
+const isYear = (value: string | undefined) => value === undefined || /^(?:19|20)\d\d$/.test(value);
+const isOrdinal = (whole: string, day: string | undefined) =>
+  isDay(day) && /^(?:1st|2nd|3rd|21st|22nd|23rd|31st|(?:[4-9]|1\d|2[04-9]|30)th)$/.test(whole.replace(/^0/, ''));
 
 /**
- * Whether Full words could carry a number to call, a site or an address, judged by whole classes rather than by
- * known spellings: any digit outside a time or a date, a slash or an at sign, a dot or a dash inside a word, single
- * letters in a row, or a site or a number read out in words. Ordinary words pass; a false alarm only costs the
- * reminder's own words, which stay in the app.
+ * Times and dates written the usual ways, each with its parts in range: a day 1 to 31, a month by its whole name,
+ * an hour 0 to 23 or 1 to 12 before am or pm, minutes 00 to 59, and a year in the 1900s or 2000s.
  */
-function mayCarryContactDetail(plain: string): boolean {
-  const rest = TIME_AND_DATE_SHAPES.reduce((text, shape) => text.replace(shape, ' '), plain);
-  return (
-    /\d/.test(rest) ||
-    /[/@]/.test(rest) ||
-    /[a-z0-9][.\-_][a-z0-9]/i.test(rest) ||
-    /(?<![a-z0-9])[a-z](?:[\s.,_-]+[a-z])+(?![a-z0-9])/i.test(rest) ||
-    SPOKEN_DETAIL.test(rest)
+const TIME_AND_DATE_SHAPES: readonly {
+  shape: RegExp;
+  fits: (parts: (string | undefined)[], whole: string) => boolean;
+}[] = [
+  {
+    shape: new RegExp(`${BEFORE}${DAY}\\s+(?:of\\s+)?${MONTH}${YEAR}${AFTER}`, 'g'),
+    fits: ([day, month, year]) => isDay(day) && MONTHS.has(month ?? '') && isYear(year),
+  },
+  {
+    shape: new RegExp(`${BEFORE}${MONTH}\\s+${DAY}${YEAR}${AFTER}`, 'g'),
+    fits: ([month, day, year]) => isDay(day) && MONTHS.has(month ?? '') && isYear(year),
+  },
+  {
+    shape: new RegExp(`${BEFORE}(\\d{4})-(\\d{2})-(\\d{2})${AFTER}`, 'g'),
+    fits: ([year, month, day]) => isYear(year) && isMonth(month) && isDay(day),
+  },
+  {
+    shape: new RegExp(`${BEFORE}(\\d{1,2})/(\\d{1,2})(?:/(\\d{4}|\\d{2}))?${AFTER}`, 'g'),
+    fits: ([first, second, year]) =>
+      isDay(first) && isDay(second) && (isMonth(first) || isMonth(second)) && (year?.length !== 4 || isYear(year)),
+  },
+  {
+    shape: new RegExp(`${BEFORE}(\\d{1,2})(?:[:.](\\d{2}))?\\s?[ap]\\.?m\\.?(?![a-z0-9])`, 'g'),
+    fits: ([hour, minute]) => inRange({ value: hour, low: 1, high: 12 }) && isMinute(minute),
+  },
+  {
+    shape: new RegExp(`${BEFORE}(\\d{1,2})[:.](\\d{2})${AFTER}`, 'g'),
+    fits: ([hour, minute]) => inRange({ value: hour, low: 0, high: 23 }) && isMinute(minute),
+  },
+  {
+    shape: new RegExp(`${BEFORE}(\\d{1,2})(?:st|nd|rd|th)${AFTER}`, 'g'),
+    fits: ([day], whole) => isOrdinal(whole, day),
+  },
+];
+
+/** Stands in for a time or a date while the words are checked. Plain text never holds it. */
+const SHAPE = '\u0000';
+const SMALL_NUMBER = /^\d{1,2}$/;
+const WORD = /^[a-z]+(?:['-][a-z]+)*$/;
+/** Punctuation a sentence puts before or after a word. Anywhere else in a word, it could join the parts of a site. */
+const EDGES = /^[("']+|[)"'.,!?;:]+$/g;
+/** Standing alone, these join words rather than spell anything. */
+const JOINS = new Set(['-', '&', '+']);
+/** Words that read out a site: a spoken dot or slash, or a web cue. */
+const SPOKEN_SITE = new Set(['dot', 'slash', 'backslash', 'www', 'http', 'https', 'url', 'com']);
+// prettier-ignore
+const NUMBER_WORDS = new Set([
+  'zero', 'oh', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'eleven', 'twelve',
+  'thirteen', 'fourteen', 'fifteen', 'sixteen', 'seventeen', 'eighteen', 'nineteen', 'twenty', 'thirty', 'forty',
+  'fifty', 'sixty', 'seventy', 'eighty', 'ninety', 'hundred', 'thousand', 'double', 'triple',
+]);
+/** The most digits, times and dates one Full text may hold, so a run of them cannot spell a number to call. */
+const MAX_DIGIT_TOKENS = 2;
+
+/** The text with each time and date that is in range put as one stand-in, and anything else left as it was. */
+function withShapes(text: string): string {
+  return TIME_AND_DATE_SHAPES.reduce(
+    (rest, { shape, fits }) =>
+      rest.replace(shape, (whole: string, ...groups: unknown[]) => {
+        const parts = groups.slice(0, -2).map(group => (typeof group === 'string' ? group : undefined));
+        return fits(parts, whole) ? ` ${SHAPE} ` : whole;
+      }),
+    text,
   );
 }
 
-/** Why a Full text went out in Private words instead, or null when it carried the item's own words. */
-export type FullWithheld = 'noticed' | 'contact_detail' | null;
+/** Whether words in a row read out a number: three number words, or two that end in hundred or thousand. */
+function readsOutNumber(words: readonly string[]): boolean {
+  let run = 0;
+  for (const word of words) {
+    if (NUMBER_WORDS.has(word)) {
+      run += 1;
+      if (run >= 3 || (run >= 2 && (word === 'hundred' || word === 'thousand'))) {
+        return true;
+      }
+    } else if (word !== 'and') {
+      run = 0;
+    }
+  }
+  return false;
+}
+
+/** Whether three single letters stand in a row, which can spell a site or a number letter by letter. */
+function spellsLetters(words: readonly string[]): boolean {
+  let run = 0;
+  for (const word of words) {
+    run = /^[a-z]$/.test(word) ? run + 1 : 0;
+    if (run >= 3) {
+      return true;
+    }
+  }
+  return false;
+}
 
 /**
- * Kinds whose words a person or Aman itself wrote: a reminder the person asked for, and a test. What the assistant
- * noticed is worded by the model, and those words stay in the app, so a text names only its kind.
+ * Whether these words could carry a number to call, a site or an address. Only known shapes pass: words, small
+ * numbers, and times and dates in range, at most two holding digits and never two side by side. Anything else, such
+ * as a sign inside a word, a long number, single letters in a row or a site or a number read out in words, fails. A
+ * false alarm only costs the item's own words, which stay in the app. This is the one check for words a text carries.
  */
-const OWN_WORDS_KINDS: ReadonlySet<DeliveryKind> = new Set(['reminder', 'note']);
+export function mayCarryContactDetail(text: string): boolean {
+  const tokens = withShapes(plainText(text).toLowerCase())
+    .split(/\s+/)
+    .filter(token => token !== '');
+  let digitTokens = 0;
+  let lastHadDigits = false;
+  for (const token of tokens) {
+    const word = token.replace(EDGES, '');
+    if (word === '' || JOINS.has(token)) {
+      // Punctuation alone neither spells anything nor parts two numbers.
+      continue;
+    }
+    const hasDigits = token === SHAPE || SMALL_NUMBER.test(word);
+    if (!hasDigits && !WORD.test(word)) {
+      return true;
+    }
+    if (SPOKEN_SITE.has(word) || (word === 'at' && token.startsWith('('))) {
+      return true;
+    }
+    if (hasDigits && lastHadDigits) {
+      return true;
+    }
+    digitTokens += hasDigits ? 1 : 0;
+    lastHadDigits = hasDigits;
+  }
+  const words = plainText(text)
+    .toLowerCase()
+    .split(/[\s,;.()_-]+/)
+    .filter(word => word !== '');
+  return digitTokens > MAX_DIGIT_TOKENS || readsOutNumber(words) || spellsLetters(words);
+}
+
+/** Why a Full text went out in Private words instead, or null when it carried the item's own words. */
+export type FullWithheld = 'noticed' | 'not_plain_words' | null;
+
+/** Kinds whose words the person asked for. What the assistant noticed is worded by the model and stays in the app. */
+const OWN_WORDS_KINDS: ReadonlySet<DeliveryKind> = new Set(['reminder']);
 
 /**
  * The text that goes out for a delivery, given the name already made fit for a text. Full carries the item's words
- * only for a reminder or a test; anything noticed goes out in Private words. Words that could hold a link, a site, a
- * phone number or an address also go out in Private words, since a text is where a link or a number to call does the
- * most harm.
+ * only for a reminder or a Try it test; anything noticed goes out in Private words. Words that are not plain words,
+ * times and dates also go out in Private words, since a text is where a link or a number to call does the most harm.
  */
-export function textBody({ name, delivery, mode }: { name: string; delivery: Delivery; mode: TextMode }): {
+export function textBody({
+  name,
+  delivery,
+  mode,
+  test,
+}: {
+  name: string;
+  delivery: Delivery;
+  mode: TextMode;
+  test: boolean;
+}): {
   body: string;
   withheld: FullWithheld;
 } {
@@ -127,13 +260,13 @@ export function textBody({ name, delivery, mode }: { name: string; delivery: Del
   if (mode === 'private') {
     return { body: privateBody, withheld: null };
   }
-  if (!OWN_WORDS_KINDS.has(delivery.kind)) {
+  if (!test && !OWN_WORDS_KINDS.has(delivery.kind)) {
     return { body: privateBody, withheld: 'noticed' };
   }
-  const plain = plainText(delivery.text);
-  if (mayCarryContactDetail(plain) || namesContactDetail([delivery.text, plain])) {
-    return { body: privateBody, withheld: 'contact_detail' };
+  if (mayCarryContactDetail(delivery.text)) {
+    return { body: privateBody, withheld: 'not_plain_words' };
   }
+  const plain = plainText(delivery.text);
   const prefix = `${name}: `;
   return { body: `${prefix}${cut({ text: plain, room: TEXT_MAX - prefix.length })}`, withheld: null };
 }

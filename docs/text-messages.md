@@ -10,7 +10,7 @@ Texts go through Twilio, a service you sign up for. You pay Twilio for each text
 ## What a text says
 
 - **Private (the default).** The text says only the kind of thing, such as "Mannie: a reminder is due. Open the app to see it." It holds no names, amounts or message content. Your assistant's name is the one you chose in Personalization. A text uses at most 20 letters of it.
-- **Full.** A reminder's text holds the reminder, cut to fit two texts. It can show on a locked screen, and Twilio and the phone company can read it. Something your assistant noticed still gets the Private words, because its wording comes from the model and stays in the app. A link or a number to call in a text is a common trick, so a reminder goes out in Full only when it holds nothing that could be one. It can hold times and dates, but no other numbers. It cannot hold a slash, an at sign, a dot or dash inside a word, single letters in a row, or a website or number written out in words. Any other reminder goes out in Private words.
+- **Full.** A reminder's text holds the reminder, cut to fit two texts. It can show on a locked screen, and Twilio and the phone company can read it. Something your assistant noticed still gets the Private words, because its wording comes from the model and stays in the app. A link or a number to call in a text is a common trick, so a reminder goes out in Full only when it is plain words. It can hold times and dates, ordinals such as 1st, and small numbers such as 2, but at most two of these. It cannot hold a sign inside a word, such as a slash, an at sign or a dot, a long number, or a website or number written out in words. Any other reminder goes out in Private words, and Activity says why.
 
 The text with your confirmation code holds only the code. It does not name your assistant.
 
@@ -52,7 +52,7 @@ Texts cost money, so Aman limits them:
 - Each person gets at most 30 texts a day, reminders and tests included. After that, new items wait in the app, and the item says when texts start again.
 - One number gets at most 30 texts a day, however many people confirmed it.
 - The whole server sends at most 500 texts a day. To change this, set `REACH_SMS_MAX_TEXTS_PER_DAY` in the settings file, then start Aman again.
-- Try it sends at most 3 test texts an hour. When a day's limit is reached, Try it says so and does not count the test.
+- Try it sends at most 3 test texts an hour. When any limit is reached, Try it says which one and when to try again, and the test counts toward none of them.
 - Aman sends at most 3 codes an hour, and 10 a day, for each person. It sends at most 50 codes a day in all. A code to a number you already confirmed does not count toward the 50.
 - Aman sends at most 3 codes an hour, and 10 a day, to any one number, whoever asks. The person who confirmed the number can still get a code to it. Removing a number does not reset these limits.
 

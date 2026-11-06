@@ -3,6 +3,7 @@ import winston from 'winston';
 import { createDeliveryService } from '../../../../src/runtime/delivery/deliveryService';
 import {
   deliveryTextLimits,
+  MAX_TEST_TEXTS_PER_HOUR,
   MAX_TEXTS_PER_NUMBER_PER_DAY,
   MAX_TEXTS_PER_PERSON_PER_DAY,
 } from '../../../../src/runtime/texts/textLimits';
@@ -95,7 +96,7 @@ describe('texts as a channel of the delivery layer', () => {
     );
   });
 
-  it('sends a Full reminder that names a link in Private words, and says so', async () => {
+  it('sends a Full reminder that is not plain words in Private words, and says so with the next step', async () => {
     const h = await textsHarness({ assistantName: 'Mannie' });
     await h.readyToText({ mode: 'full' });
     const delivery = await h.deliveries.deliver(
@@ -103,8 +104,28 @@ describe('texts as a channel of the delivery layer', () => {
     );
     expect(h.sent[0]?.body).toBe('Mannie: a reminder is due. Open the app to see it.');
     expect(delivery.attempts.find(row => row.channel === 'sms')?.detail).toBe(
-      'Private text: the message named a link, a phone number or an address, so only the kind of thing was sent.',
+      'Private text: a Full text carries only words, times and dates. This message had other numbers or signs, so only the kind of thing was sent. To see it, open the app.',
     );
+  });
+
+  it('counts a Try it test toward the button’s own limit in the same claim, and says when to try again', async () => {
+    const h = await textsHarness();
+    await h.readyToText();
+    const test = { ...nudge('A test.'), kind: 'note' as const, test: 'sms' as const };
+    for (let press = 0; press < MAX_TEST_TEXTS_PER_HOUR; press += 1) {
+      await h.deliveries.deliver(test);
+    }
+    const refused = await h.deliveries.deliver(test);
+    expect(refused.attempts.find(row => row.channel === 'sms')).toMatchObject({
+      outcome: 'skipped',
+      detail: 'That was 3 test texts this hour. Wait 60 minutes, then try again.',
+    });
+    expect(h.sent).toHaveLength(MAX_TEST_TEXTS_PER_HOUR);
+    // The refused test counted toward no day's limit either.
+    const day = deliveryTextLimits({ owner: ALICE, phone: PHONE, settings: h.limits });
+    await expect(
+      h.contacts.claimTextSends({ limits: [{ ...day.person, max: MAX_TEST_TEXTS_PER_HOUR + 1 }], now: h.clock.now }),
+    ).resolves.toEqual({ ok: true });
   });
 
   it('sends at most a day’s texts to one person, reminders included, then says when they start again', async () => {
@@ -178,9 +199,8 @@ describe('texts as a channel of the delivery layer', () => {
     expect(h.sent).toHaveLength(5);
     // The number's day did not grow either, so nobody else who has it is held back.
     await expect(
-      h.contacts.textSendRoom({
-        ...deliveryTextLimits({ owner: ALICE, phone: PHONE, settings: h.limits }).number,
-        max: 1,
+      h.contacts.claimTextSends({
+        limits: [{ ...deliveryTextLimits({ owner: ALICE, phone: PHONE, settings: h.limits }).number, max: 1 }],
         now: h.clock.now,
       }),
     ).resolves.toEqual({ ok: true });
@@ -266,7 +286,7 @@ describe('texts as a channel of the delivery layer', () => {
   it('a test of one channel does not try the others', async () => {
     const h = await textsHarness();
     await h.readyToText();
-    const delivery = await h.deliveries.deliver({ ...nudge('A test.'), only_channels: [] });
+    const delivery = await h.deliveries.deliver({ ...nudge('A test.'), test: 'in_app' });
     expect(delivery.attempts.map(attempt => attempt.channel)).toEqual(['in_app']);
     expect(h.sent).toEqual([]);
   });

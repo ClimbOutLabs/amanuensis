@@ -11,8 +11,8 @@ import { ReachSettingsStore } from '../../../src/db/reachSettingsStore';
 import { createSqliteDb } from '../../../src/db/sqlite/client';
 import { TextContactStore } from '../../../src/db/textContactStore';
 import { createDeliveryService } from '../../../src/runtime/delivery/deliveryService';
+import type { ChannelViewer } from '../../../src/runtime/noticing/reachChannels';
 import { NO_PHONE_CHANNELS, reachChannelsFor } from '../../../src/runtime/noticing/reachChannels';
-import type { ChannelViewer } from '../../../src/runtime/texts/smsProvider';
 import type { ReachAvailability } from '../../../src/schemas/reach';
 import { defaultReachSettings, GetReachResponseSchema, type ReachSettings } from '../../../src/schemas/reach';
 
@@ -44,7 +44,6 @@ async function build({
     createReachRouter({
       reachStore,
       textContacts: new TextContactStore(db),
-      textLimits: undefined,
       noticingStore,
       deliveryService,
       channels,

@@ -16,7 +16,7 @@ One server-side feed of things Aman wants a person to see, called deliveries. Ea
 
 **Server owns seen state.** Seen on one device is seen on every device. Every read and write is scoped to the tenant and the person who owns the delivery.
 
-**Kinds and channels grow without migrations.** Kind, level and channel are plain text columns. The API validates kind with a discriminated union, so later parts add kinds and channels in code only. A channel sender names its channel (`web_push`, `sms`), so a failure is recorded under the right one. A test of one channel can pass `only_channels` to the service to try just that sender.
+**Kinds and channels grow without migrations.** Kind, level and channel are plain text columns. The API validates kind with a discriminated union, so later parts add kinds and channels in code only. A channel sender names its channel (`web_push`, `sms`), so a failure is recorded under the right one. A Try it test names its channel as `test`, so the service tries just that sender and tells it the delivery is a test.
 
 **Push carries no content.** The push payload is the delivery id and a short title such as "Reminder". It never holds the reminder text, the reason or the assistant's name. The page fetches details after the person opens it.
 

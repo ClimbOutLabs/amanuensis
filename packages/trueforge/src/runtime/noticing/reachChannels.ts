@@ -1,7 +1,35 @@
 import type { TwilioSettings } from '../../config';
 import type { ReachAvailability } from '../../schemas/reach';
-import { numberProblemWords, type ChannelViewer, type PointNumberFailure } from '../texts/smsProvider';
+import type { PointNumberFailure } from '../texts/smsProvider';
 import { TEXTS_NOT_SET_UP } from '../texts/textWords';
+
+/** Who reads the words about a number that could not be pointed here: whoever runs Aman, or anyone else. */
+export type ChannelViewer = 'owner' | 'person';
+
+/**
+ * What Reach me says when the number could not be pointed here. Whoever runs Aman gets the one thing to do, in words
+ * the settings page can show; everyone else is told whom to ask. The setting names stay in the log.
+ */
+export function numberProblemWords({
+  failure,
+  viewer,
+}: {
+  failure: PointNumberFailure;
+  viewer: ChannelViewer;
+}): string {
+  const lead = 'STOP replies do not reach Aman yet.';
+  if (viewer === 'person') {
+    return `${lead} Ask the person who runs Aman to check the Twilio settings.`;
+  }
+  switch (failure) {
+    case 'number_not_found':
+      return `${lead} Aman could not find its number in your Twilio account. Put one of your Twilio numbers in the settings file, then start Aman again.`;
+    case 'not_accepted':
+      return `${lead} Twilio did not accept the sign-in details. Copy the account id and auth token from the Twilio console into the settings file again, then start Aman again.`;
+    case 'unreachable':
+      return `${lead} Twilio could not be reached. Aman keeps trying by itself, so check again in a few minutes.`;
+  }
+}
 
 /**
  * Which of the person's phone channels can be used on this server. Each channel reports itself here when it is set

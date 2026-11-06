@@ -165,7 +165,6 @@ const app = createServerApp({
   }),
   reachChannels: () => NO_PHONE_CHANNELS,
   isInstanceOwner: () => false,
-  textLimits: undefined,
   textContactStore: new TextContactStore(db),
   textNumbers: createTextNumberService({
     store: new TextContactStore(db),

@@ -6,11 +6,11 @@ import { createTextNumberRouter } from '../../../src/apis/textNumber';
 import type { RequestContext } from '../../../src/auth/identity';
 import { NoticingStore } from '../../../src/db/noticingStore';
 import { reachChannelsFor } from '../../../src/runtime/noticing/reachChannels';
-import { MAX_TEST_TEXTS_PER_HOUR, testTextLimit } from '../../../src/runtime/texts/textLimits';
+import { deliveryTextLimits, MAX_TEST_TEXTS_PER_HOUR, testTextLimit } from '../../../src/runtime/texts/textLimits';
 import { RequestErrorResponseSchema } from '../../../src/schemas/errors';
 import { defaultReachSettings } from '../../../src/schemas/reach';
 import { GetTextStatusResponseSchema } from '../../../src/schemas/textMessages';
-import { ALICE, textsHarness } from '../../fixtures/textsHarness';
+import { ALICE, PHONE, textsHarness } from '../../fixtures/textsHarness';
 
 function person(id: string): RequestContext {
   return { tenant_id: 'default', subject: { id, type: 'user', display_name: id }, roles: [], user_credential: null };
@@ -19,8 +19,8 @@ function person(id: string): RequestContext {
 async function build({
   provider = true,
   maxTextsPerDay,
-  roomAlwaysFree = false,
-}: { provider?: boolean; maxTextsPerDay?: number; roomAlwaysFree?: boolean } = {}) {
+  textsOffAfterCheck = false,
+}: { provider?: boolean; maxTextsPerDay?: number; textsOffAfterCheck?: boolean } = {}) {
   const h = await textsHarness({ provider, ...(maxTextsPerDay === undefined ? {} : { maxTextsPerDay }) });
   const channels = reachChannelsFor({
     twilio: provider ? { accountSid: 'AC' } : undefined,
@@ -39,18 +39,25 @@ async function build({
   app.route(
     '/reach',
     createReachRouter({
-      reachStore: h.reachSettings,
-      textContacts: roomAlwaysFree
+      reachStore: textsOffAfterCheck
         ? {
-            get: owner => h.contacts.get(owner),
-            claimTextSends: input => h.contacts.claimTextSends(input),
-            forgetTextSends: input => h.contacts.forgetTextSends(input),
-            giveBackTextSends: input => h.contacts.giveBackTextSends(input),
-            // As if another text took the day's last place between the check and the send.
-            textSendRoom: () => Promise.resolve({ ok: true }),
+            listOwners: () => h.reachSettings.listOwners(),
+            put: input => h.reachSettings.put(input),
+            importSettings: input => h.reachSettings.importSettings(input),
+            // As if the person switched texts off in another tab just after the route read their settings.
+            get: async owner => {
+              const settings = await h.reachSettings.get(owner);
+              if (settings !== undefined) {
+                await h.reachSettings.put({
+                  ...owner,
+                  settings: { ...settings, channels: { ...settings.channels, texts: false } },
+                });
+              }
+              return settings;
+            },
           }
-        : h.contacts,
-      textLimits: provider ? h.limits : undefined,
+        : h.reachSettings,
+      textContacts: h.contacts,
       noticingStore: new NoticingStore(h.db),
       deliveryService: h.deliveries,
       channels: () => channels,
@@ -237,6 +244,11 @@ describe('the text test button', () => {
     }
     expect(statuses).toEqual([201, 201, 201, 429, 429, 429, 429, 429, 429, 429]);
     expect(h.sent).toHaveLength(MAX_TEST_TEXTS_PER_HOUR);
+    // The refused tests counted nowhere: the day's count for the person holds only the tests that went out.
+    const day = deliveryTextLimits({ owner: ALICE, phone: PHONE, settings: h.limits });
+    await expect(
+      h.contacts.claimTextSends({ limits: [{ ...day.person, max: MAX_TEST_TEXTS_PER_HOUR + 1 }], now: h.clock.now }),
+    ).resolves.toEqual({ ok: true });
     h.clock.now = new Date(h.clock.now.getTime() + 20 * 60_000);
     const later = await call('/reach/test', { method: 'POST', body: { channel: 'text' } });
     expect(later.status).toBe(429);
@@ -264,29 +276,26 @@ describe('the text test button', () => {
       'This server sent the most texts it may send in one day, so no text was sent. Texts start again in about 24 hours.',
     );
     expect(h.sent).toHaveLength(1);
-    await expect(h.contacts.textSendRoom({ ...testTextLimit(ALICE), max: 1, now: h.clock.now })).resolves.toEqual({
-      ok: true,
-    });
+    // A limit of one still has room, so the refused test was not counted against the button.
+    await expect(
+      h.contacts.claimTextSends({ limits: [{ ...testTextLimit(ALICE), max: 1 }], now: h.clock.now }),
+    ).resolves.toEqual({ ok: true });
   });
 
-  it('gives the test back when the day’s last text went to something else between the check and the send', async () => {
-    const { h, call } = await build({ maxTextsPerDay: 1, roomAlwaysFree: true });
+  it('asks the person to switch texts on when they were switched off between the check and the send', async () => {
+    const { h, call } = await build({ textsOffAfterCheck: true });
     await h.readyToText();
-    await h.deliveries.deliver({
-      ...ALICE,
-      kind: 'reminder',
-      level: 'nudge',
-      text: 'Water the plants',
-      reason: 'Due.',
-      link: null,
-    });
-    const refused = await call('/reach/test', { method: 'POST', body: { channel: 'text' } });
-    expect(refused.status).toBe(429);
-    expect(await message(refused)).toMatch(/^This server sent the most texts it may send in one day/);
-    expect(h.sent).toHaveLength(1);
-    await expect(h.contacts.textSendRoom({ ...testTextLimit(ALICE), max: 1, now: h.clock.now })).resolves.toEqual({
-      ok: true,
-    });
+    const response = await call('/reach/test', { method: 'POST', body: { channel: 'text' } });
+    expect(response.status).toBe(409);
+    expect(await message(response)).toBe('Confirm your number and switch texts on first, then try again.');
+    expect(h.sent).toEqual([]);
+  });
+
+  it('sends the test in its own words when the person chose Full', async () => {
+    const { h, call } = await build();
+    await h.readyToText({ mode: 'full' });
+    expect((await call('/reach/test', { method: 'POST', body: { channel: 'text' } })).status).toBe(201);
+    expect(h.sent.at(-1)?.body).toMatch(/: This is a test\. If you can read this, it works\.$/);
   });
 
   it('says texts are not set up, with the one thing to do, when there is no provider', async () => {

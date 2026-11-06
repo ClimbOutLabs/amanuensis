@@ -8,8 +8,11 @@ import type { DeliveryChannelSender } from './deliveryChannel';
 
 /** The one door into the feed: makes the delivery, tries each channel, and writes every step to Activity. */
 export interface DeliveryService {
-  /** `only_channels` limits which senders are tried, such as a test of one channel. The app itself always gets it. */
-  deliver(input: CreateDeliveryInput & { only_channels?: readonly DeliveryChannel[] }): Promise<Delivery>;
+  /**
+   * `test` makes this a Try it test of one channel: only that channel's sender is tried, and it is told the delivery
+   * is a test. The app itself always gets it.
+   */
+  deliver(input: CreateDeliveryInput & { test?: DeliveryChannel }): Promise<Delivery>;
   /**
    * Delivers once per id: a later call with the same id resolves to the delivery made first. It sends again only when
    * that delivery has no attempt written down, because the call that made it stopped before its sends were recorded.
@@ -89,11 +92,11 @@ export function createDeliveryService({
   async function send({
     owner,
     created,
-    only_channels,
+    test,
   }: {
     owner: PersonOwner;
     created: Delivery;
-    only_channels: readonly DeliveryChannel[] | undefined;
+    test: DeliveryChannel | undefined;
   }): Promise<Delivery> {
     await record({
       owner,
@@ -110,11 +113,11 @@ export function createDeliveryService({
     };
     const attempts: DeliveryAttempt[] = [inApp];
     for (const sender of senders) {
-      if (only_channels !== undefined && !only_channels.includes(sender.channel)) {
+      if (test !== undefined && test !== sender.channel) {
         continue;
       }
       try {
-        attempts.push(...(await sender.send({ delivery: created, ...owner })));
+        attempts.push(...(await sender.send({ delivery: created, ...owner, test: test !== undefined })));
       } catch (error) {
         logger.warn('A delivery channel failed', {
           delivery_id: created.id,
@@ -147,14 +150,14 @@ export function createDeliveryService({
   }
 
   return {
-    async deliver({ only_channels, ...input }) {
-      return await send({ owner: ownerOf(input), created: await store.create(input), only_channels });
+    async deliver({ test, ...input }) {
+      return await send({ owner: ownerOf(input), created: await store.create(input), test });
     },
     async deliverOnce(input) {
       const { delivery, created } = await store.createOnce(input);
       // Sending again can repeat a notice that went out just before a crash, which is better than losing it.
       return created || delivery.attempts.length === 0
-        ? await send({ owner: ownerOf(input), created: delivery, only_channels: undefined })
+        ? await send({ owner: ownerOf(input), created: delivery, test: undefined })
         : delivery;
     },
   };
