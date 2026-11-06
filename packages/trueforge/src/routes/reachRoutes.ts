@@ -76,7 +76,7 @@ export const testReachChannelRoute = createRoute({
   tags: [OpenApiTag.DELIVERIES],
   summary: 'Try a channel',
   description:
-    'Sends the signed-in person a test item on one channel. A channel that is not set up answers 409. Test texts are limited to a few an hour.',
+    'Sends the signed-in person a test item on one channel. A channel that is not set up answers 409. Test texts and test calls are limited, and a test past the limit answers 429.',
   'x-fern-sdk-group-name': ['reach'],
   'x-fern-sdk-method-name': 'test_channel',
   request: { body: { content: { 'application/json': { schema: TestReachChannelRequestSchema } }, required: true } },
@@ -90,7 +90,7 @@ export const testReachChannelRoute = createRoute({
     },
     429: {
       content: { 'application/json': { schema: RequestErrorResponseSchema } },
-      description: 'Too many test texts this hour. The message says how long to wait.',
+      description: 'Too many test texts or test calls. The message says how long to wait.',
     },
     502: {
       content: { 'application/json': { schema: RequestErrorResponseSchema } },

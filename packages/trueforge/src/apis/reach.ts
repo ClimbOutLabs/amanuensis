@@ -11,6 +11,7 @@ import {
   updateReachRoute,
 } from '../routes/reachRoutes';
 import type { PhoneCallService } from '../runtime/calls/phoneCalls';
+import { claimTestCall } from '../runtime/calls/testCallLimits';
 import type { DeliveryService } from '../runtime/delivery/deliveryService';
 import { KIND_MAX_LEVEL } from '../runtime/noticing/levels';
 import { suggestAlwaysImportant } from '../runtime/noticing/suggestions';
@@ -204,6 +205,10 @@ export function createReachRouter(deps: ReachRouterDeps) {
       const contact = await deps.textContacts.get(owner);
       if (settings?.channels.calls !== true || !canText(contact)) {
         return c.json({ error: { message: 'Confirm your number and switch calls on first, then try again.' } }, 409);
+      }
+      const claim = await claimTestCall({ store: deps.textContacts, owner, at: now() });
+      if (!claim.ok) {
+        return c.json({ error: { message: claim.message } }, 429);
       }
       // A note in the feed that only the app shows, so a test never counts toward the time between calls. The call
       // itself is placed below, and a test call never falls back to a text.

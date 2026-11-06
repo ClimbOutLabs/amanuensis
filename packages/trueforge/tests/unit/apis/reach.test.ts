@@ -43,6 +43,7 @@ async function build({
   });
   let current = person('alice');
   let offered = channels;
+  let at = NOW;
   const calls = { place };
   const app = new OpenAPIHono();
   app.route(
@@ -56,7 +57,7 @@ async function build({
       memories: () => Promise.resolve(memories),
       resolveRequestContext: () => current,
       logger: winston.createLogger({ silent: true }),
-      now: () => NOW,
+      now: () => at,
     }),
   );
   const call = (path: string, init?: { method: string; body: unknown }) =>
@@ -74,6 +75,10 @@ async function build({
     textContacts,
     as: (id: string) => {
       current = person(id);
+    },
+    /** Moves the server's clock forward. */
+    later: (ms: number) => {
+      at = new Date(at.getTime() + ms);
     },
     /** The channels the server offers from now on, as when the voice parts stop. */
     offer: (next: ReachAvailability) => {
@@ -177,6 +182,45 @@ describe('reach routes', () => {
     await expect(
       deliveryStore.lastCreatedAt({ tenant_id: 'default', created_by: 'alice', levels: ['call'] }),
     ).resolves.toBeUndefined();
+  });
+
+  it('rings on Try it at most once every 2 minutes and 5 times a day, and says when to try again', async () => {
+    const channels: ReachAvailability = { ...NO_PHONE_CHANNELS, calls: { available: true, note: 'On.' } };
+    let placed = 0;
+    const { call, put, textContacts, later } = await build({
+      channels,
+      place: () => {
+        placed += 1;
+        return Promise.resolve({
+          channel: 'call',
+          outcome: 'sent',
+          detail: 'The phone is ringing.',
+          target: 'ending 0111',
+          attempted_at: NOW.toISOString(),
+        });
+      },
+    });
+    await confirmNumber({
+      store: textContacts,
+      owner: { tenant_id: 'default', created_by: 'alice' },
+      phone: '+15550111',
+      now: NOW,
+    });
+    expect((await put({ ...defaultReachSettings('UTC'), channels: { texts: false, calls: true } })).status).toBe(200);
+    const tryIt = () => call('/test', { method: 'POST', body: { channel: 'call' } });
+    expect((await tryIt()).status).toBe(201);
+    const soon = await tryIt();
+    expect(soon.status).toBe(429);
+    expect(JSON.stringify(await soon.json())).toContain('Wait 2 minutes, then try again.');
+    for (let i = 0; i < 4; i += 1) {
+      later(2 * 60_000);
+      expect((await tryIt()).status).toBe(201);
+    }
+    later(2 * 60_000);
+    const sixth = await tryIt();
+    expect(sixth.status).toBe(429);
+    expect(JSON.stringify(await sixth.json())).toContain('That was 5 test calls today.');
+    expect(placed).toBe(5);
   });
 
   it('refuses a call tick for a kind that can never call', async () => {

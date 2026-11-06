@@ -54,7 +54,7 @@ The rules are Noticing's, unchanged: the kind is ticked for calls (or the remind
 
 - With Twilio set up and the voice parts running, the Calls row is available and shows the privacy note: "Calls and texts travel through Twilio and the phone company. The assistant's voice and the transcript are made on your computer."
 - Calls can be switched on only once the number under Texts is confirmed.
-- Try it rings the person's phone with a test call. A test call never sends a text or a push. Its item in the feed is a note, so it never counts toward the day's nudges or the time between calls.
+- Try it rings the person's phone with a test call. A test call never sends a text or a push. Its item in the feed is a note, so it never counts toward the day's nudges or the time between calls. Each test call is paid, so the button is limited per person through the shared send counter: one call every 2 minutes, then 5 a day. The short wait is claimed first, so a call it refuses spends none of the day. A test past either limit answers 429 and says how long to wait.
 - The settings that only matter for calls (which kinds may call, quiet hours, the time between calls, calls for urgent reminders) show once calls are set up.
 
 ## Design Decisions
