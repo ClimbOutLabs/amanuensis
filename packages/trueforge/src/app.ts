@@ -625,6 +625,7 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
         tokenStore: deps.tokenStore,
         globalSettingsStore: deps.globalSettingsStore,
         googleConnectionStore: deps.googleConnectionStore,
+        personalizationStore: deps.personalizationStore,
         hostReportPath: configuration.HOST_REPORT_PATH,
         schedulerStatus: deps.schedulerStatus,
         logger: deps.logger,
