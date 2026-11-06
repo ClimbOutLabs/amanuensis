@@ -24,8 +24,9 @@ describe('app data dir', () => {
 
   it('keeps the voice model folder under the data root so the setup script and the server agree', () => {
     expect(defaultVoiceModelDir('/data/app')).toBe('/data/app/voice-model');
+    const { VOICE_VAD_MODEL_DIR } = process.env;
     expect(configuration.VOICE_VAD_MODEL_DIR).toBe(
-      process.env.VOICE_VAD_MODEL_DIR ?? defaultVoiceModelDir(path.dirname(configuration.SANDBOX_RUNS_DIR)),
+      VOICE_VAD_MODEL_DIR ?? defaultVoiceModelDir(path.dirname(configuration.SANDBOX_RUNS_DIR)),
     );
   });
 });
