@@ -3,7 +3,7 @@ import type { CalendarEvent } from '@truefoundry/trueforge-core/core/calendar/ca
 import { LIST_DEADLINE_MS, type GmailApiPort } from '@truefoundry/trueforge-core/core/email/gmail/gmailApi';
 import type { GmailMessage } from '@truefoundry/trueforge-core/core/email/gmail/gmailWire';
 
-import { GoogleApiError } from '@truefoundry/trueforge-core/core/google/errors';
+import { GoogleApiError, GoogleUnusableReplyError } from '@truefoundry/trueforge-core/core/google/errors';
 import { GOOGLE_TOKEN_URL } from '@truefoundry/trueforge-core/core/google/oauth';
 import { z } from 'zod';
 
@@ -86,15 +86,36 @@ describe('Google Calendar source', () => {
     ]);
   });
 
-  it('counts an event someone the person shares with made for them, with no one else on it', async () => {
+  it('counts an event someone the person shares with made for them in Google Calendar, with no one else on it', async () => {
     const assistant = { email: 'assistant@example.com' };
     const events = await sourceOf([
-      timed('made for me', { organizer: me, creator: assistant }),
+      timed('made for me', { organizer: me, creator: assistant, iCalUID: 'abc123@google.com' }),
       timed('just me', {}),
     ]).listEvents({ from: NOW, to: new Date('2026-11-06T15:00:00.000Z') });
     expect(events.map(item => [item.id, item.own])).toEqual([
       ['made for me', true],
       ['just me', true],
+    ]);
+  });
+
+  it('does not count an outside invite file that names the person as organizer and lists no guests', async () => {
+    // An imported invite keeps the id its sender gave it, so Google did not make it.
+    const events = await sourceOf([
+      timed('imported', { organizer: me, creator: stranger, iCalUID: 'uid-1@mail.stranger.example' }),
+      timed('no id', { organizer: me, creator: stranger }),
+      timed('organizer self only', { organizer: me, creator: me }),
+      timed('made for me with guests', {
+        organizer: me,
+        creator: { email: 'assistant@example.com' },
+        iCalUID: 'abc123@google.com',
+        attendees: [{ ...stranger, responseStatus: 'accepted' }],
+      }),
+    ]).listEvents({ from: NOW, to: new Date('2026-11-06T15:00:00.000Z') });
+    expect(events.map(item => [item.id, item.own])).toEqual([
+      ['imported', false],
+      ['no id', false],
+      ['organizer self only', true],
+      ['made for me with guests', false],
     ]);
   });
 
@@ -233,24 +254,8 @@ describe('Gmail source', () => {
     expect(seen).toEqual(['x1', 'y1', 'x2']);
   });
 
-  it('marks a message Gmail can never give back as unreadable, and passes other failures on', async () => {
-    const { api } = gmail({ messages: [], perPage: 100 });
-    const failing = (error: Error) =>
-      gmailMailSource({
-        ...api,
-        getMessage: () => Promise.reject(error),
-        getThread: () => Promise.reject(error),
-      });
+  describe('a message that fails to read', () => {
     const mailRef = { id: 'm', thread_id: 't', received_at: minute(1) };
-    const gone = failing(new GoogleApiError({ status: 404, message: 'Gmail has no such message.' }));
-    const garbled = failing(
-      new GoogleApiError({
-        status: 502,
-        message: 'Gmail returned a response Aman could not read.',
-        cause: new z.ZodError([]),
-      }),
-    );
-    const limited = failing(new GoogleApiError({ status: 429, message: 'Too many requests.' }));
     const asMail = {
       ...mailRef,
       from_address: 'dana@example.com',
@@ -259,11 +264,75 @@ describe('Gmail source', () => {
       snippet: '',
       authentication_results: [],
     };
-    await expect(gone.readText(asMail)).rejects.toBeInstanceOf(MessageUnreadableError);
-    await expect(gone.laterInThread(mailRef)).rejects.toBeInstanceOf(MessageUnreadableError);
-    await expect(garbled.readText(asMail)).rejects.toBeInstanceOf(MessageUnreadableError);
-    await expect(limited.readText(asMail)).rejects.toThrow('Too many requests.');
-    await expect(limited.laterInThread(mailRef)).rejects.not.toBeInstanceOf(MessageUnreadableError);
+    const failing = (error: Error) => {
+      const { api } = gmail({ messages: [], perPage: 100 });
+      return gmailMailSource({
+        ...api,
+        getMessage: () => Promise.reject(error),
+        getThread: () => Promise.reject(error),
+      });
+    };
+
+    it.each([
+      ['a message Gmail no longer has', new GoogleApiError({ status: 404, message: 'Gmail has no such message.' })],
+      [
+        'a reply over the size Aman reads, with no cause',
+        new GoogleUnusableReplyError({ message: 'Gmail sent back more than Aman will read at once.' }),
+      ],
+      [
+        'a reply that does not parse, whatever the cause',
+        new GoogleUnusableReplyError({
+          message: 'Gmail returned a response Aman could not read.',
+          cause: new RangeError(),
+        }),
+      ],
+      [
+        'a reply that fails the schema',
+        new GoogleUnusableReplyError({
+          message: 'Gmail returned a response Aman could not read.',
+          cause: new z.ZodError([]),
+        }),
+      ],
+    ])('is unreadable for %s', async (_name, error) => {
+      await expect(failing(error).readText(asMail)).rejects.toBeInstanceOf(MessageUnreadableError);
+      await expect(failing(error).laterInThread(mailRef)).rejects.toBeInstanceOf(MessageUnreadableError);
+    });
+
+    it.each([
+      ['a rate limit', new GoogleApiError({ status: 429, message: 'Too many requests.' })],
+      [
+        'a request Gmail did not accept',
+        new GoogleApiError({ status: 400, message: 'Gmail did not accept that request.' }),
+      ],
+      ['Gmail failing with a 502 of its own', new GoogleApiError({ status: 502, message: 'Gmail is busy right now.' })],
+      [
+        'a dropped connection',
+        new GoogleApiError({ status: 503, message: 'Gmail is busy.', cause: new TypeError('fetch failed') }),
+      ],
+    ])('is passed on as it is for %s, so the pass can try again later', async (_name, error) => {
+      await expect(failing(error).readText(asMail)).rejects.toBe(error);
+      await expect(failing(error).laterInThread(mailRef)).rejects.toBe(error);
+    });
+
+    it('is unreadable when the message body itself cannot be taken apart', async () => {
+      // A message nested deep enough to overflow the reader is a fault of that message, never of the connection.
+      let part: NonNullable<GmailMessage['payload']> = { mimeType: 'text/plain', body: { data: 'aGk' } };
+      for (let level = 0; level < 100_000; level += 1) {
+        part = { mimeType: 'multipart/mixed', parts: [part] };
+      }
+      const { api } = gmail({ messages: [], perPage: 100 });
+      const nested = gmailMailSource({
+        ...api,
+        getMessage: () => Promise.resolve({ id: 'm', threadId: 't', payload: part }),
+        getThread: () =>
+          Promise.resolve({
+            id: 't',
+            messages: [{ id: 'm2', threadId: 't', internalDate: String(minute(5).getTime()), payload: part }],
+          }),
+      });
+      await expect(nested.readText(asMail)).rejects.toBeInstanceOf(MessageUnreadableError);
+      await expect(nested.laterInThread(mailRef)).rejects.toBeInstanceOf(MessageUnreadableError);
+    });
   });
 
   it('hands back the oldest part when Gmail is too slow to read it all', async () => {

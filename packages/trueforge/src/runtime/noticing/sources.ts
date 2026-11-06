@@ -31,17 +31,25 @@ export type MailWindowRead =
   { read: 'all'; messages: MailMessage[] } | { read: 'too_many' } | { read: 'oldest'; messages: MailMessage[] };
 
 /**
- * One message the source can never read however often it tries: it was deleted, or it comes back in a shape the
- * source cannot parse. Anything else, such as a busy server or a dropped connection, is thrown as it is, so the pass
- * stops and the next one reads the same mail again.
+ * One message the source can never read however often it tries: it was deleted, it is too large, or it comes back in
+ * a shape the source cannot parse. Anything else, such as a busy server or a dropped connection, is thrown as it is,
+ * so the pass stops and the next one reads the same mail again.
  */
 export class MessageUnreadableError extends Error {
-  readonly message_id: string;
-
-  constructor({ message_id, cause }: { message_id: string; cause: unknown }) {
+  constructor({ cause }: { cause: unknown }) {
     super('This message could not be read.', { cause });
     this.name = 'MessageUnreadableError';
-    this.message_id = message_id;
+  }
+}
+
+/** Said when the mail server took too long to list new mail, so the person can be told why mail was not checked. */
+export class MailTooSlowError extends Error {
+  constructor({ seconds, cause }: { seconds: number; cause: unknown }) {
+    super(
+      `The Email connector took longer than ${String(seconds)} seconds to list new mail. New mail was not checked this time. If this keeps happening, check that the mail server answers quickly.`,
+      { cause },
+    );
+    this.name = 'MailTooSlowError';
   }
 }
 

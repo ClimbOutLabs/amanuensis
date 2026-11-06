@@ -157,6 +157,7 @@ const WIRE_REACH = {
       calls: { available: false, note: 'Phone calls are not set up yet.' },
     },
     max_levels: { travel: 'call', bill_due: 'nudge', other: 'call' },
+    mail_problem: null,
   },
 };
 
@@ -173,6 +174,22 @@ test('reads Reach me settings into the app shape, dropping what it does not know
   assert.equal(view.settings.timezone, 'Europe/Paris');
   assert.deepEqual(view.maxLevels, { travel: 'call', bill_due: 'nudge' });
   assert.equal(view.availability.calls.note, 'Phone calls are not set up yet.');
+  assert.equal(view.mailProblem, null);
+});
+
+test('reads the mail trouble the server reports, and treats a kind it does not know as other trouble', async () => {
+  const problem = { since: '2026-11-05T14:00:00.000Z', kind: 'too_slow' };
+  const slow = createDeliveriesApi(async () => Response.json({ data: { ...WIRE_REACH.data, mail_problem: problem } }));
+  assert.deepEqual((await slow.reach.get()).mailProblem, problem);
+  const odd = createDeliveriesApi(async () =>
+    Response.json({ data: { ...WIRE_REACH.data, mail_problem: { ...problem, kind: 'new_kind' } } }),
+  );
+  assert.deepEqual((await odd.reach.get()).mailProblem, { since: problem.since, kind: 'other' });
+  const missing = createDeliveriesApi(async () => {
+    const { mail_problem: _left, ...rest } = WIRE_REACH.data;
+    return Response.json({ data: rest });
+  });
+  await assert.rejects(missing.reach.get(), /could not be read\. Reload the page\./);
 });
 
 test('says the settings could not be read when the server leaves a field out, instead of filling in defaults', async () => {

@@ -6,6 +6,7 @@ import { createReachRouter } from '../../../src/apis/reach';
 import type { RequestContext } from '../../../src/auth/identity';
 import { DeliveryStore } from '../../../src/db/deliveryStore';
 import { migrateSqliteToLatest } from '../../../src/db/migrateSqlite';
+import { NoticingStore } from '../../../src/db/noticingStore';
 import { ReachSettingsStore } from '../../../src/db/reachSettingsStore';
 import { createSqliteDb } from '../../../src/db/sqlite/client';
 import { createDeliveryService } from '../../../src/runtime/delivery/deliveryService';
@@ -26,6 +27,7 @@ async function build({
   const db = createSqliteDb(':memory:');
   await migrateSqliteToLatest(db);
   const reachStore = new ReachSettingsStore(db);
+  const noticingStore = new NoticingStore(db);
   const deliveryStore = new DeliveryStore(db);
   const deliveryService = createDeliveryService({
     store: deliveryStore,
@@ -39,6 +41,7 @@ async function build({
     '/reach',
     createReachRouter({
       reachStore,
+      noticingStore,
       deliveryService,
       channels: () => channels,
       memories: () => Promise.resolve(memories),
@@ -58,6 +61,7 @@ async function build({
     call,
     put,
     reachStore,
+    noticingStore,
     deliveryStore,
     as: (id: string) => {
       current = person(id);
@@ -77,6 +81,32 @@ describe('reach routes', () => {
     expect(data.availability.calls).toEqual({ available: false, note: 'Phone calls are not set up yet.' });
     expect(data.max_levels.bill_due).toBe('nudge');
     expect(data.max_levels.calendar_clash).toBe('call');
+  });
+
+  describe('when mail checks keep failing', () => {
+    const OWNER = { tenant_id: 'default', created_by: 'alice' };
+    const minutesAgo = (minutes: number) => new Date(NOW.getTime() - minutes * 60_000);
+    const failingSince = (minutes: number) => ({
+      checked_at: minutesAgo(5),
+      failure: { kind: 'too_slow' as const, since: minutesAgo(minutes) },
+      stuck: undefined,
+    });
+
+    it('says nothing about mail that works, or that has failed for less than an hour', async () => {
+      const { call, noticingStore } = await build();
+      expect(GetReachResponseSchema.parse(await (await call('')).json()).data.mail_problem).toBeNull();
+      await noticingStore.setCheckpoint({ ...OWNER, watcher: 'mail', ...failingSince(59) });
+      expect(GetReachResponseSchema.parse(await (await call('')).json()).data.mail_problem).toBeNull();
+    });
+
+    it('says when mail was last checked well and why not since, after about an hour', async () => {
+      const { call, noticingStore, as } = await build();
+      await noticingStore.setCheckpoint({ ...OWNER, watcher: 'mail', ...failingSince(60) });
+      const mine = GetReachResponseSchema.parse(await (await call('')).json()).data;
+      expect(mine.mail_problem).toEqual({ since: minutesAgo(60).toISOString(), kind: 'too_slow' });
+      as('bob');
+      expect(GetReachResponseSchema.parse(await (await call('')).json()).data.mail_problem).toBeNull();
+    });
   });
 
   it('saves settings per person and reads them back', async () => {

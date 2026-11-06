@@ -1,8 +1,10 @@
 import type { ExpressionBuilder, Kysely } from 'kysely';
 
 import {
+  MailProblemKindSchema,
   NoticingEventSchema,
   NoticingVerdictSchema,
+  type MailProblemKind,
   type NoticingEvent,
   type NoticingKind,
   type NoticingVerdict,
@@ -38,12 +40,21 @@ export interface NoticingEventTable {
   attempts: number;
 }
 
-/** When a watcher last looked for one person. */
+/**
+ * When a watcher last looked for one person, and how it is doing. `failing_since` and `failure_kind` are set while
+ * passes keep failing and cleared by a pass that works. `stuck_*` name the one message a pass keeps failing on, how
+ * many passes failed on it and since when, so a message that never reads can be passed over.
+ */
 export interface NoticingCheckpointTable {
   tenant_id: string;
   created_by: string;
   watcher: string;
   checked_at: string | Date;
+  failing_since: string | Date | null;
+  failure_kind: string | null;
+  stuck_message_id: string | null;
+  stuck_passes: number;
+  stuck_since: string | Date | null;
 }
 
 /** Who is deciding how loudly to reach one person right now, and until when. */
@@ -83,6 +94,20 @@ const MAX_ATTEMPTS = 5;
 
 /** Events a pass may claim: waiting to be raised, or left halfway through delivery by a pass that stopped. */
 const WAITING = ['pending', 'delivering'];
+
+/** A message a watcher keeps failing on: how many passes failed on it and when the first one did. */
+export interface StuckMessage {
+  message_id: string;
+  passes: number;
+  since: Date;
+}
+
+/** Where a watcher reads from next, and its trouble if passes keep failing. */
+export interface WatcherCheckpoint {
+  checked_at: Date;
+  failure: { kind: MailProblemKind; since: Date } | undefined;
+  stuck: StuckMessage | undefined;
+}
 
 export interface INoticingStore {
   /**
@@ -138,8 +163,9 @@ export interface INoticingStore {
   acquireReachLease(input: PersonOwner & { holder: string; now: Date; until: Date }): Promise<boolean>;
   /** Hands the lease back, when this holder still has it. */
   releaseReachLease(input: PersonOwner & { holder: string }): Promise<void>;
-  getCheckpoint(input: PersonOwner & { watcher: NoticingWatcher }): Promise<Date | undefined>;
-  setCheckpoint(input: PersonOwner & { watcher: NoticingWatcher; checked_at: Date }): Promise<void>;
+  getCheckpoint(input: PersonOwner & { watcher: NoticingWatcher }): Promise<WatcherCheckpoint | undefined>;
+  /** Replaces the whole checkpoint, so a pass that works clears an earlier failure by leaving it out. */
+  setCheckpoint(input: PersonOwner & { watcher: NoticingWatcher } & WatcherCheckpoint): Promise<void>;
 }
 
 function eventOf(row: Pick<NoticingEventTable, 'event_json'>): NoticingEvent {
@@ -401,23 +427,44 @@ export class NoticingStore implements INoticingStore {
       .execute();
   }
 
-  async getCheckpoint(input: PersonOwner & { watcher: NoticingWatcher }): Promise<Date | undefined> {
+  async getCheckpoint(input: PersonOwner & { watcher: NoticingWatcher }): Promise<WatcherCheckpoint | undefined> {
     const row = await this.#db
       .selectFrom('noticing_checkpoint')
-      .select('checked_at')
+      .selectAll()
       .where('tenant_id', '=', input.tenant_id)
       .where('created_by', '=', input.created_by)
       .where('watcher', '=', input.watcher)
       .executeTakeFirst();
-    return row === undefined ? undefined : new Date(row.checked_at);
+    if (row === undefined) {
+      return undefined;
+    }
+    const kind = MailProblemKindSchema.safeParse(row.failure_kind);
+    return {
+      checked_at: new Date(row.checked_at),
+      failure:
+        row.failing_since === null || !kind.success
+          ? undefined
+          : { kind: kind.data, since: new Date(row.failing_since) },
+      stuck:
+        row.stuck_message_id === null || row.stuck_since === null
+          ? undefined
+          : { message_id: row.stuck_message_id, passes: row.stuck_passes, since: new Date(row.stuck_since) },
+    };
   }
 
-  async setCheckpoint(input: PersonOwner & { watcher: NoticingWatcher; checked_at: Date }): Promise<void> {
-    const checked_at = input.checked_at.toISOString();
+  async setCheckpoint(input: PersonOwner & { watcher: NoticingWatcher } & WatcherCheckpoint): Promise<void> {
+    const state = {
+      checked_at: input.checked_at.toISOString(),
+      failing_since: input.failure?.since.toISOString() ?? null,
+      failure_kind: input.failure?.kind ?? null,
+      stuck_message_id: input.stuck?.message_id ?? null,
+      stuck_passes: input.stuck?.passes ?? 0,
+      stuck_since: input.stuck?.since.toISOString() ?? null,
+    };
     await this.#db
       .insertInto('noticing_checkpoint')
-      .values({ tenant_id: input.tenant_id, created_by: input.created_by, watcher: input.watcher, checked_at })
-      .onConflict(conflict => conflict.columns(['tenant_id', 'created_by', 'watcher']).doUpdateSet({ checked_at }))
+      .values({ tenant_id: input.tenant_id, created_by: input.created_by, watcher: input.watcher, ...state })
+      .onConflict(conflict => conflict.columns(['tenant_id', 'created_by', 'watcher']).doUpdateSet(state))
       .execute();
   }
 }

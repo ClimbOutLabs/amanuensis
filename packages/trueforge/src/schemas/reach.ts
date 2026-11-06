@@ -139,6 +139,20 @@ export const ReachAvailabilitySchema = z
 
 export type ReachAvailability = z.infer<typeof ReachAvailabilitySchema>;
 
+export const MailProblemKindSchema = z
+  .enum(['too_slow', 'other'])
+  .describe('Why mail could not be checked: the mail server answered too slowly, or something else went wrong.')
+  .openapi('MailProblemKind');
+
+export type MailProblemKind = z.infer<typeof MailProblemKindSchema>;
+
+export const MailProblemSchema = z
+  .object({
+    since: z.string().describe('When mail checks first failed, with none succeeding since, ISO 8601 UTC.'),
+    kind: MailProblemKindSchema,
+  })
+  .openapi('MailProblem');
+
 export const ReachViewSchema = z
   .object({
     settings: ReachSettingsSchema,
@@ -147,6 +161,9 @@ export const ReachViewSchema = z
     max_levels: z
       .record(NoticingKindSchema, DeliveryLevelSchema)
       .describe('The highest level each kind of event can ever reach, whatever the model says.'),
+    mail_problem: MailProblemSchema.nullable().describe(
+      'Set when mail has not been checked for about an hour. Null when mail checks work.',
+    ),
   })
   .openapi('ReachView');
 

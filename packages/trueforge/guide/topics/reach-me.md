@@ -29,3 +29,7 @@ A model suggests how loudly to tell you, and your settings decide. The model's w
 1. Click **Settings**, then click **Reach me**.
 2. Click **Try it** next to a way to reach you.
 3. A test item shows under the bell. For notices, Aman also says how many devices it reached.
+
+## If Aman could not check your mail
+
+If your mail has not been checked for about an hour, **Reach me** says so at the top, with the time it first failed. If your mail server answers slowly, check that it is running well. Otherwise, click **Settings**, then click **Connectors**, and check that your mail is still connected. The notice goes away after the next check that works.

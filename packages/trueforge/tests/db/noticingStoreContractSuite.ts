@@ -260,13 +260,49 @@ export function runNoticingStoreContractSuite(getStore: () => INoticingStore): v
 
   it('keeps a checkpoint per watcher and person', async () => {
     const store = getStore();
+    const clear = { failure: undefined, stuck: undefined };
     await expect(store.getCheckpoint({ ...ALICE, watcher: 'mail' })).resolves.toBeUndefined();
-    await store.setCheckpoint({ ...ALICE, watcher: 'mail', checked_at: new Date('2026-11-05T10:00:00.000Z') });
-    await store.setCheckpoint({ ...ALICE, watcher: 'mail', checked_at: new Date('2026-11-05T10:10:00.000Z') });
-    await expect(store.getCheckpoint({ ...ALICE, watcher: 'mail' })).resolves.toEqual(
-      new Date('2026-11-05T10:10:00.000Z'),
-    );
+    await store.setCheckpoint({
+      ...ALICE,
+      watcher: 'mail',
+      checked_at: new Date('2026-11-05T10:00:00.000Z'),
+      ...clear,
+    });
+    await store.setCheckpoint({
+      ...ALICE,
+      watcher: 'mail',
+      checked_at: new Date('2026-11-05T10:10:00.000Z'),
+      ...clear,
+    });
+    await expect(store.getCheckpoint({ ...ALICE, watcher: 'mail' })).resolves.toEqual({
+      checked_at: new Date('2026-11-05T10:10:00.000Z'),
+      ...clear,
+    });
     await expect(store.getCheckpoint({ ...ALICE, watcher: 'calendar' })).resolves.toBeUndefined();
     await expect(store.getCheckpoint({ ...BOB, watcher: 'mail' })).resolves.toBeUndefined();
+  });
+
+  it('keeps a watcher’s trouble with its checkpoint until a pass that works clears it', async () => {
+    const store = getStore();
+    const trouble = {
+      checked_at: new Date('2026-11-05T10:00:00.000Z'),
+      failure: { kind: 'too_slow' as const, since: new Date('2026-11-05T09:00:00.000Z') },
+      stuck: { message_id: 'm7', passes: 2, since: new Date('2026-11-05T09:30:00.000Z') },
+    };
+    await store.setCheckpoint({ ...ALICE, watcher: 'mail', ...trouble });
+    await expect(store.getCheckpoint({ ...ALICE, watcher: 'mail' })).resolves.toEqual(trouble);
+    await expect(store.getCheckpoint({ ...BOB, watcher: 'mail' })).resolves.toBeUndefined();
+    await store.setCheckpoint({
+      ...ALICE,
+      watcher: 'mail',
+      checked_at: new Date('2026-11-05T10:10:00.000Z'),
+      failure: undefined,
+      stuck: undefined,
+    });
+    await expect(store.getCheckpoint({ ...ALICE, watcher: 'mail' })).resolves.toEqual({
+      checked_at: new Date('2026-11-05T10:10:00.000Z'),
+      failure: undefined,
+      stuck: undefined,
+    });
   });
 }

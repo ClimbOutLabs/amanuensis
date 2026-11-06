@@ -99,6 +99,23 @@ function NumberField({
   );
 }
 
+const MAIL_PROBLEM_NEXT_STEP = {
+  too_slow: 'Your mail server answers too slowly. Check that it is running well.',
+  other: 'Open Settings, Connectors, and check that your mail is still connected.',
+} as const;
+
+/** Shown only once mail has gone unchecked for about an hour, so a short hiccup never worries anyone. */
+function MailProblem({ problem }: { problem: NonNullable<ReachView['mailProblem']> }) {
+  const assistant = useAssistantDisplayName();
+  const since = new Date(problem.since).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+  return (
+    <div role="status" className={`${CARD} flex flex-col gap-1`}>
+      <p className="text-text-primary text-sm font-semibold">{`${assistant} could not check your mail since ${since}.`}</p>
+      <p className="text-text-secondary text-sm">{MAIL_PROBLEM_NEXT_STEP[problem.kind]}</p>
+    </div>
+  );
+}
+
 function Card({ title, children, intro }: { title: string; children: ReactNode; intro?: string }) {
   return (
     <div className={CARD}>
@@ -227,6 +244,7 @@ export function ReachPreferences({ reach }: { reach: ReachApi }) {
 
   return (
     <div data-role="reach-preferences" className="flex flex-col gap-4">
+      {view.mailProblem === null ? null : <MailProblem problem={view.mailProblem} />}
       <Card title="Ways to reach you" intro="In the app is always on. Notices on this device are set up above.">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <span className="text-text-primary text-sm">In the app, under the bell</span>
