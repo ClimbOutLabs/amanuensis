@@ -25,7 +25,7 @@ Everything lands under the bell with the reason you got it.
 - **Nudge:** a notice on the devices where you turned notices on.
 - **Call:** a phone call. Calls are not set up yet. Until they are, nothing calls you.
 
-A model reads a short description of each new thing and suggests how loudly to tell you. It can only suggest. Your settings decide. A bill or a waiting approval can nudge you but never call. Words in a message, such as "urgent", can never make it louder than a note.
+A model reads a short description of each new thing and suggests how loudly to tell you. It can only suggest. Your settings decide. A waiting approval can nudge you but never call. A bill can nudge you only when it came from someone you marked always important and your mail server confirmed the sender, and it never calls. Words in a message, such as "urgent", can never make it louder than a note.
 
 ## Your settings
 
@@ -42,7 +42,7 @@ Each way to reach you has a **Try it** button. It sends a test item under the be
 ## When something goes wrong
 
 - If the model cannot be asked, or has used its limit for the day, things still arrive as quiet notes.
-- If a delivery fails, Aman tries again on the next check.
+- If a delivery fails, Aman tries again on the next check. After five tries it stops trying that item.
 - If a page says your settings could not be read, reload the page.
 
 See [Privacy](privacy) for what is sent where.
