@@ -68,11 +68,12 @@ async function opened(t: Awaited<ReturnType<typeof setup>>, input: { delivery: D
 }
 
 /** The chat a call wrote into; fails when it wrote none. */
-function writtenTo(chat: { session_id?: string | undefined }): string {
-  if (chat.session_id === undefined) {
+async function writtenTo(chat: { begin: () => Promise<string | undefined> }): Promise<string> {
+  const session_id = await chat.begin();
+  if (session_id === undefined) {
     throw new Error('expected the call to write into a chat');
   }
-  return chat.session_id;
+  return session_id;
 }
 
 function say(
@@ -102,21 +103,50 @@ describe('the chat a phone call talks in', () => {
       delivery: delivery({ type: 'chat', session_id: linked.session_id }),
       call_id: 'call-1',
     });
-    expect(writtenTo(chat)).not.toBe(linked.session_id);
-    const record = await t.sessionStore.getSession({ tenant_id: TENANT, session_id: writtenTo(chat) });
+    expect(await writtenTo(chat)).not.toBe(linked.session_id);
+    const record = await t.sessionStore.getSession({ tenant_id: TENANT, session_id: await writtenTo(chat) });
     expect(record?.agent).toEqual(AGENT);
     expect(record?.title).toBe(PHONE_CALL_CHAT_TITLE);
     expect(record?.created_by_subject).toEqual(DANA);
-    const turns = await t.sessionStore.listTurns({ session_id: writtenTo(chat), limit: 10, page_token: undefined });
+    const turns = await t.sessionStore.listTurns({
+      session_id: await writtenTo(chat),
+      limit: 10,
+      page_token: undefined,
+    });
     expect(turns.data).toHaveLength(1);
     expect(JSON.stringify(turns.data[0]?.state)).toContain('Hi, this is Mannie.');
+  });
+
+  it('writes nothing until the person has heard the message, then writes the chat once', async () => {
+    const t = await setup();
+    const chat = await opened(t, { delivery: delivery(null), call_id: 'call-2' });
+    const listAll = () =>
+      t.sessionStore.listSessions({
+        tenant_id: TENANT,
+        limit: 10,
+        page_token: undefined,
+        order: 'desc',
+        start_timestamp: undefined,
+        end_timestamp: undefined,
+        agent_id: undefined,
+        folder_id: undefined,
+        no_folder: false,
+        created_by_or_agent_ids: undefined,
+        metadata: undefined,
+        source_type: undefined,
+        source_id: undefined,
+      });
+    expect((await listAll()).data.map(session => session.title)).not.toContain(PHONE_CALL_CHAT_TITLE);
+    const [first, second] = await Promise.all([chat.begin(), chat.begin()]);
+    expect(second).toBe(first);
+    expect((await listAll()).data.filter(session => session.title === PHONE_CALL_CHAT_TITLE)).toHaveLength(1);
   });
 
   it('still talks with a person who has never chatted, and writes no chat for them', async () => {
     const t = await setup({ noChat: true });
     const chat = await opened(t, { delivery: delivery(null), call_id: 'call-3' });
     // A chat needs an assistant, and the app's own new-chat rules pick that only when the person starts one.
-    expect(chat.session_id).toBeUndefined();
+    expect(await chat.begin()).toBeUndefined();
     expect((await say(chat, 'when is it?')).heard).toBe('It starts at 3pm.');
     const listed = await t.sessionStore.listSessions({
       tenant_id: TENANT,
@@ -148,7 +178,7 @@ describe('the chat a phone call talks in', () => {
       delivery: delivery({ type: 'chat', session_id: theirs.session_id }),
       call_id: 'call-4',
     });
-    expect(chat.session_id).toBeUndefined();
+    expect(await chat.begin()).toBeUndefined();
   });
 
   it('has no chat to open when the server has no model at all', async () => {
@@ -233,14 +263,18 @@ describe('what the assistant can do on a call', () => {
       { role: 'assistant', content: 'It starts at 3pm.' },
       { role: 'user', content: injected },
     ]);
-    const turns = await t.sessionStore.listTurns({ session_id: writtenTo(chat), limit: 10, page_token: undefined });
+    const turns = await t.sessionStore.listTurns({
+      session_id: await writtenTo(chat),
+      limit: 10,
+      page_token: undefined,
+    });
     // Nothing said on the call is ever the person's message to a later turn.
     expect(turns.data.map(turn => turn.input)).toEqual([[], [], []]);
     const lastId = turns.data.at(-1)?.turn_id;
     if (lastId === undefined) {
       throw new Error('expected turns');
     }
-    const last = await t.sessionStore.getTurn({ session_id: writtenTo(chat), turn_id: lastId });
+    const last = await t.sessionStore.getTurn({ session_id: await writtenTo(chat), turn_id: lastId });
     const context = last?.snapshot.threads[MAIN_THREAD_ID]?.context ?? [];
     expect(context.map(message => ('role' in message ? message.role : message.type))).toEqual([
       'assistant',
@@ -260,7 +294,11 @@ describe('what the assistant can do on a call', () => {
     abort.abort();
     const outcome = await chat.turns.sendMessage({ text: 'when?', signal: abort.signal, onText: () => undefined });
     expect(outcome).toEqual({ kind: 'failed' });
-    const turns = await t.sessionStore.listTurns({ session_id: writtenTo(chat), limit: 10, page_token: undefined });
+    const turns = await t.sessionStore.listTurns({
+      session_id: await writtenTo(chat),
+      limit: 10,
+      page_token: undefined,
+    });
     expect(turns.data).toHaveLength(1);
   });
 

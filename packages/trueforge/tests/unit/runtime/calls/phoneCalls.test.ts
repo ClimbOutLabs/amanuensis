@@ -374,28 +374,85 @@ describe('a call that ends while its line opens', () => {
     expect(h.pushes).toEqual([delivery.id]);
   });
 
-  it('when the voice would change a word of the message after a yes, says none of it and sends a text and a push', async () => {
+  /** Answers the opening with a yes, the way the person does on the phone. */
+  async function sayYes(media: Awaited<ReturnType<Harness['openMedia']>>): Promise<void> {
+    await h.waitFor(() => h.tts.sentences.length >= 1 && media.frames.some(frame => frame.event === 'mark'));
+    // The fake line plays instantly, so wait out the opening's own length before answering.
+    await pause(1700);
+    await sendSound(media, Int16Array.from([...hum(600), ...quiet(900)]));
+  }
+
+  it('after a yes, speaks a message the voice would not say word for word, such as a time written for the screen', async () => {
+    const begun: string[] = [];
     h = await callsHarness({
-      tts: new FakeTts({ changes: text => text.includes('school pickup') }),
-      chat: { session_id: 'chat-1', turns: new FakeTurns({ message: [] }) },
+      // The way the voice service refuses "p.m." when asked to say a text exactly.
+      tts: new FakeTts({ changes: text => text.includes('p.m.') }),
+      chat: {
+        turns: new FakeTurns({ message: [] }),
+        begin: () => {
+          begun.push('chat-1');
+          return Promise.resolve('chat-1');
+        },
+      },
+      listening: () => Promise.resolve({ vad: new LoudnessVad(), stt: new FakeStt('yes') }),
+    });
+    await h.readyToCall();
+    const delivery = await h.callDelivery('Dentist at 2:30 p.m.');
+    const media = await h.openMedia({ token: (await h.answer()).token });
+    await sayYes(media);
+    await h.waitFor(() => h.tts.sentences.join(' ').includes('Dentist at 2:30 p.m.'));
+    await h.waitFor(() => begun.length === 1);
+    media.socket.close();
+    await h.waitFor(async () => (await h.calls.getBySid(CALL_SID))?.status === 'ended');
+    expect((await h.calls.getBySid(CALL_SID))?.outcome).toBe('answered');
+    expect(h.texts).toEqual([]);
+    const calls = (await h.attemptsOf(delivery.id)).filter(attempt => attempt.channel === 'call');
+    expect(calls.at(-1)?.detail).toMatch(/what was said is in the chat\.$/);
+    expect(h.activity.at(-1)?.conversation_id).toBe('chat-1');
+  });
+
+  it('when the voice cannot speak the message after a yes, writes no chat and sends a text and a push', async () => {
+    const begun: string[] = [];
+    h = await callsHarness({
+      tts: new FakeTts({ failOn: text => text.includes('school pickup') }),
+      chat: {
+        turns: new FakeTurns({ message: [] }),
+        begin: () => {
+          begun.push('chat-1');
+          return Promise.resolve('chat-1');
+        },
+      },
       listening: () => Promise.resolve({ vad: new LoudnessVad(), stt: new FakeStt('yes') }),
     });
     await h.readyToCall();
     const delivery = await h.callDelivery();
     const media = await h.openMedia({ token: (await h.answer()).token });
-    await h.waitFor(() => h.tts.sentences.length >= 1 && media.frames.some(frame => frame.event === 'mark'));
-    // The fake line plays instantly, so wait out the opening's own length before answering.
-    await pause(1700);
-    await sendSound(media, Int16Array.from([...hum(600), ...quiet(900)]));
+    await sayYes(media);
     expect(await media.closed).toBe(1000);
     await h.waitFor(() => h.texts.length === 1 && h.pushes.length === 1);
-    expect(h.tts.asked.some(text => text.includes('school pickup'))).toBe(true);
-    expect(h.tts.sentences.join(' ')).not.toContain('school pickup');
+    expect(begun).toEqual([]);
     expect((await h.calls.getBySid(CALL_SID))?.outcome).toBe('failed');
     const calls = (await h.attemptsOf(delivery.id)).filter(attempt => attempt.channel === 'call');
     expect(calls.at(-1)?.detail).toBe(
-      'You answered, but the message could not be read out as written. It was sent as a text and a notice instead.',
+      'You answered, but the message could not be read out. It was sent as a text and a notice instead.',
     );
+  });
+
+  it('does not say what was said is in the chat when no chat was written', async () => {
+    h = await callsHarness({
+      chat: { turns: new FakeTurns({ message: [] }), begin: () => Promise.resolve(undefined) },
+      listening: () => Promise.resolve({ vad: new LoudnessVad(), stt: new FakeStt('yes') }),
+    });
+    await h.readyToCall();
+    const delivery = await h.callDelivery();
+    const media = await h.openMedia({ token: (await h.answer()).token });
+    await sayYes(media);
+    await h.waitFor(() => h.tts.sentences.join(' ').includes('school pickup'));
+    media.socket.close();
+    await h.waitFor(async () => (await h.calls.getBySid(CALL_SID))?.status === 'ended');
+    const calls = (await h.attemptsOf(delivery.id)).filter(attempt => attempt.channel === 'call');
+    expect(calls.at(-1)?.detail).toBe('You answered. The call lasted about a minute.');
+    expect(h.activity.at(-1)?.conversation_id).toBe('');
   });
 
   it.each([

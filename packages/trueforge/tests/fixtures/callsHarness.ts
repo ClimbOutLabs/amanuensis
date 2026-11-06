@@ -141,7 +141,7 @@ export async function callsHarness({
     logger,
     now: () => clock.now,
   });
-  const activity: { tool_name: string; description: string; conversation_id: string }[] = [];
+  const activity: { tool_name: string; description: string; conversation_id: string | undefined }[] = [];
   const service = createPhoneCallService({
     store: calls,
     deliveryStore,

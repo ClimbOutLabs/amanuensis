@@ -30,13 +30,13 @@ function call({ heard, chatReplies = [] }: { heard: string[]; chatReplies?: Scri
     message: MESSAGE,
     openChat: () => {
       opened += 1;
-      return Promise.resolve({ session_id: 'chat-1', turns: chatTurns });
+      return Promise.resolve({ turns: chatTurns, begin: () => Promise.resolve('chat-1') });
     },
     hangUp: () => {
       hungUp += 1;
     },
     sayMessage: line => {
-      void session.say(line, { exact: true });
+      void session.say(line);
     },
   });
   const session = new VoiceSession({
@@ -85,14 +85,14 @@ describe('a phone call in private mode', () => {
     expect(t.chatTurns.sent).toEqual([]);
   });
 
-  it('reads the message out in one piece and only as written', async () => {
+  it('reads the message out after a yes, the way every reply after it is read', async () => {
     const t = call({ heard: ['yes'] });
     await t.session.say(OPENING, { interruptible: false });
     t.clock.advance(5_000);
     await speak(t);
     await t.session.settled();
-    expect(t.tts.asked).toContain(CALL_LINES.message(MESSAGE));
-    expect(t.tts.sentences).toContain(CALL_LINES.message(MESSAGE));
+    expect(t.tts.asked).not.toContain(CALL_LINES.message(MESSAGE));
+    expect(t.tts.sentences.join(' ')).toContain(CALL_LINES.message(MESSAGE));
   });
 
   it('says who the call is for before it asks anything', () => {

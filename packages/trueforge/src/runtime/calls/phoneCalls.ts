@@ -69,8 +69,7 @@ const ENDED_WORDS = {
     'A voicemail picked up, so a short message was left. It said only that something needs you. The call was not tried again.',
   voicemailNotLeft: 'A voicemail picked up, but no message could be left. The call was not tried again.',
   lineNotOpened: 'The call was answered, but the line could not be opened. The call was not tried again.',
-  messageNotSaid:
-    'You answered, but the message could not be read out as written. It was sent as a text and a notice instead.',
+  messageNotSaid: 'You answered, but the message could not be read out. It was sent as a text and a notice instead.',
   cutOff: 'The call stopped before it finished. The call was not tried again.',
   saidNo: 'You answered and said it was not a good time. It is waiting for you in the app.',
   noYes: 'You answered, but the call ended before you said it was a good time. It is waiting for you in the app.',
@@ -469,11 +468,28 @@ export function createPhoneCallService(deps: PhoneCallDeps): PhoneCallService {
     const timers: NodeJS.Timeout[] = [];
     let talking: { session: VoiceSession; turns: CallTurns; startedAt: Date } | undefined;
     let ended = false;
-    /** Why the call was not heard through, when the voice could not say the opening or the message as written. */
+    /** Why the call was not heard through, when the voice could not say the opening or the message. */
     let unheard: string | undefined;
     /** The wait for an answer, while one is running. */
     let silence: NodeJS.Timeout | undefined;
     let ending: Promise<void> | undefined;
+    /** The conversation opened by a yes. */
+    let opened: CallChat | undefined;
+    /** The chat being written, once the person heard the message; it resolves to the chat's id when one was written. */
+    let written: Promise<string | undefined> | undefined;
+
+    const writeChat = async (): Promise<string | undefined> => {
+      try {
+        const session_id = await opened?.begin();
+        if (session_id !== undefined) {
+          await store.setSession({ id: call.id, session_id });
+        }
+        return session_id;
+      } catch (error) {
+        logger.warn('A phone call chat could not be written', { call_id: call.id, error: errorName(error) });
+        return undefined;
+      }
+    };
 
     const later = (ms: number, run: () => void): void => {
       timers.push(setTimeout(run, ms));
@@ -560,17 +576,19 @@ export function createPhoneCallService(deps: PhoneCallDeps): PhoneCallService {
             call_id: call.id,
             opening: `Hi, this is ${name}. ${CALL_LINES.message(spokenMessage(delivery))}`,
           });
-          if (chat?.session_id !== undefined) {
-            await store.setSession({ id: call.id, session_id: chat.session_id });
-          }
+          opened = chat;
           return chat;
         },
         hangUp,
+        // Said in the voice's own reading, like every reply after it: a reminder is written for the screen, and a
+        // check that it reads word for word would refuse many of them while protecting nothing on an answered call.
         sayMessage: line => {
-          void session.say(line, { exact: true }).then(said => {
+          void session.say(line).then(said => {
             if (!said) {
               notHeard(ENDED_WORDS.messageNotSaid);
+              return;
             }
+            written ??= writeChat();
           });
         },
         askedAgain: () => {
@@ -646,19 +664,23 @@ export function createPhoneCallService(deps: PhoneCallDeps): PhoneCallService {
           }
           const { session, turns, startedAt } = talking;
           await session.end();
+          const session_id = await written;
+          const lasted = `The call lasted ${minutesWords(now().getTime() - startedAt.getTime())}`;
           const said =
-            turns.chat !== undefined
-              ? `You answered. The call lasted ${minutesWords(now().getTime() - startedAt.getTime())}, and what was said is in the chat.`
-              : turns.ending === 'said_no'
-                ? ENDED_WORDS.saidNo
-                : turns.ending === 'no_chat'
-                  ? ENDED_WORDS.noChat
-                  : ENDED_WORDS.noYes;
+            session_id !== undefined
+              ? `You answered. ${lasted}, and what was said is in the chat.`
+              : turns.chat !== undefined
+                ? `You answered. ${lasted}.`
+                : turns.ending === 'said_no'
+                  ? ENDED_WORDS.saidNo
+                  : turns.ending === 'no_chat'
+                    ? ENDED_WORDS.noChat
+                    : ENDED_WORDS.noYes;
           await endAnswered({
             call,
             outcome: turns.answered ? 'answered' : 'not_now',
             detail: said,
-            session_id: turns.chat?.session_id,
+            session_id,
           });
         })();
         return ending;

@@ -196,30 +196,43 @@ export function createCallChats({
       if (ask === undefined) {
         return undefined;
       }
-      const conversation = (record: (line: string) => Promise<string>) =>
-        new CallConversation({ ask, instructions: callInstructions({ names, delivery }), opening, record });
-      if (base === undefined) {
-        // A chat needs an assistant, and the app's own new-chat rules pick it when the person starts one, so a person
-        // with no chat of their own still gets the conversation but no chat is written.
-        return { session_id: undefined, turns: conversation(() => Promise.resolve('')) };
-      }
-      const { session } = await sessions().getOrCreateByExternalId({
-        tenant_id: owner.tenant_id,
-        external_id: `phone-call:${call_id}`,
-        created_by_subject: base.created_by_subject,
-        agent: base.agent,
-      });
-      const write = (text: string) =>
+      // Nothing is written until the person heard the message, so a chat never says something was read out that was not.
+      let begun: Promise<string | undefined> | undefined;
+      const begin = (): Promise<string | undefined> => {
+        begun ??= (async () => {
+          if (base === undefined) {
+            // A chat needs an assistant, and the app's own new-chat rules pick it when the person starts one, so a
+            // person with no chat of their own still gets the conversation but no chat is written.
+            return undefined;
+          }
+          const { session } = await sessions().getOrCreateByExternalId({
+            tenant_id: owner.tenant_id,
+            external_id: `phone-call:${call_id}`,
+            created_by_subject: base.created_by_subject,
+            agent: base.agent,
+          });
+          await write({ session_id: session.session_id, text: opening });
+          return session.session_id;
+        })();
+        return begun;
+      };
+      const write = ({ session_id, text }: { session_id: string; text: string }) =>
         appendAssistantLine({
           sessionStore,
           tenant_id: owner.tenant_id,
-          session_id: session.session_id,
+          session_id,
           text,
           title: PHONE_CALL_CHAT_TITLE,
           now: now(),
         });
-      await write(opening);
-      return { session_id: session.session_id, turns: conversation(write) };
+      const record = async (line: string): Promise<string> => {
+        const session_id = await begin();
+        return session_id === undefined ? '' : write({ session_id, text: line });
+      };
+      return {
+        turns: new CallConversation({ ask, instructions: callInstructions({ names, delivery }), opening, record }),
+        begin,
+      };
     },
   };
 }

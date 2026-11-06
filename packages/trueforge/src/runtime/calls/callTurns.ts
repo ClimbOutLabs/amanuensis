@@ -64,8 +64,12 @@ type CallEnding = 'said_no' | 'unclear' | 'no_chat';
 
 /** The conversation a call has once the person said yes, and the chat it is written into when there is one. */
 export interface CallChat {
-  session_id: string | undefined;
   turns: VoiceTurnRunner;
+  /**
+   * Writes the chat, once the person heard what the call is about. Resolves to its id, or undefined when no chat is
+   * written. Called again, it resolves to the same chat.
+   */
+  begin: () => Promise<string | undefined>;
 }
 
 /**
@@ -100,7 +104,7 @@ export class CallTurns implements VoiceTurnRunner {
     hangUp: () => void;
     /** The question was asked again, so a wait for its answer can start again. */
     askedAgain?: () => void;
-    /** Says what the call is about, word for word, or not at all. */
+    /** Says what the call is about. */
     sayMessage: (line: string) => void;
   }) {
     this.#message = message;
@@ -173,7 +177,6 @@ export class CallTurns implements VoiceTurnRunner {
       }
       this.#chat = chat;
       this.#phase = 'open';
-      // Spoken apart from the turn's own words, so it is checked whole and never said differently.
       this.#sayMessage(CALL_LINES.message(this.#message));
       return { kind: 'done', turnId: '', approvals: [] };
     }
