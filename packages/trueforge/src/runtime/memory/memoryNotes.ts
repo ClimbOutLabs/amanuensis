@@ -200,7 +200,6 @@ const NoteMarkerSchema = z.strictObject({
   source: z.enum(NOTE_SOURCES),
   date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
 });
-type NoteMarker = z.infer<typeof NoteMarkerSchema>;
 
 /**
  * The fact variant of the hidden marker at the end of one page bullet. `seen` is for facts on probation
@@ -251,9 +250,19 @@ function markerFields({ kind, tokens }: { kind: string; tokens: string[] }): Rec
   return fields;
 }
 
-/** A note marker as a daily-log entry carries it. Fact markers are only read, never written, by Aman here. */
-export function formatMarker(marker: NoteMarker): string {
-  return `<!-- note: ${marker.source} ${marker.date} -->`;
+/** The hidden marker a note or a page bullet carries, written the way `parseMarker` reads it. */
+export function formatMarker(marker: Marker): string {
+  if (marker.kind === 'note') {
+    return `<!-- note: ${marker.source} ${marker.date} -->`;
+  }
+  const fields = [`id=${marker.id}`, `src=${marker.src}`];
+  for (const key of ['since', 'until', 'seen'] as const) {
+    const value = marker[key];
+    if (value !== undefined) {
+      fields.push(`${key}=${value}`);
+    }
+  }
+  return `<!-- fact: ${fields.join(' ')} -->`;
 }
 
 /**

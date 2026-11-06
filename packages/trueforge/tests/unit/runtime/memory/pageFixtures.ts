@@ -14,6 +14,55 @@ import {
   type PageSectionBlock,
 } from '../../../../src/runtime/memory/memoryPages';
 
+/** A person page as a person would keep it. */
+export const WENDY = `---
+kind: person
+title: Wendy
+aliases: [Wendy, my wife, wendy@example.com]
+household: true
+---
+# Wendy
+
+The owner's wife. Lives with them; plans are shared.
+
+## How you write to them
+- Short and casual. No sign-off. <!-- fact: id=f_01 src=sent_mail since=2026-10-31 -->
+
+## Now
+- Booked the movie for Saturday 7 PM. <!-- fact: id=f_02 src=mail since=2026-10-30 until=2026-11-01 -->
+
+## Unconfirmed
+- Might be travelling the week of Nov 16. <!-- fact: id=f_03 src=read_content seen=2026-10-29 -->
+
+## Earlier
+- Worked at Acme. <!-- fact: id=f_04 src=you_said since=2024-01 until=2026-03 -->
+`;
+
+/** A matter page with a key the format does not know. */
+export const MADRID = `---
+kind: matter
+title: The Madrid move
+aliases: [Madrid, the move]
+status: active
+colour: teal
+---
+# The Madrid move
+
+Moving the family to Madrid in spring.
+
+## Now
+- Lease on Calle Mayor signed through 2027. <!-- fact: id=f_10 src=you_said since=2026-10-20 -->
+
+## Decided
+- Shipping the furniture, not selling it. <!-- fact: id=f_11 src=you_said since=2026-10-22 -->
+
+## Open
+- Which school for Leo. <!-- fact: id=f_12 src=you_said since=2026-10-22 -->
+
+## Unconfirmed
+
+## Earlier
+`;
 export interface FixtureFact {
   section: PageSection;
   text: string;
