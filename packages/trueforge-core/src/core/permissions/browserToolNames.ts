@@ -53,3 +53,41 @@ export const BROWSER_COMMIT_REASON = 'browser_commit';
 export function isBrowserToolName(tool_name: string): tool_name is BrowserToolName {
   return BROWSER_TOOL_NAMES.some(name => name === tool_name);
 }
+
+/** The name of Aman's own browser tool set, as its calls report it in `mcp_server_name`. */
+export const BROWSER_SERVER_ID = 'browser';
+
+/**
+ * Whether a call is one of Aman's own browser tools: a system tool of the browser tool set, so a
+ * connector or another tool set with a tool of the same name never counts.
+ */
+export function isAmanBrowserCall(info: {
+  type: string;
+  mcp_server_name: string;
+  original_tool_name: string;
+}): boolean {
+  return (
+    info.type === 'truefoundry-system' &&
+    info.mcp_server_name === BROWSER_SERVER_ID &&
+    isBrowserToolName(info.original_tool_name)
+  );
+}
+
+/** Browser steps that move or change the open page; reading it and taking its picture do not. */
+const BROWSER_PAGE_MOVING_TOOL_NAMES: ReadonlySet<string> = new Set([
+  BROWSER_OPEN_TOOL_NAME,
+  BROWSER_SCROLL_TOOL_NAME,
+  BROWSER_BACK_TOOL_NAME,
+  BROWSER_TYPE_TOOL_NAME,
+  BROWSER_SELECT_TOOL_NAME,
+  BROWSER_CLICK_TOOL_NAME,
+]);
+
+/**
+ * Whether a call is a step of Aman's own browser that moves or changes the open page. When the page
+ * it returns differs from the one seen before, the same step may run again from there (scrolling a
+ * long page), and a read of the page may run again.
+ */
+export function movesBrowserPage(info: { type: string; mcp_server_name: string; original_tool_name: string }): boolean {
+  return isAmanBrowserCall(info) && BROWSER_PAGE_MOVING_TOOL_NAMES.has(info.original_tool_name);
+}

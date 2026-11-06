@@ -147,7 +147,7 @@ None of these change what it's allowed to do. Sending, deleting and installing s
 
 **5. Connect your email and calendar.** This is where it starts carrying things for you. Go to **Settings, Connectors**:
 
-- **Gmail and Google Calendar.** Choose **Google**, then **Connect**. The panel walks you through making your own Google sign-in in about ten minutes, so your mail goes from Google straight to your computer and nobody else is in between. Connect mail first, then **Connect Calendar**. [Step-by-step guide](docs/google.mdx).
+- **Gmail and Google Calendar.** Choose **Google**, then **Connect**. The panel walks you through making your own Google sign-in in about ten minutes, so your mail goes from Google straight to your computer and nobody else is in between. Connect mail first, then **Connect Calendar**. For Google Calendar only, the simpler way is the **Calendar** card with an app password. [Step-by-step guide](docs/google.mdx#connect-google-calendar-with-an-app-password).
 - **Any other mailbox or calendar.** Choose **Email** for an IMAP mailbox (Outlook, iCloud, Fastmail and most others), and **Calendar** for a CalDAV calendar.
 
 Reading is quiet. Every draft, send and calendar change shows you a card first and waits for your OK.
