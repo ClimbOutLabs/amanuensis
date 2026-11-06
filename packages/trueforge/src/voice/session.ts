@@ -18,6 +18,7 @@ import { ENVELOPE_FRAME_MS, PlaybackTimeline, SpokenTextLog, systemClock, wordsO
 import { SentenceSplitter } from './sentences';
 import { SpeechOutput } from './speechOutput';
 import {
+  UncheckedSpeechError,
   WouldChangeTextError,
   type PendingApproval,
   type SpeechSynthesizer,
@@ -51,6 +52,8 @@ const REALTIME_SLACK_MS = 5_000;
 const MAX_PARALLEL_TRANSCRIPTIONS = 2;
 /** Said when a third utterance arrives while two are still being turned into words. */
 const MISSED_THAT_NOTICE = 'I missed that. Please say it again.';
+const VOICE_OUT_OF_DATE_NOTICE = 'The voice service is out of date. Rebuild it, then try again.';
+const CARD_ON_SCREEN_NOTICE = 'I stopped reading that card. It is waiting on the screen. Answer it there.';
 /** A conversation with no speech from the person for this long ends, so an open mic cannot run on unseen. */
 export const IDLE_END_MS = 2 * 60_000;
 /** No conversation runs longer than this, whatever is said. */
@@ -97,7 +100,8 @@ export interface VoiceSessionDeps {
   onNote?: (note: string) => void;
 }
 
-interface Awaiting {
+/** A card whose read-back was made and which is to be waited on. */
+interface CardAsked {
   approval: PendingApproval;
   turnId: string;
   verb: ApprovalVerb;
@@ -105,6 +109,9 @@ interface Awaiting {
   expiresAtMs: number;
   /** Said once the body was made; the card is waited on only if this was made too. */
   instruction: string;
+}
+
+interface Awaiting extends CardAsked {
   /** Speech that began before this is no answer to the card: the person had not heard it yet. */
   armedAtMs: number;
 }
@@ -153,6 +160,8 @@ export class VoiceSession {
    * off; a short notice queued after it is not part of one, so talking over only that leaves a card waiting.
    */
   #replyEndsAtMs = 0;
+  /** Read-backs the voice refused to say exactly, so the line that follows can say why. */
+  readonly #refused = new WeakSet<SpeechOutput>();
   /** Sound that may still arrive early: it refills as time passes, but never past the slack. */
   #creditMs = REALTIME_SLACK_MS;
   #lastArrivalAtMs = 0;
@@ -455,11 +464,7 @@ export class VoiceSession {
         this.#awaiting = undefined;
       }
       const waiting = await this.#stillWaitingCard();
-      if (waiting !== undefined && heard.startedAtMs < waiting.armedAtMs) {
-        // Said before the card was read out, so it cannot be an answer to it; the card stays for the screen.
-        this.#deps.onNote?.('speech_before_card');
-        this.#awaiting = undefined;
-      } else if (
+      if (
         waiting !== undefined &&
         !(await this.#answerWaitingCard({ text, heard, awaiting: waiting, signal, speechSignal, marks }))
       ) {
@@ -554,7 +559,7 @@ export class VoiceSession {
     speechSignal,
     marks,
   }: {
-    asking: Awaiting | undefined;
+    asking: CardAsked | undefined;
     speech: SpeechOutput;
     speechSignal: AbortSignal;
     marks: Marks;
@@ -566,15 +571,30 @@ export class VoiceSession {
       readInFull = await speech.drain();
     }
     if (asking !== undefined && !readInFull && !speechSignal.aborted) {
-      await this.#leaveCardForTheScreen({ signal: speechSignal, marks });
+      await this.#leaveCardForTheScreen({ signal: speechSignal, marks, refused: this.#refused.has(speech) });
       return;
     }
     this.#startAwaiting({ asking, signal: speechSignal });
   }
 
-  async #leaveCardForTheScreen({ signal, marks }: { signal: AbortSignal; marks: Marks }): Promise<void> {
+  async #leaveCardForTheScreen({
+    signal,
+    marks,
+    refused,
+  }: {
+    signal: AbortSignal;
+    marks: Marks;
+    refused: boolean;
+  }): Promise<void> {
     const speech = this.#speechFor({ signal, marks });
-    speech.say({ text: APPROVAL_LINES.leftForTheApp, role: 'instruction' });
+    // A card the voice would not read exactly says why, so it does not look like a card that can never be read.
+    speech.say({
+      text: refused ? APPROVAL_LINES.cannotReadExactly : APPROVAL_LINES.leftForTheApp,
+      role: 'instruction',
+    });
+    if (refused) {
+      this.#deps.transport.sendEvent({ type: 'notice', text: APPROVAL_LINES.cannotReadExactly });
+    }
     if (!(await speech.drain())) {
       this.#deps.transport.sendEvent({
         type: 'notice',
@@ -584,11 +604,18 @@ export class VoiceSession {
   }
 
   /** The card is waited on only once its read-back was heard through; a person who cut it off sees it on screen. */
-  #startAwaiting({ asking, signal }: { asking: Awaiting | undefined; signal: AbortSignal }): void {
-    if (asking !== undefined && !signal.aborted && !this.#ended) {
-      asking.armedAtMs = this.#clock.now();
-      this.#awaiting = asking;
+  #startAwaiting({ asking, signal }: { asking: CardAsked | undefined; signal: AbortSignal }): void {
+    if (asking === undefined) {
+      return;
     }
+    if (signal.aborted || this.#ended) {
+      // Cut off before it could be waited on: the card stays on the screen, and the screen is told so.
+      if (!this.#ended) {
+        this.#deps.transport.sendEvent({ type: 'notice', text: CARD_ON_SCREEN_NOTICE });
+      }
+      return;
+    }
+    this.#awaiting = { ...asking, armedAtMs: this.#clock.now() };
   }
 
   /** Returns true when the words are not an answer to the card and should run as a turn of their own. */
@@ -607,7 +634,12 @@ export class VoiceSession {
     speechSignal: AbortSignal;
     marks: Marks;
   }): Promise<boolean> {
-    const answer = classifyAnswer({ heard: text, verb: awaiting.verb });
+    // Said before the card was read out, so it cannot be an answer to it: it gets the reminder like any other words.
+    const early = heard.startedAtMs < awaiting.armedAtMs;
+    if (early) {
+      this.#deps.onNote?.('speech_before_card');
+    }
+    const answer = early ? 'other' : classifyAnswer({ heard: text, verb: awaiting.verb });
     const speech = this.#speechFor({ signal: speechSignal, marks });
     if (answer === 'other') {
       if (awaiting.reminded) {
@@ -670,7 +702,7 @@ export class VoiceSession {
     outcome: TurnOutcome;
     speech: SpeechOutput;
     signal: AbortSignal;
-  }): Awaiting | undefined {
+  }): CardAsked | undefined {
     if (signal.aborted) {
       return undefined;
     }
@@ -703,7 +735,7 @@ export class VoiceSession {
     approvals: PendingApproval[];
     speech: SpeechOutput;
     turnId: string;
-  }): Awaiting | undefined {
+  }): CardAsked | undefined {
     const only = approvals.length === 1 ? approvals[0] : undefined;
     if (plan.kind === 'typed_only' || only === undefined) {
       speech.say({ text: APPROVAL_LINES.leftForTheApp, role: 'instruction' });
@@ -720,7 +752,6 @@ export class VoiceSession {
       reminded: false,
       expiresAtMs: now + AWAITING_MS,
       instruction: plan.instruction,
-      armedAtMs: now,
     };
   }
 
@@ -734,7 +765,7 @@ export class VoiceSession {
     kind?: 'reply' | 'missed';
   }): SpeechOutput {
     let reported = false;
-    return new SpeechOutput({
+    const output: SpeechOutput = new SpeechOutput({
       tts: this.#deps.tts,
       format: this.#deps.transport.outputFormat,
       transport: this.#deps.transport,
@@ -757,6 +788,13 @@ export class VoiceSession {
         if (error instanceof WouldChangeTextError) {
           // The voice is working; it would only not say this text as written. The card stays on the screen.
           this.#deps.onNote?.('read_back_refused');
+          this.#refused.add(output);
+          return;
+        }
+        if (error instanceof UncheckedSpeechError) {
+          // The voice is running but is not the version that checks words, so "check it is running" is wrong advice.
+          this.#deps.onNote?.('tts_unchecked');
+          this.#deps.transport.sendEvent({ type: 'notice', text: VOICE_OUT_OF_DATE_NOTICE });
           return;
         }
         this.#deps.onNote?.(`tts_failed:${error instanceof Error ? error.name : 'unknown'}`);
@@ -767,6 +805,7 @@ export class VoiceSession {
         }
       },
     });
+    return output;
   }
 
   #reportLatency(marks: Marks): void {

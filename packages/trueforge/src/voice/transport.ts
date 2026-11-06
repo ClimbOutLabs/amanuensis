@@ -70,6 +70,14 @@ export class WouldChangeTextError extends Error {
   }
 }
 
+/** The voice service answered an exact request without saying it checked the words: it is out of date or not the voice. */
+export class UncheckedSpeechError extends Error {
+  constructor() {
+    super('the voice service did not check the words, so nothing was spoken');
+    this.name = 'UncheckedSpeechError';
+  }
+}
+
 export type TurnRefusal = 'expired' | 'changed' | 'not_allowed' | 'tool_gone' | 'sign_in';
 
 export type TurnOutcome =

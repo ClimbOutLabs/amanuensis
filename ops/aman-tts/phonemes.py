@@ -131,11 +131,13 @@ _LIST_MARKER = re.compile(r"^\s*(?:[-*+>]|\d+[.)])\s+")
 _STRIP_CHARS = re.compile(r"[*_#`~|<>\[\]{}]")
 _SPACES = re.compile(r"\s+")
 
+# Digits with their own thousands commas ("1,000"). A comma after a number is a pause of its own, not part of it.
+_DIGITS = r"(?:\d{1,3}(?:,\d{3})+(?!\d)|\d+)"
 _TOKEN = re.compile(
     r"(?P<time>\b\d{1,2}:\d{2}\b)"
-    r"|(?P<money>\$\d[\d,]*(?:\.\d+)?)"
+    rf"|(?P<money>\${_DIGITS}(?:\.\d+)?)"
     r"|(?P<ordinal>\b\d+(?:st|nd|rd|th)\b)"
-    r"|(?P<number>\d[\d,]*(?:\.\d+)?)"
+    rf"|(?P<number>{_DIGITS}(?:\.\d+)?)"
     r"|(?P<word>[A-Za-z]+(?:'[A-Za-z]+)*)"
     r"|(?P<punct>\.\.\.|[.,!?;:\u2014\u2026])"
     r"|(?P<symbol>[%&+@=])"
@@ -208,37 +210,62 @@ _PLAIN_NUMBER = re.compile(
 )
 # Number spellings: digits (with their own comma, point or colon) and number words. Two of them with only
 # blanks or signs that make no sound or only a pause between them ("1000 500", "1000 (500)", "1000; 500",
-# "1000...500", "twenty (5)") run together when heard. Two words are said as written, so one digit is needed.
-_NUMBER_WORDS = (
-    r"(?:zero|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen"
-    r"|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundred|thousand|million"
-    r"|billion|trillion)"
+# "1000...500", "twenty (5)") run together when heard. Two plain words are said as written, so a digit or a
+# bracket or quote between words is needed.
+_CARDINALS = (
+    r"zero|oh|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen"
+    r"|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety"
+    r"|(?:hundred|thousand|million|billion|trillion|dozen|lakh|crore)s?|grand|k|bn|mn"
 )
-_NUMBER_SPELLING = re.compile(rf"(?i)\$?\d+(?:[,.:]\d+)*|\b{_NUMBER_WORDS}\b")
+# An ordinal beside a number only matters inside a bracket or quote ("fifth (5)"): "the first 3 items" is plain.
+_ORDINALS = (
+    r"first|second|third|fourth|fifth|sixth|seventh|eighth|ninth|tenth|eleventh|twelfth|(?:thir|four|fif|six|seven"
+    r"|eigh|nine)teenth|(?:twen|thir|for|fif|six|seven|eigh|nine)tieth"
+)
+_NUMBER_SPELLING = re.compile(
+    rf"(?i)\$?\d+(?:[,.:]\d+)*|(?<![\w'])(?:(?P<cardinal>{_CARDINALS})|(?P<ordinal>{_ORDINALS}))(?![\w'])"
+)
 _SILENT_GAP = re.compile(r"[ \t\n\"'()\u2014\u2026;!?,:&.]+")
 _SENTENCE_STOP_GAP = re.compile(r"[.!?][ \t\n]+")
 _COMMA_GAP = re.compile(r", +")
-_SMALL_NUMBER = re.compile(r"\d{1,2}")
-_DATE_PART = re.compile(r"\d{1,2}:\d\d|(?:19|20)\d\d|\d{1,2}")
+_AND_GAP = re.compile(r",? +and +", re.IGNORECASE)
+_WRAPPED_GAP = re.compile(r".*[\"'()].*")
+# A comma is a pause, so it is plain only where a written date or time has one: a day and a year ("Nov 6,
+# 2026"), a day and a time ("Nov 6, 2:30") or a year and a time ("Nov 6, 2026, 2:30 pm").
+_DAY = re.compile(r"\d{1,2}")
+_YEAR = re.compile(r"(?:19|20)\d\d")
+_CLOCK = re.compile(r"\d{1,2}:\d\d")
+
+
+def _plain_comma(left: str, right: str) -> bool:
+    return (_DAY.fullmatch(left) is not None and _YEAR.fullmatch(right) is not None) or (
+        (_DAY.fullmatch(left) is not None or _YEAR.fullmatch(left) is not None) and _CLOCK.fullmatch(right) is not None
+    )
 
 
 def _runs_numbers_together(text: str) -> bool:
-    """True when two number spellings, at least one of them digits, are heard as one number or run on."""
+    """True when two number spellings are heard as one number or run on, at least one of them digits."""
     spellings = list(_NUMBER_SPELLING.finditer(text))
     for left, right in zip(spellings, spellings[1:]):
         gap = text[left.end() : right.start()]
-        if (
-            _SILENT_GAP.fullmatch(gap) is None
-            or _SENTENCE_STOP_GAP.fullmatch(gap)
-            or not (left.group()[-1].isdigit() or right.group()[0] in "$0123456789")
-        ):
+        a, b = left.group(), right.group()
+        digits = a[-1].isdigit() or b[0] in "$0123456789"
+        wrapped = _WRAPPED_GAP.fullmatch(gap) is not None
+        if left.lastgroup == "ordinal" or right.lastgroup == "ordinal":
+            if not (wrapped and _SILENT_GAP.fullmatch(gap)):
+                continue
+            return True
+        if _AND_GAP.fullmatch(gap):
+            # "1000 and 500" is heard as one number, "one thousand and five hundred".
+            plain = a.replace(",", "").isdigit() and b.replace(",", "").isdigit()
+            if plain and len(a.replace(",", "")) >= 3 and int(b.replace(",", "")) < 1000:
+                return True
             continue
-        # A comma is a plain pause between a day or list number and a year, a time or another small number.
-        if (
-            _COMMA_GAP.fullmatch(gap)
-            and _SMALL_NUMBER.fullmatch(left.group())
-            and _DATE_PART.fullmatch(right.group())
-        ):
+        if _SILENT_GAP.fullmatch(gap) is None or _SENTENCE_STOP_GAP.fullmatch(gap):
+            continue
+        if not digits and not wrapped:
+            continue
+        if _COMMA_GAP.fullmatch(gap) and _plain_comma(a, b):
             continue
         return True
     return False
@@ -248,8 +275,11 @@ _WRITTEN_WORD = re.compile(r"[^\W_]+(?:'[^\W_]+)*")
 # Characters the voice says as written: letters and digits, spaces, usual punctuation and a few symbols.
 _PLAIN_CHARS = re.compile(r"[A-Za-z0-9 \n\t.,!?;:'\"()%&+@=$\u2014\u2026-]*")
 _LONE_HYPHEN = re.compile(r"(?<![A-Za-z])-|-(?![A-Za-z])")
-# A dot inside a word ("my.bank.com", "mybank.com", "my-bank.com" all sound alike) is not heard as written.
-_DOTTED_WORD = re.compile(r"[A-Za-z]\.[A-Za-z]")
+# A dot inside web-address-like text ("my.bank.com", "t.co") is not heard as written. A single letter on each
+# side ("e.g.", "p.m.", "U.S.") is said letter by letter and is kept.
+_DOTTED_WORD = re.compile(r"[A-Za-z]{2,}\.[A-Za-z]|[A-Za-z]\.[A-Za-z]{2,}")
+# A hyphenated name before "dot" ("my-bank dot com") sounds like the same name without the hyphen.
+_HYPHENATED_HOST = re.compile(r"[A-Za-z]-[A-Za-z]+\s+dot\s+[A-Za-z]", re.IGNORECASE)
 
 
 def _spell_plain_number(match: re.Match[str]) -> str:
@@ -277,6 +307,7 @@ def reads_as_written(text: str) -> bool:
         _PLAIN_CHARS.fullmatch(written) is None
         or _LONE_HYPHEN.search(written)
         or _DOTTED_WORD.search(written)
+        or _HYPHENATED_HOST.search(written)
         or _URL.search(written)
         or _runs_numbers_together(written)
     ):

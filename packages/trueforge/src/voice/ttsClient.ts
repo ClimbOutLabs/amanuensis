@@ -7,9 +7,14 @@ import type { ReadableStreamReadResult } from 'node:stream/web';
 import configuration from '../config';
 import type { OutputFormat } from './audio';
 import type { SpeechRateLimiter } from './speechRateLimit';
-import { WouldChangeTextError, type SpeechSynthesizer } from './transport';
+import { UncheckedSpeechError, WouldChangeTextError, type SpeechSynthesizer } from './transport';
 
 const TTS_STREAM_TIMEOUT_MS = 60_000;
+
+/** Why a 400 is no fault of the service, and the mark an exact answer carries once its words were checked. */
+const REASON_HEADER = 'x-aman-reason';
+const EXACT_HEADER = 'x-aman-exact';
+const EXACT_CHECKED = 'checked';
 
 export function ttsBaseUrl(): string {
   return configuration.TTS_URL.replace(/\/+$/, '');
@@ -36,7 +41,7 @@ function refusedFor({
   response: Response;
   reason: 'nothing_to_say' | 'would_change_text';
 }): boolean {
-  return response.status === 400 && response.headers.get('x-aman-reason') === reason;
+  return response.status === 400 && response.headers.get(REASON_HEADER) === reason;
 }
 
 /** Hands on only whole 16-bit samples, holding a trailing odd byte until the next piece arrives. */
@@ -129,10 +134,11 @@ export class SidecarSpeechSynthesizer implements SpeechSynthesizer {
     // A service that does not know `exact` speaks anything and answers 200; only this mark says it checked.
     if (
       exact &&
-      (response.headers.get('x-aman-exact') !== 'checked' ||
-        !(response.headers.get('content-type') ?? '').startsWith('audio/'))
+      (response.headers.get(EXACT_HEADER) !== EXACT_CHECKED ||
+        !(response.headers.get('content-type') ?? '').toLowerCase().startsWith('audio/'))
     ) {
-      throw new Error('the voice service did not check the words, so nothing was spoken');
+      await response.body.cancel().catch(() => undefined);
+      throw new UncheckedSpeechError();
     }
     const reader = response.body.getReader();
     // A chunk can end in the middle of a 16-bit sample; the odd byte waits for the next chunk.

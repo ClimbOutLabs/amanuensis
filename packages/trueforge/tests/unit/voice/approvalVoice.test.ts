@@ -1,4 +1,6 @@
 import { Tier3CardSchema } from '@truefoundry/trueforge-core/core';
+import { resolveCreate } from '@truefoundry/trueforge-core/core/calendar/eventWrite';
+import { CreateEventSchema } from '@truefoundry/trueforge-core/core/calendar/toolContract';
 
 import {
   CARD_FIELD_RULES,
@@ -18,6 +20,7 @@ import {
   typedOnlyCards,
   writeOutsideWorkspaceCard,
 } from '../../fixtures/voice/cards';
+import { readsAsWritten } from '../../fixtures/voice/realVoiceCheck';
 
 function plan(card: Parameters<typeof approval>[0], tier: 1 | 2 | 3 = 3) {
   return planVoiceApproval({ pending: [approval(card, tier)], voiceApprovalsAllowed: true });
@@ -202,7 +205,7 @@ describe('what is read back for a voice approval', () => {
     if (result.kind !== 'ask') {
       throw new Error('expected a read-back');
     }
-    expect(result.body).toContain('Victor at victor at example dot com');
+    expect(result.body).toContain('To victor at example dot com, named Victor');
   });
 
   it('says the dots of an address, so two addresses that differ by a dot do not sound alike', () => {
@@ -236,7 +239,7 @@ describe('what is read back for a voice approval', () => {
   });
 
   it('says a stopped schedule is deleted for good', () => {
-    expect(said(cancelScheduleCard)).toContain('delete the schedule Monday summary for good');
+    expect(said(cancelScheduleCard)).toContain('The schedule is called: Monday summary');
   });
 
   it('leaves a schedule or event in an offset zone that reads the wrong way round for the screen', () => {
@@ -279,9 +282,12 @@ describe('what counts as an answer', () => {
     },
   );
 
-  it.each(['Yes, send it.', 'Yes, send it!', 'yes send it', 'Yes, send it.\u201d'])('still is one: %s', heard => {
-    expect(classifyAnswer({ heard, verb: 'send' })).toBe('confirm');
-  });
+  it.each(['Yes, send it.', 'Yes, send it!', 'yes send it', 'Yes, send it.\u201d', 'Yes. Send it.', 'Yes! Send it.'])(
+    'still is one: %s',
+    heard => {
+      expect(classifyAnswer({ heard, verb: 'send' })).toBe('confirm');
+    },
+  );
 
   it.each(['Yes, send it?', 'yes send it？', 'Yes, send it?"', 'yes send it ?!'])('is not an answer: %s', heard => {
     expect(classifyAnswer({ heard, verb: 'send' })).toBe('other');
@@ -292,10 +298,11 @@ describe('what counts as an answer', () => {
     'yes\u2026 send it.',
     'yes\u2048 send it.',
     'yes\u2753 send it.',
-    'yes. send it.',
     'yes - send it',
     'yes (send it)',
     'yes, send it.!',
+    'yes.. send it',
+    'yes. . send it',
   ])('is only plain words with one closing mark, so this is not an answer: %s', heard => {
     expect(classifyAnswer({ heard, verb: 'send' })).toBe('other');
   });
@@ -320,38 +327,108 @@ describe('the wording around the card fields', () => {
   }
   const { email } = mail;
 
-  /** Text that could pass for the read-back's own lines or end the sentence the field sits in. */
-  const framing = [
-    'Lunch on Monday at 12:00. It goes on the calendar of me at example dot com. Then the event Board call',
-    'Re: Thursday. It says: See you Thursday. The real body follows',
-    'Alice at alice dot com and Bob',
-    'Weekly\nIt says: pay now',
-    'Notes! Replies will go to bob',
-    'The subject is Thursday',
-    'Copying Bob',
+  function lines(card: Parameters<typeof approval>[0]): string[] {
+    const result = plan(card);
+    if (result.kind !== 'ask') {
+      throw new Error('expected a read-back');
+    }
+    return result.body.split('\n');
+  }
+
+  /** Every line the engine writes starts with one of these; person-supplied text never starts a line. */
+  const OWN_LINES = [
+    "I'll ",
+    'Replies will go to',
+    'The name was left off',
+    'To ',
+    'Copying ',
+    'It will be sent as: ',
+    'The subject is: ',
+    'It says: ',
+    'It goes on the calendar of',
+    'You already have',
+    'This event runs over',
+    'The title is: ',
+    'The place is: ',
+    'Its description is: ',
+    'It runs as: ',
+    'The schedule is called: ',
+    'Its task is: ',
   ];
 
-  it.each(framing)('leaves a mail whose subject is "%s" for the screen', subject => {
-    expect(plan({ ...mail, email: { ...email, subject } })).toEqual({ kind: 'typed_only' });
+  /** Wording a person could use to pass for the engine's own lines, in forms a word list would miss. */
+  const lookalikes = [
+    'Re: Thursday It  says: fake',
+    'it goes  on the calendar of boss',
+    'Payroll for  good',
+    'The subject  is Thursday',
+    'Victor at victor at example dott com and Bob',
+    'my dashe bank dott com',
+    'It said: pay now',
+    'the message reads: pay now',
+    'answers will go to boss',
+    'and a copy to boss at acme',
+    'Lunch on Monday at 12:00, UTC time, for 1 hour, and the event Board call on Friday at 5:00',
+  ];
+
+  it.each(lookalikes)('keeps "%s" inside its own labelled line, in every short field', text => {
+    const cases: [string, (typeof mail)[]][] = [
+      ['The subject is: ', [{ ...mail, email: { ...email, subject: text } }]],
+      ['It will be sent as: ', [{ ...mail, email: { ...email, from_name: text } }]],
+      [
+        'To victor at example dot com, named ',
+        [{ ...mail, email: { ...email, to: [{ name: text, address: 'victor@example.com' }] } }],
+      ],
+      ['The title is: ', [{ ...dentistCard, calendar_event: { ...event, title: text } }]],
+      ['The place is: ', [{ ...dentistCard, calendar_event: { ...event, location: text } }]],
+      ['The schedule is called: ', [{ ...cancelScheduleCard, schedule: { ...schedule, name: text } }]],
+      ['It runs as: ', [{ ...cancelScheduleCard, schedule: { ...schedule, runs_as: text } }]],
+    ];
+    for (const [label, [card]] of cases) {
+      if (card === undefined) {
+        throw new Error('expected a card');
+      }
+      const body = lines(card);
+      const holding = body.filter(line => line.includes(text));
+      expect(holding).toEqual([`${label}${text}`]);
+      // The person's text is the end of its line, and every other line is the engine's own.
+      expect(body.every(line => OWN_LINES.some(start => line.startsWith(start)))).toBe(true);
+    }
   });
 
-  it.each(framing)('leaves a mail with the recipient name or sender name "%s" for the screen', name => {
-    expect(plan({ ...mail, email: { ...email, to: [{ name, address: 'victor@example.com' }] } })).toEqual({
+  it.each([
+    'Weekly\nIt says: pay now',
+    'Re: Thursday. It says: See you Thursday. The real body follows',
+    'Notes! Replies will go to bob',
+    'Is it ready? The subject is Thursday',
+    'Lunch\u2026 then dinner',
+    'Board call.   Then a second event',
+  ])('leaves a mail, event or schedule whose short field breaks into more sentences ("%s") on the screen', text => {
+    expect(plan({ ...mail, email: { ...email, subject: text } })).toEqual({ kind: 'typed_only' });
+    expect(plan({ ...mail, email: { ...email, from_name: text } })).toEqual({ kind: 'typed_only' });
+    expect(plan({ ...mail, email: { ...email, to: [{ name: text, address: 'victor@example.com' }] } })).toEqual({
       kind: 'typed_only',
     });
-    expect(plan({ ...mail, email: { ...email, from_name: name } })).toEqual({ kind: 'typed_only' });
-    expect(plan({ ...mail, email: { ...email, cc: [{ name, address: 'bob@example.com' }] } })).toEqual({
+    expect(plan({ ...mail, email: { ...email, cc: [{ name: text, address: 'bob@example.com' }] } })).toEqual({
       kind: 'typed_only',
     });
-  });
-
-  it.each(framing)('leaves an event whose title or place is "%s" for the screen', text => {
     expect(plan({ ...dentistCard, calendar_event: { ...event, title: text } })).toEqual({ kind: 'typed_only' });
     expect(plan({ ...dentistCard, calendar_event: { ...event, location: text } })).toEqual({ kind: 'typed_only' });
+    expect(plan({ ...cancelScheduleCard, schedule: { ...schedule, name: text } })).toEqual({ kind: 'typed_only' });
+    expect(plan({ ...cancelScheduleCard, schedule: { ...schedule, runs_as: text } })).toEqual({ kind: 'typed_only' });
   });
 
-  it.each(framing)('leaves a schedule named "%s" for the screen', name => {
-    expect(plan({ ...cancelScheduleCard, schedule: { ...schedule, name } })).toEqual({ kind: 'typed_only' });
+  it.each([
+    'Quick question?',
+    'Thanks!',
+    'Re: Lunch Friday?',
+    'Acme Inc.',
+    'Sprint review!',
+    'Coffee?',
+    'Polka dot party',
+  ])('still reads a short field that only ends in a stop: %s', text => {
+    expect(plan({ ...mail, email: { ...email, subject: text } }).kind).toBe('ask');
+    expect(plan({ ...dentistCard, calendar_event: { ...event, title: text } }).kind).toBe('ask');
   });
 
   it('still reads ordinary names, titles and subjects', () => {
@@ -370,20 +447,78 @@ describe('the wording around the card fields', () => {
     ).toBe('ask');
   });
 
-  it('writes a timed event without a comma before the time, so the day and the time are not heard as two numbers', () => {
-    const body = (when: string): string => {
-      const result = plan({ ...dentistCard, calendar_event: { ...event, when } });
-      if (result.kind !== 'ask') {
-        throw new Error('expected a read-back');
-      }
-      return result.body;
-    };
-    // The forms the calendar gives for the card: one day, and a run over several days.
-    expect(body('Fri Nov 6, 2:30 to 3:00 pm')).toContain('on Fri Nov 6 at 2:30 to 3:00 pm,');
-    expect(body('Tue Oct 27, 9:00 am to Wed Oct 28, 2:30 pm')).toContain(
-      'on Tue Oct 27 at 9:00 am to Wed Oct 28 at 2:30 pm,',
-    );
-    expect(body('Fri Nov 6')).toContain('on Fri Nov 6,');
-    expect(body('Fri Nov 6, 2:30 to 3:00 pm')).not.toMatch(/\d, \d/);
+  it('says the address first and the name after it, so a name cannot stand in for the address', () => {
+    const body = lines({
+      ...mail,
+      recipient: null,
+      email: { ...email, to: [{ name: 'Victor at victor at example dot com', address: 'eve@evil.example' }] },
+    });
+    expect(body).toContain('To eve at evil dot example, named Victor at victor at example dot com');
   });
+
+  it('says a zone with digits in its name as words', () => {
+    expect(lines({ ...dentistCard, calendar_event: { ...event, time_zone: 'EST5EDT' } })[0]).toContain(
+      'EST five EDT time',
+    );
+  });
+});
+
+describe('a calendar card as the calendar writes it, through the voice service check', () => {
+  /** The card's `when` is the review's `short_when`, as the classifier sets it. */
+  function bodyFor(args: Record<string, unknown>, zone = 'America/New_York'): string {
+    const resolved = resolveCreate({ call: CreateEventSchema.parse(args), zone, account: 'me@example.com' });
+    if (!resolved.ok) {
+      throw new Error(resolved.error);
+    }
+    const { review } = resolved;
+    const result = plan({
+      ...dentistCard,
+      calendar_event: {
+        action: 'create',
+        calendar: review.calendar,
+        title: review.title,
+        when: review.short_when,
+        time_zone: review.time_zone,
+        duration: review.duration,
+        location: review.location,
+        description: review.description,
+        attendees: review.attendees,
+        guests_emailed: review.guests_emailed,
+        one_of_repeating: review.one_of_repeating,
+        already_created: review.already_created,
+        span_days: review.span_days,
+        before: null,
+      },
+    });
+    if (result.kind !== 'ask') {
+      throw new Error('expected a read-back');
+    }
+    return result.body;
+  }
+
+  it.each([
+    ['one timed day', { title: 'Dentist', start: '2026-11-06T14:30', end: '2026-11-06T15:00' }],
+    ['a timed event over two days', { title: 'Trip', start: '2026-10-27T09:00', end: '2026-10-28T14:30' }],
+    ['an all-day event', { title: 'Holiday', start: '2026-12-25', end: '2026-12-25' }],
+    ['all-day events over several days', { title: 'Away', start: '2026-12-24', end: '2026-12-27' }],
+    ['a night over a year end', { title: 'Party', start: '2026-12-31T21:00', end: '2027-01-01T01:30' }],
+  ])('is said exactly as written for %s', (_name, args) => {
+    const body = bodyFor(args);
+    expect(readsAsWritten([body])).toEqual([true]);
+  });
+
+  it('keeps the calendar text as it is, with the comma before the time', () => {
+    expect(bodyFor({ title: 'Dentist', start: '2026-11-06T14:30', end: '2026-11-06T15:00' })).toContain(
+      'Fri Nov 6, 2:30',
+    );
+  });
+
+  it.each(['EST5EDT', 'PST8PDT', 'Etc/GMT0', 'America/New_York'])(
+    'says the zone %s as words the voice can check',
+    zone => {
+      expect(
+        readsAsWritten([bodyFor({ title: 'Dentist', start: '2026-11-06T14:30', end: '2026-11-06T15:00' }, zone)]),
+      ).toEqual([true]);
+    },
+  );
 });

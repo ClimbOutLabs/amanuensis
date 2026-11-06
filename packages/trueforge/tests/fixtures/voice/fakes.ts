@@ -13,7 +13,7 @@ import type {
   VoiceTransport,
   VoiceTurnRunner,
 } from '../../../src/voice/transport';
-import { WouldChangeTextError } from '../../../src/voice/transport';
+import { UncheckedSpeechError, WouldChangeTextError } from '../../../src/voice/transport';
 import type { SpeechProbability } from '../../../src/voice/vad/sileroVad';
 import { VAD_WINDOW_SAMPLES } from '../../../src/voice/vad/utteranceDetector';
 
@@ -156,6 +156,8 @@ export class FakeTts implements SpeechSynthesizer {
       changes?: ((text: string) => boolean) | undefined;
       /** The voice cannot be reached to check a text it is asked to say exactly. */
       cannotCheck?: boolean | undefined;
+      /** The voice service answers an exact request without having checked the words. */
+      unchecked?: boolean | undefined;
     } = {},
   ) {}
 
@@ -174,6 +176,9 @@ export class FakeTts implements SpeechSynthesizer {
       this.asked.push(text);
       if (this.options.cannotCheck === true) {
         throw new Error('the voice is not answering');
+      }
+      if (this.options.unchecked === true) {
+        throw new UncheckedSpeechError();
       }
       if (this.options.changes?.(text) === true) {
         throw new WouldChangeTextError();

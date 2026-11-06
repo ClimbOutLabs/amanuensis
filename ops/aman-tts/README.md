@@ -52,14 +52,17 @@ text that was checked is the text that is heard. The check needs no model.
   other than what is written. That covers numbers it would read another way (`1,5`, `10.0.0.1`,
   `11.06.2026`, `007`, `5 000`, more than two cents), two numbers with only blanks or silent signs
   between them (`1000 (500)`, `1000; 500`, `1000...500`, `1000 & 500`), a number word next to a digit
-  the same way (`twenty (5)`, `5 (hundred)`), a dot inside a word (`my-bank.com` sounds like
-  `mybank.com`), times that are not real (`9:60`), digits
+  the same way (`twenty (5)`, `5 (hundred)`, `5 dozen`, `5 k`), number words either side of a bracket or
+  quote (`one thousand (five hundred)`), `1000 and 500` (heard as one number), web-address-like text
+  (`my.bank.com`, `t.co`, `my-bank dot com`; a single letter either side of a dot, as in `e.g.` and
+  `p.m.`, is kept), times that are not real (`9:60`), digits
   written as superscripts or other forms, links, code, list marks, a minus sign or range, line breaks
   other than a plain one, and letters outside plain English. Only the common forms are kept: plain
   digits with no leading zero, groups of three with commas, up to two cents after a dollar sign, a
   decimal, and a time like `9:30`. Two numbers are fine when one sentence stop and a space separate
-  them (`Use 5. 3 more follow.`), and a comma and a space is fine between a small number and a year,
-  a time or another small number (`Fri Nov 6, 2:30`, `March 5, 2026`, `Items 1, 2 and 3`).
+  them (`Use 5. 3 more follow.`). A comma after a number is a pause of its own, and it is plain only
+  where a date or time has one: a day and a year, a day and a time, or a year and a time
+  (`Fri Nov 6, 2:30`, `March 5, 2026`, `Nov 6, 2026, 2:30 pm`). `Pay 19, 99 dollars` is refused.
 - A `200` for an exact speak carries `x-aman-exact: checked`. A caller that asked for `exact` must treat
   an answer without it as unchecked: an older service ignores `exact` and speaks anything.
 - Cents are said with their unit: `$1,000.10` is "one thousand dollars and ten cents".

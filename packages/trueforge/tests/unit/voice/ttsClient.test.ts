@@ -1,5 +1,5 @@
 import { SpeechRateLimiter } from '../../../src/voice/speechRateLimit';
-import { WouldChangeTextError } from '../../../src/voice/transport';
+import { UncheckedSpeechError, WouldChangeTextError } from '../../../src/voice/transport';
 import { SidecarSpeechSynthesizer, WholeSamples } from '../../../src/voice/ttsClient';
 
 function streamOf(...pieces: Uint8Array[]): Response {
@@ -167,7 +167,38 @@ describe('SidecarSpeechSynthesizer with exact', () => {
     const read = collect(
       new SidecarSpeechSynthesizer().stream({ text: 'Hi.', format: 'pcm16', signal: never, exact: true }),
     );
-    await expect(read).rejects.toThrow(/did not check/);
+    await expect(read).rejects.toBeInstanceOf(UncheckedSpeechError);
     await expect(read).rejects.not.toBeInstanceOf(WouldChangeTextError);
+  });
+
+  it('stops an unchecked answer at once, so an older service does not keep making the whole read-back', async () => {
+    let cancelled = false;
+    const body = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        controller.enqueue(Uint8Array.of(1, 2));
+      },
+      cancel() {
+        cancelled = true;
+      },
+    });
+    jest.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(body, { status: 200 }));
+    const read = collect(
+      new SidecarSpeechSynthesizer().stream({ text: 'Hi.', format: 'pcm16', signal: never, exact: true }),
+    );
+    await expect(read).rejects.toBeInstanceOf(UncheckedSpeechError);
+    expect(cancelled).toBe(true);
+  });
+
+  it('takes the audio type in any case', async () => {
+    jest.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(Uint8Array.of(1, 2), {
+        status: 200,
+        headers: { 'x-aman-exact': 'checked', 'content-type': 'AUDIO/L16' },
+      }),
+    );
+    const pieces = await collect(
+      new SidecarSpeechSynthesizer().stream({ text: 'Hi.', format: 'pcm16', signal: never, exact: true }),
+    );
+    expect(pieces.length).toBe(1);
   });
 });

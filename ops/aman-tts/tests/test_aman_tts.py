@@ -32,6 +32,7 @@ from phonemes import (  # noqa: E402
     spoken_words,
     split_chunks,
     split_sentences,
+    _tokens,
     to_phonemes,
     whole_words,
 )
@@ -201,9 +202,41 @@ class SpokenWordsTest(unittest.TestCase):
             "Wire 10, 500 now.",  # a comma is a pause only between small numbers, a date or a time
             "Wire $5, 20 now.",
             "Wire 1000, 2026 now.",
+            "Pay 19, 99 dollars.",  # a comma between small numbers is no day, year or time
+            "Wire 15, 30 dollars.",
+            "Pay 2, 50 now.",
+            "Wire 20, 26 dollars.",
+            "Send 12, 2000 dollars and 5, 7 cents.",
+            "On May 1, 10 people came.",
+            "Items 1, 2 and 3.",
+            "Pay one thousand (five hundred) dollars.",  # number words either side of a bracket or quote
+            "Pay twenty-five (hundred) dollars.",
+            'Pay one thousand "five hundred" dollars.',
+            "Pay 5 (thousands) dollars.",  # forms of number words
+            "Pay 5 dozen now.",
+            "Pay 5 grand now.",
+            "Pay 5 k now.",
+            "Pay 5 bn now.",
+            "Pay 5 lakh now.",
+            "Pay 5 crore now.",
+            "Pay 5 hundreds now.",
+            "Pay fifth (5) now.",
+            "Pay 5 oh 5 now.",
+            "Wire 1000 and 500 dollars.",  # heard as one number: one thousand and five hundred
+            "Wire 100 and 5 dollars.",
+            "Mail me at my-bank dot com today.",  # sounds like mybank dot com
+            "Mail me at t.co today.",
+            "Mail sam@example.com today.",
         ):
             with self.subTest(text=text):
                 self.assertFalse(reads_as_written(text))
+
+    def test_a_comma_after_a_number_is_a_pause_of_its_own(self) -> None:
+        # The comma is not part of the number, so "19, 99" is never heard as one run of digits.
+        self.assertIn(("punct", ","), list(_tokens("Pay 19, 99 dollars.")))
+        self.assertIn(("punct", ","), list(_tokens("Pay $19, 99 dollars.")))
+        self.assertEqual(spoken_words("Pay 1,000 or 19, 99."), ["pay", "one", "thousand", "or", "nineteen", "ninety", "nine"])
+        self.assertNotIn(("punct", ","), list(_tokens("Pay 1,000,000 now.")))
 
     def test_says_the_cents_of_a_sum_with_their_unit(self) -> None:
         self.assertEqual(
@@ -227,7 +260,15 @@ class SpokenWordsTest(unittest.TestCase):
             "I'll add the event Trip on Tue Oct 27, 9:00 am to Wed Oct 28, 2:30 pm.",
             "I'll add the event Trip on Fri Nov 6 at 2:30 to 3:00 pm.",
             "It was on March 5, 2026 in town.",
-            "Items 1, 2 and 3.",
+            "Nov 6, 2026, 2:30 pm is fine.",
+            "Items 1 and 2 and 3.",
+            "Pages 10 and 12 are done.",
+            "We met in 2019 and 2020.",
+            "Thursday at 2 p.m.? Yes.",  # letters with dots are said letter by letter
+            "e.g. chips, i.e. before the review.",
+            "The U.S. office and J.R. agree.",
+            "It is the first 3 items.",
+            "I'm 5 minutes away.",
             "Use 5. 3 more follow.",  # one sentence stop and a space
             "Twenty five and one hundred.",
             "Pay one, two and three.",

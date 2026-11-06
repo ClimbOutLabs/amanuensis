@@ -60,7 +60,7 @@ export class SpeechOutput {
         }
         if (!counted && role === 'body') {
           // Remembered from the first sound, so an echo of it can be told apart.
-          spoken.add(text);
+          spoken.add({ text });
           counted = true;
         }
         madeSound = true;
@@ -79,8 +79,8 @@ export class SpeechOutput {
       this.#complete = false;
     }
     if (madeSound && role === 'body' && !stopped()) {
-      // A long text is still playing a minute after its first sound, so its tail is remembered from the last.
-      spoken.add(text);
+      // A long text is still playing a minute after its first sound, so its tail is remembered from when it ends.
+      spoken.add({ text, lastHeardAtMs: timeline.endsAtMs });
     }
   }
 }
