@@ -208,7 +208,7 @@ export function createCallChats({
       if (ask === undefined) {
         return undefined;
       }
-      // Nothing is written until the person heard the message, so a chat never says something was read out that was not.
+      // Nothing is written until the person heard the message, so a chat never holds a message that was not read out.
       let begun: Promise<string | undefined> | undefined;
       const begin = (): Promise<string | undefined> => {
         begun ??= (async () => {

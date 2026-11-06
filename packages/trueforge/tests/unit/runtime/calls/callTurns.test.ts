@@ -196,6 +196,10 @@ describe('a phone call in private mode', () => {
     'Yeah?',
     'Okay?',
     'Yes ?',
+    'Yes?!',
+    'Yes？',
+    'Yeah¿',
+    'Yeah? Yeah.',
   ])('does not take "%s" as a yes', heard => {
     expect(goodTimeAnswer(heard)).toBe('unclear');
   });
