@@ -37,8 +37,8 @@ What it can do today:
   shell's installer in the setup container with https on this computer
   and daily backups. Then the steps the earlier commands added run in
   their order: the adopt step puts the command and the Start menu
-  entries in place (Aman, which opens it, Check Aman, Update Aman and
-  Backups), the folder Aman keeps on the PC is made private,
+  entries in place (Aman, which opens it, Check Aman, Update Aman,
+  Remove Aman and Backups), the folder Aman keeps on the PC is made private,
   Aman opens in the browser, and the home network is opened when the
   phone answer was yes. At the end a short getting started page opens
   in the browser; the page is also saved in the Amanuensis folder.
@@ -75,6 +75,19 @@ What it can do today:
   choice in the state record and adds a Backups entry to the Start
   menu. On Windows the doctor's backup check looks for that task and
   reads the ages of the backups from the folder they land in.
+- `aman uninstall`, on Windows, removes Aman from the PC. It says what
+  goes and asks once before anything is deleted: the instances with all
+  their data (through the shell's own `instance remove --purge-data`, in
+  the setup container), the Aman volumes and images in Docker, the
+  shortcuts that point at Aman, the daily backup task, the resume entry,
+  the firewall rule (one Windows prompt), the PATH entry, the
+  certificate Aman added, the Amanuensis folder and the aman command
+  itself. A second question decides the backups: they are kept, with a
+  last backup made first, unless it is answered yes. Docker Desktop
+  stays installed, and the last line says how to remove it. A removal
+  that stops part way says why and can be run again; the aman command
+  is deleted only once everything else is gone. The Start menu's
+  Remove Aman entry runs it.
 - `aman backups`, on Windows, lists the backups kept on the PC,
   newest first. The Start menu's Backups entry opens the folder.
 
