@@ -60,14 +60,13 @@ export async function measureTurnLatency({
     }, timeoutMs).unref();
   });
   const play = async (): Promise<void> => {
-    const started = clock.now();
-    for (
-      let offset = 0, step = 1;
-      offset + VAD_WINDOW_SAMPLES <= recording.length;
-      offset += VAD_WINDOW_SAMPLES, step += 1
-    ) {
+    // Each window follows the one before by a window's length. After a stall the rest of the recording is still
+    // played in real time, never rushed to catch up, since a rushed silence would look like an instant endpoint.
+    let due = clock.now();
+    for (let offset = 0; offset + VAD_WINDOW_SAMPLES <= recording.length; offset += VAD_WINDOW_SAMPLES) {
       session.pushAudio(pcmBytesOf(recording.subarray(offset, offset + VAD_WINDOW_SAMPLES)));
-      const wait = started + step * WINDOW_MS - clock.now();
+      due = Math.max(due, clock.now()) + WINDOW_MS;
+      const wait = due - clock.now();
       if (wait > 0) {
         await new Promise<void>(resolve => {
           setTimeout(resolve, wait);
