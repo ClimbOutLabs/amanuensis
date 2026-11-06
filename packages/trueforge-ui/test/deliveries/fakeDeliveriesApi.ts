@@ -59,6 +59,7 @@ export function fakeServer(initial: DeliveryItem[]) {
         approval_waiting: 'nudge',
       },
       mailProblem: null,
+      calendarProblem: null,
       mailSource: null,
     },
     suggestions: [],

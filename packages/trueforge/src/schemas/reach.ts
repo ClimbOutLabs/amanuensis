@@ -140,8 +140,10 @@ export const ReachAvailabilitySchema = z
 export type ReachAvailability = z.infer<typeof ReachAvailabilitySchema>;
 
 export const MailProblemKindSchema = z
-  .enum(['too_slow', 'other'])
-  .describe('Why mail could not be checked: the mail server answered too slowly, or something else went wrong.')
+  .enum(['too_slow', 'google_sign_in', 'email_password', 'other'])
+  .describe(
+    'Why mail could not be checked: the mail server answered too slowly, Google needs signing in again, the shared Email connector could not log in, or something else went wrong.',
+  )
   .openapi('MailProblemKind');
 
 export type MailProblemKind = z.infer<typeof MailProblemKindSchema>;
@@ -160,6 +162,12 @@ export const MailProblemSchema = z
   })
   .openapi('MailProblem');
 
+export const CalendarProblemSchema = z
+  .object({
+    since: z.string().describe('When calendar checks first failed, with none succeeding since, ISO 8601 UTC.'),
+  })
+  .openapi('CalendarProblem');
+
 export const ReachViewSchema = z
   .object({
     settings: ReachSettingsSchema,
@@ -170,6 +178,9 @@ export const ReachViewSchema = z
       .describe('The highest level each kind of event can ever reach, whatever the model says.'),
     mail_problem: MailProblemSchema.nullable().describe(
       'Set when mail has not been checked for about an hour. Null when mail checks work.',
+    ),
+    calendar_problem: CalendarProblemSchema.nullable().describe(
+      'Set when the calendar has not been checked for about an hour. Null when calendar checks work.',
     ),
     mail_source: MailSourceKindSchema.nullable().describe(
       'Where mail is read from. Null until mail has been checked once.',

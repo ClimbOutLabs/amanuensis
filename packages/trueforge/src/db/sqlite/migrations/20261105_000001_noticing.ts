@@ -53,6 +53,7 @@ export async function up(db: Kysely<unknown>): Promise<void> {
         failure_kind TEXT,
         stuck_message_id TEXT,
         stuck_passes INTEGER NOT NULL DEFAULT 0,
+        stuck_since TEXT,
         window_ms INTEGER,
         source TEXT,
         PRIMARY KEY (tenant_id, created_by, watcher)

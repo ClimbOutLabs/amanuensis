@@ -57,6 +57,7 @@ export interface NoticingCheckpointTable {
   failure_kind: string | null;
   stuck_message_id: string | null;
   stuck_passes: number;
+  stuck_since: string | Date | null;
   window_ms: number | null;
   source: string | null;
 }
@@ -100,12 +101,14 @@ const MAX_ATTEMPTS = 5;
 const WAITING = ['pending', 'delivering'];
 
 /**
- * What a watcher keeps stopping at, and how many passes in a row failed on it. `message_id` is a message, or for a
- * stretch of mail that cannot be listed `list:` and the time it starts at, so nothing may read it as a message id.
+ * What a watcher keeps stopping at, how many passes in a row failed on it, and when it first did. `message_id` is a
+ * message, or for a stretch of mail that cannot be listed `list:` and the time it starts at, so nothing may read it as
+ * a message id.
  */
 export interface StuckMessage {
   message_id: string;
   passes: number;
+  since: Date;
 }
 
 /** Where a watcher reads from next, and its trouble if passes keep failing. */
@@ -455,7 +458,14 @@ export class NoticingStore implements INoticingStore {
         row.failing_since === null || !kind.success
           ? undefined
           : { kind: kind.data, since: new Date(row.failing_since) },
-      stuck: row.stuck_message_id === null ? undefined : { message_id: row.stuck_message_id, passes: row.stuck_passes },
+      stuck:
+        row.stuck_message_id === null
+          ? undefined
+          : {
+              message_id: row.stuck_message_id,
+              passes: row.stuck_passes,
+              since: new Date(row.stuck_since ?? row.checked_at),
+            },
       window_ms: row.window_ms ?? undefined,
       source: source.success ? source.data : undefined,
     };
@@ -468,6 +478,7 @@ export class NoticingStore implements INoticingStore {
       failure_kind: input.failure?.kind ?? null,
       stuck_message_id: input.stuck?.message_id ?? null,
       stuck_passes: input.stuck?.passes ?? 0,
+      stuck_since: input.stuck?.since.toISOString() ?? null,
       window_ms: input.window_ms ?? null,
       source: input.source ?? null,
     };

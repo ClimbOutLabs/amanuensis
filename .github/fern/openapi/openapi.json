@@ -1309,6 +1309,22 @@
         ],
         "type": "object"
       },
+      "CalendarProblem": {
+        "description": "Set when the calendar has not been checked for about an hour. Null when calendar checks work.",
+        "properties": {
+          "since": {
+            "description": "When calendar checks first failed, with none succeeding since, ISO 8601 UTC.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "since"
+        ],
+        "type": [
+          "object",
+          "null"
+        ]
+      },
       "CalendarProvider": {
         "properties": {
           "account_url_template": {
@@ -6503,9 +6519,11 @@
         ]
       },
       "MailProblemKind": {
-        "description": "Why mail could not be checked: the mail server answered too slowly, or something else went wrong.",
+        "description": "Why mail could not be checked: the mail server answered too slowly, Google needs signing in again, the shared Email connector could not log in, or something else went wrong.",
         "enum": [
           "too_slow",
+          "google_sign_in",
+          "email_password",
           "other"
         ],
         "type": "string"
@@ -9233,6 +9251,9 @@
           "availability": {
             "$ref": "#/components/schemas/ReachAvailability"
           },
+          "calendar_problem": {
+            "$ref": "#/components/schemas/CalendarProblem"
+          },
           "mail_problem": {
             "$ref": "#/components/schemas/MailProblem"
           },
@@ -9274,6 +9295,7 @@
           "availability",
           "max_levels",
           "mail_problem",
+          "calendar_problem",
           "mail_source"
         ],
         "type": "object"

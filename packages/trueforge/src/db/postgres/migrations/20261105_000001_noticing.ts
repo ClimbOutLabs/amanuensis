@@ -58,6 +58,7 @@ export async function up(db: Kysely<unknown>): Promise<void> {
       .addColumn('failure_kind', 'text')
       .addColumn('stuck_message_id', 'text')
       .addColumn('stuck_passes', 'integer', col => col.notNull().defaultTo(0))
+      .addColumn('stuck_since', 'timestamptz')
       .addColumn('window_ms', 'integer')
       .addColumn('source', 'text')
       .addPrimaryKeyConstraint('noticing_checkpoint_pk', ['tenant_id', 'created_by', 'watcher'])

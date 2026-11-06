@@ -100,7 +100,9 @@ function NumberField({
 }
 
 const MAIL_PROBLEM_NEXT_STEP = {
-  too_slow: 'Your mail server answers too slowly. Ask whoever runs your mail to check it.',
+  too_slow: 'Your mail is taking too long to read. Ask whoever runs your mail to check it, or wait for it to catch up.',
+  google_sign_in: 'Open Settings, Connectors, Google and choose Reconnect to sign in to Google again.',
+  email_password: 'Open Settings, Connectors, and check the Email connector’s account name and password.',
   other: 'Open Settings, Connectors, and check that your mail is still connected.',
 } as const;
 
@@ -112,6 +114,20 @@ function MailProblem({ problem }: { problem: NonNullable<ReachView['mailProblem'
     <div role="status" className={`${CARD} flex flex-col gap-1`}>
       <p className="text-text-primary text-sm font-semibold">{`${assistant} has not been able to check your mail since ${since}.`}</p>
       <p className="text-text-secondary text-sm">{MAIL_PROBLEM_NEXT_STEP[problem.kind]}</p>
+    </div>
+  );
+}
+
+/** Shown only once the calendar has gone unchecked for about an hour. */
+function CalendarProblem({ problem }: { problem: NonNullable<ReachView['calendarProblem']> }) {
+  const assistant = useAssistantDisplayName();
+  const since = new Date(problem.since).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+  return (
+    <div role="status" className={`${CARD} flex flex-col gap-1`}>
+      <p className="text-text-primary text-sm font-semibold">{`${assistant} has not been able to check your calendar since ${since}.`}</p>
+      <p className="text-text-secondary text-sm">
+        Open Settings, Connectors, and check that your calendar is still connected.
+      </p>
     </div>
   );
 }
@@ -259,6 +275,7 @@ export function ReachPreferences({ reach }: { reach: ReachApi }) {
   return (
     <div data-role="reach-preferences" className="flex flex-col gap-4">
       {view.mailProblem === null ? null : <MailProblem problem={view.mailProblem} />}
+      {view.calendarProblem === null ? null : <CalendarProblem problem={view.calendarProblem} />}
       {view.mailSource === null ? null : <MailSource source={view.mailSource} />}
       <Card title="Ways to reach you" intro="In the app is always on. Notices on this device are set up above.">
         <div className="flex flex-wrap items-center justify-between gap-2">

@@ -61,8 +61,10 @@ export type ReachView = {
   availability: { texts: ReachChannelState; calls: ReachChannelState };
   /** The highest level each kind of event can ever reach, so only kinds that can call offer the tick. */
   maxLevels: Partial<Record<NoticingKind, 'note' | 'nudge' | 'call'>>;
-  /** Set once mail has gone unchecked for about an hour: since when, and whether the mail server was too slow. */
-  mailProblem: { since: string; kind: 'too_slow' | 'other' } | null;
+  /** Set once mail has gone unchecked for about an hour: since when, and what to do about it. */
+  mailProblem: { since: string; kind: 'too_slow' | 'google_sign_in' | 'email_password' | 'other' } | null;
+  /** Set once the calendar has gone unchecked for about an hour. */
+  calendarProblem: { since: string } | null;
   /** Where mail is read from, or null until it has been checked once. */
   mailSource: 'google' | 'email_connector' | null;
 };

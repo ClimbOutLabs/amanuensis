@@ -70,6 +70,7 @@ describe('sidecar mail source (IMAP)', () => {
       since: new Date('2026-11-05T14:00:00.000Z'),
       before: NOW,
       limit: 50,
+      out_of_time: () => false,
     });
     const messages = read.read === 'all' ? read.messages : [];
     expect(messages).toHaveLength(1);
@@ -112,6 +113,7 @@ describe('sidecar mail source (IMAP)', () => {
       since: new Date('2026-11-05T14:13:00.000Z'),
       before: NOW,
       limit: 50,
+      out_of_time: () => false,
     });
     expect(read.read === 'all' ? read.messages.map(message => message.id) : read.read).toEqual(['7', '8', '9']);
   });
@@ -134,13 +136,24 @@ describe('sidecar mail source (IMAP)', () => {
       since: new Date('2026-11-05T12:00:00Z'),
       before: new Date('2026-11-05T12:00:50Z'),
       limit: 100,
+      out_of_time: () => false,
     });
     expect(some.read === 'all' ? some.messages.length : some.read).toBe(50);
     await expect(
-      source.listNewMessages({ since: new Date('2026-11-05T12:00:00Z'), before: NOW, limit: 200 }),
+      source.listNewMessages({
+        since: new Date('2026-11-05T12:00:00Z'),
+        before: NOW,
+        limit: 200,
+        out_of_time: () => false,
+      }),
     ).resolves.toEqual({ read: 'too_many' });
     await expect(
-      source.listNewMessages({ since: new Date('2026-11-05T12:00:00Z'), before: NOW, limit: 20 }),
+      source.listNewMessages({
+        since: new Date('2026-11-05T12:00:00Z'),
+        before: NOW,
+        limit: 20,
+        out_of_time: () => false,
+      }),
     ).resolves.toEqual({ read: 'too_many' });
     expect(calls.map(args => [args['page'], args['page_size']])).toEqual([
       [1, 100],
@@ -164,6 +177,7 @@ describe('sidecar mail source (IMAP)', () => {
       since,
       before: NOW,
       limit: 50,
+      out_of_time: () => false,
     });
     const latest = new Date(NOW.getTime() - 1);
     expect(read.read === 'all' ? read.messages.map(message => [message.id, message.received_at]) : read.read).toEqual([
@@ -181,6 +195,7 @@ describe('sidecar mail source (IMAP)', () => {
       before: NOW,
       limit: 50,
       from: ['dana@example.com', 'billing@power.test'],
+      out_of_time: () => false,
     });
     expect(read.read === 'all' ? read.messages.length : read.read).toBe(2);
     expect(calls.map(([, args]) => args['from_address'])).toEqual(['dana@example.com', 'billing@power.test']);
@@ -196,6 +211,7 @@ describe('sidecar mail source (IMAP)', () => {
       since: new Date('2026-11-05T14:00:00.000Z'),
       before: NOW,
       limit: 50,
+      out_of_time: () => false,
     });
     await expect(read).rejects.toBeInstanceOf(MailTooSlowError);
     expect(calls).toHaveLength(1);
@@ -269,7 +285,7 @@ describe('sidecar mail source (IMAP)', () => {
         logger: { warn: jest.fn() },
         stuck: undefined,
         out_of_time: () => false,
-        stalled_since: undefined,
+        assistant: 'Mira',
         max_width: undefined,
       });
       expect(found.track.map(event => event.id)).toEqual(['bill_due:7']);
@@ -314,7 +330,12 @@ describe('sidecar mail source (IMAP)', () => {
         const source = sidecarMailSource({ call: failing(reply), account: 'default' });
         await expect(source.readText(asMail)).rejects.toBeInstanceOf(MailSourceBusyError);
         await expect(
-          source.listNewMessages({ since: new Date('2026-11-05T14:00:00.000Z'), before: NOW, limit: 50 }),
+          source.listNewMessages({
+            since: new Date('2026-11-05T14:00:00.000Z'),
+            before: NOW,
+            limit: 50,
+            out_of_time: () => false,
+          }),
         ).rejects.toBeInstanceOf(MailSourceBusyError);
       }
     });
@@ -333,6 +354,7 @@ describe('sidecar mail source (IMAP)', () => {
         since: new Date('2026-11-05T14:00:00.000Z'),
         before: NOW,
         limit: 50,
+        out_of_time: () => false,
       });
       await expect(read).rejects.toBeInstanceOf(MailTooSlowError);
     });
@@ -344,6 +366,7 @@ describe('sidecar mail source (IMAP)', () => {
       since: new Date('2026-11-05T14:00:00.000Z'),
       before: NOW,
       limit: 50,
+      out_of_time: () => false,
     });
     await expect(read).rejects.toBeInstanceOf(MailSourceBusyError);
     await expect(read).rejects.toHaveProperty('cause', expect.objectContaining({ message: 'connection refused' }));
@@ -396,10 +419,14 @@ describe('sidecar mail source (IMAP)', () => {
         logger: warnings,
         stuck: undefined,
         out_of_time: () => false,
-        stalled_since: undefined,
+        assistant: 'Mira',
         max_width: undefined,
       });
-      expect(found.raise.map(event => event.id)).toEqual(['bill_due:7']);
+      // The one message the connector cannot list is told about in a fixed note.
+      expect(found.raise.map(event => event.id)).toEqual([
+        'mail_gap:2026-11-05T14:55:00.000Z:2026-11-05T14:55:04.000Z',
+        'bill_due:7',
+      ]);
       expect(found.resume_from).toBeUndefined();
       expect(found.stopped_by).toBeUndefined();
       expect(pageSizes).toContain(1);
@@ -407,6 +434,130 @@ describe('sidecar mail source (IMAP)', () => {
         'Left out mail the mail server could not list one by one',
         expect.objectContaining({ skipped: 1 }),
       );
+    });
+
+    it('reads the bill beside three crafted headers in the same few seconds, and tells of the three', async () => {
+      const bad = (id: string, second: number) => ({
+        email: { ...EMAIL, email_id: id, subject: 'Crafted' },
+        arrived: `2026-11-05T14:55:0${String(second)}.000Z`,
+      });
+      const mail = [
+        bad('8', 0),
+        bad('9', 1),
+        bad('10', 2),
+        {
+          email: { ...EMAIL, email_id: '7', subject: 'Invoice: amount due by November 7' },
+          arrived: '2026-11-05T14:55:03.000Z',
+        },
+      ];
+      const listing = inbox(mail);
+      const call: CallSidecarTool = (name, args) => {
+        if (name === 'get_emails_content') {
+          return Promise.resolve({
+            structuredContent: { emails: [{ email_id: '7', body: 'Amount due by November 7' }], failed_ids: [] },
+          });
+        }
+        const page = Number(args['page']);
+        const size = Number(args['page_size']);
+        const since = new Date(String(args['since'])).getTime();
+        const before = new Date(String(args['before'])).getTime();
+        const ahead = mail
+          .filter(item => {
+            const arrived = new Date(item.arrived).getTime();
+            return arrived >= since && arrived < before;
+          })
+          .slice((page - 1) * size, page * size);
+        return ahead.some(item => item.email.subject === 'Crafted')
+          ? Promise.reject(new SidecarToolError({ server: 'Email', tool: name, reply: 'incomplete metadata page' }))
+          : listing(name, args);
+      };
+      const found = await watchMail({
+        source: sidecarMailSource({ call, account: 'default' }),
+        settings: defaultReachSettings('UTC'),
+        since: new Date('2026-11-05T14:00:00.000Z'),
+        now: NOW,
+        logger: { warn: jest.fn() },
+        stuck: undefined,
+        out_of_time: () => false,
+        assistant: 'Mira',
+        max_width: undefined,
+      });
+      expect(found.raise.map(event => event.id)).toEqual([
+        'mail_gap:2026-11-05T14:55:00.000Z:2026-11-05T14:55:04.000Z',
+        'bill_due:7',
+      ]);
+      expect(found.stopped_by).toBeUndefined();
+      expect(found.resume_from).toBeUndefined();
+    });
+
+    it('tries a failing page once more before it leaves the message out', async () => {
+      let tries = 0;
+      const listing = inbox([{ email: BILL, arrived: '2026-11-05T14:55:00.000Z' }]);
+      const call: CallSidecarTool = (name, args) => {
+        if (Number(args['page_size']) === 1) {
+          tries += 1;
+          if (tries === 1) {
+            return Promise.reject(new SidecarToolError({ server: 'Email', tool: name, reply: 'incomplete page' }));
+          }
+        } else {
+          return Promise.reject(new SidecarToolError({ server: 'Email', tool: name, reply: 'incomplete page' }));
+        }
+        return listing(name, args);
+      };
+      const read = await sidecarMailSource({ call, account: 'default' }).listNewMessages({
+        since: new Date('2026-11-05T14:55:00.000Z'),
+        before: new Date('2026-11-05T14:55:02.000Z'),
+        limit: 50,
+        out_of_time: () => false,
+      });
+      expect(read).toMatchObject({ read: 'all', messages: [{ id: '7' }] });
+      expect(read).not.toHaveProperty('skipped');
+    });
+
+    it('stops searching one message at a time when the pass has run out of time', async () => {
+      const calls: number[] = [];
+      const call: CallSidecarTool = (_name, args) => {
+        calls.push(Number(args['page']));
+        return Promise.reject(new SidecarToolError({ server: 'Email', tool: 'x', reply: 'incomplete page' }));
+      };
+      let looks = 0;
+      const read = sidecarMailSource({ call, account: 'default' }).listNewMessages({
+        since: new Date('2026-11-05T14:55:00.000Z'),
+        before: new Date('2026-11-05T14:55:02.000Z'),
+        limit: 500,
+        out_of_time: () => (looks += 1) > 2,
+      });
+      await expect(read).rejects.toBeInstanceOf(MailTooSlowError);
+      expect(calls.length).toBeLessThan(8);
+    });
+
+    it('does not search one message at a time when the list is only a check on the account', async () => {
+      const call = jest.fn<ReturnType<CallSidecarTool>, Parameters<CallSidecarTool>>(() =>
+        Promise.reject(new SidecarToolError({ server: 'Email', tool: 'x', reply: 'incomplete page' })),
+      );
+      const read = sidecarMailSource({ call, account: 'default' }).listNewMessages({
+        since: new Date('2026-11-05T14:55:00.000Z'),
+        before: new Date('2026-11-05T14:55:02.000Z'),
+        limit: 500,
+        out_of_time: () => false,
+        whole: true,
+      });
+      await expect(read).rejects.toBeInstanceOf(SidecarToolError);
+      expect(call).toHaveBeenCalledTimes(1);
+    });
+
+    it('reads a few seconds that hold more than one page of mail whole', async () => {
+      const mail = Array.from({ length: 250 }, (_, n) => ({
+        email: { ...EMAIL, email_id: String(n) },
+        arrived: new Date(Date.UTC(2026, 10, 5, 14, 55, 0, n * 10)).toISOString(),
+      }));
+      const read = await sidecarMailSource({ call: inbox(mail), account: 'default' }).listNewMessages({
+        since: new Date('2026-11-05T14:55:00.000Z'),
+        before: new Date('2026-11-05T14:55:04.000Z'),
+        limit: 500,
+        out_of_time: () => false,
+      });
+      expect(read.read === 'all' ? read.messages : []).toHaveLength(250);
     });
 
     it('leaves a list that fails for every page to the caller, since that is the account and not a message', async () => {
@@ -418,6 +569,7 @@ describe('sidecar mail source (IMAP)', () => {
         since: new Date('2026-11-05T14:55:00.000Z'),
         before: new Date('2026-11-05T14:55:02.000Z'),
         limit: 50,
+        out_of_time: () => false,
       });
       await expect(read).rejects.toBeInstanceOf(SidecarToolError);
     });
@@ -465,7 +617,7 @@ describe('sidecar mail source (IMAP)', () => {
       logger: { warn: jest.fn() },
       stuck: undefined,
       out_of_time: () => false,
-      stalled_since: undefined,
+      assistant: 'Mira',
       max_width: undefined,
     });
     expect(found.raise.map(event => [event.kind, event.evidence])).toEqual([['bill_due', 'content']]);
@@ -681,7 +833,7 @@ describe('createSidecarNoticingSources', () => {
 
   it('uses the shared connector only when Google gives no mail, never in place of a Google login that must be redone', async () => {
     const reconnect: NoticingSources = {
-      mail: { status: 'unreachable', error: new Error('Google needs to be connected again.') },
+      mail: { status: 'unreachable', error: new Error('Google needs to be connected again.'), kind: 'google' },
       calendar: undefined,
     };
     const provider = createSidecarNoticingSources({

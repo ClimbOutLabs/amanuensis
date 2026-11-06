@@ -158,7 +158,21 @@ function parseMailProblem(value: unknown): ReachView['mailProblem'] {
   if (Number.isNaN(new Date(since).getTime())) {
     throw new Error(UNREADABLE);
   }
-  return { since, kind: kind === 'too_slow' ? 'too_slow' : 'other' };
+  return {
+    since,
+    kind: kind === 'too_slow' || kind === 'google_sign_in' || kind === 'email_password' ? kind : 'other',
+  };
+}
+
+function parseCalendarProblem(value: unknown): ReachView['calendarProblem'] {
+  if (value === null || value === undefined) {
+    return null;
+  }
+  const since = required(required(value, isRecord).since, isString);
+  if (Number.isNaN(new Date(since).getTime())) {
+    throw new Error(UNREADABLE);
+  }
+  return { since };
 }
 
 function parseMailSource(value: unknown): ReachView['mailSource'] {
@@ -185,6 +199,7 @@ function parseView(body: unknown): ReachView {
     availability: { texts: parseChannel(availability.texts), calls: parseChannel(availability.calls) },
     maxLevels,
     mailProblem: parseMailProblem(data.mail_problem),
+    calendarProblem: parseCalendarProblem(data.calendar_problem),
     mailSource: parseMailSource(data.mail_source),
   };
 }

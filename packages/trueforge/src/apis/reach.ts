@@ -12,7 +12,7 @@ import {
 } from '../routes/reachRoutes';
 import type { DeliveryService } from '../runtime/delivery/deliveryService';
 import { KIND_MAX_LEVEL } from '../runtime/noticing/levels';
-import { MAIL_PROBLEM_SHOWN_AFTER_MS } from '../runtime/noticing/noticingService';
+import { MAIL_PROBLEM_SHOWN_AFTER_MS, mailProblemOf } from '../runtime/noticing/noticingService';
 import { suggestAlwaysImportant } from '../runtime/noticing/suggestions';
 import type { ReachAvailability } from '../schemas/reach';
 import { defaultReachSettings, NOTICING_KINDS, type AlwaysImportantSender, type ReachSettings } from '../schemas/reach';
@@ -78,14 +78,18 @@ export function createReachRouter(deps: ReachRouterDeps) {
   const view = async (owner: ReturnType<typeof ownerOf>) => {
     const stored = await deps.reachStore.get(owner);
     const checkpoint = await deps.noticingStore.getCheckpoint({ ...owner, watcher: 'mail' });
-    const failure = checkpoint?.failure;
-    const failing = failure !== undefined && now().getTime() - failure.since.getTime() >= MAIL_PROBLEM_SHOWN_AFTER_MS;
+    const calendar = await deps.noticingStore.getCheckpoint({ ...owner, watcher: 'calendar' });
+    const problem = mailProblemOf({ checkpoint, now: now() });
+    const calendarFailure = calendar?.failure;
+    const calendarFailing =
+      calendarFailure !== undefined && now().getTime() - calendarFailure.since.getTime() >= MAIL_PROBLEM_SHOWN_AFTER_MS;
     return {
       settings: stored ?? defaultReachSettings('UTC'),
       saved: stored !== undefined,
       availability: deps.channels(),
       max_levels: KIND_MAX_LEVEL,
-      mail_problem: failing ? { since: failure.since.toISOString(), kind: failure.kind } : null,
+      mail_problem: problem === undefined ? null : { since: problem.since.toISOString(), kind: problem.kind },
+      calendar_problem: calendarFailing ? { since: calendarFailure.since.toISOString() } : null,
       mail_source: checkpoint?.source ?? null,
     };
   };

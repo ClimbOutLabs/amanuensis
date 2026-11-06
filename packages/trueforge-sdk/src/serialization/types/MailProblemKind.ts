@@ -5,8 +5,8 @@ import * as core from "../../core/index.js";
 import type * as serializers from "../index.js";
 
 export const MailProblemKind: core.serialization.Schema<serializers.MailProblemKind.Raw, TrueForge.MailProblemKind> =
-    core.serialization.enum_(["too_slow", "other"]);
+    core.serialization.enum_(["too_slow", "google_sign_in", "email_password", "other"]);
 
 export declare namespace MailProblemKind {
-    export type Raw = "too_slow" | "other";
+    export type Raw = "too_slow" | "google_sign_in" | "email_password" | "other";
 }

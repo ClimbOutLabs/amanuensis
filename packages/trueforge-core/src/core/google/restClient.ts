@@ -122,7 +122,7 @@ export interface GoogleRestProduct {
 function describeFailure(input: { product: GoogleRestProduct; status: number; reason: string }): string {
   const { product, status, reason } = input;
   const busy = `${product.name} is busy right now. Try again in a minute.`;
-  if (status === 429 || RATE_LIMIT_REASONS.has(reason) || reason === 'backendError') {
+  if (isBusyFailure({ status, reason }) && status < 500) {
     return busy;
   }
   if (API_OFF_REASONS.has(reason)) {
