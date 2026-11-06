@@ -3393,6 +3393,17 @@
         ],
         "type": "object"
       },
+      "GetMapsSettingsResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/MapsSettings"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
       "GetMeResponse": {
         "properties": {
           "data": {
@@ -6319,6 +6330,160 @@
           "server_id",
           "server_name",
           "name"
+        ],
+        "type": "object"
+      },
+      "MapsServerFieldState": {
+        "properties": {
+          "default_value": {
+            "description": "The built-in default address, shown as the field placeholder.",
+            "type": "string"
+          },
+          "set_by_environment": {
+            "description": "Whether the server environment sets this address; the field is read-only then and the value wins.",
+            "type": "boolean"
+          },
+          "value": {
+            "description": "The address in the field: the environment address when the environment sets one, else the address saved in Settings, else null.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "value",
+          "default_value",
+          "set_by_environment"
+        ],
+        "type": "object"
+      },
+      "MapsServerSettings": {
+        "properties": {
+          "maps_cycling_router_url": {
+            "description": "A maps server address saved in Settings, or null to clear it back to the default. Omitted keeps the saved address.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "maps_geocoder_url": {
+            "description": "A maps server address saved in Settings, or null to clear it back to the default. Omitted keeps the saved address.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "maps_router_url": {
+            "description": "A maps server address saved in Settings, or null to clear it back to the default. Omitted keeps the saved address.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "maps_tile_url": {
+            "description": "A maps server address saved in Settings, or null to clear it back to the default. Omitted keeps the saved address.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "maps_transit_url": {
+            "description": "A maps server address saved in Settings, or null to clear it back to the default. Omitted keeps the saved address.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "maps_walking_router_url": {
+            "description": "A maps server address saved in Settings, or null to clear it back to the default. Omitted keeps the saved address.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "type": "object"
+      },
+      "MapsServerTestResult": {
+        "properties": {
+          "message": {
+            "description": "Why the test failed, in plain words; null when the server answered.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "ok": {
+            "description": "Whether the server answered the test request.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "ok",
+          "message"
+        ],
+        "type": "object"
+      },
+      "MapsSettings": {
+        "properties": {
+          "maps_cycling_router_url": {
+            "$ref": "#/components/schemas/MapsServerFieldState"
+          },
+          "maps_geocoder_url": {
+            "$ref": "#/components/schemas/MapsServerFieldState"
+          },
+          "maps_router_url": {
+            "$ref": "#/components/schemas/MapsServerFieldState"
+          },
+          "maps_tile_url": {
+            "$ref": "#/components/schemas/MapsServerFieldState"
+          },
+          "maps_transit_url": {
+            "$ref": "#/components/schemas/MapsServerFieldState"
+          },
+          "maps_walking_router_url": {
+            "$ref": "#/components/schemas/MapsServerFieldState"
+          }
+        },
+        "required": [
+          "maps_router_url",
+          "maps_walking_router_url",
+          "maps_cycling_router_url",
+          "maps_geocoder_url",
+          "maps_transit_url",
+          "maps_tile_url"
+        ],
+        "type": "object"
+      },
+      "MapsSettingsTest": {
+        "properties": {
+          "maps_cycling_router_url": {
+            "$ref": "#/components/schemas/MapsServerTestResult"
+          },
+          "maps_geocoder_url": {
+            "$ref": "#/components/schemas/MapsServerTestResult"
+          },
+          "maps_router_url": {
+            "$ref": "#/components/schemas/MapsServerTestResult"
+          },
+          "maps_tile_url": {
+            "$ref": "#/components/schemas/MapsServerTestResult"
+          },
+          "maps_transit_url": {
+            "$ref": "#/components/schemas/MapsServerTestResult"
+          },
+          "maps_walking_router_url": {
+            "$ref": "#/components/schemas/MapsServerTestResult"
+          }
+        },
+        "required": [
+          "maps_router_url",
+          "maps_walking_router_url",
+          "maps_cycling_router_url",
+          "maps_geocoder_url",
+          "maps_transit_url",
+          "maps_tile_url"
         ],
         "type": "object"
       },
@@ -11317,6 +11482,17 @@
         "required": [
           "result",
           "account_email"
+        ],
+        "type": "object"
+      },
+      "TestMapsSettingsResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/MapsSettingsTest"
+          }
+        },
+        "required": [
+          "data"
         ],
         "type": "object"
       },
@@ -22743,6 +22919,162 @@
           "firstRunGuide"
         ],
         "x-fern-sdk-method-name": "create_or_update"
+      }
+    },
+    "/api/v1/settings/maps": {
+      "get": {
+        "description": "Every maps server field as the Settings card shows it: the environment address when the environment sets one, else the saved address, plus the built-in default.",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetMapsSettingsResponse"
+                }
+              }
+            },
+            "description": "The maps server fields."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication required."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Admin access required."
+          }
+        },
+        "summary": "Get the maps server addresses",
+        "tags": [
+          "Capabilities"
+        ],
+        "x-fern-sdk-group-name": [
+          "settings",
+          "maps"
+        ],
+        "x-fern-sdk-method-name": "get"
+      },
+      "put": {
+        "description": "Saves the given maps server addresses in Settings. A field sent as null is cleared back to its default; a field left out keeps its saved address. An address set by the environment still wins.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MapsServerSettings"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetMapsSettingsResponse"
+                }
+              }
+            },
+            "description": "The maps server fields after the update."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "A maps server address cannot be saved; the error says what to fix."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication required."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Admin access required."
+          }
+        },
+        "summary": "Save or clear maps server addresses",
+        "tags": [
+          "Capabilities"
+        ],
+        "x-fern-sdk-group-name": [
+          "settings",
+          "maps"
+        ],
+        "x-fern-sdk-method-name": "create_or_update"
+      }
+    },
+    "/api/v1/settings/maps/test": {
+      "post": {
+        "description": "Tries each maps server address in force once: a short route from the route servers, one address lookup, one journey plan, and one map tile. Each service is reported on its own.",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TestMapsSettingsResponse"
+                }
+              }
+            },
+            "description": "One result per maps service."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication required."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Admin access required."
+          }
+        },
+        "summary": "Test the maps server addresses",
+        "tags": [
+          "Capabilities"
+        ],
+        "x-fern-sdk-group-name": [
+          "settings",
+          "maps"
+        ],
+        "x-fern-sdk-method-name": "test"
       }
     },
     "/api/v1/settings/mcp-servers": {
