@@ -57,9 +57,19 @@ function isAboveView(element, scrollBoxTops) {
   return element.getBoundingClientRect().bottom <= viewTopOf(element, scrollBoxTops);
 }
 
-/** The page's main heading and its alerts stay in a read wherever the view is, so an error shown at the top is seen. */
+/** The most text an alert may hold and still stay in a read wherever the view is. */
+const ALERT_MAX_CHARS = 500;
+
+/**
+ * The page's main heading and its short alerts stay in a read wherever the view is, so an error
+ * shown at the top is seen. A long live region, such as a chat log, scrolls like the rest.
+ */
 function isAlwaysShown(element) {
-  return element.tagName === 'H1' || element.closest('[role="alert"], [aria-live]:not([aria-live="off"])') !== null;
+  if (element.tagName === 'H1') {
+    return true;
+  }
+  const alert = element.closest('[role="alert"], [aria-live="assertive"]');
+  return alert !== null && (alert.textContent ?? '').length <= ALERT_MAX_CHARS;
 }
 
 /**

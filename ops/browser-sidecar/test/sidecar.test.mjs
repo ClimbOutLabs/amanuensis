@@ -102,6 +102,13 @@ async function withWorld(run) {
   const siteA = await fixture({
     '/': ACCOUNT_PAGE,
     '/checkout': (_req, res) => res.writeHead(200, { 'content-type': 'text/html' }).end(CHECKOUT_FIXTURE_HTML),
+    // A chat log: a long polite live region that must scroll like the rest of the page.
+    '/chat-log': html(
+      `<h1>Chat</h1><div role="log" aria-live="polite">${Array.from(
+        { length: 3000 },
+        (_v, i) => `<p>Chat message ${String(i)} in a long conversation.</p>`,
+      ).join('')}</div>`,
+    ),
     // A web app that scrolls an inner box, not the page, under a header that stays put.
     '/long-box': html(
       `<h1 style="height:80px;margin:0">Inbox</h1><div style="height:600px;overflow:auto">${Array.from(
@@ -651,6 +658,17 @@ test('a scroll down a tall page that fits one read says where the view is', { sk
     }
     const end = await sidecar.scroll({ ...where, direction: 'down' });
     assert.match(end.text, /the end of the page$/m);
+  });
+});
+
+test('a chat log scrolls like the rest of the page', { skip: !browsersAvailable }, async () => {
+  await withWorld(async ({ sidecar }) => {
+    const where = { owner: 'owner-1', tab: 'chat-1' };
+    await sidecar.open({ ...where, url: 'http://site-a.test/chat-log' });
+    await sidecar.scroll({ ...where, direction: 'down' });
+    const scrolled = await sidecar.scroll({ ...where, direction: 'down' });
+    assert.match(scrolled.text, /left out; scroll up/);
+    assert.doesNotMatch(scrolled.text, /Chat message 0 in/);
   });
 });
 
