@@ -165,6 +165,28 @@ describe('phone calls as a channel of the delivery layer', () => {
     expect((await h.calls.getBySid(CALL_SID))?.outcome).toBe('no_answer');
   });
 
+  it('stops the voicemail’s voice when the line drops while it is being made', async () => {
+    let reached: () => void = () => undefined;
+    const making = new Promise<void>(resolve => {
+      reached = resolve;
+    });
+    const tts = new FakeTts({
+      delay: () => {
+        reached();
+        return new Promise<void>(() => undefined);
+      },
+    });
+    h = await callsHarness({ tts });
+    await h.readyToCall();
+    await h.callDelivery();
+    const media = await h.openMedia({ token: (await h.answer('machine_end_beep')).token });
+    await making;
+    const text = 'This is Mannie. Something needs you. Please open the app.';
+    expect(tts.signals.get(text)?.aborted).toBe(false);
+    media.socket.close();
+    await h.waitFor(() => tts.signals.get(text)?.aborted === true);
+  });
+
   it('on a voicemail, leaves one short message in the assistant’s own voice, then one text and one push', async () => {
     h = await callsHarness();
     await h.readyToCall();
