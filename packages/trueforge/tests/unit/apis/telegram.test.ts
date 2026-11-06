@@ -43,7 +43,7 @@ function makeSettingsApp() {
   return { app, store, client };
 }
 
-function postJson(app: Hono, path: string, body: unknown): Promise<Response> {
+async function postJson(app: Hono, path: string, body: unknown): Promise<Response> {
   return app.request(path, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
@@ -178,7 +178,7 @@ describe('the telegram webhook secret gate', () => {
     return { app };
   }
 
-  function post(app: Hono, secret?: string): Promise<Response> {
+  async function post(app: Hono, secret?: string): Promise<Response> {
     return app.request(`${TELEGRAM_WEBHOOK_BASE_PATH}/webhook`, {
       method: 'POST',
       headers: {
