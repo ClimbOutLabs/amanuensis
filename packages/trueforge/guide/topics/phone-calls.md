@@ -27,7 +27,7 @@ Whoever says yes hears the message, because the phone cannot tell if it is you. 
 
 After your yes, Aman tells you what it is about. You can ask about that one thing. It cannot see your mail, calendar or files on the call, and nothing is approved on a call. To do anything about it, open the app.
 
-A call lasts at most 10 minutes. What was said is written in a chat called "Phone call". The chat quotes what the person on the phone said, and your assistant never takes it as your own request.
+A call lasts at most 10 minutes. What was said is written in a chat called "Phone call". The chat keeps the call as a record in quotes, and your assistant never takes it as your own request.
 
 ## If you miss the call
 

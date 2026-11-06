@@ -42,7 +42,7 @@ After your yes, the message is read out the way your assistant reads any reply, 
 
 Each call is recorded in Activity: when it was and how it ended. What was said on the call is written in a chat called "Phone call", starting once you heard the message. You can carry on in that chat in the app.
 
-The chat shows what the person on the phone said as a quote, marked as their words. Your assistant never takes those words as your own request, because it cannot know who was on the phone. If you have no chat in the app yet, the call still talks with you, but nothing is written to a chat.
+The chat keeps the call as a record, with what was said on both sides in quotes. Your assistant never takes those words as your own request, or as its own promise, because it cannot know who was on the phone. If you have no chat in the app yet, the call still talks with you, but nothing is written to a chat.
 
 ## Set it up
 
