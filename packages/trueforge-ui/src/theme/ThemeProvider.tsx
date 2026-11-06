@@ -125,10 +125,9 @@ export function ThemeProvider({ theme, children }: { theme?: ThemeConfig; childr
   // Preset is uncontrolled: the stored preset wins, else the host config, else the default.
   const [preset, setPresetState] = useState<ThemePreset>(() => initialPreset(theme?.preset));
 
-  const webFonts = theme?.webFonts;
   useLayoutEffect(() => {
-    ensureStyles(undefined, { webFonts });
-  }, [webFonts]);
+    ensureStyles();
+  }, []);
 
   useLayoutEffect(() => {
     if (theme?.mode !== undefined) {

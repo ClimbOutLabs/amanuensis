@@ -188,6 +188,7 @@ export async function openExportDataSession({ migrate }: { migrate: boolean }): 
     poolMax: configuration.DATABASE_POOL_MAX,
     statementTimeoutMs: configuration.POSTGRES_STATEMENT_TIMEOUT_MS,
     idleInTransactionSessionTimeoutMs: configuration.POSTGRES_IDLE_IN_TRANSACTION_SESSION_TIMEOUT_MS,
+    connectionTimeoutMs: configuration.POSTGRES_CONNECT_TIMEOUT_MS,
     migrate,
   });
   return buildSession({ stores, signInOffUserId });

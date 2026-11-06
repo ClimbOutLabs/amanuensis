@@ -9,7 +9,7 @@
  * (migrate, Redis, listen) are caught below and exit non-zero. SQLite vs
  * Postgres store modules stay dynamic so only the active engine is loaded.
  */
-import { extractErrorLogFields } from '@truefoundry/trueforge-core/core';
+import { configureOutboundFetches, extractErrorLogFields } from '@truefoundry/trueforge-core/core';
 import type { Context } from 'hono';
 import { mkdir } from 'node:fs/promises';
 import path from 'node:path';
@@ -51,6 +51,21 @@ try {
   );
   process.exit(1);
 }
+
+configureOutboundFetches({
+  model: {
+    connectTimeoutMs: configuration.MODEL_HTTP_CONNECT_TIMEOUT_MS,
+    headersTimeoutMs: configuration.MODEL_HTTP_HEADERS_TIMEOUT_MS,
+    bodyTimeoutMs: configuration.MODEL_HTTP_BODY_TIMEOUT_MS,
+    maxRetries: configuration.MODEL_HTTP_MAX_RETRIES,
+  },
+  mcp: {
+    connectTimeoutMs: configuration.MCP_HTTP_CONNECT_TIMEOUT_MS,
+    headersTimeoutMs: configuration.MCP_HTTP_HEADERS_TIMEOUT_MS,
+    bodyTimeoutMs: configuration.MCP_HTTP_BODY_TIMEOUT_MS,
+    maxRetries: configuration.MCP_HTTP_MAX_RETRIES,
+  },
+});
 
 import { serve } from '@hono/node-server';
 import {
@@ -462,6 +477,7 @@ async function createDistributedPersistence(options: {
     DATABASE_POOL_MAX: databasePoolMax,
     POSTGRES_STATEMENT_TIMEOUT_MS: statementTimeoutMs,
     POSTGRES_IDLE_IN_TRANSACTION_SESSION_TIMEOUT_MS: idleInTransactionSessionTimeoutMs,
+    POSTGRES_CONNECT_TIMEOUT_MS: connectionTimeoutMs,
     REDIS_URL: redisUrl,
     EXECUTOR_ID: executorId,
   } = configuration;
@@ -523,6 +539,13 @@ async function createDistributedPersistence(options: {
     poolMax: databasePoolMax,
     statementTimeoutMs,
     idleInTransactionSessionTimeoutMs,
+    connectionTimeoutMs,
+    onIdleClientError: error => {
+      logger.error(
+        'A Postgres connection in the pool broke; the next query opens a new one',
+        extractErrorLogFields(error),
+      );
+    },
   });
   await migrateToLatest(db);
   logger.info('Distributed mode: postgres');
