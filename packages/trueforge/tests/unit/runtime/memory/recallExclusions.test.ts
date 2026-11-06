@@ -74,9 +74,7 @@ async function recallBlockFor(sessionId: string): Promise<string | null> {
 }
 
 /** The block one turn builds from the given memory client. */
-async function blockFrom(
-  capability: ReturnType<typeof hindsightMemoryCapability>,
-): Promise<string | null> {
+async function blockFrom(capability: ReturnType<typeof hindsightMemoryCapability>): Promise<string | null> {
   const processor = capability.preLLMProcessors?.[0];
   if (processor === undefined) {
     throw new Error('expected a preLLM processor');

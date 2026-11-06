@@ -346,9 +346,7 @@ export const RailHomeDesk: FC<{
               </li>
             ))}
           </ul>
-          {today.needs_ok_more && (
-            <p className="aman-runtime-rail__row-text">More are waiting in your chats.</p>
-          )}
+          {today.needs_ok_more && <p className="aman-runtime-rail__row-text">More are waiting in your chats.</p>}
         </DeskSection>
       )}
     </>

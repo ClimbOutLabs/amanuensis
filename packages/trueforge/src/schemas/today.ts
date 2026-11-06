@@ -64,7 +64,9 @@ export const TodaySchema = z
     needs_ok: z.array(TodayNeedsOkItemSchema).describe('Actions waiting for the person, oldest first.'),
     needs_ok_more: z
       .boolean()
-      .describe('True when more actions are waiting than the list shows: the scan has caps, and it says so when one cuts.'),
+      .describe(
+        'True when more actions are waiting than the list shows: the scan has caps, and it says so when one cuts.',
+      ),
     carrying: z.number().int().nonnegative().describe('How many schedules are switched on for the person.'),
     as_of: z.string().describe('The server time this view was read at, as an ISO 8601 instant.'),
   })

@@ -1583,8 +1583,7 @@ export class HindsightMemoryProcessor implements PreLLMProcessor, PreLLMEphemera
       const exclusions = recallExclusionsFor(this.sessionId);
       if (exclusions.size > 0) {
         items = items.filter(
-          item =>
-            !recallFactExcluded({ exclusions, shownText: sanitizeMemoryLine(withoutNoteTrailer(item.text)) }),
+          item => !recallFactExcluded({ exclusions, shownText: sanitizeMemoryLine(withoutNoteTrailer(item.text)) }),
         );
       }
       entities = gated.entities;
