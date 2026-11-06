@@ -31,6 +31,17 @@ describe('SpeechRateLimiter', () => {
     expect(limiter.acquire('alice').allowed).toBe(false);
   });
 
+  it('lets a voice conversation share the in-flight cap without spending the minute budget', () => {
+    const limiter = new SpeechRateLimiter({ maxPerWindow: 1, maxInFlight: 2 });
+
+    const spoken = [limiter.acquireInFlight('alice'), limiter.acquireInFlight('alice')];
+    expect(spoken.map(permit => permit.allowed)).toEqual([true, true]);
+    // The cap is shared with read-aloud requests, so a conversation cannot starve them, nor they it.
+    expect(limiter.acquire('alice').allowed).toBe(false);
+    spoken.forEach(permit => permit.allowed && permit.release());
+    expect(limiter.acquire('alice').allowed).toBe(true);
+  });
+
   it('keeps each person separate', () => {
     const limiter = new SpeechRateLimiter({ maxPerWindow: 1 });
 

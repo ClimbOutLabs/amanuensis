@@ -8,8 +8,10 @@ import { randomBytes } from 'node:crypto';
 
 const TICKET_TTL_MS = 30_000;
 const MAX_OPEN_TICKETS = 1_000;
+/** A person asking again and again can only crowd out their own tickets, never anyone else's. */
+const MAX_OPEN_TICKETS_PER_PERSON = 5;
 
-export interface VoiceTicket {
+export interface VoiceTicketClaims {
   tenantId: string;
   subjectId: string;
   sessionId: string;
@@ -19,26 +21,39 @@ export interface VoiceTicket {
   voice: string | undefined;
 }
 
+export class VoiceTicketsFullError extends Error {
+  constructor() {
+    super('Too many voice tickets are open');
+  }
+}
+
 export class VoiceTicketStore {
-  readonly #open = new Map<string, { ticket: VoiceTicket; expiresAtMs: number }>();
+  readonly #open = new Map<string, { ticket: VoiceTicketClaims; expiresAtMs: number }>();
   readonly #now: () => number;
 
   constructor({ now = Date.now }: { now?: () => number } = {}) {
     this.#now = now;
   }
 
-  issue(ticket: VoiceTicket): { id: string; expiresInSeconds: number } {
+  /** Throws when the server holds too many tickets already, rather than dropping someone else's. */
+  issue(ticket: VoiceTicketClaims): { id: string; expiresInSeconds: number } {
     const now = this.#now();
     for (const [id, entry] of this.#open) {
       if (entry.expiresAtMs <= now) {
         this.#open.delete(id);
       }
     }
-    if (this.#open.size >= MAX_OPEN_TICKETS) {
-      const oldest = this.#open.keys().next();
-      if (!oldest.done) {
-        this.#open.delete(oldest.value);
+    const mine = [...this.#open].filter(
+      ([, entry]) => entry.ticket.tenantId === ticket.tenantId && entry.ticket.subjectId === ticket.subjectId,
+    );
+    if (mine.length >= MAX_OPEN_TICKETS_PER_PERSON) {
+      const oldest = mine[0];
+      if (oldest !== undefined) {
+        this.#open.delete(oldest[0]);
       }
+    }
+    if (this.#open.size >= MAX_OPEN_TICKETS) {
+      throw new VoiceTicketsFullError();
     }
     const id = randomBytes(24).toString('base64url');
     this.#open.set(id, { ticket, expiresAtMs: now + TICKET_TTL_MS });
@@ -46,7 +61,7 @@ export class VoiceTicketStore {
   }
 
   /** Single use: a ticket that was redeemed, or has expired, or never existed, gives nothing. */
-  redeem(id: string): VoiceTicket | undefined {
+  redeem(id: string): VoiceTicketClaims | undefined {
     const entry = this.#open.get(id);
     this.#open.delete(id);
     return entry !== undefined && entry.expiresAtMs > this.#now() ? entry.ticket : undefined;

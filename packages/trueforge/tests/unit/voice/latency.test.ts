@@ -38,14 +38,15 @@ describe('the latency harness on a virtual clock', () => {
       recording: recording(),
       driver,
     });
-    // The closing silence is 600 ms, heard one 32 ms window late. The virtual clock moves in 32 ms windows, so the
-    // 120, 80 and 60 ms of work are each seen at the next window: 128, 96 and 64.
+    // The closing silence is 600 ms, heard 20 windows (640 ms) after speech ended, as the window is judged on the
+    // next tick. The virtual clock moves in 32 ms windows, so the 120, 80 and 60 ms of work are each seen at the
+    // next window: 128, 96 and 64.
     expect(latency).toEqual({
-      endpointing_ms: 608,
+      endpointing_ms: 640,
       speech_to_text_ms: 128,
       reply_first_sentence_ms: 96,
       voice_first_audio_ms: 64,
-      total_ms: 896,
+      total_ms: 928,
     });
   });
 

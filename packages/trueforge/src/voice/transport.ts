@@ -4,9 +4,8 @@
  * listening, turns, speaking, interrupting and approvals.
  */
 import type { Tier3Card } from '@truefoundry/trueforge-core/core';
+import type { VoiceServerEvent } from '../schemas/voice';
 import type { InputFormat, OutputFormat } from './audio';
-
-export type VoiceState = 'listening' | 'thinking' | 'speaking';
 
 /** An answer waiting on the person: the same card the chat shows, found on the finished turn. */
 export interface PendingApproval {
@@ -16,14 +15,9 @@ export interface PendingApproval {
   tier: 1 | 2 | 3 | undefined;
 }
 
-export type VoiceEvent =
-  | { type: 'state'; state: VoiceState }
-  /** What the engine heard the person say; the chat itself holds the saved turn. */
-  | { type: 'heard'; text: string }
-  /** A turn was saved in the chat, so the screen can refresh it. */
-  | { type: 'turn_saved'; turn_id: string }
-  /** A plain-words message for the person that is not part of the conversation. */
-  | { type: 'notice'; text: string };
+/** What the engine tells the person's screen while it works; the wire shape is the shared schema. */
+export type VoiceEvent = Exclude<VoiceServerEvent, { type: 'ready' | 'clear' }>;
+export type VoiceState = Extract<VoiceEvent, { type: 'state' }>['state'];
 
 export interface VoiceTransport {
   /** What `sendAudio` receives and what the line plays; the engine asks the voice for exactly this. */

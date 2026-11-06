@@ -158,9 +158,13 @@ export const connectVoiceRoute = createRoute({
       content: { 'application/json': { schema: RequestErrorResponseSchema } },
       description: 'The chat was not found.',
     },
+    429: {
+      content: { 'application/json': { schema: RequestErrorResponseSchema } },
+      description: 'Too many requests; wait for the Retry-After seconds.',
+    },
     503: {
       content: { 'application/json': { schema: RequestErrorResponseSchema } },
-      description: 'Voice mode is off, or speech to text or the listening model is not ready.',
+      description: 'Voice mode is off, or speech to text, the voice or the listening model is not ready.',
     },
   },
 });

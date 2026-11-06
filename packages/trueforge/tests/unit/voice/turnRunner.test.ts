@@ -92,7 +92,14 @@ describe('HttpVoiceTurnRunner', () => {
       onText: () => undefined,
     });
     expect(body).toEqual({
-      input: [{ type: 'user.tool_approval', thread_id: 'main', tool_call_id: 'call-7', approval: { status: 'allow' } }],
+      input: [
+        {
+          type: 'user.tool_approval',
+          thread_id: 'main',
+          tool_call_id: 'call-7',
+          approval: { status: 'allow', scope: 'once' },
+        },
+      ],
       stream: true,
       client_timezone: 'Europe/Paris',
     });
@@ -125,12 +132,38 @@ describe('HttpVoiceTurnRunner', () => {
     expect(await busy.sendMessage({ text: 'x', signal: never, onText: () => undefined })).toEqual({ kind: 'failed' });
   });
 
-  it('cancels through the chat cancel route', async () => {
+  it('cancels through the chat cancel route only while a turn it started is running', async () => {
     const seen: string[] = [];
-    await runnerFor(path => {
-      seen.push(path);
-      return Promise.resolve(Response.json({}));
-    }).cancel();
+    let open: ReadableStreamDefaultController<Uint8Array> | undefined;
+    const encoder = new TextEncoder();
+    const runner = runnerFor(path => {
+      if (path.endsWith('/cancel')) {
+        seen.push(path);
+        return Promise.resolve(Response.json({}));
+      }
+      return Promise.resolve(
+        new Response(
+          new ReadableStream<Uint8Array>({
+            start(controller) {
+              open = controller;
+              controller.enqueue(encoder.encode(`id: 1\ndata: ${JSON.stringify(created)}\n\n`));
+            },
+          }),
+          { headers: { 'content-type': 'text/event-stream' } },
+        ),
+      );
+    });
+    await runner.cancel();
+    expect(seen).toEqual([]);
+
+    const sending = runner.sendMessage({ text: 'x', signal: never, onText: () => undefined });
+    await new Promise(resolve => setTimeout(resolve, 20));
+    await runner.cancel();
     expect(seen).toEqual(['/api/v1/sessions/chat%201/cancel']);
+
+    open?.enqueue(encoder.encode(`id: 2\ndata: ${JSON.stringify(done([]))}\n\n`));
+    await sending;
+    await runner.cancel();
+    expect(seen).toHaveLength(1);
   });
 });

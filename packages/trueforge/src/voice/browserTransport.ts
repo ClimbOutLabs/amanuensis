@@ -5,6 +5,8 @@
  */
 import type { RawData, WebSocket } from 'ws';
 
+import { VoiceClientMessageSchema, type VoiceServerEvent } from '../schemas/voice';
+import { OUTPUT_SAMPLE_RATE } from './audio';
 import type { VoiceEvent, VoiceTransport } from './transport';
 
 /** Sub-protocol name that the browser asks for and the server answers with. */
@@ -25,7 +27,7 @@ export class BrowserVoiceTransport implements VoiceTransport {
 
   /** Tells the browser what rate the audio it receives is at. */
   open(): void {
-    this.#sendJson({ type: 'ready', sample_rate: 24_000 });
+    this.#sendJson({ type: 'ready', sample_rate: OUTPUT_SAMPLE_RATE.pcm16 });
   }
 
   sendAudio(chunk: Uint8Array): void {
@@ -48,7 +50,7 @@ export class BrowserVoiceTransport implements VoiceTransport {
     }
   }
 
-  #sendJson(message: object): void {
+  #sendJson(message: VoiceServerEvent): void {
     if (this.#socket.readyState === this.#socket.OPEN) {
       this.#socket.send(JSON.stringify(message));
     }
@@ -74,9 +76,9 @@ export function readClientFrame({
     return { kind: 'audio', bytes: new Uint8Array(joined(data)) };
   }
   try {
-    const message: unknown = JSON.parse(joined(data).toString());
-    const type = typeof message === 'object' && message !== null && 'type' in message ? message.type : undefined;
-    return type === 'end' ? { kind: 'end' } : { kind: 'ignore' };
+    return VoiceClientMessageSchema.safeParse(JSON.parse(joined(data).toString())).success
+      ? { kind: 'end' }
+      : { kind: 'ignore' };
   } catch {
     return { kind: 'ignore' };
   }

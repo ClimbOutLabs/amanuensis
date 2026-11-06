@@ -30,7 +30,7 @@ describe('audio helpers', () => {
   });
 
   it('turns 8 kHz phone audio into twice as many 16 kHz samples', () => {
-    const decoder = new InputDecoder('mulaw_8k');
+    const decoder = new InputDecoder('mulaw8k');
     expect(decoder.push(mulawBytes(new Int16Array(160))).length).toBe(320);
   });
 
@@ -85,7 +85,7 @@ describe('a phone line as the transport', () => {
     const transport = new FakeTransport({
       clock,
       voiceApprovals: false,
-      inputFormat: 'mulaw_8k',
+      inputFormat: 'mulaw8k',
       outputFormat: 'mulaw8k',
     });
     const turns = new FakeTurns({ message: [{ text: ['Hello caller.'] }] });

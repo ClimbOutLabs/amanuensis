@@ -528,6 +528,55 @@ class StreamingTest(unittest.TestCase):
         self.assertLess(len(made), 1000)
 
 
+class StreamFailureTest(unittest.TestCase):
+    def test_a_failure_after_the_first_sentence_ends_the_response_as_an_error_not_a_clean_end(self):
+        class FailsSecond(FakeSynthesizer):
+            def speak_sentences(self, text, voice, cancelled):
+                yield np.zeros(2400, dtype=np.float32)
+                raise RuntimeError("model failed")
+
+        app = create_app(Settings(), synthesizer_factory=FailsSecond)
+
+        async def go():
+            async with app.router.lifespan_context(app):
+                scope, receive, send, sent, _ = asgi_post(app, {"text": "A. B.", "format": "pcm16", "stream": True})
+                with self.assertRaises(RuntimeError):
+                    await app(scope, receive, send)
+                return sent
+
+        sent = asyncio.run(go())
+        self.assertFalse(any(m["type"] == "http.response.body" and not m.get("more_body", False) for m in sent))
+
+    def test_a_caller_whose_connection_breaks_before_the_first_chunk_stops_the_work(self):
+        stopped = threading.Event()
+
+        class Endless(FakeSynthesizer):
+            def speak_sentences(self, text, voice, cancelled):
+                for _ in range(1000):
+                    if cancelled():
+                        stopped.set()
+                        raise aman_tts.SpeechCancelled()
+                    yield np.zeros(2400, dtype=np.float32)
+                    threading.Event().wait(0.01)
+
+        app = create_app(Settings(), synthesizer_factory=Endless)
+
+        async def go():
+            async with app.router.lifespan_context(app):
+                scope, receive, _, _, _ = asgi_post(app, {"text": "Go.", "format": "pcm16", "stream": True})
+
+                async def broken_send(message):
+                    if message["type"] == "http.response.body":
+                        raise OSError("connection reset")
+
+                with contextlib.suppress(Exception):
+                    await app(scope, receive, broken_send)
+                await asyncio.to_thread(stopped.wait, 5)
+
+        asyncio.run(go())
+        self.assertTrue(stopped.is_set())
+
+
 class CancelTest(unittest.TestCase):
     def test_reading_stops_between_pieces_once_the_caller_hangs_up(self):
         pieces: list[int] = []
