@@ -49,10 +49,11 @@ class FakeTts {
       req.on('end', () => {
         const raw = Buffer.concat(chunks).toString('utf8');
         const body: unknown = raw === '' ? undefined : JSON.parse(raw);
+        const speechSecretHeader = req.headers['x-speech-secret'];
         this.calls.push({
           path: req.url ?? '',
           contentType: req.headers['content-type'],
-          speechSecret: req.headers['x-speech-secret'],
+          speechSecret: typeof speechSecretHeader === 'string' ? speechSecretHeader : undefined,
           body,
         });
         this.reply(res);

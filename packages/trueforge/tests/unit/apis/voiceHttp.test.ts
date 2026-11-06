@@ -58,7 +58,14 @@ describe('voice HTTP endpoints', () => {
   function appWith(speechLimiter?: SpeechRateLimiter): OpenAPIHono {
     const app = new OpenAPIHono();
     app.use('*', createAuthMiddleware(alwaysAuthenticator));
-    app.route('/', createVoiceRouter({ logger, resolveRequestContext, speechLimiter }));
+    app.route(
+      '/',
+      createVoiceRouter({
+        logger,
+        resolveRequestContext,
+        ...(speechLimiter === undefined ? {} : { speechLimiter }),
+      }),
+    );
     return app;
   }
 
