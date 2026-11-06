@@ -14,6 +14,7 @@ import type { Logger } from 'winston';
 
 import type { ResolveRequestContext } from '../auth/identity';
 import configuration from '../config';
+import { inProcessFetch } from '../http/tls';
 import { connectVoiceRoute, getVoiceStatusRoute, speakVoiceRoute, transcribeVoiceRoute } from '../routes/voiceRoutes';
 import {
   MAX_SPEAK_TEXT_CHARS,
@@ -27,14 +28,14 @@ import { isVoiceAvailable, probeSttHealth } from '../voice/sttAvailability';
 import { forwardToSidecar } from '../voice/sttClient';
 import { probeTtsHealth, ttsBaseUrl } from '../voice/ttsClient';
 import { VadModelUnavailableError } from '../voice/vad/sileroVad';
-import { FORWARDED_HEADERS, readyVadModel, requestAs, type SelfFetch } from '../voice/voiceSocket';
+import { FORWARDED_HEADERS, readyVadModel, requestAs, type VoiceApp } from '../voice/voiceSocket';
 import { VoiceTicketsFullError, voiceTickets } from '../voice/voiceTickets';
 
 export interface VoiceRouterDeps {
   logger: Logger;
   resolveRequestContext: ResolveRequestContext;
-  /** Runs a request against this server's own app; voice mode uses it to check the chat is the person's. */
-  selfFetch: SelfFetch;
+  /** This server's own app; voice mode calls it to check the chat is the person's. */
+  app: VoiceApp;
   /** Defaults to a fresh per-process limiter; tests inject one with a small budget. */
   speechLimiter?: SpeechRateLimiter;
   /** How often one person may ask to open a voice line. */
@@ -356,7 +357,7 @@ export function createVoiceRouter(deps: VoiceRouterDeps) {
       voice: request.voice,
     };
     // The chat's own route says whether this person may use it, so there is one rule for that.
-    const owned = await requestAs({ ticket, selfFetch: deps.selfFetch })(
+    const owned = await requestAs({ ticket, selfFetch: inProcessFetch(deps.app) })(
       `/api/v1/sessions/${encodeURIComponent(request.session_id)}`,
       { method: 'GET' },
     );

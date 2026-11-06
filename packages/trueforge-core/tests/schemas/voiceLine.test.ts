@@ -8,6 +8,7 @@ describe('the voice line messages', () => {
     { type: 'heard', text: 'hello' },
     { type: 'turn_saved', turn_id: 't1' },
     { type: 'notice', text: 'Voice mode ended.' },
+    { type: 'tts_failed' },
   ])('accepts the server message %j', message => {
     expect(VoiceServerEventSchema.safeParse(message).success).toBe(true);
   });

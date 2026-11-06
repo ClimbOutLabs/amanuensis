@@ -103,6 +103,9 @@ class Player {
 }
 
 const CHECK_CONNECTION = 'Check your connection, then tap voice mode again.';
+/** Shown when the server could not turn a reply into sound; the reply itself is already in the chat. */
+const SPEECH_FAILED_NOTICE =
+  'I could not say that out loud. The reply is in the chat. If this keeps happening, turn voice mode off and on again.';
 
 function opened(socket: WebSocket): Promise<void> {
   return new Promise((resolve, reject) => {
@@ -190,6 +193,9 @@ export async function startLiveVoice({
         break;
       case 'notice':
         events.onNotice(event.text);
+        break;
+      case 'tts_failed':
+        events.onNotice(SPEECH_FAILED_NOTICE);
         break;
       case 'ready':
         player.setRate(event.sample_rate);

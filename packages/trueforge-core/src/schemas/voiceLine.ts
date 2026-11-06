@@ -15,6 +15,8 @@ export const VoiceServerEventSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('heard'), text: z.string() }),
   z.object({ type: z.literal('turn_saved'), turn_id: z.string() }),
   z.object({ type: z.literal('notice'), text: z.string() }),
+  /** A reply could not be turned into sound, so the line went quiet. The reply is still in the chat. */
+  z.object({ type: z.literal('tts_failed') }),
 ]);
 export type VoiceServerEvent = z.infer<typeof VoiceServerEventSchema>;
 

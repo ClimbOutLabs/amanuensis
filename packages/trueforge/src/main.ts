@@ -1239,7 +1239,7 @@ try {
   );
 
   // Voice mode's WebSocket: the upgrade is handled here because the app's own router cannot take one.
-  attachVoiceSocket({ server, selfFetch: request => app.fetch(request), logger });
+  attachVoiceSocket({ server, app, logger, requireClientCertificate: tlsServe !== undefined });
 
   server.on('error', (error: unknown) => {
     console.error('Failed to start server:', error instanceof Error ? error.message : error);

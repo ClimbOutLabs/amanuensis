@@ -103,6 +103,26 @@ describe('a spoken turn', () => {
     expect(t.transport.states()).toEqual(['listening', 'thinking', 'speaking']);
   });
 
+  it('tells the line once that a reply could not be spoken, so a caller can act on a line with no audio', async () => {
+    const t = setup({
+      stt: ['what is on my calendar'],
+      message: [{ text: ['You have two meetings. ', 'The first is at nine.'] }],
+      speechFailsOn: () => true,
+    });
+    await feed({ session: t.session, clock: t.clock, samples: says() });
+    await t.session.settled();
+    expect(t.transport.audio).toEqual([]);
+    expect(t.transport.events.filter(event => event.type === 'tts_failed')).toEqual([{ type: 'tts_failed' }]);
+    expect(t.notes).toContain('tts_failed:Error');
+  });
+
+  it('does not report a failure when the reply was spoken', async () => {
+    const t = setup({ stt: ['hello'], message: [{ text: ['Hi there.'] }] });
+    await feed({ session: t.session, clock: t.clock, samples: says() });
+    await t.session.settled();
+    expect(t.transport.events.some(event => event.type === 'tts_failed')).toBe(false);
+  });
+
   it('is silent and sends nothing when nothing was understood', async () => {
     const t = setup({ stt: [''] });
     await feed({ session: t.session, clock: t.clock, samples: says() });

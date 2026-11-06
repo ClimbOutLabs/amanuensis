@@ -80,9 +80,11 @@ describe('the voice WebSocket', () => {
       server,
       pages: new Set([PAGE]),
       logger: winstonSilent(),
-      selfFetch: request => {
-        sentToApp.push(request.url);
-        return new Response('{}');
+      app: {
+        fetch: request => {
+          sentToApp.push(request.url);
+          return new Response('{}');
+        },
       },
       maxSessions,
       makeParts: async () => {
@@ -183,7 +185,7 @@ describe('the voice WebSocket', () => {
       server: full,
       pages: new Set([PAGE]),
       logger: winstonSilent(),
-      selfFetch: () => new Response('{}'),
+      app: { fetch: () => new Response('{}') },
       maxSessions: 1,
       makeParts: () =>
         Promise.resolve({ vad: new LoudnessVad(), stt: new FakeStt(), tts: new FakeTts(), turns: new FakeTurns() }),
@@ -228,7 +230,7 @@ describe('the voice WebSocket', () => {
       pages: new Set([PAGE]),
       server: logServer,
       logger,
-      selfFetch: () => new Response('{}'),
+      app: { fetch: () => new Response('{}') },
       makeParts: () =>
         Promise.resolve({
           vad: new LoudnessVad(),

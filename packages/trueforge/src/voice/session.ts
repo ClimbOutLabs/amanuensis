@@ -697,6 +697,7 @@ export class VoiceSession {
   }
 
   #speechFor({ signal, marks }: { signal: AbortSignal; marks: Marks }): SpeechOutput {
+    let reported = false;
     return new SpeechOutput({
       tts: this.#deps.tts,
       format: this.#deps.transport.outputFormat,
@@ -713,10 +714,11 @@ export class VoiceSession {
       },
       onFailure: error => {
         this.#deps.onNote?.(`tts_failed:${error instanceof Error ? error.name : 'unknown'}`);
-        this.#deps.transport.sendEvent({
-          type: 'notice',
-          text: 'I could not speak that. Check that the voice is running. The reply is in the chat.',
-        });
+        // Once per reply: a dead voice fails every sentence, and one signal is enough to act on.
+        if (!reported) {
+          reported = true;
+          this.#deps.transport.sendEvent({ type: 'tts_failed' });
+        }
       },
     });
   }

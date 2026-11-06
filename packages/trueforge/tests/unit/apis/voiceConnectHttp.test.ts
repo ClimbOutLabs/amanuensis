@@ -56,9 +56,11 @@ describe('POST /connect', () => {
         logger,
         resolveRequestContext,
         connectLimiter,
-        selfFetch: request => {
-          asked.push({ url: request.url, cookie: request.headers.get('cookie') });
-          return new Response('{}', { status: chatStatus });
+        app: {
+          fetch: request => {
+            asked.push({ url: request.url, cookie: request.headers.get('cookie') });
+            return new Response('{}', { status: chatStatus });
+          },
         },
       }),
     );
