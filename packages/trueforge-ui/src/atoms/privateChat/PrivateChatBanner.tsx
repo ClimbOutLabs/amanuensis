@@ -12,7 +12,9 @@ import { useOptionalServer } from '../../server/ServerContext.js';
 import { useOptionalShellMode } from '../../server/ShellModeContext.js';
 import { auiButtonClass } from '../lib/buttonClasses.js';
 import { cn } from '../lib/cn.js';
-import { PRIVATE_CHAT_CHOICE_LINE, privateChatBannerLine } from './privateChatCopy.js';
+import { Button } from '../primitives/Button.js';
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '../primitives/Dialog.js';
+import { PRIVATE_CHAT_CHOICE_LINE, PRIVATE_CHAT_DELETE_WARNING, privateChatBannerLine } from './privateChatCopy.js';
 import { usePrivateChatFrame } from './usePrivateChatFrame.js';
 
 const CLOSE_FAILED_MESSAGE = 'This chat was not deleted. Check your connection, then press Close and delete again.';
@@ -53,6 +55,7 @@ export function PrivateChatBanner() {
   const isOpenPrivateChat = sessionId !== undefined && framed;
   const privacy = useChatPrivacy(isOpenPrivateChat ? sessionId : undefined);
   const [closing, setClosing] = useState(false);
+  const [confirming, setConfirming] = useState(false);
 
   if (sessionId === undefined && framed) {
     return (
@@ -79,6 +82,7 @@ export function PrivateChatBanner() {
       toaster?.showError(new Error(CLOSE_FAILED_MESSAGE));
     } finally {
       setClosing(false);
+      setConfirming(false);
     }
   };
 
@@ -88,16 +92,38 @@ export function PrivateChatBanner() {
       <span className="min-w-0 flex-1">{privateChatBannerLine(privacy)}</span>
       <button
         type="button"
-        disabled={closing}
         className={cn(
           auiButtonClass({ variant: 'ghost', size: 'small' }),
           'h-7 gap-1 rounded-full border border-text-primary px-2.5 text-sm font-normal',
         )}
-        onClick={() => void closeAndDelete()}
+        onClick={() => setConfirming(true)}
       >
         <Icon name="trash" className="size-3.5 shrink-0" />
-        {closing ? 'Deleting' : 'Close and delete'}
+        Close and delete
       </button>
+      <Dialog
+        open={confirming}
+        onOpenChange={next => {
+          if (!closing) setConfirming(next);
+        }}
+        aria-label="Close and delete this chat"
+        className="max-w-md"
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Close and delete this chat?</DialogTitle>
+            <p className="text-text-secondary text-sm">{PRIVATE_CHAT_DELETE_WARNING}</p>
+          </DialogHeader>
+        </DialogContent>
+        <DialogFooter>
+          <Button.Secondary type="button" disabled={closing} onClick={() => setConfirming(false)}>
+            Keep
+          </Button.Secondary>
+          <Button.Destructive type="button" disabled={closing} onClick={() => void closeAndDelete()}>
+            {closing ? 'Deleting' : 'Delete for good'}
+          </Button.Destructive>
+        </DialogFooter>
+      </Dialog>
     </div>
   );
 }

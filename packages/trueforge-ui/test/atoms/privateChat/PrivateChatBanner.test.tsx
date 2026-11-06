@@ -4,7 +4,11 @@ import { act } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { PrivateChatBanner } from '@/atoms/privateChat/PrivateChatBanner.js';
-import { PRIVATE_CHAT_CHOICE_LINE } from '@/atoms/privateChat/privateChatCopy.js';
+import {
+  PRIVATE_CHAT_CHOICE_LINE,
+  PRIVATE_CHAT_DELETE_WARNING,
+  PRIVATE_CHAT_HOVER_LINE,
+} from '@/atoms/privateChat/privateChatCopy.js';
 import { PrivateChatToggle } from '@/atoms/privateChat/PrivateChatToggle.js';
 import {
   adoptPrivateChat,
@@ -24,14 +28,14 @@ afterEach(() => {
 });
 
 describe('PrivateChatToggle and PrivateChatBanner', () => {
-  it('offers Private on a new chat and says what it means once chosen', () => {
+  it('offers Incognito on a new chat and says what it means once chosen', () => {
     render(
       <RuntimeHarness messages={[]}>
         <PrivateChatBanner />
         <PrivateChatToggle />
       </RuntimeHarness>,
     );
-    const toggle = screen.getByRole('button', { name: 'Private chat' });
+    const toggle = screen.getByRole('button', { name: 'Incognito chat' });
     expect(toggle).toHaveAttribute('aria-pressed', 'false');
     expect(screen.queryByText(PRIVATE_CHAT_CHOICE_LINE)).not.toBeInTheDocument();
 
@@ -49,7 +53,7 @@ describe('PrivateChatToggle and PrivateChatBanner', () => {
         <PrivateChatBanner />
       </RuntimeHarness>,
     );
-    expect(screen.queryByRole('button', { name: 'Private chat' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Incognito chat' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Close and delete' })).not.toBeInTheDocument();
   });
 
@@ -76,5 +80,39 @@ describe('PrivateChatToggle and PrivateChatBanner', () => {
     ).toBeInTheDocument();
     expect(getChatPrivacy).toHaveBeenCalledWith({ sessionId: 'ses_private' });
     expect(screen.getByRole('button', { name: 'Close and delete' })).toBeInTheDocument();
+  });
+
+  it('warns that everything is gone for good before it deletes, and Keep leaves the chat open', async () => {
+    const server = {
+      ...createMockAgentUIServer(),
+      getChatPrivacy: vi.fn(async () => ({ leavesMachine: false, hostedProviders: [] })),
+    };
+    act(() => adoptPrivateChat('ses_private'));
+    render(
+      <ServerProvider server={server}>
+        <RuntimeHarness messages={[]} threadId="t1" remoteId="ses_private">
+          <PrivateChatBanner />
+        </RuntimeHarness>
+      </ServerProvider>,
+    );
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Close and delete' }));
+    const warning = (await screen.findByText(PRIVATE_CHAT_DELETE_WARNING)).closest('dialog');
+    expect(warning).toHaveAttribute('open');
+    expect(screen.getByRole('button', { name: 'Delete for good' })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Keep' }));
+    expect(warning).not.toHaveAttribute('open');
+    expect(readPrivateChatState().openSessionId).toBe('ses_private');
+  });
+
+  it('says what the Incognito chat button does on hover', async () => {
+    render(
+      <RuntimeHarness messages={[]}>
+        <PrivateChatToggle />
+      </RuntimeHarness>,
+    );
+    fireEvent.mouseEnter(screen.getByRole('button', { name: 'Incognito chat' }));
+    expect(await screen.findByRole('tooltip')).toHaveTextContent(PRIVATE_CHAT_HOVER_LINE);
   });
 });

@@ -82,23 +82,23 @@ describe('draft composer sections', () => {
     setPendingPrivateChat(false);
   });
 
-  it('offers Private chat on a new chat, and pressing it chooses Private for that chat', () => {
+  it('offers Incognito chat on a new chat, and pressing it chooses Incognito for that chat', () => {
     render(<DraftSections />);
 
-    const choice = screen.getByRole('button', { name: 'Private chat' });
+    const choice = screen.getByRole('button', { name: 'Incognito chat' });
     expect(choice).toHaveAttribute('aria-pressed', 'false');
     fireEvent.click(choice);
     expect(choice).toHaveAttribute('aria-pressed', 'true');
     expect(readPrivateChatState().pending).toBe(true);
   });
 
-  it('does not offer Private chat once the chat has started', () => {
+  it('does not offer Incognito chat once the chat has started', () => {
     render(<DraftSections remoteId="ses_started" />);
 
-    expect(screen.queryByRole('button', { name: 'Private chat' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Incognito chat' })).not.toBeInTheDocument();
   });
 
-  it('leaves Private chat out of the builder composer', () => {
+  it('leaves Incognito chat out of the builder composer', () => {
     render(
       <ShellModeProvider agentConfig={{ mode: 'AgentComposer' }}>
         <BuilderMode>
@@ -107,7 +107,7 @@ describe('draft composer sections', () => {
       </ShellModeProvider>,
     );
 
-    expect(screen.queryByRole('button', { name: 'Private chat' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Incognito chat' })).not.toBeInTheDocument();
   });
 
   it('puts attaching and add-ons in one plus menu, with no standalone attach or add-ons control', async () => {

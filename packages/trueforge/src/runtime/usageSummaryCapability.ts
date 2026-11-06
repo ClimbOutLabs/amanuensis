@@ -222,7 +222,7 @@ function renderUsageSummaryText(summary: UsageSummary): string {
 }
 
 const USAGE_SUMMARY_DESCRIPTION =
-  "Read the signed-in person's own usage: tokens in and out, cost where priced, by model and by day, the top chats by cost (titles only; deleted and private chats count but are never named), and the shared daily Token Factory cap left. The cap covers the whole instance. Periods: today, this_week, this_month (default) or date_range. Unpriced tokens are counted apart; a cost is not shown when any of its tokens have no known price. Say so; never guess a price. Answer in a few plain sentences; a small bar chart fits several days or models.";
+  "Read the signed-in person's own usage: tokens in and out, cost where priced, by model and by day, the top chats by cost (titles only; deleted and incognito chats count but are never named), and the shared daily Token Factory cap left. The cap covers the whole instance. Periods: today, this_week, this_month (default) or date_range. Unpriced tokens are counted apart; a cost is not shown when any of its tokens have no known price. Say so; never guess a price. Answer in a few plain sentences; a small bar chart fits several days or models.";
 
 export interface UsageSummaryTurnContext {
   sessionStore: UsageSessionReader;

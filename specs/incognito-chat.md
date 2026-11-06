@@ -1,4 +1,4 @@
-# Spec: Private chats
+# Spec: Incognito chats
 
 **Status:** approved
 
@@ -8,19 +8,19 @@ Every chat teaches Aman something. Memory retain runs after each turn, profile l
 
 ## Solution
 
-A private chat: a chat you start on purpose that Aman does not remember. When it closes it is gone. The server enforces every guarantee below from a flag on the session row; nothing depends on the model behaving.
+An incognito chat: a chat you start on purpose that Aman does not remember. When it closes it is gone. The server enforces every guarantee below from a flag on the session row; nothing depends on the model behaving.
 
 Two rules do not bend:
 
-1. **Read yes, write no.** A private chat may recall the vault but never writes to it, in any persona.
+1. **Read yes, write no.** An incognito chat may recall the vault but never writes to it, in any persona.
 2. **Actions still leave a receipt.** Approval tiers, held actions, approval tokens and the action audit work exactly as in a normal chat, and the receipts outlive the chat.
 
 ## 1. Data model
 
-- `session.is_incognito`: boolean, not null, default false. Set only when the chat is created. The update path refuses to change it with: "A chat is private from the start or not at all. Start a new private chat instead."
+- `session.is_incognito`: boolean, not null, default false. Set only when the chat is created. The update path refuses to change it with: "A chat is incognito from the start or not at all. Start a new incognito chat instead."
 - `session.private_expires_at`: the last turn time plus 24 hours, renewed on every completed turn. The chat is deleted at close or at expiry, whichever comes first.
 - Migrations for both backends. Both fields are carried on the create request and the session DTO.
-- Export skips private chats. An older export without the fields imports unchanged, through an import upgrade step with an older-format fixture.
+- Export skips incognito chats. An older export without the fields imports unchanged, through an import upgrade step with an older-format fixture.
 
 ## 2. One gate
 
@@ -31,17 +31,17 @@ One function, `sessionKeepsNothing({ session })`, is called by every writer:
 - profile learning
 - past-chat search indexing
 - brief items and the Home feed
-- bug reports, which leave a private chat out
+- bug reports, which leave an incognito chat out
 
-`GET /api/v1/sessions` leaves private chats out unless `include_private=true`, and only the person who started a private chat can see it. The client keeps the one open private chat's id in memory, never in browser storage, and asks for it by name. Spaces in this app are the pages Aman keeps, so the chat-side grouping is folders: moving a private chat into a folder is refused with "Private chats cannot be added to a folder. Start a normal chat to keep it in one." Session metrics keep per-model token counts.
+`GET /api/v1/sessions` leaves incognito chats out unless `include_private=true`, and only the person who started an incognito chat can see it. The client keeps the one open incognito chat's id in memory, never in browser storage, and asks for it by name. Spaces in this app are the pages Aman keeps, so the chat-side grouping is folders: moving an incognito chat into a folder is refused with "Incognito chats cannot be added to a folder. Start a normal chat to keep it in one." Session metrics keep per-model token counts.
 
 ## 3. Deletion
 
 - **Close and delete** deletes the chat for real, not with a flag: the session, turns, thread context, session events, chat images, turn artifacts and any blob no other chat uses, in one transaction. Its sandbox files go with it.
 - The per-model token counts of a deleted chat are kept, with no words and no chat id, so the usage summary stays right.
-- An expiry sweep runs on the controller loop, the same shape as the schedule dispatch, and once at boot. It deletes only private chats past their expiry.
+- An expiry sweep runs on the controller loop, the same shape as the schedule dispatch, and once at boot. It deletes only incognito chats past their expiry.
 - On SQLite, deleted pages are overwritten and the write-ahead log is emptied after a delete, so the words cannot be read back from the file.
-- The nightly backup removes private chats from its copy of the database, so a chat open at backup time is not kept.
+- The nightly backup removes incognito chats from its copy of the database, so a chat open at backup time is not kept.
 
 ## 4. Kept by design
 
@@ -60,27 +60,27 @@ A model counts as local only when its address is this machine (loopback, `localh
 
 ## 6. UI
 
-- **New chat:** a "Private chat" choice on the new chat's composer, before the first message, with the line "Aman forgets this chat when it closes. It can still read what it already knows."
-- **Open private chat:** an ink frame instead of the accent frame, the banner above the composer, the Close and delete control, and no status line for the assistant. Existing theme tokens and `rem` only.
-- **Chat list:** a small "Private" label while the chat is open in that tab. It is never in search or recents.
-- **Personas:** a private chat with a persona reads that persona's vault, writes nothing, and shows the same banner.
+- **New chat:** an "Incognito chat" choice on the new chat's composer, before the first message, with the line "Aman forgets this chat when it closes. It can still read what it already knows." Its hover text reads "Start a chat Aman forgets. Nothing from it is saved, and it is deleted when you close it."
+- **Open incognito chat:** an ink frame instead of the accent frame, the banner above the composer, the Close and delete control (it asks once first: "Everything in this chat is deleted for good: every message, picture and file. It cannot be brought back."), and no status line for the assistant. Existing theme tokens and `rem` only.
+- **Chat list:** a small "Incognito" label while the chat is open in that tab. It is never in search or recents.
+- **Personas:** an incognito chat with a persona reads that persona's vault, writes nothing, and shows the same banner.
 
 ## Privacy
 
-A private chat narrows what Aman keeps: no vault write, no learned-profile write, no past-chat search, no brief or Home item, no history after it closes, no files. It does not narrow what leaves the machine: model, search and connector traffic is unchanged, and the banner says so. Only the receipts of actions and per-model token counts outlive the chat.
+An incognito chat narrows what Aman keeps: no vault write, no learned-profile write, no past-chat search, no brief or Home item, no history after it closes, no files. It does not narrow what leaves the machine: model, search and connector traffic is unchanged, and the banner says so. Only the receipts of actions and per-model token counts outlive the chat.
 
 ## Testing
 
 All tests use synthetic data, never anyone's real memory or mail.
 
 - Schema and migration tests on both backends.
-- A pair test: a private turn produces no retain, daily note, embedding, brief item or Home item, and a normal turn produces all of them.
-- The receipts of a private chat's actions (approval tokens and the action audit) survive its deletion. Held actions exist only in unattended runs, which a private chat never is.
+- A pair test: an incognito turn produces no retain, daily note, embedding, brief item or Home item, and a normal turn produces all of them.
+- The receipts of an incognito chat's actions (approval tokens and the action audit) survive its deletion. Held actions exist only in unattended runs, which an incognito chat never is.
 - Delete removes every listed row and blob, on both backends.
-- The sweep deletes only past-expiry private chats.
-- Export omits private chats, and an older export imports with the default.
+- The sweep deletes only past-expiry incognito chats.
+- Export omits incognito chats, and an older export imports with the default.
 - Update refuses the flip with the exact message.
-- An end-to-end run over the HTTP surface: an approved action in a private chat, then Close and delete leaves only the receipts.
+- An end-to-end run over the HTTP surface: an approved action in an incognito chat, then Close and delete leaves only the receipts.
 
 ## Out of scope
 

@@ -17,7 +17,7 @@ export type ThreadListRowProps = {
   lastMessageAt?: Date;
   /** Something new came in that the person has not opened yet. */
   unread?: boolean;
-  /** The private chat open in this tab; it leaves the list when it closes. */
+  /** The incognito chat open in this tab; it leaves the list when it closes. */
   isPrivate?: boolean;
   /** Overflow actions (e.g. delete menu) — rendered as a sibling of the title button. */
   actions?: ReactNode;
@@ -80,7 +80,7 @@ export function ThreadListRow({
                 data-slot="aui_thread-list-item-private"
                 className="border-text-primary text-text-primary shrink-0 rounded-full border px-1.5 text-xs leading-4"
               >
-                Private
+                Incognito
               </span>
             ) : null}
             {unread === true ? (

@@ -164,7 +164,7 @@ Your memory, chats, personas and settings live on your computer. Memory is plain
 
 Be clear about one thing: **the model sees what you send it.** If you use a hosted model, the company running it sees each chat, including what Aman knows about you and anything it reads for you. To keep everything on your computer, use a local model. Web searches, maps and connectors still reach their own services. [docs/privacy.md](docs/privacy.md) lists exactly what goes where.
 
-When you want Aman to forget a conversation, start a private chat. Aman can still read what it knows, but saves nothing from the chat, and deletes it when you close it.
+When you want Aman to forget a conversation, start an incognito chat. Aman can still read what it knows, but saves nothing from the chat, and deletes it when you close it.
 
 Sending a message, deleting anything and installing anything always wait for your OK. That rule is enforced in code, on the tool itself, not left to the model's good behaviour.
 

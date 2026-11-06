@@ -2,9 +2,17 @@ import type { TrueForgeApi } from '@truefoundry/trueforge-sdk';
 
 import { providerLabel } from '../../utils/modelUsage.js';
 
-/** Shown on a new chat once Private is chosen. */
+/** Shown on a new chat once Incognito is chosen. */
 export const PRIVATE_CHAT_CHOICE_LINE =
   'Aman forgets this chat when it closes. It can still read what it already knows.';
+
+/** The Incognito chat button's hover text. */
+export const PRIVATE_CHAT_HOVER_LINE =
+  'Start a chat Aman forgets. Nothing from it is saved, and it is deleted when you close it.';
+
+/** Close and delete asks first, because nothing can bring the chat back. */
+export const PRIVATE_CHAT_DELETE_WARNING =
+  'Everything in this chat is deleted for good: every message, picture and file. It cannot be brought back.';
 
 export const PRIVATE_CHAT_LOCAL_LINE = 'Nothing from this chat is kept. It never leaves this machine.';
 

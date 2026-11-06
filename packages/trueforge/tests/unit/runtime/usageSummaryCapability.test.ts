@@ -156,7 +156,7 @@ describe('usage_summary tool result text', () => {
     expect(() => JSON.parse(text)).toThrow();
   });
 
-  it('counts deleted and private chats, without naming them in the top chats', async () => {
+  it('counts deleted and incognito chats, without naming them in the top chats', async () => {
     await seedDoneChat({
       store,
       tenantId: TENANT,

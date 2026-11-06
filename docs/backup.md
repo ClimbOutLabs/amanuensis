@@ -15,7 +15,7 @@ Each backup is a new folder inside the hidden `.amanuensis` folder in your home 
 - the local certificate authority, so your devices keep trusting Aman after a restore;
 - a `SHA256SUMS` file to check every file in the folder.
 
-A private chat that is open when the backup runs is left out of it, because a private chat is gone when it closes. See [Privacy](/privacy#private-chats).
+An incognito chat that is open when the backup runs is left out of it, because an incognito chat is gone when it closes. See [Privacy](/privacy#incognito-chats).
 
 If any part fails, the half-written folder is removed. The last 7 backups are kept and older ones are deleted.
 
