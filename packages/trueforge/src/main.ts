@@ -122,6 +122,7 @@ import { PACKAGE_VERSION } from './packageVersion';
 import { closePersonaKnowledgeIndexers } from './personaKnowledge/knowledgeIndexer';
 import { ActiveTurnRegistry } from './runtime/activeTurns';
 import { registerCalendarConnectorForBoot } from './runtime/calendarAccount';
+import { createCallAnswerer } from './runtime/calls/callAnswerer';
 import { createCallChats } from './runtime/calls/callChats';
 import { createPhoneCallService } from './runtime/calls/phoneCalls';
 import { createTwilioCallProvider } from './runtime/calls/twilioCalls';
@@ -177,7 +178,7 @@ import { inboundSmsRoute } from './twilioWebhook/inboundSms';
 import { twilioListenerFor } from './twilioWebhook/listener';
 import { phoneCallRoutes } from './twilioWebhook/voiceCall';
 import { ensureWritableDataDir } from './utils/dataDir';
-import { startSttAvailabilityWatcher } from './voice/sttAvailability';
+import { isVoiceAvailable, startSttAvailabilityWatcher } from './voice/sttAvailability';
 import { SidecarSpeechToText } from './voice/sttClient';
 import { SidecarSpeechSynthesizer } from './voice/ttsClient';
 import { SileroSpeechProbability } from './voice/vad/sileroVad';
@@ -831,13 +832,21 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     // Codes are keyed by a secret that is not in the database. With no Twilio details no code is ever sent.
     codeKey: configuration.TWILIO?.authToken ?? randomBytes(32).toString('hex'),
   });
-  const reachChannels = () => reachChannelsFor({ twilio: configuration.TWILIO });
+  const reachChannels = () => reachChannelsFor({ twilio: configuration.TWILIO, voiceReady: isVoiceAvailable() });
   // Made below; the call channel reaches them only once a call is under way.
   const callDeps: {
     deliveries?: DeliveryService;
     sessions?: Sessions<SessionCustom, TurnCustom>;
-    app?: { fetch: (request: Request, env: object) => Response | Promise<Response> };
   } = {};
+  const ownerContext = (owner: { tenant_id: string; created_by: string }) =>
+    requestContextFromCreatedBySubject({
+      tenant_id: owner.tenant_id,
+      created_by_subject: {
+        subject_id: owner.created_by,
+        subject_type: 'user',
+        subject_display_name: owner.created_by,
+      },
+    });
   const phoneCalls = createPhoneCallService({
     store: phoneCallStore,
     deliveryStore,
@@ -852,6 +861,7 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
             accountSid: configuration.TWILIO.accountSid,
             publicUrl: configuration.TWILIO.webhookPublicUrl,
           },
+    voiceReady: isVoiceAvailable,
     deliveries: () => {
       if (callDeps.deliveries === undefined) {
         throw new Error('The delivery service is not ready yet.');
@@ -866,16 +876,8 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
         }
         return callDeps.sessions;
       },
-      reachSettings: reachSettingsStore,
       newChatAgent: async owner => {
-        const context = requestContextFromCreatedBySubject({
-          tenant_id: owner.tenant_id,
-          created_by_subject: {
-            subject_id: owner.created_by,
-            subject_type: 'user',
-            subject_display_name: owner.created_by,
-          },
-        });
+        const context = ownerContext(owner);
         const spec = newChatAgentSpec({
           model: await resolveDefaultChatModelEntry({
             tenantId: owner.tenant_id,
@@ -891,25 +893,30 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
         });
         return spec === undefined ? undefined : { type: 'inline', spec };
       },
-      selfFetch: () => (request, env) => {
-        if (callDeps.app === undefined) {
-          throw new Error('The app is not ready yet.');
-        }
-        return callDeps.app.fetch(request, env);
-      },
-      contextFor: ({ tenant_id, subject }) =>
-        getTrueForgeAuthMode(configuration) === TrueForgeAuthMode.Standalone
-          ? STANDALONE_REQUEST_CONTEXT
-          : requestContextFromCreatedBySubject({ tenant_id, created_by_subject: subject }),
-      port: configuration.PORT,
+      answerer: owner =>
+        createCallAnswerer({
+          tenantId: owner.tenant_id,
+          modelProviderStore: persistence.resolveModelProviderStore(ownerContext(owner)),
+          globalSettingsStore,
+          tokenFactoryBudget,
+          logger,
+        }),
     }),
-    parts: async () => ({
+    speaking: () => new SidecarSpeechSynthesizer(),
+    listening: async () => ({
       vad: await SileroSpeechProbability.load({ modelPath: await readyVadModel() }),
       stt: new SidecarSpeechToText(),
-      tts: new SidecarSpeechSynthesizer(),
     }),
     logger,
   });
+
+  // A call cut off when the server stopped is still written down, and its text and push still go out.
+  const phoneCallSweepTimer = setInterval(() => {
+    phoneCalls.sweep().catch((error: unknown) => {
+      logger.warn('Phone call sweep failed', extractErrorLogFields(error));
+    });
+  }, 60_000);
+  phoneCallSweepTimer.unref();
   const deliveries = createDeliveryService({
     store: deliveryStore,
     senders: [
@@ -1122,7 +1129,6 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
       return controller.isRunning() ? 'running' : 'stopped';
     },
   });
-  callDeps.app = app;
 
   return {
     activeTurns,

@@ -23,13 +23,13 @@ Everything lands under the bell with the reason you got it.
 
 - **Note:** a quiet item under the bell. It never makes a sound. Most things are notes.
 - **Nudge:** a notice on the devices where you turned notices on, and a text if you set up texts and switched them on. See [Text messages](/text-messages).
-- **Call:** a phone call, if the owner set up Twilio and you switched calls on. Until then, something that would call you comes as a nudge. See [Phone calls](/phone-calls).
+- **Call:** a phone call, if the owner set up Twilio, the voice parts of Aman are running, and you switched calls on. Until then, something that would call you comes as a nudge. See [Phone calls](/phone-calls).
 
 A model reads a short description of each new thing and suggests how loudly to tell you. It can only suggest. Your settings decide. A bill or a waiting approval can nudge you but never call. Words in a message, such as "urgent", can never make it louder than a note.
 
 ## Your settings
 
-- **Ways to reach you.** In the app is always on. Notices are turned on per device. Texts work once the owner sets up Twilio, and you confirm your number. Until then they show what to do to set them up. Phone calls ring the number you confirmed for texts. Until Twilio is set up, they say what to do to set them up.
+- **Ways to reach you.** In the app is always on. Notices are turned on per device. Texts work once the owner sets up Twilio, and you confirm your number. Until then they show what to do to set them up. Phone calls ring the number you confirmed for texts. Until Twilio is set up, they say what to do to set them up. While the voice parts of Aman are not running, they say to start them.
 - **Mail that always matters.** Add the people whose mail you always want to hear about. Aman may suggest people it found in what it remembers. Nothing is added until you say so.
 - **How often and how early.** The most nudges in one day (5 to start with). After that, things wait as notes. Reminders you set never count toward this limit. Your time zone decides when your day starts. You also choose how early to hear about leaving, and how long an approval may wait.
 

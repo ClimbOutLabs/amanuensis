@@ -16,7 +16,7 @@ function person(id: string): RequestContext {
 
 async function build({ provider = true }: { provider?: boolean } = {}) {
   const h = await textsHarness({ provider });
-  const channels = reachChannelsFor({ twilio: provider ? { accountSid: 'AC' } : undefined });
+  const channels = reachChannelsFor({ twilio: provider ? { accountSid: 'AC' } : undefined, voiceReady: true });
   const calls = { place: () => Promise.reject(new Error('No calls in this test.')) };
   const app = new OpenAPIHono();
   app.route(

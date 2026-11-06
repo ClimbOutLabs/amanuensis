@@ -7,7 +7,6 @@ import configuration from '../config';
 import type { Authenticator } from './authenticator';
 import { toRequestContext, type IdTokenClaims } from './claims';
 import { hasAdminRole, type RequestContext } from './identity';
-import { inProcessCaller } from './inProcessCaller';
 import { getOidcVerify } from './oidc';
 import { extractRequestToken, readBearerToken } from './token';
 
@@ -15,8 +14,7 @@ export { extractRequestToken, readBearerToken };
 
 export function createAuthMiddleware(authenticator: Authenticator): MiddlewareHandler {
   return async (c, next) => {
-    const requestContext =
-      inProcessCaller({ env: c.env, path: c.req.path }) ?? (await tryAuthenticate({ authenticator, context: c }));
+    const requestContext = await tryAuthenticate({ authenticator, context: c });
     if (requestContext === undefined) {
       throw new HTTPException(401, { message: 'Authentication required' });
     }

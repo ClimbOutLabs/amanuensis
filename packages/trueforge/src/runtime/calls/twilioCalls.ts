@@ -1,8 +1,9 @@
 import { z } from 'zod';
 
 import type { TwilioSettings } from '../../config';
+import { CallSidSchema } from '../../schemas/phoneCalls';
 import type { ResolveAddresses } from '../publicFetch';
-import { publicTwilioFetch, twilioAuthorization, twilioErrorCode, type TwilioFetch } from '../texts/smsProvider';
+import { postTwilioForm, publicTwilioFetch, twilioErrorCode, type TwilioFetch } from '../twilio/rest';
 
 /** Why a call could not be started. The words for the person are written by whoever shows it. */
 export type CallFailure = 'invalid_number' | 'not_accepted' | 'unreachable';
@@ -14,7 +15,8 @@ export type PlaceCallResult = { outcome: 'started'; call_sid: string } | { outco
  * never carries the number or any credential.
  */
 export interface CallProvider {
-  place(input: { to: string }): Promise<PlaceCallResult>;
+  /** `call_id` is Aman's own id for the call, which Twilio sends back on every request about it. */
+  place(input: { to: string; call_id: string }): Promise<PlaceCallResult>;
 }
 
 /** Where Twilio asks what to do once the call is answered. */
@@ -28,10 +30,12 @@ export const MEDIA_STREAM_PATH = '/twilio/media';
 const RING_SECONDS = 25;
 /** How long Twilio may listen for a voicemail greeting to end before it connects the call anyway. */
 const MACHINE_DETECTION_SECONDS = 30;
+/** Twilio ends the call after this, whatever Aman is doing: a little longer than a call may talk. */
+const TIME_LIMIT_SECONDS = 11 * 60;
 
 const INVALID_NUMBER_CODES = new Set([13223, 13224, 21211, 21214, 21215, 21216, 21217, 21401]);
 
-const CreatedCallSchema = z.object({ sid: z.string().regex(/^CA[0-9a-fA-F]{32}$/) });
+const CreatedCallSchema = z.object({ sid: CallSidSchema });
 
 /**
  * Starts a call through Twilio's REST API. Twilio answers to the voice webhook with the call's own id, and asks the
@@ -47,31 +51,24 @@ export function createTwilioCallProvider({
   resolveAddresses?: ResolveAddresses;
   fetchTwilio?: TwilioFetch;
 }): CallProvider {
-  const url = `https://api.twilio.com/2010-04-01/Accounts/${encodeURIComponent(settings.accountSid)}/Calls.json`;
-  const authorization = twilioAuthorization(settings);
   return {
-    async place({ to }) {
+    async place({ to, call_id }) {
+      // The call's own id rides in the addresses Twilio calls back, which the signature covers.
+      const about = `?call=${encodeURIComponent(call_id)}`;
       const form = new URLSearchParams({
         To: to,
         From: settings.fromNumber,
-        Url: `${settings.webhookPublicUrl}${VOICE_WEBHOOK_PATH}`,
+        Url: `${settings.webhookPublicUrl}${VOICE_WEBHOOK_PATH}${about}`,
         Method: 'POST',
-        StatusCallback: `${settings.webhookPublicUrl}${CALL_STATUS_PATH}`,
+        StatusCallback: `${settings.webhookPublicUrl}${CALL_STATUS_PATH}${about}`,
         StatusCallbackMethod: 'POST',
         Timeout: String(RING_SECONDS),
+        TimeLimit: String(TIME_LIMIT_SECONDS),
         MachineDetection: 'DetectMessageEnd',
         MachineDetectionTimeout: String(MACHINE_DETECTION_SECONDS),
       });
       try {
-        const reply = await fetchTwilio({
-          url,
-          headers: {
-            Authorization: authorization,
-            'Content-Type': 'application/x-www-form-urlencoded',
-            Accept: 'application/json',
-          },
-          body: new TextEncoder().encode(form.toString()),
-        });
+        const reply = await postTwilioForm({ fetchTwilio, settings, resource: 'Calls.json', form });
         const text = await reply.text();
         if (reply.status >= 200 && reply.status < 300) {
           let body: unknown;

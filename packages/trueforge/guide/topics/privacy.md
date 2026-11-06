@@ -12,6 +12,7 @@ Some things leave your computer, and only when needed:
 - The web search service. The search words and the pages Aman opens.
 - The map service. Places and routes, after you approve the card.
 - Google. What a connected email or calendar action sends, after you approve it.
+- Twilio and the phone company, only if you set up texts or calls. Your phone number, each text, and the sound of each call. The voice and the transcript of a call are made on your computer.
 
 Voice input runs on your computer. Memory search runs on your computer too.
 

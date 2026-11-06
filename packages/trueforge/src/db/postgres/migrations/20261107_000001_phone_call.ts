@@ -22,7 +22,6 @@ export async function up(db: Kysely<unknown>): Promise<void> {
       .addColumn('mode', 'text')
       .addColumn('session_id', 'text')
       .addColumn('fallback', 'text', col => col.notNull())
-      .addColumn('follow_ups', 'integer', col => col.notNull())
       .addColumn('token_hash', 'text')
       .addColumn('token_expires_at', 'timestamptz')
       .addColumn('created_at', 'timestamptz', col => col.notNull())

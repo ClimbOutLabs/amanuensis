@@ -42,6 +42,7 @@ async function build({
     logger: winston.createLogger({ silent: true }),
   });
   let current = person('alice');
+  let offered = channels;
   const calls = { place };
   const app = new OpenAPIHono();
   app.route(
@@ -51,7 +52,7 @@ async function build({
       textContacts,
       deliveryService,
       calls,
-      channels: () => channels,
+      channels: () => offered,
       memories: () => Promise.resolve(memories),
       resolveRequestContext: () => current,
       logger: winston.createLogger({ silent: true }),
@@ -73,6 +74,10 @@ async function build({
     textContacts,
     as: (id: string) => {
       current = person(id);
+    },
+    /** The channels the server offers from now on, as when the voice parts stop. */
+    offer: (next: ReachChannels) => {
+      offered = next;
     },
   };
 }
@@ -124,6 +129,21 @@ describe('reach routes', () => {
       now: NOW,
     });
     expect((await put({ ...defaultReachSettings('UTC'), channels: { texts: false, calls: true } })).status).toBe(200);
+  });
+
+  it('keeps calls on, and saves other changes, while calls are briefly not available', async () => {
+    const channels: ReachChannels = { ...NO_PHONE_CHANNELS, calls: { available: true, note: 'On.' } };
+    const { put, textContacts, offer } = await build({ channels });
+    await confirmNumber({
+      store: textContacts,
+      owner: { tenant_id: 'default', created_by: 'alice' },
+      phone: '+15550111',
+      now: NOW,
+    });
+    const on = { ...defaultReachSettings('UTC'), channels: { texts: false, calls: true } };
+    expect((await put(on)).status).toBe(200);
+    offer({ ...NO_PHONE_CHANNELS, calls: { available: false, note: 'Calls need the voice parts of Aman.' } });
+    expect((await put({ ...on, max_nudges_per_day: 2 })).status).toBe(200);
   });
 
   it('rings the phone on Try it for calls, without using up the time between calls', async () => {

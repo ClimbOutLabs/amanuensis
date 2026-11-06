@@ -1,4 +1,9 @@
-import { AgentSpecSchema, type AgentSpec } from '@truefoundry/trueforge-core/agent-session';
+import {
+  AgentSpecSchema,
+  DEFAULT_NEW_CHAT_SKILLS,
+  defaultReasoningEffort,
+  type AgentSpec,
+} from '@truefoundry/trueforge-core/agent-session';
 import type { Logger } from 'winston';
 
 import type { IGlobalSettingsStore } from '../db/globalSettingsStore';
@@ -36,9 +41,8 @@ export async function resolveDefaultChatModel(
 }
 
 /**
- * The assistant a new chat in the app starts on, for a chat the server opens itself: the default model at its lowest
- * real reasoning effort, with the sandbox on when the server has one. The app's default skills build pages in the
- * sandbox and are left out here.
+ * The assistant a new chat in the app starts on, for a chat the server opens itself: the default model at the app's
+ * default reasoning effort, with the sandbox on when the server has one and the app's default skills when it does.
  */
 export function newChatAgentSpec({
   model,
@@ -50,11 +54,11 @@ export function newChatAgentSpec({
   if (model === undefined) {
     return undefined;
   }
-  const efforts = model.properties.reasoning_efforts;
-  // Catalog lists are ordered lowest first, as in the app's model picker.
-  const effort = efforts?.find(value => value !== 'none') ?? efforts?.[0];
+  const effort = defaultReasoningEffort(model.properties.reasoning_efforts);
   return AgentSpecSchema.parse({
     model: { name: model.name, ...(effort === undefined ? {} : { params: { reasoning_effort: effort } }) },
+    // Skills need the sandbox: a spec that lists them without it is refused.
+    ...(sandbox ? { skills: DEFAULT_NEW_CHAT_SKILLS.map(name => ({ name })) } : {}),
     config: { sandbox: { enabled: sandbox } },
   });
 }

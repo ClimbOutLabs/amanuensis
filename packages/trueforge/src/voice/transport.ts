@@ -74,10 +74,13 @@ export type TurnOutcome =
 export interface VoiceTurnRunner {
   sendMessage({
     text,
+    startedWhileSpeaking,
     signal,
     onText,
   }: {
     text: string;
+    /** The person began while the assistant's audio was still playing. */
+    startedWhileSpeaking?: boolean;
     signal: AbortSignal;
     onText: (delta: string) => void;
   }): Promise<TurnOutcome>;

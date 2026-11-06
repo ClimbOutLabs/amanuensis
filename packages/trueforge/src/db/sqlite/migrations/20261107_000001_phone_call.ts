@@ -20,7 +20,6 @@ export async function up(db: Kysely<unknown>): Promise<void> {
         mode TEXT,
         session_id TEXT,
         fallback TEXT NOT NULL,
-        follow_ups INTEGER NOT NULL,
         token_hash TEXT,
         token_expires_at TEXT,
         created_at TEXT NOT NULL,

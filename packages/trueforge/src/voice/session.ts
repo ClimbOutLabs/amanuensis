@@ -90,6 +90,8 @@ interface Heard {
   speechEndedAtMs: number;
   /** The speech began while the assistant was speaking or just after: never taken as an approval. */
   startedInGuard: boolean;
+  /** The speech began while the assistant's audio was still playing. */
+  startedWhileSpeaking: boolean;
 }
 
 interface Marks {
@@ -114,6 +116,11 @@ export class VoiceSession {
   #turnAbort: AbortController | undefined;
   #cancelling: Promise<void> = Promise.resolve();
   #guardAtSpeechStart = false;
+  #speakingAtSpeechStart = false;
+  /** A line that holds the floor is being handed over, or plays until this time. */
+  #floorHeld = false;
+  #floorUntilMs = Number.NEGATIVE_INFINITY;
+  #lineAbort: AbortController | undefined;
   #awaiting: Awaiting | undefined;
   #state: VoiceState = 'listening';
   #busy = false;
@@ -153,15 +160,22 @@ export class VoiceSession {
 
   /**
    * Speaks a line that no turn asked for, such as the opening of a phone call, after anything already queued. The
-   * person can interrupt it like any reply. Resolves once it has been handed to the line.
+   * person can interrupt it like any reply, unless `interruptible` is false: then it plays to the end, and what the
+   * person says over it still becomes a turn, marked as started while speaking. Resolves once it has been handed to
+   * the line.
    */
-  say(text: string): Promise<void> {
+  say(text: string, { interruptible = true }: { interruptible?: boolean } = {}): Promise<void> {
     const spoken = this.#turnChain.then(async () => {
       if (this.#ended) {
         return;
       }
       const abort = new AbortController();
-      this.#turnAbort = abort;
+      if (interruptible) {
+        this.#turnAbort = abort;
+      } else {
+        this.#lineAbort = abort;
+        this.#floorHeld = true;
+      }
       const now = this.#clock.now();
       const speech = this.#speechFor({ signal: abort.signal, marks: { speechEndedAtMs: now, utteranceAtMs: now } });
       for (const sentence of splitSentences(text)) {
@@ -170,6 +184,11 @@ export class VoiceSession {
       await speech.drain();
       if (this.#turnAbort === abort) {
         this.#turnAbort = undefined;
+      }
+      if (!interruptible) {
+        this.#lineAbort = undefined;
+        this.#floorHeld = false;
+        this.#floorUntilMs = this.#timeline.endsAtMs;
       }
       this.#refreshState();
     });
@@ -191,6 +210,7 @@ export class VoiceSession {
     this.#ended = true;
     this.#cancelStateCheck?.();
     this.#turnAbort?.abort();
+    this.#lineAbort?.abort();
     this.#timeline.stop();
     this.#deps.transport.clearAudio();
     await this.#deps.turns.cancel().catch(() => undefined);
@@ -231,7 +251,9 @@ export class VoiceSession {
   #onDetected(event: DetectorEvent): void {
     if (event.type === 'speech_started') {
       this.#guardAtSpeechStart = this.#timeline.inGuard(event.startedAtMs);
-      if (this.#timeline.isPlaying()) {
+      this.#speakingAtSpeechStart = this.#timeline.isPlaying() || event.startedAtMs < this.#timeline.endsAtMs;
+      const floorHeld = this.#floorHeld || this.#clock.now() < this.#floorUntilMs;
+      if (this.#timeline.isPlaying() && !floorHeld) {
         this.#bargeIn();
       }
       return;
@@ -244,6 +266,7 @@ export class VoiceSession {
       startedAtMs: event.startedAtMs,
       speechEndedAtMs: event.speechEndedAtMs,
       startedInGuard: this.#guardAtSpeechStart,
+      startedWhileSpeaking: this.#speakingAtSpeechStart,
     };
     // A new utterance replaces a turn that is still being worked on.
     this.#abortTurn();
@@ -292,7 +315,7 @@ export class VoiceSession {
         await this.#answerWaitingCard({ text, heard, awaiting, signal: abort.signal, marks });
       } else {
         this.#deps.transport.sendEvent({ type: 'heard', text });
-        await this.#runTurn({ text, signal: abort.signal, marks });
+        await this.#runTurn({ text, startedWhileSpeaking: heard.startedWhileSpeaking, signal: abort.signal, marks });
       }
     } finally {
       if (this.#turnAbort === abort) {
@@ -319,7 +342,17 @@ export class VoiceSession {
     }
   }
 
-  async #runTurn({ text, signal, marks }: { text: string; signal: AbortSignal; marks: Marks }): Promise<void> {
+  async #runTurn({
+    text,
+    startedWhileSpeaking,
+    signal,
+    marks,
+  }: {
+    text: string;
+    startedWhileSpeaking: boolean;
+    signal: AbortSignal;
+    marks: Marks;
+  }): Promise<void> {
     await this.#cancelling;
     const speech = this.#speechFor({ signal, marks });
     const splitter = new SentenceSplitter();
@@ -337,6 +370,7 @@ export class VoiceSession {
     };
     const outcome = await this.#deps.turns.sendMessage({
       text,
+      startedWhileSpeaking,
       signal,
       onText: delta => {
         splitter.push(delta).forEach(say);

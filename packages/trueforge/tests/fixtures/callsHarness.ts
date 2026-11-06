@@ -10,7 +10,12 @@ import { createSqliteDb } from '../../src/db/sqlite/client';
 import { SqlitePersonalizationStore } from '../../src/db/sqlite/personalization-store/SqlitePersonalizationStore';
 import { TextContactStore } from '../../src/db/textContactStore';
 import type { CallChat } from '../../src/runtime/calls/callTurns';
-import { createPhoneCallService, type CallChats } from '../../src/runtime/calls/phoneCalls';
+import {
+  createPhoneCallService,
+  type CallChats,
+  type CallLimits,
+  type CallListening,
+} from '../../src/runtime/calls/phoneCalls';
 import { MEDIA_STREAM_PATH, type CallProvider, type PlaceCallResult } from '../../src/runtime/calls/twilioCalls';
 import type { DeliveryChannelSender } from '../../src/runtime/delivery/deliveryChannel';
 import { createDeliveryService } from '../../src/runtime/delivery/deliveryService';
@@ -40,7 +45,19 @@ export const AUTH_TOKEN = 'token-for-tests';
 export async function callsHarness({
   chat,
   assistantName = 'Mannie',
-}: { chat?: CallChat; assistantName?: string } = {}) {
+  limits,
+  voiceReady = true,
+  listening = () => Promise.resolve({ vad: new LoudnessVad(), stt: new FakeStt() }),
+  tts = new FakeTts(),
+}: {
+  chat?: CallChat;
+  assistantName?: string;
+  limits?: Partial<CallLimits>;
+  voiceReady?: boolean;
+  /** What a conversation listens with; a test can make it slow or fail. */
+  listening?: () => Promise<CallListening>;
+  tts?: FakeTts;
+} = {}) {
   const db = createSqliteDb(':memory:');
   await migrateSqliteToLatest(db);
   const logger = winston.createLogger({ silent: true });
@@ -84,22 +101,21 @@ export async function callsHarness({
       ]);
     },
   };
-  const placed: string[] = [];
+  const placed: { to: string; call_id: string }[] = [];
   const nextCall: { result: PlaceCallResult } = { result: { outcome: 'started', call_sid: CALL_SID } };
   const provider: CallProvider = {
-    place: ({ to }) => {
-      placed.push(to);
+    place: ({ to, call_id }) => {
+      placed.push({ to, call_id });
       return Promise.resolve(nextCall.result);
     },
   };
-  const opened: { opening: string; call_id: string }[] = [];
+  const opened: { opening: string; call_id: string; person: string | undefined }[] = [];
   const chats: CallChats = {
-    open: ({ opening, call_id }) => {
-      opened.push({ opening, call_id });
+    open: ({ opening, call_id, names }) => {
+      opened.push({ opening, call_id, person: names.person });
       return Promise.resolve(chat);
     },
   };
-  const tts = new FakeTts();
   const numbers = createTextNumberService({
     store: contacts,
     codeKey: 'test-code-key',
@@ -118,10 +134,13 @@ export async function callsHarness({
     reachSettings,
     personalization,
     twilio: { provider, accountSid: ACCOUNT_SID, publicUrl: PUBLIC_URL },
+    voiceReady: () => voiceReady,
     deliveries: () => deliveries,
     chats,
-    parts: () => Promise.resolve({ vad: new LoudnessVad(), stt: new FakeStt(), tts }),
+    speaking: () => tts,
+    listening,
     logger,
+    ...(limits === undefined ? {} : { limits }),
     now: () => clock.now,
   });
   const deliveries = createDeliveryService({
@@ -271,15 +290,43 @@ export async function callsHarness({
   /** The one-time token the voice webhook put in its TwiML, or undefined when it hung up. */
   async function answer(answeredBy = 'human'): Promise<{ twiml: string; token: string | undefined }> {
     const response = await twilioPost({
-      path: '/twilio/voice',
+      path: `/twilio/voice?call=${placed.at(-1)?.call_id ?? ''}`,
       fields: { AccountSid: ACCOUNT_SID, CallSid: CALL_SID, AnsweredBy: answeredBy, From: '+15550100', To: PHONE },
     });
     const twiml = await response.text();
     return { twiml, token: /<Parameter name="token" value="([^"]+)"/.exec(twiml)?.[1] };
   }
 
+  /** Twilio's status webhook for the last call placed, or for another call id and Twilio id. */
+  function status(
+    callStatus: string,
+    { callSid = CALL_SID, callId = placed.at(-1)?.call_id ?? '' }: { callSid?: string; callId?: string } = {},
+  ) {
+    return twilioPost({
+      path: `/twilio/call-status?call=${callId}`,
+      fields: { AccountSid: ACCOUNT_SID, CallSid: callSid, CallStatus: callStatus },
+    });
+  }
+
+  /** Waits for a condition that is met by work the listener does after it answers. */
+  async function waitFor(check: () => boolean | Promise<boolean>, ms = 3000): Promise<void> {
+    const until = Date.now() + ms;
+    while (!(await check())) {
+      if (Date.now() > until) {
+        throw new Error('timed out');
+      }
+      await new Promise(resolve => setTimeout(resolve, 10));
+    }
+  }
+
+  async function attemptsOf(id: string) {
+    return (await deliveryStore.get({ ...ALICE, id }))?.attempts ?? [];
+  }
+
   return {
     db,
+    waitFor,
+    attemptsOf,
     contacts,
     reachSettings,
     deliveryStore,
@@ -300,6 +347,7 @@ export async function callsHarness({
     twilioPost,
     openMedia,
     answer,
+    status,
     close: () => closeServer(server),
   };
 }

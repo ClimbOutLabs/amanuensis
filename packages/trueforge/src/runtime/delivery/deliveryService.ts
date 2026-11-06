@@ -40,6 +40,14 @@ const CHANNEL_WORDS: Record<DeliveryChannel, string> = {
   call: 'a phone call',
 };
 
+/** What failed, when a sender broke before it could say so itself. */
+const FAILED_WORDS: Record<DeliveryChannel, string> = {
+  in_app: 'The notice could not be added.',
+  web_push: 'The push notice could not be sent.',
+  sms: 'The text could not be sent.',
+  call: 'The call could not be made.',
+};
+
 function conversationOf(delivery: Delivery): string {
   const link = delivery.link;
   return link !== null && 'session_id' in link ? link.session_id : '';
@@ -95,7 +103,37 @@ export function createDeliveryService({
     }
   }
 
-  async function trySenders({
+  /** Runs one sender. A sender that breaks is written down as a failed attempt on its own channel. */
+  async function trySender({
+    sender,
+    delivery,
+    owner,
+  }: {
+    sender: DeliveryChannelSender;
+    delivery: Delivery;
+    owner: DeliveryOwner;
+  }): Promise<DeliveryAttempt[]> {
+    try {
+      return await sender.send({ delivery, ...owner });
+    } catch (error) {
+      logger.warn('A delivery channel failed', {
+        delivery_id: delivery.id,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return [
+        {
+          channel: sender.channel,
+          outcome: 'failed',
+          detail: `${FAILED_WORDS[sender.channel]} It is still in your feed.`,
+          target: null,
+          attempted_at: now().toISOString(),
+        },
+      ];
+    }
+  }
+
+  /** Tries each sender in turn and writes each attempt down as it happens, then any fallback it asks for. */
+  async function sendThrough({
     delivery,
     owner,
     channels,
@@ -109,20 +147,15 @@ export function createDeliveryService({
       if (channels !== undefined && !channels.includes(sender.channel)) {
         continue;
       }
-      try {
-        attempts.push(...(await sender.send({ delivery, ...owner })));
-      } catch (error) {
-        logger.warn('A delivery channel failed', {
-          delivery_id: delivery.id,
-          error: error instanceof Error ? error.message : String(error),
-        });
-        attempts.push({
-          channel: sender.channel,
-          outcome: 'failed',
-          detail: 'The notice could not be sent. It is still in your feed.',
-          target: null,
-          attempted_at: now().toISOString(),
-        });
+      const made = await trySender({ sender, delivery, owner });
+      for (const attempt of made) {
+        await keep({ owner, delivery, attempt });
+      }
+      attempts.push(...made);
+      if (sender.fallsBackTo !== undefined && made.some(attempt => attempt.outcome !== 'sent')) {
+        attempts.push(
+          ...(await sendThrough({ delivery: { ...delivery, level: 'nudge' }, owner, channels: sender.fallsBackTo })),
+        );
       }
     }
     return attempts;
@@ -168,13 +201,8 @@ export function createDeliveryService({
         target: null,
         attempted_at: now().toISOString(),
       };
-      const attempts: DeliveryAttempt[] = [
-        inApp,
-        ...(await trySenders({ delivery: created, owner, channels: only_channels })),
-      ];
-      for (const attempt of attempts) {
-        await keep({ owner, delivery: created, attempt });
-      }
+      await keep({ owner, delivery: created, attempt: inApp });
+      const attempts = [inApp, ...(await sendThrough({ delivery: created, owner, channels: only_channels }))];
       return (await store.get({ ...owner, id: created.id })) ?? { ...created, attempts };
     },
     async fallBack({ delivery_id, channels, ...owner }) {
@@ -182,11 +210,7 @@ export function createDeliveryService({
       if (delivery === undefined) {
         return [];
       }
-      const attempts = await trySenders({ delivery: { ...delivery, level: 'nudge' }, owner, channels });
-      for (const attempt of attempts) {
-        await keep({ owner, delivery, attempt });
-      }
-      return attempts;
+      return sendThrough({ delivery: { ...delivery, level: 'nudge' }, owner, channels });
     },
     async recordAttempt({ delivery_id, attempt, conversation_id, ...owner }) {
       const delivery = await store.get({ ...owner, id: delivery_id });

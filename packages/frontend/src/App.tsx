@@ -1,3 +1,4 @@
+import { defaultReasoningEffort } from '@truefoundry/trueforge-core/agent-session/newChatDefaults';
 import {
   AmanRuntimeRail,
   AmanSetupProvider,
@@ -347,9 +348,7 @@ export function App() {
           });
           return;
         }
-        const reasoningEfforts = first.properties.reasoningEfforts;
-        // Default to the lowest real effort, not "none" — catalog lists are ordered ascending.
-        const defaultReasoningEffort = reasoningEfforts?.find(effort => effort !== 'none') ?? reasoningEfforts?.[0];
+        const reasoningEffort = defaultReasoningEffort(first.properties.reasoningEfforts);
         setBoot({
           status: 'ready',
           openSettings: false,
@@ -359,7 +358,7 @@ export function App() {
           defaultAgentSpec: {
             model: {
               name: first.name,
-              ...(defaultReasoningEffort ? { params: { reasoningEffort: defaultReasoningEffort } } : {}),
+              ...(reasoningEffort ? { params: { reasoningEffort } } : {}),
             },
             config: sandboxConfig,
             skills: [...DEFAULT_AGENT_SPEC_SKILLS],

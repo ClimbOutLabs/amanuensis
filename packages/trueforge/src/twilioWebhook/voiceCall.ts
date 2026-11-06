@@ -16,15 +16,15 @@ export function phoneCallRoutes({ calls }: { calls: Pick<PhoneCallService, 'answ
       {
         method: 'POST',
         path: VOICE_WEBHOOK_PATH,
-        async handle({ params }) {
-          return { status: 200, body: await calls.answered(params) };
+        async handle(request) {
+          return { status: 200, body: await calls.answered(request) };
         },
       },
       {
         method: 'POST',
         path: CALL_STATUS_PATH,
-        async handle({ params }) {
-          await calls.statusChanged(params);
+        async handle(request) {
+          await calls.statusChanged(request);
           return { status: 200, body: EMPTY_TWIML };
         },
       },

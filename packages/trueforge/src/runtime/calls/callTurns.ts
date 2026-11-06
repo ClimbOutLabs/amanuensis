@@ -5,33 +5,46 @@ import type { TurnOutcome, VoiceTurnRunner } from '../../voice/transport';
 export type GoodTimeAnswer = 'yes' | 'no' | 'unclear';
 
 const NO_WORDS = new Set(['no', 'nope', 'not', 'busy', 'later', 'bad', 'cant', 'cannot', 'driving', 'stop']);
-const YES_WORDS = new Set(['yes', 'yeah', 'yep', 'yup', 'sure', 'ok', 'okay', 'fine', 'alright', 'go']);
+/** Words that are only ever a yes. "Go", "fine", "ok" and "alright" are left out: each also starts other replies. */
+const YES_WORDS = new Set(['yes', 'yeah', 'yep', 'yup', 'sure', 'okay']);
+/** A yes is short: anything longer is a person saying something else, or not the person at all. */
+const MOST_YES_WORDS = 3;
+/** A "no" word that means yes or nothing at all, so the question is asked again. */
+const NO_THAT_IS_NOT_NO = ['no problem', 'no worries', 'not busy', 'not bad', 'why not'];
 
 /**
- * A plain yes or no. A "no" word wins over a "yes" word, so "not a good time" is a no. This only decides whether the
- * assistant may say more on the call; it never approves anything.
+ * A plain yes or no. Only a reply of one to three words that are all yes words is a yes, so a greeting, a question
+ * or someone handing over the phone is never taken for one. A "no" word is a no, unless it is part of a phrase like
+ * "no problem", which is asked again. This only decides whether the assistant may say more on the call; it never
+ * approves anything.
  */
 export function goodTimeAnswer(heard: string): GoodTimeAnswer {
   const words = wordsOf(heard).map(word => word.replace(/'/g, ''));
+  const phrase = ` ${words.join(' ')} `;
+  if (NO_THAT_IS_NOT_NO.some(words => phrase.includes(` ${words} `))) {
+    return 'unclear';
+  }
   if (words.some(word => NO_WORDS.has(word))) {
     return 'no';
   }
-  return words.some(word => YES_WORDS.has(word)) ? 'yes' : 'unclear';
+  const yes = words.length > 0 && words.length <= MOST_YES_WORDS && words.every(word => YES_WORDS.has(word));
+  return yes ? 'yes' : 'unclear';
 }
 
 /** The lines a call speaks before and around the conversation. Every name in them comes from the person's settings. */
 export const CALL_LINES = {
-  /** Private mode: only the kind of thing until the person says it is a good time. */
-  opening: ({ name, kind }: { name: string; kind: string }): string =>
-    `Hi, it's ${name}. ${capitalized(kind)}. Is this a good time?`,
+  /** Private mode: who is calling, who for, and only the kind of thing until the person says it is a good time. */
+  opening: ({ name, person, kind }: { name: string; person: string | undefined; kind: string }): string =>
+    `Hi, this is ${name}, calling for ${person ?? 'the person who set me up'}. ${capitalized(kind)}. Is this a good time?`,
   /** Once the person said yes. The chat holds this line, with the greeting, as the start of the conversation. */
-  message: (message: string): string => `${withStop(message)} Want me to do something about it?`,
+  message: (message: string): string =>
+    `${withStop(message)} You can ask me about it. To do something about it, open the app.`,
   notNow: 'Okay. It is waiting in the app for you. Goodbye.',
   askAgain: 'Sorry, I did not catch that. Is this a good time? Please say yes or no.',
   giveUp: 'I will leave it in the app for you. Goodbye.',
   noChat: 'I cannot talk it through on the phone right now. Please open the app to see it. Goodbye.',
   timeUp: 'I need to go now. Everything we said is in the chat in the app. Goodbye.',
-  voicemail: (name: string): string => `${name} here, something needs you, please open the app.`,
+  voicemail: (name: string): string => `This is ${name}. Something needs you. Please open the app.`,
 } as const;
 
 function capitalized(text: string): string {
@@ -43,42 +56,50 @@ function withStop(text: string): string {
   return /[.!?]$/.test(trimmed) ? trimmed : `${trimmed}.`;
 }
 
-/** The chat a call talks in, once the person said yes: its turns run exactly as a typed message's would. */
+/** Why a call ended before a conversation: the person said no, no yes was heard, or no chat could open. */
+export type CallEnding = 'said_no' | 'unclear' | 'no_chat';
+
+/** The chat a call talks in, once the person said yes. */
 export interface CallChat {
   session_id: string;
   turns: VoiceTurnRunner;
-  /** Called once the call is over, so nothing can act as the person any more. */
-  close: () => void;
 }
 
 /**
  * The turns of a phone call. Until the person says it is a good time, nothing they say reaches the model and the
- * assistant says only the kind of thing. After that, each utterance is a normal turn in the call's chat. An approval
- * is never answered by voice on a call: the line says false, and this runner refuses one even if asked.
+ * assistant says only who it is calling for and the kind of thing. After that, each utterance goes to the call's
+ * chat. An approval is never answered by voice on a call: the line says false, and this runner refuses one even if
+ * asked.
  */
 export class CallTurns implements VoiceTurnRunner {
   readonly #message: string;
   readonly #openChat: () => Promise<CallChat | undefined>;
   readonly #hangUp: () => void;
+  readonly #askedAgain: () => void;
   #phase: 'asking' | 'open' | 'closing' = 'asking';
   #unclear = 0;
+  #replies = 0;
   #chat: CallChat | undefined;
-  #followUps = 0;
+  #ending: CallEnding | undefined;
 
   constructor({
     message,
     openChat,
     hangUp,
+    askedAgain = () => undefined,
   }: {
     /** What the call is about, said only after a yes. */
     message: string;
     openChat: () => Promise<CallChat | undefined>;
     /** Ends the call once what is being said has played. */
     hangUp: () => void;
+    /** The question was asked again, so a wait for its answer can start again. */
+    askedAgain?: () => void;
   }) {
     this.#message = message;
     this.#openChat = openChat;
     this.#hangUp = hangUp;
+    this.#askedAgain = askedAgain;
   }
 
   /** Whether the person said it was a good time. */
@@ -90,35 +111,57 @@ export class CallTurns implements VoiceTurnRunner {
     return this.#chat;
   }
 
-  /** Approval cards the call left waiting in the app. */
-  get followUps(): number {
-    return this.#followUps;
+  /** Why the call ended before a conversation, once it has. */
+  get ending(): CallEnding | undefined {
+    return this.#ending;
+  }
+
+  /** Replies heard to the question so far, so a silence timer can tell whether one came. */
+  get replies(): number {
+    return this.#replies;
+  }
+
+  /**
+   * The person said nothing after the question: counted like a reply that was not caught. Resolves to the line to say,
+   * and whether the call ends after it; undefined once the question is answered.
+   */
+  heardNothing(): { line: string; end: boolean } | undefined {
+    if (this.#phase !== 'asking') {
+      return undefined;
+    }
+    this.#unclear += 1;
+    if (this.#unclear >= 2) {
+      this.#phase = 'closing';
+      this.#ending = 'unclear';
+      return { line: CALL_LINES.giveUp, end: true };
+    }
+    return { line: CALL_LINES.askAgain, end: false };
   }
 
   async sendMessage({
     text,
+    startedWhileSpeaking = false,
     signal,
     onText,
   }: {
     text: string;
+    startedWhileSpeaking?: boolean;
     signal: AbortSignal;
     onText: (delta: string) => void;
   }): Promise<TurnOutcome> {
     if (this.#phase === 'open' && this.#chat !== undefined) {
-      const outcome = await this.#chat.turns.sendMessage({ text, signal, onText });
-      if (outcome.kind === 'done') {
-        this.#followUps += outcome.approvals.length;
-      }
-      return outcome;
+      return this.#chat.turns.sendMessage({ text, signal, onText });
     }
-    if (this.#phase === 'closing') {
+    if (this.#phase === 'closing' || startedWhileSpeaking) {
+      // A reply that began over the opening was not an answer to a question the person had heard.
       return { kind: 'done', turnId: '', approvals: [] };
     }
+    this.#replies += 1;
     const answer = goodTimeAnswer(text);
     if (answer === 'yes') {
       const chat = await this.#openChat();
       if (chat === undefined) {
-        return this.#close({ line: CALL_LINES.noChat, onText });
+        return this.#close({ line: CALL_LINES.noChat, ending: 'no_chat', onText });
       }
       this.#chat = chat;
       this.#phase = 'open';
@@ -126,13 +169,14 @@ export class CallTurns implements VoiceTurnRunner {
       return { kind: 'done', turnId: '', approvals: [] };
     }
     if (answer === 'no') {
-      return this.#close({ line: CALL_LINES.notNow, onText });
+      return this.#close({ line: CALL_LINES.notNow, ending: 'said_no', onText });
     }
     this.#unclear += 1;
     if (this.#unclear >= 2) {
-      return this.#close({ line: CALL_LINES.giveUp, onText });
+      return this.#close({ line: CALL_LINES.giveUp, ending: 'unclear', onText });
     }
     onText(CALL_LINES.askAgain);
+    this.#askedAgain();
     return { kind: 'done', turnId: '', approvals: [] };
   }
 
@@ -145,8 +189,9 @@ export class CallTurns implements VoiceTurnRunner {
     await this.#chat?.turns.cancel();
   }
 
-  #close({ line, onText }: { line: string; onText: (delta: string) => void }): TurnOutcome {
+  #close({ line, ending, onText }: { line: string; ending: CallEnding; onText: (delta: string) => void }): TurnOutcome {
     this.#phase = 'closing';
+    this.#ending = ending;
     onText(line);
     this.#hangUp();
     return { kind: 'done', turnId: '', approvals: [] };

@@ -29,8 +29,6 @@ export const PhoneCallSchema = z.object({
   /** The chat the conversation is written in, once the person said it was a good time. */
   session_id: z.string().nullable(),
   fallback: PhoneCallFallbackSchema,
-  /** Approvals the call left waiting in the app. */
-  follow_ups: z.number().int().min(0),
   created_at: z.string(),
   /** After this, Twilio's requests for the call are refused and no media session can open. */
   expires_at: z.string(),
@@ -38,6 +36,38 @@ export const PhoneCallSchema = z.object({
 });
 
 export type PhoneCall = z.infer<typeof PhoneCallSchema>;
-export type PhoneCallStatus = z.infer<typeof PhoneCallStatusSchema>;
 export type PhoneCallOutcome = z.infer<typeof PhoneCallOutcomeSchema>;
 export type PhoneCallMode = z.infer<typeof PhoneCallModeSchema>;
+
+/** Twilio's id for a call. */
+export const CallSidSchema = z.string().regex(/^CA[0-9a-fA-F]{32}$/);
+
+/** What Twilio's voice webhook says about a call that was just answered. Other fields Twilio sends are not read. */
+export const VoiceWebhookParamsSchema = z.object({
+  AccountSid: z.string().min(1),
+  CallSid: CallSidSchema,
+  /** Who answered, as the phone company could tell; missing when it could not. */
+  AnsweredBy: z
+    .enum(['human', 'machine_start', 'machine_end_beep', 'machine_end_silence', 'machine_end_other', 'fax', 'unknown'])
+    .optional(),
+});
+
+/** What Twilio's status webhook says about how a call stands. Other fields Twilio sends are not read. */
+export const CallStatusParamsSchema = z.object({
+  AccountSid: z.string().min(1),
+  CallSid: CallSidSchema,
+  CallStatus: z.enum([
+    'queued',
+    'initiated',
+    'ringing',
+    'in-progress',
+    'completed',
+    'busy',
+    'no-answer',
+    'failed',
+    'canceled',
+  ]),
+});
+
+export type VoiceWebhookParams = z.infer<typeof VoiceWebhookParamsSchema>;
+export type CallStatusParams = z.infer<typeof CallStatusParamsSchema>;

@@ -7,5 +7,10 @@ import type { Delivery, DeliveryAttempt, DeliveryChannel } from '../../schemas/d
 export interface DeliveryChannelSender {
   /** The channel its attempts are recorded under, including when it fails before it can say so itself. */
   readonly channel: DeliveryChannel;
+  /**
+   * When an attempt of this sender does not go out, the delivery is sent again as a nudge through these channels,
+   * once, right after that attempt is written down.
+   */
+  readonly fallsBackTo?: readonly DeliveryChannel[];
   send(input: { delivery: Delivery; tenant_id: string; created_by: string }): Promise<DeliveryAttempt[]>;
 }

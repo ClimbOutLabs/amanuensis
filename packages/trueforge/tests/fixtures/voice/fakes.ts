@@ -185,6 +185,8 @@ export interface ScriptedReply {
 
 export class FakeTurns implements VoiceTurnRunner {
   readonly sent: string[] = [];
+  /** For each message, whether the person began while the assistant was still speaking. */
+  readonly spokenOver: boolean[] = [];
   readonly answers: { decision: 'allow' | 'deny'; toolCallId: string }[] = [];
   cancels = 0;
   #count = 0;
@@ -193,8 +195,19 @@ export class FakeTurns implements VoiceTurnRunner {
     private readonly options: { gate?: () => Promise<void> } = {},
   ) {}
 
-  async sendMessage({ text, signal, onText }: { text: string; signal: AbortSignal; onText: (delta: string) => void }) {
+  async sendMessage({
+    text,
+    startedWhileSpeaking,
+    signal,
+    onText,
+  }: {
+    text: string;
+    startedWhileSpeaking?: boolean;
+    signal: AbortSignal;
+    onText: (delta: string) => void;
+  }) {
     this.sent.push(text);
+    this.spokenOver.push(startedWhileSpeaking ?? false);
     return this.#run({ reply: this.replies.message?.shift(), signal, onText });
   }
 

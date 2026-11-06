@@ -3,6 +3,7 @@ import {
   MAIN_THREAD_ID,
   type ISessionStore,
   type TerminalTurnState,
+  type TurnContextAppend,
   type TurnCreatedEvent,
   type TurnDoneEvent,
 } from '@truefoundry/trueforge-core/agent-session';
@@ -14,13 +15,15 @@ import type { SessionCustom, TurnCustom } from '../db/sessionCustom';
 
 /**
  * Writes one finished assistant line at the end of a chat, with no model call, the way the chat shows any reply. Later
- * turns in the chat see it as the assistant's own words. Resolves to the turn it wrote.
+ * turns in the chat see it as the assistant's own words, after what the person said when `said` is given. Resolves to
+ * the turn it wrote.
  */
 export async function appendAssistantLine({
   sessionStore,
   tenant_id,
   session_id,
   text,
+  said,
   title,
   now,
 }: {
@@ -28,6 +31,8 @@ export async function appendAssistantLine({
   tenant_id: string;
   session_id: string;
   text: string;
+  /** What the person said that this line answers, written as their message. */
+  said?: string;
   /** Becomes the chat's title when it has none yet. */
   title: string;
   now: Date;
@@ -38,6 +43,10 @@ export async function appendAssistantLine({
   }
   const previous =
     record.last_turn_id === null ? undefined : await sessionStore.getTurn({ session_id, turn_id: record.last_turn_id });
+  const context: TurnContextAppend['context'] = [{ role: 'assistant', content: text }];
+  if (said !== undefined) {
+    context.unshift({ role: 'user', content: said });
+  }
   const turnId = ulid().toLowerCase();
   const createdAt = now.toISOString();
   await sessionStore.createTurn({
@@ -48,7 +57,7 @@ export async function appendAssistantLine({
       ancestor_ids: previous === undefined ? [] : [...previous.ancestor_ids, previous.turn_id],
       previous_turn_id: previous?.turn_id ?? null,
       state: { status: 'running' },
-      input: [],
+      input: said === undefined ? [] : [{ type: EventType.USER_MESSAGE, content: said }],
       custom: null,
       created_at: now,
       updated_at: now,
@@ -70,7 +79,11 @@ export async function appendAssistantLine({
           ]
         : [],
     new_context_appends: [
-      { thread_id: MAIN_THREAD_ID, context: [{ role: 'assistant', content: text }], current_context_usage: null },
+      {
+        thread_id: MAIN_THREAD_ID,
+        context,
+        current_context_usage: null,
+      },
     ],
     capability_states: [
       {

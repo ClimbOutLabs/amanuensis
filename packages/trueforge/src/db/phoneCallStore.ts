@@ -14,7 +14,6 @@ export interface PhoneCallTable {
   mode: string | null;
   session_id: string | null;
   fallback: string;
-  follow_ups: number;
   /** SHA-256 of the one-time media token, while one is waiting to be used. The token itself is never stored. */
   token_hash: string | null;
   token_expires_at: string | Date | null;
@@ -49,8 +48,8 @@ export interface IPhoneCallStore {
   /** Records Twilio's id for a call still dialing. Resolves to false when the call already has one or moved on. */
   attachSid(input: { id: string; call_sid: string }): Promise<boolean>;
   /**
-   * Stores a one-time media token for a ringing call that has not expired, and moves it to `connecting`. Only the
-   * first request wins: a call is connected once.
+   * Stores a one-time media token for a call that has not expired and is ringing or still waiting for its line, and
+   * moves it to `connecting`. A retried webhook replaces a waiting token; once the line is open, no token is given.
    */
   issueToken(input: {
     call_sid: string;
@@ -66,9 +65,13 @@ export interface IPhoneCallStore {
   redeemToken(input: { call_sid: string; token_hash: string; now: Date }): Promise<PhoneCall | undefined>;
   setSession(input: { id: string; session_id: string }): Promise<void>;
   /** Ends a call once. Resolves to false when it had already ended. */
-  finish(input: { id: string; outcome: PhoneCallOutcome; follow_ups: number; now: Date }): Promise<boolean>;
+  finish(input: { id: string; outcome: PhoneCallOutcome; now: Date }): Promise<boolean>;
   /** Claims the one fallback a missed call may send. Resolves to false when it was sent already or is off. */
   claimFallback(id: string): Promise<boolean>;
+  /** Calls started before a time that have not ended, such as one cut off when the server stopped. */
+  listUnfinished(input: { created_before: Date }): Promise<PhoneCall[]>;
+  /** Deletes calls that ended before a time. Resolves to how many were deleted. */
+  prune(input: { ended_before: Date }): Promise<number>;
 }
 
 function iso(value: string | Date | null): string | null {
@@ -90,7 +93,6 @@ function toCall(row: PhoneCallTable): PhoneCall {
     mode: row.mode,
     session_id: row.session_id,
     fallback: row.fallback,
-    follow_ups: row.follow_ups,
     created_at: iso(row.created_at),
     expires_at: iso(row.expires_at),
     ended_at: iso(row.ended_at),
@@ -116,7 +118,6 @@ export class PhoneCallStore implements IPhoneCallStore {
       mode: null,
       session_id: null,
       fallback: input.fallback ? 'pending' : 'off',
-      follow_ups: 0,
       token_hash: null,
       token_expires_at: null,
       created_at: input.now.toISOString(),
@@ -165,7 +166,7 @@ export class PhoneCallStore implements IPhoneCallStore {
         token_expires_at: input.token_expires_at.toISOString(),
       })
       .where('call_sid', '=', input.call_sid)
-      .where('status', '=', 'ringing')
+      .where('status', 'in', ['ringing', 'connecting'])
       .where('expires_at', '>', input.now.toISOString())
       .returning('id')
       .execute();
@@ -190,13 +191,12 @@ export class PhoneCallStore implements IPhoneCallStore {
     await this.#db.updateTable('phone_call').set({ session_id }).where('id', '=', id).execute();
   }
 
-  async finish(input: { id: string; outcome: PhoneCallOutcome; follow_ups: number; now: Date }): Promise<boolean> {
+  async finish(input: { id: string; outcome: PhoneCallOutcome; now: Date }): Promise<boolean> {
     const rows = await this.#db
       .updateTable('phone_call')
       .set({
         status: 'ended',
         outcome: input.outcome,
-        follow_ups: input.follow_ups,
         token_hash: null,
         token_expires_at: null,
         ended_at: input.now.toISOString(),
@@ -217,5 +217,25 @@ export class PhoneCallStore implements IPhoneCallStore {
       .returning('id')
       .execute();
     return rows.length > 0;
+  }
+
+  async listUnfinished({ created_before }: { created_before: Date }): Promise<PhoneCall[]> {
+    const rows = await this.#db
+      .selectFrom('phone_call')
+      .selectAll()
+      .where('status', '!=', 'ended')
+      .where('created_at', '<', created_before.toISOString())
+      .execute();
+    return rows.map(toCall);
+  }
+
+  async prune({ ended_before }: { ended_before: Date }): Promise<number> {
+    const rows = await this.#db
+      .deleteFrom('phone_call')
+      .where('status', '=', 'ended')
+      .where('ended_at', '<', ended_before.toISOString())
+      .returning('id')
+      .execute();
+    return rows.length;
   }
 }

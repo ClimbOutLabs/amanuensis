@@ -1,5 +1,6 @@
 import type { TwilioSettings } from '../../config';
 import type { ReachAvailability } from '../../schemas/reach';
+import { CALLS_NEED_VOICE, CALLS_NOT_SET_UP } from '../calls/phoneCalls';
 import { TEXTS_NOT_SET_UP } from '../texts/textWords';
 
 /**
@@ -11,27 +12,29 @@ export type ReachChannels = ReachAvailability;
 
 export const NO_PHONE_CHANNELS: ReachChannels = {
   texts: { available: false, note: TEXTS_NOT_SET_UP },
-  calls: {
-    available: false,
-    note: 'Calls are not set up on this server. To set them up, add the Twilio details to the settings file and restart Aman.',
-  },
+  calls: { available: false, note: CALLS_NOT_SET_UP },
 };
 
 /** Shown beside Calls in Reach me settings, word for word. */
-export const CALLS_PRIVACY_NOTE =
+const CALLS_PRIVACY_NOTE =
   "Calls and texts travel through Twilio and the phone company. The assistant's voice and the transcript are made on your computer.";
 
-/** The channels this server offers: texts and calls once Twilio is set up. Calls ring the number confirmed for texts. */
+/**
+ * The channels this server offers: texts once Twilio is set up, and calls once the parts that listen and speak are
+ * running too. Calls ring the number confirmed for texts.
+ */
 export function reachChannelsFor({
   twilio,
+  voiceReady,
 }: {
   twilio: Pick<TwilioSettings, 'accountSid'> | undefined;
+  voiceReady: boolean;
 }): ReachChannels {
   if (twilio === undefined) {
     return NO_PHONE_CHANNELS;
   }
   return {
     texts: { available: true, note: 'Texts travel through Twilio and the phone company.' },
-    calls: { available: true, note: CALLS_PRIVACY_NOTE },
+    calls: voiceReady ? { available: true, note: CALLS_PRIVACY_NOTE } : { available: false, note: CALLS_NEED_VOICE },
   };
 }

@@ -9,19 +9,29 @@ import type { IPhoneCallStore } from '../../db/phoneCallStore';
 import type { IReachSettingsStore } from '../../db/reachSettingsStore';
 import type { ITextContactStore } from '../../db/textContactStore';
 import type { Delivery, DeliveryAttempt } from '../../schemas/deliveries';
-import type { PhoneCall, PhoneCallOutcome } from '../../schemas/phoneCalls';
+import {
+  CallStatusParamsSchema,
+  VoiceWebhookParamsSchema,
+  type PhoneCall,
+  type PhoneCallOutcome,
+} from '../../schemas/phoneCalls';
 import { newId } from '../../utils/id';
 import { PhoneVoiceTransport, readPhoneFrame } from '../../voice/phoneTransport';
 import { VoiceSession, type VoiceSessionDeps } from '../../voice/session';
-import { UNNAMED_ASSISTANT } from '../chatAssistant';
 import type { DeliveryChannelSender } from '../delivery/deliveryChannel';
 import type { DeliveryService } from '../delivery/deliveryService';
-import { assistantNameFor } from '../texts/assistantName';
+import { plainName } from '../texts/assistantName';
 import { maskedTarget } from '../texts/smsSender';
 import { canText } from '../texts/textNumber';
 import { privatePhrase } from '../texts/textWords';
 import { CALL_LINES, CallTurns, type CallChat } from './callTurns';
 import { callFailureWords, MEDIA_STREAM_PATH, type CallProvider } from './twilioCalls';
+
+/** Said where calls are offered while this server has no Twilio account. */
+export const CALLS_NOT_SET_UP =
+  'Calls are not set up on this server. To set them up, add the Twilio details to the settings file and restart Aman.';
+/** Said where calls are offered while the parts that listen and speak are not running. */
+export const CALLS_NEED_VOICE = 'Calls need the voice parts of Aman. Start them, then try again in a minute.';
 
 /** Twilio's requests for a call are refused after this, and no media session can open. */
 const CALL_LIFETIME_MS = 5 * 60_000;
@@ -29,21 +39,55 @@ const CALL_LIFETIME_MS = 5 * 60_000;
 const MEDIA_TOKEN_TTL_MS = 30_000;
 /** Twilio sends `start` straight after the socket opens; a socket that names no call by then is closed. */
 const START_WAIT_MS = 10_000;
-/** The longest a call talks before the assistant says goodbye. */
-const MAX_TALK_MS = 10 * 60_000;
+/** Ended calls are kept this long, then forgotten. */
+const KEEP_ENDED_MS = 30 * 24 * 60 * 60_000;
+
+/** How long a call may go on. Each can be shortened for a test. */
+export interface CallLimits {
+  /** The assistant says goodbye after this much talking. */
+  talkMs: number;
+  /** The line is closed this long after goodbye was due, whatever is still running. */
+  hangUpGraceMs: number;
+  /** Silence after the question counts as an answer that was not caught. */
+  silenceMs: number;
+}
+
+const DEFAULT_LIMITS: CallLimits = { talkMs: 10 * 60_000, hangUpGraceMs: 15_000, silenceMs: 8_000 };
 
 /** Twilio's final statuses for a call that never reached a person. */
 const MISSED_STATUSES = new Set(['busy', 'no-answer', 'failed', 'canceled']);
 
 export const HANG_UP_TWIML = '<?xml version="1.0" encoding="UTF-8"?><Response><Hangup/></Response>';
 
-/** The parts a call listens and speaks with; the same ones a voice session in the app uses. */
-export type CallVoiceParts = Pick<VoiceSessionDeps, 'vad' | 'stt' | 'tts'>;
+/** What Activity says about how a call ended. Each sentence is one idea. */
+const ENDED_WORDS = {
+  noAnswer: 'No one answered. The call was not tried again.',
+  voicemail:
+    'A voicemail picked up, so a short message was left. It said only that something needs you. The call was not tried again.',
+  voicemailNotLeft: 'A voicemail picked up, but no message could be left. The call was not tried again.',
+  lineNotOpened: 'The call was answered, but the line could not be opened. The call was not tried again.',
+  cutOff: 'The call stopped before it finished. The call was not tried again.',
+  saidNo: 'You answered and said it was not a good time. It is waiting for you in the app.',
+  noYes: 'You answered, but the call ended before you said it was a good time. It is waiting for you in the app.',
+  noChat: 'You answered, but the assistant could not talk it through on the phone. It is waiting for you in the app.',
+  ended: 'You answered. The call ended. Anything that was said is in the chat.',
+} as const;
+
+/** What a call listens with. It speaks with the same voice a voice session in the app uses. */
+export type CallListening = Pick<VoiceSessionDeps, 'vad' | 'stt'>;
+export type CallSpeaking = VoiceSessionDeps['tts'];
+
+/** The names a call says: the assistant's, and the person's, each from their settings and undefined when unset. */
+export interface CallNames {
+  assistant: string | undefined;
+  person: string | undefined;
+}
 
 /** Opens the chat a call's conversation is written in, as the person, starting with the assistant's opening line. */
 export interface CallChats {
   open(input: {
     owner: { tenant_id: string; created_by: string };
+    names: CallNames;
     delivery: Delivery;
     call_id: string;
     opening: string;
@@ -60,11 +104,13 @@ export interface PhoneCallService {
     fallback: boolean;
   }): Promise<DeliveryAttempt>;
   /** Twilio's voice webhook: what to do now the call was answered. Resolves to TwiML. */
-  answered(params: URLSearchParams): Promise<string>;
-  /** Twilio's status webhook: how the call ended. */
-  statusChanged(params: URLSearchParams): Promise<void>;
+  answered(input: { params: URLSearchParams; query: URLSearchParams }): Promise<string>;
+  /** Twilio's status webhook: how the call stands. */
+  statusChanged(input: { params: URLSearchParams; query: URLSearchParams }): Promise<void>;
   /** A media WebSocket Twilio opened. It must name a call Aman started, with its one-time token. */
   media(socket: WebSocket): void;
+  /** Ends calls that never finished, such as one cut off when the server stopped, and forgets old ones. */
+  sweep(): Promise<void>;
 }
 
 export interface PhoneCallDeps {
@@ -82,11 +128,17 @@ export interface PhoneCallDeps {
         publicUrl: string;
       }
     | undefined;
+  /** Whether the parts that listen and speak are running now. */
+  voiceReady: () => boolean;
   /** Read when needed: the delivery service is made after its channels. */
   deliveries: () => Pick<DeliveryService, 'fallBack' | 'recordAttempt'>;
   chats: CallChats;
-  parts: () => Promise<CallVoiceParts>;
+  /** The voice; a voicemail needs only this. */
+  speaking: () => CallSpeaking;
+  /** What a conversation listens with, loaded once the person is on the line. */
+  listening: () => Promise<CallListening>;
   logger: Logger;
+  limits?: Partial<CallLimits>;
   now?: () => Date;
   newToken?: () => string;
 }
@@ -109,13 +161,27 @@ function minutesWords(ms: number): string {
   return minutes === 1 ? 'about a minute' : `about ${String(minutes)} minutes`;
 }
 
+function errorName(error: unknown): string {
+  return error instanceof Error ? error.name : 'unknown';
+}
+
+/** One open line, from the socket's first frame to its close. `end` runs once, however the line ends. */
+interface CallLine {
+  start(): Promise<void>;
+  end(): Promise<void>;
+  audio(bytes: Uint8Array): void;
+}
+
 export function createPhoneCallService(deps: PhoneCallDeps): PhoneCallService {
   const now = deps.now ?? (() => new Date());
   const newToken = deps.newToken ?? (() => randomBytes(32).toString('base64url'));
+  const limits: CallLimits = { ...DEFAULT_LIMITS, ...deps.limits };
   const { store, logger } = deps;
   const twilio = deps.twilio;
   const streamUrl =
     twilio === undefined ? undefined : `${twilio.publicUrl.replace(/^https:/, 'wss:')}${MEDIA_STREAM_PATH}`;
+  /** Calls with an open line in this process; their own close writes them down. */
+  const live = new Set<string>();
 
   const attempt = ({
     outcome,
@@ -127,36 +193,71 @@ export function createPhoneCallService(deps: PhoneCallDeps): PhoneCallService {
     target: string | null;
   }): DeliveryAttempt => ({ channel: 'call', outcome, detail, target, attempted_at: now().toISOString() });
 
-  async function nameFor(owner: { tenant_id: string; created_by: string }): Promise<string> {
-    // The same rule as a text: plain letters only, kept short, and never a name that holds a phone number.
-    return assistantNameFor({ personalization: deps.personalization, owner });
+  /** The same rule as a text: plain letters only, kept short, and never a name that holds a phone number. */
+  async function namesFor(owner: { tenant_id: string; created_by: string }): Promise<CallNames> {
+    const profile = await deps.personalization.getProfile(owner);
+    return {
+      assistant: plainName(profile?.assistant_name),
+      person: plainName(profile?.address_as ?? profile?.user_name),
+    };
+  }
+
+  function spokenName(names: CallNames): string {
+    return names.assistant ?? 'your assistant';
   }
 
   function deliveryOf(call: PhoneCall): Promise<Delivery | undefined> {
     return deps.deliveryStore.get({ tenant_id: call.tenant_id, created_by: call.created_by, id: call.delivery_id });
   }
 
-  /** A call that never reached a person: written down once, then one text and one push. It is never tried again. */
-  async function missed({ call, outcome }: { call: PhoneCall; outcome: 'voicemail' | 'no_answer' }): Promise<void> {
+  /**
+   * A call that never got to a conversation: written down once, then one text and one push. It is never tried again.
+   */
+  async function endWithoutTalking({
+    call,
+    outcome,
+    detail,
+  }: {
+    call: PhoneCall;
+    outcome: Extract<PhoneCallOutcome, 'voicemail' | 'no_answer' | 'failed'>;
+    detail: string;
+  }): Promise<void> {
     const owner = { tenant_id: call.tenant_id, created_by: call.created_by };
-    if (!(await store.finish({ id: call.id, outcome, follow_ups: 0, now: now() }))) {
+    if (!(await store.finish({ id: call.id, outcome, now: now() }))) {
       return;
     }
     await deps.deliveries().recordAttempt({
       ...owner,
       delivery_id: call.delivery_id,
-      attempt: attempt({
-        outcome: outcome === 'voicemail' ? 'sent' : 'failed',
-        detail:
-          outcome === 'voicemail'
-            ? 'No one answered, so a short voicemail was left. It said only that something needs you. The call was not tried again.'
-            : 'No one answered. The call was not tried again.',
-        target: null,
-      }),
+      attempt: attempt({ outcome: outcome === 'voicemail' ? 'sent' : 'failed', detail, target: null }),
     });
     if (await store.claimFallback(call.id)) {
       await deps.deliveries().fallBack({ ...owner, delivery_id: call.delivery_id, channels: ['sms', 'web_push'] });
     }
+  }
+
+  /** A call the person answered, written down once with how it went. */
+  async function endAnswered({
+    call,
+    outcome,
+    detail,
+    session_id,
+  }: {
+    call: PhoneCall;
+    outcome: Extract<PhoneCallOutcome, 'answered' | 'not_now'>;
+    detail: string;
+    session_id: string | null | undefined;
+  }): Promise<void> {
+    if (!(await store.finish({ id: call.id, outcome, now: now() }))) {
+      return;
+    }
+    await deps.deliveries().recordAttempt({
+      tenant_id: call.tenant_id,
+      created_by: call.created_by,
+      delivery_id: call.delivery_id,
+      attempt: attempt({ outcome: 'sent', detail, target: null }),
+      ...(session_id === undefined || session_id === null ? {} : { conversation_id: session_id }),
+    });
   }
 
   async function place({
@@ -169,15 +270,18 @@ export function createPhoneCallService(deps: PhoneCallDeps): PhoneCallService {
     fallback: boolean;
   }): Promise<DeliveryAttempt> {
     if (twilio === undefined) {
-      return attempt({
-        outcome: 'skipped',
-        detail: 'Calls are not set up on this server. Add the Twilio settings and restart Aman.',
-        target: null,
-      });
+      return attempt({ outcome: 'skipped', detail: CALLS_NOT_SET_UP, target: null });
+    }
+    if (!deps.voiceReady()) {
+      return attempt({ outcome: 'skipped', detail: CALLS_NEED_VOICE, target: null });
     }
     const settings = await deps.reachSettings.get(owner);
     if (settings?.channels.calls !== true) {
-      return attempt({ outcome: 'skipped', detail: 'Calls are switched off in Settings, Reach me.', target: null });
+      return attempt({
+        outcome: 'skipped',
+        detail: 'Calls are switched off. Switch them on in Settings, Reach me.',
+        target: null,
+      });
     }
     const contact = await deps.contacts.get(owner);
     if (!canText(contact)) {
@@ -197,12 +301,17 @@ export function createPhoneCallService(deps: PhoneCallDeps): PhoneCallService {
       now: at,
       expires_at: new Date(at.getTime() + CALL_LIFETIME_MS),
     });
-    const result = await twilio.provider.place({ to: contact.phone });
+    const result = await twilio.provider.place({ to: contact.phone, call_id: call.id });
     if (result.outcome === 'failed') {
-      await store.finish({ id: call.id, outcome: 'failed', follow_ups: 0, now: now() });
+      await store.finish({ id: call.id, outcome: 'failed', now: now() });
       return attempt({ outcome: 'failed', detail: callFailureWords(result.failure), target });
     }
-    await store.attachSid({ id: call.id, call_sid: result.call_sid });
+    try {
+      await store.attachSid({ id: call.id, call_sid: result.call_sid });
+    } catch (error) {
+      // The phone is ringing whatever happened here: Twilio's requests name the call by Aman's own id too.
+      logger.warn('A phone call id could not be saved', { call_id: call.id, error: errorName(error) });
+    }
     // Only the outcome is logged: the number and what the call is about are the person's.
     logger.info('A phone call was started', { call_id: call.id });
     return attempt({ outcome: 'sent', detail: 'The phone is ringing.', target });
@@ -210,45 +319,57 @@ export function createPhoneCallService(deps: PhoneCallDeps): PhoneCallService {
 
   const sender: DeliveryChannelSender = {
     channel: 'call',
+    // A phone that never rang is told through a text and a push instead, once.
+    fallsBackTo: ['sms', 'web_push'],
     async send({ delivery, tenant_id, created_by }) {
       if (delivery.level !== 'call') {
         return [];
       }
-      const owner = { tenant_id, created_by };
-      const started = await place({ owner, delivery, fallback: true });
-      if (started.outcome !== 'sent') {
-        // The phone never rang, so the person hears through a text and a push instead, once.
-        await deps.deliveries().fallBack({ ...owner, delivery_id: delivery.id, channels: ['sms', 'web_push'] });
-      }
-      return [started];
+      return [await place({ owner: { tenant_id, created_by }, delivery, fallback: true })];
     },
   };
 
-  async function answered(params: URLSearchParams): Promise<string> {
-    const sid = params.get('CallSid');
-    if (
-      twilio === undefined ||
-      streamUrl === undefined ||
-      params.get('AccountSid') !== twilio.accountSid ||
-      sid === null
-    ) {
+  /**
+   * The call a Twilio request is about: by Twilio's id, or else by Aman's own id in the signed address, for a call
+   * whose Twilio id was never saved.
+   */
+  async function callFor({ sid, query }: { sid: string; query: URLSearchParams }): Promise<PhoneCall | undefined> {
+    const bySid = await store.getBySid(sid);
+    if (bySid !== undefined) {
+      return bySid;
+    }
+    const id = query.get('call');
+    const byId = id === null ? undefined : await store.get(id);
+    if (byId?.call_sid !== null) {
+      return undefined;
+    }
+    await store.attachSid({ id: byId.id, call_sid: sid });
+    return store.get(byId.id);
+  }
+
+  async function answered({ params, query }: { params: URLSearchParams; query: URLSearchParams }): Promise<string> {
+    const parsed = VoiceWebhookParamsSchema.safeParse(Object.fromEntries(params));
+    if (twilio === undefined || streamUrl === undefined || !parsed.success) {
       return HANG_UP_TWIML;
     }
-    const call = await store.getBySid(sid);
+    const { AccountSid, CallSid, AnsweredBy = 'unknown' } = parsed.data;
+    if (AccountSid !== twilio.accountSid) {
+      return HANG_UP_TWIML;
+    }
+    const call = await callFor({ sid: CallSid, query });
     if (call === undefined) {
       return HANG_UP_TWIML;
     }
-    const answeredBy = params.get('AnsweredBy') ?? 'unknown';
-    if (answeredBy === 'fax') {
-      await missed({ call, outcome: 'no_answer' });
+    if (AnsweredBy === 'fax') {
+      await endWithoutTalking({ call, outcome: 'no_answer', detail: ENDED_WORDS.noAnswer });
       return HANG_UP_TWIML;
     }
     const token = newToken();
     const issued = await store.issueToken({
-      call_sid: sid,
+      call_sid: CallSid,
       token_hash: tokenHash(token),
       token_expires_at: new Date(now().getTime() + MEDIA_TOKEN_TTL_MS),
-      mode: answeredBy.startsWith('machine') ? 'voicemail' : 'talk',
+      mode: AnsweredBy.startsWith('machine') ? 'voicemail' : 'talk',
       now: now(),
     });
     if (!issued) {
@@ -262,44 +383,68 @@ export function createPhoneCallService(deps: PhoneCallDeps): PhoneCallService {
     );
   }
 
-  async function statusChanged(params: URLSearchParams): Promise<void> {
-    const sid = params.get('CallSid');
-    if (params.get('AccountSid') !== twilio?.accountSid || sid === null) {
+  async function statusChanged({ params, query }: { params: URLSearchParams; query: URLSearchParams }): Promise<void> {
+    const parsed = CallStatusParamsSchema.safeParse(Object.fromEntries(params));
+    if (!parsed.success || parsed.data.AccountSid !== twilio?.accountSid) {
       return;
     }
-    const call = await store.getBySid(sid);
+    const { CallSid, CallStatus } = parsed.data;
+    const call = await callFor({ sid: CallSid, query });
     if (call === undefined || call.status === 'ended') {
       return;
     }
-    const status = params.get('CallStatus') ?? '';
-    // A call that ended before its line opened never reached the person, whatever Twilio calls it.
-    if (MISSED_STATUSES.has(status) || (status === 'completed' && call.status !== 'connected')) {
-      await missed({ call, outcome: 'no_answer' });
+    const lineGiven = call.status === 'connecting' || call.status === 'connected';
+    if (MISSED_STATUSES.has(CallStatus) || (CallStatus === 'completed' && !lineGiven)) {
+      await endWithoutTalking({ call, outcome: 'no_answer', detail: ENDED_WORDS.noAnswer });
+      return;
+    }
+    if (CallStatus !== 'completed' || live.has(call.id)) {
+      // A line open in this process writes itself down when it closes.
+      return;
+    }
+    if (call.status === 'connecting') {
+      await endWithoutTalking({ call, outcome: 'failed', detail: ENDED_WORDS.lineNotOpened });
+    } else if (call.mode === 'voicemail') {
+      await endWithoutTalking({ call, outcome: 'voicemail', detail: ENDED_WORDS.voicemail });
+    } else {
+      await endAnswered({ call, outcome: 'answered', detail: ENDED_WORDS.ended, session_id: call.session_id });
     }
   }
 
-  async function leaveVoicemail({ call, transport }: { call: PhoneCall; transport: PhoneVoiceTransport }) {
-    const owner = { tenant_id: call.tenant_id, created_by: call.created_by };
-    const parts = await deps.parts();
-    const text = CALL_LINES.voicemail(await nameFor(owner));
-    const abort = new AbortController();
-    try {
-      for await (const chunk of parts.tts.stream({ text, format: 'mulaw8k', signal: abort.signal })) {
-        transport.sendAudio(chunk);
-      }
-      await transport.whenPlayed();
-    } catch (error) {
-      logger.warn('A voicemail could not be spoken', {
-        call_id: call.id,
-        error: error instanceof Error ? error.name : 'unknown',
-      });
-    } finally {
-      transport.close();
-    }
-    await missed({ call, outcome: 'voicemail' });
+  function voicemailLine({ call, transport }: { call: PhoneCall; transport: PhoneVoiceTransport }): CallLine {
+    let left = false;
+    let ending: Promise<void> | undefined;
+    return {
+      async start() {
+        const abort = new AbortController();
+        try {
+          const text = CALL_LINES.voicemail(spokenName(await namesFor(call)));
+          for await (const chunk of deps.speaking().stream({ text, format: 'mulaw8k', signal: abort.signal })) {
+            transport.sendAudio(chunk);
+          }
+          await transport.whenPlayed();
+          left = true;
+        } catch (error) {
+          logger.warn('A voicemail could not be spoken', { call_id: call.id, error: errorName(error) });
+        } finally {
+          transport.close();
+        }
+      },
+      end() {
+        ending ??= endWithoutTalking({
+          call,
+          outcome: 'voicemail',
+          detail: left ? ENDED_WORDS.voicemail : ENDED_WORDS.voicemailNotLeft,
+        });
+        return ending;
+      },
+      audio() {
+        // A voicemail only speaks.
+      },
+    };
   }
 
-  async function talk({
+  function talkLine({
     call,
     socket,
     transport,
@@ -307,117 +452,189 @@ export function createPhoneCallService(deps: PhoneCallDeps): PhoneCallService {
     call: PhoneCall;
     socket: WebSocket;
     transport: PhoneVoiceTransport;
-  }): Promise<(bytes: Uint8Array) => void> {
+  }): CallLine {
     const owner = { tenant_id: call.tenant_id, created_by: call.created_by };
-    const delivery = await deliveryOf(call);
-    const name = await nameFor(owner);
-    const greetingName = name === UNNAMED_ASSISTANT ? name.toLowerCase() : name;
-    const parts = await deps.parts();
-    const startedAt = now();
-    const hangUp = (): void => {
-      void (async () => {
-        await session.settled();
-        await transport.whenPlayed();
-        transport.close();
-      })();
+    const timers: NodeJS.Timeout[] = [];
+    let talking: { session: VoiceSession; turns: CallTurns; startedAt: Date } | undefined;
+    let ended = false;
+    let ending: Promise<void> | undefined;
+
+    const later = (ms: number, run: () => void): void => {
+      timers.push(setTimeout(run, ms));
     };
-    const turns = new CallTurns({
-      message: delivery === undefined ? 'It is in the app for you to see.' : spokenMessage(delivery),
-      openChat: async () => {
-        if (delivery === undefined) {
-          return undefined;
-        }
-        const chat = await deps.chats.open({
-          owner,
-          delivery,
-          call_id: call.id,
-          opening: `Hi, it's ${greetingName}. ${CALL_LINES.message(spokenMessage(delivery))}`,
+
+    async function begin(): Promise<void> {
+      const [delivery, names, listening] = await Promise.all([deliveryOf(call), namesFor(owner), deps.listening()]);
+      if (ended) {
+        return;
+      }
+      const name = spokenName(names);
+      const hangUp = (): void => {
+        void (async () => {
+          await talking?.session.settled();
+          await transport.whenPlayed();
+          transport.close();
+        })();
+      };
+      /** Waits for the person to answer the question; silence counts as an answer that was not caught. */
+      const listenForAnswer = (): void => {
+        const heard = turns.replies;
+        later(limits.silenceMs, () => {
+          if (turns.replies !== heard) {
+            return;
+          }
+          const next = turns.heardNothing();
+          if (next === undefined) {
+            return;
+          }
+          void session
+            .say(next.line)
+            .then(() => transport.whenPlayed())
+            .then(() => {
+              if (next.end) {
+                transport.close();
+              } else {
+                listenForAnswer();
+              }
+            });
         });
-        if (chat !== undefined) {
-          await store.setSession({ id: call.id, session_id: chat.session_id });
-        }
-        return chat;
-      },
-      hangUp,
-    });
-    const session = new VoiceSession({
-      ...parts,
-      transport,
-      turns,
-      // Timings and reason codes only: what was said is never logged.
-      onLatency: latency => {
-        logger.info('phone call turn', latency);
-      },
-      onNote: note => {
-        logger.info('phone call note', { note });
-      },
-    });
-    session.start();
-    void session.say(
-      CALL_LINES.opening({
-        name: greetingName,
-        kind: delivery === undefined ? 'something needs you' : privatePhrase(delivery.kind),
-      }),
-    );
-    const timeUp = setTimeout(() => {
-      void session.say(CALL_LINES.timeUp).then(hangUp);
-    }, MAX_TALK_MS);
-    socket.once('close', () => {
-      clearTimeout(timeUp);
-      void (async () => {
-        await session.end();
-        turns.chat?.close();
-        const outcome: PhoneCallOutcome = turns.answered ? 'answered' : 'not_now';
-        if (!(await store.finish({ id: call.id, outcome, follow_ups: turns.followUps, now: now() }))) {
-          return;
-        }
-        const waiting =
-          turns.followUps === 0
-            ? ''
-            : ` ${String(turns.followUps)} ${turns.followUps === 1 ? 'thing is' : 'things are'} waiting for your ok in the chat.`;
-        await deps.deliveries().recordAttempt({
-          ...owner,
-          delivery_id: call.delivery_id,
-          attempt: attempt({
-            outcome: 'sent',
-            detail:
-              outcome === 'answered'
-                ? `You answered. The call lasted ${minutesWords(now().getTime() - startedAt.getTime())}, and what was said is in the chat.${waiting}`
-                : 'You answered and said it was not a good time. It is waiting for you in the app.',
-            target: null,
-          }),
-          ...(turns.chat === undefined ? {} : { conversation_id: turns.chat.session_id }),
-        });
-      })().catch((error: unknown) => {
-        logger.warn('A phone call could not be written down', {
-          call_id: call.id,
-          error: error instanceof Error ? error.message : String(error),
-        });
+      };
+      const turns = new CallTurns({
+        message: delivery === undefined ? 'It is in the app for you to see.' : spokenMessage(delivery),
+        openChat: async () => {
+          if (delivery === undefined) {
+            return undefined;
+          }
+          const chat = await deps.chats.open({
+            owner,
+            names,
+            delivery,
+            call_id: call.id,
+            opening: `Hi, this is ${name}. ${CALL_LINES.message(spokenMessage(delivery))}`,
+          });
+          if (chat !== undefined) {
+            await store.setSession({ id: call.id, session_id: chat.session_id });
+          }
+          return chat;
+        },
+        hangUp,
+        askedAgain: () => {
+          void session
+            .settled()
+            .then(() => transport.whenPlayed())
+            .then(listenForAnswer);
+        },
       });
-    });
-    return bytes => {
-      session.pushAudio(bytes);
+      const session = new VoiceSession({
+        ...listening,
+        tts: deps.speaking(),
+        transport,
+        turns,
+        // Timings and reason codes only: what was said is never logged.
+        onLatency: latency => {
+          logger.info('phone call turn', latency);
+        },
+        onNote: note => {
+          logger.info('phone call note', { note });
+        },
+      });
+      talking = { session, turns, startedAt: now() };
+      session.start();
+      const opening = CALL_LINES.opening({
+        name,
+        person: names.person,
+        kind: delivery === undefined ? 'something needs you' : privatePhrase(delivery.kind),
+      });
+      // The opening plays to the end: a reply that starts over it is not an answer to the question.
+      void session
+        .say(opening, { interruptible: false })
+        .then(() => transport.whenPlayed())
+        .then(listenForAnswer);
+      later(limits.talkMs, () => {
+        void session.say(CALL_LINES.timeUp).then(hangUp);
+      });
+      // The line closes whatever is still running, so a stuck reply cannot hold the call open.
+      later(limits.talkMs + limits.hangUpGraceMs, () => {
+        socket.terminate();
+      });
+    }
+
+    return {
+      async start() {
+        try {
+          await begin();
+        } catch (error) {
+          logger.warn('A phone call could not start', { call_id: call.id, error: errorName(error) });
+          socket.close(1011, 'could not start');
+        }
+      },
+      end() {
+        ending ??= (async () => {
+          ended = true;
+          timers.forEach(clearTimeout);
+          if (talking === undefined) {
+            // The person never heard the assistant, so they hear through a text and a push instead.
+            await endWithoutTalking({ call, outcome: 'failed', detail: ENDED_WORDS.lineNotOpened });
+            return;
+          }
+          const { session, turns, startedAt } = talking;
+          await session.end();
+          const said =
+            turns.chat !== undefined
+              ? `You answered. The call lasted ${minutesWords(now().getTime() - startedAt.getTime())}, and what was said is in the chat.`
+              : turns.ending === 'said_no'
+                ? ENDED_WORDS.saidNo
+                : turns.ending === 'no_chat'
+                  ? ENDED_WORDS.noChat
+                  : ENDED_WORDS.noYes;
+          await endAnswered({
+            call,
+            outcome: turns.answered ? 'answered' : 'not_now',
+            detail: said,
+            session_id: turns.chat?.session_id,
+          });
+        })();
+        return ending;
+      },
+      audio(bytes) {
+        talking?.session.pushAudio(bytes);
+      },
     };
   }
 
   function media(socket: WebSocket): void {
-    let onAudio: ((bytes: Uint8Array) => void) | undefined;
-    let transport: PhoneVoiceTransport | undefined;
+    let line: { call: PhoneCall; run: CallLine; transport: PhoneVoiceTransport } | undefined;
     let started = false;
+    let closed = false;
     const waitForStart = setTimeout(() => {
       socket.close(1008, 'no call');
     }, START_WAIT_MS);
+    const writeDown = ({ call, run }: { call: PhoneCall; run: CallLine }): void => {
+      run
+        .end()
+        .catch((error: unknown) => {
+          logger.warn('A phone call could not be written down', { call_id: call.id, error: errorName(error) });
+        })
+        .finally(() => {
+          live.delete(call.id);
+        });
+    };
+    // Attached before anything is awaited, so a line that drops at any point is still written down.
     socket.on('close', () => {
+      closed = true;
       clearTimeout(waitForStart);
+      if (line !== undefined) {
+        writeDown(line);
+      }
     });
     socket.on('message', data => {
       const frame = readPhoneFrame(data);
       if (frame.kind === 'audio') {
-        onAudio?.(frame.bytes);
+        line?.run.audio(frame.bytes);
         return;
       }
       if (frame.kind === 'mark') {
-        transport?.onMark(frame.name);
+        line?.transport.onMark(frame.name);
         return;
       }
       if (frame.kind === 'stop') {
@@ -441,19 +658,36 @@ export function createPhoneCallService(deps: PhoneCallDeps): PhoneCallService {
           socket.close(1008, 'unknown call');
           return;
         }
-        const line = new PhoneVoiceTransport({ socket, streamSid: frame.streamSid });
-        transport = line;
-        if (call.mode === 'voicemail') {
-          await leaveVoicemail({ call, transport: line });
+        live.add(call.id);
+        const transport = new PhoneVoiceTransport({ socket, streamSid: frame.streamSid });
+        const run =
+          call.mode === 'voicemail' ? voicemailLine({ call, transport }) : talkLine({ call, socket, transport });
+        line = { call, run, transport };
+        if (closed) {
+          writeDown(line);
           return;
         }
-        onAudio = await talk({ call, socket, transport: line });
+        await run.start();
       })().catch((error: unknown) => {
-        logger.warn('A phone call could not start', { error: error instanceof Error ? error.message : String(error) });
+        logger.warn('A phone call could not start', { error: errorName(error) });
         socket.close(1011, 'could not start');
       });
     });
   }
 
-  return { sender, place, answered, statusChanged, media };
+  async function sweep(): Promise<void> {
+    const at = now().getTime();
+    // A call that never reached its line is over once it expires; one that did is over once its longest talk is.
+    const longest = CALL_LIFETIME_MS + limits.talkMs + limits.hangUpGraceMs + 60_000;
+    for (const call of await store.listUnfinished({ created_before: new Date(at - CALL_LIFETIME_MS) })) {
+      const lineGiven = call.status === 'connecting' || call.status === 'connected';
+      const over = lineGiven ? Date.parse(call.created_at) + longest < at : Date.parse(call.expires_at) < at;
+      if (over && !live.has(call.id)) {
+        await endWithoutTalking({ call, outcome: 'failed', detail: ENDED_WORDS.cutOff });
+      }
+    }
+    await store.prune({ ended_before: new Date(at - KEEP_ENDED_MS) });
+  }
+
+  return { sender, place, answered, statusChanged, media, sweep };
 }

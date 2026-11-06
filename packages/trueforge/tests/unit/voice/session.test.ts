@@ -114,6 +114,33 @@ describe('a line no turn asked for', () => {
     await feed({ session: t.session, clock: t.clock, samples: quiet(900) });
     await t.session.settled();
     expect(t.turns.sent).toEqual(['hello?']);
+    expect(t.turns.spokenOver).toEqual([true]);
+  });
+
+  it('can hold the floor: talking over it does not stop it, and the turn is told it was spoken over', async () => {
+    const t = setup({
+      stt: ['yeah?', 'yes'],
+      message: [{ text: ['Okay.'] }, { text: ['Okay.'] }],
+      outputFormat: 'mulaw8k',
+    });
+    await t.session.say('Hi, it is your assistant. Something needs you. Is this a good time?', {
+      interruptible: false,
+    });
+    const clearedBefore = t.transport.cleared;
+    await feed({ session: t.session, clock: t.clock, samples: hum(700, 0.3, 1.7) });
+    await feed({ session: t.session, clock: t.clock, samples: quiet(900) });
+    await t.session.settled();
+    expect(t.transport.cleared).toBe(clearedBefore);
+    expect(t.tts.sentences.slice(0, 3)).toEqual([
+      'Hi, it is your assistant.',
+      'Something needs you.',
+      'Is this a good time?',
+    ]);
+    t.clock.advance(5_000);
+    await feed({ session: t.session, clock: t.clock, samples: says() });
+    await t.session.settled();
+    expect(t.turns.sent).toEqual(['yeah?', 'yes']);
+    expect(t.turns.spokenOver).toEqual([true, false]);
   });
 });
 

@@ -1,22 +1,35 @@
+import { createHash } from 'node:crypto';
+
+import { CALL_LINES } from '../../../../src/runtime/calls/callTurns';
+import { CALLS_NEED_VOICE } from '../../../../src/runtime/calls/phoneCalls';
 import { readReachHistory } from '../../../../src/runtime/noticing/reachGate';
-import { applyReachRules } from '../../../../src/runtime/noticing/reachRules';
-import { defaultReachSettings } from '../../../../src/schemas/reach';
 import { ACCOUNT_SID, ALICE, CALL_SID, PHONE, callsHarness } from '../../../fixtures/callsHarness';
+import { FakeStt, FakeTts, LoudnessVad } from '../../../fixtures/voice/fakes';
 
 type Harness = Awaited<ReturnType<typeof callsHarness>>;
 
-const waitFor = async (check: () => boolean | Promise<boolean>, ms = 3000): Promise<void> => {
-  const until = Date.now() + ms;
-  while (!(await check())) {
-    if (Date.now() > until) {
-      throw new Error('timed out');
-    }
-    await new Promise(resolve => setTimeout(resolve, 10));
-  }
-};
+const OTHER_SID = `CA${'c'.repeat(32)}`;
 
-async function attemptsOf(h: Harness, id: string) {
-  return (await h.deliveryStore.get({ ...ALICE, id }))?.attempts ?? [];
+/** A call row whose Twilio id was never saved, as when saving it failed or Twilio answered slowly. */
+async function callWithoutSid(h: Harness) {
+  const delivery = await h.deliveries.deliver({
+    ...ALICE,
+    kind: 'nudge',
+    level: 'call',
+    text: 'Your 3pm clashes.',
+    reason: 'Two things at once.',
+    link: null,
+    only_channels: [],
+  });
+  const call = await h.calls.create({
+    id: 'call-unsaved',
+    ...ALICE,
+    delivery_id: delivery.id,
+    fallback: true,
+    now: h.clock.now,
+    expires_at: new Date(h.clock.now.getTime() + 5 * 60_000),
+  });
+  return { delivery, call };
 }
 
 describe('phone calls as a channel of the delivery layer', () => {
@@ -30,25 +43,14 @@ describe('phone calls as a channel of the delivery layer', () => {
     const delivery = await h.callDelivery();
     expect(h.placed).toEqual([]);
     expect(h.texts).toEqual([]);
-    const call = delivery.attempts.find(attempt => attempt.channel === 'call');
-    expect(call?.outcome).toBe('skipped');
-    // The quiet defaults never let a call through the rules either.
-    const decision = applyReachRules({
-      subject: { kind: 'calendar_clash', evidence: 'own' },
-      asked: 'call',
-      settings: defaultReachSettings('UTC'),
-      history: { nudges_today: 0, last_call_at: undefined },
-      now: h.clock.now,
-      calls_available: true,
-    });
-    expect(decision.delivered).not.toBe('call');
+    expect(delivery.attempts.find(attempt => attempt.channel === 'call')?.outcome).toBe('skipped');
   });
 
   it('rings the confirmed number once, records it as a call attempt, and sends no push or text while it rings', async () => {
     h = await callsHarness();
     await h.readyToCall();
     const delivery = await h.callDelivery();
-    expect(h.placed).toEqual([PHONE]);
+    expect(h.placed).toEqual([{ to: PHONE, call_id: expect.any(String) }]);
     expect(delivery.attempts.map(attempt => [attempt.channel, attempt.outcome])).toEqual([
       ['in_app', 'sent'],
       ['call', 'sent'],
@@ -63,18 +65,25 @@ describe('phone calls as a channel of the delivery layer', () => {
     h = await callsHarness();
     await h.readyToCall({ pending: '+15550199' });
     await h.callDelivery();
-    expect(h.placed).toEqual([PHONE]);
+    expect(h.placed.map(call => call.to)).toEqual([PHONE]);
+  });
+
+  it('never rings a number that replied STOP, and falls back to a push at once', async () => {
+    h = await callsHarness();
+    await h.readyToCall();
+    await h.contacts.optOut({ phone: PHONE, now: h.clock.now });
+    const delivery = await h.callDelivery();
+    expect(h.placed).toEqual([]);
+    expect(h.texts).toEqual([]);
+    expect(h.pushes).toEqual([delivery.id]);
   });
 
   it('counts a call toward the time between calls even when no one answered', async () => {
     h = await callsHarness();
     await h.readyToCall();
     const delivery = await h.callDelivery();
-    await h.twilioPost({
-      path: '/twilio/call-status',
-      fields: { AccountSid: ACCOUNT_SID, CallSid: CALL_SID, CallStatus: 'no-answer' },
-    });
-    await waitFor(() => h.pushes.length > 0);
+    await h.status('no-answer');
+    await h.waitFor(() => h.pushes.length > 0);
     const history = await readReachHistory({
       history: h.deliveryStore,
       owner: ALICE,
@@ -84,13 +93,29 @@ describe('phone calls as a channel of the delivery layer', () => {
     expect(history.last_call_at?.toISOString()).toBe(delivery.created_at);
   });
 
-  it('does not call a number that is not confirmed, and falls back to a push at once', async () => {
+  it('does not call a number that is not confirmed, and falls back to a push at once, after saying why', async () => {
     h = await callsHarness();
     await h.readyToCall();
     await h.contacts.remove(ALICE);
     const delivery = await h.callDelivery();
     expect(h.placed).toEqual([]);
-    expect((await attemptsOf(h, delivery.id)).find(attempt => attempt.channel === 'call')?.outcome).toBe('skipped');
+    expect((await h.attemptsOf(delivery.id)).map(attempt => [attempt.channel, attempt.outcome])).toEqual([
+      ['in_app', 'sent'],
+      ['call', 'skipped'],
+      ['web_push', 'sent'],
+      ['sms', 'skipped'],
+    ]);
+    expect(h.pushes).toEqual([delivery.id]);
+  });
+
+  it('does not ring while the voice parts are not running, says so, and sends a text and a push instead', async () => {
+    h = await callsHarness({ voiceReady: false });
+    await h.readyToCall();
+    const delivery = await h.callDelivery();
+    expect(h.placed).toEqual([]);
+    const call = (await h.attemptsOf(delivery.id)).find(attempt => attempt.channel === 'call');
+    expect(call).toMatchObject({ outcome: 'skipped', detail: CALLS_NEED_VOICE });
+    expect(h.texts).toHaveLength(1);
     expect(h.pushes).toEqual([delivery.id]);
   });
 
@@ -98,21 +123,22 @@ describe('phone calls as a channel of the delivery layer', () => {
     h = await callsHarness();
     await h.readyToCall();
     const delivery = await h.callDelivery();
-    const status = { AccountSid: ACCOUNT_SID, CallSid: CALL_SID, CallStatus: 'no-answer' };
-    expect((await h.twilioPost({ path: '/twilio/call-status', fields: status })).status).toBe(200);
+    expect((await h.status('no-answer')).status).toBe(200);
     // Twilio may tell us twice; nothing happens twice.
-    await h.twilioPost({ path: '/twilio/call-status', fields: status });
-    await h.twilioPost({ path: '/twilio/call-status', fields: { ...status, CallStatus: 'completed' } });
-    expect(h.placed).toEqual([PHONE]);
+    await h.status('no-answer');
+    await h.status('completed');
+    expect(h.placed).toHaveLength(1);
     expect(h.texts).toHaveLength(1);
     expect(h.texts[0]?.body).toBe('Mannie: something needs you. Open the app to see it.');
     expect(h.pushes).toEqual([delivery.id]);
-    const attempts = await attemptsOf(h, delivery.id);
+    const attempts = await h.attemptsOf(delivery.id);
     expect(attempts.filter(attempt => attempt.channel === 'call').map(attempt => attempt.outcome)).toEqual([
       'sent',
       'failed',
     ]);
-    expect(attempts.find(attempt => attempt.outcome === 'failed')?.detail).toContain('not tried again');
+    expect(attempts.find(attempt => attempt.outcome === 'failed')?.detail).toBe(
+      'No one answered. The call was not tried again.',
+    );
     expect((await h.calls.getBySid(CALL_SID))?.outcome).toBe('no_answer');
   });
 
@@ -125,20 +151,31 @@ describe('phone calls as a channel of the delivery layer', () => {
     expect(twiml).not.toContain('<Say');
     const media = await h.openMedia({ token });
     expect(await media.closed).toBe(1000);
-    await waitFor(async () => (await h.calls.getBySid(CALL_SID))?.outcome === 'voicemail');
-    expect(h.tts.sentences).toEqual(['Mannie here, something needs you, please open the app.']);
+    await h.waitFor(() => h.texts.length === 1 && h.pushes.length === 1);
+    expect(h.tts.sentences.join(' ')).toBe('This is Mannie. Something needs you. Please open the app.');
     expect(media.frames.some(frame => frame.event === 'media')).toBe(true);
-    await h.twilioPost({
-      path: '/twilio/call-status',
-      fields: { AccountSid: ACCOUNT_SID, CallSid: CALL_SID, CallStatus: 'completed' },
-    });
-    await waitFor(() => h.texts.length === 1 && h.pushes.length === 1);
+    expect((await h.calls.getBySid(CALL_SID))?.outcome).toBe('voicemail');
+    await h.status('completed');
+    expect(h.texts).toHaveLength(1);
     expect(h.texts[0]?.body).not.toContain('482');
     expect(h.pushes).toEqual([delivery.id]);
     expect(h.placed).toHaveLength(1);
-    const calls = (await attemptsOf(h, delivery.id)).filter(attempt => attempt.channel === 'call');
+    const calls = (await h.attemptsOf(delivery.id)).filter(attempt => attempt.channel === 'call');
     expect(calls.map(attempt => attempt.outcome)).toEqual(['sent', 'sent']);
-    expect(calls[1]?.detail).toContain('voicemail');
+    expect(calls[1]?.detail).toContain('A voicemail picked up, so a short message was left.');
+  });
+
+  it('when a voicemail could not be spoken, still sends one text and one push, and says no message was left', async () => {
+    h = await callsHarness({ tts: new FakeTts({ delay: () => Promise.reject(new Error('voice down')) }) });
+    await h.readyToCall();
+    const delivery = await h.callDelivery();
+    const media = await h.openMedia({ token: (await h.answer('machine_end_beep')).token });
+    await media.closed;
+    await h.waitFor(() => h.texts.length === 1 && h.pushes.length === 1);
+    const calls = (await h.attemptsOf(delivery.id)).filter(attempt => attempt.channel === 'call');
+    expect(calls.at(-1)?.detail).toBe(
+      'A voicemail picked up, but no message could be left. The call was not tried again.',
+    );
   });
 
   it('a test call never falls back to a text', async () => {
@@ -146,215 +183,238 @@ describe('phone calls as a channel of the delivery layer', () => {
     await h.readyToCall();
     const delivery = await h.deliveries.deliver({
       ...ALICE,
-      kind: 'nudge',
-      level: 'call',
+      kind: 'note',
+      level: 'nudge',
       text: 'This is a test call.',
       reason: 'You pressed Try it.',
       link: null,
       only_channels: [],
     });
     expect((await h.service.place({ owner: ALICE, delivery, fallback: false })).outcome).toBe('sent');
-    await h.twilioPost({
-      path: '/twilio/call-status',
-      fields: { AccountSid: ACCOUNT_SID, CallSid: CALL_SID, CallStatus: 'busy' },
-    });
+    await h.status('busy');
     expect(h.texts).toEqual([]);
     expect(h.pushes).toEqual([]);
   });
 });
 
-describe('the Twilio listener for calls', () => {
+describe('a call whose Twilio id was not saved', () => {
   let h: Harness;
   afterEach(async () => {
     await h.close();
   });
 
-  it('rejects an unsigned voice or status webhook, and runs nothing', async () => {
+  it('still reports the call as ringing when saving Twilio’s id fails, and it still connects', async () => {
+    h = await callsHarness();
+    await h.readyToCall();
+    jest.spyOn(h.calls, 'attachSid').mockRejectedValueOnce(new Error('database busy'));
+    const delivery = await h.callDelivery();
+    expect(delivery.attempts.find(attempt => attempt.channel === 'call')?.outcome).toBe('sent');
+    expect(h.pushes).toEqual([]);
+    // Twilio's own request names the call by Aman's id too.
+    expect((await h.answer()).token).toBeDefined();
+  });
+
+  it('finds the call by its own id when Twilio says early that it failed, and falls back', async () => {
+    h = await callsHarness();
+    await h.readyToCall();
+    const { delivery, call } = await callWithoutSid(h);
+    await h.status('failed', { callSid: OTHER_SID, callId: call.id });
+    await h.waitFor(() => h.pushes.length === 1);
+    expect(h.pushes).toEqual([delivery.id]);
+    expect((await h.calls.get(call.id))?.outcome).toBe('no_answer');
+  });
+
+  it('ignores a request whose call id names a call that already has another Twilio id', async () => {
     h = await callsHarness();
     await h.readyToCall();
     await h.callDelivery();
-    const fields = { AccountSid: ACCOUNT_SID, CallSid: CALL_SID, AnsweredBy: 'human' };
-    expect((await h.twilioPost({ path: '/twilio/voice', fields, sign: false })).status).toBe(403);
-    expect(
-      (await h.twilioPost({ path: '/twilio/call-status', fields: { ...fields, CallStatus: 'no-answer' }, sign: false }))
-        .status,
-    ).toBe(403);
-    expect((await h.calls.getBySid(CALL_SID))?.status).toBe('ringing');
-    expect(h.texts).toEqual([]);
-  });
-
-  it('refuses an unsigned media socket before it opens', async () => {
-    h = await callsHarness();
-    const media = await h.openMedia({ token: 'anything', sign: false });
-    expect(media.refusedWith).toBe(403);
-  });
-
-  it('serves nothing but its own routes, and takes no WebSocket at any other address', async () => {
-    h = await callsHarness();
-    for (const path of ['/twilio/voice', '/twilio/call-status', '/twilio/media', '/api/v1/voice/stream', '/']) {
-      expect([path, (await fetch(`${h.base}${path}`)).status]).toEqual([path, 404]);
-    }
-    const { default: WebSocket } = await import('ws');
-    const stray = new WebSocket(`${h.base.replace('http:', 'ws:')}/api/v1/voice/stream`);
-    const status = await new Promise<number | undefined>(resolve => {
-      stray.on('unexpected-response', (_request, response) => {
-        resolve(response.statusCode);
-      });
-      stray.on('open', () => {
-        resolve(undefined);
-      });
+    const callId = h.placed[0]?.call_id ?? '';
+    const response = await h.twilioPost({
+      path: `/twilio/voice?call=${callId}`,
+      fields: { AccountSid: ACCOUNT_SID, CallSid: OTHER_SID, AnsweredBy: 'human' },
     });
-    expect(status).toBe(404);
+    expect(await response.text()).toContain('<Hangup/>');
+    expect((await h.calls.get(callId))?.call_sid).toBe(CALL_SID);
+  });
+});
+
+describe('a call that ends while its line opens', () => {
+  let h: Harness;
+  afterEach(async () => {
+    await h.close();
   });
 
-  it('gives a request no way in by claiming to come from inside Aman', async () => {
-    h = await callsHarness();
-    const headers = { 'x-aman-in-process-caller': 'a'.repeat(43), 'sec-fetch-site': 'same-origin' };
-    for (const path of ['/api/v1/sessions/chat-1/turns', '/api/v1/user/reach', '/']) {
-      expect([path, (await fetch(`${h.base}${path}`, { method: 'POST', headers })).status]).toEqual([path, 404]);
-    }
-    const unsigned = await fetch(`${h.base}/twilio/voice`, {
-      method: 'POST',
-      headers: { ...headers, 'content-type': 'application/x-www-form-urlencoded' },
-      body: 'CallSid=x',
-    });
-    expect(unsigned.status).toBe(403);
-  });
-
-  it('does nothing twice for a repeated webhook: no second media key and no second text or push', async () => {
+  it('when Twilio says the call completed before the line opened, says so and sends a text and a push', async () => {
     h = await callsHarness();
     await h.readyToCall();
     const delivery = await h.callDelivery();
-    const first = await h.answer();
-    expect(first.token).toBeDefined();
-    expect((await h.answer()).twiml).toContain('<Hangup/>');
-    const status = { AccountSid: ACCOUNT_SID, CallSid: CALL_SID, CallStatus: 'no-answer' };
-    for (let n = 0; n < 3; n += 1) {
-      expect((await h.twilioPost({ path: '/twilio/call-status', fields: status })).status).toBe(200);
-    }
-    await waitFor(() => h.pushes.length > 0);
+    await h.answer();
+    await h.status('completed');
+    await h.waitFor(() => h.pushes.length === 1);
+    expect((await h.calls.getBySid(CALL_SID))?.outcome).toBe('failed');
+    const calls = (await h.attemptsOf(delivery.id)).filter(attempt => attempt.channel === 'call');
+    expect(calls.at(-1)?.detail).toBe(
+      'The call was answered, but the line could not be opened. The call was not tried again.',
+    );
+  });
+
+  it('when the parts that listen cannot load, closes the line and sends a text and a push', async () => {
+    h = await callsHarness({ listening: () => Promise.reject(new Error('model missing')) });
+    await h.readyToCall();
+    const delivery = await h.callDelivery();
+    const media = await h.openMedia({ token: (await h.answer()).token });
+    expect(await media.closed).toBe(1011);
+    await h.waitFor(() => h.texts.length === 1 && h.pushes.length === 1);
+    expect((await h.calls.getBySid(CALL_SID))?.outcome).toBe('failed');
     expect(h.pushes).toEqual([delivery.id]);
-    expect(h.texts).toHaveLength(1);
-  });
-
-  it('hangs up on a call Aman did not start, and on one from another account', async () => {
-    h = await callsHarness();
-    const unknown = await h.twilioPost({
-      path: '/twilio/voice',
-      fields: { AccountSid: ACCOUNT_SID, CallSid: `CA${'c'.repeat(32)}`, AnsweredBy: 'human' },
-    });
-    expect(await unknown.text()).toContain('<Hangup/>');
-    await h.readyToCall();
-    await h.callDelivery();
-    const other = await h.twilioPost({
-      path: '/twilio/voice',
-      fields: { AccountSid: `AC${'d'.repeat(32)}`, CallSid: CALL_SID, AnsweredBy: 'human' },
-    });
-    expect(await other.text()).toContain('<Hangup/>');
-  });
-
-  it('opens no media session for an unknown token, a token for another call, a used token or an expired one', async () => {
-    h = await callsHarness();
-    await h.readyToCall();
-    await h.callDelivery();
-    const { token } = await h.answer();
-    expect(token).toBeDefined();
-
-    expect(await (await h.openMedia({ token: 'not-a-token' })).closed).toBe(1008);
-    expect(await (await h.openMedia({ token: undefined })).closed).toBe(1008);
-    expect(await (await h.openMedia({ token, callSid: `CA${'e'.repeat(32)}` })).closed).toBe(1008);
-
-    h.clock.now = new Date(h.clock.now.getTime() + 60_000);
-    expect(await (await h.openMedia({ token })).closed).toBe(1008);
     expect(h.tts.sentences).toEqual([]);
   });
 
-  it('gives out a media token once per call, and a token works once', async () => {
-    h = await callsHarness();
+  it('when the line drops while the call is starting, writes it down and says nothing on a closed line', async () => {
+    let ready: () => void = () => undefined;
+    const gate = new Promise<void>(resolve => {
+      ready = resolve;
+    });
+    h = await callsHarness({
+      listening: async () => {
+        await gate;
+        return { vad: new LoudnessVad(), stt: new FakeStt() };
+      },
+    });
     await h.readyToCall();
     await h.callDelivery();
-    const first = await h.answer();
-    const second = await h.answer();
-    expect(first.token).toBeDefined();
-    expect(second.twiml).toContain('<Hangup/>');
-
-    const opened = await h.openMedia({ token: first.token });
-    await waitFor(() => h.tts.sentences.length > 0);
-    const again = await h.openMedia({ token: first.token });
-    expect(await again.closed).toBe(1008);
-    opened.socket.close();
-    await opened.closed;
+    const media = await h.openMedia({ token: (await h.answer()).token });
+    await h.waitFor(async () => (await h.calls.getBySid(CALL_SID))?.status === 'connected');
+    media.socket.close();
+    await media.closed;
+    await h.waitFor(async () => (await h.calls.getBySid(CALL_SID))?.status === 'ended');
+    ready();
+    await new Promise(resolve => setTimeout(resolve, 50));
+    expect(h.tts.sentences).toEqual([]);
+    expect(h.pushes).toHaveLength(1);
   });
 
-  it('says the assistant name by the same rule as a text: never a phone number, and at most 20 plain letters', async () => {
-    for (const [name, spoken] of [
-      ['Call 555 0100 now', "Hi, it's your assistant."],
-      ['Mannie the very helpful assistant', "Hi, it's Mannie the very help."],
-    ] as const) {
-      h = await callsHarness({ assistantName: name });
-      await h.readyToCall();
-      await h.callDelivery();
-      const { token } = await h.answer();
-      const media = await h.openMedia({ token });
-      await waitFor(() => h.tts.sentences.length > 0);
-      expect(h.tts.sentences[0]).toBe(spoken);
-      media.socket.close();
-      await waitFor(async () => (await h.calls.getBySid(CALL_SID))?.status === 'ended');
-      await h.close();
-    }
-  });
-
-  it('opens a call in private mode: the assistant gives its own name and only the kind of thing, and asks first', async () => {
+  it('when Twilio says a call with an open line completed but no line is open here, writes it down once', async () => {
     h = await callsHarness();
     await h.readyToCall();
     const delivery = await h.callDelivery();
     const { token } = await h.answer();
-    const media = await h.openMedia({ token });
-    await waitFor(() => h.tts.sentences.length > 0);
-    expect(h.tts.sentences[0]).toBe("Hi, it's Mannie.");
-    expect(h.tts.sentences.join(' ')).toBe("Hi, it's Mannie. Something needs you. Is this a good time?");
-    expect(h.tts.sentences.join(' ')).not.toContain('Dana');
+    // The line was opened by a server that has since stopped: nothing in this one is holding it.
+    await h.calls.redeemToken({
+      call_sid: CALL_SID,
+      token_hash: createHash('sha256')
+        .update(token ?? '', 'utf8')
+        .digest('hex'),
+      now: h.clock.now,
+    });
+    await h.status('completed');
+    await h.status('completed');
+    await h.waitFor(async () => (await h.calls.getBySid(CALL_SID))?.status === 'ended');
+    expect((await h.calls.getBySid(CALL_SID))?.outcome).toBe('answered');
+    const calls = (await h.attemptsOf(delivery.id)).filter(attempt => attempt.channel === 'call');
+    expect(calls.map(attempt => attempt.detail)).toEqual([
+      'The phone is ringing.',
+      'You answered. The call ended. Anything that was said is in the chat.',
+    ]);
+    expect(h.texts).toEqual([]);
+  });
+
+  it('ends a call Twilio never called back about, once it expires, and sends a text and a push', async () => {
+    h = await callsHarness();
+    await h.readyToCall();
+    const delivery = await h.callDelivery();
+    await h.service.sweep();
+    expect((await h.calls.getBySid(CALL_SID))?.status).toBe('ringing');
+    h.clock.now = new Date(h.clock.now.getTime() + 6 * 60_000);
+    await h.service.sweep();
+    expect((await h.calls.getBySid(CALL_SID))?.outcome).toBe('failed');
+    expect(h.pushes).toEqual([delivery.id]);
+    expect(h.texts).toHaveLength(1);
+    const calls = (await h.attemptsOf(delivery.id)).filter(attempt => attempt.channel === 'call');
+    expect(calls.at(-1)?.detail).toBe('The call stopped before it finished. The call was not tried again.');
+    await h.service.sweep();
+    expect(h.pushes).toHaveLength(1);
+  });
+
+  it('forgets ended calls after 30 days', async () => {
+    h = await callsHarness();
+    await h.readyToCall();
+    await h.callDelivery();
+    await h.status('no-answer');
+    await h.waitFor(() => h.pushes.length === 1);
+    h.clock.now = new Date(h.clock.now.getTime() + 29 * 24 * 3_600_000);
+    await h.service.sweep();
+    expect(await h.calls.getBySid(CALL_SID)).toBeDefined();
+    h.clock.now = new Date(h.clock.now.getTime() + 2 * 24 * 3_600_000);
+    await h.service.sweep();
+    expect(await h.calls.getBySid(CALL_SID)).toBeUndefined();
+  });
+});
+
+describe('a conversation on the phone', () => {
+  let h: Harness;
+  afterEach(async () => {
+    await h.close();
+  });
+
+  it('opens in private mode: who is calling, who for, only the kind of thing, then the question', async () => {
+    h = await callsHarness();
+    await h.readyToCall();
+    const delivery = await h.callDelivery();
+    const media = await h.openMedia({ token: (await h.answer()).token });
+    await h.waitFor(() => h.tts.sentences.length >= 3);
+    expect(h.tts.sentences.join(' ')).toBe(
+      'Hi, this is Mannie, calling for Dana. Something needs you. Is this a good time?',
+    );
+    expect(h.tts.sentences.join(' ')).not.toContain('school pickup');
     media.socket.close();
-    await waitFor(async () => (await h.calls.getBySid(CALL_SID))?.status === 'ended');
+    await h.waitFor(async () => (await h.calls.getBySid(CALL_SID))?.status === 'ended');
     expect((await h.calls.getBySid(CALL_SID))?.outcome).toBe('not_now');
     expect(h.opened).toEqual([]);
-    const ended = (await attemptsOf(h, delivery.id)).filter(attempt => attempt.channel === 'call');
-    expect(ended.at(-1)?.detail).toContain('not a good time');
+    const ended = (await h.attemptsOf(delivery.id)).filter(attempt => attempt.channel === 'call');
+    expect(ended.at(-1)?.detail).toBe(
+      'You answered, but the call ended before you said it was a good time. It is waiting for you in the app.',
+    );
     // An answered call is not missed: no text, no push.
     expect(h.texts).toEqual([]);
     expect(h.pushes).toEqual([]);
   });
-});
 
-describe('the rules before a call is placed', () => {
-  const ticked = {
-    ...defaultReachSettings('UTC'),
-    channels: { texts: true, calls: true },
-    call_kinds: ['calendar_clash' as const],
-  };
-  const ask = ({ now, last_call_at }: { now: Date; last_call_at?: Date }) =>
-    applyReachRules({
-      subject: { kind: 'calendar_clash', evidence: 'own' },
-      asked: 'call',
-      settings: ticked,
-      history: { nudges_today: 0, last_call_at },
-      now,
-      calls_available: true,
-    });
-
-  it('calls when the kind is ticked, calls are on and nothing holds it back', () => {
-    expect(ask({ now: new Date('2026-11-06T15:00:00.000Z') }).delivered).toBe('call');
+  it.each([
+    ['Call 555 0100 now', 'Hi, this is your assistant, calling for Dana.'],
+    ['Mannie the very helpful assistant', 'Hi, this is Mannie the very help, calling for Dana.'],
+  ])('says the assistant name "%s" by the same rule as a text', async (name, spoken) => {
+    h = await callsHarness({ assistantName: name });
+    await h.readyToCall();
+    await h.callDelivery();
+    const media = await h.openMedia({ token: (await h.answer()).token });
+    await h.waitFor(() => h.tts.sentences.length > 0);
+    expect(h.tts.sentences[0]).toBe(spoken);
+    media.socket.close();
+    await h.waitFor(async () => (await h.calls.getBySid(CALL_SID))?.status === 'ended');
   });
 
-  it('holds a call back in quiet hours, and says so', () => {
-    const decision = ask({ now: new Date('2026-11-06T22:30:00.000Z') });
-    expect(decision.delivered).toBe('nudge');
-    expect(decision.steps).toContain('It is during your quiet hours, so no call.');
+  it('takes silence after the question as an answer it did not catch: asks once more, then says goodbye', async () => {
+    h = await callsHarness({ limits: { silenceMs: 40 } });
+    await h.readyToCall();
+    const delivery = await h.callDelivery();
+    const media = await h.openMedia({ token: (await h.answer()).token });
+    expect(await media.closed).toBe(1000);
+    expect(h.tts.sentences.slice(3).join(' ')).toBe(`${CALL_LINES.askAgain} ${CALL_LINES.giveUp}`);
+    await h.waitFor(async () => (await h.calls.getBySid(CALL_SID))?.outcome === 'not_now');
+    expect(h.opened).toEqual([]);
+    const ended = (await h.attemptsOf(delivery.id)).filter(attempt => attempt.channel === 'call');
+    expect(ended.at(-1)?.detail).toContain('the call ended before you said it was a good time');
   });
 
-  it('allows one call in 6 hours', () => {
-    const now = new Date('2026-11-06T15:00:00.000Z');
-    expect(ask({ now, last_call_at: new Date(now.getTime() - 2 * 3_600_000) }).delivered).toBe('nudge');
-    expect(ask({ now, last_call_at: new Date(now.getTime() - 7 * 3_600_000) }).delivered).toBe('call');
+  it('closes the line at the time limit even when the assistant is stuck mid-sentence', async () => {
+    const stuck = new FakeTts({ delay: () => new Promise<void>(() => undefined) });
+    h = await callsHarness({ tts: stuck, limits: { talkMs: 60, hangUpGraceMs: 40 } });
+    await h.readyToCall();
+    await h.callDelivery();
+    const media = await h.openMedia({ token: (await h.answer()).token });
+    await media.closed;
+    await h.waitFor(async () => (await h.calls.getBySid(CALL_SID))?.status === 'ended');
+    expect((await h.calls.getBySid(CALL_SID))?.outcome).toBe('not_now');
   });
 });

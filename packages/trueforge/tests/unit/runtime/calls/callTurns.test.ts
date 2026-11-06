@@ -1,7 +1,5 @@
 import { CALL_LINES, CallTurns, goodTimeAnswer } from '../../../../src/runtime/calls/callTurns';
-import { APPROVAL_LINES } from '../../../../src/voice/approvalVoice';
 import { VoiceSession } from '../../../../src/voice/session';
-import { approval, sendReplyCard } from '../../../fixtures/voice/cards';
 import {
   FakeStt,
   FakeTransport,
@@ -32,7 +30,7 @@ function call({ heard, chatReplies = [] }: { heard: string[]; chatReplies?: Scri
     message: MESSAGE,
     openChat: () => {
       opened += 1;
-      return Promise.resolve({ session_id: 'chat-1', turns: chatTurns, close: () => undefined });
+      return Promise.resolve({ session_id: 'chat-1', turns: chatTurns });
     },
     hangUp: () => {
       hungUp += 1;
@@ -64,9 +62,11 @@ function speak(t: ReturnType<typeof call>) {
 }
 
 describe('a phone call in private mode', () => {
+  const OPENING = CALL_LINES.opening({ name: 'Mannie', person: 'Sam', kind: 'something needs you' });
+
   it('says only the kind of thing until the person says yes, and sends nothing they say to the model', async () => {
-    const t = call({ heard: ['who is this', 'yes go ahead'] });
-    await t.session.say(CALL_LINES.opening({ name: 'Mannie', kind: 'something needs you' }));
+    const t = call({ heard: ['who is this', 'yes'] });
+    await t.session.say(OPENING, { interruptible: false });
     t.clock.advance(5_000);
     await speak(t);
     await t.session.settled();
@@ -78,8 +78,34 @@ describe('a phone call in private mode', () => {
     await speak(t);
     await t.session.settled();
     expect(t.opened()).toBe(1);
-    expect(t.tts.sentences.join(' ')).toContain(`${MESSAGE} Want me to do something about it?`);
+    expect(t.tts.sentences.join(' ')).toContain(CALL_LINES.message(MESSAGE));
     expect(t.chatTurns.sent).toEqual([]);
+  });
+
+  it('says who the call is for before it asks anything', () => {
+    expect(OPENING).toBe('Hi, this is Mannie, calling for Sam. Something needs you. Is this a good time?');
+    expect(CALL_LINES.opening({ name: 'Mannie', person: undefined, kind: 'a reminder' })).toBe(
+      'Hi, this is Mannie, calling for the person who set me up. A reminder. Is this a good time?',
+    );
+  });
+
+  it('ignores a reply that began while the opening was still playing, and plays the whole opening', async () => {
+    const t = call({ heard: ['hello? yeah?', 'yes'] });
+    const opening = t.session.say(OPENING, { interruptible: false });
+    await speak(t);
+    await opening;
+    await t.session.settled();
+    expect(t.opened()).toBe(0);
+    expect(t.transport.cleared).toBe(0);
+    expect(t.tts.sentences).toEqual([
+      'Hi, this is Mannie, calling for Sam.',
+      'Something needs you.',
+      'Is this a good time?',
+    ]);
+    t.clock.advance(5_000);
+    await speak(t);
+    await t.session.settled();
+    expect(t.opened()).toBe(1);
   });
 
   it('says goodbye and hangs up on a no, and never opens the chat', async () => {
@@ -103,41 +129,58 @@ describe('a phone call in private mode', () => {
     expect(t.hungUp()).toBe(1);
   });
 
-  it('tells yes from no in plain words', () => {
-    expect(goodTimeAnswer('Yes.')).toBe('yes');
-    expect(goodTimeAnswer('Sure, go ahead')).toBe('yes');
-    expect(goodTimeAnswer("No, I can't talk")).toBe('no');
-    expect(goodTimeAnswer('not a good time')).toBe('no');
-    expect(goodTimeAnswer('is this a good time')).toBe('unclear');
+  it('counts silence after the question as an answer it did not catch', () => {
+    const t = call({ heard: [] });
+    expect(t.turns.heardNothing()).toEqual({ line: CALL_LINES.askAgain, end: false });
+    expect(t.turns.heardNothing()).toEqual({ line: CALL_LINES.giveUp, end: true });
+    expect(t.turns.heardNothing()).toBeUndefined();
+    expect(t.opened()).toBe(0);
+  });
+
+  it('stops counting silence once the person said yes', async () => {
+    const t = call({ heard: ['yes'] });
+    await speak(t);
+    await t.session.settled();
+    expect(t.turns.heardNothing()).toBeUndefined();
+  });
+
+  it('takes only a short, plain yes as a yes', () => {
+    for (const yes of ['Yes.', 'Yeah.', 'Yep', 'Yup!', 'Sure.', 'Okay.', 'Yes, sure.', 'Yeah yeah okay']) {
+      expect(goodTimeAnswer(yes)).toBe('yes');
+    }
+  });
+
+  it.each([
+    'Hello? Yeah?',
+    'Go away',
+    'Who is this? Okay',
+    "I'm fine, who's calling?",
+    'Sure, hold on, let me get her',
+    'Mom, phone! Okay hang on',
+    'Is this a sales call? Alright whatever',
+    'Hi, you have reached Sam. Please leave a message, okay?',
+    'Go ahead',
+    'Fine',
+    'OK',
+    'Alright',
+    'Yes yes yes yes',
+  ])('does not take "%s" as a yes', heard => {
+    expect(goodTimeAnswer(heard)).toBe('unclear');
+  });
+
+  it.each(['No problem, go ahead', "I'm not busy", 'Why not, sure', 'No worries'])(
+    'does not take "%s" as a no, and asks again',
+    heard => {
+      expect(goodTimeAnswer(heard)).toBe('unclear');
+    },
+  );
+
+  it.each(["No, I can't talk", 'not a good time', 'Busy', 'Nope', 'Later please'])('takes "%s" as a no', heard => {
+    expect(goodTimeAnswer(heard)).toBe('no');
   });
 });
 
 describe('approvals on a phone call', () => {
-  it('leaves a card the call asked for waiting in the app, and never approves it by voice', async () => {
-    const t = call({
-      heard: ['yes', 'reply to dana that I will be late', 'yes send it', 'yes, send it'],
-      chatReplies: [{ text: ['I wrote the reply.'], approvals: [approval(sendReplyCard())] }],
-    });
-    await speak(t);
-    await t.session.settled();
-    t.clock.advance(5_000);
-    await speak(t);
-    await t.session.settled();
-    expect(t.chatTurns.sent).toEqual(['reply to dana that I will be late']);
-    expect(t.tts.sentences).toContain(APPROVAL_LINES.leftForTheApp);
-    // Nothing the card says is read back as something to confirm.
-    expect(t.tts.sentences.join(' ')).not.toContain("Say 'yes, send it'");
-    for (let n = 0; n < 2; n += 1) {
-      t.clock.advance(5_000);
-      await speak(t);
-      await t.session.settled();
-    }
-    expect(t.chatTurns.answers).toEqual([]);
-    expect(t.turns.followUps).toBe(1);
-    // The exact phrase became a normal message in the chat, never an answer to the card.
-    expect(t.chatTurns.sent.slice(1)).toEqual(['yes send it', 'yes, send it']);
-  });
-
   it('refuses to answer an approval even when asked to directly', async () => {
     const t = call({ heard: [] });
     const outcome = await t.turns.answerApproval();

@@ -85,11 +85,11 @@ export const testReachChannelRoute = createRoute({
     401: unauthorizedResponse,
     409: {
       content: { 'application/json': { schema: RequestErrorResponseSchema } },
-      description: 'That channel is not set up yet.',
+      description: 'That channel is not set up yet, or the number is not confirmed.',
     },
     502: {
       content: { 'application/json': { schema: RequestErrorResponseSchema } },
-      description: 'The test text could not be sent.',
+      description: 'The test text could not be sent, or the test call could not be started.',
     },
   },
 });

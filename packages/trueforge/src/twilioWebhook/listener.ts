@@ -26,7 +26,8 @@ interface TwilioWebhookReply {
 export interface TwilioWebhookRoute {
   path: string;
   method: 'POST';
-  handle(input: { params: URLSearchParams }): Promise<TwilioWebhookReply>;
+  /** `query` is the signed address's own query, which Aman set when it asked Twilio to call back. */
+  handle(input: { params: URLSearchParams; query: URLSearchParams }): Promise<TwilioWebhookReply>;
 }
 
 /**
@@ -89,7 +90,7 @@ function createTwilioWebhookApp({
       logger.warn('A Twilio request was refused because its signature did not match', { path: route.path });
       return c.body(null, 403);
     }
-    const reply = await route.handle({ params });
+    const reply = await route.handle({ params, query: url.searchParams });
     return c.body(reply.body, reply.status, { 'Content-Type': 'text/xml; charset=utf-8' });
   });
   return app;

@@ -105,7 +105,9 @@ export function createReachRouter(deps: ReachRouterDeps) {
         );
       }
     }
-    if (settings.channels.calls && !channels.calls.available) {
+    // Calls already on stay on while the voice parts are briefly down; only switching them on needs them now.
+    const callsWereOn = (await deps.reachStore.get(owner))?.channels.calls === true;
+    if (settings.channels.calls && !channels.calls.available && !callsWereOn) {
       return c.json({ error: { message: `${channels.calls.note} Leave calls off for now.` } }, 400);
     }
     if (settings.channels.calls) {

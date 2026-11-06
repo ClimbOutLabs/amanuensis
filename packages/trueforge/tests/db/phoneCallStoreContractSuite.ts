@@ -41,14 +41,20 @@ export function runPhoneCallStoreContractSuite(getStore: () => IPhoneCallStore):
     expect(await store.get('nope')).toBeUndefined();
   });
 
-  it('gives out one media token per call, only while it rings and has not expired', async () => {
+  it('gives out a media token only while the call rings or waits for its line, and never after it expired', async () => {
     const store = getStore();
     await ringing(store);
     const token = { call_sid: SID, token_hash: 'h1', token_expires_at: later(30_000), mode: 'talk' as const };
     expect(await store.issueToken({ ...token, now: later(10 * 60_000) })).toBe(false);
     expect(await store.issueToken({ ...token, now: NOW })).toBe(true);
-    expect(await store.issueToken({ ...token, token_hash: 'h2', now: NOW })).toBe(false);
     expect(await store.getBySid(SID)).toMatchObject({ status: 'connecting', mode: 'talk' });
+    // A retried webhook replaces the waiting token, so only the newest one opens the line.
+    expect(await store.issueToken({ ...token, token_hash: 'h2', now: later(1_000) })).toBe(true);
+    expect(await store.redeemToken({ call_sid: SID, token_hash: 'h1', now: later(2_000) })).toBeUndefined();
+    expect(await store.redeemToken({ call_sid: SID, token_hash: 'h2', now: later(2_000) })).toMatchObject({
+      status: 'connected',
+    });
+    expect(await store.issueToken({ ...token, token_hash: 'h3', now: later(3_000) })).toBe(false);
   });
 
   it('uses a token once, only for its own call and only before it expires', async () => {
@@ -70,16 +76,15 @@ export function runPhoneCallStoreContractSuite(getStore: () => IPhoneCallStore):
     expect(await store.redeemToken({ call_sid: SID, token_hash: 'h1', now: later(2_000) })).toBeUndefined();
   });
 
-  it('ends a call once, and keeps its outcome, chat and follow-ups', async () => {
+  it('ends a call once, and keeps its outcome and chat', async () => {
     const store = getStore();
     await ringing(store);
     await store.setSession({ id: 'call-1', session_id: 'chat-1' });
-    expect(await store.finish({ id: 'call-1', outcome: 'answered', follow_ups: 2, now: later(60_000) })).toBe(true);
-    expect(await store.finish({ id: 'call-1', outcome: 'no_answer', follow_ups: 0, now: later(61_000) })).toBe(false);
+    expect(await store.finish({ id: 'call-1', outcome: 'answered', now: later(60_000) })).toBe(true);
+    expect(await store.finish({ id: 'call-1', outcome: 'no_answer', now: later(61_000) })).toBe(false);
     expect(await store.get('call-1')).toMatchObject({
       status: 'ended',
       outcome: 'answered',
-      follow_ups: 2,
       session_id: 'chat-1',
       ended_at: later(60_000).toISOString(),
     });
@@ -92,5 +97,37 @@ export function runPhoneCallStoreContractSuite(getStore: () => IPhoneCallStore):
     expect(await store.claimFallback('call-1')).toBe(true);
     expect(await store.claimFallback('call-1')).toBe(false);
     expect(await store.claimFallback('call-2')).toBe(false);
+  });
+
+  it('lists the calls started before a time that never ended', async () => {
+    const store = getStore();
+    await ringing(store);
+    await ringing(store, { id: 'call-2' });
+    await store.create({
+      id: 'call-3',
+      tenant_id: 't1',
+      created_by: 'alice',
+      delivery_id: 'delivery-3',
+      fallback: true,
+      now: later(60_000),
+      expires_at: later(6 * 60_000),
+    });
+    await store.finish({ id: 'call-2', outcome: 'answered', now: later(1_000) });
+    expect((await store.listUnfinished({ created_before: later(30_000) })).map(call => call.id)).toEqual(['call-1']);
+    expect((await store.listUnfinished({ created_before: later(90_000) })).map(call => call.id).sort()).toEqual([
+      'call-1',
+      'call-3',
+    ]);
+  });
+
+  it('forgets calls that ended before a time, and keeps the rest', async () => {
+    const store = getStore();
+    await ringing(store);
+    await ringing(store, { id: 'call-2' });
+    await store.finish({ id: 'call-1', outcome: 'no_answer', now: later(1_000) });
+    await store.finish({ id: 'call-2', outcome: 'answered', now: later(5_000) });
+    expect(await store.prune({ ended_before: later(2_000) })).toBe(1);
+    expect(await store.get('call-1')).toBeUndefined();
+    expect(await store.get('call-2')).toBeDefined();
   });
 }
