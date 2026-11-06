@@ -86,3 +86,7 @@ lines are compared to golden files too.
 Build the single executable with `pnpm build:aman-installer` from the
 repository root. The bundle is made with esbuild and turned into one file
 with Node's single executable support and postject.
+
+Before a release that changes Aman Setup, it is run by hand on three
+Windows computers, following [the Windows install gate](windows-install-gate.md),
+and each run is recorded in that page's table.
