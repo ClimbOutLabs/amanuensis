@@ -6,8 +6,8 @@ import { mayCarryContactDetail, plainText } from './textWords';
 const NAME_MAX = 20;
 
 /**
- * A name from the person's settings, made fit to say or send: only letters, spaces, apostrophes and dashes, at most
- * 20 of them, so it cannot carry a link or a number to call. Undefined when nothing of it is left.
+ * A name from the person's settings, made fit to say or send: only letters, spaces, and apostrophes and dashes between
+ * letters, at most 20 of them, so it cannot carry a link or a number to call. Undefined when nothing of it is left.
  */
 export function plainName(name: string | null | undefined): string | undefined {
   const plain = plainText(name ?? '');
@@ -20,6 +20,9 @@ export function plainName(name: string | null | undefined): string | undefined {
     .replace(/\s+/g, ' ')
     .trim()
     .slice(0, NAME_MAX)
+    // After the cut, which can leave a dash at the end: a voice will not say a lone dash or apostrophe as written.
+    .replace(/(?<![A-Za-z])['-]|['-](?![A-Za-z])/g, ' ')
+    .replace(/\s+/g, ' ')
     .trim();
   return letters === '' ? undefined : letters;
 }

@@ -34,4 +34,12 @@ describe('a name from the person’s settings, said on a call', () => {
     expect(plainName('🙂 123')).toBeUndefined();
     expect(plainName('Call 555 0100 now')).toBeUndefined();
   });
+
+  it('drops a dash or an apostrophe that is not between two letters, also where the name was cut', () => {
+    expect(plainName('Anna-Maria Gonzalez-Lopez')).toBe('Anna-Maria Gonzalez');
+    expect(plainName('Jo - Bot')).toBe('Jo Bot');
+    expect(plainName("'Tis Dana'")).toBe('Tis Dana');
+    expect(plainName('--')).toBeUndefined();
+    expect(plainName("Dana O'Neil-Reyes")).toBe("Dana O'Neil-Reyes");
+  });
 });
