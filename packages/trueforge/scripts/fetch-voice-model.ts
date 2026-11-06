@@ -7,7 +7,7 @@
  */
 import { voiceModelDirFromEnv } from '../src/appDataDir';
 import { processEnv } from '../src/cli/env';
-import { downloadVadModel } from '../src/voice/vad/sileroVad';
+import { downloadVadModel } from './lib/vadModelDownload';
 
 const optional = process.argv.includes('--optional');
 try {

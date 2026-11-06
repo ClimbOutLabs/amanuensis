@@ -14,7 +14,8 @@ import { measureTurnLatency } from '../src/voice/latencyHarness';
 import { syntheticRecording } from '../src/voice/syntheticSpeech';
 import type { SpeechToText, VoiceTurnRunner } from '../src/voice/transport';
 import { SidecarSpeechSynthesizer } from '../src/voice/ttsClient';
-import { downloadVadModel, SileroSpeechProbability } from '../src/voice/vad/sileroVad';
+import { SileroSpeechProbability } from '../src/voice/vad/sileroVad';
+import { downloadVadModel } from './lib/vadModelDownload';
 
 const { values } = parseArgs({
   options: {

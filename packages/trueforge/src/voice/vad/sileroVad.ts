@@ -5,17 +5,16 @@
  * before it is loaded, so a changed file never reaches the model parser.
  */
 import { createHash } from 'node:crypto';
-import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
+import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import type * as Ort from 'onnxruntime-node';
 
 import { INPUT_SAMPLE_RATE } from '../audio';
 import { VAD_WINDOW_SAMPLES } from './utteranceDetector';
 
-/** Silero VAD v5.1.2, `src/silero_vad/data/silero_vad.onnx`. */
+/** Silero VAD v5.1.2, `src/silero_vad/data/silero_vad.onnx`. Where it is fetched from lives with the setup scripts. */
 export const SILERO_VAD_MODEL = {
   fileName: 'silero_vad.onnx',
-  url: 'https://raw.githubusercontent.com/snakers4/silero-vad/v5.1.2/src/silero_vad/data/silero_vad.onnx',
   size: 2_327_524,
   sha256: '2623a2953f6ff3d2c1e61740c6cdb7168133479b267dfef114a4a3cc5bdd788f',
 } as const;
@@ -37,7 +36,6 @@ export class VadModelUnavailableError extends Error {}
 
 export interface PinnedModel {
   fileName: string;
-  url: string;
   size: number;
   sha256: string;
 }
@@ -65,54 +63,6 @@ export async function verifiedVadModel({
     throw new VadModelUnavailableError(MISSING_MODEL_MESSAGE);
   }
   return bytes;
-}
-
-/** Fetches the pinned file into `dir` for host development and tests; images carry it from their build. */
-export async function downloadVadModel({
-  dir,
-  pin = SILERO_VAD_MODEL,
-  fetchFile = fetch,
-}: {
-  dir: string;
-  pin?: PinnedModel;
-  fetchFile?: typeof fetch;
-}): Promise<string> {
-  const target = path.join(dir, pin.fileName);
-  const existing = await readFile(target).catch(() => undefined);
-  if (existing !== undefined && matchesPin({ bytes: existing, pin })) {
-    return target;
-  }
-  let bytes: Uint8Array;
-  try {
-    const response = await fetchFile(pin.url, { signal: AbortSignal.timeout(60_000) });
-    if (!response.ok) {
-      throw new Error(`the download answered ${String(response.status)}`);
-    }
-    bytes = new Uint8Array(await response.arrayBuffer());
-  } catch (cause) {
-    throw new VadModelUnavailableError(
-      'Voice mode needs a small listening model that could not be downloaded. Check the internet connection, then try again.',
-      { cause },
-    );
-  }
-  if (!matchesPin({ bytes, pin })) {
-    throw new VadModelUnavailableError(
-      'The listening model that was downloaded is not the one Aman expects, so it was not used. Try again in a few minutes.',
-    );
-  }
-  await mkdir(dir, { recursive: true });
-  const partial = `${target}.partial`;
-  await writeFile(partial, bytes);
-  await rename(partial, target).catch(async (cause: unknown) => {
-    await rm(partial, { force: true });
-    throw new VadModelUnavailableError(
-      'The listening model could not be saved. Check that the data folder is writable.',
-      {
-        cause,
-      },
-    );
-  });
-  return target;
 }
 
 type OrtModule = typeof Ort;
