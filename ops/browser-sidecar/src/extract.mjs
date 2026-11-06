@@ -18,7 +18,7 @@ function nameWords(element) {
 /** Name words that mark a field as a password, a card number, or a one-time code. */
 const CARD_WORDS = /\b(card ?(number|no|num)|cc ?(num|number|no)|cvv|cvc|csc|security ?code)\b/;
 const CODE_WORDS =
-  /\b(otp|totp|passcode|mpin|tpin|(one ?time|verification|mfa|2 ?fa|sms|otp) ?code|(atm|card|security|secret|upi) ?pin)\b/;
+  /\b(otp|totp|passcode|mpin|tpin|(one ?time|verification|mfa|2 ?fa|sms|otp) ?code|(atm|card|security|secret|upi|txn|transaction) ?pin)\b/;
 /**
  * "pin" names a secret unless it is a place or a postal code: a "PIN code" or "pincode" is a postal
  * code in India, and a map pin is a place, so neither is hidden.
@@ -39,14 +39,26 @@ function takesDigits(element) {
 /** How far up from a one-digit box to look for the others in its row. */
 const DIGIT_ROW_LEVELS = 5;
 
-/** A box for one digit next to others like it: a code typed one digit per box. */
+/** Whether a field has a label of its own: a count such as "Adults" is labelled, a code's digit boxes are not. */
+function hasOwnLabel(element) {
+  const aria = element.getAttribute('aria-label') ?? '';
+  const labels = element.labels === null ? [] : [...element.labels];
+  return /[a-z]{3}/i.test(aria) || labels.some(label => /[a-z]{3}/i.test(label.textContent ?? ''));
+}
+
+/** A one-digit box with no label of its own. */
+function isDigitBox(element) {
+  return element.getAttribute('maxlength') === '1' && takesDigits(element) && !hasOwnLabel(element);
+}
+
+/** A box for one digit next to others like it, however deeply each is wrapped: a code typed one digit per box. */
 function isCodeDigitBox(element) {
-  if (element.getAttribute('maxlength') !== '1' || !takesDigits(element)) {
+  if (!isDigitBox(element)) {
     return false;
   }
   let around = element.parentElement;
   for (let level = 0; around !== null && level < DIGIT_ROW_LEVELS; level += 1, around = around.parentElement) {
-    if ([...around.querySelectorAll('input[maxlength="1"]')].filter(takesDigits).length >= 2) {
+    if ([...around.querySelectorAll('input[maxlength="1"]')].filter(isDigitBox).length >= 2) {
       return true;
     }
   }
@@ -66,7 +78,8 @@ function fieldKind(element) {
   if (autocomplete === 'one-time-code' || CODE_WORDS.test(words)) {
     return 'otp';
   }
-  if (BARE_PIN.test(words) && !PLACE_WORDS.test(words) && autocomplete !== 'postal-code') {
+  const postal = autocomplete === 'postal-code' || autocomplete.startsWith('address');
+  if (BARE_PIN.test(words) && !PLACE_WORDS.test(words) && !postal) {
     return 'otp';
   }
   // Only the first box of a code typed one digit per box often says what it is.

@@ -57,7 +57,7 @@ In scope: the browser container and gateway, the browser tools, their permission
   - Logins and cookies are stored only in the person's browser profile, on a volume only the browser's container mounts.
   - The addresses Aman opens go to those sites, under the checks above.
 - **What stays on the device:** the profiles, the browser, the gateway and every page Aman reads. Nothing goes to a third-party service other than the sites themselves and the model provider.
-- **Password, payment and one-time-code fields never show their values in the page text.** A field counts as one by its type, its autocomplete hint, or the words in its name in any naming style (`otp_code`, `otpCode`, `cvv`, a card's security code, a field named `pin`, `mpin` or `tpin`, a row of one-digit boxes). A postal PIN code (`pincode`, `pin_code`, India's postal code) and a map pin are not secrets and stay visible.
+- **Password, payment and one-time-code fields never show their values in the page text.** A field counts as one by its type, its autocomplete hint, or the words in its name in any naming style (`otp_code`, `otpCode`, `cvv`, a card's security code, a field named `pin`, `mpin`, `tpin` or a transaction PIN, a row of unlabelled one-digit boxes however each is wrapped). A postal PIN code (`pincode`, `pin_code`, or a `pin` field marked as a postal code, India's postal code), a map pin, and labelled one-digit boxes such as a count of guests are not secrets and stay visible.
 
 ## Testing
 

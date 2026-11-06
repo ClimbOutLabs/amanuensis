@@ -144,6 +144,10 @@ async function withWorld(run) {
       <input name="pin" inputmode="numeric" maxlength="4" value="1357" style="display:block;width:300px;height:40px;background:#00ff00;color:#00ff00;border:0" />
       <input name="pin" type="text" value="2468" style="display:block;width:300px;height:40px;background:#00ff00;color:#00ff00;border:0" /><input name="mpin" value="9753" style="display:block;width:300px;height:40px;background:#00ff00;color:#00ff00;border:0" />
       <input name="tpin" value="8642" style="display:block;width:300px;height:40px;background:#00ff00;color:#00ff00;border:0" />
+      <input name="txn_pin" value="1928" style="display:block;width:300px;height:40px;background:#00ff00;color:#00ff00;border:0" /><input id="pin" inputmode="numeric" value="3746" style="display:block;width:300px;height:40px;background:#00ff00;color:#00ff00;border:0" />
+      <div class="otp">${[1, 2, 3].map(() => `<div class="cell"><span><input maxlength="1" inputmode="numeric" value="7" style="display:block;width:300px;height:40px;background:#00ff00;color:#00ff00;border:0" /></span></div>`).join('')}</div>
+      <input name="pin" autocomplete="postal-code" value="110001" />
+      <form><label>Adults <input type="number" maxlength="1" value="2" /></label><label>Children <input type="number" maxlength="1" value="3" /></label></form>
       <div><div><div><input maxlength="1" inputmode="numeric" value="7" style="display:block;width:300px;height:40px;background:#00ff00;color:#00ff00;border:0" /></div></div></div>
       <div><div><div><input maxlength="1" inputmode="numeric" value="7" style="display:block;width:300px;height:40px;background:#00ff00;color:#00ff00;border:0" /></div></div></div>
       <input maxlength="1" pattern="[0-9]" value="7" style="display:block;width:300px;height:40px;background:#00ff00;color:#00ff00;border:0" /><input maxlength="1" pattern="[0-9]" value="7" style="display:block;width:300px;height:40px;background:#00ff00;color:#00ff00;border:0" />
@@ -716,11 +720,13 @@ test('code and card fields are found whatever naming style the site uses', { ski
     const opened = await sidecar.open({ owner: 'owner-1', tab: 'chat-1', url: 'http://site-a.test/code-names' });
     assert.doesNotMatch(opened.text, /135790/);
     assert.doesNotMatch(opened.text, /: 7$/m);
-    for (const secret of ['1357', '2468', '9753', '8642']) {
+    for (const secret of ['1357', '2468', '9753', '8642', '1928', '3746']) {
       assert.doesNotMatch(opened.text, new RegExp(secret), 'a PIN is a secret');
     }
     assert.match(opened.text, /94110/, 'a zip code is not a secret');
-    for (const shown of ['560001', '560002', '560003', 'Cubbon Park']) {
+    assert.match(opened.text, /: 2$/m, 'a labelled count box is not a code');
+    assert.match(opened.text, /: 3$/m, 'a labelled count box is not a code');
+    for (const shown of ['560001', '560002', '560003', '110001', 'Cubbon Park']) {
       assert.match(opened.text, new RegExp(shown), 'a postal PIN code or a map pin is not a secret');
     }
   });
