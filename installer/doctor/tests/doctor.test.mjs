@@ -662,12 +662,6 @@ describe('backup age check', () => {
     assert.equal(check.fix, 'Run aman backup');
   });
 
-  it('tells a person with a backup that aman restore goes back to it', () => {
-    make();
-    world.backup('20261008T120000Z', 2);
-    assert.match(machine(world.json(), 'backup').detail, /To go back to one: aman restore$/);
-  });
-
   it('judges by the newest backup', () => {
     make();
     world.backup('old', 30);

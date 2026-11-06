@@ -609,7 +609,7 @@ check_backup() {
       elif [ "$age_days" -gt 2 ]; then
         record machine backup warn "Daily backups are scheduled, but the last one is ${days} old. The newest backup is in $(ui_path "${newest%/}")." "Run aman doctor backup --fix"
       else
-        record machine backup ok "Daily backups are on; the last one is ${days} old. To go back to one: aman restore" ""
+        record machine backup ok "Daily backups are on; the last one is ${days} old." ""
       fi
       ;;
     off)
@@ -625,7 +625,7 @@ check_backup() {
       elif [ "$age_days" -gt "$BACKUP_WARN_DAYS" ]; then
         record machine backup warn "The last backup is ${days} old." "Run aman backup"
       else
-        record machine backup ok "The last backup is ${days} old. To go back to one: aman restore" ""
+        record machine backup ok "The last backup is ${days} old." ""
       fi
       ;;
   esac
