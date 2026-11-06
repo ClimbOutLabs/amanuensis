@@ -33,7 +33,7 @@ The tool server always starts from this file and restarts when it changes. Remov
 
 ## Which addresses are allowed
 
-The calendar address may be on the internet or on your home or office network. These are never allowed, however the name is written: this computer itself (127.x, ::1), link-local addresses (169.254.x, fe80::), the special addresses cloud hosts use for their private settings, multicast and reserved ranges, and any other address on this service's own Compose network. The check runs on the address the connection actually uses. No redirect is followed, so the login is never sent anywhere else. The calendar tool server refuses every redirect too, so the sign-in check asks the same address it asks first: the saved address with one trailing slash.
+The calendar address may be on the internet or on your home or office network. These are never allowed, however the name is written: this computer itself (127.x, ::1), link-local addresses (169.254.x, fe80::), the special addresses cloud hosts use for their private settings, multicast and reserved ranges, and any other address on this service's own Compose network. The check runs on the address the connection actually uses. The sign-in check takes the same steps the calendar tool server takes to find the account. It asks the saved address first, with one trailing slash. If that address redirects, it asks the server's /.well-known/caldav address and follows at most one redirect from there, and only on the same server. A redirect to another server is never followed, so the login is never sent anywhere else.
 
 ## What a saved value may hold
 

@@ -81,8 +81,16 @@ describe('the calendar account agent', () => {
         res.end();
         return;
       }
-      if (behavior === 'unslash' && req.url.endsWith('/')) {
-        res.writeHead(301, { Location: req.url.replace(/\/+$/, '') });
+      if (behavior === 'gmx' && req.url !== '/begenda/dav/users/') {
+        // Like GMX and web.de: the saved address redirects before the login is looked at, and the
+        // well-known route names the real address on the same server.
+        const location = req.url === '/.well-known/caldav' ? '/begenda/dav/users/' : '/begenda/';
+        res.writeHead(302, { Location: location });
+        res.end();
+        return;
+      }
+      if (behavior === 'loop') {
+        res.writeHead(302, { Location: '/somewhere-else/' });
         res.end();
         return;
       }
@@ -200,7 +208,10 @@ describe('the calendar account agent', () => {
     behavior = 'redirect';
     const redirected = await call('POST', payload());
     assert.deepEqual(JSON.parse(redirected.text), { error: 'redirected' });
-    assert.equal(seen.length, 1);
+    assert.deepEqual(
+      seen.map(request => request.url),
+      ['/dav/', '/.well-known/caldav'],
+    );
     assert.ok(!redirected.text.includes(CANARY));
     assert.equal(existsSync(file), false);
   });
@@ -233,11 +244,24 @@ describe('the calendar account agent', () => {
     );
   });
 
-  it('refuses a redirect to another path on the same server, since the tool server would refuse it too', async () => {
-    behavior = 'unslash';
+  it('takes the well-known route when the saved address redirects, the way the tool server finds GMX and web.de', async () => {
+    behavior = 'gmx';
+    const saved = await call('POST', payload({ url: `https://${HOST}:${calendarPort}/` }));
+    assert.equal(saved.status, 200);
+    assert.deepEqual(
+      seen.map(request => request.url),
+      ['/', '/.well-known/caldav', '/begenda/dav/users/'],
+    );
+  });
+
+  it('follows only one redirect from the well-known route', async () => {
+    behavior = 'loop';
     const refused = await call('POST', payload({ url: `https://${HOST}:${calendarPort}/dav/` }));
     assert.deepEqual(JSON.parse(refused.text), { error: 'redirected' });
-    assert.equal(seen.length, 1);
+    assert.deepEqual(
+      seen.map(request => request.url),
+      ['/dav/', '/.well-known/caldav', '/somewhere-else/'],
+    );
     assert.equal(existsSync(file), false);
   });
 
