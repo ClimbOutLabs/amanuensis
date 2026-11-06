@@ -4,14 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 
 import { useAssistantDisplayName } from '../components/PersonalizationContext.js';
 import { useOptionalDeliveries } from './DeliveriesContext.js';
-import {
-  currentPushSubscription,
-  disablePush,
-  enablePush,
-  pushSupport,
-  subscribedWithKey,
-  type PushBlocker,
-} from './pushDevice.js';
+import { disablePush, enablePush, pushStatus, pushSupport, type PushBlocker } from './pushDevice.js';
 
 function blockerWords(assistant: string): Record<PushBlocker, string> {
   return {
@@ -39,16 +32,11 @@ export function ReachMeSettings() {
   useEffect(() => {
     if (api === undefined) return;
     let cancelled = false;
-    void Promise.all([currentPushSubscription().catch(() => null), api.pushPublicKey().catch(() => null)]).then(
-      ([subscription, key]) => {
-        if (cancelled) return;
-        // A subscription made with an older key gets nothing, so it reads as off until it is turned on again.
-        setState(
-          subscription !== null && key !== null && subscribedWithKey({ subscription, publicKey: key }) ? 'on' : 'off',
-        );
-        setServerReady(key !== null);
-      },
-    );
+    void pushStatus({ api }).then(status => {
+      if (cancelled) return;
+      setState(status.on ? 'on' : 'off');
+      setServerReady(status.serverReady);
+    });
     return () => {
       cancelled = true;
     };
@@ -63,7 +51,9 @@ export function ReachMeSettings() {
       setState('on');
     } catch (caught) {
       console.error(caught);
-      setError(caught instanceof Error ? caught.message : 'Notices could not be turned on. Try again.');
+      setError(
+        caught instanceof Error ? caught.message : 'Notices could not be turned on. Reload the page, then try again.',
+      );
     } finally {
       setBusy(false);
     }
@@ -78,7 +68,9 @@ export function ReachMeSettings() {
       setState('off');
     } catch (caught) {
       console.error(caught);
-      setError(caught instanceof Error ? caught.message : 'Notices could not be turned off. Try again.');
+      setError(
+        caught instanceof Error ? caught.message : 'Notices could not be turned off. Reload the page, then try again.',
+      );
     } finally {
       setBusy(false);
     }

@@ -208,6 +208,12 @@ export const CreateTurnRequestSchema = z
           'name and an omitted field both fall back to UTC.',
       )
       .openapi('ClientTimezoneInput'),
+    spoken_reply: z
+      .boolean()
+      .optional()
+      .describe(
+        'True when the person spoke this message and the client reads the reply aloud. The reply is then kept short and plain.',
+      ),
   })
   .superRefine((data, ctx) => {
     if (!data.input) {

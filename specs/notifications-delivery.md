@@ -1,4 +1,4 @@
-# Spec: Reaching You (Notifications Delivery)
+# Spec: Reach Me (Notifications Delivery)
 
 **Status:** approved
 
@@ -22,13 +22,13 @@ One server-side feed of things Aman wants a person to see, called deliveries. Ea
 
 **Push names no one.** The contact every push carries defaults to the project's public page, not the owner's email. The owner can set their own with `WEB_PUSH_SUBJECT`.
 
-**A bounded number of devices.** A person keeps notices on for at most 10 devices. Turning on another drops the one turned on longest ago. A notice goes to at most 4 devices at a time.
+**A bounded number of devices.** A person keeps notices on for at most 10 devices. Turning on another drops the one turned on longest ago. A notice goes to at most 4 devices at a time. Settings asks the server whether this device is still saved, so a device that was dropped, or that its push service reported gone, reads as off and can be turned on again.
 
 **New keys mean new subscriptions.** Each device records the key it was turned on with. After the keys change, a device on the old key is removed instead of sent to, and turning notices on again makes a fresh subscription with the new key.
 
 **Push is opt-in per device.** A person turns notices on from a click in Settings. Push is off unless the server has a key pair. The installer creates the key pair at install, and on upgrade for instances that have none.
 
-**The Reach me words name the assistant, and a failure says its kind.** The settings page speaks of the assistant by the name the person chose, not the product name. When turning notices on or off fails, the page says what kind of failure it was in plain words, with the one next step; the raw browser error stays in the console and on the error's cause. A certificate failure (the browser does not trust the secure connection at this address, which a page can be opened past but the notice program cannot) names the two remedies the product already has: `aman doctor network --fix` on the computer that runs the assistant, and the trust page on the device.
+**The Reach me words name the assistant, and a failure says its kind.** The settings page speaks of the assistant by the name the person chose, not the product name. When turning notices on or off fails, the page says what kind of failure it was in plain words, with the one next step; the raw browser error stays in the console and on the error's cause. A certificate failure, and a SecurityError raised while subscribing, both mean the browser does not trust the secure connection at this address, which a page can be opened past but the notice program cannot. The next step the words name is this computer's trust page, opened on the device; if that is not enough, they name the certificate repair on the computer, `aman doctor tls --fix`.
 
 **The service worker stays inert.** It shows notices and opens items. It has no fetch handler and stores nothing, so it cannot touch API calls or streams.
 
@@ -65,7 +65,7 @@ All tests use synthetic data, never a person's real data.
 - The push payload holds no reminder text
 - A dead push subscription is removed
 - A device on an old key is removed, and turning notices on again re-subscribes
-- An 11th device drops the oldest
+- An 11th device drops the oldest, and the dropped device reads as off in Settings
 - A full export with many devices per item imports
 - An upgraded install gets push keys
 - The service worker takes no fetch events

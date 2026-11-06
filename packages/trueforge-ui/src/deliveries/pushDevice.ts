@@ -49,12 +49,35 @@ function bufferToBase64Url(buffer: ArrayBuffer | null): string {
 }
 
 /**
+ * The name and message of a browser failure. The browser steps below throw DOMExceptions, which are not Error
+ * instances in every browser, so read the two fields off whatever was thrown.
+ */
+function failureShape(caught: unknown): { name: string; message: string } {
+  if (typeof caught !== 'object' || caught === null) return { name: '', message: '' };
+  const name = Reflect.get(caught, 'name');
+  const message = Reflect.get(caught, 'message');
+  return {
+    name: typeof name === 'string' ? name : '',
+    message: typeof message === 'string' ? message : '',
+  };
+}
+
+/**
+ * Plain words for a trust failure: this browser does not trust the secure connection at this address. The page
+ * itself can be opened past a certificate warning, but the browser fetches the notice program only over a
+ * connection it fully trusts, so an address whose certificate this device does not trust fails here and nowhere
+ * else. The next step is on this device: open this computer's trust page and follow its steps. If that is not
+ * enough, the person who runs it can repair the certificate on the computer with `aman doctor tls --fix`.
+ */
+function trustFailureWords({ assistant, turningOn }: { assistant: string; turningOn: boolean }): string {
+  const consequence = turningOn ? 'notices cannot be set up here' : 'notices cannot be turned off here';
+  return `This browser does not trust the secure connection at this address, so ${consequence}. On this device, open the trust page for the computer that runs ${assistant} (the installer printed its address; it ends in /trust) and follow its steps. Then come back here and try again. If it still does not work, ask the person who runs it to run: aman doctor tls --fix.`;
+}
+
+/**
  * Plain words for a failure the browser reported during a push step, matched to the kind of failure so the next
- * step fits it. A certificate failure reads differently from the rest: the page itself can be opened past a
- * certificate warning, but the browser fetches the notice program only over a connection it fully trusts, so an
- * address whose certificate this device does not trust fails here and nowhere else. Its remedies are the ones the
- * product already has: refresh the addresses recorded on the computer (which re-issues its certificate), and
- * trust that computer on this device.
+ * step fits it. A certificate failure, and a SecurityError raised while subscribing, both mean the browser does
+ * not trust this address, so both get the trust words.
  */
 function browserFailureWords({
   caught,
@@ -65,10 +88,9 @@ function browserFailureWords({
   assistant: string;
   turningOn: boolean;
 }): string {
-  const message = caught instanceof Error ? caught.message : '';
-  const name = caught instanceof Error ? caught.name : '';
-  if (/certificate|ssl/i.test(message)) {
-    return `This browser does not trust the secure connection at this address, so notices cannot be set up here. On the computer that runs ${assistant}, run: aman doctor network --fix. Then, on this device, open the trust page for that computer (the installer printed its address; it ends in /trust) and follow its steps. Then come back here and try again.`;
+  const { name, message } = failureShape(caught);
+  if (/certificate|ssl/i.test(message) || name === 'SecurityError') {
+    return trustFailureWords({ assistant, turningOn });
   }
   if (name === 'NotAllowedError') {
     return 'This browser did not allow notices. Allow them for this site in the browser settings, then try again.';
@@ -118,6 +140,27 @@ export function subscribedWithKey({
 }): boolean {
   const current = subscription.options.applicationServerKey;
   return current !== null && bufferToBase64Url(current) === publicKey.replace(/=+$/, '');
+}
+
+/** Whether push works on the server, and whether this device gets notices now. */
+export type PushStatus = { serverReady: boolean; on: boolean };
+
+/**
+ * Notices are on only when this browser has a subscription made with the server's current key and the server still
+ * has it: a device the server dropped, for a newer one or because its push service said it is gone, reads as off.
+ * When the server cannot be asked, the browser's own answer stands, so a failed check never flips a working device off.
+ */
+export async function pushStatus({ api }: { api: DeliveriesApi }): Promise<PushStatus> {
+  const [subscription, key] = await Promise.all([
+    currentPushSubscription().catch(() => null),
+    api.pushPublicKey().catch(() => null),
+  ]);
+  if (key === null) return { serverReady: false, on: false };
+  if (subscription === null || !subscribedWithKey({ subscription, publicKey: key })) {
+    return { serverReady: true, on: false };
+  }
+  const saved = await api.pushDeviceSaved(subscription.endpoint).catch(() => true);
+  return { serverReady: true, on: saved };
 }
 
 function deviceOf({ subscription, label }: { subscription: PushSubscription; label: string }) {
