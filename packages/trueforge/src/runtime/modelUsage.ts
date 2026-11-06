@@ -59,7 +59,6 @@ export const NO_TURN_USAGE: TurnModelUsage = {
  * all-zero usage means the provider reported nothing and the client filled in zeros; it is never
  * shown as a real count.
  */
-
 export function reportedUsage(usage: CompletionUsage | null | undefined): CompletionUsage | null {
   if (usage === undefined || usage === null || usage.input_tokens + usage.output_tokens <= 0) {
     return null;

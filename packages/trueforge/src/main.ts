@@ -1504,7 +1504,6 @@ try {
     console.error(error instanceof Error ? error.message : error);
     process.exit(1);
   });
-
   if (smsProvider !== undefined && configuration.TWILIO !== undefined) {
     // So nobody has to set it in the Twilio console. Only this number's incoming-text address changes, only to the
     // configured one, and a failure leaves texts working as before.
