@@ -1,3 +1,4 @@
+import { GoogleApiError } from '@truefoundry/trueforge-core/core/google/errors';
 import winston from 'winston';
 
 import { DeliveryStore } from '../../../../src/db/deliveryStore';
@@ -8,15 +9,16 @@ import { createSqliteDb } from '../../../../src/db/sqlite/client';
 import { createDeliveryService } from '../../../../src/runtime/delivery/deliveryService';
 import type { NoticingJudge } from '../../../../src/runtime/noticing/judge';
 import { createNoticingService } from '../../../../src/runtime/noticing/noticingService';
-import type {
-  ApprovalSource,
-  CalendarEventInfo,
-  CalendarSource,
-  MailMessage,
-  MailSource,
-  MailWindowRead,
-  NoticingSources,
-  WaitingApproval,
+import {
+  MessageUnreadableError,
+  type ApprovalSource,
+  type CalendarEventInfo,
+  type CalendarSource,
+  type MailMessage,
+  type MailSource,
+  type MailWindowRead,
+  type NoticingSources,
+  type WaitingApproval,
 } from '../../../../src/runtime/noticing/sources';
 import { TokenFactoryDailyCapError } from '../../../../src/runtime/tokenFactoryBudget';
 import type { Delivery } from '../../../../src/schemas/deliveries';
@@ -126,17 +128,15 @@ async function setup({
   const store = new NoticingStore(db);
   const deliveryStore = new DeliveryStore(db);
   const pushed: Delivery[] = [];
-  const notices: string[] = [];
   const auditTexts: string[] = [];
   const deliveries = createDeliveryService({
     store: deliveryStore,
     senders: [
       {
         channel: 'web_push',
-        send: ({ delivery, notice_text }) => {
+        send: ({ delivery }) => {
           if (delivery.level !== 'note') {
             pushed.push(delivery);
-            notices.push(notice_text);
           }
           return Promise.resolve([]);
         },
@@ -171,7 +171,7 @@ async function setup({
     ),
     readText: message =>
       message.id in unreadable
-        ? Promise.reject(new Error('The message could not be parsed.'))
+        ? Promise.reject(new MessageUnreadableError({ message_id: message.id, cause: new Error('no such message') }))
         : Promise.resolve(texts[message.id] ?? message.snippet),
     laterInThread: jest.fn(() => Promise.resolve(later)),
     trustedAuthenticationServers: ['mx.example.net'],
@@ -214,7 +214,6 @@ async function setup({
     judge,
     feed,
     pushed,
-    notices,
     auditTexts,
     store,
     mailSource,
@@ -911,8 +910,16 @@ describe('passes that fail, stop or overlap', () => {
     expect((await feed()).map(item => item.level)).toEqual(['nudge']);
   });
 
-  it('keeps raising tracked bills when one bill’s mail can no longer be read', async () => {
-    const { service, store, mailSource, feed } = await setup({});
+  /** Two tracked bills, due within three days, whose threads `laterInThread` answers. */
+  async function trackedBills({
+    store,
+    mailSource,
+    gone,
+  }: {
+    store: NoticingStore;
+    mailSource: MailSource;
+    gone: Error;
+  }): Promise<void> {
     const bill = ({ id, due }: { id: string; due: string }): NoticingEvent => ({
       ...trackedBill,
       id: `bill_due:${id}`,
@@ -930,15 +937,51 @@ describe('passes that fail, stop or overlap', () => {
     });
     jest
       .mocked(mailSource.laterInThread)
-      .mockImplementation(ref =>
-        ref.id === 'gone'
-          ? Promise.reject(new Error('Gmail has no such message, thread or draft.'))
-          : Promise.resolve([]),
-      );
+      .mockImplementation(ref => (ref.id === 'gone' ? Promise.reject(gone) : Promise.resolve([])));
+  }
+
+  it('keeps a tracked bill for later when its thread fails to read, and raises the rest', async () => {
+    const { service, store, mailSource, feed } = await setup({});
+    await trackedBills({ store, mailSource, gone: new GoogleApiError({ status: 429, message: 'Too many requests.' }) });
     await expect(service.run({ watcher: 'mail' })).resolves.toMatchObject({ raised: 1 });
-    expect((await feed()).map(item => item.text)).toHaveLength(1);
+    expect(await feed()).toHaveLength(1);
     const left = await store.listTracking({ ...OWNER, due_before: new Date('2027-01-01'), limit: 10 });
     expect(left.map(item => item.id)).toEqual(['bill_due:gone']);
+  });
+
+  it('raises a tracked bill whose thread can never be read, since nothing can say it was paid', async () => {
+    const { service, store, mailSource, feed } = await setup({});
+    const gone = new MessageUnreadableError({ message_id: 'gone', cause: new Error('no such message') });
+    await trackedBills({ store, mailSource, gone });
+    await expect(service.run({ watcher: 'mail' })).resolves.toMatchObject({ raised: 2 });
+    expect(await feed()).toHaveLength(2);
+  });
+
+  it('stops the pass on a rate limit, keeps the checkpoint and reads the mail on the next pass', async () => {
+    const message = mail({ received_at: new Date('2026-11-05T14:52:00.000Z') });
+    const { service, clock, store, feed, mailSource } = await setup({
+      settings: { always_important: [ALWAYS] },
+      messages: [message],
+    });
+    jest
+      .spyOn(mailSource, 'readText')
+      .mockRejectedValueOnce(new GoogleApiError({ status: 429, message: 'Too many requests.' }));
+    await expect(service.run({ watcher: 'mail' })).resolves.toMatchObject({ raised: 0 });
+    await expect(store.getCheckpoint({ ...OWNER, watcher: 'mail' })).resolves.toBeUndefined();
+
+    // A first pass looks back ten minutes, so the mail from 14:52 is still in reach.
+    clock.now = new Date('2026-11-05T15:01:00.000Z');
+    await expect(service.run({ watcher: 'mail' })).resolves.toMatchObject({ raised: 1 });
+    expect(await feed()).toHaveLength(1);
+  });
+
+  it('still raises tracked bills when new mail could not be listed', async () => {
+    const { service, store, mailSource, feed } = await setup({});
+    await trackedBills({ store, mailSource, gone: new Error('unused') });
+    jest.mocked(mailSource.laterInThread).mockResolvedValue([]);
+    jest.mocked(mailSource.listNewMessages).mockRejectedValue(new Error('The Email connector took too long.'));
+    await expect(service.run({ watcher: 'mail' })).resolves.toMatchObject({ raised: 2 });
+    expect(await feed()).toHaveLength(2);
   });
 
   it('drops waiting approvals past their expiry for people no pass looks at any more', async () => {
@@ -1086,26 +1129,6 @@ describe('passes that fail, stop or overlap', () => {
     );
     await service.run({ watcher: 'calendar' });
     expect((await feed()).map(item => item.level)).toEqual(['call', 'nudge']);
-  });
-});
-
-describe('what a notice outside the app carries', () => {
-  const clash = [
-    event({ id: 'a', title: 'Standup', start: '2026-11-05T16:00:00.000Z', end: '2026-11-05T17:00:00.000Z' }),
-    event({ id: 'b', title: 'Dentist', start: '2026-11-05T16:30:00.000Z', end: '2026-11-05T17:30:00.000Z' }),
-  ];
-
-  it('gives a notice only the plain sentence, and keeps the model’s words for the feed', async () => {
-    const { service, feed, notices } = await setup({
-      events: clash,
-      verdict: { level: 'nudge', reason: 'Today matters.', message: 'Your standup and dentist clash, sort it out.' },
-    });
-    await service.run({ watcher: 'calendar' });
-    const [item] = await feed();
-    expect(item?.text).toBe('Your standup and dentist clash, sort it out.');
-    expect(notices).toHaveLength(1);
-    expect(notices[0]).toContain('overlaps');
-    expect(notices[0]).not.toContain('sort it out');
   });
 });
 

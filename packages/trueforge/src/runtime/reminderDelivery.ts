@@ -183,8 +183,6 @@ export async function deliverReminder(params: {
         kind: 'reminder',
         level: decision.delivered,
         text: feedText(what),
-        // The person wrote the reminder, so a notice may carry it as it is.
-        notice_text: feedText(what),
         reason: joinReasons([
           `You asked to be reminded on ${formatRunTime({ at: new Date(run.scheduled_for), timezone: schedule.manifest.timezone })}.`,
           ...decision.steps,

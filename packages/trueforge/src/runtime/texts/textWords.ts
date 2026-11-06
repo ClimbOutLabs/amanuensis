@@ -1,6 +1,6 @@
 import { namesContactDetail } from '@truefoundry/trueforge-core/core/permissions/provenance';
 
-import type { DeliveryKind } from '../../schemas/deliveries';
+import type { Delivery, DeliveryKind } from '../../schemas/deliveries';
 import type { TextMode } from '../../schemas/textMessages';
 
 /** Said wherever texts are asked for on a server that has no Twilio details. */
@@ -73,30 +73,38 @@ function cut({ text, room }: { text: string; room: number }): string {
   return `${(space > room / 2 ? head.slice(0, space) : head).trimEnd()}...`;
 }
 
+/** Why a Full text went out in Private words instead, or null when it carried the item's own words. */
+export type FullWithheld = 'noticed' | 'contact_detail' | null;
+
 /**
- * The text that goes out for a delivery, given the name already made fit for a text, and the words it was sent in.
- * Full carries the delivery's notice words, never the model's own wording, which only the feed shows. Those words can
- * still quote mail someone else wrote, such as a subject, so a message that names a link, a site, a phone number or
- * an address, in any spelling, goes out in Private words, since a text is where a link or a number to call does the
- * most harm.
+ * Kinds whose words a person or Aman itself wrote: a reminder the person asked for, and a test. What the assistant
+ * noticed is worded by the model, and those words stay in the app, so a text names only its kind.
  */
-export function textBody({
-  name,
-  kind,
-  notice_text,
-  mode,
-}: {
-  name: string;
-  kind: DeliveryKind;
-  notice_text: string;
-  mode: TextMode;
-}): { body: string; sent_as: TextMode } {
-  const plain = plainText(notice_text);
-  if (mode === 'private' || namesContactDetail([notice_text, plain])) {
-    return { body: privateText({ name, kind }), sent_as: 'private' };
+const OWN_WORDS_KINDS: ReadonlySet<DeliveryKind> = new Set(['reminder', 'note']);
+
+/**
+ * The text that goes out for a delivery, given the name already made fit for a text. Full carries the item's words
+ * only for a reminder or a test; anything noticed goes out in Private words. Words that name a link, a site, a phone
+ * number or an address, in any spelling, also go out in Private words, since a text is where a link or a number to
+ * call does the most harm.
+ */
+export function textBody({ name, delivery, mode }: { name: string; delivery: Delivery; mode: TextMode }): {
+  body: string;
+  withheld: FullWithheld;
+} {
+  const privateBody = privateText({ name, kind: delivery.kind });
+  if (mode === 'private') {
+    return { body: privateBody, withheld: null };
+  }
+  if (!OWN_WORDS_KINDS.has(delivery.kind)) {
+    return { body: privateBody, withheld: 'noticed' };
+  }
+  const plain = plainText(delivery.text);
+  if (namesContactDetail([delivery.text, plain])) {
+    return { body: privateBody, withheld: 'contact_detail' };
   }
   const prefix = `${name}: `;
-  return { body: `${prefix}${cut({ text: plain, room: TEXT_MAX - prefix.length })}`, sent_as: 'full' };
+  return { body: `${prefix}${cut({ text: plain, room: TEXT_MAX - prefix.length })}`, withheld: null };
 }
 
 /** The code text. It carries no name the person chose, because it goes to a number nobody has proved yet. */

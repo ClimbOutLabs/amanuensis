@@ -22,9 +22,11 @@ function sourceOf({
   inbox,
   fits,
   answer,
+  trusted = ['mx.example.net'],
 }: {
   inbox: MailMessage[];
   fits: number;
+  trusted?: readonly string[];
   answer?: (input: { since: Date; before: Date; from: readonly string[] | undefined }) => MailWindowRead | undefined;
 }): { source: MailSource; asked: { since: Date; before: Date; from: readonly string[] | undefined }[] } {
   const asked: { since: Date; before: Date; from: readonly string[] | undefined }[] = [];
@@ -45,7 +47,7 @@ function sourceOf({
     },
     readText: () => Promise.resolve(''),
     laterInThread: () => Promise.resolve([]),
-    trustedAuthenticationServers: [],
+    trustedAuthenticationServers: trusted,
   };
   return { source, asked };
 }
@@ -116,34 +118,20 @@ describe('readMailWindow', () => {
     expect(asked.at(-1)?.from).toEqual(['boss@example.com']);
   });
 
-  it('halves a window that is too slow to list, and fails the pass when even a few seconds are', async () => {
-    const inbox = [message({ id: 'a', at: new Date('2026-11-05T14:10:00.000Z') })];
-    const halfHour = new Date('2026-11-05T14:30:00.000Z');
-    const slowOverHalfHour = sourceOf({
-      inbox,
-      fits: 10,
-      answer: ({ before }) => (before.getTime() > halfHour.getTime() ? { read: 'too_slow' } : undefined),
+  it('does not look for always-important senders in a flood when the source cannot vouch for them', async () => {
+    const at = new Date(SINCE.getTime() + 1000);
+    const forged = message({ id: 'forged', at, from: 'boss@example.com' });
+    const inbox = [...Array.from({ length: 600 }, (_, n) => message({ id: String(n), at })), forged];
+    const { source, asked } = sourceOf({ inbox, fits: 500, trusted: [] });
+    const read = await readMailWindow({
+      source,
+      since: SINCE,
+      now: NOW,
+      limit: 100,
+      keep_from: ['boss@example.com'],
+      logger: logger(),
     });
-    await expect(
-      readMailWindow({
-        source: slowOverHalfHour.source,
-        since: SINCE,
-        now: NOW,
-        limit: 10,
-        keep_from: [],
-        logger: logger(),
-      }),
-    ).resolves.toEqual({ messages: inbox, resume_from: halfHour });
-    const neverAnswers = sourceOf({ inbox, fits: 10, answer: () => ({ read: 'too_slow' }) });
-    await expect(
-      readMailWindow({
-        source: neverAnswers.source,
-        since: SINCE,
-        now: NOW,
-        limit: 10,
-        keep_from: [],
-        logger: logger(),
-      }),
-    ).rejects.toThrow('did not list a few seconds of mail in time');
+    expect(read.messages).toEqual([]);
+    expect(asked.some(item => item.from !== undefined)).toBe(false);
   });
 });

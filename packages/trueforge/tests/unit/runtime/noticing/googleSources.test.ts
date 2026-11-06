@@ -3,7 +3,9 @@ import type { CalendarEvent } from '@truefoundry/trueforge-core/core/calendar/ca
 import { LIST_DEADLINE_MS, type GmailApiPort } from '@truefoundry/trueforge-core/core/email/gmail/gmailApi';
 import type { GmailMessage } from '@truefoundry/trueforge-core/core/email/gmail/gmailWire';
 
+import { GoogleApiError } from '@truefoundry/trueforge-core/core/google/errors';
 import { GOOGLE_TOKEN_URL } from '@truefoundry/trueforge-core/core/google/oauth';
+import { z } from 'zod';
 
 import { migrateSqliteToLatest } from '../../../../src/db/migrateSqlite';
 import { createSqliteDb } from '../../../../src/db/sqlite/client';
@@ -13,6 +15,7 @@ import {
   googleCalendarSource,
   googleCalendarTimezoneFor,
 } from '../../../../src/runtime/noticing/googleSources';
+import { MessageUnreadableError } from '../../../../src/runtime/noticing/sources';
 import { readMailWindow } from '../../../../src/runtime/noticing/watchers';
 
 const NOW = new Date('2026-11-05T15:00:00.000Z');
@@ -81,6 +84,33 @@ describe('Google Calendar source', () => {
       ['spoofed', false],
       ['no creator', false],
     ]);
+  });
+
+  it('counts an event someone the person shares with made for them, with no one else on it', async () => {
+    const assistant = { email: 'assistant@example.com' };
+    const events = await sourceOf([
+      timed('made for me', { organizer: me, creator: assistant }),
+      timed('just me', {}),
+    ]).listEvents({ from: NOW, to: new Date('2026-11-06T15:00:00.000Z') });
+    expect(events.map(item => [item.id, item.own])).toEqual([
+      ['made for me', true],
+      ['just me', true],
+    ]);
+  });
+
+  it('takes an accept Google reports on an outside invite as the person’s own answer', async () => {
+    // Calendar does not say whether an accept came from the person or from the invite file, so it is believed.
+    const events = await sourceOf([
+      timed('outside', {
+        organizer: stranger,
+        creator: stranger,
+        attendees: [
+          { ...me, responseStatus: 'accepted' },
+          { ...stranger, organizer: true, responseStatus: 'accepted' },
+        ],
+      }),
+    ]).listEvents({ from: NOW, to: new Date('2026-11-06T15:00:00.000Z') });
+    expect(events.map(item => [item.id, item.own])).toEqual([['outside', true]]);
   });
 });
 
@@ -201,6 +231,39 @@ describe('Gmail source', () => {
       since = read.resume_from;
     }
     expect(seen).toEqual(['x1', 'y1', 'x2']);
+  });
+
+  it('marks a message Gmail can never give back as unreadable, and passes other failures on', async () => {
+    const { api } = gmail({ messages: [], perPage: 100 });
+    const failing = (error: Error) =>
+      gmailMailSource({
+        ...api,
+        getMessage: () => Promise.reject(error),
+        getThread: () => Promise.reject(error),
+      });
+    const mailRef = { id: 'm', thread_id: 't', received_at: minute(1) };
+    const gone = failing(new GoogleApiError({ status: 404, message: 'Gmail has no such message.' }));
+    const garbled = failing(
+      new GoogleApiError({
+        status: 502,
+        message: 'Gmail returned a response Aman could not read.',
+        cause: new z.ZodError([]),
+      }),
+    );
+    const limited = failing(new GoogleApiError({ status: 429, message: 'Too many requests.' }));
+    const asMail = {
+      ...mailRef,
+      from_address: 'dana@example.com',
+      from_name: null,
+      subject: '',
+      snippet: '',
+      authentication_results: [],
+    };
+    await expect(gone.readText(asMail)).rejects.toBeInstanceOf(MessageUnreadableError);
+    await expect(gone.laterInThread(mailRef)).rejects.toBeInstanceOf(MessageUnreadableError);
+    await expect(garbled.readText(asMail)).rejects.toBeInstanceOf(MessageUnreadableError);
+    await expect(limited.readText(asMail)).rejects.toThrow('Too many requests.');
+    await expect(limited.laterInThread(mailRef)).rejects.not.toBeInstanceOf(MessageUnreadableError);
   });
 
   it('hands back the oldest part when Gmail is too slow to read it all', async () => {

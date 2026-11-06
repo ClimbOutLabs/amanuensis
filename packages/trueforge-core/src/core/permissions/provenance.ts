@@ -222,10 +222,12 @@ const KNOWN_NUMBER_SHAPES = [
   /[$\u20ac\u00a3\u00a5\u20b9]\s?(?:\d{1,3}(?:,\d{3})+|\d{1,6})(?:\.\d{2})?(?![\d,])/g,
 ];
 
-/** A word made only of digits and the letters that pass for them in a number: `O` and `o`, `I` and `l`, and `S`. */
-const NUMBER_LIKE_WORD = /^[\dOoIlS]+$/;
+/** A word made only of digits and the letters that pass for them in a number: `O` and `o`, `I` and `l`, `S` and `Z`. */
+const NUMBER_LIKE_WORD = /^[\dOoIlSZ]+$/;
 /** Words people write between the parts of a number instead of a mark. */
-const SPOKEN_SEPARATOR = /^(?:dash|hyphen|space)$/i;
+const SPOKEN_SEPARATOR = /^(?:dash|hyphen|space|ext|extension)$/i;
+/** A digit read out as a word, which counts as one digit next to written ones, as in `five five five 0100`. */
+const SPOKEN_DIGIT = /^(?:zero|oh|one|two|three|four|five|six|seven|eight|nine)$/i;
 
 /**
  * Whether a text holds a run of digits as long as a short phone number, however the parts are kept apart: any marks
@@ -240,12 +242,14 @@ function holdsPhoneDigits(text: string): boolean {
     if (SPOKEN_SEPARATOR.test(word)) {
       continue;
     }
-    if (!NUMBER_LIKE_WORD.test(word)) {
+    if (SPOKEN_DIGIT.test(word)) {
+      digits += 1 + pendingLookalike;
+      pendingLookalike = 0;
+    } else if (!NUMBER_LIKE_WORD.test(word)) {
       digits = 0;
       pendingLookalike = 0;
       continue;
-    }
-    if (/\d/.test(word)) {
+    } else if (/\d/.test(word)) {
       digits += word.length + pendingLookalike;
       pendingLookalike = 0;
     } else if (digits > 0) {
@@ -277,8 +281,8 @@ const LATIN_LOOKALIKES: Record<string, string> = {
   '\u03bf': 'o',
   '\u03b1': 'a',
 };
-/** Dots that are not a full stop: the ideographic one and its half-width form. */
-const OTHER_DOTS = /[\u3002\uff61]/g;
+/** Dots that are not a full stop: middle dots, bullets, a one-dot leader, and the ideographic dot and its half-width form. */
+const OTHER_DOTS = /[\u00b7\u2022\u2024\u2027\u30fb\u3002\uff61]/g;
 /** Math minus signs and other dashes that are not in the dash class. */
 const OTHER_DASHES = /[\u2212\u2043\u2010\u2011\u2012\ufe63\uff0d]/g;
 /** The mark that turns a digit into a keycap picture, `5\ufe0f\u20e3`. */
@@ -298,14 +302,14 @@ const SPELLED_DOT =
   /[\p{L}\p{N}]\s*(?:\[\s*(?:\.|d[o0]t)\s*\]|\(\s*(?:\.|d[o0]t)\s*\)|\{\s*(?:\.|d[o0]t)\s*\}|\s+d[o0]t\s+)\s*[\p{L}\p{N}]/iu;
 /** A site with spaces around its dot, such as `evil-pay .com`, for the endings sites use most. */
 const SPACED_DOT =
-  /[\p{L}\p{N}-](?:\s+\.\s*|\s*\.\s+)(?:com|net|org|info|biz|io|co|app|xyz|top|site|online|link|shop|me|us|uk|ru|cn)\b/iu;
+  /[\p{L}\p{N}-](?:\s+\.\s*|\s*\.\s+)(?:com|net|org|info|biz|io|ai|gg|dev|tv|cc|ly|co|app|xyz|top|site|online|link|shop|me|us|uk|ru|cn)\b/iu;
 /** An address with its at sign bracketed, such as `ceo [at] evil`. */
 const SPELLED_AT = /[\p{L}\p{N}]\s*(?:\[\s*at\s*\]|\(\s*at\s*\)|\{\s*at\s*\})\s*[\p{L}\p{N}]/iu;
 /** A number read out word by word, such as `five five five oh one oh oh` or `five-five-five, zero-one-hundred`. */
 const SPELLED_DIGITS =
   /\b(?:(?:zero|oh|one|two|three|four|five|six|seven|eight|nine|hundred|thousand|double|triple|dash)\b[\s,-]*){6,}/i;
-/** A bare IPv4 address, which opens a site as well as a name does. */
-const IPV4 = /(?<![\d.])\d{1,3}(?:\.\d{1,3}){3}(?![\d.])/;
+/** A bare IPv4 address, dotted or as one hex number such as `0x7f000001`, which opens a site as well as a name does. */
+const IPV4 = /(?<![\d.])\d{1,3}(?:\.\d{1,3}){3}(?![\d.])|\b0x[\da-f]{8}\b/i;
 
 /**
  * Whether any value carries a phone number, a site or an address in any spelling: short local numbers kept apart

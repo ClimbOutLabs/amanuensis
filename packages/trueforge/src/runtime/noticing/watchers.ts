@@ -4,7 +4,14 @@ import type { Logger } from 'winston';
 import type { AlwaysImportantSender, NoticingEvent, ReachSettings } from '../../schemas/reach';
 import { checkSender } from './authenticationResults';
 import { findDeadline, looksLikeBill, saysPaid } from './deadlines';
-import type { CalendarEventInfo, CalendarSource, MailMessage, MailSource, WaitingApproval } from './sources';
+import {
+  MessageUnreadableError,
+  type CalendarEventInfo,
+  type CalendarSource,
+  type MailMessage,
+  type MailSource,
+  type WaitingApproval,
+} from './sources';
 
 /** A bill is raised when it falls due within this long. */
 export const BILL_WINDOW_MS = 3 * 86_400_000;
@@ -87,11 +94,6 @@ export async function readMailWindow({
       // Everything up to the newest message read was read. With none read, the next pass tries the same window.
       return { messages: read.messages, resume_from: read.messages.at(-1)?.received_at ?? since };
     }
-    if (read.read === 'too_slow' && short) {
-      // Even a few seconds of mail could not be listed, so the mail server is not answering. Nothing is passed over:
-      // the pass fails and the next one tries the same window.
-      throw new Error('The mail server did not list a few seconds of mail in time.');
-    }
     if (short) {
       return await readFlood({ source, since, before, keep_from, logger });
     }
@@ -114,11 +116,12 @@ async function readFlood({
   logger: Pick<Logger, 'warn'>;
 }): Promise<{ messages: MailMessage[]; resume_from: Date }> {
   const window = { since: since.toISOString(), before: before.toISOString() };
+  // Where no sender can be confirmed, mail from those senders is ordinary mail, so reading it is not worth a call.
   const kept =
-    keep_from.length === 0
+    keep_from.length === 0 || source.trustedAuthenticationServers.length === 0
       ? undefined
       : await source.listNewMessages({ since, before, limit: MOST_IN_SHORTEST_WINDOW, from: keep_from });
-  if (kept === undefined || kept.read === 'too_many' || kept.read === 'too_slow') {
+  if (kept === undefined || kept.read === 'too_many') {
     logger.warn('Passed over a flood of mail that arrived within a few seconds', window);
     return { messages: [], resume_from: before };
   }
@@ -133,8 +136,9 @@ async function readFlood({
 /**
  * Mail from someone the person marked always important, when the mail server vouched for the sender, and bills or
  * deadlines named in any new mail. A message from an always-important address that the server did not vouch for is
- * handled as ordinary mail: it can still be a bill, but only as a note. A message that cannot be read is passed over,
- * so one broken message never holds up the rest.
+ * handled as ordinary mail: it can still be a bill, but only as a note. A message the source can never read is passed
+ * over, so one broken message never holds up the rest. Any other failure stops the pass, so no message is lost to a
+ * busy server or a dropped connection: the next pass reads the same mail again.
  */
 export async function watchMail({
   source,
@@ -165,9 +169,12 @@ export async function watchMail({
       findings.raise.push(...found.raise);
       findings.track.push(...found.track);
     } catch (error) {
+      if (!(error instanceof MessageUnreadableError)) {
+        throw error;
+      }
       logger.warn('Passed over a mail that could not be read', {
         message_id: message.id,
-        error: error instanceof Error ? error.message : String(error),
+        error: error.cause instanceof Error ? error.cause.message : error.message,
       });
     }
   }
@@ -215,10 +222,23 @@ async function findInMessage({
     });
   }
   const bill = await billFrom({ source, message, settings, verified, now });
-  if (bill === undefined || (await billIsPaid({ source, event: bill }))) {
+  if (bill === undefined) {
     return found;
   }
-  if (bill.due_at !== null && new Date(bill.due_at).getTime() - now.getTime() > BILL_WINDOW_MS) {
+  const paid = await billIsPaid({ source, event: bill }).catch((error: unknown) => {
+    if (error instanceof MessageUnreadableError) {
+      return undefined;
+    }
+    throw error;
+  });
+  if (paid === true) {
+    return found;
+  }
+  // A thread that could not be read is checked again with the tracked bills, before the bill is raised.
+  if (
+    paid === undefined ||
+    (bill.due_at !== null && new Date(bill.due_at).getTime() - now.getTime() > BILL_WINDOW_MS)
+  ) {
     found.track.push(bill);
   } else if (found.raise.length === 0) {
     // Mail already raised for its sender is not raised a second time as a bill.

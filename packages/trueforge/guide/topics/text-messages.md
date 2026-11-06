@@ -9,7 +9,7 @@ Aman can send you a text message when something needs you and you are away from 
 ## What a text says
 
 - **Private (recommended)** is the default. A text says only your assistant's name and the kind of thing, such as "a reminder is due". It never holds names, amounts or what a message said.
-- **Full** carries a short plain sentence about the item. A locked screen can show it, and the phone company can read it. If that sentence holds a link, a website, a phone number or an email address, Aman sends the Private words instead.
+- **Full** carries the words of a reminder. A locked screen can show them, and the phone company can read them. Something your assistant noticed still gets the Private words. If a reminder holds a link, a website, a phone number or an email address, Aman sends the Private words too.
 
 The text with your confirmation code holds only the code.
 

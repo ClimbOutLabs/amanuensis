@@ -8,7 +8,7 @@ import { assistantNameFor } from './assistantName';
 import { smsFailureWords, type SmsProvider } from './smsProvider';
 import { claimTextLimits, deliveryTextLimit, MAX_TEXTS_PER_PERSON_PER_DAY, waitWords } from './textLimits';
 import { canText, type TextNumberService } from './textNumber';
-import { textBody, TEXTS_NOT_SET_UP } from './textWords';
+import { textBody, TEXTS_NOT_SET_UP, type FullWithheld } from './textWords';
 
 function maskedTarget(phone: string): string {
   return `number ending ${phone.slice(-4)}`;
@@ -28,13 +28,15 @@ function attempt({
   return { channel: 'sms', outcome, detail, target, attempted_at: at.toISOString() };
 }
 
-function sentWords({ mode, sent_as }: { mode: TextMode; sent_as: TextMode }): string {
-  if (sent_as === 'full') {
-    return 'Full text.';
+function sentWords({ mode, withheld }: { mode: TextMode; withheld: FullWithheld }): string {
+  switch (withheld) {
+    case 'noticed':
+      return 'Private text: what your assistant noticed is shown only in the app, so only the kind of thing was sent.';
+    case 'contact_detail':
+      return 'Private text: the message named a link, a phone number or an address, so only the kind of thing was sent.';
+    case null:
+      return mode === 'full' ? 'Full text.' : 'Private text: only the kind of thing was sent.';
   }
-  return mode === 'full'
-    ? 'Private text: the message named a link, a phone number or an address, so only the kind of thing was sent.'
-    : 'Private text: only the kind of thing was sent.';
 }
 
 /**
@@ -60,7 +62,7 @@ export function createSmsSender({
 }): DeliveryChannelSender {
   return {
     channel: 'sms',
-    async send({ delivery, notice_text, tenant_id, created_by }) {
+    async send({ delivery, tenant_id, created_by }) {
       if (delivery.level !== 'nudge') {
         return [];
       }
@@ -104,10 +106,10 @@ export function createSmsSender({
         ];
       }
       const name = await assistantNameFor({ personalization, owner });
-      const { body, sent_as } = textBody({ name, kind: delivery.kind, notice_text, mode: contact.mode });
+      const { body, withheld } = textBody({ name, delivery, mode: contact.mode });
       const result = await provider.send({ to: contact.phone, body });
       if (result.outcome === 'sent') {
-        return [attempt({ outcome: 'sent', detail: sentWords({ mode: contact.mode, sent_as }), target, at: now() })];
+        return [attempt({ outcome: 'sent', detail: sentWords({ mode: contact.mode, withheld }), target, at: now() })];
       }
       if (result.failure === 'opted_out') {
         await textNumbers.stopNumber(contact.phone);

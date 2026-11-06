@@ -7,11 +7,5 @@ import type { Delivery, DeliveryAttempt, DeliveryChannel } from '../../schemas/d
 export interface DeliveryChannelSender {
   /** The channel its attempts are recorded under, including when it fails before it can say so itself. */
   readonly channel: DeliveryChannel;
-  /** `notice_text` is what a notice outside the app may say. A sender never puts the delivery's `text` there. */
-  send(input: {
-    delivery: Delivery;
-    notice_text: string;
-    tenant_id: string;
-    created_by: string;
-  }): Promise<DeliveryAttempt[]>;
+  send(input: { delivery: Delivery; tenant_id: string; created_by: string }): Promise<DeliveryAttempt[]>;
 }

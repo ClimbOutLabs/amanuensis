@@ -1,7 +1,7 @@
 ---
 id: reach-me
 title: How Aman reaches you
-covers: route:reach
+covers: settings:reach-me, route:reach, route:delivery
 ---
 
 Aman can tell you about something without waiting for you to open a chat. You choose what may reach you, and how, in **Settings**, then **Reach me**.

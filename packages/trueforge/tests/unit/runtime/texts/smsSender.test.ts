@@ -14,7 +14,6 @@ function nudge(text: string, kind: 'nudge' | 'reminder' = 'nudge') {
     kind,
     level: 'nudge' as const,
     text,
-    notice_text: text,
     reason: 'A bill is due soon.',
     link: null,
   };
@@ -72,28 +71,30 @@ describe('texts as a channel of the delivery layer', () => {
     }
   });
 
-  it('Full texts carry the one-sentence message', async () => {
+  it('Full texts carry a reminder’s words', async () => {
     const h = await textsHarness({ assistantName: 'Mannie' });
     await h.readyToText({ mode: 'full' });
-    await h.deliveries.deliver(nudge(BILL_TEXT));
+    await h.deliveries.deliver(nudge(BILL_TEXT, 'reminder'));
     expect(h.sent[0]?.body).toBe(`Mannie: ${BILL_TEXT}`);
   });
 
-  it('Full texts carry the notice words, never the model’s own wording, which only the feed shows', async () => {
+  it('Full texts never carry what the assistant noticed, which is worded by the model and stays in the app', async () => {
     const h = await textsHarness({ assistantName: 'Mannie' });
     await h.readyToText({ mode: 'full' });
-    const delivery = await h.deliveries.deliver({ ...nudge(BILL_TEXT), text: 'The model says: reply YES to pay now.' });
-    expect(h.sent[0]?.body).toBe(`Mannie: ${BILL_TEXT}`);
-    expect(delivery.text).toBe('The model says: reply YES to pay now.');
+    const delivery = await h.deliveries.deliver(nudge('The model says: reply YES to pay now.'));
+    expect(h.sent[0]?.body).toBe('Mannie: something needs you. Open the app to see it.');
+    expect(delivery.attempts.find(row => row.channel === 'sms')?.detail).toBe(
+      'Private text: what your assistant noticed is shown only in the app, so only the kind of thing was sent.',
+    );
   });
 
-  it('sends a Full message that names a link in Private words, and says so', async () => {
+  it('sends a Full reminder that names a link in Private words, and says so', async () => {
     const h = await textsHarness({ assistantName: 'Mannie' });
     await h.readyToText({ mode: 'full' });
     const delivery = await h.deliveries.deliver(
-      nudge('Your parcel is held. Pay the fee at https://parcel.example.invalid now.'),
+      nudge('Your parcel is held. Pay the fee at https://parcel.example.invalid now.', 'reminder'),
     );
-    expect(h.sent[0]?.body).toBe('Mannie: something needs you. Open the app to see it.');
+    expect(h.sent[0]?.body).toBe('Mannie: a reminder is due. Open the app to see it.');
     expect(delivery.attempts.find(row => row.channel === 'sms')?.detail).toBe(
       'Private text: the message named a link, a phone number or an address, so only the kind of thing was sent.',
     );

@@ -10,7 +10,8 @@ import type { ReachHistory } from './reachRules';
 /**
  * Longest one holder keeps a person's reach decisions to itself before another may take over. It is well past the
  * longest a delivery's sends can take, so a holder never loses it mid-delivery. A holder that hangs past it only lets
- * the next pass decide; that pass cannot send the same delivery twice, because each delivery is made once per id.
+ * the next pass decide. Each delivery is made once per id, so that pass sends it again only when no send of it was
+ * written down.
  */
 const LEASE_MS = 120_000;
 const LEASE_TRIES = 10;
