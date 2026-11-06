@@ -9220,7 +9220,7 @@ await client.reach.texts.get();
 <dl>
 <dd>
 
-Chooses Private (only the kind of thing) or Full (the one-sentence message).
+Chooses Private (only the kind of thing) or Full (a reminder’s own words).
 </dd>
 </dl>
 </dd>

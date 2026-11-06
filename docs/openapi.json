@@ -11906,7 +11906,7 @@
         "type": "object"
       },
       "TextMode": {
-        "description": "Private texts say only the kind of thing. Full texts carry the one-sentence message.",
+        "description": "Private texts say only the kind of thing. Full texts carry a reminder’s own words.",
         "enum": [
           "private",
           "full"
@@ -26879,7 +26879,7 @@
                 }
               }
             },
-            "description": "Too many test texts this hour. The message says how long to wait."
+            "description": "Too many test texts this hour, or a day’s limit on texts is reached. The message says how long to wait."
           },
           "502": {
             "content": {
@@ -26972,7 +26972,7 @@
         "x-fern-sdk-method-name": "get"
       },
       "put": {
-        "description": "Chooses Private (only the kind of thing) or Full (the one-sentence message).",
+        "description": "Chooses Private (only the kind of thing) or Full (a reminder’s own words).",
         "requestBody": {
           "content": {
             "application/json": {
