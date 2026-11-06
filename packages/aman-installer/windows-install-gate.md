@@ -25,11 +25,11 @@ goes out. A fix to the code or the guide means that machine is run again.
 
 ## The three computers
 
-| Machine | Windows | Starts with |
-| --- | --- | --- |
-| A | Windows 11 Home, clean | No Docker Desktop, no WSL |
-| B | Windows 10 22H2, clean | No Docker Desktop, no WSL |
-| C | Windows 10 or 11 | Docker Desktop installed and running |
+| Machine | Windows                | Starts with                          |
+| ------- | ---------------------- | ------------------------------------ |
+| A       | Windows 11 Home, clean | No Docker Desktop, no WSL            |
+| B       | Windows 10 22H2, clean | No Docker Desktop, no WSL            |
+| C       | Windows 10 or 11       | Docker Desktop installed and running |
 
 Machine C checks that Aman Setup uses the Docker Desktop that is already
 there and does not install it again.
@@ -65,8 +65,8 @@ Write down the clock time at step 1 and at step 12.
      without adding it again in Settings.
    - "Also use Aman from your phone and other devices on your home
      Wi-Fi? (yes or no):" — answer **yes**.
-   Also try one short password and one mismatched pair on one machine,
-   and check the wording of what comes back.
+     Also try one short password and one mismatched pair on one machine,
+     and check the wording of what comes back.
 6. **Aman opens.** The install runs, Aman opens in the browser at its
    https address with no certificate warning, and the getting started
    page opens. The last line is "Aman is installed, and the getting
@@ -108,8 +108,8 @@ Then, on each computer:
 Fill one row per computer. Time is from step 1 to step 12, restarts
 included. Result is Pass, or Fail with the bug links.
 
-| Machine | Windows build | Release tag | Date | Who | Time | Docker Desktop before / after | Result | Bugs and doc fixes |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| A: Win 11 Home, clean | | | | | | none / | | |
-| B: Win 10 22H2, clean | | | | | | none / | | |
-| C: Docker Desktop running | | | | | | / | | |
+| Machine                   | Windows build | Release tag | Date | Who | Time | Docker Desktop before / after | Result | Bugs and doc fixes |
+| ------------------------- | ------------- | ----------- | ---- | --- | ---- | ----------------------------- | ------ | ------------------ |
+| A: Win 11 Home, clean     |               |             |      |     |      | none /                        |        |                    |
+| B: Win 10 22H2, clean     |               |             |      |     |      | none /                        |        |                    |
+| C: Docker Desktop running |               |             |      |     |      | /                             |        |                    |
