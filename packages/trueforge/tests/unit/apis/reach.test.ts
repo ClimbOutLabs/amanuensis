@@ -206,10 +206,15 @@ describe('reach routes', () => {
   });
 
   it('refuses to switch on texts or calls that are not set up', async () => {
-    const { put } = await build();
+    const { put, call } = await build();
     const base = defaultReachSettings('UTC');
     expect((await put({ ...base, channels: { texts: true, calls: false } })).status).toBe(400);
-    expect((await put({ ...base, channels: { texts: false, calls: true } })).status).toBe(400);
+    const calls = await put({ ...base, channels: { texts: false, calls: true } });
+    expect(calls.status).toBe(400);
+    // One next step: the note already says what to do.
+    await expect(calls.json()).resolves.toEqual({ error: { message: NO_PHONE_CHANNELS.calls.note } });
+    const tried = await call('/test', { method: 'POST', body: { channel: 'call' } });
+    await expect(tried.json()).resolves.toEqual({ error: { message: NO_PHONE_CHANNELS.calls.note } });
   });
 
   it('allows calls once the channel is available and the number is confirmed, and says what to do before that', async () => {

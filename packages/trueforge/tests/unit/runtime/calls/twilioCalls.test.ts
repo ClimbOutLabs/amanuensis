@@ -50,15 +50,12 @@ describe('starting a call through Twilio', () => {
     });
   });
 
-  it('takes only a well-formed call id from Twilio', async () => {
+  it('takes only a well-formed call id from Twilio, and otherwise cannot tell whether a call started', async () => {
     for (const body of [{ sid: 'CA123' }, { sid: `SM${'b'.repeat(32)}` }, {}, 'not json']) {
       const t = replying(201, body);
       expect(
         await createTwilioCallProvider({ settings, fetchTwilio: t.fetchTwilio }).place({ to: '+1', call_id: 'c' }),
-      ).toEqual({
-        outcome: 'failed',
-        failure: 'unreachable',
-      });
+      ).toEqual({ outcome: 'unknown' });
     }
   });
 
@@ -84,15 +81,21 @@ describe('starting a call through Twilio', () => {
       settings,
       fetchTwilio: () => Promise.reject(new Error(`boom ${settings.authToken} +15550111`)),
     }).place({ to: '+15550111', call_id: 'c' });
-    expect(result).toEqual({ outcome: 'failed', failure: 'unreachable' });
+    // The request may have reached Twilio before it failed, so whether the phone rings is not known.
+    expect(result).toEqual({ outcome: 'unknown' });
     expect(JSON.stringify(result)).not.toContain('5550111');
   });
 
   it('says what to do next for every failure', () => {
-    expect(callFailureWords('invalid_number')).toBe(
+    expect(callFailureWords({ failure: 'invalid_number', test: true })).toBe(
       'The phone company would not call this number. Check it in Settings, Reach me.',
     );
-    expect(callFailureWords('not_accepted')).toContain('Check the account id and auth token');
-    expect(callFailureWords('unreachable')).toBe('The call could not be started. Try again in a minute.');
+    expect(callFailureWords({ failure: 'not_accepted', test: false })).toContain('Check the account id and auth token');
+    expect(callFailureWords({ failure: 'unreachable', test: true })).toBe(
+      'The call could not be started. Try again in a minute.',
+    );
+    expect(callFailureWords({ failure: 'unreachable', test: false })).toBe(
+      'The call could not be started. It was sent as a text and a notice instead.',
+    );
   });
 });

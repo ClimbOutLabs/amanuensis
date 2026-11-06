@@ -8,7 +8,9 @@ import { postTwilioForm, publicTwilioFetch, twilioErrorCode, twilioRefusal, type
 /** Why a call could not be started. The words for the person are written by whoever shows it. */
 type CallFailure = 'invalid_number' | 'not_accepted' | 'unreachable';
 
-export type PlaceCallResult = { outcome: 'started'; call_sid: string } | { outcome: 'failed'; failure: CallFailure };
+/** `unknown` when no clear answer came back: Twilio may have started the call, so the phone may still ring. */
+export type PlaceCallResult =
+  { outcome: 'started'; call_sid: string } | { outcome: 'failed'; failure: CallFailure } | { outcome: 'unknown' };
 
 /**
  * One way to ring the person's phone. A provider never throws: a failure comes back as a result, and what it says
@@ -78,9 +80,7 @@ export function createTwilioCallProvider({
             body = undefined;
           }
           const created = CreatedCallSchema.safeParse(body);
-          return created.success
-            ? { outcome: 'started', call_sid: created.data.sid }
-            : { outcome: 'failed', failure: 'unreachable' };
+          return created.success ? { outcome: 'started', call_sid: created.data.sid } : { outcome: 'unknown' };
         }
         const code = twilioErrorCode(text);
         if (code !== undefined && INVALID_NUMBER_CODES.has(code)) {
@@ -88,20 +88,26 @@ export function createTwilioCallProvider({
         }
         return { outcome: 'failed', failure: twilioRefusal(reply.status) };
       } catch {
-        return { outcome: 'failed', failure: 'unreachable' };
+        // The request may have reached Twilio before the answer was lost.
+        return { outcome: 'unknown' };
       }
     },
   };
 }
 
-/** The line shown to the person for a call that could not start, ending with the one thing to do. */
-export function callFailureWords(failure: CallFailure): string {
+/**
+ * Why a call could not be started, and the one thing that happens or to do next. A real call already went out as a
+ * text and a notice instead; a test sent nothing else.
+ */
+export function callFailureWords({ failure, test }: { failure: CallFailure; test: boolean }): string {
   switch (failure) {
     case 'invalid_number':
       return 'The phone company would not call this number. Check it in Settings, Reach me.';
     case 'not_accepted':
       return 'Twilio did not accept the sign-in details. Check the account id and auth token in the settings file.';
     case 'unreachable':
-      return 'The call could not be started. Try again in a minute.';
+      return test
+        ? 'The call could not be started. Try again in a minute.'
+        : 'The call could not be started. It was sent as a text and a notice instead.';
   }
 }

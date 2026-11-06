@@ -124,7 +124,7 @@ export function createReachRouter(deps: ReachRouterDeps) {
     // Calls already on stay on while the voice parts are briefly down; only switching them on needs them now.
     const callsWereOn = (await deps.reachStore.get(owner))?.channels.calls === true;
     if (settings.channels.calls && !channels.calls.available && !callsWereOn) {
-      return c.json({ error: { message: `${channels.calls.note} Leave calls off for now.` } }, 400);
+      return c.json({ error: { message: channels.calls.note } }, 400);
     }
     if (settings.channels.calls) {
       const contact = await deps.textContacts.get(owner);
@@ -213,7 +213,7 @@ export function createReachRouter(deps: ReachRouterDeps) {
     }
     if (channel === 'call') {
       if (!channels.calls.available) {
-        return c.json({ error: { message: `${channels.calls.note} There is nothing to try yet.` } }, 409);
+        return c.json({ error: { message: channels.calls.note } }, 409);
       }
       const notOn = 'Confirm your number and switch calls on first, then try again.';
       const settings = await deps.reachStore.get(owner);
@@ -243,7 +243,10 @@ export function createReachRouter(deps: ReachRouterDeps) {
           : c.json({ error: { message: rang.detail ?? notOn } }, 409);
       }
       if (rang.outcome !== 'sent') {
-        return c.json({ error: { message: rang.detail ?? callFailureWords('unreachable') } }, 502);
+        return c.json(
+          { error: { message: rang.detail ?? callFailureWords({ failure: 'unreachable', test: true }) } },
+          502,
+        );
       }
       return c.json({ data: { delivery_id: delivery.id, devices_reached: 0 } }, 201);
     }

@@ -160,7 +160,7 @@ describe('phone calls as a channel of the delivery layer', () => {
       'failed',
     ]);
     expect(attempts.find(attempt => attempt.outcome === 'failed')?.detail).toBe(
-      'No one answered. The call was not tried again.',
+      'No one answered. It was sent as a text and a notice instead.',
     );
     expect((await h.calls.getBySid(CALL_SID))?.outcome).toBe('no_answer');
   });
@@ -197,7 +197,7 @@ describe('phone calls as a channel of the delivery layer', () => {
     await h.waitFor(() => h.texts.length === 1 && h.pushes.length === 1);
     const calls = (await h.attemptsOf(delivery.id)).filter(attempt => attempt.channel === 'call');
     expect(calls.at(-1)?.detail).toBe(
-      'A voicemail picked up, but no message could be left. The call was not tried again.',
+      'A voicemail picked up, but no message could be left. It was sent as a text and a notice instead.',
     );
   });
 
@@ -211,7 +211,7 @@ describe('phone calls as a channel of the delivery layer', () => {
     expect(h.tts.sentences).toEqual([]);
     const calls = (await h.attemptsOf(delivery.id)).filter(attempt => attempt.channel === 'call');
     expect(calls.at(-1)?.detail).toBe(
-      'A voicemail picked up, but no message could be left. The call was not tried again.',
+      'A voicemail picked up, but no message could be left. It was sent as a text and a notice instead.',
     );
   });
 
@@ -251,6 +251,25 @@ describe('phone calls as a channel of the delivery layer', () => {
     expect(second?.outcome).toBe('skipped');
     expect(second?.detail).toMatch(/try again/i);
     expect(h.placed).toHaveLength(1);
+  });
+
+  it('a test call Twilio could not start says to try again, since nothing else was sent', async () => {
+    h = await callsHarness();
+    await h.readyToCall();
+    h.nextCall.result = { outcome: 'failed', failure: 'unreachable' };
+    const delivery = await h.deliveries.deliver({
+      ...ALICE,
+      kind: 'note',
+      level: 'nudge',
+      text: 'This is a test call.',
+      reason: 'You pressed Try it.',
+      link: null,
+      test: 'call',
+    });
+    expect(delivery.attempts.find(attempt => attempt.channel === 'call')?.detail).toBe(
+      'The call could not be started. Try again in a minute.',
+    );
+    expect(h.texts).toEqual([]);
   });
 
   it('a test call that cannot ring yet does not use up a test', async () => {
@@ -331,7 +350,7 @@ describe('a call that ends while its line opens', () => {
     expect((await h.calls.getBySid(CALL_SID))?.outcome).toBe('failed');
     const calls = (await h.attemptsOf(delivery.id)).filter(attempt => attempt.channel === 'call');
     expect(calls.at(-1)?.detail).toBe(
-      'The call was answered, but the line could not be opened. The call was not tried again.',
+      'The call was answered, but the line could not be opened. It was sent as a text and a notice instead.',
     );
   });
 
@@ -358,7 +377,7 @@ describe('a call that ends while its line opens', () => {
     expect(h.pushes).toEqual([delivery.id]);
     const calls = (await h.attemptsOf(delivery.id)).filter(attempt => attempt.channel === 'call');
     expect(calls.at(-1)?.detail).toBe(
-      'The call was answered, but the line could not be opened. The call was not tried again.',
+      'The call was answered, but the line could not be opened. It was sent as a text and a notice instead.',
     );
   });
 
@@ -456,8 +475,11 @@ describe('a call that ends while its line opens', () => {
   });
 
   it.each([
-    ['human', 'The call was answered, but the line could not be opened. The call was not tried again.'],
-    ['machine_end_beep', 'A voicemail picked up, but no message could be left. The call was not tried again.'],
+    ['human', 'The call was answered, but the line could not be opened. It was sent as a text and a notice instead.'],
+    [
+      'machine_end_beep',
+      'A voicemail picked up, but no message could be left. It was sent as a text and a notice instead.',
+    ],
   ])(
     'when the voice service speaks without saying it checked the words (%s), says nothing and falls back',
     async (answeredBy, detail) => {
@@ -560,6 +582,62 @@ describe('a call that ends while its line opens', () => {
     expect(h.texts).toEqual([]);
   });
 
+  it('ends a call whose line was given but never closed, once its longest talk is over, as cut off', async () => {
+    h = await callsHarness();
+    await h.readyToCall();
+    const delivery = await h.callDelivery();
+    await h.answer();
+    h.clock.now = new Date(h.clock.now.getTime() + 20 * 60_000);
+    await h.service.sweep();
+    expect((await h.calls.getBySid(CALL_SID))?.outcome).toBe('failed');
+    const calls = (await h.attemptsOf(delivery.id)).filter(attempt => attempt.channel === 'call');
+    expect(calls.at(-1)?.detail).toBe(
+      'The call stopped before it finished. It was sent as a text and a notice instead.',
+    );
+    expect(h.texts).toHaveLength(1);
+  });
+
+  it('when Twilio could not be reached, says the text and the notice went out instead', async () => {
+    h = await callsHarness();
+    await h.readyToCall();
+    h.nextCall.result = { outcome: 'failed', failure: 'unreachable' };
+    const delivery = await h.callDelivery();
+    const call = (await h.attemptsOf(delivery.id)).find(attempt => attempt.channel === 'call');
+    expect(call?.detail).toBe('The call could not be started. It was sent as a text and a notice instead.');
+    expect(h.texts).toHaveLength(1);
+  });
+
+  it('when no clear answer came back from Twilio, waits for the call instead of texting and then hanging up', async () => {
+    h = await callsHarness();
+    await h.readyToCall();
+    h.nextCall.result = { outcome: 'unknown' };
+    const delivery = await h.callDelivery();
+    const call = (await h.attemptsOf(delivery.id)).find(attempt => attempt.channel === 'call');
+    expect(call?.outcome).toBe('sent');
+    expect(h.texts).toEqual([]);
+    expect(h.pushes).toEqual([]);
+    // Twilio did start it: its requests name the call by Aman's own id, so the line still opens.
+    const { token } = await h.answer();
+    expect(token).toBeDefined();
+    const media = await h.openMedia({ token });
+    await h.waitFor(() => h.tts.sentences.length > 0);
+    media.socket.close();
+    await h.waitFor(async () => (await h.calls.getBySid(CALL_SID))?.status === 'ended');
+    expect(h.texts).toEqual([]);
+  });
+
+  it('when no clear answer came back and Twilio never calls, sends the text and the notice once the call expires', async () => {
+    h = await callsHarness();
+    await h.readyToCall();
+    h.nextCall.result = { outcome: 'unknown' };
+    const delivery = await h.callDelivery();
+    expect(h.texts).toEqual([]);
+    h.clock.now = new Date(h.clock.now.getTime() + 6 * 60_000);
+    await h.service.sweep();
+    expect(h.texts).toHaveLength(1);
+    expect(h.pushes).toEqual([delivery.id]);
+  });
+
   it('ends a call Twilio never called back about, once it expires, and sends a text and a push', async () => {
     h = await callsHarness();
     await h.readyToCall();
@@ -568,11 +646,11 @@ describe('a call that ends while its line opens', () => {
     expect((await h.calls.getBySid(CALL_SID))?.status).toBe('ringing');
     h.clock.now = new Date(h.clock.now.getTime() + 6 * 60_000);
     await h.service.sweep();
-    expect((await h.calls.getBySid(CALL_SID))?.outcome).toBe('failed');
     expect(h.pushes).toEqual([delivery.id]);
     expect(h.texts).toHaveLength(1);
     const calls = (await h.attemptsOf(delivery.id)).filter(attempt => attempt.channel === 'call');
-    expect(calls.at(-1)?.detail).toBe('The call stopped before it finished. The call was not tried again.');
+    expect(calls.at(-1)?.detail).toBe('No one answered. It was sent as a text and a notice instead.');
+    expect((await h.calls.getBySid(CALL_SID))?.outcome).toBe('no_answer');
     await h.service.sweep();
     expect(h.pushes).toHaveLength(1);
   });

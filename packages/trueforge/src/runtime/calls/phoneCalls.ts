@@ -65,17 +65,18 @@ const MISSED_STATUSES = new Set(['busy', 'no-answer', 'failed', 'canceled']);
 
 const HANG_UP_TWIML = '<?xml version="1.0" encoding="UTF-8"?><Response><Hangup/></Response>';
 
-/** What Activity says about how a call ended. Each sentence is one idea. */
+/**
+ * What Activity says about how a call ended. Each sentence is one idea. A call that ends without a conversation gets
+ * one more sentence from `endWithoutTalking`: what was sent instead, or for a test, that it was not tried again.
+ */
 const ENDED_WORDS = {
-  noAnswer: 'No one answered. The call was not tried again.',
-  voicemail:
-    'A voicemail picked up, so a short message was left. It said only that something needs you. The call was not tried again.',
-  voicemailNotLeft: 'A voicemail picked up, but no message could be left. The call was not tried again.',
-  lineNotOpened: 'The call was answered, but the line could not be opened. The call was not tried again.',
-  messageNotSaid: 'You answered, but the message could not be read out. It was sent as a text and a notice instead.',
-  cutOff: 'The call stopped before it finished. The call was not tried again.',
-  noOneSpoke:
-    'The call was answered, but no one spoke, so it may have been a voicemail. It was sent as a text and a notice instead.',
+  noAnswer: 'No one answered.',
+  voicemail: 'A voicemail picked up, so a short message was left. It said only that something needs you.',
+  voicemailNotLeft: 'A voicemail picked up, but no message could be left.',
+  lineNotOpened: 'The call was answered, but the line could not be opened.',
+  messageNotSaid: 'You answered, but the message could not be read out.',
+  cutOff: 'The call stopped before it finished.',
+  noOneSpoke: 'The call was answered, but no one spoke, so it may have been a voicemail.',
   saidNo: 'You answered and said it was not a good time. It is waiting for you in the app.',
   noYes: 'You answered, but the call ended before you said it was a good time. It is waiting for you in the app.',
   noChat: 'You answered, but the assistant could not talk it through on the phone. It is waiting for you in the app.',
@@ -231,10 +232,16 @@ export function createPhoneCallService(deps: PhoneCallDeps): PhoneCallService {
     if (!(await store.finish({ id: call.id, outcome, now: now() }))) {
       return;
     }
+    const instead =
+      call.fallback === 'off' ? 'The call was not tried again.' : 'It was sent as a text and a notice instead.';
     await deps.deliveries().recordAttempt({
       ...owner,
       delivery_id: call.delivery_id,
-      attempt: attempt({ outcome: outcome === 'voicemail' ? 'sent' : 'failed', detail, target: null }),
+      attempt: attempt({
+        outcome: outcome === 'voicemail' ? 'sent' : 'failed',
+        detail: `${detail} ${instead}`,
+        target: null,
+      }),
     });
     if (await store.claimFallback(call.id)) {
       await deps.deliveries().fallBack({ ...owner, delivery_id: call.delivery_id, channels: ['sms', 'web_push'] });
@@ -317,7 +324,19 @@ export function createPhoneCallService(deps: PhoneCallDeps): PhoneCallService {
     const result = await twilio.provider.place({ to: contact.phone, call_id: call.id });
     if (result.outcome === 'failed') {
       await store.finish({ id: call.id, outcome: 'failed', now: now() });
-      return attempt({ outcome: 'failed', detail: callFailureWords(result.failure), target });
+      return attempt({ outcome: 'failed', detail: callFailureWords({ failure: result.failure, test }), target });
+    }
+    if (result.outcome === 'unknown') {
+      // Twilio may have started the call. Ending it here would text the person and then hang up on them when it rings,
+      // so the call is left open: Twilio's requests name it by Aman's own id, and the sweep ends it if none come.
+      logger.warn('A phone call may have started without Twilio saying so', { call_id: call.id });
+      return attempt({
+        outcome: 'sent',
+        detail: test
+          ? 'Twilio did not confirm the call. If your phone does not ring in a minute, try again.'
+          : 'Twilio did not confirm the call. If it does not ring, a text and a notice follow in a few minutes.',
+        target,
+      });
     }
     try {
       await store.attachSid({ id: call.id, call_sid: result.call_sid });
@@ -796,7 +815,11 @@ export function createPhoneCallService(deps: PhoneCallDeps): PhoneCallService {
       const lineGiven = call.status === 'connecting' || call.status === 'connected';
       const over = lineGiven ? Date.parse(call.created_at) + longest < at : Date.parse(call.expires_at) < at;
       if (over && !live.has(call.id)) {
-        await endWithoutTalking({ call, outcome: 'failed', detail: ENDED_WORDS.cutOff });
+        await endWithoutTalking(
+          lineGiven
+            ? { call, outcome: 'failed', detail: ENDED_WORDS.cutOff }
+            : { call, outcome: 'no_answer', detail: ENDED_WORDS.noAnswer },
+        );
       }
     }
     await store.prune({ ended_before: new Date(at - KEEP_ENDED_MS) });
